@@ -551,7 +551,7 @@ describe('ESP Store - Getters', () => {
     it('should filter by heartbeat timing (recent = online)', () => {
       const store = useEspStore()
       store.devices = [
-        { ...mockESPDevice, device_id: 'ESP_001', status: 'online', connected: true, last_heartbeat: new Date().toISOString(), last_seen: new Date().toISOString() },
+        { ...mockESPDevice, device_id: 'ESP_001', status: 'online', last_heartbeat: new Date().toISOString(), last_seen: new Date().toISOString() },
         { ...mockESPDevice, device_id: 'ESP_002', status: 'offline', connected: false, last_heartbeat: OLD_TS, last_seen: OLD_TS }
       ]
 
@@ -585,7 +585,7 @@ describe('ESP Store - Getters', () => {
     it('should filter by heartbeat timing (stale = offline)', () => {
       const store = useEspStore()
       store.devices = [
-        { ...mockESPDevice, device_id: 'ESP_001', status: 'online', connected: true, last_heartbeat: new Date().toISOString(), last_seen: new Date().toISOString() },
+        { ...mockESPDevice, device_id: 'ESP_001', status: 'online', last_heartbeat: new Date().toISOString(), last_seen: new Date().toISOString() },
         { ...mockESPDevice, device_id: 'ESP_002', status: 'offline', connected: false, last_heartbeat: OLD_TS, last_seen: OLD_TS }
       ]
 

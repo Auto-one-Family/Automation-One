@@ -1,8 +1,8 @@
 /**
  * PendingDevicesPanel Component Tests
  *
- * Tests panel visibility, backdrop, close behavior, tab switching,
- * empty state, and device list rendering.
+ * Block 3: Updated for SlideOver-based panel (was popover).
+ * Tests tab switching, empty states, device list, search, and actions.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -14,24 +14,67 @@ import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
 const mockFetchPendingDevices = vi.fn()
 const mockApproveDevice = vi.fn()
 const mockRejectDevice = vi.fn()
+const mockDeleteDevice = vi.fn()
 
+let mockDevices: any[] = []
 let mockPendingDevices: any[] = []
 let mockIsPendingLoading = false
 
 vi.mock('@/stores/esp', () => ({
   useEspStore: () => ({
-    devices: [],
+    devices: mockDevices,
     pendingDevices: mockPendingDevices,
     isPendingLoading: mockIsPendingLoading,
     fetchPendingDevices: mockFetchPendingDevices,
     approveDevice: mockApproveDevice,
     rejectDevice: mockRejectDevice,
+    deleteDevice: mockDeleteDevice,
     getDeviceId: (d: any) => d?.device_id || d?.esp_id || '',
+    isMock: (id: string) => id.startsWith('MOCK_'),
+    mockDevices: [],
+    realDevices: [],
   }),
 }))
 
+vi.mock('@/shared/stores/ui.store', () => ({
+  useUiStore: () => ({
+    confirm: vi.fn().mockResolvedValue(true),
+    openContextMenu: vi.fn(),
+    pushModal: vi.fn(),
+    popModal: vi.fn(),
+  }),
+}))
+
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({
+    success: vi.fn(),
+    error: vi.fn(),
+  }),
+}))
+
+vi.mock('@/composables/useZoneDragDrop', () => ({
+  useZoneDragDrop: () => ({
+    groupDevicesByZone: (devices: any[]) => {
+      const grouped: Record<string, any> = {}
+      for (const d of devices) {
+        const zId = d.zone_id || '__UNASSIGNED__'
+        const zName = d.zone_name || 'Nicht zugewiesen'
+        if (!grouped[zId]) grouped[zId] = { zoneId: zId, zoneName: zName, devices: [] }
+        grouped[zId].devices.push(d)
+      }
+      return Object.values(grouped)
+    },
+  }),
+  ZONE_UNASSIGNED: '__UNASSIGNED__',
+}))
+
+vi.mock('@/composables/useESPStatus', () => ({
+  getESPStatus: () => 'online',
+  getESPStatusDisplay: () => ({ text: 'Online', color: 'var(--color-success)' }),
+}))
+
 vi.mock('@/utils/wifiStrength', () => ({
-  getWifiStrength: (rssi: number | null | undefined) => ({
+  getWifiStrength: () => ({
     quality: 'good',
     label: 'Gut',
     bars: 3,
@@ -47,7 +90,7 @@ vi.mock('@/utils/logger', () => ({
   }),
 }))
 
-// Stub the child modal
+// Stub child components
 vi.mock('@/components/modals/RejectDeviceModal.vue', () => ({
   default: {
     name: 'RejectDeviceModal',
@@ -55,6 +98,34 @@ vi.mock('@/components/modals/RejectDeviceModal.vue', () => ({
     props: ['open', 'deviceId'],
   },
 }))
+
+vi.mock('@/shared/design/primitives/SlideOver.vue', () => ({
+  default: {
+    name: 'SlideOver',
+    template: '<div class="slide-over-stub" v-if="open"><slot /></div>',
+    props: ['open', 'title', 'width'],
+    emits: ['close'],
+  },
+}))
+
+const sampleDevices = [
+  {
+    device_id: 'ESP_001',
+    name: 'Gewächshaus ESP',
+    zone_id: 'zone-1',
+    zone_name: 'Echt',
+    sensors: [{ gpio: 4, sensor_type: 'sht31_temp' }],
+    status: 'online',
+  },
+  {
+    device_id: 'ESP_002',
+    name: null,
+    zone_id: 'zone-1',
+    zone_name: 'Echt',
+    sensors: [],
+    status: 'offline',
+  },
+]
 
 const samplePendingDevices = [
   {
@@ -88,79 +159,56 @@ function mountPanel(props: Record<string, unknown> = {}) {
 describe('PendingDevicesPanel', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    mockDevices = []
     mockPendingDevices = []
     mockIsPendingLoading = false
     mockFetchPendingDevices.mockClear()
     mockApproveDevice.mockClear()
     mockRejectDevice.mockClear()
+    mockDeleteDevice.mockClear()
   })
 
   describe('visibility', () => {
     it('does NOT render panel content when isOpen=false', () => {
       const w = mountPanel({ isOpen: false })
-      expect(w.find('.pending-panel').exists()).toBe(false)
+      expect(w.find('.slide-over-stub').exists()).toBe(false)
     })
 
     it('renders panel when isOpen=true', () => {
       const w = mountPanel({ isOpen: true })
-      expect(w.find('.pending-panel').exists()).toBe(true)
-    })
-
-    it('renders backdrop when isOpen=true', () => {
-      const w = mountPanel({ isOpen: true })
-      expect(w.find('.pending-backdrop').exists()).toBe(true)
-    })
-
-    it('does NOT render backdrop when isOpen=false', () => {
-      const w = mountPanel({ isOpen: false })
-      expect(w.find('.pending-backdrop').exists()).toBe(false)
-    })
-  })
-
-  describe('close behavior', () => {
-    it('close button emits update:isOpen with false', async () => {
-      const w = mountPanel({ isOpen: true })
-      const closeBtn = w.find('.pending-panel__close')
-      expect(closeBtn.exists()).toBe(true)
-
-      await closeBtn.trigger('click')
-
-      expect(w.emitted('update:isOpen')).toBeTruthy()
-      expect(w.emitted('update:isOpen')![0]).toEqual([false])
-    })
-
-    it('backdrop click emits close and update:isOpen', async () => {
-      const w = mountPanel({ isOpen: true })
-      const backdrop = w.find('.pending-backdrop')
-
-      await backdrop.trigger('click')
-
-      expect(w.emitted('close')).toBeTruthy()
-      expect(w.emitted('update:isOpen')).toBeTruthy()
-      expect(w.emitted('update:isOpen')![0]).toEqual([false])
+      expect(w.find('.slide-over-stub').exists()).toBe(true)
     })
   })
 
   describe('tab switching', () => {
     it('starts on the devices tab', () => {
       const w = mountPanel({ isOpen: true })
-      const tabs = w.findAll('.pending-panel__tab')
-      expect(tabs[0].classes()).toContain('active')
+      const tabs = w.findAll('.device-panel__tab')
+      expect(tabs[0].classes()).toContain('device-panel__tab--active')
       expect(tabs[0].text()).toContain('Geräte')
+    })
+
+    it('switches to pending tab on click', async () => {
+      const w = mountPanel({ isOpen: true })
+      const tabs = w.findAll('.device-panel__tab')
+      await tabs[1].trigger('click')
+
+      const updatedTabs = w.findAll('.device-panel__tab')
+      expect(updatedTabs[1].classes()).toContain('device-panel__tab--active')
     })
 
     it('switches to info tab on click', async () => {
       const w = mountPanel({ isOpen: true })
-      const tabs = w.findAll('.pending-panel__tab')
+      const tabs = w.findAll('.device-panel__tab')
       await tabs[2].trigger('click')
 
-      const updatedTabs = w.findAll('.pending-panel__tab')
-      expect(updatedTabs[2].classes()).toContain('active')
+      const updatedTabs = w.findAll('.device-panel__tab')
+      expect(updatedTabs[2].classes()).toContain('device-panel__tab--active')
     })
 
     it('info tab shows connection guide content', async () => {
       const w = mountPanel({ isOpen: true })
-      const tabs = w.findAll('.pending-panel__tab')
+      const tabs = w.findAll('.device-panel__tab')
       await tabs[2].trigger('click')
 
       expect(w.text()).toContain('ESP32 verbinden')
@@ -169,36 +217,103 @@ describe('PendingDevicesPanel', () => {
   })
 
   describe('empty state', () => {
-    it('shows devices empty state when no zones (default tab)', () => {
-      mockPendingDevices = []
-      mockIsPendingLoading = false
+    it('shows devices empty state when no devices (default tab)', () => {
+      mockDevices = []
       const w = mountPanel({ isOpen: true })
-      expect(w.find('.pending-panel__empty').exists()).toBe(true)
-      expect(w.text()).toContain('Keine Geräte in Zonen')
+      expect(w.find('.device-panel__empty').exists()).toBe(true)
+      expect(w.text()).toContain('Keine Geräte vorhanden')
     })
 
     it('shows pending empty state when on pending tab and no pending devices', async () => {
       mockPendingDevices = []
       mockIsPendingLoading = false
       const w = mountPanel({ isOpen: true })
-      await w.findAll('.pending-panel__tab')[1].trigger('click')
+      await w.findAll('.device-panel__tab')[1].trigger('click')
       expect(w.text()).toContain('Keine neuen Geräte')
     })
   })
 
-  describe('device list', () => {
-    it('renders device cards when pending devices exist', async () => {
-      mockPendingDevices = samplePendingDevices
+  describe('device list (Geräte tab)', () => {
+    it('renders device rows when devices exist in zones', () => {
+      mockDevices = sampleDevices
       const w = mountPanel({ isOpen: true })
-      await w.findAll('.pending-panel__tab')[1].trigger('click')
-      const devices = w.findAll('.pending-device')
+      const devices = w.findAll('.device-panel__device')
       expect(devices).toHaveLength(2)
     })
 
-    it('displays device IDs', async () => {
+    it('displays device names', () => {
+      mockDevices = sampleDevices
+      const w = mountPanel({ isOpen: true })
+      expect(w.text()).toContain('Gewächshaus ESP')
+      expect(w.text()).toContain('ESP_002')
+    })
+
+    it('displays zone group headers', () => {
+      mockDevices = sampleDevices
+      const w = mountPanel({ isOpen: true })
+      expect(w.find('.device-panel__zone-title').text()).toBe('Echt')
+    })
+
+    it('shows config and delete buttons for each device', () => {
+      mockDevices = [sampleDevices[0]]
+      const w = mountPanel({ isOpen: true })
+      expect(w.find('.device-panel__btn--config').exists()).toBe(true)
+      expect(w.find('.device-panel__btn--delete').exists()).toBe(true)
+    })
+
+    it('emits open-esp-config when config button is clicked', async () => {
+      mockDevices = [sampleDevices[0]]
+      const w = mountPanel({ isOpen: true })
+      await w.find('.device-panel__btn--config').trigger('click')
+      expect(w.emitted('open-esp-config')).toBeTruthy()
+    })
+  })
+
+  describe('search', () => {
+    it('renders search field on devices tab', () => {
+      const w = mountPanel({ isOpen: true })
+      expect(w.find('.device-panel__search-input').exists()).toBe(true)
+    })
+
+    it('filters devices by name', async () => {
+      mockDevices = sampleDevices
+      const w = mountPanel({ isOpen: true })
+      const input = w.find('.device-panel__search-input')
+      await input.setValue('Gewächshaus')
+      const devices = w.findAll('.device-panel__device')
+      expect(devices).toHaveLength(1)
+      expect(w.text()).toContain('Gewächshaus ESP')
+    })
+
+    it('shows no-results state when search matches nothing', async () => {
+      mockDevices = sampleDevices
+      const w = mountPanel({ isOpen: true })
+      const input = w.find('.device-panel__search-input')
+      await input.setValue('xyz-not-found')
+      expect(w.text()).toContain('Keine Treffer')
+    })
+
+    it('shows clear button when search has value', async () => {
+      const w = mountPanel({ isOpen: true })
+      const input = w.find('.device-panel__search-input')
+      await input.setValue('test')
+      expect(w.find('.device-panel__search-clear').exists()).toBe(true)
+    })
+  })
+
+  describe('pending device list', () => {
+    it('renders pending device cards', async () => {
       mockPendingDevices = samplePendingDevices
       const w = mountPanel({ isOpen: true })
-      await w.findAll('.pending-panel__tab')[1].trigger('click')
+      await w.findAll('.device-panel__tab')[1].trigger('click')
+      const devices = w.findAll('.device-panel__pending-device')
+      expect(devices).toHaveLength(2)
+    })
+
+    it('displays pending device IDs', async () => {
+      mockPendingDevices = samplePendingDevices
+      const w = mountPanel({ isOpen: true })
+      await w.findAll('.device-panel__tab')[1].trigger('click')
       expect(w.text()).toContain('ESP_NEW_001')
       expect(w.text()).toContain('ESP_NEW_002')
     })
@@ -206,19 +321,17 @@ describe('PendingDevicesPanel', () => {
     it('displays IP addresses', async () => {
       mockPendingDevices = samplePendingDevices
       const w = mountPanel({ isOpen: true })
-      await w.findAll('.pending-panel__tab')[1].trigger('click')
+      await w.findAll('.device-panel__tab')[1].trigger('click')
       expect(w.text()).toContain('192.168.1.50')
       expect(w.text()).toContain('192.168.1.51')
     })
 
-    it('shows approve and reject buttons for each device', async () => {
+    it('shows approve and reject buttons', async () => {
       mockPendingDevices = [samplePendingDevices[0]]
       const w = mountPanel({ isOpen: true })
-      await w.findAll('.pending-panel__tab')[1].trigger('click')
-      const approveBtn = w.find('.pending-device__btn--approve')
-      const rejectBtn = w.find('.pending-device__btn--reject')
-      expect(approveBtn.exists()).toBe(true)
-      expect(rejectBtn.exists()).toBe(true)
+      await w.findAll('.device-panel__tab')[1].trigger('click')
+      expect(w.find('.device-panel__btn--approve').exists()).toBe(true)
+      expect(w.find('.device-panel__btn--reject').exists()).toBe(true)
     })
   })
 })

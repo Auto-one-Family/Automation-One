@@ -479,6 +479,13 @@ function handleSettings(device: ESPDevice) {
   isSettingsOpen.value = true
 }
 
+/** Block 3: Open ESP config from PendingDevicesPanel (Variante A → Variante B) */
+function handleOpenEspConfigFromPanel(device: ESPDevice) {
+  dashStore.showPendingPanel = false
+  settingsDevice.value = device
+  isSettingsOpen.value = true
+}
+
 function handleSettingsClose() {
   isSettingsOpen.value = false
   setTimeout(() => { if (!isSettingsOpen.value) settingsDevice.value = null }, 200)
@@ -750,8 +757,12 @@ function formatTimeAgo(timestamp: number): string {
     <!-- Create Mock ESP Modal -->
     <CreateMockEspModal v-model="dashStore.showCreateMock" @created="onMockEspCreated" />
 
-    <!-- Pending Devices Panel -->
-    <PendingDevicesPanel v-model:is-open="dashStore.showPendingPanel" :anchor-el="null" @close="dashStore.showPendingPanel = false" />
+    <!-- Pending Devices Panel (SlideOver) -->
+    <PendingDevicesPanel
+      v-model:is-open="dashStore.showPendingPanel"
+      @close="dashStore.showPendingPanel = false"
+      @open-esp-config="handleOpenEspConfigFromPanel"
+    />
 
     <!-- ESP Settings Sheet -->
     <ESPSettingsSheet

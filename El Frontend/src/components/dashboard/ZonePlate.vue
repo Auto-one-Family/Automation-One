@@ -58,6 +58,24 @@ const dragStore = useDragStateStore()
 const uiStore = useUiStore()
 const plateRef = ref<HTMLElement | null>(null)
 
+// ── Subzone Filter (declared early — localDevices watch depends on it) ────
+/** Active subzone filter (null = show all) */
+const activeSubzoneFilter = ref<string | null>(null)
+
+/** Filtered devices for VueDraggable based on subzone filter */
+const filteredDevices = computed(() => {
+  if (!activeSubzoneFilter.value) return props.devices
+  return props.devices.filter(d =>
+    (d.subzone_id || null) === activeSubzoneFilter.value
+  )
+})
+
+// Local copy of devices for VueDraggable v-model.
+// Syncs with filteredDevices (respects subzone filter).
+const localDevices = ref<ESPDevice[]>([...props.devices])
+watch([() => props.devices, () => activeSubzoneFilter.value], () => {
+  localDevices.value = [...filteredDevices.value]
+})
 // ── Status Aggregation ───────────────────────────────────────────────────
 const stats = computed(() => {
   const total = props.devices.length
@@ -108,9 +126,6 @@ const statusLabel = computed(() => {
 })
 
 // ── B3: Subzone Chips ────────────────────────────────────────────────────
-/** Active subzone filter (null = show all) */
-const activeSubzoneFilter = ref<string | null>(null)
-
 function toggleSubzoneFilter(subzoneId: string | null) {
   if (activeSubzoneFilter.value === subzoneId) {
     activeSubzoneFilter.value = null // Deselect
@@ -134,19 +149,6 @@ function getSubzoneStatusColor(group: SubzoneGroup): string {
   if (online < group.devices.length) return 'var(--color-warning)'
   return 'var(--color-success)'
 }
-
-/** Filtered devices for VueDraggable based on subzone filter */
-const filteredDevices = computed(() => {
-  if (!activeSubzoneFilter.value) return props.devices
-  return props.devices.filter(d =>
-    (d.subzone_id || null) === activeSubzoneFilter.value
-  )
-})
-
-const localDevices = ref<ESPDevice[]>([...props.devices])
-watch([() => props.devices, () => activeSubzoneFilter.value], () => {
-  localDevices.value = [...filteredDevices.value]
-})
 
 // ── Subzone Grouping ─────────────────────────────────────────────────────
 interface SubzoneGroup {
