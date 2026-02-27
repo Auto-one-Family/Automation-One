@@ -3258,22 +3258,23 @@ async def get_load_test_metrics(
             total_actuators += len(sim_config.get("actuators", {}))
 
     # Count sensor_data entries (as proxy for MQTT messages)
-    from ..models.sensor import SensorData
+    from ...db.models.sensor import SensorData
+    from ...db.models.esp import ESPDevice
 
     sensor_data_count_result = await db.execute(
         select(func.count(SensorData.id))
-        .join(SensorData.esp_device)
-        .where(SensorData.esp_device.has(hardware_type="MOCK_ESP32"))
+        .join(ESPDevice, SensorData.esp_id == ESPDevice.id)
+        .where(ESPDevice.hardware_type == "MOCK_ESP32")
     )
     sensor_data_count = sensor_data_count_result.scalar() or 0
 
     # Count actuator_history entries
-    from ..models.actuator import ActuatorHistory
+    from ...db.models.actuator import ActuatorHistory
 
     actuator_history_count_result = await db.execute(
         select(func.count(ActuatorHistory.id))
-        .join(ActuatorHistory.esp_device)
-        .where(ActuatorHistory.esp_device.has(hardware_type="MOCK_ESP32"))
+        .join(ESPDevice, ActuatorHistory.esp_id == ESPDevice.id)
+        .where(ESPDevice.hardware_type == "MOCK_ESP32")
     )
     actuator_history_count = actuator_history_count_result.scalar() or 0
 
