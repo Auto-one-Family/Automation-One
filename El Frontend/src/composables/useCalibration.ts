@@ -1,7 +1,7 @@
 /**
  * useCalibration Composable
  *
- * Manages pH and EC sensor calibration wizard state.
+ * Manages pH, EC, and moisture sensor calibration wizard state.
  *
  * pH Calibration (2-point):
  *   Point 1: pH 4.0 buffer → record raw ADC value
@@ -12,6 +12,11 @@
  *   Point 1: Dry electrode (air) → record zero point
  *   Point 2: Calibration solution (e.g., 1413 µS/cm) → record reference
  *   Result: factor for conversion
+ *
+ * Moisture Calibration (2-point dry/wet):
+ *   dry_value: ADC reading in dry soil
+ *   wet_value: ADC reading in wet soil
+ *   Result: dry/wet boundaries for percentage mapping
  */
 
 import { ref, computed } from 'vue'
@@ -32,11 +37,15 @@ export interface CalibrationResult {
 export type CalibrationStep = 'idle' | 'point1' | 'point2' | 'complete'
 
 export function useCalibration() {
-  const calibrationType = ref<'pH' | 'EC' | null>(null)
+  const calibrationType = ref<'pH' | 'EC' | 'moisture' | null>(null)
   const step = ref<CalibrationStep>('idle')
   const point1 = ref<CalibrationPoint | null>(null)
   const point2 = ref<CalibrationPoint | null>(null)
   const result = ref<CalibrationResult | null>(null)
+
+  // Moisture-specific refs (dry/wet ADC boundaries)
+  const dryValue = ref<number>(3200)
+  const wetValue = ref<number>(1500)
 
   const isActive = computed(() => step.value !== 'idle')
   const isComplete = computed(() => step.value === 'complete')
@@ -44,7 +53,7 @@ export function useCalibration() {
   /**
    * Start a calibration wizard
    */
-  function startCalibration(type: 'pH' | 'EC') {
+  function startCalibration(type: 'pH' | 'EC' | 'moisture') {
     calibrationType.value = type
     step.value = 'point1'
     point1.value = null
@@ -98,6 +107,17 @@ export function useCalibration() {
    * Get calibration data for saving to the sensor config
    */
   function getCalibrationData(): Record<string, unknown> | null {
+    // Moisture uses dry/wet refs directly, no result.value needed
+    if (calibrationType.value === 'moisture') {
+      return {
+        type: 'moisture_2point',
+        dry_value: dryValue.value,
+        wet_value: wetValue.value,
+        invert: false,
+        calibrated_at: new Date().toISOString(),
+      }
+    }
+
     if (!result.value) return null
 
     if (calibrationType.value === 'pH') {
@@ -146,6 +166,8 @@ export function useCalibration() {
     point1,
     point2,
     result,
+    dryValue,
+    wetValue,
     isActive,
     isComplete,
     startCalibration,

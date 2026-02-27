@@ -183,6 +183,10 @@ export const useEspStore = defineStore('esp', () => {
     devices.value.filter(device => device.zone_id === zoneId)
   )
 
+  const unassignedDevices = computed(() =>
+    devices.value.filter(device => !device.zone_id)
+  )
+
   const masterZoneDevices = computed(() =>
     devices.value.filter(device => device.is_zone_master === true)
   )
@@ -1597,6 +1601,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     mockDevices,
     realDevices,
     devicesByZone,
+    unassignedDevices,
     masterZoneDevices,
     isMock,
     getDeviceId,

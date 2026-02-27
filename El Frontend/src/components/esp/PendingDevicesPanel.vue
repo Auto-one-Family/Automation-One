@@ -70,13 +70,8 @@ const zoneGroups = computed(() => {
   return groups.filter(g => g.zoneId !== ZONE_UNASSIGNED)
 })
 
-/** Unassigned devices (separate section) */
-const unassignedGroup = computed(() => {
-  const devices = espStore.devices ?? []
-  const groups = groupDevicesByZone(devices)
-  const group = groups.find(g => g.zoneId === ZONE_UNASSIGNED)
-  return group?.devices ?? []
-})
+/** Unassigned devices (from store — single source of truth) */
+const unassignedGroup = computed(() => espStore.unassignedDevices)
 
 /** Filter zone groups + unassigned by search query */
 const filteredZoneGroups = computed(() => {
@@ -315,6 +310,10 @@ function isProcessing(deviceId: string): boolean {
               <div class="device-panel__device-name">{{ device.name || getDeviceId(device) }}</div>
               <div class="device-panel__device-meta">
                 <span
+                  class="device-panel__status-dot"
+                  :style="{ backgroundColor: getESPStatusDisplay(getESPStatus(device)).color }"
+                />
+                <span
                   class="device-panel__device-status"
                   :style="{ color: getESPStatusDisplay(getESPStatus(device)).color }"
                 >
@@ -357,6 +356,10 @@ function isProcessing(deviceId: string): boolean {
             <div class="device-panel__device-info">
               <div class="device-panel__device-name">{{ device.name || getDeviceId(device) }}</div>
               <div class="device-panel__device-meta">
+                <span
+                  class="device-panel__status-dot"
+                  :style="{ backgroundColor: getESPStatusDisplay(getESPStatus(device)).color }"
+                />
                 <span
                   class="device-panel__device-status"
                   :style="{ color: getESPStatusDisplay(getESPStatus(device)).color }"
@@ -760,10 +763,18 @@ function isProcessing(deviceId: string): boolean {
 .device-panel__device-meta {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-1);
   font-size: var(--text-xs);
   font-family: var(--font-body);
   color: var(--color-text-muted);
+}
+
+.device-panel__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .device-panel__device-status {

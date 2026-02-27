@@ -40,10 +40,8 @@ const isDragOver = ref(false)
 const dragOverCount = ref(0)
 const localDevices = ref<ESPDevice[]>([])
 
-// Unassigned devices from store
-const unassignedDevices = computed(() => {
-  return espStore.devices.filter(device => !device.zone_id)
-})
+// Unassigned devices (from store — single source of truth)
+const unassignedDevices = computed(() => espStore.unassignedDevices)
 
 // Sync local devices with store
 watch(unassignedDevices, (newDevices) => {
@@ -128,7 +126,7 @@ function handleDrop(event: DragEvent) {
 async function handleDragAdd(event: any) {
   const device = event?.added?.element as ESPDevice | undefined
   if (!device) {
-    log.warn('handleDragAdd: No device in event.added.element')
+    // Not an add event (could be a move or remove) — ignore
     return
   }
 
@@ -143,6 +141,14 @@ async function handleDragAdd(event: any) {
     log.debug('Unassigning device from zone', { deviceId, zoneId: device.zone_id })
     await handleRemoveFromZone(device)
   }
+}
+
+function handleDragStart() {
+  dragStore.startEspCardDrag()
+}
+
+function handleDragEnd() {
+  dragStore.endEspCardDrag()
 }
 </script>
 
@@ -195,9 +201,17 @@ async function handleDragAdd(event: any) {
           v-model="localDevices"
           class="unassigned-tray__cards"
           group="esp-devices"
-          :animation="100"
+          :animation="150"
           ghost-class="unassigned-card--ghost"
+          :force-fallback="true"
+          :fallback-on-body="true"
+          :delay-on-touch-only="true"
+          :delay="300"
+          :fallback-tolerance="5"
+          :touch-start-threshold="3"
           @change="handleDragAdd"
+          @start="handleDragStart"
+          @end="handleDragEnd"
         >
           <!-- Device Card -->
           <div
@@ -428,7 +442,13 @@ async function handleDragAdd(event: any) {
 }
 
 .unassigned-card--ghost {
-  opacity: 0.3;
+  opacity: 0.4;
+  transform: scale(1.05);
+}
+
+.unassigned-card--ghost > * {
+  border-style: dashed !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2) !important;
 }
 
 /* Status Dot */

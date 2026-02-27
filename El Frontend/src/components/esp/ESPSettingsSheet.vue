@@ -2,19 +2,13 @@
 /**
  * ESPSettingsSheet Component
  *
- * A slide-in settings panel from the right edge of the screen.
- * Replaces ESPSettingsPopover with better UX and scroll behavior.
- *
- * Features:
- * - Device identification (name, ESP-ID, type)
- * - Status overview (online status, WiFi, heap, heartbeat)
- * - Zone information display
- * - Mock-specific controls (manual heartbeat, auto-heartbeat)
- * - Danger zone (delete device with two-step confirmation)
+ * Uses SlideOver primitive for consistent panel behavior.
+ * Status via useESPStatus (single source of truth).
+ * Sensor/Actuator config via event emission to parent SlideOvers.
+ * Delete via ConfirmDialog (uiStore.confirm) + Toast.
  */
 
 import { ref, computed, onUnmounted, watch, nextTick } from 'vue'
-import { useScrollLock } from '@/composables/useScrollLock'
 import {
   X,
   Heart,
@@ -34,16 +28,19 @@ import {
   Activity,
   Thermometer,
   Zap,
+  ChevronRight,
 } from 'lucide-vue-next'
+import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import { Badge, AccordionSection } from '@/shared/design/primitives'
 import ZoneAssignmentPanel from '@/components/zones/ZoneAssignmentPanel.vue'
-import SensorConfigPanel from './SensorConfigPanel.vue'
-import ActuatorConfigPanel from './ActuatorConfigPanel.vue'
-import { espApi, type ESPDevice } from '@/api/esp'
+import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useUiStore } from '@/shared/stores'
+import { useESPStatus } from '@/composables/useESPStatus'
+import { useToast } from '@/composables/useToast'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
-import { formatRelativeTime, formatUptimeShort, formatHeapSize } from '@/utils/formatters'
+import { formatUptimeShort, formatHeapSize } from '@/utils/formatters'
+import { getSensorLabel, getSensorUnit } from '@/utils/sensorDefaults'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('ESPSettings')
@@ -64,6 +61,8 @@ const emit = defineEmits<{
   'zone-updated': [payload: { deviceId: string; zoneId: string; zoneName: string }]
   deleted: [payload: { deviceId: string }]
   'heartbeat-triggered': [payload: { deviceId: string }]
+  'open-sensor-config': [payload: { espId: string; gpio: number; sensorType: string; unit: string }]
+  'open-actuator-config': [payload: { espId: string; gpio: number; actuatorType: string }]
 }>()
 
 // =============================================================================
@@ -72,12 +71,14 @@ const emit = defineEmits<{
 
 const espStore = useEspStore()
 const uiStore = useUiStore()
-const sheetRef = ref<HTMLElement | null>(null)
+const { success: showSuccess, error: showError } = useToast()
+
+// Status via useESPStatus (single source of truth)
+const { statusColor, statusText, statusPulse, isMock, lastSeenText } = useESPStatus(() => props.device)
 
 // Loading states
 const heartbeatLoading = ref(false)
 const deleteLoading = ref(false)
-const showDeleteConfirm = ref(false)
 
 // Name editing state
 const isEditingName = ref(false)
@@ -99,12 +100,6 @@ const autoHeartbeatLoading = ref(false)
 // =============================================================================
 
 const espId = computed(() => props.device?.device_id || props.device?.esp_id || '')
-
-const isMock = computed(() => espApi.isMockEsp(espId.value))
-
-const isOnline = computed(() =>
-  props.device?.status === 'online' || props.device?.connected === true
-)
 
 const displayName = computed(() => props.device?.name || espId.value)
 
@@ -156,7 +151,7 @@ const zoneDisplay = computed(() => {
   return props.device?.zone_name || props.device?.zone_id || null
 })
 
-// Sensor/Actuator lists for config panels (Phase 4.3)
+// Sensor/Actuator lists
 const sensors = computed(() => {
   const d = props.device as any
   return d?.sensors ?? []
@@ -174,13 +169,6 @@ const actuators = computed(() => {
 function close() {
   emit('update:isOpen', false)
   emit('close')
-  showDeleteConfirm.value = false
-}
-
-function handleOverlayClick(event: MouseEvent) {
-  if (event.target === event.currentTarget) {
-    close()
-  }
 }
 
 async function handleHeartbeat() {
@@ -200,18 +188,55 @@ async function handleHeartbeat() {
 }
 
 async function handleDelete() {
-  if (deleteLoading.value) return
+  const confirmed = await uiStore.confirm({
+    title: 'Gerät löschen',
+    message: `Möchtest du "${displayName.value}" wirklich löschen? ${isMock.value ? 'Der simulierte ESP wird vollständig entfernt.' : 'Das Gerät und alle zugehörigen Sensoren/Aktoren werden aus der Datenbank entfernt.'}`,
+    variant: 'danger',
+    confirmText: 'Löschen',
+  })
+  if (!confirmed) return
 
   deleteLoading.value = true
   try {
     await espStore.deleteDevice(espId.value)
+    showSuccess(`"${displayName.value}" wurde gelöscht`)
     emit('deleted', { deviceId: espId.value })
     close()
   } catch (err) {
+    showError(err instanceof Error ? err.message : 'Gerät konnte nicht gelöscht werden')
     log.error('Failed to delete device', err)
   } finally {
     deleteLoading.value = false
   }
+}
+
+// =============================================================================
+// SENSOR / ACTUATOR CONFIG (emit to parent)
+// =============================================================================
+
+function openSensorConfig(sensor: any) {
+  emit('open-sensor-config', {
+    espId: espId.value,
+    gpio: sensor.gpio,
+    sensorType: sensor.sensor_type || sensor.type || 'generic',
+    unit: sensor.unit || getSensorUnit(sensor.sensor_type || sensor.type || ''),
+  })
+}
+
+function openActuatorConfig(actuator: any) {
+  emit('open-actuator-config', {
+    espId: espId.value,
+    gpio: actuator.gpio,
+    actuatorType: actuator.actuator_type || actuator.type || 'relay',
+  })
+}
+
+function formatSensorValue(sensor: any): string {
+  const val = sensor.raw_value ?? sensor.value
+  if (val === null || val === undefined) return '--'
+  const num = Number(val)
+  if (isNaN(num)) return String(val)
+  return num.toFixed(1)
 }
 
 // =============================================================================
@@ -269,6 +294,7 @@ function handleNameKeydown(event: KeyboardEvent) {
     saveName()
   } else if (event.key === 'Escape') {
     event.preventDefault()
+    event.stopPropagation()
     cancelEditName()
   }
 }
@@ -351,22 +377,13 @@ function syncAutoHeartbeatFromStore() {
   autoHeartbeatEnabled.value = deviceAutoHB ?? false
 }
 
-// Reference-counted scroll lock
-const scrollLock = useScrollLock()
-
 watch(
   () => props.isOpen,
   (isOpen) => {
     if (isOpen) {
-      scrollLock.lock()
-      showDeleteConfirm.value = false
       syncAutoHeartbeatFromStore()
       uiStore.pushModal('esp-settings-sheet')
-      nextTick(() => {
-        sheetRef.value?.focus()
-      })
     } else {
-      scrollLock.unlock()
       uiStore.popModal('esp-settings-sheet')
     }
   }
@@ -401,521 +418,400 @@ watch(
 )
 
 onUnmounted(() => {
-  scrollLock.unlock()
   uiStore.popModal('esp-settings-sheet')
 })
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="sheet">
-      <div
-        v-if="isOpen"
-        class="sheet-overlay"
-        @click="handleOverlayClick"
-      >
-        <div
-          ref="sheetRef"
-          class="sheet-content"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="sheet-title"
-          tabindex="-1"
-          @click.stop
-          @keydown.escape="close"
-        >
-          <!-- Header -->
-          <div class="sheet-header">
-            <div class="sheet-header__title-group">
-              <Settings2 class="w-5 h-5 text-iridescent" />
-              <h3 id="sheet-title" class="sheet-header__title">Geräte-Einstellungen</h3>
-            </div>
-            <button
-              class="sheet-close-btn"
-              aria-label="Schließen"
-              @click="close"
-            >
-              <X class="w-5 h-5" />
-            </button>
+  <SlideOver
+    :open="isOpen"
+    title="Geräte-Einstellungen"
+    width="lg"
+    @close="close"
+  >
+    <div class="sheet-body">
+      <!-- IDENTIFICATION Section -->
+      <section class="sheet-section">
+        <h4 class="sheet-section__title">
+          <Tag class="w-3.5 h-3.5" />
+          Identifikation
+        </h4>
+        <div class="sheet-section__content">
+          <!-- Name (Editable) -->
+          <div class="info-row info-row--name">
+            <span class="info-row__label">Name</span>
+
+            <!-- Edit Mode -->
+            <template v-if="isEditingName">
+              <div class="name-edit">
+                <input
+                  ref="nameInputRef"
+                  v-model="editedName"
+                  type="text"
+                  class="name-edit__input"
+                  placeholder="Gerätename eingeben..."
+                  :disabled="isSavingName"
+                  @keydown="handleNameKeydown"
+                  @blur="saveName"
+                />
+                <div class="name-edit__actions">
+                  <button
+                    v-if="isSavingName"
+                    class="name-edit__btn"
+                    disabled
+                  >
+                    <Loader2 class="w-4 h-4 animate-spin" />
+                  </button>
+                  <template v-else>
+                    <button
+                      class="name-edit__btn name-edit__btn--save"
+                      title="Speichern (Enter)"
+                      @mousedown.prevent="saveName"
+                    >
+                      <Check class="w-4 h-4" />
+                    </button>
+                    <button
+                      class="name-edit__btn name-edit__btn--cancel"
+                      title="Abbrechen (Escape)"
+                      @mousedown.prevent="cancelEditName"
+                    >
+                      <X class="w-4 h-4" />
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </template>
+
+            <!-- Display Mode -->
+            <template v-else>
+              <div
+                class="name-display"
+                title="Klicken zum Bearbeiten"
+                @click="startEditName"
+              >
+                <span :class="['info-row__value info-row__value--name', { 'info-row__value--empty': !displayName }]">
+                  {{ displayName || 'Unbenannt' }}
+                </span>
+                <Pencil class="name-display__pencil w-4 h-4" />
+              </div>
+            </template>
           </div>
 
-          <!-- Body (scrollable) -->
-          <div class="sheet-body">
-            <!-- IDENTIFICATION Section -->
-            <section class="sheet-section">
-              <h4 class="sheet-section__title">
-                <Tag class="w-3.5 h-3.5" />
-                Identifikation
-              </h4>
-              <div class="sheet-section__content">
-                <!-- Name (Editable) -->
-                <div class="info-row info-row--name">
-                  <span class="info-row__label">Name</span>
+          <!-- Name Error Message -->
+          <div v-if="saveError" class="name-edit__error">
+            {{ saveError }}
+          </div>
 
-                  <!-- Edit Mode -->
-                  <template v-if="isEditingName">
-                    <div class="name-edit">
-                      <input
-                        ref="nameInputRef"
-                        v-model="editedName"
-                        type="text"
-                        class="name-edit__input"
-                        placeholder="Gerätename eingeben..."
-                        :disabled="isSavingName"
-                        @keydown="handleNameKeydown"
-                        @blur="saveName"
-                      />
-                      <div class="name-edit__actions">
-                        <button
-                          v-if="isSavingName"
-                          class="name-edit__btn"
-                          disabled
-                        >
-                          <Loader2 class="w-4 h-4 animate-spin" />
-                        </button>
-                        <template v-else>
-                          <button
-                            class="name-edit__btn name-edit__btn--save"
-                            title="Speichern (Enter)"
-                            @mousedown.prevent="saveName"
-                          >
-                            <Check class="w-4 h-4" />
-                          </button>
-                          <button
-                            class="name-edit__btn name-edit__btn--cancel"
-                            title="Abbrechen (Escape)"
-                            @mousedown.prevent="cancelEditName"
-                          >
-                            <X class="w-4 h-4" />
-                          </button>
-                        </template>
-                      </div>
-                    </div>
-                  </template>
+          <!-- ESP-ID -->
+          <div class="info-row">
+            <span class="info-row__label">ESP-ID</span>
+            <code class="info-row__value info-row__value--mono">{{ espId }}</code>
+          </div>
 
-                  <!-- Display Mode -->
-                  <template v-else>
-                    <div
-                      class="name-display"
-                      title="Klicken zum Bearbeiten"
-                      @click="startEditName"
-                    >
-                      <span :class="['info-row__value info-row__value--name', { 'info-row__value--empty': !displayName }]">
-                        {{ displayName || 'Unbenannt' }}
-                      </span>
-                      <Pencil class="name-display__pencil w-4 h-4" />
-                    </div>
-                  </template>
-                </div>
-
-                <!-- Name Error Message -->
-                <div v-if="saveError" class="name-edit__error">
-                  {{ saveError }}
-                </div>
-
-                <!-- ESP-ID -->
-                <div class="info-row">
-                  <span class="info-row__label">ESP-ID</span>
-                  <code class="info-row__value info-row__value--mono">{{ espId }}</code>
-                </div>
-
-                <!-- Type -->
-                <div class="info-row">
-                  <span class="info-row__label">Typ</span>
-                  <div class="info-row__value">
-                    <Badge :variant="isMock ? 'mock' : 'real'" size="sm">
-                      {{ isMock ? 'MOCK' : 'REAL' }}
-                    </Badge>
-                    <span class="text-muted text-sm ml-2">{{ deviceType }}</span>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <!-- STATUS Section (Quick status inline + details in accordion) -->
-            <section class="sheet-section">
-              <h4 class="sheet-section__title">
-                <Activity class="w-3.5 h-3.5" />
-                Status
-              </h4>
-              <div class="sheet-section__content">
-                <!-- Online Status (always visible) -->
-                <div class="info-row">
-                  <span class="info-row__label">Verbindung</span>
-                  <Badge
-                    :variant="isOnline ? 'success' : 'gray'"
-                    :pulse="isOnline"
-                    dot
-                    size="sm"
-                  >
-                    {{ isOnline ? 'Online' : 'Offline' }}
-                  </Badge>
-                </div>
-
-                <!-- Last Heartbeat (always visible) -->
-                <div class="info-row">
-                  <span class="info-row__label">
-                    <Heart class="w-4 h-4 inline mr-1" />
-                    Heartbeat
-                  </span>
-                  <span :class="['info-row__value', isHeartbeatFresh ? 'text-success' : '']">
-                    {{ formatRelativeTime(device.last_heartbeat || device.last_seen || '') }}
-                  </span>
-                </div>
-
-                <!-- Details (accordion) -->
-                <AccordionSection
-                  title="Status-Details"
-                  storage-key="esp-settings-status-details"
-                  :icon="Activity"
-                >
-                  <!-- WiFi Signal -->
-                  <div class="info-row">
-                    <span class="info-row__label">
-                      <Wifi class="w-4 h-4 inline mr-1" />
-                      WiFi
-                    </span>
-                    <div class="info-row__value wifi-display">
-                      <div :class="['wifi-bars', wifiColorClass]">
-                        <span :class="['wifi-bar', { active: wifiInfo.bars >= 1 }]" />
-                        <span :class="['wifi-bar', { active: wifiInfo.bars >= 2 }]" />
-                        <span :class="['wifi-bar', { active: wifiInfo.bars >= 3 }]" />
-                        <span :class="['wifi-bar', { active: wifiInfo.bars >= 4 }]" />
-                      </div>
-                      <span :class="wifiColorClass">{{ wifiInfo.label }}</span>
-                      <span v-if="device.wifi_rssi" class="text-muted text-xs ml-1">
-                        ({{ device.wifi_rssi }} dBm)
-                      </span>
-                    </div>
-                  </div>
-
-                  <!-- Heap Memory -->
-                  <div v-if="heapDisplay" class="info-row">
-                    <span class="info-row__label">
-                      <HardDrive class="w-4 h-4 inline mr-1" />
-                      Speicher
-                    </span>
-                    <span class="info-row__value">{{ heapDisplay }} frei</span>
-                  </div>
-
-                  <!-- Uptime -->
-                  <div v-if="uptimeDisplay" class="info-row">
-                    <span class="info-row__label">
-                      <Clock class="w-4 h-4 inline mr-1" />
-                      Uptime
-                    </span>
-                    <span class="info-row__value">{{ uptimeDisplay }}</span>
-                  </div>
-                </AccordionSection>
-              </div>
-            </section>
-
-            <!-- ZONE Section -->
-            <section class="sheet-section">
-              <h4 class="sheet-section__title">
-                <MapPin class="w-4 h-4 inline mr-1" />
-                Zone
-              </h4>
-              <div class="sheet-section__content">
-                <div v-if="zoneDisplay" class="info-row info-row--zone-current">
-                  <span class="info-row__label">Aktuell</span>
-                  <Badge variant="success" size="sm">
-                    {{ zoneDisplay }}
-                  </Badge>
-                </div>
-
-                <ZoneAssignmentPanel
-                  :esp-id="espId"
-                  :current-zone-id="device.zone_id ?? undefined"
-                  :current-zone-name="device.zone_name ?? undefined"
-                  :current-master-zone-id="device.master_zone_id ?? undefined"
-                  :is-mock="isMock"
-                  compact
-                  @zone-updated="handleZoneUpdated"
-                  @zone-error="handleZoneError"
-                />
-
-                <p class="text-muted text-xs mt-2">
-                  <Info class="w-3 h-3 inline mr-1" />
-                  Zone kann auch via Drag &amp; Drop im Dashboard geändert werden.
-                </p>
-              </div>
-            </section>
-
-            <!-- SENSOR CONFIGURATION Section (Phase 4.3) -->
-            <AccordionSection
-              v-if="sensors.length > 0"
-              :title="`Sensor-Konfiguration (${sensors.length})`"
-              storage-key="esp-settings-sensors"
-              :icon="Thermometer"
-            >
-              <div v-for="sensor in sensors" :key="`s-${sensor.gpio}`" class="config-panel-item">
-                <SensorConfigPanel
-                  :esp-id="espId"
-                  :gpio="sensor.gpio"
-                  :sensor-type="sensor.sensor_type || sensor.type || 'generic'"
-                  :unit="sensor.unit || ''"
-                />
-              </div>
-            </AccordionSection>
-
-            <!-- ACTUATOR CONFIGURATION Section (Phase 4.3) -->
-            <AccordionSection
-              v-if="actuators.length > 0"
-              :title="`Aktor-Konfiguration (${actuators.length})`"
-              storage-key="esp-settings-actuators"
-              :icon="Zap"
-            >
-              <div v-for="actuator in actuators" :key="`a-${actuator.gpio}`" class="config-panel-item">
-                <ActuatorConfigPanel
-                  :esp-id="espId"
-                  :gpio="actuator.gpio"
-                  :actuator-type="actuator.actuator_type || actuator.type || 'generic'"
-                />
-              </div>
-            </AccordionSection>
-
-            <!-- MOCK CONTROLS Section -->
-            <section v-if="isMock" class="sheet-section sheet-section--mock">
-              <AccordionSection
-                title="Mock-Steuerung"
-                storage-key="esp-settings-mock-controls"
-                :icon="Settings2"
-                default-open
-              >
-                <button
-                  class="action-btn action-btn--heartbeat"
-                  :disabled="heartbeatLoading"
-                  @click="handleHeartbeat"
-                >
-                  <Loader2 v-if="heartbeatLoading" class="w-4 h-4 animate-spin" />
-                  <Heart v-else class="w-4 h-4" />
-                  <span>{{ heartbeatLoading ? 'Wird gesendet...' : 'Heartbeat senden' }}</span>
-                </button>
-
-                <!-- Auto-Heartbeat Toggle -->
-                <div class="auto-heartbeat">
-                  <div class="auto-heartbeat__row">
-                    <div class="auto-heartbeat__label">
-                      <Timer class="w-4 h-4" />
-                      <span>Automatische Heartbeats</span>
-                    </div>
-                    <button
-                      :class="[
-                        'auto-heartbeat__toggle',
-                        { 'auto-heartbeat__toggle--active': autoHeartbeatEnabled }
-                      ]"
-                      :disabled="autoHeartbeatLoading"
-                      @click="handleAutoHeartbeatToggle"
-                    >
-                      <span class="auto-heartbeat__toggle-knob" />
-                    </button>
-                  </div>
-
-                  <Transition name="slide-fade">
-                    <div v-if="autoHeartbeatEnabled" class="auto-heartbeat__interval">
-                      <label class="auto-heartbeat__interval-label">
-                        Intervall:
-                        <input
-                          v-model.number="autoHeartbeatInterval"
-                          type="number"
-                          min="10"
-                          max="300"
-                          class="auto-heartbeat__interval-input"
-                          :disabled="autoHeartbeatLoading"
-                          @change="handleIntervalChange"
-                        />
-                        <span class="auto-heartbeat__interval-unit">Sek.</span>
-                      </label>
-                      <Loader2 v-if="autoHeartbeatLoading" class="w-3 h-3 animate-spin text-muted" />
-                    </div>
-                  </Transition>
-                </div>
-
-                <p class="text-muted text-xs mt-2">
-                  <template v-if="autoHeartbeatEnabled">
-                    Heartbeats werden automatisch alle {{ autoHeartbeatInterval }} Sekunden gesendet.
-                  </template>
-                  <template v-else>
-                    Mock ESPs senden keine automatischen Heartbeats.
-                    Aktiviere diese Option fuer regelmaessige Updates.
-                  </template>
-                </p>
-              </AccordionSection>
-            </section>
-
-            <!-- REAL ESP INFO -->
-            <section v-if="!isMock" class="sheet-section sheet-section--info">
-              <h4 class="sheet-section__title">Geraeteinformation</h4>
-              <div class="sheet-section__content">
-                <p class="text-muted text-sm">
-                  <Info class="w-4 h-4 inline mr-1" />
-                  Dieses Geraet sendet automatisch alle 60 Sekunden einen Heartbeat.
-                  Sensor- und Aktor-Daten werden in Echtzeit ueber MQTT synchronisiert.
-                </p>
-              </div>
-            </section>
-
-            <!-- DANGER ZONE -->
-            <section class="sheet-section sheet-section--danger">
-              <h4 class="sheet-section__title">
-                <AlertTriangle class="w-4 h-4 inline mr-1" />
-                Gefahrenzone
-              </h4>
-              <div class="sheet-section__content">
-                <div v-if="showDeleteConfirm" class="delete-confirm">
-                  <p class="delete-confirm__text">
-                    Möchtest du <strong>{{ displayName }}</strong> wirklich löschen?
-                  </p>
-                  <p v-if="isMock" class="delete-confirm__detail">
-                    Der simulierte ESP wird vollständig entfernt.
-                  </p>
-                  <p v-else class="delete-confirm__detail">
-                    Das Gerät und alle zugehörigen Sensoren/Aktoren werden aus der Datenbank entfernt.
-                  </p>
-                  <div class="delete-confirm__actions">
-                    <button
-                      class="action-btn action-btn--secondary"
-                      @click="showDeleteConfirm = false"
-                    >
-                      Abbrechen
-                    </button>
-                    <button
-                      class="action-btn action-btn--delete"
-                      :disabled="deleteLoading"
-                      @click="handleDelete"
-                    >
-                      <Loader2 v-if="deleteLoading" class="w-4 h-4 animate-spin" />
-                      <Trash2 v-else class="w-4 h-4" />
-                      <span>Endgültig löschen</span>
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  v-else
-                  class="action-btn action-btn--danger-outline"
-                  @click="showDeleteConfirm = true"
-                >
-                  <Trash2 class="w-4 h-4" />
-                  <span>Gerät löschen</span>
-                </button>
-              </div>
-            </section>
+          <!-- Type -->
+          <div class="info-row">
+            <span class="info-row__label">Typ</span>
+            <div class="info-row__value">
+              <Badge :variant="isMock ? 'mock' : 'real'" size="sm">
+                {{ isMock ? 'MOCK' : 'REAL' }}
+              </Badge>
+              <span class="text-muted text-sm ml-2">{{ deviceType }}</span>
+            </div>
           </div>
         </div>
-      </div>
-    </Transition>
-  </Teleport>
+      </section>
+
+      <!-- STATUS Section (uses useESPStatus) -->
+      <section class="sheet-section">
+        <h4 class="sheet-section__title">
+          <Activity class="w-3.5 h-3.5" />
+          Status
+        </h4>
+        <div class="sheet-section__content">
+          <!-- Online Status with dot + text (like DeviceMiniCard) -->
+          <div class="info-row">
+            <span class="info-row__label">Verbindung</span>
+            <div class="status-display">
+              <span
+                class="status-dot"
+                :class="{ 'status-dot--pulse': statusPulse }"
+                :style="{ backgroundColor: statusColor }"
+              />
+              <span class="status-text" :style="{ color: statusColor }">{{ statusText }}</span>
+            </div>
+          </div>
+
+          <!-- Last Heartbeat (always visible) -->
+          <div class="info-row">
+            <span class="info-row__label">
+              <Heart class="w-4 h-4 inline mr-1" />
+              Heartbeat
+            </span>
+            <span :class="['info-row__value', isHeartbeatFresh ? 'text-success' : '']">
+              {{ lastSeenText }}
+            </span>
+          </div>
+
+          <!-- Details (accordion) -->
+          <AccordionSection
+            title="Status-Details"
+            storage-key="esp-settings-status-details"
+            :icon="Activity"
+          >
+            <!-- WiFi Signal -->
+            <div class="info-row">
+              <span class="info-row__label">
+                <Wifi class="w-4 h-4 inline mr-1" />
+                WiFi
+              </span>
+              <div class="info-row__value wifi-display">
+                <div :class="['wifi-bars', wifiColorClass]">
+                  <span :class="['wifi-bar', { active: wifiInfo.bars >= 1 }]" />
+                  <span :class="['wifi-bar', { active: wifiInfo.bars >= 2 }]" />
+                  <span :class="['wifi-bar', { active: wifiInfo.bars >= 3 }]" />
+                  <span :class="['wifi-bar', { active: wifiInfo.bars >= 4 }]" />
+                </div>
+                <span :class="wifiColorClass">{{ wifiInfo.label }}</span>
+                <span v-if="device.wifi_rssi" class="text-muted text-xs ml-1">
+                  ({{ device.wifi_rssi }} dBm)
+                </span>
+              </div>
+            </div>
+
+            <!-- Heap Memory -->
+            <div v-if="heapDisplay" class="info-row">
+              <span class="info-row__label">
+                <HardDrive class="w-4 h-4 inline mr-1" />
+                Speicher
+              </span>
+              <span class="info-row__value">{{ heapDisplay }} frei</span>
+            </div>
+
+            <!-- Uptime -->
+            <div v-if="uptimeDisplay" class="info-row">
+              <span class="info-row__label">
+                <Clock class="w-4 h-4 inline mr-1" />
+                Uptime
+              </span>
+              <span class="info-row__value">{{ uptimeDisplay }}</span>
+            </div>
+          </AccordionSection>
+        </div>
+      </section>
+
+      <!-- ZONE Section -->
+      <section class="sheet-section">
+        <h4 class="sheet-section__title">
+          <MapPin class="w-4 h-4 inline mr-1" />
+          Zone
+        </h4>
+        <div class="sheet-section__content">
+          <div v-if="zoneDisplay" class="info-row info-row--zone-current">
+            <span class="info-row__label">Aktuell</span>
+            <Badge variant="success" size="sm">
+              {{ zoneDisplay }}
+            </Badge>
+          </div>
+
+          <ZoneAssignmentPanel
+            :esp-id="espId"
+            :current-zone-id="device.zone_id ?? undefined"
+            :current-zone-name="device.zone_name ?? undefined"
+            :current-master-zone-id="device.master_zone_id ?? undefined"
+            :is-mock="isMock"
+            compact
+            @zone-updated="handleZoneUpdated"
+            @zone-error="handleZoneError"
+          />
+
+          <p class="text-muted text-xs mt-2">
+            <Info class="w-3 h-3 inline mr-1" />
+            Zone kann auch via Drag &amp; Drop im Dashboard geändert werden.
+          </p>
+        </div>
+      </section>
+
+      <!-- SENSOR LIST Section (replaces inline SensorConfigPanel) -->
+      <section v-if="sensors.length > 0" class="sheet-section">
+        <h4 class="sheet-section__title">
+          <Thermometer class="w-3.5 h-3.5" />
+          Sensoren ({{ sensors.length }})
+        </h4>
+        <div class="sheet-section__content">
+          <button
+            v-for="sensor in sensors"
+            :key="`s-${sensor.gpio}`"
+            class="config-list-item"
+            @click="openSensorConfig(sensor)"
+          >
+            <div class="config-list-item__info">
+              <span class="config-list-item__name">
+                {{ sensor.name || getSensorLabel(sensor.sensor_type || sensor.type || '') }}
+              </span>
+              <span class="config-list-item__detail">
+                GPIO {{ sensor.gpio }}
+              </span>
+            </div>
+            <div class="config-list-item__value">
+              <span class="config-list-item__reading">
+                {{ formatSensorValue(sensor) }}
+              </span>
+              <span class="config-list-item__unit">
+                {{ sensor.unit || getSensorUnit(sensor.sensor_type || sensor.type || '') }}
+              </span>
+            </div>
+            <ChevronRight class="config-list-item__arrow w-4 h-4" />
+          </button>
+        </div>
+      </section>
+
+      <!-- ACTUATOR LIST Section (replaces inline ActuatorConfigPanel) -->
+      <section v-if="actuators.length > 0" class="sheet-section">
+        <h4 class="sheet-section__title">
+          <Zap class="w-3.5 h-3.5" />
+          Aktoren ({{ actuators.length }})
+        </h4>
+        <div class="sheet-section__content">
+          <button
+            v-for="actuator in actuators"
+            :key="`a-${actuator.gpio}`"
+            class="config-list-item"
+            @click="openActuatorConfig(actuator)"
+          >
+            <div class="config-list-item__info">
+              <span class="config-list-item__name">
+                {{ actuator.name || actuator.actuator_type || actuator.type || 'Aktor' }}
+              </span>
+              <span class="config-list-item__detail">
+                GPIO {{ actuator.gpio }}
+              </span>
+            </div>
+            <div class="config-list-item__value">
+              <Badge
+                :variant="actuator.state ? 'success' : 'gray'"
+                size="sm"
+                dot
+              >
+                {{ actuator.state ? 'AN' : 'AUS' }}
+              </Badge>
+            </div>
+            <ChevronRight class="config-list-item__arrow w-4 h-4" />
+          </button>
+        </div>
+      </section>
+
+      <!-- MOCK CONTROLS Section -->
+      <section v-if="isMock" class="sheet-section sheet-section--mock">
+        <AccordionSection
+          title="Mock-Steuerung"
+          storage-key="esp-settings-mock-controls"
+          :icon="Settings2"
+          default-open
+        >
+          <button
+            class="action-btn action-btn--heartbeat"
+            :disabled="heartbeatLoading"
+            @click="handleHeartbeat"
+          >
+            <Loader2 v-if="heartbeatLoading" class="w-4 h-4 animate-spin" />
+            <Heart v-else class="w-4 h-4" />
+            <span>{{ heartbeatLoading ? 'Wird gesendet...' : 'Heartbeat senden' }}</span>
+          </button>
+
+          <!-- Auto-Heartbeat Toggle -->
+          <div class="auto-heartbeat">
+            <div class="auto-heartbeat__row">
+              <div class="auto-heartbeat__label">
+                <Timer class="w-4 h-4" />
+                <span>Automatische Heartbeats</span>
+              </div>
+              <button
+                :class="[
+                  'auto-heartbeat__toggle',
+                  { 'auto-heartbeat__toggle--active': autoHeartbeatEnabled }
+                ]"
+                :disabled="autoHeartbeatLoading"
+                @click="handleAutoHeartbeatToggle"
+              >
+                <span class="auto-heartbeat__toggle-knob" />
+              </button>
+            </div>
+
+            <Transition name="slide-fade">
+              <div v-if="autoHeartbeatEnabled" class="auto-heartbeat__interval">
+                <label class="auto-heartbeat__interval-label">
+                  Intervall:
+                  <input
+                    v-model.number="autoHeartbeatInterval"
+                    type="number"
+                    min="10"
+                    max="300"
+                    class="auto-heartbeat__interval-input"
+                    :disabled="autoHeartbeatLoading"
+                    @change="handleIntervalChange"
+                  />
+                  <span class="auto-heartbeat__interval-unit">Sek.</span>
+                </label>
+                <Loader2 v-if="autoHeartbeatLoading" class="w-3 h-3 animate-spin text-muted" />
+              </div>
+            </Transition>
+          </div>
+
+          <p class="text-muted text-xs mt-2">
+            <template v-if="autoHeartbeatEnabled">
+              Heartbeats werden automatisch alle {{ autoHeartbeatInterval }} Sekunden gesendet.
+            </template>
+            <template v-else>
+              Mock ESPs senden keine automatischen Heartbeats.
+              Aktiviere diese Option fuer regelmaessige Updates.
+            </template>
+          </p>
+        </AccordionSection>
+      </section>
+
+      <!-- REAL ESP INFO -->
+      <section v-if="!isMock" class="sheet-section sheet-section--info">
+        <h4 class="sheet-section__title">Geraeteinformation</h4>
+        <div class="sheet-section__content">
+          <p class="text-muted text-sm">
+            <Info class="w-4 h-4 inline mr-1" />
+            Dieses Geraet sendet automatisch alle 60 Sekunden einen Heartbeat.
+            Sensor- und Aktor-Daten werden in Echtzeit ueber MQTT synchronisiert.
+          </p>
+        </div>
+      </section>
+
+      <!-- DANGER ZONE (uses ConfirmDialog via uiStore.confirm) -->
+      <section class="sheet-section sheet-section--danger">
+        <h4 class="sheet-section__title">
+          <AlertTriangle class="w-4 h-4 inline mr-1" />
+          Gefahrenzone
+        </h4>
+        <div class="sheet-section__content">
+          <button
+            class="action-btn action-btn--danger-outline"
+            :disabled="deleteLoading"
+            @click="handleDelete"
+          >
+            <Loader2 v-if="deleteLoading" class="w-4 h-4 animate-spin" />
+            <Trash2 v-else class="w-4 h-4" />
+            <span>Gerät löschen</span>
+          </button>
+        </div>
+      </section>
+    </div>
+  </SlideOver>
 </template>
 
 <style scoped>
 /* =============================================================================
-   OVERLAY
-   ============================================================================= */
-
-.sheet-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal);
-  background-color: var(--backdrop-color-light);
-  -webkit-backdrop-filter: blur(var(--backdrop-blur-light));
-  backdrop-filter: blur(var(--backdrop-blur-light));
-}
-
-/* =============================================================================
-   SHEET CONTENT (Slide-in from right)
-   ============================================================================= */
-
-.sheet-content {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  max-width: 420px;
-  display: flex;
-  flex-direction: column;
-  z-index: var(--z-modal);
-  background-color: var(--color-bg-secondary);
-  border-left: 1px solid var(--glass-border);
-  box-shadow: -20px 0 40px rgba(0, 0, 0, 0.4);
-  overflow: hidden;
-  outline: none;
-}
-
-/* =============================================================================
-   HEADER
-   ============================================================================= */
-
-.sheet-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--glass-border);
-  flex-shrink: 0;
-}
-
-.sheet-header__title-group {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-}
-
-.sheet-header__title {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0;
-}
-
-.sheet-close-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 0.5rem;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.sheet-close-btn:hover {
-  background-color: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-}
-
-/* =============================================================================
-   BODY
+   BODY (inside SlideOver content slot)
    ============================================================================= */
 
 .sheet-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem 1.25rem;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
-  scrollbar-width: thin;
-  scrollbar-color: var(--glass-border) transparent;
-}
-
-.sheet-body::-webkit-scrollbar {
-  width: 4px;
-}
-
-.sheet-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.sheet-body::-webkit-scrollbar-thumb {
-  background: var(--glass-border);
-  border-radius: 2px;
 }
 
 /* =============================================================================
@@ -1028,6 +924,37 @@ onUnmounted(() => {
   color: var(--color-text-muted);
   font-style: italic;
   font-weight: 400;
+}
+
+/* =============================================================================
+   STATUS DISPLAY (dot + text, like DeviceMiniCard)
+   ============================================================================= */
+
+.status-display {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.status-dot--pulse {
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.status-text {
+  font-size: 0.8125rem;
+  font-weight: 500;
 }
 
 /* =============================================================================
@@ -1165,6 +1092,82 @@ onUnmounted(() => {
 .wifi-bar.active { opacity: 1; background-color: currentColor; }
 
 /* =============================================================================
+   CONFIG LIST ITEMS (Sensor/Actuator rows with "Einstellungen" affordance)
+   ============================================================================= */
+
+.config-list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  background-color: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.config-list-item:hover {
+  border-color: var(--color-iridescent-1);
+  background-color: rgba(96, 165, 250, 0.04);
+}
+
+.config-list-item__info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.config-list-item__name {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-list-item__detail {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.config-list-item__value {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.config-list-item__reading {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.config-list-item__unit {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.config-list-item__arrow {
+  color: var(--color-text-muted);
+  opacity: 0.4;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease;
+}
+
+.config-list-item:hover .config-list-item__arrow {
+  opacity: 1;
+  color: var(--color-iridescent-1);
+}
+
+/* =============================================================================
    ACTION BUTTONS
    ============================================================================= */
 
@@ -1207,38 +1210,6 @@ onUnmounted(() => {
   background: rgba(239, 68, 68, 0.1);
   border-color: rgba(239, 68, 68, 0.5);
 }
-
-.action-btn--delete {
-  background: var(--color-error);
-  border: none;
-  color: white;
-}
-
-.action-btn--delete:hover:not(:disabled) {
-  background: #dc2626;
-  transform: translateY(-1px);
-}
-
-.action-btn--secondary {
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--glass-border);
-  color: var(--color-text-secondary);
-}
-
-.action-btn--secondary:hover:not(:disabled) {
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
-}
-
-/* =============================================================================
-   DELETE CONFIRMATION
-   ============================================================================= */
-
-.delete-confirm { display: flex; flex-direction: column; gap: 0.75rem; }
-.delete-confirm__text { font-size: 0.875rem; color: var(--color-text-primary); margin: 0; }
-.delete-confirm__detail { font-size: 0.75rem; color: var(--color-text-muted); margin: 0; }
-.delete-confirm__actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
-.delete-confirm__actions .action-btn { flex: 1; }
 
 /* =============================================================================
    AUTO-HEARTBEAT
@@ -1367,53 +1338,4 @@ onUnmounted(() => {
 .ml-1 { margin-left: 0.25rem; }
 .ml-2 { margin-left: 0.5rem; }
 .mt-2 { margin-top: 0.5rem; }
-
-/* =============================================================================
-   SHEET TRANSITIONS (Slide from right)
-   ============================================================================= */
-
-.sheet-enter-active,
-.sheet-leave-active {
-  transition: opacity var(--transition-sheet);
-}
-
-.sheet-enter-active .sheet-content,
-.sheet-leave-active .sheet-content {
-  transition: transform var(--transition-sheet);
-}
-
-.sheet-enter-from,
-.sheet-leave-to {
-  opacity: 0;
-}
-
-.sheet-enter-from .sheet-content,
-.sheet-leave-to .sheet-content {
-  transform: translateX(100%);
-}
-
-/* =============================================================================
-   CONFIG PANEL ITEMS (Phase 4.3)
-   ============================================================================= */
-
-.config-panel-item {
-  padding: 0.75rem;
-  background-color: var(--color-bg-tertiary);
-  border: 1px solid var(--glass-border);
-  border-radius: 0.5rem;
-}
-
-.config-panel-item + .config-panel-item {
-  margin-top: 0.5rem;
-}
-
-/* =============================================================================
-   RESPONSIVE
-   ============================================================================= */
-
-@media (max-width: 480px) {
-  .sheet-content {
-    max-width: 100%;
-  }
-}
 </style>

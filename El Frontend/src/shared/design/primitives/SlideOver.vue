@@ -77,13 +77,14 @@ onUnmounted(() => {
             :class="['slide-over', `slide-over--${width}`]"
             role="dialog"
             aria-modal="true"
-            :aria-label="title"
+            aria-labelledby="sheet-title"
           >
             <!-- Header -->
             <header class="slide-over__header">
-              <h2 class="slide-over__title">{{ title }}</h2>
+              <h2 id="sheet-title" class="slide-over__title">{{ title }}</h2>
               <button
                 class="slide-over__close"
+                aria-label="Schließen"
                 title="Schließen (ESC)"
                 @click="emit('close')"
               >

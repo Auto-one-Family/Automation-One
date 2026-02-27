@@ -1,8 +1,8 @@
 /**
  * Dashboard Store
  *
- * Bridge between HardwareView (data producer) and TopBar (UI consumer).
- * HardwareView writes counts, breadcrumb, and reads filter state.
+ * Bridge between HardwareView and TopBar (UI consumer).
+ * statusCounts are computed from espStore via getESPStatus (reactive).
  * TopBar reads counts/breadcrumb and writes filter changes.
  *
  * Extended with Custom Dashboard Layout management (Phase 2).
@@ -11,6 +11,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useEspStore } from '@/stores/esp'
+import { getESPStatus } from '@/composables/useESPStatus'
 
 export type StatusFilter = 'online' | 'offline' | 'warning' | 'safemode'
 export type TypeFilter = 'all' | 'mock' | 'real'
@@ -59,8 +60,30 @@ export const useDashboardStore = defineStore('dashboard', () => {
   /* ── Visibility ── */
   const showControls = ref(false)
 
-  /* ── Counts (written by DashboardView) ── */
-  const statusCounts = ref({ online: 0, offline: 0, warning: 0, safeMode: 0 })
+  /* ── Counts (computed from espStore via getESPStatus — reactive to device changes) ── */
+  const statusCounts = computed(() => {
+    let online = 0, offline = 0, warning = 0, safeMode = 0
+    for (const device of espStore.devices) {
+      const status = getESPStatus(device)
+      switch (status) {
+        case 'online':
+        case 'stale':
+          online++
+          break
+        case 'offline':
+        case 'unknown':
+          offline++
+          break
+        case 'error':
+          warning++
+          break
+        case 'safemode':
+          safeMode++
+          break
+      }
+    }
+    return { online, offline, warning, safeMode }
+  })
 
   /* ── Device counts (computed from espStore — reactive to device changes) ── */
   const deviceCounts = computed(() => ({
@@ -68,7 +91,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     mock: espStore.mockDevices.length,
     real: espStore.realDevices.length,
   }))
-  const pendingCount = ref(0)
+  const pendingCount = computed(() => espStore.pendingCount)
 
   /* ── Filters (bidirectional: TopBar writes, DashboardView reads) ── */
   const activeStatusFilters = ref<Set<StatusFilter>>(new Set())

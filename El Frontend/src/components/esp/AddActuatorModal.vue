@@ -154,11 +154,11 @@ async function addActuator() {
   }
 }
 
-function onActuatorGpioValidation(valid: boolean): void {
+function onActuatorGpioValidation(valid: boolean, _message: string | null): void {
   actuatorGpioValid.value = valid
 }
 
-function onActuatorAuxGpioValidation(valid: boolean): void {
+function onActuatorAuxGpioValidation(valid: boolean, _message: string | null): void {
   actuatorAuxGpioValid.value = valid
 }
 </script>
@@ -175,7 +175,7 @@ function onActuatorAuxGpioValidation(valid: boolean): void {
       <!-- GPIO -->
       <div class="form-group">
         <label class="form-label">GPIO Pin</label>
-        <GpioPicker v-model="newActuator.gpio" :esp-id="espId" component-category="actuator" :show-recommendations="true" @validation="onActuatorGpioValidation" />
+        <GpioPicker v-model="newActuator.gpio" :esp-id="espId" :actuator-type="newActuator.actuator_type" variant="dropdown" @validation-change="onActuatorGpioValidation" />
       </div>
 
       <!-- Actuator Type -->
@@ -195,7 +195,7 @@ function onActuatorAuxGpioValidation(valid: boolean): void {
       <!-- Aux GPIO -->
       <div v-if="supportsAuxGpio(newActuator.actuator_type)" class="form-group">
         <label class="form-label">Aux-GPIO (Direction-Pin) <span class="form-label-hint">Optional</span></label>
-        <GpioPicker v-model="actuatorAuxGpio" :esp-id="espId" component-category="actuator" :show-recommendations="true" :allow-empty="true" empty-value="255" empty-label="Nicht verwendet" @validation="onActuatorAuxGpioValidation" />
+        <GpioPicker v-model="actuatorAuxGpio" :esp-id="espId" :actuator-type="newActuator.actuator_type" variant="dropdown" @validation-change="onActuatorAuxGpioValidation" />
       </div>
 
       <!-- PWM -->

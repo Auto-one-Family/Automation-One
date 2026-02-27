@@ -399,6 +399,26 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 300,
     supportsOnDemand: false,
+    defaultIntervalSeconds: 60,
+    recommendedGpios: [32, 33, 34, 35, 36, 39],
+  },
+
+  'soil_moisture': {
+    label: 'Bodenfeuchte',
+    unit: '%',
+    min: 0,
+    max: 100,
+    decimals: 0,
+    icon: 'Droplets',
+    defaultValue: 50,
+    description: 'Bodenfeuchtigkeit in Prozent. Kapazitiver oder resistiver Sensor.',
+    category: 'soil',
+    // Operating Mode (Phase 2B)
+    recommendedMode: 'continuous',
+    recommendedTimeout: 300,
+    supportsOnDemand: false,
+    defaultIntervalSeconds: 60,
+    recommendedGpios: [32, 33, 34, 35, 36, 39],
   },
 }
 

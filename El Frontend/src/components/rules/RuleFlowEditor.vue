@@ -930,8 +930,7 @@ defineExpose({
 /* ======================== CUSTOM NODES ======================== */
 
 .rule-node {
-  min-width: 190px;
-  max-width: 240px;
+  width: 210px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
@@ -995,8 +994,8 @@ defineExpose({
 }
 
 .rule-node--logic {
-  min-width: auto;
-  max-width: none;
+  width: auto;
+  min-width: 80px;
 }
 
 .rule-node--actuator::before {
@@ -1079,9 +1078,7 @@ defineExpose({
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--color-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.3;
 }
 
 /* Sensor chip (e.g. "DS18B20") */
@@ -1126,7 +1123,7 @@ defineExpose({
 }
 
 .rule-node__detail-value--truncate {
-  max-width: 140px;
+  max-width: 170px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1139,12 +1136,13 @@ defineExpose({
 }
 
 .rule-node__condition {
-  font-size: 1.375rem;
+  font-size: clamp(1rem, 1.375rem, 1.375rem);
   font-weight: 700;
   color: var(--color-text-primary);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
   line-height: 1.3;
+  word-break: break-word;
 }
 
 .rule-node__unit {
@@ -1270,8 +1268,8 @@ defineExpose({
 /* ======================== HANDLE STYLING ======================== */
 
 :deep(.vue-flow__handle) {
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: var(--color-bg-primary);
   border: 2.5px solid rgba(129, 140, 248, 0.6);
@@ -1279,37 +1277,47 @@ defineExpose({
   z-index: 5;
 }
 
+/* Invisible hit area expansion for easier grabbing */
+:deep(.vue-flow__handle::after) {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+}
+
 /* Source handles (output - right side) */
 :deep(.vue-flow__handle.vue-flow__handle-right) {
-  background: rgba(129, 140, 248, 0.2);
+  background: rgba(129, 140, 248, 0.25);
   border-color: rgba(129, 140, 248, 0.7);
+  right: -9px;
 }
 
 /* Target handles (input - left side) */
 :deep(.vue-flow__handle.vue-flow__handle-left) {
   background: var(--color-bg-primary);
   border-color: rgba(129, 140, 248, 0.5);
+  left: -9px;
 }
 
 :deep(.vue-flow__handle:hover) {
   background: var(--color-iridescent-2);
   border-color: var(--color-iridescent-2);
-  box-shadow: 0 0 14px rgba(129, 140, 248, 0.6);
-  transform: scale(1.35);
+  box-shadow: 0 0 16px rgba(129, 140, 248, 0.6);
+  transform: scale(1.3);
 }
 
 :deep(.vue-flow__handle-connecting) {
   background: var(--color-iridescent-1);
   border-color: var(--color-iridescent-1);
-  box-shadow: 0 0 18px rgba(96, 165, 250, 0.7);
-  transform: scale(1.4);
+  box-shadow: 0 0 20px rgba(96, 165, 250, 0.7);
+  transform: scale(1.35);
 }
 
 :deep(.vue-flow__handle-valid) {
   background: var(--color-success);
   border-color: var(--color-success);
-  box-shadow: 0 0 16px rgba(52, 211, 153, 0.6);
-  transform: scale(1.4);
+  box-shadow: 0 0 18px rgba(52, 211, 153, 0.6);
+  transform: scale(1.35);
 }
 
 /* ======================== EDGE STYLING ======================== */
@@ -1331,7 +1339,7 @@ defineExpose({
 }
 
 :deep(.vue-flow__edge .vue-flow__edge-interaction) {
-  stroke-width: 24;
+  stroke-width: 32;
 }
 
 :deep(.vue-flow__arrowhead) {

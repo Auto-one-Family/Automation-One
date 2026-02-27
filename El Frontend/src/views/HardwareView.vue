@@ -22,7 +22,7 @@ import type { ESPDevice } from '@/api/esp'
 import { useZoneDragDrop, ZONE_UNASSIGNED, useKeyboardShortcuts, useSwipeNavigation } from '@/composables'
 import { useToast } from '@/composables/useToast'
 import { zonesApi } from '@/api/zones'
-import { Plus, Filter, GitBranch, Workflow } from 'lucide-vue-next'
+import { Plus, Filter, GitBranch, Workflow, MapPin, XCircle, ChevronDown } from 'lucide-vue-next'
 import { getESPStatus } from '@/composables/useESPStatus'
 import { createLogger } from '@/utils/logger'
 
@@ -39,14 +39,18 @@ import ESPConfigPanel from '@/components/esp/ESPConfigPanel.vue'
 import CreateMockEspModal from '@/components/modals/CreateMockEspModal.vue'
 import ESPSettingsSheet from '@/components/esp/ESPSettingsSheet.vue'
 import ComponentSidebar from '@/components/dashboard/ComponentSidebar.vue'
-import UnassignedDropBar from '@/components/dashboard/UnassignedDropBar.vue'
 import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
 import LoadingState from '@/shared/design/primitives/BaseSkeleton.vue'
 import { EmptyState } from '@/shared/design/patterns'
 
 // Level components
 import ZonePlate from '@/components/dashboard/ZonePlate.vue'
+import DeviceMiniCard from '@/components/dashboard/DeviceMiniCard.vue'
 import DeviceDetailView from '@/components/esp/DeviceDetailView.vue'
+import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
+import { VueDraggable } from 'vue-draggable-plus'
+import { useDragStateStore } from '@/shared/stores/dragState.store'
+import { Inbox } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -54,8 +58,9 @@ const espStore = useEspStore()
 const logicStore = useLogicStore()
 const uiStore = useUiStore()
 const dashStore = useDashboardStore()
-const { groupDevicesByZone, handleDeviceDrop, generateZoneId } = useZoneDragDrop()
+const { groupDevicesByZone, handleDeviceDrop, handleRemoveFromZone, generateZoneId, getAvailableZones } = useZoneDragDrop()
 const { register } = useKeyboardShortcuts()
+const dragStore = useDragStateStore()
 const { success: showSuccess, error: showError } = useToast()
 
 // =============================================================================
@@ -235,40 +240,6 @@ const unregisterEscape = register({
 onUnmounted(() => unregisterEscape())
 
 // =============================================================================
-// Status counts → Dashboard Store
-// =============================================================================
-const onlineCount = computed(() => espStore.onlineDevices.length)
-const offlineCount = computed(() => espStore.offlineDevices.length)
-
-const warningCount = computed(() =>
-  espStore.devices.filter(device => {
-    const deviceId = espStore.getDeviceId(device)
-    if (espStore.isMock(deviceId)) {
-      const m = device as any
-      return m.system_state === 'ERROR' || m.actuators?.some((a: any) => a.emergency_stopped)
-    }
-    return device.status === 'error'
-  }).length
-)
-
-const safeModeCount = computed(() =>
-  espStore.devices.filter(device => {
-    if (espStore.isMock(espStore.getDeviceId(device))) {
-      return (device as any).system_state === 'SAFE_MODE'
-    }
-    return false
-  }).length
-)
-
-watch(
-  [onlineCount, offlineCount, warningCount, safeModeCount],
-  ([on, off, warn, safe]) => {
-    dashStore.statusCounts = { online: on, offline: off, warning: warn, safeMode: safe }
-  },
-  { immediate: true }
-)
-
-// =============================================================================
 // Filtered ESPs & Zone Grouping
 // =============================================================================
 const filteredEsps = computed(() => {
@@ -283,17 +254,16 @@ const filteredEsps = computed(() => {
   const filters = dashStore.activeStatusFilters
   if (filters.size > 0) {
     esps = esps.filter(device => {
-      const deviceId = espStore.getDeviceId(device)
-      const isMock = espStore.isMock(deviceId)
-      const mockDevice = device as any
+      const status = getESPStatus(device)
 
-      if (filters.has('online') && (device.status === 'online' || device.connected === true)) return true
-      if (filters.has('offline') && (device.status === 'offline' || device.connected === false)) return true
+      if (filters.has('online') && (status === 'online' || status === 'stale')) return true
+      if (filters.has('offline') && (status === 'offline' || status === 'unknown')) return true
       if (filters.has('warning')) {
-        if (isMock && (mockDevice.system_state === 'ERROR' || mockDevice.actuators?.some((a: any) => a.emergency_stopped))) return true
-        if (!isMock && device.status === 'error') return true
+        if (status === 'error') return true
+        const actuators = (device as any).actuators as Array<{ emergency_stopped?: boolean }> | undefined
+        if (actuators?.some(a => a.emergency_stopped)) return true
       }
-      if (filters.has('safemode') && isMock && mockDevice.system_state === 'SAFE_MODE') return true
+      if (filters.has('safemode') && status === 'safemode') return true
       return false
     })
   }
@@ -331,12 +301,47 @@ const zoneGroups = computed(() => {
   return zones
 })
 
-/** Unassigned devices (for zone create ESP picker) */
-const unassignedDevices = computed(() => {
-  const allGroups = groupDevicesByZone(espStore.devices)
-  const unassigned = allGroups.find(g => g.zoneId === ZONE_UNASSIGNED)
-  return unassigned?.devices || []
+/** Unassigned devices (from store — single source of truth) */
+const unassignedDevices = computed(() => espStore.unassignedDevices)
+
+/** Local copy for VueDraggable v-model (unassigned section) */
+const localUnassignedDevices = ref<ESPDevice[]>([])
+watch(unassignedDevices, (newDevices) => {
+  localUnassignedDevices.value = [...newDevices]
+}, { immediate: true, deep: true })
+
+/** Unassigned section default open when devices exist */
+const unassignedSectionOpen = ref(unassignedDevices.value.length > 0)
+watch(() => unassignedDevices.value.length, (len) => {
+  if (len > 0) unassignedSectionOpen.value = true
 })
+
+function isMockDevice(device: ESPDevice): boolean {
+  return espStore.isMock(espStore.getDeviceId(device))
+}
+
+function handleUnassignedDragAdd(event: any) {
+  const deviceId = event?.item?.dataset?.deviceId
+  if (!deviceId) return
+
+  const device = espStore.devices.find(d =>
+    espStore.getDeviceId(d) === deviceId
+  )
+  if (!device) return
+
+  // Device was dropped into unassigned — remove from zone
+  if (device.zone_id) {
+    handleRemoveFromZone(device)
+  }
+}
+
+function handleUnassignedDragStart() {
+  dragStore.startEspCardDrag()
+}
+
+function handleUnassignedDragEnd() {
+  dragStore.endEspCardDrag()
+}
 
 // =============================================================================
 // Zone Create (inline form)
@@ -385,8 +390,14 @@ const selectedDevice = computed(() => {
 
 const selectedZoneName = computed(() => {
   if (!selectedZoneId.value) return ''
-  const device = espStore.devices.find(d => d.zone_id === selectedZoneId.value)
-  return device?.zone_name || selectedZoneId.value
+  const zoneDevices = espStore.devices.filter(d => d.zone_id === selectedZoneId.value)
+  const zoneName = zoneDevices[0]?.zone_name || selectedZoneId.value
+  const total = zoneDevices.length
+  const online = zoneDevices.filter(d => {
+    const s = getESPStatus(d)
+    return s === 'online' || s === 'stale'
+  }).length
+  return `Zone: ${zoneName} (${online}/${total} Online)`
 })
 
 const selectedDeviceName = computed(() => {
@@ -477,6 +488,54 @@ async function handleDelete(espId: string) {
 function handleSettings(device: ESPDevice) {
   settingsDevice.value = device
   isSettingsOpen.value = true
+}
+
+/** Click-to-Place: Show zone picker via context menu */
+function handleChangeZone(device: ESPDevice) {
+  const currentZoneId = device.zone_id || null
+
+  // Build zone menu items from available zones
+  const availableZones = getAvailableZones(espStore.devices)
+  const menuItems: Array<{ id: string; label: string; icon: any; action: () => void; variant?: 'default' | 'danger' }> = []
+
+  for (const zone of availableZones) {
+    if (zone.zoneId === currentZoneId) continue // Skip current zone
+    menuItems.push({
+      id: `zone-${zone.zoneId}`,
+      label: zone.zoneName,
+      icon: MapPin,
+      action: async () => {
+        await handleDeviceDrop({
+          device,
+          fromZoneId: currentZoneId,
+          toZoneId: zone.zoneId,
+        })
+      },
+    })
+  }
+
+  // Add "Remove from zone" option if device has a zone
+  if (currentZoneId) {
+    menuItems.push({
+      id: 'remove-zone',
+      label: 'Aus Zone entfernen',
+      icon: XCircle,
+      variant: 'danger',
+      action: async () => {
+        await handleRemoveFromZone(device)
+      },
+    })
+  }
+
+  if (menuItems.length === 0) {
+    showError('Keine anderen Zonen vorhanden')
+    return
+  }
+
+  // Show context menu at center of screen
+  const x = window.innerWidth / 2
+  const y = window.innerHeight / 2
+  uiStore.openContextMenu(x, y, menuItems)
 }
 
 /** Block 3: Open ESP config from PendingDevicesPanel (Variante A → Variante B) */
@@ -579,6 +638,20 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   showActuatorConfig.value = true
 }
 
+// =============================================================================
+// SlideOver handlers: open config panels from ESPSettingsSheet events
+// =============================================================================
+
+function handleSensorConfigFromSheet(payload: { espId: string; gpio: number; sensorType: string; unit: string }) {
+  configSensorData.value = payload
+  showSensorConfig.value = true
+}
+
+function handleActuatorConfigFromSheet(payload: { espId: string; gpio: number; actuatorType: string }) {
+  configActuatorData.value = payload
+  showActuatorConfig.value = true
+}
+
 // Rules Activity
 const latestExecution = computed(() => logicStore.recentExecutions[0] ?? null)
 
@@ -659,11 +732,83 @@ function formatTimeAgo(timestamp: number): string {
                 @update:is-expanded="setZoneExpanded(group.zoneId, $event)"
                 @device-click="onDeviceCardClick"
                 @device-dropped="onDeviceDropped"
+                @change-zone="handleChangeZone"
                 @rename="handleZoneRename"
                 @delete="handleZoneDelete"
                 @device-delete="handleDelete"
                 @settings="handleSettings"
               />
+
+              <!-- Unassigned Devices Section -->
+              <section
+                class="unassigned-section"
+                :class="{ 'unassigned-section--drop-target': dragStore.isDraggingEspCard }"
+              >
+                <AccordionSection
+                  v-model="unassignedSectionOpen"
+                  storage-key="ao-unassigned-section"
+                  class="unassigned-section__accordion"
+                >
+                  <template #header="{ isOpen, toggle }">
+                    <div class="unassigned-section__header" @click="toggle">
+                      <ChevronDown
+                        class="zone-plate__chevron"
+                        :class="{ 'zone-plate__chevron--collapsed': !isOpen }"
+                      />
+                      <Inbox class="unassigned-section__icon" />
+                      <h3 class="unassigned-section__title">Nicht zugewiesen</h3>
+                      <span v-if="unassignedDevices.length > 0" class="unassigned-section__count">
+                        {{ unassignedDevices.length }}
+                      </span>
+                      <span v-else class="unassigned-section__empty-hint">
+                        Alle Geräte zugewiesen
+                      </span>
+                    </div>
+                  </template>
+
+                  <VueDraggable
+                    v-model="localUnassignedDevices"
+                    class="zone-plate__devices"
+                    group="esp-devices"
+                    :animation="150"
+                    handle=".esp-drag-handle"
+                    :force-fallback="true"
+                    :fallback-on-body="true"
+                    ghost-class="zone-item--ghost"
+                    chosen-class="zone-item--chosen"
+                    drag-class="zone-item--drag"
+                    :swap-threshold="0.65"
+                    :delay-on-touch-only="true"
+                    :delay="300"
+                    :fallback-tolerance="5"
+                    :touch-start-threshold="3"
+                    @add="handleUnassignedDragAdd"
+                    @start="handleUnassignedDragStart"
+                    @end="handleUnassignedDragEnd"
+                  >
+                    <div
+                      v-for="device in localUnassignedDevices"
+                      :key="espStore.getDeviceId(device)"
+                      :data-device-id="espStore.getDeviceId(device)"
+                      class="zone-plate__device-wrapper"
+                    >
+                      <DeviceMiniCard
+                        :device="device"
+                        :is-mock="isMockDevice(device)"
+                        @click="onDeviceCardClick"
+                        @change-zone="handleChangeZone"
+                        @settings="handleSettings"
+                        @delete="handleDelete"
+                      />
+                    </div>
+                  </VueDraggable>
+
+                  <div v-if="unassignedDevices.length === 0" class="unassigned-section__all-assigned">
+                    <Inbox class="unassigned-section__all-assigned-icon" />
+                    <span>Alle Geräte sind Zonen zugewiesen</span>
+                  </div>
+                </AccordionSection>
+              </section>
 
               <!-- Zone Create: inline form -->
               <div v-if="showCreateZoneForm" class="zone-create-form">
@@ -751,9 +896,6 @@ function formatTimeAgo(timestamp: number): string {
       </div>
     </template>
 
-    <!-- Unassigned Devices Bar -->
-    <UnassignedDropBar />
-
     <!-- Create Mock ESP Modal -->
     <CreateMockEspModal v-model="dashStore.showCreateMock" @created="onMockEspCreated" />
 
@@ -775,6 +917,8 @@ function formatTimeAgo(timestamp: number): string {
       @heartbeat-triggered="(p: any) => handleHeartbeat(p.deviceId)"
       @name-updated="handleNameUpdated"
       @zone-updated="handleZoneUpdated"
+      @open-sensor-config="handleSensorConfigFromSheet"
+      @open-actuator-config="handleActuatorConfigFromSheet"
     />
 
     <!-- Sensor Config SlideOver -->
@@ -930,7 +1074,7 @@ function formatTimeAgo(timestamp: number): string {
   font-size: var(--text-xs);
   font-weight: 500;
   cursor: pointer;
-  z-index: 100;
+  z-index: var(--z-fixed);
   box-shadow: var(--elevation-raised);
   transition: all var(--transition-base);
 }
@@ -1055,6 +1199,87 @@ function formatTimeAgo(timestamp: number): string {
 .zone-create-form__btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ── Unassigned Section ─────────────────────────────────────────────────── */
+.unassigned-section {
+  background: rgba(245, 158, 11, 0.04);
+  border: 1px solid rgba(245, 158, 11, 0.15);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.unassigned-section--drop-target {
+  border-color: var(--color-warning);
+  box-shadow: 0 0 0 1px var(--color-warning), inset 0 0 12px rgba(245, 158, 11, 0.08);
+}
+
+.unassigned-section__accordion {
+  border-bottom: none;
+}
+
+.unassigned-section__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3) var(--space-3);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.unassigned-section__header:hover {
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.unassigned-section__icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-warning);
+  flex-shrink: 0;
+}
+
+.unassigned-section__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-warning);
+  margin: 0;
+}
+
+.unassigned-section__count {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--color-bg-primary);
+  background: var(--color-warning);
+  border-radius: var(--radius-full);
+}
+
+.unassigned-section__empty-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.unassigned-section__all-assigned {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.unassigned-section__all-assigned-icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0.5;
 }
 
 @media (max-width: 640px) {

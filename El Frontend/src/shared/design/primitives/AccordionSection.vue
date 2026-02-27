@@ -14,6 +14,7 @@
  */
 
 import { ref, computed, onMounted } from 'vue'
+import type { Component } from 'vue'
 import { ChevronRight } from 'lucide-vue-next'
 
 interface Props {
@@ -23,8 +24,8 @@ interface Props {
   storageKey?: string
   /** Whether section is open by default */
   defaultOpen?: boolean
-  /** Optional lucide icon component */
-  icon?: object
+  /** Optional lucide icon component (Vue Component - object or functional) */
+  icon?: Component
   /** External v-model control (overrides internal state when provided) */
   modelValue?: boolean
 }

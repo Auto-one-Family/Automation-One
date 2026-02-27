@@ -13,6 +13,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { Save, RotateCcw, Beaker, Gauge, Settings, Cpu } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { subzonesApi } from '@/api/subzones'
+import { espApi } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { useCalibration } from '@/composables/useCalibration'
@@ -85,7 +86,7 @@ const isDigital = computed(() => props.sensorType.toLowerCase().includes('flow')
 
 const needsCalibration = computed(() => {
   const t = props.sensorType.toLowerCase()
-  return t === 'ph' || t === 'ec'
+  return t === 'ph' || t === 'ec' || t === 'moisture' || t === 'soil_moisture'
 })
 
 /** ADC1-only pins for analog sensors */
@@ -106,29 +107,43 @@ const accordionKey = computed(() => `sensor-${props.espId}-${props.gpio}`)
 // Load existing config
 // =============================================================================
 onMounted(async () => {
-  try {
-    const config = await sensorsApi.get(props.espId, props.gpio)
-    if (config) {
-      name.value = (config as any).name || ''
-      description.value = (config as any).description || ''
-      unitValue.value = (config as any).unit || defaultUnit.value
-      enabled.value = (config as any).enabled !== false
-      i2cAddress.value = (config as any).i2c_address || '0x44'
-      i2cBus.value = (config as any).i2c_bus || 0
+  const isMock = espApi.isMockEsp(props.espId)
 
-      // Subzone
-      if ((config as any).subzone_id) {
-        subzoneId.value = (config as any).subzone_id
+  // Load sensor config from server (real devices only)
+  if (!isMock) {
+    try {
+      const config = await sensorsApi.get(props.espId, props.gpio)
+      if (config) {
+        name.value = (config as any).name || ''
+        description.value = (config as any).description || ''
+        unitValue.value = (config as any).unit || defaultUnit.value
+        enabled.value = (config as any).enabled !== false
+        i2cAddress.value = (config as any).i2c_address || '0x44'
+        i2cBus.value = (config as any).i2c_bus || 0
+
+        // Subzone
+        if ((config as any).subzone_id) {
+          subzoneId.value = (config as any).subzone_id
+        }
+
+        // Thresholds
+        if ((config as any).threshold_min != null) alarmLow.value = (config as any).threshold_min
+        if ((config as any).warning_min != null) warnLow.value = (config as any).warning_min
+        if ((config as any).warning_max != null) warnHigh.value = (config as any).warning_max
+        if ((config as any).threshold_max != null) alarmHigh.value = (config as any).threshold_max
       }
-
-      // Thresholds
-      if ((config as any).threshold_min != null) alarmLow.value = (config as any).threshold_min
-      if ((config as any).warning_min != null) warnLow.value = (config as any).warning_min
-      if ((config as any).warning_max != null) warnHigh.value = (config as any).warning_max
-      if ((config as any).threshold_max != null) alarmHigh.value = (config as any).threshold_max
+    } catch {
+      // No existing config — use defaults
+      unitValue.value = defaultUnit.value
+      if (sensorConfig.value) {
+        alarmLow.value = sensorConfig.value.min
+        warnLow.value = sensorConfig.value.min + (sensorConfig.value.max - sensorConfig.value.min) * 0.1
+        warnHigh.value = sensorConfig.value.max - (sensorConfig.value.max - sensorConfig.value.min) * 0.1
+        alarmHigh.value = sensorConfig.value.max
+      }
     }
-  } catch {
-    // No existing config — use defaults
+  } else {
+    // Mock device: use defaults from sensorConfig
     unitValue.value = defaultUnit.value
     if (sensorConfig.value) {
       alarmLow.value = sensorConfig.value.min
@@ -136,9 +151,8 @@ onMounted(async () => {
       warnHigh.value = sensorConfig.value.max - (sensorConfig.value.max - sensorConfig.value.min) * 0.1
       alarmHigh.value = sensorConfig.value.max
     }
-  } finally {
-    loading.value = false
   }
+  loading.value = false
 
   // Load existing subzone from device store (more reliable than config)
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === props.espId)
@@ -146,17 +160,19 @@ onMounted(async () => {
     subzoneId.value = device.subzone_id
   }
 
-  // Load available subzones for this ESP
-  try {
-    const result = await subzonesApi.getSubzones(props.espId)
-    if (result && Array.isArray(result)) {
-      availableSubzones.value = result.map((sz: any) => ({
-        id: sz.subzone_id || sz.id,
-        name: sz.subzone_name || sz.name || sz.subzone_id || sz.id,
-      }))
+  // Load available subzones (real devices only)
+  if (!isMock) {
+    try {
+      const result = await subzonesApi.getSubzones(props.espId)
+      if (result && Array.isArray(result)) {
+        availableSubzones.value = result.map((sz: any) => ({
+          id: sz.subzone_id || sz.id,
+          name: sz.subzone_name || sz.name || sz.subzone_id || sz.id,
+        }))
+      }
+    } catch {
+      // No subzones available — that's fine
     }
-  } catch {
-    // No subzones available — that's fine
   }
 })
 
@@ -180,47 +196,54 @@ watch(
 // =============================================================================
 async function handleSave() {
   saving.value = true
+  const isMock = espApi.isMockEsp(props.espId)
   try {
-    const config: Record<string, unknown> = {
-      esp_id: props.espId,
-      gpio: props.gpio,
-      sensor_type: props.sensorType,
-      name: name.value || null,
-      description: description.value || null,
-      unit: unitValue.value || null,
-      enabled: enabled.value,
-      interface_type: interfaceType.value,
-      threshold_min: alarmLow.value,
-      threshold_max: alarmHigh.value,
-      warning_min: warnLow.value,
-      warning_max: warnHigh.value,
+    if (isMock) {
+      // Mock: config lives in device_metadata, just show success
+      toast.success('Sensor-Konfiguration gespeichert')
+    } else {
+      // Real: save to server via sensors API
+      const config: Record<string, unknown> = {
+        esp_id: props.espId,
+        gpio: props.gpio,
+        sensor_type: props.sensorType,
+        name: name.value || null,
+        description: description.value || null,
+        unit: unitValue.value || null,
+        enabled: enabled.value,
+        interface_type: interfaceType.value,
+        threshold_min: alarmLow.value,
+        threshold_max: alarmHigh.value,
+        warning_min: warnLow.value,
+        warning_max: warnHigh.value,
+      }
+
+      if (isI2C.value) {
+        config.i2c_address = i2cAddress.value
+        config.i2c_bus = i2cBus.value
+      }
+
+      if (isDigital.value) {
+        config.pulses_per_liter = pulsesPerLiter.value
+      }
+
+      if (isAnalog.value) {
+        config.measure_range_min = measureRangeMin.value
+        config.measure_range_max = measureRangeMax.value
+      }
+
+      // Subzone assignment
+      config.subzone_id = subzoneId.value
+
+      // Calibration data
+      const calData = calibration.getCalibrationData()
+      if (calData) {
+        config.calibration = calData
+      }
+
+      await sensorsApi.createOrUpdate(props.espId, props.gpio, config as any)
+      toast.success('Sensor-Konfiguration gespeichert')
     }
-
-    if (isI2C.value) {
-      config.i2c_address = i2cAddress.value
-      config.i2c_bus = i2cBus.value
-    }
-
-    if (isDigital.value) {
-      config.pulses_per_liter = pulsesPerLiter.value
-    }
-
-    if (isAnalog.value) {
-      config.measure_range_min = measureRangeMin.value
-      config.measure_range_max = measureRangeMax.value
-    }
-
-    // Subzone assignment
-    config.subzone_id = subzoneId.value
-
-    // Calibration data
-    const calData = calibration.getCalibrationData()
-    if (calData) {
-      config.calibration = calData
-    }
-
-    await sensorsApi.createOrUpdate(props.espId, props.gpio, config as any)
-    toast.success('Sensor-Konfiguration gespeichert')
   } catch (err) {
     const msg = (err as any)?.response?.data?.detail ?? 'Fehler beim Speichern'
     toast.error(msg)
@@ -356,7 +379,11 @@ async function handleSave() {
         <template v-if="!calibration.isActive.value">
           <button
             class="sensor-config__cal-start"
-            @click="calibration.startCalibration(sensorType.toLowerCase() === 'ph' ? 'pH' : 'EC')"
+            @click="calibration.startCalibration(
+              sensorType.toLowerCase() === 'ph' ? 'pH'
+              : sensorType.toLowerCase() === 'moisture' || sensorType.toLowerCase() === 'soil_moisture' ? 'moisture'
+              : 'EC'
+            )"
           >
             <Beaker class="w-4 h-4" />
             Kalibrierung starten
@@ -436,6 +463,48 @@ async function handleSave() {
               <span>Faktor: {{ calibration.result.value?.slope }}</span>
               <span>Offset: {{ calibration.result.value?.offset }}</span>
             </div>
+            <div class="sensor-config__cal-actions">
+              <button class="sensor-config__cal-btn sensor-config__cal-btn--save" @click="handleSave">
+                Kalibrierung speichern
+              </button>
+              <button class="sensor-config__cal-btn sensor-config__cal-btn--reset" @click="calibration.resetCalibration()">
+                <RotateCcw class="w-3 h-3" />
+                Zuruecksetzen
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <!-- Moisture Calibration (dry/wet ADC boundaries) -->
+        <template v-else-if="calibration.calibrationType.value === 'moisture'">
+          <div class="sensor-config__cal-step">
+            <h4>Bodenfeuchte-Kalibrierung</h4>
+            <p>ADC-Grenzwerte fuer trockenen und nassen Boden festlegen.</p>
+
+            <div class="sensor-config__field">
+              <label class="sensor-config__label">Trocken-Wert (ADC)</label>
+              <input
+                v-model.number="calibration.dryValue.value"
+                type="number"
+                class="sensor-config__input"
+                min="0"
+                max="4095"
+              />
+              <span class="sensor-config__helper">ADC-Wert bei trockenem Boden (typisch ~3200)</span>
+            </div>
+
+            <div class="sensor-config__field">
+              <label class="sensor-config__label">Nass-Wert (ADC)</label>
+              <input
+                v-model.number="calibration.wetValue.value"
+                type="number"
+                class="sensor-config__input"
+                min="0"
+                max="4095"
+              />
+              <span class="sensor-config__helper">ADC-Wert bei nassem Boden (typisch ~1500)</span>
+            </div>
+
             <div class="sensor-config__cal-actions">
               <button class="sensor-config__cal-btn sensor-config__cal-btn--save" @click="handleSave">
                 Kalibrierung speichern

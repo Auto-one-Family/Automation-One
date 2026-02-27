@@ -21,6 +21,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useDashboardStore } from '@/shared/stores/dashboard.store'
+import { useEspStore } from '@/stores/esp'
 import {
   LogOut, ChevronDown, Menu, Filter,
   Plus, Sparkles, Radio, AlertTriangle
@@ -37,6 +38,7 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const dashStore = useDashboardStore()
+const espStore = useEspStore()
 const showUserMenu = ref(false)
 const showMobileFilters = ref(false)
 
@@ -63,6 +65,10 @@ const connectionTooltip = computed(() => {
 
 const pageTitle = computed(() =>
   (route.meta.title as string) || 'Dashboard'
+)
+
+const pendingAndUnassignedCount = computed(() =>
+  espStore.pendingDevices.length + espStore.unassignedDevices.length
 )
 
 /** Is user on hardware or monitor route? */
@@ -205,7 +211,7 @@ async function handleLogout() {
 
     <!-- ═══ RIGHT: Actions + Emergency + Status + User ═══ -->
     <div class="header__right">
-      <!-- Dashboard Actions -->
+      <!-- Dashboard Actions (only on hardware routes) -->
       <template v-if="dashStore.showControls">
         <button
           class="header__action-btn header__action-btn--create"
@@ -215,30 +221,31 @@ async function handleLogout() {
           <Plus class="header__action-btn-icon" />
           <span class="header__action-btn-label">Mock</span>
         </button>
-
-        <button
-          :class="[
-            'header__action-btn',
-            dashStore.hasPendingDevices
-              ? 'header__action-btn--pending'
-              : 'header__action-btn--default'
-          ]"
-          :title="dashStore.hasPendingDevices
-            ? 'Neue Geräte warten auf Genehmigung'
-            : 'Geräte verwalten'"
-          @click="dashStore.showPendingPanel = true"
-        >
-          <component
-            :is="dashStore.hasPendingDevices ? Sparkles : Radio"
-            class="header__action-btn-icon"
-          />
-          <span class="header__action-btn-label">
-            {{ dashStore.hasPendingDevices ? `${dashStore.pendingCount} Neue` : 'Geräte' }}
-          </span>
-        </button>
-
-        <div class="header__divider" />
       </template>
+
+      <!-- Pending/Unassigned Badge (visible on ALL routes) -->
+      <button
+        :class="[
+          'header__action-btn',
+          pendingAndUnassignedCount > 0
+            ? 'header__action-btn--pending'
+            : 'header__action-btn--default'
+        ]"
+        :title="pendingAndUnassignedCount > 0
+          ? `${pendingAndUnassignedCount} Geräte offen`
+          : 'Geräte verwalten'"
+        @click="dashStore.showPendingPanel = true"
+      >
+        <component
+          :is="pendingAndUnassignedCount > 0 ? Sparkles : Radio"
+          class="header__action-btn-icon"
+        />
+        <span class="header__action-btn-label">
+          {{ pendingAndUnassignedCount > 0 ? `${pendingAndUnassignedCount} offen` : 'Geräte' }}
+        </span>
+      </button>
+
+      <div class="header__divider" />
 
       <!-- Color Legend -->
       <ColorLegend />

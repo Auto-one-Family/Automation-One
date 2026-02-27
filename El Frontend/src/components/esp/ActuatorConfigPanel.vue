@@ -13,6 +13,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { Save, Power, AlertOctagon, Zap, Clock, Shield, Settings } from 'lucide-vue-next'
 import { actuatorsApi } from '@/api/actuators'
 import { subzonesApi } from '@/api/subzones'
+import { espApi } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { AccordionSection } from '@/shared/design/primitives'
@@ -57,6 +58,7 @@ const switchDelay = ref(50) // ms
 // =============================================================================
 // Computed
 // =============================================================================
+const isMock = computed(() => espApi.isMockEsp(props.espId))
 const isPump = computed(() => props.actuatorType.toLowerCase() === 'pump')
 const isValve = computed(() => props.actuatorType.toLowerCase() === 'valve')
 const isPWM = computed(() => props.actuatorType.toLowerCase() === 'pwm')
@@ -79,30 +81,39 @@ const accordionKey = computed(() => `actuator-${props.espId}-${props.gpio}`)
 // Load existing config
 // =============================================================================
 onMounted(async () => {
-  try {
-    const config = await actuatorsApi.get(props.espId, props.gpio)
-    if (config) {
-      name.value = (config as any).name || ''
-      description.value = (config as any).description || ''
-      enabled.value = (config as any).enabled !== false
-      maxRuntime.value = (config as any).max_on_duration_ms ? Math.round((config as any).max_on_duration_ms / 1000) : 3600
-      minPause.value = (config as any).min_pause_seconds || 60
-      maxOpenTime.value = (config as any).max_open_time_seconds || 3600
-      isNormalClosed.value = (config as any).active_high !== true
-      pwmFrequency.value = (config as any).frequency || 5000
-      powerLimit.value = (config as any).duty_max || 100
-      switchDelay.value = (config as any).switch_delay_ms || 50
+  const isMock = espApi.isMockEsp(props.espId)
 
-      // Subzone
-      if ((config as any).subzone_id) {
-        subzoneId.value = (config as any).subzone_id
+  // Load actuator config from server (real devices only)
+  if (!isMock) {
+    try {
+      const config = await actuatorsApi.get(props.espId, props.gpio)
+      if (config) {
+        name.value = (config as any).name || ''
+        description.value = (config as any).description || ''
+        enabled.value = (config as any).enabled !== false
+        maxRuntime.value = (config as any).max_on_duration_ms ? Math.round((config as any).max_on_duration_ms / 1000) : 3600
+        minPause.value = (config as any).min_pause_seconds || 60
+        maxOpenTime.value = (config as any).max_open_time_seconds || 3600
+        isNormalClosed.value = (config as any).active_high !== true
+        pwmFrequency.value = (config as any).frequency || 5000
+        powerLimit.value = (config as any).duty_max || 100
+        switchDelay.value = (config as any).switch_delay_ms || 50
+
+        if ((config as any).subzone_id) {
+          subzoneId.value = (config as any).subzone_id
+        }
       }
+    } catch {
+      // No existing config
     }
-  } catch {
-    // No existing config
-  } finally {
-    loading.value = false
+  } else if (liveActuator.value) {
+    // Mock device: read config from store
+    const act = liveActuator.value as any
+    name.value = act.name || ''
+    description.value = act.description || ''
+    enabled.value = act.enabled !== false
   }
+  loading.value = false
 
   // Load existing subzone from device store (more reliable than config)
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === props.espId)
@@ -110,17 +121,19 @@ onMounted(async () => {
     subzoneId.value = device.subzone_id
   }
 
-  // Load available subzones for this ESP
-  try {
-    const result = await subzonesApi.getSubzones(props.espId)
-    if (result && Array.isArray(result)) {
-      availableSubzones.value = result.map((sz: any) => ({
-        id: sz.subzone_id || sz.id,
-        name: sz.subzone_name || sz.name || sz.subzone_id || sz.id,
-      }))
+  // Load available subzones (real devices only)
+  if (!isMock) {
+    try {
+      const result = await subzonesApi.getSubzones(props.espId)
+      if (result && Array.isArray(result)) {
+        availableSubzones.value = result.map((sz: any) => ({
+          id: sz.subzone_id || sz.id,
+          name: sz.subzone_name || sz.name || sz.subzone_id || sz.id,
+        }))
+      }
+    } catch {
+      // No subzones available — that's fine
     }
-  } catch {
-    // No subzones available — that's fine
   }
 })
 
@@ -161,11 +174,17 @@ async function setPwmValue(value: number) {
 async function emergencyStop() {
   commandLoading.value = true
   try {
-    await actuatorsApi.emergencyStop({
-      esp_id: props.espId,
-      gpio: props.gpio,
-      reason: 'Manueller Stopp ueber Konfigurations-Panel',
-    })
+    if (isMock.value) {
+      // Mock: use store emergency stop (debug API)
+      await espStore.emergencyStop(props.espId, 'Manueller Stopp ueber Konfigurations-Panel')
+    } else {
+      // Real: use actuators API
+      await actuatorsApi.emergencyStop({
+        esp_id: props.espId,
+        gpio: props.gpio,
+        reason: 'Manueller Stopp ueber Konfigurations-Panel',
+      })
+    }
     toast.warning('Emergency-Stop ausgeloest')
   } catch {
     toast.error('Emergency-Stop fehlgeschlagen')
@@ -180,38 +199,45 @@ async function emergencyStop() {
 async function handleSave() {
   saving.value = true
   try {
-    const config: Record<string, unknown> = {
-      esp_id: props.espId,
-      gpio: props.gpio,
-      actuator_type: props.actuatorType,
-      name: name.value || null,
-      description: description.value || null,
-      enabled: enabled.value,
-      subzone_id: subzoneId.value,
-    }
+    if (isMock.value) {
+      // Mock: config lives in device_metadata, just show success
+      // Name/description changes are cosmetic for mock devices
+      toast.success('Aktor-Konfiguration gespeichert')
+    } else {
+      // Real: save to server via actuators API
+      const config: Record<string, unknown> = {
+        esp_id: props.espId,
+        gpio: props.gpio,
+        actuator_type: props.actuatorType,
+        name: name.value || null,
+        description: description.value || null,
+        enabled: enabled.value,
+        subzone_id: subzoneId.value,
+      }
 
-    if (isPump.value) {
-      config.max_on_duration_ms = maxRuntime.value * 1000
-      config.min_pause_seconds = minPause.value
-    }
+      if (isPump.value) {
+        config.max_on_duration_ms = maxRuntime.value * 1000
+        config.min_pause_seconds = minPause.value
+      }
 
-    if (isValve.value) {
-      config.max_open_time_seconds = maxOpenTime.value
-      config.active_high = !isNormalClosed.value
-    }
+      if (isValve.value) {
+        config.max_open_time_seconds = maxOpenTime.value
+        config.active_high = !isNormalClosed.value
+      }
 
-    if (isPWM.value) {
-      config.frequency = pwmFrequency.value
-      config.duty_max = powerLimit.value
-    }
+      if (isPWM.value) {
+        config.frequency = pwmFrequency.value
+        config.duty_max = powerLimit.value
+      }
 
-    if (isRelay.value) {
-      config.active_high = !isNormalClosed.value
-      config.switch_delay_ms = switchDelay.value
-    }
+      if (isRelay.value) {
+        config.active_high = !isNormalClosed.value
+        config.switch_delay_ms = switchDelay.value
+      }
 
-    await actuatorsApi.createOrUpdate(props.espId, props.gpio, config as any)
-    toast.success('Aktor-Konfiguration gespeichert')
+      await actuatorsApi.createOrUpdate(props.espId, props.gpio, config as any)
+      toast.success('Aktor-Konfiguration gespeichert')
+    }
   } catch (err) {
     const msg = (err as any)?.response?.data?.detail ?? 'Fehler beim Speichern'
     toast.error(msg)

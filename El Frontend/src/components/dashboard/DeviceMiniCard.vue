@@ -36,6 +36,7 @@ const emit = defineEmits<{
   (e: 'click', payload: { deviceId: string; originRect: DOMRect }): void
   (e: 'settings', device: ESPDevice): void
   (e: 'delete', deviceId: string): void
+  (e: 'change-zone', device: ESPDevice): void
 }>()
 
 const uiStore = useUiStore()
@@ -185,7 +186,7 @@ function openCardMenu(event: MouseEvent) {
       id: 'change-zone',
       label: 'Zone ändern',
       icon: ArrowRightLeft,
-      action: () => emit('settings', props.device),
+      action: () => emit('change-zone', props.device),
     },
     {
       id: 'delete',
@@ -329,9 +330,14 @@ function openCardMenu(event: MouseEvent) {
   transition-duration: 60ms;
 }
 
-/* ── Grip handle (visible on hover via CSS pseudo-element) ── */
+/* ── Grip handle (always visible for discoverability) ── */
 :deep(.esp-drag-handle) {
   cursor: grab;
+  min-height: 44px; /* Touch-friendly target size */
+}
+
+:deep(.esp-drag-handle):active {
+  cursor: grabbing;
 }
 
 :deep(.esp-drag-handle)::before {
@@ -339,13 +345,13 @@ function openCardMenu(event: MouseEvent) {
   font-size: 11px;
   line-height: 1;
   color: var(--color-text-muted);
-  opacity: 0;
+  opacity: 0.25;
   transition: opacity var(--transition-fast);
   flex-shrink: 0;
 }
 
 .device-mini-card:hover :deep(.esp-drag-handle)::before {
-  opacity: 0.4;
+  opacity: 0.5;
 }
 
 /* ── ESPCardBase inner overrides for mini sizing ── */

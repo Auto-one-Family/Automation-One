@@ -99,6 +99,8 @@ export const useZoneStore = defineStore('zone', () => {
 
     const device = devices[deviceIndex]
 
+    const toast = useToast()
+
     if (data.status === 'zone_assigned') {
       // DEFENSIVE: only update fields that are DEFINED in the event
       const updates: Partial<ESPDevice> = {}
@@ -110,7 +112,15 @@ export const useZoneStore = defineStore('zone', () => {
 
       setDevice(deviceIndex, { ...device, ...updates })
       logger.info(`Zone confirmed: ${espId} → ${data.zone_id}${data.zone_name ? ` (${data.zone_name})` : ''} (reactivity triggered)`)
+
+      const deviceName = device.name || espId
+      const zoneName = data.zone_name || data.zone_id || 'Zone'
+      toast.success(`"${deviceName}" wurde zu "${zoneName}" zugewiesen`)
     } else if (data.status === 'zone_removed') {
+      // Capture zone name before clearing fields
+      const deviceName = device.name || espId
+      const zoneName = device.zone_name || device.zone_id || 'Zone'
+
       // Clear zone fields on removal. kaiser_id remains unchanged (WP2-F24)
       setDevice(deviceIndex, {
         ...device,
@@ -119,8 +129,10 @@ export const useZoneStore = defineStore('zone', () => {
         master_zone_id: undefined,
       })
       logger.info(`Zone removed: ${espId}`)
+      toast.success(`"${deviceName}" wurde aus "${zoneName}" entfernt`)
     } else if (data.status === 'error') {
       logger.error(`Zone assignment error for ${espId}: ${data.message}`)
+      toast.error(data.message || 'Zone-Zuweisung fehlgeschlagen')
     } else {
       logger.warn(`Unknown zone_assignment status: ${data.status}`)
     }

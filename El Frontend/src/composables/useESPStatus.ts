@@ -75,9 +75,11 @@ const HEARTBEAT_OFFLINE_MS = 300_000 // 5 minutes
  */
 export function getESPStatus(device: ESPDevice): ESPStatus {
   // Priority 1: Server-provided status + connected flag
+  // Mock ESPs use system_state instead of status for error/safemode detection
+  const systemState = (device as any).system_state as string | undefined
+  if (device.status === 'error' || systemState === 'ERROR') return 'error'
+  if (device.status === 'safemode' || systemState === 'SAFE_MODE') return 'safemode'
   if (device.status === 'online' || device.connected === true) return 'online'
-  if (device.status === 'error') return 'error'
-  if (device.status === 'safemode' || (device as any).system_state === 'SAFE_MODE') return 'safemode'
   if (device.status === 'offline') return 'offline'
 
   // Priority 2: Heartbeat-based timing (for devices without explicit status)
@@ -117,11 +119,11 @@ export function useESPStatus(esp: MaybeRefOrGetter<ESPDevice>) {
   /** Whether the device is fully online */
   const isOnline = computed(() => status.value === 'online')
 
-  /** Mock vs Real distinction */
+  /** Mock vs Real distinction — consistent with espApi.isMockEsp() */
   const isMock = computed(() => {
     const device = toValue(esp)
     const id = device.device_id || device.esp_id || ''
-    return id.includes('MOCK') || (device.hardware_type === 'MOCK_ESP32')
+    return id.startsWith('ESP_MOCK_') || id.startsWith('MOCK_') || (device.hardware_type === 'MOCK_ESP32')
   })
 
   /** Border color for mock/real visual distinction */

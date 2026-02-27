@@ -48,6 +48,7 @@ const emit = defineEmits<{
   (e: 'device-dropped', payload: { device: ESPDevice; fromZoneId: string | null; toZoneId: string }): void
   (e: 'device-click', payload: { deviceId: string; originRect: DOMRect }): void
   (e: 'settings', device: ESPDevice): void
+  (e: 'change-zone', device: ESPDevice): void
   (e: 'rename', payload: { zoneId: string; newName: string }): void
   (e: 'delete', zoneId: string): void
   (e: 'device-delete', deviceId: string): void
@@ -84,12 +85,11 @@ const stats = computed(() => {
     return status === 'online' || status === 'stale'
   }).length
   const warnings = props.devices.filter(d => {
-    const id = espStore.getDeviceId(d)
-    if (espStore.isMock(id)) {
-      const m = d as any
-      return m.system_state === 'ERROR' || m.actuators?.some((a: any) => a.emergency_stopped)
-    }
-    return d.status === 'error'
+    const status = getESPStatus(d)
+    if (status === 'error' || status === 'safemode') return true
+    // Emergency-stopped actuators count as warnings regardless of device status
+    const actuators = (d as any).actuators as Array<{ emergency_stopped?: boolean }> | undefined
+    return actuators?.some(a => a.emergency_stopped) ?? false
   }).length
   return { total, online, warnings }
 })
@@ -259,6 +259,10 @@ function handleDeviceSettings(device: ESPDevice) {
   emit('settings', device)
 }
 
+function handleDeviceChangeZone(device: ESPDevice) {
+  emit('change-zone', device)
+}
+
 function handleDeviceDelete(deviceId: string) {
   emit('device-delete', deviceId)
 }
@@ -399,44 +403,42 @@ function handleDragEnd() {
         </div>
       </template>
 
-      <!-- Devices grouped by subzone, inside ONE VueDraggable for cross-zone drag-drop -->
+      <!-- Devices inside VueDraggable for cross-zone drag-drop -->
       <VueDraggable
         v-model="localDevices"
         class="zone-plate__devices"
         group="esp-devices"
-        :animation="0"
+        :animation="150"
         handle=".esp-drag-handle"
         :force-fallback="true"
         :fallback-on-body="true"
         ghost-class="zone-item--ghost"
+        chosen-class="zone-item--chosen"
+        drag-class="zone-item--drag"
         :swap-threshold="0.65"
+        :delay-on-touch-only="true"
+        :delay="300"
+        :fallback-tolerance="5"
+        :touch-start-threshold="3"
         @add="handleDragAdd"
         @start="handleDragStart"
         @end="handleDragEnd"
       >
-        <!-- Subzone visual grouping (rendered inline within the flat drag list) -->
-        <template v-for="group in subzoneGroups" :key="group.subzoneId ?? '__ungrouped'">
-          <div
-            v-if="group.subzoneId && subzoneGroups.length > 1"
-            class="zone-plate__subzone-label"
-          >
-            {{ group.subzoneName }}
-          </div>
-          <div
-            v-for="device in group.devices"
-            :key="espStore.getDeviceId(device)"
-            :data-device-id="espStore.getDeviceId(device)"
-            class="zone-plate__device-wrapper"
-          >
-            <DeviceMiniCard
-              :device="device"
-              :is-mock="isMock(device)"
-              @click="handleDeviceClick"
-              @settings="handleDeviceSettings"
-              @delete="handleDeviceDelete"
-            />
-          </div>
-        </template>
+        <div
+          v-for="device in localDevices"
+          :key="espStore.getDeviceId(device)"
+          :data-device-id="espStore.getDeviceId(device)"
+          class="zone-plate__device-wrapper"
+        >
+          <DeviceMiniCard
+            :device="device"
+            :is-mock="isMock(device)"
+            @click="handleDeviceClick"
+            @settings="handleDeviceSettings"
+            @change-zone="handleDeviceChangeZone"
+            @delete="handleDeviceDelete"
+          />
+        </div>
       </VueDraggable>
 
       <!-- Empty state with drop target hint -->
@@ -743,7 +745,7 @@ function handleDragEnd() {
 }
 
 .zone-plate__device-wrapper {
-  display: contents;
+  /* Must be a real box element — display: contents breaks SortableJS drag visuals */
 }
 
 /* Subzone label inline within flat drag list */
@@ -796,6 +798,36 @@ function handleDragEnd() {
 .zone-plate--drop-target .zone-plate__empty {
   border-color: var(--color-iridescent-1);
   background: rgba(96, 165, 250, 0.04);
+}
+
+/* ═══════ DnD Ghost / Chosen / Drag classes (from ZoneGroup reference) ═══════ */
+
+.zone-item--ghost {
+  opacity: 0.4;
+  transform: scale(1.05);
+}
+
+.zone-item--ghost > * {
+  border-style: dashed !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2) !important;
+}
+
+.zone-item--chosen {
+  transform: scale(1.02);
+}
+
+.zone-item--chosen > * {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3) !important;
+}
+
+.zone-item--drag {
+  transform: scale(1.03);
+  z-index: var(--z-drag-overlay);
+  pointer-events: none;
+}
+
+.zone-item--drag > * {
+  box-shadow: 0 12px 32px rgba(96, 165, 250, 0.3) !important;
 }
 
 @media (max-width: 640px) {
