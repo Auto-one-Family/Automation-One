@@ -11,7 +11,7 @@
  * - Glasmorphism design consistent with Events tab
  */
 
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { logsApi, type LogFileInfo } from '@/api/logs'
 import {
   X,
@@ -210,6 +210,10 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => {
   loadStatistics()
   window.addEventListener('keydown', handleKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
