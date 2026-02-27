@@ -62,6 +62,7 @@ SENSOR_TYPE_MAPPING: Dict[str, str] = {
     "ec": "ec",  # Already normalized
     # Moisture sensor (Phase 2)
     "moisture": "moisture",
+    "soil_moisture": "moisture",  # Alias — normalize_sensor_type() returns "moisture"
     # CO2 sensors (Phase 3)
     "mhz19_co2": "mhz19_co2",
     "scd30_co2": "scd30_co2",

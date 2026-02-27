@@ -25,6 +25,12 @@ from .subzone import router as subzone_router
 from .users import router as users_router
 from .zone import router as zone_router
 
+# PLANNED routers - stubs with no endpoints yet, included for discoverability.
+# Add endpoints directly to the router files; they will be available immediately.
+from .ai import router as ai_router
+from .kaiser import router as kaiser_router
+from .library import router as library_router
+
 # Create main v1 router
 api_v1_router = APIRouter()
 
@@ -44,10 +50,14 @@ api_v1_router.include_router(users_router)
 api_v1_router.include_router(zone_router)
 api_v1_router.include_router(subzone_router)  # Phase 9 - Subzone Management
 api_v1_router.include_router(sequences_router)  # Phase 3 - Sequence Actions
+api_v1_router.include_router(ai_router)  # PLANNED - God Layer AI integration
+api_v1_router.include_router(kaiser_router)  # PLANNED - Kaiser relay node management
+api_v1_router.include_router(library_router)  # PLANNED - OTA sensor library distribution
 
 # Export individual routers for direct access if needed
 __all__ = [
     "api_v1_router",
+    "ai_router",
     "audit_router",
     "auth_router",
     "debug_router",
@@ -57,6 +67,8 @@ __all__ = [
     "sensor_type_defaults_router",
     "actuators_router",
     "health_router",
+    "kaiser_router",
+    "library_router",
     "logic_router",
     "logs_router",
     "sequences_router",

@@ -1031,6 +1031,7 @@ class SimulationScheduler:
             "emergency_stopped": runtime.emergency_stopped,
             "actuator_states": dict(runtime.actuator_states),
             "actuator_pwm_values": dict(runtime.actuator_pwm_values),
+            "last_commands": dict(runtime.last_commands),
             "jobs": mock_jobs,
         }
 
@@ -1458,6 +1459,41 @@ class SimulationScheduler:
             runtime.actuator_pwm_values[gpio] = pwm_value
         else:
             runtime.actuator_pwm_values[gpio] = 255 if state else 0
+
+        # Update DB state so fetchDevice returns correct data
+        actuator_entry = actuators[str(gpio)]
+        actuator_entry["state"] = state
+        if pwm_value is not None:
+            actuator_entry["pwm_value"] = pwm_value
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(device, "device_metadata")
+        await session.commit()
+
+        # Publish MQTT status so server processes it and sends WebSocket event
+        if self._mqtt_publish:
+            import time as _time
+            actuator_type = actuator_entry.get("actuator_type", "relay")
+            topic = f"kaiser/{runtime.kaiser_id}/esp/{esp_id}/actuator/{gpio}/status"
+            payload = {
+                "esp_id": esp_id,
+                "zone_id": runtime.zone_id or "",
+                "subzone_id": "",
+                "ts": int(_time.time() * 1000),
+                "gpio": gpio,
+                "actuator_type": actuator_type,
+                "type": actuator_type,
+                "state": state,
+                "value": runtime.actuator_pwm_values.get(gpio, 0),
+                "pwm": runtime.actuator_pwm_values.get(gpio, 0),
+                "last_command": "ON" if state else "OFF",
+                "runtime_ms": runtime.actuator_runtime_ms.get(gpio, 0),
+                "emergency": "active" if runtime.emergency_stopped else "normal",
+                "error": None,
+            }
+            try:
+                self._mqtt_publish(topic, payload, 1)
+            except Exception as e:
+                logger.warning(f"Failed to publish actuator status for {esp_id}:GPIO{gpio}: {e}")
 
         logger.info(f"Set actuator {esp_id}:GPIO{gpio} = {state} (PWM={pwm_value})")
         return True

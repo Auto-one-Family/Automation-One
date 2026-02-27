@@ -253,7 +253,7 @@ class ActuatorState(Base):
     )
 
     last_command_timestamp: Mapped[Optional[datetime]] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
         doc="Timestamp of last command",
     )
@@ -396,7 +396,7 @@ class ActuatorHistory(Base):
 
     # Timestamp (CRITICAL for Time-Series!)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         index=True,
         default=datetime.utcnow,

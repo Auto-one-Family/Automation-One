@@ -240,7 +240,7 @@ async def list_sensors(
         )
 
         response = _model_to_response(sensor, esp_device_id)
-        response.latest_value = latest.processed_value if latest else None
+        response.latest_value = (latest.processed_value if latest.processed_value is not None else latest.raw_value) if latest else None
         response.latest_quality = latest.quality if latest else None
         response.latest_timestamp = latest.timestamp if latest else None
 
@@ -330,7 +330,7 @@ async def get_sensor(
 
     # Convert model to response schema
     response = _model_to_response(sensor, esp_id)
-    response.latest_value = latest.processed_value if latest else None
+    response.latest_value = (latest.processed_value if latest.processed_value is not None else latest.raw_value) if latest else None
     response.latest_quality = latest.quality if latest else None
     response.latest_timestamp = latest.timestamp if latest else None
 
@@ -1448,7 +1448,7 @@ async def list_onewire_sensors(
             sensor.esp_id, sensor.gpio, sensor_type=sensor.sensor_type
         )
         response = _model_to_response(sensor, esp_id)
-        response.latest_value = latest.processed_value if latest else None
+        response.latest_value = (latest.processed_value if latest.processed_value is not None else latest.raw_value) if latest else None
         response.latest_quality = latest.quality if latest else None
         response.latest_timestamp = latest.timestamp if latest else None
         responses.append(response)

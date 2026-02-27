@@ -287,8 +287,11 @@ class SensorDataHandler:
                     # Check the display value against sensor physical limits.
                     # Values outside datasheet range get quality="critical" but are
                     # still saved (never discarded) for diagnostic purposes.
+                    # Skip check when raw_mode=True and no processing occurred:
+                    # RAW ADC values have no physical unit, so range check is meaningless.
                     display_val = processed_value if processed_value is not None else value
-                    if display_val is not None and quality not in ("error",):
+                    skip_range_check = raw_mode and processed_value is None
+                    if display_val is not None and quality not in ("error",) and not skip_range_check:
                         range_result = self._check_physical_range(
                             sensor_type, float(display_val)
                         )
@@ -333,6 +336,17 @@ class SensorDataHandler:
                         },
                         data_source=data_source,
                     )
+
+                    # Step 9b: Activate sensor config on first successful data save
+                    # If config_status is still "pending", transition to "applied"
+                    # (mirrors config_handler.py pattern for config_response)
+                    if sensor_config and sensor_config.config_status == "pending":
+                        sensor_config.config_status = "applied"
+                        logger.info(
+                            f"Sensor config activated: esp_id={esp_id_str}, "
+                            f"gpio={gpio}, sensor_type={sensor_type}, "
+                            f"config_status: pending → applied"
+                        )
 
                     # Commit transaction
                     await session.commit()

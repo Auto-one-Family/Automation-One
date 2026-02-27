@@ -138,18 +138,35 @@ def _build_mock_esp_response(
             )
         )
 
-    # Build actuator responses
+    # Build actuator responses (merge runtime state if simulation active)
+    # Runtime state reflects actual current state (e.g., after toggle commands)
+    # DB state may be stale if only runtime was updated
+    runtime_actuator_states = {}
+    runtime_actuator_pwm = {}
+    runtime_last_commands = {}
+    runtime_emergency = False
+    if simulation_active and runtime_status:
+        runtime_actuator_states = runtime_status.get("actuator_states", {})
+        runtime_actuator_pwm = runtime_status.get("actuator_pwm_values", {})
+        runtime_last_commands = runtime_status.get("last_commands", {})
+        runtime_emergency = runtime_status.get("emergency_stopped", False)
+
     actuators = []
     for gpio_str, config in actuators_config.items():
+        gpio_int = int(gpio_str)
+        # Prefer runtime state over DB state when simulation is active
+        act_state = runtime_actuator_states.get(gpio_int, config.get("state", False))
+        act_pwm = runtime_actuator_pwm.get(gpio_int, config.get("pwm_value", 0.0))
+        act_last_cmd = runtime_last_commands.get(gpio_int)
         actuators.append(
             MockActuatorResponse(
-                gpio=int(gpio_str),
+                gpio=gpio_int,
                 actuator_type=config.get("actuator_type", "relay"),
                 name=config.get("name"),
-                state=config.get("state", False),
-                pwm_value=config.get("pwm_value", 0.0),
-                emergency_stopped=False,
-                last_command=None,
+                state=act_state,
+                pwm_value=act_pwm,
+                emergency_stopped=runtime_emergency,
+                last_command=act_last_cmd,
             )
         )
 
@@ -1229,6 +1246,7 @@ async def add_actuator(
     Add an actuator to a mock ESP.
 
     DB-FIRST: Updates database configuration.
+    If simulation is running, also registers actuator in runtime.
     """
     esp_repo = ESPRepository(db)
 
@@ -1252,11 +1270,30 @@ async def add_actuator(
     if success:
         await db.commit()
 
+    # Sync with running simulation runtime (if active)
+    runtime_synced = False
+    try:
+        sim_scheduler = get_simulation_scheduler()
+        if sim_scheduler.is_mock_active(esp_id):
+            runtime = sim_scheduler.get_runtime(esp_id)
+            if runtime:
+                runtime.actuator_states[config.gpio] = config.state or False
+                runtime.actuator_pwm_values[config.gpio] = config.pwm_value or 0
+                runtime_synced = True
+                logger.info(f"Synced new actuator GPIO {config.gpio} to runtime for {esp_id}")
+    except RuntimeError:
+        pass  # Scheduler not initialized
+
     return CommandResponse(
         success=success,
         esp_id=esp_id,
         command="add_actuator",
-        result={"gpio": config.gpio, "actuator_type": config.actuator_type, "db_updated": success},
+        result={
+            "gpio": config.gpio,
+            "actuator_type": config.actuator_type,
+            "db_updated": success,
+            "runtime_synced": runtime_synced,
+        },
     )
 
 

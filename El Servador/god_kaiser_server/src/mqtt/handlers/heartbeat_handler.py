@@ -719,6 +719,25 @@ class HeartbeatHandler:
                                 f"Auto-reassigning zone '{db_zone_id}' to ESP {esp_device.device_id} "
                                 f"(zone lost after reboot). Topic: {resync_topic}"
                             )
+
+                            # For Mock-ESPs: also update the SimulationScheduler runtime
+                            # so the next heartbeat sends zone_assigned=true, breaking
+                            # the ZONE_MISMATCH loop (real ESPs handle this via NVS)
+                            try:
+                                from ...services.simulation import get_simulation_scheduler
+
+                                sim_scheduler = get_simulation_scheduler()
+                                if sim_scheduler.is_mock_active(esp_device.device_id):
+                                    sim_scheduler.update_zone(
+                                        esp_device.device_id,
+                                        db_zone_id,
+                                        esp_device.kaiser_id or constants.get_kaiser_id(),
+                                    )
+                                    logger.debug(
+                                        f"Updated Mock-ESP runtime zone for {esp_device.device_id}"
+                                    )
+                            except Exception:
+                                pass  # SimulationScheduler not initialized (no mock-ESP mode)
                         except Exception as resync_error:
                             logger.error(
                                 f"Failed to resend zone assignment to "
