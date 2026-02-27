@@ -14,7 +14,9 @@ import {
   mockSensor,
   mockActuator,
   mockPendingDevice,
-  mockGpioStatus
+  mockGpioStatus,
+  setMockDeviceStatus,
+  resetMockState,
 } from '../../mocks/handlers'
 
 // MSW Server Lifecycle
@@ -1000,5 +1002,85 @@ describe('ESP Store - Edge Cases', () => {
     } catch (e) {
       expect(store.error).toContain('gpio')
     }
+  })
+
+  it('should handle network error (ECONNREFUSED)', async () => {
+    server.use(
+      http.get('/api/v1/esp/devices', () => {
+        return HttpResponse.error()
+      }),
+      http.get('/api/v1/debug/mock-esp', () => {
+        return HttpResponse.error()
+      })
+    )
+
+    const store = useEspStore()
+
+    await expect(store.fetchAll()).rejects.toThrow()
+    expect(store.devices).toEqual([])
+    expect(store.error).toBeTruthy()
+  })
+
+  it('should set isLoading to false even on error', async () => {
+    server.use(
+      http.get('/api/v1/esp/devices', () => {
+        return HttpResponse.json({ detail: 'Error' }, { status: 500 })
+      }),
+      http.get('/api/v1/debug/mock-esp', () => {
+        return HttpResponse.json({ detail: 'Error' }, { status: 500 })
+      })
+    )
+
+    const store = useEspStore()
+
+    try {
+      await store.fetchAll()
+    } catch { /* expected */ }
+
+    expect(store.isLoading).toBe(false)
+  })
+})
+
+// =============================================================================
+// DYNAMIC MOCK STATE (from handlers.ts)
+// =============================================================================
+
+describe('ESP Store - Dynamic Mock State', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    server.resetHandlers()
+    resetMockState()
+  })
+
+  it('setMockDeviceStatus changes device status in API response', async () => {
+    // Set ESP_TEST_001 to offline
+    setMockDeviceStatus('ESP_TEST_001', 'offline', { connected: false })
+
+    const store = useEspStore()
+    await store.fetchAll()
+
+    const device = store.devices.find(d => d.device_id === 'ESP_TEST_001')
+    expect(device).toBeDefined()
+    expect(device?.status).toBe('offline')
+    expect(device?.connected).toBe(false)
+  })
+
+  it('resetMockState restores original device state', async () => {
+    // Mock ESP normalization: status derived from `connected` field (connected ? 'online' : 'offline')
+    // So we must also set connected: false to see the status change through the store
+    setMockDeviceStatus('ESP_TEST_001', 'offline', { connected: false })
+
+    const store = useEspStore()
+    await store.fetchAll()
+    expect(store.devices.find(d => d.device_id === 'ESP_TEST_001')?.status).toBe('offline')
+
+    // Reset and fetch again — should restore original online status
+    resetMockState()
+    await store.fetchAll()
+    expect(store.devices.find(d => d.device_id === 'ESP_TEST_001')?.status).toBe('online')
   })
 })

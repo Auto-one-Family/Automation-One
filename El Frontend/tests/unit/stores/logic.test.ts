@@ -140,11 +140,10 @@ describe('Logic Store - Computed Getters', () => {
       const store = useLogicStore()
       await store.fetchRules()
 
-      // mockLogicRule is cross-ESP (ESP_TEST_001 → ESP_TEST_002)
-      expect(store.crossEspConnections.length).toBe(1)
-      const conn = store.crossEspConnections[0]
-      expect(conn.isCrossEsp).toBe(true)
-      expect(conn.sourceEspId).not.toBe(conn.targetEspId)
+      // All 5 rules produce cross-ESP connections (7 total: rules with multiple conditions create multiple connections)
+      expect(store.crossEspConnections.length).toBe(7)
+      expect(store.crossEspConnections.every(c => c.isCrossEsp)).toBe(true)
+      expect(store.crossEspConnections.every(c => c.sourceEspId !== c.targetEspId)).toBe(true)
     })
 
     it('excludes same-ESP connections', async () => {
@@ -268,9 +267,14 @@ describe('Logic Store - fetchRules', () => {
     const store = useLogicStore()
     await store.fetchRules()
 
-    expect(store.rules.length).toBe(1)
+    expect(store.rules.length).toBe(5)
     expect(store.rules[0].id).toBe('rule-001')
     expect(store.rules[0].name).toBe('Temperature Fan Control')
+    expect(store.rules[1].id).toBe('rule-002')
+    expect(store.rules[1].name).toBe('Humidity Humidifier Control')
+    expect(store.rules[2].id).toBe('rule-003')
+    expect(store.rules[3].id).toBe('rule-004')
+    expect(store.rules[4].id).toBe('rule-005')
   })
 
   it('sets isLoading during fetch', async () => {
@@ -950,5 +954,347 @@ describe('Logic Store - WebSocket Integration', () => {
       const connection = store.connections[0]
       expect(store.isConnectionActive(connection)).toBe(true)
     })
+  })
+})
+
+// =============================================================================
+// ERROR RECOVERY - API FAILURES
+// =============================================================================
+
+describe('Logic Store - Error Recovery', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  describe('createRule error handling', () => {
+    it('sets error on 422 validation failure', async () => {
+      server.use(
+        http.post('/api/v1/logic/rules', () => {
+          return HttpResponse.json({
+            detail: [
+              { loc: ['body', 'conditions'], msg: 'at least one condition required' },
+              { loc: ['body', 'actions'], msg: 'at least one action required' },
+            ]
+          }, { status: 422 })
+        })
+      )
+
+      const store = useLogicStore()
+
+      await expect(store.createRule({
+        name: 'Invalid Rule',
+        conditions: [],
+        logic_operator: 'AND',
+        actions: [],
+      })).rejects.toThrow()
+
+      expect(store.error).toContain('conditions')
+      expect(store.error).toContain('actions')
+    })
+
+    it('does not add rule to list on failure', async () => {
+      server.use(
+        http.post('/api/v1/logic/rules', () => {
+          return HttpResponse.json({ detail: 'Server error' }, { status: 500 })
+        })
+      )
+
+      const store = useLogicStore()
+      const initialCount = store.rules.length
+
+      try {
+        await store.createRule({ name: 'Failing Rule', conditions: [], logic_operator: 'AND', actions: [] })
+      } catch { /* expected */ }
+
+      expect(store.rules.length).toBe(initialCount)
+    })
+  })
+
+  describe('updateRule error handling', () => {
+    it('sets error on 404 when rule does not exist', async () => {
+      server.use(
+        http.put('/api/v1/logic/rules/:ruleId', () => {
+          return HttpResponse.json({ detail: 'Rule not found' }, { status: 404 })
+        })
+      )
+
+      const store = useLogicStore()
+
+      await expect(store.updateRule('nonexistent', { name: 'Updated' })).rejects.toThrow()
+      expect(store.error).toContain('Rule not found')
+    })
+  })
+
+  describe('deleteRule error handling', () => {
+    it('sets error on 500 server failure', async () => {
+      server.use(
+        http.delete('/api/v1/logic/rules/:ruleId', () => {
+          return HttpResponse.json({ detail: 'Internal server error' }, { status: 500 })
+        })
+      )
+
+      const store = useLogicStore()
+      store.rules = [{ ...mockLogicRule }]
+
+      await expect(store.deleteRule('rule-001')).rejects.toThrow()
+      expect(store.error).toContain('Internal server error')
+      // Rule should NOT be removed from local list on failure
+      expect(store.rules.length).toBe(1)
+    })
+  })
+
+  describe('error state management', () => {
+    it('successful operation clears previous error', async () => {
+      const store = useLogicStore()
+      store.error = 'Previous error from failed operation'
+
+      await store.fetchRules()
+
+      expect(store.error).toBeNull()
+    })
+
+    it('clearError resets error independently', () => {
+      const store = useLogicStore()
+      store.error = 'Some error'
+
+      store.clearError()
+
+      expect(store.error).toBeNull()
+    })
+
+    it('multiple sequential errors replace each other', async () => {
+      const store = useLogicStore()
+
+      // First error
+      server.use(
+        http.get('/api/v1/logic/rules', () => {
+          return HttpResponse.json({ detail: 'First error' }, { status: 500 })
+        })
+      )
+      await store.fetchRules()
+      expect(store.error).toContain('First error')
+
+      // Reset handler
+      server.resetHandlers()
+
+      // Second error via different action
+      server.use(
+        http.post('/api/v1/logic/rules/:ruleId/toggle', () => {
+          return HttpResponse.json({ detail: 'Second error' }, { status: 500 })
+        })
+      )
+
+      store.rules = [{ ...mockLogicRule }]
+      try {
+        await store.toggleRule('rule-001')
+      } catch { /* expected */ }
+
+      expect(store.error).toContain('Second error')
+    })
+  })
+})
+
+// =============================================================================
+// WEBSOCKET EDGE CASES
+// =============================================================================
+
+describe('Logic Store - WebSocket Edge Cases', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('handles duplicate execution events idempotently', () => {
+    const store = useLogicStore()
+    store.subscribeToWebSocket()
+
+    const callback = (websocketService.subscribe as ReturnType<typeof vi.fn>).mock.calls[0][1]
+    const event = {
+      type: 'logic_execution',
+      data: {
+        rule_id: 'rule-001',
+        rule_name: 'Test',
+        trigger: { esp_id: 'ESP', gpio: 4, sensor_type: 'ds18b20', value: 25 },
+        action: { esp_id: 'ESP', gpio: 16, command: 'ON' },
+        success: true,
+        timestamp: Date.now() / 1000,
+      },
+      timestamp: Date.now(),
+    }
+
+    // Send same event twice
+    callback(event)
+    callback(event)
+
+    // Both should be recorded (no dedup on execution events — they represent actual executions)
+    expect(store.recentExecutions.length).toBe(2)
+    // Active state should still be set
+    expect(store.isRuleActive('rule-001')).toBe(true)
+  })
+
+  it('handles malformed execution event without crash', () => {
+    const store = useLogicStore()
+    store.subscribeToWebSocket()
+
+    const callback = (websocketService.subscribe as ReturnType<typeof vi.fn>).mock.calls[0][1]
+
+    // Missing rule_id — should be ignored silently
+    callback({
+      type: 'logic_execution',
+      data: {
+        rule_name: 'Broken Event',
+        // no rule_id
+      },
+      timestamp: Date.now(),
+    })
+
+    expect(store.recentExecutions.length).toBe(0)
+  })
+
+  it('handles execution event with empty data object gracefully', () => {
+    const store = useLogicStore()
+    store.subscribeToWebSocket()
+
+    const callback = (websocketService.subscribe as ReturnType<typeof vi.fn>).mock.calls[0][1]
+
+    // Empty data object — rule_id is undefined → should be ignored
+    callback({
+      type: 'logic_execution',
+      data: {},
+      timestamp: Date.now(),
+    })
+
+    expect(store.recentExecutions.length).toBe(0)
+  })
+
+  it('execution for unknown rule still gets recorded', () => {
+    const store = useLogicStore()
+    // Do NOT fetch rules — rules list is empty
+    store.subscribeToWebSocket()
+
+    const callback = (websocketService.subscribe as ReturnType<typeof vi.fn>).mock.calls[0][1]
+
+    callback({
+      type: 'logic_execution',
+      data: {
+        rule_id: 'rule-unknown-999',
+        rule_name: 'Unknown Rule',
+        trigger: { esp_id: 'ESP', gpio: 4, sensor_type: 'ds18b20', value: 25 },
+        action: { esp_id: 'ESP', gpio: 16, command: 'ON' },
+        success: true,
+        timestamp: Date.now() / 1000,
+      },
+      timestamp: Date.now(),
+    })
+
+    // Execution is still recorded even though rule doesn't exist in store
+    expect(store.recentExecutions.length).toBe(1)
+    expect(store.isRuleActive('rule-unknown-999')).toBe(true)
+  })
+})
+
+// =============================================================================
+// UNDO/REDO
+// =============================================================================
+
+describe('Logic Store - Undo/Redo', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('pushToHistory stores snapshot', () => {
+    const store = useLogicStore()
+    const nodes = [{ id: 'n1', type: 'sensor' }]
+    const edges = [{ id: 'e1', source: 'n1', target: 'n2' }]
+
+    store.pushToHistory(nodes, edges)
+
+    expect(store.history.length).toBe(1)
+    expect(store.historyIndex).toBe(0)
+  })
+
+  it('can undo after 2 pushes', () => {
+    const store = useLogicStore()
+
+    store.pushToHistory([{ id: 'n1' }], [])
+    store.pushToHistory([{ id: 'n1' }, { id: 'n2' }], [{ id: 'e1' }])
+
+    expect(store.canUndo).toBe(true)
+    const previous = store.undo()
+
+    expect(previous).not.toBeNull()
+    expect(previous!.nodes).toHaveLength(1)
+    expect(store.historyIndex).toBe(0)
+  })
+
+  it('can redo after undo', () => {
+    const store = useLogicStore()
+
+    store.pushToHistory([{ id: 'n1' }], [])
+    store.pushToHistory([{ id: 'n1' }, { id: 'n2' }], [])
+
+    store.undo()
+    expect(store.canRedo).toBe(true)
+
+    const redone = store.redo()
+    expect(redone).not.toBeNull()
+    expect(redone!.nodes).toHaveLength(2)
+  })
+
+  it('cannot undo with only 1 entry', () => {
+    const store = useLogicStore()
+    store.pushToHistory([], [])
+
+    expect(store.canUndo).toBe(false)
+    expect(store.undo()).toBeNull()
+  })
+
+  it('cannot redo at latest entry', () => {
+    const store = useLogicStore()
+    store.pushToHistory([], [])
+
+    expect(store.canRedo).toBe(false)
+    expect(store.redo()).toBeNull()
+  })
+
+  it('clearHistory resets state', () => {
+    const store = useLogicStore()
+    store.pushToHistory([], [])
+    store.pushToHistory([], [])
+
+    store.clearHistory()
+
+    expect(store.history.length).toBe(0)
+    expect(store.historyIndex).toBe(-1)
+  })
+
+  it('discards future entries when pushing after undo', () => {
+    const store = useLogicStore()
+
+    store.pushToHistory([{ id: 'a' }], [])
+    store.pushToHistory([{ id: 'b' }], [])
+    store.pushToHistory([{ id: 'c' }], [])
+
+    // Undo back to 'a'
+    store.undo()
+    store.undo()
+    expect(store.historyIndex).toBe(0)
+
+    // Push new state — 'b' and 'c' should be discarded
+    store.pushToHistory([{ id: 'd' }], [])
+    expect(store.history.length).toBe(2) // 'a' and 'd'
+    expect(store.historyIndex).toBe(1)
+  })
+
+  it('limits history to MAX_HISTORY (50)', () => {
+    const store = useLogicStore()
+
+    for (let i = 0; i < 55; i++) {
+      store.pushToHistory([{ id: `n${i}` }], [])
+    }
+
+    expect(store.history.length).toBe(50)
+    // Latest entry should be n54
+    expect(store.history[49].nodes[0].id).toBe('n54')
   })
 })

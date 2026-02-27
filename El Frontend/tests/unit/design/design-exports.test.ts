@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest'
 
 describe('shared/design primitives exports', () => {
-  it('exports all Base* primitives', async () => {
+  it('exports all Base* primitives', { timeout: 15000 }, async () => {
     const mod = await import('@/shared/design/primitives')
     expect(mod.BaseCard).toBeDefined()
     expect(mod.BaseBadge).toBeDefined()

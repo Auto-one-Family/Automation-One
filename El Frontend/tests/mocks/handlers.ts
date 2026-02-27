@@ -65,8 +65,10 @@ const mockSensor = {
   processed_value: 23.5,
   unit: '°C',
   quality: 'excellent' as const,
+  data_source: 'mock' as const,
   raw_mode: true,
   last_read: new Date().toISOString(),
+  read_interval_ms: 30_000,
   operating_mode: 'continuous',
   timeout_seconds: 180,
   is_stale: false,
@@ -83,7 +85,10 @@ const mockActuator = {
   state: false,
   pwm_value: 0,
   emergency_stopped: false,
-  last_command: null
+  last_command: null,
+  operating_mode: 'auto' as const,
+  runtime_seconds: 0,
+  safety_timeout_ms: 3_600_000,
 }
 
 const mockPendingDevice = {
@@ -111,6 +116,96 @@ const mockGpioStatus = {
   total_reserved: 2,
   total_system: 12,
   last_esp_report: new Date().toISOString()
+}
+
+// Humidity sensor ESP with SHT31
+const mockHumiditySensorESP = {
+  esp_id: 'ESP_HUMIDITY_001',
+  device_id: 'ESP_HUMIDITY_001',
+  name: 'Humidity Sensor',
+  zone_id: 'zone_1',
+  zone_name: 'Test Zone',
+  status: 'online',
+  is_mock: true,
+  system_state: 'OPERATIONAL',
+  heap_free: 135000,
+  wifi_rssi: -58,
+  uptime: 7200,
+  last_heartbeat: new Date().toISOString(),
+  last_seen: new Date().toISOString(),
+  connected: true,
+  sensors: [
+    {
+      gpio: 21,
+      sensor_type: 'SHT31',
+      name: 'Air Humidity Sensor',
+      subzone_id: null,
+      raw_value: 38.2,
+      processed_value: 38.2,
+      unit: '%',
+      quality: 'excellent' as const,
+      data_source: 'mock' as const,
+      raw_mode: true,
+      last_read: new Date().toISOString(),
+      read_interval_ms: 30_000,
+      operating_mode: 'continuous',
+      timeout_seconds: 180,
+      is_stale: false,
+      stale_reason: undefined,
+      is_multi_value: true,
+      device_type: null,
+      multi_values: {
+        humidity: { value: 38.2, unit: '%', quality: 'excellent' },
+        temperature: { value: 23.1, unit: '°C', quality: 'excellent' }
+      }
+    }
+  ],
+  actuators: [],
+  sensor_count: 1,
+  actuator_count: 0,
+  hardware_type: 'MOCK_ESP32',
+  auto_heartbeat: true,
+  created_at: '2026-01-15T00:00:00Z',
+  updated_at: '2026-01-15T00:00:00Z'
+}
+
+// Humidifier relay ESP
+const mockHumidifierESP = {
+  esp_id: 'ESP_HUMIDIFIER_001',
+  device_id: 'ESP_HUMIDIFIER_001',
+  name: 'Humidifier Controller',
+  zone_id: 'zone_1',
+  zone_name: 'Test Zone',
+  status: 'online',
+  is_mock: true,
+  system_state: 'OPERATIONAL',
+  heap_free: 140000,
+  wifi_rssi: -62,
+  uptime: 5400,
+  last_heartbeat: new Date().toISOString(),
+  last_seen: new Date().toISOString(),
+  connected: true,
+  sensors: [],
+  actuators: [
+    {
+      gpio: 16,
+      actuator_type: 'relay',
+      name: 'Humidifier Relay',
+      state: false,
+      pwm_value: 0,
+      emergency_stopped: false,
+      last_command: null,
+      operating_mode: 'auto' as const,
+      runtime_seconds: 0,
+      safety_timeout_ms: 3_600_000,
+    }
+  ],
+  sensor_count: 0,
+  actuator_count: 1,
+  hardware_type: 'MOCK_ESP32',
+  auto_heartbeat: true,
+  created_at: '2026-01-15T00:00:00Z',
+  updated_at: '2026-01-15T00:00:00Z'
 }
 
 // =============================================================================
@@ -209,12 +304,23 @@ const authHandlers = [
 // ESP Device Handlers
 // =============================================================================
 
+const allMockDevices = [mockESPDevice, mockHumiditySensorESP, mockHumidifierESP]
+const mockDevicesById: Record<string, typeof mockESPDevice> = {
+  'ESP_TEST_001': mockESPDevice,
+  'ESP_HUMIDITY_001': mockHumiditySensorESP,
+  'ESP_HUMIDIFIER_001': mockHumidifierESP,
+}
+
 const espHandlers = [
-  // GET /esp/devices - Get all devices
+  // GET /esp/devices - Get all devices (applies dynamic overrides)
   http.get('/api/v1/esp/devices', () => {
+    const devices = allMockDevices.map(d => {
+      const id = d.esp_id || d.device_id
+      return applyDeviceOverrides(d, id)
+    })
     return HttpResponse.json({
-      data: [mockESPDevice],
-      total: 1
+      data: devices,
+      total: devices.length
     })
   }),
 
@@ -226,12 +332,14 @@ const espHandlers = [
     })
   }),
 
-  // GET /esp/devices/:id - Get single device
+  // GET /esp/devices/:id - Get single device (applies dynamic overrides)
   http.get('/api/v1/esp/devices/:espId', ({ params }) => {
     const { espId } = params
+    const baseDevice = mockDevicesById[espId as string]
 
-    if (espId === 'ESP_TEST_001') {
-      return HttpResponse.json(mockESPDevice)
+    if (baseDevice) {
+      const device = applyDeviceOverrides(baseDevice, espId as string)
+      return HttpResponse.json(device)
     }
 
     return HttpResponse.json(
@@ -244,10 +352,11 @@ const espHandlers = [
   http.patch('/api/v1/esp/devices/:espId', async ({ params, request }) => {
     const { espId } = params
     const body = await request.json() as Record<string, unknown>
+    const device = mockDevicesById[espId as string]
 
-    if (espId === 'ESP_TEST_001') {
+    if (device) {
       return HttpResponse.json({
-        ...mockESPDevice,
+        ...device,
         ...body
       })
     }
@@ -262,7 +371,7 @@ const espHandlers = [
   http.delete('/api/v1/esp/devices/:espId', ({ params }) => {
     const { espId } = params
 
-    if (espId === 'ESP_TEST_001' || (espId as string).startsWith('ESP_MOCK')) {
+    if (mockDevicesById[espId as string] || (espId as string).startsWith('ESP_MOCK')) {
       return HttpResponse.json({ message: 'Device deleted' })
     }
 
@@ -517,23 +626,293 @@ const mockLogicRule = {
   updated_at: '2026-01-01T00:00:00Z'
 }
 
+// Humidity → Humidifier logic rule
+const mockHumidityRule = {
+  id: 'rule-002',
+  name: 'Humidity Humidifier Control',
+  description: 'Turn on humidifier when air humidity drops below 40%',
+  enabled: true,
+  conditions: [
+    {
+      type: 'sensor_threshold',
+      esp_id: 'ESP_HUMIDITY_001',
+      gpio: 21,
+      sensor_type: 'SHT31',
+      operator: '<',
+      value: 40
+    }
+  ],
+  logic_operator: 'AND',
+  actions: [
+    {
+      type: 'actuator_command',
+      esp_id: 'ESP_HUMIDIFIER_001',
+      gpio: 16,
+      command: 'ON',
+      duration: 300
+    }
+  ],
+  priority: 2,
+  cooldown_seconds: 120,
+  max_executions_per_hour: 6,
+  last_triggered: null,
+  created_at: '2026-01-15T00:00:00Z',
+  updated_at: '2026-01-15T00:00:00Z'
+}
+
+// AND rule: Temperature > 30°C AND Humidity < 40% → Humidifier ON
+const mockAndRule = {
+  id: 'rule-003',
+  name: 'Heat & Dry Protection',
+  description: 'Turn on humidifier when temperature is high AND humidity is low',
+  enabled: true,
+  conditions: [
+    {
+      type: 'sensor_threshold',
+      esp_id: 'ESP_TEST_001',
+      gpio: 4,
+      sensor_type: 'ds18b20',
+      operator: '>',
+      value: 30
+    },
+    {
+      type: 'sensor_threshold',
+      esp_id: 'ESP_HUMIDITY_001',
+      gpio: 21,
+      sensor_type: 'SHT31',
+      operator: '<',
+      value: 40
+    }
+  ],
+  logic_operator: 'AND',
+  actions: [
+    {
+      type: 'actuator_command',
+      esp_id: 'ESP_HUMIDIFIER_001',
+      gpio: 16,
+      command: 'ON',
+      duration: 600
+    }
+  ],
+  priority: 3,
+  cooldown_seconds: 180,
+  max_executions_per_hour: 4,
+  last_triggered: null,
+  created_at: '2026-02-01T00:00:00Z',
+  updated_at: '2026-02-01T00:00:00Z'
+}
+
+// OR rule: Soil moisture low OR manual trigger → Irrigation ON
+const mockOrRule = {
+  id: 'rule-004',
+  name: 'Irrigation Fallback',
+  description: 'Water plants when soil is dry OR manual trigger received',
+  enabled: true,
+  conditions: [
+    {
+      type: 'sensor_threshold',
+      esp_id: 'ESP_TEST_001',
+      gpio: 4,
+      sensor_type: 'ds18b20',
+      operator: '<',
+      value: 20
+    },
+    {
+      type: 'sensor_threshold',
+      esp_id: 'ESP_HUMIDITY_001',
+      gpio: 21,
+      sensor_type: 'SHT31',
+      operator: '<',
+      value: 25
+    }
+  ],
+  logic_operator: 'OR',
+  actions: [
+    {
+      type: 'actuator_command',
+      esp_id: 'ESP_HUMIDIFIER_001',
+      gpio: 16,
+      command: 'ON',
+      duration: 120
+    }
+  ],
+  priority: 1,
+  cooldown_seconds: 300,
+  max_executions_per_hour: 3,
+  last_triggered: null,
+  created_at: '2026-02-01T00:00:00Z',
+  updated_at: '2026-02-01T00:00:00Z'
+}
+
+// Multi-Action rule: Temperature > 35°C → Fan ON + Alert
+const mockMultiActionRule = {
+  id: 'rule-005',
+  name: 'Heat Emergency Multi-Action',
+  description: 'Emergency response: activate fan and send alert when critically hot',
+  enabled: false,
+  conditions: [
+    {
+      type: 'sensor_threshold',
+      esp_id: 'ESP_TEST_001',
+      gpio: 4,
+      sensor_type: 'ds18b20',
+      operator: '>',
+      value: 35
+    }
+  ],
+  logic_operator: 'AND',
+  actions: [
+    {
+      type: 'actuator_command',
+      esp_id: 'ESP_TEST_002',
+      gpio: 16,
+      command: 'ON'
+    },
+    {
+      type: 'notification',
+      channel: 'websocket',
+      target: 'dashboard',
+      message_template: 'CRITICAL: Temperature {value}°C exceeds 35°C!'
+    }
+  ],
+  priority: 10,
+  cooldown_seconds: 60,
+  max_executions_per_hour: 20,
+  last_triggered: null,
+  created_at: '2026-02-01T00:00:00Z',
+  updated_at: '2026-02-01T00:00:00Z'
+}
+
+const allMockRules = [mockLogicRule, mockHumidityRule, mockAndRule, mockOrRule, mockMultiActionRule]
+const mockRulesById: Record<string, typeof mockLogicRule> = {
+  'rule-001': mockLogicRule,
+  'rule-002': mockHumidityRule,
+  'rule-003': mockAndRule as typeof mockLogicRule,
+  'rule-004': mockOrRule as typeof mockLogicRule,
+  'rule-005': mockMultiActionRule as typeof mockLogicRule,
+}
+
+// =============================================================================
+// Dynamic Mock State (for test manipulation)
+// =============================================================================
+
+/**
+ * Mutable state map that tests can manipulate to simulate device status changes.
+ * MSW handlers read from this map, so tests can do:
+ *   setMockDeviceStatus('ESP_TEST_001', 'offline')
+ *   await store.fetchAll()
+ *   expect(store.devices[0].status).toBe('offline')
+ */
+const mockDeviceState = new Map<string, Partial<typeof mockESPDevice>>()
+
+/** Set mock device overrides. Handler merges these into the base device. */
+function setMockDeviceStatus(espId: string, status: string, extras?: Record<string, unknown>): void {
+  mockDeviceState.set(espId, { status, ...extras } as Partial<typeof mockESPDevice>)
+}
+
+/** Reset all dynamic mock state. Call in afterEach. */
+function resetMockState(): void {
+  mockDeviceState.clear()
+}
+
+/** Apply dynamic overrides to a device */
+function applyDeviceOverrides<T extends Record<string, unknown>>(device: T, espId: string): T {
+  const overrides = mockDeviceState.get(espId)
+  if (overrides) {
+    return { ...device, ...overrides }
+  }
+  return device
+}
+
 const logicHandlers = [
   // GET /logic/rules - Get all rules
   http.get('/api/v1/logic/rules', () => {
     return HttpResponse.json({
-      items: [mockLogicRule],
-      total: 1,
+      items: allMockRules,
+      total: allMockRules.length,
       page: 1,
       page_size: 50
     })
   }),
 
+  // POST /logic/rules - Create a new rule
+  http.post('/api/v1/logic/rules', async ({ request }) => {
+    const body = await request.json() as Record<string, unknown>
+    const newRule = {
+      id: `rule-${Date.now()}`,
+      ...body,
+      priority: (body.priority as number) ?? 1,
+      cooldown_seconds: (body.cooldown_seconds as number) ?? 60,
+      max_executions_per_hour: (body.max_executions_per_hour as number) ?? 10,
+      last_triggered: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    return HttpResponse.json(newRule, { status: 201 })
+  }),
+
   // GET /logic/rules/:id - Get single rule
   http.get('/api/v1/logic/rules/:ruleId', ({ params }) => {
     const { ruleId } = params
+    const rule = mockRulesById[ruleId as string]
 
-    if (ruleId === 'rule-001') {
-      return HttpResponse.json(mockLogicRule)
+    if (rule) {
+      return HttpResponse.json(rule)
+    }
+
+    return HttpResponse.json(
+      { detail: 'Rule not found' },
+      { status: 404 }
+    )
+  }),
+
+  // PUT /logic/rules/:id - Update a rule
+  http.put('/api/v1/logic/rules/:ruleId', async ({ params, request }) => {
+    const { ruleId } = params
+    const rule = mockRulesById[ruleId as string]
+
+    if (rule) {
+      const body = await request.json() as Record<string, unknown>
+      return HttpResponse.json({
+        ...rule,
+        ...body,
+        updated_at: new Date().toISOString(),
+      })
+    }
+
+    return HttpResponse.json(
+      { detail: 'Rule not found' },
+      { status: 404 }
+    )
+  }),
+
+  // PATCH /logic/rules/:id - Partial update a rule
+  http.patch('/api/v1/logic/rules/:ruleId', async ({ params, request }) => {
+    const { ruleId } = params
+    const rule = mockRulesById[ruleId as string]
+
+    if (rule) {
+      const body = await request.json() as Record<string, unknown>
+      return HttpResponse.json({
+        ...rule,
+        ...body,
+        updated_at: new Date().toISOString(),
+      })
+    }
+
+    return HttpResponse.json(
+      { detail: 'Rule not found' },
+      { status: 404 }
+    )
+  }),
+
+  // DELETE /logic/rules/:id - Delete a rule
+  http.delete('/api/v1/logic/rules/:ruleId', ({ params }) => {
+    const { ruleId } = params
+    const rule = mockRulesById[ruleId as string]
+
+    if (rule) {
+      return new HttpResponse(null, { status: 204 })
     }
 
     return HttpResponse.json(
@@ -545,13 +924,14 @@ const logicHandlers = [
   // POST /logic/rules/:id/toggle - Toggle rule
   http.post('/api/v1/logic/rules/:ruleId/toggle', ({ params }) => {
     const { ruleId } = params
+    const rule = mockRulesById[ruleId as string]
 
-    if (ruleId === 'rule-001') {
+    if (rule) {
       return HttpResponse.json({
         success: true,
         message: 'Rule toggled',
         rule_id: ruleId,
-        enabled: !mockLogicRule.enabled
+        enabled: !rule.enabled
       })
     }
 
@@ -564,17 +944,25 @@ const logicHandlers = [
   // POST /logic/rules/:id/test - Test rule
   http.post('/api/v1/logic/rules/:ruleId/test', ({ params }) => {
     const { ruleId } = params
+    const rule = mockRulesById[ruleId as string]
 
-    if (ruleId === 'rule-001') {
+    if (rule) {
+      // Simulate evaluation based on rule conditions
+      const conditionsResult = ruleId === 'rule-002'
+        ? mockHumiditySensorESP.sensors[0].raw_value < 40
+        : true
+
       return HttpResponse.json({
         success: true,
         message: 'Rule evaluation completed',
         rule_id: ruleId,
-        conditions_result: true,
-        evaluation_details: [
-          { condition_index: 0, result: true, sensor_value: 26.5 }
-        ],
-        would_execute_actions: true
+        conditions_result: conditionsResult,
+        evaluation_details: rule.conditions.map((cond, idx) => ({
+          condition_index: idx,
+          result: conditionsResult,
+          sensor_value: ruleId === 'rule-002' ? 38.2 : 26.5
+        })),
+        would_execute_actions: conditionsResult
       })
     }
 
@@ -747,25 +1135,27 @@ const debugHandlers = [
     })
   }),
 
-  // GET /debug/mock-esp - List all mock ESPs
+  // GET /debug/mock-esp - List all mock ESPs (with dynamic state overrides)
   http.get('/api/v1/debug/mock-esp', () => {
+    const device = applyDeviceOverrides(mockESPDevice, mockESPDevice.device_id)
     return HttpResponse.json({
       success: true,
-      data: [mockESPDevice],
+      data: [device],
       total: 1
     })
   }),
 
-  // GET /debug/mock-esp/:id - Get single mock ESP
+  // GET /debug/mock-esp/:id - Get single mock ESP (with dynamic state overrides)
   http.get('/api/v1/debug/mock-esp/:espId', ({ params }) => {
     const { espId } = params
 
     if (espId === 'ESP_TEST_001' || (espId as string).startsWith('ESP_MOCK')) {
-      return HttpResponse.json({
+      const device = applyDeviceOverrides({
         ...mockESPDevice,
         esp_id: espId,
         device_id: espId
-      })
+      }, espId as string)
+      return HttpResponse.json(device)
     }
 
     return HttpResponse.json(
@@ -1004,6 +1394,16 @@ export {
   mockPendingDevice,
   mockGpioStatus,
   mockLogicRule,
+  mockHumidityRule,
+  mockAndRule,
+  mockOrRule,
+  mockMultiActionRule,
+  mockHumiditySensorESP,
+  mockHumidifierESP,
   mockTableSchema,
-  mockTableData
+  mockTableData,
+  // Dynamic state helpers
+  mockDeviceState,
+  setMockDeviceStatus,
+  resetMockState,
 }

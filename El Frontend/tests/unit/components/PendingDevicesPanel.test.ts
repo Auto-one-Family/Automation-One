@@ -33,6 +33,7 @@ vi.mock('@/stores/esp', () => ({
     isMock: (id: string) => id.startsWith('MOCK_'),
     mockDevices: [],
     realDevices: [],
+    unassignedDevices: [],
   }),
 }))
 
