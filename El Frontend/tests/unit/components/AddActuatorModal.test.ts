@@ -73,7 +73,7 @@ describe('AddActuatorModal', () => {
       props: { modelValue: true, espId: 'ESP_001' },
       global: { plugins: [createPinia()], stubs: { Teleport: true, GpioPicker: true } },
     })
-    await wrapper.find('.modal-close').trigger('click')
+    await wrapper.find('.modal-close-btn').trigger('click')
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([false])
   })
 
