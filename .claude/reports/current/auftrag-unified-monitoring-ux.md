@@ -296,7 +296,8 @@ def categorize_alert(alert: GrafanaAlert) -> str:
 
 ### A3: Backend system_health WS-Event (periodisch 30s)
 
-**Kein neuer Endpoint.** Stattdessen: Erweiterung des bestehenden `update_metrics()` Scheduler-Jobs in `core/metrics.py` (laeuft bereits alle 15s).
+**Kein neuer Endpoint.** Stattdessen: Erweiterung des bestehenden `update_all_metrics_async()` Scheduler-Jobs in `core/metrics.py` (laeuft bereits alle 15s).
+[Korrektur verify-plan: Funktionsname ist `update_all_metrics_async()`, nicht `update_metrics()` — Zeile 403 in metrics.py]
 
 **Implementierung:**
 1. Alle 30 Sekunden (jeder 2. Zyklus): Health-Daten aus dem bereits vorhandenen Collection-Zyklus nehmen
@@ -362,15 +363,24 @@ App-Start
 
 **Store-Registrierung im WS-Dispatcher (`esp.store.ts`, 1645 Zeilen):**
 
-**IST-ZUSTAND (verifiziert 2026-02-25):** `esp.store.ts` ist der ZENTRALE WS-Dispatcher. Alle 26 WS-Events laufen durch `esp.store.ts` und werden an spezialisierte Stores delegiert (actuator.store 10 Handler, sensor.store 2, config.store 3, zone.store 2, notification.store 3, logic.store 1, gpio.store via esp_health). Die 2 neuen Events (`system_health`, `alert_update`) werden analog eingehaengt:
+**IST-ZUSTAND (verifiziert 2026-02-27):** `esp.store.ts` (1671 Zeilen) ist der ZENTRALE WS-Dispatcher. Alle WS-Events laufen durch `esp.store.ts` und werden an spezialisierte Stores delegiert (actuator.store, sensor.store, config.store, zone.store, notification.store, gpio.store). Die 2 neuen Events (`system_health`, `alert_update`) werden analog eingehaengt:
+[Korrektur verify-plan: 1671 Zeilen (nicht 1645). Pfad: `El Frontend/src/stores/esp.ts` (nicht shared/stores/)]
 
 ```typescript
-// In der bestehenden WS-Event-Dispatch-Logik:
-case 'system_health':
-case 'alert_update':
-  useSystemHealthStore().handleWsEvent(event.event_type, event.data)
-  break
+// In der bestehenden WS-Event-Dispatch-Logik (esp.store.ts, initWebSocket()):
+// Pattern ist ws.on(), NICHT switch/case:
+ws.on('system_health', handleSystemHealth),
+ws.on('alert_update', handleAlertUpdate),
+
+// Handler delegiert an useSystemHealthStore:
+function handleSystemHealth(data: any) {
+  useSystemHealthStore().handleWsEvent('system_health', data)
+}
+function handleAlertUpdate(data: any) {
+  useSystemHealthStore().handleWsEvent('alert_update', data)
+}
 ```
+[Korrektur verify-plan: esp.store.ts nutzt `ws.on('event', handler)` Pattern (Zeile 1518-1548), NICHT switch/case]
 
 **ACHTUNG:** Die HealthTab-Komponente macht aktuell einen EIGENEN REST-Call (`GET /health/esp`) bei jedem Mount. Nach Migration auf `useSystemHealthStore` entfaellt dieser Call — HealthTab liest dann aus dem Store. Das ist die Kern-Konsolidierung: von 4 separaten REST-Calls (HealthTab, HealthSummaryBar, ESPHealthWidget, AlarmListWidget) auf 2 initiale Calls im Store.
 
@@ -571,7 +581,8 @@ Wenn ein Grafana-Alert fuer einen Sensor aktiv ist (identifiziert durch `labels.
 
 ### C1: SystemMonitorView — Debug-Tab hinzufuegen
 
-**Bestehende `SystemMonitorView.vue` (2120 Zeilen) hat bereits 5 Tabs (verifiziert via MonitorTabs.vue):**
+**Bestehende `SystemMonitorView.vue` (2456 Zeilen, Pfad: `views/SystemMonitorView.vue`) hat bereits 5 Tabs (verifiziert via MonitorTabs.vue):**
+[Korrektur verify-plan: 2456 Zeilen (nicht 2120). Pfad ist `El Frontend/src/views/SystemMonitorView.vue`, NICHT `components/system-monitor/`]
 - `events` — Ereignisse (Activity-Icon) — Audit-Events + WS
 - `logs` — Server Logs (FileText-Icon) — Application Logs (WARNING+)
 - `database` — Datenbank (Database-Icon) — DB-Records-Browser
@@ -609,7 +620,8 @@ Ein 6. Tab "Debug" wird hinzugefuegt.
 
 ### C2: Backend Loki-Proxy Endpoint
 
-**Im bestehenden `api/v1/debug.py` Router (bereits vorhanden):**
+**Im bestehenden `api/v1/debug.py` Router (bereits vorhanden — aktuell Mock-ESP-Management + DB-Explorer, 700+ Zeilen):**
+[Korrektur verify-plan: debug.py hat KEINE Loki-Funktionalitaet — der Loki-Proxy-Endpoint ist komplett NEU. Alternativ: eigenen `loki.py` Router erstellen um debug.py nicht weiter aufzublaehen]
 
 ```python
 # GET /api/v1/debug/logs/recent?service=el-servador&limit=50&severity=ERROR
@@ -708,7 +720,7 @@ Arbeitspaket A (5-6h) — Unified Health + Alert System
 ### Aktuelle WS-Event-Architektur
 
 ```
-WebSocket (26 Events) → esp.store.ts (1645 Zeilen, ZENTRALER Dispatcher)
+WebSocket (26 Events) → esp.store.ts (1671 Zeilen, ZENTRALER Dispatcher) [Korrektur: 1671]
     ├─→ sensor.store.ts (sensor_data, sensor_health)
     ├─→ actuator.store.ts (10 Handler)
     ├─→ notification.store.ts (error_event, notification, system_event → useToast())
@@ -833,9 +845,9 @@ Nach Abschluss aller 3 Arbeitspakete:
 | `El Servador/god_kaiser_server/src/api/v1/__init__.py` | Router-Registry (67 Zeilen) |
 | `El Servador/god_kaiser_server/src/api/v1/health.py` | Bestehende Health-Endpoints (410 Zeilen) |
 | `El Servador/god_kaiser_server/src/api/v1/logs.py` | Pattern fuer Endpoint ohne Auth (140 Zeilen) |
-| `El Servador/god_kaiser_server/src/api/v1/debug.py` | Debug-Router fuer Loki-Proxy |
+| `El Servador/god_kaiser_server/src/api/v1/debug.py` | Debug-Router (Mock-ESP + DB-Explorer); Loki-Proxy ist NEU [Korrektur] |
 | `El Servador/god_kaiser_server/src/websocket/manager.py` | WS-Broadcast (388 Zeilen) |
-| `El Servador/god_kaiser_server/src/core/metrics.py` | Scheduler-Job fuer system_health (499 Zeilen) |
+| `El Servador/god_kaiser_server/src/core/metrics.py` | Scheduler-Job `update_all_metrics_async()` fuer system_health (498 Zeilen) [Korrektur: Funktionsname] |
 | `docker/grafana/provisioning/alerting/` | Provisioning-Verzeichnis |
 
 ### Frontend-Dateien (auto-one Repo)
@@ -843,9 +855,9 @@ Nach Abschluss aller 3 Arbeitspakete:
 | Pfad | Relevanz |
 |------|---------|
 | `El Frontend/src/shared/stores/` | Store-Verzeichnis — hier kommt system-health.store.ts |
-| `El Frontend/src/stores/esp.ts` | WS-Dispatcher (1645 Zeilen) — leitet neue Events weiter |
+| `El Frontend/src/stores/esp.ts` | WS-Dispatcher (1671 Zeilen) — leitet neue Events weiter [Korrektur: 1671] |
 | `El Frontend/src/shared/stores/notification.store.ts` | Bleibt unveraendert |
 | `El Frontend/src/components/system-monitor/HealthSummaryBar.vue` | Wird zu SystemStatusBar |
-| `El Frontend/src/components/system-monitor/SystemMonitorView.vue` | Bekommt Debug-Tab |
+| `El Frontend/src/views/SystemMonitorView.vue` | Bekommt Debug-Tab [Korrektur: views/, nicht components/system-monitor/] |
 | `El Frontend/src/components/dashboard-widgets/AlarmListWidget.vue` | Wird erweitert (Grafana-Alerts) |
 | `El Frontend/src/types/websocket-events.ts` | 2 neue Event-Typen |

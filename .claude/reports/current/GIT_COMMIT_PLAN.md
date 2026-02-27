@@ -1,73 +1,47 @@
 # Git Commit Plan
 **Erstellt:** 2026-02-27
-**Branch:** master (behind origin/master by 5 commits)
+**Branch:** master (up to date with origin/master)
 **Ungepushte Commits:** 0
-**Aenderungen gesamt:** 1 modified, 2 untracked (1 report + 1 cache-dir)
+**Änderungen gesamt:** 43 modified, 19 untracked, 0 staged
 
 ---
 
-## Situation
+## Commit 1: chore: add Sentry env placeholder and pyyaml dependency
 
-- **Lokal:** 1 modifizierte Datei + 1 neuer Report + 1 Playwright-MCP Cache-Verzeichnis
-- **Remote:** 5 neue Commits (Frontend-Features + Docs)
-- **Konflikte:** KEINE — Remote hat andere Dateien geaendert
-- **Strategie:** Lokal committen → Pull (Fast-Forward) → Verifizieren
+**Dateien:** `.env.example`, `El Servador/god_kaiser_server/pyproject.toml`
 
----
+## Commit 2: feat(firmware): add soil_moisture sensor alias and ADC attenuation
 
-## Commit 1: chore(git): add playwright-mcp cache to gitignore
+**Dateien:** `El Trabajante/src/models/sensor_registry.cpp`, `El Trabajante/src/services/sensor/sensor_manager.cpp`
 
-**Was:** `.playwright-mcp/` ist der Playwright MCP Server Cache (Console-Logs, Screenshots). Gehoert nicht ins Repo. Wird zur `.gitignore` hinzugefuegt.
+## Commit 3: feat(server): improve sensor handling, simulation sync and actuator state
 
-**Dateien:**
-- `.gitignore` — Eintrag `.playwright-mcp/` hinzufuegen
+**Dateien:** 9 Server-Dateien + uv.lock
 
-**Befehle:**
-```bash
-git add .gitignore
-git commit -m "chore(git): add playwright-mcp cache to gitignore"
-```
+## Commit 4: feat(frontend): redesign HardwareView with zone management and ESP settings
 
----
+**Dateien:** 21 Frontend src-Dateien
 
-## Commit 2: docs(reports): update auftrag status and add dashboard reactivity bugfix spec
+## Commit 5: test(frontend): add and update tests for HardwareView redesign
 
-**Was:** Auftrag-Hauptdokument mit Block 1+2 als ERLEDIGT aktualisiert, Referenzpfad korrigiert. Neuer Auftrag fuer Dashboard-Reaktivitaet und Performance (Bug 3b/3c aus HW-Test).
+**Dateien:** 10 Test-Dateien
 
-**Dateien:**
-- `.claude/reports/current/auftrag.md` — Block 1+2 ERLEDIGT markiert, Referenzpfad korrigiert
-- `.claude/reports/current/auftrag-dashboard-reaktivitaet-performance.md` — Neuer Bugfix-Auftrag (3 Bugs, 4 Bloecke)
+## Commit 6: test: add e2e scenarios and server integration test
 
-**Befehle:**
-```bash
-git add .claude/reports/current/auftrag.md .claude/reports/current/auftrag-dashboard-reaktivitaet-performance.md
-git commit -m "docs(reports): update auftrag status and add dashboard reactivity bugfix spec"
-```
+**Dateien:** 4 Test-Dateien (neu)
+
+## Commit 7: docs: add session reports and update frontend development skill
+
+**Dateien:** 14 Report/Skill-Dateien
 
 ---
 
-## Nach den Commits: Pull
-
-```bash
-# Remote-Aenderungen holen (Fast-Forward, kein Merge noetig)
-git pull origin master
-
-# Status pruefen
-git status
-```
-
----
-
-## Remote eingehend (5 Commits)
-
-| Commit | Beschreibung |
-|--------|-------------|
-| `1c820aa` | docs(skills): update dashboard navigation references |
-| `873444b` | feat(frontend): sensor grouping helpers |
-| `4b74e0c` | feat(dashboard): DeviceMiniCard/UnassignedDropBar overhaul |
-| `94f46f8` | feat(dashboard): zone aggregation, subzone chips, sorting |
-| `caaea4b` | docs(reports): overview tab redesign task spec |
-
-**Hinweise:**
-- Kein Merge-Konflikt erwartet (Remote und Lokal aendern unterschiedliche Dateien)
-- `.playwright-mcp/` wird nach dem gitignore-Commit nicht mehr als untracked angezeigt
+| # | Commit | Dateien | Typ |
+|---|--------|---------|-----|
+| 1 | `chore: add Sentry env placeholder and pyyaml dependency` | 2 | chore |
+| 2 | `feat(firmware): add soil_moisture sensor alias and ADC attenuation` | 2 | feat |
+| 3 | `feat(server): improve sensor handling, simulation sync and actuator state` | 9 | feat |
+| 4 | `feat(frontend): redesign HardwareView with zone management and ESP settings` | 21 | feat |
+| 5 | `test(frontend): add and update tests for HardwareView redesign` | 10 | test |
+| 6 | `test: add e2e scenarios and server integration test` | 4 | test |
+| 7 | `docs: add session reports and update frontend development skill` | 14 | docs |

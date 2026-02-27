@@ -15,7 +15,7 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.4
+**Version:** 9.7
 **Letzte Aktualisierung:** 2026-02-27
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 130 .vue Komponenten)
@@ -239,7 +239,7 @@ DashboardView.vue
 ├── CrossEspConnectionOverlay.vue (SVG)
 ├── UnassignedDropBar.vue (bottom)
 ├── PendingDevicesPanel.vue (slide-over)
-└── ESPSettingsPopover.vue (floating)
+└── ESPSettingsSheet.vue (SlideOver)
 ```
 
 ### Komponentenhierarchie (HardwareView / Zone Accordion)
@@ -253,7 +253,10 @@ HardwareView.vue
 │   │   └── DeviceMiniCard.vue[] (Compact: groupSensorsByBaseType)
 │   └── EmptyState (PackageOpen, wenn Zone leer)
 ├── UnassignedDropBar.vue (bottom, MOCK-Badge, Sensor-Summary)
-└── PendingDevicesPanel.vue (slide-over)
+├── PendingDevicesPanel.vue (slide-over)
+├── ESPSettingsSheet.vue (SlideOver, ESP-Detail: Status, Sensor/Actuator-Liste, Delete)
+├── SensorConfigPanel.vue (SlideOver, via ESPSettingsSheet Event)
+└── ActuatorConfigPanel.vue (SlideOver, via ESPSettingsSheet Event)
 ```
 
 ### Standard Component Template
@@ -365,6 +368,8 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 |-------|-------|-------|-------------------|
 | auth | stores/auth.ts | user, tokens, setupRequired | login, logout, refreshTokens |
 | esp | stores/esp.ts | devices[], pendingDevices[] | fetchAll, isMock, gpioStatusMap, onlineDevices (via getESPStatus), offlineDevices |
+| dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb, layouts[] | toggleStatusFilter, resetFilters, createLayout, saveLayout |
+| zone | stores/zone.store.ts | (stateless) | handleZoneAssignment (+ Toasts), handleSubzoneAssignment (+ Toasts) |
 | logic | stores/logic.ts | rules[], activeExecutions | fetchRules, toggleRule, crossEspConnections |
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
 | database | stores/database.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
@@ -730,9 +735,18 @@ Gleiche Zone = immer gleiche Farbe (deterministisch).
 
 | System | Library | Was | Wohin |
 |--------|---------|-----|-------|
-| Zone-Drag | VueDraggable | ESP-Card | Andere Zone |
+| Zone-Drag | VueDraggable | ESP-Card (DeviceMiniCard) | Andere Zone / UnassignedDropBar |
+| Unassigned-Drag | VueDraggable | Unassigned-Card | ZonePlate (Zone zuweisen) |
 | Sensor-Drag | Native HTML5 | SensorSatellite | Chart-Panel |
 | Component-Drag | Native HTML5 | Sidebar-Item | ESP-Card |
+
+### VueDraggable Regeln (Wichtig!)
+
+- **NIEMALS** `display: contents` auf Drag-Item-Wrapper — SortableJS braucht echte Box-Elemente
+- **IMMER** `v-model` Array und Template-Iteration muessen identische Datenquelle nutzen (1:1 DOM-Kind zu Array-Item)
+- **IMMER** `group="esp-devices"` auf allen verbundenen VueDraggable-Instanzen
+- **IMMER** `force-fallback` + `fallback-on-body` fuer zuverlaessiges Cross-Container-Drag
+- **IMMER** `@start`/`@end` Events an `dragStore.startEspCardDrag()`/`endEspCardDrag()` weiterleiten
 
 ### DragState Store
 
@@ -750,14 +764,15 @@ dragPayload: any
 - Stats-Tracking (totalDrags, successfulDrops, timeouts)
 ```
 
-### Zone-Assignment Flow
+### Zone-Assignment Flow (Zone → Zone / Unassigned → Zone)
 
 ```
-1. VueDraggable @add Event
-   └─> ZoneGroup.vue emits 'device-dropped'
+1. VueDraggable @add Event (ZonePlate)
+   └─> ZonePlate.vue emits 'device-dropped'
+   └─> event.item.dataset.deviceId → espStore.devices lookup
 
-2. View: onDeviceDropped(event)
-   └─> useZoneDragDrop Composable
+2. HardwareView: onDeviceDropped(event)
+   └─> useZoneDragDrop.handleDeviceDrop()
 
 3. API: zonesApi.assignZone(deviceId, {zone_id, zone_name})
    └─> POST /api/v1/zone/devices/{id}/assign
@@ -770,6 +785,22 @@ dragPayload: any
 
 7. Frontend: espStore.fetchAll() → UI aktualisiert
    └─> History-Push (fuer Undo, max 20 Eintraege)
+   └─> Toast: Erfolg/Fehler
+```
+
+### Zone-Removal Flow (Zone → UnassignedDropBar)
+
+```
+1. VueDraggable @change Event (UnassignedDropBar)
+   └─> event.added.element → ESPDevice Objekt
+
+2. UnassignedDropBar: handleDragAdd()
+   └─> device.zone_id gesetzt? → handleRemoveFromZone(device)
+
+3. API: zonesApi.removeZone(deviceId)
+   └─> DELETE /api/v1/zone/devices/{id}/zone
+
+4. Server: DB Update + MQTT Publish → espStore.fetchAll()
    └─> Toast: Erfolg/Fehler
 ```
 
@@ -793,7 +824,7 @@ dragPayload: any
 
 ### Feature mit Settings
 
-1. Setting-UI in `SettingsView.vue` oder `ESPSettingsPopover`
+1. Setting-UI in `SettingsView.vue` oder `ESPSettingsSheet`
 2. API-Call ueber `api/*.ts` Modul
 3. Store-Action fuer Persistenz
 4. Toast-Feedback bei Erfolg/Fehler
@@ -932,8 +963,38 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.4
+**Version:** 9.7
 **Letzte Aktualisierung:** 2026-02-27
+
+### Aenderungen in v9.7
+
+- dashboard.store.ts: statusCounts von ref() zu computed() umgebaut — nutzt getESPStatus() direkt, keine manuelle Zuweisung aus HardwareView mehr noetig
+- HardwareView.vue: 30 Zeilen entfernt (4 Computeds onlineCount/offlineCount/warningCount/safeModeCount + watch-Block der dashStore.statusCounts schrieb)
+- zone.store.ts: handleZoneAssignment() hat jetzt Toasts (zone_assigned, zone_removed, error) — identische Texte zu useZoneDragDrop.ts fuer 2s-Deduplication
+- PendingDevicesPanel.vue: Status-Dot (8x8px, border-radius 50%) vor Status-Text in beiden Geraete-Listen (assigned + unassigned)
+- Store-Architektur-Tabelle: dashboard und zone Stores dokumentiert
+
+### Aenderungen in v9.6
+
+- ESPSettingsSheet.vue: Custom SlideOver-Implementierung (Teleport+Transition+Overlay) ersetzt durch SlideOver-Primitive (shared/design/primitives/SlideOver.vue)
+- ESPSettingsSheet.vue: Status-Anzeige von eigener `isOnline` Logik auf `useESPStatus()` Composable migriert (Dot + Text + Pulse)
+- ESPSettingsSheet.vue: Inline SensorConfigPanel/ActuatorConfigPanel (AccordionSections) entfernt — durch klickbare Sensor/Actuator-Liste ersetzt
+- ESPSettingsSheet.vue: Neue Emits `open-sensor-config` und `open-actuator-config` — HardwareView faengt Events und oeffnet separate SlideOvers
+- ESPSettingsSheet.vue: Two-Step-Delete (showDeleteConfirm ref) ersetzt durch `uiStore.confirm()` (ConfirmDialog) + `useToast()` Feedback
+- ESPSettingsSheet.vue: 1419 → 1341 Zeilen (Wrapper-Vereinfachung, Inline-Panels entfernt)
+- HardwareView.vue: Neue Event-Handler `handleSensorConfigFromSheet()` und `handleActuatorConfigFromSheet()`
+- HardwareView.vue: 1066 → 1316 Zeilen (neue Handler + parallele Block-2-Arbeit)
+- Komponentenhierarchie (HardwareView): ESPSettingsSheet, SensorConfigPanel, ActuatorConfigPanel als SlideOver-Stack dokumentiert
+
+### Aenderungen in v9.5
+
+- ZonePlate.vue: `display: contents` auf device-wrapper entfernt — brach SortableJS Drag-Visuals (Element wurde verschoben, aber hatte keine CSS-Box)
+- ZonePlate.vue: VueDraggable Template iteriert jetzt `localDevices` direkt statt verschachtelt `subzoneGroups` — fixes v-model/DOM-Kind Mismatch
+- ZonePlate.vue: VueDraggable animation 0 → 150 fuer visuelles Reorder-Feedback
+- UnassignedDropBar.vue: `@start`/`@end` Events + dragStore Integration hinzugefuegt — ZonePlates zeigen Drop-Target-Visuals beim Drag aus der Leiste
+- Section 12 (Drag & Drop): VueDraggable-Regeln dokumentiert (display:contents Verbot, v-model/Template Konsistenz, force-fallback Pflicht)
+- Section 12: Zone-Removal Flow (Zone → UnassignedDropBar) als separater Flow dokumentiert
+- Section 12: Dual-System Tabelle erweitert um Unassigned-Drag Flow
 
 ### Aenderungen in v9.4
 
