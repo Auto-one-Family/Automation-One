@@ -21,7 +21,6 @@ from ..core.request_context import (
     generate_request_id,
     set_request_id,
     clear_request_id,
-    get_request_id,
 )
 
 logger = logging.getLogger(__name__)
