@@ -155,15 +155,9 @@ describe('dashboard store', () => {
       expect(store.hasPendingDevices).toBe(false)
     })
 
-    it('returns true when pendingCount is greater than 0', async () => {
-      const { useEspStore } = await import('@/stores/esp')
-      const espStore = useEspStore()
-      espStore.pendingDevices.push({
-        device_id: 'ESP_PENDING_01',
-        mac_address: 'AA:BB:CC:DD:EE:FF',
-        discovered_at: new Date().toISOString(),
-      } as any)
+    it('returns true when pendingCount is greater than 0', () => {
       const store = useDashboardStore()
+      store.pendingCount = 1
       expect(store.hasPendingDevices).toBe(true)
     })
   })

@@ -45,6 +45,7 @@ async function handleEmergencyStop() {
     :class="{ 'emergency-btn--loading': isLoading }"
     :disabled="isLoading"
     title="NOTFALL-STOPP: Alle Aktoren sofort abschalten"
+    aria-label="Not-Aus: Alle Aktoren sofort abschalten"
     @click="showConfirm = true"
   >
     <OctagonX class="w-4 h-4" />
@@ -53,12 +54,12 @@ async function handleEmergencyStop() {
 
   <!-- Confirmation Dialog Overlay -->
   <Teleport to="body">
-    <div v-if="showConfirm" class="emergency-overlay" @click.self="showConfirm = false">
+    <div v-if="showConfirm" class="emergency-overlay" role="dialog" aria-modal="true" aria-labelledby="emergency-stop-title" @click.self="showConfirm = false">
       <div class="emergency-dialog">
         <div class="emergency-dialog__icon">
           <OctagonX class="w-10 h-10 text-red-400" />
         </div>
-        <h3 class="emergency-dialog__title">NOTFALL-STOPP</h3>
+        <h3 id="emergency-stop-title" class="emergency-dialog__title">NOTFALL-STOPP</h3>
         <p class="emergency-dialog__text">
           Dies stoppt <strong>alle Aktoren auf allen Geräten</strong> sofort.
           Fortfahren?

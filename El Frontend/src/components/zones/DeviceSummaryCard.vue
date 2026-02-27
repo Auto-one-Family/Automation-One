@@ -12,7 +12,7 @@
  * Wraps ESPCardBase variant="summary" for consistent header rendering.
  */
 
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import type { ESPDevice } from '@/api/esp'
 import ESPCardBase from '@/components/esp/ESPCardBase.vue'
 import {
@@ -99,6 +99,7 @@ const healthColor = computed(() => {
 })
 
 /** Watch sensor data for value-flash animation */
+let flashTimer: ReturnType<typeof setTimeout> | null = null
 watch(
   () => {
     const sensors = props.device.sensors as any[] | undefined
@@ -108,10 +109,15 @@ watch(
   (newVal, oldVal) => {
     if (oldVal && newVal !== oldVal) {
       valueFlashing.value = true
-      setTimeout(() => { valueFlashing.value = false }, 600)
+      if (flashTimer) clearTimeout(flashTimer)
+      flashTimer = setTimeout(() => { valueFlashing.value = false }, 600)
     }
   }
 )
+
+onUnmounted(() => {
+  if (flashTimer) clearTimeout(flashTimer)
+})
 
 function handleClick(event: Event) {
   if ((event.target as HTMLElement).closest('.device-summary-card__actions')) return

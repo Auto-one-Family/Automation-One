@@ -19,7 +19,7 @@ import { useScrollLock } from '@/composables/useScrollLock'
 import { X, Check, Ban, Wifi, Clock, MapPin, Info, Loader2, Radio, Settings2 } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
 import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables/useZoneDragDrop'
-import { getESPStatus } from '@/composables/useESPStatus'
+import { getESPStatus, getESPStatusDisplay } from '@/composables/useESPStatus'
 import { getWifiStrength } from '@/utils/wifiStrength'
 import RejectDeviceModal from '@/components/modals/RejectDeviceModal.vue'
 import type { PendingESPDevice } from '@/types'
@@ -322,7 +322,7 @@ function isProcessing(deviceId: string): boolean {
                 <div class="pending-device__info">
                   <div class="pending-device__name">{{ device.name || espStore.getDeviceId(device) }}</div>
                   <div class="pending-device__meta">
-                    <span class="pending-device__meta-item">{{ getESPStatus(device).label }}</span>
+                    <span class="pending-device__meta-item">{{ getESPStatusDisplay(getESPStatus(device)).text }}</span>
                     <span class="pending-device__meta-item">{{ (device.sensors?.length ?? device.sensor_count ?? 0) }} Sensoren</span>
                   </div>
                 </div>
