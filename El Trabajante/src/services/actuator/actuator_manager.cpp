@@ -768,7 +768,10 @@ bool ActuatorManager::handleActuatorConfig(const String& payload, const String& 
     }
 
     if (!configureActuator(config)) {
-      String message = "Failed to configure actuator on GPIO " + String(config.gpio);
+      String message = "Failed to configure actuator on GPIO " + String(config.gpio) +
+                       " type=" + config.actuator_type +
+                       " name=" + config.actuator_name +
+                       " heap=" + String(ESP.getFreeHeap());
       LOG_E(TAG, message);
       ConfigResponseBuilder::publishError(
           ConfigType::ACTUATOR, ConfigErrorCode::UNKNOWN_ERROR, message, failed_variant,
