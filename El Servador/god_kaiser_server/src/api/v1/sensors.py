@@ -858,6 +858,7 @@ async def query_sensor_data(
             processed_value=r.processed_value,
             unit=r.unit,
             quality=r.quality,
+            sensor_type=r.sensor_type,
         )
         for r in readings
     ]
@@ -944,6 +945,7 @@ async def get_sensor_data_by_source(
             processed_value=r.processed_value,
             unit=r.unit,
             quality=r.quality,
+            sensor_type=r.sensor_type,
         )
         for r in readings
     ]

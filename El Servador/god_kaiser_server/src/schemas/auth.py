@@ -159,14 +159,14 @@ class LoginRequest(BaseModel):
 
     username: str = Field(
         ...,
-        min_length=3,
+        min_length=1,
         max_length=50,
         description="Username or email address",
         examples=["admin", "user@example.com"],
     )
     password: str = Field(
         ...,
-        min_length=8,
+        min_length=1,
         max_length=128,
         description="User password",
     )

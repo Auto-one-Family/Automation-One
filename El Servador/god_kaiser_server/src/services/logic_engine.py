@@ -327,8 +327,8 @@ class LogicEngine:
                 rule.actions, trigger_data, rule.id, rule.rule_name, rule.priority
             )
 
-            # Update last_triggered timestamp
-            rule.last_triggered = datetime.now(timezone.utc)
+            # Update last_triggered timestamp (timezone-naive for DB column)
+            rule.last_triggered = datetime.now(timezone.utc).replace(tzinfo=None)
 
             # Log successful execution
             execution_time_ms = int((time.time() - start_time) * 1000)
@@ -348,33 +348,49 @@ class LogicEngine:
                 exc_info=True,
             )
 
-            # Log failed execution
-            execution_time_ms = int((time.time() - start_time) * 1000)
-            await logic_repo.log_execution(
-                rule_id=rule.id,
-                trigger_data=trigger_data,
-                actions=rule.actions,
-                success=False,
-                execution_ms=execution_time_ms,
-                error_message=str(e),
-            )
-            await logic_repo.session.commit()
+            # Log failed execution (rollback first in case session is broken)
+            try:
+                await logic_repo.session.rollback()
+                execution_time_ms = int((time.time() - start_time) * 1000)
+                await logic_repo.log_execution(
+                    rule_id=rule.id,
+                    trigger_data=trigger_data,
+                    actions=rule.actions,
+                    success=False,
+                    execution_ms=execution_time_ms,
+                    error_message=str(e),
+                )
+                await logic_repo.session.commit()
+            except Exception as log_err:
+                logger.error(f"Failed to log execution error: {log_err}")
 
-    async def _check_conditions(self, conditions: dict, sensor_data: dict) -> bool:
+    async def _check_conditions(self, conditions, sensor_data: dict) -> bool:
         """
         Check if conditions are met using modular evaluators.
 
         Supports:
         - Single condition: {'type': 'sensor_threshold', ...}
         - Compound conditions: {'logic': 'AND', 'conditions': [...]}
+        - List of conditions: [{'type': 'sensor', ...}, ...] (from API)
 
         Args:
-            conditions: Condition dictionary
+            conditions: Condition dict, compound dict, or list of condition dicts
             sensor_data: Sensor data to check against (or context dict)
 
         Returns:
             True if conditions are met, False otherwise
         """
+        # Handle list of conditions (API stores conditions as List[Dict])
+        if isinstance(conditions, list):
+            if len(conditions) == 0:
+                return False
+            if len(conditions) == 1:
+                # Single condition in list
+                conditions = conditions[0]
+            else:
+                # Multiple conditions — wrap as AND compound
+                conditions = {"logic": "AND", "conditions": conditions}
+
         # Use modular evaluators if available
         if self.condition_evaluators:
             return await self._check_conditions_modular(conditions, sensor_data)

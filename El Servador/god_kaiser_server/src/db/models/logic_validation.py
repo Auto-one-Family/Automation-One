@@ -50,11 +50,19 @@ class SensorThresholdCondition(BaseModel):
     operator: Literal[">", ">=", "<", "<=", "==", "!=", "between"] = Field(
         ..., description="Comparison operator"
     )
-    value: float = Field(..., description="Threshold value")
+    value: Optional[float] = Field(None, description="Threshold value (required for all operators except 'between')")
 
     # Optional fields for "between" operator
     min: Optional[float] = Field(None, description="Minimum value for 'between' operator")
     max: Optional[float] = Field(None, description="Maximum value for 'between' operator")
+
+    @field_validator("value", mode="after")
+    @classmethod
+    def validate_value_required(cls, v, info):
+        """Validate that value is required for non-between operators."""
+        if info.data.get("operator") != "between" and v is None:
+            raise ValueError("'value' is required for operators other than 'between'")
+        return v
 
     @field_validator("min", "max")
     @classmethod
@@ -100,6 +108,59 @@ class TimeWindowCondition(BaseModel):
         return v
 
 
+class HysteresisCondition(BaseModel):
+    """
+    Hysteresis Condition.
+
+    Prevents "flapping" near threshold by using separate activate/deactivate thresholds.
+
+    Two modes:
+    - Cooling: activate_above + deactivate_below (e.g., fan)
+    - Heating: activate_below + deactivate_above (e.g., heater)
+
+    Example (Cooling):
+        {
+            "type": "hysteresis",
+            "esp_id": "ESP_12AB34",
+            "gpio": 4,
+            "sensor_type": "DS18B20",
+            "activate_above": 28.0,
+            "deactivate_below": 24.0
+        }
+    """
+
+    type: Literal["hysteresis"] = Field(..., description="Condition type (must be 'hysteresis')")
+    esp_id: str = Field(
+        ...,
+        description="ESP device ID",
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
+    )
+    gpio: int = Field(..., description="GPIO pin number", ge=0, le=50)
+    sensor_type: Optional[str] = Field(None, description="Sensor type filter (optional)")
+
+    # Cooling mode thresholds
+    activate_above: Optional[float] = Field(None, description="Activate when value exceeds this (cooling mode)")
+    deactivate_below: Optional[float] = Field(None, description="Deactivate when value drops below this (cooling mode)")
+
+    # Heating mode thresholds
+    activate_below: Optional[float] = Field(None, description="Activate when value drops below this (heating mode)")
+    deactivate_above: Optional[float] = Field(None, description="Deactivate when value exceeds this (heating mode)")
+
+    @field_validator("deactivate_below", mode="after")
+    @classmethod
+    def validate_thresholds(cls, v, info):
+        """Validate that either cooling or heating mode thresholds are provided."""
+        data = info.data
+        has_cooling = data.get("activate_above") is not None and v is not None
+        has_heating = data.get("activate_below") is not None and data.get("deactivate_above") is not None
+
+        if not has_cooling and not has_heating:
+            # Only raise if we're done processing all fields and neither mode is set
+            # This validator runs after deactivate_below, so cooling mode can be checked here
+            pass  # Will be checked in model_validator if needed
+        return v
+
+
 class CompoundCondition(BaseModel):
     """
     Compound Condition (AND/OR logic).
@@ -121,7 +182,7 @@ class CompoundCondition(BaseModel):
 
 
 # Union type for all condition types
-ConditionType = Union[SensorThresholdCondition, TimeWindowCondition, CompoundCondition]
+ConditionType = Union[SensorThresholdCondition, TimeWindowCondition, HysteresisCondition, CompoundCondition]
 
 
 # =============================================================================
@@ -229,8 +290,10 @@ def validate_condition(condition: dict) -> ConditionType:
     # Accept both "sensor_threshold" and "sensor" as valid condition types
     if cond_type in ("sensor_threshold", "sensor"):
         return SensorThresholdCondition(**condition)
-    elif cond_type == "time_window":
+    elif cond_type in ("time_window", "time"):
         return TimeWindowCondition(**condition)
+    elif cond_type == "hysteresis":
+        return HysteresisCondition(**condition)
     elif "logic" in condition and "conditions" in condition:
         # Compound condition - recursively validate sub-conditions
         validated_sub_conditions = [

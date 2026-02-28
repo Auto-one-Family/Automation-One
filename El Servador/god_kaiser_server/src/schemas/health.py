@@ -286,7 +286,7 @@ class ESPHealthItem(BaseModel):
     name: Optional[str] = Field(None, description="Device name")
     status: str = Field(
         ...,
-        pattern=r"^(online|offline|error|unknown)$",
+        pattern=r"^(online|offline|error|unknown|pending_approval|approved|rejected)$",
         description="Device status",
     )
     last_seen: Optional[datetime] = Field(None, description="Last heartbeat")

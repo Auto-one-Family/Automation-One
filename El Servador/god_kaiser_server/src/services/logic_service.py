@@ -7,10 +7,13 @@ Business logic for logic rule management, validation, and testing.
 import uuid
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.exc import IntegrityError
+
 from ..core.logging_config import get_logger
 from ..db.models.logic import CrossESPLogic
 from ..db.repositories import LogicRepository
 from ..schemas.logic import (
+    ActionResult,
     ConditionResult,
     LogicRuleCreate,
     LogicRuleUpdate,
@@ -125,8 +128,14 @@ class LogicService:
             max_executions_per_hour=rule_data.max_executions_per_hour,
         )
 
-        created = await self.logic_repo.create(rule)
-        await self.logic_repo.session.commit()
+        try:
+            created = await self.logic_repo.create(rule)
+            await self.logic_repo.session.commit()
+        except IntegrityError as e:
+            await self.logic_repo.session.rollback()
+            if "rule_name" in str(e) or "ix_cross_esp_logic_rule_name" in str(e):
+                raise ValueError(f"Rule with name '{rule_data.name}' already exists")
+            raise ValueError(f"Database constraint violation: {e}")
 
         logger.info(f"Logic rule created: '{created.name}' (ID: {created.id})")
 
@@ -350,12 +359,37 @@ class LogicService:
         else:  # AND
             would_trigger = all_conditions_met and len(condition_results) > 0
 
-        # Evaluate actions (dry run)
+        # Build action results (show what would happen)
         action_results = []
-        if would_trigger and not test_request.dry_run:
-            # Would execute actions (but don't actually execute in test mode)
-            # This is handled by the test endpoint in logic.py
-            pass
+        if would_trigger:
+            actions = rule.actions if isinstance(rule.actions, list) else [rule.actions]
+            for act_idx, action in enumerate(actions):
+                action_type = action.get("type", "unknown")
+                details = ""
+                if action_type in ("actuator_command", "actuator"):
+                    details = (
+                        f"{action.get('esp_id', '?')}:{action.get('gpio', '?')} "
+                        f"{action.get('command', '?')}"
+                    )
+                elif action_type == "notification":
+                    details = f"{action.get('channel', '?')} → {action.get('target', '?')}"
+                elif action_type == "delay":
+                    details = f"Wait {action.get('seconds', '?')}s"
+                elif action_type == "sequence":
+                    steps = action.get("steps", [])
+                    details = f"Sequence with {len(steps)} steps"
+                else:
+                    details = str(action)
+
+                action_results.append(
+                    ActionResult(
+                        action_index=act_idx,
+                        action_type=action_type,
+                        would_execute=True,
+                        details=details,
+                        dry_run=test_request.dry_run,
+                    )
+                )
 
         return RuleTestResponse(
             success=True,

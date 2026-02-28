@@ -319,10 +319,21 @@ class HeartbeatHandler:
                 # ============================================
                 # Allows ESP to transition from PENDING_APPROVAL → OPERATIONAL
                 # without requiring a reboot after admin approval
+                # Check if ESP lost its config (e.g., after reboot)
+                esp_sensor_count = payload.get(
+                    "sensor_count", payload.get("active_sensors", 0)
+                )
+                esp_actuator_count = payload.get(
+                    "actuator_count", payload.get("active_actuators", 0)
+                )
+                config_pending = await self._has_pending_config(
+                    esp_device, session, esp_sensor_count, esp_actuator_count
+                )
+
                 await self._send_heartbeat_ack(
                     esp_id=esp_id_str,
                     status="online",  # Device is now online
-                    config_available=await self._has_pending_config(esp_device),
+                    config_available=config_pending,
                 )
 
                 return True
@@ -1139,22 +1150,102 @@ class HeartbeatHandler:
             logger.warning(f"Error sending heartbeat ACK to {esp_id}: {e}")
             return False
 
-    async def _has_pending_config(self, esp_device: ESPDevice) -> bool:
+    async def _has_pending_config(
+        self,
+        esp_device: ESPDevice,
+        session,
+        esp_sensor_count: int = 0,
+        esp_actuator_count: int = 0,
+    ) -> bool:
         """
         Check if server has unsent configuration for this ESP.
 
-        Currently returns False (placeholder for future config-push system).
-        ESP32 polls for config separately via config topic.
+        Detects config loss after ESP reboot by comparing the sensor/actuator
+        counts reported in the heartbeat against the DB. If the ESP reports 0
+        but the DB has configs, triggers an automatic config push.
 
         Args:
             esp_device: ESPDevice instance
+            session: Active DB session
+            esp_sensor_count: sensor_count from heartbeat payload
+            esp_actuator_count: actuator_count from heartbeat payload
 
         Returns:
             True if there is pending configuration, False otherwise
         """
-        # TODO: Implement when config-push tracking is added
-        # For now, always return False (ESP32 polls config)
-        return False
+        try:
+            from ...db.repositories import SensorRepository, ActuatorRepository
+
+            sensor_repo = SensorRepository(session)
+            actuator_repo = ActuatorRepository(session)
+
+            db_sensor_count = await sensor_repo.count_by_esp(esp_device.id)
+            db_actuator_count = await actuator_repo.count_by_esp(esp_device.id)
+
+            # ESP reports 0 configs but DB has configs → reboot detected
+            needs_sensor_push = esp_sensor_count == 0 and db_sensor_count > 0
+            needs_actuator_push = esp_actuator_count == 0 and db_actuator_count > 0
+
+            if needs_sensor_push or needs_actuator_push:
+                logger.info(
+                    f"Config mismatch detected for {esp_device.device_id}: "
+                    f"ESP reports sensors={esp_sensor_count}/actuators={esp_actuator_count}, "
+                    f"DB has sensors={db_sensor_count}/actuators={db_actuator_count}. "
+                    f"Triggering auto config push."
+                )
+                import asyncio
+
+                asyncio.create_task(
+                    self._auto_push_config(esp_device.device_id)
+                )
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to check pending config for {esp_device.device_id}: {e}"
+            )
+            return False
+
+    async def _auto_push_config(self, esp_device_id: str) -> None:
+        """
+        Auto-push configuration to ESP after reboot detection.
+
+        Runs as a separate async task so it doesn't block heartbeat processing.
+        Uses its own DB session to avoid conflicts with the heartbeat session.
+        """
+        try:
+            from ...services.config_builder import ConfigPayloadBuilder
+            from ...services.esp_service import ESPService
+
+            async with resilient_session() as session:
+                config_builder = ConfigPayloadBuilder()
+                combined_config = await config_builder.build_combined_config(
+                    esp_device_id, session
+                )
+
+                esp_repo = ESPRepository(session)
+                esp_service = ESPService(esp_repo)
+                result = await esp_service.send_config(esp_device_id, combined_config)
+
+                if result.get("success"):
+                    logger.info(
+                        f"Auto config push successful for {esp_device_id}: "
+                        f"{len(combined_config.get('sensors', []))} sensors, "
+                        f"{len(combined_config.get('actuators', []))} actuators"
+                    )
+                else:
+                    logger.warning(
+                        f"Auto config push failed for {esp_device_id}: "
+                        f"{result.get('message', 'unknown error')}"
+                    )
+
+        except Exception as e:
+            logger.error(
+                f"Auto config push error for {esp_device_id}: {e}",
+                exc_info=True,
+            )
 
     async def check_device_timeouts(self) -> dict:
         """
