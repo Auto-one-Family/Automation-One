@@ -50,8 +50,11 @@ class SensorConditionEvaluator(BaseConditionEvaluator):
         if condition.get("esp_id") != sensor_data.get("esp_id"):
             return False
 
-        # Match GPIO
-        if condition.get("gpio") != sensor_data.get("gpio"):
+        # Match GPIO (with type coercion for int/str safety)
+        try:
+            if int(condition.get("gpio", -1)) != int(sensor_data.get("gpio", -2)):
+                return False
+        except (ValueError, TypeError):
             return False
 
         # Optional sensor type filter
@@ -70,9 +73,16 @@ class SensorConditionEvaluator(BaseConditionEvaluator):
             )
             return False
 
+        if threshold is None and operator != "between":
+            logger.warning(
+                f"Condition missing threshold value for {sensor_data.get('esp_id')}:{sensor_data.get('gpio')}"
+            )
+            return False
+
         try:
             actual = float(actual)
-            threshold = float(threshold)
+            if threshold is not None:
+                threshold = float(threshold)
         except (ValueError, TypeError) as e:
             logger.error(f"Invalid numeric values for sensor condition: {e}")
             return False

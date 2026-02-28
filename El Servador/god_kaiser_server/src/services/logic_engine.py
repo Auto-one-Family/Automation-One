@@ -207,22 +207,24 @@ class LogicEngine:
                 # Filter rules with time_window conditions
                 timer_rules = []
                 for rule in all_rules:
-                    conditions = rule.conditions
+                    # Use trigger_conditions (raw JSON) for type checking,
+                    # NOT .conditions property which always wraps in list
+                    raw_conditions = rule.trigger_conditions
                     has_time_condition = False
 
                     # Check if rule has time_window condition
-                    if isinstance(conditions, dict):
-                        if conditions.get("type") in ("time_window", "time"):
+                    if isinstance(raw_conditions, dict):
+                        if raw_conditions.get("type") in ("time_window", "time"):
                             has_time_condition = True
-                        elif conditions.get("logic"):
+                        elif raw_conditions.get("logic"):
                             # Compound condition - check sub-conditions
-                            sub_conditions = conditions.get("conditions", [])
+                            sub_conditions = raw_conditions.get("conditions", [])
                             for sub_cond in sub_conditions:
                                 if sub_cond.get("type") in ("time_window", "time"):
                                     has_time_condition = True
                                     break
-                    elif isinstance(conditions, list):
-                        for cond in conditions:
+                    elif isinstance(raw_conditions, list):
+                        for cond in raw_conditions:
                             if cond.get("type") in ("time_window", "time"):
                                 has_time_condition = True
                                 break
@@ -456,7 +458,11 @@ class LogicEngine:
             # Match on ESP + GPIO + optionally Sensor Type
             if condition.get("esp_id") != sensor_data.get("esp_id"):
                 return False
-            if condition.get("gpio") != sensor_data.get("gpio"):
+            # GPIO comparison with type coercion (int vs str safety)
+            try:
+                if int(condition.get("gpio", -1)) != int(sensor_data.get("gpio", -2)):
+                    return False
+            except (ValueError, TypeError):
                 return False
             # sensor_type is optional for "sensor" shorthand
             if condition.get("sensor_type") and condition.get("sensor_type") != sensor_data.get(
@@ -467,6 +473,21 @@ class LogicEngine:
             operator = condition.get("operator")
             threshold = condition.get("value")
             actual = sensor_data.get("value")
+
+            if actual is None:
+                logger.warning(
+                    f"Sensor data missing value for "
+                    f"{sensor_data.get('esp_id')}:{sensor_data.get('gpio')}"
+                )
+                return False
+
+            # Type-safe conversion to float
+            try:
+                actual = float(actual)
+                threshold = float(threshold)
+            except (ValueError, TypeError) as e:
+                logger.error(f"Invalid numeric values for sensor condition: {e}")
+                return False
 
             if operator == ">":
                 return actual > threshold
@@ -483,12 +504,18 @@ class LogicEngine:
             elif operator == "between":
                 min_val = condition.get("min")
                 max_val = condition.get("max")
-                return min_val <= actual <= max_val
+                if min_val is None or max_val is None:
+                    logger.warning("'between' operator requires 'min' and 'max' fields")
+                    return False
+                try:
+                    return float(min_val) <= actual <= float(max_val)
+                except (ValueError, TypeError):
+                    return False
             else:
                 logger.warning(f"Unknown operator: {operator}")
                 return False
 
-        elif cond_type == "time_window":
+        elif cond_type in ("time_window", "time"):
             # Time window condition
             now = datetime.now()
             start_hour = condition.get("start_hour", 0)
@@ -500,9 +527,13 @@ class LogicEngine:
                 if now.weekday() not in days:
                     return False
 
-            # Check time window
+            # Check time window with overnight wrapping support
             current_hour = now.hour
-            return start_hour <= current_hour < end_hour
+            if start_hour <= end_hour:
+                return start_hour <= current_hour < end_hour
+            else:
+                # Wrapping case (e.g., 22:00 to 06:00)
+                return current_hour >= start_hour or current_hour < end_hour
 
         else:
             logger.warning(f"Unknown condition type: {cond_type}")
@@ -584,19 +615,24 @@ class LogicEngine:
                             try:
                                 result = await executor.execute(action, context)
 
-                                # WebSocket broadcast
-                                await self.websocket_manager.broadcast(
-                                    "logic_execution",
-                                    {
-                                        "rule_id": str(rule_id),
-                                        "rule_name": rule_name,
-                                        "trigger": trigger_data,
-                                        "action": action,
-                                        "success": result.success,
-                                        "message": result.message,
-                                        "timestamp": trigger_data.get("timestamp"),
-                                    },
-                                )
+                                # WebSocket broadcast (non-critical, must not interrupt execution)
+                                try:
+                                    await self.websocket_manager.broadcast(
+                                        "logic_execution",
+                                        {
+                                            "rule_id": str(rule_id),
+                                            "rule_name": rule_name,
+                                            "trigger": trigger_data,
+                                            "action": action,
+                                            "success": result.success,
+                                            "message": result.message,
+                                            "timestamp": trigger_data.get("timestamp"),
+                                        },
+                                    )
+                                except Exception as ws_err:
+                                    logger.warning(
+                                        f"WebSocket broadcast failed for rule {rule_name}: {ws_err}"
+                                    )
 
                                 if result.success:
                                     logger.info(
@@ -663,24 +699,29 @@ class LogicEngine:
                 issued_by=f"logic:{rule_id}",
             )
 
-            # WebSocket broadcast
-            await self.websocket_manager.broadcast(
-                "logic_execution",
-                {
-                    "rule_id": str(rule_id),
-                    "rule_name": rule_name,
-                    "trigger": trigger_data,
-                    "action": {
-                        "esp_id": esp_id,
-                        "gpio": gpio,
-                        "command": command,
-                        "value": value,
-                        "duration": duration,
+            # WebSocket broadcast (non-critical, must not interrupt execution)
+            try:
+                await self.websocket_manager.broadcast(
+                    "logic_execution",
+                    {
+                        "rule_id": str(rule_id),
+                        "rule_name": rule_name,
+                        "trigger": trigger_data,
+                        "action": {
+                            "esp_id": esp_id,
+                            "gpio": gpio,
+                            "command": command,
+                            "value": value,
+                            "duration": duration,
+                        },
+                        "success": success,
+                        "timestamp": trigger_data.get("timestamp"),
                     },
-                    "success": success,
-                    "timestamp": trigger_data.get("timestamp"),
-                },
-            )
+                )
+            except Exception as ws_err:
+                logger.warning(
+                    f"WebSocket broadcast failed for rule {rule_name}: {ws_err}"
+                )
 
             if success:
                 logger.info(

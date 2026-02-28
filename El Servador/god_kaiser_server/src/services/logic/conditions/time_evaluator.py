@@ -70,14 +70,17 @@ class TimeConditionEvaluator(BaseConditionEvaluator):
         # Support both hour-based (0-23) and time-based (HH:MM) formats
         start_hour = condition.get("start_hour")
         end_hour = condition.get("end_hour")
+        start_minute = 0
+        end_minute = 0
         start_time_str = condition.get("start_time")
         end_time_str = condition.get("end_time")
 
-        # Convert HH:MM format to hour
+        # Convert HH:MM format to hour + minute
         if start_time_str:
             try:
                 parts = start_time_str.split(":")
                 start_hour = int(parts[0])
+                start_minute = int(parts[1]) if len(parts) > 1 else 0
             except (ValueError, IndexError):
                 logger.warning(f"Invalid start_time format: {start_time_str}")
                 return False
@@ -86,6 +89,7 @@ class TimeConditionEvaluator(BaseConditionEvaluator):
             try:
                 parts = end_time_str.split(":")
                 end_hour = int(parts[0])
+                end_minute = int(parts[1]) if len(parts) > 1 else 0
             except (ValueError, IndexError):
                 logger.warning(f"Invalid end_time format: {end_time_str}")
                 return False
@@ -104,13 +108,15 @@ class TimeConditionEvaluator(BaseConditionEvaluator):
             logger.warning(f"Invalid end_hour: {end_hour}. Must be 0-24")
             return False
 
-        # Check if current hour is within window
-        current_hour = current_time.hour
+        # Compare using total minutes for proper HH:MM granularity
+        current_minutes = current_time.hour * 60 + current_time.minute
+        start_minutes = start_hour * 60 + start_minute
+        end_minutes = end_hour * 60 + end_minute
 
         # Handle wrapping (e.g., 22:00 to 06:00)
-        if start_hour <= end_hour:
-            # Normal case: start_hour < end_hour (e.g., 8:00 to 18:00)
-            return start_hour <= current_hour < end_hour
+        if start_minutes <= end_minutes:
+            # Normal case (e.g., 8:00 to 18:00)
+            return start_minutes <= current_minutes < end_minutes
         else:
-            # Wrapping case: start_hour > end_hour (e.g., 22:00 to 06:00)
-            return current_hour >= start_hour or current_hour < end_hour
+            # Wrapping case (e.g., 22:30 to 06:15)
+            return current_minutes >= start_minutes or current_minutes < end_minutes

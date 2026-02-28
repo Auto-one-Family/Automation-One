@@ -165,8 +165,45 @@ class ActuatorCommandAction(BaseModel):
     duration_seconds: int = Field(0, description="Duration in seconds (0 = unlimited)", ge=0)
 
 
+class NotificationAction(BaseModel):
+    """
+    Notification Action.
+
+    Sends notification via websocket, email or webhook.
+    """
+
+    type: Literal["notification"] = Field(..., description="Action type")
+    channel: Literal["websocket", "email", "webhook"] = Field(
+        ..., description="Notification channel"
+    )
+    target: str = Field(..., description="Target (email address, webhook URL, WS topic)")
+    message_template: str = Field("", description="Message template with {placeholders}")
+
+
+class DelayAction(BaseModel):
+    """
+    Delay Action.
+
+    Pauses execution for a specified duration.
+    """
+
+    type: Literal["delay"] = Field(..., description="Action type")
+    seconds: int = Field(..., description="Delay duration in seconds", ge=1, le=3600)
+
+
+class SequenceAction(BaseModel):
+    """
+    Sequence Action.
+
+    Executes multiple actions in sequence with optional delays.
+    """
+
+    type: Literal["sequence"] = Field(..., description="Action type")
+    steps: List[Any] = Field(..., description="List of action steps", min_length=1)
+
+
 # Union type for all action types
-ActionType = ActuatorCommandAction  # Extend with more action types later
+ActionType = Union[ActuatorCommandAction, NotificationAction, DelayAction, SequenceAction]
 
 
 # =============================================================================
@@ -243,6 +280,12 @@ def validate_action(action: dict) -> ActionType:
     # Accept both "actuator_command" and "actuator" as valid action types
     if action_type in ("actuator_command", "actuator"):
         return ActuatorCommandAction(**action)
+    elif action_type == "notification":
+        return NotificationAction(**action)
+    elif action_type == "delay":
+        return DelayAction(**action)
+    elif action_type == "sequence":
+        return SequenceAction(**action)
     else:
         raise ValueError(f"Unknown action type: {action_type}")
 

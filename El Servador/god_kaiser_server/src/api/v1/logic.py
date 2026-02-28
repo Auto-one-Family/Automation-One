@@ -89,8 +89,8 @@ async def list_rules(
     if enabled is not None:
         rules = [r for r in rules if r.enabled == enabled]
 
-    # Sort by priority (highest first)
-    rules.sort(key=lambda r: r.priority, reverse=True)
+    # Sort by priority (lower number = higher priority, shown first)
+    rules.sort(key=lambda r: r.priority)
 
     # Pagination
     total_items = len(rules)
