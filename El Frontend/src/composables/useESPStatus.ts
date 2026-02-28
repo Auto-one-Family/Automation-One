@@ -82,7 +82,18 @@ export function getESPStatus(device: ESPDevice): ESPStatus {
   if (device.status === 'online' || device.connected === true) return 'online'
   if (device.status === 'offline') return 'offline'
 
-  // Priority 2: Heartbeat-based timing (for devices without explicit status)
+  // Priority 2: "approved" status — device approved but no heartbeat yet
+  // Treat as online if last_seen is recent, otherwise offline
+  if (device.status === 'approved') {
+    const ts = device.last_seen || device.last_heartbeat
+    if (ts) {
+      const age = Date.now() - new Date(ts).getTime()
+      if (age < HEARTBEAT_OFFLINE_MS) return 'online'
+    }
+    return 'offline'
+  }
+
+  // Priority 3: Heartbeat-based timing (for devices without explicit status)
   const ts = device.last_seen || device.last_heartbeat
   if (ts) {
     const age = Date.now() - new Date(ts).getTime()

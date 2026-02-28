@@ -29,7 +29,7 @@ export interface LogicRule {
 // Condition Types
 // =============================================================================
 
-export type LogicCondition = SensorCondition | TimeCondition | CompoundCondition
+export type LogicCondition = SensorCondition | TimeCondition | HysteresisCondition | CompoundCondition
 
 export interface SensorCondition {
   type: 'sensor' | 'sensor_threshold'
@@ -47,6 +47,17 @@ export interface TimeCondition {
   start_hour: number
   end_hour: number
   days_of_week?: number[] // 0 = Sunday, 6 = Saturday
+}
+
+export interface HysteresisCondition {
+  type: 'hysteresis'
+  esp_id: string
+  gpio: number
+  sensor_type?: string
+  activate_above?: number
+  deactivate_below?: number
+  activate_below?: number
+  deactivate_above?: number
 }
 
 export interface CompoundCondition {
@@ -110,15 +121,23 @@ export interface LogicConnection {
 // =============================================================================
 
 export interface LogicRulesResponse {
-  items: LogicRule[]
-  total: number
-  page: number
-  page_size: number
+  success: boolean
+  data: LogicRule[]
+  pagination: {
+    page: number
+    page_size: number
+    total_items: number
+    total_pages: number
+    has_next: boolean
+    has_previous: boolean
+  }
 }
 
 export interface ExecutionHistoryResponse {
-  items: ExecutionHistoryItem[]
-  total: number
+  success: boolean
+  entries: ExecutionHistoryItem[]
+  total_count: number
+  success_rate: number | null
 }
 
 export interface ExecutionHistoryItem {

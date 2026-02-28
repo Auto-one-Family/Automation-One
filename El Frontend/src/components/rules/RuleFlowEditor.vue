@@ -14,7 +14,7 @@
  * - Auto-layout for imported rules
  */
 
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch } from 'vue'
 import { VueFlow, Position, MarkerType, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -77,13 +77,16 @@ const {
   fitView,
   onNodeClick,
   getNode,
+  onNodesInitialized,
+  setNodes,
+  setEdges,
 } = useVueFlow({
   defaultEdgeOptions: {
     animated: true,
     type: 'smoothstep',
     markerEnd: MarkerType.ArrowClosed,
   },
-  fitViewOnInit: true,
+  fitViewOnInit: false,
   snapToGrid: true,
   snapGrid: [20, 20] as [number, number],
 })
@@ -91,6 +94,25 @@ const {
 const flowWrapper = ref<HTMLElement | null>(null)
 const isDragOver = ref(false)
 let nodeIdCounter = 0
+let pendingFitView = false
+
+// Initial node dimensions prevent Vue Flow clampNodeExtent crash (dimensions undefined before render)
+const NODE_INIT_DIMS: Record<string, { width: number; height: number }> = {
+  sensor: { width: 210, height: 120 },
+  time: { width: 210, height: 100 },
+  logic: { width: 100, height: 60 },
+  actuator: { width: 210, height: 120 },
+  notification: { width: 210, height: 100 },
+  delay: { width: 210, height: 80 },
+}
+
+// Fit view only after Vue Flow has measured node dimensions
+onNodesInitialized(() => {
+  if (pendingFitView) {
+    pendingFitView = false
+    fitView({ padding: 0.3 })
+  }
+})
 
 // Consolidated sensor configuration: icon, unit, and label per sensor type
 interface SensorMeta {
@@ -189,6 +211,7 @@ function onDrop(event: DragEvent) {
 
   const id = `${data.type}-${Date.now()}-${nodeIdCounter++}`
   const nodeData = getDefaultNodeData(data.type, data.defaults || {})
+  const dims = NODE_INIT_DIMS[data.type] || { width: 210, height: 100 }
 
   addNodes([
     {
@@ -196,7 +219,9 @@ function onDrop(event: DragEvent) {
       type: data.type,
       position,
       data: nodeData,
-    },
+      width: dims.width,
+      height: dims.height,
+    } as Node,
   ])
 
   emit('graph-changed')
@@ -431,6 +456,15 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
     })
   })
 
+  // Set initial dimensions on all nodes to prevent Vue Flow clampNodeExtent crash
+  for (const node of resultNodes) {
+    const dims = NODE_INIT_DIMS[node.type || '']
+    if (dims) {
+      ;(node as Record<string, unknown>).width = dims.width
+      ;(node as Record<string, unknown>).height = dims.height
+    }
+  }
+
   return { nodes: resultNodes, edges: resultEdges }
 }
 
@@ -513,10 +547,13 @@ watch(
   (newRule) => {
     if (newRule) {
       const graph = ruleToGraph(newRule)
-      // Clear existing and set new
-      nodes.value = graph.nodes as typeof nodes.value
-      edges.value = graph.edges as typeof edges.value
-      nextTick(() => fitView({ padding: 0.3 }))
+      // Use setNodes/setEdges (NOT nodes.value =) to go through parseNode pipeline
+      // parseNode initializes dimensions: { width: 0, height: 0 } which prevents
+      // clampNodeExtent crash in Vue Flow v1.48.2
+      setNodes(graph.nodes)
+      setEdges(graph.edges)
+      // Defer fitView until Vue Flow has measured real node dimensions
+      pendingFitView = true
     } else {
       nodes.value = []
       edges.value = []

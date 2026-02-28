@@ -46,16 +46,31 @@ export interface ToggleResponse {
   success: boolean
   message: string
   rule_id: string
+  rule_name: string
   enabled: boolean
+  previous_state: boolean
 }
 
 export interface TestResponse {
   success: boolean
-  message: string
   rule_id: string
-  conditions_result: boolean
-  evaluation_details: Record<string, unknown>[]
-  would_execute_actions: boolean
+  rule_name: string
+  would_trigger: boolean
+  condition_results: {
+    condition_index: number
+    condition_type: string
+    result: boolean
+    details: string
+    actual_value: number | null
+  }[]
+  action_results: {
+    action_index: number
+    action_type: string
+    would_execute: boolean
+    details: string
+    dry_run: boolean
+  }[]
+  dry_run: boolean
 }
 
 // =============================================================================
@@ -95,7 +110,7 @@ export const logicApi = {
    * Update an existing logic rule
    */
   async updateRule(ruleId: string, update: LogicRuleUpdate): Promise<LogicRule> {
-    const response = await api.patch<LogicRule>(`/logic/rules/${ruleId}`, update)
+    const response = await api.put<LogicRule>(`/logic/rules/${ruleId}`, update)
     return response.data
   },
 
@@ -109,16 +124,28 @@ export const logicApi = {
   /**
    * Toggle rule enabled/disabled
    */
-  async toggleRule(ruleId: string): Promise<ToggleResponse> {
-    const response = await api.post<ToggleResponse>(`/logic/rules/${ruleId}/toggle`)
+  async toggleRule(ruleId: string, enabled: boolean, reason?: string): Promise<ToggleResponse> {
+    const response = await api.post<ToggleResponse>(`/logic/rules/${ruleId}/toggle`, {
+      enabled,
+      reason,
+    })
     return response.data
   },
 
   /**
    * Test rule evaluation without executing actions
    */
-  async testRule(ruleId: string): Promise<TestResponse> {
-    const response = await api.post<TestResponse>(`/logic/rules/${ruleId}/test`)
+  async testRule(
+    ruleId: string,
+    mockSensorValues?: Record<string, number>,
+    mockTime?: string,
+    dryRun = true
+  ): Promise<TestResponse> {
+    const response = await api.post<TestResponse>(`/logic/rules/${ruleId}/test`, {
+      mock_sensor_values: mockSensorValues,
+      mock_time: mockTime,
+      dry_run: dryRun,
+    })
     return response.data
   },
 

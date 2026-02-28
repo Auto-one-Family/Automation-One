@@ -122,7 +122,7 @@ export const useLogicStore = defineStore('logic', () => {
 
     try {
       const response = await logicApi.getRules(params)
-      rules.value = response.items || []
+      rules.value = response.data || []
       logger.debug('Fetched rules', { count: rules.value.length })
     } catch (err) {
       error.value = extractErrorMessage(err, 'Fehler beim Laden der Logic Rules')
@@ -165,7 +165,11 @@ export const useLogicStore = defineStore('logic', () => {
     error.value = null
 
     try {
-      const response = await logicApi.toggleRule(ruleId)
+      // Find current state to toggle
+      const currentRule = rules.value.find((r) => r.id === ruleId)
+      const newEnabled = currentRule ? !currentRule.enabled : true
+
+      const response = await logicApi.toggleRule(ruleId, newEnabled)
       // Update local state
       const rule = rules.value.find((r) => r.id === ruleId)
       if (rule) {
@@ -188,8 +192,8 @@ export const useLogicStore = defineStore('logic', () => {
 
     try {
       const response = await logicApi.testRule(ruleId)
-      logger.info('Rule test completed', { ruleId, conditionsResult: response.conditions_result })
-      return response.conditions_result
+      logger.info('Rule test completed', { ruleId, wouldTrigger: response.would_trigger })
+      return response.would_trigger
     } catch (err) {
       error.value = extractErrorMessage(err, 'Fehler beim Testen der Regel')
       logger.error('testRule error', err)

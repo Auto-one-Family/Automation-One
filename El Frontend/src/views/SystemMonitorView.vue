@@ -51,9 +51,8 @@ import CleanupPanel from '@/components/system-monitor/CleanupPanel.vue'
 // Constants
 // ============================================================================
 
-// WICHTIG: Sehr hoher Wert um alle historischen Events anzuzeigen
-// Virtual Scrolling in UnifiedEventList.vue kickt ab 200 Events ein für Performance
-const MAX_EVENTS = 10000
+// Safety limit — Virtual Scrolling handles rendering performance
+const MAX_EVENTS = 5000
 
 // All event types we subscribe to (from Server WebSocket broadcasts)
 // WICHTIG: Diese Liste muss ALLE event_types aus dem Server enthalten!

@@ -103,7 +103,7 @@ function formatTimeSpan(ms: number): string {
 // Virtual Scrolling State
 // ============================================================================
 
-const VIRTUAL_SCROLL_THRESHOLD = 10000  // ⭐ Page-Scroll: Effektiv deaktiviert
+const VIRTUAL_SCROLL_THRESHOLD = 200  // Enable virtual scroll above 200 events
 const ITEM_HEIGHT = 60 // Approximate height of each item in pixels
 const BUFFER_SIZE = 10 // Extra items to render above/below viewport
 
@@ -833,10 +833,9 @@ onUnmounted(() => {
 }
 
 .event-list--virtual {
-  /* ⭐ FIX: `contain: strict` durch `contain: layout paint` ersetzt
-   * - `strict` aktiviert Size Containment → Container-Höhe wird 0 bei flex: 1
-   * - `layout paint` behält Performance-Vorteile ohne Size Containment
-   */
+  /* Virtual scroll needs a fixed-height scrollable container */
+  overflow-y: auto;
+  max-height: calc(100vh - 220px);
   contain: layout paint;
 }
 

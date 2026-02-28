@@ -98,54 +98,61 @@ watch([selectedEspId, selectedGpio, selectedSensorType], () => {
   if (selectedEspId.value) fetchData()
 })
 
-// Chart data
-const chartData = computed(() => ({
-  datasets: [{
-    label: selectedSensorType.value || 'Sensor',
-    data: readings.value.map(r => ({
-      x: new Date(r.timestamp).getTime(),
-      y: r.processed_value ?? r.raw_value,
-    })),
-    borderColor: CHART_COLORS[0],
-    backgroundColor: `${CHART_COLORS[0]}20`,
-    borderWidth: 2,
-    pointRadius: readings.value.length > 200 ? 0 : 2,
-    pointHoverRadius: 4,
-    tension: 0.3,
-    fill: true,
-  }],
-}))
+// Group readings by sensor_type (or unit as fallback) for separate datasets
+const groupedReadings = computed(() => {
+  const groups = new Map<string, { unit: string; readings: SensorReading[] }>()
+  for (const r of readings.value) {
+    const key = r.sensor_type || r.unit || 'unknown'
+    if (!groups.has(key)) {
+      groups.set(key, { unit: r.unit ?? '', readings: [] })
+    }
+    groups.get(key)!.readings.push(r)
+  }
+  return groups
+})
 
-const chartOptions = computed(() => ({
-  responsive: true,
-  maintainAspectRatio: false,
-  animation: { duration: 300 },
-  interaction: { mode: 'index' as const, intersect: false },
-  plugins: {
-    legend: { display: false },
-    tooltip: {
-      backgroundColor: 'rgba(7,7,13,0.92)',
-      borderColor: 'rgba(133,133,160,0.3)',
-      borderWidth: 1,
-      titleFont: { family: 'JetBrains Mono', size: 11 },
-      bodyFont: { family: 'JetBrains Mono', size: 12 },
-      titleColor: '#8585a0',
-      bodyColor: '#eaeaf2',
-      padding: 10,
-      callbacks: {
-        title: (items: TooltipItem<'line'>[]) => {
-          if (!items.length) return ''
-          const x = items[0].parsed.x ?? 0
-          return new Date(x).toLocaleString('de-DE')
-        },
-        label: (item: TooltipItem<'line'>) => {
-          const unit = readings.value[0]?.unit ?? ''
-          return ` ${item.parsed.y?.toFixed(2)} ${unit}`
-        },
-      },
-    },
-  },
-  scales: {
+const uniqueUnits = computed(() => {
+  const units = new Set<string>()
+  for (const group of groupedReadings.value.values()) {
+    units.add(group.unit)
+  }
+  return [...units]
+})
+
+// Chart data — one dataset per sensor_type, with separate Y-axis per unit
+const chartData = computed(() => {
+  const groups = groupedReadings.value
+  const units = uniqueUnits.value
+  const datasets = [...groups.entries()].map(([sensorType, group], idx) => {
+    const colorIdx = idx % CHART_COLORS.length
+    const yAxisID = units.length > 1
+      ? (units.indexOf(group.unit) === 0 ? 'y' : 'y1')
+      : 'y'
+    return {
+      label: `${sensorType}${group.unit ? ' (' + group.unit + ')' : ''}`,
+      data: group.readings.map(r => ({
+        x: new Date(r.timestamp).getTime(),
+        y: r.processed_value ?? r.raw_value,
+      })),
+      borderColor: CHART_COLORS[colorIdx],
+      backgroundColor: `${CHART_COLORS[colorIdx]}20`,
+      borderWidth: 2,
+      pointRadius: group.readings.length > 200 ? 0 : 2,
+      pointHoverRadius: 4,
+      tension: 0.3,
+      fill: false,
+      yAxisID,
+    }
+  })
+  return { datasets }
+})
+
+const chartOptions = computed(() => {
+  const units = uniqueUnits.value
+  const hasMultipleDatasets = groupedReadings.value.size > 1
+  const hasDualAxis = units.length > 1
+
+  const scales: Record<string, unknown> = {
     x: {
       type: 'time' as const,
       time: {
@@ -156,19 +163,88 @@ const chartOptions = computed(() => ({
       border: { display: false },
     },
     y: {
+      position: 'left' as const,
       grid: { color: 'rgba(29,29,42,0.8)' },
       ticks: {
-        color: '#484860',
+        color: CHART_COLORS[0],
         font: { family: 'JetBrains Mono', size: 10 },
         callback: (val: string | number) => {
-          const unit = readings.value[0]?.unit ?? ''
+          const unit = units[0] ?? ''
           return `${val}${unit ? ' ' + unit : ''}`
         },
       },
       border: { display: false },
+      title: hasDualAxis ? {
+        display: true,
+        text: units[0] ?? '',
+        color: CHART_COLORS[0],
+        font: { family: 'JetBrains Mono', size: 10 },
+      } : undefined,
     },
-  },
-}))
+  }
+
+  if (hasDualAxis) {
+    scales.y1 = {
+      position: 'right' as const,
+      grid: { drawOnChartArea: false },
+      ticks: {
+        color: CHART_COLORS[1],
+        font: { family: 'JetBrains Mono', size: 10 },
+        callback: (val: string | number) => {
+          const unit = units[1] ?? ''
+          return `${val}${unit ? ' ' + unit : ''}`
+        },
+      },
+      border: { display: false },
+      title: {
+        display: true,
+        text: units[1] ?? '',
+        color: CHART_COLORS[1],
+        font: { family: 'JetBrains Mono', size: 10 },
+      },
+    }
+  }
+
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 300 },
+    interaction: { mode: 'index' as const, intersect: false },
+    plugins: {
+      legend: {
+        display: hasMultipleDatasets,
+        labels: {
+          color: '#8585a0',
+          font: { family: 'JetBrains Mono', size: 11 },
+          boxWidth: 12,
+          padding: 12,
+        },
+      },
+      tooltip: {
+        backgroundColor: 'rgba(7,7,13,0.92)',
+        borderColor: 'rgba(133,133,160,0.3)',
+        borderWidth: 1,
+        titleFont: { family: 'JetBrains Mono', size: 11 },
+        bodyFont: { family: 'JetBrains Mono', size: 12 },
+        titleColor: '#8585a0',
+        bodyColor: '#eaeaf2',
+        padding: 10,
+        callbacks: {
+          title: (items: TooltipItem<'line'>[]) => {
+            if (!items.length) return ''
+            const x = items[0].parsed.x ?? 0
+            return new Date(x).toLocaleString('de-DE')
+          },
+          label: (item: TooltipItem<'line'>) => {
+            const label = item.dataset.label ?? 'Sensor'
+            return ` ${label}: ${item.parsed.y?.toFixed(2)}`
+          },
+        },
+      },
+    },
+    scales,
+  }
+})
 
 function exportCsv() {
   if (!readings.value.length) return
@@ -266,7 +342,10 @@ function exportCsv() {
     <!-- Chart -->
     <div v-else class="sensor-history__chart-wrap">
       <div class="sensor-history__chart-header">
-        <span class="sensor-history__point-count">{{ readings.length }} Datenpunkte</span>
+        <span class="sensor-history__point-count">
+          {{ readings.length }} Datenpunkte
+          <template v-if="groupedReadings.size > 1"> · {{ groupedReadings.size }} Sensortypen</template>
+        </span>
         <button class="sensor-history__export-btn" @click="exportCsv">
           <Download :size="14" /> CSV Export
         </button>

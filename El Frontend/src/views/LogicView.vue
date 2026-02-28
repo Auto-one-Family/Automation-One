@@ -50,6 +50,8 @@ import type { Node } from '@vue-flow/core'
 import RuleFlowEditor from '@/components/rules/RuleFlowEditor.vue'
 import RuleNodePalette from '@/components/rules/RuleNodePalette.vue'
 import RuleConfigPanel from '@/components/rules/RuleConfigPanel.vue'
+import RuleTemplateCard from '@/components/rules/RuleTemplateCard.vue'
+import { ruleTemplates, type RuleTemplate } from '@/config/rule-templates'
 
 const logger = createLogger('LogicView')
 const logicStore = useLogicStore()
@@ -136,6 +138,26 @@ async function startNewRule() {
   newRuleDescription.value = ''
   showRuleDropdown.value = false
   editorRef.value?.clearCanvas()
+}
+
+async function useTemplate(template: RuleTemplate) {
+  if (hasUnsavedChanges.value) {
+    const confirmed = await uiStore.confirm({
+      title: 'Ungespeicherte Aenderungen',
+      message: 'Ungespeicherte Aenderungen verwerfen?',
+      variant: 'warning',
+    })
+    if (!confirmed) return
+  }
+  selectedRuleId.value = null
+  selectedNode.value = null
+  isCreatingNew.value = true
+  hasUnsavedChanges.value = false
+  newRuleName.value = template.rule.name
+  newRuleDescription.value = template.rule.description || ''
+  showRuleDropdown.value = false
+  editorRef.value?.clearCanvas()
+  logger.info('Template selected', { templateId: template.id, name: template.name })
 }
 
 function cancelNewRule() {
@@ -560,6 +582,19 @@ onUnmounted(() => {
             <p class="rules-empty__hint">
               Bausteine auf die Arbeitsfläche ziehen und verbinden
             </p>
+          </div>
+
+          <!-- Templates -->
+          <div class="rules-empty__templates">
+            <h3 class="rules-empty__templates-title">Vorlagen</h3>
+            <div class="rules-empty__templates-grid">
+              <RuleTemplateCard
+                v-for="tpl in ruleTemplates"
+                :key="tpl.id"
+                :template="tpl"
+                @use-template="useTemplate"
+              />
+            </div>
           </div>
 
           <!-- Existing rules quick list -->
@@ -1245,6 +1280,28 @@ onUnmounted(() => {
   color: var(--color-text-muted);
   opacity: 0.6;
   letter-spacing: 0.02em;
+}
+
+/* Templates grid */
+.rules-empty__templates {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.rules-empty__templates-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 var(--space-3) 0;
+}
+
+.rules-empty__templates-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-3);
 }
 
 /* Rules list */
