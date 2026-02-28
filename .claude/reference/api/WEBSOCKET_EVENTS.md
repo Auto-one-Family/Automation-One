@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 2.3 | **Aktualisiert:** 2026-02-26
+> **Version:** 2.4 | **Aktualisiert:** 2026-02-28
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
-> **Event-Anzahl:** 28 verschiedene Event-Typen (esp_diagnostics hinzugefügt)
+> **Event-Anzahl:** 28 verschiedene Event-Typen
 
 ---
 
@@ -735,13 +735,11 @@ Subzone Assignment ACK vom ESP.
 
 ### 8.1 logic_execution
 
-Automation Rule wurde ausgeführt.
+Automation Rule wurde ausgeführt. Wird pro Action einmal gesendet.
 
-**Trigger:** `LogicEngine.evaluate_sensor_data()` führt Rule aus
+**Trigger:** `LogicEngine._execute_actions()` nach erfolgreicher Condition-Evaluation
 
-**Code-Locations:**
-- [logic_engine.py:599](El Servador/god_kaiser_server/src/services/logic_engine.py#L599)
-- [logic_engine.py:675](El Servador/god_kaiser_server/src/services/logic_engine.py#L675)
+**Code-Location:** [logic_engine.py:636](El Servador/god_kaiser_server/src/services/logic_engine.py#L636)
 
 **Payload:**
 ```json
@@ -749,15 +747,41 @@ Automation Rule wurde ausgeführt.
   "type": "logic_execution",
   "timestamp": 1706787600,
   "data": {
-    "rule_id": "1",
+    "rule_id": "uuid-string",
     "rule_name": "Auto-Irrigation",
-    "triggered_by": "sensor_threshold",
-    "actions_executed": 1,
+    "trigger": {
+      "esp_id": "ESP_12AB34CD",
+      "gpio": 4,
+      "sensor_type": "temperature",
+      "value": 31.5,
+      "timestamp": 1706787600
+    },
+    "action": {
+      "type": "actuator_command",
+      "esp_id": "ESP_AABBCCDD",
+      "gpio": 5,
+      "command": "ON",
+      "value": 1.0
+    },
     "success": true,
-    "duration_ms": 150
+    "message": "Actuator command sent successfully",
+    "timestamp": 1706787600
   }
 }
 ```
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `rule_id` | string | Rule UUID als String |
+| `rule_name` | string | Name der ausgeführten Rule |
+| `trigger` | object | Trigger-Daten (Sensor-Werte die die Rule ausgelöst haben) |
+| `action` | object | Ausgeführte Action (komplett) |
+| `success` | bool | Ob die Action erfolgreich war |
+| `message` | string | Ergebnis-Nachricht vom Action-Executor |
+| `timestamp` | number | Unix Timestamp des Triggers |
+
+> **Hinweis:** Bei Rules mit mehreren Actions wird pro Action ein separates `logic_execution` Event gesendet.
+> Die WebSocket-Broadcast ist non-critical — Fehler beim Senden unterbrechen NICHT die Rule-Execution.
 
 ---
 

@@ -40,7 +40,7 @@ src/ (60,604 Zeilen)
 ├── services/      13,675 (22.6%)  Business Logic, Logic Engine
 ├── api/v1/        12,210 (20.1%)  REST Endpoints (170)
 ├── core/           7,294 (12.0%)  Config, Security, Scheduler
-├── db/             6,942 (11.5%)  Models (17), Repositories (16)
+├── db/             6,942 (11.5%)  Models (16), Repositories (16)
 ├── mqtt/           6,938 (11.4%)  Client, Handlers (14), Publisher
 ├── schemas/        6,778 (11.2%)  Pydantic DTOs (70+)
 ├── sensors/        3,728 (6.2%)   Sensor Libraries
@@ -162,7 +162,7 @@ DB Persist → Logic Engine → WebSocket Broadcast
 
 ## 4. REST API
 
-**Dateien:** `src/api/v1/` (12,210 Zeilen, 14 Router, 170 Endpoints)
+**Dateien:** `src/api/v1/` (~12,500 Zeilen, 19 Router inkl. 3 PLANNED, ~170 Endpoints)
 
 ### Auth Matrix
 
@@ -191,6 +191,10 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | errors | /v1/errors | 4 | Active |
 | sensor_type_defaults | /v1/sensor-type-defaults | 6 | Operator+ |
 | sequences | /v1/sequences | 4 | Operator+ |
+| logs | /v1/logs | 1 | Public |
+| ai | /v1/ai | PLANNED | - |
+| kaiser | /v1/kaiser | PLANNED | - |
+| library | /v1/library | PLANNED | - |
 
 ### Neuen Endpoint hinzufügen
 
@@ -237,7 +241,7 @@ class YourRepository(BaseRepository[YourModel]):
 | SensorConfig | `sensor_configs` | esp_id (FK), gpio, sensor_type, i2c_address |
 | ActuatorConfig | `actuator_configs` | esp_id (FK), gpio, actuator_type, inverted |
 | SubzoneConfig | `subzone_configs` | id (UUID PK), esp_id (FK), subzone_id, assigned_gpios (JSON), safe_mode_active |
-| CrossESPLogic | `cross_esp_logic` | rule_name, conditions (JSON), actions (JSON) |
+| CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority, cooldown_seconds |
 | SensorData | `sensor_data` | sensor_id (FK), raw_value, processed_value |
 | AuditLog | `audit_logs` | event_type, severity, source_type |
 
@@ -352,7 +356,7 @@ poetry run python scripts/seed_wokwi_esp.py
 
 | Service | Datei | Zeilen | Hauptmethoden |
 |---------|-------|--------|---------------|
-| **LogicEngine** | logic_engine.py | 781 | `start()`, `stop()`, `evaluate_sensor_data()` |
+| **LogicEngine** | logic_engine.py | 833 | `start()`, `stop()`, `evaluate_sensor_data()`, `evaluate_timer_triggered_rules()` |
 | **SafetyService** | safety_service.py | 264 | `validate_actuator_command()`, `emergency_stop_all()` |
 | **SensorService** | sensor_service.py | 545 | `process_reading()`, `trigger_measurement()` |
 | **ActuatorService** | actuator_service.py | 279 | `send_command()` |

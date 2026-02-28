@@ -639,11 +639,13 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
          │                             │    - SensorConditionEvaluator
          │                             │    - TimeConditionEvaluator │
          │                             │    - CompoundConditionEvaluator
+         │                             │    - HysteresisConditionEvaluator
          │                             │                             │
          │                             │ 7. Execute actions          │
          │                             │    - ActuatorActionExecutor │
          │                             │    - DelayActionExecutor    │
          │                             │    - NotificationActionExecutor
+         │                             │    - SequenceActionExecutor │
          │                             │                             │
          │                             │ 8. MQTT: actuator/command   │
          │                             │────────────────────────────►│
@@ -660,22 +662,29 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
 
 ```json
 {
-  "id": 1,
+  "id": "uuid",
   "name": "Auto-Irrigation",
   "enabled": true,
-  "trigger_conditions": {
-    "type": "sensor_threshold",
-    "esp_id": "ESP_SENSOR_01",
-    "gpio": 4,
-    "operator": ">",
-    "value": 30.0
-  },
-  "actions": [{
-    "type": "actuator_command",
-    "esp_id": "ESP_ACTUATOR_01",
-    "gpio": 5,
-    "command": "ON"
-  }],
+  "conditions": [
+    {
+      "type": "sensor",
+      "esp_id": "ESP_SENSOR_01",
+      "gpio": 4,
+      "sensor_type": "DS18B20",
+      "operator": ">",
+      "value": 30.0
+    }
+  ],
+  "actions": [
+    {
+      "type": "actuator",
+      "esp_id": "ESP_ACTUATOR_01",
+      "gpio": 5,
+      "command": "ON"
+    }
+  ],
+  "logic_operator": "AND",
+  "priority": 5,
   "cooldown_seconds": 300
 }
 ```
@@ -691,14 +700,16 @@ Die Logic Engine unterstützt Rules über **mehrere ESPs**:
 
 | Komponente | Datei | Beschreibung |
 |------------|-------|--------------|
-| SensorConditionEvaluator | logic_engine.py:70 | Sensor-Schwellwert-Prüfung |
-| TimeConditionEvaluator | logic_engine.py:73 | Zeit-basierte Bedingungen |
-| CompoundConditionEvaluator | logic_engine.py:76 | AND/OR Verknüpfungen |
-| ActuatorActionExecutor | logic_engine.py:79 | Actuator-Befehle |
-| DelayActionExecutor | logic_engine.py:82 | Verzögerungen |
-| NotificationActionExecutor | logic_engine.py:85 | WebSocket Notifications |
-| ConflictManager | logic_engine.py:88 | GPIO-Konflikt-Prüfung |
-| RateLimiter | logic_engine.py:91 | Command-Flooding-Schutz |
+| SensorConditionEvaluator | conditions/sensor_evaluator.py | Sensor-Schwellwert-Prüfung (`sensor`, `sensor_threshold`) |
+| TimeConditionEvaluator | conditions/time_evaluator.py | Zeit-basierte Bedingungen (`time_window`, `time`) |
+| CompoundConditionEvaluator | conditions/compound_evaluator.py | AND/OR Verknüpfungen (`compound`) |
+| HysteresisConditionEvaluator | conditions/hysteresis_evaluator.py | Hysterese (`hysteresis`) |
+| ActuatorActionExecutor | actions/actuator_executor.py | Actuator-Befehle (`actuator`, `actuator_command`) |
+| DelayActionExecutor | actions/delay_executor.py | Verzögerungen (`delay`) |
+| NotificationActionExecutor | actions/notification_executor.py | WebSocket Notifications (`notification`) |
+| SequenceActionExecutor | actions/sequence_executor.py | Verkettete Aktionen (`sequence`) |
+| ConflictManager | safety/conflict_manager.py | GPIO-Konflikt-Prüfung |
+| RateLimiter | safety/rate_limiter.py | Command-Flooding-Schutz |
 
 ---
 

@@ -18,7 +18,7 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 **Version:** 9.7
 **Letzte Aktualisierung:** 2026-02-27
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
-**Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 130 .vue Komponenten)
+**Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 137 .vue Komponenten)
 
 > **Server-Dokumentation:** Siehe `.claude/skills/server-development/SKILL.md`
 > **ESP32-Firmware:** Siehe `.claude/skills/esp32-development/SKILL.md`
@@ -132,15 +132,15 @@ El Frontend/src/
 │   ├── system-monitor/ # 18 Dateien
 │   ├── filters/       # UnifiedFilterBar
 │   ├── modals/
-│   ├── rules/         # RuleConfigPanel, RuleFlowEditor, RuleNodePalette (3 Dateien)
+│   ├── rules/         # RuleCard, RuleConfigPanel, RuleFlowEditor, RuleNodePalette, RuleTemplateCard (5 Dateien)
 │   ├── error/         # ErrorDetailsModal, TroubleshootingPanel
 │   ├── database/      # DataTable, FilterPanel, Pagination, etc. (6 Dateien)
 │   └── safety/        # EmergencyStopButton
 ├── shared/        # Design System + Shared Stores (NEU)
 │   ├── design/
-│   │   ├── primitives/  # 10 Komponenten (9 Base + AccordionSection)
+│   │   ├── primitives/  # 13 Komponenten (10 Base + AccordionSection + QualityIndicator + RangeSlider + SlideOver)
 │   │   ├── layout/      # AppShell, Sidebar, TopBar (3 Dateien)
-│   │   └── patterns/    # EmptyState, ErrorState, ToastContainer (3 Dateien)
+│   │   └── patterns/    # ConfirmDialog, ContextMenu, EmptyState, ErrorState, ToastContainer (5 Dateien)
 │   └── stores/          # 12 Shared Stores (actuator, auth, config, dashboard, database, dragState, gpio, logic, notification, sensor, ui, zone)
 ├── styles/        # CSS Design Tokens + Shared Styles (6 Dateien)
 │   ├── tokens.css       # Design Token Definitionen
@@ -349,9 +349,14 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 
 ### Logic Types (types/logic.ts)
 
-- LogicRule: Conditions + Actions + Cooldown
-- SensorCondition: Vergleichsoperatoren + between
+- LogicRule: Conditions + Actions + Cooldown + logic_operator (AND/OR)
+- SensorCondition: Vergleichsoperatoren (>, <, >=, <=, ==, !=, between)
+- TimeCondition: start_hour, end_hour, days_of_week
+- HysteresisCondition: activate_above/deactivate_below
+- CompoundCondition: Nested AND/OR conditions
 - ActuatorAction: ON/OFF/PWM/TOGGLE + Duration
+- NotificationAction: channel + target + message_template
+- DelayAction: seconds
 
 ### GPIO Types (types/gpio.ts)
 
@@ -1055,7 +1060,7 @@ cleanupWebSocket() {
 - Design System: `shared/design/` mit primitives/ (9), layout/ (3), patterns/ (3)
 - Shared Stores: `shared/stores/` (auth, database, dragState, logic)
 - Styles: `styles/` (tokens.css, glass.css, animations.css, main.css, tailwind.css)
-- Rules Components: `components/rules/` (RuleConfigPanel, RuleFlowEditor, RuleNodePalette)
+- Rules Components: `components/rules/` (RuleCard, RuleConfigPanel, RuleFlowEditor, RuleNodePalette, RuleTemplateCard)
 - Component Count: 67 → 97 .vue, Stores: 5 → 9 (5 original + 4 shared)
 - Ordnerstruktur (Section 2) vollstaendig aktualisiert
 

@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 2.3 | **Aktualisiert:** 2026-02-26
+> **Version:** 2.5 | **Aktualisiert:** 2026-02-28
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
@@ -114,13 +114,13 @@ allowed-tools: Read
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
 | `/logic/rules` | GET | JWT | Automation Rules auflisten |
-| `/logic/rules` | POST | JWT | Neue Rule erstellen |
+| `/logic/rules` | POST | Operator | Neue Rule erstellen |
 | `/logic/rules/{rule_id}` | GET | JWT | Rule Details |
-| `/logic/rules/{rule_id}` | PUT | JWT | Rule aktualisieren |
-| `/logic/rules/{rule_id}` | DELETE | JWT | Rule löschen |
-| `/logic/rules/{rule_id}/toggle` | POST | JWT | Rule aktivieren/deaktivieren |
-| `/logic/rules/{rule_id}/test` | POST | JWT | Rule testen |
-| `/logic/rules/{rule_id}/history` | GET | JWT | Execution History |
+| `/logic/rules/{rule_id}` | PUT | Operator | Rule aktualisieren |
+| `/logic/rules/{rule_id}` | DELETE | Operator | Rule löschen |
+| `/logic/rules/{rule_id}/toggle` | POST | Operator | Rule aktivieren/deaktivieren |
+| `/logic/rules/{rule_id}/test` | POST | Operator | Rule testen |
+| `/logic/execution_history` | GET | JWT | Execution History |
 
 ### Sequences (`/sequences`) - 4 Endpoints
 
@@ -749,9 +749,55 @@ Global Emergency-Stop für alle Actuators.
 
 ### 5.1 GET /logic/rules
 
-Automation Rules auflisten.
+Automation Rules auflisten (paginiert, sortiert nach Priority aufsteigend — niedrigere Nummer = höhere Priorität).
 
 **Auth:** JWT Required
+
+**Query-Parameter:**
+
+| Parameter | Typ | Default | Beschreibung |
+|-----------|-----|---------|--------------|
+| `enabled` | bool | - | Filter nach enabled Status |
+| `page` | int | 1 | Seite (1-indexed) |
+| `page_size` | int | 20 | Einträge pro Seite (max: 100) |
+
+**Response 200 (LogicRuleListResponse):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "name": "High pH Alert",
+      "description": "Stop dosing pump when pH exceeds 7.5",
+      "conditions": [
+        {"type": "sensor", "esp_id": "ESP_12AB34CD", "gpio": 34, "operator": ">", "value": 7.5}
+      ],
+      "actions": [
+        {"type": "actuator", "esp_id": "ESP_AABBCCDD", "gpio": 5, "command": "OFF"}
+      ],
+      "logic_operator": "AND",
+      "enabled": true,
+      "priority": 80,
+      "cooldown_seconds": 300,
+      "max_executions_per_hour": null,
+      "last_triggered": "2026-01-01T12:00:00Z",
+      "execution_count": 15,
+      "last_execution_success": true,
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T12:00:00Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "page_size": 20,
+    "total_items": 5,
+    "total_pages": 1,
+    "has_next": false,
+    "has_previous": false
+  }
+}
+```
 
 ---
 
@@ -759,34 +805,240 @@ Automation Rules auflisten.
 
 Neue Rule erstellen.
 
-**Auth:** JWT Required
+**Auth:** Operator Required
 
-**Request Body (LogicRuleBase):**
+**Request Body (LogicRuleCreate):**
 ```json
 {
-  "name": "Auto-Irrigation",
-  "enabled": true,
-  "priority": 1,
-  "trigger_conditions": {
-    "type": "sensor_threshold",
-    "esp_id": "ESP_SENSOR_01",
-    "gpio": 4,
-    "sensor_type": "temperature",
-    "operator": ">",
-    "value": 30.0
-  },
-  "actions": [
+  "name": "High pH Alert",
+  "description": "Stop dosing pump when pH exceeds 7.5",
+  "conditions": [
     {
-      "type": "actuator_command",
-      "esp_id": "ESP_ACTUATOR_01",
-      "gpio": 5,
-      "command": "ON",
-      "value": 1.0
+      "type": "sensor",
+      "esp_id": "ESP_12AB34CD",
+      "gpio": 34,
+      "operator": ">",
+      "value": 7.5,
+      "sensor_type": "ph"
+    },
+    {
+      "type": "time",
+      "start_time": "06:00",
+      "end_time": "22:00"
     }
   ],
+  "actions": [
+    {
+      "type": "actuator",
+      "esp_id": "ESP_AABBCCDD",
+      "gpio": 5,
+      "command": "OFF",
+      "value": 0.0
+    }
+  ],
+  "logic_operator": "AND",
+  "enabled": true,
+  "priority": 80,
   "cooldown_seconds": 300,
-  "time_start": "06:00",
-  "time_end": "22:00"
+  "max_executions_per_hour": 10
+}
+```
+
+**Condition Types:**
+
+| type | Felder | Beschreibung |
+|------|--------|--------------|
+| `sensor` / `sensor_threshold` | esp_id, gpio, operator, value, sensor_type? | Sensor-Schwellwert |
+| `time` / `time_window` | start_time (HH:MM), end_time (HH:MM), days_of_week? | Zeitfenster |
+| `hysteresis` | esp_id, gpio, sensor_type?, activate_above?, deactivate_below?, activate_below?, deactivate_above? | Hysterese |
+| `compound` | logic (AND/OR), conditions[] | Verschachtelte Bedingungen |
+
+**Action Types:**
+
+| type | Felder | Beschreibung |
+|------|--------|--------------|
+| `actuator` / `actuator_command` | esp_id, gpio, command (ON/OFF/PWM/TOGGLE), value?, duration? | Actuator steuern |
+| `notification` | channel (email/webhook/websocket), target, message_template | Benachrichtigung |
+| `delay` | seconds (1-3600) | Verzögerung |
+| `sequence` | description?, abort_on_failure?, steps[] (name, action, delay_seconds?) | Verkettete Aktionen |
+
+**Response 201 (LogicRuleResponse):** Siehe GET /logic/rules Response-Objekt.
+
+**Error Responses:**
+| Code | Reason |
+|------|--------|
+| 400 | Validation Error oder Duplicate Name |
+| 422 | Unprocessable Entity |
+
+---
+
+### 5.3 GET /logic/rules/{rule_id}
+
+Rule Details abrufen.
+
+**Auth:** JWT Required
+
+**Response 200 (LogicRuleResponse):** Siehe GET /logic/rules Response-Objekt.
+
+**Error Responses:**
+| Code | Reason |
+|------|--------|
+| 404 | Rule not found |
+
+---
+
+### 5.4 PUT /logic/rules/{rule_id}
+
+Rule aktualisieren (alle Felder optional).
+
+**Auth:** Operator Required
+
+**Request Body (LogicRuleUpdate):**
+```json
+{
+  "name": "Updated Name",
+  "conditions": [...],
+  "actions": [...],
+  "priority": 90
+}
+```
+
+**Response 200 (LogicRuleResponse):** Siehe GET /logic/rules Response-Objekt.
+
+**Error Responses:**
+| Code | Reason |
+|------|--------|
+| 400 | Validation Error |
+| 404 | Rule not found |
+
+---
+
+### 5.5 DELETE /logic/rules/{rule_id}
+
+Rule löschen.
+
+**Auth:** Operator Required
+
+**Response 200 (LogicRuleResponse):** Gibt die gelöschte Rule zurück.
+
+**Error Responses:**
+| Code | Reason |
+|------|--------|
+| 404 | Rule not found |
+
+---
+
+### 5.6 POST /logic/rules/{rule_id}/toggle
+
+Rule aktivieren/deaktivieren.
+
+**Auth:** Operator Required
+
+**Request Body (RuleToggleRequest):**
+```json
+{
+  "enabled": true,
+  "reason": "Maintenance complete"
+}
+```
+
+**Response 200 (RuleToggleResponse):**
+```json
+{
+  "success": true,
+  "message": "Rule 'High pH Alert' enabled",
+  "rule_id": "uuid",
+  "rule_name": "High pH Alert",
+  "enabled": true,
+  "previous_state": false
+}
+```
+
+---
+
+### 5.7 POST /logic/rules/{rule_id}/test
+
+Rule testen/simulieren ohne Aktionen auszuführen.
+
+**Auth:** Operator Required
+
+**Request Body (RuleTestRequest):**
+```json
+{
+  "mock_sensor_values": {"ESP_12AB34CD:34": 7.8},
+  "mock_time": "14:30",
+  "dry_run": true
+}
+```
+
+**Response 200 (RuleTestResponse):**
+```json
+{
+  "success": true,
+  "rule_id": "uuid",
+  "rule_name": "High pH Alert",
+  "would_trigger": true,
+  "condition_results": [
+    {
+      "condition_index": 0,
+      "condition_type": "sensor",
+      "result": true,
+      "details": "ESP_12AB34CD:34 (7.8) > 7.5",
+      "actual_value": 7.8
+    }
+  ],
+  "action_results": [
+    {
+      "action_index": 0,
+      "action_type": "actuator",
+      "would_execute": true,
+      "details": "ESP_AABBCCDD:5 OFF",
+      "dry_run": true
+    }
+  ],
+  "dry_run": true
+}
+```
+
+---
+
+### 5.8 GET /logic/execution_history
+
+Execution History abfragen (nicht rule-scoped).
+
+**Auth:** JWT Required
+
+**Query-Parameter:**
+
+| Parameter | Typ | Default | Beschreibung |
+|-----------|-----|---------|--------------|
+| `rule_id` | UUID | - | Filter nach Rule |
+| `success` | bool | - | Filter nach Erfolg |
+| `start_time` | datetime | -7 Tage | Start-Zeitraum (ISO) |
+| `end_time` | datetime | jetzt | End-Zeitraum (ISO) |
+| `limit` | int | 50 | Max Ergebnisse (1-100) |
+
+**Response 200 (ExecutionHistoryResponse):**
+```json
+{
+  "success": true,
+  "entries": [
+    {
+      "id": "uuid",
+      "rule_id": "uuid",
+      "rule_name": "High pH Alert",
+      "triggered_at": "2026-01-01T12:00:00Z",
+      "trigger_reason": "ESP_12AB34CD:34 (7.8) > 7.5",
+      "actions_executed": [
+        {"type": "actuator", "esp_id": "ESP_AABBCCDD", "gpio": 5, "command": "OFF"}
+      ],
+      "success": true,
+      "error_message": null,
+      "execution_time_ms": 45.2
+    }
+  ],
+  "total_count": 150,
+  "success_rate": 0.95
 }
 ```
 
@@ -914,12 +1166,11 @@ Health Check (keine Auth erforderlich).
 ```json
 {
   "status": "healthy",
-  "database": "connected",
-  "mqtt": "connected",
-  "uptime": 86400,
-  "version": "1.0.0"
+  "mqtt_connected": true
 }
 ```
+
+> **Hinweis:** `/health` gibt nur `status` und `mqtt_connected` zurück. Für Details `/health/detailed` nutzen.
 
 ---
 
@@ -984,10 +1235,13 @@ Health Check (keine Auth erforderlich).
 - `EmergencyStopRequest`, `ActuatorHistoryEntry`
 
 ### Logic Schemas (`schemas/logic.py`)
-- `SensorCondition`, `TimeCondition`
+- `SensorCondition`, `TimeCondition`, `HysteresisCondition`, `CompoundCondition`
 - `ActuatorAction`, `NotificationAction`, `DelayAction`
-- `LogicRuleBase`, `LogicRuleUpdate`
-- `RuleTestRequest`, `ExecutionHistoryEntry`
+- `LogicRuleBase`, `LogicRuleCreate`, `LogicRuleUpdate`
+- `LogicRuleResponse`, `LogicRuleListResponse`
+- `RuleToggleRequest`, `RuleToggleResponse`
+- `RuleTestRequest`, `RuleTestResponse`, `ConditionResult`, `ActionResult`
+- `ExecutionHistoryEntry`, `ExecutionHistoryQuery`, `ExecutionHistoryResponse`
 
 ### Debug Schemas (`schemas/debug.py`)
 - `MockESPCreate`, `MockESPUpdate`, `MockESPResponse`
@@ -1039,3 +1293,8 @@ Health Check (keine Auth erforderlich).
 | audit | `audit.py` | 22 |
 | users | `users.py` | 7 |
 | health | `health.py` | 6 |
+| logs | `logs.py` | 1 |
+| websocket | `websocket/realtime.py` | 1 |
+| ai | `ai.py` | PLANNED (God Layer AI) |
+| kaiser | `kaiser.py` | PLANNED (Kaiser Relay Node) |
+| library | `library.py` | PLANNED (OTA Sensor Library) |

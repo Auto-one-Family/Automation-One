@@ -14,35 +14,35 @@ description: Vollständige API-Referenz für God-Kaiser Server Module
 
 ### 1.1 LogicEngine
 
-**Datei:** `src/services/logic_engine.py` (781 Zeilen)
+**Datei:** `src/services/logic_engine.py` (833 Zeilen)
 
 | Methode | Parameter | Return | Beschreibung |
 |---------|-----------|--------|--------------|
 | `start()` | - | `None` | Startet Engine + Scheduler |
 | `stop()` | - | `None` | Stoppt Engine graceful |
-| `evaluate_sensor_data()` | `esp_id: str, gpio: int, value: float, sensor_type: str` | `List[RuleExecution]` | Evaluiert Rules für Sensor-Event |
-| `register_rule()` | `rule: CrossESPLogic` | `bool` | Registriert neue Rule |
-| `unregister_rule()` | `rule_id: int` | `bool` | Entfernt Rule |
-| `get_active_rules()` | - | `List[CrossESPLogic]` | Alle aktiven Rules |
-| `trigger_rule()` | `rule_id: int` | `RuleExecution` | Manueller Rule-Trigger |
+| `evaluate_sensor_data()` | `esp_id: str, gpio: int, value: float, sensor_type: str` | `None` | Evaluiert Rules für Sensor-Event |
+| `evaluate_timer_triggered_rules()` | - | `None` | Evaluiert time_window Rules (periodisch) |
+| `_evaluate_rule()` | `rule, trigger_data, logic_repo` | `None` | Einzelne Rule evaluieren + ausführen |
+| `_check_conditions()` | `conditions, context` | `bool` | Conditions prüfen (modulare Evaluatoren) |
+| `_execute_actions()` | `actions, trigger_data, rule_id, rule_name` | `None` | Actions ausführen (mit WS-Broadcast) |
 
 **Condition Evaluators:**
 
 | Evaluator | Typ | Parameter |
 |-----------|-----|-----------|
-| SensorConditionEvaluator | `sensor_threshold` | `esp_id`, `gpio`, `sensor_type`, `operator`, `value` |
-| TimeConditionEvaluator | `time_window` | `time_start`, `time_end`, `days_of_week` |
-| HysteresisEvaluator | `hysteresis` | `threshold`, `deadband` |
-| CompoundConditionEvaluator | `compound` | `operator` (AND/OR/NOT), `conditions[]` |
+| SensorConditionEvaluator | `sensor` / `sensor_threshold` | `esp_id`, `gpio`, `sensor_type`, `operator`, `value` |
+| TimeConditionEvaluator | `time_window` / `time` | `start_time` (HH:MM), `end_time` (HH:MM), `days_of_week` |
+| HysteresisConditionEvaluator | `hysteresis` | `esp_id`, `gpio`, `sensor_type`, `activate_above`, `deactivate_below`, `activate_below?`, `deactivate_above?` |
+| CompoundConditionEvaluator | `compound` | `logic` (AND/OR), `conditions[]` |
 
 **Action Executors:**
 
 | Executor | Typ | Parameter |
 |----------|-----|-----------|
-| ActuatorActionExecutor | `actuator_command` | `esp_id`, `gpio`, `command`, `value`, `duration` |
-| DelayActionExecutor | `delay` | `delay_seconds` |
-| NotificationActionExecutor | `notification` | `message`, `severity` |
-| SequenceActionExecutor | `sequence` | `steps[]` |
+| ActuatorActionExecutor | `actuator` / `actuator_command` | `esp_id`, `gpio`, `command`, `value?`, `duration?` |
+| DelayActionExecutor | `delay` | `seconds` (1-3600) |
+| NotificationActionExecutor | `notification` | `channel`, `target`, `message_template` |
+| SequenceActionExecutor | `sequence` | `description?`, `abort_on_failure?`, `steps[]` (name, action, delay_seconds?) |
 
 ---
 
@@ -321,14 +321,14 @@ class ValidationResult:
 
 | Method | Path | Auth | Request | Response |
 |--------|------|------|---------|----------|
-| GET | `/rules` | Active | - | `List[LogicRule]` |
-| GET | `/rules/{rule_id}` | Active | - | `LogicRule` |
-| POST | `/rules` | Operator | `LogicRuleCreate` | `LogicRule` |
-| PUT | `/rules/{rule_id}` | Operator | `LogicRuleUpdate` | `LogicRule` |
-| DELETE | `/rules/{rule_id}` | Operator | - | `SuccessResponse` |
-| POST | `/rules/{rule_id}/enable` | Operator | - | `LogicRule` |
-| POST | `/rules/{rule_id}/disable` | Operator | - | `LogicRule` |
-| POST | `/rules/{rule_id}/test` | Operator | `TestContext` | `TestResult` |
+| GET | `/rules` | Active | - | `LogicRuleListResponse` |
+| GET | `/rules/{rule_id}` | Active | - | `LogicRuleResponse` |
+| POST | `/rules` | Operator | `LogicRuleCreate` | `LogicRuleResponse` |
+| PUT | `/rules/{rule_id}` | Operator | `LogicRuleUpdate` | `LogicRuleResponse` |
+| DELETE | `/rules/{rule_id}` | Operator | - | `LogicRuleResponse` |
+| POST | `/rules/{rule_id}/toggle` | Operator | `RuleToggleRequest` | `RuleToggleResponse` |
+| POST | `/rules/{rule_id}/test` | Operator | `RuleTestRequest` | `RuleTestResponse` |
+| GET | `/execution_history` | Active | - | `ExecutionHistoryResponse` |
 
 ### 3.6 Health Router (`/v1/health`) - 6 Endpoints
 
@@ -421,8 +421,8 @@ Wichtige Endpoints:
 
 | Model | Tabelle | Felder |
 |-------|---------|--------|
-| **CrossESPLogic** | `cross_esp_logic` | `id (PK)`, `rule_name`, `description`, `enabled`, `priority`, `conditions (JSON)`, `actions (JSON)`, `cooldown_seconds`, `time_start`, `time_end`, `max_executions_per_hour` |
-| **LogicExecutionHistory** | `logic_execution_history` | `id (PK)`, `rule_id (FK)`, `trigger_sensor_id`, `trigger_value`, `actions_executed (JSON)`, `success`, `error_message`, `executed_at` |
+| **CrossESPLogic** | `cross_esp_logic` | `id (PK UUID)`, `rule_name (UNIQUE)`, `description`, `enabled`, `trigger_conditions (JSON)`, `logic_operator`, `actions (JSON)`, `priority`, `cooldown_seconds`, `max_executions_per_hour`, `last_triggered`, `metadata (JSON)` |
+| **LogicExecutionHistory** | `logic_execution_history` | `id (PK UUID)`, `logic_rule_id (FK)`, `trigger_data (JSON)`, `actions_executed (JSON)`, `success`, `error_message`, `execution_time_ms`, `timestamp`, `metadata (JSON)` |
 
 ### 4.3 System Models
 

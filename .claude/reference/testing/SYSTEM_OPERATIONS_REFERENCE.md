@@ -1,9 +1,10 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 2.14 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-26
+> **Version:** 2.15 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-28
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
 > **Änderungen 2.13:** Auth-Token-Pfad korrigiert (response.tokens.access_token statt response.access_token)
 > **Änderungen 2.12:** E2E Sensor-Test-Script (scripts/test_e2e_sensor_publish.py), ENVIRONMENT Bugfix (test→testing in CI/Test Compose)
+> **Änderungen 2.15:** Wokwi 178 Szenarien (15 Kategorien), Backend 19 Router (3 PLANNED), Frontend 137 .vue (13 Primitives), Logic sort fix
 > **Änderungen 2.11:** Wokwi: make wokwi-test-all (173), make wokwi-test-error-injection (10), wokwi-seed fix (lokal statt docker exec)
 > **Änderungen 2.10:** Serena MCP-Server Pfade in §9, .mcp.json Pfad ergänzt
 > **Änderungen 2.9:** Health-Response korrigiert (Code-Abgleich), Provisioning Portal für Real-Hardware (§6.1), `tasklist` → Docker-Alternative, sqlite3 → PostgreSQL in §6.2/6.3, PlatformIO Git-Bash-Hinweis, Auth-Header ergänzt
@@ -1170,7 +1171,7 @@ make wokwi-build-esp03  # ESP_00000003
 make wokwi-seed
 # Nutzt lokales .venv/Scripts/python.exe (Script ist nicht im Container gemountet)
 
-# Alle verfügbaren Szenarien auflisten (173 total, 14 Kategorien)
+# Alle verfügbaren Szenarien auflisten (178 total, 15 Kategorien)
 make wokwi-list
 
 # Schnelltest (3 Szenarien: boot_full, boot_safe_mode, sensor_heartbeat)
@@ -1179,7 +1180,7 @@ make wokwi-test-quick
 # Alle CI core-Szenarien lokal (22 passive Szenarien, ~30 Minuten)
 make wokwi-test-full
 
-# ALLE 173 Szenarien (Nightly-Equivalent, erfordert Mosquitto)
+# ALLE 178 Szenarien (Nightly-Equivalent, erfordert Mosquitto)
 make wokwi-test-all
 
 # 10 Error-Injection Szenarien (erfordert Mosquitto + mosquitto_pub)
