@@ -11,7 +11,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SequenceStatus(str, Enum):
@@ -126,8 +126,7 @@ class SequenceProgressSchema(BaseModel):
     error: Optional[str]
     error_code: Optional[int]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SequenceListResponse(BaseModel):

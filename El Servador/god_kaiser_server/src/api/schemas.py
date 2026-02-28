@@ -9,7 +9,7 @@ Provides type-safe, validated models for:
 
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SensorProcessRequest(BaseModel):
@@ -67,17 +67,15 @@ class SensorProcessRequest(BaseModel):
     @classmethod
     def validate_sensor_type(cls, v: str) -> str:
         """Validate sensor type format."""
-        # Lowercase and strip whitespace
         v = v.lower().strip()
 
-        # Check for invalid characters
         if not v.replace("_", "").replace("-", "").isalnum():
             raise ValueError("Sensor type must be alphanumeric (with - or _)")
 
         return v
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "esp_id": "ESP_12AB34CD",
                 "gpio": 34,
@@ -88,6 +86,7 @@ class SensorProcessRequest(BaseModel):
                 "timestamp": 1735818000,
             }
         }
+    )
 
 
 class SensorProcessResponse(BaseModel):
@@ -132,8 +131,8 @@ class SensorProcessResponse(BaseModel):
         description="Additional processing metadata",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "success": True,
                 "processed_value": 7.2,
@@ -143,6 +142,7 @@ class SensorProcessResponse(BaseModel):
                 "metadata": {"voltage": 1.75, "calibrated": True},
             }
         }
+    )
 
 
 class ErrorResponse(BaseModel):
@@ -163,14 +163,15 @@ class ErrorResponse(BaseModel):
         description="Error timestamp (Unix seconds)",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "error": "SENSOR_NOT_FOUND",
                 "detail": "No processor found for sensor type 'invalid_sensor'",
                 "timestamp": 1735818000,
             }
         }
+    )
 
 
 # =============================================================================
@@ -251,8 +252,8 @@ class SensorCalibrateRequest(BaseModel):
         """Normalize sensor type."""
         return v.lower().strip()
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "esp_id": "ESP_12AB34CD",
                 "gpio": 34,
@@ -265,6 +266,7 @@ class SensorCalibrateRequest(BaseModel):
                 "save_to_config": True,
             }
         }
+    )
 
 
 class SensorCalibrateResponse(BaseModel):
@@ -300,8 +302,8 @@ class SensorCalibrateResponse(BaseModel):
         description="Additional information or warnings",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "success": True,
                 "calibration": {
@@ -316,3 +318,4 @@ class SensorCalibrateResponse(BaseModel):
                 "message": "Calibration saved. Apply temperature compensation for best accuracy.",
             }
         }
+    )
