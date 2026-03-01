@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from ..core.logging_config import get_logger
 from ..core.metrics import increment_logic_error, increment_safety_trigger
-from ..db.repositories import LogicRepository
+from ..db.repositories import LogicRepository, ESPRepository, SensorRepository
 from ..db.session import get_session
 from ..websocket.manager import WebSocketManager
 from .actuator_service import ActuatorService
@@ -306,13 +306,20 @@ class LogicEngine:
 
             # Evaluate conditions
             # For sensor-triggered rules, prepare context with sensor_data
+            # Pre-load cross-sensor values for multi-sensor rules
+            sensor_values = await self._load_cross_sensor_values(
+                rule.trigger_conditions, trigger_data, logic_repo.session
+            )
             context = {
                 "sensor_data": trigger_data,
+                "sensor_values": sensor_values,
                 "current_time": datetime.now(),
                 "rule_id": str(rule.id),  # For hysteresis state management
                 "condition_index": 0,  # For hysteresis state management
             }
-            conditions_met = await self._check_conditions(rule.trigger_conditions, context)
+            conditions_met = await self._check_conditions(
+                rule.trigger_conditions, context, logic_operator=rule.logic_operator
+            )
 
             if not conditions_met:
                 logger.debug(
@@ -364,7 +371,9 @@ class LogicEngine:
             except Exception as log_err:
                 logger.error(f"Failed to log execution error: {log_err}")
 
-    async def _check_conditions(self, conditions, sensor_data: dict) -> bool:
+    async def _check_conditions(
+        self, conditions, sensor_data: dict, logic_operator: str = "AND"
+    ) -> bool:
         """
         Check if conditions are met using modular evaluators.
 
@@ -376,6 +385,7 @@ class LogicEngine:
         Args:
             conditions: Condition dict, compound dict, or list of condition dicts
             sensor_data: Sensor data to check against (or context dict)
+            logic_operator: Logic operator for combining multiple conditions ("AND" or "OR")
 
         Returns:
             True if conditions are met, False otherwise
@@ -388,8 +398,9 @@ class LogicEngine:
                 # Single condition in list
                 conditions = conditions[0]
             else:
-                # Multiple conditions — wrap as AND compound
-                conditions = {"logic": "AND", "conditions": conditions}
+                # Multiple conditions — wrap as compound using rule's logic_operator
+                operator = logic_operator.upper() if logic_operator else "AND"
+                conditions = {"logic": operator, "conditions": conditions}
 
         # Use modular evaluators if available
         if self.condition_evaluators:
@@ -751,6 +762,102 @@ class LogicEngine:
 
         else:
             logger.warning(f"Unknown action type: {action_type}")
+
+    async def _load_cross_sensor_values(
+        self, trigger_conditions, trigger_data: dict, session
+    ) -> dict:
+        """
+        Pre-load latest sensor values for cross-sensor conditions.
+
+        When a rule references multiple sensors (e.g., AND: temp > 25 AND moisture < 40),
+        only one sensor triggers the evaluation. For other sensors, we need to look up
+        the latest value from the database.
+
+        Args:
+            trigger_conditions: Rule's trigger_conditions (list or dict)
+            trigger_data: Current trigger sensor data (esp_id, gpio, sensor_type, value)
+            session: SQLAlchemy async session
+
+        Returns:
+            Dict mapping "ESP_ID:GPIO" to {"value": float, "sensor_type": str}
+        """
+        sensor_values = {}
+
+        # Include trigger data in sensor_values for consistency
+        trigger_key = f"{trigger_data.get('esp_id')}:{trigger_data.get('gpio')}"
+        sensor_values[trigger_key] = {
+            "value": trigger_data.get("value"),
+            "sensor_type": trigger_data.get("sensor_type"),
+        }
+
+        # Extract all sensor conditions from trigger_conditions
+        conditions_to_check = []
+        if isinstance(trigger_conditions, list):
+            conditions_to_check = trigger_conditions
+        elif isinstance(trigger_conditions, dict):
+            if trigger_conditions.get("type") in ("sensor_threshold", "sensor"):
+                conditions_to_check = [trigger_conditions]
+            elif trigger_conditions.get("logic") in ("AND", "OR"):
+                conditions_to_check = trigger_conditions.get("conditions", [])
+            elif trigger_conditions.get("type") == "compound":
+                conditions_to_check = trigger_conditions.get("conditions", [])
+
+        # Find conditions that reference different sensors than the trigger
+        cross_sensor_keys = []
+        for cond in conditions_to_check:
+            if cond.get("type") not in ("sensor_threshold", "sensor"):
+                continue
+            cond_esp = cond.get("esp_id")
+            cond_gpio = cond.get("gpio")
+            if cond_esp is None or cond_gpio is None:
+                continue
+            sensor_key = f"{cond_esp}:{cond_gpio}"
+            if sensor_key != trigger_key and sensor_key not in sensor_values:
+                cross_sensor_keys.append(
+                    (cond_esp, int(cond_gpio), cond.get("sensor_type"))
+                )
+
+        if not cross_sensor_keys:
+            return sensor_values
+
+        # Look up latest values from DB
+        try:
+            esp_repo = ESPRepository(session)
+            sensor_repo = SensorRepository(session)
+
+            for esp_id_str, gpio, sensor_type in cross_sensor_keys:
+                sensor_key = f"{esp_id_str}:{gpio}"
+                # Look up ESP UUID from device_id
+                esp_device = await esp_repo.get_by_device_id(esp_id_str)
+                if not esp_device:
+                    logger.debug(f"Cross-sensor lookup: ESP {esp_id_str} not found")
+                    continue
+
+                # Get latest sensor reading
+                reading = await sensor_repo.get_latest_reading(
+                    esp_id=esp_device.id, gpio=gpio, sensor_type=sensor_type
+                )
+                if reading:
+                    display_value = (
+                        reading.processed_value
+                        if reading.processed_value is not None
+                        else reading.raw_value
+                    )
+                    sensor_values[sensor_key] = {
+                        "value": display_value,
+                        "sensor_type": reading.sensor_type,
+                    }
+                    logger.debug(
+                        f"Cross-sensor loaded: {sensor_key} = {display_value} "
+                        f"({reading.sensor_type})"
+                    )
+                else:
+                    logger.debug(f"Cross-sensor lookup: no data for {sensor_key}")
+
+        except Exception as e:
+            logger.warning(f"Failed to load cross-sensor values: {e}")
+
+        return sensor_values
 
     def _extract_target_esp_ids(self, actions: list) -> List[str]:
         """
