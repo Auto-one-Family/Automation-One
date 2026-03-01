@@ -102,7 +102,7 @@ watch([selectedEspId, selectedGpio, selectedSensorType], () => {
 const groupedReadings = computed(() => {
   const groups = new Map<string, { unit: string; readings: SensorReading[] }>()
   for (const r of readings.value) {
-    const key = r.sensor_type || r.unit || 'unknown'
+    const key = (r as SensorReading & { sensor_type?: string }).sensor_type || r.unit || 'unknown'
     if (!groups.has(key)) {
       groups.set(key, { unit: r.unit ?? '', readings: [] })
     }
@@ -351,7 +351,7 @@ function exportCsv() {
         </button>
       </div>
       <div class="sensor-history__chart" style="height: 400px">
-        <Line :data="chartData" :options="chartOptions" />
+        <Line :data="chartData" :options="(chartOptions as any)" />
       </div>
     </div>
   </div>

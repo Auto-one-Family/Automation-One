@@ -37,7 +37,7 @@ import {
   Zap,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
-import type { LogicRule, SensorCondition, TimeCondition, ActuatorAction, NotificationAction, DelayAction, LogicCondition, LogicAction } from '@/types/logic'
+import type { LogicRule, SensorCondition, TimeCondition, HysteresisCondition, CompoundCondition, ActuatorAction, NotificationAction, DelayAction, LogicCondition, LogicAction } from '@/types/logic'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
@@ -340,16 +340,17 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
 
   // Create condition nodes (left column, x=50)
   const conditionIds: string[] = []
+  let nodeRow = 0
   rule.conditions.forEach((cond, i) => {
     const id = `cond-${i}`
-    conditionIds.push(id)
 
     if (cond.type === 'sensor' || cond.type === 'sensor_threshold') {
+      conditionIds.push(id)
       const sc = cond as SensorCondition
       resultNodes.push({
         id,
         type: 'sensor',
-        position: { x: 50, y: 60 + i * ROW_SPACING },
+        position: { x: 50, y: 60 + nodeRow * ROW_SPACING },
         data: {
           espId: sc.esp_id,
           gpio: sc.gpio,
@@ -360,50 +361,100 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
           max: sc.max,
         },
       })
+      nodeRow++
     } else if (cond.type === 'time_window' || cond.type === 'time') {
+      conditionIds.push(id)
       const tc = cond as TimeCondition
       resultNodes.push({
         id,
         type: 'time',
-        position: { x: 50, y: 60 + i * ROW_SPACING },
+        position: { x: 50, y: 60 + nodeRow * ROW_SPACING },
         data: {
           startHour: tc.start_hour,
           endHour: tc.end_hour,
           daysOfWeek: tc.days_of_week || [],
         },
       })
+      nodeRow++
+    } else if (cond.type === 'hysteresis') {
+      conditionIds.push(id)
+      const hc = cond as HysteresisCondition
+      resultNodes.push({
+        id,
+        type: 'sensor',
+        position: { x: 50, y: 60 + nodeRow * ROW_SPACING },
+        data: {
+          espId: hc.esp_id,
+          gpio: hc.gpio,
+          sensorType: hc.sensor_type || 'hysteresis',
+          operator: 'hysteresis',
+          value: hc.activate_above ?? hc.activate_below ?? 0,
+          isHysteresis: true,
+          activateAbove: hc.activate_above,
+          deactivateBelow: hc.deactivate_below,
+          activateBelow: hc.activate_below,
+          deactivateAbove: hc.deactivate_above,
+        },
+      })
+      nodeRow++
+    } else if (cond.type === 'compound') {
+      // Flatten compound conditions: render sub-conditions as individual nodes
+      // Parent compound ID is NOT added — only sub-condition nodes get IDs
+      const cc = cond as CompoundCondition
+      cc.conditions.forEach((subCond, j) => {
+        if (subCond.type === 'sensor' || subCond.type === 'sensor_threshold') {
+          const sc = subCond as SensorCondition
+          const subId = `cond-${i}-sub-${j}`
+          conditionIds.push(subId)
+          resultNodes.push({
+            id: subId,
+            type: 'sensor',
+            position: { x: 50, y: 60 + nodeRow * ROW_SPACING },
+            data: {
+              espId: sc.esp_id,
+              gpio: sc.gpio,
+              sensorType: sc.sensor_type,
+              operator: sc.operator,
+              value: sc.value,
+              min: sc.min,
+              max: sc.max,
+            },
+          })
+          nodeRow++
+        }
+      })
     }
   })
 
-  // Create logic gate if multiple conditions
+  // Always create logic gate for consistent graph structure
   let sourceIds = conditionIds
-  if (rule.conditions.length > 1) {
-    const logicId = 'logic-0'
-    const avgY = (rule.conditions.length - 1) * ROW_SPACING / 2 + 60
-    resultNodes.push({
-      id: logicId,
-      type: 'logic',
-      position: { x: 50 + COLUMN_SPACING, y: avgY },
-      data: { operator: rule.logic_operator },
-    })
+  const logicId = 'logic-0'
+  const avgY = conditionIds.length > 0
+    ? (conditionIds.length - 1) * ROW_SPACING / 2 + 60
+    : 60
+  resultNodes.push({
+    id: logicId,
+    type: 'logic',
+    position: { x: 50 + COLUMN_SPACING, y: avgY },
+    data: { operator: rule.logic_operator },
+  })
 
-    // Connect conditions → logic gate
-    conditionIds.forEach((condId) => {
-      resultEdges.push({
-        id: `e-${condId}-${logicId}`,
-        source: condId,
-        target: logicId,
-        animated: true,
-        type: 'smoothstep',
-        markerEnd: MarkerType.ArrowClosed,
-      })
+  // Connect conditions → logic gate
+  conditionIds.forEach((condId) => {
+    resultEdges.push({
+      id: `e-${condId}-${logicId}`,
+      source: condId,
+      target: logicId,
+      animated: true,
+      type: 'smoothstep',
+      markerEnd: MarkerType.ArrowClosed,
     })
+  })
 
-    sourceIds = [logicId]
-  }
+  sourceIds = [logicId]
 
   // Create action nodes (right column)
-  const actionX = rule.conditions.length > 1 ? 50 + COLUMN_SPACING * 2 : 50 + COLUMN_SPACING
+  const actionX = 50 + COLUMN_SPACING * 2
   rule.actions.forEach((action, i) => {
     const id = `action-${i}`
 
@@ -417,8 +468,8 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
           espId: aa.esp_id,
           gpio: aa.gpio,
           command: aa.command,
-          pwmValue: aa.value,
-          duration: aa.duration,
+          pwmValue: aa.value !== undefined ? Math.round(aa.value * 100) : undefined,
+          duration: aa.duration ?? aa.duration_seconds,
         },
       })
     } else if (action.type === 'notification') {
@@ -460,8 +511,8 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
   for (const node of resultNodes) {
     const dims = NODE_INIT_DIMS[node.type || '']
     if (dims) {
-      ;(node as Record<string, unknown>).width = dims.width
-      ;(node as Record<string, unknown>).height = dims.height
+      ;(node as unknown as Record<string, unknown>).width = dims.width
+      ;(node as unknown as Record<string, unknown>).height = dims.height
     }
   }
 
@@ -546,14 +597,21 @@ watch(
   () => props.rule,
   (newRule) => {
     if (newRule) {
-      const graph = ruleToGraph(newRule)
-      // Use setNodes/setEdges (NOT nodes.value =) to go through parseNode pipeline
-      // parseNode initializes dimensions: { width: 0, height: 0 } which prevents
-      // clampNodeExtent crash in Vue Flow v1.48.2
-      setNodes(graph.nodes)
-      setEdges(graph.edges)
-      // Defer fitView until Vue Flow has measured real node dimensions
-      pendingFitView = true
+      try {
+        const graph = ruleToGraph(newRule)
+        // Use setNodes/setEdges (NOT nodes.value =) to go through parseNode pipeline
+        // parseNode initializes dimensions: { width: 0, height: 0 } which prevents
+        // clampNodeExtent crash in Vue Flow v1.48.2
+        setNodes(graph.nodes)
+        setEdges(graph.edges)
+        // Defer fitView until Vue Flow has measured real node dimensions
+        pendingFitView = true
+      } catch (err) {
+        console.error('[RuleFlowEditor] Failed to convert rule to graph:', err)
+        toast.error('Regel konnte nicht geladen werden')
+        nodes.value = []
+        edges.value = []
+      }
     } else {
       nodes.value = []
       edges.value = []

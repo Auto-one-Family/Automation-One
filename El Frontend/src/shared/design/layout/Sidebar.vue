@@ -17,7 +17,6 @@ import {
   Wrench,
   UserCog,
   Activity,
-  TrendingUp,
   SlidersHorizontal,
 } from 'lucide-vue-next'
 
@@ -74,7 +73,7 @@ function handleNavClick() {
 
       <RouterLink
         to="/hardware"
-        :class="['sidebar__link', (isActive('/hardware') || isActive('/monitor') || isActive('/custom-dashboard')) && 'sidebar__link--active']"
+        :class="['sidebar__link', (isActive('/hardware') || isActive('/monitor') || isActive('/editor')) && 'sidebar__link--active']"
         @click="handleNavClick"
       >
         <div class="sidebar__link-indicator" />
@@ -102,15 +101,6 @@ function handleNavClick() {
         <span>Komponenten</span>
       </RouterLink>
 
-      <RouterLink
-        to="/sensor-history"
-        :class="['sidebar__link', isActive('/sensor-history') && 'sidebar__link--active']"
-        @click="handleNavClick"
-      >
-        <div class="sidebar__link-indicator" />
-        <TrendingUp class="sidebar__link-icon" />
-        <span>Zeitreihen</span>
-      </RouterLink>
 
       <!-- Admin Section -->
       <template v-if="authStore.isAdmin">

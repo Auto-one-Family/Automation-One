@@ -71,10 +71,14 @@ const pendingAndUnassignedCount = computed(() =>
   espStore.pendingDevices.length + espStore.unassignedDevices.length
 )
 
-/** Is user on hardware or monitor route? */
+/** Route detection for breadcrumb display */
 const isHardwareRoute = computed(() => route.path.startsWith('/hardware'))
 const isMonitorRoute = computed(() => route.path.startsWith('/monitor'))
-const isRouteBasedView = computed(() => isHardwareRoute.value || isMonitorRoute.value)
+const isEditorRoute = computed(() => route.path.startsWith('/editor'))
+const isLogicRoute = computed(() => route.path.startsWith('/logic'))
+const isRouteBasedView = computed(() =>
+  isHardwareRoute.value || isMonitorRoute.value || isEditorRoute.value || isLogicRoute.value
+)
 
 /** Route-based breadcrumb segments */
 const routeBreadcrumbs = computed(() => {
@@ -95,10 +99,33 @@ const routeBreadcrumbs = computed(() => {
       crumbs.push({ label: deviceName, current: true })
     }
   } else if (isMonitorRoute.value) {
+    const hasSensor = !!route.params.sensorId
     crumbs.push({ label: 'Monitor', to: '/monitor', current: !route.params.zoneId })
     if (route.params.zoneId) {
       const zoneName = dashStore.breadcrumb.zoneName || (route.params.zoneId as string)
-      crumbs.push({ label: zoneName, current: true })
+      crumbs.push({
+        label: zoneName,
+        to: `/monitor/${route.params.zoneId}`,
+        current: !hasSensor,
+      })
+    }
+    if (hasSensor) {
+      const sensorName = dashStore.breadcrumb.sensorName || (route.params.sensorId as string)
+      crumbs.push({ label: sensorName, current: true })
+    }
+  } else if (isEditorRoute.value) {
+    const hasDashboard = !!route.params.dashboardId
+    crumbs.push({ label: 'Editor', to: '/editor', current: !hasDashboard })
+    if (hasDashboard) {
+      const dashboardName = dashStore.breadcrumb.dashboardName || (route.params.dashboardId as string)
+      crumbs.push({ label: dashboardName, current: true })
+    }
+  } else if (isLogicRoute.value) {
+    const hasRule = !!route.params.ruleId
+    crumbs.push({ label: 'Automatisierung', to: '/logic', current: !hasRule })
+    if (hasRule) {
+      const ruleName = dashStore.breadcrumb.ruleName || (route.params.ruleId as string)
+      crumbs.push({ label: ruleName, current: true })
     }
   }
 
@@ -936,6 +963,12 @@ async function handleLogout() {
   position: fixed;
   inset: 0;
   z-index: calc(var(--z-dropdown) - 1);
+}
+
+/* ── SVG pointer-events fix: prevent SVG icons from intercepting clicks on parent buttons ── */
+.header__type-btn svg,
+.header__action-btn svg {
+  pointer-events: none;
 }
 
 /* ═══ REDUCED MOTION ════════════════════════════════════════════════════ */

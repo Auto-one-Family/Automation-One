@@ -6,7 +6,7 @@
  * used throughout the application. Triggered by an info icon
  * in the TopBar. Uses CSS design tokens for all colors.
  */
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { HelpCircle } from 'lucide-vue-next'
 
 const isOpen = ref(false)
@@ -18,6 +18,16 @@ function toggle() {
 function close() {
   isOpen.value = false
 }
+
+function handleEsc(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && isOpen.value) {
+    close()
+    e.stopPropagation()
+  }
+}
+
+onMounted(() => document.addEventListener('keydown', handleEsc))
+onUnmounted(() => document.removeEventListener('keydown', handleEsc))
 
 const legendItems = [
   {

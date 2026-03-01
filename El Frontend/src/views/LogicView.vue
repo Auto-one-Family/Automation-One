@@ -22,6 +22,7 @@
  */
 
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Plus,
   Save,
@@ -43,6 +44,7 @@ import {
 } from 'lucide-vue-next'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { useUiStore } from '@/shared/stores'
+import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/logger'
 import type { LogicRule } from '@/types/logic'
@@ -54,7 +56,10 @@ import RuleTemplateCard from '@/components/rules/RuleTemplateCard.vue'
 import { ruleTemplates, type RuleTemplate } from '@/config/rule-templates'
 
 const logger = createLogger('LogicView')
+const route = useRoute()
+const router = useRouter()
 const logicStore = useLogicStore()
+const dashStore = useDashboardStore()
 const uiStore = useUiStore()
 const toast = useToast()
 
@@ -94,13 +99,24 @@ const toolbarTitle = computed(() => {
 
 // ======================== LIFECYCLE ========================
 
-onMounted(() => {
-  logicStore.fetchRules()
+onMounted(async () => {
+  await logicStore.fetchRules()
   logicStore.subscribeToWebSocket()
+
+  // Deep-link: open rule from URL param /logic/:ruleId
+  const ruleIdFromUrl = route.params.ruleId as string | undefined
+  if (ruleIdFromUrl && logicStore.getRuleById(ruleIdFromUrl)) {
+    selectedRuleId.value = ruleIdFromUrl
+    const rule = logicStore.getRuleById(ruleIdFromUrl)
+    if (rule) {
+      dashStore.breadcrumb.ruleName = rule.name
+    }
+  }
 })
 
 onUnmounted(() => {
   logicStore.unsubscribeFromWebSocket()
+  dashStore.breadcrumb.ruleName = ''
 })
 
 // ======================== RULE MANAGEMENT ========================
@@ -119,6 +135,11 @@ async function selectRule(ruleId: string) {
   isCreatingNew.value = false
   hasUnsavedChanges.value = false
   showRuleDropdown.value = false
+
+  // URL-sync: update URL to /logic/:ruleId
+  const rule = logicStore.getRuleById(ruleId)
+  dashStore.breadcrumb.ruleName = rule?.name ?? ''
+  router.replace({ name: 'logic-rule', params: { ruleId } })
 }
 
 async function startNewRule() {
@@ -138,6 +159,10 @@ async function startNewRule() {
   newRuleDescription.value = ''
   showRuleDropdown.value = false
   editorRef.value?.clearCanvas()
+
+  // URL-sync: reset to /logic
+  dashStore.breadcrumb.ruleName = ''
+  router.replace({ name: 'logic' })
 }
 
 async function useTemplate(template: RuleTemplate) {
@@ -316,6 +341,17 @@ function formatTimestamp(ts: number): string {
   })
 }
 
+function formatRelativeTime(isoString: string): string {
+  const diff = Date.now() - new Date(isoString).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'gerade eben'
+  if (mins < 60) return `vor ${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `vor ${hours}h`
+  const days = Math.floor(hours / 24)
+  return `vor ${days}d`
+}
+
 // Close dropdown on outside click
 function onClickOutsideDropdown(event: MouseEvent) {
   const target = event.target as HTMLElement
@@ -383,6 +419,12 @@ onUnmounted(() => {
                     :class="rule.enabled ? 'rule-selector__dropdown-dot--enabled' : 'rule-selector__dropdown-dot--disabled'"
                   />
                   <span class="rule-selector__dropdown-name">{{ rule.name }}</span>
+                  <span v-if="rule.execution_count" class="rule-selector__dropdown-count">
+                    {{ rule.execution_count }}x
+                  </span>
+                  <span v-if="rule.last_triggered" class="rule-selector__dropdown-time">
+                    {{ formatRelativeTime(rule.last_triggered) }}
+                  </span>
                   <span v-if="logicStore.isRuleActive(rule.id)" class="rule-selector__dropdown-flash">
                     LIVE
                   </span>
@@ -888,6 +930,21 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 
+.rule-selector__dropdown-count {
+  font-size: 0.625rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.rule-selector__dropdown-time {
+  font-size: 0.5625rem;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
 .rule-selector__dropdown-flash {
   font-size: 0.5625rem;
   font-weight: 700;
@@ -1075,10 +1132,12 @@ onUnmounted(() => {
 .rules-empty {
   flex: 1;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   position: relative;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 2rem 0;
 }
 
 /* Animated background */
@@ -1120,7 +1179,7 @@ onUnmounted(() => {
 
 .rules-empty__content {
   text-align: center;
-  max-width: 520px;
+  max-width: 740px;
   padding: 2rem;
   position: relative;
   z-index: 1;

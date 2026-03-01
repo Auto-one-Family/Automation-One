@@ -17,14 +17,14 @@ const route = useRoute()
 const tabs = [
   { path: '/hardware', label: 'Übersicht', icon: LayoutDashboard },
   { path: '/monitor', label: 'Monitor', icon: Activity },
-  { path: '/custom-dashboard', label: 'Editor', icon: PenTool },
+  { path: '/editor', label: 'Editor', icon: PenTool },
 ] as const
 
 const activeTab = computed(() => {
   const path = route.path
   if (path.startsWith('/hardware')) return '/hardware'
   if (path.startsWith('/monitor')) return '/monitor'
-  if (path.startsWith('/custom-dashboard')) return '/custom-dashboard'
+  if (path.startsWith('/editor')) return '/editor'
   return '/hardware'
 })
 </script>

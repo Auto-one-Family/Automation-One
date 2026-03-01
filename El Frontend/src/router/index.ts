@@ -67,15 +67,32 @@ const router = createRouter({
           component: () => import('@/views/MonitorView.vue'),
           meta: { title: 'Monitor' },
         },
+        {
+          path: 'monitor/:zoneId/sensor/:sensorId',
+          name: 'monitor-sensor',
+          component: () => import('@/views/MonitorView.vue'),
+          meta: { title: 'Monitor' },
+        },
 
         // ═══════════════════════════════════════════════════════════════════
-        // CUSTOM DASHBOARD — Widget Builder (/custom-dashboard)
+        // EDITOR — Dashboard Widget Builder (/editor)
         // ═══════════════════════════════════════════════════════════════════
         {
-          path: 'custom-dashboard',
-          name: 'custom-dashboard',
+          path: 'editor',
+          name: 'editor',
           component: () => import('@/views/CustomDashboardView.vue'),
-          meta: { title: 'Dashboard' },
+          meta: { title: 'Editor' },
+        },
+        {
+          path: 'editor/:dashboardId',
+          name: 'editor-dashboard',
+          component: () => import('@/views/CustomDashboardView.vue'),
+          meta: { title: 'Editor' },
+        },
+        // DEPRECATED 2026-03-01: /custom-dashboard → /editor
+        {
+          path: 'custom-dashboard',
+          redirect: '/editor',
         },
 
         // DEPRECATED 2026-02-23: DashboardView-Legacy → Hardware
@@ -183,6 +200,12 @@ const router = createRouter({
           meta: { title: 'Automatisierung' },
         },
         {
+          path: 'logic/:ruleId',
+          name: 'logic-rule',
+          component: () => import('@/views/LogicView.vue'),
+          meta: { title: 'Automatisierung' },
+        },
+        {
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/SettingsView.vue'),
@@ -194,11 +217,11 @@ const router = createRouter({
           component: () => import('@/views/CalibrationView.vue'),
           meta: { requiresAdmin: true, title: 'Kalibrierung' },
         },
+        // DEPRECATED 2026-03-01: SensorHistoryView → Monitor (integriert in Monitor L3 SlideOver)
         {
           path: 'sensor-history',
           name: 'sensor-history',
-          component: () => import('@/views/SensorHistoryView.vue'),
-          meta: { title: 'Sensor-Zeitreihen' },
+          redirect: '/monitor',
         },
       ],
     },

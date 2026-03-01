@@ -18,6 +18,10 @@ import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { AccordionSection } from '@/shared/design/primitives'
 import type { MockActuator } from '@/types'
+import DeviceMetadataSection from '@/components/devices/DeviceMetadataSection.vue'
+import LinkedRulesSection from '@/components/devices/LinkedRulesSection.vue'
+import type { DeviceMetadata } from '@/types/device-metadata'
+import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
 
 interface Props {
   espId: string
@@ -55,6 +59,9 @@ const pwmFrequency = ref(5000) // Hz
 const powerLimit = ref(100) // %
 const switchDelay = ref(50) // ms
 
+// Device Metadata
+const metadata = ref<DeviceMetadata>({})
+
 // =============================================================================
 // Computed
 // =============================================================================
@@ -72,6 +79,7 @@ const liveActuator = computed<MockActuator | null>(() => {
 })
 
 const isOn = computed(() => !!liveActuator.value?.state)
+const isEmergencyStopped = computed(() => !!liveActuator.value?.emergency_stopped)
 const currentPwmValue = ref(0)
 
 /** Storage key prefix for accordion persistence */
@@ -102,6 +110,9 @@ onMounted(async () => {
         if ((config as any).subzone_id) {
           subzoneId.value = (config as any).subzone_id
         }
+
+        // Device metadata
+        metadata.value = parseDeviceMetadata((config as any).metadata)
       }
     } catch {
       // No existing config
@@ -235,6 +246,9 @@ async function handleSave() {
         config.switch_delay_ms = switchDelay.value
       }
 
+      // Device metadata
+      config.metadata = mergeDeviceMetadata(null, metadata.value)
+
       await actuatorsApi.createOrUpdate(props.espId, props.gpio, config as any)
       toast.success('Aktor-Konfiguration gespeichert')
     }
@@ -279,11 +293,14 @@ function formatDuration(seconds: number): string {
           <button
             v-if="!isPWM"
             class="actuator-config__toggle-btn"
-            :class="{ 'actuator-config__toggle-btn--on': isOn }"
-            :disabled="commandLoading"
+            :class="{
+              'actuator-config__toggle-btn--on': isOn,
+              'actuator-config__toggle-btn--emergency': isEmergencyStopped,
+            }"
+            :disabled="commandLoading || isEmergencyStopped"
             @click="toggleActuator"
           >
-            {{ commandLoading ? '...' : isOn ? 'Ausschalten' : 'Einschalten' }}
+            {{ isEmergencyStopped ? 'Not-Stopp aktiv' : commandLoading ? '...' : isOn ? 'Ausschalten' : 'Einschalten' }}
           </button>
         </div>
 
@@ -296,6 +313,7 @@ function formatDuration(seconds: number): string {
             :max="powerLimit"
             :value="currentPwmValue"
             class="actuator-config__pwm-slider"
+            :disabled="isEmergencyStopped"
             @change="setPwmValue(Number(($event.target as HTMLInputElement).value))"
           />
           <div class="actuator-config__pwm-labels">
@@ -460,6 +478,10 @@ function formatDuration(seconds: number): string {
             <Zap class="w-3.5 h-3.5" />
             <span>Zustand: {{ isOn ? 'Aktiv' : 'Inaktiv' }}</span>
           </div>
+          <div v-if="isEmergencyStopped" class="actuator-config__safety-row actuator-config__safety-row--alert">
+            <AlertOctagon class="w-3.5 h-3.5" />
+            <span>Not-Stopp aktiv — Steuerung gesperrt</span>
+          </div>
         </div>
 
         <!-- Emergency Stop -->
@@ -471,6 +493,29 @@ function formatDuration(seconds: number): string {
           <AlertOctagon class="w-5 h-5" />
           NOTFALL-STOPP
         </button>
+      </AccordionSection>
+
+      <!-- ═══ DEVICE INFO (Metadata) ═════════════════════════════════════ -->
+      <AccordionSection
+        title="Geräte-Informationen"
+        :storage-key="`${accordionKey}-device-info`"
+      >
+        <DeviceMetadataSection
+          :metadata="metadata"
+          @update:metadata="metadata = $event"
+        />
+      </AccordionSection>
+
+      <!-- ═══ LINKED RULES ════════════════════════════════════════════════ -->
+      <AccordionSection
+        title="Verknüpfte Regeln"
+        :storage-key="`${accordionKey}-linked-rules`"
+      >
+        <LinkedRulesSection
+          :esp-id="espId"
+          :gpio="gpio"
+          device-type="actuator"
+        />
       </AccordionSection>
 
       <!-- ═══ SAVE BUTTON ════════════════════════════════════════════════ -->
@@ -585,6 +630,11 @@ function formatDuration(seconds: number): string {
 }
 
 .actuator-config__toggle-btn--on:hover { background: rgba(239, 68, 68, 0.1); }
+.actuator-config__toggle-btn--emergency {
+  border-color: var(--color-status-alarm);
+  color: var(--color-status-alarm);
+  opacity: 0.7;
+}
 .actuator-config__toggle-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* PWM */
@@ -726,6 +776,11 @@ function formatDuration(seconds: number): string {
   gap: var(--space-2);
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
+}
+
+.actuator-config__safety-row--alert {
+  color: var(--color-status-alarm);
+  font-weight: 600;
 }
 
 .actuator-config__emergency {

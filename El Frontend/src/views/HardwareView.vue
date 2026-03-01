@@ -61,7 +61,7 @@ const dashStore = useDashboardStore()
 const { groupDevicesByZone, handleDeviceDrop, handleRemoveFromZone, generateZoneId, getAvailableZones } = useZoneDragDrop()
 const { register } = useKeyboardShortcuts()
 const dragStore = useDragStateStore()
-const { success: showSuccess, error: showError } = useToast()
+const { success: showSuccess, error: showError, info: showInfo } = useToast()
 
 // =============================================================================
 // Navigation State (route-param based, 2 levels)
@@ -202,7 +202,6 @@ watch(
 // Modal states
 const settingsDevice = ref<ESPDevice | null>(null)
 const isSettingsOpen = ref(false)
-const showCrossEspConnections = ref(true)
 
 // SlideOver states for config panels
 const showSensorConfig = ref(false)
@@ -301,8 +300,15 @@ const zoneGroups = computed(() => {
   return zones
 })
 
-/** Unassigned devices (from store — single source of truth) */
-const unassignedDevices = computed(() => espStore.unassignedDevices)
+/** Unassigned devices — filtered to match active status/type filters */
+const unassignedDevices = computed(() => {
+  const filters = dashStore.activeStatusFilters
+  const filterType = dashStore.filterType
+  // If no filters active, fall back to store source of truth
+  if (filters.size === 0 && filterType === 'all') return espStore.unassignedDevices
+  // Otherwise derive from filteredEsps to stay consistent with zone groups
+  return filteredEsps.value.filter(d => !d.zone_id)
+})
 
 /** Local copy for VueDraggable v-model (unassigned section) */
 const localUnassignedDevices = ref<ESPDevice[]>([])
@@ -418,6 +424,9 @@ watch(
       level: breadcrumbLevel as 1 | 2 | 3,
       zoneName: zone,
       deviceName: device,
+      sensorName: '',
+      ruleName: '',
+      dashboardName: '',
     }
   },
   { immediate: true }
@@ -864,8 +873,8 @@ function formatTimeAgo(timestamp: number): string {
             <button
               v-if="logicStore.crossEspConnections.length > 0"
               class="cross-esp-toggle"
-              :class="{ 'cross-esp-toggle--active': showCrossEspConnections }"
-              @click="showCrossEspConnections = !showCrossEspConnections"
+              :title="'Cross-ESP Visualisierung (demnächst verfügbar)'"
+              @click="showInfo('Cross-ESP Visualisierung wird noch entwickelt')"
             >
               <GitBranch class="w-4 h-4" />
               <span>{{ logicStore.crossEspConnections.length }} Cross-ESP</span>

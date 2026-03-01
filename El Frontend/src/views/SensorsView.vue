@@ -12,7 +12,6 @@ import type { QualityLevel } from '@/types'
 import { getQualityLabel } from '@/utils/labels'
 import {
   Thermometer,
-  Gauge,
   Filter,
   X,
   ChevronDown,
@@ -23,14 +22,16 @@ import {
   Pencil,
   Trash2,
   Check,
+  Activity,
 } from 'lucide-vue-next'
-import LiveLineChart from '@/components/charts/LiveLineChart.vue'
-import type { ChartDataPoint } from '@/components/charts/LiveLineChart.vue'
 import { subzonesApi } from '@/api/subzones'
+import { useZoneGrouping, ZONE_UNASSIGNED } from '@/composables/useZoneGrouping'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import SensorConfigPanel from '@/components/esp/SensorConfigPanel.vue'
 import ActuatorConfigPanel from '@/components/esp/ActuatorConfigPanel.vue'
+import SensorCard from '@/components/devices/SensorCard.vue'
+import ActuatorCard from '@/components/devices/ActuatorCard.vue'
 
 type TabType = 'sensors' | 'actuators'
 type ActuatorStateFilter = 'on' | 'off' | 'emergency'
@@ -63,9 +64,6 @@ function setActiveTab(tab: TabType) {
   const query = tab === 'actuators' ? { tab: 'actuators' } : {}
   router.replace({ path: '/sensors', query })
 }
-
-// Track updated items for visual feedback
-const updatedSensorKeys = ref<Set<string>>(new Set())
 
 // Accordion collapse state (default: all expanded, so empty = none collapsed)
 const collapsedZones = ref<Set<string>>(new Set())
@@ -188,40 +186,6 @@ async function deleteSubzone(subzoneId: string) {
 }
 
 // =============================================================================
-// Sparkline Data Cache (pattern from MonitorView)
-// =============================================================================
-const sparklineCache = ref<Map<string, ChartDataPoint[]>>(new Map())
-const SPARKLINE_MAX_POINTS = 20
-
-function getSensorSparklineKey(espId: string, gpio: number): string {
-  return `${espId}-${gpio}`
-}
-
-watch(
-  () => espStore.devices,
-  () => {
-    for (const device of espStore.devices) {
-      const deviceId = espStore.getDeviceId(device)
-      const sensors = (device.sensors as { gpio: number; raw_value: number }[]) || []
-      for (const s of sensors) {
-        if (typeof s.raw_value !== 'number') continue
-        const key = getSensorSparklineKey(deviceId, s.gpio)
-        const existing = sparklineCache.value.get(key) || []
-        const lastPoint = existing[existing.length - 1]
-        const now = new Date()
-        if (!lastPoint || s.raw_value !== lastPoint.value ||
-            (now.getTime() - new Date(lastPoint.timestamp).getTime()) > 5000) {
-          const updated = [...existing, { timestamp: now, value: s.raw_value }]
-          if (updated.length > SPARKLINE_MAX_POINTS) updated.shift()
-          sparklineCache.value.set(key, updated)
-        }
-      }
-    }
-  },
-  { deep: true }
-)
-
-// =============================================================================
 // SlideOver Config Panels
 // =============================================================================
 const showSensorPanel = ref(false)
@@ -241,6 +205,13 @@ function openSensorConfig(sensor: { esp_id: string; gpio: number; sensor_type: s
   }
   showSensorPanel.value = true
 }
+
+// Zone of the currently selected sensor (for cross-navigation to monitor)
+const selectedSensorZoneId = computed(() => {
+  if (!selectedSensorConfig.value) return null
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === selectedSensorConfig.value!.espId)
+  return device?.zone_id ?? null
+})
 
 function closeSensorPanel() {
   showSensorPanel.value = false
@@ -314,188 +285,50 @@ const availableActuatorTypes = computed(() => {
 onMounted(async () => {
   // Initial load via REST (WebSocket is handled by esp store)
   await espStore.fetchAll()
+
+  // Deep-link: ?sensor={espId}-gpio{gpio} opens SensorConfigPanel
+  const sensorParam = route.query.sensor as string | undefined
+  if (sensorParam) {
+    const match = sensorParam.match(/^(.+)-gpio(\d+)$/)
+    if (match) {
+      const [, espId, gpioStr] = match
+      const gpio = parseInt(gpioStr, 10)
+      const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
+      if (device) {
+        const sensor = (device.sensors as { gpio: number; sensor_type: string; unit?: string; name?: string | null }[])
+          ?.find(s => s.gpio === gpio)
+        if (sensor) {
+          openSensorConfig({
+            esp_id: espId,
+            gpio,
+            sensor_type: sensor.sensor_type,
+            unit: sensor.unit ?? '',
+            name: sensor.name,
+          })
+        }
+      }
+    }
+  }
 })
 
 // =============================================================================
-// Sensor Data & Filters (with zone/subzone context)
+// Sensor & Actuator Data via Composable (zone/subzone grouping)
 // =============================================================================
-interface SensorWithContext {
-  gpio: number
-  sensor_type: string
-  name: string | null
-  raw_value: number
-  unit: string
-  quality: QualityLevel
-  esp_id: string
-  esp_state?: string
-  zone_id: string | null
-  zone_name: string
-  subzone_id: string | null
-  subzone_name: string
-}
-
-const allSensors = computed((): SensorWithContext[] => {
-  return espStore.devices.flatMap(esp => {
-    const sensors = esp.sensors as { gpio: number; sensor_type: string; name: string | null; raw_value: number; unit: string; quality: QualityLevel }[] | undefined
-    if (!sensors) return []
-    const espId = espStore.getDeviceId(esp)
-    const zoneId = esp.zone_id || null
-    const zoneName = esp.zone_name || (zoneId ?? '')
-    const subzoneId = esp.subzone_id || null
-    const subzoneName = esp.subzone_name || (subzoneId ?? '')
-    return sensors.map(sensor => ({
-      ...sensor,
-      esp_id: espId,
-      esp_state: esp.system_state,
-      zone_id: zoneId,
-      zone_name: zoneName,
-      subzone_id: subzoneId,
-      subzone_name: subzoneName,
-    }))
-  })
-})
-
-const filteredSensors = computed(() => {
-  return allSensors.value.filter(sensor => {
-    if (filterEspId.value && !sensor.esp_id.toLowerCase().includes(filterEspId.value.toLowerCase())) {
-      return false
-    }
-    if (filterSensorType.value.length > 0 && !filterSensorType.value.includes(sensor.sensor_type)) {
-      return false
-    }
-    if (filterQuality.value.length > 0 && !filterQuality.value.includes(sensor.quality)) {
-      return false
-    }
-    return true
-  })
-})
-
-// Group sensors by zone, then by subzone
-interface SubzoneGroup {
-  subzoneId: string | null
-  subzoneName: string
-  sensors: SensorWithContext[]
-}
-interface ZoneGroup {
-  zoneId: string | null
-  zoneName: string
-  subzones: SubzoneGroup[]
-  sensorCount: number
-}
-const ZONE_UNASSIGNED = '__unassigned__'
-
-const sensorsByZone = computed((): ZoneGroup[] => {
-  const zoneMap = new Map<string | null, Map<string | null, SensorWithContext[]>>()
-  for (const sensor of filteredSensors.value) {
-    const zId = sensor.zone_id || ZONE_UNASSIGNED
-    const szId = sensor.subzone_id ?? '__none__'
-    if (!zoneMap.has(zId)) {
-      zoneMap.set(zId, new Map())
-    }
-    const subMap = zoneMap.get(zId)!
-    if (!subMap.has(szId)) {
-      subMap.set(szId, [])
-    }
-    subMap.get(szId)!.push(sensor)
-  }
-  const result: ZoneGroup[] = []
-  for (const [zoneId, subMap] of zoneMap) {
-    const subzones: SubzoneGroup[] = []
-    let total = 0
-    for (const [szId, sensors] of subMap) {
-      const subzoneName: string = szId === '__none__'
-        ? (zoneId === ZONE_UNASSIGNED ? '' : 'Keine Subzone')
-        : (sensors[0]?.subzone_name || szId || '')
-      subzones.push({
-        subzoneId: szId === '__none__' ? null : szId,
-        subzoneName,
-        sensors,
-      })
-      total += sensors.length
-    }
-    subzones.sort((a, b) => {
-      if (a.subzoneId === null) return 1
-      if (b.subzoneId === null) return -1
-      return (a.subzoneName || '').localeCompare(b.subzoneName || '')
-    })
-    result.push({
-      zoneId: zoneId === ZONE_UNASSIGNED ? null : zoneId,
-      zoneName: zoneId === ZONE_UNASSIGNED ? 'Nicht zugewiesen' : (filteredSensors.value.find(s => s.zone_id === zoneId)?.zone_name || zoneId || ''),
-      subzones,
-      sensorCount: total,
-    })
-  }
-  result.sort((a, b) => {
-    if (a.zoneId === null) return 1
-    if (b.zoneId === null) return -1
-    return (a.zoneName || '').localeCompare(b.zoneName || '')
-  })
-  return result
+const {
+  allSensors, filteredSensors, sensorsByZone,
+  allActuators, filteredActuators, actuatorsByZone,
+} = useZoneGrouping({
+  filterEspId,
+  filterSensorType,
+  filterQuality,
+  filterActuatorType,
+  filterState,
 })
 
 const hasSensorFilters = computed(() => {
   return filterEspId.value !== '' ||
     filterSensorType.value.length > 0 ||
     filterQuality.value.length > 0
-})
-
-// =============================================================================
-// Actuator Data & Filters (with zone/subzone context)
-// =============================================================================
-interface ActuatorWithContext {
-  gpio: number
-  actuator_type: string
-  name: string | null
-  state: boolean
-  pwm_value: number
-  emergency_stopped: boolean
-  esp_id: string
-  esp_state?: string
-  zone_id: string | null
-  zone_name: string
-  subzone_id: string | null
-  subzone_name: string
-}
-
-const allActuators = computed((): ActuatorWithContext[] => {
-  return espStore.devices.flatMap(esp => {
-    const actuators = esp.actuators as { gpio: number; actuator_type: string; name: string | null; state: boolean; pwm_value: number; emergency_stopped: boolean }[] | undefined
-    if (!actuators) return []
-    const espId = espStore.getDeviceId(esp)
-    const zoneId = esp.zone_id || null
-    const zoneName = esp.zone_name || (zoneId ?? '')
-    const subzoneId = esp.subzone_id || null
-    const subzoneName = esp.subzone_name || (subzoneId ?? '')
-    return actuators.map(actuator => ({
-      ...actuator,
-      esp_id: espId,
-      esp_state: esp.system_state,
-      zone_id: zoneId,
-      zone_name: zoneName,
-      subzone_id: subzoneId,
-      subzone_name: subzoneName,
-    }))
-  })
-})
-
-const filteredActuators = computed(() => {
-  return allActuators.value.filter(actuator => {
-    if (filterEspId.value && !actuator.esp_id.toLowerCase().includes(filterEspId.value.toLowerCase())) {
-      return false
-    }
-    if (filterActuatorType.value.length > 0 && !filterActuatorType.value.includes(actuator.actuator_type)) {
-      return false
-    }
-    if (filterState.value.length > 0) {
-      const matchesOn = filterState.value.includes('on') && actuator.state && !actuator.emergency_stopped
-      const matchesOff = filterState.value.includes('off') && !actuator.state && !actuator.emergency_stopped
-      const matchesEmergency = filterState.value.includes('emergency') && actuator.emergency_stopped
-      if (!matchesOn && !matchesOff && !matchesEmergency) {
-        return false
-      }
-    }
-    return true
-  })
 })
 
 const actuatorStats = computed(() => {
@@ -506,68 +339,6 @@ const actuatorStats = computed(() => {
     else stats.off++
   })
   return stats
-})
-
-// Group actuators by zone, then by subzone
-interface ActuatorSubzoneGroup {
-  subzoneId: string | null
-  subzoneName: string
-  actuators: ActuatorWithContext[]
-}
-interface ActuatorZoneGroup {
-  zoneId: string | null
-  zoneName: string
-  subzones: ActuatorSubzoneGroup[]
-  actuatorCount: number
-}
-
-const actuatorsByZone = computed((): ActuatorZoneGroup[] => {
-  const zoneMap = new Map<string | null, Map<string | null, ActuatorWithContext[]>>()
-  for (const actuator of filteredActuators.value) {
-    const zId = actuator.zone_id || ZONE_UNASSIGNED
-    const szId = actuator.subzone_id ?? '__none__'
-    if (!zoneMap.has(zId)) {
-      zoneMap.set(zId, new Map())
-    }
-    const subMap = zoneMap.get(zId)!
-    if (!subMap.has(szId)) {
-      subMap.set(szId, [])
-    }
-    subMap.get(szId)!.push(actuator)
-  }
-  const result: ActuatorZoneGroup[] = []
-  for (const [zoneId, subMap] of zoneMap) {
-    const subzones: ActuatorSubzoneGroup[] = []
-    let total = 0
-    for (const [szId, actuators] of subMap) {
-      const subzoneName: string = szId === '__none__'
-        ? (zoneId === ZONE_UNASSIGNED ? '' : 'Keine Subzone')
-        : (actuators[0]?.subzone_name || szId || '')
-      subzones.push({
-        subzoneId: szId === '__none__' ? null : szId,
-        subzoneName,
-        actuators,
-      })
-      total += actuators.length
-    }
-    subzones.sort((a, b) => {
-      if (a.subzoneId === null) return 1
-      if (b.subzoneId === null) return -1
-      return (a.subzoneName || '').localeCompare(b.subzoneName || '')
-    })
-    result.push({
-      zoneId: zoneId === ZONE_UNASSIGNED ? null : zoneId,
-      zoneName: zoneId === ZONE_UNASSIGNED ? 'Nicht zugewiesen' : (filteredActuators.value.find(a => a.zone_id === zoneId)?.zone_name || zoneId || ''),
-      subzones,
-      actuatorCount: total,
-    })
-  }
-  result.sort((a, b) => {
-    if (a.zoneId === null) return 1
-    if (b.zoneId === null) return -1
-    return (a.zoneName || '').localeCompare(b.zoneName || '')
-  })
-  return result
 })
 
 const hasActuatorFilters = computed(() => {
@@ -648,20 +419,6 @@ async function toggleActuator(espId: string, gpio: number, currentState: boolean
   await espStore.sendActuatorCommand(espId, gpio, currentState ? 'OFF' : 'ON')
 }
 
-// =============================================================================
-// Helper Functions
-// =============================================================================
-function getQualityColor(quality: string): string {
-  switch (quality) {
-    case 'excellent':
-    case 'good': return 'badge-success'
-    case 'fair': return 'badge-info'
-    case 'poor': return 'badge-warning'
-    case 'bad':
-    case 'stale': return 'badge-danger'
-    default: return 'badge-gray'
-  }
-}
 </script>
 
 <template>
@@ -1002,52 +759,13 @@ function getQualityColor(quality: string): string {
                     v-show="zone.subzones.length <= 1 && !subzone.subzoneName ? true : isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`)"
                     class="sensors-subzone-cards"
                   >
-                    <div
+                    <SensorCard
                       v-for="sensor in subzone.sensors"
                       :key="`${sensor.esp_id}-${sensor.gpio}`"
-                      :class="[
-                        'card hover:border-dark-600 transition-colors cursor-pointer',
-                        updatedSensorKeys.has(`${sensor.esp_id}-${sensor.gpio}`) ? 'sensor-value--updated' : ''
-                      ]"
-                      @click="openSensorConfig(sensor)"
-                    >
-                      <div class="card-header flex items-center gap-3">
-                        <div class="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                          <Gauge class="w-5 h-5 text-purple-400" />
-                        </div>
-                        <div class="flex-1 min-w-0">
-                          <p class="font-medium text-dark-100 truncate">{{ sensor.name || `GPIO ${sensor.gpio}` }}</p>
-                          <p class="text-xs text-dark-400 truncate">{{ sensor.esp_id }} · {{ sensor.sensor_type }}</p>
-                        </div>
-                      </div>
-                      <div class="card-body">
-                        <div class="flex items-end justify-between gap-2">
-                          <div class="min-w-0">
-                            <p class="text-2xl md:text-3xl font-bold font-mono text-dark-100 truncate">
-                              {{ sensor.raw_value.toFixed(2) }}
-                            </p>
-                            <p class="text-sm text-dark-400">{{ sensor.unit }}</p>
-                          </div>
-                          <span :class="['badge flex-shrink-0', getQualityColor(sensor.quality)]">
-                            {{ getQualityLabel(sensor.quality) }}
-                          </span>
-                        </div>
-                        <!-- Mini Sparkline -->
-                        <div
-                          v-if="sparklineCache.get(getSensorSparklineKey(sensor.esp_id, sensor.gpio))?.length"
-                          class="sensors-sparkline"
-                        >
-                          <LiveLineChart
-                            :data="sparklineCache.get(getSensorSparklineKey(sensor.esp_id, sensor.gpio)) || []"
-                            :compact="true"
-                            height="30px"
-                            :fill="true"
-                            :show-grid="false"
-                            :max-data-points="20"
-                          />
-                        </div>
-                      </div>
-                    </div>
+                      :sensor="sensor"
+                      mode="config"
+                      @configure="openSensorConfig"
+                    />
                   </div>
                 </Transition>
               </div>
@@ -1209,47 +927,14 @@ function getQualityColor(quality: string): string {
                     v-show="zone.subzones.length <= 1 && !subzone.subzoneName ? true : isSubzoneExpanded(`${zone.zoneId ?? '__u'}-${subzone.subzoneId ?? '__n'}`)"
                     class="sensors-subzone-cards"
                   >
-                    <div
+                    <ActuatorCard
                       v-for="actuator in subzone.actuators"
                       :key="`${actuator.esp_id}-${actuator.gpio}`"
-                      class="card hover:border-dark-600 transition-colors cursor-pointer"
-                      :class="{ 'border-red-500/30': actuator.emergency_stopped }"
-                      @click="openActuatorConfig(actuator)"
-                    >
-                      <div class="card-header flex items-center gap-3">
-                        <div
-                          :class="[
-                            'w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0',
-                            actuator.state ? 'bg-green-500/20' : 'bg-dark-700'
-                          ]"
-                        >
-                          <Power :class="['w-5 h-5', actuator.state ? 'text-green-400' : 'text-dark-400']" />
-                        </div>
-                        <div class="flex-1 min-w-0">
-                          <p class="font-medium text-dark-100 truncate">{{ actuator.name || `GPIO ${actuator.gpio}` }}</p>
-                          <p class="text-xs text-dark-400 truncate">{{ actuator.esp_id }} · {{ actuator.actuator_type }}</p>
-                        </div>
-                      </div>
-                      <div class="card-body">
-                        <div class="flex items-center justify-between gap-2">
-                          <div class="flex items-center gap-2 flex-wrap">
-                            <span :class="['badge', actuator.state ? 'badge-success' : 'badge-gray']">
-                              {{ actuator.state ? 'Ein' : 'Aus' }}
-                            </span>
-                            <span v-if="actuator.emergency_stopped" class="badge badge-danger">
-                              Not-Stopp
-                            </span>
-                          </div>
-                          <button
-                            class="btn-secondary btn-sm flex-shrink-0 touch-target"
-                            :disabled="actuator.emergency_stopped"
-                            @click.stop="toggleActuator(actuator.esp_id, actuator.gpio, actuator.state)"
-                          >
-                            {{ actuator.state ? 'Ausschalten' : 'Einschalten' }}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
+                      :actuator="actuator"
+                      mode="config"
+                      @configure="openActuatorConfig"
+                      @toggle="toggleActuator"
+                    />
                   </div>
                 </Transition>
               </div>
@@ -1273,6 +958,22 @@ function getQualityColor(quality: string): string {
         :sensor-type="selectedSensorConfig.sensorType"
         :unit="selectedSensorConfig.unit"
       />
+      <!-- Cross-link to Monitor (Live data) -->
+      <button
+        v-if="selectedSensorConfig && selectedSensorZoneId"
+        class="sensors-view__monitor-link"
+        @click="router.push({
+          name: 'monitor-sensor',
+          params: {
+            zoneId: selectedSensorZoneId,
+            sensorId: `${selectedSensorConfig.espId}-gpio${selectedSensorConfig.gpio}`,
+          },
+        })"
+      >
+        <Activity class="w-4 h-4" />
+        <span>Live-Daten im Monitor anzeigen</span>
+        <ChevronRight class="w-4 h-4 ml-auto" />
+      </button>
     </SlideOver>
 
     <!-- Actuator Config SlideOver -->
@@ -1363,22 +1064,6 @@ function getQualityColor(quality: string): string {
 .slide-enter-to,
 .slide-leave-from {
   max-height: 500px;
-}
-
-/* Visual feedback for updated sensor values */
-.sensor-value--updated {
-  animation: sensorUpdateHighlight 0.5s ease-out;
-}
-
-@keyframes sensorUpdateHighlight {
-  0% {
-    border-color: rgba(59, 130, 246, 0.5);
-    background-color: rgba(59, 130, 246, 0.1);
-  }
-  100% {
-    border-color: transparent;
-    background-color: transparent;
-  }
 }
 
 /* Zone/Subzone accordion */
@@ -1627,12 +1312,28 @@ function getQualityColor(quality: string): string {
   color: var(--color-error);
 }
 
-/* Sparkline on sensor cards */
-.sensors-sparkline {
-  margin-top: var(--space-2);
-  height: 30px;
-  opacity: 0.7;
+/* Cross-link to Monitor */
+.sensors-view__monitor-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
-  overflow: hidden;
+  color: var(--color-accent-bright);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  width: 100%;
+  text-align: left;
 }
+
+.sensors-view__monitor-link:hover {
+  border-color: var(--color-accent);
+  background: rgba(59, 130, 246, 0.06);
+}
+
 </style>

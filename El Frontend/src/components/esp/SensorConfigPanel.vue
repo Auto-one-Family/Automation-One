@@ -22,6 +22,10 @@ import { SENSOR_TYPE_CONFIG, getSensorUnit } from '@/utils/sensorDefaults'
 import { AccordionSection } from '@/shared/design/primitives'
 import RangeSlider from '@/shared/design/primitives/RangeSlider.vue'
 import LiveDataPreview from './LiveDataPreview.vue'
+import DeviceMetadataSection from '@/components/devices/DeviceMetadataSection.vue'
+import LinkedRulesSection from '@/components/devices/LinkedRulesSection.vue'
+import type { DeviceMetadata } from '@/types/device-metadata'
+import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
 
 interface Props {
   espId: string
@@ -71,6 +75,9 @@ const alarmHigh = ref(100)
 
 // Calibration
 const currentRawValue = ref(0)
+
+// Device Metadata
+const metadata = ref<DeviceMetadata>({})
 
 // =============================================================================
 // Computed
@@ -131,6 +138,9 @@ onMounted(async () => {
         if ((config as any).warning_min != null) warnLow.value = (config as any).warning_min
         if ((config as any).warning_max != null) warnHigh.value = (config as any).warning_max
         if ((config as any).threshold_max != null) alarmHigh.value = (config as any).threshold_max
+
+        // Device metadata
+        metadata.value = parseDeviceMetadata((config as any).metadata)
       }
     } catch {
       // No existing config — use defaults
@@ -234,6 +244,9 @@ async function handleSave() {
 
       // Subzone assignment
       config.subzone_id = subzoneId.value
+
+      // Device metadata
+      config.metadata = mergeDeviceMetadata(null, metadata.value)
 
       // Calibration data
       const calData = calibration.getCalibrationData()
@@ -619,6 +632,29 @@ async function handleSave() {
         <div class="sensor-config__preview">
           <LiveDataPreview :esp-id="espId" :gpio="gpio" :unit="unitValue || defaultUnit" />
         </div>
+      </AccordionSection>
+
+      <!-- ═══ DEVICE INFO (Metadata) ═════════════════════════════════════ -->
+      <AccordionSection
+        title="Geräte-Informationen"
+        :storage-key="`${accordionKey}-device-info`"
+      >
+        <DeviceMetadataSection
+          :metadata="metadata"
+          @update:metadata="metadata = $event"
+        />
+      </AccordionSection>
+
+      <!-- ═══ LINKED RULES ════════════════════════════════════════════════ -->
+      <AccordionSection
+        title="Verknüpfte Regeln"
+        :storage-key="`${accordionKey}-linked-rules`"
+      >
+        <LinkedRulesSection
+          :esp-id="espId"
+          :gpio="gpio"
+          device-type="sensor"
+        />
       </AccordionSection>
 
       <!-- ═══ SAVE BUTTON ════════════════════════════════════════════════ -->

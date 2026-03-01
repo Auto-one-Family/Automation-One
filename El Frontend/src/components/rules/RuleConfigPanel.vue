@@ -137,13 +137,19 @@ const nodeType = computed(() => props.node?.type || '')
 const typeLabel = computed(() => nodeTypeLabels[nodeType.value] || 'Unbekannt')
 const typeIcon = computed(() => nodeTypeIcons[nodeType.value] || Thermometer)
 
-// Available ESP devices for selectors
-const espDevices = computed(() =>
-  espStore.devices.map((d) => ({
+// Available ESP devices for selectors (with fallback for unknown IDs)
+const espDevices = computed(() => {
+  const devices = espStore.devices.map((d) => ({
     id: espStore.getDeviceId(d),
     name: d.name || espStore.getDeviceId(d),
   }))
-)
+  // If the node's saved espId is not in the device list, show it as unknown
+  const currentEspId = localData.value.espId as string
+  if (currentEspId && !devices.find(d => d.id === currentEspId)) {
+    devices.unshift({ id: currentEspId, name: `${currentEspId} (nicht gefunden)` })
+  }
+  return devices
+})
 
 // Device-aware: sensors on the currently selected ESP (sensor config)
 const availableSensors = computed(() => {
