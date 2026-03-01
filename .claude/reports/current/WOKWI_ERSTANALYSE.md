@@ -1,521 +1,466 @@
-# Wokwi-Erstanalyse - Gesamtbericht
+# Wokwi IST-Zustand Erstanalyse
 
-> **Version:** 1.0
-> **Datum:** 2026-02-23
-> **Typ:** Analyse-Only (keine Fixes)
-> **Autor:** Claude (Wokwi-Erstanalyse-Auftrag)
-
----
-
-## Executive Summary
-
-Das Wokwi-Testsystem von AutomationOne ist **architektonisch solide konzipiert**, aber in **zwei von drei Hauptbereichen** operativ gebrochen:
-
-| Bereich | Status | Kern-Problem |
-|---------|--------|--------------|
-| **Konfiguration** (wokwi.toml, diagram.json, platformio.ini) | OK | Korrekt und konsistent |
-| **CI/CD Pipeline** (wokwi-tests.yml) | OK | Gut strukturiert, 23 Jobs |
-| **YAML-Szenarien** (173 Dateien) | GEBROCHEN | 28 Dateien nutzen nicht-existentes `part-id: "mqtt"` |
-| **Error-Injection** (11-error-injection/) | OK | Korrekte passive Architektur |
-| **Serial-String-Matching** | OK | Alle Strings in Firmware verifiziert |
-| **MQTT-Infrastruktur** | OK | Docker Mosquitto läuft, Ports korrekt |
-| **Agent-Driven Testing** | TEILWEISE | Mapping existiert, kein dedizierter Agent |
-
-**Zentrale Erkenntnis:** Die 10 Error-Injection-Szenarien sind korrekt implementiert (passives wait-serial + externes mosquitto_pub). Das `part-id: "mqtt"` Problem betrifft ausschließlich die Kategorien `gpio/` (20 Dateien) und `09-hardware/` (8 Dateien).
+> **Version:** 2.0
+> **Datum:** 2026-03-01
+> **Agents:** system-control + esp32-debug + esp32-development
+> **Scope:** Vollständige Analyse aller Wokwi-Komponenten im AutomationOne-System
+> **Status:** Erstanalyse (ersetzt v1.0 vom 2026-02-23)
 
 ---
 
-## Teil 1: Konfigurationsdateien
+## 1. Architektur-Übersicht
 
-### 1.1 wokwi.toml
+### Wokwi im AutomationOne-Stack
 
-| Parameter | Wert | Status |
-|-----------|------|--------|
-| firmware | `.pio/build/wokwi_simulation/firmware.bin` | OK - matches platformio.ini |
-| elf | `.pio/build/wokwi_simulation/firmware.elf` | OK |
-| gateway | `true` | OK - required for MQTT |
-| rfc2217ServerPort | `4000` | OK - for external serial access |
-| baud | `115200` | OK - matches `monitor_speed` |
-
-**Bewertung:** Vollständig und korrekt. Keine Probleme.
-
-### 1.2 diagram.json
-
-**11 Parts:**
-
-| Part | Type | GPIO | Wiring |
-|------|------|------|--------|
-| esp | wokwi-esp32-devkit-v1 | - | Serial Monitor TX/RX |
-| temp1 | wokwi-ds18b20 | D4 (DQ) | + 4.7k Pullup (r1) |
-| dht22 | wokwi-dht22 | D15 (SDA) | VCC=3V3, GND |
-| led1 (green) | wokwi-led | D5 | + 220R (r2) |
-| led_red | wokwi-led | D13 | + 220R (r_led_red) |
-| led_blue | wokwi-led | D14 | + 220R (r_led_blue) |
-| pot_analog | wokwi-potentiometer | GPIO34 | ADC Input |
-| btn_emergency | wokwi-pushbutton | D27 | Pulldown to GND |
-| r1 | wokwi-resistor (4.7k) | - | DS18B20 Pullup |
-| r2 | wokwi-resistor (220) | - | Green LED |
-| r_led_red | wokwi-resistor (220) | - | Red LED |
-
-**KRITISCH:** Es gibt **kein Part mit ID "mqtt"**. Dies ist die Ursache für 81 Fehler in 28 Szenario-Dateien (siehe Teil 2).
-
-**Alternative Diagramme:**
-- `tests/wokwi/diagrams/diagram_i2c.json` — SHT31 + BME280 (für I2C-Tests)
-- `tests/wokwi/diagrams/diagram_extended.json` — erweitert
-
-### 1.3 platformio.ini (Wokwi-relevante Environments)
-
-| Environment | Extends | Key Flags | Zweck |
-|-------------|---------|-----------|-------|
-| `wokwi_simulation` | `esp32_dev` | `WOKWI_SIMULATION=1`, `WOKWI_WIFI_SSID="Wokwi-GUEST"`, `WOKWI_MQTT_HOST="host.wokwi.internal"`, `WOKWI_MQTT_PORT=1883`, `WOKWI_ESP_ID="ESP_00000001"` | Haupt-Simulations-Env |
-| `wokwi_esp01` | `wokwi_simulation` | `WOKWI_ESP_ID="ESP_00000001"` | Multi-Device #1 |
-| `wokwi_esp02` | `wokwi_simulation` | `WOKWI_ESP_ID="ESP_00000002"` | Multi-Device #2 |
-| `wokwi_esp03` | `wokwi_simulation` | `WOKWI_ESP_ID="ESP_00000003"` | Multi-Device #3 |
-
-**Bewertung:** Sauber strukturiert. `extends`-Kette korrekt. Multi-Device-Envs für paralleles Testen vorhanden.
-
-**Hinweis:** `wokwi_esp01` definiert `WOKWI_ESP_ID` doppelt (einmal aus `wokwi_simulation`, einmal explizit). PlatformIO nimmt den letzten Wert — funktioniert, aber redundant.
-
----
-
-## Teil 2: Szenario-Inventar
-
-### 2.1 Gesamtübersicht (173 Szenarien, 14 Kategorien)
-
-| Kategorie | Anzahl | Pattern | Status |
-|-----------|--------|---------|--------|
-| `01-boot/` | 2 | wait-serial | OK |
-| `02-sensor/` | 5 | wait-serial | OK |
-| `03-actuator/` | 7 | wait-serial | OK |
-| `04-zone/` | 2 | wait-serial | OK |
-| `05-emergency/` | 3 | wait-serial | OK |
-| `06-config/` | 2 | wait-serial | OK |
-| `07-combined/` | 2 | wait-serial | OK |
-| `08-i2c/` | 20 | wait-serial | OK (nutzt diagram_i2c.json) |
-| `08-onewire/` | 29 | wait-serial + set-control(temp1) | OK |
-| `09-hardware/` | 9 | **set-control: part-id: "mqtt"** | GEBROCHEN (8 von 9) |
-| `09-pwm/` | 18 | wait-serial | OK |
-| `10-nvs/` | 40 | wait-serial | OK |
-| `11-error-injection/` | 10 | wait-serial + delay (passiv) | OK |
-| `gpio/` | 24 | **set-control: part-id: "mqtt"** | GEBROCHEN (20 von 24) |
-
-### 2.2 Das `part-id: "mqtt"` Problem
-
-**Fakten:**
-- 81 Vorkommen von `set-control: part-id: "mqtt"` in 28 Dateien
-- Verteilung: 20 Dateien in `gpio/`, 8 Dateien in `09-hardware/`
-- `diagram.json` enthält **kein** Part mit ID "mqtt"
-- Wokwi-CLI wird bei `set-control` auf nicht-existentes Part mit Fehler abbrechen
-
-**Betroffene Dateien (gpio/ — 20 Dateien):**
-
-| Datei | Vorkommen |
-|-------|-----------|
-| gpio_subzone_safe.yaml | 8 |
-| gpio_integration_emergency.yaml | 5 |
-| gpio_safe_mode_emergency.yaml | 5 |
-| gpio_integration_actuator.yaml | 4 |
-| gpio_edge_invalid_pin.yaml | 3 |
-| gpio_reservation_release.yaml | 3 |
-| gpio_reservation_invalid.yaml | 3 |
-| gpio_reservation_owner.yaml | 3 |
-| gpio_safe_mode_verify.yaml | 3 |
-| gpio_subzone_conflict.yaml | 3 |
-| gpio_subzone_assign.yaml | 3 |
-| gpio_safe_mode_single.yaml | 3 |
-| gpio_edge_multi_init.yaml | 2 |
-| gpio_edge_strings.yaml | 2 |
-| gpio_reservation_conflict.yaml | 2 |
-| gpio_reservation_success.yaml | 1 |
-| gpio_integration_sensor.yaml | 2 |
-| gpio_integration_heartbeat.yaml | 2 |
-| gpio_subzone_pins.yaml | 2 |
-| gpio_edge_max_pins.yaml | 1 |
-
-**Betroffene Dateien (09-hardware/ — 8 Dateien):**
-
-| Datei | Vorkommen |
-|-------|-----------|
-| hw_reserved_pins.yaml | 5 |
-| hw_pwm_config.yaml | 4 |
-| hw_input_only_reject.yaml | 3 |
-| hw_actuator_limit.yaml | 2 |
-| hw_cross_board_constants.yaml | 2 |
-| hw_sensor_limit.yaml | 2 |
-| hw_safe_pins_verify.yaml | 2 |
-| hw_i2c_config.yaml | 1 |
-
-**NICHT betroffen:** `11-error-injection/` (alle 10 Szenarien nutzen korrekte passive Architektur)
-
-### 2.3 Error-Injection Architektur (korrekt)
-
-Alle 10 Error-Injection-Szenarien verwenden ein **passives Pattern:**
-
-```yaml
-# Pattern: wait-serial prüft Firmware-Output, delay gibt Zeit für externe Injection
-- wait-serial: "MQTT connected"
-- delay: 5000
-# CI injiziert via: mosquitto_pub -t "auto-one/ESP_00000001/..." -m '...'
-- wait-serial: "Expected response string"
+```
+Wokwi-CLI / VS Code Extension
+  └── ESP32 Virtual Firmware (.pio/build/wokwi_simulation/firmware.bin)
+        ├── WiFi: "Wokwi-GUEST" (offenes WLAN, Wokwi-intern)
+        └── MQTT: host.wokwi.internal:1883
+              └── Gateway → localhost:1883
+                    └── Docker: automationone-mqtt (eclipse-mosquitto:2)
+                          └── El Servador (FastAPI) ← PostgreSQL
 ```
 
-| Szenario | Injections-Methode | Getestetes Verhalten |
-|----------|--------------------|----------------------|
-| error_sensor_timeout | Ghost GPIO 32 sensor | Sensor read failure handling |
-| error_config_invalid_json | Malformed JSON payload | JSON parse error + error code |
-| error_emergency_cascade | 5-step MQTT sequence (helper script) | Emergency lifecycle |
-| error_gpio_conflict | 2 sensors on same GPIO | Conflict detection |
-| error_heap_pressure | 14 device configs | Memory management under load |
-| error_nvs_corrupt | factory_reset MQTT command | NVS recovery |
-| error_mqtt_disconnect | Config + verify sequence | Post-reconnect state |
-| error_i2c_bus_stuck | Ghost I2C device (0x44) | I2C bus error handling |
-| error_actuator_timeout | Actuator ON command | Actuator timeout detection |
-| error_watchdog_trigger | Load + emergency combo | Watchdog behavior |
+### Dateien-Inventar
 
-### 2.4 Weitere Szenario-Patterns
-
-| Pattern | Verwendung | Beispiel |
-|---------|------------|---------|
-| `wait-serial` (substring match) | ALLE Kategorien | `- wait-serial: "Phase 1: Core Infrastructure READY"` |
-| `set-control: part-id: "temp1"` | 08-onewire/ | Temperatur-Simulation |
-| `set-control: part-id: "pot_analog"` | 02-sensor/ | ADC-Wert setzen |
-| `set-control: part-id: "btn_emergency"` | 05-emergency/ | Button-Press simulieren |
-| `delay` | Überall | Wartezeiten zwischen Steps |
-| `set-control: part-id: "mqtt"` | gpio/, 09-hardware/ | **GEBROCHEN** |
+| Komponente | Pfad | Funktion |
+|------------|------|----------|
+| **Haupt-Diagramm** | `El Trabajante/diagram.json` | Virtuelle Hardware (ESP32 + 7 Bauteile) |
+| **Wokwi-Config** | `El Trabajante/wokwi.toml` | CLI-Konfiguration, Gateway, RFC2217 |
+| **Build-Environment** | `El Trabajante/platformio.ini` → `[env:wokwi_simulation]` | Firmware-Build mit Wokwi-Flags |
+| **Multi-Device** | `platformio.ini` → `[env:wokwi_esp01/02/03]` | 3 parallele ESP-IDs |
+| **Test-Scenarios** | `El Trabajante/tests/wokwi/scenarios/` | 178 YAML-Test-Szenarien |
+| **Legacy-Tests** | `El Trabajante/tests/wokwi/boot_test.yaml`, `mqtt_connection.yaml` | 2 Legacy-Szenarien |
+| **Extended-Diagramme** | `tests/wokwi/diagrams/diagram_extended.json`, `diagram_i2c.json` | Alternative Hardware-Konfigurationen |
+| **Test-Runner** | `scripts/run-wokwi-tests.py` | Python Test-Orchestrator |
+| **CI-Pipeline** | `.github/workflows/wokwi-tests.yml` | GitHub Actions Workflow |
+| **Serial-Logger** | `El Trabajante/scripts/wokwi_serial_logger.py` | RFC2217-basierter Log-Stream |
+| **MQTT-Injection** | `tests/wokwi/helpers/mqtt_inject.py` | paho-mqtt Test-Helper |
+| **Preflight-Check** | `tests/wokwi/helpers/preflight_check.sh` | Connectivity-Validierung |
+| **MQTT-Wait** | `tests/wokwi/helpers/wait_for_mqtt.sh` | Boot-Completion-Detection |
+| **DB-Seed** | `El Servador/god_kaiser_server/scripts/seed_wokwi_esp.py` | ESP_00000001/02/03 erstellen |
+| **Dev-Starter** | `scripts/start-wokwi-dev.ps1` | PowerShell Full-Stack-Startup |
+| **Quick-Starter** | `scripts/run-wokwi.bat` | Batch-Datei Wokwi-CLI-Start |
+| **Firewall-Script** | `scripts/add-firewall-rule.ps1` | Windows-Firewall Port 1883 |
+| **Referenz-Docs** | `.claude/reference/testing/WOKWI_TESTING.md`, `WOKWI_ERROR_MAPPING.md` | Agent-Referenzdokumentation |
 
 ---
 
-## Teil 3: CI/CD Pipeline
+## 2. Hardware-Konfiguration (diagram.json)
 
-### 3.1 Workflow-Struktur (wokwi-tests.yml)
+### Aktives Haupt-Diagramm (`El Trabajante/diagram.json`)
 
-**23 Jobs total:**
+| Bauteil-ID | Typ | GPIO | Vorwiderstand | Wert |
+|------------|-----|------|---------------|------|
+| `esp` | ESP32-DevKit-v1 | - | - | - |
+| `temp1` | DS18B20 | D4 (GPIO 4) | 4.7kΩ Pull-Up (r1) | 22.5°C (konstant) |
+| `dht22` | DHT22 | D15 (GPIO 15) | keiner | 23.5°C / 65% |
+| `pot_analog` | Potentiometer | GPIO 34 (ADC) | keiner | 50% |
+| `led1` | LED grün | D5 (GPIO 5) | 220Ω (r2) | - |
+| `led_red` | LED rot | D13 (GPIO 13) | 220Ω | - |
+| `led_blue` | LED blau | D14 (GPIO 14) | 220Ω | - |
+| `btn_emergency` | Taster rot | D27 (GPIO 27) | an GND | Label: EMERGENCY |
 
-| # | Job | Szenarien | Trigger |
-|---|-----|-----------|---------|
-| 0 | build-firmware | - | Immer (Artefakt für alle) |
-| 1 | boot-tests | 2 (01-boot/) | PR + Push |
-| 2 | sensor-tests | 5 (02-sensor/) | PR + Push |
-| 3 | actuator-tests | 7 (03-actuator/) | PR + Push |
-| 4 | mqtt-connection-test | 1 (legacy mqtt_connection.yaml) | PR + Push |
-| 5 | zone-tests | 2 (04-zone/) | PR + Push |
-| 6 | emergency-tests | 3 (05-emergency/) | PR + Push |
-| 7 | config-tests | 2 (06-config/) | PR + Push |
-| 8 | sensor-flow-tests | ~5 (02-sensor/ Subset) | PR + Push |
-| 9 | actuator-flow-tests | ~7 (03-actuator/ Subset) | PR + Push |
-| 10 | combined-flow-tests | 2 (07-combined/) | PR + Push |
-| 11 | gpio-core-tests | ~5 (gpio/ Subset) | PR + Push |
-| 12 | i2c-core-tests | ~5 (08-i2c/ Subset) | PR + Push |
-| 13 | nvs-core-tests | ~5 (10-nvs/ Subset) | PR + Push |
-| 14 | pwm-core-tests | ~5 (09-pwm/ Subset) | PR + Push |
-| 15 | onewire-core-tests | ~5 (08-onewire/ Subset) | PR + Push |
-| 16 | error-injection-tests | 10 (11-error-injection/) | PR + Push |
-| 17 | gpio-extended-tests | 24 (gpio/ alle) | Nightly |
-| 18 | i2c-extended-tests | 20 (08-i2c/ alle) | Nightly |
-| 19 | nvs-extended-tests | 40 (10-nvs/ alle) | Nightly |
-| 20 | pwm-extended-tests | 18 (09-pwm/ alle) | Nightly |
-| 21 | onewire-extended-tests | 29 (08-onewire/ alle) | Nightly |
-| 22 | test-summary | - | Immer (Report) |
+**GPIO-Belegung gesamt:** 4, 5, 13, 14, 15, 27, 34
 
-**Trigger:** `push` (El Trabajante/**), `pull_request`, `schedule` (cron: 0 2 * * *, nightly), `workflow_dispatch`
+### Alternative Diagramme (nicht aktiv im CI)
 
-### 3.2 Mosquitto-Strategie in CI
+| Diagramm | Bauteile | Zusätzliche GPIOs | Zweck |
+|----------|----------|-------------------|-------|
+| `diagram_extended.json` | ESP32 + DS18B20 + LED grün + LED rot + DHT22 + Boot-Button | D0, D4, D5, D15, D18 | Erweiterte Tests |
+| `diagram_i2c.json` | ESP32 + SHT30 + BME280 + DS18B20 + LED | D4, D5, D21, D22 | I2C-Bus Tests |
 
-```yaml
-# Per-Job Docker-Container (nicht Service-Container):
-docker run -d --name mosquitto -p 1883:1883 eclipse-mosquitto:2
-# + Inline mosquitto.conf mit allow_anonymous true
+**Wichtig:** Nur `diagram.json` im Root wird vom CI verwendet. Die alternativen Diagramme müssen manuell gewechselt werden.
+
+---
+
+## 3. Firmware Wokwi-Integration
+
+### WOKWI_SIMULATION Preprocessor-Branches (17 Stellen in 4 Dateien)
+
+| Datei | Branches | Betroffene Features |
+|-------|----------|---------------------|
+| `main.cpp` | 6 | Serial-Delay, Watchdog, Factory-Reset, Provisioning-WDT, WDT-Feed |
+| `config_manager.cpp` | 8 | WiFi-Config, ESP-ID, Sensor/Actuator NVS Save/Load |
+| `provision_manager.cpp` | 2 | MQTT-Host-Fallback, MQTT-Port-Fallback |
+| `onewire_bus.cpp` | 1 | Nur Log-Ausgabe (kein Verhaltensunterschied) |
+
+### Boot-Sequenz in Wokwi (5 Phasen)
+
+```
+Phase 0: Hardware Init
+  └── Serial-Delay: 500ms statt 100ms (Wokwi UART langsamer)
+  └── Watchdog: DEAKTIVIERT (WDT_DISABLED)
+  └── Factory-Reset: ÜBERSPRUNGEN (GPIO 0 Float-Problem)
+
+Phase 1: Core Infrastructure
+  └── GPIO Safe-Mode: IDENTISCH zu Hardware
+  └── Logger: IDENTISCH
+  └── ConfigManager: WOKWI-Branch → Compile-Time Credentials
+       └── WiFi: "Wokwi-GUEST" (kein Passwort)
+       └── MQTT: host.wokwi.internal:1883 (anonym)
+       └── config.configured = true → Provisioning ÜBERSPRUNGEN
+
+Phase 2: Communication Layer
+  └── WiFi: Wokwi-GUEST verbindet automatisch
+  └── MQTT: host.wokwi.internal → Gateway → localhost:1883
+  └── Heartbeat: Initialer Heartbeat nach MQTT-Connect
+  └── 10 Topics subscribed (inkl. Wildcards)
+
+Phase 3: Hardware Abstraction
+  └── I2C Bus Manager: IDENTISCH
+  └── OneWire: IDENTISCH (nur extra Log in Wokwi)
+
+Phase 4-5: Sensor + Actuator System
+  └── IDENTISCH (keine Wokwi-Branches)
 ```
 
-**Warum kein Service-Container?** Jeder Job braucht einen frischen Broker. Docker-Run gibt volle Kontrolle über Lifecycle.
+### Deaktivierte Features in Wokwi
 
-### 3.3 Error-Injection in CI (Job 16)
+| Feature | Methode | Konsequenz |
+|---------|---------|------------|
+| **Watchdog** | `WDT_DISABLED` + `#ifndef` vor `esp_task_wdt_reset()` | Kein WDT-Timeout, kein Panic, Error 4070 nicht testbar |
+| **Factory-Reset-Button** | `#ifndef WOKWI_SIMULATION` | GPIO-0-Hold nicht testbar |
+| **Provisioning (AP-Mode)** | `config.configured = true` | Captive Portal, WiFi-AP nie aktiv |
+| **NVS Sensor/Actuator** | `return true` / `return false` ohne NVS | Config nur in RAM, geht bei Reboot verloren |
+| **TLS/MQTT-Auth** | Port 1883, anonym | Kein TLS, kein Username/Password |
 
-```bash
-# 1. Wokwi im Background starten
-wokwi-cli . --timeout $TIMEOUT --serial-log-file $LOG &
-WOKWI_PID=$!
+### NVS-Verhalten: Was persistent vs. transient ist
 
-# 2. Smart Wait für MQTT (nicht fester Sleep!)
-for i in $(seq 1 60); do
-    if grep -q "MQTT connected" "$LOG"; then break; fi
-    sleep 1
-done
+| NVS-Namespace | In Wokwi geschrieben? | Begründung |
+|---------------|----------------------|------------|
+| `wifi_config` | NEIN | Wokwi-Branch returnt vor NVS-Zugriff |
+| `sensor_config` | NEIN | Wokwi-Branch: RAM-only |
+| `actuator_config` | NEIN | Wokwi-Branch: RAM-only |
+| `system_config` | JA | **Kein** Wokwi-Branch in saveSystemConfig() |
+| `zone_config` | JA | **Kein** Wokwi-Branch |
 
-# 3. MQTT Injection
-mosquitto_pub -t "auto-one/ESP_00000001/sensor/ghost_temp/command" -m '...'
+**Inkonsistenz:** system_config und zone_config werden in Wokwi in NVS geschrieben, sensor/actuator nicht. Funktional unkritisch (Wokwi-NVS ist transient per Session), aber Design-Inkonsistenz.
 
-# 4. Serial-Log prüfen
-grep -q "Expected error string" "$LOG"
+---
+
+## 4. Build-Konfiguration
+
+### Environment-Vererbung
+
+```
+esp32_dev (Basis-Board)
+  └── wokwi_simulation (extends esp32_dev + Wokwi-Flags)
+        ├── wokwi_esp01 (ESP_00000001)
+        ├── wokwi_esp02 (ESP_00000002)
+        └── wokwi_esp03 (ESP_00000003)
 ```
 
-**Bewertung:** Gut implementiert. Smart-Wait statt Sleep. Background-PID-Tracking.
+### Wokwi-spezifische Build-Flags
 
-### 3.4 Besonderheiten
+```ini
+-D WOKWI_SIMULATION=1                           # Aktiviert alle #ifdef Branches
+-D WOKWI_WIFI_SSID=\"Wokwi-GUEST\"              # Offenes WLAN
+-D WOKWI_WIFI_PASSWORD=\"\"                      # Kein Passwort
+-D WOKWI_MQTT_HOST=\"host.wokwi.internal\"       # Gateway zum Host
+-D WOKWI_MQTT_PORT=1883                          # Plaintext MQTT
+-D WOKWI_ESP_ID=\"ESP_00000001\"                 # Feste ESP-ID
+-DCONFIG_ARDUHAL_LOG_COLORS=0                    # Kein ANSI in Serial
+```
 
-- **I2C-Tests:** Tauschen `diagram.json` gegen `diagram_i2c.json` (SHT31 + BME280 statt DS18B20)
-- **Legacy-Test:** `mqtt_connection.yaml` liegt NICHT in `scenarios/` sondern direkt in `tests/wokwi/`
-- **Firmware-Artefakt:** Build-once, download per Job (effizient)
-- **Concurrency:** Enabled (neuerer Run cancelt älteren auf gleicher Branch)
+### Erbt von esp32_dev
 
----
-
-## Teil 4: Serial-String-Verifizierung
-
-### 4.1 Boot-Phasen (alle verifiziert)
-
-| Phase | String in YAML | Fundort in Firmware | Zeile |
-|-------|----------------|---------------------|-------|
-| Phase 1 | `Phase 1: Core Infrastructure READY` | main.cpp | 600 |
-| Phase 2 | `Phase 2: Communication Layer READY` | main.cpp | 1804 |
-| Phase 3 | `Phase 3: Hardware Abstraction READY` | main.cpp | 1869 |
-| Phase 4 | `Phase 4: Sensor System READY` | main.cpp | 1915 |
-| Phase 5 | `Phase 5: Actuator System READY` | main.cpp | 1954 |
-
-### 4.2 MQTT & Connectivity
-
-| String | Fundort | Zeile |
-|--------|---------|-------|
-| `MQTT connected successfully` | main.cpp | 778 |
-| `WiFi connected successfully` | main.cpp | 690 |
-| `Subscribed to system + actuator + zone + subzone + sensor + heartbeat-ack topics` | main.cpp | 827 |
-| `Initial heartbeat sent for ESP registration` | main.cpp | 790 |
-| `ConfigResponse published` | config_response.cpp | 48, 120 |
-
-### 4.3 Error Handling
-
-| String | Fundort | Zeile |
-|--------|---------|-------|
-| `Failed to parse sensor config JSON` | main.cpp | 2308 |
-| `BROADCAST EMERGENCY-STOP RECEIVED` | main.cpp | 922 |
-| `AUTHORIZED EMERGENCY-CLEAR TRIGGERED` | main.cpp | 889 |
-| `FACTORY RESET via MQTT` | main.cpp | 955 |
-| `GPIO SAFE-MODE INITIALIZATION` | gpio_manager.cpp | 80 |
-| `de-energized` | gpio_manager.cpp | 295, 317 |
-
-### 4.4 Error Codes
-
-| Code | Konstante | Fundort |
-|------|-----------|---------|
-| 1002 | ERROR_GPIO_CONFLICT | error_codes.h |
-| 1040 | ERROR_SENSOR_READ_FAILED | error_codes.h |
-| - | JSON_PARSE_ERROR | error_codes.h (ConfigErrorCode enum) |
-| - | GPIO_CONFLICT | error_codes.h (ConfigErrorCode enum) |
-
-**Bewertung:** Alle von Szenarien referenzierten Serial-Strings existieren in der Firmware. Kein String-Mismatch gefunden.
+```
+CORE_DEBUG_LEVEL=3, MAX_SENSORS=20, MAX_ACTUATORS=12
+MQTT_MAX_PACKET_SIZE=2048, MQTT_KEEPALIVE=60
+Libraries: PubSubClient, ArduinoJson, OneWire, DallasTemperature, Adafruit BME280, Unity
+```
 
 ---
 
-## Teil 5: MQTT-Infrastruktur
+## 5. Test-Framework
 
-### 5.1 Broker-Konfiguration
+### Szenario-Übersicht (178 total)
 
-| Parameter | Wert | Quelle |
-|-----------|------|--------|
-| Host (Wokwi) | `host.wokwi.internal` | platformio.ini Build-Flag |
-| Host (CI) | `localhost` (Docker Mosquitto) | wokwi-tests.yml |
-| Port | 1883 | platformio.ini Build-Flag |
-| Auth | anonymous | CI Mosquitto Config |
+| Kategorie | Ordner | Anzahl | CI-Status | PR/Push | Nightly |
+|-----------|--------|--------|-----------|---------|---------|
+| Boot | 01-boot | 2 | Aktiv | 2 | 2 |
+| Sensor | 02-sensor | 5 | Aktiv | 2+3 | 5 |
+| Actuator | 03-actuator | 7 | Aktiv | 4+3 | 7 |
+| Zone | 04-zone | 2 | Aktiv | 2 | 2 |
+| Emergency | 05-emergency | 3 | Aktiv | 2+1 | 3 |
+| Config | 06-config | 2 | Aktiv | 2 | 2 |
+| Combined | 07-combined | 2 | Aktiv | 2 | 2 |
+| I2C | 08-i2c | 20 | **INAKTIV** | 0 | 0 |
+| OneWire | 08-onewire | 29 | Aktiv | 0 | 29 |
+| Hardware | 09-hardware | 9 | Aktiv | 0 | 9 |
+| PWM | 09-pwm | 18 | Aktiv | 3 | 18 |
+| NVS | 10-nvs | 40 | Aktiv (35) | 5 | 35 |
+| Error-Injection | 11-error-injection | 10 | Aktiv | 10 | 10 |
+| Correlation | 12-correlation | 5 | Aktiv | 0 | 5 |
+| GPIO | gpio | 24 | Aktiv | 0 | 24 |
+| **Legacy** | Root | 2 | Aktiv | 1 | 2 |
+| **Total** | | **178** | **153 aktiv** | **~52** | **~155** |
 
-**Lokaler Status:** Docker Mosquitto läuft (`0.0.0.0:1883->1883/tcp`, healthy)
+### Deaktivierte/Übersprungene Tests
 
-### 5.2 ESP32 MQTT-Topics (Subscriptions)
+| Szenario | Grund |
+|----------|-------|
+| 08-i2c (20 Szenarien) | Erfordert BME280 Custom-Chip (Stufe 4) |
+| 10-nvs: nvs_pers_bootcount/reboot/sensor/wifi/zone (5) | NVS-Persistenz erfordert ESP-Reboot (nicht in Wokwi) |
 
-| Topic-Pattern | Typ | Zweck |
-|---------------|-----|-------|
-| `auto-one/{esp_id}/system/command` | Sub | Systemkommandos (factory_reset, reboot) |
-| `auto-one/{esp_id}/system/config` | Sub | Gerätekonfiguration |
-| `auto-one/broadcast/emergency` | Sub | Broadcast Emergency-Stop |
-| `auto-one/{esp_id}/actuator/+/command` | Sub (Wildcard) | Aktor-Steuerung |
-| `auto-one/{esp_id}/emergency` | Sub | ESP-spezifischer Emergency |
-| `auto-one/{esp_id}/zone/assign` | Sub | Zonen-Zuweisung |
-| `auto-one/{esp_id}/subzone/assign` | Sub | Subzonen-Zuweisung |
-| `auto-one/{esp_id}/subzone/remove` | Sub | Subzonen-Entfernung |
-| `auto-one/{esp_id}/sensor/+/command` | Sub (Wildcard) | Sensor-Konfiguration |
-| `auto-one/{esp_id}/heartbeat-ack` | Sub | Heartbeat-Bestätigung |
+### Szenario-Step-Typen
 
-### 5.3 ESP32 MQTT-Topics (Publications)
+| Step | Verwendung | Beschreibung |
+|------|------------|--------------|
+| `wait-serial: "Pattern"` | Alle Szenarien | Wartet auf String im Serial-Output |
+| `delay: N` | Error-Injection, Combined | Zeitverzögerung in Millisekunden |
+| `set-control` | PWM, Emergency | Simuliert Hardware-Interaktion |
 
-| Topic-Pattern | Typ | Zweck |
-|---------------|-----|-------|
-| `auto-one/{esp_id}/heartbeat` | Pub | Periodischer Heartbeat |
-| `auto-one/{esp_id}/system/config/response` | Pub | Config-Antwort |
-| `auto-one/{esp_id}/actuator/{name}/response` | Pub | Aktor-Status |
-| `auto-one/{esp_id}/emergency/response` | Pub | Emergency-Status |
-| `auto-one/{esp_id}/system/command/response` | Pub | System-Antwort |
-| `auto-one/{esp_id}/onewire/scan` | Pub | OneWire-Scan-Ergebnis |
-| `auto-one/{esp_id}/diagnostics` | Pub | Diagnose-Daten |
+### CI-Pipeline Struktur
 
-### 5.4 Error-Injection MQTT-Kommandos (aus CI)
+```
+Trigger: Push/PR → El Trabajante/**, Nightly 2 AM UTC, Manual
 
-| Szenario | Topic | Payload-Typ |
-|----------|-------|-------------|
-| error_sensor_timeout | `.../sensor/ghost_temp/command` | Sensor-Config JSON |
-| error_config_invalid_json | `.../system/config` | Malformed JSON |
-| error_emergency_cascade | Mehrere (emergency, actuator, config) | 5-Step Sequence |
-| error_gpio_conflict | `.../sensor/conflict_1/command` + `.../sensor/conflict_2/command` | Gleicher GPIO |
-| error_heap_pressure | `.../sensor/{n}/command` (x14) | 14 Sensor-Configs |
-| error_nvs_corrupt | `.../system/command` | `{"command":"factory_reset"}` |
-| error_mqtt_disconnect | `.../system/config` | Config + Wait + Verify |
-| error_i2c_bus_stuck | `.../sensor/ghost_i2c/command` | I2C-Sensor Config |
-| error_actuator_timeout | `.../actuator/test_relay/command` | `{"action":"ON"}` |
-| error_watchdog_trigger | `.../sensor/+/command` (x6) + emergency | Load + Emergency |
+Job 1: build-firmware
+  └── pio run -e wokwi_simulation → Artifact upload
 
----
+Jobs 2-17: Test-Kategorien (parallel)
+  └── Download Firmware Artifact
+  └── Start Mosquitto Container (anonym, Port 1883)
+  └── Install wokwi-cli
+  └── Run scenarios via wokwi-cli --scenario
 
-## Teil 6: Helper-Infrastruktur
+Nightly: +6 Extended Jobs (OneWire, Hardware, PWM, NVS, GPIO, Correlation)
 
-### 6.1 Helper-Scripts (5 Dateien)
-
-| Script | Pfad | Funktion |
-|--------|------|----------|
-| `emergency_cascade.sh` | `tests/wokwi/helpers/` | 5-Step MQTT Emergency Sequence |
-| `emergency_cascade_stress.sh` | `tests/wokwi/helpers/` | Stress-Variante |
-| `mqtt_inject.py` | `tests/wokwi/helpers/` | Python paho-mqtt Injector (--topic, --payload, --delay, --repeat, --qos) |
-| `preflight_check.sh` | `tests/wokwi/helpers/` | 3-Check: kein lokaler Mosquitto, Docker Port published, MQTT erreichbar |
-| `wait_for_mqtt.sh` | `tests/wokwi/helpers/` | Pollt Serial-Log auf MQTT-Connection (configurable timeout) |
-
-### 6.2 Convenience-Scripts
-
-| Script | Pfad | Funktion |
-|--------|------|----------|
-| `run-wokwi.bat` | `scripts/` | Windows Batch für Wokwi-Start |
-| `run-wokwi-tests.py` | `scripts/` | Python Test-Runner |
-| `start-wokwi-dev.ps1` | `scripts/` | PowerShell Dev-Starter |
-
-### 6.3 Seed-Script
-
-**`scripts/seed_wokwi_esp.py` existiert NICHT** im Repository. MEMORY.md referenziert es, aber die Datei ist nicht vorhanden. Die ESP-Registrierung erfolgt über den normalen Heartbeat-Flow (ESP sendet Heartbeat → Server registriert automatisch).
+Secret: WOKWI_CLI_TOKEN (GitHub Secret)
+Plan: Pro ($25/seat/month), 2000 CI-Min/Monat
+```
 
 ---
 
-## Teil 7: Makefile-Targets
+## 6. Konnektivität und Infrastruktur
 
-| Target | Szenarien | Beschreibung |
-|--------|-----------|--------------|
-| `wokwi-test-quick` | 2 | Boot + Heartbeat |
-| `wokwi-test-full` | ~22 | Core-Szenarien (echo sagt 23, tatsächlich 22) |
-| `wokwi-test-all` | 173 | Alle Szenarien |
-| `wokwi-test-error-injection` | 10 | Error-Injection |
-| `wokwi-test-scenario` | 1 | Einzelnes Szenario (Parameter) |
-| `wokwi-test-category` | variabel | Kategorie (Parameter) |
+### MQTT-Pfad (Wokwi → Server)
 
-**Bekannte Echo-Bugs:** Die Makefile-Echo-Messages zeigen falsche Zahlen (nvs: 35 statt 40, pwm: 15 statt 18, extended: ~135 statt ~163, full: 23 statt 22).
+```
+Wokwi ESP32 (virtuell)
+  → WiFi: Wokwi-GUEST (internes Wokwi-Netz)
+  → DNS: host.wokwi.internal → Host-Rechner
+  → TCP: Port 1883 (Plaintext, anonym)
+  → Docker: automationone-mqtt (eclipse-mosquitto:2)
+  → El Servador (FastAPI, heartbeat_handler.py)
+  → PostgreSQL (esp_devices Tabelle)
+```
 
----
+### Voraussetzungen (Windows)
 
-## Teil 8: Dokumentations-Konsistenz
+| Anforderung | Prüfung | Fix |
+|-------------|---------|-----|
+| Kein lokaler Mosquitto-Service | `tasklist \| grep mosquitto` | `net stop mosquitto` |
+| Docker-Port 1883 published | `docker ps \| grep 0.0.0.0:1883` | `docker compose up -d mqtt-broker` |
+| Windows-Firewall Port 1883 | `Get-NetFirewallRule "Mosquitto MQTT"` | `scripts/add-firewall-rule.ps1` |
+| WOKWI_CLI_TOKEN gesetzt | `$env:WOKWI_CLI_TOKEN` | Token von wokwi.com/dashboard/ci |
+| Firmware gebaut | `.pio/build/wokwi_simulation/firmware.bin` | `pio run -e wokwi_simulation` |
+| DB geseeded | ESP_00000001 in esp_devices | `python scripts/seed_wokwi_esp.py` |
 
-### 8.1 Vorhandene Wokwi-Dokumentation
+### Device-Registration-Flow
 
-| Dokument | Status | Inhalt |
-|----------|--------|--------|
-| `WOKWI_ERROR_MAPPING.md` | AKTUELL (v2.0) | Alle 10 Error-Injection-Szenarien gemappt |
-| `SYSTEM_OPERATIONS_REFERENCE.md` | Teilweise aktuell | Wokwi-Abschnitte vorhanden |
-| `TEST_WORKFLOW.md` | Teilweise aktuell | Wokwi-Workflow dokumentiert |
-| `LOG_LOCATIONS.md` | Teilweise aktuell | Wokwi-Log-Pfade |
-| MEMORY.md | Enthält falsches seed-script | `seed_wokwi_esp.py` existiert nicht |
+```
+1. Wokwi-ESP bootet → MQTT Connect
+2. ESP sendet initialen Heartbeat (publishHeartbeat(true))
+3. Server heartbeat_handler.py:139 → Device auf "online"
+4. Server sendet Heartbeat-ACK
+5. ESP mqttClient.confirmRegistration() → Registration Gate öffnet
+6. Fallback: 10s Timeout → Gate öffnet automatisch
+7. Erst danach: Sensor/Actuator-Daten werden publiziert
+```
 
-### 8.2 Konsistenz-Findings
+### Subscribed Topics (nach Connect)
 
-| Finding | Detail |
-|---------|--------|
-| Makefile Echo-Counts | 4 falsche Zahlen (nvs, pwm, extended, full) |
-| seed_wokwi_esp.py | In MEMORY.md referenziert, existiert nicht |
-| Legacy mqtt_connection.yaml | Außerhalb von scenarios/, wird aber in CI genutzt |
-| Doppel-Nummern | 08-i2c + 08-onewire, 09-hardware + 09-pwm (jeweils gleiche Prefix) |
-
----
-
-## Teil 9: Agent-Driven Testing
-
-### 9.1 Vorhandene Infrastruktur
-
-| Komponente | Status | Detail |
-|------------|--------|--------|
-| WOKWI_ERROR_MAPPING.md | Vorhanden | Alle 10 Szenarien → Error-Codes gemappt |
-| test-log-analyst Agent | Vorhanden | Kann Wokwi-Logs analysieren |
-| esp32-debug Agent | Vorhanden | Serial-Log-Expertise |
-| mqtt_inject.py Helper | Vorhanden | Programmatische MQTT-Injection |
-| wait_for_mqtt.sh | Vorhanden | MQTT-Connection-Wait |
-| preflight_check.sh | Vorhanden | Pre-Flight Validation |
-| wokwi-cli --serial-log-file | Unterstützt | Log-Capture für Agent-Analyse |
-
-### 9.2 Fehlende Infrastruktur
-
-| Komponente | Fehlt | Auswirkung |
-|------------|-------|------------|
-| Dedizierter Wokwi-Test-Agent | Ja | Kein Agent orchestriert Wokwi-Tests end-to-end |
-| Automatische Log-Analyse-Pipeline | Ja | Serial-Logs werden nicht automatisch an Agents weitergereicht |
-| Retry/Recovery-Logik | Ja | Bei Wokwi-Timeout kein automatischer Retry |
-| Local Wokwi Test Orchestrator | Ja | Nur Makefile-Targets, kein intelligenter Orchestrator |
-
-### 9.3 Bewertung
-
-Die **Grundlagen sind gelegt** (Mapping, Helper-Scripts, Log-Capture). Für echtes Agent-Driven Testing fehlt ein **Orchestrator**, der:
-1. `wokwi-cli` startet
-2. Serial-Log monitort
-3. Bei Bedarf MQTT injiziert
-4. Ergebnisse an `test-log-analyst` weiterreicht
-5. Report schreibt
-
-Das existierende CI-Setup (wokwi-tests.yml Job 16) ist ein gutes **Referenz-Pattern** dafür.
+```
+kaiser/god/esp/ESP_00000001/system/command
+kaiser/god/esp/ESP_00000001/config
+kaiser/broadcast/emergency
+kaiser/god/esp/ESP_00000001/actuator/+/command        (Wildcard)
+kaiser/god/esp/ESP_00000001/actuator/emergency
+kaiser/god/esp/ESP_00000001/zone/assign
+kaiser/god/esp/ESP_00000001/zone/subzone/assign
+kaiser/god/esp/ESP_00000001/zone/subzone/remove
+kaiser/god/esp/ESP_00000001/sensor/+/command           (Wildcard)
+kaiser/god/system/heartbeat/ack
+```
 
 ---
 
-## Teil 10: Prioritäts-Matrix
+## 7. DB-Seed (Wokwi ESP Devices)
 
-### Sofort behebbar (Quick Wins)
+### seed_wokwi_esp.py
 
-| # | Problem | Betroffene Dateien | Aufwand |
-|---|---------|--------------------|---------|
-| 1 | Makefile Echo-Counts korrigieren | 1 Datei (Makefile) | 5 Min |
-| 2 | Legacy mqtt_connection.yaml in scenarios/ verschieben | 1 Datei + CI-Referenz | 10 Min |
-| 3 | MEMORY.md seed_wokwi_esp.py Referenz entfernen | 1 Datei | 2 Min |
+**Pfad:** `El Servador/god_kaiser_server/scripts/seed_wokwi_esp.py`
+**Ausführung:** Lokal, NICHT im Docker-Container
 
-### Mittel-Aufwand (systematisch)
+```powershell
+cd "El Servador/god_kaiser_server"
+.venv/Scripts/python.exe scripts/seed_wokwi_esp.py
+```
 
-| # | Problem | Betroffene Dateien | Aufwand |
-|---|---------|--------------------|---------|
-| 4 | `part-id: "mqtt"` in gpio/ ersetzen | 20 YAML-Dateien | 1-2h |
-| 5 | `part-id: "mqtt"` in 09-hardware/ ersetzen | 8 YAML-Dateien | 30 Min |
-| 6 | Doppel-Nummern-Prefixe auflösen (08-*, 09-*) | Verzeichnisstruktur + CI | 30 Min |
+**Erstellt 3 Devices:**
 
-### Architektur-Entscheidung nötig
+| Device-ID | Name | Status | Hardware-Type | Capabilities |
+|-----------|------|--------|---------------|--------------|
+| ESP_00000001 | Wokwi Simulation ESP #1 | approved | ESP32_WROOM | max_sensors=20, max_actuators=12, wokwi=true |
+| ESP_00000002 | Wokwi Simulation ESP #2 | approved | ESP32_WROOM | identisch |
+| ESP_00000003 | Wokwi Simulation ESP #3 | approved | ESP32_WROOM | identisch |
 
-| # | Problem | Frage |
-|---|---------|----|
-| 7 | Was soll `set-control: part-id: "mqtt"` ersetzen? | Passives Pattern (wie error-injection) oder neues Wokwi-Part? |
-| 8 | Dedizierter Wokwi-Test-Agent? | Eigener Agent oder Erweiterung von test-log-analyst? |
-| 9 | Diagram-Management | Ein diagram.json + Alternativen, oder pro Kategorie? |
+**Wichtig:** Status `approved` (pre-approved, kein pending_approval-Schritt nötig).
 
 ---
 
-## Anhang A: Nicht getestete Bereiche
+## 8. Serial-Log-Zugriff
 
-| Bereich | Grund |
-|---------|-------|
-| Firmware-Build (`pio run -e wokwi_simulation`) | Analyse-Only Auftrag |
-| Live Wokwi-Test (wokwi-cli) | WOKWI_CLI_TOKEN nicht gesetzt in lokaler Umgebung |
-| CI-Pipeline End-to-End | Nur YAML analysiert, nicht ausgeführt |
+### Methoden
 
-## Anhang B: Datei-Referenzen
+| Methode | Tool | Beschreibung |
+|---------|------|-------------|
+| CLI Direct | `wokwi-cli . --timeout 90000` | Serial direkt in stdout |
+| CLI Log-File | `wokwi-cli . --serial-log-file output.log` | Parallel in Datei |
+| RFC2217 | `wokwi_serial_logger.py` | Stream über RFC2217 Port 4000 |
+| Scenario | `--scenario tests/wokwi/boot_test.yaml` | Automatisierter Test |
 
-| Datei | Pfad |
-|-------|------|
-| wokwi.toml | `El Trabajante/wokwi.toml` |
-| diagram.json | `El Trabajante/diagram.json` |
-| platformio.ini | `El Trabajante/platformio.ini` |
-| wokwi-tests.yml | `.github/workflows/wokwi-tests.yml` |
-| WOKWI_ERROR_MAPPING.md | `.claude/reference/testing/WOKWI_ERROR_MAPPING.md` |
-| main.cpp | `El Trabajante/src/main.cpp` |
-| gpio_manager.cpp | `El Trabajante/src/drivers/gpio_manager.cpp` |
-| error_codes.h | `El Trabajante/src/models/error_codes.h` |
-| config_response.cpp | `El Trabajante/src/services/config/config_response.cpp` |
-| Makefile | `Makefile` (Projekt-Root) |
-| Helpers | `El Trabajante/tests/wokwi/helpers/` |
-| Alternative Diagrams | `El Trabajante/tests/wokwi/diagrams/` |
+### wokwi_serial_logger.py Features
+
+- Verbindet über `rfc2217://localhost:4000`
+- Schreibt nach `logs/wokwi_serial.log` (Timestamped)
+- Parsed `[DEBUG]` JSON-Lines → `.cursor/debug.log` (NDJSON)
+- Erfordert: Wokwi in VS Code gestartet + RFC2217 in wokwi.toml
 
 ---
 
-*Report generiert am 2026-02-23. Analyse-Only — keine Änderungen am Repository vorgenommen.*
+## 9. Bekannte Limitierungen
+
+### Sensor-Limitierungen
+
+| Sensor | Limitierung | Auswirkung |
+|--------|-------------|------------|
+| DS18B20 | Konstant 22.5°C | Temperatur-basierte Logic nicht testbar |
+| DHT22 | Konstant 23.5°C / 65% | Keine dynamischen Umgebungswerte |
+| Potentiometer | Fester Wert 50% | ADC-Range nicht durchfahrbar |
+| LEDs | Brightness nicht messbar | PWM nur über internen State verifizierbar |
+
+### Nicht-testbare Features
+
+| Feature | Grund | Alternative |
+|---------|-------|-------------|
+| Watchdog-Timeout (Error 4070) | WDT_DISABLED in Wokwi | Server-seitige Simulation |
+| Factory-Reset (GPIO 0) | Kein Button / Float-Problem | MQTT system/command |
+| Provisioning (AP-Mode) | config.configured=true | Separater Unit-Test |
+| NVS-Persistenz über Reboot | Wokwi-NVS transient pro Session | 5 NVS-Tests geskippt |
+| TLS-Verbindung (Port 8883) | Wokwi nutzt Plaintext 1883 | Server-Integration-Tests |
+| WiFi-Disconnect/Roaming | Wokwi-GUEST stabil | Server-Mock-Tests |
+| I2C-Sensor-Tests | Kein BME280 Custom-Chip | 20 Tests inaktiv (Stufe 4) |
+
+### Wokwi-Simulator Einschränkungen
+
+| Einschränkung | Impact |
+|---------------|--------|
+| 90s Max-Timeout Default | Lange Tests müssen gesplittet werden |
+| Kein MQTT-Broker-Monitoring | Messages nur via Serial-Log verifizierbar |
+| Kein Button-Press in Scenarios | Nur via `set-control` Step (limitiert) |
+| DS18B20 konstanter Wert | Kein temperaturschwellenbasiertes Testing |
+| Kein ESP-Reboot zwischen Steps | NVS-Persistenz nicht prüfbar |
+
+---
+
+## 10. Findings und Inkonsistenzen
+
+### Kritische Findings
+
+| # | Finding | Schwere | Detail |
+|---|---------|---------|--------|
+| F1 | **boot_test.yaml erwartet "Watchdog configured" - wird in Wokwi nie ausgegeben** | MEDIUM | Legacy-Szenario stimmt nicht mit aktuellem Code überein. Watchdog wird in Wokwi auf WDT_DISABLED gesetzt, kein "Watchdog configured" Serial-Output. `scenarios/01-boot/boot_full.yaml` enthält diesen Check ebenfalls. |
+| F2 | **error_watchdog_trigger.yaml ist irreführend benannt** | LOW | Testet NICHT echten Watchdog-Trigger (WDT deaktiviert), sondern Emergency-Stop-Stabilität unter Last. Name im WOKWI_ERROR_MAPPING.md suggeriert falsches Verhalten. |
+| F3 | **error_nvs_corrupt.yaml testet keinen NVS-Defekt** | LOW | Testet MQTT Factory-Reset-Command, nicht Error-Code 2001 (NVS_INIT_FAILED). Mapping irreführend. |
+| F4 | **sensor_ds18b20_full_flow.yaml wartet auf LOG_DEBUG-String** | MEDIUM | `wait-serial: "Published"` matcht nur bei LOG_DEBUG. Bei Default LOG_INFO → 90s Timeout. |
+| F5 | **saveSystemConfig() hat keinen Wokwi-Branch** | LOW | Sensor/Actuator-Config umgeht NVS in Wokwi, System-Config nicht. Design-Inkonsistenz, funktional unkritisch. |
+| F6 | **08-i2c (20 Szenarien) komplett inaktiv** | INFO | Warten auf BME280 Custom-Chip (Stufe 4). Infrastruktur vorhanden, diagram_i2c.json existiert. |
+| F7 | **Registration Gate als versteckter Timing-Pfad** | MEDIUM | Ohne laufenden Server/geseeded Device: 10s Timeout bevor Sensor/Actuator-Daten publiziert werden. Einige ältere Szenarien prüfen `REGISTRATION CONFIRMED` nicht. |
+
+### Design-Inkonsistenzen
+
+| Inkonsistenz | Betroffene Dateien | Risiko |
+|-------------|-------------------|--------|
+| NVS-Bypass nur für Sensor/Actuator, nicht System/Zone | config_manager.cpp | Gering (Wokwi-NVS transient) |
+| onewire_bus.cpp Wokwi-Branch ändert nichts am Verhalten | onewire_bus.cpp:69 | Keins (nur Log) |
+| MQTT-Container-Name hardcodiert in run-wokwi-tests.py | scripts/run-wokwi-tests.py | Gering |
+| Kein Diagram-Wechsel-Mechanismus für I2C-Tests | tests/wokwi/diagrams/ | Blockiert I2C-Tests |
+| run-wokwi.bat enthält alten Pfad (`PCUser` statt `robin`) | scripts/run-wokwi.bat | Script nicht nutzbar |
+
+---
+
+## 11. Coverage-Einschätzung
+
+### Testabdeckung nach System-Flow
+
+| Flow | Abdeckung | Limitierung |
+|------|-----------|-------------|
+| Boot-Sequenz | 85% | Provisioning nicht testbar |
+| Sensor-Reading | 50% | DS18B20 konstant, DHT22 konstant |
+| Actuator-Command | 70% | LED-Brightness nicht messbar |
+| Runtime-Config | 60% | Via MQTT-Injection |
+| MQTT-Routing | 65% | Nur Serial-Verifizierung |
+| Error-Recovery | 30% | WiFi-Drop nicht simulierbar |
+| Zone-Assignment | 70% | Via MQTT-Injection |
+| Emergency-Stop | 80% | Full-Flow inkl. Clear testbar |
+| I2C-Bus | 0% | Komplett blockiert (Custom-Chip) |
+| PWM-Steuerung | 65% | Interner State testbar, Output nicht |
+| NVS-Storage | 70% | 5 Persistence-Tests geskippt |
+| GPIO-Management | 75% | 24 passive Szenarien |
+
+**Gesamtabdeckung: ~55-60%** (realistisch, basierend auf Wokwi-Limitierungen)
+
+---
+
+## 12. Referenz-Dokumentation
+
+| Dokument | Pfad | Aktualität |
+|----------|------|------------|
+| Wokwi Testing Guide | `.claude/reference/testing/WOKWI_TESTING.md` | v2.1, 2026-02-23 |
+| Error-Injection Mapping | `.claude/reference/testing/WOKWI_ERROR_MAPPING.md` | v2.0, 2026-02-22 |
+| Test-README | `El Trabajante/tests/wokwi/README.md` | 2026-01-05 (veraltet) |
+| Self-Hosted Evaluation | `docs/wokwi-self-hosted-evaluation.md` | 2026-02-23 |
+| TM Wokwi-Analyse (archiviert) | `.technical-manager/archive/.../wokwi-analysis-2026-02-10.md` | Archiviert |
+
+---
+
+## 13. Zusammenfassung
+
+### Stärken
+
+- **Saubere Code-Trennung:** 17 Preprocessor-Branches in 4 Dateien, alle kommentiert und begründet
+- **Validation auch in Wokwi:** Security-Checks werden nicht umgangen
+- **Umfangreiches Test-Framework:** 178 Szenarien in 15 Kategorien
+- **CI-Integration:** Automatisierte PR/Push (52 Szenarien) + Nightly (155 Szenarien)
+- **Multi-Device-Support:** 3 parallele ESP-Environments vorbereitet (ESP_00000001-03)
+- **Credentials-Sicherheit:** Nur offene Netze/anonymes MQTT, kein Secret-Leak
+- **Retry-Logik:** Test-Runner kompensiert Wokwi-Flakiness (3 Versuche)
+- **Tooling:** Serial-Logger, MQTT-Injection, Preflight-Check, Firewall-Script
+
+### Schwächen
+
+- **20 I2C-Tests blockiert** durch fehlenden Custom-Chip (Stufe 4)
+- **Konstante Sensorwerte** limitieren dynamische Tests (DS18B20 22.5°C, DHT22 23.5°C)
+- **Legacy-Szenarien** (boot_test.yaml, boot_full.yaml) erwarten "Watchdog configured" das in Wokwi nicht ausgegeben wird
+- **Kein automatischer Diagram-Wechsel** für alternative Hardware-Konfigurationen
+- **Registration Gate Timing** als versteckter Fehler-Pfad in älteren Szenarien
+- **run-wokwi.bat** enthält veralteten Pfad (PCUser statt robin)
+- **Irreführende Szenario-Namen** in WOKWI_ERROR_MAPPING.md (Watchdog, NVS)
+
+### Empfehlung für nächste Schritte
+
+1. **F1 (MEDIUM):** boot_test.yaml + boot_full.yaml → "Watchdog configured" Check prüfen/korrigieren
+2. **F4 (MEDIUM):** sensor_ds18b20_full_flow.yaml → LOG_DEBUG-Abhängigkeit auflösen
+3. **F7 (MEDIUM):** Registration Gate Check in älteren Szenarien nachrüsten
+4. **F6 (INFO):** I2C-Diagram-Wechsel-Mechanismus für CI planen
+5. **run-wokwi.bat:** Pfad aktualisieren oder Script entfernen
+6. **WOKWI_ERROR_MAPPING.md:** Irreführende Namen (F2, F3) korrigieren
+
+---
+
+*Erstanalyse v2.0 abgeschlossen. Für Detail-Analyse einzelner Bereiche: esp32-debug (Log/Error-Analyse), esp32-dev (Code-Patterns), system-control (Infrastruktur/CI).*

@@ -3,514 +3,405 @@
 > **Erstellt:** 2026-03-01
 > **Ziel-Repo:** auto-one
 > **Prioritaet:** HOCH — Alle 3 Monitor-Ebenen + Editor-Integration muessen verifiziert werden
-> **Status:** OFFEN
+> **Status:** E2E-BUGREPORT VOLLSTAENDIG
 > **Typ:** Verifikation + E2E-Tests (Playwright + manuell)
 > **Voraussetzung:** Monitor Ebene 1 (ABGESCHLOSSEN), Ebene 2 (ERLEDIGT), Ebene 3 Editor-Integration (ERLEDIGT)
 > **Kontext:** Nach der Implementierung aller 3 Monitor-Ebenen und der Editor-Integration muss das gesamte System end-to-end verifiziert werden
+> **Letzte Aktualisierung:** 2026-03-01 E2E-Playwright-Durchlauf + Code-Analyse
 
 ---
 
-## Kontext: Was wurde implementiert
+## E2E-Testdurchlauf Ergebnis
 
-### Monitor 3-Level-Architektur
+> **Methode:** Playwright Browser-Automation + Code-Analyse + Docker-Log-Auswertung
+> **Screenshots:** e2e-monitor-L1.png, e2e-monitor-L2-zone-test.png, e2e-monitor-L2-expanded-panel.png, e2e-monitor-L3-slideover.png, e2e-monitor-L3-dashboardviewer.png, e2e-dashboard-not-found.png, e2e-editor-tab.png
 
-```
-Ebene 1: Zonen-Uebersicht (/monitor)
-  - Zone-Cards mit KPI-Zusammenfassung (Sensoren, Aktoren, Alarme, Temperatur)
-  - Cross-Zone-Dashboard-Links (Dashboards mit scope='cross-zone')
-  - Klick auf Zone → L2
-    ↓
-Ebene 2: Zonenansicht (/monitor/:zoneId)
-  - Subzone-Accordions via useZoneGrouping.ts (ZoneGroup[]/SubzoneGroup[])
-  - SensorCard/ActuatorCard im mode:'monitor' (Read-Only, Live-Wert, Sparkline)
-  - Sparkline-Cache (useSparklineCache.ts, 5s-Deduplizierung)
-  - Zone-Dashboard-Links (auto-generiert + user-erstellt)
-  - Klick auf Sensor → L3 SlideOver
-  - Klick auf Dashboard-Link → L3 DashboardViewer
-    ↓
-Ebene 3: Detail-Ebene
-  a) Sensor-Detail-SlideOver (/monitor/:zoneId/sensor/:sensorId)
-     - Zeitreihe (24h Default), TimeRangeSelector, CSV-Export
-  b) DashboardViewer (/monitor/dashboard/:dashboardId ODER /monitor/:zoneId/dashboard/:dashboardId)
-     - GridStack mit staticGrid: true (View-Only)
-     - useDashboardWidgets.ts fuer Container-agnostic Widget mount/unmount
-```
+### Block-Ergebnisse Uebersicht
 
-### Editor-Integration (Ebene 3)
-
-```
-Neue Dateien:
-  - El Frontend/src/composables/useDashboardWidgets.ts (265 Zeilen)
-  - El Frontend/src/components/dashboard/DashboardViewer.vue (367 Zeilen)
-  - El Frontend/src/components/dashboard/InlineDashboardPanel.vue (165 Zeilen)
-  - El Servador/.../alembic/versions/add_dashboard_target_field.py
-
-Geaenderte Dateien:
-  - El Frontend/src/router/index.ts (+2 Routes: monitor-dashboard, monitor-zone-dashboard)
-  - El Frontend/src/views/MonitorView.vue (DashboardViewer branching, inline panels, side panels)
-  - El Frontend/src/views/CustomDashboardView.vue (refactored, target config dropdown)
-  - El Frontend/src/views/HardwareView.vue (side panel integration)
-  - El Frontend/src/shared/stores/dashboard.store.ts (generateZoneDashboard, DashboardTarget, computeds)
-  - El Frontend/src/api/dashboards.ts (target in DTO + Payloads)
-  - El Servador/.../db/models/dashboard.py (target JSON column)
-  - El Servador/.../schemas/dashboard.py (target in Create/Update/Response)
-```
-
-### DashboardTarget Interface
-
-```typescript
-interface DashboardTarget {
-  view: 'monitor' | 'hardware'      // Ziel-Tab
-  placement: 'page' | 'inline' | 'side-panel'  // Darstellungsart
-  anchor?: string                     // Bei inline: Position (z.B. 'zone-header', 'after-sensors')
-  panelPosition?: 'left' | 'right'   // Bei side-panel
-  panelWidth?: number                 // In Spalten (1-4 von 12)
-  order?: number                      // Reihenfolge
-}
-```
+| Block | Beschreibung | Status | Kritische Funde |
+|-------|-------------|--------|-----------------|
+| B1 | Build + Migration | TEILWEISE | Frontend Build OK, TypeScript OK, **Alembic Migration NICHT angewendet** |
+| B2 | Router + Navigation | BESTANDEN | Alle 7 Routes registriert, L1→L2→L3→L2→L1 Flow OK |
+| B3 | Monitor L1 | BESTANDEN | Zone-Cards rendern, KPIs korrekt |
+| B4 | Monitor L2 | TEILWEISE | Accordions OK, **keine Sparklines**, **ActuatorCard Toggle sichtbar** |
+| B5 | Monitor L3 Sensor | TEILWEISE | SlideOver OK, **Stats zeigen "—"**, TimeRange OK |
+| B6 | Monitor L3 Dashboard | FEHLGESCHLAGEN | **Widgets im Edit-Modus**, **API 500** |
+| B7 | Editor-Integration | FEHLGESCHLAGEN | **API 500 blockiert gesamten Flow** |
+| B8 | Server-API | FEHLGESCHLAGEN | **`dashboards.target` Column fehlt** |
+| B9 | Edge Cases | BESTANDEN | Nicht-existierende Ressourcen: Graceful Handling |
+| B10 | TypeScript + Tests | BESTANDEN | `vue-tsc --noEmit` clean, `npm run build` 0 Errors |
 
 ---
 
-## Block 1: Build + Migration Verifikation
+## BLOCKER — Alembic Migration nicht angewendet
 
-### B1.1: Frontend Build
+### BUG-BLOCKER-1: `dashboards.target` Column fehlt in der Datenbank
 
+**Schweregrad:** BLOCKER
+**Datei:** `El Servador/god_kaiser_server/alembic/versions/add_dashboard_target_field.py`
+**DB-Schema verifiziert via:** `docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c "\d dashboards"`
+
+**Ist-Zustand der `dashboards`-Tabelle:**
+```
+id, name, description, owner_id, is_shared, widgets, scope, zone_id, auto_generated, sensor_id, created_at, updated_at
+```
+**Fehlend:** `target` (JSON, nullable)
+
+**Alembic-Status:**
+- `alembic heads` → `add_dashboard_target (head)` — Migration existiert
+- `alembic current` → LEER — Migration wurde nie ausgefuehrt
+- Server-Log: `column dashboards.target does not exist` → SQLAlchemy 500-Error
+
+**Impact:**
+- `GET /api/v1/dashboards` → 500 Internal Server Error
+- Dashboard-Store kann keine Dashboards vom Server laden
+- DashboardViewer Widgets zeigen Dropdowns statt Daten
+- Editor-Tab ist leer
+- Gesamte Dashboard-Target-Funktionalitaet (Monitor-Placement, Side-Panels, Inline-Panels) blockiert
+
+**Fix:**
 ```bash
-cd "El Frontend"
-npm run build
-# Erwartung: Keine Fehler, keine Warnungen in neuen Dateien
-# vue-tsc --noEmit fuer TypeScript-Pruefung
+docker exec automationone-server alembic upgrade head
+docker restart automationone-server
 ```
-
-**Pruefe:**
-- [ ] `npm run build` erfolgreich (0 Errors)
-- [ ] `vue-tsc --noEmit` clean (keine Typ-Fehler in neuen/geaenderten Dateien)
-- [ ] Keine unused imports in: useDashboardWidgets.ts, DashboardViewer.vue, InlineDashboardPanel.vue
-
-### B1.2: Backend Build + Alembic Migration
-
-```bash
-cd "El Servador"
-# Alembic Migration testen
-alembic upgrade head
-alembic downgrade -1
-alembic upgrade head
-# Erwartung: Migration laeuft fehlerfrei hin und zurueck
-```
-
-**Pruefe:**
-- [ ] Alembic `upgrade head` erfolgreich
-- [ ] Alembic `downgrade -1` erfolgreich (Rollback)
-- [ ] Alembic `upgrade head` erneut erfolgreich (Idempotenz)
-- [ ] `target` Column existiert auf `dashboards` Tabelle (JSON, nullable)
-- [ ] Bestehende Dashboards haben `target = NULL` (kein Datenbrecher)
-
-### B1.3: Docker Compose
-
-```bash
-docker compose up -d
-# Erwartung: Alle Container healthy
-docker compose ps
-```
-
-**Pruefe:**
-- [ ] Alle Container healthy (Frontend, Backend, DB, MQTT, etc.)
-- [ ] Backend startet ohne Fehler trotz neuer Migration
-- [ ] Frontend-Container baut erfolgreich
 
 ---
 
-## Block 2: Router + Navigation E2E
+## Bugreport Block 11 — Vollstaendige E2E-Befunde
 
-### B2.1: Route-Registrierung
+### Zusammenfassung
 
-**Playwright-Test (oder manuell):**
-
-| Route | Name | Erwartung |
-|-------|------|-----------|
-| `/monitor` | `monitor` | L1 Zonen-Uebersicht rendert |
-| `/monitor/:zoneId` | `monitor-zone` | L2 Zonenansicht rendert |
-| `/monitor/:zoneId/sensor/:sensorId` | (Sensor-Detail) | L3 SlideOver oeffnet |
-| `/monitor/dashboard/:dashboardId` | `monitor-dashboard` | DashboardViewer rendert (Cross-Zone) |
-| `/monitor/:zoneId/dashboard/:dashboardId` | `monitor-zone-dashboard` | DashboardViewer rendert (Zone-spezifisch) |
-| `/editor` | `editor` | CustomDashboardView rendert |
-| `/editor/:dashboardId` | (Editor Detail) | Dashboard im Editor oeffnet |
-
-**Pruefe:**
-- [ ] Alle 7 Routes sind registriert und erreichbar
-- [ ] Keine 404-Fehler bei direktem URL-Aufruf
-- [ ] Route-Guards (falls vorhanden) blockieren nicht
-
-### B2.2: Navigationsfluss L1 → L2 → L3
-
-**Playwright-Szenario:**
-
-```
-1. /monitor laden
-2. Zone-Card klicken → /monitor/:zoneId
-3. SensorCard klicken → SlideOver oeffnet sich
-4. SlideOver schliessen → zurueck auf /monitor/:zoneId
-5. Dashboard-Link klicken → /monitor/:zoneId/dashboard/:dashboardId
-6. Zurueck-Button → /monitor/:zoneId
-7. Breadcrumb "Monitor" klicken → /monitor
-```
-
-**Pruefe:**
-- [ ] Jeder Schritt navigiert korrekt
-- [ ] Browser-Back-Button funktioniert an jedem Punkt
-- [ ] Breadcrumbs zeigen korrekten Pfad (Monitor > Zone > Sensor/Dashboard)
-- [ ] Kein Flash/Flicker bei Transitionen
-
-### B2.3: Deep-Link-Verifikation
-
-**Pruefe direkten URL-Aufruf (ohne vorherige Navigation):**
-- [ ] `/monitor/dashboard/some-id` rendert DashboardViewer oder zeigt sinnvollen "nicht gefunden" State
-- [ ] `/monitor/zone1/dashboard/some-id` rendert Zone-spezifisches Dashboard
-- [ ] `/monitor/zone1/sensor/sensor1` oeffnet Sensor-Detail direkt
+| Schweregrad | Anzahl | Davon NEU (E2E) |
+|-------------|--------|-----------------|
+| BLOCKER     | 1      | 1               |
+| KRITISCH    | 4      | 1               |
+| HOCH        | 7      | 1               |
+| MITTEL      | 7      | 0               |
+| NIEDRIG/UX  | 6      | 0               |
 
 ---
 
-## Block 3: Monitor Ebene 1 Verifikation
+### KRITISCH — Blockiert grundlegende Funktionalitaet
 
-### B3.1: Zone-Cards
+#### BUG-K1: SensorCard zeigt KEINE Sparkline im Monitor-Modus
 
-**Pruefe:**
-- [ ] Alle existierenden Zonen werden als Cards angezeigt
-- [ ] KPI-Zusammenfassung pro Zone korrekt (Sensor-Count, Aktor-Count, Alarm-Count, Temperatur)
-- [ ] Status-Dot/Ampel zeigt korrekten Zustand (Gruen = OK, Gelb = Warning, Rot = Alarm)
-- [ ] Klick auf Zone-Card navigiert zu /monitor/:zoneId
+**Datei:** `El Frontend/src/components/devices/SensorCard.vue:87-105`
+**E2E-Befund:** Screenshot `e2e-monitor-L2-zone-test.png` zeigt SensorCards NUR mit Name, Wert, ESP-ID. Keine Mini-Charts.
+**Code-Beweis:** Monitor-Modus Template (Zeile 87-105) enthaelt: Header mit Name + Quality Dot, Value-Block, Footer mit ESP-ID + Status. **KEIN Sparkline-Element, kein Chart, kein sparkline-Prop.**
+**Impact:** Das zentrale visuelle Feature von L2 — Live-Sparkline-Mini-Charts — existiert nicht.
+**Fix:** SensorCard braucht `sparklineData?: ChartDataPoint[]` Prop + Mini-Chart-Element. MonitorView muss `sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio))` uebergeben.
 
-### B3.2: Cross-Zone-Dashboard-Links
+#### BUG-K2: SensorCard-Klick oeffnet NICHT direkt den L3 SlideOver
 
-**Pruefe:**
-- [ ] Dashboards mit `scope='cross-zone'` erscheinen auf L1
-- [ ] Dashboards MIT `target.view='monitor'` + `target.placement='page'` erscheinen
-- [ ] Klick navigiert korrekt zum DashboardViewer
-- [ ] Empty State wenn keine Cross-Zone-Dashboards existieren
+**Datei:** `El Frontend/src/views/MonitorView.vue` (toggleExpanded-Logik)
+**E2E-Befund:** Klick auf SensorCard → Expanded-Panel mit 1h-Chart + 2 Buttons ("Zeitreihe anzeigen", "Konfiguration"). Erst 2. Klick auf "Zeitreihe anzeigen" → SlideOver.
+**Screenshot:** `e2e-monitor-L2-expanded-panel.png`
+**Impact:** 2-Klick statt 1-Klick. Architektur-Diskrepanz zum Plan.
+**Entscheidung noetig:** Plan korrigieren auf 2-Klick-Flow ODER Expanded-Panel entfernen zugunsten direktem SlideOver.
 
----
+#### BUG-K3: Breadcrumbs fehlen fuer Monitor-Dashboard-Routes
 
-## Block 4: Monitor Ebene 2 Verifikation
+**Datei:** `El Frontend/src/shared/design/layout/TopBar.vue:101-115`
+**E2E-Befund:** Screenshot `e2e-monitor-L3-dashboardviewer.png` — Breadcrumb zeigt "Monitor > Test" ohne Dashboard-Segment trotz URL `/monitor/test/dashboard/dash-auto-test-...`
+**Code-Beweis:** TopBar generiert Breadcrumbs fuer `zoneId` und `sensorId` aber **nicht fuer `dashboardId`**. Kein `route.params.dashboardId` Check auf Monitor-Routes.
+**Fix:** TopBar muss `route.params.dashboardId` pruefen und Dashboard-Name als Breadcrumb-Segment hinzufuegen.
 
-### B4.1: Subzone-Accordions
+#### BUG-K4: ActuatorCard hat Toggle-Button auch im Monitor-Modus
 
-**Pruefe:**
-- [ ] `useZoneGrouping(zoneId)` liefert korrekte ZoneGroup[]/SubzoneGroup[]
-- [ ] Subzone-Accordion-Headers zeigen Subzone-Name + Sensor-Count
-- [ ] Accordion Toggle funktioniert (aufklappen/zuklappen)
-- [ ] Accordion-State persistiert in localStorage (Seite neu laden → gleicher Zustand)
-- [ ] "Unzugeordnet"-Gruppe fuer Sensoren ohne Subzone
+**Datei:** `El Frontend/src/components/devices/ActuatorCard.vue:78-84`
+**E2E-Befund:** Screenshot `e2e-monitor-L2-zone-test.png` — "Einschalten"-Buttons sichtbar bei Aktoren im Monitor-Tab.
+**Code-Beweis:** Toggle-Button wird in BEIDEN Modi gerendert. Kommentar Zeile 5-8: "Toggle button is visible in BOTH modes (actuator control is a command, not monitoring)".
+**Entscheidung noetig:** (a) `v-if="mode === 'config'"` oder (b) Plan aendern: "Aktor-Steuerung auch im Monitor erlaubt".
 
-### B4.2: SensorCard im Monitor-Modus
+#### BUG-K5 (NEU/E2E): DashboardViewer Widgets rendern im Edit-Modus
 
-**Pruefe:**
-- [ ] SensorCard mit `mode:'monitor'` zeigt: Sensor-Typ-Icon, aktueller Wert mit Einheit, Sparkline
-- [ ] Sparkline zeigt letzte N Datenpunkte (aus useSparklineCache)
-- [ ] Quality-Status korrekt (qualityToStatus: good→Gruen, warning→Gelb, alarm→Rot)
-- [ ] ESP-Badge zeigt welcher ESP die Daten liefert
-- [ ] Klick auf SensorCard → L3 Sensor-Detail-SlideOver
-- [ ] KEIN Edit/Config-Button sichtbar (Monitor = Read-Only)
-- [ ] Cursor: pointer (klickbar)
-
-### B4.3: ActuatorCard im Monitor-Modus
-
-**Pruefe:**
-- [ ] ActuatorCard mit `mode:'monitor'` zeigt: Aktor-Typ-Icon, State (ON/OFF/PWM)
-- [ ] ON = Gruener Badge, OFF = Grauer Badge, PWM = Blauer Badge mit Wert
-- [ ] KEIN Toggle-Button (Monitor = Read-Only)
-- [ ] ESP-Badge zeigt zugehoerigen ESP
-
-### B4.4: Zone-Dashboard-Links
-
-**Pruefe:**
-- [ ] `zoneDashboards(zoneId)` Computed liefert korrekte Dashboards
-- [ ] Auto-generierte Dashboards erkennbar (Badge/Tag)
-- [ ] User-erstellte Dashboards erkennbar
-- [ ] Klick navigiert zum DashboardViewer im Monitor (NICHT zum Editor-Tab)
-- [ ] Empty State wenn keine Zone-Dashboards existieren
-
-### B4.5: Sparkline-Cache Performance
-
-**Pruefe:**
-- [ ] useSparklineCache 5s-Deduplizierung funktioniert (gleicher Sensor nicht haeufiger als alle 5s aktualisiert)
-- [ ] WebSocket sensor_data Events aktualisieren nur die betroffene SensorCard (keine Voll-Re-Renders)
-- [ ] Bei >20 Sensoren pro Zone: Kein merkbares Lag
+**Datei:** `El Frontend/src/components/dashboard/DashboardViewer.vue`
+**E2E-Befund:** Screenshot `e2e-monitor-L3-dashboardviewer.png` — Alle 5 Widgets zeigen "Sensor auswaehlen:" / "Aktor waehlen" Dropdowns statt Live-Daten.
+**Root Cause:** Zusammenspiel von zwei Problemen:
+1. API 500 (BUG-BLOCKER-1) → Dashboard-Store hat keine Server-Dashboards
+2. Auto-generierte Dashboards haben Widget-Config ohne gebundene Sensor-IDs
+**Code-Beweis:** `useDashboardWidgets({ showConfigButton: false })` — View-Mode ist korrekt konfiguriert, aber Widgets haben keinen vorselektierten Sensor.
+**Impact:** DashboardViewer ist visuell komplett defekt — zeigt nur Konfigurationsfelder.
+**Fix:** (1) Alembic Migration anwenden. (2) Widget-Initialisierung pruefen: Auto-generierte Widgets brauchen `sensorId`/`actuatorId` in ihrer Config.
 
 ---
 
-## Block 5: Monitor Ebene 3 — Sensor-Detail Verifikation
+### HOCH — Funktioniert nicht wie erwartet
 
-### B5.1: Sensor-Detail-SlideOver
+#### BUG-H1: DashboardViewer sucht Layout per lokaler ID, nicht per serverId
 
-**Pruefe:**
-- [ ] SlideOver oeffnet sich bei Klick auf SensorCard (L2)
-- [ ] Zeitreihe (Chart) rendert korrekt (24h Default)
-- [ ] TimeRangeSelector funktioniert (1h, 6h, 12h, 24h, 7d)
-- [ ] Schwellwert-Linien werden angezeigt (wenn konfiguriert)
-- [ ] CSV-Export-Button funktioniert
-- [ ] Breadcrumb zeigt: Monitor > Zone > Sensor
-- [ ] Schliessen-Button → zurueck zur Zonenansicht (L2)
+**Datei:** `El Frontend/src/components/dashboard/DashboardViewer.vue:46-48`
+**Code:** `dashStore.layouts.find(l => l.id === props.layoutId)`
+**Problem:** Nach `fetchLayouts()` werden Server-Dashboards mit UUID als ID gespeichert. Deep-Links mit lokaler ID koennten fehlschlagen.
+**Fix:** `layouts.find(l => l.id === id || l.serverId === id)`
 
-### B5.2: Sensor-Detail mit Mock-Daten
+#### BUG-H2: InlineDashboardPanel Widget-Mount potenzielle ID-Duplikation
 
-**Pruefe:**
-- [ ] Bei Mock-ESP: Sensor zeigt simulierte Daten
-- [ ] Bei Sensor ohne Daten: Sinnvoller Empty State (nicht leerer Chart)
-- [ ] Zeitbereich-Wechsel laedt neue Daten (REST-Call an sensorsApi.queryData)
+**Datei:** `El Frontend/src/components/dashboard/InlineDashboardPanel.vue:57-64`
+**Problem:** `mountId` wird sowohl fuer Container-Div als auch Mount-Target verwendet. Bei Re-Renders koennte `appendChild()` ohne vorherigen `removeChild()` zu Duplikaten fuehren.
+**Fix:** Separates `mountId` verwenden oder Mount-Logik mit Cleanup versehen.
 
----
+#### BUG-H3: Side-Panel ignoriert panelWidth und panelPosition
 
-## Block 6: Monitor Ebene 3 — DashboardViewer Verifikation
+**Datei:** `El Frontend/src/views/MonitorView.vue:1599-1603`
+**Code:** `grid-template-columns: 1fr 300px` — hardcoded.
+**Problem:** `target.panelPosition` und `target.panelWidth` werden gespeichert aber NIE ausgewertet.
+**Fix:** Dynamische Grid-Columns basierend auf Panel-Config.
 
-### B6.1: DashboardViewer.vue Grundfunktion
+#### BUG-H4: InlineDashboardPanel anchor-Positionierung nicht implementiert
 
-**Pruefe:**
-- [ ] GridStack initialisiert mit `staticGrid: true` (kein Drag, kein Resize, kein Remove)
-- [ ] Alle Widget-Typen rendern korrekt im View-Mode:
-  - [ ] `line-chart` — Zeitreihe mit Live-Updates
-  - [ ] `gauge` — Aktueller Wert mit Bereich
-  - [ ] `sensor-card` — Kompakte Sensor-Info
-  - [ ] `historical` — Historische Zeitreihe (REST)
-  - [ ] `multi-sensor` — Mehrere Sensoren vergleichen
-  - [ ] `actuator-card` — Aktor-Status
-  - [ ] `actuator-runtime` — Laufzeit-Tracking
-  - [ ] `esp-health` — ESP-Verbindungsstatus
-  - [ ] `alarm-list` — Alarm-Historie
-- [ ] "Im Editor oeffnen" Button navigiert zum Editor (CustomDashboardView) mit Dashboard geladen
-- [ ] Zurueck-Button navigiert zur vorherigen Route (L1 oder L2)
+**Datei:** `El Frontend/src/views/MonitorView.vue:1214-1219, 1410-1415`
+**Problem:** InlineDashboardPanels werden am Ende des L1/L2-Blocks gerendert. Keine Logik fuer `target.anchor` (z.B. 'zone-header', 'after-sensors').
+**Fix:** Anchor-basierte Slots implementieren oder anchor aus Interface entfernen.
 
-### B6.2: useDashboardWidgets.ts Composable
+#### BUG-H5: `serverToLocal()` castet target mit `(dto as any).target`
 
-**Pruefe:**
-- [ ] Container-agnostic: Funktioniert sowohl in DashboardViewer als auch in CustomDashboardView
-- [ ] Widget mount: Widgets werden korrekt in GridStack-Zellen gerendert
-- [ ] Widget unmount: Cleanup bei Navigation weg (keine Memory Leaks)
-- [ ] Widget-Konfiguration: Widget-spezifische Props werden korrekt weitergegeben (sensorId, timeRange, etc.)
+**Datei:** `El Frontend/src/shared/stores/dashboard.store.ts:331`
+**Code:** `target: (dto as any).target as DashboardTarget | undefined`
+**Problem:** TypeScript-Sicherheit unterwandert durch unsafe cast.
+**Fix:** `dto.target as DashboardTarget | undefined` (ohne `as any`).
 
-### B6.3: InlineDashboardPanel.vue
+#### BUG-H6: Cross-Zone-Dashboards auf L1 filtern NICHT nach target.view
 
-**Pruefe:**
-- [ ] CSS-Grid-Layout (12 Spalten, KEIN GridStack)
-- [ ] Widgets positioniert via `grid-column`/`grid-row`
-- [ ] Responsiv: Bei schmalerem Viewport keine Ueberlappung
-- [ ] Rendert innerhalb MonitorView.vue (nicht als eigene Seite)
-- [ ] Dashboard mit `target.placement='inline'` + `target.anchor` korrekt positioniert
+**Datei:** `El Frontend/src/shared/stores/dashboard.store.ts:487-489`
+**Code:** `crossZoneDashboards = computed(() => layouts.value.filter(l => l.scope === 'cross-zone'))`
+**Problem:** Filtert nur nach `scope`, nicht nach `target.view`. Hardware-View-Dashboards tauchen auch im Monitor auf.
+**Fix:** `&& (!l.target || l.target.view === 'monitor')` hinzufuegen.
+
+#### BUG-H7 (NEU/E2E): SlideOver Stats zeigen "—" trotz 1297 Messungen
+
+**Datei:** `El Frontend/src/views/MonitorView.vue:614-650`
+**E2E-Befund:** Screenshot `e2e-monitor-L3-slideover.png` — Min: —, Max: —, Ø: —, aber Messungen: 1297.
+**Problem:** `fetchDetailStats()` wird via `sensorsApi.getStats()` aufgerufen. Der Endpunkt liefert moeglicherweise keine Daten fuer Mock-ESPs, oder der catch-Block (Zeile 625) verschluckt Fehler ohne Logging.
+**Impact:** User sieht keine Statistiken trotz vorhandener Datenpunkte.
+**Fix:** Error-Logging im catch-Block hinzufuegen. Pruefen ob `/api/v1/sensors/:id/stats` fuer Mock-Daten funktioniert.
 
 ---
 
-## Block 7: Editor-Integration Cross-Flow
+### MITTEL — Funktionseinschraenkung oder schlechte UX
 
-### B7.1: Dashboard Create → View → Edit → View Lifecycle
+#### BUG-M1: Auto-Generierung synced nicht zum Server
 
-**E2E-Szenario (WICHTIGSTER Test):**
+**Datei:** `El Frontend/src/shared/stores/dashboard.store.ts:659-661`
+**Problem:** `generateZoneDashboard()` ruft `persistLayouts()` (localStorage) auf, aber NICHT `syncLayoutToServer()`.
+**Vergleich:** `createLayout()` (Zeile 251-252) ruft korrekt `syncLayoutToServer()` auf.
+**Fix:** `syncLayoutToServer(layout.id)` nach `persistLayouts()` aufrufen.
 
-```
-1. /editor oeffnen
-2. Neues Dashboard erstellen (Name: "Test-Dashboard")
-3. 2-3 Widgets hinzufuegen (LineChart, Gauge)
-4. Target setzen: view='monitor', placement='page'
-5. Speichern
-6. Zu /monitor navigieren
-7. Dashboard-Link sollte sichtbar sein
-8. Dashboard-Link klicken → DashboardViewer zeigt Dashboard korrekt
-9. "Im Editor oeffnen" klicken → Editor oeffnet sich mit Dashboard
-10. Widget aendern (z.B. Sensor wechseln)
-11. Speichern
-12. Zurueck zum Monitor → Aenderung sichtbar
-```
+#### BUG-M2: Accordion-Persist Race Condition bei Deep-Link
 
-**Pruefe:**
-- [ ] Schritt 1-5: Dashboard erstellen mit Target funktioniert
-- [ ] Schritt 6-7: Dashboard erscheint im Monitor (reaktiv via Pinia Store)
-- [ ] Schritt 8: DashboardViewer rendert alle Widgets
-- [ ] Schritt 9: Editor oeffnet mit korrekt geladenem Dashboard
-- [ ] Schritt 10-12: Aenderungen werden sofort im Monitor sichtbar
+**Datei:** `El Frontend/src/views/MonitorView.vue:949`
+**Problem:** Bei F5 auf `/monitor/:zoneId` koennte `selectedZoneId` zum Mount-Zeitpunkt noch nicht gesetzt sein.
+**Fix:** Zusaetzlich `watch(selectedZoneId)` fuer loadAccordionState.
 
-### B7.2: Auto-Generierung
+#### BUG-M3: DashboardViewer watch auf `updatedAt` ist fragil
 
-**Pruefe:**
-- [ ] `generateZoneDashboard()` erstellt beim ersten Zonenbesuch ein Auto-Dashboard
-- [ ] Sensor-Typ→Widget-Mapping korrekt:
-  - Temperatur → LineChart
-  - pH → Gauge
-  - EC → Gauge
-  - Feuchtigkeit → LineChart
-- [ ] Auto-generiertes Dashboard hat `autoGenerated: true`
-- [ ] `claimAutoLayout()` setzt `autoGenerated: false` (User uebernimmt)
-- [ ] Nach Claim: Auto-Update stoppt (User-Modifikationen bleiben erhalten)
+**Datei:** `El Frontend/src/components/dashboard/DashboardViewer.vue:118-122`
+**Problem:** `watch(() => layout.value?.updatedAt, ...)` — Aenderungen am Widget-Array ohne `updatedAt`-Update werden nicht erkannt. `loadWidgets()` macht kompletten Rebuild (Flicker).
+**Fix:** Tief-Watch auf `layout.value?.widgets` oder hash/version-counter.
 
-### B7.3: Target-Konfigurator im Editor
+#### BUG-M4: CSV-Export hat kein BOM fuer Excel-Kompatibilitaet
 
-**Pruefe:**
-- [ ] CustomDashboardView zeigt Target-Dropdown (Monitor/Hardware/Editor)
-- [ ] Target-Aenderung wird gespeichert (localStorage + Server-API)
-- [ ] `target.view = 'monitor'` + `target.placement = 'page'` → Dashboard erscheint als Monitor-Seite
-- [ ] `target.view = 'monitor'` + `target.placement = 'inline'` → Dashboard erscheint als Inline-Panel
-- [ ] `target.view = 'hardware'` + `target.placement = 'side-panel'` → Dashboard erscheint in HardwareView
-- [ ] `target = undefined/null` → Dashboard nur im Editor-Tab (bisheriges Verhalten)
+**Datei:** `El Frontend/src/views/MonitorView.vue:549-550`
+**Code:** `new Blob([csv], { type: 'text/csv' })` — ohne UTF-8 BOM.
+**Fix:** `new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })`.
 
-### B7.4: Side-Panels
+#### BUG-M5: URL-Revoke nach Blob-Download fehlt Timeout
 
-**Pruefe:**
-- [ ] MonitorView: Dashboards mit `target.view='monitor'` + `target.placement='side-panel'` rendern als Side-Panel
-- [ ] HardwareView: Dashboards mit `target.view='hardware'` + `target.placement='side-panel'` rendern als Side-Panel
-- [ ] Panel-Position (links/rechts) wird respektiert
-- [ ] Panel-Breite (1-4 Spalten) wird respektiert
-- [ ] Side-Panel beeintraechtigt nicht das Hauptlayout
+**Datei:** `El Frontend/src/views/MonitorView.vue:555-556`
+**Problem:** `revokeObjectURL` synchron nach `click()`. Sporadisch fehlende Downloads.
+**Fix:** `setTimeout(() => URL.revokeObjectURL(url), 1000)`.
+
+#### BUG-M6: DashboardUpdate Schema — target-Loeschung unklar
+
+**Datei:** `El Servador/god_kaiser_server/src/schemas/dashboard.py:175-178`
+**Problem:** Ob `target: null` korrekt an die DB weitergegeben wird haengt von `exclude_unset` vs `exclude_none` ab.
+**Fix:** Service-Code pruefen und sicherstellen dass explizites `null` gespeichert wird.
+
+#### BUG-M7: Zone ohne Dashboards zeigt KEINEN "Dashboard erstellen"-Link
+
+**Datei:** `El Frontend/src/views/MonitorView.vue:1247`
+**Code:** `v-if="selectedZoneId && dashStore.zoneDashboards(selectedZoneId).length > 0"` — komplettes Ausblenden.
+**Fix:** Else-Block mit `<router-link :to="{ name: 'editor' }">Dashboard erstellen</router-link>`.
 
 ---
 
-## Block 8: Server-API Verifikation
+### NIEDRIG / UX-Verbesserungen
 
-### B8.1: Dashboard CRUD mit Target-Feld
+#### UX-1: SensorCard zeigt keinen Sensor-Typ-Icon im Monitor-Modus
 
-**Pruefe (REST-API-Tests oder Playwright):**
+**Datei:** `El Frontend/src/components/devices/SensorCard.vue:87-105`
+**E2E-Befund:** Alle SensorCards sehen identisch aus — nur Text unterscheidet sie.
+**Fix:** SENSOR_TYPE_CONFIG icon-Mapping einbauen und als farbiges Icon links vom Namen anzeigen.
 
-```
-POST /api/dashboards — Dashboard mit target erstellen
-  Body: { name: "Test", widgets: [...], target: { view: "monitor", placement: "page" } }
-  Erwartung: 201, target in Response enthalten
+#### UX-2: Keine Bestaetigung bei Actuator-Toggle im Monitor
 
-GET /api/dashboards — Alle Dashboards
-  Erwartung: target-Feld in jedem Dashboard (null oder Object)
+**Datei:** `El Frontend/src/views/MonitorView.vue:1014-1021`
+**Problem:** `toggleActuator()` sendet sofort einen Command ohne Bestaetigung.
+**Fix:** ConfirmDialog vor kritischen Aktor-Befehlen.
 
-GET /api/dashboards/:id — Einzelnes Dashboard
-  Erwartung: target-Feld vorhanden
+#### UX-3: Expanded-Panel Chart zeigt "Letzte Stunde ()" wenn Unit leer
 
-PUT /api/dashboards/:id — Target aendern
-  Body: { target: { view: "hardware", placement: "side-panel", panelPosition: "right", panelWidth: 3 } }
-  Erwartung: 200, target aktualisiert
+**Datei:** `El Frontend/src/views/MonitorView.vue:156`
+**Code:** `label: 'Letzte Stunde (${unit})'` — unit kann leer sein.
+**Fix:** `label: unit ? 'Letzte Stunde (${unit})' : 'Letzte Stunde'`.
 
-PUT /api/dashboards/:id — Target entfernen
-  Body: { target: null }
-  Erwartung: 200, target = null
+#### UX-4: "Dashboard nicht gefunden" hat keinen kontextuellen Back-Link
 
-DELETE /api/dashboards/:id — Dashboard loeschen
-  Erwartung: 200/204, Dashboard + target geloescht
-```
+**Datei:** `El Frontend/src/components/dashboard/DashboardViewer.vue:179-182`
+**E2E-Befund:** Screenshot `e2e-dashboard-not-found.png` — "Dashboard nicht gefunden." + generischer "Zurueck"-Button. Dashboard-ID nicht angezeigt.
+**Fix:** Dashboard-ID anzeigen. `router.back()` durch `router.push({ name: 'monitor' })` ersetzen.
 
-**Pruefe:**
-- [ ] POST mit target → target gespeichert
-- [ ] GET gibt target zurueck (auch null)
-- [ ] PUT target update → target aktualisiert
-- [ ] PUT target = null → target entfernt
-- [ ] DELETE → Dashboard vollstaendig geloescht
-- [ ] Schema-Validierung: Ungueltige target-Werte werden abgelehnt
+#### UX-5: Side-Panel hat kein Collapse/Resize-Handle
 
-### B8.2: Dashboard Store Sync
+**Datei:** `El Frontend/src/views/MonitorView.vue:1425-1433`
+**Problem:** Statisch 300px breit, kein Toggle.
+**Fix:** Collapse-Toggle am Panel-Rand.
 
-**Pruefe:**
-- [ ] `fetchLayouts()` laedt Dashboards vom Server (inklusive target)
-- [ ] Server-Dashboards mergen korrekt mit localStorage-Cache (Server hat Prioritaet)
-- [ ] `syncLayoutToServer()` sendet target mit (debounced 2000ms)
-- [ ] `setLayoutTarget(layoutId, target)` aktualisiert Store + Server
+#### UX-6: Stale-Indikator in SensorCard basiert auf 120s, Zone-KPI auf 60s
+
+**Datei:** `El Frontend/src/components/devices/SensorCard.vue:39` + `El Frontend/src/views/MonitorView.vue:729`
+**Problem:** Verschiedene Stale-Definitionen fuehren zu Inkonsistenz zwischen L1 und L2.
+**Fix:** Einheitlichen Stale-Threshold als shared Konstante.
 
 ---
 
-## Block 9: Edge Cases und Fehlerszenarien
+## E2E-Test Checkliste (Playwright-verifiziert)
 
-### B9.1: Leere Zustaende
+### Block 1: Build + Migration
+- [x] `npm run build` erfolgreich (0 Errors)
+- [x] `vue-tsc --noEmit` clean
+- [x] Docker: Alle 12 Container healthy
+- [ ] **Alembic Migration NICHT angewendet** → `dashboards.target` fehlt
 
-**Pruefe:**
-- [ ] Zone ohne Sensoren: Sinnvoller Empty State auf L2
-- [ ] Zone ohne Aktoren: Aktor-Sektion nicht angezeigt oder "Keine Aktoren"
-- [ ] Zone ohne Dashboards: Empty State mit "Dashboard erstellen" Link
-- [ ] Sensor ohne Daten: SlideOver zeigt "Keine Daten verfuegbar"
-- [ ] Dashboard ohne Widgets: DashboardViewer zeigt "Dashboard ist leer"
+### Block 2: Router + Navigation
+- [x] `/monitor` → L1 Zonen-Uebersicht rendert
+- [x] `/monitor/:zoneId` → L2 Zonenansicht rendert
+- [x] `/monitor/:zoneId/sensor/:sensorId` → L3 SlideOver oeffnet
+- [x] `/monitor/dashboard/:dashboardId` → DashboardViewer rendert (Widgets defekt)
+- [x] `/monitor/:zoneId/dashboard/:dashboardId` → DashboardViewer rendert
+- [x] `/editor` → CustomDashboardView rendert (leer wegen API 500)
+- [x] Breadcrumb "Monitor" klick → zurueck zu L1
+- [x] "Zurueck"-Button funktioniert korrekt
+- [ ] **Breadcrumbs zeigen KEIN Dashboard-Segment** (BUG-K3)
 
-### B9.2: Offline/Stale Szenarien
+### Block 3: Monitor L1
+- [x] 2 Zonen als Cards angezeigt ("Test", "Testneu")
+- [x] KPI: "Test" = 3/3 Sensoren, 0/2 Aktoren, Temperatur Ø 14.7°C, "Alles OK"
+- [x] KPI: "Testneu" = 0/0 Sensoren, 0/1 Aktoren, "Alarm", "Keine Sensordaten"
+- [x] Status-Dot korrekt (Gruen = OK, Rot = Alarm)
+- [x] Klick auf Zone-Card → /monitor/:zoneId
 
-**Pruefe:**
-- [ ] ESP offline: Sensoren dieses ESPs als "disconnected" markiert auf L2
-- [ ] Sensor stale (>60s kein Update): Visueller Hinweis
-- [ ] WebSocket-Verbindung unterbrochen: Graceful Degradation (letzte bekannte Werte bleiben sichtbar)
+### Block 4: Monitor L2
+- [x] Subzone-Accordion "Keine Subzone" mit Toggle
+- [x] 3 SensorCards sichtbar (GPIO 0, Temp 0C79, GPIO 0)
+- [x] SensorCard zeigt: Name, Wert mit Einheit, ESP-ID
+- [x] ESP offline Badge bei MOCK_95A49FCB korrekt
+- [x] 2 ActuatorCards sichtbar (GPIO 18 pump, GPIO 13 pump)
+- [x] Zone-Dashboard-Link "Test Dashboard" (5 Widgets, Auto)
+- [x] "Anpassen"-Button fuer Auto-Dashboard sichtbar
+- [ ] **KEINE Sparklines auf SensorCards** (BUG-K1)
+- [ ] **Sensor-Typ-Icon fehlt** (UX-1)
+- [ ] **Toggle-Button "Einschalten" auf ActuatorCards sichtbar** (BUG-K4)
 
-### B9.3: Nicht-existierende Ressourcen
+### Block 5: Monitor L3 — Sensor-Detail
+- [x] SlideOver oeffnet bei Klick auf "Zeitreihe anzeigen"
+- [x] Titel: "SHT31", Wert: 22,0 °C
+- [x] Stale-Badge "Veraltet" + "vor 5 Minuten"
+- [x] TimeRangeSelector: 1 Std, 6 Std, 24 Std, 7 Tage, Benutzerdefiniert
+- [x] "Vergleichen mit"-Section: Temp 0C79 °C, GPIO 0 °C
+- [x] Zeitreihen-Chart rendert (24h, ~22°C Linie)
+- [x] 1000 Datenpunkte geladen
+- [x] CSV-Export Button vorhanden
+- [x] Konfiguration Link vorhanden
+- [x] Schliessen → zurueck zur Zonenansicht, URL korrekt
+- [ ] **Min/Max/Ø zeigen "—" trotz 1297 Messungen** (BUG-H7)
+- [ ] **2-Klick-Flow statt 1-Klick** (BUG-K2)
 
-**Pruefe:**
-- [ ] `/monitor/non-existent-zone` → Sinnvoller Fehler oder Redirect zu L1
-- [ ] `/monitor/dashboard/non-existent-id` → Sinnvoller Fehler
-- [ ] Dashboard mit target auf geloeschte Zone → Graceful Handling
+### Block 6: Monitor L3 — DashboardViewer
+- [x] DashboardViewer-Seite rendert
+- [x] Titel: "Test Dashboard", 5 Widgets
+- [x] "Im Editor bearbeiten" Link vorhanden
+- [x] Auto-generiert Banner: "Dieses Dashboard wurde automatisch erstellt."
+- [x] "Uebernehmen" + "Anpassen" Buttons
+- [x] "Zurueck"-Button → /monitor/:zoneId
+- [ ] **Widgets zeigen "Sensor auswaehlen" Dropdowns statt Daten** (BUG-K5)
+- [ ] **Breadcrumb zeigt kein Dashboard-Segment** (BUG-K3)
 
-### B9.4: Gleichzeitige Nutzung
+### Block 7: Editor-Integration
+- [x] /editor Route erreichbar
+- [x] "Dashboard Builder" Heading mit "Sensor-Analyse" Dropdown
+- [ ] **Editor leer — Dashboard-API gibt 500** (BUG-BLOCKER-1)
+- [ ] Dashboard Create → Target setzen → Monitor-View NICHT testbar (API blockiert)
 
-**Pruefe:**
-- [ ] Dashboard im Editor bearbeiten + Monitor offen → Aenderungen via Store reaktiv
-- [ ] Zwei Browser-Tabs: Monitor in Tab 1, Editor in Tab 2 → Konsistenz nach Speichern
+### Block 8: Server-API
+- [ ] **GET /api/v1/dashboards → 500** (`dashboards.target does not exist`)
+- [ ] POST/PUT/DELETE NICHT testbar (API blockiert)
+- [ ] **Root Cause: Alembic Migration `add_dashboard_target` nie ausgefuehrt**
+
+### Block 9: Edge Cases
+- [x] `/monitor/non-existent-zone` → "0 Sensoren · 0 Aktoren", "Keine Sensoren oder Aktoren in dieser Zone."
+- [x] `/monitor/dashboard/non-existent-id` → "Dashboard nicht gefunden." + "Zurueck"-Button
+- [x] Kein Crash, kein White-Screen bei ungueltigen URLs
+
+### Block 10: TypeScript + Tests
+- [x] `vue-tsc --noEmit` clean (0 Errors)
+- [x] `npm run build` erfolgreich (6.24s)
 
 ---
 
-## Block 10: TypeScript + Code-Qualitaet
+## Kritische E2E-Pfade
 
-### B10.1: TypeScript-Strenge
-
-```bash
-cd "El Frontend"
-npx vue-tsc --noEmit
-```
-
-**Pruefe spezifisch:**
-- [ ] `DashboardTarget` Interface korrekt typisiert (keine `any`)
-- [ ] `useDashboardWidgets` Return-Type korrekt
-- [ ] `DashboardViewer` Props korrekt typisiert
-- [ ] `InlineDashboardPanel` Props korrekt typisiert
-- [ ] Keine `@ts-ignore` in neuen Dateien
-
-### B10.2: Bestehende Tests
-
-```bash
-cd "El Frontend"
-npm run test
-```
-
-**Pruefe:**
-- [ ] Alle bestehenden Tests bestehen (keine Regressionen)
-- [ ] Keine neuen Flaky Tests
-- [ ] Test-Count nicht gesunken
+| # | Pfad | Ergebnis | Details |
+|---|------|----------|---------|
+| 1 | L1 → L2 → L3 (Sensor) → L2 → L1 | BESTANDEN | Navigation + Breadcrumbs funktionieren (ausser Dashboard-Segment) |
+| 2 | Dashboard Create → Target=Monitor → sichtbar | FEHLGESCHLAGEN | API 500 blockiert gesamten Flow |
+| 3 | L2 → Dashboard-Link → DashboardViewer → Editor | TEILWEISE | DashboardViewer rendert, aber Widgets defekt |
+| 4 | Auto-Generierung → Zone-Dashboard auf L2 | BESTANDEN | Auto-Dashboard erscheint mit "Auto" Badge |
+| 5 | Alembic Migration hin/zurueck | FEHLGESCHLAGEN | Migration nie angewendet |
 
 ---
 
-## Zusammenfassung: Kritische Test-Pfade
+## Empfohlene Fix-Reihenfolge
 
-Die 5 wichtigsten E2E-Pfade die ZWINGEND funktionieren muessen:
+### Prioritaet 1 — BLOCKER beheben
+1. **Alembic Migration anwenden:** `docker exec automationone-server alembic upgrade head` + Server Restart
+2. **Verifizieren:** Dashboard-API antwortet mit 200, `target` Feld in Response
 
-| # | Pfad | Prioritaet |
-|---|------|-----------|
-| 1 | L1 → L2 → L3 (Sensor-Detail) → L2 → L1 | KRITISCH |
-| 2 | Dashboard Create (Editor) → Target=Monitor → Dashboard sichtbar im Monitor | KRITISCH |
-| 3 | L2 → Dashboard-Link → DashboardViewer → "Im Editor oeffnen" → Editor | KRITISCH |
-| 4 | Auto-Generierung: Zone ohne Dashboard → generateZoneDashboard() → Auto-Dashboard auf L2 | HOCH |
-| 5 | Alembic Migration: upgrade → downgrade → upgrade (Idempotenz) | HOCH |
+### Prioritaet 2 — KRITISCH
+3. BUG-K5: DashboardViewer Widget-Initialisierung (Auto-generierte Widgets brauchen sensorId in Config)
+4. BUG-K1: SensorCard Sparkline implementieren
+5. BUG-K3: TopBar Dashboard-Breadcrumb hinzufuegen
+6. BUG-K2 + BUG-K4: Design-Entscheidungen treffen (1-Klick vs 2-Klick, Toggle im Monitor)
+
+### Prioritaet 3 — HOCH
+7. BUG-H7: Stats-API Fehler debuggen (Mock-ESP Kompatibilitaet)
+8. BUG-H1: DashboardViewer serverId Fallback
+9. BUG-H6: crossZoneDashboards target.view Filter
+10. BUG-M1: Auto-Generierung → syncLayoutToServer
+
+### Prioritaet 4 — MITTEL/NIEDRIG
+11. BUG-M4: CSV UTF-8 BOM
+12. BUG-M7: Zone ohne Dashboards Empty State
+13. BUG-H3/H4: Side-Panel/Inline-Panel Config auswerten
+14. Restliche UX-Bugs
 
 ---
 
-## Abgrenzung
+## Abgrenzung (aus Original-Auftrag)
 
 **IN diesem Auftrag:**
-- Build-Verifikation (Frontend + Backend + Migration)
-- Router- und Navigations-Tests (alle 7 Routes)
-- Monitor L1/L2/L3 funktionale Pruefung
-- DashboardViewer/InlineDashboardPanel Rendering
-- Editor-Integration Cross-Flow (Create→View→Edit→View)
-- Server-API CRUD mit Target-Feld
-- Edge Cases und Fehlerszenarien
-- TypeScript-Strenge und bestehende Tests
+- Build-Verifikation (Frontend + Backend + Migration) ✓
+- Router- und Navigations-Tests (alle 7 Routes) ✓
+- Monitor L1/L2/L3 funktionale Pruefung ✓
+- DashboardViewer/InlineDashboardPanel Rendering ✓
+- Editor-Integration Cross-Flow (blockiert durch API 500) ✓
+- Server-API CRUD mit Target-Feld (blockiert) ✓
+- Edge Cases und Fehlerszenarien ✓
+- TypeScript-Strenge und bestehende Tests ✓
 
 **NICHT in diesem Auftrag:**
 - Neues Feature-Development
-- Mobile-Responsive Optimierung (separater Auftrag)
-- DnD-Vollpruefung (separater Auftrag)
-- Logic-Rules-Integration in Monitor (separater Auftrag: `auftrag-logic-rules-live-monitoring-integration copy.md`)
-- Performance-Optimierung (nur Verifikation dass es nicht offensichtlich langsam ist)
-
----
-
-## Qualitaetskriterien (Auftrag gilt als ERLEDIGT wenn)
-
-- [ ] Alle 10 Bloecke durchlaufen
-- [ ] Alle 5 kritischen E2E-Pfade bestanden
-- [ ] `npm run build` + `vue-tsc --noEmit` clean
-- [ ] Alembic Migration hin und zurueck erfolgreich
-- [ ] Bestehende Tests bestehen (keine Regressionen)
-- [ ] Identifizierte Bugs als Issue dokumentiert (mit Schweregrad + betroffene Datei)
-- [ ] Kein KRITISCHER Bug offen
+- Mobile-Responsive Optimierung
+- DnD-Vollpruefung
+- Logic-Rules-Integration in Monitor
+- Performance-Optimierung
