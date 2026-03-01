@@ -19,26 +19,14 @@ import { GridStack, type GridItemHTMLElement, type GridStackNode } from 'gridsta
 import 'gridstack/dist/gridstack.min.css'
 import {
   LayoutGrid, Plus, Trash2, Download, Upload,
-  BarChart3, Gauge, Activity, Zap, Bell, Cpu,
-  ChevronDown, Pencil, Eye,
+  ChevronDown, Pencil, Eye, MonitorPlay, MapPin,
 } from 'lucide-vue-next'
 import { useDashboardStore, type WidgetType } from '@/shared/stores/dashboard.store'
 import { useUiStore } from '@/shared/stores'
 import { useToast } from '@/composables/useToast'
+import { useDashboardWidgets } from '@/composables/useDashboardWidgets'
 import { useEspStore } from '@/stores/esp'
 import ViewTabBar from '@/components/common/ViewTabBar.vue'
-import { h, render, type Component, getCurrentInstance } from 'vue'
-
-// Widget components
-import LineChartWidget from '@/components/dashboard-widgets/LineChartWidget.vue'
-import GaugeWidget from '@/components/dashboard-widgets/GaugeWidget.vue'
-import SensorCardWidget from '@/components/dashboard-widgets/SensorCardWidget.vue'
-import ActuatorCardWidget from '@/components/dashboard-widgets/ActuatorCardWidget.vue'
-import HistoricalChartWidget from '@/components/dashboard-widgets/HistoricalChartWidget.vue'
-import ESPHealthWidget from '@/components/dashboard-widgets/ESPHealthWidget.vue'
-import AlarmListWidget from '@/components/dashboard-widgets/AlarmListWidget.vue'
-import ActuatorRuntimeWidget from '@/components/dashboard-widgets/ActuatorRuntimeWidget.vue'
-import MultiSensorWidget from '@/components/dashboard-widgets/MultiSensorWidget.vue'
 import WidgetConfigPanel from '@/components/dashboard-widgets/WidgetConfigPanel.vue'
 
 const route = useRoute()
@@ -47,21 +35,32 @@ const uiStore = useUiStore()
 const espStore = useEspStore()
 const toast = useToast()
 
-// Widget component registry (all 9 types)
-const widgetComponentMap: Record<string, Component> = {
-  'line-chart': LineChartWidget,
-  'gauge': GaugeWidget,
-  'sensor-card': SensorCardWidget,
-  'actuator-card': ActuatorCardWidget,
-  'historical': HistoricalChartWidget,
-  'esp-health': ESPHealthWidget,
-  'alarm-list': AlarmListWidget,
-  'actuator-runtime': ActuatorRuntimeWidget,
-  'multi-sensor': MultiSensorWidget,
-}
+// Widget Config Panel state (declared early — referenced by composable callbacks)
+const configPanelOpen = ref(false)
+const configWidgetId = ref('')
+const configWidgetType = ref('')
 
-// Track mounted Vue vnodes for cleanup
-const mountedWidgets = new Map<string, HTMLElement>()
+// Shared widget rendering via composable
+const {
+  WIDGET_TYPE_META: widgetTypes,
+  WIDGET_DEFAULT_CONFIGS,
+  createWidgetElement,
+  mountWidgetToElement: mountWidgetComponent,
+  unmountWidgetFromElement,
+  cleanupAllWidgets,
+} = useDashboardWidgets({
+  showConfigButton: true,
+  onConfigClick: (widgetId, widgetType) => {
+    configWidgetId.value = widgetId
+    configWidgetType.value = widgetType
+    configPanelOpen.value = true
+  },
+  onConfigUpdate: (widgetId, newConfig) => {
+    const existing = widgetConfigs.value.get(widgetId) || {}
+    widgetConfigs.value.set(widgetId, { ...existing, ...newConfig })
+    autoSave()
+  },
+})
 
 // GridStack instance
 let grid: GridStack | null = null
@@ -74,27 +73,58 @@ const newLayoutName = ref('')
 const isEditing = ref(false)
 const layoutSelectorRef = ref<HTMLElement | null>(null)
 
+// Guard: prevents autoSave during loadWidgetsToGrid (race condition with grid.on('removed'))
+let isLoadingWidgets = false
+
 // Close layout dropdown on outside click
 onClickOutside(layoutSelectorRef, () => {
   showLayoutDropdown.value = false
 })
 
-// Widget Config Panel state
-const configPanelOpen = ref(false)
-const configWidgetId = ref('')
-const configWidgetType = ref('')
+// Target configurator (progressive disclosure)
+const showTargetConfig = ref(false)
 
-const widgetTypes = [
-  { type: 'line-chart', label: 'Linien-Chart', description: 'Live-Verlauf eines Sensors mit Y-Achsen-Defaults', icon: BarChart3, w: 6, h: 4, minW: 4, minH: 3, category: 'Sensoren' },
-  { type: 'gauge', label: 'Gauge-Chart', description: 'Kreisanzeige für aktuelle Messwerte', icon: Gauge, w: 3, h: 3, minW: 2, minH: 3, category: 'Sensoren' },
-  { type: 'sensor-card', label: 'Sensor-Karte', description: 'Kompakte Karte mit aktuellem Wert', icon: Activity, w: 3, h: 2, minW: 2, minH: 2, category: 'Sensoren' },
-  { type: 'historical', label: 'Historische Zeitreihe', description: 'Zeitreihe mit historischen API-Daten', icon: BarChart3, w: 6, h: 4, minW: 6, minH: 4, category: 'Sensoren' },
-  { type: 'multi-sensor', label: 'Multi-Sensor-Chart', description: 'Mehrere Sensoren in einem Chart vergleichen', icon: BarChart3, w: 8, h: 5, minW: 6, minH: 4, category: 'Sensoren' },
-  { type: 'actuator-card', label: 'Aktor-Status', description: 'Aktor-Status und Steuerung', icon: Zap, w: 3, h: 2, minW: 2, minH: 2, category: 'Aktoren' },
-  { type: 'actuator-runtime', label: 'Aktor-Laufzeit', description: 'Laufzeitstatistik eines Aktors', icon: BarChart3, w: 4, h: 3, minW: 3, minH: 3, category: 'Aktoren' },
-  { type: 'esp-health', label: 'ESP-Health', description: 'Health-Metriken eines ESP32', icon: Cpu, w: 6, h: 3, minW: 4, minH: 3, category: 'System' },
-  { type: 'alarm-list', label: 'Alarm-Liste', description: 'Liste aktiver und vergangener Alarme', icon: Bell, w: 4, h: 4, minW: 4, minH: 4, category: 'System' },
-]
+const activeTarget = computed(() => dashStore.activeLayout?.target ?? null)
+
+function setTarget(view: 'monitor' | 'hardware', placement: 'page' | 'inline' | 'side-panel') {
+  const layoutId = dashStore.activeLayoutId
+  if (!layoutId) return
+  dashStore.setLayoutTarget(layoutId, { view, placement })
+  showTargetConfig.value = false
+}
+
+function clearTarget() {
+  const layoutId = dashStore.activeLayoutId
+  if (!layoutId) return
+  dashStore.setLayoutTarget(layoutId, null)
+  showTargetConfig.value = false
+}
+
+// Monitor route for "Im Monitor anzeigen" button (based on layout scope)
+const monitorRouteForLayout = computed(() => {
+  const layout = dashStore.activeLayout
+  if (!layout?.scope) return null
+
+  if (layout.scope === 'zone' && layout.zoneId) {
+    return {
+      name: 'monitor-zone-dashboard',
+      params: { zoneId: layout.zoneId, dashboardId: layout.id },
+    }
+  }
+  if (layout.scope === 'cross-zone') {
+    return {
+      name: 'monitor-dashboard',
+      params: { dashboardId: layout.id },
+    }
+  }
+  if (layout.scope === 'sensor-detail' && layout.sensorId && layout.zoneId) {
+    return {
+      name: 'monitor-sensor',
+      params: { zoneId: layout.zoneId, sensorId: layout.sensorId },
+    }
+  }
+  return null
+})
 
 const groupedWidgets = computed(() => {
   const groups: Record<string, typeof widgetTypes> = {}
@@ -142,11 +172,7 @@ function initGrid() {
     // Unmount Vue components of removed widgets to prevent memory leaks
     for (const item of items) {
       if (item.id) {
-        const mountEl = mountedWidgets.get(item.id)
-        if (mountEl) {
-          render(null, mountEl)
-          mountedWidgets.delete(item.id)
-        }
+        unmountWidgetFromElement(item.id)
       }
     }
     autoSave()
@@ -196,6 +222,9 @@ onMounted(() => {
     espStore.fetchAll()
   }
 
+  // Fetch dashboards from server (merges with localStorage cache)
+  dashStore.fetchLayouts()
+
   // Deep-link: open dashboard from URL param /editor/:dashboardId
   const dashboardIdFromUrl = route.params.dashboardId as string | undefined
   if (dashboardIdFromUrl) {
@@ -222,10 +251,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   // Cleanup all mounted Vue vnodes
-  for (const [, el] of mountedWidgets) {
-    render(null, el)
-  }
-  mountedWidgets.clear()
+  cleanupAllWidgets()
 
   if (grid) {
     grid.destroy(false)
@@ -242,11 +268,11 @@ const widgetConfigs = ref<Map<string, Record<string, any>>>(new Map())
 function loadWidgetsToGrid(widgets: any[]) {
   if (!grid) return
 
+  // Guard: prevent autoSave from firing during removeAll/addWidget cycle
+  isLoadingWidgets = true
+
   // Cleanup existing mounted widgets
-  for (const [, el] of mountedWidgets) {
-    render(null, el)
-  }
-  mountedWidgets.clear()
+  cleanupAllWidgets()
 
   grid.removeAll(true)
 
@@ -273,134 +299,14 @@ function loadWidgetsToGrid(widgets: any[]) {
       mountWidgetComponent(w.id, mountId, w.type, w.config || {})
     })
   }
-}
 
-/**
- * Build widget DOM element using the DOM API (no innerHTML) so user-controlled
- * strings such as `title` are set via textContent and cannot carry XSS payloads.
- * GridStack.renderCB no longer needs to be overridden — we inject the element
- * directly into `.grid-stack-item-content` after addWidget() returns.
- */
-function createWidgetElement(type: string, title: string, widgetId: string, mountId: string): HTMLElement {
-  const widgetDef = widgetTypes.find(w => w.type === type)
-  const label = widgetDef?.label || type
-  const hasVueComponent = type in widgetComponentMap
-
-  const container = document.createElement('div')
-  container.className = 'dashboard-widget'
-  container.dataset.type = type
-  container.dataset.widgetId = widgetId
-
-  const header = document.createElement('div')
-  header.className = 'dashboard-widget__header'
-
-  const titleEl = document.createElement('span')
-  titleEl.className = 'dashboard-widget__title'
-  titleEl.textContent = title || label        // textContent — safe for user input
-
-  const typeEl = document.createElement('span')
-  typeEl.className = 'dashboard-widget__type'
-  typeEl.textContent = type
-
-  // Gear icon for widget configuration (Bug 3 fix)
-  const gearBtn = document.createElement('button')
-  gearBtn.className = 'dashboard-widget__gear-btn'
-  gearBtn.title = 'Konfigurieren'
-  gearBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>'
-  gearBtn.addEventListener('click', (e) => {
-    e.stopPropagation()
-    openConfigPanel(widgetId, type)
-  })
-
-  header.append(titleEl, typeEl, gearBtn)
-  container.appendChild(header)
-
-  if (hasVueComponent) {
-    const mountDiv = document.createElement('div')
-    mountDiv.id = mountId
-    mountDiv.className = 'dashboard-widget__vue-mount'
-    container.appendChild(mountDiv)
-  } else {
-    const body = document.createElement('div')
-    body.className = 'dashboard-widget__body'
-    const placeholder = document.createElement('div')
-    placeholder.className = 'dashboard-widget__placeholder'
-    placeholder.textContent = label
-    body.appendChild(placeholder)
-    container.appendChild(body)
-  }
-
-  return container
-}
-
-// Get current Vue instance for app context sharing
-const currentInstance = getCurrentInstance()
-
-/**
- * Mount a Vue widget component into a GridStack cell.
- * Uses Vue's render() API with appContext to share Pinia stores.
- */
-function mountWidgetComponent(widgetId: string, mountId: string, type: string, config: Record<string, any>) {
-  const WidgetComponent = widgetComponentMap[type]
-  if (!WidgetComponent) return
-
-  const mountEl = document.getElementById(mountId)
-  if (!mountEl) return
-
-  // Build props based on widget type and config
-  const props: Record<string, any> = {}
-  if (config.sensorId) props.sensorId = config.sensorId
-  if (config.actuatorId) props.actuatorId = config.actuatorId
-  if (config.timeRange) props.timeRange = config.timeRange
-  if (config.showThresholds != null) props.showThresholds = config.showThresholds
-  if (config.zoneFilter) props.zoneFilter = config.zoneFilter
-  if (config.showOfflineOnly != null) props.showOfflineOnly = config.showOfflineOnly
-  if (config.maxItems) props.maxItems = config.maxItems
-  if (config.showResolved != null) props.showResolved = config.showResolved
-  if (config.actuatorFilter) props.actuatorFilter = config.actuatorFilter
-  if (config.dataSources) props.dataSources = config.dataSources
-  // Y-axis range, color, and threshold values (for chart widgets)
-  if (config.yMin != null) props.yMin = config.yMin
-  if (config.yMax != null) props.yMax = config.yMax
-  if (config.color) props.color = config.color
-  if (config.warnLow != null) props.warnLow = config.warnLow
-  if (config.warnHigh != null) props.warnHigh = config.warnHigh
-  if (config.alarmLow != null) props.alarmLow = config.alarmLow
-  if (config.alarmHigh != null) props.alarmHigh = config.alarmHigh
-
-  // onUpdate:config handler
-  props['onUpdate:config'] = (newConfig: Record<string, any>) => {
-    const existing = widgetConfigs.value.get(widgetId) || {}
-    widgetConfigs.value.set(widgetId, { ...existing, ...newConfig })
-    autoSave()
-  }
-
-  // Create vnode and attach appContext for Pinia/router access
-  const vnode = h(WidgetComponent, props)
-  if (currentInstance?.appContext) {
-    vnode.appContext = currentInstance.appContext
-  }
-
-  render(vnode, mountEl)
-  mountedWidgets.set(widgetId, mountEl)
+  // Release guard after GridStack has finished processing
+  isLoadingWidgets = false
 }
 
 // =============================================================================
 // Widget Actions
 // =============================================================================
-
-/** Default config per widget type */
-const WIDGET_DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
-  'line-chart': { timeRange: '1h', showThresholds: false },
-  'gauge': {},
-  'sensor-card': {},
-  'historical': { timeRange: '24h' },
-  'multi-sensor': { dataSources: '' },
-  'actuator-card': {},
-  'actuator-runtime': {},
-  'esp-health': {},
-  'alarm-list': {},
-}
 
 function addWidget(type: string) {
   if (!grid) {
@@ -434,13 +340,6 @@ function addWidget(type: string) {
   autoSave()
 }
 
-/** Open widget config panel */
-function openConfigPanel(widgetId: string, widgetType: string) {
-  configWidgetId.value = widgetId
-  configWidgetType.value = widgetType
-  configPanelOpen.value = true
-}
-
 /** Handle config update from config panel — re-mounts the Vue component with new props */
 function handleConfigUpdate(newConfig: Record<string, any>) {
   const widgetId = configWidgetId.value
@@ -450,11 +349,7 @@ function handleConfigUpdate(newConfig: Record<string, any>) {
 
   // Re-mount the widget component with updated config
   const mountId = `widget-mount-${widgetId}`
-  const mountEl = mountedWidgets.get(widgetId)
-  if (mountEl) {
-    render(null, mountEl)
-    mountedWidgets.delete(widgetId)
-  }
+  unmountWidgetFromElement(widgetId)
   mountWidgetComponent(widgetId, mountId, configWidgetType.value, newConfig)
 
   // Update the header title
@@ -468,7 +363,7 @@ function handleConfigUpdate(newConfig: Record<string, any>) {
 }
 
 function autoSave() {
-  if (!grid || !dashStore.activeLayoutId) return
+  if (!grid || !dashStore.activeLayoutId || isLoadingWidgets) return
 
   const items = grid.getGridItems()
   const widgets = items.map((el: GridItemHTMLElement) => {
@@ -501,8 +396,12 @@ function handleCreateLayout() {
   newLayoutName.value = ''
   showLayoutDropdown.value = false
 
-  // Clear grid
-  if (grid) grid.removeAll(true)
+  // Clear grid (guard against autoSave race)
+  if (grid) {
+    isLoadingWidgets = true
+    grid.removeAll(true)
+    isLoadingWidgets = false
+  }
   toast.success(`Dashboard "${name}" erstellt`)
 }
 
@@ -542,7 +441,11 @@ async function handleDeleteLayout() {
   })
   if (!confirmed) return
   dashStore.deleteLayout(dashStore.activeLayoutId)
-  if (grid) grid.removeAll(true)
+  if (grid) {
+    isLoadingWidgets = true
+    grid.removeAll(true)
+    isLoadingWidgets = false
+  }
   toast.info(`Dashboard "${name}" gelöscht`)
 }
 
@@ -640,6 +543,42 @@ function handleImport() {
       </div>
 
       <div class="dashboard-builder__toolbar-right">
+        <!-- "Im Monitor anzeigen" link (only if dashboard has a scope) -->
+        <router-link
+          v-if="monitorRouteForLayout"
+          :to="monitorRouteForLayout"
+          class="dashboard-builder__tool-btn dashboard-builder__tool-btn--monitor"
+          title="Im Monitor anzeigen"
+        >
+          <MonitorPlay class="w-4 h-4" />
+        </router-link>
+
+        <!-- Target Configurator (progressive disclosure) -->
+        <div v-if="dashStore.activeLayoutId && isEditing" class="dashboard-builder__target-wrapper">
+          <button
+            :class="['dashboard-builder__tool-btn', { 'dashboard-builder__tool-btn--active': activeTarget }]"
+            title="Wo anzeigen?"
+            @click="showTargetConfig = !showTargetConfig"
+          >
+            <MapPin class="w-4 h-4" />
+          </button>
+          <div v-if="showTargetConfig" class="dashboard-builder__target-dropdown">
+            <div class="dashboard-builder__target-title">Wo anzeigen?</div>
+            <button class="dashboard-builder__target-option" @click="setTarget('monitor', 'inline')">
+              Monitor — Inline
+            </button>
+            <button class="dashboard-builder__target-option" @click="setTarget('monitor', 'side-panel')">
+              Monitor — Seitenpanel
+            </button>
+            <button class="dashboard-builder__target-option" @click="setTarget('hardware', 'inline')">
+              Übersicht — Inline
+            </button>
+            <button v-if="activeTarget" class="dashboard-builder__target-option dashboard-builder__target-option--clear" @click="clearTarget">
+              Ziel entfernen
+            </button>
+          </div>
+        </div>
+
         <button
           v-if="dashStore.activeLayoutId"
           :class="['dashboard-builder__tool-btn', { 'dashboard-builder__tool-btn--active': isEditing }]"

@@ -1,0 +1,265 @@
+/**
+ * useDashboardWidgets — Shared Widget Mount/Unmount Composable
+ *
+ * Container-agnostic widget rendering for:
+ * - CustomDashboardView (GridStack Editor)
+ * - DashboardViewer (GridStack Static)
+ * - InlineDashboardPanel (CSS-Grid)
+ *
+ * Extracts widgetComponentMap, widget type metadata, default configs,
+ * and DOM creation/mount/cleanup logic from CustomDashboardView.
+ */
+
+import { getCurrentInstance, h, render, type Component } from 'vue'
+
+// Widget components
+import LineChartWidget from '@/components/dashboard-widgets/LineChartWidget.vue'
+import GaugeWidget from '@/components/dashboard-widgets/GaugeWidget.vue'
+import SensorCardWidget from '@/components/dashboard-widgets/SensorCardWidget.vue'
+import ActuatorCardWidget from '@/components/dashboard-widgets/ActuatorCardWidget.vue'
+import HistoricalChartWidget from '@/components/dashboard-widgets/HistoricalChartWidget.vue'
+import ESPHealthWidget from '@/components/dashboard-widgets/ESPHealthWidget.vue'
+import AlarmListWidget from '@/components/dashboard-widgets/AlarmListWidget.vue'
+import ActuatorRuntimeWidget from '@/components/dashboard-widgets/ActuatorRuntimeWidget.vue'
+import MultiSensorWidget from '@/components/dashboard-widgets/MultiSensorWidget.vue'
+
+// Icons for widget catalog
+import {
+  BarChart3, Gauge, Activity, Zap, Bell, Cpu,
+} from 'lucide-vue-next'
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export interface WidgetTypeMeta {
+  type: string
+  label: string
+  description: string
+  icon: Component
+  w: number
+  h: number
+  minW: number
+  minH: number
+  category: string
+}
+
+export interface UseDashboardWidgetsOptions {
+  /** Show gear (config) button on widget headers. Default: true */
+  showConfigButton?: boolean
+  /** Called when gear button is clicked */
+  onConfigClick?: (widgetId: string, widgetType: string) => void
+  /** Called when widget emits onUpdate:config */
+  onConfigUpdate?: (widgetId: string, newConfig: Record<string, any>) => void
+}
+
+export interface UseDashboardWidgetsReturn {
+  widgetComponentMap: Record<string, Component>
+  WIDGET_TYPE_META: WidgetTypeMeta[]
+  WIDGET_DEFAULT_CONFIGS: Record<string, Record<string, unknown>>
+  createWidgetElement: (type: string, title: string, widgetId: string, mountId: string) => HTMLElement
+  mountWidgetToElement: (widgetId: string, mountId: string, type: string, config: Record<string, any>) => void
+  unmountWidgetFromElement: (widgetId: string) => void
+  cleanupAllWidgets: () => void
+  mountedWidgets: Map<string, HTMLElement>
+}
+
+// ─── Static Data (shared across all instances) ──────────────────────────────
+
+/** Widget component registry — all 9 types */
+const widgetComponentMap: Record<string, Component> = {
+  'line-chart': LineChartWidget,
+  'gauge': GaugeWidget,
+  'sensor-card': SensorCardWidget,
+  'actuator-card': ActuatorCardWidget,
+  'historical': HistoricalChartWidget,
+  'esp-health': ESPHealthWidget,
+  'alarm-list': AlarmListWidget,
+  'actuator-runtime': ActuatorRuntimeWidget,
+  'multi-sensor': MultiSensorWidget,
+}
+
+/** Widget type metadata for catalog and auto-generation */
+const WIDGET_TYPE_META: WidgetTypeMeta[] = [
+  { type: 'line-chart', label: 'Linien-Chart', description: 'Live-Verlauf eines Sensors mit Y-Achsen-Defaults', icon: BarChart3, w: 6, h: 4, minW: 4, minH: 3, category: 'Sensoren' },
+  { type: 'gauge', label: 'Gauge-Chart', description: 'Kreisanzeige für aktuelle Messwerte', icon: Gauge, w: 3, h: 3, minW: 2, minH: 3, category: 'Sensoren' },
+  { type: 'sensor-card', label: 'Sensor-Karte', description: 'Kompakte Karte mit aktuellem Wert', icon: Activity, w: 3, h: 2, minW: 2, minH: 2, category: 'Sensoren' },
+  { type: 'historical', label: 'Historische Zeitreihe', description: 'Zeitreihe mit historischen API-Daten', icon: BarChart3, w: 6, h: 4, minW: 6, minH: 4, category: 'Sensoren' },
+  { type: 'multi-sensor', label: 'Multi-Sensor-Chart', description: 'Mehrere Sensoren in einem Chart vergleichen', icon: BarChart3, w: 8, h: 5, minW: 6, minH: 4, category: 'Sensoren' },
+  { type: 'actuator-card', label: 'Aktor-Status', description: 'Aktor-Status und Steuerung', icon: Zap, w: 3, h: 2, minW: 2, minH: 2, category: 'Aktoren' },
+  { type: 'actuator-runtime', label: 'Aktor-Laufzeit', description: 'Laufzeitstatistik eines Aktors', icon: BarChart3, w: 4, h: 3, minW: 3, minH: 3, category: 'Aktoren' },
+  { type: 'esp-health', label: 'ESP-Health', description: 'Health-Metriken eines ESP32', icon: Cpu, w: 6, h: 3, minW: 4, minH: 3, category: 'System' },
+  { type: 'alarm-list', label: 'Alarm-Liste', description: 'Liste aktiver und vergangener Alarme', icon: Bell, w: 4, h: 4, minW: 4, minH: 4, category: 'System' },
+]
+
+/** Default config per widget type */
+const WIDGET_DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
+  'line-chart': { timeRange: '1h', showThresholds: false },
+  'gauge': {},
+  'sensor-card': {},
+  'historical': { timeRange: '24h' },
+  'multi-sensor': { dataSources: '' },
+  'actuator-card': {},
+  'actuator-runtime': {},
+  'esp-health': {},
+  'alarm-list': {},
+}
+
+/** Gear icon SVG (inline, no external dependency) */
+const GEAR_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>'
+
+// ─── Composable ──────────────────────────────────────────────────────────────
+
+/**
+ * Shared widget rendering composable.
+ *
+ * MUST be called in setup() context (captures getCurrentInstance for appContext).
+ */
+export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): UseDashboardWidgetsReturn {
+  const {
+    showConfigButton = true,
+    onConfigClick,
+    onConfigUpdate,
+  } = options
+
+  // Capture appContext in setup() context — CRITICAL: do not move into callbacks
+  const instance = getCurrentInstance()
+  const appContext = instance?.appContext ?? null
+
+  // Per-instance map of mounted widget elements
+  const mountedWidgets = new Map<string, HTMLElement>()
+
+  /**
+   * Build widget DOM element using the DOM API (no innerHTML for user strings).
+   * GridStack cells or CSS-Grid cells can use this to inject widget content.
+   */
+  function createWidgetElement(type: string, title: string, widgetId: string, mountId: string): HTMLElement {
+    const widgetDef = WIDGET_TYPE_META.find(w => w.type === type)
+    const label = widgetDef?.label || type
+    const hasVueComponent = type in widgetComponentMap
+
+    const container = document.createElement('div')
+    container.className = 'dashboard-widget'
+    container.dataset.type = type
+    container.dataset.widgetId = widgetId
+
+    const header = document.createElement('div')
+    header.className = 'dashboard-widget__header'
+
+    const titleEl = document.createElement('span')
+    titleEl.className = 'dashboard-widget__title'
+    titleEl.textContent = title || label
+
+    const typeEl = document.createElement('span')
+    typeEl.className = 'dashboard-widget__type'
+    typeEl.textContent = type
+
+    header.append(titleEl, typeEl)
+
+    // Gear icon for widget configuration (only when showConfigButton is true)
+    if (showConfigButton && onConfigClick) {
+      const gearBtn = document.createElement('button')
+      gearBtn.className = 'dashboard-widget__gear-btn'
+      gearBtn.title = 'Konfigurieren'
+      gearBtn.innerHTML = GEAR_SVG
+      gearBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        onConfigClick(widgetId, type)
+      })
+      header.appendChild(gearBtn)
+    }
+
+    container.appendChild(header)
+
+    if (hasVueComponent) {
+      const mountDiv = document.createElement('div')
+      mountDiv.id = mountId
+      mountDiv.className = 'dashboard-widget__vue-mount'
+      container.appendChild(mountDiv)
+    } else {
+      const body = document.createElement('div')
+      body.className = 'dashboard-widget__body'
+      const placeholder = document.createElement('div')
+      placeholder.className = 'dashboard-widget__placeholder'
+      placeholder.textContent = label
+      body.appendChild(placeholder)
+      container.appendChild(body)
+    }
+
+    return container
+  }
+
+  /**
+   * Mount a Vue widget component into an element.
+   * Container-agnostic: works for GridStack cells AND CSS-Grid cells.
+   */
+  function mountWidgetToElement(widgetId: string, mountId: string, type: string, config: Record<string, any>): void {
+    const WidgetComponent = widgetComponentMap[type]
+    if (!WidgetComponent) return
+
+    const mountEl = document.getElementById(mountId)
+    if (!mountEl) return
+
+    // Build props from config
+    const props: Record<string, any> = {}
+    if (config.sensorId) props.sensorId = config.sensorId
+    if (config.actuatorId) props.actuatorId = config.actuatorId
+    if (config.timeRange) props.timeRange = config.timeRange
+    if (config.showThresholds != null) props.showThresholds = config.showThresholds
+    if (config.zoneFilter) props.zoneFilter = config.zoneFilter
+    if (config.showOfflineOnly != null) props.showOfflineOnly = config.showOfflineOnly
+    if (config.maxItems) props.maxItems = config.maxItems
+    if (config.showResolved != null) props.showResolved = config.showResolved
+    if (config.actuatorFilter) props.actuatorFilter = config.actuatorFilter
+    if (config.dataSources) props.dataSources = config.dataSources
+    if (config.yMin != null) props.yMin = config.yMin
+    if (config.yMax != null) props.yMax = config.yMax
+    if (config.color) props.color = config.color
+    if (config.warnLow != null) props.warnLow = config.warnLow
+    if (config.warnHigh != null) props.warnHigh = config.warnHigh
+    if (config.alarmLow != null) props.alarmLow = config.alarmLow
+    if (config.alarmHigh != null) props.alarmHigh = config.alarmHigh
+
+    // onUpdate:config handler
+    if (onConfigUpdate) {
+      props['onUpdate:config'] = (newConfig: Record<string, any>) => {
+        onConfigUpdate(widgetId, newConfig)
+      }
+    }
+
+    // Create vnode and attach appContext for Pinia/router access
+    const vnode = h(WidgetComponent, props)
+    if (appContext) {
+      vnode.appContext = appContext
+    }
+
+    render(vnode, mountEl)
+    mountedWidgets.set(widgetId, mountEl)
+  }
+
+  /** Unmount a single widget from its element */
+  function unmountWidgetFromElement(widgetId: string): void {
+    const mountEl = mountedWidgets.get(widgetId)
+    if (mountEl) {
+      render(null, mountEl)
+      mountedWidgets.delete(widgetId)
+    }
+  }
+
+  /** Cleanup all mounted widgets — call in onUnmounted() */
+  function cleanupAllWidgets(): void {
+    for (const [, el] of mountedWidgets) {
+      render(null, el)
+    }
+    mountedWidgets.clear()
+  }
+
+  return {
+    widgetComponentMap,
+    WIDGET_TYPE_META,
+    WIDGET_DEFAULT_CONFIGS,
+    createWidgetElement,
+    mountWidgetToElement,
+    unmountWidgetFromElement,
+    cleanupAllWidgets,
+    mountedWidgets,
+  }
+}
