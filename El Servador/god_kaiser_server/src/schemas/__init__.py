@@ -185,6 +185,16 @@ from .subzone import (
     SubzoneRemoveResponse,
 )
 
+# Dashboard schemas
+from .dashboard import (
+    DashboardCreate,
+    DashboardDataResponse,
+    DashboardListResponse,
+    DashboardResponse,
+    DashboardUpdate,
+    DashboardWidget,
+)
+
 # Health schemas
 from .health import (
     ComponentHealth,
@@ -354,6 +364,13 @@ __all__ = [
     "SubzoneInfo",
     "SubzoneListResponse",
     "SubzoneRemoveResponse",
+    # Dashboard
+    "DashboardCreate",
+    "DashboardDataResponse",
+    "DashboardListResponse",
+    "DashboardResponse",
+    "DashboardUpdate",
+    "DashboardWidget",
     # Health
     "ComponentHealth",
     "DatabaseHealth",

@@ -5,6 +5,7 @@ Repository Layer Exports
 from .actuator_repo import ActuatorRepository
 from .audit_log_repo import AuditLogRepository
 from .base_repo import BaseRepository
+from .dashboard_repo import DashboardRepository
 from .esp_heartbeat_repo import ESPHeartbeatRepository
 from .esp_repo import ESPRepository
 from .logic_repo import LogicRepository
@@ -17,6 +18,7 @@ from .user_repo import UserRepository
 
 __all__ = [
     "BaseRepository",
+    "DashboardRepository",
     "ESPRepository",
     "ESPHeartbeatRepository",
     "SensorRepository",

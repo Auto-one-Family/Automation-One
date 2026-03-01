@@ -24,6 +24,7 @@ from .sequences import router as sequences_router
 from .subzone import router as subzone_router
 from .users import router as users_router
 from .zone import router as zone_router
+from .dashboards import router as dashboards_router
 
 # PLANNED routers - stubs with no endpoints yet, included for discoverability.
 # Add endpoints directly to the router files; they will be available immediately.
@@ -53,6 +54,7 @@ api_v1_router.include_router(sequences_router)  # Phase 3 - Sequence Actions
 api_v1_router.include_router(ai_router)  # PLANNED - God Layer AI integration
 api_v1_router.include_router(kaiser_router)  # PLANNED - Kaiser relay node management
 api_v1_router.include_router(library_router)  # PLANNED - OTA sensor library distribution
+api_v1_router.include_router(dashboards_router)  # Dashboard Layout Persistence
 
 # Export individual routers for direct access if needed
 __all__ = [
@@ -75,4 +77,5 @@ __all__ = [
     "subzone_router",
     "users_router",
     "zone_router",
+    "dashboards_router",
 ]

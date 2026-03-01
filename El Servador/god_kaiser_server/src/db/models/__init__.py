@@ -11,6 +11,7 @@ from . import (  # noqa: F401
     ai,
     audit_log,  # AuditLog model for event tracking
     auth,  # TokenBlacklist model
+    dashboard,  # Dashboard layout persistence
     enums,  # Shared enums (DataSource, SensorOperatingMode, etc.)
     esp,
     esp_heartbeat,  # ESP Heartbeat History (Time-Series)
@@ -29,6 +30,7 @@ from .actuator import ActuatorConfig, ActuatorState, ActuatorHistory  # noqa: F4
 from .ai import AIPredictions  # noqa: F401
 from .audit_log import AuditLog, AuditEventType, AuditSeverity, AuditSourceType  # noqa: F401
 from .auth import TokenBlacklist  # noqa: F401
+from .dashboard import Dashboard  # noqa: F401
 from .enums import DataSource, SensorOperatingMode  # noqa: F401
 from .esp import ESPDevice  # noqa: F401
 from .esp_heartbeat import (
@@ -51,6 +53,7 @@ __all__ = [
     "ai",
     "audit_log",
     "auth",
+    "dashboard",
     "enums",
     "esp",
     "esp_heartbeat",
@@ -75,6 +78,7 @@ __all__ = [
     "AuditSeverity",
     "AuditSourceType",
     "TokenBlacklist",
+    "Dashboard",
     "ESPDevice",
     "ESPHeartbeatLog",
     "HeartbeatHealthStatus",
