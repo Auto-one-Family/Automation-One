@@ -29,6 +29,12 @@ const emit = defineEmits<{
 const espStore = useEspStore()
 const selectedRange = ref<'1h' | '6h' | '24h' | '7d'>(props.timeRange)
 
+// Local sensorId state — survives render() one-shot props (Bug 1b fix)
+const localSensorId = ref(props.sensorId || '')
+
+// Sync from props when they change (e.g. page reload with saved config)
+watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
+
 watch(selectedRange, (val) => {
   emit('update:config', { timeRange: val })
 })
@@ -47,9 +53,10 @@ const availableSensors = computed(() => {
   return items
 })
 
+// Parsed sensor data — uses localSensorId instead of props.sensorId
 const parsedSensor = computed(() => {
-  if (!props.sensorId) return null
-  const [espId, gpioStr] = props.sensorId.split(':')
+  if (!localSensorId.value) return null
+  const [espId, gpioStr] = localSensorId.value.split(':')
   const gpio = parseInt(gpioStr)
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
   if (!device) return null
@@ -59,13 +66,14 @@ const parsedSensor = computed(() => {
 })
 
 function selectSensor(sensorId: string) {
+  localSensorId.value = sensorId  // Immediate local update (Bug 1b fix)
   emit('update:config', { sensorId })
 }
 </script>
 
 <template>
   <div class="historical-widget">
-    <template v-if="sensorId && parsedSensor">
+    <template v-if="localSensorId && parsedSensor">
       <div class="historical-widget__info">
         <span class="historical-widget__sensor-name">
           {{ parsedSensor.sensor.name || parsedSensor.sensor.sensor_type }}

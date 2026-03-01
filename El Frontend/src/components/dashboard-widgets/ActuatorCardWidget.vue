@@ -1,8 +1,10 @@
 <script setup lang="ts">
 /**
  * ActuatorCardWidget — Actuator toggle card for dashboard
+ *
+ * Fix: Uses local actuatorId ref to survive render() one-shot props.
  */
-import { computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useEspStore } from '@/stores/esp'
 import { Zap, Power } from 'lucide-vue-next'
 import type { MockActuator } from '@/types'
@@ -18,6 +20,12 @@ const emit = defineEmits<{
 
 const espStore = useEspStore()
 
+// Local actuatorId state — survives render() one-shot props (Bug 1b fix)
+const localActuatorId = ref(props.actuatorId || '')
+
+// Sync from props when they change (e.g. page reload with saved config)
+watch(() => props.actuatorId, (v) => { if (v) localActuatorId.value = v })
+
 const availableActuators = computed(() => {
   const items: { id: string; label: string }[] = []
   for (const device of espStore.devices) {
@@ -32,17 +40,18 @@ const availableActuators = computed(() => {
   return items
 })
 
+// Current actuator data — uses localActuatorId instead of props.actuatorId
 const currentActuator = computed(() => {
-  if (!props.actuatorId) return null
-  const [espId, gpioStr] = props.actuatorId.split(':')
+  if (!localActuatorId.value) return null
+  const [espId, gpioStr] = localActuatorId.value.split(':')
   const gpio = parseInt(gpioStr)
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
   if (!device) return null
   return ((device.actuators as MockActuator[]) || []).find(a => a.gpio === gpio) || null
 })
 
-const espId = computed(() => props.actuatorId?.split(':')[0] || '')
-const gpio = computed(() => parseInt(props.actuatorId?.split(':')[1] || '0'))
+const espId = computed(() => localActuatorId.value?.split(':')[0] || '')
+const gpio = computed(() => parseInt(localActuatorId.value?.split(':')[1] || '0'))
 
 async function toggle() {
   if (!currentActuator.value) return
@@ -51,13 +60,14 @@ async function toggle() {
 }
 
 function selectActuator(id: string) {
+  localActuatorId.value = id  // Immediate local update (Bug 1b fix)
   emit('update:config', { actuatorId: id })
 }
 </script>
 
 <template>
   <div class="actuator-card-widget">
-    <template v-if="actuatorId && currentActuator">
+    <template v-if="localActuatorId && currentActuator">
       <div class="actuator-card-widget__header">
         <span class="actuator-card-widget__name">{{ currentActuator.name || currentActuator.actuator_type }}</span>
         <Zap class="w-4 h-4" :style="{ color: currentActuator.state ? 'var(--color-success)' : 'var(--color-text-muted)' }" />

@@ -4,8 +4,13 @@
  *
  * Renders a LiveLineChart with live sensor data from the store.
  * Includes a sensor selector dropdown for configuration.
+ *
+ * Fix: Uses local sensorId ref to survive render() one-shot props.
+ * Fix: Watch on last_read instead of raw_value (fires on every WS event,
+ *      even when value is constant).
  */
 import { ref, computed, watch } from 'vue'
+import type { ThresholdConfig } from '@/components/charts/LiveLineChart.vue'
 import { useEspStore } from '@/stores/esp'
 import LiveLineChart from '@/components/charts/LiveLineChart.vue'
 import type { ChartDataPoint } from '@/components/charts/LiveLineChart.vue'
@@ -13,9 +18,27 @@ import type { MockSensor } from '@/types'
 
 interface Props {
   sensorId?: string   // format: "espId:gpio"
+  showThresholds?: boolean
+  yMin?: number
+  yMax?: number
+  color?: string
+  /** Threshold values from WidgetConfigPanel */
+  warnLow?: number
+  warnHigh?: number
+  alarmLow?: number
+  alarmHigh?: number
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  showThresholds: false,
+  yMin: undefined,
+  yMax: undefined,
+  color: undefined,
+  warnLow: undefined,
+  warnHigh: undefined,
+  alarmLow: undefined,
+  alarmHigh: undefined,
+})
 const emit = defineEmits<{
   'update:config': [config: { sensorId: string }]
 }>()
@@ -23,6 +46,12 @@ const emit = defineEmits<{
 const espStore = useEspStore()
 const dataBuffer = ref<ChartDataPoint[]>([])
 const MAX_POINTS = 60
+
+// Local sensorId state — survives render() one-shot props (Bug 1b fix)
+const localSensorId = ref(props.sensorId || '')
+
+// Sync from props when they change (e.g. page reload with saved config)
+watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
 
 // All available sensors for selection
 const availableSensors = computed(() => {
@@ -40,10 +69,10 @@ const availableSensors = computed(() => {
   return items
 })
 
-// Current sensor data
+// Current sensor data — uses localSensorId instead of props.sensorId
 const currentSensor = computed(() => {
-  if (!props.sensorId) return null
-  const [espId, gpioStr] = props.sensorId.split(':')
+  if (!localSensorId.value) return null
+  const [espId, gpioStr] = localSensorId.value.split(':')
   const gpio = parseInt(gpioStr)
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
   if (!device) return null
@@ -51,19 +80,34 @@ const currentSensor = computed(() => {
   return sensor ? { ...sensor, espId, unit: sensor.unit || '' } : null
 })
 
-// Cache live data points
+// Watch on last_read instead of raw_value (Bug 1a fix):
+// raw_value doesn't change for constant sensors (e.g. Mock SHT31 = 22.0),
+// but last_read updates on every WebSocket event.
 watch(
-  () => currentSensor.value?.raw_value,
-  (val) => {
-    if (val == null) return
-    const point: ChartDataPoint = { timestamp: new Date(), value: val }
+  () => currentSensor.value?.last_read,
+  () => {
+    const sensor = currentSensor.value
+    if (!sensor || sensor.raw_value == null) return
+    const point: ChartDataPoint = { timestamp: new Date(), value: sensor.raw_value }
     const buf = [...dataBuffer.value, point]
     if (buf.length > MAX_POINTS) buf.shift()
     dataBuffer.value = buf
   },
 )
 
+// Build threshold config from individual props
+const thresholdConfig = computed<ThresholdConfig | undefined>(() => {
+  if (!props.showThresholds) return undefined
+  const t: ThresholdConfig = {}
+  if (props.warnLow != null) t.warnLow = props.warnLow
+  if (props.warnHigh != null) t.warnHigh = props.warnHigh
+  if (props.alarmLow != null) t.alarmLow = props.alarmLow
+  if (props.alarmHigh != null) t.alarmHigh = props.alarmHigh
+  return Object.keys(t).length > 0 ? t : undefined
+})
+
 function selectSensor(sensorId: string) {
+  localSensorId.value = sensorId  // Immediate local update (Bug 1b fix)
   emit('update:config', { sensorId })
   dataBuffer.value = []
 }
@@ -71,12 +115,18 @@ function selectSensor(sensorId: string) {
 
 <template>
   <div class="line-chart-widget">
-    <template v-if="sensorId && currentSensor">
+    <template v-if="localSensorId && currentSensor">
       <LiveLineChart
         :data="dataBuffer"
         height="100%"
         :unit="currentSensor.unit"
+        :sensor-type="currentSensor.sensor_type"
         :fill="true"
+        :color="props.color"
+        :y-min="props.yMin"
+        :y-max="props.yMax"
+        :show-thresholds="props.showThresholds"
+        :thresholds="thresholdConfig"
       />
     </template>
     <div v-else class="line-chart-widget__empty">

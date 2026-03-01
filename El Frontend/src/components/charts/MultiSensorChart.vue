@@ -35,6 +35,7 @@ import { sensorsApi } from '@/api/sensors'
 import { websocketService } from '@/services/websocket'
 import type { ChartSensor, SensorReading } from '@/types'
 import { createLogger } from '@/utils/logger'
+import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 
 const log = createLogger('MultiSensorChart')
 
@@ -202,6 +203,15 @@ const totalDataPoints = computed(() => {
   return total
 })
 
+/** Shared sensor type config (if all sensors share the same type) */
+const sharedSensorTypeConfig = computed(() => {
+  if (props.sensors.length === 0) return null
+  const types = new Set(props.sensors.map(s => s.sensorType).filter(Boolean))
+  if (types.size !== 1) return null
+  const type = [...types][0]
+  return type ? SENSOR_TYPE_CONFIG[type] ?? null : null
+})
+
 /** Berechne Y-Achsen-Bereich automatisch mit Puffer */
 const computedYRange = computed(() => {
   let minVal = Infinity
@@ -338,9 +348,15 @@ const chartOptions = computed(() => {
       },
       y: {
         beginAtZero: false,
-        // Explizite Props haben Vorrang, sonst berechnete Werte
-        min: props.yMin ?? computedYRange.value.min,
-        max: props.yMax ?? computedYRange.value.max,
+        // Priority: explicit props > SENSOR_TYPE_CONFIG (if all same type) > computed from data
+        ...(props.yMin != null ? { suggestedMin: props.yMin }
+          : sharedSensorTypeConfig.value ? { suggestedMin: sharedSensorTypeConfig.value.min }
+          : computedYRange.value.min != null ? { suggestedMin: computedYRange.value.min }
+          : {}),
+        ...(props.yMax != null ? { suggestedMax: props.yMax }
+          : sharedSensorTypeConfig.value ? { suggestedMax: sharedSensorTypeConfig.value.max }
+          : computedYRange.value.max != null ? { suggestedMax: computedYRange.value.max }
+          : {}),
         grid: {
           color: 'rgba(255, 255, 255, 0.05)',
         },

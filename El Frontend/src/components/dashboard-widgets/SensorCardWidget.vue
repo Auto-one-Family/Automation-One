@@ -1,11 +1,14 @@
 <script setup lang="ts">
 /**
  * SensorCardWidget — Sensor value card for dashboard
+ *
+ * Fix: Uses local sensorId ref to survive render() one-shot props.
  */
-import { computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useEspStore } from '@/stores/esp'
 import { Activity } from 'lucide-vue-next'
 import type { MockSensor } from '@/types'
+import { getSensorUnit } from '@/utils/sensorDefaults'
 
 interface Props {
   sensorId?: string // "espId:gpio"
@@ -17,6 +20,12 @@ const emit = defineEmits<{
 }>()
 
 const espStore = useEspStore()
+
+// Local sensorId state — survives render() one-shot props (Bug 1b fix)
+const localSensorId = ref(props.sensorId || '')
+
+// Sync from props when they change (e.g. page reload with saved config)
+watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
 
 const availableSensors = computed(() => {
   const items: { id: string; label: string }[] = []
@@ -32,9 +41,10 @@ const availableSensors = computed(() => {
   return items
 })
 
+// Current sensor data — uses localSensorId instead of props.sensorId
 const currentSensor = computed(() => {
-  if (!props.sensorId) return null
-  const [espId, gpioStr] = props.sensorId.split(':')
+  if (!localSensorId.value) return null
+  const [espId, gpioStr] = localSensorId.value.split(':')
   const gpio = parseInt(gpioStr)
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
   if (!device) return null
@@ -50,20 +60,21 @@ const qualityClass = computed(() => {
 })
 
 function selectSensor(sensorId: string) {
+  localSensorId.value = sensorId  // Immediate local update (Bug 1b fix)
   emit('update:config', { sensorId })
 }
 </script>
 
 <template>
   <div class="sensor-card-widget">
-    <template v-if="sensorId && currentSensor">
+    <template v-if="localSensorId && currentSensor">
       <div class="sensor-card-widget__header">
         <span class="sensor-card-widget__name">{{ currentSensor.name || currentSensor.sensor_type }}</span>
         <span :class="['sensor-card-widget__dot', qualityClass]" />
       </div>
       <div class="sensor-card-widget__value">
         <span class="sensor-card-widget__number">{{ (currentSensor.raw_value ?? 0).toFixed(1) }}</span>
-        <span class="sensor-card-widget__unit">{{ currentSensor.unit || '' }}</span>
+        <span class="sensor-card-widget__unit">{{ getSensorUnit(currentSensor.sensor_type) !== 'raw' ? getSensorUnit(currentSensor.sensor_type) : (currentSensor.unit || '') }}</span>
       </div>
     </template>
     <div v-else class="sensor-card-widget__empty">

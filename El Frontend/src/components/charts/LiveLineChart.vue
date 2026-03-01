@@ -21,6 +21,7 @@ import {
 import annotationPlugin from 'chartjs-plugin-annotation'
 import 'chartjs-adapter-date-fns'
 import { tokens } from '@/utils/cssTokens'
+import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 
 ChartJS.register(
   CategoryScale,
@@ -39,7 +40,7 @@ export interface ChartDataPoint {
   label?: string
 }
 
-interface ThresholdConfig {
+export interface ThresholdConfig {
   alarmLow?: number
   warnLow?: number
   warnHigh?: number
@@ -67,6 +68,12 @@ interface Props {
   showThresholds?: boolean
   /** Compact/sparkline mode: hides axes, tooltips, grid for minimal inline display */
   compact?: boolean
+  /** Sensor type key for automatic Y-axis range from SENSOR_TYPE_CONFIG */
+  sensorType?: string
+  /** Explicit Y-axis minimum (overrides sensorType lookup) */
+  yMin?: number
+  /** Explicit Y-axis maximum (overrides sensorType lookup) */
+  yMax?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -80,6 +87,9 @@ const props = withDefaults(defineProps<Props>(), {
   thresholds: undefined,
   showThresholds: false,
   compact: false,
+  sensorType: undefined,
+  yMin: undefined,
+  yMax: undefined,
 })
 
 // Internal data buffer
@@ -194,6 +204,15 @@ const chartOptions = computed(() => {
     scales: {
       x: {
         type: 'time' as const,
+        time: {
+          displayFormats: {
+            millisecond: 'HH:mm:ss',
+            second: 'HH:mm:ss',
+            minute: 'HH:mm',
+            hour: 'HH:mm',
+            day: 'dd.MM',
+          },
+        },
         display: !isCompact,
         grid: {
           display: !isCompact && props.showGrid,
@@ -208,6 +227,15 @@ const chartOptions = computed(() => {
       },
       y: {
         display: !isCompact,
+        // Y-axis range: explicit props > SENSOR_TYPE_CONFIG lookup > auto
+        ...(props.yMin != null ? { suggestedMin: props.yMin }
+          : props.sensorType && SENSOR_TYPE_CONFIG[props.sensorType]
+            ? { suggestedMin: SENSOR_TYPE_CONFIG[props.sensorType].min }
+            : {}),
+        ...(props.yMax != null ? { suggestedMax: props.yMax }
+          : props.sensorType && SENSOR_TYPE_CONFIG[props.sensorType]
+            ? { suggestedMax: SENSOR_TYPE_CONFIG[props.sensorType].max }
+            : {}),
         grid: {
           display: !isCompact && props.showGrid,
           color: 'rgba(29, 29, 42, 0.8)',
