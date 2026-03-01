@@ -6,17 +6,14 @@
  * Monitor mode: Name, live value, quality dot, sparkline, ESP-ID
  */
 import { computed } from 'vue'
-import { Settings, ChevronRight } from 'lucide-vue-next'
+import { Settings, ChevronRight, WifiOff, Clock } from 'lucide-vue-next'
 import type { SensorWithContext } from '@/composables/useZoneGrouping'
-import type { ChartDataPoint } from '@/components/charts/LiveLineChart.vue'
-import { qualityToStatus } from '@/utils/formatters'
+import { qualityToStatus, getDataFreshness, formatRelativeTime } from '@/utils/formatters'
 import { getSensorLabel } from '@/utils/sensorDefaults'
-import LiveLineChart from '@/components/charts/LiveLineChart.vue'
 
 interface Props {
   sensor: SensorWithContext
   mode: 'monitor' | 'config'
-  sparklineData?: ChartDataPoint[]
 }
 
 const props = defineProps<Props>()
@@ -38,9 +35,18 @@ const statusClass = computed(() =>
   `sensor-card__dot--${qualityToStatus(props.sensor.quality)}`
 )
 
-function formatValue(value: number): string {
+// Data freshness indicator (stale after 120s)
+const freshness = computed(() => getDataFreshness(props.sensor.last_read))
+const isStale = computed(() => freshness.value === 'stale')
+
+// ESP offline indicator
+const isEspOffline = computed(() =>
+  props.sensor.esp_state !== undefined && props.sensor.esp_state !== 'OPERATIONAL'
+)
+
+function formatValue(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
-  return Number.isInteger(value) ? value.toString() : value.toFixed(1)
+  return Number.isInteger(value) ? value.toString() : Number(value).toFixed(1)
 }
 
 function handleClick() {
@@ -58,6 +64,8 @@ function handleClick() {
       'sensor-card',
       `sensor-card--${mode}`,
       mode === 'monitor' ? `sensor-card--${qualityToStatus(sensor.quality)}` : '',
+      mode === 'monitor' && isStale ? 'sensor-card--stale' : '',
+      mode === 'monitor' && isEspOffline ? 'sensor-card--esp-offline' : '',
     ]"
     @click="handleClick"
   >
@@ -85,20 +93,14 @@ function handleClick() {
         <span class="sensor-card__number">{{ formatValue(sensor.raw_value) }}</span>
         <span class="sensor-card__unit">{{ sensor.unit }}</span>
       </div>
-      <div
-        v-if="sparklineData?.length"
-        class="sensor-card__sparkline"
-      >
-        <LiveLineChart
-          :data="sparklineData"
-          :compact="true"
-          height="50px"
-          :fill="true"
-          :show-grid="false"
-        />
-      </div>
       <div class="sensor-card__footer">
         <span class="sensor-card__esp">{{ sensor.esp_id }}</span>
+        <span v-if="isEspOffline" class="sensor-card__badge sensor-card__badge--offline">
+          <WifiOff class="w-3 h-3" /> ESP offline
+        </span>
+        <span v-else-if="isStale" class="sensor-card__badge sensor-card__badge--stale">
+          <Clock class="w-3 h-3" /> {{ formatRelativeTime(sensor.last_read) }}
+        </span>
       </div>
     </template>
   </div>
@@ -222,14 +224,6 @@ function handleClick() {
   color: var(--color-text-muted);
 }
 
-.sensor-card__sparkline {
-  height: 50px;
-  margin: var(--space-1) 0;
-  opacity: 0.8;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
 .sensor-card__footer {
   display: flex;
   align-items: center;
@@ -246,4 +240,45 @@ function handleClick() {
 .sensor-card--warning { border-color: rgba(251, 191, 36, 0.15); }
 .sensor-card--alarm { border-color: rgba(248, 113, 113, 0.15); }
 .sensor-card--offline { border-color: var(--glass-border); }
+
+/* Stale data indicator */
+.sensor-card--stale {
+  opacity: 0.7;
+  border-color: rgba(251, 191, 36, 0.25);
+}
+
+.sensor-card--stale .sensor-card__number {
+  color: var(--color-text-secondary);
+}
+
+/* ESP offline indicator */
+.sensor-card--esp-offline {
+  opacity: 0.5;
+  border-color: var(--glass-border);
+}
+
+.sensor-card--esp-offline .sensor-card__number {
+  color: var(--color-text-muted);
+}
+
+/* Badges */
+.sensor-card__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.sensor-card__badge--stale {
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.1);
+}
+
+.sensor-card__badge--offline {
+  color: var(--color-text-muted);
+  background: rgba(112, 112, 128, 0.15);
+}
 </style>

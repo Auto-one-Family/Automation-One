@@ -18,13 +18,13 @@ import { useEspStore } from '@/stores/esp'
 import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
 import { useZoneGrouping } from '@/composables/useZoneGrouping'
 import { useSparklineCache } from '@/composables/useSparklineCache'
-import { aggregateZoneSensors, formatAggregatedValue, getSensorUnit } from '@/utils/sensorDefaults'
+import { aggregateZoneSensors, formatAggregatedValue, getSensorUnit, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { getESPStatus } from '@/composables/useESPStatus'
-import { formatRelativeTime } from '@/utils/formatters'
+import { formatRelativeTime, qualityToStatus } from '@/utils/formatters'
 import { sensorsApi } from '@/api/sensors'
-import type { SensorReading } from '@/types'
-import { LayoutDashboard, Download, CheckCircle2, XCircle, Clock } from 'lucide-vue-next'
+import type { SensorReading, SensorStats } from '@/types'
+import { LayoutDashboard, Download, CheckCircle2, XCircle, Clock, TrendingUp, TrendingDown, Minus } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import TimeRangeSelector, { type TimePreset } from '@/components/charts/TimeRangeSelector.vue'
 import { Line } from 'vue-chartjs'
@@ -52,12 +52,11 @@ import {
   ChevronRight, Settings,
 } from 'lucide-vue-next'
 import type { MockSensor, MockActuator } from '@/types'
-import LiveLineChart from '@/components/charts/LiveLineChart.vue'
-import HistoricalChart from '@/components/charts/HistoricalChart.vue'
-import GaugeChart from '@/components/charts/GaugeChart.vue'
 import ViewTabBar from '@/components/common/ViewTabBar.vue'
 import SensorCard from '@/components/devices/SensorCard.vue'
 import ActuatorCard from '@/components/devices/ActuatorCard.vue'
+import DashboardViewer from '@/components/dashboard/DashboardViewer.vue'
+import InlineDashboardPanel from '@/components/dashboard/InlineDashboardPanel.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -67,21 +66,159 @@ const { groupDevicesByZone } = useZoneDragDrop()
 
 const selectedZoneId = computed(() => (route.params.zoneId as string) || null)
 const selectedSensorId = computed(() => (route.params.sensorId as string) || null)
+const selectedDashboardId = computed(() => (route.params.dashboardId as string) || null)
+const isDashboardView = computed(() => !!selectedDashboardId.value)
 const isZoneDetail = computed(() => !!selectedZoneId.value)
 
-// Expanded sensor card state (for inline charts)
+// Expanded sensor card state (for inline 1h chart)
 const expandedSensorKey = ref<string | null>(null)
-const historicalTimeRange = ref<'1h' | '6h' | '24h' | '7d'>('1h')
 
-// Sparkline data cache (shared composable)
-const { sparklineCache, getSensorKey } = useSparklineCache()
+// Sensor key helper (from sparkline cache composable)
+const { getSensorKey } = useSparklineCache()
 
 // Zone grouping composable (for L2 subzone accordion)
 const { sensorsByZone, actuatorsByZone } = useZoneGrouping()
 
 function toggleExpanded(sensorKey: string) {
-  expandedSensorKey.value = expandedSensorKey.value === sensorKey ? null : sensorKey
+  const wasExpanded = expandedSensorKey.value === sensorKey
+  expandedSensorKey.value = wasExpanded ? null : sensorKey
+  if (!wasExpanded) {
+    fetchExpandedChartData(sensorKey)
+  }
 }
+
+// =============================================================================
+// Chart colors (shared between expanded panel + L3 overlay)
+// =============================================================================
+
+const CHART_COLORS = ['#a78bfa', '#34d399', '#f97316', '#3b82f6', '#ec4899']
+
+// =============================================================================
+// Expanded Panel: 1h Chart with Initial Fetch
+// =============================================================================
+
+const expandedChartLoading = ref(false)
+const expandedChartReadings = ref<SensorReading[]>([])
+
+async function fetchExpandedChartData(sensorKey: string) {
+  // Parse sensorKey format: "{espId}-{gpio}"
+  const parts = sensorKey.split('-')
+  if (parts.length < 2) return
+  const gpio = parseInt(parts[parts.length - 1], 10)
+  const espId = parts.slice(0, -1).join('-')
+  if (isNaN(gpio)) return
+
+  expandedChartLoading.value = true
+  expandedChartReadings.value = []
+  try {
+    const now = new Date()
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
+    const response = await sensorsApi.queryData({
+      esp_id: espId,
+      gpio,
+      start_time: oneHourAgo.toISOString(),
+      end_time: now.toISOString(),
+      limit: 500,
+    })
+    expandedChartReadings.value = response.readings ?? []
+  } catch {
+    expandedChartReadings.value = []
+  } finally {
+    expandedChartLoading.value = false
+  }
+}
+
+/** Resolve unit for the currently expanded sensor (avoids duplication in chartData + chartOptions) */
+const expandedSensorUnit = computed(() => {
+  if (!expandedSensorKey.value) return ''
+  const parts = expandedSensorKey.value.split('-')
+  const gpio = parseInt(parts[parts.length - 1], 10)
+  const espId = parts.slice(0, -1).join('-')
+  const sensorGroup = zoneSensorGroup.value
+  if (sensorGroup) {
+    for (const sz of sensorGroup.subzones) {
+      const found = sz.sensors.find(s => s.esp_id === espId && s.gpio === gpio)
+      if (found) {
+        return getSensorUnit(found.sensor_type) !== 'raw' ? getSensorUnit(found.sensor_type) : (found.unit || '')
+      }
+    }
+  }
+  return ''
+})
+
+const expandedChartData = computed(() => {
+  if (!expandedChartReadings.value.length) return { datasets: [] }
+
+  const unit = expandedSensorUnit.value
+
+  return {
+    datasets: [{
+      label: `Letzte Stunde (${unit})`,
+      data: expandedChartReadings.value.map(r => ({
+        x: new Date(r.timestamp).getTime(),
+        y: r.processed_value ?? r.raw_value,
+      })),
+      borderColor: CHART_COLORS[0],
+      backgroundColor: `${CHART_COLORS[0]}20`,
+      borderWidth: 2,
+      pointRadius: expandedChartReadings.value.length > 100 ? 0 : 2,
+      pointHoverRadius: 4,
+      tension: 0.3,
+      fill: true,
+    }],
+  }
+})
+
+const expandedChartOptions = computed(() => {
+  const unit = expandedSensorUnit.value
+
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 300 },
+    interaction: { mode: 'index' as const, intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: 'rgba(7,7,13,0.92)',
+        borderColor: 'rgba(133,133,160,0.3)',
+        borderWidth: 1,
+        titleFont: { family: 'JetBrains Mono', size: 11 },
+        bodyFont: { family: 'JetBrains Mono', size: 12 },
+        titleColor: '#8585a0',
+        bodyColor: '#eaeaf2',
+        padding: 10,
+        callbacks: {
+          title: (items: TooltipItem<'line'>[]) => {
+            if (!items.length) return ''
+            return new Date(items[0].parsed.x ?? 0).toLocaleString('de-DE')
+          },
+          label: (item: TooltipItem<'line'>) => ` ${item.parsed.y?.toFixed(2)} ${unit}`,
+        },
+      },
+    },
+    scales: {
+      x: {
+        type: 'time' as const,
+        time: {
+          displayFormats: { second: 'HH:mm:ss', minute: 'HH:mm', hour: 'HH:mm' },
+        },
+        grid: { color: 'rgba(29,29,42,0.8)' },
+        ticks: { color: '#484860', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 6 },
+        border: { display: false },
+      },
+      y: {
+        grid: { color: 'rgba(29,29,42,0.8)' },
+        ticks: {
+          color: CHART_COLORS[0],
+          font: { family: 'JetBrains Mono', size: 10 },
+          callback: (val: string | number) => `${val} ${unit}`,
+        },
+        border: { display: false },
+      },
+    },
+  }
+})
 
 // =============================================================================
 // Level 3: Sensor Detail SlideOver
@@ -104,7 +241,11 @@ const detailReadings = ref<SensorReading[]>([])
 const detailLoading = ref(false)
 const detailError = ref('')
 
-const CHART_COLORS = ['#a78bfa', '#34d399', '#f97316', '#3b82f6']
+// Multi-sensor overlay state
+const overlaySensorIds = ref<string[]>([])
+const overlaySensorReadings = ref<Map<string, SensorReading[]>>(new Map())
+const overlayLoading = ref<Set<string>>(new Set())
+const MAX_OVERLAY_SENSORS = 4
 
 function openSensorDetail(sensor: { esp_id: string; gpio: number; sensor_type: string; name: string | null; unit: string }) {
   const sensorName = sensor.name || sensor.sensor_type
@@ -141,6 +282,10 @@ function closeSensorDetail() {
   setTimeout(() => {
     selectedDetailSensor.value = null
     detailReadings.value = []
+    // Clear overlay state
+    overlaySensorIds.value = []
+    overlaySensorReadings.value = new Map()
+    overlayLoading.value = new Set()
   }, 300)
 }
 
@@ -148,6 +293,10 @@ function onDetailRangeChange(payload: { start: string; end: string }) {
   detailStartTime.value = payload.start
   detailEndTime.value = payload.end
   fetchDetailData()
+  // Re-fetch overlay sensor data for new time range
+  for (const key of overlaySensorIds.value) {
+    fetchOverlaySensorData(key)
+  }
 }
 
 async function fetchDetailData() {
@@ -171,11 +320,86 @@ async function fetchDetailData() {
   }
 }
 
+// =============================================================================
+// Multi-Sensor Overlay (L3)
+// =============================================================================
+
+/** All sensors in current zone except the primary detail sensor */
+const availableOverlaySensors = computed(() => {
+  if (!zoneSensorGroup.value || !selectedDetailSensor.value) return []
+  const result: { key: string; name: string; type: string; unit: string; espId: string; gpio: number }[] = []
+  for (const sz of zoneSensorGroup.value.subzones) {
+    for (const s of sz.sensors) {
+      if (s.esp_id === selectedDetailSensor.value.espId && s.gpio === selectedDetailSensor.value.gpio) continue
+      const key = `${s.esp_id}-${s.gpio}`
+      result.push({
+        key,
+        name: s.name || `GPIO ${s.gpio}`,
+        type: s.sensor_type,
+        unit: getSensorUnit(s.sensor_type) !== 'raw' ? getSensorUnit(s.sensor_type) : (s.unit || ''),
+        espId: s.esp_id,
+        gpio: s.gpio,
+      })
+    }
+  }
+  return result
+})
+
+async function toggleOverlaySensor(sensorKey: string) {
+  const idx = overlaySensorIds.value.indexOf(sensorKey)
+  if (idx >= 0) {
+    overlaySensorIds.value.splice(idx, 1)
+    overlaySensorReadings.value.delete(sensorKey)
+    overlayLoading.value.delete(sensorKey)
+    return
+  }
+  if (overlaySensorIds.value.length >= MAX_OVERLAY_SENSORS) return
+  overlaySensorIds.value.push(sensorKey)
+  await fetchOverlaySensorData(sensorKey)
+}
+
+async function fetchOverlaySensorData(sensorKey: string) {
+  const parts = sensorKey.split('-')
+  if (parts.length < 2) return
+  const gpio = parseInt(parts[parts.length - 1], 10)
+  const espId = parts.slice(0, -1).join('-')
+  if (isNaN(gpio)) return
+
+  overlayLoading.value.add(sensorKey)
+  try {
+    const response = await sensorsApi.queryData({
+      esp_id: espId,
+      gpio,
+      start_time: detailStartTime.value,
+      end_time: detailEndTime.value,
+      limit: 1000,
+    })
+    overlaySensorReadings.value.set(sensorKey, response.readings ?? [])
+  } catch {
+    overlaySensorReadings.value.set(sensorKey, [])
+  } finally {
+    overlayLoading.value.delete(sensorKey)
+  }
+}
+
+/** Get the chart color for an overlay sensor by its index in overlaySensorIds */
+function getOverlayColor(sensorKey: string): string {
+  const idx = overlaySensorIds.value.indexOf(sensorKey)
+  return CHART_COLORS[(idx + 1) % CHART_COLORS.length]
+}
+
 const detailChartData = computed(() => {
-  if (!detailReadings.value.length) return { datasets: [] }
+  const hasMain = detailReadings.value.length > 0
+  const hasOverlay = overlaySensorIds.value.length > 0
+  if (!hasMain && !hasOverlay) return { datasets: [] }
+
   const sensor = selectedDetailSensor.value
-  return {
-    datasets: [{
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const datasets: any[] = []
+
+  // Primary sensor dataset
+  if (hasMain) {
+    datasets.push({
       label: `${sensor?.name ?? 'Sensor'} (${sensor?.unit ?? ''})`,
       data: detailReadings.value.map(r => ({
         x: new Date(r.timestamp).getTime(),
@@ -188,19 +412,109 @@ const detailChartData = computed(() => {
       pointHoverRadius: 4,
       tension: 0.3,
       fill: true,
-    }],
+      yAxisID: 'y',
+    })
   }
+
+  // Overlay sensor datasets
+  for (let i = 0; i < overlaySensorIds.value.length; i++) {
+    const key = overlaySensorIds.value[i]
+    const readings = overlaySensorReadings.value.get(key)
+    if (!readings?.length) continue
+
+    const overlaySensor = availableOverlaySensors.value.find(s => s.key === key)
+    const color = CHART_COLORS[(i + 1) % CHART_COLORS.length]
+    const sameUnit = overlaySensor?.unit === sensor?.unit
+
+    datasets.push({
+      label: `${overlaySensor?.name ?? key} (${overlaySensor?.unit ?? ''})`,
+      data: readings.map(r => ({
+        x: new Date(r.timestamp).getTime(),
+        y: r.processed_value ?? r.raw_value,
+      })),
+      borderColor: color,
+      backgroundColor: `${color}10`,
+      borderWidth: 1.5,
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      tension: 0.3,
+      fill: false,
+      yAxisID: sameUnit ? 'y' : 'y1',
+    })
+  }
+
+  return { datasets }
 })
 
 const detailChartOptions = computed(() => {
   const unit = selectedDetailSensor.value?.unit ?? ''
+  const hasOverlays = overlaySensorIds.value.length > 0
+
+  // Check if any overlay sensor has a different unit → needs secondary y-axis
+  const needsSecondaryAxis = overlaySensorIds.value.some(key => {
+    const s = availableOverlaySensors.value.find(os => os.key === key)
+    return s && s.unit !== unit
+  })
+  const secondaryUnit = needsSecondaryAxis
+    ? (availableOverlaySensors.value.find(s => overlaySensorIds.value.includes(s.key) && s.unit !== unit)?.unit ?? '')
+    : ''
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const scales: any = {
+    x: {
+      type: 'time' as const,
+      time: {
+        displayFormats: { second: 'HH:mm:ss', minute: 'HH:mm', hour: 'HH:mm', day: 'dd.MM' },
+      },
+      grid: { color: 'rgba(29,29,42,0.8)' },
+      ticks: { color: '#484860', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 8 },
+      border: { display: false },
+    },
+    y: {
+      grid: { color: 'rgba(29,29,42,0.8)' },
+      ticks: {
+        color: CHART_COLORS[0],
+        font: { family: 'JetBrains Mono', size: 10 },
+        callback: (val: string | number) => `${val} ${unit}`,
+      },
+      border: { display: false },
+      // SENSOR_TYPE_CONFIG Y-axis defaults (suggestedMin/suggestedMax)
+      ...(detailSensorTypeConfig.value ? {
+        suggestedMin: detailSensorTypeConfig.value.min,
+        suggestedMax: detailSensorTypeConfig.value.max,
+      } : {}),
+    },
+  }
+
+  if (needsSecondaryAxis) {
+    scales.y1 = {
+      position: 'right',
+      grid: { drawOnChartArea: false },
+      ticks: {
+        color: CHART_COLORS[1 % CHART_COLORS.length],
+        font: { family: 'JetBrains Mono', size: 10 },
+        callback: (val: string | number) => `${val} ${secondaryUnit}`,
+      },
+      border: { display: false },
+    }
+  }
+
   return {
     responsive: true,
     maintainAspectRatio: false,
     animation: { duration: 300 },
     interaction: { mode: 'index' as const, intersect: false },
     plugins: {
-      legend: { display: false },
+      legend: {
+        display: hasOverlays,
+        labels: {
+          color: '#b0b0c0',
+          font: { family: 'JetBrains Mono', size: 10 },
+          boxWidth: 12,
+          boxHeight: 2,
+          padding: 8,
+        },
+      },
       tooltip: {
         backgroundColor: 'rgba(7,7,13,0.92)',
         borderColor: 'rgba(133,133,160,0.3)',
@@ -215,30 +529,14 @@ const detailChartOptions = computed(() => {
             if (!items.length) return ''
             return new Date(items[0].parsed.x ?? 0).toLocaleString('de-DE')
           },
-          label: (item: TooltipItem<'line'>) => ` ${item.parsed.y?.toFixed(2)} ${unit}`,
+          label: (item: TooltipItem<'line'>) => {
+            const dsUnit = item.dataset.label?.match(/\(([^)]*)\)/)?.[1] ?? unit
+            return ` ${item.parsed.y?.toFixed(2)} ${dsUnit}`
+          },
         },
       },
     },
-    scales: {
-      x: {
-        type: 'time' as const,
-        time: {
-          displayFormats: { second: 'HH:mm:ss', minute: 'HH:mm', hour: 'HH:mm', day: 'dd.MM' },
-        },
-        grid: { color: 'rgba(29,29,42,0.8)' },
-        ticks: { color: '#484860', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 8 },
-        border: { display: false },
-      },
-      y: {
-        grid: { color: 'rgba(29,29,42,0.8)' },
-        ticks: {
-          color: CHART_COLORS[0],
-          font: { family: 'JetBrains Mono', size: 10 },
-          callback: (val: string | number) => `${val} ${unit}`,
-        },
-        border: { display: false },
-      },
-    },
+    scales,
   }
 })
 
@@ -257,6 +555,100 @@ function exportDetailCsv() {
   a.click()
   URL.revokeObjectURL(url)
 }
+
+// =============================================================================
+// Level 3: Sensor Detail — Live Value, Stats, Trend (Block 1 Polishing)
+// =============================================================================
+
+/** Current live value from store (reactive) */
+const detailLiveValue = computed(() => {
+  if (!selectedDetailSensor.value) return null
+  const device = espStore.devices.find(d =>
+    espStore.getDeviceId(d) === selectedDetailSensor.value!.espId
+  )
+  if (!device) return null
+  const sensor = (device.sensors as MockSensor[] | undefined)?.find(
+    s => s.gpio === selectedDetailSensor.value!.gpio
+  )
+  if (!sensor) return null
+  return {
+    value: sensor.raw_value,
+    quality: sensor.quality ?? 'unknown',
+    lastUpdate: sensor.last_reading_at ?? sensor.last_read ?? null,
+  }
+})
+
+/** SENSOR_TYPE_CONFIG for the detail sensor */
+const detailSensorTypeConfig = computed(() => {
+  if (!selectedDetailSensor.value) return null
+  return SENSOR_TYPE_CONFIG[selectedDetailSensor.value.sensorType] ?? null
+})
+
+/** Stale indicator: >120s since last update */
+const detailIsStale = computed(() => {
+  const lastUpdate = detailLiveValue.value?.lastUpdate
+  if (!lastUpdate) return false
+  return Date.now() - new Date(lastUpdate).getTime() > 120_000
+})
+
+/** Trend calculation from readings (last 10% vs first 10%) */
+const detailTrend = computed<'up' | 'down' | 'stable'>(() => {
+  const readings = detailReadings.value
+  if (readings.length < 4) return 'stable'
+  const chunkSize = Math.max(2, Math.floor(readings.length * 0.1))
+  const firstChunk = readings.slice(0, chunkSize)
+  const lastChunk = readings.slice(-chunkSize)
+  const avgFirst = firstChunk.reduce((sum, r) => sum + (r.processed_value ?? r.raw_value), 0) / chunkSize
+  const avgLast = lastChunk.reduce((sum, r) => sum + (r.processed_value ?? r.raw_value), 0) / chunkSize
+  const diff = avgLast - avgFirst
+  const range = detailSensorTypeConfig.value
+    ? (detailSensorTypeConfig.value.max - detailSensorTypeConfig.value.min)
+    : Math.abs(avgFirst) || 1
+  const threshold = range * 0.02
+  if (diff > threshold) return 'up'
+  if (diff < -threshold) return 'down'
+  return 'stable'
+})
+
+/** Stats fetched from server API */
+const detailStats = ref<SensorStats | null>(null)
+
+async function fetchDetailStats() {
+  if (!selectedDetailSensor.value) return
+  try {
+    const resp = await sensorsApi.getStats(
+      selectedDetailSensor.value.espId,
+      selectedDetailSensor.value.gpio,
+      { start_time: detailStartTime.value, end_time: detailEndTime.value },
+    )
+    detailStats.value = resp.stats
+  } catch {
+    detailStats.value = null
+  }
+}
+
+/** Format a stat value with the detail sensor's unit and decimals */
+function formatStatValue(value: number | null): string {
+  if (value == null) return '—'
+  const decimals = detailSensorTypeConfig.value?.decimals ?? 1
+  return value.toFixed(decimals).replace('.', ',')
+}
+
+/** Sensor config link for Quick-Actions */
+const detailConfigRoute = computed(() => {
+  if (!selectedDetailSensor.value) return null
+  const sensorParam = `${selectedDetailSensor.value.espId}-gpio${selectedDetailSensor.value.gpio}`
+  return { path: '/sensors', query: { sensor: sensorParam } }
+})
+
+// Fetch stats whenever detail data is loaded
+watch(detailReadings, (readings) => {
+  if (readings.length > 0) {
+    fetchDetailStats()
+  } else {
+    detailStats.value = null
+  }
+})
 
 // Fetch data on mount + deep-link support
 onMounted(() => {
@@ -501,6 +893,51 @@ watch(selectedZoneName, (name) => {
   }
 })
 
+// Breadcrumb update for dashboard name
+watch(selectedDashboardId, (dashId) => {
+  if (dashId) {
+    const layout = dashStore.layouts.find(l => l.id === dashId)
+    dashStore.breadcrumb.dashboardName = layout?.name || ''
+  } else {
+    dashStore.breadcrumb.dashboardName = ''
+  }
+}, { immediate: true })
+
+// Auto-generate zone dashboard on first visit or auto-update when sensors change
+const generatedZoneDashboards = ref<Set<string>>(new Set())
+
+watch(
+  [selectedZoneId, () => espStore.devices.length],
+  ([zoneId, deviceCount]) => {
+    if (!zoneId || deviceCount === 0) return
+
+    const zoneDevices = espStore.devices.filter(d => d.zone_id === zoneId)
+    if (zoneDevices.length === 0) return
+    const zoneName = zoneDevices[0]?.zone_name || zoneId
+
+    const existingDashboards = dashStore.zoneDashboards(zoneId)
+
+    // Case 1: No dashboard exists — generate on first visit
+    if (existingDashboards.length === 0 && !generatedZoneDashboards.value.has(zoneId)) {
+      dashStore.generateZoneDashboard(zoneId, zoneDevices as any, zoneName)
+      generatedZoneDashboards.value.add(zoneId)
+      return
+    }
+
+    // Case 2: Auto-generated dashboard exists — update if sensor/actuator count changed
+    const autoLayout = existingDashboards.find(l => l.autoGenerated)
+    if (autoLayout) {
+      const totalSensors = zoneDevices.reduce((sum, d) => sum + (d.sensors?.length || 0), 0)
+      const totalActuators = zoneDevices.reduce((sum, d) => sum + (d.actuators?.length || 0), 0)
+      const currentWidgetCount = autoLayout.widgets.length
+      if (totalSensors + totalActuators !== currentWidgetCount) {
+        dashStore.generateZoneDashboard(zoneId, zoneDevices as any, zoneName)
+      }
+    }
+  },
+  { immediate: true },
+)
+
 // =============================================================================
 // Accordion State with localStorage persistence
 // =============================================================================
@@ -588,9 +1025,58 @@ function getSubzoneKey(zoneId: string | null, subzoneId: string | null): string 
   return `${zoneId ?? '__u'}-${subzoneId ?? '__n'}`
 }
 
+// Subzone KPI helper: representative sensor values for header
+function getSubzoneKPIs(sensors: { sensor_type: string; raw_value: number; unit: string; quality: string }[]): string {
+  const typeMap = new Map<string, { sum: number; count: number; unit: string }>()
+  for (const s of sensors) {
+    const baseType = s.sensor_type?.toLowerCase()?.replace(/[_\d]+/g, '') || 'other'
+    if (!typeMap.has(baseType)) {
+      typeMap.set(baseType, { sum: 0, count: 0, unit: getSensorUnit(s.sensor_type) !== 'raw' ? getSensorUnit(s.sensor_type) : (s.unit || '') })
+    }
+    const entry = typeMap.get(baseType)!
+    if (s.raw_value !== null && s.raw_value !== undefined) {
+      entry.sum += s.raw_value
+      entry.count++
+    }
+  }
+
+  const parts: string[] = []
+  for (const [, v] of typeMap) {
+    if (v.count > 0) {
+      const avg = v.count > 1 ? v.sum / v.count : v.sum
+      parts.push(`${Number.isInteger(avg) ? avg : avg.toFixed(1)}${v.unit}`)
+    }
+  }
+  return parts.slice(0, 3).join(' · ')
+}
+
+// Worst-case quality status for a set of sensors
+function getWorstQualityStatus(sensors: { quality: string }[]): 'good' | 'warning' | 'alarm' | 'offline' {
+  let worst: 'good' | 'warning' | 'alarm' | 'offline' = 'good'
+  for (const s of sensors) {
+    const status = qualityToStatus(s.quality)
+    if (status === 'alarm') return 'alarm'
+    if (status === 'warning') worst = 'warning'
+    if (status === 'offline' && worst === 'good') worst = 'offline'
+  }
+  return worst
+}
+
+// Zone alarm count
+const zoneAlarmCount = computed(() => {
+  if (!zoneSensorGroup.value) return 0
+  let count = 0
+  for (const sz of zoneSensorGroup.value.subzones) {
+    for (const s of sz.sensors) {
+      if (qualityToStatus(s.quality) === 'alarm') count++
+    }
+  }
+  return count
+})
+
 function handleClaimLayout(layoutId: string) {
   dashStore.claimAutoLayout(layoutId)
-  router.push({ path: '/editor', query: { layout: layoutId } })
+  router.push({ name: 'editor-dashboard', params: { dashboardId: layoutId } })
 }
 </script>
 
@@ -598,6 +1084,15 @@ function handleClaimLayout(layoutId: string) {
   <div class="monitor-view">
     <!-- View Tab Bar (Hardware / Monitor / Dashboard) -->
     <ViewTabBar />
+
+    <!-- L3 Dashboard View (Cross-Zone or Zone-specific) -->
+    <template v-if="isDashboardView">
+      <DashboardViewer :layoutId="selectedDashboardId!" showHeader />
+    </template>
+
+    <!-- L1/L2 with optional Side-Panel -->
+    <div v-else class="monitor-layout" :class="{ 'monitor-layout--has-side': dashStore.sideMonitorPanels.length > 0 }">
+      <main class="monitor-layout__main">
 
     <!-- Level 1: Zone Overview -->
     <template v-if="!isZoneDetail">
@@ -690,7 +1185,7 @@ function handleClaimLayout(layoutId: string) {
           <router-link
             v-for="dash in visibleCrossZoneDashboards"
             :key="dash.id"
-            :to="{ path: '/editor', query: { layout: dash.id } }"
+            :to="{ name: 'monitor-dashboard', params: { dashboardId: dash.id } }"
             class="monitor-dashboard-link"
           >
             <LayoutDashboard class="w-4 h-4" style="color: var(--color-iridescent-2)" />
@@ -714,6 +1209,14 @@ function handleClaimLayout(layoutId: string) {
 
       <!-- Logic Rules Section (placeholder — implementation in auftrag-logic-rules-live-monitoring-integration.md) -->
       <!-- Will contain: active rules with status, 24h trigger counter, zone tags, quick-access to rule detail -->
+
+      <!-- Inline Dashboard Panels (target.view='monitor', placement='inline') -->
+      <InlineDashboardPanel
+        v-for="panel in dashStore.inlineMonitorPanels"
+        :key="panel.id"
+        :layoutId="panel.id"
+        mode="inline"
+      />
     </template>
 
     <!-- Level 2: Zone Data Detail (Subzone Accordion) -->
@@ -723,7 +1226,21 @@ function handleClaimLayout(layoutId: string) {
           <ArrowLeft class="w-4 h-4" />
           <span>Zurück</span>
         </button>
-        <h2 class="monitor-view__title">{{ selectedZoneName }}</h2>
+        <div class="monitor-view__header-info">
+          <h2 class="monitor-view__title">{{ selectedZoneName }}</h2>
+          <p class="monitor-view__zone-kpis">
+            {{ zoneSensorCount }} {{ zoneSensorCount === 1 ? 'Sensor' : 'Sensoren' }}
+            <span class="monitor-view__kpi-dot">&middot;</span>
+            {{ zoneActuatorCount }} {{ zoneActuatorCount === 1 ? 'Aktor' : 'Aktoren' }}
+            <template v-if="zoneAlarmCount > 0">
+              <span class="monitor-view__kpi-dot">&middot;</span>
+              <span class="monitor-view__kpi-alarm">
+                <AlertTriangle class="w-3 h-3" />
+                {{ zoneAlarmCount }} {{ zoneAlarmCount === 1 ? 'Alarm' : 'Alarme' }}
+              </span>
+            </template>
+          </p>
+        </div>
       </div>
 
       <!-- Zone Dashboards -->
@@ -736,7 +1253,7 @@ function handleClaimLayout(layoutId: string) {
             class="monitor-dashboard-link-wrap"
           >
             <router-link
-              :to="{ path: '/editor', query: { layout: dash.id } }"
+              :to="{ name: 'monitor-zone-dashboard', params: { zoneId: selectedZoneId!, dashboardId: dash.id } }"
               class="monitor-dashboard-link"
             >
               <LayoutDashboard class="w-4 h-4" style="color: var(--color-iridescent-2)" />
@@ -777,7 +1294,9 @@ function handleClaimLayout(layoutId: string) {
             <ChevronRight
               :class="['monitor-subzone__chevron', { 'monitor-subzone__chevron--expanded': isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId)) }]"
             />
+            <span :class="['monitor-subzone__status-dot', `monitor-subzone__status-dot--${getWorstQualityStatus(subzone.sensors)}`]" />
             <span class="monitor-subzone__name">{{ subzone.subzoneName || 'Keine Subzone' }}</span>
+            <span class="monitor-subzone__kpis" v-if="getSubzoneKPIs(subzone.sensors)">{{ getSubzoneKPIs(subzone.sensors) }}</span>
             <span class="monitor-subzone__count">{{ subzone.sensors.length }} {{ subzone.sensors.length === 1 ? 'Sensor' : 'Sensoren' }}</span>
           </button>
 
@@ -798,52 +1317,28 @@ function handleClaimLayout(layoutId: string) {
                 <SensorCard
                   :sensor="sensor"
                   mode="monitor"
-                  :sparkline-data="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio))"
                   @click="toggleExpanded(getSensorKey(sensor.esp_id, sensor.gpio))"
                 />
 
-                <!-- Expanded Chart Panel -->
+                <!-- Expanded Chart Panel (simplified: 1h chart + 2 action buttons) -->
                 <Transition name="expand">
                   <div
                     v-if="expandedSensorKey === getSensorKey(sensor.esp_id, sensor.gpio)"
                     class="monitor-sensor-card__charts"
                     @click.stop
                   >
-                    <div class="monitor-sensor-card__charts-grid">
-                      <div class="monitor-sensor-card__gauge">
-                        <GaugeChart
-                          :value="sensor.raw_value"
-                          :unit="getSensorUnit(sensor.sensor_type) !== 'raw' ? getSensorUnit(sensor.sensor_type) : (sensor.unit || '')"
-                          size="sm"
-                        />
+                    <!-- 1h Chart Container (populated in Schritt 3 via expandedChartData) -->
+                    <div class="monitor-sensor-card__1h-chart">
+                      <div v-if="expandedChartLoading" class="monitor-sensor-card__chart-loading">
+                        <div class="sensor-detail__spinner" />
+                        <span>Lade Daten...</span>
                       </div>
-                      <div class="monitor-sensor-card__live-chart">
-                        <LiveLineChart
-                          :data="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio)) || []"
-                          height="120px"
-                          :unit="getSensorUnit(sensor.sensor_type) !== 'raw' ? getSensorUnit(sensor.sensor_type) : (sensor.unit || '')"
-                          :fill="true"
-                        />
+                      <div v-else-if="expandedChartData.datasets.length > 0" style="height: 160px">
+                        <Line :data="expandedChartData" :options="expandedChartOptions" />
                       </div>
-                    </div>
-
-                    <!-- Historical Chart -->
-                    <div class="monitor-sensor-card__historical">
-                      <!-- Time range buttons only when SlideOver is not open -->
-                      <div v-if="!showSensorDetail" class="monitor-sensor-card__time-range">
-                        <button
-                          v-for="tr in (['1h', '6h', '24h', '7d'] as const)"
-                          :key="tr"
-                          :class="['monitor-sensor-card__time-btn', { 'monitor-sensor-card__time-btn--active': historicalTimeRange === tr }]"
-                          @click.stop="historicalTimeRange = tr"
-                        >{{ tr }}</button>
+                      <div v-else class="monitor-sensor-card__chart-empty">
+                        Keine Daten der letzten Stunde
                       </div>
-                      <HistoricalChart
-                        :esp-id="sensor.esp_id"
-                        :gpio="sensor.gpio"
-                        :sensor-type="sensor.sensor_type"
-                        :time-range="historicalTimeRange"
-                      />
                     </div>
 
                     <!-- Action Buttons -->
@@ -911,13 +1406,34 @@ function handleClaimLayout(layoutId: string) {
         </div>
       </section>
 
+      <!-- Inline Dashboard Panels for this zone (target.view='monitor', placement='inline') -->
+      <InlineDashboardPanel
+        v-for="panel in dashStore.inlineMonitorPanels"
+        :key="panel.id"
+        :layoutId="panel.id"
+        mode="inline"
+      />
+
       <div v-if="zoneSensorCount === 0 && zoneActuatorCount === 0" class="monitor-view__empty">
         <Activity class="w-12 h-12" style="color: var(--color-text-muted)" />
         <p>Keine Sensoren oder Aktoren in dieser Zone.</p>
       </div>
     </template>
 
-    <!-- Level 3: Sensor Detail SlideOver -->
+      </main>
+
+      <!-- Side-Panel (target.view='monitor', placement='side-panel') -->
+      <aside v-if="dashStore.sideMonitorPanels.length > 0" class="monitor-layout__side">
+        <InlineDashboardPanel
+          v-for="panel in dashStore.sideMonitorPanels"
+          :key="panel.id"
+          :layoutId="panel.id"
+          mode="side-panel"
+        />
+      </aside>
+    </div>
+
+    <!-- Level 3: Sensor Detail SlideOver (5-Section Anatomy) -->
     <SlideOver
       :open="showSensorDetail"
       :title="selectedDetailSensor?.name || 'Sensor-Detail'"
@@ -925,17 +1441,67 @@ function handleClaimLayout(layoutId: string) {
       @close="closeSensorDetail"
     >
       <template v-if="selectedDetailSensor">
-        <!-- Breadcrumb -->
-        <div class="sensor-detail__breadcrumb">
-          Monitor → {{ selectedZoneName }} → {{ selectedDetailSensor.name }}
+        <!-- ═══ Section 1: Header — Live Value + Trend + Stale ═══ -->
+        <div class="sensor-detail__hero">
+          <div class="sensor-detail__hero-top">
+            <span class="sensor-detail__sensor-type">{{ selectedDetailSensor.sensorType }}</span>
+            <span class="sensor-detail__esp-name">{{ selectedDetailSensor.espId }}</span>
+          </div>
+          <div class="sensor-detail__hero-value">
+            <span v-if="detailLiveValue?.value != null" class="sensor-detail__live-value">
+              {{ formatStatValue(detailLiveValue.value) }}
+              <span class="sensor-detail__live-unit">{{ selectedDetailSensor.unit }}</span>
+            </span>
+            <span v-else class="sensor-detail__live-value sensor-detail__live-value--no-data">—</span>
+            <component
+              :is="detailTrend === 'up' ? TrendingUp : detailTrend === 'down' ? TrendingDown : Minus"
+              :class="['sensor-detail__trend-icon', `sensor-detail__trend-icon--${detailTrend}`]"
+              :size="20"
+            />
+          </div>
+          <div class="sensor-detail__hero-meta">
+            <span v-if="detailIsStale" class="sensor-detail__stale-badge">
+              <Clock :size="12" />
+              Veraltet
+            </span>
+            <span v-if="detailLiveValue?.lastUpdate" class="sensor-detail__last-update">
+              {{ formatRelativeTime(detailLiveValue.lastUpdate) }}
+            </span>
+          </div>
         </div>
 
-        <!-- Time Range Selector -->
+        <!-- ═══ Section 2: TimeRange Chips ═══ -->
         <TimeRangeSelector
           v-model="detailPreset"
           @range-change="onDetailRangeChange"
         />
 
+        <!-- Multi-Sensor Overlay Selector -->
+        <div v-if="availableOverlaySensors.length > 0" class="sensor-detail__overlay">
+          <p class="sensor-detail__overlay-label">Vergleichen mit:</p>
+          <div class="sensor-detail__overlay-chips">
+            <button
+              v-for="s in availableOverlaySensors"
+              :key="s.key"
+              :class="[
+                'sensor-detail__overlay-chip',
+                { 'sensor-detail__overlay-chip--active': overlaySensorIds.includes(s.key) },
+                { 'sensor-detail__overlay-chip--loading': overlayLoading.has(s.key) },
+              ]"
+              :disabled="!overlaySensorIds.includes(s.key) && overlaySensorIds.length >= MAX_OVERLAY_SENSORS"
+              @click="toggleOverlaySensor(s.key)"
+            >
+              <span
+                class="sensor-detail__overlay-dot"
+                :style="{ background: overlaySensorIds.includes(s.key) ? getOverlayColor(s.key) : 'var(--color-text-muted)' }"
+              />
+              {{ s.name }}
+              <span class="sensor-detail__overlay-unit">{{ s.unit }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ═══ Section 3: Chart ═══ -->
         <!-- Loading -->
         <div v-if="detailLoading" class="sensor-detail__status">
           <div class="sensor-detail__spinner" />
@@ -952,19 +1518,59 @@ function handleClaimLayout(layoutId: string) {
           Keine Daten für den gewählten Zeitraum.
         </div>
 
-        <!-- Chart -->
-        <div v-else class="sensor-detail__chart-wrap">
-          <div class="sensor-detail__chart-header">
-            <span class="sensor-detail__point-count">
-              {{ detailReadings.length }} Datenpunkte
-            </span>
-            <button class="sensor-detail__export-btn" @click="exportDetailCsv">
-              <Download :size="14" /> CSV Export
-            </button>
+        <!-- Chart + Stats -->
+        <template v-else>
+          <div class="sensor-detail__chart-wrap">
+            <div class="sensor-detail__chart-header">
+              <span class="sensor-detail__point-count">
+                {{ detailReadings.length }} Datenpunkte
+              </span>
+            </div>
+            <div class="sensor-detail__chart" style="height: 300px">
+              <Line :data="detailChartData" :options="detailChartOptions" />
+            </div>
           </div>
-          <div class="sensor-detail__chart" style="height: 350px">
-            <Line :data="detailChartData" :options="detailChartOptions" />
+
+          <!-- ═══ Section 4: Statistics Row ═══ -->
+          <div v-if="detailStats" class="sensor-detail__stats">
+            <div class="sensor-detail__stat">
+              <span class="sensor-detail__stat-label">Min</span>
+              <span class="sensor-detail__stat-value">{{ formatStatValue(detailStats.min_value) }}</span>
+              <span class="sensor-detail__stat-unit">{{ selectedDetailSensor.unit }}</span>
+            </div>
+            <div class="sensor-detail__stat">
+              <span class="sensor-detail__stat-label">Max</span>
+              <span class="sensor-detail__stat-value">{{ formatStatValue(detailStats.max_value) }}</span>
+              <span class="sensor-detail__stat-unit">{{ selectedDetailSensor.unit }}</span>
+            </div>
+            <div class="sensor-detail__stat">
+              <span class="sensor-detail__stat-label">Ø</span>
+              <span class="sensor-detail__stat-value">{{ formatStatValue(detailStats.avg_value) }}</span>
+              <span class="sensor-detail__stat-unit">{{ selectedDetailSensor.unit }}</span>
+            </div>
+            <div class="sensor-detail__stat">
+              <span class="sensor-detail__stat-label">Messungen</span>
+              <span class="sensor-detail__stat-value">{{ detailStats.reading_count }}</span>
+            </div>
           </div>
+        </template>
+      </template>
+
+      <!-- ═══ Section 5: Quick-Actions (fixed footer) ═══ -->
+      <template #footer v-if="selectedDetailSensor">
+        <div class="sensor-detail__actions">
+          <router-link
+            v-if="detailConfigRoute"
+            :to="detailConfigRoute"
+            class="sensor-detail__action-btn"
+          >
+            <Settings :size="14" />
+            Konfiguration
+          </router-link>
+          <button class="sensor-detail__action-btn" @click="exportDetailCsv" :disabled="detailReadings.length === 0">
+            <Download :size="14" />
+            CSV Export
+          </button>
         </div>
       </template>
     </SlideOver>
@@ -977,6 +1583,50 @@ function handleClaimLayout(layoutId: string) {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYOUT — Main + optional Side-Panel (Block 7d)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.monitor-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1;
+}
+
+.monitor-layout--has-side {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: var(--space-4);
+}
+
+.monitor-layout__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.monitor-layout__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow-y: auto;
+  max-height: calc(100vh - 120px);
+  position: sticky;
+  top: 0;
+}
+
+@media (max-width: 768px) {
+  .monitor-layout--has-side {
+    grid-template-columns: 1fr;
+  }
+  .monitor-layout__side {
+    position: static;
+    max-height: none;
+  }
 }
 
 .monitor-view__title {
@@ -1045,6 +1695,35 @@ function handleClaimLayout(layoutId: string) {
 .monitor-view__back:hover {
   color: var(--color-text-primary);
   border-color: var(--glass-border-hover);
+}
+
+.monitor-view__header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.monitor-view__zone-kpis {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  flex-wrap: wrap;
+}
+
+.monitor-view__kpi-dot {
+  color: var(--color-text-muted);
+  margin: 0 2px;
+}
+
+.monitor-view__kpi-alarm {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--color-warning);
+  font-weight: 600;
 }
 
 .monitor-view__empty {
@@ -1287,9 +1966,31 @@ function handleClaimLayout(layoutId: string) {
   flex: 1;
 }
 
+.monitor-subzone__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.monitor-subzone__status-dot--good { background: var(--color-success); }
+.monitor-subzone__status-dot--warning { background: var(--color-warning); }
+.monitor-subzone__status-dot--alarm { background: var(--color-error); }
+.monitor-subzone__status-dot--offline { background: var(--color-text-muted); }
+
+.monitor-subzone__kpis {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+  margin-left: auto;
+  margin-right: var(--space-2);
+  white-space: nowrap;
+}
+
 .monitor-subzone__count {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1302,22 +2003,7 @@ function handleClaimLayout(layoutId: string) {
   gap: var(--space-3);
 }
 
-/* Sensor Card */
-.monitor-sensor-card {
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--glass-border);
-  border-left: 3px solid var(--color-status-good);
-  border-radius: var(--radius-md);
-  padding: var(--space-3);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.monitor-sensor-card:hover {
-  border-color: var(--glass-border-hover);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
+/* Sensor Card wrapper (SensorCard handles its own visual styling) */
 .monitor-sensor-card--expanded {
   grid-column: 1 / -1;
 }
@@ -1338,65 +2024,28 @@ function handleClaimLayout(layoutId: string) {
   gap: var(--space-3);
 }
 
-.monitor-sensor-card__charts-grid {
-  display: grid;
-  grid-template-columns: 120px 1fr;
-  gap: var(--space-3);
-  align-items: start;
+.monitor-sensor-card__1h-chart {
+  min-height: 60px;
 }
 
-@media (max-width: 480px) {
-  .monitor-sensor-card__charts-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.monitor-sensor-card__gauge {
+.monitor-sensor-card__chart-loading {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.monitor-sensor-card__live-chart {
-  min-width: 0;
-}
-
-.monitor-sensor-card__historical {
-  display: flex;
-  flex-direction: column;
   gap: var(--space-2);
-}
-
-.monitor-sensor-card__time-range {
-  display: flex;
-  gap: 2px;
-  background: var(--color-bg-primary);
-  padding: 2px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--glass-border);
-  width: fit-content;
-}
-
-.monitor-sensor-card__time-btn {
-  padding: 2px 8px;
-  font-size: var(--text-xs);
-  font-weight: 500;
+  padding: var(--space-6);
   color: var(--color-text-muted);
-  background: transparent;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: all var(--transition-fast);
+  font-size: var(--text-sm);
 }
 
-.monitor-sensor-card__time-btn:hover {
-  color: var(--color-text-secondary);
-}
-
-.monitor-sensor-card__time-btn--active {
-  color: var(--color-text-primary);
-  background: var(--color-bg-secondary);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+.monitor-sensor-card__chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-style: italic;
 }
 
 /* Expand transition */
@@ -1601,13 +2250,175 @@ function handleClaimLayout(layoutId: string) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SENSOR DETAIL SLIDEOVER CONTENT
+   SENSOR DETAIL SLIDEOVER CONTENT (5-Section Anatomy)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.sensor-detail__breadcrumb {
+/* Section 1: Hero Header */
+.sensor-detail__hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+
+.sensor-detail__hero-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sensor-detail__sensor-type {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-iridescent-2);
+  background: rgba(129, 140, 248, 0.1);
+  padding: 1px 6px;
+  border-radius: 100px;
+}
+
+.sensor-detail__esp-name {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
-  margin-bottom: var(--space-3);
+  font-family: var(--font-mono);
+}
+
+.sensor-detail__hero-value {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.sensor-detail__live-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  line-height: 1.1;
+}
+
+.sensor-detail__live-value--no-data {
+  color: var(--color-text-muted);
+}
+
+.sensor-detail__live-unit {
+  font-size: var(--text-base);
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+
+.sensor-detail__trend-icon {
+  flex-shrink: 0;
+}
+
+.sensor-detail__trend-icon--up {
+  color: var(--color-error);
+}
+
+.sensor-detail__trend-icon--down {
+  color: var(--color-info);
+}
+
+.sensor-detail__trend-icon--stable {
+  color: var(--color-text-muted);
+}
+
+.sensor-detail__hero-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.sensor-detail__stale-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--color-warning);
+  font-weight: 600;
+  animation: breathe 2s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.sensor-detail__last-update {
+  color: var(--color-text-muted);
+}
+
+/* Section 4: Statistics Row */
+.sensor-detail__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+}
+
+.sensor-detail__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+}
+
+.sensor-detail__stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sensor-detail__stat-value {
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+}
+
+.sensor-detail__stat-unit {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+/* Section 5: Quick-Actions (footer) */
+.sensor-detail__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.sensor-detail__action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.sensor-detail__action-btn:hover:not(:disabled) {
+  border-color: var(--color-iridescent-1);
+  color: var(--color-text-primary);
+}
+
+.sensor-detail__action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .sensor-detail__status {
@@ -1657,26 +2468,6 @@ function handleClaimLayout(layoutId: string) {
   color: var(--color-text-muted);
 }
 
-.sensor-detail__export-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: var(--space-1) var(--space-3);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--glass-border);
-  background: var(--color-bg-secondary);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.sensor-detail__export-btn:hover {
-  border-color: var(--color-iridescent-1);
-  color: var(--color-text-primary);
-}
-
 .sensor-detail__chart {
   position: relative;
   width: 100%;
@@ -1684,5 +2475,76 @@ function handleClaimLayout(layoutId: string) {
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   padding: var(--space-3);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MULTI-SENSOR OVERLAY (L3)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.sensor-detail__overlay {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.sensor-detail__overlay-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  font-weight: 500;
+}
+
+.sensor-detail__overlay-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.sensor-detail__overlay-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 100px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.sensor-detail__overlay-chip:hover:not(:disabled) {
+  border-color: var(--color-border-hover, rgba(255, 255, 255, 0.12));
+  color: var(--color-text-primary);
+}
+
+.sensor-detail__overlay-chip--active {
+  background: rgba(167, 139, 250, 0.1);
+  border-color: rgba(167, 139, 250, 0.3);
+  color: var(--color-text-primary);
+}
+
+.sensor-detail__overlay-chip--loading {
+  opacity: 0.6;
+}
+
+.sensor-detail__overlay-chip:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.sensor-detail__overlay-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sensor-detail__overlay-unit {
+  color: var(--color-text-muted);
+  font-size: 10px;
 }
 </style>

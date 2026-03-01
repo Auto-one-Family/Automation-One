@@ -48,6 +48,7 @@ import ZonePlate from '@/components/dashboard/ZonePlate.vue'
 import DeviceMiniCard from '@/components/dashboard/DeviceMiniCard.vue'
 import DeviceDetailView from '@/components/esp/DeviceDetailView.vue'
 import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
+import InlineDashboardPanel from '@/components/dashboard/InlineDashboardPanel.vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { useDragStateStore } from '@/shared/stores/dragState.store'
 import { Inbox } from 'lucide-vue-next'
@@ -719,7 +720,7 @@ function formatTimeAgo(timestamp: number): string {
     </div>
 
     <!-- Two-Level Hardware View -->
-    <template v-else>
+    <div v-else class="hardware-content" :class="{ 'hardware-content--has-side': dashStore.hardwarePanels.length > 0 }">
       <div class="hardware-main-layout">
         <div ref="zoomContainerRef" class="zoom-container">
 
@@ -903,7 +904,17 @@ function formatTimeAgo(timestamp: number): string {
         <!-- Component Sidebar (Level 2 / Orbital only) -->
         <ComponentSidebar v-show="currentLevel === 2" />
       </div>
-    </template>
+
+      <!-- Hardware Side-Panel (target.view='hardware', placement='side-panel') -->
+      <aside v-if="dashStore.hardwarePanels.length > 0" class="hardware-side-panel">
+        <InlineDashboardPanel
+          v-for="panel in dashStore.hardwarePanels"
+          :key="panel.id"
+          :layoutId="panel.id"
+          mode="side-panel"
+        />
+      </aside>
+    </div>
 
     <!-- Create Mock ESP Modal -->
     <CreateMockEspModal v-model="dashStore.showCreateMock" @created="onMockEspCreated" />
@@ -993,6 +1004,40 @@ function formatTimeAgo(timestamp: number): string {
 }
 
 .hardware-view--detail { background-color: var(--color-bg-level-3); }
+
+/* ═══ Hardware Content with optional Side-Panel (Block 7d) ═══ */
+
+.hardware-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.hardware-content--has-side {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: var(--space-4);
+}
+
+.hardware-side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow-y: auto;
+  max-height: calc(100vh - 120px);
+  position: sticky;
+  top: 0;
+}
+
+@media (max-width: 768px) {
+  .hardware-content--has-side {
+    grid-template-columns: 1fr;
+  }
+  .hardware-side-panel {
+    position: static;
+    max-height: none;
+  }
+}
 
 .hardware-main-layout {
   display: flex;
