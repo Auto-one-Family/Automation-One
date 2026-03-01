@@ -148,6 +148,6 @@ Plugins werden automatisch durch die `PluginRegistry` entdeckt.
 ## Bei Fehlern
 
 1. **Server nicht erreichbar:** `cd "El Servador/god_kaiser_server" && python -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8000`
-2. **Auth fehlgeschlagen:** Standard-Credentials: admin / TestAdmin123! (oder env: AUTOOPS_PASSWORD)
+2. **Auth fehlgeschlagen:** Standard-Credentials: admin / Admin123# (oder env: AUTOOPS_PASSWORD)
 3. **Import-Fehler:** `cd "El Servador/god_kaiser_server" && pip install -e .`
 4. **Plugin nicht gefunden:** Prüfe `autoops/plugins/` ob Datei vorhanden

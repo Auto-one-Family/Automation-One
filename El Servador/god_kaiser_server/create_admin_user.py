@@ -22,7 +22,7 @@ async def create_admin():
         user = User(
             username="testadmin",
             email="testadmin@test.local",
-            hashed_password=get_password_hash("TestAdmin123!"),
+            hashed_password=get_password_hash("Admin123#"),
             full_name="Test Admin",
             is_active=True
         )

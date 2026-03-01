@@ -1,9 +1,9 @@
 # AutoOps - Autonomous Operations Agent Framework
 
 > **Für KI-Agenten:** Plugin-basierter autonomer Agent der ESP32-Geräte vollständig über die REST API konfiguriert, debuggt und dokumentiert.
-> **Version:** 2.0.0
+> **Version:** 2.1.0
 > **Erstellt:** 2026-02-15
-> **Aktualisiert:** 2026-02-23
+> **Aktualisiert:** 2026-03-02
 
 ---
 
@@ -44,7 +44,7 @@
 │  ├─ /v1/debug/*     (Mock ESP Management)                    │
 │  ├─ /v1/zone/*      (Zone & Subzone Assignment)              │
 │  ├─ /v1/health/*    (Health, Metrics, Liveness, Readiness)   │
-│  ├─ /v1/database/*  (Table Inspection)                       │
+│  ├─ /v1/debug/db/*  (Table Inspection)                       │
 │  └─ /v1/audit/*     (Audit Logs)                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -97,7 +97,7 @@ Der API Client bildet alle Frontend-Aktionen nach, mit automatischem Retry und s
 client = GodKaiserClient("http://localhost:8000")
 
 # Standard-Credentials (oder via Env: AUTOOPS_PASSWORD)
-await client.authenticate("admin", "TestAdmin123!")
+await client.authenticate("admin", "Admin123#")
 
 # Retry-Konfiguration (Default: 3 Retries, 1s Basis-Delay)
 client = GodKaiserClient(
@@ -110,8 +110,8 @@ client = GodKaiserClient(
 ### Device Management (Mock)
 
 ```python
-# Mock ESP erstellen (Debug-API)
-esp = await client.create_mock_esp("Test ESP", hardware_type="ESP32_WROOM")
+# Mock ESP erstellen (Debug-API, auto-generates MOCK_XXXXXX ID)
+esp = await client.create_mock_esp(zone_name="Gewächshaus")
 
 # Device-Liste
 devices = await client.list_devices()
@@ -150,7 +150,7 @@ await client.add_sensor(
 await client.set_mock_sensor_value("MOCK_ABC123", gpio=4, raw_value=23.5)
 
 # Sensor-Typ-Defaults abrufen
-defaults = await client.list_sensor_type_defaults()
+defaults = await client.get_sensor_type_defaults("temperature")
 
 # Sensor-Daten lesen
 data = await client.list_sensor_data(esp_id="MOCK_ABC123", limit=10)
@@ -172,18 +172,17 @@ await client.send_actuator_command("MOCK_ABC123", gpio=16, command="ON")
 ### Zone & Subzone Management
 
 ```python
-# Zone erstellen
-zone = await client.create_zone(name="Gewächshaus", description="...")
+# Zone erstellen (implizit durch Device-Zuweisung)
+await client.assign_zone("MOCK_ABC123", zone_id="zone-1", zone_name="Gewächshaus")
 
-# Subzone erstellen
-subzone = await client.create_subzone(zone_id=1, name="Bewässerung")
+# Subzone zuweisen
+await client.assign_subzone("MOCK_ABC123", subzone_name="Bewässerung")
 
-# Zonen/Subzonen auflisten
+# Zonen auflisten (abgeleitet aus Device-Zuweisungen)
 zones = await client.list_zones()
-subzones = await client.list_subzones(zone_id=1)
 
-# Device einer Zone zuweisen
-await client.assign_zone("MOCK_ABC123", zone_id=1)
+# Subzones auflisten (pro Device)
+subzones = await client.list_subzones(esp_id="MOCK_ABC123")
 ```
 
 ### Health & Monitoring
@@ -193,7 +192,7 @@ await client.assign_zone("MOCK_ABC123", zone_id=1)
 health = await client.check_health()
 
 # Detail-Health (mit Service-Statuses)
-detailed = await client.check_health_detailed()
+detailed = await client.get_server_health()
 
 # Performance Metrics
 metrics = await client.get_health_metrics()
@@ -239,29 +238,29 @@ data = await client.query_table("devices", limit=10)
 | `get_gpio_status()` | GpioPicker | `GET /v1/esp/devices/{id}/gpio-status` |
 | `add_sensor()` | Sensor-Config-Form | `POST /v1/sensors/{esp_id}/{gpio}` |
 | `add_mock_sensor()` | Debug Mock-Sensor | `POST /v1/debug/mock-esp/{id}/sensors` |
-| `set_mock_sensor_value()` | Mock Value Set | `POST /v1/debug/mock-esp/{id}/sensor-value` |
+| `set_mock_sensor_value()` | Mock Value Set | `POST /v1/debug/mock-esp/{id}/sensors/{gpio}/value` |
 | `list_sensor_data()` | Sensor Data View | `GET /v1/sensors/data` |
-| `list_sensor_type_defaults()` | Sensor Type Info | `GET /v1/sensors/type-defaults` |
+| `get_sensor_type_defaults()` | Sensor Type Info | `GET /v1/sensors/type-defaults/{type}` |
 | `add_actuator()` | Aktuator-Config-Form | `POST /v1/actuators/{esp_id}/{gpio}` |
 | `send_actuator_command()` | ON/OFF Toggle | `POST /v1/actuators/{esp_id}/{gpio}/command` |
 | `assign_zone()` | Zone-Assignment-Panel | `POST /v1/zone/devices/{id}/assign` |
-| `list_zones()` | Zone-Liste | `GET /v1/zone/zones` |
-| `create_zone()` | Zone erstellen | `POST /v1/zone/zones` |
-| `list_subzones()` | Subzone-Liste | `GET /v1/zone/zones/{id}/subzones` |
-| `create_subzone()` | Subzone erstellen | `POST /v1/zone/zones/{id}/subzones` |
+| `list_zones()` | Zone-Liste | Derived from device data |
+| `create_zone()` | Zone erstellen | Via `assign_zone()` (implicit) |
+| `list_subzones()` | Subzone-Liste | `GET /v1/subzone/devices/{id}/subzones` |
+| `assign_subzone()` | Subzone zuweisen | `POST /v1/subzone/devices/{id}/subzones/assign` |
 | `trigger_heartbeat()` | Heartbeat-Button | `POST /v1/debug/mock-esp/{id}/heartbeat` |
 | `set_auto_heartbeat()` | Auto-HB Toggle | `POST /v1/debug/mock-esp/{id}/auto-heartbeat` |
 | `start_simulation()` | Start Simulation | `POST /v1/debug/mock-esp/{id}/simulation/start` |
 | `check_health()` | Health Status | `GET /v1/health` |
-| `check_health_detailed()` | Health Details | `GET /v1/health/detailed` |
-| `get_health_metrics()` | Performance Metrics | `GET /v1/health/metrics` |
-| `get_liveness()` | Liveness Probe | `GET /v1/health/liveness` |
-| `get_readiness()` | Readiness Probe | `GET /v1/health/readiness` |
-| `list_audit_logs()` | Audit Log View | `GET /v1/audit/logs` |
-| `scan_onewire()` | OneWire Scan | `POST /v1/esp/devices/{id}/onewire/scan` |
-| `get_onewire_devices()` | OneWire Devices | `GET /v1/esp/devices/{id}/onewire` |
-| `list_tables()` | DB Explorer | `GET /v1/database/tables` |
-| `query_table()` | DB Table View | `GET /v1/database/tables/{name}` |
+| `get_server_health()` | Health Details | `GET /v1/health/detailed` |
+| `get_health_metrics()` | Performance Metrics | `GET /v1/health/metrics` (Prometheus) |
+| `get_liveness()` | Liveness Probe | `GET /v1/health/live` |
+| `get_readiness()` | Readiness Probe | `GET /v1/health/ready` |
+| `list_audit_logs()` | Audit Log View | `GET /v1/audit/` |
+| `scan_onewire()` | OneWire Scan | `POST /v1/sensors/esp/{id}/onewire/scan` |
+| `get_onewire_devices()` | OneWire Devices | `GET /v1/sensors/esp/{id}/onewire` |
+| `list_tables()` | DB Explorer | `GET /v1/debug/db/tables` |
+| `query_table()` | DB Table View | `GET /v1/debug/db/{name}` |
 | `list_logic_rules()` | Logic Rules | `GET /v1/logic/rules` |
 
 ### Retry-Verhalten
@@ -565,7 +564,7 @@ result = asyncio.run(run_autoops(mode='debug'))
 |----------|---------|-------------|
 | `AUTOOPS_SERVER` | `http://localhost:8000` | Server-URL |
 | `AUTOOPS_USER` | `admin` | Login Username |
-| `AUTOOPS_PASSWORD` | `TestAdmin123!` | Login Passwort |
+| `AUTOOPS_PASSWORD` | `Admin123#` | Login Passwort |
 
 ### Sensor-Presets
 
@@ -651,7 +650,7 @@ AutoOps kann als Basis für die geplante KI-Integration dienen:
 
 ---
 
-## 12. Changelog (v1.0 → v2.0)
+## 12. Changelog (v1.0 → v2.1)
 
 | Bereich | v1.0 | v2.0 |
 |---------|------|------|
@@ -666,11 +665,26 @@ AutoOps kann als Basis für die geplante KI-Integration dienen:
 | **Cleanup** | Nicht vorhanden | Stale Devices, Orphans, DB Health |
 | **CLI** | Basis-Argumente | +device-mode, +device-id, +max-retries |
 | **Config** | Hardcoded | Environment Variables |
-| **Passwort** | "admin" (falsch) | "TestAdmin123!" (korrekt) |
+| **Passwort** | "admin" (falsch) | "Admin123#" (korrekt) |
 | **Plattform** | Windows-Pfade | Linux-kompatibel |
 | **SimulationPattern** | Nicht vorhanden | 6 Patterns (constant, sine, realistic...) |
 
+### v2.0 → v2.1 (2026-03-02)
+
+| Bereich | Änderung |
+|---------|----------|
+| **API Client** | `_request()` erkennt Content-Type (JSON vs Prometheus text/plain) |
+| **Metrics** | `_parse_prometheus_metrics()` Parser für `/health/metrics` Endpoint |
+| **Mock ESP** | `create_mock_esp()` sendet `esp_id` (Pflichtfeld), auto-generiert `MOCK_XXXXXX` |
+| **Mock State** | `set_mock_state()` Feld `new_state` → `state`, `set_mock_sensor_value()` PUT → POST |
+| **API Pfade** | 10+ Endpoint-Pfade korrigiert (`debug/db/*`, `logic/rules`, `sensors/type-defaults/*`) |
+| **Plugin Registry** | Import-Fix: package-anchored `importlib.import_module` statt relativem Import |
+| **Credentials** | `TestAdmin123!` → `Admin123#` (alle Stellen) |
+| **Exception Handling** | Redundantes `except (APIError, Exception)` → `except Exception` |
+| **Imports** | `import secrets` auf Top-Level verschoben (Pattern-Konformität) |
+| **Reports** | `.gitignore` für Session-Reports, Test-Mock-Devices aus DB bereinigt |
+
 ---
 
-**Letzte Aktualisierung:** 2026-02-23
-**Version:** 2.0.0
+**Letzte Aktualisierung:** 2026-03-02
+**Version:** 2.1.0

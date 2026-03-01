@@ -74,7 +74,7 @@ def make_request(method: str, url: str, data: Dict = None, require_auth: bool = 
         }
 
 
-def get_auth_token(username: str = "testadmin", password: str = "TestAdmin123!") -> bool:
+def get_auth_token(username: str = "admin", password: str = "Admin123#") -> bool:
     global auth_token
     print(f"Authenticating as {username}...")
 

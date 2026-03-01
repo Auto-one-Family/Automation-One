@@ -1,6 +1,6 @@
 {
-  "username": "testadmin",
-  "email": "testadmin@test.local",
-  "password": "TestAdmin123!",
-  "full_name": "Test Admin"
+  "username": "admin",
+  "email": "admin@automationone.local",
+  "password": "Admin123#",
+  "full_name": "Admin"
 }

@@ -29,14 +29,14 @@ async def create_test_admin():
         user = await user_repo.create(
             email='test_admin@example.com',  # Valid TLD!
             username='test_admin',
-            password_hash=get_password_hash('TestAdmin123!'),
+            password_hash=get_password_hash('Admin123#'),
             role='admin',
             is_active=True
         )
         await session.commit()
         print(f'[OK] New admin created: {user.username} (ID: {user.id})')
         print(f'   Email: {user.email}')
-        print(f'   Password: TestAdmin123!')
+        print(f'   Password: Admin123#')
         return user.id
 
 
