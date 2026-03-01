@@ -178,9 +178,23 @@ class LogicEngine:
                     "timestamp": int(time.time()),
                 }
 
-                # Evaluate each matching rule
-                for rule in matching_rules:
-                    await self._evaluate_rule(rule, trigger_data, logic_repo)
+                # Evaluate each matching rule with batch-level lock tracking
+                # Locks are held across the entire batch to enable ConflictManager
+                # to block lower-priority rules from overriding higher-priority ones
+                batch_locks = []
+                try:
+                    for rule in matching_rules:
+                        await self._evaluate_rule(
+                            rule, trigger_data, logic_repo, batch_locks=batch_locks
+                        )
+                finally:
+                    # Release all locks at the end of the batch
+                    for lock in batch_locks:
+                        await self.conflict_manager.release_actuator(
+                            esp_id=lock["esp_id"],
+                            gpio=lock["gpio"],
+                            rule_id=lock["rule_id"],
+                        )
 
                 break  # Exit after first session
 
@@ -241,23 +255,34 @@ class LogicEngine:
                     "current_time": datetime.now(),
                 }
 
-                # Evaluate each timer rule
-                for rule in timer_rules:
-                    # Check if time conditions are met
-                    conditions = rule.trigger_conditions
+                # Evaluate each timer rule with batch-level lock tracking
+                batch_locks = []
+                try:
+                    for rule in timer_rules:
+                        # Check if time conditions are met
+                        conditions = rule.trigger_conditions
 
-                    # Use modular evaluators to check time conditions
-                    conditions_met = await self._check_conditions(conditions, context)
+                        # Use modular evaluators to check time conditions
+                        conditions_met = await self._check_conditions(conditions, context)
 
-                    if conditions_met:
-                        # Prepare trigger data for timer-based execution
-                        trigger_data = {
-                            "type": "timer",
-                            "timestamp": int(time.time()),
-                            "rule_id": str(rule.id),
-                        }
+                        if conditions_met:
+                            # Prepare trigger data for timer-based execution
+                            trigger_data = {
+                                "type": "timer",
+                                "timestamp": int(time.time()),
+                                "rule_id": str(rule.id),
+                            }
 
-                        await self._evaluate_rule(rule, trigger_data, logic_repo)
+                            await self._evaluate_rule(
+                                rule, trigger_data, logic_repo, batch_locks=batch_locks
+                            )
+                finally:
+                    for lock in batch_locks:
+                        await self.conflict_manager.release_actuator(
+                            esp_id=lock["esp_id"],
+                            gpio=lock["gpio"],
+                            rule_id=lock["rule_id"],
+                        )
 
                 break  # Exit after first session
 
@@ -267,7 +292,13 @@ class LogicEngine:
                 exc_info=True,
             )
 
-    async def _evaluate_rule(self, rule, trigger_data: dict, logic_repo: LogicRepository) -> None:
+    async def _evaluate_rule(
+        self,
+        rule,
+        trigger_data: dict,
+        logic_repo: LogicRepository,
+        batch_locks: list | None = None,
+    ) -> None:
         """
         Evaluate a single rule.
 
@@ -331,7 +362,8 @@ class LogicEngine:
             logger.info(f"Rule {rule.rule_name} triggered: executing {len(rule.actions)} actions")
 
             await self._execute_actions(
-                rule.actions, trigger_data, rule.id, rule.rule_name, rule.priority
+                rule.actions, trigger_data, rule.id, rule.rule_name, rule.priority,
+                batch_locks=batch_locks,
             )
 
             # Update last_triggered timestamp (timezone-naive for DB column)
@@ -573,6 +605,7 @@ class LogicEngine:
         rule_id: uuid.UUID,
         rule_name: str,
         rule_priority: int = 100,
+        batch_locks: list | None = None,
     ) -> None:
         """
         Execute actions for a triggered rule using modular executors.
@@ -583,6 +616,9 @@ class LogicEngine:
             rule_id: UUID of the rule
             rule_name: Name of the rule
             rule_priority: Rule priority (lower number = higher priority)
+            batch_locks: Optional batch-level lock tracking list.
+                If provided, acquired locks are added here and NOT released
+                in this method (caller is responsible for batch release).
         """
         # Extract actuator actions for conflict management
         actuator_actions = [
@@ -682,11 +718,15 @@ class LogicEngine:
                 if not executor_found:
                     await self._execute_action_legacy(action, trigger_data, rule_id, rule_name)
         finally:
-            # Release all acquired locks
-            for lock in acquired_locks:
-                await self.conflict_manager.release_actuator(
-                    esp_id=lock["esp_id"], gpio=lock["gpio"], rule_id=lock["rule_id"]
-                )
+            if batch_locks is not None:
+                # Batch mode: transfer locks to batch for deferred release
+                batch_locks.extend(acquired_locks)
+            else:
+                # Non-batch mode: release locks immediately
+                for lock in acquired_locks:
+                    await self.conflict_manager.release_actuator(
+                        esp_id=lock["esp_id"], gpio=lock["gpio"], rule_id=lock["rule_id"]
+                    )
 
     async def _execute_action_legacy(
         self,
