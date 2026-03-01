@@ -237,9 +237,7 @@ export const useSensorStore = defineStore('sensor', () => {
       if (data.value !== undefined) sensor.raw_value = data.value
       if (data.quality) sensor.quality = data.quality
       if (data.unit) sensor.unit = data.unit
-      sensor.last_read = data.timestamp
-        ? new Date(data.timestamp * 1000).toISOString()
-        : new Date().toISOString()
+      sensor.last_read = normalizeRawTimestamp(data.timestamp)
     }
   }
 

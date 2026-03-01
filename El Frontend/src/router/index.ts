@@ -61,6 +61,14 @@ const router = createRouter({
           component: () => import('@/views/MonitorView.vue'),
           meta: { title: 'Monitor' },
         },
+        // IMPORTANT: monitor/dashboard/:dashboardId MUST come BEFORE monitor/:zoneId
+        // otherwise Vue Router interprets "dashboard" as a zoneId (greedy matching)
+        {
+          path: 'monitor/dashboard/:dashboardId',
+          name: 'monitor-dashboard',
+          component: () => import('@/views/MonitorView.vue'),
+          meta: { title: 'Monitor' },
+        },
         {
           path: 'monitor/:zoneId',
           name: 'monitor-zone',
@@ -70,6 +78,12 @@ const router = createRouter({
         {
           path: 'monitor/:zoneId/sensor/:sensorId',
           name: 'monitor-sensor',
+          component: () => import('@/views/MonitorView.vue'),
+          meta: { title: 'Monitor' },
+        },
+        {
+          path: 'monitor/:zoneId/dashboard/:dashboardId',
+          name: 'monitor-zone-dashboard',
           component: () => import('@/views/MonitorView.vue'),
           meta: { title: 'Monitor' },
         },

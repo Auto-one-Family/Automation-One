@@ -38,3 +38,5 @@ export type {
   ZoneGroup, SubzoneGroup,
   ActuatorZoneGroup, ActuatorSubzoneGroup,
 } from './useZoneGrouping'
+export { useDashboardWidgets } from './useDashboardWidgets'
+export type { WidgetTypeMeta, UseDashboardWidgetsOptions } from './useDashboardWidgets'

@@ -95,7 +95,7 @@ export const useNotificationStore = defineStore('notification', () => {
 
     toast.show({
       message: displayMsg,
-      type: severity === 'critical' ? 'error' : severity === 'warning' ? 'warning' : 'error',
+      type: severity === 'critical' ? 'error' : severity === 'warning' ? 'warning' : severity === 'info' ? 'info' : 'error',
       persistent: severity === 'critical' || severity === 'error',
       actions: actions.length > 0 ? actions : undefined,
     })
