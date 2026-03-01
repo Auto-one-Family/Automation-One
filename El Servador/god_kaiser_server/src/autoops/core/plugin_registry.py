@@ -70,11 +70,12 @@ class PluginRegistry:
         from .. import plugins as plugins_package
 
         discovered = 0
+        plugins_pkg_name = plugins_package.__name__
         for importer, modname, ispkg in pkgutil.iter_modules(plugins_package.__path__):
             if modname.startswith("_"):
                 continue
             try:
-                module = importlib.import_module(f"..plugins.{modname}", package=__name__)
+                module = importlib.import_module(f".{modname}", package=plugins_pkg_name)
                 # Look for plugin classes in the module
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)

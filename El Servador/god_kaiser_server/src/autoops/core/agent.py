@@ -57,7 +57,7 @@ class AutoOpsAgent:
         self,
         server_url: str = "http://localhost:8000",
         username: str = "admin",
-        password: str = "TestAdmin123!",
+        password: str = "Admin123#",
         dry_run: bool = False,
         verbose: bool = True,
         device_mode: str = "mock",

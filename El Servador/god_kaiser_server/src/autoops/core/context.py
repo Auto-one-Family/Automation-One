@@ -120,7 +120,7 @@ class AutoOpsContext:
     server_url: str = "http://localhost:8000"
     auth_token: Optional[str] = None
     username: str = "admin"
-    password: str = "TestAdmin123!"
+    password: str = "Admin123#"
 
     # Device mode
     device_mode: DeviceMode = DeviceMode.MOCK

@@ -12,7 +12,7 @@ Features:
 
 Usage:
     client = GodKaiserClient("http://localhost:8000")
-    await client.authenticate("admin", "TestAdmin123!")
+    await client.authenticate("admin", "Admin123#")
 
     esp = await client.create_mock_esp("Test ESP", hardware_type="ESP32_WROOM")
     sensor = await client.add_sensor(esp["device_id"], gpio=4, sensor_type="DS18B20")
@@ -20,6 +20,7 @@ Usage:
 
 import asyncio
 import logging
+import secrets
 from typing import Any, Optional
 
 import httpx
@@ -113,8 +114,14 @@ class GodKaiserClient:
         params: dict | None = None,
         action_name: str = "",
         target: str = "",
+        expect_json: bool = True,
     ) -> dict[str, Any]:
-        """Make an API request with full logging and automatic retry."""
+        """Make an API request with full logging and automatic retry.
+
+        Args:
+            expect_json: If False, wraps non-JSON responses in {"raw_text": ...}
+                         instead of raising JSONDecodeError.
+        """
         client = await self._ensure_client()
         url = f"/api{endpoint}" if not endpoint.startswith("/api") else endpoint
         last_error: Exception | None = None
@@ -178,7 +185,19 @@ class GodKaiserClient:
                 if response.status_code == 204:
                     return {}
 
-                return response.json()
+                # Handle non-JSON responses (e.g. Prometheus metrics)
+                content_type = response.headers.get("content-type", "")
+                if "application/json" in content_type:
+                    return response.json()
+
+                if not expect_json:
+                    return {"raw_text": response.text, "content_type": content_type}
+
+                # Try JSON parsing, fallback to raw text wrapper
+                try:
+                    return response.json()
+                except Exception:
+                    return {"raw_text": response.text, "content_type": content_type}
 
             except httpx.RequestError as e:
                 last_error = e
@@ -224,7 +243,9 @@ class GodKaiserClient:
             action_name="Authenticate",
             target=f"user:{username}",
         )
-        self._token = result.get("access_token", "")
+        # Token may be at top level or nested under "tokens"
+        tokens = result.get("tokens", {})
+        self._token = tokens.get("access_token", "") or result.get("access_token", "")
         return result
 
     async def check_health(self) -> dict[str, Any]:
@@ -303,26 +324,37 @@ class GodKaiserClient:
 
     async def create_mock_esp(
         self,
-        name: str,
+        name: str = "",
         hardware_type: str = "ESP32_WROOM",
         device_id: Optional[str] = None,
         zone_name: Optional[str] = None,
+        sensors: Optional[list[dict[str, Any]]] = None,
+        actuators: Optional[list[dict[str, Any]]] = None,
+        auto_heartbeat: bool = False,
+        heartbeat_interval_seconds: int = 60,
     ) -> dict[str, Any]:
-        """Create a mock ESP device (like clicking 'Add Mock ESP' in frontend)."""
-        data: dict[str, Any] = {
-            "name": name,
-            "hardware_type": hardware_type,
-        }
-        if device_id:
-            data["device_id"] = device_id
+        """Create a mock ESP device (like clicking 'Add Mock ESP' in frontend).
+
+        The API requires esp_id in format ESP_XXXXXX or MOCK_XXXXXX.
+        If device_id is not provided, a MOCK_XXXXXX ID is auto-generated.
+        """
+        esp_id = device_id or f"MOCK_{secrets.token_hex(4).upper()[:6]}"
+        data: dict[str, Any] = {"esp_id": esp_id}
         if zone_name:
             data["zone_name"] = zone_name
+        if sensors:
+            data["sensors"] = sensors
+        if actuators:
+            data["actuators"] = actuators
+        if auto_heartbeat:
+            data["auto_heartbeat"] = True
+            data["heartbeat_interval_seconds"] = heartbeat_interval_seconds
         return await self._request(
             "POST",
             "/v1/debug/mock-esp",
             json_data=data,
             action_name="Create Mock ESP",
-            target=device_id or name,
+            target=esp_id,
         )
 
     async def list_mock_esps(self) -> dict[str, Any]:
@@ -444,7 +476,7 @@ class GodKaiserClient:
     ) -> dict[str, Any]:
         """Set a mock sensor's value (simulates real sensor reading)."""
         return await self._request(
-            "PUT",
+            "POST",
             f"/v1/debug/mock-esp/{esp_id}/sensors/{gpio}/value",
             json_data={"raw_value": raw_value, "publish": publish},
             action_name="Set Sensor Value",
@@ -617,13 +649,28 @@ class GodKaiserClient:
         )
 
     async def list_zones(self) -> dict[str, Any]:
-        """List all zones."""
-        return await self._request(
-            "GET",
-            "/v1/zone/zones",
-            action_name="List Zones",
-            target="all_zones",
-        )
+        """List all zones (derived from device zone assignments)."""
+        # No dedicated list-zones endpoint; derive from unassigned endpoint
+        # and device listing to discover existing zones
+        try:
+            devices_resp = await self.list_devices()
+            devices = devices_resp.get("devices", devices_resp.get("data", []))
+            if not isinstance(devices, list):
+                devices = []
+            zones: dict[str, dict[str, Any]] = {}
+            for d in devices:
+                if isinstance(d, dict) and d.get("zone_id"):
+                    zid = d["zone_id"]
+                    if zid not in zones:
+                        zones[zid] = {
+                            "zone_id": zid,
+                            "name": d.get("zone_name", zid),
+                            "device_count": 0,
+                        }
+                    zones[zid]["device_count"] += 1
+            return {"zones": list(zones.values())}
+        except APIError:
+            return {"zones": []}
 
     # =========================================================================
     # System & Diagnostics
@@ -662,12 +709,15 @@ class GodKaiserClient:
     # State Transition (Mock ESP lifecycle)
     # =========================================================================
 
-    async def set_mock_state(self, esp_id: str, state: str) -> dict[str, Any]:
+    async def set_mock_state(self, esp_id: str, state: str, reason: Optional[str] = None) -> dict[str, Any]:
         """Set mock ESP system state."""
+        data: dict[str, Any] = {"state": state}
+        if reason:
+            data["reason"] = reason
         return await self._request(
             "POST",
             f"/v1/debug/mock-esp/{esp_id}/state",
-            json_data={"new_state": state},
+            json_data=data,
             action_name=f"Set State ({state})",
             target=esp_id,
         )
@@ -698,7 +748,7 @@ class GodKaiserClient:
         """List available database tables."""
         return await self._request(
             "GET",
-            "/v1/debug/database/tables",
+            "/v1/debug/db/tables",
             action_name="List DB Tables",
             target="database",
         )
@@ -709,7 +759,7 @@ class GodKaiserClient:
         """Query a database table."""
         return await self._request(
             "GET",
-            f"/v1/debug/database/tables/{table_name}",
+            f"/v1/debug/db/{table_name}",
             params={"limit": limit, "offset": offset},
             action_name=f"Query Table ({table_name})",
             target=f"db:{table_name}",
@@ -719,29 +769,25 @@ class GodKaiserClient:
     # Subzone Management
     # =========================================================================
 
-    async def list_subzones(self, zone_id: Optional[str] = None) -> dict[str, Any]:
-        """List subzones, optionally filtered by zone."""
-        params = {}
-        if zone_id:
-            params["zone_id"] = zone_id
+    async def list_subzones(self, esp_id: str) -> dict[str, Any]:
+        """List subzones for a specific device."""
         return await self._request(
             "GET",
-            "/v1/subzone/",
-            params=params,
+            f"/v1/subzone/devices/{esp_id}/subzones",
             action_name="List Subzones",
-            target=zone_id or "all_subzones",
+            target=esp_id,
         )
 
-    async def create_subzone(
-        self, zone_id: str, name: str, subzone_type: str = "bed"
+    async def assign_subzone(
+        self, esp_id: str, subzone_name: str, subzone_type: str = "bed"
     ) -> dict[str, Any]:
-        """Create a subzone within a zone."""
+        """Assign a subzone to a device."""
         return await self._request(
             "POST",
-            "/v1/subzone/",
-            json_data={"zone_id": zone_id, "name": name, "subzone_type": subzone_type},
-            action_name="Create Subzone",
-            target=f"{zone_id}/{name}",
+            f"/v1/subzone/devices/{esp_id}/subzones/assign",
+            json_data={"name": subzone_name, "subzone_type": subzone_type},
+            action_name="Assign Subzone",
+            target=f"{esp_id}/{subzone_name}",
         )
 
     # =========================================================================
@@ -750,33 +796,24 @@ class GodKaiserClient:
 
     async def create_zone(
         self,
-        name: str,
-        zone_type: str = "greenhouse",
-        description: str = "",
+        esp_id: str,
+        zone_id: str,
+        zone_name: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Create a new zone."""
-        data: dict[str, Any] = {"name": name, "zone_type": zone_type}
-        if description:
-            data["description"] = description
-        return await self._request(
-            "POST",
-            "/v1/zone/zones",
-            json_data=data,
-            action_name="Create Zone",
-            target=name,
-        )
+        """Create a zone by assigning a device to it (zones are implicit)."""
+        return await self.assign_zone(esp_id, zone_id, zone_name)
 
     # =========================================================================
     # Sensor Type Defaults
     # =========================================================================
 
-    async def list_sensor_type_defaults(self) -> dict[str, Any]:
-        """Get all sensor type default configurations."""
+    async def get_sensor_type_defaults(self, sensor_type: str) -> dict[str, Any]:
+        """Get default configuration for a specific sensor type."""
         return await self._request(
             "GET",
-            "/v1/sensor_type_defaults/",
-            action_name="List Sensor Type Defaults",
-            target="sensor_type_defaults",
+            f"/v1/sensors/type-defaults/{sensor_type}",
+            action_name=f"Sensor Type Defaults ({sensor_type})",
+            target=f"sensor_type:{sensor_type}",
         )
 
     # =========================================================================
@@ -784,13 +821,42 @@ class GodKaiserClient:
     # =========================================================================
 
     async def get_health_metrics(self) -> dict[str, Any]:
-        """Get server performance metrics."""
-        return await self._request(
+        """Get server performance metrics (Prometheus text format → parsed dict)."""
+        result = await self._request(
             "GET",
             "/v1/health/metrics",
             action_name="Health Metrics",
             target="server_metrics",
+            expect_json=False,
         )
+        # Parse Prometheus text format into key metrics
+        raw = result.get("raw_text", "")
+        if raw:
+            return self._parse_prometheus_metrics(raw)
+        return result
+
+    @staticmethod
+    def _parse_prometheus_metrics(text: str) -> dict[str, Any]:
+        """Extract key metrics from Prometheus exposition format."""
+        metrics: dict[str, Any] = {}
+        for line in text.splitlines():
+            if line.startswith("#") or not line.strip():
+                continue
+            # Format: metric_name{labels} value  or  metric_name value
+            parts = line.split()
+            if len(parts) >= 2:
+                name = parts[0].split("{")[0]
+                try:
+                    value = float(parts[-1])
+                except ValueError:
+                    continue
+                if name not in metrics:
+                    metrics[name] = value
+                elif isinstance(metrics[name], list):
+                    metrics[name].append(value)
+                else:
+                    metrics[name] = [metrics[name], value]
+        return {"format": "prometheus", "metric_count": len(metrics), "metrics": metrics}
 
     async def get_liveness(self) -> dict[str, Any]:
         """Kubernetes-style liveness probe."""
@@ -854,7 +920,7 @@ class GodKaiserClient:
         """List all automation logic rules."""
         return await self._request(
             "GET",
-            "/v1/logic/",
+            "/v1/logic/rules",
             action_name="List Logic Rules",
             target="logic_engine",
         )

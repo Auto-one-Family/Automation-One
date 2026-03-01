@@ -237,18 +237,19 @@ class HealthCheckPlugin(AutoOpsPlugin):
         # =============================================
         try:
             metrics = await client.get_health_metrics()
+            metric_count = metrics.get("metric_count", len(metrics))
             health_data["metrics"] = metrics
             actions.append(
                 PluginAction.create(
                     action="Performance Metrics",
                     target="server_metrics",
-                    details=metrics,
-                    result="Metrics collected",
+                    details={"format": metrics.get("format", "json"), "count": metric_count},
+                    result=f"Metrics collected ({metric_count} metrics)",
                     severity=ActionSeverity.SUCCESS,
                 )
             )
-        except APIError:
-            pass  # Metrics endpoint may not exist
+        except Exception:
+            pass  # Metrics endpoint may not exist or return unexpected format
 
         # =============================================
         # Check 7: Sensor Data Freshness
