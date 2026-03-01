@@ -98,6 +98,7 @@ const flowWrapper = ref<HTMLElement | null>(null)
 const isDragOver = ref(false)
 let nodeIdCounter = 0
 let pendingFitView = false
+let templateLoadGuard = false  // Prevents watch from clearing nodes after loadFromRuleData
 
 // Initial node dimensions prevent Vue Flow clampNodeExtent crash (dimensions undefined before render)
 const NODE_INIT_DIMS: Record<string, { width: number; height: number }> = {
@@ -630,6 +631,9 @@ watch(
         nodes.value = []
         edges.value = []
       }
+    } else if (templateLoadGuard) {
+      // Template was loaded via loadFromRuleData — do NOT clear the canvas
+      templateLoadGuard = false
     } else {
       nodes.value = []
       edges.value = []
@@ -762,12 +766,51 @@ function handleKeyboard(e: KeyboardEvent) {
   }
 }
 
+/**
+ * Load a partial rule (e.g. from a template) onto the canvas.
+ * Converts conditions/actions/logic_operator into Vue Flow nodes and edges.
+ */
+function loadFromRuleData(ruleData: {
+  conditions: LogicCondition[]
+  actions: LogicAction[]
+  logic_operator?: string
+  priority?: number
+  cooldown_seconds?: number
+}) {
+  // Set guard BEFORE nodes are loaded — prevents the props.rule watch
+  // from clearing nodes when rule becomes null (template mode)
+  templateLoadGuard = true
+
+  const syntheticRule = {
+    id: '',
+    name: '',
+    conditions: ruleData.conditions,
+    actions: ruleData.actions,
+    logic_operator: ruleData.logic_operator || 'AND',
+    enabled: true,
+    priority: ruleData.priority ?? 5,
+    cooldown_seconds: ruleData.cooldown_seconds ?? 0,
+  } as LogicRule
+
+  try {
+    const graph = ruleToGraph(syntheticRule)
+    setNodes(graph.nodes)
+    setEdges(graph.edges)
+    pendingFitView = true
+  } catch (err) {
+    templateLoadGuard = false
+    console.error('[RuleFlowEditor] Failed to load template data:', err)
+    toast.error('Vorlage konnte nicht geladen werden')
+  }
+}
+
 defineExpose({
   graphToRuleData,
   updateNodeData,
   deleteNode,
   duplicateNode,
   clearCanvas,
+  loadFromRuleData,
   fitView: () => fitView({ padding: 0.3 }),
 })
 </script>

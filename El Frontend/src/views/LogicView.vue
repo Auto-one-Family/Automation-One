@@ -21,7 +21,7 @@
  * @see RuleConfigPanel.vue - Node configuration
  */
 
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Plus,
@@ -174,14 +174,35 @@ async function useTemplate(template: RuleTemplate) {
     })
     if (!confirmed) return
   }
+
+  // 1. Deselect any current rule and switch to create mode
   selectedRuleId.value = null
   selectedNode.value = null
   isCreatingNew.value = true
-  hasUnsavedChanges.value = false
+  hasUnsavedChanges.value = true
   newRuleName.value = template.rule.name
   newRuleDescription.value = template.rule.description || ''
   showRuleDropdown.value = false
-  editorRef.value?.clearCanvas()
+
+  // 2. Wait for the editor to mount (it's in a v-else block that requires isCreatingNew)
+  await nextTick()
+  // Need a second tick for VueFlow internal initialization
+  await nextTick()
+
+  // 3. Load template conditions/actions onto the canvas as Vue Flow nodes
+  console.log('[TEMPLATE-DEBUG] editorRef available:', !!editorRef.value)
+  console.log('[TEMPLATE-DEBUG] conditions:', template.rule.conditions.length, 'actions:', template.rule.actions.length)
+  if (template.rule.conditions.length > 0 || template.rule.actions.length > 0) {
+    editorRef.value?.loadFromRuleData({
+      conditions: template.rule.conditions,
+      actions: template.rule.actions,
+      logic_operator: template.rule.logic_operator,
+      priority: template.rule.priority,
+      cooldown_seconds: template.rule.cooldown_seconds,
+    })
+    console.log('[TEMPLATE-DEBUG] loadFromRuleData called')
+  }
+
   logger.info('Template selected', { templateId: template.id, name: template.name })
 }
 
