@@ -794,7 +794,7 @@ Automation Rules auflisten (paginiert, sortiert nach Priority aufsteigend — ni
     "total_items": 5,
     "total_pages": 1,
     "has_next": false,
-    "has_previous": false
+    "has_prev": false
   }
 }
 ```

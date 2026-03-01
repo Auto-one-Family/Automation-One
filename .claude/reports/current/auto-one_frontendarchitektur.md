@@ -1,8 +1,7 @@
 # AutomationOne – Frontend-Architektur (El Frontend)
 
-> **Version:** 3.0 | **Stand:** 2026-02-23
-> **Grundlage:** Vollständige Code-Analyse nach Dashboard-Merge (feature/frontend-consolidation)
-> **Grundlage v2.0:** Vollständige Code-Analyse von `El Frontend/src/` (alle Dateien) + Detail-Audit (CSS, z-index, Duplikate, Overlays, Imports)
+> **Version:** 4.0 | **Stand:** 2026-03-01
+> **Grundlage:** Vollständige Code-Analyse nach Dashboard-Editor-Migration (custom-dashboard → editor), Monitor-Konsolidierung, HardwareView-Redesign
 > **Referenzen:** auto-one_systemarchitektur.md (Schicht 3), WEBSOCKET_EVENTS, REST_ENDPOINTS
 > **Übergeordnet:** `auto-one_systemarchitektur.md`
 
@@ -45,7 +44,7 @@ El Frontend ist das Vue 3 Dashboard des AutomationOne IoT-Frameworks. Es impleme
                          │
          ┌───────────────┼───────────────┐
          ▼               ▼               ▼
-    Views (16)    Components (93)    Services/Stores
+    Views (15)    Components (106)   Services/Stores
     (Seiten)      (UI-Bausteine)     (Daten + Logik)
 ```
 
@@ -61,13 +60,12 @@ El Frontend/src/
 ├── router/
 │   └── index.ts                         # Vue Router: 16 Views, Navigation Guards, Redirects
 │
-├── views/                               # 16 Views (Seiten)
-│   ├── MonitorView.vue                  # NEU: Sensor/Aktor-Daten nach Zonen (Default-Route)
-│   ├── HardwareView.vue                 # NEU: ESP-Hardware-Topologie (3-Level-Zoom)
-│   ├── CustomDashboardView.vue          # NEU: GridStack Widget-Builder
-│   ├── CalibrationView.vue              # NEU: Sensor-Kalibrierungs-Wizard
-│   ├── SensorHistoryView.vue            # NEU: Historische Zeitreihen (Chart.js)
-│   ├── DashboardView.vue                # LEGACY: Altes Dashboard (unter /dashboard-legacy)
+├── views/                               # 15 Views (Seiten)
+│   ├── HardwareView.vue                 # ESP-Hardware-Topologie (Default-Route, 3-Level-Zoom)
+│   ├── MonitorView.vue                  # Sensor/Aktor-Daten nach Zonen
+│   ├── CustomDashboardView.vue          # GridStack Widget-Builder (Route: /editor)
+│   ├── CalibrationView.vue              # Sensor-Kalibrierungs-Wizard
+│   ├── SensorHistoryView.vue            # DEPRECATED: Route → /monitor (Datei noch vorhanden)
 │   ├── LoginView.vue                    # Login mit Particle-Animations
 │   ├── SetupView.vue                    # Ersteinrichtung Admin-Account
 │   ├── LogicView.vue                    # Node-RED-inspirierter Rule-Editor
@@ -79,46 +77,50 @@ El Frontend/src/
 │   ├── SystemConfigView.vue             # Systemkonfiguration Key-Value
 │   └── SettingsView.vue                 # Benutzer-Einstellungen + Logout
 │
-├── components/                          # 93 Komponenten in 13 Kategorien
-│   ├── calibration/   (2)              # NEU: Kalibrierungs-Wizard
-│   ├── charts/        (6 + index)      # Diagramm-Komponenten (erweitert: +HistoricalChart, +TimeRangeSelector)
-│   ├── command/       (1)              # Command Palette
-│   ├── common/        (1)              # Nur GrafanaPanelEmbed (Rest migriert)
-│   ├── dashboard/     (10 + index)     # Dashboard-Level-Komponenten
-│   ├── database/      (6)              # Database Explorer
-│   ├── error/         (2)              # Error-Details + Troubleshooting
-│   ├── esp/           (24 + index)     # ESP-Device-Verwaltung (erweitert: +ESPConfigPanel, +ZoneConfigPanel)
-│   ├── filters/       (1 + index)      # Filter-Leisten
-│   ├── forms/         (3 + index)      # Dynamische Formulare
-│   ├── modals/        (2)              # Globale Modals
-│   ├── rules/         (5)              # Logic-Rule-Editor
-│   ├── safety/        (1)              # Emergency-Stop
-│   ├── system-monitor/ (20 + index)    # System-Monitor-Tabs
-│   └── zones/         (6)              # Zone-Verwaltung
+├── components/                          # 106 Komponenten in 18 Kategorien
+│   ├── calibration/        (2)         # Kalibrierungs-Wizard
+│   ├── charts/             (6 + index) # Diagramm-Komponenten
+│   ├── command/            (1)         # Command Palette
+│   ├── common/             (3)         # GrafanaPanelEmbed, ColorLegend, ViewTabBar
+│   ├── dashboard/          (9 + index) # Dashboard-Level-Komponenten
+│   ├── dashboard-widgets/  (11)        # GridStack Widget-Typen (Editor)
+│   ├── database/           (6)         # Database Explorer
+│   ├── devices/            (4)         # Sensor/Aktor-Karten (Monitor/Hardware)
+│   ├── error/              (2)         # Error-Details + Troubleshooting
+│   ├── esp/                (24 + index)# ESP-Device-Verwaltung
+│   ├── filters/            (1 + index) # Filter-Leisten
+│   ├── forms/              (3 + index) # Dynamische Formulare
+│   ├── modals/             (2)         # Globale Modals
+│   ├── rules/              (5)         # Logic-Rule-Editor
+│   ├── safety/             (1)         # Emergency-Stop
+│   ├── system-monitor/     (20 + index)# System-Monitor-Tabs
+│   ├── widgets/            (2)         # Legacy-Widgets (DeviceStatus, SensorOverview)
+│   └── zones/              (4)         # Zone-Verwaltung
 │
 ├── shared/
 │   ├── design/                          # Design System
-│   │   ├── primitives/ (12 + index)    # +SlideOver, +QualityIndicator, +RangeSlider
+│   │   ├── primitives/ (13 + index)    # +AccordionSection, +SlideOver, +QualityIndicator, +RangeSlider
 │   │   ├── layout/     (3 + index)      # AppShell, Sidebar, TopBar
 │   │   └── patterns/   (5 + index)      # ConfirmDialog, ContextMenu, Toast, ...
 │   └── stores/         (12 + index)     # Shared Pinia Stores (kanonisch)
 │
 ├── stores/             (1)              # Nur esp.ts (Legacy-Proxies entfernt)
-├── composables/        (16 + index)     # +useScrollLock, +useCalibration
-├── api/                (18 + index)     # +calibration.ts
+├── composables/        (20 + index)     # +useESPStatus, +useOrbitalDragDrop, +useZoneGrouping, +useSparklineCache, +useDeviceMetadata
+├── api/                (17 + index)     # 17 API-Module + Axios-Instanz
 ├── services/
 │   └── websocket.ts                     # WebSocket Singleton-Service
-├── types/              (6 + index)      # TypeScript-Definitionen
-├── utils/              (16 + index)     # Utility-Funktionen
+├── types/              (7 + index)      # TypeScript-Definitionen (+device-metadata.ts)
+├── utils/              (17 + index)     # Utility-Funktionen (+cssTokens.ts)
 ├── config/             (2)              # sensor-schemas.ts, rule-templates.ts
-└── styles/             (5)              # CSS-Dateien
+└── styles/             (6)              # CSS-Dateien (+forms.css)
 ```
 
-**REMOVED directories (since v2.0):**
+**REMOVED (since v2.0):**
 - `components/layout/` (3 files → migrated to shared/design/layout/)
-- `components/widgets/` (5 files → replaced by CustomDashboardView + GridStack)
 - `stores/auth.ts`, `stores/logic.ts`, `stores/database.ts`, `stores/dragState.ts` (4 Legacy-Proxies removed)
-- `components/common/` deprecated wrappers (11 files removed, only GrafanaPanelEmbed remains)
+- `components/common/` deprecated wrappers (11 files removed)
+- `views/DashboardView.vue` (LEGACY → entfernt, Route `/dashboard-legacy` → Redirect `/hardware`)
+- `views/SensorHistoryView.vue` Route deprecated (Redirect → `/monitor`, Datei noch vorhanden)
 
 ---
 
@@ -130,18 +132,19 @@ El Frontend/src/
 |-------|------|------|-------|-------------|
 | `/login` | LoginView | Nein | – | JWT-Login |
 | `/setup` | SetupView | Nein | – | Ersteinrichtung (Admin-Account erstellen) |
-| `/` | – (Redirect) | – | – | Redirect → `/monitor` |
-| `/monitor` | MonitorView | Ja | – | **NEU:** Sensor/Aktor-Daten nach Zonen (Default-Route) |
-| `/monitor/:zoneId` | MonitorView | Ja | – | **NEU:** Zone-Detail mit Sensor-/Aktor-Karten |
-| `/hardware` | HardwareView | Ja | – | **NEU:** ESP-Hardware-Topologie (Zoom-Navigation) |
-| `/hardware/:zoneId` | HardwareView | Ja | – | **NEU:** Zone-Level ESP-Übersicht |
-| `/hardware/:zoneId/:espId` | HardwareView | Ja | – | **NEU:** ESP-Detail mit Sensoren/Aktoren |
-| `/custom-dashboard` | CustomDashboardView | Ja | – | **NEU:** Widget-Builder (GridStack) |
-| `/calibration` | CalibrationView | Ja | Ja | **NEU:** Sensor-Kalibrierung (pH, EC) |
-| `/sensor-history` | SensorHistoryView | Ja | – | **NEU:** Historische Zeitreihen (Chart.js) |
-| `/dashboard-legacy` | DashboardView | Ja | – | **LEGACY:** Altes Dashboard |
+| `/` | – (Redirect) | – | – | Redirect → `/hardware` |
+| `/hardware` | HardwareView | Ja | – | ESP-Hardware-Topologie (Default-Route, Zoom-Navigation) |
+| `/hardware/:zoneId` | HardwareView | Ja | – | Zone-Level ESP-Übersicht |
+| `/hardware/:zoneId/:espId` | HardwareView | Ja | – | ESP-Detail mit Sensoren/Aktoren |
+| `/monitor` | MonitorView | Ja | – | Sensor/Aktor-Daten nach Zonen |
+| `/monitor/:zoneId` | MonitorView | Ja | – | Zone-Detail mit Sensor-/Aktor-Karten |
+| `/monitor/:zoneId/sensor/:sensorId` | MonitorView | Ja | – | Sensor-Detail (SlideOver) |
+| `/editor` | CustomDashboardView | Ja | – | Widget-Builder (GridStack) |
+| `/editor/:dashboardId` | CustomDashboardView | Ja | – | Spezifisches Dashboard bearbeiten |
+| `/calibration` | CalibrationView | Ja | Ja | Sensor-Kalibrierung (pH, EC) |
 | `/sensors` | SensorsView | Ja | – | Sensor- + Aktor-Übersicht (Tab: `?tab=actuators`) |
 | `/logic` | LogicView | Ja | – | Automatisierungs-Editor |
+| `/logic/:ruleId` | LogicView | Ja | – | Spezifische Regel bearbeiten |
 | `/system-monitor` | SystemMonitorView | Ja | Ja | Events, Logs, DB, MQTT, Health (Tab: `?tab=`) |
 | `/users` | UserManagementView | Ja | Ja | Benutzerverwaltung |
 | `/system-config` | SystemConfigView | Ja | Ja | Systemkonfiguration |
@@ -153,10 +156,14 @@ El Frontend/src/
 
 | Alte Route | Redirect | Seit |
 |-----------|----------|------|
-| `/` | `/monitor` | 2026-02-23 |
-| `/devices` | `/hardware` | 2026-02-23 (war: `/`) |
+| `/` | `/hardware` | 2026-02-23 |
+| `/custom-dashboard` | `/editor` | 2026-03-01 |
+| `/dashboard-legacy` | `/hardware` | 2026-02-23 |
+| `/sensor-history` | `/monitor` | 2026-03-01 |
+| `/devices` | `/hardware` | 2026-02-23 |
 | `/devices/:espId` | `/hardware?openSettings={espId}` | 2026-02-23 |
-| `/mock-esp` | `/hardware` | 2026-02-23 (war: `/`) |
+| `/mock-esp` | `/hardware` | 2026-02-23 |
+| `/mock-esp/:espId` | `/hardware?openSettings={espId}` | 2026-02-23 |
 | `/database` | `/system-monitor?tab=database` | 2026-01-23 |
 | `/logs` | `/system-monitor?tab=logs` | 2026-01-23 |
 | `/audit` | `/system-monitor?tab=events` | 2026-01-24 |
@@ -167,18 +174,18 @@ El Frontend/src/
 
 1. **Setup-Guard:** Wenn `setupRequired === true` → Redirect zu `/setup`
 2. **Auth-Guard:** Wenn `requiresAuth` und nicht authentifiziert → Redirect zu `/login`
-3. **Admin-Guard:** Wenn `requiresAdmin` und kein Admin → Redirect zu `/monitor`
-4. **Post-Auth-Guard:** Authentifizierte User werden von `/login` und `/setup` nach `/monitor` weggeleitet
+3. **Admin-Guard:** Wenn `requiresAdmin` und kein Admin → Redirect zu `/hardware`
+4. **Post-Auth-Guard:** Authentifizierte User werden von `/login` und `/setup` nach `/hardware` weggeleitet
 
 ---
 
-## 4. Views (16 Seiten)
+## 4. Views (15 Seiten)
 
-### 4.1 MonitorView (NEU, Default-Route)
+### 4.1 MonitorView
 
 **Sensor-/Aktor-Daten-Ansicht nach Zonen.**
 
-Route: `/monitor`, `/monitor/:zoneId`
+Route: `/monitor`, `/monitor/:zoneId`, `/monitor/:zoneId/sensor/:sensorId`
 
 | Level | Ansicht | Inhalt |
 |-------|---------|--------|
@@ -191,7 +198,7 @@ Route: `/monitor`, `/monitor/:zoneId`
 **Genutzte Composables:** `useZoneDragDrop`
 **Neue Patterns:** `SlideOver` + `SensorConfigPanel` / `ActuatorConfigPanel`
 
-### 4.2 HardwareView (NEU)
+### 4.2 HardwareView (Default-Route)
 
 **ESP-Hardware-Topologie mit 3-Level-Zoom-Navigation.**
 
@@ -211,11 +218,11 @@ Erbt die Zoom-Navigation des alten DashboardView:
 **Genutzte Composables:** `useZoneDragDrop`, `useKeyboardShortcuts`, `useSwipeNavigation`
 **Neue Patterns:** `SlideOver` + `SensorConfigPanel` / `ActuatorConfigPanel` / `ESPConfigPanel`
 
-### 4.3 CustomDashboardView (NEU)
+### 4.3 CustomDashboardView
 
 **Dashboard-Builder mit GridStack.js.**
 
-Route: `/custom-dashboard`
+Route: `/editor`, `/editor/:dashboardId` (ehemals `/custom-dashboard`, jetzt Redirect)
 
 - GridStack.js 12-Spalten Layout-Grid
 - Widget-Katalog-Sidebar (Drag to Add)
@@ -227,7 +234,7 @@ Route: `/custom-dashboard`
 **Genutzte Stores:** `dashboardStore`
 **Dependencies:** `gridstack`
 
-### 4.4 CalibrationView (NEU)
+### 4.4 CalibrationView
 
 **Sensor-Kalibrierungs-Wizard.**
 
@@ -238,11 +245,9 @@ Wrapper-View für `CalibrationWizard`-Komponente. Unterstützt pH (2-Punkt) und 
 **Genutzte Composables:** `useCalibration`
 **API:** `calibration.ts`
 
-### 4.5 SensorHistoryView (NEU)
+### 4.5 SensorHistoryView (DEPRECATED Route)
 
-**Historische Sensor-Zeitreihen.**
-
-Route: `/sensor-history`
+**Historische Sensor-Zeitreihen.** Datei noch vorhanden, Route `/sensor-history` ist seit 2026-03-01 ein Redirect → `/monitor`.
 
 - Chart.js Liniendiagramm mit Zeitachse
 - Sensor-Picker (Multi-Select)
@@ -252,25 +257,7 @@ Route: `/sensor-history`
 
 **Dependencies:** `chart.js`, `vue-chartjs`, `chartjs-adapter-date-fns`
 
-### 4.6 DashboardView (LEGACY, ~955 Zeilen)
-
-**LEGACY: Altes Haupt-Dashboard, jetzt unter `/dashboard-legacy`.** Die Funktionalität wurde auf HardwareView und MonitorView aufgeteilt.
-
-| Level | Ansicht | Komponente | Inhalt |
-|-------|---------|-----------|--------|
-| **1** | Zone Overview | `ZonePlate` (pro Zone) | Alle Zonen als Karten mit Device-Count, Status |
-| **2** | Zone Detail | `ZoneMonitorView` | Einzelne Zone mit Sensor-/Aktor-Live-Daten |
-| **3** | Device Detail | `DeviceDetailView` | ESP mit Orbital-Layout (Sensoren/Aktoren als Satelliten) |
-
-**Besonderheit:** Alle 3 Levels existieren gleichzeitig im DOM (`v-show`), verbunden durch CSS-Zoom-Transitions. Level-2 öffnet bei Klick auf ein Device den `ESPSettingsSheet` als Slide-In statt Level 3.
-
-**Genutzte Composables:** `useZoomNavigation`, `useZoneDragDrop`, `useKeyboardShortcuts`, `useSwipeNavigation`
-
-**Genutzte Stores:** `espStore`, `logicStore`, `uiStore`, `dashboardStore`
-
-**Sub-Komponenten:** CreateMockEspModal, ESPSettingsSheet, ComponentSidebar, UnassignedDropBar, PendingDevicesPanel, ZonePlate, ZoneMonitorView, DeviceDetailView
-
-### 4.7 LoginView (~695 Zeilen)
+### 4.6 LoginView (~689 Zeilen)
 
 **Mission-Control-Login mit animiertem Design.**
 
@@ -281,7 +268,7 @@ Route: `/sensor-history`
 - Success-Celebration-Animation nach Login
 - Rein BEM-scoped CSS (kein Tailwind)
 
-### 4.8 SetupView (~776 Zeilen)
+### 4.7 SetupView (~770 Zeilen)
 
 **Ersteinrichtung: Admin-Account erstellen.**
 
@@ -290,7 +277,7 @@ Route: `/sensor-history`
 - Requirement-Checks: 8 Zeichen, Groß-/Kleinbuchstabe, Zahl, Sonderzeichen
 - Rein BEM-scoped CSS (kein Tailwind)
 
-### 4.9 LogicView (~1.552 Zeilen)
+### 4.8 LogicView (~1.667 Zeilen)
 
 **Node-RED-inspirierter visueller Automations-Editor.**
 
@@ -312,7 +299,7 @@ Layout:
 - Test-Ausführung mit Live-Feedback
 - Execution-History mit Zeitstempel und Ergebnis
 
-### 4.10 SystemMonitorView (~2.466 Zeilen)
+### 4.9 SystemMonitorView (~2.455 Zeilen)
 
 **Konsolidierter System-Monitor mit 5 Tabs.**
 
@@ -331,7 +318,7 @@ Layout:
 - Max 10.000 Events mit Virtual Scrolling (ab 200 Events)
 - Event-Gruppierung nach Zeitfenster
 
-### 4.11 SensorsView (~692 Zeilen)
+### 4.10 SensorsView (~1.339 Zeilen)
 
 **Kombinierte Sensor- und Aktor-Übersicht mit Tab-Navigation.**
 
@@ -341,7 +328,7 @@ Layout:
 - URL-Sync: `?tab=actuators`
 - Visuelles Feedback bei Live-Updates (Highlight-Animation)
 
-### 4.12 MaintenanceView (~529 Zeilen)
+### 4.11 MaintenanceView (~528 Zeilen)
 
 **Wartungs-Dashboard für System-Administration.**
 
@@ -350,7 +337,7 @@ Layout:
 - Manueller Cleanup-Trigger
 - Cleanup-History (letzte Ausführungen)
 
-### 4.13 LoadTestView (~389 Zeilen)
+### 4.12 LoadTestView (~388 Zeilen)
 
 **Last-Test-Tool für Mock-ESP-Szenarien.**
 
@@ -359,7 +346,7 @@ Layout:
 - Live-Metriken-Dashboard (Auto-Refresh)
 - Cleanup aller Last-Test-ESPs
 
-### 4.14 UserManagementView (~566 Zeilen)
+### 4.13 UserManagementView (~537 Zeilen)
 
 **Benutzerverwaltung mit vollständigem CRUD.**
 
@@ -368,7 +355,7 @@ Layout:
 - Passwort-Reset durch Admin
 - Eigenes Passwort ändern
 
-### 4.15 SystemConfigView (~286 Zeilen)
+### 4.14 SystemConfigView (~285 Zeilen)
 
 **Key-Value Systemkonfiguration.**
 
@@ -377,7 +364,7 @@ Layout:
 - Secret-Werte maskiert (Toggle zum Anzeigen)
 - Typ-Filter
 
-### 4.16 SettingsView (~112 Zeilen)
+### 4.15 SettingsView (~111 Zeilen)
 
 **Benutzer-Einstellungen.**
 
@@ -387,23 +374,18 @@ Layout:
 
 ---
 
-## 5. Komponenten (93 Dateien)
+## 5. Komponenten (106 Dateien)
 
-### 5.1 Dashboard (13 Komponenten)
+### 5.1 Dashboard (9 Komponenten)
 
 | Komponente | Beschreibung |
 |-----------|-------------|
 | `ZonePlate.vue` | Zone-Karte (Level 1): Zeigt Zone-Name, Device-Count, Status-Indikatoren. Klick → Zoom zu Level 2 |
-| `ZoneMonitorView` | (Siehe zones/) |
 | `DeviceMiniCard.vue` | Kompakte ESP-Karte innerhalb einer ZonePlate: Status-LED, Name, Sensor-/Aktor-Count |
-| `ZoomBreadcrumb.vue` | Breadcrumb-Navigation für Zoom-Levels: Zone Overview → Zone Detail → Device |
-| `LevelNavigation.vue` | Navigations-Controls für Zoom-Level-Wechsel |
 | `ActionBar.vue` | Aktionsleiste: Filter, Add-Buttons, Pending-Counter |
 | `StatCard.vue` | Statistik-Karte: Einzelne Kennzahl (z.B. "12 Sensoren online") |
 | `StatusPill.vue` | Status-Badge: Farbiger Pill (online/offline/warning/safemode) |
 | `ComponentSidebar.vue` | Seitenpanel: Sensor-/Aktor-Typen zum Drag-and-Drop auf ESPs |
-| `SensorSidebar.vue` | Spezifisches Seitenpanel für Sensor-Typ-Auswahl |
-| `ActuatorSidebar.vue` | Spezifisches Seitenpanel für Aktor-Typ-Auswahl |
 | `ComponentCard.vue` | Karte für einzelnen Sensor-/Aktor-Typ in der Sidebar |
 | `UnassignedDropBar.vue` | Drop-Zone am unteren Rand: ESPs ohne Zone hierher ziehen |
 | `CrossEspConnectionOverlay.vue` | SVG-Overlay: Zeichnet Verbindungslinien zwischen ESPs (Logic Rules) |
@@ -414,7 +396,7 @@ Layout:
 |-----------|-------------|
 | `ESPCard.vue` | Standard ESP-Gerätekarte: Status, Name, Zone, Sensoren, Aktoren |
 | `ESPOrbitalLayout.vue` | Orbital-Darstellung: ESP im Zentrum, Sensoren/Aktoren als Satelliten im Kreis |
-| `ESPOrbitalLayout.css` | Zugehörige CSS-Animationen für Orbital-Darstellung |
+| `ESPCardBase.vue` | Basis-Karte für ESP-Darstellung (gemeinsame Logik für ESPCard-Varianten) |
 | `ESPSettingsSheet.vue` | Slide-In-Panel: ESP-Konfiguration (Name, Zone, GPIO-Status, Sensor/Aktor-Verwaltung) |
 | `ESPConfigPanel.vue` | ESP-Konfigurationspanel: Name, Zone, WiFi/MQTT-Status, GPIO-Pins, Emergency-Stop (SlideOver) |
 | `ZoneConfigPanel.vue` | Zone-Konfigurationspanel: Name, Beschreibung, Subzonen, Statistiken (SlideOver) |
@@ -437,13 +419,11 @@ Layout:
 | `ZoneAssignmentDropdown.vue` | Dropdown für Zone-Zuweisung eines ESP |
 | `AnalysisDropZone.vue` | Drop-Zone für Sensor-Analyse (Drag-Sensor → Analyse-Bereich) |
 
-### 5.3 Zones (6 Komponenten)
+### 5.3 Zones (4 Komponenten)
 
 | Komponente | Beschreibung |
 |-----------|-------------|
 | `ZoneDetailView.vue` | Zone-Detail (Level 2): Alle ESPs einer Zone mit DeviceSummaryCards |
-| `ZoneMonitorView.vue` | Zone-Monitor: Live-Sensor-/Aktor-Daten einer Zone |
-| `ZoneGroup.vue` | Gruppierung von ESPs nach Zone |
 | `DeviceSummaryCard.vue` | Kompakte ESP-Übersicht innerhalb einer Zone: Status, Sensoren, Aktoren |
 | `SubzoneArea.vue` | Subzone-Bereich: Darstellung einer Subzone mit zugehörigen Sensoren/Aktoren |
 | `ZoneAssignmentPanel.vue` | Panel für Zone-Zuweisungen (Drag-and-Drop) |
@@ -494,13 +474,15 @@ Layout:
 | `HistoricalChart.vue` | NEU: Historisches Zeitreihen-Diagramm mit Threshold-Linien (chartjs-plugin-annotation) und Live-Daten-Append via WebSocket |
 | `TimeRangeSelector.vue` | NEU: Zeitbereich-Selektor: Presets (1h, 6h, 24h, 7d) + Custom Datumsbereich |
 
-### 5.7 Common (1 Komponente)
+### 5.7 Common (3 Komponenten)
 
 | Komponente | Beschreibung |
 |-----------|-------------|
 | `GrafanaPanelEmbed.vue` | Grafana-Panel als iFrame eingebettet |
+| `ColorLegend.vue` | Farb-Legende für Sensor-/Aktor-Visualisierungen |
+| `ViewTabBar.vue` | Tab-Navigation für Views mit URL-Sync |
 
-**Migration abgeschlossen:** Alle 11 deprecated Wrapper-Dateien (Badge, Button, Card, Modal, Input, Select, Toggle, Spinner, EmptyState, ErrorState, ToastContainer, LoadingState) wurden entfernt. Die kanonischen Versionen in `shared/design/` sind jetzt die einzige Quelle.
+**Migration abgeschlossen:** Alle 11 deprecated Wrapper-Dateien wurden entfernt. Die kanonischen Versionen in `shared/design/` sind jetzt die einzige Quelle.
 
 ### 5.8 Database (6 Komponenten)
 
@@ -553,12 +535,44 @@ Layout:
 |-----------|-------------|
 | `CommandPalette.vue` | Spotlight-artige Suchleiste (Ctrl+K): Fuzzy-Search über Navigation, Geräte, Aktionen |
 
-### 5.15 Calibration (2 Komponenten, NEU)
+### 5.15 Calibration (2 Komponenten)
 
 | Komponente | Beschreibung |
 |-----------|-------------|
 | `CalibrationWizard.vue` | Mehrstufiger Kalibrierungs-Wizard: Sensor-Typ-Auswahl, Messpunkt-Erfassung, Ergebnis-Berechnung |
 | `CalibrationStep.vue` | Einzelner Kalibrierschritt: Rohwert-Erfassung, Referenzwert-Eingabe |
+
+### 5.16 Dashboard-Widgets (11 Komponenten)
+
+| Komponente | Beschreibung |
+|-----------|-------------|
+| `WidgetWrapper.vue` | GridStack Widget-Container: Rendert Widget-Typ, Header, Resize-Handle |
+| `WidgetConfigPanel.vue` | Konfigurations-Panel für Widget-Einstellungen (Sensor-Auswahl, Zeitraum, etc.) |
+| `LineChartWidget.vue` | Linien-Chart-Widget: Einzelner Sensor-Verlauf |
+| `MultiSensorWidget.vue` | Multi-Sensor-Widget: Mehrere Sensoren im Vergleich |
+| `GaugeWidget.vue` | Gauge-Widget: Sensor-Wert als Tacho |
+| `SensorCardWidget.vue` | Sensor-Karten-Widget: Kompakte Sensor-Anzeige |
+| `ActuatorCardWidget.vue` | Aktor-Karten-Widget: Aktor-Status + Toggle |
+| `ActuatorRuntimeWidget.vue` | Aktor-Laufzeit-Widget: Laufzeit-Statistiken |
+| `HistoricalChartWidget.vue` | Historisches Chart-Widget: Zeitreihen mit Threshold-Linien |
+| `ESPHealthWidget.vue` | ESP-Health-Widget: Fleet-Status-Übersicht |
+| `AlarmListWidget.vue` | Alarm-Liste-Widget: Aktive Alarme |
+
+### 5.17 Devices (4 Komponenten)
+
+| Komponente | Beschreibung |
+|-----------|-------------|
+| `SensorCard.vue` | Sensor-Karte für Monitor/Hardware-Views: Live-Wert, Qualität, Trend |
+| `ActuatorCard.vue` | Aktor-Karte für Monitor/Hardware-Views: Status, Toggle, Steuerung |
+| `DeviceMetadataSection.vue` | Metadaten-Sektion: ESP-Details (WiFi, MQTT, Firmware) |
+| `LinkedRulesSection.vue` | Verknüpfte Regeln: Zeigt Logic-Rules die einen Sensor/Aktor referenzieren |
+
+### 5.18 Widgets (2 Komponenten, Legacy)
+
+| Komponente | Beschreibung |
+|-----------|-------------|
+| `DeviceStatusWidget.vue` | Device-Status-Widget (Legacy) |
+| `SensorOverviewWidget.vue` | Sensor-Übersicht-Widget (Legacy) |
 
 ---
 
@@ -566,12 +580,13 @@ Layout:
 
 Dreistufiges Design System:
 
-### 6.1 Primitives (12 Komponenten)
+### 6.1 Primitives (13 Komponenten)
 
 Atomare UI-Bausteine ohne Business-Logik:
 
 | Komponente | Beschreibung |
 |-----------|-------------|
+| `AccordionSection.vue` | Auf-/zuklappbarer Bereich mit Header und Content-Slot, localStorage-Persistenz |
 | `BaseBadge.vue` | Badge mit Farb-Varianten |
 | `BaseButton.vue` | Button mit Size/Variant/Loading-State |
 | `BaseCard.vue` | Card-Container mit Header/Body/Footer-Slots |
@@ -679,14 +694,14 @@ WebSocket Message
 
 ---
 
-## 8. Composables (16 Stück)
+## 8. Composables (20 Stück)
 
 | Composable | Beschreibung |
 |-----------|-------------|
 | `useWebSocket` | WebSocket-Verbindung: Auto-Connect, Auto-Reconnect, Filter-basierte Subscriptions, Lifecycle-gebunden |
-| `useZoomNavigation` | 3-Level-Zoom: CSS-Animationsklassen, URL-Query-Sync, Transition-Locking, Device-Removal-Watcher |
 | `useToast` | Toast-Notifications: Singleton-State, Auto-Dismiss, Actions, Stacking (max 20) |
 | `useZoneDragDrop` | Zone-Drag-and-Drop: Optimistic UI, API-Calls, Error-Rollback, Gruppierung nach Zonen |
+| `useOrbitalDragDrop` | Orbital-Drag-and-Drop: Sensor/Aktor-Drag auf ESP Orbital-Layout |
 | `useGpioStatus` | GPIO-Status: Reaktiver GPIO-Status pro ESP, Available/Reserved Pins, Validation |
 | `useCommandPalette` | Command Palette: Singleton-Registry, Fuzzy-Search, Keyboard-Navigation |
 | `useKeyboardShortcuts` | Keyboard Shortcuts: Singleton-Registry, Scope-Awareness, Input-Element-Suppression |
@@ -697,12 +712,16 @@ WebSocket Message
 | `useGrafana` | Grafana-Integration: Embed-URL-Builder für Panels und Dashboards |
 | `useContextMenu` | Context-Menu: Wrapper um uiStore.openContextMenu, Viewport-Boundary-Detection |
 | `useDeviceActions` | Device-Aktionen: Inline-Name-Editing, Heartbeat-Trigger, WiFi-Info, State-Info |
-| `useScrollLock` | NEU: Reference-counted Body Scroll-Lock. Verhindert Race Conditions bei mehreren offenen Modals/Overlays |
-| `useCalibration` | NEU: Kalibrierungs-Wizard-State: pH 2-Punkt / EC 1-2-Punkt Kalibrierung, Messpunkt-Erfassung, Ergebnis-Berechnung |
+| `useScrollLock` | Reference-counted Body Scroll-Lock. Verhindert Race Conditions bei mehreren offenen Modals/Overlays |
+| `useCalibration` | Kalibrierungs-Wizard-State: pH 2-Punkt / EC 1-2-Punkt Kalibrierung, Messpunkt-Erfassung, Ergebnis-Berechnung |
+| `useESPStatus` | ESP-Status-Auswertung: Online/Offline/Safemode/Warning (Single Source of Truth) |
+| `useDeviceMetadata` | Device-Metadaten: WiFi-Signal, Firmware-Version, MQTT-Status für ESP-Karten |
+| `useZoneGrouping` | Zone-Gruppierung: ESPs nach Zonen gruppieren, Aggregation, Sortierung |
+| `useSparklineCache` | Sparkline-Cache: Gepufferte Sensor-Werte für Mini-Charts in Karten |
 
 ---
 
-## 9. API-Module (18 Stück)
+## 9. API-Module (18 Dateien)
 
 Alle Module nutzen die zentrale Axios-Instanz (`api/index.ts`) mit JWT-Interceptor.
 
@@ -739,7 +758,7 @@ Skip: /auth/refresh, /auth/login, /auth/setup, /auth/status (kein Refresh-Loop)
 
 ---
 
-## 10. WebSocket-Service (`services/websocket.ts`, 686 Zeilen)
+## 10. WebSocket-Service (`services/websocket.ts`, ~690 Zeilen)
 
 ### 10.1 Architektur
 
@@ -778,7 +797,7 @@ WebSocketService (Singleton)
 
 ---
 
-## 11. TypeScript-Typen (6 Dateien)
+## 11. TypeScript-Typen (7 Dateien)
 
 | Datei | Inhalt |
 |-------|--------|
@@ -788,10 +807,11 @@ WebSocketService (Singleton)
 | `websocket-events.ts` | UnifiedEvent-Typ für System Monitor |
 | `event-grouping.ts` | Event-Gruppierung: EventOrGroup, GroupingOptions |
 | `form-schema.ts` | Dynamische Formular-Schema-Definitionen |
+| `device-metadata.ts` | Device-Metadaten-Types: DeviceMetadata, WiFiInfo, FirmwareInfo |
 
 ---
 
-## 12. Utility-Funktionen (16 Dateien)
+## 12. Utility-Funktionen (17 Dateien)
 
 | Datei | Beschreibung |
 |-------|-------------|
@@ -809,12 +829,13 @@ WebSocketService (Singleton)
 | `databaseColumnTranslator.ts` | DB-Spalten-Übersetzung: Technische Spaltennamen → Deutsche Labels |
 | `logMessageTranslator.ts` | Log-Message-Übersetzung: Server-Logs → Deutsche Nachrichten |
 | `logSummaryGenerator.ts` | Log-Summary: Zusammenfassung von Log-Einträgen |
+| `cssTokens.ts` | CSS-Token-Zugriff: Liest Design-Token-Werte aus :root Custom Properties |
 | `logger.ts` | Frontend-Logger: Structured Logging mit Modulnamen (createLogger) |
 | `index.ts` | Re-Exports |
 
 ---
 
-## 13. Styles (5 Dateien)
+## 13. Styles (6 Dateien)
 
 | Datei | Beschreibung |
 |-------|-------------|
@@ -823,6 +844,7 @@ WebSocketService (Singleton)
 | `tokens.css` | Design Tokens: CSS Custom Properties für Farben, Spacing, Radii, Shadows |
 | `glass.css` | Glassmorphismus-Effekte: Backdrop-Blur, Border-Glow, Gradient-Overlays |
 | `animations.css` | CSS-Animationen: Zoom-Transitions, Fade, Slide, Pulse, Orbital-Rotation |
+| `forms.css` | Formular-Styles: Input, Select, Checkbox, Radio Basis-Klassen |
 
 ---
 
@@ -873,10 +895,9 @@ Zurück:
 
 | Level | URL |
 |-------|-----|
-| 1 | `/` |
-| 2 | `/?zone={zoneId}` |
-| 3 | `/?zone={zoneId}&device={deviceId}` |
-| Settings | `/?openSettings={espId}` |
+| 1 | `/hardware` |
+| 2 | `/hardware/{zoneId}` |
+| 3 | `/hardware/{zoneId}/{espId}` |
 
 ### 15.3 Technische Details
 
@@ -933,14 +954,13 @@ AddSensorModal / AddActuatorModal (Konfigurations-Dialog)
 App.vue
 └─► Router → Views
     │
-    ├─► DashboardView
+    ├─► HardwareView (Default-Route)
     │   ├─► espStore (Haupt-Store)
     │   │   ├─► sensorStore, actuatorStore, zoneStore
     │   │   ├─► gpioStore, notificationStore, configStore
     │   │   └─► websocketService (Singleton)
     │   ├─► logicStore
     │   ├─► dashboardStore, uiStore
-    │   ├─► useZoomNavigation
     │   ├─► useZoneDragDrop
     │   ├─► useKeyboardShortcuts
     │   └─► useSwipeNavigation
@@ -968,7 +988,7 @@ API-Layer:
 api/index.ts (Axios Singleton)
 ├─► JWT Token Interceptor
 ├─► 401 → Auto-Refresh
-└─► 16 spezialisierte API-Module
+└─► 17 spezialisierte API-Module
 
 WebSocket-Layer:
 websocket.ts (Singleton)
@@ -1110,7 +1130,7 @@ Frontend ist **ausschließlich Dark Mode** (Mission-Control-Aesthetic). Kein Lig
 
 ### 20.1 Design-System-Migration: 100% abgeschlossen
 
-Die Migration von `components/common/` + `components/layout/` → `shared/design/` ist **vollständig abgeschlossen**. Die Verzeichnisse `components/layout/` und `components/widgets/` wurden gelöscht. `components/common/` enthält nur noch `GrafanaPanelEmbed.vue` (keine kanonische Design-System-Version vorhanden).
+Die Migration von `components/common/` + `components/layout/` → `shared/design/` ist **vollständig abgeschlossen**. Das Verzeichnis `components/layout/` wurde gelöscht. `components/widgets/` enthält noch 2 Legacy-Widgets (DeviceStatusWidget, SensorOverviewWidget). `components/common/` enthält GrafanaPanelEmbed.vue, ColorLegend.vue und ViewTabBar.vue.
 
 ### 20.2 Doppelte Komponenten (14 Paare) — Historisch
 
@@ -1159,18 +1179,15 @@ export default BaseBadge
 
 **Alle 6 Dateien mit alten Import-Pfaden wurden migriert.** Es gibt keine Importe mehr von `@/components/common/` (außer GrafanaPanelEmbed). Die Store-Legacy-Proxies wurden entfernt.
 
-### 20.4 Index-Exports — 3 Parallele Pfade zum selben Component
+### 20.4 Index-Exports — 2 Parallele Pfade zum selben Component
 
-Jede Komponente ist über **3 verschiedene Pfade** importierbar:
+Jede Komponente ist über **2 verschiedene Pfade** importierbar (deprecated Wrapper entfernt):
 
 ```typescript
-// Pfad A: Deprecated Wrapper (5-Zeilen-Proxy)
-import Badge from '@/components/common/Badge.vue'
-
-// Pfad B: Kanonisch direkt
+// Pfad A: Kanonisch direkt
 import BaseBadge from '@/shared/design/primitives/BaseBadge.vue'
 
-// Pfad C: Kanonisch via Barrel (mit Alias)
+// Pfad B: Kanonisch via Barrel (mit Alias)
 import { Badge } from '@/shared/design/primitives'
 ```
 
@@ -1294,7 +1311,7 @@ Kein Scroll-Lock, kein Escape-Handler, kein Design-System.
 | Datei | Problem | Detail |
 |-------|---------|--------|
 | `ZonePlate.vue` | **Gemischte Pfade** | Zeile 21: `useEspStore from '@/stores/esp'`, Zeile 22: `useDragStateStore from '@/shared/stores'` |
-| `App.vue` | **Gemischte Pfade** | `useAuthStore from '@/stores/auth'` + `ConfirmDialog from '@/shared/design/patterns'` |
+| `App.vue` | **Korrekt** | `useAuthStore from '@/shared/stores/auth.store'` + `ConfirmDialog from '@/shared/design/patterns'` |
 | `DashboardView.vue` | **Gemischte Pfade** | `useEspStore from '@/stores/esp'` + `useUiStore from '@/shared/stores'` |
 
 ### 22.4 Barrel-Export Nutzung
@@ -1314,7 +1331,7 @@ Kein Scroll-Lock, kein Escape-Handler, kein Design-System.
 
 ### 22.5 Composables — Kein Duplikat
 
-`useZoomNavigation` wird **nur 1× exportiert** (composables/index.ts Zeile 28). Die frühere Angabe im Dokument (Sektion 8, doppelter Eintrag) war ein Dokumentationsfehler, kein Code-Duplikat.
+Alle Composables werden jeweils 1× exportiert. `useZoomNavigation` wurde entfernt (war nur in DashboardView genutzt, das entfernt wurde).
 
 ### 22.6 config/ Dateien
 
@@ -1345,7 +1362,7 @@ Kein Scroll-Lock, kein Escape-Handler, kein Design-System.
 | H2 | ErrorDetailsModal + CommandPalette: Kein Scroll-Lock | `ErrorDetailsModal.vue`, `CommandPalette.vue` | 0.5h |
 | H3 | UserManagementView: 5 inline Modals statt BaseModal | `UserManagementView.vue` | 2h |
 | H4 | 7 verschiedene Backdrop-Implementierungen — keine Tokens | Alle Modal-Komponenten | 1.5h |
-| H5 | ✅ Deprecated Wrapper entfernt (Sektion 20) | App.vue, DashboardView, UnassignedDropBar, ESPOrbitalLayout, AddSensorModal, MaintenanceView | ERLEDIGT |
+| H5 | ✅ Deprecated Wrapper entfernt (Sektion 20) | Alle 14 deprecated Wrapper-Dateien + Layout + Store-Proxies | ERLEDIGT |
 | H6 | ⚠️ 4 Legacy-Store-Proxies entfernt. `stores/esp.ts` bleibt als einziger Legacy-Import-Pfad. | 39 .vue/.ts Dateien | TEILWEISE ERLEDIGT |
 | H7 | MonitorHeader/SystemMonitorView z-index: 100 — über Modals | `MonitorHeader.vue:414`, `SystemMonitorView.vue:1798` | 0.25h |
 | H8 | Scroll-Lock Race Condition bei mehreren offenen Modals | Alle scroll-lockenden Modals | 1h (useScrollLock Composable) |

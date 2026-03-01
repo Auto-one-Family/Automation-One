@@ -1,80 +1,114 @@
-# Frontend Dev Report: Sidebar-Navigation Kalibrierung und Sensor-Zeitreihen
+# Frontend Dev Report: BUG-011 und BUG-012 Fix
 
 ## Modus: B (Implementierung)
 
 ## Auftrag
-Zwei neue Sidebar-Links ergaenzen fuer bereits implementierte Views:
-- `/calibration` (CalibrationView, requiresAdmin: true)
-- `/sensor-history` (SensorHistoryView, kein Admin-Requirement)
+- BUG-011: Offline-Filter zeigt auch Online-Geräte innerhalb gefilterter Zonen (Unassigned-Sektion)
+- BUG-012: Cross-ESP Button zeigt keine sichtbare Änderung beim Klick
 
 ## Codebase-Analyse
 
-### Analysierte Dateien
-- `El Frontend/src/shared/design/layout/Sidebar.vue` — Sidebar-Komponente (vollstaendig gelesen)
-- `El Frontend/src/router/index.ts` — Router-Konfiguration (vollstaendig gelesen)
+### Gelesene Dateien
+- `El Frontend/src/views/HardwareView.vue` — vollständig (Zeilen 1-950+)
+- `El Frontend/src/components/dashboard/ZonePlate.vue` — vollständig
+- `El Frontend/src/composables/useZoneDragDrop.ts` — Zeilen 125-162 (groupDevicesByZone)
+- `El Frontend/src/composables/useToast.ts` — vollständig
 
-### Gefundene Patterns
+### BUG-011 Root Cause (gefunden)
+Die ursprüngliche Vermutung war korrekt — aber der Fehler lag nicht in ZonePlate:
 
-**Navigations-Struktur:**
-- Zwei Sektionen: Hauptnavigation ("Navigation") und Admin-Section ("Administration")
-- Admin-Section ist in `<template v-if="authStore.isAdmin">` eingewickelt
-- Jeder Link hat exakt dieselbe Struktur: `RouterLink > sidebar__link-indicator + Icon + span`
-- Icons aus `lucide-vue-next`, alle als Named Imports im Script-Block
+- `filteredEsps` (Zeile 245-272): filtert ESPs korrekt nach Status/Type
+- `zoneGroups` (Zeile 274-302): nutzt `groupDevicesByZone(filteredEsps.value)` — korrekt
+- `ZonePlate` bekommt `:devices="group.devices"` — korrekt gefilterte Devices
+- `ZonePlate.vue` rendert ausschliesslich `props.devices` (kein direkter Store-Zugriff fuers Rendering)
 
-**Bestehende Links (Hauptnavigation):**
-- `/hardware` → `Cpu` Icon → "Hardware"
-- `/logic` → `Workflow` Icon → "Regeln"
-- `/sensors` → `Activity` Icon → "Komponenten"
+**Eigentlicher Bug:** `unassignedDevices` (Zeile 305) wurde hardcoded auf `espStore.unassignedDevices` gesetzt
+— das sind ALLE unzugewiesenen Devices, komplett am Filter vorbei. Der Unassigned-Bereich ignorierte
+daher sowohl den Status-Filter als auch den Type-Filter.
 
-**Bestehende Links (Admin-Section):**
-- `/system-monitor` → `Monitor` Icon → "System"
-- `/users` → `Users` Icon → "Benutzer"
-- `/maintenance` → `Wrench` Icon → "Wartung"
-
-**Route-Analyse:**
-- `calibration`: `meta: { requiresAdmin: true, title: 'Kalibrierung' }` → Admin-Section
-- `sensor-history`: `meta: { title: 'Sensor-Zeitreihen' }` → Hauptnavigation
+### BUG-012 Root Cause (bestätigt)
+- `showCrossEspConnections = ref(true)` war ein reiner UI-State ohne angebundenen Content
+- Kein Panel/Overlay nutzte diesen State
+- Button togglte visuell auf "aktiv" ohne sichtbare Auswirkung — irrefuehrend fuer den User
 
 ## Qualitaetspruefung (8-Dimensionen)
 
-| # | Dimension | Ergebnis |
-|---|-----------|----------|
-| 1 | Struktur & Einbindung | Datei `shared/design/layout/Sidebar.vue` — korrekt. `@/` Alias fuer Imports bereits vorhanden. |
-| 2 | Namenskonvention | Neue Icons `TrendingUp`, `SlidersHorizontal` aus lucide-vue-next — PascalCase korrekt. |
-| 3 | Rueckwaertskompatibilitaet | Keine bestehenden Links geaendert. Nur neue Links hinzugefuegt. |
-| 4 | Wiederverwendbarkeit | Exakt dasselbe RouterLink-Pattern wie alle anderen Links verwendet. |
-| 5 | Speicher & Ressourcen | Nur zwei statische RouterLinks — kein Overhead. |
-| 6 | Fehlertoleranz | RouterLink mit `isActive()` Funktion — gleiches Error-Handling wie alle anderen Links. |
-| 7 | Seiteneffekte | Keine. Nur Templates erweitert, kein neuer reaktiver State. |
-| 8 | Industrielles Niveau | TypeScript strict, Named Imports, Dark Theme only, kein Light Mode. |
+| # | Dimension | Status |
+|---|-----------|--------|
+| 1 | Struktur & Einbindung | HardwareView.vue — bestehende computed properties erweitert |
+| 2 | Namenskonvention | camelCase-Funktionen, bestehende Pattern beibehalten |
+| 3 | Rueckwaertskompatibilitaet | Nur interne computed-Logik geaendert, keine Props/Emits geaendert |
+| 4 | Wiederverwendbarkeit | `filteredEsps` bereits vorhanden, nur Ableitung hinzugefuegt |
+| 5 | Speicher & Ressourcen | Keine neue Reactivity, computed-Derivat von bestehendem computed |
+| 6 | Fehlertoleranz | Fallback: wenn keine Filter aktiv -> `espStore.unassignedDevices` (Originalverhalten) |
+| 7 | Seiteneffekte | `showCrossEspConnections` ref entfernt (war toter State), keine anderen Abhaengigkeiten |
+| 8 | Industrielles Niveau | TypeScript strict, keine `any` eingefuehrt, minimale Aenderungen |
 
 ## Cross-Layer Impact
+- Keine Server-API-Aenderungen
+- Keine Store-Aenderungen (nur View-Logik)
+- Keine Type-Aenderungen
 
-Keine Cross-Layer-Aenderungen. Nur die Sidebar-Navigation wurde erweitert. Die Views und Routes waren bereits implementiert.
-
-## Ergebnis
+## Implementierung
 
 ### Geaenderte Datei
-`El Frontend/src/shared/design/layout/Sidebar.vue`
+`El Frontend/src/views/HardwareView.vue`
 
-**Aenderungen:**
-1. Icons `TrendingUp` und `SlidersHorizontal` zu lucide-vue-next Imports hinzugefuegt (Zeilen 20-21)
-2. RouterLink fuer `/sensor-history` in Hauptnavigation nach `/sensors` eingefuegt (Zeilen 105-113)
-   - Icon: `TrendingUp` (passt zu Zeitreihen/Charts)
-   - Label: "Zeitreihen" (kurz, konsistent mit anderen Labels)
-3. RouterLink fuer `/calibration` in Admin-Section nach `/maintenance` eingefuegt (Zeilen 150-158)
-   - Icon: `SlidersHorizontal` (passt zu Kalibrierung/Einstellungen)
-   - Label: "Kalibrierung" (klar, aus Meta title uebernommen)
-   - Korrekt innerhalb `<template v-if="authStore.isAdmin">` — folgt dem requiresAdmin Pattern
+### BUG-011 Fix (2 Aenderungen)
+
+1. `info` zu Toast-Destrukturierung hinzugefuegt (benoetigt fuer BUG-012):
+```typescript
+const { success: showSuccess, error: showError, info: showInfo } = useToast()
+```
+
+2. `unassignedDevices` computed umgestellt auf filterbasierte Ableitung:
+```typescript
+// VORHER
+const unassignedDevices = computed(() => espStore.unassignedDevices)
+
+// NACHHER
+const unassignedDevices = computed(() => {
+  const filters = dashStore.activeStatusFilters
+  const filterType = dashStore.filterType
+  // If no filters active, fall back to store source of truth
+  if (filters.size === 0 && filterType === 'all') return espStore.unassignedDevices
+  // Otherwise derive from filteredEsps to stay consistent with zone groups
+  return filteredEsps.value.filter(d => !d.zone_id)
+})
+```
+
+### BUG-012 Fix (2 Aenderungen)
+
+3. Cross-ESP Button — active-class und Toggle entfernt, Info-Toast und Tooltip hinzugefuegt:
+```html
+<!-- VORHER -->
+<button
+  v-if="logicStore.crossEspConnections.length > 0"
+  class="cross-esp-toggle"
+  :class="{ 'cross-esp-toggle--active': showCrossEspConnections }"
+  @click="showCrossEspConnections = !showCrossEspConnections"
+>
+
+<!-- NACHHER -->
+<button
+  v-if="logicStore.crossEspConnections.length > 0"
+  class="cross-esp-toggle"
+  :title="'Cross-ESP Visualisierung (demnächst verfügbar)'"
+  @click="showInfo('Cross-ESP Visualisierung wird noch entwickelt')"
+>
+```
+
+4. Tote Variable `showCrossEspConnections = ref(true)` entfernt (war Zeile 205).
 
 ## Verifikation
 
-Build-Ergebnis: **ERFOLGREICH**
-```
-✓ 2358 modules transformed.
-✓ built in 42.57s
-```
-Keine TypeScript-Fehler, keine Build-Warnings.
+`npx vue-tsc --noEmit` zeigt ausschliesslich pre-existing Fehler in:
+- `src/components/rules/RuleFlowEditor.vue` (2 Fehler — VueFlow Node-Typ-Konvertierung)
+- `src/views/SensorHistoryView.vue` (2 Fehler — Chart.js Scales-Typen)
+
+Keine neuen Fehler durch meine Aenderungen eingefuehrt.
 
 ## Empfehlung
-Kein weiterer Agent noetig. Die Sidebar-Links sind funktionsfaehig und beide Views waren bereits vollstaendig implementiert.
+
+Die pre-existing Build-Fehler in `RuleFlowEditor.vue` und `SensorHistoryView.vue` sollten separat
+behoben werden um den Build wieder zu aktivieren.

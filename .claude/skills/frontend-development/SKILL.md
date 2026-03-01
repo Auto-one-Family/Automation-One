@@ -15,10 +15,10 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.7
-**Letzte Aktualisierung:** 2026-02-27
+**Version:** 9.10
+**Letzte Aktualisierung:** 2026-03-01
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
-**Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 137 .vue Komponenten)
+**Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
 
 > **Server-Dokumentation:** Siehe `.claude/skills/server-development/SKILL.md`
 > **ESP32-Firmware:** Siehe `.claude/skills/esp32-development/SKILL.md`
@@ -122,20 +122,25 @@ El Frontend/src/
 │   ├── zones.ts       # Zone Assignment
 │   ├── logic.ts       # Automation Rules
 │   └── ...
-├── components/    # Vue Komponenten (13 Unterverzeichnisse)
-│   ├── common/        # Modal, Toast, Skeleton (13 Dateien)
-│   ├── layout/        # MainLayout, AppHeader, AppSidebar
+├── components/    # Vue Komponenten (18 Unterverzeichnisse)
+│   ├── calibration/   # CalibrationWizard
+│   ├── charts/        # LiveLineChart, HistoricalChart, GaugeChart, MultiSensorChart
+│   ├── command/       # CommandPalette
+│   ├── common/        # Modal, Toast, Skeleton, ViewTabBar (13 Dateien)
 │   ├── dashboard/     # Dashboard subcomponents (9 Dateien)
-│   ├── esp/           # ESPCard, ESPCardBase, ESPOrbitalLayout (11 Dateien)
-│   ├── zones/         # ZoneGroup, ZoneAssignmentPanel
-│   ├── charts/        # MultiSensorChart
-│   ├── system-monitor/ # 18 Dateien
+│   ├── dashboard-widgets/ # SensorCardWidget, GaugeWidget, LineChartWidget, etc.
+│   ├── database/      # DataTable, FilterPanel, Pagination, etc. (6 Dateien)
+│   ├── devices/       # SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection (4 Dateien)
+│   ├── error/         # ErrorDetailsModal, TroubleshootingPanel
+│   ├── esp/           # ESPCard, ESPCardBase, ESPOrbitalLayout, SensorConfigPanel, ActuatorConfigPanel (11 Dateien)
 │   ├── filters/       # UnifiedFilterBar
+│   ├── forms/         # FormBuilder
 │   ├── modals/
 │   ├── rules/         # RuleCard, RuleConfigPanel, RuleFlowEditor, RuleNodePalette, RuleTemplateCard (5 Dateien)
-│   ├── error/         # ErrorDetailsModal, TroubleshootingPanel
-│   ├── database/      # DataTable, FilterPanel, Pagination, etc. (6 Dateien)
-│   └── safety/        # EmergencyStopButton
+│   ├── safety/        # EmergencyStopButton
+│   ├── system-monitor/ # 18 Dateien
+│   ├── widgets/       # Widget primitives
+│   └── zones/         # ZoneGroup, ZoneAssignmentPanel
 ├── shared/        # Design System + Shared Stores (NEU)
 │   ├── design/
 │   │   ├── primitives/  # 13 Komponenten (10 Base + AccordionSection + QualityIndicator + RangeSlider + SlideOver)
@@ -149,7 +154,7 @@ El Frontend/src/
 │   ├── main.css         # Hauptstyles (Buttons, Layout)
 │   ├── forms.css        # Shared Form + Modal Styles
 │   └── tailwind.css     # Tailwind Konfiguration
-├── composables/   # 18 Composables
+├── composables/   # 20 Composables
 │   ├── useWebSocket.ts
 │   ├── useToast.ts
 │   ├── useModal.ts
@@ -162,22 +167,28 @@ El Frontend/src/
 │   ├── useCommandPalette.ts
 │   ├── useContextMenu.ts
 │   ├── useDeviceActions.ts
+│   ├── useDeviceMetadata.ts
 │   ├── useESPStatus.ts
 │   ├── useGrafana.ts
 │   ├── useKeyboardShortcuts.ts
 │   ├── useOrbitalDragDrop.ts
 │   ├── useScrollLock.ts
+│   ├── useSparklineCache.ts
+│   ├── useZoneGrouping.ts
 │   └── useSwipeNavigation.ts
 ├── router/        # Route-Definitionen + Guards
 ├── services/      # WebSocket Singleton
 │   └── websocket.ts   # ~625 Zeilen
 ├── stores/        # 1 Pinia Store (Legacy, ESP-spezifisch)
 │   └── esp.ts         # ~2500 Zeilen
-├── types/         # 4 Type-Dateien (~2106 Zeilen)
-│   ├── index.ts           # ~979 Zeilen
+├── types/         # 7 Type-Dateien
+│   ├── index.ts           # ~979 Zeilen (Re-Exports)
 │   ├── websocket-events.ts # ~748 Zeilen
 │   ├── logic.ts
-│   └── gpio.ts
+│   ├── gpio.ts
+│   ├── device-metadata.ts  # DeviceMetadata Interface + Utility-Funktionen
+│   ├── event-grouping.ts
+│   └── form-schema.ts
 ├── utils/         # 9 Utility-Module
 │   ├── formatters.ts      # ~631 Zeilen
 │   ├── labels.ts
@@ -257,6 +268,64 @@ HardwareView.vue
 ├── ESPSettingsSheet.vue (SlideOver, ESP-Detail: Status, Sensor/Actuator-Liste, Delete)
 ├── SensorConfigPanel.vue (SlideOver, via ESPSettingsSheet Event)
 └── ActuatorConfigPanel.vue (SlideOver, via ESPSettingsSheet Event)
+```
+
+### Komponentenhierarchie (SensorsView / Komponenten-Tab)
+
+```
+SensorsView.vue (?sensor={espId}-gpio{gpio} → auto-open SensorConfigPanel)
+├── Tab-Navigation (Sensors/Actuators)
+├── Filter (ESP ID, Sensor Type, Quality, Actuator Type, State)
+├── Zone-Accordion → Subzone-Accordion
+│   ├── SensorCard.vue[] (mode='config', from components/devices/)
+│   └── ActuatorCard.vue[] (mode='config', from components/devices/)
+├── Subzone CRUD (erstellen, umbenennen, loeschen)
+├── SlideOver
+│   ├── SensorConfigPanel.vue (AccordionSections + DeviceMetadataSection + LinkedRulesSection)
+│   │   └── Cross-Link: "Live-Daten im Monitor anzeigen" → /monitor/:zoneId
+│   └── ActuatorConfigPanel.vue (AccordionSections + DeviceMetadataSection + LinkedRulesSection)
+└── EmergencyStopButton.vue
+```
+
+### Komponentenhierarchie (MonitorView / Live-Monitoring)
+
+```
+MonitorView.vue (URL-Sync: L1→L2→L3 via route params)
+├── L1 /monitor — Zone-Tiles mit KPI-Aggregation
+├── L2 /monitor/:zoneId — Subzone-Accordion
+│   ├── SensorCard.vue[] (mode='monitor', sparklineData, from components/devices/)
+│   │   └── [Expanded] GaugeChart + LiveLineChart + HistoricalChart (in MonitorView)
+│   │       ├── "Zeitreihe anzeigen" → openSensorDetail (L3)
+│   │       └── "Konfiguration" → /sensors?sensor={espId}-gpio{gpio}
+│   └── ActuatorCard.vue[] (mode='monitor', from components/devices/)
+└── L3 /monitor/:zoneId/sensor/:sensorId — SlideOver (Sensor-Detail, Deep-Link-faehig)
+```
+
+### Komponentenhierarchie (CustomDashboardView / Dashboard Editor)
+
+```
+CustomDashboardView.vue (/editor, /editor/:dashboardId)
+├── ViewTabBar.vue (Tab-Navigation)
+├── Toolbar
+│   ├── Layout-Selector (Dropdown: vorhandene Dashboards + Templates)
+│   │   └── DASHBOARD_TEMPLATES (4 Templates: Zonen-Uebersicht, Sensor-Detail, Multi-Sensor, Leer)
+│   ├── Edit/View-Toggle (Pencil/Eye Icon, isEditing ref)
+│   ├── Widget-Katalog-Toggle (LayoutGrid Icon, showCatalog ref)
+│   ├── Export/Import/Delete Buttons (nur im Edit-Modus sichtbar)
+│   └── "Neues Dashboard" Button
+├── Widget-Katalog Sidebar (showCatalog, 9 Widget-Typen mit Icon + Label + Description)
+│   └── addWidget(type) → WIDGET_DEFAULT_CONFIGS + GridStack.addWidget()
+├── GridStack 12-Column Grid (staticGrid im View-Modus, editierbar im Edit-Modus)
+│   └── Dashboard-Widget[] (imperativ via createWidgetElement + mountWidgetComponent)
+│       ├── Widget-Header (Titel + Gear-Icon, nur im Edit-Modus sichtbar)
+│       └── Widget-Body (SensorCardWidget, GaugeWidget, LineChartWidget, etc.)
+└── WidgetConfigPanel.vue (SlideOver, Gear-Icon oeffnet Konfiguration)
+    ├── Titel-Input
+    ├── Sensor/Actuator-Selektion (je nach Widget-Typ)
+    ├── Y-Achse Min/Max (Charts)
+    ├── Zeitraum-Chips (Historical)
+    ├── Farb-Palette (8 Farben)
+    └── Threshold-Konfiguration (Alarm/Warn Low/High, auto-populate aus SENSOR_TYPE_CONFIG)
 ```
 
 ### Standard Component Template
@@ -363,6 +432,14 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 - GpioUsageItem: Pin-Belegung
 - GpioStatusResponse: Freie/Belegte/System-Pins
 
+### Device Metadata Types (types/device-metadata.ts)
+
+- DeviceMetadata: Hersteller, Modell, Datenblatt-URL, Seriennummer, Installation, Wartung, Notizen, custom_fields
+- parseDeviceMetadata(raw): Extrahiert typisierte Felder aus Server-JSON
+- mergeDeviceMetadata(existing, structured): Merged strukturierte Metadaten zurueck in Server-JSON (preserviert unbekannte Felder)
+- getNextMaintenanceDate(metadata): Berechnet naechsten Wartungstermin aus last_maintenance + interval
+- isMaintenanceOverdue(metadata): Prueft ob Wartung ueberfaellig
+
 ---
 
 ## 5. State Management (Pinia)
@@ -373,7 +450,7 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 |-------|-------|-------|-------------------|
 | auth | stores/auth.ts | user, tokens, setupRequired | login, logout, refreshTokens |
 | esp | stores/esp.ts | devices[], pendingDevices[] | fetchAll, isMock, gpioStatusMap, onlineDevices (via getESPStatus), offlineDevices |
-| dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb, layouts[] | toggleStatusFilter, resetFilters, createLayout, saveLayout |
+| dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb (level, zoneName, deviceName, sensorName, ruleName, dashboardName), layouts[], DASHBOARD_TEMPLATES | toggleStatusFilter, resetFilters, createLayout, saveLayout, createLayoutFromTemplate, deleteLayout, exportLayout, importLayout |
 | zone | stores/zone.store.ts | (stateless) | handleZoneAssignment (+ Toasts), handleSubzoneAssignment (+ Toasts) |
 | logic | stores/logic.ts | rules[], activeExecutions | fetchRules, toggleRule, crossEspConnections |
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
@@ -627,10 +704,17 @@ type AggCategory = 'climate' | 'water' | 'light' | 'system'
 '/setup'  → SetupView.vue
 
 // Protected Routes (requiresAuth: true)
-'/'               → DashboardView.vue (?openSettings={id})
-'/sensors'        → SensorsView.vue (Tabs: Sensoren | Aktoren)
-'/logic'          → LogicView.vue
-'/settings'       → SettingsView.vue
+'/'                                    → DashboardView.vue (?openSettings={id})
+'/hardware'                            → HardwareView.vue (Zone Accordion)
+'/monitor'                             → MonitorView.vue L1 (Zone-Tiles)
+'/monitor/:zoneId'                     → MonitorView.vue L2 (Subzone-Accordion)
+'/monitor/:zoneId/sensor/:sensorId'    → MonitorView.vue L3 (Sensor-Detail SlideOver)
+'/editor'                              → CustomDashboardView.vue
+'/editor/:dashboardId'                 → CustomDashboardView.vue (Deep-Link)
+'/sensors'                             → SensorsView.vue (Tabs: Sensoren | Aktoren, ?sensor={espId}-gpio{gpio})
+'/logic'                               → LogicView.vue
+'/logic/:ruleId'                       → LogicView.vue (Deep-Link: Rule oeffnen)
+'/settings'                            → SettingsView.vue
 
 // Admin Routes (requiresAdmin: true)
 '/system-monitor' → SystemMonitorView.vue
@@ -640,13 +724,33 @@ type AggCategory = 'climate' | 'water' | 'light' | 'system'
 '/maintenance'    → MaintenanceView.vue
 
 // Deprecated Redirects
-'/devices'   → '/'
-'/database'  → '/system-monitor?tab=database'
-'/logs'      → '/system-monitor?tab=logs'
-'/audit'     → '/system-monitor?tab=events'
-'/mqtt-log'  → '/system-monitor?tab=mqtt'
-'/actuators' → '/sensors?tab=actuators'
+'/devices'           → '/'
+'/database'          → '/system-monitor?tab=database'
+'/logs'              → '/system-monitor?tab=logs'
+'/audit'             → '/system-monitor?tab=events'
+'/mqtt-log'          → '/system-monitor?tab=mqtt'
+'/actuators'         → '/sensors?tab=actuators'
+'/custom-dashboard'  → '/editor'
+'/sensor-history'    → '/monitor'
 ```
+
+### Deep-Link-Pattern
+
+Views synchronisieren URL-Parameter mit UI-State:
+
+```typescript
+// onMounted: URL → UI-State
+const ruleId = route.params.ruleId as string | undefined
+if (ruleId) selectRule(ruleId)
+
+// Benutzer-Aktion: UI-State → URL
+router.replace({ name: 'logic-rule', params: { ruleId } })
+
+// Cleanup: onUnmounted oder Deselect
+router.replace({ name: 'logic' })
+```
+
+**Sensor-ID-Format fuer URLs:** `{espId}-gpio{gpio}` (z.B. `ESP_12AB34CD-gpio5`)
 
 ### Navigation Guards
 
@@ -822,10 +926,12 @@ dragPayload: any
 
 ### Neues Dashboard-Widget
 
-1. Komponente in `components/dashboard/` erstellen
-2. In `DashboardView.vue` einbinden
-3. CSS: Tailwind + `glass-panel` fuer Konsistenz
-4. Daten aus Store beziehen (nicht direkt API)
+1. Widget-Komponente in `components/dashboard-widgets/` erstellen
+2. In `CustomDashboardView.vue` → `mountWidgetComponent()` einbinden
+3. `widgetTypes` Array erweitern (icon, label, description, defaultW/H)
+4. `WIDGET_DEFAULT_CONFIGS` Record erweitern (Smart-Defaults fuer Config)
+5. CSS: Tailwind + `glass-panel` fuer Konsistenz
+6. Daten aus Store beziehen (nicht direkt API)
 
 ### Feature mit Settings
 
@@ -968,8 +1074,67 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.7
-**Letzte Aktualisierung:** 2026-02-27
+**Version:** 9.10
+**Letzte Aktualisierung:** 2026-03-01
+
+### Aenderungen in v9.10
+
+- CustomDashboardView.vue: Edit/View-Mode-Trennung — `isEditing` ref, GridStack `enableMove()`/`enableResize()` Toggle, Gear-Icon + Katalog/Export/Import/Delete nur im Edit-Modus sichtbar
+- CustomDashboardView.vue: Widget-Katalog erweitert um `description` Feld pro Widget-Typ (9 Beschreibungen), Text-xs + text-muted Darstellung
+- CustomDashboardView.vue: `WIDGET_DEFAULT_CONFIGS` Record mit Smart-Defaults pro Widget-Typ (z.B. line-chart: timeRange '1h', historical: timeRange '24h')
+- CustomDashboardView.vue: Template-Auswahl UI im Layout-Dropdown (4 Templates via `dashStore.DASHBOARD_TEMPLATES`)
+- MultiSensorChart.vue: `SENSOR_TYPE_CONFIG` Import, Y-Achse von hart `min`/`max` zu flexibel `suggestedMin`/`suggestedMax` (3-Tier: Props > SENSOR_TYPE_CONFIG > computedYRange)
+- MultiSensorChart.vue: `sharedSensorTypeConfig` Computed — erkennt wenn alle Sensoren gleichen Typ haben, nutzt dann SENSOR_TYPE_CONFIG fuer Y-Achsen-Defaults
+- WidgetConfigPanel.vue: `handleSensorChange()` auto-populate Threshold-Werte aus SENSOR_TYPE_CONFIG (warnLow/warnHigh bei 10% vom Rand, alarmLow/alarmHigh bei min/max)
+- WidgetConfigPanel.vue: 4 Threshold-Inputfelder (Alarm Low/High, Warn Low/High) mit farbigen Labels, sichtbar wenn showThresholds aktiviert
+- dashboard.store.ts: `DASHBOARD_TEMPLATES` Registry (4 Templates: zone-overview, sensor-detail, multi-sensor-compare, empty)
+- dashboard.store.ts: `createLayoutFromTemplate(templateId, name?)` Funktion mit eindeutigen Widget-IDs (Index in ID gegen Kollision)
+- Bugfix: Threshold auto-populate Check `!value` → `value == null` (Wert 0 ist valider Threshold, z.B. 0°C)
+- Bugfix: Template Widget-ID Kollision bei synchronem `.map()` — Index im ID-String ergaenzt
+- Bugfix: View-Modus Cursor `move` auf Widget-Header → `default` (nur im Edit-Modus `move`)
+- Section 3: Neue Komponentenhierarchie (CustomDashboardView / Dashboard Editor) dokumentiert
+- Section 5 Store-Tabelle: dashboard Store um DASHBOARD_TEMPLATES + createLayoutFromTemplate erweitert
+- Section 13: "Neues Dashboard-Widget" Workflow auf CustomDashboardView + WIDGET_DEFAULT_CONFIGS aktualisiert
+
+### Aenderungen in v9.9
+
+- Router: `/custom-dashboard` umbenannt zu `/editor`, neuer optionaler Param `/editor/:dashboardId` (name: 'editor-dashboard')
+- Router: `/logic/:ruleId` Route hinzugefuegt (name: 'logic-rule') — Deep-Link zu spezifischer Rule
+- Router: `/monitor/:zoneId/sensor/:sensorId` Route hinzugefuegt (name: 'monitor-sensor') — Sensor-Detail L3 URL-basiert
+- Router: Legacy-Redirects `/custom-dashboard` → `/editor` und `/sensor-history` → `/monitor`
+- ViewTabBar.vue: Tab-Pfad `/custom-dashboard` → `/editor`, activeTab Computed erweitert
+- Sidebar.vue: "Zeitreihen" Eintrag entfernt (veraltet, in Monitor L3 integriert), Dashboard Active-Check deckt `/editor` ab
+- TopBar.vue: Breadcrumbs fuer Editor (Dashboard-Name), Logic (Rule-Name), Monitor L3 (Sensor-Name) hinzugefuegt
+- dashboard.store.ts: breadcrumb ref erweitert um `sensorName`, `ruleName`, `dashboardName` (6 Felder statt 3)
+- LogicView.vue: Deep-Link Support — `route.params.ruleId` lesen, `selectRule()` mit `router.replace()` URL-Sync, Breadcrumb-Update
+- CustomDashboardView.vue: Deep-Link Support — `route.params.dashboardId` und Legacy `route.query.layout` konsumieren, Breadcrumb-Update
+- MonitorView.vue: Sensor-Detail URL-Sync via `router.replace()` in `openSensorDetail()`/`closeSensorDetail()`, Deep-Link Watcher fuer sensorId
+- MonitorView.vue: Cross-Link "Konfiguration" Button → `/sensors?sensor={espId}-gpio{gpio}`, alle `/custom-dashboard` Links → `/editor`
+- SensorsView.vue: `?sensor={espId}-gpio{gpio}` Query-Param Deep-Link — auto-open SensorConfigPanel
+- SensorsView.vue: Cross-Link "Live-Daten im Monitor anzeigen" Button → `/monitor/:zoneId`
+- LinkedRulesSection.vue: Rule-Items klickbar mit `router.push({ name: 'logic-rule', params: { ruleId } })`, ExternalLink Icon mit Hover-Reveal
+- HardwareView.vue: breadcrumb Objekt erweitert um `sensorName`, `ruleName`, `dashboardName`
+- Sensor-ID-Format fuer URLs: `{espId}-gpio{gpio}` (z.B. "ESP_12AB34CD-gpio5")
+- Section 10 (Router): Route-Struktur vollstaendig aktualisiert, Deep-Link-Pattern dokumentiert
+- Komponentenhierarchien: SensorsView und MonitorView mit Cross-Links und URL-Sync aktualisiert
+
+### Aenderungen in v9.8
+
+- Neues Verzeichnis `components/devices/` (4 Dateien): SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection
+- SensorCard.vue: Unified Sensor-Card mit `mode: 'config' | 'monitor'` — ersetzt Inline-Cards in SensorsView UND MonitorView
+- ActuatorCard.vue: Unified Actuator-Card mit Toggle in beiden Modi — ersetzt Inline-Cards in SensorsView UND MonitorView
+- DeviceMetadataSection.vue: Formular fuer Geraete-Metadaten (3 Gruppen: Hersteller/Produkt, Installation/Wartung, Notizen) mit Wartungs-Ueberfaellig-Alert
+- LinkedRulesSection.vue: Read-Only Anzeige verknuepfter Logic Rules per Sensor/Aktor (filtert logicStore.connections)
+- SensorsView.vue: Monitoring-Elemente entfernt (Sparklines, Live-Werte, Quality-Dots, updatedSensorKeys, getQualityColor) — Inline-Cards durch SensorCard/ActuatorCard ersetzt
+- MonitorView.vue: Inline-Cards durch SensorCard/ActuatorCard ersetzt, ~70 Zeilen ungenutztes CSS entfernt
+- SensorConfigPanel.vue: 2 neue AccordionSections ("Geraete-Informationen" + "Verknuepfte Regeln") mit DeviceMetadataSection + LinkedRulesSection
+- ActuatorConfigPanel.vue: Identisch zu SensorConfigPanel — 2 neue AccordionSections
+- Neuer Type: `device-metadata.ts` — DeviceMetadata Interface + parseDeviceMetadata + mergeDeviceMetadata + getNextMaintenanceDate + isMaintenanceOverdue
+- Neues Composable: `useDeviceMetadata.ts` — metadata ref, isDirty, loadFromRaw, toRawMetadata, updateField
+- types/index.ts: Re-Exports fuer DeviceMetadata + Utility-Funktionen
+- composables/index.ts: Re-Exports fuer useDeviceMetadata + useZoneGrouping
+- Ordnerstruktur: components/ 13 → 18 Unterverzeichnisse, composables 18 → 20, types 4 → 7
+- Komponentenhierarchien: SensorsView und MonitorView dokumentiert
 
 ### Aenderungen in v9.7
 

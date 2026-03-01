@@ -1,47 +1,40 @@
 # Git Commit Plan
-**Erstellt:** 2026-02-27
-**Branch:** master (up to date with origin/master)
+**Erstellt:** 2026-03-01 22:30
+**Branch:** master
 **Ungepushte Commits:** 0
-**Änderungen gesamt:** 43 modified, 19 untracked, 0 staged
+**Änderungen gesamt:** 41 modified, 33 untracked, 0 staged
 
 ---
 
-## Commit 1: chore: add Sentry env placeholder and pyyaml dependency
+## Commit 1: feat(server): add dashboard persistence API with CRUD endpoints
 
-**Dateien:** `.env.example`, `El Servador/god_kaiser_server/pyproject.toml`
+**Was:** Kompletter Dashboard-Persistenz-Stack: Alembic Migration, SQLAlchemy Model, Repository, Service, Pydantic Schemas und FastAPI Endpoints.
 
-## Commit 2: feat(firmware): add soil_moisture sensor alias and ADC attenuation
+## Commit 2: feat(frontend): add shared composables, device components, and utils
 
-**Dateien:** `El Trabajante/src/models/sensor_registry.cpp`, `El Trabajante/src/services/sensor/sensor_manager.cpp`
+**Was:** useSparklineCache, useZoneGrouping, useDeviceMetadata, SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection, chartColors, qualityToStatus, normalizeRawTimestamp.
 
-## Commit 3: feat(server): improve sensor handling, simulation sync and actuator state
+## Commit 3: feat(frontend): enhance dashboard editor with templates and widget config
 
-**Dateien:** 9 Server-Dateien + uv.lock
+**Was:** Dashboard Store Templates/Scopes/Breadcrumbs, CustomDashboardView Edit/View-Modus, WidgetConfigPanel, MultiSensorWidget, /editor Route.
 
-## Commit 4: feat(frontend): redesign HardwareView with zone management and ESP settings
+## Commit 4: fix(frontend): fix widget state loss and chart Y-axis defaults
 
-**Dateien:** 21 Frontend src-Dateien
+**Was:** Alle Widgets nutzen lokalen State statt Props, SENSOR_TYPE_CONFIG für Y-Achsen, LineChartWidget watched last_read.
 
-## Commit 5: test(frontend): add and update tests for HardwareView redesign
+## Commit 5: feat(frontend): rewrite views with routing, deep-linking, and monitor L3
 
-**Dateien:** 10 Test-Dateien
+**Was:** MonitorView L1/L2/L3, LogicView Deep-Linking, SensorsView refactored, RuleFlowEditor Hysteresis/Compound, Config-Panels mit Metadata/LinkedRules.
 
-## Commit 6: test: add e2e scenarios and server integration test
+## Commit 6: docs: update reference docs, skills, and session reports
 
-**Dateien:** 4 Test-Dateien (neu)
-
-## Commit 7: docs: add session reports and update frontend development skill
-
-**Dateien:** 14 Report/Skill-Dateien
-
----
+**Was:** REST_ENDPOINTS has_prev, Frontend-Skill v9.10, alle Session-Reports.
 
 | # | Commit | Dateien | Typ |
 |---|--------|---------|-----|
-| 1 | `chore: add Sentry env placeholder and pyyaml dependency` | 2 | chore |
-| 2 | `feat(firmware): add soil_moisture sensor alias and ADC attenuation` | 2 | feat |
-| 3 | `feat(server): improve sensor handling, simulation sync and actuator state` | 9 | feat |
-| 4 | `feat(frontend): redesign HardwareView with zone management and ESP settings` | 21 | feat |
-| 5 | `test(frontend): add and update tests for HardwareView redesign` | 10 | test |
-| 6 | `test: add e2e scenarios and server integration test` | 4 | test |
-| 7 | `docs: add session reports and update frontend development skill` | 14 | docs |
+| 1 | `feat(server): add dashboard persistence API` | 10 | feat |
+| 2 | `feat(frontend): add shared composables and components` | 16 | feat |
+| 3 | `feat(frontend): enhance dashboard editor` | 4 | feat |
+| 4 | `fix(frontend): fix widget state loss and chart axes` | 7 | fix |
+| 5 | `feat(frontend): rewrite views with routing and monitor L3` | 14 | feat |
+| 6 | `docs: update reference docs, skills, and reports` | ~20 | docs |
