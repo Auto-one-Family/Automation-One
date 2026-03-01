@@ -5,11 +5,18 @@
  * Config mode: Name, type, ESP-ID, GPIO, settings hint
  * Monitor mode: Name, live value, quality dot, sparkline, ESP-ID
  */
-import { computed } from 'vue'
-import { Settings, ChevronRight, WifiOff, Clock } from 'lucide-vue-next'
+import { computed, type Component } from 'vue'
+import { Settings, ChevronRight, WifiOff, Clock, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity } from 'lucide-vue-next'
 import type { SensorWithContext } from '@/composables/useZoneGrouping'
 import { qualityToStatus, getDataFreshness, formatRelativeTime } from '@/utils/formatters'
-import { getSensorLabel } from '@/utils/sensorDefaults'
+import { getSensorLabel, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+
+/** Map SENSOR_TYPE_CONFIG icon names to Lucide components */
+const ICON_MAP: Record<string, Component> = {
+  Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity,
+  Droplet: Droplets,
+  Zap: Activity,
+}
 
 interface Props {
   sensor: SensorWithContext
@@ -43,6 +50,12 @@ const isStale = computed(() => freshness.value === 'stale')
 const isEspOffline = computed(() =>
   props.sensor.esp_state !== undefined && props.sensor.esp_state !== 'OPERATIONAL'
 )
+
+// Sensor type icon (from SENSOR_TYPE_CONFIG)
+const sensorIcon = computed(() => {
+  const iconName = SENSOR_TYPE_CONFIG[props.sensor.sensor_type]?.icon
+  return iconName ? (ICON_MAP[iconName] ?? Activity) : Activity
+})
 
 function formatValue(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
@@ -86,6 +99,7 @@ function handleClick() {
     <!-- Monitor Mode -->
     <template v-else>
       <div class="sensor-card__header">
+        <component :is="sensorIcon" class="sensor-card__type-icon" />
         <span class="sensor-card__name">{{ displayName }}</span>
         <span :class="['sensor-card__dot', statusClass]" />
       </div>
@@ -173,13 +187,21 @@ function handleClick() {
 .sensor-card--monitor .sensor-card__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--space-1);
   margin-bottom: var(--space-1);
+}
+
+.sensor-card__type-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--color-iridescent-2);
+  flex-shrink: 0;
 }
 
 .sensor-card--monitor .sensor-card__name {
   font-size: var(--text-sm);
   font-weight: 500;
+  flex: 1;
 }
 
 .sensor-card__dot {
