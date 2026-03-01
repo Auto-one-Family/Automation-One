@@ -450,6 +450,15 @@ export function formatCount(count: number, singular: string, plural: string): st
 // DATA FRESHNESS UTILITIES
 // =============================================================================
 
+/** Sensor data considered "live" within this many seconds */
+export const DATA_LIVE_THRESHOLD_S = 30
+
+/** Sensor data considered "stale" after this many seconds (2 min) */
+export const DATA_STALE_THRESHOLD_S = 120
+
+/** Zone considered stale if no sensor event for this many ms (1 min) */
+export const ZONE_STALE_THRESHOLD_MS = 60_000
+
 /**
  * Freshness level for data
  */
@@ -457,9 +466,9 @@ export type FreshnessLevel = 'live' | 'recent' | 'stale' | 'unknown'
 
 /**
  * Get data freshness level based on timestamp
- * - live: < 30 seconds ago
- * - recent: < 2 minutes ago
- * - stale: > 2 minutes ago
+ * - live: < DATA_LIVE_THRESHOLD_S seconds ago
+ * - recent: < DATA_STALE_THRESHOLD_S seconds ago
+ * - stale: > DATA_STALE_THRESHOLD_S seconds ago
  * - unknown: no timestamp
  */
 export function getDataFreshness(
@@ -468,7 +477,7 @@ export function getDataFreshness(
 ): FreshnessLevel {
   if (!timestamp) return 'unknown'
 
-  const { live = 30, recent = 120 } = thresholds
+  const { live = DATA_LIVE_THRESHOLD_S, recent = DATA_STALE_THRESHOLD_S } = thresholds
   const now = Date.now()
   const then = new Date(timestamp).getTime()
   const diffSec = Math.floor((now - then) / 1000)

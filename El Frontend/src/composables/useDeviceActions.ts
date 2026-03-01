@@ -20,7 +20,7 @@ import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { getStateInfo } from '@/utils/labels'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
-import { formatRelativeTime } from '@/utils/formatters'
+import { formatRelativeTime, DATA_STALE_THRESHOLD_S } from '@/utils/formatters'
 import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('DeviceActions')
@@ -78,7 +78,7 @@ export function useDeviceActions(device: () => ESPDevice) {
     const lastSeen = device().last_heartbeat || device().last_seen
     if (!lastSeen) return false
     const diff = Date.now() - new Date(lastSeen).getTime()
-    return diff < 120_000
+    return diff < DATA_STALE_THRESHOLD_S * 1000
   })
 
   const heartbeatTooltip = computed(() => {
