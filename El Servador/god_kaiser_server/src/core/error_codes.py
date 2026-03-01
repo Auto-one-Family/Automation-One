@@ -250,6 +250,7 @@ class ValidationErrorCode(IntEnum):
     FIELD_TYPE_MISMATCH = 5206
     VALUE_OUT_OF_RANGE = 5207
     DUPLICATE_ENTRY = 5208
+    INVALID_PAYLOAD_FORMAT = 5209
 
 
 class DatabaseErrorCode(IntEnum):
@@ -505,6 +506,7 @@ SERVER_ERROR_DESCRIPTIONS: Dict[int, str] = {
     5206: "Field type mismatch",
     5207: "Value out of allowed range",
     5208: "Duplicate entry (already exists)",
+    5209: "Invalid payload format",
     # Database errors (5300-5399)
     5301: "Database query failed",
     5302: "Database commit failed",

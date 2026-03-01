@@ -105,6 +105,10 @@ class DashboardCreate(BaseModel):
         description="Associated sensor ID",
         max_length=100,
     )
+    target: Optional[dict[str, Any]] = Field(
+        None,
+        description="Display target: { view, placement, anchor?, panelPosition?, panelWidth?, order? }",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -168,6 +172,10 @@ class DashboardUpdate(BaseModel):
         description="Associated sensor ID",
         max_length=100,
     )
+    target: Optional[dict[str, Any]] = Field(
+        None,
+        description="Display target: { view, placement, anchor?, panelPosition?, panelWidth?, order? }",
+    )
 
 
 # =============================================================================
@@ -191,6 +199,7 @@ class DashboardResponse(BaseModel):
     zone_id: Optional[str] = Field(None, description="Associated zone ID")
     auto_generated: bool = Field(False, description="Whether auto-generated")
     sensor_id: Optional[str] = Field(None, description="Associated sensor ID")
+    target: Optional[dict[str, Any]] = Field(None, description="Display target config")
     created_at: Optional[datetime] = Field(None, description="Creation timestamp")
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
 

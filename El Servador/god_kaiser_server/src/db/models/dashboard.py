@@ -112,6 +112,17 @@ class Dashboard(Base, TimestampMixin):
         doc="Associated sensor ID (for sensor-detail dashboards)",
     )
 
+    # Target configuration (where/how to display the dashboard)
+    target: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        doc=(
+            "Display target config: "
+            "{ view: 'monitor'|'hardware', placement: 'page'|'inline'|'side-panel', "
+            "anchor?: string, panelPosition?: 'left'|'right', panelWidth?: number, order?: number }"
+        ),
+    )
+
     # Indices
     __table_args__ = (
         Index("idx_dashboard_owner", "owner_id"),
