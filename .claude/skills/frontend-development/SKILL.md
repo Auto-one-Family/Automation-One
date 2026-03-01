@@ -631,7 +631,7 @@ interface WebSocketFilters {
 
 ## 9. Utilities
 
-### formatters.ts (~631 Zeilen)
+### formatters.ts (~655 Zeilen)
 
 German-lokalisierte Formatter:
 
@@ -1083,6 +1083,26 @@ cleanupWebSocket() {
 
 **Version:** 9.13
 **Letzte Aktualisierung:** 2026-03-01
+
+### Aenderungen in v9.14
+
+- formatters.ts: 3 neue benannte Konstanten — `DATA_LIVE_THRESHOLD_S` (30), `DATA_STALE_THRESHOLD_S` (120), `ZONE_STALE_THRESHOLD_MS` (60000) — ersetzen Magic Numbers in getDataFreshness(), useDeviceActions, MonitorView
+- useDeviceActions.ts: `isRecentlyActive` nutzt `DATA_STALE_THRESHOLD_S * 1000` statt hardcoded `120_000`
+- SensorCard.vue: Sensor-Typ-Icons im Monitor-Modus — `ICON_MAP` Record mappt SENSOR_TYPE_CONFIG Icon-Namen auf Lucide-Komponenten (Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity), `sensorIcon` Computed, `.sensor-card__type-icon` (14px, iridescent-2)
+- dashboard.store.ts: `generateZoneDashboard()` trackt `espId` pro Device — SensorEntry/ActuatorEntry um `espId` erweitert, Widget-Configs enthalten `espId`, `sensorId`/`actuatorId` (`{espId}-gpio{gpio}`)
+- dashboard.store.ts: `crossZoneDashboards` filtert nach `target.view === 'monitor'` (verhindert Hardware-Dashboards im Monitor)
+- dashboard.store.ts: `generateZoneDashboard()` ruft `syncLayoutToServer()` nach Erstellung auf (auto-persist)
+- dashboard.store.ts: `target` Cast von `(dto as any).target` zu `(dto.target as unknown)` (type-safe)
+- DashboardViewer.vue: Layout-Lookup per `l.id === layoutId || l.serverId === layoutId` (Server-UUID Kompatibilitaet)
+- DashboardViewer.vue: Empty-State mit `router-link` zurueck zum Monitor statt Button + goBack()
+- TopBar.vue: Dashboard-Breadcrumb im Monitor-Route — `hasDashboard` Check, `dashboardName` Segment bei `/monitor/dashboard/:dashboardId`
+- MonitorView.vue: Zone-Dashboard Empty-State — "Dashboard erstellen" Link zu Editor bei leeren Zonen (LayoutDashboard Icon, dashed Border)
+- MonitorView.vue: CSV-Export mit BOM (`\uFEFF`) fuer korrekte UTF-8-Erkennung in Excel
+- MonitorView.vue: `URL.revokeObjectURL` verzoegert (1s setTimeout) fuer zuverlaessigeren Download
+- MonitorView.vue: `detailIsStale` nutzt `DATA_STALE_THRESHOLD_S * 1000` statt hardcoded `120_000`
+- MonitorView.vue: `expandedChartData` Label ohne leere Klammern wenn Unit fehlt
+- MonitorView.vue: Error-Logging bei fehlgeschlagenem `fetchDetailStats()`
+- Section 9: formatters.ts Zeilenanzahl 631 → 655
 
 ### Aenderungen in v9.13
 

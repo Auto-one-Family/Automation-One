@@ -663,7 +663,7 @@ Historische Sensor-Daten.
 
 ### 3.4 GET /sensors/{sensor_id}/stats
 
-Sensor-Statistiken.
+Sensor-Statistiken. Berechnet min/max/avg/stddev aus `COALESCE(processed_value, raw_value)` — fällt auf raw_value zurück wenn processed_value NULL ist.
 
 **Auth:** JWT Required
 
