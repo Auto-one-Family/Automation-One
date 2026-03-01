@@ -100,18 +100,24 @@ const routeBreadcrumbs = computed(() => {
     }
   } else if (isMonitorRoute.value) {
     const hasSensor = !!route.params.sensorId
-    crumbs.push({ label: 'Monitor', to: '/monitor', current: !route.params.zoneId })
+    const hasDashboard = !!route.params.dashboardId
+    const hasChild = hasSensor || hasDashboard
+    crumbs.push({ label: 'Monitor', to: '/monitor', current: !route.params.zoneId && !hasDashboard })
     if (route.params.zoneId) {
       const zoneName = dashStore.breadcrumb.zoneName || (route.params.zoneId as string)
       crumbs.push({
         label: zoneName,
         to: `/monitor/${route.params.zoneId}`,
-        current: !hasSensor,
+        current: !hasChild,
       })
     }
     if (hasSensor) {
       const sensorName = dashStore.breadcrumb.sensorName || (route.params.sensorId as string)
       crumbs.push({ label: sensorName, current: true })
+    }
+    if (hasDashboard) {
+      const dashboardName = dashStore.breadcrumb.dashboardName || 'Dashboard'
+      crumbs.push({ label: dashboardName, current: true })
     }
   } else if (isEditorRoute.value) {
     const hasDashboard = !!route.params.dashboardId

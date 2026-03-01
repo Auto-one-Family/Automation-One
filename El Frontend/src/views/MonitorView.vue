@@ -21,7 +21,7 @@ import { useSparklineCache } from '@/composables/useSparklineCache'
 import { aggregateZoneSensors, formatAggregatedValue, getSensorUnit, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { getESPStatus } from '@/composables/useESPStatus'
-import { formatRelativeTime, qualityToStatus } from '@/utils/formatters'
+import { formatRelativeTime, qualityToStatus, DATA_STALE_THRESHOLD_S, ZONE_STALE_THRESHOLD_MS } from '@/utils/formatters'
 import { sensorsApi } from '@/api/sensors'
 import type { SensorReading, SensorStats } from '@/types'
 import { LayoutDashboard, Download, CheckCircle2, XCircle, Clock, TrendingUp, TrendingDown, Minus } from 'lucide-vue-next'
@@ -153,7 +153,7 @@ const expandedChartData = computed(() => {
 
   return {
     datasets: [{
-      label: `Letzte Stunde (${unit})`,
+      label: unit ? `Letzte Stunde (${unit})` : 'Letzte Stunde',
       data: expandedChartReadings.value.map(r => ({
         x: new Date(r.timestamp).getTime(),
         y: r.processed_value ?? r.raw_value,
@@ -547,13 +547,13 @@ function exportDetailCsv() {
     `${r.timestamp},${r.raw_value},${r.processed_value ?? ''},${r.unit ?? ''},${r.quality}`
   )
   const csv = [header, ...rows].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' })
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = `sensor-data_${selectedDetailSensor.value?.espId}_gpio${selectedDetailSensor.value?.gpio}_${Date.now()}.csv`
   a.click()
-  URL.revokeObjectURL(url)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 // =============================================================================
@@ -584,11 +584,11 @@ const detailSensorTypeConfig = computed(() => {
   return SENSOR_TYPE_CONFIG[selectedDetailSensor.value.sensorType] ?? null
 })
 
-/** Stale indicator: >120s since last update */
+/** Stale indicator: no update within DATA_STALE_THRESHOLD_S */
 const detailIsStale = computed(() => {
   const lastUpdate = detailLiveValue.value?.lastUpdate
   if (!lastUpdate) return false
-  return Date.now() - new Date(lastUpdate).getTime() > 120_000
+  return Date.now() - new Date(lastUpdate).getTime() > DATA_STALE_THRESHOLD_S * 1000
 })
 
 /** Trend calculation from readings (last 10% vs first 10%) */
@@ -622,7 +622,8 @@ async function fetchDetailStats() {
       { start_time: detailStartTime.value, end_time: detailEndTime.value },
     )
     detailStats.value = resp.stats
-  } catch {
+  } catch (e) {
+    console.warn('[MonitorView] Failed to fetch sensor stats:', selectedDetailSensor.value?.espId, 'GPIO', selectedDetailSensor.value?.gpio, e)
     detailStats.value = null
   }
 }
@@ -725,8 +726,7 @@ interface ZoneKPI {
   totalDevices: number
 }
 
-/** Stale threshold: zone considered stale if no sensor event for >60s */
-const ZONE_STALE_THRESHOLD_MS = 60_000
+// ZONE_STALE_THRESHOLD_MS imported from @/utils/formatters
 
 function getZoneHealthStatus(
   alarmCount: number,
@@ -1244,8 +1244,14 @@ function handleClaimLayout(layoutId: string) {
       </div>
 
       <!-- Zone Dashboards -->
-      <section v-if="selectedZoneId && dashStore.zoneDashboards(selectedZoneId).length > 0" class="monitor-dashboards">
+      <section v-if="selectedZoneId" class="monitor-dashboards">
         <h3 class="monitor-section__title">Zone-Dashboards</h3>
+        <div v-if="dashStore.zoneDashboards(selectedZoneId).length === 0" class="monitor-dashboard-empty">
+          <router-link :to="{ name: 'editor' }" class="monitor-dashboard-empty__link">
+            <LayoutDashboard class="w-4 h-4" />
+            <span>Dashboard erstellen</span>
+          </router-link>
+        </div>
         <div class="monitor-dashboard-links">
           <div
             v-for="dash in dashStore.zoneDashboards(selectedZoneId!)"
@@ -2203,6 +2209,25 @@ function handleClaimLayout(layoutId: string) {
 }
 
 .monitor-dashboard-link__claim:hover {
+  border-color: var(--color-iridescent-2);
+  background: rgba(129, 140, 248, 0.06);
+}
+
+.monitor-dashboard-empty__link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  transition: all var(--transition-fast);
+}
+
+.monitor-dashboard-empty__link:hover {
+  color: var(--color-iridescent-2);
   border-color: var(--color-iridescent-2);
   background: rgba(129, 140, 248, 0.06);
 }
