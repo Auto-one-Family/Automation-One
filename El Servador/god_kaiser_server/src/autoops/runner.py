@@ -215,7 +215,7 @@ async def run_autoops(
     # Resolve from environment with correct defaults
     resolved_url = server_url or os.environ.get("AUTOOPS_SERVER", "http://localhost:8000")
     resolved_user = username or os.environ.get("AUTOOPS_USER", "admin")
-    resolved_pass = password or os.environ.get("AUTOOPS_PASSWORD", "TestAdmin123!")
+    resolved_pass = password or os.environ.get("AUTOOPS_PASSWORD", "Admin123#")
 
     agent = AutoOpsAgent(
         server_url=resolved_url,
