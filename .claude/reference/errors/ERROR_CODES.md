@@ -548,13 +548,10 @@ const char* range = getErrorCodeRange(1002);   // → "HARDWARE"
 
 ### ⚠️ Offene Lücken
 
-#### 3. ValidationErrorCode - INVALID_PAYLOAD_FORMAT fehlt
+#### 3. ValidationErrorCode - INVALID_PAYLOAD_FORMAT ✅ BEHOBEN
 
-Der Code `INVALID_PAYLOAD_FORMAT` wird in `zone_ack_handler.py` verwendet, aber ist nicht im `ValidationErrorCode` enum definiert.
-
-**Verwendung:** `ValidationErrorCode.INVALID_PAYLOAD_FORMAT` in:
-- `El Servador/god_kaiser_server/src/mqtt/handlers/zone_ack_handler.py:217`
-- `El Servador/god_kaiser_server/src/mqtt/handlers/zone_ack_handler.py:226`
+`INVALID_PAYLOAD_FORMAT = 5209` wurde zum `ValidationErrorCode` Enum hinzugefügt.
+Beschreibung "Invalid payload format" in SERVER_ERROR_DESCRIPTIONS ergänzt.
 
 ---
 

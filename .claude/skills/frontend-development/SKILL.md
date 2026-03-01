@@ -15,7 +15,7 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.10
+**Version:** 9.13
 **Letzte Aktualisierung:** 2026-03-01
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
@@ -127,7 +127,7 @@ El Frontend/src/
 │   ├── charts/        # LiveLineChart, HistoricalChart, GaugeChart, MultiSensorChart
 │   ├── command/       # CommandPalette
 │   ├── common/        # Modal, Toast, Skeleton, ViewTabBar (13 Dateien)
-│   ├── dashboard/     # Dashboard subcomponents (9 Dateien)
+│   ├── dashboard/     # Dashboard subcomponents (11 Dateien, inkl. DashboardViewer + InlineDashboardPanel)
 │   ├── dashboard-widgets/ # SensorCardWidget, GaugeWidget, LineChartWidget, etc.
 │   ├── database/      # DataTable, FilterPanel, Pagination, etc. (6 Dateien)
 │   ├── devices/       # SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection (4 Dateien)
@@ -154,7 +154,7 @@ El Frontend/src/
 │   ├── main.css         # Hauptstyles (Buttons, Layout)
 │   ├── forms.css        # Shared Form + Modal Styles
 │   └── tailwind.css     # Tailwind Konfiguration
-├── composables/   # 20 Composables
+├── composables/   # 21 Composables
 │   ├── useWebSocket.ts
 │   ├── useToast.ts
 │   ├── useModal.ts
@@ -166,6 +166,7 @@ El Frontend/src/
 │   ├── useCalibration.ts
 │   ├── useCommandPalette.ts
 │   ├── useContextMenu.ts
+│   ├── useDashboardWidgets.ts
 │   ├── useDeviceActions.ts
 │   ├── useDeviceMetadata.ts
 │   ├── useESPStatus.ts
@@ -174,8 +175,7 @@ El Frontend/src/
 │   ├── useOrbitalDragDrop.ts
 │   ├── useScrollLock.ts
 │   ├── useSparklineCache.ts
-│   ├── useZoneGrouping.ts
-│   └── useSwipeNavigation.ts
+│   └── useZoneGrouping.ts
 ├── router/        # Route-Definitionen + Guards
 ├── services/      # WebSocket Singleton
 │   └── websocket.ts   # ~625 Zeilen
@@ -291,14 +291,17 @@ SensorsView.vue (?sensor={espId}-gpio{gpio} → auto-open SensorConfigPanel)
 
 ```
 MonitorView.vue (URL-Sync: L1→L2→L3 via route params)
-├── L1 /monitor — Zone-Tiles mit KPI-Aggregation
-├── L2 /monitor/:zoneId — Subzone-Accordion
-│   ├── SensorCard.vue[] (mode='monitor', sparklineData, from components/devices/)
-│   │   └── [Expanded] GaugeChart + LiveLineChart + HistoricalChart (in MonitorView)
+├── L1 /monitor — Zone-Tiles mit KPI-Aggregation + Cross-Zone-Dashboards
+├── L2 /monitor/:zoneId — Subzone-Accordion (KPIs im Header, Status-Dots)
+│   ├── Zone-Header: Name + Sensor/Aktor-Count + Alarm-Count
+│   ├── Auto-generierte Zone-Dashboards (generateZoneDashboard bei erstem Besuch)
+│   ├── SensorCard.vue[] (mode='monitor', Stale/ESP-Offline-Badges, from components/devices/)
+│   │   └── [Expanded] 1h-Chart (vue-chartjs Line, sensorsApi.queryData Initial-Fetch)
 │   │       ├── "Zeitreihe anzeigen" → openSensorDetail (L3)
 │   │       └── "Konfiguration" → /sensors?sensor={espId}-gpio{gpio}
 │   └── ActuatorCard.vue[] (mode='monitor', from components/devices/)
 └── L3 /monitor/:zoneId/sensor/:sensorId — SlideOver (Sensor-Detail, Deep-Link-faehig)
+    └── Multi-Sensor-Overlay: Chip-Selektor (max 4 Sensoren), sekundaere Y-Achse bei unterschiedlichen Einheiten
 ```
 
 ### Komponentenhierarchie (CustomDashboardView / Dashboard Editor)
@@ -420,12 +423,14 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 
 - LogicRule: Conditions + Actions + Cooldown + logic_operator (AND/OR)
 - SensorCondition: Vergleichsoperatoren (>, <, >=, <=, ==, !=, between)
-- TimeCondition: start_hour, end_hour, days_of_week
+- TimeCondition: start_hour, end_hour, days_of_week (0=Monday, 6=Sunday — ISO 8601 / Python weekday())
 - HysteresisCondition: activate_above/deactivate_below
 - CompoundCondition: Nested AND/OR conditions
 - ActuatorAction: ON/OFF/PWM/TOGGLE + Duration
 - NotificationAction: channel + target + message_template
 - DelayAction: seconds
+- ExecutionHistoryItem: rule_id, rule_name, triggered_at, trigger_reason, actions_executed, success, error_message?, execution_time_ms
+- LogicConnection: ruleId, sourceEspId/Gpio, targetEspId/Gpio, isCrossEsp
 
 ### GPIO Types (types/gpio.ts)
 
@@ -450,9 +455,9 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 |-------|-------|-------|-------------------|
 | auth | stores/auth.ts | user, tokens, setupRequired | login, logout, refreshTokens |
 | esp | stores/esp.ts | devices[], pendingDevices[] | fetchAll, isMock, gpioStatusMap, onlineDevices (via getESPStatus), offlineDevices |
-| dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb (level, zoneName, deviceName, sensorName, ruleName, dashboardName), layouts[], DASHBOARD_TEMPLATES | toggleStatusFilter, resetFilters, createLayout, saveLayout, createLayoutFromTemplate, deleteLayout, exportLayout, importLayout |
+| dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb (level, zoneName, deviceName, sensorName, ruleName, dashboardName), layouts[], DASHBOARD_TEMPLATES, DashboardTarget (interface), inlineMonitorPanels (computed), sideMonitorPanels (computed), hardwarePanels (computed) | toggleStatusFilter, resetFilters, createLayout, saveLayout, createLayoutFromTemplate, deleteLayout, exportLayout, importLayout, setLayoutTarget, generateZoneDashboard, claimAutoLayout |
 | zone | stores/zone.store.ts | (stateless) | handleZoneAssignment (+ Toasts), handleSubzoneAssignment (+ Toasts) |
-| logic | stores/logic.ts | rules[], activeExecutions | fetchRules, toggleRule, crossEspConnections |
+| logic | stores/logic.ts | rules[], activeExecutions, executionHistory[], historyLoaded | fetchRules, toggleRule, crossEspConnections, loadExecutionHistory, pushToHistory, undo, redo, canUndo, canRedo |
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
 | database | stores/database.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
 
@@ -707,8 +712,10 @@ type AggCategory = 'climate' | 'water' | 'light' | 'system'
 '/'                                    → DashboardView.vue (?openSettings={id})
 '/hardware'                            → HardwareView.vue (Zone Accordion)
 '/monitor'                             → MonitorView.vue L1 (Zone-Tiles)
+'/monitor/dashboard/:dashboardId'      → MonitorView.vue L3 (Dashboard Viewer, VOR :zoneId wegen Greedy-Matching)
 '/monitor/:zoneId'                     → MonitorView.vue L2 (Subzone-Accordion)
 '/monitor/:zoneId/sensor/:sensorId'    → MonitorView.vue L3 (Sensor-Detail SlideOver)
+'/monitor/:zoneId/dashboard/:dashboardId' → MonitorView.vue L3 (Zone-Dashboard Viewer)
 '/editor'                              → CustomDashboardView.vue
 '/editor/:dashboardId'                 → CustomDashboardView.vue (Deep-Link)
 '/sensors'                             → SensorsView.vue (Tabs: Sensoren | Aktoren, ?sensor={espId}-gpio{gpio})
@@ -1074,8 +1081,65 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.10
+**Version:** 9.13
 **Letzte Aktualisierung:** 2026-03-01
+
+### Aenderungen in v9.13
+
+- useDashboardWidgets.ts: Container-agnostisches Widget-Rendering Composable — extrahiert aus CustomDashboardView, 9 Widget-Typen, `WIDGET_TYPE_META`, `WIDGET_DEFAULT_CONFIGS`, `createWidgetElement()`, `mountWidgetToElement()`, `cleanupAllWidgets()`
+- DashboardViewer.vue: View-Only Dashboard-Rendering mit GridStack `staticGrid: true` — Header (Zurueck + Titel + "Im Editor bearbeiten"), Auto-Generated Banner mit Uebernehmen/Anpassen
+- InlineDashboardPanel.vue: CSS-Grid-Only Dashboard-Renderer (12 Spalten, KEIN GridStack) — Props: `layoutId`, `mode: 'inline' | 'side-panel'`, Zero-Overhead Rendering
+- dashboard.store.ts: `DashboardTarget` Interface (`view`, `placement`, `anchor`, `panelPosition`, `panelWidth`, `order`), `setLayoutTarget()`, `generateZoneDashboard()`, `claimAutoLayout()`
+- dashboard.store.ts: 3 neue Computeds — `inlineMonitorPanels`, `sideMonitorPanels`, `hardwarePanels` (filtern layouts nach target.view + target.placement)
+- dashboard.store.ts: `serverToLocal()`/`localToServer()` mappen target-Feld zwischen API DTO und lokalem State
+- Router: 2 neue Routes — `monitor/dashboard/:dashboardId` (name: 'monitor-dashboard', VOR :zoneId wegen Greedy-Matching), `monitor/:zoneId/dashboard/:dashboardId` (name: 'monitor-zone-dashboard')
+- MonitorView.vue: InlineDashboardPanel-Integration — CSS-Grid-Layout mit Side-Panel (`grid-template-columns: 1fr 300px`), Inline-Panels in L1 + L2, responsive Breakpoint 768px
+- HardwareView.vue: InlineDashboardPanel-Integration — Side-Panel fuer Hardware-View mit sticky Positionierung, responsive Breakpoint 768px
+- CustomDashboardView.vue: Target-Konfigurator — `showTargetConfig`, `activeTarget`, `setTarget()`/`clearTarget()`, "Im Monitor anzeigen" RouterLink mit `monitorRouteForLayout` Computed
+- Server: `target` JSON-Spalte in DashboardLayout Model + DashboardCreate/Update/Response Schemas + Alembic Migration
+- api/dashboards.ts: `target` Feld in DashboardDTO, CreatePayload, UpdatePayload
+- composables/index.ts: Re-Export `useDashboardWidgets` + Types (`WidgetTypeMeta`, `UseDashboardWidgetsOptions`)
+- Section 2: dashboard/ Components 9 → 11 (DashboardViewer + InlineDashboardPanel)
+- Section 5: dashboard Store-Tabelle um DashboardTarget, target-Computeds, setLayoutTarget, generateZoneDashboard, claimAutoLayout erweitert
+- Section 10: Router-Tabelle um monitor/dashboard/:dashboardId und monitor/:zoneId/dashboard/:dashboardId erweitert
+
+### Aenderungen in v9.12
+
+- RuleConfigPanel.vue: Days-of-Week Fix — `dayLabels` von `['So','Mo',...,'Sa']` (JS: 0=Sonntag) zu `['Mo','Di','Mi','Do','Fr','Sa','So']` (ISO 8601: 0=Montag) umgestellt, passt zu Python `weekday()`
+- RuleFlowEditor.vue: Default `daysOfWeek` von `[1,2,3,4,5]` auf `[0,1,2,3,4]` korrigiert (Montag-Freitag)
+- types/logic.ts: ExecutionHistoryItem Felder an Server-Response angepasst — `logic_rule_id`→`rule_id`, `timestamp`→`triggered_at`, `trigger_data`→`trigger_reason` (Typ: Record→string), `rule_name` hinzugefuegt
+- types/logic.ts: TimeCondition Kommentar aktualisiert auf `0 = Monday, 6 = Sunday (ISO 8601 / Python weekday())`
+- logic.store.ts: `loadExecutionHistory(ruleId?)` Action — REST-Fetch via `logicApi.getExecutionHistory()`, Merge mit WebSocket-Events, Deduplizierung nach ID, max 50 Eintraege
+- logic.store.ts: Neuer State: `executionHistory`, `isLoadingHistory`, `historyLoaded`
+- logic.store.ts: `handleLogicExecutionEvent` erweitert — pusht WS-Events auch in `executionHistory`
+- RuleFlowEditor.vue: `pushToHistory()` in 4 fehlende Events eingebaut — onDrop, deleteNode (vor Loeschung), duplicateNode, onNodeDragStop
+- RuleFlowEditor.vue: Undo/Redo Buttons als Overlay (Undo2/Redo2 Icons), disabled-State bei `!canUndo`/`!canRedo`
+- RuleFlowEditor.vue: Keyboard-Shortcuts Ctrl+Z (Undo), Ctrl+Y/Ctrl+Shift+Z (Redo), via `@keydown` auf Graph-Container
+- LogicView.vue: Landing-Page Rule-Liste von Inline-Buttons auf `<RuleCard>` Komponenten umgestellt
+- LogicView.vue: RuleCard Event-Handler — `@select` (Rule oeffnen), `@toggle` (Enable/Disable + Toast), `@delete` (ConfirmDialog + Toast)
+- LogicView.vue: Execution History Panel erweitert — REST-Integration beim ersten Oeffnen, Filter (Regel + Status), expandierbare Detail-Rows, Loading-Spinner
+- LogicView.vue: Alte list-item CSS (72 Zeilen) ersetzt durch `.rules-empty__cards` Grid
+- RuleCard.vue: Sichtbares Status-Label ("Aktiv"/"Deaktiviert"/"Fehler") neben Status-Dot
+- RuleCard.vue: Error-Styling — `rule-card--error` (roter Rand) bei `last_execution_success === false`, AlertCircle Error-Icon
+- RuleCard.vue: Toggle-Pulse-Animation (dot-pulse, 0.8s) beim Status-Dot-Klick
+- Section 4: Logic Types um ExecutionHistoryItem und LogicConnection ergaenzt
+- Section 5: Logic Store Zeile um executionHistory, historyLoaded, loadExecutionHistory, pushToHistory, undo, redo erweitert
+
+### Aenderungen in v9.11
+
+- MonitorView.vue L2: SensorCard Sparkline im Monitor-Modus entfernt — keine `sparklineData` Prop-Bindung, keine `LiveLineChart`-Nutzung, kompaktere Karte (Name + Wert + Dot + ESP-ID)
+- MonitorView.vue L2: Expanded Panel radikal vereinfacht — GaugeChart, LiveLineChart, HistoricalChart + doppelte TimeRange-Buttons ENTFERNT, ersetzt durch 1h-Chart (vue-chartjs `Line`) + 2 Action-Buttons
+- MonitorView.vue L2: 1h-Chart mit Initial-Fetch — `fetchExpandedChartData()` via `sensorsApi.queryData` (1h Fenster, 500 Datenpunkte), `expandedChartData`/`expandedChartOptions` Computeds
+- MonitorView.vue L2: Auto-generierte Zone-Dashboards — `generatedZoneDashboards` Guard-Set, Watcher ruft `dashStore.generateZoneDashboard()` beim ersten Zonenbesuch
+- MonitorView.vue L2: Zone-Header erweitert um KPI-Zeile (Sensor-Count, Aktor-Count, Alarm-Count mit AlertTriangle)
+- MonitorView.vue L2: Subzone-Header erweitert um Status-Dot (`getWorstQualityStatus`) und KPI-Werte (`getSubzoneKPIs` — aggregiert Sensorwerte nach Basistyp, max 3 Eintraege)
+- MonitorView.vue L3: Multi-Sensor-Overlay — `availableOverlaySensors` Computed, `toggleOverlaySensor()`, `fetchOverlaySensorData()`, Chip-Selektor UI (max 4 Overlays), sekundaere Y-Achse bei unterschiedlichen Einheiten, Legend bei aktiven Overlays
+- MonitorView.vue L3: Overlay-Cleanup in `closeSensorDetail()` und Re-Fetch in `onDetailRangeChange()`
+- SensorCard.vue: Stale-Indikator (>120s kein Update) — `getDataFreshness()`, CSS `sensor-card--stale` (opacity 0.7, warning border), Clock-Badge mit `formatRelativeTime()`
+- SensorCard.vue: ESP-Offline-Indikator — `esp_state !== 'OPERATIONAL'`, CSS `sensor-card--esp-offline` (opacity 0.5), WifiOff-Badge
+- SensorCard.vue: `formatValue()` Signatur von `(value: number)` zu `(value: number | null | undefined)` — 0 wird korrekt als valider Wert behandelt (P2.5 Fix)
+- SensorCard.vue: `LiveLineChart` Import entfernt (nicht mehr benoetigt)
+- Section 3: Komponentenhierarchie MonitorView aktualisiert (Sparkline→1h-Chart, L3 Overlay dokumentiert)
 
 ### Aenderungen in v9.10
 

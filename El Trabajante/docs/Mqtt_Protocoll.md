@@ -1160,50 +1160,43 @@ Libraries werden über MQTT in Chunks übertragen, da MQTT-Payloads limitiert si
 
 **Topic:** `kaiser/god/esp/{esp_id}/system/error`
 
-**QoS:** 1  
-**Retain:** false  
-**Frequency:** Bei kritischen Fehlern  
-**Module:** `error_handling/error_reporter.cpp`
+**QoS:** 1
+**Retain:** false
+**Frequency:** Bei Fehlern (Rate-Limited)
+**Module:** `error_handling/error_tracker.cpp`
 
 **Payload-Schema:**
 ```json
 {
-  "ts": 1735818000,
-  "esp_id": "ESP_12AB34CD",
-  "error_code": "GPIO_CONFLICT",       // Siehe error_codes.h
-  "severity": "critical",              // "warning", "error", "critical"
-  "message": "GPIO 5 already in use",
-  "module": "GPIOManager",             // Modul das den Fehler geworfen hat
-  "function": "initializeGPIO",        // Funktion (optional)
-  "stack_trace": "...",                // Stack-Trace (optional, nur bei critical)
-  "context": {                         // Zusätzlicher Kontext (optional)
-    "gpio": 5,
-    "requested_mode": "OUTPUT",
-    "current_mode": "INPUT"
-  }
+  "error_code": 1002,                  // Numerisch, siehe error_codes.h (1000-4999)
+  "severity": 2,                       // 0=INFO, 1=WARNING, 2=ERROR, 3=CRITICAL
+  "category": "HARDWARE",              // HARDWARE, SERVICE, COMMUNICATION, APPLICATION
+  "message": "GPIO 5 already in use",  // Human-readable Fehlerbeschreibung
+  "context": {                         // Zusätzlicher Kontext
+    "esp_id": "ESP_12AB34CD",
+    "uptime_ms": 123456
+  },
+  "ts": 1735818000                     // Unix timestamp (0 wenn NTP nicht gesynced)
 }
 ```
 
-**Error-Codes (Beispiele):**
-- `GPIO_CONFLICT`: GPIO bereits in Verwendung
-- `SENSOR_INIT_FAILED`: Sensor-Initialisierung fehlgeschlagen
-- `ACTUATOR_FAULT`: Aktor-Hardware-Fehler
-- `MEMORY_LOW`: Heap unter kritischem Limit
-- `WIFI_DISCONNECTED`: WiFi-Verbindung verloren
-- `MQTT_SUBSCRIBE_FAILED`: MQTT-Subscription fehlgeschlagen
-- `CONFIG_INVALID`: Ungültige Konfiguration
-- `NVS_WRITE_FAILED`: NVS-Schreibfehler
-- `WATCHDOG_TIMEOUT`: Watchdog-Reset
+**Error-Code Ranges (siehe error_codes.h):**
+- `1000-1099`: HARDWARE (GPIO, I2C, OneWire, PWM, Sensor, Actuator, DS18B20)
+- `2000-2599`: SERVICE (NVS, Config, Logger, Storage, Subzone)
+- `3000-3099`: COMMUNICATION (WiFi, MQTT, HTTP, Network)
+- `4000-4299`: APPLICATION (State, Operation, Command, Payload, Memory, System, Task, Watchdog, Discovery)
 
-**Severity-Levels:**
-- `warning`: Nicht-kritisch, System läuft weiter
-- `error`: Fehler, aber System funktional
-- `critical`: Kritischer Fehler, Safe-Mode oder Reboot erforderlich
+**Severity-Levels (numerisch):**
+- `0` (INFO): Informativ, kein Handlungsbedarf
+- `1` (WARNING): Nicht-kritisch, System läuft weiter
+- `2` (ERROR): Fehler, aber System funktional
+- `3` (CRITICAL): Kritischer Fehler, Safe-Mode oder Reboot erforderlich
 
 **Frequency-Throttling:**
-- Max 1 Error-Message pro Error-Code alle 10 Sekunden
-- Verhindert Spam bei wiederkehrenden Fehlern
-- Counter für wiederholte Fehler im Payload
+- Max 1 Error-Message pro Error-Code alle 60 Sekunden
+- Verhindert MQTT-Broker-Flooding bei wiederkehrenden Fehlern
+- Suppressed-Count wird beim nächsten Publish geloggt
+- Implementiert als Modulo-Hash-Tabelle (32 Slots) in ErrorTracker
 
 ---
 
