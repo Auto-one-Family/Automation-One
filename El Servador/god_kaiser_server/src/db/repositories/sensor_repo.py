@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import and_, delete, func, select, tuple_
+from sqlalchemy import and_, delete, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.sensor import SensorConfig, SensorData
@@ -590,14 +590,16 @@ class SensorRepository(BaseRepository[SensorConfig]):
         dialect_name = bind.dialect.name if bind is not None else ""
         supports_stddev = dialect_name not in ("sqlite",)
 
+        # Use COALESCE(processed_value, raw_value) to handle rows where processed_value is null
+        value_col = func.coalesce(SensorData.processed_value, SensorData.raw_value)
         agg_columns = [
             func.count().label("reading_count"),
-            func.min(SensorData.processed_value).label("min_value"),
-            func.max(SensorData.processed_value).label("max_value"),
-            func.avg(SensorData.processed_value).label("avg_value"),
+            func.min(value_col).label("min_value"),
+            func.max(value_col).label("max_value"),
+            func.avg(value_col).label("avg_value"),
         ]
         if supports_stddev:
-            agg_columns.append(func.stddev_pop(SensorData.processed_value).label("std_dev"))
+            agg_columns.append(func.stddev_pop(value_col).label("std_dev"))
 
         agg_stmt = select(*agg_columns).where(*filters)
 
@@ -632,11 +634,13 @@ class SensorRepository(BaseRepository[SensorConfig]):
         if supports_stddev:
             std_dev = agg_row.std_dev if agg_row.reading_count > 1 else 0.0
         else:
-            # Fetch processed values (non-null) for Python-side stddev; small test datasets are acceptable.
+            # Fetch values (non-null) for Python-side stddev; small test datasets are acceptable.
             values_stmt = (
-                select(SensorData.processed_value)
+                select(func.coalesce(SensorData.processed_value, SensorData.raw_value))
                 .where(*filters)
-                .where(SensorData.processed_value.isnot(None))
+                .where(
+                    or_(SensorData.processed_value.isnot(None), SensorData.raw_value.isnot(None))
+                )
             )
             values_result = await self.session.execute(values_stmt)
             values = [v for (v,) in values_result.all() if v is not None]
