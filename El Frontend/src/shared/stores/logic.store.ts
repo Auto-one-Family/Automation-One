@@ -13,7 +13,7 @@ import { logicApi } from '@/api/logic'
 import type { LogicRuleCreate, LogicRuleUpdate } from '@/api/logic'
 import { extractConnections } from '@/types/logic'
 import { createLogger } from '@/utils/logger'
-import type { LogicRule, LogicConnection } from '@/types/logic'
+import type { LogicRule, LogicConnection, ExecutionHistoryItem } from '@/types/logic'
 import { websocketService, type WebSocketMessage } from '@/services/websocket'
 
 const logger = createLogger('LogicStore')
@@ -76,6 +76,11 @@ export const useLogicStore = defineStore('logic', () => {
 
   /** Recent execution history from WebSocket */
   const recentExecutions = ref<LogicExecutionEvent[]>([])
+
+  /** Merged execution history (REST + WebSocket) */
+  const executionHistory = ref<ExecutionHistoryItem[]>([])
+  const isLoadingHistory = ref(false)
+  const historyLoaded = ref(false)
 
   /** WebSocket subscription ID */
   let wsSubscriptionId: string | null = null
@@ -295,6 +300,53 @@ export const useLogicStore = defineStore('logic', () => {
   }
 
   // =============================================================================
+  // Execution History (REST + WebSocket merge)
+  // =============================================================================
+
+  /**
+   * Load execution history from REST API and merge with WebSocket events.
+   * Deduplicates by ID, sorts descending by triggered_at, limits to 50 entries.
+   */
+  async function loadExecutionHistory(ruleId?: string): Promise<void> {
+    isLoadingHistory.value = true
+
+    try {
+      const params: { rule_id?: string; limit?: number } = { limit: 50 }
+      if (ruleId) params.rule_id = ruleId
+
+      const response = await logicApi.getExecutionHistory(params)
+      const restEntries = response.entries || []
+
+      // Merge with existing entries: REST entries as base, deduplicate by id
+      const merged = new Map<string, ExecutionHistoryItem>()
+
+      // Add REST entries first
+      for (const entry of restEntries) {
+        merged.set(entry.id, entry)
+      }
+
+      // Add existing entries (may include prior REST loads)
+      for (const entry of executionHistory.value) {
+        if (!merged.has(entry.id)) {
+          merged.set(entry.id, entry)
+        }
+      }
+
+      // Sort descending by triggered_at, limit to 50
+      executionHistory.value = Array.from(merged.values())
+        .sort((a, b) => new Date(b.triggered_at).getTime() - new Date(a.triggered_at).getTime())
+        .slice(0, 50)
+
+      historyLoaded.value = true
+      logger.debug('Execution history loaded', { count: executionHistory.value.length })
+    } catch (err) {
+      logger.error('loadExecutionHistory error', err)
+    } finally {
+      isLoadingHistory.value = false
+    }
+  }
+
+  // =============================================================================
   // WebSocket Integration
   // =============================================================================
 
@@ -314,6 +366,24 @@ export const useLogicStore = defineStore('logic', () => {
     recentExecutions.value.unshift(event)
     if (recentExecutions.value.length > 20) {
       recentExecutions.value.pop()
+    }
+
+    // Also add to merged execution history if loaded
+    if (historyLoaded.value) {
+      const historyEntry: ExecutionHistoryItem = {
+        id: `ws-${event.rule_id}-${event.timestamp}`,
+        rule_id: event.rule_id,
+        rule_name: event.rule_name,
+        triggered_at: new Date(event.timestamp * 1000).toISOString(),
+        trigger_reason: `${event.trigger.sensor_type} = ${event.trigger.value}`,
+        actions_executed: [{ esp_id: event.action.esp_id, gpio: event.action.gpio, command: event.action.command }],
+        success: event.success,
+        execution_time_ms: 0,
+      }
+      executionHistory.value.unshift(historyEntry)
+      if (executionHistory.value.length > 50) {
+        executionHistory.value.pop()
+      }
     }
 
     // Mark rule as active (for visual feedback)
@@ -524,6 +594,12 @@ export const useLogicStore = defineStore('logic', () => {
     getIncomingConnections,
     getRuleById,
     clearError,
+
+    // Execution History
+    executionHistory,
+    isLoadingHistory,
+    historyLoaded,
+    loadExecutionHistory,
 
     // WebSocket
     subscribeToWebSocket,

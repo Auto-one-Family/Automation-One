@@ -35,6 +35,8 @@ import {
   Waves,
   Leaf,
   Zap,
+  Undo2,
+  Redo2,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { LogicRule, SensorCondition, TimeCondition, HysteresisCondition, CompoundCondition, ActuatorAction, NotificationAction, DelayAction, LogicCondition, LogicAction } from '@/types/logic'
@@ -76,6 +78,7 @@ const {
   project,
   fitView,
   onNodeClick,
+  onNodeDragStop,
   getNode,
   onNodesInitialized,
   setNodes,
@@ -224,6 +227,12 @@ function onDrop(event: DragEvent) {
     } as Node,
   ])
 
+  // Snapshot for undo after adding node
+  logicStore.pushToHistory(
+    JSON.parse(JSON.stringify(nodes.value)),
+    JSON.parse(JSON.stringify(edges.value))
+  )
+
   emit('graph-changed')
 }
 
@@ -246,7 +255,7 @@ function getDefaultNodeData(type: string, defaults: Record<string, unknown> = {}
       return {
         startHour: defaults.startHour ?? 8,
         endHour: defaults.endHour ?? 18,
-        daysOfWeek: defaults.daysOfWeek || [1, 2, 3, 4, 5],
+        daysOfWeek: defaults.daysOfWeek || [0, 1, 2, 3, 4],
         ...defaults,
       }
     case 'logic':
@@ -325,6 +334,15 @@ onConnect((connection: Connection) => {
 
 onNodeClick(({ node }) => {
   emit('node-selected', node)
+})
+
+// ======================== NODE DRAG STOP → UNDO HISTORY ========================
+
+onNodeDragStop(() => {
+  logicStore.pushToHistory(
+    JSON.parse(JSON.stringify(nodes.value)),
+    JSON.parse(JSON.stringify(edges.value))
+  )
 })
 
 // ======================== RULE ↔ GRAPH CONVERSION ========================
@@ -631,6 +649,12 @@ function updateNodeData(nodeId: string, data: Record<string, unknown>) {
 }
 
 function deleteNode(nodeId: string) {
+  // Snapshot BEFORE deletion for undo
+  logicStore.pushToHistory(
+    JSON.parse(JSON.stringify(nodes.value)),
+    JSON.parse(JSON.stringify(edges.value))
+  )
+
   // Remove connected edges first
   const connectedEdges = edges.value.filter(
     (e) => e.source === nodeId || e.target === nodeId
@@ -654,6 +678,13 @@ function duplicateNode(nodeId: string) {
       data: { ...node.data },
     },
   ])
+
+  // Snapshot after duplication
+  logicStore.pushToHistory(
+    JSON.parse(JSON.stringify(nodes.value)),
+    JSON.parse(JSON.stringify(edges.value))
+  )
+
   emit('graph-changed')
 }
 
@@ -695,6 +726,42 @@ function miniMapNodeColor(node: Node): string {
   return colors[node.type || '']?.() || '#707080'
 }
 
+// ======================== UNDO/REDO ========================
+
+function performUndo() {
+  const state = logicStore.undo()
+  if (state) {
+    setNodes(state.nodes)
+    setEdges(state.edges)
+    emit('graph-changed')
+  }
+}
+
+function performRedo() {
+  const state = logicStore.redo()
+  if (state) {
+    setNodes(state.nodes)
+    setEdges(state.edges)
+    emit('graph-changed')
+  }
+}
+
+function handleKeyboard(e: KeyboardEvent) {
+  // Only handle when flow editor is focused (not in input/textarea)
+  const tag = (e.target as HTMLElement)?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+  const isCtrlOrMeta = e.ctrlKey || e.metaKey
+
+  if (isCtrlOrMeta && e.key === 'z' && !e.shiftKey) {
+    e.preventDefault()
+    performUndo()
+  } else if (isCtrlOrMeta && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+    e.preventDefault()
+    performRedo()
+  }
+}
+
 defineExpose({
   graphToRuleData,
   updateNodeData,
@@ -710,9 +777,11 @@ defineExpose({
     ref="flowWrapper"
     class="flow-editor"
     :class="{ 'flow-editor--dragover': isDragOver }"
+    tabindex="0"
     @dragover="onDragOverCanvas"
     @dragleave="onDragLeave"
     @drop="onDrop"
+    @keydown="handleKeyboard"
   >
     <!-- Empty state hint -->
     <div v-if="nodes.length === 0" class="flow-editor__empty">
@@ -744,6 +813,28 @@ defineExpose({
         <div class="flow-editor__drop-text">Hier ablegen</div>
       </div>
     </Transition>
+
+    <!-- Undo/Redo toolbar overlay -->
+    <div class="flow-editor__undo-bar">
+      <button
+        class="flow-editor__undo-btn"
+        :disabled="!logicStore.canUndo"
+        title="Rückgängig (Ctrl+Z)"
+        aria-label="Rückgängig"
+        @click="performUndo"
+      >
+        <Undo2 class="w-3.5 h-3.5" />
+      </button>
+      <button
+        class="flow-editor__undo-btn"
+        :disabled="!logicStore.canRedo"
+        title="Wiederholen (Ctrl+Shift+Z)"
+        aria-label="Wiederholen"
+        @click="performRedo"
+      >
+        <Redo2 class="w-3.5 h-3.5" />
+      </button>
+    </div>
 
     <VueFlow
       :class="{ 'flow-active': props.rule && logicStore.isRuleActive(props.rule.id) }"
@@ -1563,5 +1654,45 @@ defineExpose({
   .flow-editor__empty-content {
     animation: none;
   }
+}
+
+/* ======================== UNDO/REDO OVERLAY ======================== */
+
+.flow-editor__undo-bar {
+  position: absolute;
+  top: 0.625rem;
+  left: 0.625rem;
+  z-index: 5;
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.flow-editor__undo-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.flow-editor__undo-btn:hover:not(:disabled) {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.flow-editor__undo-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
 }
 </style>

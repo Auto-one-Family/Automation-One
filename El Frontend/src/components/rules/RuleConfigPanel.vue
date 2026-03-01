@@ -97,7 +97,7 @@ const channelOptions = [
   { value: 'webhook', label: 'Webhook' },
 ]
 
-const dayLabels = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']
+const dayLabels = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
 
 // Local editable copy of node data
 const localData = ref<Record<string, unknown>>({})

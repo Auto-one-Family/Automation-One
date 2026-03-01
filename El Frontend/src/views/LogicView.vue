@@ -303,6 +303,42 @@ async function deleteRule() {
   }
 }
 
+// ======================== RULE CARD EVENTS ========================
+
+async function onRuleCardToggle(ruleId: string, _enabled: boolean) {
+  try {
+    const newState = await logicStore.toggleRule(ruleId)
+    toast.success(newState ? 'Regel aktiviert' : 'Regel deaktiviert')
+  } catch {
+    toast.error('Toggle fehlgeschlagen')
+  }
+}
+
+async function onRuleCardDelete(ruleId: string) {
+  const rule = logicStore.getRuleById(ruleId)
+  if (!rule) return
+
+  const confirmed = await uiStore.confirm({
+    title: 'Regel löschen',
+    message: `Regel "${rule.name}" wirklich löschen?`,
+    variant: 'danger',
+    confirmText: 'Löschen',
+  })
+  if (!confirmed) return
+
+  try {
+    await logicStore.deleteRule(ruleId)
+    if (selectedRuleId.value === ruleId) {
+      selectedRuleId.value = null
+      selectedNode.value = null
+      hasUnsavedChanges.value = false
+    }
+    toast.success('Regel gelöscht')
+  } catch {
+    toast.error('Löschen fehlgeschlagen')
+  }
+}
+
 // ======================== NODE EVENTS ========================
 
 function onNodeSelected(node: Node | null) {
@@ -333,13 +369,52 @@ function onGraphChanged() {
 
 // ======================== EXECUTION HISTORY ========================
 
-function formatTimestamp(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString('de-DE', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
+function onToggleHistory() {
+  showHistory.value = !showHistory.value
+  if (showHistory.value && !logicStore.historyLoaded) {
+    logicStore.loadExecutionHistory()
+  }
 }
+
+const historyRuleFilter = ref('')
+const historyStatusFilter = ref('')
+const expandedHistoryId = ref<string | null>(null)
+
+const filteredHistory = computed(() => {
+  let items = logicStore.executionHistory
+  if (historyRuleFilter.value) {
+    items = items.filter(e => e.rule_id === historyRuleFilter.value)
+  }
+  if (historyStatusFilter.value === 'success') {
+    items = items.filter(e => e.success)
+  } else if (historyStatusFilter.value === 'error') {
+    items = items.filter(e => !e.success)
+  }
+  return items
+})
+
+function toggleHistoryDetail(id: string) {
+  expandedHistoryId.value = expandedHistoryId.value === id ? null : id
+}
+
+function formatHistoryTime(isoString: string): string {
+  try {
+    return new Date(isoString).toLocaleTimeString('de-DE', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+  } catch {
+    return '??:??:??'
+  }
+}
+
+function formatActionSummary(action: Record<string, unknown>): string {
+  if (action.command) return `${action.command}`
+  if (action.channel) return `${action.channel}`
+  return JSON.stringify(action)
+}
+
 
 function formatRelativeTime(isoString: string): string {
   const diff = Date.now() - new Date(isoString).getTime()
@@ -544,7 +619,7 @@ onUnmounted(() => {
           title="Ausführungshistorie"
           aria-label="Ausführungshistorie anzeigen"
           :aria-pressed="showHistory"
-          @click="showHistory = !showHistory"
+          @click="onToggleHistory"
         >
           <History class="w-4 h-4" />
         </button>
@@ -639,31 +714,24 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Existing rules quick list -->
+          <!-- Existing rules as RuleCards -->
           <div v-if="logicStore.rules.length > 0" class="rules-empty__list">
             <h3 class="rules-empty__list-title">
               <Workflow class="w-3.5 h-3.5" />
               {{ logicStore.rules.length }} {{ logicStore.rules.length === 1 ? 'Regel' : 'Regeln' }} vorhanden
             </h3>
-            <div class="rules-empty__list-items">
-              <button
+            <div class="rules-empty__cards">
+              <RuleCard
                 v-for="rule in logicStore.rules"
                 :key="rule.id"
-                class="rules-empty__list-item"
-                @click="selectRule(rule.id)"
-              >
-                <span
-                  class="rules-empty__list-dot"
-                  :class="rule.enabled ? 'rules-empty__list-dot--on' : 'rules-empty__list-dot--off'"
-                />
-                <span class="rules-empty__list-name">{{ rule.name }}</span>
-                <span class="rules-empty__list-meta">
-                  {{ rule.conditions.length }} {{ rule.conditions.length === 1 ? 'Bedingung' : 'Bedingungen' }}
-                  <span class="rules-empty__list-arrow">&rarr;</span>
-                  {{ rule.actions.length }} {{ rule.actions.length === 1 ? 'Aktion' : 'Aktionen' }}
-                </span>
-                <span v-if="rule.enabled" class="rules-empty__list-badge">Aktiv</span>
-              </button>
+                :rule="rule"
+                :is-selected="selectedRuleId === rule.id"
+                :is-active="logicStore.isRuleActive(rule.id)"
+                :execution-count="rule.execution_count ?? 0"
+                @select="selectRule"
+                @toggle="onRuleCardToggle"
+                @delete="onRuleCardDelete"
+              />
             </div>
           </div>
         </div>
@@ -700,32 +768,80 @@ onUnmounted(() => {
           <div class="rules-history__header">
             <span class="rules-history__title">
               <History class="w-4 h-4" />
-              Letzte Ausführungen
+              Execution History
             </span>
+            <div class="rules-history__filters">
+              <select
+                v-model="historyRuleFilter"
+                class="rules-history__filter-select"
+                aria-label="Regel-Filter"
+              >
+                <option value="">Alle Regeln</option>
+                <option v-for="rule in logicStore.rules" :key="rule.id" :value="rule.id">
+                  {{ rule.name }}
+                </option>
+              </select>
+              <select
+                v-model="historyStatusFilter"
+                class="rules-history__filter-select"
+                aria-label="Status-Filter"
+              >
+                <option value="">Alle</option>
+                <option value="success">Nur Erfolg</option>
+                <option value="error">Nur Fehler</option>
+              </select>
+            </div>
             <button class="rules-history__close" @click="showHistory = false" aria-label="Historie schließen">
               <ChevronDown class="w-4 h-4" />
             </button>
           </div>
-          <div class="rules-history__list">
+
+          <!-- Loading spinner -->
+          <div v-if="logicStore.isLoadingHistory" class="rules-history__loading">
+            <Loader2 class="w-4 h-4 animate-spin" />
+            <span>Lade Historie...</span>
+          </div>
+
+          <div v-else class="rules-history__list">
             <div
-              v-for="(exec, i) in logicStore.recentExecutions"
-              :key="i"
+              v-for="exec in filteredHistory"
+              :key="exec.id"
               class="rules-history__item"
               :class="{ 'rules-history__item--success': exec.success, 'rules-history__item--fail': !exec.success }"
+              @click="toggleHistoryDetail(exec.id)"
             >
-              <span class="rules-history__item-time">{{ formatTimestamp(exec.timestamp) }}</span>
-              <span class="rules-history__item-name">{{ exec.rule_name }}</span>
-              <span class="rules-history__item-status">
-                <Check v-if="exec.success" class="w-3 h-3" />
-                <AlertCircle v-else class="w-3 h-3" />
-              </span>
-              <span class="rules-history__item-detail">
-                {{ exec.trigger.sensor_type }} {{ exec.trigger.value }}
-                → {{ exec.action.command }}
-              </span>
+              <div class="rules-history__item-row">
+                <span class="rules-history__item-dot" :class="exec.success ? 'rules-history__item-dot--ok' : 'rules-history__item-dot--err'" />
+                <span class="rules-history__item-time">{{ formatHistoryTime(exec.triggered_at) }}</span>
+                <span class="rules-history__item-name">{{ exec.rule_name }}</span>
+                <span class="rules-history__item-status">
+                  <Check v-if="exec.success" class="w-3 h-3" />
+                  <AlertCircle v-else class="w-3 h-3" />
+                </span>
+                <span v-if="exec.execution_time_ms > 0" class="rules-history__item-timing">
+                  {{ exec.execution_time_ms }}ms
+                </span>
+              </div>
+              <!-- Expandable details -->
+              <div v-if="expandedHistoryId === exec.id" class="rules-history__detail">
+                <div class="rules-history__detail-row">
+                  <span class="rules-history__detail-label">Trigger:</span>
+                  <span>{{ exec.trigger_reason }}</span>
+                </div>
+                <div v-if="exec.actions_executed.length > 0" class="rules-history__detail-row">
+                  <span class="rules-history__detail-label">Aktionen:</span>
+                  <span v-for="(action, ai) in exec.actions_executed" :key="ai">
+                    {{ formatActionSummary(action) }}{{ ai < exec.actions_executed.length - 1 ? ', ' : '' }}
+                  </span>
+                </div>
+                <div v-if="exec.error_message" class="rules-history__detail-row rules-history__detail-row--error">
+                  <span class="rules-history__detail-label">Fehler:</span>
+                  <span>{{ exec.error_message }}</span>
+                </div>
+              </div>
             </div>
-            <div v-if="logicStore.recentExecutions.length === 0" class="rules-history__empty">
-              Noch keine Ausführungen in dieser Session
+            <div v-if="filteredHistory.length === 0" class="rules-history__empty">
+              Keine Ausführungen gefunden
             </div>
           </div>
         </div>
@@ -1388,78 +1504,9 @@ onUnmounted(() => {
   padding: 0 0.375rem;
 }
 
-.rules-empty__list-items {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.rules-empty__list-item {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  width: 100%;
-  padding: 0.625rem 0.625rem;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  color: var(--color-text-primary);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  text-align: left;
-}
-
-.rules-empty__list-item:hover {
-  background: var(--color-bg-tertiary);
-  border-color: var(--glass-border);
-}
-
-.rules-empty__list-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.rules-empty__list-dot--on {
-  background: var(--color-success);
-  box-shadow: 0 0 6px rgba(52, 211, 153, 0.4);
-}
-
-.rules-empty__list-dot--off {
-  background: var(--color-text-muted);
-}
-
-.rules-empty__list-name {
-  font-weight: 500;
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.rules-empty__list-meta {
-  font-size: 0.6875rem;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
-.rules-empty__list-arrow {
-  color: var(--color-iridescent-2);
-  margin: 0 0.125rem;
-}
-
-.rules-empty__list-badge {
-  font-size: 0.5625rem;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: var(--radius-full);
-  background: rgba(52, 211, 153, 0.15);
-  color: var(--color-success);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  flex-shrink: 0;
+.rules-empty__cards {
+  display: grid;
+  gap: 0.5rem;
 }
 
 /* ======================== EXECUTION HISTORY ======================== */
@@ -1474,7 +1521,7 @@ onUnmounted(() => {
 .rules-history__inner {
   display: flex;
   flex-direction: column;
-  max-height: 200px;
+  max-height: 260px;
   min-height: 0;
   overflow: hidden;
   background: var(--color-bg-secondary);
@@ -1483,7 +1530,7 @@ onUnmounted(() => {
 .rules-history__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.75rem;
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--glass-border);
 }
@@ -1497,6 +1544,29 @@ onUnmounted(() => {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.rules-history__filters {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex: 1;
+}
+
+.rules-history__filter-select {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.6875rem;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  outline: none;
+  cursor: pointer;
+}
+
+.rules-history__filter-select:focus {
+  border-color: rgba(129, 140, 248, 0.4);
 }
 
 .rules-history__close {
@@ -1506,10 +1576,21 @@ onUnmounted(() => {
   color: var(--color-text-muted);
   cursor: pointer;
   border-radius: var(--radius-sm);
+  flex-shrink: 0;
 }
 
 .rules-history__close:hover {
   color: var(--color-text-primary);
+}
+
+.rules-history__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1.5rem;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
 }
 
 .rules-history__list {
@@ -1520,16 +1601,38 @@ onUnmounted(() => {
 
 .rules-history__item {
   display: flex;
-  align-items: center;
-  gap: 0.625rem;
+  flex-direction: column;
+  gap: 0;
   padding: 0.375rem 0.5rem;
   font-size: 0.75rem;
   border-radius: var(--radius-sm);
+  cursor: pointer;
   transition: background var(--transition-fast);
 }
 
 .rules-history__item:hover {
   background: var(--color-bg-tertiary);
+}
+
+.rules-history__item-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.rules-history__item-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.rules-history__item-dot--ok {
+  background: var(--color-success);
+}
+
+.rules-history__item-dot--err {
+  background: var(--color-error);
 }
 
 .rules-history__item-time {
@@ -1545,6 +1648,7 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
   max-width: 200px;
 }
 
@@ -1560,11 +1664,38 @@ onUnmounted(() => {
   color: var(--color-error);
 }
 
-.rules-history__item-detail {
+.rules-history__item-timing {
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+.rules-history__detail {
+  padding: 0.375rem 0 0.25rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  color: var(--color-text-secondary);
+  border-left: 2px solid var(--glass-border);
+  margin-left: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.rules-history__detail-row {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.rules-history__detail-row--error {
+  color: var(--color-error);
+}
+
+.rules-history__detail-label {
+  font-weight: 600;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 
 .rules-history__empty {

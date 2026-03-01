@@ -48,7 +48,7 @@ export interface TimeCondition {
   type: 'time_window' | 'time'
   start_hour: number
   end_hour: number
-  days_of_week?: number[] // 0 = Sunday, 6 = Saturday
+  days_of_week?: number[] // 0 = Monday, 6 = Sunday (ISO 8601 / Python weekday())
 }
 
 export interface HysteresisCondition {
@@ -146,13 +146,14 @@ export interface ExecutionHistoryResponse {
 
 export interface ExecutionHistoryItem {
   id: string
-  logic_rule_id: string
-  trigger_data: Record<string, unknown>
+  rule_id: string
+  rule_name: string
+  triggered_at: string
+  trigger_reason: string
   actions_executed: Record<string, unknown>[]
   success: boolean
   error_message?: string
   execution_time_ms: number
-  timestamp: string
 }
 
 // =============================================================================

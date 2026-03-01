@@ -7,8 +7,8 @@
  * Status dot, last execution timestamp, execution counter.
  */
 
-import { computed } from 'vue'
-import { Zap, Clock, Trash2 } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { Zap, Clock, Trash2, AlertCircle } from 'lucide-vue-next'
 import { formatDistanceToNow } from 'date-fns'
 import { de } from 'date-fns/locale'
 import type { LogicRule, SensorCondition, ActuatorAction } from '@/types/logic'
@@ -34,6 +34,29 @@ const emit = defineEmits<{
   toggle: [ruleId: string, enabled: boolean]
   delete: [ruleId: string]
 }>()
+
+const isToggling = ref(false)
+
+/** Status label + color based on enabled state and last execution */
+const statusInfo = computed(() => {
+  if (props.rule.last_execution_success === false) {
+    return { label: 'Fehler', cssClass: 'rule-card__status-label--error' }
+  }
+  if (props.rule.enabled) {
+    return { label: 'Aktiv', cssClass: 'rule-card__status-label--active' }
+  }
+  return { label: 'Deaktiviert', cssClass: 'rule-card__status-label--disabled' }
+})
+
+/** Whether last execution failed */
+const hasError = computed(() => props.rule.last_execution_success === false)
+
+async function handleToggle() {
+  isToggling.value = true
+  emit('toggle', props.rule.id, !props.rule.enabled)
+  // Reset after short delay (parent handles actual async)
+  setTimeout(() => { isToggling.value = false }, 800)
+}
 
 /** Extract first sensor condition for display */
 const sensorBadge = computed(() => {
@@ -92,19 +115,32 @@ const lastTriggeredText = computed(() => {
       'rule-card--selected': isSelected,
       'rule-card--active': isActive,
       'rule-card--disabled': !rule.enabled,
+      'rule-card--error': hasError,
     }"
     @click="emit('select', rule.id)"
   >
-    <!-- Status dot + name -->
+    <!-- Status dot + name + status label -->
     <div class="rule-card__header">
       <button
         class="rule-card__status-dot"
-        :class="rule.enabled ? 'rule-card__status-dot--on' : 'rule-card__status-dot--off'"
+        :class="[
+          rule.enabled ? 'rule-card__status-dot--on' : 'rule-card__status-dot--off',
+          { 'rule-card__status-dot--error': hasError },
+          { 'rule-card__status-dot--toggling': isToggling },
+        ]"
         :title="rule.enabled ? 'Aktiv - Klick zum Deaktivieren' : 'Inaktiv - Klick zum Aktivieren'"
         :aria-label="rule.enabled ? 'Regel deaktivieren' : 'Regel aktivieren'"
-        @click.stop="emit('toggle', rule.id, !rule.enabled)"
+        @click.stop="handleToggle"
       />
       <span class="rule-card__name">{{ rule.name }}</span>
+      <span class="rule-card__status-label" :class="statusInfo.cssClass">
+        {{ statusInfo.label }}
+      </span>
+      <AlertCircle
+        v-if="hasError"
+        class="rule-card__error-icon"
+        :title="rule.last_execution_success === false ? 'Letzte Ausführung fehlgeschlagen' : ''"
+      />
       <button
         class="rule-card__delete"
         title="Regel löschen"
@@ -186,6 +222,14 @@ const lastTriggeredText = computed(() => {
   opacity: 0.6;
 }
 
+.rule-card--error {
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.rule-card--error:hover {
+  border-color: rgba(248, 113, 113, 0.6);
+}
+
 .rule-card__header {
   display: flex;
   align-items: center;
@@ -210,6 +254,46 @@ const lastTriggeredText = computed(() => {
 
 .rule-card__status-dot--off {
   background: var(--color-text-muted);
+}
+
+.rule-card__status-dot--error {
+  background: var(--color-status-error);
+  box-shadow: 0 0 4px var(--color-status-error);
+}
+
+.rule-card__status-dot--toggling {
+  animation: dot-pulse 0.8s ease-in-out;
+}
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.rule-card__status-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.rule-card__status-label--active {
+  color: var(--color-status-success);
+}
+
+.rule-card__status-label--disabled {
+  color: var(--color-text-muted);
+}
+
+.rule-card__status-label--error {
+  color: var(--color-status-error);
+}
+
+.rule-card__error-icon {
+  width: 12px;
+  height: 12px;
+  color: var(--color-status-error);
+  flex-shrink: 0;
 }
 
 .rule-card__name {
