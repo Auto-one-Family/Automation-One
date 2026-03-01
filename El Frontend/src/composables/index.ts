@@ -30,3 +30,11 @@ export { useScrollLock } from './useScrollLock'
 export { useESPStatus, getESPStatus, getESPStatusDisplay } from './useESPStatus'
 export type { ESPStatus } from './useESPStatus'
 export { useOrbitalDragDrop } from './useOrbitalDragDrop'
+export { useSparklineCache } from './useSparklineCache'
+export { useDeviceMetadata } from './useDeviceMetadata'
+export { useZoneGrouping } from './useZoneGrouping'
+export type {
+  SensorWithContext, ActuatorWithContext,
+  ZoneGroup, SubzoneGroup,
+  ActuatorZoneGroup, ActuatorSubzoneGroup,
+} from './useZoneGrouping'

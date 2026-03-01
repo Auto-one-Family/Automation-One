@@ -1049,6 +1049,22 @@ function getSensorAggCategory(sensorType: string): AggCategory {
   if (lower === 'ph') return 'ph'
   if (lower === 'ec') return 'ec'
   if (lower.includes('flow')) return 'flow'
+
+  // Fallback: multi-value base types (e.g. "sht31", "bme280") that don't match
+  // string-based checks above. Use SENSOR_TYPE_CONFIG category to determine mapping.
+  const config = SENSOR_TYPE_CONFIG[sensorType] || SENSOR_TYPE_CONFIG[lower]
+  if (config) {
+    const categoryToAgg: Partial<Record<SensorCategoryId, AggCategory>> = {
+      temperature: 'temperature',
+      air: 'humidity',
+      soil: 'moisture',
+      light: 'light',
+      water: 'other',
+      other: 'other',
+    }
+    return categoryToAgg[config.category] ?? 'other'
+  }
+
   return 'other'
 }
 
@@ -1140,6 +1156,7 @@ export function aggregateZoneSensors(devices: any[]): ZoneAggregation {
       for (const val of group.values) {
         if (val.value === null || val.value === undefined) continue
         if (val.quality === 'stale') continue // Skip stale data
+        if (val.value === 0 && val.quality === 'unknown') continue // Skip DB init value (no live data yet)
 
         const category = getSensorAggCategory(val.type)
         if (category === 'other') continue // Skip uncategorized

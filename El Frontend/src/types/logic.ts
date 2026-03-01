@@ -21,6 +21,8 @@ export interface LogicRule {
   cooldown_seconds?: number
   max_executions_per_hour?: number
   last_triggered?: string
+  execution_count?: number
+  last_execution_success?: boolean | null
   created_at: string
   updated_at: string
 }
@@ -79,6 +81,7 @@ export interface ActuatorAction {
   command: 'ON' | 'OFF' | 'PWM' | 'TOGGLE'
   value?: number // For PWM (0.0-1.0)
   duration?: number // Auto-off after N seconds
+  duration_seconds?: number // Backend field name (alias for duration)
 }
 
 export interface NotificationAction {
@@ -129,7 +132,8 @@ export interface LogicRulesResponse {
     total_items: number
     total_pages: number
     has_next: boolean
-    has_previous: boolean
+    has_previous?: boolean
+    has_prev?: boolean
   }
 }
 

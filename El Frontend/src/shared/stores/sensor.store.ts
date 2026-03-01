@@ -52,6 +52,21 @@ interface SensorHealthMessage {
   data: SensorHealthEvent
 }
 
+/**
+ * Normalize raw timestamp from server WebSocket event to ISO string.
+ *
+ * Server sends esp32_timestamp_raw which can be in seconds OR milliseconds.
+ * Mirrors server-side logic: if > 1e10, treat as milliseconds; else seconds.
+ * (sensor_handler.py line 315-322)
+ */
+function normalizeRawTimestamp(ts: number | undefined | null): string {
+  if (!ts) return new Date().toISOString()
+  const ms = ts > 1e10 ? ts : ts * 1000
+  // Sanity: if result is unreasonable (before year 2000 or after 2100), use now
+  if (ms < 946684800000 || ms > 4102444800000) return new Date().toISOString()
+  return new Date(ms).toISOString()
+}
+
 // ============================================================================
 // Helper: Get worst quality from multi-values
 // ============================================================================
@@ -173,9 +188,7 @@ export const useSensorStore = defineStore('sensor', () => {
     }
 
     sensor.quality = getWorstQuality(Object.values(sensor.multi_values))
-    sensor.last_read = data.timestamp
-      ? new Date(data.timestamp * 1000).toISOString()
-      : new Date().toISOString()
+    sensor.last_read = normalizeRawTimestamp(data.timestamp)
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -209,9 +222,7 @@ export const useSensorStore = defineStore('sensor', () => {
     }
 
     existingSensor.quality = getWorstQuality(Object.values(existingSensor.multi_values!))
-    existingSensor.last_read = data.timestamp
-      ? new Date(data.timestamp * 1000).toISOString()
-      : new Date().toISOString()
+    existingSensor.last_read = normalizeRawTimestamp(data.timestamp)
   }
 
   // ════════════════════════════════════════════════════════════════════════════

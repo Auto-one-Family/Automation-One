@@ -9,6 +9,17 @@ export * from './gpio'
 export * from './websocket-events'
 
 // =============================================================================
+// Device Metadata Types
+// =============================================================================
+export type { DeviceMetadata } from './device-metadata'
+export {
+  parseDeviceMetadata,
+  mergeDeviceMetadata,
+  getNextMaintenanceDate,
+  isMaintenanceOverdue,
+} from './device-metadata'
+
+// =============================================================================
 // Discovery/Approval Types (Phase: Device Discovery)
 // =============================================================================
 

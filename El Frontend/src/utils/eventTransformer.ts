@@ -227,18 +227,22 @@ function transformHeartbeat(event: UnifiedEvent, data: Record<string, unknown>):
 
 function transformSensorData(event: UnifiedEvent, data: Record<string, unknown>): TransformedMessage {
   const sensorType = (data.sensor_type || event.device_type || 'sensor') as string
-  const value = typeof data.value === 'number' ? data.value : 0
+  // Server sends processed_value and raw_value — no plain "value" field
+  const value = typeof data.processed_value === 'number' ? data.processed_value
+    : typeof data.raw_value === 'number' ? data.raw_value
+    : typeof data.value === 'number' ? data.value
+    : null
   const unit = (data.unit || '') as string
   const gpio = event.gpio ?? data.gpio
 
   const sensorName = SENSOR_NAMES[sensorType.toLowerCase()] || sensorType
-  const formattedValue = formatSensorValue(value, sensorType.toLowerCase())
+  const formattedValue = value !== null ? formatSensorValue(value, sensorType.toLowerCase()) : '-'
 
   return {
     type: 'sensor_data',
     title: 'SENSORDATEN',
     titleDE: sensorName,
-    summary: `${sensorName}: ${formattedValue}${unit ? ` ${unit}` : ''} · GPIO ${gpio}`,
+    summary: `${sensorName}: ${formattedValue}${value !== null && unit ? ` ${unit}` : ''} · GPIO ${gpio}`,
     description: `Neuer Messwert von ${sensorName}`,
     icon: 'Thermometer',
     category: 'sensors',

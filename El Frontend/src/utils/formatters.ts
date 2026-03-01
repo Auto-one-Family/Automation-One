@@ -610,6 +610,20 @@ export function getModeLabel(mode: SensorOperatingMode | undefined): string {
   }
 }
 
+/**
+ * Maps sensor quality level to a simplified status category.
+ * Used for status-dot coloring in MonitorView and similar views.
+ */
+export type SensorStatus = 'good' | 'warning' | 'alarm' | 'offline'
+
+export function qualityToStatus(quality: string): SensorStatus {
+  if (quality === 'good' || quality === 'excellent') return 'good'
+  if (quality === 'fair') return 'warning'
+  if (quality === 'poor' || quality === 'bad' || quality === 'error') return 'alarm'
+  if (quality === 'stale') return 'offline'
+  return 'good'
+}
+
 
 
 
