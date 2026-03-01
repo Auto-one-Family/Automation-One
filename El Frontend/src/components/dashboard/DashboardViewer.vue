@@ -42,7 +42,7 @@ const {
 let grid: GridStack | null = null
 const gridContainer = ref<HTMLElement | null>(null)
 
-// Resolved layout (match by local ID or server UUID)
+// Resolved layout (match by local ID or server UUID for deep-link robustness)
 const layout = computed(() =>
   dashStore.layouts.find(l => l.id === props.layoutId || l.serverId === props.layoutId) ?? null
 )

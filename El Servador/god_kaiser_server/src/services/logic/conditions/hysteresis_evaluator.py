@@ -248,10 +248,13 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
         if condition.get("gpio") != sensor_data.get("gpio"):
             return False
 
-        # Sensor-Type ist optional
+        # Sensor-Type ist optional (case-insensitive: ESP sends lowercase,
+        # rules may store uppercase from UI input)
         cond_sensor_type = condition.get("sensor_type")
-        if cond_sensor_type and cond_sensor_type != sensor_data.get("sensor_type"):
-            return False
+        if cond_sensor_type:
+            data_sensor_type = sensor_data.get("sensor_type") or ""
+            if cond_sensor_type.lower() != data_sensor_type.lower():
+                return False
 
         return True
 

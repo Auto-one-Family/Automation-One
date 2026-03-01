@@ -557,24 +557,37 @@ function handleImport() {
         <div v-if="dashStore.activeLayoutId && isEditing" class="dashboard-builder__target-wrapper">
           <button
             :class="['dashboard-builder__tool-btn', { 'dashboard-builder__tool-btn--active': activeTarget }]"
-            title="Wo anzeigen?"
+            title="Anzeigeort festlegen"
             @click="showTargetConfig = !showTargetConfig"
           >
             <MapPin class="w-4 h-4" />
           </button>
           <div v-if="showTargetConfig" class="dashboard-builder__target-dropdown">
-            <div class="dashboard-builder__target-title">Wo anzeigen?</div>
-            <button class="dashboard-builder__target-option" @click="setTarget('monitor', 'inline')">
-              Monitor — Inline
+            <div class="dashboard-builder__target-title">Anzeigeort</div>
+            <div class="dashboard-builder__target-hint">Wo soll dieses Dashboard eingebettet werden?</div>
+            <button
+              :class="['dashboard-builder__target-option', { 'dashboard-builder__target-option--selected': activeTarget?.view === 'monitor' && activeTarget?.placement === 'inline' }]"
+              @click="setTarget('monitor', 'inline')"
+            >
+              <span class="dashboard-builder__target-label">Monitor — Inline</span>
+              <span class="dashboard-builder__target-desc">Unter den Zone-Kacheln im Monitor</span>
             </button>
-            <button class="dashboard-builder__target-option" @click="setTarget('monitor', 'side-panel')">
-              Monitor — Seitenpanel
+            <button
+              :class="['dashboard-builder__target-option', { 'dashboard-builder__target-option--selected': activeTarget?.view === 'monitor' && activeTarget?.placement === 'side-panel' }]"
+              @click="setTarget('monitor', 'side-panel')"
+            >
+              <span class="dashboard-builder__target-label">Monitor — Seitenpanel</span>
+              <span class="dashboard-builder__target-desc">Fixiert rechts neben dem Monitor-Inhalt</span>
             </button>
-            <button class="dashboard-builder__target-option" @click="setTarget('hardware', 'inline')">
-              Übersicht — Inline
+            <button
+              :class="['dashboard-builder__target-option', { 'dashboard-builder__target-option--selected': activeTarget?.view === 'hardware' && activeTarget?.placement === 'inline' }]"
+              @click="setTarget('hardware', 'inline')"
+            >
+              <span class="dashboard-builder__target-label">Übersicht — Seitenpanel</span>
+              <span class="dashboard-builder__target-desc">Fixiert rechts in der Hardware-Übersicht</span>
             </button>
             <button v-if="activeTarget" class="dashboard-builder__target-option dashboard-builder__target-option--clear" @click="clearTarget">
-              Ziel entfernen
+              <span class="dashboard-builder__target-label">Anzeigeort entfernen</span>
             </button>
           </div>
         </div>
@@ -840,6 +853,92 @@ function handleImport() {
 .dashboard-builder__tool-btn:hover { background: var(--glass-bg-light); color: var(--color-text-primary); }
 .dashboard-builder__tool-btn--active { color: var(--color-accent); background: rgba(59, 130, 246, 0.08); }
 .dashboard-builder__tool-btn--danger:hover { color: var(--color-status-alarm); }
+
+/* Target Configurator Dropdown */
+.dashboard-builder__target-wrapper {
+  position: relative;
+}
+
+.dashboard-builder__target-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: var(--z-dropdown, 50);
+  min-width: 260px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-floating, 0 8px 32px rgba(0, 0, 0, 0.4));
+  padding: var(--space-2) 0;
+  animation: animate-fade-in 0.15s ease-out;
+}
+
+.dashboard-builder__target-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  padding: var(--space-1) var(--space-3);
+}
+
+.dashboard-builder__target-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  padding: 0 var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--glass-border);
+  margin-bottom: var(--space-1);
+}
+
+.dashboard-builder__target-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.dashboard-builder__target-option:hover {
+  background: var(--glass-bg-light, rgba(255, 255, 255, 0.04));
+}
+
+.dashboard-builder__target-option--selected {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.dashboard-builder__target-option--selected .dashboard-builder__target-label {
+  color: var(--color-accent);
+}
+
+.dashboard-builder__target-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.dashboard-builder__target-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.dashboard-builder__target-option--clear {
+  border-top: 1px solid var(--glass-border);
+  margin-top: var(--space-1);
+  padding-top: var(--space-2);
+}
+
+.dashboard-builder__target-option--clear .dashboard-builder__target-label {
+  color: var(--color-text-secondary);
+}
+
+.dashboard-builder__target-option--clear:hover .dashboard-builder__target-label {
+  color: var(--color-status-alarm);
+}
 
 /* Content Area */
 .dashboard-builder__content {

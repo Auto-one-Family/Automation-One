@@ -289,12 +289,15 @@ class LogicService:
                 esp_id = condition.get("esp_id", "")
                 gpio = condition.get("gpio", 0)
 
-                # Get mock value or default
+                # Get mock value, or fall back to latest real sensor reading from DB
                 mock_key = f"{esp_id}:{gpio}"
                 if test_request.mock_sensor_values and mock_key in test_request.mock_sensor_values:
                     actual_value = test_request.mock_sensor_values[mock_key]
                 else:
-                    actual_value = 0.0
+                    # Query latest real sensor data from DB
+                    actual_value = await self._get_latest_sensor_value(esp_id, gpio)
+                    if actual_value is None:
+                        actual_value = 0.0
 
                 # Create context
                 context = {
@@ -450,3 +453,39 @@ class LogicService:
                         break
 
         return timer_rules
+
+    async def _get_latest_sensor_value(
+        self, esp_id: str, gpio: int
+    ) -> Optional[float]:
+        """
+        Get the latest real sensor value from the database.
+
+        Uses the logic_repo's session to query sensor_data directly,
+        matching by device_id string and gpio pin.
+
+        Args:
+            esp_id: ESP device ID string (e.g., "ESP_00000001")
+            gpio: GPIO pin number
+
+        Returns:
+            Latest processed_value or raw_value, or None if no data found
+        """
+        try:
+            from sqlalchemy import text
+
+            result = await self.logic_repo.session.execute(
+                text(
+                    "SELECT sd.processed_value, sd.raw_value "
+                    "FROM sensor_data sd "
+                    "JOIN esp_devices ed ON sd.esp_id = ed.id "
+                    "WHERE ed.device_id = :esp_id AND sd.gpio = :gpio "
+                    "ORDER BY sd.timestamp DESC LIMIT 1"
+                ),
+                {"esp_id": esp_id, "gpio": gpio},
+            )
+            row = result.fetchone()
+            if row:
+                return float(row[0]) if row[0] is not None else float(row[1])
+        except Exception as e:
+            logger.warning(f"Failed to fetch latest sensor value for {esp_id}:{gpio}: {e}")
+        return None

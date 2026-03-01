@@ -181,6 +181,13 @@ bool MQTTClient::connectToBroker() {
     
     LOG_I(TAG, "Connecting to MQTT broker: " + current_config_.server + ":" + String(current_config_.port));
 
+    // Re-set server before every connection attempt to prevent dangling pointer.
+    // PubSubClient::setServer() stores only the char* pointer, not a copy.
+    // If Arduino String reallocates its internal buffer (heap fragmentation),
+    // the old pointer becomes invalid. This fixes DNS resolution errors
+    // like "hostByName(): DNS Failed for <garbage>" on reconnect.
+    mqtt_.setServer(current_config_.server.c_str(), current_config_.port);
+
     // ============================================
     // LAST-WILL CONFIGURATION (Critical for ESP failure detection)
     // ============================================

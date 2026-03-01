@@ -723,8 +723,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
     syncLayoutToServer(layoutId)
   }
 
-  // Auto-load on store creation
+  // Auto-load on store creation: localStorage first (instant), then server sync (async)
   loadLayouts()
+  fetchLayouts()
 
   return {
     showControls,

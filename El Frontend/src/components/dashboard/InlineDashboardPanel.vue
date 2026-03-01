@@ -30,7 +30,7 @@ const { createWidgetElement, mountWidgetToElement, cleanupAllWidgets } = useDash
 })
 
 const layout = computed(() =>
-  dashStore.layouts.find(l => l.id === props.layoutId)
+  dashStore.layouts.find(l => l.id === props.layoutId || l.serverId === props.layoutId)
 )
 
 const widgets = computed(() => layout.value?.widgets ?? [])
@@ -40,12 +40,11 @@ const editorRoute = computed(() => ({
   params: { dashboardId: layout.value?.serverId || props.layoutId },
 }))
 
-/** Calculate grid cell style from widget position */
+/** Calculate grid cell style from widget position (row height = 60px via grid-auto-rows) */
 function widgetStyle(w: DashboardWidget): Record<string, string> {
   return {
     'grid-column': `${w.x + 1} / span ${w.w}`,
     'grid-row': `${w.y + 1} / span ${w.h}`,
-    'min-height': `${w.h * 60}px`,
   }
 }
 
@@ -148,6 +147,7 @@ onUnmounted(() => {
 .inline-dashboard__grid {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
+  grid-auto-rows: 60px;
   gap: 4px;
   padding: 8px;
 }
@@ -155,10 +155,14 @@ onUnmounted(() => {
 .inline-dashboard__cell {
   min-width: 0;
   overflow: hidden;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.06));
 }
 
 .inline-dashboard__mount {
   width: 100%;
   height: 100%;
+  overflow: hidden;
 }
 </style>

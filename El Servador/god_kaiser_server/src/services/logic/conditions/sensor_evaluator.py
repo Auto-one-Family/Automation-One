@@ -57,9 +57,12 @@ class SensorConditionEvaluator(BaseConditionEvaluator):
         except (ValueError, TypeError):
             return False
 
-        # Optional sensor type filter
+        # Optional sensor type filter (case-insensitive: ESP sends lowercase,
+        # rules may store uppercase from UI input)
         if condition.get("sensor_type"):
-            if condition.get("sensor_type") != sensor_data.get("sensor_type"):
+            cond_type = (condition.get("sensor_type") or "").lower()
+            data_type = (sensor_data.get("sensor_type") or "").lower()
+            if cond_type != data_type:
                 return False
 
         # Get values

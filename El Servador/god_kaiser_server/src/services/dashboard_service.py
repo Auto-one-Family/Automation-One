@@ -116,6 +116,7 @@ class DashboardService:
             zone_id=data.zone_id,
             auto_generated=data.auto_generated,
             sensor_id=data.sensor_id,
+            target=data.target,
         )
         await self.session.commit()
 
@@ -173,6 +174,9 @@ class DashboardService:
             update_data["auto_generated"] = data.auto_generated
         if data.sensor_id is not None:
             update_data["sensor_id"] = data.sensor_id
+        # target uses UNSET sentinel: None means "clear target", missing means "don't change"
+        if "target" in (data.model_fields_set or set()):
+            update_data["target"] = data.target
 
         if not update_data:
             return dashboard
