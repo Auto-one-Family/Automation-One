@@ -89,11 +89,34 @@ class SensorConditionEvaluator(BaseConditionEvaluator):
         return True
 
     def _get_cross_sensor_value(self, condition: Dict, context: Dict) -> float | None:
-        """Look up latest sensor value from pre-loaded cross-sensor data."""
+        """Look up latest sensor value from pre-loaded cross-sensor data.
+
+        Multi-value sensor support: For sensors like SHT31 that provide multiple
+        values on the same GPIO, sensor_type is included in the lookup key.
+        """
         sensor_values = context.get("sensor_values", {})
+        cond_sensor_type = condition.get("sensor_type")
+
+        # Try sensor_type-specific key first (multi-value sensors like SHT31)
+        if cond_sensor_type:
+            typed_key = f"{condition.get('esp_id')}:{condition.get('gpio')}:{cond_sensor_type}"
+            cross_data = sensor_values.get(typed_key)
+            if cross_data is not None:
+                return cross_data.get("value")
+
+        # Fallback: untyped key (single-value sensors)
         sensor_key = f"{condition.get('esp_id')}:{condition.get('gpio')}"
         cross_data = sensor_values.get(sensor_key)
         if cross_data is not None:
+            # Verify sensor_type matches if condition specifies one
+            if cond_sensor_type:
+                data_type = (cross_data.get("sensor_type") or "").lower()
+                if data_type and data_type != cond_sensor_type.lower():
+                    logger.debug(
+                        f"Cross-sensor type mismatch: condition wants {cond_sensor_type}, "
+                        f"got {data_type} for {sensor_key}"
+                    )
+                    return None
             return cross_data.get("value")
         return None
 
@@ -145,6 +168,11 @@ class SensorConditionEvaluator(BaseConditionEvaluator):
             try:
                 min_val = float(min_val)
                 max_val = float(max_val)
+                if min_val > max_val:
+                    logger.warning(
+                        f"'between' operator: min ({min_val}) > max ({max_val}), swapping"
+                    )
+                    min_val, max_val = max_val, min_val
                 return min_val <= actual <= max_val
             except (ValueError, TypeError) as e:
                 logger.error(f"Invalid numeric values for 'between' operator: {e}")

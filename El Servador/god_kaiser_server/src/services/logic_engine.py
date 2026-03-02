@@ -315,7 +315,7 @@ class LogicEngine:
                 last_execution = await logic_repo.get_last_execution(rule.id)
                 if last_execution:
                     time_since_last = datetime.now(timezone.utc) - last_execution.timestamp
-                    if time_since_last.total_seconds() < rule.cooldown_seconds:
+                    if time_since_last.total_seconds() <= rule.cooldown_seconds:
                         logger.debug(
                             f"Rule {rule.rule_name} in cooldown: "
                             f"{time_since_last.total_seconds():.1f}s < {rule.cooldown_seconds}s"
@@ -824,11 +824,24 @@ class LogicEngine:
         sensor_values = {}
 
         # Include trigger data in sensor_values for consistency
-        trigger_key = f"{trigger_data.get('esp_id')}:{trigger_data.get('gpio')}"
+        # Use sensor_type-specific key for multi-value sensors (SHT31 temp vs humidity)
+        trigger_sensor_type = trigger_data.get("sensor_type")
+        trigger_key = (
+            f"{trigger_data.get('esp_id')}:{trigger_data.get('gpio')}:{trigger_sensor_type}"
+            if trigger_sensor_type
+            else f"{trigger_data.get('esp_id')}:{trigger_data.get('gpio')}"
+        )
         sensor_values[trigger_key] = {
             "value": trigger_data.get("value"),
-            "sensor_type": trigger_data.get("sensor_type"),
+            "sensor_type": trigger_sensor_type,
         }
+        # Also store untyped key for backward compatibility
+        untyped_trigger_key = f"{trigger_data.get('esp_id')}:{trigger_data.get('gpio')}"
+        if untyped_trigger_key != trigger_key:
+            sensor_values[untyped_trigger_key] = {
+                "value": trigger_data.get("value"),
+                "sensor_type": trigger_sensor_type,
+            }
 
         # Extract all sensor conditions from trigger_conditions
         conditions_to_check = []
@@ -851,10 +864,12 @@ class LogicEngine:
             cond_gpio = cond.get("gpio")
             if cond_esp is None or cond_gpio is None:
                 continue
-            sensor_key = f"{cond_esp}:{cond_gpio}"
+            # Include sensor_type in key for multi-value sensors (SHT31 temp vs humidity)
+            cond_sensor_type = cond.get("sensor_type")
+            sensor_key = f"{cond_esp}:{cond_gpio}:{cond_sensor_type}" if cond_sensor_type else f"{cond_esp}:{cond_gpio}"
             if sensor_key != trigger_key and sensor_key not in sensor_values:
                 cross_sensor_keys.append(
-                    (cond_esp, int(cond_gpio), cond.get("sensor_type"))
+                    (cond_esp, int(cond_gpio), cond_sensor_type)
                 )
 
         if not cross_sensor_keys:
@@ -866,7 +881,8 @@ class LogicEngine:
             sensor_repo = SensorRepository(session)
 
             for esp_id_str, gpio, sensor_type in cross_sensor_keys:
-                sensor_key = f"{esp_id_str}:{gpio}"
+                # Include sensor_type in key for multi-value sensors (SHT31 temp vs humidity)
+                sensor_key = f"{esp_id_str}:{gpio}:{sensor_type}" if sensor_type else f"{esp_id_str}:{gpio}"
                 # Look up ESP UUID from device_id
                 esp_device = await esp_repo.get_by_device_id(esp_id_str)
                 if not esp_device:
