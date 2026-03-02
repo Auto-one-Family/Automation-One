@@ -72,7 +72,7 @@ help:
 	@echo "  make wokwi-list          - List all available test scenarios"
 	@echo "  make wokwi-test-quick    - Run quick tests (boot + heartbeat)"
 	@echo "  make wokwi-test-full     - Run all CI core scenarios (22 passive tests)"
-	@echo "  make wokwi-test-all      - Run ALL 173 scenarios (nightly equivalent)"
+	@echo "  make wokwi-test-all      - Run ALL 191 scenarios (nightly equivalent)"
 	@echo "  make wokwi-test-error-injection - Run 10 error-injection scenarios"
 	@echo "  make wokwi-test-scenario SCENARIO=path - Run specific scenario"
 	@echo "  make wokwi-test-category CAT=01-boot   - Run category tests"
@@ -315,7 +315,7 @@ endif
 		echo "✅ Category $(CAT) tests passed!"
 
 wokwi-test-all:
-	@echo "Running ALL 173 Wokwi scenarios (nightly equivalent)..."
+	@echo "Running ALL 191 Wokwi scenarios (nightly equivalent)..."
 	@echo "This will take a long time. Requires Mosquitto on localhost:1883."
 	@PASSED=0; FAILED=0; TOTAL=0; \
 	cd "El Trabajante" && \

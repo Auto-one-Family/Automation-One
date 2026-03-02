@@ -12,19 +12,20 @@
 # Prerequisites:
 # - WOKWI_CLI_TOKEN secret must be configured in GitHub repository
 #
-# Coverage: 191 scenarios across 14 categories (178 on disk + 13 new dynamic sensor)
+# Coverage: 191 scenarios across 15 categories
 # - PR/Push: 52 core scenarios + 1 legacy across 16 jobs (fast feedback)
-# - Nightly/Manual: ALL 191 scenarios (+ 7 extended jobs = 24 total jobs + summary)
+# - Nightly/Manual (Mon+Thu): ALL 191 scenarios (+ 7 extended jobs = 24 total jobs + summary)
 #
 # Core PR Tests (52 scenarios in categories + 1 legacy):
-# - Boot (2), Sensor (2+3), MQTT Legacy (1), Actuator (4+3), Zone (2)
-# - Emergency (2+1), Config (2), Combined (3), GPIO (5), I2C (5)
+# - Boot (2), Sensor (5), MQTT Legacy (1), Actuator (7), Zone (2)
+# - Emergency (3), Config (2), Combined (2), GPIO (5), I2C (5)
 # - NVS (5), PWM (3), Error-Injection (10)
 #
-# Nightly Extended Tests (135 additional scenarios):
+# Nightly Extended Tests (139 additional scenarios):
 # - I2C Extended (15), OneWire (29), Hardware (9)
 # - PWM Extended (15), NVS Extended (35), GPIO Extended (19)
 # - Sensor Dynamic (13): DS18B20 sweeps, DHT22 sweeps, ADC sweeps
+# - Correlation (5)
 #
 # Documentation: https://docs.wokwi.com/wokwi-ci/getting-started
 
@@ -45,7 +46,7 @@ on:
       - 'El Trabajante/**'
       - '.github/workflows/wokwi-tests.yml'
   schedule:
-    - cron: '0 2 * * *'  # Nightly at 2 AM UTC — runs ALL scenarios
+    - cron: '0 2 * * 1,4'  # Mon+Thu at 2 AM UTC — runs ALL scenarios (quota-optimized: ~720 min/week vs 2520 min/week)
   workflow_dispatch:  # Allow manual triggering
 
 jobs:

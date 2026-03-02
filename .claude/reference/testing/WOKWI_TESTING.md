@@ -1,9 +1,11 @@
 # Wokwi ESP32 Testing Guide
 
-**Version:** 2.1 (Nightly Extended Tests)
-**Last Updated:** 2026-02-23
-**Status:** ✅ Production-Ready
-**Test Coverage:** 52 core (PR) + 122 extended (Nightly) = 173 total (100%)
+**Version:** 2.2 (MCP Integration + Quota Optimization)
+**Last Updated:** 2026-03-02
+**Status:** Production-Ready
+**CLI Version:** v0.26.1
+**Test Coverage:** 52 core (PR) + 139 extended (Nightly) = 191 total across 15 categories
+**Nightly Schedule:** Mon+Thu at 2 AM UTC (quota-optimized)
 
 ---
 
@@ -548,12 +550,12 @@ docker ps --format "table {{.Names}}\t{{.Ports}}" | Select-String mqtt
 
 **Solution:**
 ```bash
-# Install Wokwi CLI (requires Wokwi account)
-npm install -g wokwi-cli
+# Download latest from GitHub releases (wokwi-cli is NOT on npm)
+gh release download v0.26.1 --repo wokwi/wokwi-cli --pattern "wokwi-cli-win-x64.exe" --dir /tmp/
+cp /tmp/wokwi-cli-win-x64.exe ~/.wokwi/bin/wokwi-cli
 
-# Or use npx (no install)
-cd "El Trabajante"
-npx wokwi-cli . --timeout 90000 --scenario <scenario>
+# Verify
+wokwi-cli --version  # Should show 0.26.1
 ```
 
 **CI:** Uses `WOKWI_CLI_TOKEN` secret (set in GitHub repository settings)
@@ -620,6 +622,80 @@ npx wokwi-cli . --timeout 90000 --scenario <scenario>
    make wokwi-seed  # Only once
    make wokwi-test-quick  # Run multiple times
    ```
+
+---
+
+## Wokwi MCP Server Integration
+
+**Status:** Configured (v0.26.1, experimental)
+**Config:** `.mcp.json` (project root, `wokwi` server entry)
+
+### Available MCP Tools (11 tools, verified 2026-03-02)
+
+| Tool | Required Params | Description |
+|------|----------------|-------------|
+| `wokwi_start_simulation` | `projectPath?` | Start simulation |
+| `wokwi_stop_simulation` | - | Stop simulation |
+| `wokwi_resume_simulation` | - | Resume paused simulation |
+| `wokwi_restart_simulation` | - | Restart simulation |
+| `wokwi_get_status` | - | Get simulation status |
+| `wokwi_write_serial` | `text` | Write to serial monitor |
+| `wokwi_read_serial` | `clear?` | Read serial buffer |
+| `wokwi_read_pin` | `partId`, `pin` | Read pin value |
+| `wokwi_set_control` | `partId`, `control`, `value` | Set part control (e.g. temperature) |
+| `wokwi_take_screenshot` | `partId` | Screenshot display component |
+| `wokwi_export_vcd` | `outputPath` | Export VCD logic analyzer data |
+
+### MCP Resources (2 resources)
+
+| URI | Description |
+|-----|-------------|
+| `file://wokwi.toml` | Project configuration |
+| `file://diagram.json` | Circuit diagram |
+
+### Agent-Driven Testing Flow (via MCP)
+
+```
+1. wokwi_start_simulation → Start ESP32 simulation
+2. wokwi_read_serial (poll) → Wait for "MQTT connected"
+3. mosquitto_pub (Bash) → Inject MQTT config/commands
+4. wokwi_read_serial → Read response
+5. wokwi_set_control → Change sensor values dynamically
+6. wokwi_read_serial → Verify sensor data published
+7. wokwi_read_pin → Verify GPIO states (LED, actuator)
+8. wokwi_export_vcd → Save timing data for analysis
+9. wokwi_stop_simulation → Clean up
+```
+
+### Quota Notes
+
+- MCP handshake and tool discovery do NOT consume quota
+- Starting a simulation DOES consume CI minutes
+- Nightly schedule: Mon+Thu (cron: `0 2 * * 1,4`) to preserve quota
+- Quota is account-wide, not per-token
+
+---
+
+## Scenario Count (2026-03-02)
+
+| Category | Count | CI Type |
+|----------|-------|---------|
+| 01-boot | 2 | core |
+| 02-sensor | 18 | core (5) + nightly (13 dynamic) |
+| 03-actuator | 7 | core |
+| 04-zone | 2 | core |
+| 05-emergency | 3 | core |
+| 06-config | 2 | core |
+| 07-combined | 2 | core |
+| 08-i2c | 20 | core (5) + nightly (15) |
+| 08-onewire | 29 | nightly |
+| 09-hardware | 9 | nightly |
+| 09-pwm | 18 | core (3) + nightly (15) |
+| 10-nvs | 40 | core (5) + nightly (35) |
+| 11-error-injection | 10 | core |
+| 12-correlation | 5 | nightly |
+| gpio | 24 | core (5) + nightly (19) |
+| **Total** | **191** | **52 core + 139 nightly** |
 
 ---
 
