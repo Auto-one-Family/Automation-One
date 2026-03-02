@@ -20,8 +20,15 @@ Endpoints:
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query
 
+from ...core.exceptions import (
+    EmailProviderUnavailableException,
+    EmailSendException,
+    NoEmailRecipientException,
+    NotificationNotFoundException,
+    NotificationSendFailedException,
+)
 from ...core.logging_config import get_logger
 from ...db.repositories.notification_repo import (
     NotificationPreferencesRepository,
@@ -159,10 +166,7 @@ async def get_notification(
     notification = await repo.get_by_id(notification_id)
 
     if not notification or notification.user_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Notification not found",
-        )
+        raise NotificationNotFoundException(str(notification_id))
 
     return NotificationResponse.model_validate(notification)
 
@@ -187,10 +191,7 @@ async def mark_notification_read(
     notification = await repo.mark_as_read(notification_id, user.id)
 
     if not notification:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Notification not found",
-        )
+        raise NotificationNotFoundException(str(notification_id))
 
     await db.commit()
 
@@ -262,10 +263,7 @@ async def send_notification(
     result = await router_service.route(notification_create)
 
     if not result:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Notification was deduplicated or no users found",
-        )
+        raise NotificationSendFailedException("Notification was deduplicated or no users found")
 
     return NotificationResponse.model_validate(result)
 
@@ -314,10 +312,7 @@ async def test_email(
     email_service = get_email_service()
 
     if not email_service.is_available:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Email service not available. Check EMAIL_ENABLED and provider configuration.",
-        )
+        raise EmailProviderUnavailableException()
 
     # Determine recipient
     recipient = request.email
@@ -331,19 +326,13 @@ async def test_email(
             recipient = user.email
 
     if not recipient:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="No email address found. Provide one in the request or set it in preferences.",
-        )
+        raise NoEmailRecipientException()
 
     provider = email_service.provider_name
     success = await email_service.send_test_email(recipient)
 
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Email delivery failed via {provider}. Check server logs for details.",
-        )
+        raise EmailSendException(provider=provider, reason="Check server logs for details.")
 
     return TestEmailResponse(
         success=True,

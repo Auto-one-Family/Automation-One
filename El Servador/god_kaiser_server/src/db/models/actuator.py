@@ -20,7 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from ..base import Base, TimestampMixin
+from ..base import Base, TimestampMixin, _utc_now
 from .enums import DataSource
 
 
@@ -134,6 +134,20 @@ class ActuatorConfig(Base, TimestampMixin):
         default=dict,
         nullable=False,
         doc="Additional actuator metadata",
+    )
+
+    # Alert Configuration (Phase 4A.7 — Per-Actuator Alert Suppression)
+    alert_config: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        doc="Per-actuator alert config: alerts_enabled, suppression_reason/note/until",
+    )
+
+    # Runtime Statistics (Phase 4A.8 — Runtime & Maintenance)
+    runtime_stats: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        doc="Runtime stats: uptime_hours, last_restart, expected_lifetime_hours, maintenance_log[]",
     )
 
     # =========================================================================
@@ -399,7 +413,7 @@ class ActuatorHistory(Base):
         DateTime(timezone=True),
         nullable=False,
         index=True,
-        default=datetime.utcnow,
+        default=_utc_now,
         doc="Command timestamp",
     )
 

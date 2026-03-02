@@ -4,7 +4,7 @@ Tests for actuator config, state, and history operations
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
@@ -106,7 +106,7 @@ class TestActuatorRepositoryState:
             actuator_type="pump",
             current_value=1.0,
             state="on",
-            last_command_timestamp=datetime.utcnow(),
+            last_command_timestamp=datetime.now(timezone.utc),
         )
         actuator_repo.session.add(state)
         await actuator_repo.session.flush()

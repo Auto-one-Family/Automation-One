@@ -377,6 +377,27 @@ class SensorDataHandler:
                     display_value = processed_value if processed_value is not None else raw_value
                     update_sensor_value(esp_id_str, sensor_type, display_value)
 
+                    # ═══════════════════════════════════════════════════════
+                    # THRESHOLD → NOTIFICATION PIPELINE (Phase 4A.7)
+                    # Alerts are ALWAYS evaluated. Notifications are
+                    # suppressed if sensor/device is in suppression mode.
+                    # ═══════════════════════════════════════════════════════
+                    if sensor_config:
+                        try:
+                            await self._evaluate_thresholds_and_notify(
+                                session=session,
+                                sensor_config=sensor_config,
+                                esp_id_str=esp_id_str,
+                                gpio=gpio,
+                                sensor_type=sensor_type,
+                                value=display_value,
+                            )
+                        except Exception as e:
+                            # Threshold evaluation MUST NOT block data processing
+                            logger.warning(
+                                f"Threshold evaluation failed for {esp_id_str} GPIO {gpio}: {e}"
+                            )
+
                     # WebSocket Broadcast (best-effort, outside transaction)
                     try:
                         from ...websocket.manager import WebSocketManager
@@ -468,6 +489,118 @@ class SensorDataHandler:
                 exc_info=True,
             )
             return False
+
+    async def _evaluate_thresholds_and_notify(
+        self,
+        session,
+        sensor_config,
+        esp_id_str: str,
+        gpio: int,
+        sensor_type: str,
+        value: float,
+    ) -> None:
+        """
+        Evaluate sensor value against thresholds and route notification.
+
+        Pipeline:
+        1. Get effective thresholds (custom from alert_config > global from sensor_config)
+        2. Check value against thresholds → determine severity
+        3. Check suppression status (sensor-level + device-level)
+        4. Route notification via NotificationRouter (unless suppressed)
+        5. Alert is always logged (even when suppressed)
+        """
+        from ...services.alert_suppression_service import AlertSuppressionService
+        from ...services.notification_router import NotificationRouter
+        from ...schemas.notification import NotificationCreate
+
+        suppression_svc = AlertSuppressionService(session)
+
+        # Step 1: Get effective thresholds
+        thresholds = suppression_svc.get_effective_thresholds(sensor_config)
+        if not thresholds:
+            return  # No thresholds configured — nothing to evaluate
+
+        # Step 2: Check value against thresholds
+        severity = suppression_svc.check_thresholds(value, thresholds)
+        if not severity:
+            return  # Value within bounds — no alert
+
+        # Apply severity override if configured
+        override = suppression_svc.get_severity_override(sensor_config)
+        if override:
+            severity = override
+
+        # Step 3: Check suppression
+        is_suppressed, suppression_reason = await suppression_svc.is_sensor_suppressed(
+            sensor_config
+        )
+
+        # Step 4: Build notification payload
+        sensor_name = sensor_config.sensor_name or f"{sensor_type} GPIO {gpio}"
+        unit = sensor_config.sensor_metadata.get("latest_unit", "") if sensor_config.sensor_metadata else ""
+
+        alert_metadata = {
+            "esp_id": esp_id_str,
+            "gpio": gpio,
+            "sensor_type": sensor_type,
+            "sensor_config_id": str(sensor_config.id),
+            "value": value,
+            "severity": severity,
+            "thresholds": thresholds,
+        }
+
+        if is_suppressed:
+            # ISA-18.2 Audit-Trail: ALWAYS persist alert to DB, even when suppressed.
+            # Uses NotificationRouter.persist_suppressed() for pattern-conformity
+            # (Service → Repository, no direct repo access from handler).
+            try:
+                alert_metadata["suppressed"] = True
+                alert_metadata["suppression_reason"] = suppression_reason
+                suppressed_notification = NotificationCreate(
+                    severity=severity,
+                    category="data_quality",
+                    title=f"[Suppressed] Schwellenwert-Alarm: {sensor_name}",
+                    body=(
+                        f"Sensor '{sensor_name}' ({sensor_type}) auf {esp_id_str} GPIO {gpio} "
+                        f"hat Wert {value}{unit} — {severity}-Schwellenwert überschritten. "
+                        f"(Suppressed: {suppression_reason})"
+                    ),
+                    source="sensor_threshold",
+                    metadata=alert_metadata,
+                )
+                router = NotificationRouter(session)
+                await router.persist_suppressed(suppressed_notification)
+                await session.commit()
+                logger.debug(
+                    f"Suppressed alert persisted (audit-trail): {esp_id_str} GPIO {gpio}, "
+                    f"severity={severity}, reason={suppression_reason}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to persist suppressed alert: {e}")
+            return  # Suppressed — persisted but not routed (no WS, no email)
+
+        # Step 5: Route notification (unsuppressed → full pipeline)
+        notification = NotificationCreate(
+            severity=severity,
+            category="data_quality",
+            title=f"Schwellenwert-Alarm: {sensor_name}",
+            body=(
+                f"Sensor '{sensor_name}' ({sensor_type}) auf {esp_id_str} GPIO {gpio} "
+                f"hat Wert {value}{unit} — {severity}-Schwellenwert überschritten."
+            ),
+            source="sensor_threshold",
+            metadata=alert_metadata,
+        )
+
+        try:
+            router = NotificationRouter(session)
+            await router.route(notification)
+            logger.info(
+                f"Threshold alert routed: {esp_id_str} GPIO {gpio}, "
+                f"severity={severity}, value={value}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to route threshold notification: {e}")
 
     @classmethod
     def _check_physical_range(cls, sensor_type: str, value: float) -> str | None:

@@ -365,6 +365,18 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Digest Service job registered (60min interval)")
 
+        # Step 3.4.5: Register Alert Suppression tasks (Phase 4A.7)
+        # - Suppression expiry check: every 5 min (re-enables expired suppressions)
+        # - Maintenance overdue check: daily at 08:00 (sends info notifications)
+        logger.info("Registering Alert Suppression scheduler tasks...")
+        try:
+            from .services.alert_suppression_scheduler import register_suppression_tasks
+
+            register_suppression_tasks(_central_scheduler)
+            logger.info("Alert Suppression scheduler tasks registered")
+        except Exception as e:
+            logger.warning(f"Alert Suppression scheduler registration failed (non-critical): {e}")
+
         # Step 3.5: Recover running Mock-ESP simulations from database (Paket X)
         # After server restart, resume any simulations that were active before shutdown
         # Uses SimulationScheduler.recover_mocks() for DB-First architecture

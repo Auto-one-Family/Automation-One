@@ -19,13 +19,18 @@ Routing Rules (ISA-18.2):
 """
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.logging_config import get_logger
+from ..core.metrics import (
+    increment_notification_created,
+    increment_notification_deduplicated,
+    increment_notification_suppressed,
+    increment_ws_notification_broadcast,
+)
 from ..db.models.notification import Notification, NotificationSeverity
-from ..db.models.user import User
 from ..db.repositories.notification_repo import (
     NotificationPreferencesRepository,
     NotificationRepository,
@@ -77,19 +82,31 @@ class NotificationRouter:
         if user_id is None:
             return await self._broadcast_to_all(notification)
 
-        # Step 0: Deduplication check (60s window)
-        is_duplicate = await self.notification_repo.check_duplicate(
-            user_id=user_id,
-            source=notification.source,
-            category=notification.category,
-            title=notification.title,
-            window_seconds=60,
-        )
-        if is_duplicate:
-            logger.debug(
-                f"Notification deduplicated: '{notification.title}' for user {user_id}"
+        # Step 0: Deduplication check
+        # FIX-07: Fingerprint-based dedup (Grafana alerts) takes priority
+        if notification.fingerprint:
+            is_fp_duplicate = await self.notification_repo.check_fingerprint_duplicate(
+                fingerprint=notification.fingerprint,
             )
-            return None
+            if is_fp_duplicate:
+                logger.debug(f"Notification deduplicated by fingerprint: '{notification.title}'")
+                increment_notification_deduplicated()
+                return None
+        else:
+            # Fallback: title-based dedup (60s window)
+            is_duplicate = await self.notification_repo.check_duplicate(
+                user_id=user_id,
+                source=notification.source,
+                category=notification.category,
+                title=notification.title,
+                window_seconds=60,
+            )
+            if is_duplicate:
+                logger.debug(
+                    f"Notification deduplicated: '{notification.title}' for user {user_id}"
+                )
+                increment_notification_deduplicated()
+                return None
 
         # Step 1: ALWAYS persist to DB
         db_notification = await self.notification_repo.create(
@@ -99,15 +116,21 @@ class NotificationRouter:
             category=notification.category,
             title=notification.title,
             body=notification.body,
-            metadata=notification.metadata,
+            extra_data=notification.metadata,
             source=notification.source,
             parent_notification_id=notification.parent_notification_id,
+            fingerprint=notification.fingerprint,
         )
 
         logger.info(
             f"Notification created: id={db_notification.id}, "
             f"severity={notification.severity}, source={notification.source}, "
             f"title='{notification.title}'"
+        )
+        increment_notification_created(
+            severity=notification.severity,
+            category=notification.category,
+            source=notification.source,
         )
 
         # Step 2: Load user preferences
@@ -162,11 +185,14 @@ class NotificationRouter:
                 "title": notification.title,
                 "body": notification.body,
                 "source": notification.source,
-                "metadata": notification.metadata,
+                "metadata": notification.extra_data,
                 "is_read": notification.is_read,
-                "created_at": notification.created_at.isoformat() if notification.created_at else None,
+                "created_at": (
+                    notification.created_at.isoformat() if notification.created_at else None
+                ),
             }
             await ws_manager.broadcast("notification_new", data)
+            increment_ws_notification_broadcast("notification_new")
             logger.debug(f"WebSocket broadcast: notification_new for user {notification.user_id}")
         except Exception as e:
             # WebSocket failure MUST NOT block notification processing
@@ -191,9 +217,7 @@ class NotificationRouter:
         if self._is_quiet_hours(prefs):
             # During quiet hours, only send critical
             if severity != NotificationSeverity.CRITICAL:
-                logger.debug(
-                    f"Email suppressed (quiet hours): {notification.title}"
-                )
+                logger.debug(f"Email suppressed (quiet hours): {notification.title}")
                 return
 
         # Get recipient email
@@ -262,7 +286,7 @@ class NotificationRouter:
                 severity=notification.severity,
                 source=notification.source,
                 category=notification.category,
-                metadata=notification.metadata,
+                metadata=notification.extra_data,
             )
             if success:
                 logger.info(f"Alert email sent to {recipient}: {notification.title}")
@@ -271,6 +295,50 @@ class NotificationRouter:
         except Exception as e:
             # Email failure MUST NOT block notification processing
             logger.error(f"Email delivery error: {e}")
+
+    async def persist_suppressed(self, notification: NotificationCreate) -> None:
+        """
+        Persist a suppressed alert for ISA-18.2 audit trail.
+
+        Suppressed alerts are stored as is_read=True with channel="suppressed".
+        No WebSocket broadcast, no email delivery.
+        When user_id is None, creates one record per active user (like _broadcast_to_all).
+        """
+        user_ids: List[int] = []
+
+        if notification.user_id is not None:
+            user_ids = [notification.user_id]
+        else:
+            users = await self.user_repo.get_active_users()
+            user_ids = [u.id for u in users]
+
+        if not user_ids:
+            logger.warning("No active users found for suppressed alert persistence")
+            return
+
+        for uid in user_ids:
+            await self.notification_repo.create(
+                user_id=uid,
+                channel="suppressed",
+                severity=notification.severity,
+                category=notification.category,
+                title=notification.title,
+                body=notification.body,
+                extra_data=notification.metadata,
+                source=notification.source,
+                is_read=True,
+            )
+
+        increment_notification_suppressed(
+            reason=(
+                notification.metadata.get("suppression_reason", "unknown")
+                if notification.metadata
+                else "unknown"
+            )
+        )
+        logger.debug(
+            f"Suppressed alert persisted for {len(user_ids)} user(s): '{notification.title}'"
+        )
 
     async def broadcast_notification_updated(self, notification: Notification) -> None:
         """Broadcast notification_updated event via WebSocket (e.g., after mark-as-read)."""
@@ -303,5 +371,6 @@ class NotificationRouter:
                     "highest_severity": highest,
                 },
             )
+            increment_ws_notification_broadcast("notification_unread_count")
         except Exception as e:
             logger.error(f"Failed to broadcast unread count: {e}")

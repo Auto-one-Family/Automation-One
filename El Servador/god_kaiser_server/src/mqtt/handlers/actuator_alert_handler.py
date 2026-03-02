@@ -41,12 +41,20 @@ logger = get_logger(__name__)
 MIN_VALID_TIMESTAMP = 1700000000  # ~2023-11-14
 MAX_VALID_TIMESTAMP = 2500000000  # ~2049-03-22
 
-# Alert severity mapping
+# FIX-15: Severity mapping uses only ISA-18.2 levels (critical/warning/info)
 ALERT_SEVERITY = {
     "emergency_stop": "critical",
     "runtime_protection": "warning",
     "safety_violation": "critical",
-    "hardware_error": "error",
+    "hardware_error": "warning",
+}
+
+# FIX-15: Category mapping for NotificationRouter
+ALERT_CATEGORY = {
+    "emergency_stop": "system",
+    "runtime_protection": "maintenance",
+    "safety_violation": "security",
+    "hardware_error": "infrastructure",
 }
 
 
@@ -94,18 +102,13 @@ class ActuatorAlertHandler:
             # Log with appropriate level based on severity
             if severity == "critical":
                 logger.critical(
-                    f"🚨 ACTUATOR ALERT [{alert_type.upper()}]: "
+                    f"ACTUATOR ALERT [{alert_type.upper()}]: "
                     f"esp_id={esp_id_str}, gpio={gpio}, zone={zone_id}"
                 )
                 logger.critical(f"   Message: {message}")
-            elif severity == "error":
-                logger.error(
-                    f"⚠️ ACTUATOR ALERT [{alert_type}]: "
-                    f"esp_id={esp_id_str}, gpio={gpio}, message={message}"
-                )
             else:
                 logger.warning(
-                    f"⚠️ ACTUATOR ALERT [{alert_type}]: "
+                    f"ACTUATOR ALERT [{alert_type}]: "
                     f"esp_id={esp_id_str}, gpio={gpio}, message={message}"
                 )
 
@@ -210,6 +213,45 @@ class ActuatorAlertHandler:
                     logger.debug(f"Alert broadcast via WebSocket: {alert_type}")
                 except Exception as e:
                     logger.debug(f"WebSocket broadcast skipped: {e}")
+
+                # FIX-15: Route through NotificationRouter for persistence + inbox
+                try:
+                    from ...schemas.notification import NotificationCreate
+                    from ...services.notification_router import NotificationRouter
+
+                    alert_info = get_actuator_alert_info(alert_type)
+                    category = ALERT_CATEGORY.get(alert_type, "system")
+                    title = (
+                        alert_info["message"]
+                        if alert_info
+                        else f"Actuator Alert: {alert_type}"
+                    )
+                    body = message if message and message != alert_type else None
+
+                    notification = NotificationCreate(
+                        user_id=None,  # Broadcast to all users
+                        channel="websocket",
+                        severity=severity,
+                        category=category,
+                        title=title[:255],
+                        body=body,
+                        metadata={
+                            "esp_id": esp_id_str,
+                            "gpio": gpio,
+                            "alert_type": alert_type,
+                            "zone_id": zone_id,
+                        },
+                        source="mqtt_handler",
+                    )
+
+                    notification_router = NotificationRouter(session)
+                    await notification_router.route(notification)
+                    logger.debug(
+                        f"Actuator alert routed via NotificationRouter: {alert_type}"
+                    )
+                except Exception as e:
+                    # NotificationRouter failure MUST NOT block MQTT processing
+                    logger.warning(f"NotificationRouter routing failed: {e}")
 
                 return True
 

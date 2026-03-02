@@ -11,10 +11,10 @@ Tables:
 """
 
 import uuid
-from datetime import datetime, time, timezone
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,7 +39,7 @@ class Notification(Base, TimestampMixin):
         id: Primary key (UUID)
         user_id: Target user (FK to user_accounts.id)
         channel: Delivery channel (websocket, email, webhook)
-        severity: Notification severity (critical, warning, info, resolved)
+        severity: Notification severity (critical, warning, info)
         category: Alert category (connectivity, data_quality, infrastructure, etc.)
         title: Short notification title
         body: Full notification body text
@@ -64,6 +64,13 @@ class Notification(Base, TimestampMixin):
         Index("ix_notifications_created_at", "created_at"),
         Index("ix_notifications_source_category", "source", "category"),
         Index("ix_notifications_severity", "severity"),
+        # FIX-07: Partial unique index for Grafana alert deduplication
+        Index(
+            "ix_notifications_fingerprint_unique",
+            "fingerprint",
+            unique=True,
+            postgresql_where=text("fingerprint IS NOT NULL"),
+        ),
     )
 
     # Primary Key
@@ -94,7 +101,7 @@ class Notification(Base, TimestampMixin):
         String(20),
         nullable=False,
         default="info",
-        doc="Notification severity (critical, warning, info, resolved)",
+        doc="Notification severity (critical, warning, info)",
     )
 
     category: Mapped[str] = mapped_column(
@@ -117,7 +124,8 @@ class Notification(Base, TimestampMixin):
         doc="Full notification body text",
     )
 
-    metadata: Mapped[dict] = mapped_column(
+    extra_data: Mapped[dict] = mapped_column(
+        "metadata",
         JSON,
         default=dict,
         nullable=False,
@@ -159,6 +167,13 @@ class Notification(Base, TimestampMixin):
         ForeignKey("notifications.id", ondelete="SET NULL"),
         nullable=True,
         doc="Parent notification for cascade suppression",
+    )
+
+    # FIX-07: Grafana alert deduplication fingerprint
+    fingerprint: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        doc="Unique fingerprint for Grafana alert deduplication",
     )
 
     # Read Tracking
@@ -291,12 +306,11 @@ class NotificationPreferences(Base, TimestampMixin):
 
 # Severity Constants
 class NotificationSeverity:
-    """Notification severity level constants."""
+    """Notification severity level constants (ISA-18.2: 3 levels only)."""
 
     CRITICAL = "critical"
     WARNING = "warning"
     INFO = "info"
-    RESOLVED = "resolved"
 
 
 # Source Constants

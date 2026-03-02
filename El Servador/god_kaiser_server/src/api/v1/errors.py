@@ -20,6 +20,10 @@ from ...core.esp32_error_mapping import (
     get_all_error_codes,
     get_error_info,
 )
+from ...core.server_error_mapping import (
+    SERVER_ERROR_MAPPING,
+    get_server_error_info,
+)
 from ...core.logging_config import get_logger
 from ...db.models.audit_log import AuditEventType, AuditLog, AuditSeverity, AuditSourceType
 from ...db.repositories import ESPRepository
@@ -336,7 +340,7 @@ async def get_error_codes(
     ),
 ) -> ErrorCodeListResponse:
     """
-    Get all known ESP32 error codes with their descriptions.
+    Get all known error codes (ESP32 + Server) with their descriptions.
 
     Provides a reference list of error codes for documentation and
     frontend error code lookup.
@@ -349,8 +353,27 @@ async def get_error_codes(
     """
     error_codes = []
 
+    # ESP32 error codes (1000-4999)
     for code, info in ALL_ESP32_ERROR_MESSAGES.items():
-        # Apply category filter if specified
+        if category and info.get("category") != category.upper():
+            continue
+
+        error_codes.append(
+            ErrorCodeInfoResponse(
+                error_code=code,
+                title=info.get("message_de"),
+                category=info.get("category", "UNKNOWN"),
+                severity=info.get("severity", "ERROR"),
+                message=info.get("message_user_de", f"Error code: {code}"),
+                troubleshooting=info.get("troubleshooting_de", []),
+                docs_link=info.get("docs_link"),
+                recoverable=info.get("recoverable", True),
+                user_action_required=info.get("user_action_required", False),
+            )
+        )
+
+    # Server error codes (5000-5999)
+    for code, info in SERVER_ERROR_MAPPING.items():
         if category and info.get("category") != category.upper():
             continue
 
@@ -402,7 +425,8 @@ async def get_error_code_info(
     Raises:
         HTTPException: 404 if error code not found
     """
-    error_info = get_error_info(error_code)
+    # Try ESP32 mapping first, then server mapping as fallback
+    error_info = get_error_info(error_code) or get_server_error_info(error_code)
 
     if not error_info:
         raise HTTPException(
@@ -415,8 +439,8 @@ async def get_error_code_info(
         title=error_info.get("message_de"),
         category=error_info.get("category", "UNKNOWN"),
         severity=error_info.get("severity", "ERROR"),
-        message=error_info.get("message", f"Error code: {error_code}"),
-        troubleshooting=error_info.get("troubleshooting", []),
+        message=error_info.get("message_user_de", error_info.get("message", f"Error code: {error_code}")),
+        troubleshooting=error_info.get("troubleshooting_de", error_info.get("troubleshooting", [])),
         docs_link=error_info.get("docs_link"),
         recoverable=error_info.get("recoverable", True),
         user_action_required=error_info.get("user_action_required", False),

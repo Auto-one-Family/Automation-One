@@ -30,6 +30,8 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query
 
+from ...schemas.alert_config import ActuatorAlertConfigUpdate, RuntimeStatsUpdate
+
 from ...core.exceptions import (
     ActuatorNotFoundError,
     DeviceNotApprovedError,
@@ -470,7 +472,9 @@ async def send_command(
         raise ActuatorNotFoundError(esp_id, gpio)
 
     if not actuator.enabled:
-        raise ValidationException("actuator", "Actuator is disabled. Enable via PUT request with enabled=true.")
+        raise ValidationException(
+            "actuator", "Actuator is disabled. Enable via PUT request with enabled=true."
+        )
 
     # Send command via service (includes safety validation)
     success = await actuator_service.send_command(
@@ -931,3 +935,176 @@ async def get_history(
         entries=entries,
         total_count=len(entries),
     )
+
+
+# =========================================================================
+# ALERT CONFIGURATION (Phase 4A.7 — Per-Actuator Alert Suppression)
+# =========================================================================
+
+
+@router.patch(
+    "/{actuator_id}/alert-config",
+    summary="Update actuator alert configuration",
+)
+async def update_actuator_alert_config(
+    actuator_id: str,
+    payload: ActuatorAlertConfigUpdate,
+    db: DBSession,
+    current_user: OperatorUser,
+) -> dict:
+    """
+    Update per-actuator alert configuration (ISA-18.2 Shelved Alarms).
+
+    Merges provided fields into the existing alert_config JSONB.
+    Only provided fields are updated — others remain unchanged.
+    """
+    actuator_repo = ActuatorRepository(db)
+    actuator = await actuator_repo.get_by_id(actuator_id)
+    if not actuator:
+        raise ActuatorNotFoundError(actuator_id)
+
+    # Merge into existing alert_config
+    existing = actuator.alert_config or {}
+    update_data = payload.model_dump(exclude_unset=True)
+
+    # Handle custom_thresholds merge
+    if "custom_thresholds" in update_data and update_data["custom_thresholds"]:
+        existing_thresholds = existing.get("custom_thresholds", {})
+        existing_thresholds.update(update_data.pop("custom_thresholds"))
+        existing["custom_thresholds"] = existing_thresholds
+
+    existing.update(update_data)
+    actuator.alert_config = existing
+
+    await db.commit()
+    await db.refresh(actuator)
+
+    logger.info(f"Alert config updated for actuator {actuator_id} by user {current_user.id}")
+
+    return {
+        "success": True,
+        "actuator_id": str(actuator.id),
+        "alert_config": actuator.alert_config,
+    }
+
+
+@router.get(
+    "/{actuator_id}/alert-config",
+    summary="Get actuator alert configuration",
+)
+async def get_actuator_alert_config(
+    actuator_id: str,
+    db: DBSession,
+    current_user: ActiveUser,
+) -> dict:
+    """Get per-actuator alert configuration with effective thresholds."""
+    actuator_repo = ActuatorRepository(db)
+    actuator = await actuator_repo.get_by_id(actuator_id)
+    if not actuator:
+        raise ActuatorNotFoundError(actuator_id)
+
+    return {
+        "success": True,
+        "actuator_id": str(actuator.id),
+        "alert_config": actuator.alert_config or {},
+        "global_thresholds": actuator.thresholds if hasattr(actuator, "thresholds") else None,
+    }
+
+
+# =========================================================================
+# RUNTIME STATISTICS (Phase 4A.8 — Runtime & Maintenance)
+# =========================================================================
+
+
+@router.get(
+    "/{actuator_id}/runtime",
+    summary="Get actuator runtime statistics",
+)
+async def get_actuator_runtime(
+    actuator_id: str,
+    db: DBSession,
+    current_user: ActiveUser,
+) -> dict:
+    """Get actuator runtime statistics with computed values."""
+    actuator_repo = ActuatorRepository(db)
+    actuator = await actuator_repo.get_by_id(actuator_id)
+    if not actuator:
+        raise ActuatorNotFoundError(actuator_id)
+
+    stats = actuator.runtime_stats or {}
+
+    # Compute current uptime if last_restart is set
+    computed_uptime = None
+    if stats.get("last_restart"):
+        try:
+            last_restart = datetime.fromisoformat(stats["last_restart"])
+            if last_restart.tzinfo is None:
+                last_restart = last_restart.replace(tzinfo=timezone.utc)
+            delta = datetime.now(timezone.utc) - last_restart
+            computed_uptime = round(delta.total_seconds() / 3600, 2)
+        except (ValueError, TypeError):
+            pass
+
+    # Compute maintenance overdue
+    maintenance_overdue = False
+    if stats.get("last_maintenance") and stats.get("maintenance_interval_hours"):
+        try:
+            last_maint = datetime.fromisoformat(stats["last_maintenance"])
+            if last_maint.tzinfo is None:
+                last_maint = last_maint.replace(tzinfo=timezone.utc)
+            hours_since = (datetime.now(timezone.utc) - last_maint).total_seconds() / 3600
+            maintenance_overdue = hours_since > stats["maintenance_interval_hours"]
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "success": True,
+        "actuator_id": str(actuator.id),
+        "runtime_stats": stats,
+        "computed_uptime_hours": computed_uptime,
+        "maintenance_overdue": maintenance_overdue,
+    }
+
+
+@router.patch(
+    "/{actuator_id}/runtime",
+    summary="Update actuator runtime statistics",
+)
+async def update_actuator_runtime(
+    actuator_id: str,
+    payload: RuntimeStatsUpdate,
+    db: DBSession,
+    current_user: OperatorUser,
+) -> dict:
+    """
+    Update actuator runtime statistics.
+
+    Merges provided fields. Appends to maintenance_log if provided.
+    """
+    actuator_repo = ActuatorRepository(db)
+    actuator = await actuator_repo.get_by_id(actuator_id)
+    if not actuator:
+        raise ActuatorNotFoundError(actuator_id)
+
+    existing = actuator.runtime_stats or {}
+    update_data = payload.model_dump(exclude_unset=True)
+
+    # Append maintenance_log entries instead of replacing
+    if "maintenance_log" in update_data and update_data["maintenance_log"]:
+        existing_log = existing.get("maintenance_log", [])
+        existing_log.extend(update_data.pop("maintenance_log"))
+        existing["maintenance_log"] = existing_log
+
+    existing.update(update_data)
+    actuator.runtime_stats = existing
+
+    await db.commit()
+    await db.refresh(actuator)
+
+    logger.info(f"Runtime stats updated for actuator {actuator_id} by user {current_user.id}")
+
+    return {
+        "success": True,
+        "actuator_id": str(actuator.id),
+        "runtime_stats": actuator.runtime_stats,
+    }

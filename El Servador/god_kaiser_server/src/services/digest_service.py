@@ -16,6 +16,7 @@ Batches warning notifications into periodic digest emails.
 from typing import Optional
 
 from ..core.logging_config import get_logger
+from ..core.metrics import increment_digest_processed, observe_digest_batch_size
 from ..db.repositories.notification_repo import (
     NotificationPreferencesRepository,
     NotificationRepository,
@@ -123,6 +124,8 @@ class DigestService:
                         notification_ids = [n.id for n in pending]
                         await notification_repo.mark_digest_sent(notification_ids)
                         digests_sent += 1
+                        increment_digest_processed()
+                        observe_digest_batch_size(len(pending))
                         logger.info(
                             f"Digest email sent to {recipient}: "
                             f"{len(pending)} notifications"

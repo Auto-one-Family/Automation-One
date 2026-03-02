@@ -235,6 +235,84 @@ SENSOR_IMPLAUSIBLE_TOTAL = Counter(
     ["sensor_type", "esp_id"],
 )
 
+# =============================================================================
+# API Error Code Counter (per numeric_code from GodKaiserException)
+# =============================================================================
+
+API_ERROR_CODE_COUNTER = Counter(
+    "god_kaiser_api_error_code_total",
+    "Total API errors by numeric error code and source type",
+    ["error_code", "source_type"],  # e.g. error_code="5210", source_type="server"
+)
+
+# =============================================================================
+# Notification Pipeline Metrics (Phase 4A)
+# =============================================================================
+
+NOTIFICATIONS_TOTAL = Counter(
+    "god_kaiser_notifications_total",
+    "Total notifications created",
+    ["severity", "category", "source"],
+)
+
+NOTIFICATIONS_SUPPRESSED_TOTAL = Counter(
+    "god_kaiser_notifications_suppressed_total",
+    "Total suppressed notifications",
+    ["reason"],
+)
+
+NOTIFICATIONS_DEDUPLICATED_TOTAL = Counter(
+    "god_kaiser_notifications_deduplicated_total",
+    "Total deduplicated notifications (fingerprint or title)",
+)
+
+EMAIL_SENT_TOTAL = Counter(
+    "god_kaiser_email_sent_total",
+    "Total emails sent",
+    ["provider", "status"],
+)
+
+EMAIL_LATENCY_SECONDS = Histogram(
+    "god_kaiser_email_latency_seconds",
+    "Email sending latency in seconds",
+    ["provider"],
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0),
+)
+
+DIGEST_PROCESSED_TOTAL = Counter(
+    "god_kaiser_digest_processed_total",
+    "Total digest batches processed",
+)
+
+DIGEST_NOTIFICATIONS_PER_BATCH = Histogram(
+    "god_kaiser_digest_notifications_per_batch",
+    "Number of notifications per digest batch",
+    buckets=(1, 3, 5, 10, 20, 50),
+)
+
+WS_NOTIFICATION_BROADCAST_TOTAL = Counter(
+    "god_kaiser_ws_notification_broadcast_total",
+    "Total WebSocket notification broadcasts",
+    ["event_type"],
+)
+
+WEBHOOK_RECEIVED_TOTAL = Counter(
+    "god_kaiser_webhook_received_total",
+    "Total webhooks received",
+    ["source", "status"],
+)
+
+ALERT_SUPPRESSION_ACTIVE = Gauge(
+    "god_kaiser_alert_suppression_active",
+    "Currently suppressed entities",
+    ["entity_type"],
+)
+
+ALERT_SUPPRESSION_EXPIRED_TOTAL = Counter(
+    "god_kaiser_alert_suppression_expired_total",
+    "Total suppressions auto-expired by scheduler",
+)
+
 # Track server start time
 _server_start_time: float = time.time()
 _metrics_initialized: bool = False
@@ -269,6 +347,24 @@ def init_metrics() -> None:
     # HTTP error counters
     HTTP_ERRORS_TOTAL.labels(status_class="4xx")
     HTTP_ERRORS_TOTAL.labels(status_class="5xx")
+
+    # Notification pipeline counters (Phase 4A)
+    for sev in ("critical", "warning", "info"):
+        NOTIFICATIONS_TOTAL.labels(severity=sev, category="system", source="sensor_threshold")
+    NOTIFICATIONS_SUPPRESSED_TOTAL.labels(reason="maintenance")
+    NOTIFICATIONS_SUPPRESSED_TOTAL.labels(reason="calibration")
+    EMAIL_SENT_TOTAL.labels(provider="resend", status="success")
+    EMAIL_SENT_TOTAL.labels(provider="resend", status="failure")
+    EMAIL_SENT_TOTAL.labels(provider="smtp", status="success")
+    EMAIL_SENT_TOTAL.labels(provider="smtp", status="failure")
+    WS_NOTIFICATION_BROADCAST_TOTAL.labels(event_type="notification_new")
+    WS_NOTIFICATION_BROADCAST_TOTAL.labels(event_type="notification_unread_count")
+    WEBHOOK_RECEIVED_TOTAL.labels(source="grafana", status="processed")
+    WEBHOOK_RECEIVED_TOTAL.labels(source="grafana", status="skipped")
+    WEBHOOK_RECEIVED_TOTAL.labels(source="grafana", status="error")
+    ALERT_SUPPRESSION_ACTIVE.labels(entity_type="sensor")
+    ALERT_SUPPRESSION_ACTIVE.labels(entity_type="actuator")
+    ALERT_SUPPRESSION_ACTIVE.labels(entity_type="device")
 
     logger.info("Prometheus metrics initialized (all label combinations visible)")
 
@@ -398,6 +494,75 @@ def increment_sensor_implausible(sensor_type: str, esp_id: str) -> None:
 def increment_safety_trigger() -> None:
     """Increment safety system trigger counter."""
     SAFETY_TRIGGERS_TOTAL.inc()
+
+
+def increment_api_error_code(numeric_code: int) -> None:
+    """Increment per-code API error counter. Called from exception_handlers."""
+    source_type = "esp" if numeric_code < 5000 else "server"
+    API_ERROR_CODE_COUNTER.labels(
+        error_code=str(numeric_code),
+        source_type=source_type,
+    ).inc()
+
+
+# =========================================================================
+# Notification Pipeline metric helpers (Phase 4A)
+# =========================================================================
+
+
+def increment_notification_created(severity: str, category: str, source: str) -> None:
+    """Increment notification counter. Called from NotificationRouter.route()."""
+    NOTIFICATIONS_TOTAL.labels(severity=severity, category=category, source=source).inc()
+
+
+def increment_notification_suppressed(reason: str) -> None:
+    """Increment suppressed counter. Called from NotificationRouter.persist_suppressed()."""
+    NOTIFICATIONS_SUPPRESSED_TOTAL.labels(reason=reason or "unknown").inc()
+
+
+def increment_notification_deduplicated() -> None:
+    """Increment dedup counter. Called from NotificationRouter.route() dedup branch."""
+    NOTIFICATIONS_DEDUPLICATED_TOTAL.inc()
+
+
+def increment_email_sent(provider: str, success: bool) -> None:
+    """Increment email counter. Called from EmailService.send_email()."""
+    EMAIL_SENT_TOTAL.labels(provider=provider, status="success" if success else "failure").inc()
+
+
+def observe_email_latency(provider: str, duration: float) -> None:
+    """Observe email latency. Called from EmailService.send_email()."""
+    EMAIL_LATENCY_SECONDS.labels(provider=provider).observe(duration)
+
+
+def increment_digest_processed() -> None:
+    """Increment digest counter. Called from DigestService.process_digests()."""
+    DIGEST_PROCESSED_TOTAL.inc()
+
+
+def observe_digest_batch_size(count: int) -> None:
+    """Observe digest batch size. Called from DigestService.process_digests()."""
+    DIGEST_NOTIFICATIONS_PER_BATCH.observe(count)
+
+
+def increment_ws_notification_broadcast(event_type: str) -> None:
+    """Increment WS broadcast counter. Called from NotificationRouter._broadcast_websocket()."""
+    WS_NOTIFICATION_BROADCAST_TOTAL.labels(event_type=event_type).inc()
+
+
+def increment_webhook_received(source: str, status: str) -> None:
+    """Increment webhook counter. Called from webhooks.py."""
+    WEBHOOK_RECEIVED_TOTAL.labels(source=source, status=status).inc()
+
+
+def update_alert_suppression_active(entity_type: str, count: int) -> None:
+    """Set active suppression gauge. Called from scheduler."""
+    ALERT_SUPPRESSION_ACTIVE.labels(entity_type=entity_type).set(count)
+
+
+def increment_alert_suppression_expired() -> None:
+    """Increment suppression expired counter. Called from scheduler."""
+    ALERT_SUPPRESSION_EXPIRED_TOTAL.inc()
 
 
 async def update_all_metrics_async(get_session_func: callable) -> None:

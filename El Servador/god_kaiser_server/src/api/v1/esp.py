@@ -31,6 +31,8 @@ from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 
+from ...schemas.alert_config import DeviceAlertConfigUpdate
+
 from ...core.logging_config import get_logger
 from ...db.models.audit_log import AuditEventType, AuditSeverity
 from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
@@ -1291,3 +1293,73 @@ async def reject_device(
         status="rejected",
         rejection_reason=request.reason,
     )
+
+
+# =========================================================================
+# ALERT CONFIGURATION (Phase 4A.7 — Device-Level Alert Suppression)
+# =========================================================================
+
+
+@router.patch(
+    "/devices/{esp_id}/alert-config",
+    summary="Update device-level alert configuration",
+)
+async def update_device_alert_config(
+    esp_id: str,
+    payload: DeviceAlertConfigUpdate,
+    db: DBSession,
+    current_user: OperatorUser,
+) -> dict:
+    """
+    Update device-level alert configuration (ISA-18.2 Shelved Alarms).
+
+    Merges provided fields into the existing alert_config JSONB.
+    When propagate_to_children=True, all child sensors/actuators
+    inherit the device suppression.
+    """
+    esp_repo = ESPRepository(db)
+    device = await esp_repo.get_by_device_id(esp_id)
+    if not device:
+        raise ESPNotFoundError(esp_id)
+
+    # Merge into existing alert_config
+    existing = device.alert_config or {}
+    update_data = payload.model_dump(exclude_unset=True)
+    existing.update(update_data)
+    device.alert_config = existing
+
+    await db.commit()
+    await db.refresh(device)
+
+    logger.info(
+        f"Device alert config updated for {esp_id} by user {current_user.id}, "
+        f"propagate_to_children={existing.get('propagate_to_children', True)}"
+    )
+
+    return {
+        "success": True,
+        "esp_id": esp_id,
+        "alert_config": device.alert_config,
+    }
+
+
+@router.get(
+    "/devices/{esp_id}/alert-config",
+    summary="Get device-level alert configuration",
+)
+async def get_device_alert_config(
+    esp_id: str,
+    db: DBSession,
+    current_user: ActiveUser,
+) -> dict:
+    """Get device-level alert configuration."""
+    esp_repo = ESPRepository(db)
+    device = await esp_repo.get_by_device_id(esp_id)
+    if not device:
+        raise ESPNotFoundError(esp_id)
+
+    return {
+        "success": True,
+        "esp_id": esp_id,
+        "alert_config": device.alert_config or {},
+    }

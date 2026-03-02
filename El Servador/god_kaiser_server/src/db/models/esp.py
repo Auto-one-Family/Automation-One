@@ -194,6 +194,13 @@ class ESPDevice(Base, TimestampMixin):
         doc="Additional device metadata",
     )
 
+    # Alert Configuration (Phase 4A.7 — Device-Level Alert Suppression)
+    alert_config: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        doc="Device-level alert config: alerts_enabled, suppression_reason/note/until, propagate_to_children",
+    )
+
     # Relationships
     sensors: Mapped[list["SensorConfig"]] = relationship(
         "SensorConfig",

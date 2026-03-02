@@ -23,7 +23,7 @@ References:
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -804,11 +804,11 @@ async def query_sensor_data(
     # Default time range to last 24 hours
     # Use naive datetimes (no tzinfo) to match PostgreSQL TIMESTAMP WITHOUT TIME ZONE
     if not start_time:
-        start_time = datetime.utcnow() - timedelta(hours=24)
+        start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
     else:
         start_time = start_time.replace(tzinfo=None) if start_time.tzinfo else start_time
     if not end_time:
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc).replace(tzinfo=None)
     else:
         end_time = end_time.replace(tzinfo=None) if end_time.tzinfo else end_time
 
@@ -1010,11 +1010,11 @@ async def get_sensor_stats(
 
     # Default time range (naive datetimes for TIMESTAMP WITHOUT TIME ZONE)
     if not start_time:
-        start_time = datetime.utcnow() - timedelta(hours=24)
+        start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
     else:
         start_time = start_time.replace(tzinfo=None) if start_time.tzinfo else start_time
     if not end_time:
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc).replace(tzinfo=None)
     else:
         end_time = end_time.replace(tzinfo=None) if end_time.tzinfo else end_time
 
@@ -1598,3 +1598,162 @@ async def _validate_onewire_config(
         raise DuplicateError("OneWireSensor", "onewire_address", onewire_address)
 
     return onewire_address
+
+
+# =============================================================================
+# Alert Config Endpoints (Phase 4A.7)
+# =============================================================================
+
+
+@router.patch(
+    "/{sensor_id}/alert-config",
+    response_model=dict,
+    summary="Update sensor alert configuration",
+)
+async def update_sensor_alert_config(
+    sensor_id: uuid.UUID,
+    body: dict,
+    session: DBSession,
+    user: OperatorUser,
+):
+    """
+    Update per-sensor alert configuration (suppression, thresholds, severity).
+
+    The alert_config is a JSONB field — partial updates merge with existing config.
+    """
+    sensor_repo = SensorRepository(session)
+    sensor = await sensor_repo.get_by_id(sensor_id)
+    if not sensor:
+        raise SensorNotFoundException(str(sensor_id))
+
+    # Merge with existing config
+    existing = dict(sensor.alert_config or {})
+    for key, value in body.items():
+        if value is None:
+            existing.pop(key, None)
+        else:
+            existing[key] = value
+
+    sensor.alert_config = existing
+    await session.commit()
+
+    logger.info(f"Alert config updated: sensor {sensor_id}, config={existing}")
+    return {"status": "ok", "alert_config": existing}
+
+
+@router.get(
+    "/{sensor_id}/alert-config",
+    response_model=dict,
+    summary="Get sensor alert configuration",
+)
+async def get_sensor_alert_config(
+    sensor_id: uuid.UUID,
+    session: DBSession,
+    user: ActiveUser,
+):
+    """Get the current alert configuration for a sensor."""
+    sensor_repo = SensorRepository(session)
+    sensor = await sensor_repo.get_by_id(sensor_id)
+    if not sensor:
+        raise SensorNotFoundException(str(sensor_id))
+
+    return {
+        "status": "ok",
+        "alert_config": sensor.alert_config or {},
+        "thresholds": sensor.thresholds or {},
+    }
+
+
+# =============================================================================
+# Runtime Stats Endpoints (Phase 4A.8)
+# =============================================================================
+
+
+@router.get(
+    "/{sensor_id}/runtime",
+    response_model=dict,
+    summary="Get sensor runtime stats",
+)
+async def get_sensor_runtime(
+    sensor_id: uuid.UUID,
+    session: DBSession,
+    user: ActiveUser,
+):
+    """Get runtime statistics for a sensor."""
+    sensor_repo = SensorRepository(session)
+    sensor = await sensor_repo.get_by_id(sensor_id)
+    if not sensor:
+        raise SensorNotFoundException(str(sensor_id))
+
+    runtime = sensor.runtime_stats or {}
+    metadata = sensor.sensor_metadata or {}
+
+    # Compute uptime from installation_date
+    uptime_hours = None
+    installation_date = metadata.get("installation_date")
+    if installation_date:
+        try:
+            from datetime import timezone
+
+            inst_dt = datetime.fromisoformat(installation_date)
+            if inst_dt.tzinfo is None:
+                inst_dt = inst_dt.replace(tzinfo=timezone.utc)
+            delta = datetime.now(timezone.utc) - inst_dt
+            uptime_hours = round(delta.total_seconds() / 3600, 1)
+        except (ValueError, TypeError):
+            pass
+
+    # Compute next_maintenance
+    next_maintenance = None
+    maintenance_overdue = False
+    last_maintenance = metadata.get("last_maintenance")
+    interval_days = metadata.get("maintenance_interval_days")
+    if last_maintenance and interval_days:
+        try:
+            last_dt = datetime.fromisoformat(last_maintenance)
+            next_dt = last_dt + timedelta(days=interval_days)
+            next_maintenance = next_dt.isoformat()
+            maintenance_overdue = next_dt < datetime.now()
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "status": "ok",
+        "runtime_stats": runtime,
+        "computed_uptime_hours": uptime_hours,
+        "last_restart": runtime.get("last_restart"),
+        "expected_lifetime_hours": runtime.get("expected_lifetime_hours"),
+        "maintenance_log": runtime.get("maintenance_log", []),
+        "next_maintenance": next_maintenance,
+        "maintenance_overdue": maintenance_overdue,
+    }
+
+
+@router.patch(
+    "/{sensor_id}/runtime",
+    response_model=dict,
+    summary="Update sensor runtime stats",
+)
+async def update_sensor_runtime(
+    sensor_id: uuid.UUID,
+    body: dict,
+    session: DBSession,
+    user: OperatorUser,
+):
+    """Update runtime statistics for a sensor (expected_lifetime, maintenance_log)."""
+    sensor_repo = SensorRepository(session)
+    sensor = await sensor_repo.get_by_id(sensor_id)
+    if not sensor:
+        raise SensorNotFoundException(str(sensor_id))
+
+    existing = dict(sensor.runtime_stats or {})
+    for key, value in body.items():
+        if value is None:
+            existing.pop(key, None)
+        else:
+            existing[key] = value
+
+    sensor.runtime_stats = existing
+    await session.commit()
+
+    return {"status": "ok", "runtime_stats": existing}

@@ -43,6 +43,7 @@ from src.db.models import (  # noqa: F401, E402 - imports needed for SQLAlchemy 
     kaiser,
     library,
     logic,
+    notification,
     sensor,
     subzone,
     system,
@@ -458,3 +459,75 @@ async def override_actuator_service(test_engine: AsyncEngine):
 
     yield  # Cleanup - remove override
     app.dependency_overrides.pop(get_actuator_service, None)
+
+
+# =============================================================================
+# Notification Test Fixtures (Phase 4A)
+# =============================================================================
+
+
+@pytest_asyncio.fixture
+async def sample_notification(db_session: AsyncSession, sample_user):
+    """Create a test notification in the DB."""
+    from src.db.models.notification import Notification  # noqa: E402
+
+    notif = Notification(
+        user_id=sample_user.id,
+        title="Test Alert",
+        body="Sensor XYZ hat Schwellwert ueberschritten",
+        channel="websocket",
+        severity="warning",
+        category="data_quality",
+        source="sensor_threshold",
+    )
+    db_session.add(notif)
+    await db_session.flush()
+    await db_session.refresh(notif)
+    return notif
+
+
+@pytest_asyncio.fixture
+async def sample_preferences(db_session: AsyncSession, sample_user):
+    """Create test NotificationPreferences."""
+    from src.db.models.notification import NotificationPreferences  # noqa: E402
+
+    prefs = NotificationPreferences(
+        user_id=sample_user.id,
+        websocket_enabled=True,
+        email_enabled=False,
+        email_severities=["critical"],
+    )
+    db_session.add(prefs)
+    await db_session.flush()
+    await db_session.refresh(prefs)
+    return prefs
+
+
+@pytest.fixture
+def mock_email_service():
+    """Mock for EmailService — no real email delivery in tests."""
+    from unittest.mock import AsyncMock  # noqa: E402
+
+    service = AsyncMock()
+    service.is_available = True
+    service.send_email = AsyncMock(return_value=True)
+    service.send_critical_alert = AsyncMock(return_value=True)
+    service.send_digest = AsyncMock(return_value=True)
+    service.send_test_email = AsyncMock(return_value=True)
+    service.provider_name = "Mock"
+    return service
+
+
+@pytest.fixture
+def mock_ws_manager():
+    """Mock for WebSocketManager — no real WS broadcast in tests."""
+    from unittest.mock import AsyncMock, patch  # noqa: E402
+
+    mock_instance = AsyncMock()
+    mock_instance.broadcast = AsyncMock()
+    mock_instance.connection_count = 0
+    with patch(
+        "src.websocket.manager.WebSocketManager.get_instance",
+        return_value=mock_instance,
+    ):
+        yield mock_instance

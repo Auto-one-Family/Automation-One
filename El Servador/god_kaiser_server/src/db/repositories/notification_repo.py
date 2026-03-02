@@ -96,7 +96,6 @@ class NotificationRepository(BaseRepository[Notification]):
             NotificationSeverity.CRITICAL: 0,
             NotificationSeverity.WARNING: 1,
             NotificationSeverity.INFO: 2,
-            NotificationSeverity.RESOLVED: 3,
         }
 
         stmt = (
@@ -221,6 +220,16 @@ class NotificationRepository(BaseRepository[Notification]):
                     Notification.created_at >= cutoff,
                 )
             )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one() > 0
+
+    async def check_fingerprint_duplicate(self, fingerprint: str) -> bool:
+        """Check if a notification with this fingerprint already exists (any user)."""
+        stmt = (
+            select(func.count())
+            .select_from(Notification)
+            .where(Notification.fingerprint == fingerprint)
         )
         result = await self.session.execute(stmt)
         return result.scalar_one() > 0

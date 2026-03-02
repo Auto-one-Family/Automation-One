@@ -20,21 +20,31 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .common import BaseResponse, PaginatedResponse, PaginationMeta
-
+from .common import BaseResponse, PaginationMeta
 
 # =============================================================================
 # Severity / Source / Category Constants
 # =============================================================================
 
-NOTIFICATION_SEVERITIES = ["critical", "warning", "info", "resolved"]
+NOTIFICATION_SEVERITIES = ["critical", "warning", "info"]
 NOTIFICATION_SOURCES = [
-    "logic_engine", "mqtt_handler", "grafana", "sensor_threshold",
-    "device_event", "autoops", "manual", "system",
+    "logic_engine",
+    "mqtt_handler",
+    "grafana",
+    "sensor_threshold",
+    "device_event",
+    "autoops",
+    "manual",
+    "system",
 ]
 NOTIFICATION_CATEGORIES = [
-    "connectivity", "data_quality", "infrastructure",
-    "lifecycle", "maintenance", "security", "system",
+    "connectivity",
+    "data_quality",
+    "infrastructure",
+    "lifecycle",
+    "maintenance",
+    "security",
+    "system",
 ]
 
 
@@ -56,7 +66,7 @@ class NotificationCreate(BaseModel):
     )
     severity: str = Field(
         default="info",
-        description="Severity level (critical, warning, info, resolved)",
+        description="Severity level (critical, warning, info)",
     )
     category: str = Field(
         default="system",
@@ -83,6 +93,11 @@ class NotificationCreate(BaseModel):
     parent_notification_id: Optional[uuid.UUID] = Field(
         None,
         description="Parent notification ID for cascade suppression",
+    )
+    fingerprint: Optional[str] = Field(
+        None,
+        max_length=64,
+        description="Unique fingerprint for alert deduplication (e.g., Grafana alert fingerprint)",
     )
 
     @field_validator("severity")
@@ -130,17 +145,18 @@ class NotificationResponse(BaseModel):
     category: str
     title: str
     body: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict, validation_alias="extra_data")
     source: str
     is_read: bool
     is_archived: bool
     digest_sent: bool
     parent_notification_id: Optional[uuid.UUID] = None
+    fingerprint: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     read_at: Optional[datetime] = None
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class NotificationListResponse(BaseResponse):
@@ -199,9 +215,7 @@ class NotificationPreferencesUpdate(BaseModel):
     websocket_enabled: Optional[bool] = Field(None, description="Enable WebSocket notifications")
     email_enabled: Optional[bool] = Field(None, description="Enable email notifications")
     email_address: Optional[str] = Field(None, description="Override email address")
-    email_severities: Optional[List[str]] = Field(
-        None, description="Severities that trigger email"
-    )
+    email_severities: Optional[List[str]] = Field(None, description="Severities that trigger email")
     quiet_hours_enabled: Optional[bool] = Field(None, description="Enable quiet hours")
     quiet_hours_start: Optional[str] = Field(
         None,
@@ -219,9 +233,7 @@ class NotificationPreferencesUpdate(BaseModel):
         le=1440,
         description="Digest interval in minutes (0 = disabled)",
     )
-    browser_notifications: Optional[bool] = Field(
-        None, description="Enable browser notifications"
-    )
+    browser_notifications: Optional[bool] = Field(None, description="Enable browser notifications")
 
     @field_validator("email_severities")
     @classmethod
@@ -229,7 +241,9 @@ class NotificationPreferencesUpdate(BaseModel):
         if v is not None:
             for s in v:
                 if s not in NOTIFICATION_SEVERITIES:
-                    raise ValueError(f"Invalid severity '{s}', must be one of {NOTIFICATION_SEVERITIES}")
+                    raise ValueError(
+                        f"Invalid severity '{s}', must be one of {NOTIFICATION_SEVERITIES}"
+                    )
         return v
 
 

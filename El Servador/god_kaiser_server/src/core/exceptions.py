@@ -66,6 +66,7 @@ class RecordNotFoundException(DatabaseException):
             message=f"{model} with identifier {identifier} not found",
             error_code="RECORD_NOT_FOUND",
             details={"model": model, "identifier": str(identifier)},
+            numeric_code=5307,  # DatabaseErrorCode.RECORD_NOT_FOUND
         )
 
 
@@ -77,6 +78,7 @@ class DuplicateRecordException(DatabaseException):
             message=f"{model} with {field}={value} already exists",
             error_code="DUPLICATE_RECORD",
             details={"model": model, "field": field, "value": str(value)},
+            numeric_code=5308,  # DatabaseErrorCode.RECORD_DUPLICATE
         )
 
 
@@ -131,6 +133,7 @@ class MQTTSubscribeException(MQTTException):
             message=f"Failed to subscribe to topic: {topic}",
             error_code="MQTT_SUBSCRIBE_FAILED",
             details={"topic": topic, "details": details},
+            numeric_code=5108,  # MQTTErrorCode.SUBSCRIBE_FAILED
         )
 
 
@@ -148,6 +151,7 @@ class InvalidCredentialsException(AuthenticationException):
         super().__init__(
             message="Invalid username or password",
             error_code="INVALID_CREDENTIALS",
+            numeric_code=5406,  # ServiceErrorCode.AUTHENTICATION_FAILED
         )
 
 
@@ -158,6 +162,7 @@ class TokenExpiredException(AuthenticationException):
         super().__init__(
             message="Access token has expired",
             error_code="TOKEN_EXPIRED",
+            numeric_code=5407,  # ServiceErrorCode.TOKEN_EXPIRED
         )
 
 
@@ -169,6 +174,7 @@ class InvalidTokenException(AuthenticationException):
             message="Invalid or malformed token",
             error_code="INVALID_TOKEN",
             details={"details": details} if details else {},
+            numeric_code=5408,  # ServiceErrorCode.TOKEN_INVALID
         )
 
 
@@ -180,6 +186,7 @@ class InsufficientPermissionsException(GodKaiserException):
             message=f"Insufficient permissions. Required: {required_permission}",
             error_code="INSUFFICIENT_PERMISSIONS",
             details={"required_permission": required_permission},
+            numeric_code=5409,  # ServiceErrorCode.AUTHORIZATION_FAILED
         )
 
 
@@ -256,6 +263,7 @@ class ESP32CommandFailedException(ESP32Exception):
             message=f"Command '{command}' failed for ESP32 {esp_id}",
             error_code="ESP32_COMMAND_FAILED",
             details={"esp_id": esp_id, "command": command, "details": details},
+            numeric_code=5008,  # ConfigErrorCode.ESP_COMMAND_FAILED
         )
 
 
@@ -278,6 +286,7 @@ class SensorNotFoundException(SensorException, NotFoundError):
             message=f"Sensor not found: ESP {esp_id}, GPIO {gpio}",
             error_code="SENSOR_NOT_FOUND",
             details={"resource_type": "Sensor", "identifier": f"{esp_id}:{gpio}", "esp_id": esp_id, "gpio": gpio},
+            numeric_code=5210,  # ValidationErrorCode.SENSOR_NOT_FOUND
         )
 
 
@@ -292,6 +301,7 @@ class SensorNotFoundError(NotFoundError):
             message=f"Sensor not found: ESP {esp_id}, GPIO {gpio}",
             error_code="SENSOR_NOT_FOUND",
             details={"resource_type": "Sensor", "identifier": f"{esp_id}:{gpio}", "esp_id": esp_id, "gpio": gpio},
+            numeric_code=5210,  # ValidationErrorCode.SENSOR_NOT_FOUND
         )
 
 
@@ -303,6 +313,7 @@ class SensorProcessingException(SensorException):
             message=f"Sensor processing failed: ESP {esp_id}, GPIO {gpio}",
             error_code="SENSOR_PROCESSING_FAILED",
             details={"esp_id": esp_id, "gpio": gpio, "details": details},
+            numeric_code=5411,  # ServiceErrorCode.SENSOR_PROCESSING_FAILED
         )
 
 
@@ -324,6 +335,7 @@ class ActuatorNotFoundException(ActuatorException, NotFoundError):
             message=f"Actuator not found: ESP {esp_id}, GPIO {gpio}",
             error_code="ACTUATOR_NOT_FOUND",
             details={"resource_type": "Actuator", "identifier": f"{esp_id}:{gpio}", "esp_id": esp_id, "gpio": gpio},
+            numeric_code=5211,  # ValidationErrorCode.ACTUATOR_NOT_FOUND
         )
 
 
@@ -338,6 +350,7 @@ class ActuatorNotFoundError(NotFoundError):
             message=f"Actuator not found: ESP {esp_id}, GPIO {gpio}",
             error_code="ACTUATOR_NOT_FOUND",
             details={"resource_type": "Actuator", "identifier": f"{esp_id}:{gpio}", "esp_id": esp_id, "gpio": gpio},
+            numeric_code=5211,  # ValidationErrorCode.ACTUATOR_NOT_FOUND
         )
 
 
@@ -349,6 +362,7 @@ class ActuatorCommandFailedException(ActuatorException):
             message=f"Actuator command '{command}' failed: ESP {esp_id}, GPIO {gpio}",
             error_code="ACTUATOR_COMMAND_FAILED",
             details={"esp_id": esp_id, "gpio": gpio, "command": command, "details": details},
+            numeric_code=5412,  # ServiceErrorCode.ACTUATOR_COMMAND_FAILED
         )
 
 
@@ -360,6 +374,7 @@ class SafetyConstraintViolationException(ActuatorException):
             message=f"Safety constraint violated: {constraint}",
             error_code="SAFETY_CONSTRAINT_VIOLATION",
             details={"esp_id": esp_id, "gpio": gpio, "constraint": constraint},
+            numeric_code=5413,  # ServiceErrorCode.SAFETY_CONSTRAINT_VIOLATED
         )
 
 
@@ -375,6 +390,7 @@ class ValidationException(GodKaiserException):
             message=f"Validation failed for field '{field}': {message}",
             error_code="VALIDATION_ERROR",
             details={"field": field, "validation_message": message},
+            numeric_code=5205,  # ValidationErrorCode.MISSING_REQUIRED_FIELD (generic validation)
         )
 
 
@@ -403,6 +419,7 @@ class AuthenticationError(GodKaiserException):
         super().__init__(
             message=message,
             error_code="AUTHENTICATION_FAILED",
+            numeric_code=5406,  # ServiceErrorCode.AUTHENTICATION_FAILED
         )
 
 
@@ -416,6 +433,7 @@ class AuthorizationError(GodKaiserException):
         super().__init__(
             message=message,
             error_code="FORBIDDEN",
+            numeric_code=5409,  # ServiceErrorCode.AUTHORIZATION_FAILED
         )
 
 
@@ -434,6 +452,7 @@ class ServiceUnavailableError(GodKaiserException):
                 if details
                 else {"service_name": service_name}
             ),
+            numeric_code=5410,  # ServiceErrorCode.EXTERNAL_SERVICE_FAILED
         )
 
 
@@ -465,6 +484,7 @@ class GodLayerException(ExternalServiceException):
             message="God Layer service unavailable or failed",
             error_code="GOD_LAYER_FAILED",
             details={"details": details} if details else {},
+            numeric_code=5410,  # ServiceErrorCode.EXTERNAL_SERVICE_FAILED
         )
 
 
@@ -476,6 +496,7 @@ class KaiserCommunicationException(ExternalServiceException):
             message=f"Communication with Kaiser {kaiser_id} failed",
             error_code="KAISER_COMMUNICATION_FAILED",
             details={"kaiser_id": kaiser_id, "details": details},
+            numeric_code=5410,  # ServiceErrorCode.EXTERNAL_SERVICE_FAILED
         )
 
 
@@ -676,6 +697,7 @@ class UserNotFoundException(NotFoundError):
 
     def __init__(self, user_id: Any) -> None:
         super().__init__("User", user_id)
+        self.numeric_code = 5414  # ServiceErrorCode.USER_NOT_FOUND
 
 
 # Dashboard Exceptions
@@ -687,3 +709,113 @@ class DashboardNotFoundException(NotFoundError):
     def __init__(self, dashboard_id: Any) -> None:
         super().__init__("Dashboard", dashboard_id)
         self.numeric_code = 5750
+
+
+# Notification Exceptions (Phase 4A)
+class NotificationException(GodKaiserException):
+    """Base exception for notification errors"""
+
+    pass
+
+
+class NotificationNotFoundException(NotificationException, NotFoundError):
+    """Raised when a notification is not found"""
+
+    status_code = 404
+    error_code = "NOTIFICATION_NOT_FOUND"
+
+    def __init__(self, notification_id: str) -> None:
+        GodKaiserException.__init__(
+            self,
+            message=f"Notification '{notification_id}' not found",
+            error_code="NOTIFICATION_NOT_FOUND",
+            details={"resource_type": "Notification", "identifier": str(notification_id)},
+            numeric_code=5850,  # NotificationErrorCode.NOTIFICATION_NOT_FOUND
+        )
+
+
+class NotificationSendFailedException(NotificationException):
+    """Raised when notification send fails"""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            message=f"Notification send failed: {reason}",
+            error_code="NOTIFICATION_SEND_FAILED",
+            details={"reason": reason},
+            numeric_code=5851,  # NotificationErrorCode.NOTIFICATION_SEND_FAILED
+        )
+
+
+class EmailProviderUnavailableException(NotificationException):
+    """Raised when email provider is unavailable"""
+
+    status_code = 503
+    error_code = "EMAIL_PROVIDER_UNAVAILABLE"
+
+    def __init__(self, provider: Optional[str] = None) -> None:
+        super().__init__(
+            message="Email service not available. Check EMAIL_ENABLED and provider configuration.",
+            error_code="EMAIL_PROVIDER_UNAVAILABLE",
+            details={"provider": provider} if provider else {},
+            numeric_code=5852,  # NotificationErrorCode.EMAIL_PROVIDER_UNAVAILABLE
+        )
+
+
+class EmailSendException(NotificationException):
+    """Raised when email delivery fails"""
+
+    status_code = 502
+    error_code = "EMAIL_SEND_FAILED"
+
+    def __init__(self, provider: str, reason: str = "delivery failed") -> None:
+        super().__init__(
+            message=f"Email delivery failed via {provider}: {reason}",
+            error_code="EMAIL_SEND_FAILED",
+            details={"provider": provider, "reason": reason},
+            numeric_code=5851,  # NotificationErrorCode.NOTIFICATION_SEND_FAILED
+        )
+
+
+class WebhookValidationException(ValidationException):
+    """Raised when webhook payload validation fails"""
+
+    error_code = "WEBHOOK_INVALID_PAYLOAD"
+
+    def __init__(self, reason: str) -> None:
+        GodKaiserException.__init__(
+            self,
+            message=f"Webhook payload invalid: {reason}",
+            error_code="WEBHOOK_INVALID_PAYLOAD",
+            details={"reason": reason},
+            numeric_code=5857,  # NotificationErrorCode.WEBHOOK_INVALID_PAYLOAD
+        )
+
+
+class AlertPreferenceNotFoundException(NotificationException, NotFoundError):
+    """Raised when alert preference is not found"""
+
+    status_code = 404
+    error_code = "ALERT_PREFERENCE_NOT_FOUND"
+
+    def __init__(self, identifier: str) -> None:
+        GodKaiserException.__init__(
+            self,
+            message=f"Alert preference for '{identifier}' not found",
+            error_code="ALERT_PREFERENCE_NOT_FOUND",
+            details={"resource_type": "AlertPreference", "identifier": identifier},
+            numeric_code=5859,  # NotificationErrorCode.ALERT_PREFERENCE_NOT_FOUND
+        )
+
+
+class NoEmailRecipientException(NotificationException):
+    """Raised when no email address is available for sending"""
+
+    status_code = 422
+    error_code = "NO_EMAIL_RECIPIENT"
+
+    def __init__(self, message: str = "No email address found. Provide one in the request or set it in preferences.") -> None:
+        super().__init__(
+            message=message,
+            error_code="NO_EMAIL_RECIPIENT",
+            numeric_code=5853,
+        )

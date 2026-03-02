@@ -330,7 +330,7 @@ class TestBroadcastAuthUpdate:
 
         # Mock publisher
         mock_publisher = MagicMock()
-        mock_publisher._publish_with_retry = AsyncMock(return_value=True)
+        mock_publisher._publish_with_retry = MagicMock(return_value=True)
         service.publisher = mock_publisher
 
         # Mock TLS enabled
@@ -368,7 +368,7 @@ class TestBroadcastAuthUpdate:
 
         # Mock publisher
         mock_publisher = MagicMock()
-        mock_publisher._publish_with_retry = AsyncMock(return_value=True)
+        mock_publisher._publish_with_retry = MagicMock(return_value=True)
         service.publisher = mock_publisher
 
         # Mock TLS enabled

@@ -10,7 +10,7 @@ from sqlalchemy import DateTime, Float, ForeignKey, Index, JSON, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ..base import Base
+from ..base import Base, _utc_now
 
 
 class AIPredictions(Base):
@@ -102,7 +102,7 @@ class AIPredictions(Base):
         DateTime,
         nullable=False,
         index=True,
-        default=datetime.utcnow,
+        default=_utc_now,
         doc="Prediction timestamp",
     )
 

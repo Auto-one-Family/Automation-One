@@ -21,6 +21,7 @@ from typing import Dict, Optional
 
 from ..core.config import get_settings
 from ..core.logging_config import get_logger
+from ..core.metrics import increment_email_sent, observe_email_latency
 
 logger = get_logger(__name__)
 
@@ -181,6 +182,9 @@ class EmailService:
         text_body: Optional[str],
     ) -> bool:
         """Send email via Resend API."""
+        import time as _time
+
+        start = _time.monotonic()
         try:
             import resend
 
@@ -196,9 +200,15 @@ class EmailService:
 
             # Resend SDK is sync — run in thread pool
             result = await asyncio.to_thread(resend.Emails.send, params)
+            duration = _time.monotonic() - start
+            increment_email_sent("resend", True)
+            observe_email_latency("resend", duration)
             logger.info(f"Email sent via Resend to {to} (id={result.get('id', 'unknown')})")
             return True
         except Exception as e:
+            duration = _time.monotonic() - start
+            increment_email_sent("resend", False)
+            observe_email_latency("resend", duration)
             logger.error(f"Resend email delivery failed: {e}")
             return False
 
@@ -233,11 +243,20 @@ class EmailService:
 
                 server.send_message(msg)
 
+        import time as _time
+
+        start = _time.monotonic()
         try:
             await asyncio.to_thread(_send_sync)
+            duration = _time.monotonic() - start
+            increment_email_sent("smtp", True)
+            observe_email_latency("smtp", duration)
             logger.info(f"Email sent via SMTP to {to}")
             return True
         except Exception as e:
+            duration = _time.monotonic() - start
+            increment_email_sent("smtp", False)
+            observe_email_latency("smtp", duration)
             logger.error(f"SMTP email delivery failed: {e}")
             return False
 

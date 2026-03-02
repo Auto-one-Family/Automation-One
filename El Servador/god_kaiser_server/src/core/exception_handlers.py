@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from .exceptions import GodKaiserException
 from .logging_config import get_logger
+from .metrics import increment_api_error_code
 from .request_context import get_request_id
 
 logger = get_logger(__name__)
@@ -100,8 +101,9 @@ async def automation_one_exception_handler(
         },
     )
 
-    # AuditLog integration: log errors with numeric_code to audit trail
+    # Prometheus per-code counter + AuditLog integration
     if exc.numeric_code:
+        increment_api_error_code(exc.numeric_code)
         await _log_to_audit(request, exc, request_id)
 
     return JSONResponse(

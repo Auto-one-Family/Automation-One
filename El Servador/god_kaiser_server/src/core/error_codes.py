@@ -24,7 +24,8 @@ Server (5000-5999):
 - DASHBOARD_ERROR: 5750-5779
 - SUBZONE_ERROR: 5780-5799
 - AUTOOPS_ERROR: 5800-5849
-- RESERVED: 5850-5999
+- NOTIFICATION_ERROR: 5850-5899
+- RESERVED: 5900-5999
 
 Test Infrastructure (6000-6099):
 - TEST_ERROR: 6000-6099
@@ -232,6 +233,7 @@ class ConfigErrorCode(IntEnum):
     FIELD_MAPPING_FAILED = 5005
     CONFIG_TIMEOUT = 5006
     ESP_OFFLINE = 5007
+    ESP_COMMAND_FAILED = 5008
 
 
 class MQTTErrorCode(IntEnum):
@@ -245,6 +247,7 @@ class MQTTErrorCode(IntEnum):
     RETRY_EXHAUSTED = 5105
     BROKER_UNAVAILABLE = 5106
     AUTHENTICATION_FAILED = 5107
+    SUBSCRIBE_FAILED = 5108
 
 
 class ValidationErrorCode(IntEnum):
@@ -260,6 +263,8 @@ class ValidationErrorCode(IntEnum):
     VALUE_OUT_OF_RANGE = 5207
     DUPLICATE_ENTRY = 5208
     INVALID_PAYLOAD_FORMAT = 5209
+    SENSOR_NOT_FOUND = 5210
+    ACTUATOR_NOT_FOUND = 5211
 
 
 class DatabaseErrorCode(IntEnum):
@@ -272,6 +277,8 @@ class DatabaseErrorCode(IntEnum):
     CONNECTION_FAILED = 5304
     INTEGRITY_ERROR = 5305
     MIGRATION_FAILED = 5306
+    RECORD_NOT_FOUND = 5307
+    RECORD_DUPLICATE = 5308
 
 
 class ServiceErrorCode(IntEnum):
@@ -283,6 +290,15 @@ class ServiceErrorCode(IntEnum):
     OPERATION_TIMEOUT = 5403
     RATE_LIMIT_EXCEEDED = 5404
     PERMISSION_DENIED = 5405
+    AUTHENTICATION_FAILED = 5406
+    TOKEN_EXPIRED = 5407
+    TOKEN_INVALID = 5408
+    AUTHORIZATION_FAILED = 5409
+    EXTERNAL_SERVICE_FAILED = 5410
+    SENSOR_PROCESSING_FAILED = 5411
+    ACTUATOR_COMMAND_FAILED = 5412
+    SAFETY_CONSTRAINT_VIOLATED = 5413
+    USER_NOT_FOUND = 5414
 
 
 class AuditErrorCode(IntEnum):
@@ -363,6 +379,21 @@ class AutoOpsErrorCode(IntEnum):
 
     AUTOOPS_JOB_FAILED = 5800
     AUTOOPS_SCHEDULE_INVALID = 5801
+
+
+class NotificationErrorCode(IntEnum):
+    """Phase 4A Notification-System error codes (5850-5899)."""
+
+    NOTIFICATION_NOT_FOUND = 5850
+    NOTIFICATION_SEND_FAILED = 5851
+    EMAIL_PROVIDER_UNAVAILABLE = 5852
+    EMAIL_TEMPLATE_MISSING = 5853
+    DIGEST_SCHEDULE_INVALID = 5854
+    SUPPRESSION_CONFIG_INVALID = 5855
+    SUPPRESSION_WINDOW_CONFLICT = 5856
+    WEBHOOK_INVALID_PAYLOAD = 5857
+    WEBHOOK_SIGNATURE_INVALID = 5858
+    ALERT_PREFERENCE_NOT_FOUND = 5859
 
 
 class TestErrorCodes(IntEnum):
@@ -533,6 +564,7 @@ SERVER_ERROR_DESCRIPTIONS: Dict[int, str] = {
     5005: "Failed to map fields between server and ESP32 format",
     5006: "Configuration response timeout",
     5007: "ESP device is offline",
+    5008: "ESP32 command execution failed",
     # MQTT errors (5100-5199)
     5101: "MQTT publish operation failed",
     5102: "Failed to build MQTT topic",
@@ -541,6 +573,7 @@ SERVER_ERROR_DESCRIPTIONS: Dict[int, str] = {
     5105: "MQTT retry attempts exhausted",
     5106: "MQTT broker is unavailable",
     5107: "MQTT authentication failed",
+    5108: "MQTT subscribe operation failed",
     # Validation errors (5200-5299)
     5201: "Invalid ESP device ID format",
     5202: "Invalid GPIO pin number",
@@ -551,6 +584,8 @@ SERVER_ERROR_DESCRIPTIONS: Dict[int, str] = {
     5207: "Value out of allowed range",
     5208: "Duplicate entry (already exists)",
     5209: "Invalid payload format",
+    5210: "Sensor not found in server database",
+    5211: "Actuator not found in server database",
     # Database errors (5300-5399)
     5301: "Database query failed",
     5302: "Database commit failed",
@@ -558,12 +593,23 @@ SERVER_ERROR_DESCRIPTIONS: Dict[int, str] = {
     5304: "Database connection failed",
     5305: "Database integrity constraint violated",
     5306: "Database migration failed",
+    5307: "Database record not found",
+    5308: "Duplicate database record (integrity constraint)",
     # Service errors (5400-5499)
     5401: "Service initialization failed",
     5402: "Required dependency missing",
     5403: "Service operation timed out",
     5404: "Rate limit exceeded",
     5405: "Permission denied",
+    5406: "Authentication failed (invalid credentials)",
+    5407: "Authentication token expired",
+    5408: "Authentication token invalid or malformed",
+    5409: "Authorization failed (insufficient permissions)",
+    5410: "External service unavailable or failed",
+    5411: "Sensor data processing failed",
+    5412: "Actuator command execution failed",
+    5413: "Safety constraint violated",
+    5414: "User not found",
     # Audit errors (5500-5599)
     5501: "Failed to write audit log",
     5502: "Retention cleanup failed",
@@ -612,6 +658,17 @@ SERVER_ERROR_DESCRIPTIONS: Dict[int, str] = {
     # AutoOps errors (5800-5849)
     5800: "AutoOps job execution failed",
     5801: "AutoOps schedule configuration invalid",
+    # Notification errors (5850-5899)
+    5850: "Notification with given ID not found",
+    5851: "Failed to send notification via configured provider",
+    5852: "Email provider unavailable or misconfigured",
+    5853: "Email template missing or invalid",
+    5854: "Digest schedule configuration invalid",
+    5855: "Alert suppression configuration invalid",
+    5856: "Alert suppression window conflicts with existing window",
+    5857: "Webhook payload invalid or malformed",
+    5858: "Webhook signature validation failed",
+    5859: "Alert preference for device not found",
 }
 
 # Test infrastructure error descriptions
@@ -721,6 +778,8 @@ def get_error_code_range(code: int) -> str:
         return "SERVER_SUBZONE"
     elif 5800 <= code < 5850:
         return "SERVER_AUTOOPS"
+    elif 5850 <= code < 5900:
+        return "SERVER_NOTIFICATION"
     elif 6000 <= code < 6100:
         return "TEST"
     return "UNKNOWN"

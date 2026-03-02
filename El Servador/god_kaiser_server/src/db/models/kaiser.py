@@ -10,7 +10,7 @@ from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Uniqu
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ..base import Base, TimestampMixin
+from ..base import Base, TimestampMixin, _utc_now
 
 
 class KaiserRegistry(Base, TimestampMixin):
@@ -168,7 +168,7 @@ class ESPOwnership(Base, TimestampMixin):
     # Assignment Information
     assigned_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
+        default=_utc_now,
         nullable=False,
         doc="Assignment timestamp",
     )

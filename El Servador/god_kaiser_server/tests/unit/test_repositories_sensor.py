@@ -4,7 +4,7 @@ Tests for sensor config and data operations
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
@@ -362,7 +362,7 @@ class TestSensorRepositoryData:
 
     async def test_get_data_range_success(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test retrieval of data within time range."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Save data at different times
         for i in range(5):
@@ -390,7 +390,7 @@ class TestSensorRepositoryData:
 
     async def test_get_data_range_empty(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test retrieval with no data in range."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         start_time = now - timedelta(hours=1)
         end_time = now - timedelta(minutes=30)
 
