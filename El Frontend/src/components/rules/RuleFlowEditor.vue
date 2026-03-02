@@ -595,7 +595,6 @@ function graphToRuleData(): {
         } as ActuatorAction)
         break
       }
-        break
 
       case 'notification':
         actions.push({
