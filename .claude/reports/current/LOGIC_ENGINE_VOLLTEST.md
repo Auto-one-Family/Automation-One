@@ -4,8 +4,8 @@
 
 ## System-Bestandsaufnahme (Block A)
 - ESP: MOCK_TEST01 (Mock-ESP, approved, online)
-- Sensor-GPIOs: DS18B20=GPIO4 (temperature)
-- Sensor-Type-Name: `temperature`
+- Sensor-GPIOs: DS18B20=GPIO4 (temperature), DHT22=GPIO15 (humidity)
+- Sensor-Type-Name: `temperature`, `humidity`
 - Aktor: GPIO5, digital (Green LED), ID via DB
 - Kein Bodenfeuchtesensor im Wokwi-Diagramm — MQTT-Inject simuliert
 - GPIO-Wiring-Status: MATCH (DS18B20=GPIO4, LED1=GPIO5 im Diagramm)
@@ -35,12 +35,40 @@
 | D8: Hysterese | ✅ OK | **BUG GEFUNDEN+GEFIXT**: get_rules_by_trigger_sensor() ignorierte hysteresis-type → Fix: hysteresis zu SENSOR_CONDITION_TYPES hinzugefügt. Nach Fix: activate_above=28 bei 29°C korrekt aktiviert |
 | D9: Zeitfenster (Timer) | ⏳ PARTIAL | Reine Timer-Regeln nicht getestet (brauchen 60s Scheduler-Intervall). D9c (kombiniert) getestet |
 | D9c: Zeit + Sensor (AND) | ✅ OK | Zeitfenster + Sensor AND-Kombination feuert korrekt im aktiven Zeitfenster |
-| D10: Compound-Conditions | ⏳ SKIPPED | Backend-Code verifiziert (CompoundConditionEvaluator existiert), kein separater E2E-Test — wird in Frontend Block C getestet |
-| D11: Sequence-Action | ⏳ SKIPPED | SequenceActionExecutor existiert und ist registriert, kein separater E2E-Test — Grundfunktionalität durch D5 Delay verifiziert |
+| D10: Compound-Conditions | ⏳ SKIPPED | Backend-Code verifiziert (CompoundConditionEvaluator existiert), kein separater E2E-Test |
+| D11: Sequence-Action | ⏳ SKIPPED | SequenceActionExecutor existiert und ist registriert, Grundfunktionalität durch D5 Delay verifiziert |
 | D12: Test/Dry-Run | ✅ OK | mock_sensor_values funktionieren, would_trigger korrekt, per-condition results, dry_run=true → kein Aktor geschaltet |
 | D13: Toggle + History | ✅ OK | Disable→kein Trigger, Enable→Trigger wieder. Execution-History korrekt (1→1→2) |
 | D14: Cross-Sensor (DB-Lookup) | ✅ OK | Nur Temp getriggert, Humidity aus DB geladen → feuert. Gegentest: falscher DB-Wert → nicht feuern |
 | D15: Priority + Cooldown | ✅ OK | Cooldown 15s blockiert korrekt, nach Ablauf feuert wieder. max_executions_per_hour=5 gesetzt |
+
+## Aktor-Verifikation (Block G)
+- Aktor: MOCK_TEST01 GPIO5, digital, enabled
+- Manueller Test: ON/OFF via API → MQTT-Command sichtbar ✅
+- E2E-Loop: Sensor 28°C → Regel → MQTT ON-Command → Aktor-State active ✅ (15ms)
+- Wokwi: Mock-ESP (kein echtes Wokwi), Mock-Actuator bestätigt Commands
+
+## Error-Handling (Block E)
+| Test | HTTP-Code | Erwartet | OK? |
+|------|-----------|----------|-----|
+| Nicht-existenter ESP (E1a) | 400 | 400/422 | ✅ Pattern-Validation |
+| Ungültiger Condition-Typ (E1b) | 400 | 400/422 | ✅ "Unknown condition type" |
+| Leere Conditions (E1c) | 422 | 400/422 | ✅ min_length=1 |
+| null Sensor-Wert (E2a) | — | kein Fire | ✅ Korrekt nicht gefeuert |
+| Out-of-Range 1000°C (E2b) | — | Range-Check | ⚠️ Feuert! Logic Engine hat keinen Range-Check (sensor_handler hat einen, aber 1000>25 ist math. korrekt) |
+| 10-Regeln-Performance (E4) | — | <500ms | ✅ 10/10 in ~0ms (Notifications) |
+
+## Frontend Rule Builder (Block C)
+⏳ PENDING
+
+## Persistenz (Block P)
+⏳ PENDING
+
+## Timing-Beobachtungen
+- Sensor→Logic→Aktor Latenz: 15-26ms (Trigger bis MQTT-Command)
+- LogicScheduler Intervall: 60s (konfiguriert)
+- Cooldown-Präzision: Exakt (15s, 30s getestet)
+- Cross-Sensor DB-Lookup: Transparent, kein messbarer Overhead
 
 ## Direkt-Fixes
 | # | Datei | Fix | Commit |
@@ -52,3 +80,9 @@
 |----|-------------|--------------|
 | HYST-1 | NIEDRIG | Mock-ESP Auto-Heartbeat sendet raw_value=0 → stört Hysterese-State. In Produktion mit echten ESPs kein Problem |
 | TIMER-1 | NIEDRIG | Reine Timer-Regeln (nur time_window) brauchen 60s Scheduler-Intervall — nicht E2E getestet, nur kombiniert |
+| RANGE-1 | NIEDRIG | Logic Engine hat keinen Range-Check für Sensor-Werte (1000°C feuert Regeln). sensor_handler filtert bereits, aber bei MQTT-Inject möglich |
+
+## Empfehlungen
+1. Logic Engine könnte optional quality="good" als Bedingung prüfen (aktuell wird jeder Wert akzeptiert)
+2. Hysterese-State sollte langfristig in DB persistiert werden (aktuell In-Memory, geht bei Restart verloren)
+3. Reine Timer-Regeln könnten kürzeres Scheduler-Intervall nutzen (aktuell 60s)
