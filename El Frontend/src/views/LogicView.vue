@@ -1,4 +1,6 @@
 <script setup lang="ts">
+defineOptions({ name: 'LogicView' })
+
 /**
  * LogicView (Rules Editor)
  *
@@ -29,6 +31,7 @@ import {
   Play,
   Trash2,
   ChevronDown,
+  ChevronUp,
   History,
   Workflow,
   Check,
@@ -74,6 +77,16 @@ const isTesting = ref(false)
 const showHistory = ref(false)
 const showRuleDropdown = ref(false)
 const hasUnsavedChanges = ref(false)
+
+// Templates section collapsed state (auto-collapse when user has rules)
+const templatesCollapsed = ref(
+  localStorage.getItem('logic-templates-collapsed') === 'true'
+)
+
+function toggleTemplatesCollapsed() {
+  templatesCollapsed.value = !templatesCollapsed.value
+  localStorage.setItem('logic-templates-collapsed', String(templatesCollapsed.value))
+}
 
 // New rule form
 const newRuleName = ref('')
@@ -675,70 +688,18 @@ onUnmounted(() => {
         </div>
 
         <div class="rules-empty__content">
-          <!-- Animated flow illustration -->
-          <div class="rules-empty__illustration">
-            <div class="rules-empty__flow">
-              <div class="rules-empty__flow-node rules-empty__flow-node--sensor">
-                <Zap class="w-5 h-5" />
-              </div>
-              <div class="rules-empty__flow-line">
-                <svg width="80" height="2" viewBox="0 0 80 2">
-                  <line x1="0" y1="1" x2="80" y2="1" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3" class="rules-empty__flow-dash" />
-                </svg>
-              </div>
-              <div class="rules-empty__flow-node rules-empty__flow-node--logic">
-                <GitBranch class="w-5 h-5" />
-              </div>
-              <div class="rules-empty__flow-line">
-                <svg width="80" height="2" viewBox="0 0 80 2">
-                  <line x1="0" y1="1" x2="80" y2="1" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3" class="rules-empty__flow-dash" />
-                </svg>
-              </div>
-              <div class="rules-empty__flow-node rules-empty__flow-node--action">
-                <Workflow class="w-5 h-5" />
-              </div>
-            </div>
-            <div class="rules-empty__flow-labels">
-              <span>Bedingung</span>
-              <span>Logik</span>
-              <span>Aktion</span>
-            </div>
-          </div>
-
-          <h2 class="rules-empty__title">Automatisierung</h2>
-          <p class="rules-empty__desc">
-            Erstelle visuelle Regeln, um Aktoren basierend auf Sensordaten und Zeitplänen zu steuern.
-          </p>
-
-          <div class="rules-empty__actions">
-            <button class="rules-empty__cta" @click="startNewRule">
-              <Plus class="w-4.5 h-4.5" />
-              <span>Neue Regel erstellen</span>
-            </button>
-            <p class="rules-empty__hint">
-              Bausteine auf die Arbeitsfläche ziehen und verbinden
-            </p>
-          </div>
-
-          <!-- Templates -->
-          <div class="rules-empty__templates">
-            <h3 class="rules-empty__templates-title">Vorlagen</h3>
-            <div class="rules-empty__templates-grid">
-              <RuleTemplateCard
-                v-for="tpl in ruleTemplates"
-                :key="tpl.id"
-                :template="tpl"
-                @use-template="useTemplate"
-              />
-            </div>
-          </div>
-
-          <!-- Existing rules as RuleCards -->
+          <!-- ====== SECTION 1: Existing Rules (PRIMARY — above the fold) ====== -->
           <div v-if="logicStore.rules.length > 0" class="rules-empty__list">
-            <h3 class="rules-empty__list-title">
-              <Workflow class="w-3.5 h-3.5" />
-              {{ logicStore.rules.length }} {{ logicStore.rules.length === 1 ? 'Regel' : 'Regeln' }} vorhanden
-            </h3>
+            <div class="rules-empty__list-header">
+              <h3 class="rules-empty__list-title">
+                <Workflow class="w-3.5 h-3.5" />
+                Meine Regeln ({{ logicStore.rules.length }})
+              </h3>
+              <button class="rules-empty__cta rules-empty__cta--compact" @click="startNewRule">
+                <Plus class="w-3.5 h-3.5" />
+                <span>Neue Regel</span>
+              </button>
+            </div>
             <div class="rules-empty__cards">
               <RuleCard
                 v-for="rule in logicStore.rules"
@@ -752,6 +713,73 @@ onUnmounted(() => {
                 @delete="onRuleCardDelete"
               />
             </div>
+          </div>
+
+          <!-- ====== Empty state illustration (only when no rules exist) ====== -->
+          <template v-if="logicStore.rules.length === 0">
+            <div class="rules-empty__illustration">
+              <div class="rules-empty__flow">
+                <div class="rules-empty__flow-node rules-empty__flow-node--sensor">
+                  <Zap class="w-5 h-5" />
+                </div>
+                <div class="rules-empty__flow-line">
+                  <svg width="80" height="2" viewBox="0 0 80 2">
+                    <line x1="0" y1="1" x2="80" y2="1" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3" class="rules-empty__flow-dash" />
+                  </svg>
+                </div>
+                <div class="rules-empty__flow-node rules-empty__flow-node--logic">
+                  <GitBranch class="w-5 h-5" />
+                </div>
+                <div class="rules-empty__flow-line">
+                  <svg width="80" height="2" viewBox="0 0 80 2">
+                    <line x1="0" y1="1" x2="80" y2="1" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3" class="rules-empty__flow-dash" />
+                  </svg>
+                </div>
+                <div class="rules-empty__flow-node rules-empty__flow-node--action">
+                  <Workflow class="w-5 h-5" />
+                </div>
+              </div>
+              <div class="rules-empty__flow-labels">
+                <span>Bedingung</span>
+                <span>Logik</span>
+                <span>Aktion</span>
+              </div>
+            </div>
+
+            <h2 class="rules-empty__title">Automatisierung</h2>
+            <p class="rules-empty__desc">
+              Erstelle visuelle Regeln, um Aktoren basierend auf Sensordaten und Zeitplänen zu steuern.
+            </p>
+
+            <div class="rules-empty__actions">
+              <button class="rules-empty__cta" @click="startNewRule">
+                <Plus class="w-4.5 h-4.5" />
+                <span>Neue Regel erstellen</span>
+              </button>
+              <p class="rules-empty__hint">
+                Bausteine auf die Arbeitsfläche ziehen und verbinden
+              </p>
+            </div>
+          </template>
+
+          <!-- ====== SECTION 2: Templates (SECONDARY — collapsible) ====== -->
+          <div class="rules-empty__templates">
+            <button class="rules-empty__templates-toggle" @click="toggleTemplatesCollapsed">
+              <component :is="templatesCollapsed ? ChevronDown : ChevronUp" class="w-4 h-4" />
+              <h3 class="rules-empty__templates-title">
+                Vorlagen & Schnellstart ({{ ruleTemplates.length }})
+              </h3>
+            </button>
+            <Transition name="collapse">
+              <div v-show="!templatesCollapsed" class="rules-empty__templates-grid">
+                <RuleTemplateCard
+                  v-for="tpl in ruleTemplates"
+                  :key="tpl.id"
+                  :template="tpl"
+                  @use-template="useTemplate"
+                />
+              </div>
+            </Transition>
           </div>
         </div>
       </div>
@@ -1476,56 +1504,111 @@ onUnmounted(() => {
   letter-spacing: 0.02em;
 }
 
-/* Templates grid */
-.rules-empty__templates {
-  width: 100%;
-  max-width: 720px;
-  margin: 0 auto;
-}
-
-.rules-empty__templates-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin: 0 0 var(--space-3) 0;
-}
-
-.rules-empty__templates-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--space-3);
-}
-
-/* Rules list */
+/* Rules list (PRIMARY — above the fold) */
 .rules-empty__list {
   text-align: left;
-  padding: 1rem;
+  padding: var(--space-4);
   background: rgba(13, 13, 22, 0.6);
   backdrop-filter: blur(8px);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
-  max-width: 400px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto var(--space-4);
+}
+
+.rules-empty__list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
 }
 
 .rules-empty__list-title {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  font-size: 0.6875rem;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
-  margin-bottom: 0.5rem;
-  padding: 0 0.375rem;
+  margin: 0;
+  padding: 0;
 }
 
 .rules-empty__cards {
   display: grid;
-  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-3);
+}
+
+/* Compact CTA button variant (inline with header) */
+.rules-empty__cta--compact {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  gap: var(--space-1);
+}
+
+/* Templates section (SECONDARY — collapsible) */
+.rules-empty__templates {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.rules-empty__templates-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: rgba(13, 13, 22, 0.4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  color: var(--color-text-muted);
+}
+
+.rules-empty__templates-toggle:hover {
+  background: rgba(13, 13, 22, 0.6);
+}
+
+.rules-empty__templates-title {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
+.rules-empty__templates-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+}
+
+/* Collapse transition */
+.collapse-enter-active,
+.collapse-leave-active {
+  transition: all 200ms ease;
+  overflow: hidden;
+}
+
+.collapse-enter-from,
+.collapse-leave-to {
+  opacity: 0;
+  max-height: 0;
+  padding-top: 0;
+}
+
+.collapse-enter-to,
+.collapse-leave-from {
+  opacity: 1;
+  max-height: 600px;
 }
 
 /* ======================== EXECUTION HISTORY ======================== */

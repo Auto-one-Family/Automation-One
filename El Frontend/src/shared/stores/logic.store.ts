@@ -395,10 +395,12 @@ export const useLogicStore = defineStore('logic', () => {
       activeExecutions.value.delete(ruleId)
     }, 2000)
 
-    // Update rule's last_triggered if we have the rule
+    // Update rule's last_triggered and execution_count if we have the rule
     const rule = rules.value.find((r) => r.id === ruleId)
     if (rule) {
       rule.last_triggered = new Date(event.timestamp * 1000).toISOString()
+      rule.execution_count = (rule.execution_count ?? 0) + 1
+      rule.last_execution_success = event.success
     }
   }
 
