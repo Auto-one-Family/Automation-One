@@ -361,12 +361,14 @@ Statt nur passiv zu warten, bestehende Szenarien um `set-control` Steps ergaenze
 | `09-pwm/*.yaml` | Potentiometer als Steuerungsquelle |
 
 ### Akzeptanzkriterien Stufe 2
-- [ ] 5 neue DS18B20-Sweep-Szenarien, alle GRUEN lokal
-- [ ] 5 neue DHT22-Sweep-Szenarien, alle GRUEN lokal
-- [ ] 3 neue ADC-Sweep-Szenarien, alle GRUEN lokal
-- [ ] 3 neue Emergency-Button-Szenarien, alle GRUEN lokal
-- [ ] CI-Pipeline um neue Szenarien erweitert (PR + Nightly)
-- [ ] Sensor-Coverage von 50% auf 75% gestiegen
+- [x] 5 neue DS18B20-Sweep-Szenarien erstellt (temp_sweep, extreme_cold, extreme_hot, rapid_change, precision)
+- [x] 5 neue DHT22-Sweep-Szenarien erstellt (temp_sweep, humidity_sweep, extreme_values, rapid_change, combined_change)
+- [x] 3 neue ADC-Sweep-Szenarien erstellt (adc_full_sweep, adc_boundaries, adc_rapid_change)
+- [ ] ~~3 neue Emergency-Button-Szenarien~~ **BLOCKIERT**: Firmware hat keinen GPIO27 Interrupt-Handler. btn_emergency in diagram.json existiert, aber digitalRead(27) wird nirgends aufgerufen. Erfordert Firmware-Erweiterung (GPIO ISR fuer Emergency Button)
+- [x] CI-Pipeline um Nightly-Job `nightly-sensor-dynamic` erweitert (13 neue Szenarien, skip 5 Core)
+- [x] Bestehende Szenarien erweitert: sensor_dht22_full_flow.yaml + sensor_analog_flow.yaml mit set-control Steps
+- [ ] Alle Szenarien GRUEN lokal — **Manuell pruefen: `wokwi-cli . --timeout 90000 --scenario <file>`**
+- [ ] Sensor-Coverage von 50% auf 75% gestiegen — messbar nach CI-Run
 
 ---
 
