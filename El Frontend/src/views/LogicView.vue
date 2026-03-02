@@ -190,8 +190,6 @@ async function useTemplate(template: RuleTemplate) {
   await nextTick()
 
   // 3. Load template conditions/actions onto the canvas as Vue Flow nodes
-  console.log('[TEMPLATE-DEBUG] editorRef available:', !!editorRef.value)
-  console.log('[TEMPLATE-DEBUG] conditions:', template.rule.conditions.length, 'actions:', template.rule.actions.length)
   if (template.rule.conditions.length > 0 || template.rule.actions.length > 0) {
     editorRef.value?.loadFromRuleData({
       conditions: template.rule.conditions,
@@ -200,7 +198,6 @@ async function useTemplate(template: RuleTemplate) {
       priority: template.rule.priority,
       cooldown_seconds: template.rule.cooldown_seconds,
     })
-    console.log('[TEMPLATE-DEBUG] loadFromRuleData called')
   }
 
   logger.info('Template selected', { templateId: template.id, name: template.name })
