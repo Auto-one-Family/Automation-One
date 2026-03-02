@@ -7,11 +7,11 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 2.5 | **Aktualisiert:** 2026-02-28
+> **Version:** 2.7 | **Aktualisiert:** 2026-03-02
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
-> **Endpoint-Anzahl:** ~170 Endpoints
+> **Endpoint-Anzahl:** ~190 Endpoints
 
 ---
 
@@ -32,7 +32,7 @@ allowed-tools: Read
 | `/auth/api-keys` | GET | JWT | API-Keys auflisten |
 | `/auth/api-keys` | POST | JWT | API-Key erstellen |
 
-### ESP Devices (`/esp`) - 15 Endpoints
+### ESP Devices (`/esp`) - 17 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
@@ -50,9 +50,11 @@ allowed-tools: Read
 | `/esp/devices/{esp_id}/assign_kaiser` | POST | Operator | Kaiser zuweisen |
 | `/esp/devices/{esp_id}/approve` | POST | Operator | **Pending Device genehmigen** |
 | `/esp/devices/{esp_id}/reject` | POST | Operator | **Pending Device ablehnen** |
+| `/esp/devices/{esp_id}/alert-config` | PATCH | Operator | Device-Level Alert-Config setzen (Phase 4A.7) |
+| `/esp/devices/{esp_id}/alert-config` | GET | JWT | Device-Level Alert-Config abrufen |
 | `/esp/discovery` | GET | JWT | Network Discovery Results |
 
-### Sensors (`/sensors`) - 12 Endpoints
+### Sensors (`/sensors`) - 16 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
@@ -68,8 +70,12 @@ allowed-tools: Read
 | `/sensors/onewire/scan` | POST | JWT | OneWire-Bus scannen |
 | `/sensors/{sensor_id}/trigger` | POST | JWT | Messung triggern |
 | `/sensors/by-esp/{esp_id}` | GET | JWT | Sensoren nach ESP |
+| `/sensors/{sensor_id}/alert-config` | PATCH | Operator | Per-Sensor Alert-Config setzen (Phase 4A.7) |
+| `/sensors/{sensor_id}/alert-config` | GET | JWT | Per-Sensor Alert-Config abrufen |
+| `/sensors/{sensor_id}/runtime` | GET | JWT | Runtime-Stats + Wartungsstatus (Phase 4A.8) |
+| `/sensors/{sensor_id}/runtime` | PATCH | Operator | Runtime-Stats aktualisieren (Wartungslog) |
 
-### Actuators (`/actuators`) - 8 Endpoints
+### Actuators (`/actuators`) - 12 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
@@ -81,6 +87,10 @@ allowed-tools: Read
 | `/actuators/emergency-stop` | POST | JWT | Global Emergency-Stop |
 | `/actuators/{actuator_id}` | DELETE | JWT | Actuator löschen |
 | `/actuators/by-esp/{esp_id}` | GET | JWT | Actuators nach ESP |
+| `/actuators/{actuator_id}/alert-config` | PATCH | Operator | Per-Actuator Alert-Config setzen (Phase 4A.7) |
+| `/actuators/{actuator_id}/alert-config` | GET | JWT | Per-Actuator Alert-Config abrufen |
+| `/actuators/{actuator_id}/runtime` | GET | JWT | Runtime-Stats + Wartungsstatus (Phase 4A.8) |
+| `/actuators/{actuator_id}/runtime` | PATCH | Operator | Runtime-Stats aktualisieren (Wartungslog) |
 
 ### Zones (`/zone`) - 5 Endpoints
 
@@ -243,6 +253,26 @@ allowed-tools: Read
 | `/users/{user_id}` | DELETE | Admin | User löschen |
 | `/users/{user_id}/reset-password` | POST | Admin | Passwort zurücksetzen |
 | `/users/{user_id}/role` | PATCH | Admin | Rolle ändern |
+
+### Notifications (`/notifications`) - 9 Endpoints
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/notifications` | GET | JWT | Alle Notifications (paginiert, filterbar) |
+| `/notifications/unread-count` | GET | JWT | Ungelesene-Anzahl + höchste Severity |
+| `/notifications/{id}` | GET | JWT | Notification Details |
+| `/notifications/{id}/read` | PATCH | JWT | Als gelesen markieren |
+| `/notifications/read-all` | PATCH | JWT | Alle als gelesen markieren |
+| `/notifications/send` | POST | Admin | Manuelle Notification senden |
+| `/notifications/preferences` | GET | JWT | User-Preferences abrufen |
+| `/notifications/preferences` | PUT | JWT | User-Preferences aktualisieren |
+| `/notifications/test-email` | POST | JWT | Test-Email senden |
+
+### Webhooks (`/webhooks`) - 1 Endpoint
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/webhooks/grafana-alerts` | POST | None | Grafana Alert Webhook Empfänger |
 
 ### Health (`/health`) - 6 Endpoints
 
@@ -1243,6 +1273,17 @@ Health Check (keine Auth erforderlich).
 - `RuleTestRequest`, `RuleTestResponse`, `ConditionResult`, `ActionResult`
 - `ExecutionHistoryEntry`, `ExecutionHistoryQuery`, `ExecutionHistoryResponse`
 
+### Alert Config Schemas (`schemas/alert_config.py`)
+- `SensorAlertConfigUpdate`, `ActuatorAlertConfigUpdate`, `DeviceAlertConfigUpdate`
+- `CustomThresholds`, `MaintenanceLogEntry`
+- `RuntimeStatsUpdate`, `RuntimeStatsResponse`
+
+### Notification Schemas (`schemas/notification.py`)
+- `NotificationCreate`, `NotificationResponse`, `NotificationListResponse`
+- `NotificationPreferencesUpdate`, `NotificationPreferencesResponse`
+- `UnreadCountResponse`, `TestEmailRequest`
+- `GrafanaAlert`, `GrafanaWebhookPayload`
+
 ### Debug Schemas (`schemas/debug.py`)
 - `MockESPCreate`, `MockESPUpdate`, `MockESPResponse`
 - `MockSensorConfig`, `SetSensorValueRequest`
@@ -1274,15 +1315,16 @@ Health Check (keine Auth erforderlich).
 | logs | `logs.ts` | Log Viewer |
 | audit | `audit.ts` | Audit Logs |
 | users | `users.ts` | User Management |
+| notifications | `notifications.ts` | Notification Inbox + Preferences |
 
 ### Backend Router (`El Servador/god_kaiser_server/src/api/v1/`)
 
 | Router | Datei | Endpoints |
 |--------|-------|-----------|
 | auth | `auth.py` | 10 |
-| esp | `esp.py` | 16 |
-| sensors | `sensors.py` | 12 |
-| actuators | `actuators.py` | 8 |
+| esp | `esp.py` | 17 |
+| sensors | `sensors.py` | 16 |
+| actuators | `actuators.py` | 12 |
 | zone | `zone.py` | 5 |
 | subzone | `subzone.py` | 6 |
 | logic | `logic.py` | 8 |
@@ -1293,6 +1335,8 @@ Health Check (keine Auth erforderlich).
 | audit | `audit.py` | 22 |
 | users | `users.py` | 7 |
 | health | `health.py` | 6 |
+| notifications | `notifications.py` | 9 |
+| webhooks | `webhooks.py` | 1 |
 | logs | `logs.py` | 1 |
 | websocket | `websocket/realtime.py` | 1 |
 | ai | `ai.py` | PLANNED (God Layer AI) |

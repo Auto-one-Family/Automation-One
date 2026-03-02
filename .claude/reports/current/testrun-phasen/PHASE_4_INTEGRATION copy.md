@@ -130,13 +130,13 @@ POST   /v1/notifications/test-email         # Test-Email (Setup-Verifikation)
 2. **NotificationInbox** (Drawer, rechts): Gruppiert nach Severity, Filter (Alle/Kritisch/Warnungen/System), Acknowledge/Read-Buttons
 3. **Detail-Ansicht** (Inline expandierbar): Severity, Quelle, Zone, ESP, Correlation-ID, Deep-Links
 
-**WebSocket-Events:** `notification:new`, `notification:updated`, `notification:read`
+**WebSocket-Events:** `notification_new`, `notification_updated`, `notification_unread_count` (Underscore-Konvention wie `sensor_data`, `actuator_status` etc.)
 **Browser-Notifications:** Optional bei Critical (mit User-Permission)
 
 ### Block 4A.3: Grafana Webhook → Backend (~2-3h)
 
-**Endpoint:** `POST /v1/webhooks/grafana-alerts`
-**Grafana Contact Point:** Webhook an `http://el-servador:8000/v1/webhooks/grafana-alerts`
+**Endpoint:** `POST /api/v1/webhooks/grafana-alerts`
+**Grafana Contact Point:** Webhook an `http://el-servador:8000/api/v1/webhooks/grafana-alerts`
 
 **Recherche-Empfehlung:** Email NICHT direkt ueber Grafana Contact Point senden. Stattdessen: Backend entscheidet basierend auf Severity + User-Praeferenzen + Digest-Logik. Das ist wartbarer und testbarer.
 
@@ -149,7 +149,7 @@ contactPoints:
         type: webhook
         disableResolveMessage: false  # Resolved-Events senden!
         settings:
-          url: http://el-servador:8000/v1/webhooks/grafana-alerts
+          url: http://el-servador:8000/api/v1/webhooks/grafana-alerts
 policies:
   - receiver: automationone-webhook
     group_by: [grafana_folder, alertname]

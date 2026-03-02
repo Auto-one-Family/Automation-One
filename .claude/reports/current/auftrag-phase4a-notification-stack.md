@@ -119,20 +119,28 @@ CREATE TABLE notifications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id INTEGER REFERENCES user_accounts(id),  -- NICHT UUID, NICHT users!
     channel VARCHAR(20) NOT NULL,          -- 'email', 'websocket', 'webhook', 'inbox'
-    severity VARCHAR(20) NOT NULL,         -- 'critical', 'warning', 'info', 'success'
-    category VARCHAR(50) NOT NULL,         -- 'sensor_alert', 'device_event', 'infrastructure',
-                                           -- 'rule_execution', 'system', 'manual'
+    severity VARCHAR(20) NOT NULL,         -- 'critical', 'warning', 'info' (3 Severity-Stufen)
+                                           -- FIX-02: 'resolved' ist STATUS, nicht Severity.
+                                           -- Severity + Status sind getrennte Dimensionen (ISA-18.2).
+    category VARCHAR(50) NOT NULL,         -- FIX-03: Category und Source sind GETRENNTE Dimensionen.
+                                           -- Categories: 'connectivity', 'data_quality', 'infrastructure',
+                                           -- 'lifecycle', 'maintenance', 'security', 'system'
+                                           -- Sources: separate Spalte (s.u.)
     title VARCHAR(255) NOT NULL,
-    body TEXT NOT NULL,
+    body TEXT,                              -- NULLABLE (nicht alle Notifications haben Body)
     metadata JSONB DEFAULT '{}',           -- esp_id, sensor_type, rule_id, grafana_fingerprint,
                                            -- correlation_id, zone_name, values
     source VARCHAR(50) NOT NULL,           -- 'grafana', 'logic_engine', 'mqtt_handler',
-                                           -- 'sensor_threshold', 'device_event', 'manual'
+                                           -- 'sensor_threshold', 'device_event', 'autoops', 'manual', 'system'
+    fingerprint VARCHAR(64),               -- FIX-07: Deduplikation. MD5/SHA256 von source+category+title.
+                                           -- Partial Index WHERE fingerprint IS NOT NULL
     is_read BOOLEAN DEFAULT FALSE,
     is_archived BOOLEAN DEFAULT FALSE,
     digest_sent BOOLEAN DEFAULT FALSE,     -- Fuer Warning-Digest-Tracking
     parent_notification_id UUID REFERENCES notifications(id),  -- Root-Cause Korrelation
-    created_at TIMESTAMPTZ DEFAULT NOW(),
+    -- FIX-04: created_at/updated_at kommen via TimestampMixin automatisch.
+    -- In SQLAlchemy-Model NICHT nochmal definieren! read_at ist eigenes Feld.
+    created_at TIMESTAMPTZ DEFAULT NOW(),   -- (nur Doku, TimestampMixin liefert dies)
     read_at TIMESTAMPTZ
 );
 
@@ -145,6 +153,9 @@ CREATE INDEX idx_notifications_source_category
     ON notifications(source, category);
 CREATE INDEX idx_notifications_severity
     ON notifications(severity) WHERE severity IN ('critical', 'warning');
+-- FIX-07: Fingerprint-Index fuer Deduplication
+CREATE UNIQUE INDEX idx_notifications_fingerprint
+    ON notifications(fingerprint) WHERE fingerprint IS NOT NULL;
 ```
 
 **Tabelle `notification_preferences`:**
@@ -198,6 +209,11 @@ class NotificationSettings(BaseSettings):
     # --- NEU HINZUFUEGEN: ---
     resend_api_key: str = Field(default="", alias="RESEND_API_KEY")
     email_enabled: bool = Field(default=False, alias="EMAIL_ENABLED")  # Master-Switch
+    # FIX-05: email_enabled vs. smtp_enabled Logik:
+    #   email_enabled=false → KEIN Email (weder Resend noch SMTP)
+    #   email_enabled=true + resend_api_key gesetzt → Resend Provider
+    #   email_enabled=true + resend_api_key leer + smtp_enabled=true → SMTP Fallback
+    #   smtp_enabled ist PROVIDER-Switch, email_enabled ist MASTER-Switch
     email_from: str = Field(default="AutomationOne <alerts@robin-herbig.de>", alias="EMAIL_FROM")
     email_template_dir: str = Field(default="templates/email", alias="EMAIL_TEMPLATE_DIR")
 ```
@@ -329,7 +345,7 @@ class NotificationRouter:
 
 ```python
 class NotificationCreate(BaseModel):
-    severity: Literal["critical", "warning", "info", "success"]
+    severity: Literal["critical", "warning", "info"]  # FIX-02: 'success' gestrichen, 'resolved' ist Status
     category: str
     title: str = Field(max_length=255)
     body: str
@@ -861,6 +877,108 @@ Parallelisierung:
 2. **`src/db/models/__init__.py`** — Notification-Model muss importiert werden (analog zu Zeilen 9-26)
 3. **`src/schemas/notification.py`** — Pydantic-Schemas gehoeren in eigene Datei (bestehendes Pattern, 20 Schema-Dateien existieren)
 4. **BackgroundTasks vs asyncio.to_thread** — Codebase nutzt NICHT FastAPI BackgroundTasks. Bestehende Pattern: `asyncio.to_thread()` fuer blocking, `APScheduler` fuer periodic. DigestService sollte in bestehenden `_central_scheduler` integriert werden, nicht als eigener `asyncio.Task`
+
+---
+
+## Systemkontext-Analyse Fix-Log (2026-03-02)
+
+> Ergebnis der Element-fuer-Element Analyse aller Phase-4A-Elemente gegen die tatsaechliche Codebase.
+> **Status:** Alle 15 FIX-Eintraege + 5 PRUEFEN-Punkte analysiert und eingearbeitet.
+
+### Angewandte Fixes (in diesem Dokument)
+
+| Fix-ID | Prio | Was | Status |
+|--------|------|-----|--------|
+| **FIX-02** | HOCH | Severity `success` gestrichen. 3 Severity-Stufen: `critical/warning/info`. `resolved` ist STATUS (ISA-18.2 Lifecycle), nicht Severity | ✅ SQL-Block 4A.1.1 korrigiert |
+| **FIX-03** | MITTEL | Category und Source sind GETRENNTE Dimensionen. Categories: `connectivity/data_quality/infrastructure/lifecycle/maintenance/security/system`. Sources: `grafana/logic_engine/mqtt_handler/sensor_threshold/device_event/autoops/manual/system` | ✅ SQL-Block 4A.1.1 korrigiert |
+| **FIX-04** | MITTEL | TimestampMixin-Hinweis: `class Notification(Base, TimestampMixin)` liefert `created_at/updated_at` automatisch. NICHT nochmal im Model definieren. `read_at` ist eigenes Feld | ✅ SQL-Kommentar ergaenzt |
+| **FIX-05** | HOCH | `email_enabled` vs. `smtp_enabled` Logik geklaert: `email_enabled` = Master-Switch, `smtp_enabled` = Provider-Switch | ✅ Config-Block ergaenzt |
+| **FIX-07** | HOCH | `fingerprint VARCHAR(64)` als eigene Spalte mit Partial UNIQUE Index ergaenzt | ✅ SQL + Index ergaenzt |
+
+### Fixes in anderen Dokumenten
+
+| Fix-ID | Prio | Was | Datei | Status |
+|--------|------|-----|-------|--------|
+| **FIX-06** | KRITISCH | WS-Event-Naming: `notification:new` → `notification_new` (Underscore) | `PHASE_4_INTEGRATION copy.md` | ✅ 3 Stellen korrigiert |
+| **FIX-10** | KRITISCH | UX-Auftrag Status → "ABSORBIERT durch Phase 4A+4B". Kein `useSystemHealthStore`, kein `AlertSlideOver`, kein `alert_update` Event | `auftrag-unified-monitoring-ux.md` | ✅ Status geaendert |
+| **FIX-14** | HOCH | Grafana Webhook URL: `/v1/webhooks/grafana-alerts` → `/api/v1/webhooks/grafana-alerts` | `PHASE_4_INTEGRATION copy.md` | ✅ 3 Stellen korrigiert |
+| **FIX-01** | KRITISCH | `user_id UUID → INTEGER`, `users → user_accounts` | `roadmap-phase4-system-integration.md` (Life-Repo, nicht im auto-one Repo) | ⚠️ EXTERN — User muss im Life-Repo korrigieren |
+
+### Neue Dokumentations-Abschnitte (FIX-08, FIX-13, FIX-15)
+
+#### FIX-08: WS-Event Migration (notification → notification_new)
+
+**Aktueller Zustand (implementiert):**
+- `esp.store.ts` registriert BEIDE Events nebeneinander:
+  - `ws.on('notification', handleNotification)` → `notification.store.ts` (Toast-System, LEGACY)
+  - `ws.on('notification_new', handleNotificationNew)` → `notification-inbox.store.ts` (Inbox)
+- Der `NotificationRouter` im Backend broadcastet `notification_new` (korrekter Name)
+- Der alte `NotificationActionExecutor` broadcastet `notification` (Legacy)
+
+**Entscheidung:** Sauberer Schnitt. Der `NotificationActionExecutor` wird durch den `NotificationRouter` ersetzt (Block 4A.1.6). Nach Refactoring broadcastet nur noch der Router mit `notification_new`. Das alte `notification` Event entfaellt — Frontend-seitig bleibt der Handler fuer Abwaertskompatibilitaet bis zum naechsten Cleanup, funktioniert aber als Dead-Code.
+
+#### FIX-09: alert_update Event (UX-Auftrag) entfaellt
+
+Der UX-Auftrag (`auftrag-unified-monitoring-ux.md`, Status: ABSORBIERT) plante ein WS-Event `alert_update`. Dieses wird durch `notification_new` vollstaendig abgedeckt. Das Frontend unterscheidet via `source`-Feld (grafana, logic_engine, etc.). EIN Event fuer alles.
+
+#### FIX-13: Event-Routing-Logik (Toast vs. Inbox)
+
+**Explizite Routing-Matrix (implementiert in `esp.store.ts`):**
+
+| WS-Event | Ziel-Store | Funktion | Zweck |
+|----------|-----------|----------|-------|
+| `notification` | `notification.store.ts` | `handleNotification()` | Toast-System (transient, legacy) |
+| `error_event` | `notification.store.ts` | `handleErrorEvent()` | Error-Toast (transient) |
+| `notification_new` | `notification-inbox.store.ts` | `handleWSNotificationNew()` | Persistente Inbox + Badge |
+| `notification_updated` | `notification-inbox.store.ts` | `handleWSNotificationUpdated()` | Read/Archive Updates |
+| `notification_unread_count` | `notification-inbox.store.ts` | `handleWSUnreadCount()` | Badge-Zaehler |
+
+**Wichtig:** Toast-Pipeline (notification.store) und Inbox-Pipeline (notification-inbox.store) koexistieren. NICHT den alten Toast-Handler entfernen.
+
+#### FIX-12: AlertSlideOver (UX-Auftrag) entfaellt
+
+Der UX-Auftrag plante `AlertSlideOver.vue` (400px, Severity-gruppiert). Phase 4A baut stattdessen `NotificationDrawer.vue` (560px, Zeitgruppen, Filter-Tabs). NUR EIN Drawer. Phase 4B erweitert den Drawer optional — kein zweiter Drawer.
+
+#### FIX-15: actuator_alert_handler.py Integration
+
+**Aktuell:** `src/mqtt/handlers/actuator_alert_handler.py` verarbeitet 4 Alert-Types (emergency, runtime, safety, hardware) via MQTT. Diese werden per WebSocket broadcastet aber NICHT in der `notifications`-Tabelle persistiert.
+
+**Integration nach Phase 4A:** Der `actuator_alert_handler` sollte den `NotificationRouter.route()` aufrufen mit:
+- `source = "mqtt_handler"`
+- `category`: emergency → `connectivity`, safety → `system`, runtime → `system`, hardware → `infrastructure`
+- `severity`: emergency → `critical`, safety → `warning`, runtime → `warning`, hardware → `warning`
+
+**Aufwand:** ~1h, als Block 4A.1.8 oder nachgelagerter Integrations-Schritt. Kein Scope-Creep — dies ist eine natuerliche Erweiterung des Routing-Patterns.
+
+### PRUEFEN-Ergebnisse (Codebase-Verifikation 2026-03-02)
+
+| ID | Frage | Ergebnis |
+|----|-------|---------|
+| **PRUEFEN-01** | APScheduler Typ | ✅ `AsyncIOScheduler` (`src/core/scheduler.py:107`). Kein ContextVar-Problem. Digest-Service kann `get_central_scheduler()` nutzen |
+| **PRUEFEN-02** | Admin-only Decorator | ✅ `require_admin()` existiert in `deps.py:242`. Type-Alias: `AdminUser = Annotated[User, Depends(require_admin)]` in `deps.py:298`. Fuer POST /send: `user: AdminUser` als Parameter |
+| **PRUEFEN-03** | Store-Initialisierung | ✅ `App.vue:34` ruft `notificationInboxStore.loadInitial()` auf. Pattern: onMounted() → store.init() |
+| **PRUEFEN-04** | Zeitformatierungs-Lib | ✅ `date-fns` v4.1.0 installiert. `formatDistanceToNow` + `de` Locale bereits genutzt in `RuleCard.vue`. `NotificationItem.vue` hat bereits `relativeTime` Computed |
+| **PRUEFEN-05** | Grafana Provisioning | ✅ `docker/grafana/provisioning/alerting/` existiert. Dateien vorhanden: `contact-points.yml` (korrekte URL), `notification-policies.yml`, `alert-rules.yml`, `loki-alert-rules.yml` |
+
+### FIX-11: Farb-Token-Naming Ergebnis
+
+**Verifiziert in `tokens.css`:**
+- `--color-error: #f87171` (Zeile 67) — Standard rot
+- `--color-warning: #fbbf24` (Zeile 66) — Standard amber
+- `--color-status-alarm: #ef4444` (Zeile 210) — Semantisches Alias rot
+- `--color-status-warning: #eab308` (Zeile 209) — Semantisches Alias gelb
+
+**Empfehlung:** `--color-error/warning/info/success` verwenden (garantiert vorhanden). Die `--color-status-*` Tokens existieren AUCH, sind aber leicht andere Farbnuancen (status-alarm ist red-500 vs error ist red-400). Fuer Phase 4A: Standardtokens `--color-error/warning` verwenden — konsistent mit dem implementierten Code.
+
+### Scope-Abgrenzung (Phase 4A aendert NICHT)
+
+| Komponente | Warum nicht | Wann |
+|-----------|------------|------|
+| `SystemMonitorView.vue` | Scope-Creep, gehoert in Phase 4D (Diagnostics Hub) | Phase 4D |
+| `AlarmListWidget.vue` | Dashboard-Widget bleibt unabhaengig, wird in 4B erweitert | Phase 4B |
+| `actuator_alert_handler.py` | Nur Routing-Vorbereitung dokumentiert (FIX-15), Implementierung als 4A.1.8 | Phase 4A.1.8 |
+| `useSystemHealthStore` | UX-Auftrag ABSORBIERT (FIX-10), kommt als `alert-center.store` in 4B | Phase 4B |
+| `AlertSlideOver.vue` | UX-Auftrag ABSORBIERT (FIX-12), NotificationDrawer reicht | Phase 4B |
 5. **`esp.store.ts` WS-Dispatcher** — Neue Events muessen in der Dispatcher-Switch-Logik (Zeilen ~1522-1551) registriert und an `notification-inbox.store` delegiert werden
 6. **AccordionSection.vue** — Existiert in shared/design/primitives/ und kann fuer die Preferences-Zonen genutzt werden
 7. **Grafana `grafana.ini`** — Hat `unified_alerting.enabled = true` bereits gesetzt. Webhook-Authentication (HMAC) erfordert zusaetzliche ini-Einstellung

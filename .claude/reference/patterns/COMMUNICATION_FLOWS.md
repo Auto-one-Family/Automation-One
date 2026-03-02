@@ -737,7 +737,10 @@ Die Logic Engine unterstützt Rules über **mehrere ESPs**:
 | `sequence_started` | `handleSequenceStarted()` | 2225 | Automation gestartet |
 | `sequence_completed` | `handleSequenceCompleted()` | 2244 | Automation fertig |
 | `sequence_error` | `handleSequenceError()` | 2260 | Automation-Fehler |
-| `notification` | `handleNotification()` | 2033 | Logic-Rule Benachrichtigung |
+| `notification` | `handleNotification()` | 2033 | Logic-Rule Benachrichtigung (legacy → Toast) |
+| `notification_new` | notification-inbox.store | - | Neuer Alert → Inbox/Badge (Phase 4A) |
+| `notification_updated` | notification-inbox.store | - | Alert-Status geaendert (Phase 4A) |
+| `notification_unread_count` | notification-inbox.store | - | Unread-Count Sync (Phase 4A) |
 | `error_event` | `handleErrorEvent()` | 2048 | Fehler mit Troubleshooting |
 | `system_event` | `handleSystemEvent()` | 2108 | System-Wartung |
 
@@ -756,7 +759,9 @@ const ws = useWebSocket({
       'actuator_response', 'actuator_command', 'actuator_command_failed',
       'config_published', 'config_failed',
       'sequence_started', 'sequence_step', 'sequence_completed', 'sequence_error',
-      'logic_execution', 'notification', 'error_event', 'system_event'
+      'logic_execution', 'notification', 'notification_new',
+      'notification_updated', 'notification_unread_count',
+      'error_event', 'system_event'
     ]
   }
 })

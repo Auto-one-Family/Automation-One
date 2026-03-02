@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 2.4 | **Aktualisiert:** 2026-02-28
+> **Version:** 2.5 | **Aktualisiert:** 2026-03-02
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
-> **Event-Anzahl:** 28 verschiedene Event-Typen
+> **Event-Anzahl:** 31 verschiedene Event-Typen
 
 ---
 
@@ -64,7 +64,15 @@ allowed-tools: Read
 | Event | Richtung | Trigger | Beschreibung |
 |-------|----------|---------|--------------|
 | `logic_execution` | Server→Frontend | Rule ausgeführt | Automation Rule triggered |
-| `notification` | Server→Frontend | Rule-Notification | Benachrichtigung von Rule |
+| `notification` | Server→Frontend | Rule-Notification | Benachrichtigung von Rule (Legacy) |
+
+### Notification Events (Phase 4A)
+
+| Event | Richtung | Trigger | Beschreibung |
+|-------|----------|---------|--------------|
+| `notification_new` | Server→Frontend | NotificationRouter | Neue Notification (DB-persistiert) |
+| `notification_updated` | Server→Frontend | NotificationRouter | Notification gelesen/archiviert |
+| `notification_unread_count` | Server→Frontend | NotificationRouter | Ungelesene-Anzahl + höchste Severity |
 
 ### Sequence Events
 
@@ -810,6 +818,102 @@ Notification von Automation Rule.
 
 ---
 
+### 8.3 notification_new
+
+Neue DB-persistierte Notification. Wird vom NotificationRouter nach jeder Notification-Erstellung gesendet.
+
+**Trigger:** `NotificationRouter.route()` nach DB-Insert
+
+**Code-Location:** [notification_router.py:218](El Servador/god_kaiser_server/src/services/notification_router.py#L218)
+
+**Payload:**
+```json
+{
+  "type": "notification_new",
+  "timestamp": 1706787600,
+  "data": {
+    "id": "uuid-string",
+    "user_id": 1,
+    "channel": "websocket",
+    "severity": "warning",
+    "category": "data_quality",
+    "title": "Sensor-Timeout: DS18B20",
+    "body": "Sensor auf GPIO 4 hat seit 5 Minuten keine Daten gesendet",
+    "metadata": {
+      "esp_id": "ESP_12AB34CD",
+      "gpio": 4,
+      "sensor_type": "DS18B20"
+    },
+    "source": "sensor_threshold",
+    "is_read": false,
+    "created_at": "2026-02-01T10:23:45Z"
+  }
+}
+```
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `id` | UUID string | Notification Primary Key |
+| `severity` | string | `critical`, `warning`, `info` |
+| `category` | string | `connectivity`, `data_quality`, `infrastructure`, `lifecycle`, `maintenance`, `security`, `system` |
+| `source` | string | `grafana`, `logic_engine`, `mqtt_handler`, `sensor_threshold`, `device_event`, `autoops`, `manual`, `system` |
+| `metadata` | object | Context-spezifisch (esp_id, gpio, rule_id, grafana_uid, etc.) |
+
+> **Event-Routing:** `notification_new` → `notification-inbox.store` (persistente Inbox). Das Legacy-Event `notification` (8.2) geht weiterhin an `notification.store` (Toasts).
+
+---
+
+### 8.4 notification_updated
+
+Bestehende Notification wurde aktualisiert (gelesen, archiviert).
+
+**Trigger:** `NotificationRouter` nach mark-as-read oder archive
+
+**Code-Location:** [notification_router.py:244](El Servador/god_kaiser_server/src/services/notification_router.py#L244)
+
+**Payload:**
+```json
+{
+  "type": "notification_updated",
+  "timestamp": 1706787600,
+  "data": {
+    "id": "uuid-string",
+    "is_read": true,
+    "is_archived": false,
+    "read_at": "2026-02-01T10:30:00Z"
+  }
+}
+```
+
+---
+
+### 8.5 notification_unread_count
+
+Autoritativer Badge-Zähler vom Server. Wird nach jeder Zustandsänderung gesendet.
+
+**Trigger:** `NotificationRouter` nach read/archive/new
+
+**Code-Location:** [notification_router.py:260](El Servador/god_kaiser_server/src/services/notification_router.py#L260)
+
+**Payload:**
+```json
+{
+  "type": "notification_unread_count",
+  "timestamp": 1706787600,
+  "data": {
+    "unread_count": 5,
+    "highest_severity": "warning"
+  }
+}
+```
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `unread_count` | int | Anzahl ungelesener Notifications |
+| `highest_severity` | string? | Höchste Severity unter ungelesenen (`critical` > `warning` > `info`), null wenn 0 ungelesen |
+
+---
+
 ## 9. Sequence Events
 
 ### 9.1 sequence_started
@@ -1129,6 +1233,7 @@ interface WebSocketFilters {
 |-------|--------------|
 | `src/websocket/manager.py` | WebSocket Connection Manager |
 | `src/api/v1/websocket/realtime.py` | WebSocket Route |
+| `src/services/notification_router.py` | Notification Routing + WS Broadcast |
 
 ### MQTT Handler (Broadcast Trigger)
 
@@ -1144,6 +1249,12 @@ interface WebSocketFilters {
 | `subzone_ack_handler.py` | `subzone_assignment` |
 | `error_handler.py` | `error_event` |
 | `lwt_handler.py` | `esp_health` (offline) |
+
+### Service (Broadcast Trigger)
+
+| Service | Events |
+|---------|--------|
+| `notification_router.py` | `notification_new`, `notification_updated`, `notification_unread_count` |
 
 ---
 

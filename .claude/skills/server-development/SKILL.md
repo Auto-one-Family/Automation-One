@@ -95,6 +95,7 @@ Server sendet:  Actuator-Commands, Config-Updates
 | 3.4 | Central Scheduler Init | 264-268 | JA |
 | 3.4.1 | Simulation Scheduler | 270-278 | JA |
 | 3.4.2 | Maintenance Service | 312-322 | JA |
+| 3.4.5 | Alert Suppression Scheduler | ~325 | NON-FATAL |
 | 3.5 | Mock-ESP Recovery | 324-336 | NON-FATAL |
 | 3.6 | Sensor Type Auto-Reg | 338-357 | NON-FATAL |
 | 3.7 | Sensor Schedule Recovery | 359-387 | NON-FATAL |
@@ -178,9 +179,9 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | Router | Prefix | Endpoints | Auth |
 |--------|--------|-----------|------|
 | auth | /v1/auth | 10 | Mixed |
-| esp | /v1/esp | 14 | Active/Operator |
-| sensors | /v1/sensors | 11 | Active/Operator |
-| actuators | /v1/actuators | 8 | Active/Operator |
+| esp | /v1/esp | 17 | Active/Operator |
+| sensors | /v1/sensors | 16 | Active/Operator |
+| actuators | /v1/actuators | 12 | Active/Operator |
 | logic | /v1/logic | 8 | Operator+ |
 | health | /v1/health | 6 | Mixed |
 | audit | /v1/audit | 21 | Admin/Active |
@@ -192,6 +193,8 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | sensor_type_defaults | /v1/sensor-type-defaults | 6 | Operator+ |
 | sequences | /v1/sequences | 4 | Operator+ |
 | logs | /v1/logs | 1 | Public |
+| notifications | /v1/notifications | 9 | Active/Operator |
+| webhooks | /v1/webhooks | 1 | Public (Grafana) |
 | ai | /v1/ai | PLANNED | - |
 | kaiser | /v1/kaiser | PLANNED | - |
 | library | /v1/library | PLANNED | - |
@@ -238,12 +241,14 @@ class YourRepository(BaseRepository[YourModel]):
 | Model | Tabelle | Wichtige Felder |
 |-------|---------|-----------------|
 | ESPDevice | `esps` | esp_id (PK), zone_id, zone_name, master_zone_id, is_online, last_heartbeat |
-| SensorConfig | `sensor_configs` | esp_id (FK), gpio, sensor_type, i2c_address |
-| ActuatorConfig | `actuator_configs` | esp_id (FK), gpio, actuator_type, inverted |
+| SensorConfig | `sensor_configs` | esp_id (FK), gpio, sensor_type, i2c_address, alert_config (JSONB), runtime_stats (JSONB) |
+| ActuatorConfig | `actuator_configs` | esp_id (FK), gpio, actuator_type, inverted, alert_config (JSONB), runtime_stats (JSONB) |
 | SubzoneConfig | `subzone_configs` | id (UUID PK), esp_id (FK), subzone_id, assigned_gpios (JSON), safe_mode_active |
 | CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority, cooldown_seconds |
 | SensorData | `sensor_data` | sensor_id (FK), raw_value, processed_value |
 | AuditLog | `audit_logs` | event_type, severity, source_type |
+| Notification | `notifications` | title, severity (critical/warning/info), source, category, channel, fingerprint (FIX-07 dedup) |
+| NotificationPreferences | `notification_preferences` | user_id, channel, enabled, severity_filter |
 
 ### Multi-Value Sensor Support
 
@@ -365,6 +370,8 @@ poetry run python scripts/seed_wokwi_esp.py
 | **SubzoneService** | subzone_service.py | 595 | `assign_subzone()`, `set_safe_mode()` |
 | **ConfigBuilder** | config_builder.py | 249 | `build_esp_config()` |
 | **MaintenanceService** | maintenance/service.py | 260 | `start()`, `stop()`, `register_jobs()` |
+| **NotificationRouter** | notification_router.py | ~120 | `route()` — persist → fingerprint dedup → WS broadcast → optional email |
+| **AlertSuppressionService** | alert_suppression_service.py | ~180 | `check_suppression()`, `update_config()`, `expire_suppressions()` — ISA-18.2 Shelved Alarms |
 
 ### Logic Engine Architektur
 
@@ -400,6 +407,7 @@ LogicEngine
 | `maintenance_` | Cleanup | `maintenance_cleanup_sensor_data` |
 | `monitor_` | Health | `monitor_health_check_esps` |
 | `sensor_schedule_` | Scheduled | `sensor_schedule_ESP_123_34_ph` |
+| `alert_` | Alert Suppression | `alert_expire_suppressions` |
 
 ### Maintenance Jobs
 
@@ -409,6 +417,7 @@ LogicEngine
 | cleanup_command_history | Daily 03:30 | COMMAND_HISTORY_RETENTION_ENABLED |
 | health_check_esps | 60s | ESP_HEALTH_CHECK_INTERVAL_SECONDS |
 | health_check_mqtt | 30s | MQTT_HEALTH_CHECK_INTERVAL_SECONDS |
+| expire_alert_suppressions | Hourly :00 | ALERT_SUPPRESSION_ENABLED |
 
 ---
 

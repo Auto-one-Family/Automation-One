@@ -7,7 +7,7 @@
 > **Erstellt:** 2026-02-25
 > **Erstellt von:** Automation-Experte (Life-Repo), basierend auf verify-plan-Analyse + 3 gezielte Recherchen
 > **Ersetzt:** `auftrag-monitoring-stack-integration.md` (4-Schichten-Entwurf mit 7 Architektur-Problemen)
-> **Status:** OFFEN
+> **Status:** ABSORBIERT durch Phase 4A (Notification-Stack) + Phase 4B (Unified Alert Center). UX-Auftrag wird NICHT separat implementiert. Gute Architekturentscheidungen (ISA-18.2, ERSETZEN statt HINZUFUEGEN, ein Alert-Begriff) werden in 4A/4B uebernommen. Kein useSystemHealthStore, kein AlertSlideOver, kein alert_update WS-Event — alles durch notification-inbox.store, NotificationDrawer, notification_new ersetzt.
 >
 > **Wissensgrundlage (Recherche-Ergebnisse):**
 > - `wissen/iot-automation/grafana-alerting-webhook-provisioning.md` — Exakte YAML-Vorlagen, Payload-Format, 9 Fallstricke

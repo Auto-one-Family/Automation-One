@@ -38,7 +38,7 @@
 - `notification.store.ts` in `El Frontend: src/shared/stores/notification.store.ts` — [VERIFIZIERT] Toast-System (error/warning/success/info), NUR Toasts, keine Inbox, kein persistenter State. Toast-Composable `useToast()` ist ein separater Singleton in `src/composables/useToast.ts` (kein Pinia-Store)
 - `ToastContainer.vue` + `useToast()` — In-App-Notifications
 - `AlarmListWidget.vue` — Sensor-Quality-Alerts als Dashboard-Widget
-- `SystemMonitorView.vue` — [VERIFIZIERT] 5 Tabs (Events, Logs, Database, MQTT, Health)
+- `SystemMonitorView.vue` — [VERIFIZIERT] 5 Tabs (Events, Logs, Database, MQTT, Health). **⚠️ Grafana-Deeplink fehlt (verify-plan 2026-03-02):** Tiefergehende System-Diagnostik und Logs liegen in Grafana (localhost:3000). Ein Link/Button dorthin muss im HealthTab oder als eigener Tab im SystemMonitorView ergaenzt werden.
 - API-Layer — [VERIFIZIERT] 20 Module in `src/api/`. Pattern: `export const {domain}Api = { ... }` oder benannte Exports. Nutzt `api` axios-Instance aus `./index` mit JWT-Auth + Interceptor. Basis-URL: `/api/v1`
 - Design-System — [VERIFIZIERT] `tokens.css` mit Status-Farben: `--color-error` (rot), `--color-warning` (amber), `--color-info` (blau), `--color-success` (gruen)
 - Icon-Library — [VERIFIZIERT] Projekt nutzt ausschliesslich `lucide-vue-next` (108 Imports). Heroicons ist NICHT installiert
@@ -854,9 +854,9 @@ Der FAB zeigt unterschiedliche Optionen je nach aktuellem View. Das wird ueber `
 - **NICHT anzeigen** auf Login-Seite und bei Mobile-Viewport < 768px (dort wuerde der FAB kritischen Content ueberdecken)
 
 **Registrierung nach Implementierung:**
-- [ ] `QuickActionBall` in `AppShell.vue` als Teleport-Target einbauen
-- [ ] Store in `src/shared/stores/` anlegen (Konvention)
-- [ ] Composable in `src/composables/` anlegen
+- [x] `QuickActionBall` in `AppShell.vue` als Teleport-Target einbauen
+- [x] Store in `src/shared/stores/` anlegen (Konvention)
+- [x] Composable in `src/composables/` anlegen
 
 ---
 
@@ -958,7 +958,9 @@ Das Quick Alert Panel nutzt die `notification-inbox.store.ts` aus Block 4A.2 als
 
 ## Gruppe 3: Alert-Konfiguration + Component Tab (Bloecke 4A.7 – 4A.8)
 
-> Per-Sensor-Alert-Konfiguration gibt Robin granulare Kontrolle ueber welche Sensoren wann Alerts ausloesen. Die Component-Tab-Erweiterung liefert Hardware-Metadaten und Runtime-Tracking als Kontext fuer Diagnosen.
+> Per-Sensor-Alert-Konfiguration gibt Robin granulare Kontrolle ueber welche Sensoren wann Alerts ausloesen. Die Component-Tab-Erweiterung liefert Runtime-Tracking als Kontext fuer Diagnosen.
+>
+> **⚠️ verify-plan Korrektur (2026-03-02):** Block 4A.8 wurde REDUZIERT weil Hardware-Metadaten (manufacturer, model, serial_number, etc.) und Basis-Maintenance-Logik BEREITS implementiert sind in DeviceMetadataSection.vue + device-metadata.ts + sensor_metadata/actuator_metadata JSONB-Felder. Gesamtaufwand Gruppe 3: ~12-17h (statt ~15-20h). Geraete-Einstellungen werden IMMER ueber Dashboard (Hardware-View → SlideOver) erreicht, NIE ueber Komponenten-Tab.
 
 ---
 
@@ -1019,16 +1021,24 @@ interface DeviceAlertConfig {
 ### 4A.7.2: Backend
 
 **Aenderungen:**
-- `SensorConfig` Model erweitern: `alert_config` JSONB-Feld
-- `ActuatorConfig` Model erweitern: `alert_config` JSONB-Feld
-- `ESPDevice` Model erweitern: `alert_config` JSONB-Feld
+- `SensorConfig` Model erweitern: `alert_config` JSONB-Feld (Datei: `El Servador/god_kaiser_server/src/db/models/sensor.py`)
+- `ActuatorConfig` Model erweitern: `alert_config` JSONB-Feld (Datei: `El Servador/god_kaiser_server/src/db/models/actuator.py`)
+- `ESPDevice` Model erweitern: `alert_config` JSONB-Feld (Datei: `El Servador/god_kaiser_server/src/db/models/esp.py`)
 - Neuer Service: `AlertSuppressionService` — prueft ob Sensor/Device suppressed ist
 - Neue API-Endpoints: `PATCH /v1/sensors/{id}/alert-config`, `PATCH /v1/actuators/{id}/alert-config`, `PATCH /v1/esp/devices/{id}/alert-config`
 - Alembic-Migration fuer 3 neue JSONB-Felder
 
+**⚠️ WICHTIG — IST-Zustand sensor_handler.py (verify-plan 2026-03-02):**
+Der aktuelle `sensor_handler.py` (`El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py`) hat KEINE Threshold-Pruefung und KEINEN NotificationRouter-Aufruf. Die GESAMTE Pipeline Threshold→Severity→NotificationRouter muss NEU gebaut werden — nicht nur die Suppression-Schicht. Das betrifft:
+1. `_get_effective_thresholds()` — Custom aus alert_config vs. Global aus sensor_config.thresholds
+2. `_check_thresholds()` — Wert gegen Schwellenwerte pruefen, Severity bestimmen
+3. `_persist_alert()` — Alert in DB speichern (auch wenn suppressed)
+4. NotificationRouter-Integration — Import + Aufruf in der Verarbeitungskette
+5. AlertSuppressionService-Integration — is_suppressed() Pruefung
+
 **Integration in Sensor-Handler (sensor_handler.py):**
 ```python
-# VOR NotificationRouter.route() pruefen:
+# KOMPLETT NEU ZU BAUEN — sensor_handler hat aktuell KEINE Threshold/Notification-Logik:
 async def _process_sensor_data(self, sensor_config, value):
     # 1. Threshold pruefen (Custom oder Global)
     thresholds = self._get_effective_thresholds(sensor_config)
@@ -1042,13 +1052,20 @@ async def _process_sensor_data(self, sensor_config, value):
         await self._persist_alert(sensor_config, severity, value, suppressed=True)
 ```
 
-**Automatisches Re-Enable:** Ein periodischer Task (via bestehendem `APScheduler`/`_central_scheduler`) prueft alle 5 Minuten ob `suppression_until` abgelaufen ist und setzt `alerts_enabled = true`.
+**Automatisches Re-Enable:** Periodischer Task via bestehendem APScheduler (`El Servador/god_kaiser_server/src/core/scheduler.py`). Neue JobCategory `MAINTENANCE` (oder eigene Kategorie) nutzen. Alle 5 Minuten `suppression_until`-Pruefung. Existierende Kategorien: MOCK_ESP, MAINTENANCE, MONITOR, CUSTOM, SENSOR_SCHEDULE.
 
 ### 4A.7.3: Frontend — AlertConfigSection.vue
 
-**Neue Datei:** `El Frontend: src/components/esp/config-sections/AlertConfigSection.vue`
+**Neue Datei:** `El Frontend/src/components/esp/AlertConfigSection.vue`
 
-Integration als neue Accordion-Sektion in bestehendem `SensorConfigPanel.vue` (917 Zeilen, Three-Zone-Pattern) und `ActuatorConfigPanel.vue` (753 Zeilen). Die bestehenden Sektionen (GPIO, I2C, Schwellenwerte, Kalibrierung) bleiben unveraendert.
+**⚠️ KORREKTUR (verify-plan 2026-03-02):** Das Verzeichnis `config-sections/` existiert NICHT. Bestehende Sektions-Komponenten liegen in:
+- `src/components/devices/` (DeviceMetadataSection.vue, LinkedRulesSection.vue)
+- `src/components/esp/` (LiveDataPreview.vue)
+Empfehlung: Neue Datei in `src/components/esp/` ablegen (konsistent mit LiveDataPreview) oder in `src/components/devices/` (konsistent mit DeviceMetadataSection). KEIN neues Unterverzeichnis `config-sections/` anlegen.
+
+Integration als neue Accordion-Sektion in bestehendem `SensorConfigPanel.vue` (Three-Zone-Pattern) und `ActuatorConfigPanel.vue`. Platzierung: NACH der bestehenden "Schwellwerte & Alarme"-Sektion (Zone 2), VOR der Zone 3 (Hardware). Die bestehenden Sektionen bleiben UNVERAENDERT.
+
+**Geraete-Einstellungen werden IMMER ueber das Dashboard (Hardware-View → Device-Detail → SlideOver/ESPSettingsSheet) erreicht, NIEMALS ueber den "Komponenten"-Tab (/sensors).** Die SensorConfigPanel/ActuatorConfigPanel sind Teil des SlideOver-Systems im Dashboard.
 
 ```
 ┌─ Alert-Konfiguration ─────────────────────────┐
@@ -1082,67 +1099,86 @@ Integration als neue Accordion-Sektion in bestehendem `SensorConfigPanel.vue` (9
 **Device-Level Alert-Config:** Dasselbe Pattern wird auch in `ESPSettingsSheet.vue` als neue Accordion-Sektion eingebaut. Wenn ein Device suppressed wird mit `propagate_to_children: true`, werden alle Child-Sensoren/Aktoren automatisch suppressed (visuell mit "Geerbt von Device" Hinweis).
 
 **Registrierung nach Implementierung:**
-- [ ] `AlertConfigSection.vue` in `src/components/esp/config-sections/` anlegen
-- [ ] In `SensorConfigPanel.vue` und `ActuatorConfigPanel.vue` als Accordion-Sektion einbinden
+- [ ] `AlertConfigSection.vue` in `src/components/esp/` oder `src/components/devices/` anlegen (KEIN config-sections/ Unterordner)
+- [ ] In `SensorConfigPanel.vue` und `ActuatorConfigPanel.vue` als Accordion-Sektion einbinden (nach "Schwellwerte & Alarme", vor Zone 3)
 - [ ] In `ESPSettingsSheet.vue` als Device-Level Accordion-Sektion einbinden
 - [ ] `AlertSuppressionService` im Backend anlegen
 - [ ] Alembic-Migration fuer 3 JSONB-Felder (sensor_configs, actuator_configs, esp_devices)
-- [ ] Periodischen Task fuer `suppression_until` Check registrieren
+- [ ] Periodischen Task fuer `suppression_until` Check registrieren (scheduler.py, Kategorie MAINTENANCE)
+- [ ] **NEU:** Threshold→Severity→NotificationRouter Pipeline in sensor_handler.py komplett bauen (existiert aktuell NICHT)
+- [ ] QuickAlertPanel.vue: Mute-Placeholder (Zeile 7: "Auftrag 5 dependency") durch echte Suppression-Action ersetzen
 
 ---
 
-## Block 4A.8: Component Tab Erweiterung — Hardware-Info + Runtime (~8-10h)
+## Block 4A.8: Component Tab Erweiterung — Hardware-Info + Runtime (~5-7h, REDUZIERT)
 
 ### Hintergrund: Three-Zone-Pattern im Konfigurationspanel
 
-AutomationOnes SensorConfigPanel und ActuatorConfigPanel nutzen bereits das Three-Zone-Pattern (Zone 1: Primaer-Anzeige, Zone 2: Konfiguration, Zone 3: Erweitert). Die neuen Sektionen werden als Zone 3 Accordion-Sektionen hinzugefuegt — unterhalb der bestehenden Basis-Konfigurationen (GPIO, I2C, Schwellenwerte, Kalibrierung). Das Three-Zone-Pattern kommt aus dem Bereich Industrial IoT Configuration UX: Primaere Infos sofort sichtbar, Konfiguration einen Klick entfernt, erweiterte Details im Accordion.
+AutomationOnes SensorConfigPanel und ActuatorConfigPanel nutzen bereits das Three-Zone-Pattern (Zone 1: Primaer-Anzeige, Zone 2: Konfiguration, Zone 3: Erweitert). Das Three-Zone-Pattern kommt aus dem Bereich Industrial IoT Configuration UX.
 
-### 4A.8.1: Hardware-Info Sektion (~4-5h)
+### ⚠️ DUPLIKAT-WARNUNG (verify-plan 2026-03-02)
 
-**Neue Datei:** `El Frontend: src/components/esp/config-sections/HardwareInfoSection.vue`
+**Die Hardware-Info-Felder und die Basis-Maintenance-Logik EXISTIEREN BEREITS im System:**
 
-**Backend:** `SensorConfig`/`ActuatorConfig` Model erweitern um `metadata` JSONB-Feld + `PATCH /v1/sensors/{id}/metadata` + `PATCH /v1/actuators/{id}/metadata`
+**Bestehende Komponenten (NICHT neu bauen!):**
+- `El Frontend/src/components/devices/DeviceMetadataSection.vue` — Fertige Komponente, bereits eingebunden in SensorConfigPanel (Zeile 642) und ActuatorConfigPanel (Zeile 503) als Accordion "Geraete-Informationen"
+- `El Frontend/src/types/device-metadata.ts` — TypeScript-Interface `DeviceMetadata` mit: manufacturer, model, datasheet_url, serial_number, installation_date, installation_location, maintenance_interval_days, last_maintenance, notes, custom_fields
+- `El Frontend/src/composables/useDeviceMetadata.ts` — Composable fuer Metadata-Handling
+- Helper-Funktionen: `parseDeviceMetadata()`, `mergeDeviceMetadata()`, `getNextMaintenanceDate()`, `isMaintenanceOverdue()`
 
-**Felder:**
+**Bestehende Backend-Felder (KEINE neue Migration noetig!):**
+- `SensorConfig.sensor_metadata` — JSONB-Feld existiert bereits (`El Servador/god_kaiser_server/src/db/models/sensor.py`, Zeile 157)
+- `ActuatorConfig.actuator_metadata` — JSONB-Feld existiert bereits (`El Servador/god_kaiser_server/src/db/models/actuator.py`, Zeile 132)
+- `ESPDevice.device_metadata` — JSONB-Feld existiert bereits (`El Servador/god_kaiser_server/src/db/models/esp.py`, Zeile 190)
 
-| Feld | Typ | Pflicht | Beschreibung |
-|------|-----|---------|-------------|
-| manufacturer | string | Nein | Hersteller (z.B. "Adafruit", "DFRobot") |
-| model | string | Nein | Modellbezeichnung (z.B. "SHT31-D") |
-| serial_number | string | Nein | Seriennummer |
-| firmware_version | string | Nein | Firmware/Treiberversion |
-| installation_date | date | Nein | Installationsdatum |
-| notes | text | Nein | Freitextnotizen |
-| datasheet_url | url | Nein | Link zum Datenblatt |
+### 4A.8.1: Hardware-Info Sektion — NUR ERWEITERUNG (~1-2h)
 
-**Alembic-Migration:** `metadata` JSONB-Feld auf SensorConfig + ActuatorConfig (kann mit Block 4A.7 Migration kombiniert werden).
+**KEINE neue Datei.** Bestehende `DeviceMetadataSection.vue` erweitern um fehlende Felder:
 
-### 4A.8.2: Runtime & Maintenance Sektion (~4-5h)
+| Feld | Status | Aktion |
+|------|--------|--------|
+| manufacturer | ✅ EXISTIERT | Nichts tun |
+| model | ✅ EXISTIERT | Nichts tun |
+| serial_number | ✅ EXISTIERT | Nichts tun |
+| datasheet_url | ✅ EXISTIERT | Nichts tun |
+| installation_date | ✅ EXISTIERT | Nichts tun |
+| installation_location | ✅ EXISTIERT | Nichts tun |
+| maintenance_interval_days | ✅ EXISTIERT | Nichts tun |
+| last_maintenance | ✅ EXISTIERT | Nichts tun |
+| notes | ✅ EXISTIERT | Nichts tun |
+| **firmware_version** | ❌ FEHLT | In `DeviceMetadata` Interface + `DeviceMetadataSection.vue` + `parseDeviceMetadata()` ergaenzen |
 
-**Neue Datei:** `El Frontend: src/components/esp/config-sections/RuntimeMaintenanceSection.vue`
+**Backend:** KEINE neue Migration. Das `firmware_version` Feld wird einfach ins bestehende JSONB geschrieben (sensor_metadata/actuator_metadata sind schematlos).
 
-**Backend:** `runtime_stats` JSONB-Feld + `/v1/sensors/{id}/runtime` API
+### 4A.8.2: Runtime & Maintenance Sektion — NUR NEUE Felder (~4-5h)
 
-**Felder:**
+**Neue Datei:** `El Frontend/src/components/devices/RuntimeMaintenanceSection.vue` (im `devices/`-Ordner, konsistent mit DeviceMetadataSection)
+
+**NUR diese Felder sind tatsaechlich NEU** (Maintenance-Grundlogik existiert schon in device-metadata.ts):
 
 | Feld | Typ | Automatisch | Beschreibung |
 |------|-----|-------------|-------------|
 | uptime_hours | number | Ja (berechnet) | Betriebsstunden seit Installation (aus `installation_date` + Heartbeat-Daten) |
 | last_restart | datetime | Ja (aus ESP-Health) | Letzter Neustart |
-| next_maintenance | date | Nein (User setzt) | Naechste geplante Wartung |
-| maintenance_interval_days | number | Nein | Wartungsintervall in Tagen |
 | expected_lifetime_hours | number | Nein | Erwartete Lebensdauer |
 | maintenance_log | array | Nein | Wartungshistorie (Datum + Beschreibung) |
 
-**Timeline-Anzeige:** Kleine Timeline-Visualisierung der Wartungshistorie (letztes Jahr). Warnung wenn `next_maintenance` ueberfaellig ist (orange Badge auf der Accordion-Sektion).
+**NICHT duplizieren** (existieren bereits in DeviceMetadata/DeviceMetadataSection):
+- ~~next_maintenance~~ → wird aus `last_maintenance` + `maintenance_interval_days` berechnet (Funktion `getNextMaintenanceDate()` existiert in device-metadata.ts)
+- ~~maintenance_interval_days~~ → existiert in DeviceMetadata
+
+**Backend:** `runtime_stats` JSONB-Feld auf SensorConfig + ActuatorConfig + Alembic-Migration. Neuer Endpoint: `/v1/sensors/{id}/runtime`, `/v1/actuators/{id}/runtime`
+
+**Timeline-Anzeige:** Kleine Timeline-Visualisierung der Wartungshistorie (letztes Jahr). Die Overdue-Warnung existiert bereits in `DeviceMetadataSection.vue` (AlertTriangle-Icon + `isMaintenanceOverdue()`), muss NICHT nochmal gebaut werden.
 
 **Maintenance-Alert-Integration:** Wenn `next_maintenance` ueberfaellig → automatische Notification via NotificationRouter (Block 4A.1). Severity: `info`. Category: `maintenance`. Das ist ein natuerlicher Consumer des Notification-Stacks.
 
 **Registrierung nach Implementierung:**
-- [ ] `HardwareInfoSection.vue` und `RuntimeMaintenanceSection.vue` in `src/components/esp/config-sections/` anlegen
-- [ ] In `SensorConfigPanel.vue` und `ActuatorConfigPanel.vue` als Accordion-Sektionen einbinden
-- [ ] Backend-Endpoints fuer metadata und runtime
-- [ ] Alembic-Migration fuer `metadata` und `runtime_stats` JSONB-Felder
+- [ ] `firmware_version` Feld in bestehende `DeviceMetadataSection.vue` + `device-metadata.ts` ergaenzen
+- [ ] `RuntimeMaintenanceSection.vue` in `src/components/devices/` anlegen (NICHT in config-sections/)
+- [ ] In `SensorConfigPanel.vue` und `ActuatorConfigPanel.vue` als Accordion-Sektion einbinden (nach "Geraete-Informationen")
+- [ ] Backend: `runtime_stats` JSONB-Feld + Alembic-Migration (NUR fuer runtime_stats, NICHT fuer metadata — das existiert schon)
+- [ ] Backend: Endpoints `/v1/sensors/{id}/runtime` + `/v1/actuators/{id}/runtime`
 
 ---
 
@@ -1197,12 +1233,12 @@ GRUPPE 3: Alert-Config + Component Tab
 
 Block 4A.7 (Per-Sensor Alert-Config):
 ├── 4A.7.1 Schema definieren                ← ZUERST
-├── 4A.7.2 Backend (Service + API + Migration) ← NACH 4A.1.3 (braucht NotificationRouter)
-└── 4A.7.3 Frontend AlertConfigSection.vue   ← NACH Backend
+├── 4A.7.2 Backend (Service + API + Migration + Threshold→Notification Pipeline NEU!) ← NACH 4A.1.3 (braucht NotificationRouter)
+└── 4A.7.3 Frontend AlertConfigSection.vue   ← NACH Backend (in src/components/esp/ oder src/components/devices/)
 
-Block 4A.8 (Component Tab):
-├── 4A.8.1 HardwareInfoSection.vue          ← Parallel (unabhaengig)
-└── 4A.8.2 RuntimeMaintenanceSection.vue    ← Parallel (unabhaengig)
+Block 4A.8 (Component Tab — REDUZIERT, ~5-7h statt 8-10h):
+├── 4A.8.1 DeviceMetadataSection ERWEITERN   ← NUR firmware_version ergaenzen (NICHT neu bauen!)
+└── 4A.8.2 RuntimeMaintenanceSection.vue     ← NUR neue Felder (uptime, last_restart, lifetime, maintenance_log)
 
 GRUPPEN-ABHAENGIGKEITEN
 ═══════════════════════
@@ -1253,14 +1289,14 @@ Parallelisierung nach Gruppe 1:
 
 ### Quick Action Ball (MUSS) — Gruppe 2
 
-- [ ] **FAB sichtbar:** Quick Action Ball auf allen Views (bottom-right, ueber Sidebar, z-50)
-- [ ] **Kontext-Actions:** Actions wechseln bei View-Wechsel (HardwareView vs. MonitorView vs. LogicView)
-- [ ] **Glassmorphism:** Styling konsistent mit Design-Tokens (backdrop-filter, rgba, shadow)
-- [ ] **Micro-Interaction:** Hover-Scale, Expand-Animation smooth (200ms, keine Ruckler)
-- [ ] **Alert-Badge:** Pulsiert bei Critical (rot), zeigt korrekte Anzahl aus notification-inbox.store
+- [x] **FAB sichtbar:** Quick Action Ball auf allen Views (bottom-right, ueber Sidebar, z-38)
+- [x] **Kontext-Actions:** Actions wechseln bei View-Wechsel (HardwareView vs. MonitorView vs. LogicView)
+- [x] **Glassmorphism:** Styling konsistent mit Design-Tokens (backdrop-filter, rgba, shadow)
+- [x] **Micro-Interaction:** Hover-Scale, Expand-Animation smooth (200ms, keine Ruckler)
+- [x] **Alert-Badge:** Pulsiert bei Critical (rot), zeigt korrekte Anzahl aus notification-inbox.store
 - [ ] **Quick Alert Panel:** Ack/Mute/Navigate funktionieren, Alerts korrekt aus Store geladen
 - [ ] **Quick Navigation:** MRU-Liste aktualisiert sich bei View-Wechsel, localStorage persistiert
-- [ ] **Mobile:** FAB ueberdeckt keinen kritischen Content (ausgeblendet < 768px)
+- [x] **Mobile:** FAB ueberdeckt keinen kritischen Content (ausgeblendet < 768px)
 
 ### Alert-Config + Component Tab (MUSS) — Gruppe 3
 
@@ -1282,7 +1318,7 @@ Parallelisierung nach Gruppe 1:
 - [ ] Backend: Integration-Test fuer REST-API (CRUD, read-all, preferences, alert-config)
 - [ ] Frontend: Vitest fuer notification-inbox.store (WS-Handler, markAsRead, filter)
 - [ ] Frontend: Vitest fuer quickAction.store (context-actions, menu-state)
-- [ ] Bestehende Tests: 804+ Backend + 1347+ Frontend Tests duerfen NICHT brechen
+- [x] Bestehende Tests: 804+ Backend + 1532 Frontend Tests brechen NICHT (verifiziert 2026-03-02)
 
 ---
 

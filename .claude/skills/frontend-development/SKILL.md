@@ -15,8 +15,8 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.13
-**Letzte Aktualisierung:** 2026-03-01
+**Version:** 9.18
+**Letzte Aktualisierung:** 2026-03-02
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
 
@@ -122,7 +122,7 @@ El Frontend/src/
 │   ├── zones.ts       # Zone Assignment
 │   ├── logic.ts       # Automation Rules
 │   └── ...
-├── components/    # Vue Komponenten (18 Unterverzeichnisse)
+├── components/    # Vue Komponenten (19 Unterverzeichnisse)
 │   ├── calibration/   # CalibrationWizard
 │   ├── charts/        # LiveLineChart, HistoricalChart, GaugeChart, MultiSensorChart
 │   ├── command/       # CommandPalette
@@ -130,13 +130,15 @@ El Frontend/src/
 │   ├── dashboard/     # Dashboard subcomponents (11 Dateien, inkl. DashboardViewer + InlineDashboardPanel)
 │   ├── dashboard-widgets/ # SensorCardWidget, GaugeWidget, LineChartWidget, etc.
 │   ├── database/      # DataTable, FilterPanel, Pagination, etc. (6 Dateien)
-│   ├── devices/       # SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection (4 Dateien)
+│   ├── devices/       # SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection, AlertConfigSection, RuntimeMaintenanceSection (6 Dateien)
 │   ├── error/         # ErrorDetailsModal, TroubleshootingPanel
 │   ├── esp/           # ESPCard, ESPCardBase, ESPOrbitalLayout, SensorConfigPanel, ActuatorConfigPanel (11 Dateien)
 │   ├── filters/       # UnifiedFilterBar
 │   ├── forms/         # FormBuilder
 │   ├── modals/
 │   ├── rules/         # RuleCard, RuleConfigPanel, RuleFlowEditor, RuleNodePalette, RuleTemplateCard (5 Dateien)
+│   ├── notifications/ # NotificationDrawer, NotificationItem (2 Dateien)
+│   ├── quick-action/  # QuickActionBall (FAB), QuickActionMenu, QuickActionItem, QuickAlertPanel, QuickNavPanel (5 Dateien)
 │   ├── safety/        # EmergencyStopButton
 │   ├── system-monitor/ # 18 Dateien
 │   ├── widgets/       # Widget primitives
@@ -146,7 +148,7 @@ El Frontend/src/
 │   │   ├── primitives/  # 13 Komponenten (10 Base + AccordionSection + QualityIndicator + RangeSlider + SlideOver)
 │   │   ├── layout/      # AppShell, Sidebar, TopBar (3 Dateien)
 │   │   └── patterns/    # ConfirmDialog, ContextMenu, EmptyState, ErrorState, ToastContainer (5 Dateien)
-│   └── stores/          # 12 Shared Stores (actuator, auth, config, dashboard, database, dragState, gpio, logic, notification, sensor, ui, zone)
+│   └── stores/          # 13 Shared Stores (actuator, auth, config, dashboard, database, dragState, gpio, logic, notification, quickAction, sensor, ui, zone)
 ├── styles/        # CSS Design Tokens + Shared Styles (6 Dateien)
 │   ├── tokens.css       # Design Token Definitionen
 │   ├── glass.css        # Glassmorphism Klassen
@@ -154,7 +156,7 @@ El Frontend/src/
 │   ├── main.css         # Hauptstyles (Buttons, Layout)
 │   ├── forms.css        # Shared Form + Modal Styles
 │   └── tailwind.css     # Tailwind Konfiguration
-├── composables/   # 21 Composables
+├── composables/   # 23 Composables
 │   ├── useWebSocket.ts
 │   ├── useToast.ts
 │   ├── useModal.ts
@@ -172,7 +174,9 @@ El Frontend/src/
 │   ├── useESPStatus.ts
 │   ├── useGrafana.ts
 │   ├── useKeyboardShortcuts.ts
+│   ├── useNavigationHistory.ts
 │   ├── useOrbitalDragDrop.ts
+│   ├── useQuickActions.ts
 │   ├── useScrollLock.ts
 │   ├── useSparklineCache.ts
 │   └── useZoneGrouping.ts
@@ -460,6 +464,7 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 | logic | stores/logic.ts | rules[], activeExecutions, executionHistory[], historyLoaded | fetchRules, toggleRule, crossEspConnections, loadExecutionHistory, pushToHistory, undo, redo, canUndo, canRedo |
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
 | database | stores/database.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
+| quickAction | stores/quickAction.store.ts | isMenuOpen, activePanel (QuickActionPanel: 'menu' \| 'alerts' \| 'navigation'), currentView, contextActions[], globalActions[] | toggleMenu, closeMenu, setActivePanel, setViewContext, setContextActions, executeAction; alertSummary, hasActiveAlerts, isCritical, isWarning (computed from notification-inbox) |
 
 ### Store-Konventionen
 
@@ -643,7 +648,7 @@ German-lokalisierte Formatter:
 | formatUptime(seconds) | "1d 1h 1m" |
 | formatRssi(dBm) | "-65 dBm (Gut)" |
 | formatSensorValue(value, type) | "23,5 °C" |
-| formatRelativeTime(date) | "vor 5 Minuten" |
+| formatRelativeTime(date) | "vor 5 Minuten" (SSOT — alle Komponenten importieren von hier) |
 
 ### labels.ts
 
@@ -1106,8 +1111,47 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.15
+**Version:** 9.18
 **Letzte Aktualisierung:** 2026-03-02
+
+### Aenderungen in v9.18
+
+- AlertConfigSection.vue: Neue Komponente in `components/devices/` — Per-Sensor/Actuator Alert-Konfiguration (ISA-18.2 Shelved Alarms Pattern), Master-Toggle, Suppression-Details (Grund, Notiz, Zeitlimit), Custom Thresholds (warning/critical min/max), Severity Override, generische Props (`fetchFn`/`updateFn` fuer Sensor/Actuator-Reuse)
+- RuntimeMaintenanceSection.vue: Neue Komponente in `components/devices/` — Laufzeit-Statistiken (Uptime, letzte Wartung, erwartete Lebensdauer), Wartungsprotokoll mit Add-Entry-Formular, Maintenance-Overdue-Alert, generische Props (`fetchFn`/`updateFn`)
+- SensorConfigPanel.vue: 2 neue AccordionSections integriert — "Alert-Konfiguration" (AlertConfigSection mit sensorsApi) + "Laufzeit & Wartung" (RuntimeMaintenanceSection mit sensorsApi)
+- ActuatorConfigPanel.vue: 2 neue AccordionSections integriert — "Alert-Konfiguration" (AlertConfigSection mit actuatorsApi) + "Laufzeit & Wartung" (RuntimeMaintenanceSection mit actuatorsApi)
+- QuickAlertPanel.vue: Mute-Button aktiviert — `sensorsApi.updateAlertConfig()` mit `alerts_enabled: false` + `suppression_reason: 'user_mute'`
+- sensors.ts: 4 neue Methoden in `sensorsApi` — `getAlertConfig()`, `updateAlertConfig()`, `getRuntime()`, `updateRuntime()` (Phase 4A.7/4A.8)
+- actuators.ts: 4 neue Methoden in `actuatorsApi` — `getAlertConfig()`, `updateAlertConfig()`, `getRuntime()`, `updateRuntime()` (Phase 4A.7/4A.8)
+- sensors.ts: Bugfix — alert-config/runtime Methoden waren versehentlich in `oneWireApi` statt `sensorsApi` platziert (TypeScript-Fehler)
+- Section 2: devices/ Components 4 → 6 (AlertConfigSection + RuntimeMaintenanceSection)
+
+### Aenderungen in v9.17
+
+- formatRelativeTime: 8 lokale Duplikate eliminiert — QuickAlertPanel, NotificationItem, LogicView, DataTable, HealthProblemChip, HealthSummaryBar, useESPStatus, PreviewEventCard importieren jetzt alle von `@/utils/formatters` (Single Source of Truth)
+- Server FIX-02: Severity auf 3 Stufen reduziert (critical/warning/info) — kein `success`/`resolved` als Severity
+- Server FIX-07: `fingerprint` VARCHAR(64) Spalte in notifications-Tabelle + Partial UNIQUE Index fuer Grafana-Alert Deduplication
+- Server FIX-09: Kein separates `alert_update` WS-Event — `notification_new` fuer alles, Frontend unterscheidet via `source`-Feld
+- Server FIX-13: Event-Routing — `notification` (legacy) → Toast, `notification_new` → notification-inbox.store (Inbox/Badge)
+- Server FIX-15: actuator_alert_handler routet jetzt durch NotificationRouter mit ISA-18.2 Severity-Mapping (emergency→critical, safety→warning, runtime→info, hardware→warning)
+- Section 9: formatRelativeTime als SSOT markiert
+
+### Aenderungen in v9.16
+
+- QuickActionBall.vue: Sub-Panel-Routing — dynamische `<component :is>` rendert QuickActionMenu, QuickAlertPanel oder QuickNavPanel basierend auf `store.activePanel`
+- QuickAlertPanel.vue: Neues Sub-Panel im FAB — Top-5 ungelesene Alerts sortiert nach Severity (critical > warning > info), Ack/Navigate/Details-Expand Actions, Mute als disabled Placeholder (Auftrag 5 Abhaengigkeit), Footer oeffnet NotificationDrawer
+- QuickNavPanel.vue: Neues Sub-Panel im FAB — MRU-Liste (letzte 5 besuchte Views), Favoriten mit Stern-Toggle, Quick-Search Trigger (Ctrl+K via uiStore.toggleCommandPalette)
+- useNavigationHistory.ts: Neues Composable — Route-Tracking via router.afterEach(), localStorage Persistenz (ao_nav_history max 20, ao_nav_favorites separat), ROUTE_META fuer 12 Views, StoredNavItem/NavHistoryItem Dual-Type-Pattern (JSON-serializable vs Component-Icon)
+- quickAction.store.ts: `QuickActionPanel` Type ('menu' | 'alerts' | 'navigation'), `activePanel` State, `setActivePanel()` Action
+- quickAction.store.ts: Bugfix `executeAction()` — prueft ob `activePanel` sich nach Handler-Aufruf geaendert hat, schliesst Menu nur wenn Handler kein Sub-Panel geoeffnet hat
+- quickAction.store.ts: Bugfix `toggleMenu()` — nutzt `closeMenu()` beim Schliessen (resettet `activePanel` auf 'menu'), verhindert dass Sub-Panel beim naechsten Oeffnen noch aktiv ist
+- useQuickActions.ts: `global-alerts` Action oeffnet jetzt QuickAlertPanel via `setActivePanel('alerts')` statt `inboxStore.toggleDrawer()`
+- useQuickActions.ts: Neue `global-navigation` Action mit Navigation-Icon, oeffnet QuickNavPanel via `setActivePanel('navigation')`
+- composables/index.ts: Re-Exports fuer `useNavigationHistory` + Type `NavHistoryItem`
+- shared/stores/index.ts: Re-Exports fuer `useNotificationInboxStore`, `InboxFilter`, `QuickActionPanel`
+- Neues Verzeichnis: `components/notifications/` (NotificationDrawer, NotificationItem)
+- Section 2: components/ 18 → 19 Unterverzeichnisse (notifications/ hinzugefuegt), composables 22 → 23 (useNavigationHistory), quick-action/ 3 → 5 Dateien (QuickAlertPanel + QuickNavPanel)
+- Section 5: quickAction Store-Tabelle um activePanel, setActivePanel, closeMenu, hasActiveAlerts, isCritical, isWarning erweitert
 
 ### Aenderungen in v9.15
 

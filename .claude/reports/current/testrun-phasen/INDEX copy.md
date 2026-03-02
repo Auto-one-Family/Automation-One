@@ -1,7 +1,7 @@
 # AutomationOne — Testinfrastruktur Phasenplan Index
 
 > **Erstellt:** 2026-02-21
-> **Aktualisiert:** 2026-03-02 (Phase 4 erweitert: 5 Subphasen 4A-4E, 3 neue Recherchen integriert, 32 Alerts verifiziert)
+> **Aktualisiert:** 2026-03-02 (Phase 4 erweitert: 5 Subphasen 4A-4E, Quick Action Ball + Alert-Config + Component Tab IN 4A integriert, 3 neue Recherchen, 32 Alerts verifiziert)
 > **Ordner:** `.claude/reports/current/testrun-phasen/`
 
 ---
@@ -15,7 +15,7 @@
 | [PHASE_1_WOKWI_SIMULATION.md](./PHASE_1_WOKWI_SIMULATION.md) | 10 Error-Injection, CI/CD, **Wokwi MCP Server Integration**, Agent-Driven SIL-Testing | ✅ **ABGESCHLOSSEN** + MCP-Extension |
 | [PHASE_2_PRODUKTIONSTESTFELD.md](./PHASE_2_PRODUKTIONSTESTFELD.md) | Docker-Stack, ESP32, Frontend (Wizard + Zeitreihen + Sidebar FERTIG), Chaos Engineering, **Wokwi MCP Debugging** | ⚠️ **Code fertig, Deploy offen** |
 | [PHASE_3_KI_ERROR_ANALYSE.md](./PHASE_3_KI_ERROR_ANALYSE.md) | Rule-based (Stufe 1 ✅ via 32 Alerts), Isolation Forest (Stufe 2 — AI Model existiert, Service STUB), **LLM + KG RCA (Stufe 3)**, **Self-Healing-Bridge**, **NetworkX KG**, Signal-Coverage-Luecke | ⚠️ **Stufe 1 aktiv, Stufe 2+3 offen** |
-| [PHASE_4_INTEGRATION.md](./PHASE_4_INTEGRATION.md) | **5 Subphasen:** 4A Notification-Stack, 4B Unified Alert Center (ISA-18.2), 4C Plugin-System, 4D Diagnostics Hub, 4E Hardware-Test 2. **~80-110h Gesamtaufwand.** Error-Reports, Dashboards, Closed-Loop, Frontend Tool-Integration | ⚠️ **~15%, Planung komplett** |
+| [PHASE_4_INTEGRATION.md](./PHASE_4_INTEGRATION.md) | **5 Subphasen:** 4A Notification-Stack + Quick Action Ball + Alert-Config (~50-65h, 8 Bloecke), 4B Unified Alert Center (ISA-18.2), 4C Plugin-System, 4D Diagnostics Hub, 4E Hardware-Test 2. **~80-110h Gesamtaufwand.** Error-Reports, Dashboards, Closed-Loop, Frontend Tool-Integration | ⚠️ **~15%, Planung komplett** |
 | [OPS_READINESS.md](./OPS_READINESS.md) | Operationale Readiness, Metriken-Check, Readiness-Matrix | Aktualisiert |
 | [PHASE_0_2_COMPLETION_REPORT.md](./PHASE_0_2_COMPLETION_REPORT.md) | Vollstaendige Verifikation aller implementierten Dateien | Aktualisiert |
 
@@ -34,12 +34,16 @@ Phase 0 (Fundament)        ✅ DONE (32 Alerts, 27+ Metriken)
                               + Mock-Trockentest                      │         │
                                          │                            │         │
                                          ▼                            ▼         ▼
-                              Phase 4A (Notification, 15-20h)   ←── Phase 3 ←─ Phase 1
+                              Phase 4A (Notification + QAB + Alert-Config, ~50-65h)
+                              ├── Gruppe 1: Email-Service + Inbox + Grafana (4A.1-4A.3)
+                              ├── Gruppe 2: Quick Action Ball (4A.4-4A.6, nach 4A.1-4A.3)
+                              └── Gruppe 3: Alert-Config + Component Tab (4A.7-4A.8, nach 4A.4)
+                                         │
                               Phase 4B (Alert Center, 15-20h)
                                          │
-                              Phase 4C (Plugins, 15-20h)
-                              Phase 4D (Diagnostics, 20-25h)
-                              Phase 4E (HW-Test 2, 10-15h)
+                              Phase 4C (Plugins, 15-20h)  ←─┐
+                              Phase 4D (Diagnostics, 20-25h) │ parallel
+                              Phase 4E (HW-Test 2, 10-15h) ──┘
 ```
 
 ## Cross-Referenzen
@@ -62,6 +66,8 @@ Phase 0 (Fundament)        ✅ DONE (32 Alerts, 27+ Metriken)
 | Phase 4D → Phase 4E | Diagnose-Tools bereit | HW-Test 2 nutzt volles Diagnose-Toolset |
 | Phase 4E → Phase 1 | Feedback-Loop | Produktionsfehler werden Wokwi-Regression |
 | **Masterplan** → Alle | Wokwi MCP Server, Closed-Loop-Architektur, 16+ Papers | Wissenschaftliche Fundierung + MCP-Config |
+| **Phase 4A (Gruppe 1)** → Phase 4A (Gruppe 2+3) | Notification-Stack | Quick Action Ball + Alert-Config brauchen NotificationRouter aus 4A.1 |
+| **Phase 4A (4A.8)** → Phase 4D | Runtime-Tracking-Daten | Diagnostics Hub nutzt Runtime/Maintenance-Daten aus Component Tab |
 
 ## Phase 4 Voraussetzungen
 
@@ -83,6 +89,8 @@ Phase 0 (Fundament)        ✅ DONE (32 Alerts, 27+ Metriken)
 | Multi-Agent Debugging | TraceCoder | Phase 4D |
 | **Alert UX & ISA-18.2** | ISA-18.2/IEC 62682, ThingsBoard, PagerDuty | **Phase 4B** |
 | **LLM Root-Cause** | Pedroso (2025), LEAT (2025), AetherLog (2024) | **Phase 3 Stufe 3, Phase 4D** |
+| **FAB Usability** | Pibernik (2019), Umar (2024), Farooq (2025) | **Phase 4A (4A.4-4A.6)** |
+| **Alert Fatigue IoT** | DIADEM-X (2025), RPM Alarm Classification (2023) | **Phase 4A (4A.7)** |
 
 ## Wissensbasis (Recherchen 2026-03)
 
@@ -93,5 +101,7 @@ Phase 0 (Fundament)        ✅ DONE (32 Alerts, 27+ Metriken)
 | `wissen/iot-automation/diagnostics-hub-plugin-system-hil-testing-recherche-2026.md` | Diagnostics + Plugin + HIL |
 | `wissen/iot-automation/unified-alert-center-ux-best-practices.md` | Alert Center UX (Grafana/HA/PagerDuty) |
 | `arbeitsbereiche/automation-one/auftrag-forschung-ki-monitoring-queries.md` | 5 Suchqueries fuer /forschung |
+| `wissen/iot-automation/quick-action-ball-alert-management-recherche-2026.md` | FAB Patterns + Alert Management (31 Quellen) |
+| `wissen/iot-automation/forschung-fab-alert-fatigue-papers-2026.md` | 11 Papers: FAB Usability + Alert Fatigue |
 
 **Vollstaendige Paper-Tabelle:** [00_MASTER_PLAN.md](./00_MASTER_PLAN.md) Abschnitt "Wissenschaftliche Fundierung"
