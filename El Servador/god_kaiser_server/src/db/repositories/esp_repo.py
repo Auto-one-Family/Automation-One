@@ -653,7 +653,13 @@ class ESPRepository(BaseRepository[ESPDevice]):
             return False
 
         sim_config = device.device_metadata.get("simulation_config", {})
-        if str(gpio) not in sim_config.get("sensors", {}):
+        # MULTI-VALUE FIX: Keys are "{gpio}_{sensor_type}" (e.g., "0_SHT31"),
+        # not just str(gpio). Check for both formats for backward compat.
+        sensors = sim_config.get("sensors", {})
+        sensor_exists = any(
+            k == str(gpio) or k.startswith(f"{gpio}_") for k in sensors
+        )
+        if not sensor_exists:
             return False
 
         # Add manual override

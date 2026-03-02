@@ -228,7 +228,7 @@ async def get_subzones(
 
     try:
         return await service.get_esp_subzones(device_id=esp_id)
-    except ValueError as e:
+    except ValueError:
         raise ESPNotFoundError(esp_id)
 
 

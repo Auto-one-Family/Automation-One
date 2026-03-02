@@ -26,7 +26,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query
 
 from ...core.exceptions import (
     ConfigurationException,

@@ -1118,7 +1118,13 @@ async def set_manual_sensor_override(
         )
 
     sim_config = esp_repo.get_simulation_config(device)
-    if str(gpio) not in sim_config.get("sensors", {}):
+    sensors = sim_config.get("sensors", {})
+    # MULTI-VALUE FIX: Keys are "{gpio}_{sensor_type}" (e.g., "0_SHT31"),
+    # not just str(gpio). Check for both formats for backward compat.
+    sensor_exists = any(
+        k == str(gpio) or k.startswith(f"{gpio}_") for k in sensors
+    )
+    if not sensor_exists:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sensor GPIO {gpio} not found on {esp_id}",

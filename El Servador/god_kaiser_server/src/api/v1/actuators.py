@@ -28,7 +28,7 @@ import json
 from datetime import datetime, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query
 
 from ...core.exceptions import (
     ActuatorNotFoundError,

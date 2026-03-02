@@ -284,13 +284,17 @@ class SensorDataHandler:
                         processed_value = value
 
                     # Step 8b: Physical range validation (post-processing)
-                    # Check the display value against sensor physical limits.
+                    # Check processed value against sensor physical limits.
                     # Values outside datasheet range get quality="critical" but are
                     # still saved (never discarded) for diagnostic purposes.
-                    # Skip check when raw_mode=True and no processing occurred:
-                    # RAW ADC values have no physical unit, so range check is meaningless.
+                    #
+                    # IMPORTANT: Only validate server-processed values (pi_enhanced).
+                    # RAW values and ESP self-reported values (local mode) may use
+                    # different scales (e.g., ADC 0-4095 vs processed 0-100% for
+                    # moisture). Checking raw ADC values against processed limits
+                    # would produce false "implausible" warnings.
                     display_val = processed_value if processed_value is not None else value
-                    skip_range_check = raw_mode and processed_value is None
+                    skip_range_check = processing_mode != "pi_enhanced" or processed_value is None
                     if display_val is not None and quality not in ("error",) and not skip_range_check:
                         range_result = self._check_physical_range(
                             sensor_type, float(display_val)
@@ -337,16 +341,29 @@ class SensorDataHandler:
                         data_source=data_source,
                     )
 
-                    # Step 9b: Activate sensor config on first successful data save
-                    # If config_status is still "pending", transition to "applied"
-                    # (mirrors config_handler.py pattern for config_response)
-                    if sensor_config and sensor_config.config_status == "pending":
-                        sensor_config.config_status = "applied"
-                        logger.info(
-                            f"Sensor config activated: esp_id={esp_id_str}, "
-                            f"gpio={gpio}, sensor_type={sensor_type}, "
-                            f"config_status: pending → applied"
+                    # Step 9b: Update sensor config on successful data save
+                    if sensor_config:
+                        # Activate config on first successful data receipt
+                        if sensor_config.config_status == "pending":
+                            sensor_config.config_status = "active"
+                            logger.info(
+                                f"Sensor config activated: esp_id={esp_id_str}, "
+                                f"gpio={gpio}, sensor_type={sensor_type}, "
+                                f"config_status: pending → active"
+                            )
+
+                        # Update latest reading in sensor_metadata
+                        latest_value = (
+                            processed_value if processed_value is not None
+                            else raw_value
                         )
+                        updated_metadata = dict(sensor_config.sensor_metadata or {})
+                        updated_metadata["latest_value"] = latest_value
+                        updated_metadata["latest_timestamp"] = (
+                            esp32_timestamp.isoformat()
+                        )
+                        updated_metadata["latest_quality"] = quality
+                        sensor_config.sensor_metadata = updated_metadata
 
                     # Commit transaction
                     await session.commit()

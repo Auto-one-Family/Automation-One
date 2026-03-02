@@ -138,7 +138,7 @@ class MQTTSubscribeException(MQTTException):
 class AuthenticationException(GodKaiserException):
     """Base exception for authentication errors"""
 
-    pass
+    status_code = 401
 
 
 class InvalidCredentialsException(AuthenticationException):
