@@ -169,7 +169,7 @@ jobs:
         run: poetry install --no-root --no-interaction
 
       - name: Install mosquitto clients
-        run: sudo apt-get install -y mosquitto-clients
+        run: sudo apt-get update && sudo apt-get install -y mosquitto-clients
 
       - name: Wait for Mosquitto ready
         run: |

@@ -90,7 +90,7 @@ jobs:
 
       - name: Verify services
         run: |
-          COMPOSE="docker compose -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml"
+          COMPOSE="docker compose --profile frontend -f docker-compose.yml -f docker-compose.ci.yml -f docker-compose.e2e.yml"
 
           echo "--- Waiting for Server ---"
           max_attempts=60
