@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Error-Code Referenz
 
-> **Version:** 1.2 | **Aktualisiert:** 2026-03-01
+> **Version:** 1.3 | **Aktualisiert:** 2026-03-02
 > **Quellen:** `El Trabajante/src/models/error_codes.h`, `El Servador/god_kaiser_server/src/core/error_codes.py`
 > **Letzte Verifizierung:** AGENT 3 Error-Code Spezialist
 
@@ -34,6 +34,8 @@ allowed-tools: Read
 | 5640 | Server | SEQUENCE | Actuator locked | Warten oder Force-Release |
 | 5700 | Server | LOGIC | Rule nicht gefunden | Rule-Name prüfen |
 | 5780 | Server | SUBZONE | Subzone nicht gefunden | Subzone-Config prüfen |
+| 5850 | Server | NOTIFICATION | Notification nicht gefunden | Notification-ID prüfen |
+| 5852 | Server | NOTIFICATION | Email-Provider nicht verfügbar | SMTP-Config prüfen |
 
 ---
 
@@ -56,7 +58,8 @@ allowed-tools: Read
 | **5750-5779** | Server | DASHBOARD_ERROR |
 | **5780-5799** | Server | SUBZONE_ERROR |
 | **5800-5849** | Server | AUTOOPS_ERROR |
-| **5850-5999** | Server | RESERVED |
+| **5850-5899** | Server | NOTIFICATION_ERROR |
+| **5900-5999** | Server | RESERVED |
 | **6000-6099** | Test | TEST (Testinfrastruktur-Fehler) |
 
 **MQTT Error Publishing Rate-Limiting (F8):** ESP32 ErrorTracker throttles MQTT error publishes to max 1 per error code per 60s window. Suppressed occurrences are counted and logged on next publish. Implementation: `error_tracker.cpp` — `shouldPublishError()` with modulo-hashed 32-slot static table.
@@ -331,6 +334,7 @@ allowed-tools: Read
 | 5005 | `FIELD_MAPPING_FAILED` | Failed to map fields between server and ESP32 format |
 | 5006 | `CONFIG_TIMEOUT` | Configuration response timeout |
 | 5007 | `ESP_OFFLINE` | ESP device is offline |
+| 5008 | `ESP_COMMAND_FAILED` | Failed to send command to ESP device |
 
 ---
 
@@ -345,6 +349,7 @@ allowed-tools: Read
 | 5105 | `RETRY_EXHAUSTED` | MQTT retry attempts exhausted |
 | 5106 | `BROKER_UNAVAILABLE` | MQTT broker is unavailable |
 | 5107 | `AUTHENTICATION_FAILED` | MQTT authentication failed |
+| 5108 | `SUBSCRIBE_FAILED` | MQTT subscribe operation failed |
 
 ---
 
@@ -360,6 +365,9 @@ allowed-tools: Read
 | 5206 | `FIELD_TYPE_MISMATCH` | Field type mismatch |
 | 5207 | `VALUE_OUT_OF_RANGE` | Value out of allowed range |
 | 5208 | `DUPLICATE_ENTRY` | Duplicate entry (already exists) |
+| 5209 | `INVALID_PAYLOAD_FORMAT` | Invalid payload format |
+| 5210 | `SENSOR_NOT_FOUND` | Sensor not found in database |
+| 5211 | `ACTUATOR_NOT_FOUND` | Actuator not found in database |
 
 ---
 
@@ -373,6 +381,8 @@ allowed-tools: Read
 | 5304 | `CONNECTION_FAILED` | Database connection failed |
 | 5305 | `INTEGRITY_ERROR` | Database integrity constraint violated |
 | 5306 | `MIGRATION_FAILED` | Database migration failed |
+| 5307 | `RECORD_NOT_FOUND` | Database record not found |
+| 5308 | `RECORD_DUPLICATE` | Duplicate database record |
 
 ---
 
@@ -385,6 +395,15 @@ allowed-tools: Read
 | 5403 | `OPERATION_TIMEOUT` | Service operation timed out |
 | 5404 | `RATE_LIMIT_EXCEEDED` | Rate limit exceeded |
 | 5405 | `PERMISSION_DENIED` | Permission denied |
+| 5406 | `AUTHENTICATION_FAILED` | Service authentication failed |
+| 5407 | `TOKEN_EXPIRED` | Authentication token expired |
+| 5408 | `TOKEN_INVALID` | Authentication token invalid |
+| 5409 | `AUTHORIZATION_FAILED` | Authorization check failed |
+| 5410 | `EXTERNAL_SERVICE_FAILED` | External service call failed |
+| 5411 | `SENSOR_PROCESSING_FAILED` | Sensor data processing failed |
+| 5412 | `ACTUATOR_COMMAND_FAILED` | Actuator command execution failed |
+| 5413 | `SAFETY_CONSTRAINT_VIOLATED` | Safety constraint violated |
+| 5414 | `USER_NOT_FOUND` | User not found |
 
 ---
 
@@ -491,6 +510,23 @@ allowed-tools: Read
 
 ---
 
+## 12e. Server Notification Errors (5850-5899)
+
+| Code | Name | Beschreibung |
+|------|------|--------------|
+| 5850 | `NOTIFICATION_NOT_FOUND` | Notification not found |
+| 5851 | `NOTIFICATION_SEND_FAILED` | Failed to send notification via provider |
+| 5852 | `EMAIL_PROVIDER_UNAVAILABLE` | Email provider unavailable or misconfigured |
+| 5853 | `EMAIL_TEMPLATE_MISSING` | Email template not found |
+| 5854 | `DIGEST_SCHEDULE_INVALID` | Digest schedule configuration invalid |
+| 5855 | `SUPPRESSION_CONFIG_INVALID` | Alert suppression configuration invalid |
+| 5856 | `SUPPRESSION_WINDOW_CONFLICT` | Alert suppression window conflict |
+| 5857 | `WEBHOOK_INVALID_PAYLOAD` | Webhook payload invalid or malformed |
+| 5858 | `WEBHOOK_SIGNATURE_INVALID` | Webhook signature validation failed |
+| 5859 | `ALERT_PREFERENCE_NOT_FOUND` | Alert preference not found for user |
+
+---
+
 ## 13. ESP32 Config Error Codes (String-based)
 
 Diese Codes werden in `config_response` Payloads verwendet:
@@ -525,6 +561,7 @@ Diese Codes werden in `config_response` Payloads verwendet:
 | `El Servador/god_kaiser_server/src/core/exceptions.py` | Exception-Hierarchie mit numeric_code Bridge |
 | `El Servador/god_kaiser_server/src/core/exception_handlers.py` | Global Exception Handler (numeric_code + request_id in Response) |
 | `El Servador/god_kaiser_server/src/core/esp32_error_mapping.py` | ESP32 Error Enrichment (Troubleshooting-Texte, 11 neue Einträge) |
+| `El Servador/god_kaiser_server/src/core/server_error_mapping.py` | Server Error Enrichment (49 Codes mit Severity, Troubleshooting-DE, User-Messages) |
 
 ### Helper-Funktionen (Python)
 
