@@ -1,7 +1,7 @@
 # Docker-Infrastruktur Referenz - AutomationOne
 
-**Version:** 1.9
-**Datum:** 2026-02-23
+**Version:** 2.0
+**Datum:** 2026-03-02
 **Zweck:** Vollstaendige Referenz fuer Docker-Stack Architektur und Befehle
 
 ---
@@ -31,7 +31,7 @@
 | el-servador | automationone-server | Custom Build | 8000 | - | curl /api/v1/health/live |
 | el-frontend | automationone-frontend | Custom Build | 5173 | - | node fetch |
 | loki | automationone-loki | grafana/loki:3.4 | 3100 | monitoring | wget /ready |
-| alloy | automationone-alloy | grafana/alloy:v1.13.1 | 12345 | monitoring | wget /-/ready |
+| alloy | automationone-alloy | grafana/alloy:v1.13.1 | 12345 | monitoring | bash TCP /dev/tcp/localhost/12345 |
 | prometheus | automationone-prometheus | prom/prometheus:v3.2.1 | 9090 | monitoring | wget /-/healthy |
 | grafana | automationone-grafana | grafana/grafana:11.5.2 | 3000 | monitoring | wget /api/health |
 | postgres-exporter | automationone-postgres-exporter | prometheuscommunity/postgres-exporter:v0.16.0 | 9187 | monitoring | wget /metrics |
@@ -274,7 +274,7 @@ make e2e-up
 | POSTGRES_DB | DB-Name | god_kaiser_db |
 | JWT_SECRET_KEY | JWT Signing Key | secrets.token_urlsafe(32) |
 | GRAFANA_ADMIN_PASSWORD | Grafana Login | changeme |
-| PGADMIN_DEFAULT_EMAIL | pgAdmin Login-Email | admin@automationone.local |
+| PGADMIN_DEFAULT_EMAIL | pgAdmin Login-Email | admin@automationone.dev |
 | PGADMIN_DEFAULT_PASSWORD | pgAdmin Login-Passwort | changeme |
 | WOKWI_CLI_TOKEN | Wokwi API Token | wok_... |
 
@@ -324,6 +324,7 @@ services:
 
 **Docker Socket Mount:** `/var/run/docker.sock` (read-only)
 **Migration:** Ersetzt Promtail (EOL 2026-03-02). Native River-Config seit 2026-02-25. Archived: `docker/promtail/config.yml`
+**Pipeline (v4.7):** 6 service-spezifische Pipelines. Level-Normalisierung auf uppercase (alle Services). 10 Drop-Filter (health, healthcheck, checkpoint, query-stats). Structured Metadata: logger, request_id (server), component (frontend/ESP), device, error_code (ESP), query_duration_ms (postgres)
 
 ### 5.3 Prometheus (Metriken)
 
@@ -501,6 +502,9 @@ docker volume rm automationone-postgres-data
 | 1.6 | 2026-02-11 | esp32-serial-logger hinzugefuegt (12 Services: 4 Core + 6 Monitoring + 1 DevTools + 1 Hardware), Profile: hardware, TCP-Bridge via socat |
 | 1.7 | 2026-02-11 | Bind-Mounts-Tabelle: `./logs/mqtt/` als deaktiviert markiert (Mosquitto stdout-only seit v3.1) |
 | 1.8 | 2026-02-11 | Section 7.5: Port-1883-Blockade durch lokalen Mosquitto, Docker Desktop 500/WSL-Troubleshooting ergaenzt |
+| 1.9 | 2026-02-25 | Bind-Mounts: PostgreSQL `logging_collector=off` (kein Bind-Mount mehr, stderr → Docker → Alloy → Loki). cadvisor Service hinzugefuegt (13 Services: 4 Core + 7 Monitoring + 1 DevTools + 1 Hardware) |
+| 2.0 | 2026-03-02 | Alloy Healthcheck korrigiert: `bash TCP check` statt `wget /-/ready` (kein wget im Alloy-Image) |
+| 2.1 | 2026-03-02 | Alloy Pipeline v4.7: Level-Normalisierung (uppercase) für loki/mqtt-broker/el-frontend, 3 Drop-Filter für query-stats Noise, SM-Beschreibung ergänzt |
 
 ---
 

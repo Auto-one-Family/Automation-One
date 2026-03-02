@@ -2,7 +2,7 @@
 
 > **Erstellt:** 2026-02-21
 > **Erstellt von:** Automation-Experte (Life-Repo)
-> **Aktualisiert:** 2026-02-24 (Phase 1 CI-Fix ABGESCHLOSSEN: MQTT-Injection in nightly-gpio-extended + nightly-hardware-extended; Grafana 28 UIDs verifiziert; Playwright visual-regression ausgeschlossen)
+> **Aktualisiert:** 2026-03-02 (Forschungs-Integration: Phase 4 mit 5 Subphasen 4A-4E, 3 neue Recherchen, ISA-18.2/Resend/NetworkX Erkenntnisse, 32 Alerts verifiziert)
 > **Zweck:** Ueberblick ueber den Aufbau der Testinfrastruktur mit zwei parallelen Spuren (Wokwi-Simulation + Produktionstestfeld), gemeinsamer Error-Taxonomie und phasenweiser Fertigstellung.
 > **Charakter:** Offen und flexibel — Phasen geben Richtung, nicht starre Deadlines.
 
@@ -33,7 +33,7 @@
 ║                    │  Error-Codes: 1000-5699  │                             ║
 ║                    │  Severity: info→critical │                             ║
 ║                    │  Kategorien: 6 Typen     │                             ║
-║                    │  Grafana-Alerts: 28      │                             ║
+║                    │  Grafana-Alerts: 32      │                             ║
 ║                    │  KI: 3-Stufen-Strategie  │                             ║
 ║                    └─────────────────────────┘                             ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -50,7 +50,7 @@
 | Docker-Stack (13 Services) | **12/13 healthy** | Core (4) + Monitoring (7) + DevTools (1) + Hardware (1). Mosquitto-Exporter unhealthy — kein Einfluss |
 | PostgreSQL | **Laeuft** | 19 Tabellen, Alembic Migrations, ai_predictions vorbereitet |
 | Mosquitto MQTT | **Laeuft** | Port 1883 + 9001 (WS), allow_anonymous (Testmodus) |
-| Grafana | **Laeuft** | 26 Panels, **28 Alert-UIDs** (Phase 0 ERLEDIGT + Alloy/MQTT-Broker-Alerts 2026-02-24), Auto-Refresh 10s |
+| Grafana | **Laeuft** | 2 Dashboards (system-health, debug-console), **32 Alert-Rules** in 7 Gruppen (verifiziert 2026-03-02), Auto-Refresh 10s |
 | Prometheus | **Laeuft** | **27 Metriken** (15 alt + 12 Phase-0 neu), 7 Scrape-Jobs |
 | Loki + Promtail | **Laeuft** | Zentrale Log-Aggregation, 7d Retention, JSON-Logs |
 | cAdvisor | **Laeuft** | Container-Ressourcen-Monitoring |
@@ -61,14 +61,14 @@
 |---------|-------------|-------------------|---------------------|
 | El Servador (FastAPI) | 97% | **98% bereit** — ~170 Endpoints, 12 MQTT-Handler, 9 Sensor-Libraries, **27 Prometheus-Metriken**, **Handler-Integration komplett** | Phase 0: ✅ Metriken + Handler FERTIG |
 | El Trabajante (ESP32) | 92% | **95% bereit** — Full Boot bestanden, **173 Wokwi-Szenarien** (163 + 10 Error-Injection), 12 Test-Error-Codes | Phase 1: ✅ Error-Injection FERTIG, ✅ MQTT-CI-Fix FERTIG (2026-02-24) |
-| El Frontend (Vue3) | 90% | **93% bereit** — 129 Komponenten, 13 Pinia Stores, WebSocket stabil, **CalibrationWizard + SensorHistoryView FERTIG** | Phase 2: ✅ Frontend-Code FERTIG, ✅ Sidebar-Links FERTIG — Playwright: visual-regression ausgeschlossen (kein Baseline), 7 Restfailures offen |
+| El Frontend (Vue3) | 93% | **95% bereit** — **108 .vue Komponenten**, 13 Pinia Stores, **30+ WS-Events**, **20 API-Clients**, **10+ Dashboard-Widget-Typen**, CalibrationWizard + MonitorView (3-Level) + SystemMonitorView (6-Tab) + CustomDashboardView (Widget-Builder) FERTIG | Phase 2: ✅ Frontend-Code + Sidebar FERTIG. MonitorView + SystemMonitor + Dashboard-Editor als Basis fuer Phase 4 Tool-Integration |
 
 ### Test-Suite (vorhanden)
 
 | Suite | Tool | Umfang | Status |
 |-------|------|--------|--------|
-| Backend Unit | pytest | 759 Tests (109 Dateien) | GRUEN |
-| Frontend Unit | Vitest | 1118 Tests (64 Dateien) | GRUEN |
+| Backend Unit | pytest | 804+ Tests (115 Dateien) | GRUEN |
+| Frontend Unit | Vitest | 1342/1343 Tests | GRUEN (1 pre-existing timeout) |
 | Firmware Native | Unity | 22 Tests | GRUEN |
 | Wokwi Simulation | pytest + Wokwi | **173 Szenarien** (163 + 10 Error-Injection) | GRUEN |
 | Wokwi CI/CD | wokwi-tests.yml | **PR/Push: 16 Jobs (~52 Szenarien), Nightly: 23 Jobs (alle 173)**, **inkl. Error-Injection** | KONFIGURIERT |
@@ -208,7 +208,7 @@
 | Severity-Stufen | **Aktiv** | info, warning, error, critical |
 | Fehler-Kategorien | **Aktiv** | sensor, actuator, mqtt, system, config, safety, **test** |
 | Audit-Log-Tabelle | **Laeuft** | event_type, severity, correlation_id, error_code |
-| Grafana-Alerts | **28 aktiv** | 5 Critical (ao-promtail-down → ao-alloy-down, 1:1 ersetzt) + 3 Warning + 3 Infrastructure + 5 Sensor + 4 Device + 6 Application + 2 MQTT-Broker-Alerts (ao-mqtt-broker-no-clients, ao-mqtt-broker-messages-stored) |
+| Grafana-Alerts | **32 aktiv** (verifiziert 2026-03-02) | 7 Gruppen: Critical + Warning + Infrastructure + Sensor + Device + Application + MQTT-Broker |
 | Prometheus-Metriken | **27 aktiv** | 15 alt + **12 Phase-0 neu**, alle Handler-integriert |
 | Error-Code-Referenz | **Dokumentiert** | `.claude/reference/errors/ERROR_CODES.md` (inkl. Sektion 19: Test-Codes) |
 | Wokwi-Error-Mapping | **Dokumentiert** | `.claude/reference/testing/WOKWI_ERROR_MAPPING.md` |
@@ -222,10 +222,10 @@
 | ~~Sidebar-Navigation~~ | ~~Frontend~~ | ~~HOCH~~ | ✅ **ERLEDIGT** — TrendingUp (Zeitreihen) + SlidersHorizontal (Kalibrierung) in Sidebar.vue |
 | Analyse-Profile UI | Frontend | MITTEL | Offen — Dashboard fuer Datenerfassungs-Steuerung |
 | Benutzer-Management UI | Frontend | NIEDRIG | Offen — Admin-Panel (JWT/RBAC funktioniert bereits) |
-| ~~Erweiterte Grafana-Alert-Regeln~~ | ~~Monitoring~~ | ~~HOCH~~ | ✅ **ERLEDIGT** — 28 UIDs aktiv (26 Phase-0 + Alloy-Alert + 2 MQTT-Broker-Alerts 2026-02-24) |
+| ~~Erweiterte Grafana-Alert-Regeln~~ | ~~Monitoring~~ | ~~HOCH~~ | ✅ **ERLEDIGT** — 32 Alert-Rules aktiv in 7 Gruppen (verifiziert 2026-03-02) |
 | ~~Handler-Integration Metriken~~ | ~~Backend~~ | ~~KRITISCH~~ | ✅ **ERLEDIGT** — Alle 12 Update-Funktionen in Handlern integriert |
 | Isolation Forest Service | Backend | MITTEL | Offen — `ai.py` Model existiert (AIPredictions), scikit-learn/numpy NICHT in pyproject.toml |
-| Grafana Deployment-Verifikation | Monitoring | MITTEL | ✅ **VERIFIZIERT (2026-02-24)** — 28 aktive UIDs in Grafana bestätigt |
+| Grafana Deployment-Verifikation | Monitoring | MITTEL | ✅ **VERIFIZIERT (2026-03-02)** — 32 aktive Alert-Rules in 7 Gruppen bestätigt |
 | MQTT-ACL | Security | NIEDRIG (fuer Testlauf) | Offen — Vorlage existiert, fuer Produktion MUSS |
 | Incident-Management-Prozess | Operations | NIEDRIG | Offen — Wer macht was bei Ausfall |
 
@@ -384,7 +384,7 @@ Die Error-Taxonomie ist bereits zweistufig definiert:
 ### 0.2 Grafana-Alert-Regeln erweitern ✅ ERLEDIGT
 
 ~~Aktuelle 8 Regeln → Ziel: 28+ Regeln fuer den Testlauf.~~
-**Aktuell: 26 Alert-Regeln aktiv** (8 alt + 18 Phase-0 neu). 2 Regeln begruendet weggelassen (Node Exporter fehlt, cAdvisor-Bug).
+**Aktuell: 32 Alert-Regeln aktiv** in 7 Gruppen (verifiziert 2026-03-02, Ziel 28+ uebertroffen).
 
 **Implementierte Regeln (Empfehlung, kein Code noetig — nur `alert-rules.yml` erweitern):**
 
@@ -404,7 +404,7 @@ Die Error-Taxonomie ist bereits zweistufig definiert:
 **Agent-Verknuepfung:** auto-ops Plugin (`/auto-ops:ops-diagnose`) aggregiert Grafana-Alert-Status und korreliert zusammenhaengende Events. System-Health Skill hat Eskalationsmatrix.
 
 **Automatisierte Alert-Agent-Verknuepfung (Stufe 0.3 integriert):**
-Die 26 Grafana-Alerts sind bereits mit dem auto-ops Agent-System verknuepft:
+Die 32 Grafana-Alerts (verifiziert 2026-03-02) sind bereits mit dem auto-ops Agent-System verknuepft:
 - `/ops-diagnose` liest Alert-Status via Grafana HTTP API und korreliert zusammenhaengende Events automatisch
 - `system-health` Skill hat Eskalationsmatrix: WARNING → auto-ops analysiert, CRITICAL → sofortige Cross-Layer-Diagnose
 - `cross-layer-correlation` Skill verbindet Alert-Events ueber Timestamp-Abgleich (±5s Fenster)
@@ -736,9 +736,47 @@ PLAUSIBILITY_RANGES = {
 
 ---
 
-## PHASE 4: INTEGRATION — Beide Spuren verbinden
+## PHASE 4: SYSTEM-INTEGRATION, NOTIFICATIONS, DIAGNOSTICS & HARDWARE-TEST 2
 
-> **Ziel:** Wokwi-Regressionstests und Produktionstestfeld nutzen dieselben Error-Reports und Dashboards.
+> **Ziel:** Alle vorherigen Phasen zu einem integrierten System verbinden — mit Notification-Stack, Alert Center, Plugin-Steuerung, Diagnostics Hub und Hardware-Test 2.
+> **Aufwand:** ~80-110h (4-6 Wochen)
+> **Detail-Dokument:** [PHASE_4_INTEGRATION.md](./PHASE_4_INTEGRATION.md) (5 Subphasen mit Code-Snippets, DB-Schemata, UI-Mockups)
+> **Detaillierte Roadmap:** `arbeitsbereiche/automation-one/roadmap-phase4-system-integration.md`
+
+### Voraussetzungen (VOR Phase 4)
+
+| # | Auftrag | Aufwand | Status |
+|---|---------|---------|--------|
+| 1 | `auftrag-logging-multi-layer-fix.md` | ~4-5h | OFFEN |
+| 2 | `auftrag-loki-pipeline-verifikation.md` | ~6-8h | OFFEN |
+| 3 | `auftrag-logic-engine-volltest.md` | ~10-12h | OFFEN |
+| 4 | `auftrag-mock-trockentest.md` | ~8-10h | OFFEN |
+
+### 5 Subphasen
+
+```
+Phase 4A: Notification-Stack (15-20h)    Phase 4B: Unified Alert Center (15-20h)
+(Email + Routing + Inbox)                (ISA-18.2, Grafana→Frontend)
+         │                                         │
+         └────────────┬────────────────────────────┘
+                      │
+               Phase 4C: Plugin-System (15-20h)
+               (AutoOps UI + Logic Engine Actions)
+                      │
+               Phase 4D: Diagnostics Hub (20-25h)
+               (SystemMonitorView → Debugging)
+                      │
+               Phase 4E: Hardware-Test 2 (10-15h)
+               (Volle Kontrolle, volles Monitoring)
+```
+
+| Subphase | Fokus | Kern-Ergebnis | Forschungsbasis |
+|----------|-------|---------------|-----------------|
+| **4A** | Notification-Stack | Email (Resend), WS-Toast, Webhook, DB-Inbox | ISA-18.2, BackgroundTasks |
+| **4B** | Unified Alert Center | Grafana-Webhook → UnifiedAlert → Progressive Disclosure | ThingsBoard 2x2, ISA-18.2 <3 Alerts/h |
+| **4C** | Plugin-System | Card-basierter Katalog, autoops_trigger, Config-UI | Grafana/Home Assistant Pattern |
+| **4D** | Diagnostics Hub | On-Demand Checks, Loki-Integration, IF-Ergebnisse | On-Demand Diagnostic Pattern |
+| **4E** | Hardware-Test 2 | Signal-Coverage, volles Monitoring, Auto-Dokumentation | HW-Test 1 Luecken schliessen |
 
 ### 4.1 Gemeinsame Error-Reports
 
@@ -767,19 +805,20 @@ Wokwi-Szenario fehlgeschlagen          Produktions-ESP meldet Fehler
 
 ### 4.2 Dashboard-Konsolidierung
 
-| Dashboard | Datenquelle | Inhalt |
-|-----------|-------------|--------|
-| Operations (existiert) | Prometheus + Loki | System-Health, Container, MQTT-Traffic |
-| Sensor-Daten (NEU) | PostgreSQL sensor_data | Live-Werte + Historisch + Anomalien |
-| Error-Analyse (NEU) | Grafana Alerts + ai_predictions | Error-Heatmap, Trends, Recovery-Status |
-| Test-Status (NEU) | CI/CD + Wokwi-Results | Test-Ergebnisse beider Spuren |
+| Dashboard | Datenquelle | Inhalt | Phase-4-Subphase |
+|-----------|-------------|--------|-----------------|
+| Operations (existiert) | Prometheus + Loki | System-Health, Container, MQTT-Traffic | — |
+| **Unified Alert Center** (NEU) | Grafana-Webhook + Backend | Alert-Lifecycle, ISA-18.2, Progressive Disclosure | **4B** |
+| **Diagnostics Hub** (NEU) | Loki + Prometheus + ai_predictions | On-Demand Checks, IF-Score, Dependency-Tree | **4D** |
+| Sensor-Daten (NEU) | PostgreSQL sensor_data | Live-Werte + Historisch + Anomalien | 4B/4D |
+| Test-Status (NEU) | CI/CD + Wokwi-Results | Test-Ergebnisse beider Spuren | 4E |
 
-### 4.3 Feedback-Loop
+### 4.3 Feedback-Loop + Closed-Loop Agent-Architektur
 
 ```
 Produktion findet Fehler → Error-Code wird dokumentiert
         ↓
-Wokwi-Szenario wird erstellt das den Fehler reproduziert
+Wokwi-Szenario wird erstellt das den Fehler reproduziert (via Wokwi MCP)
         ↓
 Fix wird implementiert
         ↓
@@ -788,18 +827,20 @@ Wokwi-Regression bestaetigt Fix
 Fix wird in Produktion deployed
 ```
 
+**Closed-Loop (NEU):** Agent-Driven Testing nutzt Wokwi MCP direkt — Szenario generieren → ausfuehren → Logs analysieren → verbessern (Naqvi et al. 2026)
+
 ---
 
 ## Phasen-Uebersicht (Reihenfolge, nicht Zeitplan) — aktualisiert 2026-02-23
 
-| Phase | Fokus | Status | Verbleibend |
-|-------|-------|--------|-------------|
-| **0** | Error-Taxonomie + Grafana-Alerts erweitern | ✅ **ABGESCHLOSSEN** | Grafana-Deployment-Verifikation (Reload) |
-| **0.5** | **CI/CD-Infrastruktur reparieren** | ⚠️ **4/8 GRUEN** | 4 pre-existing Issues (`auftrag-test-engine-komplett.md`) |
-| **1** | Wokwi-Simulation stabilisieren + CI/CD automatisieren | ✅ **ABGESCHLOSSEN** | 28 gpio/hardware Dateien, M6 CI-Run, lokaler Test-Run |
-| **2** | Produktionstestfeld aufbauen + Frontend-Luecken schliessen | ⚠️ **CODE KOMPLETT** | Deployment + Hardware-Verifikation |
-| **3** | KI-Error-Analyse (Stufe 1 sofort, Stufe 2 iterativ) | 🔲 **OFFEN** | scikit-learn/numpy installieren, Isolation Forest Service + Scheduler |
-| **4** | Integration beider Spuren, Dashboards, Feedback-Loop | 🔲 **OFFEN** | Braucht Phase 2+3 |
+| Phase | Fokus | Status | Fortschritt | Verbleibend |
+|-------|-------|--------|-------------|-------------|
+| **0** | Error-Taxonomie + Grafana-Alerts | ✅ **ABGESCHLOSSEN** | **100%** | 32 Alerts (Ziel 28+), 27+ Metriken, 18 Call-Sites |
+| **0.5** | CI/CD-Infrastruktur reparieren | ⚠️ **4/8 GRUEN** | 50% | 4 pre-existing Issues |
+| **1** | Wokwi-Simulation + CI/CD | ✅ **ABGESCHLOSSEN** | **100%** | 7/7 Kriterien, CI gruen |
+| **2** | Produktionstestfeld + Frontend | ⚠️ **CODE KOMPLETT** | **~75%** | ~~Sidebar~~ ✅. Deploy + ESP32-Hardware offen |
+| **3** | KI-Error-Analyse (3 Stufen) | ⚠️ **STUFE 1 AKTIV** | **~35%** | Stufe 1 via 32 Alerts ✅. AI Model existiert ✅. Service/Repo/Router STUB. Dependencies fehlen |
+| **4** | **System-Integration** (5 Subphasen: 4A-4E, ~80-110h) | ⚠️ **GEPLANT** | **~15%** | 4A Notification (15-20h), 4B Alert Center (15-20h), 4C Plugins (15-20h), 4D Diagnostics (20-25h), 4E HW-Test 2 (10-15h). Voraussetzungen: 4 Auftraege (~30h) |
 
 **Wichtig:** Phase 1 und Phase 2 laufen PARALLEL. Wokwi braucht keine echte Hardware. Das Produktionstestfeld braucht keine Wokwi-Szenarien. Beide teilen sich Phase 0 (Error-Taxonomie) und Phase 3 (KI-Error-Analyse).
 
@@ -894,6 +935,31 @@ Dieser Phasenplan stuetzt sich auf folgende Forschung (aktualisiert 2026-02-23, 
 - `wissen/iot-automation/ki-error-analyse-iot.md` — KI-Error-Analyse Architektur (4 Ebenen)
 - `wissen/iot-automation/2025-devops-iot-deployment-hil-testing.md`, `2024-chaos-engineering-iot-resilience-testing.md`, `2024-self-healing-iot-isolation-forest.md`, `2025-sil-hil-digital-twin-validation-framework.md`, `2025-renode-digital-twin-iot-firmware-testing.md`, `2025-ai-driven-fault-injection-chaos-engineering.md`
 
+### Neue Recherchen (2026-03-02: Alert UX, Email, Diagnostics, Plugin-System)
+
+| Datei | Inhalt | Phase-Relevanz |
+|-------|--------|----------------|
+| `wissen/datenanalyse/forschungsbericht-ki-monitoring-iot-2026-03.md` | 16 Papers Synthese, 11 Luecken, 4 Suchqueries | Phase 3+4 |
+| `wissen/iot-automation/iot-alert-email-notification-architektur-2026.md` | ISA-18.2, ThingsBoard 2x2, Resend vs. SMTP, Alert Fatigue | Phase 4A+4B |
+| `wissen/iot-automation/diagnostics-hub-plugin-system-hil-testing-recherche-2026.md` | On-Demand Diagnostic, Card-based Plugin UI, HIL-Pattern | Phase 4C+4D |
+| `wissen/iot-automation/unified-alert-center-ux-best-practices.md` | Grafana/Home Assistant/PagerDuty-Analyse, Progressive Disclosure | Phase 4B |
+| `wissen/iot-automation/alarm-fatigue-empirische-benchmarks-monitoring.md` | ISA-18.2 Benchmarks, Alert-Rationalisierung | Phase 4B |
+| `wissen/iot-automation/grafana-alerting-webhook-provisioning.md` | Grafana-Webhook → Backend, Provisioning-YAML | Phase 4B |
+| `arbeitsbereiche/automation-one/auftrag-forschung-ki-monitoring-queries.md` | 5 Suchqueries fuer naechste /forschung | Phase 3+4 |
+
+**Kern-Erkenntnisse aus Recherchen:**
+
+| Erkenntnis | Quelle | Auswirkung |
+|-----------|--------|-----------|
+| ISA-18.2: <6 Alerts/h, AutomationOne Ziel <3 | Alert-Recherche | Design-Constraint fuer Phase 4B |
+| Resend > SMTP fuer Email (Free 3.000/Monat) | Email-Recherche | Technologie-Entscheidung Phase 4A |
+| ThingsBoard 2x2 Alert-Lifecycle | Alert-Recherche | UX-Pattern fuer Phase 4B |
+| Root-Cause Suppression (MQTT-down → suppress dependents) | Alert-Recherche | Backend-Logik Phase 4B |
+| Card-based Plugin Catalog (Grafana/Home Assistant) | Plugin-Recherche | UI-Pattern Phase 4C |
+| On-Demand Diagnostic Pattern (nicht Polling) | Diagnostics-Recherche | Architektur Phase 4D |
+| NetworkX fuer KG (in-memory, <50 Sensoren) | KI-Forschung | Phase 3 Stufe 3b |
+| Signal-Coverage-Luecke aus HW-Test 1 | HW-Test Analyse | Phase 4E erweitert |
+
 ---
 
 ## Ergaenzungshinweise (nicht-deterministisch)
@@ -937,3 +1003,11 @@ Diese Punkte sind Beobachtungen und Empfehlungen — keine festen Vorgaben:
 | `wissen/iot-automation/2024-self-healing-iot-isolation-forest.md` | Paper: Self-Healing IoT |
 | `wissen/datenanalyse/2025-anomaly-detection-comparison-sensor-data.md` | Paper: Isolation Forest vs. LSTM |
 | `wissen/datenanalyse/2025-hybrid-lstm-autoencoder-iot-anomaly.md` | Paper: Hybrid-Pipeline |
+| `wissen/datenanalyse/forschungsbericht-ki-monitoring-iot-2026-03.md` | **NEU:** KI-Monitoring Synthese (16 Papers, 11 Luecken) |
+| `wissen/iot-automation/iot-alert-email-notification-architektur-2026.md` | **NEU:** Alert UX + Email-Architektur |
+| `wissen/iot-automation/diagnostics-hub-plugin-system-hil-testing-recherche-2026.md` | **NEU:** Diagnostics + Plugin + HIL |
+| `wissen/iot-automation/unified-alert-center-ux-best-practices.md` | Alert Center UX Best Practices |
+| `wissen/iot-automation/alarm-fatigue-empirische-benchmarks-monitoring.md` | ISA-18.2 Benchmarks |
+| `wissen/iot-automation/grafana-alerting-webhook-provisioning.md` | Grafana Webhook Provisioning |
+| `arbeitsbereiche/automation-one/roadmap-phase4-system-integration.md` | **NEU:** Phase 4 Detaillierte Roadmap (Code-Snippets) |
+| `arbeitsbereiche/automation-one/auftrag-forschung-ki-monitoring-queries.md` | **NEU:** 5 Suchqueries fuer /forschung |

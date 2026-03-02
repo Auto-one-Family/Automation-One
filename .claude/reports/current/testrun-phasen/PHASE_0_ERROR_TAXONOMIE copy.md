@@ -10,7 +10,7 @@
 
 ## Ziel ✅ ERREICHT
 
-Einheitliches Fehlersystem das BEIDE Spuren (Wokwi + Produktion) nutzen. Grafana-Alert-Regeln von 8 auf 26 erweitert. KI-Error-Analyse Stufe 1 (rule-based) konfiguriert. Handler-Integration komplett.
+Einheitliches Fehlersystem das BEIDE Spuren (Wokwi + Produktion) nutzen. Grafana-Alert-Regeln von 8 auf **32 erweitert** (Ziel 28+ uebertroffen). KI-Error-Analyse Stufe 1 (rule-based) konfiguriert. Handler-Integration komplett (18 aktive Call-Sites).
 
 ---
 
@@ -131,13 +131,14 @@ grep "600" "El Servador/god_kaiser_server/src/core/error_codes.py"
 ### ~~Ist-Zustand~~ Aktueller Stand
 
 **Datei:** `docker/grafana/provisioning/alerting/alert-rules.yml`
-**~~Aktuell 8 Regeln~~ Jetzt 26 Regeln in 6 Gruppen:**
-- 5 Critical: server-down, mqtt-disconnected, database-down, loki-down, promtail-down
+**~~Aktuell 8 Regeln~~ ~~26 Regeln~~ Jetzt **32 Regeln** in **7 Gruppen** (verifiziert 2026-03-02):**
+- 6 Critical: server-down, mqtt-disconnected, database-down, loki-down, alloy-down, prometheus-down
 - 3 Warning: high-memory, esp-devices-offline, high-mqtt-error-rate
-- **3 Infrastructure: db-query-slow, db-connections-high, cadvisor-down**
-- **5 Sensor: temp-range, ph-range, humidity-range, ec-range, sensor-stale**
-- **4 Device: heartbeat-gap, esp-boot-loop, esp-error-cascade, esp-safe-mode**
+- **6 Infrastructure: db-query-slow, db-connections-high, cadvisor-down, container-restart-loop, database-size-high, loki-ingestion-failure**
+- **7 Sensor/ESP: temp-range, ph-range, humidity-range, ec-range, sensor-stale, heartbeat-gap, esp-boot-loop, esp-error-cascade, esp-safe-mode**
 - **6 Application: ws-disconnects, mqtt-backlog, api-errors, logic-errors, actuator-timeout, safety-triggered**
+- **2 MQTT Broker: mqtt-broker-no-clients, mqtt-broker-messages-stored**
+- 2 Reserved (future expansion)
 
 **Pattern (MUSS beibehalten werden):**
 ```yaml
@@ -486,4 +487,4 @@ Beide Phasen referenzieren die in Phase 0 definierten Error-Codes und Alert-Rege
 - [ ] ESP32↔Python Error-Code Sync-Luecken schliessen (DS18B20 1060-1063, I2C 1015-1018)
 
 ### Zusammenfassung (aktualisiert 2026-02-23)
-~~Plan ist strukturell solide. Hauptblocker: 15 fehlende Metriken.~~ **Phase 0 ist VOLLSTAENDIG ABGESCHLOSSEN.** Alle Metriken definiert, alle Handler integriert, 26 Alert-Regeln konfiguriert, Error-Taxonomie synchronisiert. **Einziger offener Punkt: Grafana-Deployment-Verifikation** (Reload nach alert-rules.yml Update).
+~~Plan ist strukturell solide. Hauptblocker: 15 fehlende Metriken.~~ **Phase 0 ist VOLLSTAENDIG ABGESCHLOSSEN.** Alle Metriken definiert (27+, 18 aktive Call-Sites), alle Handler integriert, **32 Alert-Regeln** konfiguriert (Ziel 28+ uebertroffen), Error-Taxonomie synchronisiert. **Einziger offener Punkt: Grafana-Deployment-Verifikation** (Reload nach alert-rules.yml Update).

@@ -5,7 +5,7 @@
 > **Nutzt (NEU):** [Phase 1](./PHASE_1_WOKWI_SIMULATION.md) Wokwi MCP fuer Anomalie-Validierung
 > **Nachfolger:** [Phase 4](./PHASE_4_INTEGRATION.md) (Integration + Closed-Loop)
 > **Master-Plan:** [00_MASTER_PLAN.md](./00_MASTER_PLAN.md) Abschnitt "PHASE 3" + "Agent-Driven Testing"
-> **Aktualisiert:** 2026-02-23 (Forschungs-Update: Knowledge Graph RCA, MQTT-Trace-Analyse, Causal Graphs, 8 neue Papers)
+> **Aktualisiert:** 2026-03-02 (Forschungs-Update: Self-Healing-Bridge, NetworkX fuer KG, APScheduler-Korrektur, Signal-Coverage-Luecke, 3 neue Recherchen integriert)
 
 ---
 
@@ -19,7 +19,7 @@ Automatisierte Fehlererkennung die im Hintergrund mitlaeuft — in beiden Spuren
 
 ### Voraussetzung
 
-- [Phase 0](./PHASE_0_ERROR_TAXONOMIE.md) Schritt 0.3 abgeschlossen: **26 Grafana-Alert-Regeln aktiv** (verifiziert 2026-02-23)
+- [Phase 0](./PHASE_0_ERROR_TAXONOMIE.md) Schritt 0.3 abgeschlossen: **32 Grafana-Alert-Regeln aktiv** (verifiziert 2026-03-02, Ziel 28+ uebertroffen)
 - Docker-Stack laeuft mit Monitoring-Profil
 
 ### Was Stufe 1 leistet
@@ -84,9 +84,10 @@ curl -X POST http://localhost:8000/api/v1/debug/simulate-error \
 
 | Datei | Status | Beschreibung |
 |-------|--------|-------------|
-| `El Servador/god_kaiser_server/src/services/ai_service.py` | **STUB** (1 Zeile) | "Phase 3 - PLANNED" |
-| `El Servador/god_kaiser_server/src/db/repositories/ai_repo.py` | **STUB** (2 Zeilen) | "Phase 2 - PLANNED" |
-| `El Servador/god_kaiser_server/src/db/models/ai_prediction.py` | **Zu pruefen** | DB-Model fuer Predictions |
+| `El Servador/god_kaiser_server/src/services/ai_service.py` | **STUB** (Docstring only) | "Phase 3 - PLANNED" |
+| `El Servador/god_kaiser_server/src/db/repositories/ai_repo.py` | **STUB** (Docstring only) | "Phase 2 - PLANNED" |
+| `El Servador/god_kaiser_server/src/db/models/ai.py` | **✅ VOLLSTAENDIG** (130 Zeilen) | AIPredictions: UUID PK, FK esp_devices, JSON-Felder, 4 Indizes |
+| `El Servador/god_kaiser_server/src/api/v1/ai.py` | **STUB** (Router definiert, 5 Endpoints geplant, 0 implementiert) | POST /recommendation, GET /predictions, POST approve/reject, POST send_batch |
 
 > **[VERIFY-PLAN] AI-Infrastruktur Korrektur:**
 > - `ai_prediction.py` existiert NICHT, aber `ai.py` EXISTIERT: `src/db/models/ai.py` mit Klasse `AIPredictions` (130 Zeilen, VOLLSTAENDIG implementiert!)
@@ -196,21 +197,70 @@ class AnomalyDetectionService:
 
 #### Schritt 3.2.4: Periodic Task fuer Anomalie-Erkennung
 
-**Integration in Server-Startup:**
+**Integration in Server-Startup (APScheduler-Pattern):**
+
+> **[VERIFY-PLAN] Korrektur:** Projekt nutzt APScheduler (`AsyncIOScheduler` in `core/scheduler.py`, 570 Zeilen), NICHT FastAPI `repeat_every`. Periodic Task MUSS als APScheduler-Job registriert werden.
 
 ```python
-# In main.py oder scheduler Setup:
-@repeat_every(seconds=300)  # Alle 5 Minuten
+# In core/scheduler.py — neuer Job registrieren:
+from src.services.ai_service import AnomalyDetectionService
+
 async def run_anomaly_detection():
     """Periodisch Anomalie-Erkennung auf aktuelle Sensordaten."""
-    # 1. Letzte 24h Sensordaten laden
+    # 1. Letzte 24h Sensordaten laden (sensor_repo.get_recent_data())
     # 2. Modell trainieren (oder Re-Use wenn < 1h alt)
     # 3. Letzte 5min Daten analysieren
-    # 4. Anomalien in ai_predictions schreiben
+    # 4. Anomalien in ai_predictions schreiben (ai_repo.create_prediction())
     # 5. Bei Anomalie: Audit-Log + ggf. Prometheus-Metrik
+
+# Registration in scheduler startup:
+scheduler.add_job(
+    run_anomaly_detection,
+    trigger="interval",
+    seconds=300,
+    id="anomaly_detection",
+    name="AI Anomaly Detection (Isolation Forest)",
+    replace_existing=True,
+    misfire_grace_time=60
+)
 ```
 
-#### Schritt 3.2.5: API-Endpoint fuer AI-Predictions
+#### Schritt 3.2.5b: Self-Healing-Bridge (IF → Circuit Breaker)
+
+> **Wissenschaftliche Basis:** Devi et al. (2024) — Isolation Forest Anomalie-Score als Trigger fuer automatische Recovery-Entscheidung
+
+**Konzept:** Isolation Forest Anomalie-Score → Circuit Breaker Trigger (~50 Zeilen Python)
+
+```python
+# In ai_service.py — Self-Healing Extension:
+from src.services.safety_service import CircuitBreakerService
+
+class SelfHealingBridge:
+    """Bruecke zwischen Anomalie-Erkennung und Safety-System.
+
+    Wenn Isolation Forest einen Anomalie-Score < -0.5 meldet (schwer anomal),
+    wird der Circuit Breaker fuer den betroffenen Sensor aktiviert.
+
+    Wissenschaftliche Basis: Devi et al. (2024) — Self-Healing IoT
+    """
+    ANOMALY_THRESHOLD = -0.5  # Schwere Anomalie
+
+    async def evaluate_and_act(
+        self, anomaly_result: AnomalyResult, cb_service: CircuitBreakerService
+    ) -> Optional[str]:
+        if anomaly_result.score < self.ANOMALY_THRESHOLD:
+            # Circuit Breaker aktivieren fuer betroffenen Sensor
+            await cb_service.trip(
+                sensor_id=anomaly_result.sensor_id,
+                reason=f"IF anomaly_score={anomaly_result.score:.3f}"
+            )
+            return "circuit_breaker_tripped"
+        return None
+```
+
+**WICHTIG:** Self-Healing ist eine Erweiterung NACH funktionierender Stufe 2. Nicht gleichzeitig implementieren.
+
+#### Schritt 3.2.6: API-Endpoint fuer AI-Predictions
 
 **Datei:** `El Servador/god_kaiser_server/src/api/v1/ai.py`
 
@@ -356,11 +406,32 @@ Kanten (kausale Beziehungen):
 └── DB_CONNECTION_LOST (5001) → CALIBRATION_INVALID (5201) [prevents]
 ```
 
+**Technologie-Empfehlung (Recherche-Ergebnis 2026-03):**
+
+> **NetworkX** (Python, in-memory Graph) ist ausreichend fuer AutomationOne (<50 Sensoren, <200 Error-Codes).
+> Keine externe Graph-DB (Neo4j, ArangoDB) noetig — wuerde Over-Engineering sein.
+> NetworkX ist bereits indirekt ueber scipy/scikit-learn verfuegbar (transitive Dependency).
+
+```python
+import networkx as nx
+
+# ESP32 Fehler-Knowledge-Graph aufbauen
+kg = nx.DiGraph()
+# Knoten: Error-Codes
+kg.add_node("WIFI_INIT_FAILED_3001", category="system", severity="critical")
+kg.add_node("MQTT_CONNECT_FAILED_3011", category="mqtt", severity="error")
+# Kausale Kanten
+kg.add_edge("WIFI_INIT_FAILED_3001", "MQTT_CONNECT_FAILED_3011", relation="causes", confidence=0.95)
+# Pfad-Abfrage fuer RCA
+path = nx.shortest_path(kg, source="WIFI_INIT_FAILED_3001", target="MQTT_CONNECT_FAILED_3011")
+```
+
 **Aufbau-Strategie:**
-1. **Statische Basis:** Error-Code-Referenz (`ERROR_CODES.md`) als Knoten importieren
+1. **Statische Basis:** Error-Code-Referenz (`ERROR_CODES.md`) als Knoten importieren → NetworkX DiGraph
 2. **Kausale Kanten:** Aus Audit-Log-Korrelationen und Wokwi Error-Injection-Ergebnissen ableiten
 3. **Dynamische Erweiterung:** LLM analysiert neue Fehler und schlaegt Kanten vor (LLMs-DCGRCA Ansatz)
 4. **Validierung:** Wokwi MCP fuer Kausal-Hypothesen-Tests (Error-Injection → beobachte Kaskade)
+5. **Persistenz:** NetworkX GraphML Export/Import — kein DB-Setup noetig
 
 ### Stufe 3c: LLM Root-Cause-Analyse (mit KG-Kontext)
 
@@ -464,7 +535,7 @@ Das auto-ops Plugin hat bereits:
 
 | # | Kriterium | Verifikation |
 |---|-----------|-------------|
-| 1 | 28+ Grafana-Alerts aktiv | Grafana API → count(rules) >= 28 |
+| 1 | ~~28+~~ **32 Grafana-Alerts aktiv** | ✅ Grafana API → 32 Rules (7 Gruppen, verifiziert 2026-03-02) |
 | 2 | Alerts feuern korrekt bei Out-of-Range | Manueller Test mit simulierten Daten |
 | 3 | LogQL-Pattern-Matching funktioniert | Loki-Query findet Server-Errors |
 
@@ -480,6 +551,29 @@ Das auto-ops Plugin hat bereits:
 
 ---
 
+## Signal-Coverage-Luecke (identifiziert in HW-Test 1)
+
+> **Erkenntnis aus Hardware-Test 1 (2026-02-26):** Nur normale Temperaturbereiche (~20-25°C) getestet.
+> Extremwerte, Grenzwerte und Sensor-Degradation wurden NICHT validiert.
+
+**Was fehlt fuer robuste Stufe 2 (Isolation Forest):**
+
+| Test-Bereich | Status HW-Test 1 | Benoetigt fuer IF |
+|-------------|-------------------|-------------------|
+| Normaler Temperaturbereich (20-25°C) | ✅ Getestet | Baseline-Daten |
+| Grenzwerte (nahe -40°C / +85°C) | ❌ Nicht getestet | Schwellen-Kalibrierung |
+| Schnelle Temperaturwechsel (>5°C/min) | ❌ Nicht getestet | Spike-Erkennung |
+| Sensor-Ausfall (I2C NACK) | ✅ Getestet (F1-F9) | Anomalie-Pattern |
+| Multi-Sensor-Korrelation | ❌ Nicht getestet | Korrelations-Checks |
+
+**Empfehlung:** HW-Test 2 (Phase 4E) MUSS Signal-Coverage explizit erweitern:
+- Haartrockner fuer Temperatur-Spikes (>50°C)
+- Kuehlakku fuer Tieftemperatur (<10°C)
+- Sensor absichtlich abklemmen waehrend Datenerfassung
+- Zwei Sensoren am selben ESP fuer Korrelations-Validierung
+
+---
+
 ## Uebergang zu Phase 4
 
 Phase 3 liefert:
@@ -490,11 +584,14 @@ Phase 3 liefert:
 - **NEU: ESP32 Fehler-Knowledge-Graph** (Stufe 3b) — kausale Beziehungen zwischen Error-Codes
 - **NEU: LLM-RCA mit KG-Kontext** (Stufe 3c) — Claude API fuer Root-Cause-Analyse
 
-Dies wird in **[Phase 4: Integration](./PHASE_4_INTEGRATION.md)** verwendet fuer:
-- Error-Analyse-Dashboard: Anomalien + Alerts + **Kausal-Graphen** in einem Dashboard
-- Feedback-Loop: Anomalie erkannt → **Wokwi MCP validiert Hypothese** → Wokwi-Szenario erstellt
-- Cross-Layer-Korrelation: meta-analyst verbindet Alerts mit Anomalien **und KG-Pfaden**
-- **NEU: Closed-Loop Agent-Architektur** nutzt RCA-Ergebnisse fuer automatische Test-Verfeinerung
+Dies wird in **[Phase 4: Integration](./PHASE_4_INTEGRATION.md)** (5 Subphasen, ~80-110h) verwendet fuer:
+- **Phase 4A:** Notification-Stack — Anomalie-Erkennung triggert Email/WebSocket/Webhook via NotificationRouter
+- **Phase 4B:** Unified Alert Center — Anomalien + Alerts + **Kausal-Graphen** in ISA-18.2-konformem Dashboard
+- **Phase 4C:** Plugin-System — autoops_trigger als Logic Engine Action, Plugin-Status im Frontend
+- **Phase 4D:** Diagnostics Hub — SystemMonitorView mit IF-Ergebnissen, LLM-RCA-Interface, Loki-Integration
+- **Phase 4E:** Hardware-Test 2 — Signal-Coverage-Erweiterung, volles Monitoring, automatische Dokumentation
+- **Feedback-Loop:** Anomalie erkannt → **Wokwi MCP validiert Hypothese** → Wokwi-Szenario erstellt
+- **Closed-Loop Agent-Architektur** nutzt RCA-Ergebnisse fuer automatische Test-Verfeinerung
 
 ---
 
@@ -509,8 +606,23 @@ Dies wird in **[Phase 4: Integration](./PHASE_4_INTEGRATION.md)** verwendet fuer
 | **TRAIL (2025)** | Formale Error-Taxonomie + Trace Reasoning | **Stufe 3a/3b:** Taxonomie-Integration |
 | **FVDebug (2025)** | For-and-Against Prompting, 61.2% F1 | **Stufe 3b:** Kausalgraph-Generierung |
 | **TraceCoder (2026)** | Multi-Agent Debugging, +34.43% Pass@1 | **Stufe 3c:** Multi-Agent-Analyse |
-| Fariha (2024) — AetherLog | KG-basierte Log-Analyse fuer Cloud-Systeme | **Stufe 3a:** Log-Abstraktion Referenz |
-| LEAT (2025) | LLM-Enhanced Anomaly Transformer | **Stufe 2/3:** Hybrid-Strategie |
+| Fariha (2024) — AetherLog | KG-basierte Log-Analyse fuer Cloud-Systeme, **F1=0.97** | **Stufe 3a:** Log-Abstraktion Referenz |
+| LEAT (2025) | LLM-Enhanced Anomaly Transformer, **Precision@1=0.891** | **Stufe 2/3:** Hybrid-Strategie |
+| **Pedroso et al. (2025)** | LLM + Bayesian Networks, **100% Anomalie-Erkennung** | **Stufe 3c:** Zero-Shot LLM-RCA, **89% Erstdiagnose-Praezision** |
+
+### Forschungsluecken (identifiziert 2026-03)
+
+> **Quelle:** `wissen/datenanalyse/forschungsbericht-ki-monitoring-iot-2026-03.md` — 11 Luecken, 4 Suchqueries
+
+| Luecke | Beschreibung | Relevanz fuer Phase 3 |
+|--------|-------------|----------------------|
+| **L1:** Transformer vs. IF fuer IoT-Sensoren | PatchTST, TimesNet vs. IF auf Temp/Feuchte/pH | MITTEL — Entscheidung Server vs. Jetson |
+| **L2:** TinyML auf ESP32 | IF als ONNX auf Mikrocontroller | NIEDRIG — Phase 5+ |
+| **L3:** Alert-Korrelation | Algorithmische Methoden statt ISA-18.2 Benchmark | KRITISCH — aber Phase 4B |
+| **L7:** MQTT-Trace + LLM | **Pionierfeld** — kein Paper existiert | HOCH — Bachelorarbeit-Potenzial |
+| **L8:** Fehler-KG fuer Embedded/IoT | Papers nur Cloud/Microservices | MITTEL — NetworkX-Ansatz reicht vorerst |
+
+**Empfohlene naechste `/forschung`-Session:** Queries A+B (KRITISCH fuer Phase 4), Query C (Validation IF). Siehe `arbeitsbereiche/automation-one/auftrag-forschung-ki-monitoring-queries.md`
 
 ---
 
@@ -577,4 +689,28 @@ Dies wird in **[Phase 4: Integration](./PHASE_4_INTEGRATION.md)** verwendet fuer
 - [ ] Alembic-Migration fuer ai_predictions Tabelle pruefen (Model existiert, Tabelle ggf. noch nicht)
 
 ### Zusammenfassung
-Plan ist konzeptionell stark, hat aber **8 Korrekturen** noetig. Wichtigste Erkenntnis: Das AI-Prediction DB-Model existiert bereits vollstaendig (`ai.py`) — Schritt 3.2.1 kann uebersprungen werden. Die uebrigen Probleme sind Pfad-Korrekturen und fehlende Dependencies. Scheduler muss APScheduler-Pattern folgen statt repeat_every.
+Plan ist konzeptionell stark, hat aber **8 Korrekturen** noetig. Wichtigste Erkenntnis: Das AI-Prediction DB-Model existiert bereits vollstaendig (`ai.py`, 130 Zeilen, UUID PK, 4 Indizes) — Schritt 3.2.1 kann uebersprungen werden. **AI-Router** existiert ebenfalls als Stub mit 5 geplanten Endpoints (POST /recommendation, GET /predictions, approve/reject, send_batch). Die uebrigen Probleme sind Pfad-Korrekturen und fehlende Dependencies (scikit-learn, numpy). Scheduler muss APScheduler-Pattern folgen statt repeat_every.
+
+**Aktualisierung 2026-03-02 — Codebase-Verifikation:**
+- Stufe 1 (Rule-based): ✅ AKTIV via 32 Grafana-Alerts (Ziel 28+ uebertroffen)
+- AI Model: ✅ Existiert (`src/db/models/ai.py`, AIPredictions, 130 Zeilen)
+- AI Router: STUB mit 5 geplanten Endpoints (`src/api/v1/ai.py`)
+- AI Service: STUB (nur Docstring)
+- AI Repo: STUB (nur Docstring)
+- Dependencies: scikit-learn + numpy NICHT in pyproject.toml
+- Scheduler: APScheduler vorhanden (570 Zeilen, voll implementiert) — ready fuer Periodic Task
+
+### Forschungs-Anreicherung (2026-03-02)
+
+**Neue Wissens-Dateien integriert:**
+- `wissen/datenanalyse/forschungsbericht-ki-monitoring-iot-2026-03.md` — 16 Papers Synthese, 11 Luecken
+- `wissen/iot-automation/iot-alert-email-notification-architektur-2026.md` — Alert UX, Email, ISA-18.2
+- `wissen/iot-automation/diagnostics-hub-plugin-system-hil-testing-recherche-2026.md` — Diagnostics, Plugins, HIL
+
+**Neue Erkenntnisse eingearbeitet:**
+- Self-Healing-Bridge (IF → Circuit Breaker) als Erweiterung fuer Stufe 2
+- NetworkX fuer Fehler-Knowledge-Graph (in-memory, kein Neo4j noetig)
+- APScheduler-Pattern korrigiert (statt repeat_every)
+- Signal-Coverage-Luecke aus HW-Test 1 dokumentiert
+- LLM Zero-Shot Root-Cause Precision@1=89% (Pedroso et al. 2025)
+- 5 Forschungsluecken mit Relevanz-Bewertung ergaenzt

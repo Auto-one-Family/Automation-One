@@ -1654,12 +1654,19 @@ curl -s "http://localhost:3100/loki/api/v1/query_range" \
   --data-urlencode 'query={compose_service="el-servador"}' \
   --data-urlencode 'limit=50'
 
+# Errors across all services (level normalized to uppercase since v4.7)
+curl -s "http://localhost:3100/loki/api/v1/query_range" \
+  --data-urlencode 'query={compose_service=~".+"} | level="ERROR"' \
+  --data-urlencode 'limit=50'
+
 # Verfuegbare Labels
 curl -s http://localhost:3100/loki/api/v1/labels
 
 # Verfuegbare Services (compose_service = Alloy-Target-Label)
 curl -s "http://localhost:3100/loki/api/v1/label/compose_service/values"
 ```
+
+**10 Debug-Queries:** `docs/debugging/logql-queries.md`
 
 ### 8.4 Loki-Labels
 
@@ -1670,6 +1677,8 @@ curl -s "http://localhost:3100/loki/api/v1/label/compose_service/values"
 | MQTT Broker | `mqtt-broker` | `automationone-mqtt` |
 | PostgreSQL | `postgres` | `automationone-postgres` |
 | ESP32 Serial Logger | `esp32-serial-logger` | `automationone-esp32-serial` |
+
+**Weitere Labels:** `level` (DEBUG/INFO/WARNING/ERROR/CRITICAL, alle Services uppercase), `container`, `compose_project` (auto-one), `stream` (stdout/stderr)
 
 ### 8.5 Prometheus-Metriken
 

@@ -1,7 +1,7 @@
 # Log-System - AutomationOne
 
-> **Version:** 4.6 | **Aktualisiert:** 2026-02-25
-> **Änderungen 4.6:** PostgreSQL logging_collector=off (kein Bind-Mount mehr), Level-Extraktion + Slow-Query Metadata in Alloy, ESP32 Regex-Fallback
+> **Version:** 4.7 | **Aktualisiert:** 2026-03-02
+> **Änderungen 4.7:** Level-Normalisierung (uppercase) für loki, mqtt-broker, el-frontend in Alloy. Drop-Filter für Loki query-stats (metrics.go, engine.go, roundtrip.go). Volumen 57→24 MB/Tag
 > **Zweck:** Vollständige Dokumentation aller Log-Quellen, Speicherorte und Capture-Methoden
 > **Änderungen 3.0:** Docker-basierte Log-Infrastruktur, neue Log-Verzeichnisse, PostgreSQL-Logging, .env-Auslagerung
 
@@ -871,7 +871,7 @@ mosquitto_sub -h localhost -t "kaiser/#" -v -C 10 -W 30 | ts '[%Y-%m-%d %H:%M:%S
 |-------|-------------|------|-----------------------------------|-------------------------------|---------|
 | **Server** (el-servador) | Ja | Ja (tail / docker logs / Loki) | Ja, `compose_service=el-servador` + level, logger | Ja (Regex-Parser, level/logger) | Zusätzlich Datei: `logs/server/god_kaiser.log` |
 | **Frontend** (el-frontend) | Ja | Ja (docker logs / Loki) | Ja, `compose_service=el-frontend` + level, component | Ja (JSON-Parser) | Nur stdout, kein Bind-Mount |
-| **MQTT-Broker** | Ja | Ja (docker logs / Loki) | Ja, `compose_service=mqtt-broker` | Teilweise (kein level-Extract) | Broker-Events; **MQTT-Payload** (kaiser/#) nicht in Loki, nur live z. B. `mosquitto_sub` / session.sh |
+| **MQTT-Broker** | Ja | Ja (docker logs / Loki) | Ja, `compose_service=mqtt-broker` + level | Ja (Regex + Level-Normalisierung uppercase) | Broker-Events; **MQTT-Payload** (kaiser/#) nicht in Loki, nur live z. B. `mosquitto_sub` / session.sh |
 | **PostgreSQL** | Ja | Ja (docker logs / Loki) | Ja, `compose_service=postgres` + level, query_duration_ms | Ja (Level-Extraktion, Slow-Query Metadata) | `logging_collector=off` → stderr → Docker → Alloy → Loki |
 | **ESP32 Serial** | Bedingt | Ja, wenn Pfad aktiv | Ja, wenn Profile `hardware` + Host-Bridge (ser2net/socat); `compose_service=esp32-serial-logger` + level, device_id, component | Ja (JSON-Parser) | Ohne Hardware-Bridge nur manuell: `logs/current/esp32_serial.log` |
 
@@ -927,6 +927,7 @@ curl -s "http://localhost:3100/loki/api/v1/label/compose_service/values"
 |-------|-------------|----------------|
 | `compose_service` | Docker Compose Service-Name (Primär für Queries, ROADMAP §1.1) | `el-servador`, `mqtt-broker`, `el-frontend`, `postgres`, `esp32-serial-logger` |
 | `container` | Container-Name | `automationone-server`, `automationone-mqtt`, `automationone-esp32-serial` |
+| `level` | Log-Level (alle Services normalisiert auf uppercase seit v4.7) | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
 | `service` | Wie compose_service (Alloy setzt beide) | `el-servador` |
 | `compose_project` | Compose-Projekt | `auto-one` |
 | `stream` | Log-Stream | `stdout`, `stderr` |
@@ -953,9 +954,10 @@ curl -s http://localhost:9090/api/v1/targets
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-25
-**Version:** 4.5
+**Letzte Aktualisierung:** 2026-03-02
+**Version:** 4.7
 **Changelog:**
+- 4.7: Level-Normalisierung: Alle 6 Alloy-Pipelines normalisieren zu uppercase (INFO/ERROR/WARNING/CRITICAL/DEBUG). Neue Level-Norm für loki (logfmt→uppercase), mqtt-broker (regex→uppercase), el-frontend (json→uppercase). 3 neue Drop-Filter für Loki query-stats (caller=metrics.go/engine.go/roundtrip.go). Log-Volumen 57→24 MB/Tag. `level` als Label in Labels-Tabelle dokumentiert
 - 4.6: Multi-Layer Logging Fix: PostgreSQL `logging_collector=off` (kein Bind-Mount `logs/postgres/` mehr, Logs via stderr → Docker → Alloy → Loki). Alloy-Pipeline: PG Level-Extraktion (LOG→INFO, FATAL/PANIC→CRITICAL), `query_duration_ms` Structured Metadata, ESP32 Regex-Fallback für Plain-Text-Logs. Pure ASGI RequestIdMiddleware (ContextVar-Fix). MQTT CID Thread-Propagation
 - 4.5: Alert-Quality Fix: Container Restart Loop nutzt `changes(container_start_time_seconds)` (cAdvisor hat kein `container_restart_count`). Container Disk Usage ersetzt durch Database Size High (`pg_database_size_bytes`). cAdvisor auf Docker Desktop hat kein `name`-Label — nur `id`-Pfade. 38/38 Alerts laden fehlerfrei
 - 4.4: Alerting erweitert auf 38 Rules (32 Prometheus + 6 Loki). Neue: Frontend Down (Loki), Container Restart Loop, Database Size High, Loki Ingestion Failure

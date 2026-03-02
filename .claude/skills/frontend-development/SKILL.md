@@ -990,6 +990,29 @@ Mock ESP erstellen (POST /v1/debug/mock-esp)
 
 ## 16. Lifecycle & Cleanup
 
+### keep-alive Pattern (AppShell)
+
+AppShell nutzt `keep-alive` fuer MonitorView, LogicView, CustomDashboardView. Bei Nutzung:
+
+1. `defineOptions({ name: 'ComponentName' })` setzen (muss mit `:include` Array matchen)
+2. `onActivated()` fuer Re-Init (z.B. GridStack, Breadcrumbs)
+3. `onDeactivated()` fuer Cleanup (z.B. Breadcrumb reset)
+4. `onMounted`/`onUnmounted` nur einmal beim ersten Mount/letzten Destroy
+
+```typescript
+defineOptions({ name: 'CustomDashboardView' })
+
+onActivated(() => {
+  // Re-init nach Tab-Wechsel (GridStack, Breadcrumb)
+  if (!grid) nextTick(() => initGrid())
+})
+
+onDeactivated(() => {
+  // Cleanup bei Tab-Wechsel (Breadcrumb reset)
+  dashStore.breadcrumb.dashboardName = ''
+})
+```
+
 ### App.vue
 
 ```typescript
@@ -1038,6 +1061,8 @@ cleanupWebSocket() {
 | Mock ESP nicht gefunden | Server neugestartet | Mock ESP neu erstellen |
 | Zone-Zuweisung fehlgeschlagen | ESP offline | Heartbeat triggern |
 | gpioConfig Import-Fehler | Namenskonflikt | Direkt importieren |
+| State-Verlust bei Tab-Wechsel | View nicht in keep-alive `:include` | `defineOptions({ name: 'ViewName' })` + Name in AppShell include-Array |
+| GridStack leer nach Tab-Rueckkehr | `onActivated` fehlt | Re-Init in `onActivated()`, Cleanup in `onDeactivated()` |
 
 ---
 
@@ -1081,8 +1106,22 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.13
-**Letzte Aktualisierung:** 2026-03-01
+**Version:** 9.15
+**Letzte Aktualisierung:** 2026-03-02
+
+### Aenderungen in v9.15
+
+- AppShell.vue: `keep-alive` Wrapper mit `:include="['MonitorView', 'LogicView', 'CustomDashboardView']"` — Views bleiben bei Tab-Wechsel erhalten
+- MonitorView.vue, LogicView.vue, CustomDashboardView.vue: `defineOptions({ name: 'ComponentName' })` fuer keep-alive Matching
+- CustomDashboardView.vue: `onActivated()` re-initialisiert GridStack + Breadcrumb, `onDeactivated()` raeumt Breadcrumb auf (keep-alive Lifecycle)
+- MonitorView.vue: DashboardOverviewCard mit horizontalen Chips, Collapse-Toggle (localStorage), Edit-Icons, "+"-Button
+- LogicView.vue: Layout umstrukturiert — Eigene Regeln OBEN (primaer), Vorlagen UNTEN (collapsible mit localStorage-State)
+- dashboard.store.ts: Per-Layout Debounce-Timer (`Map<string, ReturnType<typeof setTimeout>>`) statt globalem Timer — verhindert Datenverlust bei schnellem Layout-Wechsel
+- logic.store.ts: `execution_count` und `last_execution_success` werden bei WebSocket `logic_execution` Event aktualisiert
+- DashboardViewer.vue: `inset: 4px` aus `.grid-stack-item-content` entfernt (konsistent mit GridStack-Default margin)
+- InlineDashboardPanel.vue: ROW_HEIGHT 60 → 80px (synchron mit CustomDashboardView/DashboardViewer cellHeight), overflow `hidden` → `auto`, CSS hardcoded px → Design-Tokens
+- CSS-Konsistenz: 4 Widget-Dateien (ActuatorRuntimeWidget, ActuatorCardWidget, AlarmListWidget, MultiSensorWidget) — hardcoded `font-size`, `padding`, `gap`, `rgba()` durch `var(--text-xs)`, `var(--space-*)`, `var(--color-zone-*)` ersetzt
+- Section 16: keep-alive Pattern dokumentiert
 
 ### Aenderungen in v9.14
 

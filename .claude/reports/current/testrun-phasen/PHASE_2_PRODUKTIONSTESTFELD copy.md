@@ -4,7 +4,7 @@
 > **Parallel zu:** [Phase 1](./PHASE_1_WOKWI_SIMULATION.md) ✅ abgeschlossen
 > **Nachfolger:** [Phase 3](./PHASE_3_KI_ERROR_ANALYSE.md) (Sensordaten muessen fliessen), [Phase 4](./PHASE_4_INTEGRATION.md)
 > **Master-Plan:** [00_MASTER_PLAN.md](./00_MASTER_PLAN.md) Abschnitt "PHASE 2"
-> **Aktualisiert:** 2026-02-23 (Forschungs-Update: Wokwi MCP Debugging-Referenz, Frontend verifiziert, Logging ergaenzt)
+> **Aktualisiert:** 2026-03-02 (Codebase-Verifikation: Sidebar Links ✅, 32 Alerts, Frontend-Monitoring-Inventar ergaenzt)
 
 ---
 
@@ -183,7 +183,7 @@ Frontend   → Dashboard zeigt ESP als "online" ✓
 
 ---
 
-## Schritt 2.3: Frontend-Luecken schliessen — ⚠️ CODE FERTIG, SIDEBAR FEHLT
+## Schritt 2.3: Frontend-Luecken schliessen — ✅ CODE + NAVIGATION FERTIG
 
 ### Prioritaet 1: Kalibrierungs-Wizard — ✅ IMPLEMENTIERT
 
@@ -199,7 +199,7 @@ Frontend   → Dashboard zeigt ESP als "online" ✓
 | calibration.ts (API) | ✅ Erstellt | `El Frontend/src/api/calibration.ts` |
 | CalibrationView.vue | ✅ Erstellt | `El Frontend/src/views/CalibrationView.vue` |
 | Route `/calibration` | ✅ In Router | `El Frontend/src/router/index.ts` |
-| **Sidebar-Link** | **❌ FEHLT** | `El Frontend/src/shared/design/layout/Sidebar.vue` |
+| **Sidebar-Link** | **✅ VORHANDEN** (seit 2026-02-24) | `El Frontend/src/shared/design/layout/Sidebar.vue` (Admin-Sektion, SlidersHorizontal Icon) |
 
 **Backend-Referenz (korrigiert):**
 - Endpoint: `POST /api/v1/sensors/process/calibrate` (in `sensor_processing.py`)
@@ -217,21 +217,47 @@ Frontend   → Dashboard zeigt ESP als "online" ✓
 |-------|--------|------|
 | TimeRangeSelector.vue | ✅ Erstellt | `El Frontend/src/components/charts/TimeRangeSelector.vue` |
 | SensorHistoryView.vue | ✅ Erstellt | `El Frontend/src/views/SensorHistoryView.vue` |
-| Route `/sensor-history` | ✅ In Router | `El Frontend/src/router/index.ts` |
-| **Sidebar-Link** | **❌ FEHLT** | `El Frontend/src/shared/design/layout/Sidebar.vue` |
+| Route `/sensor-history` | ✅ In Router | `El Frontend/src/router/index.ts` (redirected → `/monitor`) |
+| **Sidebar-Link** | **✅ VORHANDEN** (seit 2026-02-24) | `El Frontend/src/shared/design/layout/Sidebar.vue` (TrendingUp Icon) |
 
 **Bestehende Chart-Infrastruktur:**
 - `GaugeChart.vue`, `LiveLineChart.vue`, `StatusBarChart.vue`, `MultiSensorChart.vue` (in `components/charts/`)
 - Chart.js Dependencies: `chart.js ^4.5.0`, `chartjs-adapter-date-fns ^3.0.0`, `vue-chartjs ^5.3.2`, `chartjs-plugin-annotation`
 - API: `GET /api/v1/sensors/data?esp_id=X&start_time=...&end_time=...`
 
-### ❌ Verbleibende Frontend-Luecke: Sidebar-Navigation
+### ~~❌ Verbleibende Frontend-Luecke: Sidebar-Navigation~~ ✅ GELOEST (2026-02-24)
 
-Die Routes `/calibration` und `/sensor-history` existieren im Router, aber es fehlen die **Navigations-Links in der Sidebar**. Ohne diese sind die Views nur ueber direkte URL-Eingabe erreichbar.
+Beide Links sind in der Sidebar vorhanden:
+- `/sensor-history` + `TrendingUp` Icon → "Zeitreihen" (Hauptnavigation)
+- `/calibration` + `SlidersHorizontal` Icon → "Kalibrierung" (Admin-Sektion)
 
-**Fix noetig in:** `El Frontend/src/shared/design/layout/Sidebar.vue`
-**Agent:** `frontend-dev`
-**Aufwand:** ~5 Minuten
+**HINWEIS:** `/sensor-history` ist jetzt ein Redirect → `/monitor` (MonitorView hat die Zeitreihen-Funktionalitaet integriert)
+
+### Frontend-Monitoring-Inventar (verifiziert 2026-03-02)
+
+**Bereits existierende Monitoring-Infrastruktur im Frontend:**
+
+| Komponente | View/Pfad | Beschreibung |
+|-----------|-----------|-------------|
+| **MonitorView** | `/monitor` | 3-Level hierarchisches Monitoring: Zone→Subzone→Sensor, Sparklines, SlideOver-Detail |
+| **SystemMonitorView** | `/system-monitor` | 6-Tab Admin-Dashboard: Events, Health, Logs, DB, MQTT, Cleanup |
+| **CustomDashboardView** | `/editor` | Widget-basierter Dashboard-Builder mit Drag&Drop, 10+ Widget-Typen |
+| **SystemConfigView** | `/system-config` | Key-Value Config-Editor (Admin), JSON-Parsing, Secret-Masking |
+| **MaintenanceView** | `/maintenance` | Job-Scheduling, Data-Retention, Cleanup-Operationen |
+| **CalibrationView** | `/calibration` | 5-Phasen Wizard fuer Sensor-Kalibrierung |
+| **Grafana-Embedding** | `useGrafana()` | Panel- und Dashboard-Embedding per Composable |
+
+**Dashboard-Widget-Typen (10+):**
+LineChartWidget, HistoricalChartWidget, GaugeWidget, SensorCardWidget, ActuatorCardWidget,
+ActuatorRuntimeWidget, ESPHealthWidget, AlarmListWidget, MultiSensorWidget, WidgetConfigPanel
+
+**Chart-Typen (5):** GaugeChart, LiveLineChart, HistoricalChart, MultiSensorChart, StatusBarChart
+
+**WebSocket-Events (30+):** sensor_data, sensor_health, actuator_status, device_online/offline,
+error_event, mqtt_error, logic_execution, emergency_stop, esp_health, etc.
+
+**API-Clients (20):** auth, esp, sensors, actuators, zones, subzones, config, health, audit,
+dashboards, database, debug, logs, logic, calibration, loadtest, users, errors, etc.
 
 ### Prioritaet 3 (spaeter): Analyse-Profile Dashboard
 
@@ -468,8 +494,8 @@ Schritt 2.1-2.4 muessen abgeschlossen sein. Der Stack laeuft stabil mit echtem E
 | 2 | ESP32 verbunden und sendet Daten | Serial: "MQTT connected" + "Sensor data published" | 🔲 |
 | 3 | Sensordaten in DB | `SELECT count(*) FROM sensor_data` > 0 | 🔲 |
 | 4 | Live-Daten im Frontend sichtbar | Dashboard zeigt aktuelle Werte | 🔲 |
-| 5 | Kalibrierungs-Wizard funktioniert | `/calibration` Route erreichbar + Wizard laeuft | ✅ Code, ⚠️ Sidebar |
-| 6 | Zeitreihen-View zeigt historische Daten | `/sensor-history` Route + Chart mit Verlauf | ✅ Code, ⚠️ Sidebar |
+| 5 | Kalibrierungs-Wizard funktioniert | `/calibration` Route erreichbar + Wizard laeuft | ✅ Code + Sidebar |
+| 6 | Zeitreihen-View zeigt historische Daten | `/monitor` (MonitorView L3) + Chart mit Verlauf | ✅ Code + Sidebar |
 | 7 | Grafana-Alerts reagieren auf echte Daten | Mindestens 1 Alert korrekt gefeuert | 🔲 |
 | 8 | Mindestens 1 Chaos-Test bestanden | Server recovered nach Crash | 🔲 |
 
@@ -536,17 +562,17 @@ Dies ist die **Voraussetzung fuer [Phase 3: KI-Error-Analyse](./PHASE_3_KI_ERROR
 
 **Noch offen:**
 - `adminer` existiert NICHT in docker-compose.yml → aus Tabelle als "nicht definiert" markiert
-- Sidebar-Links fuer `/calibration` und `/sensor-history` fehlen in `Sidebar.vue`
+- ~~Sidebar-Links fuer `/calibration` und `/sensor-history` fehlen in `Sidebar.vue`~~ ✅ Seit 2026-02-24
 - Chaos-Test 4: `tc/netem` nicht in Alpine-Images installiert
 - `docker pause` hook-blocked → User muss manuell ausfuehren
 
 ### Verbleibende Vorbedingungen
-- [x] Phase 0 abgeschlossen (Grafana-Alerts + Metriken + Handler) ✅
-- [ ] Sidebar-Links hinzufuegen (frontend-dev, ~5 Min)
+- [x] Phase 0 abgeschlossen (32 Grafana-Alerts + 27+ Metriken + Handler) ✅
+- [x] Sidebar-Links vorhanden ✅ (seit 2026-02-24)
 - [ ] Docker-Stack deployen und Health verifizieren
 - [ ] ESP32-Hardware verfuegbar und im selben Netzwerk
 - [ ] Serial-Capture einrichten (PowerShell, NICHT Git Bash)
 - [ ] E2E Datenpfad verifizieren (ESP → MQTT → Server → DB → Frontend)
 
 ### Zusammenfassung
-Der **gesamte Code fuer Phase 2 ist fertig** — Kalibrierungs-Wizard, Zeitreihen-View, Routes, 26 Grafana-Alerts, 27 Prometheus-Metriken, Handler-Integration. Verbleibend sind **operationale Schritte**: Sidebar-Links ergaenzen, Stack deployen, ESP32 flashen, E2E-Pfad verifizieren. Chaos-Tests kommen nach stabiler Basis.
+Der **gesamte Code fuer Phase 2 ist fertig** — Kalibrierungs-Wizard, Zeitreihen-View (MonitorView L3), Routes, **32 Grafana-Alerts**, 27+ Prometheus-Metriken, Handler-Integration, Sidebar-Links. **Frontend-Monitoring ist umfangreicher als im Plan vorgesehen:** MonitorView (3-Level), SystemMonitorView (6-Tab), CustomDashboardView (Widget-Builder), 10+ Widget-Typen, 5 Chart-Komponenten, 30+ WS-Events, 20 API-Clients. Verbleibend sind **nur operationale Schritte**: Stack deployen, ESP32 flashen, E2E-Pfad verifizieren. Chaos-Tests kommen nach stabiler Basis.
