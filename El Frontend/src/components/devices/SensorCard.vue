@@ -9,7 +9,7 @@ import { computed, type Component } from 'vue'
 import { Settings, ChevronRight, WifiOff, Clock, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity } from 'lucide-vue-next'
 import type { SensorWithContext } from '@/composables/useZoneGrouping'
 import { qualityToStatus, getDataFreshness, formatRelativeTime } from '@/utils/formatters'
-import { getSensorLabel, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+import { getSensorLabel, getSensorUnit, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 
 /** Map SENSOR_TYPE_CONFIG icon names to Lucide components */
 const ICON_MAP: Record<string, Component> = {
@@ -57,6 +57,26 @@ const sensorIcon = computed(() => {
   return iconName ? (ICON_MAP[iconName] ?? Activity) : Activity
 })
 
+// Resolved unit: sensor.unit → SENSOR_TYPE_CONFIG fallback
+const resolvedUnit = computed(() => {
+  const raw = props.sensor.unit
+  if (raw && raw !== 'raw') return raw
+  const configUnit = getSensorUnit(props.sensor.sensor_type)
+  return configUnit !== 'raw' ? configUnit : ''
+})
+
+// Quality text label for accessibility (dual encoding: color + text)
+const qualityLabel = computed(() => {
+  const status = qualityToStatus(props.sensor.quality)
+  const labels: Record<string, string> = {
+    good: 'OK',
+    warning: 'Warnung',
+    alarm: 'Kritisch',
+    offline: 'Offline',
+  }
+  return labels[status] ?? ''
+})
+
 function formatValue(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
   return Number.isInteger(value) ? value.toString() : Number(value).toFixed(1)
@@ -101,11 +121,18 @@ function handleClick() {
       <div class="sensor-card__header">
         <component :is="sensorIcon" class="sensor-card__type-icon" />
         <span class="sensor-card__name">{{ displayName }}</span>
-        <span :class="['sensor-card__dot', statusClass]" />
+        <div class="sensor-card__quality">
+          <span :class="['sensor-card__dot', statusClass]" />
+          <span v-if="qualityLabel" :class="['sensor-card__quality-text', `sensor-card__quality-text--${qualityToStatus(sensor.quality)}`]">{{ qualityLabel }}</span>
+        </div>
       </div>
       <div class="sensor-card__value">
         <span class="sensor-card__number">{{ formatValue(sensor.raw_value) }}</span>
-        <span class="sensor-card__unit">{{ sensor.unit }}</span>
+        <span class="sensor-card__unit">{{ resolvedUnit }}</span>
+      </div>
+      <!-- Sparkline slot: parent can inject a mini chart -->
+      <div v-if="$slots.sparkline" class="sensor-card__sparkline">
+        <slot name="sparkline" />
       </div>
       <div class="sensor-card__footer">
         <span class="sensor-card__esp">{{ sensor.esp_id }}</span>
@@ -204,11 +231,35 @@ function handleClick() {
   flex: 1;
 }
 
+.sensor-card__quality {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .sensor-card__dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+.sensor-card__quality-text {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.sensor-card__quality-text--good { color: var(--color-success); }
+.sensor-card__quality-text--warning { color: var(--color-warning); }
+.sensor-card__quality-text--alarm { color: var(--color-error); }
+.sensor-card__quality-text--offline { color: var(--color-text-muted); }
+
+.sensor-card__sparkline {
+  height: 32px;
+  margin: 0 0 var(--space-1);
+  overflow: hidden;
 }
 
 .sensor-card__dot--good {

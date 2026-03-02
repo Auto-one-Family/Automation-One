@@ -30,6 +30,7 @@ import { LayoutDashboard, Download, CheckCircle2, XCircle, Clock, TrendingUp, Tr
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import TimeRangeSelector, { type TimePreset } from '@/components/charts/TimeRangeSelector.vue'
 import { Line } from 'vue-chartjs'
+import LiveLineChart from '@/components/charts/LiveLineChart.vue'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -76,7 +77,7 @@ const isZoneDetail = computed(() => !!selectedZoneId.value)
 const expandedSensorKey = ref<string | null>(null)
 
 // Sensor key helper (from sparkline cache composable)
-const { getSensorKey } = useSparklineCache()
+const { sparklineCache, getSensorKey } = useSparklineCache()
 
 // Zone grouping composable (for L2 subzone accordion)
 const { sensorsByZone, actuatorsByZone } = useZoneGrouping()
@@ -544,16 +545,20 @@ const detailChartOptions = computed(() => {
 
 function exportDetailCsv() {
   if (!detailReadings.value.length) return
+  const sensor = selectedDetailSensor.value
+  const unit = sensor?.unit || ''
   const header = 'timestamp,raw_value,processed_value,unit,quality'
-  const rows = detailReadings.value.map(r =>
-    `${r.timestamp},${r.raw_value},${r.processed_value ?? ''},${r.unit ?? ''},${r.quality}`
-  )
+  const rows = detailReadings.value.map(r => {
+    const processedVal = r.processed_value ?? r.raw_value
+    const rowUnit = r.unit || unit
+    return `${r.timestamp},${r.raw_value},${processedVal},${rowUnit},${r.quality}`
+  })
   const csv = [header, ...rows].join('\n')
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `sensor-data_${selectedDetailSensor.value?.espId}_gpio${selectedDetailSensor.value?.gpio}_${Date.now()}.csv`
+  a.download = `sensor-data_${sensor?.espId}_gpio${sensor?.gpio}_${Date.now()}.csv`
   a.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
@@ -635,6 +640,31 @@ function formatStatValue(value: number | null): string {
   if (value == null) return '—'
   const decimals = detailSensorTypeConfig.value?.decimals ?? 1
   return value.toFixed(decimals).replace('.', ',')
+}
+
+/** Find timestamp of min/max values from readings (client-side fallback) */
+const detailMinMaxTimestamps = computed(() => {
+  const readings = detailReadings.value
+  if (readings.length === 0) return { minAt: null as string | null, maxAt: null as string | null }
+  let minVal = Infinity
+  let maxVal = -Infinity
+  let minAt: string | null = null
+  let maxAt: string | null = null
+  for (const r of readings) {
+    const val = r.processed_value ?? r.raw_value
+    if (val < minVal) { minVal = val; minAt = r.timestamp }
+    if (val > maxVal) { maxVal = val; maxAt = r.timestamp }
+  }
+  return { minAt, maxAt }
+})
+
+/** Format a timestamp to short time (HH:mm) */
+function formatShortTime(ts: string | null): string {
+  if (!ts) return ''
+  try {
+    const d = new Date(ts)
+    return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+  } catch { return '' }
 }
 
 /** Sensor config link for Quick-Actions */
@@ -1180,7 +1210,7 @@ function handleClaimLayout(layoutId: string) {
               <span :class="['monitor-zone-tile__count', {
                 'monitor-zone-tile__count--ok': zone.activeActuators > 0,
               }]">
-                {{ zone.activeActuators }}/{{ zone.actuatorCount }} Aktoren
+                {{ zone.actuatorCount }} {{ zone.actuatorCount === 1 ? 'Aktor' : 'Aktoren' }}<template v-if="zone.activeActuators > 0"> · {{ zone.activeActuators }} aktiv</template>
               </span>
             </div>
             <div class="monitor-zone-tile__activity" :class="{ 'monitor-zone-tile__activity--stale': isZoneStale(zone.lastActivity) }">
@@ -1354,7 +1384,17 @@ function handleClaimLayout(layoutId: string) {
                   :sensor="sensor"
                   mode="monitor"
                   @click="toggleExpanded(getSensorKey(sensor.esp_id, sensor.gpio))"
-                />
+                >
+                  <template #sparkline>
+                    <LiveLineChart
+                      v-if="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio))?.length"
+                      :data="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio))!"
+                      compact
+                      height="32px"
+                      :max-data-points="30"
+                    />
+                  </template>
+                </SensorCard>
 
                 <!-- Expanded Chart Panel (simplified: 1h chart + 2 action buttons) -->
                 <Transition name="expand">
@@ -1481,7 +1521,12 @@ function handleClaimLayout(layoutId: string) {
         <div class="sensor-detail__hero">
           <div class="sensor-detail__hero-top">
             <span class="sensor-detail__sensor-type">{{ selectedDetailSensor.sensorType }}</span>
+            <span class="sensor-detail__hero-sep">·</span>
             <span class="sensor-detail__esp-name">{{ selectedDetailSensor.espId }}</span>
+            <template v-if="selectedZoneName">
+              <span class="sensor-detail__hero-sep">·</span>
+              <span class="sensor-detail__zone-name">{{ selectedZoneName }}</span>
+            </template>
           </div>
           <div class="sensor-detail__hero-value">
             <span v-if="detailLiveValue?.value != null" class="sensor-detail__live-value">
@@ -1573,11 +1618,13 @@ function handleClaimLayout(layoutId: string) {
               <span class="sensor-detail__stat-label">Min</span>
               <span class="sensor-detail__stat-value">{{ formatStatValue(detailStats.min_value) }}</span>
               <span class="sensor-detail__stat-unit">{{ selectedDetailSensor.unit }}</span>
+              <span v-if="detailMinMaxTimestamps.minAt" class="sensor-detail__stat-time">({{ formatShortTime(detailMinMaxTimestamps.minAt) }})</span>
             </div>
             <div class="sensor-detail__stat">
               <span class="sensor-detail__stat-label">Max</span>
               <span class="sensor-detail__stat-value">{{ formatStatValue(detailStats.max_value) }}</span>
               <span class="sensor-detail__stat-unit">{{ selectedDetailSensor.unit }}</span>
+              <span v-if="detailMinMaxTimestamps.maxAt" class="sensor-detail__stat-time">({{ formatShortTime(detailMinMaxTimestamps.maxAt) }})</span>
             </div>
             <div class="sensor-detail__stat">
               <span class="sensor-detail__stat-label">Ø</span>
@@ -2428,6 +2475,17 @@ function handleClaimLayout(layoutId: string) {
   font-family: var(--font-mono);
 }
 
+.sensor-detail__hero-sep {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.sensor-detail__zone-name {
+  font-size: var(--text-xs);
+  color: var(--color-iridescent-2);
+  font-weight: 500;
+}
+
 .sensor-detail__hero-value {
   display: flex;
   align-items: baseline;
@@ -2532,6 +2590,12 @@ function handleClaimLayout(layoutId: string) {
 .sensor-detail__stat-unit {
   font-size: 10px;
   color: var(--color-text-muted);
+}
+
+.sensor-detail__stat-time {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
 }
 
 /* Section 5: Quick-Actions (footer) */

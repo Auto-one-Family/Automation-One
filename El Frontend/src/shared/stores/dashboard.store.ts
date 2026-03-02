@@ -583,7 +583,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
         config: {
           espId: s.espId,
           gpio: s.gpio,
-          sensorId: s.espId ? `${s.espId}-gpio${s.gpio}` : undefined,
+          sensorId: s.espId ? `${s.espId}:${s.gpio}` : undefined,
           sensorType: s.sensorType,
           zoneId,
           title: s.name || config?.label || s.sensorType,
@@ -606,7 +606,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
         config: {
           espId: s.espId,
           gpio: s.gpio,
-          sensorId: s.espId ? `${s.espId}-gpio${s.gpio}` : undefined,
+          sensorId: s.espId ? `${s.espId}:${s.gpio}` : undefined,
           sensorType: s.sensorType,
           zoneId,
           title: s.name || config?.label || s.sensorType,
@@ -630,7 +630,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
         config: {
           espId: s.espId,
           gpio: s.gpio,
-          sensorId: s.espId ? `${s.espId}-gpio${s.gpio}` : undefined,
+          sensorId: s.espId ? `${s.espId}:${s.gpio}` : undefined,
           sensorType: s.sensorType,
           zoneId,
           title: s.name || config?.label || s.sensorType,
@@ -651,7 +651,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
         config: {
           espId: a.espId,
           gpio: a.gpio,
-          actuatorId: a.espId ? `${a.espId}-gpio${a.gpio}` : undefined,
+          actuatorId: a.espId ? `${a.espId}:${a.gpio}` : undefined,
           zoneId,
           title: a.name || a.actuatorType,
         },

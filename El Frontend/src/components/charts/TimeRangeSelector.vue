@@ -7,7 +7,7 @@
 
 import { ref, computed } from 'vue'
 
-export type TimePreset = '1h' | '6h' | '24h' | '7d' | 'custom'
+export type TimePreset = '1h' | '6h' | '12h' | '24h' | '7d' | 'custom'
 
 interface Props {
   modelValue?: TimePreset
@@ -25,6 +25,7 @@ const emit = defineEmits<{
 const presets: { key: TimePreset; label: string; ms: number }[] = [
   { key: '1h', label: '1 Std', ms: 60 * 60 * 1000 },
   { key: '6h', label: '6 Std', ms: 6 * 60 * 60 * 1000 },
+  { key: '12h', label: '12 Std', ms: 12 * 60 * 60 * 1000 },
   { key: '24h', label: '24 Std', ms: 24 * 60 * 60 * 1000 },
   { key: '7d', label: '7 Tage', ms: 7 * 24 * 60 * 60 * 1000 },
 ]
