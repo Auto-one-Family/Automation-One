@@ -30,6 +30,7 @@ const dashStore = useDashboardStore()
 
 const { createWidgetElement, mountWidgetToElement, cleanupAllWidgets, widgetComponentMap } = useDashboardWidgets({
   showConfigButton: false,
+  showWidgetHeader: false,
 })
 
 /** Row height in pixels — synchronized with CustomDashboardView/DashboardViewer cellHeight */
@@ -86,13 +87,18 @@ function mountWidgets() {
         continue
       }
 
-      const mountId = `inline-${props.layoutId}-${w.id}`
-      const container = document.getElementById(mountId)
+      const containerId = `inline-${props.layoutId}-${w.id}`
+      const container = document.getElementById(containerId)
       if (!container) continue
 
-      const el = createWidgetElement(w.type, w.config?.title || '', w.id, mountId)
+      // Clear previous DOM to prevent element accumulation on re-mount
+      container.innerHTML = ''
+
+      // Use distinct mount ID to avoid duplicate IDs (container already has containerId)
+      const vmMountId = `vm-${containerId}`
+      const el = createWidgetElement(w.type, w.config?.title || '', w.id, vmMountId)
       container.appendChild(el)
-      mountWidgetToElement(w.id, mountId, w.type, w.config || {})
+      mountWidgetToElement(w.id, vmMountId, w.type, w.config || {})
     }
   })
 }
@@ -204,7 +210,20 @@ onUnmounted(() => {
 .inline-dashboard__mount {
   width: 100%;
   height: 100%;
-  overflow: auto;
+  overflow: hidden;
+}
+
+/* Widget shell fills mount container — no outer header, direct widget content */
+.inline-dashboard__mount :deep(.dashboard-widget) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.inline-dashboard__mount :deep(.dashboard-widget__vue-mount) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .inline-dashboard__unknown {

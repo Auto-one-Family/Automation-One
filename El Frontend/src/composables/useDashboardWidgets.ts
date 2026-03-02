@@ -45,6 +45,9 @@ export interface WidgetTypeMeta {
 export interface UseDashboardWidgetsOptions {
   /** Show gear (config) button on widget headers. Default: true */
   showConfigButton?: boolean
+  /** Show outer widget header (title + type badge). Default: true.
+   *  Set to false for inline/read-only panels where widgets provide their own headers. */
+  showWidgetHeader?: boolean
   /** Called when gear button is clicked */
   onConfigClick?: (widgetId: string, widgetType: string) => void
   /** Called when widget emits onUpdate:config */
@@ -116,6 +119,7 @@ const GEAR_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
 export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): UseDashboardWidgetsReturn {
   const {
     showConfigButton = true,
+    showWidgetHeader = true,
     onConfigClick,
     onConfigUpdate,
   } = options
@@ -141,33 +145,36 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
     container.dataset.type = type
     container.dataset.widgetId = widgetId
 
-    const header = document.createElement('div')
-    header.className = 'dashboard-widget__header'
+    // Outer header: skip for inline/read-only panels (widgets provide their own headers)
+    if (showWidgetHeader) {
+      const header = document.createElement('div')
+      header.className = 'dashboard-widget__header'
 
-    const titleEl = document.createElement('span')
-    titleEl.className = 'dashboard-widget__title'
-    titleEl.textContent = title || label
+      const titleEl = document.createElement('span')
+      titleEl.className = 'dashboard-widget__title'
+      titleEl.textContent = title || label
 
-    const typeEl = document.createElement('span')
-    typeEl.className = 'dashboard-widget__type'
-    typeEl.textContent = type
+      const typeEl = document.createElement('span')
+      typeEl.className = 'dashboard-widget__type'
+      typeEl.textContent = type
 
-    header.append(titleEl, typeEl)
+      header.append(titleEl, typeEl)
 
-    // Gear icon for widget configuration (only when showConfigButton is true)
-    if (showConfigButton && onConfigClick) {
-      const gearBtn = document.createElement('button')
-      gearBtn.className = 'dashboard-widget__gear-btn'
-      gearBtn.title = 'Konfigurieren'
-      gearBtn.innerHTML = GEAR_SVG
-      gearBtn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        onConfigClick(widgetId, type)
-      })
-      header.appendChild(gearBtn)
+      // Gear icon for widget configuration (only when showConfigButton is true)
+      if (showConfigButton && onConfigClick) {
+        const gearBtn = document.createElement('button')
+        gearBtn.className = 'dashboard-widget__gear-btn'
+        gearBtn.title = 'Konfigurieren'
+        gearBtn.innerHTML = GEAR_SVG
+        gearBtn.addEventListener('click', (e) => {
+          e.stopPropagation()
+          onConfigClick(widgetId, type)
+        })
+        header.appendChild(gearBtn)
+      }
+
+      container.appendChild(header)
     }
-
-    container.appendChild(header)
 
     if (hasVueComponent) {
       const mountDiv = document.createElement('div')
