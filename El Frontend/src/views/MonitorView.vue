@@ -1,4 +1,6 @@
 <script setup lang="ts">
+defineOptions({ name: 'MonitorView' })
+
 /**
  * MonitorView — Sensor & Actuator Live Monitoring
  *
@@ -24,7 +26,7 @@ import { getESPStatus } from '@/composables/useESPStatus'
 import { formatRelativeTime, qualityToStatus, DATA_STALE_THRESHOLD_S, ZONE_STALE_THRESHOLD_MS } from '@/utils/formatters'
 import { sensorsApi } from '@/api/sensors'
 import type { SensorReading, SensorStats } from '@/types'
-import { LayoutDashboard, Download, CheckCircle2, XCircle, Clock, TrendingUp, TrendingDown, Minus } from 'lucide-vue-next'
+import { LayoutDashboard, Download, CheckCircle2, XCircle, Clock, TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp, Pencil, Plus as PlusIcon } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import TimeRangeSelector, { type TimePreset } from '@/components/charts/TimeRangeSelector.vue'
 import { Line } from 'vue-chartjs'
@@ -856,6 +858,14 @@ const systemSummary = computed(() => {
 /** Cross-zone dashboards: max visible on L1 */
 const MAX_CROSS_ZONE_VISIBLE = 4
 const showAllCrossZone = ref(false)
+const dashboardsCollapsed = ref(
+  localStorage.getItem('monitor-dashboards-collapsed') === 'true'
+)
+
+function toggleDashboardsCollapsed() {
+  dashboardsCollapsed.value = !dashboardsCollapsed.value
+  localStorage.setItem('monitor-dashboards-collapsed', String(dashboardsCollapsed.value))
+}
 
 const visibleCrossZoneDashboards = computed(() => {
   const all = dashStore.crossZoneDashboards
@@ -1181,33 +1191,50 @@ function handleClaimLayout(layoutId: string) {
         </div>
       </div>
 
-      <!-- Cross-Zone Dashboards -->
-      <section v-if="dashStore.crossZoneDashboards.length > 0" class="monitor-dashboards">
-        <h3 class="monitor-section__title">Cross-Zone Dashboards</h3>
-        <div class="monitor-dashboard-links">
-          <router-link
-            v-for="dash in visibleCrossZoneDashboards"
-            :key="dash.id"
-            :to="{ name: 'monitor-dashboard', params: { dashboardId: dash.id } }"
-            class="monitor-dashboard-link"
-          >
+      <!-- Dashboard Overview Card (compact, horizontal chips) -->
+      <section v-if="dashStore.crossZoneDashboards.length > 0" class="monitor-dashboard-card">
+        <div class="monitor-dashboard-card__header">
+          <button class="monitor-dashboard-card__toggle" @click="toggleDashboardsCollapsed">
+            <component :is="dashboardsCollapsed ? ChevronDown : ChevronUp" class="w-4 h-4" />
             <LayoutDashboard class="w-4 h-4" style="color: var(--color-iridescent-2)" />
-            <div class="monitor-dashboard-link__info">
-              <span class="monitor-dashboard-link__name">{{ dash.name }}</span>
-              <span class="monitor-dashboard-link__meta">
-                {{ dash.widgets.length }} Widgets
-                <span class="monitor-dashboard-link__updated">{{ formatRelativeTime(dash.updatedAt) }}</span>
-              </span>
-            </div>
+            <span class="monitor-dashboard-card__title">
+              Dashboards ({{ dashStore.crossZoneDashboards.length }})
+            </span>
+          </button>
+          <router-link :to="{ name: 'editor' }" class="monitor-dashboard-card__add" title="Neues Dashboard erstellen">
+            <PlusIcon class="w-3.5 h-3.5" />
           </router-link>
         </div>
-        <button
-          v-if="dashStore.crossZoneDashboards.length > MAX_CROSS_ZONE_VISIBLE && !showAllCrossZone"
-          class="monitor-dashboards__show-all"
-          @click.stop="showAllCrossZone = true"
-        >
-          Alle {{ dashStore.crossZoneDashboards.length }} Dashboards anzeigen
-        </button>
+        <div v-show="!dashboardsCollapsed" class="monitor-dashboard-card__chips">
+          <div
+            v-for="dash in visibleCrossZoneDashboards"
+            :key="dash.id"
+            class="monitor-dashboard-chip"
+          >
+            <router-link
+              :to="{ name: 'monitor-dashboard', params: { dashboardId: dash.id } }"
+              class="monitor-dashboard-chip__link"
+            >
+              <span class="monitor-dashboard-chip__name">{{ dash.name }}</span>
+              <span class="monitor-dashboard-chip__meta">{{ dash.widgets.length }} Widgets</span>
+            </router-link>
+            <router-link
+              :to="{ name: 'editor-dashboard', params: { dashboardId: dash.serverId || dash.id } }"
+              class="monitor-dashboard-chip__edit"
+              title="Im Editor bearbeiten"
+              @click.stop
+            >
+              <Pencil class="w-3 h-3" />
+            </router-link>
+          </div>
+          <button
+            v-if="dashStore.crossZoneDashboards.length > MAX_CROSS_ZONE_VISIBLE && !showAllCrossZone"
+            class="monitor-dashboard-chip monitor-dashboard-chip--more"
+            @click.stop="showAllCrossZone = true"
+          >
+            +{{ dashStore.crossZoneDashboards.length - MAX_CROSS_ZONE_VISIBLE }} weitere
+          </button>
+        </div>
       </section>
 
       <!-- Logic Rules Section (placeholder — implementation in auftrag-logic-rules-live-monitoring-integration.md) -->
@@ -2103,12 +2130,131 @@ function handleClaimLayout(layoutId: string) {
    DASHBOARD LINKS
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.monitor-dashboards {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+/* Dashboard Overview Card (compact, collapsible) */
+.monitor-dashboard-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
+.monitor-dashboard-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.monitor-dashboard-card__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0;
+  font-size: var(--text-sm);
+}
+
+.monitor-dashboard-card__title {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.monitor-dashboard-card__add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  transition: all var(--transition-fast);
+}
+
+.monitor-dashboard-card__add:hover {
+  background: var(--color-bg-quaternary);
+  color: var(--color-iridescent-2);
+}
+
+.monitor-dashboard-card__chips {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-3);
+}
+
+.monitor-dashboard-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  overflow: hidden;
+}
+
+.monitor-dashboard-chip:hover {
+  border-color: var(--color-iridescent-2);
+}
+
+.monitor-dashboard-chip__link {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  text-decoration: none;
+  color: inherit;
+}
+
+.monitor-dashboard-chip__name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+.monitor-dashboard-chip__meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.monitor-dashboard-chip__edit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2);
+  color: var(--color-text-muted);
+  border-left: 1px solid var(--glass-border);
+  transition: all var(--transition-fast);
+  align-self: stretch;
+}
+
+.monitor-dashboard-chip__edit:hover {
+  color: var(--color-iridescent-2);
+  background: var(--color-bg-quaternary);
+}
+
+.monitor-dashboard-chip--more {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-accent-bright);
+  cursor: pointer;
+  border-style: dashed;
+}
+
+.monitor-dashboard-chip--more:hover {
+  background: rgba(59, 130, 246, 0.06);
+}
+
+/* Legacy dashboard link styles (still used in Zone L2) */
 .monitor-dashboard-links {
   display: flex;
   gap: var(--space-3);
@@ -2152,34 +2298,6 @@ function handleClaimLayout(layoutId: string) {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.monitor-dashboard-link__updated {
-  color: var(--color-text-muted);
-  font-size: 10px;
-}
-
-.monitor-dashboard-link__updated::before {
-  content: '\00b7';
-  margin-right: var(--space-1);
-}
-
-.monitor-dashboards__show-all {
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--color-accent-bright);
-  background: transparent;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  align-self: flex-start;
-}
-
-.monitor-dashboards__show-all:hover {
-  border-color: var(--color-accent);
-  background: rgba(59, 130, 246, 0.06);
 }
 
 .monitor-dashboard-link__auto {
