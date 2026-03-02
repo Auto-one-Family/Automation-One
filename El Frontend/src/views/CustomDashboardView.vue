@@ -1,4 +1,6 @@
 <script setup lang="ts">
+defineOptions({ name: 'CustomDashboardView' })
+
 /**
  * CustomDashboardView — Dashboard Builder with GridStack.js
  *
@@ -12,7 +14,7 @@
  * - Multiple named layouts
  */
 
-import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, computed } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { useRoute } from 'vue-router'
 import { GridStack, type GridItemHTMLElement, type GridStackNode } from 'gridstack'
@@ -270,6 +272,24 @@ onUnmounted(() => {
   }
 
   // Clear breadcrumb
+  dashStore.breadcrumb.dashboardName = ''
+})
+
+// keep-alive lifecycle: Preserve GridStack state across tab switches
+onActivated(() => {
+  // Re-init grid if it was destroyed during deactivation
+  if (!grid) {
+    nextTick(() => initGrid())
+  }
+  // Restore breadcrumb
+  const layout = dashStore.activeLayout
+  if (layout) {
+    dashStore.breadcrumb.dashboardName = layout.name
+  }
+})
+
+onDeactivated(() => {
+  // Clear breadcrumb while hidden (other views may set their own)
   dashStore.breadcrumb.dashboardName = ''
 })
 

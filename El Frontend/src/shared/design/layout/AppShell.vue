@@ -87,7 +87,11 @@ onUnmounted(() => {
 
       <!-- Page Content — scrollable -->
       <main class="shell__content">
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <keep-alive :include="['MonitorView', 'LogicView', 'CustomDashboardView']" :max="5">
+            <component :is="Component" />
+          </keep-alive>
+        </RouterView>
       </main>
     </div>
   </div>

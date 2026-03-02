@@ -372,15 +372,17 @@ export const useDashboardStore = defineStore('dashboard', () => {
     }
   }
 
-  /** Debounce timer for server save (autoSave fires frequently) */
-  let _saveDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  /** Per-layout debounce timers (prevents losing edits when switching dashboards) */
+  const _saveDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const SAVE_DEBOUNCE_MS = 2000
 
-  /** Sync layout to server (fire-and-forget, debounced) */
+  /** Sync layout to server (fire-and-forget, debounced per layout) */
   function syncLayoutToServer(layoutId: string): void {
-    if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer)
+    const existing = _saveDebounceTimers.get(layoutId)
+    if (existing) clearTimeout(existing)
 
-    _saveDebounceTimer = setTimeout(async () => {
+    const timer = setTimeout(async () => {
+      _saveDebounceTimers.delete(layoutId)
       const layout = layouts.value.find(l => l.id === layoutId)
       if (!layout) return
 
@@ -425,6 +427,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
         logger.warn(`Failed to sync layout "${layout.name}" to server`, e)
       }
     }, SAVE_DEBOUNCE_MS)
+    _saveDebounceTimers.set(layoutId, timer)
   }
 
   /** Delete layout from server (fire-and-forget) */
