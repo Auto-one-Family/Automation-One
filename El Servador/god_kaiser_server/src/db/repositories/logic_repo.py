@@ -89,8 +89,8 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
                 conditions = trigger
             elif isinstance(trigger, dict):
                 # Check if it's a single condition or a compound condition
-                # Support both "sensor" (schema) and "sensor_threshold" (legacy) types
-                if trigger.get("type") in ("sensor_threshold", "sensor"):
+                # Support sensor, sensor_threshold (legacy), AND hysteresis types
+                if trigger.get("type") in ("sensor_threshold", "sensor", "hysteresis"):
                     conditions = [trigger]
                 elif trigger.get("logic") in ("AND", "OR"):
                     # Compound condition with multiple sub-conditions
@@ -100,17 +100,25 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
                     conditions = [trigger]
 
             # Check each condition for sensor match
-            # Support both "sensor" (schema) and "sensor_threshold" (legacy) types
+            # Support sensor_threshold, sensor (shorthand), AND hysteresis condition types
+            # All three reference a specific ESP + GPIO + optional sensor_type
             # Use case-insensitive comparison for sensor_type (ESP sends lowercase,
             # rules may store uppercase from UI input)
+            SENSOR_CONDITION_TYPES = ("sensor_threshold", "sensor", "hysteresis")
             sensor_type_lower = sensor_type.lower() if sensor_type else ""
             for condition in conditions:
-                if condition.get("type") in ("sensor_threshold", "sensor"):
+                if condition.get("type") in SENSOR_CONDITION_TYPES:
                     cond_sensor_type = (condition.get("sensor_type") or "").lower()
+                    cond_gpio = condition.get("gpio")
+                    # GPIO comparison with type coercion (int vs str safety)
+                    try:
+                        gpio_match = int(cond_gpio) == int(gpio) if cond_gpio is not None else False
+                    except (ValueError, TypeError):
+                        gpio_match = False
                     if (
                         condition.get("esp_id") == esp_id
-                        and condition.get("gpio") == gpio
-                        and cond_sensor_type == sensor_type_lower
+                        and gpio_match
+                        and (not cond_sensor_type or cond_sensor_type == sensor_type_lower)
                     ):
                         matching_rules.append(rule)
                         break  # Found match, no need to check other conditions for this rule
