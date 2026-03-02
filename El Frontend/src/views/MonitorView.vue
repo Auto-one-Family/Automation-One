@@ -752,6 +752,8 @@ interface ZoneKPI {
   lastActivity: string | null
   /** Computed zone health status */
   healthStatus: ZoneHealthStatus
+  /** Human-readable reason for the health status (empty for 'ok') */
+  healthReason: string
   /** Number of online ESP devices in this zone */
   onlineDevices: number
   /** Total ESP devices in this zone */
@@ -767,16 +769,25 @@ function getZoneHealthStatus(
   onlineDevices: number,
   totalDevices: number,
   emergencyStoppedCount: number,
-): ZoneHealthStatus {
+): { status: ZoneHealthStatus; reason: string } {
+  const offlineDevices = totalDevices - onlineDevices
   // Red: all devices offline OR no active sensors when sensors exist
-  if (totalDevices > 0 && onlineDevices === 0) return 'alarm'
-  if (sensorCount > 0 && activeSensors === 0) return 'alarm'
+  if (totalDevices > 0 && onlineDevices === 0) {
+    return { status: 'alarm', reason: `${totalDevices === 1 ? 'Gerät' : `Alle ${totalDevices} Geräte`} offline` }
+  }
+  if (sensorCount > 0 && activeSensors === 0) {
+    return { status: 'alarm', reason: 'Keine Sensoren aktiv' }
+  }
   // Yellow: some alarms OR some sensors offline OR emergency-stopped actuators
   // (matches ZonePlate warning logic in HardwareView for consistency)
-  if (alarmCount > 0 || (sensorCount > 0 && activeSensors < sensorCount)) return 'warning'
-  if (emergencyStoppedCount > 0) return 'warning'
+  const reasons: string[] = []
+  if (offlineDevices > 0) reasons.push(`${offlineDevices} ${offlineDevices === 1 ? 'Gerät' : 'Geräte'} offline`)
+  if (alarmCount > 0) reasons.push(`${alarmCount} ${alarmCount === 1 ? 'Sensor' : 'Sensoren'} fehlerhaft`)
+  else if (sensorCount > 0 && activeSensors < sensorCount) reasons.push(`${sensorCount - activeSensors} ${sensorCount - activeSensors === 1 ? 'Sensor' : 'Sensoren'} inaktiv`)
+  if (emergencyStoppedCount > 0) reasons.push(`${emergencyStoppedCount} Not-Aus aktiv`)
+  if (reasons.length > 0) return { status: 'warning', reason: reasons.join(', ') }
   // Green: everything OK
-  return 'ok'
+  return { status: 'ok', reason: '' }
 }
 
 const HEALTH_STATUS_CONFIG: Record<ZoneHealthStatus, { label: string; colorClass: string }> = {
@@ -841,7 +852,7 @@ const zoneKPIs = computed<ZoneKPI[]>(() => {
 
       const aggregation = aggregateZoneSensors(group.devices)
       const totalDevices = group.devices.length
-      const healthStatus = getZoneHealthStatus(alarmCount, activeSensors, sensorCount, onlineDevices, totalDevices, emergencyStoppedCount)
+      const health = getZoneHealthStatus(alarmCount, activeSensors, sensorCount, onlineDevices, totalDevices, emergencyStoppedCount)
 
       return {
         zoneId: group.zoneId,
@@ -853,7 +864,8 @@ const zoneKPIs = computed<ZoneKPI[]>(() => {
         alarmCount,
         aggregation,
         lastActivity: newestTimestamp,
-        healthStatus,
+        healthStatus: health.status,
+        healthReason: health.reason,
         onlineDevices,
         totalDevices,
       }
@@ -1178,6 +1190,10 @@ function handleClaimLayout(layoutId: string) {
               <XCircle v-else class="w-3.5 h-3.5" />
               <span>{{ HEALTH_STATUS_CONFIG[zone.healthStatus].label }}</span>
             </span>
+          </div>
+          <!-- Health Reason (only for warning/alarm) -->
+          <div v-if="zone.healthReason" class="monitor-zone-tile__reason">
+            {{ zone.healthReason }}
           </div>
 
           <!-- KPIs from aggregateZoneSensors -->
@@ -1906,6 +1922,23 @@ function handleClaimLayout(layoutId: string) {
 
 .zone-status--alarm {
   color: var(--color-error);
+}
+
+.monitor-zone-tile__reason {
+  font-size: var(--text-xs, 11px);
+  color: var(--color-text-muted);
+  margin-top: calc(-1 * var(--space-2));
+  padding: 0 var(--space-1);
+}
+
+.monitor-zone-tile--warning .monitor-zone-tile__reason {
+  color: var(--color-warning);
+  opacity: 0.85;
+}
+
+.monitor-zone-tile--alarm .monitor-zone-tile__reason {
+  color: var(--color-error);
+  opacity: 0.85;
 }
 
 /* KPIs */

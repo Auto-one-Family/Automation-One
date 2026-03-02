@@ -307,6 +307,8 @@ function loadWidgetsToGrid(widgets: any[]) {
 
   grid.removeAll(true)
 
+  const mountOps: Array<() => void> = []
+
   for (const w of widgets) {
     const mountId = `widget-mount-${w.id}`
     if (w.config) {
@@ -323,16 +325,19 @@ function loadWidgetsToGrid(widgets: any[]) {
       id: w.id,
     })
 
-    // Inject widget DOM and mount Vue component after GridStack has created the cell
-    nextTick(() => {
+    // Collect mount operations to run in a single nextTick
+    mountOps.push(() => {
       const contentDiv = itemEl.querySelector('.grid-stack-item-content')
       contentDiv?.appendChild(createWidgetElement(w.type, w.config?.title || w.type, w.id, mountId))
       mountWidgetComponent(w.id, mountId, w.type, w.config || {})
     })
   }
 
-  // Release guard after GridStack has finished processing
-  isLoadingWidgets = false
+  // Release guard AFTER all Vue mount operations complete
+  nextTick(() => {
+    for (const op of mountOps) op()
+    isLoadingWidgets = false
+  })
 }
 
 // =============================================================================
@@ -455,8 +460,11 @@ function handleCreateFromTemplate(templateId: string) {
 function switchLayout(layoutId: string) {
   dashStore.activeLayoutId = layoutId
   const layout = dashStore.layouts.find(l => l.id === layoutId)
-  if (layout && grid) {
-    loadWidgetsToGrid(layout.widgets)
+  if (layout) {
+    dashStore.breadcrumb.dashboardName = layout.name
+    if (grid) {
+      loadWidgetsToGrid(layout.widgets)
+    }
   }
   showLayoutDropdown.value = false
 }

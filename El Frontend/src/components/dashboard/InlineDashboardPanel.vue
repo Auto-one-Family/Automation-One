@@ -33,8 +33,11 @@ const { createWidgetElement, mountWidgetToElement, cleanupAllWidgets, widgetComp
 })
 
 /** Row height in pixels — synchronized with CustomDashboardView/DashboardViewer cellHeight */
-const ROW_HEIGHT = 80
-const rowHeightPx = `${ROW_HEIGHT}px`
+const ROW_HEIGHT_INLINE = 80
+const ROW_HEIGHT_SIDE = 120
+
+const isSidePanel = computed(() => props.mode === 'side-panel')
+const rowHeightPx = computed(() => `${isSidePanel.value ? ROW_HEIGHT_SIDE : ROW_HEIGHT_INLINE}px`)
 
 const layout = computed(() =>
   dashStore.getLayoutById(props.layoutId)
@@ -47,8 +50,20 @@ const editorRoute = computed(() => ({
   params: { dashboardId: layout.value?.serverId || props.layoutId },
 }))
 
-/** Calculate grid cell style from widget position (row height = 80px via grid-auto-rows) */
+/**
+ * Calculate grid cell style from widget position.
+ * Side-panel mode: single column, widgets stacked vertically (ignore x/w).
+ * Inline mode: full 12-column grid with original positions.
+ */
 function widgetStyle(w: DashboardWidget): Record<string, string> {
+  if (isSidePanel.value) {
+    // Stack vertically — each widget spans full width, height from original h
+    const minH = Math.max(w.h, 2)
+    return {
+      'grid-column': '1 / -1',
+      'grid-row': `span ${minH}`,
+    }
+  }
   return {
     'grid-column': `${w.x + 1} / span ${w.w}`,
     'grid-row': `${w.y + 1} / span ${w.h}`,
@@ -170,6 +185,12 @@ onUnmounted(() => {
   grid-auto-rows: v-bind(rowHeightPx);
   gap: var(--space-1);
   padding: var(--space-2);
+}
+
+.inline-dashboard--side-panel .inline-dashboard__grid {
+  grid-template-columns: 1fr;
+  grid-auto-rows: v-bind(rowHeightPx);
+  gap: var(--space-2);
 }
 
 .inline-dashboard__cell {
