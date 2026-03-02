@@ -346,6 +346,8 @@ services:
     image: prometheuscommunity/postgres-exporter:v0.16.0
     container_name: automationone-postgres-exporter
     profiles: ["monitoring"]
+    volumes:
+      - ./docker/postgres-exporter/postgres_exporter.yml:/postgres_exporter.yml:ro
     environment:
       DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
     expose:
