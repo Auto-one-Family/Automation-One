@@ -2,6 +2,7 @@
 #include "../communication/mqtt_client.h"
 #include "../config/config_manager.h"
 #include "../../drivers/gpio_manager.h"
+#include <WiFi.h>  // For ADC2/WiFi conflict detection
 #include "../../drivers/i2c_bus.h"
 #include "../../drivers/i2c_sensor_protocol.h"
 #include "../../drivers/onewire_bus.h"
@@ -1281,7 +1282,16 @@ uint32_t SensorManager::readRawAnalog(uint8_t gpio) {
     if (!initialized_) {
         return 0;
     }
-    
+
+    // ADC2/WiFi conflict check: ADC2 pins cannot be used for analog reads when WiFi is active
+    // ESP32 hardware limitation - ADC2 peripheral is shared with WiFi radio
+    if (gpio_manager_->isADC2Pin(gpio)) {
+        if (WiFi.isConnected() || WiFi.getMode() != WIFI_OFF) {
+            LOG_E(TAG, "GPIO " + String(gpio) + " is on ADC2 - cannot read while WiFi is active! Use ADC1 pins (GPIO32-39) for analog sensors");
+            return 0;
+        }
+    }
+
     // Configure pin as analog input if needed
     gpio_manager_->configurePinMode(gpio, INPUT);
     analogSetPinAttenuation(gpio, ADC_11db);  // Safety-Net: 100-3100mV range for all analog sensors

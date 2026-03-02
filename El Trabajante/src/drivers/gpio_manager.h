@@ -90,6 +90,10 @@ public:
     // Check if a pin is reserved (Boot/UART/etc.)
     bool isPinReserved(uint8_t gpio) const;
 
+    // Check if a pin is on ADC2 (conflicts with WiFi on ESP32)
+    // ADC2 pins cannot be used for analogRead() when WiFi is active
+    bool isADC2Pin(uint8_t gpio) const;
+
     // Check if a pin is currently in safe mode
     bool isPinInSafeMode(uint8_t gpio) const;
 

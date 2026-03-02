@@ -124,7 +124,7 @@
     ["esp:GND.2", "led1:C", "black", ["v60", "h100"]],
     ["esp:D5", "r2:1", "yellow", ["v50", "h80"]],
     ["r2:2", "led1:A", "yellow", ["h20"]],
-    ["esp:D15", "dht22:SDA", "blue", ["v30", "h-100"]],
+    ["esp:D16", "dht22:SDA", "blue", ["v30", "h-100"]],
     ["esp:3V3", "dht22:VCC", "red", ["v10", "h-110"]],
     ["esp:GND.1", "dht22:GND", "black", ["v20", "h-90"]],
     ["pot_analog:SIG", "esp:34", "purple", ["h80"]],

@@ -591,6 +591,17 @@ bool GPIOManager::isInputOnlyPin(uint8_t gpio) const {
     return false;
 }
 
+bool GPIOManager::isADC2Pin(uint8_t gpio) const {
+    #ifndef XIAO_ESP32C3
+    for (uint8_t i = 0; i < HardwareConfig::ADC2_PIN_COUNT; i++) {
+        if (HardwareConfig::ADC2_GPIO_PINS[i] == gpio) {
+            return true;
+        }
+    }
+    #endif
+    return false;
+}
+
 bool GPIOManager::verifyPinState(uint8_t pin, uint8_t expected_mode) {
     delay(1);  // Allow pin to stabilize (1ms is sufficient)
 

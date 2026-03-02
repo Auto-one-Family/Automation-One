@@ -99,10 +99,22 @@ constexpr uint8_t BUTTON_PIN = 0;   // Boot Button (GPIO0) - RESERVED!
 // ============================================
 // ESP32 has 18 ADC channels (ADC1: GPIO32-39, ADC2: GPIO0-27)
 // ADC resolution: 12-bit (0-4095)
-// Note: ADC2 pins cannot be used when WiFi is active!
+// CRITICAL: ADC2 pins CANNOT be used when WiFi is active!
 
 constexpr uint8_t ADC_RESOLUTION = 12;
 constexpr uint16_t ADC_MAX_VALUE = 4095;
+
+// ============================================
+// ADC2 PINS (CONFLICT WITH WIFI!)
+// ============================================
+// These pins share the ADC2 peripheral with WiFi.
+// analogRead() on these pins will return ESP_ERR_TIMEOUT when WiFi is active.
+// Only ADC1 pins (GPIO32-39) are safe for analog reads with WiFi.
+
+const uint8_t ADC2_GPIO_PINS[] = {
+    0, 2, 4, 12, 13, 14, 15, 25, 26, 27
+};
+const uint8_t ADC2_PIN_COUNT = 10;
 
 } // namespace HardwareConfig
 
