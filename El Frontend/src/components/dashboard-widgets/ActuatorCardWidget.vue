@@ -130,7 +130,7 @@ function selectActuator(id: string) {
 }
 
 .actuator-card-widget__badge {
-  padding: 2px 8px;
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);
   font-weight: 600;
@@ -139,7 +139,7 @@ function selectActuator(id: string) {
 }
 
 .actuator-card-widget__badge--on {
-  background: rgba(34, 197, 94, 0.15);
+  background: var(--color-zone-normal, rgba(34, 197, 94, 0.15));
   color: var(--color-success);
 }
 

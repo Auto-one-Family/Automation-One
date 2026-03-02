@@ -163,9 +163,9 @@ const activeCount = computed(() => actuators.value.filter(a => a.state).length)
 }
 
 .runtime-widget__badge {
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-weight: 600;
-  padding: 1px 6px;
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
   background: var(--color-bg-quaternary);
   color: var(--color-text-muted);
@@ -173,12 +173,12 @@ const activeCount = computed(() => actuators.value.filter(a => a.state).length)
 }
 
 .runtime-widget__badge--on {
-  background: rgba(34, 197, 94, 0.15);
+  background: var(--color-zone-normal, rgba(34, 197, 94, 0.15));
   color: var(--color-success);
 }
 
 .runtime-widget__cmd {
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-family: var(--font-mono);
   color: var(--color-text-muted);
   opacity: 0.7;

@@ -350,7 +350,6 @@ function handleClaim() {
 }
 
 .dashboard-viewer__grid :deep(.grid-stack-item-content) {
-  inset: 4px;
   background: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);

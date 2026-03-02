@@ -154,8 +154,8 @@ function formatTimeAgo(isoStr: string | null): string {
   font-size: var(--text-xs);
   font-weight: 700;
   color: var(--color-error);
-  background: rgba(248, 113, 113, 0.1);
-  padding: 2px 8px;
+  background: var(--color-zone-alarm, rgba(248, 113, 113, 0.1));
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
 }
 
@@ -215,7 +215,7 @@ function formatTimeAgo(isoStr: string | null): string {
 }
 
 .alarm-widget__time {
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-family: var(--font-mono);
   color: var(--color-text-muted);
   flex-shrink: 0;
@@ -225,7 +225,7 @@ function formatTimeAgo(isoStr: string | null): string {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-top: 2px;
+  margin-top: var(--space-1);
 }
 
 .alarm-widget__value {
@@ -235,11 +235,11 @@ function formatTimeAgo(isoStr: string | null): string {
 }
 
 .alarm-widget__zone {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   background: var(--color-bg-quaternary);
-  padding: 1px 4px;
-  border-radius: 3px;
+  padding: var(--space-1) var(--space-1);
+  border-radius: var(--radius-sm);
 }
 
 .alarm-widget__empty {

@@ -175,7 +175,7 @@ function removeSensor(sensorId: string) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   padding: var(--space-1) var(--space-2);
   flex-shrink: 0;
   position: relative;
@@ -184,8 +184,8 @@ function removeSensor(sensorId: string) {
 .multi-sensor-widget__chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
   border: 1px solid;
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);

@@ -32,8 +32,8 @@ const { createWidgetElement, mountWidgetToElement, cleanupAllWidgets, widgetComp
   showConfigButton: false,
 })
 
-/** Row height in pixels — must match grid-auto-rows in CSS below */
-const ROW_HEIGHT = 60
+/** Row height in pixels — synchronized with CustomDashboardView/DashboardViewer cellHeight */
+const ROW_HEIGHT = 80
 const rowHeightPx = `${ROW_HEIGHT}px`
 
 const layout = computed(() =>
@@ -47,7 +47,7 @@ const editorRoute = computed(() => ({
   params: { dashboardId: layout.value?.serverId || props.layoutId },
 }))
 
-/** Calculate grid cell style from widget position (row height = 60px via grid-auto-rows) */
+/** Calculate grid cell style from widget position (row height = 80px via grid-auto-rows) */
 function widgetStyle(w: DashboardWidget): Record<string, string> {
   return {
     'grid-column': `${w.x + 1} / span ${w.w}`,
@@ -144,7 +144,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
   background: var(--color-bg-tertiary);
 }
@@ -168,8 +168,8 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
   grid-auto-rows: v-bind(rowHeightPx);
-  gap: 4px;
-  padding: 8px;
+  gap: var(--space-1);
+  padding: var(--space-2);
 }
 
 .inline-dashboard__cell {
@@ -183,7 +183,7 @@ onUnmounted(() => {
 .inline-dashboard__mount {
   width: 100%;
   height: 100%;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .inline-dashboard__unknown {
