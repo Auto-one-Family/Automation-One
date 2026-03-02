@@ -578,15 +578,23 @@ function graphToRuleData(): {
         logicOperator = node.data.operator || 'AND'
         break
 
-      case 'actuator':
+      case 'actuator': {
+        // Backend ActuatorCommandAction requires 'value' field (0.0-1.0)
+        // PWM: use slider value / 100, ON: 1.0, OFF: 0.0
+        const cmd = (node.data.command || 'ON').toUpperCase()
+        const pwmVal = node.data.pwmValue !== undefined
+          ? node.data.pwmValue / 100
+          : (cmd === 'OFF' ? 0.0 : 1.0)
         actions.push({
           type: 'actuator',
           esp_id: node.data.espId || '',
           gpio: node.data.gpio || 0,
-          command: node.data.command || 'ON',
-          ...(node.data.pwmValue !== undefined ? { value: node.data.pwmValue / 100 } : {}),
-          ...(node.data.duration ? { duration: node.data.duration } : {}),
+          command: cmd,
+          value: pwmVal,
+          ...(node.data.duration ? { duration_seconds: node.data.duration } : { duration_seconds: 0 }),
         } as ActuatorAction)
+        break
+      }
         break
 
       case 'notification':
