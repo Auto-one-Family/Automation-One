@@ -29,7 +29,7 @@ References:
 from datetime import datetime, timezone
 from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from ...core.logging_config import get_logger
 from ...db.models.audit_log import AuditEventType, AuditSeverity
@@ -58,6 +58,7 @@ from ...schemas import (
 from ...schemas.esp import GpioStatusResponse, GpioUsageItem
 from ...services.gpio_validation_service import GpioValidationService, SYSTEM_RESERVED_PINS
 from ...schemas.common import PaginationMeta
+from ...core.exceptions import DuplicateESPError, ESPNotFoundError, ValidationException
 from ..deps import ActiveUser, DBSession, OperatorUser, get_mqtt_publisher
 
 logger = get_logger(__name__)
@@ -320,10 +321,7 @@ async def get_device(
 
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     sensor_count = await sensor_repo.count_by_esp(device.id)
     actuator_count = await actuator_repo.count_by_esp(device.id)
@@ -395,10 +393,7 @@ async def register_device(
     # Check if device already exists
     existing = await esp_repo.get_by_device_id(request.device_id)
     if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"ESP device '{request.device_id}' already registered",
-        )
+        raise DuplicateESPError(request.device_id)
 
     # Create device
     from ...db.models.esp import ESPDevice
@@ -491,10 +486,7 @@ async def update_device(
 
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     # Update fields
     update_data = request.model_dump(exclude_unset=True)
@@ -597,10 +589,7 @@ async def delete_device(
 
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     # Delete associated sensors and actuators first
     sensors = await sensor_repo.get_by_esp(device.id)
@@ -676,10 +665,7 @@ async def restart_device(
 
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     # Publish restart command
     success = publisher.publish_system_command(
@@ -739,19 +725,13 @@ async def reset_device(
         Command response
     """
     if not request.confirm:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Factory reset requires confirm=true",
-        )
+        raise ValidationException("confirm", "Factory reset requires confirm=true")
 
     esp_repo = ESPRepository(db)
 
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     # Publish factory reset command
     success = publisher.publish_system_command(
@@ -809,10 +789,7 @@ async def get_device_health(
 
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     # Get latest health from device_metadata (populated by heartbeat handler)
     health_data = device.device_metadata.get("health", {}) if device.device_metadata else {}
@@ -893,10 +870,7 @@ async def get_gpio_status(
 
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     # Get all sensors for this ESP
     all_sensors = await sensor_repo.get_by_esp(device.id)
@@ -1027,10 +1001,7 @@ async def assign_kaiser(
 
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     previous_kaiser = device.device_metadata.get("kaiser_id") if device.device_metadata else None
 
@@ -1144,15 +1115,11 @@ async def approve_device(
     device = await esp_repo.get_by_device_id(esp_id)
 
     if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     if device.status not in ("pending_approval", "rejected"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Device '{esp_id}' is not pending approval (status: {device.status})",
+        raise ValidationException(
+            "status", f"Device '{esp_id}' is not pending approval (status: {device.status})"
         )
 
     # Capture old status before update
@@ -1260,15 +1227,11 @@ async def reject_device(
     device = await esp_repo.get_by_device_id(esp_id)
 
     if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     if device.status not in ("pending_approval", "approved", "online"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Device '{esp_id}' cannot be rejected (status: {device.status})",
+        raise ValidationException(
+            "status", f"Device '{esp_id}' cannot be rejected (status: {device.status})"
         )
 
     # Capture old status before update

@@ -201,11 +201,11 @@ class TestI2CAddressRangeValidation:
         """Test: Negative I2C address rejected."""
         from src.api.v1.sensors import _validate_i2c_config
         from src.db.repositories.sensor_repo import SensorRepository
-        from fastapi import HTTPException
+        from src.core.exceptions import ValidationException
 
         sensor_repo = SensorRepository(db_session)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ValidationException) as exc_info:
             await _validate_i2c_config(
                 sensor_repo=sensor_repo,
                 esp_id=sample_esp_device.id,
@@ -214,7 +214,7 @@ class TestI2CAddressRangeValidation:
             )
 
         assert exc_info.value.status_code == 400
-        assert "positive" in str(exc_info.value.detail).lower()
+        assert "positive" in exc_info.value.message.lower()
 
     async def test_i2c_out_of_7bit_range_rejected(
         self,
@@ -224,12 +224,12 @@ class TestI2CAddressRangeValidation:
         """Test: I2C address > 0x7F rejected (out of 7-bit range)."""
         from src.api.v1.sensors import _validate_i2c_config
         from src.db.repositories.sensor_repo import SensorRepository
-        from fastapi import HTTPException
+        from src.core.exceptions import ValidationException
 
         sensor_repo = SensorRepository(db_session)
 
         # Test 0xFF (255)
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ValidationException) as exc_info:
             await _validate_i2c_config(
                 sensor_repo=sensor_repo,
                 esp_id=sample_esp_device.id,
@@ -238,7 +238,7 @@ class TestI2CAddressRangeValidation:
             )
 
         assert exc_info.value.status_code == 400
-        assert "0x08-0x77" in exc_info.value.detail or "7-bit range" in exc_info.value.detail
+        assert "0x08-0x77" in exc_info.value.message or "7-bit range" in exc_info.value.message
 
     async def test_i2c_reserved_low_address_rejected(
         self,
@@ -248,7 +248,7 @@ class TestI2CAddressRangeValidation:
         """Test: Reserved I2C address 0x00-0x07 rejected."""
         from src.api.v1.sensors import _validate_i2c_config
         from src.db.repositories.sensor_repo import SensorRepository
-        from fastapi import HTTPException
+        from src.core.exceptions import ValidationException
 
         sensor_repo = SensorRepository(db_session)
 
@@ -256,7 +256,7 @@ class TestI2CAddressRangeValidation:
         reserved_addresses = [0x00, 0x01, 0x05, 0x07]
 
         for addr in reserved_addresses:
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(ValidationException) as exc_info:
                 await _validate_i2c_config(
                     sensor_repo=sensor_repo,
                     esp_id=sample_esp_device.id,
@@ -265,11 +265,11 @@ class TestI2CAddressRangeValidation:
                 )
 
             assert exc_info.value.status_code == 400
-            detail = exc_info.value.detail.lower()
+            message = exc_info.value.message.lower()
             if addr == 0x00:
-                assert "required" in detail
+                assert "required" in message
             else:
-                assert "reserved" in detail
+                assert "reserved" in message
 
     async def test_i2c_reserved_high_address_rejected(
         self,
@@ -279,7 +279,7 @@ class TestI2CAddressRangeValidation:
         """Test: Reserved I2C address 0x78-0x7F rejected."""
         from src.api.v1.sensors import _validate_i2c_config
         from src.db.repositories.sensor_repo import SensorRepository
-        from fastapi import HTTPException
+        from src.core.exceptions import ValidationException
 
         sensor_repo = SensorRepository(db_session)
 
@@ -287,7 +287,7 @@ class TestI2CAddressRangeValidation:
         reserved_addresses = [0x78, 0x7A, 0x7D, 0x7F]
 
         for addr in reserved_addresses:
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(ValidationException) as exc_info:
                 await _validate_i2c_config(
                     sensor_repo=sensor_repo,
                     esp_id=sample_esp_device.id,
@@ -296,7 +296,7 @@ class TestI2CAddressRangeValidation:
                 )
 
             assert exc_info.value.status_code == 400
-            assert "reserved" in exc_info.value.detail.lower()
+            assert "reserved" in exc_info.value.message.lower()
 
     async def test_i2c_valid_address_accepted(
         self,

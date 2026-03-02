@@ -112,8 +112,38 @@ ESP32_GPIO_ERROR_MESSAGES: Dict[int, Dict[str, Any]] = {
     },
 }
 
-# I2C Errors (1010-1014)
+# I2C Errors (1007, 1009-1019)
 ESP32_I2C_ERROR_MESSAGES: Dict[int, Dict[str, Any]] = {
+    1007: {
+        "category": "HARDWARE",
+        "severity": "ERROR",
+        "message_de": "I2C-Timeout: Sensor antwortet nicht",
+        "message_user_de": "Hardware-Fehler: I2C-Gerät antwortet nicht innerhalb der Zeitgrenze",
+        "troubleshooting_de": [
+            "1. Kabelprüfung SDA/SCL auf Wackelkontakt oder Bruch",
+            "2. Pull-Up-Widerstände prüfen (4.7kOhm empfohlen)",
+            "3. Nur ein I2C-Master auf dem Bus erlaubt",
+            "4. ESP32 neu starten für Bus-Reset",
+        ],
+        "docs_link": "/docs/hardware/i2c#timeout",
+        "recoverable": True,
+        "user_action_required": True,
+    },
+    1009: {
+        "category": "HARDWARE",
+        "severity": "WARNING",
+        "message_de": "I2C CRC-Prüfung fehlgeschlagen",
+        "message_user_de": "Hardware-Warnung: Daten vom I2C-Sensor sind beschädigt (CRC-Fehler)",
+        "troubleshooting_de": [
+            "1. Kabellänge prüfen (max. ~50cm ohne Level-Shifter)",
+            "2. Abgeschirmte Kabel verwenden bei Störquellen in der Nähe",
+            "3. Elektromagnetische Störquellen entfernen (Motoren, Relais)",
+            "4. Versorgungsspannung des Sensors prüfen (stabil 3.3V oder 5V)",
+        ],
+        "docs_link": "/docs/hardware/i2c#crc-errors",
+        "recoverable": True,
+        "user_action_required": False,
+    },
     1010: {
         "category": "HARDWARE",
         "severity": "ERROR",
@@ -185,6 +215,77 @@ ESP32_I2C_ERROR_MESSAGES: Dict[int, Dict[str, Any]] = {
         ],
         "docs_link": "/docs/hardware/i2c#bus-errors",
         "recoverable": False,
+        "user_action_required": True,
+    },
+    1015: {
+        "category": "HARDWARE",
+        "severity": "CRITICAL",
+        "message_de": "I2C-Bus blockiert (SDA oder SCL dauerhaft LOW)",
+        "message_user_de": "Kritischer Hardware-Fehler: I2C-Bus hängt, kein Gerät antwortet",
+        "troubleshooting_de": [
+            "1. SDA- und SCL-Leitungen mit Multimeter prüfen (sollten HIGH sein im Ruhezustand)",
+            "2. ESP32 neu starten (erzwingt Bus-Reset)",
+            "3. Sensor vom Bus trennen und einzeln testen (Power-Cycle)",
+            "4. Clock-Stretching-Problem: Sensor hält SCL zu lange LOW",
+        ],
+        "docs_link": "/docs/hardware/i2c#bus-stuck",
+        "recoverable": False,
+        "user_action_required": True,
+    },
+    1016: {
+        "category": "HARDWARE",
+        "severity": "WARNING",
+        "message_de": "I2C-Bus Recovery gestartet",
+        "message_user_de": "System-Info: Automatische I2C-Bus-Wiederherstellung wurde gestartet",
+        "troubleshooting_de": [
+            "1. Keine Aktion nötig — System versucht Selbstheilung",
+            "2. Bei häufigem Auftreten: Verkabelung und Pull-Up-Widerstände prüfen",
+            "3. Sensor-Stromversorgung auf Stabilität prüfen",
+        ],
+        "docs_link": "/docs/hardware/i2c#recovery",
+        "recoverable": True,
+        "user_action_required": False,
+    },
+    1017: {
+        "category": "HARDWARE",
+        "severity": "CRITICAL",
+        "message_de": "I2C-Bus Recovery fehlgeschlagen",
+        "message_user_de": "Kritischer Hardware-Fehler: Automatische Bus-Wiederherstellung war nicht erfolgreich",
+        "troubleshooting_de": [
+            "1. ESP32 neu starten (manueller Reset)",
+            "2. Sensor physisch abklemmen und wieder anschließen",
+            "3. I2C-Adresse des Sensors prüfen (Adresskonflikt?)",
+            "4. Sensor könnte defekt sein — mit Ersatzsensor testen",
+        ],
+        "docs_link": "/docs/hardware/i2c#recovery-failed",
+        "recoverable": False,
+        "user_action_required": True,
+    },
+    1018: {
+        "category": "HARDWARE",
+        "severity": "WARNING",
+        "message_de": "I2C-Bus erfolgreich wiederhergestellt",
+        "message_user_de": "System-Info: I2C-Bus wurde erfolgreich wiederhergestellt, normaler Betrieb",
+        "troubleshooting_de": [
+            "1. Keine Aktion nötig — Bus funktioniert wieder normal",
+            "2. Bei häufigem Auftreten: Hardware-Verkabelung überprüfen",
+        ],
+        "docs_link": "/docs/hardware/i2c#recovery",
+        "recoverable": True,
+        "user_action_required": False,
+    },
+    1019: {
+        "category": "HARDWARE",
+        "severity": "ERROR",
+        "message_de": "I2C-Protokoll nicht unterstützt",
+        "message_user_de": "Konfigurations-Fehler: Der Sensor-Typ hat kein registriertes I2C-Kommunikationsprotokoll",
+        "troubleshooting_de": [
+            "1. Sensor-Datenblatt prüfen — unterstützt der Sensor I2C?",
+            "2. I2C-Standard-Modus verwenden (100kHz)",
+            "3. Alternative Sensor-Library prüfen oder Sensor-Typ korrigieren",
+        ],
+        "docs_link": "/docs/hardware/i2c#protocols",
+        "recoverable": True,
         "user_action_required": True,
     },
 }
@@ -441,6 +542,68 @@ ESP32_SENSOR_ERROR_MESSAGES: Dict[int, Dict[str, Any]] = {
         "docs_link": "/docs/sensors#timeouts",
         "recoverable": True,
         "user_action_required": False,
+    },
+}
+
+# DS18B20 Temperature Errors (1060-1063)
+ESP32_DS18B20_ERROR_MESSAGES: Dict[int, Dict[str, Any]] = {
+    1060: {
+        "category": "HARDWARE",
+        "severity": "ERROR",
+        "message_de": "DS18B20 Sensor-Fehler: -127°C zeigt Verbindungsproblem oder CRC-Fehler an",
+        "message_user_de": "Hardware-Fehler: Temperatursensor meldet -127°C (Sensor getrennt oder defekt)",
+        "troubleshooting_de": [
+            "1. 4.7kOhm Pull-Up-Widerstand an DQ-Leitung prüfen",
+            "2. Versorgungsspannung 3.3V am Sensor prüfen",
+            "3. Kabel-Kontakte und Steckverbindungen prüfen",
+            "4. Sensor tauschen wenn Problem bestehen bleibt",
+        ],
+        "docs_link": "/docs/sensors/ds18b20#sensor-fault",
+        "recoverable": False,
+        "user_action_required": True,
+    },
+    1061: {
+        "category": "HARDWARE",
+        "severity": "WARNING",
+        "message_de": "DS18B20 Power-On-Reset erkannt (85°C Default-Wert)",
+        "message_user_de": "Hardware-Warnung: Sensor meldet 85°C — keine Messung durchgeführt (Power-On-Reset)",
+        "troubleshooting_de": [
+            "1. Versorgungsspannung auf Stabilität prüfen (Spannungseinbrüche?)",
+            "2. Bei parasitärem Modus: Externe 3.3V Versorgung verwenden (3-Wire)",
+            "3. Entkopplungskondensator (100nF) nahe am Sensor einsetzen",
+        ],
+        "docs_link": "/docs/sensors/ds18b20#power-on-reset",
+        "recoverable": True,
+        "user_action_required": False,
+    },
+    1062: {
+        "category": "HARDWARE",
+        "severity": "WARNING",
+        "message_de": "DS18B20 Temperatur außerhalb gültiger Range (-55°C bis +125°C)",
+        "message_user_de": "Hardware-Warnung: Gemessene Temperatur liegt außerhalb des physikalisch möglichen Bereichs",
+        "troubleshooting_de": [
+            "1. Sensor-Umgebung prüfen — liegt die Temperatur wirklich im Extrembereich?",
+            "2. Kalibrierung des Sensors prüfen",
+            "3. Kurzschluss an DQ-Leitung ausschließen",
+        ],
+        "docs_link": "/docs/sensors/ds18b20#out-of-range",
+        "recoverable": True,
+        "user_action_required": False,
+    },
+    1063: {
+        "category": "HARDWARE",
+        "severity": "ERROR",
+        "message_de": "DS18B20 Sensor im Betrieb getrennt",
+        "message_user_de": "Hardware-Fehler: Temperatursensor war verbunden, ist aber jetzt nicht mehr erreichbar",
+        "troubleshooting_de": [
+            "1. Stecker und Kabelverbindungen prüfen (Wackelkontakt)",
+            "2. OneWire-Bus Länge prüfen (max. ~5m ohne Repeater)",
+            "3. Pull-Up-Widerstand (4.7kOhm) vorhanden und korrekt?",
+            "4. Bei mehreren Sensoren: Einzeln testen um defekten zu identifizieren",
+        ],
+        "docs_link": "/docs/sensors/ds18b20#disconnected",
+        "recoverable": True,
+        "user_action_required": True,
     },
 }
 
@@ -1798,6 +1961,7 @@ ALL_ESP32_ERROR_MESSAGES: Dict[int, Dict[str, Any]] = {
     **ESP32_ONEWIRE_ERROR_MESSAGES,
     **ESP32_PWM_ERROR_MESSAGES,
     **ESP32_SENSOR_ERROR_MESSAGES,
+    **ESP32_DS18B20_ERROR_MESSAGES,
     **ESP32_ACTUATOR_ERROR_MESSAGES,
     # SERVICE (2000-2999)
     **ESP32_NVS_ERROR_MESSAGES,

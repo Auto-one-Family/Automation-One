@@ -7,6 +7,10 @@
  * Server-Centric: All translations come from esp32_error_mapping.py.
  * Real-time error_events already include translations via WebSocket.
  * This API is for on-demand lookups of historical/stored events.
+ *
+ * TODO: Used by planned History-View feature for displaying historical
+ * error events with full troubleshooting context. Do not remove.
+ * See also: parseApiError.ts for REST API error parsing.
  */
 
 import api from './index'

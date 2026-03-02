@@ -6,14 +6,21 @@
 name: DS18B20 Sensor Read Test
 version: 1
 steps:
-  # Wait for full boot
-  - wait-serial: "Phase 5: Actuator System READY"
+  # MQTT connected (setup Phase 2)
+  - wait-serial: "MQTT connected"
 
-  # Verify OneWire bus is initialized
+  # OneWire bus initialization logged (setup Phase 3 - after MQTT, before loop)
   - wait-serial: "OneWire Bus Manager"
 
-  # Verify Sensor Manager is active
+  # Sensor Manager active (setup Phase 4 - after OneWire, before loop)
   - wait-serial: "Sensor Manager"
+
+  # Wait for full boot (Phase 5 READY - last setup step)
+  - wait-serial: "Phase 5: Actuator System READY"
+
+  # Registration gate: opens on server confirmation or 10s timeout fallback
+  # Note: REGISTRATION comes from loop() AFTER setup() completes
+  - wait-serial: "REGISTRATION"
 
   # Wait for heartbeat to confirm loop() is running
   - wait-serial: "heartbeat"

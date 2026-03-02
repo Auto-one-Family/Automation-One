@@ -9,13 +9,30 @@ Status: IMPLEMENTED
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 
+from ...core.exceptions import (
+    SequenceNotFoundException,
+    ServiceUnavailableError,
+    ValidationException,
+)
 from ...api.deps import get_current_user
 from ...schemas.sequence import SequenceListResponse, SequenceProgressSchema, SequenceStatsResponse
 from ...services.logic_engine import get_logic_engine
 
 router = APIRouter(prefix="/sequences", tags=["Sequences"])
+
+
+def _get_sequence_executor():
+    """Get the sequence executor from the logic engine, or raise."""
+    logic_engine = get_logic_engine()
+    if not logic_engine:
+        raise ServiceUnavailableError("Logic Engine")
+
+    for executor in logic_engine.action_executors:
+        if executor.supports("sequence"):
+            return executor
+    return None
 
 
 @router.get("", response_model=SequenceListResponse)
@@ -31,14 +48,9 @@ async def list_sequences(
         running_only: Nur laufende Sequenzen anzeigen
         limit: Maximale Anzahl (1-500)
     """
-    logic_engine = get_logic_engine()
-    if not logic_engine:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Logic Engine not available",
-        )
+    _get_sequence_executor()  # Validates logic engine availability
 
-    # Hole Executor
+    logic_engine = get_logic_engine()
     sequence_executor = None
     for executor in logic_engine.action_executors:
         if executor.supports("sequence"):
@@ -74,13 +86,9 @@ async def list_sequences(
 @router.get("/stats", response_model=SequenceStatsResponse)
 async def get_sequence_stats(current_user=Depends(get_current_user)):
     """Statistiken über Sequenz-Ausführungen."""
-    logic_engine = get_logic_engine()
-    if not logic_engine:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Logic Engine not available",
-        )
+    _get_sequence_executor()  # Validates logic engine availability
 
+    logic_engine = get_logic_engine()
     sequence_executor = None
     for executor in logic_engine.action_executors:
         if executor.supports("sequence"):
@@ -104,31 +112,14 @@ async def get_sequence_stats(current_user=Depends(get_current_user)):
 @router.get("/{sequence_id}", response_model=SequenceProgressSchema)
 async def get_sequence(sequence_id: str, current_user=Depends(get_current_user)):
     """Status einer spezifischen Sequenz."""
-    logic_engine = get_logic_engine()
-    if not logic_engine:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Logic Engine not available",
-        )
-
-    sequence_executor = None
-    for executor in logic_engine.action_executors:
-        if executor.supports("sequence"):
-            sequence_executor = executor
-            break
+    sequence_executor = _get_sequence_executor()
 
     if not sequence_executor:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Sequence executor not available",
-        )
+        raise SequenceNotFoundException(sequence_id)
 
     status_data = sequence_executor.get_sequence_status(sequence_id)
     if not status_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Sequence '{sequence_id}' not found",
-        )
+        raise SequenceNotFoundException(sequence_id)
 
     return status_data
 
@@ -144,31 +135,17 @@ async def cancel_sequence(
 
     Requires: User muss eingeloggt sein
     """
-    logic_engine = get_logic_engine()
-    if not logic_engine:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Logic Engine not available",
-        )
-
-    sequence_executor = None
-    for executor in logic_engine.action_executors:
-        if executor.supports("sequence"):
-            sequence_executor = executor
-            break
+    sequence_executor = _get_sequence_executor()
 
     if not sequence_executor:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Sequence executor not available",
-        )
+        raise SequenceNotFoundException(sequence_id)
 
     cancelled = await sequence_executor.cancel_sequence(sequence_id, reason)
 
     if not cancelled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot cancel sequence '{sequence_id}' (not running or not found)",
+        raise ValidationException(
+            "sequence_id",
+            f"Cannot cancel sequence '{sequence_id}' (not running or not found)",
         )
 
     return {

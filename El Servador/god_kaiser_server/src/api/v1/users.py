@@ -5,9 +5,15 @@ Provides REST endpoints for user CRUD operations.
 Admin-only endpoints for managing user accounts.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...core.exceptions import (
+    AuthenticationError,
+    DuplicateError,
+    UserNotFoundException,
+    ValidationException,
+)
 from ...core.logging_config import get_logger
 from ...core.security import get_password_hash, verify_password
 from ...db.repositories.user_repo import UserRepository
@@ -60,7 +66,7 @@ async def list_users(
 @router.post(
     "",
     response_model=UserResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=201,
     summary="Create User",
     description="Create a new user account. Admin only.",
 )
@@ -73,17 +79,12 @@ async def create_user(
     # Check if username already exists
     existing_user = await user_repo.get_by_username(user_data.username)
     if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Username '{user_data.username}' already exists",
-        )
+        raise DuplicateError("User", "username", user_data.username)
 
     # Check if email already exists
     existing_email = await user_repo.get_by_email(user_data.email)
     if existing_email:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=f"Email '{user_data.email}' already exists"
-        )
+        raise DuplicateError("User", "email", user_data.email)
 
     # Hash password
     password_hash = get_password_hash(user_data.password)
@@ -119,9 +120,7 @@ async def get_user(
     user = await user_repo.get_by_id(user_id)
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"User with ID {user_id} not found"
-        )
+        raise UserNotFoundException(user_id)
 
     return UserResponse.model_validate(user)
 
@@ -140,9 +139,7 @@ async def update_user(
     user = await user_repo.get_by_id(user_id)
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"User with ID {user_id} not found"
-        )
+        raise UserNotFoundException(user_id)
 
     # Build update dict
     update_data = user_data.model_dump(exclude_unset=True)
@@ -155,10 +152,7 @@ async def update_user(
     if "email" in update_data and update_data["email"]:
         existing = await user_repo.get_by_email(update_data["email"])
         if existing and existing.id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Email '{update_data['email']}' already exists",
-            )
+            raise DuplicateError("User", "email", update_data["email"])
 
     # Apply updates
     for field, value in update_data.items():
@@ -175,7 +169,7 @@ async def update_user(
 
 @router.delete(
     "/{user_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=204,
     summary="Delete User",
     description="Delete a user account. Admin only.",
 )
@@ -183,17 +177,13 @@ async def delete_user(user_id: int, current_user: AdminUser, db: AsyncSession = 
     """Delete user (admin only)."""
     # Prevent self-deletion
     if user_id == current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete your own account"
-        )
+        raise ValidationException("user_id", "Cannot delete your own account")
 
     user_repo = UserRepository(db)
     user = await user_repo.get_by_id(user_id)
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"User with ID {user_id} not found"
-        )
+        raise UserNotFoundException(user_id)
 
     # Delete user
     await user_repo.delete(user)
@@ -219,9 +209,7 @@ async def reset_user_password(
     user = await user_repo.get_by_id(user_id)
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"User with ID {user_id} not found"
-        )
+        raise UserNotFoundException(user_id)
 
     # Hash new password
     user.password_hash = get_password_hash(password_data.new_password)
@@ -257,9 +245,7 @@ async def change_own_password(
     """Change own password."""
     # Verify current password
     if not verify_password(password_data.current_password, current_user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect"
-        )
+        raise AuthenticationError("Current password is incorrect")
 
     # Hash new password
     current_user.password_hash = get_password_hash(password_data.new_password)

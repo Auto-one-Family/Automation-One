@@ -229,6 +229,7 @@ class AuditEventType:
     MQTT_ERROR = "mqtt_error"
     DATABASE_ERROR = "database_error"
     VALIDATION_ERROR = "validation_error"
+    API_ERROR = "api_error"
 
 
 class AuditSeverity:

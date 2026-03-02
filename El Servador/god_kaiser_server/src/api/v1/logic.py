@@ -24,8 +24,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query, status
 
+from ...core.exceptions import RuleNotFoundException, RuleValidationException
 from ...core.logging_config import get_logger
 from ...db.repositories import LogicRepository
 from ...services.logic_service import LogicService
@@ -167,10 +168,7 @@ async def get_rule(
 
     rule = await logic_repo.get_by_id(rule_id)
     if not rule:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Logic rule {rule_id} not found",
-        )
+        raise RuleNotFoundException(rule_id)
 
     exec_count = await logic_repo.get_execution_count(rule.id)
     last_exec = await logic_repo.get_last_execution(rule.id)
@@ -229,10 +227,7 @@ async def create_rule(
     try:
         created = await logic_service.create_rule(request)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+        raise RuleValidationException(str(e))
 
     logger.info(
         f"Logic rule created: '{created.name}' (ID: {created.id}) by {current_user.username}"
@@ -300,16 +295,10 @@ async def update_rule(
     try:
         rule = await logic_service.update_rule(rule_id, request)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+        raise RuleValidationException(str(e))
 
     if not rule:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Logic rule {rule_id} not found",
-        )
+        raise RuleNotFoundException(rule_id)
 
     exec_count = await logic_repo.get_execution_count(rule.id)
     last_exec = await logic_repo.get_last_execution(rule.id)
@@ -370,10 +359,7 @@ async def delete_rule(
 
     rule = await logic_repo.get_by_id(rule_id)
     if not rule:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Logic rule {rule_id} not found",
-        )
+        raise RuleNotFoundException(rule_id)
 
     # Delete rule
     await logic_repo.delete(rule_id)
@@ -437,10 +423,7 @@ async def toggle_rule(
 
     rule = await logic_repo.get_by_id(rule_id)
     if not rule:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Logic rule {rule_id} not found",
-        )
+        raise RuleNotFoundException(rule_id)
 
     previous_state = rule.enabled
     rule.enabled = request.enabled
@@ -502,10 +485,7 @@ async def test_rule(
 
     rule = await logic_repo.get_by_id(rule_id)
     if not rule:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Logic rule {rule_id} not found",
-        )
+        raise RuleNotFoundException(rule_id)
 
     # Test rule using LogicService
     test_result = await logic_service.test_rule(rule, request)

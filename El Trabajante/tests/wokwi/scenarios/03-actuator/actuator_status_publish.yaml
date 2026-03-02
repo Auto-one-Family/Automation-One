@@ -8,6 +8,9 @@ steps:
   # Wait for full boot
   - wait-serial: "Phase 5: Actuator System READY"
 
+  # Registration gate: opens on server confirmation or 10s timeout fallback
+  - wait-serial: "REGISTRATION"
+
   # Wait for heartbeat (system running)
   - wait-serial: "heartbeat"
 

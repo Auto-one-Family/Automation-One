@@ -28,8 +28,15 @@ import json
 from datetime import datetime, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
+from ...core.exceptions import (
+    ActuatorNotFoundError,
+    DeviceNotApprovedError,
+    ESPNotFoundError,
+    GpioConflictError,
+    ValidationException,
+)
 from ...core.logging_config import get_logger
 from ...db.models.actuator import ActuatorConfig, ActuatorState as ActuatorStateModel
 from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
@@ -261,17 +268,11 @@ async def get_actuator(
 
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     actuator = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not actuator:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Actuator on GPIO {gpio} not found for ESP '{esp_id}'",
-        )
+        raise ActuatorNotFoundError(esp_id, gpio)
 
     state = await actuator_repo.get_state(esp_device.id, gpio)
 
@@ -319,25 +320,13 @@ async def create_or_update_actuator(
 
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     # =========================================================================
     # DEVICE STATUS GUARD - Only approved/online devices can be configured
     # =========================================================================
     if esp_device.status not in ("approved", "online"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": "DEVICE_NOT_APPROVED",
-                "device_id": esp_id,
-                "current_status": esp_device.status,
-                "message": f"Device '{esp_id}' must be approved before configuration "
-                f"(current status: {esp_device.status})",
-            },
-        )
+        raise DeviceNotApprovedError(esp_id, esp_device.status)
 
     # Check if actuator exists
     existing = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
@@ -363,18 +352,14 @@ async def create_or_update_actuator(
             f"GPIO conflict for ESP {esp_id}, GPIO {gpio}: "
             f"{validation_result.conflict_type} - {validation_result.message}"
         )
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "GPIO_CONFLICT",
-                "gpio": gpio,
-                "conflict_type": validation_result.conflict_type.value,
-                "conflict_component": validation_result.conflict_component,
-                "conflict_id": (
-                    str(validation_result.conflict_id) if validation_result.conflict_id else None
-                ),
-                "message": validation_result.message,
-            },
+        raise GpioConflictError(
+            gpio=gpio,
+            conflict_type=validation_result.conflict_type.value,
+            conflict_component=validation_result.conflict_component,
+            conflict_id=(
+                str(validation_result.conflict_id) if validation_result.conflict_id else None
+            ),
+            message=validation_result.message,
         )
     # =========================================================================
 
@@ -476,37 +461,16 @@ async def send_command(
     if not esp_device:
         # BUG-006 Fix: Detailed error message with hint
         logger.warning(f"Actuator command failed: ESP '{esp_id}' not found in database")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error": "ESP_NOT_FOUND",
-                "message": f"ESP device '{esp_id}' not found",
-                "hint": "ESP must send heartbeat to register. Check if ESP is online and connected to MQTT.",
-            },
-        )
+        raise ESPNotFoundError(esp_id)
 
     actuator = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not actuator:
         # BUG-006 Fix: Detailed error message with hint
         logger.warning(f"Actuator command failed: No actuator on GPIO {gpio} for ESP '{esp_id}'")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error": "ACTUATOR_NOT_FOUND",
-                "message": f"Actuator on GPIO {gpio} not found for ESP '{esp_id}'",
-                "hint": f"Create actuator first via PUT /api/v1/actuators/{esp_id}/{gpio}",
-            },
-        )
+        raise ActuatorNotFoundError(esp_id, gpio)
 
     if not actuator.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": "ACTUATOR_DISABLED",
-                "message": "Actuator is disabled",
-                "hint": "Enable actuator via PUT request with enabled=true",
-            },
-        )
+        raise ValidationException("actuator", "Actuator is disabled. Enable via PUT request with enabled=true.")
 
     # Send command via service (includes safety validation)
     success = await actuator_service.send_command(
@@ -520,9 +484,9 @@ async def send_command(
 
     if not success:
         # Get last error from safety check
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Command rejected by safety validation or MQTT publish failed",
+        raise ValidationException(
+            "command",
+            "Command rejected by safety validation or MQTT publish failed",
         )
 
     logger.info(
@@ -582,17 +546,11 @@ async def get_status(
 
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     actuator = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not actuator:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Actuator on GPIO {gpio} not found for ESP '{esp_id}'",
-        )
+        raise ActuatorNotFoundError(esp_id, gpio)
 
     state = await actuator_repo.get_state(esp_device.id, gpio)
 
@@ -667,10 +625,7 @@ async def emergency_stop(
     if request.esp_id:
         esp_device = await esp_repo.get_by_device_id(request.esp_id)
         if not esp_device:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"ESP device '{request.esp_id}' not found",
-            )
+            raise ESPNotFoundError(request.esp_id)
         devices = [esp_device]
     else:
         devices = await esp_repo.get_all()
@@ -869,17 +824,11 @@ async def delete_actuator(
 
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     actuator = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not actuator:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Actuator on GPIO {gpio} not found for ESP '{esp_id}'",
-        )
+        raise ActuatorNotFoundError(esp_id, gpio)
 
     # Send OFF command before deleting
     publisher.publish_actuator_command(
@@ -952,10 +901,7 @@ async def get_history(
 
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     # Get history entries
     history = await actuator_repo.get_history(esp_device.id, gpio, limit=limit)

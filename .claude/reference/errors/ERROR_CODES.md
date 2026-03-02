@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Error-Code Referenz
 
-> **Version:** 1.1 | **Aktualisiert:** 2026-02-01
+> **Version:** 1.2 | **Aktualisiert:** 2026-03-01
 > **Quellen:** `El Trabajante/src/models/error_codes.h`, `El Servador/god_kaiser_server/src/core/error_codes.py`
 > **Letzte Verifizierung:** AGENT 3 Error-Code Spezialist
 
@@ -32,6 +32,8 @@ allowed-tools: Read
 | 5202 | Server | VALIDATION | Ungültiger GPIO | Gültigen GPIO verwenden |
 | 5301 | Server | DATABASE | DB Connection failed | PostgreSQL prüfen |
 | 5640 | Server | SEQUENCE | Actuator locked | Warten oder Force-Release |
+| 5700 | Server | LOGIC | Rule nicht gefunden | Rule-Name prüfen |
+| 5780 | Server | SUBZONE | Subzone nicht gefunden | Subzone-Config prüfen |
 
 ---
 
@@ -50,6 +52,11 @@ allowed-tools: Read
 | **5400-5499** | Server | SERVICE_ERROR |
 | **5500-5599** | Server | AUDIT_ERROR |
 | **5600-5699** | Server | SEQUENCE_ERROR |
+| **5700-5749** | Server | LOGIC_ERROR |
+| **5750-5779** | Server | DASHBOARD_ERROR |
+| **5780-5799** | Server | SUBZONE_ERROR |
+| **5800-5849** | Server | AUTOOPS_ERROR |
+| **5850-5999** | Server | RESERVED |
 | **6000-6099** | Test | TEST (Testinfrastruktur-Fehler) |
 
 **MQTT Error Publishing Rate-Limiting (F8):** ESP32 ErrorTracker throttles MQTT error publishes to max 1 per error code per 60s window. Suppressed occurrences are counted and logged on next publish. Implementation: `error_tracker.cpp` — `shouldPublishError()` with modulo-hashed 32-slot static table.
@@ -439,6 +446,51 @@ allowed-tools: Read
 
 ---
 
+## 12a. Server Logic Errors (5700-5749)
+
+| Code | Name | Beschreibung |
+|------|------|--------------|
+| 5700 | `RULE_NOT_FOUND` | Logic rule not found |
+| 5701 | `RULE_VALIDATION_FAILED` | Logic rule validation failed |
+| 5702 | `RULE_EXECUTION_FAILED` | Logic rule execution failed |
+| 5703 | `RULE_LOOP_DETECTED` | Feedback loop detected in logic rules |
+| 5704 | `RULE_CONDITION_INVALID` | Invalid condition in logic rule |
+| 5705 | `RULE_ACTION_FAILED` | Logic rule action execution failed |
+
+---
+
+## 12b. Server Dashboard Errors (5750-5779)
+
+| Code | Name | Beschreibung |
+|------|------|--------------|
+| 5750 | `DASHBOARD_NOT_FOUND` | Dashboard configuration not found |
+| 5751 | `DASHBOARD_LAYOUT_INVALID` | Dashboard layout configuration invalid |
+| 5752 | `WIDGET_TYPE_UNKNOWN` | Unknown dashboard widget type |
+| 5753 | `WIDGET_CONFIG_INVALID` | Dashboard widget configuration invalid |
+
+---
+
+## 12c. Server Subzone Errors (5780-5799)
+
+| Code | Name | Beschreibung |
+|------|------|--------------|
+| 5780 | `SUBZONE_NOT_FOUND` | Server-side subzone not found |
+| 5781 | `SUBZONE_PARENT_INVALID` | Subzone parent zone invalid or missing |
+| 5782 | `SUBZONE_GPIO_CONFLICT` | Subzone GPIO assignment conflict |
+
+> **Hinweis:** ESP32-seitige Subzone-Codes (2500-2506) bleiben unverändert in Section 3.
+
+---
+
+## 12d. Server AutoOps Errors (5800-5849)
+
+| Code | Name | Beschreibung |
+|------|------|--------------|
+| 5800 | `AUTOOPS_JOB_FAILED` | AutoOps job execution failed |
+| 5801 | `AUTOOPS_SCHEDULE_INVALID` | AutoOps schedule configuration invalid |
+
+---
+
 ## 13. ESP32 Config Error Codes (String-based)
 
 Diese Codes werden in `config_response` Payloads verwendet:
@@ -470,6 +522,9 @@ Diese Codes werden in `config_response` Payloads verwendet:
 | Datei | Beschreibung |
 |-------|--------------|
 | `El Servador/god_kaiser_server/src/core/error_codes.py` | Error Code Enums + Helper-Funktionen |
+| `El Servador/god_kaiser_server/src/core/exceptions.py` | Exception-Hierarchie mit numeric_code Bridge |
+| `El Servador/god_kaiser_server/src/core/exception_handlers.py` | Global Exception Handler (numeric_code + request_id in Response) |
+| `El Servador/god_kaiser_server/src/core/esp32_error_mapping.py` | ESP32 Error Enrichment (Troubleshooting-Texte, 11 neue Einträge) |
 
 ### Helper-Funktionen (Python)
 
@@ -495,7 +550,7 @@ const char* range = getErrorCodeRange(1002);   // → "HARDWARE"
 
 ## 15. Synchronisations-Analyse (ESP32 ↔ Server)
 
-> **Letzte Prüfung:** 2026-02-01
+> **Letzte Prüfung:** 2026-03-01
 
 ### ✅ Vollständig synchronisiert
 
@@ -934,7 +989,7 @@ GET /api/v1/actuators/{actuator_id}/locks
 
 ## 18. Empfohlene Korrekturen
 
-> **Status:** Korrektur 1 und 3 wurden in Phase 0 umgesetzt (I2C 1015-1018, DS18B20 1060-1063 in Python-Mirror eingefuegt).
+> **Status:** Korrektur 1, 2 und 3 wurden umgesetzt (I2C 1015-1018, DS18B20 1060-1063 in Python-Mirror + Enrichment in esp32_error_mapping.py). Exception-Bridge (numeric_code) und 4 neue Server-Ranges (Logic/Dashboard/Subzone/AutoOps) in Block 1-3 hinzugefügt (2026-03-01).
 
 ### 1. Server error_codes.py - ESP32HardwareError erweitern (ERLEDIGT)
 

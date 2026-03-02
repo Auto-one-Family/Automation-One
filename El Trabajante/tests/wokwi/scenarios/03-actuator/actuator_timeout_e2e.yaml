@@ -9,6 +9,9 @@ steps:
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"
 
+  # Registration gate: opens on server confirmation or 10s timeout fallback
+  - wait-serial: "REGISTRATION"
+
   # Wait for system to be operational
   - wait-serial: "heartbeat"
 

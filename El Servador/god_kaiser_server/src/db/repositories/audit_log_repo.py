@@ -153,6 +153,46 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def log_api_error(
+        self,
+        error_code: str,
+        numeric_code: Optional[int],
+        severity: str,
+        message: str,
+        source_id: str,
+        method: str,
+        details: Optional[dict] = None,
+    ) -> AuditLog:
+        """
+        Log a REST API error with numeric error code.
+
+        Called by the global exception handler when a GodKaiserException
+        with numeric_code is raised.
+
+        Args:
+            error_code: String error code (e.g., "ESP_NOT_FOUND")
+            numeric_code: Numeric error code (e.g., 5001)
+            severity: Severity level (info, warning, error, critical)
+            message: Error message
+            source_id: Request path (e.g., "/api/v1/esp/devices")
+            method: HTTP method (GET, POST, etc.)
+            details: Additional error details
+
+        Returns:
+            Created AuditLog entry
+        """
+        return await self.create(
+            event_type=AuditEventType.API_ERROR,
+            severity=severity,
+            source_type=AuditSourceType.API,
+            source_id=source_id,
+            status="failed",
+            message=message,
+            details=details or {},
+            error_code=str(numeric_code) if numeric_code else error_code,
+            error_description=message,
+        )
+
     async def log_mqtt_error(
         self,
         source_id: str,

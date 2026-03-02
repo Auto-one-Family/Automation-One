@@ -22,8 +22,13 @@ References:
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, status
+from fastapi import APIRouter, Path
 
+from ...core.exceptions import (
+    ESPNotFoundError,
+    SubzoneNotFoundException,
+    ValidationException,
+)
 from ...core.logging_config import get_logger
 from ...db.repositories import ESPRepository
 from ..deps import DBSession, MQTTPublisher, OperatorUser
@@ -125,15 +130,9 @@ async def assign_subzone(
         # ESP not found or no zone assigned
         error_msg = str(e)
         if "not found" in error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=error_msg,
-            )
+            raise ESPNotFoundError(esp_id)
         else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=error_msg,
-            )
+            raise ValidationException("subzone", error_msg)
 
 
 @router.delete(
@@ -183,10 +182,10 @@ async def remove_subzone(
             subzone_id=subzone_id,
         )
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
-        )
+        error_msg = str(e)
+        if "not found" in error_msg:
+            raise SubzoneNotFoundException(subzone_id, esp_id)
+        raise ValidationException("subzone", error_msg)
 
 
 # =============================================================================
@@ -230,10 +229,7 @@ async def get_subzones(
     try:
         return await service.get_esp_subzones(device_id=esp_id)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
-        )
+        raise ESPNotFoundError(esp_id)
 
 
 @router.get(
@@ -271,10 +267,7 @@ async def get_subzone(
     subzone = await service.get_subzone(device_id=esp_id, subzone_id=subzone_id)
 
     if not subzone:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Subzone '{subzone_id}' not found on device '{esp_id}'",
-        )
+        raise SubzoneNotFoundException(subzone_id, esp_id)
 
     return subzone
 
@@ -343,10 +336,10 @@ async def enable_safe_mode(
             reason=request.reason,
         )
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
-        )
+        error_msg = str(e)
+        if "not found" in error_msg:
+            raise SubzoneNotFoundException(subzone_id, esp_id)
+        raise ValidationException("safe_mode", error_msg)
 
 
 @router.delete(
@@ -410,7 +403,7 @@ async def disable_safe_mode(
             reason=request.reason,
         )
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
-        )
+        error_msg = str(e)
+        if "not found" in error_msg:
+            raise SubzoneNotFoundException(subzone_id, esp_id)
+        raise ValidationException("safe_mode", error_msg)

@@ -19,9 +19,18 @@ Server (5000-5999):
 - DATABASE_ERROR: 5300-5399
 - SERVICE_ERROR: 5400-5499
 - AUDIT_ERROR: 5500-5599
+- SEQUENCE_ERROR: 5600-5699
+- LOGIC_ERROR: 5700-5749
+- DASHBOARD_ERROR: 5750-5779
+- SUBZONE_ERROR: 5780-5799
+- AUTOOPS_ERROR: 5800-5849
+- RESERVED: 5850-5999
 
-Phase: Runtime Config Flow Implementation
-Priority: MEDIUM
+Test Infrastructure (6000-6099):
+- TEST_ERROR: 6000-6099
+
+Phase: Cross-Layer Error Consistency
+Priority: HIGH
 Status: IMPLEMENTED
 """
 
@@ -321,6 +330,41 @@ class SequenceErrorCode(IntEnum):
     SEQ_SAFETY_BLOCKED = 5642
 
 
+class LogicErrorCode(IntEnum):
+    """Logic Engine error codes (5700-5749)."""
+
+    RULE_NOT_FOUND = 5700
+    RULE_VALIDATION_FAILED = 5701
+    RULE_EXECUTION_FAILED = 5702
+    RULE_LOOP_DETECTED = 5703
+    RULE_CONDITION_INVALID = 5704
+    RULE_ACTION_FAILED = 5705
+
+
+class DashboardErrorCode(IntEnum):
+    """Dashboard error codes (5750-5779)."""
+
+    DASHBOARD_NOT_FOUND = 5750
+    DASHBOARD_LAYOUT_INVALID = 5751
+    WIDGET_TYPE_UNKNOWN = 5752
+    WIDGET_CONFIG_INVALID = 5753
+
+
+class SubzoneErrorCode(IntEnum):
+    """Server-side Subzone error codes (5780-5799)."""
+
+    SUBZONE_NOT_FOUND = 5780
+    SUBZONE_PARENT_INVALID = 5781
+    SUBZONE_GPIO_CONFLICT = 5782
+
+
+class AutoOpsErrorCode(IntEnum):
+    """AutoOps error codes (5800-5849)."""
+
+    AUTOOPS_JOB_FAILED = 5800
+    AUTOOPS_SCHEDULE_INVALID = 5801
+
+
 class TestErrorCodes(IntEnum):
     """Test infrastructure error codes (6000-6099). Only used in test reports, NOT in production."""
 
@@ -549,6 +593,25 @@ SERVER_ERROR_DESCRIPTIONS: Dict[int, str] = {
     5640: "Actuator locked by another sequence/rule",
     5641: "Rate limit exceeded",
     5642: "Action blocked by safety system",
+    # Logic Engine errors (5700-5749)
+    5700: "Logic rule not found",
+    5701: "Logic rule validation failed",
+    5702: "Logic rule execution failed",
+    5703: "Logic rule loop detected (circular dependency)",
+    5704: "Logic rule condition invalid",
+    5705: "Logic rule action execution failed",
+    # Dashboard errors (5750-5779)
+    5750: "Dashboard not found",
+    5751: "Dashboard layout invalid",
+    5752: "Unknown widget type",
+    5753: "Widget configuration invalid",
+    # Subzone errors (5780-5799)
+    5780: "Subzone not found",
+    5781: "Subzone parent zone invalid",
+    5782: "Subzone GPIO conflict with existing assignment",
+    # AutoOps errors (5800-5849)
+    5800: "AutoOps job execution failed",
+    5801: "AutoOps schedule configuration invalid",
 }
 
 # Test infrastructure error descriptions
@@ -650,6 +713,14 @@ def get_error_code_range(code: int) -> str:
         return "SERVER_AUDIT"
     elif 5600 <= code < 5700:
         return "SERVER_SEQUENCE"
+    elif 5700 <= code < 5750:
+        return "SERVER_LOGIC"
+    elif 5750 <= code < 5780:
+        return "SERVER_DASHBOARD"
+    elif 5780 <= code < 5800:
+        return "SERVER_SUBZONE"
+    elif 5800 <= code < 5850:
+        return "SERVER_AUTOOPS"
     elif 6000 <= code < 6100:
         return "TEST"
     return "UNKNOWN"

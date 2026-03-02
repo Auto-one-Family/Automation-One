@@ -21,6 +21,8 @@ class GodKaiserException(Exception):
         message: str,
         error_code: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None,
+        *,
+        numeric_code: Optional[int] = None,
     ) -> None:
         """
         Initialize exception.
@@ -29,20 +31,24 @@ class GodKaiserException(Exception):
             message: Error message
             error_code: Optional error code for categorization
             details: Optional additional details dict
+            numeric_code: Optional numeric error code (1000-5999) for cross-layer tracing
         """
         self.message = message
         self.error_code = error_code or self.error_code
         self.details = details or {}
+        self.numeric_code = numeric_code
         super().__init__(self.message)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert exception to dictionary for API responses"""
-        return {
+        result = {
             "error": self.__class__.__name__,
             "message": self.message,
             "error_code": self.error_code,
+            "numeric_code": self.numeric_code,
             "details": self.details,
         }
+        return result
 
 
 # Database Exceptions
@@ -82,6 +88,7 @@ class DatabaseConnectionException(DatabaseException):
             message="Database connection failed",
             error_code="DB_CONNECTION_FAILED",
             details={"details": details} if details else {},
+            numeric_code=5304,
         )
 
 
@@ -100,6 +107,7 @@ class MQTTConnectionException(MQTTException):
             message=f"Failed to connect to MQTT broker at {broker_host}:{broker_port}",
             error_code="MQTT_CONNECTION_FAILED",
             details={"broker_host": broker_host, "broker_port": broker_port, "details": details},
+            numeric_code=5104,
         )
 
 
@@ -111,6 +119,7 @@ class MQTTPublishException(MQTTException):
             message=f"Failed to publish to topic: {topic}",
             error_code="MQTT_PUBLISH_FAILED",
             details={"topic": topic, "details": details},
+            numeric_code=5101,
         )
 
 
@@ -203,12 +212,13 @@ class ESP32NotFoundException(ESP32Exception, NotFoundError):
     error_code = "ESP_NOT_FOUND"
 
     def __init__(self, esp_id: str) -> None:
-        super().__init__(
+        GodKaiserException.__init__(
+            self,
             message=f"ESP32 device {esp_id} not found",
             error_code="ESP_NOT_FOUND",
             details={"esp_id": esp_id},
+            numeric_code=5001,
         )
-        NotFoundError.__init__(self, "ESP32", esp_id)
 
 
 class ESPNotFoundError(NotFoundError):
@@ -217,8 +227,13 @@ class ESPNotFoundError(NotFoundError):
     error_code = "ESP_NOT_FOUND"
 
     def __init__(self, esp_id: str) -> None:
-        super().__init__("ESP32", esp_id)
-        self.details["esp_id"] = esp_id
+        GodKaiserException.__init__(
+            self,
+            message=f"ESP32 device {esp_id} not found",
+            error_code="ESP_NOT_FOUND",
+            details={"resource_type": "ESP32", "identifier": esp_id, "esp_id": esp_id},
+            numeric_code=5001,
+        )
 
 
 class ESP32OfflineException(ESP32Exception):
@@ -229,6 +244,7 @@ class ESP32OfflineException(ESP32Exception):
             message=f"ESP32 device {esp_id} is offline",
             error_code="ESP32_OFFLINE",
             details={"esp_id": esp_id},
+            numeric_code=5007,
         )
 
 
@@ -257,12 +273,12 @@ class SensorNotFoundException(SensorException, NotFoundError):
     error_code = "SENSOR_NOT_FOUND"
 
     def __init__(self, esp_id: str, gpio: int) -> None:
-        super().__init__(
+        GodKaiserException.__init__(
+            self,
             message=f"Sensor not found: ESP {esp_id}, GPIO {gpio}",
             error_code="SENSOR_NOT_FOUND",
-            details={"esp_id": esp_id, "gpio": gpio},
+            details={"resource_type": "Sensor", "identifier": f"{esp_id}:{gpio}", "esp_id": esp_id, "gpio": gpio},
         )
-        NotFoundError.__init__(self, "Sensor", f"{esp_id}:{gpio}")
 
 
 class SensorNotFoundError(NotFoundError):
@@ -271,9 +287,12 @@ class SensorNotFoundError(NotFoundError):
     error_code = "SENSOR_NOT_FOUND"
 
     def __init__(self, esp_id: str, gpio: int) -> None:
-        super().__init__("Sensor", f"{esp_id}:{gpio}")
-        self.details["esp_id"] = esp_id
-        self.details["gpio"] = gpio
+        GodKaiserException.__init__(
+            self,
+            message=f"Sensor not found: ESP {esp_id}, GPIO {gpio}",
+            error_code="SENSOR_NOT_FOUND",
+            details={"resource_type": "Sensor", "identifier": f"{esp_id}:{gpio}", "esp_id": esp_id, "gpio": gpio},
+        )
 
 
 class SensorProcessingException(SensorException):
@@ -300,12 +319,12 @@ class ActuatorNotFoundException(ActuatorException, NotFoundError):
     error_code = "ACTUATOR_NOT_FOUND"
 
     def __init__(self, esp_id: str, gpio: int) -> None:
-        super().__init__(
+        GodKaiserException.__init__(
+            self,
             message=f"Actuator not found: ESP {esp_id}, GPIO {gpio}",
             error_code="ACTUATOR_NOT_FOUND",
-            details={"esp_id": esp_id, "gpio": gpio},
+            details={"resource_type": "Actuator", "identifier": f"{esp_id}:{gpio}", "esp_id": esp_id, "gpio": gpio},
         )
-        NotFoundError.__init__(self, "Actuator", f"{esp_id}:{gpio}")
 
 
 class ActuatorNotFoundError(NotFoundError):
@@ -314,9 +333,12 @@ class ActuatorNotFoundError(NotFoundError):
     error_code = "ACTUATOR_NOT_FOUND"
 
     def __init__(self, esp_id: str, gpio: int) -> None:
-        super().__init__("Actuator", f"{esp_id}:{gpio}")
-        self.details["esp_id"] = esp_id
-        self.details["gpio"] = gpio
+        GodKaiserException.__init__(
+            self,
+            message=f"Actuator not found: ESP {esp_id}, GPIO {gpio}",
+            error_code="ACTUATOR_NOT_FOUND",
+            details={"resource_type": "Actuator", "identifier": f"{esp_id}:{gpio}", "esp_id": esp_id, "gpio": gpio},
+        )
 
 
 class ActuatorCommandFailedException(ActuatorException):
@@ -367,6 +389,7 @@ class DuplicateError(GodKaiserException):
             message=f"{resource_type} with {field}={value} already exists",
             error_code="DUPLICATE",
             details={"resource_type": resource_type, "field": field, "value": str(value)},
+            numeric_code=5208,
         )
 
 
@@ -423,6 +446,7 @@ class ConfigurationException(GodKaiserException):
             message=f"Invalid configuration for '{config_key}': {message}",
             error_code="CONFIGURATION_ERROR",
             details={"config_key": config_key, "config_message": message},
+            numeric_code=5002,
         )
 
 
@@ -500,3 +524,166 @@ class DuplicateESPError(DuplicateError):
     def __init__(self, esp_id: str) -> None:
         super().__init__("ESP32", "device_id", esp_id)
         self.details["esp_id"] = esp_id
+
+
+# Device Configuration Exceptions
+class DeviceNotApprovedError(GodKaiserException):
+    """Raised when attempting to configure a device that is not approved"""
+
+    status_code = 403
+    error_code = "DEVICE_NOT_APPROVED"
+
+    def __init__(self, esp_id: str, current_status: str) -> None:
+        super().__init__(
+            message=f"Device '{esp_id}' must be approved before configuration (current status: {current_status})",
+            error_code="DEVICE_NOT_APPROVED",
+            details={
+                "device_id": esp_id,
+                "current_status": current_status,
+            },
+            numeric_code=5405,  # ServiceErrorCode.PERMISSION_DENIED
+        )
+
+
+class GpioConflictError(GodKaiserException):
+    """Raised when a GPIO pin conflict is detected"""
+
+    status_code = 409
+    error_code = "GPIO_CONFLICT"
+
+    def __init__(
+        self,
+        gpio: int,
+        conflict_type: str,
+        conflict_component: Optional[str] = None,
+        conflict_id: Optional[str] = None,
+        message: Optional[str] = None,
+    ) -> None:
+        details: Dict[str, Any] = {
+            "gpio": gpio,
+            "conflict_type": conflict_type,
+            "conflict_component": conflict_component,
+            "conflict_id": conflict_id,
+        }
+        super().__init__(
+            message=message or f"GPIO {gpio} conflict: {conflict_type}",
+            error_code="GPIO_CONFLICT",
+            details=details,
+            numeric_code=5208,  # ValidationErrorCode.DUPLICATE_ENTRY - GPIO already in use
+        )
+
+
+class GatewayTimeoutError(GodKaiserException):
+    """Raised when an ESP32 device does not respond within the expected timeout"""
+
+    status_code = 504
+    error_code = "GATEWAY_TIMEOUT"
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(
+            message=message,
+            error_code="GATEWAY_TIMEOUT",
+            details=details or {},
+            numeric_code=5403,  # ServiceErrorCode.OPERATION_TIMEOUT
+        )
+
+
+# Logic Engine Exceptions
+class LogicException(GodKaiserException):
+    """Base exception for logic engine errors"""
+
+    pass
+
+
+class RuleNotFoundException(LogicException, NotFoundError):
+    """Raised when a logic rule is not found"""
+
+    status_code = 404
+    error_code = "RULE_NOT_FOUND"
+
+    def __init__(self, rule_id: Any) -> None:
+        GodKaiserException.__init__(
+            self,
+            message=f"Logic rule '{rule_id}' not found",
+            error_code="RULE_NOT_FOUND",
+            details={"resource_type": "LogicRule", "identifier": str(rule_id), "rule_id": str(rule_id)},
+            numeric_code=5700,
+        )
+
+
+class RuleValidationException(LogicException):
+    """Raised when logic rule validation fails"""
+
+    status_code = 400
+    error_code = "RULE_VALIDATION_FAILED"
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(
+            message=message,
+            error_code="RULE_VALIDATION_FAILED",
+            details=details,
+            numeric_code=5701,
+        )
+
+
+# Subzone Exceptions (Server-side)
+class SubzoneException(GodKaiserException):
+    """Base exception for subzone errors"""
+
+    pass
+
+
+class SubzoneNotFoundException(SubzoneException, NotFoundError):
+    """Raised when a subzone is not found on the server"""
+
+    status_code = 404
+    error_code = "SUBZONE_NOT_FOUND"
+
+    def __init__(self, subzone_id: str, esp_id: Optional[str] = None) -> None:
+        details: Dict[str, Any] = {
+            "resource_type": "Subzone",
+            "identifier": subzone_id,
+            "subzone_id": subzone_id,
+        }
+        if esp_id:
+            details["esp_id"] = esp_id
+        GodKaiserException.__init__(
+            self,
+            message=f"Subzone '{subzone_id}' not found",
+            error_code="SUBZONE_NOT_FOUND",
+            details=details,
+            numeric_code=5780,
+        )
+
+
+# Sequence Exceptions
+class SequenceNotFoundException(NotFoundError):
+    """Raised when a sequence is not found"""
+
+    error_code = "SEQUENCE_NOT_FOUND"
+
+    def __init__(self, sequence_id: str) -> None:
+        super().__init__("Sequence", sequence_id)
+        self.details["sequence_id"] = sequence_id
+        self.numeric_code = 5611
+
+
+# User Exceptions
+class UserNotFoundException(NotFoundError):
+    """Raised when a user is not found"""
+
+    error_code = "USER_NOT_FOUND"
+
+    def __init__(self, user_id: Any) -> None:
+        super().__init__("User", user_id)
+
+
+# Dashboard Exceptions
+class DashboardNotFoundException(NotFoundError):
+    """Raised when a dashboard is not found or not accessible"""
+
+    error_code = "DASHBOARD_NOT_FOUND"
+
+    def __init__(self, dashboard_id: Any) -> None:
+        super().__init__("Dashboard", dashboard_id)
+        self.numeric_code = 5750

@@ -25,8 +25,9 @@ References:
 
 from typing import List
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
 
+from ...core.exceptions import ESPNotFoundError
 from ...core.logging_config import get_logger
 from ...db.repositories import ESPRepository
 from ...schemas.zone import ZoneAssignRequest, ZoneAssignResponse, ZoneInfo, ZoneRemoveResponse
@@ -84,10 +85,6 @@ async def assign_zone(
 
     Returns:
         ZoneAssignResponse with assignment status
-
-    Raises:
-        HTTPException 404: If ESP device not found
-        HTTPException 500: If MQTT publish fails
     """
     esp_repo = ESPRepository(db)
     zone_service = ZoneService(esp_repo)
@@ -118,11 +115,8 @@ async def assign_zone(
 
         return result
 
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
-        )
+    except ValueError:
+        raise ESPNotFoundError(esp_id)
 
 
 @router.delete(
@@ -178,11 +172,8 @@ async def remove_zone(
 
         return result
 
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
-        )
+    except ValueError:
+        raise ESPNotFoundError(esp_id)
 
 
 # =============================================================================
@@ -218,10 +209,7 @@ async def get_zone_info(
     device = await esp_repo.get_by_device_id(esp_id)
 
     if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     return ZoneInfo(
         zone_id=device.zone_id,

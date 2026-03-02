@@ -12,8 +12,9 @@ Provides:
 import uuid
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query, status
 
+from ...core.exceptions import DashboardNotFoundException
 from ...core.logging_config import get_logger
 from ...schemas.common import PaginationMeta
 from ...schemas.dashboard import (
@@ -92,10 +93,7 @@ async def get_dashboard(
     )
 
     if dashboard is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Dashboard '{dashboard_id}' not found or not accessible",
-        )
+        raise DashboardNotFoundException(dashboard_id)
 
     return DashboardDataResponse(
         success=True,
@@ -161,10 +159,7 @@ async def update_dashboard(
     )
 
     if dashboard is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Dashboard '{dashboard_id}' not found or not authorized",
-        )
+        raise DashboardNotFoundException(dashboard_id)
 
     return DashboardDataResponse(
         success=True,
@@ -198,10 +193,7 @@ async def delete_dashboard(
     )
 
     if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Dashboard '{dashboard_id}' not found or not authorized",
-        )
+        raise DashboardNotFoundException(dashboard_id)
 
     return DashboardDataResponse(
         success=True,

@@ -27,11 +27,11 @@ Fuer Szenario 7 (Emergency Cascade) wird ein Helper-Script verwendet: `tests/wok
 | 1014/1015 | I2C_BUS_ERROR/STUCK | `error_i2c_bus_stuck.yaml` | `ConfigResponse published` | Config mit SHT31 auf nicht-existierender I2C-Adresse | warning |
 | 1040 | SENSOR_READ_FAILED | `error_sensor_timeout.yaml` | `ConfigResponse published` | Config mit DS18B20 auf GPIO 32 (nicht angeschlossen) | warning |
 | 1050 | ACTUATOR_SET_FAILED | `error_actuator_timeout.yaml` | `Actuator` | Config + ON-Command auf GPIO 5 (LED) | warning |
-| 2001 | NVS_INIT_FAILED | `error_nvs_corrupt.yaml` | `FACTORY RESET via MQTT` | system/command mit factory_reset + confirm:true | error |
+| 2001 | NVS_INIT_FAILED | `error_nvs_corrupt.yaml` | `FACTORY RESET via MQTT` | system/command mit factory_reset + confirm:true | error | Testet MQTT Factory-Reset-Command, NICHT Error-Code 2001 direkt (NVS_INIT_FAILED wird in Wokwi nicht ausgeloest) |
 | 3011 | MQTT_CONNECT_FAILED | `error_mqtt_disconnect.yaml` | `ConfigResponse published` | Config mit DS18B20 auf GPIO 4 (validiert MQTT-Aktivitaet) | error |
 | 4001+ | STATE_INVALID | `error_emergency_cascade.yaml` | `BROADCAST EMERGENCY-STOP RECEIVED` | 5 Messages: Config + Actuator ON + Emergency + Clear + Emergency | critical |
 | 4040 | MEMORY_FULL | `error_heap_pressure.yaml` | `ConfigResponse published` (2x) | Config mit 8 Sensoren + 6 Aktoren | warning |
-| 4070 | WATCHDOG_TIMEOUT | `error_watchdog_trigger.yaml` | `BROADCAST EMERGENCY-STOP RECEIVED` | Config + Broadcast Emergency + Emergency Clear | critical |
+| 4070 | WATCHDOG_TIMEOUT | `error_watchdog_trigger.yaml` | `BROADCAST EMERGENCY-STOP RECEIVED` | Config + Broadcast Emergency + Emergency Clear | critical | Testet System-Stabilitaet unter Last via Emergency-Cascade, NICHT echten WDT-Trigger (WDT in Wokwi deaktiviert) |
 | ConfigErrorCode | JSON_PARSE_ERROR | `error_config_invalid_json.yaml` | `Failed to parse` | Absichtlich kaputtes JSON an config-Topic | warning |
 
 ---

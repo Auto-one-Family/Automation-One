@@ -21,10 +21,20 @@ References:
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordRequestForm
 
 from ...core.config import get_settings
+from ...core.exceptions import (
+    AuthenticationError,
+    AuthorizationError,
+    ConfigurationException,
+    DuplicateError,
+    InvalidCredentialsException,
+    InvalidTokenException,
+    ServiceUnavailableError,
+    TokenExpiredException,
+)
 from ...core.logging_config import get_logger
 from ...core.security import (
     create_access_token,
@@ -135,9 +145,6 @@ async def initial_setup(
 
     Returns:
         SetupResponse with tokens and user info
-
-    Raises:
-        HTTPException: 403 if users already exist
     """
     user_repo = UserRepository(db)
 
@@ -145,25 +152,18 @@ async def initial_setup(
     user_count = await user_repo.count()
     if user_count > 0:
         logger.warning("Setup attempted but users already exist")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Setup already completed. Use /register endpoint instead.",
+        raise AuthorizationError(
+            "Setup already completed. Use /register endpoint instead."
         )
 
     # Check if username or email already exists (safety check)
     existing_user = await user_repo.get_by_username(request.username)
     if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Username '{request.username}' already exists",
-        )
+        raise DuplicateError("User", "username", request.username)
 
     existing_email = await user_repo.get_by_email(request.email)
     if existing_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Email '{request.email}' already registered",
-        )
+        raise DuplicateError("User", "email", request.email)
 
     # Create first admin user
     admin = await user_repo.create_user(
@@ -242,9 +242,6 @@ async def login(
 
     Returns:
         LoginResponse with tokens and user info
-
-    Raises:
-        HTTPException: 401 if credentials invalid
     """
     user_repo = UserRepository(db)
 
@@ -261,18 +258,11 @@ async def login(
             pass  # Email login successful
         else:
             logger.warning(f"Failed login attempt for: {credentials.username}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid username or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            raise InvalidCredentialsException()
 
     if not user.is_active:
         logger.warning(f"Login attempt for inactive user: {user.username}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User account is disabled",
-        )
+        raise AuthenticationError("User account is disabled")
 
     # Generate tokens (include token_version for logout-all functionality)
     expires_delta = timedelta(days=7) if credentials.remember_me else None
@@ -337,11 +327,7 @@ async def login_form(
     )
 
     if not user or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise InvalidCredentialsException()
 
     # FIX: Include token_version for logout-all functionality (same as /login)
     access_token = create_access_token(
@@ -394,27 +380,18 @@ async def register(
 
     Returns:
         RegisterResponse with created user info
-
-    Raises:
-        HTTPException: 400 if username/email exists, 403 if not admin
     """
     user_repo = UserRepository(db)
 
     # Check if username already exists
     existing_user = await user_repo.get_by_username(request.username)
     if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Username '{request.username}' already exists",
-        )
+        raise DuplicateError("User", "username", request.username)
 
     # Check if email already exists
     existing_email = await user_repo.get_by_email(request.email)
     if existing_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Email '{request.email}' already registered",
-        )
+        raise DuplicateError("User", "email", request.email)
 
     # Create user
     new_user = await user_repo.create_user(
@@ -477,9 +454,6 @@ async def refresh_token(
 
     Returns:
         RefreshTokenResponse with new tokens
-
-    Raises:
-        HTTPException: 401 if refresh token invalid
     """
     old_refresh_token = request.refresh_token
 
@@ -487,10 +461,7 @@ async def refresh_token(
     blacklist_repo = TokenBlacklistRepository(db)
     if await blacklist_repo.is_blacklisted(old_refresh_token):
         logger.warning("Refresh token is blacklisted")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token has been revoked",
-        )
+        raise InvalidTokenException("Refresh token has been revoked")
 
     try:
         # Verify refresh token
@@ -498,22 +469,18 @@ async def refresh_token(
         user_id = int(payload.get("sub"))
         expires_at = datetime.fromtimestamp(payload.get("exp"), tz=timezone.utc)
 
+    except InvalidTokenException:
+        raise
     except Exception as e:
         logger.warning(f"Refresh token verification failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
-        )
+        raise TokenExpiredException()
 
     # Verify user still exists and is active
     user_repo = UserRepository(db)
     user = await user_repo.get_by_id(user_id)
 
     if not user or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or inactive",
-        )
+        raise AuthenticationError("User not found or inactive")
 
     # TOKEN ROTATION: Blacklist old refresh token BEFORE creating new ones
     # Cache user data before any DB operations that might fail
@@ -721,9 +688,6 @@ async def configure_mqtt_auth(
 
     Returns:
         MQTTAuthConfigResponse
-
-    Raises:
-        HTTPException: 500 if configuration fails
     """
     try:
         # Initialize repositories and service
@@ -774,16 +738,13 @@ async def configure_mqtt_auth(
 
     except ValueError as e:
         logger.error(f"MQTT auth configuration failed (validation): {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Configuration failed: {str(e)}",
-        )
+        raise ConfigurationException("mqtt_auth", str(e))
     except Exception as e:
         logger.error(f"MQTT auth configuration failed: {e}", exc_info=True)
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="MQTT authentication configuration failed. Check server logs for details.",
+        raise ServiceUnavailableError(
+            "MQTT Authentication",
+            "MQTT authentication configuration failed. Check server logs for details.",
         )
 
 

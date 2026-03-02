@@ -1,114 +1,149 @@
-# Frontend Dev Report: BUG-011 und BUG-012 Fix
+# Frontend Dev Report: Error-Handling Verifikation (parseApiError.ts + errors.ts)
 
-## Modus: B (Implementierung)
+## Modus: B (Implementierung / Verifikation & Fix)
+## Auftrag: Verifikation und Debugging der Frontend Error-Handling-Änderungen
 
-## Auftrag
-- BUG-011: Offline-Filter zeigt auch Online-Geräte innerhalb gefilterter Zonen (Unassigned-Sektion)
-- BUG-012: Cross-ESP Button zeigt keine sichtbare Änderung beim Klick
+---
 
 ## Codebase-Analyse
 
-### Gelesene Dateien
-- `El Frontend/src/views/HardwareView.vue` — vollständig (Zeilen 1-950+)
-- `El Frontend/src/components/dashboard/ZonePlate.vue` — vollständig
-- `El Frontend/src/composables/useZoneDragDrop.ts` — Zeilen 125-162 (groupDevicesByZone)
-- `El Frontend/src/composables/useToast.ts` — vollständig
+### Analysierte Dateien
+- `El Frontend/src/api/parseApiError.ts` — neue Datei (vollständig gelesen)
+- `El Frontend/src/api/errors.ts` — geänderte Datei (vollständig gelesen)
+- `El Frontend/src/api/index.ts` — Barrel-Export / Axios-Interceptor (vollständig gelesen)
+- `El Frontend/src/api/esp.ts` — Referenz für bestehende Error-Handling-Patterns (vollständig gelesen)
+- Glob aller `El Frontend/src/api/*.ts` Dateien — Strukturübersicht
 
-### BUG-011 Root Cause (gefunden)
-Die ursprüngliche Vermutung war korrekt — aber der Fehler lag nicht in ZonePlate:
+### Gefundene Patterns (bestehende Error-Handling-Konventionen)
+- ESP API nutzt `catch (err: unknown)` + Type-Assertion `err as { response?: { status?: number } }` — manuelles Status-Checking ohne strukturierten Parser
+- Kein zentraler Error-Parser bisher aktiv verwendet
+- `api/index.ts` exportiert nur den Axios-Singleton und HTTP-Helper-Methoden — kein Barrel-Export für `errors.ts` oder `parseApiError.ts`
 
-- `filteredEsps` (Zeile 245-272): filtert ESPs korrekt nach Status/Type
-- `zoneGroups` (Zeile 274-302): nutzt `groupDevicesByZone(filteredEsps.value)` — korrekt
-- `ZonePlate` bekommt `:devices="group.devices"` — korrekt gefilterte Devices
-- `ZonePlate.vue` rendert ausschliesslich `props.devices` (kein direkter Store-Zugriff fuers Rendering)
+---
 
-**Eigentlicher Bug:** `unassignedDevices` (Zeile 305) wurde hardcoded auf `espStore.unassignedDevices` gesetzt
-— das sind ALLE unzugewiesenen Devices, komplett am Filter vorbei. Der Unassigned-Bereich ignorierte
-daher sowohl den Status-Filter als auch den Type-Filter.
+## Qualitätsprüfung (8 Dimensionen)
 
-### BUG-012 Root Cause (bestätigt)
-- `showCrossEspConnections = ref(true)` war ein reiner UI-State ohne angebundenen Content
-- Kein Panel/Overlay nutzte diesen State
-- Button togglte visuell auf "aktiv" ohne sichtbare Auswirkung — irrefuehrend fuer den User
+| # | Dimension | Ergebnis |
+|---|-----------|----------|
+| 1 | **Struktur & Einbindung** | Datei korrekt in `api/` platziert. `import type` für AxiosError korrekt. |
+| 2 | **Namenskonvention** | `parseApiError` (camelCase), `StructuredApiError` (PascalCase), Helper-Funktionen (camelCase) — konventionskonform. |
+| 3 | **Rückwärtskompatibilität** | Neue Datei, keine bestehenden Abhängigkeiten. Keine Breaking Changes. |
+| 4 | **Wiederverwendbarkeit** | Interface + Parser + 3 Helper-Funktionen — gut modular. Klarer Verwendungszweck. |
+| 5 | **Speicher & Ressourcen** | Reine Utility-Datei, keine State-Haltung, keine Memory-Leak-Risiken. |
+| 6 | **Fehlertoleranz** | Alle 3 Edge Cases abgedeckt: GodKaiserException-Format, FastAPI HTTPException-Format, Netzwerkfehler/unbekanntes Format. Nullsafe Zugriffe via `?.` und `??`. |
+| 7 | **Seiteneffekte** | Keine. Pure Funktion ohne Store-Zugriff oder Subscriptions. |
+| 8 | **Industrielles Niveau** | `import type` korrekt. Kein `any`. Alle Felder typisiert. Fallback-Werte für alle Felder definiert. |
 
-## Qualitaetspruefung (8-Dimensionen)
+---
 
-| # | Dimension | Status |
-|---|-----------|--------|
-| 1 | Struktur & Einbindung | HardwareView.vue — bestehende computed properties erweitert |
-| 2 | Namenskonvention | camelCase-Funktionen, bestehende Pattern beibehalten |
-| 3 | Rueckwaertskompatibilitaet | Nur interne computed-Logik geaendert, keine Props/Emits geaendert |
-| 4 | Wiederverwendbarkeit | `filteredEsps` bereits vorhanden, nur Ableitung hinzugefuegt |
-| 5 | Speicher & Ressourcen | Keine neue Reactivity, computed-Derivat von bestehendem computed |
-| 6 | Fehlertoleranz | Fallback: wenn keine Filter aktiv -> `espStore.unassignedDevices` (Originalverhalten) |
-| 7 | Seiteneffekte | `showCrossEspConnections` ref entfernt (war toter State), keine anderen Abhaengigkeiten |
-| 8 | Industrielles Niveau | TypeScript strict, keine `any` eingefuehrt, minimale Aenderungen |
+## Detailanalyse: parseApiError.ts
 
-## Cross-Layer Impact
-- Keine Server-API-Aenderungen
-- Keine Store-Aenderungen (nur View-Logik)
-- Keine Type-Aenderungen
+### A) TypeScript-Typen
 
-## Implementierung
-
-### Geaenderte Datei
-`El Frontend/src/views/HardwareView.vue`
-
-### BUG-011 Fix (2 Aenderungen)
-
-1. `info` zu Toast-Destrukturierung hinzugefuegt (benoetigt fuer BUG-012):
+`StructuredApiError` Interface vollständig und korrekt:
 ```typescript
-const { success: showSuccess, error: showError, info: showInfo } = useToast()
+code: string                     // OK
+numericCode: number | null       // OK
+message: string                  // OK
+details: Record<string, unknown> // OK
+requestId: string | null         // OK
+statusCode: number               // OK
 ```
 
-2. `unassignedDevices` computed umgestellt auf filterbasierte Ableitung:
+`import type { AxiosError } from 'axios'` — korrekt. `import type` ist die richtige Wahl für reine Type-Imports.
+
+### B) Server-Response-Parsing
+
+Server sendet:
+```json
+{"success": false, "error": {"code": "ESP_NOT_FOUND", "numeric_code": 5001, "message": "...", "details": {...}, "request_id": "uuid"}}
+```
+
+Parser-Logik korrekt:
+1. `response?.data?.error` greift auf das `error`-Objekt zu
+2. `errorData.numeric_code` → `numericCode` — snake_case zu camelCase Mapping korrekt
+3. `errorData.request_id` → `requestId` — Mapping korrekt
+4. String-Coercion via `String(errorData.code ?? 'UNKNOWN')` — sicher
+
+### C) Edge Cases
+
+| Szenario | Handling |
+|----------|----------|
+| `response.data` = null | `(null as Record<string,unknown>)?.error` = undefined → fällt durch zu Network-Error-Branch. OK. |
+| `error.response` = undefined (Netzwerkfehler) | `statusCode = 0`, `errorData = undefined` → Network-Error-Return mit `error.message`. OK. |
+| `detail` ist ein Objekt (FastAPI Validation Error) | `JSON.stringify(detail)` — korrekt abgedeckt. |
+| `error.message` leer | `'An unexpected error occurred'` Fallback — OK. |
+
+### D) Header-Zugriff
+
 ```typescript
-// VORHER
-const unassignedDevices = computed(() => espStore.unassignedDevices)
-
-// NACHHER
-const unassignedDevices = computed(() => {
-  const filters = dashStore.activeStatusFilters
-  const filterType = dashStore.filterType
-  // If no filters active, fall back to store source of truth
-  if (filters.size === 0 && filterType === 'all') return espStore.unassignedDevices
-  // Otherwise derive from filteredEsps to stay consistent with zone groups
-  return filteredEsps.value.filter(d => !d.zone_id)
-})
+requestId: response?.headers?.['x-request-id'] ?? null,
 ```
 
-### BUG-012 Fix (2 Aenderungen)
+`AxiosResponseHeaders` ist `RawAxiosResponseHeaders & AxiosHeaders`. Der Index-Zugriff mit String-Key ist valide. TypeScript-Compiler akzeptiert dies (bestätigt durch `npm run type-check` — 0 Errors).
 
-3. Cross-ESP Button — active-class und Toggle entfernt, Info-Toast und Tooltip hinzugefuegt:
-```html
-<!-- VORHER -->
-<button
-  v-if="logicStore.crossEspConnections.length > 0"
-  class="cross-esp-toggle"
-  :class="{ 'cross-esp-toggle--active': showCrossEspConnections }"
-  @click="showCrossEspConnections = !showCrossEspConnections"
->
+### E) Helper-Funktionen
 
-<!-- NACHHER -->
-<button
-  v-if="logicStore.crossEspConnections.length > 0"
-  class="cross-esp-toggle"
-  :title="'Cross-ESP Visualisierung (demnächst verfügbar)'"
-  @click="showInfo('Cross-ESP Visualisierung wird noch entwickelt')"
->
+```typescript
+hasNumericCode(error): boolean    // numericCode !== null — korrekt
+isNotFoundError(error): boolean   // statusCode === 404 — korrekt
+isValidationError(error): boolean // statusCode === 400 — korrekt
 ```
 
-4. Tote Variable `showCrossEspConnections = ref(true)` entfernt (war Zeile 205).
+Semantisch korrekt und vollständig.
+
+---
+
+## Detailanalyse: errors.ts
+
+Hinzugefügter TODO-Kommentar:
+```
+* TODO: Used by planned History-View feature for displaying historical
+* error events with full troubleshooting context. Do not remove.
+* See also: parseApiError.ts for REST API error parsing.
+```
+
+Bewertung: Sinnvoll und informativ. Bricht keine bestehende Funktionalität. Der Verweis auf `parseApiError.ts` hilft zukünftigen Entwicklern den Zusammenhang zu verstehen.
+
+---
+
+## Cross-Layer Checks
+
+| Prüfpunkt | Ergebnis |
+|-----------|----------|
+| `api/index.ts` Barrel-Export | `parseApiError.ts` wird nicht in `index.ts` re-exportiert. Akzeptabel — `index.ts` exportiert nur den Axios-Singleton und HTTP-Helper. |
+| Verwendung in anderen Dateien | `parseApiError` wird nirgendwo importiert (außer der Datei selbst). Beabsichtigt — vorbereitet für zukünftige Nutzung. |
+| Konsistenz mit bestehendem Error-Handling | Bestehendes Pattern in `esp.ts` nutzt manuelle Type-Assertions. `parseApiError` ist eine Verbesserung, aber noch nicht integriert. Keine Konflikte. |
+
+---
+
+## Bugs gefunden
+
+**Keine Bugs gefunden.** Keine Korrekturen notwendig.
+
+---
 
 ## Verifikation
 
-`npx vue-tsc --noEmit` zeigt ausschliesslich pre-existing Fehler in:
-- `src/components/rules/RuleFlowEditor.vue` (2 Fehler — VueFlow Node-Typ-Konvertierung)
-- `src/views/SensorHistoryView.vue` (2 Fehler — Chart.js Scales-Typen)
+```
+npm run type-check  →  0 Errors, 0 Warnings
+npm run build       →  built in 6.54s, 0 Errors
+```
 
-Keine neuen Fehler durch meine Aenderungen eingefuehrt.
+---
+
+## Ergebnis
+
+Beide Dateien sind korrekt implementiert und produktionsreif:
+
+1. **parseApiError.ts** — Alle Edge Cases abgedeckt, TypeScript strict, kein `any`, korrektes `import type`, alle drei Response-Formate (GodKaiserException, HTTPException, Netzwerkfehler) korrekt geparst.
+
+2. **errors.ts** — TODO-Kommentar sinnvoll, keine Funktionalität gebrochen.
+
+3. **Barrel-Export fehlt** — Akzeptabel. `parseApiError` wird direkt importiert wenn benötigt.
+
+4. **Noch nicht verwendet** — Beabsichtigt (History-View Feature geplant).
 
 ## Empfehlung
 
-Die pre-existing Build-Fehler in `RuleFlowEditor.vue` und `SensorHistoryView.vue` sollten separat
-behoben werden um den Build wieder zu aktivieren.
+Bei nächster Store-Action die `AxiosError` wirft: `parseApiError` aus `@/api/parseApiError` importieren und nutzen statt manueller Type-Assertions. Das ersetzt das `err as { response?: { status?: number } }` Pattern in `esp.ts`.

@@ -26,8 +26,20 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
+from ...core.exceptions import (
+    ConfigurationException,
+    DeviceNotApprovedError,
+    DuplicateError,
+    ESPNotFoundError,
+    GatewayTimeoutError,
+    GpioConflictError,
+    SensorNotFoundException,
+    SensorProcessingException,
+    ServiceUnavailableError,
+    ValidationException,
+)
 from ...core.logging_config import get_logger
 from ...db.models.sensor import SensorConfig
 from ...db.models.enums import DataSource
@@ -297,10 +309,7 @@ async def get_sensor(
 
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     # Multi-value sensor support: use sensor_type for precise lookup
     if sensor_type:
@@ -317,11 +326,7 @@ async def get_sensor(
         sensor = sensors[0] if sensors else None
 
     if not sensor:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Sensor on GPIO {gpio} not found for ESP '{esp_id}'"
-            + (f" with type '{sensor_type}'" if sensor_type else ""),
-        )
+        raise SensorNotFoundException(esp_id, gpio)
 
     # Get latest reading filtered by sensor_type for correct multi-value data
     latest = await sensor_repo.get_latest_reading(
@@ -378,25 +383,13 @@ async def create_or_update_sensor(
 
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     # =========================================================================
     # DEVICE STATUS GUARD - Only approved/online devices can be configured
     # =========================================================================
     if esp_device.status not in ("approved", "online"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": "DEVICE_NOT_APPROVED",
-                "device_id": esp_id,
-                "current_status": esp_device.status,
-                "message": f"Device '{esp_id}' must be approved before configuration "
-                f"(current status: {esp_device.status})",
-            },
-        )
+        raise DeviceNotApprovedError(esp_id, esp_device.status)
 
     # =========================================================================
     # MULTI-VALUE SENSOR SPLITTING
@@ -409,9 +402,9 @@ async def create_or_update_sensor(
 
         # Guard: empty value_types means registry misconfiguration
         if not value_types:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Sensor type '{request.sensor_type}' is registered as multi-value "
+            raise ConfigurationException(
+                "sensor_type_registry",
+                f"Sensor type '{request.sensor_type}' is registered as multi-value "
                 "but has no defined sub-types. Contact system administrator.",
             )
 
@@ -485,9 +478,10 @@ async def create_or_update_sensor(
                 f"rolling back all sub-types. Error: {e}",
                 exc_info=True,
             )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Multi-value sensor creation failed for '{request.sensor_type}': {str(e)}",
+            raise SensorProcessingException(
+                esp_id,
+                gpio,
+                f"Multi-value sensor creation failed for '{request.sensor_type}': {str(e)}",
             )
 
         # Refresh all sensors and build response from first
@@ -567,20 +561,16 @@ async def create_or_update_sensor(
                 f"GPIO conflict for ESP {esp_id}, GPIO {gpio}: "
                 f"{validation_result.conflict_type} - {validation_result.message}"
             )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "GPIO_CONFLICT",
-                    "gpio": gpio,
-                    "conflict_type": validation_result.conflict_type.value,
-                    "conflict_component": validation_result.conflict_component,
-                    "conflict_id": (
-                        str(validation_result.conflict_id)
-                        if validation_result.conflict_id
-                        else None
-                    ),
-                    "message": validation_result.message,
-                },
+            raise GpioConflictError(
+                gpio=gpio,
+                conflict_type=validation_result.conflict_type.value,
+                conflict_component=validation_result.conflict_component,
+                conflict_id=(
+                    str(validation_result.conflict_id)
+                    if validation_result.conflict_id
+                    else None
+                ),
+                message=validation_result.message,
             )
 
         if validation_result.warning:
@@ -726,17 +716,11 @@ async def delete_sensor(
 
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     sensor = await sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not sensor:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Sensor on GPIO {gpio} not found for ESP '{esp_id}'",
-        )
+        raise SensorNotFoundException(esp_id, gpio)
 
     # Delete sensor
     await sensor_repo.delete(sensor.id)
@@ -833,10 +817,7 @@ async def query_sensor_data(
     if esp_id:
         esp_device = await esp_repo.get_by_device_id(esp_id)
         if not esp_device:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"ESP device '{esp_id}' not found",
-            )
+            raise ESPNotFoundError(esp_id)
         esp_db_id = esp_device.id
 
     # Query data
@@ -911,9 +892,9 @@ async def get_sensor_data_by_source(
         data_source = DataSource(source.lower())
     except ValueError:
         valid_sources = [e.value for e in DataSource]
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid source '{source}'. Valid sources: {valid_sources}",
+        raise ValidationException(
+            "source",
+            f"Invalid source '{source}'. Valid sources: {valid_sources}",
         )
 
     esp_repo = ESPRepository(db)
@@ -924,10 +905,7 @@ async def get_sensor_data_by_source(
     if esp_id:
         esp_device = await esp_repo.get_by_device_id(esp_id)
         if not esp_device:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"ESP device '{esp_id}' not found",
-            )
+            raise ESPNotFoundError(esp_id)
         esp_db_id = esp_device.id
 
     # Query data by source
@@ -1024,17 +1002,11 @@ async def get_sensor_stats(
 
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     sensor = await sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
     if not sensor:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Sensor on GPIO {gpio} not found for ESP '{esp_id}'",
-        )
+        raise SensorNotFoundException(esp_id, gpio)
 
     # Default time range (naive datetimes for TIMESTAMP WITHOUT TIME ZONE)
     if not start_time:
@@ -1118,11 +1090,11 @@ async def trigger_measurement(
 
     except ValueError as e:
         # ESP or sensor not found, or sensor disabled
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise SensorNotFoundException(esp_id, gpio) from e
 
     except RuntimeError as e:
         # ESP offline or MQTT failure
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
+        raise ServiceUnavailableError("ESP32", str(e)) from e
 
 
 # =============================================================================
@@ -1192,9 +1164,7 @@ async def scan_onewire_bus(
     esp_device = await esp_repo.get_by_device_id(esp_id)
 
     if not esp_device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"ESP device not found: {esp_id}"
-        )
+        raise ESPNotFoundError(esp_id)
 
     # =========================================================================
     # MOCK-ESP DETECTION: Return fake devices without MQTT
@@ -1259,9 +1229,9 @@ async def scan_onewire_bus(
     # =========================================================================
 
     if esp_device.status != "online":
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"ESP device is {esp_device.status}, must be online for OneWire scan",
+        raise ServiceUnavailableError(
+            "ESP32",
+            f"ESP device {esp_id} is {esp_device.status}, must be online for OneWire scan",
         )
 
     # Step 2: Prepare MQTT command
@@ -1298,9 +1268,9 @@ async def scan_onewire_bus(
     # Check if MQTT client is connected
     if not mqtt_client.is_connected() or mqtt_client.client is None:
         logger.error(f"OneWire scan failed: MQTT client not connected")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="MQTT broker not connected. Cannot send scan command to ESP.",
+        raise ServiceUnavailableError(
+            "MQTT",
+            "MQTT broker not connected. Cannot send scan command to ESP.",
         )
 
     # Subscribe to response topic
@@ -1314,9 +1284,9 @@ async def scan_onewire_bus(
         )
 
         if not success:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Failed to send OneWire scan command to ESP. Check MQTT connection.",
+            raise ServiceUnavailableError(
+                "MQTT",
+                "Failed to send OneWire scan command to ESP. Check MQTT connection.",
             )
 
         logger.debug(f"OneWire scan command sent to {esp_id}, waiting for response...")
@@ -1326,10 +1296,10 @@ async def scan_onewire_bus(
             result = await asyncio.wait_for(response_future, timeout=10.0)
         except asyncio.TimeoutError:
             logger.error(f"OneWire scan timeout: ESP {esp_id} did not respond within 10 seconds")
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail=f"ESP {esp_id} did not respond to OneWire scan command within 10 seconds. "
+            raise GatewayTimeoutError(
+                message=f"ESP {esp_id} did not respond to OneWire scan command within 10 seconds. "
                 f"Ensure ESP is online and OneWire bus is configured on GPIO {pin}.",
+                details={"esp_id": esp_id, "pin": pin, "timeout_seconds": 10},
             )
 
         # Step 6: Parse response and build device list with enrichment
@@ -1430,10 +1400,7 @@ async def list_onewire_sensors(
 
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ESP device '{esp_id}' not found",
-        )
+        raise ESPNotFoundError(esp_id)
 
     # Get all OneWire sensors for this ESP
     onewire_sensors = await sensor_repo.get_all_by_interface(esp_device.id, "ONEWIRE")
@@ -1522,10 +1489,7 @@ async def _validate_i2c_config(
 
     # Check 1: Address is required
     if not i2c_address:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="i2c_address is required for I2C sensors",
-        )
+        raise ValidationException("i2c_address", "i2c_address is required for I2C sensors")
 
     # Check 1.5: Negative addresses (Ergänzung 1)
     if i2c_address < 0:
@@ -1534,7 +1498,7 @@ async def _validate_i2c_config(
             f"Rejected I2C config: ESP {esp_id}, address 0x{i2c_address:02X} "
             f"(reason: {rejection_reason})"
         )
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=rejection_reason)
+        raise ValidationException("i2c_address", rejection_reason)
 
     # Check 2: Validate 7-bit range (0x00-0x7F)
     if i2c_address > 0x7F:
@@ -1546,7 +1510,7 @@ async def _validate_i2c_config(
             f"Rejected I2C config: ESP {esp_id}, address 0x{i2c_address:02X} "
             f"(reason: {rejection_reason})"
         )
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=rejection_reason)
+        raise ValidationException("i2c_address", rejection_reason)
 
     # Check 3: Reserved address ranges
     # 0x00-0x07: General call, START byte, reserved
@@ -1559,7 +1523,7 @@ async def _validate_i2c_config(
             f"Rejected I2C config: ESP {esp_id}, address 0x{i2c_address:02X} "
             f"(reason: {rejection_reason})"
         )
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=rejection_reason)
+        raise ValidationException("i2c_address", rejection_reason)
 
     # 0x78-0x7F: 10-bit addressing reserved
     if 0x78 <= i2c_address <= 0x7F:
@@ -1571,7 +1535,7 @@ async def _validate_i2c_config(
             f"Rejected I2C config: ESP {esp_id}, address 0x{i2c_address:02X} "
             f"(reason: {rejection_reason})"
         )
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=rejection_reason)
+        raise ValidationException("i2c_address", rejection_reason)
 
     # Check 4: Address already used (conflict check)
     existing_with_address = await sensor_repo.get_by_i2c_address(esp_id, i2c_address)
@@ -1582,9 +1546,7 @@ async def _validate_i2c_config(
             f"Rejected I2C config: ESP {esp_id}, address 0x{i2c_address:02X} "
             f"(reason: {rejection_reason})"
         )
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=f"I2C_ADDRESS_CONFLICT: {rejection_reason}"
-        )
+        raise DuplicateError("I2CSensor", "i2c_address", f"0x{i2c_address:02X}")
 
 
 async def _validate_onewire_config(
@@ -1633,9 +1595,6 @@ async def _validate_onewire_config(
     existing_with_address = await sensor_repo.get_by_onewire_address(esp_id, onewire_address)
 
     if existing_with_address and existing_with_address.id != exclude_sensor_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"ONEWIRE_ADDRESS_CONFLICT: Address {onewire_address} already in use",
-        )
+        raise DuplicateError("OneWireSensor", "onewire_address", onewire_address)
 
     return onewire_address

@@ -1,653 +1,545 @@
-# Auftrag: Uebersicht-Tab Redesign (HardwareView Level 1)
+## Auftrag: Error-Code-System — Vollstaendiger Ausbau zur Cross-Layer-Konsistenz
 
-**Erstellt:** 2026-02-26
-**Status:** OFFEN
-**Prioritaet:** HOCH — Kernauftrag fuer Dashboard-UX
-**Geschaetzter Aufwand:** ~8-12h
-**Voraussetzung:** Hardware-Testlauf abgeschlossen (ESP32+SHT31 laeuft)
-**Ziel-Agent:** frontend-development (auto-one Repo)
-
----
-
-## IST-Zustand (Screenshot 2026-02-26)
-
-Das Dashboard zeigt Route `/hardware` (HardwareView, Level 1 — Zone Accordion).
-
-### Zone "test" (ZonePlate)
-
-```
-┌─────────────────────────────────────────────────────────────┐  ← iridescent Border
-│  ˅  test                                 1 ESP  1/1 Online ⋮│  ← Zone-Header
-│                                                             │
-│  ┌───────────────────────────┐                              │
-│  │ ● Mock #CD10       [MOCK] │                              │
-│  │ ● Online              2S  │                              │
-│  │ 🌡 Temp 0C79    0  °C ▬▬  │  ← PROBLEM: "Temp 0C79"    │
-│  │ 🌡 SHT31       22  °C ▬▬  │  ← PROBLEM: "SHT31"        │
-│  │ Öffnen                    │                              │
-│  └───────────────────────────┘                              │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-
-┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
-   + Zone erstellen                                            ← Dashed Border
-└ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
-
-                         ... Leerraum ...
-
-┌─────────────────────────────────────────────────────────────┐
-│ 🏠 NICHT ZUGEWIESEN  ❶                                   ˅ │  ← UnassignedDropBar
-│                                                             │
-│  ┌───────────────────────────┐                              │
-│  │ [SIM] Mock #1C68          │  ← PROBLEM: "SIM" statt     │
-│  │ ● Gerade eben             │     "MOCK" (inkonsistent)    │
-│  └───────────────────────────┘                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Was bereits funktioniert (NICHT anfassen)
-- Zone-Accordion auf/zuklappbar mit Chevron
-- Zone-Header zeigt "1 ESP 1/1 Online" — klar und lesbar
-- Drei-Punkt-Menue rechts oben im Zone-Header
-- DeviceMiniCard zeigt bereits: Status-Dot, Online-Text, Sensor-Count (2S), einzelne Sensorzeilen mit Thermometer-Icons, Spark-Bars, "Oeffnen"-Link
-- [MOCK] Badge auf der Card (lila)
-- UnassignedDropBar am unteren Rand mit Count-Badge und Expand/Collapse
-- "+ Zone erstellen" Placeholder mit gestrichelter Border
-- Iridescent Border um Zonen
-- Glasmorphism-Hintergrund
-
-### Was KONKRET falsch ist
-
-**Problem 1 — Sensor-Namen sind kryptisch:**
-- `Temp 0C79` → Das ist `sensor_name` mit abgeschnittenem Device-ID-Suffix. Muss `Temperatur` heissen.
-- `SHT31` → Das ist der `sensor_type` (Basis-Typ). Muss aufgeloest werden: SHT31 ist ein Multi-Value-Device mit Temperatur UND Luftfeuchte. Aktuell fehlt die Humidity komplett.
-
-**Problem 2 — Multi-Value-Device nicht aufgeloest:**
-- SHT31 hat 2 Werte (sht31_temp + sht31_humidity), zeigt aber nur EINEN Eintrag "SHT31 → 22 °C"
-- Die Humidity (z.B. 45% RH) fehlt komplett in der Card
-- Ursache: Die Card iteriert ueber `props.device.sensors` (Typ `unknown[]`) und nutzt den rohen `sensor.name` statt Multi-Value aufzuloesen. Die Fallback-Kette in Zeile ~144 ist `sensor.name || config?.label || sType` — zeigt also zuerst den rohen Server-Namen (z.B. "Temp 0C79")
-
-**Problem 3 — "Temp 0C79" zeigt 0°C:**
-- Dieser Sensor-Eintrag ist ein Artefakt aus der alten Konfiguration (vor dem Lifecycle-Fix)
-- Wert 0°C ist Muell-Daten — stammt aus der Zeit wo SHT31 nur als Single-Value konfiguriert war
-- Nach DB-Cleanup + Neu-Konfiguration sollte nur noch EIN SHT31-Eintrag mit 2 Werten existieren
-- Die Card muss trotzdem robust sein: Wenn ein Sensor 0°C liefert, sollte klar sein ob das ein echter Wert oder stale Data ist
-
-**Problem 4 — Spark-Bars ohne Aussagekraft:**
-- Die gruenen horizontalen Balken (▬▬) neben den Werten sind CSS-Spark-Bars
-- Sie zeigen den normalisierten Wert proportional zum Wertebereich
-- Bei 0°C ist der Balken leer, bei 22°C ist er teilweise gefuellt
-- Ohne Referenz-Skala, Label oder Tooltip sind die Bars bedeutungslos
-- Sie nehmen Platz ein ohne Information zu vermitteln
-
-**Problem 5 — Badge-Inkonsistenz Mock/SIM:**
-- In der Zone: `[MOCK]` (lila Badge, via ESPCardBase Zeile 52)
-- In der UnassignedDropBar: `[SIM]` (lila Badge, via UnassignedDropBar Zeile 211)
-- Beide sind Mock-Devices, gleiche Farbe (`mock` variant = lila) — aber verschiedene Badge-TEXTE
-- Root Cause: ESPCardBase nutzt `'MOCK'/'REAL'`, UnassignedDropBar nutzt `'SIM'/'HW'`
-- Muss konsistent sein: EIN Begriff
-
-**Problem 6 — Zone-Header ohne Aggregation:**
-- Zone "test" zeigt `1 ESP 1/1 Online` — das ist gut als Status
-- Aber keine Sensor-Aggregation: Welche Temperatur herrscht in der Zone? Welche Luftfeuchte?
-- Bei einer Zone mit 1 Device waere z.B. `22°C | 45% RH` direkt im Header hilfreich
-- Bei mehreren Devices: Durchschnittswerte
-
-**Problem 7 — "Oeffnen"-Link statt Klick-auf-Card:**
-- Die Card hat einen expliziten "Oeffnen"-Link unten
-- Besser: Die gesamte Card ist klickbar (Standard-Pattern), "Oeffnen" als separater Link ist unueblich
-- Card braucht `cursor: pointer` und Hover-Feedback
+**Ziel-Repo:** auto-one
+**Kontext:** Cross-Layer Error-Code-Audit (2026-03-01) hat Gesamtbewertung 7.5/10 ergeben. MQTT-Pipeline funktioniert exzellent, aber REST-API-Layer und Exception-System sind nicht integriert. 11 aktive Firmware-Codes ohne Enrichment. Ziel: Error-Trace-Logik auf 100% bringen, damit KI-Integration (Ebene 1-4) optimal aufsetzen kann.
+**Bezug:** KI-Error-Analyse Roadmap (ki-error-analyse-iot.md), Backend-Verifikation (STATUS.md), Observability-Modernisierung
+**Prioritaet:** Hoch
+**Datum:** 2026-03-01
 
 ---
 
-## Abgrenzung — was ist DIESER Auftrag, was NICHT
+### Ist-Zustand
 
-### DIESER Auftrag (Level 1 Darstellung)
-- Sensor-Namen menschenlesbar machen (Typ-Labels statt rohe Namen/IDs)
-- Multi-Value-Devices korrekt aufloesen (SHT31 → Temperatur + Luftfeuchte)
-- Spark-Bars ersetzen durch aussagekraeftige Darstellung
-- Badge-Konsistenz (MOCK/SIM vereinheitlichen)
-- Zone-Header mit aggregierten Sensor-Werten
-- Card-Klick statt "Oeffnen"-Link
-- Subzone-Chips wenn Subzonen existieren
+**Was funktioniert (Staerken — beibehalten):**
+- ESP32 ↔ Server Error-Code-Sync: 100% (error_codes.h ↔ error_codes.py)
+- MQTT Error-Pipeline: Vollstaendig (ErrorTracker → MQTT → Server → DB → WebSocket → Frontend)
+- Rate-Limiting: 1/Code/60s auf ESP32 (verhindert Broker-Flooding)
+- Recursion Guard: Verhindert Endlosschleife bei MQTT-Publish-Fehlern
+- Error Enrichment: 97/108 Codes mit deutschen Troubleshooting-Hinweisen
+- Server-Zentrische Interpretation: Frontend zeigt nur an, interpretiert nicht lokal
+- AuditLog-Persistierung: Fehler in audit_logs mit Request-ID Tracing
+- Prometheus-Metriken: increment_esp_error() fuer Grafana
+- Correlation-IDs: X-Request-ID End-to-End (Frontend → Server → DB)
+- GodKaiserException Handler: Strukturierte JSON-Responses fuer REST-API
 
-### NICHT dieser Auftrag (andere Auftraege)
-- Level 2/3 (ESPOrbitalLayout, SensorSatellite) → bleibt wie es ist
-- Monitor-Tab, Editor-Tab → nicht betroffen
-- Store-Logik, Datenfluss → korrekt, nur Darstellung aendern
-- Drag-Drop-Mechanik in useZoneDragDrop.ts → funktioniert, DnD-Fixes separat
-- ESPCardBase + useESPStatus Composable → separat (`auftrag-hardware-tab-css-settings-ux.md`)
-- Perspektiven-Toggle Grid/Monitor → separat (`auftrag-view-architektur-dashboard-integration.md`)
-- SystemStatusBar global → separat (`auftrag-unified-monitoring-ux.md`)
-- CSS-Extraktion (btn--primary, Teleport-Fix) → separat (`auftrag-hardware-tab-css-settings-ux.md`)
+**Was fehlt (Luecken — zu schliessen):**
 
-### Abhaengigkeiten
-1. **Dieser Auftrag kann SOFORT starten** — keine Blocker
-2. Block C (Sensor-Konsolidierung Helper) sollte VOR Block A und B laufen, da beide die Helper nutzen
-3. Kompatibel mit spaeteren Auftraegen (ESPCardBase, Perspektiven-Toggle, DnD)
+| # | Luecke | Schweregrad | Kurzbeschreibung |
+|---|--------|-------------|------------------|
+| B1 | ~~REST-API umgeht Error-Code-System~~ | ~~Strukturell~~ | ✅ BEHOBEN: 11 API-Dateien migriert, 82 HTTPExceptions bewusst in 4 Utility-Dateien |
+| B2 | ~~Paralleles Exception-System~~ | ~~Architektur~~ | ✅ BEHOBEN: numeric_code Attribut + AuditLog-Integration |
+| B3 | ~~11 Codes ohne Enrichment~~ | ~~Funktional~~ | ✅ BEHOBEN: 108/108 Codes mit Enrichment |
+| B4 | translateErrorCode() ungenutzt | Toter Code | Frontend-API-Modul nie importiert |
+| B5 | ~63 tote Error-Codes | Wartbarkeit | ~45 ESP32 + ~18 Server — definiert aber nicht verwendet |
+| B6 | ~~Neue Features ohne Codes~~ | ~~Konsistenz~~ | ✅ BEHOBEN: Logic 5700-5749, Dashboard 5750-5779, Subzones 5780-5799, AutoOps 5800-5849, Sequences 5850-5899 |
 
----
-
-## Block A: DeviceMiniCard — Sensor-Darstellung fixen (3-4h)
-
-**Datei:** `src/components/dashboard/DeviceMiniCard.vue`
-**Referenz:** `src/utils/sensorDefaults.ts`, `src/utils/formatters.ts`
-
-Die DeviceMiniCard hat bereits ein gutes Grundlayout. Es muss NICHT komplett umgebaut werden. Die Aenderungen betreffen die Sensor-Zeilen innerhalb der Card.
-
-### A1: Sensor-Zeilen mit menschenlesbaren Labels
-
-**IST:**
-```
-🌡 Temp 0C79    0  °C ▬▬
-🌡 SHT31       22  °C ▬▬
-```
-
-**SOLL:**
-```
-🌡 Temperatur      22.0 °C
-💧 Luftfeuchte     45.2 %RH
-```
-
-**Regeln:**
-- Sensor-Typ-Label aus `SENSOR_TYPE_CONFIG[type].label` verwenden, NICHT `sensor_name`
-- Icon aus `SENSOR_TYPE_CONFIG[type].icon` — verschiedene Icons je Typ (Thermometer, Droplets, Gauge, Sun, etc.)
-- Wert formatiert mit `formatSensorValueWithUnit(value, type)` — eine Dezimalstelle
-- Unit direkt hinter dem Wert, kein Pfeil-Separator (→)
-- Kein Device-ID-Suffix im Label
-
-**Label-Zuordnung (nach Aufloesung durch groupSensorsByBaseType — kurze Labels OHNE Geraete-Suffix):**
-
-| Aufgeloester sensor_type | Anzeige-Label (SOLL) | Icon (IST im Code) | Unit (IST) |
-|--------------------------|---------------------|---------------------|------------|
-| `sht31_temp` | Temperatur | Thermometer | °C |
-| `sht31_humidity` | Luftfeuchte | Droplets | % RH |
-| `DS18B20` / `ds18b20` | Temperatur | Thermometer | °C |
-| `BME280` (als bme280_temp) | Temperatur | Thermometer | °C |
-| `BME280_humidity` | Luftfeuchte | Droplets | % RH |
-| `BME280_pressure` | Luftdruck | Gauge | hPa |
-| `moisture` | Bodenfeuchte | Droplets | % |
-| `pH` | pH-Wert | Droplet | pH |
-| `EC` | Leitfaehigkeit | Zap | µS/cm |
-| `light` | Licht | Sun | lux |
-| `co2` | CO2 | Cloud | ppm |
-| `flow` | Durchfluss | Waves | L/min |
-
-**HINWEIS:** Die kurzen Labels ("Temperatur", "Luftfeuchte") kommen aus dem `groupSensorsByBaseType` Helper (Block C), der die MULTI_VALUE_DEVICES.values[].label nutzt — dort stehen bereits Kurzlabels. Fuer Single-Value-Sensoren (DS18B20, pH etc.) muessen die SENSOR_TYPE_CONFIG Labels gekuerzt werden (Geraete-Suffix entfernen). Siehe Block C4.
-
-### A2: Multi-Value-Devices aufloesen
-
-**IST:** SHT31 zeigt als 1 Zeile "SHT31 → 22 °C" — Humidity fehlt
-
-**SOLL:** SHT31 zeigt als 2 Zeilen:
-```
-🌡 Temperatur      22.0 °C
-💧 Luftfeuchte     45.2 %RH
-```
-
-**Implementierung:**
-- `MULTI_VALUE_DEVICES` aus sensorDefaults.ts nutzen um zu erkennen dass SHT31 Temp+Humidity liefert
-- Ueber die aufgeloesten Wert-Typen (`sht31_temp`, `sht31_humidity`) iterieren, NICHT ueber den Basis-Typ
-- Nutze den neuen Helper `groupSensorsByBaseType()` (Block C) um `props.device.sensors` (unknown[]) zu gruppieren
-- **Fallback-Kette umdrehen:** Zuerst `SENSOR_TYPE_CONFIG[type].label`, dann `sensor.name` als Fallback (aktuell ist es umgekehrt — Zeile ~144)
-- Jeder Wert-Typ bekommt eine eigene Zeile mit eigenem Icon und Label
-
-### A3: Spark-Bars entfernen
-
-**IST:** Gruene horizontale 3px-Balken rechts neben den Werten, proportional zum Wertebereich
-
-**SOLL:** Spark-Bars komplett entfernen — sowohl Template-Code ALS AUCH CSS-Klassen (`.device-mini-card__spark-bar` und `.device-mini-card__spark-fill`, ca. Zeilen 538-550). Sie liefern ohne Referenz-Skala keine brauchbare Information und nehmen Platz weg.
-
-**Stattdessen — Quality-Indikator per Textfarbe:**
-- Wert im normalen Bereich → Standard-Textfarbe (`var(--color-text)`)
-- Wert ausserhalb Plausibilitaetsbereich → orange Text (`var(--color-warning)`)
-- Wert = 0 bei einem Sensor der nie 0 sein sollte (z.B. Luftfeuchte) → gedimmt + `?` Suffix (`var(--color-text-muted)`) als Hinweis auf fragwuerdige Daten
-- Kein Wert vorhanden → `--` anzeigen in gedimmter Farbe
-
-### A4: "Oeffnen"-Link durch Card-Klick ersetzen
-
-**IST:** "Oeffnen" als blauer Text-Link unter den Sensoren
-
-**SOLL:**
-- "Oeffnen"-Link entfernen
-- Card hat bereits `cursor: pointer`, Hover-Shadow und emittiert ein `click` Event mit `originRect` — das funktioniert. HardwareView ruft `zoomToDevice(deviceId)` auf, das `router.push({ name: 'hardware-esp', params: { zoneId, espId: deviceId } })` ausfuehrt. **Kein neuer Code noetig fuer die Klick-Navigation — nur den "Oeffnen"-Link-Text entfernen.**
-- Hover-State leicht verbessern: Zum bestehenden Shadow einen minimalen `scale(1.01)` Transform ergaenzen (subtle, nicht aufdringlich)
-- Kleines Chevron-Icon (ChevronRight, 14px, `var(--color-text-muted)`) rechts unten in der Card als visueller Drill-Down-Hint — ChevronRight ist bereits im Projekt importiert (AccordionSection u.a.)
-
-### A5: Badge-Konsistenz (MOCK/SIM)
-
-**IST:** Zone-Card (via ESPCardBase) zeigt `[MOCK]` (lila, variant `mock`), UnassignedDropBar zeigt `[SIM]` (ebenfalls lila variant `mock` — nur der TEXT ist anders, Farbe ist identisch). Root Cause: `UnassignedDropBar.vue` Zeile 211: `isMock(device) ? 'SIM' : 'HW'`, waehrend `ESPCardBase.vue` Zeile 52: `isMock.value ? 'MOCK' : 'REAL'`
-
-**SOLL:** Einheitlich `[MOCK]` fuer alle Mock-Devices. Ein Badge-Text, eine Farbe:
-- `[MOCK]` → `var(--color-mock)` (lila) — Software-generierte Testdaten
-- Kein Badge fuer Real-Devices — Real ist der Default, braucht keinen Badge
-
-**Implementierung:** Badge wird in `ESPCardBase` bestimmt via `isMock.value ? 'MOCK' : 'REAL'`. `BaseBadge.vue` (Pfad: `src/shared/design/primitives/BaseBadge.vue`) hat die Varianten `mock` und `real`. Das Backend liefert KEINEN SIM-Zustand — `ESPDevice` hat kein `is_simulator` oder `source` Feld. Was aktuell als `[SIM]` in der UnassignedDropBar erscheint, muss auf `[MOCK]` vereinheitlicht werden. Die UnassignedDropBar rendert Devices moeglicherweise ueber einen anderen Code-Pfad als ZonePlate — dort den Badge-Text pruefen und angleichen.
-
-**TODO (spaeter, nicht in diesem Auftrag):** Wenn Wokwi-Simulator-Devices unterschieden werden sollen, braucht das Backend ein neues Feld (z.B. `device_source: 'mock' | 'simulator' | 'hardware'`). Dann kann ein `[SIM]` Badge mit eigener Farbe eingefuehrt werden.
-
-### A6: Compact-Modus (UnassignedDropBar) anpassen
-
-Der Compact-Modus in der UnassignedDropBar muss die gleichen Badge-Regeln befolgen (A5). Ausserdem:
-- Status-Zeile "Gerade eben" beibehalten (ist der Last-Seen-Timestamp — gut)
-- Falls Sensoren vorhanden: 1-Zeilen-Summary unter dem Namen: `22°C 45%` (kompakt, ohne Labels)
-- Falls keine Sensoren: nur Name + Badge + Last-Seen
+**Position im Plan:** Backend-Verifikation + Observability-Modernisierung (kurzfristig). Vorbereitung fuer KI-Error-Analyse Ebene 1 (regelbasiert) und Ebene 2 (Isolation Forest).
 
 ---
 
-## Block B: ZonePlate — Header-Aggregation und Subzonen (2-3h)
+### Was getan werden muss
 
-**Datei:** `src/components/dashboard/ZonePlate.vue`
-**Referenz:** `src/utils/sensorDefaults.ts`
+Das Error-Code-System muss von einem "funktioniert fuer MQTT" zu einem "funktioniert ueberall" ausgebaut werden. Am Ende soll jeder Fehler — egal ob aus ESP32 via MQTT, aus der REST-API, oder aus internen Services — denselben strukturierten Weg gehen: numerischer Code → Enrichment → AuditLog → Frontend-Anzeige. Das ist die Grundlage dafuer, dass die KI-Error-Analyse (Ebene 1-4) spaeter auf einem konsistenten Datenstrom aufbauen kann.
 
-### B1: Aggregierte Sensor-Werte im Zone-Header
+**Erwartetes Ergebnis aus Nutzersicht:**
+- Jeder Fehler im System traegt einen numerischen Error-Code (1000-5699+)
+- Frontend zeigt bei REST-API-Fehlern dieselbe strukturierte Fehlermeldung wie bei MQTT-Fehlern
+- Troubleshooting-Hinweise fuer alle aktiv genutzten Codes verfuegbar
+- AuditLog enthaelt einheitliche Error-Code-Eintraege — keine Luecken je nach Fehlerquelle
+- Error-Metriken in Prometheus fuer ALLE Fehlertypen (nicht nur ESP32-Errors)
 
-**IST:**
-```
-˅  test                                 1 ESP  1/1 Online ⋮
-```
-
-**SOLL:**
-```
-˅  test           22.0°C  45%RH         1 ESP  1/1 Online ⋮
-```
-
-**Design:**
-- Aggregierte Werte stehen ZWISCHEN Zone-Name und ESP-Count
-- Werte in `var(--color-text-muted)` (dezenter als der Zone-Name)
-- Schriftgroesse `text-xs` (kleiner als Zone-Name)
-- Trennzeichen zwischen Werten: 2 Leerzeichen (kein Pipe, zu visuell schwer)
-- Icons weglassen im Header — zu viel Noise auf der Ueberblicksebene
-
-**Aggregationslogik je nach Device-Anzahl:**
-- **0 Devices:** Keine Werte anzeigen
-- **1 Device:** Direkte Werte des Devices: `22.0°C  45%RH`
-- **2-5 Devices:** Durchschnitt: `Ø 21.5°C  Ø 52%RH`
-- **6+ Devices:** Durchschnitt + Ausreisser-Count wenn vorhanden: `Ø 22°C  Ø 48%RH  ⚠1`
-
-**Welche Sensor-Typen anzeigen:**
-- Maximal 3 verschiedene Sensor-Typen im Header (die haeufigsten)
-- Temperatur und Luftfeuchte haben Vorrang (am universellsten)
-- Nutze `aggregateZoneSensors()` Helper (Block C)
-
-### B2: Zone-Status-Indikator verfeinern
-
-**IST:** `1/1 Online` als weisser Text — funktioniert, aber kein Farb-Feedback
-
-**SOLL:** Farbiger Status-Dot VOR dem Text:
-- `● 1/1 Online` (gruen) — `var(--color-success)` — alle Devices online
-- `● 2/3 Online` (gelb) — `var(--color-warning)` — mindestens 1 offline/stale
-- `● 0/3 Offline` (rot) — `var(--color-error)` — alle offline (tokens.css Zeile 67: `--color-error: #f87171`)
-- `● - Leer` (grau) — `var(--color-text-muted)` — keine Devices
-
-Dot-Groesse: 8px, gleicher Stil wie der Status-Dot auf der DeviceMiniCard.
-
-### B3: Subzone-Chips (wenn Subzonen vorhanden)
-
-**IST:** Keine Subzone-Darstellung auf Level 1
-
-**SOLL:** Wenn eine Zone Subzonen hat, Chips direkt unter dem Zone-Header:
-```
-˅  Gewaechshaus    22°C  48%RH          3 ESP  3/3 Online ⋮
-   [Kammer A ●]  [Kammer B ●]  [Trocknung ●]
-```
-
-- Chips als kleine Pills (Border-Radius, kein Hintergrund, nur Border + Text)
-- Farbiger Dot (4px) im Chip = Subzone-Status (gruen/gelb/rot)
-- Klick auf Chip → filtert die DeviceMiniCards innerhalb der Zone auf diese Subzone
-- Klick auf bereits aktiven Chip → Filter aufheben (alle anzeigen)
-- **Datenquelle:** ZonePlate hat bereits ein `subzoneGroups` computed das Devices nach `device.subzone_id` / `device.subzone_name` gruppiert — darauf direkt aufbauen. `zone.store.ts` speichert KEINE Subzone-Liste, die Daten kommen von den Device-Properties selbst
-- Wenn Zone keine Subzonen hat → keine Chips anzeigen (kein leerer Platz)
+**Abhaengigkeiten:**
+- Keine harten Blocker — alle Aenderungen sind inkrementell
+- Bestehende Tests duerfen nicht brechen (790 Backend + 1339 Frontend)
 
 ---
 
-## Block C: Sensor-Konsolidierung Helper (2-3h)
+### Technische Details
 
-**Datei:** `src/utils/sensorDefaults.ts` (erweitern)
+**Betroffene Schichten:**
+- [x] Backend (El Servador) — Hauptarbeit
+- [ ] Firmware (El Trabajante) — Keine Aenderungen noetig
+- [x] Frontend (El Frontend) — Kleine Anpassungen
+- [ ] Monitoring (Grafana/Prometheus/Loki) — Optional (Prio 3)
 
-Dieser Block liefert die Helper-Funktionen die Block A und B brauchen. **MUSS ZUERST implementiert werden.**
+**Betroffene Module/Komponenten:**
 
-### C1: groupSensorsByBaseType()
+| Modul | Aenderungstyp |
+|-------|--------------|
+| `src/core/error_codes.py` | Erweitern: Neue Ranges (5700+) fuer Logic/Dashboard/AutoOps |
+| `src/core/exceptions.py` | Erweitern: `numeric_code` Attribut auf GodKaiserException |
+| `src/core/exception_handlers.py` | Erweitern: numeric_code in JSON-Response + AuditLog |
+| `src/core/esp32_error_mapping.py` | Erweitern: 11 fehlende Enrichment-Eintraege |
+| `src/api/v1/*.py` (14 Dateien) | Migrieren: HTTPException → GodKaiserException (schrittweise) |
+| `Frontend: src/api/errors.ts` | Entscheidung: Behalten oder entfernen |
+| `Frontend: ErrorDetailsModal.vue` | Optional: REST-Error-Codes anzeigen |
 
-**WICHTIG — Datenstruktur:** `props.device.sensors` ist `unknown[]`. Jeder Sensor hat Felder wie `sensor_type`, `raw_value`, `name`, `unit`, `gpio`, `quality`. Ein typisiertes Interface definieren:
+**Vorhandene Infrastruktur die genutzt werden kann:**
+- `GodKaiserException` mit `automation_one_exception_handler` — bereits registriert, strukturierte Responses
+- `AuditLog` Model mit `error_code` Feld (als String) — bereits nutzbar
+- `esp32_error_mapping.py` Pattern — kann fuer Server-Codes repliziert werden
+- Prometheus `increment_esp_error()` — kann zu generischem `increment_error()` erweitert werden
+- Frontend `ErrorDetailsModal.vue` — kann REST-Errors anzeigen wenn strukturiert
+
+---
+
+### Block 1: Exception-Bridge (GodKaiserException ↔ Numerische Codes) — ✅ ERLEDIGT
+**Aufwand:** ~2-3 Stunden | **Prio:** KRITISCH — Basis fuer alles Weitere | **Status:** IMPLEMENTIERT (2026-03-01)
+
+**Konzept:** GodKaiserException bekommt ein optionales `numeric_code: int` Attribut. Der `exception_handler` schreibt diesen Code in die JSON-Response UND in den AuditLog. Keine Breaking Changes — bestehende Exceptions ohne numeric_code funktionieren weiterhin mit ihrem String-Code.
+
+**1.1 GodKaiserException erweitern (exceptions.py)**
+
+```python
+class GodKaiserException(Exception):
+    def __init__(
+        self,
+        message: str,
+        error_code: str = "INTERNAL_ERROR",
+        numeric_code: int | None = None,  # NEU
+        status_code: int = 500,
+        details: dict | None = None,
+    ):
+        self.message = message
+        self.error_code = error_code
+        self.numeric_code = numeric_code  # NEU
+        self.status_code = status_code
+        self.details = details or {}
+        super().__init__(message)
+```
+
+**1.2 Bestehende Exceptions verknuepfen (exceptions.py)**
+
+Die 7 Exceptions die bereits numerische Pendants haben:
+
+| Exception | String-Code | Numerischer Code |
+|-----------|------------|------------------|
+| `DatabaseConnectionException` | "DB_CONNECTION_FAILED" | 5304 |
+| `MQTTConnectionException` | "MQTT_CONNECTION_FAILED" | 5104 |
+| `MQTTPublishException` | "MQTT_PUBLISH_FAILED" | 5101 |
+| `ESP32NotFoundException` | "ESP_NOT_FOUND" | 5001 |
+| `ESP32OfflineException` | "ESP32_OFFLINE" | 5007 |
+| `DuplicateError` | "DUPLICATE" | 5208 |
+| `ConfigurationException` | "CONFIGURATION_ERROR" | 5002 |
+
+```python
+class ESP32NotFoundException(NotFoundError):
+    def __init__(self, esp_id: str, details: dict | None = None):
+        super().__init__(
+            message=f"ESP32 device '{esp_id}' not found",
+            error_code="ESP_NOT_FOUND",
+            numeric_code=5001,  # NEU — verknuepft mit ServerErrorCode.ESP_DEVICE_NOT_FOUND
+            details=details,
+        )
+```
+
+**1.3 Exception Handler erweitern (exception_handlers.py)**
+
+```python
+async def automation_one_exception_handler(request, exc: GodKaiserException):
+    response_body = {
+        "success": False,
+        "error": {
+            "code": exc.error_code,           # String (Rueckwaertskompatibel)
+            "numeric_code": exc.numeric_code,  # NEU (int oder null)
+            "message": exc.message,
+            "details": exc.details,
+            "request_id": getattr(request.state, "request_id", None),
+        }
+    }
+
+    # NEU: AuditLog-Eintrag wenn numeric_code vorhanden
+    if exc.numeric_code:
+        try:
+            audit_repo.log_api_error(
+                error_code=str(exc.numeric_code),
+                severity=_map_status_to_severity(exc.status_code),
+                message=exc.message,
+                source_type="api",
+                source_id=request.url.path,
+                details={
+                    "string_code": exc.error_code,
+                    "status_code": exc.status_code,
+                    "request_id": response_body["error"]["request_id"],
+                    "method": request.method,
+                    "path": request.url.path,
+                },
+            )
+        except Exception:
+            pass  # AuditLog-Fehler darf API-Response nicht blockieren
+
+    return JSONResponse(status_code=exc.status_code, content=response_body)
+```
+
+**1.4 Severity-Mapping (HTTP Status → AuditLog Severity)**
+
+```python
+def _map_status_to_severity(status_code: int) -> str:
+    if status_code >= 500:
+        return "critical"
+    if status_code == 429:
+        return "warning"
+    if status_code >= 400:
+        return "error"
+    return "info"
+```
+
+**Akzeptanzkriterien Block 1:**
+- [x] GodKaiserException hat `numeric_code` Attribut (Optional[int]) — exceptions.py:25
+- [x] 7 bestehende Exceptions tragen ihre numerischen Codes — verifiziert
+- [x] Exception Handler schreibt `numeric_code` in JSON-Response — exception_handlers.py:69
+- [x] Exception Handler loggt Fehler mit numeric_code in AuditLog — ✅ IMPLEMENTIERT (2026-03-02): `_log_to_audit()` fire-and-forget mit standalone DB-Session, `AuditEventType.API_ERROR`, `AuditLogRepository.log_api_error()`
+- [x] Bestehende Exceptions ohne numeric_code funktionieren unveraendert
+- [ ] Alle 810+ Backend-Tests bestehen — **NICHT VERIFIZIERT**
+
+---
+
+### Block 2: Fehlende Enrichment-Eintraege (esp32_error_mapping.py) — ✅ ERLEDIGT
+**Aufwand:** ~1-2 Stunden | **Prio:** HOCH — aktive Codes ohne Troubleshooting | **Status:** IMPLEMENTIERT (2026-03-01)
+
+**2.1 I2C Extended Codes (7 Eintraege)**
+
+| Code | Name | Category | Severity | Troubleshooting |
+|------|------|----------|----------|-----------------|
+| 1007 | I2C_TIMEOUT | HARDWARE | ERROR | I2C-Bus blockiert: 1) Kabelpruefung (SDA/SCL), 2) Pull-Up-Widerstaende (4.7kOhm), 3) Nur ein Master, 4) Bus-Reset |
+| 1009 | I2C_CRC_FAILED | HARDWARE | WARNING | CRC-Fehler: 1) Kabellaenge <50cm, 2) Abschirmung, 3) Stoerquellen entfernen, 4) Versorgungsspannung pruefen |
+| 1015 | I2C_BUS_STUCK | HARDWARE | CRITICAL | Bus blockiert: 1) SDA/SCL pruefen, 2) ESP32 neustarten, 3) Sensor-Power-Cycle, 4) Clock-Stretching-Problem |
+| 1016 | I2C_BUS_RECOVERY_STARTED | HARDWARE | WARNING | Automatische Recovery gestartet — keine Aktion noetig, System versucht Selbstheilung |
+| 1017 | I2C_BUS_RECOVERY_FAILED | HARDWARE | CRITICAL | Recovery fehlgeschlagen: 1) ESP32 neustarten, 2) Sensor abklemmen + neu anschliessen, 3) I2C-Adresse pruefen |
+| 1018 | I2C_BUS_RECOVERED | HARDWARE | WARNING | Bus erfolgreich wiederhergestellt — informativ, keine Aktion noetig |
+| 1019 | I2C_PROTOCOL_UNSUPPORTED | HARDWARE | ERROR | Protokoll nicht unterstuetzt: 1) Sensor-Datenblatt pruefen, 2) I2C-Standard-Modus verwenden, 3) Alternative Library |
+
+**2.2 DS18B20 Codes (4 Eintraege)**
+
+| Code | Name | Category | Severity | Troubleshooting |
+|------|------|----------|----------|-----------------|
+| 1060 | DS18B20_SENSOR_FAULT | HARDWARE | ERROR | Sensor-Fehler: 1) 4.7kOhm Pull-Up an DQ, 2) Versorgung 3.3V pruefen, 3) Kabel-Kontakt, 4) Sensor tauschen |
+| 1061 | DS18B20_POWER_ON_RESET | HARDWARE | WARNING | Power-On-Reset erkannt: 1) Versorgungsspannung stabil?, 2) Parasitaer-Modus vs. 3-Wire, 3) Entkopplungskondensator |
+| 1062 | DS18B20_OUT_OF_RANGE | HARDWARE | WARNING | Messwert ausserhalb -55..+125°C: 1) Sensor-Umgebung pruefen, 2) Kalibrierung, 3) Kurzschluss an DQ-Leitung |
+| 1063 | DS18B20_DISCONNECTED_RUNTIME | HARDWARE | ERROR | Sensor im Betrieb getrennt: 1) Stecker/Kabel pruefen, 2) OneWire-Bus Laenge <5m, 3) Pull-Up vorhanden |
+
+**Implementierung:** Fuer jeden Code einen Eintrag im `ESP32_ERROR_MAPPING` Dict in `esp32_error_mapping.py` analog zum bestehenden Pattern mit:
+- `category`, `severity`, `message_de`, `message_user_de`, `troubleshooting_de` (Liste), `docs_link`, `recoverable`, `user_action_required`
+
+**Akzeptanzkriterien Block 2:**
+- [x] Alle 11 Codes in esp32_error_mapping.py eingetragen — verifiziert (1007,1009,1015-1019,1060-1063)
+- [x] `get_error_info()` gibt fuer alle 11 Codes ein gueltiges Dict zurueck
+- [x] Coverage: 108/108 definierte ESP32-Codes gemappt (100%)
+- [x] Troubleshooting-Texte sind praxistauglich (Hardware-Test-Erfahrung einbeziehen)
+- [ ] Docs-Links zeigen auf existierende Doku-Seiten — **NICHT VERIFIZIERT**
+
+---
+
+### Block 3: Server Error-Code-Ranges fuer neue Features (error_codes.py) — ✅ ERLEDIGT
+**Aufwand:** ~1 Stunde | **Prio:** MITTEL — Konsistenz fuer wachsende Codebase | **Status:** IMPLEMENTIERT (2026-03-01)
+
+**3.1 Neue Error-Code-Ranges definieren**
+
+Aktuell belegt: 5000-5699 (Server-Codes). Freier Bereich: 5700-5999.
+
+| Range | Feature | Beispiel-Codes |
+|-------|---------|---------------|
+| 5700-5749 | Logic Engine | 5700 RULE_NOT_FOUND, 5701 RULE_VALIDATION_FAILED, 5702 RULE_EXECUTION_FAILED, 5703 RULE_LOOP_DETECTED, 5704 RULE_CONDITION_INVALID, 5705 RULE_ACTION_FAILED |
+| 5750-5779 | Dashboard | 5750 DASHBOARD_NOT_FOUND, 5751 DASHBOARD_LAYOUT_INVALID, 5752 WIDGET_TYPE_UNKNOWN, 5753 WIDGET_CONFIG_INVALID |
+| 5780-5799 | Subzones | 5780 SUBZONE_NOT_FOUND, 5781 SUBZONE_PARENT_INVALID, 5782 SUBZONE_GPIO_CONFLICT |
+| 5800-5849 | AutoOps | 5800 AUTOOPS_JOB_FAILED, 5801 AUTOOPS_SCHEDULE_INVALID |
+| 5850-5899 | Sequences | 5850 SEQUENCE_NOT_FOUND, 5851 SEQUENCE_STEP_FAILED, 5852 SEQUENCE_TIMEOUT |
+| 5900-5999 | Reserviert | Zukuenftige Features |
+
+**3.2 Enum-Klassen erweitern (error_codes.py)**
+
+Neue Enum-Klassen analog zu `ServerErrorCode`:
+
+```python
+class LogicErrorCode(IntEnum):
+    RULE_NOT_FOUND = 5700
+    RULE_VALIDATION_FAILED = 5701
+    RULE_EXECUTION_FAILED = 5702
+    RULE_LOOP_DETECTED = 5703
+    RULE_CONDITION_INVALID = 5704
+    RULE_ACTION_FAILED = 5705
+
+class DashboardErrorCode(IntEnum):
+    DASHBOARD_NOT_FOUND = 5750
+    DASHBOARD_LAYOUT_INVALID = 5751
+    WIDGET_TYPE_UNKNOWN = 5752
+    WIDGET_CONFIG_INVALID = 5753
+
+class SubzoneErrorCode(IntEnum):
+    SUBZONE_NOT_FOUND = 5780
+    SUBZONE_PARENT_INVALID = 5781
+    SUBZONE_GPIO_CONFLICT = 5782
+```
+
+**3.3 Descriptions erweitern (SERVER_ERROR_DESCRIPTIONS)**
+
+Zu jedem neuen Code eine englische Beschreibung.
+
+**Akzeptanzkriterien Block 3:**
+- [x] Neue Enum-Klassen in error_codes.py definiert — LogicErrorCode, DashboardErrorCode, SubzoneErrorCode, AutoOpsErrorCode
+- [x] Descriptions fuer alle neuen Codes vorhanden — SERVER_ERROR_DESCRIPTIONS erweitert
+- [x] Keine Ueberlappungen mit bestehenden Ranges — verifiziert
+- [x] Kommentierte Range-Uebersicht am Anfang der Datei — Docstring aktualisiert
+
+---
+
+### Block 4: REST-API schrittweise migrieren (14 API-Dateien) — ✅ ERLEDIGT
+**Aufwand:** ~3-4 Stunden | **Prio:** MITTEL — inkrementell, nicht auf einmal | **Status:** 11 Dateien migriert (0 HTTPExceptions), 4 Dateien bewusst HTTPException (debug=59, audit=14, sensor_type_defaults=5, errors=4 = 82 bewusst)
+
+**Strategie:** NICHT alle 185 HTTPExceptions auf einmal umstellen. Stattdessen:
+
+1. **Neue Exceptions erstellen** wo noetig (z.B. `RuleNotFoundException`, `DashboardNotFoundException`)
+2. **Pro API-Datei migrieren** — eine Datei pro PR/Commit
+3. **HTTPException als Fallback behalten** fuer reine HTTP-Semantik (z.B. 401 Unauthorized bleibt HTTPException)
+
+**4.1 Migrationsmuster**
+
+Vorher:
+```python
+raise HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND,
+    detail=f"Rule '{rule_id}' not found",
+)
+```
+
+Nachher:
+```python
+raise RuleNotFoundException(rule_id=rule_id)
+```
+
+Wobei:
+```python
+class RuleNotFoundException(NotFoundError):
+    def __init__(self, rule_id: str):
+        super().__init__(
+            message=f"Logic rule '{rule_id}' not found",
+            error_code="RULE_NOT_FOUND",
+            numeric_code=5700,
+        )
+```
+
+**4.2 Migrationsreihenfolge (nach Impact)**
+
+| Reihenfolge | API-Datei | HTTPExceptions | Neue Exceptions noetig |
+|-------------|-----------|----------------|----------------------|
+| 1 | `api/v1/esp.py` | ~~14~~ 0 | ✅ ERLEDIGT — ESPNotFoundError, DuplicateESPError, ValidationException |
+| 2 | `api/v1/sensors.py` | ~~29~~ ~~7~~ 0 | ✅ ERLEDIGT — DeviceNotApprovedError, GpioConflictError, GatewayTimeoutError, SensorProcessingException, ConfigurationException |
+| 3 | `api/v1/actuators.py` | ~~15~~ ~~2~~ 0 | ✅ ERLEDIGT — DeviceNotApprovedError, GpioConflictError |
+| 4 | `api/v1/logic.py` | ~~7~~ 0 | ✅ ERLEDIGT — RuleNotFoundException, RuleValidationException |
+| 5 | `api/v1/auth.py` | ~~13~~ 0 | ✅ ERLEDIGT — InvalidCredentialsException, TokenExpiredException, AuthenticationError, AuthorizationError, DuplicateError, ConfigurationException, ServiceUnavailableError |
+| 6 | `api/v1/subzone.py` | ~~7~~ 0 | ✅ ERLEDIGT (bereits migriert) — ESPNotFoundError, SubzoneNotFoundException, ValidationException |
+| 7 | `api/v1/sequences.py` | ~~8~~ 0 | ✅ ERLEDIGT — SequenceNotFoundException, ServiceUnavailableError, ValidationException |
+| 8 | `api/v1/users.py` | ~~9~~ 0 | ✅ ERLEDIGT — UserNotFoundException, DuplicateError, ValidationException, AuthenticationError |
+| 9 | `api/v1/audit.py` | 14 | Bleiben HTTPException (reine Query-Fehler) |
+| 10 | `api/v1/zone.py` | ~~3~~ 0 | ✅ ERLEDIGT — ESPNotFoundError |
+| 11 | `api/v1/dashboards.py` | ~~3~~ 0 | ✅ ERLEDIGT — DashboardNotFoundException(5750) |
+| 12 | `api/v1/sensor_type_defaults.py` | 5 | Bleiben HTTPException |
+| 13 | `api/v1/errors.py` | 4 | Bleiben HTTPException |
+| 14 | `api/v1/debug.py` | 59 | Bleiben HTTPException (Debug-Endpoints) |
+
+**Was NICHT migriert wird (bewusst):**
+- `debug.py` — 58 HTTPExceptions sind Debug-Tools, die bleiben generisch
+- `audit.py` — Query-Fehler, kein fachlicher Error-Code noetig
+- `sensor_type_defaults.py` — 4 einfache Validierungen
+- `errors.py` — Meta-Endpoint fuer Error-Codes selbst
+- Reine 401/403 Unauthorized/Forbidden — bleiben HTTP-Semantik
+
+**Effektiver Scope:** Alle fachlichen API-Dateien migriert (11 von 14). 82 HTTPExceptions verbleiben bewusst in 4 Utility-Dateien (debug=59, audit=14, sensor_type_defaults=5, errors=4).
+
+**Akzeptanzkriterien Block 4:**
+- [x] Mindestens die ersten 4 API-Dateien (esp, sensors, actuators, logic) migriert — esp.py ✅, logic.py ✅, sensors.py ✅ (0 verbleibend), actuators.py ✅ (0 verbleibend)
+- [x] Neue Exception-Klassen tragen numeric_code — RuleNotFoundException=5700, RuleValidationException=5701, SubzoneNotFoundException=5780
+- [x] JSON-Response enthaelt sowohl string_code als auch numeric_code — exception_handlers.py:66-69
+- [x] Bestehende API-Clients brechen nicht (string_code bleibt erhalten)
+- [ ] Tests fuer migrierte Endpoints angepasst — **NICHT VERIFIZIERT**
+- [x] sensors.py und actuators.py vollstaendig migriert — 3 neue Exceptions: DeviceNotApprovedError(5403), GpioConflictError(5209), GatewayTimeoutError(5504)
+- [x] auth.py migriert (13→0) — InvalidCredentialsException, TokenExpiredException, AuthenticationError, AuthorizationError, DuplicateError, ConfigurationException, ServiceUnavailableError
+- [x] subzone.py bereits migriert (0 HTTPExceptions) — ESPNotFoundError, SubzoneNotFoundException(5780), ValidationException
+- [x] sequences.py migriert (8→0) — SequenceNotFoundException(5611), ServiceUnavailableError, ValidationException
+- [x] users.py migriert (9→0) — UserNotFoundException, DuplicateError(5208), ValidationException, AuthenticationError
+- [x] zone.py migriert (3→0) — ESPNotFoundError(5001)
+- [x] dashboards.py migriert (3→0) — DashboardNotFoundException(5750)
+
+---
+
+### Block 5: Frontend Error-Handling vereinheitlichen — ❌ NICHT GESTARTET
+**Aufwand:** ~1-2 Stunden | **Prio:** NIEDRIG — Folgearbeit nach Block 1-4 | **Status:** OFFEN
+
+**5.1 REST-Error-Response parsen**
+
+Neues Utility in `src/api/` oder `src/utils/`:
 
 ```typescript
-/** Typisierung fuer die rohen Sensor-Daten aus props.device.sensors */
-interface RawSensor {
-  sensor_type: string
-  raw_value: number | null
-  name: string
-  unit?: string
-  gpio?: number
-  quality?: number
+interface StructuredApiError {
+  code: string;           // String-Code (z.B. "ESP_NOT_FOUND")
+  numericCode: number | null;  // Numerischer Code (z.B. 5001)
+  message: string;
+  details: Record<string, unknown>;
+  requestId: string | null;
 }
 
-interface GroupedSensor {
-  baseType: string              // z.B. 'sht31', 'ds18b20', 'bme280'
-  label: string                 // z.B. 'SHT31' (Display-Name des Basis-Geraets)
-  values: {
-    type: string                // z.B. 'sht31_temp'
-    label: string               // z.B. 'Temperatur'
-    value: number | null        // z.B. 22.0
-    unit: string                // z.B. '°C'
-    icon: string                // z.B. 'Thermometer' (Lucide Icon-Name)
-    quality: 'normal' | 'warning' | 'stale' | 'unknown'
-  }[]
+function parseApiError(error: AxiosError): StructuredApiError {
+  const data = error.response?.data?.error;
+  return {
+    code: data?.code ?? 'UNKNOWN',
+    numericCode: data?.numeric_code ?? null,
+    message: data?.message ?? error.message,
+    details: data?.details ?? {},
+    requestId: data?.request_id ?? null,
+  };
 }
-
-/**
- * Gruppiert Sensoren eines Devices nach Basis-Typ.
- *
- * Eingabe: [{sensor_type: 'sht31_temp', raw_value: 22.0}, {sensor_type: 'sht31_humidity', raw_value: 45.2}]
- * Ausgabe: [{baseType: 'sht31', label: 'SHT31', values: [{type: 'sht31_temp', label: 'Temperatur', ...}, ...]}]
- *
- * Einzelwert-Sensoren (DS18B20) → eine Gruppe mit einem Wert.
- * Multi-Value-Sensoren (SHT31, BME280) → eine Gruppe mit mehreren Werten.
- */
-export function groupSensorsByBaseType(sensors: RawSensor[]): GroupedSensor[]
 ```
 
-Nutzt `MULTI_VALUE_DEVICES`, `BASE_TYPE_TO_DEVICE` und `SENSOR_TYPE_CONFIG` um Basis-Typen und Wert-Typen zu mappen.
+**5.2 ErrorDetailsModal fuer REST-Errors**
 
-**ACHTUNG — MULTI_VALUE_DEVICES Keys:** Die Registry hat lowercase Keys: `sht31`, `bmp280`. BME280 wird separat als `BME280_CONFIG` erstellt und via `MULTI_VALUE_DEVICES['bme280']` eingefuegt. Der Helper muss case-insensitive matchen oder den `BASE_TYPE_TO_DEVICE` Lookup nutzen.
+`ErrorDetailsModal.vue` kann REST-Errors anzeigen wenn `numericCode` vorhanden — dasselbe Modal wie fuer WebSocket-Errors. Troubleshooting-Hinweise kommen dann ueber den bestehenden REST-Endpoint `/v1/errors/codes/{code}`.
 
-### C2: aggregateZoneSensors()
+**5.3 Entscheidung translateErrorCode()**
 
-```typescript
-interface ZoneAggregation {
-  sensorTypes: {
-    type: string              // z.B. 'temperature' (abstrahierter Typ)
-    label: string             // z.B. 'Temperatur'
-    avg: number
-    min: number
-    max: number
-    count: number
-    unit: string
-  }[]
-  deviceCount: number
-  onlineCount: number
-}
+`src/api/errors.ts` mit `translateErrorCode()` — BEHALTEN fuer spaetere History-View. Nicht als toten Code entfernen, sondern mit `// TODO: Used by planned History-View feature` markieren.
+**IST-Stand:** `translateErrorCode()` wird aktuell NIRGENDS importiert (nur Selbstreferenz in errors.ts). Toter Code.
 
-/**
- * Erstellt Zone-Aggregation aus allen Devices einer Zone.
- * Fasst gleiche Sensor-Kategorien zusammen (alle Temperatur-Sensoren,
- * egal ob SHT31, DS18B20 oder BME280).
- *
- * Sortierung: Temperatur > Luftfeuchte > Rest alphabetisch
- * Maximal 3 Sensor-Typen zurueckgeben.
- */
-export function aggregateZoneSensors(devices: Device[]): ZoneAggregation
-```
-
-### C3: formatAggregatedValue()
-
-```typescript
-/**
- * Formatiert einen aggregierten Wert fuer den Zone-Header.
- *
- * 1 Device:   "22.0°C"
- * 2-5:        "Ø 21.5°C"
- * 6+:         "Ø 22°C"
- */
-export function formatAggregatedValue(
-  agg: ZoneAggregation['sensorTypes'][0],
-  deviceCount: number
-): string
-```
-
-### C4: Typ-Labels sicherstellen
-
-**ACHTUNG — Tatsaechliche Keys in SENSOR_TYPE_CONFIG (Case-Sensitiv!):**
-
-Die Keys im Code nutzen gemischtes Casing. Tabelle zeigt IST-Keys und was angepasst werden muss:
-
-| IST Key in Code | IST label | IST icon | IST unit | SOLL label (kurz, ohne Geraet) |
-|-----------------|-----------|----------|----------|-------------------------------|
-| `sht31` (Base) | SHT31 | Thermometer | °C | (nicht direkt anzeigen — via sht31_temp/humidity) |
-| `sht31_temp` | Temperatur (SHT31) | Thermometer | °C | Temperatur |
-| `sht31_humidity` | Luftfeuchtigkeit (SHT31) | Droplets | % RH | Luftfeuchte |
-| `DS18B20` | Temperatur (DS18B20) | Thermometer | °C | Temperatur |
-| `ds18b20` | Temperatur (DS18B20) | Thermometer | °C | Temperatur |
-| `BME280` (Base) | Temperatur (BME280) | Thermometer | °C | (nicht direkt anzeigen — via bme280_temp/humidity/pressure) |
-| `BME280_humidity` | Luftfeuchtigkeit (BME280) | Droplets | % RH | Luftfeuchte |
-| `BME280_pressure` | Luftdruck (BME280) | Gauge | hPa | Luftdruck |
-| `moisture` | Bodenfeuchte | Droplets | % | Bodenfeuchte |
-| `pH` | pH-Wert | Droplet | pH | pH-Wert |
-| `EC` | Leitfaehigkeit (EC) | Zap | µS/cm | Leitfaehigkeit |
-| `light` | Lichtsensor | Sun | lux | Licht |
-| `co2` | CO2-Sensor | Cloud | ppm | CO2 |
-| `flow` | Durchflusssensor | Waves | L/min | Durchfluss |
-
-**HINWEIS:** Base-Typ-Keys (`sht31`, `BME280`) haben Labels wie "SHT31" — diese werden NICHT direkt in der Card angezeigt. Der `groupSensorsByBaseType` Helper loest sie auf in die Wert-Typen (`sht31_temp`, `sht31_humidity`). Die MULTI_VALUE_DEVICES Registry hat eigene kurze Labels (z.B. "Temperatur", "Luftfeuchtigkeit") ohne Geraete-Suffix — diese nutzen.
-
-**Aenderungen an SENSOR_TYPE_CONFIG:**
-1. Labels: Geraete-Suffix entfernen — `"Temperatur (SHT31)"` → `"Temperatur"`. Der `groupSensorsByBaseType` Helper zeigt den Geraetetyp separat wenn noetig
-2. Labels: `"Luftfeuchtigkeit"` → `"Luftfeuchte"` (kuerzer, passt besser in Cards)
-3. Units: `"% RH"` → `"%RH"` (ohne Leerzeichen, kompakter)
-4. Icons NICHT aendern — bestehende Icons beibehalten (pH bleibt Droplet, co2 bleibt Cloud)
-
-**Lowercase-Aliase ergaenzen** fuer konsistenten Lookup: `soil_moisture` → `moisture`, `ph` → `pH`, `ec` → `EC`, `bme280_temp` → `BME280`, `bme280_humidity` → `BME280_humidity`, `bme280_pressure` → `BME280_pressure`, `ds18b20` → `DS18B20`. Alternativ: Lookup-Funktion die case-insensitive matcht.
+**Akzeptanzkriterien Block 5:**
+- [ ] `parseApiError()` Utility existiert und wird in API-Interceptor genutzt
+- [ ] ErrorDetailsModal zeigt REST-Errors mit numeric_code an
+- [ ] translateErrorCode() mit TODO-Kommentar versehen
+- [ ] 1339 Frontend-Tests bestehen
 
 ---
 
-## Block D: HardwareView Layout-Anpassungen (1-2h)
+### Block 6: Prometheus-Metriken erweitern (Optional) — ❌ NICHT GESTARTET
+**Aufwand:** ~30 Minuten | **Prio:** NIEDRIG — Nice-to-Have fuer Grafana | **Status:** OFFEN
 
-**Datei:** `src/views/HardwareView.vue`
+**6.1 Generisches Error-Counting**
 
-### D1: Zone-Reihenfolge
+```python
+# Neben increment_esp_error():
+def increment_api_error(endpoint: str, error_code: int, method: str):
+    """Zaehlt API-Fehler nach Endpoint und Error-Code."""
+    api_error_counter.labels(
+        endpoint=endpoint,
+        error_code=str(error_code),
+        method=method,
+    ).inc()
+```
 
-**IST:** Zonen in Store-Reihenfolge (unbestimmt)
+**6.2 Grafana Dashboard**
 
-**SOLL:**
-1. Zonen mit Offline/Warning-Devices zuerst (Probleme nach oben)
-2. Zonen mit Online-Devices
-3. Leere Zonen zuletzt
-4. Alphabetisch innerhalb gleicher Kategorie
-5. UnassignedDropBar bleibt fixiert am unteren Rand (ist keine sortierbare Zone)
+Neues Panel "API Errors by Code" im bestehenden Server-Health-Dashboard:
+- Top-10 Error-Codes (Rate/5m)
+- Error-Rate nach Endpoint
+- Trend ueber 24h
 
-### D2: Leere-Zone-State
-
-**IST:** Zone ohne Devices zeigt leeren Accordion-Body
-
-**SOLL:** `EmptyState.vue` (existiert unter `src/shared/design/patterns/EmptyState.vue`, Props: `icon`, `title`, `description`, `actionText`) mit:
-- Icon: `PackageOpen` (Lucide) — **MUSS importiert werden**, ist noch nicht im Projekt verwendet
-- Text (title): "Keine Geraete zugewiesen"
-- Subtext (description): "Ziehe Geraete aus der Leiste unten in diese Zone"
-- Wenn ein Device ueber die Zone gedraggt wird: gestrichelte Border + leichter Hintergrund-Highlight als Drop-Target-Indikator
-
-### D3: Zone-Accordion Collapse-Persistenz
-
-**IST:** Collapse-State geht bei Seiten-Reload verloren
-
-**SOLL:**
-- Collapse-State in `localStorage` persistieren (Key: `ao-zone-collapse-${zoneId}`)
-- Default beim ersten Besuch: Alle Zonen aufgeklappt (bis max 4 Zonen), ab 5+ nur die erste aufgeklappt
-- Zonen mit Problemen (Offline-Devices): Immer aufgeklappt, unabhaengig vom gespeicherten State
-- Animation: `max-height` Transition (200ms ease-out) — falls nicht bereits vorhanden
+**Akzeptanzkriterien Block 6:**
+- [ ] `increment_api_error()` Funktion existiert
+- [ ] Exception Handler ruft increment_api_error() auf
+- [ ] Grafana-Dashboard zeigt API-Error-Metriken
 
 ---
 
-## SOLL-Design komplett (ASCII-Mockup des Endergebnisses)
+### Block 7: Dead-Code-Dokumentation + Cleanup — ❌ NICHT GESTARTET
+**Aufwand:** ~1 Stunde | **Prio:** NIEDRIG — Wartbarkeit | **Status:** OFFEN
 
-### Zone mit 1 Device (SHT31 Multi-Value, Real-ESP):
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ ˅  Gewaechshaus     22.0°C  45%RH       1 ESP  ● 1/1 Online ⋮ │
-│    [Kammer A ●]  [Kammer B ●]                                   │
-│                                                                 │
-│  ┌────────────────────────────────┐                             │
-│  │ ● ESP_472204                   │                             │
-│  │ ● Online                   2S  │                             │
-│  │ 🌡 Temperatur      22.0 °C     │                             │
-│  │ 💧 Luftfeuchte     45.2 %RH    │                             │
-│  │                            ›   │  ← Chevron als Drill-Down   │
-│  └────────────────────────────────┘                             │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+**7.1 Dead-Code-Register erstellen**
 
-### Zone mit 3 Devices (gemischt Mock + Real):
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ ˅  Outdoor        Ø 19.3°C  Ø 62%RH    3 ESP  ● 2/3 Online ⋮ │
-│                                                                 │
-│  ┌──────────────────────┐  ┌──────────────────────┐             │
-│  │ ● ESP_472204         │  │ ● Mock #AB12  [MOCK] │             │
-│  │ ● Online         2S  │  │ ● Online         1S  │             │
-│  │ 🌡 Temperatur 21.0°C │  │ 🌡 Temperatur 22.0°C │             │
-│  │ 💧 Luftfeu.  55.0%RH │  │                   ›  │             │
-│  │                   ›  │  └──────────────────────┘             │
-│  └──────────────────────┘  ┌──────────────────────┐             │
-│                            │ ● ESP_891BC7         │             │
-│                            │ ● Offline        3S  │ ← rote Dot │
-│                            │ 🌡 Temperatur   --    │ ← kein Wert│
-│                            │ 💧 Luftfeu.    --     │             │
-│                            │                   ›  │             │
-│                            └──────────────────────┘             │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+Neue Datei `.claude/reference/errors/DEAD_CODES.md` mit:
+- Alle ~45 toten ESP32-Codes + Grund warum sie nicht verwendet werden
+- Alle ~18 toten Server-Codes + Grund
+- Markierung: "Reserviert fuer zukuenftige Features" vs. "Kann entfernt werden"
 
-### Leere Zone:
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ ˅  Lager                                0 ESP  ● - Leer     ⋮ │
-│                                                                 │
-│  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐  │
-│    📦 Keine Geraete zugewiesen                                  │
-│       Ziehe Geraete aus der Leiste unten in diese Zone          │
-│  └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘  │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+**7.2 Entscheidung pro Code-Gruppe:**
 
-### UnassignedDropBar (Compact-Modus):
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ 🏠 NICHT ZUGEWIESEN  ❷                                       ˅ │
-│                                                                 │
-│  ┌──────────────────────┐  ┌──────────────────────┐             │
-│  │ [MOCK] Mock #1C68    │  │ [MOCK] Mock #2D99    │             │
-│  │ ● Gerade eben        │  │ ● Vor 2 Min          │             │
-│  │ 22°C  45%            │  │ --                    │ ← keine    │
-│  └──────────────────────┘  └──────────────────────┘    Sensoren │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+| Gruppe | Empfehlung | Grund |
+|--------|-----------|-------|
+| GPIO (1003/1005/1006) | Behalten (reserviert) | Koennte bei erweiterten GPIO-Treibern gebraucht werden |
+| NVS (2001-2005) | Behalten (reserviert) | NVS-Fehlerbehandlung koennte spaeter erweitert werden |
+| Storage (2030-2032) | Entfernen | Kein Storage-Manager geplant |
+| Subzone ESP32 (2500-2504) | Entfernen auf ESP32 | Subzone-Validierung laeuft nur auf Server |
+| Logger (2020-2021) | Entfernen | Logger kann eigene Fehler nicht loggen — by design |
+| Network (3030-3031) | Behalten (reserviert) | Koennte bei erweiterten Netzwerk-Features gebraucht werden |
+
+**Akzeptanzkriterien Block 7:**
+- [ ] DEAD_CODES.md erstellt mit allen toten Codes + Status
+- [ ] Codes die "Entfernen" markiert sind: Aus error_codes.h und error_codes.py entfernt
+- [ ] Kommentar "RESERVED" fuer beibehaltene tote Codes
 
 ---
 
-## Dateien die bearbeitet werden
+### Gesamtreihenfolge und Abhaengigkeiten
 
-| Datei | Aenderung | Block |
-|-------|-----------|-------|
-| `src/utils/sensorDefaults.ts` | groupSensorsByBaseType, aggregateZoneSensors, formatAggregatedValue, Labels ergaenzen | C (ZUERST) |
-| `src/components/dashboard/DeviceMiniCard.vue` | Sensor-Labels, Multi-Value-Aufloesung, Spark-Bars entfernen, Card klickbar, Badge-Konsistenz, Chevron | A |
-| `src/components/dashboard/ZonePlate.vue` | Header-Aggregation, Status-Dot, Subzone-Chips | B |
-| `src/views/HardwareView.vue` | Zone-Sortierung, Leere-Zone-State, Accordion-Persistenz | D |
-| `src/shared/design/primitives/BaseBadge.vue` | Badge-Text/Farb-Konsistenz pruefen (MOCK vs SIM vereinheitlichen) | A5 |
+```
+Block 2 (Enrichment)          Block 7 (Dead-Code)
+   │ (unabhaengig)                │ (unabhaengig)
+   ▼                              ▼
+   SOFORT                         NIEDRIG
 
-**Keine neuen Dateien.** Alles in bestehenden Dateien.
+Block 1 (Exception-Bridge)
+   │
+   ▼
+Block 3 (Neue Ranges)
+   │
+   ▼
+Block 4 (API-Migration)     Block 6 (Prometheus)
+   │                            │ (unabhaengig)
+   ▼                            ▼
+Block 5 (Frontend)           NIEDRIG
+```
 
----
+**Empfohlene Session-Aufteilung (aktualisiert):**
 
-## Reihenfolge der Implementierung
+| Session | Bloecke | Status |
+|---------|---------|--------|
+| ~~Session 1~~ | ~~Block 1 + Block 2~~ | ✅ ERLEDIGT |
+| ~~Session 2~~ | ~~Block 3 + Block 4 (Dateien 1-4)~~ | ✅ ERLEDIGT (Block 3 komplett, Block 4 teilweise) |
+| ~~Session 3~~ | ~~Block 4 Rest + Block 1.3 AuditLog Fix~~ | ✅ ERLEDIGT (2026-03-02): auth, sequences, users, zone, dashboards migriert. AuditLog-Integration implementiert |
+| **Session 4 (NAECHSTE)** | Block 5 (Frontend) + Block 6 (Prometheus) + Block 7 (Dead-Code) | **OFFEN** |
 
-1. **Block C zuerst** — Helper-Funktionen die Block A und B brauchen
-2. **Block A** — DeviceMiniCard Sensor-Darstellung (groesster visueller Impact)
-3. **Block B** — ZonePlate Header-Aggregation (nutzt Block C Helper)
-4. **Block D** — HardwareView Layout (unabhaengig, kann auch parallel zu B)
-
----
-
-## Verifikation
-
-Nach jedem Block:
-1. `npm run type-check` — keine TypeScript-Fehler
-2. `npm run test` — Vitest-Tests gruen (besonders sensorDefaults-Tests)
-3. Manuell im Browser pruefen:
-
-**Block C:**
-- Unit-Tests fuer groupSensorsByBaseType mit SHT31, BME280, DS18B20
-- Unit-Tests fuer aggregateZoneSensors mit 0, 1, 3, 7 Devices
-
-**Block A:**
-- DeviceMiniCard zeigt "Temperatur 22.0 °C" statt "Temp 0C79 → 0"
-- SHT31-Device zeigt Temperatur UND Luftfeuchte als separate Zeilen
-- Keine Spark-Bars mehr sichtbar
-- Hover auf Card zeigt Pointer-Cursor + Shadow
-- Klick auf Card navigiert zu Level 2
-- Mock-Devices: [MOCK] Badge konsistent in Zone und UnassignedDropBar
-- Wert 0°C bei Temp zeigt fragwuerdige Daten visuell an (gedimmt)
-
-**Block B:**
-- Zone-Header zeigt "22.0°C 45%RH" nach Zone-Name
-- Zone mit 3 Devices zeigt "Ø 21.5°C Ø 52%RH"
-- Leere Zone zeigt keine Werte
-- Status-Dot vor "1/1 Online" ist gruen
-- Subzone-Chips erscheinen wenn Subzonen existieren
-- Subzone-Chip-Klick filtert Devices
-
-**Block D:**
-- Zonen mit Offline-Devices stehen oben
-- Leere Zone zeigt EmptyState mit PackageOpen-Icon
-- Accordion-State bleibt nach Reload erhalten
-
-## Commit-Strategie
-
-4 Commits (1 pro Block):
-1. `feat(utils): add sensor grouping and zone aggregation helpers`
-2. `feat(dashboard): fix DeviceMiniCard sensor labels, multi-value display, and click behavior`
-3. `feat(dashboard): add zone header aggregation, status dot, and subzone chips`
-4. `feat(dashboard): improve zone ordering, empty states, and collapse persistence`
+**Verbleibend:** ~3-4 Stunden (1 Session)
 
 ---
 
-## Was dieser Auftrag BEWUSST NICHT macht
+### Akzeptanzkriterien (Gesamt) — Stand 2026-03-01
 
-- **Keine ECharts-Sparklines** — braucht Sensor-History-Daten mit resolution-Parameter (noch nicht implementiert). Kommt in separatem Auftrag
-- **Keine Zone-Umsortierung per DnD** — Zone-Reihenfolge wird algorithmisch bestimmt
-- **Kein Perspektiven-Toggle** → `auftrag-view-architektur-dashboard-integration.md`
-- **Kein ESPCardBase Refactoring** → `auftrag-hardware-tab-css-settings-ux.md`
-- **Keine DnD-Verbesserungen** → `auftrag-dnd-konsolidierung-interaktion.md`
-- **Keine Alert-Integration** → `auftrag-unified-monitoring-ux.md`
-
----
-
-## Verifizierte Code-Fakten (2026-02-26)
-
-Folgende Fakten wurden gegen den tatsaechlichen Code geprueft:
-
-| Fakt | Status |
-|------|--------|
-| DeviceMiniCard.vue existiert, hat Spark-Bars + sensor.name + "Oeffnen"-Button | Bestaetigt |
-| ZonePlate.vue hat `subzoneGroups` computed (Subzone-Gruppierung) | Bestaetigt |
-| HardwareView.vue importiert EmptyState aus `@/shared/design/patterns` | Bestaetigt |
-| sensorDefaults.ts hat SENSOR_TYPE_CONFIG, MULTI_VALUE_DEVICES, formatSensorValueWithUnit | Bestaetigt |
-| Card emittiert bereits `click` Event → HardwareView ruft `zoomToDevice()` mit `router.push` | Bestaetigt |
-| Card hat bereits `cursor: pointer` und Hover-Shadow | Bestaetigt |
-| ChevronRight Icon ist im Projekt bereits importiert | Bestaetigt |
-| `useZoomNavigation` existiert NICHT — Navigation geht ueber `router.push` direkt | Korrigiert im Plan |
-| `sensor_configs` heisst im Code `sensors` (unknown[]) | Korrigiert im Plan |
-| SENSOR_TYPE_CONFIG Keys: gemischtes Casing (sht31, DS18B20, BME280, pH, EC) | Korrigiert im Plan |
-| Subzone-Daten kommen aus Device-Properties, NICHT aus zone.store.ts | Korrigiert im Plan |
-| BaseBadge.vue liegt unter `primitives/`, nicht direkt unter `design/` | Korrigiert im Plan |
-| Backend hat keinen SIM-Zustand — nur MOCK/REAL | Korrigiert im Plan |
-| `--color-error` existiert in tokens.css (#f87171), `--color-danger` existiert NICHT | Korrigiert im Plan |
-| PackageOpen Icon muss importiert werden (noch nicht im Projekt) | Hinweis im Plan |
-| MULTI_VALUE_DEVICES Keys: lowercase (sht31, bmp280, bme280) | Hinweis im Plan |
+- [x] Jeder fachliche Fehler im System traegt einen numerischen Error-Code — ✅ MQTT + REST-API migriert (82 HTTPExceptions verbleiben in 4 Dateien — bewusst: debug, audit, sensor_type_defaults, errors)
+- [x] GodKaiserException ↔ Numerische Codes verknuepft (Bridge) — ✅ Block 1
+- [x] 108/108 ESP32-Codes mit Enrichment in esp32_error_mapping.py (100%) — ✅ Block 2
+- [x] REST-API-Fehler erscheinen im AuditLog mit numerischem Code — ✅ IMPLEMENTIERT (2026-03-02): `_log_to_audit()` in exception_handlers.py
+- [ ] Frontend zeigt strukturierte Fehlermeldungen fuer REST-Errors — **OFFEN: Block 5**
+- [x] Neue Error-Code-Ranges fuer Logic/Dashboard/Subzones definiert — ✅ Block 3
+- [ ] Keine Test-Regressionen (810+ Backend + 1339 Frontend) — **NICHT VERIFIZIERT**
+- [ ] Dead-Code dokumentiert und bereinigt — **OFFEN: Block 7**
+- [x] Error-Code-System bereit fuer KI-Error-Analyse Integration (Ebene 1) — ✅ Backend komplett (Block 1-4), Frontend-Anzeige (Block 5) und Monitoring (Block 6) ausstehend
 
 ---
 
-## Querverweise
+### Referenzen
 
-| Thema | Datei |
-|-------|-------|
-| DnD Zone-Assignment | `frontend-konsolidierung/auftrag-dnd-konsolidierung-interaktion.md` |
-| CSS-Sanierung + ESPCardBase | `frontend-konsolidierung/auftrag-hardware-tab-css-settings-ux.md` |
-| View-Architektur + Perspektiven | `frontend-konsolidierung/auftrag-view-architektur-dashboard-integration.md` |
-| Monitoring + Alerts | `frontend-konsolidierung/auftrag-unified-monitoring-ux.md` |
-| DnD Sensor/Aktor Orbital Bugs | `auftrag-dnd-sensor-aktor-drop-fix.md` |
-| Dashboard-UX Forschung | `wissen/iot-automation/iot-dashboard-design-best-practices-2026.md` |
-| Config-Panel UX | `wissen/iot-automation/iot-device-config-panel-ux-patterns.md` |
-| Sensor-Konsolidierung Grundlage | `auftrag-device-sensor-lifecycle-fix.md` (Multi-Value-Splitting) |
+**Life-Repo:**
+- `arbeitsbereiche/automation-one/STATUS.md` — Aktueller Stand (95% alle Schichten)
+- `arbeitsbereiche/automation-one/architektur-uebersicht.md` — 3-Schichten-Architektur
+- `arbeitsbereiche/automation-one/roadmap.md` — KI-Inferenz in mittelfristiger Roadmap
+- `wissen/iot-automation/ki-error-analyse-iot.md` — 4-Ebenen KI-Error-Analyse-Strategie
+- `wissen/iot-automation/grafana-prometheus-iot-monitoring.md` — Monitoring Best Practices
+
+**Ziel-Repo (auto-one):**
+- `god_kaiser_server/src/core/error_codes.py` — Enum-Definitionen
+- `god_kaiser_server/src/core/exceptions.py` — GodKaiserException-Hierarchie
+- `god_kaiser_server/src/core/exception_handlers.py` — HTTP Exception Handler
+- `god_kaiser_server/src/core/esp32_error_mapping.py` — Error Enrichment (97 Codes)
+- `god_kaiser_server/src/mqtt/handlers/error_handler.py` — MQTT Error Handler
+- `god_kaiser_server/src/db/models/audit_log.py` — AuditLog Model
+- `god_kaiser_server/src/api/v1/*.py` — 14 API-Dateien
+- `El Frontend/src/api/errors.ts` — translateErrorCode()
+- `El Frontend/src/components/error/ErrorDetailsModal.vue` — Error-Detail-Modal
+- `El Trabajante/src/models/error_codes.h` — ESP32 Error-Code-Definitionen
+- `.claude/reference/errors/ERROR_CODES.md` — Agent-Referenz v1.1
+
+---
+
+### Offene Punkte
+
+- **AuditLog error_code Typ:** ✅ ENTSCHIEDEN: String beibehalten. `log_api_error()` schreibt `str(numeric_code)` wenn vorhanden, sonst `error_code` String. Kompatibel mit bestehenden String-Codes.
+- **Error-Response Versionierung:** Soll `numeric_code` in einem separaten API-Response-Schema (v2) leben oder direkt in v1 ergaenzt werden? Empfehlung: Direkt in v1 als optionales Feld — kein Breaking Change.
+- **Debug-Endpoints (debug.py, 58 HTTPExceptions):** Sollen diese jemals Error-Codes bekommen? Empfehlung: Nein — Debug-Tools sind per Definition unkritisch und temporaer.
+- **Tote ESP32-Codes (2500-2504 Subzone):** Aus Firmware entfernen oder als Server-only-Codes behalten? Empfehlung: Aus error_codes.h entfernen, in error_codes.py behalten (Server braucht sie).
+- **Frontend Error-Boundary:** Soll ein globaler Vue Error-Boundary REST-API-Fehler abfangen und ueber ErrorDetailsModal anzeigen? Oder bleibt das per-Komponente? Empfehlung: Globaler Interceptor in Axios-Instance mit opt-out pro Endpoint.

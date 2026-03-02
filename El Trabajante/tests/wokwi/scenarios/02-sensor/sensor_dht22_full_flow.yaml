@@ -9,6 +9,9 @@ steps:
   # Boot and connect
   - wait-serial: "MQTT connected"
 
+  # Registration gate: opens on server confirmation or 10s timeout fallback
+  - wait-serial: "REGISTRATION"
+
   # Sensor Manager active
   - wait-serial: "Sensor Manager"
 

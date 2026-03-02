@@ -306,6 +306,14 @@ bool ConfigManager::loadZoneConfig(KaiserZone& kaiser, MasterZone& master) {
 bool ConfigManager::saveZoneConfig(const KaiserZone& kaiser, const MasterZone& master) {
   LOG_I(TAG, "ConfigManager: Saving Zone configuration...");
 
+  // ============================================
+  // WOKWI MODE: Skip NVS, store in RAM only
+  // ============================================
+  #ifdef WOKWI_SIMULATION
+    LOG_I(TAG, "ConfigManager: WOKWI mode - zone config stored in RAM only (NVS not supported)");
+    return true;  // ✅ Signalisiere Erfolg - RAM-Config ist aktiv
+  #endif
+
   if (!storageManager.beginNamespace("zone_config", false)) {
     LOG_E(TAG, "ConfigManager: Failed to open zone_config namespace for writing");
     return false;
@@ -1181,6 +1189,14 @@ bool ConfigManager::loadSystemConfig(SystemConfig& config) {
 
 bool ConfigManager::saveSystemConfig(const SystemConfig& config) {
   LOG_I(TAG, "ConfigManager: Saving System configuration...");
+
+  // ============================================
+  // WOKWI MODE: Skip NVS, store in RAM only
+  // ============================================
+  #ifdef WOKWI_SIMULATION
+    LOG_I(TAG, "ConfigManager: WOKWI mode - system config stored in RAM only (NVS not supported)");
+    return true;  // ✅ Signalisiere Erfolg - RAM-Config ist aktiv
+  #endif
 
   if (!storageManager.beginNamespace("system_config", false)) {
     LOG_E(TAG, "ConfigManager: Failed to open system_config namespace for writing");
