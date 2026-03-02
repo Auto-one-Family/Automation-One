@@ -21,8 +21,8 @@ export function useSparklineCache(maxPoints: number = DEFAULT_MAX_POINTS) {
 
   const sparklineCache = ref<Map<string, ChartDataPoint[]>>(new Map())
 
-  function getSensorKey(espId: string, gpio: number): string {
-    return `${espId}-${gpio}`
+  function getSensorKey(espId: string, gpio: number, sensorType?: string): string {
+    return sensorType ? `${espId}-${gpio}-${sensorType}` : `${espId}-${gpio}`
   }
 
   watch(
@@ -30,10 +30,10 @@ export function useSparklineCache(maxPoints: number = DEFAULT_MAX_POINTS) {
     () => {
       for (const device of espStore.devices) {
         const deviceId = espStore.getDeviceId(device)
-        const sensors = (device.sensors as { gpio: number; raw_value: number }[]) || []
+        const sensors = (device.sensors as { gpio: number; sensor_type?: string; raw_value: number }[]) || []
         for (const s of sensors) {
           if (typeof s.raw_value !== 'number') continue
-          const key = getSensorKey(deviceId, s.gpio)
+          const key = getSensorKey(deviceId, s.gpio, s.sensor_type)
           const existing = sparklineCache.value.get(key) || []
           const lastPoint = existing[existing.length - 1]
           const now = new Date()

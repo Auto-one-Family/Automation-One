@@ -37,6 +37,7 @@ watch(() => props.dataSources, (v) => { if (v) localDataSources.value = v })
 watch(() => props.timeRange, (v) => { if (v) localTimeRange.value = v })
 
 // Parse selected sensor IDs from comma-separated string
+// Format: "espId:gpio:sensorType,espId:gpio:sensorType" (backward-compatible with "espId:gpio")
 const selectedSensorIds = computed(() => {
   if (!localDataSources.value) return []
   return localDataSources.value.split(',').filter(Boolean)
@@ -45,17 +46,22 @@ const selectedSensorIds = computed(() => {
 // Build ChartSensor[] for MultiSensorChart
 const chartSensors = computed<ChartSensor[]>(() => {
   return selectedSensorIds.value.map((sId, idx) => {
-    const [espId, gpioStr] = sId.split(':')
-    const gpio = parseInt(gpioStr)
+    const parts = sId.split(':')
+    const espId = parts[0]
+    const gpio = parseInt(parts[1])
+    const explicitSensorType = parts[2] || null // new: explicit sensor_type from ID
     const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
     const sensor = device
-      ? ((device.sensors as MockSensor[]) || []).find(s => s.gpio === gpio)
+      ? ((device.sensors as MockSensor[]) || []).find(s =>
+          s.gpio === gpio && (!explicitSensorType || s.sensor_type === explicitSensorType)
+        )
       : null
+    const sensorType = explicitSensorType || sensor?.sensor_type || 'unknown'
     return {
-      id: `${espId}_${gpio}`,
+      id: `${espId}_${gpio}_${sensorType}`,
       espId,
       gpio,
-      sensorType: sensor?.sensor_type || 'unknown',
+      sensorType,
       name: sensor?.name || sensor?.sensor_type || `GPIO ${gpio}`,
       unit: sensor?.unit || '',
       color: CHART_COLORS[idx % CHART_COLORS.length],
@@ -63,13 +69,13 @@ const chartSensors = computed<ChartSensor[]>(() => {
   })
 })
 
-// All available sensors for "add" dropdown
+// All available sensors for "add" dropdown (multi-value sensors listed per sub-type)
 const availableSensors = computed(() => {
   const items: { id: string; label: string }[] = []
   for (const device of espStore.devices) {
     const deviceId = espStore.getDeviceId(device)
     for (const s of (device.sensors as MockSensor[]) || []) {
-      const id = `${deviceId}:${s.gpio}`
+      const id = `${deviceId}:${s.gpio}:${s.sensor_type}`
       if (!selectedSensorIds.value.includes(id)) {
         items.push({
           id,

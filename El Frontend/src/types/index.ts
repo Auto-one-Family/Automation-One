@@ -764,7 +764,7 @@ export type DragData = SensorDragData | ActuatorDragData
  * Selected sensor for Multi-Sensor Chart.
  */
 export interface ChartSensor {
-  id: string  // Unique ID: `${espId}_${gpio}`
+  id: string  // Unique ID: `${espId}_${gpio}_${sensorType}` (includes sensorType for multi-value sensors like SHT31)
   espId: string
   gpio: number
   sensorType: string

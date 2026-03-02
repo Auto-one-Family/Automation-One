@@ -104,9 +104,17 @@ const expandedChartLoading = ref(false)
 const expandedChartReadings = ref<SensorReading[]>([])
 
 async function fetchExpandedChartData(sensorKey: string) {
-  // Parse sensorKey format: "{espId}-{gpio}"
+  // Parse sensorKey format: "{espId}-{gpio}-{sensorType}" or legacy "{espId}-{gpio}"
   const parts = sensorKey.split('-')
   if (parts.length < 2) return
+
+  // sensor_type is the last part if 3+ segments and not a number
+  let sensorType: string | undefined
+  const lastPart = parts[parts.length - 1]
+  if (parts.length >= 3 && isNaN(parseInt(lastPart, 10))) {
+    sensorType = lastPart
+    parts.pop()
+  }
   const gpio = parseInt(parts[parts.length - 1], 10)
   const espId = parts.slice(0, -1).join('-')
   if (isNaN(gpio)) return
@@ -119,6 +127,7 @@ async function fetchExpandedChartData(sensorKey: string) {
     const response = await sensorsApi.queryData({
       esp_id: espId,
       gpio,
+      sensor_type: sensorType || undefined,
       start_time: oneHourAgo.toISOString(),
       end_time: now.toISOString(),
       limit: 500,
@@ -134,13 +143,24 @@ async function fetchExpandedChartData(sensorKey: string) {
 /** Resolve unit for the currently expanded sensor (avoids duplication in chartData + chartOptions) */
 const expandedSensorUnit = computed(() => {
   if (!expandedSensorKey.value) return ''
-  const parts = expandedSensorKey.value.split('-')
-  const gpio = parseInt(parts[parts.length - 1], 10)
-  const espId = parts.slice(0, -1).join('-')
+  const keyParts = expandedSensorKey.value.split('-')
+
+  // Extract sensor_type from key if present (last part, non-numeric)
+  let sensorType: string | undefined
+  const lastPart = keyParts[keyParts.length - 1]
+  if (keyParts.length >= 3 && isNaN(parseInt(lastPart, 10))) {
+    sensorType = lastPart
+    keyParts.pop()
+  }
+  const gpio = parseInt(keyParts[keyParts.length - 1], 10)
+  const espId = keyParts.slice(0, -1).join('-')
+
   const sensorGroup = zoneSensorGroup.value
   if (sensorGroup) {
     for (const sz of sensorGroup.subzones) {
-      const found = sz.sensors.find(s => s.esp_id === espId && s.gpio === gpio)
+      const found = sz.sensors.find(s =>
+        s.esp_id === espId && s.gpio === gpio && (!sensorType || s.sensor_type === sensorType)
+      )
       if (found) {
         return getSensorUnit(found.sensor_type) !== 'raw' ? getSensorUnit(found.sensor_type) : (found.unit || '')
       }
@@ -310,6 +330,7 @@ async function fetchDetailData() {
     const response = await sensorsApi.queryData({
       esp_id: selectedDetailSensor.value.espId,
       gpio: selectedDetailSensor.value.gpio,
+      sensor_type: selectedDetailSensor.value.sensorType || undefined,
       start_time: detailStartTime.value,
       end_time: detailEndTime.value,
       limit: 1000,
@@ -327,17 +348,20 @@ async function fetchDetailData() {
 // Multi-Sensor Overlay (L3)
 // =============================================================================
 
-/** All sensors in current zone except the primary detail sensor */
+/** All sensors in current zone except the primary detail sensor (includes sensor_type for multi-value separation) */
 const availableOverlaySensors = computed(() => {
   if (!zoneSensorGroup.value || !selectedDetailSensor.value) return []
   const result: { key: string; name: string; type: string; unit: string; espId: string; gpio: number }[] = []
   for (const sz of zoneSensorGroup.value.subzones) {
     for (const s of sz.sensors) {
-      if (s.esp_id === selectedDetailSensor.value.espId && s.gpio === selectedDetailSensor.value.gpio) continue
-      const key = `${s.esp_id}-${s.gpio}`
+      // Exclude the primary detail sensor (match by espId + gpio + sensorType)
+      if (s.esp_id === selectedDetailSensor.value.espId &&
+          s.gpio === selectedDetailSensor.value.gpio &&
+          s.sensor_type === selectedDetailSensor.value.sensorType) continue
+      const key = `${s.esp_id}-${s.gpio}-${s.sensor_type}`
       result.push({
         key,
-        name: s.name || `GPIO ${s.gpio}`,
+        name: s.name || s.sensor_type || `GPIO ${s.gpio}`,
         type: s.sensor_type,
         unit: getSensorUnit(s.sensor_type) !== 'raw' ? getSensorUnit(s.sensor_type) : (s.unit || ''),
         espId: s.esp_id,
@@ -364,6 +388,14 @@ async function toggleOverlaySensor(sensorKey: string) {
 async function fetchOverlaySensorData(sensorKey: string) {
   const parts = sensorKey.split('-')
   if (parts.length < 2) return
+
+  // Extract sensor_type from key if present (last part, non-numeric)
+  let sensorType: string | undefined
+  const lastPart = parts[parts.length - 1]
+  if (parts.length >= 3 && isNaN(parseInt(lastPart, 10))) {
+    sensorType = lastPart
+    parts.pop()
+  }
   const gpio = parseInt(parts[parts.length - 1], 10)
   const espId = parts.slice(0, -1).join('-')
   if (isNaN(gpio)) return
@@ -373,6 +405,7 @@ async function fetchOverlaySensorData(sensorKey: string) {
     const response = await sensorsApi.queryData({
       esp_id: espId,
       gpio,
+      sensor_type: sensorType || undefined,
       start_time: detailStartTime.value,
       end_time: detailEndTime.value,
       limit: 1000,
@@ -1390,21 +1423,21 @@ function handleClaimLayout(layoutId: string) {
             >
               <div
                 v-for="sensor in subzone.sensors"
-                :key="`${sensor.esp_id}-${sensor.gpio}`"
+                :key="`${sensor.esp_id}-${sensor.gpio}-${sensor.sensor_type}`"
                 :class="[
                   'monitor-sensor-card',
-                  { 'monitor-sensor-card--expanded': expandedSensorKey === getSensorKey(sensor.esp_id, sensor.gpio) }
+                  { 'monitor-sensor-card--expanded': expandedSensorKey === getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type) }
                 ]"
               >
                 <SensorCard
                   :sensor="sensor"
                   mode="monitor"
-                  @click="toggleExpanded(getSensorKey(sensor.esp_id, sensor.gpio))"
+                  @click="toggleExpanded(getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type))"
                 >
                   <template #sparkline>
                     <LiveLineChart
-                      v-if="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio))?.length"
-                      :data="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio))!"
+                      v-if="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type))?.length"
+                      :data="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type))!"
                       compact
                       height="32px"
                       :max-data-points="30"
@@ -1415,7 +1448,7 @@ function handleClaimLayout(layoutId: string) {
                 <!-- Expanded Chart Panel (simplified: 1h chart + 2 action buttons) -->
                 <Transition name="expand">
                   <div
-                    v-if="expandedSensorKey === getSensorKey(sensor.esp_id, sensor.gpio)"
+                    v-if="expandedSensorKey === getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type)"
                     class="monitor-sensor-card__charts"
                     @click.stop
                   >

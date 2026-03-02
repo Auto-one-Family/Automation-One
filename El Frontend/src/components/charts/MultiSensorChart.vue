@@ -410,10 +410,12 @@ async function fetchData(retryAttempt = 0): Promise<void> {
         log.debug(`Querying API for sensor ${sensor.id}`, {
           esp_id: sensor.espId,
           gpio: sensor.gpio,
+          sensorType: sensor.sensorType,
         })
         const response = await sensorsApi.queryData({
           esp_id: sensor.espId,
           gpio: sensor.gpio,
+          sensor_type: sensor.sensorType || undefined,
           start_time: startTime.toISOString(),
           end_time: now.toISOString(),
           limit: MAX_DATA_POINTS,
@@ -545,19 +547,13 @@ function setupWebSocketSubscriptions(): void {
 function handleSensorDataMessage(sensor: ChartSensor, message: any): void {
   const data = message.data
 
-  // Prüfe ob die Daten zu diesem Sensor gehören (GPIO-Match)
+  // Prüfe ob die Daten zu diesem Sensor gehören (GPIO + sensor_type Match)
   if (data.gpio !== undefined && data.gpio !== sensor.gpio) {
-    // Nur alle 5 Sekunden loggen um Console nicht zu fluten
-    const now = Date.now()
-    const lastLog = (handleSensorDataMessage as any)._lastFilterLog || 0
-    if (now - lastLog > 5000) {
-      log.debug(`WebSocket data filtered (GPIO mismatch)`, {
-        expectedGpio: sensor.gpio,
-        receivedGpio: data.gpio,
-        sensorId: sensor.id,
-      })
-      ;(handleSensorDataMessage as any)._lastFilterLog = now
-    }
+    return
+  }
+
+  // Filter by sensor_type to prevent multi-value mixing (e.g., SHT31 temp vs humidity)
+  if (sensor.sensorType && data.sensor_type && data.sensor_type !== sensor.sensorType) {
     return
   }
 

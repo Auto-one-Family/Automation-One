@@ -56,8 +56,8 @@ const availableSensors = computed(() => {
     const deviceId = espStore.getDeviceId(device)
     for (const s of (device.sensors as MockSensor[]) || []) {
       items.push({
-        id: `${deviceId}:${s.gpio}`,
-        label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio})`,
+        id: `${deviceId}:${s.gpio}:${s.sensor_type}`,
+        label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
         type: s.sensor_type || '',
       })
     }

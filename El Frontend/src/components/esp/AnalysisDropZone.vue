@@ -216,8 +216,8 @@ function handleDrop(event: DragEvent) {
       return
     }
 
-    // Check if sensor already exists
-    const sensorId = `${dragData.espId}_${dragData.gpio}`
+    // Check if sensor already exists (include sensorType for multi-value sensors like SHT31)
+    const sensorId = `${dragData.espId}_${dragData.gpio}_${dragData.sensorType}`
     if (selectedSensors.value.some((s) => s.id === sensorId)) {
       log.debug('DROP REJECTED - sensor already in chart', { sensorId })
       return

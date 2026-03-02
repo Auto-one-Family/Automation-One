@@ -45,8 +45,8 @@ const availableSensors = computed(() => {
     const deviceId = espStore.getDeviceId(device)
     for (const s of (device.sensors as MockSensor[]) || []) {
       items.push({
-        id: `${deviceId}:${s.gpio}`,
-        label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio})`,
+        id: `${deviceId}:${s.gpio}:${s.sensor_type}`,
+        label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
       })
     }
   }
@@ -56,11 +56,15 @@ const availableSensors = computed(() => {
 // Parsed sensor data — uses localSensorId instead of props.sensorId
 const parsedSensor = computed(() => {
   if (!localSensorId.value) return null
-  const [espId, gpioStr] = localSensorId.value.split(':')
-  const gpio = parseInt(gpioStr)
+  const parts = localSensorId.value.split(':')
+  const espId = parts[0]
+  const gpio = parseInt(parts[1])
+  const sensorType = parts[2] || null
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
   if (!device) return null
-  const sensor = ((device.sensors as MockSensor[]) || []).find(s => s.gpio === gpio)
+  const sensor = ((device.sensors as MockSensor[]) || []).find(s =>
+    s.gpio === gpio && (!sensorType || s.sensor_type === sensorType)
+  )
   if (!sensor) return null
   return { espId, gpio, sensor }
 })
