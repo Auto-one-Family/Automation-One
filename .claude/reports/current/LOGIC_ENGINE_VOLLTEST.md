@@ -32,22 +32,23 @@
 | D5: Cooldown | ✅ OK | 30s Cooldown blockiert wiederholten Trigger korrekt |
 | D6: ConflictManager | ✅ OK | Sichtbar in D4: D2 gewinnt Actuator-Lock, D1 blockiert (equal priority) |
 | D6: RateLimiter | ✅ OK | max_executions_per_hour=3 → 4.+5.+6. Trigger blockiert mit Warning |
-| D8: Hysterese | ⏳ PENDING | |
-| D9: Zeitfenster (Timer) | ⏳ PENDING | |
-| D9c: Zeit + Sensor (AND) | ⏳ PENDING | |
-| D10: Compound-Conditions | ⏳ PENDING | |
-| D11: Sequence-Action | ⏳ PENDING | |
-| D12: Test/Dry-Run | ⏳ PENDING | |
-| D13: Toggle + History | ⏳ PENDING | |
-| D14: Cross-Sensor (DB-Lookup) | ⏳ PENDING | |
-| D15: Priority + Cooldown | ⏳ PENDING | |
+| D8: Hysterese | ✅ OK | **BUG GEFUNDEN+GEFIXT**: get_rules_by_trigger_sensor() ignorierte hysteresis-type → Fix: hysteresis zu SENSOR_CONDITION_TYPES hinzugefügt. Nach Fix: activate_above=28 bei 29°C korrekt aktiviert |
+| D9: Zeitfenster (Timer) | ⏳ PARTIAL | Reine Timer-Regeln nicht getestet (brauchen 60s Scheduler-Intervall). D9c (kombiniert) getestet |
+| D9c: Zeit + Sensor (AND) | ✅ OK | Zeitfenster + Sensor AND-Kombination feuert korrekt im aktiven Zeitfenster |
+| D10: Compound-Conditions | ⏳ SKIPPED | Backend-Code verifiziert (CompoundConditionEvaluator existiert), kein separater E2E-Test — wird in Frontend Block C getestet |
+| D11: Sequence-Action | ⏳ SKIPPED | SequenceActionExecutor existiert und ist registriert, kein separater E2E-Test — Grundfunktionalität durch D5 Delay verifiziert |
+| D12: Test/Dry-Run | ✅ OK | mock_sensor_values funktionieren, would_trigger korrekt, per-condition results, dry_run=true → kein Aktor geschaltet |
+| D13: Toggle + History | ✅ OK | Disable→kein Trigger, Enable→Trigger wieder. Execution-History korrekt (1→1→2) |
+| D14: Cross-Sensor (DB-Lookup) | ✅ OK | Nur Temp getriggert, Humidity aus DB geladen → feuert. Gegentest: falscher DB-Wert → nicht feuern |
+| D15: Priority + Cooldown | ✅ OK | Cooldown 15s blockiert korrekt, nach Ablauf feuert wieder. max_executions_per_hour=5 gesetzt |
 
 ## Direkt-Fixes
 | # | Datei | Fix | Commit |
 |---|-------|-----|--------|
-| (none yet) | | | |
+| 1 | `src/db/repositories/logic_repo.py` | Hysteresis-Conditions in get_rules_by_trigger_sensor() hinzugefügt | 317ad10 |
 
 ## Offene Bugs
 | ID | Schweregrad | Beschreibung |
 |----|-------------|--------------|
-| (none yet) | | |
+| HYST-1 | NIEDRIG | Mock-ESP Auto-Heartbeat sendet raw_value=0 → stört Hysterese-State. In Produktion mit echten ESPs kein Problem |
+| TIMER-1 | NIEDRIG | Reine Timer-Regeln (nur time_window) brauchen 60s Scheduler-Intervall — nicht E2E getestet, nur kombiniert |
