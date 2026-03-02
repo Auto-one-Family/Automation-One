@@ -8,6 +8,7 @@
 import api from './index'
 import { debugApi } from './debug'
 import { sensorsApi } from './sensors'
+import { actuatorsApi } from './actuators'
 import { createLogger } from '@/utils/logger'
 import { getSensorUnit } from '@/utils/sensorDefaults'
 
@@ -24,6 +25,8 @@ import type {
   ESPApprovalResponse,
   ESPRejectionRequest,
   SensorConfigResponse,
+  ActuatorConfigResponse,
+  MockActuator,
   QualityLevel
 } from '@/types'
 
@@ -258,6 +261,65 @@ async function enrichDbDevicesWithSensors(devices: ESPDevice[]): Promise<void> {
   }
 }
 
+/**
+ * Map ActuatorConfigResponse to MockActuator shape expected by components.
+ */
+function mapActuatorConfigToMockActuator(config: ActuatorConfigResponse): MockActuator {
+  return {
+    gpio: config.gpio,
+    actuator_type: config.actuator_type,
+    name: config.name || null,
+    state: config.is_active ?? false,
+    pwm_value: config.current_value ?? 0,
+    emergency_stopped: false,
+    last_command: config.last_command_at || null,
+    config_status: config.config_status as MockActuator['config_status'],
+    config_error: config.config_error || null,
+    config_error_detail: config.config_error_detail || null,
+  }
+}
+
+/**
+ * Fetch actuator configs for real (DB) devices and attach as actuators[].
+ *
+ * Without this enrichment, DB devices only have actuator_count (integer)
+ * but no actuators[] array, causing Rule Builder to show "no actuators" fallback.
+ */
+async function enrichDbDevicesWithActuators(devices: ESPDevice[]): Promise<void> {
+  const devicesWithActuators = devices.filter(d => (d.actuator_count ?? 0) > 0)
+
+  if (devicesWithActuators.length === 0) return
+
+  try {
+    const { data: allActuators } = await actuatorsApi.list({ page_size: 100 })
+
+    const actuatorsByEsp = new Map<string, MockActuator[]>()
+    for (const actuatorConfig of allActuators) {
+      const espId = actuatorConfig.esp_device_id || actuatorConfig.esp_id
+      if (!espId) continue
+
+      if (!actuatorsByEsp.has(espId)) {
+        actuatorsByEsp.set(espId, [])
+      }
+      actuatorsByEsp.get(espId)!.push(mapActuatorConfigToMockActuator(actuatorConfig))
+    }
+
+    for (const device of devicesWithActuators) {
+      const deviceId = device.device_id || device.esp_id || ''
+      const actuators = actuatorsByEsp.get(deviceId)
+      if (actuators && actuators.length > 0) {
+        device.actuators = actuators
+        device.actuator_count = actuators.length
+        logger.debug(`Enriched ${deviceId} with ${actuators.length} actuators`)
+      }
+    }
+
+    logger.info(`Enriched ${devicesWithActuators.length} DB devices with actuator data`)
+  } catch (err) {
+    logger.error('Failed to enrich DB devices with actuators - rule builder may show manual input fallback', err)
+  }
+}
+
 // =============================================================================
 // Unified ESP API
 // =============================================================================
@@ -368,6 +430,8 @@ export const espApi = {
     // Enrich DB devices with sensor configs (so SensorSatellite cards render)
     // Mock ESPs already have sensors[] from debug store; DB devices only have sensor_count
     await enrichDbDevicesWithSensors(filteredDbDevices)
+    // Enrich DB devices with actuator configs (so Rule Builder actuator dropdown works)
+    await enrichDbDevicesWithActuators(filteredDbDevices)
 
     const result = [...normalizedMockEsps, ...filteredDbDevices]
     logger.debug(`Returning ${result.length} devices (${normalizedMockEsps.length} mocks + ${filteredDbDevices.length} filtered DB)`)
@@ -436,6 +500,10 @@ export const espApi = {
       // Enrich real device with sensor configs (same as in listDevices)
       if ((device.sensor_count ?? 0) > 0 && !device.sensors?.length) {
         await enrichDbDevicesWithSensors([device])
+      }
+      // Enrich real device with actuator configs (same as in listDevices)
+      if ((device.actuator_count ?? 0) > 0 && !device.actuators?.length) {
+        await enrichDbDevicesWithActuators([device])
       }
 
       return device

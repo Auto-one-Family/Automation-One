@@ -96,17 +96,22 @@ void GPIOManager::initializeAllPinsToSafeMode() {
 
     uint8_t warning_count = 0;  // Track failed verifications
 
-    // Initialize all safe GPIO pins to INPUT_PULLUP
+    // Initialize all safe GPIO pins to safe state
     for (uint8_t i = 0; i < HardwareConfig::SAFE_PIN_COUNT; i++) {
         uint8_t pin = HardwareConfig::SAFE_GPIO_PINS[i];
 
-        // Set hardware pin mode to INPUT_PULLUP (safe state) via HAL
+        // Input-only pins (34-39) have no internal pull-ups, use INPUT mode
+        bool input_only = isInputOnlyPin(pin);
+        GPIOMode safe_mode = input_only ? GPIOMode::GPIO_INPUT : GPIOMode::GPIO_INPUT_PULLUP;
+        uint8_t arduino_mode = input_only ? INPUT : INPUT_PULLUP;
+
+        // Set hardware pin mode via HAL
         if (gpio_hal_) {
-            gpio_hal_->pinMode(pin, GPIOMode::GPIO_INPUT_PULLUP);
+            gpio_hal_->pinMode(pin, safe_mode);
         }
 
         // Verify pin state
-        if (!verifyPinState(pin, INPUT_PULLUP)) {
+        if (!verifyPinState(pin, arduino_mode)) {
             LOG_W(TAG, "GPIO " + String(pin) + " may not be in safe state!");
             warning_count++;
         }
@@ -116,11 +121,11 @@ void GPIOManager::initializeAllPinsToSafeMode() {
         info.pin = pin;
         info.owner[0] = '\0';
         info.component_name[0] = '\0';
-        info.mode = INPUT_PULLUP;
+        info.mode = arduino_mode;
         info.in_safe_mode = true;
         pins_.push_back(info);
 
-        LOG_D(TAG, "GPIO " + String(pin) + ": Safe-Mode (INPUT_PULLUP)");
+        LOG_D(TAG, "GPIO " + String(pin) + ": Safe-Mode (" + String(input_only ? "INPUT" : "INPUT_PULLUP") + ")");
     }
 
     // Auto-reserve I2C pins for system use (skip in unit tests)

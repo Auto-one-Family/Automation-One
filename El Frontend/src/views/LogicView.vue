@@ -53,6 +53,7 @@ import RuleFlowEditor from '@/components/rules/RuleFlowEditor.vue'
 import RuleNodePalette from '@/components/rules/RuleNodePalette.vue'
 import RuleConfigPanel from '@/components/rules/RuleConfigPanel.vue'
 import RuleTemplateCard from '@/components/rules/RuleTemplateCard.vue'
+import RuleCard from '@/components/rules/RuleCard.vue'
 import { ruleTemplates, type RuleTemplate } from '@/config/rule-templates'
 
 const logger = createLogger('LogicView')

@@ -44,9 +44,10 @@ const uint8_t RESERVED_PIN_COUNT = 6;
 // These pins are safe to use for sensors, actuators, and general I/O
 
 const uint8_t SAFE_GPIO_PINS[] = {
-    4, 5, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33
+    4, 5, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33,
+    34, 35, 36, 39  // Input-only ADC1 pins (no internal pull-ups, no output mode)
 };
-const uint8_t SAFE_PIN_COUNT = 16;
+const uint8_t SAFE_PIN_COUNT = 20;
 
 // ============================================
 // INPUT-ONLY PINS (NO OUTPUT MODE!)
