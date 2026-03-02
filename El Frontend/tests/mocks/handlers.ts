@@ -828,10 +828,16 @@ const logicHandlers = [
   // GET /logic/rules - Get all rules
   http.get('/api/v1/logic/rules', () => {
     return HttpResponse.json({
-      items: allMockRules,
-      total: allMockRules.length,
-      page: 1,
-      page_size: 50
+      success: true,
+      data: allMockRules,
+      pagination: {
+        page: 1,
+        page_size: 50,
+        total_items: allMockRules.length,
+        total_pages: 1,
+        has_next: false,
+        has_previous: false,
+      }
     })
   }),
 
@@ -931,7 +937,9 @@ const logicHandlers = [
         success: true,
         message: 'Rule toggled',
         rule_id: ruleId,
-        enabled: !rule.enabled
+        rule_name: rule.name,
+        enabled: !rule.enabled,
+        previous_state: rule.enabled,
       })
     }
 
@@ -954,15 +962,24 @@ const logicHandlers = [
 
       return HttpResponse.json({
         success: true,
-        message: 'Rule evaluation completed',
         rule_id: ruleId,
-        conditions_result: conditionsResult,
-        evaluation_details: rule.conditions.map((cond, idx) => ({
+        rule_name: rule.name,
+        would_trigger: conditionsResult,
+        condition_results: rule.conditions.map((cond, idx) => ({
           condition_index: idx,
+          condition_type: cond.type,
           result: conditionsResult,
-          sensor_value: ruleId === 'rule-002' ? 38.2 : 26.5
+          details: `Evaluated condition ${idx}`,
+          actual_value: ruleId === 'rule-002' ? 38.2 : 26.5,
         })),
-        would_execute_actions: conditionsResult
+        action_results: rule.actions.map((action, idx) => ({
+          action_index: idx,
+          action_type: action.type,
+          would_execute: conditionsResult,
+          details: `Would execute action ${idx}`,
+          dry_run: true,
+        })),
+        dry_run: true,
       })
     }
 

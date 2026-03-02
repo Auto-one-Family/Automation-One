@@ -119,9 +119,9 @@ async function performLogin(baseURL: string): Promise<AuthTokens> {
   })
 
   if (!response.ok) {
-    // Try setup endpoint if login fails (fresh database)
-    if (response.status === 401 || response.status === 404) {
-      console.log('[Global Setup] Login failed, trying setup endpoint...')
+    // Try setup endpoint if login fails (fresh database, no users yet)
+    if (response.status === 401 || response.status === 404 || response.status === 500) {
+      console.log(`[Global Setup] Login failed (${response.status}), trying setup endpoint...`)
       return performSetup(baseURL)
     }
 

@@ -1,5 +1,6 @@
 # DHT22 Dual-Value Sensor Flow Test
-# Validates DHT22 initialization and dual-value reading (temperature + humidity)
+# Validates DHT22 initialization, dual-value reading (temperature + humidity),
+# and dynamic value changes via set-control
 # Requires DHT22 connected to GPIO 15 in diagram.json
 # Timeout: 90000ms
 
@@ -15,7 +16,15 @@ steps:
   # Sensor Manager active
   - wait-serial: "Sensor Manager"
 
-  # Sensor data published (loop running)
+  # Sensor data published (loop running) with default values (23.5C, 65%)
+  - wait-serial: "Published"
+
+  # Dynamic: Change temperature to 35C via set-control
+  - set-control:
+      part-id: "dht22"
+      control: "temperature"
+      value: "35"
+  - delay: 8000ms
   - wait-serial: "Published"
 
   # Heartbeat confirms system operational

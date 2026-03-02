@@ -12,18 +12,19 @@
 # Prerequisites:
 # - WOKWI_CLI_TOKEN secret must be configured in GitHub repository
 #
-# Coverage: 173 scenarios across 14 categories
-# - PR/Push: 51 core scenarios + 1 legacy across 16 jobs (fast feedback)
-# - Nightly/Manual: ALL 173 scenarios (+ 6 extended jobs = 22 total jobs + summary)
+# Coverage: 191 scenarios across 14 categories (178 on disk + 13 new dynamic sensor)
+# - PR/Push: 52 core scenarios + 1 legacy across 16 jobs (fast feedback)
+# - Nightly/Manual: ALL 191 scenarios (+ 7 extended jobs = 24 total jobs + summary)
 #
-# Core PR Tests (51 scenarios in categories + 1 legacy):
+# Core PR Tests (52 scenarios in categories + 1 legacy):
 # - Boot (2), Sensor (2+3), MQTT Legacy (1), Actuator (4+3), Zone (2)
 # - Emergency (2+1), Config (2), Combined (3), GPIO (5), I2C (5)
 # - NVS (5), PWM (3), Error-Injection (10)
 #
-# Nightly Extended Tests (122 additional scenarios):
+# Nightly Extended Tests (135 additional scenarios):
 # - I2C Extended (15), OneWire (29), Hardware (9)
 # - PWM Extended (15), NVS Extended (35), GPIO Extended (19)
+# - Sensor Dynamic (13): DS18B20 sweeps, DHT22 sweeps, ADC sweeps
 #
 # Documentation: https://docs.wokwi.com/wokwi-ci/getting-started
 
@@ -2723,8 +2724,90 @@ jobs:
           path: El Trabajante/gpio_*.log
           retention-days: 7
 
+  # --- Nightly: Dynamic Sensor Tests (13 new set-control sweep scenarios) ---
+  nightly-sensor-dynamic:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: wokwi-firmware
+          path: El Trabajante/.pio/build/wokwi_simulation/
+
+      - name: Start Mosquitto MQTT Broker
+        run: |
+          mkdir -p /tmp/mosquitto
+          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
+          docker run -d --name mosquitto -p 1883:1883 \
+            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
+            eclipse-mosquitto:2
+          for i in {1..30}; do
+            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
+            sleep 1
+          done
+
+      - name: Install Wokwi CLI
+        run: |
+          curl -L https://wokwi.com/ci/install.sh | sh
+          echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
+
+      - name: Run Dynamic Sensor Sweep Tests
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          export PATH="$HOME/.wokwi/bin:$PATH"
+          cd "El Trabajante"
+
+          # Skip scenarios already in core PR sensor jobs
+          CORE_TESTS="sensor_heartbeat sensor_ds18b20_read sensor_ds18b20_full_flow sensor_dht22_full_flow sensor_analog_flow"
+          PASSED=0
+          FAILED=0
+          SKIPPED=0
+
+          for scenario in tests/wokwi/scenarios/02-sensor/*.yaml; do
+            name=$(basename "$scenario" .yaml)
+
+            # Skip core tests
+            if echo "$CORE_TESTS" | grep -qw "$name"; then
+              echo "SKIP (core): $name"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            echo "=== Running: $name ==="
+            if timeout 120 wokwi-cli . --timeout 90000 --scenario "$scenario" 2>&1 | tee "${name}.log"; then
+              echo "PASS: $name"
+              PASSED=$((PASSED + 1))
+            else
+              echo "FAIL: $name (exit $?)"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== Dynamic Sensor Results: $PASSED passed, $FAILED failed, $SKIPPED skipped ==="
+
+      - name: Stop Mosquitto
+        if: always()
+        run: docker stop mosquitto && docker rm mosquitto || true
+
+      - name: Upload Dynamic Sensor Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-sensor-dynamic-logs
+          path: El Trabajante/sensor_*.log
+          retention-days: 7
+
   # ============================================
-  # JOB 23: Test Summary
+  # JOB 24: Test Summary
   # ============================================
   test-summary:
     runs-on: ubuntu-latest
