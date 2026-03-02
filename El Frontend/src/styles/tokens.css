@@ -154,6 +154,7 @@
   --z-sticky:         20;
   --z-fixed:          30;
   --z-tray:           35;  /* bottom tray (UnassignedDropBar) — below modals */
+  --z-fab:            38;  /* Quick Action Ball — above tray, below modal-backdrop */
   --z-modal-backdrop: 40;
   --z-modal:          50;
   --z-popover:        60;

@@ -18,6 +18,7 @@ export default defineConfig({
         target: process.env.VITE_API_TARGET || 'http://localhost:8000',
         changeOrigin: true,
         autoRewrite: true,
+        ws: true,
       },
       '/ws': {
         target: process.env.VITE_WS_TARGET || 'ws://localhost:8000',

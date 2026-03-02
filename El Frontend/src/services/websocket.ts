@@ -112,11 +112,9 @@ class WebSocketService {
       this.tokenExpiry = null
     }
 
-    // In development, use localhost:8000 directly for WebSocket
-    // In production, use the same host as the page
-    const isDev = import.meta.env.DEV
+    // Use same host as page — in dev, Vite proxy handles WebSocket upgrades
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = isDev ? 'localhost:8000' : window.location.host
+    const host = window.location.host
 
     // Backend endpoint: /api/v1/ws/realtime/{client_id}
     return `${protocol}//${host}/api/v1/ws/realtime/${this.clientId}?token=${encodeURIComponent(token)}`
@@ -166,7 +164,6 @@ class WebSocketService {
     }
 
     this.setStatus('connecting')
-    this.reconnectAttempts = 0
 
     return new Promise((resolve, reject) => {
       try {

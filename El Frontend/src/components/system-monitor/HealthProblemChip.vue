@@ -9,6 +9,7 @@
 import { computed } from 'vue'
 import { ExternalLink } from 'lucide-vue-next'
 import type { FleetHealthDevice } from '@/api/health'
+import { formatRelativeTime } from '@/utils/formatters'
 
 export type ProblemType = 'offline' | 'low-heap' | 'weak-signal' | 'high-errors'
 
@@ -50,16 +51,6 @@ const displayName = computed(() =>
   props.device.name || props.device.device_id
 )
 
-function formatRelativeTime(isoString: string): string {
-  const diff = Date.now() - new Date(isoString).getTime()
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return 'gerade eben'
-  if (minutes < 60) return `vor ${minutes} ${minutes === 1 ? 'Minute' : 'Minuten'}`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `vor ${hours} ${hours === 1 ? 'Stunde' : 'Stunden'}`
-  const days = Math.floor(hours / 24)
-  return `vor ${days} ${days === 1 ? 'Tag' : 'Tagen'}`
-}
 </script>
 
 <template>

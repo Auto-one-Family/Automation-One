@@ -17,7 +17,7 @@ import type { ESPDevice } from '@/api/esp'
 import type { Component } from 'vue'
 import { computed, ref } from 'vue'
 import {
-  Settings2, MoreVertical, Trash2, ArrowRightLeft, ChevronRight,
+  Settings2, MoreVertical, Trash2, ArrowRightLeft,
   Thermometer, Droplets, Droplet, Zap, Sun, Gauge, Wind, Activity, Waves, Cloud, ToggleLeft, Layers,
 } from 'lucide-vue-next'
 import ESPCardBase from '@/components/esp/ESPCardBase.vue'
@@ -37,6 +37,7 @@ const emit = defineEmits<{
   (e: 'settings', device: ESPDevice): void
   (e: 'delete', deviceId: string): void
   (e: 'change-zone', device: ESPDevice): void
+  (e: 'monitor-nav', device: ESPDevice): void
 }>()
 
 const uiStore = useUiStore()
@@ -172,16 +173,15 @@ function handleSettings(event: MouseEvent) {
   emit('settings', props.device)
 }
 
+function handleMonitorNav(event: MouseEvent) {
+  event.stopPropagation()
+  emit('monitor-nav', props.device)
+}
+
 function openCardMenu(event: MouseEvent) {
   event.stopPropagation()
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   uiStore.openContextMenu(rect.right, rect.bottom, [
-    {
-      id: 'configure',
-      label: 'Konfigurieren',
-      icon: Settings2,
-      action: () => emit('settings', props.device),
-    },
     {
       id: 'change-zone',
       label: 'Zone ändern',
@@ -208,16 +208,7 @@ function openCardMenu(event: MouseEvent) {
     @click="handleClick"
     @keydown.enter.prevent="handleClick"
   >
-    <!-- Settings gear in header actions -->
-    <template #actions>
-      <button
-        class="device-mini-card__settings-btn"
-        title="Einstellungen"
-        @click="handleSettings"
-      >
-        <Settings2 class="device-mini-card__settings-icon" />
-      </button>
-    </template>
+    <!-- Header actions slot intentionally empty — settings moved to action row -->
 
     <!-- Card content: status line, subzone, sensors -->
     <template #default>
@@ -262,16 +253,31 @@ function openCardMenu(event: MouseEvent) {
         {{ sensorFallback }}
       </div>
 
-      <!-- Drill-down chevron hint -->
-      <div class="device-mini-card__drill-down">
+      <!-- Action Row: Primary monitor link + settings + overflow -->
+      <div class="device-mini-card__actions" @click.stop>
         <button
-          class="device-mini-card__overflow-btn"
+          class="device-mini-card__action-btn device-mini-card__action-btn--primary"
+          title="Im Monitor anzeigen"
+          @click="handleMonitorNav($event)"
+        >
+          <Activity :size="13" />
+          <span class="device-mini-card__action-label">Monitor</span>
+        </button>
+        <span class="device-mini-card__actions-spacer" />
+        <button
+          class="device-mini-card__action-btn"
+          title="Konfigurieren"
+          @click="handleSettings($event)"
+        >
+          <Settings2 :size="13" />
+        </button>
+        <button
+          class="device-mini-card__action-btn"
           title="Weitere Aktionen"
           @click.stop="openCardMenu($event)"
         >
-          <MoreVertical class="device-mini-card__overflow-icon" />
+          <MoreVertical :size="13" />
         </button>
-        <ChevronRight class="device-mini-card__chevron-hint" />
       </div>
     </template>
   </ESPCardBase>
@@ -379,37 +385,7 @@ function openCardMenu(event: MouseEvent) {
   font-size: 9px;
 }
 
-/* ── Settings gear button (hover-only) ── */
-.device-mini-card__settings-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
-  padding: 0;
-}
-
-.device-mini-card:hover .device-mini-card__settings-btn {
-  opacity: 1;
-}
-
-.device-mini-card__settings-btn:hover {
-  color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.device-mini-card__settings-icon {
-  width: 11px;
-  height: 11px;
-}
+/* (Settings button moved to action row) */
 
 /* ── Status line ── */
 .device-mini-card__status-line {
@@ -529,61 +505,61 @@ function openCardMenu(event: MouseEvent) {
   white-space: nowrap;
 }
 
-/* ── Drill-down row (chevron + overflow) ── */
-.device-mini-card__drill-down {
+/* ── Action Row ── */
+.device-mini-card__actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-1);
-  padding-top: 2px;
-}
-
-.device-mini-card__chevron-hint {
-  width: 14px;
-  height: 14px;
-  color: var(--color-text-muted);
+  gap: 2px;
+  padding-top: var(--space-1);
+  border-top: 1px solid transparent;
+  margin-top: auto;
   opacity: 0;
-  transition: opacity var(--transition-fast), transform var(--transition-fast);
-  flex-shrink: 0;
+  transition: opacity var(--transition-fast), border-color var(--transition-fast);
 }
 
-.device-mini-card:hover .device-mini-card__chevron-hint {
-  opacity: 0.6;
+.device-mini-card:hover .device-mini-card__actions {
+  opacity: 1;
+  border-top-color: var(--glass-border);
 }
 
-.device-mini-card:hover .device-mini-card__chevron-hint:hover {
-  transform: translateX(2px);
+.device-mini-card__actions-spacer {
+  flex: 1;
 }
 
-.device-mini-card__overflow-btn {
-  display: flex;
+.device-mini-card__action-btn {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
+  gap: 3px;
+  padding: 2px var(--space-1);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 4px;
   background: transparent;
   color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 500;
   cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+  white-space: nowrap;
   flex-shrink: 0;
-  opacity: 0;
-  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
-  padding: 0;
 }
 
-.device-mini-card:hover .device-mini-card__overflow-btn {
-  opacity: 1;
-}
-
-.device-mini-card__overflow-btn:hover {
+.device-mini-card__action-btn:hover {
   color: var(--color-text-primary);
   background: rgba(255, 255, 255, 0.06);
 }
 
-.device-mini-card__overflow-icon {
-  width: 12px;
-  height: 12px;
+/* Primary action: Monitor link with accent color */
+.device-mini-card__action-btn--primary {
+  color: var(--color-accent-bright);
+}
+
+.device-mini-card__action-btn--primary:hover {
+  color: var(--color-accent-bright);
+  background: rgba(96, 165, 250, 0.1);
+}
+
+.device-mini-card__action-label {
+  line-height: 1;
 }
 
 /* Mobile: allow full width */

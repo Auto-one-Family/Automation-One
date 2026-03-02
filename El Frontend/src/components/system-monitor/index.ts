@@ -32,4 +32,4 @@ export { default as DatabaseTab } from './DatabaseTab.vue'
 export { default as MqttTrafficTab } from './MqttTrafficTab.vue'
 
 // Re-export types
-export type { TabId } from './MonitorTabs.vue'
+export type { TabId } from './types'

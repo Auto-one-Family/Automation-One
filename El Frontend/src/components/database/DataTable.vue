@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { ColumnSchema, SortOrder } from '@/api/database'
 import { ArrowUp, ArrowDown, ArrowUpDown, Eye } from 'lucide-vue-next'
+import { formatRelativeTime } from '@/utils/formatters'
 
 const props = defineProps<{
   columns: ColumnSchema[]
@@ -31,35 +32,6 @@ const visibleColumns = computed(() => {
   // Parent already filtered/ordered, just limit count
   return props.columns.slice(0, 8)
 })
-
-/**
- * Format relative time (e.g., "vor 5 Min." or "14:30 (UTC)")
- */
-function formatRelativeTime(date: Date): string {
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffSec = Math.floor(diffMs / 1000)
-  const diffMin = Math.floor(diffSec / 60)
-  const diffHour = Math.floor(diffMin / 60)
-  const diffDay = Math.floor(diffHour / 24)
-
-  if (diffSec < 60) {
-    return 'gerade eben'
-  } else if (diffMin < 60) {
-    return `vor ${diffMin} Min.`
-  } else if (diffHour < 24) {
-    return `vor ${diffHour} Std.`
-  } else if (diffDay < 7) {
-    return `vor ${diffDay} Tag${diffDay > 1 ? 'en' : ''}`
-  } else {
-    // Fallback to time with timezone indicator
-    const hours = date.getHours().toString().padStart(2, '0')
-    const minutes = date.getMinutes().toString().padStart(2, '0')
-    const day = date.getDate().toString().padStart(2, '0')
-    const month = (date.getMonth() + 1).toString().padStart(2, '0')
-    return `${day}.${month}. ${hours}:${minutes}`
-  }
-}
 
 /**
  * Check if a string looks like a UUID

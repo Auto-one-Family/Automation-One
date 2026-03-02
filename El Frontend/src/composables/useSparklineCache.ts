@@ -10,7 +10,7 @@
 
 import { ref, watch } from 'vue'
 import { useEspStore } from '@/stores/esp'
-import type { ChartDataPoint } from '@/components/charts/LiveLineChart.vue'
+import type { ChartDataPoint } from '@/components/charts/types'
 export type { ChartDataPoint }
 
 const DEFAULT_MAX_POINTS = 30

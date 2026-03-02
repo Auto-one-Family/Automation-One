@@ -20,16 +20,8 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip)
 
-export interface StatusBarItem {
-  /** Bar label */
-  label: string
-  /** Bar value */
-  value: number
-  /** Bar color (hex) */
-  color?: string
-  /** Maximum value for relative sizing */
-  maxValue?: number
-}
+import type { StatusBarItem } from './types'
+export type { StatusBarItem }
 
 interface Props {
   /** Bar data items */

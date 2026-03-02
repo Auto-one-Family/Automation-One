@@ -20,8 +20,6 @@ import {
   type NotificationDTO,
   type NotificationSeverity,
   type NotificationListFilters,
-  type NotificationPreferencesDTO,
-  type NotificationPreferencesUpdate,
 } from '@/api/notifications'
 import { createLogger } from '@/utils/logger'
 
@@ -30,12 +28,11 @@ const logger = createLogger('NotificationInboxStore')
 /** Filter tabs in the drawer */
 export type InboxFilter = 'all' | 'critical' | 'warning' | 'system'
 
-/** Severity priority for sorting (lower = higher priority) */
+/** Severity priority for sorting (lower = higher priority, ISA-18.2: 3 levels) */
 const SEVERITY_PRIORITY: Record<string, number> = {
   critical: 0,
   warning: 1,
   info: 2,
-  resolved: 3,
 }
 
 /** Max items to load per page */
@@ -72,7 +69,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
         case 'warning':
           return n.severity === 'warning'
         case 'system':
-          return n.severity === 'info' || n.severity === 'resolved'
+          return n.severity === 'info'
         default:
           return true
       }

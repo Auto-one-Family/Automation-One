@@ -81,8 +81,8 @@ export interface ESPDevice {
   actuator_count?: number
   // Mock ESP specific fields (from debug API in-memory store)
   system_state?: string               // MockSystemState (BOOT, OPERATIONAL, etc.)
-  sensors?: unknown[]                 // MockSensor[]
-  actuators?: unknown[]               // MockActuator[]
+  sensors?: MockSensor[]
+  actuators?: MockActuator[]
   auto_heartbeat?: boolean            // Whether auto-heartbeat is enabled (Mock ESPs only)
   heartbeat_interval_seconds?: number // Heartbeat interval in seconds (Mock ESPs only)
   heap_free?: number                  // Free heap memory in bytes
@@ -858,6 +858,36 @@ export const espApi = {
     )
     return response.data
   },
+
+  // =========================================================================
+  // Device-Level Alert Configuration (Phase 4A.7)
+  // =========================================================================
+
+  async getAlertConfig(espId: string): Promise<import('./sensors').AlertConfigResponse> {
+    const response = await api.get<import('./sensors').AlertConfigResponse>(
+      `/esp/devices/${espId}/alert-config`
+    )
+    return response.data
+  },
+
+  async updateAlertConfig(
+    espId: string,
+    config: DeviceAlertConfigUpdate
+  ): Promise<import('./sensors').AlertConfigResponse> {
+    const response = await api.patch<import('./sensors').AlertConfigResponse>(
+      `/esp/devices/${espId}/alert-config`,
+      config
+    )
+    return response.data
+  },
+}
+
+export interface DeviceAlertConfigUpdate {
+  alerts_enabled?: boolean
+  suppression_reason?: string
+  suppression_note?: string
+  suppression_until?: string | null
+  propagate_to_children?: boolean
 }
 
 

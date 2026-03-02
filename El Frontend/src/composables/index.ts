@@ -40,3 +40,8 @@ export type {
 } from './useZoneGrouping'
 export { useDashboardWidgets } from './useDashboardWidgets'
 export type { WidgetTypeMeta, UseDashboardWidgetsOptions } from './useDashboardWidgets'
+export { useQuickActions } from './useQuickActions'
+export { useNavigationHistory } from './useNavigationHistory'
+export type { NavHistoryItem } from './useNavigationHistory'
+export { useWidgetDragFromFab } from './useWidgetDragFromFab'
+export type { WidgetDragItem } from './useWidgetDragFromFab'

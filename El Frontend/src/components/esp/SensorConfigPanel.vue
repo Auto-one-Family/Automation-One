@@ -22,6 +22,8 @@ import { SENSOR_TYPE_CONFIG, getSensorUnit } from '@/utils/sensorDefaults'
 import { AccordionSection } from '@/shared/design/primitives'
 import RangeSlider from '@/shared/design/primitives/RangeSlider.vue'
 import LiveDataPreview from './LiveDataPreview.vue'
+import AlertConfigSection from '@/components/devices/AlertConfigSection.vue'
+import RuntimeMaintenanceSection from '@/components/devices/RuntimeMaintenanceSection.vue'
 import DeviceMetadataSection from '@/components/devices/DeviceMetadataSection.vue'
 import LinkedRulesSection from '@/components/devices/LinkedRulesSection.vue'
 import type { DeviceMetadata } from '@/types/device-metadata'
@@ -47,6 +49,7 @@ const calibration = useCalibration()
 // =============================================================================
 const loading = ref(true)
 const saving = ref(false)
+const sensorDbId = ref<string | null>(null)
 
 // Basic fields
 const name = ref('')
@@ -121,6 +124,7 @@ onMounted(async () => {
     try {
       const config = await sensorsApi.get(props.espId, props.gpio)
       if (config) {
+        sensorDbId.value = (config as any).id ? String((config as any).id) : null
         name.value = (config as any).name || ''
         description.value = (config as any).description || ''
         unitValue.value = (config as any).unit || defaultUnit.value
@@ -632,6 +636,34 @@ async function handleSave() {
         <div class="sensor-config__preview">
           <LiveDataPreview :esp-id="espId" :gpio="gpio" :unit="unitValue || defaultUnit" />
         </div>
+      </AccordionSection>
+
+      <!-- ═══ ALERT CONFIGURATION (Phase 4A.7) ═════════════════════════ -->
+      <AccordionSection
+        v-if="sensorDbId"
+        title="Alert-Konfiguration"
+        :storage-key="`${accordionKey}-alert-config`"
+      >
+        <AlertConfigSection
+          :entity-id="sensorDbId"
+          entity-type="sensor"
+          :fetch-fn="sensorsApi.getAlertConfig"
+          :update-fn="sensorsApi.updateAlertConfig"
+        />
+      </AccordionSection>
+
+      <!-- ═══ RUNTIME & MAINTENANCE (Phase 4A.8) ══════════════════════ -->
+      <AccordionSection
+        v-if="sensorDbId"
+        title="Laufzeit & Wartung"
+        :storage-key="`${accordionKey}-runtime`"
+      >
+        <RuntimeMaintenanceSection
+          :entity-id="sensorDbId"
+          entity-type="sensor"
+          :fetch-fn="sensorsApi.getRuntime"
+          :update-fn="sensorsApi.updateRuntime"
+        />
       </AccordionSection>
 
       <!-- ═══ DEVICE INFO (Metadata) ═════════════════════════════════════ -->

@@ -18,6 +18,8 @@ import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { AccordionSection } from '@/shared/design/primitives'
 import type { MockActuator } from '@/types'
+import AlertConfigSection from '@/components/devices/AlertConfigSection.vue'
+import RuntimeMaintenanceSection from '@/components/devices/RuntimeMaintenanceSection.vue'
 import DeviceMetadataSection from '@/components/devices/DeviceMetadataSection.vue'
 import LinkedRulesSection from '@/components/devices/LinkedRulesSection.vue'
 import type { DeviceMetadata } from '@/types/device-metadata'
@@ -39,6 +41,7 @@ const espStore = useEspStore()
 // =============================================================================
 const loading = ref(true)
 const saving = ref(false)
+const actuatorDbId = ref<string | null>(null)
 const commandLoading = ref(false)
 
 // Basic fields
@@ -96,6 +99,7 @@ onMounted(async () => {
     try {
       const config = await actuatorsApi.get(props.espId, props.gpio)
       if (config) {
+        actuatorDbId.value = (config as any).id ? String((config as any).id) : null
         name.value = (config as any).name || ''
         description.value = (config as any).description || ''
         enabled.value = (config as any).enabled !== false
@@ -493,6 +497,34 @@ function formatDuration(seconds: number): string {
           <AlertOctagon class="w-5 h-5" />
           NOTFALL-STOPP
         </button>
+      </AccordionSection>
+
+      <!-- ═══ ALERT CONFIGURATION (Phase 4A.7) ═════════════════════════ -->
+      <AccordionSection
+        v-if="actuatorDbId"
+        title="Alert-Konfiguration"
+        :storage-key="`${accordionKey}-alert-config`"
+      >
+        <AlertConfigSection
+          :entity-id="actuatorDbId"
+          entity-type="actuator"
+          :fetch-fn="actuatorsApi.getAlertConfig"
+          :update-fn="actuatorsApi.updateAlertConfig"
+        />
+      </AccordionSection>
+
+      <!-- ═══ RUNTIME & MAINTENANCE (Phase 4A.8) ══════════════════════ -->
+      <AccordionSection
+        v-if="actuatorDbId"
+        title="Laufzeit & Wartung"
+        :storage-key="`${accordionKey}-runtime`"
+      >
+        <RuntimeMaintenanceSection
+          :entity-id="actuatorDbId"
+          entity-type="actuator"
+          :fetch-fn="actuatorsApi.getRuntime"
+          :update-fn="actuatorsApi.updateRuntime"
+        />
       </AccordionSection>
 
       <!-- ═══ DEVICE INFO (Metadata) ═════════════════════════════════════ -->

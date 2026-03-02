@@ -10,6 +10,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { RouterView } from 'vue-router'
 import AppSidebar from './Sidebar.vue'
 import AppHeader from './TopBar.vue'
+import QuickActionBall from '@/components/quick-action/QuickActionBall.vue'
 import { useUiStore } from '@/shared/stores'
 import { useKeyboardShortcuts } from '@/composables'
 
@@ -94,6 +95,9 @@ onUnmounted(() => {
         </RouterView>
       </main>
     </div>
+
+    <!-- Quick Action Ball (FAB) — global, bottom-right -->
+    <QuickActionBall />
   </div>
 </template>
 

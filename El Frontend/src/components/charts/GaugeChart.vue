@@ -18,12 +18,8 @@ import {
 
 ChartJS.register(ArcElement, Tooltip)
 
-export interface GaugeThreshold {
-  /** Value at which this threshold starts */
-  value: number
-  /** Color for this segment (hex) */
-  color: string
-}
+import type { GaugeThreshold } from './types'
+export type { GaugeThreshold }
 
 interface Props {
   /** Current gauge value */

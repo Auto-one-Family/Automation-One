@@ -375,8 +375,14 @@ function handleDragEnd() {
   font-size: var(--text-xs);
   font-weight: 700;
   color: var(--color-bg-primary);
-  background: var(--color-text-muted);
+  background: var(--color-warning);
   border-radius: var(--radius-full);
+  animation: breathe-badge 3s ease-in-out infinite;
+}
+
+@keyframes breathe-badge {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(0.95); }
 }
 
 .unassigned-tray__toggle {

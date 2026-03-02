@@ -456,6 +456,13 @@ function onDeviceCardClick(payload: { deviceId: string; originRect: DOMRect }) {
   zoomToDevice(payload.deviceId)
 }
 
+function onDeviceMonitorNav(device: ESPDevice) {
+  const zoneId = device.zone_id
+  if (zoneId) {
+    router.push({ name: 'monitor-zone', params: { zoneId } })
+  }
+}
+
 async function onDeviceDropped(payload: { device: any; fromZoneId: string | null; toZoneId: string }) {
   await handleDeviceDrop(payload)
 }
@@ -747,6 +754,7 @@ function formatTimeAgo(timestamp: number): string {
                 @delete="handleZoneDelete"
                 @device-delete="handleDelete"
                 @settings="handleSettings"
+                @monitor-nav="onDeviceMonitorNav"
               />
 
               <!-- Unassigned Devices Section -->

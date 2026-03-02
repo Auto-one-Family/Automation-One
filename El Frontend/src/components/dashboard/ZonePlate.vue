@@ -21,7 +21,7 @@ import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/shared/stores'
 import { useUiStore } from '@/shared/stores/ui.store'
-import { ChevronDown, MoreVertical, Pencil, Trash2 } from 'lucide-vue-next'
+import { ChevronDown, MoreVertical, Pencil, Trash2, Activity } from 'lucide-vue-next'
 import { PackageOpen } from 'lucide-vue-next'
 import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
 import { EmptyState } from '@/shared/design/patterns'
@@ -52,6 +52,7 @@ const emit = defineEmits<{
   (e: 'rename', payload: { zoneId: string; newName: string }): void
   (e: 'delete', zoneId: string): void
   (e: 'device-delete', deviceId: string): void
+  (e: 'monitor-nav', device: ESPDevice): void
 }>()
 
 const espStore = useEspStore()
@@ -267,6 +268,10 @@ function handleDeviceDelete(deviceId: string) {
   emit('device-delete', deviceId)
 }
 
+function handleDeviceMonitorNav(device: ESPDevice) {
+  emit('monitor-nav', device)
+}
+
 // ── Drag & Drop ──────────────────────────────────────────────────────────
 function isMock(device: ESPDevice): boolean {
   return espStore.isMock(espStore.getDeviceId(device))
@@ -375,6 +380,17 @@ function handleDragEnd() {
             ⚠ {{ stats.warnings }}
           </span>
 
+          <!-- Monitor quick-link -->
+          <RouterLink
+            :to="{ name: 'monitor-zone', params: { zoneId: zoneId } }"
+            class="zone-plate__monitor-link"
+            title="Zone im Monitor anzeigen"
+            @click.stop
+          >
+            <Activity class="zone-plate__monitor-icon" />
+            <span class="zone-plate__monitor-label">Monitor</span>
+          </RouterLink>
+
           <!-- Overflow menu -->
           <button
             class="zone-plate__menu-btn"
@@ -437,6 +453,7 @@ function handleDragEnd() {
             @settings="handleDeviceSettings"
             @change-zone="handleDeviceChangeZone"
             @delete="handleDeviceDelete"
+            @monitor-nav="handleDeviceMonitorNav"
           />
         </div>
       </VueDraggable>
@@ -445,8 +462,8 @@ function handleDragEnd() {
       <EmptyState
         v-if="devices.length === 0"
         :icon="PackageOpen"
-        title="Keine Geräte zugewiesen"
-        description="Ziehe Geräte aus der Leiste unten in diese Zone"
+        title="Keine Geräte in dieser Zone"
+        description="Weise ESPs per Drag & Drop zu — ziehe sie aus der Leiste unten oder aus einer anderen Zone."
         :show-action="false"
         class="zone-plate__empty"
       />
@@ -704,6 +721,47 @@ function handleDragEnd() {
   font-weight: 500;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+/* Monitor quick-link */
+.zone-plate__monitor-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  transition: color var(--transition-fast), background var(--transition-fast), opacity var(--transition-fast);
+  opacity: 0;
+  text-decoration: none;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.zone-plate__header:hover .zone-plate__monitor-link {
+  opacity: 1;
+}
+
+.zone-plate__monitor-link:hover {
+  color: var(--color-accent-bright);
+  background: rgba(96, 165, 250, 0.08);
+}
+
+.zone-plate__monitor-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.zone-plate__monitor-label {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .zone-plate__monitor-label {
+    display: inline;
+  }
 }
 
 /* Overflow menu button */

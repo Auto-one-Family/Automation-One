@@ -16,6 +16,8 @@ defineOptions({ name: 'MonitorView' })
 
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
+import { useSwipeNavigation } from '@/composables/useSwipeNavigation'
 import { useEspStore } from '@/stores/esp'
 import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
 import { useZoneGrouping } from '@/composables/useZoneGrouping'
@@ -52,7 +54,7 @@ ChartJS.register(
 )
 import {
   ArrowLeft, Activity, AlertTriangle,
-  ChevronRight, Settings,
+  ChevronLeft, ChevronRight, Settings,
 } from 'lucide-vue-next'
 import type { MockSensor, MockActuator } from '@/types'
 import ViewTabBar from '@/components/common/ViewTabBar.vue'
@@ -730,7 +732,23 @@ onMounted(() => {
 
 onUnmounted(() => {
   dashStore.breadcrumb.sensorName = ''
+  deactivateScope('monitor-zone')
+  unregisterLeft?.()
+  unregisterRight?.()
 })
+
+// Graceful fallback: redirect to L1 if zone does not exist
+watch(
+  [selectedZoneId, () => espStore.devices.length],
+  ([zoneId, deviceCount]) => {
+    if (!zoneId || deviceCount === 0) return
+    const zoneExists = espStore.devices.some(d => d.zone_id === zoneId)
+    if (!zoneExists) {
+      router.replace({ name: 'monitor' })
+    }
+  },
+  { immediate: true },
+)
 
 // Deep-link: open sensor detail from URL /monitor/:zoneId/sensor/:sensorId
 watch(
@@ -1074,14 +1092,17 @@ function toggleSubzone(subzoneKey: string) {
   }
 }
 
-// Load accordion state when zone changes
+// Load accordion state when zone changes (also handles Prev/Next nav via router.replace)
 const prevZoneId = ref<string | null>(null)
-onMounted(() => {
-  if (selectedZoneId.value && selectedZoneId.value !== prevZoneId.value) {
-    loadAccordionState(selectedZoneId.value)
-    prevZoneId.value = selectedZoneId.value
+
+watch(selectedZoneId, (zoneId) => {
+  if (zoneId && zoneId !== prevZoneId.value) {
+    loadAccordionState(zoneId)
+    prevZoneId.value = zoneId
+    // Close expanded sensor panel when switching zones
+    expandedSensorKey.value = null
   }
-})
+}, { immediate: true })
 
 // =============================================================================
 // Navigation
@@ -1094,6 +1115,89 @@ function goToZone(zoneId: string) {
 function goBack() {
   router.push({ name: 'monitor' })
 }
+
+// Zone-to-Zone navigation (Prev/Next on L2)
+const sortedZoneIds = computed(() => zoneKPIs.value.map(z => z.zoneId))
+
+const currentZoneIndex = computed(() => {
+  if (!selectedZoneId.value) return -1
+  return sortedZoneIds.value.indexOf(selectedZoneId.value)
+})
+
+const prevNavZoneId = computed(() => {
+  const idx = currentZoneIndex.value
+  return idx > 0 ? sortedZoneIds.value[idx - 1] : null
+})
+
+const nextNavZoneId = computed(() => {
+  const idx = currentZoneIndex.value
+  return idx >= 0 && idx < sortedZoneIds.value.length - 1
+    ? sortedZoneIds.value[idx + 1]
+    : null
+})
+
+const zonePositionLabel = computed(() => {
+  if (currentZoneIndex.value < 0) return ''
+  return `${currentZoneIndex.value + 1}/${sortedZoneIds.value.length}`
+})
+
+function goToPrevZone() {
+  if (prevNavZoneId.value) {
+    router.replace({ name: 'monitor-zone', params: { zoneId: prevNavZoneId.value } })
+  }
+}
+
+function goToNextZone() {
+  if (nextNavZoneId.value) {
+    router.replace({ name: 'monitor-zone', params: { zoneId: nextNavZoneId.value } })
+  }
+}
+
+// =============================================================================
+// Keyboard shortcuts: ArrowLeft/ArrowRight for zone navigation on L2
+// =============================================================================
+
+const { register: registerShortcut, activateScope, deactivateScope } = useKeyboardShortcuts()
+let unregisterLeft: (() => void) | null = null
+let unregisterRight: (() => void) | null = null
+
+watch(selectedZoneId, (zoneId) => {
+  if (zoneId) {
+    activateScope('monitor-zone')
+    unregisterLeft?.()
+    unregisterRight?.()
+    unregisterLeft = registerShortcut({
+      key: 'ArrowLeft',
+      handler: goToPrevZone,
+      description: 'Vorherige Zone',
+      scope: 'monitor-zone',
+    })
+    unregisterRight = registerShortcut({
+      key: 'ArrowRight',
+      handler: goToNextZone,
+      description: 'Nächste Zone',
+      scope: 'monitor-zone',
+    })
+  } else {
+    deactivateScope('monitor-zone')
+    unregisterLeft?.()
+    unregisterRight?.()
+    unregisterLeft = null
+    unregisterRight = null
+  }
+})
+
+// =============================================================================
+// Swipe navigation: Left/Right swipe for zone navigation on L2
+// =============================================================================
+
+const monitorContentRef = ref<HTMLElement | null>(null)
+
+useSwipeNavigation(monitorContentRef, {
+  onSwipeLeft: () => { if (selectedZoneId.value) goToNextZone() },
+  onSwipeRight: () => { if (selectedZoneId.value) goToPrevZone() },
+  threshold: 50,
+})
 
 // =============================================================================
 // Actuator control
@@ -1330,13 +1434,38 @@ function handleClaimLayout(layoutId: string) {
 
     <!-- Level 2: Zone Data Detail (Subzone Accordion) -->
     <template v-else>
+      <div ref="monitorContentRef">
       <div class="monitor-view__header">
         <button class="monitor-view__back" @click="goBack">
           <ArrowLeft class="w-4 h-4" />
           <span>Zurück</span>
         </button>
+
+        <!-- Zone-to-Zone Navigation -->
+        <div v-if="sortedZoneIds.length > 1" class="monitor-view__zone-nav">
+          <button
+            class="monitor-view__zone-nav-btn"
+            :disabled="!prevNavZoneId"
+            title="Vorherige Zone"
+            @click="goToPrevZone"
+          >
+            <ChevronLeft class="w-4 h-4" />
+          </button>
+          <span class="monitor-view__zone-nav-label">
+            {{ selectedZoneName }} ({{ zonePositionLabel }})
+          </span>
+          <button
+            class="monitor-view__zone-nav-btn"
+            :disabled="!nextNavZoneId"
+            title="Nächste Zone"
+            @click="goToNextZone"
+          >
+            <ChevronRight class="w-4 h-4" />
+          </button>
+        </div>
+
         <div class="monitor-view__header-info">
-          <h2 class="monitor-view__title">{{ selectedZoneName }}</h2>
+          <h2 v-if="sortedZoneIds.length <= 1" class="monitor-view__title">{{ selectedZoneName }}</h2>
           <p class="monitor-view__zone-kpis">
             {{ zoneSensorCount }} {{ zoneSensorCount === 1 ? 'Sensor' : 'Sensoren' }}
             <span class="monitor-view__kpi-dot">&middot;</span>
@@ -1543,6 +1672,7 @@ function handleClaimLayout(layoutId: string) {
         <Activity class="w-12 h-12" style="color: var(--color-text-muted)" />
         <p>Keine Sensoren oder Aktoren in dieser Zone.</p>
       </div>
+      </div><!-- /monitorContentRef -->
     </template>
 
       </main>
@@ -1808,6 +1938,57 @@ function handleClaimLayout(layoutId: string) {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* Zone-to-Zone Navigation (Prev/Next on L2) */
+.monitor-view__zone-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: auto;
+}
+
+.monitor-view__zone-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--color-text-primary);
+  transition: all var(--transition-fast);
+  padding: 0;
+}
+
+.monitor-view__zone-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.monitor-view__zone-nav-btn:not(:disabled):hover {
+  background: var(--color-surface-hover);
+  border-color: var(--glass-border-hover);
+}
+
+.monitor-view__zone-nav-label {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  min-width: 80px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .monitor-view__zone-nav-label {
+    display: none;
+  }
+  .monitor-view__zone-nav {
+    gap: var(--space-1);
+  }
 }
 
 .monitor-view__back {

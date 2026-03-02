@@ -50,6 +50,7 @@ import { useUiStore } from '@/shared/stores'
 import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/logger'
+import { formatRelativeTime } from '@/utils/formatters'
 import type { LogicRule } from '@/types/logic'
 import type { Node } from '@vue-flow/core'
 import RuleFlowEditor from '@/components/rules/RuleFlowEditor.vue'
@@ -447,17 +448,6 @@ function formatActionSummary(action: Record<string, unknown>): string {
   return JSON.stringify(action)
 }
 
-
-function formatRelativeTime(isoString: string): string {
-  const diff = Date.now() - new Date(isoString).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'gerade eben'
-  if (mins < 60) return `vor ${mins}m`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `vor ${hours}h`
-  const days = Math.floor(hours / 24)
-  return `vor ${days}d`
-}
 
 // Close dropdown on outside click
 function onClickOutsideDropdown(event: MouseEvent) {

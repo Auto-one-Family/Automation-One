@@ -98,6 +98,18 @@ function onNumberInput(field: keyof DeviceMetadata, event: Event) {
           />
         </div>
       </div>
+      <div class="device-metadata__row">
+        <div class="device-metadata__field device-metadata__field--half">
+          <label class="device-metadata__label">Firmware-Version</label>
+          <input
+            class="device-metadata__input"
+            :value="metadata.firmware_version"
+            placeholder="z.B. 1.2.3"
+            @input="onInput('firmware_version', $event)"
+          />
+        </div>
+        <div class="device-metadata__field device-metadata__field--half" />
+      </div>
     </div>
 
     <!-- Group 2: Installation & Maintenance -->

@@ -26,6 +26,7 @@
 
 <script setup lang="ts">
 import type { CleanupPreviewEvent } from '@/api/audit'
+import { formatRelativeTime } from '@/utils/formatters'
 
 interface Props {
   event: CleanupPreviewEvent
@@ -61,20 +62,6 @@ function truncateMessage(msg: string, maxLen: number): string {
   return msg.substring(0, maxLen) + '...'
 }
 
-function formatRelativeTime(isoString: string | null): string {
-  if (!isoString) return ''
-  const date = new Date(isoString)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMins = Math.floor(diffMs / (1000 * 60))
-  const diffHours = Math.floor(diffMins / 60)
-  const diffDays = Math.floor(diffHours / 24)
-
-  if (diffMins < 1) return 'gerade eben'
-  if (diffMins < 60) return `vor ${diffMins} Min`
-  if (diffHours < 24) return `vor ${diffHours} Std`
-  return `vor ${diffDays} Tag${diffDays > 1 ? 'en' : ''}`
-}
 </script>
 
 <style scoped>

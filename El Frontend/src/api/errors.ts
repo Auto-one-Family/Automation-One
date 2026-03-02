@@ -4,12 +4,12 @@
  * Provides cached access to error code translations from the server.
  * Used for historical events that need translation (e.g., in EventDetailsPanel).
  *
- * Server-Centric: All translations come from esp32_error_mapping.py.
+ * Server-Centric: All translations come from esp32_error_mapping.py + server_error_mapping.py.
  * Real-time error_events already include translations via WebSocket.
- * This API is for on-demand lookups of historical/stored events.
+ * This API is for on-demand lookups of historical/stored events and
+ * auto-enrichment of API errors that carry a numeric_code.
  *
- * TODO: Used by planned History-View feature for displaying historical
- * error events with full troubleshooting context. Do not remove.
+ * Used by: ErrorDetailsModal (auto-enrichment), History-View (planned).
  * See also: parseApiError.ts for REST API error parsing.
  */
 
@@ -44,7 +44,7 @@ const translationCache = new Map<number, TranslatedError>()
 /**
  * Translate a single error code. Results are cached.
  *
- * @param code - Error code (1000-5999)
+ * @param code - Error code (ESP32: 1000-4999, Server: 5000-5999)
  * @returns Translated error info, or fallback for unknown codes
  */
 export async function translateErrorCode(code: number): Promise<TranslatedError> {

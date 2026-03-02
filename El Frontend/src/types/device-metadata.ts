@@ -12,6 +12,7 @@ export interface DeviceMetadata {
   model?: string
   datasheet_url?: string
   serial_number?: string
+  firmware_version?: string
 
   // Installation
   installation_date?: string // ISO date (YYYY-MM-DD)
@@ -46,6 +47,8 @@ export function parseDeviceMetadata(
       typeof raw.datasheet_url === 'string' ? raw.datasheet_url : undefined,
     serial_number:
       typeof raw.serial_number === 'string' ? raw.serial_number : undefined,
+    firmware_version:
+      typeof raw.firmware_version === 'string' ? raw.firmware_version : undefined,
     installation_date:
       typeof raw.installation_date === 'string'
         ? raw.installation_date
@@ -86,6 +89,7 @@ export function mergeDeviceMetadata(
     'model',
     'datasheet_url',
     'serial_number',
+    'firmware_version',
     'installation_date',
     'installation_location',
     'maintenance_interval_days',

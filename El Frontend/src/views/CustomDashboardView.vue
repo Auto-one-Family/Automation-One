@@ -25,6 +25,7 @@ import {
 } from 'lucide-vue-next'
 import { useDashboardStore, type WidgetType } from '@/shared/stores/dashboard.store'
 import { useUiStore } from '@/shared/stores'
+import { useDragStateStore } from '@/shared/stores/dragState.store'
 import { useToast } from '@/composables/useToast'
 import { useDashboardWidgets } from '@/composables/useDashboardWidgets'
 import { useEspStore } from '@/stores/esp'
@@ -35,6 +36,7 @@ const route = useRoute()
 const dashStore = useDashboardStore()
 const uiStore = useUiStore()
 const espStore = useEspStore()
+const dragStore = useDragStateStore()
 const toast = useToast()
 
 // Widget Config Panel state (declared early — referenced by composable callbacks)
@@ -191,6 +193,20 @@ function initGrid() {
     autoSave()
   })
 
+  // Handle external widget drops from FAB QuickWidgetPanel (HTML5 DnD)
+  grid.on('dropped', (_event: Event, _previousNode: GridStackNode, newNode: GridStackNode) => {
+    if (!newNode.el || !isEditing.value) return
+
+    const payload = dragStore.dashboardWidgetPayload
+    if (!payload) return
+
+    // Remove GridStack's auto-created placeholder — reuse addWidget() for robust mounting
+    grid!.removeWidget(newNode.el, true, false)
+    addWidget(payload.widgetType)
+
+    dragStore.endDrag()
+  })
+
   // Apply edit mode state after init (default: view mode = locked)
   if (!isEditing.value) {
     grid.enableMove(false)
@@ -229,6 +245,14 @@ watch(() => dashStore.activeLayoutId, (newId) => {
   }
 })
 
+/** Handle keyboard widget placement from FAB (Space/Enter on widget chip) */
+function handleWidgetPlaceAnnounced(e: Event): void {
+  const detail = (e as CustomEvent).detail
+  if (detail?.type && isEditing.value) {
+    addWidget(detail.type)
+  }
+}
+
 onMounted(() => {
   // Ensure ESP data is loaded for widgets
   if (espStore.devices.length === 0) {
@@ -257,12 +281,17 @@ onMounted(() => {
     }
   }
 
+  // Listen for keyboard-placed widgets from FAB
+  window.addEventListener('widget-place-announced', handleWidgetPlaceAnnounced)
+
   nextTick(() => {
     initGrid()
   })
 })
 
 onUnmounted(() => {
+  window.removeEventListener('widget-place-announced', handleWidgetPlaceAnnounced)
+
   // Cleanup all mounted Vue vnodes
   cleanupAllWidgets()
 
@@ -704,7 +733,11 @@ function handleImport() {
         <div
           v-else
           ref="gridContainer"
-          :class="['grid-stack', { 'grid-stack--editing': isEditing }]"
+          :class="[
+            'grid-stack',
+            { 'grid-stack--editing': isEditing },
+            { 'grid-stack--drop-target': isEditing && dragStore.isDraggingDashboardWidget },
+          ]"
         />
       </div>
     </div>
@@ -1208,5 +1241,24 @@ function handleImport() {
   height: 16px;
   right: 4px;
   bottom: 4px;
+}
+
+/* Drop-zone feedback when dragging widget from FAB */
+.grid-stack--drop-target {
+  outline: 2px dashed var(--color-accent);
+  outline-offset: 4px;
+  animation: drop-zone-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes drop-zone-pulse {
+  0%, 100% { outline-color: rgba(96, 165, 250, 0.4); }
+  50% { outline-color: rgba(96, 165, 250, 0.8); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grid-stack--drop-target {
+    animation: none;
+    outline-color: var(--color-accent);
+  }
 }
 </style>

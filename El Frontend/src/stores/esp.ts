@@ -29,6 +29,7 @@ import { useActuatorStore } from '@/shared/stores/actuator.store'
 import { useSensorStore } from '@/shared/stores/sensor.store'
 import { useGpioStore } from '@/shared/stores/gpio.store'
 import { useNotificationStore } from '@/shared/stores/notification.store'
+import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
 import { useConfigStore } from '@/shared/stores/config.store'
 import {
   inferInterfaceType,
@@ -1340,6 +1341,22 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   }
 
   // =============================================================================
+  // Phase 4A: Notification Inbox Handlers - delegates to notification-inbox.store.ts
+  // =============================================================================
+
+  function handleNotificationNew(message: { data: Record<string, unknown> }): void {
+    useNotificationInboxStore().handleWSNotificationNew(message.data)
+  }
+
+  function handleNotificationUpdated(message: { data: Record<string, unknown> }): void {
+    useNotificationInboxStore().handleWSNotificationUpdated(message.data)
+  }
+
+  function handleNotificationUnreadCount(message: { data: Record<string, unknown> }): void {
+    useNotificationInboxStore().handleWSUnreadCount(message.data)
+  }
+
+  // =============================================================================
   // Phase 2: Actuator Command Lifecycle Handlers - delegates to actuator.store.ts
   // =============================================================================
 
@@ -1538,6 +1555,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       ws.on('notification', handleNotification),
       ws.on('error_event', handleErrorEvent),
       ws.on('system_event', handleSystemEvent),
+      // Phase 4A: Notification Inbox
+      ws.on('notification_new', handleNotificationNew),
+      ws.on('notification_updated', handleNotificationUpdated),
+      ws.on('notification_unread_count', handleNotificationUnreadCount),
       // Phase UI/UX 2: Full Event Coverage
       ws.on('actuator_command', handleActuatorCommand),
       ws.on('actuator_command_failed', handleActuatorCommandFailed),

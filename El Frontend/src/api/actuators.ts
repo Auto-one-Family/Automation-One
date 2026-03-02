@@ -127,9 +127,51 @@ export const actuatorsApi = {
     )
     return response.data
   },
+
+  // =========================================================================
+  // Alert Configuration (Phase 4A.7)
+  // =========================================================================
+
+  async getAlertConfig(actuatorId: string): Promise<import('./sensors').AlertConfigResponse> {
+    const response = await api.get<import('./sensors').AlertConfigResponse>(
+      `/actuators/${actuatorId}/alert-config`
+    )
+    return response.data
+  },
+
+  async updateAlertConfig(
+    actuatorId: string,
+    config: import('./sensors').AlertConfigUpdate
+  ): Promise<import('./sensors').AlertConfigResponse> {
+    const response = await api.patch<import('./sensors').AlertConfigResponse>(
+      `/actuators/${actuatorId}/alert-config`,
+      config
+    )
+    return response.data
+  },
+
+  // =========================================================================
+  // Runtime Statistics (Phase 4A.8)
+  // =========================================================================
+
+  async getRuntime(actuatorId: string): Promise<import('./sensors').RuntimeStatsResponse> {
+    const response = await api.get<import('./sensors').RuntimeStatsResponse>(
+      `/actuators/${actuatorId}/runtime`
+    )
+    return response.data
+  },
+
+  async updateRuntime(
+    actuatorId: string,
+    stats: import('./sensors').RuntimeStatsUpdate
+  ): Promise<import('./sensors').RuntimeStatsResponse> {
+    const response = await api.patch<import('./sensors').RuntimeStatsResponse>(
+      `/actuators/${actuatorId}/runtime`,
+      stats
+    )
+    return response.data
+  },
 }
-
-
 
 
 

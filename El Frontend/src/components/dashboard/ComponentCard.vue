@@ -28,25 +28,8 @@ import {
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
-export interface ComponentCardItem {
-  type: 'sensor' | 'actuator'
-  gpio: number
-  sensorType?: string
-  actuatorType?: string
-  name: string | null
-  value: number | null
-  unit: string
-  quality?: string
-  state?: boolean
-  emergencyStopped?: boolean
-  espId: string
-  espName: string | null
-  zoneName: string | null
-  zoneId: string | null
-  subzoneName: string | null
-  subzoneId: string | null
-  isStale?: boolean
-}
+import type { ComponentCardItem } from './types'
+export type { ComponentCardItem }
 
 interface Props {
   item: ComponentCardItem

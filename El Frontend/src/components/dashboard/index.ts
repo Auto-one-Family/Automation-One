@@ -16,7 +16,7 @@ export { default as CrossEspConnectionOverlay } from './CrossEspConnectionOverla
 
 // Komponentenübersicht
 export { default as ComponentCard } from './ComponentCard.vue'
-export type { ComponentCardItem } from './ComponentCard.vue'
+export type { ComponentCardItem } from './types'
 
 // Zonen
 export { default as ZonePlate } from './ZonePlate.vue'

@@ -2,15 +2,18 @@
 import { RouterView } from 'vue-router'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { useEspStore } from '@/stores/esp'
+import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
 import { onMounted, onUnmounted, ref } from 'vue'
 import ToastContainer from '@/shared/design/patterns/ToastContainer.vue'
 import ErrorDetailsModal from '@/components/error/ErrorDetailsModal.vue'
 import type { ErrorDetailsData } from '@/components/error/ErrorDetailsModal.vue'
 import ConfirmDialog from '@/shared/design/patterns/ConfirmDialog.vue'
 import ContextMenu from '@/shared/design/patterns/ContextMenu.vue'
+import NotificationDrawer from '@/components/notifications/NotificationDrawer.vue'
 
 const authStore = useAuthStore()
 const espStore = useEspStore()
+const notificationInboxStore = useNotificationInboxStore()
 
 // Error Details Modal state (triggered via CustomEvent from toast actions)
 const errorModalOpen = ref(false)
@@ -25,6 +28,11 @@ function handleShowErrorDetails(e: Event) {
 onMounted(async () => {
   await authStore.checkAuthStatus()
   window.addEventListener('show-error-details', handleShowErrorDetails)
+
+  // Load notification inbox after auth is ready
+  if (authStore.isAuthenticated) {
+    notificationInboxStore.loadInitial()
+  }
 })
 
 onUnmounted(() => {
@@ -35,6 +43,7 @@ onUnmounted(() => {
 
 <template>
   <RouterView />
+  <NotificationDrawer />
   <ToastContainer />
   <ConfirmDialog />
   <ContextMenu />

@@ -30,6 +30,7 @@ import {
 import TroubleshootingPanel from './TroubleshootingPanel.vue'
 import { getCategoryLabel, detectCategory, shouldPulse } from '@/utils/errorCodeTranslator'
 import type { ErrorSeverity } from '@/utils/errorCodeTranslator'
+import { translateErrorCode } from '@/api/errors'
 
 export interface ErrorDetailsData {
   error_code?: number
@@ -60,6 +61,24 @@ const backdropRef = ref<HTMLElement | null>(null)
 const modalRef = ref<HTMLElement | null>(null)
 let previouslyFocused: HTMLElement | null = null
 const scrollLock = useScrollLock()
+
+// Auto-enrichment: fetch troubleshooting from server when error_code is present but data is missing
+const enrichedTroubleshooting = ref<string[]>([])
+const enrichedDescription = ref<string | null>(null)
+const enrichedDocsLink = ref<string | null>(null)
+
+const effectiveTroubleshooting = computed(() => {
+  const original = props.error?.troubleshooting ?? []
+  return original.length > 0 ? original : enrichedTroubleshooting.value
+})
+
+const effectiveDescription = computed(() => {
+  return props.error?.description || enrichedDescription.value || ''
+})
+
+const effectiveDocsLink = computed(() => {
+  return props.error?.docs_link ?? enrichedDocsLink.value
+})
 
 const severityLevel = computed((): ErrorSeverity => {
   const s = props.error?.severity
@@ -124,6 +143,10 @@ function handleBackdropClick(e: MouseEvent) {
 
 watch(() => props.open, (isOpen) => {
   showTechnicalDetails.value = false
+  enrichedTroubleshooting.value = []
+  enrichedDescription.value = null
+  enrichedDocsLink.value = null
+
   if (isOpen) {
     scrollLock.lock()
     previouslyFocused = document.activeElement as HTMLElement | null
@@ -132,6 +155,20 @@ watch(() => props.open, (isOpen) => {
       const closeBtn = modalRef.value?.querySelector<HTMLElement>('.error-modal__close')
       closeBtn?.focus()
     })
+
+    // Auto-enrich: fetch from server when error_code present but troubleshooting empty
+    const err = props.error
+    if (err?.error_code && (!err.troubleshooting || err.troubleshooting.length === 0)) {
+      translateErrorCode(err.error_code).then((translated) => {
+        enrichedTroubleshooting.value = translated.troubleshooting ?? []
+        if (!err.description && translated.message) {
+          enrichedDescription.value = translated.message
+        }
+        if (!err.docs_link && translated.docs_link) {
+          enrichedDocsLink.value = translated.docs_link
+        }
+      })
+    }
   } else {
     scrollLock.unlock()
     document.removeEventListener('keydown', handleKeydown)
@@ -187,20 +224,20 @@ onUnmounted(() => {
 
           <!-- Description -->
           <div class="error-modal__body">
-            <p class="error-modal__description">{{ error.description }}</p>
+            <p class="error-modal__description">{{ effectiveDescription }}</p>
 
             <!-- Troubleshooting -->
             <TroubleshootingPanel
-              v-if="error.troubleshooting && error.troubleshooting.length > 0"
-              :steps="error.troubleshooting"
+              v-if="effectiveTroubleshooting.length > 0"
+              :steps="effectiveTroubleshooting"
               :user-action-required="error.user_action_required"
               :severity="severityLevel"
             />
 
             <!-- Docs Link -->
             <a
-              v-if="error.docs_link"
-              :href="error.docs_link"
+              v-if="effectiveDocsLink"
+              :href="effectiveDocsLink"
               target="_blank"
               rel="noopener"
               class="error-modal__docs-link"

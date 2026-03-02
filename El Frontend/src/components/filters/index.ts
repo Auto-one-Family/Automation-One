@@ -7,9 +7,4 @@
 export { default as UnifiedFilterBar } from './UnifiedFilterBar.vue'
 
 // Re-export types for convenience
-export type {
-  StatusFilter,
-  TypeFilter,
-  TimeRange,
-  FilterCounts
-} from './UnifiedFilterBar.vue'
+export type { StatusFilter, TypeFilter, TimeRange, FilterCounts } from './types'

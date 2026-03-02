@@ -18,10 +18,8 @@
 import { Activity, FileText, Database, MessageSquare, HeartPulse, Play, Pause, Download } from 'lucide-vue-next'
 
 // ============================================================================
-// Types
-// ============================================================================
-
-export type TabId = 'events' | 'logs' | 'database' | 'mqtt' | 'health'
+import type { TabId } from './types'
+export type { TabId }
 
 interface Tab {
   id: TabId

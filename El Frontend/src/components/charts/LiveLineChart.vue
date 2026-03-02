@@ -34,11 +34,8 @@ ChartJS.register(
   annotationPlugin
 )
 
-export interface ChartDataPoint {
-  timestamp: string | Date
-  value: number
-  label?: string
-}
+import type { ChartDataPoint } from './types'
+export type { ChartDataPoint }
 
 export interface ThresholdConfig {
   alarmLow?: number

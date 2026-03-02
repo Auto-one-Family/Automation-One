@@ -13,6 +13,7 @@
 
 import { computed, type ComputedRef, toValue, type MaybeRefOrGetter } from 'vue'
 import type { ESPDevice } from '@/api/esp'
+import { formatRelativeTime } from '@/utils/formatters'
 
 /** Possible ESP status values */
 export type ESPStatus = 'online' | 'stale' | 'offline' | 'error' | 'safemode' | 'unknown'
@@ -178,21 +179,3 @@ export function useESPStatus(esp: MaybeRefOrGetter<ESPDevice>) {
   }
 }
 
-/** Format a timestamp as relative time (e.g., "vor 2 Min.") */
-function formatRelativeTime(timestamp: string): string {
-  const now = Date.now()
-  const then = new Date(timestamp).getTime()
-  const diffMs = now - then
-
-  if (diffMs < 0) return 'Jetzt'
-  if (diffMs < 60_000) return 'Gerade eben'
-
-  const minutes = Math.floor(diffMs / 60_000)
-  if (minutes < 60) return `vor ${minutes} Min.`
-
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `vor ${hours} Std.`
-
-  const days = Math.floor(hours / 24)
-  return `vor ${days} Tag${days > 1 ? 'en' : ''}`
-}

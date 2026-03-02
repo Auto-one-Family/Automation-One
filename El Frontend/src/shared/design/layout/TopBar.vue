@@ -24,9 +24,11 @@ import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { useEspStore } from '@/stores/esp'
 import {
   LogOut, ChevronDown, Menu, Filter,
-  Plus, Sparkles, Radio, AlertTriangle
+  Plus, Sparkles, Radio, AlertTriangle,
+  LayoutGrid, Activity,
 } from 'lucide-vue-next'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
+import NotificationBadge from '@/components/notifications/NotificationBadge.vue'
 import StatusPill from '@/components/dashboard/StatusPill.vue'
 import ColorLegend from '@/components/common/ColorLegend.vue'
 
@@ -138,6 +140,20 @@ const routeBreadcrumbs = computed(() => {
   return crumbs
 })
 
+/** Cross-tab link: when on Monitor zone → link to Hardware zone (and vice versa) */
+const crossTabLink = computed(() => {
+  const zoneId = route.params.zoneId as string | undefined
+  if (!zoneId) return null
+
+  if (isMonitorRoute.value) {
+    return { to: `/hardware/${zoneId}`, title: 'In der Übersicht anzeigen', icon: LayoutGrid }
+  }
+  if (isHardwareRoute.value) {
+    return { to: `/monitor/${zoneId}`, title: 'Im Monitor anzeigen', icon: Activity }
+  }
+  return null
+})
+
 function navigateCrumb(to: string | undefined) {
   if (to) router.push(to)
 }
@@ -168,6 +184,15 @@ async function handleLogout() {
           >{{ crumb.label }}</button>
           <span v-else class="header__crumb--current">{{ crumb.label }}</span>
         </template>
+        <!-- Cross-tab link: Monitor ↔ Hardware -->
+        <RouterLink
+          v-if="crossTabLink"
+          :to="crossTabLink.to"
+          class="header__cross-link"
+          :title="crossTabLink.title"
+        >
+          <component :is="crossTabLink.icon" class="header__cross-link-icon" />
+        </RouterLink>
       </nav>
 
       <!-- Non-Dashboard: Page Title -->
@@ -282,6 +307,9 @@ async function handleLogout() {
 
       <!-- Color Legend -->
       <ColorLegend />
+
+      <!-- Notification Bell -->
+      <NotificationBadge />
 
       <!-- Emergency Stop -->
       <EmergencyStopButton />
@@ -493,6 +521,31 @@ async function handleLogout() {
   font-size: var(--text-xs);
   user-select: none;
   flex-shrink: 0;
+}
+
+/* Cross-tab link (Monitor ↔ Hardware) */
+.header__cross-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition: color var(--transition-fast), background var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.header__cross-link:hover {
+  color: var(--color-accent-bright);
+  background: rgba(96, 165, 250, 0.08);
+}
+
+.header__cross-link-icon {
+  width: 13px;
+  height: 13px;
 }
 
 /* ═══ CENTER SECTION: Dashboard Controls ════════════════════════════════ */

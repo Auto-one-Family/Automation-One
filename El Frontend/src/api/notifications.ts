@@ -13,7 +13,7 @@ import api from './index'
 // Types
 // =============================================================================
 
-export type NotificationSeverity = 'critical' | 'warning' | 'info' | 'resolved'
+export type NotificationSeverity = 'critical' | 'warning' | 'info'
 export type NotificationCategory =
   | 'connectivity'
   | 'data_quality'

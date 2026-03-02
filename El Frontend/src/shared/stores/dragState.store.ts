@@ -71,6 +71,19 @@ export interface ActuatorTypeDragPayload {
 }
 
 /**
+ * Payload für Dashboard-Widget-Drag aus dem FAB (Phase 4A)
+ */
+export interface DashboardWidgetDragPayload {
+  action: 'add-dashboard-widget'
+  widgetType: string
+  label: string
+  defaultW: number
+  defaultH: number
+  minW: number
+  minH: number
+}
+
+/**
  * Drag-Statistiken für Debugging
  */
 interface DragStats {
@@ -113,6 +126,12 @@ export const useDragStateStore = defineStore('dragState', () => {
   /** Aktueller Actuator-Drag-Payload (Phase 7) */
   const actuatorTypePayload = ref<ActuatorTypeDragPayload | null>(null)
 
+  /** True wenn ein Dashboard-Widget aus dem FAB gedraggt wird (Phase 4A) */
+  const isDraggingDashboardWidget = ref(false)
+
+  /** Aktueller Dashboard-Widget-Drag-Payload (Phase 4A) */
+  const dashboardWidgetPayload = ref<DashboardWidgetDragPayload | null>(null)
+
   /** Zeitpunkt des Drag-Starts (für Timeout-Detection) */
   const dragStartTime = ref<number | null>(null)
 
@@ -133,7 +152,7 @@ export const useDragStateStore = defineStore('dragState', () => {
 
   /** True wenn irgendein Drag aktiv ist */
   const isAnyDragActive = computed(() =>
-    isDraggingSensorType.value || isDraggingSensor.value || isDraggingEspCard.value || isDraggingActuatorType.value
+    isDraggingSensorType.value || isDraggingSensor.value || isDraggingEspCard.value || isDraggingActuatorType.value || isDraggingDashboardWidget.value
   )
 
   /** Aktuelle Drag-Dauer in ms (für Debugging) */
@@ -275,6 +294,25 @@ export const useDragStateStore = defineStore('dragState', () => {
   }
 
   /**
+   * Startet einen Dashboard-Widget-Drag aus dem FAB (Phase 4A)
+   */
+  function startDashboardWidgetDrag(payload: DashboardWidgetDragPayload): void {
+    logger.debug('Starting dashboard widget drag', { widgetType: payload.widgetType })
+
+    if (isAnyDragActive.value) {
+      logger.debug('Warning: Starting new drag while previous drag active - resetting')
+      endDrag()
+    }
+
+    isDraggingDashboardWidget.value = true
+    dashboardWidgetPayload.value = payload
+    dragStartTime.value = Date.now()
+    stats.value.startCount++
+
+    startSafetyTimeout()
+  }
+
+  /**
    * Beendet den aktuellen Drag-Vorgang.
    * Wird sowohl von Components als auch vom Safety-Timeout aufgerufen.
    */
@@ -285,9 +323,11 @@ export const useDragStateStore = defineStore('dragState', () => {
       wasDraggingSensor: isDraggingSensor.value,
       wasDraggingEspCard: isDraggingEspCard.value,
       wasDraggingActuatorType: isDraggingActuatorType.value,
+      wasDraggingDashboardWidget: isDraggingDashboardWidget.value,
       sensorPayload: sensorPayload.value,
       draggingSensorEspId: draggingSensorEspId.value,
       actuatorTypePayload: actuatorTypePayload.value,
+      dashboardWidgetPayload: dashboardWidgetPayload.value,
     })
 
     // Berechne Drag-Dauer für Statistiken
@@ -305,6 +345,8 @@ export const useDragStateStore = defineStore('dragState', () => {
     isDraggingEspCard.value = false
     isDraggingActuatorType.value = false
     actuatorTypePayload.value = null
+    isDraggingDashboardWidget.value = false
+    dashboardWidgetPayload.value = null
     dragStartTime.value = null
     stats.value.endCount++
 
@@ -353,17 +395,18 @@ export const useDragStateStore = defineStore('dragState', () => {
       return
     }
 
-    // Nur bei nativen Drags (Sensor-Typ aus Sidebar, Sensor-Satellite für Chart, Actuator-Typ aus Sidebar)
-    if (isDraggingSensorType.value || isDraggingSensor.value || isDraggingActuatorType.value) {
+    // Nur bei nativen Drags (Sensor-Typ aus Sidebar, Sensor-Satellite für Chart, Actuator-Typ aus Sidebar, Dashboard-Widget aus FAB)
+    if (isDraggingSensorType.value || isDraggingSensor.value || isDraggingActuatorType.value || isDraggingDashboardWidget.value) {
       logger.debug('Global dragend caught for native drag - ensuring state cleanup', {
         target: (event.target as HTMLElement)?.tagName,
         isDraggingSensorType: isDraggingSensorType.value,
         isDraggingSensor: isDraggingSensor.value,
         isDraggingActuatorType: isDraggingActuatorType.value,
+        isDraggingDashboardWidget: isDraggingDashboardWidget.value,
       })
       // Kleine Verzögerung um Component-Handler Zeit zu geben
       setTimeout(() => {
-        if (isDraggingSensorType.value || isDraggingSensor.value || isDraggingActuatorType.value) {
+        if (isDraggingSensorType.value || isDraggingSensor.value || isDraggingActuatorType.value || isDraggingDashboardWidget.value) {
           logger.debug('State still active after global dragend - forcing cleanup')
           endDrag()
         }
@@ -426,6 +469,8 @@ export const useDragStateStore = defineStore('dragState', () => {
     isDraggingEspCard,
     isDraggingActuatorType,
     actuatorTypePayload,
+    isDraggingDashboardWidget,
+    dashboardWidgetPayload,
 
     // Computed
     isAnyDragActive,
@@ -435,6 +480,7 @@ export const useDragStateStore = defineStore('dragState', () => {
     startSensorTypeDrag,
     startSensorDrag,
     startActuatorTypeDrag,
+    startDashboardWidgetDrag,
     startEspCardDrag,
     endEspCardDrag,
     endDrag,

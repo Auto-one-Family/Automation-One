@@ -210,6 +210,50 @@ export const sensorsApi = {
     )
     return response.data
   },
+
+  // =========================================================================
+  // Alert Configuration (Phase 4A.7)
+  // =========================================================================
+
+  async getAlertConfig(sensorId: string): Promise<AlertConfigResponse> {
+    const response = await api.get<AlertConfigResponse>(
+      `/sensors/${sensorId}/alert-config`
+    )
+    return response.data
+  },
+
+  async updateAlertConfig(
+    sensorId: string,
+    config: AlertConfigUpdate
+  ): Promise<AlertConfigResponse> {
+    const response = await api.patch<AlertConfigResponse>(
+      `/sensors/${sensorId}/alert-config`,
+      config
+    )
+    return response.data
+  },
+
+  // =========================================================================
+  // Runtime Statistics (Phase 4A.8)
+  // =========================================================================
+
+  async getRuntime(sensorId: string): Promise<RuntimeStatsResponse> {
+    const response = await api.get<RuntimeStatsResponse>(
+      `/sensors/${sensorId}/runtime`
+    )
+    return response.data
+  },
+
+  async updateRuntime(
+    sensorId: string,
+    stats: RuntimeStatsUpdate
+  ): Promise<RuntimeStatsResponse> {
+    const response = await api.patch<RuntimeStatsResponse>(
+      `/sensors/${sensorId}/runtime`,
+      stats
+    )
+    return response.data
+  },
 }
 
 // ===========================================================================
@@ -332,9 +376,55 @@ export const oneWireApi = {
     }>(`/sensors/esp/${espId}/onewire`, { params: pin !== undefined ? { pin } : {} })
     return response.data
   },
+
 }
 
+// Phase 4A.7 Types
+export interface AlertConfigUpdate {
+  alerts_enabled?: boolean
+  suppression_reason?: string
+  suppression_note?: string
+  suppression_until?: string | null
+  custom_thresholds?: {
+    warning_min?: number | null
+    warning_max?: number | null
+    critical_min?: number | null
+    critical_max?: number | null
+  }
+  severity_override?: string | null
+}
 
+export interface AlertConfigResponse {
+  success: boolean
+  sensor_id?: string
+  actuator_id?: string
+  esp_id?: string
+  alert_config: Record<string, unknown>
+  global_thresholds?: Record<string, unknown> | null
+}
+
+export interface RuntimeStatsUpdate {
+  uptime_hours?: number
+  last_restart?: string
+  expected_lifetime_hours?: number
+  last_maintenance?: string
+  maintenance_interval_hours?: number
+  maintenance_log?: Array<{
+    date: string
+    action: string
+    notes?: string
+    performed_by?: string
+  }>
+}
+
+export interface RuntimeStatsResponse {
+  success: boolean
+  sensor_id?: string
+  actuator_id?: string
+  runtime_stats: Record<string, unknown>
+  computed_uptime_hours?: number | null
+  maintenance_overdue?: boolean
+}
 
 
 
