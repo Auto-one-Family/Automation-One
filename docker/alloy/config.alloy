@@ -162,6 +162,13 @@ loki.process "pipeline" {
       }
     }
 
+    // Normalize frontend lowercase levels (info, error, warn, debug)
+    // to uppercase for consistent cross-service queries
+    stage.template {
+      source   = "level"
+      template = "{{ if eq .level \"error\" }}ERROR{{ else if eq .level \"warn\" }}WARNING{{ else if eq .level \"warning\" }}WARNING{{ else if eq .level \"info\" }}INFO{{ else if eq .level \"debug\" }}DEBUG{{ else }}{{ .level }}{{ end }}"
+    }
+
     // Promote level to label
     stage.labels {
       values = {
@@ -249,10 +256,17 @@ loki.process "pipeline" {
       drop_counter_reason = "mqtt_healthcheck_noise"
     }
 
-    // Extract level from Mosquitto log lines (only matches "error")
+    // Extract level from Mosquitto log lines (case-insensitive)
     stage.regex {
-      expression = "(?i)(?P<level>error)"
+      expression = "(?i)(?P<mqtt_level>error|warning)"
     }
+
+    // Normalize to uppercase for consistent cross-service queries
+    stage.template {
+      source   = "level"
+      template = "{{ if eq .mqtt_level \"error\" }}ERROR{{ else if eq .mqtt_level \"Error\" }}ERROR{{ else if eq .mqtt_level \"warning\" }}WARNING{{ else if eq .mqtt_level \"Warning\" }}WARNING{{ else }}{{ .mqtt_level }}{{ end }}"
+    }
+
     stage.labels {
       values = {
         "level" = "",
@@ -275,17 +289,34 @@ loki.process "pipeline" {
         "level" = "",
       }
     }
+
+    // Normalize Loki's native lowercase levels (info, error, warn, debug)
+    // to uppercase (INFO, ERROR, WARNING, DEBUG) for consistent cross-service queries
+    stage.template {
+      source   = "level"
+      template = "{{ if eq .level \"error\" }}ERROR{{ else if eq .level \"warn\" }}WARNING{{ else if eq .level \"info\" }}INFO{{ else if eq .level \"debug\" }}DEBUG{{ else }}{{ .level }}{{ end }}"
+    }
+
     stage.labels {
       values = {
         "level" = "",
       }
     }
 
-    // Drop info-level lines containing LogQL query parameters
-    // Pattern: level=info ... query="{...}" (query execution stats)
+    // Drop info-level query execution stats (metrics.go, engine.go, roundtrip.go)
+    // Covers both stream queries (query="{...") and metric queries
+    // (query="sum(count_over_time({..."))  from Grafana alert evaluations.
     // Error-level query logs (malformed queries etc.) are preserved.
     stage.drop {
-      expression          = ".*level=info.*query=\"\\{.*"
+      expression          = ".*level=info.*caller=metrics\\.go.*"
+      drop_counter_reason = "loki_query_stats_noise"
+    }
+    stage.drop {
+      expression          = ".*level=info.*caller=engine\\.go.*"
+      drop_counter_reason = "loki_query_stats_noise"
+    }
+    stage.drop {
+      expression          = ".*level=info.*caller=roundtrip\\.go.*"
       drop_counter_reason = "loki_query_stats_noise"
     }
   }
