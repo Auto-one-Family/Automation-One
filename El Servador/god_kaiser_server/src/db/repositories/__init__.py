@@ -9,6 +9,7 @@ from .dashboard_repo import DashboardRepository
 from .esp_heartbeat_repo import ESPHeartbeatRepository
 from .esp_repo import ESPRepository
 from .logic_repo import LogicRepository
+from .notification_repo import NotificationPreferencesRepository, NotificationRepository
 from .sensor_repo import SensorRepository
 from .sensor_type_defaults_repo import SensorTypeDefaultsRepository
 from .subzone_repo import SubzoneRepository
@@ -27,6 +28,8 @@ __all__ = [
     "AuditLogRepository",
     "UserRepository",
     "LogicRepository",
+    "NotificationPreferencesRepository",
+    "NotificationRepository",
     "SubzoneRepository",
     "TokenBlacklistRepository",
     "SystemConfigRepository",

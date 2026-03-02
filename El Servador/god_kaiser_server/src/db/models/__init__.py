@@ -18,6 +18,7 @@ from . import (  # noqa: F401
     kaiser,
     library,
     logic,
+    notification,  # Notification + Preferences (Phase 4A.1)
     sensor,
     sensor_type_defaults,  # Sensor type default configuration (Phase 2A)
     subzone,  # Subzone configuration model (Phase 9)
@@ -41,6 +42,13 @@ from .esp_heartbeat import (
 from .kaiser import KaiserRegistry, ESPOwnership  # noqa: F401
 from .library import LibraryMetadata  # noqa: F401
 from .logic import CrossESPLogic, LogicExecutionHistory  # noqa: F401
+from .notification import (
+    Notification,
+    NotificationCategory,
+    NotificationPreferences,
+    NotificationSeverity,
+    NotificationSource,
+)  # noqa: F401
 from .sensor import SensorConfig, SensorData  # noqa: F401
 from .sensor_type_defaults import SensorTypeDefaults  # noqa: F401
 from .subzone import SubzoneConfig  # noqa: F401
@@ -60,6 +68,7 @@ __all__ = [
     "kaiser",
     "library",
     "logic",
+    "notification",
     "sensor",
     "sensor_type_defaults",
     "subzone",
@@ -88,6 +97,11 @@ __all__ = [
     "LibraryMetadata",
     "CrossESPLogic",
     "LogicExecutionHistory",
+    "Notification",
+    "NotificationCategory",
+    "NotificationPreferences",
+    "NotificationSeverity",
+    "NotificationSource",
     "SensorConfig",
     "SensorData",
     "SensorTypeDefaults",

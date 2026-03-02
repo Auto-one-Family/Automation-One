@@ -1,19 +1,21 @@
 """
 Notification Action Executor
 
-Executes notification actions (email, webhook, websocket).
+Executes notification actions by delegating to the NotificationRouter.
+
+Phase 4A.1 Refactoring: Channel methods now route through the central
+NotificationRouter which handles DB persistence, WebSocket broadcast,
+and email delivery (severity-based). Webhook remains a direct HTTP POST.
 """
 
-import asyncio
-import smtplib
-from email.message import EmailMessage
-from typing import Dict, Optional
-
 import httpx
+from typing import Dict, Optional
 
 from ....core.config import get_settings
 from ....core.logging_config import get_logger
-from ....websocket.manager import WebSocketManager
+from ....db.session import resilient_session
+from ....schemas.notification import NotificationCreate
+from ...notification_router import NotificationRouter
 from .base import ActionResult, BaseActionExecutor
 
 logger = get_logger(__name__)
@@ -21,22 +23,22 @@ logger = get_logger(__name__)
 
 class NotificationActionExecutor(BaseActionExecutor):
     """
-    Executes notification actions.
+    Executes notification actions via NotificationRouter.
 
-    Supports:
-    - WebSocket notifications (implemented)
-    - Email notifications (placeholder for future)
-    - Webhook notifications (placeholder for future)
+    Channels:
+    - websocket / email → delegated to NotificationRouter (DB + WS + Email)
+    - webhook → direct HTTP POST (not part of notification stack)
     """
 
-    def __init__(self, websocket_manager: Optional[WebSocketManager] = None):
+    def __init__(self, notification_router: Optional[NotificationRouter] = None):
         """
         Initialize notification executor.
 
         Args:
-            websocket_manager: Optional WebSocketManager instance for WebSocket notifications
+            notification_router: Optional NotificationRouter instance.
+                If None, a new one is created per invocation using resilient_session.
         """
-        self.websocket_manager = websocket_manager
+        self._notification_router = notification_router
 
     def supports(self, action_type: str) -> bool:
         """Check if this executor supports notification actions."""
@@ -97,106 +99,102 @@ class NotificationActionExecutor(BaseActionExecutor):
             logger.warning(f"Error formatting notification template: {e}")
             message = message_template  # Use template as-is if formatting fails
 
-        # Execute based on channel
-        if channel == "websocket":
-            return await self._send_websocket_notification(target, message, context)
-        if channel == "email":
-            return await self._send_email_notification(target, message, context)
+        # Webhook remains a direct HTTP POST (not part of notification stack)
         if channel == "webhook":
             return await self._send_webhook_notification(target, message, context)
+
+        # WebSocket and email go through NotificationRouter
+        if channel in ("websocket", "email"):
+            return await self._route_via_notification_router(
+                channel=channel,
+                target=target,
+                message=message,
+                context=context,
+            )
 
         return ActionResult(
             success=False,
             message=f"Unsupported notification channel: {channel}",
         )
 
-    async def _send_websocket_notification(
-        self, target: str, message: str, context: Dict
+    async def _route_via_notification_router(
+        self,
+        channel: str,
+        target: str,
+        message: str,
+        context: Dict,
     ) -> ActionResult:
-        """Send WebSocket notification."""
-        if not self.websocket_manager:
-            return ActionResult(
-                success=False,
-                message="WebSocket manager not available",
-            )
+        """
+        Route notification through the central NotificationRouter.
+
+        Creates a NotificationCreate schema and delegates to the router
+        which handles DB persistence, WebSocket broadcast, and email delivery.
+        """
+        trigger_data = context.get("trigger_data", {})
+        rule_name = context.get("rule_name", "Unknown Rule")
+        rule_id = context.get("rule_id")
+
+        # Determine severity from action context
+        severity = context.get("severity", "info")
+
+        # Build metadata from trigger context
+        metadata = {
+            "rule_name": rule_name,
+            "rule_id": str(rule_id) if rule_id else None,
+            "esp_id": trigger_data.get("esp_id"),
+            "sensor_type": trigger_data.get("sensor_type"),
+            "gpio": trigger_data.get("gpio"),
+            "target": target,
+        }
+        # Remove None values
+        metadata = {k: v for k, v in metadata.items() if v is not None}
+
+        notification = NotificationCreate(
+            user_id=None,  # Broadcast to all users (system notification)
+            channel=channel,
+            severity=severity,
+            category="system",
+            title=f"Logic Rule: {rule_name}",
+            body=message,
+            metadata=metadata,
+            source="logic_engine",
+        )
 
         try:
-            # Broadcast notification via WebSocket
-            notification_data = {
-                "type": "notification",
-                "target": target,
-                "message": message,
-                "rule_name": context.get("rule_name"),
-                "rule_id": str(context.get("rule_id")) if context.get("rule_id") else None,
-                "timestamp": context.get("trigger_data", {}).get("timestamp"),
-            }
+            if self._notification_router:
+                result = await self._notification_router.route(notification)
+            else:
+                # Create a transient router with a fresh session
+                async with resilient_session() as session:
+                    router = NotificationRouter(session)
+                    result = await router.route(notification)
 
-            await self.websocket_manager.broadcast("notification", notification_data)
-
-            return ActionResult(
-                success=True,
-                message=f"WebSocket notification sent to {target}",
-                data={"channel": "websocket", "target": target, "message": message},
-            )
+            if result:
+                return ActionResult(
+                    success=True,
+                    message=f"Notification routed via {channel} for rule '{rule_name}'",
+                    data={
+                        "channel": channel,
+                        "target": target,
+                        "notification_id": str(result.id),
+                    },
+                )
+            else:
+                # result is None → deduplicated
+                return ActionResult(
+                    success=True,
+                    message=f"Notification deduplicated for rule '{rule_name}'",
+                    data={"channel": channel, "target": target, "deduplicated": True},
+                )
 
         except Exception as e:
             logger.error(
-                f"Error sending WebSocket notification: {e}",
+                f"Error routing notification via NotificationRouter: {e}",
                 exc_info=True,
             )
             return ActionResult(
                 success=False,
-                message=f"Error sending WebSocket notification: {str(e)}",
-            )
-
-    async def _send_email_notification(
-        self, target: str, message: str, context: Dict
-    ) -> ActionResult:
-        """Send email notification via SMTP (blocking call executed in thread)."""
-        settings = get_settings()
-
-        if not settings.notification.smtp_enabled:
-            return ActionResult(
-                success=False,
-                message="SMTP is disabled (enable SMTP_ENABLED to send emails)",
-            )
-
-        smtp_host = settings.notification.smtp_host
-        smtp_port = settings.notification.smtp_port
-        smtp_user = settings.notification.smtp_username
-        smtp_pass = settings.notification.smtp_password
-        use_tls = settings.notification.smtp_use_tls
-        sender = settings.notification.smtp_from
-
-        subject = f"Logic notification - {context.get('rule_name', 'Rule')}"
-
-        def _send_email_sync() -> None:
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-                if use_tls:
-                    server.starttls()
-                if smtp_user and smtp_pass:
-                    server.login(smtp_user, smtp_pass)
-
-                msg = EmailMessage()
-                msg["Subject"] = subject
-                msg["From"] = sender
-                msg["To"] = target
-                msg.set_content(message)
-
-                server.send_message(msg)
-
-        try:
-            await asyncio.to_thread(_send_email_sync)
-            return ActionResult(
-                success=True,
-                message=f"Email sent to {target}",
-                data={"channel": "email", "target": target},
-            )
-        except Exception as e:
-            logger.error(f"Error sending email notification: {e}", exc_info=True)
-            return ActionResult(
-                success=False,
-                message=f"Error sending email notification: {str(e)}",
+                message=f"Error routing notification: {str(e)}",
             )
 
     async def _send_webhook_notification(

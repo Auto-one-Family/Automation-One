@@ -195,6 +195,22 @@ from .dashboard import (
     DashboardWidget,
 )
 
+# Notification schemas (Phase 4A.1)
+from .notification import (
+    NOTIFICATION_CATEGORIES,
+    NOTIFICATION_SEVERITIES,
+    NOTIFICATION_SOURCES,
+    NotificationCreate,
+    NotificationListResponse,
+    NotificationPreferencesResponse,
+    NotificationPreferencesUpdate,
+    NotificationResponse,
+    NotificationSendRequest,
+    NotificationUnreadCountResponse,
+    TestEmailRequest,
+    TestEmailResponse,
+)
+
 # Health schemas
 from .health import (
     ComponentHealth,
@@ -371,6 +387,19 @@ __all__ = [
     "DashboardResponse",
     "DashboardUpdate",
     "DashboardWidget",
+    # Notification (Phase 4A.1)
+    "NOTIFICATION_CATEGORIES",
+    "NOTIFICATION_SEVERITIES",
+    "NOTIFICATION_SOURCES",
+    "NotificationCreate",
+    "NotificationListResponse",
+    "NotificationPreferencesResponse",
+    "NotificationPreferencesUpdate",
+    "NotificationResponse",
+    "NotificationSendRequest",
+    "NotificationUnreadCountResponse",
+    "TestEmailRequest",
+    "TestEmailResponse",
     # Health
     "ComponentHealth",
     "DatabaseHealth",

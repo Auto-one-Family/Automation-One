@@ -1,0 +1,273 @@
+"""
+Notification Pydantic Schemas
+
+Phase 4A.1: Notification-Stack Backend
+Priority: HIGH
+Status: IMPLEMENTED
+
+Provides:
+- NotificationCreate: Input schema for creating notifications
+- NotificationResponse: Output schema for single notification
+- NotificationListResponse: Paginated notification list
+- NotificationPreferencesUpdate: Input for updating preferences
+- NotificationPreferencesResponse: Output for preferences
+- NotificationUnreadCountResponse: Badge counter
+"""
+
+import uuid
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from .common import BaseResponse, PaginatedResponse, PaginationMeta
+
+
+# =============================================================================
+# Severity / Source / Category Constants
+# =============================================================================
+
+NOTIFICATION_SEVERITIES = ["critical", "warning", "info", "resolved"]
+NOTIFICATION_SOURCES = [
+    "logic_engine", "mqtt_handler", "grafana", "sensor_threshold",
+    "device_event", "autoops", "manual", "system",
+]
+NOTIFICATION_CATEGORIES = [
+    "connectivity", "data_quality", "infrastructure",
+    "lifecycle", "maintenance", "security", "system",
+]
+
+
+# =============================================================================
+# Notification Schemas
+# =============================================================================
+
+
+class NotificationCreate(BaseModel):
+    """Schema for creating a new notification (internal + API)."""
+
+    user_id: Optional[int] = Field(
+        None,
+        description="Target user ID. If None, broadcasts to all users.",
+    )
+    channel: str = Field(
+        default="websocket",
+        description="Delivery channel (websocket, email, webhook)",
+    )
+    severity: str = Field(
+        default="info",
+        description="Severity level (critical, warning, info, resolved)",
+    )
+    category: str = Field(
+        default="system",
+        description="Alert category",
+    )
+    title: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Short notification title",
+    )
+    body: Optional[str] = Field(
+        None,
+        description="Full notification body text",
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional context (esp_id, sensor_type, rule_id, etc.)",
+    )
+    source: str = Field(
+        default="system",
+        description="Notification origin",
+    )
+    parent_notification_id: Optional[uuid.UUID] = Field(
+        None,
+        description="Parent notification ID for cascade suppression",
+    )
+
+    @field_validator("severity")
+    @classmethod
+    def validate_severity(cls, v: str) -> str:
+        if v not in NOTIFICATION_SEVERITIES:
+            raise ValueError(f"severity must be one of {NOTIFICATION_SEVERITIES}")
+        return v
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, v: str) -> str:
+        if v not in NOTIFICATION_SOURCES:
+            raise ValueError(f"source must be one of {NOTIFICATION_SOURCES}")
+        return v
+
+    @field_validator("category")
+    @classmethod
+    def validate_category(cls, v: str) -> str:
+        if v not in NOTIFICATION_CATEGORIES:
+            raise ValueError(f"category must be one of {NOTIFICATION_CATEGORIES}")
+        return v
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "severity": "warning",
+                "category": "data_quality",
+                "title": "Sensor data stale",
+                "body": "SHT31 temperature sensor has not reported for 5 minutes",
+                "source": "sensor_threshold",
+                "metadata": {"esp_id": "ESP_12AB34CD", "sensor_type": "sht31_temp"},
+            }
+        }
+    )
+
+
+class NotificationResponse(BaseModel):
+    """Schema for a single notification response."""
+
+    id: uuid.UUID
+    user_id: int
+    channel: str
+    severity: str
+    category: str
+    title: str
+    body: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    source: str
+    is_read: bool
+    is_archived: bool
+    digest_sent: bool
+    parent_notification_id: Optional[uuid.UUID] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    read_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class NotificationListResponse(BaseResponse):
+    """Paginated list of notifications."""
+
+    data: List[NotificationResponse] = Field(default_factory=list)
+    pagination: PaginationMeta
+
+
+class NotificationUnreadCountResponse(BaseResponse):
+    """Unread notification count for badge."""
+
+    unread_count: int = Field(
+        ...,
+        ge=0,
+        description="Number of unread notifications",
+    )
+    highest_severity: Optional[str] = Field(
+        None,
+        description="Highest severity among unread notifications",
+    )
+
+
+class NotificationSendRequest(BaseModel):
+    """Admin request to manually send a notification."""
+
+    title: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Notification title",
+    )
+    body: Optional[str] = Field(None, description="Notification body")
+    severity: str = Field(default="info")
+    category: str = Field(default="system")
+    source: str = Field(default="manual")
+    channel: str = Field(default="websocket")
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("severity")
+    @classmethod
+    def validate_severity(cls, v: str) -> str:
+        if v not in NOTIFICATION_SEVERITIES:
+            raise ValueError(f"severity must be one of {NOTIFICATION_SEVERITIES}")
+        return v
+
+
+# =============================================================================
+# Notification Preferences Schemas
+# =============================================================================
+
+
+class NotificationPreferencesUpdate(BaseModel):
+    """Schema for updating user notification preferences."""
+
+    websocket_enabled: Optional[bool] = Field(None, description="Enable WebSocket notifications")
+    email_enabled: Optional[bool] = Field(None, description="Enable email notifications")
+    email_address: Optional[str] = Field(None, description="Override email address")
+    email_severities: Optional[List[str]] = Field(
+        None, description="Severities that trigger email"
+    )
+    quiet_hours_enabled: Optional[bool] = Field(None, description="Enable quiet hours")
+    quiet_hours_start: Optional[str] = Field(
+        None,
+        description="Quiet hours start (HH:MM)",
+        pattern=r"^\d{2}:\d{2}$",
+    )
+    quiet_hours_end: Optional[str] = Field(
+        None,
+        description="Quiet hours end (HH:MM)",
+        pattern=r"^\d{2}:\d{2}$",
+    )
+    digest_interval_minutes: Optional[int] = Field(
+        None,
+        ge=0,
+        le=1440,
+        description="Digest interval in minutes (0 = disabled)",
+    )
+    browser_notifications: Optional[bool] = Field(
+        None, description="Enable browser notifications"
+    )
+
+    @field_validator("email_severities")
+    @classmethod
+    def validate_email_severities(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is not None:
+            for s in v:
+                if s not in NOTIFICATION_SEVERITIES:
+                    raise ValueError(f"Invalid severity '{s}', must be one of {NOTIFICATION_SEVERITIES}")
+        return v
+
+
+class NotificationPreferencesResponse(BaseModel):
+    """Schema for notification preferences response."""
+
+    user_id: int
+    websocket_enabled: bool = True
+    email_enabled: bool = False
+    email_address: Optional[str] = None
+    email_severities: List[str] = Field(default_factory=lambda: ["critical", "warning"])
+    quiet_hours_enabled: bool = False
+    quiet_hours_start: Optional[str] = "22:00"
+    quiet_hours_end: Optional[str] = "07:00"
+    digest_interval_minutes: int = 60
+    browser_notifications: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# =============================================================================
+# Test Email Schema
+# =============================================================================
+
+
+class TestEmailRequest(BaseModel):
+    """Request to send a test email."""
+
+    email: Optional[str] = Field(
+        None,
+        description="Recipient email address. If None, uses user's email from preferences or account.",
+    )
+
+
+class TestEmailResponse(BaseResponse):
+    """Response for test email request."""
+
+    provider: Optional[str] = Field(None, description="Email provider used (Resend or SMTP)")
+    recipient: Optional[str] = Field(None, description="Recipient email address")

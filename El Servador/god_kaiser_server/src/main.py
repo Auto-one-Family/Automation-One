@@ -346,6 +346,25 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Prometheus metrics job registered (15s interval)")
 
+        # Step 3.4.4: Register Digest Service job (Phase 4A.1)
+        # Batches warning notifications into periodic digest emails (ISA-18.2).
+        # Default: every 60 minutes, sends digest when >= 3 pending warnings.
+        logger.info("Registering Digest Service job...")
+        from .services.digest_service import get_digest_service
+
+        _digest_service = get_digest_service()
+
+        async def _digest_job() -> None:
+            await _digest_service.process_digests()
+
+        _central_scheduler.add_interval_job(
+            job_id="maintenance_digest_emails",
+            func=_digest_job,
+            seconds=3600,  # 60 minutes
+            category=JobCategory.MAINTENANCE,
+        )
+        logger.info("Digest Service job registered (60min interval)")
+
         # Step 3.5: Recover running Mock-ESP simulations from database (Paket X)
         # After server restart, resume any simulations that were active before shutdown
         # Uses SimulationScheduler.recover_mocks() for DB-First architecture
@@ -465,7 +484,7 @@ async def lifespan(app: FastAPI):
             # Setup action executors
             actuator_executor = ActuatorActionExecutor(actuator_service)
             delay_executor = DelayActionExecutor()
-            notification_executor = NotificationActionExecutor(_websocket_manager)
+            notification_executor = NotificationActionExecutor()
 
             # Phase 3: Sequence Executor (requires circular dependency resolution)
             global _sequence_executor
@@ -531,7 +550,7 @@ async def lifespan(app: FastAPI):
         logger.info(f"Log Level: {settings.log_level}")
         logger.info(f"MQTT Broker: {settings.mqtt.broker_host}:{settings.mqtt.broker_port}")
         logger.info(
-            "API Endpoints: /api/v1/auth, /api/v1/esp, /api/v1/sensors, /api/v1/actuators, /api/v1/logic, /api/v1/health"
+            "API Endpoints: /api/v1/auth, /api/v1/esp, /api/v1/sensors, /api/v1/actuators, /api/v1/logic, /api/v1/health, /api/v1/notifications"
         )
         logger.info("Resilience: Circuit Breakers (mqtt, database, external_api) + Retry + Timeout")
         logger.info("=" * 60)

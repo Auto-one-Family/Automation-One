@@ -248,6 +248,7 @@ class ExternalServicesSettings(BaseSettings):
 class NotificationSettings(BaseSettings):
     """Notification (email/webhook) settings"""
 
+    # SMTP (Fallback provider)
     smtp_enabled: bool = Field(default=False, alias="SMTP_ENABLED")
     smtp_host: str = Field(default="localhost", alias="SMTP_HOST")
     smtp_port: int = Field(default=587, alias="SMTP_PORT", ge=1, le=65535)
@@ -255,6 +256,34 @@ class NotificationSettings(BaseSettings):
     smtp_password: Optional[str] = Field(default=None, alias="SMTP_PASSWORD")
     smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
     smtp_from: str = Field(default="noreply@god-kaiser.local", alias="SMTP_FROM")
+
+    # Resend (Primary email provider — Phase 4A.1)
+    resend_api_key: Optional[str] = Field(
+        default=None,
+        alias="RESEND_API_KEY",
+        description="Resend API key for primary email delivery",
+    )
+
+    # Email delivery master switch
+    email_enabled: bool = Field(
+        default=False,
+        alias="EMAIL_ENABLED",
+        description="Master switch for email notifications (Resend or SMTP)",
+    )
+
+    # Email sender address (shared by Resend and SMTP)
+    email_from: str = Field(
+        default="noreply@god-kaiser.local",
+        alias="EMAIL_FROM",
+        description="Sender address for notification emails",
+    )
+
+    # Email template directory
+    email_template_dir: str = Field(
+        default="templates/email",
+        alias="EMAIL_TEMPLATE_DIR",
+        description="Path to Jinja2 email templates",
+    )
 
     webhook_timeout_seconds: int = Field(
         default=5,

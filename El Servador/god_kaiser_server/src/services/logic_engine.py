@@ -81,7 +81,7 @@ class LogicEngine:
         if action_executors is None:
             actuator_exec = ActuatorActionExecutor(actuator_service)
             delay_exec = DelayActionExecutor()
-            notification_exec = NotificationActionExecutor(websocket_manager)
+            notification_exec = NotificationActionExecutor()
             self.action_executors = [actuator_exec, delay_exec, notification_exec]
         else:
             self.action_executors = action_executors

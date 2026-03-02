@@ -18,6 +18,7 @@ from .esp import router as esp_router
 from .health import router as health_router
 from .logic import router as logic_router
 from .logs import router as logs_router
+from .notifications import router as notifications_router
 from .sensors import router as sensors_router
 from .sensor_type_defaults import router as sensor_type_defaults_router
 from .sequences import router as sequences_router
@@ -47,6 +48,7 @@ api_v1_router.include_router(health_router)
 api_v1_router.include_router(logic_router)
 api_v1_router.include_router(debug_router)
 api_v1_router.include_router(logs_router)  # Frontend error log ingestion
+api_v1_router.include_router(notifications_router)  # Phase 4A.1 - Notification Stack
 api_v1_router.include_router(users_router)
 api_v1_router.include_router(zone_router)
 api_v1_router.include_router(subzone_router)  # Phase 9 - Subzone Management
@@ -73,6 +75,7 @@ __all__ = [
     "library_router",
     "logic_router",
     "logs_router",
+    "notifications_router",
     "sequences_router",
     "subzone_router",
     "users_router",
