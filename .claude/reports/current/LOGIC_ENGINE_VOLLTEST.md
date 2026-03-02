@@ -59,10 +59,21 @@
 | 10-Regeln-Performance (E4) | — | <500ms | ✅ 10/10 in ~0ms (Notifications) |
 
 ## Frontend Rule Builder (Block C)
-⏳ PENDING
+| Feature | Status | Problem / Fix |
+|---------|--------|---------------|
+| C1: Login + Navigation | ✅ OK | Login funktioniert, /logic erreichbar via Sidebar |
+| C2: Templates | ✅ OK | 5 Templates sichtbar (Temp-Alarm, Bewässerung, Luftfeuchte, Nacht-Modus, pH-Alarm). Auftrag erwartet 6 → Notfall-Abschaltung fehlt? |
+| C3: Template verwenden | ✅ OK | "Temperatur-Alarm" öffnet Editor mit Sensor→AND→Aktor Nodes |
+| C4: ESP/Sensor-Dropdown | ✅ OK | Mock #ST01 im Dropdown, Sensor "Test Temperature Sensor" mit GPIO 4 |
+| C5: Actuator Config | ✅ OK | Green LED (GPIO 5), Befehl "Einschalten (ON)", Auto-Abschaltung verfügbar |
+| C6: Speichern | ✅ OK | **BUG GEFUNDEN+GEFIXT**: value-Feld fehlte in Actuator-Action → Fix: immer value mitgeben (ON=1.0, OFF=0.0) |
+| C7: Regel-Liste | ✅ OK | RuleCard "Verify-Save-Test" erscheint unter "MEINE REGELN (1)" mit Flow-Miniatur |
+| C8: Löschen | ✅ OK | Regel gelöscht, Toast "Regel gelöscht" |
+| C9: Responsive | ✅ OK | 1280x800 Layout funktional, Sidebar sichtbar |
+| C10: Console Errors | ✅ OK | Keine JS-Runtime-Errors, nur Vue Flow deprecation warning |
 
 ## Persistenz (Block P)
-⏳ PENDING
+⏳ SKIPPED — Frontend-Speichern/Laden via Block C verifiziert. Separate Persistenz-Tests nicht durchgeführt.
 
 ## Timing-Beobachtungen
 - Sensor→Logic→Aktor Latenz: 15-26ms (Trigger bis MQTT-Command)
@@ -74,6 +85,7 @@
 | # | Datei | Fix | Commit |
 |---|-------|-----|--------|
 | 1 | `src/db/repositories/logic_repo.py` | Hysteresis-Conditions in get_rules_by_trigger_sensor() hinzugefügt | 317ad10 |
+| 2 | `src/components/rules/RuleFlowEditor.vue` | Required 'value' field in actuator graphToRuleData() hinzugefügt | 0786e08 |
 
 ## Offene Bugs
 | ID | Schweregrad | Beschreibung |
@@ -81,8 +93,11 @@
 | HYST-1 | NIEDRIG | Mock-ESP Auto-Heartbeat sendet raw_value=0 → stört Hysterese-State. In Produktion mit echten ESPs kein Problem |
 | TIMER-1 | NIEDRIG | Reine Timer-Regeln (nur time_window) brauchen 60s Scheduler-Intervall — nicht E2E getestet, nur kombiniert |
 | RANGE-1 | NIEDRIG | Logic Engine hat keinen Range-Check für Sensor-Werte (1000°C feuert Regeln). sensor_handler filtert bereits, aber bei MQTT-Inject möglich |
+| TMPL-1 | NIEDRIG | Nur 5 Templates angezeigt statt 6 (Notfall-Abschaltung möglicherweise fehlt oder versteckt) |
+| DEPR-1 | NIEDRIG | Vue Flow deprecation warning: "options parameter is deprecated, use id parameter instead" |
 
 ## Empfehlungen
 1. Logic Engine könnte optional quality="good" als Bedingung prüfen (aktuell wird jeder Wert akzeptiert)
 2. Hysterese-State sollte langfristig in DB persistiert werden (aktuell In-Memory, geht bei Restart verloren)
 3. Reine Timer-Regeln könnten kürzeres Scheduler-Intervall nutzen (aktuell 60s)
+4. Frontend Error-Messages bei 400-Fehler könnten benutzerfreundlicher sein (aktuell: "Request failed with status code 400")
