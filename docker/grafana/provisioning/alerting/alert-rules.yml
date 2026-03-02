@@ -1,7 +1,7 @@
 # Grafana Alerting Provisioning - AutomationOne
-# Phase 2: Expanded Alerting (UI-only, no webhook yet)
+# Phase 2+4A: Expanded Alerting
 #
-# 32 Rules across 7 groups:
+# 37 Rules across 8 groups:
 #   Critical (10s): server-down, mqtt-disconnected, database-down, loki-down, alloy-down, prometheus-down
 #   Warning (1m):   high-memory, esp-devices-offline, high-mqtt-error-rate
 #   Infrastructure (1m): db-query-slow, db-connections-high, cadvisor-down,
@@ -12,6 +12,8 @@
 #                     logic-engine-errors, actuator-timeout, safety-triggered
 #   MQTT Broker (30s): mqtt-broker-no-clients, mqtt-broker-messages-stored
 #                      (requires mosquitto-exporter healthy, port 9234, job=mqtt-broker)
+#   Notification Pipeline (1m): notification-rate-high, email-failure-rate,
+#                               webhook-reception-stopped, high-suppression-ratio, digest-backlog
 #
 # Pipeline per rule: A (PromQL query) -> B (Reduce to last value) -> C (Threshold)
 # All datasource UIDs verified against datasources.yml (2026-02-09)
@@ -1649,6 +1651,259 @@ groups:
         labels:
           severity: warning
           component: mqtt
+
+  # ============================================
+  # Notification Pipeline Alerts (Phase 4A)
+  # ============================================
+  - orgId: 1
+    name: automationone-notification-pipeline
+    folder: AutomationOne Alerts
+    interval: 1m
+    rules:
+      # Rule 33: Notification Rate Too High
+      # Fires when notification creation rate exceeds 10/5m (ISA-18.2 alarm flood)
+      - uid: ao-notification-rate-high
+        title: "Notification Rate Too High"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "rate(god_kaiser_notifications_total[5m])"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [10]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "Notification Rate >10/5min (ISA-18.2 Alarm Flood)"
+          description: "Notification creation rate exceeds 10 per 5 minutes. Possible alarm flood — check sensor thresholds and suppression rules."
+        labels:
+          severity: warning
+          component: notifications
+
+      # Rule 34: Email Failure Rate
+      # Fires when email delivery failure rate exceeds 50% in 15m
+      - uid: ao-email-failure-rate
+        title: "Email Failure Rate High"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: 'rate(god_kaiser_email_sent_total{status="failure"}[15m])'
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.5]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "Email delivery failure rate >50% in 15m"
+          description: "Email delivery is failing frequently. Check Resend API key, SMTP credentials, and network connectivity."
+        labels:
+          severity: critical
+          component: notifications
+
+      # Rule 35: Webhook Reception Stopped
+      # Fires when no Grafana webhooks received for 1 hour
+      - uid: ao-webhook-reception-stopped
+        title: "Webhook Reception Stopped"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "increase(god_kaiser_webhook_received_total[1h])"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              refId: C
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: "No Grafana webhooks received for >1 hour"
+          description: "Grafana webhook reception has stopped. Check Grafana alerting contact point configuration and server connectivity."
+        labels:
+          severity: warning
+          component: notifications
+
+      # Rule 36: High Suppression Ratio
+      # Fires when >80% of notifications are suppressed
+      - uid: ao-high-suppression-ratio
+        title: "High Suppression Ratio"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "sum(increase(god_kaiser_notifications_suppressed_total[1h])) / (sum(increase(god_kaiser_notifications_total[1h])) + sum(increase(god_kaiser_notifications_suppressed_total[1h])) + 0.001)"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.8]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 30m
+        annotations:
+          summary: "Suppression ratio >80% in last hour"
+          description: "More than 80% of notifications are being suppressed. Review suppression rules — some may be overly broad."
+        labels:
+          severity: info
+          component: notifications
+
+      # Rule 37: Digest Backlog
+      # Fires when no digests processed for >2 hours (stale scheduler)
+      - uid: ao-digest-backlog
+        title: "Digest Processing Stale"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 7200
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "increase(god_kaiser_digest_processed_total[2h])"
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: reduce
+              expression: "A"
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              expression: "B"
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              refId: C
+        noDataState: OK
+        execErrState: Alerting
+        for: 30m
+        annotations:
+          summary: "No digest emails processed for >2 hours"
+          description: "Digest scheduler may be stale. Check CentralScheduler status and digest service health."
+        labels:
+          severity: warning
+          component: notifications
 
 # Remove legacy Promtail rule (migrated to Alloy 2026-02-24)
 deleteRules:
