@@ -206,11 +206,20 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const layouts = ref<DashboardLayout[]>([])
   /** Currently active layout ID */
   const activeLayoutId = ref<string | null>(null)
+  /** Server sync in progress */
+  const isSyncing = ref(false)
+  /** Last server sync error message (null = no error) */
+  const lastSyncError = ref<string | null>(null)
 
   /** Currently active layout */
   const activeLayout = computed<DashboardLayout | null>(() =>
     layouts.value.find(l => l.id === activeLayoutId.value) ?? null
   )
+
+  /** Lookup layout by local ID or server UUID (for deep-link robustness) */
+  function getLayoutById(id: string): DashboardLayout | undefined {
+    return layouts.value.find(l => l.id === id || l.serverId === id)
+  }
 
   /** Load layouts from localStorage */
   function loadLayouts() {
@@ -334,9 +343,12 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
   /**
    * Fetch dashboards from server API and merge with localStorage cache.
-   * Server dashboards take priority. Called on editor mount.
+   * Server dashboards take priority (matched by serverId).
+   * Called on store init and editor mount.
    */
   async function fetchLayouts(): Promise<void> {
+    isSyncing.value = true
+    lastSyncError.value = null
     try {
       const response = await dashboardsApi.list()
       if (response.success && response.data.length > 0) {
@@ -352,7 +364,11 @@ export const useDashboardStore = defineStore('dashboard', () => {
         logger.info(`Fetched ${serverLayouts.length} dashboards from server, ${localOnly.length} local-only`)
       }
     } catch (e) {
-      logger.warn('Failed to fetch dashboards from server, using localStorage cache', e)
+      const msg = e instanceof Error ? e.message : String(e)
+      lastSyncError.value = msg
+      logger.warn('Failed to fetch dashboards from server, using localStorage cache:', msg)
+    } finally {
+      isSyncing.value = false
     }
   }
 
@@ -710,10 +726,32 @@ export const useDashboardStore = defineStore('dashboard', () => {
       .sort((a, b) => (a.target?.order ?? 0) - (b.target?.order ?? 0))
   )
 
-  /** Set display target for a layout */
+  /** Set display target for a layout. Enforces uniqueness: clears conflicting target from other layouts. */
   function setLayoutTarget(layoutId: string, target: DashboardTarget | null) {
     const idx = layouts.value.findIndex(l => l.id === layoutId)
     if (idx === -1) return
+
+    // Enforce target uniqueness: only one dashboard per view+placement slot
+    if (target) {
+      const existingHolder = layouts.value.find(l =>
+        l.id !== layoutId &&
+        l.target?.view === target.view &&
+        l.target?.placement === target.placement
+      )
+      if (existingHolder) {
+        const holderIdx = layouts.value.findIndex(l => l.id === existingHolder.id)
+        if (holderIdx !== -1) {
+          layouts.value[holderIdx] = {
+            ...layouts.value[holderIdx],
+            target: undefined,
+            updatedAt: new Date().toISOString(),
+          }
+          syncLayoutToServer(existingHolder.id)
+          logger.info(`Target conflict: cleared target from "${existingHolder.name}" (replaced by "${layouts.value[idx].name}")`)
+        }
+      }
+    }
+
     layouts.value[idx] = {
       ...layouts.value[idx],
       target: target || undefined,
@@ -725,7 +763,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
   // Auto-load on store creation: localStorage first (instant), then server sync (async)
   loadLayouts()
-  fetchLayouts()
+  fetchLayouts().catch(() => {
+    // Error already handled inside fetchLayouts — this prevents unhandled promise rejection
+  })
 
   return {
     showControls,
@@ -752,6 +792,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
     layouts,
     activeLayoutId,
     activeLayout,
+    getLayoutById,
+    isSyncing,
+    lastSyncError,
     loadLayouts,
     fetchLayouts,
     createLayout,

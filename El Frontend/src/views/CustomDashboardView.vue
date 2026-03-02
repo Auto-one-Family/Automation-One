@@ -100,6 +100,17 @@ function clearTarget() {
   showTargetConfig.value = false
 }
 
+/** Find which dashboard currently holds a target slot (for conflict hint) */
+function targetSlotHolder(view: string, placement: string): string | null {
+  const currentId = dashStore.activeLayoutId
+  const holder = dashStore.layouts.find(l =>
+    l.id !== currentId &&
+    l.target?.view === view &&
+    l.target?.placement === placement
+  )
+  return holder?.name ?? null
+}
+
 // Monitor route for "Im Monitor anzeigen" button (based on layout scope)
 const monitorRouteForLayout = computed(() => {
   const layout = dashStore.activeLayout
@@ -228,18 +239,18 @@ onMounted(() => {
   // Deep-link: open dashboard from URL param /editor/:dashboardId
   const dashboardIdFromUrl = route.params.dashboardId as string | undefined
   if (dashboardIdFromUrl) {
-    const layout = dashStore.layouts.find(l => l.id === dashboardIdFromUrl)
+    const layout = dashStore.getLayoutById(dashboardIdFromUrl)
     if (layout) {
-      dashStore.activeLayoutId = dashboardIdFromUrl
+      dashStore.activeLayoutId = layout.id
       dashStore.breadcrumb.dashboardName = layout.name
     }
   }
   // Also support legacy ?layout= query param (from MonitorView cross-links)
   const layoutFromQuery = route.query.layout as string | undefined
   if (layoutFromQuery && !dashboardIdFromUrl) {
-    const layout = dashStore.layouts.find(l => l.id === layoutFromQuery)
+    const layout = dashStore.getLayoutById(layoutFromQuery)
     if (layout) {
-      dashStore.activeLayoutId = layoutFromQuery
+      dashStore.activeLayoutId = layout.id
       dashStore.breadcrumb.dashboardName = layout.name
     }
   }
@@ -571,6 +582,9 @@ function handleImport() {
             >
               <span class="dashboard-builder__target-label">Monitor — Inline</span>
               <span class="dashboard-builder__target-desc">Unter den Zone-Kacheln im Monitor</span>
+              <span v-if="targetSlotHolder('monitor', 'inline')" class="dashboard-builder__target-conflict">
+                Belegt von: {{ targetSlotHolder('monitor', 'inline') }} — wird übernommen
+              </span>
             </button>
             <button
               :class="['dashboard-builder__target-option', { 'dashboard-builder__target-option--selected': activeTarget?.view === 'monitor' && activeTarget?.placement === 'side-panel' }]"
@@ -578,6 +592,9 @@ function handleImport() {
             >
               <span class="dashboard-builder__target-label">Monitor — Seitenpanel</span>
               <span class="dashboard-builder__target-desc">Fixiert rechts neben dem Monitor-Inhalt</span>
+              <span v-if="targetSlotHolder('monitor', 'side-panel')" class="dashboard-builder__target-conflict">
+                Belegt von: {{ targetSlotHolder('monitor', 'side-panel') }} — wird übernommen
+              </span>
             </button>
             <button
               :class="['dashboard-builder__target-option', { 'dashboard-builder__target-option--selected': activeTarget?.view === 'hardware' && activeTarget?.placement === 'inline' }]"
@@ -585,6 +602,9 @@ function handleImport() {
             >
               <span class="dashboard-builder__target-label">Übersicht — Seitenpanel</span>
               <span class="dashboard-builder__target-desc">Fixiert rechts in der Hardware-Übersicht</span>
+              <span v-if="targetSlotHolder('hardware', 'inline')" class="dashboard-builder__target-conflict">
+                Belegt von: {{ targetSlotHolder('hardware', 'inline') }} — wird übernommen
+              </span>
             </button>
             <button v-if="activeTarget" class="dashboard-builder__target-option dashboard-builder__target-option--clear" @click="clearTarget">
               <span class="dashboard-builder__target-label">Anzeigeort entfernen</span>
@@ -930,6 +950,12 @@ function handleImport() {
   border-top: 1px solid var(--glass-border);
   margin-top: var(--space-1);
   padding-top: var(--space-2);
+}
+
+.dashboard-builder__target-conflict {
+  font-size: var(--text-xs);
+  color: var(--color-warning, #f59e0b);
+  font-style: italic;
 }
 
 .dashboard-builder__target-option--clear .dashboard-builder__target-label {

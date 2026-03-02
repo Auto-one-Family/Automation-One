@@ -13,6 +13,9 @@ import { RouterLink } from 'vue-router'
 import { Pencil } from 'lucide-vue-next'
 import { useDashboardStore, type DashboardWidget } from '@/shared/stores/dashboard.store'
 import { useDashboardWidgets } from '@/composables/useDashboardWidgets'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('InlineDashboardPanel')
 
 interface Props {
   layoutId: string
@@ -25,12 +28,16 @@ const props = withDefaults(defineProps<Props>(), {
 
 const dashStore = useDashboardStore()
 
-const { createWidgetElement, mountWidgetToElement, cleanupAllWidgets } = useDashboardWidgets({
+const { createWidgetElement, mountWidgetToElement, cleanupAllWidgets, widgetComponentMap } = useDashboardWidgets({
   showConfigButton: false,
 })
 
+/** Row height in pixels — must match grid-auto-rows in CSS below */
+const ROW_HEIGHT = 60
+const rowHeightPx = `${ROW_HEIGHT}px`
+
 const layout = computed(() =>
-  dashStore.layouts.find(l => l.id === props.layoutId || l.serverId === props.layoutId)
+  dashStore.getLayoutById(props.layoutId)
 )
 
 const widgets = computed(() => layout.value?.widgets ?? [])
@@ -48,12 +55,22 @@ function widgetStyle(w: DashboardWidget): Record<string, string> {
   }
 }
 
+/** Check if a widget type has a registered Vue component */
+function isKnownWidgetType(type: string): boolean {
+  return type in widgetComponentMap
+}
+
 /** Mount all widgets into their DOM containers */
 function mountWidgets() {
   cleanupAllWidgets()
 
   nextTick(() => {
     for (const w of widgets.value) {
+      if (!isKnownWidgetType(w.type)) {
+        logger.warn(`Unknown widget type "${w.type}" — skipping render`)
+        continue
+      }
+
       const mountId = `inline-${props.layoutId}-${w.id}`
       const container = document.getElementById(mountId)
       if (!container) continue
@@ -97,7 +114,10 @@ onUnmounted(() => {
         class="inline-dashboard__cell"
         :style="widgetStyle(w)"
       >
-        <div :id="`inline-${layoutId}-${w.id}`" class="inline-dashboard__mount" />
+        <div v-if="isKnownWidgetType(w.type)" :id="`inline-${layoutId}-${w.id}`" class="inline-dashboard__mount" />
+        <div v-else class="inline-dashboard__unknown">
+          <span>{{ w.type }}</span>
+        </div>
       </div>
     </div>
   </div>
@@ -147,7 +167,7 @@ onUnmounted(() => {
 .inline-dashboard__grid {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
-  grid-auto-rows: 60px;
+  grid-auto-rows: v-bind(rowHeightPx);
   gap: 4px;
   padding: 8px;
 }
@@ -164,5 +184,17 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+.inline-dashboard__unknown {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs, 11px);
+  font-style: italic;
+  opacity: 0.6;
 }
 </style>

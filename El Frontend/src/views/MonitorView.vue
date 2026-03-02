@@ -893,10 +893,10 @@ watch(selectedZoneName, (name) => {
   }
 })
 
-// Breadcrumb update for dashboard name
+// Breadcrumb update for dashboard name (match by local ID or server UUID via store getter)
 watch(selectedDashboardId, (dashId) => {
   if (dashId) {
-    const layout = dashStore.layouts.find(l => l.id === dashId)
+    const layout = dashStore.getLayoutById(dashId)
     dashStore.breadcrumb.dashboardName = layout?.name || ''
   } else {
     dashStore.breadcrumb.dashboardName = ''
@@ -919,8 +919,11 @@ watch(
 
     // Case 1: No dashboard exists — generate on first visit
     if (existingDashboards.length === 0 && !generatedZoneDashboards.value.has(zoneId)) {
-      dashStore.generateZoneDashboard(zoneId, zoneDevices as any, zoneName)
-      generatedZoneDashboards.value.add(zoneId)
+      const generated = dashStore.generateZoneDashboard(zoneId, zoneDevices as any, zoneName)
+      // Only mark as generated if dashboard was actually created (non-null = has widgets)
+      if (generated) {
+        generatedZoneDashboards.value.add(zoneId)
+      }
       return
     }
 
