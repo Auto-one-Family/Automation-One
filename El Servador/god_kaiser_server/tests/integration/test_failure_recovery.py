@@ -18,7 +18,6 @@ from tests.esp32.mocks.mock_esp32_client import (
 )
 from src.services.safety_service import SafetyService
 
-
 # =========================================================================
 # ESP32 Emergency Recovery Workflow
 # =========================================================================

@@ -16,7 +16,6 @@ from src.db.models.sensor import SensorConfig
 from src.db.models.actuator import ActuatorConfig
 from src.db.models.notification import Notification
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -102,29 +101,41 @@ async def sensor_with_overdue_maintenance(db_session: AsyncSession, sample_esp_d
 
 @pytest.mark.asyncio
 async def test_suppression_expiry_re_enables(
-    db_session, sample_esp_device, sensor_with_expired_suppression,
+    db_session,
+    sample_esp_device,
+    sensor_with_expired_suppression,
 ):
     """Sensor with expired suppression_until → alerts_enabled set back to True."""
+    from contextlib import asynccontextmanager
     from sqlalchemy import select
+    from src.db.models.sensor import SensorConfig
     from src.services.alert_suppression_scheduler import check_suppression_expiry
 
-    # Mock get_session_maker to return our test session
+    sensor_id = sensor_with_expired_suppression.id
+
+    # Mock get_session_maker: returns a factory whose () returns an async ctx manager
+    @asynccontextmanager
     async def mock_session_ctx():
         yield db_session
 
-    mock_session_maker = MagicMock()
-    mock_session_maker.return_value.__aenter__ = AsyncMock(return_value=db_session)
-    mock_session_maker.return_value.__aexit__ = AsyncMock(return_value=False)
+    def mock_factory():
+        return mock_session_ctx()
 
     with patch(
         "src.services.alert_suppression_scheduler.get_session_maker",
-        return_value=mock_session_maker,
+        return_value=mock_factory,
     ):
         await check_suppression_expiry()
 
-    # Refresh and verify
-    await db_session.refresh(sensor_with_expired_suppression)
-    cfg = sensor_with_expired_suppression.alert_config or {}
+    # Expire all cached state so the next query hits the DB
+    db_session.expire_all()
+
+    # Re-load the sensor from DB to verify changes
+    stmt = select(SensorConfig).where(SensorConfig.id == sensor_id)
+    result = await db_session.execute(stmt)
+    reloaded = result.scalar_one()
+
+    cfg = reloaded.alert_config or {}
     assert cfg.get("alerts_enabled") is True
     assert "suppression_until" not in cfg
     assert "suppression_reason" not in cfg
@@ -137,18 +148,24 @@ async def test_suppression_expiry_re_enables(
 
 @pytest.mark.asyncio
 async def test_suppression_not_expired_stays(
-    db_session, sample_esp_device, sensor_with_future_suppression,
+    db_session,
+    sample_esp_device,
+    sensor_with_future_suppression,
 ):
     """Sensor with future suppression_until → stays suppressed."""
+    from contextlib import asynccontextmanager
     from src.services.alert_suppression_scheduler import check_suppression_expiry
 
-    mock_session_maker = MagicMock()
-    mock_session_maker.return_value.__aenter__ = AsyncMock(return_value=db_session)
-    mock_session_maker.return_value.__aexit__ = AsyncMock(return_value=False)
+    @asynccontextmanager
+    async def mock_session_ctx():
+        yield db_session
+
+    def mock_factory():
+        return mock_session_ctx()
 
     with patch(
         "src.services.alert_suppression_scheduler.get_session_maker",
-        return_value=mock_session_maker,
+        return_value=mock_factory,
     ):
         await check_suppression_expiry()
 
@@ -166,25 +183,35 @@ async def test_suppression_not_expired_stays(
 
 @pytest.mark.asyncio
 async def test_maintenance_overdue_sends_notification(
-    db_session, sample_esp_device, sensor_with_overdue_maintenance, sample_user,
+    db_session,
+    sample_esp_device,
+    sensor_with_overdue_maintenance,
+    sample_user,
 ):
     """Sensor with overdue maintenance → notification created via router."""
+    from contextlib import asynccontextmanager
     from sqlalchemy import select
     from src.services.alert_suppression_scheduler import check_maintenance_overdue
 
     mock_ws = AsyncMock()
     mock_ws.broadcast = AsyncMock()
 
-    mock_session_maker = MagicMock()
-    mock_session_maker.return_value.__aenter__ = AsyncMock(return_value=db_session)
-    mock_session_maker.return_value.__aexit__ = AsyncMock(return_value=False)
+    @asynccontextmanager
+    async def mock_session_ctx():
+        yield db_session
 
-    with patch(
-        "src.services.alert_suppression_scheduler.get_session_maker",
-        return_value=mock_session_maker,
-    ), patch(
-        "src.websocket.manager.WebSocketManager.get_instance",
-        return_value=mock_ws,
+    def mock_factory():
+        return mock_session_ctx()
+
+    with (
+        patch(
+            "src.services.alert_suppression_scheduler.get_session_maker",
+            return_value=mock_factory,
+        ),
+        patch(
+            "src.websocket.manager.WebSocketManager.get_instance",
+            return_value=mock_ws,
+        ),
     ):
         await check_maintenance_overdue()
 

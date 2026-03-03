@@ -13,7 +13,6 @@ from src.db.models.notification import Notification, NotificationPreferences
 from src.schemas.notification import NotificationCreate
 from src.services.notification_router import NotificationRouter
 
-
 # =============================================================================
 # Helper Fixtures
 # =============================================================================
@@ -93,7 +92,9 @@ async def test_route_normal_flow(db_session, sample_user, mock_ws_manager, mock_
 
 
 @pytest.mark.asyncio
-async def test_route_fingerprint_dedup(db_session, sample_user, mock_ws_manager, mock_email_service):
+async def test_route_fingerprint_dedup(
+    db_session, sample_user, mock_ws_manager, mock_email_service
+):
     """Second notification with same fingerprint is skipped."""
     router = NotificationRouter(session=db_session, email_service=mock_email_service)
 
@@ -337,9 +338,7 @@ def test_is_quiet_hours_overnight_range():
 
 
 @pytest.mark.asyncio
-async def test_broadcast_websocket_error_non_blocking(
-    db_session, sample_user, mock_email_service
-):
+async def test_broadcast_websocket_error_non_blocking(db_session, sample_user, mock_email_service):
     """WS broadcast failure is logged but does not block route()."""
     with patch(
         "src.websocket.manager.WebSocketManager.get_instance",
@@ -388,6 +387,7 @@ async def test_persist_suppressed_audit_trail(
 
     # Verify the suppressed notification was persisted
     from sqlalchemy import select
+
     stmt = select(Notification).where(
         Notification.user_id == sample_user.id,
         Notification.channel == "suppressed",

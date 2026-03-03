@@ -9,7 +9,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 from pathlib import Path
 
-
 # =============================================================================
 # Mock Settings
 # =============================================================================
@@ -245,9 +244,7 @@ def test_singleton_get_email_service():
 def test_jinja2_template_loading():
     """All 3 templates load without TemplateNotFoundError."""
     # Find template directory
-    template_dir = (
-        Path(__file__).parent.parent.parent / "templates" / "email"
-    )
+    template_dir = Path(__file__).parent.parent.parent / "templates" / "email"
 
     if not template_dir.exists():
         pytest.skip("Email template directory not found — templates may not be deployed")

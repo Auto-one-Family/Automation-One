@@ -40,7 +40,6 @@ from tests.integration.conftest_logic import (  # noqa: F401
 
 from tests.esp32.mocks.mock_esp32_client import MockESP32Client, SystemState  # noqa: F401
 
-
 pytestmark = [pytest.mark.logic, pytest.mark.sht31]
 
 

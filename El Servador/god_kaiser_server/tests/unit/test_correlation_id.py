@@ -97,9 +97,7 @@ class TestContextVarIsolation:
     def test_generate_request_id_is_uuid(self):
         """generate_request_id returns a valid UUID string."""
         rid = generate_request_id()
-        uuid_pattern = re.compile(
-            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-        )
+        uuid_pattern = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
         assert uuid_pattern.match(rid)
 
     @pytest.mark.asyncio

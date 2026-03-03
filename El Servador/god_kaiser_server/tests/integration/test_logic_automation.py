@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock
 from tests.esp32.mocks.mock_esp32_client import MockESP32Client
 from src.services.logic_engine import LogicEngine
 
-
 # =========================================================================
 # Fixtures (same pattern as test_logic_engine_resilience.py)
 # =========================================================================

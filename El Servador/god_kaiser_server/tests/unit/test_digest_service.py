@@ -8,7 +8,6 @@ Tests: Digest collection, empty batch, email-enabled only, mark sent, singleton
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-
 # =============================================================================
 # Mock Helpers
 # =============================================================================
@@ -27,7 +26,9 @@ def _make_mock_notification(title="Test Alert", severity="warning", source="sens
     return mock
 
 
-def _make_mock_prefs(user_id=1, email_enabled=True, digest_interval=60, email_address="user@test.com"):
+def _make_mock_prefs(
+    user_id=1, email_enabled=True, digest_interval=60, email_address="user@test.com"
+):
     """Create a mock NotificationPreferences object."""
     mock = MagicMock()
     mock.user_id = user_id
@@ -58,12 +59,10 @@ async def test_process_digests_collects_pending():
         mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "src.services.digest_service.NotificationPreferencesRepository"
-        ) as MockPrefsRepo, patch(
-            "src.services.digest_service.NotificationRepository"
-        ) as MockNotifRepo, patch(
-            "src.services.digest_service.UserRepository"
+        with (
+            patch("src.services.digest_service.NotificationPreferencesRepository") as MockPrefsRepo,
+            patch("src.services.digest_service.NotificationRepository") as MockNotifRepo,
+            patch("src.services.digest_service.UserRepository"),
         ):
             mock_prefs_repo = AsyncMock()
             mock_prefs_repo.get_all_with_email_enabled = AsyncMock(return_value=[mock_prefs])
@@ -104,12 +103,10 @@ async def test_process_digests_empty_batch_no_email():
         mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "src.services.digest_service.NotificationPreferencesRepository"
-        ) as MockPrefsRepo, patch(
-            "src.services.digest_service.NotificationRepository"
-        ) as MockNotifRepo, patch(
-            "src.services.digest_service.UserRepository"
+        with (
+            patch("src.services.digest_service.NotificationPreferencesRepository") as MockPrefsRepo,
+            patch("src.services.digest_service.NotificationRepository") as MockNotifRepo,
+            patch("src.services.digest_service.UserRepository"),
         ):
             mock_prefs_repo = AsyncMock()
             mock_prefs_repo.get_all_with_email_enabled = AsyncMock(return_value=[mock_prefs])
@@ -150,12 +147,10 @@ async def test_process_digests_only_email_enabled_users():
         mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "src.services.digest_service.NotificationPreferencesRepository"
-        ) as MockPrefsRepo, patch(
-            "src.services.digest_service.NotificationRepository"
-        ) as MockNotifRepo, patch(
-            "src.services.digest_service.UserRepository"
+        with (
+            patch("src.services.digest_service.NotificationPreferencesRepository") as MockPrefsRepo,
+            patch("src.services.digest_service.NotificationRepository") as MockNotifRepo,
+            patch("src.services.digest_service.UserRepository"),
         ):
             mock_prefs_repo = AsyncMock()
             mock_prefs_repo.get_all_with_email_enabled = AsyncMock(
@@ -199,12 +194,10 @@ async def test_process_digests_marks_sent():
         mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "src.services.digest_service.NotificationPreferencesRepository"
-        ) as MockPrefsRepo, patch(
-            "src.services.digest_service.NotificationRepository"
-        ) as MockNotifRepo, patch(
-            "src.services.digest_service.UserRepository"
+        with (
+            patch("src.services.digest_service.NotificationPreferencesRepository") as MockPrefsRepo,
+            patch("src.services.digest_service.NotificationRepository") as MockNotifRepo,
+            patch("src.services.digest_service.UserRepository"),
         ):
             mock_prefs_repo = AsyncMock()
             mock_prefs_repo.get_all_with_email_enabled = AsyncMock(return_value=[mock_prefs])

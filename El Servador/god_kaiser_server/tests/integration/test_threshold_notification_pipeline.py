@@ -16,7 +16,6 @@ from src.db.models.sensor import SensorConfig
 from src.db.models.user import User
 from src.mqtt.handlers.sensor_handler import SensorDataHandler
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -136,7 +135,10 @@ async def sensor_no_thresholds(db_session: AsyncSession, pipeline_esp):
 
 @pytest.mark.asyncio
 async def test_threshold_exceeded_creates_notification(
-    db_session, pipeline_esp, pipeline_sensor, pipeline_user,
+    db_session,
+    pipeline_esp,
+    pipeline_sensor,
+    pipeline_user,
 ):
     """Value over critical_max → router.route() called with severity='critical'."""
     mock_ws = AsyncMock()
@@ -159,6 +161,7 @@ async def test_threshold_exceeded_creates_notification(
 
     # Verify notification was created
     from sqlalchemy import select
+
     stmt = select(Notification).where(
         Notification.source == "sensor_threshold",
         Notification.severity == "critical",
@@ -175,7 +178,10 @@ async def test_threshold_exceeded_creates_notification(
 
 @pytest.mark.asyncio
 async def test_suppressed_sensor_persists_suppressed(
-    db_session, pipeline_esp, suppressed_pipeline_sensor, pipeline_user,
+    db_session,
+    pipeline_esp,
+    suppressed_pipeline_sensor,
+    pipeline_user,
 ):
     """Suppressed sensor → persist_suppressed() instead of route()."""
     mock_ws = AsyncMock()
@@ -198,6 +204,7 @@ async def test_suppressed_sensor_persists_suppressed(
 
     # Verify suppressed notification was persisted
     from sqlalchemy import select
+
     stmt = select(Notification).where(
         Notification.channel == "suppressed",
     )
@@ -214,7 +221,10 @@ async def test_suppressed_sensor_persists_suppressed(
 
 @pytest.mark.asyncio
 async def test_severity_override_from_alert_config(
-    db_session, pipeline_esp, pipeline_sensor, pipeline_user,
+    db_session,
+    pipeline_esp,
+    pipeline_sensor,
+    pipeline_user,
 ):
     """severity_override in alert_config overrides calculated severity."""
     # Set severity override
@@ -243,6 +253,7 @@ async def test_severity_override_from_alert_config(
 
     # Verify notification used overridden severity
     from sqlalchemy import select
+
     stmt = select(Notification).where(
         Notification.source == "sensor_threshold",
         Notification.severity == "warning",  # Overridden from critical
@@ -259,7 +270,10 @@ async def test_severity_override_from_alert_config(
 
 @pytest.mark.asyncio
 async def test_no_threshold_no_notification(
-    db_session, pipeline_esp, sensor_no_thresholds, pipeline_user,
+    db_session,
+    pipeline_esp,
+    sensor_no_thresholds,
+    pipeline_user,
 ):
     """No thresholds configured → no notification created."""
     handler = SensorDataHandler.__new__(SensorDataHandler)
@@ -274,6 +288,7 @@ async def test_no_threshold_no_notification(
 
     # No notifications should have been created
     from sqlalchemy import select
+
     stmt = select(Notification).where(
         Notification.source == "sensor_threshold",
     )
@@ -292,13 +307,16 @@ async def test_no_threshold_no_notification(
 
 @pytest.mark.asyncio
 async def test_pipeline_error_non_blocking(
-    db_session, pipeline_esp, pipeline_sensor, pipeline_user,
+    db_session,
+    pipeline_esp,
+    pipeline_sensor,
+    pipeline_user,
 ):
     """Error in notification pipeline does NOT block sensor data commit."""
     # Mock NotificationRouter.route to raise an exception
-    with patch(
-        "src.mqtt.handlers.sensor_handler.NotificationRouter"
-    ) as MockRouter:
+    # NotificationRouter is imported inside _evaluate_thresholds_and_notify,
+    # so we patch at its source module
+    with patch("src.services.notification_router.NotificationRouter") as MockRouter:
         mock_router_instance = AsyncMock()
         mock_router_instance.route = AsyncMock(side_effect=Exception("DB connection lost"))
         mock_router_instance.persist_suppressed = AsyncMock(

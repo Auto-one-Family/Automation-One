@@ -15,7 +15,6 @@ from sqlalchemy.exc import IntegrityError
 from src.db.models.sensor import SensorConfig
 from src.db.repositories.sensor_repo import SensorRepository
 
-
 pytestmark = [pytest.mark.asyncio]
 
 

@@ -22,6 +22,7 @@ NOTE: Performance targets based on real hardware capabilities:
 
 import pytest
 import time
+from time import perf_counter
 import random
 
 
@@ -36,19 +37,19 @@ class TestSensorPerformance:
         Performance target: < 1 second for 100 reads (Mock).
         Real hardware target: < 10 seconds.
         """
-        start_time = time.time()
+        start_time = perf_counter()
 
         for i in range(100):
             response = mock_esp32_with_sensors.handle_command("sensor_read", {"gpio": 34})
             assert response["status"] == "ok"
 
-        elapsed = time.time() - start_time
+        elapsed = perf_counter() - start_time
 
         # Performance target
         assert elapsed < 1.0, f"Too slow: {elapsed:.3f}s for 100 reads"
 
-        # Throughput calculation
-        throughput = 100 / elapsed
+        # Throughput calculation (guard against near-zero elapsed on fast systems)
+        throughput = 100 / max(elapsed, 1e-9)
         print(f"Sensor read throughput: {throughput:.1f} reads/second")
 
     def test_many_sensors_concurrent(self, mock_esp32):
@@ -63,12 +64,12 @@ class TestSensorPerformance:
             mock_esp32.set_sensor_value(gpio, random.random() * 4095, sensor_type="analog")
 
         # Read all sensors
-        start_time = time.time()
+        start_time = perf_counter()
         results = []
         for gpio in sensor_gpios:
             response = mock_esp32.handle_command("sensor_read", {"gpio": gpio})
             results.append(response)
-        elapsed = time.time() - start_time
+        elapsed = perf_counter() - start_time
 
         # Verify all succeeded
         assert all(r["status"] == "ok" for r in results), "Some sensor reads failed"
@@ -76,7 +77,7 @@ class TestSensorPerformance:
         # Performance target
         assert elapsed < 2.0, f"Too slow: {elapsed:.3f}s for 20 sensors"
 
-        print(f"20 sensors read in {elapsed:.3f}s ({20/elapsed:.1f} reads/second)")
+        print(f"20 sensors read in {elapsed:.3f}s ({20/max(elapsed, 1e-9):.1f} reads/second)")
 
     def test_sensor_read_with_mqtt_publishing(self, mock_esp32_with_sensors):
         """
@@ -89,14 +90,14 @@ class TestSensorPerformance:
         """
         mock_esp32_with_sensors.clear_published_messages()
 
-        start_time = time.time()
+        start_time = perf_counter()
 
         # Read sensor 50 times
         for i in range(50):
             response = mock_esp32_with_sensors.handle_command("sensor_read", {"gpio": 34})
             assert response["status"] == "ok"
 
-        elapsed = time.time() - start_time
+        elapsed = perf_counter() - start_time
 
         # Verify MQTT messages published (2 per read when zone configured)
         messages = mock_esp32_with_sensors.get_published_messages()
@@ -123,19 +124,21 @@ class TestSensorPerformance:
             mock_esp32.set_sensor_value(gpio, random.random() * 4095)
 
         iterations = 10  # 10 full sweeps = 100 reads
-        start_time = time.time()
+        start_time = perf_counter()
 
         for _ in range(iterations):
             for gpio in sensor_gpios:
                 response = mock_esp32.handle_command("sensor_read", {"gpio": gpio})
                 assert response["status"] == "ok"
 
-        elapsed = time.time() - start_time
+        elapsed = perf_counter() - start_time
         total_reads = iterations * len(sensor_gpios)
 
         assert elapsed < 1.0, f"Too slow: {elapsed:.3f}s for {total_reads} reads"
 
-        print(f"{total_reads} reads in {elapsed:.3f}s ({total_reads/elapsed:.1f} reads/second)")
+        print(
+            f"{total_reads} reads in {elapsed:.3f}s ({total_reads/max(elapsed, 1e-9):.1f} reads/second)"
+        )
 
 
 @pytest.mark.performance
@@ -148,7 +151,7 @@ class TestActuatorPerformance:
 
         Performance target: < 1 second for 50 toggles.
         """
-        start_time = time.time()
+        start_time = perf_counter()
 
         for i in range(50):
             value = i % 2  # Toggle 0/1
@@ -157,11 +160,11 @@ class TestActuatorPerformance:
             )
             assert response["status"] == "ok"
 
-        elapsed = time.time() - start_time
+        elapsed = perf_counter() - start_time
 
         assert elapsed < 1.0, f"Too slow: {elapsed:.3f}s for 50 toggles"
 
-        print(f"50 actuator toggles: {elapsed:.3f}s ({50/elapsed:.1f} toggles/second)")
+        print(f"50 actuator toggles: {elapsed:.3f}s ({50/max(elapsed, 1e-9):.1f} toggles/second)")
 
     def test_pwm_value_changes(self, mock_esp32):
         """
@@ -169,7 +172,7 @@ class TestActuatorPerformance:
 
         Simulates smooth dimming/speed control.
         """
-        start_time = time.time()
+        start_time = perf_counter()
 
         # Ramp up: 0.0 → 1.0 in 0.1 steps (11 values)
         for pwm in [i / 10 for i in range(11)]:
@@ -186,7 +189,7 @@ class TestActuatorPerformance:
             )
             assert response["status"] == "ok"
 
-        elapsed = time.time() - start_time
+        elapsed = perf_counter() - start_time
 
         # 22 PWM changes should complete quickly
         assert elapsed < 0.5, f"Too slow: {elapsed:.3f}s"
@@ -202,7 +205,7 @@ class TestActuatorPerformance:
         # Setup 12 actuators
         actuator_gpios = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
-        start_time = time.time()
+        start_time = perf_counter()
 
         # Turn all ON
         for gpio in actuator_gpios:
@@ -218,7 +221,7 @@ class TestActuatorPerformance:
             )
             assert response["status"] == "ok"
 
-        elapsed = time.time() - start_time
+        elapsed = perf_counter() - start_time
 
         # 24 commands (12 ON + 12 OFF)
         assert elapsed < 1.0, f"Too slow: {elapsed:.3f}s for 24 commands"
@@ -242,7 +245,7 @@ class TestMQTTThroughput:
         """
         mock_esp32.clear_published_messages()
 
-        start_time = time.time()
+        start_time = perf_counter()
 
         for i in range(100):
             # Sensor reads generate MQTT publishes (2 per read with zone)
@@ -252,7 +255,7 @@ class TestMQTTThroughput:
                 "actuator_set", {"gpio": 5, "value": i % 2, "mode": "digital"}
             )
 
-        elapsed = time.time() - start_time
+        elapsed = perf_counter() - start_time
 
         messages = mock_esp32.get_published_messages()
         # With zone config: sensor_read=2 msgs, actuator_set=2 msgs (status + response)
@@ -279,11 +282,11 @@ class TestMQTTThroughput:
         """
         mock_esp32.clear_published_messages()
 
-        start_time = time.time()
+        start_time = perf_counter()
         duration = 5.0  # 5 seconds
 
         count = 0
-        while (time.time() - start_time) < duration:
+        while (perf_counter() - start_time) < duration:
             # Alternate sensor read and actuator command
             if count % 2 == 0:
                 mock_esp32.handle_command("sensor_read", {"gpio": 34})
@@ -293,7 +296,7 @@ class TestMQTTThroughput:
                 )
             count += 1
 
-        elapsed = time.time() - start_time
+        elapsed = perf_counter() - start_time
         messages = mock_esp32.get_published_messages()
 
         throughput = len(messages) / elapsed
@@ -311,14 +314,14 @@ class TestMQTTThroughput:
 
         Config messages can be larger than sensor/actuator messages.
         """
-        start_time = time.time()
+        start_time = perf_counter()
 
         # Send 20 config get commands (larger responses)
         for i in range(20):
             response = mock_esp32.handle_command("config_get", {})
             assert response["status"] == "ok"
 
-        elapsed = time.time() - start_time
+        elapsed = perf_counter() - start_time
 
         # Should still be fast despite larger payloads
         assert elapsed < 0.5, f"Too slow: {elapsed:.3f}s"
@@ -343,7 +346,7 @@ class TestSystemLoad:
 
         mock_esp32.clear_published_messages()
 
-        start_time = time.time()
+        start_time = perf_counter()
 
         # Mixed operations
         operations = 0
@@ -368,7 +371,7 @@ class TestSystemLoad:
                 mock_esp32.handle_command("config_get", {})
                 operations += 1
 
-        elapsed = time.time() - start_time
+        elapsed = perf_counter() - start_time
 
         assert operations == 50
         assert elapsed < 1.0, f"Too slow: {elapsed:.3f}s for {operations} operations"
@@ -387,7 +390,7 @@ class TestSystemLoad:
 
         mock_esp32.clear_published_messages()
 
-        start_time = time.time()
+        start_time = perf_counter()
 
         for i in range(1000):
             if i % 2 == 0:
@@ -397,7 +400,7 @@ class TestSystemLoad:
                     "actuator_set", {"gpio": 5, "value": i % 2, "mode": "digital"}
                 )
 
-        elapsed = time.time() - start_time
+        elapsed = perf_counter() - start_time
 
         assert elapsed < 10.0, f"Stress test too slow: {elapsed:.3f}s for 1000 operations"
 
@@ -419,9 +422,9 @@ class TestSystemLoad:
             mock_esp32.handle_command("sensor_read", {"gpio": 34})
 
         # Emergency stop
-        start_time = time.time()
+        start_time = perf_counter()
         response = mock_esp32.handle_command("emergency_stop", {})
-        elapsed = time.time() - start_time
+        elapsed = perf_counter() - start_time
 
         assert response["status"] == "ok"
 
@@ -450,9 +453,9 @@ class TestResponseTimes:
         response_times = []
 
         for _ in range(10):
-            start = time.time()
+            start = perf_counter()
             response = mock_esp32.handle_command("ping", {})
-            elapsed = time.time() - start
+            elapsed = perf_counter() - start
 
             assert response["status"] == "ok"
             response_times.append(elapsed * 1000)  # Convert to ms
@@ -475,11 +478,11 @@ class TestResponseTimes:
         response_times = []
 
         for i in range(20):
-            start = time.time()
+            start = perf_counter()
             response = mock_esp32.handle_command(
                 "actuator_set", {"gpio": 5, "value": i % 2, "mode": "digital"}
             )
-            elapsed = time.time() - start
+            elapsed = perf_counter() - start
 
             assert response["status"] == "ok"
             response_times.append(elapsed * 1000)
@@ -500,9 +503,9 @@ class TestResponseTimes:
         response_times = []
 
         for _ in range(10):
-            start = time.time()
+            start = perf_counter()
             response = mock_esp32.handle_command("config_get", {})
-            elapsed = time.time() - start
+            elapsed = perf_counter() - start
 
             assert response["status"] == "ok"
             response_times.append(elapsed * 1000)

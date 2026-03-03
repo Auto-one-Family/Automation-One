@@ -55,7 +55,6 @@ from src.db.repositories.sensor_repo import SensorRepository  # noqa: E402
 from src.db.repositories.subzone_repo import SubzoneRepository  # noqa: E402
 from src.db.repositories.user_repo import UserRepository  # noqa: E402
 
-
 # =============================================================================
 # FIX 3: In-memory SQLite with StaticPool for Windows compatibility
 # StaticPool ensures all connections share the same in-memory database

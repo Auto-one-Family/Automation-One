@@ -36,7 +36,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "esp32"))
 
 from tests.esp32.mocks.mock_esp32_client import MockESP32Client, SystemState
 
-
 # =============================================================================
 # Fixtures for Cross-ESP Testing
 # =============================================================================

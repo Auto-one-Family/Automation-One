@@ -28,7 +28,6 @@ from src.sensors.library_loader import LibraryLoader
 from src.sensors.sensor_libraries.active.moisture import MoistureSensorProcessor
 from src.sensors.sensor_type_registry import normalize_sensor_type
 
-
 pytestmark = [pytest.mark.sensor, pytest.mark.flow_a]
 
 
@@ -91,9 +90,7 @@ class TestMoistureLibraryLoaderDiscovery:
         assert processor is not None
         assert isinstance(processor, MoistureSensorProcessor)
 
-    def test_alias_and_direct_resolve_to_same_processor_class(
-        self, library_loader: LibraryLoader
-    ):
+    def test_alias_and_direct_resolve_to_same_processor_class(self, library_loader: LibraryLoader):
         """Both "soil_moisture" and "moisture" must resolve to same processor class."""
         proc_alias = library_loader.get_processor("soil_moisture")
         proc_direct = library_loader.get_processor("moisture")
@@ -110,9 +107,7 @@ class TestMoistureLibraryLoaderDiscovery:
 class TestMoistureProcessingUncalibrated:
     """MoistureSensorProcessor with default (uncalibrated) mapping."""
 
-    def test_process_raw_2143_no_calibration(
-        self, moisture_processor: MoistureSensorProcessor
-    ):
+    def test_process_raw_2143_no_calibration(self, moisture_processor: MoistureSensorProcessor):
         """
         process(raw_value=2143, calibration=None) → ~62.2%, unit="%", quality="good"
 
@@ -191,9 +186,7 @@ class TestMoistureProcessingCalibrated:
         calibration = {"dry_value": 2800, "wet_value": 1300}
 
         # Normal result (50%)
-        result_normal = moisture_processor.process(
-            raw_value=2050, calibration=calibration
-        )
+        result_normal = moisture_processor.process(raw_value=2050, calibration=calibration)
 
         # Inverted via params (correct placement)
         result_inverted = moisture_processor.process(
@@ -201,6 +194,4 @@ class TestMoistureProcessingCalibrated:
         )
 
         # Inverted should be 100 - normal
-        assert result_inverted.value == pytest.approx(
-            100.0 - result_normal.value, abs=0.1
-        )
+        assert result_inverted.value == pytest.approx(100.0 - result_normal.value, abs=0.1)

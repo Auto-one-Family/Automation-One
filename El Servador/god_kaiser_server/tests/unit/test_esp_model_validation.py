@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.models.esp import ESPDevice
 from src.services.gpio_validation_service import GpioValidationService, GpioConflictType
 
-
 # ==================== ESP32-C3 Tests ====================
 
 

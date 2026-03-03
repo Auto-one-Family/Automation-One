@@ -15,7 +15,6 @@ from src.api.v1.webhooks import categorize_alert
 from src.db.models.user import User
 from src.main import app
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -80,9 +79,7 @@ async def test_grafana_webhook_firing_alert(webhook_user):
         "src.websocket.manager.WebSocketManager.get_instance",
         return_value=mock_ws,
     ):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/webhooks/grafana-alerts",
                 json=GRAFANA_FIRING_PAYLOAD,
@@ -108,9 +105,7 @@ async def test_grafana_webhook_resolved_alert(webhook_user):
         "src.websocket.manager.WebSocketManager.get_instance",
         return_value=mock_ws,
     ):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/webhooks/grafana-alerts",
                 json=GRAFANA_RESOLVED_PAYLOAD,
@@ -130,9 +125,7 @@ async def test_grafana_webhook_resolved_alert(webhook_user):
 @pytest.mark.asyncio
 async def test_grafana_webhook_invalid_payload():
     """POST with empty alerts → error response."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
             "/api/v1/webhooks/grafana-alerts",
             json={"status": "firing", "alerts": []},
@@ -156,9 +149,7 @@ async def test_grafana_webhook_fingerprint_dedup(webhook_user):
         "src.websocket.manager.WebSocketManager.get_instance",
         return_value=mock_ws,
     ):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # First webhook
             response1 = await client.post(
                 "/api/v1/webhooks/grafana-alerts",

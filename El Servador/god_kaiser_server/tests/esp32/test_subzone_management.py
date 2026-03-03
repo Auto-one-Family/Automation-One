@@ -28,7 +28,6 @@ from dataclasses import dataclass, field
 
 from .mocks.mock_esp32_client import MockESP32Client, SystemState, ActuatorState
 
-
 # =============================================================================
 # Extended Mock ESP32 with Subzone Support
 # =============================================================================
