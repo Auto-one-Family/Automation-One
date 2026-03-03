@@ -193,7 +193,7 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | sensor_type_defaults | /v1/sensor-type-defaults | 6 | Operator+ |
 | sequences | /v1/sequences | 4 | Operator+ |
 | logs | /v1/logs | 1 | Public |
-| notifications | /v1/notifications | 9 | Active/Operator |
+| notifications | /v1/notifications | 13 | Active/Operator |
 | webhooks | /v1/webhooks | 1 | Public (Grafana) |
 | ai | /v1/ai | PLANNED | - |
 | kaiser | /v1/kaiser | PLANNED | - |
@@ -247,7 +247,7 @@ class YourRepository(BaseRepository[YourModel]):
 | CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority, cooldown_seconds |
 | SensorData | `sensor_data` | sensor_id (FK), raw_value, processed_value |
 | AuditLog | `audit_logs` | event_type, severity, source_type |
-| Notification | `notifications` | title, severity (critical/warning/info), source, category, channel, fingerprint (FIX-07 dedup) |
+| Notification | `notifications` | title, severity (critical/warning/info), source, category, channel, fingerprint (FIX-07 dedup), status (active/acknowledged/resolved), correlation_id, acknowledged_at, acknowledged_by, resolved_at |
 | NotificationPreferences | `notification_preferences` | user_id, channel, enabled, severity_filter |
 
 ### Multi-Value Sensor Support

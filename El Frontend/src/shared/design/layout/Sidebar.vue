@@ -18,6 +18,7 @@ import {
   UserCog,
   Activity,
   SlidersHorizontal,
+  Puzzle,
 } from 'lucide-vue-next'
 
 defineProps<{
@@ -109,7 +110,7 @@ function handleNavClick() {
 
         <RouterLink
           to="/system-monitor"
-          :class="['sidebar__link', isActive('/system-monitor') && 'sidebar__link--active']"
+          :class="['sidebar__link', isActive('/system-monitor') && route.query.tab !== 'health' && 'sidebar__link--active']"
           @click="handleNavClick"
         >
           <div class="sidebar__link-indicator" />
@@ -128,8 +129,8 @@ function handleNavClick() {
         </RouterLink>
 
         <RouterLink
-          to="/maintenance"
-          :class="['sidebar__link', isActive('/maintenance') && 'sidebar__link--active']"
+          to="/system-monitor?tab=health"
+          :class="['sidebar__link', (isActive('/maintenance') || (isActive('/system-monitor') && route.query.tab === 'health')) && 'sidebar__link--active']"
           @click="handleNavClick"
         >
           <div class="sidebar__link-indicator" />
@@ -145,6 +146,16 @@ function handleNavClick() {
           <div class="sidebar__link-indicator" />
           <SlidersHorizontal class="sidebar__link-icon" />
           <span>Kalibrierung</span>
+        </RouterLink>
+
+        <RouterLink
+          to="/plugins"
+          :class="['sidebar__link', isActive('/plugins') && 'sidebar__link--active']"
+          @click="handleNavClick"
+        >
+          <div class="sidebar__link-indicator" />
+          <Puzzle class="sidebar__link-icon" />
+          <span>Plugins</span>
         </RouterLink>
       </template>
     </nav>

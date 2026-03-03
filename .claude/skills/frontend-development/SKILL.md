@@ -15,8 +15,8 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.18
-**Letzte Aktualisierung:** 2026-03-02
+**Version:** 9.19
+**Letzte Aktualisierung:** 2026-03-03
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
 
@@ -137,7 +137,7 @@ El Frontend/src/
 │   ├── forms/         # FormBuilder
 │   ├── modals/
 │   ├── rules/         # RuleCard, RuleConfigPanel, RuleFlowEditor, RuleNodePalette, RuleTemplateCard (5 Dateien)
-│   ├── notifications/ # NotificationDrawer, NotificationItem (2 Dateien)
+│   ├── notifications/ # NotificationDrawer, NotificationItem, AlertStatusBar (3 Dateien)
 │   ├── quick-action/  # QuickActionBall (FAB), QuickActionMenu, QuickActionItem, QuickAlertPanel, QuickNavPanel (5 Dateien)
 │   ├── safety/        # EmergencyStopButton
 │   ├── system-monitor/ # 18 Dateien
@@ -148,7 +148,7 @@ El Frontend/src/
 │   │   ├── primitives/  # 13 Komponenten (10 Base + AccordionSection + QualityIndicator + RangeSlider + SlideOver)
 │   │   ├── layout/      # AppShell, Sidebar, TopBar (3 Dateien)
 │   │   └── patterns/    # ConfirmDialog, ContextMenu, EmptyState, ErrorState, ToastContainer (5 Dateien)
-│   └── stores/          # 13 Shared Stores (actuator, auth, config, dashboard, database, dragState, gpio, logic, notification, quickAction, sensor, ui, zone)
+│   └── stores/          # 15 Shared Stores (actuator, alertCenter, auth, config, dashboard, database, dragState, gpio, logic, notification, notificationInbox, quickAction, sensor, ui, zone)
 ├── styles/        # CSS Design Tokens + Shared Styles (6 Dateien)
 │   ├── tokens.css       # Design Token Definitionen
 │   ├── glass.css        # Glassmorphism Klassen
@@ -465,6 +465,8 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
 | database | stores/database.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
 | quickAction | stores/quickAction.store.ts | isMenuOpen, activePanel (QuickActionPanel: 'menu' \| 'alerts' \| 'navigation'), currentView, contextActions[], globalActions[] | toggleMenu, closeMenu, setActivePanel, setViewContext, setContextActions, executeAction; alertSummary, hasActiveAlerts, isCritical, isWarning (computed from notification-inbox) |
+| notificationInbox | stores/notification-inbox.store.ts | notifications[], unreadCount, highestSeverity, isDrawerOpen, filter (InboxFilter) | fetchNotifications, markAsRead, markAllAsRead, toggleDrawer, setFilter; WS-Listener: notification_new, notification_updated, notification_unread_count |
+| alertCenter | stores/alert-center.store.ts | activeAlerts[], alertStats (MTTA, MTTR, counts), isLoading | fetchActiveAlerts, fetchAlertStats, acknowledgeAlert, resolveAlert; alertsByCategory, alertsBySeverity, criticalCount, warningCount (computed) |
 
 ### Store-Konventionen
 
@@ -1111,8 +1113,24 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.18
-**Letzte Aktualisierung:** 2026-03-02
+**Version:** 9.19
+**Letzte Aktualisierung:** 2026-03-03
+
+### Aenderungen in v9.19
+
+- Phase 4B: Unified Alert Center — ISA-18.2 Alert Lifecycle (active → acknowledged → resolved) im Frontend
+- alert-center.store.ts: Neuer Shared Store — `activeAlerts[]`, `alertStats` (MTTA, MTTR), `fetchActiveAlerts()`, `fetchAlertStats()`, `acknowledgeAlert()`, `resolveAlert()`, Computeds: `alertsByCategory`, `alertsBySeverity`, `criticalCount`, `warningCount`
+- notification-inbox.store.ts: Neuer Shared Store — `notifications[]`, `unreadCount`, `highestSeverity`, `isDrawerOpen`, `filter`, WS-Listener fuer `notification_new`, `notification_updated`, `notification_unread_count`
+- AlertStatusBar.vue: Neue Komponente in `components/notifications/` — Horizontale Alert-Statusleiste mit Severity-Counts (critical/warning/info), Klick oeffnet NotificationDrawer mit Filter
+- NotificationDrawer.vue: Ack/Resolve Buttons integriert — `acknowledgeAlert()` und `resolveAlert()` via `alertCenterStore`, Status-Badge (active/acknowledged/resolved) pro NotificationItem
+- NotificationItem.vue: ISA-18.2 Status-Anzeige — Status-Dot mit Farbkodierung, Ack/Resolve Action-Buttons, acknowledged_by/resolved_at Timestamps
+- QuickAlertPanel.vue: Status-Filter (active/acknowledged) — FilterChips, Severity-Sortierung (critical > warning > info), Bugfix: ungenutzter `Check` Import entfernt (TS6133)
+- HealthTab.vue (System Monitor): Alert-Statistik-Sektion — ISA-18.2 KPIs (MTTA, MTTR), Active/Acknowledged/Resolved Counts, AlertStatusBar Integration
+- HealthSummaryBar.vue (System Monitor): Alert-Count-Chips — Critical/Warning Counts aus `alertCenterStore`, Klick-Navigation zu System Monitor Health-Tab
+- notifications.ts (API): 4 neue Methoden — `getActiveAlerts()`, `getAlertStats()`, `acknowledgeAlert()`, `resolveAlert()` (Phase 4B REST-Endpoints)
+- notification_updated WS-Event: Erweitert um `status`, `acknowledged_at`, `acknowledged_by`, `resolved_at` Felder
+- Section 2: notifications/ 2 → 3 Dateien (AlertStatusBar), Shared Stores 13 → 15 (alertCenter, notificationInbox)
+- Section 5: Store-Tabelle um notificationInbox und alertCenter erweitert
 
 ### Aenderungen in v9.18
 

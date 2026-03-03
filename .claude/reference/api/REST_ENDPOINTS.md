@@ -7,11 +7,11 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 2.7 | **Aktualisiert:** 2026-03-02
+> **Version:** 2.8 | **Aktualisiert:** 2026-03-03
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
-> **Endpoint-Anzahl:** ~190 Endpoints
+> **Endpoint-Anzahl:** ~194 Endpoints
 
 ---
 
@@ -254,14 +254,18 @@ allowed-tools: Read
 | `/users/{user_id}/reset-password` | POST | Admin | Passwort zurücksetzen |
 | `/users/{user_id}/role` | PATCH | Admin | Rolle ändern |
 
-### Notifications (`/notifications`) - 9 Endpoints
+### Notifications (`/notifications`) - 13 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
 | `/notifications` | GET | JWT | Alle Notifications (paginiert, filterbar) |
 | `/notifications/unread-count` | GET | JWT | Ungelesene-Anzahl + höchste Severity |
+| `/notifications/alerts/active` | GET | JWT | Aktive Alerts (Phase 4B, ISA-18.2) |
+| `/notifications/alerts/stats` | GET | JWT | Alert-Statistiken: MTTA, MTTR, Counts (Phase 4B) |
 | `/notifications/{id}` | GET | JWT | Notification Details |
 | `/notifications/{id}/read` | PATCH | JWT | Als gelesen markieren |
+| `/notifications/{id}/acknowledge` | PATCH | JWT | Alert bestätigen: active → acknowledged (Phase 4B) |
+| `/notifications/{id}/resolve` | PATCH | JWT | Alert erledigen: active/acknowledged → resolved (Phase 4B) |
 | `/notifications/read-all` | PATCH | JWT | Alle als gelesen markieren |
 | `/notifications/send` | POST | Admin | Manuelle Notification senden |
 | `/notifications/preferences` | GET | JWT | User-Preferences abrufen |
@@ -1282,6 +1286,7 @@ Health Check (keine Auth erforderlich).
 - `NotificationCreate`, `NotificationResponse`, `NotificationListResponse`
 - `NotificationPreferencesUpdate`, `NotificationPreferencesResponse`
 - `UnreadCountResponse`, `TestEmailRequest`
+- `AlertStatsResponse`, `AlertActiveListResponse` (Phase 4B)
 - `GrafanaAlert`, `GrafanaWebhookPayload`
 
 ### Debug Schemas (`schemas/debug.py`)
@@ -1335,7 +1340,7 @@ Health Check (keine Auth erforderlich).
 | audit | `audit.py` | 22 |
 | users | `users.py` | 7 |
 | health | `health.py` | 6 |
-| notifications | `notifications.py` | 9 |
+| notifications | `notifications.py` | 13 |
 | webhooks | `webhooks.py` | 1 |
 | logs | `logs.py` | 1 |
 | websocket | `websocket/realtime.py` | 1 |

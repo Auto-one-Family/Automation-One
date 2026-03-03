@@ -4,8 +4,8 @@
 **Kontext:** Der Komponenten-Tab (/sensors) wird von einer Zone-gruppierten Sensor-Ansicht zu einer flachen Hardware-Inventar-Ansicht mit erweiterbarem Metadaten-Modell umgebaut. Dieser Tab wird die Datenbasis fuer KI-Integration, Warenwirtschaft und betriebsspezifische Kontextdaten.
 **Prioritaet:** Hoch (Baustein fuer MCP-Server + AI-Integration in Phase 4C+)
 **Datum:** 2026-03-02
-**Aufwand:** ~25-35h (4 Bloecke)
-**Abhaengigkeiten:** Block 4A.8 (Hardware-Info + Runtime) muss VORHER oder PARALLEL fertig sein
+**Aufwand:** ~31-43h (5 Bloecke: D0 + K1-K4)
+**Abhaengigkeiten:** Block 4A.8 (Hardware-Info + Runtime) muss VORHER oder PARALLEL fertig sein. Block D0 MUSS VOR K1.
 
 ---
 
@@ -55,8 +55,11 @@
 
 Robin bekommt einen vollstaendigen Hardware-Inventar-Tab der als Wissens-Infrastruktur fuer das gesamte System funktioniert:
 
+**Block D0 — Dashboard + Monitor Anpassungen (VORARBEIT):** [NEU]
+Subzone-CRUD (create/rename/delete) wird als Composable extrahiert und in Uebersicht (HardwareView) + Monitor eingebaut. Hardware-Informationen (DeviceMetadataSection) werden aus dem Dashboard ausgeblendet. Links zu /sensors werden aus dem Monitor entfernt. Dashboard-Struktur bleibt dabei UNVERAENDERT.
+
 **Block K1 — Flache Inventar-Tabelle:**
-Flat Table View der alle Sensoren + Aktoren + ESPs in einer einzigen, durchsuchbaren und filterbaren Tabelle zeigt. Keine Zone-Gruppierung mehr als Standard — Zonen werden zum Filter.
+Flat Table View der alle Sensoren + Aktoren + ESPs in einer einzigen, durchsuchbaren und filterbaren Tabelle zeigt. Keine Zone-Gruppierung mehr als Standard — Zonen werden zum Filter. Hardware-Info (Hersteller, Modell, Wartung) ist hier die ZENTRALE Anlaufstelle.
 
 **Block K2 — Schema-Registry & Erweiterbare Metadaten:**
 Pro-Geraetetyp-Schemas die definieren welche Metadaten-Felder verfuegbar sind. JSON Schema → dynamische Formulare. User kann Felder befuellen, System validiert.
@@ -81,23 +84,138 @@ Strukturierter JSON-Export pro Geraet + Zone im WoT-TD-inspirierten Format. API-
 
 ### Betroffene Module (Pfade relativ zum Subprojekt)
 
-| Schicht | Modul | Aenderung |
-|---------|-------|-----------|
-| Backend | `El Servador/god_kaiser_server/src/db/models/zone_context.py` | **NEU** — Zone-Context DB-Modell |
-| Backend | `El Servador/god_kaiser_server/src/schemas/zone_context.py` | **NEU** — Pydantic-Schemas |
-| Backend | `El Servador/god_kaiser_server/src/api/v1/zone_context.py` | **NEU** — CRUD-API fuer Zone-Kontext-Daten |
-| Backend | `El Servador/god_kaiser_server/src/api/v1/component_export.py` | **NEU** — AI-Ready Export-API |
-| Backend | `El Servador/god_kaiser_server/src/api/v1/__init__.py` | **ERWEITERN** — Neue Router registrieren |
-| Backend | `El Servador/god_kaiser_server/src/db/models/__init__.py` | **ERWEITERN** — ZoneContext-Model importieren |
-| Backend | `El Servador/god_kaiser_server/alembic/versions/` | **NEU** — Migration fuer zone_context Tabelle |
-| Frontend | `El Frontend: src/views/SensorsView.vue` | **REWRITE** → ComponentInventoryView.vue (Route bleibt /sensors fuer Kompatibilitaet) |
-| Frontend | `El Frontend: src/components/inventory/InventoryTable.vue` | **NEU** — Flache Geraete-Tabelle |
-| Frontend | `El Frontend: src/components/inventory/DeviceDetailPanel.vue` | **NEU** — Detail-Panel (SlideOver) |
-| Frontend | `El Frontend: src/components/inventory/ZoneContextEditor.vue` | **NEU** — Zone-Kontext-Formular |
-| Frontend | `El Frontend: src/components/inventory/SchemaForm.vue` | **NEU** — Dynamische Formulare aus JSON Schema |
-| Frontend | `El Frontend: src/shared/stores/inventory.store.ts` | **NEU** — Inventory-spezifischer State |
-| Frontend | `El Frontend: src/api/inventory.ts` | **NEU** — API-Client |
-| Frontend | `El Frontend: src/config/device-schemas/` | **NEU** — JSON Schema Dateien pro Geraetetyp |
+| Schicht | Modul | Block | Aenderung |
+|---------|-------|-------|-----------|
+| Frontend | `El Frontend/src/composables/useSubzoneCRUD.ts` | **D0** | **NEU** — Subzone CRUD Composable (extrahiert aus SensorsView) |
+| Frontend | `El Frontend/src/components/esp/SensorConfigPanel.vue` | **D0** | **ERWEITERN** — Prop `showMetadata` hinzufuegen |
+| Frontend | `El Frontend/src/components/esp/ActuatorConfigPanel.vue` | **D0** | **ERWEITERN** — Prop `showMetadata` hinzufuegen |
+| Frontend | `El Frontend/src/views/HardwareView.vue` | **D0** | **ERWEITERN** — `showMetadata=false` + Subzone-CRUD einbinden |
+| Frontend | `El Frontend/src/components/hardware/ZonePlate.vue` | **D0** | **ERWEITERN** — Subzone-CRUD Buttons in Header |
+| Frontend | `El Frontend/src/views/MonitorView.vue` | **D0** | **BEREINIGEN** — /sensors-Link weg, Subzone-CRUD Buttons in L2 |
+| Backend | `El Servador/god_kaiser_server/src/db/models/zone_context.py` | K3 | **NEU** — Zone-Context DB-Modell |
+| Backend | `El Servador/god_kaiser_server/src/schemas/zone_context.py` | K3 | **NEU** — Pydantic-Schemas |
+| Backend | `El Servador/god_kaiser_server/src/api/v1/zone_context.py` | K3 | **NEU** — CRUD-API fuer Zone-Kontext-Daten |
+| Backend | `El Servador/god_kaiser_server/src/api/v1/component_export.py` | K4 | **NEU** — AI-Ready Export-API |
+| Backend | `El Servador/god_kaiser_server/src/api/v1/__init__.py` | K3/K4 | **ERWEITERN** — Neue Router registrieren |
+| Backend | `El Servador/god_kaiser_server/src/db/models/__init__.py` | K3 | **ERWEITERN** — ZoneContext-Model importieren |
+| Backend | `El Servador/god_kaiser_server/alembic/versions/` | K3 | **NEU** — Migration fuer zone_context Tabelle |
+| Frontend | `El Frontend/src/views/SensorsView.vue` | K1 | **REWRITE** → ComponentInventoryView.vue (Route bleibt /sensors) |
+| Frontend | `El Frontend/src/components/inventory/InventoryTable.vue` | K1 | **NEU** — Flache Geraete-Tabelle |
+| Frontend | `El Frontend/src/components/inventory/DeviceDetailPanel.vue` | K1 | **NEU** — Detail-Panel (SlideOver) |
+| Frontend | `El Frontend/src/components/inventory/ZoneContextEditor.vue` | K3 | **NEU** — Zone-Kontext-Formular |
+| Frontend | `El Frontend/src/components/inventory/SchemaForm.vue` | K2 | **NEU** — Dynamische Formulare aus JSON Schema |
+| Frontend | `El Frontend/src/shared/stores/inventory.store.ts` | K1 | **NEU** — Inventory-spezifischer State |
+| Frontend | `El Frontend/src/api/inventory.ts` | K1 | **NEU** — API-Client |
+| Frontend | `El Frontend/src/config/device-schemas/` | K2 | **NEU** — JSON Schema Dateien pro Geraetetyp |
+
+---
+
+## Block D0: Dashboard + Monitor Anpassungen (~6-8h) [NEU — verify-plan Ergaenzung]
+
+> **Robins Vorgabe:** Dashboard darf NICHT gross umstrukturiert werden. Subzone-Einstellungen
+> muessen in Uebersicht UND Monitor. Hardware-Info raus aus Dashboard. Links zu /sensors weg.
+>
+> **MUSS VOR Block K1** abgeschlossen sein — Subzone-CRUD muss woanders verfuegbar sein,
+> bevor es aus SensorsView entfernt wird.
+
+### D0.1: Subzone-CRUD Composable extrahieren
+
+**Datei:** `El Frontend/src/composables/useSubzoneCRUD.ts` (**NEU**)
+
+Die Subzone create/rename/delete Logik lebt aktuell NUR in `SensorsView.vue` (Z. 98-186).
+Sie muss in ein eigenes Composable extrahiert werden, damit sie in 3 Views wiederverwendbar ist:
+- HardwareView (ZonePlate-Header, L1)
+- MonitorView (L2 Subzone-Header)
+- SensorsView (bis zum Umbau)
+
+**Aus SensorsView extrahieren:**
+
+```typescript
+// useSubzoneCRUD.ts
+export function useSubzoneCRUD() {
+  // State (aus SensorsView Z. 98-102)
+  const creatingSubzoneForZone = ref<string | null>(null)
+  const newSubzoneName = ref('')
+  const editingSubzoneId = ref<string | null>(null)
+  const editSubzoneName = ref('')
+
+  // Create (aus SensorsView Z. 104-136)
+  function startCreateSubzone(zoneId: string) { /* ... */ }
+  async function confirmCreateSubzone(zoneId: string, espId: string) { /* ... */ }
+  function cancelCreateSubzone() { /* ... */ }
+
+  // Rename (aus SensorsView Z. 138-169)
+  function startRenameSubzone(subzoneId: string, currentName: string) { /* ... */ }
+  async function saveSubzoneName(zoneId: string, espId: string) { /* ... */ }
+  function cancelRenameSubzone() { /* ... */ }
+
+  // Delete (aus SensorsView Z. 171-186)
+  async function deleteSubzone(subzoneId: string, zoneId: string, espId: string) { /* ... */ }
+
+  return { /* alle States + Functions */ }
+}
+```
+
+**API-Calls:** Nutzt bestehendes `subzonesApi` aus `@/api/subzones.ts` (unveraendert).
+**Store:** Nutzt `espStore.getDeviceId()` + `espStore.fetchAll()` (unveraendert).
+
+### D0.2: Hardware-Info im Dashboard ausblenden
+
+**Dateien:**
+- `El Frontend/src/components/esp/SensorConfigPanel.vue` — Prop `showMetadata?: boolean` (default: `true`)
+- `El Frontend/src/components/esp/ActuatorConfigPanel.vue` — Prop `showMetadata?: boolean` (default: `true`)
+- `El Frontend/src/views/HardwareView.vue` — uebergibt `:showMetadata="false"` an beide Panels
+
+**Effekt:** DeviceMetadataSection (Hersteller, Modell, Seriennummer, Datenblatt, Wartung) wird
+im Dashboard-SlideOver NICHT mehr angezeigt. Die Betriebs-Config (Name, Schwellwerte, GPIO, Subzone)
+bleibt sichtbar.
+
+### D0.3: MonitorView /sensors-Link entfernen
+
+**Datei:** `El Frontend/src/views/MonitorView.vue`
+
+| Zeile | Was | Aktion |
+|-------|-----|--------|
+| 1609 | `router.push({ name: 'sensors', query: { sensor: ... } })` | ENTFERNEN (ganzer Button-Block "Konfiguration") |
+| 14 | Kommentar "Config is in SensorsView" | ENTFERNEN |
+
+### D0.4: Subzone-CRUD in MonitorView L2 einbauen
+
+**Datei:** `El Frontend/src/views/MonitorView.vue`
+
+**Wo:** L2 Subzone-Akkordeon (Z. 1523-1660)
+
+| Stelle | Was | Pattern |
+|--------|-----|---------|
+| Z. 1535 (Subzone-Header) | Action-Buttons: Stift (Rename), Muelleimer (Delete) | Wie SensorsView Z. 748-753 |
+| Z. ca. 1621 (nach letztem Subzone) | Button: "+ Subzone hinzufuegen" mit Inline-Input | Wie SensorsView Z. 664-688 |
+
+**Import:** `useSubzoneCRUD` Composable aus D0.1.
+
+### D0.5: Subzone-CRUD in HardwareView / ZonePlate einbauen
+
+**Dateien:**
+- `El Frontend/src/views/HardwareView.vue`
+- `El Frontend/src/components/hardware/ZonePlate.vue`
+
+**Wo:** Im ZonePlate-Header (L1) — Subzones als expandierbare Sub-Sektion pro Zone.
+
+**Option A (empfohlen):** Subzone-Liste als kleine Badges/Chips unterhalb des Zone-Headers.
+Klick auf Badge → Rename-Mode. "+" Badge → Create. Kontextmenue → Delete.
+
+**Option B:** Eigener "Subzones verwalten" Button im Zone-Header der ein kleines Panel oeffnet.
+
+**Import:** `useSubzoneCRUD` Composable aus D0.1.
+
+### D0.6: Registrierung
+
+- [ ] `useSubzoneCRUD.ts` in `El Frontend/src/composables/` erstellen
+- [ ] SensorConfigPanel + ActuatorConfigPanel: Prop `showMetadata` hinzufuegen
+- [ ] HardwareView: `:showMetadata="false"` an Config-Panels
+- [ ] MonitorView: /sensors-Link entfernen, Kommentar entfernen
+- [ ] MonitorView: Subzone-CRUD-Buttons in L2 Subzone-Header
+- [ ] HardwareView/ZonePlate: Subzone-CRUD-Buttons in L1 Zone-Header
+- [ ] Verifizieren: Subzone create/rename/delete funktioniert in BEIDEN neuen Stellen
 
 ---
 
@@ -803,8 +921,18 @@ VORAUSSETZUNG: Block 4A.8 (Hardware-Info + Runtime)
 4A.8.1 HardwareInfoSection       ← Liefert metadata JSONB
 4A.8.2 RuntimeMaintenanceSection ← Liefert runtime_stats JSONB
 
-KOMPONENTEN-TAB UMBAU
-═════════════════════
+DASHBOARD + MONITOR BEREINIGUNG [NEU]
+═════════════════════════════════════
+Block D0 (MUSS VOR K1):
+├── D0.1 useSubzoneCRUD.ts        ← ZUERST (Composable extrahieren)
+├── D0.2 showMetadata Prop         ← Parallel zu D0.1
+├── D0.3 MonitorView Links weg     ← Parallel zu D0.1
+├── D0.4 MonitorView Subzone-CRUD  ← NACH D0.1 (braucht Composable)
+├── D0.5 HardwareView Subzone-CRUD ← NACH D0.1 (braucht Composable)
+└── D0.6 Verifizierung            ← ZULETZT
+
+KOMPONENTEN-TAB UMBAU (nach D0)
+════════════════════════════════
 
 Block K1 (Inventar-Tabelle):
 ├── K1.4 Inventory Store          ← ZUERST (Filter-State)
@@ -832,20 +960,30 @@ Block K4 (AI-Export):
 
 BLOCK-ABHAENGIGKEITEN
 ═════════════════════
-K1 (Inventar-Tabelle)  ← Braucht 4A.8 (metadata Felder)
+D0 (Dashboard/Monitor) ← Unabhaengig, MUSS aber VOR K1 fertig sein
+K1 (Inventar-Tabelle)  ← Braucht 4A.8 (metadata Felder) + D0 (Subzone-CRUD verschoben)
 K2 (Schema-Registry)   ← Unabhaengig von K1, aber sinnvoll danach
 K3 (Zone-Context)      ← Unabhaengig von K1/K2
 K4 (AI-Export)         ← NACH K1 + K3 (braucht beide Datenquellen)
 
 Empfohlene Reihenfolge:
-4A.8 → K1 → K2 → K3 (parallel zu K2) → K4
+4A.8 → D0 → K1 → K2 → K3 (parallel zu K2) → K4
 ```
 
 ---
 
 ## Akzeptanzkriterien
 
-### Basis (MUSS)
+### Block D0 — Dashboard + Monitor (MUSS VOR K1)
+
+- [ ] **Subzone-CRUD Composable:** `useSubzoneCRUD.ts` extrahiert aus SensorsView, wiederverwendbar
+- [ ] **Hardware-Info ausgeblendet:** Config-Panels im Dashboard zeigen KEINE DeviceMetadataSection
+- [ ] **MonitorView /sensors-Link weg:** Button "Konfiguration" entfernt, kein Link zu /sensors
+- [ ] **MonitorView Subzone-CRUD:** Rename/Delete in L2 Subzone-Header, "+ Subzone" Button
+- [ ] **HardwareView Subzone-CRUD:** Subzone-Verwaltung in ZonePlate/Zone-Header (L1)
+- [ ] **SensorsView unveraendert:** Nutzt jetzt Composable, funktioniert wie vorher
+
+### Block K1-K4 — Inventar (Basis MUSS)
 
 - [ ] **Inventar-Tabelle:** Alle Sensoren + Aktoren in einer flachen Tabelle sichtbar
 - [ ] **Suche:** Freitext-Suche findet Geraete nach Name, Typ, Zone, Hersteller
@@ -970,13 +1108,17 @@ Dieses Auftragsdokument basiert auf:
 
 ### Zusammenfassung fuer TM
 
-Der Plan ist grundsaetzlich solide und gut durchdacht. Die Hauptprobleme sind:
+Der Plan ist grundsaetzlich solide und gut durchdacht. Die Hauptprobleme waren:
 1. **Alle Backend-Pfade** fehlten den `god_kaiser_server/`-Prefix (korrigiert)
 2. **Feld-Namen** im Frontend weichen erheblich von der Annahme ab — `SensorWithContext` hat weder `id`, `metadata`, `runtime_stats`, `is_online` noch `latest_value`. Ein neues Composable ist noetig.
 3. **DataTable.vue** ist nicht generisch — eigene InventoryTable ist die richtige Entscheidung
 4. **Sensor-Typ-Bezeichnungen** muessen der Server-Registry folgen (`bmp280` statt `bme280`)
 
-Der Plan ist ausfuehrbar nach diesen Korrekturen. Empfohlene Block-Reihenfolge bleibt korrekt: K1 → K2 → K3 → K4.
+**[NEU] Robins Verfeinerung:** Der Plan fehlte ein kritischer Block:
+5. **Block D0 (Dashboard + Monitor Anpassungen)** wurde ergaenzt — Subzone-CRUD nach Uebersicht + Monitor, Hardware-Info raus aus Dashboard, /sensors-Links weg aus Monitor. MUSS VOR K1 abgeschlossen sein.
+6. **Subzone-CRUD als Composable** (`useSubzoneCRUD.ts`) — extrahiert aus SensorsView, wiederverwendbar in 3 Views.
+
+Der Plan ist ausfuehrbar. Korrigierte Block-Reihenfolge: **D0 → K1 → K2 → K3 → K4**.
 
 ---
 
@@ -988,6 +1130,51 @@ Bevor Block K1 gestartet wird, muss ein Dev-Agent (frontend-dev oder server-dev)
 1. GET `/v1/sensors/{esp_id}` Response-Schema: Werden `sensor_metadata` und `runtime_stats` bereits zurueckgegeben?
 2. `espStore.ts`: Werden `sensor_metadata`/`runtime_stats` beim Device-Fetch gespeichert oder verworfen?
 3. Falls nein: Backend-Schema und Frontend-Store muessen ZUERST erweitert werden (Teil von 4A.8)
+
+### Block D0: Dashboard + Monitor Anpassungen [NEU]
+
+**Agent:** `frontend-dev`
+**Reihenfolge:**
+
+```
+Schritt 1: useSubzoneCRUD.ts erstellen
+  Pfad: El Frontend/src/composables/useSubzoneCRUD.ts
+  Quelle: SensorsView.vue Z. 98-186 (create/rename/delete Logik extrahieren)
+  API: Nutzt subzonesApi aus @/api/subzones.ts (unveraendert)
+  Store: Nutzt espStore.getDeviceId() + espStore.fetchAll()
+
+Schritt 2: SensorConfigPanel + ActuatorConfigPanel: Prop showMetadata
+  Pfade: El Frontend/src/components/esp/SensorConfigPanel.vue
+         El Frontend/src/components/esp/ActuatorConfigPanel.vue
+  Aenderung: Prop showMetadata?: boolean (default: true)
+  Wenn false: DeviceMetadataSection wird nicht gerendert (v-if)
+
+Schritt 3: HardwareView: showMetadata=false + Subzone-CRUD
+  Pfad: El Frontend/src/views/HardwareView.vue
+  3a: :showMetadata="false" an SensorConfigPanel + ActuatorConfigPanel
+  3b: useSubzoneCRUD() importieren + in ZonePlate/Zone-Section einbauen
+  Ort: ZonePlate-Header — Subzone-Badges/Chips mit Create/Rename/Delete
+
+Schritt 4: MonitorView: Links weg + Subzone-CRUD
+  Pfad: El Frontend/src/views/MonitorView.vue
+  4a: Z. 1609 — Button "Konfiguration" (router.push zu /sensors) ENTFERNEN
+  4b: Z. 14 — Kommentar "Config is in SensorsView" ENTFERNEN
+  4c: L2 Subzone-Header (Z. 1535) — Action-Buttons (Rename/Delete) hinzufuegen
+  4d: Nach letztem Subzone (Z. ca. 1621) — "+ Subzone" Button hinzufuegen
+  Import: useSubzoneCRUD() aus Schritt 1
+
+Schritt 5: SensorsView: Subzone-CRUD auf Composable umstellen
+  Pfad: El Frontend/src/views/SensorsView.vue
+  Aenderung: Z. 98-186 durch useSubzoneCRUD() Composable ersetzen
+  Effekt: Gleiche Funktionalitaet, aber Code lebt jetzt im Composable
+
+Schritt 6: Verifizieren
+  - Subzone Create/Rename/Delete funktioniert in HardwareView
+  - Subzone Create/Rename/Delete funktioniert in MonitorView
+  - SensorsView funktioniert noch wie vorher (via Composable)
+  - Config-Panels im Dashboard zeigen KEINE Hardware-Metadaten mehr
+  - Monitor hat KEINEN Link zu /sensors mehr
+```
 
 ### Block K1: Inventar-Tabelle
 

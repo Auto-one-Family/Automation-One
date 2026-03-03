@@ -27,6 +27,8 @@ from .users import router as users_router
 from .zone import router as zone_router
 from .dashboards import router as dashboards_router
 from .webhooks import router as webhooks_router
+from .plugins import router as plugins_router
+from .diagnostics import router as diagnostics_router
 
 # PLANNED routers - stubs with no endpoints yet, included for discoverability.
 # Add endpoints directly to the router files; they will be available immediately.
@@ -59,6 +61,8 @@ api_v1_router.include_router(kaiser_router)  # PLANNED - Kaiser relay node manag
 api_v1_router.include_router(library_router)  # PLANNED - OTA sensor library distribution
 api_v1_router.include_router(dashboards_router)  # Dashboard Layout Persistence
 api_v1_router.include_router(webhooks_router)  # Phase 4A.3 - Grafana Webhook
+api_v1_router.include_router(plugins_router)  # Phase 4C - Plugin Management
+api_v1_router.include_router(diagnostics_router)  # Phase 4D - Diagnostics Hub
 
 # Export individual routers for direct access if needed
 __all__ = [
@@ -84,4 +88,6 @@ __all__ = [
     "zone_router",
     "dashboards_router",
     "webhooks_router",
+    "plugins_router",
+    "diagnostics_router",
 ]
