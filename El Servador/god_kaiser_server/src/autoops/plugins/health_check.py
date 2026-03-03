@@ -332,11 +332,4 @@ class HealthCheckPlugin(AutoOpsPlugin):
             data=health_data,
         )
 
-    def _extract_list(self, response: dict, key: str) -> list:
-        if isinstance(response, list):
-            return response
-        for k in (key, "data", "items"):
-            val = response.get(k)
-            if isinstance(val, list):
-                return val
-        return []
+    # _extract_list() inherited from AutoOpsPlugin base class

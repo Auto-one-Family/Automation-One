@@ -349,6 +349,63 @@ ALERTS_ROOT_CAUSE_SUPPRESSED_TOTAL = Counter(
     ["source"],
 )
 
+# =============================================================================
+# Database Backup Metrics (Phase A V5.1)
+# =============================================================================
+
+BACKUP_CREATED_TOTAL = Counter(
+    "god_kaiser_backup_created_total",
+    "Total successful database backups",
+)
+
+BACKUP_FAILED_TOTAL = Counter(
+    "god_kaiser_backup_failed_total",
+    "Total failed database backup attempts",
+)
+
+BACKUP_SIZE_BYTES = Gauge(
+    "god_kaiser_backup_size_bytes",
+    "Size of the last successful database backup in bytes",
+)
+
+BACKUP_LAST_SUCCESS_TIMESTAMP = Gauge(
+    "god_kaiser_backup_last_success_timestamp",
+    "Unix timestamp of the last successful database backup",
+)
+
+# =============================================================================
+# Plugin System Metrics (Phase 4C)
+# =============================================================================
+
+PLUGIN_EXECUTIONS_TOTAL = Counter(
+    "god_kaiser_plugin_executions_total",
+    "Total plugin executions",
+    ["plugin_id", "status", "trigger_source"],
+)
+
+PLUGIN_EXECUTION_DURATION = Histogram(
+    "god_kaiser_plugin_execution_duration_seconds",
+    "Plugin execution duration in seconds",
+    ["plugin_id"],
+    buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
+)
+
+PLUGIN_ERRORS_TOTAL = Counter(
+    "god_kaiser_plugin_errors_total",
+    "Total plugin execution errors",
+    ["plugin_id", "error_type"],
+)
+
+PLUGINS_REGISTERED_GAUGE = Gauge(
+    "god_kaiser_plugins_registered",
+    "Number of registered plugins in the registry",
+)
+
+PLUGINS_ENABLED_GAUGE = Gauge(
+    "god_kaiser_plugins_enabled",
+    "Number of enabled plugins",
+)
+
 # Track server start time
 _server_start_time: float = time.time()
 _metrics_initialized: bool = False
@@ -412,6 +469,17 @@ def init_metrics() -> None:
         ALERTS_ACTIVE_GAUGE.labels(severity=sev)
     ALERTS_ROOT_CAUSE_SUPPRESSED_TOTAL.labels(source="grafana")
     ALERTS_ROOT_CAUSE_SUPPRESSED_TOTAL.labels(source="sensor_threshold")
+
+    # Phase 4C: Plugin system metrics
+    for pid in ("health_check", "esp_configurator", "debug_fix", "system_cleanup"):
+        for status in ("success", "error"):
+            for trigger in ("manual", "schedule", "logic_rule"):
+                PLUGIN_EXECUTIONS_TOTAL.labels(
+                    plugin_id=pid, status=status, trigger_source=trigger
+                )
+        PLUGIN_EXECUTION_DURATION.labels(plugin_id=pid)
+        PLUGIN_ERRORS_TOTAL.labels(plugin_id=pid, error_type="execution_failed")
+        PLUGIN_ERRORS_TOTAL.labels(plugin_id=pid, error_type="rollback_failed")
 
     logger.info("Prometheus metrics initialized (all label combinations visible)")
 
@@ -754,3 +822,37 @@ async def update_all_metrics_async(get_session_func: callable) -> None:
 
     except Exception as e:
         logger.warning(f"Metrics update failed (non-critical): {e}")
+
+
+# =========================================================================
+# Plugin System metric helpers (Phase 4C)
+# =========================================================================
+
+
+def increment_plugin_execution(
+    plugin_id: str, status: str, trigger_source: str
+) -> None:
+    """Increment plugin execution counter. Called from PluginService.execute_plugin()."""
+    PLUGIN_EXECUTIONS_TOTAL.labels(
+        plugin_id=plugin_id, status=status, trigger_source=trigger_source
+    ).inc()
+
+
+def observe_plugin_duration(plugin_id: str, duration: float) -> None:
+    """Observe plugin execution duration. Called from PluginService.execute_plugin()."""
+    PLUGIN_EXECUTION_DURATION.labels(plugin_id=plugin_id).observe(duration)
+
+
+def increment_plugin_error(plugin_id: str, error_type: str) -> None:
+    """Increment plugin error counter. Called from PluginService on failures."""
+    PLUGIN_ERRORS_TOTAL.labels(plugin_id=plugin_id, error_type=error_type).inc()
+
+
+def update_plugins_registered(count: int) -> None:
+    """Set registered plugins gauge. Called after registry sync."""
+    PLUGINS_REGISTERED_GAUGE.set(count)
+
+
+def update_plugins_enabled(count: int) -> None:
+    """Set enabled plugins gauge. Called during metrics update cycle."""
+    PLUGINS_ENABLED_GAUGE.set(count)

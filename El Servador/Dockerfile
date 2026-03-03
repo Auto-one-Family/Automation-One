@@ -42,8 +42,10 @@ FROM python:3.11-slim-bookworm AS runtime
 WORKDIR /app
 
 # Install runtime dependencies and apply security patches
+# postgresql-client provides pg_dump/psql for DatabaseBackupService (Phase A V5.1)
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libpq5 \
+    postgresql-client \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -71,7 +73,7 @@ COPY god_kaiser_server/alembic.ini ./alembic.ini
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app/logs && \
+    mkdir -p /app/logs /app/backups/database && \
     chown -R appuser:appuser /app
 
 USER appuser

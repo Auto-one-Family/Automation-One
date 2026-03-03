@@ -58,6 +58,7 @@ class PluginExecution(Base):
         DateTime(timezone=True),
         nullable=False,
         default=_utc_now,
+        index=True,
     )
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="running")

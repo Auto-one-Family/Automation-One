@@ -252,6 +252,22 @@ class AutoOpsPlugin(ABC):
         """
         return PluginResult.success_result(f"No rollback needed for {self.name}")
 
+    def _extract_list(self, response: dict, key: str) -> list:
+        """Extract a list from various API response formats.
+
+        Handles different response structures:
+        - Direct list response
+        - Dict with expected key (e.g., "devices", "sensors")
+        - Dict with fallback keys ("data", "items", "results")
+        """
+        if isinstance(response, list):
+            return response
+        for k in (key, "data", "items", "results"):
+            val = response.get(k)
+            if isinstance(val, list):
+                return val
+        return []
+
     def format_report(self, result: PluginResult) -> str:
         """Generate a markdown report from the plugin result."""
         lines = [

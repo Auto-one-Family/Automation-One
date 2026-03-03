@@ -25,7 +25,8 @@ Server (5000-5999):
 - SUBZONE_ERROR: 5780-5799
 - AUTOOPS_ERROR: 5800-5849
 - NOTIFICATION_ERROR: 5850-5899
-- RESERVED: 5900-5999
+- PLUGIN_ERROR: 5900-5949
+- RESERVED: 5950-5999
 
 Test Infrastructure (6000-6099):
 - TEST_ERROR: 6000-6099
@@ -395,6 +396,19 @@ class NotificationErrorCode(IntEnum):
     ALERT_PREFERENCE_NOT_FOUND = 5859
 
 
+class PluginErrorCode(IntEnum):
+    """Plugin system error codes (5900-5949)."""
+
+    PLUGIN_NOT_FOUND = 5900
+    PLUGIN_DISABLED = 5901
+    PLUGIN_EXECUTE_FAILED = 5902
+    PLUGIN_CONFIG_INVALID = 5903
+    PLUGIN_ROLLBACK_FAILED = 5904
+    PLUGIN_AUTH_FAILED = 5905
+    PLUGIN_SCHEDULE_INVALID = 5906
+    PLUGIN_REGISTRY_SYNC_FAILED = 5907
+
+
 class TestErrorCodes(IntEnum):
     """Test infrastructure error codes (6000-6099). Only used in test reports, NOT in production."""
 
@@ -668,6 +682,15 @@ SERVER_ERROR_DESCRIPTIONS: Dict[int, str] = {
     5857: "Webhook payload invalid or malformed",
     5858: "Webhook signature validation failed",
     5859: "Alert preference for device not found",
+    # Plugin system errors (5900-5949)
+    5900: "Plugin not found in registry",
+    5901: "Plugin is disabled and cannot be executed",
+    5902: "Plugin execution failed",
+    5903: "Plugin configuration invalid or schema mismatch",
+    5904: "Plugin rollback failed after execution error",
+    5905: "Plugin authentication to internal API failed",
+    5906: "Plugin schedule (cron expression) invalid",
+    5907: "Plugin registry sync to database failed",
 }
 
 # Test infrastructure error descriptions
@@ -779,6 +802,8 @@ def get_error_code_range(code: int) -> str:
         return "SERVER_AUTOOPS"
     elif 5850 <= code < 5900:
         return "SERVER_NOTIFICATION"
+    elif 5900 <= code < 5950:
+        return "SERVER_PLUGIN"
     elif 6000 <= code < 6100:
         return "TEST"
     return "UNKNOWN"

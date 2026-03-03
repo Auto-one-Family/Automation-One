@@ -13,6 +13,7 @@ from . import (  # noqa: F401
     auth,  # TokenBlacklist model
     dashboard,  # Dashboard layout persistence
     diagnostic,  # Diagnostic reports (Phase 4D)
+    email_log,  # Email delivery tracking (Phase C V1.1)
     enums,  # Shared enums (DataSource, SensorOperatingMode, etc.)
     esp,
     esp_heartbeat,  # ESP Heartbeat History (Time-Series)
@@ -35,6 +36,7 @@ from .audit_log import AuditLog, AuditEventType, AuditSeverity, AuditSourceType 
 from .auth import TokenBlacklist  # noqa: F401
 from .dashboard import Dashboard  # noqa: F401
 from .diagnostic import DiagnosticReport  # noqa: F401
+from .email_log import EmailLog  # noqa: F401
 from .enums import DataSource, SensorOperatingMode  # noqa: F401
 from .esp import ESPDevice  # noqa: F401
 from .esp_heartbeat import (
@@ -67,6 +69,7 @@ __all__ = [
     "auth",
     "dashboard",
     "diagnostic",
+    "email_log",
     "enums",
     "esp",
     "esp_heartbeat",
@@ -95,6 +98,7 @@ __all__ = [
     "TokenBlacklist",
     "Dashboard",
     "DiagnosticReport",
+    "EmailLog",
     "ESPDevice",
     "ESPHeartbeatLog",
     "HeartbeatHealthStatus",

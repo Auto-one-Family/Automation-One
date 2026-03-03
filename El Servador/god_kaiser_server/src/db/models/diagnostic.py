@@ -34,7 +34,7 @@ class DiagnosticReport(Base):
         DateTime(timezone=True), nullable=False, default=_utc_now
     )
     duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    checks: Mapped[list] = mapped_column(JSON, nullable=False)
+    checks: Mapped[list | None] = mapped_column(JSON, nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     triggered_by: Mapped[str] = mapped_column(String(50), nullable=False, server_default="manual")
     triggered_by_user: Mapped[Optional[int]] = mapped_column(

@@ -377,6 +377,39 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Alert Suppression scheduler registration failed (non-critical): {e}")
 
+        # Step 3.4.6: Initialize DatabaseBackupService (Phase A V5.1)
+        # Backup runs at 02:00 — BEFORE cleanup at 03:00 (data safety guarantee)
+        logger.info("Initializing DatabaseBackupService...")
+        from .services.database_backup_service import init_database_backup_service
+
+        _database_backup_service = init_database_backup_service(settings.backup)
+
+        if settings.backup.enabled:
+
+            async def _backup_job() -> None:
+                try:
+                    await _database_backup_service.create_backup()
+                    await _database_backup_service.cleanup_old_backups()
+                except Exception as e:
+                    logger.error(f"Scheduled database backup failed: {e}", exc_info=True)
+
+            _central_scheduler.add_cron_job(
+                job_id="database_backup",
+                func=_backup_job,
+                cron_expression={
+                    "hour": settings.backup.hour,
+                    "minute": settings.backup.minute,
+                },
+                category=JobCategory.MAINTENANCE,
+            )
+            logger.info(
+                f"Database backup job registered "
+                f"(daily {settings.backup.hour:02d}:{settings.backup.minute:02d}, "
+                f"retain {settings.backup.max_age_days}d, max {settings.backup.max_count})"
+            )
+        else:
+            logger.info("Database backup job DISABLED (DB_BACKUP_ENABLED=False)")
+
         # Step 3.5: Recover running Mock-ESP simulations from database (Paket X)
         # After server restart, resume any simulations that were active before shutdown
         # Uses SimulationScheduler.recover_mocks() for DB-First architecture
@@ -518,15 +551,10 @@ async def lifespan(app: FastAPI):
             global _sequence_executor
             _sequence_executor = SequenceActionExecutor(websocket_manager=_websocket_manager)
 
-            # Phase 4C: Plugin Action Executor
+            # Phase 4C: Plugin Action Executor (session_factory pattern — fresh session per execution)
             from .services.logic.actions.plugin_executor import PluginActionExecutor
-            from .autoops.core.plugin_registry import PluginRegistry as _PluginRegistry
-            from .services.plugin_service import PluginService as _PluginService
 
-            _plugin_registry = _PluginRegistry()
-            _plugin_registry.discover_plugins()
-            _plugin_service = _PluginService(session, _plugin_registry)
-            plugin_executor = PluginActionExecutor(_plugin_service)
+            plugin_executor = PluginActionExecutor(session_factory=get_session)
 
             # Phase 4D: Diagnostics Action Executor
             from .services.logic.actions.diagnostics_executor import (
@@ -601,6 +629,135 @@ async def lifespan(app: FastAPI):
                 break
         except Exception as e:
             logger.warning(f"Plugin registry sync failed (non-critical): {e}")
+
+        # Step 6.2: Daily Diagnostic Scheduler (Phase B V2.1)
+        # Runs full system diagnostic daily + archives old reports (V2.2)
+        if settings.maintenance.diagnostic_schedule_enabled:
+            logger.info("Registering daily diagnostic scheduler...")
+            from .services.diagnostics_service import DiagnosticsService
+
+            async def _scheduled_daily_diagnostic():
+                """Run full system diagnostic daily + cleanup old reports."""
+                try:
+                    async for session in get_session():
+                        # Build with PluginService for complete plugins check
+                        _diag_plugin_registry = PluginRegistry()
+                        _diag_plugin_registry.discover_plugins()
+                        _diag_ps = PluginService(session, _diag_plugin_registry)
+                        diag_service = DiagnosticsService(session=session, plugin_service=_diag_ps)
+
+                        # 1. Run diagnostic
+                        report = await diag_service.run_full_diagnostic(triggered_by="scheduled")
+                        logger.info(
+                            f"Daily diagnostic: {report.overall_status.value} — "
+                            f"{report.summary}"
+                        )
+
+                        # 2. Archive old reports (V2.2)
+                        archived = await diag_service.cleanup_old_reports(
+                            max_age_days=settings.maintenance.diagnostic_report_retention_days
+                        )
+                        if archived > 0:
+                            logger.info(f"Archived {archived} old diagnostic reports")
+
+                        break
+                except Exception as e:
+                    logger.error(f"Scheduled daily diagnostic FAILED: {e}")
+
+            _central_scheduler.add_cron_job(
+                job_id="daily_diagnostic",
+                func=_scheduled_daily_diagnostic,
+                cron_expression={
+                    "hour": settings.maintenance.diagnostic_schedule_hour,
+                    "minute": 0,
+                },
+                category=JobCategory.MAINTENANCE,
+            )
+            logger.info(
+                f"Daily diagnostic scheduled at "
+                f"{settings.maintenance.diagnostic_schedule_hour:02d}:00"
+            )
+        else:
+            logger.info("Daily diagnostic scheduler DISABLED")
+
+        # Step 6.3: Plugin Schedule Registration (Phase B V3.1)
+        # Load plugin schedules from DB and register as APScheduler cron jobs
+        logger.info("Registering plugin schedules from DB...")
+        try:
+            from .core.scheduler import parse_cron_string
+            from .autoops.core.base_plugin import PluginContext as _PluginContext
+            from .db.models.plugin import PluginConfig as _PluginConfigModel
+
+            async for session in get_session():
+                _sched_plugin_registry = PluginRegistry()
+                _sched_plugin_registry.discover_plugins()
+                _sched_plugin_service = PluginService(session, _sched_plugin_registry)
+
+                # Set default schedules for plugins that have none
+                _DEFAULT_PLUGIN_SCHEDULES = {
+                    "health_check": "0 5 * * *",  # Daily 05:00 (after cleanup + diagnostic)
+                    "system_cleanup": "0 4 * * 0",  # Weekly Sunday 04:00
+                }
+                for _pid, _default_sched in _DEFAULT_PLUGIN_SCHEDULES.items():
+                    _pconfig = await session.get(_PluginConfigModel, _pid)
+                    if _pconfig and _pconfig.schedule is None:
+                        try:
+                            _pconfig.schedule = _default_sched
+                            await session.commit()
+                            logger.info(f"Set default schedule for '{_pid}': {_default_sched}")
+                        except Exception as _e:
+                            await session.rollback()
+                            logger.debug(f"Plugin '{_pid}' default schedule failed: {_e}")
+
+                # Register all scheduled plugins as APScheduler jobs
+                scheduled_plugins = await _sched_plugin_service.get_scheduled_plugins()
+                _registered_count = 0
+                for _plugin_cfg in scheduled_plugins:
+                    try:
+                        cron_dict = parse_cron_string(_plugin_cfg.schedule)
+                        _job_id = f"plugin_{_plugin_cfg.plugin_id}"
+
+                        async def _execute_scheduled_plugin(
+                            pid=_plugin_cfg.plugin_id,
+                        ):
+                            """Execute a scheduled plugin."""
+                            try:
+                                async for _sess in get_session():
+                                    _reg = PluginRegistry()
+                                    _reg.discover_plugins()
+                                    _ps = PluginService(_sess, _reg)
+                                    _ctx = _PluginContext(
+                                        trigger_source="schedule",
+                                    )
+                                    await _ps.execute_plugin(
+                                        plugin_id=pid,
+                                        user_id=None,
+                                        context=_ctx,
+                                    )
+                                    break
+                            except Exception as _ex:
+                                logger.error(f"Scheduled plugin {pid} FAILED: {_ex}")
+
+                        _central_scheduler.add_cron_job(
+                            job_id=_job_id,
+                            func=_execute_scheduled_plugin,
+                            cron_expression=cron_dict,
+                            category=JobCategory.CUSTOM,
+                        )
+                        logger.info(
+                            f"Plugin '{_plugin_cfg.plugin_id}' scheduled: "
+                            f"{_plugin_cfg.schedule}"
+                        )
+                        _registered_count += 1
+                    except Exception as _e:
+                        logger.warning(
+                            f"Failed to schedule plugin " f"'{_plugin_cfg.plugin_id}': {_e}"
+                        )
+
+                logger.info(f"Registered {_registered_count} plugin schedule(s)")
+                break
+        except Exception as e:
+            logger.warning(f"Plugin schedule registration failed (non-critical): {e}")
 
         # Log resilience status
         resilience_status = get_health_status()

@@ -31,6 +31,7 @@ from ..core.metrics import (
     increment_ws_notification_broadcast,
 )
 from ..db.models.notification import Notification, NotificationSeverity
+from ..db.repositories.email_log_repo import EmailLogRepository
 from ..db.repositories.notification_repo import (
     NotificationPreferencesRepository,
     NotificationRepository,
@@ -64,6 +65,7 @@ class NotificationRouter:
         self.notification_repo = NotificationRepository(session)
         self.preferences_repo = NotificationPreferencesRepository(session)
         self.user_repo = UserRepository(session)
+        self.email_log_repo = EmailLogRepository(session)
         self.email_service = email_service or get_email_service()
 
     async def route(self, notification: NotificationCreate) -> Optional[Notification]:
@@ -292,6 +294,8 @@ class NotificationRouter:
 
     async def _send_critical_email(self, notification: Notification, recipient: str) -> None:
         """Send an immediate alert email (non-blocking)."""
+        provider = self.email_service.provider_name
+        error_message = None
         try:
             success = await self.email_service.send_critical_alert(
                 to=recipient,
@@ -305,10 +309,32 @@ class NotificationRouter:
             if success:
                 logger.info(f"Alert email sent to {recipient}: {notification.title}")
             else:
+                error_message = "Email service returned failure"
                 logger.warning(f"Alert email failed for {recipient}: {notification.title}")
         except Exception as e:
             # Email failure MUST NOT block notification processing
+            success = False
+            error_message = str(e)
             logger.error(f"Email delivery error: {e}")
+
+        # Log email send attempt + update notification metadata (Phase C V1.1)
+        try:
+            await self.email_log_repo.log_send(
+                to_address=recipient,
+                subject=f"[{notification.severity.upper()}] {notification.title}",
+                provider=provider,
+                status="sent" if success else "failed",
+                notification_id=notification.id,
+                template="critical_alert",
+                error_message=error_message,
+            )
+            # Enrich notification extra_data with email status for frontend display
+            extra = dict(notification.extra_data or {})
+            extra["email_status"] = "sent" if success else "failed"
+            extra["email_provider"] = provider
+            notification.extra_data = extra
+        except Exception as e:
+            logger.error(f"Failed to log email send: {e}")
 
     async def suppress_dependent_alerts(
         self,

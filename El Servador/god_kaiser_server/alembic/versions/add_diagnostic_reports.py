@@ -22,57 +22,62 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "diagnostic_reports",
-        sa.Column(
-            "id",
-            postgresql.UUID(as_uuid=True),
-            primary_key=True,
-            server_default=sa.text("gen_random_uuid()"),
-        ),
-        sa.Column("overall_status", sa.String(20), nullable=False),
-        sa.Column(
-            "started_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-        ),
-        sa.Column(
-            "finished_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-        ),
-        sa.Column("duration_seconds", sa.Float(), nullable=True),
-        sa.Column("checks", postgresql.JSONB(), nullable=False),
-        sa.Column("summary", sa.Text(), nullable=True),
-        sa.Column(
-            "triggered_by",
-            sa.String(50),
-            nullable=False,
-            server_default="manual",
-        ),
-        sa.Column(
-            "triggered_by_user",
-            sa.Integer(),
-            sa.ForeignKey("user_accounts.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
-        sa.Column("exported_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("export_path", sa.Text(), nullable=True),
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_tables = inspector.get_table_names()
 
-    # Index for history queries (newest first)
-    op.create_index(
-        "ix_diagnostic_reports_started",
-        "diagnostic_reports",
-        [sa.text("started_at DESC")],
-    )
+    # Diagnostic reports table (may already exist via create_all)
+    if "diagnostic_reports" not in existing_tables:
+        op.create_table(
+            "diagnostic_reports",
+            sa.Column(
+                "id",
+                postgresql.UUID(as_uuid=True),
+                primary_key=True,
+                server_default=sa.text("gen_random_uuid()"),
+            ),
+            sa.Column("overall_status", sa.String(20), nullable=False),
+            sa.Column(
+                "started_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+            ),
+            sa.Column(
+                "finished_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+            ),
+            sa.Column("duration_seconds", sa.Float(), nullable=True),
+            sa.Column("checks", postgresql.JSONB(), nullable=False),
+            sa.Column("summary", sa.Text(), nullable=True),
+            sa.Column(
+                "triggered_by",
+                sa.String(50),
+                nullable=False,
+                server_default="manual",
+            ),
+            sa.Column(
+                "triggered_by_user",
+                sa.Integer(),
+                sa.ForeignKey("user_accounts.id", ondelete="SET NULL"),
+                nullable=True,
+            ),
+            sa.Column("exported_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("export_path", sa.Text(), nullable=True),
+        )
 
-    # Check constraint for overall_status
-    op.create_check_constraint(
-        "ck_diagnostic_reports_status",
-        "diagnostic_reports",
-        sa.text("overall_status IN ('healthy', 'warning', 'critical', 'error')"),
-    )
+        # Expression index via raw SQL (sa.text in create_index is unreliable)
+        op.execute(
+            "CREATE INDEX ix_diagnostic_reports_started "
+            "ON diagnostic_reports (started_at DESC)"
+        )
+
+        # Check constraint for overall_status
+        op.create_check_constraint(
+            "ck_diagnostic_reports_status",
+            "diagnostic_reports",
+            sa.text("overall_status IN ('healthy', 'warning', 'critical', 'error')"),
+        )
 
 
 def downgrade() -> None:

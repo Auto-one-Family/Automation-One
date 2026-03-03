@@ -16,10 +16,13 @@ Usage:
 """
 
 import importlib
+import logging
 import pkgutil
 from typing import Optional
 
 from .base_plugin import AutoOpsPlugin, PluginCapability
+
+logger = logging.getLogger(__name__)
 
 
 class PluginRegistry:
@@ -90,7 +93,7 @@ class PluginRegistry:
                             self.register(plugin)
                             discovered += 1
             except Exception as e:
-                print(f"[AutoOps] Warning: Failed to load plugin module '{modname}': {e}")
+                logger.warning("Failed to load plugin module '%s': %s", modname, e)
 
         return discovered
 

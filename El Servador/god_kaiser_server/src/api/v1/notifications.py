@@ -1,7 +1,7 @@
 """
 Notification REST API Endpoints
 
-Phase 4A.1 + 4B: Notification-Stack Backend + Unified Alert Center
+Phase 4A.1 + 4B + C V1.1: Notification-Stack Backend + Alert Center + Email Log
 Priority: HIGH
 Status: IMPLEMENTED
 
@@ -10,6 +10,8 @@ Endpoints:
 - GET  /v1/notifications/unread-count     - Badge counter
 - GET  /v1/notifications/alerts/active    - Active alerts (Phase 4B)
 - GET  /v1/notifications/alerts/stats     - Alert ISA-18.2 metrics (Phase 4B)
+- GET  /v1/notifications/email-log        - Email sending log (Phase C V1.1)
+- GET  /v1/notifications/email-log/stats  - Email statistics (Phase C V1.1)
 - GET  /v1/notifications/{id}            - Single notification
 - PATCH /v1/notifications/{id}/read      - Mark as read
 - PATCH /v1/notifications/{id}/acknowledge - Acknowledge alert (Phase 4B)
@@ -22,6 +24,7 @@ Endpoints:
 """
 
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Query
@@ -41,6 +44,7 @@ from ...core.exceptions import (
 )
 from ...core.logging_config import get_logger
 from ...db.models.notification import AlertStatus
+from ...db.repositories.email_log_repo import EmailLogRepository
 from ...db.repositories.notification_repo import (
     NotificationPreferencesRepository,
     NotificationRepository,
@@ -49,6 +53,9 @@ from ...schemas.common import BaseResponse, PaginationMeta
 from ...schemas.notification import (
     AlertActiveListResponse,
     AlertStatsResponse,
+    EmailLogListResponse,
+    EmailLogResponse,
+    EmailLogStatsResponse,
     NotificationCreate,
     NotificationListResponse,
     NotificationPreferencesResponse,
@@ -220,6 +227,68 @@ async def get_preferences(
     prefs = await repo.get_or_create(user.id)
     await db.commit()
     return NotificationPreferencesResponse.model_validate(prefs)
+
+
+# =============================================================================
+# GET /v1/notifications/email-log — Email sending log (Phase C V1.1)
+# MUST be declared BEFORE /{notification_id} wildcard to avoid route shadowing
+# =============================================================================
+
+
+@router.get(
+    "/email-log",
+    response_model=EmailLogListResponse,
+    summary="Get email log",
+    description="Get paginated email sending log with optional filters.",
+)
+async def get_email_log(
+    db: DBSession,
+    user: AdminUser,
+    status: Optional[str] = Query(None, description="Filter by status (sent, failed, pending)"),
+    date_from: Optional[datetime] = Query(None, description="Filter from date (ISO 8601)"),
+    date_to: Optional[datetime] = Query(None, description="Filter to date (ISO 8601)"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Items per page"),
+):
+    repo = EmailLogRepository(db)
+    skip = (page - 1) * page_size
+
+    logs, total = await repo.get_filtered(
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+        skip=skip,
+        limit=page_size,
+    )
+
+    return EmailLogListResponse(
+        success=True,
+        data=[EmailLogResponse.model_validate(log) for log in logs],
+        pagination=PaginationMeta.from_pagination(
+            page=page, page_size=page_size, total_items=total
+        ),
+    )
+
+
+# =============================================================================
+# GET /v1/notifications/email-log/stats — Email statistics (Phase C V1.1)
+# =============================================================================
+
+
+@router.get(
+    "/email-log/stats",
+    response_model=EmailLogStatsResponse,
+    summary="Get email statistics",
+    description="Get email sending statistics (total, sent, failed, by provider).",
+)
+async def get_email_log_stats(
+    db: DBSession,
+    user: AdminUser,
+):
+    repo = EmailLogRepository(db)
+    stats = await repo.get_stats()
+
+    return EmailLogStatsResponse(success=True, **stats)
 
 
 # =============================================================================
@@ -507,6 +576,18 @@ async def test_email(
 
     provider = email_service.provider_name
     success = await email_service.send_test_email(recipient)
+
+    # Log email send attempt (Phase C V1.1)
+    email_log_repo = EmailLogRepository(db)
+    await email_log_repo.log_send(
+        to_address=recipient,
+        subject="AutomationOne Test Email",
+        provider=provider,
+        status="sent" if success else "failed",
+        template="test_email",
+        error_message=None if success else "Check server logs for details.",
+    )
+    await db.commit()
 
     if not success:
         raise EmailSendException(provider=provider, reason="Check server logs for details.")

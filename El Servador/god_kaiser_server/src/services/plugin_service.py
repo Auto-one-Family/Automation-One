@@ -18,6 +18,12 @@ from ..autoops.core.base_plugin import PluginContext, PluginResult
 from ..autoops.core.context import AutoOpsContext, DeviceMode
 from ..autoops.core.plugin_registry import PluginRegistry
 from ..core.logging_config import get_logger
+from ..core.metrics import (
+    increment_plugin_execution,
+    increment_plugin_error,
+    observe_plugin_duration,
+    update_plugins_registered,
+)
 from ..db.models.plugin import PluginConfig, PluginExecution
 
 logger = get_logger(__name__)
@@ -55,7 +61,7 @@ class PluginService:
                 config = PluginConfig(
                     plugin_id=plugin_id,
                     display_name=getattr(plugin, "_display_name", plugin.name),
-                    description=plugin.description,
+                    description=getattr(plugin, "_description", plugin.description),
                     category=getattr(plugin, "_category", "monitoring"),
                     config_schema=getattr(plugin, "_config_schema", {}),
                     capabilities=[c.value for c in plugin.capabilities],
@@ -65,11 +71,12 @@ class PluginService:
             else:
                 # Update metadata from code (display_name, description, etc.)
                 existing.display_name = getattr(plugin, "_display_name", plugin.name)
-                existing.description = plugin.description
+                existing.description = getattr(plugin, "_description", plugin.description)
                 existing.category = getattr(plugin, "_category", existing.category)
                 existing.config_schema = getattr(plugin, "_config_schema", existing.config_schema)
                 existing.capabilities = [c.value for c in plugin.capabilities]
         await self.db.commit()
+        update_plugins_registered(len(self.registry.get_all()))
 
     async def get_all_plugins(self) -> list[dict[str, Any]]:
         """All plugins with DB config + registry status."""
@@ -186,7 +193,18 @@ class PluginService:
         self.db.add(execution)
         await self.db.flush()
 
+        # WebSocket broadcast: execution started
+        await self._broadcast_ws(
+            "plugin_execution_started",
+            {
+                "execution_id": str(execution.id),
+                "plugin_id": plugin_id,
+                "trigger_source": context.trigger_source,
+            },
+        )
+
         start_time = datetime.now(timezone.utc)
+        result: PluginResult | None = None
         try:
             # Build AutoOpsContext + GodKaiserClient for plugin.execute()
             # Phase 4C.4: Enrich context with config overrides from DB + request
@@ -194,10 +212,53 @@ class PluginService:
             if context.config_overrides:
                 merged_config.update(context.config_overrides)
 
+            # Resolve internal URL from settings (Docker: http://el-servador:8000)
+            from ..core.config import get_settings
+
+            settings = get_settings()
+            internal_url = settings.server.internal_url
+
             autoops_context = AutoOpsContext(
-                server_url="http://localhost:8000",
+                server_url=internal_url,
                 device_mode=DeviceMode.MOCK,
             )
+            # Enrich context with ESP devices and active alerts from DB
+            esp_devices_data: list[dict] = []
+            active_alerts_data: list[dict] = []
+            try:
+                from ..db.repositories import ESPRepository
+
+                esp_repo = ESPRepository(self.db)
+                devices = await esp_repo.get_all()
+                esp_devices_data = [
+                    {
+                        "esp_id": d.esp_id if hasattr(d, "esp_id") else str(d.id),
+                        "name": d.name,
+                        "status": d.status,
+                    }
+                    for d in devices
+                ]
+            except Exception as enrich_err:
+                logger.debug(f"Plugin context enrichment (devices) skipped: {enrich_err}")
+
+            try:
+                from ..db.repositories.notification_repo import NotificationRepository
+
+                notif_repo = NotificationRepository(self.db)
+                alerts, _ = await notif_repo.get_alerts_by_status("active", limit=20)
+                active_alerts_data = [
+                    {
+                        "id": str(a.id),
+                        "title": a.title,
+                        "severity": a.severity,
+                        "category": a.category,
+                        "created_at": a.created_at.isoformat() if a.created_at else None,
+                    }
+                    for a in alerts
+                ]
+            except Exception as enrich_err:
+                logger.debug(f"Plugin context enrichment (alerts) skipped: {enrich_err}")
+
             # Attach enrichment data to context for plugins that need it
             autoops_context.extra = {
                 "trigger_source": context.trigger_source,
@@ -207,6 +268,8 @@ class PluginService:
                 "trigger_value": context.trigger_value,
                 "config_overrides": merged_config,
                 "user_id": user_id,
+                "esp_devices": esp_devices_data,
+                "active_alerts": active_alerts_data,
             }
 
             client = GodKaiserClient(autoops_context.server_url)
@@ -219,27 +282,56 @@ class PluginService:
             except Exception as auth_err:
                 logger.warning(f"Plugin auth failed (non-fatal): {auth_err}")
 
-            result: PluginResult = await plugin.execute(autoops_context, client)
+            result = await plugin.execute(autoops_context, client)
 
             execution.status = "success" if result.success else "error"
             execution.result = _serialize_plugin_result(result)
             if not result.success:
                 execution.error_message = "; ".join(result.errors)
+                # Attempt rollback on logical failure (not just exceptions)
+                try:
+                    await plugin.rollback(autoops_context, client, result.actions)
+                except Exception as rollback_err:
+                    logger.warning(f"Plugin '{plugin_id}' rollback failed: {rollback_err}")
 
             await client.close()
         except Exception as e:
             execution.status = "error"
             execution.error_message = str(e)
             logger.error(f"Plugin '{plugin_id}' execution failed: {e}", exc_info=True)
-            # Attempt rollback
+            # Attempt rollback with whatever actions were recorded
             try:
-                await plugin.rollback(autoops_context, client, [])
+                actions = result.actions if result else []
+                await plugin.rollback(autoops_context, client, actions)
             except Exception:
                 pass
         finally:
             execution.finished_at = datetime.now(timezone.utc)
             execution.duration_seconds = (execution.finished_at - start_time).total_seconds()
             await self.db.commit()
+
+            # Prometheus metrics
+            increment_plugin_execution(
+                plugin_id=plugin_id,
+                status=execution.status,
+                trigger_source=context.trigger_source,
+            )
+            observe_plugin_duration(plugin_id, execution.duration_seconds)
+            if execution.status == "error":
+                error_type = "rollback_failed" if result and not result.success else "execution_failed"
+                increment_plugin_error(plugin_id, error_type)
+
+            # WebSocket broadcast: execution completed
+            await self._broadcast_ws(
+                "plugin_execution_completed",
+                {
+                    "execution_id": str(execution.id),
+                    "plugin_id": plugin_id,
+                    "status": execution.status,
+                    "duration_seconds": execution.duration_seconds,
+                    "error_message": execution.error_message,
+                },
+            )
 
         return execution
 
@@ -272,13 +364,72 @@ class PluginService:
         return list(result.scalars().all())
 
     async def update_schedule(self, plugin_id: str, schedule: str | None) -> PluginConfig:
-        """Update plugin execution schedule (cron expression or None to clear)."""
+        """Update plugin schedule and re-register scheduler job.
+
+        When a schedule is changed via API, the old APScheduler job is removed
+        and a new one registered immediately (no server restart required).
+        """
         db_config = await self.db.get(PluginConfig, plugin_id)
         if not db_config:
             raise PluginNotFoundError(plugin_id)
+
+        old_schedule = db_config.schedule
         db_config.schedule = schedule
         await self.db.commit()
+
+        # Update APScheduler job reactively
+        try:
+            from ..core.scheduler import get_central_scheduler, JobCategory, parse_cron_string
+
+            scheduler = get_central_scheduler()
+            job_id = f"plugin_{plugin_id}"
+
+            # Remove old job (returns False if not present — no error)
+            scheduler.remove_job(job_id, category=JobCategory.CUSTOM)
+
+            # Register new job if schedule is set
+            if schedule:
+                cron_dict = parse_cron_string(schedule)
+
+                async def _execute(pid=plugin_id):
+                    from ..db.session import get_session
+                    from ..autoops.core.plugin_registry import PluginRegistry
+                    from ..autoops.core.base_plugin import PluginContext
+
+                    async for session in get_session():
+                        registry = PluginRegistry()
+                        registry.discover_plugins()
+                        ps = PluginService(session, registry)
+                        context = PluginContext(
+                            trigger_source="schedule",
+                        )
+                        await ps.execute_plugin(plugin_id=pid, user_id=None, context=context)
+                        break
+
+                scheduler.add_cron_job(
+                    job_id=job_id,
+                    func=_execute,
+                    cron_expression=cron_dict,
+                    category=JobCategory.CUSTOM,
+                )
+
+            logger.info(f"Plugin '{plugin_id}' schedule updated: {old_schedule} → {schedule}")
+        except RuntimeError:
+            # Scheduler not initialized (e.g., during tests)
+            logger.debug(f"Plugin '{plugin_id}' schedule saved to DB but scheduler not available")
+
         return db_config
+
+    @staticmethod
+    async def _broadcast_ws(event_type: str, data: dict) -> None:
+        """Best-effort WebSocket broadcast for plugin events."""
+        try:
+            from ..websocket.manager import WebSocketManager
+
+            ws_manager = await WebSocketManager.get_instance()
+            await ws_manager.broadcast(event_type, data)
+        except Exception as e:
+            logger.debug(f"WebSocket broadcast '{event_type}' skipped: {e}")
 
     async def get_scheduled_plugins(self) -> list[PluginConfig]:
         """Get all plugins that have a schedule configured."""
@@ -304,10 +455,24 @@ def _serialize_plugin_result(result: PluginResult) -> dict[str, Any]:
                 "details": a.details,
                 "result": a.result,
                 "severity": a.severity.value,
+                "api_endpoint": a.api_endpoint,
+                "api_method": a.api_method,
+                "api_response_code": a.api_response_code,
             }
             for a in result.actions
         ],
         "errors": result.errors,
         "warnings": result.warnings,
         "data": result.data,
+        "needs_user_input": result.needs_user_input,
+        "questions": [
+            {
+                "question": q.question,
+                "options": q.options,
+                "default": q.default,
+                "required": q.required,
+                "context": q.context,
+            }
+            for q in result.questions
+        ],
     }

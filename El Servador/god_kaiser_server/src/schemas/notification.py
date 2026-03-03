@@ -325,3 +325,54 @@ class TestEmailResponse(BaseResponse):
 
     provider: Optional[str] = Field(None, description="Email provider used (Resend or SMTP)")
     recipient: Optional[str] = Field(None, description="Recipient email address")
+
+
+# =============================================================================
+# Email Log Schemas (Phase C V1.1)
+# =============================================================================
+
+
+class EmailLogResponse(BaseModel):
+    """Schema for a single email log entry."""
+
+    id: uuid.UUID
+    notification_id: Optional[uuid.UUID] = None
+    to_address: str
+    subject: str
+    template: Optional[str] = None
+    provider: str
+    status: str
+    sent_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    retry_count: int = 0
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EmailLogBrief(BaseModel):
+    """Brief email log for embedding in notification responses."""
+
+    status: str
+    provider: str
+    sent_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EmailLogListResponse(BaseResponse):
+    """Paginated list of email logs."""
+
+    data: List[EmailLogResponse] = Field(default_factory=list)
+    pagination: PaginationMeta
+
+
+class EmailLogStatsResponse(BaseResponse):
+    """Email sending statistics."""
+
+    total: int = 0
+    sent: int = 0
+    failed: int = 0
+    by_status: Dict[str, int] = Field(default_factory=dict)
+    by_provider: Dict[str, int] = Field(default_factory=dict)

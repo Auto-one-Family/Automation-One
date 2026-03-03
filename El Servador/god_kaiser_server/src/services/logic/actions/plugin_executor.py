@@ -3,6 +3,9 @@ Plugin Action Executor — Runs AutoOps plugins as Logic Rule actions.
 
 Phase 4C.3.1: New action type 'plugin' / 'autoops_trigger' in the Logic Engine.
 When a logic rule fires, it can trigger any registered AutoOps plugin.
+
+Uses session_factory pattern (like DiagnosticsActionExecutor) to avoid
+holding a stale DB session across the application lifecycle.
 """
 
 from typing import Dict
@@ -22,8 +25,14 @@ logger = get_logger(__name__)
 class PluginActionExecutor(BaseActionExecutor):
     """Executes an AutoOps plugin as a Logic Rule action."""
 
-    def __init__(self, plugin_service: PluginService):
-        self.plugin_service = plugin_service
+    def __init__(self, session_factory=None):
+        """Initialize with async session factory for PluginService.
+
+        Args:
+            session_factory: Async generator factory (e.g. get_session).
+                Each execution creates a fresh PluginService with a new session.
+        """
+        self._session_factory = session_factory
 
     def supports(self, action_type: str) -> bool:
         """Support both 'plugin' and 'autoops_trigger' action types."""
@@ -38,6 +47,12 @@ class PluginActionExecutor(BaseActionExecutor):
                 message="Missing 'plugin_id' in action config",
             )
 
+        if not self._session_factory:
+            return ActionResult(
+                success=False,
+                message="PluginActionExecutor: no session factory configured",
+            )
+
         plugin_context = PluginContext(
             trigger_source="logic_rule",
             trigger_rule_id=context.get("rule_id"),
@@ -46,21 +61,28 @@ class PluginActionExecutor(BaseActionExecutor):
         )
 
         try:
-            execution = await self.plugin_service.execute_plugin(
-                plugin_id=plugin_id,
-                user_id=None,  # System trigger, no user
-                context=plugin_context,
-            )
+            from ....autoops.core.plugin_registry import PluginRegistry
 
-            return ActionResult(
-                success=execution.status == "success",
-                message=f"Plugin '{plugin_id}' executed: {execution.status}",
-                data={
-                    "execution_id": str(execution.id),
-                    "status": execution.status,
-                    "duration_seconds": execution.duration_seconds,
-                },
-            )
+            registry = PluginRegistry()
+
+            async for session in self._session_factory():
+                plugin_service = PluginService(session, registry)
+                execution = await plugin_service.execute_plugin(
+                    plugin_id=plugin_id,
+                    user_id=None,  # System trigger, no user
+                    context=plugin_context,
+                )
+
+                return ActionResult(
+                    success=execution.status == "success",
+                    message=f"Plugin '{plugin_id}' executed: {execution.status}",
+                    data={
+                        "execution_id": str(execution.id),
+                        "status": execution.status,
+                        "duration_seconds": execution.duration_seconds,
+                    },
+                )
+
         except PluginNotFoundError:
             return ActionResult(
                 success=False,
@@ -77,3 +99,8 @@ class PluginActionExecutor(BaseActionExecutor):
                 success=False,
                 message=f"Plugin execution failed: {str(e)}",
             )
+
+        return ActionResult(
+            success=False,
+            message="PluginActionExecutor: no session available",
+        )

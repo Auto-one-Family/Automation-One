@@ -39,6 +39,30 @@ from .logging_config import get_logger
 logger = get_logger(__name__)
 
 
+def parse_cron_string(cron: str) -> dict[str, str]:
+    """Parse 5-field cron string to APScheduler dict.
+
+    Args:
+        cron: "minute hour day month day_of_week" (e.g., "0 3 * * *")
+
+    Returns:
+        Dict with minute, hour, day, month, day_of_week keys (only non-wildcard fields).
+
+    Raises:
+        ValueError: If cron string does not have exactly 5 fields.
+    """
+    parts = cron.strip().split()
+    if len(parts) != 5:
+        raise ValueError(f"Invalid cron expression: '{cron}' (expected 5 fields, got {len(parts)})")
+
+    keys = ["minute", "hour", "day", "month", "day_of_week"]
+    result: dict[str, str] = {}
+    for key, value in zip(keys, parts):
+        if value != "*":
+            result[key] = value  # APScheduler accepts strings like "0", "3", "*/5"
+    return result
+
+
 class JobCategory(str, Enum):
     """Kategorien für Jobs - bestimmt Prefix der Job-ID."""
 

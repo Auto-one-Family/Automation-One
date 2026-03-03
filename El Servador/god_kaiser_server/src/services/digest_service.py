@@ -17,6 +17,7 @@ from typing import Optional
 
 from ..core.logging_config import get_logger
 from ..core.metrics import increment_digest_processed, observe_digest_batch_size
+from ..db.repositories.email_log_repo import EmailLogRepository
 from ..db.repositories.notification_repo import (
     NotificationPreferencesRepository,
     NotificationRepository,
@@ -60,6 +61,7 @@ class DigestService:
                 prefs_repo = NotificationPreferencesRepository(session)
                 notification_repo = NotificationRepository(session)
                 user_repo = UserRepository(session)
+                email_log_repo = EmailLogRepository(session)
 
                 # Get all users with email enabled
                 all_prefs = await prefs_repo.get_all_with_email_enabled()
@@ -113,11 +115,25 @@ class DigestService:
                         digest_period = f"{hours} hour{'s' if hours > 1 else ''}"
 
                     # Send digest email
+                    provider = self.email_service.provider_name
                     success = await self.email_service.send_digest(
                         to=recipient,
                         notifications=digest_items,
                         digest_period=digest_period,
                     )
+
+                    # Log email send attempt (Phase C V1.1)
+                    try:
+                        await email_log_repo.log_send(
+                            to_address=recipient,
+                            subject=f"AutomationOne Digest ({len(pending)} alerts)",
+                            provider=provider,
+                            status="sent" if success else "failed",
+                            template="digest",
+                            error_message=None if success else "Digest send failed",
+                        )
+                    except Exception as log_err:
+                        logger.error(f"Failed to log digest email: {log_err}")
 
                     if success:
                         # Mark as digest_sent

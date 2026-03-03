@@ -186,6 +186,39 @@ class DiagnosticsService:
         )
         return result.scalar_one_or_none()
 
+    async def cleanup_old_reports(self, max_age_days: int = 90) -> int:
+        """Archive diagnostic reports older than max_age_days.
+
+        Archives by setting `checks` JSON to NULL while keeping
+        summary fields (overall_status, started_at, triggered_by).
+        This preserves the history timeline without consuming storage.
+
+        Requires: checks column must be nullable (Alembic migration).
+
+        Args:
+            max_age_days: Reports older than this are archived. Default 90.
+
+        Returns:
+            Number of archived reports.
+        """
+        from sqlalchemy import update
+
+        cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
+
+        stmt = (
+            update(DiagnosticReportModel)
+            .where(DiagnosticReportModel.started_at < cutoff)
+            .where(DiagnosticReportModel.checks.isnot(None))
+            .values(checks=None)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+
+        archived = result.rowcount
+        if archived > 0:
+            logger.info(f"Archived {archived} diagnostic reports older than {max_age_days} days")
+        return archived
+
     # ─── Check Implementations ─────────────────────────────────────
 
     async def _check_server(self) -> CheckResult:
@@ -418,13 +451,21 @@ class DiagnosticsService:
             metrics={"total": total},
         )
 
+    # Health endpoints per monitoring service (must match docker-compose healthchecks)
+    MONITORING_HEALTH_PATHS = {
+        "grafana": "/api/health",
+        "prometheus": "/-/ready",
+        "loki": "/ready",
+    }
+
     async def _check_monitoring(self) -> CheckResult:
         """Monitoring: Grafana, Prometheus, Loki availability."""
         results: dict[str, str] = {}
 
         for name, url in self.MONITORING_URLS.items():
             try:
-                endpoint = f"{url}/api/health" if name == "grafana" else f"{url}/ready"
+                path = self.MONITORING_HEALTH_PATHS[name]
+                endpoint = f"{url}{path}"
                 async with httpx.AsyncClient(timeout=3.0) as client:
                     resp = await client.get(endpoint)
                     results[name] = "up" if resp.status_code == 200 else "down"

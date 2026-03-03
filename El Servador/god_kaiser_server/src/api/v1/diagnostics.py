@@ -93,8 +93,14 @@ _CHECK_DISPLAY_NAMES = {
 
 
 def _build_diagnostics_service(db: DBSession) -> DiagnosticsService:
-    """Build DiagnosticsService for request scope."""
-    return DiagnosticsService(session=db)
+    """Build DiagnosticsService for request scope with plugin_service."""
+    from ...autoops.core.plugin_registry import PluginRegistry
+    from ...services.plugin_service import PluginService
+
+    registry = PluginRegistry()
+    registry.discover_plugins()
+    plugin_service = PluginService(db, registry)
+    return DiagnosticsService(session=db, plugin_service=plugin_service)
 
 
 def _report_to_response(report) -> DiagnosticReportResponse:

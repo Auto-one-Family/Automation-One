@@ -77,6 +77,12 @@ class ServerSettings(BaseSettings):
     reload: bool = Field(default=True, alias="SERVER_RELOAD")
     workers: int = Field(default=4, alias="SERVER_WORKERS", ge=1, le=32)
     log_level: str = Field(default="info", alias="SERVER_LOG_LEVEL")
+    internal_url: str = Field(
+        default="http://localhost:8000",
+        alias="SERVER_INTERNAL_URL",
+        description="Internal URL for self-referencing API calls (e.g. plugin execution). "
+        "In Docker: http://el-servador:8000",
+    )
 
     @field_validator("log_level")
     @classmethod
@@ -531,6 +537,29 @@ class MaintenanceSettings(BaseSettings):
     )
 
     # ─────────────────────────────────────────────────────────
+    # DIAGNOSTIC SCHEDULE (Phase B V2.1)
+    # ─────────────────────────────────────────────────────────
+    diagnostic_schedule_enabled: bool = Field(
+        default=True,
+        alias="DIAGNOSTIC_SCHEDULE_ENABLED",
+        description="Enable daily automatic diagnostic run",
+    )
+    diagnostic_schedule_hour: int = Field(
+        default=4,
+        alias="DIAGNOSTIC_SCHEDULE_HOUR",
+        ge=0,
+        le=23,
+        description="Hour (UTC) for daily diagnostic (04:00 — after cleanup 03:00/03:30)",
+    )
+    diagnostic_report_retention_days: int = Field(
+        default=90,
+        alias="DIAGNOSTIC_REPORT_RETENTION_DAYS",
+        ge=7,
+        le=3650,
+        description="Days to keep full diagnostic reports before archiving (only summary kept)",
+    )
+
+    # ─────────────────────────────────────────────────────────
     # ADVANCED SAFETY FEATURES
     # ─────────────────────────────────────────────────────────
     cleanup_require_confirmation: bool = Field(
@@ -578,6 +607,78 @@ class MaintenanceSettings(BaseSettings):
                 f"COMMAND_HISTORY_RETENTION_DAYS={v} ist sehr kurz! " "Empfohlen: >= 7 Tage"
             )
         return v
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+
+class DatabaseBackupSettings(BaseSettings):
+    """
+    Database Backup Configuration (Phase A V5.1).
+
+    Controls automated PostgreSQL backups via pg_dump.
+    Backup runs BEFORE cleanup jobs to ensure data safety.
+    """
+
+    enabled: bool = Field(
+        default=True,
+        alias="DB_BACKUP_ENABLED",
+        description="Enable automated database backups (Default: True)",
+    )
+    hour: int = Field(
+        default=2,
+        alias="DB_BACKUP_HOUR",
+        ge=0,
+        le=23,
+        description="Hour of day for scheduled backup (Default: 02:00 — before cleanup at 03:00)",
+    )
+    minute: int = Field(
+        default=0,
+        alias="DB_BACKUP_MINUTE",
+        ge=0,
+        le=59,
+        description="Minute of hour for scheduled backup (Default: 0)",
+    )
+    max_age_days: int = Field(
+        default=7,
+        alias="DB_BACKUP_MAX_AGE_DAYS",
+        ge=1,
+        le=365,
+        description="Days to keep backups before auto-cleanup (Default: 7)",
+    )
+    max_count: int = Field(
+        default=20,
+        alias="DB_BACKUP_MAX_COUNT",
+        ge=1,
+        le=100,
+        description="Maximum number of backups to retain (Default: 20)",
+    )
+    pg_host: str = Field(
+        default="postgres",
+        alias="DB_BACKUP_PG_HOST",
+        description="PostgreSQL host for pg_dump (Docker DNS service name)",
+    )
+    pg_port: int = Field(
+        default=5432,
+        alias="DB_BACKUP_PG_PORT",
+        ge=1,
+        le=65535,
+        description="PostgreSQL port for pg_dump",
+    )
+    pg_database: str = Field(
+        default="god_kaiser_db",
+        alias="DB_BACKUP_PG_DATABASE",
+        description="PostgreSQL database name for pg_dump",
+    )
+    pg_user: str = Field(
+        default="god_kaiser",
+        alias="DB_BACKUP_PG_USER",
+        description="PostgreSQL user for pg_dump",
+    )
+    pg_password: str = Field(
+        default="password",
+        alias="DB_BACKUP_PG_PASSWORD",
+        description="PostgreSQL password for pg_dump (passed via PGPASSWORD env var)",
+    )
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -800,6 +901,7 @@ class Settings(BaseSettings):
     notification: NotificationSettings = NotificationSettings()
     development: DevelopmentSettings = DevelopmentSettings()
     maintenance: MaintenanceSettings = MaintenanceSettings()
+    backup: DatabaseBackupSettings = DatabaseBackupSettings()
     resilience: ResilienceSettings = ResilienceSettings()
 
     @property

@@ -541,15 +541,7 @@ class DebugFixPlugin(AutoOpsPlugin):
             or device.get("is_mock", False)
         )
 
-    def _extract_list(self, response: dict, key: str) -> list:
-        """Extract a list from various API response formats."""
-        if isinstance(response, list):
-            return response
-        for k in (key, "data", "items", "results"):
-            val = response.get(k)
-            if isinstance(val, list):
-                return val
-        return []
+    # _extract_list() inherited from AutoOpsPlugin base class
 
     def _count_by_category(self, issues: list[DiagnosticIssue]) -> dict[str, int]:
         counts: dict[str, int] = {}
