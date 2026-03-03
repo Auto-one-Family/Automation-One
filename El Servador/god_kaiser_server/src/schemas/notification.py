@@ -27,6 +27,7 @@ from .common import BaseResponse, PaginationMeta
 # =============================================================================
 
 NOTIFICATION_SEVERITIES = ["critical", "warning", "info"]
+ALERT_STATUSES = ["active", "acknowledged", "resolved"]
 NOTIFICATION_SOURCES = [
     "logic_engine",
     "mqtt_handler",
@@ -99,6 +100,11 @@ class NotificationCreate(BaseModel):
         max_length=64,
         description="Unique fingerprint for alert deduplication (e.g., Grafana alert fingerprint)",
     )
+    correlation_id: Optional[str] = Field(
+        None,
+        max_length=128,
+        description="Correlation ID for grouping related alerts (e.g., grafana_{fingerprint})",
+    )
 
     @field_validator("severity")
     @classmethod
@@ -155,6 +161,12 @@ class NotificationResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     read_at: Optional[datetime] = None
+    # Alert Lifecycle (Phase 4B)
+    status: str = Field(default="active", description="Alert lifecycle status")
+    acknowledged_at: Optional[datetime] = None
+    acknowledged_by: Optional[int] = None
+    resolved_at: Optional[datetime] = None
+    correlation_id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -202,6 +214,34 @@ class NotificationSendRequest(BaseModel):
         if v not in NOTIFICATION_SEVERITIES:
             raise ValueError(f"severity must be one of {NOTIFICATION_SEVERITIES}")
         return v
+
+
+# =============================================================================
+# Alert Lifecycle Schemas (Phase 4B)
+# =============================================================================
+
+
+class AlertStatsResponse(BaseResponse):
+    """Alert statistics for dashboard display."""
+
+    active_count: int = Field(0, ge=0, description="Number of active alerts")
+    acknowledged_count: int = Field(0, ge=0, description="Number of acknowledged alerts")
+    resolved_today_count: int = Field(0, ge=0, description="Alerts resolved today")
+    critical_active: int = Field(0, ge=0, description="Active critical alerts")
+    warning_active: int = Field(0, ge=0, description="Active warning alerts")
+    mean_time_to_acknowledge_s: Optional[float] = Field(
+        None, description="Average time to acknowledge (seconds)"
+    )
+    mean_time_to_resolve_s: Optional[float] = Field(
+        None, description="Average time to resolve (seconds)"
+    )
+
+
+class AlertActiveListResponse(BaseResponse):
+    """List of active alerts with pagination."""
+
+    data: List[NotificationResponse] = Field(default_factory=list)
+    pagination: PaginationMeta
 
 
 # =============================================================================

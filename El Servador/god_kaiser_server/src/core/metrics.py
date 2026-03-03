@@ -324,6 +324,25 @@ EMAIL_ERRORS_TOTAL = Counter(
     ["provider", "error_type"],
 )
 
+# Phase 4B: Alert Lifecycle Metrics (ISA-18.2)
+ALERTS_ACKNOWLEDGED_TOTAL = Counter(
+    "god_kaiser_alerts_acknowledged_total",
+    "Total alerts acknowledged",
+    ["severity"],
+)
+
+ALERTS_RESOLVED_TOTAL = Counter(
+    "god_kaiser_alerts_resolved_total",
+    "Total alerts resolved",
+    ["severity", "resolution_type"],
+)
+
+ALERTS_ACTIVE_GAUGE = Gauge(
+    "god_kaiser_alerts_active",
+    "Currently active alerts",
+    ["severity"],
+)
+
 # Track server start time
 _server_start_time: float = time.time()
 _metrics_initialized: bool = False
@@ -378,6 +397,13 @@ def init_metrics() -> None:
     ALERT_SUPPRESSION_ACTIVE.labels(entity_type="device")
     EMAIL_ERRORS_TOTAL.labels(provider="resend", error_type="connection")
     EMAIL_ERRORS_TOTAL.labels(provider="smtp", error_type="connection")
+
+    # Phase 4B: Alert lifecycle metrics
+    for sev in ("critical", "warning", "info"):
+        ALERTS_ACKNOWLEDGED_TOTAL.labels(severity=sev)
+        ALERTS_RESOLVED_TOTAL.labels(severity=sev, resolution_type="manual")
+        ALERTS_RESOLVED_TOTAL.labels(severity=sev, resolution_type="auto")
+        ALERTS_ACTIVE_GAUGE.labels(severity=sev)
 
     logger.info("Prometheus metrics initialized (all label combinations visible)")
 
@@ -586,6 +612,26 @@ def increment_notification_read(count: int = 1) -> None:
 def increment_email_error(provider: str, error_type: str) -> None:
     """Increment email error counter. Called from EmailService on failures."""
     EMAIL_ERRORS_TOTAL.labels(provider=provider, error_type=error_type).inc()
+
+
+# =========================================================================
+# Alert Lifecycle metric helpers (Phase 4B)
+# =========================================================================
+
+
+def increment_alert_acknowledged(severity: str) -> None:
+    """Increment acknowledged counter. Called from notifications.py acknowledge endpoint."""
+    ALERTS_ACKNOWLEDGED_TOTAL.labels(severity=severity).inc()
+
+
+def increment_alert_resolved(severity: str, resolution_type: str = "manual") -> None:
+    """Increment resolved counter. Called from notifications.py resolve endpoint."""
+    ALERTS_RESOLVED_TOTAL.labels(severity=severity, resolution_type=resolution_type).inc()
+
+
+def update_alerts_active_gauge(severity: str, count: int) -> None:
+    """Set active alerts gauge. Called from metrics update cycle."""
+    ALERTS_ACTIVE_GAUGE.labels(severity=severity).set(count)
 
 
 async def update_all_metrics_async(get_session_func: callable) -> None:

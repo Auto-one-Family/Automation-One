@@ -109,7 +109,7 @@ class NotificationRouter:
                 return None
 
         # Step 1: ALWAYS persist to DB
-        db_notification = await self.notification_repo.create(
+        create_kwargs = dict(
             user_id=user_id,
             channel=notification.channel,
             severity=notification.severity,
@@ -121,6 +121,11 @@ class NotificationRouter:
             parent_notification_id=notification.parent_notification_id,
             fingerprint=notification.fingerprint,
         )
+        # Phase 4B: Add correlation_id if provided
+        if notification.correlation_id:
+            create_kwargs["correlation_id"] = notification.correlation_id
+
+        db_notification = await self.notification_repo.create(**create_kwargs)
 
         logger.info(
             f"Notification created: id={db_notification.id}, "
@@ -166,6 +171,7 @@ class NotificationRouter:
                 metadata=notification.metadata,
                 source=notification.source,
                 parent_notification_id=notification.parent_notification_id,
+                correlation_id=notification.correlation_id,
             )
             result = await self.route(user_notification)
             if result and first_notification is None:
@@ -190,6 +196,14 @@ class NotificationRouter:
                 "created_at": (
                     notification.created_at.isoformat() if notification.created_at else None
                 ),
+                # Phase 4B: Alert lifecycle fields
+                "status": notification.status,
+                "parent_notification_id": (
+                    str(notification.parent_notification_id)
+                    if notification.parent_notification_id
+                    else None
+                ),
+                "correlation_id": notification.correlation_id,
             }
             await ws_manager.broadcast("notification_new", data)
             increment_ws_notification_broadcast("notification_new")
@@ -350,6 +364,19 @@ class NotificationRouter:
                 "is_read": notification.is_read,
                 "is_archived": notification.is_archived,
                 "read_at": notification.read_at.isoformat() if notification.read_at else None,
+                # Phase 4B: Alert lifecycle fields
+                "status": notification.status,
+                "acknowledged_at": (
+                    notification.acknowledged_at.isoformat()
+                    if notification.acknowledged_at
+                    else None
+                ),
+                "acknowledged_by": notification.acknowledged_by,
+                "resolved_at": (
+                    notification.resolved_at.isoformat()
+                    if notification.resolved_at
+                    else None
+                ),
             }
             await ws_manager.broadcast("notification_updated", data)
             logger.debug(f"WebSocket broadcast: notification_updated for {notification.id}")

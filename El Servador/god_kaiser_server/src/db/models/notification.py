@@ -71,6 +71,18 @@ class Notification(Base, TimestampMixin):
             unique=True,
             postgresql_where=text("fingerprint IS NOT NULL"),
         ),
+        # Phase 4B: Alert lifecycle indexes
+        Index(
+            "ix_notifications_status_severity",
+            "status",
+            "severity",
+            postgresql_where=text("resolved_at IS NULL"),
+        ),
+        Index(
+            "ix_notifications_correlation",
+            "correlation_id",
+            postgresql_where=text("correlation_id IS NOT NULL"),
+        ),
     )
 
     # Primary Key
@@ -183,9 +195,44 @@ class Notification(Base, TimestampMixin):
         doc="Timestamp when user read the notification",
     )
 
+    # Alert Lifecycle (ISA-18.2: active → acknowledged → resolved)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="active",
+        server_default="active",
+        doc="Alert lifecycle status (active, acknowledged, resolved)",
+    )
+
+    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Timestamp when alert was acknowledged",
+    )
+
+    acknowledged_by: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("user_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        doc="User who acknowledged the alert",
+    )
+
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Timestamp when alert was resolved",
+    )
+
+    # Correlation ID for grouping related alerts (e.g., grafana_{fingerprint})
+    correlation_id: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        nullable=True,
+        doc="Correlation ID for grouping related alerts",
+    )
+
     def __repr__(self) -> str:
         return (
-            f"<Notification(title='{self.title}', "
+            f"<Notification(title='{self.title}', status='{self.status}', "
             f"severity='{self.severity}', source='{self.source}')>"
         )
 
@@ -198,6 +245,21 @@ class Notification(Base, TimestampMixin):
     def is_warning(self) -> bool:
         """Check if this is a warning notification."""
         return self.severity == "warning"
+
+    @property
+    def is_active(self) -> bool:
+        """Check if this alert is in active state."""
+        return self.status == "active"
+
+    @property
+    def is_acknowledged(self) -> bool:
+        """Check if this alert has been acknowledged."""
+        return self.status == "acknowledged"
+
+    @property
+    def is_resolved(self) -> bool:
+        """Check if this alert has been resolved."""
+        return self.status == "resolved"
 
 
 class NotificationPreferences(Base, TimestampMixin):
@@ -338,3 +400,19 @@ class NotificationCategory:
     MAINTENANCE = "maintenance"
     SECURITY = "security"
     SYSTEM = "system"
+
+
+# Alert Lifecycle Status Constants (ISA-18.2)
+class AlertStatus:
+    """Alert lifecycle status constants (ISA-18.2 compliant)."""
+
+    ACTIVE = "active"
+    ACKNOWLEDGED = "acknowledged"
+    RESOLVED = "resolved"
+
+    # Valid state transitions
+    VALID_TRANSITIONS = {
+        ACTIVE: {ACKNOWLEDGED, RESOLVED},
+        ACKNOWLEDGED: {RESOLVED},
+        RESOLVED: set(),  # Terminal state
+    }

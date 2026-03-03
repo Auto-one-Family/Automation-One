@@ -846,3 +846,21 @@ class NoEmailRecipientException(NotificationException):
             error_code="NO_EMAIL_RECIPIENT",
             numeric_code=5853,
         )
+
+
+class AlertInvalidStateTransition(NotificationException):
+    """Raised when an invalid alert lifecycle state transition is attempted"""
+
+    status_code = 409
+    error_code = "ALERT_INVALID_STATE_TRANSITION"
+
+    def __init__(self, current_status: str, target_status: str) -> None:
+        super().__init__(
+            message=f"Cannot transition alert from '{current_status}' to '{target_status}'",
+            error_code="ALERT_INVALID_STATE_TRANSITION",
+            details={
+                "current_status": current_status,
+                "target_status": target_status,
+            },
+            numeric_code=5860,
+        )
