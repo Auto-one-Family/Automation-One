@@ -30,14 +30,16 @@
 - Korrekt typisiert, reaktiv
 - **Zentrale Datenquelle** — kein neues Data-Fetching noetig
 
-**DataTable.vue (`El Frontend: src/shared/design/`):**
-- Generische Tabellenkomponente, bereits vorhanden
-- Pagination, Sortierung vorhanden (Umfang pruefen)
+**DataTable.vue (`El Frontend: src/components/database/DataTable.vue`):**
+- [Korrektur] Pfad ist NICHT `shared/design/` sondern `components/database/`. Die Komponente ist an die DatabaseTab-View gekoppelt (importiert `ColumnSchema`/`SortOrder` aus `@/api/database`, hat DB-spezifische Logik wie UUID-Formatierung, max 8 Spalten hardcoded). Fuer das Inventar sollte eine EIGENE InventoryTable gebaut werden — DataTable ist NICHT generisch genug.
+- Sortierung vorhanden (via emit), aber keine Pagination, kein Column-Visibility-Toggle, kein Conditional Styling
 
 **JSONB-Felder (Backend):**
 - `SensorConfig.thresholds` — JSON-Feld (Schwellenwerte, existiert)
-- `ESPDevice.runtime_stats` — JSONB-Feld (existiert seit 4A.8 Backend-Teil, bereits DONE)
-- `SensorConfig.metadata` / `ActuatorConfig.metadata` — JSONB-Felder (geplant in Block 4A.8)
+- [Korrektur] `ESPDevice.runtime_stats` — existiert NICHT. `runtime_stats` existiert nur auf `SensorConfig` und `ActuatorConfig`, NICHT auf `ESPDevice`.
+- [Korrektur] Feld-Namen heissen `sensor_metadata` (nicht `metadata`) auf SensorConfig, `actuator_metadata` auf ActuatorConfig, `device_metadata` auf ESPDevice. Alle existieren bereits als JSON-Felder.
+- `SensorConfig.runtime_stats` / `ActuatorConfig.runtime_stats` — JSON-Felder (existieren, Phase 4A.8 Migration vorhanden)
+- **Bereits vorhanden:** `DeviceMetadata` TypeScript-Interface in `El Frontend/src/types/device-metadata.ts` mit `manufacturer`, `model`, `serial_number`, `firmware_version`, `installation_date`, `notes`, `custom_fields` — das Schema-Registry-Konzept (K2) sollte darauf aufbauen.
 
 ### Was fehlt
 
@@ -81,13 +83,13 @@ Strukturierter JSON-Export pro Geraet + Zone im WoT-TD-inspirierten Format. API-
 
 | Schicht | Modul | Aenderung |
 |---------|-------|-----------|
-| Backend | `El Servador: src/db/models/zone_context.py` | **NEU** — Zone-Context DB-Modell |
-| Backend | `El Servador: src/schemas/zone_context.py` | **NEU** — Pydantic-Schemas |
-| Backend | `El Servador: src/api/v1/zone_context.py` | **NEU** — CRUD-API fuer Zone-Kontext-Daten |
-| Backend | `El Servador: src/api/v1/component_export.py` | **NEU** — AI-Ready Export-API |
-| Backend | `El Servador: src/api/v1/__init__.py` | **ERWEITERN** — Neue Router registrieren |
-| Backend | `El Servador: src/db/models/__init__.py` | **ERWEITERN** — ZoneContext-Model importieren |
-| Backend | `El Servador: alembic/versions/` | **NEU** — Migration fuer zone_context Tabelle |
+| Backend | `El Servador/god_kaiser_server/src/db/models/zone_context.py` | **NEU** — Zone-Context DB-Modell |
+| Backend | `El Servador/god_kaiser_server/src/schemas/zone_context.py` | **NEU** — Pydantic-Schemas |
+| Backend | `El Servador/god_kaiser_server/src/api/v1/zone_context.py` | **NEU** — CRUD-API fuer Zone-Kontext-Daten |
+| Backend | `El Servador/god_kaiser_server/src/api/v1/component_export.py` | **NEU** — AI-Ready Export-API |
+| Backend | `El Servador/god_kaiser_server/src/api/v1/__init__.py` | **ERWEITERN** — Neue Router registrieren |
+| Backend | `El Servador/god_kaiser_server/src/db/models/__init__.py` | **ERWEITERN** — ZoneContext-Model importieren |
+| Backend | `El Servador/god_kaiser_server/alembic/versions/` | **NEU** — Migration fuer zone_context Tabelle |
 | Frontend | `El Frontend: src/views/SensorsView.vue` | **REWRITE** → ComponentInventoryView.vue (Route bleibt /sensors fuer Kompatibilitaet) |
 | Frontend | `El Frontend: src/components/inventory/InventoryTable.vue` | **NEU** — Flache Geraete-Tabelle |
 | Frontend | `El Frontend: src/components/inventory/DeviceDetailPanel.vue` | **NEU** — Detail-Panel (SlideOver) |
@@ -135,40 +137,41 @@ OpenRemote Asset-Modell:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Datenquelle:** `useZoneGrouping.ts` → `allSensors` + `allActuators` → vereinigen in ein `allComponents` Array:
+**Datenquelle:** `useZoneGrouping.ts` → `allSensors` + `allActuators` → vereinigen in ein `allComponents` Array.
+
+[Korrektur] Die tatsaechlichen Felder in `SensorWithContext` und `ActuatorWithContext` weichen vom Plan ab:
+
+| Plan-Feld | Echtes Feld | Status |
+|-----------|-------------|--------|
+| `s.id` | NICHT vorhanden | Sensor hat kein `id`-Feld — muss aus `esp_id + gpio` generiert werden |
+| `s.latest_value` | `s.raw_value` | Feld heisst `raw_value` (number) |
+| `s.is_online` | NICHT vorhanden | Muss aus `s.esp_state` abgeleitet werden (z.B. `esp_state === 'online'`) |
+| `s.last_seen` | `s.last_read` | Feld heisst `last_read` (string \| null \| undefined) |
+| `s.metadata` | NICHT vorhanden | Composable liefert KEINE metadata/runtime_stats — muss separat aus espStore geholt werden |
+| `a.current_state` | `a.state` (boolean) + `a.pwm_value` | Aktor hat `state: boolean` und `pwm_value: number` |
+
+**Empfehlung:** `useZoneGrouping.ts` erweitern oder ein neues `useInventoryData.ts` Composable erstellen, das die fehlenden Felder (`metadata`, `runtime_stats`) aus dem espStore-Device-Objekt mitliest. Die Sensoren/Aktoren im espStore sind verschachtelt in `esp.sensors[]` / `esp.actuators[]` und haben dort ggf. die JSON-Felder.
 
 ```typescript
+// Korrigiertes Mapping basierend auf echten Feldern:
 const allComponents = computed<ComponentItem[]>(() => {
   const sensors: ComponentItem[] = allSensors.value.map(s => ({
-    id: s.id,
-    name: s.name,
+    id: `${s.esp_id}_gpio${s.gpio}`,  // Synthetische ID
+    name: s.name ?? `${s.sensor_type} (GPIO ${s.gpio})`,
     type: 'sensor' as const,
-    sensorType: s.sensor_type,  // sht31, bme280, bh1750...
+    sensorType: s.sensor_type,
     zone: s.zone_name,
     zoneId: s.zone_id,
     espId: s.esp_id,
-    currentValue: s.latest_value,
+    gpio: s.gpio,
+    currentValue: s.raw_value,
     unit: s.unit,
-    status: s.is_online ? 'online' : 'offline',
-    lastSeen: s.last_seen,
-    metadata: s.metadata ?? {},     // aus Block 4A.8
-    runtimeStats: s.runtime_stats ?? {},
+    quality: s.quality,
+    status: s.esp_state === 'online' ? 'online' : 'offline',
+    lastSeen: s.last_read ?? null,
+    // metadata + runtimeStats muessen separat aus espStore geladen werden
   }))
-  const actuators: ComponentItem[] = allActuators.value.map(a => ({
-    id: a.id,
-    name: a.name,
-    type: 'actuator' as const,
-    sensorType: a.actuator_type,
-    zone: a.zone_name,
-    zoneId: a.zone_id,
-    espId: a.esp_id,
-    currentValue: a.current_state,
-    unit: '',
-    status: a.is_online ? 'online' : 'offline',
-    lastSeen: a.last_seen,
-    metadata: a.metadata ?? {},
-    runtimeStats: a.runtime_stats ?? {},
-  }))
+  // ... analog fuer actuators mit state/pwm_value/emergency_stopped
   return [...sensors, ...actuators]
 })
 ```
@@ -308,15 +311,20 @@ W3C WoT Thing Model: Template-Konzept — definiert Daten-Schema ohne Kommunikat
 
 **Aufbau:**
 
+[Korrektur] Sensor-Typen muessen der Server-Registry (`sensor_type_registry.py`) entsprechen. Die echten normalisierten Typen sind: `sht31_temp`, `sht31_humidity`, `bmp280_pressure`, `bmp280_temp`, `ds18b20`, `moisture`, `ph`, `ec`, `mhz19_co2`, `scd30_co2`, `light`, `flow`. Multi-Value-Devices: `sht31` (temp+humidity), `bmp280` (pressure+temp). Der Plan verwendet `bme280` — das heisst im System `bmp280`. `bh1750` wird als `light` normalisiert. Schema-Dateien sollten nach Device-Typ (nicht nach normalisiertem Sensor-Typ) benannt sein, also `sht31`, `bmp280`, `ds18b20` etc.
+
 ```
 device-schemas/
 ├── index.ts           # Registry: deviceType → Schema Mapping
 ├── base.schema.json   # Basis-Schema (alle Geraete)
 ├── sensor/
-│   ├── sht31.schema.json
-│   ├── bme280.schema.json
-│   ├── bh1750.schema.json
-│   └── soil-moisture.schema.json
+│   ├── sht31.schema.json       # Temp + Humidity (I2C)
+│   ├── bmp280.schema.json      # Pressure + Temp (I2C) [NICHT bme280!]
+│   ├── ds18b20.schema.json     # Temperature (OneWire)
+│   ├── moisture.schema.json    # Soil Moisture (Analog)
+│   ├── ph.schema.json          # pH Sensor
+│   ├── ec.schema.json          # EC Sensor
+│   └── light.schema.json       # Light (bh1750/tsl2561)
 ├── actuator/
 │   ├── relay.schema.json
 │   ├── pwm.schema.json
@@ -422,13 +430,15 @@ device-schemas/
 
 ### K2.2: Schema-Registry Index
 
-**Datei:** `El Frontend: src/config/device-schemas/index.ts`
+**Datei:** `El Frontend/src/config/device-schemas/index.ts`
 
 ```typescript
 import baseSchema from './base.schema.json'
 import sht31Schema from './sensor/sht31.schema.json'
-import bme280Schema from './sensor/bme280.schema.json'
-import bh1750Schema from './sensor/bh1750.schema.json'
+import bmp280Schema from './sensor/bmp280.schema.json'  // [Korrektur] bmp280, nicht bme280
+import ds18b20Schema from './sensor/ds18b20.schema.json'
+import moistureSchema from './sensor/moisture.schema.json'
+import lightSchema from './sensor/light.schema.json'     // [Korrektur] bh1750 wird als 'light' normalisiert
 import relaySchema from './actuator/relay.schema.json'
 // ... weitere
 
@@ -440,10 +450,12 @@ export interface DeviceSchema {
 }
 
 const registry: Record<string, DeviceSchema> = {
-  // Sensoren
+  // Sensoren — IDs muessen zu sensor_type_registry.py passen
   sht31: { id: 'sht31', schema: sht31Schema, displayName: 'SHT31 (Temp/Hum)', category: 'sensor' },
-  bme280: { id: 'bme280', schema: bme280Schema, displayName: 'BME280 (Temp/Hum/Press)', category: 'sensor' },
-  bh1750: { id: 'bh1750', schema: bh1750Schema, displayName: 'BH1750 (Licht)', category: 'sensor' },
+  bmp280: { id: 'bmp280', schema: bmp280Schema, displayName: 'BMP280 (Pressure/Temp)', category: 'sensor' },  // [Korrektur]
+  ds18b20: { id: 'ds18b20', schema: ds18b20Schema, displayName: 'DS18B20 (Temp)', category: 'sensor' },
+  moisture: { id: 'moisture', schema: moistureSchema, displayName: 'Moisture (Boden)', category: 'sensor' },
+  light: { id: 'light', schema: lightSchema, displayName: 'Lichtsensor (BH1750)', category: 'sensor' },  // [Korrektur]
   // Aktoren
   relay: { id: 'relay', schema: relaySchema, displayName: 'Relay', category: 'actuator' },
   // Fallback
@@ -517,7 +529,7 @@ SAP/ThingWorx ERP-Integration: Pro-Asset Business-Metadaten neben technischen Da
 
 ### K3.1: Datenbank-Schema
 
-**Datei:** `El Servador: src/db/models/zone_context.py`
+**Datei:** `El Servador/god_kaiser_server/src/db/models/zone_context.py`
 
 ```python
 class ZoneContext(Base, TimestampMixin):
@@ -571,7 +583,9 @@ GROWTH_PHASES = [
 
 ### K3.2: REST-API
 
-**Datei:** `El Servador: src/api/v1/zone_context.py` — `router = APIRouter(prefix="/v1/zones/context", tags=["zone-context"])`
+**Datei:** `El Servador/god_kaiser_server/src/api/v1/zone_context.py` — `router = APIRouter(prefix="/v1/zones/context", tags=["zone-context"])`
+
+[Korrektur] Bestehendes Pattern: Zone-API nutzt Prefix `/v1/zone` (Singular). Neuer Router sollte konsistent sein: `/v1/zone/context` (Singular) statt `/v1/zones/context` (Plural). Alternativ als Erweiterung des bestehenden zone.py Routers.
 
 | Methode | Endpoint | Beschreibung |
 |---------|----------|-------------|
@@ -664,7 +678,7 @@ Smart Districts Paper (2025): Sensor-Metadaten als Vector Index + Knowledge Grap
 
 ### K4.1: Component Export API
 
-**Datei:** `El Servador: src/api/v1/component_export.py` — `router = APIRouter(prefix="/v1/export", tags=["export"])`
+**Datei:** `El Servador/god_kaiser_server/src/api/v1/component_export.py` — `router = APIRouter(prefix="/v1/export", tags=["export"])`
 
 | Methode | Endpoint | Beschreibung |
 |---------|----------|-------------|
@@ -857,7 +871,7 @@ Empfohlene Reihenfolge:
 
 ## Offene Entscheidungen (Agent klaert bei Implementierung)
 
-1. **DataTable.vue wiederverwenden oder neu?** Bestehendes DataTable.vue pruefen — reicht es fuer Column-Visibility, Conditional Styling, Custom-Renderers? Falls ja: erweitern. Falls nein: eigene InventoryTable.
+1. **DataTable.vue wiederverwenden oder neu?** [GEKLAERT durch verify-plan] DataTable.vue liegt in `components/database/` (nicht `shared/design/`), ist DB-spezifisch (UUID-Formatter, max 8 Spalten hardcoded, importiert aus `@/api/database`). Entscheidung: **Eigene InventoryTable bauen.** DataTable ist NICHT generisch genug.
 2. **SchemaForm Library vs. Handgebaut?** Bei nur 7 Feldtypen (string, number, boolean, date, url, enum, textarea) ist handgebaut einfacher als eine Library-Dependency. Agent entscheidet.
 3. **Zone-Context UI-Position:** Im DeviceDetailPanel als Tab? Als eigener Bereich in der Inventar-Ansicht? Als separater View? Am sinnvollsten: Zone-Header in der Tabelle klickbar → ZoneContextEditor als SlideOver.
 4. **Custom-Data Schema fuer Zone-Context:** JSON Schema fuer `custom_data` analog zu Device-Schemas? Oder freiform? Empfehlung: Freiform fuer V1, Schema spaeter.
@@ -870,8 +884,231 @@ Dieses Auftragsdokument basiert auf:
 
 | Typ | Dokument | Pfad |
 |-----|----------|------|
-| Praxis-Recherche | IoT Component Inventory & AI-Ready Metadata (28 Quellen) | `wissen/iot-automation/iot-component-inventory-ai-metadata-infrastructure-2026.md` |
-| Forschung | IoT Metadata, AI-Integration & CEA Digital Twins (8 Papers) | `wissen/iot-automation/forschung-iot-metadata-ai-integration-cea-2026.md` |
-| Bestandswissen | IoT Device Config Panel UX Patterns | `wissen/iot-automation/iot-device-config-panel-ux-patterns.md` |
-| Abhaengigkeit | Phase 4A Block 4A.8 (Hardware-Info + Runtime) | `arbeitsbereiche/automation-one/hardware-tests/auftrag-phase4a-notification-stack.md` |
-| Recherche-Bericht | Gesamtbericht der Recherche | `.claude/reports/current/recherche-bericht-component-inventory-ai-metadata-2026-03-02.md` |
+| Praxis-Recherche | IoT Component Inventory & AI-Ready Metadata (28 Quellen) | `wissen/iot-automation/iot-component-inventory-ai-metadata-infrastructure-2026.md` [TM-lokal, nicht im Repo] |
+| Forschung | IoT Metadata, AI-Integration & CEA Digital Twins (8 Papers) | `wissen/iot-automation/forschung-iot-metadata-ai-integration-cea-2026.md` [TM-lokal, nicht im Repo] |
+| Bestandswissen | IoT Device Config Panel UX Patterns | `wissen/iot-automation/iot-device-config-panel-ux-patterns.md` [TM-lokal, nicht im Repo] |
+| Abhaengigkeit | Phase 4A Block 4A.8 (Hardware-Info + Runtime) | `arbeitsbereiche/automation-one/hardware-tests/auftrag-phase4a-notification-stack.md` [TM-lokal, nicht im Repo] |
+| Recherche-Bericht | Gesamtbericht der Recherche | `.claude/reports/current/recherche-bericht-component-inventory-ai-metadata-2026-03-02.md` [NICHT vorhanden im Repo] |
+
+---
+
+## /verify-plan Ergebnis
+
+**Plan:** Komponenten-Tab Umbau zu Hardware-Inventar mit Schema-Registry, Zone-Context und AI-Export
+**Geprueft:** 18 Pfade, 0 Agents, 2 Services (Backend/Frontend), 8 API-Endpunkte, 12 Sensor-Typen
+
+### Bestaetigte Punkte
+
+- SensorsView.vue existiert unter `El Frontend/src/views/SensorsView.vue` — Route `/sensors` mit `meta: { title: 'Komponenten' }`
+- useZoneGrouping.ts existiert und liefert `allSensors`/`allActuators` als flache Arrays (korrekt beschrieben)
+- SlideOver.vue existiert unter `El Frontend/src/shared/design/primitives/SlideOver.vue`
+- useSparklineCache.ts existiert
+- Backend-Modelle: `sensor_metadata` (SensorConfig), `actuator_metadata` (ActuatorConfig), `device_metadata` (ESPDevice) existieren als JSON-Felder
+- `runtime_stats` existiert auf SensorConfig und ActuatorConfig (Phase 4A.8 Migration vorhanden)
+- `alert_config` existiert auf allen drei Modellen (Phase 4A.7)
+- API-Router-Pattern korrekt identifiziert (`APIRouter(prefix="/v1/...")`)
+- Store-Pattern in `shared/stores/` korrekt (15 existierende Stores)
+- API-Client-Pattern in `El Frontend/src/api/` korrekt (21 existierende API-Module)
+- Alembic-Verzeichnis existiert mit 25+ Migrationen
+- DeviceMetadata TypeScript-Interface existiert bereits in `types/device-metadata.ts`
+- ESP hat `zone_id` und `zone_name` Felder — ZoneContext als eigene Tabelle ist korrekt
+- Deprecated `/actuators` Route leitet auf `/sensors?tab=actuators` weiter — Route-Kompatibilitaet bestaetigt
+- Keine Firmware-Aenderungen noetig (korrekt)
+
+### Korrekturen (bereits inline im Plan markiert)
+
+**1. Backend-Pfade: `El Servador: src/` → `El Servador/god_kaiser_server/src/`**
+- Plan sagt: `El Servador: src/db/models/zone_context.py`
+- System sagt: Voller Pfad ist `El Servador/god_kaiser_server/src/db/models/zone_context.py`
+- Betrifft ALLE Backend-Pfade im Plan (7 Stellen) — in Modul-Tabelle korrigiert
+
+**2. DataTable.vue: Falscher Pfad + nicht generisch**
+- Plan sagt: `El Frontend: src/shared/design/` (generische Tabellenkomponente)
+- System sagt: `El Frontend/src/components/database/DataTable.vue` (DB-spezifisch, max 8 Spalten, UUID-Logik)
+- Empfehlung: Eigene InventoryTable bauen — in Plan korrigiert
+
+**3. Feld-Namen: `metadata` → `sensor_metadata`/`actuator_metadata`/`device_metadata`**
+- Plan sagt: `SensorConfig.metadata`, `ActuatorConfig.metadata`
+- System sagt: Felder heissen `sensor_metadata`, `actuator_metadata`, `device_metadata`
+- Empfehlung: Im Frontend beim Mapping die echten Feld-Namen verwenden
+
+**4. ESPDevice.runtime_stats existiert NICHT**
+- Plan sagt: `ESPDevice.runtime_stats` existiert seit 4A.8
+- System sagt: `runtime_stats` existiert NUR auf SensorConfig und ActuatorConfig, NICHT auf ESPDevice
+- Empfehlung: Im Export (K4) ESPDevice-Level runtime_stats NICHT referenzieren oder als Aggregat berechnen
+
+**5. SensorWithContext-Felder weichen ab**
+- Plan sagt: `s.id`, `s.latest_value`, `s.is_online`, `s.last_seen`, `s.metadata`
+- System sagt: Kein `id`-Feld (synthetisch aus `esp_id_gpio`), `raw_value` statt `latest_value`, kein `is_online` (ableiten aus `esp_state`), `last_read` statt `last_seen`, kein `metadata`/`runtime_stats`
+- Empfehlung: Neues Composable `useInventoryData.ts` das fehlende Felder aus espStore-Device-Objekt liest
+
+**6. Sensor-Typen: `bme280` → `bmp280`, `bh1750` → `light`**
+- Plan sagt: Schema-Dateien fuer `bme280`, `bh1750`
+- System sagt: Registry verwendet `bmp280` (nicht `bme280`), `bh1750` wird als `light` normalisiert
+- Empfehlung: Schema-Dateien nach Device-Typ benennen (sht31, bmp280, ds18b20, moisture, light)
+
+**7. Zone-API-Prefix: Plural vs. Singular**
+- Plan sagt: `prefix="/v1/zones/context"`
+- System sagt: Bestehendes Pattern ist `/v1/zone` (Singular)
+- Empfehlung: `/v1/zone/context` fuer Konsistenz
+
+### Fehlende Vorbedingungen
+
+- [ ] Pruefen ob `sensor_metadata`/`actuator_metadata`/`runtime_stats` bereits ueber die REST-API exponiert werden (GET /v1/sensors/... Response-Schema pruefen)
+- [ ] Pruefen ob Frontend-Store (`esp.ts`) die metadata/runtime_stats Felder beim Device-Fetch speichert
+- [ ] Alembic `head` pruefen — die neue zone_context Migration muss auf den aktuellen Head aufbauen (25+ bestehende Migrationen, potenzielle Multi-Head-Situation)
+
+### Ergaenzungen
+
+- **Bereits existiert:** `DeviceMetadata` Interface in `types/device-metadata.ts` mit `parseDeviceMetadata()`, `mergeDeviceMetadata()`, `getNextMaintenanceDate()`, `isMaintenanceOverdue()`. Das Schema-Registry-Konzept (K2) sollte dieses Interface als Basis nutzen statt es zu duplizieren.
+- **Store-Registration:** Neuer `inventory.store.ts` muss in `shared/stores/index.ts` re-exportiert werden (Pattern: jeder Store wird dort registriert)
+- **API-Client-Registration:** Neuer `inventory.ts` API-Client — pruefen ob `api/index.ts` einen zentralen Re-Export hat
+- **Zone-ID-Format:** Bestehendes `zone_id` auf ESPDevice ist `String(100)`. ZoneContext.zone_id muss dasselbe Format verwenden. Es gibt KEIN separates Zone-Model — Zonen existieren nur als Felder auf ESPDevice.
+- **DB-Typ:** Plan verwendet `JSONB` fuer `custom_data` und `cycle_history`, aber bestehende Modelle nutzen durchgehend `JSON` (nicht `JSONB`). Fuer PostgreSQL ist beides moeglich, aber fuer Konsistenz `JSON` verwenden (es sei denn GIN-Indizes auf custom_data geplant sind).
+- **Alembic down_revision:** Aktuelle Head-Migration pruefen. Die letzte Migration ist `add_alert_config_and_runtime_stats` (rev `a4a7_alert_runtime`). Neue Migration muss darauf aufbauen (oder auf einen spaeteren Head falls weitere Migrationen existieren).
+- **Monitor-Tab-Link:** Plan referenziert `router.push({ name: 'monitor-zone', params: { zoneId } })` — pruefen ob diese Route existiert
+
+### Zusammenfassung fuer TM
+
+Der Plan ist grundsaetzlich solide und gut durchdacht. Die Hauptprobleme sind:
+1. **Alle Backend-Pfade** fehlten den `god_kaiser_server/`-Prefix (korrigiert)
+2. **Feld-Namen** im Frontend weichen erheblich von der Annahme ab — `SensorWithContext` hat weder `id`, `metadata`, `runtime_stats`, `is_online` noch `latest_value`. Ein neues Composable ist noetig.
+3. **DataTable.vue** ist nicht generisch — eigene InventoryTable ist die richtige Entscheidung
+4. **Sensor-Typ-Bezeichnungen** muessen der Server-Registry folgen (`bmp280` statt `bme280`)
+
+Der Plan ist ausfuehrbar nach diesen Korrekturen. Empfohlene Block-Reihenfolge bleibt korrekt: K1 → K2 → K3 → K4.
+
+---
+
+## Ausfuehrbarer Implementierungsplan (korrigiert)
+
+### Vorbedingung: Daten-Lage pruefen (30 min)
+
+Bevor Block K1 gestartet wird, muss ein Dev-Agent (frontend-dev oder server-dev) pruefen:
+1. GET `/v1/sensors/{esp_id}` Response-Schema: Werden `sensor_metadata` und `runtime_stats` bereits zurueckgegeben?
+2. `espStore.ts`: Werden `sensor_metadata`/`runtime_stats` beim Device-Fetch gespeichert oder verworfen?
+3. Falls nein: Backend-Schema und Frontend-Store muessen ZUERST erweitert werden (Teil von 4A.8)
+
+### Block K1: Inventar-Tabelle
+
+**Agent:** `frontend-dev`
+**Reihenfolge:**
+
+```
+Schritt 1: inventory.store.ts anlegen
+  Pfad: El Frontend/src/shared/stores/inventory.store.ts
+  Re-Export in: El Frontend/src/shared/stores/index.ts
+  Inhalt: Filter-State, Pagination, Column-Visibility, selectedDeviceId
+
+Schritt 2: useInventoryData.ts Composable erstellen (NEU — nicht im Original-Plan)
+  Pfad: El Frontend/src/composables/useInventoryData.ts
+  Aufgabe: Erweitert useZoneGrouping um metadata + runtime_stats aus espStore
+  Liefert: allComponents: ComponentItem[] (unified sensors + actuators)
+  Mapping: esp_id+gpio → id, raw_value → currentValue, esp_state → status,
+           last_read → lastSeen, sensor_metadata/actuator_metadata → metadata
+
+Schritt 3: InventoryTable.vue erstellen
+  Pfad: El Frontend/src/components/inventory/InventoryTable.vue
+  NICHT DataTable.vue erweitern — eigene Komponente
+  Features: Column-Visibility, Sortierung, Pagination, Conditional Styling
+  Basis-Primitives: BaseInput (Suche), BaseSelect (Filter)
+
+Schritt 4: DeviceDetailPanel.vue erstellen
+  Pfad: El Frontend/src/components/inventory/DeviceDetailPanel.vue
+  Nutzt: SlideOver.vue (aus shared/design/primitives/)
+  Nutzt: useSparklineCache.ts fuer Mini-Sparkline
+
+Schritt 5: SensorsView.vue rewriten
+  Pfad: El Frontend/src/views/SensorsView.vue (in-place rewrite)
+  Route bleibt: /sensors (name: 'sensors')
+  Interner Name: ComponentInventoryView
+
+Schritt 6: API-Client erstellen
+  Pfad: El Frontend/src/api/inventory.ts
+  Endpoints: metadata PATCH, zone-context CRUD, export GET
+```
+
+### Block K2: Schema-Registry
+
+**Agent:** `frontend-dev`
+**Reihenfolge:**
+
+```
+Schritt 1: Verzeichnis + base.schema.json
+  Pfad: El Frontend/src/config/device-schemas/
+  Basis-Schema: Nutzt DeviceMetadata-Interface als Referenz
+
+Schritt 2: Geraetetyp-Schemas erstellen
+  Pro Typ: sht31, bmp280, ds18b20, moisture, ph, ec, light, relay, pwm
+  Typen aus: sensor_type_registry.py MULTI_VALUE_SENSORS + SENSOR_TYPE_MAPPING
+
+Schritt 3: Registry Index (index.ts)
+  Device-Typ → Schema Mapping
+  getSchemaForDevice() Funktion
+
+Schritt 4: SchemaForm.vue
+  Pfad: El Frontend/src/components/inventory/SchemaForm.vue
+  Handgebaut (7 Feldtypen), keine externe Library
+
+Schritt 5: In DeviceDetailPanel einbinden
+```
+
+### Block K3: Zone-Context
+
+**Agent:** `server-dev` (Backend) → `frontend-dev` (Frontend)
+**Reihenfolge:**
+
+```
+Backend (server-dev):
+  Schritt 1: ZoneContext Model
+    Pfad: El Servador/god_kaiser_server/src/db/models/zone_context.py
+    JSON-Typ: JSON (nicht JSONB) fuer Konsistenz mit bestehenden Modellen
+    Import in: El Servador/god_kaiser_server/src/db/models/__init__.py
+
+  Schritt 2: Pydantic Schema
+    Pfad: El Servador/god_kaiser_server/src/schemas/zone_context.py
+
+  Schritt 3: Alembic Migration
+    Pfad: El Servador/god_kaiser_server/alembic/versions/add_zone_context_table.py
+    down_revision: Aktuellen Head ermitteln (wahrscheinlich a4a7_alert_runtime oder spaeter)
+
+  Schritt 4: REST-API Router
+    Pfad: El Servador/god_kaiser_server/src/api/v1/zone_context.py
+    Prefix: /v1/zone/context (Singular, konsistent mit /v1/zone)
+    Registrieren in: El Servador/god_kaiser_server/src/api/v1/__init__.py
+
+Frontend (frontend-dev):
+  Schritt 5: ZoneContextEditor.vue
+    Pfad: El Frontend/src/components/inventory/ZoneContextEditor.vue
+
+  Schritt 6: API-Client erweitern
+    Pfad: El Frontend/src/api/inventory.ts (Zone-Context Endpoints hinzufuegen)
+```
+
+### Block K4: AI-Export
+
+**Agent:** `server-dev`
+**Reihenfolge:**
+
+```
+Schritt 1: Export-API Router
+  Pfad: El Servador/god_kaiser_server/src/api/v1/component_export.py
+  Prefix: /v1/export
+  Registrieren in: El Servador/god_kaiser_server/src/api/v1/__init__.py
+
+Schritt 2: Serializer-Funktionen
+  Pro-Komponente und Pro-Zone JSON-Builder
+  Aggregiert: SensorConfig + sensor_metadata + runtime_stats + ZoneContext
+
+Schritt 3: Doku
+  MCP-Tool-Mapping in Roadmap-Dokument
+```
+
+### Checkliste nach Abschluss
+
+- [ ] `pio run` (ESP32 nicht betroffen, aber sicherheitshalber)
+- [ ] `pytest El Servador/god_kaiser_server/tests/` (Backend-Tests)
+- [ ] Alembic Migration testen: `alembic upgrade head` + `alembic downgrade -1`
+- [ ] Frontend Build: `npm run build` im `El Frontend/`
+- [ ] REST-API manuell testen: zone-context CRUD, export endpoints
+- [ ] /updatedocs ausfuehren nach Abschluss
