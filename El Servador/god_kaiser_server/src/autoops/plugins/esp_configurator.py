@@ -29,6 +29,7 @@ from ..core.base_plugin import (
     PluginAction,
     PluginCapability,
     PluginResult,
+    plugin_metadata,
 )
 from ..core.context import AutoOpsContext, DeviceMode, SensorSpec, ActuatorSpec
 
@@ -62,6 +63,24 @@ SENSOR_DEFAULTS = {
 }
 
 
+@plugin_metadata(
+    display_name="ESP Configurator",
+    description="Erstellt und konfiguriert ESP-Devices mit Sensoren und Aktoren automatisch",
+    category="automation",
+    config_schema={
+        "device_mode": {
+            "type": "select",
+            "options": ["mock", "real", "hybrid"],
+            "default": "mock",
+            "label": "Device-Modus",
+        },
+        "auto_heartbeat": {
+            "type": "boolean",
+            "default": True,
+            "label": "Heartbeat automatisch starten",
+        },
+    },
+)
 class ESPConfiguratorPlugin(AutoOpsPlugin):
     """
     Autonomously configures ESP32 devices through the REST API.

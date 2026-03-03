@@ -147,6 +147,9 @@ class AutoOpsContext:
     max_retries: int = 3  # API retry attempts
     retry_delay: float = 1.0  # Base delay between retries (exponential backoff)
 
+    # Phase 4C.4: Extra context data (trigger info, config overrides, user context)
+    extra: dict[str, Any] = field(default_factory=dict)
+
     # Results from previous plugin runs (shared between plugins)
     created_devices: list[dict[str, Any]] = field(default_factory=list)
     configured_sensors: list[dict[str, Any]] = field(default_factory=list)
