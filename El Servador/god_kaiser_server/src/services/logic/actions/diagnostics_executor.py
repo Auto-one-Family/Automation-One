@@ -53,8 +53,7 @@ class DiagnosticsActionExecutor(BaseActionExecutor):
                     return ActionResult(
                         success=True,
                         message=(
-                            f"Diagnostic check '{check_name}' completed: "
-                            f"{result.status.value}"
+                            f"Diagnostic check '{check_name}' completed: " f"{result.status.value}"
                         ),
                         data={
                             "check_name": check_name,
@@ -69,10 +68,7 @@ class DiagnosticsActionExecutor(BaseActionExecutor):
                     )
                     return ActionResult(
                         success=True,
-                        message=(
-                            f"Full diagnostic completed: "
-                            f"{report.overall_status.value}"
-                        ),
+                        message=(f"Full diagnostic completed: " f"{report.overall_status.value}"),
                         data={
                             "report_id": report.id,
                             "overall_status": report.overall_status.value,

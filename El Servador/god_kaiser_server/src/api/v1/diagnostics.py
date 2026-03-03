@@ -101,7 +101,11 @@ def _report_to_response(report) -> DiagnosticReportResponse:
     """Convert DiagnosticReportData to response model."""
     return DiagnosticReportResponse(
         id=report.id,
-        overall_status=report.overall_status.value if isinstance(report.overall_status, CheckStatus) else report.overall_status,
+        overall_status=(
+            report.overall_status.value
+            if isinstance(report.overall_status, CheckStatus)
+            else report.overall_status
+        ),
         started_at=report.started_at,
         finished_at=report.finished_at,
         duration_seconds=report.duration_seconds,

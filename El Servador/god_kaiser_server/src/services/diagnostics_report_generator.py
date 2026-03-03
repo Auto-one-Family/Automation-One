@@ -12,10 +12,10 @@ from .diagnostics_service import CheckResult, CheckStatus, DiagnosticReportData
 UTC = timezone.utc
 
 _STATUS_EMOJI = {
-    CheckStatus.HEALTHY: "\u2705",   # green checkmark
-    CheckStatus.WARNING: "\u26a0\ufe0f",   # warning sign
+    CheckStatus.HEALTHY: "\u2705",  # green checkmark
+    CheckStatus.WARNING: "\u26a0\ufe0f",  # warning sign
     CheckStatus.CRITICAL: "\u274c",  # red cross
-    CheckStatus.ERROR: "\U0001f6a8",    # rotating light
+    CheckStatus.ERROR: "\U0001f6a8",  # rotating light
 }
 
 _STATUS_LABEL = {
@@ -66,14 +66,21 @@ def generate_markdown(report: DiagnosticReportData) -> str:
         emoji = _STATUS_EMOJI.get(check.status, "\u2753")
         display_name = _CHECK_DISPLAY_NAMES.get(check.name, check.name)
         duration = f"{check.duration_ms:.0f}ms"
-        lines.append(f"| {idx} | {display_name} | {emoji} {_STATUS_LABEL.get(check.status, '?')} | {duration} |")
+        lines.append(
+            f"| {idx} | {display_name} | {emoji} {_STATUS_LABEL.get(check.status, '?')} | {duration} |"
+        )
 
     lines.append("")
 
     # Count by status
     status_counts = _count_by_status(report.checks)
     status_parts = []
-    for status in [CheckStatus.HEALTHY, CheckStatus.WARNING, CheckStatus.CRITICAL, CheckStatus.ERROR]:
+    for status in [
+        CheckStatus.HEALTHY,
+        CheckStatus.WARNING,
+        CheckStatus.CRITICAL,
+        CheckStatus.ERROR,
+    ]:
         count = status_counts.get(status, 0)
         if count > 0:
             emoji = _STATUS_EMOJI[status]
@@ -115,7 +122,9 @@ def generate_markdown(report: DiagnosticReportData) -> str:
     # Footer
     lines.append("---")
     lines.append("")
-    lines.append(f"*AutomationOne Diagnostics v4D | {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}*")
+    lines.append(
+        f"*AutomationOne Diagnostics v4D | {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}*"
+    )
     lines.append("")
 
     return "\n".join(lines)
@@ -128,7 +137,9 @@ def _append_check_detail(lines: list[str], check: CheckResult) -> None:
 
     lines.append(f"### {emoji} {display_name}")
     lines.append("")
-    lines.append(f"**Status:** {_STATUS_LABEL.get(check.status, '?')} | **Duration:** {check.duration_ms:.0f}ms")
+    lines.append(
+        f"**Status:** {_STATUS_LABEL.get(check.status, '?')} | **Duration:** {check.duration_ms:.0f}ms"
+    )
     lines.append(f"**Message:** {check.message}")
     lines.append("")
 
@@ -183,20 +194,12 @@ def _determine_next_steps(report: DiagnosticReportData) -> list[str]:
     """Determine next steps based on overall report status."""
     steps: list[str] = []
 
-    critical_checks = [
-        c for c in report.checks if c.status == CheckStatus.CRITICAL
-    ]
-    error_checks = [
-        c for c in report.checks if c.status == CheckStatus.ERROR
-    ]
-    warning_checks = [
-        c for c in report.checks if c.status == CheckStatus.WARNING
-    ]
+    critical_checks = [c for c in report.checks if c.status == CheckStatus.CRITICAL]
+    error_checks = [c for c in report.checks if c.status == CheckStatus.ERROR]
+    warning_checks = [c for c in report.checks if c.status == CheckStatus.WARNING]
 
     if error_checks:
-        error_names = ", ".join(
-            _CHECK_DISPLAY_NAMES.get(c.name, c.name) for c in error_checks
-        )
+        error_names = ", ".join(_CHECK_DISPLAY_NAMES.get(c.name, c.name) for c in error_checks)
         steps.append(f"Investigate error state in: {error_names}")
 
     if critical_checks:

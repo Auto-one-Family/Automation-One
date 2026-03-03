@@ -494,8 +494,12 @@ async def lifespan(app: FastAPI):
             )
 
             compound_evaluator = CompoundConditionEvaluator(
-                [sensor_evaluator, time_evaluator, hysteresis_evaluator,
-                 diagnostics_condition_evaluator]
+                [
+                    sensor_evaluator,
+                    time_evaluator,
+                    hysteresis_evaluator,
+                    diagnostics_condition_evaluator,
+                ]
             )
             condition_evaluators = [
                 sensor_evaluator,

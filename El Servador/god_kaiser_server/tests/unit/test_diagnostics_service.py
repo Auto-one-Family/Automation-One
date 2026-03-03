@@ -14,7 +14,6 @@ from src.services.diagnostics_service import (
     DiagnosticsService,
 )
 
-
 # =============================================================================
 # CheckStatus Tests
 # =============================================================================
@@ -121,8 +120,16 @@ class TestDiagnosticsServiceChecks:
         """All expected check names are registered."""
         service = DiagnosticsService(session=None)
         expected_checks = {
-            "server", "database", "mqtt", "esp_devices", "sensors",
-            "actuators", "monitoring", "logic_engine", "alerts", "plugins",
+            "server",
+            "database",
+            "mqtt",
+            "esp_devices",
+            "sensors",
+            "actuators",
+            "monitoring",
+            "logic_engine",
+            "alerts",
+            "plugins",
         }
         assert set(service.checks.keys()) == expected_checks
 

@@ -57,18 +57,14 @@ class DiagnosticsConditionEvaluator(BaseConditionEvaluator):
         operator = condition.get("operator", "==")
 
         if not check_name or not expected_status:
-            logger.warning(
-                "DiagnosticsConditionEvaluator: missing check_name or expected_status"
-            )
+            logger.warning("DiagnosticsConditionEvaluator: missing check_name or expected_status")
             return False
 
         # Get latest diagnostic report from DB
         actual_status = await self._get_check_status(check_name)
 
         if actual_status is None:
-            logger.debug(
-                f"No diagnostic report found for check '{check_name}'"
-            )
+            logger.debug(f"No diagnostic report found for check '{check_name}'")
             return False
 
         if operator == "!=":
@@ -78,9 +74,7 @@ class DiagnosticsConditionEvaluator(BaseConditionEvaluator):
     async def _get_check_status(self, check_name: str) -> str | None:
         """Read latest diagnostic report from DB and extract check status."""
         if not self._session_factory:
-            logger.warning(
-                "DiagnosticsConditionEvaluator: no session factory configured"
-            )
+            logger.warning("DiagnosticsConditionEvaluator: no session factory configured")
             return None
 
         try:
@@ -89,9 +83,7 @@ class DiagnosticsConditionEvaluator(BaseConditionEvaluator):
 
             async for session in self._session_factory():
                 stmt = (
-                    select(DiagnosticReport)
-                    .order_by(DiagnosticReport.started_at.desc())
-                    .limit(1)
+                    select(DiagnosticReport).order_by(DiagnosticReport.started_at.desc()).limit(1)
                 )
                 result = await session.execute(stmt)
                 report = result.scalar_one_or_none()
