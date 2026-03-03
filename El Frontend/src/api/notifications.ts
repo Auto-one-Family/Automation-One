@@ -135,6 +135,44 @@ export interface TestEmailResponse {
   recipient: string | null
 }
 
+// Phase C V1.1: Email log types
+export interface EmailLogEntry {
+  id: string
+  notification_id: string | null
+  to_address: string
+  subject: string
+  template: string | null
+  provider: string
+  status: 'sent' | 'failed' | 'pending'
+  sent_at: string | null
+  error_message: string | null
+  retry_count: number
+  created_at: string | null
+}
+
+export interface EmailLogListResponse {
+  success: boolean
+  data: EmailLogEntry[]
+  pagination: PaginationMeta
+}
+
+export interface EmailLogListFilters {
+  status?: string
+  date_from?: string
+  date_to?: string
+  page?: number
+  page_size?: number
+}
+
+export interface EmailLogStatsDTO {
+  success: boolean
+  total: number
+  sent: number
+  failed: number
+  by_status: Record<string, number>
+  by_provider: Record<string, number>
+}
+
 // Phase 4B: Alert lifecycle types
 export interface AlertActiveListFilters {
   severity?: NotificationSeverity
@@ -293,6 +331,28 @@ export const notificationsApi = {
    */
   async getAlertStats(): Promise<AlertStatsDTO> {
     const response = await api.get<AlertStatsDTO>('/notifications/alerts/stats')
+    return response.data
+  },
+
+  // =========================================================================
+  // Email Log (Phase C V1.1)
+  // =========================================================================
+
+  /**
+   * Get paginated email sending log (admin only)
+   */
+  async getEmailLog(filters?: EmailLogListFilters): Promise<EmailLogListResponse> {
+    const response = await api.get<EmailLogListResponse>('/notifications/email-log', {
+      params: filters,
+    })
+    return response.data
+  },
+
+  /**
+   * Get email sending statistics (admin only)
+   */
+  async getEmailLogStats(): Promise<EmailLogStatsDTO> {
+    const response = await api.get<EmailLogStatsDTO>('/notifications/email-log/stats')
     return response.data
   },
 }

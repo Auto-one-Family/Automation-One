@@ -14,7 +14,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Check, CheckCheck, ChevronDown, ChevronUp,
-  Activity, Workflow, BarChart3, ShieldCheck
+  Activity, Workflow, BarChart3, ShieldCheck, Mail
 } from 'lucide-vue-next'
 import { formatRelativeTime } from '@/utils/formatters'
 import type { NotificationDTO } from '@/api/notifications'
@@ -46,6 +46,11 @@ const metadata = computed(() => props.notification.metadata || {})
 const hasEspId = computed(() => !!metadata.value.esp_id)
 const hasRuleId = computed(() => !!metadata.value.rule_id)
 const hasSensorType = computed(() => !!metadata.value.sensor_type)
+
+// Email delivery status from metadata (Phase C V1.1)
+const emailStatus = computed(() => metadata.value.email_status as string | undefined)
+const emailProvider = computed(() => metadata.value.email_provider as string | undefined)
+const hasEmailInfo = computed(() => !!emailStatus.value)
 
 const canAcknowledge = computed(() => props.notification.status === 'active')
 const canResolve = computed(() =>
@@ -155,6 +160,14 @@ function navigateToRule(): void {
           <div v-if="hasSensorType" class="item__detail">
             <span class="item__detail-label">Sensor</span>
             <span class="item__detail-value">{{ metadata.sensor_type }}</span>
+          </div>
+          <div v-if="hasEmailInfo" class="item__detail">
+            <span class="item__detail-label">Email</span>
+            <span :class="['item__email-status', `item__email-status--${emailStatus}`]">
+              <Mail class="item__email-icon" />
+              {{ emailStatus === 'sent' ? 'Zugestellt' : emailStatus === 'failed' ? 'Fehlgeschlagen' : 'Ausstehend' }}
+              <span v-if="emailProvider" class="item__email-provider">via {{ emailProvider }}</span>
+            </span>
           </div>
         </div>
 
@@ -398,6 +411,37 @@ function navigateToRule(): void {
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
+}
+
+/* Email Status (Phase C V1.1) */
+.item__email-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+}
+
+.item__email-status--sent {
+  color: var(--color-success);
+}
+
+.item__email-status--failed {
+  color: var(--color-error);
+}
+
+.item__email-status--pending {
+  color: var(--color-text-muted);
+}
+
+.item__email-icon {
+  width: 11px;
+  height: 11px;
+}
+
+.item__email-provider {
+  color: var(--color-text-muted);
+  font-size: 10px;
 }
 
 /* Action Buttons */

@@ -21,6 +21,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const STATUS_CONFIG: Record<string, { icon: typeof CheckCircle; label: string; class: string }> = {
   success: { icon: CheckCircle, label: 'Erfolgreich', class: 'exec--success' },
+  error: { icon: XCircle, label: 'Fehlgeschlagen', class: 'exec--failure' },
   failure: { icon: XCircle, label: 'Fehlgeschlagen', class: 'exec--failure' },
   running: { icon: Loader2, label: 'Läuft...', class: 'exec--running' },
   timeout: { icon: Clock, label: 'Timeout', class: 'exec--timeout' },

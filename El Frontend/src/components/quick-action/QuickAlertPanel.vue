@@ -8,7 +8,7 @@
  * Footer: "Alle Alerts anzeigen" opens the full NotificationDrawer.
  */
 
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ArrowLeft,
@@ -18,6 +18,7 @@ import {
   ExternalLink,
   BellOff,
   AlertTriangle,
+  Clock,
   Info,
   CheckCircle2,
   ShieldCheck,
@@ -36,6 +37,18 @@ type QuickAlertFilter = 'active' | 'acknowledged' | 'all'
 const MAX_ALERTS = 5
 const BATCH_ACK_THRESHOLD = 3
 
+/** Snooze duration presets in milliseconds */
+const SNOOZE_PRESETS = [
+  { key: '1h', label: '1 Stunde', ms: 3_600_000 },
+  { key: '4h', label: '4 Stunden', ms: 14_400_000 },
+  { key: '24h', label: '24 Stunden', ms: 86_400_000 },
+  { key: '1w', label: '1 Woche', ms: 604_800_000 },
+  { key: 'permanent', label: 'Permanent', ms: 0 },
+] as const
+
+/** Timer update interval for snooze countdown (60 seconds) */
+const SNOOZE_TIMER_INTERVAL_MS = 60_000
+
 const router = useRouter()
 const inboxStore = useNotificationInboxStore()
 const alertStore = useAlertCenterStore()
@@ -45,8 +58,17 @@ const espStore = useEspStore()
 const { success, error } = useToast()
 const expandedId = ref<string | null>(null)
 const mutingId = ref<string | null>(null)
+const snoozeOpenId = ref<string | null>(null)
 const statusFilter = ref<QuickAlertFilter>('active')
 const isBatchAcking = ref(false)
+
+/**
+ * Map of sensor_config_id → suppression_until ISO string.
+ * Loaded lazily when alerts are expanded, updated on snooze.
+ */
+const suppressionMap = ref<Map<string, string | null>>(new Map())
+let snoozeTimerHandle: ReturnType<typeof setInterval> | null = null
+const timerTick = ref(0) // reactive trigger for countdown re-computation
 
 const severityOrder: Record<string, number> = {
   critical: 0,
@@ -148,30 +170,112 @@ function toggleExpand(id: string): void {
   expandedId.value = expandedId.value === id ? null : id
 }
 
-async function handleMute(notification: NotificationDTO): Promise<void> {
+function toggleSnoozeDropdown(notificationId: string): void {
+  snoozeOpenId.value = snoozeOpenId.value === notificationId ? null : notificationId
+}
+
+async function handleSnooze(
+  notification: NotificationDTO,
+  preset: typeof SNOOZE_PRESETS[number],
+): Promise<void> {
   const meta = notification.metadata || {}
   const sensorId = meta.sensor_config_id as string | undefined
 
   if (!sensorId) {
-    error('Sensor-ID nicht verfügbar — Mute nicht möglich')
+    error('Sensor-ID nicht verfügbar — Snooze nicht möglich')
     return
   }
 
   mutingId.value = notification.id
+  snoozeOpenId.value = null
   try {
-    await sensorsApi.updateAlertConfig(sensorId, {
-      alerts_enabled: false,
-      suppression_reason: 'custom',
-      suppression_note: `Stummgeschaltet via Quick Alert Panel`,
-    })
+    if (preset.key === 'permanent') {
+      await sensorsApi.updateAlertConfig(sensorId, {
+        alerts_enabled: false,
+        suppression_reason: 'custom',
+        suppression_note: 'Permanent stummgeschaltet via Quick Alert Panel',
+      })
+      suppressionMap.value.set(sensorId, null)
+      success('Sensor-Alerts permanent stummgeschaltet')
+    } else {
+      const until = new Date(Date.now() + preset.ms).toISOString()
+      await sensorsApi.updateAlertConfig(sensorId, {
+        alerts_enabled: false,
+        suppression_until: until,
+        suppression_reason: 'custom',
+        suppression_note: `Snooze ${preset.label} via Quick Alert Panel`,
+      })
+      suppressionMap.value.set(sensorId, until)
+      success(`Sensor-Alerts für ${preset.label} stummgeschaltet`)
+    }
     handleAck(notification.id)
-    success('Sensor-Alerts stummgeschaltet')
   } catch (e) {
     error(e instanceof Error ? e.message : 'Fehler beim Stummschalten')
   } finally {
     mutingId.value = null
   }
 }
+
+/** Load suppression_until for a sensor from the alert-config API */
+async function loadSuppressionInfo(sensorId: string): Promise<void> {
+  if (suppressionMap.value.has(sensorId)) return
+  try {
+    const config = await sensorsApi.getAlertConfig(sensorId)
+    const until = (config.alert_config?.suppression_until as string) ?? null
+    suppressionMap.value.set(sensorId, until)
+  } catch {
+    // Silent fail — timer just won't show
+  }
+}
+
+/** Get the suppression_until for a notification's sensor (if available) */
+function getSuppressionUntil(notification: NotificationDTO): string | null {
+  const sensorId = (notification.metadata?.sensor_config_id as string) ?? ''
+  return suppressionMap.value.get(sensorId) ?? null
+}
+
+/**
+ * Format remaining snooze time as human-readable string.
+ * Uses timerTick for reactivity (re-computed every 60s).
+ */
+function formatTimeRemaining(until: string): string {
+  // Access timerTick to create reactive dependency
+  void timerTick.value
+  const remaining = new Date(until).getTime() - Date.now()
+  if (remaining <= 0) return 'Läuft ab...'
+
+  const hours = Math.floor(remaining / 3_600_000)
+  const minutes = Math.floor((remaining % 3_600_000) / 60_000)
+
+  if (hours > 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`
+  if (hours > 0) return `${hours}h ${minutes}m`
+  return `${minutes}m`
+}
+
+function handleExpandAndLoad(id: string, notification: NotificationDTO): void {
+  toggleExpand(id)
+  // Lazy-load suppression info when expanding
+  if (expandedId.value === id) {
+    const sensorId = (notification.metadata?.sensor_config_id as string) ?? ''
+    if (sensorId) {
+      loadSuppressionInfo(sensorId)
+    }
+  }
+}
+
+// Lifecycle: start/stop timer for snooze countdowns
+onMounted(() => {
+  snoozeTimerHandle = setInterval(() => {
+    timerTick.value++
+  }, SNOOZE_TIMER_INTERVAL_MS)
+})
+
+onUnmounted(() => {
+  if (snoozeTimerHandle) {
+    clearInterval(snoozeTimerHandle)
+    snoozeTimerHandle = null
+  }
+})
 
 function handleBack(): void {
   quickActionStore.setActivePanel('menu')
@@ -278,7 +382,7 @@ function handleShowAll(): void {
             <button
               class="alert-item__action"
               title="Details"
-              @click.stop="toggleExpand(alert.id)"
+              @click.stop="handleExpandAndLoad(alert.id, alert)"
             >
               <ChevronDown v-if="expandedId !== alert.id" class="alert-item__action-icon" />
               <ChevronUp v-else class="alert-item__action-icon" />
@@ -305,17 +409,42 @@ function handleShowAll(): void {
                 <span class="alert-item__detail-text">ESP: {{ alert.metadata.esp_id }}</span>
               </div>
             </div>
-            <!-- Mute: suppress sensor alerts via Alert-Config API -->
-            <button
-              class="alert-item__mute"
-              :class="{ 'alert-item__mute--active': alert.metadata?.sensor_config_id }"
-              :disabled="!alert.metadata?.sensor_config_id || mutingId === alert.id"
-              :title="alert.metadata?.sensor_config_id ? 'Sensor-Alerts stummschalten' : 'Sensor-ID nicht verfügbar'"
-              @click.stop="handleMute(alert)"
+            <!-- Snooze Timer: show remaining suppression time -->
+            <div
+              v-if="getSuppressionUntil(alert)"
+              class="alert-item__snooze-timer"
             >
-              <BellOff class="alert-item__mute-icon" />
-              <span>{{ mutingId === alert.id ? 'Wird stummgeschaltet...' : 'Stummschalten' }}</span>
-            </button>
+              <Clock class="alert-item__snooze-timer-icon" />
+              <span>Snooze: {{ formatTimeRemaining(getSuppressionUntil(alert)!) }}</span>
+            </div>
+            <!-- Snooze: suppress sensor alerts with timed presets -->
+            <div class="alert-item__snooze-wrapper">
+              <button
+                class="alert-item__mute"
+                :class="{ 'alert-item__mute--active': alert.metadata?.sensor_config_id }"
+                :disabled="!alert.metadata?.sensor_config_id || mutingId === alert.id"
+                :title="alert.metadata?.sensor_config_id ? 'Sensor-Alerts stummschalten' : 'Sensor-ID nicht verfügbar'"
+                @click.stop="toggleSnoozeDropdown(alert.id)"
+              >
+                <BellOff class="alert-item__mute-icon" />
+                <span>{{ mutingId === alert.id ? 'Wird stummgeschaltet...' : 'Stummschalten' }}</span>
+                <ChevronDown v-if="snoozeOpenId !== alert.id" class="alert-item__mute-icon" />
+                <ChevronUp v-else class="alert-item__mute-icon" />
+              </button>
+              <!-- Snooze Dropdown -->
+              <Transition name="alert-expand">
+                <div v-if="snoozeOpenId === alert.id" class="alert-item__snooze-dropdown">
+                  <button
+                    v-for="preset in SNOOZE_PRESETS"
+                    :key="preset.key"
+                    class="alert-item__snooze-option"
+                    @click.stop="handleSnooze(alert, preset)"
+                  >
+                    {{ preset.label }}
+                  </button>
+                </div>
+              </Transition>
+            </div>
           </div>
         </Transition>
       </div>
@@ -673,6 +802,68 @@ function handleShowAll(): void {
 .alert-item__mute-icon {
   width: 12px;
   height: 12px;
+}
+
+/* ── Snooze Timer ── */
+
+.alert-item__snooze-timer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  color: var(--color-warning);
+  font-size: var(--text-xs);
+  margin-bottom: var(--space-1);
+}
+
+.alert-item__snooze-timer-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+/* ── Snooze Dropdown ── */
+
+.alert-item__snooze-wrapper {
+  position: relative;
+}
+
+.alert-item__snooze-dropdown {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-1);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  background: rgba(20, 20, 30, 0.95);
+  overflow: hidden;
+}
+
+.alert-item__snooze-option {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.alert-item__snooze-option:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+}
+
+.alert-item__snooze-option:not(:last-child) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.alert-item__snooze-option:last-child {
+  color: var(--color-text-muted);
+  font-style: italic;
 }
 
 /* ── Empty State ── */

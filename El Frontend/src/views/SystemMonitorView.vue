@@ -18,7 +18,7 @@
  * @see El Servador/god_kaiser_server/src/core/esp32_error_mapping.py - 100+ Error Mappings
  */
 
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useAuthStore } from '@/shared/stores/auth.store'
@@ -35,20 +35,21 @@ import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('SystemMonitor')
 
-// Sub-Components
+// Sub-Components (always rendered)
 import MonitorTabs, { type TabId } from '@/components/system-monitor/MonitorTabs.vue'
-import EventDetailsPanel from '@/components/system-monitor/EventDetailsPanel.vue'
-
-// Tab Content Components
-import EventsTab from '@/components/system-monitor/EventsTab.vue'
-import ServerLogsTab from '@/components/system-monitor/ServerLogsTab.vue'
-import DatabaseTab from '@/components/system-monitor/DatabaseTab.vue'
-import MqttTrafficTab from '@/components/system-monitor/MqttTrafficTab.vue'
-import HealthTab from '@/components/system-monitor/HealthTab.vue'
 import HealthSummaryBar from '@/components/system-monitor/HealthSummaryBar.vue'
-import DiagnoseTab from '@/components/system-monitor/DiagnoseTab.vue'
-import ReportsTab from '@/components/system-monitor/ReportsTab.vue'
-import CleanupPanel from '@/components/system-monitor/CleanupPanel.vue'
+
+// Tab Content Components — lazy-loaded to reduce initial module request burst.
+// Only the active tab triggers its import, preventing ERR_INSUFFICIENT_RESOURCES.
+const EventsTab = defineAsyncComponent(() => import('@/components/system-monitor/EventsTab.vue'))
+const ServerLogsTab = defineAsyncComponent(() => import('@/components/system-monitor/ServerLogsTab.vue'))
+const DatabaseTab = defineAsyncComponent(() => import('@/components/system-monitor/DatabaseTab.vue'))
+const MqttTrafficTab = defineAsyncComponent(() => import('@/components/system-monitor/MqttTrafficTab.vue'))
+const HealthTab = defineAsyncComponent(() => import('@/components/system-monitor/HealthTab.vue'))
+const DiagnoseTab = defineAsyncComponent(() => import('@/components/system-monitor/DiagnoseTab.vue'))
+const ReportsTab = defineAsyncComponent(() => import('@/components/system-monitor/ReportsTab.vue'))
+const CleanupPanel = defineAsyncComponent(() => import('@/components/system-monitor/CleanupPanel.vue'))
+const EventDetailsPanel = defineAsyncComponent(() => import('@/components/system-monitor/EventDetailsPanel.vue'))
 
 // ============================================================================
 // Constants
@@ -358,18 +359,24 @@ const filteredEvents = computed(() => {
   return events
 })
 
-const eventCounts = computed(() => ({
-  events: unifiedEvents.value.filter(e => e.severity === 'error' || e.severity === 'critical').length,
-  logs: unifiedEvents.value.filter(e => e.source === 'server').length,
-  mqtt: unifiedEvents.value.filter(e => e.source === 'mqtt' || e.source === 'esp').length,
-}))
+const eventCounts = computed(() => {
+  let events = 0
+  let logs = 0
+  let mqtt = 0
+  for (const e of unifiedEvents.value) {
+    if (e.severity === 'error' || e.severity === 'critical') events++
+    if (e.source === 'server') logs++
+    if (e.source === 'mqtt' || e.source === 'esp') mqtt++
+  }
+  return { events, logs, mqtt }
+})
 
 const uniqueEspIds = computed(() => {
   const ids = new Set<string>()
-  unifiedEvents.value.forEach(e => {
+  for (const e of unifiedEvents.value) {
     if (e.esp_id) ids.add(e.esp_id)
-  })
-  return Array.from(ids).sort()
+  }
+  return [...ids].sort()
 })
 
 // NOTE: ESP counts were moved to Dashboard - kept for potential future use
@@ -872,13 +879,9 @@ async function handleLoadMore(): Promise<void> {
     const existingIds = new Set(unifiedEvents.value.map(e => e.id))
     const newEvents = historicalEvents.filter(e => !existingIds.has(e.id))
 
-    // Add historical events (append to end since we're loading older events)
+    // Append older events to end (cursor pagination guarantees oldest→newest order)
+    // Existing events are already sorted newest-first, new events are older → append
     unifiedEvents.value = [...unifiedEvents.value, ...newEvents]
-
-    // Sort by timestamp (newest first)
-    unifiedEvents.value.sort((a, b) =>
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    )
 
     // WICHTIG: Kein Hard-Limit mehr - Virtual Scrolling handled Performance
     if (unifiedEvents.value.length > MAX_EVENTS) {
@@ -1504,9 +1507,9 @@ watch(activeTab, (newTab) => {
         v-else-if="activeTab === 'reports'"
       />
 
-      <!-- MQTT Traffic Tab - v-show statt v-if damit Messages weiter gesammelt werden -->
+      <!-- MQTT Traffic Tab -->
       <MqttTrafficTab
-        v-show="activeTab === 'mqtt'"
+        v-else-if="activeTab === 'mqtt'"
         :esp-id="filterEspId || undefined"
       />
     </main>

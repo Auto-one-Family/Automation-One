@@ -35,6 +35,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const STATUS_ICONS: Record<string, typeof CheckCircle> = {
   success: CheckCircle,
+  error: XCircle,
   failure: XCircle,
   running: Loader2,
   timeout: Clock,
@@ -233,7 +234,8 @@ const lastExecTime = computed(() => {
   color: var(--color-success);
 }
 
-.plugin-card__exec-icon--failure {
+.plugin-card__exec-icon--failure,
+.plugin-card__exec-icon--error {
   color: var(--color-error);
 }
 

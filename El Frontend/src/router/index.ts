@@ -1,5 +1,36 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import type { Component } from 'vue'
 import { useAuthStore } from '@/shared/stores/auth.store'
+
+/**
+ * Wraps a dynamic import with retry logic.
+ * Catches "Failed to fetch dynamically imported module" errors that occur
+ * when Vite HMR invalidates a module or the browser cache is stale.
+ * Without this wrapper, Vue Router logs an uncaught navigation error warning
+ * before router.onError can handle it.
+ */
+const MAX_IMPORT_RETRIES = 2
+const RETRY_DELAY_MS = 200
+
+function lazyView(factory: () => Promise<{ default: Component }>): () => Promise<{ default: Component }> {
+  return async () => {
+    for (let attempt = 0; attempt <= MAX_IMPORT_RETRIES; attempt++) {
+      try {
+        return await factory()
+      } catch (error) {
+        const isImportError =
+          error instanceof TypeError &&
+          error.message?.includes('Failed to fetch dynamically imported module')
+        if (!isImportError || attempt === MAX_IMPORT_RETRIES) {
+          throw error
+        }
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)))
+      }
+    }
+    // Unreachable — either returns or throws above
+    return await factory()
+  }
+}
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -8,20 +39,20 @@ const router = createRouter({
     {
       path: '/login',
       name: 'login',
-      component: () => import('@/views/LoginView.vue'),
+      component: lazyView(() => import('@/views/LoginView.vue')),
       meta: { requiresAuth: false },
     },
     {
       path: '/setup',
       name: 'setup',
-      component: () => import('@/views/SetupView.vue'),
+      component: lazyView(() => import('@/views/SetupView.vue')),
       meta: { requiresAuth: false },
     },
 
     // Protected routes (require auth)
     {
       path: '/',
-      component: () => import('@/shared/design/layout/AppShell.vue'),
+      component: lazyView(() => import('@/shared/design/layout/AppShell.vue')),
       meta: { requiresAuth: true },
       children: [
         // Default redirect to /hardware (primary landing page)
@@ -36,19 +67,19 @@ const router = createRouter({
         {
           path: 'hardware',
           name: 'hardware',
-          component: () => import('@/views/HardwareView.vue'),
+          component: lazyView(() => import('@/views/HardwareView.vue')),
           meta: { title: 'Übersicht' },
         },
         {
           path: 'hardware/:zoneId',
           name: 'hardware-zone',
-          component: () => import('@/views/HardwareView.vue'),
+          component: lazyView(() => import('@/views/HardwareView.vue')),
           meta: { title: 'Übersicht' },
         },
         {
           path: 'hardware/:zoneId/:espId',
           name: 'hardware-esp',
-          component: () => import('@/views/HardwareView.vue'),
+          component: lazyView(() => import('@/views/HardwareView.vue')),
           meta: { title: 'Übersicht' },
         },
 
@@ -58,7 +89,7 @@ const router = createRouter({
         {
           path: 'monitor',
           name: 'monitor',
-          component: () => import('@/views/MonitorView.vue'),
+          component: lazyView(() => import('@/views/MonitorView.vue')),
           meta: { title: 'Monitor' },
         },
         // IMPORTANT: monitor/dashboard/:dashboardId MUST come BEFORE monitor/:zoneId
@@ -66,25 +97,25 @@ const router = createRouter({
         {
           path: 'monitor/dashboard/:dashboardId',
           name: 'monitor-dashboard',
-          component: () => import('@/views/MonitorView.vue'),
+          component: lazyView(() => import('@/views/MonitorView.vue')),
           meta: { title: 'Monitor' },
         },
         {
           path: 'monitor/:zoneId',
           name: 'monitor-zone',
-          component: () => import('@/views/MonitorView.vue'),
+          component: lazyView(() => import('@/views/MonitorView.vue')),
           meta: { title: 'Monitor' },
         },
         {
           path: 'monitor/:zoneId/sensor/:sensorId',
           name: 'monitor-sensor',
-          component: () => import('@/views/MonitorView.vue'),
+          component: lazyView(() => import('@/views/MonitorView.vue')),
           meta: { title: 'Monitor' },
         },
         {
           path: 'monitor/:zoneId/dashboard/:dashboardId',
           name: 'monitor-zone-dashboard',
-          component: () => import('@/views/MonitorView.vue'),
+          component: lazyView(() => import('@/views/MonitorView.vue')),
           meta: { title: 'Monitor' },
         },
 
@@ -94,13 +125,13 @@ const router = createRouter({
         {
           path: 'editor',
           name: 'editor',
-          component: () => import('@/views/CustomDashboardView.vue'),
+          component: lazyView(() => import('@/views/CustomDashboardView.vue')),
           meta: { title: 'Editor' },
         },
         {
           path: 'editor/:dashboardId',
           name: 'editor-dashboard',
-          component: () => import('@/views/CustomDashboardView.vue'),
+          component: lazyView(() => import('@/views/CustomDashboardView.vue')),
           meta: { title: 'Editor' },
         },
         // DEPRECATED 2026-03-01: /custom-dashboard → /editor
@@ -155,7 +186,7 @@ const router = createRouter({
         {
           path: 'system-monitor',
           name: 'system-monitor',
-          component: () => import('@/views/SystemMonitorView.vue'),
+          component: lazyView(() => import('@/views/SystemMonitorView.vue')),
           meta: { requiresAdmin: true, title: 'System Monitor' },
         },
         // DEPRECATED 2026-01-24: AuditLogView → System Monitor (Phase 1 Konsolidierung)
@@ -168,19 +199,19 @@ const router = createRouter({
         {
           path: 'users',
           name: 'users',
-          component: () => import('@/views/UserManagementView.vue'),
+          component: lazyView(() => import('@/views/UserManagementView.vue')),
           meta: { requiresAdmin: true, title: 'Benutzerverwaltung' },
         },
         {
           path: 'system-config',
           name: 'system-config',
-          component: () => import('@/views/SystemConfigView.vue'),
+          component: lazyView(() => import('@/views/SystemConfigView.vue')),
           meta: { requiresAdmin: true, title: 'Systemkonfiguration' },
         },
         {
           path: 'load-test',
           name: 'load-test',
-          component: () => import('@/views/LoadTestView.vue'),
+          component: lazyView(() => import('@/views/LoadTestView.vue')),
           meta: { requiresAdmin: true, title: 'Last-Tests' },
         },
         // DEPRECATED 2026-01-23: MqttLogView → System Monitor
@@ -193,19 +224,19 @@ const router = createRouter({
         {
           path: 'maintenance',
           name: 'maintenance',
-          component: () => import('@/views/MaintenanceView.vue'),
+          component: lazyView(() => import('@/views/MaintenanceView.vue')),
           meta: { requiresAdmin: true, title: 'Wartung' },
         },
         {
           path: 'plugins',
           name: 'plugins',
-          component: () => import('@/views/PluginsView.vue'),
+          component: lazyView(() => import('@/views/PluginsView.vue')),
           meta: { requiresAdmin: true, title: 'AutoOps Plugins' },
         },
         {
           path: 'sensors',
           name: 'sensors',
-          component: () => import('@/views/SensorsView.vue'),
+          component: lazyView(() => import('@/views/SensorsView.vue')),
           meta: { title: 'Komponenten' },
         },
         // DEPRECATED 2025-01-04: ActuatorsView → SensorsView with tab query
@@ -217,25 +248,25 @@ const router = createRouter({
         {
           path: 'logic',
           name: 'logic',
-          component: () => import('@/views/LogicView.vue'),
+          component: lazyView(() => import('@/views/LogicView.vue')),
           meta: { title: 'Automatisierung' },
         },
         {
           path: 'logic/:ruleId',
           name: 'logic-rule',
-          component: () => import('@/views/LogicView.vue'),
+          component: lazyView(() => import('@/views/LogicView.vue')),
           meta: { title: 'Automatisierung' },
         },
         {
           path: 'settings',
           name: 'settings',
-          component: () => import('@/views/SettingsView.vue'),
+          component: lazyView(() => import('@/views/SettingsView.vue')),
           meta: { title: 'Einstellungen' },
         },
         {
           path: 'calibration',
           name: 'calibration',
-          component: () => import('@/views/CalibrationView.vue'),
+          component: lazyView(() => import('@/views/CalibrationView.vue')),
           meta: { requiresAdmin: true, title: 'Kalibrierung' },
         },
         // DEPRECATED 2026-03-01: SensorHistoryView → Monitor (integriert in Monitor L3 SlideOver)
@@ -253,6 +284,26 @@ const router = createRouter({
       redirect: '/hardware',
     },
   ],
+})
+
+// Dynamic import failure recovery — when browser runs out of resources
+// (ERR_INSUFFICIENT_RESOURCES) or chunks fail to load, reload the page once.
+const RELOAD_COOLDOWN_MS = 10_000
+router.onError((error, to) => {
+  if (
+    error.message?.includes('Failed to fetch dynamically imported module') ||
+    error.message?.includes('Loading chunk') ||
+    error.message?.includes('ERR_INSUFFICIENT_RESOURCES')
+  ) {
+    const lastReload = sessionStorage.getItem('__route_reload_ts')
+    const now = Date.now()
+    if (lastReload && now - Number(lastReload) < RELOAD_COOLDOWN_MS) {
+      console.error('[Router] Dynamic import failed repeatedly, not reloading again', to.fullPath)
+      return
+    }
+    sessionStorage.setItem('__route_reload_ts', String(now))
+    window.location.assign(to.fullPath)
+  }
 })
 
 // Navigation guards

@@ -36,7 +36,7 @@ export interface PluginExecutionDTO {
   plugin_id: string
   started_at: string | null
   finished_at: string | null
-  status: 'success' | 'failure' | 'running' | 'timeout'
+  status: 'success' | 'error' | 'failure' | 'running' | 'timeout'
   triggered_by: string
   triggered_by_user?: number | null
   result: Record<string, unknown> | null

@@ -1382,6 +1382,170 @@ const debugHandlers = [
 ]
 
 // =============================================================================
+// Plugin Handlers
+// =============================================================================
+
+const mockPlugin = {
+  plugin_id: 'health_check',
+  display_name: 'Health Check',
+  description: 'System health validation',
+  category: 'monitoring',
+  is_enabled: true,
+  config: { include_containers: true, alert_on_degraded: false },
+  config_schema: {
+    include_containers: { type: 'boolean', default: true, label: 'Container prüfen' },
+    alert_on_degraded: { type: 'boolean', default: false, label: 'Alert bei Degraded' },
+  },
+  capabilities: ['validate', 'monitor'],
+  last_execution: {
+    id: 'exec-001',
+    plugin_id: 'health_check',
+    started_at: '2026-03-01T10:00:00Z',
+    finished_at: '2026-03-01T10:00:05Z',
+    status: 'success',
+    triggered_by: 'manual',
+    result: { success: true, summary: 'All checks passed' },
+    error_message: null,
+    duration_seconds: 5.0,
+  },
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-03-01T00:00:00Z',
+}
+
+const mockPluginDisabled = {
+  plugin_id: 'system_cleanup',
+  display_name: 'System Cleanup',
+  description: 'Maintenance and cleanup operations',
+  category: 'maintenance',
+  is_enabled: false,
+  config: { max_log_age_days: 30, dry_run: false },
+  config_schema: {
+    max_log_age_days: { type: 'integer', default: 30, label: 'Max Log-Alter (Tage)' },
+    dry_run: { type: 'boolean', default: false, label: 'Nur simulieren' },
+  },
+  capabilities: ['cleanup', 'validate'],
+  last_execution: null,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+}
+
+const mockPluginWithSelect = {
+  plugin_id: 'esp_configurator',
+  display_name: 'ESP Configurator',
+  description: 'Autonomous ESP32 configuration',
+  category: 'automation',
+  is_enabled: true,
+  config: { device_mode: 'mock', auto_heartbeat: true },
+  config_schema: {
+    device_mode: { type: 'select', options: ['mock', 'real', 'hybrid'], default: 'mock', label: 'Geräte-Modus' },
+    auto_heartbeat: { type: 'boolean', default: true, label: 'Auto-Heartbeat' },
+  },
+  capabilities: ['configure', 'validate'],
+  last_execution: {
+    id: 'exec-002',
+    plugin_id: 'esp_configurator',
+    started_at: '2026-03-01T11:00:00Z',
+    finished_at: '2026-03-01T11:00:10Z',
+    status: 'error',
+    triggered_by: 'logic_rule',
+    result: null,
+    error_message: 'Connection timeout',
+    duration_seconds: 10.0,
+  },
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-03-01T00:00:00Z',
+}
+
+const allMockPlugins = [mockPlugin, mockPluginDisabled, mockPluginWithSelect]
+
+const mockExecution = {
+  id: 'exec-new-001',
+  plugin_id: 'health_check',
+  started_at: new Date().toISOString(),
+  finished_at: new Date().toISOString(),
+  status: 'success',
+  triggered_by: 'manual',
+  result: { success: true, summary: 'All checks passed' },
+  error_message: null,
+  duration_seconds: 3.2,
+}
+
+const pluginHandlers = [
+  // GET /plugins - List all plugins
+  http.get('/api/v1/plugins', () => {
+    return HttpResponse.json(allMockPlugins)
+  }),
+
+  // GET /plugins/:id - Get plugin detail
+  http.get('/api/v1/plugins/:pluginId', ({ params }) => {
+    const { pluginId } = params
+    const plugin = allMockPlugins.find(p => p.plugin_id === pluginId)
+
+    if (plugin) {
+      return HttpResponse.json({
+        ...plugin,
+        recent_executions: plugin.last_execution ? [plugin.last_execution] : [],
+      })
+    }
+
+    return HttpResponse.json({ detail: 'Plugin not found' }, { status: 404 })
+  }),
+
+  // POST /plugins/:id/execute - Execute plugin
+  http.post('/api/v1/plugins/:pluginId/execute', ({ params }) => {
+    const { pluginId } = params
+    const plugin = allMockPlugins.find(p => p.plugin_id === pluginId)
+
+    if (!plugin) {
+      return HttpResponse.json({ detail: 'Plugin not found' }, { status: 404 })
+    }
+    if (!plugin.is_enabled) {
+      return HttpResponse.json({ detail: 'Plugin is disabled' }, { status: 400 })
+    }
+
+    return HttpResponse.json({ ...mockExecution, plugin_id: pluginId })
+  }),
+
+  // PUT /plugins/:id/config - Update config
+  http.put('/api/v1/plugins/:pluginId/config', async ({ params, request }) => {
+    const { pluginId } = params
+    const body = await request.json() as { config: Record<string, unknown> }
+
+    return HttpResponse.json({
+      plugin_id: pluginId,
+      config: body.config,
+      updated_at: new Date().toISOString(),
+    })
+  }),
+
+  // POST /plugins/:id/enable - Enable plugin
+  http.post('/api/v1/plugins/:pluginId/enable', ({ params }) => {
+    const { pluginId } = params
+    return HttpResponse.json({ plugin_id: pluginId, is_enabled: true })
+  }),
+
+  // POST /plugins/:id/disable - Disable plugin
+  http.post('/api/v1/plugins/:pluginId/disable', ({ params }) => {
+    const { pluginId } = params
+    return HttpResponse.json({ plugin_id: pluginId, is_enabled: false })
+  }),
+
+  // GET /plugins/:id/history - Execution history
+  http.get('/api/v1/plugins/:pluginId/history', ({ params }) => {
+    const { pluginId } = params
+    const plugin = allMockPlugins.find(p => p.plugin_id === pluginId)
+
+    if (!plugin) {
+      return HttpResponse.json({ detail: 'Plugin not found' }, { status: 404 })
+    }
+
+    return HttpResponse.json(
+      plugin.last_execution ? [plugin.last_execution] : [],
+    )
+  }),
+]
+
+// =============================================================================
 // Export All Handlers
 // =============================================================================
 
@@ -1395,7 +1559,8 @@ export const handlers = [
   ...logicHandlers,
   ...databaseHandlers,
   ...auditHandlers,
-  ...debugHandlers
+  ...debugHandlers,
+  ...pluginHandlers,
 ]
 
 // =============================================================================
@@ -1423,4 +1588,8 @@ export {
   mockDeviceState,
   setMockDeviceStatus,
   resetMockState,
+  // Plugin mock data
+  mockPlugin,
+  mockPluginDisabled,
+  mockPluginWithSelect,
 }

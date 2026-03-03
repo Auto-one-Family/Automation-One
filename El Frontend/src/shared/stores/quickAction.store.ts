@@ -39,6 +39,7 @@ export type ViewContext =
   | 'editor'
   | 'settings'
   | 'sensors'
+  | 'plugins'
   | 'other'
 
 /** Sub-panel routing: which panel is shown inside the FAB */

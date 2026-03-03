@@ -10,6 +10,7 @@
  * - actuator: ESP, GPIO, command, value, duration
  * - notification: channel, target, message
  * - delay: seconds
+ * - plugin: plugin selection with dynamic config from schema
  */
 
 import { computed, watch, ref } from 'vue'
@@ -21,10 +22,12 @@ import {
   Power,
   Bell,
   Timer,
+  Puzzle,
   Trash2,
   Copy,
 } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
+import { pluginsApi, type PluginDTO } from '@/api/plugins'
 import type { Node } from '@vue-flow/core'
 import type { MockSensor, MockActuator } from '@/types'
 
@@ -43,6 +46,20 @@ const emit = defineEmits<{
 
 const espStore = useEspStore()
 
+// Load available plugins for plugin node config
+const availablePlugins = ref<PluginDTO[]>([])
+const pluginsLoaded = ref(false)
+
+async function loadPlugins() {
+  if (pluginsLoaded.value) return
+  try {
+    availablePlugins.value = await pluginsApi.list()
+    pluginsLoaded.value = true
+  } catch {
+    // Non-critical — show empty list
+  }
+}
+
 const nodeTypeLabels: Record<string, string> = {
   sensor: 'Sensor-Bedingung',
   time: 'Zeitfenster',
@@ -50,6 +67,7 @@ const nodeTypeLabels: Record<string, string> = {
   actuator: 'Aktor-Aktion',
   notification: 'Benachrichtigung',
   delay: 'Verzögerung',
+  plugin: 'Plugin-Aktion',
 }
 
 const nodeTypeIcons: Record<string, typeof Thermometer> = {
@@ -59,6 +77,7 @@ const nodeTypeIcons: Record<string, typeof Thermometer> = {
   actuator: Power,
   notification: Bell,
   delay: Timer,
+  plugin: Puzzle,
 }
 
 const operatorOptions = [
@@ -108,6 +127,10 @@ watch(
   (newNode) => {
     if (newNode) {
       localData.value = { ...newNode.data }
+      // Lazy-load plugins when a plugin node is selected
+      if (newNode.type === 'plugin') {
+        loadPlugins()
+      }
     }
   },
   { immediate: true, deep: true }
@@ -593,6 +616,86 @@ function selectActuator(value: string) {
             </p>
           </div>
         </template>
+
+        <!-- ======================== PLUGIN CONFIG ======================== -->
+        <template v-if="nodeType === 'plugin'">
+          <div class="config-field">
+            <label class="config-label">Plugin</label>
+            <select
+              class="config-select"
+              :value="localData.pluginId"
+              @change="updateField('pluginId', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">-- Plugin wählen --</option>
+              <option
+                v-for="p in availablePlugins"
+                :key="p.plugin_id"
+                :value="p.plugin_id"
+                :disabled="!p.is_enabled"
+              >
+                {{ p.display_name }}{{ !p.is_enabled ? ' (deaktiviert)' : '' }}
+              </option>
+            </select>
+          </div>
+
+          <template v-if="localData.pluginId">
+            <div class="config-field">
+              <p class="config-hint">
+                {{ availablePlugins.find(p => p.plugin_id === localData.pluginId)?.description || '' }}
+              </p>
+            </div>
+
+            <!-- Dynamic config fields from plugin config_schema -->
+            <template
+              v-for="(schemaDef, key) in (availablePlugins.find(p => p.plugin_id === localData.pluginId)?.config_schema || {})"
+              :key="key"
+            >
+              <div v-if="(schemaDef as Record<string, unknown>)?.type === 'boolean'" class="config-field">
+                <label class="config-label">
+                  {{ (schemaDef as Record<string, unknown>).label || key }}
+                </label>
+                <div class="config-toggle-group">
+                  <button
+                    class="config-toggle-btn"
+                    :class="{ 'config-toggle-btn--active': localData[`cfg_${key}`] !== false }"
+                    @click="updateField(`cfg_${key}`, true)"
+                  >
+                    An
+                  </button>
+                  <button
+                    class="config-toggle-btn"
+                    :class="{ 'config-toggle-btn--active': localData[`cfg_${key}`] === false }"
+                    @click="updateField(`cfg_${key}`, false)"
+                  >
+                    Aus
+                  </button>
+                </div>
+              </div>
+              <div v-else-if="(schemaDef as Record<string, unknown>)?.type === 'number'" class="config-field">
+                <label class="config-label">
+                  {{ (schemaDef as Record<string, unknown>).label || key }}
+                </label>
+                <input
+                  type="number"
+                  class="config-input"
+                  :value="localData[`cfg_${key}`] ?? (schemaDef as Record<string, unknown>).default"
+                  @input="updateField(`cfg_${key}`, Number(($event.target as HTMLInputElement).value))"
+                />
+              </div>
+              <div v-else-if="(schemaDef as Record<string, unknown>)?.type === 'string'" class="config-field">
+                <label class="config-label">
+                  {{ (schemaDef as Record<string, unknown>).label || key }}
+                </label>
+                <input
+                  type="text"
+                  class="config-input"
+                  :value="localData[`cfg_${key}`] ?? (schemaDef as Record<string, unknown>).default ?? ''"
+                  @input="updateField(`cfg_${key}`, ($event.target as HTMLInputElement).value)"
+                />
+              </div>
+            </template>
+          </template>
+        </template>
       </div>
 
       <!-- Footer Actions -->
@@ -673,6 +776,11 @@ function selectActuator(value: string) {
 .config-panel__type-icon--delay {
   background: rgba(133, 133, 160, 0.1);
   color: var(--color-text-secondary);
+}
+
+.config-panel__type-icon--plugin {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
 }
 
 .config-panel__type-label {

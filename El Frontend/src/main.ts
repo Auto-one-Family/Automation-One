@@ -10,16 +10,13 @@ import './styles/main.css'
 const app = createApp(App)
 const logger = createLogger('Global')
 
-// Backend API base URL for error reporting (fire-and-forget)
-const apiBase = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || ''
-
 /**
  * Fire-and-forget POST to backend log endpoint.
+ * Uses relative URL so Vite proxy handles routing (avoids CORS in dev mode).
  * Catches and silently ignores network errors.
  */
 function reportToBackend(payload: Record<string, unknown>): void {
-  if (!apiBase) return
-  fetch(`${apiBase}/api/v1/logs/frontend`, {
+  fetch('/api/v1/logs/frontend', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

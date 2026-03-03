@@ -22,11 +22,16 @@ import {
   Navigation,
   LayoutDashboard,
   LayoutGrid,
+  Stethoscope,
+  HeartPulse,
 } from 'lucide-vue-next'
 
-/** Navigate helper — wraps router.push to satisfy void handler signature */
+/** Navigate helper — wraps router.push and catches dynamic import failures */
 function nav(router: ReturnType<typeof useRouter>, to: string): void {
-  void router.push(to)
+  router.push(to).catch(() => {
+    // Dynamic import failures (ERR_INSUFFICIENT_RESOURCES, chunk load errors)
+    // are handled by the global router.onError handler
+  })
 }
 
 /** Determine ViewContext from route path */
@@ -38,6 +43,7 @@ function resolveViewContext(path: string): ViewContext {
   if (path.startsWith('/editor')) return 'editor'
   if (path.startsWith('/settings')) return 'settings'
   if (path.startsWith('/sensors')) return 'sensors'
+  if (path.startsWith('/plugins')) return 'plugins'
   return 'other'
 }
 
@@ -120,6 +126,32 @@ function buildContextActions(
           category: 'context',
           handler: () => nav(router, '/system-monitor?tab=health'),
         },
+        {
+          id: 'ctx-full-diagnostic',
+          label: 'Volle Diagnose',
+          icon: markRaw(Stethoscope),
+          category: 'context',
+          handler: async () => {
+            const { useDiagnosticsStore } = await import('@/shared/stores/diagnostics.store')
+            const diagnosticsStore = useDiagnosticsStore()
+            await diagnosticsStore.runDiagnostic()
+          },
+        },
+      ]
+
+    case 'plugins':
+      return [
+        {
+          id: 'ctx-healthcheck',
+          label: 'HealthCheck ausführen',
+          icon: markRaw(HeartPulse),
+          category: 'context',
+          handler: async () => {
+            const { usePluginsStore } = await import('@/shared/stores/plugins.store')
+            const pluginsStore = usePluginsStore()
+            await pluginsStore.executePlugin('health_check')
+          },
+        },
       ]
 
     case 'sensors':
@@ -140,6 +172,7 @@ function buildContextActions(
 
 /** Build global actions (always available) */
 function buildGlobalActions(
+  router: ReturnType<typeof useRouter>,
   quickActionStore: ReturnType<typeof useQuickActionStore>,
   inboxStore: ReturnType<typeof useNotificationInboxStore>,
   uiStore: ReturnType<typeof useUiStore>,
@@ -183,6 +216,24 @@ function buildGlobalActions(
       shortcutHint: 'Ctrl+K',
       handler: () => uiStore.toggleCommandPalette(),
     },
+    {
+      id: 'global-diagnose',
+      label: 'Diagnose starten',
+      icon: markRaw(Stethoscope),
+      category: 'global',
+      handler: async () => {
+        const { useDiagnosticsStore } = await import('@/shared/stores/diagnostics.store')
+        const diagnosticsStore = useDiagnosticsStore()
+        await diagnosticsStore.runDiagnostic()
+      },
+    },
+    {
+      id: 'global-last-report',
+      label: 'Letzter Report',
+      icon: markRaw(FileText),
+      category: 'global',
+      handler: () => nav(router, '/system-monitor?tab=reports'),
+    },
   ]
 }
 
@@ -206,7 +257,7 @@ export function useQuickActions(): void {
       quickActionStore.setViewContext(view)
       quickActionStore.setContextActions(buildContextActions(view, router, quickActionStore))
       quickActionStore.setGlobalActions(
-        buildGlobalActions(quickActionStore, inboxStore, uiStore),
+        buildGlobalActions(router, quickActionStore, inboxStore, uiStore),
       )
     },
     { immediate: true },

@@ -48,8 +48,9 @@ const configFields = computed(() => {
     return {
       key,
       type: (fieldDef.type as string) || 'string',
-      description: (fieldDef.description as string) || key,
+      label: (fieldDef.label as string) || (fieldDef.description as string) || key,
       defaultValue: fieldDef.default,
+      options: (fieldDef.options as string[]) || [],
     }
   })
 })
@@ -88,7 +89,7 @@ function handleSave() {
           class="config-dialog__field"
         >
           <label class="config-dialog__label">
-            {{ field.description }}
+            {{ field.label }}
             <span class="config-dialog__field-key">({{ field.key }})</span>
           </label>
 
@@ -104,6 +105,22 @@ function handleSave() {
               {{ localConfig[field.key] ? 'Aktiv' : 'Inaktiv' }}
             </span>
           </div>
+
+          <!-- Select -->
+          <select
+            v-else-if="field.type === 'select' && field.options.length > 0"
+            :value="(localConfig[field.key] as string) ?? (field.defaultValue as string) ?? ''"
+            class="config-dialog__input"
+            @change="updateField(field.key, ($event.target as HTMLSelectElement).value)"
+          >
+            <option
+              v-for="opt in field.options"
+              :key="opt"
+              :value="opt"
+            >
+              {{ opt }}
+            </option>
+          </select>
 
           <!-- Number -->
           <input
