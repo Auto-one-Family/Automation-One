@@ -40,7 +40,7 @@ src/ (60,604 Zeilen)
 ├── services/      13,675 (22.6%)  Business Logic, Logic Engine
 ├── api/v1/        12,210 (20.1%)  REST Endpoints (170)
 ├── core/           7,294 (12.0%)  Config, Security, Scheduler
-├── db/             6,942 (11.5%)  Models (16), Repositories (16)
+├── db/             6,942 (11.5%)  Models (18), Repositories (17)
 ├── mqtt/           6,938 (11.4%)  Client, Handlers (14), Publisher
 ├── schemas/        6,778 (11.2%)  Pydantic DTOs (70+)
 ├── sensors/        3,728 (6.2%)   Sensor Libraries
@@ -102,6 +102,9 @@ Server sendet:  Actuator-Commands, Config-Updates
 | 4 | MQTT Topics Subscribe | 389-395 | CONDITIONAL |
 | 5 | **WebSocket Manager Init** | 397-402 | JA |
 | 6 | **Services Init (Safety → Logic)** | 404-482 | KRITISCH |
+| 6.1 | Plugin-Sync (Registry → DB) | ~484-500 | NON-FATAL |
+| 6.2 | Daily Diagnostic Scheduler | ~502-530 | NON-FATAL |
+| 6.3 | Plugin Schedule Registration (DB → APScheduler) | ~532-580 | NON-FATAL |
 
 ### Shutdown-Reihenfolge
 
@@ -163,7 +166,7 @@ DB Persist → Logic Engine → WebSocket Broadcast
 
 ## 4. REST API
 
-**Dateien:** `src/api/v1/` (~12,500 Zeilen, 19 Router inkl. 3 PLANNED, ~170 Endpoints)
+**Dateien:** `src/api/v1/` (~12,500 Zeilen, 21 Router inkl. 3 PLANNED, ~208 Endpoints)
 
 ### Auth Matrix
 
@@ -193,7 +196,9 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | sensor_type_defaults | /v1/sensor-type-defaults | 6 | Operator+ |
 | sequences | /v1/sequences | 4 | Operator+ |
 | logs | /v1/logs | 1 | Public |
-| notifications | /v1/notifications | 13 | Active/Operator |
+| notifications | /v1/notifications | 15 | Active/Operator/Admin |
+| diagnostics | /v1/diagnostics | 6 | Operator/Active |
+| plugins | /v1/plugins | 8 | Operator/Active |
 | webhooks | /v1/webhooks | 1 | Public (Grafana) |
 | ai | /v1/ai | PLANNED | - |
 | kaiser | /v1/kaiser | PLANNED | - |
@@ -222,7 +227,7 @@ async def get_items(
 
 ## 5. Database
 
-**Dateien:** `src/db/` (6,942 Zeilen, 17 Models, 16 Repositories)
+**Dateien:** `src/db/` (6,942 Zeilen, 18 Models, 17 Repositories)
 
 ### Repository Pattern
 
@@ -249,6 +254,10 @@ class YourRepository(BaseRepository[YourModel]):
 | AuditLog | `audit_logs` | event_type, severity, source_type |
 | Notification | `notifications` | title, severity (critical/warning/info), source, category, channel, fingerprint (FIX-07 dedup), status (active/acknowledged/resolved), correlation_id, acknowledged_at, acknowledged_by, resolved_at |
 | NotificationPreferences | `notification_preferences` | user_id, channel, enabled, severity_filter |
+| DiagnosticReport | `diagnostic_reports` | id (UUID PK), overall_status, checks (JSON, nullable), started_at, duration_seconds, triggered_by, summary |
+| PluginConfig | `plugin_configs` | plugin_id (PK), display_name, is_enabled, config (JSONB), schedule, capabilities |
+| PluginExecution | `plugin_executions` | id (UUID PK), plugin_id (FK), status, started_at, duration_seconds, result (JSONB), error_message |
+| EmailLog | `email_log` | id (UUID PK), notification_id (FK, SET NULL), to_address, subject, template, provider, status (sent/failed/pending), sent_at, error_message, retry_count (Phase C V1.1) |
 
 ### Multi-Value Sensor Support
 
@@ -370,8 +379,10 @@ poetry run python scripts/seed_wokwi_esp.py
 | **SubzoneService** | subzone_service.py | 595 | `assign_subzone()`, `set_safe_mode()` |
 | **ConfigBuilder** | config_builder.py | 249 | `build_esp_config()` |
 | **MaintenanceService** | maintenance/service.py | 260 | `start()`, `stop()`, `register_jobs()` |
-| **NotificationRouter** | notification_router.py | ~120 | `route()` — persist → fingerprint dedup → WS broadcast → optional email |
+| **NotificationRouter** | notification_router.py | ~467 | `route()` — persist → fingerprint dedup → WS broadcast → optional email + email_log |
 | **AlertSuppressionService** | alert_suppression_service.py | ~180 | `check_suppression()`, `update_config()`, `expire_suppressions()` — ISA-18.2 Shelved Alarms |
+| **DiagnosticsService** | diagnostics_service.py | ~350 | `run_full_diagnostic()`, `cleanup_old_reports()` — 10 modulare System-Checks |
+| **PluginService** | plugin_service.py | ~380 | `execute_plugin()`, `update_schedule()`, `sync_registry_to_db()` — Registry ↔ DB Mediator |
 
 ### Logic Engine Architektur
 
@@ -408,6 +419,7 @@ LogicEngine
 | `monitor_` | Health | `monitor_health_check_esps` |
 | `sensor_schedule_` | Scheduled | `sensor_schedule_ESP_123_34_ph` |
 | `alert_` | Alert Suppression | `alert_expire_suppressions` |
+| `custom_` | Plugin-Jobs | `custom_plugin_health_check` |
 
 ### Maintenance Jobs
 
@@ -418,6 +430,8 @@ LogicEngine
 | health_check_esps | 60s | ESP_HEALTH_CHECK_INTERVAL_SECONDS |
 | health_check_mqtt | 30s | MQTT_HEALTH_CHECK_INTERVAL_SECONDS |
 | expire_alert_suppressions | Hourly :00 | ALERT_SUPPRESSION_ENABLED |
+| daily_diagnostic | Daily 04:00 | DIAGNOSTIC_SCHEDULE_ENABLED |
+| plugin_* (DB-driven) | Per-plugin cron | PluginConfig.schedule |
 
 ---
 

@@ -15,7 +15,7 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.19
+**Version:** 9.20
 **Letzte Aktualisierung:** 2026-03-03
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
@@ -1113,8 +1113,17 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.19
+**Version:** 9.20
 **Letzte Aktualisierung:** 2026-03-03
+
+### Aenderungen in v9.20
+
+- Phase C: Frontend-Verfeinerung — V1.1 Email-Status-Tracking, V4.1 Timed Snooze, V6.1 QAB-Actions
+- notifications.ts (API): 4 neue Types (`EmailLogEntry`, `EmailLogListResponse`, `EmailLogListFilters`, `EmailLogStatsDTO`) + 2 neue Methoden (`getEmailLog()`, `getEmailLogStats()`) fuer Phase C V1.1 Email-Log
+- NotificationItem.vue: Email-Delivery-Status im Detail-Grid — `emailStatus`, `emailProvider`, `hasEmailInfo` Computeds aus notification.metadata, Mail-Icon, Zugestellt/Fehlgeschlagen/Ausstehend Badge mit Provider-Info, CSS `.item__email-status--sent/failed/pending`
+- QuickAlertPanel.vue: Timed Snooze (Phase C V4.1) — 5 Preset-Dauern (15min, 30min, 1h, 4h, 8h), `suppressionMap` trackt aktive Snooze-Timer, Timer-Countdown-Anzeige, `sensorsApi.updateAlertConfig()` mit `suppression_until` ISO-Datetime
+- useQuickActions.ts: Neue QAB-Actions (Phase C V6.1) — `global-last-report` (System Monitor Reports-Tab), ViewContext `'plugins'` fuer PluginsView, `buildGlobalActions()` nimmt jetzt `router` Parameter
+- quickAction.store.ts: `'plugins'` zu `ViewContext` Type Union hinzugefuegt
 
 ### Aenderungen in v9.19
 

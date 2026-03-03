@@ -7,11 +7,11 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 2.8 | **Aktualisiert:** 2026-03-03
+> **Version:** 2.9 | **Aktualisiert:** 2026-03-03
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
-> **Endpoint-Anzahl:** ~194 Endpoints
+> **Endpoint-Anzahl:** ~210 Endpoints
 
 ---
 
@@ -254,7 +254,7 @@ allowed-tools: Read
 | `/users/{user_id}/reset-password` | POST | Admin | Passwort zurücksetzen |
 | `/users/{user_id}/role` | PATCH | Admin | Rolle ändern |
 
-### Notifications (`/notifications`) - 13 Endpoints
+### Notifications (`/notifications`) - 15 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
@@ -262,6 +262,8 @@ allowed-tools: Read
 | `/notifications/unread-count` | GET | JWT | Ungelesene-Anzahl + höchste Severity |
 | `/notifications/alerts/active` | GET | JWT | Aktive Alerts (Phase 4B, ISA-18.2) |
 | `/notifications/alerts/stats` | GET | JWT | Alert-Statistiken: MTTA, MTTR, Counts (Phase 4B) |
+| `/notifications/email-log` | GET | Admin | Email-Versandprotokoll (paginiert, filterbar) (Phase C V1.1) |
+| `/notifications/email-log/stats` | GET | Admin | Email-Versandstatistiken (Phase C V1.1) |
 | `/notifications/{id}` | GET | JWT | Notification Details |
 | `/notifications/{id}/read` | PATCH | JWT | Als gelesen markieren |
 | `/notifications/{id}/acknowledge` | PATCH | JWT | Alert bestätigen: active → acknowledged (Phase 4B) |
@@ -277,6 +279,30 @@ allowed-tools: Read
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
 | `/webhooks/grafana-alerts` | POST | None | Grafana Alert Webhook Empfänger |
+
+### Diagnostics (`/diagnostics`) - 6 Endpoints
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/diagnostics/run` | POST | Operator | Vollständigen Diagnose-Lauf starten |
+| `/diagnostics/run/{check_name}` | POST | Operator | Einzelnen Check ausführen |
+| `/diagnostics/history` | GET | JWT | Report-History auflisten |
+| `/diagnostics/history/{report_id}` | GET | JWT | Report-Details abrufen |
+| `/diagnostics/export/{report_id}` | POST | Operator | Report als JSON exportieren |
+| `/diagnostics/checks` | GET | JWT | Verfügbare Checks auflisten |
+
+### Plugins (`/plugins`) - 8 Endpoints
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/plugins` | GET | JWT | Alle Plugins auflisten |
+| `/plugins/{plugin_id}` | GET | JWT | Plugin-Details mit letzten Executions |
+| `/plugins/{plugin_id}/execute` | POST | Operator | Plugin manuell ausführen |
+| `/plugins/{plugin_id}/config` | PUT | Operator | Plugin-Konfiguration ändern |
+| `/plugins/{plugin_id}/history` | GET | JWT | Execution-History |
+| `/plugins/{plugin_id}/enable` | POST | Operator | Plugin aktivieren |
+| `/plugins/{plugin_id}/disable` | POST | Operator | Plugin deaktivieren |
+| `/plugins/{plugin_id}/schedule` | PUT | Operator | Plugin-Schedule setzen/ändern |
 
 ### Health (`/health`) - 6 Endpoints
 
@@ -1287,6 +1313,7 @@ Health Check (keine Auth erforderlich).
 - `NotificationPreferencesUpdate`, `NotificationPreferencesResponse`
 - `UnreadCountResponse`, `TestEmailRequest`
 - `AlertStatsResponse`, `AlertActiveListResponse` (Phase 4B)
+- `EmailLogResponse`, `EmailLogBrief`, `EmailLogListResponse`, `EmailLogStatsResponse` (Phase C V1.1)
 - `GrafanaAlert`, `GrafanaWebhookPayload`
 
 ### Debug Schemas (`schemas/debug.py`)
@@ -1320,7 +1347,7 @@ Health Check (keine Auth erforderlich).
 | logs | `logs.ts` | Log Viewer |
 | audit | `audit.ts` | Audit Logs |
 | users | `users.ts` | User Management |
-| notifications | `notifications.ts` | Notification Inbox + Preferences |
+| notifications | `notifications.ts` | Notification Inbox + Preferences + Email Log |
 
 ### Backend Router (`El Servador/god_kaiser_server/src/api/v1/`)
 
@@ -1340,7 +1367,9 @@ Health Check (keine Auth erforderlich).
 | audit | `audit.py` | 22 |
 | users | `users.py` | 7 |
 | health | `health.py` | 6 |
-| notifications | `notifications.py` | 13 |
+| notifications | `notifications.py` | 15 |
+| diagnostics | `diagnostics.py` | 6 |
+| plugins | `plugins.py` | 8 |
 | webhooks | `webhooks.py` | 1 |
 | logs | `logs.py` | 1 |
 | websocket | `websocket/realtime.py` | 1 |
