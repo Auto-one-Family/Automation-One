@@ -23,6 +23,7 @@ import QuickActionMenu from './QuickActionMenu.vue'
 import QuickAlertPanel from './QuickAlertPanel.vue'
 import QuickNavPanel from './QuickNavPanel.vue'
 import QuickWidgetPanel from './QuickWidgetPanel.vue'
+import QuickDashboardPanel from './QuickDashboardPanel.vue'
 
 const route = useRoute()
 const store = useQuickActionStore()
@@ -36,6 +37,7 @@ const activePanelComponent = computed(() => {
     case 'alerts': return QuickAlertPanel
     case 'navigation': return QuickNavPanel
     case 'widgets': return QuickWidgetPanel
+    case 'dashboards': return QuickDashboardPanel
     default: return QuickActionMenu
   }
 })

@@ -42,7 +42,7 @@ export type ViewContext =
   | 'other'
 
 /** Sub-panel routing: which panel is shown inside the FAB */
-export type QuickActionPanel = 'menu' | 'alerts' | 'navigation' | 'widgets'
+export type QuickActionPanel = 'menu' | 'alerts' | 'navigation' | 'widgets' | 'dashboards'
 
 // ── Store ───────────────────────────────────────────────────────────────
 

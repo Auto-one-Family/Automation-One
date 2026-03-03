@@ -20,7 +20,7 @@ import {
   FileText,
   Cpu,
   Navigation,
-  PenTool,
+  LayoutDashboard,
   LayoutGrid,
 } from 'lucide-vue-next'
 
@@ -74,18 +74,11 @@ function buildContextActions(
     case 'monitor':
       return [
         {
-          id: 'mon-dashboard-editor',
-          label: 'Dashboard Editor',
-          icon: markRaw(PenTool),
+          id: 'mon-dashboards',
+          label: 'Dashboards',
+          icon: markRaw(LayoutDashboard),
           category: 'context',
-          handler: () => nav(router, '/editor'),
-        },
-        {
-          id: 'mon-widget-insert',
-          label: 'Widget hinzufügen',
-          icon: markRaw(LayoutGrid),
-          category: 'context',
-          handler: () => quickActionStore.setActivePanel('widgets'),
+          handler: () => quickActionStore.setActivePanel('dashboards'),
         },
       ]
 
