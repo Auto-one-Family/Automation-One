@@ -295,10 +295,12 @@ class SensorDataHandler:
                     # would produce false "implausible" warnings.
                     display_val = processed_value if processed_value is not None else value
                     skip_range_check = processing_mode != "pi_enhanced" or processed_value is None
-                    if display_val is not None and quality not in ("error",) and not skip_range_check:
-                        range_result = self._check_physical_range(
-                            sensor_type, float(display_val)
-                        )
+                    if (
+                        display_val is not None
+                        and quality not in ("error",)
+                        and not skip_range_check
+                    ):
+                        range_result = self._check_physical_range(sensor_type, float(display_val))
                         if range_result == "implausible":
                             logger.warning(
                                 f"Implausible sensor value: esp_id={esp_id_str}, "
@@ -353,15 +355,10 @@ class SensorDataHandler:
                             )
 
                         # Update latest reading in sensor_metadata
-                        latest_value = (
-                            processed_value if processed_value is not None
-                            else raw_value
-                        )
+                        latest_value = processed_value if processed_value is not None else raw_value
                         updated_metadata = dict(sensor_config.sensor_metadata or {})
                         updated_metadata["latest_value"] = latest_value
-                        updated_metadata["latest_timestamp"] = (
-                            esp32_timestamp.isoformat()
-                        )
+                        updated_metadata["latest_timestamp"] = esp32_timestamp.isoformat()
                         updated_metadata["latest_quality"] = quality
                         sensor_config.sensor_metadata = updated_metadata
 
@@ -537,7 +534,11 @@ class SensorDataHandler:
 
         # Step 4: Build notification payload
         sensor_name = sensor_config.sensor_name or f"{sensor_type} GPIO {gpio}"
-        unit = sensor_config.sensor_metadata.get("latest_unit", "") if sensor_config.sensor_metadata else ""
+        unit = (
+            sensor_config.sensor_metadata.get("latest_unit", "")
+            if sensor_config.sensor_metadata
+            else ""
+        )
 
         alert_metadata = {
             "esp_id": esp_id_str,

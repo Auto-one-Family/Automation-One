@@ -439,7 +439,9 @@ async def get_error_code_info(
         title=error_info.get("message_de"),
         category=error_info.get("category", "UNKNOWN"),
         severity=error_info.get("severity", "ERROR"),
-        message=error_info.get("message_user_de", error_info.get("message", f"Error code: {error_code}")),
+        message=error_info.get(
+            "message_user_de", error_info.get("message", f"Error code: {error_code}")
+        ),
         troubleshooting=error_info.get("troubleshooting_de", error_info.get("troubleshooting", [])),
         docs_link=error_info.get("docs_link"),
         recoverable=error_info.get("recoverable", True),

@@ -14,6 +14,7 @@ from sqlalchemy import and_, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.notification import (
+    AlertStatus,
     Notification,
     NotificationPreferences,
     NotificationSeverity,
@@ -117,15 +118,14 @@ class NotificationRepository(BaseRepository[Notification]):
 
         return min(severities, key=lambda s: severity_order.get(s, 99))
 
-    async def mark_as_read(self, notification_id: uuid.UUID, user_id: int) -> Optional[Notification]:
+    async def mark_as_read(
+        self, notification_id: uuid.UUID, user_id: int
+    ) -> Optional[Notification]:
         """Mark a single notification as read."""
-        stmt = (
-            select(Notification)
-            .where(
-                and_(
-                    Notification.id == notification_id,
-                    Notification.user_id == user_id,
-                )
+        stmt = select(Notification).where(
+            and_(
+                Notification.id == notification_id,
+                Notification.user_id == user_id,
             )
         )
         result = await self.session.execute(stmt)
@@ -261,9 +261,7 @@ class NotificationPreferencesRepository:
 
     async def get_for_user(self, user_id: int) -> Optional[NotificationPreferences]:
         """Get preferences for a user."""
-        stmt = select(NotificationPreferences).where(
-            NotificationPreferences.user_id == user_id
-        )
+        stmt = select(NotificationPreferences).where(NotificationPreferences.user_id == user_id)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -289,8 +287,6 @@ class NotificationPreferencesRepository:
 
     async def get_all_with_email_enabled(self) -> List[NotificationPreferences]:
         """Get all users with email notifications enabled."""
-        stmt = select(NotificationPreferences).where(
-            NotificationPreferences.email_enabled == True
-        )
+        stmt = select(NotificationPreferences).where(NotificationPreferences.email_enabled == True)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

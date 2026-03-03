@@ -221,11 +221,7 @@ class ActuatorAlertHandler:
 
                     alert_info = get_actuator_alert_info(alert_type)
                     category = ALERT_CATEGORY.get(alert_type, "system")
-                    title = (
-                        alert_info["message"]
-                        if alert_info
-                        else f"Actuator Alert: {alert_type}"
-                    )
+                    title = alert_info["message"] if alert_info else f"Actuator Alert: {alert_type}"
                     body = message if message and message != alert_type else None
 
                     notification = NotificationCreate(
@@ -246,9 +242,7 @@ class ActuatorAlertHandler:
 
                     notification_router = NotificationRouter(session)
                     await notification_router.route(notification)
-                    logger.debug(
-                        f"Actuator alert routed via NotificationRouter: {alert_type}"
-                    )
+                    logger.debug(f"Actuator alert routed via NotificationRouter: {alert_type}")
                 except Exception as e:
                     # NotificationRouter failure MUST NOT block MQTT processing
                     logger.warning(f"NotificationRouter routing failed: {e}")

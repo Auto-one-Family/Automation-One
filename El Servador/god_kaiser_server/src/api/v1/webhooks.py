@@ -77,19 +77,48 @@ class GrafanaWebhookPayload(BaseModel):
 # Map alertname keywords to AutomationOne categories
 CATEGORY_KEYWORDS: Dict[str, List[str]] = {
     "infrastructure": [
-        "server", "database", "db", "loki", "alloy", "prometheus",
-        "cadvisor", "container", "memory", "disk", "cpu",
-    ],
-    "data_quality": [
-        "sensor", "stale", "range", "temp", "humidity", "ph", "ec",
+        "server",
+        "database",
+        "db",
+        "loki",
+        "alloy",
+        "prometheus",
+        "cadvisor",
+        "container",
+        "memory",
+        "disk",
+        "cpu",
     ],
     "connectivity": [
-        "mqtt", "disconnected", "heartbeat", "offline", "ws",
-        "websocket", "broker",
+        "mqtt",
+        "disconnected",
+        "heartbeat",
+        "offline",
+        "ws",
+        "websocket",
+        "broker",
+    ],
+    "data_quality": [
+        "sensor",
+        "stale",
+        "range",
+        "temp",
+        "humidity",
+        "ph",
+        "ec_",
+        "ec-",
+        "ecvalue",
+        "electrical",
     ],
     "system": [
-        "logic", "actuator", "safety", "boot", "error", "cascade",
-        "safe-mode", "safemode",
+        "logic",
+        "actuator",
+        "safety",
+        "boot",
+        "error",
+        "cascade",
+        "safe-mode",
+        "safemode",
     ],
 }
 
@@ -115,9 +144,7 @@ def map_grafana_severity(alert: GrafanaAlert) -> str:
 
     # Check Grafana severity label (set in alert rules)
     severity_label = (
-        alert.labels.get("severity")
-        or alert.labels.get("grafana_severity")
-        or ""
+        alert.labels.get("severity") or alert.labels.get("grafana_severity") or ""
     ).lower()
 
     if severity_label in ("critical", "error"):

@@ -34,7 +34,6 @@ from .common import (
     TimestampMixin,
 )
 
-
 # =============================================================================
 # Sensor Types and Constants
 # =============================================================================
@@ -55,8 +54,16 @@ SENSOR_TYPES = [
 ]
 
 QUALITY_LEVELS = [
-    "excellent", "good", "fair", "poor", "bad", "stale",
-    "suspect", "critical", "error", "unknown",
+    "excellent",
+    "good",
+    "fair",
+    "poor",
+    "bad",
+    "stale",
+    "suspect",
+    "critical",
+    "error",
+    "unknown",
 ]
 
 

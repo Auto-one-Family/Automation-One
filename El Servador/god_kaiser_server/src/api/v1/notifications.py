@@ -22,6 +22,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Query
 
+from ...core.metrics import increment_notification_read
 from ...core.exceptions import (
     EmailProviderUnavailableException,
     EmailSendException,
@@ -194,6 +195,7 @@ async def mark_notification_read(
         raise NotificationNotFoundException(str(notification_id))
 
     await db.commit()
+    increment_notification_read()
 
     # Broadcast notification_updated + updated unread count
     router_service = NotificationRouter(db)
@@ -221,6 +223,7 @@ async def mark_all_read(
     repo = NotificationRepository(db)
     count = await repo.mark_all_as_read(user.id)
     await db.commit()
+    increment_notification_read(count)
 
     # Broadcast updated unread count (notification_updated not sent per-item for bulk)
     router_service = NotificationRouter(db)

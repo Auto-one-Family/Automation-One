@@ -16,23 +16,23 @@ Usage:
         timeout,
         CircuitBreakerOpenError,
     )
-    
+
     # Get registry singleton
     registry = ResilienceRegistry.get_instance()
-    
+
     # Register circuit breakers
     registry.register_circuit_breaker("mqtt", CircuitBreaker(
         name="mqtt",
         failure_threshold=5,
         recovery_timeout=30,
     ))
-    
+
     # Use decorators
     @retry(max_attempts=3, base_delay=1.0)
     @timeout(seconds=5.0)
     async def my_function():
         ...
-    
+
     # Use circuit breaker decorator
     @circuit_breaker_decorator("database")
     async def db_operation():

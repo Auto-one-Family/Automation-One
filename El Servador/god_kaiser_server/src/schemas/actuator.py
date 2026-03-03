@@ -40,7 +40,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .common import BaseResponse, PaginatedResponse, TimestampMixin
 
-
 # =============================================================================
 # Actuator Types and Constants
 # =============================================================================

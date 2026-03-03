@@ -22,7 +22,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .common import BaseResponse
 
-
 # =============================================================================
 # Component Health Status
 # =============================================================================

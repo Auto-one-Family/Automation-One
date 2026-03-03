@@ -38,9 +38,7 @@ def generate_request_id() -> str:
     return str(uuid.uuid4())
 
 
-def generate_mqtt_correlation_id(
-    esp_id: str, topic_suffix: str, seq: Union[int, str, None]
-) -> str:
+def generate_mqtt_correlation_id(esp_id: str, topic_suffix: str, seq: Union[int, str, None]) -> str:
     """Generate human-readable correlation ID for MQTT messages.
 
     Format: {esp_id}:{topic_suffix}:{seq}:{timestamp_ms}

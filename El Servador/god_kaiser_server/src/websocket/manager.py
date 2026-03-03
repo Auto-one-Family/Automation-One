@@ -292,9 +292,7 @@ class WebSocketManager:
         """
         if self._loop and self._loop.is_running():
             future = asyncio.run_coroutine_threadsafe(
-                self.broadcast(
-                    message_type, data, filters, correlation_id=correlation_id
-                ),
+                self.broadcast(message_type, data, filters, correlation_id=correlation_id),
                 self._loop,
             )
             future.add_done_callback(self._handle_broadcast_result)

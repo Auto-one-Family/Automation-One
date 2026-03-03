@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .common import BaseResponse, PaginationMeta
 
-
 # =============================================================================
 # Widget Schema (embedded in Dashboard)
 # =============================================================================

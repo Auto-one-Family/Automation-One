@@ -32,7 +32,6 @@ from ..core.base_plugin import (
 )
 from ..core.context import AutoOpsContext, DeviceMode, SensorSpec, ActuatorSpec
 
-
 # GPIO Assignment Tables (ESP32 WROOM defaults)
 # These mirror the GpioPicker component in the frontend
 GPIO_ONEWIRE = [4]  # OneWire bus default

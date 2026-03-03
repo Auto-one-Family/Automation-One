@@ -313,6 +313,17 @@ ALERT_SUPPRESSION_EXPIRED_TOTAL = Counter(
     "Total suppressions auto-expired by scheduler",
 )
 
+NOTIFICATIONS_READ_TOTAL = Counter(
+    "god_kaiser_notifications_read_total",
+    "Total notifications marked as read",
+)
+
+EMAIL_ERRORS_TOTAL = Counter(
+    "god_kaiser_email_errors_total",
+    "Total email errors by type",
+    ["provider", "error_type"],
+)
+
 # Track server start time
 _server_start_time: float = time.time()
 _metrics_initialized: bool = False
@@ -365,6 +376,8 @@ def init_metrics() -> None:
     ALERT_SUPPRESSION_ACTIVE.labels(entity_type="sensor")
     ALERT_SUPPRESSION_ACTIVE.labels(entity_type="actuator")
     ALERT_SUPPRESSION_ACTIVE.labels(entity_type="device")
+    EMAIL_ERRORS_TOTAL.labels(provider="resend", error_type="connection")
+    EMAIL_ERRORS_TOTAL.labels(provider="smtp", error_type="connection")
 
     logger.info("Prometheus metrics initialized (all label combinations visible)")
 
@@ -563,6 +576,16 @@ def update_alert_suppression_active(entity_type: str, count: int) -> None:
 def increment_alert_suppression_expired() -> None:
     """Increment suppression expired counter. Called from scheduler."""
     ALERT_SUPPRESSION_EXPIRED_TOTAL.inc()
+
+
+def increment_notification_read(count: int = 1) -> None:
+    """Increment read counter. Called from notifications.py mark_read endpoints."""
+    NOTIFICATIONS_READ_TOTAL.inc(count)
+
+
+def increment_email_error(provider: str, error_type: str) -> None:
+    """Increment email error counter. Called from EmailService on failures."""
+    EMAIL_ERRORS_TOTAL.labels(provider=provider, error_type=error_type).inc()
 
 
 async def update_all_metrics_async(get_session_func: callable) -> None:

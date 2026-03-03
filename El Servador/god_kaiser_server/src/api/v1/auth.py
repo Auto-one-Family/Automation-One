@@ -152,9 +152,7 @@ async def initial_setup(
     user_count = await user_repo.count()
     if user_count > 0:
         logger.warning("Setup attempted but users already exist")
-        raise AuthorizationError(
-            "Setup already completed. Use /register endpoint instead."
-        )
+        raise AuthorizationError("Setup already completed. Use /register endpoint instead.")
 
     # Check if username or email already exists (safety check)
     existing_user = await user_repo.get_by_username(request.username)

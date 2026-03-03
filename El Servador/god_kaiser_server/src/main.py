@@ -719,13 +719,16 @@ app.add_middleware(
 # Must be after CORS middleware, before router includes.
 # Exposes HTTP request metrics (duration, count, size) + custom gauges
 # at /api/v1/health/metrics in Prometheus text format.
-from prometheus_fastapi_instrumentator import Instrumentator
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
 
-Instrumentator().instrument(app).expose(
-    app,
-    endpoint="/api/v1/health/metrics",
-    include_in_schema=False,
-)
+    Instrumentator().instrument(app).expose(
+        app,
+        endpoint="/api/v1/health/metrics",
+        include_in_schema=False,
+    )
+except ImportError:
+    logger.warning("prometheus_fastapi_instrumentator not installed — metrics endpoint disabled")
 
 # ===== ROUTES =====
 

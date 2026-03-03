@@ -9,7 +9,7 @@ Provides:
 
 Usage:
     from .sensor_type_registry import normalize_sensor_type, get_multi_value_sensor_def
-    
+
     normalized = normalize_sensor_type("temperature_sht31")  # Returns "sht31_temp"
     sht31_def = get_multi_value_sensor_def("sht31")  # Returns multi-value definition
 """
