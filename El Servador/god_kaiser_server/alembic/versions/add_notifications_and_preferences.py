@@ -77,7 +77,7 @@ def upgrade() -> None:
             comment="Full notification body",
         ),
         sa.Column(
-            "metadata",
+            "extra_data",
             sa.JSON,
             nullable=False,
             server_default="{}",

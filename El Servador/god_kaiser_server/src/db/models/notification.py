@@ -43,7 +43,7 @@ class Notification(Base, TimestampMixin):
         category: Alert category (connectivity, data_quality, infrastructure, etc.)
         title: Short notification title
         body: Full notification body text
-        metadata: JSON field with context (esp_id, sensor_type, rule_id, etc.)
+        extra_data: JSON field with context (esp_id, sensor_type, rule_id, etc.)
         source: Origin of notification (logic_engine, mqtt_handler, grafana, etc.)
         is_read: Whether user has read this notification
         is_archived: Whether notification is archived
@@ -137,7 +137,6 @@ class Notification(Base, TimestampMixin):
     )
 
     extra_data: Mapped[dict] = mapped_column(
-        "metadata",
         JSON,
         default=dict,
         nullable=False,

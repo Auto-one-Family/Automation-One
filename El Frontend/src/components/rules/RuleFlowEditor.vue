@@ -37,9 +37,11 @@ import {
   Zap,
   Undo2,
   Redo2,
+  Puzzle,
+  Stethoscope,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
-import type { LogicRule, SensorCondition, TimeCondition, HysteresisCondition, CompoundCondition, ActuatorAction, NotificationAction, DelayAction, LogicCondition, LogicAction } from '@/types/logic'
+import type { LogicRule, SensorCondition, TimeCondition, HysteresisCondition, CompoundCondition, ActuatorAction, NotificationAction, DelayAction, PluginAction, DiagnosticsCondition, DiagnosticsAction, LogicCondition, LogicAction } from '@/types/logic'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
@@ -108,6 +110,9 @@ const NODE_INIT_DIMS: Record<string, { width: number; height: number }> = {
   actuator: { width: 210, height: 120 },
   notification: { width: 210, height: 100 },
   delay: { width: 210, height: 80 },
+  plugin: { width: 210, height: 100 },
+  diagnostics_status: { width: 210, height: 100 },
+  run_diagnostic: { width: 210, height: 80 },
 }
 
 // Fit view only after Vue Flow has measured node dimensions
@@ -285,6 +290,24 @@ function getDefaultNodeData(type: string, defaults: Record<string, unknown> = {}
         seconds: defaults.seconds ?? 60,
         ...defaults,
       }
+    case 'plugin':
+      return {
+        pluginId: defaults.pluginId || '',
+        config: defaults.config || {},
+        ...defaults,
+      }
+    case 'diagnostics_status':
+      return {
+        checkName: defaults.checkName || 'mqtt',
+        expectedStatus: defaults.expectedStatus || 'critical',
+        operator: defaults.operator || '==',
+        ...defaults,
+      }
+    case 'run_diagnostic':
+      return {
+        checkName: defaults.checkName || '',
+        ...defaults,
+      }
     default:
       return { ...defaults }
   }
@@ -416,6 +439,20 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
         },
       })
       nodeRow++
+    } else if (cond.type === 'diagnostics_status') {
+      conditionIds.push(id)
+      const dc = cond as DiagnosticsCondition
+      resultNodes.push({
+        id,
+        type: 'diagnostics_status',
+        position: { x: 50, y: 60 + nodeRow * ROW_SPACING },
+        data: {
+          checkName: dc.check_name,
+          expectedStatus: dc.expected_status,
+          operator: dc.operator || '==',
+        },
+      })
+      nodeRow++
     } else if (cond.type === 'compound') {
       // Flatten compound conditions: render sub-conditions as individual nodes
       // Parent compound ID is NOT added — only sub-condition nodes get IDs
@@ -510,6 +547,27 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
         type: 'delay',
         position: { x: actionX, y: 60 + i * ROW_SPACING },
         data: { seconds: da.seconds },
+      })
+    } else if (action.type === 'plugin' || action.type === 'autoops_trigger') {
+      const pa = action as PluginAction
+      resultNodes.push({
+        id,
+        type: 'plugin',
+        position: { x: actionX, y: 60 + i * ROW_SPACING },
+        data: {
+          pluginId: pa.plugin_id,
+          config: pa.config || {},
+        },
+      })
+    } else if (action.type === 'run_diagnostic') {
+      const da = action as DiagnosticsAction
+      resultNodes.push({
+        id,
+        type: 'run_diagnostic',
+        position: { x: actionX, y: 60 + i * ROW_SPACING },
+        data: {
+          checkName: da.check_name || '',
+        },
       })
     }
 
@@ -610,6 +668,30 @@ function graphToRuleData(): {
           type: 'delay',
           seconds: node.data.seconds || 60,
         } as DelayAction)
+        break
+
+      case 'plugin':
+        actions.push({
+          type: 'plugin',
+          plugin_id: node.data.pluginId || '',
+          config: node.data.config || {},
+        } as PluginAction)
+        break
+
+      case 'diagnostics_status':
+        conditions.push({
+          type: 'diagnostics_status',
+          check_name: node.data.checkName || 'mqtt',
+          expected_status: node.data.expectedStatus || 'critical',
+          operator: (node.data.operator as '==' | '!=' | undefined) || '==',
+        } as DiagnosticsCondition)
+        break
+
+      case 'run_diagnostic':
+        actions.push({
+          type: 'run_diagnostic',
+          ...(node.data.checkName ? { check_name: node.data.checkName as string } : {}),
+        } as DiagnosticsAction)
         break
     }
   }
@@ -733,6 +815,9 @@ function miniMapNodeColor(node: Node): string {
     actuator: () => '#c084fc',
     notification: () => tokens.success,
     delay: () => '#707080',
+    plugin: () => '#f59e0b',
+    diagnostics_status: () => '#22d3ee',
+    run_diagnostic: () => '#22d3ee',
   }
   return colors[node.type || '']?.() || '#707080'
 }
@@ -1062,6 +1147,70 @@ defineExpose({
         </div>
       </template>
 
+      <template #node-plugin="{ data, id }">
+        <div
+          class="rule-node rule-node--plugin"
+          :class="{ 'rule-node--active': isNodeActive(id) }"
+        >
+          <Handle type="target" :position="Position.Left" class="handle-target" />
+          <div class="rule-node__header">
+            <div class="rule-node__icon-wrap rule-node__icon-wrap--plugin">
+              <Puzzle class="rule-node__icon" />
+            </div>
+            <span class="rule-node__type">Plugin</span>
+          </div>
+          <div class="rule-node__body">
+            <div class="rule-node__condition">
+              {{ data.pluginId || 'Nicht konfiguriert' }}
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- ======================== DIAGNOSTICS STATUS NODE (Condition) ======================== -->
+      <template #node-diagnostics_status="{ data, id }">
+        <div
+          class="rule-node rule-node--diagnostics"
+          :class="{ 'rule-node--active': isNodeActive(id) }"
+        >
+          <Handle type="source" :position="Position.Right" class="handle-source" />
+          <div class="rule-node__header">
+            <div class="rule-node__icon-wrap rule-node__icon-wrap--diagnostics">
+              <Stethoscope class="rule-node__icon" />
+            </div>
+            <span class="rule-node__type">Diagnose-Status</span>
+          </div>
+          <div class="rule-node__body">
+            <div class="rule-node__condition">
+              {{ data.checkName || 'Nicht konfiguriert' }}
+              {{ data.operator || '==' }}
+              {{ data.expectedStatus || 'critical' }}
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- ======================== RUN DIAGNOSTIC NODE (Action) ======================== -->
+      <template #node-run_diagnostic="{ data, id }">
+        <div
+          class="rule-node rule-node--diagnostics"
+          :class="{ 'rule-node--active': isNodeActive(id) }"
+        >
+          <Handle type="target" :position="Position.Left" class="handle-target" />
+          <div class="rule-node__header">
+            <div class="rule-node__icon-wrap rule-node__icon-wrap--diagnostics">
+              <Stethoscope class="rule-node__icon" />
+            </div>
+            <span class="rule-node__type">Diagnose starten</span>
+          </div>
+          <div class="rule-node__body">
+            <div class="rule-node__condition">
+              {{ data.checkName || 'Vollständige Diagnose' }}
+            </div>
+          </div>
+        </div>
+      </template>
+
       <!-- Background, Controls, MiniMap -->
       <Background :gap="20" :size="1" pattern-color="rgba(255,255,255,0.03)" />
       <Controls position="bottom-left" />
@@ -1246,6 +1395,14 @@ defineExpose({
   background: linear-gradient(90deg, var(--color-text-secondary), rgba(133, 133, 160, 0.3));
 }
 
+.rule-node--plugin::before {
+  background: linear-gradient(90deg, var(--color-warning), rgba(245, 158, 11, 0.3));
+}
+
+.rule-node--diagnostics::before {
+  background: linear-gradient(90deg, #22d3ee, rgba(34, 211, 238, 0.3));
+}
+
 /* Node inner layout */
 .rule-node__header {
   display: flex;
@@ -1300,6 +1457,16 @@ defineExpose({
 .rule-node__icon-wrap--delay {
   background: rgba(133, 133, 160, 0.12);
   color: var(--color-text-secondary);
+}
+
+.rule-node__icon-wrap--plugin {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--color-warning);
+}
+
+.rule-node__icon-wrap--diagnostics {
+  background: rgba(34, 211, 238, 0.12);
+  color: #22d3ee;
 }
 
 .rule-node__icon {

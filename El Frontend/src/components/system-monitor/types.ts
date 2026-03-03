@@ -1,1 +1,1 @@
-export type TabId = 'events' | 'logs' | 'database' | 'mqtt' | 'health'
+export type TabId = 'events' | 'logs' | 'database' | 'mqtt' | 'health' | 'diagnostics' | 'reports'

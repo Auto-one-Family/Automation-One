@@ -11,14 +11,20 @@
  * - ESC and click-outside close (SlideOver feature)
  */
 
-import { watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Settings, CheckCheck } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import NotificationItem from '@/components/notifications/NotificationItem.vue'
 import NotificationPreferences from '@/components/notifications/NotificationPreferences.vue'
+import AlertStatusBar from '@/components/notifications/AlertStatusBar.vue'
 import { useNotificationInboxStore, type InboxFilter } from '@/shared/stores/notification-inbox.store'
+import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
 
 const inboxStore = useNotificationInboxStore()
+const alertStore = useAlertCenterStore()
+
+type StatusFilter = 'all' | 'active' | 'acknowledged' | 'resolved'
+const activeStatusFilter = ref<StatusFilter>('all')
 
 const filterTabs: { key: InboxFilter; label: string }[] = [
   { key: 'all', label: 'Alle' },
@@ -26,6 +32,32 @@ const filterTabs: { key: InboxFilter; label: string }[] = [
   { key: 'warning', label: 'Warnungen' },
   { key: 'system', label: 'System' },
 ]
+
+const statusTabs = computed(() => {
+  const active = inboxStore.notifications.filter(n => n.status === 'active').length
+  const ack = inboxStore.notifications.filter(n => n.status === 'acknowledged').length
+  const resolved = inboxStore.notifications.filter(n => n.status === 'resolved').length
+
+  return [
+    { key: 'all' as StatusFilter, label: 'Alle' },
+    { key: 'active' as StatusFilter, label: `Aktiv (${active})` },
+    { key: 'acknowledged' as StatusFilter, label: `Gesehen (${ack})` },
+    { key: 'resolved' as StatusFilter, label: `Erledigt (${resolved})` },
+  ]
+})
+
+const filteredGroupedNotifications = computed(() => {
+  if (activeStatusFilter.value === 'all') {
+    return inboxStore.groupedNotifications
+  }
+
+  return inboxStore.groupedNotifications
+    .map(group => ({
+      ...group,
+      items: group.items.filter(n => n.status === activeStatusFilter.value),
+    }))
+    .filter(group => group.items.length > 0)
+})
 
 function handleClose(): void {
   inboxStore.isDrawerOpen = false
@@ -39,12 +71,21 @@ function handleMarkAllRead(): void {
   inboxStore.markAllAsRead()
 }
 
+async function handleAcknowledge(id: string): Promise<void> {
+  await alertStore.acknowledgeAlert(id)
+}
+
+async function handleResolve(id: string): Promise<void> {
+  await alertStore.resolveAlert(id)
+}
+
 // Refresh list when drawer opens
 watch(
   () => inboxStore.isDrawerOpen,
   (isOpen) => {
     if (isOpen) {
       inboxStore.loadInitial()
+      activeStatusFilter.value = 'all'
     }
   },
 )
@@ -59,6 +100,9 @@ watch(
   >
     <!-- Custom header actions (injected via default slot, header area) -->
     <template #default>
+      <!-- Alert Status Summary -->
+      <AlertStatusBar />
+
       <!-- Header Actions Row -->
       <div class="drawer__header-actions">
         <div class="drawer__tabs">
@@ -95,6 +139,21 @@ watch(
         </div>
       </div>
 
+      <!-- Status Filter Tabs -->
+      <div class="drawer__status-tabs">
+        <button
+          v-for="tab in statusTabs"
+          :key="tab.key"
+          :class="[
+            'drawer__status-tab',
+            { 'drawer__status-tab--active': activeStatusFilter === tab.key },
+          ]"
+          @click="activeStatusFilter = tab.key"
+        >
+          {{ tab.label }}
+        </button>
+      </div>
+
       <!-- Notification List -->
       <div class="drawer__list">
         <!-- Loading State -->
@@ -104,7 +163,7 @@ watch(
 
         <!-- Empty State -->
         <div
-          v-else-if="inboxStore.groupedNotifications.length === 0"
+          v-else-if="filteredGroupedNotifications.length === 0"
           class="drawer__empty"
         >
           <span class="drawer__empty-icon">🔔</span>
@@ -119,7 +178,7 @@ watch(
         <!-- Grouped Notifications -->
         <template v-else>
           <div
-            v-for="group in inboxStore.groupedNotifications"
+            v-for="group in filteredGroupedNotifications"
             :key="group.label"
             class="drawer__group"
           >
@@ -129,6 +188,8 @@ watch(
               :key="n.id"
               :notification="n"
               @mark-read="handleMarkRead"
+              @acknowledge="handleAcknowledge"
+              @resolve="handleResolve"
             />
           </div>
 
@@ -236,6 +297,39 @@ watch(
 
 .drawer__action-label {
   white-space: nowrap;
+}
+
+/* Status Filter Tabs */
+.drawer__status-tabs {
+  display: flex;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--glass-border);
+  margin-bottom: var(--space-3);
+}
+
+.drawer__status-tab {
+  padding: 3px var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.drawer__status-tab:hover {
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.drawer__status-tab--active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border-color: var(--glass-border);
 }
 
 /* Notification List */

@@ -343,6 +343,12 @@ ALERTS_ACTIVE_GAUGE = Gauge(
     ["severity"],
 )
 
+ALERTS_ROOT_CAUSE_SUPPRESSED_TOTAL = Counter(
+    "god_kaiser_alerts_root_cause_suppressed_total",
+    "Total dependent alerts suppressed by root-cause correlation",
+    ["source"],
+)
+
 # Track server start time
 _server_start_time: float = time.time()
 _metrics_initialized: bool = False
@@ -404,6 +410,8 @@ def init_metrics() -> None:
         ALERTS_RESOLVED_TOTAL.labels(severity=sev, resolution_type="manual")
         ALERTS_RESOLVED_TOTAL.labels(severity=sev, resolution_type="auto")
         ALERTS_ACTIVE_GAUGE.labels(severity=sev)
+    ALERTS_ROOT_CAUSE_SUPPRESSED_TOTAL.labels(source="grafana")
+    ALERTS_ROOT_CAUSE_SUPPRESSED_TOTAL.labels(source="sensor_threshold")
 
     logger.info("Prometheus metrics initialized (all label combinations visible)")
 
@@ -634,6 +642,11 @@ def update_alerts_active_gauge(severity: str, count: int) -> None:
     ALERTS_ACTIVE_GAUGE.labels(severity=severity).set(count)
 
 
+def increment_root_cause_suppressed(source: str) -> None:
+    """Increment root-cause suppressed counter. Called when dependent alerts are suppressed."""
+    ALERTS_ROOT_CAUSE_SUPPRESSED_TOTAL.labels(source=source).inc()
+
+
 async def update_all_metrics_async(get_session_func: callable) -> None:
     """
     Full metrics update cycle (called by scheduler every 15s).
@@ -725,6 +738,17 @@ async def update_all_metrics_async(get_session_func: callable) -> None:
             else:
                 # No online devices with data - set to 0
                 update_esp_heartbeat_metrics(0.0, 0.0, 0.0, 0.0)
+
+            # Phase 4B: Update active alerts gauge from DB
+            try:
+                from ..db.repositories.notification_repo import NotificationRepository
+
+                notification_repo = NotificationRepository(session)
+                alert_counts = await notification_repo.get_active_counts_by_severity()
+                for severity, count in alert_counts.items():
+                    update_alerts_active_gauge(severity, count)
+            except Exception as alert_err:
+                logger.debug(f"Alert gauge update skipped: {alert_err}")
 
             break  # Only need one session
 

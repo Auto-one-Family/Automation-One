@@ -12,6 +12,7 @@ from . import (  # noqa: F401
     audit_log,  # AuditLog model for event tracking
     auth,  # TokenBlacklist model
     dashboard,  # Dashboard layout persistence
+    diagnostic,  # Diagnostic reports (Phase 4D)
     enums,  # Shared enums (DataSource, SensorOperatingMode, etc.)
     esp,
     esp_heartbeat,  # ESP Heartbeat History (Time-Series)
@@ -19,6 +20,7 @@ from . import (  # noqa: F401
     library,
     logic,
     notification,  # Notification + Preferences (Phase 4A.1)
+    plugin,  # Plugin configs + execution history (Phase 4C)
     sensor,
     sensor_type_defaults,  # Sensor type default configuration (Phase 2A)
     subzone,  # Subzone configuration model (Phase 9)
@@ -32,6 +34,7 @@ from .ai import AIPredictions  # noqa: F401
 from .audit_log import AuditLog, AuditEventType, AuditSeverity, AuditSourceType  # noqa: F401
 from .auth import TokenBlacklist  # noqa: F401
 from .dashboard import Dashboard  # noqa: F401
+from .diagnostic import DiagnosticReport  # noqa: F401
 from .enums import DataSource, SensorOperatingMode  # noqa: F401
 from .esp import ESPDevice  # noqa: F401
 from .esp_heartbeat import (
@@ -51,6 +54,7 @@ from .notification import (
 )  # noqa: F401
 from .sensor import SensorConfig, SensorData  # noqa: F401
 from .sensor_type_defaults import SensorTypeDefaults  # noqa: F401
+from .plugin import PluginConfig, PluginExecution  # noqa: F401
 from .subzone import SubzoneConfig  # noqa: F401
 from .system import SystemConfig  # noqa: F401
 from .user import User  # noqa: F401
@@ -62,6 +66,7 @@ __all__ = [
     "audit_log",
     "auth",
     "dashboard",
+    "diagnostic",
     "enums",
     "esp",
     "esp_heartbeat",
@@ -69,6 +74,7 @@ __all__ = [
     "library",
     "logic",
     "notification",
+    "plugin",
     "sensor",
     "sensor_type_defaults",
     "subzone",
@@ -88,6 +94,7 @@ __all__ = [
     "AuditSourceType",
     "TokenBlacklist",
     "Dashboard",
+    "DiagnosticReport",
     "ESPDevice",
     "ESPHeartbeatLog",
     "HeartbeatHealthStatus",
@@ -105,6 +112,8 @@ __all__ = [
     "SensorConfig",
     "SensorData",
     "SensorTypeDefaults",
+    "PluginConfig",
+    "PluginExecution",
     "SubzoneConfig",
     "SystemConfig",
     "User",

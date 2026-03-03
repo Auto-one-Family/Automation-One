@@ -550,6 +550,9 @@ class SensorDataHandler:
             "thresholds": thresholds,
         }
 
+        # Phase 4B: Correlation ID for grouping related threshold alerts
+        threshold_correlation_id = f"threshold_{esp_id_str}_{sensor_type}"
+
         if is_suppressed:
             # ISA-18.2 Audit-Trail: ALWAYS persist alert to DB, even when suppressed.
             # Uses NotificationRouter.persist_suppressed() for pattern-conformity
@@ -568,6 +571,7 @@ class SensorDataHandler:
                     ),
                     source="sensor_threshold",
                     metadata=alert_metadata,
+                    correlation_id=threshold_correlation_id,
                 )
                 router = NotificationRouter(session)
                 await router.persist_suppressed(suppressed_notification)
@@ -591,6 +595,7 @@ class SensorDataHandler:
             ),
             source="sensor_threshold",
             metadata=alert_metadata,
+            correlation_id=threshold_correlation_id,
         )
 
         try:

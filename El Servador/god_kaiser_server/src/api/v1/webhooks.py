@@ -20,7 +20,8 @@ from pydantic import BaseModel, Field
 
 from ...core.exceptions import WebhookValidationException
 from ...core.logging_config import get_logger
-from ...core.metrics import increment_webhook_received
+from ...core.metrics import increment_alert_resolved, increment_webhook_received
+from ...db.repositories.notification_repo import NotificationRepository
 from ...schemas.notification import NotificationCreate
 from ...services.notification_router import NotificationRouter
 from ..deps import DBSession
@@ -188,13 +189,32 @@ async def grafana_alerts_webhook(
 
     processed = 0
     skipped = 0
+    auto_resolved = 0
 
     router_service = NotificationRouter(db)
+    notification_repo = NotificationRepository(db)
 
     for alert in payload.alerts:
         alertname = alert.labels.get("alertname", "Unknown Alert")
         severity = map_grafana_severity(alert)
         category = categorize_alert(alertname)
+
+        # Phase 4B: Build correlation_id from Grafana fingerprint
+        correlation_id = f"grafana_{alert.fingerprint}" if alert.fingerprint else None
+
+        # Phase 4B: Auto-resolve existing alerts when Grafana sends "resolved"
+        if alert.status == "resolved" and correlation_id:
+            try:
+                resolved_count = await notification_repo.auto_resolve_by_correlation(correlation_id)
+                if resolved_count > 0:
+                    auto_resolved += resolved_count
+                    increment_alert_resolved(severity, resolution_type="auto")
+                    logger.info(
+                        f"Auto-resolved {resolved_count} alerts for "
+                        f"correlation_id='{correlation_id}'"
+                    )
+            except Exception as e:
+                logger.error(f"Failed to auto-resolve alerts for '{alertname}': {e}")
 
         # Build title
         title = alert.annotations.get("summary", alertname)
@@ -241,6 +261,8 @@ async def grafana_alerts_webhook(
             source="grafana",
             # FIX-07: Pass Grafana fingerprint for deduplication
             fingerprint=alert.fingerprint,
+            # Phase 4B: Correlation ID for alert grouping + auto-resolve
+            correlation_id=correlation_id,
         )
 
         try:
@@ -265,4 +287,5 @@ async def grafana_alerts_webhook(
         "status": "ok",
         "processed": processed,
         "skipped": skipped,
+        "auto_resolved": auto_resolved,
     }

@@ -14,6 +14,7 @@ import api from './index'
 // =============================================================================
 
 export type NotificationSeverity = 'critical' | 'warning' | 'info'
+export type AlertStatus = 'active' | 'acknowledged' | 'resolved'
 export type NotificationCategory =
   | 'connectivity'
   | 'data_quality'
@@ -46,9 +47,16 @@ export interface NotificationDTO {
   is_archived: boolean
   digest_sent: boolean
   parent_notification_id: string | null
+  fingerprint: string | null
   created_at: string | null
   updated_at: string | null
   read_at: string | null
+  // Phase 4B: Alert lifecycle fields
+  status: AlertStatus
+  acknowledged_at: string | null
+  acknowledged_by: number | null
+  resolved_at: string | null
+  correlation_id: string | null
 }
 
 export interface NotificationListFilters {
@@ -125,6 +133,26 @@ export interface TestEmailResponse {
   message: string
   provider: string | null
   recipient: string | null
+}
+
+// Phase 4B: Alert lifecycle types
+export interface AlertActiveListFilters {
+  severity?: NotificationSeverity
+  category?: NotificationCategory
+  status?: AlertStatus
+  page?: number
+  page_size?: number
+}
+
+export interface AlertStatsDTO {
+  success: boolean
+  active_count: number
+  acknowledged_count: number
+  resolved_today_count: number
+  critical_active: number
+  warning_active: number
+  mean_time_to_acknowledge_s: number | null
+  mean_time_to_resolve_s: number | null
 }
 
 // =============================================================================
@@ -222,6 +250,49 @@ export const notificationsApi = {
       '/notifications/test-email',
       request ?? {},
     )
+    return response.data
+  },
+
+  // =========================================================================
+  // Alert Lifecycle (Phase 4B)
+  // =========================================================================
+
+  /**
+   * Acknowledge an alert (active → acknowledged)
+   */
+  async acknowledgeAlert(id: string): Promise<NotificationDTO> {
+    const response = await api.patch<NotificationDTO>(
+      `/notifications/${id}/acknowledge`,
+    )
+    return response.data
+  },
+
+  /**
+   * Resolve an alert (active/acknowledged → resolved)
+   */
+  async resolveAlert(id: string): Promise<NotificationDTO> {
+    const response = await api.patch<NotificationDTO>(
+      `/notifications/${id}/resolve`,
+    )
+    return response.data
+  },
+
+  /**
+   * Get active alerts with filters
+   */
+  async getActiveAlerts(filters?: AlertActiveListFilters): Promise<NotificationListResponse> {
+    const response = await api.get<NotificationListResponse>(
+      '/notifications/alerts/active',
+      { params: filters },
+    )
+    return response.data
+  },
+
+  /**
+   * Get alert ISA-18.2 statistics (MTTA, MTTR, counts)
+   */
+  async getAlertStats(): Promise<AlertStatsDTO> {
+    const response = await api.get<AlertStatsDTO>('/notifications/alerts/stats')
     return response.data
   },
 }

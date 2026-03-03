@@ -276,8 +276,38 @@ class SequenceAction(BaseModel):
     steps: List[Any] = Field(..., description="List of action steps", min_length=1)
 
 
+class PluginTriggerAction(BaseModel):
+    """
+    Plugin Trigger Action.
+
+    Triggers an AutoOps plugin as a Logic Rule action.
+
+    Example:
+        {
+            "type": "plugin",  # or "autoops_trigger"
+            "plugin_id": "health_check",
+            "config": {"skip_mqtt": true}
+        }
+    """
+
+    type: Literal["plugin", "autoops_trigger"] = Field(
+        ..., description="Action type ('plugin' or 'autoops_trigger')"
+    )
+    plugin_id: str = Field(..., description="Registered plugin ID", min_length=1, max_length=128)
+    config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Optional config overrides passed to the plugin",
+    )
+
+
 # Union type for all action types
-ActionType = Union[ActuatorCommandAction, NotificationAction, DelayAction, SequenceAction]
+ActionType = Union[
+    ActuatorCommandAction,
+    NotificationAction,
+    DelayAction,
+    SequenceAction,
+    PluginTriggerAction,
+]
 
 
 # =============================================================================
@@ -362,6 +392,8 @@ def validate_action(action: dict) -> ActionType:
         return DelayAction(**action)
     elif action_type == "sequence":
         return SequenceAction(**action)
+    elif action_type in ("plugin", "autoops_trigger"):
+        return PluginTriggerAction(**action)
     else:
         raise ValueError(f"Unknown action type: {action_type}")
 

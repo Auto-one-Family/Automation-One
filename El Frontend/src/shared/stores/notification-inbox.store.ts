@@ -17,6 +17,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import {
   notificationsApi,
+  type AlertStatus,
   type NotificationDTO,
   type NotificationSeverity,
   type NotificationListFilters,
@@ -259,10 +260,17 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
       is_read: (data.is_read as boolean) || false,
       is_archived: false,
       digest_sent: false,
-      parent_notification_id: null,
+      parent_notification_id: (data.parent_notification_id as string) || null,
+      fingerprint: (data.fingerprint as string) || null,
       created_at: (data.created_at as string) || new Date().toISOString(),
       updated_at: null,
       read_at: null,
+      // Phase 4B: Alert lifecycle fields
+      status: (data.status as AlertStatus) || 'active',
+      acknowledged_at: (data.acknowledged_at as string) || null,
+      acknowledged_by: (data.acknowledged_by as number) || null,
+      resolved_at: (data.resolved_at as string) || null,
+      correlation_id: (data.correlation_id as string) || null,
     }
 
     // Deduplicate: don't add if already in list
@@ -306,6 +314,19 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     }
     if (data.read_at !== undefined) {
       notifications.value[idx].read_at = data.read_at as string | null
+    }
+    // Phase 4B: Alert lifecycle fields
+    if (data.status !== undefined) {
+      notifications.value[idx].status = data.status as AlertStatus
+    }
+    if (data.acknowledged_at !== undefined) {
+      notifications.value[idx].acknowledged_at = data.acknowledged_at as string | null
+    }
+    if (data.acknowledged_by !== undefined) {
+      notifications.value[idx].acknowledged_by = data.acknowledged_by as number | null
+    }
+    if (data.resolved_at !== undefined) {
+      notifications.value[idx].resolved_at = data.resolved_at as string | null
     }
 
     logger.debug(`WS notification_updated: ${id}`)
