@@ -1,15 +1,19 @@
 """
 Notification REST API Endpoints
 
-Phase 4A.1: Notification-Stack Backend
+Phase 4A.1 + 4B: Notification-Stack Backend + Unified Alert Center
 Priority: HIGH
 Status: IMPLEMENTED
 
 Endpoints:
 - GET  /v1/notifications                  - List with filters
 - GET  /v1/notifications/unread-count     - Badge counter
+- GET  /v1/notifications/alerts/active    - Active alerts (Phase 4B)
+- GET  /v1/notifications/alerts/stats     - Alert ISA-18.2 metrics (Phase 4B)
 - GET  /v1/notifications/{id}            - Single notification
 - PATCH /v1/notifications/{id}/read      - Mark as read
+- PATCH /v1/notifications/{id}/acknowledge - Acknowledge alert (Phase 4B)
+- PATCH /v1/notifications/{id}/resolve    - Resolve alert (Phase 4B)
 - PATCH /v1/notifications/read-all       - Mark all as read
 - POST /v1/notifications/send            - Admin send notification
 - GET  /v1/notifications/preferences     - Get user preferences
@@ -22,7 +26,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Query
 
+from ...core.metrics import (
+    increment_alert_acknowledged,
+    increment_alert_resolved,
+    increment_notification_read,
+)
 from ...core.exceptions import (
+    AlertInvalidStateTransition,
     EmailProviderUnavailableException,
     EmailSendException,
     NoEmailRecipientException,
@@ -30,12 +40,15 @@ from ...core.exceptions import (
     NotificationSendFailedException,
 )
 from ...core.logging_config import get_logger
+from ...db.models.notification import AlertStatus
 from ...db.repositories.notification_repo import (
     NotificationPreferencesRepository,
     NotificationRepository,
 )
 from ...schemas.common import BaseResponse, PaginationMeta
 from ...schemas.notification import (
+    AlertActiveListResponse,
+    AlertStatsResponse,
     NotificationCreate,
     NotificationListResponse,
     NotificationPreferencesResponse,
@@ -125,6 +138,69 @@ async def get_unread_count(
 
 
 # =============================================================================
+# GET /v1/notifications/alerts/active — Active alerts (Phase 4B)
+# MUST be declared BEFORE /{notification_id} wildcard to avoid route shadowing
+# =============================================================================
+
+
+@router.get(
+    "/alerts/active",
+    response_model=AlertActiveListResponse,
+    summary="Get active alerts",
+    description="Get paginated list of active (unresolved) alerts for the current user.",
+)
+async def get_active_alerts(
+    db: DBSession,
+    user: ActiveUser,
+    severity: Optional[str] = Query(None, description="Filter by severity"),
+    category: Optional[str] = Query(None, description="Filter by category"),
+    status: str = Query("active", description="Alert status filter (active, acknowledged)"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Items per page"),
+):
+    repo = NotificationRepository(db)
+    skip = (page - 1) * page_size
+
+    alerts, total = await repo.get_alerts_by_status(
+        status=status,
+        user_id=user.id,
+        severity=severity,
+        category=category,
+        skip=skip,
+        limit=page_size,
+    )
+
+    return AlertActiveListResponse(
+        success=True,
+        data=[NotificationResponse.model_validate(a) for a in alerts],
+        pagination=PaginationMeta.from_pagination(
+            page=page, page_size=page_size, total_items=total
+        ),
+    )
+
+
+# =============================================================================
+# GET /v1/notifications/alerts/stats — Alert ISA-18.2 metrics (Phase 4B)
+# =============================================================================
+
+
+@router.get(
+    "/alerts/stats",
+    response_model=AlertStatsResponse,
+    summary="Get alert statistics",
+    description="Get ISA-18.2 alert lifecycle statistics (MTTA, MTTR, counts).",
+)
+async def get_alert_stats(
+    db: DBSession,
+    user: ActiveUser,
+):
+    repo = NotificationRepository(db)
+    stats = await repo.get_alert_stats(user_id=user.id)
+
+    return AlertStatsResponse(success=True, **stats)
+
+
+# =============================================================================
 # GET /v1/notifications/preferences — Get user preferences
 # MUST be declared BEFORE /{notification_id} wildcard to avoid route shadowing
 # =============================================================================
@@ -194,8 +270,108 @@ async def mark_notification_read(
         raise NotificationNotFoundException(str(notification_id))
 
     await db.commit()
+    increment_notification_read()
 
     # Broadcast notification_updated + updated unread count
+    router_service = NotificationRouter(db)
+    await router_service.broadcast_notification_updated(notification)
+    await router_service.broadcast_unread_count(user.id)
+
+    return NotificationResponse.model_validate(notification)
+
+
+# =============================================================================
+# PATCH /v1/notifications/{id}/acknowledge — Acknowledge alert (Phase 4B)
+# =============================================================================
+
+
+@router.patch(
+    "/{notification_id}/acknowledge",
+    response_model=NotificationResponse,
+    summary="Acknowledge alert",
+    description="Acknowledge an active alert (ISA-18.2: active → acknowledged).",
+)
+async def acknowledge_alert(
+    notification_id: uuid.UUID,
+    db: DBSession,
+    user: ActiveUser,
+):
+    repo = NotificationRepository(db)
+
+    # Pre-check: fetch current state to detect invalid transitions
+    existing = await repo.get_by_id(notification_id)
+    if not existing or existing.user_id != user.id:
+        raise NotificationNotFoundException(str(notification_id))
+
+    valid_targets = AlertStatus.VALID_TRANSITIONS.get(existing.status, set())
+    if AlertStatus.ACKNOWLEDGED not in valid_targets:
+        raise AlertInvalidStateTransition(
+            current_status=existing.status,
+            target_status=AlertStatus.ACKNOWLEDGED,
+        )
+
+    notification = await repo.acknowledge_alert(
+        notification_id=notification_id,
+        user_id=user.id,
+        acknowledging_user_id=user.id,
+    )
+
+    if not notification:
+        raise NotificationNotFoundException(str(notification_id))
+
+    await db.commit()
+    increment_alert_acknowledged(notification.severity)
+
+    # Broadcast updated status via WebSocket
+    router_service = NotificationRouter(db)
+    await router_service.broadcast_notification_updated(notification)
+    await router_service.broadcast_unread_count(user.id)
+
+    return NotificationResponse.model_validate(notification)
+
+
+# =============================================================================
+# PATCH /v1/notifications/{id}/resolve — Resolve alert (Phase 4B)
+# =============================================================================
+
+
+@router.patch(
+    "/{notification_id}/resolve",
+    response_model=NotificationResponse,
+    summary="Resolve alert",
+    description="Resolve an alert (ISA-18.2: active/acknowledged → resolved).",
+)
+async def resolve_alert(
+    notification_id: uuid.UUID,
+    db: DBSession,
+    user: ActiveUser,
+):
+    repo = NotificationRepository(db)
+
+    # Pre-check: fetch current state to detect invalid transitions
+    existing = await repo.get_by_id(notification_id)
+    if not existing or existing.user_id != user.id:
+        raise NotificationNotFoundException(str(notification_id))
+
+    valid_targets = AlertStatus.VALID_TRANSITIONS.get(existing.status, set())
+    if AlertStatus.RESOLVED not in valid_targets:
+        raise AlertInvalidStateTransition(
+            current_status=existing.status,
+            target_status=AlertStatus.RESOLVED,
+        )
+
+    notification = await repo.resolve_alert(
+        notification_id=notification_id,
+        user_id=user.id,
+    )
+
+    if not notification:
+        raise NotificationNotFoundException(str(notification_id))
+
+    await db.commit()
+    increment_alert_resolved(notification.severity, resolution_type="manual")
+
+    # Broadcast updated status via WebSocket
     router_service = NotificationRouter(db)
     await router_service.broadcast_notification_updated(notification)
     await router_service.broadcast_unread_count(user.id)
@@ -221,6 +397,7 @@ async def mark_all_read(
     repo = NotificationRepository(db)
     count = await repo.mark_all_as_read(user.id)
     await db.commit()
+    increment_notification_read(count)
 
     # Broadcast updated unread count (notification_updated not sent per-item for bulk)
     router_service = NotificationRouter(db)

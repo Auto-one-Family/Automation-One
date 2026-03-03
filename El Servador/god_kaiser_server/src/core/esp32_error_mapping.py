@@ -19,7 +19,6 @@ Error Code Ranges (from error_codes.h):
 
 from typing import Any, Dict, Optional
 
-
 # ============================================
 # HARDWARE ERROR CODES (1000-1999)
 # ============================================

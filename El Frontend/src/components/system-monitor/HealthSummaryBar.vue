@@ -9,9 +9,12 @@
  */
 
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { ChevronDown, CheckCircle, AlertTriangle, AlertCircle, Info, Lightbulb } from 'lucide-vue-next'
+import { ChevronDown, CheckCircle, AlertTriangle, AlertCircle, Info, Lightbulb, Bell, Stethoscope } from 'lucide-vue-next'
 import type { FleetHealthDevice, RecentError } from '@/api/health'
 import { formatRelativeTime } from '@/utils/formatters'
+import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
+import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
+import { useDiagnosticsStore } from '@/shared/stores/diagnostics.store'
 import HealthProblemChip from './HealthProblemChip.vue'
 
 interface Props {
@@ -25,7 +28,12 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   'filter-device': [espId: string]
   'update:expanded': [value: boolean]
+  'open-alerts': []
 }>()
+
+const alertStore = useAlertCenterStore()
+const inboxStore = useNotificationInboxStore()
+const diagStore = useDiagnosticsStore()
 
 // Problem detection
 const offlineDevices = computed(() =>
@@ -40,20 +48,22 @@ const weakSignalDevices = computed(() =>
   props.devices.filter(d => d.status === 'online' && d.wifi_rssi != null && d.wifi_rssi < -80)
 )
 
-const hasProblems = computed(() =>
+const hasDeviceProblems = computed(() =>
   offlineDevices.value.length > 0 ||
   lowHeapDevices.value.length > 0 ||
   weakSignalDevices.value.length > 0
 )
 
+const hasAlertProblems = computed(() => alertStore.unresolvedCount > 0)
+
+const hasProblems = computed(() =>
+  hasDeviceProblems.value || hasAlertProblems.value
+)
+
 // Status text
 const statusText = computed(() => {
-  if (!hasProblems.value) {
-    const count = props.devices.length
-    return `Alle ${count} ${count === 1 ? 'Gerät' : 'Geräte'} online`
-  }
-
   const parts: string[] = []
+
   if (offlineDevices.value.length > 0) {
     const n = offlineDevices.value.length
     parts.push(`${n} ${n === 1 ? 'Gerät' : 'Geräte'} offline`)
@@ -64,8 +74,24 @@ const statusText = computed(() => {
   if (weakSignalDevices.value.length > 0) {
     parts.push(`${weakSignalDevices.value.length} Signal schwach`)
   }
+  if (alertStore.criticalCount > 0) {
+    parts.push(`${alertStore.criticalCount} Critical Alerts`)
+  } else if (alertStore.warningCount > 0) {
+    parts.push(`${alertStore.warningCount} Warning Alerts`)
+  }
+
+  if (parts.length === 0) {
+    const count = props.devices.length
+    return `Alle ${count} ${count === 1 ? 'Gerät' : 'Geräte'} online`
+  }
+
   return parts.join(' · ')
 })
+
+function handleOpenAlerts() {
+  emit('open-alerts')
+  inboxStore.toggleDrawer()
+}
 
 // All problem devices (deduplicated)
 const allProblemDevices = computed(() => {
@@ -225,6 +251,31 @@ function formatErrorTime(isoString: string): string {
         :problem-type="item.type"
         @click="handleFilterDevice"
       />
+      <!-- Alert Chips -->
+      <button
+        v-if="alertStore.criticalCount > 0"
+        class="alert-chip alert-chip--critical"
+        @click="handleOpenAlerts"
+      >
+        <Bell :size="12" />
+        {{ alertStore.criticalCount }} Critical
+      </button>
+      <button
+        v-if="alertStore.warningCount > 0"
+        class="alert-chip alert-chip--warning"
+        @click="handleOpenAlerts"
+      >
+        <Bell :size="12" />
+        {{ alertStore.warningCount }} Warnings
+      </button>
+      <!-- Diagnostic Status Chip -->
+      <span
+        v-if="diagStore.lastRunAge"
+        :class="['diag-chip', diagStore.hasProblems ? 'diag-chip--warning' : 'diag-chip--ok']"
+      >
+        <Stethoscope :size="12" />
+        Diagnose: {{ diagStore.lastRunAge }}
+      </span>
     </div>
 
     <!-- Expanded: Error Messages -->
@@ -348,6 +399,67 @@ function formatErrorTime(isoString: string): string {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 0.75rem;
+}
+
+/* Alert Chips */
+.alert-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+  font-family: inherit;
+}
+
+.alert-chip--critical {
+  color: var(--color-error);
+  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(248, 113, 113, 0.2);
+}
+
+.alert-chip--critical:hover {
+  background: rgba(248, 113, 113, 0.15);
+  border-color: rgba(248, 113, 113, 0.3);
+}
+
+.alert-chip--warning {
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.2);
+}
+
+.alert-chip--warning:hover {
+  background: rgba(251, 191, 36, 0.15);
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+/* Diagnostic Chip */
+.diag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.diag-chip--ok {
+  color: var(--color-success);
+  background: rgba(52, 211, 153, 0.1);
+  border-color: rgba(52, 211, 153, 0.2);
+}
+
+.diag-chip--warning {
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.2);
 }
 
 /* Toggle Button - larger for better clickability */

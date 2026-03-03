@@ -17,7 +17,6 @@ from src.db.models.sensor import SensorConfig
 from src.db.models.user import User
 from src.main import app
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -36,9 +35,7 @@ async def operator_user(db_session: AsyncSession):
     db_session.add(user)
     await db_session.flush()
     await db_session.refresh(user)
-    user.token = create_access_token(
-        user_id=user.id, additional_claims={"role": user.role}
-    )
+    user.token = create_access_token(user_id=user.id, additional_claims={"role": user.role})
     return user
 
 
@@ -75,12 +72,12 @@ async def alert_config_sensor(db_session: AsyncSession, sample_esp_device):
 
 @pytest.mark.asyncio
 async def test_patch_sensor_alert_config(
-    operator_user, sample_esp_device, alert_config_sensor,
+    operator_user,
+    sample_esp_device,
+    alert_config_sensor,
 ):
     """PATCH /v1/sensors/{id}/alert-config updates suppression fields."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.patch(
             f"/api/v1/sensors/{alert_config_sensor.id}/alert-config",
             json={
@@ -104,12 +101,12 @@ async def test_patch_sensor_alert_config(
 
 @pytest.mark.asyncio
 async def test_get_sensor_alert_config(
-    operator_user, sample_esp_device, alert_config_sensor,
+    operator_user,
+    sample_esp_device,
+    alert_config_sensor,
 ):
     """GET /v1/sensors/{id}/alert-config returns alert_config + thresholds."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(
             f"/api/v1/sensors/{alert_config_sensor.id}/alert-config",
             headers={"Authorization": f"Bearer {operator_user.token}"},
@@ -130,12 +127,11 @@ async def test_get_sensor_alert_config(
 
 @pytest.mark.asyncio
 async def test_patch_device_alert_config_propagate(
-    operator_user, sample_esp_device,
+    operator_user,
+    sample_esp_device,
 ):
     """PATCH /v1/esp/devices/{esp_id}/alert-config with propagate_to_children."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.patch(
             f"/api/v1/esp/devices/{sample_esp_device.device_id}/alert-config",
             json={
@@ -160,12 +156,12 @@ async def test_patch_device_alert_config_propagate(
 
 @pytest.mark.asyncio
 async def test_alert_config_jsonb_merge(
-    operator_user, sample_esp_device, alert_config_sensor,
+    operator_user,
+    sample_esp_device,
+    alert_config_sensor,
 ):
     """Two successive PATCHes merge fields — second does not overwrite first."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # First PATCH: set suppression_reason
         await client.patch(
             f"/api/v1/sensors/{alert_config_sensor.id}/alert-config",
@@ -194,12 +190,12 @@ async def test_alert_config_jsonb_merge(
 
 @pytest.mark.asyncio
 async def test_alert_config_suppression_with_until(
-    operator_user, sample_esp_device, alert_config_sensor,
+    operator_user,
+    sample_esp_device,
+    alert_config_sensor,
 ):
     """PATCH with suppression_until stores ISO datetime for scheduler."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.patch(
             f"/api/v1/sensors/{alert_config_sensor.id}/alert-config",
             json={

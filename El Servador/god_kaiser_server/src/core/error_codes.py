@@ -38,7 +38,6 @@ Status: IMPLEMENTED
 from enum import IntEnum
 from typing import Dict, List
 
-
 # =============================================================================
 # ESP32 Error Codes (Mirror of error_codes.h)
 # =============================================================================

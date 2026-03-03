@@ -28,7 +28,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .common import BaseResponse, PaginatedResponse, TimestampMixin
 
-
 # =============================================================================
 # Condition Types
 # =============================================================================

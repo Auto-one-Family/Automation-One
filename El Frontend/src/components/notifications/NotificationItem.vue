@@ -13,8 +13,8 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  Check, ChevronDown, ChevronUp,
-  Activity, Workflow, BarChart3
+  Check, CheckCheck, ChevronDown, ChevronUp,
+  Activity, Workflow, BarChart3, ShieldCheck
 } from 'lucide-vue-next'
 import { formatRelativeTime } from '@/utils/formatters'
 import type { NotificationDTO } from '@/api/notifications'
@@ -26,6 +26,8 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   'mark-read': [id: string]
+  'acknowledge': [id: string]
+  'resolve': [id: string]
 }>()
 
 const router = useRouter()
@@ -45,10 +47,45 @@ const hasEspId = computed(() => !!metadata.value.esp_id)
 const hasRuleId = computed(() => !!metadata.value.rule_id)
 const hasSensorType = computed(() => !!metadata.value.sensor_type)
 
+const canAcknowledge = computed(() => props.notification.status === 'active')
+const canResolve = computed(() =>
+  props.notification.status === 'active' || props.notification.status === 'acknowledged'
+)
+const isResolved = computed(() => props.notification.status === 'resolved')
+const isAutoResolved = computed(() =>
+  isResolved.value && metadata.value.grafana_status === 'resolved'
+)
+
+const statusLabel = computed(() => {
+  switch (props.notification.status) {
+    case 'active': return 'Aktiv'
+    case 'acknowledged': return 'Gesehen'
+    case 'resolved': return 'Erledigt'
+    default: return ''
+  }
+})
+
+const statusClass = computed(() => {
+  switch (props.notification.status) {
+    case 'active': return 'item__status--active'
+    case 'acknowledged': return 'item__status--acknowledged'
+    case 'resolved': return 'item__status--resolved'
+    default: return ''
+  }
+})
+
 function handleMarkRead(): void {
   if (!props.notification.is_read) {
     emit('mark-read', props.notification.id)
   }
+}
+
+function handleAcknowledge(): void {
+  emit('acknowledge', props.notification.id)
+}
+
+function handleResolve(): void {
+  emit('resolve', props.notification.id)
 }
 
 function navigateToSensor(): void {
@@ -68,7 +105,7 @@ function navigateToRule(): void {
 
 <template>
   <div
-    :class="['item', { 'item--unread': !notification.is_read }]"
+    :class="['item', { 'item--unread': !notification.is_read, 'item--resolved': isResolved }]"
     @click="isExpanded = !isExpanded"
   >
     <!-- Top Row -->
@@ -76,9 +113,15 @@ function navigateToRule(): void {
       <span :class="['item__dot', severityDotClass]" />
 
       <div class="item__content">
-        <span :class="['item__title', { 'item__title--unread': !notification.is_read }]">
-          {{ notification.title }}
-        </span>
+        <div class="item__title-row">
+          <span :class="['item__title', { 'item__title--unread': !notification.is_read }]">
+            {{ notification.title }}
+          </span>
+          <span v-if="statusLabel" :class="['item__status', statusClass]">
+            {{ statusLabel }}
+          </span>
+          <span v-if="isAutoResolved" class="item__auto-badge">Auto</span>
+        </div>
         <span v-if="notification.body" class="item__body">
           {{ notification.body }}
         </span>
@@ -116,6 +159,24 @@ function navigateToRule(): void {
         </div>
 
         <div class="item__actions">
+          <button
+            v-if="canAcknowledge"
+            class="item__action item__action--ack"
+            title="Alert bestätigen (Acknowledge)"
+            @click.stop="handleAcknowledge"
+          >
+            <ShieldCheck class="item__action-icon" />
+            Bestätigen
+          </button>
+          <button
+            v-if="canResolve"
+            class="item__action item__action--resolve"
+            title="Alert erledigen (Resolve)"
+            @click.stop="handleResolve"
+          >
+            <CheckCheck class="item__action-icon" />
+            Erledigen
+          </button>
           <button
             v-if="!notification.is_read"
             class="item__action"
@@ -204,6 +265,11 @@ function navigateToRule(): void {
   background: var(--color-info);
 }
 
+/* Resolved item */
+.item--resolved {
+  opacity: 0.6;
+}
+
 /* Content */
 .item__content {
   flex: 1;
@@ -211,6 +277,53 @@ function navigateToRule(): void {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.item__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Status Badge */
+.item__status {
+  flex-shrink: 0;
+  padding: 1px var(--space-1);
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  line-height: 1.4;
+}
+
+.item__status--active {
+  color: var(--color-error);
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.item__status--acknowledged {
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.12);
+}
+
+.item__status--resolved {
+  color: var(--color-success);
+  background: rgba(52, 211, 153, 0.12);
+}
+
+/* Auto-resolve badge */
+.item__auto-badge {
+  flex-shrink: 0;
+  padding: 1px var(--space-1);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .item__title {
@@ -314,6 +427,28 @@ function navigateToRule(): void {
   color: var(--color-text-primary);
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--glass-border-hover);
+}
+
+.item__action--ack {
+  color: var(--color-warning);
+  border-color: rgba(251, 191, 36, 0.2);
+}
+
+.item__action--ack:hover {
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+.item__action--resolve {
+  color: var(--color-success);
+  border-color: rgba(52, 211, 153, 0.2);
+}
+
+.item__action--resolve:hover {
+  color: var(--color-success);
+  background: rgba(52, 211, 153, 0.08);
+  border-color: rgba(52, 211, 153, 0.3);
 }
 
 .item__action-icon {

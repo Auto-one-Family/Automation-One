@@ -25,6 +25,7 @@ from ..core.base_plugin import (
     PluginAction,
     PluginCapability,
     PluginResult,
+    plugin_metadata,
 )
 from ..core.context import AutoOpsContext
 
@@ -53,6 +54,19 @@ class DiagnosticIssue:
         self.details = details or {}
 
 
+@plugin_metadata(
+    display_name="Debug & Auto-Fix",
+    description="Diagnostiziert Probleme (Devices, Sensors, Actuators, Zones) und behebt sie automatisch",
+    category="diagnostics",
+    config_schema={
+        "auto_fix": {"type": "boolean", "default": True, "label": "Automatisch beheben"},
+        "include_zones": {
+            "type": "boolean",
+            "default": True,
+            "label": "Zonen-Diagnose einschliessen",
+        },
+    },
+)
 class DebugFixPlugin(AutoOpsPlugin):
     """
     Autonomous debug and fix agent.

@@ -38,13 +38,19 @@ from src.db.base import Base  # noqa: E402
 from src.db.models import (  # noqa: F401, E402 - imports needed for SQLAlchemy model registration
     actuator,
     ai,
+    audit_log,
     auth,
+    dashboard,
+    diagnostic,
     esp,
+    esp_heartbeat,
     kaiser,
     library,
     logic,
     notification,
+    plugin,
     sensor,
+    sensor_type_defaults,
     subzone,
     system,
     user,
@@ -54,7 +60,6 @@ from src.db.repositories.esp_repo import ESPRepository  # noqa: E402
 from src.db.repositories.sensor_repo import SensorRepository  # noqa: E402
 from src.db.repositories.subzone_repo import SubzoneRepository  # noqa: E402
 from src.db.repositories.user_repo import UserRepository  # noqa: E402
-
 
 # =============================================================================
 # FIX 3: In-memory SQLite with StaticPool for Windows compatibility

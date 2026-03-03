@@ -1466,12 +1466,14 @@ class SimulationScheduler:
         if pwm_value is not None:
             actuator_entry["pwm_value"] = pwm_value
         from sqlalchemy.orm.attributes import flag_modified
+
         flag_modified(device, "device_metadata")
         await session.commit()
 
         # Publish MQTT status so server processes it and sends WebSocket event
         if self._mqtt_publish:
             import time as _time
+
             actuator_type = actuator_entry.get("actuator_type", "relay")
             topic = f"kaiser/{runtime.kaiser_id}/esp/{esp_id}/actuator/{gpio}/status"
             payload = {

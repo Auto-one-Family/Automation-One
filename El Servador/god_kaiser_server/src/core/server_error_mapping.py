@@ -18,7 +18,6 @@ This file covers SERVER codes only (5000-5999).
 
 from typing import Any, Dict, Optional
 
-
 SERVER_ERROR_MAPPING: Dict[int, Dict[str, Any]] = {
     # =========================================================================
     # Config Errors (5000-5099)

@@ -320,9 +320,7 @@ class HeartbeatHandler:
                 # Allows ESP to transition from PENDING_APPROVAL → OPERATIONAL
                 # without requiring a reboot after admin approval
                 # Check if ESP lost its config (e.g., after reboot)
-                esp_sensor_count = payload.get(
-                    "sensor_count", payload.get("active_sensors", 0)
-                )
+                esp_sensor_count = payload.get("sensor_count", payload.get("active_sensors", 0))
                 esp_actuator_count = payload.get(
                     "actuator_count", payload.get("active_actuators", 0)
                 )
@@ -1024,7 +1022,8 @@ class HeartbeatHandler:
             mismatch = abs(gpio_reserved_count - len(validated_items))
             if mismatch > 0:
                 bus_gpio_count = sum(
-                    1 for g in gpio_status
+                    1
+                    for g in gpio_status
                     if isinstance(g, dict) and str(g.get("owner", "")).startswith("bus/")
                 )
                 if mismatch > bus_gpio_count:
@@ -1195,17 +1194,13 @@ class HeartbeatHandler:
                 )
                 import asyncio
 
-                asyncio.create_task(
-                    self._auto_push_config(esp_device.device_id)
-                )
+                asyncio.create_task(self._auto_push_config(esp_device.device_id))
                 return True
 
             return False
 
         except Exception as e:
-            logger.warning(
-                f"Failed to check pending config for {esp_device.device_id}: {e}"
-            )
+            logger.warning(f"Failed to check pending config for {esp_device.device_id}: {e}")
             return False
 
     async def _auto_push_config(self, esp_device_id: str) -> None:
@@ -1221,9 +1216,7 @@ class HeartbeatHandler:
 
             async with resilient_session() as session:
                 config_builder = ConfigPayloadBuilder()
-                combined_config = await config_builder.build_combined_config(
-                    esp_device_id, session
-                )
+                combined_config = await config_builder.build_combined_config(esp_device_id, session)
 
                 esp_repo = ESPRepository(session)
                 esp_service = ESPService(esp_repo)

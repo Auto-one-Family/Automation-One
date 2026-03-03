@@ -313,6 +313,42 @@ ALERT_SUPPRESSION_EXPIRED_TOTAL = Counter(
     "Total suppressions auto-expired by scheduler",
 )
 
+NOTIFICATIONS_READ_TOTAL = Counter(
+    "god_kaiser_notifications_read_total",
+    "Total notifications marked as read",
+)
+
+EMAIL_ERRORS_TOTAL = Counter(
+    "god_kaiser_email_errors_total",
+    "Total email errors by type",
+    ["provider", "error_type"],
+)
+
+# Phase 4B: Alert Lifecycle Metrics (ISA-18.2)
+ALERTS_ACKNOWLEDGED_TOTAL = Counter(
+    "god_kaiser_alerts_acknowledged_total",
+    "Total alerts acknowledged",
+    ["severity"],
+)
+
+ALERTS_RESOLVED_TOTAL = Counter(
+    "god_kaiser_alerts_resolved_total",
+    "Total alerts resolved",
+    ["severity", "resolution_type"],
+)
+
+ALERTS_ACTIVE_GAUGE = Gauge(
+    "god_kaiser_alerts_active",
+    "Currently active alerts",
+    ["severity"],
+)
+
+ALERTS_ROOT_CAUSE_SUPPRESSED_TOTAL = Counter(
+    "god_kaiser_alerts_root_cause_suppressed_total",
+    "Total dependent alerts suppressed by root-cause correlation",
+    ["source"],
+)
+
 # Track server start time
 _server_start_time: float = time.time()
 _metrics_initialized: bool = False
@@ -365,6 +401,17 @@ def init_metrics() -> None:
     ALERT_SUPPRESSION_ACTIVE.labels(entity_type="sensor")
     ALERT_SUPPRESSION_ACTIVE.labels(entity_type="actuator")
     ALERT_SUPPRESSION_ACTIVE.labels(entity_type="device")
+    EMAIL_ERRORS_TOTAL.labels(provider="resend", error_type="connection")
+    EMAIL_ERRORS_TOTAL.labels(provider="smtp", error_type="connection")
+
+    # Phase 4B: Alert lifecycle metrics
+    for sev in ("critical", "warning", "info"):
+        ALERTS_ACKNOWLEDGED_TOTAL.labels(severity=sev)
+        ALERTS_RESOLVED_TOTAL.labels(severity=sev, resolution_type="manual")
+        ALERTS_RESOLVED_TOTAL.labels(severity=sev, resolution_type="auto")
+        ALERTS_ACTIVE_GAUGE.labels(severity=sev)
+    ALERTS_ROOT_CAUSE_SUPPRESSED_TOTAL.labels(source="grafana")
+    ALERTS_ROOT_CAUSE_SUPPRESSED_TOTAL.labels(source="sensor_threshold")
 
     logger.info("Prometheus metrics initialized (all label combinations visible)")
 
@@ -565,6 +612,41 @@ def increment_alert_suppression_expired() -> None:
     ALERT_SUPPRESSION_EXPIRED_TOTAL.inc()
 
 
+def increment_notification_read(count: int = 1) -> None:
+    """Increment read counter. Called from notifications.py mark_read endpoints."""
+    NOTIFICATIONS_READ_TOTAL.inc(count)
+
+
+def increment_email_error(provider: str, error_type: str) -> None:
+    """Increment email error counter. Called from EmailService on failures."""
+    EMAIL_ERRORS_TOTAL.labels(provider=provider, error_type=error_type).inc()
+
+
+# =========================================================================
+# Alert Lifecycle metric helpers (Phase 4B)
+# =========================================================================
+
+
+def increment_alert_acknowledged(severity: str) -> None:
+    """Increment acknowledged counter. Called from notifications.py acknowledge endpoint."""
+    ALERTS_ACKNOWLEDGED_TOTAL.labels(severity=severity).inc()
+
+
+def increment_alert_resolved(severity: str, resolution_type: str = "manual") -> None:
+    """Increment resolved counter. Called from notifications.py resolve endpoint."""
+    ALERTS_RESOLVED_TOTAL.labels(severity=severity, resolution_type=resolution_type).inc()
+
+
+def update_alerts_active_gauge(severity: str, count: int) -> None:
+    """Set active alerts gauge. Called from metrics update cycle."""
+    ALERTS_ACTIVE_GAUGE.labels(severity=severity).set(count)
+
+
+def increment_root_cause_suppressed(source: str) -> None:
+    """Increment root-cause suppressed counter. Called when dependent alerts are suppressed."""
+    ALERTS_ROOT_CAUSE_SUPPRESSED_TOTAL.labels(source=source).inc()
+
+
 async def update_all_metrics_async(get_session_func: callable) -> None:
     """
     Full metrics update cycle (called by scheduler every 15s).
@@ -656,6 +738,17 @@ async def update_all_metrics_async(get_session_func: callable) -> None:
             else:
                 # No online devices with data - set to 0
                 update_esp_heartbeat_metrics(0.0, 0.0, 0.0, 0.0)
+
+            # Phase 4B: Update active alerts gauge from DB
+            try:
+                from ..db.repositories.notification_repo import NotificationRepository
+
+                notification_repo = NotificationRepository(session)
+                alert_counts = await notification_repo.get_active_counts_by_severity()
+                for severity, count in alert_counts.items():
+                    update_alerts_active_gauge(severity, count)
+            except Exception as alert_err:
+                logger.debug(f"Alert gauge update skipped: {alert_err}")
 
             break  # Only need one session
 

@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Error-Code Referenz
 
-> **Version:** 1.3 | **Aktualisiert:** 2026-03-02
+> **Version:** 1.4 | **Aktualisiert:** 2026-03-03
 > **Quellen:** `El Trabajante/src/models/error_codes.h`, `El Servador/god_kaiser_server/src/core/error_codes.py`
 > **Letzte Verifizierung:** AGENT 3 Error-Code Spezialist
 
@@ -524,6 +524,7 @@ allowed-tools: Read
 | 5857 | `WEBHOOK_INVALID_PAYLOAD` | Webhook payload invalid or malformed |
 | 5858 | `WEBHOOK_SIGNATURE_INVALID` | Webhook signature validation failed |
 | 5859 | `ALERT_PREFERENCE_NOT_FOUND` | Alert preference not found for user |
+| 5860 | `ALERT_INVALID_STATE_TRANSITION` | ISA-18.2 invalid alert state transition (409 Conflict) |
 
 ---
 

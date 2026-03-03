@@ -252,7 +252,11 @@ async def list_sensors(
         )
 
         response = _model_to_response(sensor, esp_device_id)
-        response.latest_value = (latest.processed_value if latest.processed_value is not None else latest.raw_value) if latest else None
+        response.latest_value = (
+            (latest.processed_value if latest.processed_value is not None else latest.raw_value)
+            if latest
+            else None
+        )
         response.latest_quality = latest.quality if latest else None
         response.latest_timestamp = latest.timestamp if latest else None
 
@@ -263,6 +267,94 @@ async def list_sensors(
         data=responses,
         pagination=PaginationMeta.from_pagination(page, page_size, total_items),
     )
+
+
+# =============================================================================
+# Sensor by ID Endpoints (must be before /{esp_id}/{gpio} to avoid route clash)
+# =============================================================================
+
+
+@router.get(
+    "/{sensor_id}/alert-config",
+    response_model=dict,
+    summary="Get sensor alert configuration",
+)
+async def get_sensor_alert_config(
+    sensor_id: uuid.UUID,
+    session: DBSession,
+    user: ActiveUser,
+):
+    """Get the current alert configuration for a sensor."""
+    sensor_repo = SensorRepository(session)
+    sensor = await sensor_repo.get_by_id(sensor_id)
+    if not sensor:
+        raise SensorNotFoundException(str(sensor_id))
+
+    return {
+        "status": "ok",
+        "alert_config": sensor.alert_config or {},
+        "thresholds": sensor.thresholds or {},
+    }
+
+
+@router.get(
+    "/{sensor_id}/runtime",
+    response_model=dict,
+    summary="Get sensor runtime stats",
+)
+async def get_sensor_runtime(
+    sensor_id: uuid.UUID,
+    session: DBSession,
+    user: ActiveUser,
+):
+    """Get runtime statistics for a sensor."""
+    sensor_repo = SensorRepository(session)
+    sensor = await sensor_repo.get_by_id(sensor_id)
+    if not sensor:
+        raise SensorNotFoundException(str(sensor_id))
+
+    runtime = sensor.runtime_stats or {}
+    metadata = sensor.sensor_metadata or {}
+
+    # Compute uptime from installation_date
+    uptime_hours = None
+    installation_date = metadata.get("installation_date")
+    if installation_date:
+        try:
+            from datetime import timezone
+
+            inst_dt = datetime.fromisoformat(installation_date)
+            if inst_dt.tzinfo is None:
+                inst_dt = inst_dt.replace(tzinfo=timezone.utc)
+            delta = datetime.now(timezone.utc) - inst_dt
+            uptime_hours = round(delta.total_seconds() / 3600, 1)
+        except (ValueError, TypeError):
+            pass
+
+    # Compute next_maintenance
+    next_maintenance = None
+    maintenance_overdue = False
+    last_maintenance = metadata.get("last_maintenance")
+    interval_days = metadata.get("maintenance_interval_days")
+    if last_maintenance and interval_days:
+        try:
+            last_dt = datetime.fromisoformat(last_maintenance)
+            next_dt = last_dt + timedelta(days=interval_days)
+            next_maintenance = next_dt.isoformat()
+            maintenance_overdue = next_dt < datetime.now()
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "status": "ok",
+        "runtime_stats": runtime,
+        "computed_uptime_hours": uptime_hours,
+        "last_restart": runtime.get("last_restart"),
+        "expected_lifetime_hours": runtime.get("expected_lifetime_hours"),
+        "maintenance_log": runtime.get("maintenance_log", []),
+        "next_maintenance": next_maintenance,
+        "maintenance_overdue": maintenance_overdue,
+    }
 
 
 # =============================================================================
@@ -335,7 +427,11 @@ async def get_sensor(
 
     # Convert model to response schema
     response = _model_to_response(sensor, esp_id)
-    response.latest_value = (latest.processed_value if latest.processed_value is not None else latest.raw_value) if latest else None
+    response.latest_value = (
+        (latest.processed_value if latest.processed_value is not None else latest.raw_value)
+        if latest
+        else None
+    )
     response.latest_quality = latest.quality if latest else None
     response.latest_timestamp = latest.timestamp if latest else None
 
@@ -425,8 +521,8 @@ async def create_or_update_sensor(
                 # Build model fields, override sensor_type + interface_type per sub-type
                 model_fields = _schema_to_model_fields(request)
                 model_fields["sensor_type"] = value_type
-                model_fields["interface_type"] = (
-                    request.interface_type or _infer_interface_type(value_type)
+                model_fields["interface_type"] = request.interface_type or _infer_interface_type(
+                    value_type
                 )
 
                 if existing_vt:
@@ -566,9 +662,7 @@ async def create_or_update_sensor(
                 conflict_type=validation_result.conflict_type.value,
                 conflict_component=validation_result.conflict_component,
                 conflict_id=(
-                    str(validation_result.conflict_id)
-                    if validation_result.conflict_id
-                    else None
+                    str(validation_result.conflict_id) if validation_result.conflict_id else None
                 ),
                 message=validation_result.message,
             )
@@ -1417,7 +1511,11 @@ async def list_onewire_sensors(
             sensor.esp_id, sensor.gpio, sensor_type=sensor.sensor_type
         )
         response = _model_to_response(sensor, esp_id)
-        response.latest_value = (latest.processed_value if latest.processed_value is not None else latest.raw_value) if latest else None
+        response.latest_value = (
+            (latest.processed_value if latest.processed_value is not None else latest.raw_value)
+            if latest
+            else None
+        )
         response.latest_quality = latest.quality if latest else None
         response.latest_timestamp = latest.timestamp if latest else None
         responses.append(response)
@@ -1639,94 +1737,6 @@ async def update_sensor_alert_config(
 
     logger.info(f"Alert config updated: sensor {sensor_id}, config={existing}")
     return {"status": "ok", "alert_config": existing}
-
-
-@router.get(
-    "/{sensor_id}/alert-config",
-    response_model=dict,
-    summary="Get sensor alert configuration",
-)
-async def get_sensor_alert_config(
-    sensor_id: uuid.UUID,
-    session: DBSession,
-    user: ActiveUser,
-):
-    """Get the current alert configuration for a sensor."""
-    sensor_repo = SensorRepository(session)
-    sensor = await sensor_repo.get_by_id(sensor_id)
-    if not sensor:
-        raise SensorNotFoundException(str(sensor_id))
-
-    return {
-        "status": "ok",
-        "alert_config": sensor.alert_config or {},
-        "thresholds": sensor.thresholds or {},
-    }
-
-
-# =============================================================================
-# Runtime Stats Endpoints (Phase 4A.8)
-# =============================================================================
-
-
-@router.get(
-    "/{sensor_id}/runtime",
-    response_model=dict,
-    summary="Get sensor runtime stats",
-)
-async def get_sensor_runtime(
-    sensor_id: uuid.UUID,
-    session: DBSession,
-    user: ActiveUser,
-):
-    """Get runtime statistics for a sensor."""
-    sensor_repo = SensorRepository(session)
-    sensor = await sensor_repo.get_by_id(sensor_id)
-    if not sensor:
-        raise SensorNotFoundException(str(sensor_id))
-
-    runtime = sensor.runtime_stats or {}
-    metadata = sensor.sensor_metadata or {}
-
-    # Compute uptime from installation_date
-    uptime_hours = None
-    installation_date = metadata.get("installation_date")
-    if installation_date:
-        try:
-            from datetime import timezone
-
-            inst_dt = datetime.fromisoformat(installation_date)
-            if inst_dt.tzinfo is None:
-                inst_dt = inst_dt.replace(tzinfo=timezone.utc)
-            delta = datetime.now(timezone.utc) - inst_dt
-            uptime_hours = round(delta.total_seconds() / 3600, 1)
-        except (ValueError, TypeError):
-            pass
-
-    # Compute next_maintenance
-    next_maintenance = None
-    maintenance_overdue = False
-    last_maintenance = metadata.get("last_maintenance")
-    interval_days = metadata.get("maintenance_interval_days")
-    if last_maintenance and interval_days:
-        try:
-            last_dt = datetime.fromisoformat(last_maintenance)
-            next_dt = last_dt + timedelta(days=interval_days)
-            next_maintenance = next_dt.isoformat()
-            maintenance_overdue = next_dt < datetime.now()
-        except (ValueError, TypeError):
-            pass
-
-    return {
-        "status": "ok",
-        "runtime_stats": runtime,
-        "computed_uptime_hours": uptime_hours,
-        "last_restart": runtime.get("last_restart"),
-        "expected_lifetime_hours": runtime.get("expected_lifetime_hours"),
-        "maintenance_log": runtime.get("maintenance_log", []),
-        "next_maintenance": next_maintenance,
-        "maintenance_overdue": maintenance_overdue,
-    }
 
 
 @router.patch(

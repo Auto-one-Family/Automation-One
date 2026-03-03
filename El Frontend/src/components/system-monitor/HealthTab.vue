@@ -9,10 +9,12 @@
  * - Cross-tab navigation to Events tab
  */
 
-import { ref, computed, onMounted } from 'vue'
-import { Cpu, Wifi, AlertTriangle, HeartPulse, ArrowUpDown, ExternalLink, RefreshCw } from 'lucide-vue-next'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { Cpu, Wifi, AlertTriangle, HeartPulse, ArrowUpDown, ExternalLink, RefreshCw, Bell, Server, Radio, BarChart3, GitBranch, Puzzle } from 'lucide-vue-next'
 import StatCard from '@/components/dashboard/StatCard.vue'
 import { getFleetHealth, type FleetHealthResponse } from '@/api/health'
+import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
+import { useDiagnosticsStore } from '@/shared/stores/diagnostics.store'
 
 // =============================================================================
 // Props & Emits
@@ -28,7 +30,11 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'filter-device': [espId: string]
+  'open-alerts': []
 }>()
+
+const alertStore = useAlertCenterStore()
+const diagStore = useDiagnosticsStore()
 
 // =============================================================================
 // State
@@ -174,7 +180,14 @@ function showEventsForEsp(espId: string) {
 // Lifecycle
 // =============================================================================
 
-onMounted(fetchHealth)
+onMounted(() => {
+  fetchHealth()
+  alertStore.startStatsPolling()
+})
+
+onUnmounted(() => {
+  alertStore.stopStatsPolling()
+})
 </script>
 
 <template>
@@ -219,6 +232,60 @@ onMounted(fetchHealth)
         :icon-color="problemDevices.length > 0 ? 'text-warning' : 'text-success'"
         :icon-bg-color="problemDevices.length > 0 ? 'bg-warning/10' : 'bg-success/10'"
         :loading="loading"
+      />
+      <StatCard
+        title="Aktive Alerts"
+        :value="alertStore.unresolvedCount"
+        :subtitle="alertStore.hasCritical ? `${alertStore.criticalCount} kritisch` : alertStore.unresolvedCount > 0 ? `${alertStore.warningCount} Warnungen` : 'Keine aktiven Alerts'"
+        :icon="Bell"
+        :icon-color="alertStore.hasCritical ? 'text-error' : alertStore.unresolvedCount > 0 ? 'text-warning' : 'text-success'"
+        :icon-bg-color="alertStore.hasCritical ? 'bg-error/10' : alertStore.unresolvedCount > 0 ? 'bg-warning/10' : 'bg-success/10'"
+        class="stat-card--clickable"
+        @click="emit('open-alerts')"
+      />
+    </section>
+
+    <!-- Diagnostics KPI Cards (from last diagnostic run) -->
+    <section v-if="diagStore.currentReport" class="health-summary health-summary--diagnostics">
+      <StatCard
+        title="Server"
+        :value="diagStore.checksByName.server?.metrics?.cpu_percent != null ? `${diagStore.checksByName.server.metrics.cpu_percent}%` : '—'"
+        :subtitle="diagStore.checksByName.server?.metrics?.memory_percent != null ? `RAM: ${diagStore.checksByName.server.metrics.memory_percent}%` : undefined"
+        :icon="Server"
+        :icon-color="diagStore.checksByName.server?.status === 'healthy' ? 'text-success' : 'text-warning'"
+        :icon-bg-color="diagStore.checksByName.server?.status === 'healthy' ? 'bg-success/10' : 'bg-warning/10'"
+      />
+      <StatCard
+        title="MQTT"
+        :value="diagStore.checksByName.mqtt?.status === 'healthy' ? 'Verbunden' : diagStore.checksByName.mqtt?.status === 'warning' ? 'Warnung' : 'Offline'"
+        :subtitle="diagStore.checksByName.mqtt?.metrics?.stale_devices != null ? `${diagStore.checksByName.mqtt.metrics.stale_devices} stale` : undefined"
+        :icon="Radio"
+        :icon-color="diagStore.checksByName.mqtt?.status === 'healthy' ? 'text-success' : 'text-warning'"
+        :icon-bg-color="diagStore.checksByName.mqtt?.status === 'healthy' ? 'bg-success/10' : 'bg-warning/10'"
+      />
+      <StatCard
+        title="Monitoring"
+        :value="diagStore.checksByName.monitoring?.status === 'healthy' ? 'Aktiv' : diagStore.checksByName.monitoring?.status ?? '—'"
+        subtitle="Grafana / Prometheus / Loki"
+        :icon="BarChart3"
+        :icon-color="diagStore.checksByName.monitoring?.status === 'healthy' ? 'text-success' : 'text-warning'"
+        :icon-bg-color="diagStore.checksByName.monitoring?.status === 'healthy' ? 'bg-success/10' : 'bg-warning/10'"
+      />
+      <StatCard
+        title="Logic Engine"
+        :value="diagStore.checksByName.logic_engine?.metrics?.active_rules != null ? String(diagStore.checksByName.logic_engine.metrics.active_rules) : '—'"
+        :subtitle="diagStore.checksByName.logic_engine?.metrics?.executions_24h != null ? `${diagStore.checksByName.logic_engine.metrics.executions_24h} Ausfuehrungen/24h` : 'Regeln'"
+        :icon="GitBranch"
+        :icon-color="diagStore.checksByName.logic_engine?.status === 'healthy' ? 'text-success' : 'text-warning'"
+        :icon-bg-color="diagStore.checksByName.logic_engine?.status === 'healthy' ? 'bg-success/10' : 'bg-warning/10'"
+      />
+      <StatCard
+        title="Plugins"
+        :value="diagStore.checksByName.plugins?.metrics?.total_plugins != null ? String(diagStore.checksByName.plugins.metrics.total_plugins) : '—'"
+        :subtitle="diagStore.checksByName.plugins?.metrics?.enabled_plugins != null ? `${diagStore.checksByName.plugins.metrics.enabled_plugins} aktiv` : 'Registriert'"
+        :icon="Puzzle"
+        :icon-color="diagStore.checksByName.plugins?.status === 'healthy' ? 'text-success' : 'text-iridescent-2'"
+        :icon-bg-color="diagStore.checksByName.plugins?.status === 'healthy' ? 'bg-success/10' : 'bg-iridescent-2/10'"
       />
     </section>
 
@@ -358,6 +425,11 @@ onMounted(fetchHealth)
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 1rem;
+}
+
+.health-summary--diagnostics {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--glass-border);
 }
 
 /* =============================================================================

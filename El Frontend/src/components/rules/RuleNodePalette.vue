@@ -24,6 +24,8 @@ import {
   Waves,
   Leaf,
   Zap,
+  Puzzle,
+  Stethoscope,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -116,6 +118,14 @@ const categories = [
         category: 'condition' as const,
         defaults: { startHour: 8, endHour: 18 },
       },
+      {
+        type: 'diagnostics_status',
+        label: 'Diagnose-Status',
+        description: 'Bedingung basierend auf System-Diagnose',
+        icon: Stethoscope,
+        category: 'condition' as const,
+        defaults: { checkName: 'mqtt', expectedStatus: 'critical', operator: '==' },
+      },
     ],
   },
   {
@@ -169,6 +179,22 @@ const categories = [
         icon: Timer,
         category: 'action' as const,
         defaults: { seconds: 60 },
+      },
+      {
+        type: 'plugin',
+        label: 'Plugin ausführen',
+        description: 'AutoOps-Plugin als Aktion triggern',
+        icon: Puzzle,
+        category: 'action' as const,
+        defaults: { pluginId: '', config: {} },
+      },
+      {
+        type: 'run_diagnostic',
+        label: 'Diagnose starten',
+        description: 'System-Diagnose als Aktion auslösen',
+        icon: Stethoscope,
+        category: 'action' as const,
+        defaults: { checkName: '' },
       },
     ],
   },

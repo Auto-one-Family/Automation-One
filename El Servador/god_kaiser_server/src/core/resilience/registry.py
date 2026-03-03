@@ -9,16 +9,16 @@ Central management for circuit breakers and resilience components:
 
 Usage:
     registry = ResilienceRegistry.get_instance()
-    
+
     # Register breakers at startup
     registry.register_circuit_breaker("mqtt", CircuitBreaker("mqtt", ...))
     registry.register_circuit_breaker("database", CircuitBreaker("database", ...))
-    
+
     # Use in code
     breaker = registry.get_circuit_breaker("mqtt")
     if breaker.allow_request():
         ...
-    
+
     # Health check
     status = registry.get_health_status()
 """

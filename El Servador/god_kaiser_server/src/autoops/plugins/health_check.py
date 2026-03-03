@@ -21,10 +21,20 @@ from ..core.base_plugin import (
     PluginAction,
     PluginCapability,
     PluginResult,
+    plugin_metadata,
 )
 from ..core.context import AutoOpsContext
 
 
+@plugin_metadata(
+    display_name="System Health Check",
+    description="Prueft Server, Auth, Devices, Database, MQTT, Services, Sensor-Daten und Zonen",
+    category="monitoring",
+    config_schema={
+        "include_containers": {"type": "boolean", "default": True, "label": "Container pruefen"},
+        "alert_on_degraded": {"type": "boolean", "default": True, "label": "Alert bei Degraded"},
+    },
+)
 class HealthCheckPlugin(AutoOpsPlugin):
     """
     System health validator.

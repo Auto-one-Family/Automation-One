@@ -15,7 +15,6 @@ from src.db.models.esp import ESPDevice
 from src.db.models.sensor import SensorConfig
 from src.services.alert_suppression_service import AlertSuppressionService
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -158,9 +157,7 @@ async def test_is_sensor_suppressed_true(db_session, suppressed_sensor):
 async def test_is_sensor_suppressed_expiry(db_session, sensor_with_expired_suppression):
     """Sensor with suppression_until in the past is NOT suppressed."""
     service = AlertSuppressionService(db_session)
-    is_suppressed, reason = await service.is_sensor_suppressed(
-        sensor_with_expired_suppression
-    )
+    is_suppressed, reason = await service.is_sensor_suppressed(sensor_with_expired_suppression)
 
     assert is_suppressed is False
     assert reason is None
@@ -177,9 +174,7 @@ async def test_device_level_propagation(
 ):
     """Device suppressed with propagate_to_children → child sensor also suppressed."""
     service = AlertSuppressionService(db_session)
-    is_suppressed, reason = await service.is_sensor_suppressed(
-        child_sensor_of_suppressed_device
-    )
+    is_suppressed, reason = await service.is_sensor_suppressed(child_sensor_of_suppressed_device)
 
     assert is_suppressed is True
     assert "device:" in reason

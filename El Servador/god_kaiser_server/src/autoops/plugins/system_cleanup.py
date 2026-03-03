@@ -20,10 +20,20 @@ from ..core.base_plugin import (
     PluginAction,
     PluginCapability,
     PluginResult,
+    plugin_metadata,
 )
 from ..core.context import AutoOpsContext
 
 
+@plugin_metadata(
+    display_name="System Cleanup",
+    description="Raeumt veraltete Daten, Logs und temporaere Ressourcen auf",
+    category="maintenance",
+    config_schema={
+        "max_log_age_days": {"type": "integer", "default": 30, "label": "Max Log-Alter (Tage)"},
+        "dry_run": {"type": "boolean", "default": False, "label": "Nur simulieren"},
+    },
+)
 class SystemCleanupPlugin(AutoOpsPlugin):
     """
     System cleanup and maintenance agent.

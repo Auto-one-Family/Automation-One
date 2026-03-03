@@ -18,7 +18,6 @@ from src.db.models.sensor import SensorConfig
 from src.db.models.user import User
 from src.main import app
 
-
 # =========================================================================
 # Fixtures
 # =========================================================================

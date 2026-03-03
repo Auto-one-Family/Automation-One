@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 2.5 | **Aktualisiert:** 2026-03-02
+> **Version:** 2.6 | **Aktualisiert:** 2026-03-03
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
 > **Event-Anzahl:** 31 verschiedene Event-Typen
@@ -71,7 +71,7 @@ allowed-tools: Read
 | Event | Richtung | Trigger | Beschreibung |
 |-------|----------|---------|--------------|
 | `notification_new` | Server→Frontend | NotificationRouter | Neue Notification (DB-persistiert) |
-| `notification_updated` | Server→Frontend | NotificationRouter | Notification gelesen/archiviert |
+| `notification_updated` | Server→Frontend | NotificationRouter | Notification gelesen/acknowledged/resolved |
 | `notification_unread_count` | Server→Frontend | NotificationRouter | Ungelesene-Anzahl + höchste Severity |
 
 ### Sequence Events
@@ -865,11 +865,11 @@ Neue DB-persistierte Notification. Wird vom NotificationRouter nach jeder Notifi
 
 ### 8.4 notification_updated
 
-Bestehende Notification wurde aktualisiert (gelesen, archiviert).
+Bestehende Notification wurde aktualisiert (gelesen, acknowledged, resolved).
 
-**Trigger:** `NotificationRouter` nach mark-as-read oder archive
+**Trigger:** `NotificationRouter` nach mark-as-read, acknowledge oder resolve
 
-**Code-Location:** [notification_router.py:244](El Servador/god_kaiser_server/src/services/notification_router.py#L244)
+**Code-Location:** [notification_router.py:357](El Servador/god_kaiser_server/src/services/notification_router.py#L357)
 
 **Payload:**
 ```json
@@ -878,12 +878,29 @@ Bestehende Notification wurde aktualisiert (gelesen, archiviert).
   "timestamp": 1706787600,
   "data": {
     "id": "uuid-string",
+    "user_id": 1,
     "is_read": true,
     "is_archived": false,
-    "read_at": "2026-02-01T10:30:00Z"
+    "read_at": "2026-02-01T10:30:00Z",
+    "status": "acknowledged",
+    "acknowledged_at": "2026-02-01T10:30:00Z",
+    "acknowledged_by": 1,
+    "resolved_at": null
   }
 }
 ```
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `id` | UUID string | Notification Primary Key |
+| `user_id` | int | User ID des Besitzers |
+| `is_read` | bool | Gelesen-Status |
+| `is_archived` | bool | Archiviert-Status |
+| `read_at` | ISO 8601? | Zeitpunkt des Lesens |
+| `status` | string | ISA-18.2 Alert-Status: `active`, `acknowledged`, `resolved` (Phase 4B) |
+| `acknowledged_at` | ISO 8601? | Zeitpunkt der Quittierung (Phase 4B) |
+| `acknowledged_by` | int? | User ID des Quittierenden (Phase 4B) |
+| `resolved_at` | ISO 8601? | Zeitpunkt der Auflösung (Phase 4B) |
 
 ---
 

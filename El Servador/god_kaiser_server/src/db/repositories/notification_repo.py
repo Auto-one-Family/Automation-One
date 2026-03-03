@@ -10,10 +10,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, List, Optional, Tuple
 
-from sqlalchemy import and_, desc, func, select, update
+from sqlalchemy import and_, case, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.notification import (
+    AlertStatus,
     Notification,
     NotificationPreferences,
     NotificationSeverity,
@@ -117,15 +118,14 @@ class NotificationRepository(BaseRepository[Notification]):
 
         return min(severities, key=lambda s: severity_order.get(s, 99))
 
-    async def mark_as_read(self, notification_id: uuid.UUID, user_id: int) -> Optional[Notification]:
+    async def mark_as_read(
+        self, notification_id: uuid.UUID, user_id: int
+    ) -> Optional[Notification]:
         """Mark a single notification as read."""
-        stmt = (
-            select(Notification)
-            .where(
-                and_(
-                    Notification.id == notification_id,
-                    Notification.user_id == user_id,
-                )
+        stmt = select(Notification).where(
+            and_(
+                Notification.id == notification_id,
+                Notification.user_id == user_id,
             )
         )
         result = await self.session.execute(stmt)
@@ -252,6 +252,356 @@ class NotificationRepository(BaseRepository[Notification]):
         result = await self.session.execute(stmt)
         return result.scalar_one()
 
+    # =========================================================================
+    # Alert Lifecycle Methods (Phase 4B — ISA-18.2)
+    # =========================================================================
+
+    async def acknowledge_alert(
+        self,
+        notification_id: uuid.UUID,
+        user_id: int,
+        acknowledging_user_id: int,
+    ) -> Optional[Notification]:
+        """
+        Acknowledge an alert (active → acknowledged).
+
+        Args:
+            notification_id: Alert UUID
+            user_id: Owner user ID (for authorization)
+            acknowledging_user_id: User performing the acknowledgement
+
+        Returns:
+            Updated notification or None if not found/not owned
+        """
+        stmt = select(Notification).where(
+            and_(
+                Notification.id == notification_id,
+                Notification.user_id == user_id,
+            )
+        )
+        result = await self.session.execute(stmt)
+        notification = result.scalar_one_or_none()
+
+        if not notification:
+            return None
+
+        # ISA-18.2 state machine: validate transition via VALID_TRANSITIONS
+        valid_targets = AlertStatus.VALID_TRANSITIONS.get(notification.status, set())
+        if AlertStatus.ACKNOWLEDGED not in valid_targets:
+            return notification  # Invalid transition (already acknowledged or resolved)
+
+        now = datetime.now(timezone.utc)
+        notification.status = AlertStatus.ACKNOWLEDGED
+        notification.acknowledged_at = now
+        notification.acknowledged_by = acknowledging_user_id
+        notification.updated_at = now
+
+        await self.session.flush()
+        await self.session.refresh(notification)
+        return notification
+
+    async def resolve_alert(
+        self,
+        notification_id: uuid.UUID,
+        user_id: int,
+    ) -> Optional[Notification]:
+        """
+        Resolve an alert (active/acknowledged → resolved).
+
+        Args:
+            notification_id: Alert UUID
+            user_id: Owner user ID (for authorization)
+
+        Returns:
+            Updated notification or None if not found/not owned
+        """
+        stmt = select(Notification).where(
+            and_(
+                Notification.id == notification_id,
+                Notification.user_id == user_id,
+            )
+        )
+        result = await self.session.execute(stmt)
+        notification = result.scalar_one_or_none()
+
+        if not notification:
+            return None
+
+        # ISA-18.2 state machine: validate transition via VALID_TRANSITIONS
+        valid_targets = AlertStatus.VALID_TRANSITIONS.get(notification.status, set())
+        if AlertStatus.RESOLVED not in valid_targets:
+            return notification  # Terminal state, no valid transition
+
+        now = datetime.now(timezone.utc)
+        notification.status = AlertStatus.RESOLVED
+        notification.resolved_at = now
+        notification.is_read = True
+        notification.read_at = notification.read_at or now
+        notification.updated_at = now
+
+        await self.session.flush()
+        await self.session.refresh(notification)
+        return notification
+
+    async def auto_resolve_by_correlation(self, correlation_id: str) -> int:
+        """
+        Auto-resolve all active/acknowledged alerts with matching correlation_id.
+        Used when Grafana sends a 'resolved' webhook.
+
+        Returns:
+            Number of alerts resolved
+        """
+        now = datetime.now(timezone.utc)
+        stmt = (
+            update(Notification)
+            .where(
+                and_(
+                    Notification.correlation_id == correlation_id,
+                    Notification.status.in_([AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]),
+                )
+            )
+            .values(
+                status=AlertStatus.RESOLVED,
+                resolved_at=now,
+                updated_at=now,
+            )
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
+
+    async def group_under_parent(
+        self,
+        parent_notification_id: uuid.UUID,
+        correlation_prefix: str,
+    ) -> int:
+        """
+        Group active/acknowledged alerts under a root-cause parent notification.
+
+        Finds alerts whose correlation_id starts with the given prefix
+        and sets their parent_notification_id. Used for ISA-18.2 root-cause
+        grouping (e.g., MQTT offline → dependent sensor-stale alerts).
+
+        Args:
+            parent_notification_id: Root-cause notification UUID
+            correlation_prefix: Prefix to match (e.g., "threshold_AABBCCDD")
+
+        Returns:
+            Number of alerts grouped
+        """
+        now = datetime.now(timezone.utc)
+        stmt = (
+            update(Notification)
+            .where(
+                and_(
+                    Notification.correlation_id.like(f"{correlation_prefix}%"),
+                    Notification.status.in_([AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]),
+                    Notification.id != parent_notification_id,
+                    Notification.parent_notification_id.is_(None),
+                )
+            )
+            .values(
+                parent_notification_id=parent_notification_id,
+                updated_at=now,
+            )
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
+
+    async def get_alerts_by_status(
+        self,
+        status: str,
+        user_id: Optional[int] = None,
+        severity: Optional[str] = None,
+        category: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> Tuple[List[Notification], int]:
+        """
+        Get paginated alerts filtered by lifecycle status.
+
+        Args:
+            status: Alert status filter (active, acknowledged, resolved)
+            user_id: Optional user filter
+            severity: Optional severity filter
+            category: Optional category filter
+            skip: Pagination offset
+            limit: Pagination limit
+
+        Returns:
+            Tuple of (notifications, total_count)
+        """
+        conditions = [Notification.status == status]
+
+        if user_id is not None:
+            conditions.append(Notification.user_id == user_id)
+        if severity is not None:
+            conditions.append(Notification.severity == severity)
+        if category is not None:
+            conditions.append(Notification.category == category)
+
+        where_clause = and_(*conditions)
+
+        # Count
+        count_stmt = select(func.count()).select_from(Notification).where(where_clause)
+        count_result = await self.session.execute(count_stmt)
+        total = count_result.scalar_one()
+
+        # Data — active/acknowledged sorted by severity (critical first), then created_at
+        if status in (AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED):
+            severity_order = case(
+                (Notification.severity == NotificationSeverity.CRITICAL, 0),
+                (Notification.severity == NotificationSeverity.WARNING, 1),
+                else_=2,
+            )
+            order_clause = [severity_order, desc(Notification.created_at)]
+        else:
+            order_clause = [desc(Notification.resolved_at)]
+
+        data_stmt = (
+            select(Notification)
+            .where(where_clause)
+            .order_by(*order_clause)
+            .offset(skip)
+            .limit(limit)
+        )
+        data_result = await self.session.execute(data_stmt)
+        notifications = list(data_result.scalars().all())
+
+        return notifications, total
+
+    async def get_alert_stats(self, user_id: Optional[int] = None) -> dict:
+        """
+        Get ISA-18.2 alert metrics (MTTA, MTTR, counts by status).
+
+        Returns:
+            Dict with active_count, acknowledged_count, resolved_today_count,
+            critical_active, warning_active, mean_time_to_acknowledge_s,
+            mean_time_to_resolve_s
+        """
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        base_conditions = []
+        if user_id is not None:
+            base_conditions.append(Notification.user_id == user_id)
+
+        # Active count
+        active_conditions = [Notification.status == AlertStatus.ACTIVE] + base_conditions
+        active_stmt = select(func.count()).select_from(Notification).where(and_(*active_conditions))
+        active_result = await self.session.execute(active_stmt)
+        active_count = active_result.scalar_one()
+
+        # Acknowledged count
+        ack_conditions = [Notification.status == AlertStatus.ACKNOWLEDGED] + base_conditions
+        ack_stmt = select(func.count()).select_from(Notification).where(and_(*ack_conditions))
+        ack_result = await self.session.execute(ack_stmt)
+        acknowledged_count = ack_result.scalar_one()
+
+        # Resolved today count
+        resolved_conditions = [
+            Notification.status == AlertStatus.RESOLVED,
+            Notification.resolved_at >= today_start,
+        ] + base_conditions
+        resolved_stmt = (
+            select(func.count()).select_from(Notification).where(and_(*resolved_conditions))
+        )
+        resolved_result = await self.session.execute(resolved_stmt)
+        resolved_today_count = resolved_result.scalar_one()
+
+        # Critical active count
+        crit_conditions = [
+            Notification.status == AlertStatus.ACTIVE,
+            Notification.severity == NotificationSeverity.CRITICAL,
+        ] + base_conditions
+        crit_stmt = select(func.count()).select_from(Notification).where(and_(*crit_conditions))
+        crit_result = await self.session.execute(crit_stmt)
+        critical_active = crit_result.scalar_one()
+
+        # Warning active count
+        warn_conditions = [
+            Notification.status == AlertStatus.ACTIVE,
+            Notification.severity == NotificationSeverity.WARNING,
+        ] + base_conditions
+        warn_stmt = select(func.count()).select_from(Notification).where(and_(*warn_conditions))
+        warn_result = await self.session.execute(warn_stmt)
+        warning_active = warn_result.scalar_one()
+
+        # Mean Time to Acknowledge (MTTA) — average seconds from created_at to acknowledged_at
+        mtta_conditions = [Notification.acknowledged_at.isnot(None)] + base_conditions
+        mtta_stmt = (
+            select(
+                func.avg(
+                    func.extract("epoch", Notification.acknowledged_at)
+                    - func.extract("epoch", Notification.created_at)
+                )
+            )
+            .select_from(Notification)
+            .where(and_(*mtta_conditions))
+        )
+        mtta_result = await self.session.execute(mtta_stmt)
+        mean_time_to_acknowledge_s = mtta_result.scalar_one()
+
+        # Mean Time to Resolve (MTTR) — average seconds from created_at to resolved_at
+        mttr_conditions = [Notification.resolved_at.isnot(None)] + base_conditions
+        mttr_stmt = (
+            select(
+                func.avg(
+                    func.extract("epoch", Notification.resolved_at)
+                    - func.extract("epoch", Notification.created_at)
+                )
+            )
+            .select_from(Notification)
+            .where(and_(*mttr_conditions))
+        )
+        mttr_result = await self.session.execute(mttr_stmt)
+        mean_time_to_resolve_s = mttr_result.scalar_one()
+
+        return {
+            "active_count": active_count,
+            "acknowledged_count": acknowledged_count,
+            "resolved_today_count": resolved_today_count,
+            "critical_active": critical_active,
+            "warning_active": warning_active,
+            "mean_time_to_acknowledge_s": (
+                round(float(mean_time_to_acknowledge_s), 1)
+                if mean_time_to_acknowledge_s is not None
+                else None
+            ),
+            "mean_time_to_resolve_s": (
+                round(float(mean_time_to_resolve_s), 1)
+                if mean_time_to_resolve_s is not None
+                else None
+            ),
+        }
+
+    async def get_active_counts_by_severity(self) -> dict[str, int]:
+        """
+        Get active (non-resolved) alert counts grouped by severity.
+
+        Used by Prometheus metrics cycle — no user_id filter.
+
+        Returns:
+            Dict mapping severity to count, e.g. {"critical": 2, "warning": 5, "info": 1}
+        """
+        stmt = (
+            select(
+                Notification.severity,
+                func.count().label("cnt"),
+            )
+            .where(Notification.status.in_([AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]))
+            .group_by(Notification.severity)
+        )
+        result = await self.session.execute(stmt)
+        rows = result.all()
+
+        # Initialize all severities to 0
+        counts: dict[str, int] = {"critical": 0, "warning": 0, "info": 0}
+        for severity, cnt in rows:
+            counts[severity] = cnt
+
+        return counts
+
 
 class NotificationPreferencesRepository:
     """Repository for user notification preferences."""
@@ -261,9 +611,7 @@ class NotificationPreferencesRepository:
 
     async def get_for_user(self, user_id: int) -> Optional[NotificationPreferences]:
         """Get preferences for a user."""
-        stmt = select(NotificationPreferences).where(
-            NotificationPreferences.user_id == user_id
-        )
+        stmt = select(NotificationPreferences).where(NotificationPreferences.user_id == user_id)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -289,8 +637,6 @@ class NotificationPreferencesRepository:
 
     async def get_all_with_email_enabled(self) -> List[NotificationPreferences]:
         """Get all users with email notifications enabled."""
-        stmt = select(NotificationPreferences).where(
-            NotificationPreferences.email_enabled == True
-        )
+        stmt = select(NotificationPreferences).where(NotificationPreferences.email_enabled == True)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

@@ -12,7 +12,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ArrowLeft,
-  Check,
+  CheckCheck,
   ChevronDown,
   ChevronUp,
   ExternalLink,
@@ -20,8 +20,10 @@ import {
   AlertTriangle,
   Info,
   CheckCircle2,
+  ShieldCheck,
 } from 'lucide-vue-next'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
+import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
 import { useQuickActionStore } from '@/shared/stores/quickAction.store'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
@@ -29,30 +31,53 @@ import { sensorsApi } from '@/api/sensors'
 import { formatRelativeTime } from '@/utils/formatters'
 import type { NotificationDTO } from '@/api/notifications'
 
+type QuickAlertFilter = 'active' | 'acknowledged' | 'all'
+
 const MAX_ALERTS = 5
+const BATCH_ACK_THRESHOLD = 3
 
 const router = useRouter()
 const inboxStore = useNotificationInboxStore()
+const alertStore = useAlertCenterStore()
 const quickActionStore = useQuickActionStore()
 const espStore = useEspStore()
 
 const { success, error } = useToast()
 const expandedId = ref<string | null>(null)
 const mutingId = ref<string | null>(null)
+const statusFilter = ref<QuickAlertFilter>('active')
+const isBatchAcking = ref(false)
 
-/** Top-5 unread alerts sorted by severity priority */
+const severityOrder: Record<string, number> = {
+  critical: 0,
+  warning: 1,
+  info: 2,
+}
+
+/** Filtered alerts based on status filter, sorted by severity priority */
 const topAlerts = computed<NotificationDTO[]>(() => {
-  const severityOrder: Record<string, number> = {
-    critical: 0,
-    warning: 1,
-    info: 2,
+  let filtered = [...inboxStore.notifications]
+
+  if (statusFilter.value === 'active') {
+    filtered = filtered.filter(n => n.status === 'active')
+  } else if (statusFilter.value === 'acknowledged') {
+    filtered = filtered.filter(n => n.status === 'acknowledged')
+  } else {
+    filtered = filtered.filter(n => n.status !== 'resolved')
   }
 
-  return [...inboxStore.notifications]
-    .filter((n) => !n.is_read && (n.severity === 'critical' || n.severity === 'warning' || n.severity === 'info'))
+  return filtered
     .sort((a, b) => (severityOrder[a.severity] ?? 9) - (severityOrder[b.severity] ?? 9))
     .slice(0, MAX_ALERTS)
 })
+
+const activeCount = computed(() =>
+  inboxStore.notifications.filter(n => n.status === 'active').length
+)
+
+const showBatchAck = computed(() =>
+  statusFilter.value === 'active' && activeCount.value > BATCH_ACK_THRESHOLD
+)
 
 const hasAlerts = computed(() => topAlerts.value.length > 0)
 
@@ -65,8 +90,29 @@ function severityDotClass(severity: string): string {
   }
 }
 
-function handleAck(id: string): void {
-  inboxStore.markAsRead(id)
+async function handleAck(id: string): Promise<void> {
+  await alertStore.acknowledgeAlert(id)
+}
+
+async function handleResolve(id: string): Promise<void> {
+  await alertStore.resolveAlert(id)
+}
+
+async function handleBatchAcknowledge(): Promise<void> {
+  const activeAlerts = inboxStore.notifications.filter(n => n.status === 'active')
+  if (activeAlerts.length === 0) return
+
+  isBatchAcking.value = true
+  try {
+    for (const alert of activeAlerts) {
+      await alertStore.acknowledgeAlert(alert.id)
+    }
+    success(`${activeAlerts.length} Alerts bestätigt`)
+  } catch (e) {
+    error(e instanceof Error ? e.message : 'Fehler beim Bestätigen')
+  } finally {
+    isBatchAcking.value = false
+  }
 }
 
 /**
@@ -145,9 +191,43 @@ function handleShowAll(): void {
         <ArrowLeft class="qa-alert-panel__back-icon" />
       </button>
       <span class="qa-alert-panel__title">Alerts</span>
-      <span v-if="inboxStore.unreadCount > 0" class="qa-alert-panel__count">
-        {{ inboxStore.unreadCount > 99 ? '99+' : inboxStore.unreadCount }}
+      <span v-if="activeCount > 0" class="qa-alert-panel__count">
+        {{ activeCount > 99 ? '99+' : activeCount }}
       </span>
+    </div>
+
+    <!-- Status Filter Chips -->
+    <div class="qa-alert-panel__filters">
+      <button
+        :class="['qa-alert-panel__filter', { 'qa-alert-panel__filter--active': statusFilter === 'active' }]"
+        @click="statusFilter = 'active'"
+      >
+        Aktiv
+      </button>
+      <button
+        :class="['qa-alert-panel__filter', { 'qa-alert-panel__filter--active': statusFilter === 'acknowledged' }]"
+        @click="statusFilter = 'acknowledged'"
+      >
+        Gesehen
+      </button>
+      <button
+        :class="['qa-alert-panel__filter', { 'qa-alert-panel__filter--active': statusFilter === 'all' }]"
+        @click="statusFilter = 'all'"
+      >
+        Alle
+      </button>
+
+      <!-- Batch Acknowledge -->
+      <button
+        v-if="showBatchAck"
+        class="qa-alert-panel__batch-ack"
+        :disabled="isBatchAcking"
+        title="Alle aktiven Alerts bestätigen"
+        @click.stop="handleBatchAcknowledge"
+      >
+        <ShieldCheck class="qa-alert-panel__batch-icon" />
+        {{ isBatchAcking ? '...' : 'Alle' }}
+      </button>
     </div>
 
     <!-- Alert List -->
@@ -172,12 +252,20 @@ function handleShowAll(): void {
           </div>
           <div class="alert-item__actions">
             <button
-              v-if="!alert.is_read"
-              class="alert-item__action"
-              title="Als gelesen markieren"
+              v-if="alert.status === 'active'"
+              class="alert-item__action alert-item__action--ack"
+              title="Bestätigen (Acknowledge)"
               @click.stop="handleAck(alert.id)"
             >
-              <Check class="alert-item__action-icon" />
+              <ShieldCheck class="alert-item__action-icon" />
+            </button>
+            <button
+              v-if="alert.status === 'active' || alert.status === 'acknowledged'"
+              class="alert-item__action alert-item__action--resolve"
+              title="Erledigen (Resolve)"
+              @click.stop="handleResolve(alert.id)"
+            >
+              <CheckCheck class="alert-item__action-icon" />
             </button>
             <button
               v-if="alert.metadata?.esp_id"
@@ -325,6 +413,72 @@ function handleShowAll(): void {
   line-height: 1;
 }
 
+/* ── Status Filter Chips ── */
+
+.qa-alert-panel__filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.qa-alert-panel__filter {
+  padding: 2px var(--space-2);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.qa-alert-panel__filter:hover {
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.qa-alert-panel__filter--active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border-color: var(--glass-border);
+}
+
+.qa-alert-panel__batch-ack {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding: 2px var(--space-2);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-warning);
+  background: transparent;
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.qa-alert-panel__batch-ack:hover:not(:disabled) {
+  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+.qa-alert-panel__batch-ack:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.qa-alert-panel__batch-icon {
+  width: 11px;
+  height: 11px;
+}
+
 /* ── Alert List ── */
 
 .qa-alert-panel__list {
@@ -426,6 +580,22 @@ function handleShowAll(): void {
 .alert-item__action:hover {
   color: var(--color-text-primary);
   background: rgba(255, 255, 255, 0.08);
+}
+
+.alert-item__action--ack {
+  color: var(--color-warning);
+}
+
+.alert-item__action--ack:hover {
+  background: rgba(251, 191, 36, 0.12);
+}
+
+.alert-item__action--resolve {
+  color: var(--color-success);
+}
+
+.alert-item__action--resolve:hover {
+  background: rgba(52, 211, 153, 0.12);
 }
 
 .alert-item__action-icon {

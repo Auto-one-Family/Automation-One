@@ -15,7 +15,7 @@
  * @emits open-cleanup-panel - When cleanup button is clicked (admin only)
  */
 
-import { Activity, FileText, Database, MessageSquare, HeartPulse, Play, Pause, Download } from 'lucide-vue-next'
+import { Activity, FileText, Database, MessageSquare, HeartPulse, Stethoscope, ClipboardList, Play, Pause, Download } from 'lucide-vue-next'
 
 // ============================================================================
 import type { TabId } from './types'
@@ -65,6 +65,8 @@ const tabs: Tab[] = [
   { id: 'database', label: 'Datenbank', icon: Database },
   { id: 'mqtt', label: 'MQTT Traffic', icon: MessageSquare },
   { id: 'health', label: 'Health', icon: HeartPulse },
+  { id: 'diagnostics', label: 'Diagnose', icon: Stethoscope },
+  { id: 'reports', label: 'Reports', icon: ClipboardList },
 ]
 
 // ============================================================================

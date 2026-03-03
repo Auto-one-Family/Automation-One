@@ -35,7 +35,9 @@ async def test_mqtt_handler_has_correlation_id():
         captured_cid = get_request_id()
 
     cid = "ESP_001:data:42:1708704000000"
-    await Subscriber._run_handler_with_cid(mock_handler, "kaiser/god/esp/ESP_001/sensor/temp/data", {}, cid)
+    await Subscriber._run_handler_with_cid(
+        mock_handler, "kaiser/god/esp/ESP_001/sensor/temp/data", {}, cid
+    )
 
     assert captured_cid == cid
 
@@ -43,6 +45,7 @@ async def test_mqtt_handler_has_correlation_id():
 @pytest.mark.asyncio
 async def test_mqtt_handler_cid_cleared_after_handler():
     """CID is cleared after handler completes."""
+
     async def mock_handler(topic: str, payload: dict):
         pass
 
@@ -56,6 +59,7 @@ async def test_mqtt_handler_cid_cleared_after_handler():
 @pytest.mark.asyncio
 async def test_mqtt_handler_cid_cleared_on_exception():
     """CID is cleared even when handler raises an exception."""
+
     async def failing_handler(topic: str, payload: dict):
         raise ValueError("handler error")
 

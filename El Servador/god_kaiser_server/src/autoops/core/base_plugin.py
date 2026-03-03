@@ -296,3 +296,65 @@ class AutoOpsPlugin(ABC):
             lines.append("")
 
         return "\n".join(lines)
+
+
+# =============================================================================
+# Phase 4C.1.3 — Plugin Metadata Decorator
+# =============================================================================
+
+
+def plugin_metadata(
+    *,
+    display_name: str,
+    description: str,
+    category: str,
+    config_schema: dict[str, Any] | None = None,
+):
+    """
+    Decorator that attaches metadata to a plugin class for Registry and API.
+
+    Usage:
+        @plugin_metadata(
+            display_name="System Health Check",
+            description="Checks server health",
+            category="monitoring",
+            config_schema={"alert_on_degraded": {"type": "boolean", "default": True, "label": "Alert bei Degraded"}},
+        )
+        class HealthCheckPlugin(AutoOpsPlugin):
+            ...
+    """
+
+    def decorator(cls):
+        cls._display_name = display_name
+        cls._description = description
+        cls._category = category
+        cls._config_schema = config_schema or {}
+        return cls
+
+    return decorator
+
+
+# =============================================================================
+# Phase 4C.1.4 — PluginContext (Web/API context, separate from AutoOpsContext)
+# =============================================================================
+
+
+@dataclass
+class PluginContext:
+    """
+    Context passed to plugins when triggered via REST-API or Logic Engine.
+
+    This is NOT AutoOpsContext (which is for CLI/Agent execution).
+    PluginService translates PluginContext into AutoOpsContext + GodKaiserClient
+    before calling plugin.execute().
+    """
+
+    user_id: int | None = None
+    user_preferences: dict[str, Any] = field(default_factory=dict)
+    system_config: dict[str, Any] = field(default_factory=dict)
+    trigger_source: str = "manual"  # 'manual', 'schedule', 'logic_rule'
+    trigger_rule_id: str | None = None
+    trigger_value: float | None = None
+    config_overrides: dict[str, Any] = field(default_factory=dict)
+    esp_devices: list[dict[str, Any]] = field(default_factory=list)
+    active_alerts: list[dict[str, Any]] = field(default_factory=list)

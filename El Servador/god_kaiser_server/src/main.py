@@ -483,13 +483,25 @@ async def lifespan(app: FastAPI):
             sensor_evaluator = SensorConditionEvaluator()
             time_evaluator = TimeConditionEvaluator()
             hysteresis_evaluator = HysteresisConditionEvaluator()
+
+            # Phase 4D: Diagnostics Condition Evaluator
+            from .services.logic.conditions.diagnostics_evaluator import (
+                DiagnosticsConditionEvaluator,
+            )
+
+            diagnostics_condition_evaluator = DiagnosticsConditionEvaluator(
+                session_factory=get_session,
+            )
+
             compound_evaluator = CompoundConditionEvaluator(
-                [sensor_evaluator, time_evaluator, hysteresis_evaluator]
+                [sensor_evaluator, time_evaluator, hysteresis_evaluator,
+                 diagnostics_condition_evaluator]
             )
             condition_evaluators = [
                 sensor_evaluator,
                 time_evaluator,
                 hysteresis_evaluator,
+                diagnostics_condition_evaluator,
                 compound_evaluator,
             ]
 
@@ -502,11 +514,32 @@ async def lifespan(app: FastAPI):
             global _sequence_executor
             _sequence_executor = SequenceActionExecutor(websocket_manager=_websocket_manager)
 
+            # Phase 4C: Plugin Action Executor
+            from .services.logic.actions.plugin_executor import PluginActionExecutor
+            from .autoops.core.plugin_registry import PluginRegistry as _PluginRegistry
+            from .services.plugin_service import PluginService as _PluginService
+
+            _plugin_registry = _PluginRegistry()
+            _plugin_registry.discover_plugins()
+            _plugin_service = _PluginService(session, _plugin_registry)
+            plugin_executor = PluginActionExecutor(_plugin_service)
+
+            # Phase 4D: Diagnostics Action Executor
+            from .services.logic.actions.diagnostics_executor import (
+                DiagnosticsActionExecutor,
+            )
+
+            diagnostics_executor = DiagnosticsActionExecutor(
+                session_factory=get_session,
+            )
+
             action_executors = [
                 actuator_executor,
                 delay_executor,
                 notification_executor,
                 _sequence_executor,
+                plugin_executor,
+                diagnostics_executor,
             ]
 
             # KRITISCH: Circular-Dependency auflösen
@@ -546,6 +579,24 @@ async def lifespan(app: FastAPI):
 
             logger.info("Services initialized successfully")
             break  # Exit after first session
+
+        # Step 6.1: Sync Plugin Registry to DB (Phase 4C)
+        logger.info("Syncing plugin registry to database...")
+        try:
+            async for session in get_session():
+                from .autoops.core.plugin_registry import PluginRegistry
+                from .services.plugin_service import PluginService
+
+                plugin_registry = PluginRegistry()
+                plugin_registry.discover_plugins()
+                plugin_service = PluginService(session, plugin_registry)
+                await plugin_service.sync_registry_to_db()
+                logger.info(
+                    f"Plugin registry synced: {len(plugin_registry.get_all())} plugins registered"
+                )
+                break
+        except Exception as e:
+            logger.warning(f"Plugin registry sync failed (non-critical): {e}")
 
         # Log resilience status
         resilience_status = get_health_status()
@@ -719,13 +770,16 @@ app.add_middleware(
 # Must be after CORS middleware, before router includes.
 # Exposes HTTP request metrics (duration, count, size) + custom gauges
 # at /api/v1/health/metrics in Prometheus text format.
-from prometheus_fastapi_instrumentator import Instrumentator
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
 
-Instrumentator().instrument(app).expose(
-    app,
-    endpoint="/api/v1/health/metrics",
-    include_in_schema=False,
-)
+    Instrumentator().instrument(app).expose(
+        app,
+        endpoint="/api/v1/health/metrics",
+        include_in_schema=False,
+    )
+except ImportError:
+    logger.warning("prometheus_fastapi_instrumentator not installed — metrics endpoint disabled")
 
 # ===== ROUTES =====
 

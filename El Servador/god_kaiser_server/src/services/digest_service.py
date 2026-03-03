@@ -127,13 +127,10 @@ class DigestService:
                         increment_digest_processed()
                         observe_digest_batch_size(len(pending))
                         logger.info(
-                            f"Digest email sent to {recipient}: "
-                            f"{len(pending)} notifications"
+                            f"Digest email sent to {recipient}: " f"{len(pending)} notifications"
                         )
                     else:
-                        logger.warning(
-                            f"Digest email failed for {recipient}"
-                        )
+                        logger.warning(f"Digest email failed for {recipient}")
 
                 await session.commit()
 

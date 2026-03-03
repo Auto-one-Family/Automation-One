@@ -31,7 +31,7 @@ export interface LogicRule {
 // Condition Types
 // =============================================================================
 
-export type LogicCondition = SensorCondition | TimeCondition | HysteresisCondition | CompoundCondition
+export type LogicCondition = SensorCondition | TimeCondition | HysteresisCondition | CompoundCondition | DiagnosticsCondition
 
 export interface SensorCondition {
   type: 'sensor' | 'sensor_threshold'
@@ -68,11 +68,18 @@ export interface CompoundCondition {
   conditions: LogicCondition[]
 }
 
+export interface DiagnosticsCondition {
+  type: 'diagnostics_status'
+  check_name: string
+  expected_status: 'healthy' | 'warning' | 'critical' | 'error'
+  operator?: '==' | '!='
+}
+
 // =============================================================================
 // Action Types
 // =============================================================================
 
-export type LogicAction = ActuatorAction | NotificationAction | DelayAction
+export type LogicAction = ActuatorAction | NotificationAction | DelayAction | PluginAction | DiagnosticsAction
 
 export interface ActuatorAction {
   type: 'actuator' | 'actuator_command'
@@ -94,6 +101,17 @@ export interface NotificationAction {
 export interface DelayAction {
   type: 'delay'
   seconds: number
+}
+
+export interface PluginAction {
+  type: 'plugin' | 'autoops_trigger'
+  plugin_id: string
+  config?: Record<string, unknown>
+}
+
+export interface DiagnosticsAction {
+  type: 'run_diagnostic'
+  check_name?: string // Optional — omit for full diagnostic
 }
 
 // =============================================================================

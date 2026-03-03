@@ -351,6 +351,37 @@ async def esp_health_summary(
 
 
 @router.get(
+    "/metrics",
+    summary="Prometheus metrics",
+    description="Export Prometheus metrics in text format.",
+    include_in_schema=False,
+)
+async def prometheus_metrics():
+    """
+    Export Prometheus metrics in text/plain format.
+
+    This endpoint serves as a fallback when the prometheus-fastapi-instrumentator
+    expose() endpoint is not active (e.g. in test environments).
+    The instrumentator endpoint at the same path takes precedence in production.
+    """
+    from fastapi.responses import PlainTextResponse
+
+    try:
+        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+
+        metrics_output = generate_latest()
+        return PlainTextResponse(
+            content=metrics_output.decode("utf-8"),
+            media_type=CONTENT_TYPE_LATEST,
+        )
+    except ImportError:
+        return PlainTextResponse(
+            content="# prometheus_client not installed\n",
+            media_type="text/plain; charset=utf-8",
+        )
+
+
+@router.get(
     "/live",
     response_model=LivenessResponse,
     summary="Liveness probe",

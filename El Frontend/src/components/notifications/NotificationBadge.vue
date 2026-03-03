@@ -12,13 +12,35 @@
 import { computed } from 'vue'
 import { Bell } from 'lucide-vue-next'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
+import { useAlertCenterStore } from '@/shared/stores'
 
 const inboxStore = useNotificationInboxStore()
+const alertStore = useAlertCenterStore()
 
-const hasBadge = computed(() => inboxStore.unreadCount > 0)
+/**
+ * Phase 4B: Badge shows unresolved alert count when alerts are active,
+ * falls back to unread notification count otherwise.
+ */
+const badgeCount = computed(() => {
+  const unresolvedAlerts = alertStore.unresolvedCount
+  return unresolvedAlerts > 0 ? unresolvedAlerts : inboxStore.unreadCount
+})
+
+const hasBadge = computed(() => badgeCount.value > 0)
+
+const badgeText = computed(() => {
+  if (badgeCount.value > 99) return '99+'
+  return String(badgeCount.value)
+})
 
 const severityClass = computed(() => {
   if (!hasBadge.value) return ''
+  // Active alerts take priority for severity coloring
+  if (alertStore.unresolvedCount > 0) {
+    return alertStore.hasCritical
+      ? 'notification-badge--critical'
+      : 'notification-badge--warning'
+  }
   switch (inboxStore.highestSeverity) {
     case 'critical':
       return 'notification-badge--critical'
@@ -33,12 +55,14 @@ const severityClass = computed(() => {
 <template>
   <button
     :class="['notification-badge', severityClass]"
-    :title="`${inboxStore.unreadCount} ungelesene Benachrichtigungen`"
+    :title="alertStore.unresolvedCount > 0
+      ? `${alertStore.unresolvedCount} aktive Alerts`
+      : `${inboxStore.unreadCount} ungelesene Benachrichtigungen`"
     @click="inboxStore.toggleDrawer()"
   >
     <Bell class="notification-badge__icon" />
     <span v-if="hasBadge" class="notification-badge__count">
-      {{ inboxStore.badgeText }}
+      {{ badgeText }}
     </span>
   </button>
 </template>

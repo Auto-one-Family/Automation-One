@@ -454,9 +454,7 @@ class LogicService:
 
         return timer_rules
 
-    async def _get_latest_sensor_value(
-        self, esp_id: str, gpio: int
-    ) -> Optional[float]:
+    async def _get_latest_sensor_value(self, esp_id: str, gpio: int) -> Optional[float]:
         """
         Get the latest real sensor value from the database.
 

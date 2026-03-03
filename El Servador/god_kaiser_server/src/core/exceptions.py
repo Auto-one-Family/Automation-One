@@ -285,7 +285,12 @@ class SensorNotFoundException(SensorException, NotFoundError):
             self,
             message=f"Sensor not found: ESP {esp_id}, GPIO {gpio}",
             error_code="SENSOR_NOT_FOUND",
-            details={"resource_type": "Sensor", "identifier": f"{esp_id}:{gpio}", "esp_id": esp_id, "gpio": gpio},
+            details={
+                "resource_type": "Sensor",
+                "identifier": f"{esp_id}:{gpio}",
+                "esp_id": esp_id,
+                "gpio": gpio,
+            },
             numeric_code=5210,  # ValidationErrorCode.SENSOR_NOT_FOUND
         )
 
@@ -300,7 +305,12 @@ class SensorNotFoundError(NotFoundError):
             self,
             message=f"Sensor not found: ESP {esp_id}, GPIO {gpio}",
             error_code="SENSOR_NOT_FOUND",
-            details={"resource_type": "Sensor", "identifier": f"{esp_id}:{gpio}", "esp_id": esp_id, "gpio": gpio},
+            details={
+                "resource_type": "Sensor",
+                "identifier": f"{esp_id}:{gpio}",
+                "esp_id": esp_id,
+                "gpio": gpio,
+            },
             numeric_code=5210,  # ValidationErrorCode.SENSOR_NOT_FOUND
         )
 
@@ -334,7 +344,12 @@ class ActuatorNotFoundException(ActuatorException, NotFoundError):
             self,
             message=f"Actuator not found: ESP {esp_id}, GPIO {gpio}",
             error_code="ACTUATOR_NOT_FOUND",
-            details={"resource_type": "Actuator", "identifier": f"{esp_id}:{gpio}", "esp_id": esp_id, "gpio": gpio},
+            details={
+                "resource_type": "Actuator",
+                "identifier": f"{esp_id}:{gpio}",
+                "esp_id": esp_id,
+                "gpio": gpio,
+            },
             numeric_code=5211,  # ValidationErrorCode.ACTUATOR_NOT_FOUND
         )
 
@@ -349,7 +364,12 @@ class ActuatorNotFoundError(NotFoundError):
             self,
             message=f"Actuator not found: ESP {esp_id}, GPIO {gpio}",
             error_code="ACTUATOR_NOT_FOUND",
-            details={"resource_type": "Actuator", "identifier": f"{esp_id}:{gpio}", "esp_id": esp_id, "gpio": gpio},
+            details={
+                "resource_type": "Actuator",
+                "identifier": f"{esp_id}:{gpio}",
+                "esp_id": esp_id,
+                "gpio": gpio,
+            },
             numeric_code=5211,  # ValidationErrorCode.ACTUATOR_NOT_FOUND
         )
 
@@ -627,7 +647,11 @@ class RuleNotFoundException(LogicException, NotFoundError):
             self,
             message=f"Logic rule '{rule_id}' not found",
             error_code="RULE_NOT_FOUND",
-            details={"resource_type": "LogicRule", "identifier": str(rule_id), "rule_id": str(rule_id)},
+            details={
+                "resource_type": "LogicRule",
+                "identifier": str(rule_id),
+                "rule_id": str(rule_id),
+            },
             numeric_code=5700,
         )
 
@@ -813,9 +837,30 @@ class NoEmailRecipientException(NotificationException):
     status_code = 422
     error_code = "NO_EMAIL_RECIPIENT"
 
-    def __init__(self, message: str = "No email address found. Provide one in the request or set it in preferences.") -> None:
+    def __init__(
+        self,
+        message: str = "No email address found. Provide one in the request or set it in preferences.",
+    ) -> None:
         super().__init__(
             message=message,
             error_code="NO_EMAIL_RECIPIENT",
             numeric_code=5853,
+        )
+
+
+class AlertInvalidStateTransition(NotificationException):
+    """Raised when an invalid alert lifecycle state transition is attempted"""
+
+    status_code = 409
+    error_code = "ALERT_INVALID_STATE_TRANSITION"
+
+    def __init__(self, current_status: str, target_status: str) -> None:
+        super().__init__(
+            message=f"Cannot transition alert from '{current_status}' to '{target_status}'",
+            error_code="ALERT_INVALID_STATE_TRANSITION",
+            details={
+                "current_status": current_status,
+                "target_status": target_status,
+            },
+            numeric_code=5860,
         )

@@ -32,7 +32,6 @@ from src.db.repositories import ESPRepository
 from src.db.repositories.subzone_repo import SubzoneRepository
 from src.services.subzone_service import SubzoneService
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================

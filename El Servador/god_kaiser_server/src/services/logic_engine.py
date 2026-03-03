@@ -362,7 +362,11 @@ class LogicEngine:
             logger.info(f"Rule {rule.rule_name} triggered: executing {len(rule.actions)} actions")
 
             await self._execute_actions(
-                rule.actions, trigger_data, rule.id, rule.rule_name, rule.priority,
+                rule.actions,
+                trigger_data,
+                rule.id,
+                rule.rule_name,
+                rule.priority,
                 batch_locks=batch_locks,
             )
 
@@ -786,9 +790,7 @@ class LogicEngine:
                     },
                 )
             except Exception as ws_err:
-                logger.warning(
-                    f"WebSocket broadcast failed for rule {rule_name}: {ws_err}"
-                )
+                logger.warning(f"WebSocket broadcast failed for rule {rule_name}: {ws_err}")
 
             if success:
                 logger.info(
@@ -866,11 +868,13 @@ class LogicEngine:
                 continue
             # Include sensor_type in key for multi-value sensors (SHT31 temp vs humidity)
             cond_sensor_type = cond.get("sensor_type")
-            sensor_key = f"{cond_esp}:{cond_gpio}:{cond_sensor_type}" if cond_sensor_type else f"{cond_esp}:{cond_gpio}"
+            sensor_key = (
+                f"{cond_esp}:{cond_gpio}:{cond_sensor_type}"
+                if cond_sensor_type
+                else f"{cond_esp}:{cond_gpio}"
+            )
             if sensor_key != trigger_key and sensor_key not in sensor_values:
-                cross_sensor_keys.append(
-                    (cond_esp, int(cond_gpio), cond_sensor_type)
-                )
+                cross_sensor_keys.append((cond_esp, int(cond_gpio), cond_sensor_type))
 
         if not cross_sensor_keys:
             return sensor_values
@@ -882,7 +886,9 @@ class LogicEngine:
 
             for esp_id_str, gpio, sensor_type in cross_sensor_keys:
                 # Include sensor_type in key for multi-value sensors (SHT31 temp vs humidity)
-                sensor_key = f"{esp_id_str}:{gpio}:{sensor_type}" if sensor_type else f"{esp_id_str}:{gpio}"
+                sensor_key = (
+                    f"{esp_id_str}:{gpio}:{sensor_type}" if sensor_type else f"{esp_id_str}:{gpio}"
+                )
                 # Look up ESP UUID from device_id
                 esp_device = await esp_repo.get_by_device_id(esp_id_str)
                 if not esp_device:

@@ -30,7 +30,6 @@ from typing import Any
 from .core.agent import AutoOpsAgent
 from .core.context import ActuatorSpec, DeviceMode, ESPSpec, SensorSpec
 
-
 # Sensor type presets with intelligent defaults
 SENSOR_PRESETS: dict[str, dict[str, Any]] = {
     "DS18B20": {

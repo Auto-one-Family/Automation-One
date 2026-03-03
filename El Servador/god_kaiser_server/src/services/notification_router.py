@@ -109,7 +109,7 @@ class NotificationRouter:
                 return None
 
         # Step 1: ALWAYS persist to DB
-        db_notification = await self.notification_repo.create(
+        create_kwargs = dict(
             user_id=user_id,
             channel=notification.channel,
             severity=notification.severity,
@@ -121,6 +121,11 @@ class NotificationRouter:
             parent_notification_id=notification.parent_notification_id,
             fingerprint=notification.fingerprint,
         )
+        # Phase 4B: Add correlation_id if provided
+        if notification.correlation_id:
+            create_kwargs["correlation_id"] = notification.correlation_id
+
+        db_notification = await self.notification_repo.create(**create_kwargs)
 
         logger.info(
             f"Notification created: id={db_notification.id}, "
@@ -166,6 +171,7 @@ class NotificationRouter:
                 metadata=notification.metadata,
                 source=notification.source,
                 parent_notification_id=notification.parent_notification_id,
+                correlation_id=notification.correlation_id,
             )
             result = await self.route(user_notification)
             if result and first_notification is None:
@@ -190,6 +196,14 @@ class NotificationRouter:
                 "created_at": (
                     notification.created_at.isoformat() if notification.created_at else None
                 ),
+                # Phase 4B: Alert lifecycle fields
+                "status": notification.status,
+                "parent_notification_id": (
+                    str(notification.parent_notification_id)
+                    if notification.parent_notification_id
+                    else None
+                ),
+                "correlation_id": notification.correlation_id,
             }
             await ws_manager.broadcast("notification_new", data)
             increment_ws_notification_broadcast("notification_new")
@@ -296,6 +310,41 @@ class NotificationRouter:
             # Email failure MUST NOT block notification processing
             logger.error(f"Email delivery error: {e}")
 
+    async def suppress_dependent_alerts(
+        self,
+        root_notification: Notification,
+        correlation_prefix: str,
+    ) -> int:
+        """
+        Group dependent alerts under a root-cause notification.
+
+        ISA-18.2 Root-Cause Grouping — reduces alarm fatigue by showing
+        dependent alerts as children of the root cause. For example, when
+        an ESP goes offline (MQTT disconnect), all subsequent sensor threshold
+        alerts for that ESP are grouped under the offline notification.
+
+        Args:
+            root_notification: The root-cause notification
+            correlation_prefix: Prefix to match dependent alerts' correlation_id
+                (e.g., "threshold_AABBCCDD" matches all sensor alerts for that ESP)
+
+        Returns:
+            Number of alerts grouped under root
+        """
+        count = await self.notification_repo.group_under_parent(
+            parent_notification_id=root_notification.id,
+            correlation_prefix=correlation_prefix,
+        )
+
+        if count > 0:
+            logger.info(
+                f"Root-cause suppression: {count} dependent alert(s) grouped under "
+                f"notification {root_notification.id} (prefix={correlation_prefix})"
+            )
+            increment_notification_suppressed(reason="root_cause_grouping")
+
+        return count
+
     async def persist_suppressed(self, notification: NotificationCreate) -> None:
         """
         Persist a suppressed alert for ISA-18.2 audit trail.
@@ -317,7 +366,7 @@ class NotificationRouter:
             return
 
         for uid in user_ids:
-            await self.notification_repo.create(
+            create_kwargs = dict(
                 user_id=uid,
                 channel="suppressed",
                 severity=notification.severity,
@@ -328,6 +377,10 @@ class NotificationRouter:
                 source=notification.source,
                 is_read=True,
             )
+            # Phase 4B: Preserve correlation_id for audit trail
+            if notification.correlation_id:
+                create_kwargs["correlation_id"] = notification.correlation_id
+            await self.notification_repo.create(**create_kwargs)
 
         increment_notification_suppressed(
             reason=(
@@ -350,6 +403,17 @@ class NotificationRouter:
                 "is_read": notification.is_read,
                 "is_archived": notification.is_archived,
                 "read_at": notification.read_at.isoformat() if notification.read_at else None,
+                # Phase 4B: Alert lifecycle fields
+                "status": notification.status,
+                "acknowledged_at": (
+                    notification.acknowledged_at.isoformat()
+                    if notification.acknowledged_at
+                    else None
+                ),
+                "acknowledged_by": notification.acknowledged_by,
+                "resolved_at": (
+                    notification.resolved_at.isoformat() if notification.resolved_at else None
+                ),
             }
             await ws_manager.broadcast("notification_updated", data)
             logger.debug(f"WebSocket broadcast: notification_updated for {notification.id}")

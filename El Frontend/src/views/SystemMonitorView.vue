@@ -23,6 +23,7 @@ import { useRoute } from 'vue-router'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { useEspStore } from '@/stores/esp'
+import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
 import { detectCategory } from '@/utils/errorCodeTranslator'
 import { auditApi, type AuditStatistics, type StatisticsTimeRange, type DataSource, type UnifiedEventFromAPI } from '@/api/audit'
 import type { UnifiedEvent } from '@/types/websocket-events'
@@ -45,6 +46,8 @@ import DatabaseTab from '@/components/system-monitor/DatabaseTab.vue'
 import MqttTrafficTab from '@/components/system-monitor/MqttTrafficTab.vue'
 import HealthTab from '@/components/system-monitor/HealthTab.vue'
 import HealthSummaryBar from '@/components/system-monitor/HealthSummaryBar.vue'
+import DiagnoseTab from '@/components/system-monitor/DiagnoseTab.vue'
+import ReportsTab from '@/components/system-monitor/ReportsTab.vue'
 import CleanupPanel from '@/components/system-monitor/CleanupPanel.vue'
 
 // ============================================================================
@@ -163,6 +166,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
 const route = useRoute()
 const authStore = useAuthStore()
 const espStore = useEspStore()
+const inboxStore = useNotificationInboxStore()
 const selectedEvent = ref<UnifiedEvent | null>(null)
 
 // Live-Pause State (persisted in localStorage)
@@ -1109,6 +1113,10 @@ function handleTabChange(tabId: TabId) {
   activeTab.value = tabId
 }
 
+function handleOpenAlerts() {
+  inboxStore.toggleDrawer()
+}
+
 function handleFilterDevice(espId: string) {
   filterEspId.value = espId
   activeTab.value = 'events'
@@ -1251,7 +1259,7 @@ onMounted(async () => {
   // Read URL params for deep-linking (esp handled by watcher with immediate: true)
   if (route.query.tab) {
     const tab = String(route.query.tab) as TabId
-    if (['events', 'logs', 'database', 'mqtt'].includes(tab)) {
+    if (['events', 'logs', 'database', 'mqtt', 'health', 'diagnostics', 'reports'].includes(tab)) {
       activeTab.value = tab
     }
   }
@@ -1483,6 +1491,17 @@ watch(activeTab, (newTab) => {
         v-else-if="activeTab === 'health'"
         :filter-esp-id="filterEspId"
         @filter-device="handleFilterDevice"
+        @open-alerts="handleOpenAlerts"
+      />
+
+      <!-- Diagnostics Tab -->
+      <DiagnoseTab
+        v-else-if="activeTab === 'diagnostics'"
+      />
+
+      <!-- Reports Tab -->
+      <ReportsTab
+        v-else-if="activeTab === 'reports'"
       />
 
       <!-- MQTT Traffic Tab - v-show statt v-if damit Messages weiter gesammelt werden -->

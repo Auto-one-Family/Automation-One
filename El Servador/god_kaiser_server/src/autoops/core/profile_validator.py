@@ -128,7 +128,9 @@ def validate_profile(profile_path: str) -> list[str]:
             if gpio in constraints["system_reserved"]:
                 errors.append(f"{prefix} ({atype}): GPIO {gpio} is system-reserved")
             if gpio in constraints["input_only"]:
-                errors.append(f"{prefix} ({atype}): GPIO {gpio} is input-only (cannot drive actuator)")
+                errors.append(
+                    f"{prefix} ({atype}): GPIO {gpio} is input-only (cannot drive actuator)"
+                )
             if gpio in used_gpios:
                 errors.append(f"{prefix} ({atype}): GPIO {gpio} already in use")
             used_gpios.add(gpio)

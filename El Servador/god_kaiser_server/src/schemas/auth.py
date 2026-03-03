@@ -23,7 +23,6 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from .common import BaseResponse, IDMixin, TimestampMixin
 
-
 # =============================================================================
 # Initial Setup (First-Run)
 # =============================================================================

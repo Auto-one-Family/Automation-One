@@ -25,6 +25,7 @@ References:
 """
 
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Optional
 
@@ -230,6 +231,85 @@ async def list_actuators(
         data=responses,
         pagination=PaginationMeta.from_pagination(page, page_size, total_items),
     )
+
+
+# =============================================================================
+# Specific /{id}/... GET routes — MUST be defined BEFORE /{esp_id}/{gpio}
+# to prevent FastAPI route collision (two-segment patterns match first).
+# =============================================================================
+
+
+@router.get(
+    "/{actuator_id}/alert-config",
+    summary="Get actuator alert configuration",
+)
+async def get_actuator_alert_config(
+    actuator_id: uuid.UUID,
+    db: DBSession,
+    current_user: ActiveUser,
+) -> dict:
+    """Get per-actuator alert configuration with effective thresholds."""
+    actuator_repo = ActuatorRepository(db)
+    actuator = await actuator_repo.get_by_id(actuator_id)
+    if not actuator:
+        raise ActuatorNotFoundError(actuator_id)
+
+    return {
+        "success": True,
+        "actuator_id": str(actuator.id),
+        "alert_config": actuator.alert_config or {},
+        "global_thresholds": actuator.thresholds if hasattr(actuator, "thresholds") else None,
+    }
+
+
+@router.get(
+    "/{actuator_id}/runtime",
+    summary="Get actuator runtime statistics",
+)
+async def get_actuator_runtime(
+    actuator_id: uuid.UUID,
+    db: DBSession,
+    current_user: ActiveUser,
+) -> dict:
+    """Get actuator runtime statistics with computed values."""
+    actuator_repo = ActuatorRepository(db)
+    actuator = await actuator_repo.get_by_id(actuator_id)
+    if not actuator:
+        raise ActuatorNotFoundError(actuator_id)
+
+    stats = actuator.runtime_stats or {}
+
+    # Compute current uptime if last_restart is set
+    computed_uptime = None
+    if stats.get("last_restart"):
+        try:
+            last_restart = datetime.fromisoformat(stats["last_restart"])
+            if last_restart.tzinfo is None:
+                last_restart = last_restart.replace(tzinfo=timezone.utc)
+            delta = datetime.now(timezone.utc) - last_restart
+            computed_uptime = round(delta.total_seconds() / 3600, 2)
+        except (ValueError, TypeError):
+            pass
+
+    # Compute maintenance overdue
+    maintenance_overdue = False
+    if stats.get("last_maintenance") and stats.get("maintenance_interval_hours"):
+        try:
+            last_maint = datetime.fromisoformat(stats["last_maintenance"])
+            if last_maint.tzinfo is None:
+                last_maint = last_maint.replace(tzinfo=timezone.utc)
+            hours_since = (datetime.now(timezone.utc) - last_maint).total_seconds() / 3600
+            maintenance_overdue = hours_since > stats["maintenance_interval_hours"]
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "success": True,
+        "actuator_id": str(actuator.id),
+        "runtime_stats": stats,
+        "computed_uptime_hours": computed_uptime,
+        "maintenance_overdue": maintenance_overdue,
+    }
 
 
 # =============================================================================
@@ -947,7 +1027,7 @@ async def get_history(
     summary="Update actuator alert configuration",
 )
 async def update_actuator_alert_config(
-    actuator_id: str,
+    actuator_id: uuid.UUID,
     payload: ActuatorAlertConfigUpdate,
     db: DBSession,
     current_user: OperatorUser,
@@ -988,90 +1068,12 @@ async def update_actuator_alert_config(
     }
 
 
-@router.get(
-    "/{actuator_id}/alert-config",
-    summary="Get actuator alert configuration",
-)
-async def get_actuator_alert_config(
-    actuator_id: str,
-    db: DBSession,
-    current_user: ActiveUser,
-) -> dict:
-    """Get per-actuator alert configuration with effective thresholds."""
-    actuator_repo = ActuatorRepository(db)
-    actuator = await actuator_repo.get_by_id(actuator_id)
-    if not actuator:
-        raise ActuatorNotFoundError(actuator_id)
-
-    return {
-        "success": True,
-        "actuator_id": str(actuator.id),
-        "alert_config": actuator.alert_config or {},
-        "global_thresholds": actuator.thresholds if hasattr(actuator, "thresholds") else None,
-    }
-
-
-# =========================================================================
-# RUNTIME STATISTICS (Phase 4A.8 — Runtime & Maintenance)
-# =========================================================================
-
-
-@router.get(
-    "/{actuator_id}/runtime",
-    summary="Get actuator runtime statistics",
-)
-async def get_actuator_runtime(
-    actuator_id: str,
-    db: DBSession,
-    current_user: ActiveUser,
-) -> dict:
-    """Get actuator runtime statistics with computed values."""
-    actuator_repo = ActuatorRepository(db)
-    actuator = await actuator_repo.get_by_id(actuator_id)
-    if not actuator:
-        raise ActuatorNotFoundError(actuator_id)
-
-    stats = actuator.runtime_stats or {}
-
-    # Compute current uptime if last_restart is set
-    computed_uptime = None
-    if stats.get("last_restart"):
-        try:
-            last_restart = datetime.fromisoformat(stats["last_restart"])
-            if last_restart.tzinfo is None:
-                last_restart = last_restart.replace(tzinfo=timezone.utc)
-            delta = datetime.now(timezone.utc) - last_restart
-            computed_uptime = round(delta.total_seconds() / 3600, 2)
-        except (ValueError, TypeError):
-            pass
-
-    # Compute maintenance overdue
-    maintenance_overdue = False
-    if stats.get("last_maintenance") and stats.get("maintenance_interval_hours"):
-        try:
-            last_maint = datetime.fromisoformat(stats["last_maintenance"])
-            if last_maint.tzinfo is None:
-                last_maint = last_maint.replace(tzinfo=timezone.utc)
-            hours_since = (datetime.now(timezone.utc) - last_maint).total_seconds() / 3600
-            maintenance_overdue = hours_since > stats["maintenance_interval_hours"]
-        except (ValueError, TypeError):
-            pass
-
-    return {
-        "success": True,
-        "actuator_id": str(actuator.id),
-        "runtime_stats": stats,
-        "computed_uptime_hours": computed_uptime,
-        "maintenance_overdue": maintenance_overdue,
-    }
-
-
 @router.patch(
     "/{actuator_id}/runtime",
     summary="Update actuator runtime statistics",
 )
 async def update_actuator_runtime(
-    actuator_id: str,
+    actuator_id: uuid.UUID,
     payload: RuntimeStatsUpdate,
     db: DBSession,
     current_user: OperatorUser,
@@ -1086,7 +1088,7 @@ async def update_actuator_runtime(
     if not actuator:
         raise ActuatorNotFoundError(actuator_id)
 
-    existing = actuator.runtime_stats or {}
+    existing = dict(actuator.runtime_stats or {})  # Copy to trigger SA change detection
     update_data = payload.model_dump(exclude_unset=True)
 
     # Append maintenance_log entries instead of replacing

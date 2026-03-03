@@ -17,7 +17,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .common import BaseResponse, PaginationMeta
 
-
 # =============================================================================
 # Error Log Response Models
 # =============================================================================

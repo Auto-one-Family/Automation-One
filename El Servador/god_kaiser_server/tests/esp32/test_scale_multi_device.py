@@ -11,7 +11,6 @@ import pytest
 
 from tests.esp32.mocks.mock_esp32_client import MockESP32Client
 
-
 # =========================================================================
 # Fleet Device Isolation
 # =========================================================================

@@ -9,6 +9,8 @@ Also checks maintenance overdue and sends maintenance reminder notifications.
 
 from datetime import datetime, timezone
 
+from sqlalchemy.orm.attributes import flag_modified
+
 from ..core.logging_config import get_logger
 from ..core.metrics import (
     increment_alert_suppression_expired,
@@ -42,7 +44,9 @@ async def check_suppression_expiry() -> None:
                 select(SensorConfig).where(SensorConfig.alert_config.isnot(None))
             )
             for sensor in result.scalars():
-                cfg = sensor.alert_config or {}
+                cfg = dict(
+                    sensor.alert_config or {}
+                )  # Copy to avoid in-place mutation of SA committed state
                 if not cfg.get("alerts_enabled", True) and cfg.get("suppression_until"):
                     try:
                         until_dt = datetime.fromisoformat(cfg["suppression_until"])
@@ -53,7 +57,8 @@ async def check_suppression_expiry() -> None:
                             cfg.pop("suppression_until", None)
                             cfg.pop("suppression_reason", None)
                             cfg.pop("suppression_note", None)
-                            sensor.alert_config = dict(cfg)  # Trigger SA change detection
+                            sensor.alert_config = cfg
+                            flag_modified(sensor, "alert_config")
                             total_re_enabled += 1
                             logger.info(
                                 f"Alert re-enabled (expired): sensor_config "
@@ -67,7 +72,7 @@ async def check_suppression_expiry() -> None:
                 select(ActuatorConfig).where(ActuatorConfig.alert_config.isnot(None))
             )
             for actuator in result.scalars():
-                cfg = actuator.alert_config or {}
+                cfg = dict(actuator.alert_config or {})  # Copy to avoid in-place mutation
                 if not cfg.get("alerts_enabled", True) and cfg.get("suppression_until"):
                     try:
                         until_dt = datetime.fromisoformat(cfg["suppression_until"])
@@ -78,7 +83,8 @@ async def check_suppression_expiry() -> None:
                             cfg.pop("suppression_until", None)
                             cfg.pop("suppression_reason", None)
                             cfg.pop("suppression_note", None)
-                            actuator.alert_config = dict(cfg)
+                            actuator.alert_config = cfg
+                            flag_modified(actuator, "alert_config")
                             total_re_enabled += 1
                             logger.info(
                                 f"Alert re-enabled (expired): actuator_config "
@@ -92,7 +98,7 @@ async def check_suppression_expiry() -> None:
                 select(ESPDevice).where(ESPDevice.alert_config.isnot(None))
             )
             for device in result.scalars():
-                cfg = device.alert_config or {}
+                cfg = dict(device.alert_config or {})  # Copy to avoid in-place mutation
                 if not cfg.get("alerts_enabled", True) and cfg.get("suppression_until"):
                     try:
                         until_dt = datetime.fromisoformat(cfg["suppression_until"])
@@ -103,7 +109,8 @@ async def check_suppression_expiry() -> None:
                             cfg.pop("suppression_until", None)
                             cfg.pop("suppression_reason", None)
                             cfg.pop("suppression_note", None)
-                            device.alert_config = dict(cfg)
+                            device.alert_config = cfg
+                            flag_modified(device, "alert_config")
                             total_re_enabled += 1
                             logger.info(f"Alert re-enabled (expired): device {device.device_id}")
                     except (ValueError, TypeError) as e:

@@ -150,7 +150,14 @@ class TestHeartbeatGpioValidation:
             {"gpio": 4, "owner": "sensor", "component": "DS18B20", "mode": 0, "safe": False},
             {"gpio": 14, "owner": "actuator", "component": "pump", "mode": 1, "safe": False},
             # Bus-GPIO that will fail validation (owner pattern doesn't match)
-            {"gpio": 21, "owner": "bus/i2c/sda", "component": "I2C_SDA", "mode": 1, "safe": False, "extra_field_that_breaks": True},
+            {
+                "gpio": 21,
+                "owner": "bus/i2c/sda",
+                "component": "I2C_SDA",
+                "mode": 1,
+                "safe": False,
+                "extra_field_that_breaks": True,
+            },
         ]
 
         # Report count includes all 3, but if bus-GPIO fails validation → mismatch = 1
@@ -158,14 +165,17 @@ class TestHeartbeatGpioValidation:
         result = heartbeat_handler._validate_gpio_status(gpio_status, 3, "ESP_BUS_TEST")
 
         # Regardless of bus-GPIO validation outcome, no WARNING for bus-GPIO-sized mismatches
-        warning_messages = [r for r in caplog.records if r.levelno == logging.WARNING
-                           and "GPIO count mismatch" in r.message]
+        warning_messages = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "GPIO count mismatch" in r.message
+        ]
         # If all items validated (bus/i2c/sda is valid per F5), mismatch = 0 → no log at all
         # If bus-GPIO failed, mismatch = 1 <= bus_gpio_count = 1 → DEBUG only
         for msg in warning_messages:
-            assert "GPIO count mismatch" not in msg.message, (
-                "Bus-GPIO mismatch should be DEBUG, not WARNING"
-            )
+            assert (
+                "GPIO count mismatch" not in msg.message
+            ), "Bus-GPIO mismatch should be DEBUG, not WARNING"
 
     def test_genuine_mismatch_still_warns(self, heartbeat_handler, caplog):
         """Non-bus-GPIO mismatches should still produce WARNING."""
@@ -181,8 +191,11 @@ class TestHeartbeatGpioValidation:
         result = heartbeat_handler._validate_gpio_status(gpio_status, 3, "ESP_GENUINE")
 
         assert result is not None
-        warning_messages = [r for r in caplog.records if r.levelno == logging.WARNING
-                           and "GPIO count mismatch" in r.message]
+        warning_messages = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and "GPIO count mismatch" in r.message
+        ]
         assert len(warning_messages) == 1, "Genuine mismatch should produce WARNING"
 
 

@@ -36,7 +36,6 @@ from src.mqtt.handlers.sensor_handler import SensorDataHandler, handle_sensor_da
 from src.mqtt.handlers.actuator_handler import ActuatorStatusHandler, handle_actuator_status
 from src.mqtt.topics import TopicBuilder
 
-
 # =============================================================================
 # Test Database Fixtures
 # =============================================================================

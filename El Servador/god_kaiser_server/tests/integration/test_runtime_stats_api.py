@@ -19,7 +19,6 @@ from src.db.models.sensor import SensorConfig
 from src.db.models.user import User
 from src.main import app
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -38,9 +37,7 @@ async def runtime_operator(db_session: AsyncSession):
     db_session.add(user)
     await db_session.flush()
     await db_session.refresh(user)
-    user.token = create_access_token(
-        user_id=user.id, additional_claims={"role": user.role}
-    )
+    user.token = create_access_token(user_id=user.id, additional_claims={"role": user.role})
     return user
 
 
@@ -101,12 +98,12 @@ async def runtime_actuator(db_session: AsyncSession, sample_esp_device):
 
 @pytest.mark.asyncio
 async def test_get_sensor_runtime_stats(
-    runtime_operator, sample_esp_device, runtime_sensor,
+    runtime_operator,
+    sample_esp_device,
+    runtime_sensor,
 ):
     """GET /v1/sensors/{id}/runtime returns runtime_stats + computed fields."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(
             f"/api/v1/sensors/{runtime_sensor.id}/runtime",
             headers={"Authorization": f"Bearer {runtime_operator.token}"},
@@ -129,12 +126,12 @@ async def test_get_sensor_runtime_stats(
 
 @pytest.mark.asyncio
 async def test_patch_sensor_runtime_stats(
-    runtime_operator, sample_esp_device, runtime_sensor,
+    runtime_operator,
+    sample_esp_device,
+    runtime_sensor,
 ):
     """PATCH /v1/sensors/{id}/runtime updates runtime_stats via JSONB merge."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.patch(
             f"/api/v1/sensors/{runtime_sensor.id}/runtime",
             json={
@@ -162,12 +159,12 @@ async def test_patch_sensor_runtime_stats(
 
 @pytest.mark.asyncio
 async def test_get_actuator_runtime_stats(
-    runtime_operator, sample_esp_device, runtime_actuator,
+    runtime_operator,
+    sample_esp_device,
+    runtime_actuator,
 ):
     """GET /v1/actuators/{id}/runtime returns runtime_stats + computed uptime."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(
             f"/api/v1/actuators/{runtime_actuator.id}/runtime",
             headers={"Authorization": f"Bearer {runtime_operator.token}"},
@@ -187,12 +184,12 @@ async def test_get_actuator_runtime_stats(
 
 @pytest.mark.asyncio
 async def test_patch_actuator_runtime_stats(
-    runtime_operator, sample_esp_device, runtime_actuator,
+    runtime_operator,
+    sample_esp_device,
+    runtime_actuator,
 ):
     """PATCH /v1/actuators/{id}/runtime updates runtime_stats."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.patch(
             f"/api/v1/actuators/{runtime_actuator.id}/runtime",
             json={

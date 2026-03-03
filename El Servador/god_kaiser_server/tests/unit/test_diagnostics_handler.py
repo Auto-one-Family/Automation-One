@@ -29,7 +29,6 @@ from src.mqtt.handlers.diagnostics_handler import (
 )
 from src.mqtt.topics import TopicBuilder
 
-
 # =============================================================================
 # Test Data Constants
 # =============================================================================

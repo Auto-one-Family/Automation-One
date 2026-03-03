@@ -116,7 +116,7 @@ class TestLogin:
 
         assert response.status_code == 401
         data = response.json()
-        assert "Invalid" in data["detail"]
+        assert "Invalid" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_login_invalid_username(self):
@@ -190,8 +190,8 @@ class TestRegister:
                 headers=admin_headers,
             )
 
-        assert response.status_code == 400
-        assert "already exists" in response.json()["detail"]
+        assert response.status_code == 409
+        assert "already exists" in response.json()["error"]["message"]
 
 
 class TestTokenRefresh:
@@ -305,7 +305,7 @@ class TestSetup:
 
         assert response.status_code == 403
         data = response.json()
-        assert "already completed" in data["detail"]
+        assert "already completed" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_setup_requires_strong_password(self, db_session: AsyncSession):

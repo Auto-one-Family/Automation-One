@@ -196,7 +196,7 @@ class TestOfflineBufferMetrics:
         buffer = MQTTOfflineBuffer(max_size=10)
 
         await buffer.add("topic1", '{"msg": 1}', qos=1)
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.15)
 
         metrics = buffer.get_metrics()
         assert metrics["oldest_message_age_seconds"] >= 0.1

@@ -30,7 +30,6 @@ from src.db.models.subzone import SubzoneConfig
 from src.db.models.user import User
 from src.core.security import get_password_hash, create_access_token
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -205,7 +204,7 @@ class TestSubzoneAssignmentAPI:
             )
 
         assert response.status_code == 404
-        assert "not found" in response.json()["detail"].lower()
+        assert "not found" in response.json()["error"]["message"].lower()
 
     @pytest.mark.asyncio
     async def test_assign_subzone_no_zone(self, auth_headers: dict, test_esp_no_zone: ESPDevice):
@@ -223,7 +222,7 @@ class TestSubzoneAssignmentAPI:
             )
 
         assert response.status_code == 400
-        assert "zone" in response.json()["detail"].lower()
+        assert "zone" in response.json()["error"]["message"].lower()
 
     @pytest.mark.asyncio
     async def test_assign_subzone_invalid_gpio(self, auth_headers: dict):

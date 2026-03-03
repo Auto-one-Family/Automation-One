@@ -85,9 +85,7 @@ class AlertSuppressionService:
         # Check device-level propagation
         esp_device = await self.esp_repo.get_by_id(sensor_config.esp_id)
         if esp_device:
-            device_suppressed, device_reason = self._check_device_suppression(
-                esp_device
-            )
+            device_suppressed, device_reason = self._check_device_suppression(esp_device)
             if device_suppressed:
                 return True, f"device:{device_reason}"
 
@@ -116,9 +114,7 @@ class AlertSuppressionService:
 
         esp_device = await self.esp_repo.get_by_id(actuator_config.esp_id)
         if esp_device:
-            device_suppressed, device_reason = self._check_device_suppression(
-                esp_device
-            )
+            device_suppressed, device_reason = self._check_device_suppression(esp_device)
             if device_suppressed:
                 return True, f"device:{device_reason}"
 
@@ -131,9 +127,7 @@ class AlertSuppressionService:
         """Check if a device's notifications are suppressed."""
         return self._check_device_suppression(esp_device)
 
-    def _check_device_suppression(
-        self, esp_device
-    ) -> tuple[bool, Optional[str]]:
+    def _check_device_suppression(self, esp_device) -> tuple[bool, Optional[str]]:
         """Check device-level suppression (synchronous, no DB call)."""
         alert_cfg = esp_device.alert_config or {}
         if not alert_cfg.get("alerts_enabled", True):
@@ -186,9 +180,7 @@ class AlertSuppressionService:
 
         return None
 
-    def check_thresholds(
-        self, value: float, thresholds: dict
-    ) -> Optional[str]:
+    def check_thresholds(self, value: float, thresholds: dict) -> Optional[str]:
         """
         Check a value against thresholds and return severity.
 

@@ -189,11 +189,18 @@ const router = createRouter({
           name: 'mqtt-log',
           redirect: '/system-monitor?tab=mqtt',
         },
+        // MaintenanceView bleibt als eigene Route erreichbar
         {
           path: 'maintenance',
           name: 'maintenance',
           component: () => import('@/views/MaintenanceView.vue'),
           meta: { requiresAdmin: true, title: 'Wartung' },
+        },
+        {
+          path: 'plugins',
+          name: 'plugins',
+          component: () => import('@/views/PluginsView.vue'),
+          meta: { requiresAdmin: true, title: 'AutoOps Plugins' },
         },
         {
           path: 'sensors',

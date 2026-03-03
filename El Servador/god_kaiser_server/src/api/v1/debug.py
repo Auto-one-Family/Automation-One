@@ -1121,9 +1121,7 @@ async def set_manual_sensor_override(
     sensors = sim_config.get("sensors", {})
     # MULTI-VALUE FIX: Keys are "{gpio}_{sensor_type}" (e.g., "0_SHT31"),
     # not just str(gpio). Check for both formats for backward compat.
-    sensor_exists = any(
-        k == str(gpio) or k.startswith(f"{gpio}_") for k in sensors
-    )
+    sensor_exists = any(k == str(gpio) or k.startswith(f"{gpio}_") for k in sensors)
     if not sensor_exists:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2962,13 +2960,11 @@ async def update_config(
 
     # Update the config
     await db.execute(
-        text(
-            """
+        text("""
             UPDATE system_config
             SET config_value = :value, updated_at = :updated_at
             WHERE config_key = :key
-        """
-        ),
+        """),
         {
             "value": update_data.config_value,
             "updated_at": datetime.now(timezone.utc),
@@ -3341,16 +3337,12 @@ async def cleanup_orphaned_mocks(
     deleted_ids = []
 
     # Only delete entries with NULL required fields (legacy cleanup)
-    result = await db.execute(
-        text(
-            """
+    result = await db.execute(text("""
             SELECT id, device_id
             FROM esp_devices
             WHERE hardware_type = 'MOCK_ESP32'
               AND (ip_address IS NULL OR mac_address IS NULL OR firmware_version IS NULL)
-        """
-        )
-    )
+        """))
     invalid_esps = result.fetchall()
 
     for esp in invalid_esps:

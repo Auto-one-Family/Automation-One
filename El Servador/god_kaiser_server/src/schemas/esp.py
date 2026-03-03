@@ -29,7 +29,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .common import BaseResponse, PaginatedResponse, TimestampMixin
 
-
 # =============================================================================
 # ESP Device Base
 # =============================================================================

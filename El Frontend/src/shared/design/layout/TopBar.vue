@@ -29,6 +29,7 @@ import {
 } from 'lucide-vue-next'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
 import NotificationBadge from '@/components/notifications/NotificationBadge.vue'
+import AlertStatusBar from '@/components/notifications/AlertStatusBar.vue'
 import StatusPill from '@/components/dashboard/StatusPill.vue'
 import ColorLegend from '@/components/common/ColorLegend.vue'
 
@@ -307,6 +308,9 @@ async function handleLogout() {
 
       <!-- Color Legend -->
       <ColorLegend />
+
+      <!-- Alert Status (Phase 4B — ISA-18.2) -->
+      <AlertStatusBar />
 
       <!-- Notification Bell -->
       <NotificationBadge />

@@ -709,7 +709,9 @@ class GodKaiserClient:
     # State Transition (Mock ESP lifecycle)
     # =========================================================================
 
-    async def set_mock_state(self, esp_id: str, state: str, reason: Optional[str] = None) -> dict[str, Any]:
+    async def set_mock_state(
+        self, esp_id: str, state: str, reason: Optional[str] = None
+    ) -> dict[str, Any]:
         """Set mock ESP system state."""
         data: dict[str, Any] = {"state": state}
         if reason:
