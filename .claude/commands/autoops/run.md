@@ -145,6 +145,26 @@ Plugins werden automatisch durch die `PluginRegistry` entdeckt.
 - **Server API:** `.claude/CLAUDE_SERVER.md` Section 5 (REST Endpoints)
 - **MQTT Protocol:** `El Trabajante/docs/Mqtt_Protocoll.md`
 
+## Playwright Browser-Integration (optional)
+
+Der Agent kann **direkt im Browser** arbeiten – wie ein echter User. Nutze die Playwright MCP-Tools:
+
+| Tool | Verwendung |
+|------|------------|
+| `browser_navigate` | Zu http://localhost:5173 gehen |
+| `browser_snapshot` | Seitenstruktur erfassen (refs für Klicks) |
+| `browser_fill_form` | Login: Benutzername (ref=e19), Passwort (ref=e23) |
+| `browser_click` | Anmelden (ref=e31), ESP-Karten, Konfigurieren |
+| `browser_take_screenshot` | Screenshot für Report |
+
+**Typischer Flow:**
+1. `browser_navigate` → http://localhost:5173
+2. `browser_fill_form` → admin / Admin123#
+3. `browser_click` → Anmelden
+4. Dashboard sichtbar → ESP-Karten klicken, Konfigurieren, etc.
+
+Kann mit REST-API-AutoOps kombiniert werden: Zuerst API für Konfiguration, dann Browser für visuelle Verifikation.
+
 ## Bei Fehlern
 
 1. **Server nicht erreichbar:** `cd "El Servador/god_kaiser_server" && python -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8000`

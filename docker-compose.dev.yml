@@ -11,6 +11,7 @@ services:
       - ./El Servador/god_kaiser_server/src:/app/src
       - ./El Servador/god_kaiser_server/alembic:/app/alembic
       - ./El Servador/god_kaiser_server/tests:/app/tests
+      - ./logs/server:/app/logs
     command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/src"]
 
   el-frontend:
@@ -21,3 +22,6 @@ services:
       - ./El Frontend/public:/app/public
       - ./El Frontend/index.html:/app/index.html
       - ./El Frontend/vite.config.ts:/app/vite.config.ts
+      - ./El Frontend/tsconfig.json:/app/tsconfig.json
+      - ./El Frontend/tailwind.config.js:/app/tailwind.config.js
+      - ./El Frontend/postcss.config.js:/app/postcss.config.js

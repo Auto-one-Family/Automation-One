@@ -824,8 +824,10 @@ void setup() {
     // Phase 9: Subzone management topics
     String subzone_assign_topic = TopicBuilder::buildSubzoneAssignTopic();
     String subzone_remove_topic = TopicBuilder::buildSubzoneRemoveTopic();
+    String subzone_safe_topic = TopicBuilder::buildSubzoneSafeTopic();
     mqttClient.subscribe(subzone_assign_topic);
     mqttClient.subscribe(subzone_remove_topic);
+    mqttClient.subscribe(subzone_safe_topic);
 
     // WP3: Build sensor command wildcard from TopicBuilder
     // Wildcard subscription for all sensor GPIOs: kaiser/{id}/esp/{esp_id}/sensor/+/command
@@ -1468,6 +1470,7 @@ void setup() {
               String old_sensor_cmd = "kaiser/" + old_kaiser_id + "/esp/" + g_system_config.esp_id + "/sensor/+/command";
               String old_subzone_assign = "kaiser/" + old_kaiser_id + "/esp/" + g_system_config.esp_id + "/subzone/assign";
               String old_subzone_remove = "kaiser/" + old_kaiser_id + "/esp/" + g_system_config.esp_id + "/subzone/remove";
+              String old_subzone_safe = "kaiser/" + old_kaiser_id + "/esp/" + g_system_config.esp_id + "/subzone/safe";
               String old_actuator_cmd = "kaiser/" + old_kaiser_id + "/esp/" + g_system_config.esp_id + "/actuator/+/command";
               String old_heartbeat_ack = "kaiser/" + old_kaiser_id + "/system/heartbeat/ack";
 
@@ -1475,6 +1478,7 @@ void setup() {
               mqttClient.unsubscribe(old_sensor_cmd);
               mqttClient.unsubscribe(old_subzone_assign);
               mqttClient.unsubscribe(old_subzone_remove);
+              mqttClient.unsubscribe(old_subzone_safe);
               mqttClient.unsubscribe(old_actuator_cmd);
               mqttClient.unsubscribe(old_heartbeat_ack);
 
@@ -1500,6 +1504,7 @@ void setup() {
               // Re-subscribe to subzone topics
               mqttClient.subscribe(TopicBuilder::buildSubzoneAssignTopic());
               mqttClient.subscribe(TopicBuilder::buildSubzoneRemoveTopic());
+              mqttClient.subscribe(TopicBuilder::buildSubzoneSafeTopic());
 
               // Re-subscribe to actuator command wildcard
               String actuator_cmd_wildcard = String(TopicBuilder::buildActuatorCommandTopic(0));
@@ -1705,6 +1710,55 @@ void setup() {
           sendSubzoneAck(subzone_id, "subzone_removed", "");
 
           LOG_I(TAG, "✅ Subzone removed: " + subzone_id);
+        }
+        return;
+      }
+
+      // Phase 9: Subzone Safe-Mode Handler (B4 Fix)
+      String subzone_safe_topic = TopicBuilder::buildSubzoneSafeTopic();
+      if (topic == subzone_safe_topic) {
+        LOG_I(TAG, "╔════════════════════════════════════════╗");
+        LOG_I(TAG, "║  SUBZONE SAFE-MODE RECEIVED           ║");
+        LOG_I(TAG, "╚════════════════════════════════════════╝");
+
+        DynamicJsonDocument doc(512);
+        DeserializationError error = deserializeJson(doc, payload);
+
+        if (!error) {
+          String subzone_id = doc["subzone_id"].as<String>();
+          String action = doc["action"].as<String>();
+          bool safe_mode = doc["safe_mode"] | (action == "enable");
+
+          if (subzone_id.length() == 0) {
+            LOG_E(TAG, "Subzone safe-mode failed: subzone_id is empty");
+            return;
+          }
+
+          SubzoneConfig config;
+          if (!configManager.loadSubzoneConfig(subzone_id, config)) {
+            LOG_W(TAG, "Subzone " + subzone_id + " not found for safe-mode");
+            return;
+          }
+
+          if (action == "enable" || safe_mode) {
+            if (gpioManager.enableSafeModeForSubzone(subzone_id)) {
+              config.safe_mode_active = true;
+              configManager.saveSubzoneConfig(config);
+              LOG_I(TAG, "✅ Safe-mode ENABLED for subzone: " + subzone_id);
+            } else {
+              LOG_E(TAG, "Failed to enable safe-mode for subzone: " + subzone_id);
+            }
+          } else if (action == "disable" || !safe_mode) {
+            if (gpioManager.disableSafeModeForSubzone(subzone_id)) {
+              config.safe_mode_active = false;
+              configManager.saveSubzoneConfig(config);
+              LOG_I(TAG, "✅ Safe-mode DISABLED for subzone: " + subzone_id);
+            } else {
+              LOG_E(TAG, "Failed to disable safe-mode for subzone: " + subzone_id);
+            }
+          }
+        } else {
+          LOG_E(TAG, "Failed to parse subzone safe-mode JSON");
         }
         return;
       }

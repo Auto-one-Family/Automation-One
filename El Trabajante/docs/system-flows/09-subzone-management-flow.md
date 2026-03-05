@@ -289,13 +289,15 @@ bool GPIOManager::enableSafeModeForSubzone(const String& subzone_id) {
 
 **File:** `src/main.cpp` (lines 502-875)
 
-**Subzone-Subscription (lines 502-508):**
+**Subzone-Subscription (lines 824-830):**
 ```cpp
 // Phase 9: Subzone management topics
 String subzone_assign_topic = TopicBuilder::buildSubzoneAssignTopic();
 String subzone_remove_topic = TopicBuilder::buildSubzoneRemoveTopic();
+String subzone_safe_topic = TopicBuilder::buildSubzoneSafeTopic();
 mqttClient.subscribe(subzone_assign_topic);
 mqttClient.subscribe(subzone_remove_topic);
+mqttClient.subscribe(subzone_safe_topic);
 LOG_INFO("Subscribed to subzone management topics");
 ```
 
@@ -484,11 +486,13 @@ void setup() {
 #### Schritt 4: Subscribe to Subzone Topics
 
 ```cpp
-// main.cpp lines 502-508
+// main.cpp lines 824-830
 String subzone_assign_topic = TopicBuilder::buildSubzoneAssignTopic();
 String subzone_remove_topic = TopicBuilder::buildSubzoneRemoveTopic();
+String subzone_safe_topic = TopicBuilder::buildSubzoneSafeTopic();
 mqttClient.subscribe(subzone_assign_topic);
 mqttClient.subscribe(subzone_remove_topic);
+mqttClient.subscribe(subzone_safe_topic);
 ```
 
 #### Schritt 5: Zone Assignment (Prerequisite)
@@ -753,6 +757,11 @@ gpioManager.enableSafeModeForSubzone(subzone_id);
   "reason": "zone_reassignment"
 }
 ```
+
+**Subzone Safe-Mode Topic (Server→ESP, B4 Fix):**
+`kaiser/{kaiser_id}/esp/{esp_id}/subzone/safe`
+
+ESP subscribt und verarbeitet. Payload: `subzone_id`, `action` (enable/disable), `reason`, `timestamp`. Optional: `safe_mode` (bool). Handler ruft `gpioManager.enableSafeModeForSubzone()` bzw. `disableSafeModeForSubzone()`, aktualisiert NVS.
 
 ---
 

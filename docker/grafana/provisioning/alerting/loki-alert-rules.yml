@@ -1,13 +1,13 @@
 # Grafana Alerting Provisioning - AutomationOne Loki Alerts
 # SUPPLEMENTS the 32 Prometheus-based alerts in alert-rules.yml
 #
-# 6 Loki-based rules detecting log PATTERNS that metrics cannot:
+# 5 Loki-based rules detecting log PATTERNS that metrics cannot:
 #   Error Storm:         Repeated errors indicating an error loop
 #   ESP Disconnect Wave: Multiple ESPs going offline simultaneously
 #   DB Connection Errors: Database connectivity issues in logs
 #   ESP Boot Loop:       ESP32 repeatedly rebooting
 #   Critical Error Burst: Multiple CRITICAL-level events
-#   Frontend Down:       No frontend container logs (container stopped/crashed)
+#   (Frontend Down deaktiviert: Vite-Dev-Server liefert keine Dauer-Logs → False Positives)
 #
 # Pipeline per rule: A (LogQL query) -> B (Reduce to last) -> C (Threshold)
 # Evaluation interval: 1m (multiple of 10s, Grafana scheduler requirement)
@@ -268,53 +268,31 @@ groups:
           component: system
           source: loki
 
-      # Rule 6: Frontend Down
-      # Detects when the Vue frontend container has stopped producing logs.
-      # The frontend (nginx/node) normally emits access logs and health check responses.
-      # If no logs appear for 5 minutes, the container is likely stopped or crashed.
-      # This solves the "no /metrics endpoint" problem without adding a new service.
-      - uid: ao-loki-frontend-down
-        title: "Loki: Frontend Down"
-        condition: C
-        data:
-          - refId: A
-            relativeTimeRange:
-              from: 300
-              to: 0
-            datasourceUid: loki
-            model:
-              expr: "sum(count_over_time({compose_service=\"el-frontend\"} [5m]))"
-              refId: A
-          - refId: B
-            relativeTimeRange:
-              from: 0
-              to: 0
-            datasourceUid: '__expr__'
-            model:
-              type: reduce
-              expression: "A"
-              reducer: last
-              refId: B
-          - refId: C
-            relativeTimeRange:
-              from: 0
-              to: 0
-            datasourceUid: '__expr__'
-            model:
-              type: threshold
-              expression: "B"
-              conditions:
-                - evaluator:
-                    type: lt
-                    params: [1]
-              refId: C
-        noDataState: Alerting
-        execErrState: Alerting
-        for: 5m
-        annotations:
-          summary: "Frontend-Container nicht erreichbar — keine Logs seit 5 Minuten"
-          description: "El Frontend (Vue 3) hat seit 5 Minuten keine Container-Logs produziert. Container ist wahrscheinlich gestoppt oder abgestuerzt. Docker-Status pruefen: docker compose ps el-frontend."
-        labels:
-          severity: warning
-          component: frontend
-          source: loki
+      # Rule 6: Frontend Down — DEAKTIVIERT (False Positives)
+      # Der Vite-Dev-Server (el-frontend) schreibt nur beim Start eine Zeile ("VITE ready"),
+      # danach keine kontinuierlichen Logs. Daher liefert count_over_time(...[5m]) fast immer 0
+      # und der Alert wuerde staendig feuern. Status stattdessen pruefen: docker compose ps el-frontend
+      # bzw. Docker-Healthcheck (interval 30s). Reaktivierbar wenn Frontend auf nginx umgestellt
+      # wird (Access-Logs) oder periodisches Heartbeat-Logging eingebaut wird.
+      # - uid: ao-loki-frontend-down
+      #   title: "Loki: Frontend Down"
+      #   condition: C
+      #   data:
+      #     - refId: A
+      #       relativeTimeRange:
+      #         from: 300
+      #         to: 0
+      #       datasourceUid: loki
+      #       model:
+      #         expr: "sum(count_over_time({compose_service=\"el-frontend\"} [5m]))"
+      #         refId: A
+      #     - refId: B
+      #       ...
+      #   noDataState: Alerting
+      #   for: 5m
+      #   annotations:
+      #     summary: "Frontend-Container nicht erreichbar — keine Logs seit 5 Minuten"
+      #   labels:
+      #     severity: warning
+      #     component: frontend
+      #     source: loki

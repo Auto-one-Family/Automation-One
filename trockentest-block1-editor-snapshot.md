@@ -1,0 +1,139 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - heading "AutomationOne" [level=1] [ref=e9]
+      - navigation [ref=e10]:
+        - generic [ref=e11]: Navigation
+        - link "Dashboard" [ref=e12] [cursor=pointer]:
+          - /url: /hardware
+          - img [ref=e14]
+          - generic [ref=e19]: Dashboard
+        - link "Regeln" [ref=e20] [cursor=pointer]:
+          - /url: /logic
+          - img [ref=e21]
+          - generic [ref=e25]: Regeln
+        - link "Komponenten" [ref=e26] [cursor=pointer]:
+          - /url: /sensors
+          - img [ref=e27]
+          - generic [ref=e29]: Komponenten
+        - generic [ref=e31]: Administration
+        - link "System" [ref=e32] [cursor=pointer]:
+          - /url: /system-monitor
+          - img [ref=e33]
+          - generic [ref=e35]: System
+        - link "Benutzer" [ref=e36] [cursor=pointer]:
+          - /url: /users
+          - img [ref=e37]
+          - generic [ref=e42]: Benutzer
+        - link "Kalibrierung" [ref=e43] [cursor=pointer]:
+          - /url: /calibration
+          - img [ref=e44]
+          - generic [ref=e45]: Kalibrierung
+        - link "Plugins" [ref=e46] [cursor=pointer]:
+          - /url: /plugins
+          - img [ref=e47]
+          - generic [ref=e49]: Plugins
+      - generic [ref=e50]:
+        - link "Einstellungen" [ref=e51] [cursor=pointer]:
+          - /url: /settings
+          - img [ref=e52]
+          - generic [ref=e64]: Einstellungen
+        - generic [ref=e65]:
+          - generic [ref=e66]: A
+          - generic [ref=e67]:
+            - paragraph [ref=e68]: admin
+            - paragraph [ref=e69]: admin
+    - generic [ref=e70]:
+      - banner [ref=e71]:
+        - navigation "Navigation" [ref=e73]:
+          - generic [ref=e74]: Editor
+        - generic [ref=e75]:
+          - button "Geräte" [ref=e76] [cursor=pointer]:
+            - img
+            - generic [ref=e77]: Geräte
+          - button "Farb-Legende anzeigen" [ref=e80] [cursor=pointer]:
+            - img [ref=e81]
+          - generic [ref=e84]:
+            - generic "Aktive Alerts" [ref=e85]:
+              - img [ref=e86]
+              - generic [ref=e88]: "6"
+            - generic "Mittlere Bestätigungszeit (MTTA)" [ref=e89]:
+              - img [ref=e90]
+              - generic [ref=e93]: MTTA
+              - generic [ref=e94]: 4m
+            - generic "Mittlere Lösungszeit (MTTR)" [ref=e95]:
+              - img [ref=e96]
+              - generic [ref=e98]: MTTR
+              - generic [ref=e99]: 7.8h
+            - generic "Heute gelöst" [ref=e100]:
+              - img [ref=e101]
+              - generic [ref=e104]: "89"
+          - button "6" [ref=e105] [cursor=pointer]:
+            - img
+            - generic: "6"
+          - button "Not-Aus aufheben" [ref=e106] [cursor=pointer]:
+            - img [ref=e107]
+            - generic [ref=e110]: Aufheben
+          - generic "Server verbunden" [ref=e112]:
+            - generic [ref=e114]: Server verbunden
+          - button "A" [ref=e116] [cursor=pointer]:
+            - generic [ref=e117]: A
+            - img [ref=e118]
+      - main [ref=e120]:
+        - generic [ref=e121]:
+          - navigation "Hauptansichten" [ref=e122]:
+            - link "Übersicht" [ref=e123] [cursor=pointer]:
+              - /url: /hardware
+              - img [ref=e124]
+              - generic [ref=e129]: Übersicht
+            - link "Monitor" [ref=e130] [cursor=pointer]:
+              - /url: /monitor
+              - img [ref=e131]
+              - generic [ref=e133]: Monitor
+            - link "Editor" [ref=e134] [cursor=pointer]:
+              - /url: /editor
+              - img [ref=e135]
+              - generic [ref=e140]: Editor
+          - generic [ref=e141]:
+            - generic [ref=e142]:
+              - img [ref=e143]
+              - heading "Dashboard Builder" [level=2] [ref=e148]
+              - button "Cross-Zone Temperatur-Vergleich" [ref=e150] [cursor=pointer]:
+                - generic [ref=e151]: Cross-Zone Temperatur-Vergleich
+                - img [ref=e152]
+            - generic [ref=e154]:
+              - link "Im Monitor anzeigen" [ref=e155] [cursor=pointer]:
+                - /url: /monitor/dashboard/eaae3fbc-bf6a-4e43-98ee-335282e30c2e
+                - img [ref=e156]
+              - button "Bearbeiten" [ref=e159] [cursor=pointer]:
+                - img [ref=e160]
+              - button "Exportieren" [ref=e163] [cursor=pointer]:
+                - img [ref=e164]
+          - generic [ref=e169]:
+            - generic [ref=e172]:
+              - generic [ref=e173]:
+                - generic [ref=e174]: Sensor-Karte
+                - generic [ref=e175]: sensor-card
+              - generic [ref=e177]:
+                - generic [ref=e179]: SHT31
+                - generic [ref=e181]:
+                  - generic [ref=e182]: "22.0"
+                  - generic [ref=e183]: °C
+            - generic [ref=e186]:
+              - generic [ref=e187]:
+                - generic [ref=e188]: Historische Zeitreihe
+                - generic [ref=e189]: historical
+              - generic [ref=e191]:
+                - generic [ref=e193]: Temp Testneu
+                - generic [ref=e195]:
+                  - generic [ref=e196]:
+                    - generic [ref=e197]:
+                      - button "1h" [ref=e198] [cursor=pointer]
+                      - button "6h" [ref=e199] [cursor=pointer]
+                      - button "24h" [ref=e200] [cursor=pointer]
+                      - button "7d" [ref=e201] [cursor=pointer]
+                    - generic [ref=e202]: 635 Datenpunkte
+                  - img [ref=e204]
+    - button "Quick Actions öffnen" [ref=e206] [cursor=pointer]:
+      - img
+  - generic "Benachrichtigungen"
