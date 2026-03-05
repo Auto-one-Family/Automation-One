@@ -15,6 +15,7 @@
 import { ref, computed, watch } from 'vue'
 // Icons not needed - BaseModal provides close button
 import GpioPicker from './GpioPicker.vue'
+import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSection.vue'
 import { BaseModal } from '@/shared/design/primitives'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
@@ -61,6 +62,7 @@ const newActuator = ref<MockActuatorConfig>({
   pwm_value: 0,
   min_value: 0,
   max_value: 100,
+  subzone_id: null,
   max_runtime_seconds: 0,
   cooldown_seconds: 0,
   inverted_logic: false,
@@ -72,6 +74,15 @@ const actuatorAuxGpioValid = ref(true)
 const actuatorAuxGpio = computed({
   get: (): number | null => newActuator.value.aux_gpio ?? 255,
   set: (value: number | null) => { newActuator.value.aux_gpio = value },
+})
+
+const device = computed(() => espStore.devices.find((d) => espStore.getDeviceId(d) === props.espId))
+const zoneId = computed(() => device.value?.zone_id ?? null)
+
+/** Subzone v-model: SubzoneAssignmentSection expects string | null, form may have undefined */
+const subzoneModel = computed({
+  get: () => newActuator.value.subzone_id ?? null,
+  set: (v: string | null) => { newActuator.value.subzone_id = v },
 })
 
 // ── Watchers ─────────────────────────────────────────────────────────
@@ -133,6 +144,7 @@ function resetForm() {
     pwm_value: 0,
     min_value: 0,
     max_value: 100,
+    subzone_id: null,
     max_runtime_seconds: defaults.maxRuntime,
     cooldown_seconds: defaults.cooldown,
     inverted_logic: false,
@@ -190,6 +202,16 @@ function onActuatorAuxGpioValidation(valid: boolean, _message: string | null): v
       <div class="form-group">
         <label class="form-label">Name (optional)</label>
         <input v-model="newActuator.name" type="text" class="form-input" placeholder="z.B. Wasserpumpe 1" maxlength="100" />
+      </div>
+
+      <!-- Subzone (optional) -->
+      <div class="form-group">
+        <SubzoneAssignmentSection
+          :esp-id="espId"
+          :gpio="newActuator.gpio"
+          :zone-id="zoneId"
+          v-model="subzoneModel"
+        />
       </div>
 
       <!-- Aux GPIO -->

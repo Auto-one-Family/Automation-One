@@ -166,7 +166,7 @@ async function saveName() {
 }
 
 function handleSensorClick(gpio: number) {
-  // Emit to parent -> opens SensorConfigPanel in SlideOver
+  // Emit to parent (HardwareView) -> opens SensorConfigPanel in SlideOver
   emit('sensorClick', gpio)
 }
 

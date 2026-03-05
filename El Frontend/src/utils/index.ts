@@ -31,6 +31,9 @@ export * from './zoneColors'
 // Actuator defaults
 export * from './actuatorDefaults'
 
+// Subzone helpers (normalize "Keine Subzone" for API)
+export { normalizeSubzoneId } from './subzoneHelpers'
+
 // Logger utility
 export { createLogger } from './logger'
 export type { Logger } from './logger'

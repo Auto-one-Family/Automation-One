@@ -6,7 +6,7 @@
  * Zone 2 (Accordion): Thresholds & Alarms, Operation & Interval, Calibration
  * Zone 3 (Accordion - Expert): Hardware (GPIO/I2C/OneWire), Live Preview
  *
- * Used inside ESPSettingsSheet as SlideOver panel.
+ * Used inside ESPSettingsSheet as SlideOver panel (HardwareView only, Route /hardware).
  */
 
 import { ref, computed, onMounted, watch } from 'vue'
@@ -70,6 +70,22 @@ const enabled = ref(true)
 
 // Subzone
 const subzoneId = ref<string | null>(null)
+
+// Operating mode (Block C: Phase 2B)
+const operatingMode = ref<'continuous' | 'on_demand' | 'scheduled' | 'paused'>('continuous')
+const timeoutSeconds = ref(0)
+// schedule_config (Auftrag 5): nur bei operating_mode=scheduled relevant
+const scheduleConfig = ref<{ type: string; expression: string } | null>(null)
+
+/** Cron presets for scheduled mode (matches EditSensorModal) */
+const CRON_PRESETS = [
+  { label: 'Jede Stunde', value: '0 * * * *', description: 'Zur vollen Stunde' },
+  { label: 'Alle 6 Stunden', value: '0 */6 * * *', description: '00:00, 06:00, 12:00, 18:00' },
+  { label: 'Täglich um 8:00', value: '0 8 * * *', description: 'Einmal täglich' },
+  { label: 'Alle 15 Minuten', value: '*/15 * * * *', description: '00, 15, 30, 45' },
+  { label: 'Alle 30 Minuten', value: '*/30 * * * *', description: '00 und 30' },
+  { label: 'Wochentags 9:00', value: '0 9 * * 1-5', description: 'Mo-Fr um 9:00' },
+]
 
 // Interface-specific
 const interfaceType = computed(() => inferInterfaceType(props.sensorType))
@@ -146,6 +162,17 @@ onMounted(async () => {
       // Subzone (C1: backend returns subzone_id in GET response)
       subzoneId.value = config.subzone_id ?? null
 
+      // Operating mode (Block C: backend returns operating_mode, timeout_seconds)
+      operatingMode.value = (config.operating_mode as 'continuous' | 'on_demand' | 'scheduled' | 'paused') || 'continuous'
+      timeoutSeconds.value = config.timeout_seconds ?? 0
+
+      // schedule_config (Auftrag 5: backend returns schedule_config)
+      const sc = configExt.schedule_config as { type?: string; expression?: string } | null | undefined
+      scheduleConfig.value =
+        sc?.expression && sc?.type === 'cron'
+          ? { type: 'cron', expression: sc.expression }
+          : null
+
       if (config.threshold_min != null) alarmLow.value = roundToDecimals(config.threshold_min, 2)
       if (config.warning_min != null) warnLow.value = roundToDecimals(config.warning_min, 2)
       if (config.warning_max != null) warnHigh.value = roundToDecimals(config.warning_max, 2)
@@ -169,11 +196,21 @@ onMounted(async () => {
         name.value = sensor.name ?? ''
         unitValue.value = sensor.unit ?? defaultUnit.value
         subzoneId.value = sensor.subzone_id ?? null
+        operatingMode.value = (sensor as any).operating_mode || 'continuous'
+        timeoutSeconds.value = (sensor as any).timeout_seconds ?? 0
+        const sc = (sensor as any).schedule_config
+        scheduleConfig.value =
+          sc?.expression && sc?.type === 'cron'
+            ? { type: 'cron', expression: sc.expression }
+            : null
       } else {
         unitValue.value = defaultUnit.value
       }
     } else {
       unitValue.value = defaultUnit.value
+      operatingMode.value = 'continuous'
+      timeoutSeconds.value = 0
+      scheduleConfig.value = null
     }
 
     if (sensorConfig.value) {
@@ -202,6 +239,12 @@ watch(
   },
   { immediate: true, deep: true }
 )
+
+function setCronExpression(expression: string) {
+  scheduleConfig.value = expression.trim()
+    ? { type: 'cron', expression: expression.trim() }
+    : null
+}
 
 // =============================================================================
 // Delete
@@ -254,6 +297,15 @@ async function handleSave() {
       threshold_max: alarmHigh.value,
       warning_min: warnLow.value,
       warning_max: warnHigh.value,
+      operating_mode: operatingMode.value,
+      timeout_seconds: timeoutSeconds.value,
+    }
+
+    // schedule_config (Auftrag 5): nur bei scheduled senden
+    if (operatingMode.value === 'scheduled' && scheduleConfig.value?.expression) {
+      config.schedule_config = { type: 'cron', expression: scheduleConfig.value.expression }
+    } else if (operatingMode.value !== 'scheduled') {
+      config.schedule_config = null
     }
 
     if (isI2C.value) {
@@ -361,13 +413,65 @@ async function handleSave() {
             :zone-id="espStore.devices.find(d => espStore.getDeviceId(d) === espId)?.zone_id ?? null"
           />
         </div>
+
+        <!-- Betriebsmodus (Block C) -->
+        <div class="sensor-config__field">
+          <label class="sensor-config__label">Betriebsmodus</label>
+          <select v-model="operatingMode" class="sensor-config__select">
+            <option value="continuous">Dauerbetrieb</option>
+            <option value="on_demand">Bei Bedarf</option>
+            <option value="scheduled">Zeitgesteuert</option>
+            <option value="paused">Pausiert</option>
+          </select>
+        </div>
+
+        <!-- Stale-Timeout (nur bei Dauerbetrieb) -->
+        <div v-if="operatingMode === 'continuous'" class="sensor-config__field">
+          <label class="sensor-config__label">Stale-Timeout (Sekunden)</label>
+          <input
+            v-model.number="timeoutSeconds"
+            type="number"
+            min="0"
+            max="86400"
+            class="sensor-config__input"
+          />
+          <span class="sensor-config__helper">0 = kein Timeout (Stale-Erkennung deaktiviert)</span>
+        </div>
+
+        <!-- schedule_config (Auftrag 5: nur bei Zeitgesteuert) -->
+        <div v-if="operatingMode === 'scheduled'" class="sensor-config__field sensor-config__schedule">
+          <label class="sensor-config__label">Zeitplan (Cron)</label>
+          <span class="sensor-config__helper">Server-gesteuerte Messung nach Zeitplan</span>
+          <div class="sensor-config__schedule-presets">
+            <button
+              v-for="preset in CRON_PRESETS"
+              :key="preset.value"
+              type="button"
+              class="sensor-config__preset-btn"
+              :class="{ 'sensor-config__preset-btn--active': scheduleConfig?.expression === preset.value }"
+              :title="preset.description"
+              @click="setCronExpression(preset.value)"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
+          <input
+            :value="scheduleConfig?.expression ?? ''"
+            type="text"
+            class="sensor-config__input sensor-config__input--mono"
+            placeholder="z.B. 0 */6 * * *"
+            @input="setCronExpression(($event.target as HTMLInputElement).value)"
+          />
+          <span class="sensor-config__helper">Format: Minute Stunde Tag Monat Wochentag</span>
+        </div>
       </section>
 
       <!-- ═══ ZONE 2: ADVANCED (Accordion sections) ═══════════════════════ -->
 
-      <!-- Thresholds -->
+      <!-- Haupt-Schwellen: Basiskonfiguration für den Sensor. Werden an createOrUpdate gesendet.
+           Alert-spezifische Overrides: AlertConfigSection (eigener Save PATCH /sensors/{id}/alert-config). -->
       <AccordionSection
-        title="Schwellwerte & Alarme"
+        title="Sensor-Schwellwerte (Basis)"
         :storage-key="`${accordionKey}-thresholds`"
         :icon="Gauge"
       >
@@ -836,6 +940,45 @@ async function handleSave() {
   padding: var(--space-1) var(--space-2);
   font-size: var(--text-sm);
   font-family: var(--font-mono);
+}
+
+.sensor-config__input--mono {
+  font-family: var(--font-mono);
+}
+
+/* schedule_config (Auftrag 5) */
+.sensor-config__schedule {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sensor-config__schedule-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.sensor-config__preset-btn {
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sensor-config__preset-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
+}
+
+.sensor-config__preset-btn--active {
+  background: var(--color-accent-dim);
+  border-color: var(--color-accent);
+  color: var(--color-accent-bright);
 }
 
 .sensor-config__select {

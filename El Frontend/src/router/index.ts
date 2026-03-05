@@ -233,6 +233,12 @@ const router = createRouter({
           meta: { requiresAdmin: true, title: 'AutoOps Plugins' },
         },
         {
+          path: 'email',
+          name: 'email-postfach',
+          component: lazyView(() => import('@/views/EmailPostfachView.vue')),
+          meta: { requiresAdmin: true, title: 'E-Mail-Postfach' },
+        },
+        {
           path: 'sensors',
           name: 'sensors',
           component: lazyView(() => import('@/views/SensorsView.vue')),

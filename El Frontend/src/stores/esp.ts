@@ -35,6 +35,7 @@ import {
   inferInterfaceType,
   getDefaultI2CAddress
 } from '@/utils/sensorDefaults'
+import { normalizeSubzoneId } from '@/utils/subzoneHelpers'
 import { isPwmActuator } from '@/utils/actuatorDefaults'
 
 /**
@@ -696,6 +697,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           sensor_type: config.sensor_type,
           name: config.name || null,
           enabled: true,
+          // Subzone: top-level für Backend SubzoneService; normalize "__none__" → null (Defense-in-Depth)
+          subzone_id: normalizeSubzoneId(config.subzone_id),
           // =========================================================================
           // MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
           // =========================================================================
@@ -715,7 +718,6 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           threshold_min: null,
           threshold_max: null,
           metadata: {
-            subzone_id: config.subzone_id || null,
             created_via: 'dashboard_drag_drop'
           }
         }
@@ -908,6 +910,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           actuator_type: config.actuator_type,
           name: config.name || null,
           enabled: true,
+          subzone_id: normalizeSubzoneId(config.subzone_id),
           aux_gpio: config.aux_gpio !== 255 ? config.aux_gpio : null,
           inverted_logic: config.inverted_logic ?? false,
           max_runtime_seconds: config.max_runtime_seconds ?? 0,

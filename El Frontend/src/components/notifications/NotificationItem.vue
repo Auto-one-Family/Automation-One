@@ -17,6 +17,7 @@ import {
   Activity, Workflow, BarChart3, ShieldCheck, Mail
 } from 'lucide-vue-next'
 import { formatRelativeTime } from '@/utils/formatters'
+import { getEmailStatusLabel, getNotificationSourceLabel } from '@/utils/labels'
 import type { NotificationDTO } from '@/api/notifications'
 import { GRAFANA_BASE_URL } from '@/composables/useGrafana'
 
@@ -80,6 +81,22 @@ const statusClass = computed(() => {
   }
 })
 
+/** Source label for badge (Sensor, Infrastruktur, Aktor, Regel, System) */
+const sourceLabel = computed(() => getNotificationSourceLabel(props.notification.source))
+
+/** CSS class for source badge color (optional differentiation) */
+const sourceBadgeClass = computed(() => {
+  const s = props.notification.source
+  if (!s) return 'item__source-badge--default'
+  switch (s) {
+    case 'sensor_threshold': return 'item__source-badge--sensor'
+    case 'grafana': return 'item__source-badge--infra'
+    case 'mqtt_handler': return 'item__source-badge--actuator'
+    case 'logic_engine': return 'item__source-badge--rule'
+    default: return 'item__source-badge--default'
+  }
+})
+
 function handleMarkRead(): void {
   if (!props.notification.is_read) {
     emit('mark-read', props.notification.id)
@@ -123,6 +140,9 @@ function navigateToRule(): void {
           <span :class="['item__title', { 'item__title--unread': !notification.is_read }]">
             {{ notification.title }}
           </span>
+          <span v-if="sourceLabel" :class="['item__source-badge', sourceBadgeClass]">
+            {{ sourceLabel }}
+          </span>
           <span v-if="statusLabel" :class="['item__status', statusClass]">
             {{ statusLabel }}
           </span>
@@ -148,7 +168,7 @@ function navigateToRule(): void {
         <div class="item__detail-grid">
           <div v-if="notification.source" class="item__detail">
             <span class="item__detail-label">Quelle</span>
-            <span class="item__detail-value">{{ notification.source }}</span>
+            <span class="item__detail-value">{{ sourceLabel || notification.source }}</span>
           </div>
           <div v-if="notification.category" class="item__detail">
             <span class="item__detail-label">Kategorie</span>
@@ -166,7 +186,7 @@ function navigateToRule(): void {
             <span class="item__detail-label">Email</span>
             <span :class="['item__email-status', `item__email-status--${emailStatus}`]">
               <Mail class="item__email-icon" />
-              {{ emailStatus === 'sent' ? 'Zugestellt' : emailStatus === 'failed' ? 'Fehlgeschlagen' : 'Ausstehend' }}
+              {{ getEmailStatusLabel(emailStatus ?? '') }}
               <span v-if="emailProvider" class="item__email-provider">via {{ emailProvider }}</span>
             </span>
           </div>
@@ -297,6 +317,44 @@ function navigateToRule(): void {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* Source Badge (Alert-Basis 3) */
+.item__source-badge {
+  flex-shrink: 0;
+  padding: 1px var(--space-1);
+  font-size: 9px;
+  font-weight: 600;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  line-height: 1.4;
+}
+
+.item__source-badge--sensor {
+  color: var(--color-info);
+  background: rgba(96, 165, 250, 0.12);
+}
+
+.item__source-badge--infra {
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.12);
+}
+
+.item__source-badge--actuator {
+  color: var(--color-iridescent-3);
+  background: rgba(167, 139, 250, 0.12);
+}
+
+.item__source-badge--rule {
+  color: var(--color-iridescent-2);
+  background: rgba(129, 140, 248, 0.12);
+}
+
+.item__source-badge--default {
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
 }
 
 /* Status Badge */
@@ -433,6 +491,10 @@ function navigateToRule(): void {
 
 .item__email-status--pending {
   color: var(--color-text-muted);
+}
+
+.item__email-status--permanently_failed {
+  color: var(--color-error);
 }
 
 .item__email-icon {

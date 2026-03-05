@@ -1,10 +1,14 @@
 <script setup lang="ts">
 /**
- * ComponentInventoryView — Flat Hardware Inventory
+ * ComponentInventoryView — Flat Hardware Inventory (Komponenten-Tab)
  *
  * Unified view for all sensors, actuators, and ESPs in a single searchable,
  * filterable, sortable table. Replaces the former zone-grouped SensorsView.
  * Route: /sensors (unchanged for backward compatibility).
+ *
+ * This view is the Komponenten-Tab (Wissensdatenbank/Inventar). It does NOT host
+ * SensorConfigPanel or ActuatorConfigPanel. Full device configuration (thresholds,
+ * subzone, calibration, alerts, runtime) is in HardwareView (Route /hardware).
  */
 
 import { ref, computed, onMounted, watch } from 'vue'

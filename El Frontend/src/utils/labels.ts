@@ -126,6 +126,51 @@ export const CONNECTION_LABELS: Record<string, string> = {
 }
 
 // =============================================================================
+// NOTIFICATION SOURCE LABELS (Alert-Basis 3 — Filter nach source)
+// =============================================================================
+
+/** Backend notification.source → lesbares Label für Filter-Chips und Badges */
+export const NOTIFICATION_SOURCE_LABELS: Record<string, string> = {
+  sensor_threshold: 'Sensor',
+  grafana: 'Infrastruktur',
+  mqtt_handler: 'Aktor',
+  logic_engine: 'Regel',
+  manual: 'System',
+  system: 'System',
+  device_event: 'System',
+  autoops: 'System',
+}
+
+/**
+ * Lesbares Label für notification.source.
+ * Fallback: unbekannte Werte werden unverändert zurückgegeben.
+ */
+export function getNotificationSourceLabel(source: string | null | undefined): string {
+  if (!source) return ''
+  return NOTIFICATION_SOURCE_LABELS[source] ?? source
+}
+
+// =============================================================================
+// EMAIL STATUS LABELS (Phase C V1.2 — Email-Retry)
+// =============================================================================
+
+/** Email-Versandstatus aus Email-Log und Notification-Metadata */
+export const EMAIL_STATUS_LABELS: Record<string, string> = {
+  'sent': 'Zugestellt',
+  'failed': 'Fehlgeschlagen',
+  'pending': 'Ausstehend',
+  'permanently_failed': 'Dauerhaft fehlgeschlagen',
+}
+
+/**
+ * Lesbares Label für Email-Status (sent, failed, pending, permanently_failed).
+ * Fallback: unbekannte Werte werden unverändert zurückgegeben.
+ */
+export function getEmailStatusLabel(status: string): string {
+  return EMAIL_STATUS_LABELS[status] ?? status
+}
+
+// =============================================================================
 // DEVICE TYPE LABELS
 // =============================================================================
 

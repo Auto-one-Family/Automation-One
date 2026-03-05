@@ -671,26 +671,6 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   showActuatorConfig.value = true
 }
 
-// =============================================================================
-// SlideOver handlers: open config panels from ESPSettingsSheet events
-// =============================================================================
-
-function handleSensorConfigFromSheet(payload: { espId: string; gpio: number; sensorType: string; unit: string }) {
-  configSensorData.value = payload
-  showSensorConfig.value = true
-  // Settings-Sheet schließen, damit SensorConfigPanel nicht überlagert wird (z-index)
-  isSettingsOpen.value = false
-  setTimeout(() => { if (!isSettingsOpen.value) settingsDevice.value = null }, 200)
-}
-
-function handleActuatorConfigFromSheet(payload: { espId: string; gpio: number; actuatorType: string }) {
-  configActuatorData.value = payload
-  showActuatorConfig.value = true
-  // Settings-Sheet schließen, damit ActuatorConfigPanel nicht überlagert wird (z-index)
-  isSettingsOpen.value = false
-  setTimeout(() => { if (!isSettingsOpen.value) settingsDevice.value = null }, 200)
-}
-
 // Rules Activity
 const latestExecution = computed(() => logicStore.recentExecutions[0] ?? null)
 
@@ -967,8 +947,6 @@ function formatTimeAgo(timestamp: number): string {
       @heartbeat-triggered="(p: any) => handleHeartbeat(p.deviceId)"
       @name-updated="handleNameUpdated"
       @zone-updated="handleZoneUpdated"
-      @open-sensor-config="handleSensorConfigFromSheet"
-      @open-actuator-config="handleActuatorConfigFromSheet"
     />
 
     <!-- Sensor Config SlideOver (elevation=high wenn über Settings-Sheet) -->

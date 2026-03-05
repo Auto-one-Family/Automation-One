@@ -1,24 +1,21 @@
 <script setup lang="ts">
 /**
- * AlertConfigSection — Per-Sensor/Actuator Alert Configuration (ISA-18.2)
+ * DeviceAlertConfigSection — Device-Level Alert Configuration (ISA-18.2)
  *
- * Master toggle: Enable/disable notifications for this sensor/actuator.
+ * Master toggle: Enable/disable alerts for this ESP device.
+ * propagate_to_children: When true, suppression applies to all child sensors/actuators.
  * When disabled: suppression reason, optional note, optional auto-re-enable date.
- * Custom thresholds: Override global thresholds for this sensor.
- * Severity override: Force all alerts to a specific severity.
  *
- * Used inside SensorConfigPanel and ActuatorConfigPanel AccordionSections.
+ * Used inside ESPSettingsSheet. No custom_thresholds or severity_override
+ * (those are sensor/actuator-level only).
  */
-import { ref, computed, onMounted } from 'vue'
-import { BellOff, Bell, Clock, Shield } from 'lucide-vue-next'
+import { ref, computed, onMounted, watch } from 'vue'
+import { BellOff, Bell, Clock, Shield, Layers } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
-import type { AlertConfigUpdate, AlertConfigResponse } from '@/api/sensors'
+import { espApi, type DeviceAlertConfigUpdate } from '@/api/esp'
 
 interface Props {
-  entityId: string
-  entityType: 'sensor' | 'actuator'
-  fetchFn: (id: string) => Promise<AlertConfigResponse>
-  updateFn: (id: string, config: AlertConfigUpdate) => Promise<AlertConfigResponse>
+  espId: string
 }
 
 const props = defineProps<Props>()
@@ -36,16 +33,16 @@ const alertsEnabled = computed({
   },
 })
 
+const propagateToChildren = computed({
+  get: () => alertConfig.value.propagate_to_children === true,
+  set: (val: boolean) => {
+    alertConfig.value.propagate_to_children = val
+  },
+})
+
 const suppressionReason = ref<string>('maintenance')
 const suppressionNote = ref<string>('')
 const suppressionUntil = ref<string>('')
-const severityOverride = ref<string>('')
-
-// Custom thresholds
-const customWarningMin = ref<number | null>(null)
-const customWarningMax = ref<number | null>(null)
-const customCriticalMin = ref<number | null>(null)
-const customCriticalMax = ref<number | null>(null)
 
 const SUPPRESSION_REASONS = [
   { value: 'maintenance', label: 'Wartung' },
@@ -54,21 +51,11 @@ const SUPPRESSION_REASONS = [
   { value: 'custom', label: 'Benutzerdefiniert' },
 ]
 
-const SEVERITY_OPTIONS = [
-  { value: '', label: 'Automatisch (Standard)' },
-  { value: 'critical', label: 'Kritisch' },
-  { value: 'warning', label: 'Warnung' },
-  { value: 'info', label: 'Info' },
-]
-
-onMounted(async () => {
-  await loadConfig()
-})
-
-async function loadConfig() {
+const loadConfig = async () => {
+  if (!props.espId) return
   isLoading.value = true
   try {
-    const response = await props.fetchFn(props.entityId)
+    const response = await espApi.getAlertConfig(props.espId)
     alertConfig.value = response.alert_config || {}
     syncFormFromConfig()
   } catch (e) {
@@ -84,22 +71,16 @@ function syncFormFromConfig() {
   suppressionReason.value = (cfg.suppression_reason as string) || 'maintenance'
   suppressionNote.value = (cfg.suppression_note as string) || ''
   suppressionUntil.value = (cfg.suppression_until as string) || ''
-  severityOverride.value = (cfg.severity_override as string) || ''
-
-  const thresholds = cfg.custom_thresholds as Record<string, number | null> | undefined
-  if (thresholds) {
-    customWarningMin.value = thresholds.warning_min ?? null
-    customWarningMax.value = thresholds.warning_max ?? null
-    customCriticalMin.value = thresholds.critical_min ?? null
-    customCriticalMax.value = thresholds.critical_max ?? null
-  }
 }
 
 async function saveConfig() {
+  if (!props.espId || isSaving.value) return
+
   isSaving.value = true
   try {
-    const update: AlertConfigUpdate = {
+    const update: DeviceAlertConfigUpdate = {
       alerts_enabled: alertsEnabled.value,
+      propagate_to_children: propagateToChildren.value,
     }
 
     if (!alertsEnabled.value) {
@@ -108,25 +89,7 @@ async function saveConfig() {
       update.suppression_until = suppressionUntil.value || null
     }
 
-    // Custom thresholds (only if any value set)
-    if (
-      customWarningMin.value != null ||
-      customWarningMax.value != null ||
-      customCriticalMin.value != null ||
-      customCriticalMax.value != null
-    ) {
-      update.custom_thresholds = {
-        warning_min: customWarningMin.value,
-        warning_max: customWarningMax.value,
-        critical_min: customCriticalMin.value,
-        critical_max: customCriticalMax.value,
-      }
-    }
-
-    // Severity override
-    update.severity_override = severityOverride.value || null
-
-    const response = await props.updateFn(props.entityId, update)
+    const response = await espApi.updateAlertConfig(props.espId, update)
     alertConfig.value = response.alert_config || {}
     syncFormFromConfig()
     success('Alert-Konfiguration gespeichert')
@@ -136,6 +99,19 @@ async function saveConfig() {
     isSaving.value = false
   }
 }
+
+onMounted(() => {
+  loadConfig()
+})
+
+watch(
+  () => props.espId,
+  (newId, oldId) => {
+    if (newId && newId !== oldId) {
+      loadConfig()
+    }
+  }
+)
 </script>
 
 <template>
@@ -163,6 +139,29 @@ async function saveConfig() {
             type="checkbox"
             :checked="alertsEnabled"
             @change="alertsEnabled = ($event.target as HTMLInputElement).checked"
+          />
+          <span class="alert-config__switch-slider" />
+        </label>
+      </div>
+
+      <!-- propagate_to_children (Device-Level only) -->
+      <div class="alert-config__propagate-row">
+        <div class="alert-config__propagate-info">
+          <Layers class="w-4 h-4 text-muted" />
+          <div>
+            <span class="alert-config__propagate-label">
+              Unterdrückung an Kind-Sensoren/-Aktoren weitergeben
+            </span>
+            <span class="alert-config__hint">
+              Wenn aktiv, werden Alerts für alle Sensoren und Aktoren dieses Geräts unterdrückt (z.B. bei Wartung).
+            </span>
+          </div>
+        </div>
+        <label class="alert-config__switch">
+          <input
+            type="checkbox"
+            :checked="propagateToChildren"
+            @change="propagateToChildren = ($event.target as HTMLInputElement).checked"
           />
           <span class="alert-config__switch-slider" />
         </label>
@@ -209,77 +208,6 @@ async function saveConfig() {
             Leer lassen für manuelle Reaktivierung
           </span>
         </div>
-      </div>
-
-      <!-- Override-Schwellen: Nur für Alert-Regeln. Überschreiben die Haupt-Schwellen aus SensorConfigPanel
-           für diesen Alert. Haupt-Schwellen: SensorConfigPanel → Grundeinstellungen/Sensor-Schwellwerte (Basis). -->
-      <div class="alert-config__section">
-        <h4 class="alert-config__section-title">Schwellen-Override für Alerts</h4>
-        <span class="alert-config__hint">Überschreiben die Sensor-Basisschwellen nur für Alert-Regeln</span>
-
-        <div class="alert-config__thresholds">
-          <div class="alert-config__threshold-row">
-            <div class="alert-config__threshold-field">
-              <label class="alert-config__label alert-config__label--warning">Warn Min</label>
-              <input
-                v-model.number="customWarningMin"
-                type="number"
-                step="any"
-                class="alert-config__input alert-config__input--small"
-                placeholder="—"
-              />
-            </div>
-            <div class="alert-config__threshold-field">
-              <label class="alert-config__label alert-config__label--warning">Warn Max</label>
-              <input
-                v-model.number="customWarningMax"
-                type="number"
-                step="any"
-                class="alert-config__input alert-config__input--small"
-                placeholder="—"
-              />
-            </div>
-          </div>
-          <div class="alert-config__threshold-row">
-            <div class="alert-config__threshold-field">
-              <label class="alert-config__label alert-config__label--critical">Kritisch Min</label>
-              <input
-                v-model.number="customCriticalMin"
-                type="number"
-                step="any"
-                class="alert-config__input alert-config__input--small"
-                placeholder="—"
-              />
-            </div>
-            <div class="alert-config__threshold-field">
-              <label class="alert-config__label alert-config__label--critical">Kritisch Max</label>
-              <input
-                v-model.number="customCriticalMax"
-                type="number"
-                step="any"
-                class="alert-config__input alert-config__input--small"
-                placeholder="—"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Severity Override -->
-      <div class="alert-config__field">
-        <label class="alert-config__label">Severity Override</label>
-        <select v-model="severityOverride" class="alert-config__input">
-          <option
-            v-for="opt in SEVERITY_OPTIONS"
-            :key="opt.value"
-            :value="opt.value"
-          >
-            {{ opt.label }}
-          </option>
-        </select>
-        <span class="alert-config__hint">
-          Erzwingt diese Stufe für alle Alerts dieses Sensors
-        </span>
       </div>
 
       <!-- Save Button -->
@@ -329,12 +257,44 @@ async function saveConfig() {
   color: var(--color-text-primary);
 }
 
+/* propagate row */
+.alert-config__propagate-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+}
+
+.alert-config__propagate-info {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.alert-config__propagate-info > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.alert-config__propagate-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
 /* Toggle switch */
 .alert-config__switch {
   position: relative;
   display: inline-block;
   width: 36px;
   height: 20px;
+  flex-shrink: 0;
 }
 
 .alert-config__switch input {
@@ -402,14 +362,6 @@ async function saveConfig() {
   color: var(--color-text-secondary);
 }
 
-.alert-config__label--warning {
-  color: var(--color-warning);
-}
-
-.alert-config__label--critical {
-  color: var(--color-error);
-}
-
 .alert-config__input {
   padding: var(--space-2) var(--space-3);
   background: var(--color-bg-tertiary);
@@ -426,50 +378,9 @@ async function saveConfig() {
   border-color: var(--color-accent);
 }
 
-.alert-config__input--small {
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--text-xs);
-  font-family: var(--font-mono);
-}
-
 .alert-config__hint {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
-}
-
-/* Sections */
-.alert-config__section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.alert-config__section-title {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-  margin: 0;
-}
-
-/* Thresholds grid */
-.alert-config__thresholds {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.alert-config__threshold-row {
-  display: flex;
-  gap: var(--space-3);
-}
-
-.alert-config__threshold-field {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
 }
 
 /* Save button */
@@ -493,4 +404,8 @@ async function saveConfig() {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.text-muted { color: var(--color-text-muted); }
+.text-success { color: var(--color-success); }
+.text-warning { color: var(--color-warning); }
 </style>

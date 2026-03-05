@@ -18,6 +18,7 @@ import {
   Activity,
   SlidersHorizontal,
   Puzzle,
+  Mail,
 } from 'lucide-vue-next'
 
 defineProps<{
@@ -145,6 +146,16 @@ function handleNavClick() {
           <div class="sidebar__link-indicator" />
           <Puzzle class="sidebar__link-icon" />
           <span>Plugins</span>
+        </RouterLink>
+
+        <RouterLink
+          to="/email"
+          :class="['sidebar__link', isActive('/email') && 'sidebar__link--active']"
+          @click="handleNavClick"
+        >
+          <div class="sidebar__link-indicator" />
+          <Mail class="sidebar__link-icon" />
+          <span>Postfach</span>
         </RouterLink>
       </template>
     </nav>

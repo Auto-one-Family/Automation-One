@@ -29,6 +29,12 @@ const logger = createLogger('NotificationInboxStore')
 /** Filter tabs in the drawer */
 export type InboxFilter = 'all' | 'critical' | 'warning' | 'system'
 
+/** Source filter: null = all, or backend source value. "__system__" = manual|system|device_event|autoops */
+export type SourceFilterValue = string | null
+
+/** Sources grouped as "System" for filter chip */
+const SYSTEM_SOURCES_SET = new Set(['manual', 'system', 'device_event', 'autoops'])
+
 /** Severity priority for sorting (lower = higher priority, ISA-18.2: 3 levels) */
 const SEVERITY_PRIORITY: Record<string, number> = {
   critical: 0,
@@ -50,6 +56,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
   const isDrawerOpen = ref(false)
   const isPreferencesOpen = ref(false)
   const activeFilter = ref<InboxFilter>('all')
+  const sourceFilter = ref<SourceFilterValue>(null)
   const isLoading = ref(false)
   const hasMore = ref(true)
   const currentPage = ref(1)
@@ -59,22 +66,36 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
   // Computed
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /** Filtered notifications based on active tab */
+  /** Filtered notifications based on active tab (severity) and source filter */
   const filteredNotifications = computed(() => {
-    if (activeFilter.value === 'all') return notifications.value
+    let list = notifications.value
 
-    return notifications.value.filter((n) => {
-      switch (activeFilter.value) {
-        case 'critical':
-          return n.severity === 'critical'
-        case 'warning':
-          return n.severity === 'warning'
-        case 'system':
-          return n.severity === 'info'
-        default:
-          return true
+    // Severity filter
+    if (activeFilter.value !== 'all') {
+      list = list.filter((n) => {
+        switch (activeFilter.value) {
+          case 'critical':
+            return n.severity === 'critical'
+          case 'warning':
+            return n.severity === 'warning'
+          case 'system':
+            return n.severity === 'info'
+          default:
+            return true
+        }
+      })
+    }
+
+    // Source filter
+    if (sourceFilter.value) {
+      if (sourceFilter.value === '__system__') {
+        list = list.filter((n) => n.source && SYSTEM_SOURCES_SET.has(n.source))
+      } else {
+        list = list.filter((n) => n.source === sourceFilter.value)
       }
-    })
+    }
+
+    return list
   })
 
   /** Group notifications by date (Heute / Gestern / Älter) */
@@ -238,6 +259,13 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     isPreferencesOpen.value = false
   }
 
+  /**
+   * Set source filter (null = all, backend source value, or "__system__" for manual|system|device_event|autoops).
+   */
+  function setSourceFilter(source: SourceFilterValue): void {
+    sourceFilter.value = source
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // WebSocket Handlers (called from esp.store.ts dispatcher)
   // ═══════════════════════════════════════════════════════════════════════════
@@ -381,6 +409,8 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     isDrawerOpen,
     isPreferencesOpen,
     activeFilter,
+    sourceFilter,
+    setSourceFilter,
     isLoading,
     hasMore,
 

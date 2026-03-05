@@ -2,14 +2,22 @@
 /**
  * AlarmListWidget — Active alarms and warnings for dashboard
  *
- * Shows sensors with quality 'alarm', 'poor', 'bad', 'error' or 'warning'.
- * Chronological list (newest first).
+ * Data source: alert-center.store (activeAlertsFromInbox) — persistierte Notifications
+ * aus der API. Gleiche Quelle wie QuickAlertPanel und NotificationDrawer.
+ *
+ * Zeigt Alerts mit status active/acknowledged (optional resolved).
+ * Chronologische Liste (neueste zuerst), sortiert nach Severity.
  * Min-size: 4x4
+ *
+ * @see Alert-Basis 1 — AlarmListWidget auf Notification-API umstellen
  */
 import { computed } from 'vue'
+import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
+import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
 import { useEspStore } from '@/stores/esp'
 import { Bell, AlertTriangle, AlertCircle } from 'lucide-vue-next'
-import type { MockSensor } from '@/types'
+import { formatRelativeTime } from '@/utils/formatters'
+import type { NotificationDTO } from '@/api/notifications'
 
 interface Props {
   maxItems?: number
@@ -23,76 +31,67 @@ const props = withDefaults(defineProps<Props>(), {
   zoneFilter: null,
 })
 
+const alertCenterStore = useAlertCenterStore()
+const inboxStore = useNotificationInboxStore()
 const espStore = useEspStore()
 
-interface AlarmEntry {
-  sensorId: string
-  espId: string
-  gpio: number
-  sensorName: string
-  sensorType: string
-  value: number
-  unit: string
-  quality: string
-  zoneName: string
-  lastRead: string | null
-  severity: 'alarm' | 'warning'
+/** Severity order: critical first, then warning, then info */
+const SEVERITY_ORDER: Record<string, number> = {
+  critical: 0,
+  warning: 1,
+  info: 2,
 }
 
-const alarms = computed<AlarmEntry[]>(() => {
-  const entries: AlarmEntry[] = []
+/** Filtered and sorted alerts from notification API (persistierte Notifications) */
+const alarms = computed<NotificationDTO[]>(() => {
+  let items = alertCenterStore.activeAlertsFromInbox
 
-  for (const device of espStore.devices) {
-    if (props.zoneFilter && device.zone_id !== props.zoneFilter) continue
-
-    const deviceId = espStore.getDeviceId(device)
-    const sensors = (device.sensors as MockSensor[]) || []
-
-    for (const sensor of sensors) {
-      const q = sensor.quality
-      const isAlarm = q === 'poor' || q === 'bad' || q === 'error'
-      const isWarning = q === 'fair' || sensor.is_stale === true
-
-      if (!isAlarm && !isWarning) continue
-
-      entries.push({
-        sensorId: `${deviceId}:${sensor.gpio}`,
-        espId: deviceId,
-        gpio: sensor.gpio,
-        sensorName: sensor.name || sensor.sensor_type,
-        sensorType: sensor.sensor_type,
-        value: sensor.raw_value ?? 0,
-        unit: sensor.unit || '',
-        quality: q,
-        zoneName: device.zone_name || '',
-        lastRead: sensor.last_read || null,
-        severity: isAlarm ? 'alarm' : 'warning',
-      })
-    }
+  if (props.showResolved) {
+    items = inboxStore.notifications.filter(
+      (n) =>
+        n.status === 'active' ||
+        n.status === 'acknowledged' ||
+        n.status === 'resolved',
+    )
   }
 
-  // Sort by severity (alarm first) then by time (newest first)
-  entries.sort((a, b) => {
-    if (a.severity !== b.severity) return a.severity === 'alarm' ? -1 : 1
-    const tA = a.lastRead ? new Date(a.lastRead).getTime() : 0
-    const tB = b.lastRead ? new Date(b.lastRead).getTime() : 0
+  if (props.zoneFilter) {
+    items = items.filter((n) => {
+      const meta = n.metadata || {}
+      const zoneId = meta.zone_id as string | undefined
+      if (zoneId) return zoneId === props.zoneFilter
+      const espId = meta.esp_id as string | undefined
+      if (espId) {
+        const device = espStore.devices.find((d) => espStore.getDeviceId(d) === espId)
+        return device?.zone_id === props.zoneFilter
+      }
+      return false
+    })
+  }
+
+  const sorted = [...items].sort((a, b) => {
+    const orderA = SEVERITY_ORDER[a.severity] ?? 9
+    const orderB = SEVERITY_ORDER[b.severity] ?? 9
+    if (orderA !== orderB) return orderA - orderB
+    const tA = a.created_at ? new Date(a.created_at).getTime() : 0
+    const tB = b.created_at ? new Date(b.created_at).getTime() : 0
     return tB - tA
   })
 
-  return entries.slice(0, props.maxItems)
+  return sorted.slice(0, props.maxItems)
 })
 
-const alarmCount = computed(() => alarms.value.filter(a => a.severity === 'alarm').length)
+const alarmCount = computed(() =>
+  alarms.value.filter((a) => a.severity === 'critical').length,
+)
 
-function formatTimeAgo(isoStr: string | null): string {
-  if (!isoStr) return '–'
-  const diff = Date.now() - new Date(isoStr).getTime()
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return 'gerade'
-  if (minutes < 60) return `vor ${minutes} Min`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `vor ${hours} Std`
-  return `vor ${Math.floor(hours / 24)}d`
+function severityDisplay(severity: string): 'alarm' | 'warning' {
+  return severity === 'critical' ? 'alarm' : 'warning'
+}
+
+/** "Zum Alert" — öffnet NotificationDrawer für Ack/Resolve */
+function openNotificationDrawer(): void {
+  inboxStore.isDrawerOpen = true
 }
 </script>
 
@@ -105,33 +104,65 @@ function formatTimeAgo(isoStr: string | null): string {
 
     <!-- Alarm List -->
     <div v-if="alarms.length > 0" class="alarm-widget__list">
-      <div
+      <button
         v-for="alarm in alarms"
-        :key="alarm.sensorId"
-        :class="['alarm-widget__item', `alarm-widget__item--${alarm.severity}`]"
+        :key="alarm.id"
+        type="button"
+        :class="[
+          'alarm-widget__item',
+          `alarm-widget__item--${severityDisplay(alarm.severity)}`,
+        ]"
+        @click="openNotificationDrawer"
       >
         <component
-          :is="alarm.severity === 'alarm' ? AlertCircle : AlertTriangle"
+          :is="
+            alarm.severity === 'critical' ? AlertCircle : AlertTriangle
+          "
           class="alarm-widget__icon w-3.5 h-3.5"
         />
         <div class="alarm-widget__content">
           <div class="alarm-widget__header">
-            <span class="alarm-widget__sensor">{{ alarm.sensorName }}</span>
-            <span class="alarm-widget__time">{{ formatTimeAgo(alarm.lastRead) }}</span>
+            <span class="alarm-widget__sensor">{{ alarm.title }}</span>
+            <span class="alarm-widget__time">{{
+              formatRelativeTime(alarm.created_at)
+            }}</span>
           </div>
-          <div class="alarm-widget__detail">
-            <span class="alarm-widget__value">{{ alarm.value.toFixed(1) }} {{ alarm.unit }}</span>
-            <span v-if="alarm.zoneName" class="alarm-widget__zone">{{ alarm.zoneName }}</span>
+          <div v-if="alarm.body" class="alarm-widget__detail">
+            <span class="alarm-widget__value">{{ alarm.body }}</span>
+          </div>
+          <div
+            v-else-if="alarm.metadata?.value != null"
+            class="alarm-widget__detail"
+          >
+            <span class="alarm-widget__value">
+              {{ alarm.metadata.value }}
+              {{ alarm.metadata.unit ?? '' }}
+            </span>
+            <span
+              v-if="alarm.metadata?.zone_name"
+              class="alarm-widget__zone"
+            >
+              {{ alarm.metadata.zone_name }}
+            </span>
           </div>
         </div>
-      </div>
+      </button>
     </div>
 
     <!-- Empty State -->
     <div v-else class="alarm-widget__empty">
       <Bell class="w-6 h-6" style="opacity: 0.3" />
-      <span>Keine aktiven Alarme</span>
-      <span class="alarm-widget__empty-sub">Alles im grünen Bereich</span>
+      <span>Keine aktiven Alerts</span>
+      <span class="alarm-widget__empty-sub"
+        >Alle Alerts werden hier angezeigt</span
+      >
+      <button
+        type="button"
+        class="alarm-widget__link"
+        @click="openNotificationDrawer"
+      >
+        Benachrichtigungen öffnen
+      </button>
     </div>
   </div>
 </template>
@@ -173,6 +204,17 @@ function formatTimeAgo(isoStr: string | null): string {
   border-radius: var(--radius-sm);
   margin-bottom: 2px;
   border-left: 2px solid transparent;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  transition: background 0.15s;
+}
+
+.alarm-widget__item:hover {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .alarm-widget__item--alarm {
@@ -256,6 +298,21 @@ function formatTimeAgo(isoStr: string | null): string {
 .alarm-widget__empty-sub {
   font-size: var(--text-xs);
   opacity: 0.6;
+}
+
+.alarm-widget__link {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-iridescent-2);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.alarm-widget__link:hover {
+  color: var(--color-iridescent-1);
 }
 
 .alarm-widget__icon {

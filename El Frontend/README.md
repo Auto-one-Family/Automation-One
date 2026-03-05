@@ -61,7 +61,8 @@ poetry run uvicorn src.main:app --reload
 | `/` | Dashboard |
 | `/mock-esp` | Mock ESP Manager |
 | `/mock-esp/:id` | Mock ESP Details |
-| `/sensors` | Sensor Overview |
+| `/sensors` | Komponenten-Tab (Inventar/Wissensdatenbank); volle Konfiguration in `/hardware` |
+| `/hardware` | Übersicht: Zone/ESP-Topologie; SensorConfigPanel/ActuatorConfigPanel nur hier |
 | `/actuators` | Actuator Control |
 | `/mqtt-log` | MQTT Live Log |
 | `/logic` | Logic Rules |

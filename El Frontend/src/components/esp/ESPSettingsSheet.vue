@@ -2,10 +2,11 @@
 /**
  * ESPSettingsSheet Component
  *
- * Uses SlideOver primitive for consistent panel behavior.
- * Status via useESPStatus (single source of truth).
- * Sensor/Actuator config via event emission to parent SlideOvers.
- * Delete via ConfirmDialog (uiStore.confirm) + Toast.
+ * Reines Informations-Panel (Level 1). Keine Konfiguration, keine Links zu
+ * SensorConfigPanel/ActuatorConfigPanel. Konfiguration ausschliesslich ueber
+ * Level 2 (Orbital → Sensor-/Aktor-Card klicken).
+ *
+ * Layout: Einheitlich mit Design-Tokens, kompakt, Geräte nach Subzone gruppiert.
  */
 
 import { ref, computed, onUnmounted, watch, nextTick } from 'vue'
@@ -19,6 +20,7 @@ import {
   Trash2,
   Loader2,
   AlertTriangle,
+  Bell,
   Info,
   Settings2,
   Pencil,
@@ -27,12 +29,11 @@ import {
   Tag,
   Activity,
   Thermometer,
-  Zap,
-  ChevronRight,
 } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import { Badge, AccordionSection } from '@/shared/design/primitives'
 import ZoneAssignmentPanel from '@/components/zones/ZoneAssignmentPanel.vue'
+import DeviceAlertConfigSection from '@/components/devices/DeviceAlertConfigSection.vue'
 import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useUiStore } from '@/shared/stores'
@@ -61,8 +62,6 @@ const emit = defineEmits<{
   'zone-updated': [payload: { deviceId: string; zoneId: string; zoneName: string }]
   deleted: [payload: { deviceId: string }]
   'heartbeat-triggered': [payload: { deviceId: string }]
-  'open-sensor-config': [payload: { espId: string; gpio: number; sensorType: string; unit: string }]
-  'open-actuator-config': [payload: { espId: string; gpio: number; actuatorType: string }]
 }>()
 
 // =============================================================================
@@ -151,15 +150,94 @@ const zoneDisplay = computed(() => {
   return props.device?.zone_name || props.device?.zone_id || null
 })
 
-// Sensor/Actuator lists
-const sensors = computed(() => {
-  const d = props.device as any
-  return d?.sensors ?? []
-})
+// =============================================================================
+// DEVICE LIST BY SUBZONE (read-only, no config links)
+// =============================================================================
 
-const actuators = computed(() => {
+interface SubzoneGroup {
+  subzoneId: string | null
+  subzoneName: string
+  items: Array<{
+    type: 'sensor' | 'actuator'
+    name: string
+    gpio: number
+    typeLabel: string
+    value?: string
+    unit?: string
+    state?: boolean
+  }>
+}
+
+function formatSensorValue(sensor: any): string {
+  const val = sensor.raw_value ?? sensor.value
+  if (val === null || val === undefined) return '--'
+  const num = Number(val)
+  if (isNaN(num)) return String(val)
+  return num.toFixed(1)
+}
+
+const devicesBySubzone = computed<SubzoneGroup[]>(() => {
   const d = props.device as any
-  return d?.actuators ?? []
+  const deviceSensors = d?.sensors ?? []
+  const deviceActuators = d?.actuators ?? []
+  const deviceSubzoneId = d?.subzone_id ?? null
+  const deviceSubzoneName = d?.subzone_name ?? null
+
+  const map = new Map<string | null, { subzoneName: string; items: SubzoneGroup['items'] }>()
+
+  function getOrCreateGroup(szId: string | null, szName: string) {
+    if (!map.has(szId)) {
+      map.set(szId, {
+        subzoneName: szId === null ? 'Keine Subzone' : (szName || szId || ''),
+        items: [],
+      })
+    }
+    return map.get(szId)!
+  }
+
+  for (const sensor of deviceSensors) {
+    const szId = sensor.subzone_id ?? null
+    const szName = sensor.subzone_name ?? szId ?? ''
+    const g = getOrCreateGroup(szId, szName)
+    g.items.push({
+      type: 'sensor',
+      name: sensor.name || getSensorLabel(sensor.sensor_type || sensor.type || ''),
+      gpio: sensor.gpio,
+      typeLabel: getSensorLabel(sensor.sensor_type || sensor.type || ''),
+      value: formatSensorValue(sensor),
+      unit: sensor.unit || getSensorUnit(sensor.sensor_type || sensor.type || ''),
+    })
+  }
+
+  for (const actuator of deviceActuators) {
+    const szId = (actuator as any).subzone_id ?? deviceSubzoneId ?? null
+    const szName = (actuator as any).subzone_name ?? deviceSubzoneName ?? szId ?? ''
+    const g = getOrCreateGroup(szId, szName)
+    g.items.push({
+      type: 'actuator',
+      name: actuator.name || actuator.actuator_type || actuator.type || 'Aktor',
+      gpio: actuator.gpio,
+      typeLabel: actuator.actuator_type || actuator.type || 'Relay',
+      state: actuator.state,
+    })
+  }
+
+  const groups: SubzoneGroup[] = []
+  for (const [szId, { subzoneName, items }] of map) {
+    groups.push({
+      subzoneId: szId,
+      subzoneName: szId === null ? 'Keine Subzone' : subzoneName || szId,
+      items,
+    })
+  }
+
+  groups.sort((a, b) => {
+    if (a.subzoneId === null) return 1
+    if (b.subzoneId === null) return -1
+    return a.subzoneName.localeCompare(b.subzoneName)
+  })
+
+  return groups
 })
 
 // =============================================================================
@@ -208,35 +286,6 @@ async function handleDelete() {
   } finally {
     deleteLoading.value = false
   }
-}
-
-// =============================================================================
-// SENSOR / ACTUATOR CONFIG (emit to parent)
-// =============================================================================
-
-function openSensorConfig(sensor: any) {
-  emit('open-sensor-config', {
-    espId: espId.value,
-    gpio: sensor.gpio,
-    sensorType: sensor.sensor_type || sensor.type || 'generic',
-    unit: sensor.unit || getSensorUnit(sensor.sensor_type || sensor.type || ''),
-  })
-}
-
-function openActuatorConfig(actuator: any) {
-  emit('open-actuator-config', {
-    espId: espId.value,
-    gpio: actuator.gpio,
-    actuatorType: actuator.actuator_type || actuator.type || 'relay',
-  })
-}
-
-function formatSensorValue(sensor: any): string {
-  const val = sensor.raw_value ?? sensor.value
-  if (val === null || val === undefined) return '--'
-  const num = Number(val)
-  if (isNaN(num)) return String(val)
-  return num.toFixed(1)
 }
 
 // =============================================================================
@@ -602,15 +651,13 @@ onUnmounted(() => {
       <!-- ZONE Section -->
       <section class="sheet-section">
         <h4 class="sheet-section__title">
-          <MapPin class="w-4 h-4 inline mr-1" />
+          <MapPin class="w-3.5 h-3.5" />
           Zone
         </h4>
         <div class="sheet-section__content">
-          <div v-if="zoneDisplay" class="info-row info-row--zone-current">
+          <div v-if="zoneDisplay" class="info-row info-row--compact">
             <span class="info-row__label">Aktuell</span>
-            <Badge variant="success" size="sm">
-              {{ zoneDisplay }}
-            </Badge>
+            <Badge variant="success" size="sm">{{ zoneDisplay }}</Badge>
           </div>
 
           <ZoneAssignmentPanel
@@ -624,79 +671,59 @@ onUnmounted(() => {
             @zone-error="handleZoneError"
           />
 
-          <p class="text-muted text-xs mt-2">
-            <Info class="w-3 h-3 inline mr-1" />
-            Zone kann auch via Drag &amp; Drop im Dashboard geändert werden.
+          <p class="sheet-hint">
+            <Info class="w-3 h-3" />
+            Zone kann auch via Drag &amp; Drop geändert werden.
           </p>
         </div>
       </section>
 
-      <!-- SENSOR LIST Section (replaces inline SensorConfigPanel) -->
-      <section v-if="sensors.length > 0" class="sheet-section">
-        <h4 class="sheet-section__title">
-          <Thermometer class="w-3.5 h-3.5" />
-          Sensoren ({{ sensors.length }})
-        </h4>
-        <div class="sheet-section__content">
-          <button
-            v-for="sensor in sensors"
-            :key="`s-${sensor.gpio}`"
-            class="config-list-item"
-            @click="openSensorConfig(sensor)"
-          >
-            <div class="config-list-item__info">
-              <span class="config-list-item__name">
-                {{ sensor.name || getSensorLabel(sensor.sensor_type || sensor.type || '') }}
-              </span>
-              <span class="config-list-item__detail">
-                GPIO {{ sensor.gpio }}
-              </span>
-            </div>
-            <div class="config-list-item__value">
-              <span class="config-list-item__reading">
-                {{ formatSensorValue(sensor) }}
-              </span>
-              <span class="config-list-item__unit">
-                {{ sensor.unit || getSensorUnit(sensor.sensor_type || sensor.type || '') }}
-              </span>
-            </div>
-            <ChevronRight class="config-list-item__arrow w-4 h-4" />
-          </button>
-        </div>
+      <!-- Alert-Konfiguration (Gerät) -->
+      <section v-if="espId" class="sheet-section">
+        <AccordionSection
+          title="Alert-Konfiguration (Gerät)"
+          storage-key="esp-settings-alert-config"
+          :icon="Bell"
+        >
+          <DeviceAlertConfigSection :esp-id="espId" />
+        </AccordionSection>
       </section>
 
-      <!-- ACTUATOR LIST Section (replaces inline ActuatorConfigPanel) -->
-      <section v-if="actuators.length > 0" class="sheet-section">
+      <!-- Geräte nach Subzone (read-only) -->
+      <section v-if="devicesBySubzone.length > 0" class="sheet-section">
         <h4 class="sheet-section__title">
-          <Zap class="w-3.5 h-3.5" />
-          Aktoren ({{ actuators.length }})
+          <Thermometer class="w-3.5 h-3.5" />
+          Geräte nach Subzone
         </h4>
         <div class="sheet-section__content">
-          <button
-            v-for="actuator in actuators"
-            :key="`a-${actuator.gpio}`"
-            class="config-list-item"
-            @click="openActuatorConfig(actuator)"
+          <div
+            v-for="group in devicesBySubzone"
+            :key="group.subzoneId ?? 'none'"
+            class="device-group"
           >
-            <div class="config-list-item__info">
-              <span class="config-list-item__name">
-                {{ actuator.name || actuator.actuator_type || actuator.type || 'Aktor' }}
-              </span>
-              <span class="config-list-item__detail">
-                GPIO {{ actuator.gpio }}
-              </span>
-            </div>
-            <div class="config-list-item__value">
-              <Badge
-                :variant="actuator.state ? 'success' : 'gray'"
-                size="sm"
-                dot
+            <h5 class="device-group__title">{{ group.subzoneName }}</h5>
+            <ul class="device-list">
+              <li
+                v-for="(item, idx) in group.items"
+                :key="`${item.type}-${item.gpio}-${idx}`"
+                class="device-list__item"
               >
-                {{ actuator.state ? 'AN' : 'AUS' }}
-              </Badge>
-            </div>
-            <ChevronRight class="config-list-item__arrow w-4 h-4" />
-          </button>
+                <span class="device-list__name">{{ item.name }}</span>
+                <span class="device-list__meta">{{ item.typeLabel }} · GPIO {{ item.gpio }}</span>
+                <span v-if="item.type === 'sensor'" class="device-list__value">
+                  {{ item.value }} {{ item.unit }}
+                </span>
+                <Badge
+                  v-else
+                  :variant="item.state ? 'success' : 'gray'"
+                  size="sm"
+                  dot
+                >
+                  {{ item.state ? 'AN' : 'AUS' }}
+                </Badge>
+              </li>
+            </ul>
+          </div>
         </div>
       </section>
 
@@ -769,9 +796,9 @@ onUnmounted(() => {
         </AccordionSection>
       </section>
 
-      <!-- REAL ESP INFO -->
+      <!-- Echt-ESP-Info -->
       <section v-if="!isMock" class="sheet-section sheet-section--info">
-        <h4 class="sheet-section__title">Geraeteinformation</h4>
+        <h4 class="sheet-section__title">Echt-ESP-Info</h4>
         <div class="sheet-section__content">
           <p class="text-muted text-sm">
             <Info class="w-4 h-4 inline mr-1" />
@@ -811,7 +838,7 @@ onUnmounted(() => {
 .sheet-body {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: var(--space-4);
 }
 
 /* =============================================================================
@@ -821,27 +848,36 @@ onUnmounted(() => {
 .sheet-section {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--space-2);
 }
 
 .sheet-section__title {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  font-size: 0.6875rem;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-secondary);
   margin: 0;
-  padding-bottom: 0.5rem;
+  padding-bottom: var(--space-1);
   border-bottom: 1px solid var(--glass-border);
 }
 
 .sheet-section__content {
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
+  gap: var(--space-2);
+}
+
+.sheet-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin: var(--space-1) 0 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 .sheet-section--mock {
@@ -1062,10 +1098,76 @@ onUnmounted(() => {
   border-radius: 0.25rem;
 }
 
+.info-row--compact {
+  min-height: 24px;
+}
+
 .info-row--zone-current {
-  padding-bottom: 0.625rem;
-  margin-bottom: 0.5rem;
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
   border-bottom: 1px solid var(--glass-border);
+}
+
+/* =============================================================================
+   DEVICE LIST (Geräte nach Subzone — read-only, compact)
+   ============================================================================= */
+
+.device-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.device-group__title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin: 0;
+  padding: 0 var(--space-1);
+}
+
+.device-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.device-list__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background-color: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+
+.device-list__name {
+  font-weight: 500;
+  color: var(--color-text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-list__meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.device-list__value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  flex-shrink: 0;
 }
 
 /* =============================================================================
@@ -1090,82 +1192,6 @@ onUnmounted(() => {
 .wifi-bar:nth-child(4) { height: 12px; }
 
 .wifi-bar.active { opacity: 1; background-color: currentColor; }
-
-/* =============================================================================
-   CONFIG LIST ITEMS (Sensor/Actuator rows with "Einstellungen" affordance)
-   ============================================================================= */
-
-.config-list-item {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  width: 100%;
-  padding: 0.625rem 0.75rem;
-  background-color: var(--color-bg-tertiary);
-  border: 1px solid var(--glass-border);
-  border-radius: 0.5rem;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  text-align: left;
-}
-
-.config-list-item:hover {
-  border-color: var(--color-iridescent-1);
-  background-color: rgba(96, 165, 250, 0.04);
-}
-
-.config-list-item__info {
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-  flex: 1;
-  min-width: 0;
-}
-
-.config-list-item__name {
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--color-text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.config-list-item__detail {
-  font-size: 0.6875rem;
-  color: var(--color-text-muted);
-}
-
-.config-list-item__value {
-  display: flex;
-  align-items: baseline;
-  gap: 0.25rem;
-  flex-shrink: 0;
-}
-
-.config-list-item__reading {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.config-list-item__unit {
-  font-size: 0.6875rem;
-  color: var(--color-text-muted);
-}
-
-.config-list-item__arrow {
-  color: var(--color-text-muted);
-  opacity: 0.4;
-  flex-shrink: 0;
-  transition: opacity 0.15s ease;
-}
-
-.config-list-item:hover .config-list-item__arrow {
-  opacity: 1;
-  color: var(--color-iridescent-1);
-}
 
 /* =============================================================================
    ACTION BUTTONS

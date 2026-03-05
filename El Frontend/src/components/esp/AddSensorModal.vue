@@ -13,6 +13,7 @@
 import { ref, computed, watch } from 'vue'
 import { Loader2, ScanLine, AlertCircle, Info, Thermometer, Plus, CheckSquare, Square, Check } from 'lucide-vue-next'
 import GpioPicker from './GpioPicker.vue'
+import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSection.vue'
 import { Badge, BaseModal } from '@/shared/design/primitives'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
@@ -27,6 +28,7 @@ import {
   getSensorTypeAwareSummary,
 } from '@/utils/sensorDefaults'
 import { getRecommendedGpios } from '@/utils/gpioConfig'
+import { normalizeSubzoneId } from '@/utils/subzoneHelpers'
 import type { MockSensorConfig } from '@/types'
 import { createLogger } from '@/utils/logger'
 
@@ -61,7 +63,7 @@ const newSensor = ref<MockSensorConfig & { operating_mode?: string; timeout_seco
   gpio: 0,
   sensor_type: defaultSensorType,
   name: '',
-  subzone_id: '',
+  subzone_id: null,
   raw_value: getSensorDefault(defaultSensorType),
   unit: getSensorUnit(defaultSensorType),
   quality: 'good',
@@ -169,6 +171,22 @@ const supportsOnDemand = computed(() => {
 
 const oneWireScanPins = computed(() => getRecommendedGpios('ds18b20', 'sensor'))
 
+/** GPIO used for subzone assignment (create-new flow); varies by sensor type */
+const effectiveGpio = computed(() => {
+  if (isOneWireSensor.value) return oneWireScanPin.value
+  if (isI2CSensor.value) return 0
+  return newSensor.value.gpio
+})
+
+const device = computed(() => espStore.devices.find((d) => espStore.getDeviceId(d) === props.espId))
+const zoneId = computed(() => device.value?.zone_id ?? null)
+
+/** Subzone v-model: SubzoneAssignmentSection expects string | null, form may have undefined */
+const subzoneModel = computed({
+  get: () => newSensor.value.subzone_id ?? null,
+  set: (v: string | null) => { newSensor.value.subzone_id = v },
+})
+
 // ── Actions ──────────────────────────────────────────────────────────
 
 function close() {
@@ -187,7 +205,7 @@ function resetForm() {
     gpio: defaultGpio,
     sensor_type: defaultSensorType,
     name: '',
-    subzone_id: '',
+    subzone_id: null,
     raw_value: getSensorDefault(defaultSensorType),
     unit: getSensorUnit(defaultSensorType),
     quality: 'good',
@@ -260,6 +278,7 @@ async function addMultipleOneWireSensors() {
   }
   let successCount = 0
   let failCount = 0
+  const chosenSubzoneId = normalizeSubzoneId(newSensor.value.subzone_id)
   for (const romCode of romCodesToAdd) {
     try {
       const device = state.scanResults.find(d => d.rom_code === romCode)
@@ -272,6 +291,7 @@ async function addMultipleOneWireSensors() {
         timeout_seconds: 180,
         raw_mode: true,
         name: `Temp ${romCode.slice(-4)}`,
+        subzone_id: chosenSubzoneId ?? undefined,
       })
       successCount++
     } catch (err) {
@@ -433,8 +453,12 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
 
       <!-- Subzone -->
       <div class="form-group">
-        <label class="form-label">Subzone (optional)</label>
-        <input v-model="newSensor.subzone_id" type="text" class="form-input" placeholder="z.B. gewaechshaus_reihe_1" />
+        <SubzoneAssignmentSection
+          :esp-id="espId"
+          :gpio="effectiveGpio"
+          :zone-id="zoneId"
+          v-model="subzoneModel"
+        />
       </div>
 
       <!-- Initial Value + Unit -->

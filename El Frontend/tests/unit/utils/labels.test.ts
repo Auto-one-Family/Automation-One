@@ -11,6 +11,7 @@ import {
   ACTUATOR_TYPE_LABELS,
   ACTUATOR_STATE_LABELS,
   CONNECTION_LABELS,
+  EMAIL_STATUS_LABELS,
   DEVICE_TYPE_LABELS,
   ACTION_LABELS,
   MESSAGE_LABELS,
@@ -25,7 +26,8 @@ import {
   getStateLabel,
   getActuatorTypeLabel,
   getConnectionLabel,
-  getDeviceTypeLabel
+  getDeviceTypeLabel,
+  getEmailStatusLabel
 } from '@/utils/labels'
 
 // =============================================================================
@@ -68,6 +70,15 @@ describe('CONNECTION_LABELS', () => {
     expect(CONNECTION_LABELS.online).toBe('Online')
     expect(CONNECTION_LABELS.offline).toBe('Offline')
     expect(CONNECTION_LABELS.connecting).toBe('Verbinde...')
+  })
+})
+
+describe('EMAIL_STATUS_LABELS', () => {
+  it('contains expected email status keys (Phase C V1.2)', () => {
+    expect(EMAIL_STATUS_LABELS.sent).toBe('Zugestellt')
+    expect(EMAIL_STATUS_LABELS.failed).toBe('Fehlgeschlagen')
+    expect(EMAIL_STATUS_LABELS.pending).toBe('Ausstehend')
+    expect(EMAIL_STATUS_LABELS.permanently_failed).toBe('Dauerhaft fehlgeschlagen')
   })
 })
 
@@ -287,6 +298,19 @@ describe('getConnectionLabel', () => {
 
   it('returns original value for unknown status', () => {
     expect(getConnectionLabel('unknown')).toBe('unknown')
+  })
+})
+
+describe('getEmailStatusLabel', () => {
+  it('returns email status label', () => {
+    expect(getEmailStatusLabel('sent')).toBe('Zugestellt')
+    expect(getEmailStatusLabel('failed')).toBe('Fehlgeschlagen')
+    expect(getEmailStatusLabel('pending')).toBe('Ausstehend')
+    expect(getEmailStatusLabel('permanently_failed')).toBe('Dauerhaft fehlgeschlagen')
+  })
+
+  it('returns original value for unknown status', () => {
+    expect(getEmailStatusLabel('unknown')).toBe('unknown')
   })
 })
 

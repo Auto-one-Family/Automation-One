@@ -17,13 +17,20 @@ import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import NotificationItem from '@/components/notifications/NotificationItem.vue'
 import NotificationPreferences from '@/components/notifications/NotificationPreferences.vue'
 import AlertStatusBar from '@/components/notifications/AlertStatusBar.vue'
-import { useNotificationInboxStore, type InboxFilter } from '@/shared/stores/notification-inbox.store'
+import {
+  useNotificationInboxStore,
+  type InboxFilter,
+  type SourceFilterValue,
+} from '@/shared/stores/notification-inbox.store'
 import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import { notificationsApi, type EmailLogEntry } from '@/api/notifications'
 import { formatRelativeTime } from '@/utils/formatters'
+import { getEmailStatusLabel } from '@/utils/labels'
 
 const inboxStore = useNotificationInboxStore()
 const alertStore = useAlertCenterStore()
+const authStore = useAuthStore()
 
 type StatusFilter = 'all' | 'active' | 'acknowledged' | 'resolved'
 const activeStatusFilter = ref<StatusFilter>('all')
@@ -33,6 +40,16 @@ const filterTabs: { key: InboxFilter; label: string }[] = [
   { key: 'critical', label: 'Kritisch' },
   { key: 'warning', label: 'Warnungen' },
   { key: 'system', label: 'System' },
+]
+
+/** Source filter chips: Alle | Sensor | Infrastruktur | Aktor | Regel | System */
+const sourceChips: { value: SourceFilterValue; label: string }[] = [
+  { value: null, label: 'Alle' },
+  { value: 'sensor_threshold', label: 'Sensor' },
+  { value: 'grafana', label: 'Infrastruktur' },
+  { value: 'mqtt_handler', label: 'Aktor' },
+  { value: 'logic_engine', label: 'Regel' },
+  { value: '__system__', label: 'System' },
 ]
 
 const statusTabs = computed(() => {
@@ -101,15 +118,6 @@ async function loadEmailLog(): Promise<void> {
 
 const hasEmailLog = computed(() => emailLog.value.length > 0)
 
-function emailStatusLabel(status: string): string {
-  switch (status) {
-    case 'sent': return 'Zugestellt'
-    case 'failed': return 'Fehlgeschlagen'
-    case 'pending': return 'Ausstehend'
-    default: return status
-  }
-}
-
 // Refresh list when drawer opens
 watch(
   () => inboxStore.isDrawerOpen,
@@ -117,7 +125,7 @@ watch(
     if (isOpen) {
       inboxStore.loadInitial()
       activeStatusFilter.value = 'all'
-      loadEmailLog()
+      if (authStore.isAdmin) loadEmailLog()
     }
   },
 )
@@ -186,6 +194,21 @@ watch(
         </button>
       </div>
 
+      <!-- Source Filter Chips -->
+      <div class="drawer__source-chips">
+        <button
+          v-for="chip in sourceChips"
+          :key="chip.value ?? 'all'"
+          :class="[
+            'drawer__source-chip',
+            { 'drawer__source-chip--active': inboxStore.sourceFilter === chip.value },
+          ]"
+          @click="inboxStore.setSourceFilter(chip.value)"
+        >
+          {{ chip.label }}
+        </button>
+      </div>
+
       <!-- Notification List -->
       <div class="drawer__list">
         <!-- Loading State -->
@@ -201,7 +224,7 @@ watch(
           <span class="drawer__empty-icon">🔔</span>
           <span class="drawer__empty-text">Keine Benachrichtigungen</span>
           <span class="drawer__empty-sub">
-            {{ inboxStore.activeFilter !== 'all'
+            {{ inboxStore.activeFilter !== 'all' || inboxStore.sourceFilter
               ? 'Kein Ergebnis für diesen Filter'
               : 'Hier erscheinen zukünftige Alarme und Ereignisse' }}
           </span>
@@ -238,22 +261,32 @@ watch(
         </template>
       </div>
 
-      <!-- Email Log Footer -->
-      <div v-if="hasEmailLog" class="drawer__email-footer">
-        <button
-          class="drawer__email-toggle"
-          @click="emailLogExpanded = !emailLogExpanded"
-        >
-          <Mail class="drawer__email-toggle-icon" />
-          <span>Letzte 5 Emails</span>
-          <component
-            :is="emailLogExpanded ? ChevronUp : ChevronDown"
-            class="drawer__email-toggle-chevron"
-          />
-        </button>
+      <!-- Email Log Footer (Admin only) -->
+      <div v-if="authStore.isAdmin" class="drawer__email-footer">
+        <div class="drawer__email-toggle-row">
+          <button
+            v-if="hasEmailLog"
+            class="drawer__email-toggle"
+            @click="emailLogExpanded = !emailLogExpanded"
+          >
+            <Mail class="drawer__email-toggle-icon" />
+            <span>Letzte 5 Emails</span>
+            <component
+              :is="emailLogExpanded ? ChevronUp : ChevronDown"
+              class="drawer__email-toggle-chevron"
+            />
+          </button>
+          <RouterLink
+            to="/email"
+            class="drawer__email-all-link"
+            @click="inboxStore.isDrawerOpen = false"
+          >
+            Alle anzeigen
+          </RouterLink>
+        </div>
 
         <Transition name="expand">
-          <div v-if="emailLogExpanded" class="drawer__email-list">
+          <div v-if="hasEmailLog && emailLogExpanded" class="drawer__email-list">
             <div
               v-for="entry in emailLog"
               :key="entry.id"
@@ -261,7 +294,15 @@ watch(
             >
               <span :class="['drawer__email-dot', `drawer__email-dot--${entry.status}`]" />
               <span class="drawer__email-subject">{{ entry.subject }}</span>
-              <span class="drawer__email-status">{{ emailStatusLabel(entry.status) }}</span>
+              <span class="drawer__email-status">
+                {{ getEmailStatusLabel(entry.status) }}
+                <span
+                  v-if="(entry.status === 'failed' || entry.status === 'permanently_failed') && entry.retry_count > 0"
+                  class="drawer__email-retry"
+                >
+                  ({{ entry.retry_count }}/3 Versuche)
+                </span>
+              </span>
               <span v-if="entry.sent_at || entry.created_at" class="drawer__email-time">
                 {{ formatRelativeTime(entry.sent_at || entry.created_at!) }}
               </span>
@@ -396,6 +437,40 @@ watch(
   border-color: var(--glass-border);
 }
 
+/* Source Filter Chips */
+.drawer__source-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.drawer__source-chip {
+  padding: 2px var(--space-2);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.drawer__source-chip:hover {
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.drawer__source-chip--active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border-color: var(--glass-border);
+}
+
 /* Notification List */
 .drawer__list {
   margin: 0 calc(-1 * var(--space-6));
@@ -493,11 +568,19 @@ watch(
   padding: var(--space-3) var(--space-4);
 }
 
+.drawer__email-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+}
+
 .drawer__email-toggle {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  width: 100%;
+  flex: 1;
   padding: var(--space-2) 0;
   font-size: var(--text-xs);
   font-weight: 600;
@@ -506,6 +589,20 @@ watch(
   border: none;
   cursor: pointer;
   transition: color var(--transition-fast);
+  text-align: left;
+}
+
+.drawer__email-all-link {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-iridescent-2);
+  text-decoration: none;
+  white-space: nowrap;
+  padding: var(--space-2) 0;
+}
+
+.drawer__email-all-link:hover {
+  text-decoration: underline;
 }
 
 .drawer__email-toggle:hover {
@@ -557,6 +654,16 @@ watch(
 
 .drawer__email-dot--pending {
   background: var(--color-text-muted);
+}
+
+.drawer__email-dot--permanently_failed {
+  background: var(--color-error);
+}
+
+.drawer__email-retry {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  margin-left: var(--space-1);
 }
 
 .drawer__email-subject {

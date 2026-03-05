@@ -21,7 +21,7 @@ export type { ConfirmOptions, ConfirmVariant, ContextMenuItem } from './ui.store
 export { useDashboardStore } from './dashboard.store'
 export type { StatusFilter, TypeFilter } from './dashboard.store'
 export { useNotificationInboxStore } from './notification-inbox.store'
-export type { InboxFilter } from './notification-inbox.store'
+export type { InboxFilter, SourceFilterValue } from './notification-inbox.store'
 export { useQuickActionStore } from './quickAction.store'
 export type { QuickAction, ViewContext, QuickActionPanel } from './quickAction.store'
 export { useAlertCenterStore } from './alert-center.store'

@@ -347,7 +347,8 @@ export interface MockSensorConfig {
   gpio: number
   sensor_type: string
   name?: string
-  subzone_id?: string
+  /** Subzone ID (optional); null = "Keine Subzone" */
+  subzone_id?: string | null
   raw_value?: number
   unit?: string
   quality?: QualityLevel
@@ -369,6 +370,8 @@ export interface MockActuatorConfig {
   pwm_value?: number
   min_value?: number
   max_value?: number
+  /** Subzone ID (optional); sent as top-level in ActuatorConfigCreate */
+  subzone_id?: string | null
   // Phase 7: Actuator Sidebar fields
   aux_gpio?: number | null      // 255 = nicht verwendet (für Ventile: Direction-Pin)
   inverted_logic?: boolean      // LOW = ON (für Pumpen, Ventile, Relais)
@@ -662,6 +665,12 @@ export interface SensorConfigResponse {
   config_error_detail?: string | null
   /** Subzone ID this sensor belongs to (if any) */
   subzone_id?: string | null
+  /** Operating mode: continuous, on_demand, scheduled, paused */
+  operating_mode?: SensorOperatingMode | null
+  /** Timeout for stale detection in seconds (0 = disabled) */
+  timeout_seconds?: number | null
+  /** Schedule config for scheduled mode: { type: 'cron', expression: string } */
+  schedule_config?: { type: string; expression: string } | Record<string, unknown> | null
   latest_value?: number | null
   latest_quality?: QualityLevel | null
   latest_timestamp?: string | null
@@ -805,6 +814,8 @@ export interface ActuatorConfigCreate {
   servo_min_pulse?: number | null
   servo_max_pulse?: number | null
   metadata?: Record<string, unknown> | null
+  /** Subzone ID to assign this actuator to. Null/empty = remove from all subzones */
+  subzone_id?: string | null
   // Phase 7: Actuator Sidebar fields
   aux_gpio?: number | null       // 255 = nicht verwendet (für Ventile: Direction-Pin)
   inverted_logic?: boolean | null  // LOW = ON (für Pumpen, Ventile, Relais)

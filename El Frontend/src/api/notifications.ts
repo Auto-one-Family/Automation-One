@@ -135,7 +135,9 @@ export interface TestEmailResponse {
   recipient: string | null
 }
 
-// Phase C V1.1: Email log types
+// Phase C V1.1: Email log types (V1.2: permanently_failed)
+export type EmailLogStatus = 'sent' | 'failed' | 'pending' | 'permanently_failed'
+
 export interface EmailLogEntry {
   id: string
   notification_id: string | null
@@ -143,7 +145,7 @@ export interface EmailLogEntry {
   subject: string
   template: string | null
   provider: string
-  status: 'sent' | 'failed' | 'pending'
+  status: EmailLogStatus
   sent_at: string | null
   error_message: string | null
   retry_count: number
@@ -157,9 +159,10 @@ export interface EmailLogListResponse {
 }
 
 export interface EmailLogListFilters {
-  status?: string
+  status?: EmailLogStatus
   date_from?: string
   date_to?: string
+  template?: string
   page?: number
   page_size?: number
 }

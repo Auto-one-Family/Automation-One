@@ -6,7 +6,7 @@
  * Zone 2 (Accordion): Type-specific settings (Pump/Valve/PWM/Relay)
  * Zone 3 (Accordion - Expert): Safety status, Emergency Stop
  *
- * Used inside ESPSettingsSheet as SlideOver panel.
+ * Used inside ESPSettingsSheet as SlideOver panel (HardwareView only, Route /hardware).
  */
 
 import { ref, computed, onMounted, watch } from 'vue'
@@ -17,12 +17,16 @@ import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { AccordionSection } from '@/shared/design/primitives'
 import { useUiStore } from '@/shared/stores/ui.store'
+import { useGpioStatus } from '@/composables/useGpioStatus'
+import { supportsAuxGpio } from '@/utils/actuatorDefaults'
+import { getGpioConfig } from '@/utils/gpioConfig'
 import type { MockActuator } from '@/types'
 import AlertConfigSection from '@/components/devices/AlertConfigSection.vue'
 import RuntimeMaintenanceSection from '@/components/devices/RuntimeMaintenanceSection.vue'
 import DeviceMetadataSection from '@/components/devices/DeviceMetadataSection.vue'
 import LinkedRulesSection from '@/components/devices/LinkedRulesSection.vue'
 import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSection.vue'
+import { normalizeSubzoneId } from '@/utils/subzoneHelpers'
 import type { DeviceMetadata } from '@/types/device-metadata'
 import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
 
@@ -70,6 +74,8 @@ const isNormalClosed = ref(true)
 const pwmFrequency = ref(5000) // Hz
 const powerLimit = ref(100) // %
 const switchDelay = ref(50) // ms
+/** aux_gpio for Valve (H-Bridge direction pin). 255 = nicht verwendet */
+const auxGpio = ref<number>(255)
 
 // Device Metadata
 const metadata = ref<DeviceMetadata>({})
@@ -97,6 +103,28 @@ const currentPwmValue = ref(0)
 /** Storage key prefix for accordion persistence */
 const accordionKey = computed(() => `actuator-${props.espId}-${props.gpio}`)
 
+/** GPIO options for aux_gpio (Valve): "Nicht verwendet" + available pins excluding main gpio */
+const { allPinStatuses } = useGpioStatus(computed(() => props.espId))
+const auxGpioOptions = computed(() => {
+  const meta = allPinStatuses.value
+  const pins =
+    meta.length > 0
+      ? meta.filter(p => p.available && p.gpio !== props.gpio).map(p => p.gpio)
+      : getGpioConfig('ESP32_WROOM')
+          .filter(p => p.category !== 'avoid')
+          .map(p => p.gpio)
+          .filter(g => g !== props.gpio)
+  const set = new Set(pins)
+  if (auxGpio.value !== 255 && auxGpio.value !== props.gpio) {
+    set.add(auxGpio.value)
+  }
+  const sorted = [...set].sort((a, b) => a - b)
+  return [
+    { value: 255, label: 'Nicht verwendet' },
+    ...sorted.map(g => ({ value: g, label: `GPIO ${g}` })),
+  ]
+})
+
 // =============================================================================
 // Load existing config
 // =============================================================================
@@ -108,24 +136,40 @@ onMounted(async () => {
     try {
       const config = await actuatorsApi.get(props.espId, props.gpio)
       if (config) {
-        actuatorDbId.value = (config as any).id ? String((config as any).id) : null
-        name.value = (config as any).name || ''
-        description.value = (config as any).description || ''
-        enabled.value = (config as any).enabled !== false
-        maxRuntime.value = (config as any).max_on_duration_ms ? Math.round((config as any).max_on_duration_ms / 1000) : 3600
-        minPause.value = (config as any).min_pause_seconds || 60
-        maxOpenTime.value = (config as any).max_open_time_seconds || 3600
-        isNormalClosed.value = (config as any).active_high !== true
-        pwmFrequency.value = (config as any).frequency || 5000
-        powerLimit.value = (config as any).duty_max || 100
-        switchDelay.value = (config as any).switch_delay_ms || 50
+        const c = config as unknown as Record<string, unknown>
+        const meta = (c.metadata as Record<string, unknown>) || {}
 
-        if ((config as any).subzone_id) {
-          subzoneId.value = (config as any).subzone_id
+        actuatorDbId.value = c.id ? String(c.id) : null
+        name.value = (c.name as string) || ''
+        description.value = (c.description as string) || ''
+        enabled.value = c.enabled !== false
+
+        // Block A: Backend→Frontend field mapping (max_runtime_seconds, cooldown_seconds, metadata)
+        maxRuntime.value = (c.max_runtime_seconds as number) ?? 3600
+        minPause.value = (c.cooldown_seconds as number) ?? 60
+        maxOpenTime.value =
+          (c.max_runtime_seconds as number) ??
+          (meta.max_open_time as number) ??
+          (meta.max_open_time_seconds as number) ??
+          3600
+        isNormalClosed.value =
+          meta.inverted_logic !== undefined
+            ? !!meta.inverted_logic
+            : (c.active_high as boolean) !== true
+        pwmFrequency.value =
+          (c.pwm_frequency as number) ?? (meta.pwm_frequency as number) ?? 5000
+        powerLimit.value = (meta.duty_max as number) ?? 100
+        switchDelay.value =
+          (meta.switch_delay_ms as number) ?? (meta.switch_delay as number) ?? 50
+        auxGpio.value =
+          (meta.aux_gpio as number) ?? 255
+
+        if (c.subzone_id) {
+          subzoneId.value = c.subzone_id as string
         }
 
-        // Device metadata
-        metadata.value = parseDeviceMetadata((config as any).metadata)
+        // Device metadata (manufacturer, model, etc.)
+        metadata.value = parseDeviceMetadata(meta)
       }
     } catch {
       // No existing config
@@ -240,7 +284,7 @@ async function handleSave() {
       toast.success('Aktor-Konfiguration gespeichert')
       emit('saved')
     } else {
-      // Real: save to server via actuators API
+      // Real: save to server via actuators API (Backend expects max_runtime_seconds, cooldown_seconds, metadata)
       const config: Record<string, unknown> = {
         esp_id: props.espId,
         gpio: props.gpio,
@@ -248,32 +292,34 @@ async function handleSave() {
         name: name.value || null,
         description: description.value || null,
         enabled: enabled.value,
-        subzone_id: subzoneId.value || null,
+        subzone_id: normalizeSubzoneId(subzoneId.value),
       }
 
+      // Device metadata base (manufacturer, model, etc.)
+      const meta: Record<string, unknown> = mergeDeviceMetadata(null, metadata.value)
+
       if (isPump.value) {
-        config.max_on_duration_ms = maxRuntime.value * 1000
-        config.min_pause_seconds = minPause.value
+        config.max_runtime_seconds = maxRuntime.value
+        config.cooldown_seconds = minPause.value
       }
 
       if (isValve.value) {
-        config.max_open_time_seconds = maxOpenTime.value
-        config.active_high = !isNormalClosed.value
+        config.max_runtime_seconds = maxOpenTime.value
+        meta.inverted_logic = isNormalClosed.value
+        meta.aux_gpio = auxGpio.value
       }
 
       if (isPWM.value) {
-        config.frequency = pwmFrequency.value
-        config.duty_max = powerLimit.value
+        config.pwm_frequency = pwmFrequency.value
+        meta.duty_max = powerLimit.value
       }
 
       if (isRelay.value) {
-        config.active_high = !isNormalClosed.value
-        config.switch_delay_ms = switchDelay.value
+        meta.inverted_logic = isNormalClosed.value
+        meta.switch_delay_ms = switchDelay.value
       }
 
-      // Device metadata
-      config.metadata = mergeDeviceMetadata(null, metadata.value)
-
+      config.metadata = meta
       await actuatorsApi.createOrUpdate(props.espId, props.gpio, config as any)
       toast.success('Aktor-Konfiguration gespeichert')
       emit('saved')
@@ -441,6 +487,16 @@ function formatDuration(seconds: number): string {
             >
               <span class="actuator-config__toggle-dot" />
             </button>
+          </div>
+          <!-- aux_gpio: Direction-Pin für H-Bridge (Block B) -->
+          <div v-if="supportsAuxGpio(actuatorType)" class="actuator-config__field">
+            <label class="actuator-config__label">Direction-Pin (H-Bridge)</label>
+            <select v-model.number="auxGpio" class="actuator-config__select">
+              <option v-for="opt in auxGpioOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+            <span class="actuator-config__helper">255 = nicht verwendet</span>
           </div>
         </template>
 

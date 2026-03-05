@@ -6,7 +6,7 @@
  * and navigation links. Used inside the inventory view when a table row is clicked.
  *
  * Note: Full device editing (AlertConfig, RuntimeMaintenance, DeviceMetadata)
- * is done via SensorConfigPanel / ActuatorConfigPanel in the /sensors view.
+ * is done via SensorConfigPanel / ActuatorConfigPanel in the HardwareView (Übersicht, Route /hardware), not in the SensorsView (/sensors).
  */
 
 import { ref, computed, watch } from 'vue'

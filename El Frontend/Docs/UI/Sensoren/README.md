@@ -2,6 +2,8 @@
 
 ## 🎯 SensorsView (`/sensors`) - Komplette UI-Dokumentation
 
+**Hinweis View-Trennung:** Die Route `/sensors` ist der **Komponenten-Tab** (Wissensdatenbank/Inventar). SensorConfigPanel und ActuatorConfigPanel (Schwellwerte, Subzone, Kalibrierung, Alerts, Runtime) werden **nicht** hier, sondern ausschließlich in der **HardwareView** (Route `/hardware`, Übersicht) geöffnet. Der Link „Vollständige Konfiguration“ im DeviceDetailPanel navigiert zu `/hardware`.
+
 Diese Dokumentation beschreibt die **SensorsView** Komponente (`/sensors`), die alle Sensoren aus allen ESP-Geräten in einer aggregierten Karten-Ansicht darstellt. Die Dokumentation ist so detailliert, dass ein Entwickler die komplette View basierend auf dieser Spezifikation nachbauen kann.
 
 ---

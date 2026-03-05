@@ -4,13 +4,13 @@
  *
  * Opens as a second SlideOver (width="md") on top of the drawer.
  * Features:
- * - Basic zone: Email on/off, email address, severity checkboxes
+ * - Basic zone: WebSocket (Echtzeit-Updates), Email on/off, email address, severity checkboxes
  * - Advanced zone (AccordionSection): Quiet hours, digest interval, browser notifications
  * - Save button with loading state
  */
 
 import { ref, watch } from 'vue'
-import { Send, Clock, Bell } from 'lucide-vue-next'
+import { Send, Clock, Bell, Radio } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
@@ -27,6 +27,7 @@ const toast = useToast()
 const inboxStore = useNotificationInboxStore()
 
 // Form state
+const websocketEnabled = ref(true)
 const emailEnabled = ref(false)
 const emailAddress = ref('')
 const emailSeverities = ref<string[]>(['critical', 'warning'])
@@ -70,6 +71,7 @@ async function loadPreferences(): Promise<void> {
 }
 
 function applyPrefs(prefs: NotificationPreferencesDTO): void {
+  websocketEnabled.value = prefs.websocket_enabled ?? true
   emailEnabled.value = prefs.email_enabled
   emailAddress.value = prefs.email_address || ''
   emailSeverities.value = prefs.email_severities || ['critical', 'warning']
@@ -84,6 +86,7 @@ async function save(): Promise<void> {
   isSaving.value = true
   try {
     const update: NotificationPreferencesUpdate = {
+      websocket_enabled: websocketEnabled.value,
       email_enabled: emailEnabled.value,
       email_address: emailAddress.value || null,
       email_severities: emailSeverities.value,
@@ -154,8 +157,26 @@ function handleClose(): void {
       </div>
 
       <div v-else class="prefs">
-        <!-- ═══ Basic Zone: Email ═══ -->
+        <!-- ═══ Basic Zone: WebSocket + Email ═══ -->
         <div class="prefs__section">
+          <div class="prefs__field">
+            <div class="prefs__row">
+              <label class="prefs__label">
+                <Radio class="prefs__label-icon" />
+                Echtzeit-Updates (WebSocket)
+              </label>
+              <button
+                :class="['prefs__toggle', { 'prefs__toggle--active': websocketEnabled }]"
+                @click="websocketEnabled = !websocketEnabled"
+              >
+                <span class="prefs__toggle-dot" />
+              </button>
+            </div>
+            <p class="prefs__hint">
+              Neue Alerts sofort im Browser anzeigen. Wenn ausgeschaltet, werden Alerts nur beim manuellen Aktualisieren geladen.
+            </p>
+          </div>
+
           <div class="prefs__row">
             <label class="prefs__label">
               <Send class="prefs__label-icon" />
