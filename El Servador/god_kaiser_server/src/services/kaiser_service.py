@@ -14,7 +14,6 @@ The "god" Kaiser is the default server-centric node.
 Real Kaisers (Pi Zero relay nodes) are for scaling beyond 50 ESPs.
 """
 
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
@@ -65,10 +64,14 @@ class KaiserService:
 
     async def sync_god_kaiser_zones(self) -> int:
         """Sync god-Kaiser zone_ids from all ESPs that have kaiser_id='god'."""
-        stmt = select(ESPDevice.zone_id).where(
-            ESPDevice.kaiser_id == GOD_KAISER_ID,
-            ESPDevice.zone_id.isnot(None),
-        ).distinct()
+        stmt = (
+            select(ESPDevice.zone_id)
+            .where(
+                ESPDevice.kaiser_id == GOD_KAISER_ID,
+                ESPDevice.zone_id.isnot(None),
+            )
+            .distinct()
+        )
         result = await self.session.execute(stmt)
         zone_ids = [r for r in result.scalars().all() if r]
 
@@ -76,6 +79,7 @@ class KaiserService:
         if kaiser:
             kaiser.zone_ids = zone_ids
             from sqlalchemy.orm.attributes import flag_modified
+
             flag_modified(kaiser, "zone_ids")
             await self.session.flush()
 
@@ -121,12 +125,14 @@ class KaiserService:
             zone_id = device.zone_id or "__unassigned__"
 
             if zone_id == "__unassigned__":
-                unassigned_devices.append({
-                    "device_id": device.device_id,
-                    "name": device.name,
-                    "status": device.status,
-                    "hardware_type": device.hardware_type,
-                })
+                unassigned_devices.append(
+                    {
+                        "device_id": device.device_id,
+                        "name": device.name,
+                        "status": device.status,
+                        "hardware_type": device.hardware_type,
+                    }
+                )
                 continue
 
             if zone_id not in zones_map:
@@ -137,12 +143,16 @@ class KaiserService:
                 zones_map[zone_id] = {
                     "zone_id": zone_id,
                     "zone_name": device.zone_name,
-                    "context": {
-                        "variety": zone_ctx.variety if zone_ctx else None,
-                        "growth_phase": zone_ctx.growth_phase if zone_ctx else None,
-                        "plant_count": zone_ctx.plant_count if zone_ctx else None,
-                        "substrate": zone_ctx.substrate if zone_ctx else None,
-                    } if zone_ctx else None,
+                    "context": (
+                        {
+                            "variety": zone_ctx.variety if zone_ctx else None,
+                            "growth_phase": zone_ctx.growth_phase if zone_ctx else None,
+                            "plant_count": zone_ctx.plant_count if zone_ctx else None,
+                            "substrate": zone_ctx.substrate if zone_ctx else None,
+                        }
+                        if zone_ctx
+                        else None
+                    ),
                     "subzones": {},
                     "devices": [],
                 }
@@ -177,33 +187,37 @@ class KaiserService:
                         )
                         sens_result = await self.session.execute(sens_stmt)
                         for sc in sens_result.scalars().all():
-                            sensors_list.append({
-                                "id": str(sc.id),
-                                "gpio": sc.gpio,
-                                "sensor_type": sc.sensor_type,
-                                "sensor_name": sc.sensor_name,
-                                "esp_id": device.device_id,
-                            })
+                            sensors_list.append(
+                                {
+                                    "id": str(sc.id),
+                                    "gpio": sc.gpio,
+                                    "sensor_type": sc.sensor_type,
+                                    "sensor_name": sc.sensor_name,
+                                    "esp_id": device.device_id,
+                                }
+                            )
                         act_stmt = select(ActuatorConfig).where(
                             ActuatorConfig.esp_id == device.id,
                             ActuatorConfig.gpio.in_(assigned_gpios),
                         )
                         act_result = await self.session.execute(act_stmt)
                         for ac in act_result.scalars().all():
-                            actuators_list.append({
-                                "id": str(ac.id),
-                                "gpio": ac.gpio,
-                                "actuator_type": ac.actuator_type,
-                                "actuator_name": ac.actuator_name,
-                                "esp_id": device.device_id,
-                            })
+                            actuators_list.append(
+                                {
+                                    "id": str(ac.id),
+                                    "gpio": ac.gpio,
+                                    "actuator_type": ac.actuator_type,
+                                    "actuator_name": ac.actuator_name,
+                                    "esp_id": device.device_id,
+                                }
+                            )
                     if sz_id not in zones_map[zone_id]["subzones"]:
                         zones_map[zone_id]["subzones"][sz_id] = {
                             "subzone_id": sz_id,
                             "subzone_name": sz.subzone_name,
                             "assigned_gpios": assigned_gpios,
                             "safe_mode_active": sz.safe_mode_active,
-                            "custom_data": sz.custom_data if hasattr(sz, 'custom_data') else {},
+                            "custom_data": sz.custom_data if hasattr(sz, "custom_data") else {},
                             "devices": [],
                             "sensors": sensors_list,
                             "actuators": actuators_list,
@@ -228,22 +242,26 @@ class KaiserService:
                     continue
                 sens_stmt = select(SensorConfig).where(SensorConfig.esp_id == dev_obj.id)
                 for sc in (await self.session.execute(sens_stmt)).scalars().all():
-                    no_sz_sensors.append({
-                        "id": str(sc.id),
-                        "gpio": sc.gpio,
-                        "sensor_type": sc.sensor_type,
-                        "sensor_name": sc.sensor_name,
-                        "esp_id": dev_obj.device_id,
-                    })
+                    no_sz_sensors.append(
+                        {
+                            "id": str(sc.id),
+                            "gpio": sc.gpio,
+                            "sensor_type": sc.sensor_type,
+                            "sensor_name": sc.sensor_name,
+                            "esp_id": dev_obj.device_id,
+                        }
+                    )
                 act_stmt = select(ActuatorConfig).where(ActuatorConfig.esp_id == dev_obj.id)
                 for ac in (await self.session.execute(act_stmt)).scalars().all():
-                    no_sz_actuators.append({
-                        "id": str(ac.id),
-                        "gpio": ac.gpio,
-                        "actuator_type": ac.actuator_type,
-                        "actuator_name": ac.actuator_name,
-                        "esp_id": dev_obj.device_id,
-                    })
+                    no_sz_actuators.append(
+                        {
+                            "id": str(ac.id),
+                            "gpio": ac.gpio,
+                            "actuator_type": ac.actuator_type,
+                            "actuator_name": ac.actuator_name,
+                            "esp_id": dev_obj.device_id,
+                        }
+                    )
             if no_sz_sensors or no_sz_actuators:
                 zone_data["no_subzone"] = {
                     "subzone_id": "__no_subzone__",

@@ -42,7 +42,12 @@ from ...core.exceptions import (
 )
 from ...core.logging_config import get_logger
 from ...db.models.actuator import ActuatorConfig, ActuatorState as ActuatorStateModel
-from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository, SubzoneRepository
+from ...db.repositories import (
+    ActuatorRepository,
+    ESPRepository,
+    SensorRepository,
+    SubzoneRepository,
+)
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...mqtt.publisher import Publisher
 from ...mqtt.topics import TopicBuilder
@@ -65,7 +70,9 @@ from ...services.actuator_service import ActuatorService
 from ...services.config_builder import ConfigPayloadBuilder
 from ...services.esp_service import ESPService
 from ...services.gpio_validation_service import GpioValidationService
+from ...services.safety_service import SafetyService
 from ...services.subzone_service import SubzoneService
+from ...utils.subzone_helpers import normalize_subzone_id
 from ..deps import (
     ActiveUser,
     DBSession,
@@ -492,16 +499,16 @@ async def create_or_update_actuator(
 
     # =========================================================================
     # SUBZONE ASSIGNMENT (mirrors sensors API)
-    # Assign actuator GPIO to subzone or remove from all subzones
+    # Assign actuator GPIO to subzone or remove from all subzones.
+    # Normalize "__none__", "", null → None (Keine Subzone = remove from all)
     # =========================================================================
     try:
-        subzone_service = SubzoneService(
-            esp_repo=esp_repo, session=db, publisher=publisher
-        )
-        if request.subzone_id:
+        subzone_service = SubzoneService(esp_repo=esp_repo, session=db, publisher=publisher)
+        subzone_id_val = normalize_subzone_id(request.subzone_id)
+        if subzone_id_val:
             await subzone_service.assign_subzone(
                 device_id=esp_id,
-                subzone_id=request.subzone_id,
+                subzone_id=subzone_id_val,
                 assigned_gpios=[gpio],
                 subzone_name=None,
                 parent_zone_id=esp_device.zone_id,
@@ -959,9 +966,7 @@ async def clear_emergency(
             publisher.client.publish(topic, payload, qos=1)
             devices_cleared += 1
         except Exception as exc:
-            logger.warning(
-                f"Clear emergency MQTT publish failed for {device.device_id}: {exc}"
-            )
+            logger.warning(f"Clear emergency MQTT publish failed for {device.device_id}: {exc}")
 
     if request.esp_id:
         await safety_service.clear_emergency_stop(request.esp_id)
@@ -973,9 +978,7 @@ async def clear_emergency(
     rows_updated = await actuator_repo.clear_emergency_states(esp_ids)
     if rows_updated:
         await db.commit()
-        logger.info(
-            f"Cleared {rows_updated} actuator_states from emergency_stop to idle"
-        )
+        logger.info(f"Cleared {rows_updated} actuator_states from emergency_stop to idle")
 
     logger.info(
         f"EMERGENCY CLEAR executed by {current_user.username}: "

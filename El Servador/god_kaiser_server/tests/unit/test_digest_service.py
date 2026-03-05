@@ -38,6 +38,19 @@ def _make_mock_prefs(
     return mock
 
 
+def _make_mock_session():
+    """Create a mock async session compatible with EmailLogRepository.
+
+    Uses MagicMock for sync methods (add) and AsyncMock for async methods (flush, commit)
+    to avoid 'coroutine was never awaited' when session.add() is called.
+    """
+    mock = MagicMock()
+    mock.add = MagicMock(return_value=None)  # sync - SQLAlchemy add is not async
+    mock.flush = AsyncMock(return_value=None)
+    mock.commit = AsyncMock(return_value=None)
+    return mock
+
+
 # =============================================================================
 # Test 1: Process Collects Pending Notifications
 # =============================================================================
@@ -55,7 +68,7 @@ async def test_process_digests_collects_pending():
     mock_notifications = [_make_mock_notification() for _ in range(3)]
 
     with patch("src.services.digest_service.resilient_session") as mock_ctx:
-        mock_session = AsyncMock()
+        mock_session = _make_mock_session()
         mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -99,7 +112,7 @@ async def test_process_digests_empty_batch_no_email():
     mock_prefs = _make_mock_prefs()
 
     with patch("src.services.digest_service.resilient_session") as mock_ctx:
-        mock_session = AsyncMock()
+        mock_session = _make_mock_session()
         mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -143,7 +156,7 @@ async def test_process_digests_only_email_enabled_users():
     mock_notifications = [_make_mock_notification() for _ in range(3)]
 
     with patch("src.services.digest_service.resilient_session") as mock_ctx:
-        mock_session = AsyncMock()
+        mock_session = _make_mock_session()
         mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -190,7 +203,7 @@ async def test_process_digests_marks_sent():
     notification_ids = [n.id for n in mock_notifications]
 
     with patch("src.services.digest_service.resilient_session") as mock_ctx:
-        mock_session = AsyncMock()
+        mock_session = _make_mock_session()
         mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 

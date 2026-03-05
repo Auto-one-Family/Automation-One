@@ -17,7 +17,7 @@ Used by:
 
 import math
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +25,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.logging_config import get_logger
 from ..db.models.esp import ESPDevice
 from ..db.models.sensor import SensorConfig, SensorData
-from ..db.models.zone_context import ZoneContext
 from ..db.repositories.zone_context_repo import ZoneContextRepository
 
 logger = get_logger(__name__)
@@ -67,8 +66,12 @@ class ZoneKPIService:
 
     async def calculate_vpd(self, zone_id: str) -> Optional[dict]:
         """VPD from latest temperature + humidity sensors in the zone."""
-        temp_val = await self._get_latest_sensor_value(zone_id, ["sht31_temp", "bmp280_temp", "ds18b20"])
-        hum_val = await self._get_latest_sensor_value(zone_id, ["sht31_humidity", "bmp280_humidity"])
+        temp_val = await self._get_latest_sensor_value(
+            zone_id, ["sht31_temp", "bmp280_temp", "ds18b20"]
+        )
+        hum_val = await self._get_latest_sensor_value(
+            zone_id, ["sht31_humidity", "bmp280_humidity"]
+        )
 
         if temp_val is None or hum_val is None:
             return None
@@ -165,10 +168,13 @@ class ZoneKPIService:
         """Get latest processed_value from any sensor of given types in the zone."""
         stmt = (
             select(SensorData.processed_value)
-            .join(SensorConfig, and_(
-                SensorData.esp_id == SensorConfig.esp_id,
-                SensorData.gpio == SensorConfig.gpio,
-            ))
+            .join(
+                SensorConfig,
+                and_(
+                    SensorData.esp_id == SensorConfig.esp_id,
+                    SensorData.gpio == SensorConfig.gpio,
+                ),
+            )
             .join(ESPDevice, SensorConfig.esp_id == ESPDevice.id)
             .where(
                 ESPDevice.zone_id == zone_id,
@@ -182,17 +188,18 @@ class ZoneKPIService:
         row = result.scalar_one_or_none()
         return float(row) if row is not None else None
 
-    async def _get_sensor_readings_24h(
-        self, zone_id: str, sensor_types: List[str]
-    ) -> List[float]:
+    async def _get_sensor_readings_24h(self, zone_id: str, sensor_types: List[str]) -> List[float]:
         """Get all sensor readings from the last 24h."""
         since = datetime.now(timezone.utc) - timedelta(hours=24)
         stmt = (
             select(SensorData.processed_value)
-            .join(SensorConfig, and_(
-                SensorData.esp_id == SensorConfig.esp_id,
-                SensorData.gpio == SensorConfig.gpio,
-            ))
+            .join(
+                SensorConfig,
+                and_(
+                    SensorData.esp_id == SensorConfig.esp_id,
+                    SensorData.gpio == SensorConfig.gpio,
+                ),
+            )
             .join(ESPDevice, SensorConfig.esp_id == ESPDevice.id)
             .where(
                 ESPDevice.zone_id == zone_id,

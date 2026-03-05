@@ -136,6 +136,7 @@ class MockActuatorConfig(BaseModel):
     gpio: int = Field(..., ge=0, le=39, description="GPIO pin number")
     actuator_type: str = Field("relay", description="Actuator type (relay, pump, valve, pwm)")
     name: Optional[str] = Field(None, description="Human-readable actuator name")
+    subzone_id: Optional[str] = Field(None, description="Subzone assignment for this actuator")
     state: bool = Field(False, description="Current on/off state")
     pwm_value: float = Field(0.0, ge=0.0, le=1.0, description="PWM duty cycle (0.0-1.0)")
     min_value: float = Field(0.0, description="Minimum allowed value")

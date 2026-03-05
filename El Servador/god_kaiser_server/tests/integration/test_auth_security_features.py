@@ -423,7 +423,8 @@ class TestMQTTAuthService:
 
             mock_settings.mqtt.use_tls = True
             mock_publisher = MagicMock()
-            mock_publisher._publish_with_retry = AsyncMock(return_value=True)
+            # _publish_with_retry is sync in Publisher, not async
+            mock_publisher._publish_with_retry = MagicMock(return_value=True)
             mock_publisher_class.return_value = mock_publisher
             service.publisher = mock_publisher
 

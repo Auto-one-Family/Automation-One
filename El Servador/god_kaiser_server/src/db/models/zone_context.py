@@ -9,10 +9,10 @@ growth phase, substrate, responsible person, cycle history.
 Designed for AI-ready export via the component export API.
 """
 
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, Float, Integer, String, Text
+from sqlalchemy import Date, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base, TimestampMixin

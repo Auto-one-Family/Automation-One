@@ -7,7 +7,7 @@ AI/God Layer Integration Endpoints (Phase K4 L3.3 + Phase 5)
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 from ..deps import ActiveUser, DBSession
 from pydantic import BaseModel, Field
@@ -18,7 +18,11 @@ router = APIRouter(prefix="/v1/ai", tags=["ai"])
 class AIQueryRequest(BaseModel):
     """Natural language query request."""
 
-    query: str = Field(..., min_length=1, description="Natural language question, e.g. 'Wie ist die Temperatur in Zone Bluete-A?'")
+    query: str = Field(
+        ...,
+        min_length=1,
+        description="Natural language question, e.g. 'Wie ist die Temperatur in Zone Bluete-A?'",
+    )
 
 
 class AIQueryResponse(BaseModel):

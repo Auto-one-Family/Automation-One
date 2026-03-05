@@ -2,10 +2,11 @@
 Email Log Repository: CRUD + Filtered Queries for Email Delivery Tracking
 
 Phase C V1.1: Email-Status-Tracking
+Phase C V1.2: Email-Retry (get_pending_retries)
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import desc, func, select
@@ -62,6 +63,7 @@ class EmailLogRepository(BaseRepository[EmailLog]):
         status: Optional[str] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
+        template: Optional[str] = None,
         skip: int = 0,
         limit: int = 50,
     ) -> Tuple[List[EmailLog], int]:
@@ -83,6 +85,10 @@ class EmailLogRepository(BaseRepository[EmailLog]):
         if date_to:
             query = query.where(EmailLog.created_at <= date_to)
             count_query = count_query.where(EmailLog.created_at <= date_to)
+        if template and template.strip():
+            pattern = f"%{template.strip()}%"
+            query = query.where(EmailLog.template.ilike(pattern))
+            count_query = count_query.where(EmailLog.template.ilike(pattern))
 
         total = (await self.session.execute(count_query)).scalar_one()
 
@@ -136,3 +142,30 @@ class EmailLogRepository(BaseRepository[EmailLog]):
         )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
+
+    async def get_pending_retries(
+        self,
+        limit: int = 50,
+        min_age_minutes: int = 5,
+    ) -> List[EmailLog]:
+        """
+        Get email log entries eligible for retry (Phase C V1.2).
+
+        Filter: status='failed', retry_count < 3.
+        Optional: created_at at least min_age_minutes ago (avoids immediate retry).
+        Sorted by created_at ascending (oldest first).
+
+        Returns:
+            List of EmailLog entries to retry
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=min_age_minutes)
+        query = (
+            select(EmailLog)
+            .where(EmailLog.status == "failed")
+            .where(EmailLog.retry_count < 3)
+            .where(EmailLog.created_at <= cutoff)
+            .order_by(EmailLog.created_at.asc())
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())

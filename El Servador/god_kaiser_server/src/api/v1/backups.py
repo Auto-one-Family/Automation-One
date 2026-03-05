@@ -12,7 +12,7 @@ Provides admin-only endpoints for PostgreSQL backup management:
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from ...core.logging_config import get_logger
 from ...services.database_backup_service import get_database_backup_service
@@ -188,9 +188,7 @@ async def restore_backup(
         service = get_database_backup_service()
         result = await service.restore_backup(backup_id)
 
-        logger.warning(
-            f"Database restored from backup {backup_id} by admin {user.username}"
-        )
+        logger.warning(f"Database restored from backup {backup_id} by admin {user.username}")
 
         return BackupRestoreResponse(
             message=f"Database restored from backup {backup_id}",

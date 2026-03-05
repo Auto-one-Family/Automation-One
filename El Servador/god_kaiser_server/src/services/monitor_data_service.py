@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models.actuator import ActuatorConfig, ActuatorState
 from ..db.models.esp import ESPDevice
-from ..db.models.sensor import SensorConfig, SensorData
+from ..db.models.sensor import SensorConfig
 from ..db.models.subzone import SubzoneConfig
 from ..schemas.monitor import (
     SubzoneActuatorEntry,
@@ -60,14 +60,11 @@ class MonitorDataService:
             )
 
         zone_name = esps[0].zone_name or zone_id
-        device_id_to_uuid: Dict[str, str] = {e.device_id: str(e.id) for e in esps}
         esp_uuids = [e.id for e in esps]
 
         # 2. Build (esp_id, gpio) -> (subzone_id, subzone_name) map
         gpio_to_subzone: Dict[Tuple[str, int], Tuple[str, str]] = {}
-        subzone_configs_stmt = select(SubzoneConfig).where(
-            SubzoneConfig.parent_zone_id == zone_id
-        )
+        subzone_configs_stmt = select(SubzoneConfig).where(SubzoneConfig.parent_zone_id == zone_id)
         subzone_result = await self.session.execute(subzone_configs_stmt)
         for sc in subzone_result.scalars().all():
             subzone_id = sc.subzone_id

@@ -98,7 +98,15 @@ class HealthScoreService:
 
     async def _score_data_quality(self, esp_uuid: Any) -> float:
         """Average quality of latest sensor readings (excellent=100, good=80, …)."""
-        quality_map = {"excellent": 100, "good": 80, "fair": 60, "poor": 40, "bad": 20, "stale": 30, "error": 0}
+        quality_map = {
+            "excellent": 100,
+            "good": 80,
+            "fair": 60,
+            "poor": 40,
+            "bad": 20,
+            "stale": 30,
+            "error": 0,
+        }
         stmt = (
             select(SensorData.quality)
             .where(SensorData.esp_id == esp_uuid)
@@ -113,7 +121,7 @@ class HealthScoreService:
         return total / len(rows) if rows else 80.0
 
     def _score_maintenance(self, device: ESPDevice) -> float:
-        meta = device.device_metadata or {}
+        _ = device.device_metadata or {}
         # Placeholder: no maintenance_until in device_metadata yet
         return 100.0
 

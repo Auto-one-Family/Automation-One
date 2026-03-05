@@ -379,6 +379,25 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Digest Service job registered (60min interval)")
 
+        # Step 3.4.4b: Register Email Retry job (Phase C V1.2)
+        # Retries failed emails (critical alerts, test) every 5 minutes.
+        # Max 3 attempts total; then status=permanently_failed.
+        logger.info("Registering Email Retry job...")
+        from .services.email_retry_service import get_email_retry_service
+
+        _email_retry_service = get_email_retry_service()
+
+        async def _email_retry_job() -> None:
+            await _email_retry_service.process_retries(limit=50)
+
+        _central_scheduler.add_interval_job(
+            job_id="maintenance_email_retry",
+            func=_email_retry_job,
+            seconds=300,  # 5 minutes
+            category=JobCategory.MAINTENANCE,
+        )
+        logger.info("Email Retry job registered (5min interval)")
+
         # Step 3.4.5: Register Alert Suppression tasks (Phase 4A.7)
         # - Suppression expiry check: every 5 min (re-enables expired suppressions)
         # - Maintenance overdue check: daily at 08:00 (sends info notifications)

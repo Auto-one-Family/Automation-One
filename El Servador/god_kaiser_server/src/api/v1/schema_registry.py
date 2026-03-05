@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from ..deps import ActiveUser, DBSession
+from ..deps import ActiveUser
 
 router = APIRouter(prefix="/v1/schema-registry", tags=["schema-registry"])
 
@@ -43,19 +43,25 @@ def _get_schema_for_type(device_type: str) -> dict[str, Any]:
     }
     if device_type in SENSOR_TYPES:
         if device_type == "sht31":
-            base["properties"].update({
-                "i2c_address": {"type": "string", "enum": ["0x44", "0x45"], "default": "0x44"},
-                "accuracy_temperature": {"type": "string", "default": "±0.3°C"},
-                "accuracy_humidity": {"type": "string", "default": "±2% RH"},
-            })
+            base["properties"].update(
+                {
+                    "i2c_address": {"type": "string", "enum": ["0x44", "0x45"], "default": "0x44"},
+                    "accuracy_temperature": {"type": "string", "default": "±0.3°C"},
+                    "accuracy_humidity": {"type": "string", "default": "±2% RH"},
+                }
+            )
         elif device_type == "ds18b20":
-            base["properties"].update({
-                "onewire_address": {"type": "string", "title": "OneWire ROM"},
-            })
+            base["properties"].update(
+                {
+                    "onewire_address": {"type": "string", "title": "OneWire ROM"},
+                }
+            )
     elif device_type in ACTUATOR_TYPES:
-        base["properties"].update({
-            "inverted": {"type": "boolean", "default": False},
-        })
+        base["properties"].update(
+            {
+                "inverted": {"type": "boolean", "default": False},
+            }
+        )
     return base
 
 

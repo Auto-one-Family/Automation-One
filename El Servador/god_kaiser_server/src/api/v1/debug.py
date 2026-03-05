@@ -1263,6 +1263,7 @@ async def add_actuator(
     actuator_config = {
         "actuator_type": config.actuator_type,
         "name": config.name,
+        "subzone_id": config.subzone_id,
         "state": config.state,
         "pwm_value": config.pwm_value,
         "min_value": config.min_value,

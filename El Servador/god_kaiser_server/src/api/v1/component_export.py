@@ -20,7 +20,6 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from ..deps import ActiveUser, DBSession
 from ...core.logging_config import get_logger
@@ -165,15 +164,21 @@ def _serialize_component(
 
     # Build capabilities
     if is_sensor:
-        capabilities = SENSOR_CAPABILITY_MAP.get(device_type, {
-            "measures": [device_type],
-            "units": {device_type: ""},
-        })
+        capabilities = SENSOR_CAPABILITY_MAP.get(
+            device_type,
+            {
+                "measures": [device_type],
+                "units": {device_type: ""},
+            },
+        )
     else:
-        capabilities = ACTUATOR_CAPABILITY_MAP.get(device_type, {
-            "actions": ["on", "off"],
-            "type": "binary",
-        })
+        capabilities = ACTUATOR_CAPABILITY_MAP.get(
+            device_type,
+            {
+                "actions": ["on", "off"],
+                "type": "binary",
+            },
+        )
 
     # Build current_state
     current_state: dict[str, Any] = {
@@ -345,9 +350,7 @@ async def export_components(
             for sensor in sensors:
                 if device_type and sensor.sensor_type != device_type:
                     continue
-                components.append(
-                    _serialize_component(esp=device, sensor=sensor)
-                )
+                components.append(_serialize_component(esp=device, sensor=sensor))
 
         # Actuators
         if type is None or type == "actuator":
@@ -355,9 +358,7 @@ async def export_components(
             for actuator in actuators:
                 if device_type and actuator.actuator_type != device_type:
                     continue
-                state_obj = await actuator_repo.get_state(
-                    device.id, actuator.gpio
-                )
+                state_obj = await actuator_repo.get_state(device.id, actuator.gpio)
                 actuator_state = None
                 if state_obj:
                     actuator_state = {
@@ -365,8 +366,7 @@ async def export_components(
                         "state": state_obj.state,
                         "last_changed": (
                             state_obj.last_changed.isoformat()
-                            if hasattr(state_obj, "last_changed")
-                            and state_obj.last_changed
+                            if hasattr(state_obj, "last_changed") and state_obj.last_changed
                             else None
                         ),
                     }
@@ -425,9 +425,7 @@ async def export_component_by_id(
             actuators = await actuator_repo.get_by_esp(device.id)
             for actuator in actuators:
                 if str(actuator.id)[:8] == uuid_prefix:
-                    state_obj = await actuator_repo.get_state(
-                        device.id, actuator.gpio
-                    )
+                    state_obj = await actuator_repo.get_state(device.id, actuator.gpio)
                     actuator_state = None
                     if state_obj:
                         actuator_state = {
@@ -476,8 +474,12 @@ async def export_zones(
                 "online_count": 0,
             }
         zone_map[zid]["device_count"] += 1
-        zone_map[zid]["sensor_count"] += len(device.sensors) if hasattr(device, "sensors") and device.sensors else 0
-        zone_map[zid]["actuator_count"] += len(device.actuators) if hasattr(device, "actuators") and device.actuators else 0
+        zone_map[zid]["sensor_count"] += (
+            len(device.sensors) if hasattr(device, "sensors") and device.sensors else 0
+        )
+        zone_map[zid]["actuator_count"] += (
+            len(device.actuators) if hasattr(device, "actuators") and device.actuators else 0
+        )
         if device.status == "online":
             zone_map[zid]["online_count"] += 1
 
@@ -553,9 +555,7 @@ async def export_zone_detail(
         # Sensors
         sensors = await sensor_repo.get_by_esp(device.id)
         for sensor in sensors:
-            components.append(
-                _serialize_component(esp=device, sensor=sensor)
-            )
+            components.append(_serialize_component(esp=device, sensor=sensor))
 
         # Actuators
         actuators = await actuator_repo.get_by_esp(device.id)

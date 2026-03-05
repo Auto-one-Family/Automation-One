@@ -12,7 +12,7 @@ Provides REST endpoints for Kaiser relay node management:
 - PUT /kaiser/{kaiser_id}/zones - Update managed zones
 """
 
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path
 

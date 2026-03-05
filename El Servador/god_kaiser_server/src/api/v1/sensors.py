@@ -74,25 +74,11 @@ from ...services.sensor_scheduler_service import SensorSchedulerService
 from ...services.sensor_service import SensorService
 from ...services.gpio_validation_service import GpioValidationService
 from ...services.subzone_service import SubzoneService
+from ...utils.subzone_helpers import normalize_subzone_id
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/v1/sensors", tags=["sensors"])
-
-
-def _normalize_subzone_id(value: Optional[str]) -> Optional[str]:
-    """
-    Normalize subzone_id for API: "__none__" and empty string mean "remove from all subzones".
-    Frontend may send "__none__" as sentinel for "Keine Subzone"; backend treats it as None.
-    """
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        return None
-    v = value.strip()
-    if v in ("", "__none__"):
-        return None
-    return v
 
 
 # =============================================================================
@@ -158,11 +144,16 @@ def _model_to_response(
         warning_min=warning_min,
         warning_max=warning_max,
         metadata=sensor.sensor_metadata,  # Model: sensor_metadata -> Schema: metadata
+        description=(sensor.sensor_metadata or {}).get("description"),
+        unit=(sensor.sensor_metadata or {}).get("unit"),
         # Config status from ESP32 verification (Phase 2: write-after-verification)
         config_status=sensor.config_status,
         config_error=sensor.config_error,
         config_error_detail=sensor.config_error_detail,
         subzone_id=subzone_id,
+        operating_mode=sensor.operating_mode,
+        timeout_seconds=sensor.timeout_seconds,
+        schedule_config=sensor.schedule_config,
         latest_value=None,  # Will be set by caller if available
         latest_quality=None,
         latest_timestamp=None,
@@ -194,6 +185,13 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
     # Infer interface_type if not provided
     interface_type = request.interface_type or _infer_interface_type(request.sensor_type)
 
+    # Merge description/unit into sensor_metadata (Config-Panel-Optimierung: persist user input)
+    sensor_metadata = dict(request.metadata or {})
+    if request.description is not None:
+        sensor_metadata["description"] = request.description
+    if request.unit is not None:
+        sensor_metadata["unit"] = request.unit
+
     return {
         "sensor_type": request.sensor_type,
         "sensor_name": request.name or "",  # Schema: name -> Model: sensor_name
@@ -202,7 +200,7 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         "pi_enhanced": pi_enhanced,  # Schema: processing_mode -> Model: pi_enhanced
         "calibration_data": request.calibration,  # Schema: calibration -> Model: calibration_data
         "thresholds": thresholds if thresholds else None,
-        "sensor_metadata": request.metadata or {},  # Schema: metadata -> Model: sensor_metadata
+        "sensor_metadata": sensor_metadata,  # Schema: metadata + description/unit -> Model: sensor_metadata
         # =========================================================================
         # MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
         # =========================================================================
@@ -256,6 +254,7 @@ async def list_sensors(
         Paginated list of sensor configs
     """
     sensor_repo = SensorRepository(db)
+    subzone_repo = SubzoneRepository(db)
     offset = (page - 1) * page_size
     rows, total_items = await sensor_repo.query_paginated(
         esp_device_id=esp_id,
@@ -271,8 +270,9 @@ async def list_sensors(
         latest = await sensor_repo.get_latest_reading(
             sensor.esp_id, sensor.gpio, sensor_type=sensor.sensor_type
         )
-
-        response = _model_to_response(sensor, esp_device_id)
+        subzone = await subzone_repo.get_subzone_by_gpio(esp_device_id, sensor.gpio)
+        subzone_id_val = subzone.subzone_id if subzone else None
+        response = _model_to_response(sensor, esp_device_id, subzone_id=subzone_id_val)
         response.latest_value = (
             (latest.processed_value if latest.processed_value is not None else latest.raw_value)
             if latest
@@ -564,8 +564,10 @@ async def create_or_update_sensor(
                         existing_vt.calibration_data = model_fields["calibration_data"]
                     if model_fields["thresholds"]:
                         existing_vt.thresholds = model_fields["thresholds"]
-                    if request.metadata is not None:
-                        existing_vt.sensor_metadata = model_fields["sensor_metadata"]
+                    if request.description is not None or request.unit is not None or request.metadata is not None:
+                        meta = dict(existing_vt.sensor_metadata or {})
+                        meta.update(model_fields["sensor_metadata"])
+                        existing_vt.sensor_metadata = meta
                     existing_vt.interface_type = model_fields["interface_type"]
                     existing_vt.operating_mode = model_fields["operating_mode"]
                     existing_vt.timeout_seconds = model_fields["timeout_seconds"]
@@ -616,7 +618,7 @@ async def create_or_update_sensor(
             subzone_service = SubzoneService(
                 esp_repo=esp_repo, session=db, publisher=publisher
             )
-            subzone_id_val = _normalize_subzone_id(request.subzone_id)
+            subzone_id_val = normalize_subzone_id(request.subzone_id)
             if subzone_id_val:
                 await subzone_service.assign_subzone(
                     device_id=esp_id,
@@ -746,8 +748,10 @@ async def create_or_update_sensor(
             existing.calibration_data = model_fields["calibration_data"]
         if model_fields["thresholds"]:
             existing.thresholds = model_fields["thresholds"]
-        if request.metadata is not None:
-            existing.sensor_metadata = model_fields["sensor_metadata"]
+        if request.description is not None or request.unit is not None or request.metadata is not None:
+            meta = dict(existing.sensor_metadata or {})
+            meta.update(model_fields["sensor_metadata"])
+            existing.sensor_metadata = meta
         # =========================================================================
         # OPERATING MODE FIELDS (Phase 2F)
         # Note: Always update - None is valid (means "use type default")
@@ -817,7 +821,7 @@ async def create_or_update_sensor(
         subzone_service = SubzoneService(
             esp_repo=esp_repo, session=db, publisher=publisher
         )
-        subzone_id_val = _normalize_subzone_id(request.subzone_id)
+        subzone_id_val = normalize_subzone_id(request.subzone_id)
         if subzone_id_val:
             await subzone_service.assign_subzone(
                 device_id=esp_id,
@@ -1607,6 +1611,7 @@ async def list_onewire_sensors(
     if pin is not None:
         onewire_sensors = [s for s in onewire_sensors if s.gpio == pin]
 
+    subzone_repo = SubzoneRepository(db)
     # Convert to response format
     responses = []
     for sensor in onewire_sensors:
@@ -1614,7 +1619,9 @@ async def list_onewire_sensors(
         latest = await sensor_repo.get_latest_reading(
             sensor.esp_id, sensor.gpio, sensor_type=sensor.sensor_type
         )
-        response = _model_to_response(sensor, esp_id)
+        subzone = await subzone_repo.get_subzone_by_gpio(esp_id, sensor.gpio)
+        subzone_id_val = subzone.subzone_id if subzone else None
+        response = _model_to_response(sensor, esp_id, subzone_id=subzone_id_val)
         response.latest_value = (
             (latest.processed_value if latest.processed_value is not None else latest.raw_value)
             if latest

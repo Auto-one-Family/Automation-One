@@ -247,6 +247,7 @@ async def get_email_log(
     status: Optional[str] = Query(None, description="Filter by status (sent, failed, pending)"),
     date_from: Optional[datetime] = Query(None, description="Filter from date (ISO 8601)"),
     date_to: Optional[datetime] = Query(None, description="Filter to date (ISO 8601)"),
+    template: Optional[str] = Query(None, description="Filter by template (partial match)"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
 ):
@@ -257,6 +258,7 @@ async def get_email_log(
         status=status,
         date_from=date_from,
         date_to=date_to,
+        template=template,
         skip=skip,
         limit=page_size,
     )

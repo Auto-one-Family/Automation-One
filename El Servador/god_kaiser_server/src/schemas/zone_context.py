@@ -12,11 +12,11 @@ Provides:
 """
 
 from datetime import date, datetime
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .common import BaseResponse, PaginatedResponse
+from .common import BaseResponse
 
 
 # =============================================================================

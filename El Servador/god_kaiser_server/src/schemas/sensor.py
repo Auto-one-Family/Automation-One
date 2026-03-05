@@ -91,6 +91,16 @@ class SensorConfigBase(BaseModel):
         description="Human-readable sensor name",
         examples=["Tank pH Sensor", "Ambient Temperature"],
     )
+    description: Optional[str] = Field(
+        None,
+        max_length=500,
+        description="Human-readable sensor description",
+    )
+    unit: Optional[str] = Field(
+        None,
+        max_length=20,
+        description="Physical unit, e.g. °C, %, pH",
+    )
 
     @field_validator("sensor_type")
     @classmethod
@@ -186,7 +196,7 @@ class SensorConfigCreate(SensorConfigBase):
         None,
         description="Warning threshold (high)",
     )
-    # Metadata
+    # Metadata (description/unit from SensorConfigBase are persisted in sensor_metadata)
     metadata: Optional[Dict[str, Any]] = Field(
         None,
         description="Custom metadata",
@@ -348,6 +358,14 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     warning_min: Optional[float] = Field(None)
     warning_max: Optional[float] = Field(None)
     metadata: Optional[Dict[str, Any]] = Field(None)
+    description: Optional[str] = Field(
+        None,
+        description="Human-readable sensor description (from sensor_metadata)",
+    )
+    unit: Optional[str] = Field(
+        None,
+        description="Physical unit, e.g. °C, %, pH (from sensor_metadata)",
+    )
     # Config status from ESP32 verification
     config_status: Optional[str] = Field(
         None,
@@ -360,6 +378,16 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     subzone_id: Optional[str] = Field(
         None,
         description="Subzone ID this sensor belongs to (if any)",
+    )
+    operating_mode: Optional[str] = Field(
+        None,
+        description="Operating mode: continuous, on_demand, scheduled, paused",
+    )
+    timeout_seconds: Optional[int] = Field(
+        None,
+        ge=0,
+        le=86400,
+        description="Timeout for stale detection in seconds (0 = disabled)",
     )
     config_error_detail: Optional[str] = Field(
         None,
