@@ -1,0 +1,277 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - heading "AutomationOne" [level=1] [ref=e9]
+      - navigation [ref=e10]:
+        - generic [ref=e11]: Navigation
+        - link "Dashboard" [ref=e12] [cursor=pointer]:
+          - /url: /hardware
+          - img [ref=e14]
+          - generic [ref=e19]: Dashboard
+        - link "Regeln" [ref=e20] [cursor=pointer]:
+          - /url: /logic
+          - img [ref=e21]
+          - generic [ref=e25]: Regeln
+        - link "Komponenten" [ref=e26] [cursor=pointer]:
+          - /url: /sensors
+          - img [ref=e27]
+          - generic [ref=e29]: Komponenten
+        - generic [ref=e31]: Administration
+        - link "System" [ref=e32] [cursor=pointer]:
+          - /url: /system-monitor
+          - img [ref=e33]
+          - generic [ref=e35]: System
+        - link "Benutzer" [ref=e36] [cursor=pointer]:
+          - /url: /users
+          - img [ref=e37]
+          - generic [ref=e42]: Benutzer
+        - link "Kalibrierung" [ref=e43] [cursor=pointer]:
+          - /url: /calibration
+          - img [ref=e44]
+          - generic [ref=e45]: Kalibrierung
+        - link "Plugins" [ref=e46] [cursor=pointer]:
+          - /url: /plugins
+          - img [ref=e47]
+          - generic [ref=e49]: Plugins
+      - generic [ref=e50]:
+        - link "Einstellungen" [ref=e51] [cursor=pointer]:
+          - /url: /settings
+          - img [ref=e52]
+          - generic [ref=e64]: Einstellungen
+        - generic [ref=e65]:
+          - generic [ref=e66]: A
+          - generic [ref=e67]:
+            - paragraph [ref=e68]: admin
+            - paragraph [ref=e69]: admin
+    - generic [ref=e70]:
+      - banner [ref=e71]:
+        - generic:
+          - navigation "Navigation":
+            - generic: Hardware
+        - generic [ref=e72]:
+          - button "4 Online" [ref=e73] [cursor=pointer]:
+            - generic [ref=e75]: "4"
+            - generic [ref=e76]: Online
+          - button "0 Offline" [ref=e77] [cursor=pointer]:
+            - generic [ref=e79]: "0"
+            - generic [ref=e80]: Offline
+          - generic [ref=e81]:
+            - button "Alle 4" [ref=e82] [cursor=pointer]:
+              - text: Alle
+              - generic [ref=e83]: "4"
+            - button "Mock 4" [ref=e84] [cursor=pointer]:
+              - text: Mock
+              - generic [ref=e85]: "4"
+            - button "Real 0" [ref=e86] [cursor=pointer]:
+              - text: Real
+              - generic [ref=e87]: "0"
+        - generic [ref=e88]:
+          - button "Mock" [ref=e89] [cursor=pointer]:
+            - img
+            - generic [ref=e90]: Mock
+          - button "Geräte" [ref=e91] [cursor=pointer]:
+            - img
+            - generic [ref=e92]: Geräte
+          - button "Farb-Legende anzeigen" [ref=e95] [cursor=pointer]:
+            - img [ref=e96]
+          - generic [ref=e99]:
+            - generic "Aktive Alerts" [ref=e100]:
+              - img [ref=e101]
+              - generic [ref=e103]: "4"
+            - generic "Mittlere Bestätigungszeit (MTTA)" [ref=e104]:
+              - img [ref=e105]
+              - generic [ref=e108]: MTTA
+              - generic [ref=e109]: 4m
+            - generic "Mittlere Lösungszeit (MTTR)" [ref=e110]:
+              - img [ref=e111]
+              - generic [ref=e113]: MTTR
+              - generic [ref=e114]: 7.2h
+            - generic "Heute gelöst" [ref=e115]:
+              - img [ref=e116]
+              - generic [ref=e119]: "19"
+          - button "4" [ref=e120] [cursor=pointer]:
+            - img
+            - generic: "4"
+          - button "Not-Aus aufheben" [ref=e121] [cursor=pointer]:
+            - img [ref=e122]
+            - generic [ref=e125]: Aufheben
+          - generic "Server verbunden" [ref=e127]:
+            - generic [ref=e129]: Server verbunden
+          - button "A" [ref=e131] [cursor=pointer]:
+            - generic [ref=e132]: A
+            - img [ref=e133]
+      - main [ref=e135]:
+        - generic [ref=e136]:
+          - navigation "Hauptansichten" [ref=e137]:
+            - link "Übersicht" [ref=e138] [cursor=pointer]:
+              - /url: /hardware
+              - img [ref=e139]
+              - generic [ref=e144]: Übersicht
+            - link "Monitor" [ref=e145] [cursor=pointer]:
+              - /url: /monitor
+              - img [ref=e146]
+              - generic [ref=e148]: Monitor
+            - link "Editor" [ref=e149] [cursor=pointer]:
+              - /url: /editor
+              - img [ref=e150]
+              - generic [ref=e155]: Editor
+          - generic [ref=e160]:
+            - 'region "Zone Test: 2/2 Geräte online" [ref=e161]':
+              - generic [ref=e162]:
+                - generic [ref=e163] [cursor=pointer]:
+                  - img [ref=e164]
+                  - heading "Test" [level=3] [ref=e166]
+                  - button "Zone umbenennen" [ref=e167]:
+                    - img [ref=e168]
+                  - generic [ref=e171]: Ø 14.7°C Ø 7.0pH
+                  - generic [ref=e172]:
+                    - text: 2 ESPs
+                    - generic [ref=e173]: ·
+                    - text: 2/2 Online
+                  - generic [ref=e175]: ⚠ 2
+                  - link "Monitor" [ref=e176]:
+                    - /url: /monitor/test
+                    - img [ref=e177]
+                    - generic [ref=e179]: Monitor
+                  - button "Zone-Aktionen" [ref=e180]:
+                    - img [ref=e181]
+                - generic [ref=e187]:
+                  - 'button "Mock #9FCB, Status: Online" [ref=e189] [cursor=pointer]':
+                    - generic [ref=e190]:
+                      - text: ⠿
+                      - generic "Online" [ref=e191]
+                      - generic [ref=e192]: "Mock #9FCB"
+                      - generic [ref=e193]: MOCK
+                    - generic [ref=e194]:
+                      - generic [ref=e195]:
+                        - generic [ref=e197]: Online
+                        - generic [ref=e198]: 2S
+                      - generic [ref=e199]:
+                        - generic [ref=e200]:
+                          - img [ref=e201]
+                          - generic [ref=e203]: pH-Wert
+                          - generic [ref=e204]: "7"
+                          - generic [ref=e205]: pH
+                        - generic [ref=e206]:
+                          - img [ref=e207]
+                          - generic [ref=e209]: Temperatur
+                          - generic [ref=e210]: "22"
+                          - generic [ref=e211]: °C
+                      - generic [ref=e212]:
+                        - button "Monitor" [ref=e213]:
+                          - img [ref=e214]
+                          - generic [ref=e216]: Monitor
+                        - button "Konfigurieren" [ref=e217]:
+                          - img [ref=e218]
+                        - button "Weitere Aktionen" [ref=e221]:
+                          - img [ref=e222]
+                  - 'button "Mock #CD10, Status: Online" [ref=e227] [cursor=pointer]':
+                    - generic [ref=e228]:
+                      - text: ⠿
+                      - generic "Online" [ref=e229]
+                      - generic [ref=e230]: "Mock #CD10"
+                      - generic [ref=e231]: MOCK
+                    - generic [ref=e232]:
+                      - generic [ref=e233]:
+                        - generic [ref=e235]: Online
+                        - generic [ref=e236]: 2S
+                      - generic [ref=e237]:
+                        - generic [ref=e238]:
+                          - img [ref=e239]
+                          - generic [ref=e241]: Temperatur
+                          - generic [ref=e242]: "0"
+                          - generic [ref=e243]: °C
+                        - generic [ref=e244]:
+                          - img [ref=e245]
+                          - generic [ref=e247]: Temperatur
+                          - generic [ref=e248]: "22"
+                          - generic [ref=e249]: °C
+                      - generic [ref=e250]:
+                        - button "Monitor" [ref=e251]:
+                          - img [ref=e252]
+                          - generic [ref=e254]: Monitor
+                        - button "Konfigurieren" [ref=e255]:
+                          - img [ref=e256]
+                        - button "Weitere Aktionen" [ref=e259]:
+                          - img [ref=e260]
+            - 'region "Zone Testneu: 2/2 Geräte online" [ref=e264]':
+              - generic [ref=e265]:
+                - generic [ref=e266] [cursor=pointer]:
+                  - img [ref=e267]
+                  - heading "Testneu" [level=3] [ref=e269]
+                  - button "Zone umbenennen" [ref=e270]:
+                    - img [ref=e271]
+                  - generic [ref=e274]: Ø 23.3°C
+                  - generic [ref=e275]:
+                    - text: 2 ESPs
+                    - generic [ref=e276]: ·
+                    - text: 2/2 Online
+                  - generic [ref=e278]: ⚠ 1
+                  - link "Monitor" [ref=e279]:
+                    - /url: /monitor/testneu
+                    - img [ref=e280]
+                    - generic [ref=e282]: Monitor
+                  - button "Zone-Aktionen" [ref=e283]:
+                    - img [ref=e284]
+                - generic [ref=e290]:
+                  - 'button "Mock #27EA, Status: Online" [ref=e292] [cursor=pointer]':
+                    - generic [ref=e293]:
+                      - text: ⠿
+                      - generic "Online" [ref=e294]
+                      - generic [ref=e295]: "Mock #27EA"
+                      - generic [ref=e296]: MOCK
+                    - generic [ref=e297]:
+                      - generic [ref=e298]:
+                        - generic [ref=e300]: Online
+                        - generic [ref=e301]: 1S
+                      - generic [ref=e303]:
+                        - img [ref=e304]
+                        - generic [ref=e306]: Temperatur
+                        - generic [ref=e307]: "24.5"
+                        - generic [ref=e308]: °C
+                      - generic [ref=e309]:
+                        - button "Monitor" [ref=e310]:
+                          - img [ref=e311]
+                          - generic [ref=e313]: Monitor
+                        - button "Konfigurieren" [ref=e314]:
+                          - img [ref=e315]
+                        - button "Weitere Aktionen" [ref=e318]:
+                          - img [ref=e319]
+                  - 'button "Mock #B22F, Status: Online" [ref=e324] [cursor=pointer]':
+                    - generic [ref=e325]:
+                      - text: ⠿
+                      - generic "Online" [ref=e326]
+                      - generic [ref=e327]: "Mock #B22F"
+                      - generic [ref=e328]: MOCK
+                    - generic [ref=e329]:
+                      - generic [ref=e330]:
+                        - generic [ref=e332]: Online
+                        - generic [ref=e333]: 1S
+                      - generic [ref=e335]:
+                        - img [ref=e336]
+                        - generic [ref=e338]: Temperatur
+                        - generic [ref=e339]: "22"
+                        - generic [ref=e340]: °C
+                      - generic [ref=e341]:
+                        - button "Monitor" [ref=e342]:
+                          - img [ref=e343]
+                          - generic [ref=e345]: Monitor
+                        - button "Konfigurieren" [ref=e346]:
+                          - img [ref=e347]
+                        - button "Weitere Aktionen" [ref=e350]:
+                          - img [ref=e351]
+            - generic [ref=e356]:
+              - generic [ref=e357] [cursor=pointer]:
+                - img [ref=e358]
+                - img [ref=e360]
+                - heading "Nicht zugewiesen" [level=3] [ref=e363]
+                - generic [ref=e364]: Alle Geräte zugewiesen
+              - generic [ref=e365]:
+                - img [ref=e366]
+                - generic [ref=e369]: Alle Geräte sind Zonen zugewiesen
+            - button "Zone erstellen" [disabled] [ref=e370]:
+              - img [ref=e371]
+              - text: Zone erstellen
+    - button "Quick Actions öffnen" [ref=e373] [cursor=pointer]:
+      - img
+  - generic "Benachrichtigungen"
