@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.2 | **Aktualisiert:** 2026-02-10
+> **Version:** 2.3 | **Aktualisiert:** 2026-03-04
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
 > **Änderungen:** Server-Subscriptions auf Multi-Kaiser-Wildcards (`kaiser/+/`) umgestellt
@@ -382,23 +382,32 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 
 **QoS:** 1
 
-**Payload:**
+**Payload (Feld `command` ist massgeblich):**
 ```json
 {
-  "action": "stop_all",
-  "gpio": 5,
+  "command": "emergency_stop",
   "reason": "User request"
 }
 ```
 
-**Actions:**
-- `stop_all`: Alle Aktoren stoppen
-- `stop_actuator`: Einzelnen Aktor stoppen (gpio erforderlich)
-- `safe_mode`: Safe-Mode aktivieren
+**Aufheben (Not-Aus freigeben):**
+```json
+{
+  "command": "clear_emergency",
+  "reason": "manual"
+}
+```
+
+**command-Werte:**
+- `emergency_stop`: Alle Aktoren dieses ESPs stoppen, Emergency-Flag setzen (Default bei fehlendem/ungueltigem command)
+- `clear_emergency`: Emergency-Flag aufheben, Aktoren wieder steuerbar
+
+**Optionale Felder:** `reason` (string), `gpio` (nur bei gerätespezifischen Erweiterungen)
 
 **Code-Referenzen:**
-- **ESP32:** `main.cpp` Zeile 729 (Subscription: broadcast/emergency)
-- **Server:** `topics.py:build_actuator_emergency_topic()` (Zeile 96)
+- **ESP32:** `main.cpp` (actuator/emergency Subscription, command clear_emergency)
+- **Server:** `topics.py:build_actuator_emergency_topic()`, `actuators.py` clear_emergency Endpoint
+- **Mock-Simulation:** `actuator_handler.py` handle_emergency/handle_broadcast_emergency werten `command` aus
 
 ---
 
@@ -971,7 +980,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSubzoneSafeTopic()` (Zeile 220)
+- **ESP32:** `topic_builder.cpp:buildSubzoneSafeTopic()`, `main.cpp` subscribt und verarbeitet (Handler: action enable/disable, gpioManager.enableSafeModeForSubzone/disableSafeModeForSubzone)
 - **Server:** `topics.py:build_subzone_safe_topic()` (Zeile 192)
 
 ---
@@ -984,13 +993,23 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 
 **QoS:** 2
 
-**Payload:**
+**Payload (Feld `command`):**
 ```json
 {
-  "action": "stop_all",
+  "command": "emergency_stop",
   "reason": "Global emergency triggered"
 }
 ```
+
+**Aufheben (alle ESPs):**
+```json
+{
+  "command": "clear_emergency",
+  "reason": "manual"
+}
+```
+
+**command-Werte:** `emergency_stop` (alle Aktoren stoppen), `clear_emergency` (Not-Aus systemweit aufheben). Konsistent mit Abschnitt 2.5 (actuator/emergency).
 
 ---
 

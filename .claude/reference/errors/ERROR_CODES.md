@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Error-Code Referenz
 
-> **Version:** 1.4 | **Aktualisiert:** 2026-03-03
+> **Version:** 1.5 | **Aktualisiert:** 2026-03-04
 > **Quellen:** `El Trabajante/src/models/error_codes.h`, `El Servador/god_kaiser_server/src/core/error_codes.py`
 > **Letzte Verifizierung:** AGENT 3 Error-Code Spezialist
 
@@ -36,6 +36,7 @@ allowed-tools: Read
 | 5780 | Server | SUBZONE | Subzone nicht gefunden | Subzone-Config prüfen |
 | 5850 | Server | NOTIFICATION | Notification nicht gefunden | Notification-ID prüfen |
 | 5852 | Server | NOTIFICATION | Email-Provider nicht verfügbar | SMTP-Config prüfen |
+| 5900 | Server | PLUGIN | Plugin nicht gefunden | Plugin-ID/Registry prüfen |
 
 ---
 
@@ -59,7 +60,8 @@ allowed-tools: Read
 | **5780-5799** | Server | SUBZONE_ERROR |
 | **5800-5849** | Server | AUTOOPS_ERROR |
 | **5850-5899** | Server | NOTIFICATION_ERROR |
-| **5900-5999** | Server | RESERVED |
+| **5900-5949** | Server | PLUGIN_ERROR |
+| **5950-5999** | Server | RESERVED |
 | **6000-6099** | Test | TEST (Testinfrastruktur-Fehler) |
 
 **MQTT Error Publishing Rate-Limiting (F8):** ESP32 ErrorTracker throttles MQTT error publishes to max 1 per error code per 60s window. Suppressed occurrences are counted and logged on next publish. Implementation: `error_tracker.cpp` — `shouldPublishError()` with modulo-hashed 32-slot static table.
@@ -525,6 +527,21 @@ allowed-tools: Read
 | 5858 | `WEBHOOK_SIGNATURE_INVALID` | Webhook signature validation failed |
 | 5859 | `ALERT_PREFERENCE_NOT_FOUND` | Alert preference not found for user |
 | 5860 | `ALERT_INVALID_STATE_TRANSITION` | ISA-18.2 invalid alert state transition (409 Conflict) |
+
+---
+
+## 12f. Server Plugin Errors (5900-5949)
+
+| Code | Name | Beschreibung |
+|------|------|--------------|
+| 5900 | `PLUGIN_NOT_FOUND` | Plugin not found in registry |
+| 5901 | `PLUGIN_DISABLED` | Plugin is disabled |
+| 5902 | `PLUGIN_EXECUTE_FAILED` | Plugin execution failed |
+| 5903 | `PLUGIN_CONFIG_INVALID` | Plugin configuration invalid |
+| 5904 | `PLUGIN_ROLLBACK_FAILED` | Plugin rollback failed |
+| 5905 | `PLUGIN_AUTH_FAILED` | Plugin authentication failed |
+| 5906 | `PLUGIN_SCHEDULE_INVALID` | Plugin schedule configuration invalid |
+| 5907 | `PLUGIN_REGISTRY_SYNC_FAILED` | Plugin registry sync failed |
 
 ---
 

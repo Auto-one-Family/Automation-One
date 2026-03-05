@@ -739,7 +739,7 @@ Die Logic Engine unterstützt Rules über **mehrere ESPs**:
 | `sequence_error` | `handleSequenceError()` | 2260 | Automation-Fehler |
 | `notification` | `handleNotification()` | 2033 | Logic-Rule Benachrichtigung (legacy → Toast) |
 | `notification_new` | notification-inbox.store | - | Neuer Alert → Inbox/Badge (Phase 4A) |
-| `notification_updated` | notification-inbox.store | - | Alert-Status geaendert (Phase 4A) |
+| `notification_updated` | notification-inbox.store | - | Alert-Lifecycle (status, acknowledged_at, resolved_at) + read (Phase 4B) |
 | `notification_unread_count` | notification-inbox.store | - | Unread-Count Sync (Phase 4A) |
 | `error_event` | `handleErrorEvent()` | 2048 | Fehler mit Troubleshooting |
 | `system_event` | `handleSystemEvent()` | 2108 | System-Wartung |

@@ -36,7 +36,7 @@
 | `logs/esp32/` | - | ESP32 Serial Logs (manuell via PlatformIO) |
 | `logs/wokwi/` | - | Wokwi Serial/MQTT/Report Logs (via make wokwi-test-*) |
 | `logs/current/` | - | Session-Logs (via start_session.sh) |
-| (kein Bind-Mount) | el-frontend | Vue/Vite stdout → Loki `compose_service=el-frontend` (JSON, level/component); `docker compose logs el-frontend` |
+| (kein Bind-Mount) | el-frontend | Vue/Vite stdout → Loki `compose_service=el-frontend` (JSON, level/component); `docker compose logs el-frontend`. **Hinweis:** Vite-Dev-Server schreibt nur beim Start eine Zeile; kein Dauer-Log. Loki-Alert „Frontend Down“ (keine Logs seit 5 Min.) ist deaktiviert (False Positives). Status: `docker compose ps el-frontend`. |
 | Docker Container | esp32-serial-logger | ESP32 Serial via TCP-Bridge (stdout only, Profile: hardware) |
 
 ### Docker-Compose Konfiguration

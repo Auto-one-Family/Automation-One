@@ -4,7 +4,7 @@
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
 > **Änderungen 2.13:** Auth-Token-Pfad korrigiert (response.tokens.access_token statt response.access_token)
 > **Änderungen 2.12:** E2E Sensor-Test-Script (scripts/test_e2e_sensor_publish.py), ENVIRONMENT Bugfix (test→testing in CI/Test Compose)
-> **Änderungen 2.15:** Wokwi 178 Szenarien (15 Kategorien), Backend 19 Router (3 PLANNED), Frontend 137 .vue (13 Primitives), Logic sort fix
+> **Änderungen 2.15:** Wokwi 178 Szenarien (15 Kategorien), Backend 27 Router in api/v1 (24 aktiv, 3 PLANNED: ai, kaiser, library), Frontend 137 .vue (13 Primitives), Logic sort fix
 > **Änderungen 2.11:** Wokwi: make wokwi-test-all (173), make wokwi-test-error-injection (10), wokwi-seed fix (lokal statt docker exec)
 > **Änderungen 2.10:** Serena MCP-Server Pfade in §9, .mcp.json Pfad ergänzt
 > **Änderungen 2.9:** Health-Response korrigiert (Code-Abgleich), Provisioning Portal für Real-Hardware (§6.1), `tasklist` → Docker-Alternative, sqlite3 → PostgreSQL in §6.2/6.3, PlatformIO Git-Bash-Hinweis, Auth-Header ergänzt
@@ -209,12 +209,14 @@ psql -h localhost -U god_kaiser -d god_kaiser_db -c "SELECT * FROM esp_devices;"
 
 ### 1.2 Schema-Übersicht
 
+> **Wissensdaten vs. operative Daten:** Siehe `.claude/reference/DATABASE_ARCHITECTURE.md` (Trennung, Verknüpfung Zonen/Subzonen/Geräte, Verteilung).
+
 | Tabelle | Beschreibung | Wichtige Felder |
 |---------|--------------|-----------------|
-| `esp_devices` | ESP32-Geräte | device_id, status, zone_id, last_seen, health_status |
-| `sensor_configs` | Sensor-Konfigurationen | esp_id, gpio, sensor_type, enabled, config_status |
+| `esp_devices` | ESP32-Geräte | device_id, status, zone_id, zone_name, last_seen, device_metadata (JSON) |
+| `sensor_configs` | Sensor-Konfigurationen | esp_id, gpio, sensor_type, enabled, sensor_metadata (JSON), runtime_stats, alert_config |
 | `sensor_data` | Sensor-Messwerte (Time-Series) | esp_id, gpio, raw_value, processed_value, timestamp |
-| `actuator_configs` | Aktor-Konfigurationen | esp_id, gpio, actuator_type, enabled |
+| `actuator_configs` | Aktor-Konfigurationen | esp_id, gpio, actuator_type, actuator_metadata (JSON), runtime_stats, alert_config |
 | `actuator_states` | Aktuelle Aktor-Zustände | esp_id, gpio, current_value, state |
 | `actuator_history` | Aktor-Historie (Time-Series) | esp_id, gpio, command_type, success, timestamp |
 | `cross_esp_logic` | Automatisierungs-Regeln | rule_name, enabled, trigger_conditions, actions |
@@ -223,7 +225,16 @@ psql -h localhost -U god_kaiser -d god_kaiser_db -c "SELECT * FROM esp_devices;"
 | `audit_logs` | System-Audit-Trail | event_type, severity, source_type, message |
 | `user_accounts` | Benutzerkonten | username, email, role, is_active |
 | `token_blacklist` | Logout-Token-Tracking | token_hash, expires_at, blacklisted_at |
-| `subzone_configs` | Subzone-Konfigurationen | esp_id, subzone_id, assigned_gpios |
+| `subzone_configs` | Subzone-Konfigurationen (FK esp_id) | esp_id, subzone_id, parent_zone_id, assigned_gpios, custom_data (JSONB), safe_mode_active |
+| `zone_contexts` | Zone-Kontext / Wissensdaten (Phase K3) | zone_id (unique, kein FK), zone_name, variety, substrate, growth_phase, cycle_history, custom_data (JSONB) |
+| `notifications` | Benachrichtigungen (Phase 4A) | user_id, severity, category, status (ISA-18.2), metadata |
+| `notification_preferences` | User-Benachrichtigungs-Einstellungen | user_id, channel, digest_schedule |
+| `email_log` | E-Mail-Versandprotokoll (Phase C) | notification_id, recipient, status, sent_at |
+| `plugin_configs` | AutoOps-Plugins (Phase 4C) | plugin_id, is_enabled, config (JSON), schedule, config_schema, capabilities |
+| `plugin_executions` | Plugin-Ausführungshistorie | plugin_id, started_at, finished_at, duration_seconds, status, result (JSON) |
+| `diagnostic_reports` | Diagnose-Reports (Phase 4D) | report_id, run_at, checks (JSON), summary |
+| `dashboards` | Dashboard-Layouts | user_id, layout (JSON), name |
+| `sensor_type_defaults` | Sensor-Typ-Standardwerte (Phase 2A) | sensor_type, operating_mode, timeout_seconds |
 | `kaiser_registry` | Kaiser-Nodes (geplant) | kaiser_id, status, zone_ids |
 | `system_config` | System-Konfiguration | config_key, config_value, config_type |
 

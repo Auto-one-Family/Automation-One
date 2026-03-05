@@ -7,11 +7,11 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 2.9 | **Aktualisiert:** 2026-03-03
+> **Version:** 3.0 | **Aktualisiert:** 2026-03-04
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
-> **Endpoint-Anzahl:** ~210 Endpoints
+> **Endpoint-Anzahl:** ~231 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry)
 
 ---
 
@@ -75,7 +75,7 @@ allowed-tools: Read
 | `/sensors/{sensor_id}/runtime` | GET | JWT | Runtime-Stats + Wartungsstatus (Phase 4A.8) |
 | `/sensors/{sensor_id}/runtime` | PATCH | Operator | Runtime-Stats aktualisieren (Wartungslog) |
 
-### Actuators (`/actuators`) - 12 Endpoints
+### Actuators (`/actuators`) - 13 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
@@ -85,6 +85,7 @@ allowed-tools: Read
 | `/actuators/{actuator_id}/state` | POST | JWT | Actuator-State setzen |
 | `/actuators/{actuator_id}/history` | GET | JWT | Actuator-History |
 | `/actuators/emergency-stop` | POST | JWT | Global Emergency-Stop |
+| `/actuators/clear_emergency` | POST | Operator | Not-Aus aufheben (MQTT clear_emergency an ESP(s)) |
 | `/actuators/{actuator_id}` | DELETE | JWT | Actuator löschen |
 | `/actuators/by-esp/{esp_id}` | GET | JWT | Actuators nach ESP |
 | `/actuators/{actuator_id}/alert-config` | PATCH | Operator | Per-Actuator Alert-Config setzen (Phase 4A.7) |
@@ -92,7 +93,7 @@ allowed-tools: Read
 | `/actuators/{actuator_id}/runtime` | GET | JWT | Runtime-Stats + Wartungsstatus (Phase 4A.8) |
 | `/actuators/{actuator_id}/runtime` | PATCH | Operator | Runtime-Stats aktualisieren (Wartungslog) |
 
-### Zones (`/zone`) - 5 Endpoints
+### Zones (`/zone`) - 6 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
@@ -100,6 +101,7 @@ allowed-tools: Read
 | `/zone/devices/{esp_id}/zone` | DELETE | Operator | Zone-Zuweisung entfernen |
 | `/zone/devices/{esp_id}` | GET | JWT | Zone-Info für ESP |
 | `/zone/{zone_id}/devices` | GET | JWT | Alle ESPs in Zone |
+| `/zone/{zone_id}/monitor-data` | GET | JWT | Zone Monitor Data L2 (Sensoren/Aktoren nach Subzone gruppiert) |
 | `/zone/unassigned` | GET | JWT | ESPs ohne Zone-Zuweisung |
 
 > **⚠️ HINWEIS:** Es gibt keinen `GET /zone` Endpoint für "alle Zonen".
@@ -117,7 +119,33 @@ allowed-tools: Read
 | `/subzone/devices/{esp_id}/subzones/{subzone_id}/safe-mode` | DELETE | Operator | Safe-Mode deaktivieren |
 
 > **Hinweis:** Subzone-Endpoints sind device-scoped (wie Zone-Endpoints).
-> Subzones haben eine eigene `subzone_configs` DB-Tabelle (im Gegensatz zu Zonen, die String-Felder auf `esp_devices` sind).
+> Subzones haben eine eigene `subzone_configs` DB-Tabelle (inkl. `custom_data` JSONB für Subzonen-Metadaten).
+
+### Zone Context (`/zone/context`) - 7 Endpoints (Phase K3)
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/zone/context` | GET | JWT | Alle Zone-Kontexte (paginiert) |
+| `/zone/context/{zone_id}` | GET | JWT | Kontext einer Zone |
+| `/zone/context/{zone_id}` | PUT | Operator | Kontext anlegen/ersetzen (Upsert) |
+| `/zone/context/{zone_id}` | PATCH | Operator | Kontext teilweise aktualisieren |
+| `/zone/context/{zone_id}/archive-cycle` | POST | Operator | Anbauzyklus archivieren |
+| `/zone/context/{zone_id}/history` | GET | JWT | Archivierte Zyklen (History) |
+| `/zone/context/{zone_id}/kpis` | GET | JWT | Zone-KPIs (VPD, DLI, Health-Score) |
+
+> **DB-Tabelle:** `zone_contexts` (Alembic: `add_zone_context_table`). Felder u.a. variety, substrate, growth_phase, cycle_history, custom_data.
+
+### Kaiser (`/kaiser`) - 5 Endpoints
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/kaiser` | GET | JWT | Alle Kaisers auflisten |
+| `/kaiser/{kaiser_id}` | GET | JWT | Kaiser-Details |
+| `/kaiser/{kaiser_id}/hierarchy` | GET | JWT | Vollstaendige Hierarchie: Kaiser → Zonen → Subzonen → Sensoren/Aktoren |
+| `/kaiser` | POST | Operator | Kaiser registrieren |
+| `/kaiser/{kaiser_id}/zones` | PUT | Operator | Managed Zones aktualisieren |
+
+> **Hierarchy-Response:** Subzonen enthalten `sensors[]` und `actuators[]` (aus assigned_gpios + sensor_configs/actuator_configs). "Keine Subzone" Gruppe fuer ESPs ohne Subzone. Nutzt: `HierarchyTab.vue`, System-Monitor.
 
 ### Logic/Automation (`/logic`) - 8 Endpoints
 
@@ -288,7 +316,7 @@ allowed-tools: Read
 | `/diagnostics/run/{check_name}` | POST | Operator | Einzelnen Check ausführen |
 | `/diagnostics/history` | GET | JWT | Report-History auflisten |
 | `/diagnostics/history/{report_id}` | GET | JWT | Report-Details abrufen |
-| `/diagnostics/export/{report_id}` | POST | Operator | Report als JSON exportieren |
+| `/diagnostics/export/{report_id}` | POST | Operator | Report als Markdown exportieren |
 | `/diagnostics/checks` | GET | JWT | Verfügbare Checks auflisten |
 
 ### Plugins (`/plugins`) - 8 Endpoints
@@ -298,11 +326,40 @@ allowed-tools: Read
 | `/plugins` | GET | JWT | Alle Plugins auflisten |
 | `/plugins/{plugin_id}` | GET | JWT | Plugin-Details mit letzten Executions |
 | `/plugins/{plugin_id}/execute` | POST | Operator | Plugin manuell ausführen |
-| `/plugins/{plugin_id}/config` | PUT | Operator | Plugin-Konfiguration ändern |
+| `/plugins/{plugin_id}/config` | PUT | Admin | Plugin-Konfiguration ändern |
 | `/plugins/{plugin_id}/history` | GET | JWT | Execution-History |
-| `/plugins/{plugin_id}/enable` | POST | Operator | Plugin aktivieren |
-| `/plugins/{plugin_id}/disable` | POST | Operator | Plugin deaktivieren |
-| `/plugins/{plugin_id}/schedule` | PUT | Operator | Plugin-Schedule setzen/ändern |
+| `/plugins/{plugin_id}/enable` | POST | Admin | Plugin aktivieren |
+| `/plugins/{plugin_id}/disable` | POST | Admin | Plugin deaktivieren |
+| `/plugins/{plugin_id}/schedule` | PUT | Admin | Plugin-Schedule setzen/ändern |
+
+### Backups (`/backups`) - 6 Endpoints (Phase A V5.1)
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/backups/database/create` | POST | Admin | Sofort-Backup auslösen |
+| `/backups/database/list` | GET | Admin | Backup-Liste |
+| `/backups/database/{backup_id}/download` | GET | Admin | Backup-Datei herunterladen |
+| `/backups/database/{backup_id}` | DELETE | Admin | Einzelnes Backup löschen |
+| `/backups/database/{backup_id}/restore` | POST | Admin | Wiederherstellen (confirm=true) |
+| `/backups/database/cleanup` | POST | Admin | Alte Backups aufräumen |
+
+### Export (`/export`) - 5 Endpoints (Phase K4 Wissensinfrastruktur)
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/export/components` | GET | JWT | Alle Komponenten als AI-Ready JSON |
+| `/export/components/{component_id}` | GET | JWT | Einzelne Komponente |
+| `/export/zones` | GET | JWT | Alle Zonen inkl. Kontext |
+| `/export/zones/{zone_id}` | GET | JWT | Zone inkl. Komponenten + Kontext |
+| `/export/system-description` | GET | JWT | System-Beschreibung (WoT-Style) |
+
+### Schema Registry (`/schema-registry`) - 3 Endpoints (Phase K4 L0.2)
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/schema-registry` | GET | JWT | Device-Typen (Sensoren/Aktoren) auflisten |
+| `/schema-registry/{device_type}` | GET | JWT | JSON-Schema für Gerätetyp |
+| `/schema-registry/{device_type}/validate` | POST | JWT | Metadaten gegen Schema validieren |
 
 ### Health (`/health`) - 6 Endpoints
 
@@ -800,6 +857,32 @@ Global Emergency-Stop für alle Actuators.
 {
   "reason": "User request",
   "esp_id": "ESP_12AB34CD"
+}
+```
+
+---
+
+### 4.5 POST /actuators/clear_emergency
+
+Not-Aus aufheben: Emergency-Flag serverseitig und auf allen betroffenen ESPs (bzw. Mocks) zuruecksetzen. Sendet MQTT-Payload `{"command": "clear_emergency", "reason": "..."}` an jedes Geraet (einzeln oder via Broadcast je nach Implementierung). Aktoren sind danach wieder steuerbar.
+
+**Auth:** JWT (Operator)
+
+**Request Body (ClearEmergencyRequest):**
+```json
+{
+  "esp_id": "ESP_12AB34CD",
+  "reason": "manual"
+}
+```
+- `esp_id`: optional; wenn gesetzt nur dieses Geraet, sonst alle Geraete.
+
+**Response 200 (ClearEmergencyResponse):**
+```json
+{
+  "success": true,
+  "message": "Emergency stop cleared",
+  "devices_cleared": 2
 }
 ```
 
@@ -1348,6 +1431,8 @@ Health Check (keine Auth erforderlich).
 | audit | `audit.ts` | Audit Logs |
 | users | `users.ts` | User Management |
 | notifications | `notifications.ts` | Notification Inbox + Preferences + Email Log |
+| backups | `backups.ts` | DB-Backup create/list/download/restore/cleanup (Admin) |
+| inventory | `inventory.ts` | Wissensdatenbank (aggregiert zone context, export, device schemas) |
 
 ### Backend Router (`El Servador/god_kaiser_server/src/api/v1/`)
 
@@ -1358,6 +1443,7 @@ Health Check (keine Auth erforderlich).
 | sensors | `sensors.py` | 16 |
 | actuators | `actuators.py` | 12 |
 | zone | `zone.py` | 5 |
+| zone_context | `zone_context.py` | 7 |
 | subzone | `subzone.py` | 6 |
 | logic | `logic.py` | 8 |
 | sequences | `sequences.py` | 4 |
@@ -1370,9 +1456,12 @@ Health Check (keine Auth erforderlich).
 | notifications | `notifications.py` | 15 |
 | diagnostics | `diagnostics.py` | 6 |
 | plugins | `plugins.py` | 8 |
+| backups | `backups.py` | 6 |
+| export (component_export) | `component_export.py` | 5 |
+| schema_registry | `schema_registry.py` | 3 |
 | webhooks | `webhooks.py` | 1 |
 | logs | `logs.py` | 1 |
 | websocket | `websocket/realtime.py` | 1 |
 | ai | `ai.py` | PLANNED (God Layer AI) |
-| kaiser | `kaiser.py` | PLANNED (Kaiser Relay Node) |
+| kaiser | `kaiser.py` | IMPLEMENTED (Kaiser Relay Node, Hierarchy) |
 | library | `library.py` | PLANNED (OTA Sensor Library) |

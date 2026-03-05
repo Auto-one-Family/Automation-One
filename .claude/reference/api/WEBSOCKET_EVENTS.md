@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 2.6 | **Aktualisiert:** 2026-03-03
+> **Version:** 2.7 | **Aktualisiert:** 2026-03-04
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
-> **Event-Anzahl:** 31 verschiedene Event-Typen
+> **Event-Anzahl:** 33 verschiedene Event-Typen
 
 ---
 
@@ -83,6 +83,13 @@ allowed-tools: Read
 | `sequence_completed` | Server→Frontend | Sequence Ende | Sequence erfolgreich beendet |
 | `sequence_error` | Server→Frontend | Sequence Fehler | Sequence mit Fehler |
 | `sequence_cancelled` | Server→Frontend | Sequence Abbruch | Sequence abgebrochen |
+
+### Plugin Events (Phase 4C)
+
+| Event | Richtung | Trigger | Beschreibung |
+|-------|----------|---------|--------------|
+| `plugin_execution_started` | Server→Frontend | PluginService | Plugin-Ausführung gestartet |
+| `plugin_execution_completed` | Server→Frontend | PluginService | Plugin-Ausführung beendet (success/error) |
 
 ### System Events
 
@@ -1055,9 +1062,65 @@ Sequence abgebrochen.
 
 ---
 
-## 10. System Events
+## 10. Plugin Events (Phase 4C)
 
-### 10.1 system_event
+### 10.1 plugin_execution_started
+
+Plugin-Ausführung gestartet.
+
+**Trigger:** `PluginService.execute_plugin()` vor Plugin-Ausführung
+
+**Code-Location:** [plugin_service.py:197](El Servador/god_kaiser_server/src/services/plugin_service.py#L197)
+
+**Payload:**
+```json
+{
+  "type": "plugin_execution_started",
+  "data": {
+    "execution_id": "uuid-string",
+    "plugin_id": "health_check",
+    "trigger_source": "manual"
+  }
+}
+```
+
+---
+
+### 10.2 plugin_execution_completed
+
+Plugin-Ausführung beendet (success oder error).
+
+**Trigger:** `PluginService.execute_plugin()` nach Abschluss
+
+**Code-Location:** [plugin_service.py:331](El Servador/god_kaiser_server/src/services/plugin_service.py#L331)
+
+**Payload:**
+```json
+{
+  "type": "plugin_execution_completed",
+  "data": {
+    "execution_id": "uuid-string",
+    "plugin_id": "health_check",
+    "status": "success",
+    "duration_seconds": 2.5,
+    "error_message": null
+  }
+}
+```
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `execution_id` | string | UUID der Execution |
+| `plugin_id` | string | Plugin-ID |
+| `status` | string | `success` oder `error` |
+| `duration_seconds` | float | Ausführungsdauer |
+| `error_message` | string? | Fehlermeldung bei status=error |
+
+---
+
+## 11. System Events
+
+### 11.1 system_event
 
 System-Event (Maintenance, Cleanup, etc.).
 
@@ -1083,7 +1146,7 @@ System-Event (Maintenance, Cleanup, etc.).
 
 ---
 
-### 10.2 error_event
+### 11.2 error_event
 
 ESP Hardware/Config Fehler.
 
@@ -1118,7 +1181,7 @@ ESP Hardware/Config Fehler.
 
 ---
 
-### 10.3 events_restored
+### 11.3 events_restored
 
 Audit-Events aus Backup wiederhergestellt.
 
@@ -1141,9 +1204,9 @@ Audit-Events aus Backup wiederhergestellt.
 
 ---
 
-## 11. Frontend Integration
+## 12. Frontend Integration
 
-### 11.1 WebSocket Service (Singleton)
+### 12.1 WebSocket Service (Singleton)
 
 ```typescript
 import { websocketService } from '@/services/websocket'
@@ -1159,7 +1222,7 @@ websocketService.isConnected()  // boolean
 websocketService.getStatus()    // 'disconnected' | 'connecting' | 'connected' | 'error'
 ```
 
-### 11.2 Type-spezifischer Listener
+### 12.2 Type-spezifischer Listener
 
 ```typescript
 // Listener registrieren
@@ -1171,7 +1234,7 @@ const unsubscribe = websocketService.on('sensor_data', (message) => {
 unsubscribe()
 ```
 
-### 11.3 Filtered Subscription
+### 12.3 Filtered Subscription
 
 ```typescript
 const subscriptionId = websocketService.subscribe(
@@ -1188,7 +1251,7 @@ const subscriptionId = websocketService.subscribe(
 websocketService.unsubscribe(subscriptionId)
 ```
 
-### 11.4 Composable: useWebSocket
+### 12.4 Composable: useWebSocket
 
 ```typescript
 import { useWebSocket } from '@/composables'
@@ -1220,7 +1283,7 @@ onUnmounted(() => {
 
 ---
 
-## 12. Filter-Typen
+## 13. Filter-Typen
 
 ```typescript
 interface WebSocketFilters {
@@ -1233,7 +1296,7 @@ interface WebSocketFilters {
 
 ---
 
-## 13. Code-Locations
+## 14. Code-Locations
 
 ### Frontend
 
@@ -1272,17 +1335,18 @@ interface WebSocketFilters {
 | Service | Events |
 |---------|--------|
 | `notification_router.py` | `notification_new`, `notification_updated`, `notification_unread_count` |
+| `plugin_service.py` | `plugin_execution_started`, `plugin_execution_completed` |
 
 ---
 
-## 14. Rate Limiting
+## 15. Rate Limiting
 
 - **Server-seitig:** 10 Nachrichten pro Sekunde pro Client
 - **Client-seitig:** Warning bei >10 msg/sec
 
 ---
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 | Problem | Ursache | Lösung |
 |---------|---------|--------|
