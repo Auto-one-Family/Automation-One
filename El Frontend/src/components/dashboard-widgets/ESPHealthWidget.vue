@@ -89,7 +89,7 @@ function navigateToDevice(device: ESPDevice) {
   if (device.zone_id) {
     router.push({ name: 'hardware-esp', params: { zoneId: device.zone_id, espId: deviceId } })
   } else {
-    router.push({ name: 'hardware', query: { device: deviceId } })
+    router.push({ name: 'hardware', query: { openSettings: deviceId } })
   }
 }
 </script>

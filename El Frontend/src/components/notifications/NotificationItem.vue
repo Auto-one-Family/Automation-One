@@ -18,6 +18,7 @@ import {
 } from 'lucide-vue-next'
 import { formatRelativeTime } from '@/utils/formatters'
 import type { NotificationDTO } from '@/api/notifications'
+import { GRAFANA_BASE_URL } from '@/composables/useGrafana'
 
 interface Props {
   notification: NotificationDTO
@@ -96,7 +97,7 @@ function handleResolve(): void {
 function navigateToSensor(): void {
   const espId = metadata.value.esp_id as string
   if (espId) {
-    router.push(`/hardware/${espId}`)
+    router.push({ path: '/hardware', query: { openSettings: espId } })
   }
 }
 
@@ -220,7 +221,7 @@ function navigateToRule(): void {
           <a
             v-if="notification.source === 'grafana'"
             class="item__action"
-            href="/grafana/alerting/list"
+            :href="`${GRAFANA_BASE_URL}/alerting/list`"
             target="_blank"
             title="In Grafana öffnen"
             @click.stop

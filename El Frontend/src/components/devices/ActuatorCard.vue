@@ -3,7 +3,7 @@
  * ActuatorCard — Unified actuator card for config and monitor views
  *
  * Config mode: Name, type, ESP-ID, GPIO, state badge, toggle, settings hint
- * Monitor mode: Read-only — state badge visible, toggle button hidden
+ * Monitor mode: State badge + toggle button (with ConfirmDialog in parent)
  */
 import { computed } from 'vue'
 import { Power, ChevronRight } from 'lucide-vue-next'
@@ -74,7 +74,6 @@ function handleToggle(event: Event) {
         </span>
       </div>
       <button
-        v-if="mode === 'config'"
         class="btn-secondary btn-sm flex-shrink-0 touch-target"
         :disabled="actuator.emergency_stopped"
         @click="handleToggle"

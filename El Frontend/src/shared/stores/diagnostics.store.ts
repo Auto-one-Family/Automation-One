@@ -77,10 +77,11 @@ export const useDiagnosticsStore = defineStore('diagnostics', () => {
     () => statusCounts.value.critical > 0 || statusCounts.value.error > 0,
   )
 
-  /** Time since last report in human-readable form */
+  /** Time since last report in human-readable form (currentReport oder neuester aus History) */
   const lastRunAge = computed<string | null>(() => {
-    if (!currentReport.value) return null
-    const finished = new Date(currentReport.value.finished_at)
+    const report = currentReport.value ?? history.value[0]
+    if (!report) return null
+    const finished = new Date(report.finished_at)
     const diffMs = Date.now() - finished.getTime()
     const diffMin = Math.floor(diffMs / 60_000)
     if (diffMin < 1) return 'gerade eben'

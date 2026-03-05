@@ -204,6 +204,22 @@ watch(
 const settingsDevice = ref<ESPDevice | null>(null)
 const isSettingsOpen = ref(false)
 
+// Handle ?openSettings=espId query param (legacy links + cross-component navigation)
+watch(
+  () => route.query.openSettings as string | undefined,
+  (espId) => {
+    if (!espId) return
+    const device = espStore.devices.find(d => d.device_id === espId)
+    if (device) {
+      settingsDevice.value = device
+      isSettingsOpen.value = true
+    }
+    // Clean the query param from URL
+    router.replace({ path: route.path, query: { ...route.query, openSettings: undefined } })
+  },
+  { immediate: true }
+)
+
 // SlideOver states for config panels
 const showSensorConfig = ref(false)
 const showActuatorConfig = ref(false)
@@ -662,11 +678,17 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
 function handleSensorConfigFromSheet(payload: { espId: string; gpio: number; sensorType: string; unit: string }) {
   configSensorData.value = payload
   showSensorConfig.value = true
+  // Settings-Sheet schließen, damit SensorConfigPanel nicht überlagert wird (z-index)
+  isSettingsOpen.value = false
+  setTimeout(() => { if (!isSettingsOpen.value) settingsDevice.value = null }, 200)
 }
 
 function handleActuatorConfigFromSheet(payload: { espId: string; gpio: number; actuatorType: string }) {
   configActuatorData.value = payload
   showActuatorConfig.value = true
+  // Settings-Sheet schließen, damit ActuatorConfigPanel nicht überlagert wird (z-index)
+  isSettingsOpen.value = false
+  setTimeout(() => { if (!isSettingsOpen.value) settingsDevice.value = null }, 200)
 }
 
 // Rules Activity
@@ -949,11 +971,12 @@ function formatTimeAgo(timestamp: number): string {
       @open-actuator-config="handleActuatorConfigFromSheet"
     />
 
-    <!-- Sensor Config SlideOver -->
+    <!-- Sensor Config SlideOver (elevation=high wenn über Settings-Sheet) -->
     <SlideOver
       :open="showSensorConfig"
       :title="configSensorData?.sensorType || 'Sensor'"
       width="lg"
+      elevation="high"
       @close="showSensorConfig = false"
     >
       <SensorConfigPanel
@@ -962,14 +985,18 @@ function formatTimeAgo(timestamp: number): string {
         :gpio="configSensorData.gpio"
         :sensor-type="configSensorData.sensorType"
         :unit="configSensorData.unit"
+        :show-metadata="false"
+        @deleted="showSensorConfig = false; espStore.fetchDevice(configSensorData!.espId)"
+        @saved="showSensorConfig = false; espStore.fetchDevice(configSensorData!.espId)"
       />
     </SlideOver>
 
-    <!-- Actuator Config SlideOver -->
+    <!-- Actuator Config SlideOver (elevation=high wenn über Settings-Sheet) -->
     <SlideOver
       :open="showActuatorConfig"
       :title="configActuatorData?.actuatorType || 'Aktor'"
       width="lg"
+      elevation="high"
       @close="showActuatorConfig = false"
     >
       <ActuatorConfigPanel
@@ -977,6 +1004,9 @@ function formatTimeAgo(timestamp: number): string {
         :esp-id="configActuatorData.espId"
         :gpio="configActuatorData.gpio"
         :actuator-type="configActuatorData.actuatorType"
+        :show-metadata="false"
+        @deleted="showActuatorConfig = false; espStore.fetchDevice(configActuatorData!.espId)"
+        @saved="showActuatorConfig = false; espStore.fetchDevice(configActuatorData!.espId)"
       />
     </SlideOver>
 

@@ -33,6 +33,15 @@ function statusLabel(status: string): string {
   }
 }
 
+function triggerLabel(trigger: string): string {
+  switch (trigger) {
+    case 'manual': return 'Manuell'
+    case 'logic_rule': return 'Regel'
+    case 'schedule': return 'Zeitplan'
+    default: return trigger
+  }
+}
+
 function statusClass(status: string): string {
   switch (status) {
     case 'healthy': return 'reports-tab__status--healthy'
@@ -169,7 +178,7 @@ onMounted(() => {
                 {{ formatDuration(report.duration_seconds) }}
               </td>
               <td class="reports-tab__trigger">
-                {{ report.triggered_by }}
+                {{ triggerLabel(report.triggered_by) }}
               </td>
               <td class="reports-tab__actions">
                 <button

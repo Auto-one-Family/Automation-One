@@ -268,13 +268,22 @@ function formatErrorTime(isoString: string): string {
         <Bell :size="12" />
         {{ alertStore.warningCount }} Warnings
       </button>
-      <!-- Diagnostic Status Chip -->
+    </div>
+
+    <!-- Diagnostic Status Chip (immer sichtbar wenn letzte Diagnose vorhanden) -->
+    <div v-if="diagStore.lastRunAge && !hasProblems" class="health-summary__diag-row">
       <span
-        v-if="diagStore.lastRunAge"
         :class="['diag-chip', diagStore.hasProblems ? 'diag-chip--warning' : 'diag-chip--ok']"
       >
         <Stethoscope :size="12" />
-        Diagnose: {{ diagStore.lastRunAge }}
+        Letzte Diagnose: {{ diagStore.lastRunAge }}
+        <template v-if="!diagStore.hasProblems"> ✓</template>
+      </span>
+    </div>
+    <div v-else-if="diagStore.lastRunAge && hasProblems" class="health-summary__diag-row">
+      <span class="diag-chip diag-chip--warning">
+        <Stethoscope :size="12" />
+        Diagnose: {{ diagStore.lastRunAge }} (Probleme)
       </span>
     </div>
 
@@ -399,6 +408,14 @@ function formatErrorTime(isoString: string): string {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 0.75rem;
+}
+
+/* Diagnose-Chip Zeile (immer sichtbar wenn letzte Diagnose) */
+.health-summary__diag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
 }
 
 /* Alert Chips */

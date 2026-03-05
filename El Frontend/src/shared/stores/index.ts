@@ -27,3 +27,5 @@ export type { QuickAction, ViewContext, QuickActionPanel } from './quickAction.s
 export { useAlertCenterStore } from './alert-center.store'
 export { usePluginsStore } from './plugins.store'
 export { useDiagnosticsStore } from './diagnostics.store'
+export { useInventoryStore, INVENTORY_COLUMNS } from './inventory.store'
+export type { ComponentItem, SortKey, SortDirection, ColumnDef } from './inventory.store'

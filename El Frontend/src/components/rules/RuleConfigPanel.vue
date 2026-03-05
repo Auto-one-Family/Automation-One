@@ -671,7 +671,7 @@ function selectActuator(value: string) {
                   </button>
                 </div>
               </div>
-              <div v-else-if="(schemaDef as Record<string, unknown>)?.type === 'number'" class="config-field">
+              <div v-else-if="(schemaDef as Record<string, unknown>)?.type === 'number' || (schemaDef as Record<string, unknown>)?.type === 'integer'" class="config-field">
                 <label class="config-label">
                   {{ (schemaDef as Record<string, unknown>).label || key }}
                 </label>
@@ -681,6 +681,24 @@ function selectActuator(value: string) {
                   :value="localData[`cfg_${key}`] ?? (schemaDef as Record<string, unknown>).default"
                   @input="updateField(`cfg_${key}`, Number(($event.target as HTMLInputElement).value))"
                 />
+              </div>
+              <div v-else-if="(schemaDef as Record<string, unknown>)?.type === 'select'" class="config-field">
+                <label class="config-label">
+                  {{ (schemaDef as Record<string, unknown>).label || key }}
+                </label>
+                <select
+                  class="config-select"
+                  :value="(localData[`cfg_${key}`] ?? (schemaDef as Record<string, unknown>).default ?? '') as string"
+                  @change="updateField(`cfg_${key}`, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option
+                    v-for="opt in ((schemaDef as Record<string, unknown>).options as string[]) || []"
+                    :key="opt"
+                    :value="opt"
+                  >
+                    {{ opt }}
+                  </option>
+                </select>
               </div>
               <div v-else-if="(schemaDef as Record<string, unknown>)?.type === 'string'" class="config-field">
                 <label class="config-label">

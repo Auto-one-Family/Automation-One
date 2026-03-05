@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from 'vue'
-import { OctagonX } from 'lucide-vue-next'
+import { ref, computed, watch, onUnmounted } from 'vue'
+import { OctagonX, RotateCcw } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
 
 const espStore = useEspStore()
 const isLoading = ref(false)
 const showConfirm = ref(false)
+
+/** True if any actuator has emergency_stopped */
+const isEmergencyActive = computed(() =>
+  espStore.devices.some((d) =>
+    (d.actuators as { emergency_stopped?: boolean }[] | undefined)?.some(
+      (a) => a.emergency_stopped === true
+    )
+  )
+)
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
@@ -36,33 +45,56 @@ async function handleEmergencyStop() {
     isLoading.value = false
   }
 }
+
+async function handleClearEmergency() {
+  showConfirm.value = false
+  isLoading.value = true
+  try {
+    await espStore.clearEmergencyAll()
+  } catch {
+    // Toast is handled inside clearEmergencyAll
+  } finally {
+    isLoading.value = false
+  }
+}
 </script>
 
 <template>
-  <!-- Emergency Stop Trigger -->
+  <!-- Emergency Stop / Clear Button (two states) -->
   <button
-    class="emergency-btn"
-    :class="{ 'emergency-btn--loading': isLoading }"
+    :class="[
+      'emergency-btn',
+      { 'emergency-btn--loading': isLoading, 'emergency-btn--active': isEmergencyActive }
+    ]"
     :disabled="isLoading"
-    title="NOTFALL-STOPP: Alle Aktoren sofort abschalten"
-    aria-label="Not-Aus: Alle Aktoren sofort abschalten"
+    :title="isEmergencyActive ? 'Not-Aus aufheben' : 'NOTFALL-STOPP: Alle Aktoren sofort abschalten'"
+    :aria-label="isEmergencyActive ? 'Not-Aus aufheben' : 'Not-Aus: Alle Aktoren sofort abschalten'"
     @click="showConfirm = true"
   >
-    <OctagonX class="w-4 h-4" />
-    <span class="hidden md:inline">NOT-AUS</span>
+    <RotateCcw v-if="isEmergencyActive" class="w-4 h-4" />
+    <OctagonX v-else class="w-4 h-4" />
+    <span class="hidden md:inline">{{ isEmergencyActive ? 'Aufheben' : 'NOT-AUS' }}</span>
   </button>
 
   <!-- Confirmation Dialog Overlay -->
   <Teleport to="body">
-    <div v-if="showConfirm" class="emergency-overlay" role="dialog" aria-modal="true" aria-labelledby="emergency-stop-title" @click.self="showConfirm = false">
+    <div v-if="showConfirm" class="emergency-overlay" role="dialog" aria-modal="true" :aria-labelledby="isEmergencyActive ? 'emergency-clear-title' : 'emergency-stop-title'" @click.self="showConfirm = false">
       <div class="emergency-dialog">
         <div class="emergency-dialog__icon">
-          <OctagonX class="w-10 h-10 text-red-400" />
+          <RotateCcw v-if="isEmergencyActive" class="w-10 h-10 text-green-400" />
+          <OctagonX v-else class="w-10 h-10 text-red-400" />
         </div>
-        <h3 id="emergency-stop-title" class="emergency-dialog__title">NOTFALL-STOPP</h3>
+        <h3 :id="isEmergencyActive ? 'emergency-clear-title' : 'emergency-stop-title'" class="emergency-dialog__title">
+          {{ isEmergencyActive ? 'NOT-AUS AUFHEBEN' : 'NOTFALL-STOPP' }}
+        </h3>
         <p class="emergency-dialog__text">
-          Dies stoppt <strong>alle Aktoren auf allen Geräten</strong> sofort.
-          Fortfahren?
+          <template v-if="isEmergencyActive">
+            Not-Aus aufheben? Aktoren können danach wieder gesteuert werden.
+          </template>
+          <template v-else>
+            Dies stoppt <strong>alle Aktoren auf allen Geräten</strong> sofort.
+            Fortfahren?
+          </template>
         </p>
         <div class="emergency-dialog__actions">
           <button
@@ -72,6 +104,15 @@ async function handleEmergencyStop() {
             Abbrechen
           </button>
           <button
+            v-if="isEmergencyActive"
+            class="btn btn-success btn-sm"
+            :disabled="isLoading"
+            @click="handleClearEmergency"
+          >
+            AUFHEBEN
+          </button>
+          <button
+            v-else
             class="btn btn-danger btn-sm"
             :disabled="isLoading"
             @click="handleEmergencyStop"
@@ -154,6 +195,25 @@ async function handleEmergencyStop() {
 
 .emergency-btn--loading {
   animation: pulse-emergency 1s ease-in-out infinite;
+}
+
+/* Active state: show "release" styling (green tint via design tokens) */
+.emergency-btn--active {
+  color: var(--color-success);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--color-success) 20%, transparent) 0%,
+    color-mix(in srgb, var(--color-success) 15%, transparent) 100%
+  );
+  border-color: color-mix(in srgb, var(--color-success) 50%, transparent);
+}
+
+.emergency-btn--active:hover:not(:disabled) {
+  color: color-mix(in srgb, var(--color-success) 90%, white);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--color-success) 35%, transparent) 0%,
+    color-mix(in srgb, var(--color-success) 25%, transparent) 100%
+  );
+  border-color: color-mix(in srgb, var(--color-success) 70%, transparent);
 }
 
 /* ── Confirmation Dialog ── */

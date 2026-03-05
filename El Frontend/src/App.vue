@@ -3,7 +3,8 @@ import { RouterView } from 'vue-router'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { useEspStore } from '@/stores/esp'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
-import { onMounted, onUnmounted, ref } from 'vue'
+import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import ToastContainer from '@/shared/design/patterns/ToastContainer.vue'
 import ErrorDetailsModal from '@/components/error/ErrorDetailsModal.vue'
 import type { ErrorDetailsData } from '@/components/error/ErrorDetailsModal.vue'
@@ -14,6 +15,7 @@ import NotificationDrawer from '@/components/notifications/NotificationDrawer.vu
 const authStore = useAuthStore()
 const espStore = useEspStore()
 const notificationInboxStore = useNotificationInboxStore()
+const alertCenterStore = useAlertCenterStore()
 
 // Error Details Modal state (triggered via CustomEvent from toast actions)
 const errorModalOpen = ref(false)
@@ -25,18 +27,35 @@ function handleShowErrorDetails(e: Event) {
   errorModalOpen.value = true
 }
 
+function initNotificationData(): void {
+  notificationInboxStore.loadInitial()
+  alertCenterStore.fetchStats()
+  alertCenterStore.startStatsPolling()
+}
+
 onMounted(async () => {
   await authStore.checkAuthStatus()
   window.addEventListener('show-error-details', handleShowErrorDetails)
 
-  // Load notification inbox after auth is ready
   if (authStore.isAuthenticated) {
-    notificationInboxStore.loadInitial()
+    initNotificationData()
   }
 })
 
+watch(
+  () => authStore.isAuthenticated,
+  (isAuth) => {
+    if (isAuth) {
+      initNotificationData()
+    } else {
+      alertCenterStore.stopStatsPolling()
+    }
+  },
+)
+
 onUnmounted(() => {
   espStore.cleanupWebSocket()
+  alertCenterStore.stopStatsPolling()
   window.removeEventListener('show-error-details', handleShowErrorDetails)
 })
 </script>

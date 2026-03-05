@@ -10,11 +10,16 @@
  */
 
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { Cpu, Wifi, AlertTriangle, HeartPulse, ArrowUpDown, ExternalLink, RefreshCw, Bell, Server, Radio, BarChart3, GitBranch, Puzzle } from 'lucide-vue-next'
+import { Cpu, Wifi, AlertTriangle, HeartPulse, ArrowUpDown, ExternalLink, RefreshCw, Bell, Server, Radio, BarChart3, GitBranch, Puzzle, Play, WifiOff, Wrench } from 'lucide-vue-next'
 import StatCard from '@/components/dashboard/StatCard.vue'
+import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
+import BaseSkeleton from '@/shared/design/primitives/BaseSkeleton.vue'
 import { getFleetHealth, type FleetHealthResponse } from '@/api/health'
+import { debugApi, type MaintenanceStatusResponse, type MaintenanceConfigResponse } from '@/api/debug'
 import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
 import { useDiagnosticsStore } from '@/shared/stores/diagnostics.store'
+import { useToast } from '@/composables/useToast'
+import { GRAFANA_BASE_URL } from '@/composables/useGrafana'
 
 // =============================================================================
 // Props & Emits
@@ -35,6 +40,7 @@ const emit = defineEmits<{
 
 const alertStore = useAlertCenterStore()
 const diagStore = useDiagnosticsStore()
+const toast = useToast()
 
 // =============================================================================
 // State
@@ -45,6 +51,12 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const sortField = ref<'device_id' | 'status' | 'uptime_seconds' | 'heap_free' | 'wifi_rssi'>('status')
 const sortAsc = ref(true)
+
+// Wartung & Cleanup (Phase 4D Konsolidierung)
+const maintenanceStatus = ref<MaintenanceStatusResponse | null>(null)
+const maintenanceConfig = ref<MaintenanceConfigResponse | null>(null)
+const maintenanceLoading = ref(false)
+const maintenanceTriggering = ref<string | null>(null)
 
 // =============================================================================
 // Computed
@@ -176,6 +188,76 @@ function showEventsForEsp(espId: string) {
   emit('filter-device', espId)
 }
 
+/** Run full diagnostic from Health tab (1-click access) */
+async function runQuickDiagnose(): Promise<void> {
+  const report = await diagStore.runDiagnostic()
+  if (report) {
+    toast.success(`Diagnose: ${report.overall_status}`)
+  } else if (diagStore.error) {
+    toast.error(diagStore.error)
+  }
+}
+
+/** Wartung: Lade Status + Config */
+async function loadMaintenanceData(): Promise<void> {
+  maintenanceLoading.value = true
+  try {
+    const [statusData, configData] = await Promise.all([
+      debugApi.getMaintenanceStatus(),
+      debugApi.getMaintenanceConfig(),
+    ])
+    maintenanceStatus.value = statusData
+    maintenanceConfig.value = configData
+  } catch (e) {
+    toast.error('Wartungsdaten konnten nicht geladen werden')
+  } finally {
+    maintenanceLoading.value = false
+  }
+}
+
+/** Wartung: Job manuell ausführen */
+async function triggerMaintenanceJob(jobId: string): Promise<void> {
+  maintenanceTriggering.value = jobId
+  try {
+    const result = await debugApi.triggerMaintenanceJob(jobId)
+    toast.success(result.message || `Job ${jobId} ausgeführt`)
+    await loadMaintenanceData()
+  } catch (e) {
+    toast.error(`Job ${jobId} fehlgeschlagen`)
+  } finally {
+    maintenanceTriggering.value = null
+  }
+}
+
+function formatMaintenanceDate(dateStr: string | null): string {
+  if (!dateStr) return '—'
+  return new Date(dateStr).toLocaleString('de-DE')
+}
+
+function formatJobName(jobId: string): string {
+  return jobId.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+}
+
+/** Grafana availability check */
+const grafanaOffline = ref(false)
+
+async function checkGrafana(): Promise<void> {
+  try {
+    const res = await fetch(`${GRAFANA_BASE_URL}/api/health`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(3000),
+    })
+    grafanaOffline.value = !res.ok
+  } catch {
+    grafanaOffline.value = true
+  }
+}
+
+const monitoringUnhealthy = computed(() => {
+  const check = diagStore.checksByName.monitoring
+  return check && check.status !== 'healthy'
+})
+
 // =============================================================================
 // Lifecycle
 // =============================================================================
@@ -183,6 +265,8 @@ function showEventsForEsp(espId: string) {
 onMounted(() => {
   fetchHealth()
   alertStore.startStatsPolling()
+  checkGrafana()
+  loadMaintenanceData()
 })
 
 onUnmounted(() => {
@@ -197,6 +281,17 @@ onUnmounted(() => {
       <AlertTriangle class="health-error__icon" />
       <span>{{ error }}</span>
       <button class="health-error__retry" @click="fetchHealth">Erneut versuchen</button>
+    </div>
+
+    <!-- Grafana Offline Banner -->
+    <div v-if="grafanaOffline || monitoringUnhealthy" class="health-grafana-banner">
+      <WifiOff class="health-grafana-banner__icon" />
+      <div class="health-grafana-banner__text">
+        <span class="health-grafana-banner__title">Monitoring-Stack nicht erreichbar</span>
+        <span class="health-grafana-banner__sub">
+          Grafana, Prometheus oder Loki sind offline. Starten mit: <code>make monitor-up</code>
+        </span>
+      </div>
     </div>
 
     <!-- Summary Cards -->
@@ -281,16 +376,87 @@ onUnmounted(() => {
       />
       <StatCard
         title="Plugins"
-        :value="diagStore.checksByName.plugins?.metrics?.total_plugins != null ? String(diagStore.checksByName.plugins.metrics.total_plugins) : '—'"
-        :subtitle="diagStore.checksByName.plugins?.metrics?.enabled_plugins != null ? `${diagStore.checksByName.plugins.metrics.enabled_plugins} aktiv` : 'Registriert'"
+        :value="diagStore.checksByName.plugins?.metrics?.total != null ? String(diagStore.checksByName.plugins.metrics.total) : '—'"
+        :subtitle="diagStore.checksByName.plugins?.metrics?.enabled != null ? `${diagStore.checksByName.plugins.metrics.enabled} aktiv` : 'Registriert'"
         :icon="Puzzle"
         :icon-color="diagStore.checksByName.plugins?.status === 'healthy' ? 'text-success' : 'text-iridescent-2'"
         :icon-bg-color="diagStore.checksByName.plugins?.status === 'healthy' ? 'bg-success/10' : 'bg-iridescent-2/10'"
       />
     </section>
 
-    <!-- Refresh Button -->
+    <!-- Wartung & Cleanup (Phase 4D) -->
+    <AccordionSection
+      title="Wartung & Cleanup"
+      storage-key="health-tab-maintenance"
+      :default-open="false"
+      :icon="Wrench"
+    >
+      <div v-if="maintenanceLoading && !maintenanceStatus" class="maintenance-loading">
+        <BaseSkeleton text="Lade Wartungsstatus..." />
+      </div>
+      <template v-else-if="maintenanceStatus && maintenanceConfig">
+        <!-- Cleanup Config (kompakt) -->
+        <div class="maintenance-config">
+          <div class="maintenance-config__item">
+            <span class="maintenance-config__label">Sensor-Daten:</span>
+            <span :class="['maintenance-config__value', maintenanceConfig.sensor_data_retention_enabled ? 'enabled' : 'disabled']">
+              {{ maintenanceConfig.sensor_data_retention_enabled ? `${maintenanceConfig.sensor_data_retention_days}d` : 'Aus' }}
+            </span>
+          </div>
+          <div class="maintenance-config__item">
+            <span class="maintenance-config__label">Befehlsverlauf:</span>
+            <span :class="['maintenance-config__value', maintenanceConfig.command_history_retention_enabled ? 'enabled' : 'disabled']">
+              {{ maintenanceConfig.command_history_retention_enabled ? `${maintenanceConfig.command_history_retention_days}d` : 'Aus' }}
+            </span>
+          </div>
+          <div class="maintenance-config__item">
+            <span class="maintenance-config__label">Orphan Mocks:</span>
+            <span :class="['maintenance-config__value', maintenanceConfig.orphaned_mock_cleanup_enabled ? 'enabled' : 'disabled']">
+              {{ maintenanceConfig.orphaned_mock_cleanup_enabled ? 'Aktiv' : 'Aus' }}
+            </span>
+          </div>
+        </div>
+        <!-- Jobs mit Run-Button -->
+        <div class="maintenance-jobs">
+          <div
+            v-for="job in maintenanceStatus.jobs"
+            :key="job.job_id"
+            class="maintenance-job"
+          >
+            <div class="maintenance-job__info">
+              <span class="maintenance-job__name">{{ formatJobName(job.job_id) }}</span>
+              <span class="maintenance-job__meta">
+                Letzte: {{ formatMaintenanceDate(job.last_run) }}
+              </span>
+            </div>
+            <button
+              class="maintenance-job__run"
+              :disabled="maintenanceTriggering !== null"
+              @click="triggerMaintenanceJob(job.job_id)"
+            >
+              <RefreshCw v-if="maintenanceTriggering === job.job_id" class="w-4 h-4 animate-spin" />
+              <Play v-else class="w-4 h-4" />
+              {{ maintenanceTriggering === job.job_id ? 'Läuft...' : 'Ausführen' }}
+            </button>
+          </div>
+        </div>
+      </template>
+    </AccordionSection>
+
+    <!-- Actions -->
     <div class="health-actions">
+      <button
+        class="diagnose-btn"
+        :disabled="diagStore.isRunning"
+        @click="runQuickDiagnose"
+      >
+        <Play v-if="!diagStore.isRunning" class="diagnose-btn__icon" />
+        <RefreshCw v-else class="diagnose-btn__icon refresh-icon--spinning" />
+        System-Check starten
+      </button>
+      <span v-if="diagStore.lastRunAge" class="health-actions__last-run">
+        Letzter Check: {{ diagStore.lastRunAge }}
+      </span>
       <button class="refresh-btn" :disabled="loading" @click="fetchHealth">
         <RefreshCw class="refresh-icon" :class="{ 'refresh-icon--spinning': loading }" />
         Aktualisieren
@@ -433,11 +599,185 @@ onUnmounted(() => {
 }
 
 /* =============================================================================
+   Grafana Offline Banner
+   ============================================================================= */
+.health-grafana-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.875rem 1.25rem;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: var(--radius-lg);
+}
+
+.health-grafana-banner__icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--color-warning);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.health-grafana-banner__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.health-grafana-banner__title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-warning);
+}
+
+.health-grafana-banner__sub {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.health-grafana-banner__sub code {
+  font-family: var(--font-mono);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.6875rem;
+}
+
+/* =============================================================================
+   Wartung & Cleanup
+   ============================================================================= */
+.maintenance-loading {
+  padding: var(--space-4) 0;
+}
+
+.maintenance-config {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  padding: var(--space-2) 0;
+}
+
+.maintenance-config__item {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.maintenance-config__label {
+  color: var(--color-text-muted);
+}
+
+.maintenance-config__value.enabled {
+  color: var(--color-success);
+}
+
+.maintenance-config__value.disabled {
+  color: var(--color-text-muted);
+}
+
+.maintenance-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.maintenance-job {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+}
+
+.maintenance-job__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.maintenance-job__name {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.maintenance-job__meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.maintenance-job__run {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-iridescent-1);
+  color: white;
+  border: none;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.maintenance-job__run:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.maintenance-job__run:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* =============================================================================
    Actions
    ============================================================================= */
 .health-actions {
   display: flex;
+  align-items: center;
+  gap: 0.75rem;
   justify-content: flex-end;
+}
+
+.diagnose-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-3));
+  border: none;
+  color: white;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+  margin-right: auto;
+}
+
+.diagnose-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.diagnose-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.diagnose-btn__icon {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.health-actions__last-run {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
 .refresh-btn {

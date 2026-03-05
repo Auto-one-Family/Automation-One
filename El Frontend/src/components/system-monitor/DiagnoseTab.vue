@@ -100,6 +100,7 @@ function formatMetricValue(value: unknown): string {
 
 onMounted(() => {
   store.loadAvailableChecks()
+  if (store.history.length === 0) store.loadHistory()
 })
 </script>
 

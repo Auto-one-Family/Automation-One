@@ -14,7 +14,6 @@ import {
   Workflow,
   Monitor,
   Users,
-  Wrench,
   UserCog,
   Activity,
   SlidersHorizontal,
@@ -110,7 +109,7 @@ function handleNavClick() {
 
         <RouterLink
           to="/system-monitor"
-          :class="['sidebar__link', isActive('/system-monitor') && route.query.tab !== 'health' && 'sidebar__link--active']"
+          :class="['sidebar__link', isActive('/system-monitor') && 'sidebar__link--active']"
           @click="handleNavClick"
         >
           <div class="sidebar__link-indicator" />
@@ -126,16 +125,6 @@ function handleNavClick() {
           <div class="sidebar__link-indicator" />
           <Users class="sidebar__link-icon" />
           <span>Benutzer</span>
-        </RouterLink>
-
-        <RouterLink
-          to="/system-monitor?tab=health"
-          :class="['sidebar__link', (isActive('/maintenance') || (isActive('/system-monitor') && route.query.tab === 'health')) && 'sidebar__link--active']"
-          @click="handleNavClick"
-        >
-          <div class="sidebar__link-indicator" />
-          <Wrench class="sidebar__link-icon" />
-          <span>Wartung</span>
         </RouterLink>
 
         <RouterLink

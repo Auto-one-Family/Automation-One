@@ -23,8 +23,8 @@ export interface PluginDTO {
   config_schema: Record<string, unknown>
   capabilities: string[]
   last_execution?: PluginExecutionDTO | null
-  created_at: string | null
-  updated_at: string | null
+  created_at?: string | null
+  updated_at?: string | null
 }
 
 export interface PluginDetailDTO extends PluginDTO {
@@ -35,7 +35,7 @@ export interface PluginExecutionDTO {
   id: string
   plugin_id: string
   started_at: string | null
-  finished_at: string | null
+  finished_at?: string | null
   status: 'success' | 'error' | 'failure' | 'running' | 'timeout'
   triggered_by: string
   triggered_by_user?: number | null

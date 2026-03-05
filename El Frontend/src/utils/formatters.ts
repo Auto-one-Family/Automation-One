@@ -138,6 +138,19 @@ export function formatTimestamp(timestamp: string | null | undefined): string {
 // =============================================================================
 
 /**
+ * Round a number to avoid floating-point display artifacts (e.g. 1.4000000000000001 → 1.4).
+ * Used for threshold inputs in SensorConfigPanel (BUG-4).
+ *
+ * @param value - Number to round
+ * @param decimals - Decimal places (default 2)
+ */
+export function roundToDecimals(value: number, decimals: number = 2): number {
+  if (decimals <= 0) return Math.round(value)
+  const factor = Math.pow(10, decimals)
+  return Math.round(value * factor) / factor
+}
+
+/**
  * Format a number with specified decimal places
  * @example formatNumber(23.456, 2) → "23,46"
  */

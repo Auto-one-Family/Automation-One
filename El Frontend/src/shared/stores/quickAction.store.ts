@@ -2,13 +2,16 @@
  * Quick Action Store
  *
  * State management for the Quick Action Ball (FAB) component.
- * Tracks menu state, context-dependent actions, and alert badge data
- * from notification-inbox.store.ts.
+ * Tracks menu state, context-dependent actions, and alert badge data.
+ *
+ * Phase 4B: Alert badge uses alert-center.store (ISA-18.2 unresolved count)
+ * with fallback to notification-inbox for unread when no active alerts.
  */
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useNotificationInboxStore } from './notification-inbox.store'
+import { useAlertCenterStore } from './alert-center.store'
 import type { Component } from 'vue'
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -55,13 +58,24 @@ export const useQuickActionStore = defineStore('quick-action', () => {
   const contextActions = ref<QuickAction[]>([])
   const globalActions = ref<QuickAction[]>([])
 
-  // Computed: alert summary from notification inbox
+  // Computed: alert summary — ISA-18.2: prefer unresolved alerts, fallback to unread
   const alertSummary = computed(() => {
     const inbox = useNotificationInboxStore()
+    const alert = useAlertCenterStore()
+    const count = alert.unresolvedCount > 0 ? alert.unresolvedCount : inbox.unreadCount
+    const badgeText = count > 0 ? (count > 99 ? '99+' : String(count)) : ''
+    const highestSeverity =
+      alert.unresolvedCount > 0
+        ? alert.hasCritical
+          ? 'critical'
+          : alert.warningCount > 0
+            ? 'warning'
+            : 'info'
+        : inbox.highestSeverity
     return {
-      unreadCount: inbox.unreadCount,
-      highestSeverity: inbox.highestSeverity,
-      badgeText: inbox.badgeText,
+      unreadCount: count,
+      highestSeverity,
+      badgeText,
     }
   })
 

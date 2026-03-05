@@ -21,13 +21,15 @@ import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/shared/stores'
 import { useUiStore } from '@/shared/stores/ui.store'
-import { ChevronDown, MoreVertical, Pencil, Trash2, Activity } from 'lucide-vue-next'
+import { useSubzoneCRUD } from '@/composables/useSubzoneCRUD'
+import { ChevronDown, MoreVertical, Pencil, Trash2, Activity, Plus, Check, X } from 'lucide-vue-next'
 import { PackageOpen } from 'lucide-vue-next'
 import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
 import { EmptyState } from '@/shared/design/patterns'
 import DeviceMiniCard from './DeviceMiniCard.vue'
 import { aggregateZoneSensors, formatAggregatedValue } from '@/utils/sensorDefaults'
 import { getESPStatus } from '@/composables/useESPStatus'
+import type { ZoneContextSummary } from '@/types'
 
 
 interface Props {
@@ -58,6 +60,7 @@ const emit = defineEmits<{
 const espStore = useEspStore()
 const dragStore = useDragStateStore()
 const uiStore = useUiStore()
+const subzoneCRUD = useSubzoneCRUD()
 const plateRef = ref<HTMLElement | null>(null)
 
 // ── Subzone Filter (declared early — localDevices watch depends on it) ────
@@ -110,6 +113,23 @@ const aggregatedValues = computed(() => {
   return zoneAggregation.value.sensorTypes.map(agg =>
     formatAggregatedValue(agg, stats.value.total)
   )
+})
+
+// ── Zone Context (Phase 4) ───────────────────────────────────────────────
+const zoneContext = computed<ZoneContextSummary | null>(() => {
+  for (const d of props.devices) {
+    if ((d as any).zone_context) return (d as any).zone_context
+  }
+  return null
+})
+
+const zoneContextLabel = computed(() => {
+  const ctx = zoneContext.value
+  if (!ctx) return ''
+  const parts: string[] = []
+  if (ctx.growth_phase) parts.push(ctx.growth_phase.replace(/_/g, ' '))
+  if (ctx.variety) parts.push(ctx.variety)
+  return parts.join(' · ')
 })
 
 // ── B2: Status Dot Color ─────────────────────────────────────────────────
@@ -362,6 +382,11 @@ function handleDragEnd() {
             {{ aggregatedValues.join('  ') }}
           </span>
 
+          <!-- Phase 4: Zone context badge -->
+          <span v-if="zoneContextLabel" class="zone-plate__context-badge" :title="zoneContext?.variety || ''">
+            {{ zoneContextLabel }}
+          </span>
+
           <!-- B2: Status with colored dot -->
           <span class="zone-plate__stats">
             {{ stats.total }} ESP{{ stats.total !== 1 ? 's' : '' }}
@@ -401,20 +426,74 @@ function handleDragEnd() {
           </button>
         </div>
 
-        <!-- B3: Subzone chips (only if subzones exist) -->
-        <div v-if="distinctSubzones.length > 0" class="zone-plate__subzone-chips" @click.stop>
-          <button
-            v-for="sz in distinctSubzones"
-            :key="sz.subzoneId ?? '__none'"
-            class="zone-plate__subzone-chip"
-            :class="{ 'zone-plate__subzone-chip--active': activeSubzoneFilter === sz.subzoneId }"
-            @click.stop="toggleSubzoneFilter(sz.subzoneId)"
-          >
-            <span
-              class="zone-plate__subzone-chip-dot"
-              :style="{ backgroundColor: getSubzoneStatusColor(sz) }"
+        <!-- B3: Subzone chips (with CRUD) -->
+        <div v-if="distinctSubzones.length > 0 || subzoneCRUD.creatingSubzoneForZone.value === zoneId" class="zone-plate__subzone-chips" @click.stop>
+          <template v-for="sz in distinctSubzones" :key="sz.subzoneId ?? '__none'">
+            <!-- Inline rename mode -->
+            <div v-if="subzoneCRUD.editingSubzoneId.value === sz.subzoneId" class="zone-plate__subzone-chip zone-plate__subzone-chip--editing">
+              <input
+                v-model="subzoneCRUD.editingSubzoneName.value"
+                class="zone-plate__subzone-rename-input"
+                @click.stop
+                @keyup.enter.stop="subzoneCRUD.saveSubzoneName(sz.subzoneId!, zoneId)"
+                @keyup.escape.stop="subzoneCRUD.cancelRenameSubzone()"
+              />
+              <button class="zone-plate__subzone-action" @click.stop="subzoneCRUD.saveSubzoneName(sz.subzoneId!, zoneId)" :disabled="subzoneCRUD.subzoneActionLoading.value">
+                <Check class="w-3 h-3" />
+              </button>
+              <button class="zone-plate__subzone-action" @click.stop="subzoneCRUD.cancelRenameSubzone()">
+                <X class="w-3 h-3" />
+              </button>
+            </div>
+            <!-- Normal chip with hover actions -->
+            <div v-else class="zone-plate__subzone-chip-wrap">
+              <button
+                class="zone-plate__subzone-chip"
+                :class="{ 'zone-plate__subzone-chip--active': activeSubzoneFilter === sz.subzoneId }"
+                @click.stop="toggleSubzoneFilter(sz.subzoneId)"
+              >
+                <span
+                  class="zone-plate__subzone-chip-dot"
+                  :style="{ backgroundColor: getSubzoneStatusColor(sz) }"
+                />
+                {{ sz.subzoneName }}
+              </button>
+              <div class="zone-plate__subzone-hover-actions">
+                <button class="zone-plate__subzone-action" title="Umbenennen" @click.stop="subzoneCRUD.startRenameSubzone(sz.subzoneId!, sz.subzoneName)">
+                  <Pencil class="w-2.5 h-2.5" />
+                </button>
+                <button class="zone-plate__subzone-action zone-plate__subzone-action--danger" title="Loeschen" @click.stop="uiStore.confirm({ title: 'Subzone loeschen', message: `&quot;${sz.subzoneName}&quot; wirklich loeschen?`, variant: 'danger', confirmText: 'Loeschen' }).then(ok => { if (ok) subzoneCRUD.deleteSubzone(sz.subzoneId!, sz.subzoneName, zoneId) })">
+                  <Trash2 class="w-2.5 h-2.5" />
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <!-- Create subzone inline form -->
+          <div v-if="subzoneCRUD.creatingSubzoneForZone.value === zoneId" class="zone-plate__subzone-chip zone-plate__subzone-chip--editing">
+            <input
+              v-model="subzoneCRUD.newSubzoneName.value"
+              class="zone-plate__subzone-rename-input"
+              placeholder="Name..."
+              @click.stop
+              @keyup.enter.stop="subzoneCRUD.confirmCreateSubzone(zoneId)"
+              @keyup.escape.stop="subzoneCRUD.cancelCreateSubzone()"
             />
-            {{ sz.subzoneName }}
+            <button class="zone-plate__subzone-action" :disabled="subzoneCRUD.subzoneActionLoading.value" @click.stop="subzoneCRUD.confirmCreateSubzone(zoneId)">
+              <Check class="w-3 h-3" />
+            </button>
+            <button class="zone-plate__subzone-action" @click.stop="subzoneCRUD.cancelCreateSubzone()">
+              <X class="w-3 h-3" />
+            </button>
+          </div>
+
+          <!-- Add subzone button -->
+          <button
+            v-if="subzoneCRUD.creatingSubzoneForZone.value !== zoneId"
+            class="zone-plate__subzone-chip zone-plate__subzone-chip--add"
+            @click.stop="subzoneCRUD.startCreateSubzone(zoneId)"
+          >
+            <Plus class="w-3 h-3" />
           </button>
         </div>
       </template>
@@ -647,6 +726,17 @@ function handleDragEnd() {
 }
 
 /* Stats label */
+.zone-plate__context-badge {
+  font-size: var(--text-xs);
+  color: var(--color-iridescent-3);
+  background: rgba(167, 139, 250, 0.1);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-transform: capitalize;
+}
+
 .zone-plate__stats {
   display: flex;
   align-items: center;
@@ -712,6 +802,94 @@ function handleDragEnd() {
   height: 4px;
   border-radius: var(--radius-full);
   flex-shrink: 0;
+}
+
+/* Subzone chip wrapper (chip + hover actions) */
+.zone-plate__subzone-chip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.zone-plate__subzone-hover-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  margin-left: -2px;
+}
+
+.zone-plate__subzone-chip-wrap:hover .zone-plate__subzone-hover-actions {
+  opacity: 1;
+}
+
+.zone-plate__subzone-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.zone-plate__subzone-action:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.zone-plate__subzone-action--danger:hover {
+  color: var(--color-error);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.zone-plate__subzone-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Inline subzone rename input */
+.zone-plate__subzone-rename-input {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-iridescent-1);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  outline: none;
+  width: 80px;
+  max-width: 120px;
+}
+
+/* Chip in editing/creating mode */
+.zone-plate__subzone-chip--editing {
+  gap: 2px;
+  padding: 1px 2px 1px 4px;
+  border-color: var(--color-iridescent-1);
+  background: rgba(96, 165, 250, 0.04);
+  cursor: default;
+}
+
+/* Add subzone "+" chip */
+.zone-plate__subzone-chip--add {
+  padding: 1px 6px;
+  border-style: dashed;
+  color: var(--color-text-muted);
+  opacity: 0.5;
+  transition: all var(--transition-fast);
+}
+
+.zone-plate__subzone-chip--add:hover {
+  opacity: 1;
+  border-color: var(--color-iridescent-1);
+  color: var(--color-iridescent-1);
 }
 
 /* Alert badge */

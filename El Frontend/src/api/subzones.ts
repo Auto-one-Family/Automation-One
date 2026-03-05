@@ -149,6 +149,26 @@ export const subzonesApi = {
       { data: request }
     )
     return response.data
+  },
+
+  // ===========================================================================
+  // Subzone Metadata
+  // ===========================================================================
+
+  /**
+   * Update subzone-specific metadata (plant info, material, notes).
+   * Merges with existing custom_data.
+   */
+  async updateMetadata(
+    deviceId: string,
+    subzoneId: string,
+    customData: Record<string, unknown>
+  ): Promise<SubzoneInfo> {
+    const response = await api.patch<SubzoneInfo>(
+      `/subzone/devices/${deviceId}/subzones/${subzoneId}/metadata`,
+      { custom_data: customData }
+    )
+    return response.data
   }
 }
 

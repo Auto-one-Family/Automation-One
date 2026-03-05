@@ -7,6 +7,7 @@
 
 import api from './index'
 import type { ZoneAssignRequest, ZoneAssignResponse, ZoneRemoveResponse, ZoneInfo } from '@/types'
+import type { ZoneMonitorData } from '@/types/monitor'
 
 /**
  * Zone Assignment API client
@@ -63,7 +64,17 @@ export const zonesApi = {
   async getUnassignedDevices(): Promise<string[]> {
     const response = await api.get<string[]>('/zone/unassigned')
     return response.data
-  }
+  },
+
+  /**
+   * Get zone monitor data for L2 display (sensors/actuators grouped by subzone).
+
+   * Used by MonitorView L2 for subzone accordion. GPIO-based grouping via subzone_configs.
+   */
+  async getZoneMonitorData(zoneId: string): Promise<ZoneMonitorData> {
+    const response = await api.get<ZoneMonitorData>(`/zone/${zoneId}/monitor-data`)
+    return response.data
+  },
 }
 
 

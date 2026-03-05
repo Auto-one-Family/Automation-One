@@ -13,7 +13,7 @@
 import { computed, ref, type Ref } from 'vue'
 
 /** Grafana base URL (same host, port 3000) */
-const GRAFANA_BASE_URL = `${window.location.protocol}//${window.location.hostname}:3000`
+export const GRAFANA_BASE_URL = `${window.location.protocol}//${window.location.hostname}:3000`
 
 /** Known dashboard UIDs from provisioned dashboards */
 export const GRAFANA_DASHBOARDS = {

@@ -6,6 +6,9 @@
  *
  * Input: espStore.devices (reactive)
  * Output: sensorsByZone, actuatorsByZone (computed ZoneGroup arrays with subzone nesting)
+ *
+ * Optional subzoneResolver: Map from `${espId}-${gpio}` to { subzoneId, subzoneName }
+ * for GPIO-based subzone resolution (fallback when monitor-data endpoint unavailable).
  */
 
 import { computed, type Ref } from 'vue'
@@ -13,6 +16,7 @@ import { useEspStore } from '@/stores/esp'
 import { ZONE_UNASSIGNED } from '@/composables/useZoneDragDrop'
 export { ZONE_UNASSIGNED }
 import type { QualityLevel } from '@/types'
+import type { SubzoneResolved } from '@/composables/useSubzoneResolver'
 
 // =============================================================================
 // Exported Interfaces
@@ -87,17 +91,26 @@ export interface ZoneGroupingFilters {
   filterState?: Ref<string[]>
 }
 
+export interface ZoneGroupingOptions {
+  filters?: ZoneGroupingFilters
+  /** GPIO→Subzone Map for fallback (key: `${espId}-${gpio}`) */
+  subzoneResolver?: Ref<Map<string, SubzoneResolved>>
+}
+
 const SUBZONE_NONE = '__none__'
 
 // =============================================================================
 // Composable
 // =============================================================================
 
-export function useZoneGrouping(filters?: ZoneGroupingFilters) {
+export function useZoneGrouping(options?: ZoneGroupingOptions | ZoneGroupingFilters) {
+  const filters = options && 'filters' in options ? options.filters : (options as ZoneGroupingFilters | undefined)
+  const subzoneResolver = options && 'subzoneResolver' in options ? options.subzoneResolver : undefined
   const espStore = useEspStore()
 
   // ── All sensors with zone/subzone context ──
   const allSensors = computed((): SensorWithContext[] => {
+    const resolver = subzoneResolver?.value
     return espStore.devices.flatMap(esp => {
       const sensors = esp.sensors as {
         gpio: number; sensor_type: string; name: string | null;
@@ -108,17 +121,28 @@ export function useZoneGrouping(filters?: ZoneGroupingFilters) {
       const espId = espStore.getDeviceId(esp)
       const zoneId = esp.zone_id || null
       const zoneName = esp.zone_name || (zoneId ?? '')
-      const subzoneId = esp.subzone_id || null
-      const subzoneName = esp.subzone_name || (subzoneId ?? '')
-      return sensors.map(sensor => ({
-        ...sensor,
-        esp_id: espId,
-        esp_state: esp.system_state,
-        zone_id: zoneId,
-        zone_name: zoneName,
-        subzone_id: subzoneId,
-        subzone_name: subzoneName,
-      }))
+      return sensors.map(sensor => {
+        let subzoneId: string | null
+        let subzoneName: string
+        if (resolver) {
+          const key = `${espId}-${sensor.gpio}`
+          const resolved = resolver.get(key)
+          subzoneId = resolved?.subzoneId ?? null
+          subzoneName = resolved?.subzoneName ?? (subzoneId ?? '')
+        } else {
+          subzoneId = esp.subzone_id || null
+          subzoneName = esp.subzone_name || (subzoneId ?? '')
+        }
+        return {
+          ...sensor,
+          esp_id: espId,
+          esp_state: esp.system_state,
+          zone_id: zoneId,
+          zone_name: zoneName,
+          subzone_id: subzoneId,
+          subzone_name: subzoneName,
+        }
+      })
     })
   })
 
@@ -190,6 +214,7 @@ export function useZoneGrouping(filters?: ZoneGroupingFilters) {
 
   // ── All actuators with zone/subzone context ──
   const allActuators = computed((): ActuatorWithContext[] => {
+    const resolver = subzoneResolver?.value
     return espStore.devices.flatMap(esp => {
       const actuators = esp.actuators as {
         gpio: number; actuator_type: string; name: string | null;
@@ -199,17 +224,28 @@ export function useZoneGrouping(filters?: ZoneGroupingFilters) {
       const espId = espStore.getDeviceId(esp)
       const zoneId = esp.zone_id || null
       const zoneName = esp.zone_name || (zoneId ?? '')
-      const subzoneId = esp.subzone_id || null
-      const subzoneName = esp.subzone_name || (subzoneId ?? '')
-      return actuators.map(actuator => ({
-        ...actuator,
-        esp_id: espId,
-        esp_state: esp.system_state,
-        zone_id: zoneId,
-        zone_name: zoneName,
-        subzone_id: subzoneId,
-        subzone_name: subzoneName,
-      }))
+      return actuators.map(actuator => {
+        let subzoneId: string | null
+        let subzoneName: string
+        if (resolver) {
+          const key = `${espId}-${actuator.gpio}`
+          const resolved = resolver.get(key)
+          subzoneId = resolved?.subzoneId ?? null
+          subzoneName = resolved?.subzoneName ?? (subzoneId ?? '')
+        } else {
+          subzoneId = esp.subzone_id || null
+          subzoneName = esp.subzone_name || (subzoneId ?? '')
+        }
+        return {
+          ...actuator,
+          esp_id: espId,
+          esp_state: esp.system_state,
+          zone_id: zoneId,
+          zone_name: zoneName,
+          subzone_id: subzoneId,
+          subzone_name: subzoneName,
+        }
+      })
     })
   })
 

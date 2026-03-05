@@ -296,6 +296,19 @@ export interface MockActuator {
   config_error_detail?: string | null
 }
 
+/** Lightweight zone context summary inherited from ZoneContext */
+export interface ZoneContextSummary {
+  zone_id: string
+  zone_name?: string | null
+  variety?: string | null
+  substrate?: string | null
+  growth_phase?: string | null
+  plant_count?: number | null
+  plant_age_days?: number | null
+  days_to_harvest?: number | null
+  responsible_person?: string | null
+}
+
 export interface MockESP {
   esp_id: string
   name: string | null  // Human-readable device name (from DB)
@@ -315,6 +328,7 @@ export interface MockESP {
   created_at: string
   connected: boolean
   hardware_type: string
+  zone_context?: ZoneContextSummary | null
 }
 
 export interface MockESPCreate {
@@ -620,6 +634,8 @@ export interface SensorConfigCreate {
   timeout_warning_enabled?: boolean
   /** Schedule-Konfiguration für scheduled-Modus */
   schedule_config?: Record<string, unknown> | null
+  /** Subzone ID to assign this sensor to. Null/empty = remove from all subzones */
+  subzone_id?: string | null
 }
 
 export interface SensorConfigResponse {
@@ -637,11 +653,15 @@ export interface SensorConfigResponse {
   threshold_max: number | null
   warning_min: number | null
   warning_max: number | null
+  /** I2C address (0-127) - backend returns as int */
+  i2c_address?: number | null
   metadata: Record<string, unknown> | null
   // Config status from ESP32 verification (Phase 2: write-after-verification)
   config_status?: 'pending' | 'applied' | 'failed' | null
   config_error?: string | null
   config_error_detail?: string | null
+  /** Subzone ID this sensor belongs to (if any) */
+  subzone_id?: string | null
   latest_value?: number | null
   latest_quality?: QualityLevel | null
   latest_timestamp?: string | null
@@ -927,6 +947,7 @@ export interface SubzoneInfo {
   safe_mode_active: boolean
   sensor_count: number
   actuator_count: number
+  custom_data: Record<string, unknown>
   created_at?: string
 }
 

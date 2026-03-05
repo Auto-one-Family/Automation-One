@@ -9,7 +9,6 @@
 import { watch, onUnmounted, markRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuickActionStore } from '@/shared/stores/quickAction.store'
-import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
 import { useUiStore } from '@/shared/stores/ui.store'
 import type { QuickAction, ViewContext } from '@/shared/stores/quickAction.store'
 import {
@@ -24,6 +23,7 @@ import {
   LayoutGrid,
   Stethoscope,
   HeartPulse,
+  Database,
 } from 'lucide-vue-next'
 
 /** Navigate helper — wraps router.push and catches dynamic import failures */
@@ -174,7 +174,6 @@ function buildContextActions(
 function buildGlobalActions(
   router: ReturnType<typeof useRouter>,
   quickActionStore: ReturnType<typeof useQuickActionStore>,
-  inboxStore: ReturnType<typeof useNotificationInboxStore>,
   uiStore: ReturnType<typeof useUiStore>,
 ): QuickAction[] {
   return [
@@ -184,12 +183,8 @@ function buildGlobalActions(
       icon: markRaw(Bell),
       category: 'global',
       handler: () => quickActionStore.setActivePanel('alerts'),
-      badge: inboxStore.unreadCount,
-      badgeVariant: inboxStore.highestSeverity === 'critical'
-        ? 'critical'
-        : inboxStore.highestSeverity === 'warning'
-          ? 'warning'
-          : 'info',
+      badge: 0,
+      badgeVariant: 'info',
     },
     {
       id: 'global-navigation',
@@ -234,6 +229,20 @@ function buildGlobalActions(
       category: 'global',
       handler: () => nav(router, '/system-monitor?tab=reports'),
     },
+    {
+      id: 'global-backup-create',
+      label: 'Backup erstellen',
+      icon: markRaw(Database),
+      category: 'global',
+      handler: async () => {
+        const { backupsApi } = await import('@/api/backups')
+        try {
+          await backupsApi.createBackup()
+        } catch {
+          // Error is handled by API interceptor (toast)
+        }
+      },
+    },
   ]
 }
 
@@ -247,7 +256,6 @@ export function useQuickActions(): void {
   const route = useRoute()
   const router = useRouter()
   const quickActionStore = useQuickActionStore()
-  const inboxStore = useNotificationInboxStore()
   const uiStore = useUiStore()
 
   const stopWatch = watch(
@@ -257,7 +265,7 @@ export function useQuickActions(): void {
       quickActionStore.setViewContext(view)
       quickActionStore.setContextActions(buildContextActions(view, router, quickActionStore))
       quickActionStore.setGlobalActions(
-        buildGlobalActions(router, quickActionStore, inboxStore, uiStore),
+        buildGlobalActions(router, quickActionStore, uiStore),
       )
     },
     { immediate: true },

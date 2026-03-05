@@ -12,13 +12,15 @@
  */
 
 import { ref, computed, watch } from 'vue'
-import { Settings, CheckCheck } from 'lucide-vue-next'
+import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import NotificationItem from '@/components/notifications/NotificationItem.vue'
 import NotificationPreferences from '@/components/notifications/NotificationPreferences.vue'
 import AlertStatusBar from '@/components/notifications/AlertStatusBar.vue'
 import { useNotificationInboxStore, type InboxFilter } from '@/shared/stores/notification-inbox.store'
 import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
+import { notificationsApi, type EmailLogEntry } from '@/api/notifications'
+import { formatRelativeTime } from '@/utils/formatters'
 
 const inboxStore = useNotificationInboxStore()
 const alertStore = useAlertCenterStore()
@@ -34,8 +36,9 @@ const filterTabs: { key: InboxFilter; label: string }[] = [
 ]
 
 const statusTabs = computed(() => {
-  const active = inboxStore.notifications.filter(n => n.status === 'active').length
-  const ack = inboxStore.notifications.filter(n => n.status === 'acknowledged').length
+  const stats = alertStore.alertStats
+  const active = stats?.active_count ?? inboxStore.notifications.filter(n => n.status === 'active').length
+  const ack = stats?.acknowledged_count ?? inboxStore.notifications.filter(n => n.status === 'acknowledged').length
   const resolved = inboxStore.notifications.filter(n => n.status === 'resolved').length
 
   return [
@@ -79,6 +82,34 @@ async function handleResolve(id: string): Promise<void> {
   await alertStore.resolveAlert(id)
 }
 
+// Email log footer
+const emailLog = ref<EmailLogEntry[]>([])
+const emailLogExpanded = ref(false)
+const emailLogLoading = ref(false)
+
+async function loadEmailLog(): Promise<void> {
+  emailLogLoading.value = true
+  try {
+    const res = await notificationsApi.getEmailLog({ page_size: 5 })
+    emailLog.value = res.data
+  } catch {
+    emailLog.value = []
+  } finally {
+    emailLogLoading.value = false
+  }
+}
+
+const hasEmailLog = computed(() => emailLog.value.length > 0)
+
+function emailStatusLabel(status: string): string {
+  switch (status) {
+    case 'sent': return 'Zugestellt'
+    case 'failed': return 'Fehlgeschlagen'
+    case 'pending': return 'Ausstehend'
+    default: return status
+  }
+}
+
 // Refresh list when drawer opens
 watch(
   () => inboxStore.isDrawerOpen,
@@ -86,6 +117,7 @@ watch(
     if (isOpen) {
       inboxStore.loadInitial()
       activeStatusFilter.value = 'all'
+      loadEmailLog()
     }
   },
 )
@@ -204,6 +236,38 @@ watch(
             </button>
           </div>
         </template>
+      </div>
+
+      <!-- Email Log Footer -->
+      <div v-if="hasEmailLog" class="drawer__email-footer">
+        <button
+          class="drawer__email-toggle"
+          @click="emailLogExpanded = !emailLogExpanded"
+        >
+          <Mail class="drawer__email-toggle-icon" />
+          <span>Letzte 5 Emails</span>
+          <component
+            :is="emailLogExpanded ? ChevronUp : ChevronDown"
+            class="drawer__email-toggle-chevron"
+          />
+        </button>
+
+        <Transition name="expand">
+          <div v-if="emailLogExpanded" class="drawer__email-list">
+            <div
+              v-for="entry in emailLog"
+              :key="entry.id"
+              class="drawer__email-entry"
+            >
+              <span :class="['drawer__email-dot', `drawer__email-dot--${entry.status}`]" />
+              <span class="drawer__email-subject">{{ entry.subject }}</span>
+              <span class="drawer__email-status">{{ emailStatusLabel(entry.status) }}</span>
+              <span v-if="entry.sent_at || entry.created_at" class="drawer__email-time">
+                {{ formatRelativeTime(entry.sent_at || entry.created_at!) }}
+              </span>
+            </div>
+          </div>
+        </Transition>
       </div>
     </template>
   </SlideOver>
@@ -420,5 +484,118 @@ watch(
 .drawer__load-more-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Email Log Footer */
+.drawer__email-footer {
+  border-top: 1px solid var(--glass-border);
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
+
+.drawer__email-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.drawer__email-toggle:hover {
+  color: var(--color-text-primary);
+}
+
+.drawer__email-toggle-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+}
+
+.drawer__email-toggle-chevron {
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  color: var(--color-text-muted);
+}
+
+.drawer__email-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+}
+
+.drawer__email-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  font-size: var(--text-xs);
+}
+
+.drawer__email-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.drawer__email-dot--sent {
+  background: var(--color-success);
+}
+
+.drawer__email-dot--failed {
+  background: var(--color-error);
+}
+
+.drawer__email-dot--pending {
+  background: var(--color-text-muted);
+}
+
+.drawer__email-subject {
+  flex: 1;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawer__email-status {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+}
+
+.drawer__email-time {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* Expand Transition (email footer) */
+.expand-enter-active,
+.expand-leave-active {
+  transition: all var(--transition-fast);
+  overflow: hidden;
+}
+
+.expand-enter-from,
+.expand-leave-to {
+  opacity: 0;
+  max-height: 0;
+}
+
+.expand-enter-to,
+.expand-leave-from {
+  opacity: 1;
+  max-height: 300px;
 }
 </style>

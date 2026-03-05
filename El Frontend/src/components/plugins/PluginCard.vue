@@ -51,8 +51,9 @@ const lastExecStatus = computed(() =>
 
 const lastExecTime = computed(() => {
   const exec = props.plugin.last_execution
-  if (!exec?.finished_at) return null
-  return formatRelativeTime(new Date(exec.finished_at))
+  const ts = exec?.finished_at ?? exec?.started_at
+  if (!ts) return null
+  return formatRelativeTime(new Date(ts))
 })
 </script>
 

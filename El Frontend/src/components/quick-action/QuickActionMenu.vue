@@ -106,8 +106,14 @@ function handleWidgetKeydown(e: KeyboardEvent, item: WidgetDragItem): void {
         :key="action.id"
         :icon="action.icon"
         :label="action.label"
-        :badge="action.badge"
-        :badge-variant="action.badgeVariant"
+        :badge="action.id === 'global-alerts' ? store.alertSummary.unreadCount : action.badge"
+        :badge-variant="action.id === 'global-alerts'
+          ? (store.alertSummary.highestSeverity === 'critical'
+            ? 'critical'
+            : store.alertSummary.highestSeverity === 'warning'
+              ? 'warning'
+              : 'info')
+          : action.badgeVariant"
         :shortcut-hint="action.shortcutHint"
         :disabled="action.disabled"
         role="menuitem"

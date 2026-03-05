@@ -10,18 +10,19 @@
  */
 
 import { ref, computed, onMounted, watch } from 'vue'
-import { Save, Power, AlertOctagon, Zap, Clock, Shield, Settings } from 'lucide-vue-next'
+import { Save, Power, AlertOctagon, Zap, Clock, Shield, Settings, Trash2 } from 'lucide-vue-next'
 import { actuatorsApi } from '@/api/actuators'
-import { subzonesApi } from '@/api/subzones'
 import { espApi } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { AccordionSection } from '@/shared/design/primitives'
+import { useUiStore } from '@/shared/stores/ui.store'
 import type { MockActuator } from '@/types'
 import AlertConfigSection from '@/components/devices/AlertConfigSection.vue'
 import RuntimeMaintenanceSection from '@/components/devices/RuntimeMaintenanceSection.vue'
 import DeviceMetadataSection from '@/components/devices/DeviceMetadataSection.vue'
 import LinkedRulesSection from '@/components/devices/LinkedRulesSection.vue'
+import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSection.vue'
 import type { DeviceMetadata } from '@/types/device-metadata'
 import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
 
@@ -29,12 +30,21 @@ interface Props {
   espId: string
   gpio: number
   actuatorType: string
+  showMetadata?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  showMetadata: true,
+})
+
+const emit = defineEmits<{
+  deleted: []
+  saved: []
+}>()
 
 const toast = useToast()
 const espStore = useEspStore()
+const uiStore = useUiStore()
 
 // =============================================================================
 // State
@@ -51,7 +61,6 @@ const enabled = ref(true)
 
 // Subzone
 const subzoneId = ref<string | null>(null)
-const availableSubzones = ref<{ id: string; name: string }[]>([])
 
 // Type-specific fields
 const maxRuntime = ref(3600) // seconds
@@ -135,21 +144,6 @@ onMounted(async () => {
   if (device?.subzone_id && !subzoneId.value) {
     subzoneId.value = device.subzone_id
   }
-
-  // Load available subzones (real devices only)
-  if (!isMock) {
-    try {
-      const result = await subzonesApi.getSubzones(props.espId)
-      if (result && Array.isArray(result)) {
-        availableSubzones.value = result.map((sz: any) => ({
-          id: sz.subzone_id || sz.id,
-          name: sz.subzone_name || sz.name || sz.subzone_id || sz.id,
-        }))
-      }
-    } catch {
-      // No subzones available — that's fine
-    }
-  }
 })
 
 // Watch live PWM value
@@ -209,6 +203,32 @@ async function emergencyStop() {
 }
 
 // =============================================================================
+// Delete
+// =============================================================================
+const deleting = ref(false)
+
+async function confirmAndDelete() {
+  const confirmed = await uiStore.confirm({
+    title: 'Aktor entfernen',
+    message: 'Der Aktor wird unwiderruflich aus diesem Gerät entfernt. Verknüpfte Automatisierungsregeln werden deaktiviert.',
+    variant: 'danger',
+    confirmText: 'Entfernen',
+  })
+  if (!confirmed) return
+
+  deleting.value = true
+  try {
+    await actuatorsApi.delete(props.espId, props.gpio)
+    toast.success('Aktor entfernt')
+    emit('deleted')
+  } catch {
+    toast.error('Aktor konnte nicht entfernt werden')
+  } finally {
+    deleting.value = false
+  }
+}
+
+// =============================================================================
 // Save
 // =============================================================================
 async function handleSave() {
@@ -218,6 +238,7 @@ async function handleSave() {
       // Mock: config lives in device_metadata, just show success
       // Name/description changes are cosmetic for mock devices
       toast.success('Aktor-Konfiguration gespeichert')
+      emit('saved')
     } else {
       // Real: save to server via actuators API
       const config: Record<string, unknown> = {
@@ -227,7 +248,7 @@ async function handleSave() {
         name: name.value || null,
         description: description.value || null,
         enabled: enabled.value,
-        subzone_id: subzoneId.value,
+        subzone_id: subzoneId.value || null,
       }
 
       if (isPump.value) {
@@ -255,6 +276,7 @@ async function handleSave() {
 
       await actuatorsApi.createOrUpdate(props.espId, props.gpio, config as any)
       toast.success('Aktor-Konfiguration gespeichert')
+      emit('saved')
     }
   } catch (err) {
     const msg = (err as any)?.response?.data?.detail ?? 'Fehler beim Speichern'
@@ -351,19 +373,14 @@ function formatDuration(seconds: number): string {
           </button>
         </div>
 
-        <!-- Subzone assignment -->
+        <!-- Subzone assignment (with create-new option) -->
         <div class="actuator-config__field">
-          <label class="actuator-config__label">Subzone</label>
-          <select v-model="subzoneId" class="actuator-config__select">
-            <option :value="null">Keine Subzone</option>
-            <option
-              v-for="sz in availableSubzones"
-              :key="sz.id"
-              :value="sz.id"
-            >
-              {{ sz.name }}
-            </option>
-          </select>
+          <SubzoneAssignmentSection
+            v-model="subzoneId"
+            :esp-id="espId"
+            :gpio="gpio"
+            :zone-id="espStore.devices.find(d => espStore.getDeviceId(d) === espId)?.zone_id ?? null"
+          />
         </div>
       </section>
 
@@ -529,6 +546,7 @@ function formatDuration(seconds: number): string {
 
       <!-- ═══ DEVICE INFO (Metadata) ═════════════════════════════════════ -->
       <AccordionSection
+        v-if="showMetadata"
         title="Geräte-Informationen"
         :storage-key="`${accordionKey}-device-info`"
       >
@@ -550,7 +568,7 @@ function formatDuration(seconds: number): string {
         />
       </AccordionSection>
 
-      <!-- ═══ SAVE BUTTON ════════════════════════════════════════════════ -->
+      <!-- ═══ ACTIONS ══════════════════════════════════════════════════════ -->
       <div class="actuator-config__actions">
         <button
           class="actuator-config__save"
@@ -559,6 +577,14 @@ function formatDuration(seconds: number): string {
         >
           <Save class="w-4 h-4" />
           {{ saving ? 'Speichert...' : 'Speichern' }}
+        </button>
+        <button
+          class="actuator-config__delete"
+          :disabled="deleting || loading"
+          @click="confirmAndDelete"
+        >
+          <Trash2 class="w-4 h-4" />
+          Aktor entfernen
         </button>
       </div>
     </template>
@@ -842,7 +868,7 @@ function formatDuration(seconds: number): string {
 .actuator-config__emergency:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Actions */
-.actuator-config__actions { padding-top: var(--space-2); }
+.actuator-config__actions { padding-top: var(--space-2); display: flex; flex-direction: column; gap: var(--space-2); }
 
 .actuator-config__save {
   display: flex;
@@ -863,4 +889,24 @@ function formatDuration(seconds: number): string {
 
 .actuator-config__save:hover:not(:disabled) { filter: brightness(1.1); }
 .actuator-config__save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.actuator-config__delete {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  justify-content: center;
+  padding: var(--space-2) var(--space-4);
+  background: transparent;
+  border: 1px solid var(--color-status-critical);
+  border-radius: var(--radius-sm);
+  color: var(--color-status-critical);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.actuator-config__delete:hover:not(:disabled) { background: rgba(239, 68, 68, 0.1); }
+.actuator-config__delete:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

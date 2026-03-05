@@ -1512,8 +1512,26 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         type: 'warning',
         persistent: true,
       })
+      await fetchAll()
     } catch (err: unknown) {
       const msg = extractErrorMessage(err, 'Notfall-Stopp fehlgeschlagen')
+      toast.error(msg, { persistent: true })
+      throw err
+    }
+  }
+
+  /**
+   * Clear emergency stop for all actuators (real API).
+   * Releases emergency state so actuators can be controlled again.
+   */
+  async function clearEmergencyAll(): Promise<void> {
+    const toast = useToast()
+    try {
+      const result = await actuatorsApi.clearEmergency()
+      toast.success(`Not-Aus aufgehoben: ${result.devices_cleared} Geräte`)
+      await fetchAll()
+    } catch (err: unknown) {
+      const msg = extractErrorMessage(err, 'Not-Aus aufheben fehlgeschlagen')
       toast.error(msg, { persistent: true })
       throw err
     }
@@ -1646,6 +1664,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     // Actuator Commands (Real + Mock)
     sendActuatorCommand,
     emergencyStopAll,
+    clearEmergencyAll,
 
     // Mock ESP specific actions
     triggerHeartbeat,

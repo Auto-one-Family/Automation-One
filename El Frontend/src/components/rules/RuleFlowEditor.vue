@@ -550,13 +550,19 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
       })
     } else if (action.type === 'plugin' || action.type === 'autoops_trigger') {
       const pa = action as PluginAction
+      const cfg = pa.config || {}
+      // Expand config into cfg_* for RuleConfigPanel schema fields
+      const cfgFields = Object.fromEntries(
+        Object.entries(cfg).map(([k, v]) => [`cfg_${k}`, v]),
+      )
       resultNodes.push({
         id,
         type: 'plugin',
         position: { x: actionX, y: 60 + i * ROW_SPACING },
         data: {
           pluginId: pa.plugin_id,
-          config: pa.config || {},
+          config: cfg,
+          ...cfgFields,
         },
       })
     } else if (action.type === 'run_diagnostic') {
@@ -670,13 +676,21 @@ function graphToRuleData(): {
         } as DelayAction)
         break
 
-      case 'plugin':
+      case 'plugin': {
+        // Merge config object + cfg_* fields (RuleConfigPanel stores schema fields as cfg_key)
+        const config: Record<string, unknown> = { ...(node.data.config as Record<string, unknown> || {}) }
+        for (const [k, v] of Object.entries(node.data)) {
+          if (k.startsWith('cfg_') && v !== undefined) {
+            config[k.slice(4)] = v
+          }
+        }
         actions.push({
           type: 'plugin',
           plugin_id: node.data.pluginId || '',
-          config: node.data.config || {},
+          config,
         } as PluginAction)
         break
+      }
 
       case 'diagnostics_status':
         conditions.push({

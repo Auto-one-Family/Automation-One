@@ -85,12 +85,14 @@ watch(() => newSensor.value.sensor_type, (newType) => {
   }
   if (newType.toLowerCase().includes('ds18b20')) {
     newSensor.value.gpio = oneWireScanPin.value
-  }
-  // Pre-select default I2C address when switching to I2C sensor
-  if (inferInterfaceType(newType) === 'I2C') {
+  } else if (inferInterfaceType(newType) === 'I2C') {
+    newSensor.value.gpio = 0 // I2C uses SDA/SCL, GPIO not used for data
     const options = getI2CAddressOptions(newType)
     selectedI2CAddress.value = options.length > 0 ? options[0].value : null
   } else {
+    // BUG-1: Default to first recommended GPIO (avoid invalid GPIO 0)
+    const rec = getRecommendedGpios(newType, 'sensor')
+    newSensor.value.gpio = rec.length > 0 ? rec[0] : 32
     selectedI2CAddress.value = null
   }
 })
@@ -174,8 +176,15 @@ function close() {
 }
 
 function resetForm() {
+  // BUG-1: Default GPIO to first recommended (avoid invalid GPIO 0)
+  const st = defaultSensorType
+  const defaultGpio = st.toLowerCase().includes('ds18b20')
+    ? oneWireScanPin.value
+    : inferInterfaceType(st) === 'I2C'
+      ? 0
+      : (getRecommendedGpios(st, 'sensor')[0] ?? 32)
   newSensor.value = {
-    gpio: 0,
+    gpio: defaultGpio,
     sensor_type: defaultSensorType,
     name: '',
     subzone_id: '',

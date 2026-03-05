@@ -24,11 +24,14 @@ interface Props {
   title?: string
   /** Panel width variant */
   width?: 'sm' | 'md' | 'lg'
+  /** Elevation for stacked modals: 'default' | 'high' (z-index +10 when opened over another SlideOver) */
+  elevation?: 'default' | 'high'
 }
 
 const props = withDefaults(defineProps<Props>(), {
   title: '',
   width: 'md',
+  elevation: 'default',
 })
 
 const emit = defineEmits<{
@@ -68,7 +71,7 @@ onUnmounted(() => {
     <Transition name="slide-over-fade">
       <div
         v-if="open"
-        class="slide-over-backdrop"
+        :class="['slide-over-backdrop', { 'slide-over-backdrop--high': elevation === 'high' }]"
         @click.self="emit('close')"
       >
         <Transition name="slide-over-panel" appear>
@@ -120,6 +123,10 @@ onUnmounted(() => {
   background: var(--slide-over-backdrop);
   display: flex;
   justify-content: flex-end;
+}
+
+.slide-over-backdrop--high {
+  z-index: calc(var(--z-modal) + 10);
 }
 
 /* Backdrop fade transition */

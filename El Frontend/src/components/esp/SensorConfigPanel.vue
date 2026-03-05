@@ -10,14 +10,15 @@
  */
 
 import { ref, computed, onMounted, watch } from 'vue'
-import { Save, RotateCcw, Beaker, Gauge, Settings, Cpu } from 'lucide-vue-next'
+import { Save, RotateCcw, Beaker, Gauge, Settings, Cpu, Trash2 } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
-import { subzonesApi } from '@/api/subzones'
 import { espApi } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
+import { useUiStore } from '@/shared/stores/ui.store'
 import { useToast } from '@/composables/useToast'
 import { useCalibration } from '@/composables/useCalibration'
 import { inferInterfaceType } from '@/utils/sensorDefaults'
+import { roundToDecimals } from '@/utils/formatters'
 import { SENSOR_TYPE_CONFIG, getSensorUnit } from '@/utils/sensorDefaults'
 import { AccordionSection } from '@/shared/design/primitives'
 import RangeSlider from '@/shared/design/primitives/RangeSlider.vue'
@@ -26,22 +27,32 @@ import AlertConfigSection from '@/components/devices/AlertConfigSection.vue'
 import RuntimeMaintenanceSection from '@/components/devices/RuntimeMaintenanceSection.vue'
 import DeviceMetadataSection from '@/components/devices/DeviceMetadataSection.vue'
 import LinkedRulesSection from '@/components/devices/LinkedRulesSection.vue'
+import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSection.vue'
 import type { DeviceMetadata } from '@/types/device-metadata'
 import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
+import type { SensorConfigCreate } from '@/types'
 
 interface Props {
   espId: string
   gpio: number
   sensorType: string
   unit?: string
+  showMetadata?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   unit: '',
+  showMetadata: true,
 })
+
+const emit = defineEmits<{
+  deleted: []
+  saved: []
+}>()
 
 const toast = useToast()
 const espStore = useEspStore()
+const uiStore = useUiStore()
 const calibration = useCalibration()
 
 // =============================================================================
@@ -59,7 +70,6 @@ const enabled = ref(true)
 
 // Subzone
 const subzoneId = ref<string | null>(null)
-const availableSubzones = ref<{ id: string; name: string }[]>([])
 
 // Interface-specific
 const interfaceType = computed(() => inferInterfaceType(props.sensorType))
@@ -119,75 +129,63 @@ const accordionKey = computed(() => `sensor-${props.espId}-${props.gpio}`)
 onMounted(async () => {
   const isMock = espApi.isMockEsp(props.espId)
 
-  // Load sensor config from server (real devices only)
-  if (!isMock) {
-    try {
-      const config = await sensorsApi.get(props.espId, props.gpio)
-      if (config) {
-        sensorDbId.value = (config as any).id ? String((config as any).id) : null
-        name.value = (config as any).name || ''
-        description.value = (config as any).description || ''
-        unitValue.value = (config as any).unit || defaultUnit.value
-        enabled.value = (config as any).enabled !== false
-        i2cAddress.value = (config as any).i2c_address || '0x44'
-        i2cBus.value = (config as any).i2c_bus || 0
+  // Load sensor config from server (Real + Mock — Single Source of Truth)
+  try {
+    const config = await sensorsApi.get(props.espId, props.gpio)
+    if (config) {
+      sensorDbId.value = config.id ? String(config.id) : null
+      name.value = config.name || ''
+      const configExt = config as unknown as Record<string, unknown>
+      description.value = (configExt.description as string) || ''
+      unitValue.value = (configExt.unit as string) || defaultUnit.value
+      enabled.value = config.enabled !== false
+      const i2cVal = config.i2c_address
+      i2cAddress.value = i2cVal != null ? `0x${Number(i2cVal).toString(16)}` : '0x44'
+      i2cBus.value = (configExt.i2c_bus as number) ?? 0
 
-        // Subzone
-        if ((config as any).subzone_id) {
-          subzoneId.value = (config as any).subzone_id
-        }
+      // Subzone (C1: backend returns subzone_id in GET response)
+      subzoneId.value = config.subzone_id ?? null
 
-        // Thresholds
-        if ((config as any).threshold_min != null) alarmLow.value = (config as any).threshold_min
-        if ((config as any).warning_min != null) warnLow.value = (config as any).warning_min
-        if ((config as any).warning_max != null) warnHigh.value = (config as any).warning_max
-        if ((config as any).threshold_max != null) alarmHigh.value = (config as any).threshold_max
+      if (config.threshold_min != null) alarmLow.value = roundToDecimals(config.threshold_min, 2)
+      if (config.warning_min != null) warnLow.value = roundToDecimals(config.warning_min, 2)
+      if (config.warning_max != null) warnHigh.value = roundToDecimals(config.warning_max, 2)
+      if (config.threshold_max != null) alarmHigh.value = roundToDecimals(config.threshold_max, 2)
 
-        // Device metadata
-        metadata.value = parseDeviceMetadata((config as any).metadata)
-      }
-    } catch {
-      // No existing config — use defaults
-      unitValue.value = defaultUnit.value
-      if (sensorConfig.value) {
-        alarmLow.value = sensorConfig.value.min
-        warnLow.value = sensorConfig.value.min + (sensorConfig.value.max - sensorConfig.value.min) * 0.1
-        warnHigh.value = sensorConfig.value.max - (sensorConfig.value.max - sensorConfig.value.min) * 0.1
-        alarmHigh.value = sensorConfig.value.max
-      }
+      metadata.value = parseDeviceMetadata(config.metadata)
     }
-  } else {
-    // Mock device: use defaults from sensorConfig
-    unitValue.value = defaultUnit.value
+  } catch {
+    // No config in DB — use defaults or Mock fallback (C2)
+    if (isMock) {
+      const device = espStore.devices.find(d => espStore.getDeviceId(d) === props.espId)
+      const sensor = device?.sensors
+        ? (device.sensors as any[]).find(
+            (s) =>
+              s.gpio === props.gpio &&
+              (!props.sensorType || s.sensor_type === props.sensorType)
+          )
+        : null
+
+      if (sensor) {
+        name.value = sensor.name ?? ''
+        unitValue.value = sensor.unit ?? defaultUnit.value
+        subzoneId.value = sensor.subzone_id ?? null
+      } else {
+        unitValue.value = defaultUnit.value
+      }
+    } else {
+      unitValue.value = defaultUnit.value
+    }
+
     if (sensorConfig.value) {
-      alarmLow.value = sensorConfig.value.min
-      warnLow.value = sensorConfig.value.min + (sensorConfig.value.max - sensorConfig.value.min) * 0.1
-      warnHigh.value = sensorConfig.value.max - (sensorConfig.value.max - sensorConfig.value.min) * 0.1
-      alarmHigh.value = sensorConfig.value.max
+      const { min, max } = sensorConfig.value
+      const range = max - min
+      alarmLow.value = roundToDecimals(min, 2)
+      warnLow.value = roundToDecimals(min + range * 0.1, 2)
+      warnHigh.value = roundToDecimals(max - range * 0.1, 2)
+      alarmHigh.value = roundToDecimals(max, 2)
     }
   }
   loading.value = false
-
-  // Load existing subzone from device store (more reliable than config)
-  const device = espStore.devices.find(d => espStore.getDeviceId(d) === props.espId)
-  if (device?.subzone_id && !subzoneId.value) {
-    subzoneId.value = device.subzone_id
-  }
-
-  // Load available subzones (real devices only)
-  if (!isMock) {
-    try {
-      const result = await subzonesApi.getSubzones(props.espId)
-      if (result && Array.isArray(result)) {
-        availableSubzones.value = result.map((sz: any) => ({
-          id: sz.subzone_id || sz.id,
-          name: sz.subzone_name || sz.name || sz.subzone_id || sz.id,
-        }))
-      }
-    } catch {
-      // No subzones available — that's fine
-    }
-  }
 })
 
 // Watch live sensor value for calibration
@@ -206,61 +204,95 @@ watch(
 )
 
 // =============================================================================
+// Delete
+// =============================================================================
+const deleting = ref(false)
+
+async function confirmAndDelete() {
+  const confirmed = await uiStore.confirm({
+    title: 'Sensor entfernen',
+    message: 'Der Sensor wird unwiderruflich aus diesem Gerät entfernt. Historische Daten bleiben erhalten.',
+    variant: 'danger',
+    confirmText: 'Entfernen',
+  })
+  if (!confirmed) return
+
+  deleting.value = true
+  const isMock = espApi.isMockEsp(props.espId)
+  try {
+    if (isMock) {
+      await espStore.removeSensor(props.espId, props.gpio)
+    } else {
+      await sensorsApi.delete(props.espId, props.gpio)
+    }
+    toast.success('Sensor entfernt')
+    emit('deleted')
+  } catch {
+    toast.error('Sensor konnte nicht entfernt werden')
+  } finally {
+    deleting.value = false
+  }
+}
+
+// =============================================================================
 // Save
 // =============================================================================
 async function handleSave() {
   saving.value = true
-  const isMock = espApi.isMockEsp(props.espId)
   try {
-    if (isMock) {
-      // Mock: config lives in device_metadata, just show success
-      toast.success('Sensor-Konfiguration gespeichert')
-    } else {
-      // Real: save to server via sensors API
-      const config: Record<string, unknown> = {
-        esp_id: props.espId,
-        gpio: props.gpio,
-        sensor_type: props.sensorType,
-        name: name.value || null,
-        description: description.value || null,
-        unit: unitValue.value || null,
-        enabled: enabled.value,
-        interface_type: interfaceType.value,
-        threshold_min: alarmLow.value,
-        threshold_max: alarmHigh.value,
-        warning_min: warnLow.value,
-        warning_max: warnHigh.value,
-      }
-
-      if (isI2C.value) {
-        config.i2c_address = i2cAddress.value
-        config.i2c_bus = i2cBus.value
-      }
-
-      if (isDigital.value) {
-        config.pulses_per_liter = pulsesPerLiter.value
-      }
-
-      if (isAnalog.value) {
-        config.measure_range_min = measureRangeMin.value
-        config.measure_range_max = measureRangeMax.value
-      }
-
-      // Subzone assignment
-      config.subzone_id = subzoneId.value
-
-      // Device metadata
-      config.metadata = mergeDeviceMetadata(null, metadata.value)
-
-      // Calibration data
-      const calData = calibration.getCalibrationData()
-      if (calData) {
-        config.calibration = calData
-      }
-
-      await sensorsApi.createOrUpdate(props.espId, props.gpio, config as any)
-      toast.success('Sensor-Konfiguration gespeichert')
+    // Block A: Real AND Mock — persist via Backend (Single Source of Truth: subzone_configs)
+    const config: Record<string, unknown> = {
+      esp_id: props.espId,
+      gpio: props.gpio,
+      sensor_type: props.sensorType,
+      name: name.value || null,
+      description: description.value || null,
+      unit: unitValue.value || null,
+      enabled: enabled.value,
+      interface_type: interfaceType.value,
+      threshold_min: alarmLow.value,
+      threshold_max: alarmHigh.value,
+      warning_min: warnLow.value,
+      warning_max: warnHigh.value,
     }
+
+    if (isI2C.value) {
+      const parsed = i2cAddress.value != null
+        ? parseInt(String(i2cAddress.value).replace(/^0x/i, ''), 16)
+        : null
+      config.i2c_address = Number.isNaN(parsed) ? null : parsed
+      config.i2c_bus = i2cBus.value
+    }
+
+    if (isDigital.value) {
+      config.pulses_per_liter = pulsesPerLiter.value
+    }
+
+    if (isAnalog.value) {
+      config.measure_range_min = measureRangeMin.value
+      config.measure_range_max = measureRangeMax.value
+    }
+
+    // Block B1: Normalize "Keine Subzone" — never send "__none__" to API
+    const rawSubzone = subzoneId.value
+    config.subzone_id =
+      rawSubzone === '__none__' || rawSubzone == null || rawSubzone === ''
+        ? null
+        : rawSubzone
+
+    config.metadata = mergeDeviceMetadata(null, metadata.value)
+
+    const calData = calibration.getCalibrationData()
+    if (calData) {
+      config.calibration = calData
+    }
+
+    const result = await sensorsApi.createOrUpdate(props.espId, props.gpio, config as unknown as SensorConfigCreate)
+    if (result?.id) {
+      sensorDbId.value = String(result.id)
+    }
+    toast.success('Sensor-Konfiguration gespeichert')
+    emit('saved')
   } catch (err) {
     const msg = (err as any)?.response?.data?.detail ?? 'Fehler beim Speichern'
     toast.error(msg)
@@ -320,19 +352,14 @@ async function handleSave() {
           </button>
         </div>
 
-        <!-- Subzone assignment -->
+        <!-- Subzone assignment (with create-new option) -->
         <div class="sensor-config__field">
-          <label class="sensor-config__label">Subzone</label>
-          <select v-model="subzoneId" class="sensor-config__select">
-            <option :value="null">Keine Subzone</option>
-            <option
-              v-for="sz in availableSubzones"
-              :key="sz.id"
-              :value="sz.id"
-            >
-              {{ sz.name }}
-            </option>
-          </select>
+          <SubzoneAssignmentSection
+            v-model="subzoneId"
+            :esp-id="espId"
+            :gpio="gpio"
+            :zone-id="espStore.devices.find(d => espStore.getDeviceId(d) === espId)?.zone_id ?? null"
+          />
         </div>
       </section>
 
@@ -668,6 +695,7 @@ async function handleSave() {
 
       <!-- ═══ DEVICE INFO (Metadata) ═════════════════════════════════════ -->
       <AccordionSection
+        v-if="showMetadata"
         title="Geräte-Informationen"
         :storage-key="`${accordionKey}-device-info`"
       >
@@ -689,7 +717,7 @@ async function handleSave() {
         />
       </AccordionSection>
 
-      <!-- ═══ SAVE BUTTON ════════════════════════════════════════════════ -->
+      <!-- ═══ ACTIONS ══════════════════════════════════════════════════════ -->
       <div class="sensor-config__actions">
         <button
           class="sensor-config__save"
@@ -698,6 +726,14 @@ async function handleSave() {
         >
           <Save class="w-4 h-4" />
           {{ saving ? 'Speichert...' : 'Speichern' }}
+        </button>
+        <button
+          class="sensor-config__delete"
+          :disabled="deleting || loading"
+          @click="confirmAndDelete"
+        >
+          <Trash2 class="w-4 h-4" />
+          Sensor entfernen
         </button>
       </div>
     </template>
@@ -1024,6 +1060,9 @@ async function handleSave() {
 
 .sensor-config__actions {
   padding-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .sensor-config__save {
@@ -1048,6 +1087,32 @@ async function handleSave() {
 }
 
 .sensor-config__save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sensor-config__delete {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  justify-content: center;
+  padding: var(--space-2) var(--space-4);
+  background: transparent;
+  border: 1px solid var(--color-status-critical);
+  border-radius: var(--radius-sm);
+  color: var(--color-status-critical);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sensor-config__delete:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.sensor-config__delete:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

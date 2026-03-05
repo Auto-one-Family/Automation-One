@@ -220,12 +220,11 @@ const router = createRouter({
           name: 'mqtt-log',
           redirect: '/system-monitor?tab=mqtt',
         },
-        // MaintenanceView bleibt als eigene Route erreichbar
+        // Phase 4D: Wartung in Health-Tab integriert (Auftrag Step 8)
         {
           path: 'maintenance',
           name: 'maintenance',
-          component: lazyView(() => import('@/views/MaintenanceView.vue')),
-          meta: { requiresAdmin: true, title: 'Wartung' },
+          redirect: '/system-monitor?tab=health',
         },
         {
           path: 'plugins',

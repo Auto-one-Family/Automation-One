@@ -48,6 +48,7 @@ const MqttTrafficTab = defineAsyncComponent(() => import('@/components/system-mo
 const HealthTab = defineAsyncComponent(() => import('@/components/system-monitor/HealthTab.vue'))
 const DiagnoseTab = defineAsyncComponent(() => import('@/components/system-monitor/DiagnoseTab.vue'))
 const ReportsTab = defineAsyncComponent(() => import('@/components/system-monitor/ReportsTab.vue'))
+const HierarchyTab = defineAsyncComponent(() => import('@/components/system-monitor/HierarchyTab.vue'))
 const CleanupPanel = defineAsyncComponent(() => import('@/components/system-monitor/CleanupPanel.vue'))
 const EventDetailsPanel = defineAsyncComponent(() => import('@/components/system-monitor/EventDetailsPanel.vue'))
 
@@ -1262,7 +1263,7 @@ onMounted(async () => {
   // Read URL params for deep-linking (esp handled by watcher with immediate: true)
   if (route.query.tab) {
     const tab = String(route.query.tab) as TabId
-    if (['events', 'logs', 'database', 'mqtt', 'health', 'diagnostics', 'reports'].includes(tab)) {
+    if (['events', 'logs', 'database', 'mqtt', 'health', 'diagnostics', 'reports', 'hierarchy'].includes(tab)) {
       activeTab.value = tab
     }
   }
@@ -1511,6 +1512,11 @@ watch(activeTab, (newTab) => {
       <MqttTrafficTab
         v-else-if="activeTab === 'mqtt'"
         :esp-id="filterEspId || undefined"
+      />
+
+      <!-- Hierarchy Tab (Phase 6) -->
+      <HierarchyTab
+        v-else-if="activeTab === 'hierarchy'"
       />
     </main>
 

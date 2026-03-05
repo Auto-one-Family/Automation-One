@@ -128,6 +128,17 @@ export const actuatorsApi = {
     return response.data
   },
 
+  /**
+   * Clear emergency stop - releases emergency state so actuators can be controlled
+   */
+  async clearEmergency(espId?: string): Promise<{ success: boolean; message: string; devices_cleared: number }> {
+    const response = await api.post<{ success: boolean; message: string; devices_cleared: number }>(
+      '/actuators/clear_emergency',
+      { esp_id: espId ?? undefined, reason: 'manual' }
+    )
+    return response.data
+  },
+
   // =========================================================================
   // Alert Configuration (Phase 4A.7)
   // =========================================================================
