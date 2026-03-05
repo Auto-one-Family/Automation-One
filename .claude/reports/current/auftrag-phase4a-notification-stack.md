@@ -30,7 +30,7 @@
 **Frontend (El Frontend):**
 - `notification.store.ts` (Pfad: `src/shared/stores/notification.store.ts`) — Toast-System (error/warning/success/info) — **NUR Toasts, keine Inbox, kein persistenter State** **[verify-plan: Store-Pfad ist `shared/stores/`, NICHT `stores/`. Toast-Composable `useToast()` ist ein separater Singleton in `src/composables/useToast.ts`, KEIN Pinia-Store.]**
 - `ToastContainer.vue` + `useToast()` — In-App-Notifications
-- `AlarmListWidget.vue` — Sensor-Quality-Alerts als Dashboard-Widget
+- `AlarmListWidget.vue` — Persistierte Alerts aus alert-center.store (seit Alert-Basis 1; vorher Sensor-Quality)
 - `SystemMonitorView.vue` — **5 Tabs** (Events, Logs, Database, MQTT, Health) **[verify-plan: 5 Tabs nicht 4, Tab-Reihenfolge korrigiert]**
 - API-Layer — **20 Module** in `src/api/` (health.ts, logs.ts, debug.ts, audit.ts, auth.ts, esp.ts, sensors.ts, actuators.ts, zones.ts, subzones.ts, dashboards.ts, logic.ts, config.ts, users.ts, database.ts, calibration.ts, loadtest.ts, errors.ts, parseApiError.ts, index.ts). Pattern: `export const {domain}Api = { ... }` oder benannte Exports. Basis-URL: `/api/v1`
 - Design-System — `tokens.css` mit Status-Farben **[verify-plan: Variablen-Namen sind `--color-error` (rot), `--color-warning` (amber), `--color-info` (blau), `--color-success` (gruen). NICHT `--status-critical` etc. Alle Referenzen im Plan muessen angepasst werden.]**

@@ -165,7 +165,7 @@
 | 6 | Aktor-Status | actuator-card | 3×2 | 2×2 | Aktor-Select (3 Pumpen) |
 | 7 | Aktor-Laufzeit | actuator-runtime | 4×3 | 3×3 | Zeigt 3 Pumpen, 1x EMERGENCY_STOP |
 | 8 | ESP-Health | esp-health | 6×3 | 4×3 | 3 Online / 1 Offline, RSSI-Werte |
-| 9 | Alarm-Liste | alarm-list | 4×4 | 4×4 | "Keine aktiven Alarme" |
+| 9 | Alarm-Liste | alarm-list | 4×4 | 4×4 | "Keine aktiven Alerts" |
 
 **DOM-CHECK nach 9 Widgets:** Exakt 9 grid-stack-item Elemente — PASS
 

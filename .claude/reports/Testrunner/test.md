@@ -1,21 +1,21 @@
 # Test Baseline Report
 
 **Erstellt:** 2026-02-11
-**Aktualisiert:** 2026-03-04 (AutoOps Debug + Full Test Run)
+**Aktualisiert:** 2026-03-05 (RuntimeWarning-Fixes, Test-Baseline)
 **Skill:** test-log-analyst
 **Zweck:** Vollständige Test-Durchlauf-Dokumentation
 
 ---
 
-## Zusammenfassung (2026-03-04)
+## Zusammenfassung (2026-03-05)
 
 | Bereich | Tests | Passed | Failed | Skipped | Status |
 |---------|-------|--------|--------|---------|--------|
-| **Backend Unit** | 881 | 877 | 0 | 4 | GRUEN |
-| **Backend Integration** | 774 | 774 | 0 | 0 | GRUEN |
+| **Backend Unit** | 884 | 884 | 0 | 4 | GRUEN |
+| **Backend Integration** | 779 | 779 | 0 | 0 | GRUEN |
 | **Backend ESP32-Mock** | 317 | 313 | 0 | 4 | GRUEN |
 | **Frontend Vitest** | 1564 | 1564 | 0 | 0 | GRUEN |
-| **TOTAL** | 3536 | 3528 | 0 | 8 | **GRUEN** |
+| **TOTAL** | 3544 | 3540 | 0 | 8 | **GRUEN** |
 
 ---
 
@@ -57,9 +57,11 @@
 
 ## Bekannte Warnings (nicht kritisch)
 
-- **email_log_repo:** RuntimeWarning "coroutine was never awaited" in digest_service Tests
-- **test_auth_security_features:** RuntimeWarning in MQTT broadcast test
 - **Skipped:** 4 Backend (I2C unique constraint, jinja2, 2x Unix permissions), 4 ESP32 (real hardware)
+
+**Behoben (2026-03-05):**
+- email_log_repo: RuntimeWarning in digest_service Tests → `_make_mock_session()` mit MagicMock für sync `session.add`
+- test_auth_security_features: RuntimeWarning in MQTT broadcast test → `_publish_with_retry` als MagicMock (sync), nicht AsyncMock
 
 ---
 

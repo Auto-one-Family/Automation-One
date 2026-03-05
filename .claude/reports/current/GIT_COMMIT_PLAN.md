@@ -1,154 +1,92 @@
 # Git Commit Plan
+**Erstellt:** 2026-03-05
+**Branch:** master
+**Remote:** origin (Auto-one-Family/Automation-One)
+**GitHub:** master protected, keine offenen PRs
 
-**Erstellt:** 2026-03-02
-**Branch:** master (up to date with origin/master)
-**Ungepushte Commits:** 0
-**Änderungen gesamt:** 17 modified, 1 untracked, 0 staged
+**Änderungen gesamt:** 65 modified, 21 untracked
 
 ---
 
-## Commit 1: feat(frontend): preserve view state with keep-alive and per-layout debounce
+## Commit 1: docs(reference): update API docs, database, docker, errors, CI
 
-**Was:** Behebt State-Verlust beim Tab-Wechsel. AppShell wrapped RouterView mit `<keep-alive>` für MonitorView, LogicView und CustomDashboardView. CustomDashboardView bekommt `defineOptions` + `onActivated`/`onDeactivated` Lifecycle-Hooks um GridStack bei Reaktivierung korrekt wiederherzustellen. Dashboard-Store wechselt von single-timer auf per-layout Debounce-Map, damit beim schnellen Dashboard-Wechsel keine Edits verloren gehen.
+**Was:** Referenz-Dokumentation aktualisieren
 
 **Dateien:**
-- `El Frontend/src/shared/design/layout/AppShell.vue` – keep-alive Wrapper mit include-Liste + max=5
-- `El Frontend/src/views/CustomDashboardView.vue` – defineOptions, onActivated/onDeactivated für Grid-Re-Init und Breadcrumb
-- `El Frontend/src/shared/stores/dashboard.store.ts` – Per-layout debounce mit Map statt einzelnem Timer
-
-**Befehle:**
-```bash
-git add "El Frontend/src/shared/design/layout/AppShell.vue" "El Frontend/src/views/CustomDashboardView.vue" "El Frontend/src/shared/stores/dashboard.store.ts"
-git commit -m "feat(frontend): preserve view state with keep-alive and per-layout debounce"
-```
+- .claude/reference/DATABASE_ARCHITECTURE.md
+- .claude/reference/api/MQTT_TOPICS.md
+- .claude/reference/api/REST_ENDPOINTS.md
+- .claude/reference/api/WEBSOCKET_EVENTS.md
+- .claude/reference/debugging/CI_PIPELINE.md
+- .claude/reference/debugging/LOG_LOCATIONS.md
+- .claude/reference/errors/ERROR_CODES.md
+- .claude/reference/infrastructure/DOCKER_AKTUELL.md
+- .claude/reference/infrastructure/DOCKER_REFERENCE.md
 
 ---
 
-## Commit 2: fix(frontend): replace hardcoded CSS values with design tokens in widgets
+## Commit 2: chore(ci): extend trivyignore
 
-**Was:** Ersetzt hardcodierte px-Werte (padding, font-size, gap, border-radius, margin) und rgba-Farben durch CSS-Variablen aus dem Design-Token-System. Betrifft Dashboard-Widget-Styling und zwei Dashboard-Layout-Komponenten. InlineDashboardPanel passt ROW_HEIGHT von 60→80px an (synchron mit DashboardViewer cellHeight) und ändert overflow von hidden→auto für scrollbare Widget-Inhalte. DashboardViewer entfernt überflüssiges `inset: 4px` auf grid-items.
+**Was:** Trivy-Scanner Ignore-Regeln erweitern
 
 **Dateien:**
-- `El Frontend/src/components/dashboard-widgets/ActuatorCardWidget.vue` – padding + background auf CSS vars
-- `El Frontend/src/components/dashboard-widgets/ActuatorRuntimeWidget.vue` – font-size + padding auf CSS vars
-- `El Frontend/src/components/dashboard-widgets/AlarmListWidget.vue` – font-size, padding, margin, border-radius auf CSS vars
-- `El Frontend/src/components/dashboard-widgets/MultiSensorWidget.vue` – gap + padding auf CSS vars
-- `El Frontend/src/components/dashboard/DashboardViewer.vue` – entferne `inset: 4px` auf grid-stack-item-content
-- `El Frontend/src/components/dashboard/InlineDashboardPanel.vue` – ROW_HEIGHT 60→80, overflow hidden→auto
-
-**Befehle:**
-```bash
-git add "El Frontend/src/components/dashboard-widgets/ActuatorCardWidget.vue" "El Frontend/src/components/dashboard-widgets/ActuatorRuntimeWidget.vue" "El Frontend/src/components/dashboard-widgets/AlarmListWidget.vue" "El Frontend/src/components/dashboard-widgets/MultiSensorWidget.vue" "El Frontend/src/components/dashboard/DashboardViewer.vue" "El Frontend/src/components/dashboard/InlineDashboardPanel.vue"
-git commit -m "fix(frontend): replace hardcoded CSS values with design tokens in widgets"
-```
+- .trivyignore
 
 ---
 
-## Commit 3: feat(frontend): redesign MonitorView dashboard section as compact card
+## Commit 3: chore(skills): update frontend and server development skills
 
-**Was:** Dashboard-Sektion im MonitorView komplett umgebaut: Statt vertikaler Link-Liste jetzt kompakte, collapsible Card mit horizontalen Chips. Jeder Chip hat Direktlinks zum Dashboard und zum Editor. Collapse-State wird in localStorage persistiert. Includes defineOptions für keep-alive Kompatibilität. Entfernt veraltete CSS-Klassen (monitor-dashboards__show-all, monitor-dashboard-link__updated).
+**Was:** Skills und MODULE_REGISTRY aktualisieren
 
 **Dateien:**
-- `El Frontend/src/views/MonitorView.vue` – defineOptions, neue Dashboard-Card mit Chips, collapsible toggle, Pencil/Plus/Chevron Icons, neue CSS-Klassen
-
-**Befehle:**
-```bash
-git add "El Frontend/src/views/MonitorView.vue"
-git commit -m "feat(frontend): redesign MonitorView dashboard section as compact card"
-```
+- .claude/skills/frontend-development/SKILL.md
+- .claude/skills/server-development/MODULE_REGISTRY.md
+- .claude/skills/server-development/SKILL.md
 
 ---
 
-## Commit 4: feat(frontend): restructure LogicView with rules-first layout
+## Commit 4: docs(reports): add alert analysis, config panel, subzone, email reports
 
-**Was:** LogicView Layout umstrukturiert: Bestehende Regeln kommen jetzt "above the fold" (Sektion 1), die Flow-Illustration erscheint nur noch im leeren Zustand. Vorlagen-Sektion wird collapsible mit Toggle-Button und Collapse-Transition. Collapse-State in localStorage persistiert. Breitere Grid-Layouts (max-width 960px). Logic-Store trackt jetzt execution_count und last_execution_success bei Rule-Execution Events.
+**Was:** Session-Reports und Analysen hinzufügen
+
+**Dateien (modified + untracked):**
+- .claude/reports/Testrunner/test.md
+- .claude/reports/current/* (alle modified und untracked)
+
+---
+
+## Commit 5: feat(server): subzone helpers, email retry, sensor/actuator API, zone KPI
+
+**Was:** Backend: Subzone-Helpers, Email-Retry-Service, API-Anpassungen, Zone-KPI
 
 **Dateien:**
-- `El Frontend/src/views/LogicView.vue` – defineOptions, rules-first Layout, collapsible templates, ChevronUp import, Collapse-Transition CSS
-- `El Frontend/src/shared/stores/logic.store.ts` – execution_count + last_execution_success Update bei rule_executed Event
-
-**Befehle:**
-```bash
-git add "El Frontend/src/views/LogicView.vue" "El Frontend/src/shared/stores/logic.store.ts"
-git commit -m "feat(frontend): restructure LogicView with rules-first layout"
-```
+- El Servador/god_kaiser_server/src/api/v1/*
+- El Servador/god_kaiser_server/src/db/models/zone_context.py
+- El Servador/god_kaiser_server/src/db/repositories/email_log_repo.py
+- El Servador/god_kaiser_server/src/main.py
+- El Servador/god_kaiser_server/src/schemas/*
+- El Servador/god_kaiser_server/src/services/*
+- El Servador/god_kaiser_server/src/utils/subzone_helpers.py (neu)
+- El Servador/god_kaiser_server/src/services/email_retry_service.py (neu)
+- El Servador/god_kaiser_server/tests/*
 
 ---
 
-## Commit 5: fix(firmware): correct Wokwi diagram pin references
+## Commit 6: feat(frontend): notification stack, sensor/actuator config, email postfach, labels
 
-**Was:** Zwei Pin-Bezeichnungen in der Wokwi-Diagrammdatei korrigiert: DHT22 Data-Pin von `esp:D16` auf `esp:RX2` (korrekter Wokwi-Alias für GPIO16) und Analog-Potentiometer von `esp:34` auf `esp:D34` (konsistente Dx-Notation).
+**Was:** Frontend: Notification-Drawer, Sensor/Actor-Config-Panels, Email-Postfach-View, Labels
 
 **Dateien:**
-- `El Trabajante/diagram.json` – DHT22 SDA Pin D16→RX2, Potentiometer SIG Pin 34→D34
-
-**Befehle:**
-```bash
-git add "El Trabajante/diagram.json"
-git commit -m "fix(firmware): correct Wokwi diagram pin references for DHT22 and ADC"
-```
-
----
-
-## Commit 6: docs(ci): update Wokwi testing docs and optimize nightly schedule
-
-**Was:** WOKWI_TESTING.md aktualisiert auf v2.2: MCP-Integration dokumentiert (11 Tools, 2 Resources, Agent-Driven Testing Flow), Szenario-Zählung aktualisiert (191 total über 15 Kategorien), CLI-Installation korrigiert (GitHub releases statt npm), Quota-Hinweise ergänzt. CI Workflow wechselt Nightly-Schedule von täglich auf Mon+Thu (Quota-Optimierung: ~720 vs 2520 min/Woche). Makefile aktualisiert 173→191 in Help-Text und Echo.
-
-**Dateien:**
-- `.claude/reference/testing/WOKWI_TESTING.md` – v2.2, MCP section, scenario count table, CLI install fix
-- `.github/workflows/wokwi-tests.yml` – cron Mon+Thu, comment updates für 15 categories + correlation
-- `Makefile` – 173→191 Szenario-Zählung in help + wokwi-test-all
-
-**Befehle:**
-```bash
-git add ".claude/reference/testing/WOKWI_TESTING.md" ".github/workflows/wokwi-tests.yml" Makefile
-git commit -m "docs(ci): update Wokwi testing docs and optimize nightly schedule to Mon+Thu"
-```
-
----
-
-## Commit 7: docs(reports): add dashboard and logic UX final polish report
-
-**Was:** Auftragsdokumentation für den Dashboard + Logik UX Polish Sprint. Beschreibt Phase 1 (Dashboard State, CSS-Konsistenz, Dashboard-Card, InlineDashboardPanel) und Phase 2 (LogicView Layout, execution_count Fix).
-
-**Dateien:**
-- `.claude/reports/current/auftrag-dashboard-logik-ux-finalpolish.md` – Neuer Auftragsbericht
-
-**Befehle:**
-```bash
-git add ".claude/reports/current/auftrag-dashboard-logik-ux-finalpolish.md"
-git commit -m "docs(reports): add dashboard and logic UX final polish report"
-```
-
----
-
-## Abschluss
-
-**Nach allen Commits:**
-```bash
-# Status prüfen (GIT_COMMIT_PLAN.md sollte als einzige modified übrig bleiben)
-git status
-
-# Push
-git push origin master
-```
-
-**Zusammenfassung:**
-
-| # | Commit | Dateien | Typ |
-|---|--------|---------|-----|
-| 1 | `feat(frontend): preserve view state with keep-alive and per-layout debounce` | 3 | feat |
-| 2 | `fix(frontend): replace hardcoded CSS values with design tokens in widgets` | 6 | fix |
-| 3 | `feat(frontend): redesign MonitorView dashboard section as compact card` | 1 | feat |
-| 4 | `feat(frontend): restructure LogicView with rules-first layout` | 2 | feat |
-| 5 | `fix(firmware): correct Wokwi diagram pin references for DHT22 and ADC` | 1 | fix |
-| 6 | `docs(ci): update Wokwi testing docs and optimize nightly schedule to Mon+Thu` | 3 | docs |
-| 7 | `docs(reports): add dashboard and logic UX final polish report` | 1 | docs |
-
-**Hinweise:**
-- `GIT_COMMIT_PLAN.md` wird NICHT committed (ist der Plan selbst)
-- Commit 1 ist Voraussetzung für Commits 3+4 (defineOptions in MonitorView/LogicView nutzt keep-alive aus AppShell)
-- Commits 2-4 sind Frontend-Änderungen aus demselben UX-Polish Sprint
-- Commit 5 ist unabhängig (Firmware-Diagramm)
-- Commits 6-7 sind reine Dokumentation
-- Reihenfolge: Infrastruktur (keep-alive) → CSS-Fixes → Features → Firmware → Docs
+- El Frontend/src/api/notifications.ts
+- El Frontend/src/components/*
+- El Frontend/src/composables/*
+- El Frontend/src/router/index.ts
+- El Frontend/src/shared/design/layout/Sidebar.vue
+- El Frontend/src/shared/stores/*
+- El Frontend/src/stores/esp.ts
+- El Frontend/src/types/index.ts
+- El Frontend/src/utils/*
+- El Frontend/src/views/*
+- El Frontend/tests/unit/utils/labels.test.ts
+- El Frontend/Docs/UI/Sensoren/README.md
+- El Frontend/README.md

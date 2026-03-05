@@ -1101,7 +1101,7 @@ Integration als neue Accordion-Sektion in bestehendem `SensorConfigPanel.vue` (T
 **Registrierung nach Implementierung:**
 - [ ] `AlertConfigSection.vue` in `src/components/esp/` oder `src/components/devices/` anlegen (KEIN config-sections/ Unterordner)
 - [ ] In `SensorConfigPanel.vue` und `ActuatorConfigPanel.vue` als Accordion-Sektion einbinden (nach "Schwellwerte & Alarme", vor Zone 3)
-- [ ] In `ESPSettingsSheet.vue` als Device-Level Accordion-Sektion einbinden
+- [x] In `ESPSettingsSheet.vue` als Device-Level Accordion-Sektion einbinden (Alert-Basis 2: DeviceAlertConfigSection)
 - [ ] `AlertSuppressionService` im Backend anlegen
 - [ ] Alembic-Migration fuer 3 JSONB-Felder (sensor_configs, actuator_configs, esp_devices)
 - [ ] Periodischen Task fuer `suppression_until` Check registrieren (scheduler.py, Kategorie MAINTENANCE)
