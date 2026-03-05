@@ -7,7 +7,7 @@ description: |
   Zone-Management, Drag-Drop, System-Monitor, Database-Explorer, Log-Viewer,
   Audit-Log, MQTT-Traffic, Composables, useWebSocket, useToast, useModal,
   useQueryFilters, useGpioStatus, useZoneDragDrop, Pinia-Stores, auth-store,
-  esp-store, logic-store, formatters, sensorDefaults, actuatorDefaults,
+  esp-store, logic-store, plugins-store, formatters, sensorDefaults, actuatorDefaults,
   Mock-ESP, PendingDevices, GPIO-Status, MainLayout, AppSidebar, Router,
   Navigation-Guards, Token-Refresh, JWT-Auth, REST-API-Client.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit
@@ -15,8 +15,8 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.20
-**Letzte Aktualisierung:** 2026-03-03
+**Version:** 9.23
+**Letzte Aktualisierung:** 2026-03-04
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
 
@@ -30,7 +30,7 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 | Ich will... | Primaere Quelle | Code-Location |
 |-------------|-----------------|---------------|
 | **Server + Frontend starten** | `make dev` oder Docker | - |
-| **API-Endpoint finden** | `.claude/reference/api/REST_ENDPOINTS.md` | ~170 Endpoints |
+| **API-Endpoint finden** | `.claude/reference/api/REST_ENDPOINTS.md` | ~230 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry) |
 | **WebSocket verstehen** | `.claude/reference/api/WEBSOCKET_EVENTS.md` | Events mit Payloads |
 | **Zone zuweisen** | [Section 12: Drag & Drop](#12-drag--drop-system) | `src/components/zones/` |
 | **ESP-Geraet verwalten** | [Section 5: State Management](#5-state-management-pinia) | `src/stores/esp.ts` |
@@ -122,7 +122,7 @@ El Frontend/src/
 │   ├── zones.ts       # Zone Assignment
 │   ├── logic.ts       # Automation Rules
 │   └── ...
-├── components/    # Vue Komponenten (19 Unterverzeichnisse)
+├── components/    # Vue Komponenten (20 Unterverzeichnisse)
 │   ├── calibration/   # CalibrationWizard
 │   ├── charts/        # LiveLineChart, HistoricalChart, GaugeChart, MultiSensorChart
 │   ├── command/       # CommandPalette
@@ -130,11 +130,12 @@ El Frontend/src/
 │   ├── dashboard/     # Dashboard subcomponents (11 Dateien, inkl. DashboardViewer + InlineDashboardPanel)
 │   ├── dashboard-widgets/ # SensorCardWidget, GaugeWidget, LineChartWidget, etc.
 │   ├── database/      # DataTable, FilterPanel, Pagination, etc. (6 Dateien)
-│   ├── devices/       # SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection, AlertConfigSection, RuntimeMaintenanceSection (6 Dateien)
+│   ├── devices/       # SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection, AlertConfigSection, RuntimeMaintenanceSection, SubzoneAssignmentSection (7 Dateien)
 │   ├── error/         # ErrorDetailsModal, TroubleshootingPanel
 │   ├── esp/           # ESPCard, ESPCardBase, ESPOrbitalLayout, SensorConfigPanel, ActuatorConfigPanel (11 Dateien)
 │   ├── filters/       # UnifiedFilterBar
 │   ├── forms/         # FormBuilder
+│   ├── inventory/     # Wissensdatenbank (Phase K4): InventoryTable, DeviceDetailPanel, SchemaForm, ZoneContextEditor, SubzoneContextEditor (5 Dateien)
 │   ├── modals/
 │   ├── rules/         # RuleCard, RuleConfigPanel, RuleFlowEditor, RuleNodePalette, RuleTemplateCard (5 Dateien)
 │   ├── notifications/ # NotificationDrawer, NotificationItem, AlertStatusBar (3 Dateien)
@@ -148,7 +149,7 @@ El Frontend/src/
 │   │   ├── primitives/  # 13 Komponenten (10 Base + AccordionSection + QualityIndicator + RangeSlider + SlideOver)
 │   │   ├── layout/      # AppShell, Sidebar, TopBar (3 Dateien)
 │   │   └── patterns/    # ConfirmDialog, ContextMenu, EmptyState, ErrorState, ToastContainer (5 Dateien)
-│   └── stores/          # 15 Shared Stores (actuator, alertCenter, auth, config, dashboard, database, dragState, gpio, logic, notification, notificationInbox, quickAction, sensor, ui, zone)
+│   └── stores/          # 18 Shared Stores (actuator, alertCenter, auth, config, dashboard, database, diagnostics, dragState, gpio, inventory, logic, notification, notificationInbox, plugins, quickAction, sensor, ui, zone)
 ├── styles/        # CSS Design Tokens + Shared Styles (6 Dateien)
 │   ├── tokens.css       # Design Token Definitionen
 │   ├── glass.css        # Glassmorphism Klassen
@@ -156,12 +157,14 @@ El Frontend/src/
 │   ├── main.css         # Hauptstyles (Buttons, Layout)
 │   ├── forms.css        # Shared Form + Modal Styles
 │   └── tailwind.css     # Tailwind Konfiguration
-├── composables/   # 23 Composables
+├── composables/   # 25 Composables
 │   ├── useWebSocket.ts
 │   ├── useToast.ts
 │   ├── useModal.ts
 │   ├── useQueryFilters.ts
 │   ├── useGpioStatus.ts
+│   ├── useSubzoneCRUD.ts
+│   ├── useSubzoneResolver.ts
 │   ├── useZoneDragDrop.ts
 │   ├── useSwipeNavigation.ts
 │   ├── useConfigResponse.ts
@@ -185,8 +188,9 @@ El Frontend/src/
 │   └── websocket.ts   # ~625 Zeilen
 ├── stores/        # 1 Pinia Store (Legacy, ESP-spezifisch)
 │   └── esp.ts         # ~2500 Zeilen
-├── types/         # 7 Type-Dateien
+├── types/         # 8 Type-Dateien
 │   ├── index.ts           # ~979 Zeilen (Re-Exports)
+│   ├── monitor.ts         # ZoneMonitorData, SubzoneGroup (Monitor L2)
 │   ├── websocket-events.ts # ~748 Zeilen
 │   ├── logic.ts
 │   ├── gpio.ts
@@ -276,6 +280,8 @@ HardwareView.vue
 
 ### Komponentenhierarchie (SensorsView / Komponenten-Tab)
 
+**Navigation:** Sidebar „Komponenten“ → Route `/sensors` → `SensorsView.vue`. Diese View ist die **Wissensdatenbank** (Phase K4): Geräte-Inventar, Zone-/Subzonen-Kontext, Device-Schemas. Backend-APIs: `/zone/context`, `/export/*`, `/schema-registry/*`, ggf. `inventory` (siehe `src/api/`). DB-Trennung und Abhängigkeiten (Zonen, Subzonen, Wissen): `.claude/reference/DATABASE_ARCHITECTURE.md`.
+
 ```
 SensorsView.vue (?sensor={espId}-gpio{gpio} → auto-open SensorConfigPanel)
 ├── Tab-Navigation (Sensors/Actuators)
@@ -297,6 +303,7 @@ SensorsView.vue (?sensor={espId}-gpio{gpio} → auto-open SensorConfigPanel)
 MonitorView.vue (URL-Sync: L1→L2→L3 via route params)
 ├── L1 /monitor — Zone-Tiles mit KPI-Aggregation + Cross-Zone-Dashboards
 ├── L2 /monitor/:zoneId — Subzone-Accordion (KPIs im Header, Status-Dots)
+│   ├── Datenquelle: zonesApi.getZoneMonitorData (primär), Fallback useZoneGrouping + useSubzoneResolver nur bei API-Fehler; Ready-Gate (v-if=!zoneMonitorLoading) + BaseSkeleton während Loading, ErrorState bei Fehler
 │   ├── Zone-Header: Name + Sensor/Aktor-Count + Alarm-Count
 │   ├── Auto-generierte Zone-Dashboards (generateZoneDashboard bei erstem Besuch)
 │   ├── SensorCard.vue[] (mode='monitor', Stale/ESP-Offline-Badges, from components/devices/)
@@ -419,6 +426,8 @@ onUnmounted(() => { /* cleanup */ })
 | device_discovered | esp_id, hardware_type | Auto-Discovery |
 | error_event | esp_id, error_code, troubleshooting | ESP→Server→WS |
 | server_log | level, message, exception | Server intern |
+| plugin_execution_started | execution_id, plugin_id, trigger_source | PluginService→WS |
+| plugin_execution_completed | execution_id, plugin_id, status, duration_seconds, error_message | PluginService→WS |
 
 **WICHTIG:** Type-Aenderungen IMMER mit Server-Team abstimmen!
 WebSocket-Events = Kontrakt zwischen Frontend und Backend.
@@ -464,9 +473,11 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 | logic | stores/logic.ts | rules[], activeExecutions, executionHistory[], historyLoaded | fetchRules, toggleRule, crossEspConnections, loadExecutionHistory, pushToHistory, undo, redo, canUndo, canRedo |
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
 | database | stores/database.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
-| quickAction | stores/quickAction.store.ts | isMenuOpen, activePanel (QuickActionPanel: 'menu' \| 'alerts' \| 'navigation'), currentView, contextActions[], globalActions[] | toggleMenu, closeMenu, setActivePanel, setViewContext, setContextActions, executeAction; alertSummary, hasActiveAlerts, isCritical, isWarning (computed from notification-inbox) |
-| notificationInbox | stores/notification-inbox.store.ts | notifications[], unreadCount, highestSeverity, isDrawerOpen, filter (InboxFilter) | fetchNotifications, markAsRead, markAllAsRead, toggleDrawer, setFilter; WS-Listener: notification_new, notification_updated, notification_unread_count |
-| alertCenter | stores/alert-center.store.ts | activeAlerts[], alertStats (MTTA, MTTR, counts), isLoading | fetchActiveAlerts, fetchAlertStats, acknowledgeAlert, resolveAlert; alertsByCategory, alertsBySeverity, criticalCount, warningCount (computed) |
+| quickAction | stores/quickAction.store.ts | isMenuOpen, activePanel (QuickActionPanel: 'menu' \| 'alerts' \| 'navigation'), currentView, contextActions[], globalActions[] | toggleMenu, closeMenu, setActivePanel, setViewContext, setContextActions, executeAction; alertSummary (computed from alert-center + inbox fallback), hasActiveAlerts, isCritical, isWarning |
+| notificationInbox | stores/notification-inbox.store.ts | notifications[], unreadCount, highestSeverity, isDrawerOpen, filter (InboxFilter) | loadInitial, loadMore, markAsRead, markAllAsRead, toggleDrawer, setFilter; WS-Listener: notification_new, notification_updated, notification_unread_count |
+| alertCenter | stores/alert-center.store.ts | alertStats, activeAlerts[], statusFilter, severityFilter | fetchStats, fetchActiveAlerts, acknowledgeAlert, resolveAlert, startStatsPolling, stopStatsPolling; unresolvedCount, criticalCount, warningCount, hasCritical, mttaFormatted, mttrFormatted (computed) |
+| diagnostics | shared/stores/diagnostics.store.ts | currentReport, history[], availableChecks[], isRunning | runDiagnostic, runCheck, loadHistory, loadReport, exportReport; lastRunAge (aus currentReport oder history[0]), checksByName, statusCounts (Phase 4D) |
+| plugins | shared/stores/plugins.store.ts | plugins[], selectedPlugin, executionHistory[], pluginOptions (computed) | fetchPlugins, fetchPluginDetail, executePlugin, togglePlugin, updateConfig, fetchHistory (Phase 4C) |
 
 ### Store-Konventionen
 
@@ -601,10 +612,13 @@ baseURL: '/api/v1'
 | `esp.ts` | `/esp/*`, `/debug/*` | Unified Mock + Real ESP API |
 | `sensors.ts` | `/sensors/*` | Sensor CRUD + History + Stats |
 | `actuators.ts` | `/actuators/*` | Actuator Control |
-| `zones.ts` | `/zone/*` | Zone Assignment/Removal |
+| `zones.ts` | `/zone/*` | Zone Assignment/Removal, getZoneMonitorData (L2) |
 | `subzones.ts` | `/subzone/*` | Subzone CRUD + Safe-Mode |
+| `backups.ts` | `/backups/*` | DB-Backup erstellen/listen/download/restore (Admin) |
+| `inventory.ts` | (aggregiert) | Geräte-Inventar (Wissensdatenbank, nutzt zone context + export) |
 | `logic.ts` | `/logic/*` | Cross-ESP Automation Rules |
-| `debug.ts` | `/debug/*` | Mock ESP Simulation |
+| `debug.ts` | `/debug/*` | Mock ESP Simulation, Maintenance Status/Config/Trigger |
+| `diagnostics.ts` | `/diagnostics/*` | Diagnose-Checks, Report-History, Export (Phase 4D) |
 | `audit.ts` | `/audit/*` | Audit Log Query + Stats |
 | `logs.ts` | `/logs/*` | Log Viewer + Management |
 
@@ -731,11 +745,12 @@ type AggCategory = 'climate' | 'water' | 'light' | 'system'
 '/settings'                            → SettingsView.vue
 
 // Admin Routes (requiresAdmin: true)
-'/system-monitor' → SystemMonitorView.vue
+'/system-monitor' → SystemMonitorView.vue (Tabs: Health, Hierarchy, Database, Logs, MQTT, Events, Reports, Diagnostics — Tabs lazy via defineAsyncComponent)
+'/plugins'        → PluginsView.vue (AutoOps Plugins, Phase 4C)
 '/users'          → UserManagementView.vue
 '/system-config'  → SystemConfigView.vue
 '/load-test'      → LoadTestView.vue
-'/maintenance'    → MaintenanceView.vue
+'/maintenance'    → Redirect zu /system-monitor?tab=health (Phase 4D: Wartung in Health-Tab integriert)
 
 // Deprecated Redirects
 '/devices'           → '/'
@@ -778,10 +793,22 @@ beforeEach(async (to, from, next) => {
 })
 ```
 
+### Lazy Loading (lazyView + Retry)
+
+Alle Route-Komponenten werden ueber `lazyView()` geladen (`router/index.ts`):
+
+```typescript
+// lazyView() wrappt dynamic import mit Retry (MAX_IMPORT_RETRIES=2, RETRY_DELAY_MS=200)
+// Fängt "Failed to fetch dynamically imported module" (HMR/Cache) ab
+component: lazyView(() => import('@/views/PluginsView.vue'))
+```
+
+`router.onError` faengt Chunk-Fehler und `ERR_INSUFFICIENT_RESOURCES` ab und loest einmalig `location.assign(to.fullPath)` aus (Reload-Cooldown 10s). SystemMonitorView-Tabs nutzen `defineAsyncComponent` fuer Tab-Komponenten (DiagnoseTab, ReportsTab, etc.), um initialen Speicher zu reduzieren.
+
 ### Neue Route hinzufuegen
 
 1. View-Komponente in `src/views/`
-2. Route in `router/index.ts` mit `meta: { requiresAuth, requiresAdmin?, title }`
+2. Route in `router/index.ts` mit `component: lazyView(() => import('@/views/...'))` und `meta: { requiresAuth, requiresAdmin?, title }`
 3. Sidebar-Eintrag in `components/layout/AppSidebar.vue`
 4. Falls Admin: `requiresAdmin: true`
 
@@ -1106,6 +1133,7 @@ cleanupWebSocket() {
 | **REST API** | `.claude/reference/api/REST_ENDPOINTS.md` | API-Calls implementieren |
 | **WebSocket Events** | `.claude/reference/api/WEBSOCKET_EVENTS.md` | Real-time Features |
 | **Error Codes** | `.claude/reference/errors/ERROR_CODES.md` | Fehler debuggen/anzeigen |
+| **Datenbank / Wissensdatenbank** | `.claude/reference/DATABASE_ARCHITECTURE.md` | Zonen, Subzonen, Wissen vs. operative Daten, Abhängigkeiten |
 | **Datenfluesse** | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | System-Kommunikation |
 | **MQTT Topics** | `.claude/reference/api/MQTT_TOPICS.md` | Backend-Kommunikation |
 
@@ -1113,8 +1141,49 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.20
-**Letzte Aktualisierung:** 2026-03-03
+**Version:** 9.24
+**Letzte Aktualisierung:** 2026-03-04
+
+### Aenderungen in v9.24 (Backend-Datenkonsistenz Fix)
+
+- MonitorView L2: Ready-Gate — v-if="!zoneMonitorLoading" auf L2-Content, BaseSkeleton während Loading, ErrorState mit Retry bei API-Fehler
+- sensorSubzones/actuatorSubzones: Fallback nur bei zoneMonitorError (nicht während Loading) — behebt "Keine Subzone"-Flackern
+- fetchZoneMonitorData() extrahiert für Retry und Watch
+- Section 3: Komponentenhierarchie MonitorView — Datenquelle-Zeile um Ready-Gate ergänzt
+
+### Aenderungen in v9.23 (Phase 4D Diagnostics Hub)
+
+- Router: `/maintenance` → Redirect zu `/system-monitor?tab=health` (Wartung in Health-Tab integriert)
+- HealthTab.vue: Wartung & Cleanup AccordionSection — Cleanup-Config (Sensor-Daten, Befehlsverlauf, Orphan Mocks) + Maintenance-Jobs mit Run-Buttons (debugApi)
+- HealthTab.vue: Plugins-KPI-Cards nutzen `total`/`enabled` (nicht total_plugins/enabled_plugins)
+- HealthSummaryBar.vue: Diagnose-Chip immer sichtbar wenn lastRunAge (auch ohne Problems), "Letzte Diagnose: vor Xm ✓"
+- diagnostics.store.ts: lastRunAge aus history[0] wenn currentReport null
+- DiagnoseTab.vue: loadHistory() beim Mount wenn history leer
+- ReportsTab.vue: triggerLabel() — manual→Manuell, logic_rule→Regel, schedule→Zeitplan
+- api/diagnostics.ts, shared/stores/diagnostics.store.ts, DiagnoseTab.vue, ReportsTab.vue (Phase 4D)
+- Section 5: diagnostics Store, Section 7: diagnostics.ts API-Modul
+
+### Aenderungen in v9.21
+
+- Monitor L2 optimiertes Design — primäre Datenquelle `zonesApi.getZoneMonitorData()`, Fallback `useZoneGrouping` + `useSubzoneResolver`
+- types/monitor.ts: ZoneMonitorData, SubzoneGroup, SubzoneSensorEntry, SubzoneActuatorEntry
+- zones.ts: `getZoneMonitorData(zoneId)` — GET /zone/{id}/monitor-data
+- useSubzoneResolver.ts: Neues Composable — Map (espId, gpio) → { subzoneId, subzoneName } aus Subzone-API, Fallback für Monitor L2
+- useZoneGrouping.ts: Optionaler Parameter `subzoneResolver` für GPIO-basierte Subzone-Auflösung
+- MonitorView L2: Subzone-Accordion mit „Keine Subzone“-Gruppe, Smart Defaults (≤4 offen, >4 erste offen), localStorage-Persistenz
+
+### Aenderungen in v9.23
+
+- Phase 4C Plugin-System Dokumentation: WebSocket-Events `plugin_execution_started`, `plugin_execution_completed` in Quick-Reference; plugins.ts API-Modul; plugins Store in Store-Architektur; Shared Stores 17 → 18
+
+### Aenderungen in v9.22
+
+- Phase 4B Konsistenz: Alert-Center als Single Source of Truth fuer Badge/Counts
+- quickAction.store.ts: alertSummary nutzt alert-center (unresolvedCount, hasCritical, warningCount) mit Fallback auf notification-inbox
+- QuickActionMenu.vue: global-alerts Badge reaktiv aus store.alertSummary (nicht aus Action-Objekt)
+- NotificationDrawer.vue: Status-Tabs (Aktiv/Gesehen) nutzen alertStore.alertStats (active_count, acknowledged_count) statt lokaler Zaehlung
+- App.vue: alertCenterStore.fetchStats() + startStatsPolling() bei Login, stopStatsPolling bei Logout, watch auf isAuthenticated
+- useQuickActions.ts: inboxStore aus buildGlobalActions entfernt (Badge kommt aus Store)
 
 ### Aenderungen in v9.20
 
@@ -1124,6 +1193,8 @@ cleanupWebSocket() {
 - QuickAlertPanel.vue: Timed Snooze (Phase C V4.1) — 5 Preset-Dauern (15min, 30min, 1h, 4h, 8h), `suppressionMap` trackt aktive Snooze-Timer, Timer-Countdown-Anzeige, `sensorsApi.updateAlertConfig()` mit `suppression_until` ISO-Datetime
 - useQuickActions.ts: Neue QAB-Actions (Phase C V6.1) — `global-last-report` (System Monitor Reports-Tab), ViewContext `'plugins'` fuer PluginsView, `buildGlobalActions()` nimmt jetzt `router` Parameter
 - quickAction.store.ts: `'plugins'` zu `ViewContext` Type Union hinzugefuegt
+- RuleConfigPanel.vue (Logic): Neuer Action-Node-Typ `plugin` — Plugin-Liste aus API, Konfig aus Schema, Rule-Flow-Editor unterstuetzt Plugin-Actions (Phase 4C)
+- Router: Alle Route-Komponenten ueber `lazyView()` (Retry bei dynamic import failure), SystemMonitorView-Tabs per `defineAsyncComponent` (DiagnoseTab, ReportsTab, etc.)
 
 ### Aenderungen in v9.19
 

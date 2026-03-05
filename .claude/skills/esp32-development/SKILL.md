@@ -262,6 +262,9 @@ TopicBuilder::buildActuatorCommandTopic(gpio); // .../actuator/{gpio}/command
 TopicBuilder::buildSystemHeartbeatTopic();     // .../system/heartbeat
 TopicBuilder::buildZoneAssignTopic();          // .../zone/assign
 TopicBuilder::buildZoneAckTopic();             // .../zone/ack
+TopicBuilder::buildSubzoneAssignTopic();       // .../subzone/assign
+TopicBuilder::buildSubzoneRemoveTopic();       // .../subzone/remove
+TopicBuilder::buildSubzoneSafeTopic();         // .../subzone/safe (ESP subscribt + Handler)
 ```
 
 ### Standard Publish-Pattern

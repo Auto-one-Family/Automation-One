@@ -404,7 +404,7 @@ Wichtige Endpoints:
 
 ---
 
-## 4. Database Models (17 Models)
+## 4. Database Models (18 Models)
 
 ### 4.1 Core Models
 
@@ -431,7 +431,8 @@ Wichtige Endpoints:
 | **User** | `users` | `id (PK)`, `username`, `email`, `password_hash`, `role`, `is_active`, `last_login`, `created_at` |
 | **TokenBlacklist** | `token_blacklist` | `id (PK)`, `jti`, `expires_at`, `created_at` |
 | **AuditLog** | `audit_logs` | `id (PK)`, `event_type`, `severity`, `source_type`, `source_id`, `user_id`, `message`, `details (JSON)`, `correlation_id`, `created_at` |
-| **SubzoneConfig** | `subzone_configs` | `id (PK)`, `esp_id (FK)`, `subzone_id`, `subzone_name`, `assigned_gpios (JSON)`, `safe_mode_active`, `created_at` |
+| **SubzoneConfig** | `subzone_configs` | `id (PK)`, `esp_id (FK)`, `subzone_id`, `subzone_name`, `assigned_gpios (JSON)`, `safe_mode_active`, `custom_data (JSONB)`, `created_at` |
+| **ZoneContext** | `zone_contexts` | `id (PK)`, `zone_id (UNIQUE)`, `zone_name`, `variety`, `substrate`, `growth_phase`, `planted_date`, `expected_harvest`, `cycle_history (JSONB)`, `custom_data (JSONB)`, `created_at`, `updated_at` |
 | **ESPHeartbeatLog** | `esp_heartbeat_logs` | `id (PK)`, `esp_id (FK)`, `uptime`, `heap_free`, `wifi_rssi`, `sensor_count`, `actuator_count`, `timestamp` |
 | **SensorTypeDefaults** | `sensor_type_defaults` | `id (PK)`, `sensor_type`, `operating_mode`, `measurement_interval_ms`, `timeout_multiplier` |
 | **SystemConfig** | `system_config` | `id (PK)`, `config_key`, `config_value`, `updated_at` |

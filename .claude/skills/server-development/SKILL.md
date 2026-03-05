@@ -38,7 +38,7 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 ```
 src/ (60,604 Zeilen)
 ├── services/      13,675 (22.6%)  Business Logic, Logic Engine
-├── api/v1/        12,210 (20.1%)  REST Endpoints (170)
+├── api/v1/        12,210 (20.1%)  REST Endpoints (~230, inkl. zone_context, backups, export, schema_registry)
 ├── core/           7,294 (12.0%)  Config, Security, Scheduler
 ├── db/             6,942 (11.5%)  Models (18), Repositories (17)
 ├── mqtt/           6,938 (11.4%)  Client, Handlers (14), Publisher
@@ -189,7 +189,7 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | health | /v1/health | 6 | Mixed |
 | audit | /v1/audit | 21 | Admin/Active |
 | debug | /v1/debug | 59 | Admin |
-| zone | /v1/zone | 5 | Operator+ |
+| zone | /v1/zone | 6 | Operator+ |
 | subzone | /v1/subzone | 6 | Operator+ |
 | users | /v1/users | 7 | Admin |
 | errors | /v1/errors | 4 | Active |
@@ -376,6 +376,7 @@ poetry run python scripts/seed_wokwi_esp.py
 | **ActuatorService** | actuator_service.py | 279 | `send_command()` |
 | **ESPService** | esp_service.py | 944 | `register()`, `approve()`, `reject()` |
 | **ZoneService** | zone_service.py | 430 | `assign_zone()`, `unassign_zone()` |
+| **MonitorDataService** | monitor_data_service.py | - | `get_zone_monitor_data()` — Subzone-Gruppierung für Monitor L2 |
 | **SubzoneService** | subzone_service.py | 595 | `assign_subzone()`, `set_safe_mode()` |
 | **ConfigBuilder** | config_builder.py | 249 | `build_esp_config()` |
 | **MaintenanceService** | maintenance/service.py | 260 | `start()`, `stop()`, `register_jobs()` |
