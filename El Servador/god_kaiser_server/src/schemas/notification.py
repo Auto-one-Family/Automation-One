@@ -37,6 +37,7 @@ NOTIFICATION_SOURCES = [
     "autoops",
     "manual",
     "system",
+    "ai_anomaly_service",  # Phase K4 / L2.2 — KI-Anomalie → Notification-Pipeline
 ]
 NOTIFICATION_CATEGORIES = [
     "connectivity",
@@ -46,6 +47,7 @@ NOTIFICATION_CATEGORIES = [
     "maintenance",
     "security",
     "system",
+    "ai_anomaly",  # Phase K4 / L2.2 — Kategorie für KI-Anomalie-Alerts
 ]
 
 

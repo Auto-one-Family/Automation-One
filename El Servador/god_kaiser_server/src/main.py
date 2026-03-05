@@ -163,6 +163,20 @@ async def lifespan(app: FastAPI):
             # Ensure engine is created even if not auto-initializing
             get_engine()
 
+        # Reset persisted emergency_stop in actuator_states so dashboard does not
+        # show stale Not-Aus after server restart (SafetyService state is in-memory only)
+        try:
+            from .db.session import get_session_maker
+            session_maker = get_session_maker()
+            async with session_maker() as session:
+                actuator_repo = ActuatorRepository(session)
+                n = await actuator_repo.clear_all_emergency_states_on_startup()
+                if n:
+                    await session.commit()
+                    logger.info("Startup: cleared %d actuator_states from emergency_stop to idle", n)
+        except Exception as e:
+            logger.warning("Startup clear emergency_states failed (non-fatal): %s", e)
+
         # Initialize database circuit breaker after DB is ready
         init_db_circuit_breaker()
         logger.info("[resilience] Database circuit breaker initialized")
@@ -425,6 +439,25 @@ async def lifespan(app: FastAPI):
                 break  # Exit after first session
         except Exception as e:
             logger.warning(f"Mock-ESP recovery failed (non-critical): {e}")
+
+        # Step 3.5b: God-Kaiser Init (Phase 1)
+        logger.info("Ensuring god-Kaiser exists...")
+        try:
+            from .services.kaiser_service import KaiserService
+
+            async for session in get_session():
+                kaiser_svc = KaiserService(session)
+                await kaiser_svc.ensure_god_kaiser()
+                orphan_count = await kaiser_svc.set_default_kaiser_for_orphans()
+                zone_count = await kaiser_svc.sync_god_kaiser_zones()
+                await session.commit()
+                logger.info(
+                    f"God-Kaiser init: {orphan_count} orphan ESPs assigned, "
+                    f"{zone_count} zones synced"
+                )
+                break
+        except Exception as e:
+            logger.warning(f"God-Kaiser init failed (non-critical): {e}")
 
         # Step 3.6: Sensor Type Auto-Registration (Phase 2A)
         # Ensures all loaded sensor libraries have entries in sensor_type_defaults.

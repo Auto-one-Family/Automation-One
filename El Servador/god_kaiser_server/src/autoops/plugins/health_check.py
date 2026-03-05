@@ -204,28 +204,35 @@ class HealthCheckPlugin(AutoOpsPlugin):
         # =============================================
         try:
             detailed = await client.get_server_health()
-            mqtt_status = detailed.get("mqtt", {}).get("status", "unknown")
-            health_data["mqtt"] = {"status": mqtt_status, "details": detailed.get("mqtt", {})}
+            mqtt_details = detailed.get("mqtt", {})
+            # Server returns MQTTHealth with "connected" bool, not "status"
+            mqtt_connected = mqtt_details.get("connected", False)
+            mqtt_status = "connected" if mqtt_connected else "disconnected"
+            health_data["mqtt"] = {"status": mqtt_status, "details": mqtt_details}
             actions.append(
                 PluginAction.create(
                     action="MQTT Broker Check",
                     target="mqtt_broker",
-                    details=detailed.get("mqtt", {}),
+                    details=mqtt_details,
                     result=f"MQTT: {mqtt_status}",
                     severity=(
                         ActionSeverity.SUCCESS
-                        if mqtt_status in ("ok", "connected")
+                        if mqtt_status == "connected"
                         else ActionSeverity.WARNING
                     ),
                 )
             )
 
-            # Additional service statuses from detailed health
+            # Additional service statuses from detailed health (database has "connected", not "status")
             for service_key in ("database", "redis", "scheduler"):
                 service_info = detailed.get(service_key)
                 if isinstance(service_info, dict):
-                    svc_status = service_info.get("status", "unknown")
-                    health_data[service_key] = service_info
+                    svc_status = service_info.get("status")
+                    if svc_status is None and "connected" in service_info:
+                        svc_status = "ok" if service_info.get("connected") else "error"
+                    if svc_status is None:
+                        svc_status = "unknown"
+                    health_data[service_key] = {**service_info, "status": svc_status}
                     actions.append(
                         PluginAction.create(
                             action=f"{service_key.title()} Service Check",
@@ -266,7 +273,8 @@ class HealthCheckPlugin(AutoOpsPlugin):
         # =============================================
         try:
             sensor_data = await client.list_sensor_data(limit=5)
-            data_items = sensor_data.get("data", sensor_data.get("items", []))
+            # API returns SensorDataResponse with "readings" key (not "data"/"items")
+            data_items = sensor_data.get("readings", sensor_data.get("data", sensor_data.get("items", [])))
             if isinstance(data_items, list) and data_items:
                 health_data["sensor_data"] = {
                     "recent_readings": len(data_items),

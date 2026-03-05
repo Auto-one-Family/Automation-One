@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.security import create_access_token, get_password_hash
 from src.db.models.sensor import SensorConfig
 from src.db.models.esp import ESPDevice
+from src.db.models.subzone import SubzoneConfig
 from src.db.models.user import User
+from src.db.repositories.subzone_repo import SubzoneRepository
 from src.main import app
 
 
@@ -194,6 +196,58 @@ class TestDeleteSensor:
         assert response.status_code == 200
         data = response.json()
         assert data["gpio"] == test_sensor.gpio
+
+    @pytest.mark.asyncio
+    async def test_delete_sensor_removes_gpio_from_subzones(
+        self,
+        auth_headers: dict,
+        test_sensor: SensorConfig,
+        test_esp: ESPDevice,
+        db_session: AsyncSession,
+    ):
+        """Test that deleting a sensor removes its GPIO from all subzones (Phase 3, S23)."""
+        esp_id = test_esp.device_id
+        gpio = test_sensor.gpio
+
+        # Ensure ESP has zone for subzone
+        test_esp.zone_id = "zone_1"
+        test_esp.zone_name = "Zone 1"
+        await db_session.flush()
+
+        # Create subzone with sensor's GPIO
+        subzone = SubzoneConfig(
+            esp_id=esp_id,
+            subzone_id="test_subzone",
+            parent_zone_id="zone_1",
+            assigned_gpios=[gpio, 35],  # Sensor GPIO + another
+            subzone_name="Test Subzone",
+        )
+        db_session.add(subzone)
+        await db_session.commit()
+        await db_session.refresh(subzone)
+
+        # Verify GPIO is in subzone
+        subzone_repo = SubzoneRepository(db_session)
+        before = await subzone_repo.get_by_esp(esp_id)
+        assert len(before) == 1
+        assert gpio in before[0].assigned_gpios
+        assert 35 in before[0].assigned_gpios
+
+        # Delete sensor via API
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.delete(
+                f"/api/v1/sensors/{esp_id}/{gpio}",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+
+        # Verify GPIO removed from subzone, other GPIOs unchanged
+        db_session.expire_all()  # Refresh from DB
+        after = await subzone_repo.get_by_esp(esp_id)
+        assert len(after) == 1
+        assert gpio not in after[0].assigned_gpios
+        assert 35 in after[0].assigned_gpios
 
 
 class TestQueryData:

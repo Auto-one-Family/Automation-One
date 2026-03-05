@@ -43,7 +43,7 @@ from ...core.exceptions import (
 from ...core.logging_config import get_logger
 from ...db.models.sensor import SensorConfig
 from ...db.models.enums import DataSource
-from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
+from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository, SubzoneRepository
 from ...schemas import (
     OneWireScanResponse,
     SensorConfigCreate,
@@ -62,19 +62,37 @@ from ...services.esp_service import ESPService
 from ..deps import (
     ActiveUser,
     DBSession,
+    MQTTPublisher,
     OperatorUser,
     get_config_builder,
     get_esp_service,
+    get_mqtt_publisher,
     get_sensor_service,
     get_sensor_scheduler_service,
 )
 from ...services.sensor_scheduler_service import SensorSchedulerService
 from ...services.sensor_service import SensorService
 from ...services.gpio_validation_service import GpioValidationService
+from ...services.subzone_service import SubzoneService
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/v1/sensors", tags=["sensors"])
+
+
+def _normalize_subzone_id(value: Optional[str]) -> Optional[str]:
+    """
+    Normalize subzone_id for API: "__none__" and empty string mean "remove from all subzones".
+    Frontend may send "__none__" as sentinel for "Keine Subzone"; backend treats it as None.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    v = value.strip()
+    if v in ("", "__none__"):
+        return None
+    return v
 
 
 # =============================================================================
@@ -83,7 +101,9 @@ router = APIRouter(prefix="/v1/sensors", tags=["sensors"])
 
 
 def _model_to_response(
-    sensor: SensorConfig, esp_device_id: Optional[str] = None
+    sensor: SensorConfig,
+    esp_device_id: Optional[str] = None,
+    subzone_id: Optional[str] = None,
 ) -> SensorConfigResponse:
     """
     Convert SensorConfig model to SensorConfigResponse schema.
@@ -142,6 +162,7 @@ def _model_to_response(
         config_status=sensor.config_status,
         config_error=sensor.config_error,
         config_error_detail=sensor.config_error_detail,
+        subzone_id=subzone_id,
         latest_value=None,  # Will be set by caller if available
         latest_quality=None,
         latest_timestamp=None,
@@ -398,6 +419,7 @@ async def get_sensor(
     """
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
+    subzone_repo = SubzoneRepository(db)
 
     esp_device = await esp_repo.get_by_device_id(esp_id)
     if not esp_device:
@@ -425,8 +447,12 @@ async def get_sensor(
         esp_device.id, gpio, sensor_type=sensor.sensor_type
     )
 
+    # Resolve subzone_id (GPIO can belong to at most one subzone)
+    subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio)
+    subzone_id_val = subzone.subzone_id if subzone else None
+
     # Convert model to response schema
-    response = _model_to_response(sensor, esp_id)
+    response = _model_to_response(sensor, esp_id, subzone_id=subzone_id_val)
     response.latest_value = (
         (latest.processed_value if latest.processed_value is not None else latest.raw_value)
         if latest
@@ -459,6 +485,7 @@ async def create_or_update_sensor(
     request: SensorConfigCreate,
     db: DBSession,
     current_user: OperatorUser,
+    publisher: MQTTPublisher,
 ) -> SensorConfigResponse:
     """
     Create or update sensor configuration.
@@ -580,12 +607,41 @@ async def create_or_update_sensor(
                 f"Multi-value sensor creation failed for '{request.sensor_type}': {str(e)}",
             )
 
-        # Refresh all sensors and build response from first
-        first_response = None
+        # Refresh all sensors
         for sensor in created_sensors:
             await db.refresh(sensor)
-            if first_response is None:
-                first_response = _model_to_response(sensor, esp_id)
+
+        # Subzone assignment (same GPIO for all sub-types)
+        try:
+            subzone_service = SubzoneService(
+                esp_repo=esp_repo, session=db, publisher=publisher
+            )
+            subzone_id_val = _normalize_subzone_id(request.subzone_id)
+            if subzone_id_val:
+                await subzone_service.assign_subzone(
+                    device_id=esp_id,
+                    subzone_id=subzone_id_val,
+                    assigned_gpios=[gpio],
+                    subzone_name=None,
+                    parent_zone_id=esp_device.zone_id,
+                    safe_mode_active=True,
+                )
+                await db.commit()
+            else:
+                await subzone_service.remove_gpio_from_all_subzones(esp_id, gpio)
+                await db.commit()
+        except ValueError as e:
+            logger.warning(f"Subzone assignment skipped for {esp_id}/GPIO {gpio}: {e}")
+            await db.rollback()
+            raise ValidationException("subzone", str(e))
+        except Exception as e:
+            logger.warning(f"Subzone assignment failed for {esp_id}/GPIO {gpio}: {e}")
+            await db.rollback()
+
+        subzone_repo = SubzoneRepository(db)
+        subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio)
+        subzone_id_val = subzone.subzone_id if subzone else None
+        first_response = _model_to_response(created_sensors[0], esp_id, subzone_id=subzone_id_val)
 
         # Publish combined config to ESP32 via MQTT (once for all sub-types)
         try:
@@ -752,6 +808,39 @@ async def create_or_update_sensor(
         # Non-fatal: DB save was successful, job can be recovered on server restart
         logger.warning(f"Schedule job update failed for {esp_id}/GPIO {gpio}: {e}")
 
+    # =========================================================================
+    # SUBZONE ASSIGNMENT (Phase 1.2)
+    # Assign sensor GPIO to subzone or remove from all subzones
+    # Block D2: Normalize "__none__" and "" to None (defensive)
+    # =========================================================================
+    try:
+        subzone_service = SubzoneService(
+            esp_repo=esp_repo, session=db, publisher=publisher
+        )
+        subzone_id_val = _normalize_subzone_id(request.subzone_id)
+        if subzone_id_val:
+            await subzone_service.assign_subzone(
+                device_id=esp_id,
+                subzone_id=subzone_id_val,
+                assigned_gpios=[gpio],
+                subzone_name=None,
+                parent_zone_id=esp_device.zone_id,
+                safe_mode_active=True,
+            )
+            await db.commit()
+        else:
+            await subzone_service.remove_gpio_from_all_subzones(esp_id, gpio)
+            await db.commit()
+    except ValueError as e:
+        # Subzone validation failed (e.g. subzone not found, zone mismatch)
+        logger.warning(f"Subzone assignment skipped for {esp_id}/GPIO {gpio}: {e}")
+        await db.rollback()
+        raise ValidationException("subzone", str(e))
+    except Exception as e:
+        logger.warning(f"Subzone assignment failed for {esp_id}/GPIO {gpio}: {e}")
+        await db.rollback()
+        # Non-fatal: sensor was saved, subzone can be fixed manually
+
     # Publish config to ESP32 via MQTT (using dependency-injected services)
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
@@ -768,8 +857,13 @@ async def create_or_update_sensor(
         # Log error but don't fail the request (DB save was successful)
         logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
 
+    # Resolve subzone_id for response
+    subzone_repo = SubzoneRepository(db)
+    subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio)
+    subzone_id_val = subzone.subzone_id if subzone else None
+
     # Convert model to response schema
-    return _model_to_response(sensor, esp_id)
+    return _model_to_response(sensor, esp_id, subzone_id=subzone_id_val)
 
 
 # =============================================================================
@@ -818,6 +912,16 @@ async def delete_sensor(
 
     # Delete sensor
     await sensor_repo.delete(sensor.id)
+
+    # Subzone cleanup: remove GPIO from all subzones (Phase 3)
+    try:
+        subzone_service = SubzoneService(
+            esp_repo=esp_repo, session=db, publisher=get_mqtt_publisher()
+        )
+        await subzone_service.remove_gpio_from_all_subzones(esp_id, gpio)
+    except Exception as e:
+        logger.debug(f"Subzone cleanup for deleted sensor: {e}")
+
     await db.commit()
 
     logger.info(f"Sensor deleted: {esp_id} GPIO {gpio} by {current_user.username}")

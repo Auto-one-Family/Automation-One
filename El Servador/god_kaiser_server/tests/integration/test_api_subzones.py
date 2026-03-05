@@ -225,7 +225,9 @@ class TestSubzoneAssignmentAPI:
         assert "zone" in response.json()["error"]["message"].lower()
 
     @pytest.mark.asyncio
-    async def test_assign_subzone_invalid_gpio(self, auth_headers: dict):
+    async def test_assign_subzone_invalid_gpio(
+        self, auth_headers: dict, test_esp_with_zone: ESPDevice
+    ):
         """Test assignment with invalid GPIO returns validation error."""
         request_data = {
             "subzone_id": "test_subzone",
@@ -234,7 +236,7 @@ class TestSubzoneAssignmentAPI:
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
-                "/api/v1/subzone/devices/ESP_EE000000/subzones/assign",
+                f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/assign",
                 json=request_data,
                 headers=auth_headers,
             )
@@ -243,22 +245,24 @@ class TestSubzoneAssignmentAPI:
         assert response.status_code in [400, 422]
 
     @pytest.mark.asyncio
-    async def test_assign_subzone_empty_gpios(self, auth_headers: dict):
-        """Test assignment with empty GPIO list returns validation error."""
+    async def test_assign_subzone_empty_gpios(
+        self, auth_headers: dict, test_esp_with_zone: ESPDevice
+    ):
+        """Test assignment with empty GPIO list is accepted (create subzone only)."""
         request_data = {
-            "subzone_id": "test_subzone",
-            "assigned_gpios": [],  # Empty list
+            "subzone_id": "test_subzone_empty",
+            "assigned_gpios": [],  # Empty list - valid per schema (create subzone only)
         }
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
-                "/api/v1/subzone/devices/ESP_EE000000/subzones/assign",
+                f"/api/v1/subzone/devices/{test_esp_with_zone.device_id}/subzones/assign",
                 json=request_data,
                 headers=auth_headers,
             )
 
-        # Pydantic validation should catch this
-        assert response.status_code in [400, 422]
+        # API accepts empty gpios (schema min_length=0, "create subzone only")
+        assert response.status_code == 200
 
     @pytest.mark.asyncio
     async def test_assign_subzone_no_auth(self, test_esp_with_zone: ESPDevice):

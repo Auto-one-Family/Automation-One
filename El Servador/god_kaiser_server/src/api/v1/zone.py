@@ -30,9 +30,11 @@ from fastapi import APIRouter, status
 from ...core.exceptions import ESPNotFoundError
 from ...core.logging_config import get_logger
 from ...db.repositories import ESPRepository
+from ...schemas.monitor import ZoneMonitorData
 from ...schemas.zone import ZoneAssignRequest, ZoneAssignResponse, ZoneInfo, ZoneRemoveResponse
+from ...services.monitor_data_service import MonitorDataService
 from ...services.zone_service import ZoneService
-from ..deps import DBSession, OperatorUser
+from ..deps import DBSession, ActiveUser, OperatorUser
 
 logger = get_logger(__name__)
 
@@ -256,6 +258,40 @@ async def get_zone_devices(
         )
         for device in devices
     ]
+
+
+@router.get(
+    "/{zone_id}/monitor-data",
+    response_model=ZoneMonitorData,
+    summary="Get Zone Monitor Data (L2)",
+    description="""
+    Get sensors and actuators for a zone, grouped by subzone (GPIO-based).
+
+    Used by MonitorView L2 for subzone accordion display.
+    Devices without subzone assignment appear in "Keine Subzone".
+    """,
+    responses={
+        200: {"description": "Zone monitor data with subzone groups"},
+    },
+)
+async def get_zone_monitor_data(
+    zone_id: str,
+    db: DBSession,
+    _user: ActiveUser,
+) -> ZoneMonitorData:
+    """
+    Get monitor data for a zone (sensors/actuators grouped by subzone).
+
+    Args:
+        zone_id: Zone identifier
+        db: Database session
+        _user: Authenticated user (required)
+
+    Returns:
+        ZoneMonitorData with subzones, sensor_count, actuator_count, alarm_count
+    """
+    service = MonitorDataService(db)
+    return await service.get_zone_monitor_data(zone_id)
 
 
 @router.get(

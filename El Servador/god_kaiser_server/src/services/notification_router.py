@@ -82,6 +82,19 @@ class NotificationRouter:
 
         # If no user_id, broadcast to all users
         if user_id is None:
+            # Dedup for broadcast: check if active notification with same
+            # correlation_id already exists (prevents duplicate Grafana alerts)
+            if notification.correlation_id:
+                is_duplicate = await self.notification_repo.check_correlation_duplicate(
+                    correlation_id=notification.correlation_id,
+                )
+                if is_duplicate:
+                    logger.debug(
+                        f"Broadcast deduplicated by correlation_id: "
+                        f"'{notification.title}'"
+                    )
+                    increment_notification_deduplicated()
+                    return None
             return await self._broadcast_to_all(notification)
 
         # Step 0: Deduplication check

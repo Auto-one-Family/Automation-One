@@ -204,7 +204,7 @@ class NotificationRepository(BaseRepository[Notification]):
         title: str,
         window_seconds: int = 60,
     ) -> bool:
-        """Check if a similar notification exists within the dedup window."""
+        """Check if a similar active notification exists within the dedup window."""
         from datetime import timedelta
 
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
@@ -218,6 +218,9 @@ class NotificationRepository(BaseRepository[Notification]):
                     Notification.category == category,
                     Notification.title == title,
                     Notification.created_at >= cutoff,
+                    Notification.status.in_(
+                        [AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]
+                    ),
                 )
             )
         )
@@ -225,11 +228,39 @@ class NotificationRepository(BaseRepository[Notification]):
         return result.scalar_one() > 0
 
     async def check_fingerprint_duplicate(self, fingerprint: str) -> bool:
-        """Check if a notification with this fingerprint already exists (any user)."""
+        """Check if an active/acknowledged notification with this fingerprint exists."""
         stmt = (
             select(func.count())
             .select_from(Notification)
-            .where(Notification.fingerprint == fingerprint)
+            .where(
+                and_(
+                    Notification.fingerprint == fingerprint,
+                    Notification.status.in_(
+                        [AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]
+                    ),
+                )
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one() > 0
+
+    async def check_correlation_duplicate(self, correlation_id: str) -> bool:
+        """Check if an active/acknowledged notification with this correlation_id exists.
+
+        Used for broadcast dedup (Grafana alerts) where fingerprint is not
+        stored on per-user copies but correlation_id is.
+        """
+        stmt = (
+            select(func.count())
+            .select_from(Notification)
+            .where(
+                and_(
+                    Notification.correlation_id == correlation_id,
+                    Notification.status.in_(
+                        [AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]
+                    ),
+                )
+            )
         )
         result = await self.session.execute(stmt)
         return result.scalar_one() > 0

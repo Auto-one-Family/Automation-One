@@ -152,6 +152,21 @@ class AlertSuppressionService:
 
         return False, None
 
+    def _normalize_thresholds(self, raw: dict) -> dict:
+        """
+        Normalize threshold keys to canonical format.
+
+        Supports both naming schemes used in the codebase:
+        - Canonical (alert_config, API): warning_min, warning_max, critical_min, critical_max
+        - Legacy (sensor_formatters, zone_aware): warning_low/high, critical_low/high, min/max
+        """
+        return {
+            "warning_min": raw.get("warning_min") or raw.get("warning_low") or raw.get("min"),
+            "warning_max": raw.get("warning_max") or raw.get("warning_high") or raw.get("max"),
+            "critical_min": raw.get("critical_min") or raw.get("critical_low"),
+            "critical_max": raw.get("critical_max") or raw.get("critical_high"),
+        }
+
     def get_effective_thresholds(self, sensor_config) -> Optional[dict]:
         """
         Get effective thresholds for a sensor.
@@ -166,17 +181,14 @@ class AlertSuppressionService:
         alert_cfg = sensor_config.alert_config or {}
         custom = alert_cfg.get("custom_thresholds")
         if custom and any(v is not None for v in custom.values()):
-            return custom
+            normalized = self._normalize_thresholds(custom)
+            if any(v is not None for v in normalized.values()):
+                return normalized
 
         # Fall back to global thresholds on sensor_config
         thresholds = sensor_config.thresholds
         if thresholds:
-            return {
-                "warning_min": thresholds.get("warning_min", thresholds.get("min")),
-                "warning_max": thresholds.get("warning_max", thresholds.get("max")),
-                "critical_min": thresholds.get("critical_min"),
-                "critical_max": thresholds.get("critical_max"),
-            }
+            return self._normalize_thresholds(thresholds)
 
         return None
 
@@ -184,13 +196,18 @@ class AlertSuppressionService:
         """
         Check a value against thresholds and return severity.
 
+        Accepts canonical (warning_min/max, critical_min/max) and legacy
+        (warning_low/high, critical_low/high, min/max) keys for compatibility
+        with sensor_formatters and zone_aware_thresholds.
+
         Returns:
             'critical', 'warning', or None if within bounds.
         """
-        critical_min = thresholds.get("critical_min")
-        critical_max = thresholds.get("critical_max")
-        warning_min = thresholds.get("warning_min")
-        warning_max = thresholds.get("warning_max")
+        t = self._normalize_thresholds(thresholds)
+        critical_min = t.get("critical_min")
+        critical_max = t.get("critical_max")
+        warning_min = t.get("warning_min")
+        warning_max = t.get("warning_max")
 
         # Critical check first (highest priority)
         if critical_min is not None and value < critical_min:

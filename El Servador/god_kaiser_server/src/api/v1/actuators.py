@@ -42,9 +42,10 @@ from ...core.exceptions import (
 )
 from ...core.logging_config import get_logger
 from ...db.models.actuator import ActuatorConfig, ActuatorState as ActuatorStateModel
-from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
+from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository, SubzoneRepository
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...mqtt.publisher import Publisher
+from ...mqtt.topics import TopicBuilder
 from ...schemas import (
     ActuatorCommand,
     ActuatorCommandResponse,
@@ -54,6 +55,8 @@ from ...schemas import (
     ActuatorHistoryResponse,
     ActuatorState,
     ActuatorStatusResponse,
+    ClearEmergencyRequest,
+    ClearEmergencyResponse,
     EmergencyStopRequest,
     EmergencyStopResponse,
 )
@@ -62,14 +65,17 @@ from ...services.actuator_service import ActuatorService
 from ...services.config_builder import ConfigPayloadBuilder
 from ...services.esp_service import ESPService
 from ...services.gpio_validation_service import GpioValidationService
+from ...services.subzone_service import SubzoneService
 from ..deps import (
     ActiveUser,
     DBSession,
+    MQTTPublisher,
     OperatorUser,
     get_actuator_service,
     get_config_builder,
     get_esp_service,
     get_mqtt_publisher,
+    get_safety_service,
 )
 
 logger = get_logger(__name__)
@@ -83,6 +89,7 @@ def _model_to_schema_response(
     actuator: ActuatorConfig,
     esp_device_id: Optional[str] = None,
     state: Optional[ActuatorStateModel] = None,
+    subzone_id: Optional[str] = None,
 ) -> ActuatorConfigResponse:
     """
     Map DB model fields to public API schema.
@@ -130,6 +137,7 @@ def _model_to_schema_response(
         last_command_at=state.last_command_timestamp if state else None,
         created_at=actuator.created_at,
         updated_at=actuator.updated_at,
+        subzone_id=subzone_id,
     )
 
 
@@ -358,7 +366,11 @@ async def get_actuator(
 
     state = await actuator_repo.get_state(esp_device.id, gpio)
 
-    return _model_to_schema_response(actuator, esp_id, state)
+    subzone_repo = SubzoneRepository(db)
+    subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio)
+    subzone_id_val = subzone.subzone_id if subzone else None
+
+    return _model_to_schema_response(actuator, esp_id, state, subzone_id=subzone_id_val)
 
 
 # =============================================================================
@@ -382,6 +394,7 @@ async def create_or_update_actuator(
     request: ActuatorConfigCreate,
     db: DBSession,
     current_user: OperatorUser,
+    publisher: MQTTPublisher,
 ) -> ActuatorConfigResponse:
     """
     Create or update actuator configuration.
@@ -477,6 +490,36 @@ async def create_or_update_actuator(
 
     await db.commit()
 
+    # =========================================================================
+    # SUBZONE ASSIGNMENT (mirrors sensors API)
+    # Assign actuator GPIO to subzone or remove from all subzones
+    # =========================================================================
+    try:
+        subzone_service = SubzoneService(
+            esp_repo=esp_repo, session=db, publisher=publisher
+        )
+        if request.subzone_id:
+            await subzone_service.assign_subzone(
+                device_id=esp_id,
+                subzone_id=request.subzone_id,
+                assigned_gpios=[gpio],
+                subzone_name=None,
+                parent_zone_id=esp_device.zone_id,
+                safe_mode_active=True,
+            )
+            await db.commit()
+        else:
+            await subzone_service.remove_gpio_from_all_subzones(esp_id, gpio)
+            await db.commit()
+    except ValueError as e:
+        logger.warning(f"Subzone assignment skipped for {esp_id}/GPIO {gpio}: {e}")
+        await db.rollback()
+        raise ValidationException("subzone", str(e))
+    except Exception as e:
+        logger.warning(f"Subzone assignment failed for {esp_id}/GPIO {gpio}: {e}")
+        await db.rollback()
+        # Non-fatal: actuator was saved, subzone can be fixed manually
+
     # Publish config to ESP32 via MQTT (using dependency-injected services)
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
@@ -493,7 +536,11 @@ async def create_or_update_actuator(
         # Log error but don't fail the request (DB save was successful)
         logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
 
-    return _model_to_schema_response(actuator, esp_id, None)
+    subzone_repo = SubzoneRepository(db)
+    subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio)
+    subzone_id_val = subzone.subzone_id if subzone else None
+
+    return _model_to_schema_response(actuator, esp_id, None, subzone_id=subzone_id_val)
 
 
 # =============================================================================
@@ -865,6 +912,82 @@ async def emergency_stop(
         reason=request.reason,
         timestamp=datetime.now(timezone.utc),
         details=details,
+    )
+
+
+@router.post(
+    "/clear_emergency",
+    response_model=ClearEmergencyResponse,
+    responses={
+        200: {"description": "Emergency stop cleared"},
+    },
+    summary="Clear emergency stop",
+    description="Release emergency stop state so actuators can be controlled again. Sends clear_emergency via MQTT to each ESP.",
+)
+async def clear_emergency(
+    request: ClearEmergencyRequest,
+    db: DBSession,
+    current_user: OperatorUser,
+    publisher: Annotated[Publisher, Depends(get_mqtt_publisher)],
+    safety_service: Annotated["SafetyService", Depends(get_safety_service)],
+) -> ClearEmergencyResponse:
+    """
+    Clear emergency stop for ESP(s).
+
+    Sends clear_emergency command via MQTT to each ESP's actuator/emergency topic.
+    Clears server-side emergency flags via SafetyService.
+    Persists cleared state in actuator_states so dashboard does not show stale
+    Not-Aus after server restart.
+    """
+    esp_repo = ESPRepository(db)
+    actuator_repo = ActuatorRepository(db)
+    devices_cleared = 0
+
+    if request.esp_id:
+        esp_device = await esp_repo.get_by_device_id(request.esp_id)
+        if not esp_device:
+            raise ESPNotFoundError(request.esp_id)
+        devices = [esp_device]
+    else:
+        devices = await esp_repo.get_all()
+
+    payload = json.dumps({"command": "clear_emergency", "reason": request.reason})
+
+    for device in devices:
+        try:
+            topic = TopicBuilder.build_actuator_emergency_topic(device.device_id)
+            publisher.client.publish(topic, payload, qos=1)
+            devices_cleared += 1
+        except Exception as exc:
+            logger.warning(
+                f"Clear emergency MQTT publish failed for {device.device_id}: {exc}"
+            )
+
+    if request.esp_id:
+        await safety_service.clear_emergency_stop(request.esp_id)
+    else:
+        await safety_service.clear_emergency_stop(None)
+
+    # Persist cleared state in DB so monitor/zone API shows no emergency after restart
+    esp_ids = [d.id for d in devices]
+    rows_updated = await actuator_repo.clear_emergency_states(esp_ids)
+    if rows_updated:
+        await db.commit()
+        logger.info(
+            f"Cleared {rows_updated} actuator_states from emergency_stop to idle"
+        )
+
+    logger.info(
+        f"EMERGENCY CLEAR executed by {current_user.username}: "
+        f"{devices_cleared} devices. Reason: {request.reason}"
+    )
+
+    return ClearEmergencyResponse(
+        success=True,
+        message="Emergency stop cleared",
+        devices_cleared=devices_cleared,
+        reason=request.reason,
+        timestamp=datetime.now(timezone.utc),
     )
 
 

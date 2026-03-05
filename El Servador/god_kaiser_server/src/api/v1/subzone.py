@@ -22,7 +22,9 @@ References:
 
 from typing import Annotated
 
-from fastapi import APIRouter, Path
+from fastapi import APIRouter, HTTPException, Path
+from pydantic import BaseModel, Field as PydanticField
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 
 from ...core.exceptions import (
     ESPNotFoundError,
@@ -46,11 +48,20 @@ from ...services.subzone_service import SubzoneService
 
 logger = get_logger(__name__)
 
+# ESP ID path pattern: real devices (ESP_ + 6-8 hex) or mock (MOCK_* / ESP_MOCK_*)
+# Consistent with logic_validation.py and zone/debug APIs.
+ESP_ID_PATH_PATTERN = r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+|ESP_MOCK_[A-Z0-9]+)$"
+
 # Router with prefix and tags
 router = APIRouter(
     prefix="/v1/subzone",
     tags=["subzone"],
 )
+
+
+class SubzoneMetadataUpdate(BaseModel):
+    """Partial update for subzone custom_data."""
+    custom_data: dict = PydanticField(..., description="Subzone-specific metadata to merge")
 
 
 # =============================================================================
@@ -95,9 +106,9 @@ async def assign_subzone(
     esp_id: Annotated[
         str,
         Path(
-            description="ESP device ID",
-            pattern=r"^ESP_[A-F0-9]{6,8}$",
-            examples=["ESP_AB12CD"],
+            description="ESP device ID (real: ESP_XXXXXX, mock: MOCK_* or ESP_MOCK_*)",
+            pattern=ESP_ID_PATH_PATTERN,
+            examples=["ESP_AB12CD", "MOCK_95A49FCB", "ESP_MOCK_E92BAA"],
         ),
     ],
     request: SubzoneAssignRequest,
@@ -125,6 +136,26 @@ async def assign_subzone(
         await session.commit()
 
         return response
+
+    except IntegrityError as e:
+        await session.rollback()
+        logger.warning(f"Subzone assign DB constraint failed for {esp_id}: {e}")
+        raise ValidationException(
+            "subzone",
+            "Subzone assignment failed (duplicate or constraint). Check subzone_id and ESP zone.",
+        )
+
+    except ProgrammingError as e:
+        await session.rollback()
+        msg = str(e).lower()
+        if "custom_data" in msg or "does not exist" in msg or "column" in msg:
+            logger.warning("Subzone assign failed (schema): %s", e)
+            raise HTTPException(
+                status_code=503,
+                detail="Database schema outdated. Run: alembic upgrade head",
+            ) from e
+        logger.exception("Subzone assign failed (database)")
+        raise HTTPException(status_code=500, detail="Database error") from e
 
     except ValueError as e:
         # ESP not found or no zone assigned
@@ -154,8 +185,8 @@ async def remove_subzone(
     esp_id: Annotated[
         str,
         Path(
-            description="ESP device ID",
-            pattern=r"^ESP_[A-F0-9]{6,8}$",
+            description="ESP device ID (real or mock)",
+            pattern=ESP_ID_PATH_PATTERN,
         ),
     ],
     subzone_id: Annotated[
@@ -216,8 +247,8 @@ async def get_subzones(
     esp_id: Annotated[
         str,
         Path(
-            description="ESP device ID",
-            pattern=r"^ESP_[A-F0-9]{6,8}$",
+            description="ESP device ID (real or mock)",
+            pattern=ESP_ID_PATH_PATTERN,
         ),
     ],
     session: DBSession,
@@ -230,6 +261,19 @@ async def get_subzones(
         return await service.get_esp_subzones(device_id=esp_id)
     except ValueError:
         raise ESPNotFoundError(esp_id)
+    except ProgrammingError as e:
+        msg = str(e).lower()
+        if "custom_data" in msg or "does not exist" in msg or "column" in msg:
+            logger.warning("Subzone list failed (schema): %s", e)
+            raise HTTPException(
+                status_code=503,
+                detail="Database schema outdated. Run: alembic upgrade head",
+            ) from e
+        logger.exception("Subzone list failed (database)")
+        raise HTTPException(status_code=500, detail="Database error") from e
+    except Exception as e:
+        logger.exception("GET /subzone/devices/%s/subzones failed: %s", esp_id, e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get(
@@ -246,8 +290,8 @@ async def get_subzone(
     esp_id: Annotated[
         str,
         Path(
-            description="ESP device ID",
-            pattern=r"^ESP_[A-F0-9]{6,8}$",
+            description="ESP device ID (real or mock)",
+            pattern=ESP_ID_PATH_PATTERN,
         ),
     ],
     subzone_id: Annotated[
@@ -270,6 +314,67 @@ async def get_subzone(
         raise SubzoneNotFoundException(subzone_id, esp_id)
 
     return subzone
+
+
+# =============================================================================
+# Subzone Metadata Endpoints
+# =============================================================================
+
+
+@router.patch(
+    "/devices/{esp_id}/subzones/{subzone_id}/metadata",
+    response_model=SubzoneInfo,
+    responses={
+        200: {"description": "Subzone metadata updated"},
+        404: {"description": "Subzone not found", "model": ErrorResponse},
+    },
+    summary="Update Subzone Metadata",
+    description="Update subzone-specific metadata (plant info, material, notes).",
+)
+async def update_subzone_metadata(
+    esp_id: Annotated[
+        str,
+        Path(description="ESP device ID (real or mock)", pattern=ESP_ID_PATH_PATTERN),
+    ],
+    subzone_id: Annotated[
+        str,
+        Path(description="Subzone ID", min_length=1, max_length=32),
+    ],
+    body: SubzoneMetadataUpdate,
+    session: DBSession,
+    user: OperatorUser,
+) -> SubzoneInfo:
+    """Update subzone custom_data metadata."""
+    from ...db.repositories.subzone_repo import SubzoneRepository
+
+    logger.info(f"Subzone metadata update for {esp_id}/{subzone_id} by {user.username}")
+
+    repo = SubzoneRepository(session)
+    subzone = await repo.get_by_esp_and_subzone(esp_id, subzone_id)
+    if not subzone:
+        raise SubzoneNotFoundException(subzone_id, esp_id)
+
+    existing = subzone.custom_data or {}
+    existing.update(body.custom_data)
+    subzone.custom_data = existing
+
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(subzone, "custom_data")
+
+    await session.commit()
+    await session.refresh(subzone)
+
+    return SubzoneInfo(
+        subzone_id=subzone.subzone_id,
+        subzone_name=subzone.subzone_name,
+        parent_zone_id=subzone.parent_zone_id,
+        assigned_gpios=subzone.assigned_gpios or [],
+        safe_mode_active=subzone.safe_mode_active,
+        sensor_count=subzone.sensor_count,
+        actuator_count=subzone.actuator_count,
+        custom_data=subzone.custom_data or {},
+        created_at=subzone.created_at.isoformat() if subzone.created_at else None,
+    )
 
 
 # =============================================================================
@@ -303,8 +408,8 @@ async def enable_safe_mode(
     esp_id: Annotated[
         str,
         Path(
-            description="ESP device ID",
-            pattern=r"^ESP_[A-F0-9]{6,8}$",
+            description="ESP device ID (real or mock)",
+            pattern=ESP_ID_PATH_PATTERN,
         ),
     ],
     subzone_id: Annotated[
@@ -370,8 +475,8 @@ async def disable_safe_mode(
     esp_id: Annotated[
         str,
         Path(
-            description="ESP device ID",
-            pattern=r"^ESP_[A-F0-9]{6,8}$",
+            description="ESP device ID (real or mock)",
+            pattern=ESP_ID_PATH_PATTERN,
         ),
     ],
     subzone_id: Annotated[

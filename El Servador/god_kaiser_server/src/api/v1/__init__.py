@@ -30,6 +30,9 @@ from .webhooks import router as webhooks_router
 from .plugins import router as plugins_router
 from .backups import router as backups_router
 from .diagnostics import router as diagnostics_router
+from .zone_context import router as zone_context_router
+from .component_export import router as component_export_router
+from .schema_registry import router as schema_registry_router
 
 # PLANNED routers - stubs with no endpoints yet, included for discoverability.
 # Add endpoints directly to the router files; they will be available immediately.
@@ -65,6 +68,9 @@ api_v1_router.include_router(webhooks_router)  # Phase 4A.3 - Grafana Webhook
 api_v1_router.include_router(plugins_router)  # Phase 4C - Plugin Management
 api_v1_router.include_router(backups_router)  # Phase A V5.1 - Database Backup
 api_v1_router.include_router(diagnostics_router)  # Phase 4D - Diagnostics Hub
+api_v1_router.include_router(zone_context_router)  # Phase K3 - Zone Context Data
+api_v1_router.include_router(component_export_router)  # Phase K4 - AI-Ready Export
+api_v1_router.include_router(schema_registry_router)  # Phase K4 L0.2 - Schema Registry
 
 # Export individual routers for direct access if needed
 __all__ = [
@@ -93,4 +99,7 @@ __all__ = [
     "plugins_router",
     "backups_router",
     "diagnostics_router",
+    "zone_context_router",
+    "component_export_router",
+    "schema_registry_router",
 ]

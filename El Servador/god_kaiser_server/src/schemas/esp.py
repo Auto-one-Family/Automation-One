@@ -159,6 +159,20 @@ class ESPDeviceUpdate(BaseModel):
     )
 
 
+class ZoneContextSummary(BaseModel):
+    """Lightweight zone context summary for device inheritance."""
+
+    zone_id: str
+    zone_name: Optional[str] = None
+    variety: Optional[str] = None
+    substrate: Optional[str] = None
+    growth_phase: Optional[str] = None
+    plant_count: Optional[int] = None
+    plant_age_days: Optional[int] = None
+    days_to_harvest: Optional[int] = None
+    responsible_person: Optional[str] = None
+
+
 class ESPDeviceResponse(ESPDeviceBase, TimestampMixin):
     """
     ESP device response model.
@@ -227,6 +241,12 @@ class ESPDeviceResponse(ESPDeviceBase, TimestampMixin):
         None,
         description="Heartbeat interval in seconds (Mock ESPs only)",
         ge=1,
+    )
+
+    # Zone context inheritance (Phase 4)
+    zone_context: Optional["ZoneContextSummary"] = Field(
+        None,
+        description="Inherited zone context (plant info, growth phase). Auto-populated when zone_id is set.",
     )
 
     model_config = ConfigDict(
@@ -731,6 +751,14 @@ class ESPHealthSummaryResponse(BaseResponse):
         default_factory=list,
         description="Per-device health summary",
     )
+
+
+class ComponentHealthScoreResponse(BaseModel):
+    """Phase K4 L2.4 — Health score 0–100 per device for Inventar/K1."""
+
+    device_id: str = Field(..., description="ESP device ID")
+    score: float = Field(..., ge=0, le=100, description="Aggregated health score 0–100")
+    factors: dict = Field(default_factory=dict, description="Per-factor scores (online, error_rate_24h, data_quality, maintenance, uptime)")
 
 
 # =============================================================================

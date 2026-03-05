@@ -51,6 +51,15 @@ from ..schemas.subzone import (
 logger = get_logger(__name__)
 
 
+def _is_mock_esp(device_id: str) -> bool:
+    """Check if device ID indicates a mock ESP (consistent with zone_service)."""
+    return (
+        device_id.startswith("ESP_MOCK_")
+        or device_id.startswith("MOCK_")
+        or "MOCK" in device_id
+    )
+
+
 class SubzoneService:
     """
     Subzone assignment and management business logic service.
@@ -143,6 +152,30 @@ class SubzoneService:
                 f"ESP's zone_id '{device.zone_id}'"
             )
 
+        # 4b. Mock devices: DB-only, no MQTT (no hardware to acknowledge)
+        if _is_mock_esp(device_id):
+            await self._upsert_subzone_config(
+                device_id=device_id,
+                subzone_id=subzone_id,
+                subzone_name=subzone_name,
+                parent_zone_id=actual_parent_zone_id,
+                assigned_gpios=assigned_gpios,
+                safe_mode_active=safe_mode_active,
+            )
+            logger.info(
+                f"Subzone assignment (mock) for {device_id}: "
+                f"subzone_id={subzone_id}, gpios={assigned_gpios}"
+            )
+            return SubzoneAssignResponse(
+                success=True,
+                message="Subzone assigned (mock device, no MQTT)",
+                device_id=device_id,
+                subzone_id=subzone_id,
+                assigned_gpios=assigned_gpios,
+                mqtt_topic="",
+                mqtt_sent=False,
+            )
+
         # 5. Build MQTT topic
         topic = TopicBuilder.build_subzone_assign_topic(device_id)
 
@@ -211,6 +244,19 @@ class SubzoneService:
         if not device:
             raise ValueError(f"ESP device '{device_id}' not found")
 
+        # 1b. Mock devices: DB-only, no MQTT
+        if _is_mock_esp(device_id):
+            await self._delete_subzone_config(device_id, subzone_id)
+            logger.info(f"Subzone removal (mock) for {device_id}: subzone_id={subzone_id}")
+            return SubzoneRemoveResponse(
+                success=True,
+                message="Subzone removed (mock device, no MQTT)",
+                device_id=device_id,
+                subzone_id=subzone_id,
+                mqtt_topic="",
+                mqtt_sent=False,
+            )
+
         # 2. Build MQTT topic
         topic = TopicBuilder.build_subzone_remove_topic(device_id)
 
@@ -265,6 +311,18 @@ class SubzoneService:
         if not device:
             raise ValueError(f"ESP device '{device_id}' not found")
 
+        if _is_mock_esp(device_id):
+            await self._update_subzone_safe_mode(device_id, subzone_id, active=True)
+            logger.info(f"Safe-mode ENABLE (mock) for {device_id}/{subzone_id}")
+            return SafeModeResponse(
+                success=True,
+                message="Safe-mode enabled (mock device, no MQTT)",
+                device_id=device_id,
+                subzone_id=subzone_id,
+                safe_mode_active=True,
+                mqtt_sent=False,
+            )
+
         topic = TopicBuilder.build_subzone_safe_topic(device_id)
         payload = {
             "subzone_id": subzone_id,
@@ -306,6 +364,18 @@ class SubzoneService:
         device = await self.esp_repo.get_by_device_id(device_id)
         if not device:
             raise ValueError(f"ESP device '{device_id}' not found")
+
+        if _is_mock_esp(device_id):
+            await self._update_subzone_safe_mode(device_id, subzone_id, active=False)
+            logger.info(f"Safe-mode DISABLE (mock) for {device_id}/{subzone_id}")
+            return SafeModeResponse(
+                success=True,
+                message="Safe-mode disabled (mock device, no MQTT)",
+                device_id=device_id,
+                subzone_id=subzone_id,
+                safe_mode_active=False,
+                mqtt_sent=False,
+            )
 
         topic = TopicBuilder.build_subzone_safe_topic(device_id)
         payload = {
@@ -403,15 +473,25 @@ class SubzoneService:
         )
         subzone_configs = result.scalars().all()
 
+        def _safe_custom_data(sc: SubzoneConfig) -> dict:
+            try:
+                val = getattr(sc, "custom_data", None)
+                if val is None:
+                    return {}
+                return dict(val) if isinstance(val, dict) else {}
+            except (TypeError, AttributeError):
+                return {}
+
         subzones = [
             SubzoneInfo(
                 subzone_id=sc.subzone_id,
                 subzone_name=sc.subzone_name,
-                parent_zone_id=sc.parent_zone_id,
+                parent_zone_id=sc.parent_zone_id or "",
                 assigned_gpios=sc.assigned_gpios or [],
-                safe_mode_active=sc.safe_mode_active,
-                sensor_count=sc.sensor_count,
-                actuator_count=sc.actuator_count,
+                safe_mode_active=bool(sc.safe_mode_active),
+                sensor_count=int(sc.sensor_count) if sc.sensor_count is not None else 0,
+                actuator_count=int(sc.actuator_count) if sc.actuator_count is not None else 0,
+                custom_data=_safe_custom_data(sc),
                 created_at=sc.created_at.isoformat() if sc.created_at else None,
             )
             for sc in subzone_configs
@@ -421,7 +501,7 @@ class SubzoneService:
             success=True,
             message=f"Found {len(subzones)} subzones",
             device_id=device_id,
-            zone_id=device.zone_id,
+            zone_id=device.zone_id or None,
             subzones=subzones,
             total_count=len(subzones),
         )
@@ -451,11 +531,12 @@ class SubzoneService:
         return SubzoneInfo(
             subzone_id=sc.subzone_id,
             subzone_name=sc.subzone_name,
-            parent_zone_id=sc.parent_zone_id,
+            parent_zone_id=sc.parent_zone_id or "",
             assigned_gpios=sc.assigned_gpios or [],
-            safe_mode_active=sc.safe_mode_active,
-            sensor_count=sc.sensor_count,
-            actuator_count=sc.actuator_count,
+            safe_mode_active=bool(sc.safe_mode_active),
+            sensor_count=int(sc.sensor_count) if sc.sensor_count is not None else 0,
+            actuator_count=int(sc.actuator_count) if sc.actuator_count is not None else 0,
+            custom_data=dict(sc.custom_data) if getattr(sc, "custom_data", None) else {},
             created_at=sc.created_at.isoformat() if sc.created_at else None,
         )
 
@@ -508,6 +589,13 @@ class SubzoneService:
         """
         Create or update subzone configuration in DB.
 
+        When updating an EXISTING subzone: MERGE assigned_gpios (union with existing)
+        instead of replacing. This prevents losing other sensors when assigning
+        a single sensor via SubzoneAssignmentSection or SensorConfigPanel.
+
+        Also removes the assigned GPIOs from all OTHER subzones of this ESP
+        (a GPIO can only belong to one subzone).
+
         Note: Flushes to make changes visible for subsequent queries.
         Caller is responsible for commit() or rollback().
         """
@@ -521,13 +609,32 @@ class SubzoneService:
         existing = result.scalar_one_or_none()
 
         if existing:
-            # Update existing
+            # MERGE: union of existing + new (don't replace - preserves other sensors)
+            current = set(existing.assigned_gpios or [])
+            merged = current | set(assigned_gpios)
+            final_gpios = sorted(merged)
+
             existing.subzone_name = subzone_name
             existing.parent_zone_id = parent_zone_id
-            existing.assigned_gpios = assigned_gpios
+            existing.assigned_gpios = final_gpios
             existing.safe_mode_active = safe_mode_active
+
+            # Remove these GPIOs from OTHER subzones of this ESP
+            gpios_to_remove = set(assigned_gpios)
+            if gpios_to_remove:
+                other_result = await self.session.execute(
+                    select(SubzoneConfig).where(
+                        SubzoneConfig.esp_id == device_id,
+                        SubzoneConfig.subzone_id != subzone_id,
+                    )
+                )
+                for other in other_result.scalars().all():
+                    if other.assigned_gpios:
+                        other.assigned_gpios = [
+                            g for g in other.assigned_gpios if g not in gpios_to_remove
+                        ]
         else:
-            # Create new
+            # Create new subzone
             new_config = SubzoneConfig(
                 esp_id=device_id,
                 subzone_id=subzone_id,
@@ -537,6 +644,17 @@ class SubzoneService:
                 safe_mode_active=safe_mode_active,
             )
             self.session.add(new_config)
+
+            # Remove these GPIOs from any OTHER subzones of this ESP
+            if assigned_gpios:
+                other_result = await self.session.execute(
+                    select(SubzoneConfig).where(SubzoneConfig.esp_id == device_id)
+                )
+                for other in other_result.scalars().all():
+                    if other.assigned_gpios:
+                        other.assigned_gpios = [
+                            g for g in other.assigned_gpios if g not in assigned_gpios
+                        ]
 
         # Flush to make changes visible for subsequent queries
         await self.session.flush()
@@ -578,3 +696,38 @@ class SubzoneService:
         if config:
             await self.session.delete(config)
             await self.session.flush()
+
+    async def _update_subzone_safe_mode(
+        self, device_id: str, subzone_id: str, active: bool
+    ) -> None:
+        """
+        Update safe_mode_active for a subzone (used for mock devices).
+
+        Note: Flushes to make changes visible. Caller is responsible for commit().
+        """
+        result = await self.session.execute(
+            select(SubzoneConfig).where(
+                SubzoneConfig.esp_id == device_id,
+                SubzoneConfig.subzone_id == subzone_id,
+            )
+        )
+        config = result.scalar_one_or_none()
+        if config:
+            config.safe_mode_active = active
+            await self.session.flush()
+
+    async def remove_gpio_from_all_subzones(self, device_id: str, gpio: int) -> None:
+        """
+        Remove a GPIO from all subzones of an ESP.
+
+        Used when: sensor is deleted, or sensor is assigned to "Keine Subzone".
+
+        Note: Flushes to make changes visible. Caller is responsible for commit().
+        """
+        result = await self.session.execute(
+            select(SubzoneConfig).where(SubzoneConfig.esp_id == device_id)
+        )
+        for subzone in result.scalars().all():
+            if subzone.assigned_gpios and gpio in subzone.assigned_gpios:
+                subzone.assigned_gpios = [g for g in subzone.assigned_gpios if g != gpio]
+        await self.session.flush()

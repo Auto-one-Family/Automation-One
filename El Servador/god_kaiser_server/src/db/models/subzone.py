@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..base import Base, TimestampMixin
+from ..types import JSONBCompat
 
 if TYPE_CHECKING:
     from .esp import ESPDevice
@@ -111,6 +112,15 @@ class SubzoneConfig(Base, TimestampMixin):
         default=0,
         nullable=False,
         doc="Number of actuators in this subzone",
+    )
+
+    # Subzone-specific metadata (plant info, material, notes — more specific than zone)
+    custom_data: Mapped[dict] = mapped_column(
+        JSONBCompat,
+        default=dict,
+        server_default="{}",
+        nullable=False,
+        doc="Subzone-specific metadata (plant info, material, notes)",
     )
 
     # Metadata

@@ -215,6 +215,12 @@ class SensorConfigCreate(SensorConfigBase):
         description="Schedule configuration for scheduled mode",
     )
 
+    subzone_id: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Subzone ID to assign this sensor to. Null/empty = remove from all subzones.",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -350,6 +356,10 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     config_error: Optional[str] = Field(
         None,
         description="Error code if config_status=failed",
+    )
+    subzone_id: Optional[str] = Field(
+        None,
+        description="Subzone ID this sensor belongs to (if any)",
     )
     config_error_detail: Optional[str] = Field(
         None,

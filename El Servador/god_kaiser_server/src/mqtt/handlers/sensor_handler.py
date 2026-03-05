@@ -514,6 +514,26 @@ class SensorDataHandler:
 
         # Step 1: Get effective thresholds
         thresholds = suppression_svc.get_effective_thresholds(sensor_config)
+
+        # Step 1b: Enrich with zone-aware thresholds (Phase 5)
+        try:
+            from ...services.zone_aware_thresholds import ZoneAwareThresholdService
+            from ...db.models.esp import ESPDevice
+            esp_device = await session.get(ESPDevice, sensor_config.esp_id)
+            zone_id = esp_device.zone_id if esp_device else None
+            if zone_id:
+                zone_thresh_svc = ZoneAwareThresholdService(session)
+                phase_thresholds = await zone_thresh_svc.get_thresholds(zone_id, sensor_type)
+                if phase_thresholds:
+                    if not thresholds:
+                        thresholds = phase_thresholds
+                    else:
+                        for k, v in phase_thresholds.items():
+                            if k not in thresholds:
+                                thresholds[k] = v
+        except Exception as e:
+            logger.debug(f"Zone-aware threshold enrichment skipped: {e}")
+
         if not thresholds:
             return  # No thresholds configured — nothing to evaluate
 

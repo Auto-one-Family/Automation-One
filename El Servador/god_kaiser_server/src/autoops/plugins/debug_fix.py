@@ -387,22 +387,24 @@ class DebugFixPlugin(AutoOpsPlugin):
             # Check sensor data freshness
             try:
                 data_response = await client.list_sensor_data(limit=20)
-                data_items = data_response.get("data", data_response.get("items", []))
+                # API returns SensorDataResponse with "readings" key (not "data"/"items")
+                data_items = data_response.get("readings", data_response.get("data", data_response.get("items", [])))
                 if isinstance(data_items, list):
                     # Group by esp_id to check which devices have recent data
+                    # Note: readings may not include esp_id per item - only when API adds it
                     devices_with_data = set()
                     for item in data_items:
-                        if isinstance(item, dict):
+                        if isinstance(item, dict) and item.get("esp_id"):
                             devices_with_data.add(item.get("esp_id", ""))
 
-                    # Check if any configured sensors have no data at all
+                    # Only run devices_without_data check when we can determine devices_with_data
                     configured_devices = set()
                     for s in sensors:
                         if isinstance(s, dict) and s.get("enabled", True):
                             configured_devices.add(s.get("esp_id", ""))
 
                     devices_without_data = configured_devices - devices_with_data
-                    if devices_without_data:
+                    if devices_with_data and devices_without_data:
                         issues.append(
                             DiagnosticIssue(
                                 category="sensor",

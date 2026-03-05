@@ -174,6 +174,11 @@ class ActuatorConfigCreate(ActuatorConfigBase):
         None,
         description="Custom metadata",
     )
+    subzone_id: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Subzone ID to assign this actuator to. Null/empty = remove from all subzones.",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -259,6 +264,10 @@ class ActuatorConfigResponse(ActuatorConfigBase, TimestampMixin):
     last_command_at: Optional[datetime] = Field(
         None,
         description="Last command timestamp",
+    )
+    subzone_id: Optional[str] = Field(
+        None,
+        description="Subzone this actuator is assigned to (derived from subzone_configs)",
     )
 
     model_config = ConfigDict(
@@ -545,6 +554,41 @@ class EmergencyStopResponse(BaseResponse):
             }
         }
     )
+
+
+class ClearEmergencyRequest(BaseModel):
+    """
+    Clear emergency stop request.
+
+    Releases emergency stop state so actuators can be controlled again.
+    Sends clear_emergency command via MQTT to each ESP.
+    """
+
+    esp_id: Optional[str] = Field(
+        None,
+        pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$",
+        description="Specific ESP to clear (None = all ESPs)",
+    )
+    reason: str = Field(
+        "manual",
+        min_length=1,
+        max_length=200,
+        description="Reason for clearing emergency (for audit)",
+    )
+
+
+class ClearEmergencyResponse(BaseResponse):
+    """
+    Clear emergency stop response.
+    """
+
+    devices_cleared: int = Field(
+        ...,
+        description="Number of ESPs that received clear command",
+        ge=0,
+    )
+    reason: str = Field(..., description="Clear reason")
+    timestamp: datetime = Field(..., description="Clear command timestamp")
 
 
 # =============================================================================

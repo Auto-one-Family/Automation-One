@@ -158,13 +158,18 @@ class ZoneService:
                 f"(DB updated, ESP may be offline or mock device)"
             )
 
-        # 6. Update MockESPManager if this is a mock device
-        # This ensures the in-memory store stays in sync with the database
+        # 6. Sync zone name to ZoneContext (if it exists)
+        try:
+            from .zone_context_service import ZoneContextService
+            zone_ctx_svc = ZoneContextService(self.esp_repo.session)
+            await zone_ctx_svc.sync_zone_name(zone_id, zone_name)
+        except Exception as e:
+            logger.warning(f"Zone-name sync to ZoneContext failed for {zone_id}: {e}")
+
+        # 7. Update MockESPManager if this is a mock device
         if _is_mock_esp(device_id):
             await self._update_mock_esp_zone(device_id, zone_id, zone_name, master_zone_id)
 
-        # Return success=True since DB was updated
-        # mqtt_sent indicates whether ESP received the assignment via MQTT
         return ZoneAssignResponse(
             success=True,  # DB update succeeded
             message=(

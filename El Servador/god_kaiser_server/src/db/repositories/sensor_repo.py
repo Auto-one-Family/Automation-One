@@ -177,7 +177,9 @@ class SensorRepository(BaseRepository[SensorConfig]):
         if esp_device_id:
             filters.append(ESPDevice.device_id == esp_device_id)
         if sensor_type:
-            filters.append(SensorConfig.sensor_type == sensor_type.lower())
+            filters.append(
+                func.lower(SensorConfig.sensor_type) == sensor_type.lower()
+            )
         if enabled is not None:
             filters.append(SensorConfig.enabled == enabled)
 
@@ -459,7 +461,9 @@ class SensorRepository(BaseRepository[SensorConfig]):
         if gpio is not None:
             stmt = stmt.where(SensorData.gpio == gpio)
         if sensor_type:
-            stmt = stmt.where(SensorData.sensor_type == sensor_type.lower())
+            stmt = stmt.where(
+                func.lower(SensorData.sensor_type) == sensor_type.lower()
+            )
         if start_time:
             stmt = stmt.where(SensorData.timestamp >= start_time)
         if end_time:

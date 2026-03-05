@@ -62,14 +62,19 @@ class SubzoneAssignRequest(BaseModel):
     )
     assigned_gpios: List[int] = Field(
         ...,
-        min_length=1,
+        min_length=0,
         max_length=20,
-        description="GPIO pin numbers to assign to this subzone",
+        description="GPIO pin numbers to assign to this subzone (empty = create subzone only)",
         examples=[[4, 5, 6], [18, 21]],
     )
     safe_mode_active: bool = Field(
         True,
         description="Whether subzone starts in safe-mode (default: true for safety)",
+    )
+    custom_data: Optional[dict] = Field(
+        None,
+        description="Subzone-specific metadata (plant info, material, notes)",
+        examples=[{"variety": "Wedding Cake", "substrate": "Coco", "notes": "Drip line A"}],
     )
 
     @field_validator("subzone_id")
@@ -323,6 +328,10 @@ class SubzoneInfo(BaseModel):
     actuator_count: int = Field(
         0,
         description="Number of actuators in subzone",
+    )
+    custom_data: dict = Field(
+        default_factory=dict,
+        description="Subzone-specific metadata (plant info, material, notes)",
     )
     created_at: Optional[str] = Field(
         None,

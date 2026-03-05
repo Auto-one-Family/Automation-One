@@ -170,9 +170,11 @@ class MockActuatorHandler:
 
     async def handle_emergency(self, topic: str, payload_str: str, esp_id: str) -> bool:
         """
-        Handle ESP-specific emergency stop.
+        Handle ESP-specific emergency topic (emergency_stop or clear_emergency).
 
-        Sets emergency_stopped flag and turns off all actuators for this ESP.
+        Payload must contain "command": "emergency_stop" | "clear_emergency".
+        - clear_emergency: Clears emergency flag, actuators become controllable again.
+        - emergency_stop or missing/other: Sets emergency_stopped and turns off all actuators.
 
         Args:
             topic: MQTT topic string
@@ -187,6 +189,18 @@ class MockActuatorHandler:
             if not runtime:
                 logger.warning(f"[MockActuator] Emergency for unknown mock: {esp_id}")
                 return False
+
+            # Parse payload to distinguish clear_emergency from emergency_stop
+            command = "emergency_stop"
+            try:
+                if payload_str and payload_str.strip():
+                    payload = json.loads(payload_str)
+                    command = (payload.get("command") or "emergency_stop").strip().lower()
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+            if command == "clear_emergency":
+                return await self.clear_emergency(esp_id)
 
             logger.warning(f"[MockActuator] Emergency stop received for {esp_id}")
 
@@ -212,22 +226,39 @@ class MockActuatorHandler:
 
     async def handle_broadcast_emergency(self, topic: str, payload_str: str) -> bool:
         """
-        Handle broadcast emergency stop for ALL active mocks.
+        Handle broadcast emergency for ALL active mocks.
+
+        Payload "command": "clear_emergency" → clear emergency on each mock.
+        Otherwise → emergency stop on each mock (same as before).
 
         Args:
             topic: MQTT topic string
             payload_str: JSON payload string
 
         Returns:
-            True if processed successfully
+            True if all processed successfully
         """
-        logger.critical("[MockActuator] Broadcast emergency stop received!")
+        command = "emergency_stop"
+        try:
+            if payload_str and payload_str.strip():
+                payload = json.loads(payload_str)
+                command = (payload.get("command") or "emergency_stop").strip().lower()
+        except (json.JSONDecodeError, AttributeError):
+            pass
 
+        if command == "clear_emergency":
+            logger.info("[MockActuator] Broadcast clear_emergency received")
+            success = True
+            for esp_id in self._scheduler.get_active_mocks():
+                if not await self.clear_emergency(esp_id):
+                    success = False
+            return success
+
+        logger.critical("[MockActuator] Broadcast emergency stop received!")
         success = True
         for esp_id in self._scheduler.get_active_mocks():
             if not await self.handle_emergency(topic, payload_str, esp_id):
                 success = False
-
         return success
 
     async def emergency_stop(self, esp_id: str, reason: Optional[str] = None) -> bool:

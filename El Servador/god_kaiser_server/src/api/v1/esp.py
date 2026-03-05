@@ -57,7 +57,7 @@ from ...schemas import (
     PendingDevicesListResponse,
     PendingESPDevice,
 )
-from ...schemas.esp import GpioStatusResponse, GpioUsageItem
+from ...schemas.esp import ComponentHealthScoreResponse, GpioStatusResponse, GpioUsageItem
 from ...services.gpio_validation_service import GpioValidationService, SYSTEM_RESERVED_PINS
 from ...schemas.common import PaginationMeta
 from ...core.exceptions import DuplicateESPError, ESPNotFoundError, ValidationException
@@ -95,6 +95,25 @@ def _extract_mock_fields(device) -> tuple[Optional[bool], Optional[int]]:
     heartbeat_interval_seconds = int(heartbeat_interval) if heartbeat_interval is not None else None
 
     return auto_heartbeat, heartbeat_interval_seconds
+
+
+async def _enrich_zone_context(
+    device, session, context_cache: dict
+) -> Optional[dict]:
+    """Fetch zone context summary for a device, with caching per zone_id."""
+    if not device.zone_id:
+        return None
+    # Check opt-out flag
+    meta = device.device_metadata or {}
+    if meta.get("inherit_zone_context") is False:
+        return None
+    if device.zone_id in context_cache:
+        return context_cache[device.zone_id]
+    from ...services.zone_context_service import ZoneContextService
+    svc = ZoneContextService(session)
+    summary = await svc.get_context_summary(device.zone_id)
+    context_cache[device.zone_id] = summary
+    return summary
 
 
 # =============================================================================
@@ -159,14 +178,25 @@ async def list_devices(
     end_idx = start_idx + page_size
     paginated_devices = devices[start_idx:end_idx]
 
-    # Build response with sensor/actuator counts
+    # Build response with sensor/actuator counts + zone context
     device_responses = []
+    zone_context_cache: dict = {}
+    include_context = True
+
     for device in paginated_devices:
         sensor_count = await sensor_repo.count_by_esp(device.id)
         actuator_count = await actuator_repo.count_by_esp(device.id)
 
         # Extract Mock-specific fields
         auto_heartbeat, heartbeat_interval_seconds = _extract_mock_fields(device)
+
+        # Zone context inheritance (Phase 4)
+        zone_ctx = None
+        if include_context:
+            zone_ctx_data = await _enrich_zone_context(device, db, zone_context_cache)
+            if zone_ctx_data:
+                from ...schemas.esp import ZoneContextSummary
+                zone_ctx = ZoneContextSummary(**zone_ctx_data)
 
         device_responses.append(
             ESPDeviceResponse(
@@ -190,6 +220,7 @@ async def list_devices(
                 heartbeat_interval_seconds=heartbeat_interval_seconds,
                 created_at=device.created_at,
                 updated_at=device.updated_at,
+                zone_context=zone_ctx,
             )
         )
 
@@ -331,6 +362,13 @@ async def get_device(
     # Extract Mock-specific fields
     auto_heartbeat, heartbeat_interval_seconds = _extract_mock_fields(device)
 
+    # Zone context inheritance (Phase 4)
+    zone_ctx = None
+    zone_ctx_data = await _enrich_zone_context(device, db, {})
+    if zone_ctx_data:
+        from ...schemas.esp import ZoneContextSummary
+        zone_ctx = ZoneContextSummary(**zone_ctx_data)
+
     return ESPDeviceResponse(
         id=device.id,
         device_id=device.device_id,
@@ -352,6 +390,7 @@ async def get_device(
         heartbeat_interval_seconds=heartbeat_interval_seconds,
         created_at=device.created_at,
         updated_at=device.updated_at,
+        zone_context=zone_ctx,
     )
 
 
@@ -826,6 +865,30 @@ async def get_device_health(
         last_seen=device.last_seen,
         uptime_formatted=uptime_formatted,
     )
+
+
+@router.get(
+    "/devices/{esp_id}/health/score",
+    response_model=ComponentHealthScoreResponse,
+    responses={
+        200: {"description": "Health score 0–100 and factors"},
+        404: {"description": "Device not found"},
+    },
+    summary="Get component health score (Phase K4 L2.4)",
+    description="Aggregated health score for Inventar/K1 badge (online, error rate, data quality, maintenance, uptime).",
+)
+async def get_device_health_score(
+    esp_id: str,
+    db: DBSession,
+    current_user: ActiveUser,
+) -> ComponentHealthScoreResponse:
+    from ...services.health_score_service import HealthScoreService
+
+    svc = HealthScoreService(db)
+    result = await svc.get_score(esp_id)
+    if not result:
+        raise ESPNotFoundError(esp_id)
+    return ComponentHealthScoreResponse(**result)
 
 
 # =============================================================================

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.actuator import ActuatorConfig, ActuatorHistory, ActuatorState
@@ -127,6 +127,45 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def clear_emergency_states(self, esp_ids: list[uuid.UUID]) -> int:
+        """
+        Set actuator_states from emergency_stop to idle for given ESPs.
+
+        Used when clear_emergency is called so the DB matches runtime state
+        and the dashboard does not show stale Not-Aus after restart.
+
+        Returns:
+            Number of rows updated.
+        """
+        if not esp_ids:
+            return 0
+        stmt = (
+            update(ActuatorState)
+            .where(
+                ActuatorState.esp_id.in_(esp_ids),
+                ActuatorState.state == "emergency_stop",
+            )
+            .values(state="idle", current_value=0.0, error_message=None)
+        )
+        result = await self.session.execute(stmt)
+        return result.rowcount or 0
+
+    async def clear_all_emergency_states_on_startup(self) -> int:
+        """
+        Reset all actuator_states with state=emergency_stop to idle.
+
+        Called once at server startup. SafetyService state is in-memory only,
+        so after a restart any persisted emergency_stop in DB would show as
+        Not-Aus in the dashboard until the user clears it. This avoids that.
+        """
+        stmt = (
+            update(ActuatorState)
+            .where(ActuatorState.state == "emergency_stop")
+            .values(state="idle", current_value=0.0, error_message=None)
+        )
+        result = await self.session.execute(stmt)
+        return result.rowcount or 0
 
     async def update_state(
         self,

@@ -114,6 +114,9 @@ class PluginService:
                             "started_at": (
                                 last_exec.started_at.isoformat() if last_exec.started_at else None
                             ),
+                            "finished_at": (
+                                last_exec.finished_at.isoformat() if last_exec.finished_at else None
+                            ),
                             "duration_seconds": last_exec.duration_seconds,
                         }
                         if last_exec
@@ -205,6 +208,8 @@ class PluginService:
 
         start_time = datetime.now(timezone.utc)
         result: PluginResult | None = None
+        autoops_context = None
+        client = None
         try:
             # Build AutoOpsContext + GodKaiserClient for plugin.execute()
             # Phase 4C.4: Enrich context with config overrides from DB + request
@@ -299,12 +304,13 @@ class PluginService:
             execution.status = "error"
             execution.error_message = str(e)
             logger.error(f"Plugin '{plugin_id}' execution failed: {e}", exc_info=True)
-            # Attempt rollback with whatever actions were recorded
-            try:
-                actions = result.actions if result else []
-                await plugin.rollback(autoops_context, client, actions)
-            except Exception:
-                pass
+            # Attempt rollback only if context/client were created (avoid NameError)
+            if autoops_context is not None and client is not None:
+                try:
+                    actions = result.actions if result else []
+                    await plugin.rollback(autoops_context, client, actions)
+                except Exception:
+                    pass
         finally:
             execution.finished_at = datetime.now(timezone.utc)
             execution.duration_seconds = (execution.finished_at - start_time).total_seconds()

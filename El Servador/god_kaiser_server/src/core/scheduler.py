@@ -125,7 +125,7 @@ class CentralScheduler:
         job_defaults = {
             "coalesce": True,  # Verpasste Jobs zusammenfassen
             "max_instances": 1,  # Max 1 Instanz pro Job gleichzeitig
-            "misfire_grace_time": 30,  # 30s Toleranz für verpasste Jobs
+            "misfire_grace_time": 120,  # 120s Toleranz (Event-Loop-Blockierung bei vielen Jobs)
         }
 
         self._scheduler = AsyncIOScheduler(

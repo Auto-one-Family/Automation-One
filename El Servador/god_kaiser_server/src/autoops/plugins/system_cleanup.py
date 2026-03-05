@@ -203,12 +203,18 @@ class SystemCleanupPlugin(AutoOpsPlugin):
             tables = tables_response.get("tables", [])
             empty_tables = []
 
-            for table_name in tables[:10]:  # Check first 10 tables
-                if not isinstance(table_name, str):
+            for table_entry in tables[:10]:  # Check first 10 tables
+                table_name = (
+                    table_entry.get("table_name") if isinstance(table_entry, dict) else
+                    getattr(table_entry, "table_name", None) if table_entry else None
+                )
+                if not table_name or not isinstance(table_name, str):
                     continue
                 try:
                     table_data = await client.query_table(table_name, limit=1)
-                    row_count = table_data.get("total", table_data.get("count", 0))
+                    row_count = table_data.get(
+                        "total_count", table_data.get("total", table_data.get("count", 0))
+                    )
                     if row_count == 0:
                         empty_tables.append(table_name)
                 except APIError:
