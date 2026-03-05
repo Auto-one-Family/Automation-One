@@ -53,6 +53,18 @@ CVE-2026-25639  # esbuild: vulnerability in build tool binary (HIGH)
 # Fix: awaiting vue-tsc and @vue/test-utils releases with minimatch >= 10.2.1.
 # Added: 2026-02-24
 CVE-2026-26996  # minimatch: ReDoS via repeated wildcards (HIGH)
+# Added: 2026-03-05 — New minimatch CVEs (same context as CVE-2026-26996)
+CVE-2026-27903  # minimatch: DoS due to unbounded (devDep, build-time only)
+CVE-2026-27904  # minimatch: DoS via catastrophic backtracking (devDep, build-time only)
+
+# -----------------------------------------------------------------------------
+# rollup — transitive devDependency (vite)
+# -----------------------------------------------------------------------------
+# Context: rollup 4.53.3 is a transitive devDependency of vite. Build tool only.
+# Impact: NONE on production. Path traversal requires crafted input during build.
+# Fix: awaiting vite/rollup upstream update to 4.59.0.
+# Added: 2026-03-05
+CVE-2026-27606  # rollup: RCE via Path Traversal (devDep, build-time only)
 
 # -----------------------------------------------------------------------------
 # tar — transitive dependency (if present in node_modules)

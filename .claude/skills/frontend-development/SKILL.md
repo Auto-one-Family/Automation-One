@@ -15,8 +15,8 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.23
-**Letzte Aktualisierung:** 2026-03-04
+**Version:** 9.33
+**Letzte Aktualisierung:** 2026-03-05
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
 
@@ -113,15 +113,20 @@ npm run test:coverage # Vitest mit v8 Coverage
 
 ```
 El Frontend/src/
-├── api/           # 16 API-Module
+├── api/           # 18 API-Module
 │   ├── index.ts       # Axios Instance + Interceptors (~89 Zeilen)
 │   ├── auth.ts        # Login, Logout, Token Refresh
 │   ├── esp.ts         # ESP Device Management
 │   ├── sensors.ts     # Sensor CRUD + History
 │   ├── actuators.ts   # Actuator Commands
 │   ├── zones.ts       # Zone Assignment
+│   ├── subzones.ts    # Subzone Management
+│   ├── backups.ts     # DB-Backup (Admin)
+│   ├── inventory.ts   # Zone Context, Export, Schema Registry (Phase K4)
 │   ├── logic.ts       # Automation Rules
 │   └── ...
+├── config/        # Device Schemas (Phase K4)
+│   └── device-schemas/  # JSON-Schemas für Sensoren/Aktoren (DS18B20, SHT31, relay, pwm, etc.)
 ├── components/    # Vue Komponenten (20 Unterverzeichnisse)
 │   ├── calibration/   # CalibrationWizard
 │   ├── charts/        # LiveLineChart, HistoricalChart, GaugeChart, MultiSensorChart
@@ -130,7 +135,7 @@ El Frontend/src/
 │   ├── dashboard/     # Dashboard subcomponents (11 Dateien, inkl. DashboardViewer + InlineDashboardPanel)
 │   ├── dashboard-widgets/ # SensorCardWidget, GaugeWidget, LineChartWidget, etc.
 │   ├── database/      # DataTable, FilterPanel, Pagination, etc. (6 Dateien)
-│   ├── devices/       # SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection, AlertConfigSection, RuntimeMaintenanceSection, SubzoneAssignmentSection (7 Dateien)
+│   ├── devices/       # SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection, AlertConfigSection, DeviceAlertConfigSection, RuntimeMaintenanceSection, SubzoneAssignmentSection (8 Dateien)
 │   ├── error/         # ErrorDetailsModal, TroubleshootingPanel
 │   ├── esp/           # ESPCard, ESPCardBase, ESPOrbitalLayout, SensorConfigPanel, ActuatorConfigPanel (11 Dateien)
 │   ├── filters/       # UnifiedFilterBar
@@ -138,10 +143,10 @@ El Frontend/src/
 │   ├── inventory/     # Wissensdatenbank (Phase K4): InventoryTable, DeviceDetailPanel, SchemaForm, ZoneContextEditor, SubzoneContextEditor (5 Dateien)
 │   ├── modals/
 │   ├── rules/         # RuleCard, RuleConfigPanel, RuleFlowEditor, RuleNodePalette, RuleTemplateCard (5 Dateien)
-│   ├── notifications/ # NotificationDrawer, NotificationItem, AlertStatusBar (3 Dateien)
+│   ├── notifications/ # NotificationDrawer, NotificationItem, AlertStatusBar, NotificationPreferences (4 Dateien)
 │   ├── quick-action/  # QuickActionBall (FAB), QuickActionMenu, QuickActionItem, QuickAlertPanel, QuickNavPanel (5 Dateien)
 │   ├── safety/        # EmergencyStopButton
-│   ├── system-monitor/ # 18 Dateien
+│   ├── system-monitor/ # 19 Dateien (inkl. HierarchyTab, HealthTab, DiagnoseTab, ReportsTab)
 │   ├── widgets/       # Widget primitives
 │   └── zones/         # ZoneGroup, ZoneAssignmentPanel
 ├── shared/        # Design System + Shared Stores (NEU)
@@ -197,14 +202,15 @@ El Frontend/src/
 │   ├── device-metadata.ts  # DeviceMetadata Interface + Utility-Funktionen
 │   ├── event-grouping.ts
 │   └── form-schema.ts
-├── utils/         # 9 Utility-Module
+├── utils/         # 10 Utility-Module
 │   ├── formatters.ts      # ~631 Zeilen
 │   ├── labels.ts
 │   ├── sensorDefaults.ts
 │   ├── actuatorDefaults.ts
 │   ├── errorCodeTranslator.ts
+│   ├── subzoneHelpers.ts  # normalizeSubzoneId (Defense-in-Depth vor API)
 │   └── ...
-├── views/         # 16 View-Komponenten
+├── views/         # 17 View-Komponenten
 ├── main.ts        # Bootstrap
 ├── App.vue        # Root Component
 └── style.css      # CSS Variablen (~800 Zeilen)
@@ -273,27 +279,20 @@ HardwareView.vue
 │   └── EmptyState (PackageOpen, wenn Zone leer)
 ├── UnassignedDropBar.vue (bottom, MOCK-Badge, Sensor-Summary)
 ├── PendingDevicesPanel.vue (slide-over)
-├── ESPSettingsSheet.vue (SlideOver, ESP-Detail: Status, Sensor/Actuator-Liste, Delete)
-├── SensorConfigPanel.vue (SlideOver, via ESPSettingsSheet Event)
-└── ActuatorConfigPanel.vue (SlideOver, via ESPSettingsSheet Event)
+├── ESPSettingsSheet.vue (SlideOver, ESP-Detail: Status, Zone, Alert-Konfiguration (Gerät) via DeviceAlertConfigSection, Geräte nach Subzone read-only, Mock/Real, Delete)
+├── SensorConfigPanel.vue (SlideOver, via DeviceDetailView @sensor-click — Grundeinstellungen inkl. operating_mode, timeout_seconds)
+└── ActuatorConfigPanel.vue (SlideOver, via DeviceDetailView @actuator-click — subzone_id via normalizeSubzoneId)
 ```
 
 ### Komponentenhierarchie (SensorsView / Komponenten-Tab)
 
-**Navigation:** Sidebar „Komponenten“ → Route `/sensors` → `SensorsView.vue`. Diese View ist die **Wissensdatenbank** (Phase K4): Geräte-Inventar, Zone-/Subzonen-Kontext, Device-Schemas. Backend-APIs: `/zone/context`, `/export/*`, `/schema-registry/*`, ggf. `inventory` (siehe `src/api/`). DB-Trennung und Abhängigkeiten (Zonen, Subzonen, Wissen): `.claude/reference/DATABASE_ARCHITECTURE.md`.
+**Navigation:** Sidebar „Komponenten“ → Route `/sensors` → `SensorsView.vue` (ComponentInventoryView). Diese View ist die **Wissensdatenbank** (Inventar): flache Tabelle aller Sensoren/Aktoren/ESPs, Zone-Kontext, Device-Schemas. **SensorConfigPanel/ActuatorConfigPanel werden hier NICHT geöffnet** — nur in der HardwareView (Route `/hardware`). Backend-APIs: `/zone/context`, `/export/*`, `/schema-registry/*`, ggf. `inventory` (siehe `src/api/`). DB-Trennung: `.claude/reference/DATABASE_ARCHITECTURE.md`.
 
 ```
-SensorsView.vue (?sensor={espId}-gpio{gpio} → auto-open SensorConfigPanel)
-├── Tab-Navigation (Sensors/Actuators)
-├── Filter (ESP ID, Sensor Type, Quality, Actuator Type, State)
-├── Zone-Accordion → Subzone-Accordion
-│   ├── SensorCard.vue[] (mode='config', from components/devices/)
-│   └── ActuatorCard.vue[] (mode='config', from components/devices/)
-├── Subzone CRUD (erstellen, umbenennen, loeschen)
-├── SlideOver
-│   ├── SensorConfigPanel.vue (AccordionSections + DeviceMetadataSection + LinkedRulesSection)
-│   │   └── Cross-Link: "Live-Daten im Monitor anzeigen" → /monitor/:zoneId
-│   └── ActuatorConfigPanel.vue (AccordionSections + DeviceMetadataSection + LinkedRulesSection)
+SensorsView.vue (?sensor={espId}-gpio{gpio} oder ?focus=sensorId → auto-open DeviceDetailPanel, NICHT SensorConfigPanel)
+├── InventoryTable.vue (filterbar, sortierbar)
+├── DeviceDetailPanel.vue (SlideOver: Metadaten, Schema, Zone-Kontext, LinkedRules)
+│   └── Link "Vollständige Konfiguration" → /hardware?openSettings={espId} (öffnet ESPSettingsSheet; Sensor-/Aktor-Konfig via Level 2 → Card klicken)
 └── EmergencyStopButton.vue
 ```
 
@@ -474,7 +473,7 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
 | database | stores/database.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
 | quickAction | stores/quickAction.store.ts | isMenuOpen, activePanel (QuickActionPanel: 'menu' \| 'alerts' \| 'navigation'), currentView, contextActions[], globalActions[] | toggleMenu, closeMenu, setActivePanel, setViewContext, setContextActions, executeAction; alertSummary (computed from alert-center + inbox fallback), hasActiveAlerts, isCritical, isWarning |
-| notificationInbox | stores/notification-inbox.store.ts | notifications[], unreadCount, highestSeverity, isDrawerOpen, filter (InboxFilter) | loadInitial, loadMore, markAsRead, markAllAsRead, toggleDrawer, setFilter; WS-Listener: notification_new, notification_updated, notification_unread_count |
+| notificationInbox | stores/notification-inbox.store.ts | notifications[], unreadCount, highestSeverity, isDrawerOpen, activeFilter (InboxFilter), sourceFilter (SourceFilterValue) | loadInitial, loadMore, markAsRead, markAllAsRead, toggleDrawer, setSourceFilter; filteredNotifications (Severity + Source); WS-Listener: notification_new, notification_updated, notification_unread_count |
 | alertCenter | stores/alert-center.store.ts | alertStats, activeAlerts[], statusFilter, severityFilter | fetchStats, fetchActiveAlerts, acknowledgeAlert, resolveAlert, startStatsPolling, stopStatsPolling; unresolvedCount, criticalCount, warningCount, hasCritical, mttaFormatted, mttrFormatted (computed) |
 | diagnostics | shared/stores/diagnostics.store.ts | currentReport, history[], availableChecks[], isRunning | runDiagnostic, runCheck, loadHistory, loadReport, exportReport; lastRunAge (aus currentReport oder history[0]), checksByName, statusCounts (Phase 4D) |
 | plugins | shared/stores/plugins.store.ts | plugins[], selectedPlugin, executionHistory[], pluginOptions (computed) | fetchPlugins, fetchPluginDetail, executePlugin, togglePlugin, updateConfig, fetchHistory (Phase 4C) |
@@ -674,11 +673,22 @@ Zentrale deutsche Labels:
 QUALITY_LABELS: { excellent: "Ausgezeichnet", good: "Gut", ... }
 STATE_LABELS: { OPERATIONAL: "Betriebsbereit", ... }
 ACTUATOR_TYPE_LABELS: { relay: "Relais", pump: "Pumpe", ... }
+EMAIL_STATUS_LABELS: { sent: "Zugestellt", failed: "Fehlgeschlagen", pending: "Ausstehend", permanently_failed: "Dauerhaft fehlgeschlagen" }  // Phase C V1.2
+getEmailStatusLabel(status): string  // Email-Log + Notification metadata.email_status
+NOTIFICATION_SOURCE_LABELS: { sensor_threshold: "Sensor", grafana: "Infrastruktur", mqtt_handler: "Aktor", logic_engine: "Regel", manual/system/device_event/autoops: "System" }  // Alert-Basis 3
+getNotificationSourceLabel(source): string  // Filter-Chips + NotificationItem Badge
 ```
 
 ### errorCodeTranslator.ts
 
 Error-Codes (1xxx-5xxx) → Deutsche Beschreibungen
+
+### subzoneHelpers.ts
+
+```typescript
+normalizeSubzoneId(val: string | null | undefined): string | null
+// "Keine Subzone" = immer null. "__none__", "", leer → null. Defense-in-Depth vor API.
+```
 
 ### sensorDefaults.ts
 
@@ -747,6 +757,7 @@ type AggCategory = 'climate' | 'water' | 'light' | 'system'
 // Admin Routes (requiresAdmin: true)
 '/system-monitor' → SystemMonitorView.vue (Tabs: Health, Hierarchy, Database, Logs, MQTT, Events, Reports, Diagnostics — Tabs lazy via defineAsyncComponent)
 '/plugins'        → PluginsView.vue (AutoOps Plugins, Phase 4C)
+'/email'          → EmailPostfachView.vue (E-Mail-Postfach, Admin)
 '/users'          → UserManagementView.vue
 '/system-config'  → SystemConfigView.vue
 '/load-test'      → LoadTestView.vue
@@ -1141,8 +1152,94 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.24
-**Letzte Aktualisierung:** 2026-03-04
+**Version:** 9.34
+**Letzte Aktualisierung:** 2026-03-05
+
+### Aenderungen in v9.34 (Alert-Basis 4 — websocket_enabled in NotificationPreferences)
+
+- NotificationPreferences.vue: Toggle „Echtzeit-Updates (WebSocket)“ in Basic Zone (vor E-Mail) — Backend nutzt websocket_enabled: bei false kein WS-Broadcast
+- applyPrefs/save: websocket_enabled ref + API-Binding, Default true
+- Section 2: notifications/ 3 → 4 Dateien (NotificationPreferences explizit)
+
+### Aenderungen in v9.33 (Alert-Basis 3 — Filter nach source in NotificationDrawer)
+
+- notification-inbox.store.ts: Neuer State `sourceFilter` (SourceFilterValue), Action `setSourceFilter()`, `filteredNotifications` erweitert um Source-Filter (AND mit Severity)
+- NotificationDrawer.vue: Source-Filter-Chips (Alle, Sensor, Infrastruktur, Aktor, Regel, System) unter Status-Tabs
+- NotificationItem.vue: Source-Badge in Titelzeile (Sensor/Infrastruktur/Aktor/Regel/System), Farbkodierung (blau/orange/lila/indigo/grau)
+- labels.ts: NOTIFICATION_SOURCE_LABELS + getNotificationSourceLabel() — Backend-source zu lesbarem Label
+- shared/stores/index.ts: Re-Export SourceFilterValue
+
+### Aenderungen in v9.32 (Alert-Basis 2 — Device-Level Alert-Config UI)
+
+- DeviceAlertConfigSection.vue: Neue Komponente in `components/devices/` — Device-Level Alert-Konfiguration (ISA-18.2), espApi.getAlertConfig/updateAlertConfig, Felder: alerts_enabled, propagate_to_children, suppression_reason, suppression_note, suppression_until (kein custom_thresholds/severity_override)
+- ESPSettingsSheet.vue: Accordion-Sektion „Alert-Konfiguration (Gerät)“ mit DeviceAlertConfigSection integriert (nach Zone, vor Geräte nach Subzone)
+- Section 2: devices/ 7 → 8 Dateien (DeviceAlertConfigSection)
+- Section 3: Komponentenhierarchie HardwareView — ESPSettingsSheet um Alert-Konfiguration erweitert
+
+### Aenderungen in v9.31 (Alert-Basis 1 — AlarmListWidget Notification-API)
+
+- AlarmListWidget.vue: Datenquelle von espStore.devices (sensor.quality) auf alertCenterStore.activeAlertsFromInbox umgestellt — persistierte Notifications statt Live-Quality
+- AlarmListWidget.vue: Gleiche Quelle wie QuickAlertPanel und NotificationDrawer (Single Source of Truth)
+- AlarmListWidget.vue: Klick auf Alert oeffnet NotificationDrawer („Zum Alert“), Empty-State „Keine aktiven Alerts“ + Link „Benachrichtigungen oeffnen“
+- Section 0.4 ALERT_VOLLANALYSE: Status GEFIXT dokumentiert
+
+### Aenderungen in v9.30 (Config-Panel-Optimierung 5 — schedule_config + Schwellwerte-Doku)
+
+- SensorConfigPanel.vue: schedule_config UI bei operating_mode=scheduled — Cron-Presets + Expression-Input, Load/Save via sensorsApi.createOrUpdate
+- SensorConfigPanel.vue: Accordion-Titel "Sensor-Schwellwerte (Basis)" — Klarstellung vs. AlertConfigSection
+- AlertConfigSection.vue: Sektion "Schwellen-Override für Alerts" — In-Code-Kommentar: Override ueberschreibt Haupt-Schwellen nur fuer Alert-Regeln
+- types/index.ts: SensorConfigResponse um schedule_config erweitert
+- Backend: _model_to_response in sensors.py liefert schedule_config in GET-Response
+
+### Sensor-Schwellwerte: Haupt vs. Alert-Override
+
+| Stelle | Zweck | API |
+|--------|------|-----|
+| **SensorConfigPanel** "Sensor-Schwellwerte (Basis)" | Basiskonfiguration fuer den Sensor (threshold_min/max, warning_min/max) | POST createOrUpdate |
+| **AlertConfigSection** "Schwellen-Override für Alerts" | Override nur fuer Alert-Regeln (custom_thresholds, severity_override) | PATCH /sensors/{id}/alert-config |
+
+Keine Dopplung der Semantik: Haupt-Schwellen = eine Stelle (SensorConfigPanel). Alert-Override = separate Stelle (AlertConfigSection).
+
+### Aenderungen in v9.29 (Config-Panel-Optimierung 3 — Initial-Panels Subzone-Dropdown)
+
+- AddSensorModal.vue: Freitext durch SubzoneAssignmentSection ersetzt — Dropdown „Keine Subzone“ + bestehende Subzonen + „Neue Subzone erstellen“; effectiveGpio (OneWire/I2C/GPIO), subzoneModel (string | null), resetForm subzone_id: null
+- AddActuatorModal.vue: Freitext durch SubzoneAssignmentSection ersetzt — gleiche Dropdown-Logik
+- addMultipleOneWireSensors: `normalizeSubzoneId(newSensor.subzone_id)` statt trim/undefined
+- types/index.ts: MockSensorConfig.subzone_id?: string | null (analog MockActuatorConfig)
+
+### Aenderungen in v9.28 (Config-Panel-Optimierung 2)
+
+- subzoneHelpers.ts: Neues Util `normalizeSubzoneId()` — "__none__", "", leer → null vor API (Defense-in-Depth)
+- esp.ts: addSensor/addActuator nutzen normalizeSubzoneId fuer subzone_id
+- ActuatorConfigPanel.vue: handleSave normalisiert subzone_id via normalizeSubzoneId
+- SensorConfigPanel.vue: operating_mode + timeout_seconds (Load, UI, Save) — Betriebsmodus-Select, Stale-Timeout bei continuous
+- types/index.ts: SensorConfigResponse um operating_mode, timeout_seconds erweitert
+- Backend: SensorConfigResponse + _model_to_response liefern operating_mode, timeout_seconds
+
+### Aenderungen in v9.27 (Initiales Sensor/Aktor-Config — Subzone top-level)
+
+- esp.ts addSensor (Real-ESP): `subzone_id` als **top-level** in `realConfig` (nicht nur in metadata) — Backend wertet nur top-level; metadata nur noch `created_via`
+- esp.ts addActuator (Real-ESP): `realConfig` um `subzone_id: config.subzone_id ?? null` ergaenzt
+- types/index.ts: `ActuatorConfigCreate` und `MockActuatorConfig` um `subzone_id?: string | null` erweitert
+- AddActuatorModal.vue: SubzoneAssignmentSection (Dropdown) — `subzoneModel` v-model, resetForm `subzone_id: null`; Wert an addActuator uebergeben
+- AddSensorModal.vue: SubzoneAssignmentSection (Dropdown) — `subzoneModel` v-model, effectiveGpio je nach Sensortyp; addMultipleOneWireSensors nutzt `normalizeSubzoneId(newSensor.subzone_id)` bei jedem `espStore.addSensor()`-Aufruf
+
+### Aenderungen in v9.26 (ESPSettingsSheet Bereinigung + Layout)
+
+- ESPSettingsSheet.vue: Reines Informations-Panel — Emits `open-sensor-config`/`open-actuator-config` entfernt, keine Links zu SensorConfigPanel/ActuatorConfigPanel
+- ESPSettingsSheet.vue: Eine Sektion „Geräte nach Subzone“ statt getrennter Sensor-/Aktor-Listen — gruppiert nach subzone_id, „Keine Subzone“ am Ende, read-only (kein cursor: pointer)
+- ESPSettingsSheet.vue: Layout-Vereinheitlichung — Design-Tokens (--space-*, --text-xs, --text-sm), device-group/device-list CSS, kompakte Zeilen
+- ESPSettingsSheet.vue: Mock vs. Real getrennt — „Mock-Steuerung“ nur bei isMock, „Echt-ESP-Info“ nur bei echtem ESP
+- HardwareView.vue: handleSensorConfigFromSheet/handleActuatorConfigFromSheet entfernt — Konfiguration ausschliesslich via Level 2 (DeviceDetailView @sensor-click/@actuator-click)
+- Section 3: Komponentenhierarchie HardwareView — ESPSettingsSheet, SensorConfigPanel, ActuatorConfigPanel aktualisiert
+
+### Aenderungen in v9.25 (Phase C V1.2 Email-Retry Frontend)
+
+- labels.ts: EMAIL_STATUS_LABELS + getEmailStatusLabel() — Email-Status-Labels (sent, failed, pending, permanently_failed) fuer NotificationDrawer + NotificationItem
+- api/notifications.ts: EmailLogStatus Type, EmailLogEntry.status um permanently_failed erweitert, EmailLogListFilters.status typisiert
+- NotificationDrawer.vue: getEmailStatusLabel aus labels, retry_count-Anzeige (X/3 Versuche) bei failed/permanently_failed, CSS drawer__email-dot--permanently_failed
+- NotificationItem.vue: getEmailStatusLabel aus labels, CSS item__email-status--permanently_failed
+- Section 9: labels.ts um EMAIL_STATUS_LABELS + getEmailStatusLabel erweitert
 
 ### Aenderungen in v9.24 (Backend-Datenkonsistenz Fix)
 
@@ -1375,7 +1472,7 @@ cleanupWebSocket() {
 - CustomDashboardView.vue: Deep-Link Support — `route.params.dashboardId` und Legacy `route.query.layout` konsumieren, Breadcrumb-Update
 - MonitorView.vue: Sensor-Detail URL-Sync via `router.replace()` in `openSensorDetail()`/`closeSensorDetail()`, Deep-Link Watcher fuer sensorId
 - MonitorView.vue: Cross-Link "Konfiguration" Button → `/sensors?sensor={espId}-gpio{gpio}`, alle `/custom-dashboard` Links → `/editor`
-- SensorsView.vue: `?sensor={espId}-gpio{gpio}` Query-Param Deep-Link — auto-open SensorConfigPanel
+- SensorsView.vue: `?sensor={espId}-gpio{gpio}` bzw. `?focus=sensorId` — auto-open DeviceDetailPanel (volle Konfiguration nur in HardwareView)
 - SensorsView.vue: Cross-Link "Live-Daten im Monitor anzeigen" Button → `/monitor/:zoneId`
 - LinkedRulesSection.vue: Rule-Items klickbar mit `router.push({ name: 'logic-rule', params: { ruleId } })`, ExternalLink Icon mit Hover-Reveal
 - HardwareView.vue: breadcrumb Objekt erweitert um `sensorName`, `ruleName`, `dashboardName`

@@ -218,6 +218,51 @@ class ValidationResult:
 
 ---
 
+### 1.13 ZoneContextService (Phase K3)
+
+**Datei:** `src/services/zone_context_service.py` (114 Zeilen)
+
+| Methode | Parameter | Return | Beschreibung |
+|---------|-----------|--------|--------------|
+| `get_by_zone()` | `zone_id: str` | `Optional[ZoneContext]` | Kontext einer Zone |
+| `upsert()` | `zone_id, data: ZoneContextUpdate` | `ZoneContext` | Kontext anlegen/ersetzen |
+| `archive_cycle()` | `zone_id: str` | `CycleEntry` | Anbauzyklus archivieren |
+| `get_history()` | `zone_id: str` | `List[CycleEntry]` | Archivierte Zyklen |
+
+---
+
+### 1.14 MonitorDataService (Phase K4)
+
+**Datei:** `src/services/monitor_data_service.py` (242 Zeilen)
+
+| Methode | Parameter | Return | Beschreibung |
+|---------|-----------|--------|--------------|
+| `get_zone_monitor_data()` | `zone_id: str` | `ZoneMonitorData` | Sensoren/Aktoren nach Subzone gruppiert |
+| `get_hierarchy()` | `kaiser_id: str` | `KaiserHierarchy` | Vollständige Hierarchie (Kaiser→Zonen→Subzonen→Devices) |
+
+---
+
+### 1.15 HealthScoreService (Phase K4)
+
+**Datei:** `src/services/health_score_service.py` (130 Zeilen)
+
+| Methode | Parameter | Return | Beschreibung |
+|---------|-----------|--------|--------------|
+| `compute_zone_health()` | `zone_id: str` | `float` | Health-Score 0-100 für Zone |
+| `compute_sensor_health()` | `sensor_id: int` | `float` | Health-Score für Sensor |
+
+---
+
+### 1.16 ZoneKPIService (Phase K4)
+
+**Datei:** `src/services/zone_kpi_service.py` (227 Zeilen)
+
+| Methode | Parameter | Return | Beschreibung |
+|---------|-----------|--------|--------------|
+| `get_zone_kpis()` | `zone_id: str` | `ZoneKPIs` | VPD, DLI, Health-Score, etc. |
+
+---
+
 ## 2. MQTT Topics & Payloads
 
 ### 2.1 Subscribed Topics (Server empfängt)

@@ -246,7 +246,7 @@ class YourRepository(BaseRepository[YourModel]):
 | Model | Tabelle | Wichtige Felder |
 |-------|---------|-----------------|
 | ESPDevice | `esps` | esp_id (PK), zone_id, zone_name, master_zone_id, is_online, last_heartbeat |
-| SensorConfig | `sensor_configs` | esp_id (FK), gpio, sensor_type, i2c_address, alert_config (JSONB), runtime_stats (JSONB) |
+| SensorConfig | `sensor_configs` | esp_id (FK), gpio, sensor_type, i2c_address, sensor_metadata (JSON, inkl. description, unit), alert_config (JSONB), runtime_stats (JSONB) |
 | ActuatorConfig | `actuator_configs` | esp_id (FK), gpio, actuator_type, inverted, alert_config (JSONB), runtime_stats (JSONB) |
 | SubzoneConfig | `subzone_configs` | id (UUID PK), esp_id (FK), subzone_id, assigned_gpios (JSON), safe_mode_active |
 | CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority, cooldown_seconds |
