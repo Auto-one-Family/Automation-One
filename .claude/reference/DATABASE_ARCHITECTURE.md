@@ -46,7 +46,7 @@ Wissensdaten sind **getrennt gespeichert**, aber **logisch verknüpft** über `z
 | Ort | Feld | Verknüpfung | Beschreibung |
 |-----|------|-------------|--------------|
 | **esp_devices** | device_metadata (JSON) | 1:1 zum Gerät | Geräte-Metadaten (Hersteller, Modell, Seriennummer, etc.) |
-| **sensor_configs** | sensor_metadata (JSON), runtime_stats, alert_config | FK esp_id → esp_devices | Sensor-Metadaten, Laufzeit, Schwellen |
+| **sensor_configs** | sensor_metadata (JSON, inkl. description, unit), runtime_stats, alert_config | FK esp_id → esp_devices | Sensor-Metadaten, Laufzeit, Schwellen |
 | **actuator_configs** | actuator_metadata (JSON), runtime_stats, alert_config | FK esp_id → esp_devices | Aktor-Metadaten, Laufzeit |
 
 **Verknüpfung:** ESP ist die Wurzel; Sensoren/Aktoren hängen per FK an ESP. Zone-Kontext wird über `esp.zone_id` → `zone_contexts.zone_id` zugeordnet (in Export und UI join-artig geladen).

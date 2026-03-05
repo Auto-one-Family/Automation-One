@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 3.0 | **Aktualisiert:** 2026-03-04
+> **Version:** 3.0 | **Aktualisiert:** 2026-03-05
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
@@ -120,6 +120,8 @@ allowed-tools: Read
 
 > **Hinweis:** Subzone-Endpoints sind device-scoped (wie Zone-Endpoints).
 > Subzones haben eine eigene `subzone_configs` DB-Tabelle (inkl. `custom_data` JSONB für Subzonen-Metadaten).
+>
+> **subzone_id Normalisierung (Sensors/Actuators Create-Update):** `null`, `""`, `"__none__"` → „Keine Subzone“ = GPIO aus allen Subzonen entfernt. Nutzt `utils/subzone_helpers.normalize_subzone_id()`.
 
 ### Zone Context (`/zone/context`) - 7 Endpoints (Phase K3)
 
@@ -290,8 +292,8 @@ allowed-tools: Read
 | `/notifications/unread-count` | GET | JWT | Ungelesene-Anzahl + höchste Severity |
 | `/notifications/alerts/active` | GET | JWT | Aktive Alerts (Phase 4B, ISA-18.2) |
 | `/notifications/alerts/stats` | GET | JWT | Alert-Statistiken: MTTA, MTTR, Counts (Phase 4B) |
-| `/notifications/email-log` | GET | Admin | Email-Versandprotokoll (paginiert, filterbar) (Phase C V1.1) |
-| `/notifications/email-log/stats` | GET | Admin | Email-Versandstatistiken (Phase C V1.1) |
+| `/notifications/email-log` | GET | Admin | Email-Versandprotokoll (paginiert, filterbar). Query `status`, `template` (Teilstring), `date_from`, `date_to`, `page`, `page_size` (Phase C V1.1, V1.2) |
+| `/notifications/email-log/stats` | GET | Admin | Email-Versandstatistiken. `by_status` inkl. permanently_failed (Phase C V1.1, V1.2) |
 | `/notifications/{id}` | GET | JWT | Notification Details |
 | `/notifications/{id}/read` | PATCH | JWT | Als gelesen markieren |
 | `/notifications/{id}/acknowledge` | PATCH | JWT | Alert bestätigen: active → acknowledged (Phase 4B) |
@@ -1367,7 +1369,8 @@ Health Check (keine Auth erforderlich).
 - `PendingESPDevice`, `ESPApprovalRequest`
 
 ### Sensor Schemas (`schemas/sensor.py`)
-- `SensorConfigBase`, `SensorConfigUpdate`
+- `SensorConfigBase`, `SensorConfigCreate`, `SensorConfigUpdate`
+- `description`, `unit` (optional, max 500/20 Zeichen) — persistiert in `sensor_metadata`, bei GET zurückgegeben
 - `SensorReading`, `SensorDataQuery`, `SensorStats`
 - `SensorProcessRequest`, `SensorCalibrateRequest`
 - `OneWireDevice`, `OneWireScanRequest`
@@ -1396,7 +1399,7 @@ Health Check (keine Auth erforderlich).
 - `NotificationPreferencesUpdate`, `NotificationPreferencesResponse`
 - `UnreadCountResponse`, `TestEmailRequest`
 - `AlertStatsResponse`, `AlertActiveListResponse` (Phase 4B)
-- `EmailLogResponse`, `EmailLogBrief`, `EmailLogListResponse`, `EmailLogStatsResponse` (Phase C V1.1)
+- `EmailLogResponse`, `EmailLogBrief`, `EmailLogListResponse`, `EmailLogStatsResponse` (Phase C V1.1, V1.2: status permanently_failed)
 - `GrafanaAlert`, `GrafanaWebhookPayload`
 
 ### Debug Schemas (`schemas/debug.py`)

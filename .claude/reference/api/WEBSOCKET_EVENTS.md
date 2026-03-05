@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 2.7 | **Aktualisiert:** 2026-03-04
+> **Version:** 2.7 | **Aktualisiert:** 2026-03-05
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
 > **Event-Anzahl:** 33 verschiedene Event-Typen

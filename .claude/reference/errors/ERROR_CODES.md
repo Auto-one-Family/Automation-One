@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Error-Code Referenz
 
-> **Version:** 1.5 | **Aktualisiert:** 2026-03-04
+> **Version:** 1.5 | **Aktualisiert:** 2026-03-05
 > **Quellen:** `El Trabajante/src/models/error_codes.h`, `El Servador/god_kaiser_server/src/core/error_codes.py`
 > **Letzte Verifizierung:** AGENT 3 Error-Code Spezialist
 

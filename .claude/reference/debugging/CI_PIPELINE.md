@@ -1,6 +1,6 @@
 # CI/CD Pipeline - AutomationOne
 
-> **Version:** 1.3 | **Aktualisiert:** 2026-02-23
+> **Version:** 1.4 | **Aktualisiert:** 2026-03-05
 > **Zweck:** Vollständige Dokumentation der GitHub Actions Workflows
 > **Themengebiet:** CI/CD, Artifacts, GitHub CLI
 
@@ -395,6 +395,7 @@ gh run download <run-id>
 | `docker compose up --wait` schlägt sofort fehl | Container-Exit ohne Log-Output | `--wait` entfernen, separaten Health-Poll-Step nutzen |
 | Lokale Tests abgebrochen (OPS-ALERT) | auto-ops PostToolUse:Bash Hook prüft Exit-Codes | pytest exit-code 1 = Testfehler ist normal; Hook-Alert ignorieren oder Hook deaktivieren |
 | `poetry lock --no-update` unbekannt | Poetry 2.x hat die Option entfernt | `poetry lock` (volles Resolve) verwenden |
+| Security Scan schlägt wegen neuer CVEs | Trivy findet neue CVEs in Dependencies | Neue CVEs in `.trivyignore` eintragen mit Begründung (z.B. `# CVE-2026-27903 minimatch`); nur bei bekannter Nicht-Ausnutzbarkeit |
 
 ### 5.3 Lokale Reproduktion
 
@@ -485,5 +486,5 @@ gh workflow run wokwi-tests.yml
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-23
-**Version:** 1.3
+**Letzte Aktualisierung:** 2026-03-05
+**Version:** 1.4

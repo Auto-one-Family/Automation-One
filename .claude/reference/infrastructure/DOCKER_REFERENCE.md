@@ -210,9 +210,9 @@ docker system df -v
 **Aenderungen zum Basis-Stack:**
 - `LOG_LEVEL: DEBUG`
 - `SERVER_RELOAD: "true"`
-- Volume-Mounts fuer `src/`, `tests/`, `alembic/`
+- Volume-Mounts fuer `src/`, `tests/`, `alembic/`, `logs/server`
 - Uvicorn mit `--reload`
-- Frontend: `NODE_ENV: development`
+- Frontend: `NODE_ENV: development`, Mounts fuer `tsconfig.json`, `tailwind.config.js`, `postcss.config.js`
 
 **Aktivierung:**
 ```bash

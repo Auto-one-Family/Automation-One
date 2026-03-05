@@ -388,8 +388,8 @@ Located in `.claude/` directory:
 - `./docker/grafana/provisioning/` -> Grafana provisioning
 
 ### docker-compose.dev.yml (Development Overrides)
-- el-servador: LOG_LEVEL=DEBUG, hot-reload, source mounts (src, alembic, tests)
-- el-frontend: NODE_ENV=development, source mounts (src, public, config files)
+- el-servador: LOG_LEVEL=DEBUG, hot-reload, source mounts (src, alembic, tests), logs/server Mount
+- el-frontend: NODE_ENV=development, source mounts (src, public, tsconfig.json, tailwind.config.js, postcss.config.js)
 - **Usage:** `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`
 
 ### docker-compose.ci.yml (GitHub Actions)

@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.3 | **Aktualisiert:** 2026-03-04
+> **Version:** 2.3 | **Aktualisiert:** 2026-03-05
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
 > **Änderungen:** Server-Subscriptions auf Multi-Kaiser-Wildcards (`kaiser/+/`) umgestellt

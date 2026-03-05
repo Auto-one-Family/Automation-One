@@ -1,6 +1,7 @@
 # Log-System - AutomationOne
 
-> **Version:** 4.7 | **Aktualisiert:** 2026-03-02
+> **Version:** 4.8 | **Aktualisiert:** 2026-03-05
+> **Änderungen 4.8:** docker-compose.dev.yml: logs/server Mount für el-servador, tsconfig/tailwind/postcss für el-frontend
 > **Änderungen 4.7:** Level-Normalisierung (uppercase) für loki, mqtt-broker, el-frontend in Alloy. Drop-Filter für Loki query-stats (metrics.go, engine.go, roundtrip.go). Volumen 57→24 MB/Tag
 > **Zweck:** Vollständige Dokumentation aller Log-Quellen, Speicherorte und Capture-Methoden
 > **Änderungen 3.0:** Docker-basierte Log-Infrastruktur, neue Log-Verzeichnisse, PostgreSQL-Logging, .env-Auslagerung
@@ -30,7 +31,7 @@
 
 | Verzeichnis | Container | Beschreibung |
 |-------------|-----------|--------------|
-| `logs/server/` | el-servador | FastAPI Server JSON-Logs |
+| `logs/server/` | el-servador | FastAPI Server JSON-Logs (auch in docker-compose.dev.yml gemountet) |
 | `logs/mqtt/` | mqtt-broker | Deaktiviert (Mosquitto stdout-only seit v3.1); Broker-Logs via Loki `compose_service=mqtt-broker` |
 | (kein Bind-Mount) | postgres | PostgreSQL Logs via stderr → Docker → Alloy → Loki `compose_service=postgres` (level, query_duration_ms) |
 | `logs/esp32/` | - | ESP32 Serial Logs (manuell via PlatformIO) |
