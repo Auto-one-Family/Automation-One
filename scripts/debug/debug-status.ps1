@@ -100,11 +100,12 @@ function Invoke-JsonEndpoint {
 }
 
 function Get-LokiLastLogAgeSeconds {
-    param([string]$LogQuery, [int]$TimeoutSec = 3)
+    param([string]$LogQuery, [int]$TimeoutSec = 5)
+    $lokiBase = "http://127.0.0.1:3100"
     try {
         $nowNs = [long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) * 1000000
         $encodedQuery = [Uri]::EscapeDataString($LogQuery)
-        $uri = "http://localhost:3100/loki/api/v1/query_range?query=$encodedQuery&limit=1&direction=backward&end=$nowNs"
+        $uri = "$lokiBase/loki/api/v1/query_range?query=$encodedQuery&limit=1&direction=backward&end=$nowNs"
         $resp = Invoke-RestMethod -Uri $uri -TimeoutSec $TimeoutSec -ErrorAction Stop
         $values = $resp.data.result | Select-Object -First 1 | ForEach-Object { $_.values }
         if ($values -and $values.Count -gt 0) {
@@ -251,7 +252,8 @@ if (-not $frontendPort) {
 # 6. Loki
 # ---------------------------------------------------------------------------
 
-$lokiReady = Invoke-HttpCheck "http://localhost:3100/ready"
+# Use 127.0.0.1 to avoid WinHTTP proxy/localhost timeout on Windows; 5s for Loki startup response
+$lokiReady = Invoke-HttpCheck "http://127.0.0.1:3100/ready" -TimeoutSec 5
 $lokiOk = ($lokiReady.ok -and ([string]$lokiReady.body) -match "ready")
 $lokiLastAge = -1
 if ($lokiOk) {

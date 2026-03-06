@@ -156,7 +156,11 @@ Agents koennen Loki-Logs per CLI oder API abfragen:
 | `make loki-trace CID=<id>` | Correlation-ID verfolgen | Datenfluss-Analyse ESP→Server→Frontend |
 | `make loki-esp ESP=<id>` | Alle Logs eines ESPs | ESP-spezifisches Debugging |
 | `make loki-health` | Loki-Status pruefen | Stack-Check, aktive Streams |
-| `scripts/loki-query.sh` | Direkter Script-Aufruf | Fuer erweiterte Queries |
+
+**Voraussetzung:** `make monitor-up` (Loki auf localhost:3100). Ohne Monitoring-Stack: Loki nicht erreichbar.
+
+**Windows:** Makefile nutzt automatisch `scripts/loki-query.ps1` (PowerShell). Direkt: `powershell -ExecutionPolicy Bypass -File scripts/loki-query.ps1 errors 5`
+**Linux/Mac:** `scripts/loki-query.sh` (Bash)
 
 **Queries-Referenz:** `docs/debugging/logql-queries.md` (10 Queries fuer die haeufigsten Debug-Situationen)
 **Debug-Workflow:** `docs/debugging/debug-workflow.md` (10 Szenarien mit Root-Cause-Matrix)

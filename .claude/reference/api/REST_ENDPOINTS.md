@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 3.0 | **Aktualisiert:** 2026-03-05
+> **Version:** 3.1 | **Aktualisiert:** 2026-03-06
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
@@ -54,7 +54,7 @@ allowed-tools: Read
 | `/esp/devices/{esp_id}/alert-config` | GET | JWT | Device-Level Alert-Config abrufen |
 | `/esp/discovery` | GET | JWT | Network Discovery Results |
 
-### Sensors (`/sensors`) - 16 Endpoints
+### Sensors (`/sensors`) - 17 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
@@ -62,6 +62,7 @@ allowed-tools: Read
 | `/sensors/{sensor_id}` | GET | JWT | Sensor Details |
 | `/sensors` | POST | JWT | Sensor erstellen |
 | `/sensors/{sensor_id}` | DELETE | JWT | Sensor löschen |
+| `/sensors/data` | GET | JWT | Query Sensor-Daten (historisch, filterbar nach zone_id, subzone_id) |
 | `/sensors/{sensor_id}/data` | GET | JWT | Sensor-Daten (historisch) |
 | `/sensors/{sensor_id}/stats` | GET | JWT | Sensor-Statistiken |
 | `/sensors/types` | GET | JWT | Alle Sensor-Typen |
@@ -747,6 +748,53 @@ Sensor-Details.
 
 ---
 
+### 3.2b GET /sensors/data
+
+Query historische Sensor-Daten (global, filterbar). Phase 0.1: Response enthält `zone_id`, `subzone_id` pro Reading (zum Messzeitpunkt).
+
+**Auth:** JWT Required
+
+**Query-Parameter:**
+
+| Parameter | Typ | Beschreibung |
+|-----------|-----|--------------|
+| `esp_id` | string | Filter nach ESP device ID |
+| `gpio` | int | Filter nach GPIO |
+| `sensor_type` | string | Filter nach Sensortyp |
+| `start_time` | datetime | Startzeit (ISO) |
+| `end_time` | datetime | Endzeit (ISO) |
+| `quality` | string | Filter nach quality |
+| `zone_id` | string | Filter nach Zone (Phase 0.1) |
+| `subzone_id` | string | Filter nach Subzone (Phase 0.1) |
+| `limit` | int | Max. Anzahl (1-1000, default 100) |
+
+**Response 200 (SensorDataResponse):**
+```json
+{
+  "success": true,
+  "esp_id": "ESP_12AB34CD",
+  "gpio": 34,
+  "sensor_type": "ph",
+  "readings": [
+    {
+      "timestamp": "2026-02-01T10:00:00Z",
+      "raw_value": 2150,
+      "processed_value": 6.8,
+      "unit": "pH",
+      "quality": "good",
+      "sensor_type": "ph",
+      "zone_id": "greenhouse",
+      "subzone_id": "zone_a"
+    }
+  ],
+  "count": 1,
+  "aggregation": null,
+  "time_range": {"start": "...", "end": "..."}
+}
+```
+
+---
+
 ### 3.3 GET /sensors/{sensor_id}/data
 
 Historische Sensor-Daten.
@@ -993,7 +1041,7 @@ Neue Rule erstellen.
 
 | type | Felder | Beschreibung |
 |------|--------|--------------|
-| `sensor` / `sensor_threshold` | esp_id, gpio, operator, value, sensor_type? | Sensor-Schwellwert |
+| `sensor` / `sensor_threshold` | esp_id, gpio, operator, value, sensor_type?, subzone_id? (Phase 2.4) | Sensor-Schwellwert |
 | `time` / `time_window` | start_time (HH:MM), end_time (HH:MM), days_of_week? | Zeitfenster |
 | `hysteresis` | esp_id, gpio, sensor_type?, activate_above?, deactivate_below?, activate_below?, deactivate_above? | Hysterese |
 | `compound` | logic (AND/OR), conditions[] | Verschachtelte Bedingungen |
@@ -1371,7 +1419,7 @@ Health Check (keine Auth erforderlich).
 ### Sensor Schemas (`schemas/sensor.py`)
 - `SensorConfigBase`, `SensorConfigCreate`, `SensorConfigUpdate`
 - `description`, `unit` (optional, max 500/20 Zeichen) — persistiert in `sensor_metadata`, bei GET zurückgegeben
-- `SensorReading`, `SensorDataQuery`, `SensorStats`
+- `SensorReading` (inkl. zone_id, subzone_id Phase 0.1), `SensorDataQuery`, `SensorStats`
 - `SensorProcessRequest`, `SensorCalibrateRequest`
 - `OneWireDevice`, `OneWireScanRequest`
 
@@ -1381,7 +1429,7 @@ Health Check (keine Auth erforderlich).
 - `EmergencyStopRequest`, `ActuatorHistoryEntry`
 
 ### Logic Schemas (`schemas/logic.py`)
-- `SensorCondition`, `TimeCondition`, `HysteresisCondition`, `CompoundCondition`
+- `SensorCondition` (optional `subzone_id` Phase 2.4), `TimeCondition`, `HysteresisCondition`, `CompoundCondition`
 - `ActuatorAction`, `NotificationAction`, `DelayAction`
 - `LogicRuleBase`, `LogicRuleCreate`, `LogicRuleUpdate`
 - `LogicRuleResponse`, `LogicRuleListResponse`

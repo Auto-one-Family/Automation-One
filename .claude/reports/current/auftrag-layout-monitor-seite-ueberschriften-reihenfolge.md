@@ -71,11 +71,12 @@
 - [x] L2: Reihenfolge „Zonen-Header → Sensoren → Aktoren → Zone-Dashboards → Inline-Panels“; Dashboards am Ende.
 - [x] Ueberschriften-Hierarchie (H2/H3) und Abstaende mit Design-System konsistent.
 
-## Erledigt (2026-03-03)
+## Erledigt (2026-03-03, Phase 1 erweitert 2026-03-06)
 
-- **Zaehlung (Variante A):** Sektionsueberschrift „Sensoren (N)“ / „Aktoren (N)“ unveraendert. Subzone-Zeile zeigt Count nur bei `subzones.length > 1` (Teilsumme), sonst keine doppelte Anzeige.
+- **Zaehlung (Variante A):** Sektionsueberschrift „Sensoren (N)“ / „Aktoren (N)“ unveraendert. Subzone-Zeile ohne Count (nur Name + KPIs).
 - **L2 Reihenfolge:** Block `monitor-dashboards` (Zone-Dashboards) von vor Sensoren nach hinter Aktoren verschoben; Reihenfolge jetzt: Zonen-Header → Sensoren → Aktoren → Zone-Dashboards → Inline-Panels.
 - **Design:** `monitor-section__title` und Subzone-Styles nutzen bereits `var(--text-base)`, `var(--color-text-*)`, `var(--space-*)`, `var(--radius-sm)` aus tokens.css.
+- **Phase 1 (2026-03-06):** ESP-Count "X/Y online" in Zone-Tile-Footer; getDashboardNameSuffix fuer eindeutige Dashboard-Namen; 40px Trennung via `--space-10` (tokens.css).
 - **Backend/ESP32:** Keine Aenderung noetig; Zaehlung kommt aus Frontend-computed (zoneSensorGroup/zoneActuatorGroup aus espStore).
 
 ---

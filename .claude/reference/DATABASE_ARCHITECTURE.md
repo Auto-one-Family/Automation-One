@@ -1,6 +1,6 @@
 # Datenbank-Architektur & Wissensdatenbank
 
-> **Version:** 1.0 | **Aktualisiert:** 2026-03-04
+> **Version:** 1.1 | **Aktualisiert:** 2026-03-06
 > **Zweck:** Trennung operative vs. Wissensdaten, Abhängigkeiten, Verteilung, Sicherheit
 > **Quellen:** `El Servador/god_kaiser_server/src/db/models/`, Repositories, Services, Export-API
 
@@ -10,7 +10,7 @@
 
 | Kategorie | Tabellen / Orte | Zweck | Schreibzugriff |
 |-----------|-----------------|--------|----------------|
-| **Operativ (Betrieb)** | esp_devices, sensor_configs, actuator_configs, sensor_data, actuator_states, actuator_history, esp_heartbeat_logs, cross_esp_logic, logic_execution_history | Laufbetrieb, Steuerung, Time-Series, Regeln | API + MQTT-Handler |
+| **Operativ (Betrieb)** | esp_devices, sensor_configs, actuator_configs, sensor_data (inkl. zone_id, subzone_id Phase 0.1), actuator_states, actuator_history, esp_heartbeat_logs, cross_esp_logic, logic_execution_history | Laufbetrieb, Steuerung, Time-Series, Regeln | API + MQTT-Handler |
 | **Wissen (Kontext)** | zone_contexts, subzone_configs.custom_data, sensor_metadata (JSON), actuator_metadata (JSON), device_metadata (JSON) | Betriebskontext, KI-Export, Inventar, Anbau | API (Operator/Admin) |
 | **System/App** | user_accounts, token_blacklist, audit_logs, notifications, notification_preferences, email_log, plugin_configs, plugin_executions, diagnostic_reports, dashboards, system_config, sensor_type_defaults | Auth, Audit, Benachrichtigungen, Plugins, UI | API (rollenbasiert) |
 

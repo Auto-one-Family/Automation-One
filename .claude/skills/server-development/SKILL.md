@@ -250,7 +250,7 @@ class YourRepository(BaseRepository[YourModel]):
 | ActuatorConfig | `actuator_configs` | esp_id (FK), gpio, actuator_type, inverted, alert_config (JSONB), runtime_stats (JSONB) |
 | SubzoneConfig | `subzone_configs` | id (UUID PK), esp_id (FK), subzone_id, assigned_gpios (JSON), safe_mode_active |
 | CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority, cooldown_seconds |
-| SensorData | `sensor_data` | sensor_id (FK), raw_value, processed_value |
+| SensorData | `sensor_data` | sensor_id (FK), raw_value, processed_value, zone_id, subzone_id (Phase 0.1), data_source |
 | AuditLog | `audit_logs` | event_type, severity, source_type |
 | Notification | `notifications` | title, severity (critical/warning/info), source, category, channel, fingerprint (FIX-07 dedup), status (active/acknowledged/resolved), correlation_id, acknowledged_at, acknowledged_by, resolved_at |
 | NotificationPreferences | `notification_preferences` | user_id, channel, enabled, severity_filter |
@@ -390,13 +390,13 @@ poetry run python scripts/seed_wokwi_esp.py
 ```
 LogicEngine
 ├── Condition Evaluators
-│   ├── SensorConditionEvaluator (Schwellenwerte)
+│   ├── SensorConditionEvaluator (Schwellenwerte, optional subzone_id Phase 2.4)
 │   ├── TimeConditionEvaluator (Zeit-Fenster)
 │   ├── HysteresisEvaluator (Zustandsübergänge)
 │   └── CompoundConditionEvaluator (AND/OR/NOT)
 │
 ├── Action Executors
-│   ├── ActuatorActionExecutor (Befehle)
+│   ├── ActuatorActionExecutor (Befehle, Phase 2.4 Subzone-Matching)
 │   ├── DelayActionExecutor (Verzögerungen)
 │   ├── NotificationActionExecutor (WebSocket)
 │   └── SequenceActionExecutor (Sub-Aktionen)

@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Kommunikationsmuster & Datenflüsse
 
-> **Version:** 2.1 | **Aktualisiert:** 2026-02-25
+> **Version:** 2.2 | **Aktualisiert:** 2026-03-06
 > **Quellen:** Code-Traces durch ESP32, Server, Frontend
 > **Verifiziert:** ✅ Alle Pfade mit Datei:Zeile dokumentiert
 
@@ -148,6 +148,8 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
     "sensor_type": "DS18B20",
     "value": 21.5,
     "unit": "°C",
+    "zone_id": "greenhouse",
+    "subzone_id": "zone_a",
     "quality": "good"
   }
 }
@@ -700,11 +702,11 @@ Die Logic Engine unterstützt Rules über **mehrere ESPs**:
 
 | Komponente | Datei | Beschreibung |
 |------------|-------|--------------|
-| SensorConditionEvaluator | conditions/sensor_evaluator.py | Sensor-Schwellwert-Prüfung (`sensor`, `sensor_threshold`) |
+| SensorConditionEvaluator | conditions/sensor_evaluator.py | Sensor-Schwellwert-Prüfung (`sensor`, `sensor_threshold`), optional `subzone_id` (Phase 2.4) |
 | TimeConditionEvaluator | conditions/time_evaluator.py | Zeit-basierte Bedingungen (`time_window`, `time`) |
 | CompoundConditionEvaluator | conditions/compound_evaluator.py | AND/OR Verknüpfungen (`compound`) |
 | HysteresisConditionEvaluator | conditions/hysteresis_evaluator.py | Hysterese (`hysteresis`) |
-| ActuatorActionExecutor | actions/actuator_executor.py | Actuator-Befehle (`actuator`, `actuator_command`) |
+| ActuatorActionExecutor | actions/actuator_executor.py | Actuator-Befehle (`actuator`, `actuator_command`), Phase 2.4: Subzone-Matching vor Execute |
 | DelayActionExecutor | actions/delay_executor.py | Verzögerungen (`delay`) |
 | NotificationActionExecutor | actions/notification_executor.py | WebSocket Notifications (`notification`) |
 | SequenceActionExecutor | actions/sequence_executor.py | Verkettete Aktionen (`sequence`) |

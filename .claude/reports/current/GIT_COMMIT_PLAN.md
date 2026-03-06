@@ -1,92 +1,60 @@
 # Git Commit Plan
-**Erstellt:** 2026-03-05
+**Erstellt:** 2026-03-06
 **Branch:** master
-**Remote:** origin (Auto-one-Family/Automation-One)
-**GitHub:** master protected, keine offenen PRs
-
-**Änderungen gesamt:** 65 modified, 21 untracked
+**Ziel:** Sauberer Commit aller Änderungen ohne Verluste, GitHub-Plugin-Verifikation
 
 ---
 
-## Commit 1: docs(reference): update API docs, database, docker, errors, CI
+## Commit 1: feat(server): subzone resolver, logic, sensors, autoops, notifications
 
-**Was:** Referenz-Dokumentation aktualisieren
+**Was:** Backend-Änderungen – Subzone/Sensor-Zuordnung, Logic-Engine, AutoOps-Plugins, E-Mail/Notification-Services.
 
-**Dateien:**
-- .claude/reference/DATABASE_ARCHITECTURE.md
-- .claude/reference/api/MQTT_TOPICS.md
-- .claude/reference/api/REST_ENDPOINTS.md
-- .claude/reference/api/WEBSOCKET_EVENTS.md
-- .claude/reference/debugging/CI_PIPELINE.md
-- .claude/reference/debugging/LOG_LOCATIONS.md
-- .claude/reference/errors/ERROR_CODES.md
-- .claude/reference/infrastructure/DOCKER_AKTUELL.md
-- .claude/reference/infrastructure/DOCKER_REFERENCE.md
+**Dateien:** El Servador/god_kaiser_server (API, DB, Schemas, Services, Tests, AutoOps, Alembic).
+
+**Befehl:**
+```bash
+git add "El Servador/god_kaiser_server/"
+git commit -m "feat(server): subzone resolver, logic, sensors, autoops, notifications"
+```
 
 ---
 
-## Commit 2: chore(ci): extend trivyignore
+## Commit 2: feat(frontend): monitor, logic, calibration, sensor/actuator config, dashboard
 
-**Was:** Trivy-Scanner Ignore-Regeln erweitern
+**Was:** Frontend – Monitor-View, Logic-Store, Kalibrierung, Sensor/Aktor-Konfiguration, Dashboard-Widgets, Tests.
 
-**Dateien:**
-- .trivyignore
+**Dateien:** El Frontend (api, components, stores, styles, types, utils, views, tests).
 
----
-
-## Commit 3: chore(skills): update frontend and server development skills
-
-**Was:** Skills und MODULE_REGISTRY aktualisieren
-
-**Dateien:**
-- .claude/skills/frontend-development/SKILL.md
-- .claude/skills/server-development/MODULE_REGISTRY.md
-- .claude/skills/server-development/SKILL.md
+**Befehl:**
+```bash
+git add "El Frontend/"
+git commit -m "feat(frontend): monitor, logic, calibration, sensor/actuator config, dashboard"
+```
 
 ---
 
-## Commit 4: docs(reports): add alert analysis, config panel, subzone, email reports
+## Commit 3: docs(claude): reference, skills, reports, agents, scripts, Makefile
 
-**Was:** Session-Reports und Analysen hinzufügen
+**Was:** Dokumentation, Claude-Referenzen, Skills, Reports, AGENTS.md, Scripts, Makefile, CI.
 
-**Dateien (modified + untracked):**
-- .claude/reports/Testrunner/test.md
-- .claude/reports/current/* (alle modified und untracked)
+**Dateien:** .claude/, docs/, .github/, AGENTS.md, Makefile, scripts/, arbeitsbereiche/.
 
----
-
-## Commit 5: feat(server): subzone helpers, email retry, sensor/actuator API, zone KPI
-
-**Was:** Backend: Subzone-Helpers, Email-Retry-Service, API-Anpassungen, Zone-KPI
-
-**Dateien:**
-- El Servador/god_kaiser_server/src/api/v1/*
-- El Servador/god_kaiser_server/src/db/models/zone_context.py
-- El Servador/god_kaiser_server/src/db/repositories/email_log_repo.py
-- El Servador/god_kaiser_server/src/main.py
-- El Servador/god_kaiser_server/src/schemas/*
-- El Servador/god_kaiser_server/src/services/*
-- El Servador/god_kaiser_server/src/utils/subzone_helpers.py (neu)
-- El Servador/god_kaiser_server/src/services/email_retry_service.py (neu)
-- El Servador/god_kaiser_server/tests/*
+**Befehl:**
+```bash
+git add .claude/ docs/ .github/ AGENTS.md Makefile scripts/ arbeitsbereiche/
+git commit -m "docs(claude): reference, skills, reports, agents, scripts, Makefile"
+```
 
 ---
 
-## Commit 6: feat(frontend): notification stack, sensor/actuator config, email postfach, labels
+## Abschluss
 
-**Was:** Frontend: Notification-Drawer, Sensor/Actor-Config-Panels, Email-Postfach-View, Labels
+**Nach allen Commits:**
+```bash
+git status
+git push origin master
+```
 
-**Dateien:**
-- El Frontend/src/api/notifications.ts
-- El Frontend/src/components/*
-- El Frontend/src/composables/*
-- El Frontend/src/router/index.ts
-- El Frontend/src/shared/design/layout/Sidebar.vue
-- El Frontend/src/shared/stores/*
-- El Frontend/src/stores/esp.ts
-- El Frontend/src/types/index.ts
-- El Frontend/src/utils/*
-- El Frontend/src/views/*
-- El Frontend/tests/unit/utils/labels.test.ts
-- El Frontend/Docs/UI/Sensoren/README.md
-- El Frontend/README.md
+**Hinweise:**
+- tsconfig.tsbuildinfo wird mitcommittet (nicht in .gitignore).
+- arbeitsbereiche/ wird einbezogen (kein Eintrag in .gitignore).

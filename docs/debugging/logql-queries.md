@@ -167,7 +167,11 @@ curl -sG "http://localhost:3100/loki/api/v1/query" \
   --data-urlencode 'query=count_over_time({compose_service=~".+"} | level="ERROR" [5m])'
 ```
 
-See `scripts/loki-query.sh` for a convenience wrapper with `errors`, `trace`, `esp`, `health` commands.
+**CLI-Wrapper:**
+- Linux/Mac: `scripts/loki-query.sh` (Bash)
+- Windows: `scripts/loki-query.ps1` (PowerShell) — `powershell -ExecutionPolicy Bypass -File scripts/loki-query.ps1 errors 5`
+
+Beide unterstützen: `errors [min]`, `trace <cid>`, `esp <esp-id>`, `health`
 
 ---
 

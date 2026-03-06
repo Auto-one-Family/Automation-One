@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 2.7 | **Aktualisiert:** 2026-03-05
+> **Version:** 2.8 | **Aktualisiert:** 2026-03-06
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
 > **Event-Anzahl:** 33 verschiedene Event-Typen
@@ -401,10 +401,16 @@ Neuer Sensor-Wert empfangen.
     "unit": "°C",
     "quality": "good",
     "timestamp": "2026-02-01T10:23:45Z",
+    "zone_id": "greenhouse",
     "subzone_id": "zone_a"
   }
 }
 ```
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `zone_id` | string? | Zone zum Messzeitpunkt (Phase 0.1) |
+| `subzone_id` | string? | Subzone zum Messzeitpunkt (Phase 0.1) |
 
 ---
 

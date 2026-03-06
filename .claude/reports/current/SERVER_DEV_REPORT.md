@@ -1,161 +1,112 @@
-# Server Dev Report: Phase 4D Diagnostics Hub — Pattern Review & Bug Fixes
+# Server Dev Report: 500-Fehler GET sensors + GET zone monitor-data
 
-## Modus: B (Implementierung)
+## Modus: B (Implementierung / Bugfix)
 
 ## Auftrag
-Thorough review of Phase 4D Diagnostics Hub server-side files for pattern consistency, import correctness, type safety, API response consistency, error handling, and DB session management. Fix all issues found.
 
-## Codebase-Analyse
+Analysiere die genauen Ursachen der 500-Fehler bei:
+1. `GET /api/v1/sensors/{esp_id}/{gpio}` (z.B. MOCK_3D6C5444/0)
+2. `GET /api/v1/zone/{zone_id}/monitor-data` (z.B. zone_id=test)
 
-Files analysed:
-- `src/services/diagnostics_service.py` — 10 diagnostic checks + persist
-- `src/services/diagnostics_report_generator.py` — Markdown generator
-- `src/api/v1/diagnostics.py` — REST endpoints
-- `src/db/models/diagnostic.py` — DB model
-- `src/services/logic/actions/diagnostics_executor.py` — Logic action
-- `src/services/logic/conditions/diagnostics_evaluator.py` — Logic condition
-- `alembic/versions/add_diagnostic_reports.py` — Migration
-
-Reference files read for pattern comparison:
-- `src/db/repositories/notification_repo.py` — `get_alert_stats()` return keys verified
-- `src/db/models/logic.py` — `LogicExecutionHistory` column names confirmed (`timestamp`, `success`)
-- `src/services/logic/actions/base.py` — `ActionResult` signature
-- `src/services/logic/conditions/base.py` — `BaseConditionEvaluator` interface
-- `src/api/deps.py` — `DBSession`, `ActiveUser` type aliases confirmed
-- `src/core/metrics.py` — `_server_start_time` exists at module level, import correct
-- `src/api/v1/notifications.py` — Router prefix pattern `/v1/notifications` confirmed
-
-## Qualitaetspruefung (8-Dimensionen)
-
-| # | Dimension | Ergebnis |
-|---|-----------|---------|
-| 1 | Struktur & Einbindung | Korrekt. `diagnostics_router` bereits in `__init__.py` registriert. Router-Prefix `/v1/diagnostics` konsistent mit Pattern (notifications, plugins). |
-| 2 | Namenskonvention | Korrekt. snake_case Funktionen, PascalCase Klassen. |
-| 3 | Rueckwaertskompatibilitaet | Neue Endpunkte, kein Breaking Change. Migration hat `downgrade()`. |
-| 4 | Wiederverwendbarkeit | `NotificationRepository` korrekt verwendet. `BaseActionExecutor`/`BaseConditionEvaluator` korrekt erweitert. |
-| 5 | Speicher & Ressourcen | Async patterns korrekt. httpx-Client per Request mit `async with`. DB-Session injiziert. |
-| 6 | Fehlertoleranz | BUGS GEFUNDEN UND BEHOBEN — siehe unten. |
-| 7 | Seiteneffekte | Keine. Nur Lese-Queries ausser `_persist_report`. Safety-Service nicht betroffen. |
-| 8 | Industrielles Niveau | Nach Fixes vollstaendig produktionsreif. Keine TODOs/Stubs. |
-
-## Bugs gefunden und behoben
-
-### Bug 1 — Falsche Stat-Keys in `_check_alerts` (LOGIKFEHLER)
-
-**Datei:** `src/services/diagnostics_service.py`, Zeilen 557-558
-
-**Problem:** `_check_alerts` rief `stats.get("mtta_seconds")` und `stats.get("mttr_seconds")` auf. `NotificationRepository.get_alert_stats()` gibt jedoch `"mean_time_to_acknowledge_s"` und `"mean_time_to_resolve_s"` zurueck. Die Keys existierten nicht — `get()` lieferte immer `None`, MTTA/MTTR-Metriken fehlten im Report.
-
-**Fix:**
-```python
-# Vorher (falsch):
-"mtta_seconds": stats.get("mtta_seconds"),
-"mttr_seconds": stats.get("mttr_seconds"),
-
-# Nachher (korrekt):
-"mtta_seconds": stats.get("mean_time_to_acknowledge_s"),
-"mttr_seconds": stats.get("mean_time_to_resolve_s"),
-```
+Minimale Fixes vorschlagen (try/except, None-Checks, Typ-Anpassungen). Kein Refactoring.
 
 ---
 
-### Bug 2 — Falscher Typ-Annotation fuer `checks`-Spalte im DB-Model (TYPE ERROR)
+## 1) GET /api/v1/sensors/{esp_id}/{gpio}
 
-**Datei:** `src/db/models/diagnostic.py`, Zeile 37
+### Codebase-Analyse
 
-**Problem:** `checks: Mapped[dict]` — das Feld speichert eine **Liste** von Check-Dicts (wie in `_persist_report` ersichtlich: `checks_json` ist eine `list`). Die falsche Annotation `Mapped[dict]` verletzt die Typkonsistenz und kann bei ORM-Introspection zu Fehlern fuehren.
+- **Endpoint:** `src/api/v1/sensors.py` → `get_sensor()`
+- **Ablauf:** `esp_repo.get_by_device_id(esp_id)` → `sensor_repo.get_by_esp_gpio_and_type()` oder `get_all_by_esp_and_gpio()` → `sensor_repo.get_latest_reading()` → `subzone_repo.get_subzone_by_gpio(esp_id, gpio)` → `_model_to_response(sensor, esp_id, subzone_id=...)` → Response-Serialisierung
 
-**Fix:**
-```python
-# Vorher (falsch):
-checks: Mapped[dict] = mapped_column(JSON, nullable=False)
+### Gefundene Fehlerquellen
 
-# Nachher (korrekt):
-checks: Mapped[list] = mapped_column(JSON, nullable=False)
-```
+| Stelle | Risiko | Erklärung |
+|--------|--------|-----------|
+| **SensorConfig.gpio** | **Ursache 500** | DB-Model `SensorConfig.gpio` ist `Optional[int]` (nullable für I2C/OneWire). Schema `SensorConfigResponse` erbt von `SensorConfigBase` mit `gpio: int` (required). Wenn `sensor.gpio is None`, baut `_model_to_response(..., gpio=sensor.gpio)` ein Objekt mit `gpio=None` → Pydantic ValidationError bei Response-Serialisierung → 500. |
+| get_by_device_id | unkritisch | Gibt `None` zurück → ESPNotFoundError (404). |
+| get_all_by_esp_and_gpio | unkritisch | Gibt Liste zurück; leere Liste → SensorNotFoundException (404). |
+| get_latest_reading | unkritisch | Gibt `Optional[SensorData]`; Aufrufer prüft `if latest` und setzt `latest_value`/`latest_quality`/`latest_timestamp` nur bei Vorhandensein. |
+| get_subzone_by_gpio(esp_id, gpio) | unkritisch | `esp_id` = Path-String, `SubzoneRepository` erwartet `str`; `SubzoneConfig.esp_id` ist `str` (FK auf `esp_devices.device_id`). Kein Typ-Mix. |
+| _model_to_response esp_id | unkritisch | `sensor.esp_id` ist UUID (FK `esp_devices.id`), Schema `SensorConfigResponse.esp_id` ist `uuid.UUID`; `esp_device_id` wird explizit als String übergeben. Kein Serialisierungsfehler. |
 
----
+### Umgesetzter Fix
 
-### Bug 3 — Falsche Exception in `DiagnosticsActionExecutor` (EXCEPTION MISMATCH)
-
-**Datei:** `src/services/logic/actions/diagnostics_executor.py`, Zeile 83
-
-**Problem:** Der Executor fing `KeyError` ab, aber `DiagnosticsService.run_single_check()` wirft `ValueError` bei unbekanntem Check-Namen (dokumentiert in `diagnostics_service.py` L149). Ein `KeyError` wurde niemals geworfen — ungueltige Check-Namen landeten im generischen `except Exception`-Block statt im spezifischen Handler.
-
-**Fix:**
-```python
-# Vorher (falsch):
-except KeyError:
-    return ActionResult(
-        success=False,
-        message=f"Diagnostic check '{check_name}' not found",
-    )
-
-# Nachher (korrekt):
-except ValueError:
-    return ActionResult(
-        success=False,
-        message=f"Diagnostic check '{check_name}' not found",
-    )
-```
+- **Datei:** `src/api/v1/sensors.py`
+- **Änderung:** In `_model_to_response()` bei der Erstellung von `SensorConfigResponse`:
+  - **Vorher:** `gpio=sensor.gpio`
+  - **Nachher:** `gpio=sensor.gpio if sensor.gpio is not None else 0`
+- **Begründung:** Schema verlangt `int`; Fallback 0 ist gültig (ge=0, le=39). Eine Signatur-Erweiterung von `_model_to_response` wurde bewusst vermieden, damit alle Aufrufer (get_sensor, list_sensors, list_onewire_sensors, create_or_update_sensor, delete_sensor) automatisch abgedeckt sind.
 
 ---
 
-### Bug 4 — Fehlende Fehlerbehandlung beim DB-Commit in `_persist_report` (MISSING ERROR HANDLING)
+## 2) GET /api/v1/zone/{zone_id}/monitor-data
 
-**Datei:** `src/services/diagnostics_service.py`, Zeilen 640-641
+### Codebase-Analyse
 
-**Problem:** `await self.session.commit()` ohne try/except. Ein DB-Fehler beim Persist wuerde die Exception durch `run_full_diagnostic` propagieren und den gesamten API-Call mit 500 beenden — obwohl die Diagnose bereits komplett ausgewertet wurde. Die fertigen Diagnose-Ergebnisse gingen verloren.
+- **Service:** `src/services/monitor_data_service.py` → `get_zone_monitor_data(zone_id)`
+- **Ablauf:** ESPs in Zone laden → SubzoneConfigs (parent_zone_id == zone_id) → gpio_to_subzone Map → Sensor-/Actuator-Configs → `get_latest_readings_batch_by_config(sensor_keys)` → ActuatorState laden → Einträge bauen (Sensor/Actuator) → SubzoneGroups → ZoneMonitorData
 
-**Fix:** try/except mit Rollback + Logging, sodass die Funktion auch bei Persist-Fehler normal zurueckkehrt:
-```python
-# Vorher (fehlt Fehlerbehandlung):
-self.session.add(db_report)
-await self.session.commit()
+### Gefundene Fehlerquellen
 
-# Nachher (korrekt):
-self.session.add(db_report)
-try:
-    await self.session.commit()
-except Exception as e:
-    await self.session.rollback()
-    logger.error(f"Failed to persist diagnostic report: {e}", exc_info=True)
-```
+| Stelle | Risiko | Erklärung |
+|--------|--------|-----------|
+| **reading.processed_value / raw_value** | **Ursache 500** | Wenn `reading` existiert, aber sowohl `processed_value` als auch `raw_value` `None` sind, wird `float(None)` aufgerufen → **TypeError** → 500. |
+| SubzoneConfig.parent_zone_id vs. ESPDevice.zone_id | unkritisch | Beide sind string; Abfrage nutzt `parent_zone_id == zone_id` und ESPs mit `zone_id == zone_id`. Kein Typ-Mix. |
+| get_latest_readings_batch_by_config(sensor_keys) | unkritisch | Bei leerer Liste gibt die Methode `{}` zurück; Keys sind `(uuid.UUID, int, str)` wie erwartet. Keine Exception. |
+| state_map Lookup (ac.esp_id, gpio) | unkritisch | `ActuatorState.esp_id` und `ActuatorConfig.esp_id` sind UUID; Lookup ist konsistent. |
+| reading.timestamp | unkritisch | Es wird `reading.timestamp.isoformat() if reading.timestamp else None` verwendet; kein Zugriff auf None. |
+| sc.gpio None | unkritisch | Es gibt `if sc.gpio is None: continue` vor der weiteren Verarbeitung. |
+| ac.gpio | unkritisch | `ActuatorConfig.gpio` ist `Mapped[int]`, nicht optional. |
 
-## Dinge die korrekt waren (keine Aenderung noetig)
+### Umgesetzter Fix
 
-- **`LogicExecutionHistory` Spalten:** `timestamp` und `success` in `_check_logic_engine` korrekt — diese Spalten existieren exakt so im Model (`logic.py` L285, L305).
-- **`MQTTClient.get_instance()` und `.is_connected()`:** Pattern korrekt — konsistent mit Nutzung in `metrics.py`.
-- **`NotificationRepository.get_alert_stats()` und `.get_active_counts_by_severity()`:** Methoden existieren mit diesen exakten Signaturen. `get_alert_stats()` nimmt `user_id=None` optional — Aufruf ohne `user_id` in `_check_alerts` korrekt (system-weite Statistik).
-- **API Router-Prefix:** `/v1/diagnostics` korrekt. Der Router wird in `api_v1_router` included, der mit `/api` gemountet wird — finale URLs `/api/v1/diagnostics/...`.
-- **`DBSession` und `ActiveUser` aus `..deps`:** Korrekte Imports, existieren mit diesen Namen.
-- **`_server_start_time` Import:** `from ..core.metrics import _server_start_time` korrekt — Variable auf Modul-Ebene in `metrics.py` definiert.
-- **Alembic Migration:** `down_revision = "add_plugin_tables"` konsistent mit Git-History. `JSONB` fuer `checks`-Spalte korrekt (PostgreSQL-spezifisch, besser als JSON fuer Array-Queries).
-- **`diagnostics_report_generator.py`:** Keine Bugs. Pure functions, kein DB/IO.
-- **`diagnostics_evaluator.py`:** Korrekt. `async for session in self._session_factory()` Pattern konsistent mit `diagnostics_executor.py`.
+- **Datei:** `src/services/monitor_data_service.py`
+- **Änderung:** Beim Setzen von `raw_value` aus einem vorhandenen `reading`:
+  - **Vorher:**  
+    `raw_value = float(reading.processed_value if reading.processed_value is not None else reading.raw_value)`  
+    → Wenn beide None sind: `float(None)` → TypeError.
+  - **Nachher:**  
+    Zuerst `val = reading.processed_value if ... else reading.raw_value`, dann  
+    `raw_value = float(val) if val is not None else None`.
+- **Begründung:** Nur wenn ein Wert vorhanden ist, wird konvertiert; sonst bleibt `raw_value=None`. Schema `SubzoneSensorEntry.raw_value` ist `Optional[float]`.
+
+---
+
+## Qualitätsprüfung (8-Dimensionen)
+
+| # | Dimension | Prüfung |
+|---|-----------|--------|
+| 1 | Struktur & Einbindung | Nur bestehende Module geändert, keine neuen Imports. |
+| 2 | Namenskonvention | Unverändert. |
+| 3 | Rückwärtskompatibilität | Response-Formate unverändert; Sensor-Response liefert bei gpio=None nun 0 statt fehlzuschlagen. |
+| 4 | Wiederverwendbarkeit | Keine neuen Patterns, nur defensive Checks. |
+| 5 | Speicher & Ressourcen | Keine Änderung. |
+| 6 | Fehlertoleranz | Explizite None-Checks verhindern ValidationError und TypeError. |
+| 7 | Seiteneffekte | Keine anderen Handler oder Shared State betroffen. |
+| 8 | Industrielles Niveau | Minimale, zielgerichtete Bugfixes. |
+
+---
 
 ## Cross-Layer Impact
 
-| Bereich | Status |
-|---------|--------|
-| Frontend | Keine Aenderung an API-Responses — kein Impact |
-| ESP32 | Kein Impact |
-| MQTT | Kein Impact |
-| Alembic | Keine Schema-Aenderung — kein Impact |
-| ERROR_CODES.md | Keine neuen Error-Codes — kein Update noetig |
+- **Frontend:** Keine Anpassung nötig. GET sensors liefert weiterhin ein Objekt mit `gpio` (nun 0 statt Abbruch bei DB-gpio=None). Monitor-Daten: `raw_value` kann weiterhin `null` sein.
+- **ESP32 / MQTT:** Nicht betroffen.
+
+---
 
 ## Verifikation
 
-Alle 4 Fixes auf Korrektheit geprueft durch erneutes Lesen der geaenderten Dateien.
-Formale pytest-Ausfuehrung steht aus (nicht Teil des Auftrags).
+- Linter: `ruff` für geänderte Dateien ohne neue Meldungen.
+- Empfohlene manuelle Checks:
+  - `GET /api/v1/sensors/MOCK_3D6C5444/0` mit Sensor, dessen `gpio` in der DB NULL ist (falls testweise vorhanden).
+  - `GET /api/v1/zone/test/monitor-data` mit Zone, in der ein Sensor-Latest-Reading existiert, aber sowohl `processed_value` als auch `raw_value` NULL sind.
 
-## Zusammenfassung
+---
 
-4 Bugs behoben in 3 Dateien:
+## Ergebnis
 
-| Datei | Bug | Schwere |
-|-------|-----|---------|
-| `diagnostics_service.py` | Falsche Stat-Keys (`mtta_seconds`/`mttr_seconds`) | Logikfehler — MTTA/MTTR immer None |
-| `diagnostics_service.py` | Kein try/except um `commit()` | Fehlendes Error-Handling |
-| `diagnostic.py` | `Mapped[dict]` statt `Mapped[list]` | Typ-Inkonsistenz |
-| `diagnostics_executor.py` | `KeyError` statt `ValueError` fangen | Exception Mismatch |
+- **sensors.py:** Ein Fix in `_model_to_response()`: `gpio` bei None mit 0 belegt, damit die Response-Serialisierung nicht mit ValidationError scheitert.
+- **monitor_data_service.py:** Ein Fix beim Aufbau von `raw_value`: `float()` nur aufrufen, wenn ein Wert vorhanden ist; sonst `raw_value=None`.
+
+Beide Änderungen sind minimale Defensiv-Checks ohne Refactoring.

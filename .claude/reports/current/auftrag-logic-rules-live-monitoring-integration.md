@@ -150,7 +150,7 @@ Auf der ersten Ebene des Monitor-Tabs (neben Zonen-Cards und Cross-Zone-Dashboar
 > 3. Pro ESP: `espStore.devices.find(d => d.esp_id === esp_id)?.zone_id`
 > 4. Rule "betrifft Zone X" wenn MINDESTENS ein Condition-Sensor ODER ein Action-Actuator in Zone X liegt.
 >
-> **Vorhandene Helper:** `getConnectionsForEsp(espId)`, `extractConnections(rule)` in logic.store.ts. Aber KEIN `getRulesForZone(zoneId)` — muss neu implementiert werden.
+> **Vorhandene Helper:** `getConnectionsForEsp(espId)`, `extractConnections(rule)`, `getRulesForZone(zoneId)` in logic.store.ts. **getRulesForZone implementiert 2026-03-06** — nutzt extractEspIdsFromRule + espStore.devices.
 >
 > **ESP-Crossing:** Bereits modelliert in `LogicConnection.isCrossEsp` (computed: sourceEspId !== targetEspId). Zone-internes Crossing erkennbar wenn beide ESPs gleiche zone_id haben.
 >

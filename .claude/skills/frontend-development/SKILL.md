@@ -15,8 +15,8 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.33
-**Letzte Aktualisierung:** 2026-03-05
+**Version:** 9.44
+**Letzte Aktualisierung:** 2026-03-06
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
 
@@ -141,7 +141,9 @@ El Frontend/src/
 │   ├── filters/       # UnifiedFilterBar
 │   ├── forms/         # FormBuilder
 │   ├── inventory/     # Wissensdatenbank (Phase K4): InventoryTable, DeviceDetailPanel, SchemaForm, ZoneContextEditor, SubzoneContextEditor (5 Dateien)
+│   ├── logic/         # RuleCardCompact (Monitor L2 Regeln für diese Zone, 1 Datei)
 │   ├── modals/
+│   ├── monitor/       # ZoneRulesSection (L2), ActiveAutomationsSection (L1 Aktive Automatisierungen, 2 Dateien)
 │   ├── rules/         # RuleCard, RuleConfigPanel, RuleFlowEditor, RuleNodePalette, RuleTemplateCard (5 Dateien)
 │   ├── notifications/ # NotificationDrawer, NotificationItem, AlertStatusBar, NotificationPreferences (4 Dateien)
 │   ├── quick-action/  # QuickActionBall (FAB), QuickActionMenu, QuickActionItem, QuickAlertPanel, QuickNavPanel (5 Dateien)
@@ -300,11 +302,18 @@ SensorsView.vue (?sensor={espId}-gpio{gpio} oder ?focus=sensorId → auto-open D
 
 ```
 MonitorView.vue (URL-Sync: L1→L2→L3 via route params)
-├── L1 /monitor — Zone-Tiles mit KPI-Aggregation + Cross-Zone-Dashboards
-├── L2 /monitor/:zoneId — Subzone-Accordion (KPIs im Header, Status-Dots)
+├── L1 /monitor — Reihenfolge: Zone-Tiles → Aktive Automatisierungen → Cross-Zone-Dashboards → Inline-Panels
+│   ├── Zone-Tile Footer: "X/Y online" (ESP-Count), Sensor/Aktor-Counts, lastActivity
+│   ├── ActiveAutomationsSection: logicStore.enabledRules, Top 5 als RuleCardCompact (ul/li, :focus-visible), Link "Alle Regeln" → /logic; Zone-Badge Fallback "—"; responsive Grid
+│   └── 40px Trennung: var(--space-10) zwischen Zone-Grid, ActiveAutomationsSection, Dashboard-Card, Inline-Panels
+├── L2 /monitor/:zoneId — Reihenfolge: Zone-Header → Sensoren → Aktoren → Regeln für diese Zone → Zone-Dashboards → Inline-Panels
 │   ├── Datenquelle: zonesApi.getZoneMonitorData (primär), Fallback useZoneGrouping + useSubzoneResolver nur bei API-Fehler; Ready-Gate (v-if=!zoneMonitorLoading) + BaseSkeleton während Loading, ErrorState bei Fehler
+│   ├── Inline-Panels L2: inlineMonitorPanelsL2 = cross-zone + zone-spezifische (scope=zone, zoneId=selectedZoneId); L1 nutzt inlineMonitorPanelsCrossZone
 │   ├── Zone-Header: Name + Sensor/Aktor-Count + Alarm-Count
-│   ├── Auto-generierte Zone-Dashboards (generateZoneDashboard bei erstem Besuch)
+│   ├── Sensoren (N): Sektionsueberschrift mit Count; Subzone-Zeile NUR Name (kein Count)
+│   ├── Aktoren (N): Sektionsueberschrift mit Count; Subzone-Zeile NUR Name (kein Count)
+│   ├── Regeln für diese Zone (N): ZoneRulesSection.vue — logicStore.getRulesForZone(zoneId); RuleCardCompact pro Regel; Klick → /logic/:ruleId; Empty State: Link "Zum Regeln-Tab"; Bei >10 Regeln: erste 5 + Link "Weitere X Regeln — Im Regeln-Tab anzeigen"
+│   ├── Zone-Dashboards: getDashboardNameSuffix(dash) fuer eindeutige Namen (createdAt oder ID)
 │   ├── SensorCard.vue[] (mode='monitor', Stale/ESP-Offline-Badges, from components/devices/)
 │   │   └── [Expanded] 1h-Chart (vue-chartjs Line, sensorsApi.queryData Initial-Fetch)
 │   │       ├── "Zeitreihe anzeigen" → openSensorDetail (L3)
@@ -335,6 +344,7 @@ CustomDashboardView.vue (/editor, /editor/:dashboardId)
 └── WidgetConfigPanel.vue (SlideOver, Gear-Icon oeffnet Konfiguration)
     ├── Titel-Input
     ├── Sensor/Actuator-Selektion (je nach Widget-Typ)
+    ├── Zone-Filter-Dropdown (alarm-list, esp-health, actuator-runtime; "Alle Zonen" oder konkrete Zone aus espStore.devices)
     ├── Y-Achse Min/Max (Charts)
     ├── Zeitraum-Chips (Historical)
     ├── Farb-Palette (8 Farben)
@@ -418,7 +428,7 @@ onUnmounted(() => { /* cleanup */ })
 
 | Event | Data | Woher |
 |-------|------|-------|
-| sensor_data | esp_id, gpio, value, quality | MQTT→Server→WS |
+| sensor_data | esp_id, gpio, value, quality, zone_id, subzone_id (Phase 0.1) | MQTT→Server→WS |
 | actuator_status | esp_id, gpio, state | MQTT→Server→WS |
 | esp_health | esp_id, status, heap, rssi | Heartbeat→Server→WS |
 | config_response | esp_id, status, error_code | ESP→MQTT→Server→WS |
@@ -434,7 +444,7 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 ### Logic Types (types/logic.ts)
 
 - LogicRule: Conditions + Actions + Cooldown + logic_operator (AND/OR)
-- SensorCondition: Vergleichsoperatoren (>, <, >=, <=, ==, !=, between)
+- SensorCondition: Vergleichsoperatoren (>, <, >=, <=, ==, !=, between), optional subzone_id (Phase 2.4)
 - TimeCondition: start_hour, end_hour, days_of_week (0=Monday, 6=Sunday — ISO 8601 / Python weekday())
 - HysteresisCondition: activate_above/deactivate_below
 - CompoundCondition: Nested AND/OR conditions
@@ -443,6 +453,7 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 - DelayAction: seconds
 - ExecutionHistoryItem: rule_id, rule_name, triggered_at, trigger_reason, actions_executed, success, error_message?, execution_time_ms
 - LogicConnection: ruleId, sourceEspId/Gpio, targetEspId/Gpio, isCrossEsp
+- extractEspIdsFromRule(rule): Set<string> — alle ESP-IDs aus Conditions (Sensor, Hysteresis) + ActuatorActions; fuer getRulesForZone und getZonesForRule
 
 ### GPIO Types (types/gpio.ts)
 
@@ -467,9 +478,9 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 |-------|-------|-------|-------------------|
 | auth | stores/auth.ts | user, tokens, setupRequired | login, logout, refreshTokens |
 | esp | stores/esp.ts | devices[], pendingDevices[] | fetchAll, isMock, gpioStatusMap, onlineDevices (via getESPStatus), offlineDevices |
-| dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb (level, zoneName, deviceName, sensorName, ruleName, dashboardName), layouts[], DASHBOARD_TEMPLATES, DashboardTarget (interface), inlineMonitorPanels (computed), sideMonitorPanels (computed), hardwarePanels (computed) | toggleStatusFilter, resetFilters, createLayout, saveLayout, createLayoutFromTemplate, deleteLayout, exportLayout, importLayout, setLayoutTarget, generateZoneDashboard, claimAutoLayout |
+| dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb (level, zoneName, deviceName, sensorName, ruleName, dashboardName), layouts[], DASHBOARD_TEMPLATES, DashboardTarget (interface), inlineMonitorPanels (alias), inlineMonitorPanelsCrossZone (computed), inlineMonitorPanelsForZone(zoneId) (fn), sideMonitorPanels (computed), bottomMonitorPanels (computed), hardwarePanels (computed) | toggleStatusFilter, resetFilters, createLayout, saveLayout, createLayoutFromTemplate, deleteLayout, exportLayout, importLayout, setLayoutTarget, generateZoneDashboard, claimAutoLayout |
 | zone | stores/zone.store.ts | (stateless) | handleZoneAssignment (+ Toasts), handleSubzoneAssignment (+ Toasts) |
-| logic | stores/logic.ts | rules[], activeExecutions, executionHistory[], historyLoaded | fetchRules, toggleRule, crossEspConnections, loadExecutionHistory, pushToHistory, undo, redo, canUndo, canRedo |
+| logic | shared/stores/logic.store.ts | rules[], activeExecutions, executionHistory[], historyLoaded | fetchRules, toggleRule, crossEspConnections, getRulesForZone(zoneId), getZonesForRule(rule), loadExecutionHistory, pushToHistory, undo, redo, canUndo, canRedo |
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
 | database | stores/database.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
 | quickAction | stores/quickAction.store.ts | isMenuOpen, activePanel (QuickActionPanel: 'menu' \| 'alerts' \| 'navigation'), currentView, contextActions[], globalActions[] | toggleMenu, closeMenu, setActivePanel, setViewContext, setContextActions, executeAction; alertSummary (computed from alert-center + inbox fallback), hasActiveAlerts, isCritical, isWarning |
@@ -712,6 +723,9 @@ getSensorDefault(type): number
 isValidSensorValue(type, value): boolean
 getDefaultInterval(type): number
 getSensorTypeAwareSummary(type): string | null
+getSensorTypeOptions(): Array<{ value: string; label: string }>
+  // Add-Sensor-Dropdown: DEVICE-Liste (ein Eintrag pro Multi-Value-Device + Single-Value).
+  // Keine Value-Types (sht31_temp, sht31_humidity), keine Duplikate (DS18B20/ds18b20 → nur ds18b20).
 
 // Aggregation Functions (NEU v9.4)
 groupSensorsByBaseType(sensors: RawSensor[]): GroupedSensor[]
@@ -1152,8 +1166,47 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.34
-**Letzte Aktualisierung:** 2026-03-05
+**Version:** 9.44
+**Letzte Aktualisierung:** 2026-03-06
+
+### Aenderungen in v9.44 (Monitor L1 — Computerspieloptik-Optimierung)
+
+- RuleCardCompact.vue: Zone-Badge Fallback "—" wenn zoneNames leer/undefined (5-Sekunden-Regel "Wo?"); Badge immer wenn zoneNames-Prop uebergeben (v-if="zoneNames !== undefined"); Zone-Badge Styling an SensorCard angeglichen (padding 2px 8px, border 1px solid var(--glass-border), max-width 140px); statusAriaLabel + aria-live="polite" fuer Screenreader; :focus-visible Outline (2px var(--color-iridescent-2)); Status-Dot transition (background-color, box-shadow)
+- ZoneRulesSection.vue: Empty State um Link "Zum Regeln-Tab" ergaenzt (wie ActiveAutomationsSection); :focus-visible auf __more-link und __empty-link
+- ActiveAutomationsSection.vue: Regel-Liste semantisch als ul/li (role="list", list-style: none); :focus-visible auf __link und __empty-link; Grid responsive minmax(min(200px, 100%), 1fr) fuer schmale Viewports (z. B. 320px)
+
+### Aenderungen in v9.43 (Monitor L1 — Aktive Automatisierungen)
+
+- ActiveAutomationsSection.vue: Neue Komponente in components/monitor/ — L1-Sektion "Aktive Automatisierungen (N)"; logicStore.enabledRules, Top 5 Regeln (Fehler zuerst, dann priority/name), RuleCardCompact mit zoneNames, Link "Alle Regeln" → /logic; Empty State bei 0 Regeln
+- RuleCardCompact.vue: Optionaler Prop `zoneNames?: string[]` — Zone-Badge fuer L1 (5-Sekunden-Regel: "Wo?"); L2 uebergibt nicht (Zone implizit); Badge-Format: "Zone1, Zone2" oder "Zone1 +2" bei >2 Zonen
+- logic.store.ts: `getZonesForRule(rule): string[]` — ermittelt Zone-Namen ueber referenzierte ESPs (extractEspIdsFromRule + espStore.devices.zone_name/zone_id)
+- MonitorView.vue L1: ActiveAutomationsSection zwischen Zone-Tiles und Dashboard-Card eingefuegt; Reihenfolge: Zonen-Kacheln → Aktive Automatisierungen → Cross-Zone-Dashboards → Inline-Panels
+- monitor-view__empty: margin-bottom var(--space-10) fuer konsistenten Abstand vor ActiveAutomationsSection
+- Section 2: monitor/ 1 → 2 Dateien (ActiveAutomationsSection)
+- Section 3: Komponentenhierarchie MonitorView L1 um ActiveAutomationsSection erweitert
+
+### Aenderungen in v9.42 (Monitor L2 — Regeln für diese Zone Verbesserungen)
+
+- ZoneRulesSection.vue: Bei >10 Regeln nur erste 5 anzeigen + Zeile "Weitere X Regeln — Im Regeln-Tab anzeigen" mit Link zu /logic; RULES_VISIBLE_THRESHOLD=10, MAX_DISPLAYED_WHEN_OVER=5
+- RuleCardCompact.vue: Fehler-Rand bei last_execution_success=false — border-left: 3px solid var(--color-status-alarm) (5-Sekunden-Regel)
+
+### Aenderungen in v9.41 (Monitor L2 — Regeln für diese Zone)
+
+- ZoneRulesSection.vue: Neue Komponente in components/monitor/ — Sektion "Regeln für diese Zone (N)"; nutzt logicStore.getRulesForZone(zoneId); Empty State bei 0 Regeln
+- RuleCardCompact.vue: Neue Komponente in components/logic/ — Read-only Regel-Karte (Status-Dot, Name, letzte Ausführung, optional Badge); Klick → router.push(/logic/:ruleId); Glow bei activeExecutions
+- MonitorView.vue L2: ZoneRulesSection zwischen Aktoren und Zone-Dashboards eingefuegt; Reihenfolge: Sensoren → Aktoren → Regeln → Zone-Dashboards → Inline-Panels
+
+### Aenderungen in v9.40 (getRulesForZone — Monitor-Integration Grundlage)
+
+- logic.store.ts: `getRulesForZone(zoneId): LogicRule[]` — filtert Regeln nach Zone via extractEspIdsFromRule + espStore.devices.zone_id; Sortierung priority, name
+- types/logic.ts: `extractEspIdsFromRule(rule): Set<string>` — sammelt ESP-IDs aus SensorCondition, HysteresisCondition, ActuatorAction (rekursiv in Compound)
+- Section 4 Logic Types: extractEspIdsFromRule dokumentiert
+- Section 5 Store-Architektur: logic Store um getRulesForZone erweitert, Pfad shared/stores/logic.store.ts korrigiert
+
+### Aenderungen in v9.39 (Phase 2.4 — Logic Subzone-Matching)
+
+- types/logic.ts: SensorCondition um optionales `subzone_id?: string | null` erweitert (Backend-Kompatibilitaet)
+- Section 4 Logic Types: SensorCondition subzone_id dokumentiert
 
 ### Aenderungen in v9.34 (Alert-Basis 4 — websocket_enabled in NotificationPreferences)
 
@@ -1182,6 +1235,54 @@ cleanupWebSocket() {
 - AlarmListWidget.vue: Gleiche Quelle wie QuickAlertPanel und NotificationDrawer (Single Source of Truth)
 - AlarmListWidget.vue: Klick auf Alert oeffnet NotificationDrawer („Zum Alert“), Empty-State „Keine aktiven Alerts“ + Link „Benachrichtigungen oeffnen“
 - Section 0.4 ALERT_VOLLANALYSE: Status GEFIXT dokumentiert
+
+### Aenderungen in v9.36 (Phase D D1 — CalibrationStep Retry-Flow)
+
+- CalibrationStep.vue: Expliziter "Erneut versuchen"-Button bei readError — erscheint neben Fehlermeldung, ruft readCurrentValue() erneut auf; CSS calibration-step__error-row, calibration-step__retry-btn (outline, var(--color-warning))
+- PHASE_D_KALIBRIERUNG_IST_ANALYSE_BERICHT.md + PHASE_D_D1_RETRY_FLOW_IMPLEMENTIERUNGSAUFTRAG.md: Docs aktualisiert (Status Implementiert, Akzeptanzkriterien abgehakt)
+
+### Aenderungen in v9.36 (Phase D2 — Kalibrierung Abbruch-Button)
+
+- CalibrationWizard.vue: "Abbrechen"-Button in point1, point2, confirm — handleAbort() ruft reset(), optional ConfirmDialog bei points.length > 0 (uiStore.confirm), kein API-Call
+- CalibrationWizard.vue: calibration-wizard__abort-btn CSS (sekundaerer Stil, Hover --color-error)
+- SensorConfigPanel.vue: "Abbrechen"-Button in pH/EC Kalibrierung point1/point2 — ruft calibration.resetCalibration(), sensor-config__cal-btn--abort CSS
+- Abgrenzung: "Zuruecksetzen" = gespeicherte Kalibrierung loeschen (complete); "Abbrechen" = laufende Erfassung abbrechen (point1/point2)
+
+### Aenderungen in v9.36 (Phase D4 — EC-Presets)
+
+- CalibrationWizard.vue: EC-Preset-Dropdown "Kalibrierloesung" bei sensor_type === 'ec' — Optionen: "0 / 1413 µS/cm", "1413 / 12.880 µS/cm", "Eigene Werte"; Default "1413 / 12.880 µS/cm"; ecPreset State, EC_PRESETS Konstante, getSuggestedReference/getReferenceLabel nutzen Preset-Werte
+- CalibrationStep.vue: Keine Aenderung — suggestedReference/referenceLabel werden vom Wizard durchgereicht; bei Custom manuelle Eingabe wie bisher
+
+### Aenderungen in v9.37 (Editor — Unteres Panel / bottom-panel)
+
+- DashboardTarget.placement um `'bottom-panel'` erweitert
+- dashboard.store.ts: neues Computed `bottomMonitorPanels` (analog inlineMonitorPanels, sideMonitorPanels)
+- CustomDashboardView.vue: Target-Dropdown um "Monitor — Unteres Panel" erweitert
+- MonitorView.vue: `monitor-layout__main-col` Wrapper (main + bottom), neuer Bereich `monitor-layout__bottom` mit InlineDashboardPanel (mode="inline"), max-height 400px, overflow-y auto
+- El Servador dashboard.py: target-Docstring um `bottom-panel` ergaenzt
+
+### Aenderungen in v9.38 (Phase 3.3 + E3 — Zone-Filter im WidgetConfigPanel, Inline-Panels L2 Zone-Filter)
+
+- WidgetConfigPanel.vue: Zone-Filter-Dropdown fuer alarm-list, esp-health, actuator-runtime — "Alle Zonen" oder konkrete Zone (aus espStore.devices); config.zoneFilter
+- dashboard.store.ts: inlineMonitorPanelsCrossZone (scope !== 'zone' oder null), inlineMonitorPanelsForZone(zoneId) (scope === 'zone' && zoneId); inlineMonitorPanels = Alias fuer Cross-Zone
+- MonitorView.vue L2: inlineMonitorPanelsL2 = cross-zone + zone-spezifische Panels fuer selectedZoneId; L1 nutzt inlineMonitorPanels (Cross-Zone)
+- DashboardWidget.config: zoneFilter?: string | null ergaenzt
+
+### Aenderungen in v9.37 (Phase 1 Monitor-Layout)
+
+- MonitorView.vue L2: Reihenfolge Zone-Header → Sensoren → Aktoren → Regeln für diese Zone → Zone-Dashboards → Inline-Panels
+- MonitorView.vue L2: Zaehlung nur in Sektionsueberschrift "Sensoren (N)" / "Aktoren (N)"; Subzone-Zeile ohne Count
+- MonitorView.vue L1: Zone-Tile Footer zeigt "X/Y online" (ESP-Count aus zoneKPIs.onlineDevices/totalDevices)
+- MonitorView.vue L2: getDashboardNameSuffix(dash) — Zone-Dashboard-Namen mit Suffix (createdAt "DD.MM." oder ID) fuer Eindeutigkeit (F004)
+- tokens.css: --space-10: 2.5rem (40px) fuer Major-Section-Trennung
+- MonitorView.vue: margin-bottom: var(--space-10) auf Zone-Grid, Dashboard-Card, monitor-section, monitor-dashboards, monitor-view__header
+
+### Aenderungen in v9.35 (Phase C — getSensorTypeOptions Deduplizierung)
+
+- sensorDefaults.ts: getSensorTypeOptions() — Device-Liste statt Value-Liste; ein Eintrag pro Multi-Value-Device (sht31, bmp280, bme280) mit Label aus MULTI_VALUE_DEVICES; Value-Types (sht31_temp, sht31_humidity, bme280_*) ausgeblendet; Duplikate DS18B20/ds18b20 dedupliziert (lowercase ds18b20 kanonisch); deviceKeySet + addedLowercase fuer Ausschluss
+- sensorDefaults.ts: getMultiValueDeviceFallbackLabel() — Fallback-Labels fuer MULTI_VALUE_DEVICES ohne label
+- AddSensorModal.vue: defaultSensorType von 'DS18B20' auf 'ds18b20' (kanonischer Key)
+- sensorDefaults.test.ts: Tests fuer SHT31/BME280 Einzeleintrag, Value-Types ausgeschlossen, Single-Value-Sensoren vorhanden
 
 ### Aenderungen in v9.30 (Config-Panel-Optimierung 5 — schedule_config + Schwellwerte-Doku)
 

@@ -95,7 +95,7 @@
 | Konzept | Persistenz | Ort (Backend) | Ort (Frontend) |
 |--------|------------|----------------|-----------------|
 | Konfiguration | DB | `sensor_configs` (GPIO, Typ, Kalibrierung, thresholds, alert_config) | Enrichment / Config-APIs |
-| Zeitreihe Messwerte | DB | `sensor_data` (raw_value, processed_value, unit, quality, timestamp) | Monitor: neueste Werte aus monitor-data; ggf. Charts/History-API |
+| Zeitreihe Messwerte | DB | `sensor_data` (raw_value, processed_value, unit, quality, timestamp, zone_id, subzone_id) | Monitor: neueste Werte aus monitor-data; ggf. Charts/History-API |
 | Qualität | DB | `sensor_data.quality` (good, fair, poor, error) | Anzeige in Monitor/Karten |
 
 **Alert-relevant:** `sensor_configs.thresholds`, `sensor_configs.alert_config` (Suppression, Severity-Override).

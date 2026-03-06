@@ -191,19 +191,25 @@ monitor-status:
 	$(COMPOSE) --profile monitoring ps
 
 # ============================================
-# Loki Debug Queries
+# Loki Debug Queries (Bash on Linux/Mac, PowerShell on Windows)
 # ============================================
+ifeq ($(OS),Windows_NT)
+LOKI_CMD = powershell -ExecutionPolicy Bypass -File scripts/loki-query.ps1
+else
+LOKI_CMD = bash scripts/loki-query.sh
+endif
+
 loki-errors:
-	@bash scripts/loki-query.sh errors 5
+	@$(LOKI_CMD) errors 5
 
 loki-trace:
-	@bash scripts/loki-query.sh trace $(CID)
+	@$(LOKI_CMD) trace $(CID)
 
 loki-esp:
-	@bash scripts/loki-query.sh esp $(ESP)
+	@$(LOKI_CMD) esp $(ESP)
 
 loki-health:
-	@bash scripts/loki-query.sh health
+	@$(LOKI_CMD) health
 
 # ============================================
 # DevTools Stack (Profile: devtools)

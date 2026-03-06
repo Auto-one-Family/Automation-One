@@ -53,9 +53,8 @@ AutomationOne is a server-centric IoT framework with three main components. See 
   - 1820+ unit/integration tests; E2E tests need `--e2e` flag and running stack
 - **Backend lint**: `cd "/workspace/El Servador/god_kaiser_server" && poetry run ruff check src/`
 - **Frontend tests**: `cd "/workspace/El Frontend" && npx vitest run`
-  - 1357+ unit tests; 3 pre-existing failures in `ComponentCard.test.ts`
+  - 1581+ unit tests (47 test files)
 - **Frontend type-check**: `cd "/workspace/El Frontend" && npx vue-tsc --noEmit`
-  - 1 pre-existing TS error in `ZonePlate.vue`
 - **Frontend build**: `cd "/workspace/El Frontend" && npx vite build`
 
 ### Gotchas

@@ -105,6 +105,37 @@ powershell -ExecutionPolicy Bypass -File scripts/debug/debug-status.ps1
 - Grafana check includes Basic auth (`admin:admin`)
 - Recommended as first step in any debug session
 
+## loki-query (Loki API Wrapper)
+
+Loki-Logs abfragen. **Voraussetzung:** `make monitor-up` (Loki auf localhost:3100).
+
+### Windows (PowerShell)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/loki-query.ps1 errors 5
+powershell -ExecutionPolicy Bypass -File scripts/loki-query.ps1 trace <correlation-id>
+powershell -ExecutionPolicy Bypass -File scripts/loki-query.ps1 esp <esp-id>
+powershell -ExecutionPolicy Bypass -File scripts/loki-query.ps1 health
+```
+
+### Linux/Mac (Bash)
+
+```bash
+bash scripts/loki-query.sh errors 5
+bash scripts/loki-query.sh trace <correlation-id>
+bash scripts/loki-query.sh esp <esp-id>
+bash scripts/loki-query.sh health
+```
+
+### Mit Make (wählt automatisch passendes Script)
+
+```bash
+make loki-errors
+make loki-trace CID=<id>
+make loki-esp ESP=<id>
+make loki-health
+```
+
 ## Log Directories
 
 | Directory | Content |

@@ -97,7 +97,7 @@
 |----------|--------|---------|
 | Zählung | „Sensoren (5)“ + „5 Sensoren“ in Subzone-Zeile | Nur „Sensoren (5)“ in Sektion |
 | Subzone-Header | Name + Count + KPIs | Name + Status-Dot + KPI-Werte („23,5°C · 65%“) — kein Count |
-| Abstand | Unklar | 40px zwischen Sektionen (tokens.css --space-4) |
+| Abstand | Unklar | 40px zwischen Sektionen (tokens.css --space-10) |
 | „Keine Subzone“ | Evtl. redundant | Nur anzeigen wenn Geräte ohne Subzone |
 | Accordion | Alle expanded? | ≤4 Subzonen: alle offen; >4: nur erste offen |
 
@@ -147,7 +147,7 @@ REGELN: Kein Breaking Change an bestehendem API-Call. Nur Rendering-Logik anpass
 ```
 KONTEXT: Monitor L2 Layout soll sich an SubzoneArea/ZonePlate angleichen. Siehe Sektion 7 (UX-Änderungen) in diesem Briefing.
 
-AUFTRAG: In MonitorView.vue L2-Bereich: (1) Zählung nur in Sektionsüberschrift "Sensoren (N)", Subzone-Header ohne Count. (2) Subzone-Header: Name + Status-Dot + KPI-Werte ("23,5°C · 65%"). (3) 40px Abstand zwischen Sektionen (var(--space-4)). (4) "Keine Subzone" nur anzeigen wenn Geräte ohne Subzone. (5) Accordion: ≤4 Subzonen alle offen; >4 nur erste offen.
+AUFTRAG: In MonitorView.vue L2-Bereich: (1) Zählung nur in Sektionsüberschrift "Sensoren (N)", Subzone-Header ohne Count. (2) Subzone-Header: Name + Status-Dot + KPI-Werte ("23,5°C · 65%"). (3) 40px Abstand zwischen Sektionen (var(--space-10)). (4) "Keine Subzone" nur anzeigen wenn Geräte ohne Subzone. (5) Accordion: ≤4 Subzonen alle offen; >4 nur erste offen.
 
 DATEIEN:
 - Bearbeiten: El Frontend/src/views/MonitorView.vue

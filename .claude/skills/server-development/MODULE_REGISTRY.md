@@ -30,7 +30,7 @@ description: Vollständige API-Referenz für God-Kaiser Server Module
 
 | Evaluator | Typ | Parameter |
 |-----------|-----|-----------|
-| SensorConditionEvaluator | `sensor` / `sensor_threshold` | `esp_id`, `gpio`, `sensor_type`, `operator`, `value` |
+| SensorConditionEvaluator | `sensor` / `sensor_threshold` | `esp_id`, `gpio`, `sensor_type`, `operator`, `value`, `subzone_id?` (Phase 2.4) |
 | TimeConditionEvaluator | `time_window` / `time` | `start_time` (HH:MM), `end_time` (HH:MM), `days_of_week` |
 | HysteresisConditionEvaluator | `hysteresis` | `esp_id`, `gpio`, `sensor_type`, `activate_above`, `deactivate_below`, `activate_below?`, `deactivate_above?` |
 | CompoundConditionEvaluator | `compound` | `logic` (AND/OR), `conditions[]` |
@@ -39,7 +39,7 @@ description: Vollständige API-Referenz für God-Kaiser Server Module
 
 | Executor | Typ | Parameter |
 |----------|-----|-----------|
-| ActuatorActionExecutor | `actuator` / `actuator_command` | `esp_id`, `gpio`, `command`, `value?`, `duration?` |
+| ActuatorActionExecutor | `actuator` / `actuator_command` | `esp_id`, `gpio`, `command`, `value?`, `duration?` — Phase 2.4: Subzone-Lookup vor Execute, Skip bei Mismatch |
 | DelayActionExecutor | `delay` | `seconds` (1-3600) |
 | NotificationActionExecutor | `notification` | `channel`, `target`, `message_template` |
 | SequenceActionExecutor | `sequence` | `description?`, `abort_on_failure?`, `steps[]` (name, action, delay_seconds?) |

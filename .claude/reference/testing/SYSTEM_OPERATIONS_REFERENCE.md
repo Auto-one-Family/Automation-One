@@ -215,11 +215,11 @@ psql -h localhost -U god_kaiser -d god_kaiser_db -c "SELECT * FROM esp_devices;"
 |---------|--------------|-----------------|
 | `esp_devices` | ESP32-Geräte | device_id, status, zone_id, zone_name, last_seen, device_metadata (JSON) |
 | `sensor_configs` | Sensor-Konfigurationen | esp_id, gpio, sensor_type, enabled, sensor_metadata (JSON), runtime_stats, alert_config |
-| `sensor_data` | Sensor-Messwerte (Time-Series) | esp_id, gpio, raw_value, processed_value, timestamp |
+| `sensor_data` | Sensor-Messwerte (Time-Series) | esp_id, gpio, raw_value, processed_value, timestamp, zone_id, subzone_id (Phase 0.1) |
 | `actuator_configs` | Aktor-Konfigurationen | esp_id, gpio, actuator_type, actuator_metadata (JSON), runtime_stats, alert_config |
 | `actuator_states` | Aktuelle Aktor-Zustände | esp_id, gpio, current_value, state |
 | `actuator_history` | Aktor-Historie (Time-Series) | esp_id, gpio, command_type, success, timestamp |
-| `cross_esp_logic` | Automatisierungs-Regeln | rule_name, enabled, trigger_conditions, actions |
+| `cross_esp_logic` | Automatisierungs-Regeln | rule_name, enabled, trigger_conditions (JSON, SensorCondition optional subzone_id Phase 2.4), actions |
 | `logic_execution_history` | Regel-Ausführungen | logic_rule_id, success, execution_time_ms |
 | `esp_heartbeat_logs` | Heartbeat-Logs | device_id, heap_free, wifi_rssi, uptime, timestamp |
 | `audit_logs` | System-Audit-Trail | event_type, severity, source_type, message |
@@ -731,7 +731,7 @@ curl -X POST http://localhost:8000/api/v1/sensors/ESP_XXXXX/4 \
 # Sensor löschen
 curl -X DELETE http://localhost:8000/api/v1/sensors/ESP_XXXXX/4
 
-# Sensor-Daten abfragen
+# Sensor-Daten abfragen (optional: zone_id=, subzone_id= Phase 0.1)
 curl "http://localhost:8000/api/v1/sensors/data?esp_id=ESP_XXXXX&gpio=4&limit=100"
 
 # Statistiken

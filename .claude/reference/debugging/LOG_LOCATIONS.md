@@ -1,7 +1,7 @@
 # Log-System - AutomationOne
 
-> **Version:** 4.8 | **Aktualisiert:** 2026-03-05
-> **Änderungen 4.8:** docker-compose.dev.yml: logs/server Mount für el-servador, tsconfig/tailwind/postcss für el-frontend
+> **Version:** 4.10 | **Aktualisiert:** 2026-03-06
+> **Änderungen 4.10:** Loki Windows: 127.0.0.1 + WebClient-Fallback (localhost-Timeout behoben)
 > **Änderungen 4.7:** Level-Normalisierung (uppercase) für loki, mqtt-broker, el-frontend in Alloy. Drop-Filter für Loki query-stats (metrics.go, engine.go, roundtrip.go). Volumen 57→24 MB/Tag
 > **Zweck:** Vollständige Dokumentation aller Log-Quellen, Speicherorte und Capture-Methoden
 > **Änderungen 3.0:** Docker-basierte Log-Infrastruktur, neue Log-Verzeichnisse, PostgreSQL-Logging, .env-Auslagerung
@@ -884,6 +884,15 @@ Monitoring-Stack muss gestartet sein: `make monitor-up`
 
 ### 12.2 Loki-Queries (Zentrales Log-System)
 
+**CLI-Helper (Makefile nutzt automatisch die passende Variante):**
+
+| Plattform | Script | Direktaufruf |
+|-----------|--------|--------------|
+| Windows | `scripts/loki-query.ps1` | `powershell -ExecutionPolicy Bypass -File scripts/loki-query.ps1 errors 5` |
+| Linux/Mac | `scripts/loki-query.sh` | `bash scripts/loki-query.sh errors 5` |
+
+**Make-Targets:** `make loki-errors`, `make loki-trace CID=<id>`, `make loki-esp ESP=<id>`, `make loki-health`
+
 ```bash
 # Alle Server-Logs (letzte Stunde) – Label compose_service (ROADMAP §1.1)
 curl -s "http://localhost:3100/loki/api/v1/query_range" \
@@ -955,9 +964,12 @@ curl -s http://localhost:9090/api/v1/targets
 
 ---
 
-**Letzte Aktualisierung:** 2026-03-02
-**Version:** 4.7
+**Letzte Aktualisierung:** 2026-03-06
+**Version:** 4.10
 **Changelog:**
+- 4.10: Loki Windows localhost-Timeout behoben — `loki-query.ps1` und `debug-status.ps1` nutzen `127.0.0.1:3100` und WebClient-Fallback; Loki-Erreichbarkeit vom Host damit stabil
+- 4.9: Loki Windows-Support — `scripts/loki-query.ps1` (PowerShell), Makefile nutzt automatisch PS auf Windows; CLI-Tabelle in §12.2
+- 4.8: docker-compose.dev.yml: logs/server Mount für el-servador, tsconfig/tailwind/postcss für el-frontend
 - 4.7: Level-Normalisierung: Alle 6 Alloy-Pipelines normalisieren zu uppercase (INFO/ERROR/WARNING/CRITICAL/DEBUG). Neue Level-Norm für loki (logfmt→uppercase), mqtt-broker (regex→uppercase), el-frontend (json→uppercase). 3 neue Drop-Filter für Loki query-stats (caller=metrics.go/engine.go/roundtrip.go). Log-Volumen 57→24 MB/Tag. `level` als Label in Labels-Tabelle dokumentiert
 - 4.6: Multi-Layer Logging Fix: PostgreSQL `logging_collector=off` (kein Bind-Mount `logs/postgres/` mehr, Logs via stderr → Docker → Alloy → Loki). Alloy-Pipeline: PG Level-Extraktion (LOG→INFO, FATAL/PANIC→CRITICAL), `query_duration_ms` Structured Metadata, ESP32 Regex-Fallback für Plain-Text-Logs. Pure ASGI RequestIdMiddleware (ContextVar-Fix). MQTT CID Thread-Propagation
 - 4.5: Alert-Quality Fix: Container Restart Loop nutzt `changes(container_start_time_seconds)` (cAdvisor hat kein `container_restart_count`). Container Disk Usage ersetzt durch Database Size High (`pg_database_size_bytes`). cAdvisor auf Docker Desktop hat kein `name`-Label — nur `id`-Pfade. 38/38 Alerts laden fehlerfrei

@@ -1,21 +1,22 @@
 # Test Baseline Report
 
 **Erstellt:** 2026-02-11
-**Aktualisiert:** 2026-03-05 (RuntimeWarning-Fixes, Test-Baseline)
+**Aktualisiert:** 2026-03-06 (AutoOps-Run, Test-Engine + Loki-Verifikation)
 **Skill:** test-log-analyst
 **Zweck:** Vollständige Test-Durchlauf-Dokumentation
 
 ---
 
-## Zusammenfassung (2026-03-05)
+## Zusammenfassung (2026-03-06)
 
 | Bereich | Tests | Passed | Failed | Skipped | Status |
 |---------|-------|--------|--------|---------|--------|
-| **Backend Unit** | 884 | 884 | 0 | 4 | GRUEN |
+| **Backend Unit** | 898 | 894 | 0 | 4 | GRUEN |
 | **Backend Integration** | 779 | 779 | 0 | 0 | GRUEN |
-| **Backend ESP32-Mock** | 317 | 313 | 0 | 4 | GRUEN |
-| **Frontend Vitest** | 1564 | 1564 | 0 | 0 | GRUEN |
-| **TOTAL** | 3544 | 3540 | 0 | 8 | **GRUEN** |
+| **Frontend Vitest** | 1581 | 1581 | 0 | 0 | GRUEN |
+| **TOTAL** | 3258 | 3254 | 0 | 4 | **GRUEN** |
+
+**AutoOps Health:** 9/9 checks passed. **Loki:** Keine ERROR-Logs in letzten 5 Min.
 
 ---
 

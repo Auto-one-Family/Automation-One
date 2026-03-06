@@ -110,7 +110,7 @@ docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c \
 |---------|----------|---------------------|
 | `esp_devices` | Device Registry | status, zone_id, capabilities |
 | `sensor_configs` | Sensor-Config pro GPIO | UNIQUE(esp_id, gpio, sensor_type, onewire_address, i2c_address) |
-| `sensor_data` | Time-Series Messwerte | FK → sensor_configs |
+| `sensor_data` | Time-Series Messwerte (inkl. zone_id, subzone_id Phase 0.1) | FK → sensor_configs |
 | `actuator_configs` | Aktuator-Config + Safety | FK → esp_devices |
 | `actuator_states` | Echtzeit-Zustand | FK → actuator_configs |
 | `actuator_history` | Command History | FK → actuator_configs |
@@ -153,17 +153,20 @@ Ermöglicht:
 ### Aktueller HEAD
 
 ```
-950ad9ce87bb (HEAD - 19 Migrations total)
+add_sensor_data_zone_subzone (HEAD)
 ```
 
-### Migration-History (letzte 6)
+**Hinweis:** Wenn die DB Schema-Fehler bei `sensor_data` meldet (z. B. `column "zone_id" of relation "sensor_data" does not exist`), fehlt die Migration auf der laufenden DB → `alembic upgrade head` im Server-Projekt ausführen (siehe Prüf-Befehle unten).
+
+### Migration-History (letzte 8)
 
 | Revision | Datum | Beschreibung |
 |----------|-------|-------------|
+| `add_sensor_data_zone_subzone` | 2026-03-06 | sensor_data.zone_id, subzone_id + Indizes (Phase 0.1) |
+| `add_subzone_custom_data` | – | subzone_configs.custom_data |
 | `950ad9ce87bb` | 2026-02-04 | UNIQUE erweitert um i2c_address |
 | `24e8638e14a5` | 2026-01-27 | request_id zu audit_log |
 | `245078bda463` | 2026-01-27 | Merge heads |
-| `add_token_version_to_user` | 2025-12-11 | user_accounts.token_version |
 | `fix_onewire_constraint` | 2026-01-27 | UNIQUE + onewire_address |
 | `add_discovery_approval_fields` | 2026-01-27 | Discovery/Approval Felder |
 | `add_esp_heartbeat_logs` | 2026-01-24 | esp_heartbeat_logs Tabelle |

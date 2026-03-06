@@ -491,7 +491,7 @@ Visual Rule Builder mit Flow-Editor, RuleCards, Execution History funktioniert r
 - [ ] pH-Kalibrierung — 2-Punkt-Verfahren funktioniert?
 - [ ] EC-Kalibrierung — 2-Punkt-Verfahren funktioniert?
 - [ ] Offset-Kalibrierung fuer andere Sensortypen — verfuegbar?
-- [ ] CalibrationWizard — Schrittfolge klar? Abbruch moeglich?
+- [x] CalibrationWizard — Schrittfolge klar? Abbruch moeglich? (D2 implementiert)
 - [ ] Kalibrierungsdaten persistent — in DB gespeichert?
 
 ---

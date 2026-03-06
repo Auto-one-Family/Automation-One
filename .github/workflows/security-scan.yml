@@ -69,7 +69,8 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
-          trivyignores: '.trivyignore'
+          # Workaround: trivyignores can be unreliable in CI; --ignorefile works
+          scan-args: '--ignorefile ./.trivyignore'
 
   scan-config:
     name: Scan Docker Configs
