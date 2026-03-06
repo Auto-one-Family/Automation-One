@@ -160,6 +160,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     supportsOnDemand: true,
   },
   
+  // SHT31 base/alias keys: Backward compat when API/DB sends "SHT31". Add-Dropdown shows only "sht31" (getSensorTypeOptions).
   'SHT31': {
     label: 'SHT31',
     unit: '°C',
@@ -207,6 +208,7 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
+    defaultIntervalSeconds: 30,
   },
 
   'sht31_humidity': {
@@ -222,8 +224,10 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
+    defaultIntervalSeconds: 30,
   },
 
+  // Alias for DB/API sending "SHT31_humidity"; value-type sht31_humidity is canonical.
   'SHT31_humidity': {
     label: 'Luftfeuchte',
     unit: '%RH',
@@ -288,7 +292,89 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedTimeout: 300,
     supportsOnDemand: false,
   },
-  
+
+  // Lowercase variants (API/Firmware send lowercase sensor_type)
+  // Phase C: Bosch BME280/BMP280 Datasheet — Operating range -40…+85 °C, 0…100 %RH, 300…1100 hPa
+  'bmp280_temp': {
+    label: 'BMP280 Temperatur',
+    unit: '°C',
+    min: -40,
+    max: 85,
+    decimals: 1,
+    icon: 'Thermometer',
+    defaultValue: 22.0,
+    description: 'BMP280 Temperatur. Bosch Datasheet: -40…+85 °C.',
+    category: 'temperature',
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: false,
+    defaultIntervalSeconds: 60,
+  },
+
+  'bmp280_pressure': {
+    label: 'BMP280 Druck',
+    unit: 'hPa',
+    min: 300,
+    max: 1100,
+    decimals: 1,
+    icon: 'Gauge',
+    defaultValue: 1013.25,
+    description: 'BMP280 Luftdruck. Bosch Datasheet: 300…1100 hPa.',
+    category: 'air',
+    recommendedMode: 'continuous',
+    recommendedTimeout: 300,
+    supportsOnDemand: false,
+    defaultIntervalSeconds: 60,
+  },
+
+  'bme280_temp': {
+    label: 'BME280 Temperatur',
+    unit: '°C',
+    min: -40,
+    max: 85,
+    decimals: 1,
+    icon: 'Thermometer',
+    defaultValue: 22.0,
+    description: 'BME280 Temperatur. Bosch Datasheet: -40…+85 °C.',
+    category: 'temperature',
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: false,
+    defaultIntervalSeconds: 60,
+  },
+
+  'bme280_humidity': {
+    label: 'BME280 Feuchte',
+    unit: '%RH',
+    min: 0,
+    max: 100,
+    decimals: 1,
+    icon: 'Droplets',
+    defaultValue: 50.0,
+    description: 'BME280 relative Luftfeuchtigkeit. Bosch Datasheet: 0…100 %RH.',
+    category: 'air',
+    recommendedMode: 'continuous',
+    recommendedTimeout: 180,
+    supportsOnDemand: false,
+    defaultIntervalSeconds: 60,
+  },
+
+  'bme280_pressure': {
+    label: 'BME280 Druck',
+    unit: 'hPa',
+    min: 300,
+    max: 1100,
+    decimals: 1,
+    icon: 'Gauge',
+    defaultValue: 1013.25,
+    description: 'BME280 Luftdruck. Bosch Datasheet: 300…1100 hPa.',
+    category: 'air',
+    recommendedMode: 'continuous',
+    recommendedTimeout: 300,
+    supportsOnDemand: false,
+    defaultIntervalSeconds: 60,
+  },
+
   'analog': {
     label: 'Analog-Eingang',
     unit: 'raw',
@@ -471,14 +557,63 @@ export function isValidSensorValue(sensorType: string, value: number): boolean {
 }
 
 /**
- * Get all available sensor types as options for select elements
+ * Get all available sensor types as options for select elements (Add-Sensor dropdown).
+ * Returns a DEVICE list: one option per multi-value device (canonical key, e.g. "sht31"),
+ * plus all single-value sensor types. Value-types (sht31_temp, sht31_humidity) and
+ * duplicate base keys (SHT31, SHT31_humidity) are excluded so the dropdown does not show 5 SHT31 variants.
+ * Duplicates like DS18B20/ds18b20 are deduplicated (lowercase preferred as canonical).
  * @returns Array of { value, label } objects
  */
 export function getSensorTypeOptions(): Array<{ value: string; label: string }> {
-  return Object.entries(SENSOR_TYPE_CONFIG).map(([key, config]) => ({
-    value: key,
-    label: config.label
+  const valueTypeSet = new Set(
+    Object.values(MULTI_VALUE_DEVICES).flatMap((d) => d.sensorTypes)
+  )
+  const deviceKeySet = new Set(
+    Object.keys(MULTI_VALUE_DEVICES).map((k) => k.toLowerCase())
+  )
+
+  const deviceOptions = Object.entries(MULTI_VALUE_DEVICES).map(([deviceType, cfg]) => ({
+    value: deviceType,
+    label: cfg.label ?? getMultiValueDeviceFallbackLabel(deviceType)
   }))
+
+  const singleValueEntries = Object.entries(SENSOR_TYPE_CONFIG)
+    .filter(([key]) => {
+      if (valueTypeSet.has(key)) return false
+      if (valueTypeSet.has(key.toLowerCase())) return false // e.g. SHT31_humidity → sht31_humidity
+      if (deviceKeySet.has(key.toLowerCase())) return false // SHT31, sht31 → already in deviceOptions
+      if (getDeviceTypeFromSensorType(key) !== null) return false
+      return true
+    })
+    .sort((a, b) => {
+      const aLower = a[0].toLowerCase()
+      const bLower = b[0].toLowerCase()
+      if (aLower !== bLower) return aLower.localeCompare(bLower)
+      // Same normalized key: prefer lowercase variant (e.g. ds18b20 before DS18B20)
+      return (a[0] === aLower ? 0 : 1) - (b[0] === bLower ? 0 : 1)
+    })
+
+  const addedLowercase = new Set<string>()
+  const singleValueOptions = singleValueEntries
+    .filter(([key]) => {
+      const lower = key.toLowerCase()
+      if (addedLowercase.has(lower)) return false
+      addedLowercase.add(lower)
+      return true
+    })
+    .map(([key, config]) => ({ value: key, label: config.label }))
+
+  return [...deviceOptions, ...singleValueOptions]
+}
+
+/** Fallback label for multi-value devices when label is missing */
+function getMultiValueDeviceFallbackLabel(deviceType: string): string {
+  const fallbacks: Record<string, string> = {
+    sht31: 'SHT31 (Temp + Humidity)',
+    bmp280: 'BMP280 (Druck + Temp)',
+    bme280: 'BME280 (Druck + Temp + Feuchte)'
+  }
+  return fallbacks[deviceType.toLowerCase()] ?? deviceType
 }
 
 /**
@@ -642,6 +777,9 @@ const BASE_TYPE_TO_DEVICE: Record<string, string> = {
   // BME280 (same as BMP280 with humidity)
   'bme280': 'bme280',
   'BME280': 'bme280',
+  'bme280_temp': 'bme280',
+  'bme280_humidity': 'bme280',
+  'bme280_pressure': 'bme280',
 }
 
 /**

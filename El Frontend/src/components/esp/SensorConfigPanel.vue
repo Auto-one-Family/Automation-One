@@ -10,7 +10,7 @@
  */
 
 import { ref, computed, onMounted, watch } from 'vue'
-import { Save, RotateCcw, Beaker, Gauge, Settings, Cpu, Trash2 } from 'lucide-vue-next'
+import { Save, RotateCcw, Beaker, Gauge, Settings, Cpu, Trash2, X } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { espApi } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
@@ -145,9 +145,10 @@ const accordionKey = computed(() => `sensor-${props.espId}-${props.gpio}`)
 onMounted(async () => {
   const isMock = espApi.isMockEsp(props.espId)
 
-  // Load sensor config from server (Real + Mock — Single Source of Truth)
+  // Load sensor config from server (Real + Mock — Single Source of Truth).
+  // Pass sensorType for multi-value sensors (e.g. SHT31) so backend returns the correct config.
   try {
-    const config = await sensorsApi.get(props.espId, props.gpio)
+    const config = await sensorsApi.get(props.espId, props.gpio, props.sensorType)
     if (config) {
       sensorDbId.value = config.id ? String(config.id) : null
       name.value = config.name || ''
@@ -545,9 +546,15 @@ async function handleSave() {
             <h4>Schritt 1: pH 4.0 Pufferloesung</h4>
             <p>Sensor in pH 4.0 Loesung tauchen und warten bis der Wert stabil ist.</p>
             <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
-            <button class="sensor-config__cal-btn" @click="calibration.setPoint1(currentRawValue, 4.0)">
-              Kalibrierungspunkt 1 setzen (pH 4.0)
-            </button>
+            <div class="sensor-config__cal-actions">
+              <button class="sensor-config__cal-btn" @click="calibration.setPoint1(currentRawValue, 4.0)">
+                Kalibrierungspunkt 1 setzen (pH 4.0)
+              </button>
+              <button class="sensor-config__cal-btn sensor-config__cal-btn--abort" @click="calibration.resetCalibration()">
+                <X class="w-3 h-3" />
+                Abbrechen
+              </button>
+            </div>
           </div>
 
           <!-- Step 2: pH 7.0 -->
@@ -558,9 +565,15 @@ async function handleSave() {
               Punkt 1: {{ calibration.point1.value?.rawValue.toFixed(0) }} ADC &rarr; pH 4.0 &#10003;
             </div>
             <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
-            <button class="sensor-config__cal-btn" @click="calibration.setPoint2(currentRawValue, 7.0)">
-              Kalibrierungspunkt 2 setzen (pH 7.0)
-            </button>
+            <div class="sensor-config__cal-actions">
+              <button class="sensor-config__cal-btn" @click="calibration.setPoint2(currentRawValue, 7.0)">
+                Kalibrierungspunkt 2 setzen (pH 7.0)
+              </button>
+              <button class="sensor-config__cal-btn sensor-config__cal-btn--abort" @click="calibration.resetCalibration()">
+                <X class="w-3 h-3" />
+                Abbrechen
+              </button>
+            </div>
           </div>
 
           <!-- Complete -->
@@ -589,9 +602,15 @@ async function handleSave() {
             <h4>Schritt 1: Trockene Elektrode (Luft)</h4>
             <p>Elektrode in der Luft halten (trocken).</p>
             <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
-            <button class="sensor-config__cal-btn" @click="calibration.setPoint1(currentRawValue, 0)">
-              Nullpunkt setzen
-            </button>
+            <div class="sensor-config__cal-actions">
+              <button class="sensor-config__cal-btn" @click="calibration.setPoint1(currentRawValue, 0)">
+                Nullpunkt setzen
+              </button>
+              <button class="sensor-config__cal-btn sensor-config__cal-btn--abort" @click="calibration.resetCalibration()">
+                <X class="w-3 h-3" />
+                Abbrechen
+              </button>
+            </div>
           </div>
 
           <!-- Step 2: Solution -->
@@ -599,9 +618,15 @@ async function handleSave() {
             <h4>Schritt 2: Kalibrierlosung</h4>
             <p>Elektrode in Kalibrierlosung (1413 &micro;S/cm) tauchen.</p>
             <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
-            <button class="sensor-config__cal-btn" @click="calibration.setPoint2(currentRawValue, 1413)">
-              Kalibrierungspunkt setzen (1413 &micro;S/cm)
-            </button>
+            <div class="sensor-config__cal-actions">
+              <button class="sensor-config__cal-btn" @click="calibration.setPoint2(currentRawValue, 1413)">
+                Kalibrierungspunkt setzen (1413 &micro;S/cm)
+              </button>
+              <button class="sensor-config__cal-btn sensor-config__cal-btn--abort" @click="calibration.resetCalibration()">
+                <X class="w-3 h-3" />
+                Abbrechen
+              </button>
+            </div>
           </div>
 
           <!-- Complete -->
@@ -1182,6 +1207,21 @@ async function handleSave() {
   background: transparent;
   border: 1px solid var(--glass-border);
   color: var(--color-text-secondary);
+}
+
+.sensor-config__cal-btn--abort {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: transparent;
+  border: 1px solid var(--color-text-muted);
+  color: var(--color-text-secondary);
+}
+
+.sensor-config__cal-btn--abort:hover {
+  border-color: var(--color-error);
+  color: var(--color-error);
+  background: rgba(248, 113, 113, 0.08);
 }
 
 .sensor-config__cal-actions {

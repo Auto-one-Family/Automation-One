@@ -42,6 +42,7 @@ export interface SensorCondition {
   value: number
   min?: number // For 'between' operator
   max?: number // For 'between' operator
+  subzone_id?: string | null // Phase 2.4: optional subzone filter
 }
 
 export interface TimeCondition {
@@ -259,4 +260,36 @@ function extractSensorConditions(conditions: LogicCondition[]): SensorCondition[
   }
 
   return result
+}
+
+/**
+ * Extract all ESP IDs referenced by a rule (conditions + actions).
+ * Used for zone-based rule filtering (getRulesForZone).
+ * Covers: SensorCondition, HysteresisCondition, ActuatorAction.
+ */
+export function extractEspIdsFromRule(rule: LogicRule): Set<string> {
+  const espIds = new Set<string>()
+
+  // From conditions: SensorCondition, HysteresisCondition (recursive in compound)
+  function collectFromConditions(conditions: LogicCondition[]): void {
+    for (const cond of conditions) {
+      if (cond.type === 'sensor' || cond.type === 'sensor_threshold') {
+        espIds.add((cond as SensorCondition).esp_id)
+      } else if (cond.type === 'hysteresis') {
+        espIds.add((cond as HysteresisCondition).esp_id)
+      } else if (cond.type === 'compound') {
+        collectFromConditions((cond as CompoundCondition).conditions)
+      }
+    }
+  }
+  collectFromConditions(rule.conditions)
+
+  // From actions: ActuatorAction
+  for (const action of rule.actions) {
+    if (action.type === 'actuator' || action.type === 'actuator_command') {
+      espIds.add((action as ActuatorAction).esp_id)
+    }
+  }
+
+  return espIds
 }

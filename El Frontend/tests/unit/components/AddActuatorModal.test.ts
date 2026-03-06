@@ -25,6 +25,7 @@ const mockFetchGpioStatus = vi.fn()
 
 vi.mock('@/stores/esp', () => ({
   useEspStore: () => ({
+    devices: [],
     getDeviceId: (d: any) => d.device_id || '',
     isMock: () => true,
     addActuator: mockAddActuator,

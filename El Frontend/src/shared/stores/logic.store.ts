@@ -11,10 +11,11 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { logicApi } from '@/api/logic'
 import type { LogicRuleCreate, LogicRuleUpdate } from '@/api/logic'
-import { extractConnections } from '@/types/logic'
+import { extractConnections, extractEspIdsFromRule } from '@/types/logic'
 import { createLogger } from '@/utils/logger'
 import type { LogicRule, LogicConnection, ExecutionHistoryItem } from '@/types/logic'
 import { websocketService, type WebSocketMessage } from '@/services/websocket'
+import { useEspStore } from '@/stores/esp'
 
 const logger = createLogger('LogicStore')
 
@@ -290,6 +291,51 @@ export const useLogicStore = defineStore('logic', () => {
    */
   function getRuleById(ruleId: string): LogicRule | undefined {
     return rules.value.find((r) => r.id === ruleId)
+  }
+
+  /**
+   * Get all rules that reference at least one sensor or actuator in the given zone.
+   * Zone mapping is derived from espStore.devices (device.zone_id).
+   * Rules without any ESP in devices are excluded (unknown zone).
+   */
+  function getRulesForZone(zoneId: string): LogicRule[] {
+    if (!zoneId) return []
+
+    const espStore = useEspStore()
+    const devices = espStore.devices
+
+    return rules.value.filter((rule) => {
+      const espIds = extractEspIdsFromRule(rule)
+      if (espIds.size === 0) return false
+
+      for (const espId of espIds) {
+        const device = devices.find((d) => espStore.getDeviceId(d) === espId)
+        if (device?.zone_id === zoneId) return true
+      }
+      return false
+    }).sort((a, b) => {
+      const prio = (a.priority ?? 0) - (b.priority ?? 0)
+      return prio !== 0 ? prio : (a.name ?? '').localeCompare(b.name ?? '')
+    })
+  }
+
+  /**
+   * Get zone names for a rule (via referenced ESPs).
+   * Used for L1 Monitor Zone-Badge — answers "Where?" per 5-second rule.
+   */
+  function getZonesForRule(rule: LogicRule): string[] {
+    const espStore = useEspStore()
+    const devices = espStore.devices
+    const espIds = extractEspIdsFromRule(rule)
+    const zoneNames = new Set<string>()
+
+    for (const espId of espIds) {
+      const device = devices.find((d) => espStore.getDeviceId(d) === espId)
+      const name = device?.zone_name ?? device?.zone_id ?? null
+      if (name) zoneNames.add(name)
+    }
+
+    return [...zoneNames].sort((a, b) => a.localeCompare(b))
   }
 
   /**
@@ -595,6 +641,8 @@ export const useLogicStore = defineStore('logic', () => {
     getOutgoingConnections,
     getIncomingConnections,
     getRuleById,
+    getRulesForZone,
+    getZonesForRule,
     clearError,
 
     // Execution History

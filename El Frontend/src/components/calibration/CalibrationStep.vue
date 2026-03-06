@@ -6,7 +6,7 @@
  * Shows instructions, a live raw-value display, and a reference input.
  */
 
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { sensorsApi } from '@/api/sensors'
 
 interface Props {
@@ -30,6 +30,14 @@ const emit = defineEmits<{
 const rawValue = ref<number | null>(null)
 const referenceValue = ref<number>(props.suggestedReference ?? 0)
 const isReading = ref(false)
+
+watch(
+  () => props.suggestedReference,
+  (val) => {
+    if (val !== undefined) referenceValue.value = val
+  },
+  { immediate: false }
+)
 const readError = ref<string | null>(null)
 
 const canCapture = computed(() => rawValue.value !== null && referenceValue.value !== undefined)
@@ -88,7 +96,16 @@ function capture() {
       >
         {{ isReading ? 'Lese...' : 'Wert lesen' }}
       </button>
-      <div v-if="readError" class="calibration-step__error">{{ readError }}</div>
+      <div v-if="readError" class="calibration-step__error-row">
+        <span class="calibration-step__error">{{ readError }}</span>
+        <button
+          class="calibration-step__retry-btn"
+          :disabled="isReading"
+          @click="readCurrentValue"
+        >
+          Erneut versuchen
+        </button>
+      </div>
     </div>
 
     <!-- Reference value input -->
@@ -207,6 +224,33 @@ function capture() {
 .calibration-step__error {
   font-size: 0.75rem;
   color: var(--color-error, #ef4444);
+}
+
+.calibration-step__error-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.calibration-step__retry-btn {
+  padding: 0.375rem 1rem;
+  font-size: 0.75rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--color-warning, #fbbf24);
+  background: transparent;
+  color: var(--color-warning, #fbbf24);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.calibration-step__retry-btn:hover:not(:disabled) {
+  background: rgba(251, 191, 36, 0.1);
+}
+
+.calibration-step__retry-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .calibration-step__reference {

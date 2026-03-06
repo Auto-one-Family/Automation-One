@@ -76,7 +76,9 @@ const actuatorAuxGpio = computed({
   set: (value: number | null) => { newActuator.value.aux_gpio = value },
 })
 
-const device = computed(() => espStore.devices.find((d) => espStore.getDeviceId(d) === props.espId))
+const device = computed(() =>
+  (espStore.devices ?? []).find((d) => espStore.getDeviceId(d) === props.espId)
+)
 const zoneId = computed(() => device.value?.zone_id ?? null)
 
 /** Subzone v-model: SubzoneAssignmentSection expects string | null, form may have undefined */

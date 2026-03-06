@@ -49,6 +49,24 @@ const hasYRange = computed(() =>
   ['line-chart', 'historical'].includes(props.widgetType)
 )
 
+/** Widgets that support zoneFilter (AlarmListWidget, ESPHealthWidget, ActuatorRuntimeWidget) */
+const hasZoneFilterField = computed(() =>
+  ['alarm-list', 'esp-health', 'actuator-runtime'].includes(props.widgetType)
+)
+
+// Available zones (from espStore.devices — no GET /zones endpoint)
+const availableZones = computed(() => {
+  const seen = new Set<string>()
+  const list: { id: string; name: string }[] = []
+  for (const d of espStore.devices) {
+    if (d.zone_id && !seen.has(d.zone_id)) {
+      seen.add(d.zone_id)
+      list.push({ id: d.zone_id, name: d.zone_name || d.zone_id })
+    }
+  }
+  return list.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
+})
+
 // Available sensors
 const availableSensors = computed(() => {
   const items: { id: string; label: string; type: string }[] = []
@@ -184,6 +202,24 @@ const widgetTypeLabels: Record<string, string> = {
             :key="a.id"
             :value="a.id"
           >{{ a.label }}</option>
+        </select>
+      </div>
+
+      <!-- Zone Filter (AlarmListWidget, ESPHealthWidget, ActuatorRuntimeWidget) -->
+      <div v-if="hasZoneFilterField" class="widget-config-panel__field">
+        <label class="widget-config-panel__label">Zone-Filter</label>
+        <select
+          class="widget-config-panel__select"
+          :value="localConfig.zoneFilter ?? ''"
+          @change="updateField('zoneFilter', ($event.target as HTMLSelectElement).value || null)"
+          aria-label="Anzeige für Zone"
+        >
+          <option value="">Alle Zonen</option>
+          <option
+            v-for="z in availableZones"
+            :key="z.id"
+            :value="z.id"
+          >{{ z.name }}</option>
         </select>
       </div>
 

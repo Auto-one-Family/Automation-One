@@ -38,6 +38,17 @@ vi.mock('@/utils/logger', () => ({
   }),
 }))
 
+// Mock esp store for getRulesForZone (logic store depends on devices + zone_id)
+const mockEspDevices: { device_id?: string; esp_id?: string; zone_id?: string }[] = []
+vi.mock('@/stores/esp', () => ({
+  useEspStore: () => ({
+    get devices() {
+      return mockEspDevices
+    },
+    getDeviceId: (d: { device_id?: string; esp_id?: string }) => d.device_id || d.esp_id || '',
+  }),
+}))
+
 // Import after mocks are set up
 import { beforeAll, afterAll, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
@@ -674,6 +685,78 @@ describe('Logic Store - Connection Helpers', () => {
       const rule = store.getRuleById('rule-001')
       expect(rule).toBeDefined()
       expect(rule?.id).toBe('rule-001')
+    })
+  })
+
+  describe('getRulesForZone', () => {
+    beforeEach(() => {
+      mockEspDevices.length = 0
+    })
+
+    it('returns empty array when zoneId is empty', async () => {
+      const store = useLogicStore()
+      await store.fetchRules()
+      expect(store.getRulesForZone('')).toEqual([])
+    })
+
+    it('returns only rules with sensor/actuator in the given zone', async () => {
+      const store = useLogicStore()
+      await store.fetchRules()
+
+      mockEspDevices.push(
+        { device_id: 'ESP_TEST_001', esp_id: 'ESP_TEST_001', zone_id: 'zone_A' },
+        { device_id: 'ESP_TEST_002', esp_id: 'ESP_TEST_002', zone_id: 'zone_A' },
+        { device_id: 'ESP_HUMIDITY_001', esp_id: 'ESP_HUMIDITY_001', zone_id: 'zone_B' }
+      )
+
+      const rulesZoneA = store.getRulesForZone('zone_A')
+      expect(rulesZoneA.map((r) => r.id)).toContain('rule-001')
+      expect(rulesZoneA.length).toBeGreaterThanOrEqual(1)
+
+      const rulesZoneB = store.getRulesForZone('zone_B')
+      expect(rulesZoneB.map((r) => r.id)).toContain('rule-002')
+    })
+
+    it('excludes rules that do not match the zone', async () => {
+      const store = useLogicStore()
+      await store.fetchRules()
+
+      mockEspDevices.push(
+        { device_id: 'ESP_TEST_001', esp_id: 'ESP_TEST_001', zone_id: 'zone_A' },
+        { device_id: 'ESP_TEST_002', esp_id: 'ESP_TEST_002', zone_id: 'zone_A' }
+      )
+
+      const rulesZoneC = store.getRulesForZone('zone_C')
+      expect(rulesZoneC).toEqual([])
+    })
+
+    it('returns empty array when espStore.devices is empty', async () => {
+      const store = useLogicStore()
+      await store.fetchRules()
+      expect(mockEspDevices).toHaveLength(0)
+
+      const rules = store.getRulesForZone('zone_A')
+      expect(rules).toEqual([])
+    })
+
+    it('sorts rules by priority then name', async () => {
+      const store = useLogicStore()
+      await store.fetchRules()
+
+      mockEspDevices.push(
+        { device_id: 'ESP_TEST_001', esp_id: 'ESP_TEST_001', zone_id: 'zone_A' },
+        { device_id: 'ESP_TEST_002', esp_id: 'ESP_TEST_002', zone_id: 'zone_A' },
+        { device_id: 'ESP_HUMIDITY_001', esp_id: 'ESP_HUMIDITY_001', zone_id: 'zone_A' },
+        { device_id: 'ESP_HUMIDIFIER_001', esp_id: 'ESP_HUMIDIFIER_001', zone_id: 'zone_A' }
+      )
+
+      const rules = store.getRulesForZone('zone_A')
+      expect(rules.length).toBeGreaterThanOrEqual(2)
+      for (let i = 1; i < rules.length; i++) {
+        const prev = rules[i - 1].priority ?? 0
+        const curr = rules[i].priority ?? 0
+        expect(curr).toBeGreaterThanOrEqual(prev)
+      }
     })
   })
 

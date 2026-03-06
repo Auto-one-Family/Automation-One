@@ -10,6 +10,7 @@ import AddSensorModal from '@/components/esp/AddSensorModal.vue'
 // Mock ESP store
 vi.mock('@/stores/esp', () => ({
   useEspStore: () => ({
+    devices: [],
     getDeviceId: (d: any) => d.device_id || '',
     isMock: () => true,
     addSensor: vi.fn(),

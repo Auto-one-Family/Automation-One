@@ -24,7 +24,7 @@ import { useSparklineCache } from '@/composables/useSparklineCache'
 import { aggregateZoneSensors, formatAggregatedValue, getSensorUnit, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { getESPStatus } from '@/composables/useESPStatus'
-import { formatRelativeTime, qualityToStatus, DATA_STALE_THRESHOLD_S, ZONE_STALE_THRESHOLD_MS } from '@/utils/formatters'
+import { formatRelativeTime, formatDate, qualityToStatus, DATA_STALE_THRESHOLD_S, ZONE_STALE_THRESHOLD_MS } from '@/utils/formatters'
 import { sensorsApi } from '@/api/sensors'
 import { zonesApi } from '@/api/zones'
 import type { SensorReading, SensorStats } from '@/types'
@@ -68,6 +68,8 @@ import DashboardViewer from '@/components/dashboard/DashboardViewer.vue'
 import InlineDashboardPanel from '@/components/dashboard/InlineDashboardPanel.vue'
 import BaseSkeleton from '@/shared/design/primitives/BaseSkeleton.vue'
 import ErrorState from '@/shared/design/patterns/ErrorState.vue'
+import ZoneRulesSection from '@/components/monitor/ZoneRulesSection.vue'
+import ActiveAutomationsSection from '@/components/monitor/ActiveAutomationsSection.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -1106,6 +1108,13 @@ async function fetchZoneMonitorData() {
     zoneMonitorError.value = null
     return
   }
+  // Only fetch when zone exists in current devices (avoids 500 for invalid/deep-link zone slugs)
+  const zoneExists = espStore.devices.some((d) => d.zone_id === zoneId)
+  if (!zoneExists) {
+    zoneMonitorData.value = null
+    zoneMonitorError.value = null
+    return
+  }
   zoneMonitorLoading.value = true
   zoneMonitorError.value = null
   try {
@@ -1222,6 +1231,23 @@ const nextNavZoneId = computed(() => {
 const zonePositionLabel = computed(() => {
   if (currentZoneIndex.value < 0) return ''
   return `${currentZoneIndex.value + 1}/${sortedZoneIds.value.length}`
+})
+
+/** L2 inline panels: cross-zone + zone-specific for selectedZoneId (E3) */
+const inlineMonitorPanelsL2 = computed(() => {
+  const cross = dashStore.inlineMonitorPanelsCrossZone
+  const zoneId = selectedZoneId.value
+  if (!zoneId) return cross
+  const forZone = dashStore.inlineMonitorPanelsForZone(zoneId)
+  const seen = new Set(cross.map(p => p.id))
+  const combined = [...cross]
+  for (const p of forZone) {
+    if (!seen.has(p.id)) {
+      seen.add(p.id)
+      combined.push(p)
+    }
+  }
+  return combined.sort((a, b) => (a.target?.order ?? 0) - (b.target?.order ?? 0))
 })
 
 function goToPrevZone() {
@@ -1355,6 +1381,19 @@ function handleClaimLayout(layoutId: string) {
   dashStore.claimAutoLayout(layoutId)
   router.push({ name: 'editor-dashboard', params: { dashboardId: layoutId } })
 }
+
+/** Compact date suffix for dashboard names (e.g. " (12.02.)") — ensures uniqueness */
+function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): string {
+  if (dash.createdAt) {
+    const d = formatDate(dash.createdAt)
+    if (d !== '-') {
+      const short = d.slice(0, 5)
+      if (short) return ` (${short}.)`
+    }
+  }
+  if (dash.id && dash.id.length >= 6) return ` #${dash.id.slice(-6)}`
+  return ''
+}
 </script>
 
 <template>
@@ -1367,8 +1406,9 @@ function handleClaimLayout(layoutId: string) {
       <DashboardViewer :layoutId="selectedDashboardId!" showHeader />
     </template>
 
-    <!-- L1/L2 with optional Side-Panel -->
+    <!-- L1/L2 with optional Side-Panel and Bottom-Panel -->
     <div v-else class="monitor-layout" :class="{ 'monitor-layout--has-side': dashStore.sideMonitorPanels.length > 0 }">
+      <div class="monitor-layout__main-col">
       <main class="monitor-layout__main">
 
     <!-- Level 1: Zone Overview -->
@@ -1435,9 +1475,12 @@ function handleClaimLayout(layoutId: string) {
             Keine Sensordaten
           </div>
 
-          <!-- Footer: Sensor/Actuator Counts + Last Activity -->
+          <!-- Footer: ESP-Count + Sensor/Actuator Counts + Last Activity -->
           <div class="monitor-zone-tile__footer">
             <div class="monitor-zone-tile__counts">
+              <span class="monitor-zone-tile__count">
+                {{ zone.totalDevices > 0 ? `${zone.onlineDevices}/${zone.totalDevices} online` : '—' }}
+              </span>
               <span :class="['monitor-zone-tile__count', {
                 'monitor-zone-tile__count--ok': zone.activeSensors === zone.sensorCount && zone.sensorCount > 0,
                 'monitor-zone-tile__count--warn': zone.activeSensors < zone.sensorCount && zone.activeSensors > 0,
@@ -1458,6 +1501,9 @@ function handleClaimLayout(layoutId: string) {
           </div>
         </div>
       </div>
+
+      <!-- Aktive Automatisierungen (L1) -->
+      <ActiveAutomationsSection />
 
       <!-- Dashboard Overview Card (compact, horizontal chips) -->
       <section v-if="dashStore.crossZoneDashboards.length > 0" class="monitor-dashboard-card">
@@ -1504,9 +1550,6 @@ function handleClaimLayout(layoutId: string) {
           </button>
         </div>
       </section>
-
-      <!-- Logic Rules Section (placeholder — implementation in auftrag-logic-rules-live-monitoring-integration.md) -->
-      <!-- Will contain: active rules with status, 24h trigger counter, zone tags, quick-access to rule detail -->
 
       <!-- Inline Dashboard Panels (target.view='monitor', placement='inline') -->
       <InlineDashboardPanel
@@ -1574,45 +1617,6 @@ function handleClaimLayout(layoutId: string) {
         </div>
       </div>
 
-      <!-- Zone Dashboards -->
-      <section v-if="selectedZoneId" class="monitor-dashboards">
-        <h3 class="monitor-section__title">Zone-Dashboards</h3>
-        <div v-if="dashStore.zoneDashboards(selectedZoneId).length === 0" class="monitor-dashboard-empty">
-          <router-link :to="{ name: 'editor' }" class="monitor-dashboard-empty__link">
-            <LayoutDashboard class="w-4 h-4" />
-            <span>Dashboard erstellen</span>
-          </router-link>
-        </div>
-        <div class="monitor-dashboard-links">
-          <div
-            v-for="dash in dashStore.zoneDashboards(selectedZoneId!)"
-            :key="dash.id"
-            class="monitor-dashboard-link-wrap"
-          >
-            <router-link
-              :to="{ name: 'monitor-zone-dashboard', params: { zoneId: selectedZoneId!, dashboardId: dash.id } }"
-              class="monitor-dashboard-link"
-            >
-              <LayoutDashboard class="w-4 h-4" style="color: var(--color-iridescent-2)" />
-              <div class="monitor-dashboard-link__info">
-                <span class="monitor-dashboard-link__name">{{ dash.name }}</span>
-                <span class="monitor-dashboard-link__meta">
-                  {{ dash.widgets.length }} Widgets
-                  <span v-if="dash.autoGenerated" class="monitor-dashboard-link__auto">Auto</span>
-                </span>
-              </div>
-            </router-link>
-            <button
-              v-if="dash.autoGenerated"
-              class="monitor-dashboard-link__claim"
-              @click="handleClaimLayout(dash.id)"
-            >
-              Anpassen
-            </button>
-          </div>
-        </div>
-      </section>
-
       <!-- Sensors Section (Subzone Accordion) -->
       <section v-if="zoneSensorGroup && zoneSensorGroup.sensorCount > 0" class="monitor-section">
         <h3 class="monitor-section__title">Sensoren ({{ zoneSensorCount }})</h3>
@@ -1652,7 +1656,6 @@ function handleClaimLayout(layoutId: string) {
                 <span class="monitor-subzone__name">{{ subzone.subzoneName || 'Keine Subzone' }}</span>
               </template>
               <span class="monitor-subzone__kpis" v-if="getSubzoneKPIs(subzone.sensors)">{{ getSubzoneKPIs(subzone.sensors) }}</span>
-              <span class="monitor-subzone__count">{{ subzone.sensors.length }} {{ subzone.sensors.length === 1 ? 'Sensor' : 'Sensoren' }}</span>
             </button>
             <!-- CRUD actions (only for named subzones) -->
             <div v-if="subzone.subzoneId && subzoneCRUD.editingSubzoneId.value !== subzone.subzoneId" class="monitor-subzone__actions">
@@ -1786,7 +1789,6 @@ function handleClaimLayout(layoutId: string) {
                 :class="['monitor-subzone__chevron', { 'monitor-subzone__chevron--expanded': isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId)) }]"
               />
               <span class="monitor-subzone__name">{{ subzone.subzoneName || 'Keine Subzone' }}</span>
-              <span class="monitor-subzone__count">{{ subzone.actuators.length }} {{ subzone.actuators.length === 1 ? 'Aktor' : 'Aktoren' }}</span>
             </button>
             <!-- CRUD actions (only for named subzones) -->
             <div v-if="subzone.subzoneId" class="monitor-subzone__actions">
@@ -1817,9 +1819,51 @@ function handleClaimLayout(layoutId: string) {
         </div>
       </section>
 
-      <!-- Inline Dashboard Panels for this zone (target.view='monitor', placement='inline') -->
+      <!-- Regeln für diese Zone (zwischen Aktoren und Dashboards) -->
+      <ZoneRulesSection :zone-id="selectedZoneId" />
+
+      <!-- Zone Dashboards -->
+      <section v-if="selectedZoneId" class="monitor-dashboards">
+        <h3 class="monitor-section__title">Zone-Dashboards</h3>
+        <div v-if="dashStore.zoneDashboards(selectedZoneId).length === 0" class="monitor-dashboard-empty">
+          <router-link :to="{ name: 'editor' }" class="monitor-dashboard-empty__link">
+            <LayoutDashboard class="w-4 h-4" />
+            <span>Dashboard erstellen</span>
+          </router-link>
+        </div>
+        <div class="monitor-dashboard-links">
+          <div
+            v-for="dash in dashStore.zoneDashboards(selectedZoneId!)"
+            :key="dash.id"
+            class="monitor-dashboard-link-wrap"
+          >
+            <router-link
+              :to="{ name: 'monitor-zone-dashboard', params: { zoneId: selectedZoneId!, dashboardId: dash.id } }"
+              class="monitor-dashboard-link"
+            >
+              <LayoutDashboard class="w-4 h-4" style="color: var(--color-iridescent-2)" />
+              <div class="monitor-dashboard-link__info">
+                <span class="monitor-dashboard-link__name">{{ dash.name }}{{ getDashboardNameSuffix(dash) }}</span>
+                <span class="monitor-dashboard-link__meta">
+                  {{ dash.widgets.length }} Widgets
+                  <span v-if="dash.autoGenerated" class="monitor-dashboard-link__auto">Auto</span>
+                </span>
+              </div>
+            </router-link>
+            <button
+              v-if="dash.autoGenerated"
+              class="monitor-dashboard-link__claim"
+              @click="handleClaimLayout(dash.id)"
+            >
+              Anpassen
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Inline Dashboard Panels for this zone (cross-zone + zone-specific, E3) -->
       <InlineDashboardPanel
-        v-for="panel in dashStore.inlineMonitorPanels"
+        v-for="panel in inlineMonitorPanelsL2"
         :key="panel.id"
         :layoutId="panel.id"
         mode="inline"
@@ -1833,6 +1877,17 @@ function handleClaimLayout(layoutId: string) {
     </template>
 
       </main>
+
+      <!-- Bottom-Panel (target.view='monitor', placement='bottom-panel') -->
+      <div v-if="dashStore.bottomMonitorPanels?.length > 0" class="monitor-layout__bottom">
+        <InlineDashboardPanel
+          v-for="panel in dashStore.bottomMonitorPanels"
+          :key="panel.id"
+          :layoutId="panel.id"
+          mode="inline"
+        />
+      </div>
+      </div>
 
       <!-- Side-Panel (target.view='monitor', placement='side-panel') -->
       <aside v-if="dashStore.sideMonitorPanels.length > 0" class="monitor-layout__side">
@@ -2013,11 +2068,27 @@ function handleClaimLayout(layoutId: string) {
   gap: var(--space-4);
 }
 
+.monitor-layout__main-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
 .monitor-layout__main {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
+}
+
+.monitor-layout__bottom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  max-height: 400px;
+  overflow-y: auto;
 }
 
 .monitor-layout__side {
@@ -2088,6 +2159,7 @@ function handleClaimLayout(layoutId: string) {
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
+  margin-bottom: var(--space-10);
 }
 
 /* Zone-to-Zone Navigation (Prev/Next on L2) */
@@ -2196,6 +2268,7 @@ function handleClaimLayout(layoutId: string) {
   padding: var(--space-12);
   text-align: center;
   color: var(--color-text-muted);
+  margin-bottom: var(--space-10);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2206,6 +2279,7 @@ function handleClaimLayout(layoutId: string) {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--space-4);
+  margin-bottom: var(--space-10);
 }
 
 @media (max-width: 639px) {
@@ -2391,6 +2465,7 @@ function handleClaimLayout(layoutId: string) {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  margin-bottom: var(--space-10);
 }
 
 .monitor-section__title {
@@ -2693,6 +2768,7 @@ function handleClaimLayout(layoutId: string) {
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   overflow: hidden;
+  margin-bottom: var(--space-10);
 }
 
 .monitor-dashboard-card__header {
@@ -2809,6 +2885,11 @@ function handleClaimLayout(layoutId: string) {
 
 .monitor-dashboard-chip--more:hover {
   background: rgba(59, 130, 246, 0.06);
+}
+
+/* Zone Dashboards section (L2) */
+.monitor-dashboards {
+  margin-bottom: var(--space-10);
 }
 
 /* Legacy dashboard link styles (still used in Zone L2) */

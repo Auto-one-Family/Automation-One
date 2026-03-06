@@ -56,7 +56,7 @@ const toast = useToast()
 
 // ── Form State ───────────────────────────────────────────────────────
 
-const defaultSensorType = 'DS18B20'
+const defaultSensorType = 'ds18b20'
 const sensorTypeOptions = getSensorTypeOptions()
 
 const newSensor = ref<MockSensorConfig & { operating_mode?: string; timeout_seconds?: number }>({
@@ -178,7 +178,9 @@ const effectiveGpio = computed(() => {
   return newSensor.value.gpio
 })
 
-const device = computed(() => espStore.devices.find((d) => espStore.getDeviceId(d) === props.espId))
+const device = computed(() =>
+  (espStore.devices ?? []).find((d) => espStore.getDeviceId(d) === props.espId)
+)
 const zoneId = computed(() => device.value?.zone_id ?? null)
 
 /** Subzone v-model: SubzoneAssignmentSection expects string | null, form may have undefined */

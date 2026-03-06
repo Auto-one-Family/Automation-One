@@ -53,6 +53,8 @@ export interface DashboardWidget {
     yMin?: number
     /** Explicit Y-axis max override */
     yMax?: number
+    /** Zone filter for alarm-list, esp-health, actuator-runtime (zone_id or null = all zones) */
+    zoneFilter?: string | null
   }
 }
 
@@ -62,7 +64,7 @@ export type DashboardScope = 'zone' | 'cross-zone' | 'sensor-detail'
 /** Display target configuration — where and how a dashboard is rendered */
 export interface DashboardTarget {
   view: 'monitor' | 'hardware'
-  placement: 'page' | 'inline' | 'side-panel'
+  placement: 'page' | 'inline' | 'side-panel' | 'bottom-panel'
   anchor?: string
   panelPosition?: 'left' | 'right'
   panelWidth?: number
@@ -711,15 +713,36 @@ export const useDashboardStore = defineStore('dashboard', () => {
   // TARGET-BASED COMPUTED VIEWS (Phase 4 — Block 7b)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /** Dashboards targeted as inline panels in Monitor view */
-  const inlineMonitorPanels = computed(() =>
-    layouts.value.filter(l => l.target?.view === 'monitor' && l.target?.placement === 'inline')
+  /** Base filter: monitor + inline placement */
+  const _inlineMonitorBase = (l: DashboardLayout) =>
+    l.target?.view === 'monitor' && l.target?.placement === 'inline'
+
+  /** Cross-zone inline panels (scope !== 'zone' or scope null) — shown on L1 and L2 */
+  const inlineMonitorPanelsCrossZone = computed(() =>
+    layouts.value
+      .filter(l => _inlineMonitorBase(l) && (l.scope !== 'zone' || l.scope == null))
       .sort((a, b) => (a.target?.order ?? 0) - (b.target?.order ?? 0))
   )
+
+  /** Zone-specific inline panels for a given zone — shown only on L2 when zoneId matches */
+  function inlineMonitorPanelsForZone(zoneId: string): DashboardLayout[] {
+    return layouts.value
+      .filter(l => _inlineMonitorBase(l) && l.scope === 'zone' && l.zoneId === zoneId)
+      .sort((a, b) => (a.target?.order ?? 0) - (b.target?.order ?? 0))
+  }
+
+  /** All inline panels for L1 (cross-zone only) — backward compat alias */
+  const inlineMonitorPanels = inlineMonitorPanelsCrossZone
 
   /** Dashboards targeted as side panels in Monitor view */
   const sideMonitorPanels = computed(() =>
     layouts.value.filter(l => l.target?.view === 'monitor' && l.target?.placement === 'side-panel')
+      .sort((a, b) => (a.target?.order ?? 0) - (b.target?.order ?? 0))
+  )
+
+  /** Dashboards targeted as bottom panels in Monitor view */
+  const bottomMonitorPanels = computed(() =>
+    layouts.value.filter(l => l.target?.view === 'monitor' && l.target?.placement === 'bottom-panel')
       .sort((a, b) => (a.target?.order ?? 0) - (b.target?.order ?? 0))
   )
 
@@ -814,7 +837,10 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
     // Target-based panel views (Phase 4 — Block 7)
     inlineMonitorPanels,
+    inlineMonitorPanelsCrossZone,
+    inlineMonitorPanelsForZone,
     sideMonitorPanels,
+    bottomMonitorPanels,
     hardwarePanels,
     setLayoutTarget,
   }

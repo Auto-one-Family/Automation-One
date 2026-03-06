@@ -77,6 +77,15 @@ const qualityLabel = computed(() => {
   return labels[status] ?? ''
 })
 
+// Subzone badge (Phase 2.2): "Keine Subzone" when null/empty
+const subzoneLabel = computed(() => {
+  const name = props.sensor.subzone_name ?? ''
+  const id = props.sensor.subzone_id ?? ''
+  if (typeof name === 'string' && name.trim()) return name
+  if (typeof id === 'string' && id.trim()) return id
+  return 'Keine Subzone'
+})
+
 function formatValue(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
   return Number.isInteger(value) ? value.toString() : Number(value).toFixed(1)
@@ -111,6 +120,7 @@ function handleClick() {
         <div class="sensor-card__info">
           <p class="sensor-card__name">{{ displayName }}</p>
           <p class="sensor-card__meta">{{ sensor.esp_id }} · {{ sensorLabel }}</p>
+          <span class="sensor-card__subzone-badge">{{ subzoneLabel }}</span>
         </div>
         <ChevronRight class="w-4 h-4 text-dark-500 flex-shrink-0" />
       </div>
@@ -136,12 +146,15 @@ function handleClick() {
       </div>
       <div class="sensor-card__footer">
         <span class="sensor-card__esp">{{ sensor.esp_id }}</span>
-        <span v-if="isEspOffline" class="sensor-card__badge sensor-card__badge--offline">
-          <WifiOff class="w-3 h-3" /> ESP offline
-        </span>
-        <span v-else-if="isStale" class="sensor-card__badge sensor-card__badge--stale">
-          <Clock class="w-3 h-3" /> {{ formatRelativeTime(sensor.last_read) }}
-        </span>
+        <div class="sensor-card__footer-badges">
+          <span class="sensor-card__subzone-badge">{{ subzoneLabel }}</span>
+          <span v-if="isEspOffline" class="sensor-card__badge sensor-card__badge--offline">
+            <WifiOff class="w-3 h-3" /> ESP offline
+          </span>
+          <span v-else-if="isStale" class="sensor-card__badge sensor-card__badge--stale">
+            <Clock class="w-3 h-3" /> {{ formatRelativeTime(sensor.last_read) }}
+          </span>
+        </div>
       </div>
     </template>
   </div>
@@ -204,6 +217,11 @@ function handleClick() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sensor-card__info .sensor-card__subzone-badge {
+  margin-top: var(--space-1);
+  display: inline-block;
 }
 
 /* Monitor Mode */
@@ -301,6 +319,30 @@ function handleClick() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.sensor-card__footer-badges {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.sensor-card__subzone-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--text-xs);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-quaternary, rgba(255, 255, 255, 0.06));
+  color: var(--color-text-secondary);
+  border: 1px solid var(--glass-border);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sensor-card__esp {

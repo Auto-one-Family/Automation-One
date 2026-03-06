@@ -25,6 +25,15 @@ const displayName = computed(() =>
   props.actuator.name || `GPIO ${props.actuator.gpio}`
 )
 
+// Phase 2.3: "Bedient Subzone(n)" — "—" when none
+const servedSubzoneLabel = computed(() => {
+  const name = props.actuator.subzone_name ?? ''
+  const id = props.actuator.subzone_id ?? ''
+  if (typeof name === 'string' && name.trim()) return name
+  if (typeof id === 'string' && id.trim()) return id
+  return '—'
+})
+
 function handleClick() {
   if (props.mode === 'config') {
     emit('configure', props.actuator)
@@ -58,6 +67,10 @@ function handleToggle(event: Event) {
       <div class="actuator-card__info">
         <p class="actuator-card__name">{{ displayName }}</p>
         <p class="actuator-card__meta">{{ actuator.esp_id }} · {{ actuator.actuator_type }}</p>
+        <p class="actuator-card__served">
+          <span class="actuator-card__served-label">Bedient:</span>
+          <span class="actuator-card__served-value">{{ servedSubzoneLabel }}</span>
+        </p>
       </div>
       <ChevronRight
         v-if="mode === 'config'"
@@ -146,6 +159,28 @@ function handleToggle(event: Event) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.actuator-card__served {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  margin-top: var(--space-1);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 0;
+}
+
+.actuator-card__served-label {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.actuator-card__served-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
 }
 
 .actuator-card__body {

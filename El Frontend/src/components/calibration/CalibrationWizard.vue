@@ -7,13 +7,15 @@
  */
 
 import { ref, computed } from 'vue'
-import { ArrowLeft, Check, FlaskConical, RefreshCw } from 'lucide-vue-next'
+import { ArrowLeft, Check, FlaskConical, RefreshCw, X } from 'lucide-vue-next'
 import { calibrationApi } from '@/api/calibration'
+import { useUiStore } from '@/shared/stores/ui.store'
 import type { CalibrationPoint, CalibrateResponse } from '@/api/calibration'
 import { useEspStore } from '@/stores/esp'
 import CalibrationStep from './CalibrationStep.vue'
 
 const espStore = useEspStore()
+const uiStore = useUiStore()
 
 // Wizard state machine
 type WizardPhase = 'select' | 'point1' | 'point2' | 'confirm' | 'done' | 'error'
@@ -23,6 +25,9 @@ const phase = ref<WizardPhase>('select')
 const selectedEspId = ref('')
 const selectedGpio = ref<number | null>(null)
 const selectedSensorType = ref('')
+
+// EC-Preset (nur bei sensor_type === 'ec')
+const ecPreset = ref<EcPresetId>('1413_12880')
 
 // Captured calibration points
 const points = ref<CalibrationPoint[]>([])
@@ -37,6 +42,14 @@ const availableDevices = computed(() =>
   espStore.devices.filter(d => espStore.getDeviceId(d))
 )
 
+/** EC-Kalibrier-Presets (NIST-zertifizierte Standards) */
+const EC_PRESETS = {
+  '0_1413': { point1: 0, point2: 1413, label: '0 / 1413 µS/cm' },
+  '1413_12880': { point1: 1413, point2: 12880, label: '1413 / 12.880 µS/cm' },
+} as const
+
+type EcPresetId = keyof typeof EC_PRESETS | 'custom'
+
 const sensorTypePresets: Record<string, { label: string; point1Label: string; point1Ref: number; point2Label: string; point2Ref: number }> = {
   ph: {
     label: 'pH-Sensor',
@@ -47,12 +60,19 @@ const sensorTypePresets: Record<string, { label: string; point1Label: string; po
   },
   ec: {
     label: 'EC-Sensor',
-    point1Label: '1413 uS/cm KCl-Standard',
+    point1Label: '1413 µS/cm KCl-Standard',
     point1Ref: 1413,
-    point2Label: '12880 uS/cm KCl-Standard',
+    point2Label: '12.880 µS/cm KCl-Standard',
     point2Ref: 12880,
   },
   moisture: {
+    label: 'Feuchtigkeitssensor',
+    point1Label: 'Trockener Zustand (0%)',
+    point1Ref: 0,
+    point2Label: 'Vollstaendig nass (100%)',
+    point2Ref: 100,
+  },
+  soil_moisture: {
     label: 'Feuchtigkeitssensor',
     point1Label: 'Trockener Zustand (0%)',
     point1Ref: 0,
@@ -69,6 +89,39 @@ const sensorTypePresets: Record<string, { label: string; point1Label: string; po
 }
 
 const currentPreset = computed(() => sensorTypePresets[selectedSensorType.value])
+
+/** EC: Referenzwerte aus Preset oder undefined bei Custom */
+const ecPointRefs = computed(() => {
+  if (selectedSensorType.value !== 'ec') return null
+  const p = ecPreset.value
+  if (p === 'custom') return { point1: undefined, point2: undefined }
+  const preset = EC_PRESETS[p]
+  return preset ? { point1: preset.point1, point2: preset.point2 } : null
+})
+
+/** suggestedReference fuer CalibrationStep (EC nutzt ecPreset) */
+function getSuggestedReference(stepNumber: 1 | 2): number | undefined {
+  if (selectedSensorType.value === 'ec' && ecPointRefs.value) {
+    return stepNumber === 1 ? ecPointRefs.value.point1 : ecPointRefs.value.point2
+  }
+  const preset = currentPreset.value
+  return stepNumber === 1 ? preset?.point1Ref : preset?.point2Ref
+}
+
+/** referenceLabel fuer CalibrationStep (EC nutzt ecPreset) */
+function getReferenceLabel(stepNumber: 1 | 2): string | undefined {
+  if (selectedSensorType.value === 'ec' && ecPreset.value !== 'custom') {
+    const p = ecPreset.value
+    const preset = EC_PRESETS[p as keyof typeof EC_PRESETS]
+    if (preset) {
+      return stepNumber === 1
+        ? `${preset.point1} µS/cm KCl-Standard`
+        : `${preset.point2} µS/cm KCl-Standard`
+    }
+  }
+  const preset = currentPreset.value
+  return stepNumber === 1 ? preset?.point1Label : preset?.point2Label
+}
 
 function selectSensor(espId: string, gpio: number, sensorType: string) {
   selectedEspId.value = espId
@@ -121,9 +174,22 @@ function reset() {
   selectedEspId.value = ''
   selectedGpio.value = null
   selectedSensorType.value = ''
+  ecPreset.value = '1413_12880'
   points.value = []
   calibrationResult.value = null
   errorMessage.value = ''
+}
+
+async function handleAbort() {
+  if (points.value.length > 0) {
+    const confirmed = await uiStore.confirm({
+      title: 'Kalibrierung abbrechen?',
+      message: 'Erfasste Daten gehen verloren. Wirklich abbrechen?',
+      variant: 'danger',
+    })
+    if (!confirmed) return
+  }
+  reset()
 }
 </script>
 
@@ -175,34 +241,68 @@ function reset() {
 
     <!-- Phase: Capture Point 1 -->
     <div v-if="phase === 'point1'" class="calibration-wizard__phase">
-      <button class="calibration-wizard__back-btn" @click="phase = 'select'">
-        <ArrowLeft :size="14" /> Zurueck
-      </button>
+      <div class="calibration-wizard__actions">
+        <button class="calibration-wizard__abort-btn" @click="handleAbort">
+          <X :size="14" /> Abbrechen
+        </button>
+        <button class="calibration-wizard__back-btn" @click="phase = 'select'">
+          <ArrowLeft :size="14" /> Zurueck
+        </button>
+      </div>
+      <div v-if="selectedSensorType === 'ec'" class="calibration-wizard__ec-preset-row">
+        <label class="calibration-wizard__label" for="ec-preset">Kalibrierloesung</label>
+        <select
+          id="ec-preset"
+          v-model="ecPreset"
+          class="calibration-wizard__ec-preset"
+        >
+          <option value="0_1413">{{ EC_PRESETS['0_1413'].label }}</option>
+          <option value="1413_12880">{{ EC_PRESETS['1413_12880'].label }}</option>
+          <option value="custom">Eigene Werte</option>
+        </select>
+      </div>
       <CalibrationStep
         :step-number="1"
         :total-steps="2"
         :esp-id="selectedEspId"
         :gpio="selectedGpio!"
         :sensor-type="selectedSensorType"
-        :suggested-reference="currentPreset?.point1Ref"
-        :reference-label="currentPreset?.point1Label"
+        :suggested-reference="getSuggestedReference(1)"
+        :reference-label="getReferenceLabel(1)"
         @captured="onPoint1Captured"
       />
     </div>
 
     <!-- Phase: Capture Point 2 -->
     <div v-if="phase === 'point2'" class="calibration-wizard__phase">
-      <button class="calibration-wizard__back-btn" @click="phase = 'point1'">
-        <ArrowLeft :size="14" /> Zurueck zu Punkt 1
-      </button>
+      <div class="calibration-wizard__actions">
+        <button class="calibration-wizard__abort-btn" @click="handleAbort">
+          <X :size="14" /> Abbrechen
+        </button>
+        <button class="calibration-wizard__back-btn" @click="phase = 'point1'">
+          <ArrowLeft :size="14" /> Zurueck zu Punkt 1
+        </button>
+      </div>
+      <div v-if="selectedSensorType === 'ec'" class="calibration-wizard__ec-preset-row">
+        <label class="calibration-wizard__label" for="ec-preset-2">Kalibrierloesung</label>
+        <select
+          id="ec-preset-2"
+          v-model="ecPreset"
+          class="calibration-wizard__ec-preset"
+        >
+          <option value="0_1413">{{ EC_PRESETS['0_1413'].label }}</option>
+          <option value="1413_12880">{{ EC_PRESETS['1413_12880'].label }}</option>
+          <option value="custom">Eigene Werte</option>
+        </select>
+      </div>
       <CalibrationStep
         :step-number="2"
         :total-steps="2"
         :esp-id="selectedEspId"
         :gpio="selectedGpio!"
         :sensor-type="selectedSensorType"
-        :suggested-reference="currentPreset?.point2Ref"
-        :reference-label="currentPreset?.point2Label"
+        :suggested-reference="getSuggestedReference(2)"
+        :reference-label="getReferenceLabel(2)"
         @captured="onPoint2Captured"
       />
     </div>
@@ -243,6 +343,9 @@ function reset() {
       </div>
 
       <div class="calibration-wizard__actions">
+        <button class="calibration-wizard__abort-btn" @click="handleAbort">
+          <X :size="14" /> Abbrechen
+        </button>
         <button class="calibration-wizard__back-btn" @click="phase = 'point2'">
           <ArrowLeft :size="14" /> Zurueck
         </button>
@@ -435,6 +538,31 @@ function reset() {
   padding: 1rem;
 }
 
+/* EC Preset (nur bei sensor_type === ec) */
+.calibration-wizard__ec-preset-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.calibration-wizard__ec-preset {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-family: inherit;
+  border-radius: 0.375rem;
+  border: 1px solid var(--glass-border, rgba(133, 133, 160, 0.12));
+  background: var(--color-bg-tertiary, #0d0d14);
+  color: var(--color-text-primary, #eaeaf2);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.calibration-wizard__ec-preset:hover,
+.calibration-wizard__ec-preset:focus {
+  border-color: var(--color-iridescent-1, #a78bfa);
+}
+
 /* Summary */
 .calibration-wizard__summary {
   background: var(--color-bg-secondary, #111118);
@@ -487,6 +615,26 @@ function reset() {
 
 .calibration-wizard__back-btn:hover {
   border-color: var(--color-text-muted, #8585a0);
+}
+
+.calibration-wizard__abort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.75rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--color-text-muted, #8585a0);
+  background: transparent;
+  color: var(--color-text-secondary, #8585a0);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.calibration-wizard__abort-btn:hover {
+  border-color: var(--color-error, #ef4444);
+  color: var(--color-error, #ef4444);
+  background: rgba(239, 68, 68, 0.08);
 }
 
 .calibration-wizard__submit-btn {

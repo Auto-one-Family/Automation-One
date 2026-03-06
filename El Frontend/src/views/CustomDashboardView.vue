@@ -90,7 +90,7 @@ const showTargetConfig = ref(false)
 
 const activeTarget = computed(() => dashStore.activeLayout?.target ?? null)
 
-function setTarget(view: 'monitor' | 'hardware', placement: 'page' | 'inline' | 'side-panel') {
+function setTarget(view: 'monitor' | 'hardware', placement: 'page' | 'inline' | 'side-panel' | 'bottom-panel') {
   const layoutId = dashStore.activeLayoutId
   if (!layoutId) return
   dashStore.setLayoutTarget(layoutId, { view, placement })
@@ -651,6 +651,16 @@ function handleImport() {
               <span class="dashboard-builder__target-desc">Fixiert rechts neben dem Monitor-Inhalt</span>
               <span v-if="targetSlotHolder('monitor', 'side-panel')" class="dashboard-builder__target-conflict">
                 Belegt von: {{ targetSlotHolder('monitor', 'side-panel') }} — wird übernommen
+              </span>
+            </button>
+            <button
+              :class="['dashboard-builder__target-option', { 'dashboard-builder__target-option--selected': activeTarget?.view === 'monitor' && activeTarget?.placement === 'bottom-panel' }]"
+              @click="setTarget('monitor', 'bottom-panel')"
+            >
+              <span class="dashboard-builder__target-label">Monitor — Unteres Panel</span>
+              <span class="dashboard-builder__target-desc">Unter dem Hauptinhalt im Monitor</span>
+              <span v-if="targetSlotHolder('monitor', 'bottom-panel')" class="dashboard-builder__target-conflict">
+                Belegt von: {{ targetSlotHolder('monitor', 'bottom-panel') }} — wird übernommen
               </span>
             </button>
             <button

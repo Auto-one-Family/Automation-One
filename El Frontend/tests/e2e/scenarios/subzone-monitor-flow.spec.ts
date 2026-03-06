@@ -7,20 +7,58 @@
  * Ausführung:
  *   npx playwright test subzone-monitor-flow.spec.ts --project=chromium
  *
- * Voraussetzung: Stack läuft (make e2e-up), mind. 1 ESP mit Zone + Sensor
+ * Voraussetzung: Stack läuft (make e2e-up). Mock ESP wird automatisch erstellt.
  */
 
 import { test, expect } from '@playwright/test'
+import { createMockEspWithSensors, deleteMockEsp } from '../helpers/api'
+
+const ZONE_ID = 'e2e_subzone_monitor'
+const ZONE_NAME = 'E2E Subzone Zone'
+
+function uniqueEspId(): string {
+  return `ESP_MOCK_SUBZONE_${Date.now().toString(36)}`
+}
 
 test.describe('Subzone-Monitor Flow', () => {
+  let espId: string
+
+  test.beforeEach(async ({ page, request }) => {
+    // Auth-State laden (Token für API)
+    await page.goto('/')
+    await page.waitForLoadState('load')
+    await page.waitForTimeout(500)
+
+    // Mock ESP mit Zone + Sensor erstellen (E2E-Stack startet mit leerer DB)
+    espId = uniqueEspId()
+    await createMockEspWithSensors(page, request, {
+      espId,
+      zone_id: ZONE_ID,
+      zone_name: ZONE_NAME,
+      sensors: [
+        { gpio: 4, sensor_type: 'DS18B20', raw_value: 22.5, name: 'Bodentemp' },
+      ],
+      auto_heartbeat: true,
+    })
+
+    await page.waitForTimeout(500)
+  })
+
+  test.afterEach(async ({ page, request }) => {
+    if (espId) {
+      await deleteMockEsp(page, request, espId).catch(() => {})
+    }
+  })
+
   test('Subzone für Sensor konfigurieren und im Monitor prüfen', async ({
     page,
   }) => {
     // ═══ Schritt 1: Hardware-View laden ═══
     await page.goto('/hardware')
     await page.waitForLoadState('networkidle')
+    await page.waitForTimeout(2000)
 
-    // Warten bis ESPs geladen
+    // Warten bis ESPs geladen (device-mini-card in ZonePlate oder monitor-zone-tile)
     await page.waitForSelector('.device-mini-card, .zone-plate, .monitor-zone-tile', {
       timeout: 15000,
     })

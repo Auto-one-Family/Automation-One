@@ -164,6 +164,52 @@ describe('getSensorConfig', () => {
     expect(config).toBeDefined()
     expect(config?.unit).toBe('°C')
   })
+
+  // Phase C: BMP280/BME280 lowercase value-types (API sends lowercase sensor_type)
+  it('returns config for bmp280_temp with Datasheet min/max', () => {
+    const config = getSensorConfig('bmp280_temp')
+    expect(config).toBeDefined()
+    expect(config?.unit).toBe('°C')
+    expect(config?.min).toBe(-40)
+    expect(config?.max).toBe(85)
+    expect(config?.label).toBe('BMP280 Temperatur')
+  })
+
+  it('returns config for bmp280_pressure with Datasheet min/max', () => {
+    const config = getSensorConfig('bmp280_pressure')
+    expect(config).toBeDefined()
+    expect(config?.unit).toBe('hPa')
+    expect(config?.min).toBe(300)
+    expect(config?.max).toBe(1100)
+    expect(config?.label).toBe('BMP280 Druck')
+  })
+
+  it('returns config for bme280_temp', () => {
+    const config = getSensorConfig('bme280_temp')
+    expect(config).toBeDefined()
+    expect(config?.unit).toBe('°C')
+    expect(config?.min).toBe(-40)
+    expect(config?.max).toBe(85)
+    expect(config?.label).toBe('BME280 Temperatur')
+  })
+
+  it('returns config for bme280_humidity', () => {
+    const config = getSensorConfig('bme280_humidity')
+    expect(config).toBeDefined()
+    expect(config?.unit).toBe('%RH')
+    expect(config?.min).toBe(0)
+    expect(config?.max).toBe(100)
+    expect(config?.label).toBe('BME280 Feuchte')
+  })
+
+  it('returns config for bme280_pressure', () => {
+    const config = getSensorConfig('bme280_pressure')
+    expect(config).toBeDefined()
+    expect(config?.unit).toBe('hPa')
+    expect(config?.min).toBe(300)
+    expect(config?.max).toBe(1100)
+    expect(config?.label).toBe('BME280 Druck')
+  })
 })
 
 // =============================================================================
@@ -247,11 +293,12 @@ describe('getSensorTypeOptions', () => {
     }
   })
 
-  it('contains DS18B20 option', () => {
+  it('contains exactly one DS18B20 option (deduplicated, lowercase canonical)', () => {
     const options = getSensorTypeOptions()
-    const ds18b20 = options.find(opt => opt.value === 'DS18B20')
-    expect(ds18b20).toBeDefined()
-    expect(ds18b20?.label).toBe('Temperatur')
+    const ds18b20Options = options.filter(opt => opt.value.toLowerCase() === 'ds18b20')
+    expect(ds18b20Options).toHaveLength(1)
+    expect(ds18b20Options[0].value).toBe('ds18b20')
+    expect(ds18b20Options[0].label).toBe('Temperatur')
   })
 
   it('contains pH option', () => {
@@ -259,6 +306,54 @@ describe('getSensorTypeOptions', () => {
     const pH = options.find(opt => opt.value === 'pH')
     expect(pH).toBeDefined()
     expect(pH?.label).toBe('pH-Wert')
+  })
+
+  it('contains exactly one SHT31 option (canonical device key sht31)', () => {
+    const options = getSensorTypeOptions()
+    const sht31Option = options.find(opt => opt.value === 'sht31')
+    expect(sht31Option).toBeDefined()
+    expect(sht31Option?.label).toBe('SHT31 (Temp + Humidity)')
+    const allSht31Related = options.filter(opt =>
+      ['sht31', 'SHT31', 'sht31_temp', 'sht31_humidity', 'SHT31_humidity'].includes(opt.value)
+    )
+    expect(allSht31Related).toHaveLength(1)
+    expect(allSht31Related[0].value).toBe('sht31')
+  })
+
+  it('does not list value-types or duplicate base keys in dropdown', () => {
+    const options = getSensorTypeOptions()
+    const values = options.map(opt => opt.value)
+    expect(values).not.toContain('sht31_temp')
+    expect(values).not.toContain('sht31_humidity')
+    expect(values).not.toContain('SHT31')
+    expect(values).not.toContain('SHT31_humidity')
+    expect(values).not.toContain('bmp280_temp')
+    expect(values).not.toContain('bmp280_pressure')
+    expect(values).not.toContain('bme280_temp')
+    expect(values).not.toContain('bme280_humidity')
+    expect(values).not.toContain('bme280_pressure')
+  })
+
+  it('contains exactly one BME280 option (canonical device key bme280)', () => {
+    const options = getSensorTypeOptions()
+    const bme280Option = options.find(opt => opt.value === 'bme280')
+    expect(bme280Option).toBeDefined()
+    expect(bme280Option?.label).toBe('BME280 (Temp + Humidity + Pressure)')
+    const allBme280Related = options.filter(opt =>
+      ['bme280', 'BME280', 'bme280_temp', 'bme280_humidity', 'bme280_pressure', 'BME280_humidity', 'BME280_pressure'].includes(opt.value)
+    )
+    expect(allBme280Related).toHaveLength(1)
+    expect(allBme280Related[0].value).toBe('bme280')
+  })
+
+  it('single-value sensors still listed (ph, ec, moisture, ds18b20, flow, light, co2, analog, digital)', () => {
+    const options = getSensorTypeOptions()
+    const values = options.map(opt => opt.value)
+    const required = ['ph', 'EC', 'moisture', 'ds18b20', 'flow', 'light', 'co2', 'analog', 'digital']
+    for (const key of required) {
+      const found = values.some(v => v.toLowerCase() === key.toLowerCase())
+      expect(found).toBe(true)
+    }
   })
 })
 

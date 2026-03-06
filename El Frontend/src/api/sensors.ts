@@ -35,11 +35,17 @@ export const sensorsApi = {
   },
 
   /**
-   * Get sensor configuration
+   * Get sensor configuration.
+   * @param sensorType - Optional; required for multi-value sensors (e.g. SHT31) that share a GPIO.
    */
-  async get(espId: string, gpio: number): Promise<SensorConfigResponse> {
+  async get(
+    espId: string,
+    gpio: number,
+    sensorType?: string
+  ): Promise<SensorConfigResponse> {
     const response = await api.get<SensorConfigResponse>(
-      `/sensors/${espId}/${gpio}`
+      `/sensors/${espId}/${gpio}`,
+      sensorType != null ? { params: { sensor_type: sensorType } } : undefined
     )
     return response.data
   },
