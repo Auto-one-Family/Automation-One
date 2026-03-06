@@ -93,12 +93,17 @@ class AINotificationBridge:
         # 2. Check suppression (expects SensorConfig model)
         sensor_config = await self.sensor_repo.get_by_id(anomaly.sensor_config_id)
         if sensor_config:
-            is_suppressed, reason = await self.suppression_service.is_sensor_suppressed(sensor_config)
+            is_suppressed, reason = await self.suppression_service.is_sensor_suppressed(
+                sensor_config
+            )
             if is_suppressed:
                 logger.debug("AI anomaly suppressed for sensor %s: %s", anomaly.sensor_name, reason)
                 return prediction_id
         else:
-            logger.warning("AI bridge: sensor_config %s not found for suppression check", anomaly.sensor_config_id)
+            logger.warning(
+                "AI bridge: sensor_config %s not found for suppression check",
+                anomaly.sensor_config_id,
+            )
 
         # 3. Route notification
         notification = NotificationCreate(

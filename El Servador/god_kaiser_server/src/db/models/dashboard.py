@@ -118,7 +118,7 @@ class Dashboard(Base, TimestampMixin):
         nullable=True,
         doc=(
             "Display target config: "
-            "{ view: 'monitor'|'hardware', placement: 'page'|'inline'|'side-panel', "
+            "{ view: 'monitor'|'hardware', placement: 'page'|'inline'|'side-panel'|'bottom-panel', "
             "anchor?: string, panelPosition?: 'left'|'right', panelWidth?: number, order?: number }"
         ),
     )

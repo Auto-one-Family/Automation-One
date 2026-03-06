@@ -34,20 +34,13 @@ class ZoneContextRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_all(
-        self, page: int = 1, page_size: int = 50
-    ) -> tuple[List[ZoneContext], int]:
+    async def get_all(self, page: int = 1, page_size: int = 50) -> tuple[List[ZoneContext], int]:
         """Return paginated list and total count."""
         count_stmt = select(func.count()).select_from(ZoneContext)
         total = (await self.session.execute(count_stmt)).scalar() or 0
 
         offset = (page - 1) * page_size
-        stmt = (
-            select(ZoneContext)
-            .order_by(ZoneContext.zone_id)
-            .offset(offset)
-            .limit(page_size)
-        )
+        stmt = select(ZoneContext).order_by(ZoneContext.zone_id).offset(offset).limit(page_size)
         result = await self.session.execute(stmt)
         contexts = list(result.scalars().all())
         return contexts, total

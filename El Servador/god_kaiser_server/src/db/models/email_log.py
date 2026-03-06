@@ -22,9 +22,7 @@ class EmailLog(Base, TimestampMixin):
 
     __tablename__ = "email_log"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     notification_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("notifications.id", ondelete="SET NULL"),
@@ -49,8 +47,6 @@ class EmailLog(Base, TimestampMixin):
         server_default=text("'pending'"),
         doc="Delivery status: pending, sent, failed, permanently_failed",
     )
-    sent_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)

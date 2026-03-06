@@ -376,6 +376,20 @@ class SensorData(Base):
         doc="Data source: production, mock, test, simulation",
     )
 
+    # Zone/Subzone zum Messzeitpunkt (Phase 0.1 — Logic Engine Subzone-Matching)
+    zone_id: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        index=True,
+        doc="Zone ID at measurement time (from esp_devices.zone_id)",
+    )
+    subzone_id: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        index=True,
+        doc="Subzone ID at measurement time (from subzone_configs.assigned_gpios)",
+    )
+
     # Time-Series Optimized Indices
     __table_args__ = (
         Index("idx_esp_gpio_timestamp", "esp_id", "gpio", "timestamp"),

@@ -75,6 +75,14 @@ class SensorConditionEvaluator(BaseConditionEvaluator):
             if cond_type != data_type:
                 return False
 
+        # Phase 2.4: Optional subzone filter — only for trigger sensor (not cross-sensor)
+        # Skip when condition.subzone_id not set (None or empty string = no filter)
+        cond_subzone = condition.get("subzone_id")
+        if trigger_matches and cond_subzone:
+            trigger_subzone = sensor_data.get("subzone_id")
+            if trigger_subzone != cond_subzone:
+                return False
+
         return self._compare(condition, actual_value)
 
     def _matches_trigger(self, condition: Dict, sensor_data: Dict) -> bool:

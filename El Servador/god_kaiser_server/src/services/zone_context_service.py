@@ -67,14 +67,10 @@ class ZoneContextService:
     async def get_by_zone_id(self, zone_id: str) -> Optional[ZoneContext]:
         return await self.repo.get_by_zone_id(zone_id)
 
-    async def get_all(
-        self, page: int = 1, page_size: int = 50
-    ) -> tuple[List[ZoneContext], int]:
+    async def get_all(self, page: int = 1, page_size: int = 50) -> tuple[List[ZoneContext], int]:
         return await self.repo.get_all(page, page_size)
 
-    async def upsert(
-        self, zone_id: str, data: Dict[str, Any], username: str
-    ) -> ZoneContext:
+    async def upsert(self, zone_id: str, data: Dict[str, Any], username: str) -> ZoneContext:
         logger.info(f"Zone context upsert for '{zone_id}' by {username}")
         return await self.repo.upsert(zone_id, data)
 

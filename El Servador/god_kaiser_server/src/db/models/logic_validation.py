@@ -57,6 +57,12 @@ class SensorThresholdCondition(BaseModel):
     min: Optional[float] = Field(None, description="Minimum value for 'between' operator")
     max: Optional[float] = Field(None, description="Maximum value for 'between' operator")
 
+    # Phase 2.4: Optional subzone filter — rule fires only when trigger_data.subzone_id matches
+    subzone_id: Optional[str] = Field(
+        None,
+        description="Optional subzone filter: condition met only when sensor is in this subzone",
+    )
+
     @field_validator("value", mode="after")
     @classmethod
     def validate_value_required(cls, v, info):

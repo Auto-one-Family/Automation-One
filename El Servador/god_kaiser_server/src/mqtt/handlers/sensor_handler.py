@@ -32,11 +32,12 @@ from ...core.error_codes import (
 from ...core.logging_config import get_logger
 from ...core.metrics import increment_sensor_implausible, update_sensor_value
 from ...utils.sensor_formatters import format_sensor_message
+from ...utils.zone_subzone_resolver import resolve_zone_subzone_for_sensor
 from ...core.resilience import (
     ServiceUnavailableError,
 )
 from ...db.models.enums import DataSource
-from ...db.repositories import ESPRepository, SensorRepository
+from ...db.repositories import ESPRepository, SensorRepository, SubzoneRepository
 from ...db.session import resilient_session
 from ..publisher import Publisher
 from ..topics import TopicBuilder
@@ -82,6 +83,7 @@ class SensorDataHandler:
         "ec": {"min": 0.0, "max": 20000.0},
         # Environmental sensors
         "moisture": {"min": 0.0, "max": 100.0},
+        "soil_moisture": {"min": 0.0, "max": 100.0},
         "co2": {"min": 0.0, "max": 10000.0},
         "light": {"min": 0.0, "max": 200000.0},
         "flow": {"min": 0.0, "max": 1000.0},
@@ -161,6 +163,7 @@ class SensorDataHandler:
                 async with resilient_session() as session:
                     esp_repo = ESPRepository(session)
                     sensor_repo = SensorRepository(session)
+                    subzone_repo = SubzoneRepository(session)
 
                     # Step 4: Lookup ESP device
                     esp_device = await esp_repo.get_by_device_id(esp_id_str)
@@ -314,6 +317,11 @@ class SensorDataHandler:
                     # Step 8c: Detect data source (mock/test/production)
                     data_source = self._detect_data_source(esp_device, payload)
 
+                    # Step 8d: Resolve zone_id/subzone_id at measurement time (Phase 0.1)
+                    zone_id, subzone_id = await resolve_zone_subzone_for_sensor(
+                        esp_id_str, gpio, esp_repo, subzone_repo
+                    )
+
                     # Step 9: Save data to database
                     # Convert ESP32 timestamp (millis since boot) to naive UTC datetime
                     # PostgreSQL TIMESTAMP WITHOUT TIME ZONE requires naive datetime
@@ -341,6 +349,8 @@ class SensorDataHandler:
                             "raw_mode": raw_mode,
                         },
                         data_source=data_source,
+                        zone_id=zone_id,
+                        subzone_id=subzone_id,
                     )
 
                     # Step 9b: Update sensor config on successful data save
@@ -425,6 +435,8 @@ class SensorDataHandler:
                                 "unit": unit,
                                 "quality": quality,
                                 "timestamp": esp32_timestamp_raw,
+                                "zone_id": zone_id,
+                                "subzone_id": subzone_id,
                             },
                         )
                     except Exception as e:
@@ -443,6 +455,8 @@ class SensorDataHandler:
                                         gpio=gpio,
                                         sensor_type=sensor_type,
                                         value=processed_value or raw_value,
+                                        zone_id=zone_id,
+                                        subzone_id=subzone_id,
                                     )
                                 else:
                                     logger.debug(
@@ -519,6 +533,7 @@ class SensorDataHandler:
         try:
             from ...services.zone_aware_thresholds import ZoneAwareThresholdService
             from ...db.models.esp import ESPDevice
+
             esp_device = await session.get(ESPDevice, sensor_config.esp_id)
             zone_id = esp_device.zone_id if esp_device else None
             if zone_id:

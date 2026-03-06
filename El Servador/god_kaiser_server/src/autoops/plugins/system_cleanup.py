@@ -205,8 +205,9 @@ class SystemCleanupPlugin(AutoOpsPlugin):
 
             for table_entry in tables[:10]:  # Check first 10 tables
                 table_name = (
-                    table_entry.get("table_name") if isinstance(table_entry, dict) else
-                    getattr(table_entry, "table_name", None) if table_entry else None
+                    table_entry.get("table_name")
+                    if isinstance(table_entry, dict)
+                    else getattr(table_entry, "table_name", None) if table_entry else None
                 )
                 if not table_name or not isinstance(table_name, str):
                     continue

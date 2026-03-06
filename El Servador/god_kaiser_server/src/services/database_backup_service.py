@@ -437,9 +437,7 @@ class DatabaseBackupService:
             logger.error(f"Database restore failed (exit {process.returncode}): {error_msg}")
             raise RuntimeError(f"psql restore failed (exit {process.returncode}): {error_msg}")
 
-        logger.info(
-            f"Database restored successfully from {backup.filename} ({duration:.1f}s)"
-        )
+        logger.info(f"Database restored successfully from {backup.filename} ({duration:.1f}s)")
 
         return {
             "backup_id": backup_id,
@@ -453,7 +451,8 @@ class DatabaseBackupService:
         """Verify pg_dump is available in the container."""
         try:
             process = await asyncio.create_subprocess_exec(
-                "pg_dump", "--version",
+                "pg_dump",
+                "--version",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -471,7 +470,8 @@ class DatabaseBackupService:
         """Get pg_dump version string."""
         try:
             process = await asyncio.create_subprocess_exec(
-                "pg_dump", "--version",
+                "pg_dump",
+                "--version",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -486,6 +486,7 @@ class DatabaseBackupService:
 # =============================================================================
 # Prometheus Metrics
 # =============================================================================
+
 
 def _update_backup_metrics(success: bool, size_bytes: int = 0) -> None:
     """Update Prometheus backup metrics."""
@@ -528,8 +529,7 @@ def get_database_backup_service() -> "DatabaseBackupService":
     global _backup_service
     if _backup_service is None:
         raise RuntimeError(
-            "DatabaseBackupService not initialized. "
-            "Call init_database_backup_service() first."
+            "DatabaseBackupService not initialized. " "Call init_database_backup_service() first."
         )
     return _backup_service
 

@@ -72,15 +72,15 @@ class HealthCheckPlugin(AutoOpsPlugin):
             server_status = health.get("status", "unknown")
             health_data["server"] = {"status": server_status, "details": health}
 
+            # Server returns "healthy" or "degraded", not "ok"
+            is_healthy = server_status in ("ok", "healthy")
             actions.append(
                 PluginAction.create(
                     action="Server Health Check",
                     target=context.server_url,
                     details=health,
                     result=f"Server: {server_status}",
-                    severity=(
-                        ActionSeverity.SUCCESS if server_status == "ok" else ActionSeverity.WARNING
-                    ),
+                    severity=(ActionSeverity.SUCCESS if is_healthy else ActionSeverity.WARNING),
                 )
             )
         except APIError as e:
@@ -274,7 +274,9 @@ class HealthCheckPlugin(AutoOpsPlugin):
         try:
             sensor_data = await client.list_sensor_data(limit=5)
             # API returns SensorDataResponse with "readings" key (not "data"/"items")
-            data_items = sensor_data.get("readings", sensor_data.get("data", sensor_data.get("items", [])))
+            data_items = sensor_data.get(
+                "readings", sensor_data.get("data", sensor_data.get("items", []))
+            )
             if isinstance(data_items, list) and data_items:
                 health_data["sensor_data"] = {
                     "recent_readings": len(data_items),

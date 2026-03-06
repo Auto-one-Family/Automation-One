@@ -9,10 +9,13 @@ from typing import Optional
 from sqlalchemy import and_, delete, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...core.logging_config import get_logger
 from ..models.sensor import SensorConfig, SensorData
 from ..models.esp import ESPDevice
 from ..models.enums import DataSource
 from .base_repo import BaseRepository
+
+logger = get_logger(__name__)
 
 
 class SensorRepository(BaseRepository[SensorConfig]):
@@ -177,9 +180,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         if esp_device_id:
             filters.append(ESPDevice.device_id == esp_device_id)
         if sensor_type:
-            filters.append(
-                func.lower(SensorConfig.sensor_type) == sensor_type.lower()
-            )
+            filters.append(func.lower(SensorConfig.sensor_type) == sensor_type.lower())
         if enabled is not None:
             filters.append(SensorConfig.enabled == enabled)
 
@@ -222,6 +223,8 @@ class SensorRepository(BaseRepository[SensorConfig]):
         timestamp: Optional[datetime] = None,
         metadata: Optional[dict] = None,
         data_source: str = DataSource.PRODUCTION.value,
+        zone_id: Optional[str] = None,
+        subzone_id: Optional[str] = None,
     ) -> SensorData:
         """
         Save sensor data.
@@ -238,6 +241,8 @@ class SensorRepository(BaseRepository[SensorConfig]):
             timestamp: ESP32 timestamp (converted to datetime). If None, uses server time as fallback.
             metadata: Additional metadata
             data_source: Data source (production, mock, test, simulation)
+            zone_id: Zone ID at measurement time (Phase 0.1)
+            subzone_id: Subzone ID at measurement time (Phase 0.1)
 
         Returns:
             Created SensorData instance
@@ -259,6 +264,8 @@ class SensorRepository(BaseRepository[SensorConfig]):
             timestamp=ts,
             sensor_metadata=metadata,  # Model field is sensor_metadata
             data_source=data_source,
+            zone_id=zone_id,
+            subzone_id=subzone_id,
         )
         self.session.add(sensor_data)
         await self.session.flush()
@@ -435,6 +442,8 @@ class SensorRepository(BaseRepository[SensorConfig]):
         end_time: Optional[datetime] = None,
         quality: Optional[str] = None,
         data_source: Optional[DataSource] = None,
+        zone_id: Optional[str] = None,
+        subzone_id: Optional[str] = None,
         limit: int = 100,
     ) -> list[SensorData]:
         """
@@ -448,6 +457,8 @@ class SensorRepository(BaseRepository[SensorConfig]):
             end_time: Optional end timestamp
             quality: Optional quality filter
             data_source: Optional data source filter (production, mock, test, simulation)
+            zone_id: Optional zone filter (Phase 0.1)
+            subzone_id: Optional subzone filter (Phase 0.1)
             limit: Maximum number of records (default: 100)
 
         Returns:
@@ -461,9 +472,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         if gpio is not None:
             stmt = stmt.where(SensorData.gpio == gpio)
         if sensor_type:
-            stmt = stmt.where(
-                func.lower(SensorData.sensor_type) == sensor_type.lower()
-            )
+            stmt = stmt.where(func.lower(SensorData.sensor_type) == sensor_type.lower())
         if start_time:
             stmt = stmt.where(SensorData.timestamp >= start_time)
         if end_time:
@@ -472,6 +481,10 @@ class SensorRepository(BaseRepository[SensorConfig]):
             stmt = stmt.where(SensorData.quality == quality.lower())
         if data_source:
             stmt = stmt.where(SensorData.data_source == data_source.value)
+        if zone_id is not None:
+            stmt = stmt.where(SensorData.zone_id == zone_id)
+        if subzone_id is not None:
+            stmt = stmt.where(SensorData.subzone_id == subzone_id)
 
         stmt = stmt.order_by(SensorData.timestamp.desc()).limit(limit)
         result = await self.session.execute(stmt)
@@ -515,6 +528,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         esp_id: uuid.UUID,
         gpio: int,
         calibration_data: dict,
+        sensor_type: str | None = None,
     ) -> Optional[SensorConfig]:
         """
         Update calibration data for a sensor.
@@ -523,11 +537,33 @@ class SensorRepository(BaseRepository[SensorConfig]):
             esp_id: ESP device UUID
             gpio: GPIO pin number
             calibration_data: Calibration parameters (sensor-specific)
+            sensor_type: Required for Multi-Value sensors (e.g. sht31_temp, sht31_humidity).
+                If omitted and multiple configs exist on (esp_id, gpio), raises ValueError.
 
         Returns:
             Updated SensorConfig or None if not found
         """
-        sensor_config = await self.get_by_esp_and_gpio(esp_id, gpio)
+        if sensor_type is not None:
+            sensor_config = await self.get_by_esp_gpio_and_type(esp_id, gpio, sensor_type)
+        else:
+            configs = await self.get_all_by_esp_and_gpio(esp_id, gpio)
+            if not configs:
+                sensor_config = None
+            elif len(configs) == 1:
+                sensor_config = configs[0]
+            else:
+                logger.warning(
+                    "update_calibration called without sensor_type but (esp_id=%s, gpio=%s) "
+                    "has %d configs. Multi-Value sensors require sensor_type.",
+                    esp_id,
+                    gpio,
+                    len(configs),
+                )
+                raise ValueError(
+                    f"Multiple sensor configs on (esp_id={esp_id}, gpio={gpio}). "
+                    "Pass sensor_type for Multi-Value sensors (e.g. sht31_temp, sht31_humidity)."
+                )
+
         if not sensor_config:
             return None
 

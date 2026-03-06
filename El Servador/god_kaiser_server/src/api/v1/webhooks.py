@@ -205,9 +205,7 @@ async def grafana_alerts_webhook(
         # Phase 4B: Auto-resolve existing alerts when Grafana sends "resolved"
         if alert.status == "resolved" and correlation_id:
             try:
-                resolved_count = await notification_repo.auto_resolve_by_correlation(
-                    correlation_id
-                )
+                resolved_count = await notification_repo.auto_resolve_by_correlation(correlation_id)
                 if resolved_count > 0:
                     auto_resolved += resolved_count
                     await db.commit()

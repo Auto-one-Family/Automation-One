@@ -68,6 +68,10 @@ class SensorCondition(BaseModel):
         None,
         description="Expected sensor type (for validation)",
     )
+    subzone_id: Optional[str] = Field(
+        None,
+        description="Optional subzone filter (Phase 2.4): rule fires only when trigger_data.subzone_id matches",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

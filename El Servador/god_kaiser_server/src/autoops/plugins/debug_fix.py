@@ -266,7 +266,8 @@ class DebugFixPlugin(AutoOpsPlugin):
                 if not isinstance(device, dict):
                     continue
 
-                device_id = device.get("device_id", "unknown")
+                # API may return device_id or esp_id (both valid for Mock ESPs)
+                device_id = device.get("device_id") or device.get("esp_id") or "unknown"
                 status = device.get("status", "unknown")
                 system_state = device.get("system_state", "unknown")
 
@@ -388,7 +389,9 @@ class DebugFixPlugin(AutoOpsPlugin):
             try:
                 data_response = await client.list_sensor_data(limit=20)
                 # API returns SensorDataResponse with "readings" key (not "data"/"items")
-                data_items = data_response.get("readings", data_response.get("data", data_response.get("items", [])))
+                data_items = data_response.get(
+                    "readings", data_response.get("data", data_response.get("items", []))
+                )
                 if isinstance(data_items, list):
                     # Group by esp_id to check which devices have recent data
                     # Note: readings may not include esp_id per item - only when API adds it
@@ -513,7 +516,7 @@ class DebugFixPlugin(AutoOpsPlugin):
         context: AutoOpsContext,
     ) -> bool:
         """Apply an automatic fix. Returns True if successful."""
-        device_id = issue.details.get("device_id", "")
+        device_id = issue.details.get("device_id") or issue.details.get("esp_id") or ""
 
         try:
             if issue.fix_action == "trigger_heartbeat" and device_id:

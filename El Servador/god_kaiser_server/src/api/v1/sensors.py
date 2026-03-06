@@ -43,7 +43,12 @@ from ...core.exceptions import (
 from ...core.logging_config import get_logger
 from ...db.models.sensor import SensorConfig
 from ...db.models.enums import DataSource
-from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository, SubzoneRepository
+from ...db.repositories import (
+    ActuatorRepository,
+    ESPRepository,
+    SensorRepository,
+    SubzoneRepository,
+)
 from ...schemas import (
     OneWireScanResponse,
     SensorConfigCreate,
@@ -124,7 +129,7 @@ def _model_to_response(
         id=sensor.id,
         esp_id=sensor.esp_id,
         esp_device_id=esp_device_id,
-        gpio=sensor.gpio,
+        gpio=sensor.gpio if sensor.gpio is not None else 0,
         sensor_type=sensor.sensor_type,
         name=sensor.sensor_name,  # Model: sensor_name -> Schema: name
         enabled=sensor.enabled,
@@ -564,7 +569,11 @@ async def create_or_update_sensor(
                         existing_vt.calibration_data = model_fields["calibration_data"]
                     if model_fields["thresholds"]:
                         existing_vt.thresholds = model_fields["thresholds"]
-                    if request.description is not None or request.unit is not None or request.metadata is not None:
+                    if (
+                        request.description is not None
+                        or request.unit is not None
+                        or request.metadata is not None
+                    ):
                         meta = dict(existing_vt.sensor_metadata or {})
                         meta.update(model_fields["sensor_metadata"])
                         existing_vt.sensor_metadata = meta
@@ -615,9 +624,7 @@ async def create_or_update_sensor(
 
         # Subzone assignment (same GPIO for all sub-types)
         try:
-            subzone_service = SubzoneService(
-                esp_repo=esp_repo, session=db, publisher=publisher
-            )
+            subzone_service = SubzoneService(esp_repo=esp_repo, session=db, publisher=publisher)
             subzone_id_val = normalize_subzone_id(request.subzone_id)
             if subzone_id_val:
                 await subzone_service.assign_subzone(
@@ -748,7 +755,11 @@ async def create_or_update_sensor(
             existing.calibration_data = model_fields["calibration_data"]
         if model_fields["thresholds"]:
             existing.thresholds = model_fields["thresholds"]
-        if request.description is not None or request.unit is not None or request.metadata is not None:
+        if (
+            request.description is not None
+            or request.unit is not None
+            or request.metadata is not None
+        ):
             meta = dict(existing.sensor_metadata or {})
             meta.update(model_fields["sensor_metadata"])
             existing.sensor_metadata = meta
@@ -818,9 +829,7 @@ async def create_or_update_sensor(
     # Block D2: Normalize "__none__" and "" to None (defensive)
     # =========================================================================
     try:
-        subzone_service = SubzoneService(
-            esp_repo=esp_repo, session=db, publisher=publisher
-        )
+        subzone_service = SubzoneService(esp_repo=esp_repo, session=db, publisher=publisher)
         subzone_id_val = normalize_subzone_id(request.subzone_id)
         if subzone_id_val:
             await subzone_service.assign_subzone(
@@ -981,6 +990,10 @@ async def query_sensor_data(
     start_time: Annotated[Optional[datetime], Query(description="Start of time range")] = None,
     end_time: Annotated[Optional[datetime], Query(description="End of time range")] = None,
     quality: Annotated[Optional[str], Query(description="Filter by quality")] = None,
+    zone_id: Annotated[Optional[str], Query(description="Filter by zone ID (Phase 0.1)")] = None,
+    subzone_id: Annotated[
+        Optional[str], Query(description="Filter by subzone ID (Phase 0.1)")
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=1000, description="Max results")] = 100,
 ) -> SensorDataResponse:
     """
@@ -1030,6 +1043,8 @@ async def query_sensor_data(
         start_time=start_time,
         end_time=end_time,
         quality=quality,
+        zone_id=zone_id,
+        subzone_id=subzone_id,
         limit=limit,
     )
 
@@ -1042,6 +1057,8 @@ async def query_sensor_data(
             unit=r.unit,
             quality=r.quality,
             sensor_type=r.sensor_type,
+            zone_id=r.zone_id,
+            subzone_id=r.subzone_id,
         )
         for r in readings
     ]
@@ -1126,6 +1143,8 @@ async def get_sensor_data_by_source(
             unit=r.unit,
             quality=r.quality,
             sensor_type=r.sensor_type,
+            zone_id=r.zone_id,
+            subzone_id=r.subzone_id,
         )
         for r in readings
     ]

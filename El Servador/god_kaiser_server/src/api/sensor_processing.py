@@ -336,11 +336,12 @@ async def calibrate_sensor(
                         message = f"ESP device '{request.esp_id}' not found - calibration not saved"
                         logger.warning(message)
                     else:
-                        # Update calibration in sensor config
+                        # Update calibration in sensor config (sensor_type required for Multi-Value)
                         updated_config = await sensor_repo.update_calibration(
                             esp_id=esp_device.id,
                             gpio=request.gpio,
                             calibration_data=calibration_result,
+                            sensor_type=request.sensor_type,
                         )
 
                         if updated_config:
@@ -356,6 +357,11 @@ async def calibrate_sensor(
                                 f"'{request.esp_id}' - calibration calculated but not saved"
                             )
                             logger.warning(message)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(e),
+                )
             except Exception as e:
                 logger.error(f"Failed to save calibration: {e}", exc_info=True)
                 message = f"Calibration calculated but failed to save: {str(e)}"

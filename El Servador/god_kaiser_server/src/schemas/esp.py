@@ -758,7 +758,10 @@ class ComponentHealthScoreResponse(BaseModel):
 
     device_id: str = Field(..., description="ESP device ID")
     score: float = Field(..., ge=0, le=100, description="Aggregated health score 0–100")
-    factors: dict = Field(default_factory=dict, description="Per-factor scores (online, error_rate_24h, data_quality, maintenance, uptime)")
+    factors: dict = Field(
+        default_factory=dict,
+        description="Per-factor scores (online, error_rate_24h, data_quality, maintenance, uptime)",
+    )
 
 
 # =============================================================================

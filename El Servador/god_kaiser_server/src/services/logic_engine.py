@@ -136,7 +136,13 @@ class LogicEngine:
         logger.info("Logic Engine stopped")
 
     async def evaluate_sensor_data(
-        self, esp_id: str, gpio: int, sensor_type: str, value: float
+        self,
+        esp_id: str,
+        gpio: int,
+        sensor_type: str,
+        value: float,
+        zone_id: Optional[str] = None,
+        subzone_id: Optional[str] = None,
     ) -> None:
         """
         Evaluate rules triggered by sensor data.
@@ -149,6 +155,8 @@ class LogicEngine:
             gpio: GPIO pin number
             sensor_type: Sensor type (e.g., "temperature", "humidity")
             value: Sensor value
+            zone_id: Zone ID at measurement time (Phase 0.1, for Phase 2.4 Subzone-Matching)
+            subzone_id: Subzone ID at measurement time (Phase 0.1, for Phase 2.4 Subzone-Matching)
         """
         try:
             # Get database session for this evaluation
@@ -169,13 +177,15 @@ class LogicEngine:
                     )
                     return
 
-                # Prepare trigger data
+                # Prepare trigger data (Phase 0.1: zone_id/subzone_id for Phase 2.4 Subzone-Matching)
                 trigger_data = {
                     "esp_id": esp_id,
                     "gpio": gpio,
                     "sensor_type": sensor_type,
                     "value": value,
                     "timestamp": int(time.time()),
+                    "zone_id": zone_id,
+                    "subzone_id": subzone_id,
                 }
 
                 # Evaluate each matching rule with batch-level lock tracking
@@ -367,6 +377,7 @@ class LogicEngine:
                 rule.id,
                 rule.rule_name,
                 rule.priority,
+                session=logic_repo.session,
                 batch_locks=batch_locks,
             )
 
@@ -533,6 +544,11 @@ class LogicEngine:
             ):
                 return False
 
+            # Phase 2.4: Optional subzone filter (skip when condition.subzone_id not set)
+            cond_subzone = condition.get("subzone_id")
+            if cond_subzone and sensor_data.get("subzone_id") != cond_subzone:
+                return False
+
             operator = condition.get("operator")
             threshold = condition.get("value")
             actual = sensor_data.get("value")
@@ -609,6 +625,7 @@ class LogicEngine:
         rule_id: uuid.UUID,
         rule_name: str,
         rule_priority: int = 100,
+        session=None,
         batch_locks: list | None = None,
     ) -> None:
         """
@@ -620,6 +637,7 @@ class LogicEngine:
             rule_id: UUID of the rule
             rule_name: Name of the rule
             rule_priority: Rule priority (lower number = higher priority)
+            session: Optional async DB session (Phase 2.4: for SubzoneRepository lookup)
             batch_locks: Optional batch-level lock tracking list.
                 If provided, acquired locks are added here and NOT released
                 in this method (caller is responsible for batch release).
@@ -662,11 +680,12 @@ class LogicEngine:
                 }
             )
 
-        # Create execution context
+        # Create execution context (Phase 2.4: session for ActuatorActionExecutor subzone lookup)
         context = {
             "trigger_data": trigger_data,
             "rule_id": rule_id,
             "rule_name": rule_name,
+            "session": session,
         }
 
         try:

@@ -399,3 +399,99 @@ class TestSensorRepositoryData:
         )
 
         assert len(data_range) == 0
+
+
+@pytest.mark.asyncio
+class TestSensorRepositoryCalibration:
+    """Test SensorRepository update_calibration (Phase D3 Multi-Value support)"""
+
+    async def test_update_calibration_single_value(
+        self, sensor_repo: SensorRepository, sample_esp_device
+    ):
+        """Single-value sensor: update without sensor_type works (Legacy)."""
+        await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=34,
+            sensor_type="ph",
+            sensor_name="pH Sensor",
+            interface_type="ANALOG",
+            enabled=True,
+        )
+
+        cal_data = {"slope": 0.001, "offset": 0.0, "calibrated": True}
+        updated = await sensor_repo.update_calibration(
+            sample_esp_device.id, 34, cal_data, sensor_type=None
+        )
+
+        assert updated is not None
+        assert updated.calibration_data == cal_data
+
+    async def test_update_calibration_with_sensor_type_multi_value(
+        self, sensor_repo: SensorRepository, sample_esp_device
+    ):
+        """Multi-Value: only sht31_temp updated, sht31_humidity unchanged."""
+        await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=21,
+            sensor_type="sht31_temp",
+            sensor_name="SHT31 Temp",
+            interface_type="I2C",
+            i2c_address=68,
+            enabled=True,
+        )
+        await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=21,
+            sensor_type="sht31_humidity",
+            sensor_name="SHT31 Humidity",
+            interface_type="I2C",
+            i2c_address=68,
+            enabled=True,
+        )
+
+        cal_temp = {"offset": 0.5, "calibrated": True}
+        updated = await sensor_repo.update_calibration(
+            sample_esp_device.id, 21, cal_temp, sensor_type="sht31_temp"
+        )
+
+        assert updated is not None
+        assert updated.sensor_type == "sht31_temp"
+        assert updated.calibration_data == cal_temp
+
+        # sht31_humidity must be unchanged
+        humidity_config = await sensor_repo.get_by_esp_gpio_and_type(
+            sample_esp_device.id, 21, "sht31_humidity"
+        )
+        assert humidity_config is not None
+        assert humidity_config.calibration_data is None or humidity_config.calibration_data != cal_temp
+
+    async def test_update_calibration_multi_value_without_sensor_type_raises(
+        self, sensor_repo: SensorRepository, sample_esp_device
+    ):
+        """Multiple configs on (esp_id, gpio) without sensor_type raises ValueError."""
+        await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=21,
+            sensor_type="sht31_temp",
+            sensor_name="SHT31 Temp",
+            interface_type="I2C",
+            i2c_address=68,
+            enabled=True,
+        )
+        await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=21,
+            sensor_type="sht31_humidity",
+            sensor_name="SHT31 Humidity",
+            interface_type="I2C",
+            i2c_address=68,
+            enabled=True,
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            await sensor_repo.update_calibration(
+                sample_esp_device.id, 21, {"offset": 0.5}, sensor_type=None
+            )
+
+        assert "Multiple sensor configs" in str(exc_info.value)
+        assert "sensor_type" in str(exc_info.value)

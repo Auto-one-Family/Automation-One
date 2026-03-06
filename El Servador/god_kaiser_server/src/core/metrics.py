@@ -474,9 +474,7 @@ def init_metrics() -> None:
     for pid in ("health_check", "esp_configurator", "debug_fix", "system_cleanup"):
         for status in ("success", "error"):
             for trigger in ("manual", "schedule", "logic_rule"):
-                PLUGIN_EXECUTIONS_TOTAL.labels(
-                    plugin_id=pid, status=status, trigger_source=trigger
-                )
+                PLUGIN_EXECUTIONS_TOTAL.labels(plugin_id=pid, status=status, trigger_source=trigger)
         PLUGIN_EXECUTION_DURATION.labels(plugin_id=pid)
         PLUGIN_ERRORS_TOTAL.labels(plugin_id=pid, error_type="execution_failed")
         PLUGIN_ERRORS_TOTAL.labels(plugin_id=pid, error_type="rollback_failed")
@@ -829,9 +827,7 @@ async def update_all_metrics_async(get_session_func: callable) -> None:
 # =========================================================================
 
 
-def increment_plugin_execution(
-    plugin_id: str, status: str, trigger_source: str
-) -> None:
+def increment_plugin_execution(plugin_id: str, status: str, trigger_source: str) -> None:
     """Increment plugin execution counter. Called from PluginService.execute_plugin()."""
     PLUGIN_EXECUTIONS_TOTAL.labels(
         plugin_id=plugin_id, status=status, trigger_source=trigger_source

@@ -126,11 +126,12 @@ class MonitorDataService:
             quality = "unknown"
             last_read = None
             if reading:
-                raw_value = float(
+                val = (
                     reading.processed_value
                     if reading.processed_value is not None
                     else reading.raw_value
                 )
+                raw_value = float(val) if val is not None else None
                 quality = reading.quality or "unknown"
                 last_read = reading.timestamp.isoformat() if reading.timestamp else None
 

@@ -61,6 +61,7 @@ router = APIRouter(
 
 class SubzoneMetadataUpdate(BaseModel):
     """Partial update for subzone custom_data."""
+
     custom_data: dict = PydanticField(..., description="Subzone-specific metadata to merge")
 
 
@@ -359,6 +360,7 @@ async def update_subzone_metadata(
     subzone.custom_data = existing
 
     from sqlalchemy.orm.attributes import flag_modified
+
     flag_modified(subzone, "custom_data")
 
     await session.commit()

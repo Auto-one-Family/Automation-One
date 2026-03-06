@@ -462,6 +462,14 @@ class SensorReading(BaseModel):
         description="Sensor type (e.g. 'sht31_temp', 'sht31_humidity', 'ds18b20'). "
         "Allows frontend to distinguish readings from multi-value sensors.",
     )
+    zone_id: Optional[str] = Field(
+        None,
+        description="Zone ID at measurement time (Phase 0.1)",
+    )
+    subzone_id: Optional[str] = Field(
+        None,
+        description="Subzone ID at measurement time (Phase 0.1)",
+    )
 
     @field_validator("quality")
     @classmethod

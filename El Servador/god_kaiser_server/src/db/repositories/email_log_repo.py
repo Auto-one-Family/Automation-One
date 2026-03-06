@@ -104,18 +104,12 @@ class EmailLogRepository(BaseRepository[EmailLog]):
         Returns summary counts by status, provider, and time ranges.
         """
         # Total counts by status
-        status_query = (
-            select(EmailLog.status, func.count())
-            .group_by(EmailLog.status)
-        )
+        status_query = select(EmailLog.status, func.count()).group_by(EmailLog.status)
         status_result = await self.session.execute(status_query)
         by_status = {row[0]: row[1] for row in status_result.all()}
 
         # Total counts by provider
-        provider_query = (
-            select(EmailLog.provider, func.count())
-            .group_by(EmailLog.provider)
-        )
+        provider_query = select(EmailLog.provider, func.count()).group_by(EmailLog.provider)
         provider_result = await self.session.execute(provider_query)
         by_provider = {row[0]: row[1] for row in provider_result.all()}
 

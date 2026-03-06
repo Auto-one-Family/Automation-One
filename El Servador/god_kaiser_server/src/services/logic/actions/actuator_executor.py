@@ -2,11 +2,13 @@
 Actuator Action Executor
 
 Executes actuator command actions.
+Phase 2.4: Skips execution when trigger has subzone_id and actuator serves a different subzone.
 """
 
 from typing import Dict
 
 from ....core.logging_config import get_logger
+from ....db.repositories.subzone_repo import SubzoneRepository
 from ...actuator_service import ActuatorService
 from .base import ActionResult, BaseActionExecutor
 
@@ -66,6 +68,31 @@ class ActuatorActionExecutor(BaseActionExecutor):
         duration = action.get("duration_seconds")
         if duration is None:
             duration = action.get("duration", 0)
+
+        # Phase 2.4: Subzone-Matching — skip if actuator serves different subzone
+        trigger_data = context.get("trigger_data", {})
+        trigger_subzone = trigger_data.get("subzone_id")
+        session = context.get("session")
+        if (
+            trigger_subzone is not None
+            and session is not None
+            and esp_id is not None
+            and gpio is not None
+        ):
+            subzone_repo = SubzoneRepository(session)
+            gpio_int = int(gpio)  # Coerce for JSON float (e.g. 5.0) vs assigned_gpios [4,5,6]
+            actuator_subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio_int)
+            actuator_subzone_id = actuator_subzone.subzone_id if actuator_subzone else None
+            if actuator_subzone_id != trigger_subzone:
+                logger.debug(
+                    f"Actuator {esp_id}:GPIO{gpio} skipped: serves subzone {actuator_subzone_id}, "
+                    f"trigger from subzone {trigger_subzone}"
+                )
+                return ActionResult(
+                    success=True,
+                    message=f"Skipped: actuator serves different subzone ({actuator_subzone_id})",
+                    data={"skipped": True, "reason": "subzone_mismatch"},
+                )
 
         # Validate required fields
         if not esp_id:

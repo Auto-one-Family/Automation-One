@@ -167,13 +167,16 @@ async def lifespan(app: FastAPI):
         # show stale Not-Aus after server restart (SafetyService state is in-memory only)
         try:
             from .db.session import get_session_maker
+
             session_maker = get_session_maker()
             async with session_maker() as session:
                 actuator_repo = ActuatorRepository(session)
                 n = await actuator_repo.clear_all_emergency_states_on_startup()
                 if n:
                     await session.commit()
-                    logger.info("Startup: cleared %d actuator_states from emergency_stop to idle", n)
+                    logger.info(
+                        "Startup: cleared %d actuator_states from emergency_stop to idle", n
+                    )
         except Exception as e:
             logger.warning("Startup clear emergency_states failed (non-fatal): %s", e)
 

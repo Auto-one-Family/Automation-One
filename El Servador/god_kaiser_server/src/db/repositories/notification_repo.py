@@ -218,9 +218,7 @@ class NotificationRepository(BaseRepository[Notification]):
                     Notification.category == category,
                     Notification.title == title,
                     Notification.created_at >= cutoff,
-                    Notification.status.in_(
-                        [AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]
-                    ),
+                    Notification.status.in_([AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]),
                 )
             )
         )
@@ -235,9 +233,7 @@ class NotificationRepository(BaseRepository[Notification]):
             .where(
                 and_(
                     Notification.fingerprint == fingerprint,
-                    Notification.status.in_(
-                        [AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]
-                    ),
+                    Notification.status.in_([AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]),
                 )
             )
         )
@@ -256,9 +252,7 @@ class NotificationRepository(BaseRepository[Notification]):
             .where(
                 and_(
                     Notification.correlation_id == correlation_id,
-                    Notification.status.in_(
-                        [AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]
-                    ),
+                    Notification.status.in_([AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]),
                 )
             )
         )

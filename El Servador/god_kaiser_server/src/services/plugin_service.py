@@ -324,7 +324,9 @@ class PluginService:
             )
             observe_plugin_duration(plugin_id, execution.duration_seconds)
             if execution.status == "error":
-                error_type = "rollback_failed" if result and not result.success else "execution_failed"
+                error_type = (
+                    "rollback_failed" if result and not result.success else "execution_failed"
+                )
                 increment_plugin_error(plugin_id, error_type)
 
             # WebSocket broadcast: execution completed

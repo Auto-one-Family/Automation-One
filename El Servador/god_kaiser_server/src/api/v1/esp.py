@@ -97,9 +97,7 @@ def _extract_mock_fields(device) -> tuple[Optional[bool], Optional[int]]:
     return auto_heartbeat, heartbeat_interval_seconds
 
 
-async def _enrich_zone_context(
-    device, session, context_cache: dict
-) -> Optional[dict]:
+async def _enrich_zone_context(device, session, context_cache: dict) -> Optional[dict]:
     """Fetch zone context summary for a device, with caching per zone_id."""
     if not device.zone_id:
         return None
@@ -110,6 +108,7 @@ async def _enrich_zone_context(
     if device.zone_id in context_cache:
         return context_cache[device.zone_id]
     from ...services.zone_context_service import ZoneContextService
+
     svc = ZoneContextService(session)
     summary = await svc.get_context_summary(device.zone_id)
     context_cache[device.zone_id] = summary
@@ -196,6 +195,7 @@ async def list_devices(
             zone_ctx_data = await _enrich_zone_context(device, db, zone_context_cache)
             if zone_ctx_data:
                 from ...schemas.esp import ZoneContextSummary
+
                 zone_ctx = ZoneContextSummary(**zone_ctx_data)
 
         device_responses.append(
@@ -367,6 +367,7 @@ async def get_device(
     zone_ctx_data = await _enrich_zone_context(device, db, {})
     if zone_ctx_data:
         from ...schemas.esp import ZoneContextSummary
+
         zone_ctx = ZoneContextSummary(**zone_ctx_data)
 
     return ESPDeviceResponse(

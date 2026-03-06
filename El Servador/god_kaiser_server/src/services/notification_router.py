@@ -90,8 +90,7 @@ class NotificationRouter:
                 )
                 if is_duplicate:
                     logger.debug(
-                        f"Broadcast deduplicated by correlation_id: "
-                        f"'{notification.title}'"
+                        f"Broadcast deduplicated by correlation_id: " f"'{notification.title}'"
                     )
                     increment_notification_deduplicated()
                     return None

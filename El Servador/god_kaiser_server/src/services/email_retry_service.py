@@ -155,9 +155,7 @@ class EmailRetryService:
             return await self.email_service.send_test_email(log.to_address)
 
         # Digest or unknown: skip (Digest-Retry would need template_context)
-        logger.debug(
-            f"Email retry skipped (unsupported type): id={log.id} template={log.template}"
-        )
+        logger.debug(f"Email retry skipped (unsupported type): id={log.id} template={log.template}")
         return None
 
 
