@@ -140,6 +140,8 @@ String gpio_string = storageManager.getStringObj("subzone_" + subzone_id + "_gpi
 | `safe_mode_reason` | String | `""` (empty) | Max 128 chars | Reason for Safe-Mode Entry |
 | `boot_count` | uint16_t | `0` | 0-65535 | Number of Reboots |
 | `log_level` | uint8_t | `1` (LOG_INFO) | 0-4 | Persisted log level (0=DEBUG, 1=INFO, 2=WARNING, 3=ERROR, 4=CRITICAL) |
+| `emergency_auth` | String | `""` (empty) | Max 64 chars | ESP emergency-stop auth token (fail-open: empty = accept all) |
+| `broadcast_em_tok` | String | `""` (empty) | Max 64 chars | Broadcast emergency-stop auth token (fail-open: empty = accept all) |
 
 #### Sensor Configuration (Namespace: `sensor_config`)
 
@@ -282,6 +284,10 @@ String gpio_string = storageManager.getStringObj("subzone_" + subzone_id + "_gpi
   - `boot_count` (uint16_t) - Anzahl der Boots (für Diagnostik)
 
   - `log_level` (uint8_t) - Persistiertes Log-Level (0=DEBUG, 1=INFO, 2=WARNING, 3=ERROR, 4=CRITICAL). Gesetzt via MQTT `set_log_level` Command, geladen bei Boot (STEP 5.1)
+
+  - `emergency_auth` (String) - ESP emergency-stop auth token (max 64 chars, fail-open: empty = accept all). Gesetzt via MQTT `set_emergency_token` Command
+
+  - `broadcast_em_tok` (String) - Broadcast emergency-stop auth token (max 64 chars, fail-open: empty = accept all). Gesetzt via MQTT `set_emergency_token` Command (token_type="broadcast")
 
   - `last_error` (String) - Letzte Fehlermeldung
 
