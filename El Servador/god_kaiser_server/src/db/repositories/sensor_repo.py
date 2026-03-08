@@ -608,6 +608,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         gpio: int,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
+        sensor_type: Optional[str] = None,
     ) -> dict:
         """
         Get statistical summary for sensor data.
@@ -617,6 +618,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             gpio: GPIO pin number
             start_time: Optional start timestamp
             end_time: Optional end timestamp
+            sensor_type: Optional sensor type filter for multi-value sensors
 
         Returns:
             Dictionary with statistics:
@@ -628,6 +630,9 @@ class SensorRepository(BaseRepository[SensorConfig]):
             - quality_distribution: Dict with quality level counts
         """
         filters = [SensorData.esp_id == esp_id, SensorData.gpio == gpio]
+
+        if sensor_type:
+            filters.append(func.lower(SensorData.sensor_type) == sensor_type.lower())
 
         if start_time:
             filters.append(SensorData.timestamp >= start_time)
