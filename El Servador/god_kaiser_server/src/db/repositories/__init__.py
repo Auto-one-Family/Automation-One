@@ -19,6 +19,7 @@ from .token_blacklist_repo import TokenBlacklistRepository
 from .user_repo import UserRepository
 from .kaiser_repo import KaiserRepository
 from .zone_context_repo import ZoneContextRepository
+from .zone_repo import ZoneRepository
 
 __all__ = [
     "BaseRepository",
@@ -39,4 +40,5 @@ __all__ = [
     "SystemConfigRepository",
     "KaiserRepository",
     "ZoneContextRepository",
+    "ZoneRepository",
 ]

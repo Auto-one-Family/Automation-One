@@ -373,11 +373,20 @@ class HeartbeatHandler:
             master_zone_id = payload.get("master_zone_id", "")
             zone_assigned = payload.get("zone_assigned", False)
 
-            # Create new ESP device with pending_approval status
+            # Detect mock devices by ID prefix — mocks skip approval gate
+            is_mock = esp_id.startswith("MOCK_") or esp_id.startswith("ESP_MOCK_")
+            if is_mock:
+                hardware_type = "MOCK_ESP32"
+                device_status = "online"
+            else:
+                hardware_type = payload.get("hardware_type", "ESP32_WROOM")
+                device_status = "pending_approval"
+
+            # Create new ESP device
             new_esp = ESPDevice(
                 device_id=esp_id,
-                hardware_type="ESP32_WROOM",  # Default, can be updated later
-                status="pending_approval",  # Requires admin approval
+                hardware_type=hardware_type,
+                status=device_status,
                 discovered_at=datetime.now(timezone.utc),  # Audit field
                 kaiser_id=constants.get_kaiser_id(),  # WP2-Fix1: Default kaiser_id from config
                 ip_address=payload.get("wifi_ip"),  # IP from heartbeat (if ESP sends it)
@@ -403,7 +412,8 @@ class HeartbeatHandler:
             await session.flush()  # Get ID without committing
 
             logger.info(
-                f"🔔 New ESP discovered: {esp_id} (pending_approval) "
+                f"🔔 New ESP discovered: {esp_id} "
+                f"(hardware_type={hardware_type}, status={device_status}) "
                 f"(Zone: {zone_id or 'unassigned'}, "
                 f"Sensors: {payload.get('sensor_count', 0)}, "
                 f"Actuators: {payload.get('actuator_count', 0)})"

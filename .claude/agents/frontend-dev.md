@@ -11,6 +11,7 @@ description: |
 model: sonnet
 color: green
 tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
+skills: ["frontend-development"]
 ---
 
 # Frontend Development Agent

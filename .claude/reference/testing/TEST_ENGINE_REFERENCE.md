@@ -544,10 +544,8 @@ PostToolUse:Bash → Exit-Code != 0 → "OPS-ALERT: Command failed..."
 
 | Hook | Typ | Datei | Effekt |
 |------|-----|-------|--------|
-| PreToolUse:Bash | auto-ops | `hooks/hooks.json` | Blockt destruktive Befehle (DELETE FROM, docker down, etc.) |
-| PostToolUse:Bash | auto-ops | `hooks/hooks.json` | Warnt bei non-zero Exit-Code |
-| PreToolUse:Edit/Write | security-guidance | Plugin-Cache | Prüft auf Security-Issues |
-| SessionStart | superpowers | Plugin-Cache | Session-Init |
+| PostToolUse:Write\|Edit | project | `.claude/hooks/auto-format.sh` | Auto-format .py Dateien mit ruff |
+| Stop | project | `settings.json` | Prueft ob alle Todos completed und Verifikation gruen |
 
 ### 8.3 Geplante Erweiterungen
 

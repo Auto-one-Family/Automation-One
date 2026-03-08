@@ -1,16 +1,40 @@
 {
   "permissions": {
     "allow": [
-      "Bash",
       "Read",
       "Write",
       "Edit",
       "Task",
       "Glob",
-      "Grep"
+      "Grep",
+      "Bash(*)",
+      "Agent(*)",
+      "Skill(*)",
+      "Skill(*:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(*rm -rf /*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard*)",
+      "Bash(git rebase*)",
+      "Bash(git clean -f*)",
+      "Bash(docker system prune*)",
+      "Bash(*DROP TABLE*)",
+      "Bash(*DROP DATABASE*)",
+      "Bash(*DELETE FROM*)",
+      "Bash(chmod 777*)",
+      "Bash(*mkfs*)",
+      "Bash(*format [A-Z]:*)",
+      "Bash(*del /s*)",
+      "Bash(*del /S*)"
     ]
   },
   "model": "sonnet",
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-4-6"
+  },
   "enabledPlugins": {
     "playwright@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true,
@@ -21,8 +45,7 @@
   },
   "context": {
     "alwaysInclude": [
-      ".claude/claude.md",
-      ".claude/rules/rules.md"
+      ".claude/claude.md"
     ],
     "maxTokens": 200000
   },
@@ -98,10 +121,6 @@
   },
   "autoops": {
     "serverUrl": "http://localhost:8000",
-    "defaultCredentials": {
-      "username": "admin",
-      "password": "Admin123#"
-    },
     "plugins": "El Servador/god_kaiser_server/src/autoops/plugins/",
     "reports": "El Servador/god_kaiser_server/src/autoops/reports/",
     "documentation": ".claude/CLAUDE_AUTOOPS.md"
@@ -117,6 +136,29 @@
     "afterServerChange": [
       "/server-test",
       "/esp-test"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/auto-format.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Bevor du stoppst: Pruefe ob alle TodoWrite-Tasks als completed markiert sind und ob die Verifikationskriterien (Build/Test/Lint) fuer alle geaenderten Bereiche erfolgreich waren. Falls nicht, arbeite weiter."
+          }
+        ]
+      }
     ]
   }
 }

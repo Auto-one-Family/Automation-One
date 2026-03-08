@@ -1,9 +1,9 @@
 # AutoOps - Autonomous Operations Agent Framework
 
 > **Für KI-Agenten:** Plugin-basierter autonomer Agent der ESP32-Geräte vollständig über die REST API konfiguriert, debuggt und dokumentiert.
-> **Version:** 2.1.0
+> **Version:** 2.2.0
 > **Erstellt:** 2026-02-15
-> **Aktualisiert:** 2026-03-02
+> **Aktualisiert:** 2026-03-08
 
 ---
 
@@ -14,7 +14,7 @@
 | **ESP komplett konfigurieren** | `/autoops-run` | `autoops/plugins/esp_configurator.py` |
 | **System debuggen & fixen** | `/autoops-debug` | `autoops/plugins/debug_fix.py` |
 | **System-Status prüfen** | `/autoops-status` | `autoops/core/agent.py` |
-| **System aufräumen** | via runner `--mode cleanup` | `autoops/plugins/system_cleanup.py` |
+| **System aufräumen** | via runner `--mode full` (auto) | `autoops/plugins/system_cleanup.py` |
 | **Eigenes Plugin schreiben** | Siehe Section 4 | `autoops/core/base_plugin.py` |
 | **API Client nutzen** | Siehe Section 3 | `autoops/core/api_client.py` |
 | **Reports lesen** | `autoops/reports/` | `autoops/core/reporter.py` |
@@ -172,13 +172,16 @@ await client.send_actuator_command("MOCK_ABC123", gpio=16, command="ON")
 ### Zone & Subzone Management
 
 ```python
-# Zone erstellen (implizit durch Device-Zuweisung)
-await client.assign_zone("MOCK_ABC123", zone_id="zone-1", zone_name="Gewächshaus")
+# Zone erstellen (persistente ZoneContext Entity)
+await client.create_zone(zone_id="gewaechshaus", name="Gewächshaus")
+
+# Device einer Zone zuweisen (via MQTT)
+await client.assign_zone("MOCK_ABC123", zone_id="gewaechshaus", zone_name="Gewächshaus")
 
 # Subzone zuweisen
 await client.assign_subzone("MOCK_ABC123", subzone_name="Bewässerung")
 
-# Zonen auflisten (abgeleitet aus Device-Zuweisungen)
+# Zonen auflisten (inkl. leerer Zonen aus ZoneContext)
 zones = await client.list_zones()
 
 # Subzones auflisten (pro Device)
@@ -244,8 +247,9 @@ data = await client.query_table("devices", limit=10)
 | `add_actuator()` | Aktuator-Config-Form | `POST /v1/actuators/{esp_id}/{gpio}` |
 | `send_actuator_command()` | ON/OFF Toggle | `POST /v1/actuators/{esp_id}/{gpio}/command` |
 | `assign_zone()` | Zone-Assignment-Panel | `POST /v1/zone/devices/{id}/assign` |
-| `list_zones()` | Zone-Liste | Derived from device data |
-| `create_zone()` | Zone erstellen | Via `assign_zone()` (implicit) |
+| `list_zones()` | Zone-Liste | `GET /v1/zone/zones` |
+| `create_zone()` | Zone erstellen | `POST /v1/zones` |
+| `delete_sensor()` | Sensor löschen | `DELETE /v1/sensors/{esp_id}/{config_id}` (UUID) |
 | `list_subzones()` | Subzone-Liste | `GET /v1/subzone/devices/{id}/subzones` |
 | `assign_subzone()` | Subzone zuweisen | `POST /v1/subzone/devices/{id}/subzones/assign` |
 | `trigger_heartbeat()` | Heartbeat-Button | `POST /v1/debug/mock-esp/{id}/heartbeat` |
@@ -324,10 +328,10 @@ class MyPlugin(AutoOpsPlugin):
 | `CONFIGURE` | Geräte konfigurieren | 2. |
 | `DIAGNOSE` | Probleme diagnostizieren | 3. |
 | `FIX` | Probleme beheben | 4. |
-| `MONITOR` | System überwachen | 5. |
-| `DOCUMENT` | Dokumentation erstellen | 6. |
-| `TEST` | Tests ausführen | - |
-| `CLEANUP` | Aufräumen | 7. (zuletzt) |
+| `CLEANUP` | Aufräumen (stale Devices, Orphans) | 5. |
+| `MONITOR` | System überwachen | 6. |
+| `DOCUMENT` | Dokumentation erstellen | 7. (zuletzt) |
+| `TEST` | Tests ausführen | - (nur explizit) |
 
 ### Aktive Plugins
 
@@ -474,11 +478,10 @@ Für Mock-Devices können verschiedene Simulations-Muster gewählt werden:
 | Pattern | Beschreibung | Anwendung |
 |---------|-------------|-----------|
 | `constant` | Fester Wert | Baseline-Tests |
-| `sine` | Sinuswelle | Temperatur-Tageszyklus |
 | `random` | Zufällige Schwankung | Noise-Simulation |
-| `sawtooth` | Sägezahn | Langsamer Anstieg, schneller Abfall |
-| `step` | Stufenweise | Diskrete Zustandswechsel |
-| `realistic` | Realistisch mit Drift | Produktionsnahe Tests |
+| `drift` | Langsamer Drift um Basiswert | Produktionsnahe Tests |
+
+> **Hinweis:** Muss mit Server-seitigem `VariationPattern` Enum in `schemas/debug.py` übereinstimmen.
 
 ```python
 from autoops.core.context import SensorSpec, SimulationPattern
@@ -488,7 +491,7 @@ sensor = SensorSpec(
     interface_type="ONEWIRE",
     raw_value=22.0,
     unit="°C",
-    variation_pattern=SimulationPattern.REALISTIC,
+    variation_pattern=SimulationPattern.DRIFT,
     variation_range=2.0,  # +/- 2°C Schwankung
 )
 ```
@@ -667,7 +670,7 @@ AutoOps kann als Basis für die geplante KI-Integration dienen:
 | **Config** | Hardcoded | Environment Variables |
 | **Passwort** | "admin" (falsch) | "Admin123#" (korrekt) |
 | **Plattform** | Windows-Pfade | Linux-kompatibel |
-| **SimulationPattern** | Nicht vorhanden | 6 Patterns (constant, sine, realistic...) |
+| **SimulationPattern** | Nicht vorhanden | 3 Patterns (constant, random, drift) |
 
 ### v2.0 → v2.1 (2026-03-02)
 
@@ -684,7 +687,20 @@ AutoOps kann als Basis für die geplante KI-Integration dienen:
 | **Imports** | `import secrets` auf Top-Level verschoben (Pattern-Konformität) |
 | **Reports** | `.gitignore` für Session-Reports, Test-Mock-Devices aus DB bereinigt |
 
+### v2.1 → v2.2 (2026-03-08)
+
+| Bereich | Änderung |
+|---------|----------|
+| **SimulationPattern** | SINE/SAWTOOTH/STEP/REALISTIC entfernt → nur CONSTANT/RANDOM/DRIFT (Server-kompatibel) |
+| **CLEANUP Capability** | In `run_autonomous()` Reihenfolge aufgenommen (zwischen FIX und MONITOR) |
+| **list_zones()** | Nutzt jetzt `GET /v1/zone/zones` statt Device-Ableitung (inkl. leerer Zonen) |
+| **set_auto_heartbeat()** | Query-Parameter statt JSON Body (Server-Signatur-Match) |
+| **delete_sensor()** | UUID `config_id` statt GPIO (vermeidet MultipleResultsFound) |
+| **create_zone()** | Eigener `POST /v1/zones` Endpoint statt implizit via `assign_zone()` |
+| **profile_validator** | `pwm_fan` zu `VALID_ACTUATOR_TYPES` hinzugefügt |
+| **add_sensor()** | Dead-Code `raw_mode` Parameter entfernt, Body-Felder bereinigt |
+
 ---
 
-**Letzte Aktualisierung:** 2026-03-02
-**Version:** 2.1.0
+**Letzte Aktualisierung:** 2026-03-08
+**Version:** 2.2.0

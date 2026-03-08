@@ -249,6 +249,16 @@ class ESPDeviceResponse(ESPDeviceBase, TimestampMixin):
         description="Inherited zone context (plant info, growth phase). Auto-populated when zone_id is set.",
     )
 
+    # Soft-delete fields (T02-Fix1)
+    deleted_at: Optional[datetime] = Field(
+        None,
+        description="Soft-delete timestamp. Present only for deleted devices (include_deleted=true).",
+    )
+    deleted_by: Optional[str] = Field(
+        None,
+        description="Username who soft-deleted this device.",
+    )
+
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
@@ -271,6 +281,8 @@ class ESPDeviceResponse(ESPDeviceBase, TimestampMixin):
                 "actuator_count": 2,
                 "auto_heartbeat": None,
                 "heartbeat_interval_seconds": None,
+                "deleted_at": None,
+                "deleted_by": None,
                 "created_at": "2025-01-01T00:00:00Z",
                 "updated_at": "2025-01-01T12:00:00Z",
             }

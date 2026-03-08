@@ -7,11 +7,28 @@
  *
  * Phase 4B.2.1
  */
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, computed } from 'vue'
 import { AlertTriangle, CheckCircle, Clock, Activity } from 'lucide-vue-next'
 import { useAlertCenterStore } from '@/shared/stores'
+import { useEspStore } from '@/stores/esp'
 
 const alertStore = useAlertCenterStore()
+const espStore = useEspStore()
+
+/** Hide entire bar when no devices or no sensors exist (stale data from previous sessions) */
+const hasDevices = computed(() => espStore.devices.length > 0)
+const hasSensors = computed(() =>
+  espStore.devices.some(d => (d.sensors?.length ?? 0) > 0)
+)
+
+/** Show bar only when there is meaningful data to display */
+const showBar = computed(() => {
+  if (!alertStore.alertStats) return false
+  if (!hasDevices.value) return false
+  if (!hasSensors.value) return false
+  const s = alertStore.alertStats
+  return s.active_count > 0 || s.acknowledged_count > 0 || s.resolved_today_count > 0
+})
 
 onMounted(() => {
   alertStore.startStatsPolling()
@@ -24,7 +41,7 @@ onUnmounted(() => {
 
 <template>
   <div
-    v-if="alertStore.alertStats"
+    v-if="showBar && alertStore.alertStats"
     class="alert-status-bar"
     :class="{ 'alert-status-bar--critical': alertStore.hasCritical }"
   >

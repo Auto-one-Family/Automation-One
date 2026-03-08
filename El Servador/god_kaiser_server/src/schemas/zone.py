@@ -241,6 +241,64 @@ class ZoneAckPayload(BaseModel):
 # =============================================================================
 
 
+class ZoneListEntry(BaseModel):
+    """
+    Zone list entry for GET /v1/zone/zones.
+
+    Merges zones from device assignments and ZoneContext table,
+    so empty zones (with context but no devices) are included.
+    """
+
+    zone_id: str = Field(
+        ...,
+        description="Zone identifier",
+        examples=["greenhouse_zone_1"],
+    )
+    zone_name: Optional[str] = Field(
+        None,
+        description="Human-readable zone name",
+        examples=["Greenhouse Section 1"],
+    )
+    device_count: int = Field(
+        0,
+        description="Number of ESP devices in this zone",
+    )
+    sensor_count: int = Field(
+        0,
+        description="Number of sensors in this zone",
+    )
+    actuator_count: int = Field(
+        0,
+        description="Number of actuators in this zone",
+    )
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "zone_id": "greenhouse_zone_1",
+                "zone_name": "Greenhouse Section 1",
+                "device_count": 3,
+                "sensor_count": 8,
+                "actuator_count": 2,
+            }
+        },
+    )
+
+
+class ZoneListResponse(BaseModel):
+    """Response for GET /v1/zone/zones."""
+
+    zones: list[ZoneListEntry] = Field(
+        default_factory=list,
+        description="All zones (including empty ones from ZoneContext)",
+    )
+    total: int = Field(
+        0,
+        description="Total number of zones",
+    )
+
+
 class ZoneInfo(BaseModel):
     """
     Zone information for display.

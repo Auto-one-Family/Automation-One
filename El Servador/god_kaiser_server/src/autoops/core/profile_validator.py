@@ -35,7 +35,7 @@ SERVER_ONLY_SENSOR_TYPES = {"co2", "light", "flow"}
 # For hardware-test profile validation, only firmware-registered types are valid.
 VALID_SENSOR_TYPES = FIRMWARE_REGISTERED_SENSOR_TYPES
 
-VALID_ACTUATOR_TYPES = {"relay", "pump", "valve", "pwm"}
+VALID_ACTUATOR_TYPES = {"relay", "pump", "valve", "pwm", "pwm_fan"}
 
 VALID_INTERFACES = {"ONEWIRE", "I2C", "ANALOG"}
 

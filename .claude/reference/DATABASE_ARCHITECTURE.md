@@ -1,6 +1,6 @@
 # Datenbank-Architektur & Wissensdatenbank
 
-> **Version:** 1.1 | **Aktualisiert:** 2026-03-06
+> **Version:** 1.3 | **Aktualisiert:** 2026-03-08
 > **Zweck:** Trennung operative vs. Wissensdaten, Abhängigkeiten, Verteilung, Sicherheit
 > **Quellen:** `El Servador/god_kaiser_server/src/db/models/`, Repositories, Services, Export-API
 
@@ -10,7 +10,7 @@
 
 | Kategorie | Tabellen / Orte | Zweck | Schreibzugriff |
 |-----------|-----------------|--------|----------------|
-| **Operativ (Betrieb)** | esp_devices, sensor_configs, actuator_configs, sensor_data (inkl. zone_id, subzone_id Phase 0.1), actuator_states, actuator_history, esp_heartbeat_logs, cross_esp_logic, logic_execution_history | Laufbetrieb, Steuerung, Time-Series, Regeln | API + MQTT-Handler |
+| **Operativ (Betrieb)** | esp_devices (soft-delete), sensor_configs, actuator_configs, sensor_data (inkl. zone_id, subzone_id, device_name), actuator_states, actuator_history, esp_heartbeat_logs, cross_esp_logic, logic_execution_history | Laufbetrieb, Steuerung, Time-Series, Regeln | API + MQTT-Handler |
 | **Wissen (Kontext)** | zone_contexts, subzone_configs.custom_data, sensor_metadata (JSON), actuator_metadata (JSON), device_metadata (JSON) | Betriebskontext, KI-Export, Inventar, Anbau | API (Operator/Admin) |
 | **System/App** | user_accounts, token_blacklist, audit_logs, notifications, notification_preferences, email_log, plugin_configs, plugin_executions, diagnostic_reports, dashboards, system_config, sensor_type_defaults | Auth, Audit, Benachrichtigungen, Plugins, UI | API (rollenbasiert) |
 
@@ -46,10 +46,19 @@ Wissensdaten sind **getrennt gespeichert**, aber **logisch verknüpft** über `z
 | Ort | Feld | Verknüpfung | Beschreibung |
 |-----|------|-------------|--------------|
 | **esp_devices** | device_metadata (JSON) | 1:1 zum Gerät | Geräte-Metadaten (Hersteller, Modell, Seriennummer, etc.) |
+| **esp_devices** | device_metadata.simulation_config.sensors (JSON) | 1:1 zum Gerät | Mock-Sensor-Konfigurationen für SimulationScheduler (Key: `cfg_{uuid}`, derived cache from sensor_configs via `rebuild_simulation_config()`) |
 | **sensor_configs** | sensor_metadata (JSON, inkl. description, unit), runtime_stats, alert_config | FK esp_id → esp_devices | Sensor-Metadaten, Laufzeit, Schwellen |
 | **actuator_configs** | actuator_metadata (JSON), runtime_stats, alert_config | FK esp_id → esp_devices | Aktor-Metadaten, Laufzeit |
 
 **Verknüpfung:** ESP ist die Wurzel; Sensoren/Aktoren hängen per FK an ESP. Zone-Kontext wird über `esp.zone_id` → `zone_contexts.zone_id` zugeordnet (in Export und UI join-artig geladen).
+
+> **GELÖST (T08-Fix1, 2026-03-08):** Mock-Sensor-Daten nutzen jetzt Write-Through Cache Pattern:
+> - `sensor_configs`-Tabelle = **Single Source of Truth**
+> - `device_metadata.simulation_config.sensors` = **derived cache**, Keys `cfg_{uuid}` (DB-IDs)
+> - `rebuild_simulation_config()` in ESPRepository wird nach JEDEM CUD auf sensor_configs aufgerufen
+> - simulation_config wird NIRGENDS direkt geschrieben (nur via rebuild)
+> - Multi-Value-Sensoren (SHT31, BME280) werden via `expand_multi_value()` korrekt gesplittet
+> - Startup-Reconciliation (Step 3.5.1) rebuildet alle simulation_configs beim Server-Start
 
 ---
 
@@ -78,6 +87,7 @@ Wissensdaten sind **getrennt gespeichert**, aber **logisch verknüpft** über `z
 
 - **ZoneContext** hat keine FK zu ESP. Änderungen an ESP.zone_id beeinflussen ZoneContext nur über expliziten Sync (zone_name). Kein CASCADE von Geräten auf Kontext.
 - **SubzoneConfig** hat FK zu esp_devices (CASCADE delete). Löschung eines ESPs löscht seine Subzonen.
+- **ESP Soft-Delete (T02-Fix1):** `esp_devices.deleted_at` statt physischem DELETE. Zeitreihen-FKs (sensor_data, esp_heartbeat_logs, actuator_states, actuator_history, ai_predictions) nutzen SET NULL — historische Daten bleiben nach Device-Löschung erhalten. sensor_data speichert `device_name` als Kontext-Snapshot.
 - **Export-Layer** liest aus mehreren Tabellen und fügt sie zusammen; er schreibt nicht. Einzige Schreibstelle für Kontext sind ZoneContextService und SubzoneRepository/Service.
 
 ---

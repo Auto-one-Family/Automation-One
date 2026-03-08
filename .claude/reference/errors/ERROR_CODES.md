@@ -230,6 +230,13 @@ allowed-tools: Read
 | 3015 | `MQTT_BUFFER_FULL` | MQTT offline buffer is full (messages dropped) |
 | 3016 | `MQTT_PAYLOAD_INVALID` | MQTT payload is invalid or malformed |
 
+### Security Errors (3500-3501)
+
+| Code | Name | Beschreibung |
+|------|------|--------------|
+| 3500 | `EMERGENCY_AUTH_REJECTED` | Emergency-stop rejected: invalid auth_token (ESP or broadcast) |
+| 3501 | `SECURITY_TOKEN_MISMATCH` | Security token mismatch on authenticated MQTT command |
+
 ### HTTP Errors (3020-3023)
 
 | Code | Name | Beschreibung |

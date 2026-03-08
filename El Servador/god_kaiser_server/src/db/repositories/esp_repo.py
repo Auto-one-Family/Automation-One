@@ -8,7 +8,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -22,28 +22,79 @@ class ESPRepository(BaseRepository[ESPDevice]):
 
     Extends BaseRepository with ESP32-specific operations like
     device_id lookups, zone queries, and status management.
+
+    Soft-Delete (T02-Fix1):
+    - All listing methods exclude soft-deleted devices by default.
+    - Use include_deleted=True for audit queries.
+    - get_by_device_id always finds devices (including deleted) for internal lookups.
     """
 
     def __init__(self, session: AsyncSession):
         super().__init__(ESPDevice, session)
 
-    async def get_by_device_id(self, device_id: str) -> Optional[ESPDevice]:
+    @staticmethod
+    def _not_deleted():
+        """Filter clause to exclude soft-deleted devices."""
+        return ESPDevice.deleted_at.is_(None)
+
+    async def get_by_device_id(
+        self, device_id: str, include_deleted: bool = False
+    ) -> Optional[ESPDevice]:
         """
         Get ESP device by device_id.
 
         Args:
             device_id: ESP device ID (e.g., ESP_A1B2C3D4)
+            include_deleted: If True, also return soft-deleted devices
 
         Returns:
             ESPDevice or None if not found
         """
         stmt = select(ESPDevice).where(ESPDevice.device_id == device_id)
+        if not include_deleted:
+            stmt = stmt.where(self._not_deleted())
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_all(
+        self, skip: int = 0, limit: int = 100, include_deleted: bool = False
+    ) -> list[ESPDevice]:
+        """Get all devices with optional soft-delete filter."""
+        stmt = select(self.model)
+        if not include_deleted:
+            stmt = stmt.where(self._not_deleted())
+        stmt = stmt.offset(skip).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def soft_delete(
+        self, device_id: str, deleted_by: str
+    ) -> Optional[ESPDevice]:
+        """
+        Soft-delete a device by setting deleted_at timestamp.
+
+        Args:
+            device_id: ESP device ID
+            deleted_by: Username performing the deletion
+
+        Returns:
+            Updated ESPDevice or None if not found
+        """
+        device = await self.get_by_device_id(device_id, include_deleted=False)
+        if not device:
+            return None
+
+        device.deleted_at = datetime.now(timezone.utc)
+        device.deleted_by = deleted_by
+        device.status = "deleted"
+
+        await self.session.flush()
+        await self.session.refresh(device)
+        return device
+
     async def get_by_zone(self, zone_id: str) -> list[ESPDevice]:
         """
-        Get all ESP devices in a zone.
+        Get all active ESP devices in a zone.
 
         Args:
             zone_id: Zone identifier
@@ -51,13 +102,15 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Returns:
             List of ESPDevice instances
         """
-        stmt = select(ESPDevice).where(ESPDevice.zone_id == zone_id)
+        stmt = select(ESPDevice).where(
+            ESPDevice.zone_id == zone_id, self._not_deleted()
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def get_by_master_zone(self, master_zone_id: str) -> list[ESPDevice]:
         """
-        Get all ESP devices in a master zone hierarchy.
+        Get all active ESP devices in a master zone hierarchy.
 
         Args:
             master_zone_id: Master zone identifier
@@ -65,13 +118,15 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Returns:
             List of ESPDevice instances
         """
-        stmt = select(ESPDevice).where(ESPDevice.master_zone_id == master_zone_id)
+        stmt = select(ESPDevice).where(
+            ESPDevice.master_zone_id == master_zone_id, self._not_deleted()
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def get_by_kaiser(self, kaiser_id: str) -> list[ESPDevice]:
         """
-        Get all ESP devices assigned to a Kaiser node.
+        Get all active ESP devices assigned to a Kaiser node.
 
         WP2-Fix5a: DB-Query via indexed kaiser_id column instead of metadata filter.
 
@@ -81,13 +136,15 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Returns:
             List of ESPDevice instances
         """
-        stmt = select(ESPDevice).where(ESPDevice.kaiser_id == kaiser_id)
+        stmt = select(ESPDevice).where(
+            ESPDevice.kaiser_id == kaiser_id, self._not_deleted()
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def get_zone_masters(self, zone_id: Optional[str] = None) -> list[ESPDevice]:
         """
-        Get zone master devices.
+        Get active zone master devices.
 
         Args:
             zone_id: Optional zone ID filter
@@ -95,7 +152,9 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Returns:
             List of zone master ESPDevice instances
         """
-        stmt = select(ESPDevice).where(ESPDevice.is_zone_master == True)
+        stmt = select(ESPDevice).where(
+            ESPDevice.is_zone_master == True, self._not_deleted()
+        )
         if zone_id:
             stmt = stmt.where(ESPDevice.zone_id == zone_id)
         result = await self.session.execute(stmt)
@@ -108,7 +167,9 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Returns:
             List of online ESPDevice instances
         """
-        stmt = select(ESPDevice).where(ESPDevice.status == "online")
+        stmt = select(ESPDevice).where(
+            ESPDevice.status == "online", self._not_deleted()
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -122,13 +183,15 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Returns:
             List of ESPDevice instances
         """
-        stmt = select(ESPDevice).where(ESPDevice.status == status)
+        stmt = select(ESPDevice).where(
+            ESPDevice.status == status, self._not_deleted()
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def get_by_hardware_type(self, hardware_type: str) -> list[ESPDevice]:
         """
-        Get ESP devices by hardware type.
+        Get active ESP devices by hardware type.
 
         Args:
             hardware_type: Hardware type (ESP32_WROOM, XIAO_ESP32_C3)
@@ -136,7 +199,9 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Returns:
             List of ESPDevice instances
         """
-        stmt = select(ESPDevice).where(ESPDevice.hardware_type == hardware_type)
+        stmt = select(ESPDevice).where(
+            ESPDevice.hardware_type == hardware_type, self._not_deleted()
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -219,12 +284,14 @@ class ESPRepository(BaseRepository[ESPDevice]):
 
     async def get_mock_devices(self) -> list[ESPDevice]:
         """
-        Get all Mock-ESP devices.
+        Get all active Mock-ESP devices.
 
         Returns:
             List of Mock ESPDevice instances
         """
-        stmt = select(ESPDevice).where(ESPDevice.hardware_type == "MOCK_ESP32")
+        stmt = select(ESPDevice).where(
+            ESPDevice.hardware_type == "MOCK_ESP32", self._not_deleted()
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -238,7 +305,9 @@ class ESPRepository(BaseRepository[ESPDevice]):
             List of online Mock ESPDevice instances
         """
         stmt = select(ESPDevice).where(
-            ESPDevice.hardware_type == "MOCK_ESP32", ESPDevice.status == "online"
+            ESPDevice.hardware_type == "MOCK_ESP32",
+            ESPDevice.status == "online",
+            self._not_deleted(),
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
@@ -439,27 +508,29 @@ class ESPRepository(BaseRepository[ESPDevice]):
 
     async def get_mock_device(self, device_id: str) -> Optional[ESPDevice]:
         """
-        Get Mock-ESP from Database.
+        Get active Mock-ESP from Database.
 
         Returns:
-            ESPDevice or None if not found or not a mock
+            ESPDevice or None if not found, not a mock, or soft-deleted
         """
         stmt = select(ESPDevice).where(
-            ESPDevice.device_id == device_id, ESPDevice.hardware_type == "MOCK_ESP32"
+            ESPDevice.device_id == device_id,
+            ESPDevice.hardware_type == "MOCK_ESP32",
+            self._not_deleted(),
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_all_mock_devices(self) -> List[ESPDevice]:
         """
-        Get all Mock-ESPs sorted by creation date (newest first).
+        Get all active Mock-ESPs sorted by creation date (newest first).
 
         Returns:
             List of Mock ESPDevice instances
         """
         stmt = (
             select(ESPDevice)
-            .where(ESPDevice.hardware_type == "MOCK_ESP32")
+            .where(ESPDevice.hardware_type == "MOCK_ESP32", self._not_deleted())
             .order_by(ESPDevice.created_at.desc())
         )
         result = await self.session.execute(stmt)
@@ -697,37 +768,54 @@ class ESPRepository(BaseRepository[ESPDevice]):
 
         return False
 
-    async def delete_mock_device(self, device_id: str) -> bool:
+    async def delete_mock_device(self, device_id: str, deleted_by: str = "system") -> bool:
         """
-        Delete Mock-ESP from Database.
+        Soft-delete Mock-ESP from Database.
 
-        SAFETY: Only deletes if hardware_type='MOCK_ESP32'
+        SAFETY: Only soft-deletes if hardware_type='MOCK_ESP32'
 
         Args:
             device_id: ESP Device ID
+            deleted_by: Username performing the deletion
 
         Returns:
-            True if successfully deleted
+            True if successfully soft-deleted
         """
         device = await self.get_mock_device(device_id)
         if not device:
             return False
 
-        await self.session.delete(device)
+        # Cleanup: Delete sensor_configs and actuator_configs for this device.
+        # sensor_data has no FK to sensor_configs (only to esp_devices with SET NULL),
+        # so historical sensor data is preserved.
+        from ..models.sensor import SensorConfig
+        from ..models.actuator import ActuatorConfig
+
+        await self.session.execute(
+            delete(SensorConfig).where(SensorConfig.esp_id == device.id)
+        )
+        await self.session.execute(
+            delete(ActuatorConfig).where(ActuatorConfig.esp_id == device.id)
+        )
+
+        device.deleted_at = datetime.now(timezone.utc)
+        device.deleted_by = deleted_by
+        device.status = "deleted"
+
         await self.session.flush()
         return True
 
     async def get_mock_count(self) -> int:
         """
-        Get count of all Mock-ESPs.
+        Get count of all active Mock-ESPs.
 
         Returns:
-            Number of Mock-ESPs in database
+            Number of active Mock-ESPs in database
         """
         stmt = (
             select(func.count())
             .select_from(ESPDevice)
-            .where(ESPDevice.hardware_type == "MOCK_ESP32")
+            .where(ESPDevice.hardware_type == "MOCK_ESP32", self._not_deleted())
         )
         result = await self.session.execute(stmt)
         return result.scalar() or 0
@@ -747,6 +835,114 @@ class ESPRepository(BaseRepository[ESPDevice]):
         if not device.device_metadata:
             return {"sensors": {}, "actuators": {}}
         return device.device_metadata.get("simulation_config", {"sensors": {}, "actuators": {}})
+
+    async def rebuild_simulation_config(
+        self,
+        device: ESPDevice,
+        sensor_configs: list,
+    ) -> Dict[str, Any]:
+        """
+        Rebuild simulation_config.sensors from sensor_configs DB (Write-Through Cache).
+
+        This is the ONLY place where simulation_config.sensors is written.
+        Called after every CUD operation on sensor_configs for this device.
+
+        Keys use cfg_{id} format to prevent collisions when multiple sensors
+        share the same GPIO (e.g., 2x DS18B20 on GPIO 4, or SHT31 temp+humidity).
+
+        Simulation-specific params (base_value, variation_pattern, etc.) are
+        preserved from old entries via (gpio, sensor_type) reverse lookup,
+        or from sensor_metadata.simulation if available.
+
+        Args:
+            device: ESPDevice instance (must be attached to session)
+            sensor_configs: List of SensorConfig instances for this device
+
+        Returns:
+            Updated simulation_config dict
+        """
+        if not device.device_metadata:
+            device.device_metadata = {}
+
+        old_sim_config = device.device_metadata.get(
+            "simulation_config", {"sensors": {}, "actuators": {}}
+        )
+        old_sensors = old_sim_config.get("sensors", {})
+
+        # Build reverse lookup: (gpio, sensor_type) -> old sim params
+        old_by_identity: Dict[tuple, dict] = {}
+        for _key, entry in old_sensors.items():
+            gpio = entry.get("gpio")
+            stype = entry.get("sensor_type", "")
+            if gpio is not None:
+                old_by_identity[(int(gpio), stype.lower())] = entry
+
+        # Simulation-specific param keys (NOT in SensorConfig model)
+        SIM_PARAMS = {
+            "base_value", "variation_pattern", "variation_range",
+            "min_value", "max_value", "interval_seconds", "quality", "raw_mode",
+        }
+
+        new_sensors: Dict[str, dict] = {}
+        for cfg in sensor_configs:
+            if not cfg.enabled:
+                continue
+
+            key = f"cfg_{cfg.id}"
+            gpio = cfg.gpio if cfg.gpio is not None else 0
+            sensor_type = cfg.sensor_type or ""
+
+            # Start with basic config from DB
+            entry: Dict[str, Any] = {
+                "sensor_type": sensor_type,
+                "gpio": gpio,
+                "name": cfg.sensor_name,
+            }
+
+            if cfg.i2c_address is not None:
+                entry["i2c_address"] = cfg.i2c_address
+            if cfg.interface_type:
+                entry["interface_type"] = cfg.interface_type
+            if cfg.onewire_address is not None:
+                entry["onewire_address"] = cfg.onewire_address
+
+            # Resolve simulation-specific params with 3-tier fallback:
+            # 1. sensor_metadata.simulation (persistent per-sensor storage)
+            # 2. old entry match by (gpio, sensor_type)
+            # 3. type-based defaults
+            sim_meta = {}
+            if cfg.sensor_metadata and isinstance(cfg.sensor_metadata, dict):
+                sim_meta = cfg.sensor_metadata.get("simulation", {})
+
+            old_entry = old_by_identity.get((gpio, sensor_type.lower()), {})
+
+            for param in SIM_PARAMS:
+                if param in sim_meta:
+                    entry[param] = sim_meta[param]
+                elif param in old_entry:
+                    entry[param] = old_entry[param]
+                # else: omit — scheduler uses its own defaults
+
+            new_sensors[key] = entry
+
+        # Preserve non-sensor parts (actuators, manual_overrides, heartbeat)
+        new_sim_config = {
+            "sensors": new_sensors,
+            "actuators": old_sim_config.get("actuators", {}),
+        }
+        # Preserve manual_overrides if they exist
+        if "manual_overrides" in old_sim_config:
+            new_sim_config["manual_overrides"] = old_sim_config["manual_overrides"]
+
+        device.device_metadata["simulation_config"] = new_sim_config
+        device.device_metadata["simulation_config_updated_at"] = datetime.now(
+            timezone.utc
+        ).isoformat()
+
+        flag_modified(device, "device_metadata")
+        await self.session.flush()
+
+        return new_sim_config
 
     def get_heartbeat_interval(self, device: ESPDevice) -> float:
         """

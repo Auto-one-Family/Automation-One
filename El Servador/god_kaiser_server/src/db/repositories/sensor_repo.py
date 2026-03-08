@@ -43,18 +43,25 @@ class SensorRepository(BaseRepository[SensorConfig]):
 
     async def get_by_esp_and_gpio(self, esp_id: uuid.UUID, gpio: int) -> Optional[SensorConfig]:
         """
-        Get sensor by ESP ID and GPIO.
+        Get sensor by ESP ID and GPIO (crash-safe for multi-value sensors).
+
+        DEPRECATED: Prefer get_all_by_esp_and_gpio() or get_by_esp_gpio_and_type()
+        for explicit multi-value sensor handling.
 
         Args:
             esp_id: ESP device UUID
             gpio: GPIO pin number
 
         Returns:
-            SensorConfig or None if not found
+            SensorConfig or None if not found. Returns first config if multiple exist.
         """
-        stmt = select(SensorConfig).where(SensorConfig.esp_id == esp_id, SensorConfig.gpio == gpio)
-        result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+        configs = await self.get_all_by_esp_and_gpio(esp_id, gpio)
+        if len(configs) > 1:
+            logger.warning(
+                "Multiple configs for esp=%s gpio=%s: %s. Returning first.",
+                esp_id, gpio, [c.sensor_type for c in configs],
+            )
+        return configs[0] if configs else None
 
     async def get_all_by_esp_and_gpio(self, esp_id: uuid.UUID, gpio: int) -> list[SensorConfig]:
         """
@@ -94,7 +101,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         stmt = select(SensorConfig).where(
             SensorConfig.esp_id == esp_id,
             SensorConfig.gpio == gpio,
-            SensorConfig.sensor_type == sensor_type,
+            func.lower(SensorConfig.sensor_type) == sensor_type.lower(),
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -225,6 +232,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         data_source: str = DataSource.PRODUCTION.value,
         zone_id: Optional[str] = None,
         subzone_id: Optional[str] = None,
+        device_name: Optional[str] = None,
     ) -> SensorData:
         """
         Save sensor data.
@@ -243,6 +251,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             data_source: Data source (production, mock, test, simulation)
             zone_id: Zone ID at measurement time (Phase 0.1)
             subzone_id: Subzone ID at measurement time (Phase 0.1)
+            device_name: Device name at measurement time (T02-Fix1)
 
         Returns:
             Created SensorData instance
@@ -266,6 +275,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             data_source=data_source,
             zone_id=zone_id,
             subzone_id=subzone_id,
+            device_name=device_name,
         )
         self.session.add(sensor_data)
         await self.session.flush()
@@ -598,6 +608,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         gpio: int,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
+        sensor_type: Optional[str] = None,
     ) -> dict:
         """
         Get statistical summary for sensor data.
@@ -607,6 +618,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             gpio: GPIO pin number
             start_time: Optional start timestamp
             end_time: Optional end timestamp
+            sensor_type: Optional sensor type filter for multi-value sensors
 
         Returns:
             Dictionary with statistics:
@@ -618,6 +630,9 @@ class SensorRepository(BaseRepository[SensorConfig]):
             - quality_distribution: Dict with quality level counts
         """
         filters = [SensorData.esp_id == esp_id, SensorData.gpio == gpio]
+
+        if sensor_type:
+            filters.append(func.lower(SensorData.sensor_type) == sensor_type.lower())
 
         if start_time:
             filters.append(SensorData.timestamp >= start_time)
@@ -857,7 +872,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         stmt = select(SensorConfig).where(
             SensorConfig.esp_id == esp_id,
             SensorConfig.gpio == gpio,
-            SensorConfig.sensor_type == sensor_type,
+            func.lower(SensorConfig.sensor_type) == sensor_type.lower(),
             SensorConfig.onewire_address == onewire_address,
         )
         result = await self.session.execute(stmt)
@@ -897,7 +912,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         stmt = select(SensorConfig).where(
             SensorConfig.esp_id == esp_id,
             SensorConfig.gpio == gpio,
-            SensorConfig.sensor_type == sensor_type,
+            func.lower(SensorConfig.sensor_type) == sensor_type.lower(),
             SensorConfig.i2c_address == i2c_address,
         )
         result = await self.session.execute(stmt)

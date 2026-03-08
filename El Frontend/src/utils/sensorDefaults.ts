@@ -1046,6 +1046,16 @@ function assessValueQuality(
 }
 
 /**
+ * Format a raw sensor_type as a readable display name.
+ * "sht31_temp" → "Sht31 Temp", "ds18b20" → "Ds18b20"
+ */
+export function formatSensorType(sensorType: string): string {
+  return sensorType
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+}
+
+/**
  * Groups sensors of a device by their base type.
  *
  * Multi-value sensors (SHT31, BME280) are resolved into individual value rows.
@@ -1099,7 +1109,7 @@ export function groupSensorsByBaseType(sensors: RawSensor[]): GroupedSensor[] {
           const primaryConfig = mvDevice.values[0]
           group.values.push({
             type: sType,
-            label: primaryConfig?.label || getSensorLabel(sType),
+            label: (sensor.name && sensor.name.trim().length > 0) ? sensor.name : (primaryConfig?.label || getSensorLabel(sType)),
             value: sensor.raw_value,
             unit: primaryConfig?.unit || sensor.unit || getSensorUnit(sType),
             icon: primaryConfig?.icon || SENSOR_TYPE_CONFIG[sType]?.icon || 'Activity',
@@ -1113,7 +1123,7 @@ export function groupSensorsByBaseType(sensors: RawSensor[]): GroupedSensor[] {
         if (!exists) {
           group.values.push({
             type: sType,
-            label: valueConfig.label,
+            label: (sensor.name && sensor.name.trim().length > 0) ? sensor.name : valueConfig.label,
             value: sensor.raw_value,
             unit: valueConfig.unit,
             icon: valueConfig.icon || mvDevice.icon,
@@ -1125,7 +1135,7 @@ export function groupSensorsByBaseType(sensors: RawSensor[]): GroupedSensor[] {
         const config = SENSOR_TYPE_CONFIG[sType]
         group.values.push({
           type: sType,
-          label: config?.label || sType,
+          label: (sensor.name && sensor.name.trim().length > 0) ? sensor.name : (config?.label || sType),
           value: sensor.raw_value,
           unit: config?.unit || sensor.unit || '',
           icon: config?.icon || 'Activity',
@@ -1134,13 +1144,16 @@ export function groupSensorsByBaseType(sensors: RawSensor[]): GroupedSensor[] {
       }
     } else {
       // Single-value sensor (DS18B20, pH, etc.)
+      // Use unique key per sensor to avoid collisions (e.g., 2x DS18B20)
+      const uniqueKey = `${sType}_${sensor.gpio ?? sensors.indexOf(sensor)}`
       const config = SENSOR_TYPE_CONFIG[sType]
-      groups.set(sType, {
+      const sensorName = (sensor.name && sensor.name.trim().length > 0) ? sensor.name : (config?.label || formatSensorType(sType))
+      groups.set(uniqueKey, {
         baseType: sType,
-        label: config?.label || sType,
+        label: config?.label || formatSensorType(sType),
         values: [{
           type: sType,
-          label: config?.label || sType,
+          label: sensorName,
           value: sensor.raw_value,
           unit: config?.unit || sensor.unit || '',
           icon: config?.icon || 'Activity',
@@ -1261,6 +1274,8 @@ export interface ZoneAggregation {
     count: number
     unit: string
   }[]
+  /** Number of categories truncated (beyond the visible 3) */
+  extraTypeCount: number
   deviceCount: number
   onlineCount: number
 }
@@ -1280,7 +1295,7 @@ export function aggregateZoneSensors(devices: any[]): ZoneAggregation {
   ).length
 
   if (deviceCount === 0) {
-    return { sensorTypes: [], deviceCount: 0, onlineCount: 0 }
+    return { sensorTypes: [], extraTypeCount: 0, deviceCount: 0, onlineCount: 0 }
   }
 
   // Collect all sensor values grouped by category
@@ -1327,31 +1342,39 @@ export function aggregateZoneSensors(devices: any[]): ZoneAggregation {
 
   // Sort by priority and limit to 3
   sensorTypes.sort((a, b) => CATEGORY_PRIORITY[a.type] - CATEGORY_PRIORITY[b.type])
+  const extraTypeCount = Math.max(0, sensorTypes.length - 3)
   sensorTypes.splice(3)
 
-  return { sensorTypes, deviceCount, onlineCount }
+  return { sensorTypes, extraTypeCount, deviceCount, onlineCount }
 }
 
 /**
  * Formats an aggregated sensor value for the zone header.
  *
- * 1 device:   "22.0°C"
- * 2-5:        "Ø 21.5°C"
- * 6+:         "Ø 22°C"
+ * 1 value:    "22.0 °C" (thin space before unit)
+ * 2+ values:  "18.3 – 22.5 °C" (range min – max)
+ * Same min/max: "22.0 °C (2)" (count in parens)
  */
 export function formatAggregatedValue(
   agg: ZoneAggregation['sensorTypes'][0],
-  deviceCount: number,
+  _deviceCount: number,
 ): string {
   if (agg.count === 0) return ''
 
-  const decimals = deviceCount >= 6 ? 0 : 1
-  const value = agg.avg.toFixed(decimals)
-
-  if (deviceCount <= 1) {
-    return `${value}${agg.unit}`
+  if (agg.count === 1) {
+    return `${agg.min.toFixed(1)}\u2009${agg.unit}`
   }
-  return `Ø ${value}${agg.unit}`
+
+  // Multiple values: show range
+  const minStr = agg.min.toFixed(1)
+  const maxStr = agg.max.toFixed(1)
+
+  if (minStr === maxStr) {
+    // Same value across sensors — show count
+    return `${minStr}\u2009${agg.unit} (${agg.count})`
+  }
+
+  return `${minStr} – ${maxStr}\u2009${agg.unit}`
 }
 
 

@@ -202,28 +202,20 @@ async function handleLogout() {
 
     <!-- ═══ CENTER: Dashboard Controls ═══ -->
     <div v-if="dashStore.showControls" class="header__controls">
+      <!-- Compact Status Chip (Online/Total) -->
+      <div class="header__status-chip" :title="`${dashStore.statusCounts.online} online, ${dashStore.statusCounts.offline} offline`">
+        <span class="header__status-dot" :class="dashStore.statusCounts.online > 0 ? 'header__status-dot--online' : 'header__status-dot--offline'" />
+        <span class="header__status-text">{{ dashStore.statusCounts.online }}/{{ dashStore.deviceCounts.all }} Online</span>
+      </div>
+
       <!-- Problem Alert (inline) -->
       <div v-if="dashStore.hasProblems && dashStore.problemMessage" class="header__alert">
         <AlertTriangle class="header__alert-icon" />
         <span class="header__alert-text">{{ dashStore.problemMessage }}</span>
       </div>
 
-      <!-- Desktop Filters (≥1024px) -->
-      <div class="header__filters-desktop">
-        <StatusPill
-          type="online"
-          :count="dashStore.statusCounts.online"
-          label="Online"
-          :active="dashStore.activeStatusFilters.has('online')"
-          @click="dashStore.toggleStatusFilter('online')"
-        />
-        <StatusPill
-          type="offline"
-          :count="dashStore.statusCounts.offline"
-          label="Offline"
-          :active="dashStore.activeStatusFilters.has('offline')"
-          @click="dashStore.toggleStatusFilter('offline')"
-        />
+      <!-- Desktop Filters — only visible when devices exist (≥1024px) -->
+      <div v-if="dashStore.deviceCounts.all > 0" class="header__filters-desktop">
         <StatusPill
           v-if="dashStore.statusCounts.warning > 0"
           type="warning"
@@ -258,8 +250,9 @@ async function handleLogout() {
         </div>
       </div>
 
-      <!-- Mobile Filter Toggle (<1024px) -->
+      <!-- Mobile Filter Toggle (<1024px, only when devices exist) -->
       <button
+        v-if="dashStore.deviceCounts.all > 0"
         class="header__filter-toggle"
         :class="{ 'header__filter-toggle--active': showMobileFilters }"
         @click="showMobileFilters = !showMobileFilters"
@@ -268,19 +261,10 @@ async function handleLogout() {
       </button>
     </div>
 
-    <!-- ═══ RIGHT: Actions + Emergency + Status + User ═══ -->
+    <!-- ═══ RIGHT: Actions + System ═══ -->
     <div class="header__right">
-      <!-- Dashboard Actions (only on hardware routes) -->
-      <template v-if="dashStore.showControls">
-        <button
-          class="header__action-btn header__action-btn--create"
-          title="Test-ESP erstellen"
-          @click="dashStore.showCreateMock = true"
-        >
-          <Plus class="header__action-btn-icon" />
-          <span class="header__action-btn-label">Mock</span>
-        </button>
-      </template>
+      <!-- Color Legend (icon-only) -->
+      <ColorLegend />
 
       <!-- Pending/Unassigned Badge (visible on ALL routes) -->
       <button
@@ -304,10 +288,19 @@ async function handleLogout() {
         </span>
       </button>
 
-      <div class="header__divider" />
+      <!-- Dashboard Actions (only on hardware routes) -->
+      <template v-if="dashStore.showControls">
+        <button
+          class="header__action-btn header__action-btn--create"
+          title="Test-ESP erstellen"
+          @click="dashStore.showCreateMock = true"
+        >
+          <Plus class="header__action-btn-icon" />
+          <span class="header__action-btn-label">Mock</span>
+        </button>
+      </template>
 
-      <!-- Color Legend -->
-      <ColorLegend />
+      <div class="header__divider" />
 
       <!-- Alert Status (Phase 4B — ISA-18.2) -->
       <AlertStatusBar />
@@ -315,14 +308,14 @@ async function handleLogout() {
       <!-- Notification Bell -->
       <NotificationBadge />
 
-      <!-- Emergency Stop -->
-      <EmergencyStopButton />
       <div class="header__divider" />
 
-      <!-- Connection Dot -->
+      <!-- Emergency Stop -->
+      <EmergencyStopButton />
+
+      <!-- Connection Dot + User -->
       <div class="header__connection" :title="connectionTooltip">
         <span class="header__dot" :class="connectionDotClass" />
-        <span class="header__connection-label">{{ connectionTooltip }}</span>
       </div>
 
       <!-- User Menu -->
@@ -352,24 +345,10 @@ async function handleLogout() {
     </div>
   </header>
 
-  <!-- Mobile Filter Dropdown (slides below header) -->
+  <!-- Mobile Filter Dropdown (slides below header, only when devices exist) -->
   <Transition name="filter-slide">
-    <div v-if="dashStore.showControls && showMobileFilters" class="header-mobile-filters">
+    <div v-if="dashStore.showControls && showMobileFilters && dashStore.deviceCounts.all > 0" class="header-mobile-filters">
       <div class="header-mobile-filters__pills">
-        <StatusPill
-          type="online"
-          :count="dashStore.statusCounts.online"
-          label="Online"
-          :active="dashStore.activeStatusFilters.has('online')"
-          @click="dashStore.toggleStatusFilter('online')"
-        />
-        <StatusPill
-          type="offline"
-          :count="dashStore.statusCounts.offline"
-          label="Offline"
-          :active="dashStore.activeStatusFilters.has('offline')"
-          @click="dashStore.toggleStatusFilter('offline')"
-        />
         <StatusPill
           v-if="dashStore.statusCounts.warning > 0"
           type="warning"
@@ -485,6 +464,7 @@ async function handleLogout() {
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+  overflow: hidden;
 }
 
 .header__crumb,
@@ -517,6 +497,7 @@ async function handleLogout() {
   cursor: default;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 200px;
 }
 
 .header__crumb-sep {
@@ -561,6 +542,39 @@ async function handleLogout() {
   flex: 1;
   justify-content: center;
   min-width: 0;
+}
+
+/* ── Compact Status Chip (Online/Total) ── */
+.header__status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+}
+
+.header__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.header__status-dot--online {
+  background-color: var(--color-success);
+  box-shadow: 0 0 4px var(--color-success);
+}
+
+.header__status-dot--offline {
+  background-color: var(--color-text-muted);
 }
 
 /* ── Problem Alert (inline) ── */
@@ -677,6 +691,16 @@ async function handleLogout() {
   height: 16px;
 }
 
+@media (max-width: 1399px) {
+  .header__type-segment {
+    display: none;
+  }
+
+  .header__crumb--current {
+    max-width: 140px;
+  }
+}
+
 @media (max-width: 1023px) {
   .header__filters-desktop {
     display: none;
@@ -688,6 +712,10 @@ async function handleLogout() {
 
   .header__alert {
     display: none;
+  }
+
+  .header__crumb--current {
+    max-width: 100px;
   }
 }
 
@@ -840,17 +868,7 @@ async function handleLogout() {
   background-color: var(--color-text-muted);
 }
 
-.header__connection-label {
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-}
-
-@media (max-width: 767px) {
-  .header__connection-label {
-    display: none;
-  }
-}
+/* Connection label removed — tooltip-only via :title attribute */
 
 /* ── User Menu ── */
 .header__user-wrapper {

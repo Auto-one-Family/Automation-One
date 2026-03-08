@@ -8,7 +8,7 @@ description: |
   oder neue Agents in die bestehende Struktur integriert werden sollen.
   NOT FOR: Code-Entwicklung, Docker-Konfiguration, Debugging von Runtime-Problemen.
   Keywords: agent-check, flow-analyse, IST-SOLL, agent-update, workflow, konsistenz
-model: sonnet
+model: haiku
 color: yellow
 tools: ["Read", "Write", "Edit", "Grep", "Glob"]
 ---

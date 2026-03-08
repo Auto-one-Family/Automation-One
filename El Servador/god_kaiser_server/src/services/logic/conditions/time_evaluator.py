@@ -4,7 +4,7 @@ Time Condition Evaluator
 Evaluates time window conditions.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict
 
 from ....core.logging_config import get_logger
@@ -45,14 +45,14 @@ class TimeConditionEvaluator(BaseConditionEvaluator):
         # Get current time from context or use now
         current_time = context.get("current_time")
         if current_time is None:
-            current_time = datetime.now()
+            current_time = datetime.now(timezone.utc)
         elif isinstance(current_time, str):
             # Try to parse if string
             try:
                 current_time = datetime.fromisoformat(current_time.replace("Z", "+00:00"))
             except ValueError:
                 logger.warning(f"Could not parse current_time: {current_time}")
-                current_time = datetime.now()
+                current_time = datetime.now(timezone.utc)
 
         # Check day of week if specified
         days_of_week = condition.get("days_of_week")

@@ -37,11 +37,14 @@ interface Props {
   gpio: number
   sensorType: string
   unit?: string
+  /** Sensor config UUID from database (required for DELETE on real ESPs) */
+  configId?: string
   showMetadata?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   unit: '',
+  configId: undefined,
   showMetadata: true,
 })
 
@@ -266,8 +269,11 @@ async function confirmAndDelete() {
   try {
     if (isMock) {
       await espStore.removeSensor(props.espId, props.gpio)
+    } else if (props.configId) {
+      await sensorsApi.delete(props.espId, props.configId)
     } else {
-      await sensorsApi.delete(props.espId, props.gpio)
+      toast.error('Sensor-Config-ID fehlt — Löschung nicht möglich')
+      return
     }
     toast.success('Sensor entfernt')
     emit('deleted')

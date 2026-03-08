@@ -27,6 +27,7 @@ from . import (  # noqa: F401
     subzone,  # Subzone configuration model (Phase 9)
     system,
     user,
+    zone,  # Zone entity (Phase 0.3)
     zone_context,  # Zone business context (Phase K3)
 )
 
@@ -61,6 +62,7 @@ from .plugin import PluginConfig, PluginExecution  # noqa: F401
 from .subzone import SubzoneConfig  # noqa: F401
 from .system import SystemConfig  # noqa: F401
 from .user import User  # noqa: F401
+from .zone import Zone  # noqa: F401
 from .zone_context import ZoneContext  # noqa: F401
 
 __all__ = [
@@ -123,5 +125,6 @@ __all__ = [
     "SubzoneConfig",
     "SystemConfig",
     "User",
+    "Zone",
     "ZoneContext",
 ]

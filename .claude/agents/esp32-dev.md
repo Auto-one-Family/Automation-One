@@ -11,6 +11,7 @@ description: |
 model: sonnet
 color: green
 tools: ["Read", "Grep", "Glob", "Bash", "Write", "Edit"]
+skills: ["esp32-development"]
 ---
 
 # ESP32 Development Agent

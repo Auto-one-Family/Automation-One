@@ -28,10 +28,11 @@ export const sensorsApi = {
   },
 
   /**
-   * Delete sensor configuration
+   * Delete sensor configuration by config_id (UUID).
+   * Backend: DELETE /sensors/{esp_id}/{config_id}
    */
-  async delete(espId: string, gpio: number): Promise<void> {
-    await api.delete(`/sensors/${espId}/${gpio}`)
+  async delete(espId: string, configId: string): Promise<void> {
+    await api.delete(`/sensors/${espId}/${configId}`)
   },
 
   /**

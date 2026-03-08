@@ -11,12 +11,13 @@ description: |
   Mock-ESP, PendingDevices, GPIO-Status, MainLayout, AppSidebar, Router,
   Navigation-Guards, Token-Refresh, JWT-Auth, REST-API-Client.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit
+argument-hint: "[Beschreibe was implementiert werden soll]"
 ---
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.44
-**Letzte Aktualisierung:** 2026-03-06
+**Version:** 9.60
+**Letzte Aktualisierung:** 2026-03-08
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
 
@@ -204,13 +205,14 @@ El Frontend/src/
 │   ├── device-metadata.ts  # DeviceMetadata Interface + Utility-Funktionen
 │   ├── event-grouping.ts
 │   └── form-schema.ts
-├── utils/         # 10 Utility-Module
+├── utils/         # 11 Utility-Module
 │   ├── formatters.ts      # ~631 Zeilen
 │   ├── labels.ts
 │   ├── sensorDefaults.ts
 │   ├── actuatorDefaults.ts
 │   ├── errorCodeTranslator.ts
 │   ├── subzoneHelpers.ts  # normalizeSubzoneId (Defense-in-Depth vor API)
+│   ├── trendUtils.ts      # calculateTrend (Linear Regression), TrendDirection, TREND_THRESHOLDS
 │   └── ...
 ├── views/         # 17 View-Komponenten
 ├── main.ts        # Bootstrap
@@ -302,23 +304,27 @@ SensorsView.vue (?sensor={espId}-gpio{gpio} oder ?focus=sensorId → auto-open D
 
 ```
 MonitorView.vue (URL-Sync: L1→L2→L3 via route params)
-├── L1 /monitor — Reihenfolge: Zone-Tiles → Aktive Automatisierungen → Cross-Zone-Dashboards → Inline-Panels
+├── L1 /monitor — Ready-Gate: BaseSkeleton bei espStore.isLoading, ErrorState bei espStore.error, Content nur nach erfolgreichem Laden
+│   ├── Datenquellen: espStore.devices (KPIs) + zonesApi.getAllZones() (inkl. leere Zonen aus ZoneContext)
+│   ├── Zone-Tiles: <button> (keyboard-navigierbar, :focus-visible); Reihenfolge: Zone-Tiles → Aktive Automatisierungen → Cross-Zone-Dashboards → Inline-Panels
+│   ├── Leere Zonen: ZoneHealthStatus 'empty' (Minus-Icon, opacity 0.7, status "Leer"), NICHT "alarm"
 │   ├── Zone-Tile Footer: "X/Y online" (ESP-Count), Sensor/Aktor-Counts, lastActivity
 │   ├── ActiveAutomationsSection: logicStore.enabledRules, Top 5 als RuleCardCompact (ul/li, :focus-visible), Link "Alle Regeln" → /logic; Zone-Badge Fallback "—"; responsive Grid
 │   └── 40px Trennung: var(--space-10) zwischen Zone-Grid, ActiveAutomationsSection, Dashboard-Card, Inline-Panels
 ├── L2 /monitor/:zoneId — Reihenfolge: Zone-Header → Sensoren → Aktoren → Regeln für diese Zone → Zone-Dashboards → Inline-Panels
-│   ├── Datenquelle: zonesApi.getZoneMonitorData (primär), Fallback useZoneGrouping + useSubzoneResolver nur bei API-Fehler; Ready-Gate (v-if=!zoneMonitorLoading) + BaseSkeleton während Loading, ErrorState bei Fehler
+│   ├── Datenquelle: zonesApi.getZoneMonitorData (primär, AbortController bei Zone-Wechsel), Fallback useZoneGrouping + useSubzoneResolver nur bei API-Fehler; Ready-Gate (v-if=!zoneMonitorLoading) + BaseSkeleton während Loading, ErrorState bei Fehler
 │   ├── Inline-Panels L2: inlineMonitorPanelsL2 = cross-zone + zone-spezifische (scope=zone, zoneId=selectedZoneId); L1 nutzt inlineMonitorPanelsCrossZone
 │   ├── Zone-Header: Name + Sensor/Aktor-Count + Alarm-Count
-│   ├── Sensoren (N): Sektionsueberschrift mit Count; Subzone-Zeile NUR Name (kein Count)
-│   ├── Aktoren (N): Sektionsueberschrift mit Count; Subzone-Zeile NUR Name (kein Count)
+│   ├── Sensoren (N): Sektionsueberschrift mit Count; Subzone-Zeile NUR Name (kein Count, kein CRUD); Leere Subzonen: Hinweis "Keine Sensoren zugeordnet" + Link zur Hardware-Ansicht
+│   ├── Aktoren (N): Sektionsueberschrift mit Count; Subzone-Zeile NUR Name (kein Count, kein CRUD)
 │   ├── Regeln für diese Zone (N): ZoneRulesSection.vue — logicStore.getRulesForZone(zoneId); RuleCardCompact pro Regel; Klick → /logic/:ruleId; Empty State: Link "Zum Regeln-Tab"; Bei >10 Regeln: erste 5 + Link "Weitere X Regeln — Im Regeln-Tab anzeigen"
 │   ├── Zone-Dashboards: getDashboardNameSuffix(dash) fuer eindeutige Namen (createdAt oder ID)
-│   ├── SensorCard.vue[] (mode='monitor', Stale/ESP-Offline-Badges, from components/devices/)
+│   ├── SensorCard.vue[] (mode='monitor', Stale/ESP-Offline-Badges, Trend-Pfeil via :trend Prop, from components/devices/)
+│   │   ├── #sparkline: LiveLineChart (compact, sensor-type → auto Y-Range, thresholds → farbige Schwellwert-Zonen aus SENSOR_TYPE_CONFIG)
 │   │   └── [Expanded] 1h-Chart (vue-chartjs Line, sensorsApi.queryData Initial-Fetch)
 │   │       ├── "Zeitreihe anzeigen" → openSensorDetail (L3)
 │   │       └── "Konfiguration" → /sensors?sensor={espId}-gpio{gpio}
-│   └── ActuatorCard.vue[] (mode='monitor', from components/devices/)
+│   └── ActuatorCard.vue[] (mode='monitor', read-only: kein Toggle, PWM-Badge bei pwm_value>0, linkedRules mit Status-Dot+Name+Condition, lastExecution mit relativem Zeitstempel, "+N weitere" Link bei >2 Regeln, from components/devices/)
 └── L3 /monitor/:zoneId/sensor/:sensorId — SlideOver (Sensor-Detail, Deep-Link-faehig)
     └── Multi-Sensor-Overlay: Chip-Selektor (max 4 Sensoren), sekundaere Y-Achse bei unterschiedlichen Einheiten
 ```
@@ -419,7 +425,7 @@ onUnmounted(() => { /* cleanup */ })
 | Type | Zeilen | Beschreibung |
 |------|--------|--------------|
 | MockESP / ESPDevice | 275-294 | Device mit Sensors, Actuators, Status |
-| MockSensor | 234-263 | Sensor mit Multi-Value Support |
+| MockSensor | 234-290 | Sensor mit Multi-Value Support, config_id (UUID), interface_type, i2c_address |
 | MockActuator | 265-273 | Actuator mit PWM |
 | QualityLevel | - | 'excellent' \| 'good' \| 'fair' \| 'poor' \| 'bad' \| 'stale' \| 'error' |
 | MockSystemState | - | 12 States: BOOT, WIFI_SETUP, WIFI_CONNECTED, MQTT_CONNECTING, MQTT_CONNECTED, AWAITING_USER_CONFIG, ZONE_CONFIGURED, SENSORS_CONFIGURED, OPERATIONAL, LIBRARY_DOWNLOADING, SAFE_MODE, ERROR |
@@ -436,6 +442,7 @@ onUnmounted(() => { /* cleanup */ })
 | error_event | esp_id, error_code, troubleshooting | ESP→Server→WS |
 | server_log | level, message, exception | Server intern |
 | plugin_execution_started | execution_id, plugin_id, trigger_source | PluginService→WS |
+| sensor_config_deleted | config_id, esp_id, gpio, sensor_type | Server→WS (Delete-Pipeline) |
 | plugin_execution_completed | execution_id, plugin_id, status, duration_seconds, error_message | PluginService→WS |
 
 **WICHTIG:** Type-Aenderungen IMMER mit Server-Team abstimmen!
@@ -454,6 +461,7 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 - ExecutionHistoryItem: rule_id, rule_name, triggered_at, trigger_reason, actions_executed, success, error_message?, execution_time_ms
 - LogicConnection: ruleId, sourceEspId/Gpio, targetEspId/Gpio, isCrossEsp
 - extractEspIdsFromRule(rule): Set<string> — alle ESP-IDs aus Conditions (Sensor, Hysteresis) + ActuatorActions; fuer getRulesForZone und getZonesForRule
+- formatConditionShort(rule): string — lesbarer Kurztext aller Conditions ("Temperatur > 28°C UND 06:00–20:00"); nutzt getSensorLabel/getSensorUnit fuer Labels+Einheiten; Operatoren ≥/≤, between, Hysterese, Zeit, Compound→"[Komplex]"; Verbindung via logic_operator (UND/ODER)
 
 ### GPIO Types (types/gpio.ts)
 
@@ -480,7 +488,7 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 | esp | stores/esp.ts | devices[], pendingDevices[] | fetchAll, isMock, gpioStatusMap, onlineDevices (via getESPStatus), offlineDevices |
 | dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb (level, zoneName, deviceName, sensorName, ruleName, dashboardName), layouts[], DASHBOARD_TEMPLATES, DashboardTarget (interface), inlineMonitorPanels (alias), inlineMonitorPanelsCrossZone (computed), inlineMonitorPanelsForZone(zoneId) (fn), sideMonitorPanels (computed), bottomMonitorPanels (computed), hardwarePanels (computed) | toggleStatusFilter, resetFilters, createLayout, saveLayout, createLayoutFromTemplate, deleteLayout, exportLayout, importLayout, setLayoutTarget, generateZoneDashboard, claimAutoLayout |
 | zone | stores/zone.store.ts | (stateless) | handleZoneAssignment (+ Toasts), handleSubzoneAssignment (+ Toasts) |
-| logic | shared/stores/logic.store.ts | rules[], activeExecutions, executionHistory[], historyLoaded | fetchRules, toggleRule, crossEspConnections, getRulesForZone(zoneId), getZonesForRule(rule), loadExecutionHistory, pushToHistory, undo, redo, canUndo, canRedo |
+| logic | shared/stores/logic.store.ts | rules[], activeExecutions, executionHistory[], historyLoaded | fetchRules, toggleRule, crossEspConnections, getRulesForZone(zoneId), getZonesForRule(rule), getRulesForActuator(espId, gpio), getLastExecutionForActuator(espId, gpio), loadExecutionHistory, pushToHistory, undo, redo, canUndo, canRedo |
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
 | database | stores/database.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
 | quickAction | stores/quickAction.store.ts | isMenuOpen, activePanel (QuickActionPanel: 'menu' \| 'alerts' \| 'navigation'), currentView, contextActions[], globalActions[] | toggleMenu, closeMenu, setActivePanel, setViewContext, setContextActions, executeAction; alertSummary (computed from alert-center + inbox fallback), hasActiveAlerts, isCritical, isWarning |
@@ -622,7 +630,7 @@ baseURL: '/api/v1'
 | `esp.ts` | `/esp/*`, `/debug/*` | Unified Mock + Real ESP API |
 | `sensors.ts` | `/sensors/*` | Sensor CRUD + History + Stats |
 | `actuators.ts` | `/actuators/*` | Actuator Control |
-| `zones.ts` | `/zone/*` | Zone Assignment/Removal, getZoneMonitorData (L2) |
+| `zones.ts` | `/zone/*` | Zone Assignment/Removal, getAllZones (inkl. leere), getZoneMonitorData (L2) |
 | `subzones.ts` | `/subzone/*` | Subzone CRUD + Safe-Mode |
 | `backups.ts` | `/backups/*` | DB-Backup erstellen/listen/download/restore (Admin) |
 | `inventory.ts` | (aggregiert) | Geräte-Inventar (Wissensdatenbank, nutzt zone context + export) |
@@ -699,6 +707,10 @@ Error-Codes (1xxx-5xxx) → Deutsche Beschreibungen
 ```typescript
 normalizeSubzoneId(val: string | null | undefined): string | null
 // "Keine Subzone" = immer null. "__none__", "", leer → null. Defense-in-Depth vor API.
+
+slugifyGerman(name: string): string
+// Deutsche Umlaut-Transliteration (ae/oe/ue/ss) VOR Slugify.
+// "Naehrloesung" → "naehrloesung", "Gewaechshaus Alpha" → "gewaechshaus_alpha"
 ```
 
 ### sensorDefaults.ts
@@ -724,22 +736,26 @@ isValidSensorValue(type, value): boolean
 getDefaultInterval(type): number
 getSensorTypeAwareSummary(type): string | null
 getSensorTypeOptions(): Array<{ value: string; label: string }>
+formatSensorType(sensorType: string): string
+  // Formatiert raw sensor_type fuer Display: "sht31_temp" → "Sht31 Temp" (Underscores → Spaces, Title Case)
   // Add-Sensor-Dropdown: DEVICE-Liste (ein Eintrag pro Multi-Value-Device + Single-Value).
   // Keine Value-Types (sht31_temp, sht31_humidity), keine Duplikate (DS18B20/ds18b20 → nur ds18b20).
 
-// Aggregation Functions (NEU v9.4)
+// Aggregation Functions (NEU v9.4, aktualisiert v9.52)
 groupSensorsByBaseType(sensors: RawSensor[]): GroupedSensor[]
   // Gruppiert Raw-Sensoren nach Basistyp (SHT31 → temp+humidity)
+  // Name-Preference: sensor.name (Custom) > Registry-Label > formatSensorType() Fallback
+  // Single-Value-Sensoren: unique Key per Sensor (gpio-basiert) — keine Map-Kollision bei 2x DS18B20
 aggregateZoneSensors(devices: {sensors}[]): ZoneAggregation
-  // Zone-weite Mittelwerte pro Kategorie (Klima, Wasser, Licht, System)
-formatAggregatedValue(agg: ZoneAggregation, cat: AggCategory): string
-  // Display-Formatierung mit Ø-Prefix bei Multi-Device Zonen
+  // Zone-weite Aggregation pro Kategorie, extraTypeCount fuer "+X mehr" Badge
+formatAggregatedValue(agg, _deviceCount): string
+  // 1 Wert: "22.0°C", 2+ Werte: "18.3 – 22.5°C" (Range), gleiche Werte: "22.0°C (2)"
 
-// Types (NEU v9.4)
-type RawSensor = { type: string; raw_value: number | null; quality: string }
-type GroupedSensor = { label: string; value: string; unit: string; valueColor: string }
-type ZoneAggregation = Record<AggCategory, { avg: number; count: number; unit: string; quality: string }>
-type AggCategory = 'climate' | 'water' | 'light' | 'system'
+// Types (NEU v9.4, aktualisiert v9.52)
+type RawSensor = { sensor_type: string; raw_value: number | null; name: string; unit?: string; gpio?: number; quality?: string }
+type GroupedSensor = { baseType: string; label: string; values: { type, label, value, unit, icon, quality }[] }
+type ZoneAggregation = { sensorTypes: { type, label, avg, min, max, count, unit }[]; extraTypeCount: number; deviceCount: number; onlineCount: number }
+type AggCategory = 'temperature' | 'humidity' | 'pressure' | 'light' | 'co2' | 'moisture' | 'ph' | 'ec' | 'flow' | 'other'
 ```
 
 ---
@@ -1166,8 +1182,190 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.44
-**Letzte Aktualisierung:** 2026-03-06
+**Version:** 9.60
+**Letzte Aktualisierung:** 2026-03-08
+
+### Aenderungen in v9.60 (T09-FixA — Multi-Value Sensor Identifikation)
+
+- types/index.ts: `config_id?: string` zu MockSensor Interface hinzugefuegt — UUID aus DB als primaerer Identifier fuer Multi-Value-Sensoren (statt GPIO)
+- api/esp.ts: `mapSensorConfigToMockSensor()` mappt `config.id` auf `config_id` — DB-Devices bekommen UUID durchgereicht
+- SensorColumn.vue: `config_id?: string` zu SensorItem Interface hinzugefuegt; `:key` von `sensor-${sensor.gpio}` auf `sensor.config_id || sensor-${sensor.gpio}-${sensor.sensor_type}` — eindeutiger Virtual-DOM-Key fuer Multi-Value-Sensoren auf GPIO 0
+- SensorColumn.vue: Emit von `'sensor-click': [gpio: number]` auf `'sensor-click': [payload: { configId?: string; gpio: number; sensorType: string }]` — uebertraegt config_id + sensorType fuer eindeutige Identifikation
+- SensorColumn.vue: `sortedSensors` Computed — deterministische Sortierung nach sensor_type alphabetisch, dann i2c_address
+- ESPOrbitalLayout.vue: Emit-Typ und Handler auf `{ configId?, gpio, sensorType }` Payload umgestellt — Event-Chain Step 2
+- DeviceDetailView.vue: Emit-Typ erweitert um `sensorType` und `configId`; Handler spreaded Payload mit espId — Event-Chain Step 3
+- HardwareView.vue: `configSensorData` um `configId?: string` erweitert; `handleSensorClickFromDetail` nutzt `gpio + sensorType` Lookup (Primary) mit GPIO-only Fallback; Template `:config-id` an SensorConfigPanel durchgereicht
+- SensorConfigPanel.vue: Neuer optionaler Prop `configId?: string`; Delete-Logik: Mock → `espStore.removeSensor`, Real mit configId → `sensorsApi.delete(espId, configId)`, fehlende configId → Error-Toast (kein 500er)
+- sensors.ts (API): `delete()` Signatur von `(espId, gpio)` auf `(espId, configId: string)` — nutzt `DELETE /sensors/{esp_id}/{config_id}` (UUID statt GPIO, behebt scalar_one_or_none Crash bei Multi-Value)
+- sensor.store.ts: `handleSensorData` priorisiert exakten Match per `gpio + sensor_type` (Post-Fix1 Pattern) vor Legacy-Multi-Value-Merge — behebt Cross-Update bei SHT31 temp/humidity
+- useWebSocket.ts: `on()` registriert Handler nur via `websocketService.on()` wenn KEINE Subscription aktiv — behebt Double-Dispatch (Handler 2x pro Message bei gleichzeitiger Subscription + Listener)
+- Section 4 Type-System: MockSensor Beschreibung um config_id erweitert
+
+### Aenderungen in v9.59 (T08-Fix2A — Sensor Display-Namen MiniCard + Orbital I2C-Label)
+
+- sensorDefaults.ts: `formatSensorType(sensorType)` exportiert — Underscores → Spaces, Title Case ("sht31_temp" → "Sht31 Temp"), Fallback fuer unbekannte Sensortypen
+- sensorDefaults.ts: `groupSensorsByBaseType()` bevorzugt jetzt `sensor.name` (Custom-Name) in allen Code-Pfaden (Multi-Value valueConfig, Multi-Value baseType, Unknown valueType, Single-Value) — Fallback: Registry-Label → formatSensorType()
+- DeviceMiniCard.vue: `:title="sensor.label"` Tooltip auf Sensor-Name-Span (Volltext bei Truncation)
+- SensorColumn.vue: `interface_type` zu SensorItem Interface + Prop-Durchreichung an SensorSatellite
+- SensorSatellite.vue: Neuer Prop `interfaceType?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | null`
+- SensorSatellite.vue: `interfaceLabel` Computed erweitert um `interfaceType` Prop-Check + `I2C_SENSOR_PREFIXES` Fallback-Array (sht31, bmp280, bme280, bh1750)
+- SensorSatellite.vue: `displayLabel` bevorzugt `props.name` (Custom-Name) vor Device/Sensor-Config-Label
+- SensorSatellite.vue: Doppelte `interfaceLabel` Deklaration (Zeile 101 alt + 163 neu) bereinigt
+- Server schemas/debug.py: `i2c_address` + `interface_type` Felder zu `MockSensorResponse` hinzugefuegt
+- Server api/v1/debug.py: Response-Builder mappt `i2c_address` + `interface_type` aus simulation_config
+- Server esp_repo.py: `rebuild_simulation_config()` persistiert `interface_type` aus sensor_configs
+- Section 9: sensorDefaults.ts um `formatSensorType()` Helper + groupSensorsByBaseType Name-Preference erweitert
+
+### Aenderungen in v9.58 (T08-Fix2B — AddSensorModal Reaktiver Info-Text)
+
+- AddSensorModal.vue: Statisches `typeSummary` (via `getSensorTypeAwareSummary`) durch reaktives `sensorTypeInfo` computed ersetzt — reflektiert aktuelle I2C-Adresse, Messintervall und Multi-Value-Eintragsanzahl
+- AddSensorModal.vue: SHT31 Info-Text zeigt aktuelle I2C-Adresse (`selectedI2CAddress` Hex-Lookup via `i2cAddressOptions`) + "(erstellt 2 Sensor-Eintraege)" + Intervall
+- AddSensorModal.vue: BMP280/BME280 Info-Text zeigt aktuelle I2C-Adresse + Multi-Value-Count (2 bzw. 3 Eintraege)
+- AddSensorModal.vue: DS18B20 Info-Text zeigt `oneWireScanPin` GPIO, kein Multi-Value-Hinweis
+- AddSensorModal.vue: Fallback fuer andere Sensortypen via `getSensorLabel()`
+- AddSensorModal.vue: `role="status"` + `aria-live="polite"` auf Info-Banner (Screen-Reader Reaktivitaet bei I2C-Adress-Wechsel)
+- AddSensorModal.vue: Import `getSensorTypeAwareSummary` entfernt, `getSensorLabel` + `getDefaultInterval` hinzugefuegt
+
+### Aenderungen in v9.57 (Aufgabe 2 — Orbital I2C-Adresse statt GPIO 0)
+
+- types/index.ts: `MockSensor` um `interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | null` und `i2c_address?: number | null` erweitert — fuer Orbital-Anzeige "I2C 0x44" statt "GPIO 0"
+- api/esp.ts: `mapSensorConfigToMockSensor()` mappt jetzt `i2c_address` aus `SensorConfigResponse` — DB-Devices bekommen I2C-Adresse durchgereicht
+- SensorColumn.vue: `SensorItem` Interface um `i2c_address` erweitert, Prop `:i2c-address` an SensorSatellite durchgereicht
+- SensorSatellite.vue: Neuer optionaler Prop `i2cAddress?: number | null` (Default null)
+- SensorSatellite.vue: `interfaceLabel` Computed — sht31/bmp/bme → "I2C 0x{HEX}" (padStart 2), sonstige → "GPIO {n}" (gpio=0 wird unterdrueckt), Hex immer uppercase mit 0x-Praefix
+- SensorSatellite.vue: GPIO-Badge zeigt `interfaceLabel` statt nur GPIO-Nummer, immer sichtbar (nicht nur bei Multi-Value)
+- SensorSatellite.vue: Title-Tooltip nutzt `interfaceLabel` statt hartcodiertem "GPIO {n}"
+- Section 4 Type-System: MockSensor Zeilenbereich und Beschreibung aktualisiert
+
+### Aenderungen in v9.56 (T08-Fix-D/E — Sensor Delete Pipeline + Alert Cleanup)
+
+- types/index.ts: `'sensor_config_deleted'` zu MessageType Union hinzugefuegt — neues WS-Event fuer Sensor-Config-Loeschung
+- esp.ts (Store): `handleSensorConfigDeleted` Handler — filtert geloeschten Sensor aus `device.sensors` per gpio+sensor_type Match, Toast-Info bei Erfolg
+- esp.ts (Store): WS-Listener `ws.on('sensor_config_deleted', handleSensorConfigDeleted)` in initWebSocket registriert
+- Section 4 WebSocket Events: `sensor_config_deleted` Event dokumentiert (config_id, esp_id, gpio, sensor_type; Server→WS Delete-Pipeline)
+
+### Aenderungen in v9.55 (T02-Fix5 — Runtime-Errors, API-Serialisierung, Alert-Metriken, Monitor-Readonly)
+
+- MonitorView.vue: `smartDefaultsApplied` ref-Deklaration vor den Watcher verschoben — behebt ReferenceError beim Laden des Monitor-Tabs (N2)
+- MonitorView.vue: Subzone-Inline-Edit komplett entfernt (Rename-Input, Check/X-Buttons, CRUD-Actions Pencil/Trash2, "Subzone hinzufuegen"-Button) — Monitor ist jetzt vollstaendig read-only (B18)
+- MonitorView.vue: `useSubzoneCRUD` Import + Instanziierung entfernt, `useUiStore` Import entfernt (nicht mehr benoetigt nach CRUD-Entfernung), `Trash2`/`Check`/`X` Icons aus Import entfernt
+- MonitorView.vue: Docstring aktualisiert — "Subzone CRUD" → "read-only, no configuration"
+- esp.ts (Store): `isLoading = true` aus `deleteDevice()` entfernt — verhindert weissen Bildschirm-Blitz beim Loeschen des letzten Devices (B17); Delete ist kein fetch-all und braucht keinen Loading-State
+- AlertStatusBar.vue: `hasSensors` Computed hinzugefuegt — Bar nur sichtbar wenn Devices UND Sensoren existieren UND mindestens ein Alert-Count > 0 (B15)
+- NotificationBadge.vue: `espStore.devices.length > 0` Check in `hasBadge` — Badge unsichtbar bei leerem System (B16)
+- Backend logs.py: Router-Prefix `/logs` → `/v1/logs` korrigiert — Frontend-Log-Endpoint erreichbar unter `/api/v1/logs/frontend` statt `/api/logs/frontend` (N3)
+- Backend esp.py (API): `deleted_at` und `deleted_by` in ESPDeviceResponse-Konstruktor gemappt — Felder werden bei `include_deleted=true` korrekt serialisiert (N4)
+
+### Aenderungen in v9.54 (T02-Fix6 — Layout-Ueberarbeitung: Orbital-Namen, L1 Zone-Tile, Konsistenz-Polish)
+
+- SensorSatellite.vue: `text-transform: uppercase` entfernt — Sensor-Namen in Normal-Case (wie vom Nutzer eingegeben); `color` von `--color-text-muted` auf `--color-text-secondary` (lesbarer); `letter-spacing` von 0.06em auf 0.02em reduziert
+- SensorSatellite.vue: Label bekommt 2-Zeilen-Clamp (`-webkit-line-clamp: 2`, `line-height: 1.2`, `max-height: 2.4em`) statt `white-space: nowrap` — lange Sensor-Namen umbrechen statt abschneiden
+- SensorSatellite.vue: `:title="displayLabel"` auf Label-Element — Tooltip mit vollem Namen bei Truncation (Bug N1 aus T02-Verify)
+- ActuatorSatellite.vue: `max-width` von 130px auf 180px — konsistent mit Sensor-Satellite Spaltenbreite
+- ActuatorSatellite.vue: Label bekommt 2-Zeilen-Clamp + `color: --color-text-secondary` (konsistent mit SensorSatellite)
+- ActuatorSatellite.vue: `:title` auf Label-Element (Tooltip, konsistent mit SensorSatellite)
+- ESPOrbitalLayout.css: Sensor-/Actuator-Spaltenbreite von 120px auf 180px (Desktop), Multi-Row Grid von `repeat(2, 120px)` auf `repeat(2, 180px)`; Tablet-Breakpoint `max-width` von 120px auf 160px
+- ZonePlate.vue: `.zone-plate__devices` von `display: flex; flex-wrap: wrap` auf `display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr))` — bei 1 Device fuellt Card volle Breite, bei 2+ responsives Grid
+- ZonePlate.vue: `.zone-plate__agg-values` bekommt `margin-left: var(--space-2)` — mehr Abstand zwischen Zone-Name und Aggregation
+- DeviceMiniCard.vue: `max-width` von 240px auf 100% — Grid steuert Breite statt feste Maximalbreite
+- DeviceMiniCard.vue: `.device-mini-card__sensor-unit` `color` von `--color-text-muted` auf `--color-text-secondary` — Einheit (°C, %RH) lesbar statt fast unsichtbar
+- sensorDefaults.ts: `formatAggregatedValue()` fuegt Thin Space (`\u2009`) vor Einheit ein — "22.5 °C" statt "22.5°C", "18.3 – 22.5 °C" statt "18.3 – 22.5°C"
+
+### Aenderungen in v9.53 (T02-Fix4 — Layout-Polish: Responsive TopBar, SensorCard-Namen, Mock-Dialog, Alert-Metriken)
+
+- CreateMockEspModal.vue: Heartbeat-Intervall Default von 60 auf 15 Sekunden korrigiert — konsistent mit Backend-Default fuer Mock-ESPs; betrifft Initial-State (ref) und resetForm()
+- TopBar.vue: Responsive Overflow-Handling — `.header__breadcrumb` bekommt `overflow: hidden`; `.header__crumb--current` bekommt `max-width: 200px` + `text-overflow: ellipsis`
+- TopBar.vue: Neuer Breakpoint `@media (max-width: 1399px)` — `.header__type-segment` ausgeblendet (`display: none`), Crumb max-width auf 140px reduziert; bestehender `1023px`-Breakpoint um `max-width: 100px` auf Crumb erweitert
+- SensorCard.vue: Monitor-Mode Name bekommt `:title="displayName"` fuer Tooltip bei abgeschnittenem Text (Namen werden uppercase in DB gespeichert, kein text-transform im CSS)
+- MonitorView.vue: `.monitor-card-grid` von `minmax(200px, 1fr)` auf `minmax(220px, 1fr)` — breitere Karten fuer laengere Sensor-Namen
+- ComponentSidebar.vue: Scroll-Indikator via `::after` Pseudo-Element — `linear-gradient(to bottom, transparent, var(--color-bg-secondary))`, 24px Hoehe, `pointer-events: none`, nur bei nicht-kollabierten Sidebar (`:not(.component-sidebar--collapsed)`)
+- AlertStatusBar.vue: `useEspStore` importiert, `hasDevices` Computed (`espStore.devices.length > 0`), `showBar` Computed — Bar nur sichtbar wenn alertStats vorhanden UND Devices existieren UND mindestens ein Count > 0 (active, acknowledged oder resolved_today)
+- AlertStatusBar.vue: Template `v-if` erweitert auf `showBar && alertStore.alertStats` — doppelte Guard fuer TypeScript Type-Narrowing + inhaltliche Pruefung
+
+### Aenderungen in v9.52 (T02-Fix3 — L1 Zone-Tile Aggregation + DeviceMiniCard Multi-Sensor + Unassigned-Section)
+
+- sensorDefaults.ts: `formatAggregatedValue()` zeigt jetzt Range statt Durchschnitt — 1 Wert: "22.0°C", 2+ Werte: "18.3 – 22.5°C" (min–max), gleiche Werte: "22.0°C (2)"; Parameter `deviceCount` unbenutzt (jetzt `_deviceCount`)
+- sensorDefaults.ts: `ZoneAggregation` um `extraTypeCount: number` erweitert — Anzahl abgeschnittener Kategorien (>3) fuer "+X mehr" Badge
+- sensorDefaults.ts: `aggregateZoneSensors()` berechnet `extraTypeCount` vor `splice(3)`, gibt es im Return zurueck
+- sensorDefaults.ts: `groupSensorsByBaseType()` — Single-Value-Sensoren nutzen unique Map-Key `${sType}_${gpio}` statt `sType` — behebt Ueberschreibung bei 2x DS18B20 auf einem Device; Label nutzt `sensor.name` fuer spezifische Namen (z.B. "Substrat", "Wasser")
+- ZonePlate.vue: Aggregierte Werte mit Pipe-Separator (`' | '`) statt Double-Space; `extraTypeCount` Computed fuer "+X" Badge (`zone-plate__agg-extra`, font-size 9px, color text-muted)
+- HardwareView.vue: Unassigned-Section mit `v-if="unassignedDevices.length > 0 || dragStore.isDraggingEspCard"` — ausgeblendet wenn leer, sichtbar als Drop-Target waehrend Drag
+- Section 9: sensorDefaults.ts Types aktualisiert (RawSensor, GroupedSensor, ZoneAggregation, AggCategory jetzt 10 Kategorien)
+
+### Aenderungen in v9.51 (Phase 3.1.4 + 3.1.5 + 3.2.4 + 3.2.5 — ActuatorCard Monitor-Kontext + SensorCard Trend-Pfeil)
+
+- ActuatorCard.vue: Neue optionale Props `linkedRules?: LogicRule[]`, `lastExecution?: ExecutionHistoryItem | null` — nur im monitor-mode ausgewertet
+- ActuatorCard.vue: PWM-Badge (`actuator-card__pwm-badge`) neben Ein/Aus-Badge wenn `pwm_value > 0` — zeigt "75%" als kompaktes Badge statt separater Zeile
+- ActuatorCard.vue: Rules-Section (`actuator-card__rules`) — max 2 Regeln mit Status-Dot (8px, gruen=enabled via `--color-status-success`, rot=error via `--color-status-error`, grau=deaktiviert via `--color-text-muted`) + Rule-Name + Condition-Kurztext via `formatConditionShort(rule)`
+- ActuatorCard.vue: "+N weitere" router-link zu `/logic` bei >2 verknuepften Regeln (`actuator-card__rules-more`, Farbe `--color-iridescent-2`)
+- ActuatorCard.vue: Letzte Execution (`actuator-card__last-execution`) — `formatRelativeTime(triggered_at)` + `trigger_reason` in Klammern; importiert aus `@/utils/formatters`
+- ActuatorCard.vue: config-mode komplett unveraendert (keine Regression)
+- SensorCard.vue: Neuer optionaler Prop `trend?: TrendDirection` (importiert aus `@/utils/trendUtils`) — nur im monitor-mode gerendert
+- SensorCard.vue: Trend-Pfeil neben Wert+Unit — `TrendingUp`/`Minus`/`TrendingDown` Icons (lucide-vue-next, :size="14"), `v-if="trend"`, `title`-Attribut ("Steigend"/"Stabil"/"Fallend")
+- SensorCard.vue: CSS `.sensor-card__trend` — `color: var(--color-text-muted)`, inline-flex, IMMER neutral gefaerbt (kein rot/gruen)
+- SensorCard.vue: `TREND_ICONS`/`TREND_TITLES` Record-Maps fuer Icon-Aufloesung und Barrierefreiheit
+- MonitorView.vue: `useLogicStore` importiert, `logicStore` instanziiert
+- MonitorView.vue onMounted: `logicStore.fetchRules()` + `logicStore.loadExecutionHistory()` aufgerufen (ActuatorCard-Kontext)
+- MonitorView.vue L2: `getSensorTrend(espId, gpio, sensorType)` Hilfsfunktion — holt Punkte aus sparklineCache, gibt `undefined` bei <5 Punkten (kein Trend statt 'stable'), berechnet Trend via `calculateTrend()` aus trendUtils
+- MonitorView.vue L2 Template: SensorCard bekommt `:trend="getSensorTrend(sensor.esp_id, sensor.gpio, sensor.sensor_type)"`
+- MonitorView.vue L2 Template: ActuatorCard bekommt `:linked-rules="logicStore.getRulesForActuator(actuator.esp_id, actuator.gpio)"` und `:last-execution="logicStore.getLastExecutionForActuator(actuator.esp_id, actuator.gpio)"`
+- Section 3: Komponentenhierarchie MonitorView L2 — SensorCard um Trend-Pfeil, ActuatorCard um linkedRules, lastExecution, PWM-Badge, "+N weitere" erweitert
+
+### Aenderungen in v9.50 (Phase 3 — ActuatorCard Logik-Grundlage + Sparkline Aussagekraeftig)
+
+- logic.store.ts: `getRulesForActuator(espId, gpio): LogicRule[]` — filtert rules nach Actions mit type 'actuator'/'actuator_command' + esp_id + gpio Match; Sortierung priority (niedrig = hoeher); im Store-Return exportiert
+- logic.store.ts: `getLastExecutionForActuator(espId, gpio): ExecutionHistoryItem | null` — nutzt getRulesForActuator intern, sammelt Rule-IDs, filtert executionHistory, sortiert triggered_at DESC, gibt erstes Element oder null
+- types/logic.ts: `formatConditionShort(rule): string` — lesbarer Kurztext aller Conditions; sensor/sensor_threshold: Label + Operator + Wert + Einheit ("Temperatur > 28°C"); hysteresis: "Ein >28, Aus <25"; time: "06:00–20:00"; compound: "[Komplex]"; Verbindung logic_operator UND/ODER; importiert getSensorLabel/getSensorUnit aus sensorDefaults
+- types/index.ts: Re-Export `formatConditionShort` aus logic.ts
+- Section 4 Logic Types: formatConditionShort dokumentiert
+- Section 5 Store-Architektur: logic Store um getRulesForActuator, getLastExecutionForActuator erweitert
+- trendUtils.ts: **NEU** — `calculateTrend()` (Lineare Regression/Least Squares), `TrendDirection` Type, `TrendResult` Interface, `TREND_THRESHOLDS` (sensor-typ-spezifisch: 13 Eintraege), `DEFAULT_TREND_THRESHOLD` (0.1); gibt `'stable'` bei <5 Datenpunkten zurueck
+- MonitorView.vue L2: `ThresholdConfig` Import aus LiveLineChart; `getDefaultThresholds(sensorType)` Hilfsfunktion — alarmLow/warnLow/warnHigh/alarmHigh aus SENSOR_TYPE_CONFIG (10%/20% Range-Raender)
+- MonitorView.vue L2: LiveLineChart im #sparkline Slot bekommt `:sensor-type`, `:thresholds`, `:show-thresholds` — Y-Achse mit sinnvollem Bereich, farbige Schwellwert-Zonen sichtbar
+- Section 2: utils/ 10 → 11 Module (trendUtils.ts)
+- Section 3: Komponentenhierarchie MonitorView L2 — SensorCard Sparkline um sensor-type + Threshold-Zonen erweitert
+
+### Aenderungen in v9.49 (Dashboard Sync-Fehler im UI anzeigen)
+
+- dashboard.store.ts: `syncLayoutToServer()` setzt jetzt `lastSyncError` bei Fehlern (vorher nur `logger.warn()` fire-and-forget) und setzt `lastSyncError = null` bei erfolgreichem Sync (create oder update)
+- CustomDashboardView.vue: Neuer Watcher auf `dashStore.lastSyncError` — zeigt `toast.error()` mit Fehlermeldung an wenn Sync fehlschlaegt; nutzt bestehenden useToast-Service (Dedup-Window 2s schuetzt vor Spam)
+
+### Aenderungen in v9.48 (Zone-Frontend Phase 0.3 — Leere Zonen + Subzonen)
+
+- zones.ts: `getAllZones()` Methode — GET /zone/zones, liefert alle Zonen inkl. leere (Device-Zuweisungen + ZoneContext merged)
+- types/index.ts: `ZoneListEntry` (zone_id, zone_name, device_count, sensor_count, actuator_count) + `ZoneListResponse` (zones[], total)
+- MonitorView.vue L1: `allZones` ref via `zonesApi.getAllZones()` in onMounted; `zoneKPIs` Computed merged Device-KPIs + leere Zonen aus Zone-API
+- MonitorView.vue L1: `ZoneHealthStatus` erweitert um `'empty'` — leere Zonen (0 Devices) zeigen Status "Leer" (Minus-Icon, opacity 0.7), NICHT "alarm"
+- MonitorView.vue L1: `HEALTH_STATUS_CONFIG.empty` — Label "Leer", CSS `.zone-status--empty` (var(--color-text-muted)), `.monitor-zone-tile--empty`
+- MonitorView.vue L2: Leere Subzonen mit Hinweis "Keine Sensoren zugeordnet — Sensoren in der Hardware-Ansicht hinzufuegen" + router-link zu /hardware
+- Backend zone.py: `GET /v1/zone/zones` Endpoint — merged Zonen aus Device-Zuweisungen + ZoneContext-Tabelle
+- Backend schemas/zone.py: `ZoneListEntry` + `ZoneListResponse` Pydantic Schemas
+- Backend monitor_data_service.py: `configured_subzone_keys` im ersten Pass gesammelt, leere Subzonen nicht mehr rausgefiltert
+
+### Aenderungen in v9.47 (Sparkline Initial History Load)
+
+- useSparklineCache.ts: `loadInitialData(sensors: SensorIdentifier[])` — laedt letzte 30 Datenpunkte pro Sensor via sensorsApi.queryData beim ersten Render; Throttling max 5 parallele Requests (Promise.allSettled in Batches); `loadedKeys` Set verhindert doppeltes Laden
+- useSparklineCache.ts: `mergeAndDeduplicate()` — merged historische API-Daten mit zwischenzeitlich eingetroffenen WS-Events; chronologische Sortierung, 5s-Dedup, capped bei maxPoints
+- useSparklineCache.ts: Neues Interface `SensorIdentifier` (esp_id, gpio, sensor_type?) exportiert; neuer Return-Wert `initialLoadInFlight` ref
+- MonitorView.vue L2: Watcher auf `zoneSensorGroup` — extrahiert Sensor-Identifier und ruft `loadSparklineHistory()` auf wenn Zone-Daten verfuegbar werden; feuert automatisch bei Zone-Wechsel
+- Kein Server-Change: Nutzt bestehende GET /sensors/data API mit esp_id + gpio + sensor_type + limit Filter
+
+### Aenderungen in v9.46 (Monitor L1 Ready-Gate + L2 AbortController)
+
+- MonitorView.vue L1: Ready-Gate-Pattern — BaseSkeleton bei espStore.isLoading, ErrorState mit Retry (espStore.fetchAll) bei espStore.error, Empty State nur bei wirklich leeren Daten nach erfolgreichem Laden
+- MonitorView.vue L1: Zone-Tiles von `<div @click>` zu `<button>` — nativ keyboard-navigierbar (Tab + Enter), :focus-visible Outline (2px var(--color-iridescent-2)), Button-Reset-CSS (font, color, text-align)
+- MonitorView.vue L2: AbortController bei fetchZoneMonitorData — bricht vorherigen Request ab bei schnellem Zone-Wechsel, AbortError im catch ignoriert, Loading nur zurueckgesetzt wenn Controller noch aktuell
+- zones.ts: getZoneMonitorData akzeptiert optionalen AbortSignal Parameter
+- onUnmounted: zoneMonitorAbort.abort() Cleanup
+- Section 3: Komponentenhierarchie MonitorView L1 um Ready-Gate und button-Kacheln erweitert, L2 um AbortController ergaenzt
+
+### Aenderungen in v9.45 (ActuatorCard Toggle Mode-Guard)
+
+- ActuatorCard.vue: Toggle-Button mit `v-if="mode !== 'monitor'"` — im monitor-mode ausgeblendet (Sicherheit: kein sendActuatorCommand aus read-only Monitor-Kontext)
+- ActuatorCard.vue: PWM-Wert-Anzeige im monitor-mode bei `actuator_type === 'pwm'` — "PWM: X%" als read-only Info
+- MonitorView.vue: Einziger Aufrufpfad `@toggle="toggleActuator"` durch Button-Guard gekappt — kein Code-Entfernung noetig
+- ActuatorCardWidget.vue (Dashboard): Toggle weiterhin funktional — Dashboard-Editor ist bewusster Steuerungs-Kontext (kein Fix)
+- Section 3: Komponentenhierarchie MonitorView L2 — ActuatorCard um read-only Hinweis erweitert
 
 ### Aenderungen in v9.44 (Monitor L1 — Computerspieloptik-Optimierung)
 
@@ -1300,6 +1498,14 @@ cleanupWebSocket() {
 | **AlertConfigSection** "Schwellen-Override für Alerts" | Override nur fuer Alert-Regeln (custom_thresholds, severity_override) | PATCH /sensors/{id}/alert-config |
 
 Keine Dopplung der Semantik: Haupt-Schwellen = eine Stelle (SensorConfigPanel). Alert-Override = separate Stelle (AlertConfigSection).
+
+### Aenderungen in v9.30 (T08-Fix F/G/H — Sensor Pipeline + Slug + Auth)
+
+- AddSensorModal.vue: `buildSensorPayload()` als gemeinsame Funktion fuer I2C- und OneWire-Flow extrahiert — OneWire-Flow uebertraegt jetzt User-Eingaben (name, raw_value, unit, operating_mode, timeout_seconds, subzone_id) statt Hardcoded-Werte
+- AddSensorModal.vue: `SensorPayload` Type-Alias (MockSensorConfig & operating_mode & timeout_seconds & i2c_address)
+- subzoneHelpers.ts: `slugifyGerman()` — Deutsche Umlaut-Transliteration (ae/oe/ue/ss) VOR Slugify, dann lowercase + non-alnum → underscore
+- useSubzoneCRUD.ts: `confirmCreateSubzone()` nutzt `slugifyGerman()` statt `toLowerCase().replace(/\s+/g, '_')` — "Naehrloesung" statt "n_hrl_sung"
+- api/index.ts: Token-Refresh Promise-Queue Pattern (isRefreshing + failedQueue) — genau 1 Refresh-Call bei N parallelen 401-Responses, keine Console-401-Errors
 
 ### Aenderungen in v9.29 (Config-Panel-Optimierung 3 — Initial-Panels Subzone-Dropdown)
 

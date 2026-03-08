@@ -53,7 +53,7 @@ const dragStore = useDragStateStore()
 const { handleDeviceDrop, handleRemoveFromZone, getAvailableZones } = useZoneDragDrop()
 
 const emit = defineEmits<{
-  sensorClick: [gpio: number]
+  sensorClick: [payload: { configId?: string; gpio: number; sensorType: string }]
   actuatorClick: [gpio: number]
   sensorDropped: [sensor: ChartSensor]
   /** Heartbeat request (Mock ESPs only) */
@@ -165,9 +165,9 @@ async function saveName() {
   if (result) emit('name-updated', result)
 }
 
-function handleSensorClick(gpio: number) {
+function handleSensorClick(payload: { configId?: string; gpio: number; sensorType: string }) {
   // Emit to parent (HardwareView) -> opens SensorConfigPanel in SlideOver
-  emit('sensorClick', gpio)
+  emit('sensorClick', payload)
 }
 
 function handleActuatorClick(gpio: number) {

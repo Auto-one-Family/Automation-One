@@ -19,6 +19,7 @@ References:
 - .claude/PI_SERVER_REFACTORING.md (Lines 135-145)
 """
 
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -168,28 +169,40 @@ class SensorService:
     async def delete_config(
         self,
         esp_id: str,
-        gpio: int,
+        gpio: int | None = None,
+        config_id: uuid.UUID | None = None,
     ) -> bool:
         """
         Delete sensor configuration.
 
+        Supports lookup by config_id (preferred, T08-Fix-D) or by gpio (legacy).
+
         Args:
             esp_id: ESP device ID
-            gpio: GPIO pin number
+            gpio: GPIO pin number (legacy, may fail for multi-value sensors)
+            config_id: SensorConfig UUID primary key (preferred)
 
         Returns:
             True if deleted, False if not found
         """
+
         esp_device = await self.esp_repo.get_by_device_id(esp_id)
         if not esp_device:
             return False
 
-        sensor = await self.sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
-        if not sensor:
+        if config_id is not None:
+            sensor = await self.sensor_repo.get_by_id(config_id)
+            if not sensor or sensor.esp_id != esp_device.id:
+                return False
+        elif gpio is not None:
+            sensor = await self.sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
+            if not sensor:
+                return False
+        else:
             return False
 
         await self.sensor_repo.delete(sensor.id)
-        logger.info(f"Sensor config deleted: {esp_id} GPIO {gpio}")
+        logger.info(f"Sensor config deleted: {esp_id} config_id={sensor.id}")
         return True
 
     # =========================================================================
@@ -303,6 +316,8 @@ class SensorService:
                 if timestamp
                 else datetime.now(timezone.utc)
             ),
+            zone_id=esp_device.zone_id,
+            device_name=esp_device.name,
         )
 
         await self.sensor_repo.store_reading(reading)

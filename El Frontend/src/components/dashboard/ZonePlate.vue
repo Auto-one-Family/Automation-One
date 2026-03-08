@@ -115,6 +115,8 @@ const aggregatedValues = computed(() => {
   )
 })
 
+const extraTypeCount = computed(() => zoneAggregation.value.extraTypeCount)
+
 // ── Zone Context (Phase 4) ───────────────────────────────────────────────
 const zoneContext = computed<ZoneContextSummary | null>(() => {
   for (const d of props.devices) {
@@ -377,9 +379,10 @@ function handleDragEnd() {
             </button>
           </template>
 
-          <!-- B1: Aggregated sensor values -->
+          <!-- B1: Aggregated sensor values (pipe-separated by type) -->
           <span v-if="aggregatedValues.length > 0" class="zone-plate__agg-values">
-            {{ aggregatedValues.join('  ') }}
+            {{ aggregatedValues.join(' | ') }}
+            <span v-if="extraTypeCount > 0" class="zone-plate__agg-extra">+{{ extraTypeCount }}</span>
           </span>
 
           <!-- Phase 4: Zone context badge -->
@@ -723,6 +726,14 @@ function handleDragEnd() {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  margin-left: var(--space-2);
+}
+
+/* Extra type count badge */
+.zone-plate__agg-extra {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  margin-left: 2px;
 }
 
 /* Stats label */
@@ -971,11 +982,11 @@ function handleDragEnd() {
 
 /* ═══════ Body (expanded content) ═══════ */
 
-/* Device flex grid */
+/* Device grid — auto-fill stretches cards when few devices */
 .zone-plate__devices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 8px;
   min-height: 32px;
   padding-top: var(--space-1);
 }

@@ -19,3 +19,28 @@ export function normalizeSubzoneId(val: string | null | undefined): string | nul
   if (trimmed === '' || trimmed === '__none__') return null
   return trimmed
 }
+
+const GERMAN_TRANSLITERATIONS: Record<string, string> = {
+  'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'ß': 'ss',
+  'Ä': 'Ae', 'Ö': 'Oe', 'Ü': 'Ue',
+}
+
+/**
+ * Generate a URL/ID-safe slug from a German name.
+ * Transliterates German umlauts BEFORE lowercasing (ä→ae, ö→oe, ü→ue, ß→ss),
+ * then replaces non-alphanumeric characters with underscores.
+ *
+ * @example slugifyGerman("Nährlösung") → "naehrloesung"
+ * @example slugifyGerman("Gewächshaus Alpha") → "gewaechshaus_alpha"
+ */
+export function slugifyGerman(name: string): string {
+  let result = name
+  for (const [char, replacement] of Object.entries(GERMAN_TRANSLITERATIONS)) {
+    result = result.replace(new RegExp(char, 'g'), replacement)
+  }
+  return result
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '')
+}

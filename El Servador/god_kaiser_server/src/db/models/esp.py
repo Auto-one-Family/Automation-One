@@ -201,6 +201,20 @@ class ESPDevice(Base, TimestampMixin):
         doc="Device-level alert config: alerts_enabled, suppression_reason/note/until, propagate_to_children",
     )
 
+    # Soft-Delete (T02-Fix1 — Preserve sensor_data on device deletion)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc="Soft-delete timestamp. Device is 'deleted' when NOT NULL.",
+    )
+
+    deleted_by: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        doc="Username who soft-deleted this device",
+    )
+
     # Relationships
     sensors: Mapped[list["SensorConfig"]] = relationship(
         "SensorConfig",

@@ -84,9 +84,7 @@ class TestSensorConditionEvaluatorSubzone:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_condition_with_subzone_id_trigger_missing_subzone_does_not_fire(
-        self, evaluator
-    ):
+    async def test_condition_with_subzone_id_trigger_missing_subzone_does_not_fire(self, evaluator):
         """When condition requires subzone_id but trigger_data has none: do not fire."""
         condition = {
             "type": "sensor",
@@ -118,9 +116,7 @@ class TestActuatorActionExecutorSubzone:
         return service
 
     @pytest.mark.asyncio
-    async def test_actuator_executes_when_no_trigger_subzone(
-        self, mock_actuator_service
-    ):
+    async def test_actuator_executes_when_no_trigger_subzone(self, mock_actuator_service):
         """Actuator executes when trigger_data has no subzone_id (backward compatible)."""
         executor = ActuatorActionExecutor(mock_actuator_service)
         action = {

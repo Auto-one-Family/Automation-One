@@ -59,6 +59,10 @@ interface Props {
   multiValues?: Record<string, MultiValueEntry> | null
   /** Is this a multi-value sensor? */
   isMultiValue?: boolean
+  /** I2C address (0-127) for I2C sensors */
+  i2cAddress?: number | null
+  /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL */
+  interfaceType?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -68,6 +72,7 @@ const props = withDefaults(defineProps<Props>(), {
   deviceType: null,
   multiValues: null,
   isMultiValue: false,
+  i2cAddress: null,
 })
 
 const emit = defineEmits<{
@@ -122,12 +127,40 @@ const deviceConfig = computed(() => {
 
 /** Display label for header (device name or sensor type) */
 const displayLabel = computed(() => {
+  // Always prefer user-provided custom name
+  if (props.name && props.name.trim().length > 0) {
+    return props.name
+  }
   if (props.deviceType && deviceConfig.value) {
     // Extract device name without the parenthetical description
     // "SHT31 (Temp + Humidity)" → "SHT31"
     return deviceConfig.value.label.split('(')[0].trim()
   }
-  return props.name || sensorConfig.value.label
+  return sensorConfig.value.label
+})
+
+/** Known I2C sensor type prefixes */
+const I2C_SENSOR_PREFIXES = ['sht31', 'bmp280', 'bme280', 'bh1750']
+
+/** Interface label: "I2C 0x44" for I2C sensors, "GPIO N" for others */
+const interfaceLabel = computed((): string => {
+  const sType = props.sensorType?.toLowerCase() || ''
+  const isI2C = props.interfaceType === 'I2C'
+    || (!props.interfaceType && I2C_SENSOR_PREFIXES.some(p => sType.startsWith(p)))
+
+  if (isI2C) {
+    if (props.i2cAddress != null) {
+      const hexAddr = `0x${props.i2cAddress.toString(16).toUpperCase().padStart(2, '0')}`
+      return `I2C ${hexAddr}`
+    }
+    return 'I2C'
+  }
+
+  // OneWire/Analog/Digital: show GPIO if meaningful (not 0)
+  if (props.gpio !== null && props.gpio !== undefined && props.gpio !== 0) {
+    return `GPIO ${props.gpio}`
+  }
+  return ''
 })
 
 /** Aggregated quality (worst across all values) */
@@ -294,7 +327,7 @@ function handleDragEnd(event: DragEvent) {
     :data-value-count="valueCount"
     data-satellite-type="sensor"
     :draggable="effectiveDraggable"
-    :title="`${displayLabel} (GPIO ${gpio})`"
+    :title="`${displayLabel}${interfaceLabel ? ' (' + interfaceLabel + ')' : ''}`"
     @click="handleClick"
     @dragstart="handleDragStart"
     @dragend="handleDragEnd"
@@ -304,8 +337,8 @@ function handleDragEnd(event: DragEvent) {
       <div class="sensor-satellite__icon" :class="`sensor-satellite__icon--${qualityVariant}`">
         <component :is="sensorIcon" class="w-4 h-4" />
       </div>
-      <span class="sensor-satellite__label">{{ displayLabel }}</span>
-      <span v-if="isMultiValue" class="sensor-satellite__gpio-badge">{{ gpio }}</span>
+      <span class="sensor-satellite__label" :title="displayLabel">{{ displayLabel }}</span>
+      <span v-if="interfaceLabel" class="sensor-satellite__gpio-badge">{{ interfaceLabel }}</span>
     </div>
 
     <!-- Values Section: Grid layout based on value count -->
@@ -492,14 +525,18 @@ function handleDragEnd(event: DragEvent) {
 .sensor-satellite__label {
   font-size: 10px;
   font-weight: 600;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--color-text-secondary);
   flex: 1;
   min-width: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.02em;
+  /* Allow up to 2 lines for longer sensor names */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+  max-height: 2.4em;
 }
 
 .sensor-satellite__gpio-badge {

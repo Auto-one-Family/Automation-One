@@ -6,8 +6,9 @@
  * Monitor mode: Name, live value, quality dot, sparkline, ESP-ID
  */
 import { computed, type Component } from 'vue'
-import { Settings, ChevronRight, WifiOff, Clock, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity } from 'lucide-vue-next'
+import { Settings, ChevronRight, WifiOff, Clock, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity, TrendingUp, TrendingDown, Minus } from 'lucide-vue-next'
 import type { SensorWithContext } from '@/composables/useZoneGrouping'
+import type { TrendDirection } from '@/utils/trendUtils'
 import { qualityToStatus, getDataFreshness, formatRelativeTime } from '@/utils/formatters'
 import { getSensorLabel, getSensorUnit, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 
@@ -21,6 +22,7 @@ const ICON_MAP: Record<string, Component> = {
 interface Props {
   sensor: SensorWithContext
   mode: 'monitor' | 'config'
+  trend?: TrendDirection
 }
 
 const props = defineProps<Props>()
@@ -45,6 +47,10 @@ const statusClass = computed(() =>
 // Data freshness indicator (stale after 120s)
 const freshness = computed(() => getDataFreshness(props.sensor.last_read))
 const isStale = computed(() => freshness.value === 'stale')
+// Value present but no timestamp known
+const isTimestampUnknown = computed(() =>
+  freshness.value === 'unknown' && props.sensor.raw_value != null
+)
 
 // ESP offline indicator
 const isEspOffline = computed(() =>
@@ -76,6 +82,18 @@ const qualityLabel = computed(() => {
   }
   return labels[status] ?? ''
 })
+
+// Trend icon + title for accessibility
+const TREND_ICONS: Record<TrendDirection, Component> = {
+  rising: TrendingUp,
+  stable: Minus,
+  falling: TrendingDown,
+}
+const TREND_TITLES: Record<TrendDirection, string> = {
+  rising: 'Steigend',
+  stable: 'Stabil',
+  falling: 'Fallend',
+}
 
 // Subzone badge (Phase 2.2): "Keine Subzone" when null/empty
 const subzoneLabel = computed(() => {
@@ -130,7 +148,7 @@ function handleClick() {
     <template v-else>
       <div class="sensor-card__header">
         <component :is="sensorIcon" class="sensor-card__type-icon" />
-        <span class="sensor-card__name">{{ displayName }}</span>
+        <span class="sensor-card__name" :title="displayName">{{ displayName }}</span>
         <div class="sensor-card__quality">
           <span :class="['sensor-card__dot', statusClass]" />
           <span v-if="qualityLabel" :class="['sensor-card__quality-text', `sensor-card__quality-text--${qualityToStatus(sensor.quality)}`]">{{ qualityLabel }}</span>
@@ -139,6 +157,9 @@ function handleClick() {
       <div class="sensor-card__value">
         <span class="sensor-card__number">{{ formatValue(sensor.raw_value) }}</span>
         <span class="sensor-card__unit">{{ resolvedUnit }}</span>
+        <span v-if="trend" class="sensor-card__trend" :title="TREND_TITLES[trend]">
+          <component :is="TREND_ICONS[trend]" :size="14" />
+        </span>
       </div>
       <!-- Sparkline slot: parent can inject a mini chart -->
       <div v-if="$slots.sparkline" class="sensor-card__sparkline">
@@ -153,6 +174,9 @@ function handleClick() {
           </span>
           <span v-else-if="isStale" class="sensor-card__badge sensor-card__badge--stale">
             <Clock class="w-3 h-3" /> {{ formatRelativeTime(sensor.last_read) }}
+          </span>
+          <span v-else-if="isTimestampUnknown" class="sensor-card__badge sensor-card__badge--unknown" title="Zeitpunkt des Messwerts unbekannt">
+            <Clock class="w-3 h-3" /> Zeitpunkt unbekannt
           </span>
         </div>
       </div>
@@ -315,6 +339,13 @@ function handleClick() {
   color: var(--color-text-muted);
 }
 
+.sensor-card__trend {
+  display: inline-flex;
+  align-items: center;
+  margin-left: var(--space-1);
+  color: var(--color-text-muted);
+}
+
 .sensor-card__footer {
   display: flex;
   align-items: center;
@@ -366,6 +397,15 @@ function handleClick() {
   color: var(--color-text-secondary);
 }
 
+.sensor-card--stale .sensor-card__sparkline {
+  opacity: 0.5;
+  filter: saturate(0.3);
+}
+
+.sensor-card--stale .sensor-card__trend {
+  opacity: 0.5;
+}
+
 /* ESP offline indicator */
 .sensor-card--esp-offline {
   opacity: 0.5;
@@ -395,5 +435,10 @@ function handleClick() {
 .sensor-card__badge--offline {
   color: var(--color-text-muted);
   background: rgba(112, 112, 128, 0.15);
+}
+
+.sensor-card__badge--unknown {
+  color: var(--color-text-muted);
+  background: rgba(112, 112, 128, 0.1);
 }
 </style>

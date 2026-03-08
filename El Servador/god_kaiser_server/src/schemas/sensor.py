@@ -164,8 +164,8 @@ class SensorConfigCreate(SensorConfigBase):
 
     onewire_address: Optional[str] = Field(
         None,
-        max_length=16,
-        description="OneWire device address (required for OneWire sensors)",
+        max_length=32,
+        description="OneWire device address (required for OneWire sensors, e.g. 28FF82F110C78897 or SIM_ prefix)",
     )
 
     provides_values: Optional[List[str]] = Field(

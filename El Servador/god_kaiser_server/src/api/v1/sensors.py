@@ -9,7 +9,7 @@ Provides:
 - GET / - List sensor configs
 - GET /{esp_id}/{gpio} - Get sensor config
 - POST /{esp_id}/{gpio} - Create/update config
-- DELETE /{esp_id}/{gpio} - Remove config
+- DELETE /{esp_id}/{config_id} - Remove config by sensor_config_id
 - GET /data - Query sensor data
 - POST /esp/{esp_id}/onewire/scan - Scan OneWire bus for devices (DS18B20)
 - GET /esp/{esp_id}/onewire - List configured OneWire sensors
@@ -367,7 +367,7 @@ async def get_sensor_runtime(
             last_dt = datetime.fromisoformat(last_maintenance)
             next_dt = last_dt + timedelta(days=interval_days)
             next_maintenance = next_dt.isoformat()
-            maintenance_overdue = next_dt < datetime.now()
+            maintenance_overdue = next_dt < datetime.now(timezone.utc)
         except (ValueError, TypeError):
             pass
 
@@ -545,10 +545,15 @@ async def create_or_update_sensor(
         # Atomic transaction: all sub-types succeed or all rollback
         try:
             for value_type in value_types:
-                # Check if this sub-type already exists
-                existing_vt = await sensor_repo.get_by_esp_gpio_and_type(
-                    esp_device.id, gpio, value_type
-                )
+                # Check if this sub-type already exists (I2C-aware for multiple same-type devices)
+                if request.i2c_address is not None:
+                    existing_vt = await sensor_repo.get_by_esp_gpio_type_and_i2c(
+                        esp_device.id, gpio, value_type, request.i2c_address
+                    )
+                else:
+                    existing_vt = await sensor_repo.get_by_esp_gpio_and_type(
+                        esp_device.id, gpio, value_type
+                    )
 
                 # Build model fields, override sensor_type + interface_type per sub-type
                 model_fields = _schema_to_model_fields(request)
@@ -885,27 +890,33 @@ async def create_or_update_sensor(
 
 
 @router.delete(
-    "/{esp_id}/{gpio}",
+    "/{esp_id}/{config_id}",
     response_model=SensorConfigResponse,
     responses={
         200: {"description": "Sensor deleted"},
         404: {"description": "Sensor not found"},
     },
-    summary="Delete sensor configuration",
-    description="Remove sensor configuration.",
+    summary="Delete sensor configuration by config ID",
+    description="Remove sensor configuration by sensor_config_id. Sensor data (historical readings) is preserved.",
 )
 async def delete_sensor(
     esp_id: str,
-    gpio: int,
+    config_id: uuid.UUID,
     db: DBSession,
     current_user: OperatorUser,
 ) -> SensorConfigResponse:
     """
-    Delete sensor configuration.
+    Delete sensor configuration by sensor_config_id (T08-Fix-D).
+
+    Uses DB primary key instead of GPIO to avoid MultipleResultsFound
+    when multiple sensors share the same GPIO (SHT31, multiple DS18B20s).
+
+    Pipeline: DB delete → rebuild_simulation_config → scheduler stop → WS event.
+    sensor_data rows are intentionally preserved (historical data).
 
     Args:
-        esp_id: ESP device ID
-        gpio: GPIO pin number
+        esp_id: ESP device ID (e.g., ESP_MOCK_E92BAA)
+        config_id: SensorConfig UUID primary key
         db: Database session
         current_user: Operator or admin user
 
@@ -919,14 +930,17 @@ async def delete_sensor(
     if not esp_device:
         raise ESPNotFoundError(esp_id)
 
-    sensor = await sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
-    if not sensor:
-        raise SensorNotFoundException(esp_id, gpio)
+    # Lookup by primary key — always unique, no MultipleResultsFound
+    sensor = await sensor_repo.get_by_id(config_id)
+    if not sensor or sensor.esp_id != esp_device.id:
+        raise SensorNotFoundException(esp_id, 0)
 
-    # Delete sensor
+    gpio = sensor.gpio if sensor.gpio is not None else 0
+
+    # 1. Delete sensor config (sensor_data rows are NOT cascade-deleted)
     await sensor_repo.delete(sensor.id)
 
-    # Subzone cleanup: remove GPIO from all subzones (Phase 3)
+    # 2. Subzone cleanup: remove GPIO from all subzones (Phase 3)
     try:
         subzone_service = SubzoneService(
             esp_repo=esp_repo, session=db, publisher=get_mqtt_publisher()
@@ -935,22 +949,39 @@ async def delete_sensor(
     except Exception as e:
         logger.debug(f"Subzone cleanup for deleted sensor: {e}")
 
+    # 3. Rebuild simulation_config (removes deleted sensor from mock cache)
+    try:
+        remaining_cfgs = await sensor_repo.get_by_esp(esp_device.id)
+        await esp_repo.rebuild_simulation_config(esp_device, remaining_cfgs)
+    except Exception as e:
+        logger.debug(f"Simulation config rebuild after sensor delete: {e}")
+
     await db.commit()
 
-    logger.info(f"Sensor deleted: {esp_id} GPIO {gpio} by {current_user.username}")
+    logger.info(
+        f"Sensor deleted: {esp_id} config_id={config_id} GPIO {gpio} "
+        f"by {current_user.username}"
+    )
 
-    # =========================================================================
-    # SCHEDULE JOB REMOVAL (Phase 2H)
-    # Remove APScheduler job when sensor is deleted
-    # =========================================================================
+    # 4. Remove APScheduler job (Phase 2H)
     try:
         scheduler_service: SensorSchedulerService = get_sensor_scheduler_service(db)
         await scheduler_service.remove_job(esp_id, gpio)
     except Exception as e:
-        # Non-fatal: Job may not exist, or scheduler may not be initialized
         logger.debug(f"Schedule job removal for deleted sensor: {e}")
 
-    # Publish updated config to ESP32 via MQTT (sensor removed from payload)
+    # 5. Stop simulation sensor job for mock devices
+    if esp_device.hardware_type == "MOCK_ESP32":
+        try:
+            from ..deps import get_simulation_scheduler
+
+            sim_scheduler = get_simulation_scheduler()
+            job_id = f"mock_{esp_id}_sensor_cfg_{config_id}"
+            sim_scheduler._scheduler.remove_job(job_id)
+        except Exception as e:
+            logger.debug(f"Simulation job removal for deleted sensor: {e}")
+
+    # 6. Publish updated config to ESP32 via MQTT (sensor removed from payload)
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
         combined_config = await config_builder.build_combined_config(esp_id, db)
@@ -963,8 +994,24 @@ async def delete_sensor(
         else:
             logger.warning(f"Config publish failed for ESP {esp_id} (DB delete was successful)")
     except Exception as e:
-        # Log error but don't fail the request (DB delete was successful)
         logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
+
+    # 7. WebSocket event: Frontend removes ghost sensor from store
+    try:
+        from ...websocket.manager import WebSocketManager
+
+        ws_manager = await WebSocketManager.get_instance()
+        await ws_manager.broadcast(
+            "sensor_config_deleted",
+            {
+                "config_id": str(config_id),
+                "esp_id": esp_id,
+                "gpio": gpio,
+                "sensor_type": sensor.sensor_type,
+            },
+        )
+    except Exception as e:
+        logger.debug(f"WebSocket broadcast for sensor_config_deleted: {e}")
 
     # Convert model to response schema
     return _model_to_response(sensor, esp_id)
@@ -1811,11 +1858,12 @@ async def _validate_onewire_config(
         HTTPException: If address conflict detected
     """
     # If no address provided, generate a placeholder
-    # Format: AUTO_<random_hex> to distinguish from real ROM addresses
+    # Format: SIM_<random_hex> to distinguish from real ROM addresses
+    # Kept within varchar(32) limit (SIM_ + 12 hex = 16 chars)
     if not onewire_address:
         import secrets
 
-        onewire_address = f"AUTO_{secrets.token_hex(8).upper()}"
+        onewire_address = f"SIM_{secrets.token_hex(6).upper()}"
         logger.info(f"Generated placeholder OneWire address: {onewire_address}")
         return onewire_address
 

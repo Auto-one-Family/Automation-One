@@ -10,6 +10,7 @@ description: |
   NICHT verwenden für: Server-seitige Logic, Python-Code, Log-Analyse.
   Abgrenzung: esp32-debug für Log-Analyse, server-dev für Server-Code.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit
+argument-hint: "[Beschreibe was implementiert werden soll]"
 ---
 
 # ESP32 Development Skill

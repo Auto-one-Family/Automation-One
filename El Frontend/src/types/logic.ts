@@ -5,6 +5,8 @@
  * @see El Servador/god_kaiser_server/src/schemas/logic.py
  */
 
+import { getSensorLabel, getSensorUnit } from '@/utils/sensorDefaults'
+
 // =============================================================================
 // Logic Rule Types
 // =============================================================================
@@ -178,6 +180,51 @@ export interface ExecutionHistoryItem {
 // =============================================================================
 // Helper Functions
 // =============================================================================
+
+/**
+ * Format all conditions of a rule into a short readable string.
+ *
+ * Examples:
+ *  - "Temperatur > 28°C"
+ *  - "Temperatur > 28°C UND 06:00–20:00"
+ *  - "Temperatur Ein >28, Aus <25"
+ *
+ * Uses getSensorLabel/getSensorUnit from sensorDefaults for readable labels + units.
+ * Note: sensorDefaults only has a type-only import from @/types (erased at runtime),
+ * so no circular dependency at runtime.
+ */
+export function formatConditionShort(rule: LogicRule): string {
+  if (!rule.conditions?.length) return 'Keine Bedingung'
+
+  const parts = rule.conditions.map(cond => {
+    if (cond.type === 'sensor' || cond.type === 'sensor_threshold') {
+      const sc = cond as SensorCondition
+      const label = getSensorLabel(sc.sensor_type) || sc.sensor_type
+      const unit = getSensorUnit(sc.sensor_type)
+      if (sc.operator === 'between') {
+        return `${label} ${sc.min ?? '?'}–${sc.max ?? '?'}${unit}`
+      }
+      const op = sc.operator === '>=' ? '≥' : sc.operator === '<=' ? '≤' : sc.operator
+      return `${label} ${op} ${sc.value}${unit}`
+    }
+    if (cond.type === 'hysteresis') {
+      const hc = cond as HysteresisCondition
+      const label = hc.sensor_type ? getSensorLabel(hc.sensor_type) : 'Hysterese'
+      return `${label} Ein >${hc.activate_above ?? '?'}, Aus <${hc.deactivate_below ?? '?'}`
+    }
+    if (cond.type === 'time_window' || cond.type === 'time') {
+      const tc = cond as TimeCondition
+      return `${String(tc.start_hour).padStart(2, '0')}:00–${String(tc.end_hour).padStart(2, '0')}:00`
+    }
+    if (cond.type === 'compound') {
+      return '[Komplex]'
+    }
+    return `[${cond.type}]`
+  })
+
+  const op = rule.logic_operator === 'OR' ? ' ODER ' : ' UND '
+  return parts.join(op)
+}
 
 /**
  * Generate human-readable description from condition and action

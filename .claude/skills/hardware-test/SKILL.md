@@ -9,6 +9,7 @@ description: |
   NICHT verwenden fuer: Software-Tests (pytest/vitest), CI-Analyse, Docker-Setup.
 allowed-tools: Read, Write, Bash, Grep, Glob, Task
 user-invocable: true
+disable-model-invocation: true
 ---
 
 # Hardware-Test Skill (F4 Flow)

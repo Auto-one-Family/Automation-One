@@ -9,6 +9,7 @@ description: |
   Plan verifizieren, Befehl gegenprüfen, TM-Befehl checken
 allowed-tools: Read, Grep, Glob, Bash, Edit
 user-invocable: true
+argument-hint: "[plan description or file path]"
 ---
 
 # /verify-plan – TM-Plan Reality-Check
