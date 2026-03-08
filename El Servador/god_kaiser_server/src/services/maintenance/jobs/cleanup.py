@@ -479,12 +479,14 @@ class OrphanedMocksCleanup:
                     if updated_at < cutoff_age:
                         old_stopped_count += 1
                         if self.settings.orphaned_mock_auto_delete:
-                            # AUTO-DELETE AKTIVIERT
-                            await self.session.delete(device)
+                            # AUTO-SOFT-DELETE AKTIVIERT (T02-Fix1)
+                            device.deleted_at = datetime.now(timezone.utc)
+                            device.deleted_by = "maintenance"
+                            device.status = "deleted"
                             deleted_count += 1
 
                             self.logger.info(
-                                f"🗑️  Deleted old orphaned Mock: {device.device_id} "
+                                f"🗑️  Soft-deleted old orphaned Mock: {device.device_id} "
                                 f"(last updated: {updated_at.date()})"
                             )
                         else:

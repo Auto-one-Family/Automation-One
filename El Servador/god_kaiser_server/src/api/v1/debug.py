@@ -68,7 +68,12 @@ from ...core.exceptions import (
     SimulationNotRunningError,
 )
 from ...services.audit_retention_service import AuditRetentionService
-from ...db.repositories import ESPRepository, SensorRepository
+from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
+from ...sensors.sensor_type_registry import (
+    expand_multi_value,
+    get_mock_default_raw_value,
+    is_multi_value_sensor,
+)
 from ..deps import AdminUser, DBSession, SimulationSchedulerDep, get_simulation_scheduler
 
 logger = get_logger(__name__)
@@ -96,32 +101,21 @@ def _build_mock_esp_response(
     actuators_config = sim_config.get("actuators", {})
 
     # Build sensor responses
-    # MULTI-VALUE SUPPORT: Keys are now "{gpio}_{sensor_type}" format
+    # Key format: "cfg_{uuid}" (new, from rebuild_simulation_config)
+    # or legacy "{gpio}_{sensor_type}" / "{gpio}"
     sensors = []
     for sensor_key, config in sensors_config.items():
-        # =====================================================================
-        # SENSOR VALUE LOADING - Consistent Fallback Chain
-        # =====================================================================
-        # Mock-ESP sensors store their value in TWO keys (for historical reasons):
-        #   - "raw_value": Display value for Frontend (what user sees)
-        #   - "base_value": Base value for SimulationScheduler calculations
-        #
-        # Both contain the SAME value (user-entered, e.g., 20.0 for 20°C).
-        # This is NOT an ADC value - Mock ESPs work with human-readable values.
-        #
-        # MULTI-VALUE: Key format is "{gpio}_{sensor_type}" (e.g., "21_sht31_temp")
-        # We extract GPIO from config.gpio or from the key prefix.
-        # =====================================================================
         sensor_value = config.get("raw_value", config.get("base_value", 0.0))
 
-        # MULTI-VALUE: Extract GPIO from config or key
+        # Extract GPIO from config dict (reliable) or key (legacy fallback)
         if "gpio" in config:
             gpio = int(config["gpio"])
+        elif sensor_key.startswith("cfg_"):
+            logger.warning(f"cfg_ key '{sensor_key}' missing 'gpio', skipping")
+            continue
         elif "_" in sensor_key and not sensor_key.isdigit():
-            # New format: "{gpio}_{sensor_type}"
             gpio = int(sensor_key.split("_")[0])
         else:
-            # Legacy format: just GPIO
             gpio = int(sensor_key)
 
         sensors.append(
@@ -135,6 +129,8 @@ def _build_mock_esp_response(
                 quality=config.get("quality", "good"),
                 raw_mode=config.get("raw_mode", True),
                 last_read=None,
+                i2c_address=config.get("i2c_address"),
+                interface_type=config.get("interface_type"),
             )
         )
 
@@ -234,25 +230,11 @@ async def create_mock_esp(
     esp_repo = ESPRepository(db)
 
     try:
-        # Build simulation config for DB storage
-        # =====================================================================
-        # SENSOR CONFIG - Dual-Key System (see add_sensor() for details)
-        # Both raw_value and base_value contain the same user-entered value.
-        # =====================================================================
+        # Build initial simulation_config with actuators only.
+        # Sensors are populated via rebuild_simulation_config() after
+        # SensorConfig DB entries are created (Write-Through Cache pattern).
         simulation_config = {
-            "sensors": {
-                str(sensor.gpio): {
-                    "sensor_type": sensor.sensor_type,
-                    "raw_value": sensor.raw_value,  # For Frontend display
-                    "base_value": sensor.raw_value,  # For SimulationScheduler
-                    "unit": sensor.unit,
-                    "quality": sensor.quality,
-                    "name": sensor.name,
-                    "subzone_id": sensor.subzone_id,
-                    "raw_mode": sensor.raw_mode,
-                }
-                for sensor in config.sensors
-            },
+            "sensors": {},
             "actuators": {
                 str(actuator.gpio): {
                     "actuator_type": actuator.actuator_type,
@@ -288,29 +270,64 @@ async def create_mock_esp(
         await db.commit()
         await db.refresh(device)
 
-        # 1.5 Create SensorConfig entries for each sensor (fixes Bug P)
-        # This ensures sensor_handler can find configs for Mock-ESP sensors
+        # 1.5 Create SensorConfig entries with multi-value split (Fix A+B+C)
+        # MULTI-VALUE SPLIT: expand_multi_value() splits base types (e.g., "sht31")
+        # into sub-types (e.g., "sht31_temp" + "sht31_humidity").
         sensor_repo = SensorRepository(db)
+        expanded_sensor_configs: list = []
         for sensor in config.sensors:
+            if is_multi_value_sensor(sensor.sensor_type):
+                sub_types = expand_multi_value(
+                    sensor.sensor_type,
+                    sensor.name or "",
+                    gpio=sensor.gpio,
+                )
+                for sub in sub_types:
+                    expanded_sensor_configs.append((sub["gpio"], sub["sensor_type"], sensor, True))
+                logger.info(
+                    f"Multi-value sensor '{sensor.sensor_type}' on GPIO {sensor.gpio}: "
+                    f"split into {[s['sensor_type'] for s in sub_types]}"
+                )
+            else:
+                expanded_sensor_configs.append(
+                    (sensor.gpio, sensor.sensor_type, sensor, False)
+                )
+
+        for gpio, sensor_type, orig_sensor, is_multi_value in expanded_sensor_configs:
+            # Per-subtype default for multi-value sensors (e.g., temp=22, humidity=55)
+            raw_for_default = None if is_multi_value else orig_sensor.raw_value
+            resolved_raw = get_mock_default_raw_value(sensor_type, raw_for_default)
             try:
                 await sensor_repo.create(
                     esp_id=device.id,
-                    gpio=sensor.gpio,
-                    sensor_type=sensor.sensor_type,
-                    sensor_name=sensor.name or f"{sensor.sensor_type}_{sensor.gpio}",
+                    gpio=gpio,
+                    sensor_type=sensor_type,
+                    sensor_name=orig_sensor.name or f"{sensor_type}_{gpio}",
                     enabled=True,
-                    pi_enhanced=False,  # Mock ESPs typically don't need Pi-Enhanced
-                    sample_interval_ms=30000,  # Default 30s
+                    pi_enhanced=False,
+                    sample_interval_ms=30000,
                     sensor_metadata={
                         "source": "mock_esp",
-                        "unit": sensor.unit,
-                        "subzone_id": sensor.subzone_id,
+                        "unit": orig_sensor.unit,
+                        "subzone_id": orig_sensor.subzone_id,
+                        "simulation": {
+                            "base_value": resolved_raw,
+                            "raw_mode": orig_sensor.raw_mode,
+                            "quality": orig_sensor.quality,
+                        },
                     },
                 )
-                logger.debug(f"Created SensorConfig for {config.esp_id} GPIO {sensor.gpio}")
+                logger.debug(
+                    f"Created SensorConfig for {config.esp_id} GPIO {gpio} type {sensor_type}"
+                )
             except Exception as e:
-                logger.warning(f"Failed to create SensorConfig for GPIO {sensor.gpio}: {e}")
+                logger.warning(
+                    f"Failed to create SensorConfig for GPIO {gpio} type {sensor_type}: {e}"
+                )
 
+        # 1.6 Rebuild simulation_config from DB (Write-Through Cache)
+        all_sensor_cfgs = await sensor_repo.get_by_esp(device.id)
+        await esp_repo.rebuild_simulation_config(device, all_sensor_cfgs)
         await db.commit()
 
         # 2. Start simulation if auto_heartbeat is True
@@ -461,8 +478,8 @@ async def get_mock_esp(
 @router.delete(
     "/mock-esp/{esp_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete Mock ESP",
-    description="Delete a mock ESP32 device.",
+    summary="Soft-delete Mock ESP",
+    description="Soft-delete a mock ESP32 device. Sensor data and historical records are preserved.",
 )
 async def delete_mock_esp(
     esp_id: str,
@@ -470,11 +487,11 @@ async def delete_mock_esp(
     db: DBSession,
 ):
     """
-    Delete a mock ESP32 instance.
+    Soft-delete a mock ESP32 instance (T02-Fix1).
 
     DB-FIRST FLOW:
     1. Stop simulation if running
-    2. Delete from database
+    2. Soft-delete from database (sets deleted_at)
     """
     esp_repo = ESPRepository(db)
 
@@ -494,11 +511,12 @@ async def delete_mock_esp(
     except RuntimeError:
         pass  # Scheduler not initialized
 
-    # 2. Delete from database
-    deleted = await esp_repo.delete_mock_device(esp_id)
+    # 2. Soft-delete from database (also cleans up sensor_configs + actuator_configs)
+    logger.debug(f"Soft-deleting mock ESP {esp_id} (device.id={device.id})")
+    deleted = await esp_repo.delete_mock_device(esp_id, deleted_by=current_user.username)
     if deleted:
         await db.commit()
-        logger.info(f"Admin {current_user.username} deleted mock ESP: {esp_id}")
+        logger.info(f"Admin {current_user.username} soft-deleted mock ESP: {esp_id}")
 
 
 # =============================================================================
@@ -813,111 +831,159 @@ async def add_sensor(
         else:
             interface_type = "ANALOG"
 
-    sensor_config = {
-        "sensor_type": config.sensor_type,
-        "raw_value": config.raw_value,  # For Frontend display
-        "base_value": config.raw_value,  # For SimulationScheduler calculations
-        "unit": config.unit,
-        "quality": config.quality,
-        "name": config.name,
-        "subzone_id": config.subzone_id,
-        "raw_mode": config.raw_mode,
-        "interval_seconds": getattr(config, "interval_seconds", 30.0),
-        "variation_pattern": getattr(config, "variation_pattern", "constant"),
-        "variation_range": getattr(config, "variation_range", 0.0),
-        "min_value": getattr(config, "min_value", config.raw_value - 10.0),
-        "max_value": getattr(config, "max_value", config.raw_value + 10.0),
-        # =====================================================================
-        # MULTI-VALUE SENSOR SUPPORT (DS18B20, SHT31, etc.)
-        # =====================================================================
-        "interface_type": interface_type,
-        "onewire_address": getattr(config, "onewire_address", None),
-        "i2c_address": getattr(config, "i2c_address", None),
-    }
+    # Simulation-specific params stored in sensor_metadata.simulation.
+    # Built per sensor_type so each sub-type gets its own plausible default.
+    interval_seconds = getattr(config, "interval_seconds", 30.0)
+    variation_pattern = getattr(config, "variation_pattern", "constant")
+    variation_range = getattr(config, "variation_range", 0.0)
 
-    # 1. Update database (Single Source of Truth)
-    success = await esp_repo.add_sensor_to_mock(esp_id, config.gpio, sensor_config)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to add sensor to database"
-        )
+    def _build_sim_params(resolved_raw: float) -> dict:
+        return {
+            "base_value": resolved_raw,
+            "raw_mode": config.raw_mode,
+            "quality": config.quality,
+            "interval_seconds": interval_seconds,
+            "variation_pattern": variation_pattern,
+            "variation_range": variation_range,
+            "min_value": config.min_value if config.min_value is not None else resolved_raw - 10.0,
+            "max_value": config.max_value if config.max_value is not None else resolved_raw + 10.0,
+        }
 
-    # 1.5 Create SensorConfig entry if it doesn't exist (fixes Bug P)
-    # Check first to avoid IntegrityError and session rollback issues
+    # 1. Create SensorConfig entries in DB (Fix C: multi-value split)
     sensor_repo = SensorRepository(db)
-    existing_sensor = await sensor_repo.get_by_esp_gpio_and_type(
-        device.id, config.gpio, config.sensor_type
-    )
+    created_types: list = []
 
-    if existing_sensor:
-        logger.debug(
-            f"SensorConfig already exists for {esp_id} GPIO {config.gpio} type {config.sensor_type}, skipping creation"
+    if is_multi_value_sensor(config.sensor_type):
+        # MULTI-VALUE SPLIT: e.g., "sht31" → "sht31_temp" + "sht31_humidity"
+        sub_types = expand_multi_value(
+            config.sensor_type,
+            config.name or "",
+            gpio=config.gpio,
+        )
+        for sub in sub_types:
+            sensor_type = sub["sensor_type"]
+            # Per-subtype default: pass None so each sub-type gets its own
+            # plausible default from SENSOR_TYPE_MOCK_DEFAULTS (e.g., temp=22, humidity=55)
+            resolved_raw = get_mock_default_raw_value(sensor_type, None)
+            sim_params = _build_sim_params(resolved_raw)
+            # I2C-aware duplicate check: allows same sensor_type at different addresses
+            i2c_addr = getattr(config, "i2c_address", None)
+            if i2c_addr is not None:
+                existing = await sensor_repo.get_by_esp_gpio_type_and_i2c(
+                    device.id, config.gpio, sensor_type, i2c_addr
+                )
+            else:
+                existing = await sensor_repo.get_by_esp_gpio_and_type(
+                    device.id, config.gpio, sensor_type
+                )
+            if existing:
+                logger.debug(f"SensorConfig already exists: {esp_id} GPIO {config.gpio} {sensor_type}")
+                created_types.append(sensor_type)
+                continue
+            try:
+                await sensor_repo.create(
+                    esp_id=device.id,
+                    gpio=config.gpio,
+                    sensor_type=sensor_type,
+                    sensor_name=sub.get("name", f"{sensor_type}_{config.gpio}"),
+                    enabled=True,
+                    pi_enhanced=False,
+                    sample_interval_ms=int(interval_seconds * 1000),
+                    interface_type=interface_type,
+                    i2c_address=getattr(config, "i2c_address", None),
+                    sensor_metadata={
+                        "source": "mock_esp",
+                        "unit": sub.get("unit", config.unit),
+                        "subzone_id": config.subzone_id,
+                        "simulation": sim_params,
+                    },
+                )
+                created_types.append(sensor_type)
+                logger.debug(f"Created SensorConfig: {esp_id} GPIO {config.gpio} {sensor_type}")
+            except Exception as e:
+                await db.rollback()
+                logger.warning(f"Failed to create SensorConfig {sensor_type}: {e}")
+        logger.info(
+            f"Multi-value sensor '{config.sensor_type}' on GPIO {config.gpio}: "
+            f"split into {created_types}"
         )
     else:
-        try:
-            await sensor_repo.create(
-                esp_id=device.id,
-                gpio=config.gpio,
-                sensor_type=config.sensor_type,
-                sensor_name=config.name or f"{config.sensor_type}_{config.gpio}",
-                enabled=True,
-                pi_enhanced=False,
-                sample_interval_ms=int(sensor_config["interval_seconds"] * 1000),
-                # =====================================================================
-                # MULTI-VALUE SENSOR SUPPORT (DS18B20, SHT31, etc.)
-                # =====================================================================
-                interface_type=interface_type,
-                onewire_address=getattr(config, "onewire_address", None),
-                i2c_address=getattr(config, "i2c_address", None),
-                sensor_metadata={
-                    "source": "mock_esp",
-                    "unit": config.unit,
-                    "subzone_id": config.subzone_id,
-                },
+        # Single-value sensor
+        resolved_raw = get_mock_default_raw_value(config.sensor_type, config.raw_value)
+        sim_params = _build_sim_params(resolved_raw)
+        # I2C-aware duplicate check for single-value sensors
+        i2c_addr = getattr(config, "i2c_address", None)
+        if i2c_addr is not None:
+            existing = await sensor_repo.get_by_esp_gpio_type_and_i2c(
+                device.id, config.gpio, config.sensor_type, i2c_addr
             )
+        else:
+            existing = await sensor_repo.get_by_esp_gpio_and_type(
+                device.id, config.gpio, config.sensor_type
+            )
+        if existing:
             logger.debug(
-                f"Created SensorConfig for {esp_id} GPIO {config.gpio} (type={interface_type})"
+                f"SensorConfig already exists: {esp_id} GPIO {config.gpio} {config.sensor_type}"
             )
-        except Exception as e:
-            # Race condition fallback - sensor was created between check and create
-            # Rollback the failed insert to clear pending transaction state
-            await db.rollback()
-            # Re-apply the mock config (rollback undid it)
-            await esp_repo.add_sensor_to_mock(esp_id, config.gpio, sensor_config)
-            logger.warning(
-                f"Failed to create SensorConfig for GPIO {config.gpio} (race condition): {e}"
-            )
+        else:
+            try:
+                await sensor_repo.create(
+                    esp_id=device.id,
+                    gpio=config.gpio,
+                    sensor_type=config.sensor_type,
+                    sensor_name=config.name or f"{config.sensor_type}_{config.gpio}",
+                    enabled=True,
+                    pi_enhanced=False,
+                    sample_interval_ms=int(interval_seconds * 1000),
+                    interface_type=interface_type,
+                    onewire_address=getattr(config, "onewire_address", None),
+                    i2c_address=getattr(config, "i2c_address", None),
+                    sensor_metadata={
+                        "source": "mock_esp",
+                        "unit": config.unit,
+                        "subzone_id": config.subzone_id,
+                        "simulation": sim_params,
+                    },
+                )
+                logger.debug(f"Created SensorConfig: {esp_id} GPIO {config.gpio} {config.sensor_type}")
+            except Exception as e:
+                await db.rollback()
+                logger.warning(f"Failed to create SensorConfig: {e}")
+        created_types.append(config.sensor_type)
 
+    # 2. Rebuild simulation_config from DB (Write-Through Cache — Fix A+B)
+    all_sensor_cfgs = await sensor_repo.get_by_esp(device.id)
+    await esp_repo.rebuild_simulation_config(device, all_sensor_cfgs)
     await db.commit()
+    success = True
 
-    # 2. If simulation is running: Start sensor job immediately
-    # MULTI-VALUE SUPPORT: Pass sensor_type to job for unique job IDs
-    job_started = False
-    initial_published = False
+    # 3. If simulation is running: Start sensor job for each created type
+    jobs_started = 0
+    initial_published_count = 0
     try:
         sim_scheduler = get_simulation_scheduler()
         if sim_scheduler.is_mock_active(esp_id):
-            job_started = sim_scheduler.add_sensor_job(
-                esp_id=esp_id,
-                gpio=config.gpio,
-                interval_seconds=sensor_config["interval_seconds"],
-                sensor_type=config.sensor_type,  # MULTI-VALUE: Pass sensor_type
-            )
-            if job_started:
-                logger.info(
-                    f"Started sensor job for {esp_id} GPIO {config.gpio} type {config.sensor_type}"
-                )
-
-                # 3. Sofortiger initialer Publish damit Frontend nicht auf Intervall warten muss
-                initial_published = await sim_scheduler.trigger_immediate_sensor_publish(
+            for st in created_types:
+                started = sim_scheduler.add_sensor_job(
                     esp_id=esp_id,
                     gpio=config.gpio,
-                    sensor_type=config.sensor_type,  # MULTI-VALUE: Pass sensor_type
+                    interval_seconds=sim_params["interval_seconds"],
+                    sensor_type=st,
                 )
-                if initial_published:
-                    logger.info(
-                        f"Initial sensor value published for {esp_id} GPIO {config.gpio} type {config.sensor_type}"
+                if started:
+                    jobs_started += 1
+                    published = await sim_scheduler.trigger_immediate_sensor_publish(
+                        esp_id=esp_id,
+                        gpio=config.gpio,
+                        sensor_type=st,
                     )
+                    if published:
+                        initial_published_count += 1
+            if jobs_started:
+                logger.info(
+                    f"Started {jobs_started} sensor job(s) for {esp_id} GPIO {config.gpio} "
+                    f"types {created_types}"
+                )
     except RuntimeError:
         pass  # Scheduler not initialized
 
@@ -928,9 +994,10 @@ async def add_sensor(
         result={
             "gpio": config.gpio,
             "sensor_type": config.sensor_type,
+            "created_types": created_types,
             "db_updated": success,
-            "job_started": job_started,
-            "initial_published": initial_published,
+            "jobs_started": jobs_started,
+            "initial_published": initial_published_count,
         },
     )
 
@@ -1051,29 +1118,31 @@ async def remove_sensor(
     except RuntimeError:
         pass  # Scheduler not initialized
 
-    # 2. Update database (Single Source of Truth)
-    # MULTI-VALUE: Pass sensor_type for targeted removal
-    success = await esp_repo.remove_sensor_from_mock(esp_id, gpio, sensor_type)
-    if not success:
+    # 2. Delete SensorConfig from DB (Single Source of Truth — Fix A+B)
+    sensor_repo = SensorRepository(db)
+    deleted_count = 0
+    if sensor_type:
+        # Delete specific sensor_type on this GPIO
+        cfg = await sensor_repo.get_by_esp_gpio_and_type(device.id, gpio, sensor_type)
+        if cfg:
+            await sensor_repo.delete(cfg.id)
+            deleted_count = 1
+    else:
+        # Delete ALL sensors on this GPIO
+        all_on_gpio = await sensor_repo.get_all_by_esp_and_gpio(device.id, gpio)
+        for cfg in all_on_gpio:
+            await sensor_repo.delete(cfg.id)
+            deleted_count += 1
+
+    if deleted_count == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sensor GPIO {gpio} (type={sensor_type or 'any'}) not found on {esp_id}",
         )
 
-    # 2.5 Delete SensorConfig entry (fixes Bug P cleanup)
-    # Note: For multi-value, we may need to delete specific sensor_config by type
-    sensor_repo = SensorRepository(db)
-    try:
-        sensor_config = await sensor_repo.get_by_esp_and_gpio(device.id, gpio)
-        # Only delete if sensor_type matches or no type specified
-        if sensor_config and (not sensor_type or sensor_config.sensor_type == sensor_type):
-            await sensor_repo.delete(sensor_config.id)
-            logger.debug(
-                f"Deleted SensorConfig for {esp_id} GPIO {gpio} type {sensor_type or 'ALL'}"
-            )
-    except Exception as e:
-        logger.warning(f"Failed to delete SensorConfig for GPIO {gpio}: {e}")
-
+    # 3. Rebuild simulation_config from DB (Write-Through Cache — Fix A+B)
+    all_sensor_cfgs = await sensor_repo.get_by_esp(device.id)
+    await esp_repo.rebuild_simulation_config(device, all_sensor_cfgs)
     await db.commit()
 
     return CommandResponse(
@@ -1083,7 +1152,8 @@ async def remove_sensor(
         result={
             "gpio": gpio,
             "sensor_type": sensor_type,
-            "db_updated": success,
+            "db_updated": True,
+            "deleted_count": deleted_count,
             "job_stopped": job_stopped,
         },
     )
@@ -1270,10 +1340,52 @@ async def add_actuator(
         "max_value": config.max_value,
     }
 
-    # Update database
+    # 1. Update simulation_config in device_metadata (for SimulationScheduler)
     success = await esp_repo.add_actuator_to_mock(esp_id, config.gpio, actuator_config)
-    if success:
-        await db.commit()
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to add actuator to database"
+        )
+
+    # 2. Create ActuatorConfig record (so standard APIs and Logic Engine can find it)
+    actuator_repo = ActuatorRepository(db)
+    existing = await actuator_repo.get_by_esp_and_gpio(device.id, config.gpio)
+    if existing:
+        logger.debug(
+            f"ActuatorConfig already exists for {esp_id} GPIO {config.gpio}, skipping creation"
+        )
+    else:
+        try:
+            await actuator_repo.create(
+                esp_id=device.id,
+                gpio=config.gpio,
+                actuator_type=config.actuator_type,
+                actuator_name=config.name or f"{config.actuator_type}_{config.gpio}",
+                enabled=True,
+                min_value=config.min_value,
+                max_value=config.max_value,
+                default_value=0.0,
+                timeout_seconds=3600,
+                safety_constraints={
+                    "max_runtime_seconds": 3600,
+                    "cooldown_seconds": 60,
+                },
+                actuator_metadata={
+                    "source": "mock_esp",
+                    "subzone_id": config.subzone_id,
+                },
+            )
+            logger.debug(
+                f"Created ActuatorConfig for {esp_id} GPIO {config.gpio}"
+            )
+        except Exception as e:
+            await db.rollback()
+            await esp_repo.add_actuator_to_mock(esp_id, config.gpio, actuator_config)
+            logger.warning(
+                f"Failed to create ActuatorConfig for GPIO {config.gpio} (race condition): {e}"
+            )
+
+    await db.commit()
 
     # Sync with running simulation runtime (if active)
     runtime_synced = False

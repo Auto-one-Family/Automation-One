@@ -339,16 +339,20 @@ class SimulationScheduler:
 
         for sensor_key, sensor_config in sensors.items():
             try:
-                # MULTI-VALUE: Key is "{gpio}_{sensor_type}" or legacy "{gpio}"
+                # Key formats: "cfg_{uuid}" (new), "{gpio}_{sensor_type}" (legacy), "{gpio}" (oldest)
                 sensor_type = sensor_config.get("sensor_type", "GENERIC")
 
-                # Extract GPIO from key or config
-                if "_" in sensor_key and not sensor_key.isdigit():
-                    # New format: "{gpio}_{sensor_type}"
+                # Extract GPIO from config dict (reliable) or key (legacy fallback)
+                if "gpio" in sensor_config:
+                    gpio = int(sensor_config["gpio"])
+                elif sensor_key.startswith("cfg_"):
+                    # cfg_{id} format — gpio MUST be in config dict
+                    logger.error(f"cfg_ key '{sensor_key}' missing 'gpio' in config, skipping")
+                    continue
+                elif "_" in sensor_key and not sensor_key.isdigit():
                     gpio = int(sensor_key.split("_")[0])
                 else:
-                    # Legacy format: just GPIO or from config
-                    gpio = sensor_config.get("gpio", int(sensor_key))
+                    gpio = int(sensor_key)
 
                 interval = sensor_config.get("interval_seconds", 30.0)
 
@@ -487,6 +491,45 @@ class SimulationScheduler:
             logger.error(f"Mock recovery failed: {e}", exc_info=True)
 
         return recovered
+
+    async def cleanup_orphaned_runtimes(self, session: AsyncSession) -> int:
+        """
+        Remove in-memory runtimes whose devices no longer exist in the database.
+
+        Called after recover_mocks() at server startup to catch edge cases
+        where DB was restored/cleaned while scheduler had active mocks.
+
+        Args:
+            session: Database session
+
+        Returns:
+            Number of orphaned runtimes removed
+        """
+        from ...db.repositories import ESPRepository
+
+        if not self._runtimes:
+            return 0
+
+        esp_repo = ESPRepository(session)
+        orphaned = []
+
+        for esp_id in list(self._runtimes.keys()):
+            device = await esp_repo.get_by_device_id(esp_id)
+            if not device:
+                orphaned.append(esp_id)
+
+        for esp_id in orphaned:
+            await self.stop_mock(esp_id)
+            logger.warning(
+                f"Removed orphaned mock runtime: {esp_id} (not found in database)"
+            )
+
+        if orphaned:
+            logger.info(
+                f"Orphaned runtime cleanup: removed {len(orphaned)} stale mocks"
+            )
+
+        return len(orphaned)
 
     def update_zone(self, esp_id: str, zone_id: str, kaiser_id: str = "god") -> bool:
         """
@@ -749,8 +792,8 @@ class SimulationScheduler:
         if not runtime or not self._mqtt_publish:
             return
 
-        # MULTI-VALUE: Use gpio_sensor_type as key
-        sensor_key = f"{gpio}_{sensor_type}"
+        # Sensor identifier for logging
+        sensor_ident = f"GPIO{gpio}_{sensor_type}"
 
         # Sensor-Wert berechnen
         try:
@@ -763,20 +806,30 @@ class SimulationScheduler:
                 device = await esp_repo.get_by_device_id(esp_id)
 
                 if not device or not device.device_metadata:
-                    logger.warning(f"[{esp_id}] No device metadata for sensor {sensor_key}")
+                    logger.warning(f"[{esp_id}] No device metadata for sensor {sensor_ident}")
                     return
 
                 sim_config = device.device_metadata.get("simulation_config", {})
                 sensors = sim_config.get("sensors", {})
 
-                # MULTI-VALUE: Try new key format first, fallback to legacy
-                sensor_config = sensors.get(sensor_key)
-                if not sensor_config:
-                    # Fallback: Try legacy format (gpio only)
-                    sensor_config = sensors.get(str(gpio))
+                # Find sensor config by (gpio, sensor_type) match across all key formats:
+                # cfg_{id} (new), {gpio}_{type} (legacy), {gpio} (oldest)
+                sensor_config = None
+                for _k, entry in sensors.items():
+                    if (
+                        entry.get("gpio") is not None
+                        and int(entry["gpio"]) == gpio
+                        and entry.get("sensor_type", "").lower() == sensor_type.lower()
+                    ):
+                        sensor_config = entry
+                        break
 
                 if not sensor_config:
-                    logger.warning(f"[{esp_id}] Sensor {sensor_key} not in config")
+                    # Fallback: legacy key formats
+                    sensor_config = sensors.get(f"{gpio}_{sensor_type}") or sensors.get(str(gpio))
+
+                if not sensor_config:
+                    logger.warning(f"[{esp_id}] Sensor {sensor_ident} not in config")
                     return
 
                 # Berechne Sensor-Wert
@@ -809,14 +862,14 @@ class SimulationScheduler:
                 # MQTT Publish
                 self._mqtt_publish(topic, payload, 0)
                 logger.debug(
-                    f"[{esp_id}] Sensor {sensor_key} published: "
+                    f"[{esp_id}] Sensor {sensor_ident} published: "
                     f"{value:.2f} {sensor_config.get('unit', '')} (type={sensor_type})"
                 )
 
                 break  # Exit async for loop
 
         except Exception as e:
-            logger.error(f"[{esp_id}] Sensor {sensor_key} job failed: {e}", exc_info=True)
+            logger.error(f"[{esp_id}] Sensor {sensor_ident} job failed: {e}", exc_info=True)
 
     def _calculate_sensor_value(
         self, gpio: int, sensor_config: dict, runtime: MockESPRuntime, manual_overrides: dict
@@ -1086,37 +1139,10 @@ class SimulationScheduler:
         if existing:
             raise DuplicateESPError(esp_id)
 
-        # Build simulation config
-        # Note: Only include optional fields if they have values to avoid None issues
-        def build_sensor_config(sensor: Dict[str, Any]) -> Dict[str, Any]:
-            """Build sensor config dict, excluding None values for optional fields."""
-            base_value = sensor.get("base_value", sensor.get("raw_value", 0.0))
-            config = {
-                "sensor_type": sensor.get("sensor_type", "GENERIC"),
-                "base_value": base_value,
-                "raw_value": sensor.get("raw_value", 0.0),
-                "unit": sensor.get("unit", ""),
-                "quality": sensor.get("quality", "good"),
-                "raw_mode": sensor.get("raw_mode", True),
-                "interval_seconds": sensor.get("interval_seconds", 30.0),
-                "variation_pattern": sensor.get("variation_pattern", "constant"),
-                "variation_range": sensor.get("variation_range", 0.0),
-            }
-            # Only add optional fields if provided (avoid storing None)
-            if sensor.get("name") is not None:
-                config["name"] = sensor["name"]
-            if sensor.get("subzone_id") is not None:
-                config["subzone_id"] = sensor["subzone_id"]
-            if sensor.get("min_value") is not None:
-                config["min_value"] = sensor["min_value"]
-            if sensor.get("max_value") is not None:
-                config["max_value"] = sensor["max_value"]
-            return config
-
+        # Build simulation config with actuators only.
+        # Sensors populated via rebuild_simulation_config() after DB entries.
         simulation_config = {
-            "sensors": {
-                str(sensor["gpio"]): build_sensor_config(sensor) for sensor in (sensors or [])
-            },
+            "sensors": {},
             "actuators": {
                 str(actuator["gpio"]): {
                     "actuator_type": actuator.get("actuator_type", "relay"),
@@ -1144,6 +1170,71 @@ class SimulationScheduler:
             auto_start=auto_start,
         )
 
+        await session.commit()
+        await session.refresh(device)
+
+        # Create SensorConfig entries in DB and rebuild simulation_config
+        from ...db.repositories import SensorRepository
+        from ...sensors.sensor_type_registry import expand_multi_value, is_multi_value_sensor
+
+        sensor_repo = SensorRepository(session)
+        for sensor_data in (sensors or []):
+            gpio = sensor_data.get("gpio", 0)
+            raw_sensor_type = sensor_data.get("sensor_type", "GENERIC")
+            base_value = sensor_data.get("base_value", sensor_data.get("raw_value", 0.0))
+
+            sim_meta = {
+                "base_value": base_value,
+                "raw_mode": sensor_data.get("raw_mode", True),
+                "quality": sensor_data.get("quality", "good"),
+                "interval_seconds": sensor_data.get("interval_seconds", 30.0),
+                "variation_pattern": sensor_data.get("variation_pattern", "constant"),
+                "variation_range": sensor_data.get("variation_range", 0.0),
+            }
+            if sensor_data.get("min_value") is not None:
+                sim_meta["min_value"] = sensor_data["min_value"]
+            if sensor_data.get("max_value") is not None:
+                sim_meta["max_value"] = sensor_data["max_value"]
+
+            # Multi-value split
+            if is_multi_value_sensor(raw_sensor_type):
+                sub_types = expand_multi_value(
+                    raw_sensor_type,
+                    sensor_data.get("name", ""),
+                    gpio=gpio,
+                )
+                for sub in sub_types:
+                    try:
+                        await sensor_repo.create(
+                            esp_id=device.id,
+                            gpio=gpio,
+                            sensor_type=sub["sensor_type"],
+                            sensor_name=sub.get("name", f"{sub['sensor_type']}_{gpio}"),
+                            enabled=True,
+                            pi_enhanced=False,
+                            sample_interval_ms=int(sim_meta["interval_seconds"] * 1000),
+                            sensor_metadata={"source": "mock_esp", "simulation": sim_meta},
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to create SensorConfig {sub['sensor_type']}: {e}")
+            else:
+                try:
+                    await sensor_repo.create(
+                        esp_id=device.id,
+                        gpio=gpio,
+                        sensor_type=raw_sensor_type,
+                        sensor_name=sensor_data.get("name", f"{raw_sensor_type}_{gpio}"),
+                        enabled=True,
+                        pi_enhanced=False,
+                        sample_interval_ms=int(sim_meta["interval_seconds"] * 1000),
+                        sensor_metadata={"source": "mock_esp", "simulation": sim_meta},
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to create SensorConfig {raw_sensor_type}: {e}")
+
+        # Rebuild simulation_config from DB (Write-Through Cache)
+        all_cfgs = await sensor_repo.get_by_esp(device.id)
+        await esp_repo.rebuild_simulation_config(device, all_cfgs)
         await session.commit()
         await session.refresh(device)
 

@@ -175,6 +175,15 @@ from .zone import (
     ZoneRemoveResponse,
 )
 
+# Zone entity schemas (Phase 0.3)
+from .zone_entity import (
+    ZoneCreate,
+    ZoneDeleteResponse,
+    ZoneListResponse,
+    ZoneResponse,
+    ZoneUpdate,
+)
+
 # Subzone schemas (Phase 9)
 from .subzone import (
     SafeModeRequest,
@@ -375,6 +384,12 @@ __all__ = [
     "ZoneAssignResponse",
     "ZoneInfo",
     "ZoneRemoveResponse",
+    # Zone Entity (Phase 0.3)
+    "ZoneCreate",
+    "ZoneDeleteResponse",
+    "ZoneListResponse",
+    "ZoneResponse",
+    "ZoneUpdate",
     # Subzone (Phase 9)
     "SafeModeRequest",
     "SafeModeResponse",

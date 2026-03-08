@@ -458,6 +458,34 @@ async def lifespan(app: FastAPI):
                     )
                 else:
                     logger.info("No active Mock-ESP simulations to recover")
+
+                # Cleanup orphaned runtimes (devices deleted from DB while server was down)
+                orphaned = await _simulation_scheduler.cleanup_orphaned_runtimes(session)
+                if orphaned > 0:
+                    logger.info(f"Cleaned up {orphaned} orphaned mock runtimes")
+
+                # Step 3.5.1: Rebuild simulation_configs from sensor_configs DB
+                # Ensures cfg_{id} key format and consistency after restart (Fix B)
+                from .db.repositories import ESPRepository, SensorRepository
+
+                esp_repo = ESPRepository(session)
+                sensor_repo = SensorRepository(session)
+                mock_devices = await esp_repo.get_mock_devices()
+                rebuilt = 0
+                for mock_dev in mock_devices:
+                    try:
+                        sensor_cfgs = await sensor_repo.get_by_esp(mock_dev.id)
+                        if sensor_cfgs:
+                            await esp_repo.rebuild_simulation_config(mock_dev, sensor_cfgs)
+                            rebuilt += 1
+                    except Exception as rebuild_err:
+                        logger.warning(
+                            f"Failed to rebuild simulation_config for {mock_dev.device_id}: {rebuild_err}"
+                        )
+                if rebuilt > 0:
+                    await session.commit()
+                    logger.info(f"Rebuilt simulation_configs for {rebuilt} mock devices")
+
                 break  # Exit after first session
         except Exception as e:
             logger.warning(f"Mock-ESP recovery failed (non-critical): {e}")

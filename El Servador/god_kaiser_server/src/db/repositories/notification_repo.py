@@ -600,6 +600,38 @@ class NotificationRepository(BaseRepository[Notification]):
             ),
         }
 
+    async def resolve_alerts_for_device(self, esp_id: str) -> int:
+        """
+        Auto-resolve all active/acknowledged alerts belonging to a deleted device.
+
+        Matches on extra_data->>'esp_id' (PostgreSQL JSON text extraction).
+        Called from device soft-delete to prevent zombie alerts.
+
+        Args:
+            esp_id: The ESP device ID being deleted
+
+        Returns:
+            Number of alerts resolved
+        """
+        now = datetime.now(timezone.utc)
+        stmt = (
+            update(Notification)
+            .where(
+                and_(
+                    Notification.extra_data["esp_id"].astext == esp_id,
+                    Notification.status.in_([AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]),
+                )
+            )
+            .values(
+                status=AlertStatus.RESOLVED,
+                resolved_at=now,
+                updated_at=now,
+            )
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
+
     async def get_active_counts_by_severity(self) -> dict[str, int]:
         """
         Get active (non-resolved) alert counts grouped by severity.

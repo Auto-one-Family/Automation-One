@@ -461,6 +461,7 @@ class AutoOpsAgent:
                 PluginCapability.CONFIGURE,  # Then: configure devices
                 PluginCapability.DIAGNOSE,  # Then: diagnose issues
                 PluginCapability.FIX,  # Then: fix issues
+                PluginCapability.CLEANUP,  # Then: cleanup stale resources
                 PluginCapability.MONITOR,  # Then: verify
                 PluginCapability.DOCUMENT,  # Finally: document
             ]

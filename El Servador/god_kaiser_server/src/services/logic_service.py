@@ -327,9 +327,9 @@ class LogicService:
 
                         current_time = time(int(parts[0]), int(parts[1]))
                         # Convert to datetime for evaluation
-                        from datetime import datetime
+                        from datetime import datetime, timezone
 
-                        current_time = datetime.combine(datetime.now().date(), current_time)
+                        current_time = datetime.combine(datetime.now(timezone.utc).date(), current_time)
                     except (ValueError, IndexError):
                         pass
 

@@ -463,7 +463,9 @@ class TestSensorRepositoryCalibration:
             sample_esp_device.id, 21, "sht31_humidity"
         )
         assert humidity_config is not None
-        assert humidity_config.calibration_data is None or humidity_config.calibration_data != cal_temp
+        assert (
+            humidity_config.calibration_data is None or humidity_config.calibration_data != cal_temp
+        )
 
     async def test_update_calibration_multi_value_without_sensor_type_raises(
         self, sensor_repo: SensorRepository, sample_esp_device

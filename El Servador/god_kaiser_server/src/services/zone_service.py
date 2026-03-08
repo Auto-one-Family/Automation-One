@@ -38,6 +38,7 @@ from ..core.logging_config import get_logger
 from ..db.models.esp import ESPDevice
 from ..db.repositories import ESPRepository
 from ..db.repositories.subzone_repo import SubzoneRepository
+from ..db.repositories.zone_repo import ZoneRepository
 from ..mqtt.publisher import Publisher
 from ..schemas.zone import ZoneAssignResponse, ZoneRemoveResponse
 
@@ -110,6 +111,23 @@ class ZoneService:
         if not device:
             logger.warning(f"Zone assignment failed: ESP {device_id} not found")
             raise ValueError(f"ESP device '{device_id}' not found")
+
+        # 1b. Ensure zone exists in zones table (backward compatibility)
+        try:
+            zone_repo = ZoneRepository(self.esp_repo.session)
+            if not await zone_repo.exists_by_zone_id(zone_id):
+                await zone_repo.create(
+                    zone_id=zone_id,
+                    name=zone_name or zone_id,
+                    description=None,
+                )
+                logger.info(
+                    "Auto-created zone entity for zone_id=%s (backward compatibility)",
+                    zone_id,
+                )
+        except Exception as e:
+            # Don't fail assignment if zone auto-creation fails
+            logger.warning("Failed to auto-create zone entity for %s: %s", zone_id, e)
 
         # 2. Build MQTT topic
         topic = f"kaiser/{self.kaiser_id}/esp/{device_id}/zone/assign"

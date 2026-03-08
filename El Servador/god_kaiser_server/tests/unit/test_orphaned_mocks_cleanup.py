@@ -161,13 +161,15 @@ class TestOrphanedMocksCleanup:
                 cleanup = OrphanedMocksCleanup(mock_session, mock_scheduler, settings)
                 result = await cleanup.execute()
 
-                # Verify: Deletion erfolgt
+                # Verify: Soft-deletion erfolgt (T02-Fix1)
                 assert result["status"] == "success"
                 assert result["deleted"] == 1
                 assert result["warned"] == 0
 
-                # Session.delete aufgerufen
-                assert mock_session.delete.call_count == 1
+                # Device soft-deleted (deleted_at gesetzt, status='deleted')
+                assert mock_device.deleted_at is not None
+                assert mock_device.deleted_by == "maintenance"
+                assert mock_device.status == "deleted"
 
     # ================================================================
     # ORPHAN DETECTION TESTS

@@ -1,8 +1,8 @@
 # Mock-ESP Sensor Simulation (Paket B.1)
 
 **Status:** ✅ VOLLSTÄNDIG IMPLEMENTIERT
-**Version:** 1.0.0
-**Datum:** 2025-12-26
+**Version:** 1.1.0
+**Datum:** 2026-03-07
 
 ---
 
@@ -18,6 +18,7 @@ Die Mock-ESP Sensor-Simulation ermöglicht es, realistische Sensor-Daten ohne ec
 ✅ **Dynamisches Management:** Sensoren zur Laufzeit hinzufügen/entfernen
 ✅ **Konfigurierbare Intervals:** Individuelles Publishing-Intervall pro Sensor
 ✅ **DB-First Architecture:** Konfiguration überlebt Server-Restart
+✅ **Multi-Value Sensor Split:** SHT31/BMP280/BME280 werden automatisch in Einzelwerte expandiert
 
 ---
 
@@ -56,7 +57,7 @@ Die Mock-ESP Sensor-Simulation ermöglicht es, realistische Sensor-Daten ohne ec
 ┌─────────────────────────────────────────────────────────────┐
 │ CentralScheduler (scheduler.py in core/)                    │
 │ ─ APScheduler: Intervall-Jobs für jeden Sensor             │
-│ ─ Job-ID: mock_{esp_id}_sensor_{gpio}                      │
+│ ─ Job-ID: mock_{esp_id}_sensor_{gpio}_{sensor_type}        │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -78,8 +79,8 @@ Sensor-Konfiguration wird in `esp_devices.device_metadata` als JSON gespeichert:
 {
   "simulation_config": {
     "sensors": {
-      "4": {
-        "sensor_type": "DS18B20",
+      "4_ds18b20": {
+        "sensor_type": "ds18b20",
         "base_value": 22.0,
         "unit": "°C",
         "interval_seconds": 30.0,
@@ -90,18 +91,22 @@ Sensor-Konfiguration wird in `esp_devices.device_metadata` als JSON gespeichert:
         "quality": "good",
         "name": "Temperatur Sensor 1",
         "subzone_id": null,
-        "raw_mode": true
+        "raw_mode": true,
+        "gpio": 4
       },
-      "34": {
-        "sensor_type": "moisture",
-        "base_value": 45.0,
-        "unit": "%",
-        "interval_seconds": 60.0,
-        "variation_pattern": "drift",
-        "variation_range": 0.2,
-        "min_value": 30.0,
-        "max_value": 60.0,
-        "quality": "good"
+      "21_sht31_temp": {
+        "sensor_type": "sht31_temp",
+        "base_value": 23.0,
+        "unit": "",
+        "quality": "good",
+        "gpio": 21
+      },
+      "21_sht31_humidity": {
+        "sensor_type": "sht31_humidity",
+        "base_value": 23.0,
+        "unit": "",
+        "quality": "good",
+        "gpio": 21
       }
     },
     "manual_overrides": {
@@ -114,6 +119,8 @@ Sensor-Konfiguration wird in `esp_devices.device_metadata` als JSON gespeichert:
   "mock": true
 }
 ```
+
+> **Key-Format:** `"{gpio}_{sensor_type}"` — Multi-Value-Sensoren (SHT31, BMP280, BME280) werden bei der Erstellung automatisch in Einzelwerte expandiert (z.B. `"sht31"` → `"21_sht31_temp"` + `"21_sht31_humidity"`).
 
 ---
 
@@ -203,7 +210,7 @@ class MockESPRuntime:
     drift_directions: Dict[int, int]    # {gpio: +1 oder -1}
 
     # Sensor-Jobs Tracking
-    active_sensor_jobs: Dict[int, str]  # {gpio: job_id}
+    active_sensor_jobs: Dict[str, str]  # {gpio_type: job_id} e.g. "21_sht31_temp": "mock_..."
 ```
 
 **Warum nicht in DB?**
@@ -390,9 +397,10 @@ DELETE /api/v1/debug/mock-esp/{esp_id}/sensors/{gpio}
 job_id = f"mock_{esp_id}_heartbeat"
 # Beispiel: mock_MOCK_001_heartbeat
 
-# Sensor-Job (pro Sensor)
-job_id = f"mock_{esp_id}_sensor_{gpio}"
-# Beispiel: mock_MOCK_001_sensor_4
+# Sensor-Job (pro Sensor-Type)
+job_id = f"mock_{esp_id}_sensor_{gpio}_{sensor_type}"
+# Beispiel: mock_MOCK_001_sensor_4_ds18b20
+# Multi-Value: mock_MOCK_001_sensor_21_sht31_temp
 ```
 
 ### Job-Lifecycle
@@ -406,7 +414,7 @@ Heartbeat-Job erstellen (mock_{esp_id}_heartbeat)
     ↓
 Sensor-Config aus DB laden
     ↓
-Für jeden Sensor: Sensor-Job erstellen (mock_{esp_id}_sensor_{gpio})
+Für jeden Sensor: Sensor-Job erstellen (mock_{esp_id}_sensor_{gpio}_{type})
     ↓
 Jobs laufen periodisch (APScheduler)
     ↓
@@ -432,10 +440,10 @@ sim_scheduler.add_sensor_job(
 )
     ↓
 CentralScheduler.add_interval_job(
-    job_id="mock_MOCK_001_sensor_4",
+    job_id="mock_MOCK_001_sensor_4_DS18B20",
     func=_sensor_job,
     seconds=30.0,
-    args=["MOCK_001", 4],
+    args=["MOCK_001", 4, "DS18B20"],
     category=JobCategory.MOCK_ESP
 )
     ↓
@@ -763,6 +771,19 @@ Server wird Processing triggern, wenn `sensor_config.pi_enhanced == True` in DB.
 ---
 
 ## Changelog
+
+### v1.2.0 (2026-03-07) — T02-Fix2
+- ✅ Bug B2: `sensor_configs.onewire_address` von `varchar(16)` auf `varchar(32)` erweitert (Alembic Migration)
+- ✅ Bug B2: Auto-generierte OneWire-Adressen von `AUTO_` (21 chars) auf `SIM_` Prefix (16 chars) gekürzt
+- ✅ Bug B2: Pydantic Schemas (`SensorConfigCreate`, `MockSensorConfig`) `max_length` auf 32 angepasst
+- ✅ Bug B3: Debug-API `POST /mock-esp/{id}/actuators` erstellt jetzt `actuator_configs` DB-Record zusätzlich zur `device_metadata` JSON
+- ✅ Bug B3: Mock-Aktoren sind nun über Standard-APIs (`GET /actuators/{esp_id}`) und Logic Engine auffindbar
+
+### v1.1.0 (2026-03-07)
+- ✅ Multi-Value Sensor Split: `create_mock_esp()` expandiert `"sht31"` → `"sht31_temp"` + `"sht31_humidity"` (via `is_multi_value_sensor()`)
+- ✅ Dict-Key-Format: `simulation_config.sensors` Keys von `str(gpio)` auf `"{gpio}_{sensor_type}"` (verhindert Überschreibung bei Multi-Value-Sensoren auf gleichem GPIO)
+- ✅ SensorConfig DB-Einträge: Expanded sensor configs werden einzeln in DB erstellt
+- ✅ 14 Unit Tests: `test_mock_esp_multi_value.py`
 
 ### v1.0.0 (2025-12-26)
 - ✅ Sensor-Simulation vollständig implementiert

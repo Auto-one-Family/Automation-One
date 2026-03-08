@@ -63,12 +63,15 @@ class MonitorDataService:
         esp_uuids = [e.id for e in esps]
 
         # 2. Build (esp_id, gpio) -> (subzone_id, subzone_name) map
+        #    Also collect all configured subzone keys (for empty subzone inclusion)
         gpio_to_subzone: Dict[Tuple[str, int], Tuple[str, str]] = {}
+        configured_subzone_keys: Set[Tuple[Optional[str], str]] = set()
         subzone_configs_stmt = select(SubzoneConfig).where(SubzoneConfig.parent_zone_id == zone_id)
         subzone_result = await self.session.execute(subzone_configs_stmt)
         for sc in subzone_result.scalars().all():
             subzone_id = sc.subzone_id
             subzone_name = sc.subzone_name or subzone_id
+            configured_subzone_keys.add((subzone_id, subzone_name))
             for gpio in sc.assigned_gpios or []:
                 gpio_to_subzone[(sc.esp_id, gpio)] = (subzone_id, subzone_name)
 
@@ -186,9 +189,14 @@ class MonitorDataService:
             actuator_entries[key].append(entry)
 
         # 9. Merge sensors and actuators into SubzoneGroups
+        #    Include empty subzones (from SubzoneConfig) that have no sensors/actuators
         all_keys: Set[Tuple[Optional[str], Optional[str]]] = set(sensor_entries.keys()) | set(
             actuator_entries.keys()
         )
+
+        # Add configured subzones that may be empty (no GPIOs assigned yet)
+        all_keys |= configured_subzone_keys
+
         subzones: List[SubzoneGroup] = []
         total_sensors = 0
         total_actuators = 0
@@ -202,8 +210,6 @@ class MonitorDataService:
         for subzone_id, subzone_name in sorted_keys:
             sensors = sensor_entries.get((subzone_id, subzone_name), [])
             actuators = actuator_entries.get((subzone_id, subzone_name), [])
-            if not sensors and not actuators:
-                continue
             subzones.append(
                 SubzoneGroup(
                     subzone_id=subzone_id,

@@ -54,6 +54,7 @@ from src.db.models import (  # noqa: F401, E402 - imports needed for SQLAlchemy 
     subzone,
     system,
     user,
+    zone,
 )
 from src.db.repositories.actuator_repo import ActuatorRepository  # noqa: E402
 from src.db.repositories.esp_repo import ESPRepository  # noqa: E402

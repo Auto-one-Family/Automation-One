@@ -176,7 +176,8 @@ class SensorDataHandler:
                         return False
 
                     # Step 5: Extract sensor_type FIRST (needed for multi-value lookup)
-                    sensor_type = payload.get("sensor_type", "unknown")
+                    # Normalize to lowercase — ESP32 sends lowercase, but DB may have mixed case
+                    sensor_type = payload.get("sensor_type", "unknown").lower()
 
                     # Step 5.5: Extract interface-specific addresses for 4-way lookup
                     # DS18B20 sensors send ROM code to distinguish multiple sensors on same GPIO
@@ -351,6 +352,7 @@ class SensorDataHandler:
                         data_source=data_source,
                         zone_id=zone_id,
                         subzone_id=subzone_id,
+                        device_name=esp_device.name,
                     )
 
                     # Step 9b: Update sensor config on successful data save
@@ -664,7 +666,8 @@ class SensorDataHandler:
         """
         Validate sensor data payload structure.
 
-        Required fields: ts OR timestamp, esp_id, gpio, sensor_type, raw OR raw_value, raw_mode
+        Required fields: ts OR timestamp, esp_id, gpio, sensor_type, raw OR raw_value
+        Optional fields: raw_mode (defaults to True)
 
         Args:
             payload: Payload dict to validate
@@ -710,13 +713,9 @@ class SensorDataHandler:
                 "error_code": ValidationErrorCode.MISSING_REQUIRED_FIELD,
             }
 
-        # raw_mode is required
+        # raw_mode is optional (defaults to True if not provided)
         if "raw_mode" not in payload:
-            return {
-                "valid": False,
-                "error": "Missing required field: raw_mode",
-                "error_code": ValidationErrorCode.MISSING_REQUIRED_FIELD,
-            }
+            payload["raw_mode"] = True
 
         # Type validation
         ts_value = payload.get("ts", payload.get("timestamp"))
@@ -734,7 +733,7 @@ class SensorDataHandler:
                 "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
             }
 
-        # raw_mode validation (must be boolean)
+        # raw_mode validation (must be boolean if provided)
         if not isinstance(payload["raw_mode"], bool):
             return {
                 "valid": False,

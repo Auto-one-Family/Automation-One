@@ -25,14 +25,14 @@ class DeviceMode(str, Enum):
 
 
 class SimulationPattern(str, Enum):
-    """Sensor value simulation patterns for mock devices."""
+    """Sensor value simulation patterns for mock devices.
+
+    Must match server-side VariationPattern enum in schemas/debug.py.
+    """
 
     CONSTANT = "constant"
-    SINE = "sine"
     RANDOM = "random"
-    SAWTOOTH = "sawtooth"
-    STEP = "step"
-    REALISTIC = "realistic"  # Combines sine + random noise
+    DRIFT = "drift"
 
 
 def _get_logger(name: str) -> logging.Logger:

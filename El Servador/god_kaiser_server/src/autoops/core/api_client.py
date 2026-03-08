@@ -387,11 +387,14 @@ class GodKaiserClient:
     async def set_auto_heartbeat(
         self, esp_id: str, enabled: bool, interval_seconds: int = 60
     ) -> dict[str, Any]:
-        """Configure auto-heartbeat for a mock ESP."""
+        """Configure auto-heartbeat for a mock ESP.
+
+        The server endpoint uses Query parameters, not JSON body.
+        """
         return await self._request(
             "POST",
             f"/v1/debug/mock-esp/{esp_id}/auto-heartbeat",
-            json_data={"enabled": enabled, "interval_seconds": interval_seconds},
+            params={"enabled": enabled, "interval_seconds": interval_seconds},
             action_name="Set Auto-Heartbeat",
             target=esp_id,
         )
@@ -407,20 +410,16 @@ class GodKaiserClient:
         sensor_type: str,
         name: Optional[str] = None,
         enabled: bool = True,
-        raw_mode: bool = True,
         processing_mode: str = "pi_enhanced",
         interval_ms: int = 30000,
         interface_type: Optional[str] = None,
         i2c_address: Optional[int] = None,
         onewire_address: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Add or update a sensor on an ESP (like configuring in frontend)."""
+        """Add or update a sensor config via POST /v1/sensors/{esp_id}/{gpio}."""
         data: dict[str, Any] = {
-            "esp_id": esp_id,
-            "gpio": gpio,
             "sensor_type": sensor_type,
             "enabled": enabled,
-            "processing_mode": processing_mode,
             "interval_ms": interval_ms,
         }
         if name:
@@ -462,13 +461,18 @@ class GodKaiserClient:
             target=esp_id or "all",
         )
 
-    async def delete_sensor(self, esp_id: str, gpio: int) -> dict[str, Any]:
-        """Delete a sensor configuration."""
+    async def delete_sensor(self, esp_id: str, config_id: str) -> dict[str, Any]:
+        """Delete a sensor configuration by its UUID config_id.
+
+        The server endpoint is DELETE /v1/sensors/{esp_id}/{config_id}
+        where config_id is the sensor_config UUID (not GPIO number).
+        This avoids MultipleResultsFound when sensors share a GPIO.
+        """
         return await self._request(
             "DELETE",
-            f"/v1/sensors/{esp_id}/{gpio}",
+            f"/v1/sensors/{esp_id}/{config_id}",
             action_name="Delete Sensor",
-            target=f"{esp_id}/gpio:{gpio}",
+            target=f"{esp_id}/{config_id}",
         )
 
     async def set_mock_sensor_value(
@@ -649,28 +653,16 @@ class GodKaiserClient:
         )
 
     async def list_zones(self) -> dict[str, Any]:
-        """List all zones (derived from device zone assignments)."""
-        # No dedicated list-zones endpoint; derive from unassigned endpoint
-        # and device listing to discover existing zones
-        try:
-            devices_resp = await self.list_devices()
-            devices = devices_resp.get("devices", devices_resp.get("data", []))
-            if not isinstance(devices, list):
-                devices = []
-            zones: dict[str, dict[str, Any]] = {}
-            for d in devices:
-                if isinstance(d, dict) and d.get("zone_id"):
-                    zid = d["zone_id"]
-                    if zid not in zones:
-                        zones[zid] = {
-                            "zone_id": zid,
-                            "name": d.get("zone_name", zid),
-                            "device_count": 0,
-                        }
-                    zones[zid]["device_count"] += 1
-            return {"zones": list(zones.values())}
-        except APIError:
-            return {"zones": []}
+        """List all zones via dedicated GET /v1/zone/zones endpoint.
+
+        Includes empty zones from ZoneContext table, not just device-derived ones.
+        """
+        return await self._request(
+            "GET",
+            "/v1/zone/zones",
+            action_name="List Zones",
+            target="all_zones",
+        )
 
     # =========================================================================
     # System & Diagnostics
@@ -798,12 +790,24 @@ class GodKaiserClient:
 
     async def create_zone(
         self,
-        esp_id: str,
         zone_id: str,
-        zone_name: Optional[str] = None,
+        name: str,
+        description: str = "",
     ) -> dict[str, Any]:
-        """Create a zone by assigning a device to it (zones are implicit)."""
-        return await self.assign_zone(esp_id, zone_id, zone_name)
+        """Create a zone entity via POST /v1/zones.
+
+        This creates a persistent ZoneContext entry independent of device assignments.
+        """
+        data: dict[str, Any] = {"zone_id": zone_id, "name": name}
+        if description:
+            data["description"] = description
+        return await self._request(
+            "POST",
+            "/v1/zones",
+            json_data=data,
+            action_name="Create Zone",
+            target=zone_id,
+        )
 
     # =========================================================================
     # Sensor Type Defaults
