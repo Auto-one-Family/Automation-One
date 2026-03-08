@@ -534,7 +534,6 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   }
 
   async function deleteDevice(deviceId: string): Promise<void> {
-    isLoading.value = true
     error.value = null
 
     try {
@@ -556,8 +555,6 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       if (selectedDeviceId.value === deviceId) {
         selectedDeviceId.value = null
       }
-
-      isLoading.value = false
     }
   }
 
@@ -1306,6 +1303,33 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     sensorStore.handleSensorHealth(message as unknown as Parameters<typeof sensorStore.handleSensorHealth>[0], findDeviceByEspIdDefensive)
   }
 
+  /**
+   * Sensor config deleted handler — removes ghost sensor from device.sensors array.
+   * Server: sensors.py DELETE → WS: sensor_config_deleted
+   * Payload: { config_id, esp_id, gpio, sensor_type }
+   */
+  function handleSensorConfigDeleted(message: { data: Record<string, unknown> }): void {
+    const data = message.data as { esp_id?: string; gpio?: number; sensor_type?: string }
+    if (!data.esp_id || data.gpio === undefined || !data.sensor_type) return
+
+    const result = findDeviceByEspIdDefensive(data.esp_id)
+    if (!result) return
+
+    const { device } = result
+    if (!device.sensors) return
+
+    const before = device.sensors.length
+
+    device.sensors = device.sensors.filter(
+      s => !(s.gpio === data.gpio && s.sensor_type === data.sensor_type),
+    )
+
+    if (device.sensors.length < before) {
+      const toast = useToast()
+      toast.info(`Sensor entfernt (${data.sensor_type})`, { duration: 3000 })
+    }
+  }
+
   // =============================================================================
   // WebSocket Handlers: Actuator Feedback & Notifications (Phase UI/UX 1)
   // =============================================================================
@@ -1567,6 +1591,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       ws.on('zone_assignment', handleZoneAssignment),
       ws.on('subzone_assignment', handleSubzoneAssignment),  // WP4
       ws.on('sensor_health', handleSensorHealth),  // Phase 2E
+      ws.on('sensor_config_deleted', handleSensorConfigDeleted),  // T08-Fix D
       // Discovery/Approval Phase
       ws.on('device_discovered', handleDeviceDiscovered),
       ws.on('device_approved', handleDeviceApproved),

@@ -17,6 +17,8 @@ import type { QualityLevel } from '@/types'
 
 /** Sensor data shape from device.sensors array */
 export interface SensorItem {
+  /** Sensor config UUID from database (unique identifier for multi-value sensors) */
+  config_id?: string
   gpio: number
   sensor_type: string
   name: string | null
@@ -27,6 +29,8 @@ export interface SensorItem {
   device_type?: string | null
   multi_values?: Record<string, any> | null
   is_multi_value?: boolean
+  i2c_address?: number | null
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | null
 }
 
 interface Props {
@@ -42,8 +46,17 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<{
-  'sensor-click': [gpio: number]
+  'sensor-click': [payload: { configId?: string; gpio: number; sensorType: string }]
 }>()
+
+/** Deterministic sort: sensor_type alphabetical, then i2c_address */
+const sortedSensors = computed(() =>
+  [...props.sensors].sort((a, b) => {
+    const typeCompare = (a.sensor_type || '').localeCompare(b.sensor_type || '')
+    if (typeCompare !== 0) return typeCompare
+    return (a.i2c_address || 0) - (b.i2c_address || 0)
+  })
+)
 
 /** Use multi-row layout when >5 sensors */
 const useMultiRow = computed(() => props.sensors.length > 5)
@@ -60,8 +73,8 @@ const useMultiRow = computed(() => props.sensors.length > 5)
     ]"
   >
     <SensorSatellite
-      v-for="(sensor, idx) in sensors"
-      :key="`sensor-${sensor.gpio}`"
+      v-for="(sensor, idx) in sortedSensors"
+      :key="sensor.config_id || `sensor-${sensor.gpio}-${sensor.sensor_type}`"
       :esp-id="espId"
       :gpio="sensor.gpio"
       :sensor-type="sensor.sensor_type"
@@ -72,11 +85,13 @@ const useMultiRow = computed(() => props.sensors.length > 5)
       :device-type="sensor.device_type"
       :multi-values="sensor.multi_values"
       :is-multi-value="sensor.is_multi_value"
+      :i2c-address="sensor.i2c_address"
+      :interface-type="sensor.interface_type"
       :selected="selectedGpio === sensor.gpio"
       :show-connections="showConnections"
       class="sensor-column__satellite"
       :style="{ animationDelay: `${idx * 60}ms` }"
-      @click="emit('sensor-click', sensor.gpio)"
+      @click="emit('sensor-click', { configId: sensor.config_id, gpio: sensor.gpio, sensorType: sensor.sensor_type })"
     />
 
     <!-- Empty state -->

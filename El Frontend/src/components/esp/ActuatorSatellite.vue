@@ -189,7 +189,7 @@ function handleDragEnd(event: DragEvent) {
     </Badge>
 
     <!-- Label (compact) -->
-    <span class="actuator-satellite__label">
+    <span class="actuator-satellite__label" :title="name || actuatorInfo.label">
       {{ name || actuatorInfo.label }}
     </span>
 
@@ -217,7 +217,7 @@ function handleDragEnd(event: DragEvent) {
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   min-width: 52px;
-  max-width: 130px;
+  max-width: 180px;
   backdrop-filter: blur(10px);
   /* Enhanced floating effect */
   box-shadow:
@@ -310,17 +310,21 @@ function handleDragEnd(event: DragEvent) {
   /* Badge styling handled by component */
 }
 
-/* Label - compact */
+/* Label - compact, up to 2 lines */
 .actuator-satellite__label {
   font-size: 0.625rem;
   font-weight: 500;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   max-width: 100%;
   line-height: 1.2;
+  /* Allow up to 2 lines for longer names */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: 2.4em;
 }
 
 /* Connection indicator */

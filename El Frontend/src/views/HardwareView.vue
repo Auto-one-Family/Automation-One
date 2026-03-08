@@ -41,7 +41,7 @@ import ESPSettingsSheet from '@/components/esp/ESPSettingsSheet.vue'
 import ComponentSidebar from '@/components/dashboard/ComponentSidebar.vue'
 import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
 import LoadingState from '@/shared/design/primitives/BaseSkeleton.vue'
-import { EmptyState } from '@/shared/design/patterns'
+// EmptyState replaced by custom inline hardware-empty block
 
 // Level components
 import ZonePlate from '@/components/dashboard/ZonePlate.vue'
@@ -224,7 +224,7 @@ watch(
 const showSensorConfig = ref(false)
 const showActuatorConfig = ref(false)
 const showEspConfig = ref(false)
-const configSensorData = ref<{ espId: string; gpio: number; sensorType: string; unit: string } | null>(null)
+const configSensorData = ref<{ espId: string; gpio: number; sensorType: string; unit: string; configId?: string } | null>(null)
 const configActuatorData = ref<{ espId: string; gpio: number; actuatorType: string } | null>(null)
 const configEspDevice = ref<ESPDevice | null>(null)
 
@@ -642,10 +642,14 @@ async function handleZoneDelete(zoneId: string) {
 // SlideOver handlers: open config panels from ESP detail view
 // =============================================================================
 
-function handleSensorClickFromDetail(payload: { espId: string; gpio: number }) {
+function handleSensorClickFromDetail(payload: { espId: string; gpio: number; sensorType: string; configId?: string }) {
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === payload.espId)
   const sensors = (device?.sensors as any[]) || []
-  const sensor = sensors.find((s: any) => s.gpio === payload.gpio)
+
+  // Primary: gpio + sensorType (unique for multi-value sensors like SHT31)
+  let sensor = sensors.find((s: any) => s.gpio === payload.gpio && s.sensor_type === payload.sensorType)
+  // Fallback: GPIO only (backward compat for single-value sensors)
+  if (!sensor) sensor = sensors.find((s: any) => s.gpio === payload.gpio)
   if (!sensor) return
 
   configSensorData.value = {
@@ -653,6 +657,7 @@ function handleSensorClickFromDetail(payload: { espId: string; gpio: number }) {
     gpio: payload.gpio,
     sensorType: sensor.sensor_type || 'unknown',
     unit: sensor.unit || '',
+    configId: payload.configId || sensor.config_id,
   }
   showSensorConfig.value = true
 }
@@ -707,18 +712,25 @@ function formatTimeAgo(timestamp: number): string {
       <RouterLink to="/logic" class="rules-ribbon__link">Regeln verwalten →</RouterLink>
     </div>
 
-    <!-- Loading -->
+    <!-- Loading / Empty State (grouped to prevent white flash on device deletion) -->
     <LoadingState v-if="espStore.isLoading && espStore.devices.length === 0" text="Lade ESP-Geräte..." />
-
-    <!-- Empty State -->
-    <EmptyState
-      v-else-if="espStore.devices.length === 0"
-      :icon="Plus"
-      title="Keine ESP-Geräte"
-      description="Erstellen Sie Ihr erstes Mock-ESP32-Gerät, um mit dem Testen zu beginnen."
-      action-text="Gerät erstellen"
-      @action="dashStore.showCreateMock = true"
-    />
+    <div v-else-if="espStore.devices.length === 0" class="hardware-empty">
+      <div class="hardware-empty__icon-wrapper">
+        <Plus class="hardware-empty__icon" />
+      </div>
+      <h3 class="hardware-empty__title">Keine Geräte konfiguriert</h3>
+      <p class="hardware-empty__desc">Erstelle dein erstes Mock-ESP, um das System zu testen.</p>
+      <button class="hardware-empty__btn" @click="dashStore.showCreateMock = true">
+        <Plus class="hardware-empty__btn-icon" />
+        Gerät erstellen
+      </button>
+      <button
+        class="hardware-empty__link"
+        @click="dashStore.showPendingPanel = true"
+      >
+        Oder verbinde ein echtes ESP32
+      </button>
+    </div>
 
     <!-- No Results (filters) -->
     <div v-else-if="filteredEsps.length === 0" class="card p-8 text-center">
@@ -759,8 +771,9 @@ function formatTimeAgo(timestamp: number): string {
                 @monitor-nav="onDeviceMonitorNav"
               />
 
-              <!-- Unassigned Devices Section -->
+              <!-- Unassigned Devices Section (hidden when empty) -->
               <section
+                v-if="unassignedDevices.length > 0 || dragStore.isDraggingEspCard"
                 class="unassigned-section"
                 :class="{ 'unassigned-section--drop-target': dragStore.isDraggingEspCard }"
               >
@@ -963,6 +976,7 @@ function formatTimeAgo(timestamp: number): string {
         :gpio="configSensorData.gpio"
         :sensor-type="configSensorData.sensorType"
         :unit="configSensorData.unit"
+        :config-id="configSensorData.configId"
         :show-metadata="false"
         @deleted="showSensorConfig = false; espStore.fetchDevice(configSensorData!.espId)"
         @saved="showSensorConfig = false; espStore.fetchDevice(configSensorData!.espId)"
@@ -1350,6 +1364,90 @@ function formatTimeAgo(timestamp: number): string {
   width: 16px;
   height: 16px;
   opacity: 0.5;
+}
+
+/* ── Empty State (Iridescent CTA) ─────────────────────────────────────── */
+.hardware-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-12) var(--space-6);
+  text-align: center;
+}
+
+.hardware-empty__icon-wrapper {
+  width: 4rem;
+  height: 4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background-color: var(--color-bg-tertiary);
+  margin-bottom: var(--space-4);
+  color: var(--color-iridescent-3);
+  animation: pulse-glow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.hardware-empty__icon {
+  width: 2rem;
+  height: 2rem;
+}
+
+.hardware-empty__title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.hardware-empty__desc {
+  font-size: var(--text-base);
+  color: var(--color-text-muted);
+  max-width: 20rem;
+  margin-bottom: var(--space-6);
+}
+
+.hardware-empty__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-6);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-text-inverse);
+  background: var(--gradient-iridescent);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  box-shadow: 0 0 20px rgba(167, 139, 250, 0.3);
+  transition: filter var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.hardware-empty__btn:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 0 28px rgba(167, 139, 250, 0.45);
+}
+
+.hardware-empty__btn-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.hardware-empty__link {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color var(--transition-fast);
+}
+
+.hardware-empty__link:hover {
+  color: var(--color-accent-bright);
 }
 
 @media (max-width: 640px) {

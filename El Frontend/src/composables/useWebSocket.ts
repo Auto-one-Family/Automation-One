@@ -151,19 +151,27 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   }
 
   /**
-   * Subscribe to specific message type
+   * Subscribe to specific message type.
+   *
+   * If a filter-based subscription is active (from useWebSocket options),
+   * messages are dispatched via routeMessage → subscription callback → messageHandlers.
+   * Only registers on websocketService.on() when NO subscription exists,
+   * to avoid double-dispatch (handler called 2x per message).
    */
   function on(type: MessageType | string, callback: (message: WebSocketMessage) => void): () => void {
     if (!messageHandlers.has(type)) {
       messageHandlers.set(type, new Set())
     }
-    
+
     messageHandlers.get(type)!.add(callback)
-    
-    // Also subscribe via service for type-based routing
-    const unsubscribeService = websocketService.on(type, callback)
-    
-    // Return combined unsubscribe function
+
+    // Only register via service when no subscription exists
+    // (subscription handler already dispatches to messageHandlers)
+    let unsubscribeService: (() => void) | null = null
+    if (!subscriptionId.value) {
+      unsubscribeService = websocketService.on(type, callback)
+    }
+
     return () => {
       const handlers = messageHandlers.get(type)
       if (handlers) {
@@ -172,7 +180,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
           messageHandlers.delete(type)
         }
       }
-      unsubscribeService()
+      unsubscribeService?.()
     }
   }
 

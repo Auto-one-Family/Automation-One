@@ -269,6 +269,19 @@ function toggleSidebar() {
   overflow: hidden;
 }
 
+/* Scroll indicator — gradient fade at bottom when content overflows */
+.component-sidebar:not(.component-sidebar--collapsed)::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 24px;
+  background: linear-gradient(to bottom, transparent, var(--color-bg-secondary));
+  pointer-events: none;
+  z-index: 1;
+}
+
 .component-sidebar--collapsed {
   width: 24px;
   min-width: 24px;

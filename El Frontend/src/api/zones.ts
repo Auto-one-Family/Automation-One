@@ -6,13 +6,22 @@
  */
 
 import api from './index'
-import type { ZoneAssignRequest, ZoneAssignResponse, ZoneRemoveResponse, ZoneInfo } from '@/types'
+import type { ZoneAssignRequest, ZoneAssignResponse, ZoneRemoveResponse, ZoneInfo, ZoneListResponse } from '@/types'
 import type { ZoneMonitorData } from '@/types/monitor'
 
 /**
  * Zone Assignment API client
  */
 export const zonesApi = {
+  /**
+   * Get all zones including empty ones (from ZoneContext table).
+   * Used by MonitorView L1 to show zones without devices.
+   */
+  async getAllZones(): Promise<ZoneListResponse> {
+    const response = await api.get<ZoneListResponse>('/zone/zones')
+    return response.data
+  },
+
   /**
    * Assign ESP to a zone
    *
@@ -71,8 +80,8 @@ export const zonesApi = {
 
    * Used by MonitorView L2 for subzone accordion. GPIO-based grouping via subzone_configs.
    */
-  async getZoneMonitorData(zoneId: string): Promise<ZoneMonitorData> {
-    const response = await api.get<ZoneMonitorData>(`/zone/${zoneId}/monitor-data`)
+  async getZoneMonitorData(zoneId: string, signal?: AbortSignal): Promise<ZoneMonitorData> {
+    const response = await api.get<ZoneMonitorData>(`/zone/${zoneId}/monitor-data`, { signal })
     return response.data
   },
 }

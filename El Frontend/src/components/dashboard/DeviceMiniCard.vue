@@ -239,7 +239,7 @@ function openCardMenu(event: MouseEvent) {
           class="device-mini-card__sensor"
         >
           <component :is="sensor.icon" class="device-mini-card__sensor-icon" />
-          <span class="device-mini-card__sensor-name">{{ sensor.label }}</span>
+          <span class="device-mini-card__sensor-name" :title="sensor.label">{{ sensor.label }}</span>
           <span class="device-mini-card__sensor-value" :style="{ color: sensor.valueColor }">{{ sensor.value }}</span>
           <span class="device-mini-card__sensor-unit">{{ sensor.unit }}</span>
         </div>
@@ -295,7 +295,7 @@ function openCardMenu(event: MouseEvent) {
     transform var(--transition-fast),
     box-shadow var(--transition-fast);
   min-width: 150px;
-  max-width: 240px;
+  max-width: 100%;
   position: relative;
   overflow: hidden;
 }
@@ -476,7 +476,7 @@ function openCardMenu(event: MouseEvent) {
 .device-mini-card__sensor-unit {
   font-family: var(--font-mono);
   font-size: 9px;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   flex-shrink: 0;
 }
 

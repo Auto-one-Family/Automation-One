@@ -201,6 +201,7 @@ function normalizeEspId(device: ESPDevice | string): string {
  */
 function mapSensorConfigToMockSensor(config: SensorConfigResponse): MockSensor {
   return {
+    config_id: config.id,
     gpio: config.gpio,
     sensor_type: config.sensor_type,
     name: config.name || null,
@@ -213,6 +214,7 @@ function mapSensorConfigToMockSensor(config: SensorConfigResponse): MockSensor {
     config_status: config.config_status as MockSensor['config_status'],
     config_error: config.config_error || null,
     config_error_detail: config.config_error_detail || null,
+    i2c_address: config.i2c_address ?? null,
   }
 }
 

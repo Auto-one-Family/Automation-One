@@ -22,7 +22,8 @@ const ZONE_GEWAECHSHAUS = 'e2e_gewaechshaus'
 const ZONE_OUTDOOR = 'e2e_outdoor'
 
 function uniqueId(prefix: string): string {
-  return `ESP_MOCK_E2E_${prefix}_${Date.now().toString(36)}`
+  const suffix = Date.now().toString(36).toUpperCase()
+  return `MOCK_E2E${prefix}${suffix}`
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────

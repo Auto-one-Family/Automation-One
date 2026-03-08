@@ -17,7 +17,8 @@ const ZONE_ID = 'e2e_subzone_monitor'
 const ZONE_NAME = 'E2E Subzone Zone'
 
 function uniqueEspId(): string {
-  return `ESP_MOCK_SUBZONE_${Date.now().toString(36)}`
+  const suffix = Date.now().toString(36).toUpperCase()
+  return `MOCK_SUBZONE${suffix}`
 }
 
 test.describe('Subzone-Monitor Flow', () => {

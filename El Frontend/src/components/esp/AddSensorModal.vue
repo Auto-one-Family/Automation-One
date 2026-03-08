@@ -22,10 +22,11 @@ import {
   MULTI_VALUE_DEVICES,
   getSensorUnit,
   getSensorDefault,
+  getSensorLabel,
+  getDefaultInterval,
   getSensorTypeOptions,
   inferInterfaceType,
   getI2CAddressOptions,
-  getSensorTypeAwareSummary,
 } from '@/utils/sensorDefaults'
 import { getRecommendedGpios } from '@/utils/gpioConfig'
 import { normalizeSubzoneId } from '@/utils/subzoneHelpers'
@@ -157,7 +158,38 @@ const allOneWireDevicesSelected = computed(() => {
   return newOneWireDevices.value.every(d => oneWireScanState.value.selectedRomCodes.includes(d.rom_code))
 })
 
-const typeSummary = computed(() => getSensorTypeAwareSummary(newSensor.value.sensor_type))
+/** Reactive info text: reflects current I2C address, interval, and multi-value count */
+const sensorTypeInfo = computed((): string => {
+  const sType = newSensor.value.sensor_type
+  if (!sType) return ''
+
+  const lower = sType.toLowerCase()
+  const addrHex = i2cAddressOptions.value.find(o => o.value === selectedI2CAddress.value)?.hex
+
+  if (lower === 'sht31' || lower.startsWith('sht31_')) {
+    const addr = addrHex || '0x44'
+    const interval = getDefaultInterval(sType)
+    return `SHT31, auf I2C ${addr}, misst Temperatur + Luftfeuchte (erstellt 2 Sensor-Eintraege), alle ${interval}s`
+  }
+
+  if (lower === 'bmp280' || lower.startsWith('bmp280_')) {
+    const addr = addrHex || '0x76'
+    return `BMP280, auf I2C ${addr}, misst Temperatur + Luftdruck (erstellt 2 Sensor-Eintraege)`
+  }
+
+  if (lower === 'bme280' || lower.startsWith('bme280_')) {
+    const addr = addrHex || '0x76'
+    return `BME280, auf I2C ${addr}, misst Temperatur + Luftfeuchte + Luftdruck (erstellt 3 Sensor-Eintraege)`
+  }
+
+  if (lower === 'ds18b20' || lower.includes('ds18b20')) {
+    return `DS18B20, auf OneWire (GPIO ${oneWireScanPin.value}), misst Temperatur`
+  }
+
+  // Fallback: generic sensor
+  const label = getSensorLabel(sType)
+  return label ? `${sType}, misst ${label}` : ''
+})
 
 const recommendedMode = computed(() => {
   const config = SENSOR_TYPE_CONFIG[newSensor.value.sensor_type]
@@ -188,6 +220,27 @@ const subzoneModel = computed({
   get: () => newSensor.value.subzone_id ?? null,
   set: (v: string | null) => { newSensor.value.subzone_id = v },
 })
+
+// ── Shared Payload Builder ───────────────────────────────────────────
+
+type SensorPayload = MockSensorConfig & { operating_mode?: string; timeout_seconds?: number; i2c_address?: number | null }
+
+/** Build sensor API payload from form state. Used by BOTH I2C and OneWire flows. */
+function buildSensorPayload(overrides: Partial<SensorPayload> = {}): SensorPayload {
+  return {
+    sensor_type: newSensor.value.sensor_type,
+    name: newSensor.value.name || undefined,
+    raw_value: newSensor.value.raw_value,
+    unit: newSensor.value.unit,
+    gpio: newSensor.value.gpio,
+    quality: newSensor.value.quality,
+    raw_mode: newSensor.value.raw_mode,
+    operating_mode: newSensor.value.operating_mode ?? 'continuous',
+    timeout_seconds: newSensor.value.timeout_seconds ?? 180,
+    subzone_id: normalizeSubzoneId(newSensor.value.subzone_id) ?? undefined,
+    ...overrides,
+  }
+}
 
 // ── Actions ──────────────────────────────────────────────────────────
 
@@ -221,12 +274,10 @@ function resetForm() {
 
 async function addSensor() {
   try {
-    const sensorData: any = { ...newSensor.value }
-    if (isI2CSensor.value && selectedI2CAddress.value !== null) {
-      sensorData.interface_type = 'I2C'
-      sensorData.i2c_address = selectedI2CAddress.value
-      sensorData.gpio = 0
-    }
+    const i2cOverrides: Partial<SensorPayload> = isI2CSensor.value && selectedI2CAddress.value !== null
+      ? { interface_type: 'I2C' as const, i2c_address: selectedI2CAddress.value, gpio: 0 }
+      : {}
+    const sensorData = buildSensorPayload(i2cOverrides)
     await espStore.addSensor(props.espId, sensorData)
 
     // Multi-value sensors create multiple configs on the server
@@ -280,21 +331,18 @@ async function addMultipleOneWireSensors() {
   }
   let successCount = 0
   let failCount = 0
-  const chosenSubzoneId = normalizeSubzoneId(newSensor.value.subzone_id)
   for (const romCode of romCodesToAdd) {
     try {
       const device = state.scanResults.find(d => d.rom_code === romCode)
-      await espStore.addSensor(props.espId, {
-        sensor_type: (device?.device_type || 'ds18b20').toUpperCase(),
+      const autoName = `Temp ${romCode.slice(-4)}`
+      const sensorData = buildSensorPayload({
+        sensor_type: (device?.device_type || 'ds18b20').toLowerCase(),
         gpio: oneWireScanPin.value,
         onewire_address: romCode,
-        interface_type: 'ONEWIRE' as any,
-        operating_mode: 'continuous',
-        timeout_seconds: 180,
-        raw_mode: true,
-        name: `Temp ${romCode.slice(-4)}`,
-        subzone_id: chosenSubzoneId ?? undefined,
+        interface_type: 'ONEWIRE' as const,
+        name: newSensor.value.name || autoName,
       })
+      await espStore.addSensor(props.espId, sensorData)
       successCount++
     } catch (err) {
       logger.error(`Failed to add OneWire sensor ${romCode}`, err)
@@ -343,10 +391,10 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
         </select>
       </div>
 
-      <!-- Type-Aware Summary -->
-      <div v-if="typeSummary" class="type-summary">
+      <!-- Type-Aware Summary (reactive: reflects I2C address, interval, multi-value count) -->
+      <div v-if="sensorTypeInfo" class="type-summary" role="status" aria-live="polite">
         <Info :size="14" class="type-summary-icon" />
-        <span>{{ typeSummary }}</span>
+        <span>{{ sensorTypeInfo }}</span>
       </div>
 
       <!-- OneWire Scan Section -->

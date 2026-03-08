@@ -425,7 +425,10 @@ export const useDashboardStore = defineStore('dashboard', () => {
             logger.debug(`Synced layout "${layout.name}" to server (create, serverId=${response.data.id})`)
           }
         }
+        lastSyncError.value = null
       } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Layout konnte nicht gespeichert werden'
+        lastSyncError.value = msg
         logger.warn(`Failed to sync layout "${layout.name}" to server`, e)
       }
     }, SAVE_DEBOUNCE_MS)
