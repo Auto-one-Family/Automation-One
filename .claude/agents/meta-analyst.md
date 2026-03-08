@@ -32,7 +32,7 @@ description: |
   Contradiction between reports, meta-analyst documents without resolving.
   </commentary>
   </example>
-model: sonnet
+model: haiku
 color: magenta
 tools: ["Read", "Write", "Grep", "Glob"]
 ---

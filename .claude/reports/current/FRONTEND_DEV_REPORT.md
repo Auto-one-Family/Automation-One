@@ -1,7 +1,344 @@
-# Frontend Dev Report: Phase 4D Diagnostics Hub — Review & Fix
+# Frontend Dev Report: DS18B20 Add-Flow Analyse — Echter ESP
 
-## Modus: B (Implementierung / Review & Fix)
-## Auftrag: Review und Bugfix der Phase 4D Diagnostics Hub Frontend-Implementierung auf Pattern-Konsistenz und Korrektheit
+## Modus: A (Analyse)
+## Auftrag: DS18B20-Add-Flow fuer echten ESP (Wokwi) vollstaendig analysieren. Warum schlaegt er fehl?
+
+---
+
+## Codebase-Analyse
+
+### Analysierte Dateien
+- `El Frontend/src/components/esp/AddSensorModal.vue` (825 Zeilen, vollstaendig gelesen)
+- `El Frontend/src/components/esp/SensorConfigPanel.vue` (>53KB, gezielt gelesen)
+- `El Frontend/src/api/sensors.ts` (vollstaendig gelesen)
+- `El Frontend/src/stores/esp.ts` (>83KB, Zeilen 660-730 = `addSensor` Action gezielt gelesen)
+- `El Frontend/src/api/esp.ts` (Zeilen 170-189 = `isMockEsp` gelesen)
+- `El Frontend/src/shared/stores/gpio.store.ts` (Zeilen 260-360 = `scanOneWireBus` gelesen)
+- `El Frontend/src/components/esp/DeviceDetailView.vue` (vollstaendig gelesen)
+- `El Frontend/src/views/HardwareView.vue` (gezielt gegrept)
+- `El Frontend/src/components/esp/ESPOrbitalLayout.vue` (gezielt gegrept)
+
+---
+
+## UI-Flow: DS18B20 bei echtem ESP hinzufuegen (vollstaendig dokumentiert)
+
+### Einstiegspunkt
+Der Nutzer gelangt ueber zwei moegliche Wege zum AddSensorModal:
+
+**Weg A (Drag & Drop):** Sidebar-Komponente in Dashboard → Sensor-Typ auf ESPOrbitalLayout ziehen → `useOrbitalDragDrop` setzt `showAddSensorModal = true` und `droppedSensorType = 'ds18b20'`
+
+**Weg B (Manuell):** "Sensor hinzufuegen"-Button in ESPCard/ESPOrbitalLayout → `showAddSensorModal = true` ohne vorselektierten Typ
+
+Das `AddSensorModal` wird von `ESPOrbitalLayout.vue` (Zeile 394-395) und ueber `DeviceDetailView.vue → HardwareView.vue` gerendert.
+
+### Schritt 1: Modal oeffnet sich
+```
+watch(props.modelValue) → resetForm() → Typ 'ds18b20' ist Default
+```
+- Form-State: `sensor_type = 'ds18b20'`, `gpio = oneWireScanPin.value (4)`
+- Wenn `initialSensorType` gesetzt: Typ wird auf ds18b20 vorgewaehlt
+- `isOneWireSensor = computed(() => sensor_type.includes('ds18b20'))` → true
+
+### Schritt 2: OneWire-Scan-Sektion erscheint
+- Template: `v-if="isOneWireSensor"` → Zeigt OneWire-Scan-Sektion
+- User waehlt GPIO-Pin (Dropdown, Default GPIO 4)
+- User klickt "Bus scannen"
+
+### Schritt 3: Scan-Button → `handleOneWireScan()`
+```
+handleOneWireScan() → espStore.scanOneWireBus(espId, pin)
+  → gpioStore.scanOneWireBus()
+    → oneWireApi.scanBus(espId, pin)
+      → POST /api/v1/sensors/esp/{esp_id}/onewire/scan?pin=4
+```
+Bei echtem ESP: Der Server sendet einen MQTT-Befehl zum ESP. ESP scannt den OneWire-Bus und antwortet. Das kann 1-10 Sekunden dauern.
+Bei Wokwi-Simulation: Haengt davon ab, ob die Simulation OneWire-Scan-Befehle implementiert hat.
+
+Kritischer Punkt — falls der ESP offline ist oder der MQTT-Scan fehlschlaegt:
+- HTTP 503 → "ESP-Gerät ist offline"
+- HTTP 504 → "ESP antwortet nicht (Timeout)"
+- Fehler landet in `state.scanError` → UI zeigt Fehler-Banner
+
+### Schritt 4: Scan-Ergebnisse
+Falls Scan erfolgreich: Devices werden in der Liste angezeigt.
+User waehlt ROM-Codes via Checkbox aus.
+
+### Schritt 5: "N neue Sensoren hinzufuegen" → `addMultipleOneWireSensors()`
+```typescript
+// AddSensorModal.vue Zeilen 322-361
+for (const romCode of romCodesToAdd) {
+  const device = state.scanResults.find(d => d.rom_code === romCode)
+  const autoName = `Temp ${romCode.slice(-4)}`
+  const sensorData = buildSensorPayload({
+    sensor_type: (device?.device_type || 'ds18b20').toUpperCase(),
+    gpio: oneWireScanPin.value,
+    onewire_address: romCode,
+    interface_type: 'ONEWIRE',
+    name: newSensor.value.name || autoName,
+  })
+  await espStore.addSensor(props.espId, sensorData)
+}
+```
+
+`buildSensorPayload()` (Zeilen 229-243) nimmt alle User-Inputs und merged `overrides`:
+```typescript
+function buildSensorPayload(overrides) {
+  return {
+    sensor_type: newSensor.value.sensor_type,
+    name: newSensor.value.name || undefined,    // User-Name-Input
+    raw_value: newSensor.value.raw_value,
+    unit: newSensor.value.unit,
+    gpio: newSensor.value.gpio,
+    quality: newSensor.value.quality,
+    raw_mode: newSensor.value.raw_mode,
+    operating_mode: newSensor.value.operating_mode,
+    timeout_seconds: newSensor.value.timeout_seconds,
+    subzone_id: normalizeSubzoneId(newSensor.value.subzone_id),
+    ...overrides,
+  }
+}
+```
+
+### Schritt 6: ESP Store `addSensor()` — Real-ESP-Pfad
+
+```typescript
+// esp.ts Zeilen 683-723
+if (isMock(deviceId)) {
+  await debugApi.addSensor(deviceId, config)     // Mock-Pfad
+} else {
+  // REAL-ESP-Pfad
+  const interfaceType = inferInterfaceType(config.sensor_type)
+  const defaultI2CAddress = getDefaultI2CAddress(config.sensor_type)
+
+  const realConfig: SensorConfigCreate = {
+    esp_id: deviceId,
+    gpio: config.gpio,
+    sensor_type: config.sensor_type,
+    name: config.name || null,
+    enabled: true,
+    subzone_id: normalizeSubzoneId(config.subzone_id),
+    interface_type: config.interface_type || interfaceType,
+    i2c_address: interfaceType === 'I2C' ? defaultI2CAddress : null,
+    onewire_address: config.onewire_address || null,
+    operating_mode: config.operating_mode || 'continuous',
+    timeout_seconds: config.timeout_seconds ?? 180,
+    // ...
+  }
+  await sensorsApi.createOrUpdate(deviceId, config.gpio, realConfig)
+}
+```
+
+---
+
+## Identifizierte Bugs und Probleme
+
+### BUG-A (KRITISCH fuer I2C): `addSensor` fuer Real-ESP ignoriert User-gewaehlte I2C-Adresse
+
+**Betrifft:** I2C-Sensoren (SHT31, BMP280) bei echten ESPs — nicht DS18B20.
+
+**Ort:** `El Frontend/src/stores/esp.ts` Zeile 704
+```typescript
+// BUG: Nutzt IMMER defaultI2CAddress aus Registry, ignoriert config.i2c_address
+i2c_address: interfaceType === 'I2C' ? defaultI2CAddress : null,
+```
+Der User waehlt im Modal eine I2C-Adresse (z.B. 0x45 fuer SHT31 mit ADDR-Pin=HIGH). Die `addSensor`-Action im Store ignoriert diese und nutzt immer den Registry-Default (0x44). Das `config.i2c_address`-Feld aus dem Modal wird nicht an `realConfig` weitergegeben.
+
+**Fix (1 Zeile):**
+```typescript
+i2c_address: interfaceType === 'I2C'
+  ? (config.i2c_address ?? defaultI2CAddress)
+  : null,
+```
+
+---
+
+### BUG-B (KRITISCH fuer DS18B20): Kein Scan = kein Hinzufuegen
+
+**Betrifft:** DS18B20 auf echtem ESP (einschliesslich Wokwi-Simulation).
+
+**Ursache:** Der einzige Weg einen DS18B20 auf einem echten ESP hinzuzufuegen erfordert einen OneWire-Bus-Scan via MQTT. Es gibt keinen manuellen Fallback. Das bedeutet:
+
+1. ESP muss online sein (MQTT-Verbindung aktiv)
+2. ESP muss OneWire-Scan-Befehle per MQTT implementieren
+3. Der ESP muss innerhalb von 10 Sekunden antworten
+
+Falls eines dieser Kriterien nicht erfuellt ist → Scan schlaegt fehl → es gibt keine Moeglichkeit einen DS18B20 ohne ROM-Code hinzuzufuegen.
+
+**Kein Frontend-Bug per se** — das ist eine Architekturentscheidung. Aber fuer Wokwi-ESPs ist der OneWire-Scan moeglicherweise nicht implementiert.
+
+**Fehlermeldungen die der User sieht:**
+- HTTP 503: "ESP-Gerät ist offline"
+- HTTP 504: "ESP antwortet nicht (Timeout). Ist OneWire-Bus auf GPIO X konfiguriert?"
+
+---
+
+### BUG-C (MEDIUM): `sensor_type` wird UPPERCASE gesendet
+
+**Ort:** `El Frontend/src/components/esp/AddSensorModal.vue` Zeile 339
+```typescript
+sensor_type: (device?.device_type || 'ds18b20').toUpperCase(),
+```
+`device.device_type` kommt vom Scan-Result (z.B. `"ds18b20"`). Es wird `.toUpperCase()` angewendet → `"DS18B20"`. Der Server-Endpunkt `POST /sensors/{espId}/{gpio}` muss pruefen ob uppercase `sensor_type` akzeptiert wird.
+
+**Fix (1 Zeile):**
+```typescript
+sensor_type: (device?.device_type || 'ds18b20').toLowerCase(),
+```
+
+---
+
+### BUG-D (LOW): NB7-Status
+
+NB7 lautete: "DS18B20 OneWire add flow ignores user inputs (name, raw_value, unit)."
+
+**Aktueller Stand nach v9.30 Refactor:**
+- `name`: wird uebernommen, korrekt
+- `raw_value`: wird an `buildSensorPayload` uebergeben, aber in `realConfig` (SensorConfigCreate) ist kein `raw_value`-Feld — wird still ignoriert
+- `unit`: gleiches Problem
+
+**Fazit:** NB7 ist fuer echte ESPs teilweise gefixt (`name` funktioniert). `raw_value` und `unit` werden ignoriert — das ist fuer Real-ESPs akzeptabel, da der ESP eigene Messwerte liefert. Fuer Mock-ESPs war es kritischer (Debug-API nutzt diese Felder).
+
+---
+
+## Hauptursache fuer Wokwi-ESP-Scheitern
+
+Das beschriebene Problem hat folgende wahrscheinliche Ursachen (Prioritaet):
+
+**Szenario 1 (wahrscheinlichste Ursache):** OneWire-Scan-MQTT-Handler auf dem Wokwi-ESP nicht implementiert oder ESP antwortet nicht innerhalb von 10 Sekunden. Resultat: HTTP 504 Timeout.
+
+**Szenario 2:** `sensor_type = "DS18B20"` (uppercase, BUG-C) wird vom Server abgelehnt → HTTP 4xx/5xx beim `POST /sensors/{espId}/{gpio}` Call.
+
+**Szenario 3:** Wokwi-ESP wird als Mock erkannt (falls esp_id `ESP_MOCK_` Praefix hat) → Mock-API-Pfad schlaegt fehl.
+
+**Szenario 4:** User versucht ohne Scan den "Hinzufuegen"-Button zu nutzen — der Button erscheint bei OneWire-Sensor-Typ gar nicht (`v-if="!isOneWireSensor"` auf dem Primär-Button). Der User sieht nur den Scan-Bereich, nicht den normalen Submit-Button.
+
+---
+
+## Wie wird AddSensorModal fuer echten ESP ausgeloest?
+
+### Via ESPOrbitalLayout (Dashboard-View)
+```
+ESPCard → "+" Button → useOrbitalDragDrop setzt showAddSensorModal = true
+```
+
+### Via DeviceDetailView (HardwareView Level 3)
+```
+HardwareView → DeviceMiniCard klicken → DeviceDetailView → ESPOrbitalLayout
+```
+
+**Unterschied Mock vs. Real:** Es gibt keinen unterschiedlichen UI-Trigger. Beide nutzen dasselbe AddSensorModal. Der Unterschied liegt im Store (`isMock()` Abfrage auf `esp_id`).
+
+**isMock-Logik** (`api/esp.ts` Zeile 174-179):
+```typescript
+function isMockEsp(espId: string): boolean {
+  return espId.startsWith('ESP_MOCK_') || espId.startsWith('MOCK_')
+}
+```
+Ein Wokwi-ESP ohne diesen Praefix wird als Real-ESP behandelt.
+
+---
+
+## SensorConfigPanel — Bestehenden DS18B20 konfigurieren
+
+Falls ein DS18B20 bereits existiert (z.B. durch Scan hinzugefuegt), wird er ueber `SensorConfigPanel` konfiguriert:
+
+```
+HardwareView → DeviceDetailView → ESPOrbitalLayout → SensorColumn → SensorSatellite (Klick)
+→ emit 'sensor-click': { configId, gpio, sensorType }
+→ DeviceDetailView.handleSensorClick()
+→ HardwareView.handleSensorClickFromDetail()
+→ configSensorData.value = { espId, gpio, sensorType, unit, configId }
+→ showSensorConfig = true (SlideOver oeffnet SensorConfigPanel)
+```
+
+`SensorConfigPanel.handleSave()` sendet `POST /sensors/{espId}/{gpio}` mit Name, Schwellwerten, Betriebsmodus etc. Fuer OneWire-Sensoren wird `interface_type = 'ONEWIRE'` korrekt via `inferInterfaceType()` berechnet.
+
+---
+
+## Qualitaetspruefung (8-Dimensionen-Checkliste)
+
+| # | Dimension | Befund |
+|---|-----------|--------|
+| 1 | Struktur | AddSensorModal in `esp/`, SensorConfigPanel in `esp/` — korrekt |
+| 2 | Namenskonvention | OK, alle PascalCase/camelCase korrekt |
+| 3 | Rueckwaertskompatibilitaet | BUG-A: i2c_address fuer Real-ESP ignoriert |
+| 4 | Wiederverwendbarkeit | `buildSensorPayload` korrekt extrahiert (v9.30) |
+| 5 | Speicher & Ressourcen | OneWire-Scan in gpioStore gecacht, cleanup via clearOneWireScan OK |
+| 6 | Fehlertoleranz | Scan-Fehler werden angezeigt, aber kein manueller Fallback (BUG-B) |
+| 7 | Seiteneffekte | `espStore.fetchDevice()` nach addSensor korrekt, kein Leak |
+| 8 | Industrielles Niveau | BUG-C (uppercase sensor_type) ist potenzieller Server-Error |
+
+---
+
+## Fix-Vorschlaege
+
+### Fix 1 (BUG-C, Prio 1): sensor_type lowercase — 1 Zeile
+**Datei:** `El Frontend/src/components/esp/AddSensorModal.vue` Zeile 339
+```typescript
+// IST:
+sensor_type: (device?.device_type || 'ds18b20').toUpperCase(),
+// SOLL:
+sensor_type: (device?.device_type || 'ds18b20').toLowerCase(),
+```
+
+### Fix 2 (BUG-A, Prio 2): User-I2C-Adresse uebergeben — 1 Zeile
+**Datei:** `El Frontend/src/stores/esp.ts` Zeile 704
+```typescript
+// IST:
+i2c_address: interfaceType === 'I2C' ? defaultI2CAddress : null,
+// SOLL:
+i2c_address: interfaceType === 'I2C' ? (config.i2c_address ?? defaultI2CAddress) : null,
+```
+
+### Fix 3 (BUG-B, optional): Manuellen ROM-Code-Fallback ermoeglichen
+Nach der Scan-Section ein optionales Textfeld anzeigen wenn kein Scan-Ergebnis vorliegt:
+```
+Bedingung: isOneWireSensor && !oneWireScanState.isScanning
+           && (!oneWireScanState.scanResults.length || oneWireScanState.scanError)
+```
+Mit manuellem ROM-Code koennte der User auch ohne funktionierende MQTT-Verbindung einen DS18B20 hinzufuegen.
+
+---
+
+## Diagnoseschritte fuer Robins Wokwi-Problem
+
+Robin sollte folgendes pruefen:
+
+1. **ESP-ID pruefen:** Beginnt die ID des Wokwi-ESP mit `ESP_MOCK_` oder `MOCK_`? Falls ja → Mock-Pfad wird genutzt.
+2. **Scan-Fehlermeldung:** Welche Fehlermeldung erscheint beim OneWire-Scan? (503/504/andere HTTP-Code)
+3. **Browser-Konsole:** Gibt es einen API-Error im Network-Tab bei `POST /api/v1/sensors/esp/{id}/onewire/scan`?
+4. **sensor_type Case:** Im Network-Tab pruefen was `sensor_type` im POST-Body des `createOrUpdate`-Calls ist — uppercase oder lowercase?
+5. **"Hinzufuegen"-Button:** Ist der Button sichtbar? Bei `isOneWireSensor = true` erscheint der normale Submit-Button NICHT — nur der Scan-Bereich.
+
+---
+
+## Cross-Layer Impact
+
+| Schicht | Betroffen | Pruefung noetig |
+|---------|-----------|-----------------|
+| Server | `POST /api/v1/sensors/esp/{id}/onewire/scan` | MQTT-Handler fuer Real-ESP vorhanden? |
+| Server | `POST /sensors/{espId}/{gpio}` | Akzeptiert uppercase `sensor_type`? Normalisierung im Backend? |
+| ESP32 | OneWire-Scan MQTT-Befehl | Implementiert in Wokwi-Simulation? |
+
+**Empfehlung:** Server-Dev-Agent fragen ob `sensor_type` case-insensitiv verarbeitet wird und ob der Wokwi-ESP den OneWire-Scan-MQTT-Handler implementiert hat.
+
+---
+
+## Verifikation
+
+Keine Code-Aenderungen vorgenommen — reine Analyse. Kein Build erforderlich.
+
+---
+
+## Empfehlung: Naechster Schritt
+
+**Fix 1 (BUG-C)** kann sofort implementiert werden: `.toUpperCase()` → `.toLowerCase()` in AddSensorModal.vue Zeile 339.
+
+**Fuer BUG-B:** Server-Dev-Agent oder ESP32-Dev-Agent fragen ob der Wokwi-ESP MQTT-Handler fuer den OneWire-Scan implementiert hat.
+
+---
+
+## Fruehere Report-Daten (ueberschrieben)
 
 ---
 

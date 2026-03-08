@@ -513,3 +513,69 @@ cd "El Frontend" && npm run lint
 | Inline Styles | Tailwind CSS verwenden |
 | `any` Type | Explizite Types definieren |
 | Magic Strings | Labels in utils/labels.ts |
+
+---
+
+## Figma MCP Integration
+
+### Required Flow (bei jeder Figma-Implementierung)
+
+1. `get_design_context` fuer den Figma-Node ausfuehren
+2. Falls Response zu gross: `get_metadata` fuer Node-Map, dann gezielt `get_design_context`
+3. `get_screenshot` fuer visuelle Referenz
+4. Erst DANACH Assets herunterladen und implementieren
+5. Figma-Output (React + Tailwind) in Auto-One Konventionen uebersetzen
+6. Visuell gegen Figma validieren vor Abschluss
+
+### Design Token Mapping (Figma -> Auto-One)
+
+```
+IMPORTANT: Figma-Output kommt als React + Tailwind. Uebersetzen nach:
+- Framework:    React -> Vue 3 (Script Setup + Composition API)
+- Styling:      Tailwind-Klassen beibehalten, CSS Variables ergaenzen
+- Farben:       NIEMALS hex hardcoden -> var(--color-*) aus styles/tokens.css
+- Spacing:      4px Grid: var(--space-1) bis var(--space-12)
+- Radius:       var(--radius-sm|md|lg|full) - nur 4 Stufen
+- Elevation:    var(--elevation-flat|raised|floating) - nur 3 Stufen
+- Typography:   var(--text-xs|sm|base|lg|xl|2xl|display), Font: Outfit
+- Glass:        .glass-panel, .glass-overlay, .iridescent-border aus glass.css
+- Transitions:  var(--transition-fast|base|slow)
+- Z-Index:      var(--z-*) Skala aus tokens.css
+```
+
+### Component Rules
+
+```
+- IMPORTANT: Zuerst shared/design/ pruefen -> BaseBadge, BaseButton, BaseCard,
+  BaseInput, BaseModal, BaseSelect, BaseSkeleton, BaseSpinner, BaseToggle
+- Layout: AppShell, Sidebar, TopBar aus shared/design/layout/
+- Patterns: ConfirmDialog, ContextMenu, EmptyState, ErrorState, ToastContainer
+- Neue Komponenten in src/components/{bereich}/ ablegen
+- IMMER <script setup lang="ts"> + defineProps<Props>() + defineEmits
+- Icons: lucide-vue-next (KEIN neues Icon-Paket installieren)
+- Imports: @/ Alias (KEINE relativen ../.. Pfade)
+- Tailwind-Klassen: dark-* Palette aus tailwind.config.js
+- Dark Theme ONLY - keine Light-Mode Styles
+- Cleanup in onUnmounted() fuer Subscriptions/Listeners
+```
+
+### Asset Rules
+
+```
+- IMPORTANT: Figma MCP localhost-URLs direkt verwenden (KEINE Platzhalter)
+- IMPORTANT: KEINE neuen Icon-Pakete installieren - nur lucide-vue-next
+- Assets nach El Frontend/public/assets/ speichern
+- SVGs als Vue-Komponenten wenn interaktiv, sonst als Datei
+```
+
+### Tailwind Config Referenz
+
+```
+Farben:     dark-50..950, iridescent-1..4, accent, success, warning, danger, info, mock, real, esp-*
+Fonts:      font-sans (Outfit), font-mono (JetBrains Mono)
+Font-Sizes: text-xs..text-display (11px..32px, base=14px)
+Shadows:    shadow-glass, shadow-card-hover, shadow-iridescent, shadow-raised, shadow-floating
+Animations: animate-shimmer, animate-fade-in, animate-slide-up, animate-scale-in, animate-breathe
+Radius:     rounded-sm(6), rounded-md(10), rounded-lg(16)
+Screens:    3xl(1600px), 4xl(1920px)
+```

@@ -10,6 +10,7 @@ description: |
   Heartbeat-Handler, Sensor-Handler, Actuator-Handler, Pi-Enhanced-Processing,
   Sensor-Libraries, Library-Loader, Error-Codes, pytest, Integration-Tests.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit
+argument-hint: "[Beschreibe was implementiert werden soll]"
 ---
 
 # God-Kaiser Server - Skill Dokumentation
@@ -40,7 +41,7 @@ src/ (60,604 Zeilen)
 ├── services/      13,675 (22.6%)  Business Logic, Logic Engine
 ├── api/v1/        12,210 (20.1%)  REST Endpoints (~230, inkl. zone_context, backups, export, schema_registry)
 ├── core/           7,294 (12.0%)  Config, Security, Scheduler
-├── db/             6,942 (11.5%)  Models (18), Repositories (17)
+├── db/             6,942 (11.5%)  Models (19), Repositories (18)
 ├── mqtt/           6,938 (11.4%)  Client, Handlers (14), Publisher
 ├── schemas/        6,778 (11.2%)  Pydantic DTOs (70+)
 ├── sensors/        3,728 (6.2%)   Sensor Libraries
@@ -97,6 +98,7 @@ Server sendet:  Actuator-Commands, Config-Updates
 | 3.4.2 | Maintenance Service | 312-322 | JA |
 | 3.4.5 | Alert Suppression Scheduler | ~325 | NON-FATAL |
 | 3.5 | Mock-ESP Recovery | 324-336 | NON-FATAL |
+| 3.5.1 | Rebuild simulation_configs (Write-Through Cache) | ~466-485 | NON-FATAL |
 | 3.6 | Sensor Type Auto-Reg | 338-357 | NON-FATAL |
 | 3.7 | Sensor Schedule Recovery | 359-387 | NON-FATAL |
 | 4 | MQTT Topics Subscribe | 389-395 | CONDITIONAL |
@@ -190,6 +192,7 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | audit | /v1/audit | 21 | Admin/Active |
 | debug | /v1/debug | 59 | Admin |
 | zone | /v1/zone | 6 | Operator+ |
+| zones | /v1/zones | 5 | Operator+ |
 | subzone | /v1/subzone | 6 | Operator+ |
 | users | /v1/users | 7 | Admin |
 | errors | /v1/errors | 4 | Active |
@@ -245,18 +248,19 @@ class YourRepository(BaseRepository[YourModel]):
 
 | Model | Tabelle | Wichtige Felder |
 |-------|---------|-----------------|
-| ESPDevice | `esps` | esp_id (PK), zone_id, zone_name, master_zone_id, is_online, last_heartbeat |
+| ESPDevice | `esps` | esp_id (PK), zone_id, zone_name, master_zone_id, is_online, last_heartbeat, deleted_at (soft-delete), deleted_by |
 | SensorConfig | `sensor_configs` | esp_id (FK), gpio, sensor_type, i2c_address, sensor_metadata (JSON, inkl. description, unit), alert_config (JSONB), runtime_stats (JSONB) |
 | ActuatorConfig | `actuator_configs` | esp_id (FK), gpio, actuator_type, inverted, alert_config (JSONB), runtime_stats (JSONB) |
 | SubzoneConfig | `subzone_configs` | id (UUID PK), esp_id (FK), subzone_id, assigned_gpios (JSON), safe_mode_active |
 | CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority, cooldown_seconds |
-| SensorData | `sensor_data` | sensor_id (FK), raw_value, processed_value, zone_id, subzone_id (Phase 0.1), data_source |
+| SensorData | `sensor_data` | sensor_id (FK), esp_id (FK SET NULL), raw_value, processed_value, zone_id, subzone_id (Phase 0.1), device_name, data_source |
 | AuditLog | `audit_logs` | event_type, severity, source_type |
 | Notification | `notifications` | title, severity (critical/warning/info), source, category, channel, fingerprint (FIX-07 dedup), status (active/acknowledged/resolved), correlation_id, acknowledged_at, acknowledged_by, resolved_at |
 | NotificationPreferences | `notification_preferences` | user_id, channel, enabled, severity_filter |
 | DiagnosticReport | `diagnostic_reports` | id (UUID PK), overall_status, checks (JSON, nullable), started_at, duration_seconds, triggered_by, summary |
 | PluginConfig | `plugin_configs` | plugin_id (PK), display_name, is_enabled, config (JSONB), schedule, capabilities |
 | PluginExecution | `plugin_executions` | id (UUID PK), plugin_id (FK), status, started_at, duration_seconds, result (JSONB), error_message |
+| Zone | `zones` | id (UUID PK), zone_id (UNIQUE), name, description, created_at, updated_at (Phase 0.3) |
 | EmailLog | `email_log` | id (UUID PK), notification_id (FK, SET NULL), to_address, subject, template, provider, status (sent/failed/pending), sent_at, error_message, retry_count (Phase C V1.1) |
 
 ### Multi-Value Sensor Support
@@ -345,15 +349,21 @@ poetry run python scripts/seed_wokwi_esp.py
 - MQTT-Topics ohne `TopicBuilder`
 - Schemas ohne Pydantic-Validierung
 - Blocking-Code in async Handlers
+- ORM-Relationships ohne `selectinload()` in async Queries (→ `MissingGreenlet`)
+- `datetime.now()` ohne timezone (→ naive/aware Mismatch). Immer `datetime.now(timezone.utc)`
+- `DateTime` ohne `timezone=True` in Model-Spalten (→ DB liefert naive Timestamps)
 
 ### IMMER
 
+- `selectinload()` für jede ORM-Relationship die im Response genutzt wird (async SQLAlchemy!)
 - Safety-Check VOR jedem Actuator-Command
 - Repository-Pattern für alle DB-Operationen
 - Pydantic-Schemas für Request/Response
 - Error-Codes aus `src/core/error_codes.py` (5000-5999)
 - Logging via `src/core/logging_config.py`
 - Circuit Breaker für externe Calls (MQTT, DB)
+- `datetime.now(timezone.utc)` statt `datetime.now()` für alle Zeitstempel
+- `DateTime(timezone=True)` für alle datetime-Spalten in SQLAlchemy Models
 
 ### Safety-First Invarianten
 
@@ -375,7 +385,7 @@ poetry run python scripts/seed_wokwi_esp.py
 | **SensorService** | sensor_service.py | 545 | `process_reading()`, `trigger_measurement()` |
 | **ActuatorService** | actuator_service.py | 279 | `send_command()` |
 | **ESPService** | esp_service.py | 944 | `register()`, `approve()`, `reject()` |
-| **ZoneService** | zone_service.py | 430 | `assign_zone()`, `unassign_zone()` |
+| **ZoneService** | zone_service.py | 430 | `assign_zone()`, `unassign_zone()` — auto-creates Zone entity on assign (backward compat) |
 | **MonitorDataService** | monitor_data_service.py | - | `get_zone_monitor_data()` — Subzone-Gruppierung für Monitor L2 |
 | **SubzoneService** | subzone_service.py | 595 | `assign_subzone()`, `set_safe_mode()` |
 | **ConfigBuilder** | config_builder.py | 249 | `build_esp_config()` |

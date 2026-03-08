@@ -7,6 +7,7 @@ description: |
   NICHT verwenden für: Neue Docs schreiben, Reports erstellen, Code-Änderungen.
   Abgrenzung: collect-reports (Reports), system-control (Session-Briefing)
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
+argument-hint: "[what to update]"
 ---
 
 # updatedocs - Dokumentations-Aktualisierung

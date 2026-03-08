@@ -1,3 +1,10 @@
+---
+name: DO
+description: |
+  Precision Execution Skill. Executes a given plan exactly as specified.
+  Trigger: /do, Plan ausfuehren, Implementierung starten.
+---
+
 # /do – Precision Execution Skill
 
 > **Modus:** EDIT (immer)

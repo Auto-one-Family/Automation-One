@@ -1,70 +1,64 @@
 # DB Inspector Report
 
-**Erstellt:** 2026-03-04
-**Modus:** A (Allgemeine Analyse) + Not-Aus-Persistenz-Fix
-**Quellen:** automationone-postgres, pg_isready, alembic_version, esp_devices, sensor_data, sensor_configs, actuator_states, esp_heartbeat_logs
+**Erstellt:** 2026-03-07
+**Modus:** B (Spezifisch: "Database Cleanup - Frischer Start")
+**Quellen:** Alle 29 Tabellen in god_kaiser_db
 
 ---
 
 ## 1. Zusammenfassung
-
-Datenbank ist gesund. Schema aktuell (Migration `add_subzone_custom_data`), keine Orphaned Records. **Not-Aus-Fix:** Ursache für „nach Docker-Neustart wieder alle im Not-Aus“ war persistierter Zustand in `actuator_states.state = 'emergency_stop'`. Der Monitor/das Dashboard liest `emergency_stopped` aus dieser Tabelle; SafetyService ist nur im RAM. Fix: Beim Aufheben (clear_emergency) werden betroffene `actuator_states` auf `idle` gesetzt; beim Server-Start werden alle `emergency_stop`-Einträge auf `idle` zurückgesetzt.
-
----
+Vollstaendiger Cleanup der Datenbank durchgefuehrt. Alle Laufzeit- und Mock-Daten wurden entfernt.
+User-Account (admin), Sensor-Type-Defaults, Notification-Preferences und Plugin-Configs wurden beibehalten.
+DB ist bereit fuer frischen Start.
 
 ## 2. Analysierte Quellen
-
 | Quelle | Status | Bemerkung |
 |--------|--------|-----------|
-| automationone-postgres | OK | Container Up 8h, healthy |
-| pg_isready | OK | accepting connections |
-| alembic current | OK | add_subzone_custom_data (head) |
-| esp_devices | OK | 4 online |
-| sensor_data | OK | 56 Einträge letzte Stunde |
-| sensor_configs | OK | Keine Orphaned Records |
-| alert_config (esp_devices) | OK | Spalte vorhanden |
+| automationone-postgres | OK | Container healthy, 6h uptime |
+| pg_isready | OK | Accepting connections |
 
----
+## 3. Durchgefuehrter Cleanup
 
-## 3. Befunde
+### 3.1 Beibehaltene Tabellen
+| Tabelle | Rows | Grund |
+|---------|------|-------|
+| user_accounts | 1 | admin@example.de (Admin-User) |
+| sensor_type_defaults | 11 | Sensor-Definitionen (9 Typen) |
+| notification_preferences | 1 | User-Einstellung |
+| plugin_configs | 4 | Plugin-Konfiguration |
+| alembic_version | 1 | Migration-Tracking |
 
-### 3.1 Schema & Migration
-- **Schwere:** Keine
-- **Detail:** Migration `add_subzone_custom_data` ist HEAD. Spalte `alert_config` in `esp_devices` existiert (historischer BUG-002 behoben).
+### 3.2 Geleerte Tabellen (TRUNCATE CASCADE)
+| Tabelle | Vorher | Nachher |
+|---------|--------|---------|
+| esp_devices | 1 (Mock #D29D) | 0 |
+| sensor_configs | 2 | 0 |
+| sensor_data | 43 | 0 |
+| esp_heartbeat_logs | 14 | 0 |
+| audit_logs | 13 | 0 |
+| notifications | 12 | 0 |
+| token_blacklist | 4 | 0 |
+| dashboards | 1 | 0 |
+| subzone_configs | 1 | 0 |
+| zones | 1 | 0 |
+| cross_esp_logic | 0 | 0 |
+| actuator_configs/states/history | 0 | 0 |
+| ai_predictions | 0 | 0 |
+| diagnostic_reports | 0 | 0 |
+| email_log | 0 | 0 |
+| esp_ownership | 0 | 0 |
+| kaiser_registry | 0 | 0 |
+| library_metadata | 0 | 0 |
+| logic_execution_history | 0 | 0 |
+| plugin_executions | 0 | 0 |
+| system_config | 0 | 0 |
+| zone_contexts | 0 | 0 |
 
-### 3.2 Orphaned Records
-- **Schwere:** Keine
-- **Detail:** Keine orphaned sensor_configs (LEFT JOIN esp_devices → 0 Zeilen).
+## 4. Hinweise
+- Server Auto-Discovery hat nach erstem TRUNCATE sofort Mock-ESP re-registriert. Zweiter TRUNCATE hat ihn entfernt.
+- Falls Mock-ESP-Simulation laeuft, werden neue Eintraege automatisch erstellt.
+- DB-Groesse nach Cleanup: 9.8 MB (Schema + Indizes)
 
-### 3.3 Datenvolumen
-- **sensor_data:** 6032 kB, 56 Einträge letzte Stunde
-- **esp_heartbeat_logs:** 2712 kB
-- **audit_logs:** 344 kB
-
----
-
-## 4. Extended Checks
-
-| Check | Ergebnis |
-|-------|----------|
-| pg_isready | OK |
-| docker compose ps | automationone-postgres Up 8h |
-| alembic current | add_subzone_custom_data (head) |
-| SELECT alert_config | Spalte vorhanden |
-
----
-
-## 5. Not-Aus-Persistenz (Behoben)
-
-- **Ursache:** `actuator_states.state = 'emergency_stop'` bleibt in der DB erhalten. SafetyService (Not-Aus-Flag) ist nur im RAM und geht bei Neustart verloren. Die Monitor-API (`get_zone_monitor_data`) liest `emergency_stopped = (state.state == "emergency_stop")` aus `actuator_states` → Dashboard zeigt nach Neustart weiterhin Not-Aus.
-- **Fix (implementiert):**
-  1. **Clear-API:** `POST /api/v1/actuators/clear_emergency` setzt für alle betroffenen ESPs in `actuator_states` alle Zeilen mit `state='emergency_stop'` auf `state='idle'`, `current_value=0`.
-  2. **Startup:** Beim Server-Start wird einmalig jede Zeile in `actuator_states` mit `state='emergency_stop'` auf `idle` gesetzt, damit nach Docker-Neustart kein veralteter Not-Aus angezeigt wird.
-- **Prüfung in DB:** `SELECT esp_id, gpio, state FROM actuator_states WHERE state = 'emergency_stop';` sollte nach Clear bzw. nach Neustart 0 Zeilen liefern.
-
----
-
-## 6. Bewertung & Empfehlung
-
-- **Root Cause:** Not-Aus-Zustand wurde nur im SafetyService (RAM) und per MQTT an ESPs geleert, nicht in `actuator_states` → Stale State nach Neustart.
-- **Nächste Schritte:** Server neu starten und prüfen, dass der grüne Button „Aufheben“ weiterhin funktioniert und nach einem erneuten Docker-Neustart keine Geräte mehr im Not-Aus angezeigt werden.
+## 5. Bewertung
+- **Status:** Cleanup erfolgreich
+- **Naechste Schritte:** Keine. DB ist bereit fuer frischen Start.

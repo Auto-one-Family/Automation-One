@@ -6,6 +6,7 @@ description: |
   Aktivieren bei: Topic hinzufuegen, Handler erstellen, Publisher erweitern,
   Subscriber erweitern, Payload-Schema definieren, QoS festlegen.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit
+argument-hint: "[Beschreibe was implementiert werden soll]"
 ---
 
 # MQTT Development Skill

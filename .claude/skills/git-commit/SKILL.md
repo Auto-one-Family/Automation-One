@@ -8,6 +8,8 @@ description: |
   Änderungen committen, was wurde geändert, Staging-Plan
 allowed-tools: Read, Grep, Glob, Bash
 user-invocable: true
+disable-model-invocation: true
+argument-hint: "[commit message]"
 ---
 
 # /git-commit – Change-Analyse & Commit-Vorbereitung

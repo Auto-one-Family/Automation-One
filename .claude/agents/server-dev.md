@@ -11,6 +11,7 @@ description: |
 model: sonnet
 color: green
 tools: ["Read", "Grep", "Glob", "Bash", "Write", "Edit"]
+skills: ["server-development"]
 ---
 
 # Server Development Agent
