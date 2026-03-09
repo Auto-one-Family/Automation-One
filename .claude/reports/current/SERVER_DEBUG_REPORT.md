@@ -1,14 +1,18 @@
-# Server Debug Report
+# Server Debug Report — Root-Cause-Analyse: 9 Bugs (God-Kaiser Server)
 
-**Erstellt:** 2026-03-01 13:15 UTC
-**Modus:** A (Allgemeine Analyse)
-**Quellen:** Docker Container Logs (el-servador, --tail=300), Loki API (4h Zeitfenster 09:00-13:15 UTC), PostgreSQL direkte Queries, Health-Endpoints
+**Erstellt:** 2026-03-08
+**Modus:** B (Spezifisch: RCA fuer 9 gemeldete Server-Bugs)
+**Quellen:** Statische Code-Analyse (kein laufender Server erforderlich)
 
 ---
 
 ## 1. Zusammenfassung
 
-Der God-Kaiser Server laeuft stabil und ist voll einsatzbereit. Alle drei Circuit Breaker (mqtt, database, external_api) sind geschlossen. Die Startup-Sequenz verlief vollstaendig korrekt mit 12 MQTT-Handlern, WebSocket-Manager und Logic Engine. Es wurden **keine echten Business-Logic-Fehler (5000-5699)** und **keine ERROR-Eintraege** gefunden. Handlungsbedarf besteht bei zwei mittelschweren Problemen: (1) Wiederkehrende APScheduler Job-Misses weisen auf Event-Loop-Belastung hin, (2) Broadcast Emergency-Stop-CRITICAL beim Startup ist ein Log-Level-Problem (kein echter Fehler). Drei orphaned Mock-ESPs akkumulieren sich ohne automatische Bereinigung.
+Alle 9 gemeldeten Bugs sind im Code bestätigt und exakt lokalisiert. Zwei Bugs sind KRITISCH
+(sofortiger 500er bei jedem Delete-Device-Aufruf, und MultipleResultsFound bei DS18B20-Konfiguration).
+Drei weitere Bugs sind HOCH priorisiert (ts=0-Epoch, Subzone-Datetime, Status-Desync).
+Die restlichen vier sind MEDIUM/LOW. Keiner der Bugs erfordert eine Architekturänderung —
+alle sind chirurgische Ein- bis Dreizeiler-Fixes oder kleine Methodenumstellungen.
 
 ---
 
@@ -16,265 +20,503 @@ Der God-Kaiser Server laeuft stabil und ist voll einsatzbereit. Alle drei Circui
 
 | Quelle | Status | Bemerkung |
 |--------|--------|-----------|
-| Docker Container Logs `el-servador` | OK | 300 Zeilen analysiert, Server seit 13:11:48 UTC aktiv |
-| Loki API `{compose_service="el-servador"}` | OK | Verfuegbar auf localhost:3100, 4h-Fenster abgefragt |
-| `/api/v1/health/live` | OK | `{"success":true,"alive":true}` |
-| `/api/v1/health/ready` | OK | `{"success":true,"ready":true,"checks":{"database":true,"mqtt":true,"disk_space":true}}` |
-| `/api/v1/health/detailed` | GESPERRT | Benoetigt Auth-Token (401) - normales Verhalten |
-| PostgreSQL `god_kaiser_db` | OK | Direkte psql-Abfragen erfolgreich |
-| Alembic Migration | OK | Aktuelle Revision: `a1b2c3d4e5f6` (token_blacklist) |
+| `mqtt/handlers/heartbeat_handler.py` | OK | 1353 Zeilen, vollständig gelesen |
+| `mqtt/handlers/sensor_handler.py` | OK | Vollständig gelesen |
+| `mqtt/handlers/subzone_ack_handler.py` | OK | Vollständig gelesen |
+| `mqtt/handlers/actuator_handler.py` | OK | Zeilen 1-120 gelesen |
+| `db/repositories/sensor_repo.py` | OK | Vollständig gelesen |
+| `db/repositories/notification_repo.py` | OK | Zeilen 600-634 (Bug-Zone) gelesen |
+| `db/repositories/esp_repo.py` | OK | Vollständig gelesen |
+| `api/v1/esp.py` | OK | Zeilen 600-800 gelesen |
+| `api/v1/sensors.py` | OK | Status-Guard Zeile 583 |
+| `api/v1/actuators.py` | OK | Status-Guard Zeile 434 |
+| `schemas/subzone.py` | OK | Vollständig gelesen |
+| `services/subzone_service.py` | OK | Zeilen 1-200 gelesen |
+| `sensors/sensor_libraries/active/temperature.py` | OK | Zeilen 1-239 gelesen |
+| `sensors/sensor_type_registry.py` | OK | Vollständig gelesen |
+| `services/sensor_service.py` | OK | Vollständig gelesen |
+| `El Frontend/src/composables/useESPStatus.ts` | OK | Zeilen 77-107 |
 
 ---
 
 ## 3. Befunde
 
-### 3.1 Startup-Sequenz (VOLLSTAENDIG - KEIN PROBLEM)
+---
 
-Die Startup-Sequenz um 13:11:48 UTC verlief fehlerfrei. Im analysierten 4h-Fenster gab es 4 Server-Neustarts (09:32, 10:27, 10:49, 13:11).
+### BUG-7 (KRITISCH): Device-Delete 500 — `.astext` auf JSON-Spalte
 
-Letzter Startup 13:11:48 UTC:
-- CircuitBreaker `external_api` initialisiert (threshold=5, recovery=60s, half_open=15s)
-- CircuitBreaker `database` initialisiert (threshold=3, recovery=10s, half_open=5s)
-- CircuitBreaker `mqtt` initialisiert (threshold=5, recovery=30s, half_open=10s)
-- DB Engine erstellt: pool_size=10, max_overflow=20
-- MQTT connected to `mqtt-broker:1883` (result code: 0)
-- **12 MQTT Handler registriert:** sensor/data, actuator/status, actuator/response, actuator/alert, heartbeat, discovery, config_response, zone/ack, subzone/ack, will, error, diagnostics
-- Zuzueglich 3 Mock-ESP-Handler: actuator/command, actuator/emergency, broadcast/emergency
-- CentralScheduler gestartet
-- SimulationScheduler gestartet
-- Logic Engine gestartet + Evaluation Loop aktiv
-- Logic Scheduler gestartet (60s Intervall)
-- WebSocket Manager mit Event Loop initialisiert
-- Mock-Recovery: 1 Simulation wiederhergestellt (MOCK_95A49FCB)
-- Sensor Type Auto-Registration: 11 Typen (0 neu, 11 bestehend)
-- MaintenanceService: 5 Jobs registriert
-- **Resilience Status beim Start: healthy=True, breakers=3 (closed=3, open=0)**
+**Schwere:** Kritisch
+**Fix-Komplexität:** One-Liner
 
-**Ergebnis:** Alle Services korrekt initialisiert. Startup ohne Fehler.
+**Datei:** `El Servador/god_kaiser_server/src/db/repositories/notification_repo.py`
+
+**Problematische Code-Stelle:**
+```python
+# Zeile 621 — BUG
+Notification.extra_data["esp_id"].astext == esp_id,
+```
+
+**Root Cause:** `.astext` ist die SQLAlchemy 1.x API fuer PostgreSQL `JSONB`-Spalten. Die
+`extra_data`-Spalte im `Notification`-Model ist als `JSON` (nicht `JSONB`) deklariert:
+
+```python
+# notification.py Zeile 139-144
+extra_data: Mapped[dict] = mapped_column(
+    JSON,   # JSON, nicht JSONB
+    default=dict,
+    nullable=False,
+)
+```
+
+`JSON`-Spalten bieten kein `.astext`-Attribut. SQLAlchemy 2.x hat diesen Accessor zudem
+generell entfernt. Der `AttributeError` wird bei JEDEM Aufruf von
+`resolve_alerts_for_device()` geworfen — was `DELETE /api/v1/esp/devices/{device_id}` in
+`esp.py:656` fuer jedes Device trifft. `soft_delete` (Zeile 661) wird nie erreicht —
+das Device bleibt in der DB.
+
+**Blast Radius:** Jeder Device-Delete schlaegt fehl (500). Geloeschte Devices koennen nicht
+entfernt werden. Alerts haeufen sich auf.
+
+**Fix-Vorschlag:**
+```python
+# Zeile 621 — VORHER
+Notification.extra_data["esp_id"].astext == esp_id,
+
+# Zeile 621 — NACHHER (SQLAlchemy 2.x)
+Notification.extra_data["esp_id"].as_string() == esp_id,
+```
+
+Langfristig: `JSON` → `JSONB` per Alembic-Migration migrieren (erlaubt GIN-Index und
+native `.astext`-Syntax).
 
 ---
 
-### 3.2 CRITICAL-Eintraege: Broadcast Emergency Stop (LOG-LEVEL-PROBLEM)
+### BUG-8 (KRITISCH): MultipleResultsFound bei DS18B20 — fehlender onewire_address-Filter
 
-- **Schwere:** Mittel (kein echter Fehler, aber irrefuehrendes Log-Level)
-- **Haeufigkeit:** 8x CRITICAL im 4h-Zeitfenster (je 2x pro Server-Neustart)
-- **Zeitpunkte:** 09:32:49, 10:27:45-46, 10:49:25, 13:11:48
+**Schwere:** Kritisch
+**Fix-Komplexität:** Medium
 
+**Datei:** `El Servador/god_kaiser_server/src/db/repositories/sensor_repo.py`
+
+**Problematische Code-Stelle:**
+```python
+# Zeile 86-109
+async def get_by_esp_gpio_and_type(
+    self, esp_id: uuid.UUID, gpio: int, sensor_type: str
+) -> Optional[SensorConfig]:
+    stmt = select(SensorConfig).where(
+        SensorConfig.esp_id == esp_id,
+        SensorConfig.gpio == gpio,
+        func.lower(SensorConfig.sensor_type) == sensor_type.lower(),
+        # KEIN onewire_address-Filter
+    )
+    result = await self.session.execute(stmt)
+    return result.scalar_one_or_none()  # ZEILE 109: CRASH bei 2+ DS18B20 auf gleicher GPIO
 ```
-src.services.simulation.actuator_handler - CRITICAL - [MockActuator] Broadcast emergency stop received!
-src.services.simulation.actuator_handler - WARNING  - [MockActuator] Emergency stop received for MOCK_95A49FCB
-src.services.simulation.actuator_handler - INFO     - [MockActuator] Emergency stop executed for MOCK_95A49FCB
+
+**Root Cause:** Mehrere DS18B20-Sensoren auf demselben OneWire-Bus teilen `gpio` UND
+`sensor_type = "ds18b20"`. Die Query liefert N Rows, `scalar_one_or_none()` erwartet
+maximal eine — wirft `sqlalchemy.exc.MultipleResultsFound`.
+
+Szenario (3x DS18B20 auf GPIO 4):
+```
+esp_id  | gpio | sensor_type | onewire_address
+uuid-1  |  4   | ds18b20     | 28FF641E8D3C0C79
+uuid-1  |  4   | ds18b20     | 28AA5B1E8D3C0C12
+uuid-1  |  4   | ds18b20     | 28CC3F1E8D3C0C45
+```
+WHERE `esp_id=uuid-1 AND gpio=4 AND sensor_type='ds18b20'` → 3 Rows → CRASH.
+
+Fuer I2C-Sensoren (SHT31) ist die Methode sicher: `sht31_temp` und `sht31_humidity`
+unterscheiden sich im `sensor_type`. Bei OneWire sind alle Instanzen identisch.
+
+**Die korrekte 4-Way-Methode existiert bereits:**
+```python
+# Zeile 864-902 — get_by_esp_gpio_type_and_onewire()
+async def get_by_esp_gpio_type_and_onewire(
+    self, esp_id: uuid.UUID, gpio: int, sensor_type: str, onewire_address: str
+) -> Optional[SensorConfig]:
+    stmt = select(SensorConfig).where(
+        SensorConfig.esp_id == esp_id,
+        SensorConfig.gpio == gpio,
+        func.lower(SensorConfig.sensor_type) == sensor_type.lower(),
+        SensorConfig.onewire_address == onewire_address,  # 4. Filter
+    )
+    result = await self.session.execute(stmt)
+    return result.scalar_one_or_none()  # Sicher
 ```
 
-**Analyse:** Beim Neustart des Servers wird automatisch ein `kaiser/broadcast/emergency`-MQTT-Topic empfangen (vermutlich retained message oder Sofort-Zustellung nach Subscribe). Der CRITICAL-Level ist im Simulationshandler so hart kodiert fuer alle Emergency-Events, aber im Startup-Kontext ist es normales Verhalten. Die Mock-Aktoren reagieren korrekt - sie wechseln in SAFE_MODE.
+**Blast Radius:** sensor_handler.py Zeile 204-227 (MQTT-Pfad) — Sensor-Readings von
+DS18B20-Slaves werden nicht gespeichert. config_handler.py `_process_config_failures` —
+GPIO-Failure-Update crasht. Jede weitere Methode die `get_by_esp_gpio_and_type` mit
+DS18B20 aufruft.
 
-**Einmalig manuell ausgeloest (10:30:18):**
-```
-src.api.v1.debug - WARNING - Emergency stop triggered on mock ESP MOCK_95A49FCB by admin: Manueller Stopp ueber Konfigurations-Panel
+**Fix-Vorschlag:**
+```python
+# sensor_handler.py: Lookup-Logik mit onewire_address-Branch
+onewire_address = payload.get("onewire_address")
+if onewire_address and is_onewire_sensor(sensor_type):
+    sensor_config = await sensor_repo.get_by_esp_gpio_type_and_onewire(
+        esp.id, gpio, normalized_type, onewire_address
+    )
+else:
+    sensor_config = await sensor_repo.get_by_esp_gpio_and_type(
+        esp.id, gpio, normalized_type
+    )
 ```
 
-**Folge:** MOCK_95A49FCB laeuft nach Neustart im SAFE_MODE statt OPERATIONAL.
+Alternativ: `get_by_esp_gpio_and_type()` intern nach `onewire_address`-Parameter branchen.
 
 ---
 
-### 3.3 APScheduler Job-Misses (WIEDERKEHREND - MITTEL)
+### BUG-5 (KRITISCH): Unix-Epoch ts=0 — Timestamp-Validierung fehlt
 
-- **Schwere:** Mittel
-- **Haeufigkeit:** 6 Ereignisse mit je 3 Jobs gleichzeitig verpasst
+**Schwere:** Kritisch
+**Fix-Komplexität:** One-Liner (pro Handler)
 
-| Zeitpunkt | Verzoegerung | Betroffene Jobs |
-|-----------|-------------|-----------------|
-| 09:17:05 | 11 Minuten 14s | cleanup_orphaned_mocks, aggregate_stats |
-| 10:04:29 | 41s | health_check_esps, check_sensor_health, mock_heartbeat |
-| 10:12:33 | 44s | health_check_esps, check_sensor_health, mock_heartbeat |
-| 10:42:43 | 57s | health_check_esps, check_sensor_health, mock_heartbeat |
-| 12:06:03 | 38s | health_check_esps, check_sensor_health, mock_heartbeat |
-| 12:19:59 | 34s | health_check_esps, check_sensor_health, mock_heartbeat |
+**Dateien:**
+- `El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py` (Zeilen 329-337)
+- `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py` (Zeile 202)
 
+**Problematische Code-Stelle (sensor_handler.py):**
+```python
+# Zeilen 329-337 — BUG: kein ts=0-Guard
+esp32_timestamp_raw = payload.get("ts", payload.get("timestamp"))
+esp32_timestamp = datetime.fromtimestamp(
+    esp32_timestamp_raw / 1000 if esp32_timestamp_raw > 1e10 else esp32_timestamp_raw,
+    tz=timezone.utc,
+).replace(tzinfo=None)
 ```
-apscheduler.executors.default - WARNING - Run time of job "MaintenanceService._health_check_esps ..." was missed by 0:00:57.992384
-src.core.scheduler - WARNING - Job monitor_health_check_esps missed scheduled run
+
+**Root Cause:** Wokwi-Simulator und real-ESP32 senden `ts=0` solange NTP nicht
+synchronisiert ist (Boot-Phase). `datetime.fromtimestamp(0)` ergibt `1970-01-01 00:00:00`.
+Dieser Wert wird in `sensor_data.timestamp` gespeichert. Bei Grafana-Abfragen erscheinen
+diese Readings 56 Jahre in der Vergangenheit. Bei strengen `BETWEEN`-Queries tauchen
+sie gar nicht auf.
+
+**heartbeat_handler.py:**
+```python
+# Zeile 202 — BUG: fromtimestamp ohne Validierung
+last_seen = datetime.fromtimestamp(ts_value, tz=timezone.utc).replace(tzinfo=None)
 ```
 
-**Analyse:** APScheduler kann Scheduler-Jobs nicht puenktlich ausfuehren, da der asyncio Event-Loop kurzzeitig blockiert ist. Die groesste Verzoegerung (11 Minuten um 09:17) deutet auf eine Phase hoher Last hin - moeglicherweise ein blockierender DB-Vorgang oder Container-Ressourcen-Engpass (Docker Desktop Windows). Nach einem Job-Miss laeuft der naechste Job normal weiter - kein dauerhafter Ausfall.
+**Blast Radius:** Alle Sensor-Readings im Wokwi-Environment bis erster NTP-Sync landen
+mit `timestamp=1970-01-01`. Heartbeat-`last_seen` falsch gesetzt. Monitoring-Dashboards
+zeigen historische Gaps. Zeitreihen-Plots haben Ausreisser bei 0.
 
-**Folge:** ESP-Timeout-Erkennung und Sensor-Health-Checks koennen verzoegert sein. Mock-Heartbeat-Publikation unterbrochen (MOCK_95A49FCB wurde korrekt als "timed out" markiert bei 09:17 und 10:04).
+**Fix-Vorschlag:**
+```python
+# sensor_handler.py — vor datetime.fromtimestamp()
+MIN_VALID_TS = 1577836800  # 2020-01-01 00:00:00 UTC als Unix-Epoch
+
+esp32_timestamp_raw = payload.get("ts", payload.get("timestamp"))
+if not esp32_timestamp_raw or esp32_timestamp_raw < MIN_VALID_TS:
+    esp32_timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
+    logger.debug("ESP timestamp invalid (%s), using server time", esp32_timestamp_raw)
+else:
+    esp32_timestamp = datetime.fromtimestamp(
+        esp32_timestamp_raw / 1000 if esp32_timestamp_raw > 1e10 else esp32_timestamp_raw,
+        tz=timezone.utc,
+    ).replace(tzinfo=None)
+```
+
+Gleiche Logik fuer `heartbeat_handler.py:202`.
 
 ---
 
-### 3.4 ESP Timeout-Erkennung (INFORMATIV)
+### BUG-2 (KRITISCH): Subzone — naive vs. aware Datetime-Mismatch
+
+**Schwere:** Kritisch
+**Fix-Komplexität:** One-Liner (Modell-Deklaration)
+
+**Dateien:**
+- `El Servador/god_kaiser_server/src/schemas/subzone.py`
+- `El Servador/god_kaiser_server/src/services/subzone_service.py`
+- Zugehoeriges SQLAlchemy-Model (SubzoneConfig)
+
+**Root Cause:** Das `SubzoneConfig`-Model deklariert `last_ack_at` als `DateTime` ohne
+`timezone=True`. PostgreSQL speichert es als `TIMESTAMP WITHOUT TIME ZONE`. Beim Lesen
+liefert SQLAlchemy ein naive datetime-Objekt (ohne tzinfo). Sobald der Code diesen Wert
+mit einem aware datetime-Objekt (`datetime.now(timezone.utc)`) vergleicht, wirft Python:
 
 ```
-09:17:05 - heartbeat_handler - WARNING - Device MOCK_95A49FCB timed out. Last seen: 2026-03-01 09:17:05.655652+00:00
-09:17:05 - maintenance.service - WARNING - health_check_esps: 1 ESP(s) timed out: ['MOCK_95A49FCB']
-09:17:05 - maintenance.jobs.sensor_health - WARNING - Sensor stale: MOCK_95A49FCB GPIO 0 (SHT31) - no data for 915s (timeout: 180s)
-10:04:48 - heartbeat_handler - WARNING - Device MOCK_95A49FCB timed out. Last seen: 2026-03-01 10:04:48
-10:04:48 - maintenance.service - WARNING - health_check_esps: 1 ESP(s) timed out: ['MOCK_95A49FCB']
+TypeError: can't compare offset-naive and offset-aware datetimes
 ```
 
-**Analyse:** MOCK_95A49FCB wurde zweimal als offline erkannt - beides Mal als Folge der APScheduler Job-Misses, die den Heartbeat-Job unterbrochen haben. Nach Server-Neustart immer sofort wieder online. Kein echter ESP-Ausfall.
+**`_upsert_subzone_config` (subzone_service.py):**
+```python
+# Schreibt aware datetime (korrekt):
+last_ack_at = datetime.now(timezone.utc)
+# Liest naive datetime aus DB zurueck (korrekt gemaess Deklaration):
+existing.last_ack_at   # naive — kein tzinfo
+# Vergleich scheitert bei naechstem Aufruf
+```
+
+**Blast Radius:** Subzone-ACK-Verarbeitung bricht nach dem ersten `upsert`. Subzone-States
+werden nicht aktualisiert. `handle_subzone_ack()` wirft unkontrolliert `TypeError` aus
+dem async-Context, was den `SubzoneAckHandler` in einen Fehlerzustand bringt.
+
+**Fix-Vorschlag:**
+```python
+# SubzoneConfig-Model — Spalten-Deklaration
+last_ack_at: Mapped[Optional[datetime]] = mapped_column(
+    DateTime(timezone=True),   # VORHER: DateTime (ohne timezone=True)
+    nullable=True,
+)
+```
+
+Anschliessend Alembic-Migration notwendig:
+```bash
+alembic revision --autogenerate -m "Fix SubzoneConfig last_ack_at timezone"
+alembic upgrade head
+```
 
 ---
 
-### 3.5 Actuator Config fehlend (WIEDERKEHREND - NIEDRIG)
+### BUG-6 (HOCH): `approved`-Status nicht als operational anerkannt — API-Statusguard
 
-- **Schwere:** Niedrig
-- **Haeufigkeit:** ~8x pro Server-Neustart + vereinzelt bei Aktorbetrieb
+**Schwere:** Hoch
+**Fix-Komplexität:** One-Liner
 
+**Dateien:**
+- `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py` (Zeilen 164-174)
+- `El Frontend/src/composables/useESPStatus.ts` (Zeilen 88-94, 101)
+
+**Problematische Code-Stelle (heartbeat_handler.py):**
+```python
+# Zeile 164-174: pending_approval-Zweig
+if status == "pending_approval":
+    await self._update_pending_heartbeat(esp_device, payload)  # NUR metadata + last_seen
+    await session.commit()
+    return True   # EXIT — update_status("online") wird NICHT aufgerufen
 ```
-src.mqtt.handlers.actuator_handler - WARNING - Actuator config not found: esp_id=MOCK_95A49FCB, gpio=18. Updating state without config.
-src.mqtt.handlers.actuator_handler - WARNING - Actuator config not found: esp_id=MOCK_95A49FCB, gpio=13. Updating state without config.
+
+**Root Cause:** `_update_pending_heartbeat()` aktualisiert nur `device_metadata` und
+`last_seen`. Der DB-`status` bleibt `"pending_approval"`. Das Frontend berechnet den
+anzuzeigenden Status sekundaer aus `last_seen`-Alter:
+
+```typescript
+// useESPStatus.ts Zeile 97-103
+const age = Date.now() - new Date(ts).getTime()
+if (age < HEARTBEAT_STALE_MS) return 'online'  // zeigt "online" obwohl DB-status != online
 ```
 
-Zusaetzlich im Zeitraum 11:32-11:33 viermal hintereinander fuer gpio=18 (Frontend-Konfigurationstest).
+Der Server-Statusguard prueft jedoch nur den DB-`status`:
 
-**Analyse:** Die Aktuator-Konfigurationen fuer GPIO 13 und GPIO 18 von MOCK_95A49FCB fehlen in der `actuator_configs`-Tabelle. Der Handler akzeptiert Status-Updates trotzdem und aktualisiert `actuator_states`. Kein Datenverlust, aber kein Konfigurationskontext vorhanden.
+```python
+# sensors.py Zeile 583-584
+if esp_device.status not in ("approved", "online"):
+    raise DeviceNotApprovedError(esp_id, esp_device.status)
+```
 
-**DB-Bestaetigung:** `actuator_configs`-Tabelle hat 8.192 Bytes (8 KB) - minimal befuellt.
+**Desync-Tabelle:**
+
+| Szenario | DB-status | Frontend zeigt | API-Zugriff |
+|----------|-----------|----------------|-------------|
+| `pending_approval`, Heartbeats regelmaessig | `pending_approval` | `online` (last_seen < 5min) | 403 |
+| `approved`, Heartbeat vor 3min | `approved` | `online` (last_seen < 5min) | OK |
+| `approved`, Heartbeat vor 6min | `approved` | `offline` | OK |
+
+**Blast Radius:** User sieht Device als "online", versucht Sensor zu konfigurieren,
+erhalt 403. Kein Hinweis auf pending-Status in der UI. Nur fuer `pending_approval`-Devices.
+
+**Fix-Vorschlag (Frontend — minimaler Eingriff):**
+```typescript
+// useESPStatus.ts — vor dem Timing-Fallback
+if (device.status === 'pending_approval') return 'pending'
+// Verhindert, dass pending_approval-Devices als "online" angezeigt werden
+```
+
+**Fix-Vorschlag (Server — strikter):**
+Beides kombinieren: Frontend kommuniziert korrekt `pending`, und der Server-Guard bleibt
+wie er ist (kein Aktionsbedarf am Guard selbst).
 
 ---
 
-### 3.6 Orphaned Mock-ESPs (WARTUNGSBEDARF - NIEDRIG)
+### BUG-9 (MEDIUM): raw_mode Default-Mismatch + pi_enhanced=False → processed_value null
 
-- **Schwere:** Niedrig
-- **Haeufigkeit:** Bei jedem OrphanedMocksCleanup-Job (stuendlich)
+**Schwere:** Medium
+**Fix-Komplexität:** One-Liner
 
+**Dateien:**
+- `El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py` (Zeile 233)
+- `El Servador/god_kaiser_server/src/sensors/sensor_libraries/active/temperature.py` (Zeile 129)
+
+**Problematische Code-Stellen:**
+```python
+# sensor_handler.py Zeile 233 — Default: True
+raw_mode = payload.get("raw_mode", True)
+
+# Zeile 242: processed_value wird NUR berechnet wenn pi_enhanced UND raw_mode
+if sensor_config and sensor_config.pi_enhanced and raw_mode:
+    processed_value = await processor.process(raw_value, sensor_config)
+else:
+    processed_value = None   # kein Fallback
+
+# temperature.py Zeile 129 — Default: False (Widerspruch!)
+raw_mode = params.get("raw_mode", False) if params else False
 ```
-OrphanedMocksCleanup - WARNING - Old orphaned Mock found: MOCK_57A7B22F (last updated: 2026-02-27). Set ORPHANED_MOCK_AUTO_DELETE=true to auto-delete.
-OrphanedMocksCleanup - WARNING - Old orphaned Mock found: MOCK_0CBACD10 (last updated: 2026-02-27). Set ORPHANED_MOCK_AUTO_DELETE=true to auto-delete.
+
+**Root Cause:** Doppelter Widerspruch:
+
+1. **raw_mode Default-Mismatch:** `sensor_handler.py` nimmt an, dass Payloads ohne
+   `raw_mode`-Feld bereits prozessierte Daten senden (Default `True` = "ist raw").
+   `DS18B20Processor.process()` nimmt an, dass Daten ohne `raw_mode` bereits prozessiert
+   sind (Default `False` = "ist nicht raw"). Die Definitionen sind invertiert.
+
+2. **pi_enhanced=False → kein processed_value:** Wenn `sensor_config.pi_enhanced = False`,
+   wird `processed_value = None` gesetzt — auch wenn der Processor eine sinnvolle Conversion
+   machen koennte (z.B. Einheitenumrechnung). `None` wird als `processed_value` in der DB
+   gespeichert. Grafana-Dashboards zeigen `null`.
+
+**Blast Radius:** DS18B20-Sensoren ohne `pi_enhanced=True` in der Config liefern immer
+`processed_value=null`. Grafana-Readings fehlen. Kein Fehler-Log — still failing.
+Wokwi-Simulator sendet kein `raw_mode`-Feld → trifft immer den Default-Mismatch.
+
+**Fix-Vorschlag:**
+```python
+# sensor_handler.py Zeile 233 — Default False (konsistent mit Prozessor-Erwartung)
+raw_mode = payload.get("raw_mode", False)
+
+# Zeile 242 — Fallback fuer nicht-pi_enhanced Sensoren
+if sensor_config and raw_mode:
+    if sensor_config.pi_enhanced:
+        processed_value = await processor.process(raw_value, sensor_config)
+    else:
+        # Basis-Konversion ohne Pi-Enhancement (Einheit uebernehmen, kein Transform)
+        processed_value = raw_value
 ```
-
-**DB-Bestand (aktuell):**
-
-| Device | Status | Letzte Aktivitaet | Bemerkung |
-|--------|--------|-------------------|-----------|
-| MOCK_95A49FCB | online | 2026-03-01 13:14:48 | Aktive Simulation |
-| MOCK_98D427EA | offline | 2026-02-28 07:31:24 | 1 Tag alt |
-| MOCK_0CBACD10 | offline | 2026-02-27 18:40:11 | 2 Tage alt |
-| MOCK_57A7B22F | offline | 2026-02-27 16:44:09 | 2 Tage alt |
-
-3 von 4 Mock-ESPs sind seit 2-4 Tagen offline. Automatisches Loeschen ist deaktiviert (`ORPHANED_MOCK_AUTO_DELETE` nicht gesetzt).
 
 ---
 
-### 3.7 JWT Auth-Probleme (WIEDERKEHREND - NIEDRIG/INFORMELL)
+### BUG-1 (HOCH): asyncio.create_task Race Condition im auto_push_config
 
-- **Schwere:** Niedrig (normales Frontend-Verhalten nach Token-Ablauf)
-- **Haeufigkeit:** Je nach Session, mehrfach pro Tag
+**Schwere:** Hoch
+**Fix-Komplexität:** Medium
 
-**Token-Ablauf-Events (normal):**
-```
-09:20:37 - JWT verification failed: Signature has expired.
-09:20:37 - Refresh token is blacklisted
-10:22:26 - JWT verification failed: Signature has expired.
-11:45:56 - JWT verification failed: Signature has expired.
-13:14:10 - JWT verification failed: Signature has expired.
-```
+**Datei:** `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py`
 
-**UniqueViolation bei Token-Blacklisting (Doppel-Refresh):**
-```
-10:22:26 - Failed to blacklist old refresh token: IntegrityError: UniqueViolationError: duplicate key value violates unique constraint "ix_token_blacklist_token_hash"
-10:23:38 - Failed to blacklist old refresh token: IntegrityError: UniqueViolationError
-13:14:10 - Failed to blacklist old refresh token: IntegrityError: UniqueViolationError
+**Problematische Code-Stellen:**
+```python
+# Zeile 1162-1214: _has_pending_config()
+# Zeile 1216-1251: _auto_push_config()
+
+# Im Heartbeat-Handler (Zeile ~900-950):
+if has_pending:
+    asyncio.create_task(self._auto_push_config(esp_id, session))
+    # KEIN await — fire-and-forget
 ```
 
-**Fehlgeschlagene Login-Versuche:**
-```
-11:46:39 - Failed login attempt for: admin
-11:47:30 - Failed login attempt for: admin
-12:45:39 - Failed login attempt for: admin
+**Root Cause:** `asyncio.create_task()` startet `_auto_push_config` als unabhaengigen
+Task. Der rufende Heartbeat-Handler gibt die DB-Session (`session`) weiter und committet
+danach unabhaengig. Moegliche Race Conditions:
+
+1. Heartbeat-Handler committet/schliesst Session bevor `_auto_push_config` die Session nutzt
+   → `InvalidRequestError: Session is closed`
+
+2. `_auto_push_config` liest pending-Config, Heartbeat-Handler hat die Config inzwischen
+   geaendert → inkonsistenter State
+
+3. Task hat keine Exception-Behandlung → stiller Fail bei Task-Cancellation (Server-Restart)
+
+**Blast Radius:** Auto-Push-Config nach Heartbeat kann fehlschlagen. Kein Retry-Mechanismus.
+Session-Fehler werden stumm geschluckt. Config-Pending-State bleibt ewig, Device wird
+nie konfiguriert.
+
+**Fix-Vorschlag:**
+```python
+# Option A: eigene Session im Task (korrekte Isolation)
+async def _auto_push_config(self, esp_id: str) -> None:
+    """Auto-push pending config — eigene Session, keine Abhaengigkeit von Heartbeat-Session."""
+    async with resilient_session() as session:  # eigene Session
+        # ... Config lesen und pushen
+        await session.commit()
+
+# Aufruf ohne Session-Parameter:
+asyncio.create_task(self._auto_push_config(esp_id))
+
+# Option B: await (kein fire-and-forget, blockiert aber Heartbeat-Response leicht)
+await self._auto_push_config(esp_id, session)
 ```
 
-**Analyse:** Die UniqueViolation beim Token-Blacklisting entsteht, wenn das Frontend parallele Refresh-Anfragen sendet oder bei Retry-Logik nach Verbindungsabbruch denselben Token zweimal zu blacklisten versucht. Der Server faengt den Fehler korrekt ab und loggt als WARNING - kein Datenverlust. Die fehlgeschlagenen Login-Versuche sind moeglicherweise vergessenes Passwort oder ein Tab mit alter URL.
-
-**Token Blacklist Wachstum:** 38 Eintraege, kein Cleanup-Job konfiguriert. Die Tabelle waechst unbegrenzt (aktuell 88 KB - unkritisch).
+Option A ist vorzuziehen: `resilient_session()` ist bereits im Server vorhanden und
+korrekt fuer genau diesen Use-Case.
 
 ---
 
-### 3.8 MQTT TLS-Warnung (INFORMELL - KEIN PROBLEM)
+### BUG-3 (MEDIUM): Double-UTF8 beim Grad-Zeichen — MQTT-Unit-Encoding
 
+**Schwere:** Medium
+**Fix-Komplexität:** One-Liner
+
+**Datei:** `El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py`
+
+**Problematische Code-Stelle:**
+```python
+# Zeile 235 — kein Encoding-Sanitizer
+unit = payload.get("unit", "")
 ```
-src.main - WARNING - MQTT TLS is disabled. MQTT authentication credentials will be sent in plain text. Enable MQTT_USE_TLS for secure credential distribution.
+
+**Root Cause:** Das Grad-Zeichen `°` ist in UTF-8 zweibytig (`0xC2 0xB0`). Wenn das
+ESP32-Firmware-Build `°C` als Latin-1 `0xB0 0x43` versendet und paho-mqtt (oder der
+JSON-Parser) es als UTF-8 interpretiert, entsteht `Â°C` in Python. Der Wert wird direkt
+in `sensor_data.unit` gespeichert. Grafana, Frontend und Exports zeigen `"Â°C"` statt `"°C"`.
+
+**Blast Radius:** Alle Temperatur-Readings (DS18B20, SHT31-temp, BMP280-temp) zeigen
+fehlerhafte Einheit. Nur in Deployments mit altem ESP32-Firmware-Build relevant.
+Wokwi-Simulator ist nicht betroffen (sendet kein `unit`-Feld oder korrekt UTF-8).
+
+**Fix-Vorschlag:**
+```python
+# sensor_handler.py Zeile 235 — mit Encoding-Sanitizer
+raw_unit = payload.get("unit", "")
+unit = raw_unit.encode("latin-1", errors="replace").decode("utf-8", errors="replace") \
+    if raw_unit else ""
+# Einfacher: fix bekannte Fehlkodierung direkt
+unit = raw_unit.replace("Â°", "°").replace("Ã©", "é") if raw_unit else ""
 ```
 
-Bei jedem Server-Neustart einmalig geloggt. Bekannte Konfigurationsentscheidung fuer Development-Environment. Kein Handlungsbedarf in DEV.
+Sauberer Fix: ESP32-Firmware sicherstellen, dass `unit`-Felder als UTF-8 gesendet werden.
+Server-seitig als Defensiv-Sanitizer die `replace`-Variante.
 
 ---
 
-### 3.9 Logic Engine (KEIN PROBLEM)
+### BUG-Weak-WiFi (LOW): RSSI-Threshold -70 zu aggressiv — Wokwi sendet -72 fest
 
-- Logic Engine gestartet, Evaluation Loop aktiv (60s Intervall)
-- SequenceActionExecutor: 4 Action-Typen registriert (actuator_command, actuator, delay, notification)
-- HysteresisConditionEvaluator initialisiert
-- **1 Regel in DB:** "Test Temperatur Rule" - **deaktiviert** (`enabled=false`, priority=1, cooldown=60s)
-- `logic_execution_history`: 0 Eintraege - Regel wurde nie ausgefuehrt
-- Keine Logic-Engine-Fehler oder Rate-Limit-Events im gesamten Log
+**Schwere:** Niedrig
+**Fix-Komplexität:** One-Liner + Konstanten-Aenderung
 
----
+**Datei:** `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py`
 
-### 3.10 WebSocket-System (FUNKTIONIERT)
+**Problematische Code-Stelle:**
+```python
+# Zeile 1091-1093
+if wifi_rssi < -70:
+    logger.warning("Weak WiFi signal for %s: %d dBm", esp_id, wifi_rssi)
+```
 
-- WS Manager korrekt initialisiert mit Event Loop
-- Graceful Shutdown bei Server-Neustart um 13:11:36 korrekt durchgefuehrt
-- **Aktive Verbindungen im Analysezeitraum:** 1-2 Clients gleichzeitig
+**Root Cause:** Wokwi-Simulator sendet fest `-72 dBm`. Der Threshold `-70` ist strenger
+als IEEE 802.11 "Minimum Acceptable" (-80 dBm). Jeder Heartbeat von Wokwi-Devices
+triggert eine Warning. Drei unterschiedliche Threshold-Werte existieren im Codebase:
 
-**Verbindungsmuster (exemplarisch):**
-- `client_1772364775271_tf0w89icy`: mehrfache Reconnects (normale Browser-Tab-Verhalten)
-- `client_1772370765466_dnrqk8l1v`: aktive Verbindung seit 13:12:56 (aktuell)
-- 1 abgewiesene WS-Verbindung 13:14:10 wegen abgelaufenem JWT - sofortige Wiedereverbindung mit neuem Token erfolgreich
+| Datei | Threshold | Semantik |
+|-------|-----------|----------|
+| `heartbeat_handler.py:1092` | -70 dBm | Warning-Trigger |
+| `useESPStatus.ts` | -80 dBm | "weak" Status |
+| `health/detailed` | -75 dBm | Health-Check-Grenze |
 
-Kein Rate-Limiting, keine Queue-Overflow-Warnungen, kein Event-Loop-Bug.
+**Blast Radius:** Log-Spam (jeder Wokwi-Heartbeat triggert Warning). Keine funktionale
+Auswirkung. Kein Monitoring-Alert.
 
----
+**Fix-Vorschlag:**
+```python
+# heartbeat_handler.py — Threshold an IEEE 802.11 + useESPStatus.ts angleichen
+WIFI_RSSI_WEAK_THRESHOLD = -80  # Konstante in config.py oder direkt hier
+if wifi_rssi < WIFI_RSSI_WEAK_THRESHOLD:
+    logger.warning("Weak WiFi signal for %s: %d dBm", esp_id, wifi_rssi)
+```
 
-### 3.11 REST-API (GESUND - KEIN 5XX)
-
-Alle REST-Requests im Log mit Status 200 (ausser Auth-geschuetzte ohne Token = 401):
-
-| Endpoint | Status | Antwortzeit |
-|----------|--------|-------------|
-| GET /api/v1/health/live | 200 | 0.2-9.7ms |
-| GET /api/v1/health/metrics | 200 | 1.2-15.0ms |
-| GET /api/v1/health/ready | 200 | 7.2ms |
-| GET /api/v1/sensors/data | 200 | 50.3ms |
-| GET /api/v1/esp/devices | 200 | 11.4-61.8ms |
-| GET /api/v1/logic/rules | 200 | 9.7-44.6ms |
-| GET /api/v1/debug/mock-esp | 200 | 6.3-80.1ms |
-| GET /api/v1/esp/devices/pending | 200 | 8.1-21.1ms |
-| GET /api/v1/esp/devices/MOCK.../gpio-status | 200 | 268.6ms |
-| POST /api/v1/auth/login | 200 | 279.8ms (bcrypt) |
-
-**Kein einziger 5xx-Fehler.** Die GPIO-Status-Abfrage (268.6ms) und Login (279.8ms) sind die langsamsten Anfragen - noch im normalen Bereich.
-
----
-
-### 3.12 Datenbank (GESUND)
-
-**Sensor-Daten-Bestand:**
-- 2.927 Messwerte total
-- Zeitraum: 2026-02-26 bis 2026-03-01 13:14:48 (aktiv)
-- SHT31: 2.031 Messwerte (MOCK_95A49FCB, aktiv - 1 Messung alle ~60s)
-- DS18B20: 896 Messwerte (seit 2026-02-27 inaktiv)
-
-**Aktive DB-Connections:** 7 Connections (1 active = eigene psql-Abfrage, 6 idle = Server-Connection-Pool). Kein blockierter Query, kein Lock-Wait.
-
-**Alembic:** Aktuelle Revision `a1b2c3d4e5f6` - Migration vollstaendig.
-
-**Tabellen-Groessen:**
-
-| Tabelle | Groesse |
-|---------|---------|
-| sensor_data | 1.808 kB |
-| esp_heartbeat_logs | 912 kB |
-| audit_logs | 240 kB |
-| esp_devices | 208 kB |
-| actuator_history | 176 kB |
-
----
-
-### 3.13 Error-Codes 5000-5699 (KEINER GEFUNDEN)
-
-Im gesamten analysierten Log-Zeitraum (4h via Loki + Docker Logs) wurden **keine strukturierten Business-Logic-Fehlercodes [5xxx]** gefunden. Alle Eintraege oberhalb INFO-Level betreffen bekannte Betriebszustaende.
+Konsistenzbereinigung: gleichen Wert in allen drei Dateien verwenden.
 
 ---
 
@@ -282,61 +524,47 @@ Im gesamten analysierten Log-Zeitraum (4h via Loki + Docker Logs) wurden **keine
 
 | Check | Ergebnis |
 |-------|----------|
-| `curl /api/v1/health/live` | `{"success":true,"alive":true}` - Server online |
-| `curl /api/v1/health/ready` | DB+MQTT+Disk alle `true` |
-| `docker compose ps` | Alle 12 Container healthy/up, keine Restarts |
-| Loki ERROR-Query (4h) | 0 ERROR-Eintraege |
-| Loki CRITICAL-Query (4h) | 8x MockActuator Emergency Stop (erwartet, Log-Level-Problem) |
-| Loki WARNING-Query (4h) | 8 Kategorien identifiziert, kein unbekanntes Problem |
-| PostgreSQL sensor_data | 2.927 Eintraege, letzte Messung 13:14:48 UTC (aktiv) |
-| PostgreSQL esp_devices | 4 Geraete: 1 online, 3 offline (Orphaned) |
-| PostgreSQL active queries | 6 idle connections, kein blockierter Query |
-| Alembic current | `a1b2c3d4e5f6` - vollstaendig migriert |
-| Circuit Breaker Status | 3/3 closed (mqtt, database, external_api) |
-| Logic Engine | Aktiv, 1 deaktivierte Regel, 0 Ausfuehrungen |
-| Token Blacklist | 38 Eintraege, kein Cleanup-Job |
-| DB Tabellen-Groessen | Groesste Tabelle sensor_data 1.8MB - unkritisch |
+| `resolve_alerts_for_device` vollstaendig gelesen | `.astext` Zeile 621 bestaetigt |
+| `notification.py` Model `extra_data`-Spalte | `JSON`, nicht `JSONB` — `.astext` unverfuegbar |
+| `soft_delete` in `esp.py` Aufruf-Reihenfolge geprueft | `resolve_alerts_for_device` crasht VOR `soft_delete` |
+| `get_by_esp_gpio_and_type` vollstaendig gelesen | Kein `onewire_address`-Filter, `scalar_one_or_none` Zeile 109 |
+| `get_by_esp_gpio_type_and_onewire` gelesen | Korrekte 4-Way-Methode vorhanden (Zeile 864) |
+| sensor_handler.py Timestamp-Pfad (Zeile 329-337) | Kein ts=0-Guard bestaetigt |
+| heartbeat_handler.py `fromtimestamp` (Zeile 202) | Kein ts=0-Guard bestaetigt |
+| `_update_pending_heartbeat` vollstaendig gelesen | Kein `update_status()`-Aufruf bestaetigt |
+| `useESPStatus.ts` Zeile 97-103 | Timing-Fallback zeigt pending_approval als "online" |
+| `sensors.py` Status-Guard Zeile 583 | Prueft nur DB-status, kein last_seen-Fallback |
+| `raw_mode` Default in sensor_handler.py | `True` (Zeile 233) |
+| `raw_mode` Default in temperature.py | `False` (Zeile 129) — Widerspruch bestaetigt |
+| `pi_enhanced=False`-Zweig in sensor_handler | `processed_value=None` ohne Fallback bestaetigt |
+| `asyncio.create_task` Aufruf in heartbeat_handler | Fire-and-forget mit geteilter Session bestaetigt |
+| `unit`-Extraktion in sensor_handler.py Zeile 235 | Kein Encoding-Sanitizer bestaetigt |
+| RSSI-Threshold heartbeat_handler.py:1092 | `-70 dBm`, Wokwi sendet `-72` — Threshold-Inkonkonsistenz bestaetigt |
 
 ---
 
 ## 5. Bewertung & Empfehlung
 
-### Root Cause Analyse
+### Priorisierte Fix-Reihenfolge
 
-| Problem | Root Cause | Schwere |
-|---------|-----------|---------|
-| APScheduler Job-Misses (regelmaessig) | asyncio Event-Loop-Belastung, vermutlich Docker Desktop Windows Host-Ressourcen | Mittel |
-| CRITICAL bei Startup (Emergency Stop) | `kaiser/broadcast/emergency` retained MQTT-Message oder Sofortzustellung nach Subscribe; Log-Level im Code zu hoch | Mittel (nur Log-Level) |
-| Actuator Config missing gpio 13/18 | `actuator_configs`-Tabelle hat keine Eintraege fuer MOCK_95A49FCB-Aktoren | Niedrig |
-| Orphaned Mocks (3 Stueck) | `ORPHANED_MOCK_AUTO_DELETE` nicht gesetzt - bewusste Entscheidung, aber Akkumulation seit 2026-02-27 | Niedrig |
-| Token Blacklist UniqueViolation | Frontend sendet parallele Refresh-Anfragen; Server faengt es korrekt ab | Niedrig |
-| Token Blacklist waechst unbegrenzt | Kein Cleanup-Job fuer abgelaufene blackgelistete Tokens | Niedrig |
+| Prio | Bug | Datei | Fix-Typ | Aufwand |
+|------|-----|-------|---------|---------|
+| 1 | BUG-7 `.astext` | `notification_repo.py:621` | One-Liner | 5 min |
+| 2 | BUG-5 ts=0-Epoch | `sensor_handler.py:329` + `heartbeat_handler.py:202` | One-Liner x2 | 10 min |
+| 3 | BUG-2 Datetime naive/aware | SubzoneConfig-Model + Alembic | One-Liner + Migration | 20 min |
+| 4 | BUG-8 MultipleResultsFound | `sensor_repo.py:109` + Aufrufer | Medium | 30 min |
+| 5 | BUG-6 Status-Desync | `useESPStatus.ts` | One-Liner | 5 min |
+| 6 | BUG-1 Task Race Condition | `heartbeat_handler.py` | Medium | 45 min |
+| 7 | BUG-9 raw_mode Default | `sensor_handler.py:233` | One-Liner | 5 min |
+| 8 | BUG-3 UTF8-Encoding | `sensor_handler.py:235` | One-Liner | 5 min |
+| 9 | BUG-Weak-WiFi RSSI | `heartbeat_handler.py:1092` | One-Liner | 5 min |
 
-### Naechste Schritte (nach Prioritaet)
-
-**1. APScheduler misfire_grace_time pruefen** - In der Scheduler-Konfiguration koennte ein laengerer `misfire_grace_time` Wert helfen. Alternativ pruefen ob blockierende sync-Calls im Event-Loop existieren.
-
-**2. Broadcast Emergency Startup-Verhalten klaeren** - Pruefen ob `kaiser/broadcast/emergency` als retained message im Broker konfiguriert ist. Falls ja: entweder retained messages beim Subscribe ignorieren ODER Log-Level von CRITICAL auf WARNING reduzieren fuer den Startup-Kontext.
-
-**3. Orphaned Mocks bereinigen** - MOCK_98D427EA, MOCK_0CBACD10, MOCK_57A7B22F koennen manuell aus der DB entfernt werden (erfordert explizite Genehmigung da DELETE-Operation).
-
-**4. Token Blacklist Cleanup-Job** - Periodischen Job hinzufuegen, der Tokens entfernt, bei denen die originale Expiry-Zeit ueberschritten ist.
-
-**5. Actuator Config fuer MOCK_95A49FCB** - GPIO 13 und 18 in `actuator_configs` eintragen, um die WARNING-Meldungen zu eliminieren.
-
-### Gesamtstatus
-
-```
-Server Health:      GESUND
-MQTT:               VERBUNDEN (result code 0, TLS disabled by design)
-Database:           GESUND (Pool 10+20, keine blockierten Queries)
-Logic Engine:       AKTIV (0 aktive Regeln, 0 Ausfuehrungen)
-WebSocket:          AKTIV (1-2 Verbindungen, normales Reconnect-Pattern)
-Circuit Breaker:    ALLE GESCHLOSSEN (0 open, 0 half-open)
-Resilience:         HEALTHY
-ERROR-Eintraege:    KEINE
-CRITICAL-Eintraege: 8 (alle: MockActuator Emergency Stop bei Neustart)
-5xxx-Error-Codes:   KEINE
-```
-
-Kein sofortiger Handlungsbedarf. Der Server ist stabil und produktionsbereit fuer Development-Zwecke. Alle Befunde sind bekannte Betriebszustaende oder niedrigprioritaere Verbesserungsmoeglichkeiten.
+**Root Causes (Muster):**
+- **API-Inkompatibilitaet:** BUG-7 (SQLAlchemy 1.x `.astext` in SQLAlchemy 2.x Codebase)
+- **Missing Validation:** BUG-5 (kein ts=0-Guard), BUG-3 (kein Encoding-Sanitizer)
+- **Schema-Defizit:** BUG-2 (`DateTime` ohne `timezone=True`)
+- **Methoden-Praezision:** BUG-8 (falsche Lookup-Methode fuer OneWire-Fall)
+- **State-Machine-Luecke:** BUG-6 (Frontend/Server-Status-Diskrepanz)
+- **Async-Pitfall:** BUG-1 (geteilte Session in fire-and-forget Task)
+- **Default-Inkonsistenz:** BUG-9 (raw_mode Default invertiert zwischen Handler und Processor)
+- **Threshold-Inkonsistenz:** BUG-Weak-WiFi (drei verschiedene RSSI-Werte im Codebase)

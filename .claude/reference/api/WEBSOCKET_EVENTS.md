@@ -474,7 +474,7 @@ Sensor-Konfiguration wurde gelöscht (T08-Fix-D Ghost-Cleanup).
 }
 ```
 
-**Frontend-Handler:** `esp.ts → handleSensorConfigDeleted` — entfernt Ghost-Sensor aus `device.sensors` per `gpio + sensor_type` Match, zeigt Toast.
+**Frontend-Handler:** `esp.ts → handleSensorConfigDeleted` — entfernt Ghost-Sensor aus `device.sensors` per `gpio + sensor_type` Match, zeigt Toast. Wird fuer Mock UND Real ESPs ausgeloest (T10-Fix-B: unified DELETE-Pipeline per config_id UUID).
 
 ---
 

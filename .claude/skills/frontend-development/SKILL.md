@@ -16,7 +16,7 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.60
+**Version:** 9.61
 **Letzte Aktualisierung:** 2026-03-08
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
@@ -1182,8 +1182,23 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.60
+**Version:** 9.62
 **Letzte Aktualisierung:** 2026-03-08
+
+### Aenderungen in v9.62 (T10-FixB — DELETE-Pipeline config_id statt GPIO)
+
+- SensorConfigPanel.vue: Mock-Delete-Pfad von `espStore.removeSensor(espId, gpio)` auf `sensorsApi.delete(espId, configId)` umgestellt — Mock UND Real nutzen jetzt einheitlich `DELETE /sensors/{esp_id}/{config_id}` (UUID). Behebt Mass-Delete Bug (6 I2C-Sensoren auf GPIO 0 alle geloescht statt 1)
+- SensorConfigPanel.vue: `isMock` Check in confirmAndDelete() entfernt — kein separater Code-Pfad mehr noetig
+- sensors.ts (API): `getByConfigId(configId)` NEU — `GET /sensors/config/{config_id}` fuer eindeutigen Sensor-Lookup per UUID
+- Backend debug.py: Guard im `remove_sensor()` Endpoint — bei >1 Sensor auf GPIO ohne sensor_type gibt 409 Conflict statt Mass-Delete
+- test_mock_esp_multi_value.py: 5 neue Tests `TestDeleteGuardMultipleSensorsOnGpio` — Guard-Logik fuer 0/1/2/6 Sensoren mit/ohne sensor_type
+
+### Aenderungen in v9.61 (T10-FixD — MiniCard Overflow-Zaehlung + LiveDataPreview Humidity-Wert)
+
+- DeviceMiniCard.vue: `sensorCount` computed (Zeile 154-157) von `sensors.length` auf `groupSensorsByBaseType()` umgestellt — Status-Zeile ("XS") und Overflow ("+X weitere") basieren jetzt auf derselben Zaehlbasis (gruppierte Values statt Roh-Array-Laenge)
+- LiveDataPreview.vue: Neuer optionaler Prop `sensorType?: string` — filtert WebSocket sensor_data nach sensor_type bei Multi-Value-Sensoren (z.B. SHT31 temp vs humidity auf demselben GPIO)
+- LiveDataPreview.vue: `handleMessage()` erweitert um case-insensitive `sensor_type` Vergleich — verhindert Cross-Update wenn sht31_temp nach sht31_humidity eintrifft
+- SensorConfigPanel.vue: `:sensor-type="sensorType"` an LiveDataPreview durchgereicht (Zeile 798) — sensorType ist bereits als Prop verfuegbar
 
 ### Aenderungen in v9.60 (T09-FixA — Multi-Value Sensor Identifikation)
 
@@ -1195,7 +1210,7 @@ cleanupWebSocket() {
 - ESPOrbitalLayout.vue: Emit-Typ und Handler auf `{ configId?, gpio, sensorType }` Payload umgestellt — Event-Chain Step 2
 - DeviceDetailView.vue: Emit-Typ erweitert um `sensorType` und `configId`; Handler spreaded Payload mit espId — Event-Chain Step 3
 - HardwareView.vue: `configSensorData` um `configId?: string` erweitert; `handleSensorClickFromDetail` nutzt `gpio + sensorType` Lookup (Primary) mit GPIO-only Fallback; Template `:config-id` an SensorConfigPanel durchgereicht
-- SensorConfigPanel.vue: Neuer optionaler Prop `configId?: string`; Delete-Logik: Mock → `espStore.removeSensor`, Real mit configId → `sensorsApi.delete(espId, configId)`, fehlende configId → Error-Toast (kein 500er)
+- SensorConfigPanel.vue: Neuer optionaler Prop `configId?: string`; Delete-Logik: Mock UND Real → unified `sensorsApi.delete(espId, configId)` (T10-Fix-B: Mock-Pfad von `espStore.removeSensor` GPIO-basiert auf config_id umgestellt), fehlende configId → Error-Toast (kein 500er)
 - sensors.ts (API): `delete()` Signatur von `(espId, gpio)` auf `(espId, configId: string)` — nutzt `DELETE /sensors/{esp_id}/{config_id}` (UUID statt GPIO, behebt scalar_one_or_none Crash bei Multi-Value)
 - sensor.store.ts: `handleSensorData` priorisiert exakten Match per `gpio + sensor_type` (Post-Fix1 Pattern) vor Legacy-Multi-Value-Merge — behebt Cross-Update bei SHT31 temp/humidity
 - useWebSocket.ts: `on()` registriert Handler nur via `websocketService.on()` wenn KEINE Subscription aktiv — behebt Double-Dispatch (Handler 2x pro Message bei gleichzeitiger Subscription + Listener)

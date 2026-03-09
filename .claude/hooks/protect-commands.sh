@@ -7,7 +7,7 @@ COMMAND=""
 
 # Try to extract command from TOOL_INPUT JSON
 if [ -n "$TOOL_INPUT" ]; then
-  COMMAND=$(echo "$TOOL_INPUT" | python -c "import sys,json; print(json.loads(sys.stdin.read()).get('command',''))" 2>/dev/null)
+  COMMAND=$(echo "$TOOL_INPUT" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('command',''))" 2>/dev/null)
 fi
 
 # If no command extracted, allow (don't block on parse failure)

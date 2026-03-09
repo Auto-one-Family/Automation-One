@@ -20,7 +20,9 @@
 
 **Screenshot S19** zeigt das Problem: Im L2 sind 4 Satellites sichtbar (Klima Decke Humidity, Klima Boden Humidity, Klima Decke Temperature, Klima Boden Temperature). Das Config-Panel rechts zeigt aber immer den ERSTEN gefundenen Sensor — nicht den angeklickten.
 
-**Root Cause:** Die Event-Kette beim Satellite-Klick uebergibt `{configId, gpio, sensorType}`. Das Config-Panel (oder der Store-Lookup dahinter) sucht den Sensor aber per `(esp_id, gpio, sensor_type)` — und bei 2x SHT31 auf verschiedenen I2C-Adressen findet es ZWEI Treffer fuer `(esp_id, 0, "sht31_temp")`. Es nimmt den ersten Treffer, der ist zufaellig immer "Klima Decke" (0x44).
+**Root Cause:** Die Event-Kette beim Satellite-Klick uebergibt `{configId, gpio, sensorType}` korrekt (SensorColumn:94 → ESPOrbitalLayout:170 → DeviceDetailView:70 → HardwareView:645). Die `configId` kommt auch korrekt als Prop bei SensorConfigPanel an (HardwareView:979). ABER: SensorConfigPanel **ignoriert die configId** in `onMounted()` (Zeile 154) und laedt die Config per API-Call `sensorsApi.get(props.espId, props.gpio, props.sensorType)` — also per `GET /sensors/{esp_id}/{gpio}?sensor_type=sht31_temp`. Bei 2x SHT31 auf verschiedenen I2C-Adressen gibt es ZWEI DB-Eintraege mit `(esp_id, gpio=0, sensor_type='sht31_temp')`, und das Backend crasht mit `MultipleResultsFound` (weil `scalar_one_or_none()` in `sensor_repo.py:107`).
+
+> [verify-plan] KORREKTUR: Der Bug ist NICHT im Store-Lookup (es gibt keinen Store-Getter fuer Sensor-Configs). Der Bug ist im API-Call in SensorConfigPanel `onMounted()` Zeile 154. Zusaetzlich: HardwareView:650 hat ebenfalls ein `.find()`-Problem, aber dort wird `configId` korrekt aus dem Payload genommen (Zeile 660), sodass die configId beim Panel ankommt — sie wird nur nicht genutzt.
 
 **Wichtig:** Bei einem EINZELNEN SHT31 funktioniert das Routing korrekt (T09-Fix-A hat das gefixt). Der Bug tritt NUR auf, wenn ZWEI gleiche Sensoren auf VERSCHIEDENEN I2C-Adressen existieren.
 
@@ -28,101 +30,111 @@
 
 ## SOLL-Zustand
 
-### Strategie: config_id als primaerer Lookup-Key im Store
+### Strategie: config_id als primaerer Lookup-Key im API-Call
 
-Die `config_id` (UUID) wird bereits in der Event-Kette mitgefuehrt (seit T09-Fix-A). Der Store-Lookup muss aber tatsaechlich `config_id` als ERSTES Kriterium verwenden — nicht (gpio, sensor_type).
+Die `config_id` (UUID) wird bereits in der Event-Kette mitgefuehrt (seit T09-Fix-A) und kommt als Prop beim SensorConfigPanel an. Der API-Call in `onMounted()` muss `config_id` als ERSTES Kriterium verwenden — nicht (gpio, sensor_type).
 
-### 1. Store-Lookup per config_id
+> [verify-plan] KORREKTUR: "im Store" → "im API-Call". Es gibt keinen Store-Lookup.
 
-Im ESP-Store (oder sensor.store.ts) existiert wahrscheinlich eine Methode wie `getSensorConfig(espId, gpio, sensorType)`. Diese muss erweitert oder ersetzt werden:
+### 1. SensorConfigPanel `onMounted`: API-Call per config_id
 
+> [verify-plan] KORREKTUR: Es gibt KEINEN Store-Lookup (`getSensorConfig()`) — weder in `sensor.store.ts` noch in `esp.store.ts`. Auch `allSensorConfigs` existiert nicht. Die Config wird direkt per API-Call in `onMounted()` geladen (SensorConfigPanel.vue:154).
+
+**IST-Code (SensorConfigPanel.vue:154):**
 ```typescript
-// sensor.store.ts (oder esp.store.ts) — Lookup AENDERN
-function getSensorConfigByConfigId(configId: string): SensorConfig | undefined {
-  // Direkt per config_id suchen — immer eindeutig
-  return allSensorConfigs.value.find(c => c.config_id === configId)
-}
+const config = await sensorsApi.get(props.espId, props.gpio, props.sensorType)
+```
 
-// ODER: Bestehende Methode erweitern mit config_id als erstes Kriterium
-function getSensorConfig(
-  espId: string,
-  gpio: number,
-  sensorType: string,
-  configId?: string  // NEU: optionaler, aber bevorzugter Parameter
-): SensorConfig | undefined {
-  if (configId) {
-    // Primaerer Lookup per config_id — IMMER eindeutig
-    return allSensorConfigs.value.find(c => c.config_id === configId)
-  }
-  // Fallback: altes Verhalten (gpio + sensor_type) — fuer Abwaertskompatibilitaet
-  return allSensorConfigs.value.find(
-    c => c.esp_id === espId && c.gpio === gpio && c.sensor_type === sensorType
-  )
+**SOLL-Code — config_id-basierter Lookup (2 Aenderungen noetig):**
+
+**Schritt 1a:** `sensorsApi` erweitern (`El Frontend/src/api/sensors.ts`):
+```typescript
+// NEU: Get sensor config by config_id (UUID) — immer eindeutig
+async getByConfigId(configId: string): Promise<SensorConfigResponse> {
+  const response = await api.get<SensorConfigResponse>(`/sensors/config/${configId}`)
+  return response.data
 }
 ```
 
-### 2. SensorConfigPanel: Props um config_id erweitern
-
+**Schritt 1b:** `SensorConfigPanel.vue` `onMounted` aendern:
 ```typescript
-// SensorConfigPanel.vue — Props
-const props = defineProps<{
-  espId: string
-  configId: string      // PRIMAERER Identifier (schon vorhanden seit T09-Fix-A)
-  gpio: number          // Weiterhin fuer Anzeige ("GPIO 4" Label)
-  sensorType: string    // Weiterhin fuer Typ-spezifische UI
-}>()
+onMounted(async () => {
+  try {
+    let config: SensorConfigResponse | null = null
 
-// Beim Laden der Config:
-const sensorConfig = computed(() => {
-  // VORHER (FALSCH): store.getSensorConfig(props.espId, props.gpio, props.sensorType)
-  // NACHHER (RICHTIG):
-  return store.getSensorConfigByConfigId(props.configId)
+    // Primaer: config_id (eindeutig, kein Ambiguitaets-Risiko)
+    if (props.configId) {
+      config = await sensorsApi.getByConfigId(props.configId)
+    } else {
+      // Fallback: gpio + sensorType (Legacy, single-sensor-per-GPIO)
+      config = await sensorsApi.get(props.espId, props.gpio, props.sensorType)
+    }
+
+    if (config) { /* ... existierende Feld-Zuweisung ... */ }
+  } catch { /* ... */ }
 })
 ```
 
-### 3. Event-Kette verifizieren
+> [verify-plan] ACHTUNG: Dies erfordert einen neuen Backend-Endpoint `GET /sensors/config/{config_id}` — das ist eine Backend-Aenderung die entweder in Fix-A enthalten sein muss oder hier ergaenzt werden muss. Siehe "Backend-Abhaengigkeit" unten.
 
-Die Event-Kette von T09-Fix-A muss verifiziert werden — alle 4 Stufen muessen `configId` korrekt weiterreichen:
+### 2. SensorConfigPanel: Props — BEREITS KORREKT
+
+> [verify-plan] BESTAETIGT: Die Props sind bereits korrekt definiert (SensorConfigPanel.vue:35-49):
+> ```typescript
+> interface Props {
+>   espId: string
+>   gpio: number
+>   sensorType: string
+>   unit?: string
+>   configId?: string      // <-- BEREITS VORHANDEN (optional, Zeile 41)
+>   showMetadata?: boolean
+> }
+> ```
+> HardwareView uebergibt `:config-id="configSensorData.configId"` (Zeile 979) — korrekt.
+> **Keine Aenderung noetig.** Aber der Plan sollte `configId` als REQUIRED statt optional kennzeichnen, da ohne configId bei 2x SHT31 der Bug bestehen bleibt.
+
+### 3. Event-Kette — BEREITS KORREKT (verifiziert)
+
+> [verify-plan] KORREKTUR der Event-Namen. Die echte Kette (verifiziert gegen Code):
 
 ```
-SensorColumn (Satellite-Klick)
-  → emit('select-sensor', { configId, gpio, sensorType })
-    → ESPOrbitalLayout
-      → emit('open-sensor-config', { configId, gpio, sensorType })
-        → DeviceDetailView
-          → emit('open-sensor-config', { configId, gpio, sensorType })
-            → HardwareView
-              → selectedSensor = { configId, gpio, sensorType }
-              → <SensorConfigPanel :config-id="selectedSensor.configId" ... />
+SensorColumn:94
+  → emit('sensor-click', { configId: sensor.config_id, gpio, sensorType })
+    → ESPOrbitalLayout:211 @sensor-click → handler:168
+      → emit('sensorClick', payload)                           // camelCase!
+        → DeviceDetailView:104 @sensor-click → handler:69
+          → emit('sensor-click', { espId, ...payload })        // espId wird ergaenzt
+            → HardwareView:920 @sensor-click
+              → handleSensorClickFromDetail(payload)           // Zeile 645
+              → configSensorData.value = { espId, gpio, sensorType, unit, configId }
+              → <SensorConfigPanel :config-id="configSensorData.configId" ... />  // Zeile 979
 ```
 
-**Pruefpunkt:** In T09-Fix-A wurde diese Kette etabliert. Jetzt muss geprueft werden, dass der LETZTE Schritt — HardwareView → SensorConfigPanel — tatsaechlich `configId` als Prop uebergibt UND dass SensorConfigPanel diesen Prop auch nutzt (nicht ignoriert und stattdessen (gpio, sensorType) verwendet).
-
-### 4. Sensor-Column: Satellite muss config_id in Click-Event haben
-
-Jeder Satellite in der SensorColumn muss seine `config_id` kennen. Beim Rendern der Satellites wird wahrscheinlich ueber die Sensor-Liste iteriert — jeder Eintrag hat `config_id`. Diese muss im Click-Handler an das Event angehaengt werden.
-
-```vue
-<!-- SensorColumn.vue — Satellite-Rendering -->
-<div
-  v-for="sensor in sortedSensors"
-  :key="sensor.config_id"
-  @click="$emit('select-sensor', {
-    configId: sensor.config_id,  // MUSS config_id sein, nicht index
-    gpio: sensor.gpio,
-    sensorType: sensor.sensor_type
-  })"
+> **BESTAETIGT:** Die `configId` kommt korrekt beim SensorConfigPanel an. Das Problem ist NICHT die Event-Kette, sondern dass `SensorConfigPanel.onMounted()` die configId IGNORIERT und stattdessen `sensorsApi.get(espId, gpio, sensorType)` aufruft (Zeile 154).
 >
-```
+> **Nebeneffekt in HardwareView:650:** Der `.find(s => s.gpio === payload.gpio && s.sensor_type === payload.sensorType)` liefert bei 2x SHT31 den ERSTEN Treffer — aber da `configId` vom Payload genommen wird (Zeile 660: `payload.configId || sensor.config_id`), ist das unkritisch fuer die configId-Weitergabe. Die daraus genommenen `sensorType` und `unit` sind bei 2x gleichem Sensor ohnehin identisch.
+
+### 4. SensorColumn: config_id im Click-Event — BEREITS KORREKT
+
+> [verify-plan] BESTAETIGT: SensorColumn.vue emittet `config_id` bereits korrekt:
+>
+> **Zeile 77:** `:key="sensor.config_id || \`sensor-${sensor.gpio}-${sensor.sensor_type}\`"`
+> **Zeile 94:** `@click="emit('sensor-click', { configId: sensor.config_id, gpio: sensor.gpio, sensorType: sensor.sensor_type })"`
+>
+> Das Interface `SensorItem` definiert `config_id?: string` (Zeile 21). **Keine Aenderung noetig.**
 
 ---
 
 ## Was NICHT gemacht wird
 
-- Keine Backend-Aenderungen (Backend-Lookup ist Fix-A)
 - Keine Aenderung an der Sensor-Erstellung (AddSensorModal)
 - Keine Aenderung an der Delete-Logik (das ist Fix-B)
-- Kein neues Store-Pattern — nur den bestehenden Lookup per config_id priorisieren
+
+> [verify-plan] KORREKTUR: Folgende Plan-Aussagen sind FALSCH:
+>
+> 1. ~~"Keine Backend-Aenderungen"~~ — FALSCH. Der aktuelle Backend-Endpoint `GET /sensors/{esp_id}/{gpio}?sensor_type=sht31_temp` crasht bei 2x SHT31 mit `MultipleResultsFound` (sensor_repo.py:107 `scalar_one_or_none()`). Es wird entweder ein neuer Endpoint `GET /sensors/config/{config_id}` benoetigt, oder der bestehende Endpoint muss `config_id` als Query-Param akzeptieren. Falls Fix-A dies bereits abdeckt: EXPLIZIT dokumentieren was Fix-A liefert.
+>
+> 2. ~~"Kein neues Store-Pattern"~~ — Richtig, aber aus falschem Grund. Es gibt KEINEN bestehenden Store-Lookup den man "priorisieren" koennte. Die Config wird per direktem API-Call geladen, nicht per Store-Getter.
 
 ---
 
@@ -136,11 +148,25 @@ Jeder Satellite in der SensorColumn muss seine `config_id` kennen. Beim Rendern 
 
 ---
 
-## Betroffene Dateien (geschaetzt)
+## Betroffene Dateien (verifiziert)
 
-| Datei | Aenderung |
-|-------|-----------|
-| `SensorConfigPanel.vue` | Lookup per config_id statt (gpio, sensorType) |
-| `sensor.store.ts` (oder `esp.store.ts`) | `getSensorConfigByConfigId()` oder bestehenden Lookup erweitern |
-| `SensorColumn.vue` | config_id im Click-Event verifizieren |
-| `HardwareView.vue` | config_id als Prop an SensorConfigPanel verifizieren |
+> [verify-plan] KORREKTUR: Tabelle gegen echten Code geprueft.
+
+| Datei | Aenderung | Status |
+|-------|-----------|--------|
+| `El Frontend/src/components/esp/SensorConfigPanel.vue` | `onMounted()` Zeile 154: API-Call per config_id statt (gpio, sensorType) | **AENDERN** |
+| `El Frontend/src/api/sensors.ts` | Neue Methode `getByConfigId(configId)` hinzufuegen | **AENDERN** |
+| `El Frontend/src/components/esp/SensorColumn.vue` | config_id im Click-Event | BEREITS KORREKT (Zeile 94) |
+| `El Frontend/src/views/HardwareView.vue` | config_id als Prop an SensorConfigPanel | BEREITS KORREKT (Zeile 979) |
+| `El Frontend/src/components/esp/ESPOrbitalLayout.vue` | configId Weiterreichung | BEREITS KORREKT (Zeile 170) |
+| `El Frontend/src/components/esp/DeviceDetailView.vue` | configId Weiterreichung | BEREITS KORREKT (Zeile 70) |
+| ~~`sensor.store.ts` (oder `esp.store.ts`)~~ | ~~Store-Lookup~~ | **ENTFAELLT** — kein Store-Getter vorhanden |
+
+### Backend-Abhaengigkeit (KRITISCH)
+
+| Datei | Aenderung | Zustaendigkeit |
+|-------|-----------|----------------|
+| `El Servador/.../api/v1/sensors.py` | Neuer Endpoint `GET /sensors/config/{config_id}` ODER bestehenden Endpoint um `?config_id=` erweitern | Fix-A (falls nicht enthalten: hier ergaenzen!) |
+| `El Servador/.../db/repositories/sensor_repo.py` | `get_by_id(config_id)` existiert bereits (Zeile 315/934) | Kein Aenderungsbedarf |
+
+> **WICHTIG fuer TM:** Bitte pruefen ob Fix-A den Endpoint `GET /sensors/config/{config_id}` liefert. Falls NEIN, muss Fix-C eine Backend-Aenderung enthalten oder Fix-A erweitert werden.

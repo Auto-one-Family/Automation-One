@@ -1,614 +1,653 @@
-# Frontend Dev Report: DS18B20 Add-Flow Analyse — Echter ESP
+# Frontend Dev Report: Code-Review Notification/Alert, Cross-View-Konsistenz, Frontend-Luecken
 
 ## Modus: A (Analyse)
-## Auftrag: DS18B20-Add-Flow fuer echten ESP (Wokwi) vollstaendig analysieren. Warum schlaegt er fehl?
+## Auftrag: Code-Review Bereiche 1-3 — Notification/Alert-System, Cross-View-Konsistenz L1/L2/Monitor, FL-03 und Status-Dot
 
 ---
 
 ## Codebase-Analyse
 
-### Analysierte Dateien
-- `El Frontend/src/components/esp/AddSensorModal.vue` (825 Zeilen, vollstaendig gelesen)
-- `El Frontend/src/components/esp/SensorConfigPanel.vue` (>53KB, gezielt gelesen)
-- `El Frontend/src/api/sensors.ts` (vollstaendig gelesen)
-- `El Frontend/src/stores/esp.ts` (>83KB, Zeilen 660-730 = `addSensor` Action gezielt gelesen)
-- `El Frontend/src/api/esp.ts` (Zeilen 170-189 = `isMockEsp` gelesen)
-- `El Frontend/src/shared/stores/gpio.store.ts` (Zeilen 260-360 = `scanOneWireBus` gelesen)
-- `El Frontend/src/components/esp/DeviceDetailView.vue` (vollstaendig gelesen)
-- `El Frontend/src/views/HardwareView.vue` (gezielt gegrept)
-- `El Frontend/src/components/esp/ESPOrbitalLayout.vue` (gezielt gegrept)
+Gelesene Dateien: `notification-inbox.store.ts`, `alert-center.store.ts`, `NotificationDrawer.vue`, `AlertStatusBar.vue`, `NotificationBadge.vue`, `QuickAlertPanel.vue`, `DeviceMiniCard.vue`, `LiveDataPreview.vue`, `SensorSatellite.vue`, `SensorColumn.vue`, `ESPOrbitalLayout.vue`, `esp.ts`, `sensor.store.ts`, `useESPStatus.ts`
 
 ---
 
-## UI-Flow: DS18B20 bei echtem ESP hinzufuegen (vollstaendig dokumentiert)
+## BEREICH 1: Notification/Alert-System
 
-### Einstiegspunkt
-Der Nutzer gelangt ueber zwei moegliche Wege zum AddSensorModal:
+### Datenfluesse
 
-**Weg A (Drag & Drop):** Sidebar-Komponente in Dashboard → Sensor-Typ auf ESPOrbitalLayout ziehen → `useOrbitalDragDrop` setzt `showAddSensorModal = true` und `droppedSensorType = 'ds18b20'`
+**Initial Load (REST)** — `notification-inbox.store.ts:146-172`:
+- `notificationsApi.list({ page: 1, page_size: 50 })` + `notificationsApi.getUnreadCount()` parallel
+- Getriggert von `NotificationDrawer.vue:122-131` via `watch(inboxStore.isDrawerOpen)`
 
-**Weg B (Manuell):** "Sensor hinzufuegen"-Button in ESPCard/ESPOrbitalLayout → `showAddSensorModal = true` ohne vorselektierten Typ
-
-Das `AddSensorModal` wird von `ESPOrbitalLayout.vue` (Zeile 394-395) und ueber `DeviceDetailView.vue → HardwareView.vue` gerendert.
-
-### Schritt 1: Modal oeffnet sich
+**Real-time (WebSocket)** — `esp.ts:1604-1607`:
 ```
-watch(props.modelValue) → resetForm() → Typ 'ds18b20' ist Default
+ws.on('notification_new')          -> inboxStore.handleWSNotificationNew()
+ws.on('notification_updated')      -> inboxStore.handleWSNotificationUpdated()
+ws.on('notification_unread_count') -> inboxStore.handleWSUnreadCount()
 ```
-- Form-State: `sensor_type = 'ds18b20'`, `gpio = oneWireScanPin.value (4)`
-- Wenn `initialSensorType` gesetzt: Typ wird auf ds18b20 vorgewaehlt
-- `isOneWireSensor = computed(() => sensor_type.includes('ds18b20'))` → true
 
-### Schritt 2: OneWire-Scan-Sektion erscheint
-- Template: `v-if="isOneWireSensor"` → Zeigt OneWire-Scan-Sektion
-- User waehlt GPIO-Pin (Dropdown, Default GPIO 4)
-- User klickt "Bus scannen"
+**Alert Stats (Polling)** — `alert-center.store.ts:186-191`: 30s Interval via `setInterval`. Gestartet in `AlertStatusBar.vue:33` (onMounted) UND in `App.vue` bei Login.
 
-### Schritt 3: Scan-Button → `handleOneWireScan()`
-```
-handleOneWireScan() → espStore.scanOneWireBus(espId, pin)
-  → gpioStore.scanOneWireBus()
-    → oneWireApi.scanBus(espId, pin)
-      → POST /api/v1/sensors/esp/{esp_id}/onewire/scan?pin=4
-```
-Bei echtem ESP: Der Server sendet einen MQTT-Befehl zum ESP. ESP scannt den OneWire-Bus und antwortet. Das kann 1-10 Sekunden dauern.
-Bei Wokwi-Simulation: Haengt davon ab, ob die Simulation OneWire-Scan-Befehle implementiert hat.
+### Status-Tabs (active/acknowledged/resolved)
 
-Kritischer Punkt — falls der ESP offline ist oder der MQTT-Scan fehlschlaegt:
-- HTTP 503 → "ESP-Gerät ist offline"
-- HTTP 504 → "ESP antwortet nicht (Timeout)"
-- Fehler landet in `state.scanError` → UI zeigt Fehler-Banner
-
-### Schritt 4: Scan-Ergebnisse
-Falls Scan erfolgreich: Devices werden in der Liste angezeigt.
-User waehlt ROM-Codes via Checkbox aus.
-
-### Schritt 5: "N neue Sensoren hinzufuegen" → `addMultipleOneWireSensors()`
+`NotificationDrawer.vue:55-67` — `statusTabs` computed:
 ```typescript
-// AddSensorModal.vue Zeilen 322-361
-for (const romCode of romCodesToAdd) {
-  const device = state.scanResults.find(d => d.rom_code === romCode)
-  const autoName = `Temp ${romCode.slice(-4)}`
-  const sensorData = buildSensorPayload({
-    sensor_type: (device?.device_type || 'ds18b20').toUpperCase(),
-    gpio: oneWireScanPin.value,
-    onewire_address: romCode,
-    interface_type: 'ONEWIRE',
-    name: newSensor.value.name || autoName,
-  })
-  await espStore.addSensor(props.espId, sensorData)
-}
+const active = stats?.active_count ?? inboxStore.notifications.filter(n => n.status === 'active').length
+const ack = stats?.acknowledged_count ?? ...
+const resolved = inboxStore.notifications.filter(n => n.status === 'resolved').length
 ```
 
-`buildSensorPayload()` (Zeilen 229-243) nimmt alle User-Inputs und merged `overrides`:
+**Problem IC-02:** `resolved` zaehlt nur geladene Inbox-Items (max 50). `active` und `ack` kommen aus REST-Stats (alle Items systemweit). Inkonsistente Zaehlbasis.
+
+### Parallele Filter-Systeme
+
+`NotificationDrawer.vue:36`: lokale `activeStatusFilter ref<StatusFilter>` (active/acknowledged/resolved) parallel zu `inboxStore.activeFilter` (Severity: all/critical/warning/system). Beide aktiv gleichzeitig. Dazu kommt `inboxStore.sourceFilter` als drittes AND-Glied. Drei parallele Filter-Dimensionen.
+
+### Acknowledge/Resolve
+
+- `NotificationDrawer.vue:94-100`: `alertStore.acknowledgeAlert(id)` / `alertStore.resolveAlert(id)`
+- `QuickAlertPanel.vue:115-138`: gleiche Actions + Batch-Ack
+
+### Quick-Alert-Panel
+
+Datenquelle: `inboxStore.notifications` direkt (kein eigener Fetch). Top 5 nach Severity sortiert, Status-gefiltert. `QuickAlertPanel.vue:80-94`.
+
+### Badge-Zahl
+
+`NotificationBadge.vue:26-33`:
 ```typescript
-function buildSensorPayload(overrides) {
+const badgeCount = computed(() => {
+  const unresolvedAlerts = alertStore.unresolvedCount  // active + acknowledged aus REST-Stats
+  return unresolvedAlerts > 0 ? unresolvedAlerts : inboxStore.unreadCount
+})
+const hasBadge = computed(() => badgeCount.value > 0 && espStore.devices.length > 0)
+```
+
+Beim App-Start (alertStats noch null): Badge = `inboxStore.unreadCount`. Nach erstem Poll: Badge = `active + acknowledged`. Kann visuell springen.
+
+### AlertStatusBar Polling-Bug
+
+`AlertStatusBar.vue:37` ruft `alertStore.stopStatsPolling()` in `onUnmounted`. Da `statsPollTimer` eine einzige Modulvariable in `alert-center.store.ts:44` ist, loescht das auch den von `App.vue` gestarteten globalen Timer. **Bug IC-01:** Drawer schliessen stoppt das globale Polling.
+
+---
+
+## BEREICH 2: Cross-View-Konsistenz
+
+### DeviceMiniCard.vue — Daten
+
+**Sensor-Count** `DeviceMiniCard.vue:153-159`:
+```typescript
+const sensorCount = computed(() => {
+  const grouped = groupSensorsByBaseType(sensors)
+  return grouped.reduce((sum, g) => sum + g.values.length, 0)
+})
+```
+Count = gruppierte Values (SHT31 = 2). Konsistent mit `extraSensorsCount` (Zeile 137-143).
+
+**Live-Werte:** Reaktiv aus `props.device` -> `espStore.devices`. WS-Events mutieren `device.sensors[].raw_value` via `sensor.store.ts:handleSensorData()`. Kein eigener WS-Handler in Komponente.
+
+### ESPOrbitalLayout / Orbital (L2)
+
+`ESPOrbitalLayout.vue:126-128`:
+```typescript
+const sensors = computed<MockSensor[]>(() => (props.device?.sensors as MockSensor[]) || [])
+```
+
+`SensorColumn.vue:82`:
+```typescript
+:value="sensor.processed_value ?? sensor.raw_value ?? 0"
+```
+
+Identische Datenquelle wie DeviceMiniCard: `espStore.devices.sensors[]`.
+
+**Inkonsistenz IC-04:** Multi-Value-Darstellung divergiert zwischen Views:
+- `DeviceMiniCard`: nutzt `groupSensorsByBaseType(sensors)` — liest `sensor.raw_value` und `sensor.sensor_type`
+- `SensorSatellite`: nutzt `props.multiValues` (`sensor.multi_values` Record)
+
+Fuer **Real-ESPs (Post-Fix1)**: Separate `MockSensor`-Eintraege pro Value-Type (sht31_temp, sht31_humidity). `multi_values` ist null. SensorSatellite zeigt Single-Value. DeviceMiniCard gruppiert korrekt.
+
+Fuer **Legacy-Mock-ESPs** (handleKnownMultiValueSensor-Pfad): Ein Eintrag mit `multi_values = { sht31_temp: {...}, sht31_humidity: {...} }`. SensorSatellite Multi-Value korrekt. DeviceMiniCard liest nur `raw_value` (primaer).
+
+### Monitor-View — Stale-Daten-Problem (HIGH)
+
+Monitor L2 laedt via `zonesApi.getZoneMonitorData(zoneId)` beim Zone-Wechsel — REST-Snapshot. `SensorCard` rendert aus diesen Daten. WS-Events (`sensor_data`) mutieren `espStore.devices`, **nicht** die Monitor-L2-Daten.
+
+**IC-05:** Sensorwerte in Monitor L2 werden nicht live aktualisiert. L1 (DeviceMiniCard) und Orbital zeigen Live-WS-Werte. Monitor L2 zeigt Snapshot vom letzten Zone-Wechsel.
+
+Einzige Live-Komponente in Monitor L2: `useSparklineCache` fuer Sparklines. Der Hauptwert in SensorCard bleibt eingefroren.
+
+### LiveDataPreview.vue
+
+`LiveDataPreview.vue:73-85`: Direkte WS-Subscription via `websocketService.subscribe()`, kein Store-Zugriff. Multi-Value-Filter via `props.sensorType` (case-insensitive, Zeile 53-54). Cleanup in `onUnmounted` korrekt. Eigenstaendig von Store-Pipeline.
+
+---
+
+## BEREICH 3: Bekannte Luecken
+
+### FL-03: Aktoren in DeviceMiniCard fehlen — Code-Beweis
+
+`DeviceMiniCard.vue` — kein Aktor-Code vorhanden:
+- Keine `actuators`-Variable, kein `device.actuators`-Zugriff
+- Keine Aktor-Computed Properties
+- Template Zeile 228: `<span v-if="sensorCount > 0">{{ sensorCount }}S</span>` — nur Sensor-Count
+- Template Zeile 236-256: nur `device-mini-card__sensors`-Block
+
+Root Cause: Bewusste Entscheidung beim L1-Redesign (v9.4). Aktoren wurden ausgelassen.
+
+### Status-Dot Logik
+
+`useESPStatus.ts:77-107` — pure function `getESPStatus(device: ESPDevice)`:
+
+```
+Priority 1: device.status === 'error'     -> 'error'
+            device.status === 'safemode'   -> 'safemode'
+            device.status === 'online'     -> 'online'
+            device.connected === true      -> 'online'
+            device.status === 'offline'    -> 'offline'
+
+Priority 2: device.status === 'approved'  -> last_seen Pruefung (< 5min = online)
+
+Priority 3: Heartbeat-Timing via last_seen || last_heartbeat
+            < 90s  -> 'online'
+            < 300s -> 'stale'
+            >= 300s -> 'offline'
+            kein ts -> 'unknown'
+```
+
+Farben (`useESPStatus.ts:30-67`):
+- online: `var(--color-success)` + pulse=true
+- stale: `var(--color-warning)` + pulse=false
+- offline: `var(--color-text-muted)` + pulse=false
+- error: `var(--color-error)` + pulse=false
+- safemode: `var(--color-warning)` + pulse=false
+- unknown: `var(--color-text-muted)` + pulse=false
+
+Verwendung in `DeviceMiniCard.vue:53-57`:
+```typescript
+const deviceStatus = computed<ESPStatus>(() => getESPStatus(props.device))
+const statusColor = computed(() => statusDisplay.value.color)
+```
+
+Template Zeile 219-226: Dot-Farbe via `:style="{ backgroundColor: statusColor }"`.
+
+`getESPStatus` ist pure function — kann in v-for ohne Composable-Constraint aufgerufen werden. Konsistent in DeviceMiniCard, ZonePlate, espStore.onlineDevices/offlineDevices eingesetzt.
+
+---
+
+## Zusammenfassung gefundener Probleme
+
+| ID | Severity | Datei:Zeile | Problem |
+|----|----------|-------------|---------|
+| IC-01 | Medium | `alert-center.store.ts:44`, `AlertStatusBar.vue:37` | Drawer-close loescht globalen Poll-Timer aus App.vue (stopStatsPolling auf shared timer) |
+| IC-02 | Medium | `NotificationDrawer.vue:59` | resolved-Count aus lokalem Array (<= 50), active/ack aus REST-Stats (alle) |
+| IC-03 | Low | `NotificationDrawer.vue:36` | Drei parallele Filter-Dimensionen (Severity-Store, Status-lokal, Source-Store) |
+| IC-04 | Low | `sensor.store.ts:156` vs `DeviceMiniCard.vue:116` | Multi-Value: Legacy-Pfad (multi_values) vs Post-Fix1-Pfad (separate Eintraege) |
+| IC-05 | High | MonitorView (zonesApi.getZoneMonitorData) | Monitor L2: REST-Snapshot statt Live-WS-Werte — Sensorwerte eingefroren |
+| FL-03 | Medium | `DeviceMiniCard.vue:112-256` | Aktoren fehlen komplett in L1 MiniCard |
+
+## Empfehlung
+
+- IC-05 (High): SensorCard in Monitor L2 auf espStore.devices anbinden ODER WS-Handler fuer Monitor-Daten
+- IC-01 (Medium): AlertStatusBar pruefen ob globalTimer laeuft bevor eigenem startStatsPolling
+- FL-03 (Medium): DeviceMiniCard um Aktor-Block erweitern
+- IC-02 (Medium): resolved via eigenen REST-Call laden (nicht aus lokalem Array)
+
+## Modus: A (Analyse)
+
+### FRUEHERER REPORT-INHALT (archiviert)
+## Auftrag: Root-Cause-Analyse fuer BUG-4, BUG-10, FL-01, FL-03, LiveDataPreview, Store
+## Datum: 2026-03-08
+
+---
+
+## Codebase-Analyse
+
+Analysierte Dateien:
+- `El Frontend/src/components/dashboard/DeviceMiniCard.vue` (574 Zeilen)
+- `El Frontend/src/components/esp/SensorConfigPanel.vue` (880+ Zeilen)
+- `El Frontend/src/components/esp/LiveDataPreview.vue` (176 Zeilen)
+- `El Frontend/src/components/esp/ESPSettingsSheet.vue` (300+ Zeilen analysiert)
+- `El Frontend/src/stores/esp.ts` (350+ Zeilen analysiert)
+- `El Frontend/src/api/esp.ts` (Actuator-Mapping analysiert)
+- `El Frontend/src/api/sensors.ts` (vollstaendig)
+- `El Frontend/src/types/index.ts` (MockActuator, MockSensor, MockESP Interfaces)
+- `El Frontend/src/views/HardwareView.vue` (1018+ Zeilen analysiert)
+
+---
+
+## BUG-4: Config-Panel zeigt keine Actuators in "Geraete nach Subzone"
+
+### Exakte Datei + Zeile
+**Datei:** `El Frontend/src/components/esp/ESPSettingsSheet.vue`
+**Zeilen:** 212-223 (Actuator-Loop in `devicesBySubzone` computed)
+
+**Ursache liegt aber in:** `El Frontend/src/api/esp.ts` Zeilen 269-282
+
+### Code-Snippet — Problematische Stelle
+
+```typescript
+// api/esp.ts Zeile 269-282: mapActuatorConfigToMockActuator
+function mapActuatorConfigToMockActuator(config: ActuatorConfigResponse): MockActuator {
   return {
-    sensor_type: newSensor.value.sensor_type,
-    name: newSensor.value.name || undefined,    // User-Name-Input
-    raw_value: newSensor.value.raw_value,
-    unit: newSensor.value.unit,
-    gpio: newSensor.value.gpio,
-    quality: newSensor.value.quality,
-    raw_mode: newSensor.value.raw_mode,
-    operating_mode: newSensor.value.operating_mode,
-    timeout_seconds: newSensor.value.timeout_seconds,
-    subzone_id: normalizeSubzoneId(newSensor.value.subzone_id),
-    ...overrides,
-  }
-}
-```
-
-### Schritt 6: ESP Store `addSensor()` — Real-ESP-Pfad
-
-```typescript
-// esp.ts Zeilen 683-723
-if (isMock(deviceId)) {
-  await debugApi.addSensor(deviceId, config)     // Mock-Pfad
-} else {
-  // REAL-ESP-Pfad
-  const interfaceType = inferInterfaceType(config.sensor_type)
-  const defaultI2CAddress = getDefaultI2CAddress(config.sensor_type)
-
-  const realConfig: SensorConfigCreate = {
-    esp_id: deviceId,
     gpio: config.gpio,
-    sensor_type: config.sensor_type,
+    actuator_type: config.actuator_type,
     name: config.name || null,
-    enabled: true,
-    subzone_id: normalizeSubzoneId(config.subzone_id),
-    interface_type: config.interface_type || interfaceType,
-    i2c_address: interfaceType === 'I2C' ? defaultI2CAddress : null,
-    onewire_address: config.onewire_address || null,
-    operating_mode: config.operating_mode || 'continuous',
-    timeout_seconds: config.timeout_seconds ?? 180,
-    // ...
+    state: config.is_active ?? false,
+    pwm_value: config.current_value ?? 0,
+    emergency_stopped: false,
+    last_command: config.last_command_at || null,
+    config_status: config.config_status as MockActuator['config_status'],
+    config_error: config.config_error || null,
+    config_error_detail: config.config_error_detail || null,
+    // FEHLT: subzone_id ist NICHT gemappt!
   }
-  await sensorsApi.createOrUpdate(deviceId, config.gpio, realConfig)
+}
+```
+
+ESPSettingsSheet.vue Zeile 212-214 greift darauf zu:
+```typescript
+for (const actuator of deviceActuators) {
+  const szId = (actuator as any).subzone_id ?? deviceSubzoneId ?? null
+  // subzone_id ist IMMER undefined -> Fallback auf ESP-Level subzone_id
+```
+
+### Root Cause
+
+`MockActuator` Interface in `types/index.ts` Zeilen 295-310 hat **kein `subzone_id` Feld**:
+
+```typescript
+export interface MockActuator {
+  gpio: number
+  actuator_type: string
+  name: string | null
+  state: boolean
+  pwm_value: number
+  emergency_stopped: boolean
+  last_command: string | null
+  config_status?: 'pending' | 'applied' | 'failed' | null
+  config_error?: string | null
+  config_error_detail?: string | null
+  // subzone_id FEHLT im Interface!
+}
+```
+
+Kausalkette:
+1. `ActuatorConfigResponse` vom Server enthaelt (ggf.) `subzone_id`
+2. `mapActuatorConfigToMockActuator()` uebersetzt es NICHT in `MockActuator`
+3. `ESPSettingsSheet.devicesBySubzone` liest `(actuator as any).subzone_id` — ist `undefined`
+4. Fallback `?? deviceSubzoneId` greift auf ESP-Level-Subzone (nicht Aktor-Subzone)
+5. Alle Aktoren landen in derselben Subzone-Gruppe (ESP-Level oder null)
+
+**Wichtig:** Aktoren verschwinden nicht gaenzlich — sie erscheinen in "Keine Subzone" oder der ESP-Level-Subzone. Das Symptom "GPIO 27 fehlt" deutet darauf hin, dass die Subzone-Gruppe mit diesem Aktor entweder leer angezeigt wird oder der Aktor gar nicht im `deviceActuators` Array landet.
+
+**Weiterer moeglicher Grund:** Bei Real-ESPs ruft `enrichDbDevicesWithActuators()` `actuatorsApi.list({ page_size: 100 })` auf. Falls der Aktor auf Seite 2 liegt (> 100 Aktoren), wird er nie geladen. Bei normalen Installationen kein Problem, aber der `page_size: 100` Hard-Limit ist ein Risikofaktor.
+
+### Fix-Vorschlag
+
+**Schritt 1 — `MockActuator` Interface erweitern** (`types/index.ts` nach Zeile 310):
+```typescript
+export interface MockActuator {
+  ...
+  config_error_detail?: string | null
+  /** Subzone assignment ID (optional) */
+  subzone_id?: string | null
+  /** Human-readable subzone name (optional) */
+  subzone_name?: string | null
+}
+```
+
+**Schritt 2 — Mapping erweitern** (`api/esp.ts` Zeile 280-281):
+```typescript
+function mapActuatorConfigToMockActuator(config: ActuatorConfigResponse): MockActuator {
+  return {
+    ...
+    config_error_detail: config.config_error_detail || null,
+    subzone_id: (config as any).subzone_id ?? null,   // NEU
+    subzone_name: (config as any).subzone_name ?? null, // NEU
+  }
+}
+```
+
+**Voraussetzung:** Server muss `subzone_id` in `ActuatorConfigResponse` liefern. Server-Dev-Analyse empfohlen.
+
+---
+
+## BUG-10: MiniCard Count falsch ("3S" statt "4S")
+
+### Exakte Datei + Zeile
+**Datei:** `El Frontend/src/components/dashboard/DeviceMiniCard.vue`
+**Zeilen:** 153-159
+
+### Code-Snippet — Aktuelle Implementation
+
+```typescript
+// Zeile 153-159
+const sensorCount = computed(() => {
+  const sensors = props.device.sensors as RawSensor[] | undefined
+  if (!sensors || sensors.length === 0) return props.device.sensor_count ?? 0
+  const grouped = groupSensorsByBaseType(sensors)
+  return grouped.reduce((sum, g) => sum + g.values.length, 0)
+})
+```
+
+### Root Cause
+
+Zwei moegliche Ursachen:
+
+**Ursache A — `sensors[]` kuenftiger Sensor fehlt:** Wenn ein Sensor `config_status: 'pending'` hat (ESP hat Konfiguration noch nicht bestaetigt), zaehlt er in `device.sensor_count` (DB-Wert vom Server), erscheint aber moeglicherweise nicht im `device.sensors[]` Array — je nach Server-Implementierung. Der computed-Fallback (`return props.device.sensor_count ?? 0`) greift nur wenn `sensors` komplett leer ist, nicht wenn ein Element fehlt.
+
+**Ursache B — `groupSensorsByBaseType()` zaehlt falsch:** Bei einem Sensor mit unbekanntem `sensor_type` (nicht in `SENSOR_TYPE_CONFIG`) koennte die Gruppe leer bleiben oder der Sensor wird als Single-Value mit 1 Value gezaehlt. Wenn ein Sensor-Typ faelschlicherweise als Multi-Value behandelt wird aber nur 1 Value hat, stimmt der Count.
+
+**Konkretes Szenario "3S statt 4S":** Ein pending Sensor (z.B. der 4. DS18B20) ist in `sensor_count = 4` enthalten, aber `sensors[]` hat nur 3 Eintraege weil der pending-Sensor noch nicht vom Server im enriched Array geliefert wird. `groupSensorsByBaseType([3 sensors]).values.length` = 3 → "3S". Korrekt waere "4S".
+
+### Fix-Vorschlag
+
+```typescript
+// Zeile 153-159: Sicherheits-Fallback
+const sensorCount = computed(() => {
+  const sensors = props.device.sensors as RawSensor[] | undefined
+  if (!sensors || sensors.length === 0) return props.device.sensor_count ?? 0
+  const grouped = groupSensorsByBaseType(sensors)
+  const groupedCount = grouped.reduce((sum, g) => sum + g.values.length, 0)
+  // Verwende hoeheren Wert: sensor_count zaehlt pending configs mit
+  return Math.max(groupedCount, props.device.sensor_count ?? 0)
+})
+```
+
+**Langfristiger Fix:** Server sollte pending Sensoren im enriched `sensors[]` Array liefern (mit `config_status: 'pending'` Marker), damit der Frontend-Count konsistent ist.
+
+---
+
+## FL-01: "+Zone" Button disabled
+
+### Exakte Datei + Zeile
+**Datei:** `El Frontend/src/views/HardwareView.vue`
+**Zeilen:** 885-894
+
+### Code-Snippet — Problematische Stelle
+
+```html
+<!-- Zeile 885-894 -->
+<button
+  v-if="!showCreateZoneForm"
+  class="zone-create-btn"
+  :disabled="unassignedDevices.length === 0"
+  :title="unassignedDevices.length === 0 ? 'Keine unzugewiesenen ESPs vorhanden' : 'Neue Zone erstellen'"
+  @click="showCreateZoneForm = true"
+>
+  <Plus class="zone-create-btn__icon" />
+  Zone erstellen
+</button>
+```
+
+### Root Cause
+
+**Intentionelles Design — aber unklare UX.**
+
+Das Formular (Zeilen 847-882) erfordert ein ESP aus `unassignedDevices` Dropdown:
+```typescript
+// Zeile 376-397: handleZoneCreate
+async function handleZoneCreate() {
+  const name = newZoneName.value.trim()
+  if (!name || !selectedEspForNewZone.value) return  // ESP Pflichtfeld!
+  const zoneId = generateZoneId(name)
+  await zonesApi.assignZone(selectedEspForNewZone.value, { zone_id: zoneId, zone_name: name })
+}
+```
+
+Zonen sind **keine eigenstaendigen Datenbank-Entitaeten** in diesem System — sie entstehen durch die ESP-Zuweisung. Der `zone_id` und `zone_name` werden in `esp_devices.zone_id` und `esp_devices.zone_name` gespeichert. Eine "leere Zone" ohne ESP kann daher technisch nicht existieren (ohne Backend-Aenderung).
+
+**Warum disabled erscheint:** Der User hat alle ESPs Zonen zugewiesen. Jetzt will er eine neue Zone erstellen, sieht aber einen disabled Button ohne klaren Erklaerungstext.
+
+### Fix-Vorschlag
+
+**Option A (Quick Win — nur Frontend):** Tooltip-Text verbessern:
+```html
+:title="unassignedDevices.length === 0
+  ? 'Alle ESPs sind bereits Zonen zugewiesen. ESP zuerst aus einer Zone entfernen (in Unzugewiesen-Leiste ziehen), dann neue Zone erstellen.'
+  : 'Neue Zone erstellen'"
+```
+
+**Option B (Vollstaendige Loesung — Backend noetig):** Neuer `POST /zone/zones` Endpoint der eine Zone ohne initialen ESP erstellt. Dann:
+```typescript
+async function handleZoneCreate() {
+  const name = newZoneName.value.trim()
+  if (!name) return
+  if (selectedEspForNewZone.value) {
+    // Klassischer Pfad: Zone per ESP-Zuweisung erstellen
+    await zonesApi.assignZone(selectedEspForNewZone.value, { zone_id: zoneId, zone_name: name })
+  } else {
+    // Neuer Pfad: Leere Zone im ZoneContext erstellen
+    await zonesApi.createZone({ zone_id: zoneId, zone_name: name })
+  }
 }
 ```
 
 ---
 
-## Identifizierte Bugs und Probleme
+## FL-03: Aktoren auf L1 MiniCard fehlen
 
-### BUG-A (KRITISCH fuer I2C): `addSensor` fuer Real-ESP ignoriert User-gewaehlte I2C-Adresse
+### Exakte Datei + Zeile
+**Datei:** `El Frontend/src/components/dashboard/DeviceMiniCard.vue`
+**Zeilen:** 237-257 (Template — keine Aktor-Sektion vorhanden)
 
-**Betrifft:** I2C-Sensoren (SHT31, BMP280) bei echten ESPs — nicht DS18B20.
+### Code-Snippet — Fehlende Stelle
 
-**Ort:** `El Frontend/src/stores/esp.ts` Zeile 704
+```html
+<!-- Zeile 237-257: NUR Sensor-Zeilen, kein Aktor-Abschnitt -->
+<div v-if="sensorDisplays.length > 0" class="device-mini-card__sensors">
+  <div v-for="(sensor, idx) in sensorDisplays" ...>
+    <!-- Sensor-Daten -->
+  </div>
+  <div v-if="extraSensorsCount > 0" class="device-mini-card__sensors-overflow">
+    +{{ extraSensorsCount }} weitere
+  </div>
+</div>
+<!-- Kein <div v-if="actuatorDisplays.length > 0"> folgt -->
+```
+
+### Root Cause
+
+**Feature-Gap — DeviceMiniCard wurde nie fuer Aktor-Anzeige konzipiert.**
+
+Im Script-Block gibt es kein `actuatorDisplays` computed. `SENSOR_ICON_MAP` enthaelt zwar Icons wie `ToggleLeft` (Aktor-tauglich), aber die werden nur fuer Sensoren genutzt.
+
+Die Aktor-Daten sind technisch vorhanden:
+- Mock-ESPs: `device.actuators` kommt direkt aus debug-store
+- Real-ESPs: `device.actuators` nach `enrichDbDevicesWithActuators()`
+
+Sie werden nur nie gerendert.
+
+### Fix-Vorschlag
+
+In DeviceMiniCard.vue folgende Ergaenzungen:
+
+**Script (nach `extraSensorsCount` computed, ca. Zeile 143):**
 ```typescript
-// BUG: Nutzt IMMER defaultI2CAddress aus Registry, ignoriert config.i2c_address
-i2c_address: interfaceType === 'I2C' ? defaultI2CAddress : null,
-```
-Der User waehlt im Modal eine I2C-Adresse (z.B. 0x45 fuer SHT31 mit ADDR-Pin=HIGH). Die `addSensor`-Action im Store ignoriert diese und nutzt immer den Registry-Default (0x44). Das `config.i2c_address`-Feld aus dem Modal wird nicht an `realConfig` weitergegeben.
+const MAX_VISIBLE_ITEMS = 4  // Kombiniertes Limit Sensoren + Aktoren
 
-**Fix (1 Zeile):**
+const actuatorDisplays = computed(() => {
+  const actuators = (props.device.actuators as MockActuator[] | undefined)
+  if (!actuators || actuators.length === 0) return []
+
+  // Restliches Platzbudget nach Sensoren
+  const sensorSlots = sensorDisplays.value.length
+  const remainingSlots = Math.max(0, MAX_VISIBLE_ITEMS - sensorSlots)
+  if (remainingSlots === 0) return []
+
+  return actuators.slice(0, remainingSlots).map(a => ({
+    label: a.name || a.actuator_type,
+    state: a.state ? 'EIN' : 'AUS',
+    stateColor: a.state ? 'var(--color-success)' : 'var(--color-text-muted)',
+    icon: resolveIcon('ToggleLeft'),
+  }))
+})
+```
+
+**Template (nach dem sensors-Block, vor actions-Block):**
+```html
+<!-- Actuator rows -->
+<div v-if="actuatorDisplays.length > 0" class="device-mini-card__sensors">
+  <div
+    v-for="(act, idx) in actuatorDisplays"
+    :key="`act-${idx}`"
+    class="device-mini-card__sensor"
+  >
+    <component :is="act.icon" class="device-mini-card__sensor-icon" />
+    <span class="device-mini-card__sensor-name" :title="act.label">{{ act.label }}</span>
+    <span class="device-mini-card__sensor-value" :style="{ color: act.stateColor }">{{ act.state }}</span>
+  </div>
+</div>
+```
+
+**Import hinzufuegen** (Zeile 20-22, `MockActuator` Type):
 ```typescript
-i2c_address: interfaceType === 'I2C'
-  ? (config.i2c_address ?? defaultI2CAddress)
-  : null,
+import type { MockActuator } from '@/types'
 ```
 
 ---
 
-### BUG-B (KRITISCH fuer DS18B20): Kein Scan = kein Hinzufuegen
+## LiveDataPreview — Analyse
 
-**Betrifft:** DS18B20 auf echtem ESP (einschliesslich Wokwi-Simulation).
+### Datei
+**Datei:** `El Frontend/src/components/esp/LiveDataPreview.vue` (176 Zeilen)
 
-**Ursache:** Der einzige Weg einen DS18B20 auf einem echten ESP hinzuzufuegen erfordert einen OneWire-Bus-Scan via MQTT. Es gibt keinen manuellen Fallback. Das bedeutet:
+### Status: Kein kritischer Bug
 
-1. ESP muss online sein (MQTT-Verbindung aktiv)
-2. ESP muss OneWire-Scan-Befehle per MQTT implementieren
-3. Der ESP muss innerhalb von 10 Sekunden antworten
+Die Komponente ist korrekt implementiert:
+- Zeile 25-28: Props mit `sensorType?: string` fuer Multi-Value-Filter vorhanden
+- Zeile 53-54: Case-insensitive sensor_type Vergleich korrekt
+- Zeile 73-85: Subscribe/Unsubscribe Pattern korrekt mit Cleanup
 
-Falls eines dieser Kriterien nicht erfuellt ist → Scan schlaegt fehl → es gibt keine Moeglichkeit einen DS18B20 ohne ROM-Code hinzuzufuegen.
+### Identifizierte Verbesserungspunkte
 
-**Kein Frontend-Bug per se** — das ist eine Architekturentscheidung. Aber fuer Wokwi-ESPs ist der OneWire-Scan moeglicherweise nicht implementiert.
+**1. Kein Initial-Value (nicht kritisch):**
+Die Komponente startet immer mit `--`. Erster echter Wert kommt erst mit naechster WS-Message. Bei langsamen Sensoren (z.B. 30s Intervall) sieht der User 30 Sekunden lang `--`.
 
-**Fehlermeldungen die der User sieht:**
-- HTTP 503: "ESP-Gerät ist offline"
-- HTTP 504: "ESP antwortet nicht (Timeout). Ist OneWire-Bus auf GPIO X konfiguriert?"
-
----
-
-### BUG-C (MEDIUM): `sensor_type` wird UPPERCASE gesendet
-
-**Ort:** `El Frontend/src/components/esp/AddSensorModal.vue` Zeile 339
+**2. `tokens.accent` Dependency (Risiko):**
 ```typescript
-sensor_type: (device?.device_type || 'ds18b20').toUpperCase(),
+import { tokens } from '@/utils/cssTokens'
+// ...
+:color="tokens.accent"
 ```
-`device.device_type` kommt vom Scan-Result (z.B. `"ds18b20"`). Es wird `.toUpperCase()` angewendet → `"DS18B20"`. Der Server-Endpunkt `POST /sensors/{espId}/{gpio}` muss pruefen ob uppercase `sensor_type` akzeptiert wird.
+Falls `@/utils/cssTokens` nicht existiert oder `accent` undefiniert ist, gibt es einen Laufzeitfehler. Diese Datei sollte geprueft werden.
 
-**Fix (1 Zeile):**
+**3. Subscription vs. on() Pattern:**
+Zeile 74: `websocketService.subscribe()` (Filter-basiert). Laut SKILL.md v9.60 kann Doppel-Dispatch entstehen wenn gleichzeitig eine Subscription UND ein on()-Listener aktiv sind. Da LiveDataPreview nur subscribe() nutzt, sollte das kein Problem sein — aber konsistenter waere `ws.on()` Pattern wie in anderen Komponenten.
+
+### Fix-Vorschlag fuer Initial-Value (optional)
+
 ```typescript
-sensor_type: (device?.device_type || 'ds18b20').toLowerCase(),
+onMounted(async () => {
+  subscriptionId = websocketService.subscribe(
+    { types: ['sensor_data'], esp_ids: [props.espId] },
+    handleMessage,
+  )
+
+  // Initial: Letzten bekannten Wert laden
+  try {
+    const { sensorsApi } = await import('@/api/sensors')
+    const result = await sensorsApi.queryData({
+      esp_id: props.espId,
+      gpio: props.gpio,
+      ...(props.sensorType ? { sensor_type: props.sensorType } : {}),
+      limit: 1,
+    })
+    if (result.readings?.length > 0) {
+      currentValue.value = result.readings[0].value
+      quality.value = result.readings[0].quality ?? 'unknown'
+    }
+  } catch {
+    // Kein historischer Wert — auf Live-Update warten
+  }
+})
 ```
 
 ---
 
-### BUG-D (LOW): NB7-Status
+## Store-Analyse (esp.ts)
 
-NB7 lautete: "DS18B20 OneWire add flow ignores user inputs (name, raw_value, unit)."
+### Datenladefluss
 
-**Aktueller Stand nach v9.30 Refactor:**
-- `name`: wird uebernommen, korrekt
-- `raw_value`: wird an `buildSensorPayload` uebergeben, aber in `realConfig` (SensorConfigCreate) ist kein `raw_value`-Feld — wird still ignoriert
-- `unit`: gleiches Problem
-
-**Fazit:** NB7 ist fuer echte ESPs teilweise gefixt (`name` funktioniert). `raw_value` und `unit` werden ignoriert — das ist fuer Real-ESPs akzeptabel, da der ESP eigene Messwerte liefert. Fuer Mock-ESPs war es kritischer (Debug-API nutzt diese Felder).
-
----
-
-## Hauptursache fuer Wokwi-ESP-Scheitern
-
-Das beschriebene Problem hat folgende wahrscheinliche Ursachen (Prioritaet):
-
-**Szenario 1 (wahrscheinlichste Ursache):** OneWire-Scan-MQTT-Handler auf dem Wokwi-ESP nicht implementiert oder ESP antwortet nicht innerhalb von 10 Sekunden. Resultat: HTTP 504 Timeout.
-
-**Szenario 2:** `sensor_type = "DS18B20"` (uppercase, BUG-C) wird vom Server abgelehnt → HTTP 4xx/5xx beim `POST /sensors/{espId}/{gpio}` Call.
-
-**Szenario 3:** Wokwi-ESP wird als Mock erkannt (falls esp_id `ESP_MOCK_` Praefix hat) → Mock-API-Pfad schlaegt fehl.
-
-**Szenario 4:** User versucht ohne Scan den "Hinzufuegen"-Button zu nutzen — der Button erscheint bei OneWire-Sensor-Typ gar nicht (`v-if="!isOneWireSensor"` auf dem Primär-Button). Der User sieht nur den Scan-Bereich, nicht den normalen Submit-Button.
-
----
-
-## Wie wird AddSensorModal fuer echten ESP ausgeloest?
-
-### Via ESPOrbitalLayout (Dashboard-View)
 ```
-ESPCard → "+" Button → useOrbitalDragDrop setzt showAddSensorModal = true
+espStore.fetchAll()
+  ↓
+espApi.listDevices()
+  ↓
+  ├── GET /debug/mock-esp          → Mock ESPs (in-memory, sensors+actuators direkt)
+  ├── GET /esp/devices             → DB ESPs (nur sensor_count, actuator_count)
+  ├── enrichDbDevicesWithSensors() → sensorsApi.list() → device.sensors[]
+  └── enrichDbDevicesWithActuators() → actuatorsApi.list({ page_size: 100 }) → device.actuators[]
+  ↓
+devices.value = dedupedDevices
 ```
 
-### Via DeviceDetailView (HardwareView Level 3)
-```
-HardwareView → DeviceMiniCard klicken → DeviceDetailView → ESPOrbitalLayout
-```
+### sensor_count Berechnung
 
-**Unterschied Mock vs. Real:** Es gibt keinen unterschiedlichen UI-Trigger. Beide nutzen dasselbe AddSensorModal. Der Unterschied liegt im Store (`isMock()` Abfrage auf `esp_id`).
-
-**isMock-Logik** (`api/esp.ts` Zeile 174-179):
+**Mock-ESPs** (api/esp.ts Zeile 402):
 ```typescript
-function isMockEsp(espId: string): boolean {
-  return espId.startsWith('ESP_MOCK_') || espId.startsWith('MOCK_')
-}
+sensor_count: mock.sensors?.length || 0
 ```
-Ein Wokwi-ESP ohne diesen Praefix wird als Real-ESP behandelt.
+Direkt aus in-memory Store — keine DB-Abfrage. Immer konsistent mit `sensors[]`.
+
+**DB-ESPs:**
+- `sensor_count` kommt vom Server (Datenbankwert, zaehlt ALLE Sensoren inkl. pending)
+- Nach `enrichDbDevicesWithSensors()` ist `device.sensors[]` befuellt
+- `sensor_count` wird NICHT ueberschrieben nach Enrichment
+
+**Inkonsistenz-Risiko:** Wenn Server in `sensor_count` Sensoren mit `config_status: 'pending'` zaehlt, aber `enrichDbDevicesWithSensors()` diese nicht ins Array aufnimmt, divergieren die Werte. Das erklaert BUG-10.
+
+### WebSocket Handler fuer Sensor/Aktor-Updates
+
+Der ESP Store registriert via `useWebSocket()` Hook (Zeile 129-144) Filter auf `['esp_health', 'sensor_data', 'actuator_status', ...]`. Die `sensor_data` Handler-Logik liegt seit v9.60 im `sensor.store.ts` (shared). Der esp-Store behandelt nur Device-Level-Events (health, discovery, config_response).
+
+Aktor-Updates via `actuator_status` Events werden im Store verarbeitet und aktualisieren den `device.actuators[gpio].state` direkt ohne API-Call.
 
 ---
 
-## SensorConfigPanel — Bestehenden DS18B20 konfigurieren
-
-Falls ein DS18B20 bereits existiert (z.B. durch Scan hinzugefuegt), wird er ueber `SensorConfigPanel` konfiguriert:
-
-```
-HardwareView → DeviceDetailView → ESPOrbitalLayout → SensorColumn → SensorSatellite (Klick)
-→ emit 'sensor-click': { configId, gpio, sensorType }
-→ DeviceDetailView.handleSensorClick()
-→ HardwareView.handleSensorClickFromDetail()
-→ configSensorData.value = { espId, gpio, sensorType, unit, configId }
-→ showSensorConfig = true (SlideOver oeffnet SensorConfigPanel)
-```
-
-`SensorConfigPanel.handleSave()` sendet `POST /sensors/{espId}/{gpio}` mit Name, Schwellwerten, Betriebsmodus etc. Fuer OneWire-Sensoren wird `interface_type = 'ONEWIRE'` korrekt via `inferInterfaceType()` berechnet.
-
----
-
-## Qualitaetspruefung (8-Dimensionen-Checkliste)
+## Qualitaetspruefung (8-Dimensionen — Analyse Only)
 
 | # | Dimension | Befund |
 |---|-----------|--------|
-| 1 | Struktur | AddSensorModal in `esp/`, SensorConfigPanel in `esp/` — korrekt |
-| 2 | Namenskonvention | OK, alle PascalCase/camelCase korrekt |
-| 3 | Rueckwaertskompatibilitaet | BUG-A: i2c_address fuer Real-ESP ignoriert |
-| 4 | Wiederverwendbarkeit | `buildSensorPayload` korrekt extrahiert (v9.30) |
-| 5 | Speicher & Ressourcen | OneWire-Scan in gpioStore gecacht, cleanup via clearOneWireScan OK |
-| 6 | Fehlertoleranz | Scan-Fehler werden angezeigt, aber kein manueller Fallback (BUG-B) |
-| 7 | Seiteneffekte | `espStore.fetchDevice()` nach addSensor korrekt, kein Leak |
-| 8 | Industrielles Niveau | BUG-C (uppercase sensor_type) ist potenzieller Server-Error |
-
----
-
-## Fix-Vorschlaege
-
-### Fix 1 (BUG-C, Prio 1): sensor_type lowercase — 1 Zeile
-**Datei:** `El Frontend/src/components/esp/AddSensorModal.vue` Zeile 339
-```typescript
-// IST:
-sensor_type: (device?.device_type || 'ds18b20').toUpperCase(),
-// SOLL:
-sensor_type: (device?.device_type || 'ds18b20').toLowerCase(),
-```
-
-### Fix 2 (BUG-A, Prio 2): User-I2C-Adresse uebergeben — 1 Zeile
-**Datei:** `El Frontend/src/stores/esp.ts` Zeile 704
-```typescript
-// IST:
-i2c_address: interfaceType === 'I2C' ? defaultI2CAddress : null,
-// SOLL:
-i2c_address: interfaceType === 'I2C' ? (config.i2c_address ?? defaultI2CAddress) : null,
-```
-
-### Fix 3 (BUG-B, optional): Manuellen ROM-Code-Fallback ermoeglichen
-Nach der Scan-Section ein optionales Textfeld anzeigen wenn kein Scan-Ergebnis vorliegt:
-```
-Bedingung: isOneWireSensor && !oneWireScanState.isScanning
-           && (!oneWireScanState.scanResults.length || oneWireScanState.scanError)
-```
-Mit manuellem ROM-Code koennte der User auch ohne funktionierende MQTT-Verbindung einen DS18B20 hinzufuegen.
-
----
-
-## Diagnoseschritte fuer Robins Wokwi-Problem
-
-Robin sollte folgendes pruefen:
-
-1. **ESP-ID pruefen:** Beginnt die ID des Wokwi-ESP mit `ESP_MOCK_` oder `MOCK_`? Falls ja → Mock-Pfad wird genutzt.
-2. **Scan-Fehlermeldung:** Welche Fehlermeldung erscheint beim OneWire-Scan? (503/504/andere HTTP-Code)
-3. **Browser-Konsole:** Gibt es einen API-Error im Network-Tab bei `POST /api/v1/sensors/esp/{id}/onewire/scan`?
-4. **sensor_type Case:** Im Network-Tab pruefen was `sensor_type` im POST-Body des `createOrUpdate`-Calls ist — uppercase oder lowercase?
-5. **"Hinzufuegen"-Button:** Ist der Button sichtbar? Bei `isOneWireSensor = true` erscheint der normale Submit-Button NICHT — nur der Scan-Bereich.
+| 1 | Struktur & Einbindung | Alle Komponenten korrekt eingebunden |
+| 2 | Namenskonvention | Korrekt (PascalCase, camelCase) |
+| 3 | Rueckwaertskompatibilitaet | BUG-4 Fix braucht Type-Erweiterung — additive, kein Breaking Change |
+| 4 | Wiederverwendbarkeit | DeviceMiniCard wird konsistent wiederverwendet |
+| 5 | Speicher & Ressourcen | LiveDataPreview Cleanup korrekt, keine Leaks erkannt |
+| 6 | Fehlertoleranz | sensor_count Fallback vorhanden; subzone_id Fallback unzulaenglich |
+| 7 | Seiteneffekte | MockActuator Type-Erweiterung betrifft alle Nutzerstellen |
+| 8 | Industrielles Niveau | FL-01 intentionell, aber schlechte UX ohne erklaerenden Text |
 
 ---
 
 ## Cross-Layer Impact
 
-| Schicht | Betroffen | Pruefung noetig |
-|---------|-----------|-----------------|
-| Server | `POST /api/v1/sensors/esp/{id}/onewire/scan` | MQTT-Handler fuer Real-ESP vorhanden? |
-| Server | `POST /sensors/{espId}/{gpio}` | Akzeptiert uppercase `sensor_type`? Normalisierung im Backend? |
-| ESP32 | OneWire-Scan MQTT-Befehl | Implementiert in Wokwi-Simulation? |
-
-**Empfehlung:** Server-Dev-Agent fragen ob `sensor_type` case-insensitiv verarbeitet wird und ob der Wokwi-ESP den OneWire-Scan-MQTT-Handler implementiert hat.
+| Aenderung | Betrifft | Aktion |
+|-----------|---------|--------|
+| BUG-4: `MockActuator.subzone_id` | `ActuatorConfigResponse` Server-Schema | server-dev pruefen ob Feld bereits existiert |
+| BUG-4: `mapActuatorConfigToMockActuator()` | Nur Frontend api/esp.ts | Sicher, additive |
+| BUG-10: `sensorCount` computed | Nur DeviceMiniCard | Lokale Aenderung, sicher |
+| FL-01: Tooltip-Text | Nur HardwareView.vue Template | Kein Risiko |
+| FL-03: Aktor-Zeilen in MiniCard | `MockActuator` Type-Import noetig | Sicher |
+| LiveDataPreview Initial-Load | `sensorsApi.queryData()` API | Kein Breaking Change |
 
 ---
+
+## Ergebnis: Bug-Tabelle
+
+| Bug | Root Cause Zusammenfassung | Exakte Stelle |
+|-----|---------------------------|---------------|
+| BUG-4 | `MockActuator` Interface hat kein `subzone_id`; Mapping-Funktion uebersetzt es nicht | `types/index.ts:295` + `api/esp.ts:269` |
+| BUG-10 | `sensor_count` (DB) > `sensors[].length` bei pending-Sensoren; grouped count unterschaetzt | `DeviceMiniCard.vue:154-159` |
+| FL-01 | Button intentionell disabled (Zone braucht initialen ESP); UX erklaert das nicht | `HardwareView.vue:888` |
+| FL-03 | Feature-Gap: Kein Template-Block fuer Aktoren in DeviceMiniCard | `DeviceMiniCard.vue:237-257` |
+| LiveDataPreview | Kein kritischer Bug; kein Initial-Value-Load; `tokens.accent` Dependency pruefen | `LiveDataPreview.vue:73-85` |
 
 ## Verifikation
 
-Keine Code-Aenderungen vorgenommen — reine Analyse. Kein Build erforderlich.
+Analyse-Modus — kein Code geaendert, kein Build noetig.
 
----
+## Empfehlung naechster Agent
 
-## Empfehlung: Naechster Schritt
-
-**Fix 1 (BUG-C)** kann sofort implementiert werden: `.toUpperCase()` → `.toLowerCase()` in AddSensorModal.vue Zeile 339.
-
-**Fuer BUG-B:** Server-Dev-Agent oder ESP32-Dev-Agent fragen ob der Wokwi-ESP MQTT-Handler fuer den OneWire-Scan implementiert hat.
-
----
-
-## Fruehere Report-Daten (ueberschrieben)
-
----
-
-## Codebase-Analyse
-
-### Analysierte Dateien (14 spezifizierte + 6 Referenz-Dateien)
-
-**Spezifizierte Dateien:**
-- `El Frontend/src/api/diagnostics.ts`
-- `El Frontend/src/shared/stores/diagnostics.store.ts`
-- `El Frontend/src/components/system-monitor/DiagnoseTab.vue`
-- `El Frontend/src/components/system-monitor/ReportsTab.vue`
-- `El Frontend/src/components/system-monitor/MonitorTabs.vue`
-- `El Frontend/src/components/system-monitor/HealthTab.vue`
-- `El Frontend/src/components/system-monitor/HealthSummaryBar.vue`
-- `El Frontend/src/components/system-monitor/types.ts`
-- `El Frontend/src/views/SystemMonitorView.vue`
-- `El Frontend/src/types/logic.ts`
-- `El Frontend/src/shared/stores/index.ts`
-- `El Frontend/src/router/index.ts`
-- `El Frontend/src/components/rules/RuleNodePalette.vue`
-- `El Frontend/src/components/rules/RuleFlowEditor.vue`
-
-**Referenz-Dateien (zum Pattern-Abgleich):**
-- `El Frontend/src/utils/formatters.ts` — Signatur von `formatRelativeTime`
-- `El Frontend/src/shared/design/primitives/BaseModal.vue` — Prop-Namen
-- `El Frontend/src/shared/design/primitives/SlideOver.vue` — Prop-Namen
-- `El Frontend/src/components/plugins/PluginConfigDialog.vue`
-- `El Frontend/src/views/PluginsView.vue`
-- `El Frontend/src/shared/design/layout/Sidebar.vue`
-
----
-
-## Qualitätsprüfung (8 Dimensionen)
-
-| # | Dimension | Ergebnis |
-|---|-----------|----------|
-| 1 | **Struktur & Einbindung** | `diagnostics.ts` in `api/`, `diagnostics.store.ts` in `shared/stores/` korrekt. Store korrekt in `shared/stores/index.ts` re-exportiert. Alle @/ Imports korrekt. |
-| 2 | **Namenskonvention** | PascalCase für Komponenten, camelCase für Funktionen, UPPER_SNAKE für Konstanten — eingehalten. |
-| 3 | **Rückwärtskompatibilität** | `TabId` in `types.ts` um `'diagnostics'` und `'reports'` erweitert — additive Erweiterung, keine Breaking Changes. |
-| 4 | **Wiederverwendbarkeit** | `diagnostics.store.ts` nutzt etabliertes Pinia Setup-Store Pattern. DiagnoseTab und ReportsTab folgen dem MonitorTabs-Komponentenmuster. |
-| 5 | **Speicher & Ressourcen** | `HealthSummaryBar.vue` — `onUnmounted` Cleanup für Keyboard-Handler vorhanden. `diagnostics.store.ts` — keine persistenten WS-Subscriptions, kein Leak-Risiko. |
-| 6 | **Fehlertoleranz** | Try-Catch in allen Store-Actions. `error` State in Store. Null-Checks in Templates via `v-if`. |
-| 7 | **Seiteneffekte** | Vue-Reaktivitätsbug (Set-Mutations in DiagnoseTab) behoben. SystemMonitorView `open-alerts` Event war unbehandelt — behoben. |
-| 8 | **Industrielles Niveau** | Nach Fixes: TypeScript strict, kein `any`, Build-verifiziert. |
-
----
-
-## Gefundene und behobene Bugs
-
-### Bug 1: Vue 3 Reaktivitätsfehler — DiagnoseTab.vue (KRITISCH)
-
-**Datei:** `El Frontend/src/components/system-monitor/DiagnoseTab.vue`
-
-**Problem:** `ref<Set<string>>(new Set())` — Vue 3's Proxy-System trackt in-place Mutations auf `Set`-Objekten (`.add()`, `.delete()`) NICHT. Das Template re-renderte nicht bei Expand/Collapse von Check-Details.
-
-**Fix:** Ersetzt durch `ref<Record<string, boolean>>({})` mit Object-Spread für alle Mutationen:
-
-```typescript
-// Vorher (broken):
-const expandedChecks = ref<Set<string>>(new Set())
-function toggleExpand(name: string) {
-  if (expandedChecks.value.has(name)) { expandedChecks.value.delete(name) }
-  else { expandedChecks.value.add(name) }
-}
-
-// Nachher (fixed):
-const expandedChecks = ref<Record<string, boolean>>({})
-function toggleExpand(name: string) {
-  if (expandedChecks.value[name]) {
-    expandedChecks.value = { ...expandedChecks.value, [name]: false }
-  } else {
-    expandedChecks.value = { ...expandedChecks.value, [name]: true }
-  }
-}
-// In runSingleCheck:
-expandedChecks.value = { ...expandedChecks.value, [checkName]: true }
-```
-
-Template-Referenzen: `expandedChecks.has(check.name)` → `expandedChecks[check.name]`
-
----
-
-### Bug 2: Unnötige `any`-Casts — ReportsTab.vue
-
-**Datei:** `El Frontend/src/components/system-monitor/ReportsTab.vue`
-
-**Problem:** `expandedReportData = ref<Record<string, unknown> | null>(null)` erzwang `(expandedReportData as any).checks` und `(expandedReportData as any).summary` im Template — TypeScript `any`-Violation.
-
-**Fix:** Typ zu `DiagnosticReport | null` geändert:
-
-```typescript
-import type { DiagnosticReport } from '@/api/diagnostics'
-const expandedReportData = ref<DiagnosticReport | null>(null)
-// In toggleReport:
-expandedReportData.value = report  // direkte Zuweisung, kein Cast nötig
-```
-
-Template: `(expandedReportData as any).checks` → `expandedReportData.checks`
-
----
-
-### Bug 3: Sidebar aktiver Zustand falsch — Sidebar.vue
-
-**Datei:** `El Frontend/src/shared/design/layout/Sidebar.vue`
-
-**Problem:** "Wartung"-Link navigiert zu `/system-monitor?tab=health`, nutzte aber `isActive('/maintenance')` — dieser Pfad existiert nicht als Route und triggerte nie. Zudem konnten "System" und "Wartung" gleichzeitig aktiv sein.
-
-**Fix:** Beide Links mit Query-Param-Bewusstsein aktualisiert:
-
-```vue
-<!-- System-Link — schließt tab=health aus -->
-:class="['sidebar__link', isActive('/system-monitor') && route.query.tab !== 'health' && 'sidebar__link--active']"
-
-<!-- Wartung-Link — matcht /maintenance (Legacy) ODER /system-monitor?tab=health -->
-:class="['sidebar__link', (isActive('/maintenance') || (isActive('/system-monitor') && route.query.tab === 'health')) && 'sidebar__link--active']"
-```
-
----
-
-### Bug 4: Fehlender Event-Handler — SystemMonitorView.vue
-
-**Datei:** `El Frontend/src/views/SystemMonitorView.vue`
-
-**Problem:** `HealthTab` emittiert `open-alerts`, aber `SystemMonitorView` hatte weder Import von `useNotificationInboxStore`, noch eine Handler-Funktion, noch `@open-alerts` Binding auf `<HealthTab>`.
-
-**Fix:**
-
-```typescript
-// Hinzugefügt:
-import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
-const inboxStore = useNotificationInboxStore()
-function handleOpenAlerts() {
-  inboxStore.toggleDrawer()
-}
-```
-
-```vue
-<!-- Template aktualisiert: -->
-<HealthTab
-  v-else-if="activeTab === 'health'"
-  :filter-esp-id="filterEspId"
-  @filter-device="handleFilterDevice"
-  @open-alerts="handleOpenAlerts"
-/>
-```
-
----
-
-### Bug 5: Fehlende Node-Typen in RuleFlowEditor — RuleFlowEditor.vue (FEATURE-VOLLSTÄNDIGKEIT)
-
-**Datei:** `El Frontend/src/components/rules/RuleFlowEditor.vue`
-
-**Problem:** `RuleNodePalette` fügt `diagnostics_status` (Condition) und `run_diagnostic` (Action) zur Palette hinzu, aber `RuleFlowEditor` hatte null Support — kein Icon-Import, keine Type-Imports, keine `NODE_INIT_DIMS`-Einträge (würde zu Crash führen), keine `getDefaultNodeData`-Cases, keine `ruleToGraph`/`graphToRuleData`-Behandlung, keine Vue Flow Node-Templates, keine CSS.
-
-**Fix — alle 6 Integrationspunkte hinzugefügt:**
-
-1. **Icon-Import:** `Stethoscope` aus `lucide-vue-next`
-2. **Type-Imports:** `DiagnosticsCondition`, `DiagnosticsAction` aus `@/types/logic`
-3. **NODE_INIT_DIMS:**
-   ```typescript
-   diagnostics_status: { width: 210, height: 100 },
-   run_diagnostic: { width: 210, height: 80 },
-   ```
-4. **getDefaultNodeData():**
-   ```typescript
-   case 'diagnostics_status':
-     return { checkName: defaults.checkName || 'mqtt', expectedStatus: defaults.expectedStatus || 'critical', operator: defaults.operator || '==', ...defaults }
-   case 'run_diagnostic':
-     return { checkName: defaults.checkName || '', ...defaults }
-   ```
-5. **ruleToGraph():** Handling für `diagnostics_status`-Conditions und `run_diagnostic`-Actions
-6. **graphToRuleData():** Konversion zurück zu `DiagnosticsCondition` / `DiagnosticsAction`
-7. **Vue Flow Node-Templates:** `#node-diagnostics_status` und `#node-run_diagnostic`
-8. **MiniMap-Farben:** `diagnostics_status: () => '#22d3ee'`, `run_diagnostic: () => '#22d3ee'`
-9. **CSS:** `.rule-node--diagnostics` und `.rule-node__icon-wrap--diagnostics` (Cyan-Farbe `#22d3ee`)
-
----
-
-### Bug 6: Falsche Prop-Namen — PluginConfigDialog.vue (TS-Fehler)
-
-**Datei:** `El Frontend/src/components/plugins/PluginConfigDialog.vue`
-
-**Problem:** Verwendete `:visible="visible"` und `size="md"`, aber `BaseModal` erwartet `:open` und `:max-width`.
-
-**Fix:**
-```vue
-<BaseModal :open="visible" :title="`${pluginName} — Konfiguration`" max-width="max-w-lg" @close="emit('close')">
-```
-
----
-
-### Bug 7: Falsches Prop bei SlideOver — PluginsView.vue (TS-Fehler)
-
-**Datei:** `El Frontend/src/views/PluginsView.vue`
-
-**Problem:** Verwendete `:visible="!!activePluginId"`, aber `SlideOver` erwartet `:open`.
-
-**Fix:**
-```vue
-<SlideOver :open="!!activePluginId" :title="activePlugin?.display_name || 'Plugin'" @close="closeDetail">
-```
-
----
-
-## Dateien ohne Änderungsbedarf (verifiziert korrekt)
-
-| Datei | Ergebnis |
-|-------|----------|
-| `api/diagnostics.ts` | Pattern-konform. API gibt unwrapped Data zurück (kein `ApiResponse`-Wrapper) — konsistent mit Direct-Response-Pattern. |
-| `shared/stores/diagnostics.store.ts` | `currentReport.value.checks[idx] = result` — wird von Vue 3 getrackt (Array-Index-Assignment über Proxy). Kein Bug. |
-| `components/system-monitor/MonitorTabs.vue` | Korrekte `TabId`-Typen, keine Probleme. |
-| `components/system-monitor/HealthTab.vue` | Diagnostics-KPI-Sektion mit `v-if="diagStore.currentReport"` korrekt. |
-| `components/system-monitor/HealthSummaryBar.vue` | `onUnmounted` Cleanup für Keyboard-Handler korrekt vorhanden. |
-| `components/system-monitor/types.ts` | `TabId` enthält `'diagnostics'` und `'reports'` — korrekt. |
-| `types/logic.ts` | `DiagnosticsCondition` und `DiagnosticsAction` korrekt definiert. |
-| `shared/stores/index.ts` | `useDiagnosticsStore` korrekt re-exportiert. |
-| `router/index.ts` | `/maintenance` Route existiert als eigenständige Route — kein Redirect nötig. |
-| `components/rules/RuleNodePalette.vue` | `Stethoscope`-Icon bereits importiert, Palette-Einträge korrekt. |
-
----
-
-## Cross-Layer Checks
-
-| Prüfpunkt | Ergebnis |
-|-----------|----------|
-| `types/logic.ts` ↔ Server Pydantic-Schemas | `DiagnosticsCondition.check_name`, `expected_status`, `operator` — Felder stimmen mit Server überein (snake_case). |
-| `api/diagnostics.ts` Endpunkte | Endpunkte wurden in REST_ENDPOINTS.md verifiziert. |
-| Sidebar `/system-monitor?tab=health` | Router-Route `/maintenance` existiert separat; Sidebar-Fix ist nur UX/Highlighting. |
-| HealthTab `open-alerts` Event | Wired zu `inboxStore.toggleDrawer()` — öffnet Notification-Drawer korrekt. |
-
----
-
-## Verifikation
-
-```
-Erster Build-Lauf:
-  src/components/plugins/PluginConfigDialog.vue(67,4): error TS2345 — 'visible' existiert nicht in BaseModal Props
-  src/views/PluginsView.vue(161,6): error TS2345 — 'visible' existiert nicht in SlideOver Props
-  → 2 TypeScript-Fehler
-
-Zweiter Build-Lauf (nach Fixes):
-  ✓ built in 18.62s
-  2984 modules transformed
-  0 TypeScript-Fehler
-  0 Warnings
-```
-
----
-
-## Ergebnis
-
-**7 Bugs gefunden und behoben** in 7 Dateien:
-
-| # | Datei | Bug-Typ | Schwere |
-|---|-------|---------|---------|
-| 1 | `DiagnoseTab.vue` | Vue 3 Reaktivitätsfehler (Set-Mutation) | Kritisch |
-| 2 | `ReportsTab.vue` | `any`-Cast durch falsche Typisierung | Mittel |
-| 3 | `Sidebar.vue` | Falscher aktiver Zustand bei "Wartung" | UX |
-| 4 | `SystemMonitorView.vue` | Fehlender `open-alerts` Event-Handler | Mittel |
-| 5 | `RuleFlowEditor.vue` | Fehlende Unterstützung für 2 neue Node-Typen | Kritisch |
-| 6 | `PluginConfigDialog.vue` | Falsche Prop-Namen für BaseModal | TypeScript-Fehler |
-| 7 | `PluginsView.vue` | Falsches Prop für SlideOver | TypeScript-Fehler |
-
-**10 Dateien ohne Änderungsbedarf** — korrekt implementiert.
-
----
-
-## Empfehlung
-
-Keine weiteren Frontend-Agenten notwendig. Der Build ist sauber. Die Phase-4D-Implementierung ist jetzt vollständig pattern-konform und TypeScript-fehlerfrei.
-
-Bei der nächsten Session die `/maintenance`-Route im Router prüfen — sie leitet noch nicht auf `/system-monitor?tab=health` um. Das ist aktuell kein Bug (die Route existiert separat), aber für eine saubere UX wäre ein Redirect sinnvoll.
+Fuer BUG-4: `server-dev` pruefen ob `ActuatorConfigResponse` bereits `subzone_id` enthaelt, dann `frontend-dev` fuer Implementation.
+Fuer FL-01 Option B: `server-dev` fuer neuen `POST /zone/zones` Endpoint.

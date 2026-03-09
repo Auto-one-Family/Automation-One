@@ -6,7 +6,7 @@ FILE_PATH=""
 
 # Extract file_path from TOOL_INPUT JSON without Python
 if [ -n "${TOOL_INPUT:-}" ]; then
-  FILE_PATH=$(echo "$TOOL_INPUT" | grep -oP '"file_path"\s*:\s*"([^"]*)"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+  FILE_PATH=$(echo "$TOOL_INPUT" | sed -n 's/.*"file_path"\s*:\s*"\([^"]*\)".*/\1/p' | head -1)
 fi
 
 # Only format Python files

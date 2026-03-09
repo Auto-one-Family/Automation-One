@@ -11,7 +11,7 @@ allowed-tools: Read
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
-> **Endpoint-Anzahl:** ~232 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry)
+> **Endpoint-Anzahl:** ~233 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry)
 
 ---
 
@@ -54,17 +54,18 @@ allowed-tools: Read
 | `/esp/devices/{esp_id}/alert-config` | GET | JWT | Device-Level Alert-Config abrufen |
 | `/esp/discovery` | GET | JWT | Network Discovery Results |
 
-### Sensors (`/sensors`) - 17 Endpoints
+### Sensors (`/sensors`) - 18 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
 | `/sensors` | GET | JWT | Alle Sensoren |
+| `/sensors/config/{config_id}` | GET | JWT | Sensor-Config by UUID (immer eindeutig, auch bei 2x SHT31) |
 | `/sensors/{sensor_id}` | GET | JWT | Sensor Details |
 | `/sensors` | POST | JWT | Sensor erstellen |
 | `/sensors/{esp_id}/{config_id}` | DELETE | Operator | Sensor-Config löschen (by UUID, Sensordaten bleiben erhalten) |
 | `/sensors/data` | GET | JWT | Query Sensor-Daten (historisch, filterbar nach zone_id, subzone_id) |
 | `/sensors/{sensor_id}/data` | GET | JWT | Sensor-Daten (historisch) |
-| `/sensors/{sensor_id}/stats` | GET | JWT | Sensor-Statistiken |
+| `/sensors/{sensor_id}/stats` | GET | JWT | Sensor-Statistiken. Query: `sensor_type` (Multi-Value-Filter) |
 | `/sensors/types` | GET | JWT | Alle Sensor-Typen |
 | `/sensors/calibrate` | POST | JWT/API-Key | Sensor kalibrieren (body: esp_id, gpio, sensor_type, calibration_points) |
 | `/sensors/{sensor_id}/process` | POST | JWT | Sensor-Wert verarbeiten |
@@ -211,7 +212,7 @@ allowed-tools: Read
 | `/debug/mock-esp/{esp_id}/state` | POST | JWT | State setzen |
 | `/debug/mock-esp/{esp_id}/sensors` | POST | JWT | Sensor hinzufügen |
 | `/debug/mock-esp/{esp_id}/sensors/{gpio}` | POST | JWT | Sensor-Wert setzen |
-| `/debug/mock-esp/{esp_id}/sensors/{gpio}` | DELETE | JWT | Sensor entfernen |
+| `/debug/mock-esp/{esp_id}/sensors/{gpio}` | DELETE | JWT | Sensor entfernen (⚠️ Guard: 409 bei >1 Sensor auf GPIO ohne sensor_type; bevorzugt `DELETE /sensors/{esp_id}/{config_id}`) |
 | `/debug/mock-esp/{esp_id}/actuators` | POST | JWT | Actuator hinzufügen |
 | `/debug/mock-esp/{esp_id}/actuators/{gpio}` | POST | JWT | Actuator-State setzen |
 | `/debug/mock-esp/{esp_id}/actuators/{gpio}` | DELETE | JWT | Actuator entfernen |
@@ -849,6 +850,13 @@ Sensor-Statistiken. Berechnet min/max/avg/stddev aus `COALESCE(processed_value, 
 
 **Auth:** JWT Required
 
+**Query-Parameter:**
+| Parameter | Typ | Default | Beschreibung |
+|-----------|-----|---------|--------------|
+| `start_time` | datetime | -24h | Start des Zeitraums |
+| `end_time` | datetime | now | Ende des Zeitraums |
+| `sensor_type` | string | null | Filter für Multi-Value-Sensoren (z.B. `sht31_temp`, `sht31_humidity`). Ohne Filter: Stats des ersten Sensor-Typs auf dem GPIO |
+
 **Response 200:**
 ```json
 {
@@ -1304,11 +1312,11 @@ Sensor zu Mock-ESP hinzufügen.
 
 ### 6.3a DELETE /debug/mock-esp/{esp_id}/sensors/{gpio}
 
-Sensor von Mock-ESP entfernen.
+Sensor von Mock-ESP entfernen. **Veraltet** — Frontend nutzt seit T10-Fix-B einheitlich `DELETE /sensors/{esp_id}/{config_id}`.
 
 **Auth:** JWT Required
 
-> **GEFIXT (T08-Fix-D):** Sensor-Delete nutzt jetzt `config_id` (UUID) statt GPIO-basierte Query. Multi-Value-Sensoren (SHT31, BME280) werden korrekt einzeln gelöscht. Siehe `DELETE /sensors/{esp_id}/{config_id}`.
+> **T10-Fix-B Guard:** Bei >1 Sensor auf demselben GPIO (z.B. I2C-Bus GPIO 0) und fehlendem `sensor_type` Query-Parameter gibt der Endpoint **409 Conflict** zurück statt alle Sensoren zu löschen. Bevorzugter Weg: `DELETE /sensors/{esp_id}/{config_id}` (UUID, Single Source of Truth).
 
 ---
 

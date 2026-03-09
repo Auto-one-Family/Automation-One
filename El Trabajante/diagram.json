@@ -113,7 +113,8 @@
       }
     },
     { "id": "temp2", "type": "wokwi-ds18b20", "attrs": {} },
-    { "id": "temp3", "type": "wokwi-ds18b20", "attrs": {} }
+    { "id": "temp3", "type": "wokwi-ds18b20", "attrs": {} },
+    { "id": "relay1", "type": "wokwi-relay", "attrs": {} }
   ],
   "connections": [
     ["esp:TX0", "$serialMonitor:RX", "", []],
@@ -145,6 +146,9 @@
     ["temp2:DQ",  "esp:4", "green", []],
     ["temp3:VCC", "esp:3V3", "red", []],
     ["temp3:GND", "esp:GND.3", "black", []],
-    ["temp3:DQ",  "esp:4", "green", []]
+    ["temp3:DQ",  "esp:4", "green", []],
+    ["relay1:VCC", "esp:3V3", "red", []],
+    ["relay1:GND", "esp:GND.4", "black", []],
+    ["relay1:IN",  "esp:26", "orange", []]
   ]
 }
