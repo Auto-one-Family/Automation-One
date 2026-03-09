@@ -105,21 +105,39 @@ export const useInventoryStore = defineStore('inventory', () => {
 
   // ── All Components (unified sensors + actuators) ──
   const allComponents = computed<ComponentItem[]>(() => {
+    // Pre-compute duplicate detection for same sensor_type on same GPIO per ESP
+    const sensorCounts = new Map<string, number>()
+    const sensorIndices = new Map<string, number>()
+    for (const s of allSensors.value) {
+      const groupKey = `${s.esp_id}_${s.gpio}_${s.sensor_type}`
+      sensorCounts.set(groupKey, (sensorCounts.get(groupKey) || 0) + 1)
+    }
+
     const sensors: ComponentItem[] = allSensors.value.map(s => {
       const device = espStore.devices.find(d => espStore.getDeviceId(d) === s.esp_id)
       const espStatus = device ? getESPStatus(device) : null
       const rawMeta = device?.sensors
         ? (device.sensors as Record<string, unknown>[]).find(
-            (sen: Record<string, unknown>) => sen.gpio === s.gpio
+            (sen: Record<string, unknown>) => sen.gpio === s.gpio && (sen as Record<string, unknown>).sensor_type === s.sensor_type
           )
         : null
       const metadata = rawMeta && (rawMeta as Record<string, unknown>).sensor_metadata
         ? parseDeviceMetadata((rawMeta as Record<string, unknown>).sensor_metadata as Record<string, unknown>)
         : null
 
+      // Disambiguate sensors with same type on same GPIO (e.g., 2x DS18B20 on OneWire bus)
+      const groupKey = `${s.esp_id}_${s.gpio}_${s.sensor_type}`
+      const isDuplicate = (sensorCounts.get(groupKey) || 0) > 1
+      let displayName = s.name ?? `${getSensorLabel(s.sensor_type)} (GPIO ${s.gpio})`
+      if (isDuplicate && !s.name) {
+        const idx = (sensorIndices.get(groupKey) || 0) + 1
+        sensorIndices.set(groupKey, idx)
+        displayName = `${getSensorLabel(s.sensor_type)} #${idx}`
+      }
+
       return {
-        id: `${s.esp_id}_gpio${s.gpio}`,
-        name: s.name ?? `${getSensorLabel(s.sensor_type)} (GPIO ${s.gpio})`,
+        id: s.config_id || `${s.esp_id}_gpio${s.gpio}_${s.sensor_type}`,
+        name: displayName,
         type: 'sensor' as const,
         deviceType: s.sensor_type,
         zone: s.zone_name || 'Nicht zugewiesen',
@@ -127,7 +145,7 @@ export const useInventoryStore = defineStore('inventory', () => {
         espId: s.esp_id,
         gpio: s.gpio,
         currentValue: s.raw_value != null ? String(s.raw_value) : '—',
-        unit: s.unit || getSensorUnit(s.sensor_type),
+        unit: (s.unit && s.unit !== 'raw') ? s.unit : (getSensorUnit(s.sensor_type) !== 'raw' ? getSensorUnit(s.sensor_type) : ''),
         quality: s.quality || 'unknown',
         status: (espStatus === 'online' || espStatus === 'stale') ? 'online' : 'offline',
         lastSeen: s.last_read ?? null,

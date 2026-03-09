@@ -149,9 +149,12 @@ onMounted(async () => {
   const isMock = espApi.isMockEsp(props.espId)
 
   // Load sensor config from server (Real + Mock — Single Source of Truth).
-  // Pass sensorType for multi-value sensors (e.g. SHT31) so backend returns the correct config.
+  // Primary: config_id (UUID) — always unambiguous, even for 2x SHT31 on different I2C addresses.
+  // Fallback: gpio + sensorType (legacy, works for single-sensor-per-GPIO).
   try {
-    const config = await sensorsApi.get(props.espId, props.gpio, props.sensorType)
+    const config = props.configId
+      ? await sensorsApi.getByConfigId(props.configId)
+      : await sensorsApi.get(props.espId, props.gpio, props.sensorType)
     if (config) {
       sensorDbId.value = config.id ? String(config.id) : null
       name.value = config.name || ''
@@ -265,11 +268,10 @@ async function confirmAndDelete() {
   if (!confirmed) return
 
   deleting.value = true
-  const isMock = espApi.isMockEsp(props.espId)
   try {
-    if (isMock) {
-      await espStore.removeSensor(props.espId, props.gpio)
-    } else if (props.configId) {
+    if (props.configId) {
+      // Unified path: Mock AND Real ESPs use the same DELETE /sensors/{esp_id}/{config_id}
+      // This endpoint handles simulation job cleanup, dual-storage sync, and MQTT config publish
       await sensorsApi.delete(props.espId, props.configId)
     } else {
       toast.error('Sensor-Config-ID fehlt — Löschung nicht möglich')
@@ -796,7 +798,7 @@ async function handleSave() {
         :icon="Settings"
       >
         <div class="sensor-config__preview">
-          <LiveDataPreview :esp-id="espId" :gpio="gpio" :unit="unitValue || defaultUnit" />
+          <LiveDataPreview :esp-id="espId" :gpio="gpio" :sensor-type="sensorType" :unit="unitValue || defaultUnit" />
         </div>
       </AccordionSection>
 

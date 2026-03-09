@@ -36,7 +36,17 @@ export const sensorsApi = {
   },
 
   /**
-   * Get sensor configuration.
+   * Get sensor configuration by config_id (UUID) — always unambiguous.
+   * Use this for multi-value sensors (e.g. 2x SHT31 on different I2C addresses).
+   * Server: GET /sensors/config/{config_id}
+   */
+  async getByConfigId(configId: string): Promise<SensorConfigResponse> {
+    const response = await api.get<SensorConfigResponse>(`/sensors/config/${configId}`)
+    return response.data
+  },
+
+  /**
+   * Get sensor configuration by ESP + GPIO.
    * @param sensorType - Optional; required for multi-value sensors (e.g. SHT31) that share a GPIO.
    */
   async get(

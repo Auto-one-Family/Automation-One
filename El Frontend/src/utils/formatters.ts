@@ -133,6 +133,24 @@ export function formatTimestamp(timestamp: string | null | undefined): string {
   return formatDateTime(timestamp)
 }
 
+/**
+ * Format last_seen timestamp with NULL and Epoch-0 guards (BUG-10 fix).
+ *
+ * - NULL → '—' (no data available)
+ * - Epoch-0 / pre-2020 → 'Nie' (technically invalid timestamp)
+ * - Valid timestamp → German-formatted date+time
+ *
+ * @example formatLastSeen(null) → '—'
+ * @example formatLastSeen('1970-01-01T00:00:00Z') → 'Nie'
+ * @example formatLastSeen('2026-03-08T14:30:00Z') → '08.03.2026, 14:30'
+ */
+export function formatLastSeen(lastSeen: string | Date | null | undefined): string {
+  if (!lastSeen) return '\u2014'  // em-dash for NULL
+  const date = normalizeTimestamp(lastSeen)
+  if (isNaN(date.getTime()) || date.getFullYear() < 2020) return 'Nie'
+  return formatDateTime(lastSeen)
+}
+
 // =============================================================================
 // NUMBER FORMATTING
 // =============================================================================

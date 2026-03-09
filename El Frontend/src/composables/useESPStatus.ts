@@ -83,6 +83,11 @@ export function getESPStatus(device: ESPDevice): ESPStatus {
   if (device.status === 'online' || device.connected === true) return 'online'
   if (device.status === 'offline') return 'offline'
 
+  // Priority 1.5: pending_approval — never show as 'online' via heartbeat fallback
+  // Device awaits admin approval; last_seen may be updated by heartbeats but
+  // status must remain 'unknown' until explicitly approved (BUG-06 fix)
+  if (device.status === 'pending_approval') return 'unknown'
+
   // Priority 2: "approved" status — device approved but no heartbeat yet
   // Treat as online if last_seen is recent, otherwise offline
   if (device.status === 'approved') {

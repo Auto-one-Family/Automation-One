@@ -908,13 +908,13 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           name: config.name || null,
           enabled: true,
           subzone_id: normalizeSubzoneId(config.subzone_id),
-          aux_gpio: config.aux_gpio !== 255 ? config.aux_gpio : null,
-          inverted_logic: config.inverted_logic ?? false,
-          max_runtime_seconds: config.max_runtime_seconds ?? 0,
-          cooldown_seconds: config.cooldown_seconds ?? 0,
+          max_runtime_seconds: config.max_runtime_seconds || null,
+          cooldown_seconds: config.cooldown_seconds || null,
           pwm_frequency: isPwmActuator(config.actuator_type) ? 1000 : null,
           metadata: {
-            created_via: 'dashboard_drag_drop'
+            created_via: 'dashboard_drag_drop',
+            ...(config.aux_gpio != null && config.aux_gpio !== 255 ? { aux_gpio: config.aux_gpio } : {}),
+            ...(config.inverted_logic ? { inverted_logic: true } : {}),
           }
         }
         await actuatorsApi.createOrUpdate(deviceId, config.gpio, realConfig)

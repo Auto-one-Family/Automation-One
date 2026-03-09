@@ -21,7 +21,7 @@ import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
 import { useZoneGrouping } from '@/composables/useZoneGrouping'
 import { useSubzoneResolver } from '@/composables/useSubzoneResolver'
 import { useSparklineCache } from '@/composables/useSparklineCache'
-import { aggregateZoneSensors, formatAggregatedValue, getSensorUnit, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+import { aggregateZoneSensors, formatAggregatedValue, getSensorLabel, getSensorUnit, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { getESPStatus } from '@/composables/useESPStatus'
@@ -423,10 +423,10 @@ const availableOverlaySensors = computed(() => {
       if (s.esp_id === selectedDetailSensor.value.espId &&
           s.gpio === selectedDetailSensor.value.gpio &&
           s.sensor_type === selectedDetailSensor.value.sensorType) continue
-      const key = `${s.esp_id}-${s.gpio}-${s.sensor_type}`
+      const key = s.config_id || `${s.esp_id}-${s.gpio}-${s.sensor_type}`
       result.push({
         key,
-        name: s.name || s.sensor_type || `GPIO ${s.gpio}`,
+        name: s.name || getSensorLabel(s.sensor_type) || `GPIO ${s.gpio}`,
         type: s.sensor_type,
         unit: getSensorUnit(s.sensor_type) !== 'raw' ? getSensorUnit(s.sensor_type) : (s.unit || ''),
         espId: s.esp_id,

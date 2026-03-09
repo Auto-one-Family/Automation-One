@@ -300,6 +300,7 @@ export interface MockActuator {
   pwm_value: number
   emergency_stopped: boolean
   last_command: string | null
+  subzone_id?: string | null
   // Config verification status from ESP32
   config_status?: 'pending' | 'applied' | 'failed' | null
   config_error?: string | null
@@ -828,9 +829,6 @@ export interface ActuatorConfigCreate {
   metadata?: Record<string, unknown> | null
   /** Subzone ID to assign this actuator to. Null/empty = remove from all subzones */
   subzone_id?: string | null
-  // Phase 7: Actuator Sidebar fields
-  aux_gpio?: number | null       // 255 = nicht verwendet (für Ventile: Direction-Pin)
-  inverted_logic?: boolean | null  // LOW = ON (für Pumpen, Ventile, Relais)
 }
 
 export interface ActuatorConfigResponse {
@@ -847,6 +845,7 @@ export interface ActuatorConfigResponse {
   servo_min_pulse: number | null
   servo_max_pulse: number | null
   metadata: Record<string, unknown> | null
+  subzone_id?: string | null
   // Config status from ESP32 verification (Phase 2: write-after-verification)
   config_status?: 'pending' | 'applied' | 'failed' | null
   config_error?: string | null

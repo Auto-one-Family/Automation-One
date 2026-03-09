@@ -150,10 +150,12 @@ const sensorFallback = computed(() => {
   return ''
 })
 
-/** Sensor & actuator counts for status line */
+/** Sensor & actuator counts for status line (grouped values, consistent with overflow count) */
 const sensorCount = computed(() => {
-  const sensors = props.device.sensors as any[] | undefined
-  return sensors?.length ?? props.device.sensor_count ?? 0
+  const sensors = props.device.sensors as RawSensor[] | undefined
+  if (!sensors || sensors.length === 0) return props.device.sensor_count ?? 0
+  const grouped = groupSensorsByBaseType(sensors)
+  return grouped.reduce((sum, g) => sum + g.values.length, 0)
 })
 
 /** Subzone label (if assigned) */

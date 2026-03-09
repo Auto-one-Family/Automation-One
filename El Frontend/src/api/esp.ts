@@ -275,6 +275,7 @@ function mapActuatorConfigToMockActuator(config: ActuatorConfigResponse): MockAc
     pwm_value: config.current_value ?? 0,
     emergency_stopped: false,
     last_command: config.last_command_at || null,
+    subzone_id: config.subzone_id ?? null,
     config_status: config.config_status as MockActuator['config_status'],
     config_error: config.config_error || null,
     config_error_detail: config.config_error_detail || null,

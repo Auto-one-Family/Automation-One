@@ -15,6 +15,7 @@ import { Save, Wifi, Radio, Cpu, AlertOctagon } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { getWifiStrength } from '@/utils/wifiStrength'
+import { formatLastSeen } from '@/utils/formatters'
 import type { ESPDevice } from '@/api/esp'
 import type { MockSensor, MockActuator } from '@/types'
 
@@ -46,14 +47,7 @@ const wifiInfo = computed(() => {
   return getWifiStrength(rssi)
 })
 
-const lastSeen = computed(() => {
-  if (!props.device.last_seen) return '—'
-  try {
-    return new Date(props.device.last_seen).toLocaleString('de-DE')
-  } catch {
-    return props.device.last_seen
-  }
-})
+const lastSeen = computed(() => formatLastSeen(props.device.last_seen))
 
 // GPIO usage from sensors/actuators
 interface PinUsage {
