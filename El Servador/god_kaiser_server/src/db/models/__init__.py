@@ -12,6 +12,8 @@ from . import (  # noqa: F401
     audit_log,  # AuditLog model for event tracking
     auth,  # TokenBlacklist model
     dashboard,  # Dashboard layout persistence
+    device_context,  # Device active context for multi-zone routing (T13-R2)
+    device_zone_change,  # Device zone change audit (T13-R1)
     diagnostic,  # Diagnostic reports (Phase 4D)
     email_log,  # Email delivery tracking (Phase C V1.1)
     enums,  # Shared enums (DataSource, SensorOperatingMode, etc.)
@@ -37,6 +39,8 @@ from .ai import AIPredictions  # noqa: F401
 from .audit_log import AuditLog, AuditEventType, AuditSeverity, AuditSourceType  # noqa: F401
 from .auth import TokenBlacklist  # noqa: F401
 from .dashboard import Dashboard  # noqa: F401
+from .device_context import DeviceActiveContext  # noqa: F401
+from .device_zone_change import DeviceZoneChange  # noqa: F401
 from .diagnostic import DiagnosticReport  # noqa: F401
 from .email_log import EmailLog  # noqa: F401
 from .enums import DataSource, SensorOperatingMode  # noqa: F401
@@ -72,6 +76,7 @@ __all__ = [
     "audit_log",
     "auth",
     "dashboard",
+    "device_zone_change",
     "diagnostic",
     "email_log",
     "enums",
@@ -101,6 +106,8 @@ __all__ = [
     "AuditSourceType",
     "TokenBlacklist",
     "Dashboard",
+    "DeviceActiveContext",
+    "DeviceZoneChange",
     "DiagnosticReport",
     "EmailLog",
     "ESPDevice",

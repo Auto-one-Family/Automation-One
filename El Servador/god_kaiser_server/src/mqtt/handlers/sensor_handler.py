@@ -37,7 +37,12 @@ from ...core.resilience import (
     ServiceUnavailableError,
 )
 from ...db.models.enums import DataSource
-from ...db.repositories import ESPRepository, SensorRepository, SubzoneRepository
+from ...db.repositories import (
+    ESPRepository,
+    SensorRepository,
+    SubzoneRepository,
+)
+from ...services.device_scope_service import DeviceScopeService
 from ...db.session import resilient_session
 from ..publisher import Publisher
 from ..topics import TopicBuilder
@@ -333,8 +338,15 @@ class SensorDataHandler:
                     data_source = self._detect_data_source(esp_device, payload)
 
                     # Step 8d: Resolve zone_id/subzone_id at measurement time (Phase 0.1)
+                    # T13-R1: Pass sensor_config_id and sensor_type for I2C GPIO-0 resolution
+                    # T13-R2: DeviceScopeService has 30s in-memory cache (avoids DB query per message)
+                    scope_service = DeviceScopeService(session)
                     zone_id, subzone_id = await resolve_zone_subzone_for_sensor(
-                        esp_id_str, gpio, esp_repo, subzone_repo
+                        esp_id_str, gpio, esp_repo, subzone_repo,
+                        sensor_config_id=str(sensor_config.id) if sensor_config else None,
+                        sensor_type=sensor_type,
+                        sensor_config=sensor_config,
+                        scope_service=scope_service,
                     )
 
                     # Step 9: Save data to database

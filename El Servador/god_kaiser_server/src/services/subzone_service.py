@@ -176,11 +176,19 @@ class SubzoneService:
         topic = TopicBuilder.build_subzone_assign_topic(device_id)
 
         # 6. Build payload (matches ESP32 expectations from system_types.h)
+        # Filter GPIO 0 (I2C placeholder) from MQTT payload — triggers Error 2506 on ESP.
+        # GPIO 0 stays in DB (assigned_gpios) for server-side I2C sensor resolution.
+        mqtt_gpios = [g for g in assigned_gpios if g != 0]
+        if len(mqtt_gpios) != len(assigned_gpios):
+            logger.debug(
+                "Filtered GPIO 0 (I2C placeholder) from subzone/assign payload for %s",
+                device_id,
+            )
         payload = {
             "subzone_id": subzone_id,
             "subzone_name": subzone_name or "",
             "parent_zone_id": actual_parent_zone_id,
-            "assigned_gpios": assigned_gpios,
+            "assigned_gpios": mqtt_gpios,
             "safe_mode_active": safe_mode_active,
             "sensor_count": 0,  # Will be updated by ESP
             "actuator_count": 0,  # Will be updated by ESP
@@ -667,6 +675,33 @@ class SubzoneService:
 
         # Flush to make changes visible for subsequent queries
         await self.session.flush()
+
+        # T13-R1: Sync sensor_count/actuator_count after subzone GPIO change
+        await self._sync_counts_for_device(device_id)
+
+    async def _sync_counts_for_device(self, device_id: str) -> None:
+        """
+        Sync sensor_count/actuator_count for all subzones of a device.
+
+        Resolves the FK-Typ-Mismatch (subzone_configs.esp_id=String vs
+        sensor_configs.esp_id=UUID) by looking up the ESP UUID first.
+        """
+        from ..db.repositories.subzone_repo import SubzoneRepository
+
+        device = await self.esp_repo.get_by_device_id(device_id)
+        if not device:
+            return
+
+        subzone_repo = SubzoneRepository(self.session)
+        try:
+            updated = await subzone_repo.sync_subzone_counts(device_id, device.id)
+            if updated:
+                logger.debug(
+                    "Synced subzone counts for %s: %d subzone(s) updated",
+                    device_id, updated,
+                )
+        except Exception as e:
+            logger.warning("Failed to sync subzone counts for %s: %s", device_id, e)
 
     async def _confirm_subzone_assignment(self, device_id: str, subzone_id: str) -> None:
         """

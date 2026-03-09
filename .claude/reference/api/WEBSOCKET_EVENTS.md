@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 2.9 | **Aktualisiert:** 2026-03-08
+> **Version:** 3.0 | **Aktualisiert:** 2026-03-09
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
-> **Event-Anzahl:** 34 verschiedene Event-Typen
+> **Event-Anzahl:** 36 verschiedene Event-Typen (inkl. device_context_changed, device_scope_changed T13-R2)
 
 ---
 
@@ -59,6 +59,8 @@ allowed-tools: Read
 |-------|----------|---------|--------------|
 | `zone_assignment` | Server→Frontend | Zone ACK | ESP bestätigt Zone-Zuweisung |
 | `subzone_assignment` | Server→Frontend | Subzone ACK | ESP bestätigt Subzone-Zuweisung/Entfernung |
+| `device_context_changed` | Server→Frontend | PUT/DELETE /device-context | Aktiver Zone-Kontext eines Sensors/Aktors geändert (T13-R2) |
+| `device_scope_changed` | Server→Frontend | PUT /sensors oder /actuators | device_scope oder assigned_zones geändert (T13-R2) |
 
 ### Logic/Automation Events
 
@@ -779,6 +781,79 @@ Subzone Assignment ACK vom ESP.
 
 ---
 
+### 7.3 device_context_changed (T13-R2)
+
+Aktiver Zone-Kontext eines Sensors oder Aktors wurde geändert. Ermöglicht Multi-Zone und Mobile Device Scopes.
+
+**Trigger:** `PUT /v1/device-context/{config_type}/{config_id}` oder `DELETE /v1/device-context/{config_type}/{config_id}`
+
+**Code-Location:** `src/api/v1/device_context.py`
+
+**Payload:**
+```json
+{
+  "type": "device_context_changed",
+  "timestamp": 1706787600,
+  "data": {
+    "config_type": "sensor",
+    "config_id": "550e8400-e29b-41d4-a716-446655440000",
+    "active_zone_id": "greenhouse_b",
+    "active_subzone_id": "shelf_1",
+    "context_source": "multi_zone",
+    "changed_by": "admin"
+  }
+}
+```
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `config_type` | string | `sensor` oder `actuator` |
+| `config_id` | UUID string | ID der SensorConfig oder ActuatorConfig |
+| `active_zone_id` | string? | Aktive Zone (null wenn gelöscht → zone_local Fallback) |
+| `active_subzone_id` | string? | Aktive Subzone (optional) |
+| `context_source` | string | `zone_local`, `multi_zone` oder `mobile` |
+| `changed_by` | string | Username des auslösenden Users |
+
+**context_source Values:**
+- `zone_local`: Default — feste Zone des ESP (kein Eintrag in `device_active_context`)
+- `multi_zone`: Sensor/Aktor wird in mehrerer Zonen genutzt — aktive Zone manuell gesetzt
+- `mobile`: Gerät wechselt physisch Zonen — aktive Zone dynamisch nachgeführt
+
+---
+
+### 7.4 device_scope_changed (T13-R2)
+
+Device Scope oder Assigned Zones eines Sensors/Aktors wurde beim Update geändert.
+
+**Trigger:** `PUT /api/v1/sensors/{esp_id}/{config_id}` oder `PUT /api/v1/actuators/{esp_id}/{actuator_id}` wenn `device_scope` oder `assigned_zones` sich ändern
+
+**Code-Locations:**
+- [sensors.py:959](El Servador/god_kaiser_server/src/api/v1/sensors.py#L959)
+- [actuators.py:579](El Servador/god_kaiser_server/src/api/v1/actuators.py#L579)
+
+**Payload:**
+```json
+{
+  "type": "device_scope_changed",
+  "timestamp": 1706787600,
+  "data": {
+    "config_type": "sensor",
+    "config_id": "550e8400-e29b-41d4-a716-446655440000",
+    "device_scope": "multi_zone",
+    "assigned_zones": ["greenhouse_a", "greenhouse_b"]
+  }
+}
+```
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `config_type` | string | `sensor` oder `actuator` |
+| `config_id` | UUID string | ID der SensorConfig oder ActuatorConfig |
+| `device_scope` | string | `zone_local`, `multi_zone` oder `mobile` |
+| `assigned_zones` | string[] | Liste der zugewiesenen Zone-IDs (leer bei `zone_local`) |
+
+---
+
 ## 8. Logic/Automation Events
 
 ### 8.1 logic_execution
@@ -1369,6 +1444,9 @@ interface WebSocketFilters {
 |---------|--------|
 | `notification_router.py` | `notification_new`, `notification_updated`, `notification_unread_count` |
 | `plugin_service.py` | `plugin_execution_started`, `plugin_execution_completed` |
+| `device_context.py` (Router) | `device_context_changed` |
+| `sensors.py` (Router) | `device_scope_changed` |
+| `actuators.py` (Router) | `device_scope_changed` |
 
 ---
 

@@ -29,7 +29,7 @@ Error Codes:
 - Uses ConfigErrorCode for ESP device lookup errors
 """
 
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -43,7 +43,19 @@ from ...db.session import resilient_session
 from ...websocket.manager import WebSocketManager
 from ..topics import TopicBuilder
 
+if TYPE_CHECKING:
+    from ...services.mqtt_command_bridge import MQTTCommandBridge
+
 logger = get_logger(__name__)
+
+# MQTTCommandBridge reference — set via set_command_bridge() from main.py
+_command_bridge: Optional["MQTTCommandBridge"] = None
+
+
+def set_command_bridge(bridge: "MQTTCommandBridge") -> None:
+    """Set the MQTTCommandBridge reference. Called from main.py during startup."""
+    global _command_bridge
+    _command_bridge = bridge
 
 
 class ZoneAckHandler:
@@ -173,6 +185,20 @@ class ZoneAckHandler:
                     logger.warning(f"Unknown zone ACK status from {esp_id_str}: {status}")
 
                 await session.commit()
+
+                # Step 5.1: Resolve pending ACK Future (if any)
+                if _command_bridge:
+                    _command_bridge.resolve_ack(
+                        ack_data={
+                            "status": status,
+                            "zone_id": zone_id,
+                            "master_zone_id": master_zone_id,
+                            "esp_id": esp_id_str,
+                            "ts": timestamp,
+                        },
+                        esp_id=esp_id_str,
+                        command_type="zone",
+                    )
 
                 # Step 6: Broadcast WebSocket event to frontend
                 await self._broadcast_zone_update(

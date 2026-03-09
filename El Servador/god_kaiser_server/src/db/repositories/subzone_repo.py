@@ -8,6 +8,7 @@ Provides CRUD operations and specialized queries for SubzoneConfig model.
 Follows the same patterns as ESPRepository for consistency.
 """
 
+import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -64,6 +65,29 @@ class SubzoneRepository(BaseRepository[SubzoneConfig]):
             List of SubzoneConfig instances
         """
         stmt = select(SubzoneConfig).where(SubzoneConfig.esp_id == esp_id)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_by_esp_and_zone(self, esp_id: str, zone_id: str) -> List[SubzoneConfig]:
+        """
+        Get all subzones for an ESP device in a specific zone.
+
+        Used by ZoneService._handle_subzone_strategy() to only affect subzones
+        belonging to the old zone during zone changes (not subzones from other zones).
+
+        Args:
+            esp_id: ESP device ID
+            zone_id: Parent zone identifier
+
+        Returns:
+            List of SubzoneConfig instances
+        """
+        stmt = select(SubzoneConfig).where(
+            and_(
+                SubzoneConfig.esp_id == esp_id,
+                SubzoneConfig.parent_zone_id == zone_id,
+            )
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -317,6 +341,76 @@ class SubzoneRepository(BaseRepository[SubzoneConfig]):
         return count
 
     # =========================================================================
+    # Zone Transfer Methods (T13-R1)
+    # =========================================================================
+
+    async def update_parent_zone(
+        self,
+        esp_id: str,
+        new_zone_id: str,
+    ) -> List[SubzoneConfig]:
+        """
+        Transfer all subzones for an ESP to a new parent zone.
+
+        Used by ZoneService.assign_zone() with strategy='transfer'.
+
+        Args:
+            esp_id: ESP device ID (String, e.g., 'ESP_12AB34CD')
+            new_zone_id: New parent zone ID
+
+        Returns:
+            List of updated SubzoneConfig instances
+        """
+        subzones = await self.get_by_esp(esp_id)
+        for subzone in subzones:
+            subzone.parent_zone_id = new_zone_id
+        await self.session.flush()
+        return subzones
+
+    async def deactivate_by_zone(self, zone_id: str) -> int:
+        """
+        Deactivate all subzones in a zone (used when archiving zone).
+
+        Args:
+            zone_id: Parent zone identifier
+
+        Returns:
+            Number of subzones deactivated
+        """
+        subzones = await self.get_by_zone(zone_id)
+        count = 0
+        for subzone in subzones:
+            if subzone.is_active:
+                subzone.is_active = False
+                count += 1
+        await self.session.flush()
+        return count
+
+    async def get_subzone_by_sensor_config_id(
+        self,
+        esp_id: str,
+        sensor_config_id: str,
+    ) -> Optional[SubzoneConfig]:
+        """
+        Find which subzone a sensor_config_id is assigned to (I2C sensors).
+
+        Args:
+            esp_id: ESP device ID
+            sensor_config_id: UUID string of the sensor_config
+
+        Returns:
+            SubzoneConfig that contains this sensor_config_id or None
+        """
+        subzones = await self.get_by_esp(esp_id)
+        for subzone in subzones:
+            if (
+                subzone.assigned_sensor_config_ids
+                and sensor_config_id in subzone.assigned_sensor_config_ids
+            ):
+                return subzone
+        return None
+
+    # =========================================================================
     # Count Methods
     # =========================================================================
 
@@ -349,3 +443,63 @@ class SubzoneRepository(BaseRepository[SubzoneConfig]):
             if subzone.assigned_gpios:
                 total += len(subzone.assigned_gpios)
         return total
+
+    async def sync_subzone_counts(
+        self,
+        device_id: str,
+        esp_uuid: "uuid.UUID",
+    ) -> int:
+        """
+        Sync sensor_count and actuator_count for all subzones of a device.
+
+        JOIN path (FK-Typ-Mismatch workaround):
+        subzone_configs.esp_id (String) -> esp_devices.device_id
+        esp_devices.id (UUID) <- sensor_configs.esp_id (UUID)
+        esp_devices.id (UUID) <- actuator_configs.esp_id (UUID)
+
+        Args:
+            device_id: ESP device_id string (e.g., 'ESP_12AB34CD')
+            esp_uuid: UUID of the esp_device (esp_devices.id)
+
+        Returns:
+            Number of subzones updated
+        """
+        from ..models.actuator import ActuatorConfig
+        from ..models.sensor import SensorConfig
+
+        subzones = await self.get_by_esp(device_id)
+        if not subzones:
+            return 0
+
+        # Load all sensor and actuator configs for this device (by UUID)
+        sensor_stmt = select(SensorConfig).where(SensorConfig.esp_id == esp_uuid)
+        sensor_result = await self.session.execute(sensor_stmt)
+        all_sensors = list(sensor_result.scalars().all())
+
+        actuator_stmt = select(ActuatorConfig).where(ActuatorConfig.esp_id == esp_uuid)
+        actuator_result = await self.session.execute(actuator_stmt)
+        all_actuators = list(actuator_result.scalars().all())
+
+        updated = 0
+        for subzone in subzones:
+            gpios = set(subzone.assigned_gpios or [])
+            config_ids = set(subzone.assigned_sensor_config_ids or [])
+
+            # Count sensors: by GPIO match OR by sensor_config_id match
+            s_count = sum(
+                1
+                for s in all_sensors
+                if s.gpio in gpios or str(s.id) in config_ids
+            )
+            # Count actuators: by GPIO match only
+            a_count = sum(1 for a in all_actuators if a.gpio in gpios)
+
+            if subzone.sensor_count != s_count or subzone.actuator_count != a_count:
+                subzone.sensor_count = s_count
+                subzone.actuator_count = a_count
+                updated += 1
+
+        if updated:
+            await self.session.flush()
+
+        return updated

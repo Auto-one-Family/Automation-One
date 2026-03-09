@@ -23,7 +23,7 @@ References:
 - El Servador/god_kaiser_server/src/mqtt/handlers/zone_ack_handler.py (Pattern)
 """
 
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from pydantic import ValidationError
 
@@ -35,7 +35,19 @@ from ...services.subzone_service import SubzoneService
 from ...websocket.manager import WebSocketManager
 from ..topics import TopicBuilder
 
+if TYPE_CHECKING:
+    from ...services.mqtt_command_bridge import MQTTCommandBridge
+
 logger = get_logger(__name__)
+
+# MQTTCommandBridge reference — set via set_command_bridge() from main.py
+_command_bridge: Optional["MQTTCommandBridge"] = None
+
+
+def set_command_bridge(bridge: "MQTTCommandBridge") -> None:
+    """Set the MQTTCommandBridge reference. Called from main.py during startup."""
+    global _command_bridge
+    _command_bridge = bridge
 
 
 class SubzoneAckHandler:
@@ -99,6 +111,23 @@ class SubzoneAckHandler:
 
             if success:
                 await session.commit()
+
+            # Resolve pending ACK Future for ALL statuses (including error)
+            # so the caller gets immediate feedback instead of waiting for timeout
+            if _command_bridge:
+                _command_bridge.resolve_ack(
+                    ack_data={
+                        "status": ack_payload.status,
+                        "subzone_id": ack_payload.subzone_id,
+                        "esp_id": esp_id,
+                        "ts": ack_payload.timestamp,
+                        "error_code": getattr(ack_payload, "error_code", None),
+                    },
+                    esp_id=esp_id,
+                    command_type="subzone",
+                )
+
+            if success:
                 # Broadcast to WebSocket clients
                 await self._broadcast_subzone_update(ack_payload)
                 return True

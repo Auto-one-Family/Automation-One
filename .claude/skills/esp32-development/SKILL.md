@@ -34,6 +34,7 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 | **Driver erstellen** | [Actuator-Workflow](#actuator-workflow) | `services/actuator/actuator_drivers/` |
 | **Build verifizieren** | [Build Commands](#build-commands) | `platformio.ini` |
 | **Startup verstehen** | [Init-Reihenfolge](#initialisierungs-reihenfolge-maincpp) | `src/main.cpp` |
+| **Wokwi ts=0 / NTP** | [Wokwi-Limitierungen](#wokwi-limitierungen-ts0) | Server-Fallback (sensor_handler, heartbeat_handler) |
 
 ---
 
@@ -112,6 +113,16 @@ C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
 C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload; C:\Users\PCUser\.platformio\penv\Scripts\pio.exe device monitor -e esp32_dev
 ```
 
+### Wokwi-Limitierungen (ts=0)
+
+| Limitierung | Verhalten | Server-Fallback |
+|-------------|-----------|-----------------|
+| **Kein NTP** | Wokwi sendet `ts: 0` in Heartbeat + Sensordaten | El Servador ersetzt durch eigenen Timestamp |
+| **NVS geskippt** | Config nur in-memory | Provisioning-Tests mit Mock-Config |
+| **PWM nur Serial** | Keine echte Hardware-Ausgabe | Logging statt GPIO |
+
+**Wichtig:** Firmware NICHT anpassen fuer ts=0 — der Server behandelt das in `sensor_handler.py` und `heartbeat_handler.py`. Echte ESPs mit NTP senden `ts > 0` und nutzen den normalen Pfad.
+
 ---
 
 ## Initialisierungs-Reihenfolge (main.cpp)
@@ -125,7 +136,7 @@ C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload; C:\
 3.1 Logger: Restore log_level from NVS (system_config namespace)
 4. ConfigManager.begin() + loadAllConfigs()
 5. [Watchdog Configuration]
-6. [Provisioning Check - wenn Config fehlt]
+6. [Provisioning Check - wenn Config fehlt; MQTT-Fehler → startAPModeForReconfig(), Config bleibt]
 7. ErrorTracker.begin()
 8. TopicBuilder::setEspId/setKaiserId
 9. WiFiManager.begin() + connect()

@@ -26,7 +26,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ...core.exceptions import (
     ConfigurationException,
@@ -159,6 +159,10 @@ def _model_to_response(
         operating_mode=sensor.operating_mode,
         timeout_seconds=sensor.timeout_seconds,
         schedule_config=sensor.schedule_config,
+        # Multi-Zone Device Scope (T13-R2)
+        device_scope=sensor.device_scope,
+        assigned_zones=sensor.assigned_zones,
+        assigned_subzones=sensor.assigned_subzones,
         latest_value=None,  # Will be set by caller if available
         latest_quality=None,
         latest_timestamp=None,
@@ -220,6 +224,12 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         "timeout_seconds": request.timeout_seconds,
         "timeout_warning_enabled": request.timeout_warning_enabled,
         "schedule_config": request.schedule_config,
+        # =========================================================================
+        # MULTI-ZONE DEVICE SCOPE (T13-R2)
+        # =========================================================================
+        "device_scope": request.device_scope if request.device_scope is not None else "zone_local",
+        "assigned_zones": request.assigned_zones if request.assigned_zones is not None else [],
+        "assigned_subzones": request.assigned_subzones if request.assigned_subzones is not None else [],
     }
 
 
@@ -584,6 +594,22 @@ async def create_or_update_sensor(
         raise DeviceNotApprovedError(esp_id, esp_device.status)
 
     # =========================================================================
+    # MULTI-ZONE VALIDATION (T13-R2 H3)
+    # Validate assigned_zones exist in zones table when scope is multi_zone/mobile
+    # =========================================================================
+    scope = request.device_scope or "zone_local"
+    if scope in ("multi_zone", "mobile") and request.assigned_zones:
+        from ...services.device_scope_service import DeviceScopeService
+
+        scope_service = DeviceScopeService(db)
+        invalid_zones = await scope_service.validate_assigned_zones(request.assigned_zones)
+        if invalid_zones:
+            raise ValidationException(
+                "assigned_zones",
+                f"Invalid or inactive zone_ids: {invalid_zones}",
+            )
+
+    # =========================================================================
     # MULTI-VALUE SENSOR SPLITTING
     # =========================================================================
     # Base device types (e.g., "sht31") are split into individual value types
@@ -651,6 +677,13 @@ async def create_or_update_sensor(
                     existing_vt.timeout_seconds = model_fields["timeout_seconds"]
                     existing_vt.timeout_warning_enabled = model_fields["timeout_warning_enabled"]
                     existing_vt.schedule_config = model_fields["schedule_config"]
+                    # Multi-Zone Device Scope (T13-R2)
+                    if request.device_scope is not None:
+                        existing_vt.device_scope = model_fields["device_scope"]
+                    if request.assigned_zones is not None:
+                        existing_vt.assigned_zones = model_fields["assigned_zones"]
+                    if request.assigned_subzones is not None:
+                        existing_vt.assigned_subzones = model_fields["assigned_subzones"]
                     existing_vt.config_status = "pending"
                     existing_vt.config_error = None
                     existing_vt.config_error_detail = None
@@ -812,6 +845,10 @@ async def create_or_update_sensor(
     if interface_type == "ONEWIRE" and validated_onewire_address:
         model_fields["onewire_address"] = validated_onewire_address
 
+    # Capture old values for H2 audit trail before modification
+    old_scope = existing.device_scope if existing else None
+    old_zones = list(existing.assigned_zones or []) if existing else None
+
     if existing:
         # Update existing sensor
         existing.sensor_type = model_fields["sensor_type"]
@@ -841,6 +878,16 @@ async def create_or_update_sensor(
         existing.timeout_warning_enabled = model_fields["timeout_warning_enabled"]
         existing.schedule_config = model_fields["schedule_config"]
         # =========================================================================
+        # MULTI-ZONE DEVICE SCOPE (T13-R2)
+        # Only update if explicitly provided (don't reset to defaults on partial update)
+        # =========================================================================
+        if request.device_scope is not None:
+            existing.device_scope = model_fields["device_scope"]
+        if request.assigned_zones is not None:
+            existing.assigned_zones = model_fields["assigned_zones"]
+        if request.assigned_subzones is not None:
+            existing.assigned_subzones = model_fields["assigned_subzones"]
+        # =========================================================================
         # WRITE-AFTER-VERIFICATION: Reset config_status to pending
         # Status will be updated to "applied" or "failed" by config_handler
         # when ESP32 responds via MQTT config_response
@@ -864,8 +911,61 @@ async def create_or_update_sensor(
             f"Sensor created: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)"
         )
 
+    # =========================================================================
+    # AUDIT TRAIL for scope/zones changes (T13-R2 H2)
+    # =========================================================================
+    scope_changed = False
+    zones_changed = False
+    if existing and old_scope is not None:
+        if request.device_scope is not None and request.device_scope != old_scope:
+            from ...db.models.device_zone_change import DeviceZoneChange
+
+            db.add(DeviceZoneChange(
+                esp_id=f"sensor:{sensor.id}",
+                old_zone_id=old_scope,
+                new_zone_id=request.device_scope,
+                subzone_strategy="scope",
+                change_type="scope_change",
+                changed_by=current_user.username,
+            ))
+            scope_changed = True
+        if request.assigned_zones is not None and sorted(request.assigned_zones) != sorted(
+            old_zones or []
+        ):
+            from ...db.models.device_zone_change import DeviceZoneChange
+
+            db.add(DeviceZoneChange(
+                esp_id=f"sensor:{sensor.id}",
+                old_zone_id=",".join(old_zones or []),
+                new_zone_id=",".join(request.assigned_zones),
+                subzone_strategy="zones",
+                change_type="zones_update",
+                changed_by=current_user.username,
+            ))
+            zones_changed = True
+
     await db.commit()
     await db.refresh(sensor)
+
+    # =========================================================================
+    # WS BROADCAST device_scope_changed (T13-R2 H1)
+    # =========================================================================
+    if scope_changed or zones_changed:
+        try:
+            from ...websocket.manager import WebSocketManager
+
+            ws_manager = await WebSocketManager.get_instance()
+            await ws_manager.broadcast(
+                "device_scope_changed",
+                {
+                    "config_type": "sensor",
+                    "config_id": str(sensor.id),
+                    "device_scope": sensor.device_scope,
+                    "assigned_zones": sensor.assigned_zones or [],
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to broadcast device_scope_changed: {e}")
 
     # =========================================================================
     # SCHEDULE JOB UPDATE (Phase 2H)
@@ -1031,6 +1131,14 @@ async def delete_sensor(
 
     await db.commit()
 
+    # T13-R1: Sync subzone sensor/actuator counts after sensor delete
+    try:
+        _subzone_repo = SubzoneRepository(db)
+        if await _subzone_repo.sync_subzone_counts(esp_id, esp_device.id):
+            await db.commit()
+    except Exception:
+        logger.debug("Subzone count sync skipped for %s", esp_id)
+
     logger.info(
         f"Sensor deleted: {esp_id} config_id={config_id} GPIO {gpio} "
         f"type={deleted_sensor_type} by {current_user.username}"
@@ -1116,6 +1224,9 @@ async def query_sensor_data(
     subzone_id: Annotated[
         Optional[str], Query(description="Filter by subzone ID (Phase 0.1)")
     ] = None,
+    sensor_config_id: Annotated[
+        Optional[str], Query(description="Filter by sensor_config UUID (T13-R2)")
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=1000, description="Max results")] = 100,
 ) -> SensorDataResponse:
     """
@@ -1156,6 +1267,15 @@ async def query_sensor_data(
             raise ESPNotFoundError(esp_id)
         esp_db_id = esp_device.id
 
+    # Resolve sensor_config_id to get esp_id/gpio/sensor_type if needed (T13-R2)
+    resolved_config_id = None
+    if sensor_config_id:
+        import uuid as _uuid
+        try:
+            resolved_config_id = _uuid.UUID(sensor_config_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid sensor_config_id UUID")
+
     # Query data
     readings = await sensor_repo.query_data(
         esp_id=esp_db_id,
@@ -1166,6 +1286,7 @@ async def query_sensor_data(
         quality=quality,
         zone_id=zone_id,
         subzone_id=subzone_id,
+        sensor_config_id=resolved_config_id,
         limit=limit,
     )
 

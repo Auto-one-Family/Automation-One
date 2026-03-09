@@ -231,6 +231,23 @@ class SensorConfigCreate(SensorConfigBase):
         description="Subzone ID to assign this sensor to. Null/empty = remove from all subzones.",
     )
 
+    # =========================================================================
+    # MULTI-ZONE DEVICE SCOPE (T13-R2)
+    # =========================================================================
+    device_scope: Optional[str] = Field(
+        None,
+        pattern=r"^(zone_local|multi_zone|mobile)$",
+        description="Device scope: 'zone_local' (default), 'multi_zone', 'mobile'",
+    )
+    assigned_zones: Optional[List[str]] = Field(
+        None,
+        description="List of zone_ids this sensor can serve (for multi_zone/mobile)",
+    )
+    assigned_subzones: Optional[List[str]] = Field(
+        None,
+        description="List of subzone_ids for static multi-zone assignment",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -295,6 +312,22 @@ class SensorConfigUpdate(BaseModel):
     schedule_config: Optional[Dict[str, Any]] = Field(
         None,
         description="Schedule configuration for scheduled mode",
+    )
+    # =========================================================================
+    # MULTI-ZONE DEVICE SCOPE (T13-R2)
+    # =========================================================================
+    device_scope: Optional[str] = Field(
+        None,
+        pattern=r"^(zone_local|multi_zone|mobile)$",
+        description="Device scope: 'zone_local', 'multi_zone', 'mobile'",
+    )
+    assigned_zones: Optional[List[str]] = Field(
+        None,
+        description="List of zone_ids this sensor can serve",
+    )
+    assigned_subzones: Optional[List[str]] = Field(
+        None,
+        description="List of subzone_ids for static multi-zone",
     )
 
 
@@ -392,6 +425,19 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     config_error_detail: Optional[str] = Field(
         None,
         description="Error detail if config_status=failed",
+    )
+    # Multi-Zone Device Scope (T13-R2)
+    device_scope: Optional[str] = Field(
+        None,
+        description="Device scope: 'zone_local', 'multi_zone', 'mobile'",
+    )
+    assigned_zones: Optional[List[str]] = Field(
+        None,
+        description="List of zone_ids this sensor can serve",
+    )
+    assigned_subzones: Optional[List[str]] = Field(
+        None,
+        description="List of subzone_ids for static multi-zone",
     )
     # Latest reading (optional)
     latest_value: Optional[float] = Field(

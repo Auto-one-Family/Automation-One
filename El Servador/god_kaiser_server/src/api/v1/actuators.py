@@ -139,6 +139,10 @@ def _model_to_schema_response(
         config_status=actuator.config_status,
         config_error=actuator.config_error,
         config_error_detail=actuator.config_error_detail,
+        # Multi-Zone Device Scope (T13-R2)
+        device_scope=actuator.device_scope,
+        assigned_zones=actuator.assigned_zones,
+        assigned_subzones=actuator.assigned_subzones,
         current_value=state.current_value if state else None,
         is_active=(state.state == "active") if state else False,
         last_command_at=state.last_command_timestamp if state else None,
@@ -187,6 +191,15 @@ def _schema_to_model_fields(
         fields["safety_constraints"] = safety_constraints
     if metadata:
         fields["actuator_metadata"] = metadata
+    # =========================================================================
+    # MULTI-ZONE DEVICE SCOPE (T13-R2)
+    # =========================================================================
+    if request.device_scope is not None:
+        fields["device_scope"] = request.device_scope
+    if request.assigned_zones is not None:
+        fields["assigned_zones"] = request.assigned_zones
+    if request.assigned_subzones is not None:
+        fields["assigned_subzones"] = request.assigned_subzones
 
     return fields
 
@@ -434,6 +447,22 @@ async def create_or_update_actuator(
     if esp_device.status not in ("approved", "online"):
         raise DeviceNotApprovedError(esp_id, esp_device.status)
 
+    # =========================================================================
+    # MULTI-ZONE VALIDATION (T13-R2 H3)
+    # Validate assigned_zones exist in zones table when scope is multi_zone/mobile
+    # =========================================================================
+    act_scope = request.device_scope or "zone_local"
+    if act_scope in ("multi_zone", "mobile") and request.assigned_zones:
+        from ...services.device_scope_service import DeviceScopeService
+
+        scope_service = DeviceScopeService(db)
+        invalid_zones = await scope_service.validate_assigned_zones(request.assigned_zones)
+        if invalid_zones:
+            raise ValidationException(
+                "assigned_zones",
+                f"Invalid or inactive zone_ids: {invalid_zones}",
+            )
+
     # Check if actuator exists
     existing = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
 
@@ -469,6 +498,10 @@ async def create_or_update_actuator(
         )
     # =========================================================================
 
+    # Capture old values for H2 audit trail before modification
+    old_act_scope = existing.device_scope if existing else None
+    old_act_zones = list(existing.assigned_zones or []) if existing else None
+
     if existing:
         # Update existing
         model_fields = _schema_to_model_fields(request, existing=existing)
@@ -499,7 +532,60 @@ async def create_or_update_actuator(
             f"Actuator created: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)"
         )
 
+    # =========================================================================
+    # AUDIT TRAIL for scope/zones changes (T13-R2 H2)
+    # =========================================================================
+    act_scope_changed = False
+    act_zones_changed = False
+    if existing and old_act_scope is not None:
+        if request.device_scope is not None and request.device_scope != old_act_scope:
+            from ...db.models.device_zone_change import DeviceZoneChange
+
+            db.add(DeviceZoneChange(
+                esp_id=f"actuator:{actuator.id}",
+                old_zone_id=old_act_scope,
+                new_zone_id=request.device_scope,
+                subzone_strategy="scope",
+                change_type="scope_change",
+                changed_by=current_user.username,
+            ))
+            act_scope_changed = True
+        if request.assigned_zones is not None and sorted(request.assigned_zones) != sorted(
+            old_act_zones or []
+        ):
+            from ...db.models.device_zone_change import DeviceZoneChange
+
+            db.add(DeviceZoneChange(
+                esp_id=f"actuator:{actuator.id}",
+                old_zone_id=",".join(old_act_zones or []),
+                new_zone_id=",".join(request.assigned_zones),
+                subzone_strategy="zones",
+                change_type="zones_update",
+                changed_by=current_user.username,
+            ))
+            act_zones_changed = True
+
     await db.commit()
+
+    # =========================================================================
+    # WS BROADCAST device_scope_changed (T13-R2 H1)
+    # =========================================================================
+    if act_scope_changed or act_zones_changed:
+        try:
+            from ...websocket.manager import WebSocketManager
+
+            ws_manager = await WebSocketManager.get_instance()
+            await ws_manager.broadcast(
+                "device_scope_changed",
+                {
+                    "config_type": "actuator",
+                    "config_id": str(actuator.id),
+                    "device_scope": actuator.device_scope,
+                    "assigned_zones": actuator.assigned_zones or [],
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to broadcast device_scope_changed: {e}")
 
     # =========================================================================
     # SUBZONE ASSIGNMENT (mirrors sensors API)
@@ -1057,6 +1143,14 @@ async def delete_actuator(
     # Delete actuator
     await actuator_repo.delete(actuator.id)
     await db.commit()
+
+    # T13-R1: Sync subzone sensor/actuator counts after actuator delete
+    try:
+        _subzone_repo = SubzoneRepository(db)
+        if await _subzone_repo.sync_subzone_counts(esp_id, esp_device.id):
+            await db.commit()
+    except Exception:
+        logger.debug("Subzone count sync skipped for %s", esp_id)
 
     logger.info(f"Actuator deleted: {esp_id} GPIO {gpio} by {current_user.username}")
 

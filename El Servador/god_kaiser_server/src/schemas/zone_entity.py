@@ -66,12 +66,14 @@ class ZoneUpdate(BaseModel):
 
 
 class ZoneResponse(BaseModel):
-    """Response schema for a single zone."""
+    """Response schema for a single zone (T13-R1: includes status)."""
 
     id: uuid.UUID = Field(..., description="Zone UUID")
     zone_id: str = Field(..., description="Human-readable zone identifier")
     name: str = Field(..., description="Display name")
     description: Optional[str] = Field(None, description="Zone description")
+    status: str = Field("active", description="Zone lifecycle: 'active', 'archived', 'deleted'")
+    deleted_at: Optional[datetime] = Field(None, description="Soft-delete timestamp")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
 

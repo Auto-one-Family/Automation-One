@@ -471,6 +471,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         data_source: Optional[DataSource] = None,
         zone_id: Optional[str] = None,
         subzone_id: Optional[str] = None,
+        sensor_config_id: Optional[uuid.UUID] = None,
         limit: int = 100,
     ) -> list[SensorData]:
         """
@@ -486,12 +487,27 @@ class SensorRepository(BaseRepository[SensorConfig]):
             data_source: Optional data source filter (production, mock, test, simulation)
             zone_id: Optional zone filter (Phase 0.1)
             subzone_id: Optional subzone filter (Phase 0.1)
+            sensor_config_id: Optional sensor config UUID filter (T13-R2)
             limit: Maximum number of records (default: 100)
 
         Returns:
             List of SensorData instances
         """
         stmt = select(SensorData)
+
+        # T13-R2: If sensor_config_id provided, resolve to esp_id + gpio + sensor_type
+        if sensor_config_id is not None:
+            config = await self.session.execute(
+                select(SensorConfig).where(SensorConfig.id == sensor_config_id)
+            )
+            config_obj = config.scalar_one_or_none()
+            if config_obj:
+                stmt = stmt.where(SensorData.esp_id == config_obj.esp_id)
+                if config_obj.gpio is not None:
+                    stmt = stmt.where(SensorData.gpio == config_obj.gpio)
+                stmt = stmt.where(
+                    func.lower(SensorData.sensor_type) == config_obj.sensor_type.lower()
+                )
 
         # Apply filters
         if esp_id is not None:

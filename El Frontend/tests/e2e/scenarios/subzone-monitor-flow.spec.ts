@@ -54,53 +54,55 @@ test.describe('Subzone-Monitor Flow', () => {
   test('Subzone für Sensor konfigurieren und im Monitor prüfen', async ({
     page,
   }) => {
-    // ═══ Schritt 1: Hardware-View laden ═══
+    // ═══ Schritt 1: Hardware-View Level 1 laden ═══
     await page.goto('/hardware')
     await page.waitForLoadState('networkidle')
     await page.waitForTimeout(2000)
 
-    // Warten bis ESPs geladen (device-mini-card in ZonePlate oder monitor-zone-tile)
-    await page.waitForSelector('.device-mini-card, .zone-plate, .monitor-zone-tile', {
-      timeout: 15000,
-    })
+    // Warten bis ESPs geladen (device-mini-card in ZonePlate)
+    await page.waitForSelector('.device-mini-card', { timeout: 15000 })
 
-    // ═══ Schritt 2: Erste Device-Card → Konfigurieren (öffnet ESPSettingsSheet) ═══
-    const configBtn = page.getByTitle('Konfigurieren')
-    if ((await configBtn.count()) > 0) {
-      await configBtn.first().click({ timeout: 10000 })
-      await page.waitForTimeout(1000)
+    // ═══ Schritt 2: Device-Card klicken → Level 2 (Orbital) ═══
+    const deviceCard = page.locator(`[data-device-id="${espId}"]`).first()
+    if ((await deviceCard.count()) > 0) {
+      await deviceCard.click({ timeout: 10000 })
     } else {
-      // Fallback: Device klicken → Level 2 → Settings
+      // Fallback: erste device-mini-card oder direkte URL-Navigation
       await page.locator('.device-mini-card').first().click({ timeout: 10000 })
-      await page.waitForTimeout(800)
-      await page.getByTitle('Einstellungen').first().click({ timeout: 10000 })
-      await page.waitForTimeout(1000)
     }
+    await page.waitForTimeout(1500)
 
-    // ═══ Schritt 3: Sensor in Config-Liste klicken (öffnet SensorConfigPanel, schließt Settings) ═══
-    const sensorItem = page.locator('.config-list-item').first()
-    await sensorItem.click({ timeout: 10000 })
-    // Warten bis Settings-Sheet ausgeblendet ist (SlideOver-Transition 300ms)
+    // Prüfe dass Level 2 aktiv ist (Orbital-Layout mit Sensor-Satellites)
+    await page.waitForSelector('.sensor-satellite', { timeout: 15000 })
+
+    // ═══ Schritt 3: Sensor-Satellite klicken → öffnet SensorConfigPanel ═══
+    const sensorSatellite = page.locator('.sensor-satellite[data-gpio="4"]')
+    if ((await sensorSatellite.count()) > 0) {
+      await sensorSatellite.click({ timeout: 10000 })
+    } else {
+      // Fallback: ersten Sensor-Satellite klicken
+      await page.locator('.sensor-satellite').first().click({ timeout: 10000 })
+    }
     await page.waitForTimeout(600)
 
     // ═══ Schritt 4: Subzone "Neue Subzone erstellen" wählen ═══
-    const subzoneSelect = page.locator('select.subzone-assignment__select')
+    const subzoneSelect = page.locator('.subzone-assignment__select')
     await subzoneSelect.waitFor({ state: 'visible', timeout: 10000 })
     await subzoneSelect.selectOption({ label: '+ Neue Subzone erstellen...' })
     await page.waitForTimeout(500)
 
-    const subzoneInput = page.locator('input.subzone-assignment__input')
+    const subzoneInput = page.locator('.subzone-assignment__input')
     await subzoneInput.fill('E2E-Test-Subzone')
     await page.waitForTimeout(300)
 
-    const confirmBtn = page.locator('button.subzone-assignment__btn--confirm')
+    const confirmBtn = page.locator('.subzone-assignment__btn--confirm')
     await confirmBtn.click({ timeout: 10000, force: true })
     await page.waitForTimeout(2000)
 
     // Save Sensor-Config
-    const saveBtn = page.getByRole('button', { name: /Speichern/ })
+    const saveBtn = page.locator('.sensor-config__save')
     if ((await saveBtn.count()) > 0) {
-      await saveBtn.click({ timeout: 5000, force: true })
+      await saveBtn.click({ timeout: 5000 })
       await page.waitForTimeout(1500)
     }
 

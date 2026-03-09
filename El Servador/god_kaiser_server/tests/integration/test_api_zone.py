@@ -2,6 +2,7 @@
 Integration Tests: Zone API
 
 Phase: 5 - API Layer
+Updated: T13-R1 — Zone must exist before assignment, FK constraint
 Tests: Zone assignment, removal, and query endpoints
 """
 
@@ -12,7 +13,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.security import create_access_token, get_password_hash
 from src.db.models.esp import ESPDevice
 from src.db.models.user import User
+from src.db.models.zone import Zone
 from src.main import app
+
+
+@pytest.fixture
+async def test_zone(db_session: AsyncSession):
+    """Create a test zone entity (T13-R1: zones must exist before assignment)."""
+    zone = Zone(
+        zone_id="greenhouse_zone_1",
+        name="Greenhouse Zone 1",
+    )
+    db_session.add(zone)
+    await db_session.commit()
+    await db_session.refresh(zone)
+    return zone
+
+
+@pytest.fixture
+async def test_zone_gh1(db_session: AsyncSession):
+    """Create greenhouse_1 zone entity for ESP with zone fixtures."""
+    zone = Zone(
+        zone_id="greenhouse_1",
+        name="Greenhouse 1",
+    )
+    db_session.add(zone)
+    await db_session.commit()
+    await db_session.refresh(zone)
+    return zone
 
 
 @pytest.fixture
@@ -35,8 +63,8 @@ async def test_esp(db_session: AsyncSession):
 
 
 @pytest.fixture
-async def test_esp_with_zone(db_session: AsyncSession):
-    """Create a test ESP device with zone assigned."""
+async def test_esp_with_zone(db_session: AsyncSession, test_zone_gh1: Zone):
+    """Create a test ESP device with zone assigned (T13-R1: zone entity must exist first)."""
     esp = ESPDevice(
         device_id="ESP_ZN000002",
         name="Zoned ESP",
@@ -106,8 +134,8 @@ class TestZoneAssign:
     """Test zone assignment endpoint."""
 
     @pytest.mark.asyncio
-    async def test_assign_zone_success(self, auth_headers: dict, test_esp: ESPDevice):
-        """Test successful zone assignment."""
+    async def test_assign_zone_success(self, auth_headers: dict, test_esp: ESPDevice, test_zone: Zone):
+        """Test successful zone assignment (T13-R1: zone must exist before assignment)."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 f"/api/v1/zone/devices/{test_esp.device_id}/assign",
@@ -204,6 +232,7 @@ class TestZoneQuery:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 f"/api/v1/zone/devices/{test_esp_with_zone.device_id}",
+                headers=auth_headers,
             )
 
         assert response.status_code == 200
@@ -212,21 +241,23 @@ class TestZoneQuery:
         assert data["zone_name"] == "Greenhouse 1"
 
     @pytest.mark.asyncio
-    async def test_get_zone_info_not_found(self):
+    async def test_get_zone_info_not_found(self, auth_headers: dict):
         """Test getting zone info for non-existent ESP."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 "/api/v1/zone/devices/ESP_NOTFOUND",
+                headers=auth_headers,
             )
 
         assert response.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_get_zone_devices(self, test_esp_with_zone: ESPDevice):
+    async def test_get_zone_devices(self, auth_headers: dict, test_esp_with_zone: ESPDevice):
         """Test listing devices in a zone."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 f"/api/v1/zone/{test_esp_with_zone.zone_id}/devices",
+                headers=auth_headers,
             )
 
         assert response.status_code == 200
@@ -235,11 +266,12 @@ class TestZoneQuery:
         assert len(data) >= 1
 
     @pytest.mark.asyncio
-    async def test_get_unassigned_devices(self, test_esp_no_zone: ESPDevice):
+    async def test_get_unassigned_devices(self, auth_headers: dict, test_esp_no_zone: ESPDevice):
         """Test listing unassigned ESPs."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 "/api/v1/zone/unassigned",
+                headers=auth_headers,
             )
 
         assert response.status_code == 200

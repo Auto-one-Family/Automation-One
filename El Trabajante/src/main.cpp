@@ -76,6 +76,10 @@ WatchdogConfig g_watchdog_config;
 WatchdogDiagnostics g_watchdog_diagnostics;
 volatile bool g_watchdog_timeout_flag = false;
 
+// Portal bei MQTT-Disconnect: true = Portal wegen Server-Trennung geoeffnet
+// Steuert parallelen Reconnect und Portal-Schliessen bei Erfolg
+static bool portal_open_due_to_disconnect_ = false;
+
 // ============================================
 // FORWARD DECLARATIONS
 // ============================================
@@ -744,9 +748,8 @@ void setup() {
                                        ":" + String(mqtt_config.port) + "' failed";
     configManager.saveSystemConfig(g_system_config);
 
-    // Clear the faulty config so the user must re-enter it
-    configManager.resetWiFiConfig();
-    LOG_I(TAG, "WiFi/MQTT configuration cleared from NVS");
+    // Config NICHT loeschen — Portal mit vorausgefuellter Config oeffnen
+    portal_open_due_to_disconnect_ = true;
 
     // Initialize and start Provisioning Manager
     if (!provisionManager.begin()) {
@@ -763,19 +766,18 @@ void setup() {
       }
     }
 
-    if (provisionManager.startAPMode()) {
+    if (provisionManager.startAPModeForReconfig()) {
       LOG_I(TAG, "╔════════════════════════════════════════╗");
       LOG_I(TAG, "║  PROVISIONING PORTAL ACTIVE            ║");
+      LOG_I(TAG, "║  Config vorausgefuellt, Reconnect OK   ║");
       LOG_I(TAG, "╚════════════════════════════════════════╝");
       LOG_I(TAG, "Connect to: AutoOne-" + g_system_config.esp_id);
       LOG_I(TAG, "Password: provision");
       LOG_I(TAG, "Open browser: http://192.168.4.1");
-      LOG_I(TAG, "");
-      LOG_I(TAG, "Correct your Server IP / MQTT Port in the form.");
-      LOG_I(TAG, "setup() complete - loop() will handle provisioning");
-      return;  // Exit setup() early - loop() will handle provisioning
+      LOG_I(TAG, "Correct Server IP / MQTT Port if needed. Reconnect laeuft im Hintergrund.");
+      return;  // Exit setup() early - loop() will handle provisioning + reconnect
     } else {
-      LOG_C(TAG, "Failed to start AP Mode after MQTT failure!");
+      LOG_C(TAG, "Failed to start AP+STA Mode after MQTT failure!");
       pinMode(LED_PIN, OUTPUT);
       while (true) {
         for (int i = 0; i < 4; i++) {
@@ -2296,8 +2298,27 @@ void loop() {
   // → AP-Mode läuft, HTTP-Server wartet auf Konfiguration
   // → Keine WiFi/MQTT-Verbindung aktiv
   if (g_system_config.current_state == STATE_SAFE_MODE_PROVISIONING) {
-    // ProvisionManager.loop() für HTTP-Request-Handling
     provisionManager.loop();
+
+    // Bei Portal wegen Disconnect: paralleler Reconnect (AP+STA-Modus)
+    if (portal_open_due_to_disconnect_) {
+      wifiManager.loop();
+      mqttClient.loop();
+      healthMonitor.loop();
+
+      // Reconnect erfolgreich → Portal schliessen, zurueck zu STA-only
+      if (mqttClient.isConnected() && mqttClient.isRegistrationConfirmed()) {
+        LOG_I(TAG, "Reconnect erfolgreich — Portal wird geschlossen");
+        provisionManager.stop();
+        portal_open_due_to_disconnect_ = false;
+        WiFi.mode(WIFI_STA);  // Zurueck zu STA-only
+        g_system_config.current_state = STATE_OPERATIONAL;
+        g_system_config.safe_mode_reason = "";
+        configManager.saveSystemConfig(g_system_config);
+        delay(10);
+        return;  // Weiter mit normaler Loop-Logik
+      }
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CRITICAL FIX: Check if config was NEWLY received via HTTP, not just exists
@@ -2370,7 +2391,34 @@ void loop() {
   LOG_D(TAG, "LOOP[" + String(loop_count) + "] MQTT OK");
 
   // ═══════════════════════════════════════════════════
-  // MQTT PERSISTENT FAILURE DETECTION → PROVISIONING RECOVERY
+  // DISCONNECT-DEBOUNCE → Portal oeffnen (30s)
+  // ═══════════════════════════════════════════════════
+  // Bei Server-Trennung: Portal oeffnen damit User umkonfigurieren kann.
+  // Reconnect laeuft parallel (AP+STA). Config bleibt erhalten.
+  {
+    static const unsigned long PORTAL_OPEN_DEBOUNCE_MS = 30000;  // 30 seconds
+    static unsigned long disconnect_start = 0;
+
+    if (g_system_config.current_state == STATE_OPERATIONAL && !mqttClient.isConnected()) {
+      if (disconnect_start == 0) {
+        disconnect_start = millis();
+      } else if (millis() - disconnect_start > PORTAL_OPEN_DEBOUNCE_MS && !portal_open_due_to_disconnect_) {
+        LOG_I(TAG, "Config-Portal geoeffnet (Server getrennt), Reconnect laeuft im Hintergrund");
+        g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
+        g_system_config.safe_mode_reason = "MQTT disconnected (" + String(PORTAL_OPEN_DEBOUNCE_MS / 1000) + "s)";
+        configManager.saveSystemConfig(g_system_config);
+        if (provisionManager.startAPModeForReconfig()) {
+          portal_open_due_to_disconnect_ = true;
+        }
+        disconnect_start = 0;
+      }
+    } else {
+      disconnect_start = 0;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════
+  // MQTT PERSISTENT FAILURE (5 min) → Portal oeffnen (Fallback)
   // ═══════════════════════════════════════════════════
   // If MQTT Circuit Breaker stays OPEN for 5 minutes continuously,
   // the server/broker config is likely wrong. Trigger portal recovery.
@@ -2385,20 +2433,21 @@ void loop() {
         mqtt_failure_start = millis();
         LOG_W(TAG, "MQTT persistent failure timer started (5 min to recovery)");
       } else if (millis() - mqtt_failure_start > MQTT_PERSISTENT_FAILURE_TIMEOUT_MS) {
-        LOG_C(TAG, "╔════════════════════════════════════════╗");
-        LOG_C(TAG, "║  MQTT PERSISTENT FAILURE (5 min)       ║");
-        LOG_C(TAG, "║  Triggering Provisioning Recovery...   ║");
-        LOG_C(TAG, "╚════════════════════════════════════════╝");
+        if (!portal_open_due_to_disconnect_) {
+          LOG_C(TAG, "╔════════════════════════════════════════╗");
+          LOG_C(TAG, "║  MQTT PERSISTENT FAILURE (5 min)       ║");
+          LOG_C(TAG, "║  Config-Portal oeffnen...              ║");
+          LOG_C(TAG, "╚════════════════════════════════════════╝");
 
-        g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
-        g_system_config.safe_mode_reason = "MQTT persistent failure (5 min Circuit Breaker OPEN)";
-        configManager.saveSystemConfig(g_system_config);
+          g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
+          g_system_config.safe_mode_reason = "MQTT persistent failure (5 min Circuit Breaker OPEN)";
+          configManager.saveSystemConfig(g_system_config);
 
-        // Clear faulty config so user must re-enter
-        configManager.resetWiFiConfig();
-        LOG_I(TAG, "Configuration cleared - rebooting to provisioning...");
-        delay(2000);
-        ESP.restart();
+          if (provisionManager.startAPModeForReconfig()) {
+            portal_open_due_to_disconnect_ = true;
+          }
+        }
+        mqtt_failure_start = 0;
       }
     } else {
       // MQTT is connected or Circuit Breaker recovered → reset timer

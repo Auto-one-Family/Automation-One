@@ -483,6 +483,7 @@ struct SystemConfig {
 #### 8. **Provisioning System** (main.cpp Zeilen 177-233)
 - Provision Check: `needsProvisioning()` Check (Zeile 177)
 - AP Mode Start: `provisionManager.startAPMode()` (Zeile 191)
+- Bei MQTT-Fehler: `startAPModeForReconfig()` (Config bleibt, AP+STA fuer parallelen Reconnect)
 - Config Wait: `provisionManager.waitForConfig()` (Zeile 202)
 
 ---

@@ -3,9 +3,11 @@ Subzone Configuration Model
 
 Phase: 9 - Subzone Management
 Status: IMPLEMENTED
+Updated: T13-R1 — is_active, assigned_sensor_config_ids (I2C GPIO-0)
 
 Stores subzone configurations for ESP devices.
 Each subzone groups GPIO pins for feingranulare Kontrolle.
+I2C sensors (gpio=0 placeholder) are assigned via sensor_config_ids.
 """
 
 import uuid
@@ -37,6 +39,8 @@ class SubzoneConfig(Base, TimestampMixin):
         subzone_name: Human-readable name
         parent_zone_id: Zone this subzone belongs to (must match ESP zone_id)
         assigned_gpios: JSON array of GPIO pin numbers
+        assigned_sensor_config_ids: JSON array of sensor_config UUIDs (for I2C gpio=0 sensors)
+        is_active: Whether subzone is active within its zone
         safe_mode_active: Whether subzone is in safe-mode
         sensor_count: Number of sensors in subzone (from ESP)
         actuator_count: Number of actuators in subzone (from ESP)
@@ -89,6 +93,24 @@ class SubzoneConfig(Base, TimestampMixin):
         default=list,
         nullable=False,
         doc="JSON array of GPIO pin numbers [4, 5, 6]",
+    )
+
+    # I2C Sensor Assignment (T13-R1 Phase 4: GPIO-0 Handling)
+    assigned_sensor_config_ids: Mapped[List[str]] = mapped_column(
+        JSON,
+        default=list,
+        nullable=False,
+        server_default="[]",
+        doc="JSON array of sensor_config UUIDs for I2C sensors (gpio=0 placeholder)",
+    )
+
+    # Active Status (T13-R1: Zone State Management)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
+        nullable=False,
+        doc="Whether subzone is active within its zone (deactivated on zone archive)",
     )
 
     # Safe-Mode Status

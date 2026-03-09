@@ -42,6 +42,20 @@ logger = get_logger(__name__)
 # Heartbeat timeout: device considered offline after 5 minutes
 HEARTBEAT_TIMEOUT_SECONDS = 300
 
+# Full-State-Push: Reconnect threshold (seconds offline before triggering)
+RECONNECT_THRESHOLD_SECONDS = 60
+# Full-State-Push: Cooldown between pushes (prevent rapid-fire on boot)
+STATE_PUSH_COOLDOWN_SECONDS = 120
+
+# Module-level MQTTCommandBridge reference (set via set_command_bridge())
+_command_bridge = None
+
+
+def set_command_bridge(bridge) -> None:
+    """Set the MQTTCommandBridge for ACK-driven Full-State-Push on reconnect."""
+    global _command_bridge
+    _command_bridge = bridge
+
 
 class HeartbeatHandler:
     """
@@ -144,6 +158,14 @@ class HeartbeatHandler:
                 # ============================================
                 status = esp_device.status
 
+                # T13-Phase3: Reconnect detection — BEFORE update_status() overwrites last_seen
+                is_reconnect = False
+                if isinstance(esp_device.last_seen, datetime):
+                    offline_seconds = (
+                        datetime.now(timezone.utc) - esp_device.last_seen
+                    ).total_seconds()
+                    is_reconnect = offline_seconds > RECONNECT_THRESHOLD_SECONDS
+
                 if status == "rejected":
                     # Check cooldown before rediscovery
                     if await self._check_rejection_cooldown(esp_device):
@@ -225,13 +247,21 @@ class HeartbeatHandler:
                     )
 
                 # Step 6: Update metadata with latest heartbeat info
-                await self._update_esp_metadata(esp_device, payload, session)
+                await self._update_esp_metadata(esp_device, payload, session, is_reconnect)
 
                 # Step 7: Log health metrics
                 self._log_health_metrics(esp_id_str, payload)
 
                 # Commit transaction
                 await session.commit()
+
+                # T13-Phase3: Fire Full-State-Push as background task after commit
+                if is_reconnect and esp_device.zone_id and _command_bridge:
+                    import asyncio
+
+                    asyncio.create_task(
+                        self._handle_reconnect_state_push(esp_device.device_id)
+                    )
 
                 # Update Prometheus metrics for Grafana alerting
                 update_esp_heartbeat_timestamp(esp_id_str)
@@ -636,7 +666,9 @@ class HeartbeatHandler:
         except Exception as e:
             logger.warning(f"Failed to broadcast device_rediscovered: {e}")
 
-    async def _update_esp_metadata(self, esp_device: ESPDevice, payload: dict, session) -> None:
+    async def _update_esp_metadata(
+        self, esp_device: ESPDevice, payload: dict, session, is_reconnect: bool = False,
+    ) -> None:
         """
         Update ESP metadata with latest heartbeat information.
 
@@ -644,6 +676,7 @@ class HeartbeatHandler:
             esp_device: ESP device model
             payload: Heartbeat payload
             session: Database session
+            is_reconnect: True if ESP was offline >60s (Full-State-Push will handle resync)
         """
         try:
             # Update device_metadata with latest values
@@ -676,7 +709,25 @@ class HeartbeatHandler:
             esp_lost_zone = not heartbeat_zone_assigned and db_has_zone
 
             if heartbeat_zone_id != db_zone_id or esp_lost_zone:
-                if esp_has_zone and not db_has_zone:
+                # T13-Phase3: Reconnect detected — Full-State-Push handles resync
+                if is_reconnect and db_has_zone:
+                    logger.info(
+                        "Zone mismatch for %s tolerated (reconnect state push pending)",
+                        esp_device.device_id,
+                    )
+                # Check: Is a zone assignment currently pending? If so, tolerate mismatch.
+                elif (pending := current_metadata.get("pending_zone_assignment")):
+                    pending_target = (
+                        pending.get("zone_id", "?")
+                        if isinstance(pending, dict)
+                        else str(pending)
+                    )
+                    logger.info(
+                        "Zone mismatch for %s tolerated (pending assignment to %s)",
+                        esp_device.device_id, pending_target,
+                    )
+                    # No warning, no resync — wait for ACK or timeout
+                elif esp_has_zone and not db_has_zone:
                     # ESP has zone from NVS, Server has None
                     # This happens after: (1) Server restart, (2) failed zone removal
                     logger.warning(
@@ -1252,6 +1303,124 @@ class HeartbeatHandler:
             logger.error(
                 f"Auto config push error for {esp_device_id}: {e}",
                 exc_info=True,
+            )
+
+    async def _handle_reconnect_state_push(self, device_id: str) -> None:
+        """
+        T13-Phase3: Full-State-Push after ESP reconnect (>60s offline).
+
+        Sends zone/assign + all active subzone/assign via MQTTCommandBridge (ACK-driven).
+        Runs as async task — does not block heartbeat processing.
+        Uses its own DB session to avoid conflicts with the heartbeat session.
+        """
+        try:
+            if not _command_bridge:
+                logger.warning("No command_bridge for state push to %s", device_id)
+                return
+
+            async with resilient_session() as session:
+                esp_repo = ESPRepository(session)
+                esp_device = await esp_repo.get_by_device_id(device_id)
+                if not esp_device or not esp_device.zone_id:
+                    return
+
+                # Skip mock ESPs (no real reboot)
+                if (
+                    device_id.startswith("ESP_MOCK_")
+                    or device_id.startswith("MOCK_")
+                    or "MOCK" in device_id
+                ):
+                    logger.debug("Skipping state push for mock ESP %s", device_id)
+                    return
+
+                # Cooldown: prevent rapid-fire pushes
+                metadata = dict(esp_device.device_metadata or {})
+                last_push = metadata.get("full_state_push_sent_at", 0)
+                now_ts = int(time_module.time())
+                if now_ts - last_push < STATE_PUSH_COOLDOWN_SECONDS:
+                    logger.debug(
+                        "State push cooldown for %s (%ds remaining)",
+                        device_id,
+                        STATE_PUSH_COOLDOWN_SECONDS - (now_ts - last_push),
+                    )
+                    return
+
+                # 1. Zone assign via command_bridge (ACK-driven)
+                zone_topic = TopicBuilder.build_zone_assign_topic(device_id)
+                zone_payload = {
+                    "zone_id": esp_device.zone_id,
+                    "master_zone_id": esp_device.master_zone_id or "",
+                    "zone_name": esp_device.zone_name or "",
+                    "kaiser_id": esp_device.kaiser_id or constants.get_kaiser_id(),
+                    "timestamp": now_ts,
+                }
+                try:
+                    await _command_bridge.send_and_wait_ack(
+                        topic=zone_topic,
+                        payload=zone_payload,
+                        esp_id=device_id,
+                        command_type="zone",
+                        timeout=10.0,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "Zone ACK timeout during state push for %s: %s", device_id, e
+                    )
+                    return
+
+                # 2. Load and send active subzones sequentially
+                from ...db.repositories.subzone_repo import SubzoneRepository
+
+                subzone_repo = SubzoneRepository(session)
+                subzones = await subzone_repo.get_by_esp(device_id)
+                active_subzones = [sz for sz in subzones if sz.is_active][:8]  # Max 8
+
+                subzone_count = 0
+                for sz in active_subzones:
+                    sz_topic = TopicBuilder.build_subzone_assign_topic(device_id)
+                    sz_payload = {
+                        "subzone_id": sz.subzone_id,
+                        "subzone_name": sz.subzone_name or "",
+                        "parent_zone_id": "",  # Firmware sets current zone automatically
+                        "assigned_gpios": [
+                            g for g in (sz.assigned_gpios or []) if g != 0
+                        ],
+                        "safe_mode_active": sz.safe_mode_active or False,
+                        "timestamp": now_ts,
+                    }
+                    try:
+                        await _command_bridge.send_and_wait_ack(
+                            topic=sz_topic,
+                            payload=sz_payload,
+                            esp_id=device_id,
+                            command_type="subzone",
+                            timeout=10.0,
+                        )
+                        subzone_count += 1
+                    except Exception as e:
+                        logger.warning(
+                            "Subzone ACK timeout for %s/%s: %s",
+                            device_id,
+                            sz.subzone_id,
+                            e,
+                        )
+
+                # 3. Set cooldown metadata
+                metadata["full_state_push_sent_at"] = now_ts
+                esp_device.device_metadata = metadata
+                await session.commit()
+
+                logger.info(
+                    "Full-State-Push completed for %s: zone=%s, subzones=%d/%d",
+                    device_id,
+                    esp_device.zone_id,
+                    subzone_count,
+                    len(active_subzones),
+                )
+
+        except Exception as e:
+            logger.error(
+                "Full-State-Push failed for %s: %s", device_id, e, exc_info=True
             )
 
     async def check_device_timeouts(self) -> dict:

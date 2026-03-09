@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Kommunikationsmuster & Datenflüsse
 
-> **Version:** 2.2 | **Aktualisiert:** 2026-03-06
+> **Version:** 2.3 | **Aktualisiert:** 2026-03-09
 > **Quellen:** Code-Traces durch ESP32, Server, Frontend
 > **Verifiziert:** ✅ Alle Pfade mit Datei:Zeile dokumentiert
 
@@ -81,10 +81,11 @@ allowed-tools: Read
 | 4 | `topic_builder.cpp` | `buildSensorDataTopic()` | 53 |
 | 5 | `mqtt_client.cpp` | `publish()` | 469 |
 | 6 | `sensor_handler.py` | `handle_sensor_data()` | 79 |
+| 6b | `zone_subzone_resolver.py` | `resolve_zone_subzone_for_sensor()` — 3-way dispatch: zone_local/multi_zone/mobile (T13-R2) | - |
 | 7 | `sensor_handler.py` | `_validate_payload()` | 353 |
 | 8 | `sensor_handler.py` | DB Save | 259 |
 | 9 | `sensor_handler.py` | WebSocket Broadcast | 297 |
-| 10 | `logic_engine.py` | `evaluate_sensor_data()` | 135 |
+| 10 | `logic_engine.py` | `evaluate_sensor_data()` mit zone_id Filter (T13-R2) | 135 |
 | 11 | `websocket/manager.py` | `broadcast()` | 179 |
 | 12 | `esp.ts` | `handleSensorData()` | 1482 |
 
@@ -414,29 +415,43 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
 
 ## 4. Flow D: Zone Assignment (Server → ESP → Server)
 
-### Sequenz-Diagramm
+### Sequenz-Diagramm (ACK-basiert, T13-Phase2)
 
 ```
 ┌──────────────────┐          ┌───────────────────┐          ┌─────────────────┐
-│     Frontend     │          │      Server       │          │      ESP32      │
+│     Frontend     │          │   Server (Bridge)  │          │      ESP32      │
 └────────┬─────────┘          └─────────┬─────────┘          └────────┬────────┘
          │                              │                             │
          │ 1. POST /esp/{id}/zone       │                             │
          │─────────────────────────────►│                             │
          │                              │                             │
-         │                              │ 2. DB Update                │
+         │                              │ 2. DB Update + pending_zone │
          │                              │                             │
          │                              │ 3. MQTT: zone/assign        │
+         │                              │    (+correlation_id)        │
          │                              │─────────────────────────────►│
          │                              │                             │
-         │                              │                             │ 4. NVS Store
+         │                              │  ┌─── Bridge waits ───┐    │ 4. NVS Store
+         │                              │  │ asyncio.Future     │    │
+         │                              │  │ timeout=10s        │    │
+         │                              │  └────────────────────┘    │
          │                              │                             │
          │                              │ 5. MQTT: zone/ack           │
          │                              │◄─────────────────────────────│
          │                              │                             │
-         │ 6. WS: zone_assignment       │                             │
+         │                              │ 6. resolve_ack() → Future   │
+         │                              │                             │
+         │                              │ 7. Subzone Transfer (if any)│
+         │                              │    MQTT: subzone/assign ────►│
+         │                              │    (parent_zone_id="")      │
+         │                              │    ◄── subzone/ack ─────────│
+         │                              │    (repeat per subzone)     │
+         │                              │                             │
+         │ 8. WS: zone_assignment       │                             │
          │◄─────────────────────────────│                             │
 ```
+
+**Wichtig:** Mock-ESPs umgehen die Bridge (fire-and-forget, kein ACK-Waiting).
 
 ### MQTT Payloads
 
@@ -445,7 +460,8 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
 {
   "zone_id": "greenhouse",
   "zone_name": "Gewächshaus",
-  "master_zone_id": "main_zone"
+  "master_zone_id": "main_zone",
+  "correlation_id": "uuid-v4"
 }
 ```
 
@@ -460,6 +476,20 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
   "message": "Zone assigned successfully"
 }
 ```
+
+**subzone/assign (Server→ESP, during transfer):**
+```json
+{
+  "subzone_id": "irrigation_A",
+  "subzone_name": "Irrigation Section A",
+  "parent_zone_id": "",
+  "assigned_gpios": [2, 4, 15],
+  "timestamp": 1735818001,
+  "correlation_id": "uuid-v4"
+}
+```
+
+**Hinweis:** `parent_zone_id` ist leer — Firmware setzt automatisch die aktuelle Zone. GPIO 0 (I2C Placeholder) wird vor dem Senden gefiltert.
 
 ---
 
@@ -702,7 +732,7 @@ Die Logic Engine unterstützt Rules über **mehrere ESPs**:
 
 | Komponente | Datei | Beschreibung |
 |------------|-------|--------------|
-| SensorConditionEvaluator | conditions/sensor_evaluator.py | Sensor-Schwellwert-Prüfung (`sensor`, `sensor_threshold`), optional `subzone_id` (Phase 2.4) |
+| SensorConditionEvaluator | conditions/sensor_evaluator.py | Sensor-Schwellwert-Prüfung (`sensor`, `sensor_threshold`), optional `subzone_id` (Phase 2.4), `zone_id` Filter (T13-R2) |
 | TimeConditionEvaluator | conditions/time_evaluator.py | Zeit-basierte Bedingungen (`time_window`, `time`) |
 | CompoundConditionEvaluator | conditions/compound_evaluator.py | AND/OR Verknüpfungen (`compound`) |
 | HysteresisConditionEvaluator | conditions/hysteresis_evaluator.py | Hysterese (`hysteresis`) |
@@ -710,7 +740,7 @@ Die Logic Engine unterstützt Rules über **mehrere ESPs**:
 | DelayActionExecutor | actions/delay_executor.py | Verzögerungen (`delay`) |
 | NotificationActionExecutor | actions/notification_executor.py | WebSocket Notifications (`notification`) |
 | SequenceActionExecutor | actions/sequence_executor.py | Verkettete Aktionen (`sequence`) |
-| ConflictManager | safety/conflict_manager.py | GPIO-Konflikt-Prüfung |
+| ConflictManager | safety/conflict_manager.py | GPIO-Konflikt-Prüfung, Zone-aware Key `esp_id:gpio:zone_id` (T13-R2) |
 | RateLimiter | safety/rate_limiter.py | Command-Flooding-Schutz |
 
 ---
@@ -727,6 +757,7 @@ Die Logic Engine unterstützt Rules über **mehrere ESPs**:
 | `actuator_alert` | `handleActuatorAlert()` | 1430 | Emergency/Timeout |
 | `config_response` | `handleConfigResponse()` | 1699 | Config ACK |
 | `zone_assignment` | `handleZoneAssignment()` | 1782 | Zone-Zuweisung |
+| `device_context_changed` | - | - | Multi-Zone Scope geändert (T13-R2) |
 | `sensor_health` | `handleSensorHealth()` | 1917 | Sensor Timeout/Recovery |
 | `device_discovered` | `handleDeviceDiscovered()` | 1837 | Neues Gerät |
 | `device_approved` | `handleDeviceApproved()` | 1873 | Gerät genehmigt |

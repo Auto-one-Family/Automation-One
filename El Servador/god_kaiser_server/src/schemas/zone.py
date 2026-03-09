@@ -39,6 +39,8 @@ class ZoneAssignRequest(BaseModel):
 
     Used to assign an ESP to a zone via MQTT.
     ESP will receive this via: kaiser/{kaiser_id}/esp/{esp_id}/zone/assign
+
+    T13-R1: Added subzone_strategy for subzone handling on zone change.
     """
 
     zone_id: str = Field(
@@ -60,6 +62,16 @@ class ZoneAssignRequest(BaseModel):
         description="Human-readable zone name",
         examples=["Greenhouse Section 1", "Farm Section A"],
     )
+    subzone_strategy: str = Field(
+        "transfer",
+        description=(
+            "Subzone handling on zone change: "
+            "'transfer' (move subzones), "
+            "'copy' (clone subzones), "
+            "'reset' (leave subzones in old zone)"
+        ),
+        examples=["transfer", "copy", "reset"],
+    )
 
     @field_validator("zone_id")
     @classmethod
@@ -69,12 +81,22 @@ class ZoneAssignRequest(BaseModel):
             raise ValueError("zone_id must contain only letters, numbers, underscores, and hyphens")
         return v.lower()
 
+    @field_validator("subzone_strategy")
+    @classmethod
+    def validate_subzone_strategy(cls, v: str) -> str:
+        """Validate subzone_strategy is one of the allowed values."""
+        valid = {"transfer", "copy", "reset"}
+        if v not in valid:
+            raise ValueError(f"subzone_strategy must be one of: {valid}")
+        return v
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "zone_id": "greenhouse_zone_1",
                 "master_zone_id": "greenhouse_master",
                 "zone_name": "Greenhouse Section 1",
+                "subzone_strategy": "transfer",
             }
         }
     )
@@ -245,8 +267,8 @@ class ZoneListEntry(BaseModel):
     """
     Zone list entry for GET /v1/zone/zones.
 
-    Merges zones from device assignments and ZoneContext table,
-    so empty zones (with context but no devices) are included.
+    T13-R1: Now sourced from zones table (Single Source of Truth),
+    enriched with device/sensor/actuator counts via JOINs.
     """
 
     zone_id: str = Field(
@@ -258,6 +280,11 @@ class ZoneListEntry(BaseModel):
         None,
         description="Human-readable zone name",
         examples=["Greenhouse Section 1"],
+    )
+    status: str = Field(
+        "active",
+        description="Zone lifecycle status: 'active', 'archived', 'deleted'",
+        examples=["active", "archived"],
     )
     device_count: int = Field(
         0,
@@ -278,6 +305,7 @@ class ZoneListEntry(BaseModel):
             "example": {
                 "zone_id": "greenhouse_zone_1",
                 "zone_name": "Greenhouse Section 1",
+                "status": "active",
                 "device_count": 3,
                 "sensor_count": 8,
                 "actuator_count": 2,

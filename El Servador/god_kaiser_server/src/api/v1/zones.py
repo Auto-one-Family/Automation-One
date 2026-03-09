@@ -2,23 +2,28 @@
 Zone Entity CRUD API Endpoints
 
 Phase: 0.3 - Zone as DB Entity
-Status: IMPLEMENTED
+Updated: T13-R1 — Archive/Reactivate, Soft-Delete, Status filter
 
 Provides:
-- POST   /zones              - Create a new zone
-- GET    /zones              - List all zones
-- GET    /zones/{zone_id}    - Get zone by zone_id
-- PUT    /zones/{zone_id}    - Update zone
-- DELETE /zones/{zone_id}    - Delete zone
+- POST   /zones                        - Create a new zone
+- GET    /zones                        - List all zones (with status filter)
+- GET    /zones/{zone_id}              - Get zone by zone_id
+- PUT    /zones/{zone_id}              - Update zone
+- POST   /zones/{zone_id}/archive      - Archive zone
+- POST   /zones/{zone_id}/reactivate   - Reactivate archived zone
+- DELETE /zones/{zone_id}              - Soft-delete zone
 
 These endpoints manage zones as independent DB entities.
 The existing zone.py router handles zone <-> ESP assignment via MQTT.
 """
 
-from fastapi import APIRouter, HTTPException, status
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Query, status
 
 from ...core.logging_config import get_logger
 from ...db.repositories import ESPRepository
+from ...db.repositories.subzone_repo import SubzoneRepository
 from ...db.repositories.zone_repo import ZoneRepository
 from ...schemas.zone_entity import (
     ZoneCreate,
@@ -68,9 +73,7 @@ async def create_zone(
 
     logger.info(
         "Zone created by %s: zone_id=%s, name=%s",
-        current_user.username,
-        zone.zone_id,
-        zone.name,
+        current_user.username, zone.zone_id, zone.name,
     )
     return ZoneResponse.model_validate(zone)
 
@@ -79,15 +82,24 @@ async def create_zone(
     "",
     response_model=ZoneListResponse,
     summary="List Zones",
-    description="List all zones. Includes zones without any assigned devices.",
+    description="List all zones. Use `status` to filter by lifecycle status.",
     responses={200: {"description": "List of all zones"}},
 )
 async def list_zones(
     db: DBSession,
     current_user: OperatorUser,
+    zone_status: Optional[str] = Query(
+        None,
+        alias="status",
+        description="Filter by status: 'active', 'archived', 'deleted'. Default: all non-deleted.",
+    ),
 ) -> ZoneListResponse:
     zone_repo = ZoneRepository(db)
-    zones = await zone_repo.list_all()
+
+    if zone_status:
+        zones = await zone_repo.list_by_status(zone_status)
+    else:
+        zones = await zone_repo.list_all()
 
     return ZoneListResponse(
         zones=[ZoneResponse.model_validate(z) for z in zones],
@@ -155,24 +167,152 @@ async def update_zone(
     await db.commit()
     await db.refresh(updated)
 
-    logger.info(
-        "Zone updated by %s: zone_id=%s",
-        current_user.username,
-        zone_id,
-    )
+    logger.info("Zone updated by %s: zone_id=%s", current_user.username, zone_id)
     return ZoneResponse.model_validate(updated)
+
+
+# =============================================================================
+# Zone Lifecycle Endpoints (T13-R1)
+# =============================================================================
+
+
+@router.post(
+    "/{zone_id}/archive",
+    response_model=ZoneResponse,
+    summary="Archive Zone",
+    description="""
+    Archive a zone. Archived zones are read-only.
+
+    **Rules:**
+    - All devices must be unassigned or moved to another zone BEFORE archiving.
+    - Subzones are deactivated (is_active=False) on archive.
+    - Archived zones still show historical data in Monitor (read-only).
+    """,
+    responses={
+        200: {"description": "Zone archived"},
+        400: {"description": "Zone still has assigned devices"},
+        404: {"description": "Zone not found"},
+    },
+)
+async def archive_zone(
+    zone_id: str,
+    db: DBSession,
+    current_user: OperatorUser,
+) -> ZoneResponse:
+    zone_repo = ZoneRepository(db)
+    esp_repo = ESPRepository(db)
+
+    zone = await zone_repo.get_by_zone_id(zone_id)
+    if not zone:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Zone '{zone_id}' not found",
+        )
+
+    if zone.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Only active zones can be archived. Current status: {zone.status}",
+        )
+
+    # Check for assigned devices (blocking for archive)
+    devices = await esp_repo.get_by_zone(zone_id)
+    if devices:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Cannot archive zone with {len(devices)} device(s) assigned. "
+                "Move or unassign all devices first."
+            ),
+        )
+
+    # Archive the zone
+    archived = await zone_repo.archive(zone_id)
+    if not archived:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Zone '{zone_id}' not found",
+        )
+
+    # Deactivate all subzones in this zone
+    subzone_repo = SubzoneRepository(db)
+    deactivated = await subzone_repo.deactivate_by_zone(zone_id)
+
+    await db.commit()
+    await db.refresh(archived)
+
+    logger.info(
+        "Zone archived by %s: zone_id=%s (%d subzones deactivated)",
+        current_user.username, zone_id, deactivated,
+    )
+    return ZoneResponse.model_validate(archived)
+
+
+@router.post(
+    "/{zone_id}/reactivate",
+    response_model=ZoneResponse,
+    summary="Reactivate Zone",
+    description="""
+    Reactivate an archived zone.
+
+    **Note:** Subzones remain deactivated after reactivation.
+    User must manually reactivate subzones.
+    """,
+    responses={
+        200: {"description": "Zone reactivated"},
+        400: {"description": "Zone is not archived"},
+        404: {"description": "Zone not found"},
+    },
+)
+async def reactivate_zone(
+    zone_id: str,
+    db: DBSession,
+    current_user: OperatorUser,
+) -> ZoneResponse:
+    zone_repo = ZoneRepository(db)
+
+    zone = await zone_repo.get_by_zone_id(zone_id)
+    if not zone:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Zone '{zone_id}' not found",
+        )
+
+    if zone.status != "archived":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Only archived zones can be reactivated. Current status: {zone.status}",
+        )
+
+    reactivated = await zone_repo.reactivate(zone_id)
+    if not reactivated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Zone '{zone_id}' not found",
+        )
+
+    await db.commit()
+    await db.refresh(reactivated)
+
+    logger.info("Zone reactivated by %s: zone_id=%s", current_user.username, zone_id)
+    return ZoneResponse.model_validate(reactivated)
 
 
 @router.delete(
     "/{zone_id}",
     response_model=ZoneDeleteResponse,
-    summary="Delete Zone",
-    description=(
-        "Delete a zone. If devices are still assigned, a warning is included "
-        "in the response but the zone is deleted anyway."
-    ),
+    summary="Delete Zone (Soft-Delete)",
+    description="""
+    Soft-delete a zone. Sets status='deleted' and deleted_at timestamp.
+
+    T13-R1: Uses soft-delete instead of hard-delete.
+    Zone data remains in DB. Deleted zones are only visible to admins.
+
+    If devices are still assigned, deletion is blocked (unlike before).
+    """,
     responses={
-        200: {"description": "Zone deleted (with optional device warning)"},
+        200: {"description": "Zone soft-deleted"},
+        400: {"description": "Zone still has assigned devices"},
         404: {"description": "Zone not found"},
     },
 )
@@ -191,32 +331,34 @@ async def delete_zone(
             detail=f"Zone '{zone_id}' not found",
         )
 
-    # Check for assigned devices (warning, not blocking)
+    # Block deletion if devices are still assigned (T13-R1: FK constraint)
     devices = await esp_repo.get_by_zone(zone_id)
     device_count = len(devices)
-    had_devices = device_count > 0
-
-    if had_devices:
-        logger.warning(
-            "Zone %s deleted by %s with %d device(s) still assigned",
-            zone_id,
-            current_user.username,
-            device_count,
+    if device_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Cannot delete zone with {device_count} device(s) assigned. "
+                "Move or unassign all devices first."
+            ),
         )
 
-    await zone_repo.delete(zone.id)
+    # Soft-delete
+    deleted = await zone_repo.soft_delete(zone_id, deleted_by=current_user.username)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Zone '{zone_id}' not found",
+        )
+
     await db.commit()
 
-    logger.info("Zone deleted by %s: zone_id=%s", current_user.username, zone_id)
-
-    message = "Zone deleted"
-    if had_devices:
-        message = f"Zone deleted (warning: {device_count} device(s) were still assigned)"
+    logger.info("Zone soft-deleted by %s: zone_id=%s", current_user.username, zone_id)
 
     return ZoneDeleteResponse(
         success=True,
-        message=message,
+        message="Zone deleted (soft-delete)",
         zone_id=zone_id,
-        had_devices=had_devices,
-        device_count=device_count,
+        had_devices=False,
+        device_count=0,
     )

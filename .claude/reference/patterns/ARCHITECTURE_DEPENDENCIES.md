@@ -178,6 +178,7 @@ enum class EmergencyState : uint8_t {
 
 **Key Responsibilities:**
 - AP-mode Zero-Touch Provisioning
+- AP+STA mode for reconfig (parallel reconnect when MQTT disconnected)
 - Captive portal with HTTP endpoints
 - Configuration validation and NVS storage
 - Factory reset support
@@ -417,6 +418,7 @@ private:
 
 4. **Provisioning Check (STEP 6.6):**
    - provisionManager.begin() + startAPMode() (nur wenn !configured)
+   - Bei MQTT-Fehler: startAPModeForReconfig() (Config bleibt, AP+STA fuer parallelen Reconnect)
    - Wenn Provisioning aktiv: return early, loop() handled provisioning
 
 5. **Error Handling Layer (STEP 7):**
