@@ -141,9 +141,9 @@ class ActuatorConfigCreate(ActuatorConfigBase):
     # Safety constraints
     max_runtime_seconds: Optional[int] = Field(
         None,
-        ge=1,
+        ge=0,
         le=86400,
-        description="Maximum continuous runtime (seconds, prevents hardware damage)",
+        description="Maximum continuous runtime in seconds (0 = no limit)",
     )
     cooldown_seconds: Optional[int] = Field(
         None,

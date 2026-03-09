@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, List, Optional, Tuple
 
-from sqlalchemy import and_, case, desc, func, select, update
+from sqlalchemy import String, and_, case, cast, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.notification import (
@@ -618,7 +618,7 @@ class NotificationRepository(BaseRepository[Notification]):
             update(Notification)
             .where(
                 and_(
-                    Notification.extra_data["esp_id"].astext == esp_id,
+                    cast(Notification.extra_data["esp_id"], String) == esp_id,
                     Notification.status.in_([AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]),
                 )
             )

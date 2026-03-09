@@ -291,7 +291,10 @@ class SequenceActionExecutor(BaseActionExecutor):
         rule_name = context.get("rule_name")
         steps = action.get("steps", [])
 
-        sequence_id = action.get("sequence_id") or f"seq-{rule_id}-{datetime.now(timezone.utc).timestamp():.0f}"
+        sequence_id = (
+            action.get("sequence_id")
+            or f"seq-{rule_id}-{datetime.now(timezone.utc).timestamp():.0f}"
+        )
 
         # Prüfe ob Sequence-ID bereits läuft
         if sequence_id in self._sequences and self._sequences[sequence_id].is_running:

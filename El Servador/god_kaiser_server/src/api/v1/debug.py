@@ -289,9 +289,7 @@ async def create_mock_esp(
                     f"split into {[s['sensor_type'] for s in sub_types]}"
                 )
             else:
-                expanded_sensor_configs.append(
-                    (sensor.gpio, sensor.sensor_type, sensor, False)
-                )
+                expanded_sensor_configs.append((sensor.gpio, sensor.sensor_type, sensor, False))
 
         for gpio, sensor_type, orig_sensor, is_multi_value in expanded_sensor_configs:
             # Per-subtype default for multi-value sensors (e.g., temp=22, humidity=55)
@@ -498,6 +496,23 @@ async def delete_mock_esp(
     # Check if mock exists in DB
     device = await esp_repo.get_mock_device(esp_id)
     if not device:
+        # Debug-logging to diagnose Delete-404 (NB-T09-04)
+        any_device = await esp_repo.get_by_device_id(esp_id, include_deleted=True)
+        if any_device and any_device.deleted_at is not None:
+            logger.warning(
+                "DELETE mock %s: device already soft-deleted at %s by %s",
+                esp_id,
+                any_device.deleted_at,
+                any_device.deleted_by,
+            )
+        elif any_device and any_device.hardware_type != "MOCK_ESP32":
+            logger.warning(
+                "DELETE mock %s: device exists but hardware_type=%s (not MOCK_ESP32)",
+                esp_id,
+                any_device.hardware_type,
+            )
+        else:
+            logger.warning("DELETE mock %s: device not found in DB at all", esp_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Mock ESP {esp_id} not found"
         )
@@ -877,7 +892,9 @@ async def add_sensor(
                     device.id, config.gpio, sensor_type
                 )
             if existing:
-                logger.debug(f"SensorConfig already exists: {esp_id} GPIO {config.gpio} {sensor_type}")
+                logger.debug(
+                    f"SensorConfig already exists: {esp_id} GPIO {config.gpio} {sensor_type}"
+                )
                 created_types.append(sensor_type)
                 continue
             try:
@@ -945,7 +962,9 @@ async def add_sensor(
                         "simulation": sim_params,
                     },
                 )
-                logger.debug(f"Created SensorConfig: {esp_id} GPIO {config.gpio} {config.sensor_type}")
+                logger.debug(
+                    f"Created SensorConfig: {esp_id} GPIO {config.gpio} {config.sensor_type}"
+                )
             except Exception as e:
                 await db.rollback()
                 logger.warning(f"Failed to create SensorConfig: {e}")
@@ -1128,8 +1147,17 @@ async def remove_sensor(
             await sensor_repo.delete(cfg.id)
             deleted_count = 1
     else:
-        # Delete ALL sensors on this GPIO
+        # Guard: Refuse mass-delete when multiple sensors share a GPIO (e.g. I2C bus on GPIO 0)
+        # Use DELETE /sensors/{esp_id}/{config_id} for targeted removal instead.
         all_on_gpio = await sensor_repo.get_all_by_esp_and_gpio(device.id, gpio)
+        if len(all_on_gpio) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"{len(all_on_gpio)} sensors on GPIO {gpio}. "
+                    f"Specify sensor_type query param or use DELETE /sensors/{{esp_id}}/{{config_id}}."
+                ),
+            )
         for cfg in all_on_gpio:
             await sensor_repo.delete(cfg.id)
             deleted_count += 1
@@ -1375,9 +1403,7 @@ async def add_actuator(
                     "subzone_id": config.subzone_id,
                 },
             )
-            logger.debug(
-                f"Created ActuatorConfig for {esp_id} GPIO {config.gpio}"
-            )
+            logger.debug(f"Created ActuatorConfig for {esp_id} GPIO {config.gpio}")
         except Exception as e:
             await db.rollback()
             await esp_repo.add_actuator_to_mock(esp_id, config.gpio, actuator_config)

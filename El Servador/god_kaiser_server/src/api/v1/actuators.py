@@ -416,6 +416,10 @@ async def create_or_update_actuator(
     Returns:
         Created/updated actuator config
     """
+    # Path params are authoritative — override body values for robustness
+    request.esp_id = esp_id
+    request.gpio = gpio
+
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
     sensor_repo = SensorRepository(db)

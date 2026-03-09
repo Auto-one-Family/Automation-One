@@ -186,10 +186,10 @@ class TestDeleteSensor:
     async def test_delete_sensor(
         self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice
     ):
-        """Test deleting a sensor."""
+        """Test deleting a sensor by config_id (UUID)."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.delete(
-                f"/api/v1/sensors/{test_esp.device_id}/{test_sensor.gpio}",
+                f"/api/v1/sensors/{test_esp.device_id}/{test_sensor.id}",
                 headers=auth_headers,
             )
 
@@ -233,10 +233,10 @@ class TestDeleteSensor:
         assert gpio in before[0].assigned_gpios
         assert 35 in before[0].assigned_gpios
 
-        # Delete sensor via API
+        # Delete sensor via API (by config_id UUID)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.delete(
-                f"/api/v1/sensors/{esp_id}/{gpio}",
+                f"/api/v1/sensors/{esp_id}/{test_sensor.id}",
                 headers=auth_headers,
             )
 
@@ -345,7 +345,7 @@ class TestSensorAuth:
         """Test deleting sensor without authentication."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.delete(
-                f"/api/v1/sensors/{test_esp.device_id}/{test_sensor.gpio}",
+                f"/api/v1/sensors/{test_esp.device_id}/{test_sensor.id}",
             )
 
         assert response.status_code == 401

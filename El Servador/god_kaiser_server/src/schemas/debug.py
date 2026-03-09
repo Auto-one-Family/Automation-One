@@ -66,7 +66,8 @@ class MockSensorConfig(BaseModel):
     name: Optional[str] = Field(None, description="Human-readable sensor name")
     subzone_id: Optional[str] = Field(None, description="Subzone assignment for this sensor")
     raw_value: Optional[float] = Field(
-        None, description="Base sensor value (used as base_value for simulation). None = use plausible physical default."
+        None,
+        description="Base sensor value (used as base_value for simulation). None = use plausible physical default.",
     )
     unit: str = Field("", description="Unit of measurement")
     quality: QualityLevel = Field(QualityLevel.GOOD, description="Data quality")

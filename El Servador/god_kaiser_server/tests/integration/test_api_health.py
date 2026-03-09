@@ -122,6 +122,7 @@ class TestPrometheusMetrics:
 
     @pytest.mark.asyncio
     async def test_prometheus_metrics(self):
+        pytest.importorskip("prometheus_client", reason="prometheus_client not installed")
         """Test Prometheus metrics export."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/health/metrics")

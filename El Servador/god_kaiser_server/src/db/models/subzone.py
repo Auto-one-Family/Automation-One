@@ -125,7 +125,7 @@ class SubzoneConfig(Base, TimestampMixin):
 
     # Metadata
     last_ack_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
         doc="Last ACK timestamp from ESP",
     )

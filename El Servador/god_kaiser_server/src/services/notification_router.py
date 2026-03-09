@@ -50,11 +50,23 @@ class NotificationRouter:
 
     All notifications flow through route() which handles:
     - DB persistence
-    - Deduplication (60s window)
+    - Deduplication (configurable window per source)
     - Cascade suppression (parent_notification_id)
     - WebSocket broadcast
     - Email delivery (severity-based)
     """
+
+    # Alert-Storm fix: configurable dedup windows per source (seconds).
+    # Error sources get longer windows to prevent alert storms.
+    # ISA-18.2 target: < 6 alerts/hour/operator.
+    DEDUP_WINDOWS: dict[str, int] = {
+        "mqtt_handler": 300,  # 5 min — MQTT errors are repetitive
+        "sensor_threshold": 120,  # 2 min — threshold alerts
+        "device_event": 300,  # 5 min — device errors
+        "logic_engine": 120,  # 2 min — rule evaluation
+        "system": 300,  # 5 min — system errors
+    }
+    DEDUP_WINDOW_DEFAULT: int = 60  # 1 min default
 
     def __init__(
         self,
@@ -107,13 +119,14 @@ class NotificationRouter:
                 increment_notification_deduplicated()
                 return None
         else:
-            # Fallback: title-based dedup (60s window)
+            # Fallback: title-based dedup (configurable window per source)
+            window = self.DEDUP_WINDOWS.get(notification.source, self.DEDUP_WINDOW_DEFAULT)
             is_duplicate = await self.notification_repo.check_duplicate(
                 user_id=user_id,
                 source=notification.source,
                 category=notification.category,
                 title=notification.title,
-                window_seconds=60,
+                window_seconds=window,
             )
             if is_duplicate:
                 logger.debug(

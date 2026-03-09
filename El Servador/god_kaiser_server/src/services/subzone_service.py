@@ -610,7 +610,10 @@ class SubzoneService:
             merged = current | set(assigned_gpios)
             final_gpios = sorted(merged)
 
-            existing.subzone_name = subzone_name
+            # BUG-09: Only overwrite subzone_name if a non-empty name is provided.
+            # Prevents clearing existing names when caller omits the parameter.
+            if subzone_name and subzone_name.strip():
+                existing.subzone_name = subzone_name
             existing.parent_zone_id = parent_zone_id
             existing.assigned_gpios = final_gpios
             existing.safe_mode_active = safe_mode_active
@@ -630,11 +633,21 @@ class SubzoneService:
                             g for g in other.assigned_gpios if g not in gpios_to_remove
                         ]
         else:
+            # BUG-09: Auto-generate subzone name if not provided
+            effective_name = subzone_name
+            if not effective_name or not effective_name.strip():
+                # Count existing subzones for this ESP to generate sequential name
+                count_result = await self.session.execute(
+                    select(SubzoneConfig).where(SubzoneConfig.esp_id == device_id)
+                )
+                existing_count = len(list(count_result.scalars().all()))
+                effective_name = f"Subzone {existing_count + 1}"
+
             # Create new subzone
             new_config = SubzoneConfig(
                 esp_id=device_id,
                 subzone_id=subzone_id,
-                subzone_name=subzone_name,
+                subzone_name=effective_name,
                 parent_zone_id=parent_zone_id,
                 assigned_gpios=assigned_gpios,
                 safe_mode_active=safe_mode_active,

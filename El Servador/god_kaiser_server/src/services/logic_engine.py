@@ -381,8 +381,8 @@ class LogicEngine:
                 batch_locks=batch_locks,
             )
 
-            # Update last_triggered timestamp (timezone-naive for DB column)
-            rule.last_triggered = datetime.now(timezone.utc).replace(tzinfo=None)
+            # Update last_triggered timestamp
+            rule.last_triggered = datetime.now(timezone.utc)
 
             # Log successful execution
             execution_time_ms = int((time.time() - start_time) * 1000)

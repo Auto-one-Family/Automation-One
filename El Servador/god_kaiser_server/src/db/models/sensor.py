@@ -206,7 +206,7 @@ class SensorConfig(Base, TimestampMixin):
     )
 
     last_manual_request: Mapped[Optional[datetime]] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
         doc="Timestamp of last manual measurement request (for on_demand mode)",
     )
@@ -353,7 +353,7 @@ class SensorData(Base):
 
     # Timestamp (CRITICAL for Time-Series!)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         index=True,
         default=_utc_now,

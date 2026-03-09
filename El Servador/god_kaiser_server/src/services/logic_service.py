@@ -329,7 +329,9 @@ class LogicService:
                         # Convert to datetime for evaluation
                         from datetime import datetime, timezone
 
-                        current_time = datetime.combine(datetime.now(timezone.utc).date(), current_time)
+                        current_time = datetime.combine(
+                            datetime.now(timezone.utc).date(), current_time
+                        )
                     except (ValueError, IndexError):
                         pass
 

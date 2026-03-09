@@ -67,9 +67,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def soft_delete(
-        self, device_id: str, deleted_by: str
-    ) -> Optional[ESPDevice]:
+    async def soft_delete(self, device_id: str, deleted_by: str) -> Optional[ESPDevice]:
         """
         Soft-delete a device by setting deleted_at timestamp.
 
@@ -102,9 +100,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Returns:
             List of ESPDevice instances
         """
-        stmt = select(ESPDevice).where(
-            ESPDevice.zone_id == zone_id, self._not_deleted()
-        )
+        stmt = select(ESPDevice).where(ESPDevice.zone_id == zone_id, self._not_deleted())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -136,9 +132,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Returns:
             List of ESPDevice instances
         """
-        stmt = select(ESPDevice).where(
-            ESPDevice.kaiser_id == kaiser_id, self._not_deleted()
-        )
+        stmt = select(ESPDevice).where(ESPDevice.kaiser_id == kaiser_id, self._not_deleted())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -152,9 +146,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Returns:
             List of zone master ESPDevice instances
         """
-        stmt = select(ESPDevice).where(
-            ESPDevice.is_zone_master == True, self._not_deleted()
-        )
+        stmt = select(ESPDevice).where(ESPDevice.is_zone_master == True, self._not_deleted())
         if zone_id:
             stmt = stmt.where(ESPDevice.zone_id == zone_id)
         result = await self.session.execute(stmt)
@@ -167,9 +159,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Returns:
             List of online ESPDevice instances
         """
-        stmt = select(ESPDevice).where(
-            ESPDevice.status == "online", self._not_deleted()
-        )
+        stmt = select(ESPDevice).where(ESPDevice.status == "online", self._not_deleted())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -183,9 +173,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Returns:
             List of ESPDevice instances
         """
-        stmt = select(ESPDevice).where(
-            ESPDevice.status == status, self._not_deleted()
-        )
+        stmt = select(ESPDevice).where(ESPDevice.status == status, self._not_deleted())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -289,9 +277,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
         Returns:
             List of Mock ESPDevice instances
         """
-        stmt = select(ESPDevice).where(
-            ESPDevice.hardware_type == "MOCK_ESP32", self._not_deleted()
-        )
+        stmt = select(ESPDevice).where(ESPDevice.hardware_type == "MOCK_ESP32", self._not_deleted())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -724,10 +710,15 @@ class ESPRepository(BaseRepository[ESPDevice]):
             return False
 
         sim_config = device.device_metadata.get("simulation_config", {})
-        # MULTI-VALUE FIX: Keys are "{gpio}_{sensor_type}" (e.g., "0_SHT31"),
-        # not just str(gpio). Check for both formats for backward compat.
+        # Keys are now "cfg_{uuid}" format. Match by entry's gpio field,
+        # with backward compat for legacy "{gpio}" and "{gpio}_{type}" keys.
         sensors = sim_config.get("sensors", {})
-        sensor_exists = any(k == str(gpio) or k.startswith(f"{gpio}_") for k in sensors)
+        sensor_exists = any(
+            k == str(gpio)
+            or k.startswith(f"{gpio}_")
+            or (isinstance(v, dict) and v.get("gpio") == gpio)
+            for k, v in sensors.items()
+        )
         if not sensor_exists:
             return False
 
@@ -791,12 +782,8 @@ class ESPRepository(BaseRepository[ESPDevice]):
         from ..models.sensor import SensorConfig
         from ..models.actuator import ActuatorConfig
 
-        await self.session.execute(
-            delete(SensorConfig).where(SensorConfig.esp_id == device.id)
-        )
-        await self.session.execute(
-            delete(ActuatorConfig).where(ActuatorConfig.esp_id == device.id)
-        )
+        await self.session.execute(delete(SensorConfig).where(SensorConfig.esp_id == device.id))
+        await self.session.execute(delete(ActuatorConfig).where(ActuatorConfig.esp_id == device.id))
 
         device.deleted_at = datetime.now(timezone.utc)
         device.deleted_by = deleted_by
@@ -879,8 +866,14 @@ class ESPRepository(BaseRepository[ESPDevice]):
 
         # Simulation-specific param keys (NOT in SensorConfig model)
         SIM_PARAMS = {
-            "base_value", "variation_pattern", "variation_range",
-            "min_value", "max_value", "interval_seconds", "quality", "raw_mode",
+            "base_value",
+            "variation_pattern",
+            "variation_range",
+            "min_value",
+            "max_value",
+            "interval_seconds",
+            "quality",
+            "raw_mode",
         }
 
         new_sensors: Dict[str, dict] = {}

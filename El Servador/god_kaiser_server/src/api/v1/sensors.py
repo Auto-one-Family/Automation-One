@@ -365,6 +365,9 @@ async def get_sensor_runtime(
     if last_maintenance and interval_days:
         try:
             last_dt = datetime.fromisoformat(last_maintenance)
+            # Ensure timezone-aware for comparison with utcnow
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
             next_dt = last_dt + timedelta(days=interval_days)
             next_maintenance = next_dt.isoformat()
             maintenance_overdue = next_dt < datetime.now(timezone.utc)
@@ -384,7 +387,64 @@ async def get_sensor_runtime(
 
 
 # =============================================================================
-# Get Sensor
+# Get Sensor by config_id (UUID) — always unambiguous
+# =============================================================================
+
+
+@router.get(
+    "/config/{config_id}",
+    response_model=SensorConfigResponse,
+    responses={
+        200: {"description": "Sensor config found"},
+        404: {"description": "Sensor config not found"},
+    },
+    summary="Get sensor config by config_id",
+    description="Get sensor configuration by its unique UUID. "
+    "Always unambiguous, even for multi-value sensors (e.g. 2x SHT31).",
+)
+async def get_sensor_by_config_id(
+    config_id: uuid.UUID,
+    db: DBSession,
+    current_user: ActiveUser,
+) -> SensorConfigResponse:
+    """Get sensor configuration by its unique database UUID."""
+    sensor_repo = SensorRepository(db)
+    subzone_repo = SubzoneRepository(db)
+    esp_repo = ESPRepository(db)
+
+    sensor = await sensor_repo.get_by_id(config_id)
+    if not sensor:
+        raise SensorNotFoundException(str(config_id))
+
+    # Resolve esp_device_id for response
+    esp_device = await esp_repo.get_by_id(sensor.esp_id)
+    esp_device_id = esp_device.device_id if esp_device else None
+
+    # Resolve subzone
+    subzone_id_val = None
+    if esp_device_id and sensor.gpio is not None:
+        subzone = await subzone_repo.get_subzone_by_gpio(esp_device_id, sensor.gpio)
+        subzone_id_val = subzone.subzone_id if subzone else None
+
+    # Latest reading
+    latest = await sensor_repo.get_latest_reading(
+        sensor.esp_id, sensor.gpio, sensor_type=sensor.sensor_type
+    )
+
+    response = _model_to_response(sensor, esp_device_id, subzone_id=subzone_id_val)
+    response.latest_value = (
+        (latest.processed_value if latest.processed_value is not None else latest.raw_value)
+        if latest
+        else None
+    )
+    response.latest_quality = latest.quality if latest else None
+    response.latest_timestamp = latest.timestamp if latest else None
+
+    return response
+
+
+# =============================================================================
+# Get Sensor by ESP + GPIO
 # =============================================================================
 
 
@@ -505,6 +565,10 @@ async def create_or_update_sensor(
     Returns:
         Created/updated sensor config
     """
+    # Path params are authoritative — override body values for robustness
+    request.esp_id = esp_id
+    request.gpio = gpio
+
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
     actuator_repo = ActuatorRepository(db)
@@ -933,23 +997,32 @@ async def delete_sensor(
     # Lookup by primary key — always unique, no MultipleResultsFound
     sensor = await sensor_repo.get_by_id(config_id)
     if not sensor or sensor.esp_id != esp_device.id:
-        raise SensorNotFoundException(esp_id, 0)
+        raise SensorNotFoundException(esp_id, config_id)
 
     gpio = sensor.gpio if sensor.gpio is not None else 0
+
+    # Save sensor_type before delete (ORM object stays accessible but be explicit)
+    deleted_sensor_type = sensor.sensor_type
 
     # 1. Delete sensor config (sensor_data rows are NOT cascade-deleted)
     await sensor_repo.delete(sensor.id)
 
-    # 2. Subzone cleanup: remove GPIO from all subzones (Phase 3)
-    try:
-        subzone_service = SubzoneService(
-            esp_repo=esp_repo, session=db, publisher=get_mqtt_publisher()
-        )
-        await subzone_service.remove_gpio_from_all_subzones(esp_id, gpio)
-    except Exception as e:
-        logger.debug(f"Subzone cleanup for deleted sensor: {e}")
+    # 2. Check if other sensors remain on the same GPIO (multi-value support)
+    #    SHT31 temp+humidity share GPIO, multiple DS18B20 share OneWire bus pin.
+    #    Only clean up GPIO-level resources if NO sensors remain on this GPIO.
+    remaining_on_gpio = await sensor_repo.get_all_by_esp_and_gpio(esp_device.id, gpio)
 
-    # 3. Rebuild simulation_config (removes deleted sensor from mock cache)
+    # 3. Subzone cleanup: remove GPIO from subzones ONLY if no sensors remain
+    if not remaining_on_gpio:
+        try:
+            subzone_service = SubzoneService(
+                esp_repo=esp_repo, session=db, publisher=get_mqtt_publisher()
+            )
+            await subzone_service.remove_gpio_from_all_subzones(esp_id, gpio)
+        except Exception as e:
+            logger.debug(f"Subzone cleanup for deleted sensor: {e}")
+
+    # 4. Rebuild simulation_config (removes deleted sensor from mock cache)
     try:
         remaining_cfgs = await sensor_repo.get_by_esp(esp_device.id)
         await esp_repo.rebuild_simulation_config(esp_device, remaining_cfgs)
@@ -960,28 +1033,30 @@ async def delete_sensor(
 
     logger.info(
         f"Sensor deleted: {esp_id} config_id={config_id} GPIO {gpio} "
-        f"by {current_user.username}"
+        f"type={deleted_sensor_type} by {current_user.username}"
     )
 
-    # 4. Remove APScheduler job (Phase 2H)
-    try:
-        scheduler_service: SensorSchedulerService = get_sensor_scheduler_service(db)
-        await scheduler_service.remove_job(esp_id, gpio)
-    except Exception as e:
-        logger.debug(f"Schedule job removal for deleted sensor: {e}")
+    # 5. Remove APScheduler job ONLY if no sensors remain on this GPIO
+    #    Job ID is per-GPIO (esp_id + gpio), so removing it would stop
+    #    scheduled measurements for ALL sensors on the same GPIO.
+    if not remaining_on_gpio:
+        try:
+            scheduler_service: SensorSchedulerService = get_sensor_scheduler_service(db)
+            await scheduler_service.remove_job(esp_id, gpio)
+        except Exception as e:
+            logger.debug(f"Schedule job removal for deleted sensor: {e}")
 
-    # 5. Stop simulation sensor job for mock devices
+    # 6. Stop simulation sensor job for mock devices (targeted by sensor_type)
     if esp_device.hardware_type == "MOCK_ESP32":
         try:
             from ..deps import get_simulation_scheduler
 
             sim_scheduler = get_simulation_scheduler()
-            job_id = f"mock_{esp_id}_sensor_cfg_{config_id}"
-            sim_scheduler._scheduler.remove_job(job_id)
+            sim_scheduler.remove_sensor_job(esp_id, gpio, deleted_sensor_type)
         except Exception as e:
             logger.debug(f"Simulation job removal for deleted sensor: {e}")
 
-    # 6. Publish updated config to ESP32 via MQTT (sensor removed from payload)
+    # 7. Publish updated config to ESP32 via MQTT (sensor removed from payload)
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
         combined_config = await config_builder.build_combined_config(esp_id, db)
@@ -996,7 +1071,7 @@ async def delete_sensor(
     except Exception as e:
         logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
 
-    # 7. WebSocket event: Frontend removes ghost sensor from store
+    # 8. WebSocket event: Frontend removes ghost sensor from store
     try:
         from ...websocket.manager import WebSocketManager
 
@@ -1063,16 +1138,15 @@ async def query_sensor_data(
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
 
-    # Default time range to last 24 hours
-    # Use naive datetimes (no tzinfo) to match PostgreSQL TIMESTAMP WITHOUT TIME ZONE
+    # Default time range to last 24 hours (timezone-aware UTC for TIMESTAMPTZ)
     if not start_time:
-        start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
-    else:
-        start_time = start_time.replace(tzinfo=None) if start_time.tzinfo else start_time
+        start_time = datetime.now(timezone.utc) - timedelta(hours=24)
+    elif start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=timezone.utc)
     if not end_time:
-        end_time = datetime.now(timezone.utc).replace(tzinfo=None)
-    else:
-        end_time = end_time.replace(tzinfo=None) if end_time.tzinfo else end_time
+        end_time = datetime.now(timezone.utc)
+    elif end_time.tzinfo is None:
+        end_time = end_time.replace(tzinfo=timezone.utc)
 
     # Get ESP device ID if specified
     esp_db_id = None
@@ -1250,6 +1324,9 @@ async def get_sensor_stats(
     current_user: ActiveUser,
     start_time: Annotated[Optional[datetime], Query(description="Start of time range")] = None,
     end_time: Annotated[Optional[datetime], Query(description="End of time range")] = None,
+    sensor_type: Annotated[
+        Optional[str], Query(description="Sensor type filter for multi-value sensors")
+    ] = None,
 ) -> SensorStatsResponse:
     """
     Get sensor statistics.
@@ -1261,6 +1338,7 @@ async def get_sensor_stats(
         current_user: Authenticated user
         start_time: Start of time range
         end_time: End of time range
+        sensor_type: Optional sensor type filter (e.g. sht31_temp, sht31_humidity)
 
     Returns:
         Statistical summary
@@ -1272,26 +1350,41 @@ async def get_sensor_stats(
     if not esp_device:
         raise ESPNotFoundError(esp_id)
 
-    sensor = await sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
+    # Use type-specific lookup when sensor_type is provided
+    if sensor_type:
+        sensor = await sensor_repo.get_by_esp_gpio_and_type(esp_device.id, gpio, sensor_type)
+    else:
+        configs = await sensor_repo.get_all_by_esp_and_gpio(esp_device.id, gpio)
+        if len(configs) > 1:
+            logger.warning(
+                "get_sensor_stats without sensor_type for multi-value GPIO: "
+                "esp=%s gpio=%s (%d configs). Using first. "
+                "Pass ?sensor_type= for accurate stats.",
+                esp_id,
+                gpio,
+                len(configs),
+            )
+        sensor = configs[0] if configs else None
     if not sensor:
         raise SensorNotFoundException(esp_id, gpio)
 
-    # Default time range (naive datetimes for TIMESTAMP WITHOUT TIME ZONE)
+    # Default time range (timezone-aware UTC for TIMESTAMPTZ)
     if not start_time:
-        start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
-    else:
-        start_time = start_time.replace(tzinfo=None) if start_time.tzinfo else start_time
+        start_time = datetime.now(timezone.utc) - timedelta(hours=24)
+    elif start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=timezone.utc)
     if not end_time:
-        end_time = datetime.now(timezone.utc).replace(tzinfo=None)
-    else:
-        end_time = end_time.replace(tzinfo=None) if end_time.tzinfo else end_time
+        end_time = datetime.now(timezone.utc)
+    elif end_time.tzinfo is None:
+        end_time = end_time.replace(tzinfo=timezone.utc)
 
-    # Get statistics
+    # Get statistics filtered by sensor_type for multi-value sensors
     stats = await sensor_repo.get_stats(
         esp_id=esp_device.id,
         gpio=gpio,
         start_time=start_time,
         end_time=end_time,
+        sensor_type=sensor.sensor_type,
     )
 
     return SensorStatsResponse(

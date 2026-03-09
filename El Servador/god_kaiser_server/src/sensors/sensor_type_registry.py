@@ -224,6 +224,51 @@ def normalize_sensor_type(sensor_type: str) -> str:
     return normalized
 
 
+def get_unit_for_sensor_type(sensor_type: str) -> Optional[str]:
+    """
+    Get the canonical unit for a sensor type from the registry.
+
+    Looks up SENSOR_TYPE_MOCK_DEFAULTS and MULTI_VALUE_SENSORS for the unit.
+
+    Args:
+        sensor_type: Normalized sensor type (e.g., "ds18b20", "sht31_temp")
+
+    Returns:
+        Unit string (e.g., "°C", "%RH") or None if unknown
+    """
+    key = sensor_type.lower()
+    defaults = SENSOR_TYPE_MOCK_DEFAULTS.get(key)
+    if defaults and "unit" in defaults:
+        return str(defaults["unit"])
+    return None
+
+
+def sanitize_unit_encoding(unit: str) -> str:
+    """
+    Fix Latin-1 → UTF-8 double-encoding in unit strings.
+
+    ESP32 firmware sends degree sign as Latin-1 byte 0xB0. When interpreted
+    as UTF-8, this produces Mojibake (e.g., "Â°C" instead of "°C").
+
+    Args:
+        unit: Unit string potentially with encoding issues
+
+    Returns:
+        Correctly encoded UTF-8 unit string
+    """
+    if not unit:
+        return unit
+    try:
+        # Try to detect double-encoding: if re-encoding as Latin-1 then
+        # decoding as UTF-8 produces a valid shorter string, it was double-encoded
+        fixed = unit.encode("latin-1").decode("utf-8")
+        if len(fixed) < len(unit):
+            return fixed
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        pass  # Already correct UTF-8 or non-Latin content
+    return unit
+
+
 def get_multi_value_sensor_def(device_type: str) -> Optional[MultiValueSensorDefinition]:
     """
     Get multi-value sensor definition by device type.
@@ -327,12 +372,14 @@ def expand_multi_value(
     for value_def in definition["values"]:
         name_suffix = value_def["name"]
         sensor_name = f"{user_name} {name_suffix}" if user_name else value_def["sensor_type"]
-        configs.append({
-            "sensor_type": value_def["sensor_type"],
-            "name": sensor_name,
-            "unit": value_def["unit"],
-            **common_fields,
-        })
+        configs.append(
+            {
+                "sensor_type": value_def["sensor_type"],
+                "name": sensor_name,
+                "unit": value_def["unit"],
+                **common_fields,
+            }
+        )
     return configs
 
 

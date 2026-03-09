@@ -122,7 +122,7 @@ class CrossESPLogic(Base, TimestampMixin):
     )
 
     last_triggered: Mapped[Optional[datetime]] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
         doc="Timestamp of last execution",
     )

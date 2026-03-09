@@ -113,6 +113,8 @@ class SimulationScheduler:
         self._runtimes: Dict[str, MockESPRuntime] = {}
         self._actuator_handler: Optional["MockActuatorHandler"] = None
         self._subscriptions_registered: bool = False
+        # Track sensors that already warned about missing config (suppress repeated warnings)
+        self._warned_missing_sensors: set[str] = set()
 
     def set_mqtt_callback(self, callback: Callable) -> None:
         """Setzt den MQTT Publish Callback."""
@@ -520,14 +522,10 @@ class SimulationScheduler:
 
         for esp_id in orphaned:
             await self.stop_mock(esp_id)
-            logger.warning(
-                f"Removed orphaned mock runtime: {esp_id} (not found in database)"
-            )
+            logger.warning(f"Removed orphaned mock runtime: {esp_id} (not found in database)")
 
         if orphaned:
-            logger.info(
-                f"Orphaned runtime cleanup: removed {len(orphaned)} stale mocks"
-            )
+            logger.info(f"Orphaned runtime cleanup: removed {len(orphaned)} stale mocks")
 
         return len(orphaned)
 
@@ -806,7 +804,12 @@ class SimulationScheduler:
                 device = await esp_repo.get_by_device_id(esp_id)
 
                 if not device or not device.device_metadata:
-                    logger.warning(f"[{esp_id}] No device metadata for sensor {sensor_ident}")
+                    warn_key = f"{esp_id}:{sensor_ident}:no_device"
+                    if warn_key not in self._warned_missing_sensors:
+                        self._warned_missing_sensors.add(warn_key)
+                        logger.warning(
+                            f"[{esp_id}] No device metadata for sensor {sensor_ident} — suppressing further warnings"
+                        )
                     return
 
                 sim_config = device.device_metadata.get("simulation_config", {})
@@ -829,7 +832,16 @@ class SimulationScheduler:
                     sensor_config = sensors.get(f"{gpio}_{sensor_type}") or sensors.get(str(gpio))
 
                 if not sensor_config:
-                    logger.warning(f"[{esp_id}] Sensor {sensor_ident} not in config")
+                    warn_key = f"{esp_id}:{sensor_ident}:not_in_config"
+                    if warn_key not in self._warned_missing_sensors:
+                        self._warned_missing_sensors.add(warn_key)
+                        logger.warning(
+                            f"[{esp_id}] Sensor {sensor_ident} not in config — removing orphaned job"
+                        )
+                    # Auto-remove the orphaned sensor job
+                    scheduler = get_central_scheduler()
+                    job_id = f"mock_{esp_id}_sensor_{gpio}_{sensor_type}"
+                    scheduler.remove_job(job_id)
                     return
 
                 # Berechne Sensor-Wert
@@ -1178,7 +1190,7 @@ class SimulationScheduler:
         from ...sensors.sensor_type_registry import expand_multi_value, is_multi_value_sensor
 
         sensor_repo = SensorRepository(session)
-        for sensor_data in (sensors or []):
+        for sensor_data in sensors or []:
             gpio = sensor_data.get("gpio", 0)
             raw_sensor_type = sensor_data.get("sensor_type", "GENERIC")
             base_value = sensor_data.get("base_value", sensor_data.get("raw_value", 0.0))

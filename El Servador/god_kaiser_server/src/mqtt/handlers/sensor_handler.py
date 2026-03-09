@@ -232,8 +232,17 @@ class SensorDataHandler:
                     # raw_mode defaults to True (ESP32 always works in raw mode)
                     raw_mode = payload.get("raw_mode", True)
                     value = payload.get("value", 0.0)
-                    unit = payload.get("unit", "")
                     quality = payload.get("quality", "unknown")
+
+                    # Unit resolution: registry > payload (avoids Latin-1/UTF-8 encoding issues)
+                    from ...sensors.sensor_type_registry import (
+                        get_unit_for_sensor_type,
+                        sanitize_unit_encoding,
+                    )
+
+                    registry_unit = get_unit_for_sensor_type(sensor_type)
+                    payload_unit = payload.get("unit", "")
+                    unit = registry_unit or sanitize_unit_encoding(payload_unit)
 
                     # Step 8: Determine processing mode
                     processing_mode = "raw"
@@ -287,6 +296,11 @@ class SensorDataHandler:
                         processing_mode = "local"
                         processed_value = value
 
+                    # Fallback: if no processing branch produced a value,
+                    # use raw_value so processed_value is never NULL in DB
+                    if processed_value is None:
+                        processed_value = raw_value
+
                     # Step 8b: Physical range validation (post-processing)
                     # Check processed value against sensor physical limits.
                     # Values outside datasheet range get quality="critical" but are
@@ -324,17 +338,20 @@ class SensorDataHandler:
                     )
 
                     # Step 9: Save data to database
-                    # Convert ESP32 timestamp (millis since boot) to naive UTC datetime
-                    # PostgreSQL TIMESTAMP WITHOUT TIME ZONE requires naive datetime
+                    # Convert ESP32 timestamp to UTC datetime
+                    # BUG-05 fix: ts<=0 (Wokwi without NTP) → use server timestamp
                     esp32_timestamp_raw = payload.get("ts", payload.get("timestamp"))
-                    esp32_timestamp = datetime.fromtimestamp(
-                        (
-                            esp32_timestamp_raw / 1000
-                            if esp32_timestamp_raw > 1e10
-                            else esp32_timestamp_raw
-                        ),
-                        tz=timezone.utc,
-                    ).replace(tzinfo=None)
+                    if esp32_timestamp_raw is None or esp32_timestamp_raw <= 0:
+                        esp32_timestamp = datetime.now(timezone.utc)
+                    else:
+                        esp32_timestamp = datetime.fromtimestamp(
+                            (
+                                esp32_timestamp_raw / 1000
+                                if esp32_timestamp_raw > 1e10
+                                else esp32_timestamp_raw
+                            ),
+                            tz=timezone.utc,
+                        )
 
                     sensor_data = await sensor_repo.save_data(
                         esp_id=esp_device.id,
@@ -719,12 +736,21 @@ class SensorDataHandler:
 
         # Type validation
         ts_value = payload.get("ts", payload.get("timestamp"))
-        if not isinstance(ts_value, int):
+        if not isinstance(ts_value, (int, float)):
             return {
                 "valid": False,
-                "error": "Field 'ts/timestamp' must be integer (Unix timestamp)",
+                "error": "Field 'ts/timestamp' must be numeric (Unix timestamp)",
                 "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
             }
+
+        # BUG-05 fix: ts<=0 is valid (Wokwi without NTP) — server will use its own timestamp
+        # Log warning but do NOT reject the payload
+        if ts_value <= 0:
+            logger.warning(
+                "Payload ts<=0 (value=%s) from esp_id=%s — will use server timestamp",
+                ts_value,
+                payload.get("esp_id", "unknown"),
+            )
 
         if not isinstance(payload["gpio"], int):
             return {

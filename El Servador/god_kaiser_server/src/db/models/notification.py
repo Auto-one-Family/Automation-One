@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base, TimestampMixin
@@ -137,10 +137,10 @@ class Notification(Base, TimestampMixin):
     )
 
     extra_data: Mapped[dict] = mapped_column(
-        JSON,
+        JSON().with_variant(JSONB(), "postgresql"),
         default=dict,
         nullable=False,
-        doc="JSON context (esp_id, sensor_type, rule_id, grafana_uid, etc.)",
+        doc="JSONB on PostgreSQL (supports .astext), JSON on SQLite for tests",
     )
 
     # Origin

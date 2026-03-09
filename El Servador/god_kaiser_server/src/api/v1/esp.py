@@ -661,9 +661,7 @@ async def delete_device(
     await esp_repo.soft_delete(esp_id, deleted_by=current_user.username)
     await db.commit()
 
-    logger.warning(
-        f"ESP device soft-deleted: {esp_id} by {current_user.username}"
-    )
+    logger.warning(f"ESP device soft-deleted: {esp_id} by {current_user.username}")
 
 
 # =============================================================================

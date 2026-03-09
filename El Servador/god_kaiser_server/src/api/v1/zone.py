@@ -31,7 +31,14 @@ from ...core.exceptions import ESPNotFoundError
 from ...core.logging_config import get_logger
 from ...db.repositories import ESPRepository
 from ...schemas.monitor import ZoneMonitorData
-from ...schemas.zone import ZoneAssignRequest, ZoneAssignResponse, ZoneInfo, ZoneListEntry, ZoneListResponse, ZoneRemoveResponse
+from ...schemas.zone import (
+    ZoneAssignRequest,
+    ZoneAssignResponse,
+    ZoneInfo,
+    ZoneListEntry,
+    ZoneListResponse,
+    ZoneRemoveResponse,
+)
 from ...services.monitor_data_service import MonitorDataService
 from ...services.zone_service import ZoneService
 from ..deps import DBSession, ActiveUser, OperatorUser
@@ -219,11 +226,13 @@ async def list_zones(
     # 1. Get zones from devices (with counts)
     zone_map: dict[str, ZoneListEntry] = {}
 
-    all_devices_stmt = sa_select(ESPDevice).where(
-        ESPDevice.zone_id.isnot(None)
-    ).options(
-        selectinload(ESPDevice.sensors),
-        selectinload(ESPDevice.actuators),
+    all_devices_stmt = (
+        sa_select(ESPDevice)
+        .where(ESPDevice.zone_id.isnot(None))
+        .options(
+            selectinload(ESPDevice.sensors),
+            selectinload(ESPDevice.actuators),
+        )
     )
     result = await db.execute(all_devices_stmt)
     all_devices = result.scalars().all()

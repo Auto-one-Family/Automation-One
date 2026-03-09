@@ -363,15 +363,32 @@ class ConfigHandler:
                     )
 
                     if failure_type == "sensor":
-                        sensor = await sensor_repo.get_by_esp_and_gpio(esp.id, gpio)
-                        if sensor:
-                            await sensor_repo.update(
-                                sensor.id,
-                                config_status="failed",
-                                config_error=error_name,
-                                config_error_detail=error_detail[:200] if error_detail else None,
+                        # Use sensor_type from failure for multi-value disambiguation
+                        failure_sensor_type = failure.get("sensor_type")
+                        if failure_sensor_type:
+                            sensor = await sensor_repo.get_by_esp_gpio_and_type(
+                                esp.id, gpio, failure_sensor_type
                             )
-                            logger.debug(f"Updated sensor config_status=failed for GPIO {gpio}")
+                            sensors_to_update = [sensor] if sensor else []
+                        else:
+                            # No sensor_type in failure: update ALL sensors on this GPIO
+                            sensors_to_update = await sensor_repo.get_all_by_esp_and_gpio(
+                                esp.id, gpio
+                            )
+                        if sensors_to_update:
+                            for sensor in sensors_to_update:
+                                await sensor_repo.update(
+                                    sensor.id,
+                                    config_status="failed",
+                                    config_error=error_name,
+                                    config_error_detail=(
+                                        error_detail[:200] if error_detail else None
+                                    ),
+                                )
+                            logger.debug(
+                                f"Updated {len(sensors_to_update)} sensor config_status=failed "
+                                f"for GPIO {gpio}"
+                            )
                         else:
                             logger.warning(f"Sensor not found for ESP {esp_id} GPIO {gpio}")
 

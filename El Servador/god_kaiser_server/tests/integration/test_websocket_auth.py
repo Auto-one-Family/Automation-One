@@ -7,8 +7,6 @@ Tests WebSocket authentication and authorization for real-time updates.
 import pytest
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession
-from websockets import connect
-from websockets.exceptions import ConnectionClosedError
 
 from src.core.security import create_access_token
 from src.db.models.user import User

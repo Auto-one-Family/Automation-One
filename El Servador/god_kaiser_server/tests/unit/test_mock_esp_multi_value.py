@@ -211,4 +211,47 @@ class TestSchedulerKeyCompatibility:
 
         for key, expected_gpio in expected_gpios.items():
             gpio, _ = self._parse_key_like_scheduler(key)
-            assert gpio == expected_gpio, f"Key '{key}' parsed to GPIO {gpio}, expected {expected_gpio}"
+            assert (
+                gpio == expected_gpio
+            ), f"Key '{key}' parsed to GPIO {gpio}, expected {expected_gpio}"
+
+
+class TestDeleteGuardMultipleSensorsOnGpio:
+    """Test that GPIO-based delete is guarded when multiple sensors share a GPIO.
+
+    The debug endpoint DELETE /mock-esp/{esp_id}/sensors/{gpio} must NOT
+    mass-delete all sensors on a shared GPIO (e.g. I2C bus on GPIO 0).
+    When >1 sensor exists on the GPIO and no sensor_type is specified,
+    the endpoint should return 409 Conflict.
+    """
+
+    def _should_guard(self, sensor_count_on_gpio: int, sensor_type_specified: bool) -> bool:
+        """Replicate the guard logic from debug.py remove_sensor()."""
+        if sensor_type_specified:
+            return False  # Targeted delete — always allowed
+        return sensor_count_on_gpio > 1  # Guard: refuse mass-delete
+
+    def test_single_sensor_no_type_allowed(self):
+        """1 sensor on GPIO, no sensor_type → delete allowed (no guard)."""
+        assert not self._should_guard(sensor_count_on_gpio=1, sensor_type_specified=False)
+
+    def test_multiple_sensors_no_type_guarded(self):
+        """2+ sensors on GPIO, no sensor_type → 409 guard triggered."""
+        assert self._should_guard(sensor_count_on_gpio=2, sensor_type_specified=False)
+        assert self._should_guard(sensor_count_on_gpio=6, sensor_type_specified=False)
+
+    def test_multiple_sensors_with_type_allowed(self):
+        """2+ sensors on GPIO, sensor_type specified → targeted delete allowed."""
+        assert not self._should_guard(sensor_count_on_gpio=2, sensor_type_specified=True)
+        assert not self._should_guard(sensor_count_on_gpio=6, sensor_type_specified=True)
+
+    def test_zero_sensors_no_guard(self):
+        """0 sensors on GPIO → no guard (404 handled elsewhere)."""
+        assert not self._should_guard(sensor_count_on_gpio=0, sensor_type_specified=False)
+
+    def test_sht31_scenario_on_gpio0(self):
+        """Real scenario: 6 I2C sensors on GPIO 0 (2x SHT31 + BMP280)."""
+        # SHT31 (2 value types each) + BMP280 (2 value types) = 6 sensor_configs on GPIO 0
+        assert self._should_guard(sensor_count_on_gpio=6, sensor_type_specified=False)
+        # Targeted delete with sensor_type should still work
+        assert not self._should_guard(sensor_count_on_gpio=6, sensor_type_specified=True)

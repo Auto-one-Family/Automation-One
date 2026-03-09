@@ -99,7 +99,7 @@ class AIPredictions(Base):
 
     # Timestamp (CRITICAL for Time-Series!)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         index=True,
         default=_utc_now,

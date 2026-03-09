@@ -59,7 +59,9 @@ class SensorRepository(BaseRepository[SensorConfig]):
         if len(configs) > 1:
             logger.warning(
                 "Multiple configs for esp=%s gpio=%s: %s. Returning first.",
-                esp_id, gpio, [c.sensor_type for c in configs],
+                esp_id,
+                gpio,
+                [c.sensor_type for c in configs],
             )
         return configs[0] if configs else None
 
@@ -90,13 +92,18 @@ class SensorRepository(BaseRepository[SensorConfig]):
         For multi-value sensors, this returns the specific sensor_type
         on a GPIO (e.g., only sht31_temp, not sht31_humidity).
 
+        BUG-08 fix: Uses list-based approach instead of scalar_one_or_none()
+        to avoid MultipleResultsFound when multiple OneWire sensors (e.g.
+        2x DS18B20) share the same (esp_id, gpio, sensor_type) but differ
+        only by onewire_address.
+
         Args:
             esp_id: ESP device UUID
             gpio: GPIO pin number
             sensor_type: Sensor type string (e.g., 'sht31_temp')
 
         Returns:
-            SensorConfig or None if not found
+            SensorConfig or None if not found. Returns first config if multiple exist.
         """
         stmt = select(SensorConfig).where(
             SensorConfig.esp_id == esp_id,
@@ -104,7 +111,17 @@ class SensorRepository(BaseRepository[SensorConfig]):
             func.lower(SensorConfig.sensor_type) == sensor_type.lower(),
         )
         result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+        rows = list(result.scalars().all())
+        if len(rows) > 1:
+            logger.warning(
+                "Multiple configs for esp=%s gpio=%s type=%s: %d results. "
+                "OneWire/I2C without address? Returning first match.",
+                esp_id,
+                gpio,
+                sensor_type,
+                len(rows),
+            )
+        return rows[0] if rows else None
 
     async def get_by_esp(self, esp_id: uuid.UUID) -> list[SensorConfig]:
         """
@@ -256,10 +273,10 @@ class SensorRepository(BaseRepository[SensorConfig]):
         Returns:
             Created SensorData instance
         """
-        # PostgreSQL TIMESTAMP WITHOUT TIME ZONE requires naive datetime
+        # Ensure timezone-aware UTC timestamp for TIMESTAMPTZ column
         ts = timestamp or datetime.now(timezone.utc)
-        if ts.tzinfo is not None:
-            ts = ts.replace(tzinfo=None)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
 
         sensor_data = SensorData(
             esp_id=esp_id,
@@ -586,6 +603,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         self,
         esp_id: uuid.UUID,
         gpio: int,
+        sensor_type: str | None = None,
     ) -> Optional[dict]:
         """
         Get calibration data for a sensor.
@@ -593,11 +611,27 @@ class SensorRepository(BaseRepository[SensorConfig]):
         Args:
             esp_id: ESP device UUID
             gpio: GPIO pin number
+            sensor_type: Sensor type for multi-value disambiguation (e.g. 'sht31_temp').
+                         Required when multiple sensors share a GPIO.
 
         Returns:
             Calibration data dict or None if not found/not calibrated
         """
-        sensor_config = await self.get_by_esp_and_gpio(esp_id, gpio)
+        if sensor_type:
+            sensor_config = await self.get_by_esp_gpio_and_type(esp_id, gpio, sensor_type)
+        else:
+            configs = await self.get_all_by_esp_and_gpio(esp_id, gpio)
+            if not configs:
+                return None
+            if len(configs) > 1:
+                logger.warning(
+                    "get_calibration called without sensor_type for multi-value GPIO: "
+                    "esp=%s gpio=%s (%d configs). Returning first.",
+                    esp_id,
+                    gpio,
+                    len(configs),
+                )
+            sensor_config = configs[0]
         if not sensor_config:
             return None
         return sensor_config.calibration_data
@@ -641,8 +675,10 @@ class SensorRepository(BaseRepository[SensorConfig]):
 
         # DB-side aggregation to avoid loading large datasets into memory where supported.
         # SQLite lacks stddev_pop, so we conditionally compute std_dev in Python for SQLite.
-        bind = self.session.get_bind()
-        dialect_name = bind.dialect.name if bind is not None else ""
+        try:
+            dialect_name = self.session.bind.dialect.name
+        except (AttributeError, TypeError):
+            dialect_name = ""
         supports_stddev = dialect_name not in ("sqlite",)
 
         # Use COALESCE(processed_value, raw_value) to handle rows where processed_value is null
@@ -771,7 +807,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             SensorData.timestamp < cutoff,
         )
         result = await self.session.execute(stmt)
-        await self.session.commit()
+        await self.session.flush()
         return result.rowcount
 
     async def count_by_source(self) -> dict[str, int]:
@@ -796,16 +832,18 @@ class SensorRepository(BaseRepository[SensorConfig]):
         self, esp_id: uuid.UUID, i2c_address: int
     ) -> Optional[SensorConfig]:
         """
-        Get sensor by ESP ID and I2C address.
+        Get first sensor by ESP ID and I2C address.
 
-        Used for validating I2C address conflicts.
+        Used for validating I2C address conflicts. Returns first match
+        because multi-value sensors (e.g. SHT31 temp+humidity) share the
+        same I2C address — scalar_one_or_none() would crash.
 
         Args:
             esp_id: ESP device UUID
             i2c_address: I2C address (0-127)
 
         Returns:
-            SensorConfig or None if not found
+            First matching SensorConfig or None if not found
         """
         stmt = select(SensorConfig).where(
             SensorConfig.esp_id == esp_id,
@@ -813,7 +851,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             SensorConfig.i2c_address == i2c_address,
         )
         result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     async def get_by_onewire_address(
         self, esp_id: uuid.UUID, onewire_address: str

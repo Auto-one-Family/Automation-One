@@ -198,9 +198,13 @@ class HeartbeatHandler:
                         logger.warning(f"Failed to audit log device_online: {audit_error}")
 
                 # Step 5: Update device status and last_seen (for online/approved devices)
-                # Use timezone-aware datetime for consistency with timeout checks
-                ts_value = payload["ts"] / 1000 if payload["ts"] > 1e10 else payload["ts"]
-                last_seen = datetime.fromtimestamp(ts_value, tz=timezone.utc)
+                # BUG-06 fix: ts<=0 (Wokwi without NTP) → use server timestamp
+                ts_raw = payload["ts"]
+                if ts_raw is None or ts_raw <= 0:
+                    last_seen = datetime.now(timezone.utc)
+                else:
+                    ts_value = ts_raw / 1000 if ts_raw > 1e10 else ts_raw
+                    last_seen = datetime.fromtimestamp(ts_value, tz=timezone.utc)
                 await esp_repo.update_status(esp_id_str, "online", last_seen)
 
                 # Step 5b: Clear stale retained LWT message from broker

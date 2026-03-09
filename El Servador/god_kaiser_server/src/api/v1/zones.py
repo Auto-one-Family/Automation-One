@@ -68,7 +68,9 @@ async def create_zone(
 
     logger.info(
         "Zone created by %s: zone_id=%s, name=%s",
-        current_user.username, zone.zone_id, zone.name,
+        current_user.username,
+        zone.zone_id,
+        zone.name,
     )
     return ZoneResponse.model_validate(zone)
 
@@ -155,7 +157,8 @@ async def update_zone(
 
     logger.info(
         "Zone updated by %s: zone_id=%s",
-        current_user.username, zone_id,
+        current_user.username,
+        zone_id,
     )
     return ZoneResponse.model_validate(updated)
 
@@ -196,7 +199,9 @@ async def delete_zone(
     if had_devices:
         logger.warning(
             "Zone %s deleted by %s with %d device(s) still assigned",
-            zone_id, current_user.username, device_count,
+            zone_id,
+            current_user.username,
+            device_count,
         )
 
     await zone_repo.delete(zone.id)
