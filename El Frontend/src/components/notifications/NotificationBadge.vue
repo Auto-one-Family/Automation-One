@@ -13,9 +13,11 @@ import { computed } from 'vue'
 import { Bell } from 'lucide-vue-next'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
 import { useAlertCenterStore } from '@/shared/stores'
+import { useEspStore } from '@/stores/esp'
 
 const inboxStore = useNotificationInboxStore()
 const alertStore = useAlertCenterStore()
+const espStore = useEspStore()
 
 /**
  * Phase 4B: Badge shows unresolved alert count when alerts are active,
@@ -26,7 +28,8 @@ const badgeCount = computed(() => {
   return unresolvedAlerts > 0 ? unresolvedAlerts : inboxStore.unreadCount
 })
 
-const hasBadge = computed(() => badgeCount.value > 0)
+/** Hide badge when no devices exist (stale notifications from previous sessions) */
+const hasBadge = computed(() => badgeCount.value > 0 && espStore.devices.length > 0)
 
 const badgeText = computed(() => {
   if (badgeCount.value > 99) return '99+'

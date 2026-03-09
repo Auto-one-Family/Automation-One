@@ -20,6 +20,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from ..deps import ActiveUser, DBSession
 from ...core.logging_config import get_logger
@@ -455,10 +456,13 @@ async def export_zones(
     Returns zone-level summary without full component details.
     Use /zones/{zone_id} for full component export per zone.
     """
-    esp_repo = ESPRepository(db)
-
-    # Get all devices to discover zones
-    all_devices = await esp_repo.get_all()
+    # Get all devices to discover zones (eager load relationships to avoid MissingGreenlet)
+    all_devices_stmt = select(ESPDevice).options(
+        selectinload(ESPDevice.sensors),
+        selectinload(ESPDevice.actuators),
+    )
+    all_devices_result = await db.execute(all_devices_stmt)
+    all_devices = list(all_devices_result.scalars().all())
 
     # Group devices by zone
     zone_map: dict[str, dict[str, Any]] = {}

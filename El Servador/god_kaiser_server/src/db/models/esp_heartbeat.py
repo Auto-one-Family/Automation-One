@@ -74,13 +74,13 @@ class ESPHeartbeatLog(Base):
         doc="Primary key (UUID)",
     )
 
-    # Foreign Key to ESP Device (for JOIN queries, with CASCADE DELETE)
-    esp_id: Mapped[uuid.UUID] = mapped_column(
+    # Foreign Key to ESP Device (SET NULL — preserve heartbeat history after device deletion, T02-Fix1)
+    esp_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("esp_devices.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("esp_devices.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
-        doc="FK to esp_devices.id",
+        doc="FK to esp_devices.id (nullable for data preservation after device deletion)",
     )
 
     # Denormalized Device ID (for fast queries without JOIN)

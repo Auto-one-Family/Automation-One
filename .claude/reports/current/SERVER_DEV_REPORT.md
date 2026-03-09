@@ -1,112 +1,310 @@
-# Server Dev Report: 500-Fehler GET sensors + GET zone monitor-data
+# Server Dev Report: DS18B20 Sensor-Konfiguration Analyse
 
-## Modus: B (Implementierung / Bugfix)
-
-## Auftrag
-
-Analysiere die genauen Ursachen der 500-Fehler bei:
-1. `GET /api/v1/sensors/{esp_id}/{gpio}` (z.B. MOCK_3D6C5444/0)
-2. `GET /api/v1/zone/{zone_id}/monitor-data` (z.B. zone_id=test)
-
-Minimale Fixes vorschlagen (try/except, None-Checks, Typ-Anpassungen). Kein Refactoring.
+## Modus: A (Analyse)
+## Auftrag: DS18B20 auf Wokwi-ESP konfigurieren — Fehleranalyse
+## Datum: 2026-03-08
 
 ---
 
-## 1) GET /api/v1/sensors/{esp_id}/{gpio}
+## Codebase-Analyse
 
-### Codebase-Analyse
-
-- **Endpoint:** `src/api/v1/sensors.py` → `get_sensor()`
-- **Ablauf:** `esp_repo.get_by_device_id(esp_id)` → `sensor_repo.get_by_esp_gpio_and_type()` oder `get_all_by_esp_and_gpio()` → `sensor_repo.get_latest_reading()` → `subzone_repo.get_subzone_by_gpio(esp_id, gpio)` → `_model_to_response(sensor, esp_id, subzone_id=...)` → Response-Serialisierung
-
-### Gefundene Fehlerquellen
-
-| Stelle | Risiko | Erklärung |
-|--------|--------|-----------|
-| **SensorConfig.gpio** | **Ursache 500** | DB-Model `SensorConfig.gpio` ist `Optional[int]` (nullable für I2C/OneWire). Schema `SensorConfigResponse` erbt von `SensorConfigBase` mit `gpio: int` (required). Wenn `sensor.gpio is None`, baut `_model_to_response(..., gpio=sensor.gpio)` ein Objekt mit `gpio=None` → Pydantic ValidationError bei Response-Serialisierung → 500. |
-| get_by_device_id | unkritisch | Gibt `None` zurück → ESPNotFoundError (404). |
-| get_all_by_esp_and_gpio | unkritisch | Gibt Liste zurück; leere Liste → SensorNotFoundException (404). |
-| get_latest_reading | unkritisch | Gibt `Optional[SensorData]`; Aufrufer prüft `if latest` und setzt `latest_value`/`latest_quality`/`latest_timestamp` nur bei Vorhandensein. |
-| get_subzone_by_gpio(esp_id, gpio) | unkritisch | `esp_id` = Path-String, `SubzoneRepository` erwartet `str`; `SubzoneConfig.esp_id` ist `str` (FK auf `esp_devices.device_id`). Kein Typ-Mix. |
-| _model_to_response esp_id | unkritisch | `sensor.esp_id` ist UUID (FK `esp_devices.id`), Schema `SensorConfigResponse.esp_id` ist `uuid.UUID`; `esp_device_id` wird explizit als String übergeben. Kein Serialisierungsfehler. |
-
-### Umgesetzter Fix
-
-- **Datei:** `src/api/v1/sensors.py`
-- **Änderung:** In `_model_to_response()` bei der Erstellung von `SensorConfigResponse`:
-  - **Vorher:** `gpio=sensor.gpio`
-  - **Nachher:** `gpio=sensor.gpio if sensor.gpio is not None else 0`
-- **Begründung:** Schema verlangt `int`; Fallback 0 ist gültig (ge=0, le=39). Eine Signatur-Erweiterung von `_model_to_response` wurde bewusst vermieden, damit alle Aufrufer (get_sensor, list_sensors, list_onewire_sensors, create_or_update_sensor, delete_sensor) automatisch abgedeckt sind.
+**Analysierte Dateien:**
+- `src/api/v1/sensors.py` (~1960 Zeilen, vollstaendig)
+- `src/schemas/sensor.py` (~1067 Zeilen, vollstaendig)
+- `src/mqtt/handlers/sensor_handler.py` (~500 Zeilen, vollstaendig)
+- `src/services/config_builder.py` (Schluessel-Stellen)
+- `src/core/config_mapping.py` (DEFAULT_SENSOR_MAPPINGS)
+- `src/db/repositories/sensor_repo.py` (OneWire-Methoden)
+- `src/db/models/sensor.py` (Feld-Definitionen)
 
 ---
 
-## 2) GET /api/v1/zone/{zone_id}/monitor-data
+## 1. Sensor-Create Endpoint — Exakter Flow
 
-### Codebase-Analyse
+**Endpoint:** `POST /v1/sensors/{esp_id}/{gpio}`
 
-- **Service:** `src/services/monitor_data_service.py` → `get_zone_monitor_data(zone_id)`
-- **Ablauf:** ESPs in Zone laden → SubzoneConfigs (parent_zone_id == zone_id) → gpio_to_subzone Map → Sensor-/Actuator-Configs → `get_latest_readings_batch_by_config(sensor_keys)` → ActuatorState laden → Einträge bauen (Sensor/Actuator) → SubzoneGroups → ZoneMonitorData
+**Status-Guard (Linie 519):**
+```python
+if esp_device.status not in ("approved", "online"):
+    raise DeviceNotApprovedError(esp_id, esp_device.status)
+```
+Nur `approved` oder `online` ESPs koennen konfiguriert werden.
 
-### Gefundene Fehlerquellen
+**DS18B20 spezifischer Pfad (Single-Value, nicht Multi-Value):**
 
-| Stelle | Risiko | Erklärung |
-|--------|--------|-----------|
-| **reading.processed_value / raw_value** | **Ursache 500** | Wenn `reading` existiert, aber sowohl `processed_value` als auch `raw_value` `None` sind, wird `float(None)` aufgerufen → **TypeError** → 500. |
-| SubzoneConfig.parent_zone_id vs. ESPDevice.zone_id | unkritisch | Beide sind string; Abfrage nutzt `parent_zone_id == zone_id` und ESPs mit `zone_id == zone_id`. Kein Typ-Mix. |
-| get_latest_readings_batch_by_config(sensor_keys) | unkritisch | Bei leerer Liste gibt die Methode `{}` zurück; Keys sind `(uuid.UUID, int, str)` wie erwartet. Keine Exception. |
-| state_map Lookup (ac.esp_id, gpio) | unkritisch | `ActuatorState.esp_id` und `ActuatorConfig.esp_id` sind UUID; Lookup ist konsistent. |
-| reading.timestamp | unkritisch | Es wird `reading.timestamp.isoformat() if reading.timestamp else None` verwendet; kein Zugriff auf None. |
-| sc.gpio None | unkritisch | Es gibt `if sc.gpio is None: continue` vor der weiteren Verarbeitung. |
-| ac.gpio | unkritisch | `ActuatorConfig.gpio` ist `Mapped[int]`, nicht optional. |
+`ds18b20` ist KEIN Multi-Value-Sensor — nur `sht31`, `bmp280`, `bme280` etc. sind es. Deshalb laeuft es durch den Standard-Pfad (Linie 676ff):
 
-### Umgesetzter Fix
+1. `_infer_interface_type("ds18b20")` → `"ONEWIRE"` (Linie 1731)
+2. `_validate_onewire_config()` wird aufgerufen (Linie 703)
+   - Wenn `onewire_address` NICHT mitgegeben: Generiert Placeholder `SIM_<12 hex>` (Linie 1866)
+   - Wenn `onewire_address` mitgegeben: Prueft auf Duplikat per 2-way Lookup (esp_id + address)
+3. Sensor-Config wird in DB gespeichert mit `interface_type="ONEWIRE"`, `config_status="pending"`
+4. APScheduler-Job wird aktualisiert (Linie 810ff)
+5. Subzone-Zuweisung (Linie 832ff)
+6. Config wird via MQTT an ESP gepusht: `build_combined_config()` → `send_config()` (Linie 862ff)
 
-- **Datei:** `src/services/monitor_data_service.py`
-- **Änderung:** Beim Setzen von `raw_value` aus einem vorhandenen `reading`:
-  - **Vorher:**  
-    `raw_value = float(reading.processed_value if reading.processed_value is not None else reading.raw_value)`  
-    → Wenn beide None sind: `float(None)` → TypeError.
-  - **Nachher:**  
-    Zuerst `val = reading.processed_value if ... else reading.raw_value`, dann  
-    `raw_value = float(val) if val is not None else None`.
-- **Begründung:** Nur wenn ein Wert vorhanden ist, wird konvertiert; sonst bleibt `raw_value=None`. Schema `SubzoneSensorEntry.raw_value` ist `Optional[float]`.
+**SENSOR_TYPES-Validator (Linie 42-113):**
+```python
+SENSOR_TYPES = ["ph", "temperature", "humidity", "ec", "moisture",
+                "pressure", "co2", "light", "flow", "analog", "digital"]
+```
+`"ds18b20"` ist NICHT in SENSOR_TYPES. Der Validator gibt aber nur ein `pass` (kein Fehler):
+```python
+if v not in SENSOR_TYPES:
+    pass  # Allow custom types but warn
+```
+Das ist kein Blocker — der Request wird akzeptiert.
 
 ---
 
-## Qualitätsprüfung (8-Dimensionen)
+## 2. Pflicht- und Optionalfelder fuer DS18B20
 
-| # | Dimension | Prüfung |
+**Schema:** `SensorConfigCreate` (sensor.py Linie 116-253)
+
+| Feld | Pflicht | Default | Anmerkung |
+|------|---------|---------|-----------|
+| `esp_id` | JA | — | Pattern: `^(ESP_[A-F0-9]{6,8}\|MOCK_[A-Z0-9]+)$` |
+| `gpio` | JA | — | Kommt aus URL-Parameter |
+| `sensor_type` | JA | — | Muss `"ds18b20"` sein |
+| `enabled` | NEIN | `true` | |
+| `interval_ms` | NEIN | `30000` | 1000-300000 ms |
+| `processing_mode` | NEIN | `"pi_enhanced"` | pi_enhanced/local/raw |
+| `interface_type` | NEIN | auto-inferred | Server leitet `"ONEWIRE"` ab |
+| `onewire_address` | NEIN | auto-generated | Empfohlen wenn ROM-Code bekannt |
+| `name` | NEIN | `""` | Anzeigename |
+| `unit` | NEIN | `None` | z.B. `"°C"` |
+
+**curl-Beispiel (minimales valides Request):**
+```bash
+curl -X POST "http://localhost:8000/v1/sensors/ESP_XXXXXXXX/4" \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "esp_id": "ESP_XXXXXXXX",
+    "gpio": 4,
+    "sensor_type": "ds18b20"
+  }'
+```
+
+**curl-Beispiel (vollstaendig mit ROM-Code):**
+```bash
+curl -X POST "http://localhost:8000/v1/sensors/ESP_XXXXXXXX/4" \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "esp_id": "ESP_XXXXXXXX",
+    "gpio": 4,
+    "sensor_type": "ds18b20",
+    "enabled": true,
+    "interval_ms": 30000,
+    "processing_mode": "pi_enhanced",
+    "interface_type": "ONEWIRE",
+    "onewire_address": "28FF641E8D3C0C79",
+    "name": "Gewaechshaus Temperatur",
+    "unit": "°C"
+  }'
+```
+
+---
+
+## 3. OneWire-Scan Endpoint
+
+**Endpoint:** `POST /v1/sensors/esp/{esp_id}/onewire/scan?pin=4`
+
+**Flow fuer echten ESP:**
+```
+1. ESP muss status="online" sein (Linie 1499)
+2. MQTT Kommando senden:
+   Topic:   kaiser/god/esp/{esp_id}/system/command
+   Payload: {"command": "onewire/scan", "pin": 4}
+3. Warten auf Response (10s Timeout):
+   Topic:   kaiser/god/esp/{esp_id}/onewire/scan_result
+   Payload: {"devices": [{"rom_code": "28FF...", "device_type": "ds18b20", "pin": 4}]}
+4. Rueckgabe mit enriched Geraeteliste (already_configured Flag)
+```
+
+**Flow fuer Mock-ESP (esp_id startet mit "MOCK_"):**
+- Direkte Rueckgabe von 3 Fake-Geraeten:
+  - `28FF641E8D3C0C79`
+  - `28FF123456789ABC`
+  - `28FF987654321DEF`
+- Kein MQTT, kein Timeout
+
+**curl-Beispiel:**
+```bash
+curl -X POST "http://localhost:8000/v1/sensors/esp/ESP_XXXXXXXX/onewire/scan?pin=4" \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+---
+
+## 4. MQTT-Handler — Eingehende Sensor-Daten
+
+**Topic:** `kaiser/god/esp/{esp_id}/sensor/{gpio}/data`
+
+**Erwartetes Payload-Format:**
+```json
+{
+    "ts": 1735818000,
+    "esp_id": "ESP_XXXXXXXX",
+    "gpio": 4,
+    "sensor_type": "ds18b20",
+    "raw": 25.5,
+    "value": 0.0,
+    "unit": "°C",
+    "quality": "good",
+    "onewire_address": "28FF641E8D3C0C79"
+}
+```
+
+**DS18B20 Lookup-Pfad (Linie 203-214):**
+Wenn `onewire_address` im Payload vorhanden:
+```python
+sensor_config = await sensor_repo.get_by_esp_gpio_type_and_onewire(
+    esp_device.id, gpio, sensor_type, onewire_address
+)
+```
+= 4-way Lookup: esp_id + gpio + sensor_type + onewire_address
+
+**Wenn kein Match gefunden:**
+```
+logger.warning("OneWire sensor config not found: ... Saving data without config.")
+```
+Daten werden trotzdem gespeichert, aber OHNE Pi-Enhanced Processing. Kein HTTP-Fehler.
+
+**Wenn Match gefunden und `config_status="pending"`:**
+```python
+sensor_config.config_status = "active"
+```
+Config wird automatisch aktiviert beim ersten erfolgreichen Dateneingeng.
+
+---
+
+## 5. Config-Push an ESP
+
+**Automatisch nach REST-POST (Linie 862-876):**
+
+Topic: `kaiser/god/esp/{esp_id}/config`
+
+Payload enthaelt (aus `DEFAULT_SENSOR_MAPPINGS` in `config_mapping.py`):
+- `gpio`: GPIO-Pin
+- `sensor_type`: `"ds18b20"`
+- `interface_type`: `"ONEWIRE"`
+- `onewire_address`: ROM-Code oder `"SIM_..."` Placeholder
+- `enabled`, `sample_interval_ms`, `pi_enhanced`, `calibration_data`
+
+Kein Unterschied zwischen echtem ESP und Mock bei Config-Push.
+
+---
+
+## 6. NB1 Bug-Status (DELETE-Endpoint)
+
+**Status: GEFIXT**
+
+Aktueller Endpoint: `DELETE /v1/sensors/{esp_id}/{config_id}` (Linie 892ff)
+- `config_id` ist UUID (Primaerschluessel)
+- Lookup: `sensor_repo.get_by_id(config_id)` — immer unique
+- Kein `scalar_one_or_none` Problem mehr
+- Vollstaendige Pipeline: DB delete → rebuild_simulation_config → scheduler stop → MQTT Config-Push → WS event
+
+---
+
+## Qualitaetspruefung: 8-Dimensionen-Checkliste
+
+| # | Dimension | Status |
 |---|-----------|--------|
-| 1 | Struktur & Einbindung | Nur bestehende Module geändert, keine neuen Imports. |
-| 2 | Namenskonvention | Unverändert. |
-| 3 | Rückwärtskompatibilität | Response-Formate unverändert; Sensor-Response liefert bei gpio=None nun 0 statt fehlzuschlagen. |
-| 4 | Wiederverwendbarkeit | Keine neuen Patterns, nur defensive Checks. |
-| 5 | Speicher & Ressourcen | Keine Änderung. |
-| 6 | Fehlertoleranz | Explizite None-Checks verhindern ValidationError und TypeError. |
-| 7 | Seiteneffekte | Keine anderen Handler oder Shared State betroffen. |
-| 8 | Industrielles Niveau | Minimale, zielgerichtete Bugfixes. |
+| 1 | Struktur & Einbindung | Analyse-Modus — keine Code-Aenderung |
+| 2 | Namenskonvention | Keine Aenderung |
+| 3 | Rueckwaertskompatibilitaet | Keine Aenderung |
+| 4 | Wiederverwendbarkeit | Keine Aenderung |
+| 5 | Speicher & Ressourcen | Keine Aenderung |
+| 6 | Fehlertoleranz | Keine Aenderung |
+| 7 | Seiteneffekte | Keine Aenderung |
+| 8 | Industrielles Niveau | Keine Aenderung |
+
+---
+
+## Identifizierte Probleme — Warum DS18B20-Konfiguration scheitert
+
+### Problem 1 (WAHRSCHEINLICHSTE URSACHE): ESP-Status nicht "approved"
+
+```python
+# Linie 519
+if esp_device.status not in ("approved", "online"):
+    raise DeviceNotApprovedError(esp_id, esp_device.status)
+```
+
+Falls der Wokwi-ESP noch `"pending"` ist → HTTP 403. Subzone-Assignment macht approved, aber erst nach expliziter Approval.
+
+**Check:** `GET /v1/esp/ESP_XXXXXXXX` → Feld `status` pruefen.
+
+### Problem 2: `esp_id` Pattern-Mismatch
+
+```python
+pattern=r"^(ESP_[A-F0-9]{6,8}|MOCK_[A-Z0-9]+)$"
+```
+
+Erlaubt nur A-F nach dem Praefix (Hex-Zeichen). Falls der Wokwi-ESP eine ID wie `ESP_123GHIJK` hat → 422 Validation Error.
+
+Wokwi-Standard-IDs sind meistens 8 Hex-Zeichen — sollte passen, aber pruefen.
+
+### Problem 3: `sensor_type` falsch
+
+Falls `"temperature"` statt `"ds18b20"` als `sensor_type` verwendet wird:
+- `_infer_interface_type("temperature")` → `"ANALOG"` (FALSCH)
+- GPIO-Konflikt-Check wird durchgefuehrt
+- Kein OneWire-Handling
+
+**Korrekt:** `sensor_type` MUSS `"ds18b20"` sein.
+
+### Problem 4: `esp_id` Mismatch URL vs Body
+
+URL-Parameter und Body-`esp_id` muessen identisch sein. Der Body-`esp_id` wird fuer Pydantic-Validierung geprueft, der URL-`esp_id` fuer den DB-Lookup.
+
+### Problem 5 (echte ESP): MQTT-Timeout beim Config-Push
+
+Falls MQTT-Broker nicht verbunden:
+- Config-Push schlaegt fehl (Warning im Log, kein HTTP-Fehler)
+- `config_status` bleibt `"pending"` — wird nie `"active"` ohne MQTT-Daten vom ESP
+
+### Problem 6 (NB7): Frontend ignoriert User-Inputs fuer DS18B20
+
+Bekanntes Problem aus T02-T08-Verifikation: Der DS18B20-Add-Flow im Frontend (`AddSensorModal.vue`) ignoriert User-Inputs wie `name`, `raw_value`, `unit`. Das heisst, selbst wenn der Server-Endpoint korrekt ist, koennte das Frontend fehlerhafte oder unvollstaendige Requests senden.
+
+---
+
+## Debugging-Checkliste (Reihenfolge)
+
+1. ESP-Status pruefen: `GET /v1/esp/{esp_id}` → `status` muss `"approved"` oder `"online"` sein
+2. Exakten HTTP-Fehler des fehlgeschlagenen Requests ansehen (Status-Code + Detail-Body)
+3. `sensor_type` pruefen: Muss `"ds18b20"` sein, nicht `"temperature"`
+4. `esp_id`-Format pruefen: Nur `ESP_[A-F0-9]{6,8}` erlaubt
+5. Body `esp_id` == URL `esp_id` pruefen
+6. Server-Log pruefen: `grep "ESP_XXXXXXXX" god_kaiser.log | tail -50`
 
 ---
 
 ## Cross-Layer Impact
 
-- **Frontend:** Keine Anpassung nötig. GET sensors liefert weiterhin ein Objekt mit `gpio` (nun 0 statt Abbruch bei DB-gpio=None). Monitor-Daten: `raw_value` kann weiterhin `null` sein.
-- **ESP32 / MQTT:** Nicht betroffen.
+Keine Code-Aenderungen. Kein Cross-Layer Impact.
 
 ---
 
 ## Verifikation
 
-- Linter: `ruff` für geänderte Dateien ohne neue Meldungen.
-- Empfohlene manuelle Checks:
-  - `GET /api/v1/sensors/MOCK_3D6C5444/0` mit Sensor, dessen `gpio` in der DB NULL ist (falls testweise vorhanden).
-  - `GET /api/v1/zone/test/monitor-data` mit Zone, in der ein Sensor-Latest-Reading existiert, aber sowohl `processed_value` als auch `raw_value` NULL sind.
+Kein Code geaendert — keine Verifikation noetig.
 
 ---
 
-## Ergebnis
+## Empfehlung
 
-- **sensors.py:** Ein Fix in `_model_to_response()`: `gpio` bei None mit 0 belegt, damit die Response-Serialisierung nicht mit ValidationError scheitert.
-- **monitor_data_service.py:** Ein Fix beim Aufbau von `raw_value`: `float()` nur aufrufen, wenn ein Wert vorhanden ist; sonst `raw_value=None`.
+Falls Fix noetig:
 
-Beide Änderungen sind minimale Defensiv-Checks ohne Refactoring.
+- **`SENSOR_TYPES` in `src/schemas/sensor.py`**: `"ds18b20"` explizit hinzufuegen (aktuell als "custom type" durchgelassen — funktioniert, aber unklar)
+- **NB7-Fix**: Falls Frontend-Inputs ignoriert werden — `frontend-dev` Agent fuer `AddSensorModal.vue` DS18B20-Pfad
+- **Falls konkrete Fehlermeldung bekannt**: `server-debug` Agent fuer Log-Analyse beauftragen
+
+Relevante Dateien:
+- `c:\Users\robin\Documents\PlatformIO\Projects\Auto-one\El Servador\god_kaiser_server\src\api\v1\sensors.py` (Linie 477-884: create_or_update_sensor)
+- `c:\Users\robin\Documents\PlatformIO\Projects\Auto-one\El Servador\god_kaiser_server\src\schemas\sensor.py` (Linie 42-54: SENSOR_TYPES, Linie 116-253: SensorConfigCreate)
+- `c:\Users\robin\Documents\PlatformIO\Projects\Auto-one\El Servador\god_kaiser_server\src\mqtt\handlers\sensor_handler.py` (Linie 203-226: OneWire Lookup)

@@ -29,7 +29,7 @@ def _sanitize(value: str) -> str:
     return _CONTROL_CHARS.sub(" ", value)
 
 
-router = APIRouter(prefix="/logs", tags=["logs"])
+router = APIRouter(prefix="/v1/logs", tags=["logs"])
 
 # Rate limiting: max 10 requests per minute per IP
 _rate_limit_store: dict[str, list[float]] = {}

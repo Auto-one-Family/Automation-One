@@ -31,7 +31,14 @@ from ...core.exceptions import ESPNotFoundError
 from ...core.logging_config import get_logger
 from ...db.repositories import ESPRepository
 from ...schemas.monitor import ZoneMonitorData
-from ...schemas.zone import ZoneAssignRequest, ZoneAssignResponse, ZoneInfo, ZoneRemoveResponse
+from ...schemas.zone import (
+    ZoneAssignRequest,
+    ZoneAssignResponse,
+    ZoneInfo,
+    ZoneListEntry,
+    ZoneListResponse,
+    ZoneRemoveResponse,
+)
 from ...services.monitor_data_service import MonitorDataService
 from ...services.zone_service import ZoneService
 from ..deps import DBSession, ActiveUser, OperatorUser
@@ -176,6 +183,98 @@ async def remove_zone(
 
     except ValueError:
         raise ESPNotFoundError(esp_id)
+
+
+# =============================================================================
+# Zone List Endpoint (includes empty zones from ZoneContext)
+# =============================================================================
+
+
+@router.get(
+    "/zones",
+    response_model=ZoneListResponse,
+    summary="List All Zones",
+    description="""
+    List all zones including empty ones.
+
+    Merges zones from:
+    - Device assignments (ESPs with zone_id set)
+    - ZoneContext table (zones with business context but possibly no devices)
+
+    Empty zones (0 devices) are included so the frontend can display them.
+    """,
+    responses={
+        200: {"description": "Zone list with device/sensor/actuator counts"},
+    },
+)
+async def list_zones(
+    db: DBSession,
+    _user: ActiveUser,
+) -> ZoneListResponse:
+    """
+    List all zones including empty ones from ZoneContext.
+
+    Combines device-derived zones with ZoneContext entries to ensure
+    zones without devices are still visible in the frontend.
+    """
+    from sqlalchemy import select as sa_select
+    from sqlalchemy.orm import selectinload
+
+    from ...db.models.esp import ESPDevice
+    from ...db.models.zone_context import ZoneContext
+
+    # 1. Get zones from devices (with counts)
+    zone_map: dict[str, ZoneListEntry] = {}
+
+    all_devices_stmt = (
+        sa_select(ESPDevice)
+        .where(ESPDevice.zone_id.isnot(None))
+        .options(
+            selectinload(ESPDevice.sensors),
+            selectinload(ESPDevice.actuators),
+        )
+    )
+    result = await db.execute(all_devices_stmt)
+    all_devices = result.scalars().all()
+
+    for device in all_devices:
+        zid = device.zone_id
+        if not zid:
+            continue
+        if zid not in zone_map:
+            zone_map[zid] = ZoneListEntry(
+                zone_id=zid,
+                zone_name=device.zone_name or zid,
+                device_count=0,
+                sensor_count=0,
+                actuator_count=0,
+            )
+        zone_map[zid].device_count += 1
+        zone_map[zid].sensor_count += (
+            len(device.sensors) if hasattr(device, "sensors") and device.sensors else 0
+        )
+        zone_map[zid].actuator_count += (
+            len(device.actuators) if hasattr(device, "actuators") and device.actuators else 0
+        )
+
+    # 2. Merge zones from ZoneContext (adds empty zones)
+    ctx_stmt = sa_select(ZoneContext)
+    ctx_result = await db.execute(ctx_stmt)
+    for ctx in ctx_result.scalars().all():
+        if ctx.zone_id not in zone_map:
+            zone_map[ctx.zone_id] = ZoneListEntry(
+                zone_id=ctx.zone_id,
+                zone_name=ctx.zone_name or ctx.zone_id,
+                device_count=0,
+                sensor_count=0,
+                actuator_count=0,
+            )
+        elif ctx.zone_name and not zone_map[ctx.zone_id].zone_name:
+            zone_map[ctx.zone_id].zone_name = ctx.zone_name
+
+    zones = sorted(zone_map.values(), key=lambda z: z.zone_name or z.zone_id)
+
+    return ZoneListResponse(zones=zones, total=len(zones))
 
 
 # =============================================================================

@@ -17,10 +17,18 @@ export interface SubzoneResolved {
   subzoneName: string
 }
 
+interface SubzoneResolverOptions {
+  /** When true, does not auto-trigger on zone changes. Call buildResolver() manually. */
+  lazy?: boolean
+}
+
 /**
  * Builds Map: `${espId}-${gpio}` → { subzoneId, subzoneName }
  */
-export function useSubzoneResolver(zoneIdRef: Ref<string | null> | ComputedRef<string | null>) {
+export function useSubzoneResolver(
+  zoneIdRef: Ref<string | null> | ComputedRef<string | null>,
+  options: SubzoneResolverOptions = {},
+) {
   const espStore = useEspStore()
   const resolverMap = ref<Map<string, SubzoneResolved>>(new Map())
   const isLoading = ref(false)
@@ -45,25 +53,26 @@ export function useSubzoneResolver(zoneIdRef: Ref<string | null> | ComputedRef<s
     const map = new Map<string, SubzoneResolved>()
 
     try {
-      for (const device of devicesInZone.value) {
-        const espId = espStore.getDeviceId(device)
-        if (!espId) continue
+      const espIds = devicesInZone.value
+        .map(d => espStore.getDeviceId(d))
+        .filter((id): id is string => !!id)
 
-        try {
-          const response = await subzonesApi.getSubzones(espId)
-          const subzones = response.subzones ?? []
+      const results = await Promise.allSettled(
+        espIds.map(async (espId) => ({
+          espId,
+          subzones: (await subzonesApi.getSubzones(espId)).subzones ?? [],
+        })),
+      )
 
-          for (const sz of subzones) {
-            const subzoneId = sz.subzone_id ?? ''
-            const subzoneName = sz.subzone_name ?? subzoneId
-
-            for (const gpio of sz.assigned_gpios ?? []) {
-              const key = `${espId}-${gpio}`
-              map.set(key, { subzoneId, subzoneName })
-            }
+      for (const result of results) {
+        if (result.status === 'rejected') continue
+        const { espId, subzones } = result.value
+        for (const sz of subzones) {
+          const subzoneId = sz.subzone_id ?? ''
+          const subzoneName = sz.subzone_name ?? subzoneId
+          for (const gpio of sz.assigned_gpios ?? []) {
+            map.set(`${espId}-${gpio}`, { subzoneId, subzoneName })
           }
-        } catch (e) {
-          console.warn(`[useSubzoneResolver] Failed to load subzones for ${espId}:`, e)
         }
       }
 
@@ -76,13 +85,15 @@ export function useSubzoneResolver(zoneIdRef: Ref<string | null> | ComputedRef<s
     }
   }
 
-  watch(
-    [zoneId, () => devicesInZone.value.length],
-    () => {
-      buildResolver()
-    },
-    { immediate: true },
-  )
+  if (!options.lazy) {
+    watch(
+      [zoneId, () => devicesInZone.value.length],
+      () => {
+        buildResolver()
+      },
+      { immediate: true },
+    )
+  }
 
   return {
     resolverMap,

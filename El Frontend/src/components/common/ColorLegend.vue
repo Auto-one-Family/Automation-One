@@ -7,7 +7,7 @@
  * in the TopBar. Uses CSS design tokens for all colors.
  */
 import { ref, onMounted, onUnmounted } from 'vue'
-import { HelpCircle } from 'lucide-vue-next'
+import { Palette } from 'lucide-vue-next'
 
 const isOpen = ref(false)
 
@@ -70,7 +70,7 @@ const legendItems = [
       title="Farb-Legende anzeigen"
       @click="toggle"
     >
-      <HelpCircle class="color-legend__icon" />
+      <Palette class="color-legend__icon" />
     </button>
 
     <Transition name="legend-pop">

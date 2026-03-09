@@ -19,6 +19,7 @@ References:
 - .claude/PI_SERVER_REFACTORING.md (Lines 135-145)
 """
 
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -67,6 +68,7 @@ class SensorService:
         self,
         esp_id: str,
         gpio: int,
+        sensor_type: str | None = None,
     ) -> Optional[SensorConfig]:
         """
         Get sensor configuration.
@@ -74,6 +76,8 @@ class SensorService:
         Args:
             esp_id: ESP device ID (ESP_XXXXXXXX format)
             gpio: GPIO pin number
+            sensor_type: Sensor type for multi-value disambiguation (e.g. 'sht31_temp').
+                         When omitted, returns first config on this GPIO.
 
         Returns:
             SensorConfig or None if not found
@@ -82,7 +86,20 @@ class SensorService:
         if not esp_device:
             return None
 
-        return await self.sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
+        if sensor_type:
+            return await self.sensor_repo.get_by_esp_gpio_and_type(esp_device.id, gpio, sensor_type)
+
+        # Legacy fallback: returns first config (may be wrong for multi-value)
+        configs = await self.sensor_repo.get_all_by_esp_and_gpio(esp_device.id, gpio)
+        if len(configs) > 1:
+            logger.warning(
+                "get_config without sensor_type for multi-value GPIO: "
+                "esp=%s gpio=%s (%d configs). Returning first.",
+                esp_id,
+                gpio,
+                len(configs),
+            )
+        return configs[0] if configs else None
 
     async def create_or_update_config(
         self,
@@ -125,7 +142,7 @@ class SensorService:
         if not esp_device:
             raise ValueError(f"ESP device '{esp_id}' not found")
 
-        existing = await self.sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
+        existing = await self.sensor_repo.get_by_esp_gpio_and_type(esp_device.id, gpio, sensor_type)
 
         if existing:
             # Update existing
@@ -168,28 +185,40 @@ class SensorService:
     async def delete_config(
         self,
         esp_id: str,
-        gpio: int,
+        gpio: int | None = None,
+        config_id: uuid.UUID | None = None,
     ) -> bool:
         """
         Delete sensor configuration.
 
+        Supports lookup by config_id (preferred, T08-Fix-D) or by gpio (legacy).
+
         Args:
             esp_id: ESP device ID
-            gpio: GPIO pin number
+            gpio: GPIO pin number (legacy, may fail for multi-value sensors)
+            config_id: SensorConfig UUID primary key (preferred)
 
         Returns:
             True if deleted, False if not found
         """
+
         esp_device = await self.esp_repo.get_by_device_id(esp_id)
         if not esp_device:
             return False
 
-        sensor = await self.sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
-        if not sensor:
+        if config_id is not None:
+            sensor = await self.sensor_repo.get_by_id(config_id)
+            if not sensor or sensor.esp_id != esp_device.id:
+                return False
+        elif gpio is not None:
+            sensor = await self.sensor_repo.get_by_esp_and_gpio(esp_device.id, gpio)
+            if not sensor:
+                return False
+        else:
             return False
 
         await self.sensor_repo.delete(sensor.id)
-        logger.info(f"Sensor config deleted: {esp_id} GPIO {gpio}")
+        logger.info(f"Sensor config deleted: {esp_id} config_id={sensor.id}")
         return True
 
     # =========================================================================
@@ -303,6 +332,8 @@ class SensorService:
                 if timestamp
                 else datetime.now(timezone.utc)
             ),
+            zone_id=esp_device.zone_id,
+            device_name=esp_device.name,
         )
 
         await self.sensor_repo.store_reading(reading)
@@ -485,6 +516,7 @@ class SensorService:
         self,
         esp_id: str,
         gpio: int,
+        sensor_type: str | None = None,
     ) -> Dict[str, Any]:
         """
         Trigger a manual measurement for a sensor.
@@ -494,6 +526,7 @@ class SensorService:
         Args:
             esp_id: ESP device ID (e.g., "ESP_12AB34CD")
             gpio: Sensor GPIO pin
+            sensor_type: Sensor type for multi-value disambiguation
 
         Returns:
             dict with success status and request_id
@@ -512,7 +545,19 @@ class SensorService:
             raise RuntimeError(f"ESP device is offline: {esp_id} (status: {esp.status})")
 
         # 2. Validate sensor exists and is enabled
-        sensor = await self.sensor_repo.get_by_esp_and_gpio(esp.id, gpio)
+        if sensor_type:
+            sensor = await self.sensor_repo.get_by_esp_gpio_and_type(esp.id, gpio, sensor_type)
+        else:
+            configs = await self.sensor_repo.get_all_by_esp_and_gpio(esp.id, gpio)
+            if len(configs) > 1:
+                logger.warning(
+                    "trigger_measurement without sensor_type for multi-value GPIO: "
+                    "esp=%s gpio=%s (%d configs). Returning first.",
+                    esp_id,
+                    gpio,
+                    len(configs),
+                )
+            sensor = configs[0] if configs else None
 
         if not sensor:
             raise ValueError(f"Sensor not found: {esp_id}/GPIO {gpio}")

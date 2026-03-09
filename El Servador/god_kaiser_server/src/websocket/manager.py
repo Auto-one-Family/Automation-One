@@ -5,7 +5,7 @@ Real-time Data Streaming für Frontend
 
 import asyncio
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 
 from fastapi import WebSocket
@@ -322,7 +322,7 @@ class WebSocketManager:
         if client_id not in self._rate_limiter:
             self._rate_limiter[client_id] = deque()
 
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         window_start = now - self._rate_limit_window
 
         # Remove old timestamps outside window

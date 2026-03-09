@@ -7,11 +7,11 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 3.1 | **Aktualisiert:** 2026-03-06
+> **Version:** 3.4 | **Aktualisiert:** 2026-03-08
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
-> **Endpoint-Anzahl:** ~231 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry)
+> **Endpoint-Anzahl:** ~233 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry)
 
 ---
 
@@ -36,12 +36,12 @@ allowed-tools: Read
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
-| `/esp/devices` | GET | JWT | Alle ESPs auflisten (ohne pending_approval) |
+| `/esp/devices` | GET | JWT | Alle ESPs auflisten (ohne pending_approval). Query: `include_deleted=true` zeigt soft-deleted Devices (Admin) |
 | `/esp/devices` | POST | Operator | Neues ESP registrieren |
 | `/esp/devices/pending` | GET | Operator | **Pending Devices auflisten** |
 | `/esp/devices/{esp_id}` | GET | JWT | ESP Details |
 | `/esp/devices/{esp_id}` | PATCH | Operator | ESP aktualisieren |
-| `/esp/devices/{esp_id}` | DELETE | Operator | ESP löschen (inkl. Sensoren/Aktoren) |
+| `/esp/devices/{esp_id}` | DELETE | Operator | ESP soft-delete (setzt deleted_at, Sensordaten bleiben erhalten) |
 | `/esp/devices/{esp_id}/health` | GET | JWT | ESP Health Metrics |
 | `/esp/devices/{esp_id}/config` | POST | Operator | Sensor/Actuator-Config senden |
 | `/esp/devices/{esp_id}/restart` | POST | Operator | ESP neu starten |
@@ -54,17 +54,18 @@ allowed-tools: Read
 | `/esp/devices/{esp_id}/alert-config` | GET | JWT | Device-Level Alert-Config abrufen |
 | `/esp/discovery` | GET | JWT | Network Discovery Results |
 
-### Sensors (`/sensors`) - 17 Endpoints
+### Sensors (`/sensors`) - 18 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
 | `/sensors` | GET | JWT | Alle Sensoren |
+| `/sensors/config/{config_id}` | GET | JWT | Sensor-Config by UUID (immer eindeutig, auch bei 2x SHT31) |
 | `/sensors/{sensor_id}` | GET | JWT | Sensor Details |
 | `/sensors` | POST | JWT | Sensor erstellen |
-| `/sensors/{sensor_id}` | DELETE | JWT | Sensor löschen |
+| `/sensors/{esp_id}/{config_id}` | DELETE | Operator | Sensor-Config löschen (by UUID, Sensordaten bleiben erhalten) |
 | `/sensors/data` | GET | JWT | Query Sensor-Daten (historisch, filterbar nach zone_id, subzone_id) |
 | `/sensors/{sensor_id}/data` | GET | JWT | Sensor-Daten (historisch) |
-| `/sensors/{sensor_id}/stats` | GET | JWT | Sensor-Statistiken |
+| `/sensors/{sensor_id}/stats` | GET | JWT | Sensor-Statistiken. Query: `sensor_type` (Multi-Value-Filter) |
 | `/sensors/types` | GET | JWT | Alle Sensor-Typen |
 | `/sensors/calibrate` | POST | JWT/API-Key | Sensor kalibrieren (body: esp_id, gpio, sensor_type, calibration_points) |
 | `/sensors/{sensor_id}/process` | POST | JWT | Sensor-Wert verarbeiten |
@@ -94,10 +95,11 @@ allowed-tools: Read
 | `/actuators/{actuator_id}/runtime` | GET | JWT | Runtime-Stats + Wartungsstatus (Phase 4A.8) |
 | `/actuators/{actuator_id}/runtime` | PATCH | Operator | Runtime-Stats aktualisieren (Wartungslog) |
 
-### Zones (`/zone`) - 6 Endpoints
+### Zones (`/zone`) - 7 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
+| `/zone/zones` | GET | JWT | Alle Zonen inkl. leere (Device-Zuweisungen + ZoneContext merged) |
 | `/zone/devices/{esp_id}/assign` | POST | Operator | ESP einer Zone zuweisen (MQTT) |
 | `/zone/devices/{esp_id}/zone` | DELETE | Operator | Zone-Zuweisung entfernen |
 | `/zone/devices/{esp_id}` | GET | JWT | Zone-Info für ESP |
@@ -105,8 +107,22 @@ allowed-tools: Read
 | `/zone/{zone_id}/monitor-data` | GET | JWT | Zone Monitor Data L2 (Sensoren/Aktoren nach Subzone gruppiert) |
 | `/zone/unassigned` | GET | JWT | ESPs ohne Zone-Zuweisung |
 
-> **⚠️ HINWEIS:** Es gibt keinen `GET /zone` Endpoint für "alle Zonen".
-> Zonen werden aus ESP-Daten extrahiert (zone_id/zone_name Felder).
+> **Hinweis:** Zone-Assignment-Endpoints (`/zone`) weisen ESPs zu/entfernen Zonen.
+> Für Zone-Entity-CRUD (erstellen, listen, löschen) siehe `/zones` (plural) unten.
+
+### Zone Entity (`/zones`) - 5 Endpoints (Phase 0.3)
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/zones` | POST | Operator | Zone erstellen (zone_id, name, description) |
+| `/zones` | GET | Operator | Alle Zonen listen (inkl. leere Zonen) |
+| `/zones/{zone_id}` | GET | Operator | Zone nach zone_id abrufen |
+| `/zones/{zone_id}` | PUT | Operator | Zone aktualisieren (name, description) |
+| `/zones/{zone_id}` | DELETE | Operator | Zone löschen (Warnung wenn Devices zugeordnet) |
+
+> **Hinweis:** Zonen sind eigenständige DB-Entitäten (Tabelle `zones`).
+> Sie existieren unabhängig von ESP-Device-Zuweisungen.
+> Zone-Assignment via `/zone/devices/{esp_id}/assign` erstellt automatisch eine Zone-Entity falls nötig (Rückwärtskompatibilität).
 
 ### Subzones (`/subzone`) - 6 Endpoints
 
@@ -190,13 +206,13 @@ allowed-tools: Read
 | `/debug/mock-esp` | POST | JWT | Mock-ESP erstellen |
 | `/debug/mock-esp` | GET | JWT | Alle Mock-ESPs |
 | `/debug/mock-esp/{esp_id}` | GET | JWT | Mock-ESP Details |
-| `/debug/mock-esp/{esp_id}` | DELETE | JWT | Mock-ESP löschen |
+| `/debug/mock-esp/{esp_id}` | DELETE | JWT | Mock-ESP soft-delete (Sensordaten bleiben erhalten) |
 | `/debug/mock-esp/{esp_id}` | PATCH | JWT | Mock-ESP aktualisieren |
 | `/debug/mock-esp/{esp_id}/heartbeat` | POST | JWT | Heartbeat triggern |
 | `/debug/mock-esp/{esp_id}/state` | POST | JWT | State setzen |
 | `/debug/mock-esp/{esp_id}/sensors` | POST | JWT | Sensor hinzufügen |
 | `/debug/mock-esp/{esp_id}/sensors/{gpio}` | POST | JWT | Sensor-Wert setzen |
-| `/debug/mock-esp/{esp_id}/sensors/{gpio}` | DELETE | JWT | Sensor entfernen |
+| `/debug/mock-esp/{esp_id}/sensors/{gpio}` | DELETE | JWT | Sensor entfernen (⚠️ Guard: 409 bei >1 Sensor auf GPIO ohne sensor_type; bevorzugt `DELETE /sensors/{esp_id}/{config_id}`) |
 | `/debug/mock-esp/{esp_id}/actuators` | POST | JWT | Actuator hinzufügen |
 | `/debug/mock-esp/{esp_id}/actuators/{gpio}` | POST | JWT | Actuator-State setzen |
 | `/debug/mock-esp/{esp_id}/actuators/{gpio}` | DELETE | JWT | Actuator entfernen |
@@ -671,7 +687,7 @@ ESP-Gerät aktualisieren.
 
 ### 2.6 DELETE /esp/devices/{esp_id}
 
-ESP-Gerät löschen (inkl. zugehöriger Sensoren und Aktoren).
+ESP-Gerät soft-delete (setzt `deleted_at`). Sensordaten, Heartbeat-Logs, Aktor-Historie und AI-Predictions bleiben erhalten (FK SET NULL). Sensor/Actuator-Configs werden per CASCADE gelöscht.
 
 **Auth:** Operator Required
 
@@ -833,6 +849,13 @@ Historische Sensor-Daten.
 Sensor-Statistiken. Berechnet min/max/avg/stddev aus `COALESCE(processed_value, raw_value)` — fällt auf raw_value zurück wenn processed_value NULL ist.
 
 **Auth:** JWT Required
+
+**Query-Parameter:**
+| Parameter | Typ | Default | Beschreibung |
+|-----------|-----|---------|--------------|
+| `start_time` | datetime | -24h | Start des Zeitraums |
+| `end_time` | datetime | now | Ende des Zeitraums |
+| `sensor_type` | string | null | Filter für Multi-Value-Sensoren (z.B. `sht31_temp`, `sht31_humidity`). Ohne Filter: Stats des ersten Sensor-Typs auf dem GPIO |
 
 **Response 200:**
 ```json
@@ -1279,6 +1302,21 @@ Sensor zu Mock-ESP hinzufügen.
   "initial_value": 20.0
 }
 ```
+
+> **BEKANNTE BUGS (T02-T08, 2026-03-07):**
+> - **NB6:** Key-Format `{gpio}_{sensor_type}` in `simulation_config` überschreibt bei 2+ Sensoren gleichen Typs auf gleichem GPIO (z.B. 2x DS18B20 auf OneWire-Bus, 2x SHT31 auf I2C GPIO 0).
+> - **NB7:** Frontend DS18B20 OneWire-Flow sendet `name`, `initial_value`, `unit` nicht mit — Backend erhält auto-generierte Werte. SHT31-Flow funktioniert korrekt.
+> - **NB10:** Multi-Value-Split (SHT31 → temp + humidity) nur im Batch-Create-Pfad, nicht bei Einzel-Add über diesen Endpoint.
+
+---
+
+### 6.3a DELETE /debug/mock-esp/{esp_id}/sensors/{gpio}
+
+Sensor von Mock-ESP entfernen. **Veraltet** — Frontend nutzt seit T10-Fix-B einheitlich `DELETE /sensors/{esp_id}/{config_id}`.
+
+**Auth:** JWT Required
+
+> **T10-Fix-B Guard:** Bei >1 Sensor auf demselben GPIO (z.B. I2C-Bus GPIO 0) und fehlendem `sensor_type` Query-Parameter gibt der Endpoint **409 Conflict** zurück statt alle Sensoren zu löschen. Bevorzugter Weg: `DELETE /sensors/{esp_id}/{config_id}` (UUID, Single Source of Truth).
 
 ---
 

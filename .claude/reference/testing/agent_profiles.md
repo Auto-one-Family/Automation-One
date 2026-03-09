@@ -1,6 +1,6 @@
 # AutomationOne — Agent-Profile
 
-> **Version:** 1.5 | **Stand:** 2026-02-26
+> **Version:** 1.6 | **Stand:** 2026-03-07
 > **Zweck:** SOLL-Definition aller Agents, Skills und Referenzen für agent-manager und System-Übersicht
 > **Genutzt von:** agent-manager (primär), system-control, Technical Manager
 
@@ -11,6 +11,7 @@
 ## 1.1 agent-manager
 - **Datei:** `.claude/agents/agent-manager.md`
 - **Rolle:** Analysiert und korrigiert das AutomationOne Agent-System. Vergleicht Flow vs. Implementierung, behebt Inkonsistenzen.
+- **Model:** haiku (Kosten-Optimierung, reine Config-Analyse)
 - **Skills:** agent-manager
 - **Referenzen:** flow_reference.md, agent_profiles.md, vs_claude_best_practice.md
 - **Andere Agenten:** Keine direkten Aufrufe; arbeitet über Agents/Skills im `.claude/`-Bereich.
@@ -25,7 +26,8 @@
 ## 1.3 esp32-dev
 - **Datei:** `.claude/agents/esp32-dev.md`
 - **Rolle:** Pattern-konformer Implementierer für ESP32 C++/PlatformIO. Findet bestehende Patterns und erweitert sie.
-- **Skills:** esp32-development (via SKILL.md / MODULE_REGISTRY.md)
+- **Model:** sonnet
+- **Skills:** esp32-development (via SKILL.md / MODULE_REGISTRY.md, Frontmatter-Preloading)
 - **Referenzen:** MQTT_TOPICS.md, ERROR_CODES.md, COMMUNICATION_FLOWS.md
 - **Andere Agenten:** esp32-debug, mqtt-debug, mqtt-dev, server-dev
 
@@ -39,7 +41,8 @@
 ## 1.5 frontend-dev
 - **Datei:** `.claude/agents/frontend-dev.md`
 - **Rolle:** Pattern-konformer Implementierer für Vue 3/TypeScript/Pinia. Erweitert existierende Patterns.
-- **Skills:** frontend-development (via SKILL.md)
+- **Model:** sonnet
+- **Skills:** frontend-development (via SKILL.md, Frontmatter-Preloading)
 - **Referenzen:** REST_ENDPOINTS.md, WEBSOCKET_EVENTS.md, ERROR_CODES.md
 - **Andere Agenten:** frontend-debug, server-dev, mqtt-dev
 
@@ -53,6 +56,7 @@
 ## 1.7 meta-analyst
 - **Datei:** `.claude/agents/meta-analyst.md`
 - **Rolle:** Cross-Report-Analyse. Vergleicht alle Reports, findet Widersprüche und Kausalität. Schreibt eigene Reports (Write-Tool).
+- **Model:** haiku (Kosten-Optimierung, reine Textanalyse)
 - **Tools:** Read, Write, Grep, Glob (KEIN Bash — liest nur Reports, führt keine Befehle aus)
 - **Skills:** meta-analyst (implizit)
 - **Referenzen:** STATUS.md, Reports in `.claude/reports/current/`, CONSOLIDATED_REPORT.md
@@ -61,7 +65,8 @@
 ## 1.8 mqtt-dev
 - **Datei:** `.claude/agents/mqtt-dev.md`
 - **Rolle:** MQTT-Implementierung auf Server und ESP32. Topics und Handler synchron halten.
-- **Skills:** Keine explizit; nutzt MQTT_TOPICS.md
+- **Model:** sonnet
+- **Skills:** mqtt-development (Frontmatter-Preloading)
 - **Referenzen:** MQTT_TOPICS.md, COMMUNICATION_FLOWS.md, ERROR_CODES.md
 - **Andere Agenten:** mqtt-debug, server-dev, esp32-dev
 
@@ -75,7 +80,8 @@
 ## 1.10 server-dev
 - **Datei:** `.claude/agents/server-dev.md`
 - **Rolle:** Pattern-konformer Implementierer für Python/FastAPI.
-- **Skills:** server-development (via SKILL.md, MODULE_REGISTRY.md)
+- **Model:** sonnet
+- **Skills:** server-development (via SKILL.md, MODULE_REGISTRY.md, Frontmatter-Preloading)
 - **Referenzen:** COMMUNICATION_FLOWS.md, ARCHITECTURE_DEPENDENCIES.md, MQTT_TOPICS.md, REST_ENDPOINTS.md, ERROR_CODES.md
 - **Andere Agenten:** server-debug, mqtt-debug, db-inspector, mqtt-dev
 
@@ -96,6 +102,7 @@
 ## 1.13 test-log-analyst
 - **Datei:** `.claude/agents/test-log-analyst.md`
 - **Rolle:** Analysiert Test-Outputs (pytest, Vitest, Playwright, Wokwi) lokal und in CI.
+- **Model:** haiku (Kosten-Optimierung, reines Log-Parsing)
 - **Skills:** test-log-analyst
 - **Referenzen:** LOG_LOCATIONS.md, CI_PIPELINE.md, TEST_ENGINE_REFERENCE.md, TEST_WORKFLOW.md, flow_reference.md
 - **Andere Agenten:** Keine; eigenständiger Flow (F4)

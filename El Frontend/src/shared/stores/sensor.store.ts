@@ -94,10 +94,10 @@ export const useSensorStore = defineStore('sensor', () => {
    * Handle sensor_data WebSocket event.
    * Updates sensor value in corresponding device for live updates.
    *
-   * Phase 6: HYBRID LOGIC
-   * 1. Known multi-value sensors → Group by GPIO using registry
-   * 2. Unknown multi-value → Dynamic detection when multiple types on same GPIO
-   * 3. Single-value sensors → Unchanged behavior
+   * Post-Fix1: Backend delivers separate sensor_config entries per value type
+   * (e.g., sht31_temp and sht31_humidity as two distinct entries).
+   * Priority: exact match by gpio + sensor_type first (handles multi-value correctly).
+   * Fallback: legacy multi-value merge logic for backward compatibility.
    */
   function handleSensorData(
     message: SensorDataMessage,
@@ -116,8 +116,21 @@ export const useSensorStore = defineStore('sensor', () => {
 
     const sensors = device.sensors as MockSensor[]
 
-    // HYBRID LOGIC:
-    // 1. Check if this is a KNOWN multi-value sensor type (Registry)
+    // Post-Fix1: Find exact match by gpio + sensor_type (unique pair).
+    // This handles multi-value sensors correctly — each sub-value has its own entry.
+    const exactMatch = sensors.find(
+      s => s.gpio === gpio && s.sensor_type === sensorType
+    )
+
+    if (exactMatch) {
+      if (data.value !== undefined) exactMatch.raw_value = data.value
+      if (data.quality) exactMatch.quality = data.quality
+      if (data.unit) exactMatch.unit = data.unit
+      exactMatch.last_read = normalizeRawTimestamp(data.timestamp)
+      return
+    }
+
+    // Fallback: legacy multi-value merge for sensors not yet in array
     const knownDeviceType = getDeviceTypeFromSensorType(sensorType)
 
     if (knownDeviceType) {
@@ -125,7 +138,7 @@ export const useSensorStore = defineStore('sensor', () => {
       return
     }
 
-    // 2. Check if there's already a sensor on this GPIO with different type
+    // Dynamic multi-value detection (different type on same GPIO)
     const existingSensor = sensors.find(s => s.gpio === gpio)
 
     if (existingSensor && existingSensor.sensor_type !== sensorType && !existingSensor.is_multi_value) {
@@ -133,7 +146,7 @@ export const useSensorStore = defineStore('sensor', () => {
       return
     }
 
-    // 3. Single-value sensor (or first value of unknown multi-value)
+    // Single-value sensor (or first value of unknown multi-value)
     handleSingleValueSensorData(sensors, data)
   }
 

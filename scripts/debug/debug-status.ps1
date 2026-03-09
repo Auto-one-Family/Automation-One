@@ -101,22 +101,25 @@ function Invoke-JsonEndpoint {
 
 function Get-LokiLastLogAgeSeconds {
     param([string]$LogQuery, [int]$TimeoutSec = 5)
-    $lokiBase = "http://127.0.0.1:3100"
-    try {
-        $nowNs = [long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) * 1000000
-        $encodedQuery = [Uri]::EscapeDataString($LogQuery)
-        $uri = "$lokiBase/loki/api/v1/query_range?query=$encodedQuery&limit=1&direction=backward&end=$nowNs"
-        $resp = Invoke-RestMethod -Uri $uri -TimeoutSec $TimeoutSec -ErrorAction Stop
-        $values = $resp.data.result | Select-Object -First 1 | ForEach-Object { $_.values }
-        if ($values -and $values.Count -gt 0) {
-            $tsNs = [long]$values[0][0]
-            return [int](($nowNs - $tsNs) / 1000000000)
-        }
+    # Use 127.0.0.1 to avoid WinHTTP proxy/localhost timeout on Windows (see LOG_LOCATIONS.md §12)
+    $lokiBase = if ($env:LOKI_URL) { $env:LOKI_URL } else { "http://127.0.0.1:3100" }
+    $nowNs = [long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) * 1000000
+    $encodedQuery = [Uri]::EscapeDataString($LogQuery)
+    $uri = "$lokiBase/loki/api/v1/query_range?query=$encodedQuery&limit=1&direction=backward&end=$nowNs"
+    $resp = Invoke-JsonEndpoint -Uri $uri -TimeoutSec $TimeoutSec
+    if (-not $resp.ok) {
         return -1
     }
-    catch {
+    $lokiData = $resp.data
+    if (-not $lokiData -or -not $lokiData.data -or -not $lokiData.data.result) {
         return -1
     }
+    $values = $lokiData.data.result | Select-Object -First 1 | ForEach-Object { $_.values }
+    if ($values -and $values.Count -gt 0) {
+        $tsNs = [long]$values[0][0]
+        return [int](($nowNs - $tsNs) / 1000000000)
+    }
+    return -1
 }
 
 # ---------------------------------------------------------------------------

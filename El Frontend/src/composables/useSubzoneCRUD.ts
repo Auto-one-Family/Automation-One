@@ -12,6 +12,7 @@ import { ref } from 'vue'
 import { subzonesApi } from '@/api/subzones'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
+import { slugifyGerman } from '@/utils/subzoneHelpers'
 
 export function useSubzoneCRUD() {
   const espStore = useEspStore()
@@ -76,7 +77,7 @@ export function useSubzoneCRUD() {
         return
       }
       const espId = espStore.getDeviceId(espInZone)
-      const subzoneId = newSubzoneName.value.trim().toLowerCase().replace(/\s+/g, '_')
+      const subzoneId = slugifyGerman(newSubzoneName.value)
       await subzonesApi.assignSubzone(espId, {
         subzone_id: subzoneId,
         subzone_name: newSubzoneName.value.trim(),

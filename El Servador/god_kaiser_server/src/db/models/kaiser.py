@@ -83,10 +83,10 @@ class KaiserRegistry(Base, TimestampMixin):
     )
 
     last_seen: Mapped[Optional[datetime]] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
         index=True,
-        doc="Last heartbeat timestamp",
+        doc="Last heartbeat timestamp (UTC)",
     )
 
     # Capabilities (CRITICAL!)
@@ -167,10 +167,10 @@ class ESPOwnership(Base, TimestampMixin):
 
     # Assignment Information
     assigned_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=_utc_now,
         nullable=False,
-        doc="Assignment timestamp",
+        doc="Assignment timestamp (UTC)",
     )
 
     priority: Mapped[int] = mapped_column(

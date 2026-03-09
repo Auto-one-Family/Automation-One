@@ -29,6 +29,7 @@ export interface SensorWithContext {
   raw_value: number
   unit: string
   quality: QualityLevel
+  config_id?: string
   esp_id: string
   esp_state?: string
   zone_id: string | null
@@ -115,7 +116,7 @@ export function useZoneGrouping(options?: ZoneGroupingOptions | ZoneGroupingFilt
       const sensors = esp.sensors as {
         gpio: number; sensor_type: string; name: string | null;
         raw_value: number; unit: string; quality: QualityLevel;
-        last_read?: string | null
+        config_id?: string; last_read?: string | null
       }[] | undefined
       if (!sensors) return []
       const espId = espStore.getDeviceId(esp)

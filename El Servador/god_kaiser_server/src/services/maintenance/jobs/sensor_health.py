@@ -224,7 +224,7 @@ async def check_sensor_timeouts(
             device = await esp_repo.get_by_id(esp_uuid)
             if device:
                 device_id_cache[esp_uuid] = device.device_id
-                if device.status == "offline":
+                if device.status == "offline" or device.deleted_at is not None:
                     offline_esp_ids.add(esp_uuid)
 
         # =====================================================================

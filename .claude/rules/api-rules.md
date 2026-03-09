@@ -50,7 +50,7 @@ Data Layer (db/, mqtt/)  → Persistence, Communication
 ```python
 # 1. Standard Library
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 
 # 2. Third-party
@@ -265,6 +265,26 @@ def fetch_data():
     return result.scalars().all()
 ```
 
+### Eager Loading fuer ORM-Relationships (async SQLAlchemy)
+
+```python
+# RICHTIG — selectinload verhindert MissingGreenlet
+from sqlalchemy.orm import selectinload
+
+stmt = select(ESPDevice).options(
+    selectinload(ESPDevice.sensors),
+    selectinload(ESPDevice.actuators),
+)
+result = await db.execute(stmt)
+
+# FALSCH — lazy load in async Context → MissingGreenlet
+stmt = select(ESPDevice)
+result = await db.execute(stmt)
+devices = result.scalars().all()
+for d in devices:
+    len(d.sensors)  # MissingGreenlet!
+```
+
 ### Concurrent Operations
 
 ```python
@@ -391,3 +411,7 @@ cd "El Servador/god_kaiser_server" && poetry run mypy src/
 | Actuator ohne Safety-Check | Safety-First |
 | Fehlende Type Hints | Code-Qualitaet |
 | Magic Numbers | Konstanten in config.py |
+| ORM-Relationships ohne selectinload() in async Queries | MissingGreenlet-Error |
+| `datetime.now()` ohne timezone | Naive/aware Mismatch → TypeError. Immer `datetime.now(timezone.utc)` |
+| `datetime.utcnow()` | Deprecated seit Python 3.12. Immer `datetime.now(timezone.utc)` |
+| `DateTime` ohne `timezone=True` in Models | DB liefert naive Timestamps → Mismatch. Immer `DateTime(timezone=True)` |

@@ -262,7 +262,7 @@ class LogicEngine:
 
                 # Prepare context for time-based evaluation
                 context = {
-                    "current_time": datetime.now(),
+                    "current_time": datetime.now(timezone.utc),
                 }
 
                 # Evaluate each timer rule with batch-level lock tracking
@@ -354,7 +354,7 @@ class LogicEngine:
             context = {
                 "sensor_data": trigger_data,
                 "sensor_values": sensor_values,
-                "current_time": datetime.now(),
+                "current_time": datetime.now(timezone.utc),
                 "rule_id": str(rule.id),  # For hysteresis state management
                 "condition_index": 0,  # For hysteresis state management
             }
@@ -381,8 +381,8 @@ class LogicEngine:
                 batch_locks=batch_locks,
             )
 
-            # Update last_triggered timestamp (timezone-naive for DB column)
-            rule.last_triggered = datetime.now(timezone.utc).replace(tzinfo=None)
+            # Update last_triggered timestamp
+            rule.last_triggered = datetime.now(timezone.utc)
 
             # Log successful execution
             execution_time_ms = int((time.time() - start_time) * 1000)
@@ -596,7 +596,7 @@ class LogicEngine:
 
         elif cond_type in ("time_window", "time"):
             # Time window condition
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             start_hour = condition.get("start_hour", 0)
             end_hour = condition.get("end_hour", 24)
             days = condition.get("days_of_week")  # Optional: [0,1,2,3,4] = Mon-Fri

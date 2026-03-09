@@ -1,6 +1,6 @@
 # AutomationOne Agenten
 
-> **Version:** 5.0 | **Aktualisiert:** 2026-02-11
+> **Version:** 5.1 | **Aktualisiert:** 2026-03-07
 > **Format:** Offizielles Claude Code Plugin-Agent-Format
 > **Agenten gesamt:** 13 | **Struktur:** Flach (alle .md direkt im agents/)
 
@@ -66,6 +66,7 @@ description: |
 model: sonnet
 color: cyan
 tools: ["Read", "Grep", "Glob", "Bash"]
+skills: ["skill-name"]  # Optional: Skill automatisch vorladen
 ---
 
 # Agent-Titel
@@ -82,6 +83,7 @@ tools: ["Read", "Grep", "Glob", "Bash"]
 | `model` | Ja | String | `sonnet`, `opus`, `haiku`, `inherit` |
 | `color` | Ja | String | `blue`, `cyan`, `green`, `yellow`, `magenta`, `red` |
 | `tools` | Nein | JSON Array | `["Read", "Grep", "Glob"]` |
+| `skills` | Nein | JSON Array | `["esp32-development"]` |
 
 ### Farb-Schema
 

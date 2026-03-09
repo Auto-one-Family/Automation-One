@@ -111,7 +111,10 @@
         "color": "red",
         "label": "EMERGENCY"
       }
-    }
+    },
+    { "id": "temp2", "type": "wokwi-ds18b20", "attrs": {} },
+    { "id": "temp3", "type": "wokwi-ds18b20", "attrs": {} },
+    { "id": "relay1", "type": "wokwi-relay", "attrs": {} }
   ],
   "connections": [
     ["esp:TX0", "$serialMonitor:RX", "", []],
@@ -137,6 +140,15 @@
     ["r_led_blue:2", "led_blue:A", "cyan", ["h20"]],
     ["led_blue:C", "esp:GND.2", "black", ["v60", "h100"]],
     ["esp:D27", "btn_emergency:1.l", "red", ["v120", "h-40"]],
-    ["esp:GND.1", "btn_emergency:2.l", "black", ["v130", "h-30"]]
+    ["esp:GND.1", "btn_emergency:2.l", "black", ["v130", "h-30"]],
+    ["temp2:VCC", "esp:3V3", "red", []],
+    ["temp2:GND", "esp:GND.2", "black", []],
+    ["temp2:DQ",  "esp:4", "green", []],
+    ["temp3:VCC", "esp:3V3", "red", []],
+    ["temp3:GND", "esp:GND.3", "black", []],
+    ["temp3:DQ",  "esp:4", "green", []],
+    ["relay1:VCC", "esp:3V3", "red", []],
+    ["relay1:GND", "esp:GND.4", "black", []],
+    ["relay1:IN",  "esp:26", "orange", []]
   ]
 }

@@ -393,6 +393,9 @@ class TestFailureProcessing:
                     mock_sensor_repo.return_value.get_by_esp_and_gpio = AsyncMock(
                         return_value=mock_sensor
                     )
+                    mock_sensor_repo.return_value.get_all_by_esp_and_gpio = AsyncMock(
+                        return_value=[mock_sensor]
+                    )
                     mock_sensor_repo.return_value.update = AsyncMock()
 
                     with patch("src.mqtt.handlers.config_handler.ActuatorRepository"):

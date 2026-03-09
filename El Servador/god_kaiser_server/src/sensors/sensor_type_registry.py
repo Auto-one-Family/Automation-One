@@ -63,6 +63,13 @@ SENSOR_TYPE_MAPPING: Dict[str, str] = {
     # Moisture sensor (Phase 2)
     "moisture": "moisture",
     "soil_moisture": "moisture",  # Alias — normalize_sensor_type() returns "moisture"
+    # BME280 variants (Phase 2)
+    "pressure_bme280": "bme280_pressure",
+    "temperature_bme280": "bme280_temp",
+    "humidity_bme280": "bme280_humidity",
+    "bme280_pressure": "bme280_pressure",  # Already normalized
+    "bme280_temp": "bme280_temp",  # Already normalized
+    "bme280_humidity": "bme280_humidity",  # Already normalized
     # CO2 sensors (Phase 3)
     "mhz19_co2": "mhz19_co2",
     "scd30_co2": "scd30_co2",
@@ -113,9 +120,79 @@ MULTI_VALUE_SENSORS: Dict[str, MultiValueSensorDefinition] = {
         ],
         "i2c_pins": {"sda": 21, "scl": 22},  # ESP32 default I2C pins
     },
+    "bme280": {
+        "device_type": "i2c",
+        "device_address": 0x76,  # Default BME280 address (0x77 if SDO to VCC)
+        "values": [
+            {
+                "sensor_type": "bme280_temp",
+                "name": "Temperature",
+                "unit": "°C",
+            },
+            {
+                "sensor_type": "bme280_pressure",
+                "name": "Pressure",
+                "unit": "hPa",
+            },
+            {
+                "sensor_type": "bme280_humidity",
+                "name": "Humidity",
+                "unit": "%RH",
+            },
+        ],
+        "i2c_pins": {"sda": 21, "scl": 22},  # ESP32 default I2C pins
+    },
     # Future multi-value sensors can be added here:
     # "scd30": { ... },  # CO2 + Temp + Humidity
 }
+
+
+# Plausible physical default start values for mock sensors.
+# Applied when the user does NOT provide a raw_value (None).
+# Keyed by the SPLIT sensor_type (e.g., "sht31_temp"), not the base type ("sht31").
+SENSOR_TYPE_MOCK_DEFAULTS: Dict[str, Dict[str, object]] = {
+    # Temperature: typical room temperature
+    "sht31_temp": {"raw_value": 22.0, "unit": "°C"},
+    "ds18b20": {"raw_value": 20.0, "unit": "°C"},
+    "bmp280_temp": {"raw_value": 22.0, "unit": "°C"},
+    "bme280_temp": {"raw_value": 22.0, "unit": "°C"},
+    "temperature": {"raw_value": 22.0, "unit": "°C"},
+    # Humidity: moderate relative humidity
+    "sht31_humidity": {"raw_value": 55.0, "unit": "%RH"},
+    "bme280_humidity": {"raw_value": 55.0, "unit": "%RH"},
+    "humidity": {"raw_value": 55.0, "unit": "%RH"},
+    # Soil moisture: moderate substrate moisture
+    "moisture": {"raw_value": 45.0, "unit": "%"},
+    "soil_moisture": {"raw_value": 45.0, "unit": "%"},
+    # Atmospheric pressure: sea-level standard
+    "bmp280_pressure": {"raw_value": 1013.25, "unit": "hPa"},
+    "bme280_pressure": {"raw_value": 1013.25, "unit": "hPa"},
+    "pressure": {"raw_value": 1013.25, "unit": "hPa"},
+    # Nutrient solution
+    "ph": {"raw_value": 6.2, "unit": "pH"},
+    "ec": {"raw_value": 1500.0, "unit": "µS/cm"},
+    # Environment
+    "co2": {"raw_value": 800.0, "unit": "ppm"},
+    "mhz19_co2": {"raw_value": 800.0, "unit": "ppm"},
+    "scd30_co2": {"raw_value": 800.0, "unit": "ppm"},
+    "light": {"raw_value": 25000.0, "unit": "lux"},
+    # Flow: pump off = 0 is correct
+    "flow": {"raw_value": 0.0, "unit": "L/min"},
+}
+
+
+def get_mock_default_raw_value(sensor_type: str, user_provided_raw: Optional[float]) -> float:
+    """Return the user value if provided, otherwise a plausible physical default.
+
+    User values always take precedence.  ``None`` means "no value given"
+    (triggers default lookup), while ``0.0`` means "user explicitly set 0".
+    """
+    if user_provided_raw is not None:
+        return user_provided_raw
+    defaults = SENSOR_TYPE_MOCK_DEFAULTS.get(sensor_type.lower())
+    if defaults:
+        return float(defaults["raw_value"])
+    return 0.0
 
 
 def normalize_sensor_type(sensor_type: str) -> str:
@@ -145,6 +222,51 @@ def normalize_sensor_type(sensor_type: str) -> str:
         logger.debug(f"Normalized sensor type: '{sensor_type}' → '{normalized}'")
 
     return normalized
+
+
+def get_unit_for_sensor_type(sensor_type: str) -> Optional[str]:
+    """
+    Get the canonical unit for a sensor type from the registry.
+
+    Looks up SENSOR_TYPE_MOCK_DEFAULTS and MULTI_VALUE_SENSORS for the unit.
+
+    Args:
+        sensor_type: Normalized sensor type (e.g., "ds18b20", "sht31_temp")
+
+    Returns:
+        Unit string (e.g., "°C", "%RH") or None if unknown
+    """
+    key = sensor_type.lower()
+    defaults = SENSOR_TYPE_MOCK_DEFAULTS.get(key)
+    if defaults and "unit" in defaults:
+        return str(defaults["unit"])
+    return None
+
+
+def sanitize_unit_encoding(unit: str) -> str:
+    """
+    Fix Latin-1 → UTF-8 double-encoding in unit strings.
+
+    ESP32 firmware sends degree sign as Latin-1 byte 0xB0. When interpreted
+    as UTF-8, this produces Mojibake (e.g., "Â°C" instead of "°C").
+
+    Args:
+        unit: Unit string potentially with encoding issues
+
+    Returns:
+        Correctly encoded UTF-8 unit string
+    """
+    if not unit:
+        return unit
+    try:
+        # Try to detect double-encoding: if re-encoding as Latin-1 then
+        # decoding as UTF-8 produces a valid shorter string, it was double-encoded
+        fixed = unit.encode("latin-1").decode("utf-8")
+        if len(fixed) < len(unit):
+            return fixed
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        pass  # Already correct UTF-8 or non-Latin content
+    return unit
 
 
 def get_multi_value_sensor_def(device_type: str) -> Optional[MultiValueSensorDefinition]:
@@ -214,6 +336,51 @@ def get_device_type_from_sensor_type(sensor_type: str) -> Optional[str]:
                 return device_type
 
     return None
+
+
+def expand_multi_value(
+    base_type: str,
+    user_name: str = "",
+    **common_fields: object,
+) -> List[dict]:
+    """
+    Expand a base multi-value sensor type into N logical sensor config dicts.
+
+    Shared by BOTH batch-create (create_mock_device) and single-add (add_sensor)
+    to guarantee identical splitting behavior.
+
+    Args:
+        base_type: Base device type (e.g., "sht31", "bme280")
+        user_name: User-given name for the sensor
+        **common_fields: Fields shared across all sub-types (gpio, i2c_address, etc.)
+
+    Returns:
+        List of dicts, each representing one sub-type with keys:
+        sensor_type, name, unit, plus all common_fields.
+        Empty list if base_type is not a multi-value sensor.
+
+    Example:
+        >>> expand_multi_value("sht31", "Klima Boden", gpio=0, i2c_address=68)
+        [{"sensor_type": "sht31_temp", "name": "Klima Boden Temperature", "unit": "°C", "gpio": 0, ...},
+         {"sensor_type": "sht31_humidity", "name": "Klima Boden Humidity", "unit": "%RH", "gpio": 0, ...}]
+    """
+    definition = MULTI_VALUE_SENSORS.get(base_type.lower())
+    if not definition:
+        return []
+
+    configs: List[dict] = []
+    for value_def in definition["values"]:
+        name_suffix = value_def["name"]
+        sensor_name = f"{user_name} {name_suffix}" if user_name else value_def["sensor_type"]
+        configs.append(
+            {
+                "sensor_type": value_def["sensor_type"],
+                "name": sensor_name,
+                "unit": value_def["unit"],
+                **common_fields,
+            }
+        )
+    return configs
 
 
 def get_all_value_types_for_device(device_type: str) -> List[str]:

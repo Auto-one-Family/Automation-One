@@ -9,7 +9,7 @@ description: |
   NOT FOR: Runtime-Logs (god_kaiser, esp32_serial, mqtt_traffic) -> server-debug, esp32-debug, mqtt-debug.
   User-Workflow: Robin fuehrt Tests manuell aus. Agent gibt bei /test gruppierte Befehle (mit vollem Projektpfad) aus.
   Robin signalisiert Fertigstellung; Agent analysiert Logs und aktualisiert .claude/reports/Testrunner/test.md fortlaufend.
-model: sonnet
+model: haiku
 color: cyan
 tools: ["Read", "Write", "Grep", "Glob", "Bash"]
 ---

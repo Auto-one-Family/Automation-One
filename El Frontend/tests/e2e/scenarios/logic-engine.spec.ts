@@ -27,7 +27,8 @@ const ZONE_NAME = 'Logic Test Zone'
 const TOKEN_KEY = 'el_frontend_access_token'
 
 function uniqueId(prefix: string): string {
-  return `ESP_MOCK_E2E_LOGIC_${prefix}_${Date.now().toString(36)}`
+  const suffix = Date.now().toString(36).toUpperCase()
+  return `MOCK_LOGIC${prefix}${suffix}`
 }
 
 // ── API Helpers ─────────────────────────────────────────────────────────

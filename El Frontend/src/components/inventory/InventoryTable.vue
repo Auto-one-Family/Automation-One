@@ -41,7 +41,7 @@ function displayValue(item: ComponentItem): string {
   if (item.currentValue === '—') return '—'
   const num = parseFloat(item.currentValue)
   if (isNaN(num)) return item.currentValue
-  return formatSensorValue(num, item.deviceType)
+  return formatSensorValue(num, item.unit)
 }
 
 // Device type label

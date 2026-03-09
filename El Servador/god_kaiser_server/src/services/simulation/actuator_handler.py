@@ -21,7 +21,7 @@ import asyncio
 import json
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
 from ...core.logging_config import get_logger
@@ -517,7 +517,7 @@ class MockActuatorHandler:
         self._cancel_auto_off_job(esp_id, gpio)
 
         # Schedule new auto-off job using add_onetime_job
-        run_at = datetime.now() + timedelta(seconds=duration)
+        run_at = datetime.now(timezone.utc) + timedelta(seconds=duration)
         scheduler.add_onetime_job(
             job_id=job_id,
             func=self._auto_off_callback,

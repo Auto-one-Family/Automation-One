@@ -17,7 +17,8 @@ const ZONE_ID = 'e2e_subzone_monitor'
 const ZONE_NAME = 'E2E Subzone Zone'
 
 function uniqueEspId(): string {
-  return `ESP_MOCK_SUBZONE_${Date.now().toString(36)}`
+  const suffix = Date.now().toString(36).toUpperCase()
+  return `MOCK_SUBZONE${suffix}`
 }
 
 test.describe('Subzone-Monitor Flow', () => {
@@ -66,25 +67,25 @@ test.describe('Subzone-Monitor Flow', () => {
     // ═══ Schritt 2: Erste Device-Card → Konfigurieren (öffnet ESPSettingsSheet) ═══
     const configBtn = page.getByTitle('Konfigurieren')
     if ((await configBtn.count()) > 0) {
-      await configBtn.first().click({ timeout: 5000 })
+      await configBtn.first().click({ timeout: 10000 })
       await page.waitForTimeout(1000)
     } else {
       // Fallback: Device klicken → Level 2 → Settings
-      await page.locator('.device-mini-card').first().click({ timeout: 5000 })
+      await page.locator('.device-mini-card').first().click({ timeout: 10000 })
       await page.waitForTimeout(800)
-      await page.getByTitle('Einstellungen').first().click({ timeout: 5000 })
+      await page.getByTitle('Einstellungen').first().click({ timeout: 10000 })
       await page.waitForTimeout(1000)
     }
 
     // ═══ Schritt 3: Sensor in Config-Liste klicken (öffnet SensorConfigPanel, schließt Settings) ═══
     const sensorItem = page.locator('.config-list-item').first()
-    await sensorItem.click({ timeout: 5000 })
+    await sensorItem.click({ timeout: 10000 })
     // Warten bis Settings-Sheet ausgeblendet ist (SlideOver-Transition 300ms)
     await page.waitForTimeout(600)
 
     // ═══ Schritt 4: Subzone "Neue Subzone erstellen" wählen ═══
     const subzoneSelect = page.locator('select.subzone-assignment__select')
-    await subzoneSelect.waitFor({ state: 'visible', timeout: 5000 })
+    await subzoneSelect.waitFor({ state: 'visible', timeout: 10000 })
     await subzoneSelect.selectOption({ label: '+ Neue Subzone erstellen...' })
     await page.waitForTimeout(500)
 

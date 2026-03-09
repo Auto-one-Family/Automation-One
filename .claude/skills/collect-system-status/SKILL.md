@@ -1,16 +1,9 @@
 ---
-skill_name: collect-system-status
-version: 1.0.0
-created: 2026-02-07
-target: VS Code Claude Agents
-purpose: IST-Stand from code perspective
-allowed_tools:
-  - Read
-  - Glob
-  - Grep
-  - Bash (read-only)
-execution_time: ~45 seconds
-output: .technical-manager/inbox/agent-reports/system-status-from-code.md
+name: collect-system-status
+description: |
+  Collect system status from code perspective.
+  Analyzes project structure, counts files, parses configs.
+  Sends IST-Stand report to Technical Manager.
 ---
 
 # Skill: Collect System Status (From Code Perspective)

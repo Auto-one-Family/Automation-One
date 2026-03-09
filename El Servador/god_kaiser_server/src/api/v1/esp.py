@@ -134,6 +134,9 @@ async def list_devices(
         Optional[str], Query(alias="status", description="Filter by status")
     ] = None,
     hardware_type: Annotated[Optional[str], Query(description="Filter by hardware type")] = None,
+    include_deleted: Annotated[
+        bool, Query(description="Include soft-deleted devices (admin/audit)")
+    ] = False,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> ESPDeviceListResponse:
@@ -146,6 +149,7 @@ async def list_devices(
         zone_id: Optional zone filter
         status_filter: Optional status filter
         hardware_type: Optional hardware type filter
+        include_deleted: Include soft-deleted devices (for audit)
         page: Page number
         page_size: Items per page
 
@@ -165,7 +169,7 @@ async def list_devices(
     elif hardware_type:
         devices = await esp_repo.get_by_hardware_type(hardware_type)
     else:
-        devices = await esp_repo.get_all()
+        devices = await esp_repo.get_all(include_deleted=include_deleted)
 
     # Filter out pending_approval devices unless explicitly requested
     if status_filter != "pending_approval":
@@ -221,6 +225,8 @@ async def list_devices(
                 created_at=device.created_at,
                 updated_at=device.updated_at,
                 zone_context=zone_ctx,
+                deleted_at=device.deleted_at,
+                deleted_by=device.deleted_by,
             )
         )
 
@@ -392,6 +398,8 @@ async def get_device(
         created_at=device.created_at,
         updated_at=device.updated_at,
         zone_context=zone_ctx,
+        deleted_at=device.deleted_at,
+        deleted_by=device.deleted_by,
     )
 
 
@@ -597,11 +605,11 @@ async def update_device(
     "/devices/{esp_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
-        204: {"description": "Device deleted"},
+        204: {"description": "Device soft-deleted"},
         404: {"description": "Device not found"},
     },
-    summary="Delete ESP device",
-    description="Remove an ESP device from the database. Use for orphaned mock devices or decommissioned hardware.",
+    summary="Soft-delete ESP device",
+    description="Soft-delete an ESP device. Sensor data and historical records are preserved. Configs (sensors/actuators) are cascade-deleted.",
 )
 async def delete_device(
     esp_id: str,
@@ -609,13 +617,11 @@ async def delete_device(
     current_user: OperatorUser,
 ) -> None:
     """
-    Delete ESP device from database.
+    Soft-delete ESP device (T02-Fix1).
 
-    WARNING: This also deletes associated sensors and actuators.
-    Use primarily for:
-    - Orphaned mock devices
-    - Decommissioned hardware
-    - Cleaning up test data
+    Sets deleted_at timestamp instead of physical deletion.
+    Sensor data, heartbeat logs, actuator history are preserved.
+    Sensor/actuator configs are cascade-deleted (they belong to the device).
 
     Args:
         esp_id: ESP device ID (e.g., ESP_MOCK_E92BAA)
@@ -626,29 +632,36 @@ async def delete_device(
         HTTPException: 404 if not found
     """
     esp_repo = ESPRepository(db)
-    sensor_repo = SensorRepository(db)
-    actuator_repo = ActuatorRepository(db)
 
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
         raise ESPNotFoundError(esp_id)
 
-    # Delete associated sensors and actuators first
-    sensors = await sensor_repo.get_by_esp(device.id)
-    for sensor in sensors:
-        await sensor_repo.delete(sensor.id)
+    # Stop simulation if this is a running mock device
+    if device.hardware_type == "MOCK_ESP32":
+        try:
+            from ..deps import get_simulation_scheduler
 
-    actuators = await actuator_repo.get_by_esp(device.id)
-    for actuator in actuators:
-        await actuator_repo.delete(actuator.id)
+            sim_scheduler = get_simulation_scheduler()
+            if sim_scheduler.is_mock_active(esp_id):
+                await sim_scheduler.stop_mock(esp_id)
+                logger.info(f"Stopped simulation for {esp_id} before soft-delete")
+        except RuntimeError:
+            pass  # Scheduler not initialized
 
-    # Delete the device
-    await db.delete(device)
+    # Resolve open alerts for this device before deletion (Fix E — NB4)
+    from ...db.repositories.notification_repo import NotificationRepository
+
+    notif_repo = NotificationRepository(db)
+    resolved_count = await notif_repo.resolve_alerts_for_device(esp_id)
+    if resolved_count > 0:
+        logger.info(f"Auto-resolved {resolved_count} alerts for deleted device {esp_id}")
+
+    # Soft-delete the device (sets deleted_at, status='deleted')
+    await esp_repo.soft_delete(esp_id, deleted_by=current_user.username)
     await db.commit()
 
-    logger.warning(
-        f"ESP device deleted: {esp_id} (including {len(sensors)} sensors, {len(actuators)} actuators) by {current_user.username}"
-    )
+    logger.warning(f"ESP device soft-deleted: {esp_id} by {current_user.username}")
 
 
 # =============================================================================

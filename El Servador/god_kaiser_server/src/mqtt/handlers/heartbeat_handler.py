@@ -198,9 +198,13 @@ class HeartbeatHandler:
                         logger.warning(f"Failed to audit log device_online: {audit_error}")
 
                 # Step 5: Update device status and last_seen (for online/approved devices)
-                # Use timezone-aware datetime for consistency with timeout checks
-                ts_value = payload["ts"] / 1000 if payload["ts"] > 1e10 else payload["ts"]
-                last_seen = datetime.fromtimestamp(ts_value, tz=timezone.utc)
+                # BUG-06 fix: ts<=0 (Wokwi without NTP) → use server timestamp
+                ts_raw = payload["ts"]
+                if ts_raw is None or ts_raw <= 0:
+                    last_seen = datetime.now(timezone.utc)
+                else:
+                    ts_value = ts_raw / 1000 if ts_raw > 1e10 else ts_raw
+                    last_seen = datetime.fromtimestamp(ts_value, tz=timezone.utc)
                 await esp_repo.update_status(esp_id_str, "online", last_seen)
 
                 # Step 5b: Clear stale retained LWT message from broker
@@ -373,11 +377,20 @@ class HeartbeatHandler:
             master_zone_id = payload.get("master_zone_id", "")
             zone_assigned = payload.get("zone_assigned", False)
 
-            # Create new ESP device with pending_approval status
+            # Detect mock devices by ID prefix — mocks skip approval gate
+            is_mock = esp_id.startswith("MOCK_") or esp_id.startswith("ESP_MOCK_")
+            if is_mock:
+                hardware_type = "MOCK_ESP32"
+                device_status = "online"
+            else:
+                hardware_type = payload.get("hardware_type", "ESP32_WROOM")
+                device_status = "pending_approval"
+
+            # Create new ESP device
             new_esp = ESPDevice(
                 device_id=esp_id,
-                hardware_type="ESP32_WROOM",  # Default, can be updated later
-                status="pending_approval",  # Requires admin approval
+                hardware_type=hardware_type,
+                status=device_status,
                 discovered_at=datetime.now(timezone.utc),  # Audit field
                 kaiser_id=constants.get_kaiser_id(),  # WP2-Fix1: Default kaiser_id from config
                 ip_address=payload.get("wifi_ip"),  # IP from heartbeat (if ESP sends it)
@@ -403,7 +416,8 @@ class HeartbeatHandler:
             await session.flush()  # Get ID without committing
 
             logger.info(
-                f"🔔 New ESP discovered: {esp_id} (pending_approval) "
+                f"🔔 New ESP discovered: {esp_id} "
+                f"(hardware_type={hardware_type}, status={device_status}) "
                 f"(Zone: {zone_id or 'unassigned'}, "
                 f"Sensors: {payload.get('sensor_count', 0)}, "
                 f"Actuators: {payload.get('actuator_count', 0)})"

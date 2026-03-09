@@ -273,7 +273,7 @@ class TestSensorHandlerValidation:
 
     def test_validate_missing_required_fields(self, sensor_handler):
         """Payload with missing required fields fails."""
-        required_fields = ["ts", "esp_id", "gpio", "sensor_type", "raw", "raw_mode"]
+        required_fields = ["ts", "esp_id", "gpio", "sensor_type", "raw"]
 
         for field in required_fields:
             payload = {
@@ -290,6 +290,21 @@ class TestSensorHandlerValidation:
 
             assert result["valid"] is False, f"Should fail for missing {field}"
             assert field in result["error"]
+
+    def test_validate_raw_mode_defaults_to_true(self, sensor_handler):
+        """Payload without raw_mode should default to True."""
+        payload = {
+            "ts": int(time.time()),
+            "esp_id": "ESP_12AB34CD",
+            "gpio": 34,
+            "sensor_type": "ph",
+            "raw": 2150,
+        }
+
+        result = sensor_handler._validate_payload(payload)
+
+        assert result["valid"] is True
+        assert payload["raw_mode"] is True
 
     def test_validate_wrong_types(self, sensor_handler):
         """Payload with wrong types fails."""

@@ -13,7 +13,7 @@ import { logicApi } from '@/api/logic'
 import type { LogicRuleCreate, LogicRuleUpdate } from '@/api/logic'
 import { extractConnections, extractEspIdsFromRule } from '@/types/logic'
 import { createLogger } from '@/utils/logger'
-import type { LogicRule, LogicConnection, ExecutionHistoryItem } from '@/types/logic'
+import type { LogicRule, LogicConnection, ExecutionHistoryItem, ActuatorAction } from '@/types/logic'
 import { websocketService, type WebSocketMessage } from '@/services/websocket'
 import { useEspStore } from '@/stores/esp'
 
@@ -339,6 +339,40 @@ export const useLogicStore = defineStore('logic', () => {
   }
 
   /**
+   * Get all rules that target a specific actuator (via esp_id + gpio in actions).
+   * Filters on action-level: type 'actuator' or 'actuator_command' with matching esp_id + gpio.
+   * Sorted by priority (lower = higher priority).
+   */
+  function getRulesForActuator(espId: string, gpio: number): LogicRule[] {
+    return rules.value
+      .filter(rule =>
+        rule.actions.some(action =>
+          (action.type === 'actuator' || action.type === 'actuator_command') &&
+          (action as ActuatorAction).esp_id === espId &&
+          (action as ActuatorAction).gpio === gpio
+        )
+      )
+      .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))
+  }
+
+  /**
+   * Get the most recent execution for a specific actuator.
+   * Uses getRulesForActuator() to find relevant rule IDs,
+   * then filters executionHistory by those IDs, sorted DESC by triggered_at.
+   */
+  function getLastExecutionForActuator(espId: string, gpio: number): ExecutionHistoryItem | null {
+    const actuatorRules = getRulesForActuator(espId, gpio)
+    if (actuatorRules.length === 0) return null
+
+    const ruleIds = new Set(actuatorRules.map(r => r.id))
+
+    return executionHistory.value
+      .filter(exec => ruleIds.has(exec.rule_id))
+      .sort((a, b) => new Date(b.triggered_at).getTime() - new Date(a.triggered_at).getTime())
+      [0] ?? null
+  }
+
+  /**
    * Clear error state
    */
   function clearError(): void {
@@ -643,6 +677,8 @@ export const useLogicStore = defineStore('logic', () => {
     getRuleById,
     getRulesForZone,
     getZonesForRule,
+    getRulesForActuator,
+    getLastExecutionForActuator,
     clearError,
 
     // Execution History

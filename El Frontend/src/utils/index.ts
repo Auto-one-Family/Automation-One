@@ -31,8 +31,8 @@ export * from './zoneColors'
 // Actuator defaults
 export * from './actuatorDefaults'
 
-// Subzone helpers (normalize "Keine Subzone" for API)
-export { normalizeSubzoneId } from './subzoneHelpers'
+// Subzone helpers (normalize "Keine Subzone" for API, German slug)
+export { normalizeSubzoneId, slugifyGerman } from './subzoneHelpers'
 
 // Logger utility
 export { createLogger } from './logger'

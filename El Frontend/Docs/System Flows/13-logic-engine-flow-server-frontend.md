@@ -663,7 +663,7 @@ if cond_type in ("sensor_threshold", "sensor"):
 ```python
 # Zeile 469-483
 elif cond_type == "time_window":
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     start_hour = condition.get("start_hour", 0)
     end_hour = condition.get("end_hour", 24)
     days = condition.get("days_of_week")  # [0,1,2,3,4] = Mon-Fri

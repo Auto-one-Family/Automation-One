@@ -248,6 +248,8 @@ export function isMultiValueSensor(sensor: MockSensor): boolean {
 }
 
 export interface MockSensor {
+  /** Sensor config UUID from database (primary identifier for multi-value sensors) */
+  config_id?: string
   gpio: number
   sensor_type: string
   name: string | null
@@ -280,6 +282,14 @@ export interface MockSensor {
   multi_values?: Record<string, MultiValueEntry> | null
   /** Is this a multi-value sensor? */
   is_multi_value?: boolean
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Interface / Address Fields (for Orbital display)
+  // ═══════════════════════════════════════════════════════════════════════════
+  /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL */
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | null
+  /** I2C address (0-127) for I2C sensors */
+  i2c_address?: number | null
 }
 
 export interface MockActuator {
@@ -290,6 +300,7 @@ export interface MockActuator {
   pwm_value: number
   emergency_stopped: boolean
   last_command: string | null
+  subzone_id?: string | null
   // Config verification status from ESP32
   config_status?: 'pending' | 'applied' | 'failed' | null
   config_error?: string | null
@@ -423,6 +434,8 @@ export type MessageType =
   | 'sequence_completed'
   | 'sequence_error'
   | 'sequence_cancelled'
+  // Sensor config lifecycle
+  | 'sensor_config_deleted'
   // System events
   | 'logic_execution'
   | 'system_event'
@@ -569,7 +582,7 @@ export type {
   ExecutionHistoryItem,
 } from './logic'
 
-export { generateRuleDescription, extractConnections } from './logic'
+export { generateRuleDescription, extractConnections, formatConditionShort } from './logic'
 
 // Legacy LogicExecution (kept for backward compatibility)
 export interface LogicExecution {
@@ -816,9 +829,6 @@ export interface ActuatorConfigCreate {
   metadata?: Record<string, unknown> | null
   /** Subzone ID to assign this actuator to. Null/empty = remove from all subzones */
   subzone_id?: string | null
-  // Phase 7: Actuator Sidebar fields
-  aux_gpio?: number | null       // 255 = nicht verwendet (für Ventile: Direction-Pin)
-  inverted_logic?: boolean | null  // LOW = ON (für Pumpen, Ventile, Relais)
 }
 
 export interface ActuatorConfigResponse {
@@ -835,6 +845,7 @@ export interface ActuatorConfigResponse {
   servo_min_pulse: number | null
   servo_max_pulse: number | null
   metadata: Record<string, unknown> | null
+  subzone_id?: string | null
   // Config status from ESP32 verification (Phase 2: write-after-verification)
   config_status?: 'pending' | 'applied' | 'failed' | null
   config_error?: string | null
@@ -929,6 +940,26 @@ export interface ZoneInfo {
   zone_name: string | null
   is_zone_master: boolean
   kaiser_id: string | null
+}
+
+/**
+ * Zone list entry from GET /v1/zone/zones.
+ * Includes empty zones (from ZoneContext table, 0 devices).
+ */
+export interface ZoneListEntry {
+  zone_id: string
+  zone_name: string | null
+  device_count: number
+  sensor_count: number
+  actuator_count: number
+}
+
+/**
+ * Response from GET /v1/zone/zones.
+ */
+export interface ZoneListResponse {
+  zones: ZoneListEntry[]
+  total: number
 }
 
 /**

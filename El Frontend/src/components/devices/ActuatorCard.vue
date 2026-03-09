@@ -3,15 +3,21 @@
  * ActuatorCard — Unified actuator card for config and monitor views
  *
  * Config mode: Name, type, ESP-ID, GPIO, state badge, toggle, settings hint
- * Monitor mode: State badge + toggle button (with ConfirmDialog in parent)
+ * Monitor mode: State badge (read-only), PWM value for PWM actuators, no toggle,
+ *               linked rules with status dots, last execution with trigger reason
  */
 import { computed } from 'vue'
 import { Power, ChevronRight } from 'lucide-vue-next'
 import type { ActuatorWithContext } from '@/composables/useZoneGrouping'
+import type { LogicRule, ExecutionHistoryItem } from '@/types/logic'
+import { formatConditionShort } from '@/types/logic'
+import { formatRelativeTime } from '@/utils/formatters'
 
 interface Props {
   actuator: ActuatorWithContext
   mode: 'monitor' | 'config'
+  linkedRules?: LogicRule[]
+  lastExecution?: ExecutionHistoryItem | null
 }
 
 const props = defineProps<Props>()
@@ -32,6 +38,16 @@ const servedSubzoneLabel = computed(() => {
   if (typeof name === 'string' && name.trim()) return name
   if (typeof id === 'string' && id.trim()) return id
   return '—'
+})
+
+// Monitor-mode: show max 2 rules
+const displayedRules = computed(() => (props.linkedRules ?? []).slice(0, 2))
+
+// Monitor-mode: PWM percentage badge
+const pwmPercent = computed(() => {
+  const val = props.actuator.pwm_value
+  if (val != null && val > 0) return `${Math.round(val * 100)}%`
+  return null
 })
 
 function handleClick() {
@@ -82,17 +98,54 @@ function handleToggle(event: Event) {
         <span :class="['badge', actuator.state ? 'badge-success' : 'badge-gray']">
           {{ actuator.state ? 'Ein' : 'Aus' }}
         </span>
+        <span v-if="mode === 'monitor' && pwmPercent" class="actuator-card__pwm-badge">
+          {{ pwmPercent }}
+        </span>
         <span v-if="actuator.emergency_stopped" class="badge badge-danger">
           Not-Stopp
         </span>
       </div>
+      <span v-if="mode === 'monitor' && actuator.actuator_type === 'pwm' && !pwmPercent" class="actuator-card__pwm">
+        PWM: 0%
+      </span>
       <button
+        v-if="mode !== 'monitor'"
         class="btn-secondary btn-sm flex-shrink-0 touch-target"
         :disabled="actuator.emergency_stopped"
         @click="handleToggle"
       >
         {{ actuator.state ? 'Ausschalten' : 'Einschalten' }}
       </button>
+    </div>
+
+    <!-- Monitor-mode: Linked rules -->
+    <div v-if="mode === 'monitor' && linkedRules?.length" class="actuator-card__rules">
+      <div v-for="rule in displayedRules" :key="rule.id" class="actuator-card__rule-item">
+        <span
+          class="actuator-card__rule-dot"
+          :class="{
+            'is-active': rule.enabled,
+            'is-error': rule.last_execution_success === false,
+          }"
+        />
+        <span class="actuator-card__rule-name">{{ rule.name }}</span>
+        <span class="actuator-card__rule-condition">{{ formatConditionShort(rule) }}</span>
+      </div>
+      <router-link
+        v-if="linkedRules.length > 2"
+        to="/logic"
+        class="actuator-card__rules-more"
+      >
+        +{{ linkedRules.length - 2 }} weitere
+      </router-link>
+    </div>
+
+    <!-- Monitor-mode: Last execution -->
+    <div v-if="mode === 'monitor' && lastExecution" class="actuator-card__last-execution">
+      Zuletzt: {{ formatRelativeTime(lastExecution.triggered_at) }}
+      <span v-if="lastExecution.trigger_reason" class="actuator-card__execution-reason">
+        ({{ lastExecution.trigger_reason }})
+      </span>
     </div>
   </div>
 </template>
@@ -195,5 +248,96 @@ function handleToggle(event: Event) {
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
+}
+
+.actuator-card__pwm {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.actuator-card__pwm-badge {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-quaternary, rgba(255, 255, 255, 0.04));
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+/* Rules section */
+.actuator-card__rules {
+  border-top: 1px solid var(--glass-border);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.actuator-card__rule-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  min-width: 0;
+}
+
+.actuator-card__rule-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.actuator-card__rule-dot.is-active {
+  background: var(--color-status-success);
+}
+
+.actuator-card__rule-dot.is-error {
+  background: var(--color-status-error);
+}
+
+.actuator-card__rule-name {
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.actuator-card__rule-condition {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 2;
+  min-width: 0;
+}
+
+.actuator-card__rules-more {
+  font-size: var(--text-xs);
+  color: var(--color-iridescent-2);
+  text-decoration: none;
+}
+
+.actuator-card__rules-more:hover {
+  text-decoration: underline;
+}
+
+/* Last execution */
+.actuator-card__last-execution {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--space-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actuator-card__execution-reason {
+  color: var(--color-text-secondary);
 }
 </style>

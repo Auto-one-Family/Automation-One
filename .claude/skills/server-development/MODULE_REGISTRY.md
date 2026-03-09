@@ -83,7 +83,7 @@ class ValidationResult:
 | `get_history()` | `sensor_id, start, end, limit` | `List[SensorData]` | Zeitbereich |
 | `create_config()` | `esp_id, config: SensorConfigCreate` | `SensorConfig` | Neue Sensor-Config |
 | `update_config()` | `sensor_id, config: SensorConfigUpdate` | `SensorConfig` | Config aktualisieren |
-| `delete_config()` | `sensor_id: int` | `bool` | Config löschen |
+| `delete_config()` | `esp_id: str, gpio: int \| None, config_id: uuid.UUID \| None` | `bool` | Config löschen (ID-basiert oder GPIO-basiert) |
 | `get_by_esp()` | `esp_id: str` | `List[SensorConfig]` | Alle Sensoren eines ESP |
 
 ---
@@ -114,11 +114,11 @@ class ValidationResult:
 | `approve()` | `device_id: str` | `ESPDevice` | Pending ESP genehmigen |
 | `reject()` | `device_id: str, reason: str` | `bool` | Pending ESP ablehnen |
 | `get_by_id()` | `device_id: str` | `Optional[ESPDevice]` | ESP nach ID |
-| `get_all()` | `include_offline: bool` | `List[ESPDevice]` | Alle ESPs |
+| `get_all()` | `include_offline: bool, include_deleted: bool` | `List[ESPDevice]` | Alle ESPs (filtered by soft-delete default) |
 | `get_online()` | - | `List[ESPDevice]` | Nur online ESPs |
 | `get_pending()` | - | `List[ESPDevice]` | Pending Approvals |
 | `update_status()` | `device_id, is_online, metadata` | `ESPDevice` | Status aktualisieren |
-| `delete()` | `device_id: str` | `bool` | ESP löschen |
+| `delete()` | `device_id: str` | `bool` | ESP soft-delete (setzt deleted_at, Zeitreihen bleiben erhalten) |
 | `push_config()` | `device_id: str` | `bool` | Config via MQTT pushen |
 | `reboot()` | `device_id: str` | `bool` | Reboot-Command senden |
 
@@ -202,6 +202,8 @@ class ValidationResult:
 | `recover_mocks()` | - | `int` | Mocks aus DB wiederherstellen |
 | `get_running_mocks()` | - | `List[str]` | Liste aktiver Mock-ESP IDs |
 | `is_mock_running()` | `esp_id: str` | `bool` | Prüft Mock-Status |
+
+> **BEKANNTES PROBLEM (NB6, 2026-03-07):** Sensor-Key in `simulation_config` ist `{gpio}_{sensor_type}` (Zeile ~576). Bei 2+ Sensoren gleichen Typs auf gleichem GPIO (DS18B20 OneWire, SHT31 I2C) wird der erste überschrieben. Warnung im Log (`"Sensor X already active"`) aber kein Abbruch. Fix: Key muss Adresse enthalten.
 
 ---
 
@@ -318,10 +320,10 @@ class ValidationResult:
 
 | Method | Path | Auth | Request | Response |
 |--------|------|------|---------|----------|
-| GET | `/devices` | Active | - | `List[ESPDevice]` |
+| GET | `/devices` | Active | `?include_deleted=true` | `List[ESPDevice]` |
 | GET | `/devices/{esp_id}` | Active | - | `ESPDevice` |
 | POST | `/register` | Operator | `ESPRegister` | `ESPDevice` |
-| DELETE | `/devices/{esp_id}` | Operator | - | `SuccessResponse` |
+| DELETE | `/devices/{esp_id}` | Operator | - | `SuccessResponse` (soft-delete) |
 | POST | `/approval/approve` | Operator | `ApprovalRequest` | `ESPDevice` |
 | POST | `/approval/reject` | Operator | `RejectRequest` | `SuccessResponse` |
 | GET | `/pending` | Operator | - | `List[ESPDevice]` |
@@ -341,7 +343,7 @@ class ValidationResult:
 | GET | `/{sensor_id}` | Active | - | `SensorConfig` |
 | POST | `/` | Operator | `SensorConfigCreate` | `SensorConfig` |
 | PUT | `/{sensor_id}` | Operator | `SensorConfigUpdate` | `SensorConfig` |
-| DELETE | `/{sensor_id}` | Operator | - | `SuccessResponse` |
+| DELETE | `/{esp_id}/{config_id}` | Operator | - | `SuccessResponse` |
 | GET | `/{sensor_id}/data` | Active | `start`, `end`, `limit` | `List[SensorData]` |
 | GET | `/{sensor_id}/latest` | Active | - | `SensorData` |
 | POST | `/{sensor_id}/trigger` | Operator | - | `SuccessResponse` |
@@ -455,10 +457,10 @@ Wichtige Endpoints:
 
 | Model | Tabelle | Felder | Relationships |
 |-------|---------|--------|---------------|
-| **ESPDevice** | `esps` | `esp_id (PK)`, `name`, `zone_id`, `master_zone_id`, `is_online`, `is_mock`, `status`, `last_heartbeat`, `metadata (JSON)`, `created_at` | → SensorConfig, ActuatorConfig, SubzoneConfig |
+| **ESPDevice** | `esps` | `esp_id (PK)`, `name`, `zone_id`, `master_zone_id`, `is_online`, `is_mock`, `status`, `last_heartbeat`, `metadata (JSON)`, `created_at`, `deleted_at` (soft-delete), `deleted_by` | → SensorConfig, ActuatorConfig, SubzoneConfig |
 | **SensorConfig** | `sensor_configs` | `id (PK)`, `esp_id (FK)`, `gpio`, `sensor_type`, `sensor_name`, `subzone_id`, `active`, `raw_mode`, `operating_mode`, `measurement_interval_ms`, `i2c_address`, `onewire_address`, `calibration (JSON)` | → SensorData |
 | **ActuatorConfig** | `actuator_configs` | `id (PK)`, `esp_id (FK)`, `gpio`, `actuator_type`, `name`, `subzone_id`, `active`, `critical`, `inverted`, `default_state`, `default_pwm` | → ActuatorState, ActuatorHistory |
-| **SensorData** | `sensor_data` | `id (PK)`, `sensor_id (FK)`, `raw_value`, `processed_value`, `unit`, `quality`, `timestamp` | - |
+| **SensorData** | `sensor_data` | `id (PK)`, `sensor_id (FK)`, `esp_id (FK SET NULL)`, `raw_value`, `processed_value`, `unit`, `quality`, `device_name`, `zone_id`, `subzone_id`, `timestamp` | - |
 | **ActuatorState** | `actuator_states` | `id (PK)`, `actuator_id (FK)`, `state`, `value`, `pwm`, `runtime_ms`, `emergency`, `last_command`, `error_message`, `updated_at` | - |
 | **ActuatorHistory** | `actuator_history` | `id (PK)`, `actuator_id (FK)`, `command`, `value`, `success`, `response`, `timestamp` | - |
 
@@ -608,7 +610,7 @@ CIRCUIT_BREAKER_MQTT_RECOVERY_TIMEOUT=30
 
 | Repository | Model | Spezial-Queries |
 |-----------|-------|-----------------|
-| ESPRepository | ESPDevice | `get_by_device_id()`, `get_running_mocks()`, `get_online()` |
+| ESPRepository | ESPDevice | `get_by_device_id(include_deleted)`, `soft_delete()`, `get_running_mocks()`, `get_online()`, `rebuild_simulation_config(device, sensor_configs)` |
 | SensorRepository | SensorConfig | `get_by_esp_gpio_and_type()`, `get_by_esp_gpio_type_and_i2c()`, `get_by_esp_gpio_type_and_onewire()` |
 | ActuatorRepository | ActuatorConfig | `get_by_esp_and_gpio()`, `get_state()`, `log_command()` |
 | LogicRepository | CrossESPLogic | `get_rules_by_trigger_sensor()`, `get_enabled_rules()` |
@@ -641,6 +643,11 @@ CIRCUIT_BREAKER_MQTT_RECOVERY_TIMEOUT=30
 | SHT31TempProcessor | sht31.py | `sht31_temp` | `°C` | SHT31 Temperatur |
 | SHT31HumidityProcessor | sht31.py | `sht31_humidity` | `%` | SHT31 Feuchtigkeit |
 | DS18B20Processor | ds18b20.py | `ds18b20` | `°C` | DS18B20 Temperatur |
+| BMP280 (temp) | temperature.py | `bmp280_temp` | `°C` | BMP280 Temperatur (via sensor_type_registry) |
+| BMP280 (pressure) | pressure.py | `bmp280_pressure` | `hPa` | BMP280 Luftdruck (via sensor_type_registry) |
+| BME280 (temp) | temperature.py | `bme280_temp` | `°C` | BME280 Temperatur (via sensor_type_registry) |
+| BME280 (pressure) | pressure.py | `bme280_pressure` | `hPa` | BME280 Luftdruck (via sensor_type_registry) |
+| BME280 (humidity) | humidity.py | `bme280_humidity` | `%` | BME280 Feuchtigkeit (via sensor_type_registry) |
 
 ### Library Interface
 

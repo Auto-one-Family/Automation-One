@@ -138,6 +138,8 @@ class TestFullConfigCycle:
                     mock_sensor.id = 100
                     mock_sensor_repo = MagicMock()
                     mock_sensor_repo.get_by_esp_and_gpio = AsyncMock(return_value=mock_sensor)
+                    mock_sensor_repo.get_all_by_esp_and_gpio = AsyncMock(return_value=[mock_sensor])
+                    mock_sensor_repo.get_by_esp = AsyncMock(return_value=[mock_sensor])
                     mock_sensor_repo.update = AsyncMock()
                     mock_sensor_repo_class.return_value = mock_sensor_repo
 

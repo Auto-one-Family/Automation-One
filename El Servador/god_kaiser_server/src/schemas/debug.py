@@ -65,8 +65,9 @@ class MockSensorConfig(BaseModel):
     sensor_type: str = Field(..., description="Sensor type (DS18B20, SHT31, pH, etc.)")
     name: Optional[str] = Field(None, description="Human-readable sensor name")
     subzone_id: Optional[str] = Field(None, description="Subzone assignment for this sensor")
-    raw_value: float = Field(
-        0.0, description="Base sensor value (used as base_value for simulation)"
+    raw_value: Optional[float] = Field(
+        None,
+        description="Base sensor value (used as base_value for simulation). None = use plausible physical default.",
     )
     unit: str = Field("", description="Unit of measurement")
     quality: QualityLevel = Field(QualityLevel.GOOD, description="Data quality")
@@ -82,8 +83,8 @@ class MockSensorConfig(BaseModel):
     )
     onewire_address: Optional[str] = Field(
         None,
-        max_length=16,
-        description="OneWire ROM address for DS18B20 sensors (16 hex chars, e.g., '28FF641E8D3C0C79')",
+        max_length=32,
+        description="OneWire ROM address for DS18B20 sensors (16 hex chars, e.g., '28FF641E8D3C0C79', or SIM_ prefix for mocks)",
     )
     i2c_address: Optional[int] = Field(
         None, ge=0, le=127, description="I2C address for I2C sensors (e.g., 0x44 = 68 for SHT31)"
@@ -276,6 +277,8 @@ class MockSensorResponse(BaseModel):
     quality: str
     raw_mode: bool
     last_read: Optional[datetime]
+    i2c_address: Optional[int] = None
+    interface_type: Optional[str] = None
 
 
 class MockActuatorResponse(BaseModel):

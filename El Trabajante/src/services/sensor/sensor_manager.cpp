@@ -338,6 +338,34 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
             // Don't fail - Wokwi simulation doesn't have real I2C devices
         }
 
+        // BMP280/BME280: Write ctrl_meas register to exit sleep mode
+        // BMP280 starts in sleep mode after power-on (datasheet BST-BMP280-DS001-26)
+        // BME280 additionally needs ctrl_hum (0xF2) BEFORE ctrl_meas (0xF4)
+        String device_type_str = String(capability->device_type);
+        if (device_type_str == "bme280") {
+            // BME280: ctrl_hum (0xF2) = 0x01 (humidity 1x oversampling)
+            // MUST be written BEFORE ctrl_meas for changes to take effect
+            Wire.beginTransmission(i2c_address);
+            Wire.write(0xF2);
+            Wire.write(0x01);
+            Wire.endTransmission();
+            // BME280: ctrl_meas (0xF4) = 0x27 (temp 1x, press 1x, normal mode)
+            Wire.beginTransmission(i2c_address);
+            Wire.write(0xF4);
+            Wire.write(0x27);
+            Wire.endTransmission();
+            delay(10);
+            LOG_I(TAG, "Sensor Manager: BME280 init sequence sent (ctrl_hum + ctrl_meas)");
+        } else if (device_type_str == "bmp280") {
+            // BMP280: ctrl_meas (0xF4) = 0x27 (temp 1x, press 1x, normal mode)
+            Wire.beginTransmission(i2c_address);
+            Wire.write(0xF4);
+            Wire.write(0x27);
+            Wire.endTransmission();
+            delay(10);
+            LOG_I(TAG, "Sensor Manager: BMP280 init sequence sent (ctrl_meas)");
+        }
+
         // Add I2C sensor (NO GPIO reservation!)
         sensors_[sensor_count_] = config;
         sensors_[sensor_count_].active = true;
@@ -1475,13 +1503,6 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
         payload += String(reading.i2c_address);
     }
 
-    // Quality hint (if set by sanity checks)
-    if (!reading.quality.isEmpty()) {
-        payload += ",\"quality\":\"";
-        payload += reading.quality;
-        payload += "\"";
-    }
-    
     payload += "}";
     
     return payload;

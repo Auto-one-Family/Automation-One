@@ -90,6 +90,25 @@ const showTargetConfig = ref(false)
 
 const activeTarget = computed(() => dashStore.activeLayout?.target ?? null)
 
+// Zone targeting for monitor placements
+const selectedZoneId = ref<string | null>(null)
+
+// Sync selectedZoneId from active layout
+watch(() => dashStore.activeLayout, (layout) => {
+  selectedZoneId.value = layout?.scope === 'zone' ? (layout.zoneId ?? null) : null
+}, { immediate: true })
+
+// Available zones from ESP devices
+const availableZones = computed(() => {
+  const zoneMap = new Map<string, string>()
+  for (const d of espStore.devices) {
+    if (d.zone_id) {
+      zoneMap.set(d.zone_id, d.zone_name || d.zone_id)
+    }
+  }
+  return Array.from(zoneMap, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+})
+
 function setTarget(view: 'monitor' | 'hardware', placement: 'page' | 'inline' | 'side-panel' | 'bottom-panel') {
   const layoutId = dashStore.activeLayoutId
   if (!layoutId) return
@@ -97,10 +116,25 @@ function setTarget(view: 'monitor' | 'hardware', placement: 'page' | 'inline' | 
   showTargetConfig.value = false
 }
 
+function setZoneScope(zoneId: string | null) {
+  const layout = dashStore.activeLayout
+  if (!layout) return
+  const idx = dashStore.layouts.findIndex(l => l.id === layout.id)
+  if (idx === -1) return
+  selectedZoneId.value = zoneId
+  dashStore.layouts[idx] = {
+    ...dashStore.layouts[idx],
+    scope: zoneId ? 'zone' : 'cross-zone',
+    zoneId: zoneId || undefined,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
 function clearTarget() {
   const layoutId = dashStore.activeLayoutId
   if (!layoutId) return
   dashStore.setLayoutTarget(layoutId, null)
+  selectedZoneId.value = null
   showTargetConfig.value = false
 }
 
@@ -242,6 +276,13 @@ watch(() => dashStore.activeLayoutId, (newId) => {
     nextTick(() => {
       initGrid()
     })
+  }
+})
+
+// Show toast when dashboard sync fails
+watch(() => dashStore.lastSyncError, (err) => {
+  if (err) {
+    toast.error(`Layout konnte nicht gespeichert werden: ${err}`)
   }
 })
 
@@ -664,18 +705,32 @@ function handleImport() {
               </span>
             </button>
             <button
-              :class="['dashboard-builder__target-option', { 'dashboard-builder__target-option--selected': activeTarget?.view === 'hardware' && activeTarget?.placement === 'inline' }]"
-              @click="setTarget('hardware', 'inline')"
+              :class="['dashboard-builder__target-option', { 'dashboard-builder__target-option--selected': activeTarget?.view === 'hardware' && activeTarget?.placement === 'side-panel' }]"
+              @click="setTarget('hardware', 'side-panel')"
             >
               <span class="dashboard-builder__target-label">Übersicht — Seitenpanel</span>
               <span class="dashboard-builder__target-desc">Fixiert rechts in der Hardware-Übersicht</span>
-              <span v-if="targetSlotHolder('hardware', 'inline')" class="dashboard-builder__target-conflict">
-                Belegt von: {{ targetSlotHolder('hardware', 'inline') }} — wird übernommen
+              <span v-if="targetSlotHolder('hardware', 'side-panel')" class="dashboard-builder__target-conflict">
+                Belegt von: {{ targetSlotHolder('hardware', 'side-panel') }} — wird übernommen
               </span>
             </button>
             <button v-if="activeTarget" class="dashboard-builder__target-option dashboard-builder__target-option--clear" @click="clearTarget">
               <span class="dashboard-builder__target-label">Anzeigeort entfernen</span>
             </button>
+            <!-- Zone scope selector (only for monitor placements) -->
+            <div v-if="activeTarget?.view === 'monitor' && availableZones.length > 0" class="dashboard-builder__zone-scope">
+              <div class="dashboard-builder__target-hint">Zone-Filter (optional)</div>
+              <select
+                class="dashboard-builder__zone-select"
+                :value="selectedZoneId ?? ''"
+                @change="setZoneScope(($event.target as HTMLSelectElement).value || null)"
+              >
+                <option value="">Alle Zonen (Cross-Zone)</option>
+                <option v-for="zone in availableZones" :key="zone.id" :value="zone.id">
+                  {{ zone.name }}
+                </option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -1035,6 +1090,29 @@ function handleImport() {
 
 .dashboard-builder__target-option--clear:hover .dashboard-builder__target-label {
   color: var(--color-status-alarm);
+}
+
+.dashboard-builder__zone-scope {
+  border-top: 1px solid var(--glass-border);
+  margin-top: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+}
+
+.dashboard-builder__zone-select {
+  width: 100%;
+  margin-top: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.dashboard-builder__zone-select:focus {
+  outline: 2px solid var(--color-iridescent-2);
+  outline-offset: -1px;
 }
 
 /* Content Area */

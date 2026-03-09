@@ -138,9 +138,9 @@ App.vue mount → espStore init → useWebSocket({ autoConnect: true })
 | Base URL | `/api/v1` |
 | Timeout | 30000ms |
 | Auth | Request Interceptor: Bearer Token aus authStore |
-| 401 | Response Interceptor: refreshTokens → Retry |
+| 401 | Response Interceptor: refreshTokens → Retry (Promise-Queue: 1 Refresh bei N parallelen 401s) |
 | Loop Guard | Skip fuer `/auth/refresh`, `/auth/login`, `/auth/setup`, `/auth/status` |
-| Fallback | Bei Refresh-Fehler → `clearAuth()` + Redirect `/login` |
+| Fallback | Bei Refresh-Fehler → `processQueue(error)` + `clearAuth()` + Redirect `/login` |
 
 ### 16 API-Module
 

@@ -18,7 +18,7 @@ Architektur:
 
 from typing import Dict, Optional, Callable, Any, List
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -241,7 +241,7 @@ class CentralScheduler:
             args=args or [],
             kwargs=kwargs or {},
             replace_existing=True,
-            next_run_time=datetime.now() if start_immediately else None,
+            next_run_time=datetime.now(timezone.utc) if start_immediately else None,
         )
 
         # Stats initialisieren
@@ -512,7 +512,7 @@ class CentralScheduler:
         job_id = event.job_id
         if job_id in self._job_stats:
             self._job_stats[job_id].executions += 1
-            self._job_stats[job_id].last_run = datetime.now()
+            self._job_stats[job_id].last_run = datetime.now(timezone.utc)
 
     def _on_job_error(self, event: JobExecutionEvent) -> None:
         """Handler für Job-Fehler."""

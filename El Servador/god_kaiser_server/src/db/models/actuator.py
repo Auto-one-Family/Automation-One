@@ -223,13 +223,13 @@ class ActuatorState(Base):
         doc="Primary key (UUID)",
     )
 
-    # Foreign Keys
-    esp_id: Mapped[uuid.UUID] = mapped_column(
+    # Foreign Keys (SET NULL — preserve actuator state history after device deletion, T02-Fix1)
+    esp_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("esp_devices.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("esp_devices.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
-        doc="Foreign key to ESP device",
+        doc="Foreign key to ESP device (nullable for data preservation after device deletion)",
     )
 
     # Actuator Information
@@ -353,13 +353,13 @@ class ActuatorHistory(Base):
         doc="Primary key (UUID)",
     )
 
-    # Foreign Keys
-    esp_id: Mapped[uuid.UUID] = mapped_column(
+    # Foreign Keys (SET NULL — preserve actuator command history after device deletion, T02-Fix1)
+    esp_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("esp_devices.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("esp_devices.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
-        doc="Foreign key to ESP device",
+        doc="Foreign key to ESP device (nullable for data preservation after device deletion)",
     )
 
     # Actuator Information

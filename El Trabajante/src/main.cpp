@@ -881,17 +881,24 @@ void setup() {
           String command = doc["command"].as<String>();
           String auth_token = doc["auth_token"].as<String>();
 
-          // Validate auth_token (load from NVS or use default: ESP-ID)
-          String stored_token = storageManager.getStringObj("emergency_auth", g_system_config.esp_id);
+          // Validate auth_token against stored ESP emergency token
+          // Fail-open: If no token configured, accept any emergency stop (safety first)
+          String stored_token = storageManager.getStringObj("emergency_auth", "");
 
-          if (auth_token != stored_token) {
+          if (stored_token.length() > 0 && auth_token != stored_token) {
             LOG_E(TAG, "╔════════════════════════════════════════╗");
             LOG_E(TAG, "║  UNAUTHORIZED EMERGENCY-STOP ATTEMPT  ║");
             LOG_E(TAG, "╚════════════════════════════════════════╝");
-            LOG_E(TAG, "Invalid auth_token for emergency command");
+            LOG_E(TAG, "[SECURITY] ESP emergency-stop rejected: invalid token");
+            errorTracker.trackError(3500, ERROR_SEVERITY_CRITICAL,
+                                   "ESP emergency-stop rejected: invalid auth_token");
             mqttClient.publish(esp_emergency_topic + "/error",
                               "{\"error\":\"unauthorized\",\"message\":\"Invalid auth_token\",\"seq\":" + String(mqttClient.getNextSeq()) + "}");
             return;
+          }
+
+          if (stored_token.length() == 0) {
+            LOG_W(TAG, "ESP emergency accepted (no token configured - fail-open)");
           }
 
           if (command == "emergency_stop") {
@@ -929,13 +936,27 @@ void setup() {
         if (!error) {
           String auth_token = doc["auth_token"].as<String>();
 
-          // Validate auth_token (broadcast uses God-Kaiser's master token)
-          // For now, we accept any token for broadcast (God-Kaiser has authority)
-          // TODO: Validate against God-Kaiser's master emergency token
+          // Validate auth_token against stored broadcast emergency token
+          // Fail-open: If no token configured, accept any broadcast (safety first)
+          String stored_broadcast_token = storageManager.getStringObj("broadcast_em_tok", "");
+
+          if (stored_broadcast_token.length() > 0 && auth_token != stored_broadcast_token) {
+            LOG_E(TAG, "╔════════════════════════════════════════╗");
+            LOG_E(TAG, "║  [SECURITY] UNAUTHORIZED BROADCAST     ║");
+            LOG_E(TAG, "║  EMERGENCY-STOP ATTEMPT REJECTED       ║");
+            LOG_E(TAG, "╚════════════════════════════════════════╝");
+            LOG_E(TAG, "[SECURITY] Broadcast emergency-stop rejected: invalid token");
+            errorTracker.trackError(3500, ERROR_SEVERITY_CRITICAL,
+                                   "Broadcast emergency-stop rejected: invalid auth_token");
+            return;
+          }
 
           LOG_W(TAG, "╔════════════════════════════════════════╗");
           LOG_W(TAG, "║  BROADCAST EMERGENCY-STOP RECEIVED    ║");
           LOG_W(TAG, "╚════════════════════════════════════════╝");
+          if (stored_broadcast_token.length() == 0) {
+            LOG_W(TAG, "Broadcast emergency accepted (no token configured - fail-open)");
+          }
           safetyController.emergencyStopAll("Broadcast emergency (God-Kaiser)");
         } else {
           LOG_E(TAG, "Failed to parse broadcast emergency JSON");
@@ -1301,6 +1322,45 @@ void setup() {
             LOG_E(TAG, "❌ Invalid log level: " + level);
           }
 
+          response_doc["seq"] = mqttClient.getNextSeq();
+
+          String response;
+          serializeJson(response_doc, response);
+          mqttClient.publish(system_command_topic + "/response", response);
+        }
+        // ============================================
+        // SET_EMERGENCY_TOKEN COMMAND (Security)
+        // ============================================
+        else if (command == "set_emergency_token") {
+          LOG_I(TAG, "╔════════════════════════════════════════╗");
+          LOG_I(TAG, "║  SET_EMERGENCY_TOKEN COMMAND RECEIVED  ║");
+          LOG_I(TAG, "╚════════════════════════════════════════╝");
+
+          String token_type = doc["token_type"] | "esp";  // "esp" or "broadcast"
+          String token_value = doc["token"].as<String>();
+
+          DynamicJsonDocument response_doc(256);
+          response_doc["command"] = "set_emergency_token";
+          response_doc["esp_id"] = g_system_config.esp_id;
+
+          if (token_value.length() == 0 || token_value.length() > 64) {
+            response_doc["success"] = false;
+            response_doc["error"] = "Token must be 1-64 characters";
+          } else if (token_type == "broadcast") {
+            storageManager.putString("broadcast_em_tok", token_value);
+            response_doc["success"] = true;
+            response_doc["token_type"] = "broadcast";
+            response_doc["message"] = "Broadcast emergency token updated";
+            LOG_I(TAG, "Broadcast emergency token updated (persisted to NVS)");
+          } else {
+            storageManager.putString("emergency_auth", token_value);
+            response_doc["success"] = true;
+            response_doc["token_type"] = "esp";
+            response_doc["message"] = "ESP emergency token updated";
+            LOG_I(TAG, "ESP emergency token updated (persisted to NVS)");
+          }
+
+          response_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
           response_doc["seq"] = mqttClient.getNextSeq();
 
           String response;

@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 2.8 | **Aktualisiert:** 2026-03-06
+> **Version:** 2.9 | **Aktualisiert:** 2026-03-08
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
-> **Event-Anzahl:** 33 verschiedene Event-Typen
+> **Event-Anzahl:** 34 verschiedene Event-Typen
 
 ---
 
@@ -33,6 +33,7 @@ allowed-tools: Read
 |-------|----------|---------|--------------|
 | `sensor_data` | Server→Frontend | Sensor-Messung | Neuer Sensor-Wert |
 | `sensor_health` | Server→Frontend | Health-Check | Sensor Timeout/Recovery |
+| `sensor_config_deleted` | Server→Frontend | Sensor DELETE | Sensor-Config entfernt (Ghost-Cleanup) |
 
 ### Actuator Events
 
@@ -448,6 +449,32 @@ Sensor Health/Maintenance Update (Timeout, Recovery).
 - `critical`: Sensor ausgefallen
 - `timeout`: Keine neuen Daten
 - `recovered`: Sensor wieder online
+
+---
+
+### 4.3 sensor_config_deleted
+
+Sensor-Konfiguration wurde gelöscht (T08-Fix-D Ghost-Cleanup).
+
+**Trigger:** `DELETE /api/v1/sensors/{esp_id}/{config_id}`
+
+**Code-Location:** [sensors.py:1000](El Servador/god_kaiser_server/src/api/v1/sensors.py#L1000)
+
+**Payload:**
+```json
+{
+  "type": "sensor_config_deleted",
+  "timestamp": 1706787600,
+  "data": {
+    "config_id": "550e8400-e29b-41d4-a716-446655440000",
+    "esp_id": "ESP_MOCK_E92BAA",
+    "gpio": 4,
+    "sensor_type": "ds18b20"
+  }
+}
+```
+
+**Frontend-Handler:** `esp.ts → handleSensorConfigDeleted` — entfernt Ghost-Sensor aus `device.sensors` per `gpio + sensor_type` Match, zeigt Toast. Wird fuer Mock UND Real ESPs ausgeloest (T10-Fix-B: unified DELETE-Pipeline per config_id UUID).
 
 ---
 

@@ -106,9 +106,9 @@ class SensorConfig(Base, TimestampMixin):
     )
 
     onewire_address: Mapped[Optional[str]] = mapped_column(
-        String(16),
+        String(32),
         nullable=True,
-        doc="OneWire device address (required for OneWire sensors)",
+        doc="OneWire device address (required for OneWire sensors, e.g. 28FF82F110C78897 or SIM_xxxx)",
     )
 
     provides_values: Mapped[Optional[list]] = mapped_column(
@@ -206,7 +206,7 @@ class SensorConfig(Base, TimestampMixin):
     )
 
     last_manual_request: Mapped[Optional[datetime]] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
         doc="Timestamp of last manual measurement request (for on_demand mode)",
     )
@@ -297,13 +297,13 @@ class SensorData(Base):
         doc="Primary key (UUID)",
     )
 
-    # Foreign Keys
-    esp_id: Mapped[uuid.UUID] = mapped_column(
+    # Foreign Keys (SET NULL — preserve sensor_data after device deletion, T02-Fix1)
+    esp_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("esp_devices.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("esp_devices.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
-        doc="Foreign key to ESP device",
+        doc="Foreign key to ESP device (nullable for data preservation after device deletion)",
     )
 
     # Sensor Information
@@ -353,7 +353,7 @@ class SensorData(Base):
 
     # Timestamp (CRITICAL for Time-Series!)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         index=True,
         default=_utc_now,
@@ -388,6 +388,13 @@ class SensorData(Base):
         nullable=True,
         index=True,
         doc="Subzone ID at measurement time (from subzone_configs.assigned_gpios)",
+    )
+
+    # Device context snapshot (T02-Fix1 — data remains identifiable after device soft-delete)
+    device_name: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        nullable=True,
+        doc="Device name at measurement time (from esp_devices.name)",
     )
 
     # Time-Series Optimized Indices

@@ -25,6 +25,7 @@ from .sequences import router as sequences_router
 from .subzone import router as subzone_router
 from .users import router as users_router
 from .zone import router as zone_router
+from .zones import router as zones_router
 from .dashboards import router as dashboards_router
 from .webhooks import router as webhooks_router
 from .plugins import router as plugins_router
@@ -58,6 +59,7 @@ api_v1_router.include_router(logs_router)  # Frontend error log ingestion
 api_v1_router.include_router(notifications_router)  # Phase 4A.1 - Notification Stack
 api_v1_router.include_router(users_router)
 api_v1_router.include_router(zone_router)
+api_v1_router.include_router(zones_router)  # Phase 0.3 - Zone Entity CRUD
 api_v1_router.include_router(subzone_router)  # Phase 9 - Subzone Management
 api_v1_router.include_router(sequences_router)  # Phase 3 - Sequence Actions
 api_v1_router.include_router(ai_router)  # PLANNED - God Layer AI integration
@@ -94,6 +96,7 @@ __all__ = [
     "subzone_router",
     "users_router",
     "zone_router",
+    "zones_router",
     "dashboards_router",
     "webhooks_router",
     "plugins_router",

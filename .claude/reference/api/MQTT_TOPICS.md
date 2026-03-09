@@ -386,6 +386,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```json
 {
   "command": "emergency_stop",
+  "auth_token": "my_secret_token",
   "reason": "User request"
 }
 ```
@@ -394,6 +395,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```json
 {
   "command": "clear_emergency",
+  "auth_token": "my_secret_token",
   "reason": "manual"
 }
 ```
@@ -401,6 +403,11 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 **command-Werte:**
 - `emergency_stop`: Alle Aktoren dieses ESPs stoppen, Emergency-Flag setzen (Default bei fehlendem/ungueltigem command)
 - `clear_emergency`: Emergency-Flag aufheben, Aktoren wieder steuerbar
+
+**Authentifizierung (fail-open):**
+- `auth_token` wird gegen NVS-Key `emergency_auth` validiert
+- Wenn kein Token in NVS konfiguriert: jeder Emergency-Stop wird akzeptiert (Sicherheit > Authentifizierung)
+- Token setzbar via `set_emergency_token` System-Command (token_type="esp")
 
 **Optionale Felder:** `reason` (string), `gpio` (nur bei gerätespezifischen Erweiterungen)
 
@@ -997,6 +1004,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```json
 {
   "command": "emergency_stop",
+  "auth_token": "my_broadcast_token",
   "reason": "Global emergency triggered"
 }
 ```
@@ -1005,11 +1013,17 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```json
 {
   "command": "clear_emergency",
+  "auth_token": "my_broadcast_token",
   "reason": "manual"
 }
 ```
 
 **command-Werte:** `emergency_stop` (alle Aktoren stoppen), `clear_emergency` (Not-Aus systemweit aufheben). Konsistent mit Abschnitt 2.5 (actuator/emergency).
+
+**Authentifizierung (fail-open):**
+- `auth_token` wird gegen NVS-Key `broadcast_em_tok` validiert
+- Wenn kein Token in NVS konfiguriert: jeder Broadcast-Stop wird akzeptiert (Sicherheit > Authentifizierung)
+- Token setzbar via `set_emergency_token` System-Command (token_type="broadcast")
 
 ---
 

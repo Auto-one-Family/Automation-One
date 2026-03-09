@@ -11,7 +11,7 @@
 import { ref, watch } from 'vue'
 import { useEspStore } from '@/stores/esp'
 import type { MockESPCreate } from '@/types'
-import { X, RefreshCw } from 'lucide-vue-next'
+import { X, RefreshCw, Info } from 'lucide-vue-next'
 
 interface Props {
   modelValue: boolean
@@ -32,7 +32,7 @@ const newEsp = ref<MockESPCreate>({
   esp_id: '',
   zone_name: '',
   auto_heartbeat: true,
-  heartbeat_interval_seconds: 60,
+  heartbeat_interval_seconds: 15,
   sensors: [],
   actuators: [],
 })
@@ -52,7 +52,7 @@ function resetForm() {
     esp_id: generateEspId(),
     zone_name: '',
     auto_heartbeat: true,
-    heartbeat_interval_seconds: 60,
+    heartbeat_interval_seconds: 15,
     sensors: [],
     actuators: [],
   }
@@ -148,15 +148,17 @@ async function createEsp() {
 
           <!-- Zone Name -->
           <div>
-            <label class="label">Zone-Name (optional)</label>
+            <div class="mock-label-row">
+              <label class="label">Zone-Name (optional)</label>
+              <span class="mock-info-icon" title="Die Zone wird automatisch erstellt wenn sie noch nicht existiert">
+                <Info class="mock-info-icon__svg" />
+              </span>
+            </div>
             <input
               v-model="newEsp.zone_name"
               class="input"
               placeholder="z.B. Zelt 1, Gewächshaus Nord"
             />
-            <p class="text-xs mt-1" style="color: var(--color-text-muted)">
-              Benutzerfreundlicher Name der Zone
-            </p>
           </div>
 
           <!-- Auto-Heartbeat -->
@@ -168,7 +170,7 @@ async function createEsp() {
               class="checkbox"
             />
             <label for="autoHeartbeat" style="color: var(--color-text-secondary)">
-              Auto-Heartbeat aktivieren
+              Automatisch Lebenszeichen senden <span class="mock-recommended">(empfohlen)</span>
             </label>
           </div>
 
@@ -190,7 +192,7 @@ async function createEsp() {
             Abbrechen
           </button>
           <button
-            class="btn-primary flex-1"
+            class="mock-create-btn flex-1"
             @click="createEsp"
             :disabled="isCreating || !newEsp.esp_id"
           >
@@ -229,7 +231,7 @@ async function createEsp() {
 }
 
 .error-close:hover {
-  color: #fca5a5;
+  opacity: 0.7;
 }
 
 /* Checkbox */
@@ -314,5 +316,67 @@ async function createEsp() {
   padding: 1rem 1.25rem;
   border-top: 1px solid var(--glass-border);
   flex-shrink: 0;
+}
+
+/* ── Iridescent Create Button ── */
+.mock-create-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-text-inverse);
+  background: var(--gradient-iridescent);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  box-shadow: 0 0 24px rgba(167, 139, 250, 0.35);
+  transition: filter var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.mock-create-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+  box-shadow: 0 0 32px rgba(167, 139, 250, 0.5);
+}
+
+.mock-create-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: saturate(0.5);
+}
+
+/* ── Zone Label Row with Info Icon ── */
+.mock-label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.mock-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+  color: var(--color-text-muted);
+  transition: color var(--transition-fast);
+}
+
+.mock-info-icon:hover {
+  color: var(--color-accent-bright);
+}
+
+.mock-info-icon__svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── Recommended tag ── */
+.mock-recommended {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-weight: 400;
 }
 </style>

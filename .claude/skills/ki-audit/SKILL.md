@@ -10,7 +10,6 @@ description: |
   Keywords: ki-audit, KI-Fehler, Audit, Qualitätsprüfung, halluzinierte API, falsches Mapping
 allowed-tools: Read, Grep, Glob, Edit
 user-invocable: true
-context: inline
 ---
 
 # KI-Audit Skill

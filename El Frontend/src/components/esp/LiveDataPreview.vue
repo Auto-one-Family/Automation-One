@@ -18,10 +18,13 @@ interface Props {
   gpio: number
   /** Value unit suffix */
   unit?: string
+  /** Sensor type for multi-value filtering (e.g. 'sht31_humidity') */
+  sensorType?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   unit: '',
+  sensorType: '',
 })
 
 const currentValue = ref<number | null>(null)
@@ -38,12 +41,17 @@ function handleMessage(msg: WebSocketMessage): void {
     gpio?: number
     value?: number
     quality?: string
+    sensor_type?: string
   }
 
   const espId = data.esp_id || data.device_id
   const gpio = data.gpio
 
   if (espId !== props.espId || gpio !== props.gpio) return
+
+  // Multi-value filter: only accept matching sensor_type (e.g. sht31_temp vs sht31_humidity)
+  if (props.sensorType && data.sensor_type
+      && data.sensor_type.toLowerCase() !== props.sensorType.toLowerCase()) return
 
   if (data.value !== undefined) {
     currentValue.value = data.value

@@ -374,8 +374,14 @@ class SensorSchedulerService:
                 return
 
             # Check if sensor still exists and is scheduled
-            sensor = await self.sensor_repo.get_by_esp_and_gpio(esp.id, gpio)
-            if not sensor:
+            # Use get_all to handle multi-value sensors on shared GPIO
+            all_sensors = await self.sensor_repo.get_all_by_esp_and_gpio(esp.id, gpio)
+            # Find the scheduled sensor(s) on this GPIO
+            scheduled_sensors = [
+                s for s in all_sensors if s.operating_mode == "scheduled" and s.enabled
+            ]
+
+            if not all_sensors:
                 logger.warning(
                     f"Scheduled measurement skipped - Sensor not found: {esp_id}/GPIO {gpio}"
                 )
@@ -383,19 +389,13 @@ class SensorSchedulerService:
                 await self.remove_job(esp_id, gpio)
                 return
 
-            if sensor.operating_mode != "scheduled":
+            if not scheduled_sensors:
                 logger.info(
-                    f"Scheduled measurement skipped - Mode changed: {esp_id}/GPIO {gpio} "
-                    f"(now: {sensor.operating_mode})"
+                    f"Scheduled measurement skipped - No scheduled+enabled sensor: "
+                    f"{esp_id}/GPIO {gpio}"
                 )
-                # Remove job since mode changed
+                # Remove job since no sensor is scheduled anymore
                 await self.remove_job(esp_id, gpio)
-                return
-
-            if not sensor.enabled:
-                logger.info(
-                    f"Scheduled measurement skipped - Sensor disabled: {esp_id}/GPIO {gpio}"
-                )
                 return
 
             # Trigger measurement via MQTT
@@ -408,7 +408,8 @@ class SensorSchedulerService:
             if success:
                 logger.info(
                     f"Scheduled measurement triggered: {esp_id}/GPIO {gpio} "
-                    f"(request_id: {request_id})"
+                    f"(sensor_type: {scheduled_sensors[0].sensor_type}, "
+                    f"request_id: {request_id})"
                 )
             else:
                 logger.error(f"Failed to trigger scheduled measurement: {esp_id}/GPIO {gpio}")

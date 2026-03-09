@@ -51,10 +51,10 @@ class AIPredictions(Base):
         doc="Prediction type (anomaly_detection, resource_optimization, failure_prediction)",
     )
 
-    # Target Information
+    # Target Information (SET NULL — preserve predictions after device deletion, T02-Fix1)
     target_esp_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("esp_devices.id", ondelete="CASCADE"),
+        ForeignKey("esp_devices.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
         doc="Foreign key to ESP device (None for zone-level predictions)",
@@ -99,7 +99,7 @@ class AIPredictions(Base):
 
     # Timestamp (CRITICAL for Time-Series!)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         index=True,
         default=_utc_now,

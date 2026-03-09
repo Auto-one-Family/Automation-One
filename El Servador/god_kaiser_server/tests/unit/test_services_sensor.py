@@ -48,7 +48,7 @@ class TestSensorServiceConfigManagement:
         mock_esp_repo.get_by_device_id = AsyncMock(return_value=mock_esp)
 
         mock_sensor_repo = MagicMock()
-        mock_sensor_repo.get_by_esp_and_gpio = AsyncMock(return_value=None)
+        mock_sensor_repo.get_all_by_esp_and_gpio = AsyncMock(return_value=[])
 
         service = SensorService(
             sensor_repo=mock_sensor_repo,
@@ -60,7 +60,7 @@ class TestSensorServiceConfigManagement:
 
         # ASSERT
         assert result is None, "get_config should return None when sensor config not found"
-        mock_sensor_repo.get_by_esp_and_gpio.assert_called_once_with(1, 4)
+        mock_sensor_repo.get_all_by_esp_and_gpio.assert_called_once_with(1, 4)
 
     @pytest.mark.sensor
     @pytest.mark.asyncio
@@ -79,7 +79,7 @@ class TestSensorServiceConfigManagement:
             name="Temperature Sensor",
         )
         mock_sensor_repo = MagicMock()
-        mock_sensor_repo.get_by_esp_and_gpio = AsyncMock(return_value=mock_config)
+        mock_sensor_repo.get_all_by_esp_and_gpio = AsyncMock(return_value=[mock_config])
 
         service = SensorService(
             sensor_repo=mock_sensor_repo,
@@ -129,7 +129,7 @@ class TestSensorServiceConfigManagement:
         mock_esp_repo.get_by_device_id = AsyncMock(return_value=mock_esp)
 
         mock_sensor_repo = MagicMock()
-        mock_sensor_repo.get_by_esp_and_gpio = AsyncMock(return_value=None)  # No existing
+        mock_sensor_repo.get_by_esp_gpio_and_type = AsyncMock(return_value=None)  # No existing
         mock_sensor_repo.create = AsyncMock()
 
         service = SensorService(
@@ -178,7 +178,7 @@ class TestSensorServiceConfigManagement:
             metadata={},
         )
         mock_sensor_repo = MagicMock()
-        mock_sensor_repo.get_by_esp_and_gpio = AsyncMock(return_value=mock_existing)
+        mock_sensor_repo.get_by_esp_gpio_and_type = AsyncMock(return_value=mock_existing)
         mock_sensor_repo.create = AsyncMock()
 
         service = SensorService(
@@ -217,7 +217,7 @@ class TestSensorServiceProcessing:
         mock_esp_repo.get_by_device_id = AsyncMock(return_value=mock_esp)
 
         mock_sensor_repo = MagicMock()
-        mock_sensor_repo.get_by_esp_and_gpio = AsyncMock(return_value=None)
+        mock_sensor_repo.get_all_by_esp_and_gpio = AsyncMock(return_value=[])
         mock_sensor_repo.store_reading = AsyncMock()
 
         # Mock processor that returns dict (as service expects)
@@ -320,7 +320,7 @@ class TestSensorServiceProcessing:
         mock_esp_repo.get_by_device_id = AsyncMock(return_value=mock_esp)
 
         mock_sensor_repo = MagicMock()
-        mock_sensor_repo.get_by_esp_and_gpio = AsyncMock(return_value=None)
+        mock_sensor_repo.get_all_by_esp_and_gpio = AsyncMock(return_value=[])
 
         mock_loader = MagicMock()
         mock_loader.get_processor = MagicMock(return_value=None)  # No processor
@@ -535,7 +535,7 @@ class TestSensorServiceEdgeCases:
         mock_esp_repo.get_by_device_id = AsyncMock(return_value=mock_esp)
 
         mock_sensor_repo = MagicMock()
-        mock_sensor_repo.get_by_esp_and_gpio = AsyncMock(return_value=None)
+        mock_sensor_repo.get_all_by_esp_and_gpio = AsyncMock(return_value=[])
         mock_sensor_repo.store_reading = AsyncMock()
 
         # Mock processor that simulates sensor fault detection

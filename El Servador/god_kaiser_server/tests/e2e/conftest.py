@@ -435,9 +435,10 @@ class E2EAPIClient:
                     f"{self.config.api_base}/esp/devices", json=payload, headers=self.headers
                 ) as response:
                     result = await response.json()
+                    registration_ok = response.status in (200, 201)
 
                 # Auto-approve after successful registration
-                if auto_approve and result.get("device_id"):
+                if auto_approve and registration_ok and result.get("device_id"):
                     await self.approve_esp(device.device_id)
 
                 return result
@@ -458,7 +459,12 @@ class E2EAPIClient:
         async with self.session.post(
             f"{self.config.api_base}/esp/devices/{device_id}/approve", json={}, headers=self.headers
         ) as response:
-            return await response.json()
+            result = await response.json()
+            if response.status not in (200, 201):
+                raise RuntimeError(
+                    f"approve_esp failed for {device_id}: HTTP {response.status} - {result}"
+                )
+            return result
 
     async def get_esp_status(self, device_id: str) -> dict:
         """Get ESP device status."""
