@@ -102,14 +102,14 @@ void errorTrackerMqttCallback(const char* topic, const char* payload) {
   }
 }
 
-// Helper: Send Subzone ACK
-void sendSubzoneAck(const String& subzone_id, const String& status, const String& error_message) {
+// Helper: Send Subzone ACK (with optional correlation_id for ACK tracking)
+void sendSubzoneAck(const String& subzone_id, const String& status, const String& error_message, const String& correlationId = "") {
   String ack_topic = TopicBuilder::buildSubzoneAckTopic();
   DynamicJsonDocument ack_doc(512);
   ack_doc["esp_id"] = g_system_config.esp_id;
   ack_doc["status"] = status;
   ack_doc["subzone_id"] = subzone_id;
-  ack_doc["timestamp"] = millis() / 1000;
+  ack_doc["timestamp"] = (unsigned long)timeManager.getUnixTimestamp();
 
   if (status == "error" && error_message.length() > 0) {
     ack_doc["error_code"] = ERROR_SUBZONE_CONFIG_SAVE_FAILED;
@@ -117,6 +117,9 @@ void sendSubzoneAck(const String& subzone_id, const String& status, const String
   }
 
   ack_doc["seq"] = mqttClient.getNextSeq();
+  if (correlationId.length() > 0) {
+    ack_doc["correlation_id"] = correlationId;
+  }
 
   String ack_payload;
   size_t written = serializeJson(ack_doc, ack_payload);
@@ -856,10 +859,10 @@ void setup() {
         return;
       }
 
-      // Actuator commands
+      // Actuator commands (must end with /command to avoid catching /emergency)
       String actuator_command_prefix = String(TopicBuilder::buildActuatorCommandTopic(0));
       actuator_command_prefix.replace("/0/command", "/");
-      if (topic.startsWith(actuator_command_prefix)) {
+      if (topic.startsWith(actuator_command_prefix) && topic.endsWith("/command")) {
         actuatorManager.handleActuatorCommand(topic, payload);
         return;
       }
@@ -1408,6 +1411,12 @@ void setup() {
           String zone_name = doc["zone_name"].as<String>();
           String kaiser_id = doc["kaiser_id"].as<String>();
 
+          // Extract correlation_id for ACK tracking (consistent with sensor/actuator config handlers)
+          String correlationId = "";
+          if (doc.containsKey("correlation_id")) {
+            correlationId = doc["correlation_id"].as<String>();
+          }
+
           // WP1: Empty zone_id = Zone Removal
           if (zone_id.length() == 0) {
             LOG_I(TAG, "╔════════════════════════════════════════╗");
@@ -1443,13 +1452,16 @@ void setup() {
 
               // Send zone_removed acknowledgment
               String ack_topic = TopicBuilder::buildZoneAckTopic();
-              DynamicJsonDocument ack_doc(256);
+              DynamicJsonDocument ack_doc(384);
               ack_doc["esp_id"] = g_system_config.esp_id;
               ack_doc["status"] = "zone_removed";
               ack_doc["zone_id"] = "";
               ack_doc["master_zone_id"] = "";
               ack_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
               ack_doc["seq"] = mqttClient.getNextSeq();
+              if (correlationId.length() > 0) {
+                ack_doc["correlation_id"] = correlationId;
+              }
 
               String ack_payload;
               size_t written = serializeJson(ack_doc, ack_payload);
@@ -1473,10 +1485,17 @@ void setup() {
 
               // Send error acknowledgment
               String ack_topic = TopicBuilder::buildZoneAckTopic();
-              String error_response = "{\"esp_id\":\"" + g_system_config.esp_id +
-                                     "\",\"status\":\"error\",\"ts\":" + String((unsigned long)timeManager.getUnixTimestamp()) +
-                                     ",\"seq\":" + String(mqttClient.getNextSeq()) +
-                                     ",\"message\":\"Failed to remove zone config\"}";
+              DynamicJsonDocument err_doc(384);
+              err_doc["esp_id"] = g_system_config.esp_id;
+              err_doc["status"] = "error";
+              err_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+              err_doc["seq"] = mqttClient.getNextSeq();
+              err_doc["message"] = "Failed to remove zone config";
+              if (correlationId.length() > 0) {
+                err_doc["correlation_id"] = correlationId;
+              }
+              String error_response;
+              serializeJson(err_doc, error_response);
               mqttClient.publish(ack_topic, error_response);
             }
             return;
@@ -1507,10 +1526,17 @@ void setup() {
 
             // Send error acknowledgment
             String ack_topic = TopicBuilder::buildZoneAckTopic();
-            String error_response = "{\"esp_id\":\"" + g_system_config.esp_id +
-                                   "\",\"status\":\"error\",\"ts\":" + String((unsigned long)timeManager.getUnixTimestamp()) +
-                                   ",\"seq\":" + String(mqttClient.getNextSeq()) +
-                                   ",\"message\":\"Zone validation failed\"}";
+            DynamicJsonDocument err_doc(384);
+            err_doc["esp_id"] = g_system_config.esp_id;
+            err_doc["status"] = "error";
+            err_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+            err_doc["seq"] = mqttClient.getNextSeq();
+            err_doc["message"] = "Zone validation failed";
+            if (correlationId.length() > 0) {
+              err_doc["correlation_id"] = correlationId;
+            }
+            String error_response;
+            serializeJson(err_doc, error_response);
             mqttClient.publish(ack_topic, error_response);
             return;
           }
@@ -1579,15 +1605,18 @@ void setup() {
               LOG_I(TAG, "Topics re-subscribed with new kaiser_id: " + kaiser_id);
             }
 
-            // Send acknowledgment
-            String ack_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/ack";
-            DynamicJsonDocument ack_doc(256);
+            // Send acknowledgment (use TopicBuilder for consistency)
+            String ack_topic = TopicBuilder::buildZoneAckTopic();
+            DynamicJsonDocument ack_doc(384);
             ack_doc["esp_id"] = g_system_config.esp_id;
             ack_doc["status"] = "zone_assigned";
             ack_doc["zone_id"] = zone_id;
             ack_doc["master_zone_id"] = master_zone_id;
             ack_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
             ack_doc["seq"] = mqttClient.getNextSeq();
+            if (correlationId.length() > 0) {
+              ack_doc["correlation_id"] = correlationId;
+            }
 
             String ack_payload;
             size_t written = serializeJson(ack_doc, ack_payload);
@@ -1611,12 +1640,19 @@ void setup() {
           } else {
             LOG_E(TAG, "❌ Failed to save zone configuration");
 
-            // Send error acknowledgment
-            String ack_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + g_system_config.esp_id + "/zone/ack";
-            String error_response = "{\"esp_id\":\"" + g_system_config.esp_id +
-                                   "\",\"status\":\"error\",\"ts\":" + String((unsigned long)timeManager.getUnixTimestamp()) +
-                                   ",\"seq\":" + String(mqttClient.getNextSeq()) +
-                                   ",\"message\":\"Failed to save zone config\"}";
+            // Send error acknowledgment (use TopicBuilder for consistency)
+            String ack_topic = TopicBuilder::buildZoneAckTopic();
+            DynamicJsonDocument err_doc(384);
+            err_doc["esp_id"] = g_system_config.esp_id;
+            err_doc["status"] = "error";
+            err_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+            err_doc["seq"] = mqttClient.getNextSeq();
+            err_doc["message"] = "Failed to save zone config";
+            if (correlationId.length() > 0) {
+              err_doc["correlation_id"] = correlationId;
+            }
+            String error_response;
+            serializeJson(err_doc, error_response);
             mqttClient.publish(ack_topic, error_response);
           }
         } else {
@@ -1642,24 +1678,30 @@ void setup() {
           JsonArray gpios_array = doc["assigned_gpios"];
           bool safe_mode_active = doc["safe_mode_active"] | true;
 
+          // Extract correlation_id for ACK tracking (consistent with zone/sensor/actuator handlers)
+          String correlationId = "";
+          if (doc.containsKey("correlation_id")) {
+            correlationId = doc["correlation_id"].as<String>();
+          }
+
           // Validation 1: subzone_id required
           if (subzone_id.length() == 0) {
             LOG_E(TAG, "Subzone assignment failed: subzone_id is empty");
-            sendSubzoneAck(subzone_id, "error", "subzone_id is required");
+            sendSubzoneAck(subzone_id, "error", "subzone_id is required", correlationId);
             return;
           }
 
           // Validation 2: parent_zone_id muss mit ESP-Zone übereinstimmen
           if (parent_zone_id.length() > 0 && parent_zone_id != g_kaiser.zone_id) {
             LOG_E(TAG, "Subzone assignment failed: parent_zone_id doesn't match ESP zone");
-            sendSubzoneAck(subzone_id, "error", "parent_zone_id mismatch");
+            sendSubzoneAck(subzone_id, "error", "parent_zone_id mismatch", correlationId);
             return;
           }
 
           // Validation 3: Zone muss zugewiesen sein
           if (!g_kaiser.zone_assigned) {
             LOG_E(TAG, "Subzone assignment failed: ESP zone not assigned");
-            sendSubzoneAck(subzone_id, "error", "ESP zone not assigned");
+            sendSubzoneAck(subzone_id, "error", "ESP zone not assigned", correlationId);
             return;
           }
 
@@ -1680,7 +1722,7 @@ void setup() {
           // Validate config
           if (!configManager.validateSubzoneConfig(subzone_config)) {
             LOG_E(TAG, "Subzone assignment failed: validation failed");
-            sendSubzoneAck(subzone_id, "error", "subzone config validation failed");
+            sendSubzoneAck(subzone_id, "error", "subzone config validation failed", correlationId);
             return;
           }
 
@@ -1701,7 +1743,7 @@ void setup() {
           }
 
           if (!all_assigned) {
-            sendSubzoneAck(subzone_id, "error", "GPIO assignment failed");
+            sendSubzoneAck(subzone_id, "error", "GPIO assignment failed", correlationId);
             return;
           }
 
@@ -1715,7 +1757,7 @@ void setup() {
           // Save to NVS
           if (!configManager.saveSubzoneConfig(subzone_config)) {
             LOG_E(TAG, "Failed to save subzone config to NVS");
-            sendSubzoneAck(subzone_id, "error", "NVS save failed");
+            sendSubzoneAck(subzone_id, "error", "NVS save failed", correlationId);
             return;
           }
 
@@ -1725,7 +1767,7 @@ void setup() {
           // TODO: Iterate through sensors/actuators and count those with matching subzone_id
 
           // Success ACK
-          sendSubzoneAck(subzone_id, "subzone_assigned", "");
+          sendSubzoneAck(subzone_id, "subzone_assigned", "", correlationId);
 
           LOG_I(TAG, "✅ Subzone assignment successful: " + subzone_id);
         } else {
@@ -1748,6 +1790,12 @@ void setup() {
         if (!error) {
           String subzone_id = doc["subzone_id"].as<String>();
 
+          // Extract correlation_id for ACK tracking
+          String correlationId = "";
+          if (doc.containsKey("correlation_id")) {
+            correlationId = doc["correlation_id"].as<String>();
+          }
+
           if (subzone_id.length() == 0) {
             LOG_E(TAG, "Subzone removal failed: subzone_id is empty");
             return;
@@ -1769,7 +1817,7 @@ void setup() {
           configManager.removeSubzoneConfig(subzone_id);
 
           // WP8: Send subzone_removed acknowledgment
-          sendSubzoneAck(subzone_id, "subzone_removed", "");
+          sendSubzoneAck(subzone_id, "subzone_removed", "", correlationId);
 
           LOG_I(TAG, "✅ Subzone removed: " + subzone_id);
         }
@@ -2088,7 +2136,19 @@ void setup() {
                             ERROR_SEVERITY_CRITICAL,
                             "ActuatorManager begin() failed");
   } else {
-    LOG_I(TAG, "Actuator Manager initialized (waiting for MQTT configs)");
+    LOG_I(TAG, "Actuator Manager initialized");
+
+    // Load actuator configs from NVS (analog to sensor loading above)
+    ActuatorConfig actuators[MAX_ACTUATORS];
+    uint8_t loaded_actuator_count = 0;
+    if (configManager.loadActuatorConfig(actuators, MAX_ACTUATORS, loaded_actuator_count)) {
+      LOG_I(TAG, "Loaded " + String(loaded_actuator_count) + " actuator configs from NVS");
+      for (uint8_t i = 0; i < loaded_actuator_count; i++) {
+        actuatorManager.configureActuator(actuators[i]);
+      }
+    } else {
+      LOG_I(TAG, "No actuator configs in NVS");
+    }
   }
 
   LOG_I(TAG, "╔════════════════════════════════════════╗");
@@ -2118,13 +2178,17 @@ bool feedWatchdog(const char* component_id) {
   // 1. Circuit Breaker Check (nur in Production Mode)
   // ─────────────────────────────────────────────────────
   if (g_watchdog_config.mode == WatchdogMode::PRODUCTION) {
-    // WiFi Circuit Breaker OPEN? → Service down!
+    // ✅ FIX (2026-03-10): WiFi CB blockiert Watchdog NICHT mehr!
+    // Root-Cause fuer Reboot-Loop: WiFi-Signal kurz weg → CB OPEN →
+    // Watchdog-Feed blockiert → 60s WDT Timeout → Reboot → wieder WiFi weg → Loop.
+    // Reboot hilft nicht bei schwachem Signal. WiFi CB regelt Reconnect bereits.
     if (wifiManager.getCircuitBreakerState() == CircuitState::OPEN) {
-      errorTracker.logApplicationError(
-        ERROR_WATCHDOG_FEED_BLOCKED,
-        "Watchdog feed blocked: WiFi Circuit Breaker OPEN"
-      );
-      return false;  // Feed blockiert
+      static unsigned long last_wifi_cb_warning = 0;
+      if (millis() - last_wifi_cb_warning > 10000) {
+        last_wifi_cb_warning = millis();
+        LOG_W(TAG, "WiFi Circuit Breaker OPEN - running in degraded mode");
+      }
+      // Continue with watchdog feed - don't block!
     }
 
     // MQTT Circuit Breaker OPEN?

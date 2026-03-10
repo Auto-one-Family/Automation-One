@@ -36,6 +36,7 @@ from ...schemas.alert_config import ActuatorAlertConfigUpdate, RuntimeStatsUpdat
 from ...core.exceptions import (
     ActuatorNotFoundError,
     DeviceNotApprovedError,
+    DeviceOfflineError,
     ESPNotFoundError,
     GpioConflictError,
     ValidationException,
@@ -652,6 +653,7 @@ async def create_or_update_actuator(
         200: {"description": "Command sent"},
         400: {"description": "Command rejected by safety check"},
         404: {"description": "Actuator not found"},
+        409: {"description": "ESP device is offline"},
     },
     summary="Send actuator command",
     description="Send command to actuator via MQTT. Validated by SafetyService.",
@@ -699,6 +701,10 @@ async def send_command(
         raise ValidationException(
             "actuator", "Actuator is disabled. Enable via PUT request with enabled=true."
         )
+
+    # V1-22: Early reject for offline ESPs with specific HTTP 409
+    if not esp_device.is_online:
+        raise DeviceOfflineError(esp_id, esp_device.status)
 
     # Send command via service (includes safety validation)
     success = await actuator_service.send_command(
@@ -967,7 +973,7 @@ async def emergency_stop(
             topic="kaiser/broadcast/emergency",
             payload=broadcast_payload,
             qos=1,
-            retain=True,
+            retain=False,
         )
         logger.info("MQTT broadcast emergency stop published on kaiser/broadcast/emergency")
     except Exception as mqtt_error:
@@ -1169,6 +1175,22 @@ async def delete_actuator(
     except Exception as e:
         # Log error but don't fail the request (DB delete was successful)
         logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
+
+    # WebSocket event: Frontend removes actuator from store (analog to sensor_config_deleted)
+    try:
+        from ...websocket.manager import WebSocketManager
+
+        ws_manager = await WebSocketManager.get_instance()
+        await ws_manager.broadcast(
+            "actuator_config_deleted",
+            {
+                "esp_id": esp_id,
+                "gpio": gpio,
+                "actuator_type": actuator.actuator_type,
+            },
+        )
+    except Exception as e:
+        logger.debug(f"WebSocket broadcast for actuator_config_deleted: {e}")
 
     return _model_to_schema_response(actuator, esp_id, None)
 

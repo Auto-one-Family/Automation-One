@@ -6,7 +6,7 @@ Tests: Core notification routing — persist, dedup, email, WS broadcast, quiet 
 """
 
 import pytest
-from datetime import datetime, time as dt_time, timezone
+from datetime import datetime, time as dt_time, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.db.models.notification import Notification, NotificationPreferences
@@ -422,3 +422,157 @@ async def test_broadcast_unread_count_correct(
     assert data["user_id"] == sample_user.id
     assert data["unread_count"] >= 1
     assert data["highest_severity"] is not None
+
+
+# =============================================================================
+# Test 13: Broadcast propagates fingerprint (Fix-V Block 1)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_broadcast_to_all_propagates_fingerprint(
+    db_session, sample_user, mock_ws_manager, mock_email_service
+):
+    """_broadcast_to_all() must propagate fingerprint to per-user notifications."""
+    router = NotificationRouter(session=db_session, email_service=mock_email_service)
+
+    # Broadcast notification (user_id=None) with fingerprint
+    notification = NotificationCreate(
+        user_id=None,
+        title="Grafana Alert: CPU High",
+        body="CPU > 90%",
+        severity="warning",
+        category="infrastructure",
+        source="grafana",
+        fingerprint="abc123def456",
+        correlation_id="grafana_abc123def456",
+    )
+
+    result = await router.route(notification)
+    assert result is not None
+
+    # Verify the persisted notification has the fingerprint
+    from sqlalchemy import select
+
+    stmt = select(Notification).where(
+        Notification.user_id == sample_user.id,
+        Notification.title == "Grafana Alert: CPU High",
+    )
+    db_result = await db_session.execute(stmt)
+    persisted = db_result.scalar_one_or_none()
+
+    assert persisted is not None
+    assert persisted.fingerprint == "abc123def456"
+
+
+# =============================================================================
+# Test 14: Fingerprint dedup blocks broadcast duplicates (Fix-V Block 1)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_broadcast_fingerprint_dedup_blocks_second(
+    db_session, sample_user, mock_ws_manager, mock_email_service
+):
+    """Second broadcast with same fingerprint is deduplicated via per-user fingerprint."""
+    router = NotificationRouter(session=db_session, email_service=mock_email_service)
+
+    notification = NotificationCreate(
+        user_id=None,
+        title="Grafana Alert: Disk Full",
+        body="Disk > 95%",
+        severity="critical",
+        category="infrastructure",
+        source="grafana",
+        fingerprint="disk_full_fp_001",
+        correlation_id="grafana_disk_full_fp_001",
+    )
+
+    result1 = await router.route(notification)
+    assert result1 is not None
+
+    # Second identical broadcast — should be deduplicated
+    result2 = await router.route(notification)
+    assert result2 is None
+
+    # Only one notification in DB for this user
+    from sqlalchemy import select, func
+
+    stmt = (
+        select(func.count())
+        .select_from(Notification)
+        .where(
+            Notification.user_id == sample_user.id,
+            Notification.title == "Grafana Alert: Disk Full",
+        )
+    )
+    count_result = await db_session.execute(stmt)
+    assert count_result.scalar_one() == 1
+
+
+# =============================================================================
+# Test 15: Correlation dedup refire-cycle protection (Fix-V Block 2)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_correlation_dedup_refire_cycle_protection(
+    db_session, sample_user, mock_ws_manager, mock_email_service
+):
+    """Recently resolved notification with same correlation_id blocks refire."""
+    from src.db.repositories.notification_repo import NotificationRepository
+
+    repo = NotificationRepository(db_session)
+
+    # Create and immediately resolve a notification (simulates Grafana resolved webhook)
+    notification = Notification(
+        user_id=sample_user.id,
+        channel="websocket",
+        severity="warning",
+        category="infrastructure",
+        title="Grafana Alert: Memory",
+        source="grafana",
+        correlation_id="grafana_mem_fp_001",
+        status="resolved",
+        resolved_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+    )
+    db_session.add(notification)
+    await db_session.flush()
+
+    # Refire within 30 min — should be detected as duplicate
+    is_dup = await repo.check_correlation_duplicate("grafana_mem_fp_001")
+    assert is_dup is True
+
+
+# =============================================================================
+# Test 16: Correlation dedup allows genuinely new alert after 30+ min
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_correlation_dedup_allows_after_30_min(
+    db_session, sample_user, mock_ws_manager, mock_email_service
+):
+    """Alert resolved > 30 min ago should NOT block new firing."""
+    from src.db.repositories.notification_repo import NotificationRepository
+
+    repo = NotificationRepository(db_session)
+
+    # Notification resolved 45 minutes ago
+    notification = Notification(
+        user_id=sample_user.id,
+        channel="websocket",
+        severity="warning",
+        category="infrastructure",
+        title="Grafana Alert: Old",
+        source="grafana",
+        correlation_id="grafana_old_fp_001",
+        status="resolved",
+        resolved_at=datetime.now(timezone.utc) - timedelta(minutes=45),
+    )
+    db_session.add(notification)
+    await db_session.flush()
+
+    # New firing after 45 min — should be allowed
+    is_dup = await repo.check_correlation_duplicate("grafana_old_fp_001")
+    assert is_dup is False

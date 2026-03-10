@@ -52,8 +52,12 @@ logger = get_logger(__name__)
 
 
 def _is_mock_esp(device_id: str) -> bool:
-    """Check if device ID indicates a mock ESP (consistent with zone_service)."""
-    return device_id.startswith("ESP_MOCK_") or device_id.startswith("MOCK_") or "MOCK" in device_id
+    """Check if device ID indicates a mock ESP (consistent with zone_service).
+
+    Only matches explicit MOCK_ or ESP_MOCK_ prefixes.
+    Wokwi and physical ESPs (e.g. ESP_472204, ESP_00000001) must NOT match.
+    """
+    return device_id.startswith("ESP_MOCK_") or device_id.startswith("MOCK_")
 
 
 class SubzoneService:
@@ -248,6 +252,16 @@ class SubzoneService:
         if not device:
             raise ValueError(f"ESP device '{device_id}' not found")
 
+        # 1a. Check subzone exists (return 404 on second DELETE — not idempotent 200)
+        result = await self.session.execute(
+            select(SubzoneConfig).where(
+                SubzoneConfig.esp_id == device_id,
+                SubzoneConfig.subzone_id == subzone_id,
+            )
+        )
+        if not result.scalar_one_or_none():
+            raise ValueError(f"Subzone '{subzone_id}' not found on device '{device_id}'")
+
         # 1b. Mock devices: DB-only, no MQTT
         if _is_mock_esp(device_id):
             await self._delete_subzone_config(device_id, subzone_id)
@@ -261,27 +275,36 @@ class SubzoneService:
                 mqtt_sent=False,
             )
 
-        # 2. Build MQTT topic
+        # 2. DB-DELETE first (DB is authoritative — before MQTT)
+        await self._delete_subzone_config(device_id, subzone_id)
+
+        # 3. Build MQTT topic
         topic = TopicBuilder.build_subzone_remove_topic(device_id)
 
-        # 3. Build payload
+        # 4. Build payload
         payload = {
             "subzone_id": subzone_id,
             "reason": reason,
             "timestamp": int(time.time()),
         }
 
-        # 4. Publish via MQTT
+        # 5. Publish via MQTT (fire-and-forget — ESP will sync on reconnect if this fails)
         mqtt_sent = self._publish_subzone_message(topic, payload)
 
         if mqtt_sent:
-            logger.info(f"Subzone removal sent to {device_id}: subzone_id={subzone_id}")
+            logger.info(f"Subzone removed from DB and ESP notified: {device_id}/{subzone_id}")
         else:
-            logger.error(f"Subzone removal MQTT publish failed for {device_id}")
+            logger.warning(
+                f"Subzone removed from DB but MQTT failed for {device_id}/{subzone_id} "
+                f"(ESP will sync on next reconnect)"
+            )
 
         return SubzoneRemoveResponse(
-            success=mqtt_sent,
-            message="Subzone removal sent to ESP" if mqtt_sent else "MQTT publish failed",
+            success=True,  # DB deletion succeeded; MQTT is fire-and-forget
+            message=(
+                "Subzone removed; ESP notified" if mqtt_sent
+                else "Subzone removed from DB; ESP will sync on reconnect"
+            ),
             device_id=device_id,
             subzone_id=subzone_id,
             mqtt_topic=topic,
@@ -436,13 +459,13 @@ class SubzoneService:
             return True
 
         elif status == "subzone_removed":
-            # Delete subzone record
+            # Delete subzone record (no-op if already deleted by remove_subzone())
             await self._delete_subzone_config(device_id, subzone_id)
             logger.info(f"Subzone removal confirmed for {device_id}: subzone_id={subzone_id}")
             return True
 
         elif status == "error":
-            logger.error(
+            logger.warning(
                 f"Subzone operation failed for {device_id}: "
                 f"subzone_id={subzone_id}, error_code={error_code}, message={message}"
             )

@@ -192,7 +192,7 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | audit | /v1/audit | 21 | Admin/Active |
 | debug | /v1/debug | 59 | Admin |
 | zone | /v1/zone | 7 | Operator+ |
-| zones | /v1/zones | 7 | Operator+ |
+| zones | /v1/zones | 8 | Operator+ |
 | subzone | /v1/subzone | 6 | Operator+ |
 | users | /v1/users | 7 | Admin |
 | errors | /v1/errors | 4 | Active |
@@ -390,15 +390,15 @@ poetry run python scripts/seed_wokwi_esp.py
 | **ESPService** | esp_service.py | 944 | `register()`, `approve()`, `reject()` |
 | **ZoneService** | zone_service.py | ~500 | `assign_zone()`, `remove_zone()` — T13-R1: Zone muss existieren + aktiv sein. subzone_strategy (transfer/copy/reset). DeviceZoneChange Audit |
 | **MonitorDataService** | monitor_data_service.py | - | `get_zone_monitor_data()` — Subzone-Gruppierung für Monitor L2 |
-| **SubzoneService** | subzone_service.py | 595 | `assign_subzone()`, `set_safe_mode()` |
+| **SubzoneService** | subzone_service.py | 595 | `assign_subzone()`, `remove_subzone()`, `set_safe_mode()` |
 | **ConfigBuilder** | config_builder.py | 249 | `build_esp_config()` |
 | **MaintenanceService** | maintenance/service.py | 260 | `start()`, `stop()`, `register_jobs()` |
 | **NotificationRouter** | notification_router.py | ~467 | `route()` — persist → fingerprint dedup → WS broadcast → optional email + email_log |
 | **AlertSuppressionService** | alert_suppression_service.py | ~180 | `check_suppression()`, `update_config()`, `expire_suppressions()` — ISA-18.2 Shelved Alarms |
 | **DiagnosticsService** | diagnostics_service.py | ~350 | `run_full_diagnostic()`, `cleanup_old_reports()` — 10 modulare System-Checks |
 | **PluginService** | plugin_service.py | ~380 | `execute_plugin()`, `update_schedule()`, `sync_registry_to_db()` — Registry ↔ DB Mediator |
-| **DeviceScopeService** | device_scope_service.py | - | `get_active_context()`, `set_context()`, `resolve_zone()` — 3-Way Resolution (zone_local/multi_zone/mobile), In-Memory Cache 30s TTL (T13-R2) |
-| **MQTTCommandBridge** | mqtt_command_bridge.py | ~200 | `send_and_wait_ack()`, `resolve_ack()`, `has_pending()`, `shutdown()` — ACK-gesteuerte MQTT-Kommunikation für Zone/Subzone-Operationen (T13-Phase2) |
+| **DeviceScopeService** | device_scope_service.py | - | `get_active_context()` → `ActiveContextData` (NamedTuple), `set_context()`, `resolve_zone()` — 3-Way Resolution, Cache 30s TTL, session-safe (T13-R2+Phase3) |
+| **MQTTCommandBridge** | mqtt_command_bridge.py | ~230 | `send_and_wait_ack()`, `resolve_ack()`, `has_pending()`, `shutdown()` — ACK-gesteuerte MQTT-Kommunikation für Zone/Subzone-Operationen (T13-Phase2) |
 
 ### Logic Engine Architektur
 
@@ -443,6 +443,7 @@ LogicEngine
 |-----|----------|------------|
 | cleanup_sensor_data | Daily 03:00 | SENSOR_DATA_RETENTION_ENABLED |
 | cleanup_command_history | Daily 03:30 | COMMAND_HISTORY_RETENTION_ENABLED |
+| cleanup_heartbeat_logs | Daily 03:15 | HEARTBEAT_LOG_RETENTION_ENABLED |
 | health_check_esps | 60s | ESP_HEALTH_CHECK_INTERVAL_SECONDS |
 | health_check_mqtt | 30s | MQTT_HEALTH_CHECK_INTERVAL_SECONDS |
 | expire_alert_suppressions | Hourly :00 | ALERT_SUPPRESSION_ENABLED |

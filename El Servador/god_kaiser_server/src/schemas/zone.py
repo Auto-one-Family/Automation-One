@@ -139,6 +139,17 @@ class ZoneAssignResponse(BaseResponse):
         ...,
         description="Whether MQTT message was successfully published",
     )
+    ack_received: Optional[bool] = Field(
+        None,
+        description=(
+            "Whether ESP confirmed via zone/ack. "
+            "True=confirmed, False=timeout, None=mock/fire-and-forget."
+        ),
+    )
+    warning: Optional[str] = Field(
+        None,
+        description="Optional warning message (e.g. ACK timeout)",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -151,6 +162,8 @@ class ZoneAssignResponse(BaseResponse):
                 "zone_name": "Greenhouse Section 1",
                 "mqtt_topic": "kaiser/god/esp/ESP_12AB34CD/zone/assign",
                 "mqtt_sent": True,
+                "ack_received": True,
+                "warning": None,
             }
         }
     )

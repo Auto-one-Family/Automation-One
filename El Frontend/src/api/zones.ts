@@ -6,7 +6,10 @@
  */
 
 import api from './index'
-import type { ZoneAssignRequest, ZoneAssignResponse, ZoneRemoveResponse, ZoneInfo, ZoneListResponse } from '@/types'
+import type {
+  ZoneAssignRequest, ZoneAssignResponse, ZoneRemoveResponse, ZoneInfo, ZoneListResponse,
+  ZoneEntity, ZoneEntityCreate, ZoneEntityUpdate, ZoneEntityListResponse, ZoneStatus,
+} from '@/types'
 import type { ZoneMonitorData } from '@/types/monitor'
 
 /**
@@ -82,6 +85,68 @@ export const zonesApi = {
    */
   async getZoneMonitorData(zoneId: string, signal?: AbortSignal): Promise<ZoneMonitorData> {
     const response = await api.get<ZoneMonitorData>(`/zone/${zoneId}/monitor-data`, { signal })
+    return response.data
+  },
+
+  // ===========================================================================
+  // Zone Entity CRUD (T13-R1) — /api/v1/zones
+  // NOTE: Separate from /api/v1/zone/ (device assignment, MQTT bridge)
+  // ===========================================================================
+
+  /**
+   * Create a new zone entity.
+   */
+  async createZoneEntity(data: ZoneEntityCreate): Promise<ZoneEntity> {
+    const response = await api.post<ZoneEntity>('/zones', data)
+    return response.data
+  },
+
+  /**
+   * List zone entities, optionally filtered by status.
+   */
+  async listZoneEntities(status?: ZoneStatus): Promise<ZoneEntityListResponse> {
+    const params = status ? { status } : undefined
+    const response = await api.get<ZoneEntityListResponse>('/zones', { params })
+    return response.data
+  },
+
+  /**
+   * Get a single zone entity by zone_id.
+   */
+  async getZoneEntity(zoneId: string): Promise<ZoneEntity> {
+    const response = await api.get<ZoneEntity>(`/zones/${zoneId}`)
+    return response.data
+  },
+
+  /**
+   * Update zone entity name/description.
+   */
+  async updateZoneEntity(zoneId: string, data: ZoneEntityUpdate): Promise<ZoneEntity> {
+    const response = await api.patch<ZoneEntity>(`/zones/${zoneId}`, data)
+    return response.data
+  },
+
+  /**
+   * Archive a zone (soft-delete, status → 'archived').
+   */
+  async archiveZoneEntity(zoneId: string): Promise<ZoneEntity> {
+    const response = await api.post<ZoneEntity>(`/zones/${zoneId}/archive`)
+    return response.data
+  },
+
+  /**
+   * Reactivate an archived zone (status → 'active').
+   */
+  async reactivateZoneEntity(zoneId: string): Promise<ZoneEntity> {
+    const response = await api.post<ZoneEntity>(`/zones/${zoneId}/reactivate`)
+    return response.data
+  },
+
+  /**
+   * Hard-delete a zone entity.
+   */
+  async deleteZoneEntity(zoneId: string): Promise<{ success: boolean; message: string }> {
+    const response = await api.delete<{ success: boolean; message: string }>(`/zones/${zoneId}`)
     return response.data
   },
 }

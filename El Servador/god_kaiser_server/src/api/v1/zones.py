@@ -8,7 +8,8 @@ Provides:
 - POST   /zones                        - Create a new zone
 - GET    /zones                        - List all zones (with status filter)
 - GET    /zones/{zone_id}              - Get zone by zone_id
-- PUT    /zones/{zone_id}              - Update zone
+- PUT    /zones/{zone_id}              - Update zone (full)
+- PATCH  /zones/{zone_id}              - Partial update zone (+ zone_name sync)
 - POST   /zones/{zone_id}/archive      - Archive zone
 - POST   /zones/{zone_id}/reactivate   - Reactivate archived zone
 - DELETE /zones/{zone_id}              - Soft-delete zone
@@ -164,10 +165,68 @@ async def update_zone(
         name=request.name,
         description=request.description,
     )
+
+    # BUG-10: Sync denormalized zone_name in esp_devices on rename
+    if request.name is not None and request.name != zone.name:
+        synced = await zone_repo.sync_zone_name_to_devices(zone_id, request.name)
+        if synced > 0:
+            logger.info("Synced zone_name to %d device(s) for zone %s", synced, zone_id)
+
     await db.commit()
     await db.refresh(updated)
 
     logger.info("Zone updated by %s: zone_id=%s", current_user.username, zone_id)
+    return ZoneResponse.model_validate(updated)
+
+
+@router.patch(
+    "/{zone_id}",
+    response_model=ZoneResponse,
+    summary="Partial Update Zone",
+    description="Partially update zone. Only provided fields are changed.",
+    responses={
+        200: {"description": "Zone updated"},
+        400: {"description": "No fields to update"},
+        404: {"description": "Zone not found"},
+    },
+)
+async def patch_zone(
+    zone_id: str,
+    request: ZoneUpdate,
+    db: DBSession,
+    current_user: OperatorUser,
+) -> ZoneResponse:
+    update_data = request.model_dump(exclude_none=True)
+    if not update_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fields to update",
+        )
+
+    zone_repo = ZoneRepository(db)
+    zone = await zone_repo.get_by_zone_id(zone_id)
+
+    if not zone:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Zone '{zone_id}' not found",
+        )
+
+    updated = await zone_repo.update(
+        id=zone.id,
+        **update_data,
+    )
+
+    # BUG-10: Sync denormalized zone_name in esp_devices on rename
+    if "name" in update_data:
+        synced = await zone_repo.sync_zone_name_to_devices(zone_id, update_data["name"])
+        if synced > 0:
+            logger.info("Synced zone_name to %d device(s) for zone %s", synced, zone_id)
+
+    await db.commit()
+    await db.refresh(updated)
+
+    logger.info("Zone patched by %s: zone_id=%s, fields=%s", current_user.username, zone_id, list(update_data.keys()))
     return ZoneResponse.model_validate(updated)
 
 

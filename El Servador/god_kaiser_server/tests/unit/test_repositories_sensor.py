@@ -335,6 +335,68 @@ class TestSensorRepositoryData:
         assert sensor_data.processed_value is None
         assert sensor_data.processing_mode == "raw"
 
+    async def test_save_data_duplicate_returns_none(
+        self, sensor_repo: SensorRepository, sample_esp_device
+    ):
+        """Test that duplicate (esp_id, gpio, sensor_type, timestamp) returns None.
+
+        Simulates MQTT QoS 1 redelivery: identical message sent twice.
+        First call saves successfully, second call returns None (dedup).
+        """
+        ts = datetime(2026, 3, 10, 7, 37, 13, tzinfo=timezone.utc)
+
+        # First save: should succeed
+        first = await sensor_repo.save_data(
+            esp_id=sample_esp_device.id,
+            gpio=21,
+            sensor_type="sht31_temp",
+            raw_value=15.8,
+            processed_value=15.8,
+            unit="°C",
+            timestamp=ts,
+        )
+        assert first is not None
+        assert first.raw_value == 15.8
+
+        # Second save with identical key: should return None (duplicate)
+        second = await sensor_repo.save_data(
+            esp_id=sample_esp_device.id,
+            gpio=21,
+            sensor_type="sht31_temp",
+            raw_value=15.8,
+            processed_value=15.8,
+            unit="°C",
+            timestamp=ts,
+        )
+        assert second is None
+
+    async def test_save_data_different_sensor_type_not_duplicate(
+        self, sensor_repo: SensorRepository, sample_esp_device
+    ):
+        """Test that different sensor_type on same (esp_id, gpio, timestamp) is NOT a duplicate.
+
+        SHT31 produces sht31_temp and sht31_humidity on the same GPIO at the same timestamp.
+        Both must be saved successfully.
+        """
+        ts = datetime(2026, 3, 10, 7, 37, 13, tzinfo=timezone.utc)
+
+        temp = await sensor_repo.save_data(
+            esp_id=sample_esp_device.id,
+            gpio=21,
+            sensor_type="sht31_temp",
+            raw_value=15.8,
+            timestamp=ts,
+        )
+        humidity = await sensor_repo.save_data(
+            esp_id=sample_esp_device.id,
+            gpio=21,
+            sensor_type="sht31_humidity",
+            raw_value=43.5,
+            timestamp=ts,
+        )
+        assert temp is not None
+        assert humidity is not None
+
     async def test_get_latest_data_success(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test retrieval of latest sensor data."""
         # Save multiple data points

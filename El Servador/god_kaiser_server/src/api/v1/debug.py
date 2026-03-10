@@ -131,6 +131,8 @@ def _build_mock_esp_response(
                 last_read=None,
                 i2c_address=config.get("i2c_address"),
                 interface_type=config.get("interface_type"),
+                device_scope=config.get("device_scope", "zone_local"),
+                assigned_zones=config.get("assigned_zones"),
             )
         )
 
@@ -163,6 +165,8 @@ def _build_mock_esp_response(
                 pwm_value=act_pwm,
                 emergency_stopped=runtime_emergency,
                 last_command=act_last_cmd,
+                device_scope=config.get("device_scope", "zone_local"),
+                assigned_zones=config.get("assigned_zones"),
             )
         )
 

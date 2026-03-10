@@ -279,6 +279,8 @@ class MockSensorResponse(BaseModel):
     last_read: Optional[datetime]
     i2c_address: Optional[int] = None
     interface_type: Optional[str] = None
+    device_scope: Optional[str] = "zone_local"
+    assigned_zones: Optional[List[str]] = None
 
 
 class MockActuatorResponse(BaseModel):
@@ -291,6 +293,8 @@ class MockActuatorResponse(BaseModel):
     pwm_value: float
     emergency_stopped: bool
     last_command: Optional[str]
+    device_scope: Optional[str] = "zone_local"
+    assigned_zones: Optional[List[str]] = None
 
 
 class MockESPResponse(BaseModel):

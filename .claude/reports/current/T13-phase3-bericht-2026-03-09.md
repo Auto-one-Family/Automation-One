@@ -123,18 +123,11 @@ Alle 5 Code-Pfade die `subzone/assign` senden gehen durch `SubzoneService.assign
 |-------|----------|
 | `ruff check` (betroffene Dateien) | CLEAN |
 | Import-Check (device_scope_service, heartbeat_handler) | OK |
-| `pytest` (vollstaendig) | UEBERSPRUNGEN (User-Entscheidung) |
+| `pytest` (vollstaendig) | **2057 passed, 0 failed, 68 skipped** (180s) |
 
-### Empfohlener Nachtest
+### Bugfix waehrend Verifizierung
 
-```bash
-cd "El Servador/god_kaiser_server" && pytest --tb=short -q
-```
-
-Besonders relevante Test-Bereiche:
-- `tests/unit/test_mqtt_command_bridge.py` (15 Tests, Phase 2)
-- `tests/integration/test_zone_bridge.py` (Phase 2 Integration)
-- Alle Heartbeat-bezogenen Tests
+2 Heartbeat-Tests schlugen fehl wegen `TypeError: '>' not supported between instances of 'MagicMock' and 'int'`. Ursache: Tests mocken `esp_device.last_seen` als `MagicMock()` statt `datetime`. Fix: `isinstance(esp_device.last_seen, datetime)` statt `if esp_device.last_seen:` in der Reconnect-Erkennung.
 
 ---
 

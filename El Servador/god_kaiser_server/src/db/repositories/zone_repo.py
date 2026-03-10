@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -248,3 +248,20 @@ class ZoneRepository:
                     entry["zone_name"] = ctx.zone_name
 
         return sorted(zone_map.values(), key=lambda z: z["zone_name"] or z["zone_id"])
+
+    async def sync_zone_name_to_devices(self, zone_id: str, new_name: str) -> int:
+        """Sync esp_devices.zone_name for all devices in this zone.
+
+        zone_name is a denormalized performance copy. When a zone is renamed,
+        this copy must be updated to keep API responses consistent.
+
+        Returns:
+            Number of updated device rows.
+        """
+        stmt = (
+            update(ESPDevice)
+            .where(ESPDevice.zone_id == zone_id, ESPDevice.deleted_at.is_(None))
+            .values(zone_name=new_name)
+        )
+        result = await self.session.execute(stmt)
+        return result.rowcount

@@ -1,14 +1,14 @@
-# DB Inspector Report
+# DB Inspector Report — T16-V2 Verifikation
 
-**Erstellt:** 2026-03-08 ~12:50 UTC
-**Modus:** B (Spezifisch: "T10-R2 Alert-System-Audit — Notification-Lifecycle & Cross-View-Matrix")
-**Quellen:** notifications, esp_devices, sensor_configs, actuator_configs, zones, subzone_configs
+**Erstellt:** 2026-03-10
+**Modus:** B (Spezifisch: "T16-V2 Verifikation — Block A (Stale Actuator) + Block B (Notification Fingerprint)")
+**Quellen:** actuator_configs, esp_devices, notifications, sensor_data, esp_heartbeat_logs, device_zone_changes, sensor_configs, notification_preferences, logic_rules
 
 ---
 
 ## 1. Zusammenfassung
 
-Die Datenbank ist healthy. Das Notification-System zeigt einen klaren Alert-Storm: 62 Notifications in 24h, 14 davon allein in der letzten Stunde. 16 aktive Alerts existieren — KEIN Status-/resolved_at-Inkonsistenz-Problem (Query 3, 4, 5 alle 0 Rows). Die Storm-Muster betreffen "Sensordaten veraltet" (6x aktiv) und "ESP32 Heartbeat-Luecke" (6x aktiv) — beide ohne Deduplication/Cooldown. Die Cross-View-Matrix zeigt 3 aktive Devices, 6 Sensor-Configs, 1 Actuator-Config, 4 Zonen und 7 Subzone-Configs.
+Die DB-Verifikation deckt kritische Schema-Luecken fuer T16 auf: `actuator_configs` hat KEIN `current_state`-Feld — der "Stale Actuator State"-Block (V-SS-01) beruht damit auf einem nicht-existenten Datenbankfeld. Im Notification-System fehlt das `fingerprint`-Feld in allen 86 Rows (NULL), waehrend `correlation_id` korrekt befuellt ist. `logic_rules` existiert als Tabelle nicht in der Datenbank. `notification_preferences` ist vorhanden (1 Eintrag). ESP_00000001 zeigt kritische WiFi-RSSI-Schwankungen und `health_status: critical` in 7 von 10 Heartbeats — offline seit 2026-03-09 14:30 UTC.
 
 ---
 
@@ -16,267 +16,218 @@ Die Datenbank ist healthy. Das Notification-System zeigt einen klaren Alert-Stor
 
 | Quelle | Status | Bemerkung |
 |--------|--------|-----------|
-| automationone-postgres | OK | Erreichbar, alle Queries erfolgreich |
-| notifications | AUFFAELLIG | 62 in 24h, 14 in letzter Stunde — Alert-Storm |
-| esp_devices | OK | 3 aktive (2 online, 1 offline), 4 deleted |
-| sensor_configs | OK | 6 aktive Configs (zu aktiven Devices) |
-| actuator_configs | OK | 1 Config total |
-| zones | OK | 4 Zonen |
-| subzone_configs | OK | 7 Subzone-Configs |
-
-**Schema-Abweichungen von Query-Vorgabe (dokumentiert):**
-- `esp_devices.esp_id` existiert nicht — korrekte Spalte: `device_id`
-- `sensor_configs.name` existiert nicht — korrekte Spalte: `sensor_name`
-- `actuator_configs.name` existiert nicht — korrekte Spalte: `actuator_name`
-- `zones.slug` existiert nicht — korrekte Spalten: `zone_id`, `name`, `description`
-- `subzones` Tabelle existiert nicht — aequivalente Tabelle: `subzone_configs`
+| automationone-postgres | OK | Container healthy, Up 3 days |
+| actuator_configs | OK (Schema-Luecke) | Kein current_state/current_value/state_updated_at/last_command_at |
+| esp_devices | OK | 1 nicht-geloeschtes Device: ESP_472204, offline |
+| notifications | OK | 86 total, source=grafana only |
+| sensor_data | OK | ESP_00000001 aktiv bis 2026-03-10 09:06 UTC |
+| esp_heartbeat_logs | OK | Spalte heisst `timestamp` (nicht `created_at`) |
+| device_zone_changes | OK | esp_id ist varchar (nicht uuid) |
+| sensor_configs | OK | alert_config: json vorhanden |
+| notification_preferences | OK | 1 Eintrag fuer user_id=1 |
+| logic_rules | FEHLT | Tabelle existiert nicht |
 
 ---
 
-## 3. Query-Ergebnisse (alle 13)
+## 3. Befunde
 
-### Query 1 — Notification Status-Verteilung
+### 3.1 V-SS-01: Actuator-State Schema — Kritische Luecke
 
-```sql
-SELECT status, COUNT(*) FROM notifications GROUP BY status;
-```
+- **Schwere:** Kritisch (fuer T16 Block A)
+- **Detail:** `actuator_configs` hat KEIN `current_state`, KEIN `current_value`, KEIN `state_updated_at`, KEIN `last_command_at`. Der urspruengliche Query schlug mit `ERROR: column ac.current_state does not exist` fehl.
 
-| status   | count |
-|----------|-------|
-| resolved |    46 |
-| active   |    16 |
+**Vollstaendiges actuator_configs Schema (22 Spalten):**
 
-Gesamt: 62 Notifications. Kein "acknowledged"-Status vorhanden — entweder nicht implementiert oder noch nicht genutzt.
+| Spalte | Typ |
+|--------|-----|
+| id | uuid |
+| esp_id | uuid |
+| gpio | integer |
+| actuator_type | varchar |
+| actuator_name | varchar |
+| enabled | boolean |
+| min_value | float |
+| max_value | float |
+| default_value | float |
+| timeout_seconds | integer |
+| safety_constraints | json |
+| actuator_metadata | json |
+| config_status | varchar |
+| config_error | varchar |
+| config_error_detail | varchar |
+| created_at | timestamptz |
+| updated_at | timestamptz |
+| alert_config | json |
+| runtime_stats | json |
+| device_scope | varchar |
+| assigned_zones | json |
+| assigned_subzones | json |
 
----
+**Kein `current_state`, kein `state_updated_at`, kein `last_command_at` vorhanden.**
 
-### Query 2 — Aktive Alerts (neueste 15)
+**Einziger Actuator-Eintrag:**
 
-```sql
-SELECT id, title, severity, status, resolved_at, created_at
-FROM notifications WHERE status = 'active' ORDER BY created_at DESC LIMIT 15;
-```
+| id | actuator_type | gpio | enabled | config_status | default_value | runtime_stats | device_id | status | last_seen |
+|----|---------------|------|---------|---------------|---------------|---------------|-----------|--------|-----------|
+| 0ca8acc5 | digital | 27 | true | applied | 0 | NULL | ESP_472204 | offline | 2026-03-10 09:42:37+00 |
 
-| id (kurz) | title | severity | status | resolved_at | created_at |
-|-----------|-------|----------|--------|-------------|------------|
-| 329cb9a2 | ESP32 Heartbeat-Luecke | warning | active | NULL | 2026-03-08 12:35:33 UTC |
-| 626b3a32 | ESP32 Heartbeat-Luecke | info | active | NULL | 2026-03-08 12:30:33 UTC |
-| 23f3225b | Sensordaten veraltet | warning | active | NULL | 2026-03-08 12:09:58 UTC |
-| 2afe9636 | Sensordaten veraltet | info | active | NULL | 2026-03-08 12:08:50 UTC |
-| 0a7e56f2 | Frontend-Container nicht erreichbar — keine Logs seit 5 Minuten | warning | active | NULL | 2026-03-08 11:25:34 UTC |
-| ae9944fb | ESP32 Heartbeat-Luecke | warning | active | NULL | 2026-03-08 10:38:11 UTC |
-| c8341f46 | ESP32 Heartbeat-Luecke | info | active | NULL | 2026-03-08 10:17:07 UTC |
-| 4f88965c | Sensordaten veraltet | warning | active | NULL | 2026-03-08 09:33:27 UTC |
-| 4fc5970b | Sensordaten veraltet | warning | active | NULL | 2026-03-08 09:18:28 UTC |
-| d5897d4a | Sensordaten veraltet | info | active | NULL | 2026-03-08 09:04:34 UTC |
-| c6a7f311 | ESP32 Heartbeat-Luecke | info | active | NULL | 2026-03-08 09:02:39 UTC |
-| c2d436b6 | No Grafana webhooks received for >1 hour | info | active | NULL | 2026-03-08 07:46:35 UTC |
-| e691c479 | No Grafana webhooks received for >1 hour | info | active | NULL | 2026-03-08 07:41:35 UTC |
-| abb0f548 | No digest emails processed for >2 hours | info | active | NULL | 2026-03-08 07:41:27 UTC |
-| 8c55686c | Sensordaten veraltet | info | active | NULL | 2026-03-08 00:18:43 UTC |
-
-**Beobachtung:** Kein Alert-Titel enthaelt "aufgelöst" im Text. Alle 15 aktiven Alerts haben resolved_at = NULL (korrekt fuer Status "active").
-
----
-
-### Query 3 — Inkonsistenz: Status active + resolved_at gesetzt
-
-```sql
-SELECT id, title, status, resolved_at FROM notifications
-WHERE status = 'active' AND resolved_at IS NOT NULL LIMIT 10;
-```
-
-| id | title | status | resolved_at |
-|----|-------|--------|-------------|
-| (0 rows) | | | |
-
-**Befund: SAUBER.** Keine Inkonsistenz. Kein einziger aktiver Alert hat resolved_at gesetzt.
+- **Befund:** ESP_472204 ist offline. `runtime_stats` = NULL. Kein timestamp-basierter State vorhanden. "Stale Actuator State" kann aktuell nur ueber `esp_devices.last_seen` + `status=offline` abgeleitet werden, nicht ueber einen dedizierten Actuator-State-Timestamp.
 
 ---
 
-### Query 4 — Alerts mit "resolved/aufgelost" im Titel
+### 3.2 V-AL-02: Notification-System + Fingerprint-Analyse
 
-```sql
-SELECT id, title, status FROM notifications
-WHERE title LIKE '%aufgelöst%' OR title LIKE '%aufgeloest%' OR title LIKE '%resolved%' LIMIT 10;
-```
+- **Schwere:** Mittel
+- **Detail:** Das `fingerprint`-Feld in der Notifications-Tabelle ist in ALLEN 86 Rows NULL. Grafana sendet `correlation_id` (befuellt), aber keinen `fingerprint`.
 
-| id | title | status |
-|----|-------|--------|
-| (0 rows) | | |
+**Notification-Uebersicht (86 total, nur source=grafana):**
 
-**Befund:** Keine Alerts mit "resolved"-Text im Titel. Titel-Texte sind konsistent (kein frei-formulierter "aufgelöst"-Text in Titeln).
+| source | category | severity | title | cnt | first | last |
+|--------|----------|----------|-------|-----|-------|------|
+| grafana | connectivity | warning | ESP32 Heartbeat-Luecke | 21 | 2026-03-08 13:31 | 2026-03-10 09:58 |
+| grafana | connectivity | info | ESP32 Heartbeat-Luecke | 14 | 2026-03-08 14:29 | 2026-03-10 10:03 |
+| grafana | data_quality | warning | Sensordaten veraltet | 12 | 2026-03-08 13:34 | 2026-03-10 10:04 |
+| grafana | infrastructure | warning | Frontend-Container nicht erreichbar | 10 | 2026-03-09 12:01 | 2026-03-10 09:23 |
+| grafana | system | info | No Grafana webhooks received | 8 | 2026-03-09 05:54 | 2026-03-10 09:14 |
+| grafana | system | warning | No Grafana webhooks received | 6 | 2026-03-09 08:24 | 2026-03-10 06:50 |
+| grafana | data_quality | info | Sensordaten veraltet | 5 | 2026-03-09 05:53 | 2026-03-10 07:32 |
+| grafana | infrastructure | critical | Critical errors detected across services | 2 | 2026-03-10 07:35 | 2026-03-10 09:09 |
+| grafana | connectivity | warning | Haeufige WebSocket-Verbindungsabbrueche | 2 | 2026-03-09 17:44 | 2026-03-09 18:58 |
+| grafana | connectivity | critical | MQTT-Broker hat keine verbundenen Clients | 1 | 2026-03-10 09:54 | (single) |
+| (weitere 5 Einzel-Events) | | | | | | |
 
----
+**Status-Verteilung:**
 
-### Query 5 — Inkonsistente Alerts: Text "aufgeloest" + Status active
+| is_read | is_archived | status | count |
+|---------|-------------|--------|-------|
+| false | false | resolved | 70 |
+| false | false | active | 12 |
+| true | false | resolved | 4 |
 
-```sql
-SELECT id, title, status FROM notifications
-WHERE title LIKE '%aufgelöst%' AND status = 'active' LIMIT 10;
-```
+**Fingerprint-Analyse — KERNBEFUND:**
 
-| id | title | status |
-|----|-------|--------|
-| (0 rows) | | |
+`fingerprint` = NULL in ALLEN 86 Rows. `correlation_id` ist befuellt (Format: `grafana_{16hex}`). 20 verschiedene correlation_ids entsprechen 20 verschiedenen Alert-Streams.
 
-**Befund: SAUBER.** Keine Inkonsistenz dieser Art vorhanden.
+| correlation_id | cnt | avg_interval_sec | Kategorie |
+|----------------|-----|-----------------|-----------|
+| grafana_796869f4ea658850 | 11 | 15.502 (~4,3h) | Frontend-Container |
+| grafana_bc4610db680147a5 | 11 | 10.093 (~2,8h) | Heartbeat-Luecke warning |
+| grafana_d5ac2636f9178437 | 10 | 10.465 (~2,9h) | System-Webhook |
+| grafana_a22fa2efc7b70869 | 9 | 19.992 (~5,5h) | Sensordaten veraltet |
+| grafana_425a13e085bf2e2e | 8 | 20.707 (~5,7h) | Heartbeat-Luecke warning |
+| grafana_4fa643ec059eb498 | 6 | 16.832 (~4,7h) | System-Webhook warning |
+| grafana_c165daebc93775a4 | 5 | 39.866 (~11,1h) | Sensordaten veraltet |
+| grafana_906bc66a0e901616 | 4 | 29.935 (~8,3h) | System info |
+| grafana_a6825bde55884d94 | 4 | 29.804 (~8,3h) | System warning |
+| grafana_75a24cd19e15b3eb | 3 | 42.561 (~11,8h) | Heartbeat info |
+| grafana_ad6b8993b0637213 | 3 | 46.169 (~12,8h) | Sensordaten info |
+| grafana_c79a7c6ad7aae4f3 | 2 | 4.410 (~1,2h) | WebSocket-Abbrueche |
+| grafana_d9a879b4f8d95d99 | 2 | 85.862 (~23,8h) | Digest-Emails |
+| grafana_ad1aadc54ad6ea76 | 2 | 5.640 (~1,6h) | Critical errors |
+| (6 Einzel-Events) | 1 | — | Verschiedene |
 
----
+- **Befund:** Kein Fingerprint-Dedup moeglich. Jedes Grafana-Firing erzeugt eine neue DB-Row. correlation_id ist die einzige Dedup-Grundlage. Fingerprint-Feld in der DB vorhanden (Spalte existiert), aber nie befuellt.
 
-### Query 6 — Alert-Storm-Rate: Neue Alerts letzte Stunde
+**Sources/Categories gesamt (nur grafana):**
 
-```sql
-SELECT COUNT(*) FROM notifications WHERE created_at > NOW() - INTERVAL '1 hour';
-```
+| source | category | count |
+|--------|----------|-------|
+| grafana | connectivity | 39 |
+| grafana | data_quality | 19 |
+| grafana | infrastructure | 14 |
+| grafana | system | 14 |
 
-| count |
-|-------|
-|    14 |
-
-**Befund: KRITISCH.** 14 neue Alerts in der letzten Stunde. Das entspricht einem Alert alle ~4 Minuten.
-
----
-
-### Query 7 — Alerts letzte 24 Stunden
-
-```sql
-SELECT COUNT(*) FROM notifications WHERE created_at > NOW() - INTERVAL '24 hours';
-```
-
-| count |
-|-------|
-|    62 |
-
-**Befund: HOCH.** 62 Notifications in 24 Stunden. Durchschnitt: ~2,6 Alerts/Stunde — aber die letzte Stunde zeigt 14 (5x ueber Durchschnitt), was auf einen eskalierenden Storm hindeutet.
-
----
-
-### Query 8 — Haeufigste aktive Alert-Titel (Storm-Muster)
-
-```sql
-SELECT title, COUNT(*) as cnt FROM notifications WHERE status = 'active'
-GROUP BY title ORDER BY cnt DESC LIMIT 10;
-```
-
-| title | cnt |
-|-------|-----|
-| Sensordaten veraltet | 6 |
-| ESP32 Heartbeat-Luecke | 6 |
-| No Grafana webhooks received for >1 hour | 2 |
-| No digest emails processed for >2 hours | 1 |
-| Frontend-Container nicht erreichbar — keine Logs seit 5 Minuten | 1 |
-
-**Befund: Alert-Storm-Muster klar sichtbar.**
-- "Sensordaten veraltet" und "ESP32 Heartbeat-Luecke" treten jeweils 6x auf — kein Deduplication/Cooldown-Mechanismus aktiv.
-- Beide Alerts werden bei jedem Check-Intervall neu erstellt, ohne den bestehenden aktiven Alert zu updaten oder zu deduplizieren.
-- "No Grafana webhooks" 2x — gleiches Muster.
+Einzige Source ist `grafana`. Kein autoops, server, mqtt als Source vorhanden.
 
 ---
 
-### Query 9 — Device-Status (BUG-06 Cross-View-Verifikation)
+### 3.3 V-SS-04: ESP_00000001 Anomalie
 
-```sql
-SELECT device_id, status, last_seen, approved_at FROM esp_devices ORDER BY last_seen DESC;
-```
+- **Schwere:** Hoch
 
-| device_id | status | last_seen | approved_at |
-|-----------|--------|-----------|-------------|
-| MOCK_A3592B7E | online | 2026-03-08 12:46:21 UTC | NULL |
-| ESP_472204 | online | 2026-03-08 12:46:07 UTC | 2026-03-08 09:18:30 UTC |
-| ESP_00000001 | offline | 2026-03-08 12:30:06 UTC | 2026-03-08 09:24:30 UTC |
-| MOCK_5FC52D0B | deleted | 2026-03-08 09:26:25 UTC | NULL |
-| MOCK_D75008E2 | deleted | 2026-03-08 09:21:36 UTC | NULL |
-| MOCK_4B2668C2 | deleted | 2026-03-08 00:31:39 UTC | NULL |
-| MOCK_3917D1BC | deleted | 2026-03-08 00:27:23 UTC | NULL |
+**sensor_data (letzte 20 Eintraege, nur ds18b20):**
 
-**Beobachtungen:**
-- MOCK_A3592B7E: online, aber `approved_at = NULL` — Mock-Device, kein Approval-Flow.
-- ESP_472204: online, approved. Echter ESP, zuletzt gesehen 12:46 UTC.
-- ESP_00000001: offline, approved. Letzter Heartbeat 12:30 UTC — koennte Wokwi-Simulation sein.
-- 4 Devices: status = "deleted" (Soft-Delete, deleted_at gesetzt in frueherer Session).
+- Ausschliesslich `ds18b20`, `raw_value=360`, `processed_value=22.5` — statischer Mock-Wert
+- Letzter Eintrag: 2026-03-10 09:06:59 UTC
+- Auffaelligkeit: Zwischen 2026-03-09 14:30 und 2026-03-10 07:18 = ca. 17h Datenpause
+- Vor 14:30 Uhr am 09.03.: rapide Eintraege im ~30-Sekunden-Takt (14:27 bis 14:30 UTC, 8 Eintraege)
 
----
+**esp_heartbeat_logs — Schema-Korrektur:** Spalte heisst `timestamp`, nicht `created_at`.
 
-### Query 10 — Alle Sensor-Configs (Cross-View-Matrix)
+| timestamp | wifi_rssi | health_status | uptime (s) |
+|-----------|-----------|---------------|------------|
+| 2026-03-09 14:30:04 | -95 | critical | 434 |
+| 2026-03-09 14:29:04 | -95 | critical | 374 |
+| 2026-03-09 14:28:05 | -66 | healthy | 314 |
+| 2026-03-09 14:27:04 | -83 | critical | 254 |
+| 2026-03-09 14:02:57 | -86 | critical | 194 |
+| 2026-03-09 14:01:56 | -84 | critical | 134 |
+| 2026-03-09 14:01:56 | -80 | degraded | 134 |
+| 2026-03-09 14:00:55 | -70 | healthy | 74 |
+| 2026-03-09 13:59:55 | -60 | healthy | 14 |
+| 2026-03-09 11:27:14 | -85 | critical | 1095 |
 
-```sql
-SELECT sc.id, sc.esp_id, sc.gpio, sc.sensor_type, sc.sensor_name
-FROM sensor_configs sc ORDER BY sc.esp_id, sc.gpio;
-```
+- 7 von 10 Heartbeats = `critical`. RSSI schwankt stark (-60 bis -95 dBm).
+- Zwei Rows mit identischem `uptime=134s` — potentielle Race Condition oder doppelter MQTT-Publish.
+- Letzter Heartbeat: 2026-03-09 14:30 — seitdem offline (konsistent mit Datenpause in sensor_data).
 
-| id (kurz) | esp_id (kurz) | gpio | sensor_type | sensor_name |
-|-----------|---------------|------|-------------|-------------|
-| 2d397712 | b6a83569 (ESP_00000001) | 0 | sht31_temp | Temperatur und Luftfeuchte Temperature |
-| a13fce3c | b6a83569 (ESP_00000001) | 0 | sht31_humidity | Temperatur und Luftfeuchte Humidity |
-| b97a2d64 | b6a83569 (ESP_00000001) | 4 | ds18b20 | Lufttemperatur |
-| 9e679530 | b6a83569 (ESP_00000001) | 4 | ds18b20 | Lufttemperatur |
-| 48e632ed | fd4e0972 (ESP_472204) | 0 | sht31_temp | Temp&Luftfeuchte |
-| 7c89863a | fd4e0972 (ESP_472204) | 0 | sht31_humidity | Temp&Luftfeuchte |
+**device_zone_changes — Schema-Korrektur:** `esp_id` ist varchar (nicht uuid).
 
-**Beobachtungen:**
-- ESP_00000001: 2x ds18b20 auf GPIO 4 mit gleichem Namen "Lufttemperatur" — das ist NB6 (OneWire Multi-Sensor, unterschiedliche Adressen, gleicher Name).
-- MOCK_A3592B7E: 0 sensor_configs — kein Sensor konfiguriert.
-- 6 Sensor-Configs total fuer 2 aktive (nicht-deleted) Devices.
+| changed_at | change_type | old_zone | new_zone | changed_by |
+|------------|-------------|----------|----------|------------|
+| 2026-03-09 14:37:05 | zone_switch | zone_alpha | wokwi_testzone | admin |
+| 2026-03-09 14:36:04 | zone_switch | wokwi_testzone | zone_alpha | admin |
+
+- 2 manuelle Zone-Switches innerhalb von 63 Sekunden (Test-Session). `affected_subzones` enthaelt jeweils 1 Subzone (zeltnaerloesung, GPIO 4), `subzone_strategy=transfer`.
 
 ---
 
-### Query 11 — Alle Actuator-Configs
+### 3.4 V-AK-01: Alert-Lifecycle Status
 
-```sql
-SELECT id, esp_id, gpio, actuator_type, actuator_name FROM actuator_configs ORDER BY esp_id;
-```
+- **Schwere:** Niedrig
 
-| id (kurz) | esp_id (kurz) | gpio | actuator_type | actuator_name |
-|-----------|---------------|------|---------------|---------------|
-| f5c81a69 | fd4e0972 (ESP_472204) | 27 | digital | Luftbefeuchter |
+| status | count |
+|--------|-------|
+| resolved | 74 |
+| active | 12 |
 
-**Befund:** 1 Actuator-Config fuer ESP_472204. Typ "digital" (On/Off). Kein Actuator fuer ESP_00000001 oder MOCK_A3592B7E.
-
----
-
-### Query 12 — Alle Zonen
-
-```sql
-SELECT id, zone_id, name, description FROM zones ORDER BY zone_id;
-```
-
-*(Hinweis: Spalte `slug` existiert nicht — Schema nutzt `zone_id` als eindeutigen Identifier)*
-
-| id (kurz) | zone_id | name | description |
-|-----------|---------|------|-------------|
-| 424dd01d | echter_esp | Echter ESP | NULL |
-| 676d007b | naehrloesung | Nährlösung | NULL |
-| 33eccb21 | test | Test | NULL |
-| f53cfcc0 | wokwi_testzone | Wokwi-Testzone | NULL |
-
-**Befund:** 4 Zonen. Keine Beschreibungen gesetzt. Zone "naehrloesung" (Nährlösung) — Umlaut in DB korrekt gespeichert.
+- 12 aktive, ungelesene Notifications. 70 resolved, ungelesen (`is_read=false`).
 
 ---
 
-### Query 13 — Alle Subzonen
+### 3.5 V-RE-02: Logic Engine
 
-```sql
-SELECT id, esp_id, subzone_id, subzone_name, parent_zone_id FROM subzone_configs
-ORDER BY parent_zone_id, subzone_id;
-```
+- **Schwere:** Kritisch (fehlende Tabelle)
+- **Befund:** `ERROR: relation "logic_rules" does not exist` — Tabelle fehlt vollstaendig. Falls T16 Logic-Rules-Funktionalitaet erfordert, fehlt die DB-Grundlage.
 
-*(Hinweis: Tabelle `subzones` existiert nicht — korrekte Tabelle: `subzone_configs`)*
+---
 
-| id (kurz) | esp_id | subzone_id | subzone_name | parent_zone_id |
-|-----------|--------|------------|--------------|----------------|
-| c51355ec | ESP_00000001 | naehrloesung_zelt | NULL | echter_esp |
-| 70dc9701 | ESP_472204 | zelt_wohnzimmer | NULL | echter_esp |
-| 1de2ae8e | MOCK_A3592B7E | block_a | NULL | test |
-| f3cf088e | MOCK_A3592B7E | block_b | Block B | test |
-| 3458692e | ESP_00000001 | reservoir | Reservoir | wokwi_testzone |
-| 80e96b74 | ESP_00000001 | topf_reihe_a | Topf-Reihe-A | wokwi_testzone |
-| 8968e149 | ESP_00000001 | topf_reihe_b | Topf-Reihe-B | wokwi_testzone |
+### 3.6 V-AK-03: Notification-Preferences
 
-**Beobachtungen:**
-- ESP_00000001 hat 4 Subzones: naehrloesung_zelt (echter_esp), reservoir, topf_reihe_a, topf_reihe_b (wokwi_testzone).
-- MOCK_A3592B7E: 2 Subzones in Zone "test" — block_a (kein Name), block_b ("Block B").
-- 5 von 7 subzone_names sind NULL — subzone_id wird als impliziter Name verwendet.
+- **Schwere:** Niedrig (vorhanden)
+- **Befund:** Tabelle existiert, 1 Eintrag fuer user_id=1:
+
+| Feld | Wert |
+|------|------|
+| websocket_enabled | true |
+| email_enabled | false |
+| email_address | (leer) |
+| email_severities | ["critical", "warning"] |
+| quiet_hours_enabled | false |
+| quiet_hours_start | 22:00 |
+| quiet_hours_end | 07:00 |
+| digest_interval_minutes | 60 |
+| browser_notifications | false |
+
+---
+
+### 3.7 V-AK-04: Alert-Config Schema
+
+- **Schwere:** Info
+- **sensor_configs:** `alert_config` (json) — vorhanden
+- **actuator_configs:** `alert_config` (json) — vorhanden
+
+Beide Tabellen haben das `alert_config`-JSON-Feld. Inhalt in actuator_configs: nicht befuellt (runtime_stats=NULL im einzigen Eintrag).
 
 ---
 
@@ -284,51 +235,45 @@ ORDER BY parent_zone_id, subzone_id;
 
 | Check | Ergebnis |
 |-------|----------|
-| pg_isready | Nicht explizit geprueft — alle Queries erfolgreich (implizit OK) |
-| Schema-Verifikation esp_devices | `\d esp_devices` ausgefuehrt — Spalte heisst `device_id`, nicht `esp_id` |
-| Schema-Verifikation sensor_configs | `\d sensor_configs` ausgefuehrt — Spalte heisst `sensor_name`, nicht `name` |
-| Schema-Verifikation zones | `\d zones` — kein `slug`, stattdessen `zone_id` als unique identifier |
-| Tabellen-Inventar | `subzones` existiert nicht — aequivalent: `subzone_configs` |
-| Alle 29 Tabellen gelistet | vollstaendig via `pg_tables WHERE schemaname='public'` |
+| Container-Name | automationone-postgres (ohne -1 Suffix) |
+| Queries gesamt | 20+ SQL-Statements erfolgreich ausgefuehrt |
+| actuator_configs Schema | Kein current_state/current_value/state_updated_at/last_command_at |
+| esp_heartbeat_logs Schema | `timestamp` statt `created_at` — initiale Query korrigiert |
+| device_zone_changes.esp_id Typ | varchar statt uuid — Cast-Fehler erkannt und korrigiert |
+| notifications.fingerprint | NULL in allen 86 Rows — Spalte existiert, wird nie befuellt |
+| logic_rules Tabelle | ERROR: relation "logic_rules" does not exist |
+| notification_preferences | Existiert, 1 Eintrag |
 
 ---
 
 ## 5. Bewertung & Empfehlung
 
-### 5.1 Notification-Lifecycle — Befund
+### Root Causes
 
-**Root Cause: Fehlender Deduplication-Mechanismus.**
+**Block A — Stale Actuator State (V-SS-01):**
+- Schema hat keinen dedizierten Actuator-State-Timestamp. `current_state` und `last_command_at` fehlen.
+- "Stale" kann nur indirekt ueber `esp_devices.last_seen` + `status=offline` detektiert werden.
+- Falls T16 einen echten Actuator-State-Timestamp benoetigt: Migration fuer `actuator_configs.state_updated_at` oder `last_command_at` erforderlich.
+- Alternativ ohne Schema-Aenderung: `runtime_stats`-JSON als Container fuer `last_command_at` nutzen (bereits vorhanden, aktuell NULL).
 
-Queries 3, 4, 5 sind alle leer — das bedeutet: Es gibt KEINE Status-Inkonsistenz in der DB (kein "active" mit resolved_at, kein "aufgelöst" im Titel). Der Notification-Lifecycle ist DB-seitig korrekt implementiert.
+**Block B — Notification Fingerprint (V-AL-02):**
+- `fingerprint`-Spalte in DB vorhanden, aber in 86 von 86 Rows NULL.
+- Grafana sendet im Webhook keinen Fingerprint-Wert, oder der Server-Ingest schreibt ihn nicht.
+- `correlation_id` ist befuellt und bleibt bei Re-Firing desselben Alerts gleich — das ist aktuell die einzige Dedup-Grundlage.
+- Fingerprint-Generierung muss server-seitig beim Ingest implementiert werden (z.B. SHA256 aus source+category+title oder aus der Grafana Alert-Rule-ID).
 
-Das eigentliche Problem: Der Alert-Generator erstellt bei jedem Check-Zyklus EINEN NEUEN Alert-Row, anstatt einen bestehenden aktiven Alert zu updaten oder zu deduplizieren. Resultat: 6 gleichlautende "Sensordaten veraltet"-Alerts nebeneinander, alle "active", alle mit NULL resolved_at.
+**V-RE-02 — Logic Rules:**
+- Tabelle `logic_rules` fehlt. Falls T16 sie benoetigt: Alembic-Migration erstellen.
 
-### 5.2 Alert-Storm-Analyse
+**V-SS-04 — ESP_00000001:**
+- Physikalisches WiFi-Problem (RSSI bis -95 dBm). Seit 2026-03-09 14:30 offline, keine Heartbeats mehr.
+- Sensor-Daten zeigen statischen Wert (22.5 C, raw=360) — Wokwi-Simulation-Verhalten.
+- Doppelter Heartbeat-Row (uptime=134s) deutet auf Race Condition im MQTT-Publish-Pfad.
 
-| Alert-Typ | Aktive Duplicates | Zeitraum der Duplicates |
-|-----------|-------------------|------------------------|
-| Sensordaten veraltet | 6 | 00:18 bis 12:09 UTC |
-| ESP32 Heartbeat-Luecke | 6 | 09:02 bis 12:35 UTC |
-| No Grafana webhooks | 2 | 07:41 bis 07:46 UTC |
+### Naechste Schritte
 
-**Eskalation:** 14 neue Alerts in der letzten Stunde (Stand ~12:50 UTC) — der Storm intensiviert sich.
-
-### 5.3 Cross-View-Matrix (T10-R2)
-
-| Kategorie | Anzahl | Aktiv | Anmerkung |
-|-----------|--------|-------|-----------|
-| Devices | 7 | 3 | 2 online, 1 offline, 4 deleted |
-| Sensor-Configs | 6 | 6 | Alle zu nicht-deleted Devices |
-| Actuator-Configs | 1 | 1 | ESP_472204, GPIO 27, digital |
-| Zonen | 4 | 4 | echter_esp, naehrloesung, test, wokwi_testzone |
-| Subzone-Configs | 7 | 7 | 3 ohne Namen (subzone_name=NULL) |
-
-### 5.4 Naechste Schritte
-
-1. **Alert-Deduplication (Server-Dev-Aufgabe):** Vor dem INSERT in `notifications` pruefen ob ein aktiver Alert mit gleichem Titel bereits existiert. Falls ja: updaten statt neu erstellen. Alternativ: Cooldown-Fenster (z.B. min. 30 Min zwischen gleichem Alert-Typ).
-
-2. **Acknowledged-Status (optional):** Derzeit nur "active" und "resolved" in Nutzung. Ein "acknowledged"-State wuerde User-Bestaetigung tracken koennen.
-
-3. **subzone_name befuellen:** 5 von 7 Subzones haben keinen lesbaren Namen — nur subzone_id. Frontend zeigt wahrscheinlich kryptische IDs an.
-
-4. **ESP_00000001 offline:** Letzter Heartbeat 12:30 UTC. Falls Wokwi-Simulation — normal. Falls echter ESP — pruefen ob Verbindung verloren.
+1. **T16 Block A:** Schema-Migration fuer `actuator_configs.state_updated_at` (timestamptz) oder `last_command_at` (timestamptz) planen, falls echter State-Timestamp benoetigt. Alternativ: `runtime_stats` nutzen (kein Schema-Change, aber weniger sauber).
+2. **T16 Block B:** Server-seitige Fingerprint-Generierung beim Grafana-Webhook-Ingest implementieren. SHA256 aus `correlation_id` oder aus `source+category+title` als stabiler Fingerprint.
+3. **logic_rules:** Tabelle fehlt komplett. Alembic-Migration erstellen falls T16 dieses Feature erfordert.
+4. **ESP_00000001 RSSI:** Physikalisches WiFi-Problem. RSSI-Threshold-Alerting pruefen (-85 dBm als Warning-Grenze).
+5. **12 aktive Notifications:** Frontend-Badge pruefen, ob korrekt dargestellt. 70 resolved sind ungelesen — Bulk-Read-Funktion pruefen.

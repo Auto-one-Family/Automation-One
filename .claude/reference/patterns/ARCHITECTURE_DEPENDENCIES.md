@@ -108,7 +108,7 @@ SystemConfig system_config_;
 - `ActuatorConfig` (per-actuator configuration)
 
 **Key Responsibilities:**
-- Configuration loading from NVS via `loadAllConfigs()`
+- Configuration loading from NVS via `loadSensorConfig()` and `loadActuatorConfig()` on boot
 - Configuration persistence to NVS via StorageManager
 - Validation of configurations before saving
 - ESP ID generation for MQTT topics

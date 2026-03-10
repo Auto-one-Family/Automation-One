@@ -425,7 +425,14 @@ class SensorData(Base):
     )
 
     # Time-Series Optimized Indices
+    # NOTE: uq_sensor_data_esp_gpio_type_timestamp does not cover orphaned rows
+    # with esp_id=NULL after device soft-delete (NULL != NULL in UNIQUE constraints).
+    # For live MQTT data esp_id is always set, so this is acceptable.
     __table_args__ = (
+        UniqueConstraint(
+            "esp_id", "gpio", "sensor_type", "timestamp",
+            name="uq_sensor_data_esp_gpio_type_timestamp",
+        ),
         Index("idx_esp_gpio_timestamp", "esp_id", "gpio", "timestamp"),
         Index("idx_sensor_type_timestamp", "sensor_type", "timestamp"),
         Index("idx_timestamp_desc", "timestamp", postgresql_ops={"timestamp": "DESC"}),

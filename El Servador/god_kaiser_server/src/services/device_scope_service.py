@@ -10,6 +10,7 @@ to avoid detached-instance issues across sessions.
 
 import time
 import uuid
+from datetime import datetime
 from typing import NamedTuple, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,7 @@ class ActiveContextData(NamedTuple):
     active_zone_id: Optional[str]
     active_subzone_id: Optional[str]
     context_source: Optional[str]
+    context_since: Optional[datetime] = None
 
 
 class _CachedContext:
@@ -97,6 +99,7 @@ class DeviceScopeService:
             active_zone_id=orm_context.active_zone_id,
             active_subzone_id=orm_context.active_subzone_id,
             context_source=orm_context.context_source,
+            context_since=orm_context.context_since,
         ) if orm_context else None
         self._context_cache[key] = _CachedContext(data, CONTEXT_CACHE_TTL_SECONDS)
         return data

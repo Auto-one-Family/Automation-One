@@ -862,12 +862,17 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 {
   "ts": 1735818000,
   "esp_id": "ESP_12AB34CD",
+  "status": "zone_assigned",
   "zone_id": "greenhouse",
-  "zone_name": "Gewächshaus",
-  "success": true,
-  "message": "Zone assigned successfully"
+  "master_zone_id": "greenhouse_master",
+  "seq": 42,
+  "correlation_id": "uuid-v4"
 }
 ```
+
+**correlation_id:** Optional. Echoed from zone/assign payload for MQTTCommandBridge ACK matching. If absent, server uses FIFO fallback via (esp_id, command_type).
+
+**status-Werte:** `zone_assigned`, `zone_removed`, `error`
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildZoneAckTopic()` (Zeile 237)
@@ -927,16 +932,18 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 **Payload:**
 ```json
 {
-  "ts": 1735818000,
+  "timestamp": 1735818000,
   "esp_id": "ESP_12AB34CD",
+  "status": "subzone_assigned",
   "subzone_id": "zone_a",
-  "action": "assigned",
-  "success": true,
-  "message": "Subzone assigned successfully"
+  "seq": 43,
+  "correlation_id": "uuid-v4"
 }
 ```
 
-**action-Werte:** `assigned`, `removed`
+**correlation_id:** Optional. Echoed from subzone/assign payload for MQTTCommandBridge ACK matching. If absent, server uses FIFO fallback via (esp_id, command_type).
+
+**status-Werte:** `subzone_assigned`, `subzone_removed`, `error`
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildSubzoneAckTopic()` (Zeile 206)

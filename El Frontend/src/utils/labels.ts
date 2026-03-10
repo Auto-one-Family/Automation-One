@@ -83,6 +83,9 @@ export const ACTUATOR_TYPE_LABELS: Record<string, string> = {
   'heater': 'Heizung',
   'light': 'Beleuchtung',
   'motor': 'Motor',
+  // Server-normalized types (actuator_configs stores interface type, not logical type)
+  'digital': 'Relais',
+  'servo': 'Servo',
 }
 
 /**
@@ -98,6 +101,10 @@ export function getActuatorTypeInfo(type: string): { label: string; icon: string
     'heater': { label: 'Heizung', icon: 'Flame' },
     'light': { label: 'Beleuchtung', icon: 'Lightbulb' },
     'motor': { label: 'Motor', icon: 'Cog' },
+    // Server-normalized types: actuator_configs stores interface type (digital/pwm/servo)
+    // while ESP32 uses logical type (relay/pump/valve). Map server types to user-friendly display.
+    'digital': { label: 'Relais', icon: 'ToggleRight' },
+    'servo': { label: 'Servo', icon: 'Cog' },
   }
   return info[type] ?? { label: type, icon: 'Power' }
 }

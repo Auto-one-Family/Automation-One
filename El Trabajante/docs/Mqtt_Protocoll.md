@@ -1936,7 +1936,9 @@ mosquitto_pub -h localhost \
   "status": "zone_assigned",
   "zone_id": "greenhouse_zone_1",
   "master_zone_id": "greenhouse_master",
-  "ts": 1234567890
+  "ts": 1234567890,
+  "seq": 42,
+  "correlation_id": "uuid-v4"
 }
 ```
 
@@ -1946,7 +1948,9 @@ mosquitto_pub -h localhost \
   "esp_id": "ESP_AB12CD",
   "status": "error",
   "message": "Failed to save zone config",
-  "ts": 1234567890
+  "ts": 1234567890,
+  "seq": 43,
+  "correlation_id": "uuid-v4"
 }
 ```
 

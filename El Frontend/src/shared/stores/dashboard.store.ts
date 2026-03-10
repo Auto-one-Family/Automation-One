@@ -364,6 +364,15 @@ export const useDashboardStore = defineStore('dashboard', () => {
         persistLayouts()
 
         logger.info(`Fetched ${serverLayouts.length} dashboards from server, ${localOnly.length} local-only`)
+
+        // Proactive orphan sync: push local-only dashboards to server
+        const orphans = localOnly.filter(l => !l.serverId)
+        if (orphans.length > 0) {
+          logger.info(`Syncing ${orphans.length} orphan dashboard(s) to server`)
+          for (const orphan of orphans) {
+            syncLayoutToServer(orphan.id)
+          }
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -588,7 +597,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
         config: {
           espId: s.espId,
           gpio: s.gpio,
-          sensorId: s.espId ? `${s.espId}:${s.gpio}` : undefined,
+          sensorId: s.espId ? `${s.espId}:${s.gpio}:${s.sensorType}` : undefined,
           sensorType: s.sensorType,
           zoneId,
           title: s.name || config?.label || s.sensorType,
@@ -676,6 +685,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
           updatedAt: new Date().toISOString(),
         }
         persistLayouts()
+        syncLayoutToServer(existing.id)
         return layouts.value[idx]
       }
     }
@@ -710,6 +720,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
       updatedAt: new Date().toISOString(),
     }
     persistLayouts()
+    syncLayoutToServer(layoutId)
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

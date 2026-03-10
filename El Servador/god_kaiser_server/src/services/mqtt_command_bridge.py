@@ -11,6 +11,7 @@ bereits auf dem FastAPI Loop dispatched wurden — daher kein Thread-Problem.
 import asyncio
 import json
 import logging
+import time
 from collections import deque
 from typing import Any
 from uuid import uuid4
@@ -113,17 +114,20 @@ class MQTTCommandBridge:
                 f"MQTT publish failed for {topic} ({client_state})"
             )
 
+        send_time = time.monotonic()
         try:
             result = await asyncio.wait_for(future, timeout=timeout)
+            duration_ms = int((time.monotonic() - send_time) * 1000)
             logger.info(
-                "ACK received for %s %s (correlation_id=%s, status=%s)",
-                esp_id, command_type, correlation_id, result.get("status"),
+                "ACK received for %s %s (correlation_id=%s, status=%s, duration_ms=%d)",
+                esp_id, command_type, correlation_id, result.get("status"), duration_ms,
             )
             return result
         except asyncio.TimeoutError:
+            duration_ms = int((time.monotonic() - send_time) * 1000)
             logger.warning(
-                "ACK timeout for %s %s (correlation_id=%s, timeout=%ss)",
-                esp_id, command_type, correlation_id, timeout,
+                "ACK timeout for %s %s (correlation_id=%s, timeout=%ss, elapsed_ms=%d)",
+                esp_id, command_type, correlation_id, timeout, duration_ms,
             )
             raise MQTTACKTimeoutError(
                 f"No ACK for {esp_id} {command_type} "

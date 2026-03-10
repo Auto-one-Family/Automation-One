@@ -57,6 +57,7 @@ const activeFilterCount = computed(() => {
   let count = 0
   if (store.typeFilter !== 'all') count++
   if (store.statusFilter !== 'all') count++
+  if (store.scopeFilter !== 'all') count++
   if (store.zoneFilter.length > 0) count += store.zoneFilter.length
   return count
 })
@@ -238,6 +239,26 @@ function toggleZoneFilter(zone: string) {
                 :key="opt.value"
                 :class="['inventory-chip', { 'inventory-chip--active': store.statusFilter === opt.value }]"
                 @click="store.statusFilter = opt.value as 'all' | 'online' | 'offline' | 'maintenance_due'; store.currentPage = 1"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Scope Filter (only when non-local scope devices exist) -->
+          <div v-if="store.hasNonLocalScope" class="inventory-filters__group">
+            <label class="inventory-filters__label">Scope</label>
+            <div class="inventory-filters__chips">
+              <button
+                v-for="opt in [
+                  { value: 'all', label: 'Alle' },
+                  { value: 'zone_local', label: 'Lokal' },
+                  { value: 'multi_zone', label: 'Multi-Zone' },
+                  { value: 'mobile', label: 'Mobil' },
+                ]"
+                :key="opt.value"
+                :class="['inventory-chip', { 'inventory-chip--active': store.scopeFilter === opt.value }]"
+                @click="store.scopeFilter = opt.value as 'all' | 'zone_local' | 'multi_zone' | 'mobile'; store.currentPage = 1"
               >
                 {{ opt.label }}
               </button>

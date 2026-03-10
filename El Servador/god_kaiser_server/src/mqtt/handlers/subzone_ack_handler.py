@@ -122,6 +122,7 @@ class SubzoneAckHandler:
                         "esp_id": esp_id,
                         "ts": ack_payload.timestamp,
                         "error_code": getattr(ack_payload, "error_code", None),
+                        "correlation_id": payload.get("correlation_id"),
                     },
                     esp_id=esp_id,
                     command_type="subzone",

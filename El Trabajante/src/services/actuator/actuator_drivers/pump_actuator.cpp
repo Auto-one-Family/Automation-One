@@ -120,16 +120,19 @@ bool PumpActuator::applyState(bool state, bool force) {
     return false;
   }
 
-  if (state == running_) {
-    return true;
-  }
-
   int level = state ? HIGH : LOW;
   if (config_.inverted_logic) {
     level = (level == HIGH) ? LOW : HIGH;
   }
 
+  // Always write GPIO — even if running_ matches state. External interference
+  // (e.g. safe-mode setting pin to INPUT_PULLUP) can desync hardware from
+  // running_ flag. Idempotent: repeated digitalWrite is safe.
   digitalWrite(gpio_, level);
+
+  if (state == running_) {
+    return true;
+  }
 
   unsigned long now = millis();
   if (state) {

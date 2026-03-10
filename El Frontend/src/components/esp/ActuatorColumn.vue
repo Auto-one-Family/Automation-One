@@ -21,6 +21,8 @@ export interface ActuatorItem {
   state: boolean
   pwm_value?: number
   emergency_stopped?: boolean
+  device_scope?: 'zone_local' | 'multi_zone' | 'mobile' | null
+  assigned_zones?: string[] | null
 }
 
 interface Props {
@@ -57,6 +59,8 @@ const emit = defineEmits<{
       :state="actuator.state"
       :pwm-value="actuator.pwm_value"
       :emergency-stopped="actuator.emergency_stopped"
+      :device-scope="actuator.device_scope"
+      :assigned-zones="actuator.assigned_zones ?? undefined"
       :selected="selectedGpio === actuator.gpio"
       :show-connections="showConnections"
       class="actuator-column__satellite"

@@ -31,6 +31,7 @@ const dashStore = useDashboardStore()
 const { createWidgetElement, mountWidgetToElement, cleanupAllWidgets, widgetComponentMap } = useDashboardWidgets({
   showConfigButton: false,
   showWidgetHeader: false,
+  readOnly: true,
 })
 
 /** Row height in pixels — synchronized with CustomDashboardView/DashboardViewer cellHeight */

@@ -28,6 +28,10 @@ import RuntimeMaintenanceSection from '@/components/devices/RuntimeMaintenanceSe
 import DeviceMetadataSection from '@/components/devices/DeviceMetadataSection.vue'
 import LinkedRulesSection from '@/components/devices/LinkedRulesSection.vue'
 import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSection.vue'
+import DeviceScopeSection from '@/components/devices/DeviceScopeSection.vue'
+import { deviceContextApi } from '@/api/device-context'
+import { useZoneStore } from '@/shared/stores/zone.store'
+import type { DeviceScope } from '@/types'
 import type { DeviceMetadata } from '@/types/device-metadata'
 import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
 import type { SensorConfigCreate } from '@/types'
@@ -57,6 +61,7 @@ const toast = useToast()
 const espStore = useEspStore()
 const uiStore = useUiStore()
 const calibration = useCalibration()
+const zoneStore = useZoneStore()
 
 // =============================================================================
 // State
@@ -73,6 +78,12 @@ const enabled = ref(true)
 
 // Subzone
 const subzoneId = ref<string | null>(null)
+
+// Device Scope (T13-R3 WP4)
+const localScope = ref<DeviceScope>('zone_local')
+const localAssignedZones = ref<string[]>([])
+const activeZoneId = ref<string | null>(null)
+const availableZones = computed(() => zoneStore.activeZones)
 
 // Operating mode (Block C: Phase 2B)
 const operatingMode = ref<'continuous' | 'on_demand' | 'scheduled' | 'paused'>('continuous')
@@ -186,6 +197,10 @@ onMounted(async () => {
       if (config.threshold_max != null) alarmHigh.value = roundToDecimals(config.threshold_max, 2)
 
       metadata.value = parseDeviceMetadata(config.metadata)
+
+      // Device Scope (T13-R3 WP4)
+      localScope.value = (configExt.device_scope as DeviceScope) ?? 'zone_local'
+      localAssignedZones.value = (configExt.assigned_zones as string[]) ?? []
     }
   } catch {
     // No config in DB — use defaults or Mock fallback (C2)
@@ -230,6 +245,21 @@ onMounted(async () => {
     }
   }
   loading.value = false
+
+  // Load active zone context (T13-R3 WP4)
+  if (sensorDbId.value && localScope.value !== 'zone_local') {
+    try {
+      const ctx = await deviceContextApi.getContext('sensor', sensorDbId.value)
+      activeZoneId.value = ctx.active_zone_id ?? null
+    } catch {
+      // No context set yet — that's fine
+    }
+  }
+
+  // Ensure zone entities are loaded for the scope section
+  if (zoneStore.zoneEntities.length === 0) {
+    zoneStore.fetchZoneEntities().catch(() => {})
+  }
 })
 
 // Watch live sensor value for calibration
@@ -273,6 +303,9 @@ async function confirmAndDelete() {
       // Unified path: Mock AND Real ESPs use the same DELETE /sensors/{esp_id}/{config_id}
       // This endpoint handles simulation job cleanup, dual-storage sync, and MQTT config publish
       await sensorsApi.delete(props.espId, props.configId)
+    } else if (espApi.isMockEsp(props.espId)) {
+      // Fallback for Mock-ESPs without config_id (e.g. freshly added sensors not yet in DB)
+      await espStore.removeSensor(props.espId, props.gpio)
     } else {
       toast.error('Sensor-Config-ID fehlt — Löschung nicht möglich')
       return
@@ -340,6 +373,10 @@ async function handleSave() {
       rawSubzone === '__none__' || rawSubzone == null || rawSubzone === ''
         ? null
         : rawSubzone
+
+    // Device Scope (T13-R3 WP4)
+    config.device_scope = localScope.value
+    config.assigned_zones = localScope.value === 'zone_local' ? [] : localAssignedZones.value
 
     config.metadata = mergeDeviceMetadata(null, metadata.value)
 
@@ -851,6 +888,22 @@ async function handleSave() {
           :esp-id="espId"
           :gpio="gpio"
           device-type="sensor"
+        />
+      </AccordionSection>
+
+      <!-- ═══ ZONE-ZUORDNUNG (T13-R3 WP4) ═════════════════════════════════ -->
+      <AccordionSection
+        title="Zone-Zuordnung"
+        :storage-key="`${accordionKey}-zone-scope`"
+      >
+        <DeviceScopeSection
+          :config-id="sensorDbId"
+          config-type="sensor"
+          v-model="localScope"
+          v-model:assigned-zones="localAssignedZones"
+          v-model:active-zone-id="activeZoneId"
+          :available-zones="availableZones"
+          :disabled="saving"
         />
       </AccordionSection>
 

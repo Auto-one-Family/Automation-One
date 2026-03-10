@@ -100,7 +100,7 @@ allowed-tools: Read
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
 | `/zone/zones` | GET | JWT | Alle Zonen aus zones-Tabelle (Single Source of Truth), enriched mit Device/Sensor/Actuator Counts. Query: `?status=active\|archived\|deleted` |
-| `/zone/devices/{esp_id}/assign` | POST | Operator | ESP einer Zone zuweisen (MQTT). T13-R1: Zone muss existieren + aktiv sein. `subzone_strategy`: transfer/copy/reset |
+| `/zone/devices/{esp_id}/assign` | POST | Operator | ESP einer Zone zuweisen (MQTT). T13-R1: Zone muss existieren + aktiv sein. `subzone_strategy`: transfer/copy/reset. Response: `ack_received`, `warning` (T14-Fix-B) |
 | `/zone/devices/{esp_id}/zone` | DELETE | Operator | Zone-Zuweisung entfernen |
 | `/zone/devices/{esp_id}` | GET | JWT | Zone-Info für ESP |
 | `/zone/{zone_id}/devices` | GET | JWT | Alle ESPs in Zone |
@@ -119,6 +119,7 @@ allowed-tools: Read
 | `/zones` | GET | Operator | Alle Zonen listen. Query: `?status=active\|archived\|deleted` (Default: non-deleted) |
 | `/zones/{zone_id}` | GET | Operator | Zone nach zone_id abrufen |
 | `/zones/{zone_id}` | PUT | Operator | Zone aktualisieren (name, description) |
+| `/zones/{zone_id}` | PATCH | Operator | Partielle Zone-Aktualisierung (nur übergebene Felder). Synct `esp_devices.zone_name` bei Umbenennung |
 | `/zones/{zone_id}/archive` | POST | Operator | Zone archivieren (Devices müssen vorher entfernt werden, Subzones werden deaktiviert) |
 | `/zones/{zone_id}/reactivate` | POST | Operator | Archivierte Zone reaktivieren (Subzones bleiben deaktiviert) |
 | `/zones/{zone_id}` | DELETE | Operator | Zone soft-delete (blockiert wenn Devices zugeordnet). Setzt status='deleted' + deleted_at |
@@ -1417,6 +1418,39 @@ Health Check (keine Auth erforderlich).
 
 > **Hinweis:** `/health` gibt nur `status` und `mqtt_connected` zurück. Für Details `/health/detailed` nutzen.
 
+### 9.2 GET /health/detailed
+
+Detaillierter Health Check mit Komponenten-Status (JWT erforderlich, ActiveUser).
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "status": "healthy",
+  "version": "2.0.0",
+  "environment": "production",
+  "uptime_seconds": 86400,
+  "uptime_formatted": "1d 0h 0m",
+  "timestamp": "2026-03-10T12:00:00Z",
+  "database": { "connected": true, "pool_size": 20, "latency_ms": 5.2, "database_type": "PostgreSQL" },
+  "mqtt": { "connected": true, "broker_host": "mqtt-broker", "broker_port": 1883 },
+  "websocket": { "active_connections": 2 },
+  "system": { "cpu_percent": 15.0, "memory_percent": 45.0, "disk_percent": 30.0 },
+  "resilience": {
+    "healthy": true,
+    "breakers": {
+      "mqtt": { "state": "closed", "failures": 0, "failure_threshold": 5, "last_failure": null, "forced_open": false },
+      "database": { "state": "closed", "failures": 0, "failure_threshold": 5, "last_failure": null, "forced_open": false }
+    },
+    "summary": { "total": 2, "closed": 2, "open": 0, "half_open": 0 }
+  },
+  "components": [],
+  "warnings": []
+}
+```
+
+> **Resilience-Feld (Fix-X):** Zeigt Circuit Breaker Status aller registrierten Breaker. Offene Breakers setzen `status: "degraded"` und erzeugen einen Warning-Eintrag. Feld ist `null` wenn ResilienceRegistry nicht initialisiert. Admin-Detail-Ansicht inkl. MQTT-Client-Status: `GET /debug/resilience/status`.
+
 ---
 
 ## 10. Error Responses
@@ -1506,6 +1540,12 @@ Health Check (keine Auth erforderlich).
 - `MockESPCreate`, `MockESPUpdate`, `MockESPResponse`
 - `MockSensorConfig`, `SetSensorValueRequest`
 - `MockActuatorConfig`, `ActuatorCommandRequest`
+
+### Health Schemas (`schemas/health.py`)
+- `HealthResponse`, `DetailedHealthResponse`, `LivenessResponse`, `ReadinessResponse`
+- `DatabaseHealth`, `MQTTHealth`, `WebSocketHealth`, `SystemResourceHealth`, `ComponentHealth`
+- `CircuitBreakerHealth`, `ResilienceSummary`, `ResilienceHealth` (Fix-X)
+- `ESPHealthItem`, `ESPHealthSummaryResponse`, `RecentError`
 
 ### Common Schemas (`schemas/common.py`)
 - `APIResponse[T]`, `PaginatedResponse[T]`

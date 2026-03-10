@@ -43,8 +43,12 @@ logger = get_logger(__name__)
 
 
 def _is_mock_esp(device_id: str) -> bool:
-    """Check if device ID indicates a mock ESP."""
-    return device_id.startswith("ESP_MOCK_") or device_id.startswith("MOCK_") or "MOCK" in device_id
+    """Check if device ID indicates a mock ESP.
+
+    Only matches explicit MOCK_ or ESP_MOCK_ prefixes.
+    Wokwi and physical ESPs (e.g. ESP_472204, ESP_00000001) must NOT match.
+    """
+    return device_id.startswith("ESP_MOCK_") or device_id.startswith("MOCK_")
 
 
 class ZoneService:
@@ -186,19 +190,24 @@ class ZoneService:
         if subzone_strategy == "transfer" and affected_subzones:
             transferred_subzones = affected_subzones
 
+        ack_received: Optional[bool] = None
+        warning_msg: Optional[str] = None
+
         if self.command_bridge and not _is_mock_esp(device_id):
             # ACK-gesteuert fuer echte ESPs
             from .mqtt_command_bridge import MQTTACKTimeoutError
 
+            ack_timeout = self.command_bridge.DEFAULT_TIMEOUT
             try:
                 zone_ack = await self.command_bridge.send_and_wait_ack(
                     topic=topic,
                     payload=payload,
                     esp_id=device_id,
                     command_type="zone",
-                    timeout=10.0,
+                    timeout=ack_timeout,
                 )
                 mqtt_sent = True
+                ack_received = True
 
                 if zone_ack.get("status") == "error":
                     logger.error(
@@ -211,8 +220,14 @@ class ZoneService:
                     await self._send_transferred_subzones(device_id, transferred_subzones)
 
             except MQTTACKTimeoutError as e:
-                logger.error("Zone assignment ACK timeout for %s: %s", device_id, e)
+                logger.warning("Zone assignment ACK timeout for %s: %s", device_id, e)
                 mqtt_sent = False
+                ack_received = False
+                warning_msg = (
+                    f"ACK-Timeout: ESP {device_id} hat nicht innerhalb "
+                    f"{ack_timeout}s bestätigt. "
+                    f"Zone-Zuweisung wurde in DB gespeichert."
+                )
         else:
             # Fire-and-forget fuer Mock-ESPs oder wenn keine Bridge vorhanden
             mqtt_sent = self._publish_zone_assignment(topic, payload)
@@ -221,6 +236,11 @@ class ZoneService:
             logger.info(
                 "Zone assignment sent to %s: zone_id=%s, strategy=%s",
                 device_id, zone_id, subzone_strategy,
+            )
+        elif ack_received is False:
+            logger.warning(
+                "Zone assignment ACK timeout for %s (DB updated, ESP may not have confirmed)",
+                device_id,
             )
         else:
             logger.warning(
@@ -241,17 +261,24 @@ class ZoneService:
         if _is_mock_esp(device_id):
             await self._update_mock_esp_zone(device_id, zone_id, zone_name, master_zone_id)
 
+        if mqtt_sent:
+            msg = "Zone assignment saved"
+        elif ack_received is False:
+            msg = "Zone assignment saved (ACK timeout)"
+        else:
+            msg = "Zone assignment saved (MQTT offline)"
+
         return ZoneAssignResponse(
             success=True,
-            message=(
-                "Zone assignment saved" if mqtt_sent else "Zone assignment saved (MQTT offline)"
-            ),
+            message=msg,
             device_id=device_id,
             zone_id=zone_id,
             master_zone_id=master_zone_id,
             zone_name=zone_name,
             mqtt_topic=topic,
             mqtt_sent=mqtt_sent,
+            ack_received=ack_received,
+            warning=warning_msg,
         )
 
     async def remove_zone(
@@ -334,7 +361,7 @@ class ZoneService:
                     payload=payload,
                     esp_id=device_id,
                     command_type="zone",
-                    timeout=10.0,
+                    timeout=15.0,
                 )
                 mqtt_sent = True
                 if ack.get("status") == "error":
@@ -469,8 +496,11 @@ class ZoneService:
         Returns:
             List of affected subzone dicts for audit logging
         """
-        # Only affect subzones belonging to the OLD zone (not subzones from other zones)
-        subzones = await subzone_repo.get_by_esp_and_zone(device_id, old_zone_id)
+        # Get ALL subzones for this ESP — not filtered by zone.
+        # Subzones belong to the ESP, not a zone. Filtering by parent_zone_id
+        # causes a self-reinforcing orphan bug: after a zone transfer updates
+        # parent_zone_id, the next transfer can't find subzones under the old zone.
+        subzones = await subzone_repo.get_by_esp(device_id)
         if not subzones:
             return []
 
@@ -525,16 +555,19 @@ class ZoneService:
             )
 
         elif strategy == "reset":
-            # Leave subzones in old zone, device starts fresh
+            # Delete all subzones for this ESP from DB.
+            # The ESP does NOT cascade-remove subzones during zone change
+            # (only during zone removal). Server DB must be authoritative.
             for sz in subzones:
                 affected.append({
                     "subzone_id": sz.subzone_id,
                     "old_parent": sz.parent_zone_id,
-                    "action": "orphaned",
+                    "action": "deleted",
                 })
+            deleted_count = await subzone_repo.delete_all_by_esp(device_id)
             logger.info(
-                "Reset: %d subzone(s) left in %s, device %s starts fresh in %s",
-                len(subzones), old_zone_id, device_id, new_zone_id,
+                "Reset: Deleted %d subzone(s) for device %s (zone change %s → %s)",
+                deleted_count, device_id, old_zone_id, new_zone_id,
             )
 
         else:
@@ -631,7 +664,7 @@ class ZoneService:
                     payload=sz_payload,
                     esp_id=device_id,
                     command_type="subzone",
-                    timeout=10.0,
+                    timeout=15.0,
                 )
                 if sz_ack.get("status") == "error":
                     logger.warning(

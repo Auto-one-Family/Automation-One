@@ -33,6 +33,7 @@ from ...db.models.audit_log import AuditEventType, AuditSeverity
 from ...db.models.enums import DataSource
 from ...db.models.esp import ESPDevice
 from ...db.repositories import ESPRepository, ESPHeartbeatRepository
+from ...db.repositories.actuator_repo import ActuatorRepository
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.session import resilient_session
 from ..topics import TopicBuilder
@@ -46,6 +47,9 @@ HEARTBEAT_TIMEOUT_SECONDS = 300
 RECONNECT_THRESHOLD_SECONDS = 60
 # Full-State-Push: Cooldown between pushes (prevent rapid-fire on boot)
 STATE_PUSH_COOLDOWN_SECONDS = 120
+
+# Config-Push: Cooldown between auto config pushes (prevent mismatch loop)
+CONFIG_PUSH_COOLDOWN_SECONDS = 120
 
 # Module-level MQTTCommandBridge reference (set via set_command_bridge())
 _command_bridge = None
@@ -730,7 +734,7 @@ class HeartbeatHandler:
                 elif esp_has_zone and not db_has_zone:
                     # ESP has zone from NVS, Server has None
                     # This happens after: (1) Server restart, (2) failed zone removal
-                    logger.warning(
+                    logger.info(
                         f"ZONE_MISMATCH [{esp_device.device_id}]: "
                         f"ESP reports zone_id='{heartbeat_zone_id}' but DB has zone_id=None. "
                         f"ESP may have stale zone from NVS. Consider re-sending zone removal."
@@ -744,12 +748,6 @@ class HeartbeatHandler:
                         if esp_lost_zone
                         else f"zone_id mismatch (ESP='{heartbeat_zone_id}', DB='{db_zone_id}')"
                     )
-                    logger.warning(
-                        f"ZONE_MISMATCH [{esp_device.device_id}]: "
-                        f"ESP lost zone config ({mismatch_reason}). "
-                        f"DB has zone_id='{db_zone_id}'. Auto-reassigning zone."
-                    )
-
                     # Auto-resend zone/assign with rate-limiting
                     # Use 60s cooldown (not 300s) because zone loss after reboot
                     # should be resolved quickly for zone-based logic to work
@@ -763,11 +761,24 @@ class HeartbeatHandler:
                         if elapsed < zone_resync_cooldown_seconds:
                             should_resync = False
                             logger.debug(
-                                f"Zone resync for {esp_device.device_id} skipped "
-                                f"(cooldown: {zone_resync_cooldown_seconds - elapsed}s remaining)"
+                                "ZONE_MISMATCH [%s]: zone lost (%s), but resync cooldown active (%ds remaining)",
+                                esp_device.device_id, mismatch_reason,
+                                zone_resync_cooldown_seconds - elapsed,
                             )
 
+                    if should_resync and esp_device.status == "offline":
+                        should_resync = False
+                        logger.debug(
+                            "Skipping zone resync for offline ESP %s",
+                            esp_device.device_id,
+                        )
+
                     if should_resync:
+                        logger.warning(
+                            f"ZONE_MISMATCH [{esp_device.device_id}]: "
+                            f"ESP lost zone config ({mismatch_reason}). "
+                            f"DB has zone_id='{db_zone_id}'. Auto-reassigning zone."
+                        )
                         try:
                             from ..client import MQTTClient
 
@@ -820,7 +831,7 @@ class HeartbeatHandler:
                             )
                 else:
                     # Both have zone but different values
-                    logger.warning(
+                    logger.info(
                         f"ZONE_MISMATCH [{esp_device.device_id}]: "
                         f"ESP reports zone_id='{heartbeat_zone_id}' but DB has zone_id='{db_zone_id}'. "
                         f"Zone assignment may be inconsistent."
@@ -1238,6 +1249,13 @@ class HeartbeatHandler:
             True if there is pending configuration, False otherwise
         """
         try:
+            # Skip config push to offline ESPs
+            if esp_device.status == "offline":
+                logger.debug(
+                    "Skipping config push for offline ESP %s", esp_device.device_id
+                )
+                return False
+
             from ...db.repositories import SensorRepository, ActuatorRepository
 
             sensor_repo = SensorRepository(session)
@@ -1251,6 +1269,28 @@ class HeartbeatHandler:
             needs_actuator_push = esp_actuator_count == 0 and db_actuator_count > 0
 
             if needs_sensor_push or needs_actuator_push:
+                # Check cooldown (analog to zone_resync_sent_at pattern)
+                metadata = esp_device.device_metadata or {}
+                last_push = metadata.get("config_push_sent_at")
+                now_ts = int(time_module.time())
+
+                if last_push:
+                    elapsed = now_ts - last_push
+                    if elapsed < CONFIG_PUSH_COOLDOWN_SECONDS:
+                        logger.debug(
+                            "Config push for %s skipped (cooldown: %ds remaining). "
+                            "ESP: sensors=%d/actuators=%d, DB: sensors=%d/actuators=%d",
+                            esp_device.device_id,
+                            int(CONFIG_PUSH_COOLDOWN_SECONDS - elapsed),
+                            esp_sensor_count, esp_actuator_count,
+                            db_sensor_count, db_actuator_count,
+                        )
+                        return False
+
+                # Cooldown expired or first push — update metadata and trigger
+                metadata["config_push_sent_at"] = now_ts
+                esp_device.device_metadata = metadata
+
                 logger.info(
                     f"Config mismatch detected for {esp_device.device_id}: "
                     f"ESP reports sensors={esp_sensor_count}/actuators={esp_actuator_count}, "
@@ -1390,7 +1430,11 @@ class HeartbeatHandler:
                         "assigned_gpios": [
                             g for g in (sz.assigned_gpios or []) if g != 0
                         ],
-                        "safe_mode_active": sz.safe_mode_active or False,
+                        # Reconnect state push restores operational state — never
+                        # activate safe-mode during resync (safe-mode is only for
+                        # explicit user actions). Prevents GPIO conflict where
+                        # safe-mode sets actuator pins to INPUT_PULLUP.
+                        "safe_mode_active": False,
                         "timestamp": now_ts,
                     }
                     try:
@@ -1444,6 +1488,7 @@ class HeartbeatHandler:
                 online_devices = await esp_repo.get_by_status("online")
 
                 offline_devices = []
+                actuator_reset_counts: dict[str, int] = {}
                 now = datetime.now(timezone.utc)
                 timeout_threshold = now - timedelta(seconds=HEARTBEAT_TIMEOUT_SECONDS)
 
@@ -1457,6 +1502,27 @@ class HeartbeatHandler:
                             # Device timed out
                             await esp_repo.update_status(device.device_id, "offline")
                             offline_devices.append(device.device_id)
+
+                            # Reset actuator states to idle for offline device
+                            try:
+                                actuator_repo = ActuatorRepository(session)
+                                reset_count = await actuator_repo.reset_states_for_device(
+                                    esp_id=device.id,
+                                    new_state="idle",
+                                    reason="heartbeat_timeout",
+                                )
+                                if reset_count > 0:
+                                    actuator_reset_counts[device.device_id] = reset_count
+                                    logger.info(
+                                        f"[Heartbeat] Reset {reset_count} actuator state(s) to idle "
+                                        f"for offline device {device.device_id}"
+                                    )
+                            except Exception as reset_err:
+                                logger.warning(
+                                    f"[Heartbeat] Failed to reset actuator states for "
+                                    f"{device.device_id}: {reset_err}"
+                                )
+
                             logger.warning(
                                 f"Device {device.device_id} timed out. "
                                 f"Last seen: {device.last_seen}"
@@ -1502,6 +1568,7 @@ class HeartbeatHandler:
                                     "reason": "heartbeat_timeout",
                                     "timeout_seconds": HEARTBEAT_TIMEOUT_SECONDS,
                                     "timestamp": int(now.timestamp()),
+                                    "actuator_states_reset": actuator_reset_counts.get(device_id, 0),
                                 },
                             )
                             logger.info(f"📡 Broadcast esp_health offline event for {device_id}")

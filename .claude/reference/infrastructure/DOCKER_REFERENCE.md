@@ -1,7 +1,7 @@
 # Docker-Infrastruktur Referenz - AutomationOne
 
-**Version:** 2.0
-**Datum:** 2026-03-02
+**Version:** 2.2
+**Datum:** 2026-03-10
 **Zweck:** Vollstaendige Referenz fuer Docker-Stack Architektur und Befehle
 
 ---
@@ -78,6 +78,7 @@
 | Host-Pfad | Service | Container-Pfad | Status |
 |-----------|---------|----------------|--------|
 | `./logs/server/` | el-servador | `/app/logs` | Aktiv |
+| `./backups/` | el-servador | `/app/backups` | Aktiv (Fix-T Block 2) |
 | `./logs/mqtt/` | mqtt-broker | `/mosquitto/log` | Deaktiviert (kommentiert seit v3.1, Mosquitto nutzt stdout-only) |
 | (kein Bind-Mount) | postgres | stderr → Docker → Alloy → Loki | `logging_collector=off` seit v4.6 |
 
@@ -505,6 +506,7 @@ docker volume rm automationone-postgres-data
 | 1.9 | 2026-02-25 | Bind-Mounts: PostgreSQL `logging_collector=off` (kein Bind-Mount mehr, stderr → Docker → Alloy → Loki). cadvisor Service hinzugefuegt (13 Services: 4 Core + 7 Monitoring + 1 DevTools + 1 Hardware) |
 | 2.0 | 2026-03-02 | Alloy Healthcheck korrigiert: `bash TCP check` statt `wget /-/ready` (kein wget im Alloy-Image) |
 | 2.1 | 2026-03-02 | Alloy Pipeline v4.7: Level-Normalisierung (uppercase) für loki/mqtt-broker/el-frontend, 3 Drop-Filter für query-stats Noise, SM-Beschreibung ergänzt |
+| 2.2 | 2026-03-10 | Fix-T: postgresql-client-16 (PGDG) im Dockerfile, Backup Bind-Mount `./backups:/app/backups` |
 
 ---
 

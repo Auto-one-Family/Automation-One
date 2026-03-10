@@ -199,6 +199,7 @@ class NotificationRouter:
                 source=notification.source,
                 parent_notification_id=notification.parent_notification_id,
                 correlation_id=notification.correlation_id,
+                fingerprint=notification.fingerprint,
             )
             result = await self.route(user_notification)
             if result and first_notification is None:

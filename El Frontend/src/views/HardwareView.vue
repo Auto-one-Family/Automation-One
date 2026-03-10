@@ -17,8 +17,10 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useEspStore } from '@/stores/esp'
 import { useLogicStore } from '@/shared/stores/logic.store'
+import { useZoneStore } from '@/shared/stores/zone.store'
 import { useUiStore, useDashboardStore } from '@/shared/stores'
 import type { ESPDevice } from '@/api/esp'
+import type { ZoneEntity } from '@/types'
 import { useZoneDragDrop, ZONE_UNASSIGNED, useKeyboardShortcuts, useSwipeNavigation } from '@/composables'
 import { useToast } from '@/composables/useToast'
 import { zonesApi } from '@/api/zones'
@@ -38,6 +40,7 @@ import ESPConfigPanel from '@/components/esp/ESPConfigPanel.vue'
 // Components
 import CreateMockEspModal from '@/components/modals/CreateMockEspModal.vue'
 import ESPSettingsSheet from '@/components/esp/ESPSettingsSheet.vue'
+import ZoneSettingsSheet from '@/components/zones/ZoneSettingsSheet.vue'
 import ComponentSidebar from '@/components/dashboard/ComponentSidebar.vue'
 import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
 import LoadingState from '@/shared/design/primitives/BaseSkeleton.vue'
@@ -62,6 +65,7 @@ const dashStore = useDashboardStore()
 const { groupDevicesByZone, handleDeviceDrop, handleRemoveFromZone, generateZoneId, getAvailableZones } = useZoneDragDrop()
 const { register } = useKeyboardShortcuts()
 const dragStore = useDragStateStore()
+const zoneStore = useZoneStore()
 const { success: showSuccess, error: showError, info: showInfo } = useToast()
 
 // =============================================================================
@@ -203,6 +207,7 @@ watch(
 // Modal states
 const settingsDevice = ref<ESPDevice | null>(null)
 const isSettingsOpen = ref(false)
+let settingsCloseTimer: ReturnType<typeof setTimeout> | null = null
 
 // Handle ?openSettings=espId query param (legacy links + cross-component navigation)
 watch(
@@ -211,6 +216,7 @@ watch(
     if (!espId) return
     const device = espStore.devices.find(d => d.device_id === espId)
     if (device) {
+      if (settingsCloseTimer) { clearTimeout(settingsCloseTimer); settingsCloseTimer = null }
       settingsDevice.value = device
       isSettingsOpen.value = true
     }
@@ -237,6 +243,7 @@ onMounted(() => {
   espStore.fetchPendingDevices()
   logicStore.fetchRules()
   logicStore.subscribeToWebSocket()
+  zoneStore.fetchZoneEntities()
 })
 
 onUnmounted(() => {
@@ -317,6 +324,125 @@ const zoneGroups = computed(() => {
   return zones
 })
 
+// =============================================================================
+// Zone Entity Integration (T13-R3 WP2)
+// =============================================================================
+
+/** Map zone_id → ZoneEntity for quick lookup */
+const zoneEntityMap = computed(() => {
+  const map = new Map<string, ZoneEntity>()
+  for (const ze of zoneStore.zoneEntities) {
+    map.set(ze.zone_id, ze)
+  }
+  return map
+})
+
+/** Active zone entities merged with device grouping data */
+interface ZoneDisplayEntry {
+  zoneId: string
+  zoneName: string
+  devices: ESPDevice[]
+  zoneEntity?: ZoneEntity
+  isArchived: boolean
+}
+
+const activeZoneEntries = computed((): ZoneDisplayEntry[] => {
+  const deviceGroupMap = new Map<string, { zoneName: string; devices: ESPDevice[] }>()
+  for (const g of zoneGroups.value) {
+    deviceGroupMap.set(g.zoneId, { zoneName: g.zoneName, devices: g.devices })
+  }
+
+  // Start from active zone entities (DB-backed)
+  const entries: ZoneDisplayEntry[] = []
+  const seenZoneIds = new Set<string>()
+
+  for (const ze of zoneStore.activeZones) {
+    const group = deviceGroupMap.get(ze.zone_id)
+    entries.push({
+      zoneId: ze.zone_id,
+      zoneName: ze.name,
+      devices: group?.devices ?? [],
+      zoneEntity: ze,
+      isArchived: false,
+    })
+    seenZoneIds.add(ze.zone_id)
+  }
+
+  // Add device-only zones (devices assigned to zones not yet in DB)
+  for (const g of zoneGroups.value) {
+    if (!seenZoneIds.has(g.zoneId)) {
+      entries.push({
+        zoneId: g.zoneId,
+        zoneName: g.zoneName,
+        devices: g.devices,
+        zoneEntity: undefined,
+        isArchived: false,
+      })
+    }
+  }
+
+  // Sort: problems first, empty last, alpha within
+  entries.sort((a, b) => {
+    const aHasProblems = a.devices.some(d => {
+      const s = getESPStatus(d)
+      return s === 'offline' || s === 'error'
+    })
+    const bHasProblems = b.devices.some(d => {
+      const s = getESPStatus(d)
+      return s === 'offline' || s === 'error'
+    })
+    const aEmpty = a.devices.length === 0
+    const bEmpty = b.devices.length === 0
+    if (aHasProblems && !bHasProblems) return -1
+    if (!aHasProblems && bHasProblems) return 1
+    if (aEmpty && !bEmpty) return 1
+    if (!aEmpty && bEmpty) return -1
+    return a.zoneName.localeCompare(b.zoneName)
+  })
+
+  return entries
+})
+
+/** Archived zone entities with their devices */
+const archivedZoneEntries = computed((): ZoneDisplayEntry[] => {
+  return zoneStore.archivedZones.map(ze => {
+    const devices = filteredEsps.value.filter(d => d.zone_id === ze.zone_id)
+    return {
+      zoneId: ze.zone_id,
+      zoneName: ze.name,
+      devices,
+      zoneEntity: ze,
+      isArchived: true,
+    }
+  })
+})
+
+// ZoneSettingsSheet state
+const zoneSettingsEntity = ref<ZoneEntity | null>(null)
+const isZoneSettingsOpen = ref(false)
+
+function openZoneSettings(zoneId: string) {
+  const entity = zoneEntityMap.value.get(zoneId)
+  if (!entity) return
+  zoneSettingsEntity.value = entity
+  isZoneSettingsOpen.value = true
+}
+
+function handleZoneSettingsClose() {
+  isZoneSettingsOpen.value = false
+  setTimeout(() => { if (!isZoneSettingsOpen.value) zoneSettingsEntity.value = null }, 200)
+}
+
+function handleZoneEntityUpdated() {
+  zoneStore.fetchZoneEntities()
+  espStore.fetchAll()
+}
+
+function handleZoneEntityArchived() {
+  zoneStore.fetchZoneEntities()
+  handleZoneSettingsClose()
+}
+
 /** Unassigned devices — filtered to match active status/type filters */
 const unassignedDevices = computed(() => {
   const filters = dashStore.activeStatusFilters
@@ -375,19 +501,26 @@ const selectedEspForNewZone = ref('')
 
 async function handleZoneCreate() {
   const name = newZoneName.value.trim()
-  if (!name || !selectedEspForNewZone.value) return
+  if (!name) return
 
   const zoneId = generateZoneId(name)
   try {
-    await zonesApi.assignZone(selectedEspForNewZone.value, {
-      zone_id: zoneId,
-      zone_name: name,
-    })
+    // Create DB-backed zone entity
+    await zoneStore.createZone({ zone_id: zoneId, name })
+
+    // If an ESP was selected, assign it to the new zone
+    if (selectedEspForNewZone.value) {
+      await zonesApi.assignZone(selectedEspForNewZone.value, {
+        zone_id: zoneId,
+        zone_name: name,
+      })
+      await espStore.fetchAll()
+    }
+
     showSuccess(`Zone "${name}" erstellt`)
     showCreateZoneForm.value = false
     newZoneName.value = ''
     selectedEspForNewZone.value = ''
-    await espStore.fetchAll()
     // Auto-expand the new zone
     setZoneExpanded(zoneId, true)
   } catch (err) {
@@ -519,6 +652,7 @@ async function handleDelete(espId: string) {
 }
 
 function handleSettings(device: ESPDevice) {
+  if (settingsCloseTimer) { clearTimeout(settingsCloseTimer); settingsCloseTimer = null }
   settingsDevice.value = device
   isSettingsOpen.value = true
 }
@@ -565,14 +699,22 @@ function handleChangeZone(device: ESPDevice) {
     return
   }
 
-  // Show context menu at center of screen
-  const x = window.innerWidth / 2
-  const y = window.innerHeight / 2
+  // Position context menu near the device card (not screen center)
+  const deviceId = espStore.getDeviceId(device)
+  const cardEl = document.querySelector(`[data-device-id="${deviceId}"]`)
+  let x = window.innerWidth / 2
+  let y = window.innerHeight / 2
+  if (cardEl) {
+    const rect = cardEl.getBoundingClientRect()
+    x = rect.right
+    y = rect.top
+  }
   uiStore.openContextMenu(x, y, menuItems)
 }
 
 /** Block 3: Open ESP config from PendingDevicesPanel (Variante A → Variante B) */
 function handleOpenEspConfigFromPanel(device: ESPDevice) {
+  if (settingsCloseTimer) { clearTimeout(settingsCloseTimer); settingsCloseTimer = null }
   dashStore.showPendingPanel = false
   settingsDevice.value = device
   isSettingsOpen.value = true
@@ -580,7 +722,11 @@ function handleOpenEspConfigFromPanel(device: ESPDevice) {
 
 function handleSettingsClose() {
   isSettingsOpen.value = false
-  setTimeout(() => { if (!isSettingsOpen.value) settingsDevice.value = null }, 200)
+  if (settingsCloseTimer) clearTimeout(settingsCloseTimer)
+  settingsCloseTimer = setTimeout(() => {
+    settingsDevice.value = null
+    settingsCloseTimer = null
+  }, 200)
 }
 
 function handleDeviceDeleted(_payload: { deviceId: string }) {
@@ -753,14 +899,15 @@ function formatTimeAgo(timestamp: number): string {
                 <p class="text-sm">Ziehe Geräte aus der unteren Leiste in eine Zone.</p>
               </div>
               <ZonePlate
-                v-for="group in zoneGroups"
-                :id="`zone-${group.zoneId}`"
-                :key="group.zoneId"
-                :zone-id="group.zoneId"
-                :zone-name="group.zoneName"
-                :devices="group.devices"
-                :is-expanded="isZoneExpanded(group.zoneId)"
-                @update:is-expanded="setZoneExpanded(group.zoneId, $event)"
+                v-for="entry in activeZoneEntries"
+                :id="`zone-${entry.zoneId}`"
+                :key="entry.zoneId"
+                :zone-id="entry.zoneId"
+                :zone-name="entry.zoneName"
+                :devices="entry.devices"
+                :zone-entity="entry.zoneEntity"
+                :is-expanded="isZoneExpanded(entry.zoneId)"
+                @update:is-expanded="setZoneExpanded(entry.zoneId, $event)"
                 @device-click="onDeviceCardClick"
                 @device-dropped="onDeviceDropped"
                 @change-zone="handleChangeZone"
@@ -769,6 +916,7 @@ function formatTimeAgo(timestamp: number): string {
                 @device-delete="handleDelete"
                 @settings="handleSettings"
                 @monitor-nav="onDeviceMonitorNav"
+                @zone-settings="openZoneSettings"
               />
 
               <!-- Unassigned Devices Section (hidden when empty) -->
@@ -785,8 +933,8 @@ function formatTimeAgo(timestamp: number): string {
                   <template #header="{ isOpen, toggle }">
                     <div class="unassigned-section__header" @click="toggle">
                       <ChevronDown
-                        class="zone-plate__chevron"
-                        :class="{ 'zone-plate__chevron--collapsed': !isOpen }"
+                        class="unassigned-section__chevron"
+                        :class="{ 'unassigned-section__chevron--collapsed': !isOpen }"
                       />
                       <Inbox class="unassigned-section__icon" />
                       <h3 class="unassigned-section__title">Nicht zugewiesen</h3>
@@ -801,7 +949,7 @@ function formatTimeAgo(timestamp: number): string {
 
                   <VueDraggable
                     v-model="localUnassignedDevices"
-                    class="zone-plate__devices"
+                    class="unassigned-section__devices"
                     group="esp-devices"
                     :animation="150"
                     handle=".esp-drag-handle"
@@ -823,7 +971,7 @@ function formatTimeAgo(timestamp: number): string {
                       v-for="device in localUnassignedDevices"
                       :key="espStore.getDeviceId(device)"
                       :data-device-id="espStore.getDeviceId(device)"
-                      class="zone-plate__device-wrapper"
+                      class="unassigned-section__device-wrapper"
                     >
                       <DeviceMiniCard
                         :device="device"
@@ -854,10 +1002,11 @@ function formatTimeAgo(timestamp: number): string {
                   @keydown.escape.prevent="cancelZoneCreate"
                 />
                 <select
+                  v-if="unassignedDevices.length > 0"
                   v-model="selectedEspForNewZone"
                   class="zone-create-form__select"
                 >
-                  <option value="" disabled>ESP wählen...</option>
+                  <option value="">Kein ESP zuweisen</option>
                   <option
                     v-for="dev in unassignedDevices"
                     :key="espStore.getDeviceId(dev)"
@@ -868,7 +1017,7 @@ function formatTimeAgo(timestamp: number): string {
                 </select>
                 <button
                   class="zone-create-form__btn zone-create-form__btn--primary"
-                  :disabled="!newZoneName.trim() || !selectedEspForNewZone"
+                  :disabled="!newZoneName.trim()"
                   @click="handleZoneCreate"
                 >
                   Erstellen
@@ -881,17 +1030,40 @@ function formatTimeAgo(timestamp: number): string {
                 </button>
               </div>
 
-              <!-- + Zone erstellen button -->
+              <!-- + Zone erstellen button (FL-01: zones are standalone entities, no ESP required) -->
               <button
                 v-if="!showCreateZoneForm"
                 class="zone-create-btn"
-                :disabled="unassignedDevices.length === 0"
-                :title="unassignedDevices.length === 0 ? 'Keine unzugewiesenen ESPs vorhanden' : 'Neue Zone erstellen'"
+                title="Neue Zone erstellen"
                 @click="showCreateZoneForm = true"
               >
                 <Plus class="zone-create-btn__icon" />
                 Zone erstellen
               </button>
+              <!-- Archived Zones (collapsible) -->
+              <AccordionSection
+                v-if="archivedZoneEntries.length > 0"
+                :title="`Archivierte Zonen (${archivedZoneEntries.length})`"
+                storage-key="ao-archived-zones"
+                :default-open="false"
+                class="archived-zones-section"
+              >
+                <ZonePlate
+                  v-for="entry in archivedZoneEntries"
+                  :key="entry.zoneId"
+                  :zone-id="entry.zoneId"
+                  :zone-name="entry.zoneName"
+                  :devices="entry.devices"
+                  :zone-entity="entry.zoneEntity"
+                  :is-archived="true"
+                  :is-expanded="isZoneExpanded(entry.zoneId)"
+                  @update:is-expanded="setZoneExpanded(entry.zoneId, $event)"
+                  @device-click="onDeviceCardClick"
+                  @settings="handleSettings"
+                  @monitor-nav="onDeviceMonitorNav"
+                  @zone-settings="openZoneSettings"
+                />
+              </AccordionSection>
             </div>
 
             <button
@@ -960,6 +1132,18 @@ function formatTimeAgo(timestamp: number): string {
       @heartbeat-triggered="(p: any) => handleHeartbeat(p.deviceId)"
       @name-updated="handleNameUpdated"
       @zone-updated="handleZoneUpdated"
+    />
+
+    <!-- Zone Settings Sheet -->
+    <ZoneSettingsSheet
+      v-if="zoneSettingsEntity"
+      :zone="zoneSettingsEntity"
+      :is-open="isZoneSettingsOpen"
+      :device-count="filteredEsps.filter(d => d.zone_id === zoneSettingsEntity?.zone_id).length"
+      @close="handleZoneSettingsClose"
+      @zone-updated="handleZoneEntityUpdated"
+      @zone-archived="handleZoneEntityArchived"
+      @zone-reactivated="handleZoneEntityUpdated"
     />
 
     <!-- Sensor Config SlideOver (elevation=high wenn über Settings-Sheet) -->
@@ -1195,7 +1379,7 @@ function formatTimeAgo(timestamp: number): string {
 .zone-create-btn:hover:not(:disabled) {
   border-color: var(--color-accent-bright);
   color: var(--color-accent-bright);
-  background: rgba(96, 165, 250, 0.04);
+  background: var(--color-accent-bg);
 }
 
 .zone-create-btn:disabled {
@@ -1287,15 +1471,15 @@ function formatTimeAgo(timestamp: number): string {
 
 /* ── Unassigned Section ─────────────────────────────────────────────────── */
 .unassigned-section {
-  background: rgba(245, 158, 11, 0.04);
-  border: 1px solid rgba(245, 158, 11, 0.15);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
   border-radius: var(--radius-md);
   overflow: hidden;
 }
 
 .unassigned-section--drop-target {
   border-color: var(--color-warning);
-  box-shadow: 0 0 0 1px var(--color-warning), inset 0 0 12px rgba(245, 158, 11, 0.08);
+  box-shadow: 0 0 0 1px var(--color-warning), inset 0 0 12px var(--color-warning-glow);
 }
 
 .unassigned-section__accordion {
@@ -1313,7 +1497,7 @@ function formatTimeAgo(timestamp: number): string {
 }
 
 .unassigned-section__header:hover {
-  background: rgba(245, 158, 11, 0.06);
+  background: var(--color-warning-bg-hover);
 }
 
 .unassigned-section__icon {
@@ -1348,6 +1532,30 @@ function formatTimeAgo(timestamp: number): string {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   font-style: italic;
+}
+
+.unassigned-section__chevron {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.unassigned-section__chevron--collapsed {
+  transform: rotate(-90deg);
+}
+
+.unassigned-section__devices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 8px;
+  min-height: 32px;
+  padding-top: var(--space-1);
+}
+
+.unassigned-section__device-wrapper {
+  /* Must be a real box element — display: contents breaks SortableJS drag visuals */
 }
 
 .unassigned-section__all-assigned {
@@ -1420,13 +1628,13 @@ function formatTimeAgo(timestamp: number): string {
   border: none;
   border-radius: var(--radius-md);
   cursor: pointer;
-  box-shadow: 0 0 20px rgba(167, 139, 250, 0.3);
+  box-shadow: 0 0 20px var(--color-iridescent-glow);
   transition: filter var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .hardware-empty__btn:hover {
   filter: brightness(1.15);
-  box-shadow: 0 0 28px rgba(167, 139, 250, 0.45);
+  box-shadow: 0 0 28px var(--color-iridescent-glow-hover);
 }
 
 .hardware-empty__btn-icon {
@@ -1448,6 +1656,18 @@ function formatTimeAgo(timestamp: number): string {
 
 .hardware-empty__link:hover {
   color: var(--color-accent-bright);
+}
+
+/* ═══ Archived zones section ═══ */
+.archived-zones-section {
+  margin-top: var(--space-4);
+  opacity: 0.7;
+}
+
+.archived-zones-section :deep(.accordion__panel) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
 @media (max-width: 640px) {

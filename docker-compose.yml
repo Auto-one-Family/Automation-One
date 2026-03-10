@@ -112,6 +112,8 @@ services:
       # Live-reload: Mount source code
       - ./El Servador/god_kaiser_server/src:/app/src:ro
       - ./logs/server:/app/logs
+      # Persist database backups on host (Fix-T Block 2)
+      - ./backups:/app/backups
     depends_on:
       postgres:
         condition: service_healthy

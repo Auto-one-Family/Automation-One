@@ -160,6 +160,14 @@ class SafetyService:
                 error=f"ESP device not found: {esp_id}",
             )
 
+        # V1-22: Online Guard — Commands to offline ESPs are silently dropped
+        # by the MQTT broker (clean_session=true). Reject early with clear feedback.
+        if not esp_device.is_online:
+            return SafetyCheckResult(
+                valid=False,
+                error=f"ESP device is offline: {esp_id} (status={esp_device.status})",
+            )
+
         # Lookup actuator config
         actuator_config = await self.actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
 

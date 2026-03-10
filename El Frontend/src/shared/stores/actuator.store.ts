@@ -118,7 +118,7 @@ export const useActuatorStore = defineStore('actuator', () => {
     const device = devices.find(d => getDeviceId(d) === espId)
     if (!device?.actuators) return
 
-    const actuator = (device.actuators as { gpio: number; state?: boolean; pwm_value?: number; emergency_stopped?: boolean; last_command?: string }[]).find(a => a.gpio === gpio)
+    const actuator = (device.actuators as { gpio: number; state?: boolean; pwm_value?: number; emergency_stopped?: boolean; last_command_at?: string }[]).find(a => a.gpio === gpio)
     if (!actuator) return
 
     // Map server payload → frontend MockActuator
@@ -130,7 +130,7 @@ export const useActuatorStore = defineStore('actuator', () => {
     if (data.emergency !== undefined) {
       actuator.emergency_stopped = data.emergency !== 'normal'
     }
-    actuator.last_command = data.timestamp
+    actuator.last_command_at = data.timestamp
       ? new Date(data.timestamp * 1000).toISOString()
       : new Date().toISOString()
   }

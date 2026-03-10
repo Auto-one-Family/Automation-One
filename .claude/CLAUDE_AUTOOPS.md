@@ -1,9 +1,9 @@
 # AutoOps - Autonomous Operations Agent Framework
 
 > **Für KI-Agenten:** Plugin-basierter autonomer Agent der ESP32-Geräte vollständig über die REST API konfiguriert, debuggt und dokumentiert.
-> **Version:** 2.2.0
+> **Version:** 2.3.0
 > **Erstellt:** 2026-02-15
-> **Aktualisiert:** 2026-03-08
+> **Aktualisiert:** 2026-03-09
 
 ---
 
@@ -175,8 +175,19 @@ await client.send_actuator_command("MOCK_ABC123", gpio=16, command="ON")
 # Zone erstellen (persistente ZoneContext Entity)
 await client.create_zone(zone_id="gewaechshaus", name="Gewächshaus")
 
-# Device einer Zone zuweisen (via MQTT)
+# Device einer Zone zuweisen (via MQTT, POST nicht PUT!)
 await client.assign_zone("MOCK_ABC123", zone_id="gewaechshaus", zone_name="Gewächshaus")
+
+# Zone-WECHSEL mit Subzone-Strategie (transfer/reset/copy)
+await client.assign_zone(
+    "ESP_472204",
+    zone_id="neue_zone",
+    zone_name="Neue Zone",
+    subzone_strategy="transfer",  # transfer | reset | copy
+)
+# transfer: Subzones mitnehmen (parent_zone_id wird aktualisiert)
+# reset: Subzones loeschen, ESP startet ohne Subzones
+# copy: Originale behalten, Kopien in neuer Zone
 
 # Subzone zuweisen
 await client.assign_subzone("MOCK_ABC123", subzone_name="Bewässerung")
@@ -187,6 +198,8 @@ zones = await client.list_zones()
 # Subzones auflisten (pro Device)
 subzones = await client.list_subzones(esp_id="MOCK_ABC123")
 ```
+
+> **Hinweis:** `assign_zone()` nutzt `POST` (nicht PUT!). PUT gibt 405 Method Not Allowed.
 
 ### Health & Monitoring
 
@@ -246,7 +259,7 @@ data = await client.query_table("devices", limit=10)
 | `get_sensor_type_defaults()` | Sensor Type Info | `GET /v1/sensors/type-defaults/{type}` |
 | `add_actuator()` | Aktuator-Config-Form | `POST /v1/actuators/{esp_id}/{gpio}` |
 | `send_actuator_command()` | ON/OFF Toggle | `POST /v1/actuators/{esp_id}/{gpio}/command` |
-| `assign_zone()` | Zone-Assignment-Panel | `POST /v1/zone/devices/{id}/assign` |
+| `assign_zone()` | Zone-Assignment-Panel | `POST /v1/zone/devices/{id}/assign` (NICHT PUT!) |
 | `list_zones()` | Zone-Liste | `GET /v1/zone/zones` |
 | `create_zone()` | Zone erstellen | `POST /v1/zones` |
 | `delete_sensor()` | Sensor löschen | `DELETE /v1/sensors/{esp_id}/{config_id}` (UUID) |
@@ -280,6 +293,74 @@ Der API Client retried automatisch bei transienten Fehlern:
 | Andere 4xx/5xx | Client/Server Error | Nein |
 
 Retry-Strategie: Exponential Backoff (`delay * 2^attempt`), max 3 Versuche.
+
+### Direct Database Access (psql via Docker)
+
+Wenn die REST-API nicht ausreicht (z.B. fuer JOINs, COUNT, komplexe Queries), kann direkt auf PostgreSQL zugegriffen werden:
+
+```bash
+docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c "<SQL>"
+```
+
+**KRITISCH — Haeufige Fehler:**
+
+| Fehler | Falsch | Richtig | Grund |
+|--------|--------|---------|-------|
+| Container-Name | `automationone-postgres-1` | `automationone-postgres` | Docker Compose v2 ohne `-1` Suffix |
+| DB-User | `-U autoone` | `-U god_kaiser` | Env-Variable `POSTGRES_USER=god_kaiser` |
+| SQL `!=` Operator | `WHERE status != 'deleted'` | `WHERE status <> 'deleted'` | Git Bash escaped `!` zu `\!` |
+| JOIN esp_devices | `ON e.id = sc.esp_id` | `ON e.device_id = sc.esp_id` | `e.id` = UUID PK, `sc.esp_id` referenziert `e.device_id` (VARCHAR FK) |
+
+**Schema Quick-Reference (haeufige JOINs):**
+
+```sql
+-- subzone_configs → esp_devices (FK: esp_id → device_id, NICHT id!)
+SELECT sc.*, e.device_id, e.zone_id
+FROM subzone_configs sc
+JOIN esp_devices e ON e.device_id = sc.esp_id
+WHERE e.deleted_at IS NULL;
+
+-- sensor_configs → esp_devices (FK: esp_id → id, UUID!)
+SELECT s.*, e.device_id
+FROM sensor_configs s
+JOIN esp_devices e ON e.id = s.esp_id
+WHERE e.deleted_at IS NULL;
+
+-- sensor_data → sensor_configs (FK: sensor_config_id → id)
+SELECT sd.*, s.sensor_type, s.gpio
+FROM sensor_data sd
+JOIN sensor_configs s ON s.id = sd.sensor_config_id;
+```
+
+> **Achtung:** `subzone_configs.esp_id` ist VARCHAR und referenziert `esp_devices.device_id`.
+> `sensor_configs.esp_id` ist UUID und referenziert `esp_devices.id`.
+> Diese Inkonsistenz ist historisch bedingt — immer Schema pruefen mit `\d tabellenname`.
+
+### Windows / Git Bash Caveats
+
+| Problem | Symptom | Fix |
+|---------|---------|-----|
+| `python3` nicht verfuegbar | `Python was not found` | `python` statt `python3` verwenden |
+| `!` in Strings | `!=` wird zu `\!=` → SQL-Fehler | `<>` statt `!=` in SQL, oder `$'...'` Quoting |
+| JSON Pipe | `python3 -m json.tool` schlaegt fehl | `python -m json.tool` |
+
+### Auth-Token fuer curl
+
+Die Login-Response hat eine **verschachtelte** Token-Struktur:
+
+```bash
+# Token extrahieren (RICHTIG — verschachtelt unter "tokens")
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"Admin123#"}' \
+  | python -c "import sys,json; print(json.load(sys.stdin)['tokens']['access_token'])")
+
+# Dann verwenden:
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/...
+```
+
+> **Haeufiger Fehler:** `response['access_token']` → FALSCH. Korrekt: `response['tokens']['access_token']`.
+> Der Python API-Client (`api_client.py`) handled beide Formate automatisch (Zeile 247-248).
 
 ---
 
@@ -700,7 +781,20 @@ AutoOps kann als Basis für die geplante KI-Integration dienen:
 | **profile_validator** | `pwm_fan` zu `VALID_ACTUATOR_TYPES` hinzugefügt |
 | **add_sensor()** | Dead-Code `raw_mode` Parameter entfernt, Body-Felder bereinigt |
 
+### v2.2 → v2.3 (2026-03-09)
+
+| Bereich | Änderung |
+|---------|----------|
+| **assign_zone()** | `subzone_strategy` Parameter hinzugefügt (transfer/reset/copy) |
+| **Doku: DB-Zugriff** | Neue Sektion "Direct Database Access" mit korrekten Credentials und Schema-JOINs |
+| **Doku: Container** | Container-Name korrigiert: `automationone-postgres` (nicht `-1`) |
+| **Doku: DB-User** | PostgreSQL-User korrigiert: `god_kaiser` (nicht `autoone`) |
+| **Doku: Windows** | Neue Sektion "Windows / Git Bash Caveats" (python vs python3, Shell-Escaping) |
+| **Doku: Auth-Token** | Token-Extraktion dokumentiert: `response['tokens']['access_token']` (verschachtelt) |
+| **Doku: Schema** | Schema Quick-Reference fuer JOINs: `esp_devices.device_id` vs `.id` Unterscheidung |
+| **API-Tabelle** | `assign_zone()` Hinweis: POST nicht PUT (405 bei PUT) |
+
 ---
 
-**Letzte Aktualisierung:** 2026-03-08
-**Version:** 2.2.0
+**Letzte Aktualisierung:** 2026-03-09
+**Version:** 2.3.0

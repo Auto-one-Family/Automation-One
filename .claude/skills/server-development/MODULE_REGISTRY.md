@@ -130,10 +130,10 @@ class ValidationResult:
 
 | Methode | Parameter | Return | Beschreibung |
 |---------|-----------|--------|--------------|
-| `assign_zone()` | `device_id, zone_id, master_zone_id, zone_name, subzone_strategy, changed_by` | `ZoneAssignResponse` | Zone zu ESP zuweisen. T13-R1: Zone muss existieren + aktiv sein. `subzone_strategy`: transfer/copy/reset. Schreibt DeviceZoneChange Audit |
+| `assign_zone()` | `device_id, zone_id, master_zone_id, zone_name, subzone_strategy, changed_by` | `ZoneAssignResponse` | Zone zu ESP zuweisen. T13-R1: Zone muss existieren + aktiv sein. `subzone_strategy`: transfer/copy/reset. Schreibt DeviceZoneChange Audit. Response: `ack_received` (True/False/None), `warning` (bei Timeout) |
 | `remove_zone()` | `device_id, changed_by` | `ZoneRemoveResponse` | Zone entfernen. Schreibt DeviceZoneChange Audit |
 | `get_unassigned_esps()` | - | `List[ESPDevice]` | Alle ESPs ohne Zone-Zuweisung |
-| `_handle_subzone_strategy()` | `device_id, old_zone_id, new_zone_id, strategy, subzone_repo` | `List[dict]` | Subzone transfer/copy/reset Logik (intern). Zone-Filter: nur Subzones aus old_zone_id |
+| `_handle_subzone_strategy()` | `device_id, old_zone_id, new_zone_id, strategy, subzone_repo` | `List[dict]` | Subzone transfer/copy/reset Logik (intern). Queries ALL subzones by ESP (not zone-filtered). Reset: physisches DELETE via `delete_all_by_esp()` (T14-Fix-B) |
 | `_generate_unique_copy_id()` | `source_subzone_id, device_id, subzone_repo` | `str` | Unique Copy-ID: strips _copy/_copy_N, counter-basiert (_copy, _copy_2, _copy_3), UUID-Fallback >99 |
 
 ---
@@ -145,7 +145,7 @@ class ValidationResult:
 | Methode | Parameter | Return | Beschreibung |
 |---------|-----------|--------|--------------|
 | `assign_subzone()` | `esp_id, subzone_id, gpio_pins[]` | `SubzoneConfig` | Subzone zuweisen |
-| `remove_subzone()` | `esp_id, subzone_id` | `bool` | Subzone entfernen |
+| `remove_subzone()` | `esp_id, subzone_id, reason` | `SubzoneRemoveResponse` | DB-Delete first, then MQTT notify (BUG-5 fix) |
 | `set_safe_mode()` | `esp_id, subzone_id, active, reason` | `bool` | Safe-Mode aktivieren |
 | `get_subzones()` | `esp_id: str` | `List[SubzoneConfig]` | Alle Subzones eines ESP |
 | `get_subzone_status()` | `esp_id, subzone_id` | `SubzoneStatus` | Subzone-Status |
@@ -273,7 +273,7 @@ class ValidationResult:
 
 | Methode | Parameter | Return | Beschreibung |
 |---------|-----------|--------|--------------|
-| `get_active_context()` | `config_type: str, config_id: UUID` | `Optional[DeviceActiveContext]` | Aktiven Kontext aus Cache (30s TTL) oder DB laden |
+| `get_active_context()` | `config_type: str, config_id: UUID` | `Optional[ActiveContextData]` | Aktiven Kontext aus Cache (30s TTL) oder DB laden. Returns NamedTuple (session-safe) |
 | `set_context()` | `config_type, config_id, zone_id, subzone_id, source, changed_by` | `DeviceActiveContext` | Kontext setzen + Cache invalidieren |
 | `delete_context()` | `config_type: str, config_id: UUID` | `bool` | Kontext löschen (→ zone_local Fallback) |
 | `resolve_zone()` | `config_type, config_id, esp_id` | `str` | 3-Way Resolution: zone_local → ESP.zone_id, multi_zone/mobile → active_zone_id aus Context |
@@ -290,7 +290,7 @@ class ValidationResult:
 
 ### 1.18 MQTTCommandBridge (T13-Phase2)
 
-**Datei:** `src/services/mqtt_command_bridge.py` (~200 Zeilen)
+**Datei:** `src/services/mqtt_command_bridge.py` (~230 Zeilen)
 
 ACK-gesteuerte MQTT-Kommunikation für kritische Operationen (Zone/Subzone-Assignment). Ergänzt den bestehenden Publisher um ACK-Waiting via `asyncio.Future`. Fire-and-forget bleibt für unkritische Nachrichten bestehen. Mock-ESPs umgehen die Bridge (fire-and-forget).
 
@@ -433,7 +433,7 @@ ACK-gesteuerte MQTT-Kommunikation für kritische Operationen (Zone/Subzone-Assig
 | GET | `/` | - | - | `HealthStatus` |
 | GET | `/live` | - | - | `{"status": "ok"}` |
 | GET | `/ready` | - | - | `ReadyStatus` |
-| GET | `/detailed` | Active | - | `DetailedHealth` |
+| GET | `/detailed` | Active | - | `DetailedHealth` (inkl. `resilience: ResilienceHealth`) |
 | GET | `/metrics` | Active | - | `Metrics` |
 | GET | `/database` | Admin | - | `DatabaseHealth` |
 
@@ -658,7 +658,7 @@ CIRCUIT_BREAKER_MQTT_RECOVERY_TIMEOUT=30
 | Handler | Datei | Zeilen | Topic | Funktion |
 |---------|-------|--------|-------|----------|
 | SensorDataHandler | sensor_handler.py | 731 | `+/sensor/+/data` | Sensor-Daten verarbeiten |
-| HeartbeatHandler | heartbeat_handler.py | 1,112 | `+/system/heartbeat` | Heartbeat + Auto-Discovery |
+| HeartbeatHandler | heartbeat_handler.py | ~1,500 | `+/system/heartbeat` | Heartbeat + Auto-Discovery + Full-State-Push on Reconnect (T13-Phase3) + Config-Push (120s cooldown, offline guard) |
 | ActuatorStatusHandler | actuator_handler.py | 457 | `+/actuator/+/status` | Actuator-Status |
 | ActuatorResponseHandler | actuator_response_handler.py | 279 | `+/actuator/+/response` | Command-Response |
 | ActuatorAlertHandler | actuator_alert_handler.py | 320 | `+/actuator/+/alert` | Alerts + E-Stop |
@@ -678,7 +678,7 @@ CIRCUIT_BREAKER_MQTT_RECOVERY_TIMEOUT=30
 | Repository | Model | Spezial-Queries |
 |-----------|-------|-----------------|
 | ESPRepository | ESPDevice | `get_by_device_id(include_deleted)`, `soft_delete()`, `get_running_mocks()`, `get_online()`, `rebuild_simulation_config(device, sensor_configs)` |
-| SensorRepository | SensorConfig | `get_by_esp_gpio_and_type()`, `get_by_esp_gpio_type_and_i2c()`, `get_by_esp_gpio_type_and_onewire()` |
+| SensorRepository | SensorConfig | `get_by_esp_gpio_and_type()`, `get_by_esp_gpio_type_and_i2c()`, `get_by_esp_gpio_type_and_onewire()`, `get_all_by_i2c_address()` |
 | ActuatorRepository | ActuatorConfig | `get_by_esp_and_gpio()`, `get_state()`, `log_command()` |
 | LogicRepository | CrossESPLogic | `get_rules_by_trigger_sensor()`, `get_enabled_rules()` |
 | AuditLogRepository | AuditLog | `search()`, `get_stats()`, `cleanup_old()` |

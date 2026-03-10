@@ -31,6 +31,7 @@ Error Codes:
 
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import flag_modified
 
 from ...core.error_codes import (
@@ -39,6 +40,7 @@ from ...core.error_codes import (
 )
 from ...core.logging_config import get_logger
 from ...db.repositories import ESPRepository
+from ...db.repositories.zone_repo import ZoneRepository
 from ...db.session import resilient_session
 from ...websocket.manager import WebSocketManager
 from ..topics import TopicBuilder
@@ -139,6 +141,21 @@ class ZoneAckHandler:
                     )
                     return False
 
+                # Step 4.5: Validate zone exists before writing FK
+                # Prevents ForeignKeyViolationError on server restart when ESP
+                # sends ACK with a zone_id that no longer exists in DB
+                if status == "zone_assigned" and zone_id:
+                    zone_repo = ZoneRepository(session)
+                    zone = await zone_repo.get_by_zone_id(zone_id)
+                    if zone is None:
+                        logger.warning(
+                            "Zone ACK from %s: zone '%s' not found in DB. "
+                            "Ignoring — will be resolved on next heartbeat cycle.",
+                            esp_id_str,
+                            zone_id,
+                        )
+                        return False
+
                 # Step 5: Update ESP based on ACK status
                 if status == "zone_assigned":
                     # Update zone fields
@@ -184,21 +201,45 @@ class ZoneAckHandler:
                 else:
                     logger.warning(f"Unknown zone ACK status from {esp_id_str}: {status}")
 
-                await session.commit()
+                try:
+                    await session.commit()
+                except IntegrityError as e:
+                    await session.rollback()
+                    if "zone" in str(e).lower():
+                        logger.warning(
+                            "Zone ACK commit failed for %s (FK violation, zone_id='%s'). "
+                            "Ignoring — will be resolved on next heartbeat cycle.",
+                            esp_id_str,
+                            zone_id,
+                        )
+                        return False
+                    raise
 
                 # Step 5.1: Resolve pending ACK Future (if any)
                 if _command_bridge:
-                    _command_bridge.resolve_ack(
+                    resolved = _command_bridge.resolve_ack(
                         ack_data={
                             "status": status,
                             "zone_id": zone_id,
                             "master_zone_id": master_zone_id,
                             "esp_id": esp_id_str,
                             "ts": timestamp,
+                            "correlation_id": payload.get("correlation_id"),
                         },
                         esp_id=esp_id_str,
                         command_type="zone",
                     )
+                    if resolved:
+                        logger.info(
+                            "zone/ack resolved for %s (correlation_id=%s)",
+                            esp_id_str,
+                            payload.get("correlation_id", "none"),
+                        )
+                    else:
+                        logger.debug(
+                            "zone/ack from %s: no pending Future (unsolicited ACK)",
+                            esp_id_str,
+                        )
 
                 # Step 6: Broadcast WebSocket event to frontend
                 await self._broadcast_zone_update(

@@ -9,7 +9,8 @@ import { ref, computed, watchEffect } from 'vue'
 import { defineStore } from 'pinia'
 import { useEspStore } from '@/stores/esp'
 import { useZoneGrouping } from '@/composables/useZoneGrouping'
-import { getSensorUnit, getSensorLabel } from '@/utils/sensorDefaults'
+import { getSensorUnit, getSensorLabel, getSensorDisplayName } from '@/utils/sensorDefaults'
+import type { DeviceScope } from '@/types'
 import { getESPStatus } from '@/composables/useESPStatus'
 import { isMaintenanceOverdue, getNextMaintenanceDate, parseDeviceMetadata } from '@/types/device-metadata'
 import type { DeviceMetadata } from '@/types/device-metadata'
@@ -36,12 +37,15 @@ export interface ComponentItem {
   metadata: DeviceMetadata | null
   maintenanceOverdue: boolean
   nextMaintenance: string | null
+  scope: DeviceScope | null
+  activeZone: string | null
 }
 
-export type SortKey = 'name' | 'type' | 'deviceType' | 'zone' | 'currentValue' | 'status' | 'lastSeen'
+export type SortKey = 'name' | 'type' | 'deviceType' | 'zone' | 'currentValue' | 'status' | 'lastSeen' | 'scope' | 'activeZone'
 export type SortDirection = 'asc' | 'desc'
 export type TypeFilter = 'all' | 'sensor' | 'actuator'
 export type StatusFilter = 'all' | 'online' | 'offline' | 'maintenance_due'
+export type ScopeFilter = 'all' | 'zone_local' | 'multi_zone' | 'mobile'
 
 export interface ColumnDef {
   key: string
@@ -60,6 +64,8 @@ export const INVENTORY_COLUMNS: ColumnDef[] = [
   { key: 'espId', label: 'ESP ID', sortable: true, defaultVisible: false },
   { key: 'lastSeen', label: 'Zuletzt gesehen', sortable: true, defaultVisible: false },
   { key: 'nextMaintenance', label: 'Nächste Wartung', sortable: true, defaultVisible: false },
+  { key: 'scope', label: 'Scope', sortable: true, defaultVisible: false },
+  { key: 'activeZone', label: 'Aktive Zone', sortable: true, defaultVisible: false },
 ]
 
 const DEFAULT_VISIBLE = INVENTORY_COLUMNS.filter(c => c.defaultVisible).map(c => c.key)
@@ -77,6 +83,7 @@ export const useInventoryStore = defineStore('inventory', () => {
   const zoneFilter = ref<string[]>([])
   const typeFilter = ref<TypeFilter>('all')
   const statusFilter = ref<StatusFilter>('all')
+  const scopeFilter = ref<ScopeFilter>('all')
 
   // ── Sort State ──
   const sortKey = ref<SortKey>('name')
@@ -128,7 +135,7 @@ export const useInventoryStore = defineStore('inventory', () => {
       // Disambiguate sensors with same type on same GPIO (e.g., 2x DS18B20 on OneWire bus)
       const groupKey = `${s.esp_id}_${s.gpio}_${s.sensor_type}`
       const isDuplicate = (sensorCounts.get(groupKey) || 0) > 1
-      let displayName = s.name ?? `${getSensorLabel(s.sensor_type)} (GPIO ${s.gpio})`
+      let displayName = getSensorDisplayName({ sensor_type: s.sensor_type, name: s.name }) || `${getSensorLabel(s.sensor_type)} (GPIO ${s.gpio})`
       if (isDuplicate && !s.name) {
         const idx = (sensorIndices.get(groupKey) || 0) + 1
         sensorIndices.set(groupKey, idx)
@@ -153,6 +160,8 @@ export const useInventoryStore = defineStore('inventory', () => {
         metadata,
         maintenanceOverdue: metadata ? isMaintenanceOverdue(metadata) : false,
         nextMaintenance: metadata ? (getNextMaintenanceDate(metadata)?.toISOString().slice(0, 10) ?? null) : null,
+        scope: (s as unknown as Record<string, unknown>).device_scope as DeviceScope | null ?? null,
+        activeZone: null,
       }
     })
 
@@ -188,11 +197,18 @@ export const useInventoryStore = defineStore('inventory', () => {
         metadata,
         maintenanceOverdue: metadata ? isMaintenanceOverdue(metadata) : false,
         nextMaintenance: metadata ? (getNextMaintenanceDate(metadata)?.toISOString().slice(0, 10) ?? null) : null,
+        scope: (a as unknown as Record<string, unknown>).device_scope as DeviceScope | null ?? null,
+        activeZone: null,
       }
     })
 
     return [...sensors, ...actuators]
   })
+
+  // ── Has non-local scope (show scope filter only when relevant) ──
+  const hasNonLocalScope = computed(() =>
+    allComponents.value.some(c => c.scope && c.scope !== 'zone_local'),
+  )
 
   // ── Available Zones (for filter dropdown) ──
   const availableZones = computed(() => {
@@ -216,6 +232,9 @@ export const useInventoryStore = defineStore('inventory', () => {
       if (statusFilter.value === 'online' && c.status !== 'online') return false
       if (statusFilter.value === 'offline' && c.status !== 'offline') return false
       if (statusFilter.value === 'maintenance_due' && !c.maintenanceOverdue) return false
+
+      // Scope filter
+      if (scopeFilter.value !== 'all' && c.scope !== scopeFilter.value) return false
 
       // Search query (debounced externally)
       if (searchQuery.value) {
@@ -243,6 +262,8 @@ export const useInventoryStore = defineStore('inventory', () => {
         case 'status': valA = a.status; valB = b.status; break
         case 'currentValue': valA = a.currentValue; valB = b.currentValue; break
         case 'lastSeen': valA = a.lastSeen ?? ''; valB = b.lastSeen ?? ''; break
+        case 'scope': valA = a.scope ?? ''; valB = b.scope ?? ''; break
+        case 'activeZone': valA = a.activeZone ?? ''; valB = b.activeZone ?? ''; break
       }
 
       if (valA < valB) return sortDirection.value === 'asc' ? -1 : 1
@@ -304,6 +325,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     zoneFilter.value = []
     typeFilter.value = 'all'
     statusFilter.value = 'all'
+    scopeFilter.value = 'all'
     currentPage.value = 1
   }
 
@@ -313,6 +335,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     zoneFilter,
     typeFilter,
     statusFilter,
+    scopeFilter,
 
     // Sort State
     sortKey,
@@ -334,6 +357,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     // Computed Data
     allComponents,
     availableZones,
+    hasNonLocalScope,
     filteredComponents,
     sortedComponents,
     paginatedComponents,

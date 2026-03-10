@@ -290,6 +290,14 @@ export interface MockSensor {
   interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | null
   /** I2C address (0-127) for I2C sensors */
   i2c_address?: number | null
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Device Scope Fields (T13-R3 WP4)
+  // ═══════════════════════════════════════════════════════════════════════════
+  /** Device scope: zone_local, multi_zone, mobile */
+  device_scope?: DeviceScope | null
+  /** Assigned zones for multi_zone/mobile devices */
+  assigned_zones?: string[] | null
 }
 
 export interface MockActuator {
@@ -299,12 +307,17 @@ export interface MockActuator {
   state: boolean
   pwm_value: number
   emergency_stopped: boolean
-  last_command: string | null
+  last_command_at: string | null
   subzone_id?: string | null
   // Config verification status from ESP32
   config_status?: 'pending' | 'applied' | 'failed' | null
   config_error?: string | null
   config_error_detail?: string | null
+  // Device Scope Fields (T13-R3 WP4)
+  /** Device scope: zone_local, multi_zone, mobile */
+  device_scope?: DeviceScope | null
+  /** Assigned zones for multi_zone/mobile devices */
+  assigned_zones?: string[] | null
 }
 
 /** Lightweight zone context summary inherited from ZoneContext */
@@ -434,8 +447,14 @@ export type MessageType =
   | 'sequence_completed'
   | 'sequence_error'
   | 'sequence_cancelled'
-  // Sensor config lifecycle
+  // Sensor/actuator config lifecycle
   | 'sensor_config_deleted'
+  | 'actuator_config_deleted'
+  // Device scope & context events (T13-R2)
+  | 'device_scope_changed'
+  | 'device_context_changed'
+  // Subzone assignment (dispatched in esp.store)
+  | 'subzone_assignment'
   // System events
   | 'logic_execution'
   | 'system_event'
@@ -652,6 +671,10 @@ export interface SensorConfigCreate {
   schedule_config?: Record<string, unknown> | null
   /** Subzone ID to assign this sensor to. Null/empty = remove from all subzones */
   subzone_id?: string | null
+  /** Device scope: zone_local, multi_zone, mobile (T13-R2) */
+  device_scope?: DeviceScope
+  /** Zones this sensor is assigned to for multi_zone scope (T13-R2) */
+  assigned_zones?: string[] | null
 }
 
 export interface SensorConfigResponse {
@@ -684,6 +707,10 @@ export interface SensorConfigResponse {
   timeout_seconds?: number | null
   /** Schedule config for scheduled mode: { type: 'cron', expression: string } */
   schedule_config?: { type: string; expression: string } | Record<string, unknown> | null
+  /** Device scope: zone_local, multi_zone, mobile (T13-R2) */
+  device_scope: DeviceScope | null
+  /** Zones this sensor is assigned to for multi_zone scope (T13-R2) */
+  assigned_zones: string[] | null
   latest_value?: number | null
   latest_quality?: QualityLevel | null
   latest_timestamp?: string | null
@@ -829,6 +856,10 @@ export interface ActuatorConfigCreate {
   metadata?: Record<string, unknown> | null
   /** Subzone ID to assign this actuator to. Null/empty = remove from all subzones */
   subzone_id?: string | null
+  /** Device scope: zone_local, multi_zone, mobile (T13-R2) */
+  device_scope?: DeviceScope
+  /** Zones this actuator is assigned to for multi_zone scope (T13-R2) */
+  assigned_zones?: string[] | null
 }
 
 export interface ActuatorConfigResponse {
@@ -850,6 +881,10 @@ export interface ActuatorConfigResponse {
   config_status?: 'pending' | 'applied' | 'failed' | null
   config_error?: string | null
   config_error_detail?: string | null
+  /** Device scope: zone_local, multi_zone, mobile (T13-R2) */
+  device_scope: DeviceScope | null
+  /** Zones this actuator is assigned to for multi_zone scope (T13-R2) */
+  assigned_zones: string[] | null
   current_value?: number | null
   is_active?: boolean
   last_command_at?: string | null
@@ -894,6 +929,61 @@ export interface ConfigResponseExtended extends ConfigResponse {
 }
 
 // =============================================================================
+// Zone Entity Types (T13-R1 Backend)
+// =============================================================================
+
+export type ZoneStatus = 'active' | 'archived' | 'deleted'
+
+export interface ZoneEntity {
+  id: string
+  zone_id: string
+  name: string
+  description: string | null
+  status: ZoneStatus
+  deleted_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ZoneEntityCreate {
+  zone_id: string
+  name: string
+  description?: string | null
+}
+
+export interface ZoneEntityUpdate {
+  name?: string | null
+  description?: string | null
+}
+
+export interface ZoneEntityListResponse {
+  zones: ZoneEntity[]
+  total: number
+}
+
+// =============================================================================
+// Device Scope Types (T13-R2 Backend)
+// =============================================================================
+
+export type DeviceScope = 'zone_local' | 'multi_zone' | 'mobile'
+
+export interface DeviceContextSet {
+  active_zone_id: string | null
+  active_subzone_id?: string | null
+  context_source?: 'manual' | 'sequence' | 'mqtt'
+}
+
+export interface DeviceContextResponse {
+  success: boolean
+  config_type: 'sensor' | 'actuator'
+  config_id: string
+  active_zone_id: string | null
+  active_subzone_id: string | null
+  context_source: string
+  context_since: string | null
+}
+
+// =============================================================================
 // Zone Assignment Types
 // =============================================================================
 
@@ -904,6 +994,8 @@ export interface ZoneAssignRequest {
   zone_id: string
   master_zone_id?: string
   zone_name?: string
+  /** Strategy for subzone handling during zone transfer (T13-R2) */
+  subzone_strategy?: 'transfer' | 'copy' | 'reset'
 }
 
 /**

@@ -198,6 +198,22 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("MQTT client connected successfully")
 
+        # Step 2b: Clear stale retained emergency-stop message from broker.
+        # Emergency-Stop is a one-shot command, not persistent state.
+        # A retained message would replay on every reconnect/restart,
+        # causing spurious CRITICAL logs and alert noise.
+        if connected:
+            try:
+                mqtt_client.publish(
+                    "kaiser/broadcast/emergency",
+                    "",  # Empty payload clears retained message
+                    qos=0,
+                    retain=True,
+                )
+                logger.info("Cleared retained emergency-stop message from broker")
+            except Exception as e:
+                logger.debug("Failed to clear retained emergency message: %s", e)
+
         # Step 3: Register MQTT handlers (ALWAYS, even if not connected)
         # Handlers will be called when auto-reconnect succeeds
         logger.info("Registering MQTT handlers...")

@@ -470,10 +470,11 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
 {
   "ts": 1735818000,
   "esp_id": "ESP_12AB34CD",
+  "status": "zone_assigned",
   "zone_id": "greenhouse",
-  "zone_name": "Gewächshaus",
-  "success": true,
-  "message": "Zone assigned successfully"
+  "master_zone_id": "greenhouse_master",
+  "seq": 42,
+  "correlation_id": "uuid-v4"
 }
 ```
 
@@ -633,6 +634,23 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
   }
 }
 ```
+
+### Config-Push on Mismatch Detection
+
+After metadata update, the handler checks `sensor_count` and `actuator_count` from the heartbeat against DB counts (`count_by_esp()`, only `enabled=True` configs). If ESP reports 0 but DB has configs, a config push is triggered.
+
+**Guards:**
+- **Offline-Check:** No config push if `esp_device.status == "offline"`
+- **Cooldown:** `CONFIG_PUSH_COOLDOWN_SECONDS = 120` via `config_push_sent_at` in `device_metadata` (integer timestamp, same pattern as `zone_resync_sent_at`)
+- **Handler:** `heartbeat_handler._has_pending_config()` → `_auto_push_config()` (async task with own DB session)
+
+### Zone Resync on Mismatch
+
+If ESP's `zone_id` doesn't match DB, a zone/assign MQTT message is published.
+
+**Guards:**
+- **Offline-Check:** No zone resync if `esp_device.status == "offline"`
+- **Cooldown:** 60 seconds via `zone_resync_sent_at` in `device_metadata`
 
 ### Device Timeout Detection
 

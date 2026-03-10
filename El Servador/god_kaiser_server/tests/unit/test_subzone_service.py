@@ -481,6 +481,107 @@ class TestSubzoneRemoval:
         assert "subzone/remove" in response.mqtt_topic
 
     @pytest.mark.asyncio
+    async def test_remove_subzone_deletes_from_db(
+        self,
+        subzone_service: SubzoneService,
+        esp_with_zone: ESPDevice,
+        db_session: AsyncSession,
+    ):
+        """Test remove_subzone() deletes subzone from DB before MQTT publish (BUG-5 fix)."""
+        # Create subzone first
+        await subzone_service.assign_subzone(
+            device_id=esp_with_zone.device_id,
+            subzone_id="db_delete_test",
+            assigned_gpios=[4, 5],
+        )
+
+        # Verify subzone exists in DB
+        subzone = await subzone_service.get_subzone(esp_with_zone.device_id, "db_delete_test")
+        assert subzone is not None
+
+        # Remove subzone
+        response = await subzone_service.remove_subzone(
+            device_id=esp_with_zone.device_id,
+            subzone_id="db_delete_test",
+        )
+
+        assert response.success is True
+
+        # Verify subzone is deleted from DB
+        subzone = await subzone_service.get_subzone(esp_with_zone.device_id, "db_delete_test")
+        assert subzone is None, "Subzone must be deleted from DB after remove_subzone()"
+
+    @pytest.mark.asyncio
+    async def test_remove_subzone_succeeds_even_if_mqtt_fails(
+        self,
+        esp_with_zone: ESPDevice,
+        db_session: AsyncSession,
+    ):
+        """Test remove_subzone() returns success=True even when MQTT publish fails (BUG-5)."""
+        # First: create subzone with a working publisher so it exists in DB
+        ok_publisher = MagicMock()
+        ok_publisher.client = MagicMock()
+        ok_publisher.client.publish = MagicMock(return_value=True)
+
+        esp_repo = ESPRepository(db_session)
+        service_ok = SubzoneService(esp_repo=esp_repo, session=db_session, publisher=ok_publisher)
+
+        await service_ok.assign_subzone(
+            device_id=esp_with_zone.device_id,
+            subzone_id="mqtt_fail_test",
+            assigned_gpios=[4, 5],
+        )
+
+        # Now: create service with failing publisher for the removal
+        fail_publisher = MagicMock()
+        fail_publisher.client = MagicMock()
+        fail_publisher.client.publish = MagicMock(return_value=False)
+
+        service = SubzoneService(esp_repo=esp_repo, session=db_session, publisher=fail_publisher)
+
+        # Remove — MQTT will fail but DB delete should succeed
+        response = await service.remove_subzone(
+            device_id=esp_with_zone.device_id,
+            subzone_id="mqtt_fail_test",
+        )
+
+        assert response.success is True, "DB deletion succeeded, success must be True"
+        assert response.mqtt_sent is False
+        # Verify DB state
+        subzone = await service.get_subzone(esp_with_zone.device_id, "mqtt_fail_test")
+        assert subzone is None, "Subzone must be deleted from DB even when MQTT fails"
+
+    @pytest.mark.asyncio
+    async def test_remove_subzone_ack_graceful_after_db_delete(
+        self,
+        subzone_service: SubzoneService,
+        esp_with_zone: ESPDevice,
+    ):
+        """Test ACK handler is graceful when subzone already deleted by remove_subzone() (BUG-5)."""
+        # Create subzone
+        await subzone_service.assign_subzone(
+            device_id=esp_with_zone.device_id,
+            subzone_id="ack_after_delete",
+            assigned_gpios=[4, 5],
+        )
+
+        # Remove subzone (deletes from DB)
+        await subzone_service.remove_subzone(
+            device_id=esp_with_zone.device_id,
+            subzone_id="ack_after_delete",
+        )
+
+        # ACK arrives after DB delete — should be a graceful no-op
+        success = await subzone_service.handle_subzone_ack(
+            device_id=esp_with_zone.device_id,
+            status="subzone_removed",
+            subzone_id="ack_after_delete",
+            timestamp=1734523800,
+        )
+
+        assert success is True, "ACK handler must succeed even when subzone already deleted"
+
+    @pytest.mark.asyncio
     async def test_remove_subzone_esp_not_found(
         self,
         subzone_service: SubzoneService,

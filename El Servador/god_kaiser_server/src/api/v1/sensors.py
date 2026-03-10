@@ -61,7 +61,11 @@ from ...schemas import (
     TriggerMeasurementResponse,
 )
 from ...schemas.common import PaginationMeta
-from ...sensors.sensor_type_registry import is_multi_value_sensor, get_all_value_types_for_device
+from ...sensors.sensor_type_registry import (
+    get_all_value_types_for_device,
+    get_device_type_from_sensor_type,
+    is_multi_value_sensor,
+)
 from ...services.config_builder import ConfigPayloadBuilder
 from ...services.esp_service import ESPService
 from ..deps import (
@@ -791,6 +795,7 @@ async def create_or_update_sensor(
             sensor_repo,
             esp_device.id,
             request.i2c_address,
+            sensor_type=request.sensor_type,
             exclude_sensor_id=existing.id if existing else None,
         )
         # I2C sensors can share GPIO (bus pins 21/22)
@@ -1952,6 +1957,7 @@ async def _validate_i2c_config(
     sensor_repo: SensorRepository,
     esp_id: uuid.UUID,
     i2c_address: Optional[int],
+    sensor_type: Optional[str] = None,
     exclude_sensor_id: Optional[uuid.UUID] = None,
 ):
     """
@@ -1963,12 +1969,14 @@ async def _validate_i2c_config(
     - Reserved addresses are rejected (0x00-0x07, 0x78-0x7F)
     - Valid range: 0x08-0x77 (112 usable addresses)
     - i2c_address must be unique per ESP (can't have 2 devices on same address)
+    - Sibling sub-types of multi-value sensors are excluded from conflict check
     - GPIO 21/22 are shared (bus pins), no conflict
 
     Args:
         sensor_repo: Sensor repository instance
         esp_id: ESP device UUID
         i2c_address: I2C address (0-127)
+        sensor_type: Sensor type for sibling sub-type exclusion (e.g. "sht31_temp")
         exclude_sensor_id: Sensor ID to exclude from conflict check (for updates)
 
     Raises:
@@ -2027,13 +2035,29 @@ async def _validate_i2c_config(
         raise ValidationException("i2c_address", rejection_reason)
 
     # Check 4: Address already used (conflict check)
-    existing_with_address = await sensor_repo.get_by_i2c_address(esp_id, i2c_address)
+    # Use get_all to properly filter sibling sub-types of multi-value sensors
+    all_with_address = await sensor_repo.get_all_by_i2c_address(esp_id, i2c_address)
 
-    if existing_with_address and existing_with_address.id != exclude_sensor_id:
+    # Determine sibling sub-types to exclude from conflict detection
+    # e.g. sht31_temp saving should not conflict with sht31_humidity
+    sibling_types: list[str] = []
+    if sensor_type:
+        base_device = get_device_type_from_sensor_type(sensor_type)
+        if base_device:
+            sibling_types = get_all_value_types_for_device(base_device)
+
+    conflicting = [
+        s
+        for s in all_with_address
+        if s.id != exclude_sensor_id
+        and s.sensor_type not in sibling_types
+    ]
+
+    if conflicting:
         rejection_reason = f"Address 0x{i2c_address:02X} already in use"
         logger.info(
             f"Rejected I2C config: ESP {esp_id}, address 0x{i2c_address:02X} "
-            f"(reason: {rejection_reason})"
+            f"(reason: {rejection_reason}, conflict with {conflicting[0].sensor_type})"
         )
         raise DuplicateError("I2CSensor", "i2c_address", f"0x{i2c_address:02X}")
 

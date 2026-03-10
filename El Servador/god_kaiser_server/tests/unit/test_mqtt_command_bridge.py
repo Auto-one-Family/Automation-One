@@ -280,3 +280,61 @@ async def test_has_pending(bridge):
     await task
 
     assert bridge.has_pending("ESP_TEST01") is False
+
+
+# =============================================================================
+# Test 10: resolve_ack() with exact correlation_id match
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_resolve_ack_exact_correlation_id(bridge):
+    """resolve_ack() resolves Future when correlation_id matches exactly."""
+
+    async def simulate_ack_with_cid():
+        await asyncio.sleep(0.05)
+        # Get the correlation_id that was injected by send_and_wait_ack
+        pending_cids = list(bridge._pending.keys())
+        assert len(pending_cids) == 1
+        cid = pending_cids[0]
+        bridge.resolve_ack(
+            ack_data={
+                "status": "zone_assigned",
+                "zone_id": "zone_c",
+                "correlation_id": cid,
+            },
+            esp_id="ESP_TEST01",
+            command_type="zone",
+        )
+
+    asyncio.create_task(simulate_ack_with_cid())
+    result = await bridge.send_and_wait_ack(
+        topic="kaiser/god/esp/ESP_TEST01/zone/assign",
+        payload={"zone_id": "zone_c"},
+        esp_id="ESP_TEST01",
+        timeout=2.0,
+    )
+
+    assert result["status"] == "zone_assigned"
+    assert result["zone_id"] == "zone_c"
+    assert result["correlation_id"] is not None
+
+
+# =============================================================================
+# Test 11: _is_mock_esp — only MOCK_ prefix matches
+# =============================================================================
+
+
+def test_is_mock_esp_prefix_only():
+    """_is_mock_esp() only matches MOCK_ or ESP_MOCK_ prefixes, not substrings."""
+    from src.services.zone_service import _is_mock_esp
+
+    # Must be True — mock devices
+    assert _is_mock_esp("MOCK_001") is True
+    assert _is_mock_esp("ESP_MOCK_001") is True
+    assert _is_mock_esp("MOCK_ESP_TEST") is True
+
+    # Must be False — real / Wokwi devices
+    assert _is_mock_esp("ESP_472204") is False
+    assert _is_mock_esp("ESP_00000001") is False
+    assert _is_mock_esp("ESP_AB12CD34") is False

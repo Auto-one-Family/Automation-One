@@ -572,7 +572,12 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     // ============================================
     // MQTT PUBLISH
     // ============================================
-    bool success = mqtt_.publish(topic.c_str(), payload.c_str(), qos == 1);
+    // PubSubClient API: publish(topic, payload, retained)
+    // Third parameter is RETAINED flag, NOT QoS.
+    // PubSubClient always uses QoS 0 for string publishes.
+    // Never retain operational messages — retained emergency/status messages
+    // cause stale state on broker that survives restarts.
+    bool success = mqtt_.publish(topic.c_str(), payload.c_str(), false);
     
     if (success) {
         // ✅ SUCCESS

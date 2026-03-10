@@ -107,8 +107,9 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
 
     async def count_by_esp(self, esp_id: uuid.UUID) -> int:
         """Count actuators for an ESP device."""
-        stmt = (
-            select(func.count()).select_from(ActuatorConfig).where(ActuatorConfig.esp_id == esp_id)
+        stmt = select(func.count()).select_from(ActuatorConfig).where(
+            ActuatorConfig.esp_id == esp_id,
+            ActuatorConfig.enabled == True,  # noqa: E712 — only count enabled configs to match ESP count
         )
         result = await self.session.execute(stmt)
         return result.scalar() or 0
@@ -166,6 +167,32 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         )
         result = await self.session.execute(stmt)
         return result.rowcount or 0
+
+    async def reset_states_for_device(
+        self, esp_id: uuid.UUID, new_state: str = "idle", reason: str = "device_offline"
+    ) -> int:
+        """
+        Reset all actuator_states for an ESP to new_state when device goes offline.
+
+        Called when ESP goes offline (LWT or heartbeat timeout).
+        Skips actuators already in idle or emergency_stop state.
+
+        Why "idle" not "unknown": "unknown" is not a defined state in ActuatorState.
+        Allowed states: idle, active, error, emergency_stop.
+        "idle" is the safe default — a powerless relay is physically idle.
+        """
+        stmt = (
+            update(ActuatorState)
+            .where(ActuatorState.esp_id == esp_id)
+            .where(ActuatorState.state.notin_(["idle", "emergency_stop"]))
+            .values(
+                state=new_state,
+                current_value=0.0,
+                error_message=f"Auto-reset: {reason}",
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.rowcount
 
     async def update_state(
         self,

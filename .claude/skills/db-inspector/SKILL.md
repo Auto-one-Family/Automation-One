@@ -110,7 +110,7 @@ docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c \
 |---------|----------|---------------------|
 | `esp_devices` | Device Registry | status, zone_id, capabilities |
 | `sensor_configs` | Sensor-Config pro GPIO | UNIQUE(esp_id, gpio, sensor_type, onewire_address, i2c_address) |
-| `sensor_data` | Time-Series Messwerte (inkl. zone_id, subzone_id Phase 0.1) | FK → sensor_configs |
+| `sensor_data` | Time-Series Messwerte (inkl. zone_id, subzone_id Phase 0.1) | FK → sensor_configs, UNIQUE(esp_id, gpio, sensor_type, timestamp) |
 | `actuator_configs` | Aktuator-Config + Safety | FK → esp_devices |
 | `actuator_states` | Echtzeit-Zustand | FK → actuator_configs |
 | `actuator_history` | Command History | FK → actuator_configs |
@@ -118,8 +118,9 @@ docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c \
 | `audit_logs` | Globales Event-Log | 5 Indizes |
 | `user_accounts` | JWT Auth | token_version für Logout-All |
 | `token_blacklist` | Revoked JWT Tokens | expires_at |
+| `zones` | Zone-Definitionen | zone_id (UNIQUE), zone_name, status |
 | `cross_esp_logic` | Logic Engine Rules | conditions (JSON), actions (JSON) |
-| `subzone_configs` | Subzone-Definitionen | FK → zones |
+| `subzone_configs` | Subzone-Definitionen | FK → esp_devices (device_id) |
 
 ### Sensor Unique Constraint
 
@@ -138,13 +139,22 @@ Ermöglicht:
 | Tabelle | FK → | ON DELETE |
 |---------|------|-----------|
 | `sensor_configs` | `esp_devices` | CASCADE |
-| `sensor_data` | `sensor_configs` | CASCADE |
 | `actuator_configs` | `esp_devices` | CASCADE |
-| `actuator_states` | `actuator_configs` | CASCADE |
-| `actuator_history` | `actuator_configs` | CASCADE |
-| `esp_heartbeat_logs` | `esp_devices` | CASCADE |
+| `subzone_configs` | `esp_devices` | CASCADE |
+| `esp_ownership` | `esp_devices` | CASCADE |
+| `sensor_data` | `esp_devices` | SET NULL |
+| `actuator_states` | `esp_devices` | SET NULL |
+| `actuator_history` | `esp_devices` | SET NULL |
+| `esp_heartbeat_logs` | `esp_devices` | SET NULL |
+| `ai_predictions` | `esp_devices` | SET NULL |
+| `esp_devices` | `zones` | SET NULL |
+| `dashboards` | `user_accounts` | CASCADE |
+| `notifications` | `user_accounts` | CASCADE |
+| `notification_preferences` | `user_accounts` | CASCADE |
+| `logic_execution_history` | `cross_esp_logic` | CASCADE |
+| `plugin_executions` | `plugin_configs` | CASCADE |
 
-**WICHTIG:** ESP gelöscht = ALLE zugehörigen Daten gelöscht!
+**WICHTIG:** ESP gelöscht = Configs gelöscht (CASCADE), aber Zeitreihen-Daten (sensor_data, actuator_history, heartbeat_logs) bleiben erhalten mit `esp_id=NULL` (SET NULL)!
 
 ---
 
@@ -153,7 +163,7 @@ Ermöglicht:
 ### Aktueller HEAD
 
 ```
-add_sensor_data_zone_subzone (HEAD)
+add_sensor_data_dedup (HEAD)
 ```
 
 **Hinweis:** Wenn die DB Schema-Fehler bei `sensor_data` meldet (z. B. `column "zone_id" of relation "sensor_data" does not exist`), fehlt die Migration auf der laufenden DB → `alembic upgrade head` im Server-Projekt ausführen (siehe Prüf-Befehle unten).
@@ -162,6 +172,8 @@ add_sensor_data_zone_subzone (HEAD)
 
 | Revision | Datum | Beschreibung |
 |----------|-------|-------------|
+| `add_sensor_data_dedup` | 2026-03-10 | UNIQUE(esp_id, gpio, sensor_type, timestamp) + Duplikat-Bereinigung (Fix-T Block 3) |
+| `fix_actuator_datetime_tz` | 2026-03-10 | actuator_states/history DateTime → timezone=True (BUG-001) |
 | `add_sensor_data_zone_subzone` | 2026-03-06 | sensor_data.zone_id, subzone_id + Indizes (Phase 0.1) |
 | `add_subzone_custom_data` | – | subzone_configs.custom_data |
 | `950ad9ce87bb` | 2026-02-04 | UNIQUE erweitert um i2c_address |
@@ -231,14 +243,13 @@ ORDER BY idx_scan DESC;
 | `cleanup_sensor_data` | Daily 03:00 | `SENSOR_DATA_RETENTION_ENABLED` | disabled |
 | `cleanup_command_history` | Daily 03:30 | `COMMAND_HISTORY_RETENTION_ENABLED` | disabled |
 | `cleanup_orphaned_mocks` | Hourly | `ORPHANED_MOCK_CLEANUP_ENABLED` | disabled |
+| `cleanup_heartbeat_logs` | Daily 03:15 | `HEARTBEAT_LOG_RETENTION_ENABLED` | enabled (DRY-RUN) |
 
 ### HeartbeatLogCleanup (cleanup.py:525-702)
 
-**⚠️ HINWEIS:** Die `HeartbeatLogCleanup`-Klasse existiert in cleanup.py, ist aber **NICHT** als Job im MaintenanceService registriert! Bei Bedarf muss diese manuell oder per Dev-Agent hinzugefügt werden.
-
 | Parameter | Wert | Config-Key |
 |-----------|------|------------|
-| Retention | 7 Tage | `HEARTBEAT_LOG_RETENTION_DAYS` |
+| Retention | 365 Tage | `HEARTBEAT_LOG_RETENTION_DAYS` |
 | Dry-Run | **TRUE** (default!) | `HEARTBEAT_LOG_CLEANUP_DRY_RUN` |
 | Batch-Size | konfigurierbar | `HEARTBEAT_LOG_CLEANUP_BATCH_SIZE` |
 

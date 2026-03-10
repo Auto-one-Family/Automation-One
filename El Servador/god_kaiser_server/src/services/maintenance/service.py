@@ -125,6 +125,21 @@ class MaintenanceService:
         else:
             logger.info("Skipped cleanup_orphaned_mocks job (DISABLED)")
 
+        if self._maintenance_settings.heartbeat_log_retention_enabled:
+            self._scheduler.add_cron_job(
+                job_id="cleanup_heartbeat_logs",
+                func=self._cleanup_heartbeat_logs,
+                cron_expression={"hour": 3, "minute": 15},  # Daily at 03:15
+                category=JobCategory.MAINTENANCE,
+            )
+            dry_run = " (DRY-RUN)" if self._maintenance_settings.heartbeat_log_cleanup_dry_run else ""
+            logger.info(
+                f"Registered cleanup_heartbeat_logs job (daily 03:15){dry_run} "
+                f"(retain {self._maintenance_settings.heartbeat_log_retention_days} days)"
+            )
+        else:
+            logger.info("Skipped cleanup_heartbeat_logs job (DISABLED)")
+
         # Health Check Jobs (MONITOR category) - immer aktiv
         self._scheduler.add_interval_job(
             job_id="health_check_esps",
@@ -202,6 +217,17 @@ class MaintenanceService:
         else:
             cleanup_status.append("  - Orphaned Mocks Cleanup: WARN ONLY (no deletion)")
 
+        if self._maintenance_settings.heartbeat_log_retention_enabled:
+            dry_run = (
+                " (DRY-RUN)" if self._maintenance_settings.heartbeat_log_cleanup_dry_run else ""
+            )
+            cleanup_status.append(
+                f"  - Heartbeat Log Cleanup: ENABLED{dry_run} "
+                f"(retain {self._maintenance_settings.heartbeat_log_retention_days} days)"
+            )
+        else:
+            cleanup_status.append("  - Heartbeat Log Cleanup: DISABLED (unlimited retention)")
+
         logger.info("Maintenance Cleanup Status:\n" + "\n".join(cleanup_status))
 
     def stop(self) -> None:
@@ -252,6 +278,7 @@ class MaintenanceService:
                 "sensor_data_retention_enabled": self._maintenance_settings.sensor_data_retention_enabled,
                 "command_history_retention_enabled": self._maintenance_settings.command_history_retention_enabled,
                 "orphaned_mock_auto_delete": self._maintenance_settings.orphaned_mock_auto_delete,
+                "heartbeat_log_retention_enabled": self._maintenance_settings.heartbeat_log_retention_enabled,
             },
         }
 
@@ -308,6 +335,23 @@ class MaintenanceService:
 
         except Exception as e:
             logger.error(f"[maintenance] ERROR cleanup_orphaned_mocks: {e}", exc_info=True)
+            self._job_results[job_id] = {"error": str(e), "status": "error"}
+
+    async def _cleanup_heartbeat_logs(self) -> None:
+        """Cleanup old heartbeat logs (runs daily at 03:15)."""
+        job_id = "maintenance_cleanup_heartbeat_logs"
+
+        try:
+            async for session in self._session_factory():
+                from .jobs.cleanup import HeartbeatLogCleanup
+
+                cleanup = HeartbeatLogCleanup(session, self._maintenance_settings)
+                result = await cleanup.execute()
+                self._job_results[job_id] = result
+                break  # Exit after first session
+
+        except Exception as e:
+            logger.error(f"[maintenance] ERROR cleanup_heartbeat_logs: {e}", exc_info=True)
             self._job_results[job_id] = {"error": str(e), "status": "error"}
 
     # ================================================================

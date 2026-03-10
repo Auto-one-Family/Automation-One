@@ -123,6 +123,8 @@ async def test_zone_assign_with_transfer_happy_path():
         )
 
     assert result.mqtt_sent is True
+    assert result.ack_received is True
+    assert result.warning is None
     # MQTT should have been called 3 times: 1 zone + 2 subzones
     assert mock_client.publish.call_count == 3
 
@@ -144,7 +146,7 @@ async def test_zone_assign_with_transfer_happy_path():
 
 @pytest.mark.asyncio
 async def test_zone_assign_ack_timeout():
-    """Zone-Wechsel ohne ACK -> Timeout, mqtt_sent=False."""
+    """Zone-Wechsel ohne ACK -> Timeout, mqtt_sent=False, ack_received=False, warning set."""
     mock_client = MagicMock()
     mock_client.publish.return_value = True
     bridge = MQTTCommandBridge(mock_client)
@@ -167,6 +169,11 @@ async def test_zone_assign_ack_timeout():
             )
 
     assert result.mqtt_sent is False
+    assert result.ack_received is False
+    assert result.warning is not None
+    assert "ACK-Timeout" in result.warning
+    # DB update still happened (zone_id set on device ORM object)
+    assert device.zone_id == "zone_b"
     # pending_zone_assignment should remain in device_metadata
     assert "pending_zone_assignment" in device.device_metadata
 
@@ -310,3 +317,145 @@ async def test_zone_removal_via_bridge():
     # zone/assign with empty zone_id
     published_payload = json.loads(mock_client.publish.call_args[0][1])
     assert published_payload["zone_id"] == ""
+
+
+# =============================================================================
+# Szenario 7: Reset-Strategie loescht Subzones aus DB (BUG-3)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_reset_strategy_deletes_subzones_from_db():
+    """Reset strategy must call delete_all_by_esp to physically remove subzones."""
+    mock_subzone_1 = MagicMock()
+    mock_subzone_1.subzone_id = "sz_1"
+    mock_subzone_1.parent_zone_id = "zone_a"
+    mock_subzone_1.subzone_name = "Subzone 1"
+    mock_subzone_1.assigned_gpios = [2, 4]
+    mock_subzone_1.safe_mode_active = True
+
+    mock_subzone_2 = MagicMock()
+    mock_subzone_2.subzone_id = "sz_2"
+    mock_subzone_2.parent_zone_id = "zone_a"
+    mock_subzone_2.subzone_name = "Subzone 2"
+    mock_subzone_2.assigned_gpios = [15]
+    mock_subzone_2.safe_mode_active = False
+
+    subzone_repo = AsyncMock()
+    subzone_repo.get_by_esp = AsyncMock(return_value=[mock_subzone_1, mock_subzone_2])
+    subzone_repo.delete_all_by_esp = AsyncMock(return_value=2)
+
+    repo, _ = _make_mock_esp_repo("ESP_TEST01", zone_id="zone_a")
+    zone_service = ZoneService(repo)
+
+    affected = await zone_service._handle_subzone_strategy(
+        device_id="ESP_TEST01",
+        old_zone_id="zone_a",
+        new_zone_id="zone_b",
+        strategy="reset",
+        subzone_repo=subzone_repo,
+    )
+
+    # Must call delete_all_by_esp
+    subzone_repo.delete_all_by_esp.assert_awaited_once_with("ESP_TEST01")
+
+    # Affected list has both subzones with action="deleted"
+    assert len(affected) == 2
+    assert affected[0]["action"] == "deleted"
+    assert affected[1]["action"] == "deleted"
+    assert affected[0]["subzone_id"] == "sz_1"
+    assert affected[1]["subzone_id"] == "sz_2"
+
+
+@pytest.mark.asyncio
+async def test_reset_strategy_no_subzones():
+    """Reset strategy with no subzones returns empty list without errors."""
+    subzone_repo = AsyncMock()
+    subzone_repo.get_by_esp = AsyncMock(return_value=[])
+
+    repo, _ = _make_mock_esp_repo("ESP_TEST01", zone_id="zone_a")
+    zone_service = ZoneService(repo)
+
+    affected = await zone_service._handle_subzone_strategy(
+        device_id="ESP_TEST01",
+        old_zone_id="zone_a",
+        new_zone_id="zone_b",
+        strategy="reset",
+        subzone_repo=subzone_repo,
+    )
+
+    assert affected == []
+    subzone_repo.delete_all_by_esp.assert_not_awaited()
+
+
+# =============================================================================
+# Szenario 8: Mock-ESP hat ack_received=None (BUG-4 Schema)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_mock_esp_ack_received_is_none():
+    """Mock-ESP uses fire-and-forget, ack_received should be None."""
+    mock_publisher = MagicMock()
+    mock_publisher.client = MagicMock()
+    mock_publisher.client.publish.return_value = True
+
+    repo, device = _make_mock_esp_repo("ESP_MOCK_002")
+    mock_client = MagicMock()
+    bridge = MQTTCommandBridge(mock_client)
+    zone_service = ZoneService(repo, publisher=mock_publisher, command_bridge=bridge)
+
+    with patch("src.services.zone_service.ZoneRepository") as MockZoneRepo, \
+         patch.object(zone_service, "_handle_subzone_strategy", return_value=[]), \
+         patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock):
+
+        mock_zone = _make_mock_zone_repo("zone_b")
+        MockZoneRepo.return_value.get_by_zone_id = AsyncMock(return_value=mock_zone)
+
+        result = await zone_service.assign_zone(
+            device_id="ESP_MOCK_002",
+            zone_id="zone_b",
+        )
+
+    assert result.ack_received is None
+    assert result.warning is None
+    assert result.mqtt_sent is True
+
+
+# =============================================================================
+# Szenario 9: ACK-Timeout — DB wird trotzdem aktualisiert (BUG-4)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_ack_timeout_db_still_updated():
+    """ACK timeout must NOT prevent DB update — zone_id must be set."""
+    mock_client = MagicMock()
+    mock_client.publish.return_value = True
+    bridge = MQTTCommandBridge(mock_client)
+
+    repo, device = _make_mock_esp_repo("ESP_TEST01", zone_id="zone_a")
+    zone_service = ZoneService(repo, command_bridge=bridge)
+
+    with patch("src.services.zone_service.ZoneRepository") as MockZoneRepo, \
+         patch.object(zone_service, "_handle_subzone_strategy", return_value=[]), \
+         patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock):
+
+        mock_zone = _make_mock_zone_repo("zone_b")
+        MockZoneRepo.return_value.get_by_zone_id = AsyncMock(return_value=mock_zone)
+
+        with patch.object(bridge, "DEFAULT_TIMEOUT", 0.1):
+            result = await zone_service.assign_zone(
+                device_id="ESP_TEST01",
+                zone_id="zone_b",
+                zone_name="Zone B",
+            )
+
+    # No exception raised — returns 200-equivalent result
+    assert result.success is True
+    assert result.ack_received is False
+    assert result.message == "Zone assignment saved (ACK timeout)"
+
+    # DB update happened despite timeout
+    assert device.zone_id == "zone_b"
+    assert device.zone_name == "Zone B"
