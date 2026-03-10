@@ -469,7 +469,9 @@ class ESPService:
             actuator_count = len(config.get("actuators", []))
             logger.info(
                 "Config sent to %s: %d sensors, %d actuators",
-                device_id, sensor_count, actuator_count,
+                device_id,
+                sensor_count,
+                actuator_count,
             )
 
             # Audit log: config published

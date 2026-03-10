@@ -134,7 +134,9 @@ class TestZoneAssign:
     """Test zone assignment endpoint."""
 
     @pytest.mark.asyncio
-    async def test_assign_zone_success(self, auth_headers: dict, test_esp: ESPDevice, test_zone: Zone):
+    async def test_assign_zone_success(
+        self, auth_headers: dict, test_esp: ESPDevice, test_zone: Zone
+    ):
         """Test successful zone assignment (T13-R1: zone must exist before assignment)."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(

@@ -84,9 +84,7 @@ class ConflictManager:
         self._mutexes: Dict[str, asyncio.Lock] = {}  # "esp_id:gpio" → asyncio.Lock
         self._conflict_history: List[ConflictInfo] = []
 
-    def _get_actuator_key(
-        self, esp_id: str, gpio: int, zone_id: Optional[str] = None
-    ) -> str:
+    def _get_actuator_key(self, esp_id: str, gpio: int, zone_id: Optional[str] = None) -> str:
         """
         Generiert eindeutigen Key für Actuator.
 

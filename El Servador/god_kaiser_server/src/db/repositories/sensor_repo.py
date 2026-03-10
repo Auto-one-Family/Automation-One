@@ -148,9 +148,14 @@ class SensorRepository(BaseRepository[SensorConfig]):
         Returns:
             Number of sensors
         """
-        stmt = select(func.count()).select_from(SensorConfig).where(
-            SensorConfig.esp_id == esp_id,
-            SensorConfig.enabled == True,  # noqa: E712 — only count enabled configs to match ESP count
+        stmt = (
+            select(func.count())
+            .select_from(SensorConfig)
+            .where(
+                SensorConfig.esp_id == esp_id,
+                SensorConfig.enabled
+                == True,  # noqa: E712 — only count enabled configs to match ESP count
+            )
         )
         result = await self.session.execute(stmt)
         return result.scalar() or 0
@@ -311,7 +316,10 @@ class SensorRepository(BaseRepository[SensorConfig]):
             await self.session.rollback()
             logger.debug(
                 "Duplicate sensor_data ignored: esp=%s, gpio=%s, type=%s, ts=%s",
-                esp_id, gpio, sensor_type, ts,
+                esp_id,
+                gpio,
+                sensor_type,
+                ts,
             )
             return None
 

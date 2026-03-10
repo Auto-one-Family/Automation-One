@@ -183,9 +183,7 @@ class SubzoneSummary(BaseModel):
         description="GPIO pins assigned to this subzone",
     )
     sensor_count: int = Field(0, description="Number of sensors in this subzone", ge=0)
-    actuator_count: int = Field(
-        0, description="Number of actuators in this subzone", ge=0
-    )
+    actuator_count: int = Field(0, description="Number of actuators in this subzone", ge=0)
     is_active: bool = Field(True, description="Whether the subzone is active")
 
     model_config = ConfigDict(from_attributes=True)

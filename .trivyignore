@@ -6,7 +6,7 @@
 #
 # Review this file periodically and remove entries when fixes are available.
 #
-# Last reviewed: 2026-02-24
+# Last reviewed: 2026-03-10
 
 # -----------------------------------------------------------------------------
 # Go stdlib — shipped in esbuild binary (vite devDependency) and nginx/Alpine
@@ -79,6 +79,8 @@ CVE-2026-23745  # tar: path traversal (HIGH)
 CVE-2026-23950  # tar: path traversal (HIGH)
 CVE-2026-24842  # tar: path traversal (HIGH)
 CVE-2026-26960  # tar: path traversal (HIGH)
+# Added: 2026-03-10 — New tar CVE (same context)
+CVE-2026-29786  # tar: hardlink path traversal via drive-relative linkpath (HIGH)
 
 # -----------------------------------------------------------------------------
 # cross-spawn — RESOLVED

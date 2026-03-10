@@ -7,11 +7,11 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 3.5 | **Aktualisiert:** 2026-03-09
+> **Version:** 3.6 | **Aktualisiert:** 2026-03-10
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
-> **Endpoint-Anzahl:** ~233 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry)
+> **Endpoint-Anzahl:** ~238 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry, Dashboards)
 
 ---
 
@@ -405,6 +405,20 @@ allowed-tools: Read
 | `/health/mqtt` | GET | JWT | MQTT Health |
 | `/health/metrics` | GET | JWT | System Metrics |
 | `/health/esps` | GET | JWT | ESP Health Summary |
+
+### Dashboards (`/dashboards`) - 5 Endpoints
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/dashboards` | GET | JWT | Dashboards auflisten (eigene + shared). Query: `page`, `page_size` |
+| `/dashboards` | POST | JWT | Dashboard erstellen (mit Widgets + Layout) |
+| `/dashboards/{dashboard_id}` | GET | JWT | Dashboard Details (Owner/Shared/Admin) |
+| `/dashboards/{dashboard_id}` | PUT | JWT | Dashboard aktualisieren (Owner/Admin) |
+| `/dashboards/{dashboard_id}` | DELETE | JWT | Dashboard löschen (Owner/Admin) |
+
+> **DB-Tabelle:** `dashboards` (Alembic: `add_dashboards_table`, `add_dashboard_target_field`).
+> Widgets als JSONB-Array gespeichert. Ownership-basierte Autorisierung in Service-Schicht.
+> Frontend-Sync: localStorage als Cache + Server als Langzeit-Persistenz.
 
 ---
 

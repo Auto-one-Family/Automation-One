@@ -48,12 +48,10 @@ class TestOnlineGuard:
 
         # ASSERT
         assert result.valid is False, "Command to offline ESP should be rejected"
-        assert "offline" in result.error.lower(), (
-            f"Error should mention 'offline', got: {result.error}"
-        )
-        assert "ESP_OFFLINE_01" in result.error, (
-            f"Error should contain ESP ID, got: {result.error}"
-        )
+        assert (
+            "offline" in result.error.lower()
+        ), f"Error should mention 'offline', got: {result.error}"
+        assert "ESP_OFFLINE_01" in result.error, f"Error should contain ESP ID, got: {result.error}"
 
     @pytest.mark.critical
     @pytest.mark.safety
@@ -94,9 +92,7 @@ class TestOnlineGuard:
         )
 
         # ASSERT
-        assert result.valid is True, (
-            f"Online ESP command should pass, got error: {result.error}"
-        )
+        assert result.valid is True, f"Online ESP command should pass, got error: {result.error}"
 
     @pytest.mark.safety
     @pytest.mark.asyncio
@@ -157,9 +153,9 @@ class TestOnlineGuard:
 
         # ASSERT
         assert result.valid is False
-        assert "timeout" in result.error, (
-            f"Error should contain actual status 'timeout', got: {result.error}"
-        )
+        assert (
+            "timeout" in result.error
+        ), f"Error should contain actual status 'timeout', got: {result.error}"
 
     @pytest.mark.safety
     @pytest.mark.asyncio

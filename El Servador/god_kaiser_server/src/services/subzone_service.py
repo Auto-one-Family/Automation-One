@@ -302,7 +302,8 @@ class SubzoneService:
         return SubzoneRemoveResponse(
             success=True,  # DB deletion succeeded; MQTT is fire-and-forget
             message=(
-                "Subzone removed; ESP notified" if mqtt_sent
+                "Subzone removed; ESP notified"
+                if mqtt_sent
                 else "Subzone removed from DB; ESP will sync on reconnect"
             ),
             device_id=device_id,
@@ -721,7 +722,8 @@ class SubzoneService:
             if updated:
                 logger.debug(
                     "Synced subzone counts for %s: %d subzone(s) updated",
-                    device_id, updated,
+                    device_id,
+                    updated,
                 )
         except Exception as e:
             logger.warning("Failed to sync subzone counts for %s: %s", device_id, e)

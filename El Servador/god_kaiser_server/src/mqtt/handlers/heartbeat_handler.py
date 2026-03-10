@@ -263,9 +263,7 @@ class HeartbeatHandler:
                 if is_reconnect and esp_device.zone_id and _command_bridge:
                     import asyncio
 
-                    asyncio.create_task(
-                        self._handle_reconnect_state_push(esp_device.device_id)
-                    )
+                    asyncio.create_task(self._handle_reconnect_state_push(esp_device.device_id))
 
                 # Update Prometheus metrics for Grafana alerting
                 update_esp_heartbeat_timestamp(esp_id_str)
@@ -671,7 +669,11 @@ class HeartbeatHandler:
             logger.warning(f"Failed to broadcast device_rediscovered: {e}")
 
     async def _update_esp_metadata(
-        self, esp_device: ESPDevice, payload: dict, session, is_reconnect: bool = False,
+        self,
+        esp_device: ESPDevice,
+        payload: dict,
+        session,
+        is_reconnect: bool = False,
     ) -> None:
         """
         Update ESP metadata with latest heartbeat information.
@@ -720,15 +722,14 @@ class HeartbeatHandler:
                         esp_device.device_id,
                     )
                 # Check: Is a zone assignment currently pending? If so, tolerate mismatch.
-                elif (pending := current_metadata.get("pending_zone_assignment")):
+                elif pending := current_metadata.get("pending_zone_assignment"):
                     pending_target = (
-                        pending.get("zone_id", "?")
-                        if isinstance(pending, dict)
-                        else str(pending)
+                        pending.get("zone_id", "?") if isinstance(pending, dict) else str(pending)
                     )
                     logger.info(
                         "Zone mismatch for %s tolerated (pending assignment to %s)",
-                        esp_device.device_id, pending_target,
+                        esp_device.device_id,
+                        pending_target,
                     )
                     # No warning, no resync — wait for ACK or timeout
                 elif esp_has_zone and not db_has_zone:
@@ -762,7 +763,8 @@ class HeartbeatHandler:
                             should_resync = False
                             logger.debug(
                                 "ZONE_MISMATCH [%s]: zone lost (%s), but resync cooldown active (%ds remaining)",
-                                esp_device.device_id, mismatch_reason,
+                                esp_device.device_id,
+                                mismatch_reason,
                                 zone_resync_cooldown_seconds - elapsed,
                             )
 
@@ -1251,9 +1253,7 @@ class HeartbeatHandler:
         try:
             # Skip config push to offline ESPs
             if esp_device.status == "offline":
-                logger.debug(
-                    "Skipping config push for offline ESP %s", esp_device.device_id
-                )
+                logger.debug("Skipping config push for offline ESP %s", esp_device.device_id)
                 return False
 
             from ...db.repositories import SensorRepository, ActuatorRepository
@@ -1282,8 +1282,10 @@ class HeartbeatHandler:
                             "ESP: sensors=%d/actuators=%d, DB: sensors=%d/actuators=%d",
                             esp_device.device_id,
                             int(CONFIG_PUSH_COOLDOWN_SECONDS - elapsed),
-                            esp_sensor_count, esp_actuator_count,
-                            db_sensor_count, db_actuator_count,
+                            esp_sensor_count,
+                            esp_actuator_count,
+                            db_sensor_count,
+                            db_actuator_count,
                         )
                         return False
 
@@ -1408,9 +1410,7 @@ class HeartbeatHandler:
                         timeout=_command_bridge.DEFAULT_TIMEOUT,
                     )
                 except Exception as e:
-                    logger.warning(
-                        "Zone ACK timeout during state push for %s: %s", device_id, e
-                    )
+                    logger.warning("Zone ACK timeout during state push for %s: %s", device_id, e)
                     return
 
                 # 2. Load and send active subzones sequentially
@@ -1427,9 +1427,7 @@ class HeartbeatHandler:
                         "subzone_id": sz.subzone_id,
                         "subzone_name": sz.subzone_name or "",
                         "parent_zone_id": "",  # Firmware sets current zone automatically
-                        "assigned_gpios": [
-                            g for g in (sz.assigned_gpios or []) if g != 0
-                        ],
+                        "assigned_gpios": [g for g in (sz.assigned_gpios or []) if g != 0],
                         # Reconnect state push restores operational state — never
                         # activate safe-mode during resync (safe-mode is only for
                         # explicit user actions). Prevents GPIO conflict where
@@ -1463,9 +1461,7 @@ class HeartbeatHandler:
                 )
 
         except Exception as e:
-            logger.error(
-                "Full-State-Push failed for %s: %s", device_id, e, exc_info=True
-            )
+            logger.error("Full-State-Push failed for %s: %s", device_id, e, exc_info=True)
 
     async def check_device_timeouts(self) -> dict:
         """
@@ -1568,7 +1564,9 @@ class HeartbeatHandler:
                                     "reason": "heartbeat_timeout",
                                     "timeout_seconds": HEARTBEAT_TIMEOUT_SECONDS,
                                     "timestamp": int(now.timestamp()),
-                                    "actuator_states_reset": actuator_reset_counts.get(device_id, 0),
+                                    "actuator_states_reset": actuator_reset_counts.get(
+                                        device_id, 0
+                                    ),
                                 },
                             )
                             logger.info(f"📡 Broadcast esp_health offline event for {device_id}")

@@ -3,12 +3,16 @@
  * SensorCardWidget — Sensor value card for dashboard
  *
  * Fix: Uses local sensorId ref to survive render() one-shot props.
+ * Fix F-12: Trend indicator via calculateTrend from sparkline cache.
  */
 import { ref, computed, watch } from 'vue'
 import { useEspStore } from '@/stores/esp'
-import { Activity } from 'lucide-vue-next'
+import { Activity, TrendingUp, TrendingDown, Minus } from 'lucide-vue-next'
 import type { MockSensor } from '@/types'
 import { getSensorUnit } from '@/utils/sensorDefaults'
+import { useSparklineCache } from '@/composables/useSparklineCache'
+import { calculateTrend } from '@/utils/trendUtils'
+import type { TrendDirection } from '@/utils/trendUtils'
 
 interface Props {
   sensorId?: string // "espId:gpio"
@@ -20,6 +24,7 @@ const emit = defineEmits<{
 }>()
 
 const espStore = useEspStore()
+const { sparklineCache, getSensorKey } = useSparklineCache(30)
 
 // Local sensorId state — survives render() one-shot props (Bug 1b fix)
 const localSensorId = ref(props.sensorId || '')
@@ -63,6 +68,32 @@ const qualityClass = computed(() => {
   return 'sensor-card-widget__dot--offline'
 })
 
+// Trend from sparkline cache (F-12) — same pattern as MonitorView
+const trend = computed<TrendDirection | undefined>(() => {
+  const sensor = currentSensor.value
+  if (!sensor || !localSensorId.value) return undefined
+  const parts = localSensorId.value.split(':')
+  const espId = parts[0]
+  const gpio = parseInt(parts[1], 10)
+  const sensorType = parts[2] || sensor.sensor_type || null
+  if (!espId || isNaN(gpio)) return undefined
+  const key = getSensorKey(espId, gpio, sensorType ?? undefined)
+  const points = sparklineCache.value.get(key)
+  if (!points || points.length < 5) return undefined
+  return calculateTrend(points, sensorType || undefined).direction
+})
+
+const TREND_ICONS: Record<TrendDirection, typeof TrendingUp> = {
+  rising: TrendingUp,
+  stable: Minus,
+  falling: TrendingDown,
+}
+const TREND_TITLES: Record<TrendDirection, string> = {
+  rising: 'Steigend',
+  stable: 'Stabil',
+  falling: 'Fallend',
+}
+
 function selectSensor(sensorId: string) {
   localSensorId.value = sensorId  // Immediate local update (Bug 1b fix)
   emit('update:config', { sensorId })
@@ -74,7 +105,16 @@ function selectSensor(sensorId: string) {
     <template v-if="localSensorId && currentSensor">
       <div class="sensor-card-widget__header">
         <span class="sensor-card-widget__name">{{ currentSensor.name || currentSensor.sensor_type }}</span>
-        <span :class="['sensor-card-widget__dot', qualityClass]" />
+        <span class="sensor-card-widget__header-right">
+          <component
+            v-if="trend"
+            :is="TREND_ICONS[trend]"
+            class="sensor-card-widget__trend"
+            :class="`sensor-card-widget__trend--${trend}`"
+            :title="TREND_TITLES[trend]"
+          />
+          <span :class="['sensor-card-widget__dot', qualityClass]" />
+        </span>
       </div>
       <div class="sensor-card-widget__value">
         <span class="sensor-card-widget__number">{{ (currentSensor.raw_value ?? 0).toFixed(1) }}</span>
@@ -109,6 +149,23 @@ function selectSensor(sensorId: string) {
   justify-content: space-between;
   margin-bottom: var(--space-1);
 }
+
+.sensor-card-widget__header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.sensor-card-widget__trend {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.sensor-card-widget__trend--rising { color: var(--color-success); }
+.sensor-card-widget__trend--falling { color: var(--color-warning); }
+.sensor-card-widget__trend--stable { color: var(--color-text-muted); }
 
 .sensor-card-widget__name {
   font-size: var(--text-sm);

@@ -90,9 +90,11 @@ async def test_zone_assign_with_transfer_happy_path():
 
     asyncio.create_task(simulate_acks())
 
-    with patch.object(zone_service, "_handle_subzone_strategy") as mock_strategy, \
-         patch("src.services.zone_service.ZoneRepository") as MockZoneRepo, \
-         patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock):
+    with (
+        patch.object(zone_service, "_handle_subzone_strategy") as mock_strategy,
+        patch("src.services.zone_service.ZoneRepository") as MockZoneRepo,
+        patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock),
+    ):
 
         mock_zone = _make_mock_zone_repo("zone_b")
         MockZoneRepo.return_value.get_by_zone_id = AsyncMock(return_value=mock_zone)
@@ -129,10 +131,7 @@ async def test_zone_assign_with_transfer_happy_path():
     assert mock_client.publish.call_count == 3
 
     # Check that GPIO 0 was filtered from subzone payload
-    subzone_calls = [
-        call for call in mock_client.publish.call_args_list
-        if "subzone" in call[0][0]
-    ]
+    subzone_calls = [call for call in mock_client.publish.call_args_list if "subzone" in call[0][0]]
     for call in subzone_calls:
         payload = json.loads(call[0][1])
         assert 0 not in payload.get("assigned_gpios", [])
@@ -154,9 +153,11 @@ async def test_zone_assign_ack_timeout():
     repo, device = _make_mock_esp_repo("ESP_TEST01", zone_id="zone_a")
     zone_service = ZoneService(repo, command_bridge=bridge)
 
-    with patch("src.services.zone_service.ZoneRepository") as MockZoneRepo, \
-         patch.object(zone_service, "_handle_subzone_strategy", return_value=[]), \
-         patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock):
+    with (
+        patch("src.services.zone_service.ZoneRepository") as MockZoneRepo,
+        patch.object(zone_service, "_handle_subzone_strategy", return_value=[]),
+        patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock),
+    ):
 
         mock_zone = _make_mock_zone_repo("zone_b")
         MockZoneRepo.return_value.get_by_zone_id = AsyncMock(return_value=mock_zone)
@@ -203,15 +204,23 @@ async def test_zone_assign_error_ack():
 
     asyncio.create_task(simulate_error_ack())
 
-    with patch("src.services.zone_service.ZoneRepository") as MockZoneRepo, \
-         patch.object(zone_service, "_handle_subzone_strategy") as mock_strategy, \
-         patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock):
+    with (
+        patch("src.services.zone_service.ZoneRepository") as MockZoneRepo,
+        patch.object(zone_service, "_handle_subzone_strategy") as mock_strategy,
+        patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock),
+    ):
 
         mock_zone = _make_mock_zone_repo("zone_b")
         MockZoneRepo.return_value.get_by_zone_id = AsyncMock(return_value=mock_zone)
         mock_strategy.return_value = [
-            {"subzone_id": "sz_1", "subzone_name": "SZ1", "assigned_gpios": [2],
-             "old_parent": "zone_a", "new_parent": "zone_b", "action": "transferred"},
+            {
+                "subzone_id": "sz_1",
+                "subzone_name": "SZ1",
+                "assigned_gpios": [2],
+                "old_parent": "zone_a",
+                "new_parent": "zone_b",
+                "action": "transferred",
+            },
         ]
 
         result = await zone_service.assign_zone(
@@ -261,9 +270,11 @@ async def test_mock_esp_skips_bridge():
     repo, device = _make_mock_esp_repo("ESP_MOCK_001")
     zone_service = ZoneService(repo, publisher=mock_publisher, command_bridge=bridge)
 
-    with patch("src.services.zone_service.ZoneRepository") as MockZoneRepo, \
-         patch.object(zone_service, "_handle_subzone_strategy", return_value=[]), \
-         patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock):
+    with (
+        patch("src.services.zone_service.ZoneRepository") as MockZoneRepo,
+        patch.object(zone_service, "_handle_subzone_strategy", return_value=[]),
+        patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock),
+    ):
 
         mock_zone = _make_mock_zone_repo("zone_b")
         MockZoneRepo.return_value.get_by_zone_id = AsyncMock(return_value=mock_zone)
@@ -305,8 +316,10 @@ async def test_zone_removal_via_bridge():
 
     asyncio.create_task(simulate_removal_ack())
 
-    with patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock), \
-         patch("src.services.zone_service.SubzoneRepository") as MockSubzoneRepo:
+    with (
+        patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock),
+        patch("src.services.zone_service.SubzoneRepository") as MockSubzoneRepo,
+    ):
 
         MockSubzoneRepo.return_value.delete_all_by_esp = AsyncMock(return_value=0)
 
@@ -405,9 +418,11 @@ async def test_mock_esp_ack_received_is_none():
     bridge = MQTTCommandBridge(mock_client)
     zone_service = ZoneService(repo, publisher=mock_publisher, command_bridge=bridge)
 
-    with patch("src.services.zone_service.ZoneRepository") as MockZoneRepo, \
-         patch.object(zone_service, "_handle_subzone_strategy", return_value=[]), \
-         patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock):
+    with (
+        patch("src.services.zone_service.ZoneRepository") as MockZoneRepo,
+        patch.object(zone_service, "_handle_subzone_strategy", return_value=[]),
+        patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock),
+    ):
 
         mock_zone = _make_mock_zone_repo("zone_b")
         MockZoneRepo.return_value.get_by_zone_id = AsyncMock(return_value=mock_zone)
@@ -437,9 +452,11 @@ async def test_ack_timeout_db_still_updated():
     repo, device = _make_mock_esp_repo("ESP_TEST01", zone_id="zone_a")
     zone_service = ZoneService(repo, command_bridge=bridge)
 
-    with patch("src.services.zone_service.ZoneRepository") as MockZoneRepo, \
-         patch.object(zone_service, "_handle_subzone_strategy", return_value=[]), \
-         patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock):
+    with (
+        patch("src.services.zone_service.ZoneRepository") as MockZoneRepo,
+        patch.object(zone_service, "_handle_subzone_strategy", return_value=[]),
+        patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock),
+    ):
 
         mock_zone = _make_mock_zone_repo("zone_b")
         MockZoneRepo.return_value.get_by_zone_id = AsyncMock(return_value=mock_zone)

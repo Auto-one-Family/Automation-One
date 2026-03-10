@@ -486,11 +486,7 @@ class SubzoneRepository(BaseRepository[SubzoneConfig]):
             config_ids = set(subzone.assigned_sensor_config_ids or [])
 
             # Count sensors: by GPIO match OR by sensor_config_id match
-            s_count = sum(
-                1
-                for s in all_sensors
-                if s.gpio in gpios or str(s.id) in config_ids
-            )
+            s_count = sum(1 for s in all_sensors if s.gpio in gpios or str(s.id) in config_ids)
             # Count actuators: by GPIO match only
             a_count = sum(1 for a in all_actuators if a.gpio in gpios)
 

@@ -349,7 +349,10 @@ class SensorDataHandler:
                     # T13-R2: DeviceScopeService has 30s in-memory cache (avoids DB query per message)
                     scope_service = DeviceScopeService(session)
                     zone_id, subzone_id = await resolve_zone_subzone_for_sensor(
-                        esp_id_str, gpio, esp_repo, subzone_repo,
+                        esp_id_str,
+                        gpio,
+                        esp_repo,
+                        subzone_repo,
                         sensor_config_id=str(sensor_config.id) if sensor_config else None,
                         sensor_type=sensor_type,
                         sensor_config=sensor_config,
@@ -396,9 +399,7 @@ class SensorDataHandler:
                         return True
 
                     # Step 9a: Secondary health indicator — update last_seen (throttled)
-                    await self._update_last_seen_throttled(
-                        esp_id_str, esp_repo
-                    )
+                    await self._update_last_seen_throttled(esp_id_str, esp_repo)
 
                     # Step 9b: Update sensor config on successful data save
                     if sensor_config:
@@ -690,9 +691,7 @@ class SensorDataHandler:
         except Exception as e:
             logger.error(f"Failed to route threshold notification: {e}")
 
-    async def _update_last_seen_throttled(
-        self, esp_id: str, esp_repo: ESPRepository
-    ) -> None:
+    async def _update_last_seen_throttled(self, esp_id: str, esp_repo: ESPRepository) -> None:
         """
         Update ESP last_seen as secondary health indicator (throttled).
 

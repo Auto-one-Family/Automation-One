@@ -111,6 +111,7 @@ function openNotificationDrawer(): void {
         :class="[
           'alarm-widget__item',
           `alarm-widget__item--${severityDisplay(alarm.severity)}`,
+          alarm.status === 'resolved' ? 'alarm-widget__item--resolved' : '',
         ]"
         @click="openNotificationDrawer"
       >
@@ -233,6 +234,15 @@ function openNotificationDrawer(): void {
 
 .alarm-widget__item--warning .alarm-widget__icon {
   color: var(--color-warning);
+}
+
+.alarm-widget__item--resolved {
+  opacity: 0.5;
+}
+
+.alarm-widget__item--resolved .alarm-widget__sensor,
+.alarm-widget__item--resolved .alarm-widget__value {
+  text-decoration: line-through;
 }
 
 .alarm-widget__content {

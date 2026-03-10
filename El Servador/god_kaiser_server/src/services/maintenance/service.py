@@ -132,7 +132,9 @@ class MaintenanceService:
                 cron_expression={"hour": 3, "minute": 15},  # Daily at 03:15
                 category=JobCategory.MAINTENANCE,
             )
-            dry_run = " (DRY-RUN)" if self._maintenance_settings.heartbeat_log_cleanup_dry_run else ""
+            dry_run = (
+                " (DRY-RUN)" if self._maintenance_settings.heartbeat_log_cleanup_dry_run else ""
+            )
             logger.info(
                 f"Registered cleanup_heartbeat_logs job (daily 03:15){dry_run} "
                 f"(retain {self._maintenance_settings.heartbeat_log_retention_days} days)"

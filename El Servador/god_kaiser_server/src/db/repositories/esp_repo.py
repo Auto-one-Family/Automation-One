@@ -193,9 +193,7 @@ class ESPRepository(BaseRepository[ESPDevice]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def update_last_seen(
-        self, device_id: str, timestamp: datetime
-    ) -> None:
+    async def update_last_seen(self, device_id: str, timestamp: datetime) -> None:
         """
         Update only last_seen without changing device status.
 

@@ -73,9 +73,7 @@ class DeviceActiveContextRepository(BaseRepository[DeviceActiveContext]):
             context_source=context_source,
         )
 
-    async def delete_context(
-        self, config_type: str, config_id: uuid.UUID
-    ) -> bool:
+    async def delete_context(self, config_type: str, config_id: uuid.UUID) -> bool:
         """
         Delete the active context for a sensor or actuator.
 
@@ -91,9 +89,7 @@ class DeviceActiveContextRepository(BaseRepository[DeviceActiveContext]):
         result = await self.session.execute(stmt)
         return result.rowcount > 0
 
-    async def get_all_for_config_type(
-        self, config_type: str
-    ) -> list[DeviceActiveContext]:
+    async def get_all_for_config_type(self, config_type: str) -> list[DeviceActiveContext]:
         """Get all active contexts for a config type ('sensor' or 'actuator')."""
         stmt = select(self.model).where(self.model.config_type == config_type)
         result = await self.session.execute(stmt)

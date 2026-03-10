@@ -125,7 +125,9 @@ class LWTHandler:
                                 f"for disconnected device {esp_id_str}"
                             )
                     except Exception as reset_err:
-                        logger.warning(f"[LWT] Failed to reset actuator states for {esp_id_str}: {reset_err}")
+                        logger.warning(
+                            f"[LWT] Failed to reset actuator states for {esp_id_str}: {reset_err}"
+                        )
 
                     # Update device_metadata with disconnect reason
                     device_metadata = esp_device.device_metadata or {}

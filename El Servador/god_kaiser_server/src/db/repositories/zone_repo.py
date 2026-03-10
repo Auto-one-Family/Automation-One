@@ -64,31 +64,19 @@ class ZoneRepository:
 
     async def list_all(self) -> list[Zone]:
         """Get all zones ordered by zone_id (excludes soft-deleted)."""
-        stmt = (
-            select(Zone)
-            .where(Zone.status != "deleted")
-            .order_by(Zone.zone_id)
-        )
+        stmt = select(Zone).where(Zone.status != "deleted").order_by(Zone.zone_id)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def list_active(self) -> list[Zone]:
         """Get only active zones."""
-        stmt = (
-            select(Zone)
-            .where(Zone.status == "active")
-            .order_by(Zone.zone_id)
-        )
+        stmt = select(Zone).where(Zone.status == "active").order_by(Zone.zone_id)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def list_by_status(self, status: str) -> list[Zone]:
         """Get zones by status ('active', 'archived', 'deleted')."""
-        stmt = (
-            select(Zone)
-            .where(Zone.status == status)
-            .order_by(Zone.zone_id)
-        )
+        stmt = select(Zone).where(Zone.status == status).order_by(Zone.zone_id)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -163,11 +151,7 @@ class ZoneRepository:
 
     async def count(self) -> int:
         """Count total non-deleted zones."""
-        stmt = (
-            select(func.count())
-            .select_from(Zone)
-            .where(Zone.status != "deleted")
-        )
+        stmt = select(func.count()).select_from(Zone).where(Zone.status != "deleted")
         result = await self.session.execute(stmt)
         return result.scalar_one()
 

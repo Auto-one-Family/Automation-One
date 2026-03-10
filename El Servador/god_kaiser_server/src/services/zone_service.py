@@ -120,9 +120,7 @@ class ZoneService:
         zone_repo = ZoneRepository(self.esp_repo.session)
         zone = await zone_repo.get_by_zone_id(zone_id)
         if not zone:
-            raise ValueError(
-                f"Zone '{zone_id}' not found. Create it first via POST /v1/zones"
-            )
+            raise ValueError(f"Zone '{zone_id}' not found. Create it first via POST /v1/zones")
         if zone.status != "active":
             raise ValueError(
                 f"Zone '{zone_id}' is {zone.status}. Only active zones accept devices."
@@ -212,7 +210,8 @@ class ZoneService:
                 if zone_ack.get("status") == "error":
                     logger.error(
                         "ESP %s rejected zone assignment: %s",
-                        device_id, zone_ack.get("message", "unknown error"),
+                        device_id,
+                        zone_ack.get("message", "unknown error"),
                     )
                     mqtt_sent = False
                 elif transferred_subzones:
@@ -235,7 +234,9 @@ class ZoneService:
         if mqtt_sent:
             logger.info(
                 "Zone assignment sent to %s: zone_id=%s, strategy=%s",
-                device_id, zone_id, subzone_strategy,
+                device_id,
+                zone_id,
+                subzone_strategy,
             )
         elif ack_received is False:
             logger.warning(
@@ -337,7 +338,9 @@ class ZoneService:
         if deleted_count > 0:
             logger.info(
                 "Cascade-deleted %d subzone(s) for device %s (was in zone %s)",
-                deleted_count, device_id, old_zone_id or "none",
+                deleted_count,
+                device_id,
+                old_zone_id or "none",
             )
 
         # 4b. Write audit entry (T13-R1)
@@ -367,7 +370,8 @@ class ZoneService:
                 if ack.get("status") == "error":
                     logger.error(
                         "ESP %s rejected zone removal: %s",
-                        device_id, ack.get("message"),
+                        device_id,
+                        ack.get("message"),
                     )
                     mqtt_sent = False
             except MQTTACKTimeoutError as e:
@@ -440,14 +444,14 @@ class ZoneService:
 
             logger.info(
                 "Zone assignment confirmed for %s: zone_id=%s, master_zone_id=%s",
-                device_id, zone_id, master_zone_id,
+                device_id,
+                zone_id,
+                master_zone_id,
             )
             return True
 
         elif status == "error":
-            logger.error(
-                "Zone assignment failed for %s: %s", device_id, message or "Unknown error"
-            )
+            logger.error("Zone assignment failed for %s: %s", device_id, message or "Unknown error")
             return False
 
         else:
@@ -509,38 +513,42 @@ class ZoneService:
         if strategy == "transfer":
             # Move subzones from old zone to new zone
             for sz in subzones:
-                affected.append({
-                    "subzone_id": sz.subzone_id,
-                    "subzone_name": sz.subzone_name or "",
-                    "assigned_gpios": list(sz.assigned_gpios) if sz.assigned_gpios else [],
-                    "old_parent": sz.parent_zone_id,
-                    "new_parent": new_zone_id,
-                    "action": "transferred",
-                })
+                affected.append(
+                    {
+                        "subzone_id": sz.subzone_id,
+                        "subzone_name": sz.subzone_name or "",
+                        "assigned_gpios": list(sz.assigned_gpios) if sz.assigned_gpios else [],
+                        "old_parent": sz.parent_zone_id,
+                        "new_parent": new_zone_id,
+                        "action": "transferred",
+                    }
+                )
                 sz.parent_zone_id = new_zone_id
             await self.esp_repo.session.flush()
             logger.info(
                 "Transferred %d subzone(s) from %s to %s for device %s",
-                len(subzones), old_zone_id, new_zone_id, device_id,
+                len(subzones),
+                old_zone_id,
+                new_zone_id,
+                device_id,
             )
 
         elif strategy == "copy":
             # Clone subzones to new zone (originals stay in old zone)
             for sz in subzones:
-                new_id = await self._generate_unique_copy_id(
-                    sz.subzone_id, device_id, subzone_repo
-                )
+                new_id = await self._generate_unique_copy_id(sz.subzone_id, device_id, subzone_repo)
                 base_name = (
-                    re.sub(r"( \(Copy\))+$", "", sz.subzone_name)
-                    if sz.subzone_name else None
+                    re.sub(r"( \(Copy\))+$", "", sz.subzone_name) if sz.subzone_name else None
                 )
-                affected.append({
-                    "subzone_id": sz.subzone_id,
-                    "copied_as": new_id,
-                    "old_parent": sz.parent_zone_id,
-                    "new_parent": new_zone_id,
-                    "action": "copied",
-                })
+                affected.append(
+                    {
+                        "subzone_id": sz.subzone_id,
+                        "copied_as": new_id,
+                        "old_parent": sz.parent_zone_id,
+                        "new_parent": new_zone_id,
+                        "action": "copied",
+                    }
+                )
                 await subzone_repo.create_subzone(
                     esp_id=device_id,
                     subzone_id=new_id,
@@ -551,7 +559,9 @@ class ZoneService:
                 )
             logger.info(
                 "Copied %d subzone(s) to %s for device %s",
-                len(subzones), new_zone_id, device_id,
+                len(subzones),
+                new_zone_id,
+                device_id,
             )
 
         elif strategy == "reset":
@@ -559,22 +569,25 @@ class ZoneService:
             # The ESP does NOT cascade-remove subzones during zone change
             # (only during zone removal). Server DB must be authoritative.
             for sz in subzones:
-                affected.append({
-                    "subzone_id": sz.subzone_id,
-                    "old_parent": sz.parent_zone_id,
-                    "action": "deleted",
-                })
+                affected.append(
+                    {
+                        "subzone_id": sz.subzone_id,
+                        "old_parent": sz.parent_zone_id,
+                        "action": "deleted",
+                    }
+                )
             deleted_count = await subzone_repo.delete_all_by_esp(device_id)
             logger.info(
                 "Reset: Deleted %d subzone(s) for device %s (zone change %s → %s)",
-                deleted_count, device_id, old_zone_id, new_zone_id,
+                deleted_count,
+                device_id,
+                old_zone_id,
+                new_zone_id,
             )
 
         else:
             valid = {"transfer", "copy", "reset"}
-            raise ValueError(
-                f"Unknown subzone_strategy '{strategy}'. Must be one of: {valid}"
-            )
+            raise ValueError(f"Unknown subzone_strategy '{strategy}'. Must be one of: {valid}")
 
         return affected
 
@@ -627,6 +640,7 @@ class ZoneService:
 
         # Safety fallback: UUID suffix (should never happen in practice)
         from uuid import uuid4
+
         return f"{clean_id}_copy_{uuid4().hex[:6]}"
 
     async def _send_transferred_subzones(
@@ -654,9 +668,7 @@ class ZoneService:
             }
 
             # Filter GPIO 0 (I2C placeholder, triggers Error 2506 on ESP)
-            sz_payload["assigned_gpios"] = [
-                g for g in sz_payload["assigned_gpios"] if g != 0
-            ]
+            sz_payload["assigned_gpios"] = [g for g in sz_payload["assigned_gpios"] if g != 0]
 
             try:
                 sz_ack = await self.command_bridge.send_and_wait_ack(
@@ -669,13 +681,17 @@ class ZoneService:
                 if sz_ack.get("status") == "error":
                     logger.warning(
                         "Subzone %s transfer ACK error for %s: code=%s, msg=%s",
-                        sz["subzone_id"], device_id,
-                        sz_ack.get("error_code"), sz_ack.get("message"),
+                        sz["subzone_id"],
+                        device_id,
+                        sz_ack.get("error_code"),
+                        sz_ack.get("message"),
                     )
             except MQTTACKTimeoutError as e:
                 logger.error(
                     "Subzone %s transfer timeout for %s: %s",
-                    sz["subzone_id"], device_id, e,
+                    sz["subzone_id"],
+                    device_id,
+                    e,
                 )
                 # Continue with next subzone — partial success is better than abort
 

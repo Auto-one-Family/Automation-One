@@ -90,7 +90,9 @@ async def assign_zone(
 
         logger.info(
             "Zone assignment for %s by %s: zone_id=%s, strategy=%s (%s)",
-            esp_id, current_user.username, request.zone_id,
+            esp_id,
+            current_user.username,
+            request.zone_id,
             request.subzone_strategy,
             "MQTT sent" if result.mqtt_sent else "MQTT offline",
         )
@@ -137,7 +139,8 @@ async def remove_zone(
 
         logger.info(
             "Zone removal for %s by %s (%s)",
-            esp_id, current_user.username,
+            esp_id,
+            current_user.username,
             "MQTT sent" if result.mqtt_sent else "MQTT offline",
         )
 

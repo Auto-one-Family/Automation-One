@@ -95,12 +95,16 @@ class DeviceScopeService:
 
         # Cache miss or expired — query DB, store plain data (not ORM object)
         orm_context = await self.context_repo.get_active_context(config_type, config_id)
-        data = ActiveContextData(
-            active_zone_id=orm_context.active_zone_id,
-            active_subzone_id=orm_context.active_subzone_id,
-            context_source=orm_context.context_source,
-            context_since=orm_context.context_since,
-        ) if orm_context else None
+        data = (
+            ActiveContextData(
+                active_zone_id=orm_context.active_zone_id,
+                active_subzone_id=orm_context.active_subzone_id,
+                context_source=orm_context.context_source,
+                context_since=orm_context.context_since,
+            )
+            if orm_context
+            else None
+        )
         self._context_cache[key] = _CachedContext(data, CONTEXT_CACHE_TTL_SECONDS)
         return data
 
@@ -179,7 +183,11 @@ class DeviceScopeService:
 
         logger.info(
             "Active context set: %s:%s -> zone=%s (source=%s, by=%s)",
-            config_type, config_id, active_zone_id, context_source, changed_by,
+            config_type,
+            config_id,
+            active_zone_id,
+            context_source,
+            changed_by,
         )
 
         return context

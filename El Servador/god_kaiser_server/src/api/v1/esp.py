@@ -58,7 +58,12 @@ from ...schemas import (
     PendingDevicesListResponse,
     PendingESPDevice,
 )
-from ...schemas.esp import ComponentHealthScoreResponse, GpioStatusResponse, GpioUsageItem, SubzoneSummary
+from ...schemas.esp import (
+    ComponentHealthScoreResponse,
+    GpioStatusResponse,
+    GpioUsageItem,
+    SubzoneSummary,
+)
 from ...services.gpio_validation_service import GpioValidationService, SYSTEM_RESERVED_PINS
 from ...schemas.common import PaginationMeta
 from ...core.exceptions import DuplicateESPError, ESPNotFoundError, ValidationException
@@ -231,9 +236,7 @@ async def list_devices(
                 zone_ctx = ZoneContextSummary(**zone_ctx_data)
 
         # Subzone summaries (T14-Fix-F)
-        subzone_summaries = await _get_subzone_summaries(
-            device.device_id, subzone_repo
-        )
+        subzone_summaries = await _get_subzone_summaries(device.device_id, subzone_repo)
 
         device_responses.append(
             ESPDeviceResponse(
@@ -412,9 +415,7 @@ async def get_device(
         zone_ctx = ZoneContextSummary(**zone_ctx_data)
 
     # Subzone summaries (T14-Fix-F)
-    subzone_summaries = await _get_subzone_summaries(
-        device.device_id, subzone_repo
-    )
+    subzone_summaries = await _get_subzone_summaries(device.device_id, subzone_repo)
 
     return ESPDeviceResponse(
         id=device.id,

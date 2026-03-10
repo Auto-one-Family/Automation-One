@@ -46,7 +46,7 @@ const hasTimeRange = computed(() =>
   ['historical'].includes(props.widgetType)
 )
 const hasYRange = computed(() =>
-  ['line-chart', 'historical'].includes(props.widgetType)
+  ['line-chart', 'historical', 'gauge'].includes(props.widgetType)
 )
 
 /** Widgets that support zoneFilter (AlarmListWidget, ESPHealthWidget, ActuatorRuntimeWidget) */
@@ -67,14 +67,18 @@ const availableZones = computed(() => {
   return list.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
 })
 
-// Available sensors
+// Available sensors (deduplicated by espId:gpio:sensorType)
 const availableSensors = computed(() => {
   const items: { id: string; label: string; type: string }[] = []
+  const seen = new Set<string>()
   for (const device of espStore.devices) {
     const deviceId = espStore.getDeviceId(device)
     for (const s of (device.sensors as MockSensor[]) || []) {
+      const id = `${deviceId}:${s.gpio}:${s.sensor_type}`
+      if (seen.has(id)) continue
+      seen.add(id)
       items.push({
-        id: `${deviceId}:${s.gpio}:${s.sensor_type}`,
+        id,
         label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
         type: s.sensor_type || '',
       })
@@ -119,14 +123,13 @@ function handleSensorChange(sensorId: string) {
   if (sensor) {
     const cfg = SENSOR_TYPE_CONFIG[sensor.type]
     if (cfg) {
-      const range = cfg.max - cfg.min
-      // Only auto-fill thresholds when not yet set
-      if (localConfig.value.warnLow == null && localConfig.value.warnHigh == null) {
-        updates.warnLow = Math.round((cfg.min + range * 0.1) * 10) / 10
-        updates.warnHigh = Math.round((cfg.max - range * 0.1) * 10) / 10
-        updates.alarmLow = cfg.min
-        updates.alarmHigh = cfg.max
+      // Auto-fill Y-axis range when not yet set (useful for gauge + charts)
+      if (localConfig.value.yMin == null && localConfig.value.yMax == null) {
+        updates.yMin = cfg.min
+        updates.yMax = cfg.max
       }
+      // Thresholds are NOT auto-populated — sensor range (e.g. -40..125°C) is not a
+      // meaningful threshold. Users must configure thresholds explicitly via the panel.
     }
   }
 

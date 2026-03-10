@@ -74,7 +74,9 @@ async def create_zone(
 
     logger.info(
         "Zone created by %s: zone_id=%s, name=%s",
-        current_user.username, zone.zone_id, zone.name,
+        current_user.username,
+        zone.zone_id,
+        zone.name,
     )
     return ZoneResponse.model_validate(zone)
 
@@ -226,7 +228,12 @@ async def patch_zone(
     await db.commit()
     await db.refresh(updated)
 
-    logger.info("Zone patched by %s: zone_id=%s, fields=%s", current_user.username, zone_id, list(update_data.keys()))
+    logger.info(
+        "Zone patched by %s: zone_id=%s, fields=%s",
+        current_user.username,
+        zone_id,
+        list(update_data.keys()),
+    )
     return ZoneResponse.model_validate(updated)
 
 
@@ -302,7 +309,9 @@ async def archive_zone(
 
     logger.info(
         "Zone archived by %s: zone_id=%s (%d subzones deactivated)",
-        current_user.username, zone_id, deactivated,
+        current_user.username,
+        zone_id,
+        deactivated,
     )
     return ZoneResponse.model_validate(archived)
 

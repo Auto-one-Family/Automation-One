@@ -233,7 +233,9 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         # =========================================================================
         "device_scope": request.device_scope if request.device_scope is not None else "zone_local",
         "assigned_zones": request.assigned_zones if request.assigned_zones is not None else [],
-        "assigned_subzones": request.assigned_subzones if request.assigned_subzones is not None else [],
+        "assigned_subzones": (
+            request.assigned_subzones if request.assigned_subzones is not None else []
+        ),
     }
 
 
@@ -925,28 +927,32 @@ async def create_or_update_sensor(
         if request.device_scope is not None and request.device_scope != old_scope:
             from ...db.models.device_zone_change import DeviceZoneChange
 
-            db.add(DeviceZoneChange(
-                esp_id=f"sensor:{sensor.id}",
-                old_zone_id=old_scope,
-                new_zone_id=request.device_scope,
-                subzone_strategy="scope",
-                change_type="scope_change",
-                changed_by=current_user.username,
-            ))
+            db.add(
+                DeviceZoneChange(
+                    esp_id=f"sensor:{sensor.id}",
+                    old_zone_id=old_scope,
+                    new_zone_id=request.device_scope,
+                    subzone_strategy="scope",
+                    change_type="scope_change",
+                    changed_by=current_user.username,
+                )
+            )
             scope_changed = True
         if request.assigned_zones is not None and sorted(request.assigned_zones) != sorted(
             old_zones or []
         ):
             from ...db.models.device_zone_change import DeviceZoneChange
 
-            db.add(DeviceZoneChange(
-                esp_id=f"sensor:{sensor.id}",
-                old_zone_id=",".join(old_zones or []),
-                new_zone_id=",".join(request.assigned_zones),
-                subzone_strategy="zones",
-                change_type="zones_update",
-                changed_by=current_user.username,
-            ))
+            db.add(
+                DeviceZoneChange(
+                    esp_id=f"sensor:{sensor.id}",
+                    old_zone_id=",".join(old_zones or []),
+                    new_zone_id=",".join(request.assigned_zones),
+                    subzone_strategy="zones",
+                    change_type="zones_update",
+                    changed_by=current_user.username,
+                )
+            )
             zones_changed = True
 
     await db.commit()
@@ -1276,6 +1282,7 @@ async def query_sensor_data(
     resolved_config_id = None
     if sensor_config_id:
         import uuid as _uuid
+
         try:
             resolved_config_id = _uuid.UUID(sensor_config_id)
         except ValueError:
@@ -2049,8 +2056,7 @@ async def _validate_i2c_config(
     conflicting = [
         s
         for s in all_with_address
-        if s.id != exclude_sensor_id
-        and s.sensor_type not in sibling_types
+        if s.id != exclude_sensor_id and s.sensor_type not in sibling_types
     ]
 
     if conflicting:

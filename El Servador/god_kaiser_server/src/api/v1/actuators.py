@@ -542,28 +542,32 @@ async def create_or_update_actuator(
         if request.device_scope is not None and request.device_scope != old_act_scope:
             from ...db.models.device_zone_change import DeviceZoneChange
 
-            db.add(DeviceZoneChange(
-                esp_id=f"actuator:{actuator.id}",
-                old_zone_id=old_act_scope,
-                new_zone_id=request.device_scope,
-                subzone_strategy="scope",
-                change_type="scope_change",
-                changed_by=current_user.username,
-            ))
+            db.add(
+                DeviceZoneChange(
+                    esp_id=f"actuator:{actuator.id}",
+                    old_zone_id=old_act_scope,
+                    new_zone_id=request.device_scope,
+                    subzone_strategy="scope",
+                    change_type="scope_change",
+                    changed_by=current_user.username,
+                )
+            )
             act_scope_changed = True
         if request.assigned_zones is not None and sorted(request.assigned_zones) != sorted(
             old_act_zones or []
         ):
             from ...db.models.device_zone_change import DeviceZoneChange
 
-            db.add(DeviceZoneChange(
-                esp_id=f"actuator:{actuator.id}",
-                old_zone_id=",".join(old_act_zones or []),
-                new_zone_id=",".join(request.assigned_zones),
-                subzone_strategy="zones",
-                change_type="zones_update",
-                changed_by=current_user.username,
-            ))
+            db.add(
+                DeviceZoneChange(
+                    esp_id=f"actuator:{actuator.id}",
+                    old_zone_id=",".join(old_act_zones or []),
+                    new_zone_id=",".join(request.assigned_zones),
+                    subzone_strategy="zones",
+                    change_type="zones_update",
+                    changed_by=current_user.username,
+                )
+            )
             act_zones_changed = True
 
     await db.commit()

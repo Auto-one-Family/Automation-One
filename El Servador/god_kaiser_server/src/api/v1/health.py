@@ -179,8 +179,7 @@ async def detailed_health(
         resilience_health = ResilienceHealth(
             healthy=raw_status["healthy"],
             breakers={
-                name: CircuitBreakerHealth(**data)
-                for name, data in raw_status["breakers"].items()
+                name: CircuitBreakerHealth(**data) for name, data in raw_status["breakers"].items()
             },
             summary=ResilienceSummary(**raw_status["summary"]),
         )

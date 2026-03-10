@@ -112,6 +112,8 @@ test.describe('Subzone-Monitor Flow', () => {
     await page.waitForTimeout(2000)
 
     // ═══ Schritt 6: Zone-Tile klicken für L2-Ansicht ═══
+    // Wait for zone tiles to render (CI may need extra time for KPI aggregation)
+    await page.waitForSelector('.monitor-zone-tile', { timeout: 20000 })
     const zoneTile = page.locator('.monitor-zone-tile').first()
     await zoneTile.click({ timeout: 10000 })
     await page.waitForTimeout(2000)

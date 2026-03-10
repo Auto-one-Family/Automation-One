@@ -29,11 +29,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # I2C sensor types that use gpio=0 as placeholder
-I2C_SENSOR_TYPES = frozenset({
-    "sht31_temp", "sht31_humidity",
-    "bmp280_temp", "bmp280_pressure",
-    "bme280_temp", "bme280_humidity", "bme280_pressure",
-})
+I2C_SENSOR_TYPES = frozenset(
+    {
+        "sht31_temp",
+        "sht31_humidity",
+        "bmp280_temp",
+        "bmp280_pressure",
+        "bme280_temp",
+        "bme280_humidity",
+        "bme280_pressure",
+    }
+)
 
 
 async def resolve_zone_subzone_for_sensor(
@@ -68,25 +74,47 @@ async def resolve_zone_subzone_for_sensor(
 
     if scope == "zone_local":
         return await _resolve_zone_local(
-            esp_id_str, gpio, esp_repo, subzone_repo, sensor_config_id, sensor_type,
+            esp_id_str,
+            gpio,
+            esp_repo,
+            subzone_repo,
+            sensor_config_id,
+            sensor_type,
         )
 
     elif scope == "multi_zone":
         return await _resolve_multi_zone(
-            esp_id_str, gpio, esp_repo, subzone_repo,
-            sensor_config, scope_service, sensor_config_id, sensor_type,
+            esp_id_str,
+            gpio,
+            esp_repo,
+            subzone_repo,
+            sensor_config,
+            scope_service,
+            sensor_config_id,
+            sensor_type,
         )
 
     elif scope == "mobile":
         return await _resolve_mobile(
-            esp_id_str, gpio, esp_repo, subzone_repo,
-            sensor_config, scope_service, sensor_config_id, sensor_type,
+            esp_id_str,
+            gpio,
+            esp_repo,
+            subzone_repo,
+            sensor_config,
+            scope_service,
+            sensor_config_id,
+            sensor_type,
         )
 
     # Unknown scope — fallback to zone_local
     logger.warning("Unknown device_scope '%s' — falling back to zone_local", scope)
     return await _resolve_zone_local(
-        esp_id_str, gpio, esp_repo, subzone_repo, sensor_config_id, sensor_type,
+        esp_id_str,
+        gpio,
+        esp_repo,
+        subzone_repo,
+        sensor_config_id,
+        sensor_type,
     )
 
 
@@ -108,13 +136,12 @@ async def _resolve_zone_local(
 
     # subzone_id resolution
     try:
-        is_i2c = gpio == 0 and (
-            sensor_type in I2C_SENSOR_TYPES if sensor_type else True
-        )
+        is_i2c = gpio == 0 and (sensor_type in I2C_SENSOR_TYPES if sensor_type else True)
 
         if is_i2c and sensor_config_id:
             subzone_config = await subzone_repo.get_subzone_by_sensor_config_id(
-                esp_id_str, sensor_config_id,
+                esp_id_str,
+                sensor_config_id,
             )
             if subzone_config:
                 subzone_id = subzone_config.subzone_id
@@ -147,14 +174,16 @@ async def _resolve_multi_zone(
     if scope_service and sensor_config:
         try:
             context = await scope_service.get_active_context(
-                config_type="sensor", config_id=sensor_config.id,
+                config_type="sensor",
+                config_id=sensor_config.id,
             )
             if context and context.active_zone_id:
                 return context.active_zone_id, context.active_subzone_id
         except Exception:
             logger.warning(
                 "Failed to get active context for multi_zone sensor %s",
-                sensor_config.id, exc_info=True,
+                sensor_config.id,
+                exc_info=True,
             )
 
     # Static multi-zone: zone_id = None (measurement applies to all assigned zones)
@@ -180,21 +209,30 @@ async def _resolve_mobile(
     if scope_service and sensor_config:
         try:
             context = await scope_service.get_active_context(
-                config_type="sensor", config_id=sensor_config.id,
+                config_type="sensor",
+                config_id=sensor_config.id,
             )
             if context and context.active_zone_id:
                 return context.active_zone_id, context.active_subzone_id
         except Exception:
             logger.warning(
                 "Failed to get active context for mobile sensor %s",
-                sensor_config.id, exc_info=True,
+                sensor_config.id,
+                exc_info=True,
             )
 
     # Fallback: use ESP zone + warning
     logger.warning(
         "Mobile sensor %s (esp=%s, gpio=%d) has no active_context — fallback to ESP zone",
-        sensor_config.id if sensor_config else "unknown", esp_id_str, gpio,
+        sensor_config.id if sensor_config else "unknown",
+        esp_id_str,
+        gpio,
     )
     return await _resolve_zone_local(
-        esp_id_str, gpio, esp_repo, subzone_repo, sensor_config_id, sensor_type,
+        esp_id_str,
+        gpio,
+        esp_repo,
+        subzone_repo,
+        sensor_config_id,
+        sensor_type,
     )

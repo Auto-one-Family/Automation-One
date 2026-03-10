@@ -12,6 +12,8 @@
  * - Robustes Error-Handling mit Retry-Logik
  * - Automatische Daten-Aggregation für große Zeiträume
  * - Memory-effiziente Datenpunkt-Limitierung
+ * - Zoom/Pan support via chartjs-plugin-zoom (8.0-A)
+ * - Dual Y-axis for different units (8.0-B)
  *
  * Phase 4: Charts & Drag-Drop (Industrial-Grade)
  */
@@ -30,7 +32,10 @@ import {
   TimeScale,
   Filler,
 } from 'chart.js'
+import zoomPlugin from 'chartjs-plugin-zoom'
+import annotationPlugin from 'chartjs-plugin-annotation'
 import 'chartjs-adapter-date-fns'
+import { RotateCcw } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { websocketService } from '@/services/websocket'
 import type { ChartSensor, SensorReading } from '@/types'
@@ -49,7 +54,9 @@ ChartJS.register(
   Tooltip,
   Legend,
   TimeScale,
-  Filler
+  Filler,
+  zoomPlugin,
+  annotationPlugin
 )
 
 // =============================================================================
@@ -140,6 +147,10 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 /** Retry-Timer */
 let retryTimer: ReturnType<typeof setTimeout> | null = null
 
+/** Zoom state (8.0-A) */
+const chartRef = ref<InstanceType<typeof Line> | null>(null)
+const isZoomed = ref(false)
+
 
 // =============================================================================
 // Computed
@@ -212,13 +223,63 @@ const sharedSensorTypeConfig = computed(() => {
   return type ? SENSOR_TYPE_CONFIG[type] ?? null : null
 })
 
-/** Berechne Y-Achsen-Bereich automatisch mit Puffer */
+// =============================================================================
+// Dual Y-Axis (8.0-B)
+// =============================================================================
+
+/** Map units to sensor IDs */
+const unitGroups = computed(() => {
+  const groups = new Map<string, string[]>()
+  for (const sensor of props.sensors) {
+    const unit = sensor.unit || ''
+    if (!groups.has(unit)) groups.set(unit, [])
+    groups.get(unit)!.push(sensor.id)
+  }
+  return groups
+})
+
+/** Unique units across all sensors */
+const uniqueUnits = computed(() => [...unitGroups.value.keys()])
+
+/** Whether dual Y-axis is needed (>= 2 different units) */
+const needsDualAxis = computed(() => uniqueUnits.value.length >= 2)
+
+/**
+ * Compute Y-axis range for sensors with a specific unit.
+ * Returns suggestedMin/suggestedMax with 15% padding.
+ */
+function computeRangeForUnit(unit: string): { min: number | undefined; max: number | undefined } {
+  const sensorIds = unitGroups.value.get(unit) || []
+  let minVal = Infinity
+  let maxVal = -Infinity
+
+  for (const sensorId of sensorIds) {
+    const readings = combinedData.value.get(sensorId) || []
+    for (const reading of readings) {
+      const value = reading.processed_value ?? reading.raw_value
+      if (typeof value === 'number' && !isNaN(value)) {
+        minVal = Math.min(minVal, value)
+        maxVal = Math.max(maxVal, value)
+      }
+    }
+  }
+
+  if (minVal === Infinity) return { min: undefined, max: undefined }
+
+  const range = maxVal - minVal
+  const padding = range > 0 ? range * 0.15 : 1
+  return {
+    min: Math.floor((minVal - padding) * 10) / 10,
+    max: Math.ceil((maxVal + padding) * 10) / 10,
+  }
+}
+
+/** Berechne Y-Achsen-Bereich automatisch mit Puffer (global, for single-axis mode) */
 const computedYRange = computed(() => {
   let minVal = Infinity
   let maxVal = -Infinity
   let valueCount = 0
 
-  // Sammle alle Y-Werte von allen Sensoren
   for (const [_sensorId, readings] of combinedData.value.entries()) {
     for (const reading of readings) {
       const value = reading.processed_value ?? reading.raw_value
@@ -230,39 +291,31 @@ const computedYRange = computed(() => {
     }
   }
 
-  // Fallback wenn keine Daten
   if (minVal === Infinity || maxVal === -Infinity) {
-    log.debug('computedYRange: no valid data', { valueCount })
     return { min: undefined, max: undefined }
   }
 
-  // 15% Puffer hinzufügen für bessere Lesbarkeit
   const range = maxVal - minVal
-  const padding = range > 0 ? range * 0.15 : 1 // Mindestens 1 Einheit Puffer
+  const padding = range > 0 ? range * 0.15 : 1
 
-  const result = {
-    min: Math.floor((minVal - padding) * 10) / 10, // Auf 0.1 abrunden
-    max: Math.ceil((maxVal + padding) * 10) / 10,  // Auf 0.1 aufrunden
+  return {
+    min: Math.floor((minVal - padding) * 10) / 10,
+    max: Math.ceil((maxVal + padding) * 10) / 10,
   }
-
-  log.debug('computedYRange calculated', {
-    rawMin: minVal,
-    rawMax: maxVal,
-    range,
-    padding,
-    resultMin: result.min,
-    resultMax: result.max,
-    valueCount,
-    sensorCount: combinedData.value.size,
-  })
-
-  return result
 })
 
 /** Chart-Daten im Chart.js Format */
 const chartData = computed(() => {
   const datasets = props.sensors.map((sensor) => {
     const readings = combinedData.value.get(sensor.id) || []
+    const unit = sensor.unit || ''
+    const unitIndex = uniqueUnits.value.indexOf(unit)
+
+    // Assign yAxisID: first unit → 'y' (left), second → 'y1' (right) (8.0-B)
+    let yAxisID = 'y'
+    if (needsDualAxis.value && unitIndex >= 1) {
+      yAxisID = unitIndex === 1 ? 'y1' : 'y' // 3rd+ unit shares left axis
+    }
 
     return {
       label: sensor.name,
@@ -273,10 +326,11 @@ const chartData = computed(() => {
       borderColor: sensor.color,
       backgroundColor: `${sensor.color}20`,
       borderWidth: 2,
-      pointRadius: readings.length > 100 ? 0 : 2, // Punkte ausblenden bei vielen Daten
+      pointRadius: readings.length > 100 ? 0 : 2,
       pointHoverRadius: 4,
       tension: 0.3,
       fill: false,
+      yAxisID,
     }
   })
 
@@ -285,11 +339,71 @@ const chartData = computed(() => {
 
 /** Chart.js Optionen */
 const chartOptions = computed(() => {
+  // Build Y-axis scales (8.0-B)
+  const yScales: Record<string, any> = {}
+
+  if (needsDualAxis.value) {
+    // Left axis (first unit)
+    const leftUnit = uniqueUnits.value[0]
+    const leftRange = computeRangeForUnit(leftUnit)
+    yScales.y = {
+      type: 'linear' as const,
+      position: 'left' as const,
+      beginAtZero: false,
+      ...(props.yMin != null ? { suggestedMin: props.yMin } : leftRange.min != null ? { suggestedMin: leftRange.min } : {}),
+      ...(props.yMax != null ? { suggestedMax: props.yMax } : leftRange.max != null ? { suggestedMax: leftRange.max } : {}),
+      title: {
+        display: true,
+        text: leftUnit,
+        color: 'rgba(255, 255, 255, 0.5)',
+        font: { size: 11 },
+      },
+      grid: { color: 'rgba(255, 255, 255, 0.05)' },
+      ticks: { color: 'rgba(255, 255, 255, 0.5)' },
+    }
+
+    // Right axis (second unit)
+    if (uniqueUnits.value.length >= 2) {
+      const rightUnit = uniqueUnits.value[1]
+      const rightRange = computeRangeForUnit(rightUnit)
+      yScales.y1 = {
+        type: 'linear' as const,
+        position: 'right' as const,
+        beginAtZero: false,
+        ...(rightRange.min != null ? { suggestedMin: rightRange.min } : {}),
+        ...(rightRange.max != null ? { suggestedMax: rightRange.max } : {}),
+        title: {
+          display: true,
+          text: rightUnit,
+          color: 'rgba(255, 255, 255, 0.5)',
+          font: { size: 11 },
+        },
+        grid: { drawOnChartArea: false }, // No grid overlay from right axis
+        ticks: { color: 'rgba(255, 255, 255, 0.5)' },
+      }
+    }
+  } else {
+    // Single axis (original behavior)
+    yScales.y = {
+      beginAtZero: false,
+      ...(props.yMin != null ? { suggestedMin: props.yMin }
+        : sharedSensorTypeConfig.value ? { suggestedMin: sharedSensorTypeConfig.value.min }
+        : computedYRange.value.min != null ? { suggestedMin: computedYRange.value.min }
+        : {}),
+      ...(props.yMax != null ? { suggestedMax: props.yMax }
+        : sharedSensorTypeConfig.value ? { suggestedMax: sharedSensorTypeConfig.value.max }
+        : computedYRange.value.max != null ? { suggestedMax: computedYRange.value.max }
+        : {}),
+      grid: { color: 'rgba(255, 255, 255, 0.05)' },
+      ticks: { color: 'rgba(255, 255, 255, 0.5)' },
+    }
+  }
+
   return {
     responsive: true,
     maintainAspectRatio: false,
     animation: {
-      duration: 300, // Schnelle Animationen für Live-Updates
+      duration: 300,
     },
     interaction: {
       mode: 'index' as const,
@@ -297,7 +411,7 @@ const chartOptions = computed(() => {
     },
     plugins: {
       legend: {
-        display: false, // Eigene Legende in Parent
+        display: false,
       },
       tooltip: {
         backgroundColor: 'rgba(0, 0, 0, 0.85)',
@@ -326,6 +440,23 @@ const chartOptions = computed(() => {
           },
         },
       },
+      // Zoom/Pan (8.0-A)
+      zoom: {
+        pan: {
+          enabled: true,
+          mode: 'x' as const,
+        },
+        zoom: {
+          wheel: {
+            enabled: true,
+          },
+          pinch: {
+            enabled: true,
+          },
+          mode: 'x' as const,
+          onZoom: () => { isZoomed.value = true },
+        },
+      },
     },
     scales: {
       x: {
@@ -346,27 +477,21 @@ const chartOptions = computed(() => {
           maxTicksLimit: 8,
         },
       },
-      y: {
-        beginAtZero: false,
-        // Priority: explicit props > SENSOR_TYPE_CONFIG (if all same type) > computed from data
-        ...(props.yMin != null ? { suggestedMin: props.yMin }
-          : sharedSensorTypeConfig.value ? { suggestedMin: sharedSensorTypeConfig.value.min }
-          : computedYRange.value.min != null ? { suggestedMin: computedYRange.value.min }
-          : {}),
-        ...(props.yMax != null ? { suggestedMax: props.yMax }
-          : sharedSensorTypeConfig.value ? { suggestedMax: sharedSensorTypeConfig.value.max }
-          : computedYRange.value.max != null ? { suggestedMax: computedYRange.value.max }
-          : {}),
-        grid: {
-          color: 'rgba(255, 255, 255, 0.05)',
-        },
-        ticks: {
-          color: 'rgba(255, 255, 255, 0.5)',
-        },
-      },
+      ...yScales,
     },
   }
 })
+
+// =============================================================================
+// Zoom Controls (8.0-A)
+// =============================================================================
+function resetZoom() {
+  const chart = chartRef.value?.chart as any
+  if (chart?.resetZoom) {
+    chart.resetZoom()
+    isZoomed.value = false
+  }
+}
 
 // =============================================================================
 // Methods
@@ -455,7 +580,7 @@ async function fetchData(retryAttempt = 0): Promise<void> {
     // Kein Error wenn mindestens ein Sensor Daten hat oder Live-Updates aktiv sind
     if (successCount === 0 && !props.enableLiveUpdates) {
       // Keine historischen Daten - kein Error, nur Info
-      log.debug('⚠️ No historical data available - waiting for live updates')
+      log.debug('No historical data available - waiting for live updates')
     }
 
     error.value = null
@@ -538,7 +663,7 @@ function setupWebSocketSubscriptions(): void {
     })
   }
 
-  log.debug(`✅ ${wsSubscriptionIds.value.length} WebSocket subscriptions aktiv`)
+  log.debug(`${wsSubscriptionIds.value.length} WebSocket subscriptions aktiv`)
 }
 
 /**
@@ -557,7 +682,7 @@ function handleSensorDataMessage(sensor: ChartSensor, message: any): void {
     return
   }
 
-  log.debug(`📡 WebSocket data received for ${sensor.id}`, { data, value: data.value ?? data.raw_value })
+  log.debug(`WebSocket data received for ${sensor.id}`, { data, value: data.value ?? data.raw_value })
 
   // Erstelle SensorReading aus WebSocket-Daten
   const reading: SensorReading = {
@@ -605,8 +730,6 @@ function clearLiveData(): void {
 
 /**
  * Sensor-IDs als String für zuverlässige Watch-Erkennung.
- * WICHTIG: Array-Mutation mit .push() ändert die Referenz nicht,
- * daher brauchen wir einen abgeleiteten Wert für die Watch.
  */
 const sensorIdsString = computed(() => props.sensors.map(s => s.id).sort().join(','))
 
@@ -616,6 +739,7 @@ watch(
   (newIds, oldIds) => {
     log.debug('sensorIdsString changed', { newIds, oldIds })
     clearLiveData()
+    isZoomed.value = false
     fetchData()
     setupWebSocketSubscriptions()
   }
@@ -626,6 +750,7 @@ watch(
   () => props.timeRange,
   () => {
     clearLiveData()
+    isZoomed.value = false
     fetchData()
   }
 )
@@ -681,7 +806,7 @@ onUnmounted(() => {
 
     <!-- Error State -->
     <div v-else-if="error && totalDataPoints === 0" class="multi-sensor-chart__error">
-      <span class="multi-sensor-chart__error-icon">⚠️</span>
+      <span class="multi-sensor-chart__error-icon">&#9888;&#65039;</span>
       <span>{{ error.message }}</span>
       <button @click="retry" class="multi-sensor-chart__retry-btn">
         Erneut versuchen
@@ -690,7 +815,7 @@ onUnmounted(() => {
 
     <!-- Empty State (keine Sensoren ausgewählt) -->
     <div v-else-if="sensors.length === 0" class="multi-sensor-chart__empty">
-      <span class="multi-sensor-chart__empty-icon">📊</span>
+      <span class="multi-sensor-chart__empty-icon">&#128202;</span>
       <span>Keine Sensoren ausgewählt</span>
       <span class="multi-sensor-chart__empty-hint">
         Ziehe einen Sensor hierher um Daten anzuzeigen
@@ -702,7 +827,7 @@ onUnmounted(() => {
       v-else-if="totalDataPoints === 0"
       class="multi-sensor-chart__no-data"
     >
-      <span class="multi-sensor-chart__no-data-icon">📈</span>
+      <span class="multi-sensor-chart__no-data-icon">&#128200;</span>
       <span>Noch keine Daten verfügbar</span>
       <span class="multi-sensor-chart__no-data-hint">
         <template v-if="enableLiveUpdates">
@@ -720,22 +845,27 @@ onUnmounted(() => {
 
     <!-- Chart -->
     <div v-else class="multi-sensor-chart__container" :style="{ height: `${height}px` }">
-      <!--
-        Key erzwingt Re-Render bei:
-        - Sensor-Änderungen (neue/entfernte Sensoren)
-        - Y-Achsen-Bereich-Änderungen (wenn neue Daten außerhalb des alten Bereichs liegen)
-        Ohne Y-Range im Key würde Chart.js die Achsen nicht aktualisieren!
-      -->
       <Line
-        :key="`chart-${sensors.map(s => s.id).join('-')}-y${computedYRange.min ?? 'auto'}-${computedYRange.max ?? 'auto'}-n${totalDataPoints}`"
+        ref="chartRef"
         :data="chartData"
         :options="chartOptions"
       />
 
-      <!-- Info-Badge: Datenpunkte & Live-Status -->
+      <!-- Info-Badge: Datenpunkte & Live-Status & Zoom-Reset -->
       <div class="multi-sensor-chart__info">
+        <button
+          v-if="isZoomed"
+          class="multi-sensor-chart__reset-zoom"
+          title="Zoom zurücksetzen"
+          @click="resetZoom"
+        >
+          <RotateCcw :size="12" />
+        </button>
         <span class="multi-sensor-chart__info-points">
           {{ totalDataPoints }} Punkte
+        </span>
+        <span v-if="needsDualAxis" class="multi-sensor-chart__info-dual">
+          2Y
         </span>
         <span v-if="enableLiveUpdates && hasLiveData" class="multi-sensor-chart__info-live">
           <span class="multi-sensor-chart__live-dot" />
@@ -864,12 +994,41 @@ onUnmounted(() => {
   letter-spacing: -0.025em;
 }
 
+.multi-sensor-chart__info-dual {
+  padding: 0 0.25rem;
+  background: rgba(96, 165, 250, 0.2);
+  border-radius: 2px;
+  color: var(--color-iridescent-1);
+  font-weight: 600;
+  font-size: 0.5rem;
+}
+
 .multi-sensor-chart__info-live {
   display: flex;
   align-items: center;
   gap: 0.1875rem;
   color: var(--color-success);
   font-weight: 500;
+}
+
+/* Zoom Reset (8.0-A) */
+.multi-sensor-chart__reset-zoom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(133, 133, 160, 0.3);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.multi-sensor-chart__reset-zoom:hover {
+  border-color: var(--color-iridescent-1);
+  color: var(--color-iridescent-1);
 }
 
 /* Loading Overlay */

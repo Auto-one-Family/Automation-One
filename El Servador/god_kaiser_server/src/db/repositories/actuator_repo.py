@@ -107,9 +107,14 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
 
     async def count_by_esp(self, esp_id: uuid.UUID) -> int:
         """Count actuators for an ESP device."""
-        stmt = select(func.count()).select_from(ActuatorConfig).where(
-            ActuatorConfig.esp_id == esp_id,
-            ActuatorConfig.enabled == True,  # noqa: E712 — only count enabled configs to match ESP count
+        stmt = (
+            select(func.count())
+            .select_from(ActuatorConfig)
+            .where(
+                ActuatorConfig.esp_id == esp_id,
+                ActuatorConfig.enabled
+                == True,  # noqa: E712 — only count enabled configs to match ESP count
+            )
         )
         result = await self.session.execute(stmt)
         return result.scalar() or 0

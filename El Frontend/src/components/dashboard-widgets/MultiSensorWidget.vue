@@ -14,7 +14,7 @@ import { CHART_COLORS } from '@/utils/chartColors'
 import type { MockSensor, ChartSensor } from '@/types'
 
 interface Props {
-  /** Comma-separated sensor IDs: "espId:gpio,espId:gpio" */
+  /** Comma-separated sensor IDs: "espId:gpio:sensorType,espId:gpio:sensorType" */
   dataSources?: string
   timeRange?: '1h' | '6h' | '24h' | '7d'
 }
@@ -69,19 +69,20 @@ const chartSensors = computed<ChartSensor[]>(() => {
   })
 })
 
-// All available sensors for "add" dropdown (multi-value sensors listed per sub-type)
+// All available sensors for "add" dropdown (deduplicated, multi-value sensors listed per sub-type)
 const availableSensors = computed(() => {
   const items: { id: string; label: string }[] = []
+  const seen = new Set<string>()
   for (const device of espStore.devices) {
     const deviceId = espStore.getDeviceId(device)
     for (const s of (device.sensors as MockSensor[]) || []) {
       const id = `${deviceId}:${s.gpio}:${s.sensor_type}`
-      if (!selectedSensorIds.value.includes(id)) {
-        items.push({
-          id,
-          label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio})`,
-        })
-      }
+      if (seen.has(id) || selectedSensorIds.value.includes(id)) continue
+      seen.add(id)
+      items.push({
+        id,
+        label: `${s.name || s.sensor_type} (${deviceId} — ${s.sensor_type})`,
+      })
     }
   }
   return items

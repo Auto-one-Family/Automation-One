@@ -68,7 +68,12 @@ from ...core.exceptions import (
     SimulationNotRunningError,
 )
 from ...services.audit_retention_service import AuditRetentionService
-from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository, SubzoneRepository
+from ...db.repositories import (
+    ActuatorRepository,
+    ESPRepository,
+    SensorRepository,
+    SubzoneRepository,
+)
 from ...sensors.sensor_type_registry import (
     expand_multi_value,
     get_mock_default_raw_value,

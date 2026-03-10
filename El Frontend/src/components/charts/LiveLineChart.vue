@@ -219,6 +219,8 @@ const chartOptions = computed(() => {
           color: tokens.textMuted,
           font: { family: 'JetBrains Mono', size: 10 },
           maxTicksLimit: 6,
+          autoSkip: true,
+          maxRotation: 0,
         },
         border: { display: false },
       },

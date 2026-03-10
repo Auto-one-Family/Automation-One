@@ -38,9 +38,7 @@ def _validate_config_type(config_type: str) -> str:
     return config_type
 
 
-async def _get_config_and_validate_scope(
-    db, config_type: str, config_id: uuid.UUID
-) -> tuple:
+async def _get_config_and_validate_scope(db, config_type: str, config_id: uuid.UUID) -> tuple:
     """Load the sensor/actuator config and verify it's not zone_local."""
     if config_type == "sensor":
         repo = SensorRepository(db)

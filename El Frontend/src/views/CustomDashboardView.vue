@@ -21,7 +21,7 @@ import { GridStack, type GridItemHTMLElement, type GridStackNode } from 'gridsta
 import 'gridstack/dist/gridstack.min.css'
 import {
   LayoutGrid, Plus, Trash2, Download, Upload,
-  ChevronDown, Pencil, Eye, MonitorPlay, MapPin,
+  ChevronDown, Pencil, Eye, MonitorPlay, MapPin, AlertTriangle,
 } from 'lucide-vue-next'
 import { useDashboardStore, type WidgetType } from '@/shared/stores/dashboard.store'
 import { useUiStore } from '@/shared/stores'
@@ -29,6 +29,7 @@ import { useDragStateStore } from '@/shared/stores/dragState.store'
 import { useToast } from '@/composables/useToast'
 import { useDashboardWidgets } from '@/composables/useDashboardWidgets'
 import { useEspStore } from '@/stores/esp'
+import { getSensorDisplayName, formatSensorType } from '@/utils/sensorDefaults'
 import ViewTabBar from '@/components/common/ViewTabBar.vue'
 import WidgetConfigPanel from '@/components/dashboard-widgets/WidgetConfigPanel.vue'
 
@@ -59,12 +60,35 @@ const {
     configWidgetType.value = widgetType
     configPanelOpen.value = true
   },
+  onRemoveClick: (widgetId) => {
+    confirmRemoveWidget(widgetId)
+  },
   onConfigUpdate: (widgetId, newConfig) => {
     const existing = widgetConfigs.value.get(widgetId) || {}
-    widgetConfigs.value.set(widgetId, { ...existing, ...newConfig })
+    const merged = { ...existing, ...newConfig }
+    widgetConfigs.value.set(widgetId, merged)
+    const widgetEl = document.querySelector(`[data-widget-id="${widgetId}"]`)
+    const type = widgetEl?.getAttribute('data-type')
+    if (type) updateWidgetTitleInDom(widgetId, type, merged)
     autoSave()
   },
 })
+
+/** Confirm and remove a widget from the grid via X-Button */
+async function confirmRemoveWidget(widgetId: string) {
+  const confirmed = await uiStore.confirm({
+    title: 'Widget entfernen',
+    message: 'Dieses Widget wird aus dem Dashboard entfernt.',
+    confirmText: 'Entfernen',
+    variant: 'danger',
+  })
+  if (!confirmed) return
+  const el = gridContainer.value?.querySelector(`[gs-id="${widgetId}"]`) as HTMLElement | null
+  if (el && grid) {
+    grid.removeWidget(el)
+    // grid.on('removed') triggers autoSave automatically
+  }
+}
 
 // GridStack instance
 let grid: GridStack | null = null
@@ -79,6 +103,41 @@ const layoutSelectorRef = ref<HTMLElement | null>(null)
 
 // Guard: prevents autoSave during loadWidgetsToGrid (race condition with grid.on('removed'))
 let isLoadingWidgets = false
+
+/** Compute display title for widget header. For line-chart with sensorId, appends sensor name when title is default. */
+function getWidgetDisplayTitle(type: string, config: Record<string, any> | undefined): string {
+  const widgetDef = widgetTypes.find(t => t.type === type)
+  const defaultLabel = widgetDef?.label || type
+  const base = config?.title || defaultLabel
+
+  if (type === 'line-chart' && config?.sensorId) {
+    const parts = config.sensorId.split(':')
+    const espId = parts[0]
+    const gpio = parseInt(parts[1], 10)
+    const sensorType = parts[2] || null
+    const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
+    const sensor = device && !isNaN(gpio)
+      ? ((device.sensors as { gpio: number; sensor_type?: string; name?: string | null }[]) || []).find(
+          s => s.gpio === gpio && (!sensorType || s.sensor_type === sensorType)
+        )
+      : null
+    const sensorLabel = sensor
+      ? getSensorDisplayName({ sensor_type: sensor.sensor_type || sensorType || '', name: sensor.name })
+      : (sensorType ? formatSensorType(sensorType) : '')
+    if (sensorLabel && base === defaultLabel) {
+      return `${base} — ${sensorLabel}`
+    }
+  }
+  return base
+}
+
+/** Update widget header title in DOM (for config updates from widget or panel) */
+function updateWidgetTitleInDom(widgetId: string, type: string, config: Record<string, any>) {
+  const widgetEl = document.querySelector(`[data-widget-id="${widgetId}"]`)
+  if (!widgetEl) return
+  const titleEl = widgetEl.querySelector('.dashboard-widget__title')
+  if (titleEl) titleEl.textContent = getWidgetDisplayTitle(type, config)
+}
 
 // Close layout dropdown on outside click
 onClickOutside(layoutSelectorRef, () => {
@@ -279,12 +338,12 @@ watch(() => dashStore.activeLayoutId, (newId) => {
   }
 })
 
-// Show toast when dashboard sync fails
-watch(() => dashStore.lastSyncError, (err) => {
-  if (err) {
-    toast.error(`Layout konnte nicht gespeichert werden: ${err}`)
+// Retry sync for current layout
+function retrySyncCurrentLayout() {
+  if (dashStore.activeLayoutId) {
+    dashStore.retrySync(dashStore.activeLayoutId)
   }
-})
+}
 
 /** Handle keyboard widget placement from FAB (Space/Enter on widget chip) */
 function handleWidgetPlaceAnnounced(e: Event): void {
@@ -300,27 +359,50 @@ onMounted(() => {
     espStore.fetchAll()
   }
 
-  // Fetch dashboards from server (merges with localStorage cache)
-  dashStore.fetchLayouts()
-
-  // Deep-link: open dashboard from URL param /editor/:dashboardId
+  // Deep-link target from URL
   const dashboardIdFromUrl = route.params.dashboardId as string | undefined
-  if (dashboardIdFromUrl) {
-    const layout = dashStore.getLayoutById(dashboardIdFromUrl)
-    if (layout) {
-      dashStore.activeLayoutId = layout.id
-      dashStore.breadcrumb.dashboardName = layout.name
-    }
-  }
-  // Also support legacy ?layout= query param (from MonitorView cross-links)
   const layoutFromQuery = route.query.layout as string | undefined
-  if (layoutFromQuery && !dashboardIdFromUrl) {
-    const layout = dashStore.getLayoutById(layoutFromQuery)
+  const deepLinkId = dashboardIdFromUrl || layoutFromQuery
+
+  /** Try to activate a dashboard by local ID or serverId */
+  function activateDeepLink(id: string): boolean {
+    const layout = dashStore.getLayoutById(id)
     if (layout) {
       dashStore.activeLayoutId = layout.id
       dashStore.breadcrumb.dashboardName = layout.name
+      return true
     }
+    return false
   }
+
+  // Try immediate activation from localStorage cache
+  if (deepLinkId) {
+    activateDeepLink(deepLinkId)
+  }
+
+  // Fetch dashboards from server (merges with localStorage cache)
+  // After fetch, retry deep-link activation (server-only dashboards may not be in localStorage yet)
+  dashStore.fetchLayouts().then(() => {
+    if (deepLinkId) {
+      const current = dashStore.activeLayout
+      // Only retry if the deep-link layout is not yet active
+      if (!current || (current.id !== deepLinkId && current.serverId !== deepLinkId)) {
+        if (!activateDeepLink(deepLinkId)) {
+          // Invalid deep-link ID: show toast and fallback to first dashboard
+          toast.warning(`Dashboard "${deepLinkId}" nicht gefunden`)
+          if (dashStore.layouts.length > 0) {
+            dashStore.activeLayoutId = dashStore.layouts[0].id
+          }
+        }
+        // Reload grid with newly activated layout
+        nextTick(() => {
+          if (grid && dashStore.activeLayout) {
+            loadWidgetsToGrid(dashStore.activeLayout.widgets)
+          }
+        })
+      }
+    }
+  })
 
   // Listen for keyboard-placed widgets from FAB
   window.addEventListener('widget-place-announced', handleWidgetPlaceAnnounced)
@@ -347,6 +429,9 @@ onUnmounted(() => {
 
 // keep-alive lifecycle: Preserve GridStack state across tab switches
 onActivated(() => {
+  // Clear stale sync errors from previous navigation
+  dashStore.lastSyncError = null
+
   // Re-init grid if it was destroyed during deactivation
   if (!grid) {
     nextTick(() => initGrid())
@@ -398,7 +483,7 @@ function loadWidgetsToGrid(widgets: any[]) {
     // Collect mount operations to run in a single nextTick
     mountOps.push(() => {
       const contentDiv = itemEl.querySelector('.grid-stack-item-content')
-      contentDiv?.appendChild(createWidgetElement(w.type, w.config?.title || w.type, w.id, mountId))
+      contentDiv?.appendChild(createWidgetElement(w.type, getWidgetDisplayTitle(w.type, w.config), w.id, mountId))
       mountWidgetComponent(w.id, mountId, w.type, w.config || {})
     })
   }
@@ -439,7 +524,7 @@ function addWidget(type: string) {
   // Inject widget DOM and mount Vue component after GridStack has created the cell
   nextTick(() => {
     const contentDiv = itemEl.querySelector('.grid-stack-item-content')
-    contentDiv?.appendChild(createWidgetElement(type, widgetDef.label, id, mountId))
+    contentDiv?.appendChild(createWidgetElement(type, getWidgetDisplayTitle(type, config), id, mountId))
     mountWidgetComponent(id, mountId, type, config)
   })
 
@@ -458,12 +543,8 @@ function handleConfigUpdate(newConfig: Record<string, any>) {
   unmountWidgetFromElement(widgetId)
   mountWidgetComponent(widgetId, mountId, configWidgetType.value, newConfig)
 
-  // Update the header title
-  const widgetEl = document.querySelector(`[data-widget-id="${widgetId}"]`)
-  if (widgetEl && newConfig.title) {
-    const titleEl = widgetEl.querySelector('.dashboard-widget__title')
-    if (titleEl) titleEl.textContent = newConfig.title
-  }
+  // Update the header title (uses getWidgetDisplayTitle for line-chart + sensorId)
+  updateWidgetTitleInDom(widgetId, configWidgetType.value, newConfig)
 
   autoSave()
 }
@@ -508,6 +589,16 @@ function handleCreateLayout() {
     grid.removeAll(true)
     isLoadingWidgets = false
   }
+
+  // New dashboards open directly in edit mode
+  isEditing.value = true
+  showCatalog.value = true
+  if (grid) {
+    grid.enableMove(true)
+    grid.enableResize(true)
+    grid.opts.removable = true
+  }
+
   toast.success(`Dashboard "${name}" erstellt`)
 }
 
@@ -515,6 +606,17 @@ function handleCreateFromTemplate(templateId: string) {
   const layout = dashStore.createLayoutFromTemplate(templateId)
   if (!layout) return
   showLayoutDropdown.value = false
+
+  // ALL new dashboards open in edit mode (template widgets have sensorId: undefined)
+  isEditing.value = true
+  showCatalog.value = true
+  nextTick(() => {
+    if (grid) {
+      grid.enableMove(true)
+      grid.enableResize(true)
+      grid.opts.removable = true
+    }
+  })
 
   // Load template widgets into grid
   nextTick(() => {
@@ -618,7 +720,8 @@ function handleImport() {
               :class="['dashboard-builder__layout-item', { 'dashboard-builder__layout-item--active': layout.id === dashStore.activeLayoutId }]"
               @click="switchLayout(layout.id)"
             >
-              {{ layout.name }}
+              <span>{{ layout.name }}</span>
+              <span v-if="layout.autoGenerated" class="dashboard-builder__auto-badge">Auto</span>
             </div>
             <div class="dashboard-builder__layout-divider" />
             <!-- Templates -->
@@ -763,6 +866,21 @@ function handleImport() {
       </div>
     </div>
 
+    <!-- Sync-Error-Banner -->
+    <div
+      v-if="dashStore.lastSyncError"
+      class="dashboard-builder__sync-error"
+    >
+      <AlertTriangle class="w-4 h-4 flex-shrink-0" />
+      <span>{{ dashStore.lastSyncError }}</span>
+      <button
+        @click="retrySyncCurrentLayout"
+        class="dashboard-builder__sync-retry"
+      >
+        Erneut versuchen
+      </button>
+    </div>
+
     <div class="dashboard-builder__content">
       <!-- Widget Catalog Sidebar (only in edit mode) -->
       <aside v-if="showCatalog && isEditing" class="dashboard-builder__catalog">
@@ -793,6 +911,22 @@ function handleImport() {
         <div v-if="!dashStore.activeLayoutId" class="dashboard-builder__no-layout">
           <LayoutGrid class="w-12 h-12" style="color: var(--color-text-muted); opacity: 0.3" />
           <p>Erstelle ein neues Dashboard oder wähle ein bestehendes aus.</p>
+        </div>
+
+        <!-- Empty-State: leeres Dashboard im View-Mode -->
+        <div
+          v-else-if="dashStore.activeLayout && dashStore.activeLayout.widgets.length === 0 && !isEditing"
+          class="dashboard-builder__empty-state"
+        >
+          <LayoutGrid class="w-12 h-12" style="opacity: 0.3" />
+          <p class="dashboard-builder__empty-title">Noch keine Widgets</p>
+          <p class="dashboard-builder__empty-hint">
+            Wechsle in den Bearbeitungsmodus um Widgets hinzuzufuegen.
+          </p>
+          <button class="dashboard-builder__empty-cta" @click="toggleEditMode">
+            <Pencil class="w-4 h-4" />
+            Bearbeiten
+          </button>
         </div>
 
         <div
@@ -897,8 +1031,18 @@ function handleImport() {
   transition: all var(--transition-fast);
 }
 
+.dashboard-builder__layout-item { display: flex; align-items: center; gap: var(--space-2); }
 .dashboard-builder__layout-item:hover { background: var(--glass-bg-light); color: var(--color-text-primary); }
 .dashboard-builder__layout-item--active { color: var(--color-accent-bright); background: rgba(59, 130, 246, 0.06); }
+
+.dashboard-builder__auto-badge {
+  font-size: var(--text-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-secondary, var(--color-bg-quaternary));
+  color: var(--color-text-muted);
+  margin-left: auto;
+}
 
 .dashboard-builder__layout-divider {
   height: 1px;
@@ -999,6 +1143,35 @@ function handleImport() {
 .dashboard-builder__tool-btn:hover { background: var(--glass-bg-light); color: var(--color-text-primary); }
 .dashboard-builder__tool-btn--active { color: var(--color-accent); background: rgba(59, 130, 246, 0.08); }
 .dashboard-builder__tool-btn--danger:hover { color: var(--color-status-alarm); }
+
+.dashboard-builder__sync-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid var(--color-status-alarm);
+  border-radius: var(--radius-md, 6px);
+  color: var(--color-status-alarm);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-2);
+}
+
+.dashboard-builder__sync-retry {
+  margin-left: auto;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 1px solid var(--color-status-alarm);
+  border-radius: var(--radius-sm, 4px);
+  color: var(--color-status-alarm);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dashboard-builder__sync-retry:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
 
 /* Target Configurator Dropdown */
 .dashboard-builder__target-wrapper {
@@ -1218,6 +1391,50 @@ function handleImport() {
   text-align: center;
 }
 
+/* Empty state for dashboard with 0 widgets in view mode */
+.dashboard-builder__empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: 300px;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.dashboard-builder__empty-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin: 0;
+}
+
+.dashboard-builder__empty-hint {
+  font-size: var(--text-sm);
+  max-width: 300px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.dashboard-builder__empty-cta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.dashboard-builder__empty-cta:hover {
+  opacity: 0.9;
+}
+
 /* GridStack widget styling */
 :deep(.grid-stack) {
   min-height: 400px;
@@ -1302,6 +1519,35 @@ function handleImport() {
 :deep(.dashboard-widget__gear-btn:hover) {
   background: var(--glass-bg-light);
   color: var(--color-text-primary);
+}
+
+/* Remove (X) button — same base styling as gear button */
+:deep(.dashboard-widget__remove-btn) {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  opacity: 0;
+}
+
+.grid-stack--editing :deep(.dashboard-widget__remove-btn) {
+  display: flex;
+}
+
+.grid-stack--editing :deep(.dashboard-widget__header:hover .dashboard-widget__remove-btn) {
+  opacity: 1;
+}
+
+:deep(.dashboard-widget__remove-btn:hover) {
+  background: var(--glass-bg-light);
+  color: var(--color-status-alarm);
 }
 
 :deep(.dashboard-widget__vue-mount) {

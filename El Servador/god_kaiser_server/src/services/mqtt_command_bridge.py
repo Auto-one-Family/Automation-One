@@ -52,7 +52,9 @@ class MQTTCommandBridge:
                 pass
         logger.info(
             "MQTTCommandBridge initialized (client_connected=%s, broker=%s:%s)",
-            self._is_connected(), broker_host, broker_port,
+            self._is_connected(),
+            broker_host,
+            broker_port,
         )
 
     async def send_and_wait_ack(
@@ -90,7 +92,10 @@ class MQTTCommandBridge:
 
         logger.debug(
             "Sending %s command to %s (correlation_id=%s, topic=%s)",
-            command_type, esp_id, correlation_id, topic,
+            command_type,
+            esp_id,
+            correlation_id,
+            topic,
         )
 
         # MQTTClient.publish() is synchronous — blocks only briefly (paho buffers internally)
@@ -100,19 +105,22 @@ class MQTTCommandBridge:
         if success:
             logger.info(
                 "%s command SENT to %s (topic=%s, correlation_id=%s, client_connected=%s)",
-                command_type, esp_id, topic, correlation_id, self._is_connected(),
+                command_type,
+                esp_id,
+                topic,
+                correlation_id,
+                self._is_connected(),
             )
 
         if not success:
             client_state = self._get_client_state()
             logger.warning(
                 "MQTT publish failed for %s — %s",
-                topic, client_state,
+                topic,
+                client_state,
             )
             self._cleanup(correlation_id, key)
-            raise MQTTACKTimeoutError(
-                f"MQTT publish failed for {topic} ({client_state})"
-            )
+            raise MQTTACKTimeoutError(f"MQTT publish failed for {topic} ({client_state})")
 
         send_time = time.monotonic()
         try:
@@ -120,14 +128,22 @@ class MQTTCommandBridge:
             duration_ms = int((time.monotonic() - send_time) * 1000)
             logger.info(
                 "ACK received for %s %s (correlation_id=%s, status=%s, duration_ms=%d)",
-                esp_id, command_type, correlation_id, result.get("status"), duration_ms,
+                esp_id,
+                command_type,
+                correlation_id,
+                result.get("status"),
+                duration_ms,
             )
             return result
         except asyncio.TimeoutError:
             duration_ms = int((time.monotonic() - send_time) * 1000)
             logger.warning(
                 "ACK timeout for %s %s (correlation_id=%s, timeout=%ss, elapsed_ms=%d)",
-                esp_id, command_type, correlation_id, timeout, duration_ms,
+                esp_id,
+                command_type,
+                correlation_id,
+                timeout,
+                duration_ms,
             )
             raise MQTTACKTimeoutError(
                 f"No ACK for {esp_id} {command_type} "
@@ -177,7 +193,9 @@ class MQTTCommandBridge:
                     pending_queue.popleft()
                     logger.debug(
                         "ACK resolved via fallback for %s/%s (correlation_id=%s)",
-                        esp_id, command_type, oldest_cid,
+                        esp_id,
+                        command_type,
+                        oldest_cid,
                     )
                     return True
                 pending_queue.popleft()  # Stale entry, skip
@@ -195,10 +213,7 @@ class MQTTCommandBridge:
         queue = self._esp_pending.get(key)
         if not queue:
             return False
-        return any(
-            cid in self._pending and not self._pending[cid].done()
-            for cid in queue
-        )
+        return any(cid in self._pending and not self._pending[cid].done() for cid in queue)
 
     async def shutdown(self) -> None:
         """Cancel all pending Futures. Called during server shutdown."""

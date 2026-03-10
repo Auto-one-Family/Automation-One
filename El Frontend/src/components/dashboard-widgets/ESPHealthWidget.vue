@@ -118,6 +118,7 @@ function navigateToDevice(device: ESPDevice) {
         />
         <span class="esp-health-widget__name">
           {{ device.name || espStore.getDeviceId(device) }}
+          <span v-if="espStore.isMock(espStore.getDeviceId(device))" class="esp-health-widget__mock-badge">MOCK</span>
         </span>
         <span class="esp-health-widget__rssi" :title="`RSSI: ${device.wifi_rssi ?? '?'} dBm`">
           <component :is="isDeviceOnline(device) ? Wifi : WifiOff" class="w-3 h-3" />
@@ -203,6 +204,19 @@ function navigateToDevice(device: ESPDevice) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.esp-health-widget__mock-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-quaternary);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 
 .esp-health-widget__rssi {

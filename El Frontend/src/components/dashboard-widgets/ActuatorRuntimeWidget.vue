@@ -9,6 +9,7 @@
 import { computed } from 'vue'
 import { useEspStore } from '@/stores/esp'
 import { Zap } from 'lucide-vue-next'
+import { formatRelativeTime } from '@/utils/formatters'
 import type { MockActuator } from '@/types'
 
 interface Props {
@@ -88,7 +89,7 @@ const activeCount = computed(() => actuators.value.filter(a => a.state).length)
             {{ act.state ? 'EIN' : 'AUS' }}
           </span>
           <span v-if="act.lastCommand" class="runtime-widget__cmd">
-            {{ act.lastCommand }}
+            {{ formatRelativeTime(act.lastCommand) }}
           </span>
         </div>
       </div>

@@ -9,7 +9,9 @@
  * - Time range selection: 1h, 6h, 24h, 7d
  * - Threshold lines (alarmLow, warnLow, warnHigh, alarmHigh)
  * - Live data append via WebSocket sensor_data events
- * - Zoom/Pan support (optional)
+ * - Zoom/Pan support via chartjs-plugin-zoom (8.0-A)
+ * - Gap detection: line breaks when ESP was offline (8.0-C)
+ * - Stats overlay: Min/Max/Avg from API + Avg annotation line (8.0-D)
  */
 
 import { ref, computed, watch, onMounted, shallowRef } from 'vue'
@@ -25,7 +27,9 @@ import {
   TimeScale,
 } from 'chart.js'
 import annotationPlugin from 'chartjs-plugin-annotation'
+import zoomPlugin from 'chartjs-plugin-zoom'
 import 'chartjs-adapter-date-fns'
+import { RotateCcw } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { useEspStore } from '@/stores/esp'
 import { tokens } from '@/utils/cssTokens'
@@ -38,7 +42,8 @@ ChartJS.register(
   Tooltip,
   Filler,
   TimeScale,
-  annotationPlugin
+  annotationPlugin,
+  zoomPlugin
 )
 
 interface Props {
@@ -77,12 +82,26 @@ const espStore = useEspStore()
 const loading = ref(true)
 const error = ref<string | null>(null)
 
-// Data buffer
+// Data buffer — allows null values for gap markers (8.0-C)
 interface DataPoint {
   timestamp: Date
-  value: number
+  value: number | null
 }
 const dataBuffer = shallowRef<DataPoint[]>([])
+
+// Stats from API (8.0-D)
+interface SensorStats {
+  min: number
+  max: number
+  avg: number
+  stdDev: number
+  count: number
+}
+const stats = ref<SensorStats | null>(null)
+
+// Zoom state (8.0-A)
+const chartRef = ref<InstanceType<typeof Line> | null>(null)
+const isZoomed = ref(false)
 
 // Time range in minutes
 const timeRangeMinutes: Record<string, number> = {
@@ -94,8 +113,55 @@ const timeRangeMinutes: Record<string, number> = {
 
 const selectedRange = ref(props.timeRange)
 
+// Median interval for gap detection (8.0-C)
+let medianIntervalMs = 0
+
+/** Multiplier: gap if time between points exceeds median * this */
+const GAP_THRESHOLD_MULTIPLIER = 3
+
 // =============================================================================
-// Load Historical Data
+// Gap Detection (8.0-C)
+// =============================================================================
+
+/**
+ * Calculates median interval from sorted data points.
+ * Returns 0 if fewer than 2 points.
+ */
+function calculateMedianInterval(points: Array<{ timestamp: Date }>): number {
+  if (points.length < 2) return 0
+  const intervals: number[] = []
+  for (let i = 1; i < points.length; i++) {
+    intervals.push(points[i].timestamp.getTime() - points[i - 1].timestamp.getTime())
+  }
+  intervals.sort((a, b) => a - b)
+  return intervals[Math.floor(intervals.length / 2)]
+}
+
+/**
+ * Inserts null gap markers where time between consecutive points
+ * exceeds GAP_THRESHOLD_MULTIPLIER * medianInterval.
+ */
+function insertGapMarkers(
+  points: Array<{ timestamp: Date; value: number }>,
+  medianInterval: number
+): DataPoint[] {
+  if (points.length < 2 || medianInterval <= 0) return points
+  const gapThreshold = medianInterval * GAP_THRESHOLD_MULTIPLIER
+  const result: DataPoint[] = [points[0]]
+
+  for (let i = 1; i < points.length; i++) {
+    const timeDiff = points[i].timestamp.getTime() - points[i - 1].timestamp.getTime()
+    if (timeDiff > gapThreshold) {
+      // Insert null marker 1ms after last valid point to break line
+      result.push({ timestamp: new Date(points[i - 1].timestamp.getTime() + 1), value: null })
+    }
+    result.push(points[i])
+  }
+  return result
+}
+
+// =============================================================================
+// Load Historical Data + Stats
 // =============================================================================
 async function loadData() {
   loading.value = true
@@ -108,25 +174,59 @@ async function loadData() {
 
     const limit = selectedRange.value === '7d' ? 2000 : 1000
 
-    const response = await sensorsApi.queryData({
-      esp_id: props.espId,
-      gpio: props.gpio,
-      start_time: from,
-      end_time: to,
-      limit,
-    })
+    // Parallel: fetch data + stats (8.0-D)
+    const [dataResponse, statsResponse] = await Promise.all([
+      sensorsApi.queryData({
+        esp_id: props.espId,
+        gpio: props.gpio,
+        sensor_type: props.sensorType,
+        start_time: from,
+        end_time: to,
+        limit,
+      }),
+      sensorsApi.getStats(props.espId, props.gpio, {
+        sensor_type: props.sensorType,
+        start_time: from,
+        end_time: to,
+      }).catch(() => null), // Stats failure is non-critical
+    ])
 
-    if (response && Array.isArray(response.readings)) {
-      dataBuffer.value = response.readings.map((d) => ({
-        timestamp: new Date(d.timestamp),
-        value: typeof d.raw_value === 'number' ? d.raw_value : parseFloat(String(d.raw_value)),
-      }))
+    if (dataResponse && Array.isArray(dataResponse.readings)) {
+      const rawPoints = dataResponse.readings.map((d) => {
+        // Use processed_value (calibrated/converted) when available, fall back to raw_value
+        const val = d.processed_value != null ? d.processed_value : d.raw_value
+        return {
+          timestamp: new Date(d.timestamp),
+          value: typeof val === 'number' ? val : parseFloat(String(val)),
+        }
+      })
+
+      // Calculate median interval for gap detection (8.0-C)
+      medianIntervalMs = calculateMedianInterval(rawPoints)
+
+      // Insert gap markers where ESP was offline
+      dataBuffer.value = insertGapMarkers(rawPoints, medianIntervalMs)
     } else {
       dataBuffer.value = []
+      medianIntervalMs = 0
+    }
+
+    // Extract stats (8.0-D) — stats are nested in response.stats
+    if (statsResponse?.stats && typeof statsResponse.stats.avg_value === 'number') {
+      stats.value = {
+        min: statsResponse.stats.min_value ?? 0,
+        max: statsResponse.stats.max_value ?? 0,
+        avg: statsResponse.stats.avg_value,
+        stdDev: statsResponse.stats.std_dev ?? 0,
+        count: statsResponse.stats.reading_count ?? dataBuffer.value.length,
+      }
+    } else {
+      stats.value = null
     }
   } catch (err: any) {
     error.value = err?.response?.data?.detail || 'Daten konnten nicht geladen werden'
     dataBuffer.value = []
+    stats.value = null
   } finally {
     loading.value = false
   }
@@ -134,33 +234,67 @@ async function loadData() {
 
 onMounted(loadData)
 
-watch(selectedRange, loadData)
+watch(selectedRange, () => {
+  isZoomed.value = false
+  loadData()
+})
 
 // Watch for live sensor data updates and append
+// Filter by sensor_type to avoid cross-updates on multi-value sensors (e.g., SHT31 temp vs humidity)
 watch(
   () => {
     const device = espStore.devices.find(d => espStore.getDeviceId(d) === props.espId)
     const sensors = (device?.sensors as any[]) || []
-    const sensor = sensors.find(s => s.gpio === props.gpio)
+    const sensor = sensors.find(s => s.gpio === props.gpio && s.sensor_type === props.sensorType)
     return sensor?.last_read
   },
   () => {
     const device = espStore.devices.find(d => espStore.getDeviceId(d) === props.espId)
     const sensors = (device?.sensors as any[]) || []
-    const sensor = sensors.find(s => s.gpio === props.gpio)
+    const sensor = sensors.find(s => s.gpio === props.gpio && s.sensor_type === props.sensorType)
     if (sensor && typeof sensor.raw_value === 'number') {
-      const newPoint: DataPoint = {
-        timestamp: new Date(sensor.last_read || Date.now()),
-        value: sensor.raw_value,
-      }
-      // Append and trim old data
+      const newTimestamp = new Date(sensor.last_read || Date.now())
+      const newValue = sensor.raw_value
+
+      // Gap check for live append (8.0-C)
+      const currentBuffer = dataBuffer.value
       const maxPoints = selectedRange.value === '7d' ? 2000 : 1000
-      const newBuffer = [...dataBuffer.value, newPoint]
+      const newBuffer = [...currentBuffer]
+
+      if (newBuffer.length > 0 && medianIntervalMs > 0) {
+        const lastPoint = newBuffer[newBuffer.length - 1]
+        if (lastPoint.value !== null) {
+          const timeDiff = newTimestamp.getTime() - lastPoint.timestamp.getTime()
+          if (timeDiff > medianIntervalMs * GAP_THRESHOLD_MULTIPLIER) {
+            newBuffer.push({ timestamp: new Date(lastPoint.timestamp.getTime() + 1), value: null })
+          }
+        }
+      }
+
+      newBuffer.push({ timestamp: newTimestamp, value: newValue })
       if (newBuffer.length > maxPoints) newBuffer.shift()
       dataBuffer.value = newBuffer
     }
   }
 )
+
+// =============================================================================
+// Zoom Controls (8.0-A)
+// =============================================================================
+function resetZoom() {
+  const chart = chartRef.value?.chart as any
+  if (chart?.resetZoom) {
+    chart.resetZoom()
+    isZoomed.value = false
+  }
+}
+
+// =============================================================================
+// Format helper (8.0-D)
+// =============================================================================
+function formatStatValue(val: number): string {
+  return val.toFixed(2).replace('.', ',')
+}
 
 // =============================================================================
 // Chart Configuration
@@ -176,6 +310,7 @@ const chartData = computed(() => ({
     pointHitRadius: 8,
     tension: 0.3,
     fill: true,
+    spanGaps: false, // Break line at null values (8.0-C)
   }],
 }))
 
@@ -193,7 +328,7 @@ const chartOptions = computed(() => {
         borderDash: [4, 4],
         label: {
           display: true,
-          content: `Alarm ↓ ${props.thresholds.alarmLow}`,
+          content: `Alarm \u2193 ${props.thresholds.alarmLow}`,
           position: 'start',
           font: { size: 9, family: 'JetBrains Mono' },
           color: 'rgba(239, 68, 68, 0.8)',
@@ -234,13 +369,34 @@ const chartOptions = computed(() => {
         borderDash: [4, 4],
         label: {
           display: true,
-          content: `Alarm ↑ ${props.thresholds.alarmHigh}`,
+          content: `Alarm \u2191 ${props.thresholds.alarmHigh}`,
           position: 'start',
           font: { size: 9, family: 'JetBrains Mono' },
           color: 'rgba(239, 68, 68, 0.8)',
           backgroundColor: 'transparent',
         },
       }
+    }
+  }
+
+  // Stats Avg annotation line (8.0-D) — subtler than thresholds
+  if (stats.value) {
+    annotations.avgLine = {
+      type: 'line',
+      yMin: stats.value.avg,
+      yMax: stats.value.avg,
+      borderColor: 'rgba(176, 176, 192, 0.4)',
+      borderWidth: 1,
+      borderDash: [6, 3],
+      label: {
+        display: true,
+        content: `Avg: ${formatStatValue(stats.value.avg)}${props.unit ? ' ' + props.unit : ''}`,
+        position: 'end',
+        font: { size: 9, family: 'JetBrains Mono' },
+        color: 'rgba(176, 176, 192, 0.7)',
+        backgroundColor: 'rgba(10, 10, 15, 0.6)',
+        padding: { top: 2, bottom: 2, left: 4, right: 4 },
+      },
     }
   }
 
@@ -261,22 +417,51 @@ const chartOptions = computed(() => {
         bodyColor: tokens.textPrimary,
         padding: 8,
         callbacks: {
-          label: (ctx: any) => `${ctx.parsed.y?.toFixed(2)}${props.unit ? ' ' + props.unit : ''}`,
+          label: (ctx: any) => {
+            if (ctx.parsed.y == null) return ''
+            return `${ctx.parsed.y?.toFixed(2)}${props.unit ? ' ' + props.unit : ''}`
+          },
         },
       },
       annotation: {
         annotations,
+      },
+      // Zoom/Pan (8.0-A)
+      zoom: {
+        pan: {
+          enabled: true,
+          mode: 'x' as const,
+        },
+        zoom: {
+          wheel: {
+            enabled: true,
+          },
+          pinch: {
+            enabled: true,
+          },
+          mode: 'x' as const,
+          onZoom: () => { isZoomed.value = true },
+        },
       },
     },
     scales: {
       x: {
         type: 'time' as const,
         display: true,
+        time: {
+          displayFormats: {
+            minute: 'HH:mm',
+            hour: 'HH:mm',
+            day: 'dd.MM.',
+          },
+        },
         grid: { display: true, color: 'rgba(29, 29, 42, 0.8)' },
         ticks: {
           color: tokens.textMuted,
           font: { family: 'JetBrains Mono', size: 10 },
           maxTicksLimit: 8,
+          autoSkip: true,
+          maxRotation: 0,
         },
         border: { display: false },
       },
@@ -309,9 +494,19 @@ const chartOptions = computed(() => {
           {{ range }}
         </button>
       </div>
-      <span v-if="dataBuffer.length > 0" class="historical-chart__count">
-        {{ dataBuffer.length }} Datenpunkte
-      </span>
+      <div class="historical-chart__header-right">
+        <button
+          v-if="isZoomed"
+          class="historical-chart__reset-zoom"
+          title="Zoom zurücksetzen"
+          @click="resetZoom"
+        >
+          <RotateCcw :size="14" />
+        </button>
+        <span v-if="dataBuffer.length > 0" class="historical-chart__count">
+          {{ dataBuffer.length }} Datenpunkte
+        </span>
+      </div>
     </div>
 
     <!-- Chart -->
@@ -323,9 +518,26 @@ const chartOptions = computed(() => {
       </div>
       <Line
         v-else
+        ref="chartRef"
         :data="chartData"
         :options="chartOptions"
       />
+    </div>
+
+    <!-- Stats Overlay (8.0-D) -->
+    <div v-if="stats && !loading" class="historical-chart__stats">
+      <span class="historical-chart__stat">
+        Min: {{ formatStatValue(stats.min) }}{{ unit ? ' ' + unit : '' }}
+      </span>
+      <span class="historical-chart__stat">
+        Avg: {{ formatStatValue(stats.avg) }}{{ unit ? ' ' + unit : '' }}
+      </span>
+      <span class="historical-chart__stat">
+        Max: {{ formatStatValue(stats.max) }}{{ unit ? ' ' + unit : '' }}
+      </span>
+      <span class="historical-chart__stat historical-chart__stat--muted">
+        &sigma; {{ formatStatValue(stats.stdDev) }} &middot; {{ stats.count }} Punkte
+      </span>
     </div>
   </div>
 </template>
@@ -341,6 +553,12 @@ const chartOptions = computed(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.historical-chart__header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .historical-chart__range-buttons {
@@ -379,6 +597,25 @@ const chartOptions = computed(() => {
   font-family: var(--font-mono);
 }
 
+.historical-chart__reset-zoom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(133, 133, 160, 0.3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.historical-chart__reset-zoom:hover {
+  border-color: var(--color-iridescent-1);
+  color: var(--color-iridescent-1);
+}
+
 .historical-chart__canvas {
   position: relative;
   width: 100%;
@@ -397,5 +634,27 @@ const chartOptions = computed(() => {
 
 .historical-chart__error {
   color: var(--color-status-alarm);
+}
+
+/* Stats overlay (8.0-D) */
+.historical-chart__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+}
+
+.historical-chart__stat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.historical-chart__stat--muted {
+  color: var(--color-text-muted);
+  margin-left: auto;
 }
 </style>

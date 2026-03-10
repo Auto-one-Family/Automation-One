@@ -430,7 +430,10 @@ class SensorData(Base):
     # For live MQTT data esp_id is always set, so this is acceptable.
     __table_args__ = (
         UniqueConstraint(
-            "esp_id", "gpio", "sensor_type", "timestamp",
+            "esp_id",
+            "gpio",
+            "sensor_type",
+            "timestamp",
             name="uq_sensor_data_esp_gpio_type_timestamp",
         ),
         Index("idx_esp_gpio_timestamp", "esp_id", "gpio", "timestamp"),

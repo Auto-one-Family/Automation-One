@@ -50,6 +50,8 @@ export interface UseDashboardWidgetsOptions {
   showWidgetHeader?: boolean
   /** Called when gear button is clicked */
   onConfigClick?: (widgetId: string, widgetType: string) => void
+  /** Called when remove (X) button is clicked */
+  onRemoveClick?: (widgetId: string) => void
   /** Called when widget emits onUpdate:config */
   onConfigUpdate?: (widgetId: string, newConfig: Record<string, any>) => void
   /** Disable interactive controls (e.g. actuator toggle) in monitor context. Default: false */
@@ -111,6 +113,9 @@ const WIDGET_DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
 /** Gear icon SVG (inline, no external dependency) */
 const GEAR_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>'
 
+/** X (close/remove) icon SVG (inline, Lucide X) */
+const REMOVE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>'
+
 // ─── Composable ──────────────────────────────────────────────────────────────
 
 /**
@@ -123,6 +128,7 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
     showConfigButton = true,
     showWidgetHeader = true,
     onConfigClick,
+    onRemoveClick,
     onConfigUpdate,
     readOnly = false,
   } = options
@@ -174,6 +180,19 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
           onConfigClick(widgetId, type)
         })
         header.appendChild(gearBtn)
+      }
+
+      // Remove (X) button (only when onRemoveClick callback is provided)
+      if (onRemoveClick) {
+        const removeBtn = document.createElement('button')
+        removeBtn.className = 'dashboard-widget__remove-btn'
+        removeBtn.title = 'Widget entfernen'
+        removeBtn.innerHTML = REMOVE_SVG
+        removeBtn.addEventListener('click', (e) => {
+          e.stopPropagation()
+          onRemoveClick(widgetId)
+        })
+        header.appendChild(removeBtn)
       }
 
       container.appendChild(header)

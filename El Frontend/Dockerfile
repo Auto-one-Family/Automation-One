@@ -19,6 +19,9 @@
 # ============================================
 FROM node:20-alpine AS development
 
+# Fix CVE-2026-22184 (zlib buffer overflow) — update alpine packages
+RUN apk update && apk upgrade --no-cache
+
 WORKDIR /app
 
 # Install dependencies first (for better caching)
