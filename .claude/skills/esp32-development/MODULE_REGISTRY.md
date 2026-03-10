@@ -564,6 +564,38 @@ extern OneWireBusManager& oneWireBusManager;
 
 ---
 
+## 14. ProvisionManager
+
+**Pfad:** `src/services/provisioning/provision_manager.h/.cpp`
+
+**Dependencies:** ConfigManager, WebServer, DNSServer, WiFi
+```cpp
+class ProvisionManager {
+public:
+    static ProvisionManager& getInstance();
+
+    bool begin();
+    bool needsProvisioning() const;
+
+    // AP-Mode: WIFI_AP (STA trennt)
+    bool startAPMode();
+
+    // AP+STA-Mode: Paralleler Reconnect bei MQTT-Disconnect, Config bleibt
+    bool startAPModeForReconfig();
+
+    bool waitForConfig(uint32_t timeout_ms);
+    void stop();
+    void loop();
+
+    bool isConfigReceived() const;
+    // ... weitere Getter
+};
+```
+
+**Verwendung:** `startAPMode()` fuer initiale Konfiguration; `startAPModeForReconfig()` bei MQTT-Disconnect (main.cpp setup/loop).
+
+---
+
 ## Sensor-Registry
 
 **Pfad:** `src/models/sensor_registry.cpp`

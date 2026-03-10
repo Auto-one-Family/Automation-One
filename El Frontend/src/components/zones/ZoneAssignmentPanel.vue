@@ -211,6 +211,7 @@ interface Props {
   currentMasterZoneId?: string
   isMock?: boolean  // Whether this is a Mock ESP (no server API call needed)
   compact?: boolean // Compact mode without Card wrapper (for embedding in popovers)
+  subzoneStrategy?: 'transfer' | 'copy' | 'reset' // Strategy for subzone handling on zone switch
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -221,6 +222,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'zone-updated', zoneData: { zone_id: string; zone_name?: string; master_zone_id?: string }): void
   (e: 'zone-error', error: string): void
+  (e: 'zone-before-save', zoneData: { zone_id: string; zone_name: string }): void
 }>()
 
 // =============================================================================
@@ -302,6 +304,17 @@ watch(() => props.currentZoneId, (newZoneId) => {
   }
 })
 
+// Track whether we need to wait for strategy confirmation
+const pendingSave = ref(false)
+
+// Watch for subzoneStrategy changes — resume save when strategy is provided
+watch(() => props.subzoneStrategy, (strategy) => {
+  if (strategy && pendingSave.value) {
+    pendingSave.value = false
+    executeSaveZone()
+  }
+})
+
 async function saveZone() {
   if (!zoneInput.value) return
 
@@ -313,6 +326,23 @@ async function saveZone() {
     assignmentState.value = 'error'
     return
   }
+
+  // If device already has a different zone and no strategy is set, ask parent for strategy
+  const isZoneChange = props.currentZoneId && zoneId !== props.currentZoneId
+  if (isZoneChange && !props.subzoneStrategy) {
+    pendingSave.value = true
+    emit('zone-before-save', { zone_id: zoneId, zone_name: zoneName })
+    return
+  }
+
+  await executeSaveZone()
+}
+
+async function executeSaveZone() {
+  const zoneName = zoneInput.value
+  const zoneId = generatedZoneId.value
+
+  if (!zoneId) return
 
   // Clear any existing timeout
   if (ackTimeoutId.value) {
@@ -326,13 +356,17 @@ async function saveZone() {
 
   try {
     // Build request with generated zone_id and user-provided zone_name
-    const request: { zone_id: string; zone_name?: string; master_zone_id?: string } = {
+    const request: { zone_id: string; zone_name?: string; master_zone_id?: string; subzone_strategy?: 'transfer' | 'copy' | 'reset' } = {
       zone_id: zoneId,        // Technical ID (lowercase, no spaces)
       zone_name: zoneName,     // Human-readable name
     }
     // Only add master_zone_id if it exists
     if (props.currentMasterZoneId) {
       request.master_zone_id = props.currentMasterZoneId
+    }
+    // Add subzone strategy if provided (zone switch scenario)
+    if (props.subzoneStrategy) {
+      request.subzone_strategy = props.subzoneStrategy
     }
 
     log.debug('Sending request', request)

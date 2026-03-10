@@ -212,6 +212,33 @@ class SensorConfig(Base, TimestampMixin):
     )
 
     # =========================================================================
+    # MULTI-ZONE DEVICE SCOPE (T13-R2)
+    # =========================================================================
+    # Allows sensors to serve multiple zones (shared equipment, mobile devices).
+
+    device_scope: Mapped[str] = mapped_column(
+        String(20),
+        default="zone_local",
+        server_default="zone_local",
+        nullable=False,
+        doc="Device scope: 'zone_local' (default), 'multi_zone', 'mobile'",
+    )
+
+    assigned_zones: Mapped[Optional[list]] = mapped_column(
+        JSON,
+        default=list,
+        nullable=True,
+        doc="JSON list of zone_ids this sensor can serve (for multi_zone/mobile)",
+    )
+
+    assigned_subzones: Mapped[Optional[list]] = mapped_column(
+        JSON,
+        default=list,
+        nullable=True,
+        doc="JSON list of subzone_ids for static multi-zone assignment",
+    )
+
+    # =========================================================================
     # CONFIG STATUS (Phase 4 - Detailed Config Feedback)
     # =========================================================================
     # Tracks the configuration status from ESP32 config_response.
@@ -398,7 +425,14 @@ class SensorData(Base):
     )
 
     # Time-Series Optimized Indices
+    # NOTE: uq_sensor_data_esp_gpio_type_timestamp does not cover orphaned rows
+    # with esp_id=NULL after device soft-delete (NULL != NULL in UNIQUE constraints).
+    # For live MQTT data esp_id is always set, so this is acceptable.
     __table_args__ = (
+        UniqueConstraint(
+            "esp_id", "gpio", "sensor_type", "timestamp",
+            name="uq_sensor_data_esp_gpio_type_timestamp",
+        ),
         Index("idx_esp_gpio_timestamp", "esp_id", "gpio", "timestamp"),
         Index("idx_sensor_type_timestamp", "sensor_type", "timestamp"),
         Index("idx_timestamp_desc", "timestamp", postgresql_ops={"timestamp": "DESC"}),

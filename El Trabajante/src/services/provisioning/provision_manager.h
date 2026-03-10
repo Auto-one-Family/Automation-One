@@ -73,6 +73,14 @@ public:
    * @return true wenn erfolgreich
    */
   bool startAPMode();
+
+  /**
+   * Startet AP+STA-Mode (paralleler Reconnect) + HTTP-Server
+   * Nutzt WIFI_AP_STA — Portal (AP) und Reconnect-Versuche (STA) laufen parallel.
+   * Formular wird aus bestehender Config vorausgefuellt (handleRoot).
+   * @return true wenn erfolgreich
+   */
+  bool startAPModeForReconfig();
   
   /**
    * Blockiert bis Config empfangen oder Timeout
@@ -172,9 +180,10 @@ private:
   
   /**
    * Startet WiFi Access Point
+   * @param ap_sta_mode true = WIFI_AP_STA (STA bleibt fuer parallelen Reconnect)
    * @return true wenn erfolgreich
    */
-  bool startWiFiAP();
+  bool startWiFiAP(bool ap_sta_mode = false);
   
   /**
    * Startet HTTP-Server auf Port 80

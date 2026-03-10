@@ -209,10 +209,12 @@ async def remove_subzone(
     service = SubzoneService(esp_repo=esp_repo, session=session, publisher=publisher)
 
     try:
-        return await service.remove_subzone(
+        result = await service.remove_subzone(
             device_id=esp_id,
             subzone_id=subzone_id,
         )
+        await session.commit()
+        return result
     except ValueError as e:
         error_msg = str(e)
         if "not found" in error_msg:
@@ -437,11 +439,13 @@ async def enable_safe_mode(
     service = SubzoneService(esp_repo=esp_repo, session=session, publisher=publisher)
 
     try:
-        return await service.enable_safe_mode(
+        result = await service.enable_safe_mode(
             device_id=esp_id,
             subzone_id=subzone_id,
             reason=request.reason,
         )
+        await session.commit()
+        return result
     except ValueError as e:
         error_msg = str(e)
         if "not found" in error_msg:
@@ -504,11 +508,13 @@ async def disable_safe_mode(
     service = SubzoneService(esp_repo=esp_repo, session=session, publisher=publisher)
 
     try:
-        return await service.disable_safe_mode(
+        result = await service.disable_safe_mode(
             device_id=esp_id,
             subzone_id=subzone_id,
             reason=request.reason,
         )
+        await session.commit()
+        return result
     except ValueError as e:
         error_msg = str(e)
         if "not found" in error_msg:

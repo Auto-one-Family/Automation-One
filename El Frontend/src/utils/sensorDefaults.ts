@@ -878,6 +878,54 @@ export function getValueConfigForSensorType(sensorType: string): MultiValueConfi
 }
 
 // =============================================================================
+// DISPLAY NAME (Multi-Value Disambiguation)
+// =============================================================================
+
+/**
+ * Get display name for a sensor, differentiating multi-value siblings.
+ *
+ * Multi-value sensors (SHT31, BMP280, BME280) create multiple sensor_configs
+ * with the same sensor_name (e.g. both "Temp&Hum"). This function appends
+ * the sub-type label to disambiguate.
+ *
+ * Fallback chain:
+ * 1. name + sub-type suffix (for multi-value sub-types): "Temp&Hum (Temperatur)"
+ * 2. name as-is (for single-value sensors): "Substrat"
+ * 3. SENSOR_TYPE_CONFIG label (when no name set): "Temperatur"
+ *
+ * @example
+ * getSensorDisplayName({ sensor_type: 'sht31_temp', name: 'Temp&Hum' })
+ * // => "Temp&Hum (Temperatur)"
+ *
+ * getSensorDisplayName({ sensor_type: 'sht31_humidity', name: 'Temp&Hum' })
+ * // => "Temp&Hum (Luftfeuchte)"
+ *
+ * getSensorDisplayName({ sensor_type: 'ds18b20', name: 'Substrat' })
+ * // => "Substrat"
+ *
+ * getSensorDisplayName({ sensor_type: 'sht31_temp', name: null })
+ * // => "Temperatur"
+ */
+export function getSensorDisplayName(sensor: { sensor_type: string; name?: string | null }): string {
+  const typeConfig = SENSOR_TYPE_CONFIG[sensor.sensor_type]
+  const typeLabel = typeConfig?.label ?? sensor.sensor_type
+
+  // No name set → type label
+  if (!sensor.name) {
+    return typeLabel
+  }
+
+  // Multi-value sub-type → append sub-type label for disambiguation
+  const valueConfig = getValueConfigForSensorType(sensor.sensor_type)
+  if (valueConfig) {
+    return `${sensor.name} (${valueConfig.label})`
+  }
+
+  // Single-value sensor → name as-is
+  return sensor.name
+}
+
+// =============================================================================
 // INTERFACE TYPE INFERENCE
 // =============================================================================
 

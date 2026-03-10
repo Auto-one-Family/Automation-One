@@ -10,7 +10,7 @@
  * - Iridescent top border for healthy zones
  * - Slim header: Zone-Name + ESP-Count + Online-Status + Alerts + Overflow Menu
  * - Inline zone name editing (pencil icon)
- * - Subzone grouping by device.subzone_id
+ * - Subzone chips from device.subzones[] (T14-Fix-F: hydrated at page load)
  * - VueDraggable for cross-zone device drag-drop
  * - Zone management: rename, delete via context menu
  */
@@ -29,7 +29,8 @@ import { EmptyState } from '@/shared/design/patterns'
 import DeviceMiniCard from './DeviceMiniCard.vue'
 import { aggregateZoneSensors, formatAggregatedValue } from '@/utils/sensorDefaults'
 import { getESPStatus } from '@/composables/useESPStatus'
-import type { ZoneContextSummary } from '@/types'
+import type { ZoneContextSummary, ZoneEntity } from '@/types'
+import { Settings } from 'lucide-vue-next'
 
 
 interface Props {
@@ -38,11 +39,14 @@ interface Props {
   devices: ESPDevice[]
   isDropTarget?: boolean
   isExpanded?: boolean
+  zoneEntity?: ZoneEntity
+  isArchived?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   isDropTarget: false,
   isExpanded: true,
+  isArchived: false,
 })
 
 const emit = defineEmits<{
@@ -55,6 +59,7 @@ const emit = defineEmits<{
   (e: 'delete', zoneId: string): void
   (e: 'device-delete', deviceId: string): void
   (e: 'monitor-nav', device: ESPDevice): void
+  (e: 'zone-settings', zoneId: string): void
 }>()
 
 const espStore = useEspStore()
@@ -71,7 +76,7 @@ const activeSubzoneFilter = ref<string | null>(null)
 const filteredDevices = computed(() => {
   if (!activeSubzoneFilter.value) return props.devices
   return props.devices.filter(d =>
-    (d.subzone_id || null) === activeSubzoneFilter.value
+    d.subzones?.some(sz => sz.subzone_id === activeSubzoneFilter.value) ?? false
   )
 })
 
@@ -157,13 +162,46 @@ function toggleSubzoneFilter(subzoneId: string | null) {
   }
 }
 
-/** Distinct subzones with at least one device */
-const distinctSubzones = computed(() => {
-  return subzoneGroups.value.filter(g => g.subzoneId !== null)
+// ── Subzone aggregation from device.subzones[] (T14-Fix-F) ──────────────
+interface AggregatedSubzone {
+  subzoneId: string
+  subzoneName: string
+  sensorCount: number
+  actuatorCount: number
+  devices: ESPDevice[]
+}
+
+/** Distinct subzones aggregated from all device.subzones[] arrays */
+const distinctSubzones = computed((): AggregatedSubzone[] => {
+  const subzoneMap = new Map<string, AggregatedSubzone>()
+
+  for (const device of props.devices) {
+    if (!device.subzones?.length) continue
+    for (const sz of device.subzones) {
+      if (!subzoneMap.has(sz.subzone_id)) {
+        subzoneMap.set(sz.subzone_id, {
+          subzoneId: sz.subzone_id,
+          subzoneName: sz.subzone_name,
+          sensorCount: 0,
+          actuatorCount: 0,
+          devices: [],
+        })
+      }
+      const entry = subzoneMap.get(sz.subzone_id)!
+      entry.sensorCount += sz.sensor_count
+      entry.actuatorCount += sz.actuator_count
+      if (!entry.devices.includes(device)) {
+        entry.devices.push(device)
+      }
+    }
+  }
+
+  return Array.from(subzoneMap.values())
+    .sort((a, b) => a.subzoneName.localeCompare(b.subzoneName))
 })
 
-/** Subzone status dot color */
-function getSubzoneStatusColor(group: SubzoneGroup): string {
+/** Subzone status dot color based on device online status */
+function getSubzoneStatusColor(group: AggregatedSubzone): string {
   const online = group.devices.filter(d => {
     const s = getESPStatus(d)
     return s === 'online' || s === 'stale'
@@ -172,38 +210,6 @@ function getSubzoneStatusColor(group: SubzoneGroup): string {
   if (online < group.devices.length) return 'var(--color-warning)'
   return 'var(--color-success)'
 }
-
-// ── Subzone Grouping ─────────────────────────────────────────────────────
-interface SubzoneGroup {
-  subzoneId: string | null
-  subzoneName: string
-  devices: ESPDevice[]
-}
-
-const subzoneGroups = computed((): SubzoneGroup[] => {
-  const groups = new Map<string | null, SubzoneGroup>()
-
-  for (const device of props.devices) {
-    const szId = device.subzone_id || null
-    if (!groups.has(szId)) {
-      groups.set(szId, {
-        subzoneId: szId,
-        subzoneName: device.subzone_name || (szId ? szId : ''),
-        devices: [],
-      })
-    }
-    groups.get(szId)!.devices.push(device)
-  }
-
-  // Sort: named subzones first, then unassigned
-  const result = Array.from(groups.values())
-  result.sort((a, b) => {
-    if (a.subzoneId === null) return 1
-    if (b.subzoneId === null) return -1
-    return a.subzoneName.localeCompare(b.subzoneName)
-  })
-  return result
-})
 
 // ── Inline Rename ────────────────────────────────────────────────────────
 const isRenaming = ref(false)
@@ -332,7 +338,8 @@ function handleDragEnd() {
     :class="[
       statusVariant,
       {
-        'zone-plate--drop-target': isDropTarget || dragStore.isDraggingEspCard,
+        'zone-plate--drop-target': !isArchived && (isDropTarget || dragStore.isDraggingEspCard),
+        'zone-plate--archived': isArchived,
       },
     ]"
     role="region"
@@ -369,7 +376,7 @@ function handleDragEnd() {
             />
           </template>
           <template v-else>
-            <h3 class="zone-plate__title">{{ zoneName }}</h3>
+            <h3 class="zone-plate__title" @click.stop="startRename" title="Klicken zum Umbenennen">{{ zoneName }}</h3>
             <button
               class="zone-plate__edit-btn"
               title="Zone umbenennen"
@@ -408,6 +415,19 @@ function handleDragEnd() {
             ⚠ {{ stats.warnings }}
           </span>
 
+          <!-- Archived badge -->
+          <span v-if="isArchived" class="zone-plate__archived-badge">Archiv</span>
+
+          <!-- Settings button -->
+          <button
+            v-if="zoneEntity"
+            class="zone-plate__settings-btn"
+            title="Zone-Einstellungen"
+            @click.stop="emit('zone-settings', zoneId)"
+          >
+            <Settings class="zone-plate__settings-icon" />
+          </button>
+
           <!-- Monitor quick-link -->
           <RouterLink
             :to="{ name: 'monitor-zone', params: { zoneId: zoneId } }"
@@ -429,8 +449,8 @@ function handleDragEnd() {
           </button>
         </div>
 
-        <!-- B3: Subzone chips (with CRUD) -->
-        <div v-if="distinctSubzones.length > 0 || subzoneCRUD.creatingSubzoneForZone.value === zoneId" class="zone-plate__subzone-chips" @click.stop>
+        <!-- B3: Subzone chips (with CRUD — disabled for archived zones) -->
+        <div v-if="!isArchived && (distinctSubzones.length > 0 || subzoneCRUD.creatingSubzoneForZone.value === zoneId)" class="zone-plate__subzone-chips" @click.stop>
           <template v-for="sz in distinctSubzones" :key="sz.subzoneId ?? '__none'">
             <!-- Inline rename mode -->
             <div v-if="subzoneCRUD.editingSubzoneId.value === sz.subzoneId" class="zone-plate__subzone-chip zone-plate__subzone-chip--editing">
@@ -460,6 +480,9 @@ function handleDragEnd() {
                   :style="{ backgroundColor: getSubzoneStatusColor(sz) }"
                 />
                 {{ sz.subzoneName }}
+                <span v-if="sz.sensorCount > 0 || sz.actuatorCount > 0" class="zone-plate__subzone-chip-count">
+                  {{ sz.sensorCount }}S{{ sz.actuatorCount > 0 ? ` ${sz.actuatorCount}A` : '' }}
+                </span>
               </button>
               <div class="zone-plate__subzone-hover-actions">
                 <button class="zone-plate__subzone-action" title="Umbenennen" @click.stop="subzoneCRUD.startRenameSubzone(sz.subzoneId!, sz.subzoneName)">
@@ -501,15 +524,16 @@ function handleDragEnd() {
         </div>
       </template>
 
-      <!-- Devices inside VueDraggable for cross-zone drag-drop -->
+      <!-- Devices inside VueDraggable for cross-zone drag-drop (disabled for archived zones) -->
       <VueDraggable
         v-model="localDevices"
         class="zone-plate__devices"
-        group="esp-devices"
+        :group="isArchived ? undefined : 'esp-devices'"
         :animation="150"
         handle=".esp-drag-handle"
         :force-fallback="true"
         :fallback-on-body="true"
+        :disabled="isArchived"
         ghost-class="zone-item--ghost"
         chosen-class="zone-item--chosen"
         drag-class="zone-item--drag"
@@ -671,7 +695,15 @@ function handleDragEnd() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: color var(--transition-fast);
+  cursor: text;
+  transition: color var(--transition-fast), text-decoration-color var(--transition-fast);
+}
+
+.zone-plate__title:hover {
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 4px;
+  text-decoration-color: var(--color-text-muted);
 }
 
 /* Inline rename input */
@@ -688,20 +720,20 @@ function handleDragEnd() {
   max-width: 250px;
 }
 
-/* Pencil edit button (hover only) */
+/* Pencil edit button (subtle on desktop, visible on touch) */
 .zone-plate__edit-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  min-width: 44px;
+  min-height: 44px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
   flex-shrink: 0;
-  opacity: 0;
+  opacity: 0.4;
   transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
   padding: 0;
 }
@@ -815,6 +847,14 @@ function handleDragEnd() {
   flex-shrink: 0;
 }
 
+.zone-plate__subzone-chip-count {
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  opacity: 0.8;
+  margin-left: 1px;
+}
+
 /* Subzone chip wrapper (chip + hover actions) */
 .zone-plate__subzone-chip-wrap {
   position: relative;
@@ -826,12 +866,13 @@ function handleDragEnd() {
   display: flex;
   align-items: center;
   gap: 1px;
-  opacity: 0;
+  opacity: 0.4;
   transition: opacity var(--transition-fast);
   margin-left: -2px;
 }
 
-.zone-plate__subzone-chip-wrap:hover .zone-plate__subzone-hover-actions {
+.zone-plate__subzone-chip-wrap:hover .zone-plate__subzone-hover-actions,
+.zone-plate__subzone-chip-wrap:focus-within .zone-plate__subzone-hover-actions {
   opacity: 1;
 }
 
@@ -839,8 +880,8 @@ function handleDragEnd() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  min-width: 32px;
+  min-height: 32px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -917,18 +958,21 @@ function handleDragEnd() {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  min-width: 44px;
+  min-height: 44px;
   padding: 2px var(--space-1);
   border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   flex-shrink: 0;
   transition: color var(--transition-fast), background var(--transition-fast), opacity var(--transition-fast);
-  opacity: 0;
+  opacity: 0.4;
   text-decoration: none;
   font-size: 10px;
   font-weight: 500;
 }
 
-.zone-plate__header:hover .zone-plate__monitor-link {
+.zone-plate__header:hover .zone-plate__monitor-link,
+.zone-plate__header:focus-within .zone-plate__monitor-link {
   opacity: 1;
 }
 
@@ -958,8 +1002,8 @@ function handleDragEnd() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  min-width: 44px;
+  min-height: 44px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -1061,10 +1105,11 @@ function handleDragEnd() {
 
 .zone-item--chosen {
   transform: scale(1.02);
+  transition: transform 150ms ease-out, box-shadow 150ms ease-out;
 }
 
 .zone-item--chosen > * {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3), 0 0 0 2px var(--color-iridescent-1) !important;
 }
 
 .zone-item--drag {
@@ -1077,6 +1122,64 @@ function handleDragEnd() {
   box-shadow: 0 12px 32px rgba(96, 165, 250, 0.3) !important;
 }
 
+/* ═══════ Archived state ═══════ */
+.zone-plate--archived {
+  opacity: 0.6;
+  border-style: dashed;
+  border-top: 1px dashed var(--glass-border);
+}
+
+.zone-plate--archived .zone-plate__title {
+  color: var(--color-text-muted);
+}
+
+/* ═══════ Archived badge ═══════ */
+.zone-plate__archived-badge {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.1);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  flex-shrink: 0;
+}
+
+/* ═══════ Settings button ═══════ */
+.zone-plate__settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.4;
+  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+  padding: 0;
+}
+
+.zone-plate__header:hover .zone-plate__settings-btn,
+.zone-plate__header:focus-within .zone-plate__settings-btn {
+  opacity: 1;
+}
+
+.zone-plate__settings-btn:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.zone-plate__settings-icon {
+  width: 14px;
+  height: 14px;
+}
+
 @media (max-width: 640px) {
   .zone-plate__header {
     flex-wrap: wrap;
@@ -1084,6 +1187,16 @@ function handleDragEnd() {
 
   .zone-plate__stats {
     margin-left: 0;
+  }
+}
+
+/* Touch devices: all interactive elements fully visible */
+@media (hover: none) {
+  .zone-plate__edit-btn,
+  .zone-plate__settings-btn,
+  .zone-plate__monitor-link,
+  .zone-plate__subzone-hover-actions {
+    opacity: 1;
   }
 }
 </style>

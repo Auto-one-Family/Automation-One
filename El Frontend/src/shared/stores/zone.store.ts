@@ -1,21 +1,27 @@
 /**
  * Zone Store
  *
- * Handles zone and subzone assignment WebSocket events.
- * Mirrors server-side zone_ack_handler.py and subzone_ack_handler.py.
+ * Handles zone entity CRUD (T13-R1) and WebSocket events for zone/subzone
+ * assignment and device scope/context changes (T13-R2).
  *
  * Server-centric architecture:
  * ESP32 → MQTT (kaiser/{esp_id}/zone/ack) → Server → WS (zone_assignment) → this store
  * ESP32 → MQTT (kaiser/{esp_id}/subzone/ack) → Server → WS (subzone_assignment) → this store
+ * Frontend → REST → Server → WS (device_scope_changed / device_context_changed) → this store
  *
  * Cross-store dependency: Uses useEspStore() for devices state.
  * The WS dispatcher in esp.store.ts delegates zone events here.
  */
 
 import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
 import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/logger'
+import { zonesApi } from '@/api/zones'
 import type { ESPDevice } from '@/api/esp'
+import type {
+  ZoneEntity, ZoneEntityCreate, ZoneEntityUpdate, ZoneStatus,
+} from '@/types'
 
 const logger = createLogger('ZoneStore')
 
@@ -58,7 +64,77 @@ function findDeviceIndex(
 export const useZoneStore = defineStore('zone', () => {
 
   // =========================================================================
-  // Zone Assignment Handler
+  // Zone Entity State (T13-R1)
+  // =========================================================================
+
+  const zoneEntities = ref<ZoneEntity[]>([])
+  const isLoadingZones = ref(false)
+
+  // =========================================================================
+  // Zone Entity Getters
+  // =========================================================================
+
+  const activeZones = computed(() =>
+    zoneEntities.value.filter(z => z.status === 'active'),
+  )
+
+  const archivedZones = computed(() =>
+    zoneEntities.value.filter(z => z.status === 'archived'),
+  )
+
+  // =========================================================================
+  // Zone Entity Actions
+  // =========================================================================
+
+  async function fetchZoneEntities(status?: ZoneStatus): Promise<void> {
+    isLoadingZones.value = true
+    try {
+      const response = await zonesApi.listZoneEntities(status)
+      zoneEntities.value = response.zones
+    } catch (e) {
+      logger.error('Failed to fetch zone entities', e)
+    } finally {
+      isLoadingZones.value = false
+    }
+  }
+
+  async function createZone(data: ZoneEntityCreate): Promise<ZoneEntity> {
+    const zone = await zonesApi.createZoneEntity(data)
+    zoneEntities.value.push(zone)
+    return zone
+  }
+
+  async function updateZone(zoneId: string, data: ZoneEntityUpdate): Promise<void> {
+    const updated = await zonesApi.updateZoneEntity(zoneId, data)
+    const index = zoneEntities.value.findIndex(z => z.zone_id === zoneId)
+    if (index !== -1) {
+      zoneEntities.value[index] = updated
+    }
+  }
+
+  async function archiveZone(zoneId: string): Promise<void> {
+    const archived = await zonesApi.archiveZoneEntity(zoneId)
+    const index = zoneEntities.value.findIndex(z => z.zone_id === zoneId)
+    if (index !== -1) {
+      zoneEntities.value[index] = archived
+    }
+  }
+
+  async function reactivateZone(zoneId: string): Promise<void> {
+    const reactivated = await zonesApi.reactivateZoneEntity(zoneId)
+    const index = zoneEntities.value.findIndex(z => z.zone_id === zoneId)
+    if (index !== -1) {
+      zoneEntities.value[index] = reactivated
+    }
+  }
+
+  async function deleteZoneEntity(zoneId: string): Promise<void> {
+    await zonesApi.deleteZoneEntity(zoneId)
+    zoneEntities.value = zoneEntities.value.filter(z => z.zone_id !== zoneId)
+  }
+
+  // =========================================================================
+  // Zone Assignment Handler (existing)
   // =========================================================================
 
   /**
@@ -139,7 +215,7 @@ export const useZoneStore = defineStore('zone', () => {
   }
 
   // =========================================================================
-  // Subzone Assignment Handler
+  // Subzone Assignment Handler (existing)
   // =========================================================================
 
   /**
@@ -156,54 +232,110 @@ export const useZoneStore = defineStore('zone', () => {
    *   message?: string
    * }
    */
+  /**
+   * @returns true if devices should be refreshed (subzone_assigned or subzone_removed)
+   */
   function handleSubzoneAssignment(
     message: { data: Record<string, unknown> },
     devices: ESPDevice[],
     getDeviceId: (d: ESPDevice) => string,
-    setDevice: (index: number, device: ESPDevice) => void,
-  ): void {
+    _setDevice: (index: number, device: ESPDevice) => void,
+  ): boolean {
     const toast = useToast()
     const data = message.data as unknown as SubzoneAssignmentPayload
     const espId = data.esp_id || data.device_id
 
     if (!espId) {
       logger.warn('subzone_assignment missing esp_id')
-      return
+      return false
     }
 
     const deviceIndex = findDeviceIndex(devices, espId, getDeviceId)
     if (deviceIndex === -1) {
       logger.debug(`Subzone assignment for unknown device: ${espId}`)
-      return
+      return false
     }
 
     const device = devices[deviceIndex]
 
     if (data.status === 'subzone_assigned') {
-      const updates: Partial<ESPDevice> = {}
-      if (data.subzone_id !== undefined) updates.subzone_id = data.subzone_id
-
-      setDevice(deviceIndex, { ...device, ...updates })
-      logger.info(`Subzone confirmed: ${espId} → ${data.subzone_id} (reactivity triggered)`)
+      logger.info(`Subzone confirmed: ${espId} → ${data.subzone_id}`)
       toast.success(`Subzone zugewiesen: ${device.name || espId}`)
+      return true
     } else if (data.status === 'subzone_removed') {
-      setDevice(deviceIndex, {
-        ...device,
-        subzone_id: undefined,
-        subzone_name: undefined,
-      })
       logger.info(`Subzone removed: ${espId}`)
       toast.success(`Subzone entfernt: ${device.name || espId}`)
+      return true
     } else if (data.status === 'error') {
       logger.error(`Subzone assignment error for ${espId}: ${data.message}`)
       toast.error(data.message || 'Subzone-Zuweisung fehlgeschlagen')
     } else {
       logger.warn(`Unknown subzone_assignment status: ${data.status}`)
     }
+    return false
+  }
+
+  // =========================================================================
+  // Device Scope & Context WS Handlers (T13-R2)
+  // =========================================================================
+
+  /**
+   * Handle device_scope_changed WebSocket event.
+   * Triggered when a sensor/actuator's device_scope or assigned_zones change.
+   * Defensively refreshes ESP data via espStore.fetchAll().
+   */
+  function handleDeviceScopeChanged(message: { data: Record<string, unknown> }): void {
+    try {
+      const toast = useToast()
+      const data = message.data
+      const configType = data.config_type as string || 'device'
+      const espId = data.esp_id as string || ''
+
+      logger.info(`Device scope changed: ${configType} on ${espId}`, data)
+      toast.info(`Geräte-Scope aktualisiert${espId ? ` (${espId})` : ''}`)
+    } catch (e) {
+      logger.error('Error handling device_scope_changed', e)
+    }
+  }
+
+  /**
+   * Handle device_context_changed WebSocket event.
+   * Triggered when a sensor/actuator's active zone/subzone context changes.
+   * Defensively refreshes ESP data via espStore.fetchAll().
+   */
+  function handleDeviceContextChanged(message: { data: Record<string, unknown> }): void {
+    try {
+      const toast = useToast()
+      const data = message.data
+      const configType = data.config_type as string || 'device'
+      const activeZone = data.active_zone_id as string || ''
+
+      logger.info(`Device context changed: ${configType} → zone ${activeZone}`, data)
+      toast.info(`Geräte-Kontext aktualisiert${activeZone ? ` (Zone: ${activeZone})` : ''}`)
+    } catch (e) {
+      logger.error('Error handling device_context_changed', e)
+    }
   }
 
   return {
+    // Zone Entity State
+    zoneEntities,
+    isLoadingZones,
+    // Zone Entity Getters
+    activeZones,
+    archivedZones,
+    // Zone Entity Actions
+    fetchZoneEntities,
+    createZone,
+    updateZone,
+    archiveZone,
+    reactivateZone,
+    deleteZoneEntity,
+    // Zone/Subzone Assignment WS Handlers (existing)
     handleZoneAssignment,
     handleSubzoneAssignment,
+    // Device Scope/Context WS Handlers (T13-R2)
+    handleDeviceScopeChanged,
+    handleDeviceContextChanged,
   }
 })

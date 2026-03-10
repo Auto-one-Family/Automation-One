@@ -17,6 +17,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import { useSwipeNavigation } from '@/composables/useSwipeNavigation'
 import { useEspStore } from '@/stores/esp'
+import { useZoneStore } from '@/shared/stores/zone.store'
 import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
 import { useZoneGrouping } from '@/composables/useZoneGrouping'
 import { useSubzoneResolver } from '@/composables/useSubzoneResolver'
@@ -33,7 +34,7 @@ import { zonesApi } from '@/api/zones'
 import type { SensorReading, SensorStats, ZoneListEntry } from '@/types'
 import type { ZoneMonitorData } from '@/types/monitor'
 import type { SensorWithContext, ActuatorWithContext } from '@/composables/useZoneGrouping'
-import { LayoutDashboard, Download, CheckCircle2, XCircle, Clock, TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp, Pencil, Plus as PlusIcon } from 'lucide-vue-next'
+import { LayoutDashboard, Download, CheckCircle2, XCircle, Clock, TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp, Pencil, Plus as PlusIcon, ListFilter } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import TimeRangeSelector, { type TimePreset } from '@/components/charts/TimeRangeSelector.vue'
 import { Line } from 'vue-chartjs'
@@ -75,9 +76,51 @@ import ActiveAutomationsSection from '@/components/monitor/ActiveAutomationsSect
 const router = useRouter()
 const route = useRoute()
 const espStore = useEspStore()
+const zoneStore = useZoneStore()
 const dashStore = useDashboardStore()
 const logicStore = useLogicStore()
 const { groupDevicesByZone } = useZoneDragDrop()
+
+// =============================================================================
+// L1 Zone Filter
+// =============================================================================
+
+const selectedZoneFilter = ref<string | null>(null)
+
+const filteredZoneKPIs = computed(() => {
+  const nonEmpty = zoneKPIs.value.filter(z => z.totalDevices > 0)
+  if (!selectedZoneFilter.value) return nonEmpty
+  return nonEmpty.filter(z => z.zoneId === selectedZoneFilter.value)
+})
+
+const isArchivedZoneSelected = computed(() => {
+  if (!selectedZoneFilter.value) return false
+  return zoneStore.archivedZones.some(z => z.zone_id === selectedZoneFilter.value)
+})
+
+const isZoneFilterActive = computed(() => selectedZoneFilter.value !== null)
+
+/** Show ActiveAutomationsSection only when enabled rules exist (or still loading) */
+const hasActiveAutomations = computed(() => {
+  if (logicStore.isLoading) return true
+  return logicStore.enabledRules.length > 0
+})
+
+// =============================================================================
+// L2 Subzone Filter
+// =============================================================================
+
+const selectedSubzoneFilter = ref<string | null>(null)
+
+const filteredSubzones = computed(() => {
+  if (!selectedSubzoneFilter.value) return zoneDeviceGroup.value
+  return zoneDeviceGroup.value.filter(sz => sz.subzoneId === selectedSubzoneFilter.value)
+})
+
+/** Unique subzone list for the L2 filter dropdown */
+const availableSubzones = computed(() => {
+  return zoneDeviceGroup.value.map(sz => ({ id: sz.subzoneId, name: sz.subzoneName }))
+})
 
 const selectedZoneId = computed(() => (route.params.zoneId as string) || null)
 const selectedSensorId = computed(() => (route.params.sensorId as string) || null)
@@ -94,6 +137,9 @@ const { sparklineCache, getSensorKey, loadInitialData: loadSparklineHistory } = 
 // Zone list from API (includes empty zones from ZoneContext)
 const allZones = ref<ZoneListEntry[]>([])
 
+let lastZoneFetch = 0
+const ZONE_FETCH_COOLDOWN_MS = 30_000
+
 async function fetchAllZones(): Promise<void> {
   try {
     const response = await zonesApi.getAllZones()
@@ -101,6 +147,15 @@ async function fetchAllZones(): Promise<void> {
   } catch {
     allZones.value = []
   }
+}
+
+async function fetchAllZonesGuarded(): Promise<void> {
+  const now = Date.now()
+  if (allZones.value.length > 0 && now - lastZoneFetch < ZONE_FETCH_COOLDOWN_MS) {
+    return
+  }
+  lastZoneFetch = now
+  await fetchAllZones()
 }
 
 // Zone monitor data (API primary, fallback via useZoneGrouping)
@@ -220,15 +275,12 @@ const expandedSensorUnit = computed(() => {
   const gpio = parseInt(keyParts[keyParts.length - 1], 10)
   const espId = keyParts.slice(0, -1).join('-')
 
-  const sensorGroup = zoneSensorGroup.value
-  if (sensorGroup) {
-    for (const sz of sensorGroup.subzones) {
-      const found = sz.sensors.find(s =>
-        s.esp_id === espId && s.gpio === gpio && (!sensorType || s.sensor_type === sensorType)
-      )
-      if (found) {
-        return getSensorUnit(found.sensor_type) !== 'raw' ? getSensorUnit(found.sensor_type) : (found.unit || '')
-      }
+  for (const sz of zoneDeviceGroup.value) {
+    const found = sz.sensors.find(s =>
+      s.esp_id === espId && s.gpio === gpio && (!sensorType || s.sensor_type === sensorType)
+    )
+    if (found) {
+      return getSensorUnit(found.sensor_type) !== 'raw' ? getSensorUnit(found.sensor_type) : (found.unit || '')
     }
   }
   return ''
@@ -415,9 +467,9 @@ async function fetchDetailData() {
 
 /** All sensors in current zone except the primary detail sensor (includes sensor_type for multi-value separation) */
 const availableOverlaySensors = computed(() => {
-  if (!zoneSensorGroup.value || !selectedDetailSensor.value) return []
+  if (zoneDeviceGroup.value.length === 0 || !selectedDetailSensor.value) return []
   const result: { key: string; name: string; type: string; unit: string; espId: string; gpio: number }[] = []
-  for (const sz of zoneSensorGroup.value.subzones) {
+  for (const sz of zoneDeviceGroup.value) {
     for (const s of sz.sensors) {
       // Exclude the primary detail sensor (match by espId + gpio + sensorType)
       if (s.esp_id === selectedDetailSensor.value.espId &&
@@ -724,7 +776,11 @@ async function fetchDetailStats() {
     const resp = await sensorsApi.getStats(
       selectedDetailSensor.value.espId,
       selectedDetailSensor.value.gpio,
-      { start_time: detailStartTime.value, end_time: detailEndTime.value },
+      {
+        start_time: detailStartTime.value,
+        end_time: detailEndTime.value,
+        sensor_type: selectedDetailSensor.value.sensorType,
+      },
     )
     detailStats.value = resp.stats
   } catch (e) {
@@ -782,8 +838,13 @@ onMounted(() => {
     espStore.fetchAll()
   }
 
-  // Fetch all zones (including empty ones from ZoneContext)
-  fetchAllZones()
+  // Fetch all zones (including empty ones from ZoneContext) — guarded against rapid re-mounts
+  fetchAllZonesGuarded()
+
+  // Fetch zone entities for filter dropdown (active + archived)
+  if (zoneStore.zoneEntities.length === 0) {
+    zoneStore.fetchZoneEntities()
+  }
 
   // Fetch logic rules + execution history for ActuatorCard context
   logicStore.fetchRules()
@@ -1085,58 +1146,84 @@ const visibleCrossZoneDashboards = computed(() => {
 })
 
 // =============================================================================
-// Level 2: Filtered zone data from composable
+// Level 2: Unified subzone-first device grouping
 // =============================================================================
 
-const zoneSensorGroup = computed(() => {
-  if (!selectedZoneId.value) return null
-  // API primary when available and no error; fallback only when zoneMonitorError
-  const data = zoneMonitorData.value
-  if (data && !zoneMonitorError.value) {
-    return {
-      zoneId: data.zone_id,
-      zoneName: data.zone_name,
-      sensorCount: data.sensor_count,
-      subzones: data.subzones.map(sz => ({
-        subzoneId: sz.subzone_id,
-        subzoneName: sz.subzone_name,
-        sensors: sz.sensors.map(s => ({
-          ...s,
-          raw_value: s.raw_value ?? 0,
-          quality: s.quality as SensorWithContext['quality'],
-          zone_id: data.zone_id,
-          zone_name: data.zone_name,
-          subzone_id: sz.subzone_id,
-          subzone_name: sz.subzone_name,
-        })) as SensorWithContext[],
-      })),
-    }
-  }
-  return sensorsByZone.value.find(z => z.zoneId === selectedZoneId.value) ?? null
-})
+interface ZoneDeviceSubzone {
+  subzoneId: string | null
+  subzoneName: string
+  sensors: SensorWithContext[]
+  actuators: ActuatorWithContext[]
+}
 
-const zoneActuatorGroup = computed(() => {
-  if (!selectedZoneId.value) return null
+const zoneDeviceGroup = computed<ZoneDeviceSubzone[]>(() => {
+  if (!selectedZoneId.value) return []
+
+  // Primary path: API data (server delivers subzones with sensors + actuators together)
   const data = zoneMonitorData.value
   if (data && !zoneMonitorError.value) {
-    return {
-      zoneId: data.zone_id,
-      zoneName: data.zone_name,
-      actuatorCount: data.actuator_count,
-      subzones: data.subzones.map(sz => ({
-        subzoneId: sz.subzone_id,
-        subzoneName: sz.subzone_name,
-        actuators: sz.actuators.map(a => ({
-          ...a,
-          zone_id: data.zone_id,
-          zone_name: data.zone_name,
-          subzone_id: sz.subzone_id,
-          subzone_name: sz.subzone_name,
-        })) as ActuatorWithContext[],
-      })),
+    return data.subzones.map(sz => ({
+      subzoneId: sz.subzone_id,
+      subzoneName: sz.subzone_id === null ? 'Zone-weit' : sz.subzone_name,
+      sensors: sz.sensors.map(s => ({
+        ...s,
+        raw_value: s.raw_value ?? 0,
+        quality: s.quality as SensorWithContext['quality'],
+        zone_id: data.zone_id,
+        zone_name: data.zone_name,
+        subzone_id: sz.subzone_id,
+        subzone_name: sz.subzone_name,
+      })) as SensorWithContext[],
+      actuators: sz.actuators.map(a => ({
+        ...a,
+        zone_id: data.zone_id,
+        zone_name: data.zone_name,
+        subzone_id: sz.subzone_id,
+        subzone_name: sz.subzone_name,
+      })) as ActuatorWithContext[],
+    })).sort((a, b) => {
+      // Named subzones first (alphabetical), "Zone-weit" (null) at end
+      if (a.subzoneId === null) return 1
+      if (b.subzoneId === null) return -1
+      return a.subzoneName.localeCompare(b.subzoneName)
+    })
+  }
+
+  // Fallback path: useZoneGrouping + useSubzoneResolver (merge sensors + actuators)
+  const sensorGroup = sensorsByZone.value.find(z => z.zoneId === selectedZoneId.value)
+  const actuatorGroup = actuatorsByZone.value.find(z => z.zoneId === selectedZoneId.value)
+  if (!sensorGroup && !actuatorGroup) return []
+
+  const subzoneMap = new Map<string | null, ZoneDeviceSubzone>()
+
+  for (const sz of sensorGroup?.subzones ?? []) {
+    subzoneMap.set(sz.subzoneId, {
+      subzoneId: sz.subzoneId,
+      subzoneName: sz.subzoneId === null ? 'Zone-weit' : (sz.subzoneName || 'Zone-weit'),
+      sensors: sz.sensors as SensorWithContext[],
+      actuators: [],
+    })
+  }
+
+  for (const sz of actuatorGroup?.subzones ?? []) {
+    const existing = subzoneMap.get(sz.subzoneId)
+    if (existing) {
+      existing.actuators = sz.actuators as ActuatorWithContext[]
+    } else {
+      subzoneMap.set(sz.subzoneId, {
+        subzoneId: sz.subzoneId,
+        subzoneName: sz.subzoneId === null ? 'Zone-weit' : (sz.subzoneName || 'Zone-weit'),
+        sensors: [],
+        actuators: sz.actuators as ActuatorWithContext[],
+      })
     }
   }
-  return actuatorsByZone.value.find(z => z.zoneId === selectedZoneId.value) ?? null
+
+  return Array.from(subzoneMap.values()).sort((a, b) => {
+    if (a.subzoneId === null) return 1
+    if (b.subzoneId === null) return -1
+    return a.subzoneName.localeCompare(b.subzoneName)
+  })
 })
 
 const selectedZoneName = computed(() => {
@@ -1145,8 +1232,12 @@ const selectedZoneName = computed(() => {
   return device?.zone_name || selectedZoneId.value
 })
 
-const zoneSensorCount = computed(() => zoneSensorGroup.value?.sensorCount ?? 0)
-const zoneActuatorCount = computed(() => zoneActuatorGroup.value?.actuatorCount ?? 0)
+const zoneSensorCount = computed(() =>
+  zoneDeviceGroup.value.reduce((sum, sz) => sum + sz.sensors.length, 0)
+)
+const zoneActuatorCount = computed(() =>
+  zoneDeviceGroup.value.reduce((sum, sz) => sum + sz.actuators.length, 0)
+)
 
 // Reactive breadcrumb update — when devices load after mount, zone_id → zone_name
 watch(selectedZoneName, (name) => {
@@ -1259,11 +1350,11 @@ watch(zoneMonitorError, (err) => {
   }
 })
 
-// Load initial sparkline history when zone sensor data becomes available
-watch(zoneSensorGroup, (group) => {
-  if (!group) return
+// Load initial sparkline history when zone device data becomes available
+watch(zoneDeviceGroup, (subzones) => {
+  if (!subzones.length) return
   const sensors: { esp_id: string; gpio: number; sensor_type?: string }[] = []
-  for (const sz of group.subzones) {
+  for (const sz of subzones) {
     for (const s of sz.sensors) {
       sensors.push({ esp_id: s.esp_id, gpio: s.gpio, sensor_type: s.sensor_type })
     }
@@ -1294,37 +1385,32 @@ function loadAccordionState(zoneId: string) {
 }
 
 function applySmartDefaults(zoneId: string) {
-  const sensorSubzones = zoneSensorGroup.value?.subzones ?? []
-  const actuatorSubzones = zoneActuatorGroup.value?.subzones ?? []
+  const subzones = zoneDeviceGroup.value
 
-  // Count unique named subzone IDs (exclude "Keine Subzone")
-  const namedSubzoneIds = new Set<string>()
-  for (const s of sensorSubzones) {
-    if (s.subzoneId !== null) namedSubzoneIds.add(s.subzoneId)
-  }
-  for (const s of actuatorSubzones) {
-    if (s.subzoneId !== null) namedSubzoneIds.add(s.subzoneId)
+  // Collapse empty subzones (0 sensors + 0 actuators)
+  const emptyKeys = new Set<string>()
+  for (const sz of subzones) {
+    if (sz.sensors.length === 0 && sz.actuators.length === 0) {
+      emptyKeys.add(getSubzoneKey(zoneId, sz.subzoneId))
+    }
   }
 
-  if (namedSubzoneIds.size <= 4) {
-    collapsedSubzones.value = new Set()
+  // Count named subzones (exclude "Zone-weit")
+  const namedSubzones = subzones.filter(sz => sz.subzoneId !== null)
+
+  if (namedSubzones.length <= 4) {
+    // <= 4 subzones: all open, except empty ones
+    collapsedSubzones.value = emptyKeys
     return
   }
 
-  // >4 named subzones: only first named + "Keine Subzone" open
-  const firstNamedId = sensorSubzones.find(s => s.subzoneId !== null)?.subzoneId
-    ?? actuatorSubzones.find(s => s.subzoneId !== null)?.subzoneId
+  // >4 named subzones: only first named + "Zone-weit" open
+  const firstNamedId = namedSubzones[0]?.subzoneId
 
-  const collapsed = new Set<string>()
-  for (const subzone of sensorSubzones) {
-    if (subzone.subzoneId === null) continue
-    if (subzone.subzoneId === firstNamedId) continue
-    collapsed.add(getSubzoneKey(zoneId, subzone.subzoneId))
-  }
-  for (const subzone of actuatorSubzones) {
-    if (subzone.subzoneId === null) continue
-    if (subzone.subzoneId === firstNamedId) continue
-    collapsed.add(getSubzoneKey(zoneId, subzone.subzoneId))
+  const collapsed = new Set<string>(emptyKeys)
+  for (const sz of namedSubzones) {
+    if (sz.subzoneId === firstNamedId) continue
+    collapsed.add(getSubzoneKey(zoneId, sz.subzoneId))
   }
 
   collapsedSubzones.value = collapsed
@@ -1371,15 +1457,17 @@ watch(selectedZoneId, (zoneId) => {
     smartDefaultsApplied.value = false
     // Close expanded sensor panel when switching zones
     expandedSensorKey.value = null
+    // Reset subzone filter when zone changes
+    selectedSubzoneFilter.value = null
   }
 }, { immediate: true })
 
 watch(
-  [zoneSensorGroup, zoneActuatorGroup],
+  zoneDeviceGroup,
   () => {
     if (smartDefaultsApplied.value) return
     if (!selectedZoneId.value) return
-    if (!zoneSensorGroup.value && !zoneActuatorGroup.value) return
+    if (zoneDeviceGroup.value.length === 0) return
 
     const stored = localStorage.getItem(
       `ao-monitor-subzone-collapse-${selectedZoneId.value}`
@@ -1568,9 +1656,9 @@ function getWorstQualityStatus(sensors: { quality: string }[]): 'good' | 'warnin
 const zoneAlarmCount = computed(() => {
   const data = zoneMonitorData.value
   if (data && !zoneMonitorError.value) return data.alarm_count
-  if (!zoneSensorGroup.value) return 0
+  if (zoneDeviceGroup.value.length === 0) return 0
   let count = 0
-  for (const sz of zoneSensorGroup.value.subzones) {
+  for (const sz of zoneDeviceGroup.value) {
     for (const s of sz.sensors) {
       if (qualityToStatus(s.quality) === 'alarm') count++
     }
@@ -1640,16 +1728,57 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
         </p>
       </div>
 
+      <!-- L1 Zone Filter -->
+      <div v-if="zoneKPIs.length > 0" class="monitor-zone-filter">
+        <div class="monitor-zone-filter__select-wrap">
+          <ListFilter class="monitor-zone-filter__icon" />
+          <select
+            v-model="selectedZoneFilter"
+            class="monitor-zone-filter__select"
+          >
+            <option :value="null">Alle Zonen</option>
+            <option
+              v-for="z in zoneStore.activeZones"
+              :key="z.zone_id"
+              :value="z.zone_id"
+            >
+              {{ z.name }}
+            </option>
+            <optgroup v-if="zoneStore.archivedZones.length > 0" label="Archiv">
+              <option
+                v-for="z in zoneStore.archivedZones"
+                :key="z.zone_id"
+                :value="z.zone_id"
+              >
+                {{ z.name }} (Archiv)
+              </option>
+            </optgroup>
+          </select>
+        </div>
+        <span v-if="isZoneFilterActive" class="monitor-zone-filter__badge">
+          Gefiltert
+        </span>
+      </div>
+
+      <!-- Archived Zone Banner -->
+      <div v-if="isArchivedZoneSelected" class="monitor-archived-banner">
+        <AlertTriangle class="w-4 h-4" />
+        <span>Archivierte Zone — nur historische Daten</span>
+      </div>
+
       <!-- Empty State (only when loading done + no error + truly empty) -->
       <div v-if="zoneKPIs.length === 0" class="monitor-view__empty">
         <Activity class="w-12 h-12" style="color: var(--color-text-muted)" />
         <p>Keine Zonen vorhanden.</p>
+        <router-link to="/hardware" class="monitor-view__empty-cta">
+          Zonen in der Hardware-Ansicht erstellen
+        </router-link>
       </div>
 
       <!-- Zone Tiles Grid -->
       <div v-else class="monitor-zone-grid">
         <button
-          v-for="zone in zoneKPIs"
+          v-for="zone in filteredZoneKPIs"
           :key="zone.zoneId"
           :class="['monitor-zone-tile', `monitor-zone-tile--${zone.healthStatus}`]"
           @click="goToZone(zone.zoneId)"
@@ -1714,8 +1843,8 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
         </button>
       </div>
 
-      <!-- Aktive Automatisierungen (L1) -->
-      <ActiveAutomationsSection />
+      <!-- Aktive Automatisierungen (L1) — hidden when 0 enabled rules -->
+      <ActiveAutomationsSection v-if="hasActiveAutomations" />
 
       <!-- Dashboard Overview Card (compact, horizontal chips) -->
       <section v-if="dashStore.crossZoneDashboards.length > 0" class="monitor-dashboard-card">
@@ -1840,149 +1969,160 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
         </router-link>
       </div>
 
-      <!-- Sensors Section (Subzone Accordion) -->
-      <section v-if="zoneSensorGroup && zoneSensorGroup.subzones.length > 0" class="monitor-section">
-        <h3 class="monitor-section__title">Sensoren ({{ zoneSensorCount }})</h3>
-
-        <div
-          v-for="subzone in zoneSensorGroup.subzones"
-          :key="subzone.subzoneId ?? '__none__'"
-          :class="['monitor-subzone', { 'monitor-subzone--unassigned': subzone.subzoneId === null }]"
-        >
-          <!-- Subzone Header (only if multiple subzones or has name) -->
-          <div
-            v-if="zoneSensorGroup.subzones.length > 1 || subzone.subzoneName"
-            :class="['monitor-subzone__header', { 'monitor-subzone__header--collapsed': !isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId)) }]"
+      <!-- L2 Subzone Filter (only when >1 subzone) -->
+      <div v-if="availableSubzones.length > 1" class="monitor-zone-filter">
+        <div class="monitor-zone-filter__select-wrap">
+          <ListFilter class="monitor-zone-filter__icon" />
+          <select
+            v-model="selectedSubzoneFilter"
+            class="monitor-zone-filter__select"
           >
-            <button class="monitor-subzone__toggle" @click="toggleSubzone(getSubzoneKey(selectedZoneId, subzone.subzoneId))">
-              <ChevronRight
-                :class="['monitor-subzone__chevron', { 'monitor-subzone__chevron--expanded': isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId)) }]"
-              />
-              <span :class="['monitor-subzone__status-dot', `monitor-subzone__status-dot--${getWorstQualityStatus(subzone.sensors)}`]" />
-              <span class="monitor-subzone__name">{{ subzone.subzoneName || 'Keine Subzone' }}</span>
-              <span class="monitor-subzone__kpis" v-if="getSubzoneKPIs(subzone.sensors)">{{ getSubzoneKPIs(subzone.sensors) }}</span>
-            </button>
-          </div>
-
-          <!-- Sensor Cards (or empty subzone hint) -->
-          <Transition name="accordion">
-            <div
-              v-show="zoneSensorGroup.subzones.length <= 1 && !subzone.subzoneName ? true : isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId))"
-              class="monitor-card-grid"
+            <option :value="null">Alle Subzonen</option>
+            <option
+              v-for="sz in availableSubzones"
+              :key="sz.id ?? '__none__'"
+              :value="sz.id"
             >
-              <!-- Empty subzone hint -->
-              <div v-if="subzone.sensors.length === 0" class="monitor-subzone__empty-hint">
-                Keine Sensoren zugeordnet — Sensoren in der
-                <router-link :to="{ name: 'hardware' }" class="monitor-subzone__empty-link">Hardware-Ansicht</router-link>
-                hinzufügen
-              </div>
-              <div
-                v-for="sensor in subzone.sensors"
-                :key="`${sensor.esp_id}-${sensor.gpio}-${sensor.sensor_type}`"
-                :class="[
-                  'monitor-sensor-card',
-                  { 'monitor-sensor-card--expanded': expandedSensorKey === getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type) }
-                ]"
-              >
-                <SensorCard
-                  :sensor="sensor"
-                  mode="monitor"
-                  :trend="getSensorTrend(sensor.esp_id, sensor.gpio, sensor.sensor_type)"
-                  @click="toggleExpanded(getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type))"
-                >
-                  <template #sparkline>
-                    <LiveLineChart
-                      v-if="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type))?.length"
-                      :data="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type))!"
-                      compact
-                      height="32px"
-                      :max-data-points="30"
-                      :sensor-type="sensor.sensor_type"
-                      :thresholds="getDefaultThresholds(sensor.sensor_type)"
-                      :show-thresholds="!!getDefaultThresholds(sensor.sensor_type)"
-                    />
-                  </template>
-                </SensorCard>
-
-                <!-- Expanded Chart Panel (simplified: 1h chart + 2 action buttons) -->
-                <Transition name="expand">
-                  <div
-                    v-if="expandedSensorKey === getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type)"
-                    class="monitor-sensor-card__charts"
-                    @click.stop
-                  >
-                    <!-- 1h Chart Container (populated in Schritt 3 via expandedChartData) -->
-                    <div class="monitor-sensor-card__1h-chart">
-                      <div v-if="expandedChartLoading" class="monitor-sensor-card__chart-loading">
-                        <div class="sensor-detail__spinner" />
-                        <span>Lade Daten...</span>
-                      </div>
-                      <div v-else-if="expandedChartData.datasets.length > 0" style="height: 160px">
-                        <Line :data="expandedChartData" :options="expandedChartOptions" />
-                      </div>
-                      <div v-else class="monitor-sensor-card__chart-empty">
-                        Keine Daten der letzten Stunde
-                      </div>
-                    </div>
-
-                    <!-- Action Buttons -->
-                    <div class="monitor-sensor-card__actions">
-                      <button
-                        class="monitor-sensor-card__detail-btn"
-                        @click.stop="openSensorDetail(sensor)"
-                      >
-                        <ChevronRight class="w-4 h-4" />
-                        <span>Zeitreihe anzeigen</span>
-                      </button>
-                    </div>
-                  </div>
-                </Transition>
-              </div>
-            </div>
-          </Transition>
+              {{ sz.name }}
+            </option>
+          </select>
         </div>
+        <span v-if="selectedSubzoneFilter !== null" class="monitor-zone-filter__badge">
+          Gefiltert
+        </span>
+      </div>
 
-        <!-- Subzone management is in HardwareView only (Monitor = read-only) -->
-      </section>
-
-      <!-- Actuators Section (Subzone Accordion) -->
-      <section v-if="zoneActuatorGroup && zoneActuatorGroup.actuatorCount > 0" class="monitor-section">
-        <h3 class="monitor-section__title">Aktoren ({{ zoneActuatorCount }})</h3>
-
+      <!-- Unified Subzone-First Section (sensors + actuators per subzone) -->
+      <section v-if="filteredSubzones.length > 0" class="monitor-section">
         <div
-          v-for="subzone in zoneActuatorGroup.subzones"
-          :key="subzone.subzoneId ?? '__none__'"
-          :class="['monitor-subzone', { 'monitor-subzone--unassigned': subzone.subzoneId === null }]"
+          v-for="subzone in filteredSubzones"
+          :key="subzone.subzoneId ?? '__zoneweit__'"
+          :class="{ 'monitor-subzone--unassigned': subzone.subzoneId === null }"
         >
-          <!-- Subzone Header -->
-          <div
-            v-if="zoneActuatorGroup.subzones.length > 1 || subzone.subzoneName"
-            :class="['monitor-subzone__header', { 'monitor-subzone__header--collapsed': !isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId)) }]"
+          <!-- Accordion-Header: only when >1 subzone OR named subzone -->
+          <button
+            v-if="filteredSubzones.length > 1 || subzone.subzoneId !== null"
+            @click="toggleSubzone(getSubzoneKey(selectedZoneId, subzone.subzoneId))"
+            class="monitor-subzone__header"
+            :class="{ 'monitor-subzone__header--zoneweit': subzone.subzoneId === null }"
           >
-            <button class="monitor-subzone__toggle" @click="toggleSubzone(getSubzoneKey(selectedZoneId, subzone.subzoneId))">
-              <ChevronRight
-                :class="['monitor-subzone__chevron', { 'monitor-subzone__chevron--expanded': isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId)) }]"
-              />
-              <span class="monitor-subzone__name">{{ subzone.subzoneName || 'Keine Subzone' }}</span>
-            </button>
-          </div>
+            <ChevronRight
+              :class="['monitor-subzone__chevron', { 'monitor-subzone__chevron--expanded': isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId)) }]"
+            />
+            <span :class="['monitor-subzone__status-dot', `monitor-subzone__status-dot--${getWorstQualityStatus(subzone.sensors)}`]" />
+            <span class="monitor-subzone__name">{{ subzone.subzoneName }}</span>
+            <span class="monitor-subzone__count">
+              {{ subzone.sensors.length }}S · {{ subzone.actuators.length }}A
+            </span>
+            <span class="monitor-subzone__kpis" v-if="getSubzoneKPIs(subzone.sensors)">{{ getSubzoneKPIs(subzone.sensors) }}</span>
+          </button>
 
-          <!-- Actuator Cards -->
+          <!-- Accordion-Body -->
           <Transition name="accordion">
+          <div v-show="isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId)) || filteredSubzones.length === 1">
+
+            <!-- Sensors -->
+            <template v-if="subzone.sensors.length > 0">
+              <div
+                v-if="subzone.sensors.length > 0 && subzone.actuators.length > 0"
+                class="monitor-subzone__type-label"
+              >Sensoren</div>
+              <div class="monitor-card-grid">
+                <div
+                  v-for="sensor in subzone.sensors"
+                  :key="`${sensor.esp_id}-${sensor.gpio}-${sensor.sensor_type}`"
+                  :class="[
+                    'monitor-sensor-card',
+                    { 'monitor-sensor-card--expanded': expandedSensorKey === getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type) }
+                  ]"
+                >
+                  <SensorCard
+                    :sensor="sensor"
+                    mode="monitor"
+                    :trend="getSensorTrend(sensor.esp_id, sensor.gpio, sensor.sensor_type)"
+                    @click="toggleExpanded(getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type))"
+                  >
+                    <template #sparkline>
+                      <LiveLineChart
+                        v-if="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type))?.length"
+                        :data="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type))!"
+                        compact
+                        height="32px"
+                        :max-data-points="30"
+                        :sensor-type="sensor.sensor_type"
+                        :thresholds="getDefaultThresholds(sensor.sensor_type)"
+                        :show-thresholds="!!getDefaultThresholds(sensor.sensor_type)"
+                      />
+                    </template>
+                  </SensorCard>
+
+                  <!-- Expanded Chart Panel (inline 1h chart) -->
+                  <Transition name="expand">
+                    <div
+                      v-if="expandedSensorKey === getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type)"
+                      class="monitor-sensor-card__charts"
+                      @click.stop
+                    >
+                      <div class="monitor-sensor-card__1h-chart">
+                        <div v-if="expandedChartLoading" class="monitor-sensor-card__chart-loading">
+                          <div class="sensor-detail__spinner" />
+                          <span>Lade Daten...</span>
+                        </div>
+                        <div v-else-if="expandedChartData.datasets.length > 0" style="height: 160px">
+                          <Line :data="expandedChartData" :options="expandedChartOptions" />
+                        </div>
+                        <div v-else class="monitor-sensor-card__chart-empty">
+                          Keine Daten der letzten Stunde
+                        </div>
+                      </div>
+                      <div class="monitor-sensor-card__actions">
+                        <button
+                          class="monitor-sensor-card__detail-btn"
+                          @click.stop="openSensorDetail(sensor)"
+                        >
+                          <ChevronRight class="w-4 h-4" />
+                          <span>Zeitreihe anzeigen</span>
+                        </button>
+                      </div>
+                    </div>
+                  </Transition>
+                </div>
+              </div>
+            </template>
+
+            <!-- Separator: only when BOTH types present -->
+            <hr
+              v-if="subzone.sensors.length > 0 && subzone.actuators.length > 0"
+              class="monitor-subzone__separator"
+            />
+
+            <!-- Actuators -->
+            <template v-if="subzone.actuators.length > 0">
+              <div
+                v-if="subzone.sensors.length > 0 && subzone.actuators.length > 0"
+                class="monitor-subzone__type-label"
+              >Aktoren</div>
+              <div class="monitor-card-grid">
+                <ActuatorCard
+                  v-for="actuator in subzone.actuators"
+                  :key="`${actuator.esp_id}-${actuator.gpio}`"
+                  :actuator="actuator"
+                  mode="monitor"
+                  :linked-rules="logicStore.getRulesForActuator(actuator.esp_id, actuator.gpio)"
+                  :last-execution="logicStore.getLastExecutionForActuator(actuator.esp_id, actuator.gpio)"
+                  @toggle="toggleActuator"
+                />
+              </div>
+            </template>
+
+            <!-- Empty subzone -->
             <div
-              v-show="zoneActuatorGroup.subzones.length <= 1 && !subzone.subzoneName ? true : isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId))"
-              class="monitor-card-grid"
+              v-if="subzone.sensors.length === 0 && subzone.actuators.length === 0"
+              class="monitor-subzone__empty"
             >
-              <ActuatorCard
-                v-for="actuator in subzone.actuators"
-                :key="`${actuator.esp_id}-${actuator.gpio}`"
-                :actuator="actuator"
-                mode="monitor"
-                :linked-rules="logicStore.getRulesForActuator(actuator.esp_id, actuator.gpio)"
-                :last-execution="logicStore.getLastExecutionForActuator(actuator.esp_id, actuator.gpio)"
-                @toggle="toggleActuator"
-              />
+              Keine Geräte zugeordnet
             </div>
+          </div>
           </Transition>
         </div>
       </section>
@@ -2217,6 +2357,79 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ZONE / SUBZONE FILTER (WP5)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.monitor-zone-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.monitor-zone-filter__select-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.monitor-zone-filter__icon {
+  position: absolute;
+  left: 10px;
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.monitor-zone-filter__select {
+  padding: 6px 32px 6px 30px;
+  font-size: var(--text-sm);
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 10px);
+  appearance: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23707080' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.monitor-zone-filter__select:focus {
+  outline: none;
+  border-color: var(--color-iridescent-2);
+}
+
+.monitor-zone-filter__select option,
+.monitor-zone-filter__select optgroup {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+.monitor-zone-filter__badge {
+  font-size: var(--text-xs);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm, 6px);
+  background: rgba(129, 140, 248, 0.15);
+  color: var(--color-iridescent-2);
+  font-weight: 500;
+}
+
+.monitor-archived-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: var(--radius-md, 10px);
+  color: var(--color-warning);
+  font-size: var(--text-sm);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2466,6 +2679,24 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
   margin-bottom: var(--space-10);
 }
 
+.monitor-view__empty-cta {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  transition: all var(--transition-fast);
+}
+
+.monitor-view__empty-cta:hover {
+  border-color: var(--color-iridescent-2);
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    ZONE TILES (Level 1)
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -2474,6 +2705,7 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--space-4);
+  align-items: stretch;
   margin-bottom: var(--space-10);
 }
 
@@ -2606,7 +2838,7 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
 }
 
 .monitor-zone-tile__kpi-label {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -2626,7 +2858,7 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
   font-style: italic;
 }
 
-/* Footer: counts + activity */
+/* Footer: counts + activity — margin-top: auto pushes footer to bottom in equal-height tiles */
 .monitor-zone-tile__footer {
   display: flex;
   align-items: center;
@@ -2634,6 +2866,7 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
   gap: var(--space-2);
   padding-top: var(--space-2);
   border-top: 1px solid var(--glass-border);
+  margin-top: auto;
 }
 
 .monitor-zone-tile__counts {
@@ -2662,7 +2895,7 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
   display: flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   white-space: nowrap;
 }
@@ -2698,15 +2931,14 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
 }
 
 .monitor-subzone--unassigned {
-  border-left: 2px dashed rgba(251, 191, 36, 0.4);
-  background: rgba(251, 191, 36, 0.03);
+  border-left: none;
+  border-top: 1px dashed var(--glass-border);
   border-radius: var(--radius-sm, 6px);
-  padding-left: var(--space-3, 12px);
+  padding-top: var(--space-2);
 }
 
 .monitor-subzone--unassigned .monitor-subzone__header {
   color: var(--color-text-secondary);
-  font-style: italic;
 }
 
 .monitor-subzone__header {
@@ -2771,6 +3003,32 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   white-space: nowrap;
+}
+
+.monitor-subzone__separator {
+  border: none;
+  border-top: 1px dashed var(--glass-border);
+  margin: var(--space-3) 0;
+}
+
+.monitor-subzone__type-label {
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-2);
+}
+
+.monitor-subzone__header--zoneweit {
+  border-left: none;
+  border-top: 1px dashed var(--glass-border);
+}
+
+.monitor-subzone__empty {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  padding: var(--space-3);
 }
 
 /* Subzone CRUD elements */

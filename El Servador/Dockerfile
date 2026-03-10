@@ -42,11 +42,16 @@ FROM python:3.11-slim-bookworm AS runtime
 WORKDIR /app
 
 # Install runtime dependencies and apply security patches
-# postgresql-client provides pg_dump/psql for DatabaseBackupService (Phase A V5.1)
+# postgresql-client-16 from PGDG repo — must match postgres:16-alpine (Fix-T Block 1)
+# Default Bookworm postgresql-client is v15, which refuses to pg_dump a v16 server
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libpq5 \
-    postgresql-client \
     curl \
+    gnupg \
+    && echo "deb http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-16 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder

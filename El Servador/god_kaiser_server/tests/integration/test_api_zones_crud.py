@@ -319,22 +319,19 @@ class TestDeleteZone:
         assert data["device_count"] == 0
 
     @pytest.mark.asyncio
-    async def test_delete_zone_with_devices_warning(
+    async def test_delete_zone_with_devices_blocked(
         self, auth_headers: dict, sample_zone: Zone, sample_esp_in_zone: ESPDevice
     ):
-        """Test deleting a zone that still has devices assigned (warning but allowed)."""
+        """Test deleting a zone with assigned devices is blocked (T13-R1: soft-delete, must unassign first)."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.delete(
                 f"/api/v1/zones/{sample_zone.zone_id}",
                 headers=auth_headers,
             )
 
-        assert response.status_code == 200
+        assert response.status_code == 400
         data = response.json()
-        assert data["success"] is True
-        assert data["had_devices"] is True
-        assert data["device_count"] == 1
-        assert "warning" in data["message"].lower() or "still assigned" in data["message"].lower()
+        assert "device" in data["detail"].lower() or "assigned" in data["detail"].lower()
 
     @pytest.mark.asyncio
     async def test_delete_zone_not_found(self, auth_headers: dict):
@@ -407,20 +404,20 @@ class TestZonePersistence:
 
 
 # =============================================================================
-# Test: Backward Compatibility (Assign auto-creates zone entity)
+# Test: Zone Existence Required (T13-R1: no auto-create)
 # =============================================================================
 
 
-class TestBackwardCompatibility:
-    """Test that zone assignment auto-creates zone entity."""
+class TestZoneExistenceRequired:
+    """Test that zone must exist before assignment (T13-R1: no auto-create)."""
 
     @pytest.mark.asyncio
-    async def test_assign_zone_auto_creates_zone_entity(
+    async def test_assign_nonexistent_zone_rejected(
         self, auth_headers: dict, db_session: AsyncSession
     ):
         """
-        Test: Assigning a zone via the old assign endpoint auto-creates
-        the zone in the zones table if it doesn't exist yet.
+        T13-R1: Assigning a zone that doesn't exist in the zones table
+        must be rejected (no auto-create).
         """
         # Create an ESP device
         esp = ESPDevice(
@@ -436,27 +433,58 @@ class TestBackwardCompatibility:
         db_session.add(esp)
         await db_session.commit()
 
-        # Assign zone via the old endpoint (should auto-create zone entity)
+        # Assign zone that doesn't exist — must be rejected
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             assign_resp = await client.post(
                 "/api/v1/zone/devices/ESP_COMPAT_001/assign",
                 json={
-                    "zone_id": "auto_created_zone",
-                    "zone_name": "Auto Created Zone",
+                    "zone_id": "nonexistent_zone",
+                    "zone_name": "Does Not Exist",
+                },
+                headers=auth_headers,
+            )
+
+        assert assign_resp.status_code == 400
+        data = assign_resp.json()
+        assert "zone" in data["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_assign_existing_zone_succeeds(
+        self, auth_headers: dict, db_session: AsyncSession
+    ):
+        """
+        T13-R1: Assigning a zone that exists in the zones table succeeds.
+        """
+        # Create zone entity first
+        zone = Zone(zone_id="pre_created_zone", name="Pre-Created Zone")
+        db_session.add(zone)
+        await db_session.commit()
+
+        # Create an ESP device
+        esp = ESPDevice(
+            device_id="ESP_COMPAT_002",
+            name="Compat ESP 2",
+            ip_address="192.168.1.221",
+            mac_address="AA:BB:CC:DD:EE:C2",
+            firmware_version="2.0.0",
+            hardware_type="ESP32_WROOM",
+            status="online",
+            device_metadata={},
+        )
+        db_session.add(esp)
+        await db_session.commit()
+
+        # Assign zone that exists — must succeed
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            assign_resp = await client.post(
+                "/api/v1/zone/devices/ESP_COMPAT_002/assign",
+                json={
+                    "zone_id": "pre_created_zone",
+                    "zone_name": "Pre-Created Zone",
                 },
                 headers=auth_headers,
             )
 
         assert assign_resp.status_code == 200
-
-        # Verify the zone entity was auto-created in the zones table
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            get_resp = await client.get(
-                "/api/v1/zones/auto_created_zone",
-                headers=auth_headers,
-            )
-
-        assert get_resp.status_code == 200
-        data = get_resp.json()
-        assert data["zone_id"] == "auto_created_zone"
-        assert data["name"] == "Auto Created Zone"
+        data = assign_resp.json()
+        assert data["zone_id"] == "pre_created_zone"

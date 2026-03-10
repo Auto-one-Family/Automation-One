@@ -158,6 +158,11 @@ const sensorCount = computed(() => {
   return grouped.reduce((sum, g) => sum + g.values.length, 0)
 })
 
+const actuatorCount = computed(() => {
+  const actuators = (props.device as any).actuators as unknown[] | undefined
+  return actuators?.length ?? props.device.actuator_count ?? 0
+})
+
 /** Subzone label (if assigned) */
 const subzoneName = computed(() => props.device.subzone_name || '')
 
@@ -225,7 +230,7 @@ function openCardMenu(event: MouseEvent) {
           :style="{ color: statusColor }"
         >{{ statusText }}</span>
         <span v-if="lastSeenText" class="device-mini-card__last-seen">· {{ lastSeenText }}</span>
-        <span v-if="sensorCount > 0" class="device-mini-card__sensor-count">{{ sensorCount }}S</span>
+        <span v-if="sensorCount > 0 || actuatorCount > 0" class="device-mini-card__sensor-count">{{ sensorCount }}S<template v-if="actuatorCount > 0"> / {{ actuatorCount }}A</template></span>
       </div>
 
       <!-- Subzone indicator -->
@@ -342,10 +347,19 @@ function openCardMenu(event: MouseEvent) {
 :deep(.esp-drag-handle) {
   cursor: grab;
   min-height: 44px; /* Touch-friendly target size */
+  min-width: 44px;
 }
 
 :deep(.esp-drag-handle):active {
   cursor: grabbing;
+}
+
+/* Long-press visual feedback (VueDraggable chosen-class applies after 300ms delay) */
+.zone-item--chosen.device-mini-card,
+.device-mini-card.sortable-chosen {
+  transform: scale(1.02);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3), 0 0 0 2px var(--color-iridescent-1);
+  transition: transform 150ms ease-out, box-shadow 150ms ease-out;
 }
 
 :deep(.esp-drag-handle)::before {
@@ -358,8 +372,16 @@ function openCardMenu(event: MouseEvent) {
   flex-shrink: 0;
 }
 
-.device-mini-card:hover :deep(.esp-drag-handle)::before {
+.device-mini-card:hover :deep(.esp-drag-handle)::before,
+.device-mini-card:focus-within :deep(.esp-drag-handle)::before {
   opacity: 0.5;
+}
+
+/* Touch devices: grip always visible */
+@media (hover: none) {
+  :deep(.esp-drag-handle)::before {
+    opacity: 0.5;
+  }
 }
 
 /* ── ESPCardBase inner overrides for mini sizing ── */
@@ -515,13 +537,22 @@ function openCardMenu(event: MouseEvent) {
   padding-top: var(--space-1);
   border-top: 1px solid transparent;
   margin-top: auto;
-  opacity: 0;
+  opacity: 0.4;
   transition: opacity var(--transition-fast), border-color var(--transition-fast);
 }
 
-.device-mini-card:hover .device-mini-card__actions {
+.device-mini-card:hover .device-mini-card__actions,
+.device-mini-card:focus-within .device-mini-card__actions {
   opacity: 1;
   border-top-color: var(--glass-border);
+}
+
+/* Touch devices: always fully visible */
+@media (hover: none) {
+  .device-mini-card__actions {
+    opacity: 1;
+    border-top-color: var(--glass-border);
+  }
 }
 
 .device-mini-card__actions-spacer {
@@ -531,7 +562,10 @@ function openCardMenu(event: MouseEvent) {
 .device-mini-card__action-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 3px;
+  min-width: 44px;
+  min-height: 44px;
   padding: 2px var(--space-1);
   border: none;
   border-radius: 4px;

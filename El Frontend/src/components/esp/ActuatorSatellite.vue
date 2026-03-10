@@ -39,6 +39,10 @@ interface Props {
   showConnections?: boolean
   /** Whether dragging is enabled */
   draggable?: boolean
+  /** Device scope (T13-R3 WP4): zone_local, multi_zone, mobile */
+  deviceScope?: 'zone_local' | 'multi_zone' | 'mobile' | null
+  /** Assigned zones for multi_zone/mobile devices */
+  assignedZones?: string[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -46,6 +50,8 @@ const props = withDefaults(defineProps<Props>(), {
   selected: false,
   showConnections: false,
   draggable: true,
+  deviceScope: null,
+  assignedZones: () => [],
 })
 
 const emit = defineEmits<{
@@ -78,14 +84,32 @@ const actuatorInfo = computed(() => getActuatorTypeInfo(props.actuatorType))
 // Get actuator icon component
 const actuatorIcon = computed(() => {
   const iconName = actuatorInfo.value.icon.toLowerCase()
-  if (iconName.includes('toggle') || iconName.includes('power')) return Power
+  if (iconName.includes('toggle')) return ToggleRight
   if (iconName.includes('waves') || iconName.includes('pump')) return Waves
   if (iconName.includes('branch') || iconName.includes('valve')) return GitBranch
   if (iconName.includes('fan')) return Fan
   if (iconName.includes('flame') || iconName.includes('heater')) return Flame
   if (iconName.includes('lightbulb') || iconName.includes('light')) return Lightbulb
   if (iconName.includes('cog') || iconName.includes('motor')) return Cog
-  return ToggleRight
+  return Power
+})
+
+// Scope badge (T13-R3 WP4): only show for non-default scopes
+const scopeBadge = computed(() => {
+  const scope = props.deviceScope
+  if (!scope || scope === 'zone_local') return null
+  if (scope === 'multi_zone') return { text: 'MZ', cls: 'actuator-satellite__scope-badge--multi-zone' }
+  if (scope === 'mobile') return { text: 'Mob', cls: 'actuator-satellite__scope-badge--mobile' }
+  return null
+})
+
+const scopeTooltip = computed(() => {
+  if (!scopeBadge.value) return ''
+  if (props.deviceScope === 'multi_zone' && props.assignedZones?.length) {
+    return `Multi-Zone: ${props.assignedZones.join(', ')}`
+  }
+  if (props.deviceScope === 'mobile') return 'Mobiles Gerät'
+  return ''
 })
 
 // Status display
@@ -187,6 +211,9 @@ function handleDragEnd(event: DragEvent) {
     >
       {{ statusDisplay.text }}
     </Badge>
+
+    <!-- Scope Badge (T13-R3 WP4) -->
+    <span v-if="scopeBadge" :class="['actuator-satellite__scope-badge', scopeBadge.cls]" :title="scopeTooltip">{{ scopeBadge.text }}</span>
 
     <!-- Label (compact) -->
     <span class="actuator-satellite__label" :title="name || actuatorInfo.label">
@@ -325,6 +352,26 @@ function handleDragEnd(event: DragEvent) {
   overflow: hidden;
   text-overflow: ellipsis;
   max-height: 2.4em;
+}
+
+/* Scope badges (T13-R3 WP4) */
+.actuator-satellite__scope-badge {
+  font-size: 7px;
+  font-weight: 600;
+  padding: 0.0625rem 0.25rem;
+  border-radius: 0.125rem;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.actuator-satellite__scope-badge--multi-zone {
+  background: rgba(96, 165, 250, 0.2);
+  color: rgb(96, 165, 250);
+}
+
+.actuator-satellite__scope-badge--mobile {
+  background: rgba(251, 146, 60, 0.2);
+  color: rgb(251, 146, 60);
 }
 
 /* Connection indicator */

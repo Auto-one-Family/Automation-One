@@ -1877,9 +1877,11 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
     config.subzone_id = migrateReadString(new_key, old_key, "");
 
     // Active Flag (breaks at i>=10 with old key)
+    // Default: true — if a config is stored in NVS, the device was active.
+    // Old key >15 chars at i>=10 → unreadable → must not deactivate on migration failure.
     snprintf(new_key, sizeof(new_key), NVS_SEN_ACTIVE, i);
     snprintf(old_key, sizeof(old_key), NVS_SEN_ACTIVE_OLD, i);
-    config.active = migrateReadBool(new_key, old_key, false);
+    config.active = migrateReadBool(new_key, old_key, true);
 
     // Raw Mode - CRITICAL (was broken! 17 chars)
     snprintf(new_key, sizeof(new_key), NVS_SEN_RAW, i);
@@ -2282,9 +2284,11 @@ bool ConfigManager::loadActuatorConfig(ActuatorConfig actuators[], uint8_t max_a
     config.subzone_id = migrateReadString(new_key, old_key, "");
 
     // Active Flag - CRITICAL for actuator enable/disable!
+    // Default: true — if a config is stored in NVS, the actuator was active.
+    // Old key "actuator_%d_active" = 17 chars > NVS limit → unreadable → must not deactivate.
     snprintf(new_key, sizeof(new_key), NVS_ACT_ACTIVE, i);
     snprintf(old_key, sizeof(old_key), NVS_ACT_ACTIVE_OLD, i);
-    config.active = migrateReadBool(new_key, old_key, false);
+    config.active = migrateReadBool(new_key, old_key, true);
 
     // Critical Flag - SAFETY CRITICAL! Emergency stop depends on this!
     snprintf(new_key, sizeof(new_key), NVS_ACT_CRIT, i);

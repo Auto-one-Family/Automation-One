@@ -6,6 +6,7 @@ from .actuator_repo import ActuatorRepository
 from .audit_log_repo import AuditLogRepository
 from .base_repo import BaseRepository
 from .dashboard_repo import DashboardRepository
+from .device_context_repo import DeviceActiveContextRepository
 from .email_log_repo import EmailLogRepository
 from .esp_heartbeat_repo import ESPHeartbeatRepository
 from .esp_repo import ESPRepository
@@ -24,6 +25,7 @@ from .zone_repo import ZoneRepository
 __all__ = [
     "BaseRepository",
     "DashboardRepository",
+    "DeviceActiveContextRepository",
     "EmailLogRepository",
     "ESPRepository",
     "ESPHeartbeatRepository",

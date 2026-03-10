@@ -37,7 +37,12 @@ from ...core.resilience import (
     ServiceUnavailableError,
 )
 from ...db.models.enums import DataSource
-from ...db.repositories import ESPRepository, SensorRepository, SubzoneRepository
+from ...db.repositories import (
+    ESPRepository,
+    SensorRepository,
+    SubzoneRepository,
+)
+from ...services.device_scope_service import DeviceScopeService
 from ...db.session import resilient_session
 from ..publisher import Publisher
 from ..topics import TopicBuilder
@@ -89,6 +94,10 @@ class SensorDataHandler:
         "flow": {"min": 0.0, "max": 1000.0},
     }
 
+    # Throttle interval for last_seen updates (seconds).
+    # Heartbeat timeout is 300s, so 60s ensures last_seen stays current.
+    LAST_SEEN_THROTTLE_SECONDS = 60
+
     def __init__(self, publisher: Optional[Publisher] = None):
         """
         Initialize sensor data handler.
@@ -101,6 +110,9 @@ class SensorDataHandler:
         # Load resilience settings
         settings = get_settings()
         self._handler_timeout = settings.resilience.timeout_sensor_processing
+
+        # In-memory cache for last_seen throttling per ESP
+        self._last_seen_cache: dict[str, datetime] = {}
 
     async def handle_sensor_data(self, topic: str, payload: dict) -> bool:
         """
@@ -333,8 +345,15 @@ class SensorDataHandler:
                     data_source = self._detect_data_source(esp_device, payload)
 
                     # Step 8d: Resolve zone_id/subzone_id at measurement time (Phase 0.1)
+                    # T13-R1: Pass sensor_config_id and sensor_type for I2C GPIO-0 resolution
+                    # T13-R2: DeviceScopeService has 30s in-memory cache (avoids DB query per message)
+                    scope_service = DeviceScopeService(session)
                     zone_id, subzone_id = await resolve_zone_subzone_for_sensor(
-                        esp_id_str, gpio, esp_repo, subzone_repo
+                        esp_id_str, gpio, esp_repo, subzone_repo,
+                        sensor_config_id=str(sensor_config.id) if sensor_config else None,
+                        sensor_type=sensor_type,
+                        sensor_config=sensor_config,
+                        scope_service=scope_service,
                     )
 
                     # Step 9: Save data to database
@@ -370,6 +389,15 @@ class SensorDataHandler:
                         zone_id=zone_id,
                         subzone_id=subzone_id,
                         device_name=esp_device.name,
+                    )
+
+                    # MQTT QoS 1 dedup: save_data returns None for duplicate messages
+                    if sensor_data is None:
+                        return True
+
+                    # Step 9a: Secondary health indicator — update last_seen (throttled)
+                    await self._update_last_seen_throttled(
+                        esp_id_str, esp_repo
                     )
 
                     # Step 9b: Update sensor config on successful data save
@@ -661,6 +689,28 @@ class SensorDataHandler:
             )
         except Exception as e:
             logger.error(f"Failed to route threshold notification: {e}")
+
+    async def _update_last_seen_throttled(
+        self, esp_id: str, esp_repo: ESPRepository
+    ) -> None:
+        """
+        Update ESP last_seen as secondary health indicator (throttled).
+
+        Only updates DB at most once per LAST_SEEN_THROTTLE_SECONDS per ESP.
+        Does NOT change device status — that remains the heartbeat_handler's job.
+        Ensures check_device_timeouts() won't mark an ESP as offline while
+        sensor data is still flowing.
+        """
+        now = datetime.now(timezone.utc)
+        last_update = self._last_seen_cache.get(esp_id)
+        if last_update and (now - last_update).total_seconds() < self.LAST_SEEN_THROTTLE_SECONDS:
+            return  # Throttled — skip
+
+        self._last_seen_cache[esp_id] = now
+        try:
+            await esp_repo.update_last_seen(esp_id, now)
+        except Exception as e:
+            logger.debug(f"Failed to update last_seen for {esp_id}: {e}")
 
     @classmethod
     def _check_physical_range(cls, sensor_type: str, value: float) -> str | None:

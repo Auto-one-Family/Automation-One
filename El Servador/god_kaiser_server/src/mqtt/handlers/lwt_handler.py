@@ -28,6 +28,7 @@ from ...core.error_codes import (
 from ...core.logging_config import get_logger
 from ...db.models.audit_log import AuditEventType, AuditSeverity
 from ...db.repositories import ESPRepository
+from ...db.repositories.actuator_repo import ActuatorRepository
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.session import resilient_session
 from ..topics import TopicBuilder
@@ -109,6 +110,23 @@ class LWTHandler:
                 if esp_device.status == "online":
                     await esp_repo.update_status(esp_id_str, "offline")
 
+                    # Reset actuator states to idle for offline device
+                    reset_count = 0
+                    try:
+                        actuator_repo = ActuatorRepository(session)
+                        reset_count = await actuator_repo.reset_states_for_device(
+                            esp_id=esp_device.id,
+                            new_state="idle",
+                            reason="lwt_disconnect",
+                        )
+                        if reset_count > 0:
+                            logger.info(
+                                f"[LWT] Reset {reset_count} actuator state(s) to idle "
+                                f"for disconnected device {esp_id_str}"
+                            )
+                    except Exception as reset_err:
+                        logger.warning(f"[LWT] Failed to reset actuator states for {esp_id_str}: {reset_err}")
+
                     # Update device_metadata with disconnect reason
                     device_metadata = esp_device.device_metadata or {}
                     device_metadata["last_disconnect"] = {
@@ -162,6 +180,7 @@ class LWTHandler:
                                     "timestamp",
                                     int(datetime.now(timezone.utc).timestamp()),
                                 ),
+                                "actuator_states_reset": reset_count,
                             },
                         )
                         logger.debug(f"Broadcast esp_health offline event for {esp_id_str}")

@@ -81,6 +81,7 @@ _logic_engine: LogicEngine = None
 _logic_scheduler: LogicScheduler = None
 _websocket_manager: WebSocketManager = None
 _sequence_executor: SequenceActionExecutor = None
+_mqtt_command_bridge = None  # MQTTCommandBridge instance
 
 
 @asynccontextmanager
@@ -197,6 +198,22 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("MQTT client connected successfully")
 
+        # Step 2b: Clear stale retained emergency-stop message from broker.
+        # Emergency-Stop is a one-shot command, not persistent state.
+        # A retained message would replay on every reconnect/restart,
+        # causing spurious CRITICAL logs and alert noise.
+        if connected:
+            try:
+                mqtt_client.publish(
+                    "kaiser/broadcast/emergency",
+                    "",  # Empty payload clears retained message
+                    qos=0,
+                    retain=True,
+                )
+                logger.info("Cleared retained emergency-stop message from broker")
+            except Exception as e:
+                logger.debug("Failed to clear retained emergency message: %s", e)
+
         # Step 3: Register MQTT handlers (ALWAYS, even if not connected)
         # Handlers will be called when auto-reconnect succeeds
         logger.info("Registering MQTT handlers...")
@@ -275,6 +292,19 @@ async def lifespan(app: FastAPI):
         logger.info("Diagnostics handler registered: kaiser/+/esp/+/system/diagnostics")
 
         logger.info(f"Registered {len(_subscriber_instance.handlers)} MQTT handlers")
+
+        # Step 3.1: MQTTCommandBridge (ACK-gesteuert fuer Zone/Subzone-Operationen)
+        from .services.mqtt_command_bridge import MQTTCommandBridge
+        from .mqtt.handlers.zone_ack_handler import set_command_bridge as set_zone_bridge
+        from .mqtt.handlers.subzone_ack_handler import set_command_bridge as set_subzone_bridge
+        from .mqtt.handlers.heartbeat_handler import set_command_bridge as set_heartbeat_bridge
+
+        global _mqtt_command_bridge
+        _mqtt_command_bridge = MQTTCommandBridge(mqtt_client)
+        set_zone_bridge(_mqtt_command_bridge)
+        set_subzone_bridge(_mqtt_command_bridge)
+        set_heartbeat_bridge(_mqtt_command_bridge)
+        logger.info("MQTTCommandBridge registered with ACK handlers + heartbeat reconnect")
 
         # Step 3.4: Initialize Central Scheduler
         logger.info("Initializing Central Scheduler...")
@@ -891,6 +921,12 @@ async def lifespan(app: FastAPI):
             logger.info("Stopping SequenceActionExecutor cleanup task...")
             await _sequence_executor.shutdown()
             logger.info("SequenceActionExecutor stopped")
+
+        # Step 2.2: Shutdown MQTTCommandBridge (cancel pending Futures)
+        if _mqtt_command_bridge:
+            logger.info("Shutting down MQTTCommandBridge...")
+            await _mqtt_command_bridge.shutdown()
+            logger.info("MQTTCommandBridge shutdown complete")
 
         # Step 2.3: Stop MaintenanceService FIRST (before scheduler shutdown)
         logger.info("Stopping MaintenanceService...")

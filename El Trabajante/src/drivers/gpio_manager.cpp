@@ -769,6 +769,14 @@ bool GPIOManager::enableSafeModeForSubzone(const String& subzone_id) {
 
   bool success = true;
   for (uint8_t gpio : pins) {
+    // Skip pins owned by actuators — safe-mode must not interfere with
+    // actuator OUTPUT state. Actuator pins are managed by ActuatorManager.
+    String owner = getPinOwner(gpio);
+    if (owner == "actuator") {
+      LOG_I(TAG, "GPIOManager: Pin " + String(gpio) + " owned by actuator, skipping safe-mode");
+      continue;
+    }
+
     // De-energize outputs BEFORE mode change
     for (auto& pin_info : pins_) {
       if (pin_info.pin == gpio && pin_info.mode == OUTPUT) {

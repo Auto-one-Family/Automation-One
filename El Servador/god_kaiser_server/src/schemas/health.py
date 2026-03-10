@@ -181,6 +181,36 @@ class SystemResourceHealth(BaseModel):
     )
 
 
+class CircuitBreakerHealth(BaseModel):
+    """Health status of an individual circuit breaker."""
+
+    state: str = Field(..., description="Current state (closed/open/half_open)")
+    failures: int = Field(..., description="Current failure count", ge=0)
+    failure_threshold: int = Field(..., description="Threshold before opening", ge=1)
+    last_failure: Optional[float] = Field(None, description="Timestamp of last failure")
+    forced_open: bool = Field(False, description="Whether manually forced open")
+
+
+class ResilienceSummary(BaseModel):
+    """Summary counts of circuit breaker states."""
+
+    total: int = Field(..., description="Total registered breakers", ge=0)
+    closed: int = Field(0, description="Breakers in closed (healthy) state", ge=0)
+    open: int = Field(0, description="Breakers in open (failing) state", ge=0)
+    half_open: int = Field(0, description="Breakers in half-open (recovering) state", ge=0)
+
+
+class ResilienceHealth(BaseModel):
+    """Resilience status with circuit breaker health."""
+
+    healthy: bool = Field(..., description="True if no circuit breakers are OPEN")
+    breakers: Dict[str, CircuitBreakerHealth] = Field(
+        default_factory=dict,
+        description="Individual circuit breaker states",
+    )
+    summary: ResilienceSummary = Field(..., description="Aggregate breaker state counts")
+
+
 class DetailedHealthResponse(BaseResponse):
     """
     Detailed health check response.
@@ -207,6 +237,9 @@ class DetailedHealthResponse(BaseResponse):
     mqtt: MQTTHealth = Field(..., description="MQTT broker health")
     websocket: WebSocketHealth = Field(..., description="WebSocket health")
     system: SystemResourceHealth = Field(..., description="System resources")
+    resilience: Optional[ResilienceHealth] = Field(
+        None, description="Circuit breaker resilience status"
+    )
 
     # Additional components
     components: List[ComponentHealth] = Field(

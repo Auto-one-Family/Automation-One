@@ -83,6 +83,16 @@ class SensorConditionEvaluator(BaseConditionEvaluator):
             if trigger_subzone != cond_subzone:
                 return False
 
+        # T13-R2: Optional zone_id filter for multi-zone sensors
+        # When condition["zone_id"] is set, only match if the sensor's active zone matches.
+        # For zone_local sensors, zone_id comes from sensor_data (set by resolver).
+        # For multi_zone/mobile sensors, zone_id is set by active_context in sensor_data.
+        cond_zone = condition.get("zone_id")
+        if trigger_matches and cond_zone:
+            trigger_zone = sensor_data.get("zone_id")
+            if trigger_zone != cond_zone:
+                return False
+
         return self._compare(condition, actual_value)
 
     def _matches_trigger(self, condition: Dict, sensor_data: Dict) -> bool:

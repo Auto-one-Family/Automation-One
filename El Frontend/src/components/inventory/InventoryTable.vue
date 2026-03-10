@@ -61,6 +61,8 @@ function cellValue(item: ComponentItem, key: string): string {
     case 'espId': return item.espId
     case 'lastSeen': return item.lastSeen ?? '—'
     case 'nextMaintenance': return item.nextMaintenance ?? '—'
+    case 'scope': return item.scope === 'multi_zone' ? 'Multi-Zone' : item.scope === 'mobile' ? 'Mobil' : item.scope === 'zone_local' ? 'Lokal' : '—'
+    case 'activeZone': return item.activeZone ?? '—'
     default: return ''
   }
 }

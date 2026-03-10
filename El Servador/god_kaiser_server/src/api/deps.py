@@ -635,6 +635,13 @@ OptionalUser = Annotated[Optional[User], Depends(get_optional_user)]
 # =============================================================================
 
 
+def get_command_bridge():
+    """Get the MQTTCommandBridge instance. Returns None if not initialized."""
+    from ..main import _mqtt_command_bridge
+
+    return _mqtt_command_bridge
+
+
 def get_mqtt_publisher():
     """Get MQTT Publisher instance."""
     from ..mqtt.publisher import Publisher

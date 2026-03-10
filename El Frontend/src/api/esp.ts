@@ -97,6 +97,18 @@ export interface ESPDevice {
   offlineInfo?: OfflineInfo
   created_at?: string
   updated_at?: string
+  /** Subzones assigned to this device (T14-Fix-F: hydrated at page load) */
+  subzones?: SubzoneSummary[]
+}
+
+/** Summary of a subzone assigned to an ESP device (from GET /esp/devices) */
+export interface SubzoneSummary {
+  subzone_id: string
+  subzone_name: string
+  assigned_gpios: number[]
+  sensor_count: number
+  actuator_count: number
+  is_active?: boolean
 }
 
 export interface ESPDeviceListResponse {
@@ -215,6 +227,9 @@ function mapSensorConfigToMockSensor(config: SensorConfigResponse): MockSensor {
     config_error: config.config_error || null,
     config_error_detail: config.config_error_detail || null,
     i2c_address: config.i2c_address ?? null,
+    subzone_id: config.subzone_id ?? null,
+    device_scope: config.device_scope ?? null,
+    assigned_zones: config.assigned_zones ?? null,
   }
 }
 
@@ -274,11 +289,13 @@ function mapActuatorConfigToMockActuator(config: ActuatorConfigResponse): MockAc
     state: config.is_active ?? false,
     pwm_value: config.current_value ?? 0,
     emergency_stopped: false,
-    last_command: config.last_command_at || null,
+    last_command_at: config.last_command_at || null,
     subzone_id: config.subzone_id ?? null,
     config_status: config.config_status as MockActuator['config_status'],
     config_error: config.config_error || null,
     config_error_detail: config.config_error_detail || null,
+    device_scope: config.device_scope ?? null,
+    assigned_zones: config.assigned_zones ?? null,
   }
 }
 
@@ -378,6 +395,15 @@ export const espApi = {
     // Create Set of mock ESP IDs for fast lookup
     const mockEspIds = new Set(mockEsps.map((m) => m.esp_id))
 
+    // Build subzone lookup from DB devices (T14-Fix-F: Mock ESPs need DB subzones)
+    const dbSubzonesByDeviceId = new Map<string, SubzoneSummary[]>()
+    for (const dbDev of dbDevices) {
+      const devId = dbDev.device_id || dbDev.esp_id || ''
+      if (devId && dbDev.subzones?.length) {
+        dbSubzonesByDeviceId.set(devId, dbDev.subzones)
+      }
+    }
+
     // Normalize Mock ESPs to unified format (rich data from in-memory store)
     const normalizedMockEsps: ESPDevice[] = mockEsps.map((mock) => ({
       id: mock.esp_id,
@@ -403,6 +429,7 @@ export const espApi = {
       sensor_count: mock.sensors?.length || 0,
       actuator_count: mock.actuators?.length || 0,
       created_at: mock.created_at,
+      subzones: dbSubzonesByDeviceId.get(mock.esp_id) || [],
     }))
 
     // Filter DB devices: exclude those that exist in mock store (prevent duplicates)

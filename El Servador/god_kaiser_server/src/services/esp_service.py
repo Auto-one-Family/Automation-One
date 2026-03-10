@@ -21,6 +21,7 @@ References:
 - El Trabajante/docs/Mqtt_Protocoll.md
 """
 
+import json
 import uuid
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -448,6 +449,11 @@ class ESPService:
 
         # Publish config via MQTT (inject correlation_id for Phase 3 tracking)
         config_with_correlation = {**config, "correlation_id": correlation_id}
+        logger.debug(
+            "Config payload for %s: %s",
+            device_id,
+            json.dumps(config, default=str),
+        )
         success = self.publisher.publish_config(
             esp_id=device_id,
             config=config_with_correlation,
@@ -459,7 +465,12 @@ class ESPService:
             result["success"] = True
             status_note = "" if is_online else f" (device is {device.status}, message queued)"
             result["message"] = f"Config sent to {device_id}{status_note}"
-            logger.info(f"Config sent to {device_id}: {list(config.keys())}")
+            sensor_count = len(config.get("sensors", []))
+            actuator_count = len(config.get("actuators", []))
+            logger.info(
+                "Config sent to %s: %d sensors, %d actuators",
+                device_id, sensor_count, actuator_count,
+            )
 
             # Audit log: config published
             try:

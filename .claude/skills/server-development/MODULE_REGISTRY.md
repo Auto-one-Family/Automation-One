@@ -126,15 +126,15 @@ class ValidationResult:
 
 ### 1.6 ZoneService
 
-**Datei:** `src/services/zone_service.py` (430 Zeilen)
+**Datei:** `src/services/zone_service.py` (T13-R1: Zone Consolidation)
 
 | Methode | Parameter | Return | Beschreibung |
 |---------|-----------|--------|--------------|
-| `assign_zone()` | `esp_id, zone_id, zone_name` | `bool` | Zone zu ESP zuweisen |
-| `unassign_zone()` | `esp_id: str` | `bool` | Zone entfernen |
-| `get_zone_devices()` | `zone_id: str` | `List[ESPDevice]` | Alle ESPs einer Zone |
-| `get_zone_sensors()` | `zone_id: str` | `List[SensorConfig]` | Alle Sensoren einer Zone |
-| `get_zone_actuators()` | `zone_id: str` | `List[ActuatorConfig]` | Alle Actuators einer Zone |
+| `assign_zone()` | `device_id, zone_id, master_zone_id, zone_name, subzone_strategy, changed_by` | `ZoneAssignResponse` | Zone zu ESP zuweisen. T13-R1: Zone muss existieren + aktiv sein. `subzone_strategy`: transfer/copy/reset. Schreibt DeviceZoneChange Audit. Response: `ack_received` (True/False/None), `warning` (bei Timeout) |
+| `remove_zone()` | `device_id, changed_by` | `ZoneRemoveResponse` | Zone entfernen. Schreibt DeviceZoneChange Audit |
+| `get_unassigned_esps()` | - | `List[ESPDevice]` | Alle ESPs ohne Zone-Zuweisung |
+| `_handle_subzone_strategy()` | `device_id, old_zone_id, new_zone_id, strategy, subzone_repo` | `List[dict]` | Subzone transfer/copy/reset Logik (intern). Queries ALL subzones by ESP (not zone-filtered). Reset: physisches DELETE via `delete_all_by_esp()` (T14-Fix-B) |
+| `_generate_unique_copy_id()` | `source_subzone_id, device_id, subzone_repo` | `str` | Unique Copy-ID: strips _copy/_copy_N, counter-basiert (_copy, _copy_2, _copy_3), UUID-Fallback >99 |
 
 ---
 
@@ -145,7 +145,7 @@ class ValidationResult:
 | Methode | Parameter | Return | Beschreibung |
 |---------|-----------|--------|--------------|
 | `assign_subzone()` | `esp_id, subzone_id, gpio_pins[]` | `SubzoneConfig` | Subzone zuweisen |
-| `remove_subzone()` | `esp_id, subzone_id` | `bool` | Subzone entfernen |
+| `remove_subzone()` | `esp_id, subzone_id, reason` | `SubzoneRemoveResponse` | DB-Delete first, then MQTT notify (BUG-5 fix) |
 | `set_safe_mode()` | `esp_id, subzone_id, active, reason` | `bool` | Safe-Mode aktivieren |
 | `get_subzones()` | `esp_id: str` | `List[SubzoneConfig]` | Alle Subzones eines ESP |
 | `get_subzone_status()` | `esp_id, subzone_id` | `SubzoneStatus` | Subzone-Status |
@@ -262,6 +262,55 @@ class ValidationResult:
 | Methode | Parameter | Return | Beschreibung |
 |---------|-----------|--------|--------------|
 | `get_zone_kpis()` | `zone_id: str` | `ZoneKPIs` | VPD, DLI, Health-Score, etc. |
+
+---
+
+### 1.17 DeviceScopeService (T13-R2)
+
+**Datei:** `src/services/device_scope_service.py`
+
+3 Device Scopes: `zone_local` (default), `multi_zone`, `mobile`. In-Memory Cache mit 30s TTL für Hot-Path Lookups.
+
+| Methode | Parameter | Return | Beschreibung |
+|---------|-----------|--------|--------------|
+| `get_active_context()` | `config_type: str, config_id: UUID` | `Optional[ActiveContextData]` | Aktiven Kontext aus Cache (30s TTL) oder DB laden. Returns NamedTuple (session-safe) |
+| `set_context()` | `config_type, config_id, zone_id, subzone_id, source, changed_by` | `DeviceActiveContext` | Kontext setzen + Cache invalidieren |
+| `delete_context()` | `config_type: str, config_id: UUID` | `bool` | Kontext löschen (→ zone_local Fallback) |
+| `resolve_zone()` | `config_type, config_id, esp_id` | `str` | 3-Way Resolution: zone_local → ESP.zone_id, multi_zone/mobile → active_zone_id aus Context |
+
+**Device Scopes:**
+
+| Scope | Beschreibung | Zone-Auflösung |
+|-------|-------------|----------------|
+| `zone_local` | Default — feste Zone des ESP | ESP.zone_id |
+| `multi_zone` | Sensor/Aktor in mehreren Zonen nutzbar | active_zone_id aus DeviceActiveContext |
+| `mobile` | Gerät wechselt physisch Zonen | active_zone_id aus DeviceActiveContext |
+
+---
+
+### 1.18 MQTTCommandBridge (T13-Phase2)
+
+**Datei:** `src/services/mqtt_command_bridge.py` (~230 Zeilen)
+
+ACK-gesteuerte MQTT-Kommunikation für kritische Operationen (Zone/Subzone-Assignment). Ergänzt den bestehenden Publisher um ACK-Waiting via `asyncio.Future`. Fire-and-forget bleibt für unkritische Nachrichten bestehen. Mock-ESPs umgehen die Bridge (fire-and-forget).
+
+| Methode | Parameter | Return | Beschreibung |
+|---------|-----------|--------|--------------|
+| `send_and_wait_ack()` | `topic: str, payload: dict, esp_id: str, command_type: str, timeout: float` | `dict` | Publish MQTT + wait for ACK. Injiziert `correlation_id` in Payload. Raises `MQTTACKTimeoutError` |
+| `resolve_ack()` | `ack_data: dict, esp_id: str, command_type: str` | `bool` | Löst pending Future auf. Matching: 1) correlation_id, 2) (esp_id, command_type) FIFO Fallback |
+| `has_pending()` | `esp_id: str, command_type: str` | `bool` | Prüft ob pending Operations laufen. Genutzt von HeartbeatHandler zur Zone-Mismatch-Toleranz |
+| `shutdown()` | - | `None` | Cancelt alle pending Futures. Aufgerufen bei Server-Shutdown |
+
+**Exceptions:**
+
+| Exception | Beschreibung |
+|-----------|-------------|
+| `MQTTACKTimeoutError` | Kein ACK innerhalb Timeout oder MQTT publish fehlgeschlagen |
+
+**Integration:**
+- ACK-Handler (`zone_ack_handler`, `subzone_ack_handler`) rufen `resolve_ack()` auf via Module-Level Setter `set_command_bridge()`
+- `ZoneService` nutzt Bridge für `assign_zone()` und `remove_zone()` (Real-ESP). Mock-ESP → fire-and-forget
+- Initialisiert in `main.py` Startup Step 3.1 (nach Handler-Registration)
 
 ---
 
@@ -384,19 +433,33 @@ class ValidationResult:
 | GET | `/` | - | - | `HealthStatus` |
 | GET | `/live` | - | - | `{"status": "ok"}` |
 | GET | `/ready` | - | - | `ReadyStatus` |
-| GET | `/detailed` | Active | - | `DetailedHealth` |
+| GET | `/detailed` | Active | - | `DetailedHealth` (inkl. `resilience: ResilienceHealth`) |
 | GET | `/metrics` | Active | - | `Metrics` |
 | GET | `/database` | Admin | - | `DatabaseHealth` |
 
-### 3.7 Zone Router (`/v1/zone`) - 5 Endpoints
+### 3.7 Zone Router (`/v1/zone`) - 7 Endpoints (T13-R1)
 
 | Method | Path | Auth | Request | Response |
 |--------|------|------|---------|----------|
-| GET | `/` | Active | - | `List[Zone]` |
-| POST | `/assign` | Operator | `ZoneAssign` | `SuccessResponse` |
-| POST | `/unassign` | Operator | `ZoneUnassign` | `SuccessResponse` |
-| GET | `/{zone_id}/devices` | Active | - | `List[ESPDevice]` |
-| GET | `/{zone_id}/status` | Active | - | `ZoneStatus` |
+| GET | `/zones` | Active | `?status=active\|archived\|deleted` | `ZoneListResponse` (from zones table, enriched with counts) |
+| POST | `/devices/{esp_id}/assign` | Operator | `ZoneAssignRequest` (zone_id, subzone_strategy) | `ZoneAssignResponse` |
+| DELETE | `/devices/{esp_id}/zone` | Operator | - | `ZoneRemoveResponse` |
+| GET | `/devices/{esp_id}` | Active | - | `ZoneInfo` |
+| GET | `/{zone_id}/devices` | Active | - | `List[ZoneInfo]` |
+| GET | `/{zone_id}/monitor-data` | Active | - | `ZoneMonitorData` |
+| GET | `/unassigned` | Active | - | `List[str]` |
+
+### 3.7b Zone Entity Router (`/v1/zones`) - 7 Endpoints (T13-R1)
+
+| Method | Path | Auth | Request | Response |
+|--------|------|------|---------|----------|
+| POST | `/` | Operator | `ZoneCreate` | `ZoneResponse` (201) |
+| GET | `/` | Operator | `?status=active\|archived\|deleted` | `ZoneListResponse` |
+| GET | `/{zone_id}` | Operator | - | `ZoneResponse` |
+| PUT | `/{zone_id}` | Operator | `ZoneUpdate` | `ZoneResponse` |
+| POST | `/{zone_id}/archive` | Operator | - | `ZoneResponse` (deactivates subzones) |
+| POST | `/{zone_id}/reactivate` | Operator | - | `ZoneResponse` |
+| DELETE | `/{zone_id}` | Operator | - | `ZoneDeleteResponse` (soft-delete, blocked if devices assigned) |
 
 ### 3.8 Subzone Router (`/v1/subzone`) - 6 Endpoints
 
@@ -448,10 +511,11 @@ Wichtige Endpoints:
 | errors | /v1/errors | 4 | Active | Error Code Lookup |
 | sensor_type_defaults | /v1/sensor-type-defaults | 6 | Operator+ | Sensor-Type Defaults CRUD |
 | sequences | /v1/sequences | 4 | Operator+ | Actuator Sequence Management |
+| device_context | /v1/device-context | 3 | Operator+ | Multi-Zone Device Scope (T13-R2) |
 
 ---
 
-## 4. Database Models (18 Models)
+## 4. Database Models (20 Models)
 
 ### 4.1 Core Models
 
@@ -478,12 +542,15 @@ Wichtige Endpoints:
 | **User** | `users` | `id (PK)`, `username`, `email`, `password_hash`, `role`, `is_active`, `last_login`, `created_at` |
 | **TokenBlacklist** | `token_blacklist` | `id (PK)`, `jti`, `expires_at`, `created_at` |
 | **AuditLog** | `audit_logs` | `id (PK)`, `event_type`, `severity`, `source_type`, `source_id`, `user_id`, `message`, `details (JSON)`, `correlation_id`, `created_at` |
-| **SubzoneConfig** | `subzone_configs` | `id (PK)`, `esp_id (FK)`, `subzone_id`, `subzone_name`, `assigned_gpios (JSON)`, `safe_mode_active`, `custom_data (JSONB)`, `created_at` |
+| **Zone** | `zones` | `id (UUID PK)`, `zone_id (UNIQUE)`, `name`, `description`, `status` (active/archived/deleted), `deleted_at`, `deleted_by`, `created_at`, `updated_at`. FK: `esp_devices.zone_id` → `zones.zone_id` (T13-R1) |
+| **SubzoneConfig** | `subzone_configs` | `id (PK)`, `esp_id (FK)`, `subzone_id`, `subzone_name`, `assigned_gpios (JSON)`, `assigned_sensor_config_ids (JSON)`, `is_active (Bool)`, `safe_mode_active`, `custom_data (JSONB)`, `created_at` (T13-R1) |
+| **DeviceZoneChange** | `device_zone_changes` | `id (UUID PK)`, `esp_id`, `old_zone_id`, `new_zone_id`, `subzone_strategy`, `affected_subzones (JSON)`, `changed_by`, `changed_at` (T13-R1 Audit) |
 | **ZoneContext** | `zone_contexts` | `id (PK)`, `zone_id (UNIQUE)`, `zone_name`, `variety`, `substrate`, `growth_phase`, `planted_date`, `expected_harvest`, `cycle_history (JSONB)`, `custom_data (JSONB)`, `created_at`, `updated_at` |
 | **ESPHeartbeatLog** | `esp_heartbeat_logs` | `id (PK)`, `esp_id (FK)`, `uptime`, `heap_free`, `wifi_rssi`, `sensor_count`, `actuator_count`, `timestamp` |
 | **SensorTypeDefaults** | `sensor_type_defaults` | `id (PK)`, `sensor_type`, `operating_mode`, `measurement_interval_ms`, `timeout_multiplier` |
 | **SystemConfig** | `system_config` | `id (PK)`, `config_key`, `config_value`, `updated_at` |
 | **LibraryMetadata** | `library_metadata` | `id (PK)`, `sensor_type`, `library_path`, `version`, `loaded_at` |
+| **DeviceActiveContext** | `device_active_context` | `config_type (sensor/actuator)`, `config_id (UUID PK FK)`, `active_zone_id`, `active_subzone_id`, `context_source (zone_local/multi_zone/mobile)`, `changed_at`, `changed_by` (T13-R2) |
 
 ### 4.4 Unique Constraints
 
@@ -591,7 +658,7 @@ CIRCUIT_BREAKER_MQTT_RECOVERY_TIMEOUT=30
 | Handler | Datei | Zeilen | Topic | Funktion |
 |---------|-------|--------|-------|----------|
 | SensorDataHandler | sensor_handler.py | 731 | `+/sensor/+/data` | Sensor-Daten verarbeiten |
-| HeartbeatHandler | heartbeat_handler.py | 1,112 | `+/system/heartbeat` | Heartbeat + Auto-Discovery |
+| HeartbeatHandler | heartbeat_handler.py | ~1,500 | `+/system/heartbeat` | Heartbeat + Auto-Discovery + Full-State-Push on Reconnect (T13-Phase3) + Config-Push (120s cooldown, offline guard) |
 | ActuatorStatusHandler | actuator_handler.py | 457 | `+/actuator/+/status` | Actuator-Status |
 | ActuatorResponseHandler | actuator_response_handler.py | 279 | `+/actuator/+/response` | Command-Response |
 | ActuatorAlertHandler | actuator_alert_handler.py | 320 | `+/actuator/+/alert` | Alerts + E-Stop |
@@ -611,12 +678,14 @@ CIRCUIT_BREAKER_MQTT_RECOVERY_TIMEOUT=30
 | Repository | Model | Spezial-Queries |
 |-----------|-------|-----------------|
 | ESPRepository | ESPDevice | `get_by_device_id(include_deleted)`, `soft_delete()`, `get_running_mocks()`, `get_online()`, `rebuild_simulation_config(device, sensor_configs)` |
-| SensorRepository | SensorConfig | `get_by_esp_gpio_and_type()`, `get_by_esp_gpio_type_and_i2c()`, `get_by_esp_gpio_type_and_onewire()` |
+| SensorRepository | SensorConfig | `get_by_esp_gpio_and_type()`, `get_by_esp_gpio_type_and_i2c()`, `get_by_esp_gpio_type_and_onewire()`, `get_all_by_i2c_address()` |
 | ActuatorRepository | ActuatorConfig | `get_by_esp_and_gpio()`, `get_state()`, `log_command()` |
 | LogicRepository | CrossESPLogic | `get_rules_by_trigger_sensor()`, `get_enabled_rules()` |
 | AuditLogRepository | AuditLog | `search()`, `get_stats()`, `cleanup_old()` |
 | UserRepository | User | `get_by_username()`, `get_by_email()`, `authenticate()` |
-| SubzoneRepository | SubzoneConfig | `get_by_esp_and_subzone()`, `get_by_esp()` |
+| ZoneRepository | Zone | `get_by_zone_id()`, `exists_by_zone_id()`, `create()`, `update()`, `list_all()`, `list_active()`, `list_by_status()`, `archive()`, `reactivate()`, `soft_delete()`, `is_active()`, `count()` (T13-R1) |
+| SubzoneRepository | SubzoneConfig | `get_by_esp_and_subzone()`, `get_by_esp()`, `get_by_esp_and_zone()`, `update_parent_zone()`, `deactivate_by_zone()`, `get_subzone_by_sensor_config_id()`, `sync_subzone_counts()` (T13-R1) |
+| DeviceZoneChangeRepository | DeviceZoneChange | (via direct session in ZoneService) (T13-R1) |
 | ESPHeartbeatRepository | ESPHeartbeatLog | `get_latest()`, `get_history()`, `cleanup_old()` |
 | SystemConfigRepository | SystemConfig | `get_value()`, `set_value()` |
 | SensorTypeDefaultsRepository | SensorTypeDefaults | `get_by_sensor_type()`, `get_all()` |

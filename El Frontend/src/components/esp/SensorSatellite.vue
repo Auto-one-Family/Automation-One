@@ -21,7 +21,8 @@ import {
   getSensorUnit,
   getSensorLabel,
   getMultiValueDeviceConfig,
-  getValueConfigForSensorType
+  getValueConfigForSensorType,
+  getSensorDisplayName,
 } from '@/utils/sensorDefaults'
 import { formatNumber } from '@/utils/formatters'
 import { getQualityLabel } from '@/utils/labels'
@@ -63,6 +64,10 @@ interface Props {
   i2cAddress?: number | null
   /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL */
   interfaceType?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | null
+  /** Device scope (T13-R3 WP4): zone_local, multi_zone, mobile */
+  deviceScope?: 'zone_local' | 'multi_zone' | 'mobile' | null
+  /** Assigned zones for multi_zone/mobile devices */
+  assignedZones?: string[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -73,6 +78,8 @@ const props = withDefaults(defineProps<Props>(), {
   multiValues: null,
   isMultiValue: false,
   i2cAddress: null,
+  deviceScope: null,
+  assignedZones: () => [],
 })
 
 const emit = defineEmits<{
@@ -127,7 +134,11 @@ const deviceConfig = computed(() => {
 
 /** Display label for header (device name or sensor type) */
 const displayLabel = computed(() => {
-  // Always prefer user-provided custom name
+  // Multi-value with custom name: disambiguate "Temp&Hum" → "Temp&Hum (Temperatur)"
+  if (props.name && props.name.trim().length > 0 && props.isMultiValue) {
+    return getSensorDisplayName({ sensor_type: props.sensorType, name: props.name })
+  }
+  // Single-value with custom name: use directly
   if (props.name && props.name.trim().length > 0) {
     return props.name
   }
@@ -160,6 +171,24 @@ const interfaceLabel = computed((): string => {
   if (props.gpio !== null && props.gpio !== undefined && props.gpio !== 0) {
     return `GPIO ${props.gpio}`
   }
+  return ''
+})
+
+// Scope badge (T13-R3 WP4): only show for non-default scopes
+const scopeBadge = computed(() => {
+  const scope = props.deviceScope
+  if (!scope || scope === 'zone_local') return null
+  if (scope === 'multi_zone') return { text: 'MZ', cls: 'sensor-satellite__scope-badge--multi-zone' }
+  if (scope === 'mobile') return { text: 'Mob', cls: 'sensor-satellite__scope-badge--mobile' }
+  return null
+})
+
+const scopeTooltip = computed(() => {
+  if (!scopeBadge.value) return ''
+  if (props.deviceScope === 'multi_zone' && props.assignedZones?.length) {
+    return `Multi-Zone: ${props.assignedZones.join(', ')}`
+  }
+  if (props.deviceScope === 'mobile') return 'Mobiles Gerät'
   return ''
 })
 
@@ -339,6 +368,7 @@ function handleDragEnd(event: DragEvent) {
       </div>
       <span class="sensor-satellite__label" :title="displayLabel">{{ displayLabel }}</span>
       <span v-if="interfaceLabel" class="sensor-satellite__gpio-badge">{{ interfaceLabel }}</span>
+      <span v-if="scopeBadge" :class="['sensor-satellite__scope-badge', scopeBadge.cls]" :title="scopeTooltip">{{ scopeBadge.text }}</span>
     </div>
 
     <!-- Values Section: Grid layout based on value count -->
@@ -548,6 +578,27 @@ function handleDragEnd(event: DragEvent) {
   padding: 0.0625rem 0.1875rem;
   border-radius: 0.125rem;
   flex-shrink: 0;
+}
+
+/* Scope badges (T13-R3 WP4) */
+.sensor-satellite__scope-badge {
+  font-size: 7px;
+  font-weight: 600;
+  padding: 0.0625rem 0.25rem;
+  border-radius: 0.125rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.sensor-satellite__scope-badge--multi-zone {
+  background: rgba(96, 165, 250, 0.2);
+  color: rgb(96, 165, 250);
+}
+
+.sensor-satellite__scope-badge--mobile {
+  background: rgba(251, 146, 60, 0.2);
+  color: rgb(251, 146, 60);
 }
 
 /* =============================================================================

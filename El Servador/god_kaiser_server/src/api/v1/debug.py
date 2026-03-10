@@ -68,7 +68,7 @@ from ...core.exceptions import (
     SimulationNotRunningError,
 )
 from ...services.audit_retention_service import AuditRetentionService
-from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
+from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository, SubzoneRepository
 from ...sensors.sensor_type_registry import (
     expand_multi_value,
     get_mock_default_raw_value,
@@ -131,6 +131,8 @@ def _build_mock_esp_response(
                 last_read=None,
                 i2c_address=config.get("i2c_address"),
                 interface_type=config.get("interface_type"),
+                device_scope=config.get("device_scope", "zone_local"),
+                assigned_zones=config.get("assigned_zones"),
             )
         )
 
@@ -163,6 +165,8 @@ def _build_mock_esp_response(
                 pwm_value=act_pwm,
                 emergency_stopped=runtime_emergency,
                 last_command=act_last_cmd,
+                device_scope=config.get("device_scope", "zone_local"),
+                assigned_zones=config.get("assigned_zones"),
             )
         )
 
@@ -976,6 +980,14 @@ async def add_sensor(
     await db.commit()
     success = True
 
+    # T13-R1: Sync subzone sensor/actuator counts after sensor create
+    try:
+        _subzone_repo = SubzoneRepository(db)
+        if await _subzone_repo.sync_subzone_counts(esp_id, device.id):
+            await db.commit()
+    except Exception:
+        logger.debug("Subzone count sync skipped for %s", esp_id)
+
     # 3. If simulation is running: Start sensor job for each created type
     jobs_started = 0
     initial_published_count = 0
@@ -1172,6 +1184,14 @@ async def remove_sensor(
     all_sensor_cfgs = await sensor_repo.get_by_esp(device.id)
     await esp_repo.rebuild_simulation_config(device, all_sensor_cfgs)
     await db.commit()
+
+    # T13-R1: Sync subzone sensor/actuator counts after sensor delete
+    try:
+        _subzone_repo = SubzoneRepository(db)
+        if await _subzone_repo.sync_subzone_counts(esp_id, device.id):
+            await db.commit()
+    except Exception:
+        logger.debug("Subzone count sync skipped for %s", esp_id)
 
     return CommandResponse(
         success=True,
@@ -1412,6 +1432,14 @@ async def add_actuator(
             )
 
     await db.commit()
+
+    # T13-R1: Sync subzone sensor/actuator counts after actuator create
+    try:
+        _subzone_repo = SubzoneRepository(db)
+        if await _subzone_repo.sync_subzone_counts(esp_id, device.id):
+            await db.commit()
+    except Exception:
+        logger.debug("Subzone count sync skipped for %s", esp_id)
 
     # Sync with running simulation runtime (if active)
     runtime_synced = False

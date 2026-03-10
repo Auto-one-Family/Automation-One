@@ -7,7 +7,7 @@ Status: IMPLEMENTED
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple
 
 from sqlalchemy import String, and_, case, cast, desc, func, select, update
@@ -245,7 +245,11 @@ class NotificationRepository(BaseRepository[Notification]):
 
         Used for broadcast dedup (Grafana alerts) where fingerprint is not
         stored on per-user copies but correlation_id is.
+
+        Also checks for recently resolved notifications (within 30 minutes)
+        to prevent refire-cycle duplicates (firing → resolved → firing).
         """
+        # Check active/acknowledged notifications
         stmt = (
             select(func.count())
             .select_from(Notification)
@@ -257,7 +261,26 @@ class NotificationRepository(BaseRepository[Notification]):
             )
         )
         result = await self.session.execute(stmt)
-        return result.scalar_one() > 0
+        if result.scalar_one() > 0:
+            return True
+
+        # Refire-cycle protection: also check recently resolved notifications.
+        # If an alert was resolved < 30 min ago and fires again, it's a
+        # refire-cycle artifact, not a genuinely new incident.
+        refire_cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+        refire_stmt = (
+            select(func.count())
+            .select_from(Notification)
+            .where(
+                and_(
+                    Notification.correlation_id == correlation_id,
+                    Notification.status == AlertStatus.RESOLVED,
+                    Notification.resolved_at >= refire_cutoff,
+                )
+            )
+        )
+        refire_result = await self.session.execute(refire_stmt)
+        return refire_result.scalar_one() > 0
 
     async def count_today_warnings(self, user_id: int, source: str) -> int:
         """Count warning notifications sent today for a user+source."""

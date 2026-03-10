@@ -52,6 +52,8 @@ export interface UseDashboardWidgetsOptions {
   onConfigClick?: (widgetId: string, widgetType: string) => void
   /** Called when widget emits onUpdate:config */
   onConfigUpdate?: (widgetId: string, newConfig: Record<string, any>) => void
+  /** Disable interactive controls (e.g. actuator toggle) in monitor context. Default: false */
+  readOnly?: boolean
 }
 
 export interface UseDashboardWidgetsReturn {
@@ -122,6 +124,7 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
     showWidgetHeader = true,
     onConfigClick,
     onConfigUpdate,
+    readOnly = false,
   } = options
 
   // Capture appContext in setup() context — CRITICAL: do not move into callbacks
@@ -224,6 +227,11 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
     if (config.warnHigh != null) props.warnHigh = config.warnHigh
     if (config.alarmLow != null) props.alarmLow = config.alarmLow
     if (config.alarmHigh != null) props.alarmHigh = config.alarmHigh
+
+    // readOnly prop for actuator widgets (monitor context = no toggle)
+    if (readOnly && type === 'actuator-card') {
+      props.readOnly = true
+    }
 
     // onUpdate:config handler
     if (onConfigUpdate) {

@@ -133,6 +133,7 @@ export const useEspStore = defineStore('esp', () => {
       types: [
         'esp_health', 'sensor_data', 'actuator_status', 'actuator_alert',
         'config_response', 'zone_assignment', 'subzone_assignment', 'sensor_health',
+        'device_scope_changed', 'device_context_changed',
         'device_discovered', 'device_approved', 'device_rejected', 'device_rediscovered',
         'actuator_response', 'actuator_command', 'actuator_command_failed',
         'config_published', 'config_failed',
@@ -1085,6 +1086,18 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         }
       }
 
+      // Reset actuator states to idle when device goes offline with reset count
+      let updatedActuators = device.actuators
+      if (data.status === 'offline' && data.actuator_states_reset && data.actuator_states_reset > 0) {
+        updatedActuators = (device.actuators as any[])?.map((actuator: any) => {
+          if (actuator.state !== 'idle' && actuator.state !== 'emergency_stop'
+              && actuator.state !== false) {
+            return { ...actuator, state: false, current_value: 0 }
+          }
+          return actuator
+        }) ?? []
+      }
+
       // Replace device with updated copy (triggers Vue reactivity)
       devices.value[deviceIndex] = {
         ...device,
@@ -1097,6 +1110,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         last_heartbeat: newLastSeen,
         status: data.status ?? device.status,
         name: data.name ?? device.name,
+        actuators: updatedActuators,
         // Clear offlineInfo when online, set when offline
         offlineInfo: data.status === 'offline' ? offlineInfo : undefined,
       }
@@ -1189,12 +1203,44 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    */
   function handleSubzoneAssignment(message: any): void {
     const zoneStore = useZoneStore()
-    zoneStore.handleSubzoneAssignment(
+    const needsRefresh = zoneStore.handleSubzoneAssignment(
       message,
       devices.value,
       getDeviceId,
       (idx, dev) => { devices.value[idx] = dev },
     )
+    // Refresh devices to get updated subzones[] from API (T14-Fix-F)
+    if (needsRefresh) {
+      fetchAll().catch((e: unknown) => {
+        logger.warn('Failed to refresh devices after subzone change', e)
+      })
+    }
+  }
+
+  /**
+   * Device scope changed handler - delegates to zone.store.ts (T13-R2)
+   * Server: sensors.py/actuators.py → WS: device_scope_changed
+   */
+  function handleDeviceScopeChanged(message: any): void {
+    const zoneStore = useZoneStore()
+    zoneStore.handleDeviceScopeChanged(message)
+    // Refresh devices to get updated scope from API (T13-R2)
+    fetchAll().catch((e: unknown) => {
+      logger.warn('Failed to refresh devices after scope change', e)
+    })
+  }
+
+  /**
+   * Device context changed handler - delegates to zone.store.ts (T13-R2)
+   * Server: device_context.py → WS: device_context_changed
+   */
+  function handleDeviceContextChanged(message: any): void {
+    const zoneStore = useZoneStore()
+    zoneStore.handleDeviceContextChanged(message)
+    // Refresh devices to get updated context from API (T13-R2)
+    fetchAll().catch((e: unknown) => {
+      logger.warn('Failed to refresh devices after context change', e)
+    })
   }
 
   // ===========================================================================
@@ -1327,6 +1373,33 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     if (device.sensors.length < before) {
       const toast = useToast()
       toast.info(`Sensor entfernt (${data.sensor_type})`, { duration: 3000 })
+    }
+  }
+
+  /**
+   * Actuator config deleted handler — removes actuator from device.actuators array.
+   * Server: actuators.py DELETE → WS: actuator_config_deleted
+   * Payload: { esp_id, gpio, actuator_type }
+   */
+  function handleActuatorConfigDeleted(message: { data: Record<string, unknown> }): void {
+    const data = message.data as { esp_id?: string; gpio?: number; actuator_type?: string }
+    if (!data.esp_id || data.gpio === undefined) return
+
+    const result = findDeviceByEspIdDefensive(data.esp_id)
+    if (!result) return
+
+    const { device } = result
+    if (!device.actuators) return
+
+    const before = device.actuators.length
+
+    device.actuators = device.actuators.filter(
+      a => a.gpio !== data.gpio,
+    )
+
+    if (device.actuators.length < before) {
+      const toast = useToast()
+      toast.info(`Aktor entfernt (GPIO ${data.gpio})`, { duration: 3000 })
     }
   }
 
@@ -1592,6 +1665,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       ws.on('subzone_assignment', handleSubzoneAssignment),  // WP4
       ws.on('sensor_health', handleSensorHealth),  // Phase 2E
       ws.on('sensor_config_deleted', handleSensorConfigDeleted),  // T08-Fix D
+      ws.on('actuator_config_deleted', handleActuatorConfigDeleted),  // Fix-Q: reactive actuator delete
+      // T13-R2: Device Scope & Context
+      ws.on('device_scope_changed', handleDeviceScopeChanged),
+      ws.on('device_context_changed', handleDeviceContextChanged),
       // Discovery/Approval Phase
       ws.on('device_discovered', handleDeviceDiscovered),
       ws.on('device_approved', handleDeviceApproved),

@@ -147,6 +147,7 @@ export const sensorsApi = {
     params?: {
       start_time?: string
       end_time?: string
+      sensor_type?: string
     }
   ): Promise<SensorStatsResponse> {
     const response = await api.get<SensorStatsResponse>(

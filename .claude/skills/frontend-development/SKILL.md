@@ -16,8 +16,8 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.61
-**Letzte Aktualisierung:** 2026-03-08
+**Version:** 9.72
+**Letzte Aktualisierung:** 2026-03-10
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
 
@@ -114,17 +114,18 @@ npm run test:coverage # Vitest mit v8 Coverage
 
 ```
 El Frontend/src/
-├── api/           # 18 API-Module
-│   ├── index.ts       # Axios Instance + Interceptors (~89 Zeilen)
-│   ├── auth.ts        # Login, Logout, Token Refresh
-│   ├── esp.ts         # ESP Device Management
-│   ├── sensors.ts     # Sensor CRUD + History
-│   ├── actuators.ts   # Actuator Commands
-│   ├── zones.ts       # Zone Assignment
-│   ├── subzones.ts    # Subzone Management
-│   ├── backups.ts     # DB-Backup (Admin)
-│   ├── inventory.ts   # Zone Context, Export, Schema Registry (Phase K4)
-│   ├── logic.ts       # Automation Rules
+├── api/           # 19 API-Module
+│   ├── index.ts           # Axios Instance + Interceptors (~89 Zeilen)
+│   ├── auth.ts            # Login, Logout, Token Refresh
+│   ├── esp.ts             # ESP Device Management
+│   ├── sensors.ts         # Sensor CRUD + History
+│   ├── actuators.ts       # Actuator Commands
+│   ├── zones.ts           # Zone Assignment + ZoneEntity CRUD (T13-R3)
+│   ├── subzones.ts        # Subzone Management
+│   ├── device-context.ts  # Device Context setzen/lesen/loeschen (T13-R3, NEU)
+│   ├── backups.ts         # DB-Backup (Admin)
+│   ├── inventory.ts       # Zone Context, Export, Schema Registry (Phase K4)
+│   ├── logic.ts           # Automation Rules
 │   └── ...
 ├── config/        # Device Schemas (Phase K4)
 │   └── device-schemas/  # JSON-Schemas für Sensoren/Aktoren (DS18B20, SHT31, relay, pwm, etc.)
@@ -136,7 +137,7 @@ El Frontend/src/
 │   ├── dashboard/     # Dashboard subcomponents (11 Dateien, inkl. DashboardViewer + InlineDashboardPanel)
 │   ├── dashboard-widgets/ # SensorCardWidget, GaugeWidget, LineChartWidget, etc.
 │   ├── database/      # DataTable, FilterPanel, Pagination, etc. (6 Dateien)
-│   ├── devices/       # SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection, AlertConfigSection, DeviceAlertConfigSection, RuntimeMaintenanceSection, SubzoneAssignmentSection (8 Dateien)
+│   ├── devices/       # SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection, AlertConfigSection, DeviceAlertConfigSection, RuntimeMaintenanceSection, SubzoneAssignmentSection, DeviceScopeSection (9 Dateien)
 │   ├── error/         # ErrorDetailsModal, TroubleshootingPanel
 │   ├── esp/           # ESPCard, ESPCardBase, ESPOrbitalLayout, SensorConfigPanel, ActuatorConfigPanel (11 Dateien)
 │   ├── filters/       # UnifiedFilterBar
@@ -151,13 +152,13 @@ El Frontend/src/
 │   ├── safety/        # EmergencyStopButton
 │   ├── system-monitor/ # 19 Dateien (inkl. HierarchyTab, HealthTab, DiagnoseTab, ReportsTab)
 │   ├── widgets/       # Widget primitives
-│   └── zones/         # ZoneGroup, ZoneAssignmentPanel
+│   └── zones/         # ZoneGroup, ZoneAssignmentPanel, ZoneSettingsSheet, ZoneSwitchDialog (4 Dateien)
 ├── shared/        # Design System + Shared Stores (NEU)
 │   ├── design/
 │   │   ├── primitives/  # 13 Komponenten (10 Base + AccordionSection + QualityIndicator + RangeSlider + SlideOver)
 │   │   ├── layout/      # AppShell, Sidebar, TopBar (3 Dateien)
 │   │   └── patterns/    # ConfirmDialog, ContextMenu, EmptyState, ErrorState, ToastContainer (5 Dateien)
-│   └── stores/          # 18 Shared Stores (actuator, alertCenter, auth, config, dashboard, database, diagnostics, dragState, gpio, inventory, logic, notification, notificationInbox, plugins, quickAction, sensor, ui, zone)
+│   └── stores/          # 19 Shared Stores (actuator, alertCenter, auth, config, dashboard, database, diagnostics, dragState, gpio, inventory, logic, notification, notificationInbox, plugins, quickAction, sensor, ui, zone + zone erweitert T13-R3)
 ├── styles/        # CSS Design Tokens + Shared Styles (6 Dateien)
 │   ├── tokens.css       # Design Token Definitionen
 │   ├── glass.css        # Glassmorphism Klassen
@@ -197,7 +198,7 @@ El Frontend/src/
 ├── stores/        # 1 Pinia Store (Legacy, ESP-spezifisch)
 │   └── esp.ts         # ~2500 Zeilen
 ├── types/         # 8 Type-Dateien
-│   ├── index.ts           # ~979 Zeilen (Re-Exports)
+│   ├── index.ts           # ~1050 Zeilen (Re-Exports, T13-R3: ZoneEntity, DeviceScope, DeviceContext)
 │   ├── monitor.ts         # ZoneMonitorData, SubzoneGroup (Monitor L2)
 │   ├── websocket-events.ts # ~748 Zeilen
 │   ├── logic.ts
@@ -276,14 +277,18 @@ DashboardView.vue
 ```
 HardwareView.vue
 ├── ActionBar.vue (Filter, View Toggle)
-├── ZonePlate.vue[] (Accordion, sortiert: offline→online→leer→alpha)
-│   ├── Header: Aggregierte Sensorwerte + Status-Dot + Subzone-Chips
-│   ├── VueDraggable (filteredDevices)
-│   │   └── DeviceMiniCard.vue[] (Compact: groupSensorsByBaseType)
+├── ZonePlate.vue[] (Accordion, sortiert: offline→online→leer→alpha, Datenquelle: zoneStore.activeZones merged mit device-only Zonen)
+│   ├── Header: Aggregierte Sensorwerte + Status-Dot + Subzone-Chips + Settings-Icon (→ ZoneSettingsSheet) + Zone-Name click-to-rename (cursor: text, dashed underline on hover)
+│   ├── VueDraggable (filteredDevices, disabled bei isArchived)
+│   │   └── DeviceMiniCard.vue[] (Compact: groupSensorsByBaseType, Sensor+Aktor-Count "XS / YA", Touch: always-visible actions, 44px touch targets, long-press feedback via chosen-class)
 │   └── EmptyState (PackageOpen, wenn Zone leer)
+├── Archived Zones AccordionSection (localStorage, nur wenn archivedZoneEntries > 0)
+│   └── ZonePlate.vue[] (isArchived=true, opacity 0.6, dashed border, kein DnD, kein Subzone-CRUD)
 ├── UnassignedDropBar.vue (bottom, MOCK-Badge, Sensor-Summary)
 ├── PendingDevicesPanel.vue (slide-over)
-├── ESPSettingsSheet.vue (SlideOver, ESP-Detail: Status, Zone, Alert-Konfiguration (Gerät) via DeviceAlertConfigSection, Geräte nach Subzone read-only, Mock/Real, Delete)
+├── ESPSettingsSheet.vue (SlideOver, ESP-Detail: Status, Zone (ZoneAssignmentPanel mit subzoneStrategy-Prop), Alert-Konfiguration (Gerät) via DeviceAlertConfigSection, Geräte nach Subzone read-only (Gruppierung via device.subzones SubzoneSummary-Resolver), Mock/Real, Delete)
+│   └── ZoneSwitchDialog.vue (Modal bei Zone-Wechsel: Strategy-Auswahl transfer/reset/copy via RadioGroup, Props: isOpen/deviceName/currentZoneName/targetZoneName, Emits: close/confirm(strategy))
+├── ZoneSettingsSheet.vue (SlideOver, Zone-Detail: Name, Beschreibung, Status, Archivieren/Reaktivieren, Loeschen)
 ├── SensorConfigPanel.vue (SlideOver, via DeviceDetailView @sensor-click — Grundeinstellungen inkl. operating_mode, timeout_seconds)
 └── ActuatorConfigPanel.vue (SlideOver, via DeviceDetailView @actuator-click — subzone_id via normalizeSubzoneId)
 ```
@@ -294,7 +299,8 @@ HardwareView.vue
 
 ```
 SensorsView.vue (?sensor={espId}-gpio{gpio} oder ?focus=sensorId → auto-open DeviceDetailPanel, NICHT SensorConfigPanel)
-├── InventoryTable.vue (filterbar, sortierbar)
+├── Scope-Filter-Chips (zone_local/multi_zone/mobile, nur sichtbar wenn hasNonLocalScope, T13-R3 WP5)
+├── InventoryTable.vue (filterbar, sortierbar, Scope/ActiveZone Spalten opt-in defaultVisible: false)
 ├── DeviceDetailPanel.vue (SlideOver: Metadaten, Schema, Zone-Kontext, LinkedRules)
 │   └── Link "Vollständige Konfiguration" → /hardware?openSettings={espId} (öffnet ESPSettingsSheet; Sensor-/Aktor-Konfig via Level 2 → Card klicken)
 └── EmergencyStopButton.vue
@@ -305,26 +311,33 @@ SensorsView.vue (?sensor={espId}-gpio{gpio} oder ?focus=sensorId → auto-open D
 ```
 MonitorView.vue (URL-Sync: L1→L2→L3 via route params)
 ├── L1 /monitor — Ready-Gate: BaseSkeleton bei espStore.isLoading, ErrorState bei espStore.error, Content nur nach erfolgreichem Laden
-│   ├── Datenquellen: espStore.devices (KPIs) + zonesApi.getAllZones() (inkl. leere Zonen aus ZoneContext)
-│   ├── Zone-Tiles: <button> (keyboard-navigierbar, :focus-visible); Reihenfolge: Zone-Tiles → Aktive Automatisierungen → Cross-Zone-Dashboards → Inline-Panels
+│   ├── Datenquellen: espStore.devices (KPIs) + zonesApi.getAllZones() via fetchAllZonesGuarded (30s Cooldown, inkl. leere Zonen aus ZoneContext) + zoneStore.activeZones/archivedZones (T13-R3 WP5)
+│   ├── Zone-Filter: Native <select> mit activeZones + <optgroup label="Archiv"> fuer archivedZones; selectedZoneFilter ref; filteredZoneKPIs computed; "Gefiltert" Badge (ListFilter-Icon) bei aktivem Filter; Archived-Banner bei archivierter Zone (T13-R3 WP5)
+│   ├── Zone-Tiles: <button> (keyboard-navigierbar, :focus-visible); CSS-Grid align-items: stretch (gleiche Hoehe pro Zeile), Footer margin-top: auto; Reihenfolge: Zone-Tiles → Aktive Automatisierungen → Cross-Zone-Dashboards → Inline-Panels
 │   ├── Leere Zonen: ZoneHealthStatus 'empty' (Minus-Icon, opacity 0.7, status "Leer"), NICHT "alarm"
 │   ├── Zone-Tile Footer: "X/Y online" (ESP-Count), Sensor/Aktor-Counts, lastActivity
-│   ├── ActiveAutomationsSection: logicStore.enabledRules, Top 5 als RuleCardCompact (ul/li, :focus-visible), Link "Alle Regeln" → /logic; Zone-Badge Fallback "—"; responsive Grid
+│   ├── ActiveAutomationsSection: v-if="hasActiveAutomations" (hidden bei 0 enabled Rules, sichtbar waehrend Loading); logicStore.enabledRules, Top 5 als RuleCardCompact (ul/li, :focus-visible), Link "Alle Regeln" → /logic; Zone-Badge Fallback "—"; responsive Grid
+│   ├── Empty State CTA: `<router-link to="/hardware">` Button "Zonen in der Hardware-Ansicht erstellen" (sekundaerer Ghost-Button-Stil, CSS `.monitor-view__empty-cta`) bei leerem zoneKPIs-Array
 │   └── 40px Trennung: var(--space-10) zwischen Zone-Grid, ActiveAutomationsSection, Dashboard-Card, Inline-Panels
-├── L2 /monitor/:zoneId — Reihenfolge: Zone-Header → Sensoren → Aktoren → Regeln für diese Zone → Zone-Dashboards → Inline-Panels
-│   ├── Datenquelle: zonesApi.getZoneMonitorData (primär, AbortController bei Zone-Wechsel), Fallback useZoneGrouping + useSubzoneResolver nur bei API-Fehler; Ready-Gate (v-if=!zoneMonitorLoading) + BaseSkeleton während Loading, ErrorState bei Fehler
+├── L2 /monitor/:zoneId — Subzone-First Gruppierung: Zone-Header → Subzone-Accordions (Sensoren+Aktoren zusammen) → Regeln → Zone-Dashboards → Inline-Panels
+│   ├── Datenquelle: zonesApi.getZoneMonitorData (primaer, AbortController bei Zone-Wechsel), Fallback useZoneGrouping + useSubzoneResolver nur bei API-Fehler; Ready-Gate (v-if=!zoneMonitorLoading) + BaseSkeleton waehrend Loading, ErrorState bei Fehler
+│   ├── Datenstruktur: zoneDeviceGroup computed (ZoneDeviceSubzone[]) — unified sensors+actuators pro Subzone; filteredSubzones computed (Subzone-Filter); ersetzt getrennte zoneSensorGroup/zoneActuatorGroup
 │   ├── Inline-Panels L2: inlineMonitorPanelsL2 = cross-zone + zone-spezifische (scope=zone, zoneId=selectedZoneId); L1 nutzt inlineMonitorPanelsCrossZone
 │   ├── Zone-Header: Name + Sensor/Aktor-Count + Alarm-Count
-│   ├── Sensoren (N): Sektionsueberschrift mit Count; Subzone-Zeile NUR Name (kein Count, kein CRUD); Leere Subzonen: Hinweis "Keine Sensoren zugeordnet" + Link zur Hardware-Ansicht
-│   ├── Aktoren (N): Sektionsueberschrift mit Count; Subzone-Zeile NUR Name (kein Count, kein CRUD)
-│   ├── Regeln für diese Zone (N): ZoneRulesSection.vue — logicStore.getRulesForZone(zoneId); RuleCardCompact pro Regel; Klick → /logic/:ruleId; Empty State: Link "Zum Regeln-Tab"; Bei >10 Regeln: erste 5 + Link "Weitere X Regeln — Im Regeln-Tab anzeigen"
-│   ├── Zone-Dashboards: getDashboardNameSuffix(dash) fuer eindeutige Namen (createdAt oder ID)
-│   ├── SensorCard.vue[] (mode='monitor', Stale/ESP-Offline-Badges, Trend-Pfeil via :trend Prop, from components/devices/)
-│   │   ├── #sparkline: LiveLineChart (compact, sensor-type → auto Y-Range, thresholds → farbige Schwellwert-Zonen aus SENSOR_TYPE_CONFIG)
-│   │   └── [Expanded] 1h-Chart (vue-chartjs Line, sensorsApi.queryData Initial-Fetch)
-│   │       ├── "Zeitreihe anzeigen" → openSensorDetail (L3)
-│   │       └── "Konfiguration" → /sensors?sensor={espId}-gpio{gpio}
-│   └── ActuatorCard.vue[] (mode='monitor', read-only: kein Toggle, PWM-Badge bei pwm_value>0, linkedRules mit Status-Dot+Name+Condition, lastExecution mit relativem Zeitstempel, "+N weitere" Link bei >2 Regeln, from components/devices/)
+│   ├── Subzone-Filter: Native <select> (nur wenn >1 Subzone); selectedSubzoneFilter ref (reset bei Zone-Wechsel); filteredSubzones computed; availableSubzones aus zoneDeviceGroup (T13-R3 WP5)
+│   ├── Subzone-Accordion: v-for subzone in filteredSubzones; Header mit Count-Badge "XS · YA"; Accordion-Header NUR wenn >1 Subzone oder benannte Subzone; Body v-show mit Transition; Smart-Defaults (<=4 alle offen, >4 erste+Zone-weit offen, leere eingeklappt); localStorage-Persistenz
+│   │   ├── Typ-Labels "Sensoren"/"Aktoren": NUR sichtbar wenn BEIDE Typen in der Subzone vorhanden
+│   │   ├── Dashed Trennlinie (.monitor-subzone__separator): NUR zwischen Sensoren und Aktoren wenn beide vorhanden
+│   │   ├── SensorCard.vue[] (mode='monitor', Stale/ESP-Offline-Badges, Trend-Pfeil via :trend Prop, Scope-Badge Multi-Zone/Mobil (T13-R3 WP4), from components/devices/; effectiveQualityStatus: bei Stale→'warning' Override, qualityLabel "Veraltet" statt "OK", border-left: 3px solid var(--color-warning))
+│   │   │   ├── #sparkline: LiveLineChart (compact, sensor-type → auto Y-Range, thresholds → farbige Schwellwert-Zonen aus SENSOR_TYPE_CONFIG)
+│   │   │   └── [Expanded] 1h-Chart (vue-chartjs Line, sensorsApi.queryData Initial-Fetch)
+│   │   │       ├── "Zeitreihe anzeigen" → openSensorDetail (L3)
+│   │   │       └── "Konfiguration" → /sensors?sensor={espId}-gpio{gpio}
+│   │   ├── ActuatorCard.vue[] (mode='monitor', read-only: kein Toggle, PWM-Badge bei pwm_value>0, linkedRules mit Status-Dot+Name+Condition, lastExecution mit relativem Zeitstempel, "+N weitere" Link bei >2 Regeln, Scope-Badge Multi-Zone/Mobil (T13-R3 WP4), ESP-Offline-Badge (opacity 0.5, WifiOff) + Stale-Markierung (opacity 0.7, warning border-left), typ-spezifische Icons via getActuatorTypeInfo(), Subzone-Fallback "Zone-weit", from components/devices/)
+│   │   └── Leere Subzone: "Keine Geraete zugeordnet" (kompakt, kein Link)
+│   ├── "Zone-weit" (statt "Keine Subzone"): Am Ende sortiert, kein farbiger Left-Border, dashed Top-Border; bei einziger Gruppe (nur Zone-weit): kein Accordion-Wrapper, Geraete direkt sichtbar
+│   ├── Regeln fuer diese Zone (N): ZoneRulesSection.vue — logicStore.getRulesForZone(zoneId); RuleCardCompact pro Regel; Klick → /logic/:ruleId; Empty State: Link "Zum Regeln-Tab"; Bei >10 Regeln: erste 5 + Link "Weitere X Regeln — Im Regeln-Tab anzeigen"
+│   └── Zone-Dashboards: getDashboardNameSuffix(dash) fuer eindeutige Namen (createdAt oder ID)
 └── L3 /monitor/:zoneId/sensor/:sensorId — SlideOver (Sensor-Detail, Deep-Link-faehig)
     └── Multi-Sensor-Overlay: Chip-Selektor (max 4 Sensoren), sekundaere Y-Achse bei unterschiedlichen Einheiten
 ```
@@ -425,10 +438,23 @@ onUnmounted(() => { /* cleanup */ })
 | Type | Zeilen | Beschreibung |
 |------|--------|--------------|
 | MockESP / ESPDevice | 275-294 | Device mit Sensors, Actuators, Status |
-| MockSensor | 234-290 | Sensor mit Multi-Value Support, config_id (UUID), interface_type, i2c_address |
-| MockActuator | 265-273 | Actuator mit PWM |
+| MockSensor | 234-290 | Sensor mit Multi-Value Support, config_id (UUID), interface_type, i2c_address, device_scope, assigned_zones |
+| MockActuator | 265-273 | Actuator mit PWM, device_scope, assigned_zones |
 | QualityLevel | - | 'excellent' \| 'good' \| 'fair' \| 'poor' \| 'bad' \| 'stale' \| 'error' |
 | MockSystemState | - | 12 States: BOOT, WIFI_SETUP, WIFI_CONNECTED, MQTT_CONNECTING, MQTT_CONNECTED, AWAITING_USER_CONFIG, ZONE_CONFIGURED, SENSORS_CONFIGURED, OPERATIONAL, LIBRARY_DOWNLOADING, SAFE_MODE, ERROR |
+| ZoneStatus (T13-R3) | - | 'active' \| 'archived' — Status einer ZoneEntity |
+| ZoneEntity (T13-R3) | - | Zone-Entitaet mit id, name, slug, status, created_at, updated_at |
+| ZoneEntityCreate (T13-R3) | - | Create-Payload: name (required), description? |
+| ZoneEntityUpdate (T13-R3) | - | Update-Payload: name?, description? |
+| ZoneEntityListResponse (T13-R3) | - | Paginierte Zone-Liste: items[], total, active_count, archived_count |
+| DeviceScope (T13-R3) | - | 'zone_local' \| 'multi_zone' \| 'mobile' — Reichweite eines Sensors/Aktors |
+| DeviceContextSet (T13-R3) | - | Context-Payload: active_zone_id, active_subzone_id? |
+| DeviceContextResponse (T13-R3) | - | Gesetzte Context-Antwort: config_type, config_id, active_zone_id, active_subzone_id?, context_source |
+| SensorConfigCreate (erweitert) | - | +device_scope?: DeviceScope, +assigned_zones?: string[] |
+| SensorConfigResponse (erweitert) | - | +device_scope: DeviceScope, +assigned_zones: string[] |
+| ActuatorConfigCreate (erweitert) | - | +device_scope?: DeviceScope, +assigned_zones?: string[] |
+| ActuatorConfigResponse (erweitert) | - | +device_scope: DeviceScope, +assigned_zones: string[] |
+| ZoneAssignRequest (erweitert) | - | +subzone_strategy?: string |
 
 ### WebSocket Events (types/websocket-events.ts)
 
@@ -444,6 +470,9 @@ onUnmounted(() => { /* cleanup */ })
 | plugin_execution_started | execution_id, plugin_id, trigger_source | PluginService→WS |
 | sensor_config_deleted | config_id, esp_id, gpio, sensor_type | Server→WS (Delete-Pipeline) |
 | plugin_execution_completed | execution_id, plugin_id, status, duration_seconds, error_message | PluginService→WS |
+| device_scope_changed (T13-R3) | config_type, config_id, device_scope, assigned_zones | Server→WS (PUT sensors/actuators) |
+| device_context_changed (T13-R3) | config_type, config_id, active_zone_id, active_subzone_id, context_source, changed_by | Server→WS (PUT/DELETE /device-context) |
+| subzone_assignment (T13-R3) | esp_id, subzone_id, status, timestamp, error_code, message | MQTT→Server→WS (subzone ACK) |
 
 **WICHTIG:** Type-Aenderungen IMMER mit Server-Team abstimmen!
 WebSocket-Events = Kontrakt zwischen Frontend und Backend.
@@ -487,7 +516,7 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 | auth | stores/auth.ts | user, tokens, setupRequired | login, logout, refreshTokens |
 | esp | stores/esp.ts | devices[], pendingDevices[] | fetchAll, isMock, gpioStatusMap, onlineDevices (via getESPStatus), offlineDevices |
 | dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb (level, zoneName, deviceName, sensorName, ruleName, dashboardName), layouts[], DASHBOARD_TEMPLATES, DashboardTarget (interface), inlineMonitorPanels (alias), inlineMonitorPanelsCrossZone (computed), inlineMonitorPanelsForZone(zoneId) (fn), sideMonitorPanels (computed), bottomMonitorPanels (computed), hardwarePanels (computed) | toggleStatusFilter, resetFilters, createLayout, saveLayout, createLayoutFromTemplate, deleteLayout, exportLayout, importLayout, setLayoutTarget, generateZoneDashboard, claimAutoLayout |
-| zone | stores/zone.store.ts | (stateless) | handleZoneAssignment (+ Toasts), handleSubzoneAssignment (+ Toasts) |
+| zone | stores/zone.store.ts | zoneEntities[], isLoadingZones | handleZoneAssignment (+ Toasts), handleSubzoneAssignment (+ Toasts), fetchZoneEntities, createZone, updateZone, archiveZone, reactivateZone, deleteZoneEntity; activeZones/archivedZones (computed); handleDeviceScopeChanged, handleDeviceContextChanged (T13-R3) |
 | logic | shared/stores/logic.store.ts | rules[], activeExecutions, executionHistory[], historyLoaded | fetchRules, toggleRule, crossEspConnections, getRulesForZone(zoneId), getZonesForRule(rule), getRulesForActuator(espId, gpio), getLastExecutionForActuator(espId, gpio), loadExecutionHistory, pushToHistory, undo, redo, canUndo, canRedo |
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
 | database | stores/database.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
@@ -495,6 +524,7 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 | notificationInbox | stores/notification-inbox.store.ts | notifications[], unreadCount, highestSeverity, isDrawerOpen, activeFilter (InboxFilter), sourceFilter (SourceFilterValue) | loadInitial, loadMore, markAsRead, markAllAsRead, toggleDrawer, setSourceFilter; filteredNotifications (Severity + Source); WS-Listener: notification_new, notification_updated, notification_unread_count |
 | alertCenter | stores/alert-center.store.ts | alertStats, activeAlerts[], statusFilter, severityFilter | fetchStats, fetchActiveAlerts, acknowledgeAlert, resolveAlert, startStatsPolling, stopStatsPolling; unresolvedCount, criticalCount, warningCount, hasCritical, mttaFormatted, mttrFormatted (computed) |
 | diagnostics | shared/stores/diagnostics.store.ts | currentReport, history[], availableChecks[], isRunning | runDiagnostic, runCheck, loadHistory, loadReport, exportReport; lastRunAge (aus currentReport oder history[0]), checksByName, statusCounts (Phase 4D) |
+| inventory | shared/stores/inventory.store.ts | searchQuery, zoneFilter, typeFilter, statusFilter, scopeFilter, sortKey, sortDirection, pageSize, currentPage, visibleColumns, selectedDeviceId, isDetailOpen | toggleSort, setPage, toggleColumn, openDetail, closeDetail, resetFilters; allComponents (unified sensors+actuators), filteredComponents, sortedComponents, paginatedComponents, availableZones, hasNonLocalScope (computed); ComponentItem mit scope/activeZone (T13-R3 WP5) |
 | plugins | shared/stores/plugins.store.ts | plugins[], selectedPlugin, executionHistory[], pluginOptions (computed) | fetchPlugins, fetchPluginDetail, executePlugin, togglePlugin, updateConfig, fetchHistory (Phase 4C) |
 
 ### Store-Konventionen
@@ -630,8 +660,9 @@ baseURL: '/api/v1'
 | `esp.ts` | `/esp/*`, `/debug/*` | Unified Mock + Real ESP API |
 | `sensors.ts` | `/sensors/*` | Sensor CRUD + History + Stats |
 | `actuators.ts` | `/actuators/*` | Actuator Control |
-| `zones.ts` | `/zone/*` | Zone Assignment/Removal, getAllZones (inkl. leere), getZoneMonitorData (L2) |
+| `zones.ts` | `/zone/*`, `/zones` | Zone Assignment/Removal, getAllZones (inkl. leere), getZoneMonitorData (L2), ZoneEntity CRUD (T13-R3) |
 | `subzones.ts` | `/subzone/*` | Subzone CRUD + Safe-Mode |
+| `device-context.ts` | `/device-context/*` | Device Context setzen (PUT), lesen (GET), loeschen (DELETE) — T13-R3, NEU |
 | `backups.ts` | `/backups/*` | DB-Backup erstellen/listen/download/restore (Admin) |
 | `inventory.ts` | (aggregiert) | Geräte-Inventar (Wissensdatenbank, nutzt zone context + export) |
 | `logic.ts` | `/logic/*` | Cross-ESP Automation Rules |
@@ -740,6 +771,10 @@ formatSensorType(sensorType: string): string
   // Formatiert raw sensor_type fuer Display: "sht31_temp" → "Sht31 Temp" (Underscores → Spaces, Title Case)
   // Add-Sensor-Dropdown: DEVICE-Liste (ein Eintrag pro Multi-Value-Device + Single-Value).
   // Keine Value-Types (sht31_temp, sht31_humidity), keine Duplikate (DS18B20/ds18b20 → nur ds18b20).
+getSensorDisplayName(sensor: { sensor_type: string; name?: string | null }): string
+  // Display-Name mit Multi-Value-Disambiguierung: "Temp&Hum (Temperatur)" / "Temp&Hum (Luftfeuchte)"
+  // Fallback-Kette: (1) name + Sub-Type-Suffix bei Multi-Value, (2) name bei Single-Value, (3) SENSOR_TYPE_CONFIG label
+  // Nutzt getValueConfigForSensorType() intern — kein Suffix bei Base-Types oder Single-Value-Sensoren
 
 // Aggregation Functions (NEU v9.4, aktualisiert v9.52)
 groupSensorsByBaseType(sensors: RawSensor[]): GroupedSensor[]
@@ -918,6 +953,33 @@ Alle Farben ueber CSS Variables definiert.
 Dynamisch aus 8-Farben-Palette via Hash der Zone-ID.
 Gleiche Zone = immer gleiche Farbe (deterministisch).
 
+### Touch-Accessibility (Fix-R)
+
+**Konvention:** Keine hover-only interaktiven Elemente. Alle klickbaren Elemente muessen auch auf Touch-Geraeten erreichbar sein.
+
+```css
+/* Pattern: Progressive Disclosure — sichtbar aber dezent */
+.action-element {
+  opacity: 0.4;
+  transition: opacity 0.2s;
+}
+.parent:hover .action-element,
+.parent:focus-within .action-element {
+  opacity: 1;
+}
+
+/* Touch-Geraete: Immer voll sichtbar */
+@media (hover: none) {
+  .action-element {
+    opacity: 1;
+  }
+}
+```
+
+**Touch-Targets:** Mindestens `min-width: 44px; min-height: 44px` auf allen klickbaren Elementen (WCAG-Empfehlung). Icons bleiben optisch klein, Touch-Area wird ueber Padding vergroessert.
+
+**Long-Press Feedback (VueDraggable):** `chosen-class` auf Drag-Items fuer visuelles Feedback nach 300ms Long-Press: `transform: scale(1.02)` + `box-shadow` mit `--color-iridescent-1`.
+
 ---
 
 ## 12. Drag & Drop System
@@ -938,6 +1000,8 @@ Gleiche Zone = immer gleiche Farbe (deterministisch).
 - **IMMER** `group="esp-devices"` auf allen verbundenen VueDraggable-Instanzen
 - **IMMER** `force-fallback` + `fallback-on-body` fuer zuverlaessiges Cross-Container-Drag
 - **IMMER** `@start`/`@end` Events an `dragStore.startEspCardDrag()`/`endEspCardDrag()` weiterleiten
+- **IMMER** `chosen-class` fuer Touch Long-Press Feedback (scale + glow, siehe Section 11 Touch-Accessibility)
+- **IMMER** Drag-Handles mit `min-width: 44px; min-height: 44px` fuer Touch-Targets
 
 ### DragState Store
 
@@ -1154,6 +1218,7 @@ cleanupWebSocket() {
 - Relative Imports (../.. statt @/ Alias)
 - Inline Styles oder !important
 - Light Mode Styles (nur Dark Theme)
+- Hover-only interaktive Elemente ohne Touch-Fallback (`@media (hover: none)` oder `focus-within`)
 
 ### IMMER
 
@@ -1164,6 +1229,8 @@ cleanupWebSocket() {
 - Cleanup in `onUnmounted`
 - Deutsche Labels in `utils/labels.ts`
 - `npm run build` zur Verifikation
+- Touch-Targets mindestens 44x44px auf klickbaren Elementen (WCAG)
+- `@media (hover: none)` Block fuer Touch-Geraete bei hover-abhaengigen Elementen
 
 ---
 
@@ -1182,8 +1249,180 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.62
-**Letzte Aktualisierung:** 2026-03-08
+**Version:** 9.72
+**Letzte Aktualisierung:** 2026-03-10
+
+### Aenderungen in v9.72 (6.5 — Monitor L1 Kompakt: Zone-Uebersicht aufraumen)
+
+- MonitorView.vue L1: `hasActiveAutomations` Computed — `ActiveAutomationsSection` nur sichtbar wenn `logicStore.enabledRules.length > 0` oder waehrend `logicStore.isLoading` (kein Flackern); `v-if="hasActiveAutomations"` statt immer gerendert; spart ~120px leeren Block bei Setups ohne Logic Engine
+- MonitorView.vue L1: Zone-Tiles gleiche Hoehe — `align-items: stretch` auf `.monitor-zone-grid` (Grid-Items pro Zeile gleich hoch), `margin-top: auto` auf `.monitor-zone-tile__footer` (Footer immer am unteren Rand)
+- MonitorView.vue L1: `font-size: 10px` durch `var(--text-xs)` ersetzt (11px via tokens.css) — 2 Stellen: `.monitor-zone-tile__kpi-label`, `.monitor-zone-tile__activity`; Token-konsistent, 4 weitere 10px-Stellen in L2/L3 bewusst out-of-scope
+- MonitorView.vue L1: `fetchAllZonesGuarded()` mit 30s Timestamp-Cooldown (`ZONE_FETCH_COOLDOWN_MS`) ersetzt direkten `fetchAllZones()`-Aufruf in onMounted — verhindert redundante API-Calls bei schneller Navigation (hin-zurueck innerhalb 30s)
+- Section 3: Komponentenhierarchie MonitorView L1 — Datenquellen um fetchAllZonesGuarded, Zone-Tiles um CSS-Grid equal-height, ActiveAutomationsSection um v-if Guard erweitert
+
+### Aenderungen in v9.71 (6.3 — Monitor Read-Only: Aktor-Toggle im Monitor unterbinden)
+
+- useDashboardWidgets.ts: `UseDashboardWidgetsOptions` um `readOnly?: boolean` (Default: false) erweitert — deaktiviert interaktive Controls (Toggle, Select) in Widget-Rendering-Kette
+- useDashboardWidgets.ts: `mountWidgetToElement()` reicht `readOnly` als Prop an `actuator-card` Widgets durch (nur bei readOnly=true UND type='actuator-card')
+- ActuatorCardWidget.vue: Neuer optionaler Prop `readOnly?: boolean` — Toggle-Button `v-if="!readOnly"` (komplett ausgeblendet, konsistent mit ActuatorCard `v-if="mode !== 'monitor'"`)
+- ActuatorCardWidget.vue: Unkonfigurierter Zustand bei readOnly — stummer Platzhalter "Kein Aktor konfiguriert" (Zap-Icon + Label) statt Select-Dropdown (`v-else-if="!readOnly"` auf Select-Block)
+- InlineDashboardPanel.vue: `readOnly: true` in useDashboardWidgets-Optionen — Monitor-Kontext (L1 + L2) hat keinen funktionierenden Aktor-Toggle mehr
+- CustomDashboardView.vue + DashboardViewer.vue: Keine Aenderung — Default readOnly=false, Steuerung in Editor/Viewer weiterhin funktional
+- Prinzip: Monitor = Read-Only (IoT-Industriestandard: versehentliches Schalten im Monitor-Kontext unterbunden)
+
+### Aenderungen in v9.70 (6.2 — ActuatorCard Paritaet mit SensorCard)
+
+- useZoneGrouping.ts: `ActuatorWithContext` um `last_seen?: string | null` erweitert; `allActuators` computed mappt `esp.last_seen ?? null` durch — Stale-Erkennung in ActuatorCard moeglich
+- ActuatorCard.vue: `isEspOffline` computed (`esp_state !== 'OPERATIONAL'`) — opacity 0.5 + WifiOff-Badge "ESP offline" (Paritaet mit SensorCard)
+- ActuatorCard.vue: `isStale` computed (ESP-Heartbeat aelter als `ZONE_STALE_THRESHOLD_MS`) — opacity 0.7, border-left 3px solid var(--color-warning); Offline hat Vorrang vor Stale
+- ActuatorCard.vue: `actuatorIcon` computed via `getActuatorTypeInfo()` aus `@/utils/labels.ts` — typ-spezifische Icons (ToggleRight, Waves, GitBranch, Fan, Flame, Lightbulb, Cog, Activity) statt immer Power; identische Quelle wie ActuatorSatellite
+- ActuatorCard.vue: Subzone-Fallback von '—' auf 'Zone-weit' (konsistent mit SensorCard und 6.1)
+- ActuatorCard.vue: CSS `.actuator-card--offline` (opacity 0.5), `.actuator-card--stale` (opacity 0.7, warning border-left), `.actuator-card__badge` + `--offline` Styles
+- SensorSatellite.vue: `displayLabel` nutzt `getSensorDisplayName()` bei Multi-Value-Sensoren (isMultiValue + name vorhanden) — "Temp&Hum (Temperatur)" statt 2x "Temp&Hum" im Orbital L2
+- Section 3: Komponentenhierarchie MonitorView L2 — ActuatorCard um ESP-Offline, Stale, typ-spezifische Icons, Scope-Badge, Subzone-Fallback erweitert
+
+### Aenderungen in v9.70 (6.1 — Monitor L2 Subzone-First Gruppierung)
+
+- MonitorView.vue L2: Subzone-First Gruppierung — jede Subzone erscheint genau EINMAL mit Sensoren+Aktoren zusammen (statt 2x unter getrennten SENSOREN/AKTOREN-Sektionen)
+- MonitorView.vue L2: `zoneDeviceGroup` computed (ZoneDeviceSubzone[]) ersetzt getrennte `zoneSensorGroup` + `zoneActuatorGroup` — unified Datenstruktur pro Subzone mit sensors[] + actuators[]
+- MonitorView.vue L2: `filteredSubzones` computed ersetzt getrennte `filteredSensorSubzones` + `filteredActuatorSubzones` — ein Subzone-Filter auf die kombinierte Gruppe
+- MonitorView.vue L2: `availableSubzones` aus `zoneDeviceGroup` abgeleitet (statt aus zwei getrennten Quellen dedupliziert)
+- MonitorView.vue L2: Template-Umbau — zwei getrennte Section-Bloecke durch einen einzigen `v-for="subzone in filteredSubzones"` ersetzt
+- MonitorView.vue L2: Typ-Labels "Sensoren"/"Aktoren" NUR sichtbar wenn BEIDE Typen in der Subzone vorhanden
+- MonitorView.vue L2: Dashed Trennlinie (`.monitor-subzone__separator`) NUR zwischen Sensoren und Aktoren wenn beide vorhanden
+- MonitorView.vue L2: "Zone-weit" (statt "Keine Subzone") — am Ende sortiert, kein farbiger Left-Border, dashed Top-Border
+- MonitorView.vue L2: Einzelne Gruppe ohne Accordion — wenn alle Geraete "Zone-weit" und keine benannten Subzonen: kein Accordion-Wrapper, Geraete direkt sichtbar
+- MonitorView.vue L2: Smart-Defaults angepasst — leere Subzonen (0 Sensoren + 0 Aktoren) immer eingeklappt
+- MonitorView.vue L2: Dead Code entfernt — `subzoneHasSensors()`, `subzoneHasActuators()` (unnoetig nach Zusammenfuehrung)
+- MonitorView.vue L2: 4 neue CSS-Klassen — `monitor-subzone__separator`, `monitor-subzone__type-label`, `monitor-subzone__header--zoneweit`, `monitor-subzone__empty`
+- MonitorView.vue L2: `.monitor-subzone--unassigned` CSS geaendert — gelbe dashed left-border entfernt, subtile dashed top-border statt dessen
+- Section 3: Komponentenhierarchie MonitorView L2 komplett aktualisiert — Subzone-First Architektur mit zoneDeviceGroup, filteredSubzones, Typ-Labels, Trennlinie, Zone-weit Sonderfall
+
+### Aenderungen in v9.69 (Fix-O — Multi-Value-Sensor Display-Differenzierung)
+
+- sensorDefaults.ts: `getSensorDisplayName(sensor)` NEU — Display-Name mit Multi-Value-Disambiguierung; Fallback-Kette: (1) name + Sub-Type-Suffix bei Multi-Value via `getValueConfigForSensorType()`, (2) name bei Single-Value, (3) SENSOR_TYPE_CONFIG label; Ergebnis: "Temp&Hum (Temperatur)" / "Temp&Hum (Luftfeuchte)" statt 2x "Temp&Hum"
+- SensorCard.vue: `displayName` Computed nutzt `getSensorDisplayName()` statt direktem `sensor.name` — Multi-Value-Sensoren zeigen eindeutigen Namen in Monitor- und Config-Mode
+- ESPSettingsSheet.vue: Sensor-Name in `devicesBySubzone` Computed nutzt `getSensorDisplayName()` — Subzone-Gruppierung zeigt disambiguierte Namen
+- inventory.store.ts: `allComponents` Computed nutzt `getSensorDisplayName()` fuer Sensor-displayName — Komponenten-Tab (/sensors) zeigt eindeutige Namen
+- Section 9: `getSensorDisplayName()` zu sensorDefaults.ts Helper Functions hinzugefuegt
+
+### Aenderungen in v9.69 (Fix-S — Code-Hygiene + Design-Token-Konsistenz)
+
+- tokens.css: 8 neue Status-Tint-Tokens unter "STATUS TINT BACKGROUNDS" — `--color-warning-bg`, `--color-warning-bg-hover`, `--color-warning-border`, `--color-warning-glow`, `--color-accent-bg`, `--color-iridescent-glow`, `--color-iridescent-glow-hover`, `--color-mock-bg`
+- HardwareView.vue: 7 hardcodierte `rgba()`-Farbwerte durch CSS-Token-Variablen ersetzt (DESIGN-001)
+- HardwareView.vue: setTimeout Race Condition bei Settings-Panel Open/Close gefixt — `settingsCloseTimer` mit `clearTimeout` in allen 4 Open-Pfaden (SETTINGS-002)
+- HardwareView.vue: BEM-Namensraum-Verletzung gefixt — `zone-plate__chevron/devices/device-wrapper` in Unassigned-Section zu `unassigned-section__*` umbenannt (DESIGN-002)
+- SensorCard.vue: 3-stufige Icon-Fallback-Kette — exakter Typ-Match → Base-Type-Suffix (z.B. `bme280_pressure` → Druck-Icon) → `CircleDot` Default-Icon (CARD-002)
+- SensorCard.vue: `rgba(168, 85, 247, 0.15)` durch `var(--color-mock-bg)` ersetzt
+- Backend: Alembic-Migration `fix_actuator_datetime_tz` erstellt — `actuator_states.last_command_timestamp` und `actuator_history.timestamp` auf `DateTime(timezone=True)` migriert (BUG-001)
+
+### Aenderungen in v9.69 (Fix-R — Touch-Accessibility + Discoverability)
+
+- DeviceMiniCard.vue: Action-Row (Settings, MoreVertical, Monitor) von `opacity: 0` auf `0.4` — sichtbar aber dezent, `opacity: 1` bei hover/focus-within; `@media (hover: none)` Block fuer volle Sichtbarkeit auf Touch-Geraeten
+- DeviceMiniCard.vue: Action-Buttons `min-width: 44px; min-height: 44px` — WCAG Touch-Target Minimum
+- DeviceMiniCard.vue: Drag-Handle `min-width: 44px` — vergroesserter Touch-Bereich
+- DeviceMiniCard.vue: Grip-Handle (::before Pseudo-Element) mit `focus-within` und `@media (hover: none)` Sichtbarkeit
+- DeviceMiniCard.vue: Long-Press Feedback via `chosen-class` — `transform: scale(1.02)`, `box-shadow` mit `--color-iridescent-1`, 150ms Transition
+- ZonePlate.vue: Pencil-Edit-Button von `opacity: 0` auf `0.4`, `min-width/min-height: 44px` (von 20px)
+- ZonePlate.vue: Settings-Button von `opacity: 0` auf `0.4`, `min-width/min-height: 44px` (von 24px), `focus-within` Trigger
+- ZonePlate.vue: Monitor-Link von `opacity: 0` auf `0.4`, `min-width/min-height: 44px`, `focus-within` Trigger
+- ZonePlate.vue: Overflow-Menu-Button `min-width/min-height: 44px` (von 24px)
+- ZonePlate.vue: Subzone-Hover-Actions von `opacity: 0` auf `0.4`, `focus-within` Trigger; Subzone-Action-Buttons `min-width/min-height: 32px` (von 16px)
+- ZonePlate.vue: Zone-Name click-to-rename — `cursor: text`, dashed underline on hover, `@click.stop="startRename"`, `title="Klicken zum Umbenennen"`
+- ZonePlate.vue: Chosen-Drag-Class mit iridescent border glow und 150ms Transition
+- ZonePlate.vue: `@media (hover: none)` Block — Edit-Button, Settings-Button, Monitor-Link, Subzone-Actions immer `opacity: 1`
+- HardwareView.vue: Context-Menu-Positionierung beim angeklickten Element via `document.querySelector([data-device-id])` + `getBoundingClientRect()` statt Bildschirmmitte (`window.innerWidth/2`)
+- Section 3: Komponentenhierarchie HardwareView — ZonePlate Header um click-to-rename, DeviceMiniCard um Touch-Accessibility erweitert
+- Section 11: Neue Subsektion "Touch-Accessibility (Fix-R)" — `@media (hover: none)` Pattern, 44px Touch-Targets, Long-Press Feedback Konvention
+- Section 12: VueDraggable Regeln um `chosen-class` und Drag-Handle Touch-Target erweitert
+- Section 18: NIEMALS-Regel "Hover-only interaktive Elemente ohne Touch-Fallback"; IMMER-Regeln "44px Touch-Targets" und "`@media (hover: none)` Block"
+
+### Aenderungen in v9.69 (Fix-P — Monitor UI-States)
+
+- SensorCard.vue: `effectiveQualityStatus` computed hinzugefuegt — bei Stale (last_read > 120s) wird Quality auf 'warning' ueberschrieben; `qualityLabel` gibt "Veraltet" zurueck bei stale Daten statt "OK"
+- SensorCard.vue: Quality-Dot + Quality-Text nutzen `effectiveQualityStatus` statt direktem `qualityToStatus` — stale Sensoren zeigen konsistent Warning-Farbe in Dot und Label
+- SensorCard.vue: CSS `.sensor-card--stale` um `border-left: 3px solid var(--color-warning)` erweitert — visuelle Markierung auf der gesamten linken Kante
+- SensorCard.vue: `sensorIcon` auf 3-Tier-Fallback umgebaut — exact match → base-type suffix → `DEFAULT_SENSOR_ICON` (CircleDot)
+- SensorCard.vue: `.sensor-card__icon--config` Background auf `var(--color-mock-bg)` geaendert
+- MonitorView.vue L1: Empty State CTA — `<router-link to="/hardware">` Button "Zonen in der Hardware-Ansicht erstellen" (sekundaerer Ghost-Button-Stil, CSS `.monitor-view__empty-cta`)
+- MonitorView.vue L2: Sensor-Section Empty-Hints — Subzones mit Aktoren zeigen KEINEN Hinweis mehr; komplett leere Subzones (keine Sensoren, keine Aktoren) zeigen "Keine Geraete zugeordnet" (kompakt, ohne Link)
+- MonitorView.vue L2: Aktor-Section Empty-Hint analog — nur bei komplett leerer Subzone, nur wenn Sensor-Section nicht sichtbar
+- MonitorView.vue: Hilfsfunktionen `subzoneHasActuators(subzoneId)` und `subzoneHasSensors(subzoneId)` — Cross-Section-Lookup ueber filteredSensorSubzones/filteredActuatorSubzones fuer bedingte Empty-Hints
+- MonitorView.vue: CSS `.monitor-view__empty-cta` fuer sekundaeren Ghost-Button-Stil
+- Section 3: Komponentenhierarchie MonitorView L1 um CTA-Link im Empty State; L2 Sensor/Aktor-Section um bedingte Subzone-Empty-Hints; SensorCard um effectiveQualityStatus Stale-Override
+
+### Aenderungen in v9.68 (T14-Fix-J — Device-Scope & Subzone Display-Chain)
+
+- types/index.ts: `MockSensor` um `device_scope?: DeviceScope | null` und `assigned_zones?: string[] | null` erweitert — Scope-Felder jetzt direkt auf MockSensor verfuegbar (nicht nur auf SensorConfigResponse)
+- types/index.ts: `MockActuator` um `device_scope?: DeviceScope | null` und `assigned_zones?: string[] | null` erweitert — analog zu MockSensor
+- api/esp.ts: `mapSensorConfigToMockSensor()` mappt jetzt `subzone_id`, `device_scope`, `assigned_zones` aus SensorConfigResponse — behebt fehlende Daten im ESP-Store fuer Scope-Badges und Subzone-Gruppierung
+- api/esp.ts: `mapActuatorConfigToMockActuator()` mappt jetzt `device_scope`, `assigned_zones` aus ActuatorConfigResponse (subzone_id war bereits vorhanden)
+- SensorColumn.vue: `SensorItem` Interface um `device_scope` und `assigned_zones` erweitert; Props `:device-scope` und `:assigned-zones` an SensorSatellite durchgereicht (behebt fehlende "MZ"/"Mob" Badges)
+- ActuatorColumn.vue: `ActuatorItem` Interface um `device_scope` und `assigned_zones` erweitert; Props `:device-scope` und `:assigned-zones` an ActuatorSatellite durchgereicht
+- ESPSettingsSheet.vue: `devicesBySubzone` Computed umgebaut — Subzone-Name-Aufloesung ueber `device.subzones[]` (SubzoneSummary-Array) statt nicht-existierendem `sensor.subzone_name`; behebt "alle Geraete unter Keine Subzone" Bug
+- Backend debug.py: `MockSensorResponse` und `MockActuatorResponse` um `device_scope` und `assigned_zones` Felder erweitert
+- Backend debug.py: Response-Builder mappt `device_scope` und `assigned_zones` aus simulation_config
+- Backend esp_repo.py: `rebuild_simulation_config()` persistiert `device_scope` und `assigned_zones` aus sensor_configs/actuator_configs
+- Section 3: Komponentenhierarchie HardwareView — ESPSettingsSheet Beschreibung um SubzoneSummary-Resolver ergaenzt
+- Section 4: MockSensor und MockActuator Beschreibung um device_scope, assigned_zones erweitert
+
+### Aenderungen in v9.67 (T13-R3 WP5 — Filter in Monitor und Components Tab)
+
+- MonitorView.vue L1: Zone-Filter-Dropdown (native `<select>`) ueber Zone-Tile-Grid — `selectedZoneFilter` ref, `filteredZoneKPIs` computed filtert zoneKPIs nach selectedZoneFilter; `isArchivedZoneSelected` computed; `isZoneFilterActive` computed fuer Badge; zoneStore.activeZones als Optionen + `<optgroup label="Archiv">` fuer archivedZones; "Gefiltert" Badge (ListFilter-Icon, bg-blue-500/20) bei aktivem Filter; Archived-Banner (warning) "Archivierte Zone — nur historische Daten" bei archivierter Zone; `zoneStore.fetchZoneEntities()` in onMounted
+- MonitorView.vue L2: Subzone-Filter-Dropdown (native `<select>`) unter Zone-Header — `selectedSubzoneFilter` ref, `filteredSensorSubzones`/`filteredActuatorSubzones` computed; `availableSubzones` computed dedupliziert aus Sensor+Aktor-Subzones; nur sichtbar wenn >1 Subzone; Reset bei Zone-Wechsel (im bestehenden selectedZoneId Watcher)
+- inventory.store.ts: `ComponentItem` Interface um `scope: DeviceScope | null` und `activeZone: string | null` erweitert; `ScopeFilter` Type (`'all' | 'zone_local' | 'multi_zone' | 'mobile'`); `SortKey` um `| 'scope' | 'activeZone'`; 2 neue Spalten in `INVENTORY_COLUMNS` (key: 'scope'/'activeZone', defaultVisible: false); `scopeFilter` State; `hasNonLocalScope` Computed; Scope-Filter in `filteredComponents`; Sort-Cases fuer scope/activeZone; `resetFilters()` inkl. scopeFilter
+- InventoryTable.vue: `cellValue()` um scope/activeZone Cases erweitert — scope: 'Multi-Zone'/'Mobil'/'Lokal'/'—'; activeZone: item.activeZone ?? '—'
+- SensorsView.vue: Scope-Filter-Chips (Lokal/Multi-Zone/Mobil) in erweitertem Filter-Bereich; nur sichtbar wenn `store.hasNonLocalScope`; `activeFilterCount` um scopeFilter erweitert
+- Section 3: Komponentenhierarchie MonitorView L1 um Zone-Filter, L2 um Subzone-Filter erweitert; SensorsView um Scope-Filter-Chips erweitert; InventoryTable um Scope/ActiveZone Spalten
+- Section 5: inventory Store zur Store-Architektur-Tabelle hinzugefuegt (19 → 20 Shared Stores dokumentiert)
+
+### Aenderungen in v9.66 (T13-R3 WP4 — Multi-Zone Device Scope Konfiguration)
+
+- DeviceScopeSection.vue: NEU in `components/devices/` — Wiederverwendbare AccordionSection fuer Device-Scope-Konfiguration; Props: configId, configType, modelValue (DeviceScope), assignedZones, activeZoneId, availableZones, disabled; 3 Scope-Optionen (Lokal/Multi-Zone/Mobil); Zone-Checkbox-Liste bei multi_zone/mobile; Active-Zone-Dropdown mit sofortigem API-Call (deviceContextApi.setContext); Info-Text "wird sofort gewechselt"
+- SensorConfigPanel.vue: AccordionSection "Zone-Zuordnung" (storage-key `${accordionKey}-zone-scope`) mit DeviceScopeSection; State: localScope, localAssignedZones, activeZoneId; Init aus SensorConfigResponse (device_scope, assigned_zones) + deviceContextApi.getContext; Save: device_scope + assigned_zones in Request-Body
+- ActuatorConfigPanel.vue: Identisches Pattern wie SensorConfigPanel — AccordionSection "Zone-Zuordnung" mit DeviceScopeSection, Init aus ActuatorConfigResponse, Save in Request-Body
+- useZoneGrouping.ts: SensorWithContext + ActuatorWithContext um `device_scope?: 'zone_local' | 'multi_zone' | 'mobile' | null` und `assigned_zones?: string[]` erweitert
+- SensorCard.vue: Scope-Badge in Config-Mode (nach Subzone-Badge) und Monitor-Mode (in footer-badges); scopeBadge Computed: Multi-Zone (blau bg-blue-500/20) oder Mobil (orange bg-orange-500/20); kein Badge bei zone_local; scopeTooltip: "Bedient: Zone A, Zone B"
+- ActuatorCard.vue: Scope-Badge im badges-Bereich (nach Emergency-Badge); gleiches Pattern wie SensorCard (scopeBadge + scopeTooltip)
+- SensorSatellite.vue: Neue Props deviceScope/assignedZones; kompaktes Badge "MZ"/"Mob" im Header neben GPIO-Badge; Scope-Tooltip
+- ActuatorSatellite.vue: Neue Props deviceScope/assignedZones; kompaktes Badge "MZ"/"Mob" zwischen Status-Badge und Label; Scope-Tooltip
+- Section 2: devices/ 8 → 9 Dateien (DeviceScopeSection.vue hinzugefuegt)
+
+### Aenderungen in v9.65 (T13-R3 WP3 — Subzone-Zaehler und Zone-Switch-Dialog)
+
+- ZonePlate.vue: `distinctSubzones` Computed um `sensorCount` und `actuatorCount` pro Subzone angereichert — Zaehlung basiert auf Frontend-Device-Daten (NICHT API-Counts); Subzone-Chips zeigen Count-Badge "3S 1A"
+- ZoneSwitchDialog.vue: NEU in `components/zones/` — Modal-Dialog (BaseModal) fuer Zone-Wechsel-Strategie-Auswahl; RadioGroup mit 3 Strategien: transfer (empfohlen, vorausgewaehlt), reset, copy; Props: isOpen, deviceName, currentZoneName, targetZoneName; Emits: close, confirm(strategy)
+- ESPSettingsSheet.vue: ZoneSwitchDialog-Integration — State `showZoneSwitchDialog`, `pendingZoneAssign`, `activeSubzoneStrategy`; `handleZoneBeforeSave()` prueft ob Device eine bestehende Zone hat und oeffnet Dialog; `handleZoneSwitchConfirm()` setzt Strategie; `subzoneStrategy`-Prop an ZoneAssignmentPanel durchgereicht
+- ZoneAssignmentPanel.vue: Neuer Prop `subzoneStrategy?: 'transfer' | 'copy' | 'reset'`; neuer Emit `zone-before-save`; `saveZone()` interceptiert Zone-Wechsel ohne gesetzter Strategie; Watcher nimmt Save automatisch auf wenn Strategie gesetzt wird; `subzone_strategy` wird im API-Request-Body mitgeschickt
+- Section 2: zones/ 3 → 4 Dateien (ZoneSwitchDialog.vue hinzugefuegt)
+
+### Aenderungen in v9.64 (T13-R3 WP2 — Zone-Status in HardwareView L1)
+
+- HardwareView.vue: Datenquelle von `groupDevicesByZone()` auf `zoneStore.zoneEntities` umgestellt — DB-backed Zone-Entities als primaere Quelle, device-only Zonen (nicht in DB) als Fallback fuer Rueckwaertskompatibilitaet
+- HardwareView.vue: `ZoneDisplayEntry` Interface (zoneId, zoneName, devices, zoneEntity?, isArchived) — einheitlicher Typ fuer aktive und archivierte Zonen
+- HardwareView.vue: `activeZoneEntries` Computed merged DB-Zonen + device-only Zonen, sortiert offline→online→leer→alpha
+- HardwareView.vue: `archivedZoneEntries` Computed filtert archivierte Zonen mit zugeordneten Devices
+- HardwareView.vue: Archivierte Zonen als AccordionSection (localStorage-Persistenz), nur sichtbar wenn archivedZoneEntries > 0
+- HardwareView.vue: Zone-Erstellung ueber `zoneStore.createZone()` statt reiner Device-Zuweisung — ESP-Auswahl optional ("Kein ESP zuweisen" Default)
+- HardwareView.vue: "+Zone" Button nicht mehr disabled bei leerer Device-Liste (FL-01) — Zonen sind eigenstaendige Entitaeten
+- HardwareView.vue: ZoneSettingsSheet-Integration mit State-Management (zoneSettingsEntity, isZoneSettingsOpen, openZoneSettings, handleZoneEntityUpdated/Archived)
+- ZonePlate.vue: Neue optionale Props `zoneEntity?: ZoneEntity` und `isArchived?: boolean` (default false)
+- ZonePlate.vue: Neuer Emit `zone-settings` — Settings-Icon im Header oeffnet ZoneSettingsSheet
+- ZonePlate.vue: Archivierter Zustand — "Archiviert" Badge (warning), opacity 0.6, dashed border, DnD deaktiviert (group=undefined, disabled=true), Subzone-CRUD ausgeblendet
+- ZoneSettingsSheet.vue: NEU — SlideOver fuer Zone-Entity-Verwaltung (Name, Beschreibung, Status-Badge, Archivieren/Reaktivieren, Danger-Zone Loeschen via ConfirmDialog)
+- DeviceMiniCard.vue: Aktor-Count Anzeige neben Sensor-Count — "XS / YA" statt nur "XS" (FL-03)
+- zone.store.ts: `deleteZoneEntity` Action hinzugefuegt — DELETE + lokale State-Bereinigung
+
+### Aenderungen in v9.63 (T13-R3 WP1 — ZoneEntity CRUD, DeviceScope, DeviceContext Frontend)
+
+- types/index.ts: Neue Types `ZoneStatus`, `ZoneEntity`, `ZoneEntityCreate`, `ZoneEntityUpdate`, `ZoneEntityListResponse`, `DeviceScope`, `DeviceContextSet`, `DeviceContextResponse` hinzugefuegt
+- types/index.ts: `SensorConfigCreate` + `SensorConfigResponse` + `ActuatorConfigCreate` + `ActuatorConfigResponse` um `device_scope?: DeviceScope` und `assigned_zones?: string[]` erweitert
+- types/index.ts: `ZoneAssignRequest` um `subzone_strategy?: string` erweitert
+- types/index.ts: `MessageType` Union um `device_scope_changed`, `device_context_changed`, `subzone_assignment` erweitert
+- api/device-context.ts: NEU — `deviceContextApi` mit `setContext` (PUT), `getContext` (GET), `clearContext` (DELETE) — Endpoint `/device-context/{configType}/{configId}`
+- api/zones.ts: 7 neue Methoden im bestehenden `zonesApi` — `createZoneEntity`, `listZoneEntities`, `getZoneEntity`, `updateZoneEntity`, `archiveZoneEntity`, `reactivateZoneEntity`, `deleteZoneEntity` — Endpoint `/zones` (CRUD)
+- shared/stores/zone.store.ts: State `zoneEntities[]` + `isLoadingZones` hinzugefuegt; Getters `activeZones` + `archivedZones`; 5 Actions (fetchZoneEntities, createZone, updateZone, archiveZone, reactivateZone); 2 neue WS-Handler (`handleDeviceScopeChanged`, `handleDeviceContextChanged`)
+- stores/esp.ts: WS-Filter um `device_scope_changed` und `device_context_changed` erweitert; 2 Handler-Delegationen an zoneStore; 2 neue `ws.on()` Registrierungen
 
 ### Aenderungen in v9.62 (T10-FixB — DELETE-Pipeline config_id statt GPIO)
 

@@ -25,6 +25,7 @@ from sqlalchemy import and_, desc, select
 
 from ...core.config import get_settings
 from ...core.logging_config import get_logger
+from ...core.resilience import ResilienceRegistry
 from ...db.models.audit_log import AuditLog, AuditSourceType
 from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
 from ...mqtt.client import MQTTClient
@@ -39,6 +40,7 @@ from ...schemas import (
     SystemResourceHealth,
     WebSocketHealth,
 )
+from ...schemas.health import CircuitBreakerHealth, ResilienceHealth, ResilienceSummary
 from ...schemas.health import ESPHealthSummaryResponse, RecentError
 from ...websocket.manager import WebSocketManager
 from ..deps import ActiveUser, DBSession
@@ -170,6 +172,21 @@ async def detailed_health(
             disk_free_gb=0.0,
         )
 
+    # Resilience health (circuit breakers)
+    try:
+        registry = ResilienceRegistry.get_instance()
+        raw_status = registry.get_health_status()
+        resilience_health = ResilienceHealth(
+            healthy=raw_status["healthy"],
+            breakers={
+                name: CircuitBreakerHealth(**data)
+                for name, data in raw_status["breakers"].items()
+            },
+            summary=ResilienceSummary(**raw_status["summary"]),
+        )
+    except Exception:
+        resilience_health = None
+
     # Determine overall status
     status = "healthy"
     warnings = []
@@ -177,6 +194,13 @@ async def detailed_health(
     if not mqtt_client.is_connected():
         status = "degraded"
         warnings.append("MQTT broker disconnected")
+
+    if resilience_health and not resilience_health.healthy:
+        status = "degraded"
+        open_breakers = [
+            name for name, b in resilience_health.breakers.items() if b.state == "open"
+        ]
+        warnings.append(f"Circuit breakers open: {', '.join(open_breakers)}")
 
     if system_health.disk_percent > 90:
         warnings.append("Disk space low")
@@ -200,6 +224,7 @@ async def detailed_health(
         mqtt=mqtt_health,
         websocket=ws_health,
         system=system_health,
+        resilience=resilience_health,
         components=[],
         warnings=warnings,
     )

@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 3.4 | **Aktualisiert:** 2026-03-08
+> **Version:** 3.5 | **Aktualisiert:** 2026-03-09
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
@@ -99,8 +99,8 @@ allowed-tools: Read
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
-| `/zone/zones` | GET | JWT | Alle Zonen inkl. leere (Device-Zuweisungen + ZoneContext merged) |
-| `/zone/devices/{esp_id}/assign` | POST | Operator | ESP einer Zone zuweisen (MQTT) |
+| `/zone/zones` | GET | JWT | Alle Zonen aus zones-Tabelle (Single Source of Truth), enriched mit Device/Sensor/Actuator Counts. Query: `?status=active\|archived\|deleted` |
+| `/zone/devices/{esp_id}/assign` | POST | Operator | ESP einer Zone zuweisen (MQTT). T13-R1: Zone muss existieren + aktiv sein. `subzone_strategy`: transfer/copy/reset. Response: `ack_received`, `warning` (T14-Fix-B) |
 | `/zone/devices/{esp_id}/zone` | DELETE | Operator | Zone-Zuweisung entfernen |
 | `/zone/devices/{esp_id}` | GET | JWT | Zone-Info für ESP |
 | `/zone/{zone_id}/devices` | GET | JWT | Alle ESPs in Zone |
@@ -109,20 +109,24 @@ allowed-tools: Read
 
 > **Hinweis:** Zone-Assignment-Endpoints (`/zone`) weisen ESPs zu/entfernen Zonen.
 > Für Zone-Entity-CRUD (erstellen, listen, löschen) siehe `/zones` (plural) unten.
+> T13-R1: Zone muss vor Assignment in `zones`-Tabelle existieren (kein Auto-Create mehr).
 
-### Zone Entity (`/zones`) - 5 Endpoints (Phase 0.3)
+### Zone Entity (`/zones`) - 7 Endpoints (T13-R1)
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
 | `/zones` | POST | Operator | Zone erstellen (zone_id, name, description) |
-| `/zones` | GET | Operator | Alle Zonen listen (inkl. leere Zonen) |
+| `/zones` | GET | Operator | Alle Zonen listen. Query: `?status=active\|archived\|deleted` (Default: non-deleted) |
 | `/zones/{zone_id}` | GET | Operator | Zone nach zone_id abrufen |
 | `/zones/{zone_id}` | PUT | Operator | Zone aktualisieren (name, description) |
-| `/zones/{zone_id}` | DELETE | Operator | Zone löschen (Warnung wenn Devices zugeordnet) |
+| `/zones/{zone_id}` | PATCH | Operator | Partielle Zone-Aktualisierung (nur übergebene Felder). Synct `esp_devices.zone_name` bei Umbenennung |
+| `/zones/{zone_id}/archive` | POST | Operator | Zone archivieren (Devices müssen vorher entfernt werden, Subzones werden deaktiviert) |
+| `/zones/{zone_id}/reactivate` | POST | Operator | Archivierte Zone reaktivieren (Subzones bleiben deaktiviert) |
+| `/zones/{zone_id}` | DELETE | Operator | Zone soft-delete (blockiert wenn Devices zugeordnet). Setzt status='deleted' + deleted_at |
 
 > **Hinweis:** Zonen sind eigenständige DB-Entitäten (Tabelle `zones`).
-> Sie existieren unabhängig von ESP-Device-Zuweisungen.
-> Zone-Assignment via `/zone/devices/{esp_id}/assign` erstellt automatisch eine Zone-Entity falls nötig (Rückwärtskompatibilität).
+> T13-R1: `zones`-Tabelle ist Single Source of Truth. FK: `esp_devices.zone_id` → `zones.zone_id`.
+> Zone Lifecycle: active → archived → deleted (Soft-Delete).
 
 ### Subzones (`/subzone`) - 6 Endpoints
 
@@ -139,6 +143,17 @@ allowed-tools: Read
 > Subzones haben eine eigene `subzone_configs` DB-Tabelle (inkl. `custom_data` JSONB für Subzonen-Metadaten).
 >
 > **subzone_id Normalisierung (Sensors/Actuators Create-Update):** `null`, `""`, `"__none__"` → „Keine Subzone“ = GPIO aus allen Subzonen entfernt. Nutzt `utils/subzone_helpers.normalize_subzone_id()`.
+
+### Device Context (`/device-context`) - 3 Endpoints (T13-R2)
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/device-context/{config_type}/{config_id}` | PUT | Operator | Aktiven Zone-Kontext für Sensor/Aktor setzen |
+| `/device-context/{config_type}/{config_id}` | GET | JWT | Aktiven Zone-Kontext abrufen |
+| `/device-context/{config_type}/{config_id}` | DELETE | Operator | Kontext löschen (Fallback: zone_local) |
+
+> **config_type:** `sensor` oder `actuator`. **config_id:** UUID der SensorConfig/ActuatorConfig.
+> Nutzt `DeviceScopeService` mit 30s In-Memory Cache. WebSocket-Broadcast: `device_context_changed`.
 
 ### Zone Context (`/zone/context`) - 7 Endpoints (Phase K3)
 
@@ -1403,6 +1418,39 @@ Health Check (keine Auth erforderlich).
 
 > **Hinweis:** `/health` gibt nur `status` und `mqtt_connected` zurück. Für Details `/health/detailed` nutzen.
 
+### 9.2 GET /health/detailed
+
+Detaillierter Health Check mit Komponenten-Status (JWT erforderlich, ActiveUser).
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "status": "healthy",
+  "version": "2.0.0",
+  "environment": "production",
+  "uptime_seconds": 86400,
+  "uptime_formatted": "1d 0h 0m",
+  "timestamp": "2026-03-10T12:00:00Z",
+  "database": { "connected": true, "pool_size": 20, "latency_ms": 5.2, "database_type": "PostgreSQL" },
+  "mqtt": { "connected": true, "broker_host": "mqtt-broker", "broker_port": 1883 },
+  "websocket": { "active_connections": 2 },
+  "system": { "cpu_percent": 15.0, "memory_percent": 45.0, "disk_percent": 30.0 },
+  "resilience": {
+    "healthy": true,
+    "breakers": {
+      "mqtt": { "state": "closed", "failures": 0, "failure_threshold": 5, "last_failure": null, "forced_open": false },
+      "database": { "state": "closed", "failures": 0, "failure_threshold": 5, "last_failure": null, "forced_open": false }
+    },
+    "summary": { "total": 2, "closed": 2, "open": 0, "half_open": 0 }
+  },
+  "components": [],
+  "warnings": []
+}
+```
+
+> **Resilience-Feld (Fix-X):** Zeigt Circuit Breaker Status aller registrierten Breaker. Offene Breakers setzen `status: "degraded"` und erzeugen einen Warning-Eintrag. Feld ist `null` wenn ResilienceRegistry nicht initialisiert. Admin-Detail-Ansicht inkl. MQTT-Client-Status: `GET /debug/resilience/status`.
+
 ---
 
 ## 10. Error Responses
@@ -1493,6 +1541,12 @@ Health Check (keine Auth erforderlich).
 - `MockSensorConfig`, `SetSensorValueRequest`
 - `MockActuatorConfig`, `ActuatorCommandRequest`
 
+### Health Schemas (`schemas/health.py`)
+- `HealthResponse`, `DetailedHealthResponse`, `LivenessResponse`, `ReadinessResponse`
+- `DatabaseHealth`, `MQTTHealth`, `WebSocketHealth`, `SystemResourceHealth`, `ComponentHealth`
+- `CircuitBreakerHealth`, `ResilienceSummary`, `ResilienceHealth` (Fix-X)
+- `ESPHealthItem`, `ESPHealthSummaryResponse`, `RecentError`
+
 ### Common Schemas (`schemas/common.py`)
 - `APIResponse[T]`, `PaginatedResponse[T]`
 - `BaseResponse`, `ErrorResponse`
@@ -1554,3 +1608,4 @@ Health Check (keine Auth erforderlich).
 | ai | `ai.py` | PLANNED (God Layer AI) |
 | kaiser | `kaiser.py` | IMPLEMENTED (Kaiser Relay Node, Hierarchy) |
 | library | `library.py` | PLANNED (OTA Sensor Library) |
+| device_context | `device_context.py` | 3 (T13-R2 Multi-Zone Device Scope) |

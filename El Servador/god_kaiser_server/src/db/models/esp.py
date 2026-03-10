@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, JSON, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -64,11 +64,13 @@ class ESPDevice(Base, TimestampMixin):
     )
 
     # Zone Management (CRITICAL!)
+    # T13-R1: FK to zones.zone_id — zones table is Single Source of Truth
     zone_id: Mapped[Optional[str]] = mapped_column(
         String(50),
+        ForeignKey("zones.zone_id", ondelete="SET NULL"),
         nullable=True,
         index=True,
-        doc="Zone identifier for hierarchical organization",
+        doc="Zone identifier (FK to zones.zone_id)",
     )
 
     zone_name: Mapped[Optional[str]] = mapped_column(

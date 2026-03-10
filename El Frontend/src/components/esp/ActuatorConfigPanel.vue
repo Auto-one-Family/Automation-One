@@ -26,7 +26,11 @@ import RuntimeMaintenanceSection from '@/components/devices/RuntimeMaintenanceSe
 import DeviceMetadataSection from '@/components/devices/DeviceMetadataSection.vue'
 import LinkedRulesSection from '@/components/devices/LinkedRulesSection.vue'
 import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSection.vue'
+import DeviceScopeSection from '@/components/devices/DeviceScopeSection.vue'
+import { deviceContextApi } from '@/api/device-context'
+import { useZoneStore } from '@/shared/stores/zone.store'
 import { normalizeSubzoneId } from '@/utils/subzoneHelpers'
+import type { DeviceScope } from '@/types'
 import type { DeviceMetadata } from '@/types/device-metadata'
 import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
 
@@ -49,6 +53,7 @@ const emit = defineEmits<{
 const toast = useToast()
 const espStore = useEspStore()
 const uiStore = useUiStore()
+const zoneStore = useZoneStore()
 
 // =============================================================================
 // State
@@ -62,6 +67,12 @@ const commandLoading = ref(false)
 const name = ref('')
 const description = ref('')
 const enabled = ref(true)
+
+// Device Scope (T13-R3 WP4)
+const localScope = ref<DeviceScope>('zone_local')
+const localAssignedZones = ref<string[]>([])
+const activeZoneId = ref<string | null>(null)
+const availableZones = computed(() => zoneStore.activeZones)
 
 // Subzone
 const subzoneId = ref<string | null>(null)
@@ -170,6 +181,10 @@ onMounted(async () => {
 
         // Device metadata (manufacturer, model, etc.)
         metadata.value = parseDeviceMetadata(meta)
+
+        // Device Scope (T13-R3 WP4)
+        localScope.value = (c.device_scope as DeviceScope) ?? 'zone_local'
+        localAssignedZones.value = (c.assigned_zones as string[]) ?? []
       }
     } catch {
       // No existing config
@@ -187,6 +202,21 @@ onMounted(async () => {
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === props.espId)
   if (device?.subzone_id && !subzoneId.value) {
     subzoneId.value = device.subzone_id
+  }
+
+  // Load active zone context (T13-R3 WP4)
+  if (actuatorDbId.value && localScope.value !== 'zone_local') {
+    try {
+      const ctx = await deviceContextApi.getContext('actuator', actuatorDbId.value)
+      activeZoneId.value = ctx.active_zone_id ?? null
+    } catch {
+      // No context set yet
+    }
+  }
+
+  // Ensure zone entities are loaded for the scope section
+  if (zoneStore.zoneEntities.length === 0) {
+    zoneStore.fetchZoneEntities().catch(() => {})
   }
 })
 
@@ -294,6 +324,10 @@ async function handleSave() {
         enabled: enabled.value,
         subzone_id: normalizeSubzoneId(subzoneId.value),
       }
+
+      // Device Scope (T13-R3 WP4)
+      config.device_scope = localScope.value
+      config.assigned_zones = localScope.value === 'zone_local' ? [] : localAssignedZones.value
 
       // Device metadata base (manufacturer, model, etc.)
       const meta: Record<string, unknown> = mergeDeviceMetadata(null, metadata.value)
@@ -549,7 +583,7 @@ function formatDuration(seconds: number): string {
         <div class="actuator-config__safety-info">
           <div class="actuator-config__safety-row">
             <Clock class="w-3.5 h-3.5" />
-            <span>Letzter Befehl: {{ liveActuator?.last_command || '&mdash;' }}</span>
+            <span>Letzter Befehl: {{ liveActuator?.last_command_at || '&mdash;' }}</span>
           </div>
           <div class="actuator-config__safety-row">
             <Zap class="w-3.5 h-3.5" />
@@ -621,6 +655,22 @@ function formatDuration(seconds: number): string {
           :esp-id="espId"
           :gpio="gpio"
           device-type="actuator"
+        />
+      </AccordionSection>
+
+      <!-- ═══ ZONE-ZUORDNUNG (T13-R3 WP4) ═════════════════════════════════ -->
+      <AccordionSection
+        title="Zone-Zuordnung"
+        :storage-key="`${accordionKey}-zone-scope`"
+      >
+        <DeviceScopeSection
+          :config-id="actuatorDbId"
+          config-type="actuator"
+          v-model="localScope"
+          v-model:assigned-zones="localAssignedZones"
+          v-model:active-zone-id="activeZoneId"
+          :available-zones="availableZones"
+          :disabled="saving"
         />
       </AccordionSection>
 

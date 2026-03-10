@@ -26,21 +26,20 @@ The Device Lifecycle Professionalization was a 3-phase TM initiative. **Phases 1
 ### What was implemented
 
 1. **MQTT failure at startup → Portal Recovery** (`main.cpp` ~691-750)
-   - When `mqttClient.connect()` fails: set `STATE_SAFE_MODE_PROVISIONING`, clear NVS WiFi config, start AP mode
+   - When `mqttClient.connect()` fails: set `STATE_SAFE_MODE_PROVISIONING`, **Config bleibt**, `startAPModeForReconfig()` (AP+STA)
    - LED blink code: 6x = MQTT failure (distinct from WiFi=5x, AP=4x, Init=3x)
 
-2. **Runtime MQTT persistent failure → Portal Recovery** (`main.cpp` ~2023-2055)
-   - When Circuit Breaker stays OPEN for 5 continuous minutes (matches server heartbeat timeout)
-   - Reboots into provisioning mode
+2. **Runtime MQTT persistent failure → Portal Recovery** (`main.cpp` ~2372+)
+   - When disconnected 30s (Debounce) or Circuit Breaker OPEN 5 min: `startAPModeForReconfig()`, **kein Reboot**, Reconnect laeuft parallel
 
 ### Error Matrix (all scenarios covered)
 
 | Scenario | Before | After |
 |----------|--------|-------|
 | WiFi wrong | Portal re-opens (existing) | Unchanged |
-| WiFi OK, MQTT port wrong | LOG_WARNING only, ESP stuck | Portal re-opens |
-| WiFi OK, Server IP unreachable | LOG_WARNING only, ESP stuck | Portal re-opens |
-| WiFi OK, MQTT OK, broker dies at runtime | Infinite Circuit Breaker retry | After 5 min → portal recovery |
+| WiFi OK, MQTT port wrong | LOG_WARNING only, ESP stuck | Portal re-opens, Config bleibt |
+| WiFi OK, Server IP unreachable | LOG_WARNING only, ESP stuck | Portal re-opens, Config bleibt |
+| WiFi OK, MQTT OK, broker dies at runtime | Infinite Circuit Breaker retry | Nach 30s/5 min → Portal, Reconnect parallel |
 
 ### Build Impact
 

@@ -2,30 +2,21 @@
 Zone Assignment API Endpoint
 
 Phase: 7 - Zone Management
-Priority: HIGH
-Status: IMPLEMENTED
+Updated: T13-R1 — Zone Consolidation, subzone_strategy, zones-table-based list
 
 Provides:
-- POST /zone/devices/{esp_id}/assign - Assign ESP to zone
-- DELETE /zone/devices/{esp_id}/assign - Remove zone assignment
+- POST /zone/devices/{esp_id}/assign - Assign ESP to zone (with subzone_strategy)
+- DELETE /zone/devices/{esp_id}/zone - Remove zone assignment
+- GET /zone/zones - List all zones (from zones table, enriched with counts)
 - GET /zone/devices/{esp_id} - Get zone info for ESP
 - GET /zone/{zone_id}/devices - Get all ESPs in zone
+- GET /zone/{zone_id}/monitor-data - Zone monitor data (L2)
 - GET /zone/unassigned - Get ESPs without zone assignment
-
-Zone assignment flow:
-1. Frontend calls POST /zone/devices/{esp_id}/assign
-2. Server publishes to MQTT: kaiser/{kaiser_id}/esp/{esp_id}/zone/assign
-3. ESP receives, saves to NVS, sends ACK via zone/ack topic
-4. Server receives ACK, updates DB, broadcasts WebSocket event
-
-References:
-- El Trabajante/docs/system-flows/08-zone-assignment-flow.md
-- .claude/README.md (Developer Briefing)
 """
 
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from ...core.exceptions import ESPNotFoundError
 from ...core.logging_config import get_logger
@@ -41,7 +32,7 @@ from ...schemas.zone import (
 )
 from ...services.monitor_data_service import MonitorDataService
 from ...services.zone_service import ZoneService
-from ..deps import DBSession, ActiveUser, OperatorUser
+from ..deps import DBSession, ActiveUser, OperatorUser, get_command_bridge
 
 logger = get_logger(__name__)
 
@@ -61,19 +52,17 @@ router = APIRouter(prefix="/v1/zone", tags=["zone"])
     description="""
     Assign an ESP device to a zone via MQTT.
 
-    **Flow:**
-    1. Validates ESP exists in database
-    2. Updates ESP zone fields (pending assignment)
-    3. Publishes zone assignment to MQTT topic
-    4. Returns response (actual confirmation comes via zone/ack topic)
+    **T13-R1:** Zone must exist in zones table. Use `subzone_strategy` to control
+    how subzones are handled when changing zones:
+    - `transfer` (default): Move subzones to new zone
+    - `copy`: Clone subzones to new zone, originals stay
+    - `reset`: Leave subzones in old zone, start fresh
 
     **MQTT Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`
-
-    **Note:** ESP confirmation is asynchronous. Frontend should listen
-    for WebSocket `zone_assignment` events for confirmation.
     """,
     responses={
         200: {"description": "Zone assignment saved (check mqtt_sent for MQTT status)"},
+        400: {"description": "Zone not found or not active"},
         404: {"description": "ESP device not found"},
     },
 )
@@ -83,20 +72,9 @@ async def assign_zone(
     db: DBSession,
     current_user: OperatorUser,
 ) -> ZoneAssignResponse:
-    """
-    Assign ESP device to a zone.
-
-    Args:
-        esp_id: ESP device ID (e.g., "ESP_12AB34CD")
-        request: Zone assignment request with zone_id, master_zone_id, zone_name
-        db: Database session
-        current_user: Authenticated operator/admin user
-
-    Returns:
-        ZoneAssignResponse with assignment status
-    """
+    """Assign ESP device to a zone."""
     esp_repo = ESPRepository(db)
-    zone_service = ZoneService(esp_repo)
+    zone_service = ZoneService(esp_repo, command_bridge=get_command_bridge())
 
     try:
         result = await zone_service.assign_zone(
@@ -104,28 +82,30 @@ async def assign_zone(
             zone_id=request.zone_id,
             master_zone_id=request.master_zone_id,
             zone_name=request.zone_name,
+            subzone_strategy=request.subzone_strategy,
+            changed_by=current_user.username,
         )
 
-        # Commit the zone assignment to DB
         await db.commit()
 
-        if result.mqtt_sent:
-            logger.info(
-                f"Zone assignment for {esp_id} by {current_user.username}: "
-                f"zone_id={request.zone_id} (MQTT sent)"
-            )
-        else:
-            # Log warning but don't fail - DB was updated, MQTT can be retried
-            # This is expected for Mock ESPs or offline devices
-            logger.warning(
-                f"Zone assignment for {esp_id} by {current_user.username}: "
-                f"zone_id={request.zone_id} (MQTT offline - DB updated)"
-            )
+        logger.info(
+            "Zone assignment for %s by %s: zone_id=%s, strategy=%s (%s)",
+            esp_id, current_user.username, request.zone_id,
+            request.subzone_strategy,
+            "MQTT sent" if result.mqtt_sent else "MQTT offline",
+        )
 
         return result
 
-    except ValueError:
-        raise ESPNotFoundError(esp_id)
+    except ValueError as e:
+        error_msg = str(e)
+        if "not found" in error_msg and "ESP" in error_msg:
+            raise ESPNotFoundError(esp_id)
+        # Zone not found or not active
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg,
+        )
 
 
 @router.delete(
@@ -133,13 +113,7 @@ async def assign_zone(
     response_model=ZoneRemoveResponse,
     status_code=status.HTTP_200_OK,
     summary="Remove Zone Assignment",
-    description="""
-    Remove zone assignment from an ESP device.
-
-    Sends empty zone assignment to ESP to clear its zone configuration.
-
-    **Note:** ESP confirmation is asynchronous.
-    """,
+    description="Remove zone assignment from an ESP device.",
     responses={
         200: {"description": "Zone removed (check mqtt_sent for MQTT status)"},
         404: {"description": "ESP device not found"},
@@ -150,34 +124,22 @@ async def remove_zone(
     db: DBSession,
     current_user: OperatorUser,
 ) -> ZoneRemoveResponse:
-    """
-    Remove zone assignment from ESP device.
-
-    Args:
-        esp_id: ESP device ID
-        db: Database session
-        current_user: Authenticated operator/admin user
-
-    Returns:
-        ZoneRemoveResponse with removal status
-    """
+    """Remove zone assignment from ESP device."""
     esp_repo = ESPRepository(db)
-    zone_service = ZoneService(esp_repo)
+    zone_service = ZoneService(esp_repo, command_bridge=get_command_bridge())
 
     try:
-        result = await zone_service.remove_zone(device_id=esp_id)
-
-        # Commit the zone removal to DB
+        result = await zone_service.remove_zone(
+            device_id=esp_id,
+            changed_by=current_user.username,
+        )
         await db.commit()
 
-        if result.mqtt_sent:
-            logger.info(f"Zone removal for {esp_id} by {current_user.username} (MQTT sent)")
-        else:
-            # Log warning but don't fail - DB was updated, MQTT can be retried
-            # This is expected for Mock ESPs or offline devices
-            logger.warning(
-                f"Zone removal for {esp_id} by {current_user.username} (MQTT offline - DB updated)"
-            )
+        logger.info(
+            "Zone removal for %s by %s (%s)",
+            esp_id, current_user.username,
+            "MQTT sent" if result.mqtt_sent else "MQTT offline",
+        )
 
         return result
 
@@ -186,7 +148,7 @@ async def remove_zone(
 
 
 # =============================================================================
-# Zone List Endpoint (includes empty zones from ZoneContext)
+# Zone List Endpoint (T13-R1: zones table as Single Source of Truth)
 # =============================================================================
 
 
@@ -195,13 +157,13 @@ async def remove_zone(
     response_model=ZoneListResponse,
     summary="List All Zones",
     description="""
-    List all zones including empty ones.
+    List all zones from the zones table (Single Source of Truth).
 
-    Merges zones from:
-    - Device assignments (ESPs with zone_id set)
-    - ZoneContext table (zones with business context but possibly no devices)
+    T13-R1: Sourced from zones table, enriched with device/sensor/actuator counts.
+    ZoneContext metadata is joined for zone names (if available).
 
-    Empty zones (0 devices) are included so the frontend can display them.
+    Use `status` query parameter to filter by zone status.
+    Default: shows active and archived zones (excludes deleted).
     """,
     responses={
         200: {"description": "Zone list with device/sensor/actuator counts"},
@@ -210,70 +172,34 @@ async def remove_zone(
 async def list_zones(
     db: DBSession,
     _user: ActiveUser,
+    zone_status: Optional[str] = Query(
+        None,
+        alias="status",
+        description="Filter by zone status: 'active', 'archived', 'deleted'. Default: all non-deleted.",
+    ),
 ) -> ZoneListResponse:
     """
-    List all zones including empty ones from ZoneContext.
+    List all zones from zones table, enriched with device counts.
 
-    Combines device-derived zones with ZoneContext entries to ensure
-    zones without devices are still visible in the frontend.
+    T13-R1: zones table is the Single Source of Truth.
+    ZoneContext is joined for additional zone names.
     """
-    from sqlalchemy import select as sa_select
-    from sqlalchemy.orm import selectinload
+    from ...db.repositories.zone_repo import ZoneRepository
 
-    from ...db.models.esp import ESPDevice
-    from ...db.models.zone_context import ZoneContext
+    zone_repo = ZoneRepository(db)
+    zone_rows = await zone_repo.list_with_device_counts(status_filter=zone_status)
 
-    # 1. Get zones from devices (with counts)
-    zone_map: dict[str, ZoneListEntry] = {}
-
-    all_devices_stmt = (
-        sa_select(ESPDevice)
-        .where(ESPDevice.zone_id.isnot(None))
-        .options(
-            selectinload(ESPDevice.sensors),
-            selectinload(ESPDevice.actuators),
+    zones = [
+        ZoneListEntry(
+            zone_id=row["zone_id"],
+            zone_name=row["zone_name"],
+            status=row["status"],
+            device_count=row["device_count"],
+            sensor_count=row["sensor_count"],
+            actuator_count=row["actuator_count"],
         )
-    )
-    result = await db.execute(all_devices_stmt)
-    all_devices = result.scalars().all()
-
-    for device in all_devices:
-        zid = device.zone_id
-        if not zid:
-            continue
-        if zid not in zone_map:
-            zone_map[zid] = ZoneListEntry(
-                zone_id=zid,
-                zone_name=device.zone_name or zid,
-                device_count=0,
-                sensor_count=0,
-                actuator_count=0,
-            )
-        zone_map[zid].device_count += 1
-        zone_map[zid].sensor_count += (
-            len(device.sensors) if hasattr(device, "sensors") and device.sensors else 0
-        )
-        zone_map[zid].actuator_count += (
-            len(device.actuators) if hasattr(device, "actuators") and device.actuators else 0
-        )
-
-    # 2. Merge zones from ZoneContext (adds empty zones)
-    ctx_stmt = sa_select(ZoneContext)
-    ctx_result = await db.execute(ctx_stmt)
-    for ctx in ctx_result.scalars().all():
-        if ctx.zone_id not in zone_map:
-            zone_map[ctx.zone_id] = ZoneListEntry(
-                zone_id=ctx.zone_id,
-                zone_name=ctx.zone_name or ctx.zone_id,
-                device_count=0,
-                sensor_count=0,
-                actuator_count=0,
-            )
-        elif ctx.zone_name and not zone_map[ctx.zone_id].zone_name:
-            zone_map[ctx.zone_id].zone_name = ctx.zone_name
-
-    zones = sorted(zone_map.values(), key=lambda z: z.zone_name or z.zone_id)
-
+        for row in zone_rows
+    ]
     return ZoneListResponse(zones=zones, total=len(zones))
 
 
@@ -295,17 +221,9 @@ async def list_zones(
 async def get_zone_info(
     esp_id: str,
     db: DBSession,
+    _user: ActiveUser,
 ) -> ZoneInfo:
-    """
-    Get zone information for an ESP device.
-
-    Args:
-        esp_id: ESP device ID
-        db: Database session
-
-    Returns:
-        ZoneInfo with current zone assignment
-    """
+    """Get zone information for an ESP device."""
     esp_repo = ESPRepository(db)
     device = await esp_repo.get_by_device_id(esp_id)
 
@@ -333,17 +251,9 @@ async def get_zone_info(
 async def get_zone_devices(
     zone_id: str,
     db: DBSession,
+    _user: ActiveUser,
 ) -> List[ZoneInfo]:
-    """
-    Get all ESP devices in a zone.
-
-    Args:
-        zone_id: Zone identifier
-        db: Database session
-
-    Returns:
-        List of ZoneInfo for ESPs in the zone
-    """
+    """Get all ESP devices in a zone."""
     esp_repo = ESPRepository(db)
     devices = await esp_repo.get_by_zone(zone_id)
 
@@ -378,17 +288,7 @@ async def get_zone_monitor_data(
     db: DBSession,
     _user: ActiveUser,
 ) -> ZoneMonitorData:
-    """
-    Get monitor data for a zone (sensors/actuators grouped by subzone).
-
-    Args:
-        zone_id: Zone identifier
-        db: Database session
-        _user: Authenticated user (required)
-
-    Returns:
-        ZoneMonitorData with subzones, sensor_count, actuator_count, alarm_count
-    """
+    """Get monitor data for a zone (sensors/actuators grouped by subzone)."""
     service = MonitorDataService(db)
     return await service.get_zone_monitor_data(zone_id)
 
@@ -404,16 +304,9 @@ async def get_zone_monitor_data(
 )
 async def get_unassigned_devices(
     db: DBSession,
+    _user: ActiveUser,
 ) -> List[str]:
-    """
-    Get all ESPs without zone assignment.
-
-    Args:
-        db: Database session
-
-    Returns:
-        List of device IDs without zone_id
-    """
+    """Get all ESPs without zone assignment."""
     esp_repo = ESPRepository(db)
     zone_service = ZoneService(esp_repo)
     devices = await zone_service.get_unassigned_esps()

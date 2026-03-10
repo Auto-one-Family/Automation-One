@@ -48,7 +48,7 @@ const actuators = computed<ActuatorInfo[]>(() => {
         id,
         name: act.name || `${act.actuator_type} (GPIO ${act.gpio})`,
         state: act.state,
-        lastCommand: act.last_command,
+        lastCommand: act.last_command_at,
         espName: device.name || deviceId,
       })
     }

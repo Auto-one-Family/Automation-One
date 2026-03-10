@@ -26,7 +26,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ...core.exceptions import (
     ConfigurationException,
@@ -61,7 +61,11 @@ from ...schemas import (
     TriggerMeasurementResponse,
 )
 from ...schemas.common import PaginationMeta
-from ...sensors.sensor_type_registry import is_multi_value_sensor, get_all_value_types_for_device
+from ...sensors.sensor_type_registry import (
+    get_all_value_types_for_device,
+    get_device_type_from_sensor_type,
+    is_multi_value_sensor,
+)
 from ...services.config_builder import ConfigPayloadBuilder
 from ...services.esp_service import ESPService
 from ..deps import (
@@ -159,6 +163,10 @@ def _model_to_response(
         operating_mode=sensor.operating_mode,
         timeout_seconds=sensor.timeout_seconds,
         schedule_config=sensor.schedule_config,
+        # Multi-Zone Device Scope (T13-R2)
+        device_scope=sensor.device_scope,
+        assigned_zones=sensor.assigned_zones,
+        assigned_subzones=sensor.assigned_subzones,
         latest_value=None,  # Will be set by caller if available
         latest_quality=None,
         latest_timestamp=None,
@@ -220,6 +228,12 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         "timeout_seconds": request.timeout_seconds,
         "timeout_warning_enabled": request.timeout_warning_enabled,
         "schedule_config": request.schedule_config,
+        # =========================================================================
+        # MULTI-ZONE DEVICE SCOPE (T13-R2)
+        # =========================================================================
+        "device_scope": request.device_scope if request.device_scope is not None else "zone_local",
+        "assigned_zones": request.assigned_zones if request.assigned_zones is not None else [],
+        "assigned_subzones": request.assigned_subzones if request.assigned_subzones is not None else [],
     }
 
 
@@ -584,6 +598,22 @@ async def create_or_update_sensor(
         raise DeviceNotApprovedError(esp_id, esp_device.status)
 
     # =========================================================================
+    # MULTI-ZONE VALIDATION (T13-R2 H3)
+    # Validate assigned_zones exist in zones table when scope is multi_zone/mobile
+    # =========================================================================
+    scope = request.device_scope or "zone_local"
+    if scope in ("multi_zone", "mobile") and request.assigned_zones:
+        from ...services.device_scope_service import DeviceScopeService
+
+        scope_service = DeviceScopeService(db)
+        invalid_zones = await scope_service.validate_assigned_zones(request.assigned_zones)
+        if invalid_zones:
+            raise ValidationException(
+                "assigned_zones",
+                f"Invalid or inactive zone_ids: {invalid_zones}",
+            )
+
+    # =========================================================================
     # MULTI-VALUE SENSOR SPLITTING
     # =========================================================================
     # Base device types (e.g., "sht31") are split into individual value types
@@ -651,6 +681,13 @@ async def create_or_update_sensor(
                     existing_vt.timeout_seconds = model_fields["timeout_seconds"]
                     existing_vt.timeout_warning_enabled = model_fields["timeout_warning_enabled"]
                     existing_vt.schedule_config = model_fields["schedule_config"]
+                    # Multi-Zone Device Scope (T13-R2)
+                    if request.device_scope is not None:
+                        existing_vt.device_scope = model_fields["device_scope"]
+                    if request.assigned_zones is not None:
+                        existing_vt.assigned_zones = model_fields["assigned_zones"]
+                    if request.assigned_subzones is not None:
+                        existing_vt.assigned_subzones = model_fields["assigned_subzones"]
                     existing_vt.config_status = "pending"
                     existing_vt.config_error = None
                     existing_vt.config_error_detail = None
@@ -758,6 +795,7 @@ async def create_or_update_sensor(
             sensor_repo,
             esp_device.id,
             request.i2c_address,
+            sensor_type=request.sensor_type,
             exclude_sensor_id=existing.id if existing else None,
         )
         # I2C sensors can share GPIO (bus pins 21/22)
@@ -812,6 +850,10 @@ async def create_or_update_sensor(
     if interface_type == "ONEWIRE" and validated_onewire_address:
         model_fields["onewire_address"] = validated_onewire_address
 
+    # Capture old values for H2 audit trail before modification
+    old_scope = existing.device_scope if existing else None
+    old_zones = list(existing.assigned_zones or []) if existing else None
+
     if existing:
         # Update existing sensor
         existing.sensor_type = model_fields["sensor_type"]
@@ -841,6 +883,16 @@ async def create_or_update_sensor(
         existing.timeout_warning_enabled = model_fields["timeout_warning_enabled"]
         existing.schedule_config = model_fields["schedule_config"]
         # =========================================================================
+        # MULTI-ZONE DEVICE SCOPE (T13-R2)
+        # Only update if explicitly provided (don't reset to defaults on partial update)
+        # =========================================================================
+        if request.device_scope is not None:
+            existing.device_scope = model_fields["device_scope"]
+        if request.assigned_zones is not None:
+            existing.assigned_zones = model_fields["assigned_zones"]
+        if request.assigned_subzones is not None:
+            existing.assigned_subzones = model_fields["assigned_subzones"]
+        # =========================================================================
         # WRITE-AFTER-VERIFICATION: Reset config_status to pending
         # Status will be updated to "applied" or "failed" by config_handler
         # when ESP32 responds via MQTT config_response
@@ -864,8 +916,61 @@ async def create_or_update_sensor(
             f"Sensor created: {esp_id} GPIO {gpio} by {current_user.username} (config_status=pending)"
         )
 
+    # =========================================================================
+    # AUDIT TRAIL for scope/zones changes (T13-R2 H2)
+    # =========================================================================
+    scope_changed = False
+    zones_changed = False
+    if existing and old_scope is not None:
+        if request.device_scope is not None and request.device_scope != old_scope:
+            from ...db.models.device_zone_change import DeviceZoneChange
+
+            db.add(DeviceZoneChange(
+                esp_id=f"sensor:{sensor.id}",
+                old_zone_id=old_scope,
+                new_zone_id=request.device_scope,
+                subzone_strategy="scope",
+                change_type="scope_change",
+                changed_by=current_user.username,
+            ))
+            scope_changed = True
+        if request.assigned_zones is not None and sorted(request.assigned_zones) != sorted(
+            old_zones or []
+        ):
+            from ...db.models.device_zone_change import DeviceZoneChange
+
+            db.add(DeviceZoneChange(
+                esp_id=f"sensor:{sensor.id}",
+                old_zone_id=",".join(old_zones or []),
+                new_zone_id=",".join(request.assigned_zones),
+                subzone_strategy="zones",
+                change_type="zones_update",
+                changed_by=current_user.username,
+            ))
+            zones_changed = True
+
     await db.commit()
     await db.refresh(sensor)
+
+    # =========================================================================
+    # WS BROADCAST device_scope_changed (T13-R2 H1)
+    # =========================================================================
+    if scope_changed or zones_changed:
+        try:
+            from ...websocket.manager import WebSocketManager
+
+            ws_manager = await WebSocketManager.get_instance()
+            await ws_manager.broadcast(
+                "device_scope_changed",
+                {
+                    "config_type": "sensor",
+                    "config_id": str(sensor.id),
+                    "device_scope": sensor.device_scope,
+                    "assigned_zones": sensor.assigned_zones or [],
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to broadcast device_scope_changed: {e}")
 
     # =========================================================================
     # SCHEDULE JOB UPDATE (Phase 2H)
@@ -1031,6 +1136,14 @@ async def delete_sensor(
 
     await db.commit()
 
+    # T13-R1: Sync subzone sensor/actuator counts after sensor delete
+    try:
+        _subzone_repo = SubzoneRepository(db)
+        if await _subzone_repo.sync_subzone_counts(esp_id, esp_device.id):
+            await db.commit()
+    except Exception:
+        logger.debug("Subzone count sync skipped for %s", esp_id)
+
     logger.info(
         f"Sensor deleted: {esp_id} config_id={config_id} GPIO {gpio} "
         f"type={deleted_sensor_type} by {current_user.username}"
@@ -1116,6 +1229,9 @@ async def query_sensor_data(
     subzone_id: Annotated[
         Optional[str], Query(description="Filter by subzone ID (Phase 0.1)")
     ] = None,
+    sensor_config_id: Annotated[
+        Optional[str], Query(description="Filter by sensor_config UUID (T13-R2)")
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=1000, description="Max results")] = 100,
 ) -> SensorDataResponse:
     """
@@ -1156,6 +1272,15 @@ async def query_sensor_data(
             raise ESPNotFoundError(esp_id)
         esp_db_id = esp_device.id
 
+    # Resolve sensor_config_id to get esp_id/gpio/sensor_type if needed (T13-R2)
+    resolved_config_id = None
+    if sensor_config_id:
+        import uuid as _uuid
+        try:
+            resolved_config_id = _uuid.UUID(sensor_config_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid sensor_config_id UUID")
+
     # Query data
     readings = await sensor_repo.query_data(
         esp_id=esp_db_id,
@@ -1166,6 +1291,7 @@ async def query_sensor_data(
         quality=quality,
         zone_id=zone_id,
         subzone_id=subzone_id,
+        sensor_config_id=resolved_config_id,
         limit=limit,
     )
 
@@ -1831,6 +1957,7 @@ async def _validate_i2c_config(
     sensor_repo: SensorRepository,
     esp_id: uuid.UUID,
     i2c_address: Optional[int],
+    sensor_type: Optional[str] = None,
     exclude_sensor_id: Optional[uuid.UUID] = None,
 ):
     """
@@ -1842,12 +1969,14 @@ async def _validate_i2c_config(
     - Reserved addresses are rejected (0x00-0x07, 0x78-0x7F)
     - Valid range: 0x08-0x77 (112 usable addresses)
     - i2c_address must be unique per ESP (can't have 2 devices on same address)
+    - Sibling sub-types of multi-value sensors are excluded from conflict check
     - GPIO 21/22 are shared (bus pins), no conflict
 
     Args:
         sensor_repo: Sensor repository instance
         esp_id: ESP device UUID
         i2c_address: I2C address (0-127)
+        sensor_type: Sensor type for sibling sub-type exclusion (e.g. "sht31_temp")
         exclude_sensor_id: Sensor ID to exclude from conflict check (for updates)
 
     Raises:
@@ -1906,13 +2035,29 @@ async def _validate_i2c_config(
         raise ValidationException("i2c_address", rejection_reason)
 
     # Check 4: Address already used (conflict check)
-    existing_with_address = await sensor_repo.get_by_i2c_address(esp_id, i2c_address)
+    # Use get_all to properly filter sibling sub-types of multi-value sensors
+    all_with_address = await sensor_repo.get_all_by_i2c_address(esp_id, i2c_address)
 
-    if existing_with_address and existing_with_address.id != exclude_sensor_id:
+    # Determine sibling sub-types to exclude from conflict detection
+    # e.g. sht31_temp saving should not conflict with sht31_humidity
+    sibling_types: list[str] = []
+    if sensor_type:
+        base_device = get_device_type_from_sensor_type(sensor_type)
+        if base_device:
+            sibling_types = get_all_value_types_for_device(base_device)
+
+    conflicting = [
+        s
+        for s in all_with_address
+        if s.id != exclude_sensor_id
+        and s.sensor_type not in sibling_types
+    ]
+
+    if conflicting:
         rejection_reason = f"Address 0x{i2c_address:02X} already in use"
         logger.info(
             f"Rejected I2C config: ESP {esp_id}, address 0x{i2c_address:02X} "
-            f"(reason: {rejection_reason})"
+            f"(reason: {rejection_reason}, conflict with {conflicting[0].sensor_type})"
         )
         raise DuplicateError("I2CSensor", "i2c_address", f"0x{i2c_address:02X}")
 

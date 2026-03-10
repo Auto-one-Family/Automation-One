@@ -173,6 +173,24 @@ class ZoneContextSummary(BaseModel):
     responsible_person: Optional[str] = None
 
 
+class SubzoneSummary(BaseModel):
+    """Summary of a subzone assigned to an ESP device."""
+
+    subzone_id: str = Field(..., description="Subzone identifier")
+    subzone_name: str = Field(..., description="Human-readable subzone name")
+    assigned_gpios: List[int] = Field(
+        default_factory=list,
+        description="GPIO pins assigned to this subzone",
+    )
+    sensor_count: int = Field(0, description="Number of sensors in this subzone", ge=0)
+    actuator_count: int = Field(
+        0, description="Number of actuators in this subzone", ge=0
+    )
+    is_active: bool = Field(True, description="Whether the subzone is active")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ESPDeviceResponse(ESPDeviceBase, TimestampMixin):
     """
     ESP device response model.
@@ -241,6 +259,12 @@ class ESPDeviceResponse(ESPDeviceBase, TimestampMixin):
         None,
         description="Heartbeat interval in seconds (Mock ESPs only)",
         ge=1,
+    )
+
+    # Subzone summaries (T14-Fix-F: Hydration at page load)
+    subzones: List["SubzoneSummary"] = Field(
+        default_factory=list,
+        description="Subzones assigned to this device with sensor/actuator counts.",
     )
 
     # Zone context inheritance (Phase 4)

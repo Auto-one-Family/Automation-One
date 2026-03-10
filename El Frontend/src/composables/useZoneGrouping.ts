@@ -37,6 +37,8 @@ export interface SensorWithContext {
   subzone_id: string | null
   subzone_name: string
   last_read?: string | null
+  device_scope?: 'zone_local' | 'multi_zone' | 'mobile' | null
+  assigned_zones?: string[]
 }
 
 export interface ActuatorWithContext {
@@ -52,6 +54,10 @@ export interface ActuatorWithContext {
   zone_name: string
   subzone_id: string | null
   subzone_name: string
+  last_seen?: string | null
+  last_command_at?: string | null
+  device_scope?: 'zone_local' | 'multi_zone' | 'mobile' | null
+  assigned_zones?: string[]
 }
 
 export interface SubzoneGroup {
@@ -241,6 +247,8 @@ export function useZoneGrouping(options?: ZoneGroupingOptions | ZoneGroupingFilt
           ...actuator,
           esp_id: espId,
           esp_state: esp.system_state,
+          last_seen: esp.last_seen ?? null,
+          last_command_at: (actuator as any).last_command_at ?? null,
           zone_id: zoneId,
           zone_name: zoneName,
           subzone_id: subzoneId,

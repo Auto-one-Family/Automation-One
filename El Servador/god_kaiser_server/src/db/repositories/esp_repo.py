@@ -193,6 +193,20 @@ class ESPRepository(BaseRepository[ESPDevice]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def update_last_seen(
+        self, device_id: str, timestamp: datetime
+    ) -> None:
+        """
+        Update only last_seen without changing device status.
+
+        Used by sensor_handler as secondary health indicator.
+        Unlike update_status(), this does NOT modify the status field.
+        """
+        device = await self.get_by_device_id(device_id)
+        if device:
+            device.last_seen = timestamp
+            await self.session.flush()
+
     async def update_status(
         self, device_id: str, status: str, last_seen: Optional[datetime] = None
     ) -> Optional[ESPDevice]:
@@ -898,6 +912,10 @@ class ESPRepository(BaseRepository[ESPDevice]):
                 entry["interface_type"] = cfg.interface_type
             if cfg.onewire_address is not None:
                 entry["onewire_address"] = cfg.onewire_address
+            if hasattr(cfg, "device_scope") and cfg.device_scope:
+                entry["device_scope"] = cfg.device_scope
+            if hasattr(cfg, "assigned_zones") and cfg.assigned_zones:
+                entry["assigned_zones"] = cfg.assigned_zones
 
             # Resolve simulation-specific params with 3-tier fallback:
             # 1. sensor_metadata.simulation (persistent per-sensor storage)

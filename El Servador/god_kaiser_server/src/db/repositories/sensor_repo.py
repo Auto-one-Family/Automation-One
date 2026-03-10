@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import and_, delete, func, or_, select, tuple_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.logging_config import get_logger
@@ -147,7 +148,10 @@ class SensorRepository(BaseRepository[SensorConfig]):
         Returns:
             Number of sensors
         """
-        stmt = select(func.count()).select_from(SensorConfig).where(SensorConfig.esp_id == esp_id)
+        stmt = select(func.count()).select_from(SensorConfig).where(
+            SensorConfig.esp_id == esp_id,
+            SensorConfig.enabled == True,  # noqa: E712 — only count enabled configs to match ESP count
+        )
         result = await self.session.execute(stmt)
         return result.scalar() or 0
 
@@ -250,9 +254,13 @@ class SensorRepository(BaseRepository[SensorConfig]):
         zone_id: Optional[str] = None,
         subzone_id: Optional[str] = None,
         device_name: Optional[str] = None,
-    ) -> SensorData:
+    ) -> Optional[SensorData]:
         """
-        Save sensor data.
+        Save sensor data. Returns None if a duplicate already exists.
+
+        Duplicates are detected via UNIQUE constraint on
+        (esp_id, gpio, sensor_type, timestamp). This handles MQTT QoS 1
+        redelivery where the broker resends a message if PUBACK is delayed.
 
         Args:
             esp_id: ESP device UUID
@@ -271,7 +279,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
             device_name: Device name at measurement time (T02-Fix1)
 
         Returns:
-            Created SensorData instance
+            Created SensorData instance, or None if duplicate was silently ignored
         """
         # Ensure timezone-aware UTC timestamp for TIMESTAMPTZ column
         ts = timestamp or datetime.now(timezone.utc)
@@ -294,10 +302,18 @@ class SensorRepository(BaseRepository[SensorConfig]):
             subzone_id=subzone_id,
             device_name=device_name,
         )
-        self.session.add(sensor_data)
-        await self.session.flush()
-        await self.session.refresh(sensor_data)
-        return sensor_data
+        try:
+            self.session.add(sensor_data)
+            await self.session.flush()
+            await self.session.refresh(sensor_data)
+            return sensor_data
+        except IntegrityError:
+            await self.session.rollback()
+            logger.debug(
+                "Duplicate sensor_data ignored: esp=%s, gpio=%s, type=%s, ts=%s",
+                esp_id, gpio, sensor_type, ts,
+            )
+            return None
 
     async def get_latest_data(
         self, esp_id: uuid.UUID, gpio: int, sensor_type: Optional[str] = None, limit: int = 1
@@ -471,6 +487,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
         data_source: Optional[DataSource] = None,
         zone_id: Optional[str] = None,
         subzone_id: Optional[str] = None,
+        sensor_config_id: Optional[uuid.UUID] = None,
         limit: int = 100,
     ) -> list[SensorData]:
         """
@@ -486,12 +503,27 @@ class SensorRepository(BaseRepository[SensorConfig]):
             data_source: Optional data source filter (production, mock, test, simulation)
             zone_id: Optional zone filter (Phase 0.1)
             subzone_id: Optional subzone filter (Phase 0.1)
+            sensor_config_id: Optional sensor config UUID filter (T13-R2)
             limit: Maximum number of records (default: 100)
 
         Returns:
             List of SensorData instances
         """
         stmt = select(SensorData)
+
+        # T13-R2: If sensor_config_id provided, resolve to esp_id + gpio + sensor_type
+        if sensor_config_id is not None:
+            config = await self.session.execute(
+                select(SensorConfig).where(SensorConfig.id == sensor_config_id)
+            )
+            config_obj = config.scalar_one_or_none()
+            if config_obj:
+                stmt = stmt.where(SensorData.esp_id == config_obj.esp_id)
+                if config_obj.gpio is not None:
+                    stmt = stmt.where(SensorData.gpio == config_obj.gpio)
+                stmt = stmt.where(
+                    func.lower(SensorData.sensor_type) == config_obj.sensor_type.lower()
+                )
 
         # Apply filters
         if esp_id is not None:
@@ -852,6 +884,30 @@ class SensorRepository(BaseRepository[SensorConfig]):
         )
         result = await self.session.execute(stmt)
         return result.scalars().first()
+
+    async def get_all_by_i2c_address(
+        self, esp_id: uuid.UUID, i2c_address: int
+    ) -> list[SensorConfig]:
+        """
+        Get all sensors by ESP ID and I2C address.
+
+        Returns all matches (not just first) so callers can filter
+        sibling sub-types from real conflicts.
+
+        Args:
+            esp_id: ESP device UUID
+            i2c_address: I2C address (0-127)
+
+        Returns:
+            List of matching SensorConfig entries (may be empty)
+        """
+        stmt = select(SensorConfig).where(
+            SensorConfig.esp_id == esp_id,
+            SensorConfig.interface_type == "I2C",
+            SensorConfig.i2c_address == i2c_address,
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     async def get_by_onewire_address(
         self, esp_id: uuid.UUID, onewire_address: str

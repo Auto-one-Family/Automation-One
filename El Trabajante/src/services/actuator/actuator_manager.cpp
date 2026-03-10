@@ -262,9 +262,9 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
   slot->in_use = true;
   slot->emergency_stopped = false;
   
-  if (!is_reconfiguration) {
-    actuator_count_++;
-  }
+  // Always increment: removeActuator() already decremented for reconfiguration,
+  // and new actuators need the increment too
+  actuator_count_++;
 
   // Phase 7: Persist to NVS immediately (save all actuators)
   ActuatorConfig actuators[MAX_ACTUATORS];

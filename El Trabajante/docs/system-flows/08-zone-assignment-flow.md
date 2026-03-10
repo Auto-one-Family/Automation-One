@@ -263,16 +263,19 @@ if (configManager.updateZoneAssignment(zone_id, master_zone_id, zone_name, kaise
     TopicBuilder::setKaiserId(kaiser_id.c_str());
   }
   
-  // Send acknowledgment
-  String ack_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + 
-                    g_system_config.esp_id + "/zone/ack";
-  DynamicJsonDocument ack_doc(256);
+  // Send acknowledgment (use TopicBuilder for consistency)
+  String ack_topic = TopicBuilder::buildZoneAckTopic();
+  DynamicJsonDocument ack_doc(384);
   ack_doc["esp_id"] = g_system_config.esp_id;
   ack_doc["status"] = "zone_assigned";
   ack_doc["zone_id"] = zone_id;
   ack_doc["master_zone_id"] = master_zone_id;
-  ack_doc["timestamp"] = millis();
-  
+  ack_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+  ack_doc["seq"] = mqttClient.getNextSeq();
+  if (correlationId.length() > 0) {
+    ack_doc["correlation_id"] = correlationId;
+  }
+
   String ack_payload;
   serializeJson(ack_doc, ack_payload);
   mqttClient.publish(ack_topic, ack_payload);
@@ -297,11 +300,19 @@ if (configManager.updateZoneAssignment(zone_id, master_zone_id, zone_name, kaise
 } else {
   LOG_ERROR("❌ Failed to save zone configuration");
   
-  // Send error acknowledgment
-  String ack_topic = "kaiser/" + g_kaiser.kaiser_id + "/esp/" + 
-                    g_system_config.esp_id + "/zone/ack";
-  String error_response = "{\"esp_id\":\"" + g_system_config.esp_id + 
-                         "\",\"status\":\"error\",\"message\":\"Failed to save zone config\"}";
+  // Send error acknowledgment (use TopicBuilder for consistency)
+  String ack_topic = TopicBuilder::buildZoneAckTopic();
+  DynamicJsonDocument err_doc(384);
+  err_doc["esp_id"] = g_system_config.esp_id;
+  err_doc["status"] = "error";
+  err_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+  err_doc["seq"] = mqttClient.getNextSeq();
+  err_doc["message"] = "Failed to save zone config";
+  if (correlationId.length() > 0) {
+    err_doc["correlation_id"] = correlationId;
+  }
+  String error_response;
+  serializeJson(err_doc, error_response);
   mqttClient.publish(ack_topic, error_response);
 }
 ```
@@ -437,9 +448,13 @@ kaiser/kaiser_production_001/esp/ESP_AB12CD/system/heartbeat
   "status": "zone_assigned",
   "zone_id": "greenhouse_zone_1",
   "master_zone_id": "greenhouse_master",
-  "timestamp": 1234567890
+  "ts": 1234567890,
+  "seq": 42,
+  "correlation_id": "uuid-v4"
 }
 ```
+
+**correlation_id:** Echoed from zone/assign payload. Enables MQTTCommandBridge exact ACK matching.
 
 **Error Payload:**
 
@@ -447,7 +462,10 @@ kaiser/kaiser_production_001/esp/ESP_AB12CD/system/heartbeat
 {
   "esp_id": "ESP_AB12CD",
   "status": "error",
-  "message": "Failed to save zone config"
+  "message": "Failed to save zone config",
+  "ts": 1234567890,
+  "seq": 43,
+  "correlation_id": "uuid-v4"
 }
 ```
 

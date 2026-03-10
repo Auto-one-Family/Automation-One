@@ -191,8 +191,8 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | health | /v1/health | 6 | Mixed |
 | audit | /v1/audit | 21 | Admin/Active |
 | debug | /v1/debug | 59 | Admin |
-| zone | /v1/zone | 6 | Operator+ |
-| zones | /v1/zones | 5 | Operator+ |
+| zone | /v1/zone | 7 | Operator+ |
+| zones | /v1/zones | 8 | Operator+ |
 | subzone | /v1/subzone | 6 | Operator+ |
 | users | /v1/users | 7 | Admin |
 | errors | /v1/errors | 4 | Active |
@@ -202,6 +202,7 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | notifications | /v1/notifications | 15 | Active/Operator/Admin |
 | diagnostics | /v1/diagnostics | 6 | Operator/Active |
 | plugins | /v1/plugins | 8 | Operator/Active |
+| device_context | /v1/device-context | 3 | Operator+ |
 | webhooks | /v1/webhooks | 1 | Public (Grafana) |
 | ai | /v1/ai | PLANNED | - |
 | kaiser | /v1/kaiser | PLANNED | - |
@@ -230,7 +231,7 @@ async def get_items(
 
 ## 5. Database
 
-**Dateien:** `src/db/` (6,942 Zeilen, 18 Models, 17 Repositories)
+**Dateien:** `src/db/` (6,942 Zeilen, 20 Models, 18 Repositories)
 
 ### Repository Pattern
 
@@ -251,7 +252,9 @@ class YourRepository(BaseRepository[YourModel]):
 | ESPDevice | `esps` | esp_id (PK), zone_id, zone_name, master_zone_id, is_online, last_heartbeat, deleted_at (soft-delete), deleted_by |
 | SensorConfig | `sensor_configs` | esp_id (FK), gpio, sensor_type, i2c_address, sensor_metadata (JSON, inkl. description, unit), alert_config (JSONB), runtime_stats (JSONB) |
 | ActuatorConfig | `actuator_configs` | esp_id (FK), gpio, actuator_type, inverted, alert_config (JSONB), runtime_stats (JSONB) |
-| SubzoneConfig | `subzone_configs` | id (UUID PK), esp_id (FK), subzone_id, assigned_gpios (JSON), safe_mode_active |
+| Zone | `zones` | id (UUID PK), zone_id (UNIQUE), name, description, status (active/archived/deleted), deleted_at, deleted_by, created_at, updated_at. FK: esp_devices.zone_id → zones.zone_id (T13-R1) |
+| SubzoneConfig | `subzone_configs` | id (UUID PK), esp_id (FK), subzone_id, assigned_gpios (JSON), assigned_sensor_config_ids (JSON), is_active (Bool), safe_mode_active |
+| DeviceZoneChange | `device_zone_changes` | id (UUID PK), esp_id, old_zone_id, new_zone_id, subzone_strategy, affected_subzones (JSON), changed_by, changed_at (T13-R1 Audit) |
 | CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority, cooldown_seconds |
 | SensorData | `sensor_data` | sensor_id (FK), esp_id (FK SET NULL), raw_value, processed_value, zone_id, subzone_id (Phase 0.1), device_name, data_source |
 | AuditLog | `audit_logs` | event_type, severity, source_type |
@@ -260,7 +263,7 @@ class YourRepository(BaseRepository[YourModel]):
 | DiagnosticReport | `diagnostic_reports` | id (UUID PK), overall_status, checks (JSON, nullable), started_at, duration_seconds, triggered_by, summary |
 | PluginConfig | `plugin_configs` | plugin_id (PK), display_name, is_enabled, config (JSONB), schedule, capabilities |
 | PluginExecution | `plugin_executions` | id (UUID PK), plugin_id (FK), status, started_at, duration_seconds, result (JSONB), error_message |
-| Zone | `zones` | id (UUID PK), zone_id (UNIQUE), name, description, created_at, updated_at (Phase 0.3) |
+| DeviceActiveContext | `device_active_context` | config_type (sensor/actuator), config_id (UUID FK), active_zone_id, active_subzone_id, context_source (zone_local/multi_zone/mobile), changed_at, changed_by (T13-R2) |
 | EmailLog | `email_log` | id (UUID PK), notification_id (FK, SET NULL), to_address, subject, template, provider, status (sent/failed/pending), sent_at, error_message, retry_count (Phase C V1.1) |
 
 ### Multi-Value Sensor Support
@@ -385,15 +388,17 @@ poetry run python scripts/seed_wokwi_esp.py
 | **SensorService** | sensor_service.py | 545 | `process_reading()`, `trigger_measurement()` |
 | **ActuatorService** | actuator_service.py | 279 | `send_command()` |
 | **ESPService** | esp_service.py | 944 | `register()`, `approve()`, `reject()` |
-| **ZoneService** | zone_service.py | 430 | `assign_zone()`, `unassign_zone()` — auto-creates Zone entity on assign (backward compat) |
+| **ZoneService** | zone_service.py | ~500 | `assign_zone()`, `remove_zone()` — T13-R1: Zone muss existieren + aktiv sein. subzone_strategy (transfer/copy/reset). DeviceZoneChange Audit |
 | **MonitorDataService** | monitor_data_service.py | - | `get_zone_monitor_data()` — Subzone-Gruppierung für Monitor L2 |
-| **SubzoneService** | subzone_service.py | 595 | `assign_subzone()`, `set_safe_mode()` |
+| **SubzoneService** | subzone_service.py | 595 | `assign_subzone()`, `remove_subzone()`, `set_safe_mode()` |
 | **ConfigBuilder** | config_builder.py | 249 | `build_esp_config()` |
 | **MaintenanceService** | maintenance/service.py | 260 | `start()`, `stop()`, `register_jobs()` |
 | **NotificationRouter** | notification_router.py | ~467 | `route()` — persist → fingerprint dedup → WS broadcast → optional email + email_log |
 | **AlertSuppressionService** | alert_suppression_service.py | ~180 | `check_suppression()`, `update_config()`, `expire_suppressions()` — ISA-18.2 Shelved Alarms |
 | **DiagnosticsService** | diagnostics_service.py | ~350 | `run_full_diagnostic()`, `cleanup_old_reports()` — 10 modulare System-Checks |
 | **PluginService** | plugin_service.py | ~380 | `execute_plugin()`, `update_schedule()`, `sync_registry_to_db()` — Registry ↔ DB Mediator |
+| **DeviceScopeService** | device_scope_service.py | - | `get_active_context()` → `ActiveContextData` (NamedTuple), `set_context()`, `resolve_zone()` — 3-Way Resolution, Cache 30s TTL, session-safe (T13-R2+Phase3) |
+| **MQTTCommandBridge** | mqtt_command_bridge.py | ~230 | `send_and_wait_ack()`, `resolve_ack()`, `has_pending()`, `shutdown()` — ACK-gesteuerte MQTT-Kommunikation für Zone/Subzone-Operationen (T13-Phase2) |
 
 ### Logic Engine Architektur
 
@@ -438,6 +443,7 @@ LogicEngine
 |-----|----------|------------|
 | cleanup_sensor_data | Daily 03:00 | SENSOR_DATA_RETENTION_ENABLED |
 | cleanup_command_history | Daily 03:30 | COMMAND_HISTORY_RETENTION_ENABLED |
+| cleanup_heartbeat_logs | Daily 03:15 | HEARTBEAT_LOG_RETENTION_ENABLED |
 | health_check_esps | 60s | ESP_HEALTH_CHECK_INTERVAL_SECONDS |
 | health_check_mqtt | 30s | MQTT_HEALTH_CHECK_INTERVAL_SECONDS |
 | expire_alert_suppressions | Hourly :00 | ALERT_SUPPRESSION_ENABLED |

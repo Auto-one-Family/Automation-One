@@ -36,6 +36,7 @@ from ...schemas.alert_config import DeviceAlertConfigUpdate
 from ...core.logging_config import get_logger
 from ...db.models.audit_log import AuditEventType, AuditSeverity
 from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
+from ...db.repositories.subzone_repo import SubzoneRepository
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...mqtt.publisher import Publisher
 from ...schemas import (
@@ -57,7 +58,7 @@ from ...schemas import (
     PendingDevicesListResponse,
     PendingESPDevice,
 )
-from ...schemas.esp import ComponentHealthScoreResponse, GpioStatusResponse, GpioUsageItem
+from ...schemas.esp import ComponentHealthScoreResponse, GpioStatusResponse, GpioUsageItem, SubzoneSummary
 from ...services.gpio_validation_service import GpioValidationService, SYSTEM_RESERVED_PINS
 from ...schemas.common import PaginationMeta
 from ...core.exceptions import DuplicateESPError, ESPNotFoundError, ValidationException
@@ -115,6 +116,32 @@ async def _enrich_zone_context(device, session, context_cache: dict) -> Optional
     return summary
 
 
+async def _get_subzone_summaries(
+    device_id: str, subzone_repo: SubzoneRepository
+) -> list[SubzoneSummary]:
+    """Fetch subzone summaries for a device.
+
+    Args:
+        device_id: ESP device_id string (e.g., ESP_472204)
+        subzone_repo: SubzoneRepository instance
+
+    Returns:
+        List of SubzoneSummary for the device (empty if no subzones).
+    """
+    subzone_configs = await subzone_repo.get_by_esp(device_id)
+    return [
+        SubzoneSummary(
+            subzone_id=sc.subzone_id,
+            subzone_name=sc.subzone_name or sc.subzone_id,
+            assigned_gpios=sc.assigned_gpios or [],
+            sensor_count=sc.sensor_count or 0,
+            actuator_count=sc.actuator_count or 0,
+            is_active=sc.is_active if sc.is_active is not None else True,
+        )
+        for sc in subzone_configs
+    ]
+
+
 # =============================================================================
 # List Devices
 # =============================================================================
@@ -159,6 +186,7 @@ async def list_devices(
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
     actuator_repo = ActuatorRepository(db)
+    subzone_repo = SubzoneRepository(db)
 
     # Get all devices (with filters)
     # By default, exclude pending_approval devices - they should be accessed via /devices/pending
@@ -181,7 +209,7 @@ async def list_devices(
     end_idx = start_idx + page_size
     paginated_devices = devices[start_idx:end_idx]
 
-    # Build response with sensor/actuator counts + zone context
+    # Build response with sensor/actuator counts + zone context + subzones
     device_responses = []
     zone_context_cache: dict = {}
     include_context = True
@@ -201,6 +229,11 @@ async def list_devices(
                 from ...schemas.esp import ZoneContextSummary
 
                 zone_ctx = ZoneContextSummary(**zone_ctx_data)
+
+        # Subzone summaries (T14-Fix-F)
+        subzone_summaries = await _get_subzone_summaries(
+            device.device_id, subzone_repo
+        )
 
         device_responses.append(
             ESPDeviceResponse(
@@ -225,6 +258,7 @@ async def list_devices(
                 created_at=device.created_at,
                 updated_at=device.updated_at,
                 zone_context=zone_ctx,
+                subzones=subzone_summaries,
                 deleted_at=device.deleted_at,
                 deleted_by=device.deleted_by,
             )
@@ -357,6 +391,7 @@ async def get_device(
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
     actuator_repo = ActuatorRepository(db)
+    subzone_repo = SubzoneRepository(db)
 
     device = await esp_repo.get_by_device_id(esp_id)
     if not device:
@@ -375,6 +410,11 @@ async def get_device(
         from ...schemas.esp import ZoneContextSummary
 
         zone_ctx = ZoneContextSummary(**zone_ctx_data)
+
+    # Subzone summaries (T14-Fix-F)
+    subzone_summaries = await _get_subzone_summaries(
+        device.device_id, subzone_repo
+    )
 
     return ESPDeviceResponse(
         id=device.id,
@@ -398,6 +438,7 @@ async def get_device(
         created_at=device.created_at,
         updated_at=device.updated_at,
         zone_context=zone_ctx,
+        subzones=subzone_summaries,
         deleted_at=device.deleted_at,
         deleted_by=device.deleted_by,
     )

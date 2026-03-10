@@ -638,12 +638,29 @@ class GodKaiserClient:
     # =========================================================================
 
     async def assign_zone(
-        self, esp_id: str, zone_id: str, zone_name: Optional[str] = None
+        self,
+        esp_id: str,
+        zone_id: str,
+        zone_name: Optional[str] = None,
+        subzone_strategy: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Assign an ESP to a zone."""
+        """Assign an ESP to a zone.
+
+        Args:
+            esp_id: Device ID (e.g. 'ESP_472204')
+            zone_id: Target zone ID
+            zone_name: Optional display name for the zone
+            subzone_strategy: What to do with existing subzones on zone change.
+                'transfer' = move subzones to new zone (updates parent_zone_id)
+                'reset' = delete all subzones of this ESP
+                'copy' = keep originals, create copies in new zone
+                None = server default (no subzone handling)
+        """
         data: dict[str, Any] = {"zone_id": zone_id}
         if zone_name:
             data["zone_name"] = zone_name
+        if subzone_strategy:
+            data["subzone_strategy"] = subzone_strategy
         return await self._request(
             "POST",
             f"/v1/zone/devices/{esp_id}/assign",

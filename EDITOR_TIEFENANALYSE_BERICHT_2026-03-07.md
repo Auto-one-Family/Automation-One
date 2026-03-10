@@ -1,4 +1,3 @@
-# Editor Tiefenanalyse Bericht — CustomDashboardView + Monitor-Integration
 
 > **Erstellt:** 2026-03-07
 > **Typ:** Reine Analyse (kein Code geschrieben)

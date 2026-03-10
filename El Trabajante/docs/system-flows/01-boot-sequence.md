@@ -960,7 +960,17 @@ if (!actuatorManager.begin()) {
                           ERROR_SEVERITY_CRITICAL,
                           "ActuatorManager begin() failed");
 } else {
-  LOG_INFO("Actuator Manager initialized (waiting for MQTT configs)");
+  LOG_INFO("Actuator Manager initialized");
+
+  // Load actuator configs from NVS (analog to sensor loading in Phase 4)
+  ActuatorConfig actuators[MAX_ACTUATORS];
+  uint8_t loaded_actuator_count = 0;
+  if (configManager.loadActuatorConfig(actuators, MAX_ACTUATORS, loaded_actuator_count)) {
+    LOG_INFO("Loaded %d actuator configs from NVS", loaded_actuator_count);
+    for (uint8_t i = 0; i < loaded_actuator_count; i++) {
+      actuatorManager.configureActuator(actuators[i]);
+    }
+  }
 }
 
 LOG_INFO("╔════════════════════════════════════════╗");
@@ -1111,7 +1121,7 @@ void loop() {
 
 ### Phase 5: Actuator System (Step 13)
 
-**Notes:** The registry starts empty; actuator definitions arrive later via MQTT `/config` payloads and are persisted only after they have been provisioned during runtime.
+**Notes:** Actuator configs are loaded from NVS on boot (analog to sensor loading in Phase 4). If NVS is empty (first boot), actuator definitions arrive via MQTT `/config` payloads and are persisted to NVS at that point.
 
 **Modules:**
 - Safety Controller

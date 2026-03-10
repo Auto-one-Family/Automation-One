@@ -13,7 +13,7 @@ Affected columns:
 - subzone_configs.last_ack_at (BUG-02 root cause)
 - sensor_configs.last_manual_request
 - sensor_data.timestamp (CRITICAL time-series column)
-- logic_rules.last_triggered
+- cross_esp_logic.last_triggered
 - ai_predictions.timestamp
 
 Migration is lossless: PostgreSQL converts existing TIMESTAMP values to
@@ -54,7 +54,7 @@ def upgrade() -> None:
         existing_nullable=False,
     )
     op.alter_column(
-        "logic_rules",
+        "cross_esp_logic",
         "last_triggered",
         type_=sa.DateTime(timezone=True),
         existing_type=sa.DateTime(),
@@ -78,7 +78,7 @@ def downgrade() -> None:
         existing_nullable=False,
     )
     op.alter_column(
-        "logic_rules",
+        "cross_esp_logic",
         "last_triggered",
         type_=sa.DateTime(),
         existing_type=sa.DateTime(timezone=True),

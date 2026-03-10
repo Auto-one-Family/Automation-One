@@ -6,11 +6,14 @@
  * Monitor mode: Name, live value, quality dot, sparkline, ESP-ID
  */
 import { computed, type Component } from 'vue'
-import { Settings, ChevronRight, WifiOff, Clock, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity, TrendingUp, TrendingDown, Minus } from 'lucide-vue-next'
+import { Settings, ChevronRight, WifiOff, Clock, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity, CircleDot, TrendingUp, TrendingDown, Minus } from 'lucide-vue-next'
 import type { SensorWithContext } from '@/composables/useZoneGrouping'
 import type { TrendDirection } from '@/utils/trendUtils'
 import { qualityToStatus, getDataFreshness, formatRelativeTime } from '@/utils/formatters'
-import { getSensorLabel, getSensorUnit, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+import { getSensorLabel, getSensorUnit, getSensorDisplayName, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+
+/** Default fallback icon for unknown sensor types */
+const DEFAULT_SENSOR_ICON = CircleDot
 
 /** Map SENSOR_TYPE_CONFIG icon names to Lucide components */
 const ICON_MAP: Record<string, Component> = {
@@ -33,15 +36,20 @@ const emit = defineEmits<{
 }>()
 
 const displayName = computed(() =>
-  props.sensor.name || `GPIO ${props.sensor.gpio}`
+  getSensorDisplayName({ sensor_type: props.sensor.sensor_type, name: props.sensor.name }) || `GPIO ${props.sensor.gpio}`
 )
 
 const sensorLabel = computed(() =>
   getSensorLabel(props.sensor.sensor_type) || props.sensor.sensor_type
 )
 
+// Effective quality status: stale overrides actual quality
+const effectiveQualityStatus = computed(() =>
+  isStale.value ? 'warning' : qualityToStatus(props.sensor.quality)
+)
+
 const statusClass = computed(() =>
-  `sensor-card__dot--${qualityToStatus(props.sensor.quality)}`
+  `sensor-card__dot--${effectiveQualityStatus.value}`
 )
 
 // Data freshness indicator (stale after 120s)
@@ -57,10 +65,20 @@ const isEspOffline = computed(() =>
   props.sensor.esp_state !== undefined && props.sensor.esp_state !== 'OPERATIONAL'
 )
 
-// Sensor type icon (from SENSOR_TYPE_CONFIG)
+// Sensor type icon — 3-tier fallback: exact match → base-type suffix → default
 const sensorIcon = computed(() => {
-  const iconName = SENSOR_TYPE_CONFIG[props.sensor.sensor_type]?.icon
-  return iconName ? (ICON_MAP[iconName] ?? Activity) : Activity
+  const sType = props.sensor.sensor_type
+  // 1. Exact match
+  const exactIcon = SENSOR_TYPE_CONFIG[sType]?.icon
+  if (exactIcon && ICON_MAP[exactIcon]) return ICON_MAP[exactIcon]
+  // 2. Base-type suffix (e.g. "bme280_pressure" → "pressure")
+  const suffix = sType.includes('_') ? sType.split('_').pop() : null
+  if (suffix) {
+    const suffixIcon = SENSOR_TYPE_CONFIG[suffix]?.icon
+    if (suffixIcon && ICON_MAP[suffixIcon]) return ICON_MAP[suffixIcon]
+  }
+  // 3. Default fallback
+  return DEFAULT_SENSOR_ICON
 })
 
 // Resolved unit: sensor.unit → SENSOR_TYPE_CONFIG fallback
@@ -73,6 +91,7 @@ const resolvedUnit = computed(() => {
 
 // Quality text label for accessibility (dual encoding: color + text)
 const qualityLabel = computed(() => {
+  if (isStale.value) return 'Veraltet'
   const status = qualityToStatus(props.sensor.quality)
   const labels: Record<string, string> = {
     good: 'OK',
@@ -94,6 +113,22 @@ const TREND_TITLES: Record<TrendDirection, string> = {
   stable: 'Stabil',
   falling: 'Fallend',
 }
+
+// Scope badge (T13-R3 WP4): only show for non-default scopes with DB config
+const scopeBadge = computed(() => {
+  const scope = props.sensor.device_scope
+  if (!scope || scope === 'zone_local') return null
+  if (scope === 'multi_zone') return { text: 'Multi-Zone', cls: 'sensor-card__scope-badge--multi-zone' }
+  if (scope === 'mobile') return { text: 'Mobil', cls: 'sensor-card__scope-badge--mobile' }
+  return null
+})
+
+const scopeTooltip = computed(() => {
+  if (scopeBadge.value?.text !== 'Multi-Zone') return ''
+  const zones = props.sensor.assigned_zones
+  if (!zones?.length) return ''
+  return `Bedient: ${zones.join(', ')}`
+})
 
 // Subzone badge (Phase 2.2): "Keine Subzone" when null/empty
 const subzoneLabel = computed(() => {
@@ -123,7 +158,7 @@ function handleClick() {
     :class="[
       'sensor-card',
       `sensor-card--${mode}`,
-      mode === 'monitor' ? `sensor-card--${qualityToStatus(sensor.quality)}` : '',
+      mode === 'monitor' ? `sensor-card--${effectiveQualityStatus}` : '',
       mode === 'monitor' && isStale ? 'sensor-card--stale' : '',
       mode === 'monitor' && isEspOffline ? 'sensor-card--esp-offline' : '',
     ]"
@@ -139,6 +174,7 @@ function handleClick() {
           <p class="sensor-card__name">{{ displayName }}</p>
           <p class="sensor-card__meta">{{ sensor.esp_id }} · {{ sensorLabel }}</p>
           <span class="sensor-card__subzone-badge">{{ subzoneLabel }}</span>
+          <span v-if="scopeBadge" :class="['sensor-card__scope-badge', scopeBadge.cls]" :title="scopeTooltip">{{ scopeBadge.text }}</span>
         </div>
         <ChevronRight class="w-4 h-4 text-dark-500 flex-shrink-0" />
       </div>
@@ -151,7 +187,7 @@ function handleClick() {
         <span class="sensor-card__name" :title="displayName">{{ displayName }}</span>
         <div class="sensor-card__quality">
           <span :class="['sensor-card__dot', statusClass]" />
-          <span v-if="qualityLabel" :class="['sensor-card__quality-text', `sensor-card__quality-text--${qualityToStatus(sensor.quality)}`]">{{ qualityLabel }}</span>
+          <span v-if="qualityLabel" :class="['sensor-card__quality-text', `sensor-card__quality-text--${effectiveQualityStatus}`]">{{ qualityLabel }}</span>
         </div>
       </div>
       <div class="sensor-card__value">
@@ -169,6 +205,7 @@ function handleClick() {
         <span class="sensor-card__esp">{{ sensor.esp_id }}</span>
         <div class="sensor-card__footer-badges">
           <span class="sensor-card__subzone-badge">{{ subzoneLabel }}</span>
+          <span v-if="scopeBadge" :class="['sensor-card__scope-badge', scopeBadge.cls]" :title="scopeTooltip">{{ scopeBadge.text }}</span>
           <span v-if="isEspOffline" class="sensor-card__badge sensor-card__badge--offline">
             <WifiOff class="w-3 h-3" /> ESP offline
           </span>
@@ -219,7 +256,7 @@ function handleClick() {
 }
 
 .sensor-card__icon--config {
-  background: rgba(168, 85, 247, 0.15);
+  background: var(--color-mock-bg);
 }
 
 .sensor-card__info {
@@ -391,6 +428,7 @@ function handleClick() {
 .sensor-card--stale {
   opacity: 0.7;
   border-color: rgba(251, 191, 36, 0.25);
+  border-left: 3px solid var(--color-warning);
 }
 
 .sensor-card--stale .sensor-card__number {
@@ -440,5 +478,27 @@ function handleClick() {
 .sensor-card__badge--unknown {
   color: var(--color-text-muted);
   background: rgba(112, 112, 128, 0.1);
+}
+
+/* Scope badges (T13-R3 WP4) */
+.sensor-card__scope-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.sensor-card__scope-badge--multi-zone {
+  background: rgba(96, 165, 250, 0.2);
+  color: rgb(96, 165, 250);
+}
+
+.sensor-card__scope-badge--mobile {
+  background: rgba(251, 146, 60, 0.2);
+  color: rgb(251, 146, 60);
 }
 </style>

@@ -33,6 +33,7 @@ import {
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import { Badge, AccordionSection } from '@/shared/design/primitives'
 import ZoneAssignmentPanel from '@/components/zones/ZoneAssignmentPanel.vue'
+import ZoneSwitchDialog from '@/components/zones/ZoneSwitchDialog.vue'
 import DeviceAlertConfigSection from '@/components/devices/DeviceAlertConfigSection.vue'
 import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
@@ -41,7 +42,7 @@ import { useESPStatus } from '@/composables/useESPStatus'
 import { useToast } from '@/composables/useToast'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { formatUptimeShort, formatHeapSize } from '@/utils/formatters'
-import { getSensorLabel, getSensorUnit } from '@/utils/sensorDefaults'
+import { getSensorLabel, getSensorUnit, getSensorDisplayName } from '@/utils/sensorDefaults'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('ESPSettings')
@@ -88,6 +89,11 @@ const nameInputRef = ref<HTMLInputElement | null>(null)
 
 // Zone error state
 const zoneError = ref('')
+
+// Zone switch dialog state
+const showZoneSwitchDialog = ref(false)
+const pendingZoneAssign = ref<{ zoneId: string; zoneName: string } | null>(null)
+const activeSubzoneStrategy = ref<'transfer' | 'copy' | 'reset' | undefined>(undefined)
 
 // Auto-Heartbeat state
 const autoHeartbeatEnabled = ref(false)
@@ -176,19 +182,58 @@ function formatSensorValue(sensor: any): string {
   return num.toFixed(1)
 }
 
+/**
+ * Resolve effective subzone for a device (sensor or actuator).
+ *
+ * Priority:
+ * 1. Direct subzone_id FK (if set)
+ * 2. GPIO match against subzone assigned_gpios (gpio > 0 only, I2C excluded)
+ * 3. Fallback to null ("Keine Subzone")
+ *
+ * GPIO 0 is an I2C placeholder and must not match assigned_gpios.
+ */
+function getEffectiveSubzoneId(
+  device: { gpio: number; subzone_id?: string | null },
+  subzones: Array<{ subzone_id: string; assigned_gpios: number[] }>,
+): string | null {
+  if (device.subzone_id) {
+    return device.subzone_id
+  }
+  if (device.gpio > 0) {
+    for (const sz of subzones) {
+      if (sz.assigned_gpios?.includes(device.gpio)) {
+        return sz.subzone_id
+      }
+    }
+  }
+  return null
+}
+
 const devicesBySubzone = computed<SubzoneGroup[]>(() => {
   const d = props.device as any
   const deviceSensors = d?.sensors ?? []
   const deviceActuators = d?.actuators ?? []
-  const deviceSubzoneId = d?.subzone_id ?? null
-  const deviceSubzoneName = d?.subzone_name ?? null
+  const deviceSubzones = props.device?.subzones ?? []
+
+  // Build subzone name lookup from device.subzones (SubzoneSummary[])
+  const subzoneNameMap = new Map<string, string>()
+  for (const sz of deviceSubzones) {
+    if (sz.subzone_id && sz.subzone_name) {
+      subzoneNameMap.set(sz.subzone_id, sz.subzone_name)
+    }
+  }
+
+  function resolveSubzoneName(szId: string | null): string {
+    if (szId === null) return 'Keine Subzone'
+    return subzoneNameMap.get(szId) || szId
+  }
 
   const map = new Map<string | null, { subzoneName: string; items: SubzoneGroup['items'] }>()
 
-  function getOrCreateGroup(szId: string | null, szName: string) {
+  function getOrCreateGroup(szId: string | null) {
     if (!map.has(szId)) {
       map.set(szId, {
-        subzoneName: szId === null ? 'Keine Subzone' : (szName || szId || ''),
+        subzoneName: resolveSubzoneName(szId),
         items: [],
       })
     }
@@ -196,12 +241,11 @@ const devicesBySubzone = computed<SubzoneGroup[]>(() => {
   }
 
   for (const sensor of deviceSensors) {
-    const szId = sensor.subzone_id ?? null
-    const szName = sensor.subzone_name ?? szId ?? ''
-    const g = getOrCreateGroup(szId, szName)
+    const szId = getEffectiveSubzoneId(sensor, deviceSubzones)
+    const g = getOrCreateGroup(szId)
     g.items.push({
       type: 'sensor',
-      name: sensor.name || getSensorLabel(sensor.sensor_type || sensor.type || ''),
+      name: getSensorDisplayName({ sensor_type: sensor.sensor_type || sensor.type || '', name: sensor.name }) || getSensorLabel(sensor.sensor_type || sensor.type || ''),
       gpio: sensor.gpio,
       typeLabel: getSensorLabel(sensor.sensor_type || sensor.type || ''),
       value: formatSensorValue(sensor),
@@ -210,9 +254,8 @@ const devicesBySubzone = computed<SubzoneGroup[]>(() => {
   }
 
   for (const actuator of deviceActuators) {
-    const szId = (actuator as any).subzone_id ?? deviceSubzoneId ?? null
-    const szName = (actuator as any).subzone_name ?? deviceSubzoneName ?? szId ?? ''
-    const g = getOrCreateGroup(szId, szName)
+    const szId = getEffectiveSubzoneId(actuator, deviceSubzones)
+    const g = getOrCreateGroup(szId)
     g.items.push({
       type: 'actuator',
       name: actuator.name || actuator.actuator_type || actuator.type || 'Aktor',
@@ -226,7 +269,7 @@ const devicesBySubzone = computed<SubzoneGroup[]>(() => {
   for (const [szId, { subzoneName, items }] of map) {
     groups.push({
       subzoneId: szId,
-      subzoneName: szId === null ? 'Keine Subzone' : subzoneName || szId,
+      subzoneName,
       items,
     })
   }
@@ -352,8 +395,36 @@ function handleNameKeydown(event: KeyboardEvent) {
 // ZONE MANAGEMENT
 // =============================================================================
 
+/**
+ * Intercept zone changes: if device already has a zone, open ZoneSwitchDialog.
+ * ZoneAssignmentPanel emits 'zone-before-save' with the pending zone data.
+ */
+function handleZoneBeforeSave(zoneData: { zone_id: string; zone_name: string }) {
+  const hasExistingZone = !!(props.device?.zone_id)
+  if (hasExistingZone && zoneData.zone_id !== props.device?.zone_id) {
+    // Device already in a zone — ask user for subzone strategy
+    pendingZoneAssign.value = { zoneId: zoneData.zone_id, zoneName: zoneData.zone_name }
+    showZoneSwitchDialog.value = true
+  } else {
+    // No existing zone or same zone — proceed directly
+    activeSubzoneStrategy.value = undefined
+  }
+}
+
+function handleZoneSwitchConfirm(strategy: 'transfer' | 'copy' | 'reset') {
+  activeSubzoneStrategy.value = strategy
+  showZoneSwitchDialog.value = false
+  pendingZoneAssign.value = null
+}
+
+function handleZoneSwitchClose() {
+  showZoneSwitchDialog.value = false
+  pendingZoneAssign.value = null
+}
+
 function handleZoneUpdated(zoneData: { zone_id: string; zone_name?: string; master_zone_id?: string }) {
   zoneError.value = ''
+  activeSubzoneStrategy.value = undefined
   emit('zone-updated', {
     deviceId: espId.value,
     zoneId: zoneData.zone_id,
@@ -666,7 +737,9 @@ onUnmounted(() => {
             :current-zone-name="device.zone_name ?? undefined"
             :current-master-zone-id="device.master_zone_id ?? undefined"
             :is-mock="isMock"
+            :subzone-strategy="activeSubzoneStrategy"
             compact
+            @zone-before-save="handleZoneBeforeSave"
             @zone-updated="handleZoneUpdated"
             @zone-error="handleZoneError"
           />
@@ -827,6 +900,16 @@ onUnmounted(() => {
         </div>
       </section>
     </div>
+
+    <!-- Zone Switch Strategy Dialog -->
+    <ZoneSwitchDialog
+      :is-open="showZoneSwitchDialog"
+      :device-name="displayName"
+      :current-zone-name="device.zone_name || device.zone_id || ''"
+      :target-zone-name="pendingZoneAssign?.zoneName || ''"
+      @close="handleZoneSwitchClose"
+      @confirm="handleZoneSwitchConfirm"
+    />
   </SlideOver>
 </template>
 

@@ -425,6 +425,47 @@ bool ProvisionManager::startAPMode() {
   return true;
 }
 
+bool ProvisionManager::startAPModeForReconfig() {
+  if (!initialized_) {
+    LOG_E(TAG, "ProvisionManager not initialized");
+    return false;
+  }
+
+  LOG_I(TAG, "╔════════════════════════════════════════╗");
+  LOG_I(TAG, "║  AP+STA MODE (Reconfig, Reconnect)     ║");
+  LOG_I(TAG, "╚════════════════════════════════════════╝");
+
+  ap_start_time_ = millis();
+  retry_count_ = 0;
+  config_received_ = false;
+
+  // Start WiFi AP in AP+STA mode (STA bleibt fuer parallelen Reconnect)
+  if (!startWiFiAP(true)) {
+    LOG_E(TAG, "Failed to start WiFi AP (AP+STA)");
+    transitionTo(PROVISION_ERROR);
+    return false;
+  }
+
+  // Start HTTP Server
+  if (!startHTTPServer()) {
+    LOG_E(TAG, "Failed to start HTTP Server");
+    transitionTo(PROVISION_ERROR);
+    return false;
+  }
+
+  // Start mDNS (optional - non-critical)
+  if (!startMDNS()) {
+    LOG_W(TAG, "Failed to start mDNS (optional feature)");
+  }
+
+  transitionTo(PROVISION_AP_MODE);
+
+  LOG_I(TAG, "Config-Portal geoeffnet (Server getrennt), Reconnect laeuft im Hintergrund");
+  LOG_I(TAG, "Connect: AutoOne-" + esp_id_ + " | http://192.168.4.1");
+
+  return true;
+}
+
 bool ProvisionManager::waitForConfig(uint32_t timeout_ms) {
   if (state_ != PROVISION_AP_MODE && state_ != PROVISION_WAITING_CONFIG) {
     LOG_E(TAG, "ProvisionManager: Not in AP-Mode or Waiting state");
@@ -682,15 +723,14 @@ void ProvisionManager::loop() {
 // ============================================
 // WIFI & SERVER SETUP
 // ============================================
-bool ProvisionManager::startWiFiAP() {
+bool ProvisionManager::startWiFiAP(bool ap_sta_mode) {
   LOG_I(TAG, "Starting WiFi Access Point...");
 
   String ssid = "AutoOne-" + esp_id_;
   String password = "provision";
 
-  // Explicitly set Access Point mode (ESP32-C3 safety)
-  // softAP() sets this automatically, but explicit is safer
-  WiFi.mode(WIFI_AP);
+  // AP-only or AP+STA (STA bleibt fuer parallelen Reconnect bei Disconnect)
+  WiFi.mode(ap_sta_mode ? WIFI_AP_STA : WIFI_AP);
 
   // Configure AP
   // softAP(ssid, password, channel, hidden, max_connections)

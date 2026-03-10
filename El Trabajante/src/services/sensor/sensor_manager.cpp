@@ -227,13 +227,32 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                 existing_cap->i2c_address == capability->i2c_address &&
                 String(existing_cap->device_type) == String(capability->device_type)) {
                 // Same I2C device, different value type - this is allowed
-                // Find an empty slot for the new sensor type
+
+                // Check if this sensor_type already exists in sensors_[] (prevent RAM duplicates)
+                for (uint8_t k = 0; k < sensor_count_; k++) {
+                    if (sensors_[k].gpio == config.gpio &&
+                        sensors_[k].sensor_type == config.sensor_type) {
+                        // Already exists — update in place instead of adding
+                        sensors_[k] = config;
+                        sensors_[k].active = true;
+                        sensors_[k].i2c_address = capability->i2c_address;
+                        if (!configManager.saveSensorConfig(config)) {
+                            LOG_E(TAG, "Sensor Manager: Failed to persist sensor config to NVS");
+                        } else {
+                            LOG_I(TAG, "  ✅ Configuration persisted to NVS");
+                        }
+                        LOG_I(TAG, "Sensor Manager: Updated existing multi-value sensor '" +
+                                   config.sensor_type + "' on GPIO " + String(config.gpio));
+                        return true;
+                    }
+                }
+
+                // Not found — add as new sensor (multi-value support)
                 if (sensor_count_ >= MAX_SENSORS) {
                     LOG_E(TAG, "Sensor Manager: Maximum sensor count reached");
                     return false;
                 }
 
-                // Add as new sensor (multi-value support)
                 sensors_[sensor_count_] = config;
                 sensors_[sensor_count_].active = true;
                 sensors_[sensor_count_].i2c_address = capability->i2c_address;  // Store I2C address

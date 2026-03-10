@@ -398,6 +398,21 @@ class SafetyConstraintViolationException(ActuatorException):
         )
 
 
+class DeviceOfflineError(GodKaiserException):
+    """Raised when a command targets an offline ESP device (V1-22)"""
+
+    status_code = 409
+    error_code = "DEVICE_OFFLINE"
+
+    def __init__(self, esp_id: str, status: str) -> None:
+        super().__init__(
+            message=f"Cannot send command: ESP {esp_id} is offline (status={status})",
+            error_code="DEVICE_OFFLINE",
+            details={"esp_id": esp_id, "status": status},
+            numeric_code=5414,
+        )
+
+
 # Validation Exceptions
 class ValidationException(GodKaiserException):
     """Raised when input validation fails"""

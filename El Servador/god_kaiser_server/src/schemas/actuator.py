@@ -179,6 +179,20 @@ class ActuatorConfigCreate(ActuatorConfigBase):
         max_length=50,
         description="Subzone ID to assign this actuator to. Null/empty = remove from all subzones.",
     )
+    # Multi-Zone Device Scope (T13-R2)
+    device_scope: Optional[str] = Field(
+        None,
+        pattern=r"^(zone_local|multi_zone|mobile)$",
+        description="Device scope: 'zone_local' (default), 'multi_zone', 'mobile'",
+    )
+    assigned_zones: Optional[List[str]] = Field(
+        None,
+        description="List of zone_ids this actuator can serve (for multi_zone/mobile)",
+    )
+    assigned_subzones: Optional[List[str]] = Field(
+        None,
+        description="List of subzone_ids for static multi-zone assignment",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -210,6 +224,20 @@ class ActuatorConfigUpdate(BaseModel):
     servo_min_pulse: Optional[int] = Field(None, ge=500, le=2500)
     servo_max_pulse: Optional[int] = Field(None, ge=500, le=2500)
     metadata: Optional[Dict[str, Any]] = Field(None)
+    # Multi-Zone Device Scope (T13-R2)
+    device_scope: Optional[str] = Field(
+        None,
+        pattern=r"^(zone_local|multi_zone|mobile)$",
+        description="Device scope: 'zone_local', 'multi_zone', 'mobile'",
+    )
+    assigned_zones: Optional[List[str]] = Field(
+        None,
+        description="List of zone_ids this actuator can serve",
+    )
+    assigned_subzones: Optional[List[str]] = Field(
+        None,
+        description="List of subzone_ids for static multi-zone",
+    )
 
 
 class ActuatorConfigResponse(ActuatorConfigBase, TimestampMixin):
@@ -251,6 +279,19 @@ class ActuatorConfigResponse(ActuatorConfigBase, TimestampMixin):
     config_error_detail: Optional[str] = Field(
         None,
         description="Error detail if config_status=failed",
+    )
+    # Multi-Zone Device Scope (T13-R2)
+    device_scope: Optional[str] = Field(
+        None,
+        description="Device scope: 'zone_local', 'multi_zone', 'mobile'",
+    )
+    assigned_zones: Optional[List[str]] = Field(
+        None,
+        description="List of zone_ids this actuator can serve",
+    )
+    assigned_subzones: Optional[List[str]] = Field(
+        None,
+        description="List of subzone_ids for static multi-zone",
     )
     # Current state
     current_value: Optional[float] = Field(

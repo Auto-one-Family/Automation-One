@@ -48,6 +48,7 @@ class ActuatorLock:
     acquired_at: datetime
     expires_at: Optional[datetime] = None
     is_safety_critical: bool = False
+    active_zone_id: Optional[str] = None  # T13-R2: Zone this lock serves
 
 
 class ConflictManager:
@@ -83,8 +84,18 @@ class ConflictManager:
         self._mutexes: Dict[str, asyncio.Lock] = {}  # "esp_id:gpio" → asyncio.Lock
         self._conflict_history: List[ConflictInfo] = []
 
-    def _get_actuator_key(self, esp_id: str, gpio: int) -> str:
-        """Generiert eindeutigen Key für Actuator."""
+    def _get_actuator_key(
+        self, esp_id: str, gpio: int, zone_id: Optional[str] = None
+    ) -> str:
+        """
+        Generiert eindeutigen Key für Actuator.
+
+        T13-R2: For zone-aware locking, zone_id is included in the key.
+        This allows the same physical actuator to be locked per-zone
+        for sequential multi-zone operation.
+        """
+        if zone_id:
+            return f"{esp_id}:{gpio}:{zone_id}"
         return f"{esp_id}:{gpio}"
 
     def _get_mutex(self, actuator_key: str) -> asyncio.Lock:
@@ -102,6 +113,7 @@ class ConflictManager:
         command: str,
         is_safety_critical: bool = False,
         lock_ttl_seconds: Optional[int] = None,
+        zone_id: Optional[str] = None,
     ) -> Tuple[bool, Optional[ConflictInfo]]:
         """
         Versucht einen Actuator für eine Rule zu reservieren.
@@ -114,13 +126,14 @@ class ConflictManager:
             command: Das gewünschte Command (ON, OFF, PWM, etc.)
             is_safety_critical: True für Emergency-Stop etc.
             lock_ttl_seconds: Wie lange der Lock gehalten wird
+            zone_id: T13-R2 — Zone context for multi-zone actuators
 
         Returns:
             Tuple of (success, conflict_info)
             - success=True: Rule darf Actuator steuern
             - success=False: Konflikt, conflict_info enthält Details
         """
-        actuator_key = self._get_actuator_key(esp_id, gpio)
+        actuator_key = self._get_actuator_key(esp_id, gpio, zone_id)
         mutex = self._get_mutex(actuator_key)
 
         async with mutex:
@@ -142,6 +155,7 @@ class ConflictManager:
                     acquired_at=now,
                     expires_at=now + timedelta(seconds=ttl),
                     is_safety_critical=is_safety_critical,
+                    active_zone_id=zone_id,
                 )
                 logger.debug(f"Actuator {actuator_key} acquired by rule {rule_id}")
                 return True, None
@@ -168,6 +182,7 @@ class ConflictManager:
                     expires_at=now
                     + timedelta(seconds=lock_ttl_seconds or self.DEFAULT_LOCK_TTL_SECONDS),
                     is_safety_critical=True,
+                    active_zone_id=zone_id,
                 )
                 logger.warning(
                     f"Safety override on {actuator_key}: {rule_id} > {existing_lock.rule_id}"
@@ -185,6 +200,7 @@ class ConflictManager:
                     expires_at=now
                     + timedelta(seconds=lock_ttl_seconds or self.DEFAULT_LOCK_TTL_SECONDS),
                     is_safety_critical=is_safety_critical,
+                    active_zone_id=zone_id,
                 )
                 logger.warning(
                     f"Priority override on {actuator_key}: {rule_id} (prio {priority}) > "
@@ -213,18 +229,21 @@ class ConflictManager:
 
             return winner == rule_id, conflict
 
-    async def release_actuator(self, esp_id: str, gpio: int, rule_id: str) -> bool:
+    async def release_actuator(
+        self, esp_id: str, gpio: int, rule_id: str, zone_id: Optional[str] = None
+    ) -> bool:
         """
         Gibt einen Actuator-Lock frei.
 
         Args:
             esp_id, gpio: Actuator-Identifikation
             rule_id: Rule die den Lock freigeben will
+            zone_id: T13-R2 — Zone context for multi-zone actuators
 
         Returns:
             True wenn erfolgreich, False wenn Lock einer anderen Rule gehört
         """
-        actuator_key = self._get_actuator_key(esp_id, gpio)
+        actuator_key = self._get_actuator_key(esp_id, gpio, zone_id)
         mutex = self._get_mutex(actuator_key)
 
         async with mutex:

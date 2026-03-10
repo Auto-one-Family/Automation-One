@@ -31,6 +31,8 @@ export interface SensorItem {
   is_multi_value?: boolean
   i2c_address?: number | null
   interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | null
+  device_scope?: 'zone_local' | 'multi_zone' | 'mobile' | null
+  assigned_zones?: string[] | null
 }
 
 interface Props {
@@ -87,6 +89,8 @@ const useMultiRow = computed(() => props.sensors.length > 5)
       :is-multi-value="sensor.is_multi_value"
       :i2c-address="sensor.i2c_address"
       :interface-type="sensor.interface_type"
+      :device-scope="sensor.device_scope"
+      :assigned-zones="sensor.assigned_zones ?? undefined"
       :selected="selectedGpio === sensor.gpio"
       :show-connections="showConnections"
       class="sensor-column__satellite"

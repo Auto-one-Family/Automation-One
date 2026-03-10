@@ -255,14 +255,14 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [0]
+                    params: [3]
               refId: C
         noDataState: OK
         execErrState: Alerting
-        for: 1m
+        for: 3m
         annotations:
-          summary: "Critical errors detected across services"
-          description: "CRITICAL-level log entries detected in the last 5 minutes. Immediate investigation required."
+          summary: "Critical error burst — 4+ CRITICAL entries in 5 minutes"
+          description: "4+ CRITICAL-level log entries detected in the last 5 minutes across 3 consecutive evaluations. Single transient startup errors are tolerated."
         labels:
           severity: critical
           component: system

@@ -3,20 +3,18 @@ Zone Model: Independent Zone Entity
 
 Phase: 0.3 - Zone as DB Entity
 Status: IMPLEMENTED
+Updated: T13-R1 — Zone Consolidation (status, deleted_at, FK)
 
 Zones are logical areas (greenhouse, office, balcony) that exist
-independently of devices. Previously zones only existed as zone_id
-strings on esp_devices — removing all devices from a zone caused it
-to disappear. This model makes zones first-class DB entities.
-
-NOTE: FK constraint from esp_devices.zone_id → zones.zone_id is
-intentionally NOT added in this migration. Planned for a follow-up.
+independently of devices. Zones are the Single Source of Truth for
+zone assignments. esp_devices.zone_id references zones.zone_id via FK.
 """
 
 import uuid
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String
+from sqlalchemy import DateTime, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,13 +26,16 @@ class Zone(Base, TimestampMixin):
     Zone Model.
 
     Represents a logical zone (area) that exists independently of devices.
-    Devices reference zones via zone_id string; FK will be added later.
+    esp_devices.zone_id references zones.zone_id via FK constraint.
 
     Attributes:
         id: Primary key (UUID)
         zone_id: Unique human-readable identifier (e.g., 'greenhouse_zone_1')
         name: Display name (e.g., 'Greenhouse Section 1')
         description: Optional description
+        status: Zone lifecycle status ('active', 'archived', 'deleted')
+        deleted_at: Soft-delete timestamp (set when status='deleted')
+        deleted_by: Username who soft-deleted this zone
     """
 
     __tablename__ = "zones"
@@ -66,5 +67,36 @@ class Zone(Base, TimestampMixin):
         doc="Optional zone description",
     )
 
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default="active",
+        server_default="active",
+        nullable=False,
+        index=True,
+        doc="Zone lifecycle: 'active', 'archived', 'deleted'",
+    )
+
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Soft-delete timestamp (set when status='deleted')",
+    )
+
+    deleted_by: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        doc="Username who soft-deleted this zone",
+    )
+
+    @property
+    def is_active(self) -> bool:
+        """Check if zone is in active state."""
+        return self.status == "active"
+
+    @property
+    def is_archived(self) -> bool:
+        """Check if zone is archived."""
+        return self.status == "archived"
+
     def __repr__(self) -> str:
-        return f"<Zone(zone_id='{self.zone_id}', name='{self.name}')>"
+        return f"<Zone(zone_id='{self.zone_id}', name='{self.name}', status='{self.status}')>"
