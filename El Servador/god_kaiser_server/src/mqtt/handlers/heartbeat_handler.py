@@ -1345,6 +1345,11 @@ class HeartbeatHandler:
                     )
                     return
 
+                # Set cooldown BEFORE attempting send to prevent retry spam on timeout
+                metadata["full_state_push_sent_at"] = now_ts
+                esp_device.device_metadata = metadata
+                await session.commit()
+
                 # 1. Zone assign via command_bridge (ACK-driven)
                 zone_topic = TopicBuilder.build_zone_assign_topic(device_id)
                 zone_payload = {
@@ -1360,10 +1365,10 @@ class HeartbeatHandler:
                         payload=zone_payload,
                         esp_id=device_id,
                         command_type="zone",
-                        timeout=10.0,
+                        timeout=_command_bridge.DEFAULT_TIMEOUT,
                     )
                 except Exception as e:
-                    logger.error(
+                    logger.warning(
                         "Zone ACK timeout during state push for %s: %s", device_id, e
                     )
                     return
@@ -1394,7 +1399,7 @@ class HeartbeatHandler:
                             payload=sz_payload,
                             esp_id=device_id,
                             command_type="subzone",
-                            timeout=10.0,
+                            timeout=_command_bridge.DEFAULT_TIMEOUT,
                         )
                         subzone_count += 1
                     except Exception as e:
@@ -1404,11 +1409,6 @@ class HeartbeatHandler:
                             sz.subzone_id,
                             e,
                         )
-
-                # 3. Set cooldown metadata
-                metadata["full_state_push_sent_at"] = now_ts
-                esp_device.device_metadata = metadata
-                await session.commit()
 
                 logger.info(
                     "Full-State-Push completed for %s: zone=%s, subzones=%d/%d",

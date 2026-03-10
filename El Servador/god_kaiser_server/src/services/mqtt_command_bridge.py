@@ -34,14 +34,25 @@ class MQTTCommandBridge:
     ACK-Handler (zone_ack_handler, subzone_ack_handler) rufen resolve_ack() auf.
     """
 
-    DEFAULT_TIMEOUT: float = 10.0
+    DEFAULT_TIMEOUT: float = 15.0
 
     def __init__(self, mqtt_client: MQTTClient):
         self._mqtt_client = mqtt_client
         self._pending: dict[str, asyncio.Future] = {}
         # Fallback-Index: (esp_id, command_type) -> deque[correlation_id] (FIFO)
         self._esp_pending: dict[tuple[str, str], deque[str]] = {}
-        logger.info("MQTTCommandBridge initialized")
+        broker_host = "N/A"
+        broker_port = "N/A"
+        if self._mqtt_client:
+            try:
+                broker_host = self._mqtt_client.settings.mqtt.broker_host
+                broker_port = self._mqtt_client.settings.mqtt.broker_port
+            except Exception:
+                pass
+        logger.info(
+            "MQTTCommandBridge initialized (client_connected=%s, broker=%s:%s)",
+            self._is_connected(), broker_host, broker_port,
+        )
 
     async def send_and_wait_ack(
         self,
@@ -58,7 +69,7 @@ class MQTTCommandBridge:
             payload: Message payload as dict. correlation_id is added automatically.
             esp_id: ESP device_id string (e.g. "ESP_AB12CD34") for fallback matching.
             command_type: "zone" or "subzone" — determines fallback queue.
-            timeout: Max seconds to wait for ACK. Default 10s.
+            timeout: Max seconds to wait for ACK. Default 15s.
 
         Returns:
             ACK payload as dict (e.g. {"status": "zone_assigned", "zone_id": "zone_b", ...})
@@ -85,10 +96,21 @@ class MQTTCommandBridge:
         payload_str = json.dumps(payload)
         success = self._mqtt_client.publish(topic, payload_str, qos=QOS_SENSOR_DATA)
 
+        if success:
+            logger.info(
+                "%s command SENT to %s (topic=%s, correlation_id=%s, client_connected=%s)",
+                command_type, esp_id, topic, correlation_id, self._is_connected(),
+            )
+
         if not success:
+            client_state = self._get_client_state()
+            logger.warning(
+                "MQTT publish failed for %s — %s",
+                topic, client_state,
+            )
             self._cleanup(correlation_id, key)
             raise MQTTACKTimeoutError(
-                f"MQTT publish failed for {topic} (circuit breaker or disconnect)"
+                f"MQTT publish failed for {topic} ({client_state})"
             )
 
         try:
@@ -99,7 +121,7 @@ class MQTTCommandBridge:
             )
             return result
         except asyncio.TimeoutError:
-            logger.error(
+            logger.warning(
                 "ACK timeout for %s %s (correlation_id=%s, timeout=%ss)",
                 esp_id, command_type, correlation_id, timeout,
             )
@@ -184,6 +206,18 @@ class MQTTCommandBridge:
         self._pending.clear()
         self._esp_pending.clear()
         logger.info("MQTTCommandBridge shutdown complete (%d pending cancelled)", count)
+
+    def _is_connected(self) -> bool:
+        """Check if the underlying MQTT client is connected."""
+        if self._mqtt_client is None:
+            return False
+        return self._mqtt_client.is_connected()
+
+    def _get_client_state(self) -> str:
+        """Return diagnostic string about MQTT client connection state."""
+        if self._mqtt_client is None:
+            return "client=None (not injected)"
+        return f"client_connected={self._mqtt_client.is_connected()}"
 
     def _cleanup(self, correlation_id: str, key: tuple[str, str]) -> None:
         """Remove a correlation_id from all tracking structures."""
