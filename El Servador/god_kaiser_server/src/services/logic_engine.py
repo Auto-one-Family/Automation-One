@@ -74,9 +74,7 @@ class LogicEngine:
             sensor_eval = SensorConditionEvaluator()
             time_eval = TimeConditionEvaluator()
             hysteresis_eval = HysteresisConditionEvaluator()
-            compound_eval = CompoundConditionEvaluator(
-                [sensor_eval, time_eval, hysteresis_eval]
-            )
+            compound_eval = CompoundConditionEvaluator([sensor_eval, time_eval, hysteresis_eval])
             self.condition_evaluators = [
                 sensor_eval,
                 time_eval,

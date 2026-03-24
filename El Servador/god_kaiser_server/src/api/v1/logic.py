@@ -407,9 +407,7 @@ async def toggle_rule(
     request: RuleToggleRequest,
     db: DBSession,
     current_user: OperatorUser,
-    actuator_service: Annotated[
-        ActuatorService, Depends(get_actuator_service)
-    ],
+    actuator_service: Annotated[ActuatorService, Depends(get_actuator_service)],
 ) -> RuleToggleResponse:
     """
     Toggle rule enabled state.
