@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, Query, status
 from ...core.exceptions import RuleNotFoundException, RuleValidationException
 from ...core.logging_config import get_logger
 from ...db.repositories import LogicRepository
+from ...services.actuator_service import ActuatorService
 from ...services.logic_service import LogicService
 from ...schemas import (
     ExecutionHistoryEntry,
@@ -407,7 +408,7 @@ async def toggle_rule(
     db: DBSession,
     current_user: OperatorUser,
     actuator_service: Annotated[
-        "ActuatorService", Depends(get_actuator_service)
+        ActuatorService, Depends(get_actuator_service)
     ],
 ) -> RuleToggleResponse:
     """
