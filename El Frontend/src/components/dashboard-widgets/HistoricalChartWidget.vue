@@ -12,7 +12,7 @@ import { BarChart3 } from 'lucide-vue-next'
 import type { MockSensor } from '@/types'
 
 interface Props {
-  sensorId?: string // "espId:gpio"
+  sensorId?: string // "espId:gpio:sensorType"
   timeRange?: '1h' | '6h' | '24h' | '7d'
   showThresholds?: boolean
 }
@@ -41,11 +41,15 @@ watch(selectedRange, (val) => {
 
 const availableSensors = computed(() => {
   const items: { id: string; label: string }[] = []
+  const seen = new Set<string>()
   for (const device of espStore.devices) {
     const deviceId = espStore.getDeviceId(device)
     for (const s of (device.sensors as MockSensor[]) || []) {
+      const id = `${deviceId}:${s.gpio}:${s.sensor_type}`
+      if (seen.has(id)) continue
+      seen.add(id)
       items.push({
-        id: `${deviceId}:${s.gpio}:${s.sensor_type}`,
+        id,
         label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
       })
     }

@@ -210,7 +210,13 @@ export function formatConditionShort(rule: LogicRule): string {
     if (cond.type === 'hysteresis') {
       const hc = cond as HysteresisCondition
       const label = hc.sensor_type ? getSensorLabel(hc.sensor_type) : 'Hysterese'
-      return `${label} Ein >${hc.activate_above ?? '?'}, Aus <${hc.deactivate_below ?? '?'}`
+      if (hc.activate_above != null && hc.deactivate_below != null) {
+        return `${label} Ein >${hc.activate_above}, Aus <${hc.deactivate_below}`
+      }
+      if (hc.activate_below != null && hc.deactivate_above != null) {
+        return `${label} Ein <${hc.activate_below}, Aus >${hc.deactivate_above}`
+      }
+      return `${label} (Hysterese)`
     }
     if (cond.type === 'time_window' || cond.type === 'time') {
       const tc = cond as TimeCondition

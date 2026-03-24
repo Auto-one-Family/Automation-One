@@ -868,6 +868,19 @@ export function getMultiValueDeviceConfigBySensorType(sensorType: string): Multi
 }
 
 /**
+ * Check if sensor_type is a multi-value base type (e.g. "SHT31", "sht31")
+ * that should be replaced with an explicit sub-type (sht31_temp, sht31_humidity).
+ *
+ * @example
+ * isMultiValueBaseType('SHT31') // true
+ * isMultiValueBaseType('sht31_temp') // false
+ */
+export function isMultiValueBaseType(sensorType: string): boolean {
+  const lower = sensorType.toLowerCase()
+  return lower in MULTI_VALUE_DEVICES
+}
+
+/**
  * Get value config for a specific sensor_type within a multi-value device
  */
 export function getValueConfigForSensorType(sensorType: string): MultiValueConfig | null {

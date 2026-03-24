@@ -131,16 +131,21 @@ interface SensorMeta {
 }
 
 const SENSOR_CONFIG: Record<string, SensorMeta> = {
-  DS18B20:  { icon: Thermometer, unit: '°C',  label: 'Temperatur' },
-  SHT31:   { icon: Droplets,    unit: '%',   label: 'Luftfeuchte' },
-  BME280:  { icon: Droplets,    unit: 'hPa', label: 'Luftdruck' },
-  pH:      { icon: Gauge,       unit: 'pH',  label: 'pH-Wert' },
-  EC:      { icon: Zap,         unit: 'mS',  label: 'Leitfähigkeit' },
-  moisture:{ icon: Waves,       unit: '%',   label: 'Bodenfeuchte' },
-  light:   { icon: Sun,         unit: 'lux', label: 'Licht' },
-  co2:     { icon: Wind,        unit: 'ppm', label: 'CO₂' },
-  flow:    { icon: Waves,       unit: 'L/m', label: 'Durchfluss' },
-  level:   { icon: Leaf,        unit: '%',   label: 'Füllstand' },
+  DS18B20:       { icon: Thermometer, unit: '°C',   label: 'Temperatur' },
+  sht31_temp:    { icon: Thermometer, unit: '°C',   label: 'Temperatur' },
+  sht31_humidity:{ icon: Droplets,    unit: '%RH',  label: 'Luftfeuchte' },
+  bmp280_temp:   { icon: Thermometer, unit: '°C',   label: 'Temperatur' },
+  bmp280_pressure:{ icon: Gauge,      unit: 'hPa',  label: 'Druck' },
+  bme280_temp:   { icon: Thermometer, unit: '°C',   label: 'Temperatur' },
+  bme280_humidity:{ icon: Droplets,   unit: '%RH',  label: 'Luftfeuchte' },
+  bme280_pressure:{ icon: Gauge,      unit: 'hPa',  label: 'Druck' },
+  pH:            { icon: Gauge,       unit: 'pH',   label: 'pH-Wert' },
+  EC:            { icon: Zap,          unit: 'mS',   label: 'Leitfähigkeit' },
+  moisture:      { icon: Waves,        unit: '%',    label: 'Bodenfeuchte' },
+  light:         { icon: Sun,          unit: 'lux',  label: 'Licht' },
+  co2:           { icon: Wind,         unit: 'ppm',  label: 'CO₂' },
+  flow:          { icon: Waves,        unit: 'L/m',  label: 'Durchfluss' },
+  level:         { icon: Leaf,         unit: '%',    label: 'Füllstand' },
 }
 
 // Helper accessors for template readability
@@ -616,18 +621,39 @@ function graphToRuleData(): {
 
   for (const node of nodes.value) {
     switch (node.type) {
-      case 'sensor':
-        conditions.push({
-          type: 'sensor',
-          esp_id: node.data.espId || '',
-          gpio: node.data.gpio || 0,
-          sensor_type: node.data.sensorType || 'DS18B20',
-          operator: node.data.operator || '>',
-          value: node.data.value ?? 0,
-          ...(node.data.min !== undefined ? { min: node.data.min } : {}),
-          ...(node.data.max !== undefined ? { max: node.data.max } : {}),
-        } as SensorCondition)
+      case 'sensor': {
+        const isHysteresis = node.data?.isHysteresis === true || node.data?.operator === 'hysteresis'
+        if (isHysteresis) {
+          // Hysterese: Kühlung (activate_above/deactivate_below) oder Heizung (activate_below/deactivate_above)
+          const hyst: HysteresisCondition = {
+            type: 'hysteresis',
+            esp_id: node.data.espId || '',
+            gpio: node.data.gpio || 0,
+            ...(node.data.sensorType ? { sensor_type: node.data.sensorType as string } : {}),
+          }
+          if (node.data.activateAbove != null && node.data.deactivateBelow != null) {
+            hyst.activate_above = Number(node.data.activateAbove)
+            hyst.deactivate_below = Number(node.data.deactivateBelow)
+          }
+          if (node.data.activateBelow != null && node.data.deactivateAbove != null) {
+            hyst.activate_below = Number(node.data.activateBelow)
+            hyst.deactivate_above = Number(node.data.deactivateAbove)
+          }
+          conditions.push(hyst)
+        } else {
+          conditions.push({
+            type: 'sensor',
+            esp_id: node.data.espId || '',
+            gpio: node.data.gpio || 0,
+            sensor_type: node.data.sensorType || 'DS18B20',
+            operator: node.data.operator || '>',
+            value: node.data.value ?? 0,
+            ...(node.data.min !== undefined ? { min: node.data.min } : {}),
+            ...(node.data.max !== undefined ? { max: node.data.max } : {}),
+          } as SensorCondition)
+        }
         break
+      }
 
       case 'time':
         conditions.push({
@@ -1012,7 +1038,20 @@ defineExpose({
           </div>
           <div class="rule-node__body">
             <div class="rule-node__condition">
-              <template v-if="data.operator === 'between'">
+              <template v-if="data.operator === 'hysteresis' || data.isHysteresis">
+                <template v-if="data.activateAbove != null && data.deactivateBelow != null">
+                  Ein &gt;{{ data.activateAbove }}<span class="rule-node__unit">{{ sensorUnit(data.sensorType) }}</span>
+                  · Aus &lt;{{ data.deactivateBelow }}<span class="rule-node__unit">{{ sensorUnit(data.sensorType) }}</span>
+                </template>
+                <template v-else-if="data.activateBelow != null && data.deactivateAbove != null">
+                  Ein &lt;{{ data.activateBelow }}<span class="rule-node__unit">{{ sensorUnit(data.sensorType) }}</span>
+                  · Aus &gt;{{ data.deactivateAbove }}<span class="rule-node__unit">{{ sensorUnit(data.sensorType) }}</span>
+                </template>
+                <template v-else>
+                  Hysterese
+                </template>
+              </template>
+              <template v-else-if="data.operator === 'between'">
                 {{ data.min }}<span class="rule-node__unit">{{ sensorUnit(data.sensorType) }}</span>
                 {{ operatorDisplay.between }}
                 {{ data.max }}<span class="rule-node__unit">{{ sensorUnit(data.sensorType) }}</span>

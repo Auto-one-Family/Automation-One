@@ -81,7 +81,7 @@ const availableSensors = computed(() => {
       seen.add(id)
       items.push({
         id,
-        label: `${s.name || s.sensor_type} (${deviceId} — ${s.sensor_type})`,
+        label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
       })
     }
   }

@@ -725,7 +725,8 @@ const detailLiveValue = computed(() => {
   )
   if (!device) return null
   const sensor = (device.sensors as MockSensor[] | undefined)?.find(
-    s => s.gpio === selectedDetailSensor.value!.gpio
+    s => s.gpio === selectedDetailSensor.value!.gpio &&
+         s.sensor_type === selectedDetailSensor.value!.sensorType
   )
   if (!sensor) return null
   return {
@@ -1162,18 +1163,30 @@ const zoneDeviceGroup = computed<ZoneDeviceSubzone[]>(() => {
   // Primary path: API data (server delivers subzones with sensors + actuators together)
   const data = zoneMonitorData.value
   if (data && !zoneMonitorError.value) {
+    // Read espStore.devices to establish reactivity — live values override API snapshot
+    const devices = espStore.devices
     return data.subzones.map(sz => ({
       subzoneId: sz.subzone_id,
       subzoneName: sz.subzone_id === null ? 'Zone-weit' : sz.subzone_name,
-      sensors: sz.sensors.map(s => ({
-        ...s,
-        raw_value: s.raw_value ?? 0,
-        quality: s.quality as SensorWithContext['quality'],
-        zone_id: data.zone_id,
-        zone_name: data.zone_name,
-        subzone_id: sz.subzone_id,
-        subzone_name: sz.subzone_name,
-      })) as SensorWithContext[],
+      sensors: sz.sensors.map(s => {
+        const device = devices.find(d => espStore.getDeviceId(d) === s.esp_id)
+        const liveSensor = (device?.sensors as MockSensor[] | undefined)?.find(
+          (sens) => sens.gpio === s.gpio && sens.sensor_type === s.sensor_type
+        )
+        const raw_value = liveSensor?.raw_value ?? s.raw_value ?? 0
+        const quality = (liveSensor?.quality ?? s.quality) as SensorWithContext['quality']
+        const last_read = liveSensor?.last_reading_at ?? liveSensor?.last_read ?? s.last_read ?? null
+        return {
+          ...s,
+          raw_value,
+          quality,
+          last_read,
+          zone_id: data.zone_id,
+          zone_name: data.zone_name,
+          subzone_id: sz.subzone_id,
+          subzone_name: sz.subzone_name,
+        }
+      }) as SensorWithContext[],
       actuators: sz.actuators.map(a => ({
         ...a,
         zone_id: data.zone_id,

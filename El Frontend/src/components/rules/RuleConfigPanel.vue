@@ -27,6 +27,7 @@ import {
   Copy,
 } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
+import { getSensorDisplayName, isMultiValueBaseType } from '@/utils/sensorDefaults'
 import { pluginsApi, type PluginDTO } from '@/api/plugins'
 import type { Node } from '@vue-flow/core'
 import type { MockSensor, MockActuator } from '@/types'
@@ -88,12 +89,18 @@ const operatorOptions = [
   { value: '==', label: 'gleich (=)' },
   { value: '!=', label: 'ungleich (≠)' },
   { value: 'between', label: 'zwischen (↔)' },
+  { value: 'hysteresis', label: 'Hysterese (Ein/Aus-Schwellen)' },
 ]
 
 const sensorTypeOptions = [
   { value: 'DS18B20', label: 'DS18B20 (Temperatur)' },
-  { value: 'SHT31', label: 'SHT31 (Temp + Feuchte)' },
-  { value: 'BME280', label: 'BME280 (Temp + Feuchte + Druck)' },
+  { value: 'sht31_temp', label: 'SHT31 Temperatur (°C)' },
+  { value: 'sht31_humidity', label: 'SHT31 Luftfeuchtigkeit (%RH)' },
+  { value: 'bmp280_temp', label: 'BMP280 Temperatur (°C)' },
+  { value: 'bmp280_pressure', label: 'BMP280 Druck (hPa)' },
+  { value: 'bme280_temp', label: 'BME280 Temperatur (°C)' },
+  { value: 'bme280_humidity', label: 'BME280 Luftfeuchtigkeit (%RH)' },
+  { value: 'bme280_pressure', label: 'BME280 Druck (hPa)' },
   { value: 'pH', label: 'pH-Sensor' },
   { value: 'EC', label: 'EC (Leitfähigkeit)' },
   { value: 'moisture', label: 'Bodenfeuchte' },
@@ -157,6 +164,13 @@ function isDayActive(day: number): boolean {
 }
 
 const nodeType = computed(() => props.node?.type || '')
+
+// Warn when rule uses base type (SHT31, BME280) instead of explicit sub-type
+const showMultiValueBaseTypeWarning = computed(() => {
+  if (nodeType.value !== 'sensor') return false
+  const st = localData.value.sensorType as string
+  return st ? isMultiValueBaseType(st) : false
+})
 const typeLabel = computed(() => nodeTypeLabels[nodeType.value] || 'Unbekannt')
 const typeIcon = computed(() => nodeTypeIcons[nodeType.value] || Thermometer)
 
@@ -183,10 +197,8 @@ const availableSensors = computed(() => {
   return (device.sensors as MockSensor[]).map(s => ({
     gpio: s.gpio,
     sensorType: s.sensor_type,
-    name: s.name || `${s.sensor_type} (GPIO ${s.gpio})`,
-    label: s.name
-      ? `${s.name} – ${s.sensor_type} (GPIO ${s.gpio})`
-      : `${s.sensor_type} (GPIO ${s.gpio})`,
+    config_id: s.config_id,
+    label: `${getSensorDisplayName({ sensor_type: s.sensor_type, name: s.name })} (GPIO ${s.gpio})`,
   }))
 })
 
@@ -219,15 +231,43 @@ function handleActuatorEspChange(espId: string) {
   updateField('gpio', undefined)
 }
 
+// Computed for sensor dropdown: value "gpio:sensorType" for multi-value disambiguation
+const sensorDropdownValue = computed({
+  get: () => {
+    const gp = localData.value.gpio as number | undefined
+    const st = localData.value.sensorType as string | undefined
+    if (gp === undefined || gp === null) return ''
+    const match = availableSensors.value.find(s => s.gpio === gp && s.sensorType === st)
+    if (match) return `${gp}:${st}`
+    // Base type (SHT31, BME280): don't auto-select — force user to choose explicit sub-type
+    if (st && isMultiValueBaseType(st)) return ''
+    // Fallback: first sensor with same gpio (legacy rules without sensorType)
+    const fallback = availableSensors.value.find(s => s.gpio === gp)
+    return fallback ? `${gp}:${fallback.sensorType}` : ''
+  },
+  set: (v: string | number) => selectSensor(v),
+})
+
 // Select sensor from device-aware dropdown → auto-fill gpio + sensorType
-function selectSensor(value: string) {
-  if (!value) {
+// Value format: "gpio:sensorType" (e.g. "0:sht31_humidity") for multi-value disambiguation
+function selectSensor(value: string | number) {
+  if (value === '' || value === undefined || value === null) {
     updateField('gpio', undefined)
     updateField('sensorType', '')
     return
   }
-  const gpio = Number(value)
-  const sensor = availableSensors.value.find(s => s.gpio === gpio)
+  let gpio: number
+  let sensorType: string
+  const strVal = String(value)
+  if (strVal.includes(':')) {
+    const [g, t] = strVal.split(':')
+    gpio = parseInt(g, 10)
+    sensorType = t || ''
+  } else {
+    gpio = typeof value === 'number' ? value : parseInt(strVal, 10)
+    sensorType = availableSensors.value.find(s => s.gpio === gpio)?.sensorType ?? ''
+  }
+  const sensor = availableSensors.value.find(s => s.gpio === gpio && s.sensorType === sensorType)
   if (sensor) {
     updateField('gpio', sensor.gpio)
     updateField('sensorType', sensor.sensorType)
@@ -288,16 +328,19 @@ function selectActuator(value: string) {
               <label class="config-label">Sensor</label>
               <select
                 class="config-select"
-                :value="localData.gpio ?? ''"
+                :value="sensorDropdownValue"
                 @change="selectSensor(($event.target as HTMLSelectElement).value)"
               >
                 <option value="">-- Sensor wählen --</option>
-                <option v-for="s in availableSensors" :key="s.gpio" :value="s.gpio">
+                <option v-for="s in availableSensors" :key="`${s.gpio}-${s.sensorType}`" :value="`${s.gpio}:${s.sensorType}`">
                   {{ s.label }}
                 </option>
               </select>
               <p v-if="localData.gpio != null && localData.sensorType" class="config-hint">
                 GPIO {{ localData.gpio }} · {{ localData.sensorType }}
+              </p>
+              <p v-if="showMultiValueBaseTypeWarning" class="config-hint config-hint--warn">
+                Diese Regel nutzt den Basis-Sensortyp „{{ localData.sensorType }}“. Bitte wählen Sie explizit einen Subtyp (z. B. SHT31 Temperatur oder SHT31 Luftfeuchtigkeit) für zuverlässige Auswertung.
               </p>
             </div>
           </template>
@@ -342,7 +385,11 @@ function selectActuator(value: string) {
             <select
               class="config-select"
               :value="localData.operator"
-              @change="updateField('operator', ($event.target as HTMLSelectElement).value)"
+              @change="(e) => {
+                const v = (e.target as HTMLSelectElement).value
+                updateField('operator', v)
+                updateField('isHysteresis', v === 'hysteresis')
+              }"
             >
               <option v-for="opt in operatorOptions" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
@@ -350,7 +397,61 @@ function selectActuator(value: string) {
             </select>
           </div>
 
-          <div v-if="localData.operator === 'between'" class="config-field-row">
+          <!-- Hysterese: Kühlung (Ein > X, Aus < Y) oder Heizung (Ein < X, Aus > Y) -->
+          <template v-if="localData.operator === 'hysteresis' || localData.isHysteresis === true">
+            <p class="config-hint">Kühlung: Ein wenn Wert über Schwellwert, Aus wenn unter.</p>
+            <div class="config-field-row">
+              <div class="config-field config-field--half">
+                <label class="config-label">Ein wenn > (Kühlung)</label>
+                <input
+                  type="number"
+                  class="config-input"
+                  :value="localData.activateAbove"
+                  step="0.1"
+                  placeholder="z.B. 28"
+                  @input="updateField('activateAbove', Number(($event.target as HTMLInputElement).value))"
+                />
+              </div>
+              <div class="config-field config-field--half">
+                <label class="config-label">Aus wenn < (Kühlung)</label>
+                <input
+                  type="number"
+                  class="config-input"
+                  :value="localData.deactivateBelow"
+                  step="0.1"
+                  placeholder="z.B. 24"
+                  @input="updateField('deactivateBelow', Number(($event.target as HTMLInputElement).value))"
+                />
+              </div>
+            </div>
+            <p class="config-hint">Heizung: Ein wenn Wert unter Schwellwert, Aus wenn über.</p>
+            <div class="config-field-row">
+              <div class="config-field config-field--half">
+                <label class="config-label">Ein wenn < (Heizung)</label>
+                <input
+                  type="number"
+                  class="config-input"
+                  :value="localData.activateBelow"
+                  step="0.1"
+                  placeholder="z.B. 18"
+                  @input="updateField('activateBelow', Number(($event.target as HTMLInputElement).value))"
+                />
+              </div>
+              <div class="config-field config-field--half">
+                <label class="config-label">Aus wenn > (Heizung)</label>
+                <input
+                  type="number"
+                  class="config-input"
+                  :value="localData.deactivateAbove"
+                  step="0.1"
+                  placeholder="z.B. 22"
+                  @input="updateField('deactivateAbove', Number(($event.target as HTMLInputElement).value))"
+                />
+              </div>
+            </div>
+          </template>
+
+          <div v-else-if="localData.operator === 'between'" class="config-field-row">
             <div class="config-field config-field--half">
               <label class="config-label">Min</label>
               <input

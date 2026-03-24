@@ -505,35 +505,88 @@ class WebSocketService {
   }
 
   /**
-   * Send subscription message to server
+   * Merge all active subscription filters into one.
+   * Prevents later subscriptions (e.g. LiveDataPreview with esp_ids) from
+   * overwriting earlier ones (esp store needs all sensor_data).
    */
-  private sendSubscription(filters: WebSocketFilters): void {
+  private mergeSubscriptionFilters(): WebSocketFilters {
+    const merged: WebSocketFilters = {}
+    const allTypes = new Set<MessageType | string>()
+    const allEspIds = new Set<string>()
+    const allSensorTypes = new Set<string>()
+    let hasUnfilteredEsp = false
+
+    for (const sub of this.subscriptions.values()) {
+      const f = sub.filters
+      if (f.types?.length) {
+        f.types.forEach((t) => allTypes.add(t))
+      }
+      if (f.esp_ids?.length) {
+        f.esp_ids.forEach((id) => allEspIds.add(id))
+      } else {
+        hasUnfilteredEsp = true
+      }
+      if (f.sensor_types?.length) {
+        f.sensor_types.forEach((t) => allSensorTypes.add(t))
+      }
+    }
+
+    if (allTypes.size) {
+      merged.types = Array.from(allTypes) as MessageType[]
+    }
+    // Only send esp_ids if ALL subscriptions filter by esp (none wants "all")
+    if (!hasUnfilteredEsp && allEspIds.size) {
+      merged.esp_ids = Array.from(allEspIds)
+    }
+    if (allSensorTypes.size) {
+      merged.sensor_types = Array.from(allSensorTypes)
+    }
+    return merged
+  }
+
+  /**
+   * Send merged subscription to server.
+   * Ensures all components receive the events they need (esp store + LiveDataPreview etc).
+   */
+  private sendMergedSubscription(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return
     }
-    
+    const merged = this.mergeSubscriptionFilters()
+    if (Object.keys(merged).length === 0) {
+      return
+    }
     try {
       this.ws.send(JSON.stringify({
         action: 'subscribe',
-        filters: filters,
+        filters: merged,
       }))
+      logger.debug('Sent merged WebSocket subscription', merged)
     } catch (error) {
       logger.error('Failed to send subscription', error)
     }
   }
 
   /**
+   * Send subscription message to server.
+   * Uses merged filters so multiple components don't overwrite each other.
+   */
+  private sendSubscription(_filters: WebSocketFilters): void {
+    this.sendMergedSubscription()
+  }
+
+  /**
    * Send unsubscribe message to server
    */
-  private sendUnsubscribe(filters?: WebSocketFilters): void {
+  private sendUnsubscribe(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return
     }
-    
+    const merged = this.mergeSubscriptionFilters()
     try {
       this.ws.send(JSON.stringify({
-        action: 'unsubscribe',
-        filters: filters || null,
+        action: 'subscribe',
+        filters: Object.keys(merged).length ? merged : {},
       }))
     } catch (error) {
       logger.error('Failed to send unsubscribe', error)
@@ -541,12 +594,11 @@ class WebSocketService {
   }
 
   /**
-   * Resubscribe all active subscriptions
+   * Resubscribe all active subscriptions.
+   * Sends merged filters once (not per subscription).
    */
   private resubscribeAll(): void {
-    for (const subscription of this.subscriptions.values()) {
-      this.sendSubscription(subscription.filters)
-    }
+    this.sendMergedSubscription()
   }
 
   /**
@@ -558,11 +610,9 @@ class WebSocketService {
     logger.info(`Processing ${this.pendingSubscriptions.length} pending subscriptions`)
 
     while (this.pendingSubscriptions.length > 0) {
-      const filters = this.pendingSubscriptions.shift()
-      if (filters) {
-        this.sendSubscription(filters)
-      }
+      this.pendingSubscriptions.shift()
     }
+    this.sendMergedSubscription()
   }
 
   /**

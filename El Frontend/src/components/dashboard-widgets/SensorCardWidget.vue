@@ -15,7 +15,7 @@ import { calculateTrend } from '@/utils/trendUtils'
 import type { TrendDirection } from '@/utils/trendUtils'
 
 interface Props {
-  sensorId?: string // "espId:gpio"
+  sensorId?: string // "espId:gpio:sensorType"
 }
 
 const props = defineProps<Props>()
@@ -34,12 +34,16 @@ watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
 
 const availableSensors = computed(() => {
   const items: { id: string; label: string }[] = []
+  const seen = new Set<string>()
   for (const device of espStore.devices) {
     const deviceId = espStore.getDeviceId(device)
     for (const s of (device.sensors as MockSensor[]) || []) {
+      const id = `${deviceId}:${s.gpio}:${s.sensor_type}`
+      if (seen.has(id)) continue
+      seen.add(id)
       items.push({
-        id: `${deviceId}:${s.gpio}:${s.sensor_type}`,
-        label: `${s.name || s.sensor_type} (${deviceId} — ${s.sensor_type})`,
+        id,
+        label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
       })
     }
   }

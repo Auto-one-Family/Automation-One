@@ -17,7 +17,7 @@ import type { ChartDataPoint } from '@/components/charts/LiveLineChart.vue'
 import type { MockSensor } from '@/types'
 
 interface Props {
-  sensorId?: string   // format: "espId:gpio"
+  sensorId?: string   // format: "espId:gpio:sensorType"
   showThresholds?: boolean
   yMin?: number
   yMax?: number
@@ -53,14 +53,18 @@ const localSensorId = ref(props.sensorId || '')
 // Sync from props when they change (e.g. page reload with saved config)
 watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
 
-// All available sensors for selection
+// All available sensors for selection (deduplicated by espId:gpio:sensorType)
 const availableSensors = computed(() => {
   const items: { id: string; label: string; unit: string }[] = []
+  const seen = new Set<string>()
   for (const device of espStore.devices) {
     const deviceId = espStore.getDeviceId(device)
     for (const s of (device.sensors as MockSensor[]) || []) {
+      const id = `${deviceId}:${s.gpio}:${s.sensor_type}`
+      if (seen.has(id)) continue
+      seen.add(id)
       items.push({
-        id: `${deviceId}:${s.gpio}:${s.sensor_type}`,
+        id,
         label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
         unit: s.unit || '',
       })
