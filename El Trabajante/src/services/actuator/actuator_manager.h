@@ -65,6 +65,7 @@ private:
     std::unique_ptr<IActuatorDriver> driver;
     ActuatorConfig config;
     bool emergency_stopped = false;
+    unsigned long command_duration_end_ms = 0;  // F1: Auto-Off timer (0 = inactive)
   };
 
   #ifndef MAX_ACTUATORS

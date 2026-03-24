@@ -1598,7 +1598,7 @@ mosquitto_pub -h localhost \
 {
   "command": "ON",                     // "ON", "OFF", "PWM", "TOGGLE"
   "value": 1.0,                        // 0.0-1.0 (nur bei PWM)
-  "duration": 0                        // Sekunden (0 = unbegrenzt)
+  "duration": 0                        // Sekunden (0 = unbegrenzt). Bei > 0: Auto-Off nach N Sek (F1 2026-03-11)
 }
 ```
 

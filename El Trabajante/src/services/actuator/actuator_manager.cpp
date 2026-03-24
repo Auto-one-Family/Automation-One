@@ -489,6 +489,21 @@ void ActuatorManager::processActuatorLoops() {
     }
 
     // ═══════════════════════════════════════════════════
+    // F1: COMMAND DURATION AUTO-OFF (from MQTT payload "duration")
+    // ═══════════════════════════════════════════════════
+    if (actuators_[i].command_duration_end_ms > 0 &&
+        actuators_[i].config.current_state &&
+        millis() >= actuators_[i].command_duration_end_ms) {
+      LOG_I(TAG, "Actuator duration elapsed: GPIO " + String(actuators_[i].config.gpio) +
+                  " auto-OFF after command duration");
+      actuators_[i].command_duration_end_ms = 0;
+      controlActuatorBinary(actuators_[i].config.gpio, false);
+      actuators_[i].config = actuators_[i].driver->getConfig();
+      publishActuatorStatus(actuators_[i].config.gpio);
+      continue;  // Skip further processing this iteration
+    }
+
+    // ═══════════════════════════════════════════════════
     // PHASE 2: TIMEOUT-PROTECTION (Robustness)
     // ═══════════════════════════════════════════════════
     // Check for actuator timeout (prevents continuous operation)
@@ -582,11 +597,19 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
     return false;
   }
 
+  // F1: Clear any pending duration timer on OFF/PWM/TOGGLE
+  actuator->command_duration_end_ms = 0;
+
   bool success = false;
   String resultMessage = "Command executed";
 
   if (command.command.equalsIgnoreCase("ON")) {
     success = controlActuatorBinary(gpio, true);
+    if (success && command.duration_s > 0) {
+      actuator->command_duration_end_ms = millis() + (static_cast<unsigned long>(command.duration_s) * 1000UL);
+      LOG_I(TAG, "Actuator GPIO " + String(gpio) + " ON with duration " +
+                  String(command.duration_s) + "s (auto-OFF scheduled)");
+    }
     if (!success) resultMessage = "Failed to turn actuator ON";
   } else if (command.command.equalsIgnoreCase("OFF")) {
     success = controlActuatorBinary(gpio, false);

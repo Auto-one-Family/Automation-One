@@ -71,7 +71,7 @@ MQTT message received on actuator command topic with wildcard subscription.
 |-------|------|----------|-------------|
 | `command` | String | Yes | Command type: ON, OFF, PWM, TOGGLE |
 | `value` | Number | No | For PWM: 0.0-1.0, For binary: 0.0 or 1.0 |
-| `duration` | Number | No | Duration in seconds (0 = indefinite) |
+| `duration` | Number | No | Duration in seconds (0 = indefinite). If > 0: actuator auto-switches OFF after N seconds (processActuatorLoops, F1 2026-03-11) |
 | `timestamp` | Number | No | Unix timestamp |
 | `command_id` | String | No | Unique command identifier |
 
@@ -231,6 +231,16 @@ if (command.command.equalsIgnoreCase("ON")) {
 | `OFF` | Turn off | Ignored | Pump, Valve, Relay |
 | `PWM` | Set PWM | 0.0 - 1.0 | PWM |
 | `TOGGLE` | Toggle state | Ignored | Pump, Valve, Relay |
+
+---
+
+### STEP 4b: Duration Auto-Off (ON with duration > 0)
+
+When `command` is `ON` and `duration_s > 0`, the ActuatorManager stores `command_duration_end_ms = millis() + (duration_s * 1000)` in `RegisteredActuator`. Each loop iteration, `processActuatorLoops()` checks: if `millis() >= command_duration_end_ms` and actuator is ON, it calls `controlActuatorBinary(gpio, false)` and clears the timer. This implements RuleConfigPanel "Auto-Abschaltung (Sek.)" behavior. Duration 0 = no auto-off (only device-level `runtime_protection.max_runtime_ms` applies).
+
+**Rule vs. Device:** The `duration` in the MQTT payload comes from the **Rule-Action** (`duration_seconds`), not from ActuatorConfig. Device `max_runtime_seconds` (ActuatorConfigPanel) is stored in DB but not sent to ESP. See `.claude/reference/logic/MAX_RUNTIME_ABGRENZUNG.md` for full documentation.
+
+**File:** `src/services/actuator/actuator_manager.cpp` (handleActuatorCommand, processActuatorLoops)
 
 ---
 
@@ -1234,6 +1244,7 @@ From actuator commands:
 - `docs/API_REFERENCE.md` - ActuatorManager API
 - `src/models/actuator_types.h` - Actuator data structures
 - `src/services/actuator/safety_controller.h` - Safety system
+- `.claude/reference/logic/MAX_RUNTIME_ABGRENZUNG.md` - Rule duration vs. Device max_runtime
 
 ---
 
