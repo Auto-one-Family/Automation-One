@@ -43,7 +43,7 @@ steps:
   - wait-serial: "ThisIsAVeryLongSensorName"
 
   # Wait for config to complete
-  - delay: 500
+  - delay: 500ms
 
   # GPIO-EDGE-003: External MQTT injection - short/minimal name (CI helper script)
 

@@ -19,6 +19,6 @@ steps:
   - wait-serial: "MQTT connected"
   # External MQTT config injection happens here (sleep 25 in CI)
   - wait-serial: "ConfigResponse published"
-  - delay: 5000
+  - delay: 5000ms
   # External actuator ON command injected via mosquitto_pub
   - wait-serial: "Actuator"

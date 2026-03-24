@@ -61,7 +61,7 @@ steps:
   - wait-serial: "config_response"
 
   # Wait for actuator to be ready
-  - delay: 500
+  - delay: 500ms
 
   # External MQTT injection: test actuator ON command (CI helper script)
 
@@ -69,14 +69,14 @@ steps:
   - wait-serial: "GPIO 5"
 
   # External MQTT injection: configure PWM actuator (fan) (CI helper script)
-  - delay: 500
+  - delay: 500ms
 
   # Verify PWM actuator allocation
   - wait-serial: "Pin 14 allocated"
   - wait-serial: "VentFan"
 
   # External MQTT injection: test PWM command (CI helper script)
-  - delay: 500
+  - delay: 500ms
 
   # Verify PWM response
   - wait-serial: "GPIO 14"

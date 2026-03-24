@@ -39,7 +39,7 @@ steps:
   - wait-serial: "Pin 14 allocated"
 
   # External MQTT injection: assign all to climate_control subzone (CI helper script)
-  - delay: 500
+  - delay: 500ms
 
   # Verify all pins assigned to subzone
   - wait-serial: "climate_control"

@@ -53,7 +53,7 @@ steps:
   - wait-serial: "Pin 4 allocated"
 
   # External MQTT config injection: actuator on GPIO 5 (CI helper script)
-  - delay: 500
+  - delay: 500ms
 
   # Verify actuator allocated
   - wait-serial: "Pin 5 allocated"

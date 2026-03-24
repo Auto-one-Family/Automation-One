@@ -49,7 +49,7 @@ steps:
   - wait-serial: "reserved pin"
 
   # Wait before next test
-  - delay: 500
+  - delay: 500ms
 
   # TEST 2: External MQTT injection - UART TX pin GPIO 1 (CI helper script)
 
@@ -57,7 +57,7 @@ steps:
   - wait-serial: "reserved pin 1"
 
   # Wait before next test
-  - delay: 500
+  - delay: 500ms
 
   # TEST 3: External MQTT injection - INPUT-only pin GPIO 34 as actuator (CI helper script)
 

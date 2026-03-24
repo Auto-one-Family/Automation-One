@@ -45,7 +45,7 @@ steps:
   - wait-serial: "not in safe pins"
 
   # Wait before next test
-  - delay: 500
+  - delay: 500ms
 
   # External MQTT injection: Test 2 - sensor on GPIO 50 (CI helper script)
 
@@ -53,7 +53,7 @@ steps:
   - wait-serial: "not in safe pins"
 
   # Wait before next test
-  - delay: 500
+  - delay: 500ms
 
   # External MQTT injection: Test 3 - sensor on GPIO 6 (Flash) (CI helper script)
 

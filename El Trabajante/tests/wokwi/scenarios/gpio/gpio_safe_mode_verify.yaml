@@ -52,13 +52,13 @@ steps:
   - wait-serial: "Pin 5 allocated"
 
   # External MQTT injection: turn actuator ON (OUTPUT HIGH) (CI helper script)
-  - delay: 500
+  - delay: 500ms
 
   # Verify actuator state is ON
   - wait-serial: "GPIO 5"
 
   # External MQTT injection: trigger emergency (CI helper script)
-  - delay: 500
+  - delay: 500ms
 
   # Verify emergency is processed
   - wait-serial: "Emergency"

@@ -55,7 +55,7 @@ steps:
   - wait-serial: "Sensor"
 
   # Wait for config response
-  - delay: 1500
+  - delay: 1500ms
 
   # TEST 2: External MQTT injection - actuator on valid safe pin GPIO 5 (CI helper script)
 

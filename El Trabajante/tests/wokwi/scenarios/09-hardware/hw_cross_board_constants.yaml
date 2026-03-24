@@ -67,7 +67,7 @@ steps:
   - wait-serial: "Sensor"
 
   # Wait for config response
-  - delay: 1500
+  - delay: 1500ms
 
   # TEST 2: External MQTT injection - actuator on WROOM-specific GPIO 33 (CI helper script)
 

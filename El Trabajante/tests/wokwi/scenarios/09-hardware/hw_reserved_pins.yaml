@@ -53,7 +53,7 @@ steps:
   - wait-serial: "reserved"
 
   # Wait before next test
-  - delay: 500
+  - delay: 500ms
 
   # TEST 2: External MQTT injection - UART TX pin GPIO 1 (CI helper script)
 
@@ -61,7 +61,7 @@ steps:
   - wait-serial: "reserved"
 
   # Wait before next test
-  - delay: 500
+  - delay: 500ms
 
   # TEST 3: External MQTT injection - UART RX pin GPIO 3 (CI helper script)
 
@@ -69,7 +69,7 @@ steps:
   - wait-serial: "reserved"
 
   # Wait before next test
-  - delay: 500
+  - delay: 500ms
 
   # TEST 4: External MQTT injection - flash strapping pin GPIO 12 (CI helper script)
 
@@ -77,7 +77,7 @@ steps:
   - wait-serial: "reserved"
 
   # Wait before next test
-  - delay: 500
+  - delay: 500ms
 
   # TEST 5: External MQTT injection - internal flash SPI GPIO 6 (CI helper script)
   # Note: Not in RESERVED_GPIO_PINS but also not in SAFE_GPIO_PINS

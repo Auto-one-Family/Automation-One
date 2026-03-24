@@ -41,7 +41,7 @@ steps:
   - wait-serial: "Pin 4 allocated"
 
   # Wait a moment for config to be applied
-  - delay: 1000
+  - delay: 1000ms
 
   # STEP 2: External MQTT injection - second sensor on SAME GPIO 4 (CI helper script)
 

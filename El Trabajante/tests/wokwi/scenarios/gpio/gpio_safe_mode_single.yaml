@@ -43,7 +43,7 @@ steps:
   - wait-serial: "Pin 5 allocated"
 
   # Wait for actuator to be operational
-  - delay: 1000
+  - delay: 1000ms
 
   # External MQTT injection: turn actuator ON (CI helper script)
 

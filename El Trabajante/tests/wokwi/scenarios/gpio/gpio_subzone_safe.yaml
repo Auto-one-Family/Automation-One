@@ -54,17 +54,17 @@ steps:
   - wait-serial: "Pin 16 allocated"
 
   # External MQTT injection: assign to irrigation + ventilation subzones (CI helper script)
-  - delay: 500
+  - delay: 500ms
 
   # Verify subzone assignments
   - wait-serial: "irrigation"
   - wait-serial: "ventilation"
 
   # External MQTT injection: turn ON all actuators (CI helper script)
-  - delay: 500
+  - delay: 500ms
 
   # Verify all actuators are ON
-  - delay: 500
+  - delay: 500ms
 
   # GPIO-SUB-004: External MQTT injection - enable safe mode for IRRIGATION only (CI helper script)
 

@@ -49,13 +49,13 @@ steps:
 
   # Verify sensor becomes operational (starts publishing)
   # Sensor data will be published on measurement interval
-  - delay: 2000
+  - delay: 2000ms
 
   # Verify config response is successful
   - wait-serial: "config_response"
 
   # External MQTT injection: configure I2C sensor SHT31 (CI helper script)
-  - delay: 500
+  - delay: 500ms
 
   # I2C sensor uses pre-reserved I2C pins (21, 22)
   # GPIO field is 255 (marker for I2C device)

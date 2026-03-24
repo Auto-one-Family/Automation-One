@@ -56,7 +56,7 @@ steps:
   - wait-serial: "IrrigationPump"
 
   # Now try to cause a conflict to verify owner is shown in error
-  - delay: 500
+  - delay: 500ms
 
   # External MQTT injection: try to use GPIO 5 for sensor (conflict) (CI helper script)
 

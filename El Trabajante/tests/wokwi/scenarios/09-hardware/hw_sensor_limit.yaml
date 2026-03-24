@@ -43,7 +43,7 @@ steps:
   - wait-serial: "Sensor"
 
   # Wait for config processing
-  - delay: 2000
+  - delay: 2000ms
 
   # Verify config response
   - wait-serial: "config_response"
@@ -51,7 +51,7 @@ steps:
   # External MQTT injection: configure second batch of sensors (CI helper script)
 
   # Wait for config processing
-  - delay: 2000
+  - delay: 2000ms
 
   # Verify heartbeat shows sensor count
   # Heartbeat payload includes sensor_count field

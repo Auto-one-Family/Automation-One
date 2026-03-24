@@ -22,7 +22,7 @@ steps:
   # External heavy config injection happens here (sleep 25 in CI)
   # 8 sensors + 6 actuators — system must process without crashing
   - wait-serial: "ConfigResponse published"
-  - delay: 15000
+  - delay: 15000ms
   # If system is still alive after 15s, the test passes (no crash/watchdog reset)
   # A second ConfigResponse may appear for actuators
   - wait-serial: "ConfigResponse published"

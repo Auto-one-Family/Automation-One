@@ -45,7 +45,7 @@ steps:
   - wait-serial: "Pin 4 allocated"
 
   # Wait for config to be applied
-  - delay: 1000
+  - delay: 1000ms
 
   # STEP 2: External MQTT injection - remove sensor (active=false) (CI helper script)
 
@@ -56,7 +56,7 @@ steps:
   - wait-serial: "safe mode"
 
   # Wait for release to complete
-  - delay: 1000
+  - delay: 1000ms
 
   # STEP 3: External MQTT injection - re-reserve GPIO 4 for actuator (CI helper script)
 

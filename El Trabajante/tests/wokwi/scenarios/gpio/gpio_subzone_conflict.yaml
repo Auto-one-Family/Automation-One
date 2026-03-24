@@ -43,13 +43,13 @@ steps:
   - wait-serial: "Pin 4 allocated"
 
   # External MQTT injection: assign GPIO 4 to FIRST subzone (CI helper script)
-  - delay: 500
+  - delay: 500ms
 
   # Verify first assignment succeeds
   - wait-serial: "subzone_alpha"
 
   # Wait for assignment to complete
-  - delay: 500
+  - delay: 500ms
 
   # External MQTT injection: try to assign SAME GPIO 4 to DIFFERENT subzone (CI helper script)
 

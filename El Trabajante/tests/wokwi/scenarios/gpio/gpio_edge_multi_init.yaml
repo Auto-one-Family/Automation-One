@@ -51,7 +51,7 @@ steps:
 
   # Emergency stop triggers enableSafeModeForAllPins
   # which is similar to re-initialization
-  - delay: 1000
+  - delay: 1000ms
 
   # External MQTT injection: trigger emergency stop (CI helper script)
 

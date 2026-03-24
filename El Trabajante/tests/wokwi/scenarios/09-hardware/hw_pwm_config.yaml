@@ -48,7 +48,7 @@ steps:
   - wait-serial: "Actuator"
 
   # Wait for config to be applied
-  - delay: 1500
+  - delay: 1500ms
 
   # External MQTT injection: send PWM command at 50% duty cycle (CI helper script)
 
@@ -56,7 +56,7 @@ steps:
   - wait-serial: "PWM"
 
   # Wait for status update
-  - delay: 1000
+  - delay: 1000ms
 
   # Verify actuator status is published
   - wait-serial: "actuator"

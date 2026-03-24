@@ -43,7 +43,7 @@ steps:
   - wait-serial: "Pin 4 allocated"
 
   # Wait for configuration
-  - delay: 500
+  - delay: 500ms
 
   # GPIO-SUB-001: External MQTT injection - assign pins to subzone (CI helper script)
 
@@ -52,7 +52,7 @@ steps:
   - wait-serial: "irrigation_zone"
 
   # Wait for assignment to complete
-  - delay: 500
+  - delay: 500ms
 
   # GPIO-SUB-002: External MQTT injection - remove pin from subzone (CI helper script)
 

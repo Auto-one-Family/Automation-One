@@ -40,7 +40,7 @@ jobs:
         run: docker build -t el-servador:scan "./El Servador"
 
       - name: Run Trivy (Server)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: 'el-servador:scan'
           format: 'table'
@@ -62,7 +62,7 @@ jobs:
         run: docker build -t el-frontend:scan --target development "./El Frontend"
 
       - name: Run Trivy (Frontend)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: 'el-frontend:scan'
           format: 'table'
@@ -81,7 +81,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Trivy Config Scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: 'config'
           scan-ref: '.'

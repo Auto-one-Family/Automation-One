@@ -54,10 +54,10 @@ steps:
   - wait-serial: "Pin 15 allocated"
 
   # External MQTT injection: turn ON all actuators (CI helper script)
-  - delay: 500
+  - delay: 500ms
 
   # Verify actuators are ON
-  - delay: 500
+  - delay: 500ms
 
   # External MQTT injection: TRIGGER EMERGENCY STOP (CI helper script)
 
