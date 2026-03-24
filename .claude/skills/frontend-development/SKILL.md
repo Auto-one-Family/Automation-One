@@ -16,8 +16,8 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.77
-**Letzte Aktualisierung:** 2026-03-10
+**Version:** 9.78
+**Letzte Aktualisierung:** 2026-03-11
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
 
@@ -484,7 +484,7 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 - LogicRule: Conditions + Actions + Cooldown + logic_operator (AND/OR)
 - SensorCondition: Vergleichsoperatoren (>, <, >=, <=, ==, !=, between), optional subzone_id (Phase 2.4)
 - TimeCondition: start_hour, end_hour, days_of_week (0=Monday, 6=Sunday — ISO 8601 / Python weekday())
-- HysteresisCondition: activate_above/deactivate_below
+- HysteresisCondition: Kühlung (activate_above/deactivate_below) oder Heizung (activate_below/deactivate_above)
 - CompoundCondition: Nested AND/OR conditions
 - ActuatorAction: ON/OFF/PWM/TOGGLE + Duration
 - NotificationAction: channel + target + message_template
@@ -1251,8 +1251,16 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.77
-**Letzte Aktualisierung:** 2026-03-10
+**Version:** 9.78
+**Letzte Aktualisierung:** 2026-03-11
+
+### Aenderungen in v9.78 (T18-F3 — Hysterese in graphToRuleData erhalten)
+
+- RuleFlowEditor.vue: `graphToRuleData()` — Bei Sensor-Node mit `isHysteresis === true` oder `operator === 'hysteresis'` wird jetzt `type: 'hysteresis'` (HysteresisCondition) serialisiert statt SensorCondition; Kühlung: activateAbove→activate_above, deactivateBelow→deactivate_below; Heizung: activateBelow→activate_below, deactivateAbove→deactivate_above; esp_id, gpio, sensor_type durchgereicht
+- RuleFlowEditor.vue: Sensor-Node Template — Hysterese-Darstellung: "Ein >28 · Aus <24" (Kühlung) oder "Ein <18 · Aus >22" (Heizung); Fallback "Hysterese" wenn keine Schwellen gesetzt
+- RuleConfigPanel.vue: Operator-Option "Hysterese (Ein/Aus-Schwellen)" hinzugefuegt; bei operator==='hysteresis' oder isHysteresis: Felder fuer Kühlung (Ein wenn >, Aus wenn <) und Heizung (Ein wenn <, Aus wenn >); Operator-Wechsel setzt isHysteresis automatisch
+- types/logic.ts: `formatConditionShort()` — Heizungsmodus unterstuetzt: "Ein <18, Aus >22" (activate_below/deactivate_above)
+- Section 4 Logic Types: HysteresisCondition um beide Modi (Kühlung/Heizung) erweitert
 
 ### Aenderungen in v9.77 (8.3b — Sensor-Auswahl Duplikate, Multi-Sensor Label, annotationPlugin)
 
@@ -1657,7 +1665,7 @@ cleanupWebSocket() {
 
 - logic.store.ts: `getRulesForActuator(espId, gpio): LogicRule[]` — filtert rules nach Actions mit type 'actuator'/'actuator_command' + esp_id + gpio Match; Sortierung priority (niedrig = hoeher); im Store-Return exportiert
 - logic.store.ts: `getLastExecutionForActuator(espId, gpio): ExecutionHistoryItem | null` — nutzt getRulesForActuator intern, sammelt Rule-IDs, filtert executionHistory, sortiert triggered_at DESC, gibt erstes Element oder null
-- types/logic.ts: `formatConditionShort(rule): string` — lesbarer Kurztext aller Conditions; sensor/sensor_threshold: Label + Operator + Wert + Einheit ("Temperatur > 28°C"); hysteresis: "Ein >28, Aus <25"; time: "06:00–20:00"; compound: "[Komplex]"; Verbindung logic_operator UND/ODER; importiert getSensorLabel/getSensorUnit aus sensorDefaults
+- types/logic.ts: `formatConditionShort(rule): string` — lesbarer Kurztext aller Conditions; sensor/sensor_threshold: Label + Operator + Wert + Einheit ("Temperatur > 28°C"); hysteresis: Kühlung "Ein >28, Aus <24" oder Heizung "Ein <18, Aus >22"; time: "06:00–20:00"; compound: "[Komplex]"; Verbindung logic_operator UND/ODER; importiert getSensorLabel/getSensorUnit aus sensorDefaults
 - types/index.ts: Re-Export `formatConditionShort` aus logic.ts
 - Section 4 Logic Types: formatConditionShort dokumentiert
 - Section 5 Store-Architektur: logic Store um getRulesForActuator, getLastExecutionForActuator erweitert

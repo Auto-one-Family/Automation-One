@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.3 | **Aktualisiert:** 2026-03-05
+> **Version:** 2.4 | **Aktualisiert:** 2026-03-11
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
-> **Änderungen:** Server-Subscriptions auf Multi-Kaiser-Wildcards (`kaiser/+/`) umgestellt
+> **Änderungen:** Server-Subscriptions auf Multi-Kaiser-Wildcards (`kaiser/+/`) umgestellt; duration > 0: ESP Auto-Off implementiert (F1 2026-03-11)
 
 ---
 
@@ -243,7 +243,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 |------|-----|----------|--------------|
 | `command` | string | Ja | ON, OFF, PWM, TOGGLE |
 | `value` | float | Nein | 0.0 - 1.0 für PWM |
-| `duration` | int | Nein | Sekunden (0 = unbegrenzt) |
+| `duration` | int | Nein | Sekunden (0 = unbegrenzt). Bei > 0: ESP schaltet Aktor nach N Sekunden automatisch aus (Auto-Off, F1 2026-03-11) |
 | `timestamp` | int | Ja | Unix Timestamp |
 | `correlation_id` | string | Nein | End-to-End Tracking ID für Response-Korrelation |
 
@@ -256,7 +256,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `PWM` | PWM-Wert setzen | 0.0 - 1.0 |
 | `TOGGLE` | Zustand umschalten | - |
 
-**duration:** Sekunden (0 = unbegrenzt)
+**duration:** Sekunden (0 = unbegrenzt). Bei > 0: ESP führt Auto-Off nach N Sekunden aus (`actuator_manager.cpp` processActuatorLoops, `command_duration_end_ms`).
 
 **Code-Referenzen:**
 - **ESP32:** `main.cpp` Zeile 731 (Subscription via Wildcard)

@@ -413,7 +413,7 @@ MainLayout → AppHeader + AppSidebar + <RouterView />
 | Report | `logs/frontend/playwright/playwright-report/` |
 | Test-Dir | `tests/e2e/scenarios/` |
 
-**6 E2E Szenarien:** auth, sensor-live, actuator, emergency, device-discovery, esp-registration-flow
+**11 E2E Szenarien:** auth, sensor-live, actuator, emergency, device-discovery, esp-registration-flow, humidity-logic, hysteresis-logic, logic-engine, hardware-view, subzone-monitor-flow
 
 **Vitest/Playwright:** In package.json (test, test:unit, test:coverage) und devDependencies.
 

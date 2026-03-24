@@ -262,6 +262,10 @@ std::unique_ptr<IActuatorDriver> createDriver(const String& type) {
 }
 ```
 
+### Command Duration (Auto-Off)
+
+ON mit `duration` > 0 im MQTT-Payload → `command_duration_end_ms` gesetzt. `processActuatorLoops()` schaltet nach N Sekunden automatisch aus. duration=0 = kein Auto-Off (nur `runtime_protection.max_runtime_ms` greift). Ref: `MQTT_TOPICS.md` §2.1, `03-actuator-command-flow.md` STEP 4b.
+
 ---
 
 ## MQTT-Patterns

@@ -565,7 +565,7 @@ make e2e-test-ui - Interactive UI mode
 |-------|-----------|-------|------|
 | Backend (Python) | Unit + Integration + E2E + ESP32 | 105 test files | pytest ^8.0, pytest-asyncio |
 | Frontend (Vue) | Unit tests | 5 test files | vitest ^2.1.8 (jsdom) |
-| Frontend (Vue) | E2E (Playwright) | 5 spec files | @playwright/test ^1.50.0 |
+| Frontend (Vue) | E2E (Playwright) | 11 scenario specs | @playwright/test ^1.50.0 |
 | ESP32 (Wokwi) | Simulation scenarios | 173 YAML files | wokwi-cli |
 | **Total** | | **288 test files/scenarios** | |
 
@@ -594,7 +594,7 @@ El Frontend/tests/
     ├── global-setup.ts
     ├── global-teardown.ts
     ├── helpers/      # websocket.ts, mqtt.ts
-    └── scenarios/    # auth.spec.ts, device-discovery.spec.ts, sensor-live.spec.ts, actuator.spec.ts, emergency.spec.ts
+    └── scenarios/    # auth, device-discovery, sensor-live, actuator, emergency, humidity-logic, hysteresis-logic, logic-engine, hardware-view, subzone-monitor-flow, esp-registration-flow
 ```
 
 ### Wokwi Scenario Categories:

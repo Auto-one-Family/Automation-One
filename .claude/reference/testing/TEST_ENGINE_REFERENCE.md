@@ -1,6 +1,6 @@
 # Test-Engine Reference - AutomationOne
 
-> **Version:** 1.5 | **Aktualisiert:** 2026-02-23
+> **Version:** 1.6 | **Aktualisiert:** 2026-03-11
 > **Zweck:** Vollständige Referenz der Test-Infrastruktur
 > **Themengebiet:** Testing, CI/CD, Agents
 
@@ -11,7 +11,7 @@
 ```
                     ┌─────────────────┐
                     │   E2E Tests     │  ← Browser (Playwright)
-                    │  (6 Dateien)    │     Server E2E (pytest)
+                    │  (11 Szenarien) │     Server E2E (pytest)
                     └────────┬────────┘
                              │
                ┌─────────────┴─────────────┐
@@ -125,8 +125,8 @@ El Frontend/
 │   ├── unit/           # 43 Dateien (Vitest)
 │   │   ├── stores/     # Pinia Store Tests
 │   │   └── components/ # Vue Component Tests
-│   └── e2e/            # 6 Szenarien + 15 CSS Specs (Playwright)
-│       ├── scenarios/  # 6 Scenario Specs
+│   └── e2e/            # 11 Szenarien + 15 CSS Specs (Playwright)
+│       ├── scenarios/  # 11 Scenario Specs (auth, humidity-logic, hysteresis-logic, logic-engine, …)
 │       └── css/        # 15 CSS/Visual Specs
 ├── vitest.config.ts
 └── playwright.config.ts
@@ -611,9 +611,10 @@ cd "El Servador/god_kaiser_server"
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-23
-**Version:** 1.5
+**Letzte Aktualisierung:** 2026-03-11
+**Version:** 1.6
 **Changelog:**
+- 1.6: E2E Szenarien 6→11 (hysteresis-logic, humidity-logic, logic-engine, hardware-view, subzone-monitor-flow, esp-registration-flow ergänzt)
 - 1.5: Fixtures (1.4) komplett überarbeitet (tatsächliche conftest.py Fixtures), Test-Reporting Pipeline (4.4) hinzugefügt, Artifact-Tabelle erweitert, Playwright test-summary ergänzt, `--wait` aus Docker CI entfernt, Hook-System dokumentiert (8.2), Version-Bump
 - 1.4: Zahlen-Korrektur (Unit 36→38, Frontend 4→43, E2E 6→9), CI-Coverage ALL 173 Wokwi in CI (52 PR Core + 121 Nightly), Backend E2E + Playwright + Security Scan Workflows ergänzt, Artifact Retention vereinheitlicht (7 Tage), poetry run → .venv/Scripts/pytest.exe
 - 1.3: ESP32 Native Unit Tests Sektion (3.5): 22 Tests (TopicBuilder + GPIOManager), Toolchain-Fix, HAL-Architektur
