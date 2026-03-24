@@ -33,7 +33,7 @@ from ...core.exceptions import (
 )
 from ...core.logging_config import get_logger
 from ...db.repositories import ESPRepository
-from ..deps import DBSession, MQTTPublisher, OperatorUser
+from ..deps import ActiveUser, DBSession, MQTTPublisher, OperatorUser
 from ...schemas.common import ErrorResponse
 from ...schemas.subzone import (
     SafeModeRequest,
@@ -255,6 +255,7 @@ async def get_subzones(
         ),
     ],
     session: DBSession,
+    user: ActiveUser,
 ) -> SubzoneListResponse:
     """Get all subzones for an ESP device."""
     esp_repo = ESPRepository(session)
@@ -306,6 +307,7 @@ async def get_subzone(
         ),
     ],
     session: DBSession,
+    user: ActiveUser,
 ) -> SubzoneInfo:
     """Get specific subzone details."""
     esp_repo = ESPRepository(session)

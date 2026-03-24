@@ -36,6 +36,8 @@ from ...utils.zone_subzone_resolver import resolve_zone_subzone_for_sensor
 from ...core.resilience import (
     ServiceUnavailableError,
 )
+from sqlalchemy.orm.attributes import flag_modified
+
 from ...db.models.enums import DataSource
 from ...db.repositories import (
     ESPRepository,
@@ -419,6 +421,7 @@ class SensorDataHandler:
                         updated_metadata["latest_timestamp"] = esp32_timestamp.isoformat()
                         updated_metadata["latest_quality"] = quality
                         sensor_config.sensor_metadata = updated_metadata
+                        flag_modified(sensor_config, "sensor_metadata")
 
                     # Commit transaction
                     await session.commit()

@@ -205,7 +205,15 @@ class ZoneAckHandler:
                     await session.commit()
                 except IntegrityError as e:
                     await session.rollback()
-                    if "zone" in str(e).lower():
+                    # INV-1a/Fix4: Check SQLSTATE code for ForeignKeyViolation
+                    # instead of fragile string matching. SQLSTATE 23503 is
+                    # the standard code for foreign_key_violation, portable
+                    # across asyncpg and psycopg2.
+                    orig = getattr(e, "orig", None)
+                    sqlstate = getattr(orig, "sqlstate", None) or getattr(
+                        orig, "pgcode", None
+                    )
+                    if sqlstate == "23503":
                         logger.warning(
                             "Zone ACK commit failed for %s (FK violation, zone_id='%s'). "
                             "Ignoring — will be resolved on next heartbeat cycle.",

@@ -31,6 +31,8 @@ from ...core.metrics import update_esp_heartbeat_timestamp, update_esp_boot_coun
 from ...core import constants
 from ...db.models.audit_log import AuditEventType, AuditSeverity
 from ...db.models.enums import DataSource
+from sqlalchemy.orm.attributes import flag_modified
+
 from ...db.models.esp import ESPDevice
 from ...db.repositories import ESPRepository, ESPHeartbeatRepository
 from ...db.repositories.actuator_repo import ActuatorRepository
@@ -274,9 +276,13 @@ class HeartbeatHandler:
                 # ============================================
                 # HEARTBEAT HISTORY LOGGING (Time-Series)
                 # ============================================
-                # Non-blocking: Errors are logged but don't fail the handler
+                # Non-blocking: Uses savepoint so a history-log failure
+                # does not rollback the already-committed device update.
+                # INV-1a/Fix3: Savepoint provides atomicity without risking
+                # the main heartbeat transaction on history-log errors.
                 device_source = self._detect_device_source(esp_device, payload)
                 try:
+                    nested = await session.begin_nested()
                     heartbeat_repo = ESPHeartbeatRepository(session)
                     await heartbeat_repo.log_heartbeat(
                         esp_uuid=esp_device.id,
@@ -284,13 +290,11 @@ class HeartbeatHandler:
                         payload=payload,
                         data_source=device_source,
                     )
-                    await session.commit()
+                    await nested.commit()
                 except Exception as hb_log_error:
                     logger.warning(
                         f"Failed to log heartbeat history for {esp_id_str}: {hb_log_error}"
                     )
-                    # Rollback partial history insert to keep session clean for subsequent ops
-                    await session.rollback()
 
                 source_indicator = (
                     f"[{device_source.upper()}]"
@@ -555,6 +559,7 @@ class HeartbeatHandler:
         metadata["rediscovery_heartbeat"] = payload
         metadata["heartbeat_count"] = metadata.get("heartbeat_count", 0) + 1
         esp_device.device_metadata = metadata
+        flag_modified(esp_device, "device_metadata")
         esp_device.last_seen = datetime.now(timezone.utc)
         # Update IP from rediscovery heartbeat (ESP may have new IP after WiFi reconnect)
         wifi_ip = payload.get("wifi_ip")
@@ -599,6 +604,7 @@ class HeartbeatHandler:
         metadata["last_sensor_count"] = payload.get("sensor_count", 0)
         metadata["last_actuator_count"] = payload.get("actuator_count", 0)
         esp_device.device_metadata = metadata
+        flag_modified(esp_device, "device_metadata")
         esp_device.last_seen = datetime.now(timezone.utc)
         # Update IP address if provided (ESP sends wifi_ip in heartbeat)
         wifi_ip = payload.get("wifi_ip")
@@ -883,6 +889,7 @@ class HeartbeatHandler:
                     )
 
             esp_device.device_metadata = current_metadata
+            flag_modified(esp_device, "device_metadata")
 
         except (AttributeError, TypeError, KeyError) as e:
             # Structured data errors: log and roll back the in-progress metadata
@@ -1292,6 +1299,7 @@ class HeartbeatHandler:
                 # Cooldown expired or first push — update metadata and trigger
                 metadata["config_push_sent_at"] = now_ts
                 esp_device.device_metadata = metadata
+                flag_modified(esp_device, "device_metadata")
 
                 logger.info(
                     f"Config mismatch detected for {esp_device.device_id}: "
@@ -1390,6 +1398,7 @@ class HeartbeatHandler:
                 # Set cooldown BEFORE attempting send to prevent retry spam on timeout
                 metadata["full_state_push_sent_at"] = now_ts
                 esp_device.device_metadata = metadata
+                flag_modified(esp_device, "device_metadata")
                 await session.commit()
 
                 # 1. Zone assign via command_bridge (ACK-driven)
@@ -1504,13 +1513,13 @@ class HeartbeatHandler:
                                 actuator_repo = ActuatorRepository(session)
                                 reset_count = await actuator_repo.reset_states_for_device(
                                     esp_id=device.id,
-                                    new_state="idle",
+                                    new_state="off",
                                     reason="heartbeat_timeout",
                                 )
                                 if reset_count > 0:
                                     actuator_reset_counts[device.device_id] = reset_count
                                     logger.info(
-                                        f"[Heartbeat] Reset {reset_count} actuator state(s) to idle "
+                                        f"[Heartbeat] Reset {reset_count} actuator state(s) to off "
                                         f"for offline device {device.device_id}"
                                     )
                             except Exception as reset_err:
