@@ -2010,6 +2010,7 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
         <div
           v-for="subzone in filteredSubzones"
           :key="subzone.subzoneId ?? '__zoneweit__'"
+          class="monitor-subzone"
           :class="{ 'monitor-subzone--unassigned': subzone.subzoneId === null }"
         >
           <!-- Accordion-Header: only when >1 subzone OR named subzone -->
