@@ -25,6 +25,7 @@ from .logic.actions import (
 from .logic.conditions import (
     BaseConditionEvaluator,
     CompoundConditionEvaluator,
+    HysteresisConditionEvaluator,
     SensorConditionEvaluator,
     TimeConditionEvaluator,
 )
@@ -72,8 +73,16 @@ class LogicEngine:
         if condition_evaluators is None:
             sensor_eval = SensorConditionEvaluator()
             time_eval = TimeConditionEvaluator()
-            compound_eval = CompoundConditionEvaluator([sensor_eval, time_eval])
-            self.condition_evaluators = [sensor_eval, time_eval, compound_eval]
+            hysteresis_eval = HysteresisConditionEvaluator()
+            compound_eval = CompoundConditionEvaluator(
+                [sensor_eval, time_eval, hysteresis_eval]
+            )
+            self.condition_evaluators = [
+                sensor_eval,
+                time_eval,
+                hysteresis_eval,
+                compound_eval,
+            ]
         else:
             self.condition_evaluators = condition_evaluators
 
@@ -320,7 +329,66 @@ class LogicEngine:
         start_time = time.time()
 
         try:
-            # Check cooldown
+            # Evaluate conditions first (needed for hysteresis deactivation path)
+            sensor_values = await self._load_cross_sensor_values(
+                rule.trigger_conditions, trigger_data, logic_repo.session
+            )
+            context = {
+                "sensor_data": trigger_data,
+                "sensor_values": sensor_values,
+                "current_time": datetime.now(timezone.utc),
+                "rule_id": str(rule.id),
+                "condition_index": 0,
+            }
+            conditions_met = await self._check_conditions(
+                rule.trigger_conditions, context, logic_operator=rule.logic_operator
+            )
+
+            # Hysteresis deactivation: bypass cooldown (OFF must execute immediately)
+            if not conditions_met and context.get("_hysteresis_just_deactivated"):
+                off_actions = []
+                for action in rule.actions:
+                    if action.get("type") in ("actuator_command", "actuator"):
+                        off_actions.append(
+                            {
+                                **action,
+                                "command": "OFF",
+                                "value": 0.0,
+                                "duration": 0,
+                            }
+                        )
+                if off_actions:
+                    logger.info(
+                        f"Rule {rule.rule_name} hysteresis deactivated: "
+                        f"sending OFF to {len(off_actions)} actuator(s)"
+                    )
+                    await self._execute_actions(
+                        off_actions,
+                        trigger_data,
+                        rule.id,
+                        rule.rule_name,
+                        rule.priority,
+                        session=logic_repo.session,
+                        batch_locks=batch_locks,
+                    )
+                    execution_time_ms = int((time.time() - start_time) * 1000)
+                    await logic_repo.log_execution(
+                        rule_id=rule.id,
+                        trigger_data=trigger_data,
+                        actions=off_actions,
+                        success=True,
+                        execution_ms=execution_time_ms,
+                    )
+                    await logic_repo.session.commit()
+                return
+
+            if not conditions_met:
+                logger.debug(
+                    f"Rule {rule.rule_name} conditions not met for trigger: {trigger_data}"
+                )
+                return
+
+            # Check cooldown (only for activation — prevents rapid ON-ON-ON)
             if rule.cooldown_seconds:
                 last_execution = await logic_repo.get_last_execution(rule.id)
                 if last_execution:
@@ -345,30 +413,7 @@ class LogicEngine:
                 logger.warning(f"Rule {rule.rule_name} rate limited: {rate_result['reason']}")
                 return
 
-            # Evaluate conditions
-            # For sensor-triggered rules, prepare context with sensor_data
-            # Pre-load cross-sensor values for multi-sensor rules
-            sensor_values = await self._load_cross_sensor_values(
-                rule.trigger_conditions, trigger_data, logic_repo.session
-            )
-            context = {
-                "sensor_data": trigger_data,
-                "sensor_values": sensor_values,
-                "current_time": datetime.now(timezone.utc),
-                "rule_id": str(rule.id),  # For hysteresis state management
-                "condition_index": 0,  # For hysteresis state management
-            }
-            conditions_met = await self._check_conditions(
-                rule.trigger_conditions, context, logic_operator=rule.logic_operator
-            )
-
-            if not conditions_met:
-                logger.debug(
-                    f"Rule {rule.rule_name} conditions not met for trigger: {trigger_data}"
-                )
-                return
-
-            # Execute actions
+            # Execute actions (conditions_met from earlier evaluation)
             logger.info(f"Rule {rule.rule_name} triggered: executing {len(rule.actions)} actions")
 
             await self._execute_actions(

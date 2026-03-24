@@ -26,6 +26,7 @@ from .logic.actions import (
 from .logic.conditions import (
     BaseConditionEvaluator,
     CompoundConditionEvaluator,
+    HysteresisConditionEvaluator,
     SensorConditionEvaluator,
     TimeConditionEvaluator,
 )
@@ -67,8 +68,16 @@ class LogicService:
         if condition_evaluators is None:
             sensor_eval = SensorConditionEvaluator()
             time_eval = TimeConditionEvaluator()
-            compound_eval = CompoundConditionEvaluator([sensor_eval, time_eval])
-            self.condition_evaluators = [sensor_eval, time_eval, compound_eval]
+            hysteresis_eval = HysteresisConditionEvaluator()
+            compound_eval = CompoundConditionEvaluator(
+                [sensor_eval, time_eval, hysteresis_eval]
+            )
+            self.condition_evaluators = [
+                sensor_eval,
+                time_eval,
+                hysteresis_eval,
+                compound_eval,
+            ]
         else:
             self.condition_evaluators = condition_evaluators
 

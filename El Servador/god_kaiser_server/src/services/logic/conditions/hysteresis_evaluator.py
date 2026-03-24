@@ -160,6 +160,7 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
             elif value < deactivate_below and state.is_active:
                 state.is_active = False
                 state.last_deactivation = now
+                context["_hysteresis_just_deactivated"] = True  # T18-F2: Signal OFF to actuators
                 logger.info(
                     f"Hysteresis DEACTIVATED (cooling): value={value:.2f} < threshold={deactivate_below:.2f} "
                     f"[rule={context.get('rule_id')}, condition={context.get('condition_index')}]"
@@ -185,6 +186,7 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
             elif value > deactivate_above and state.is_active:
                 state.is_active = False
                 state.last_deactivation = now
+                context["_hysteresis_just_deactivated"] = True  # T18-F2: Signal OFF to actuators
                 logger.info(
                     f"Hysteresis DEACTIVATED (heating): value={value:.2f} > threshold={deactivate_above:.2f} "
                     f"[rule={context.get('rule_id')}, condition={context.get('condition_index')}]"

@@ -24,7 +24,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from ...core.exceptions import RuleNotFoundException, RuleValidationException
 from ...core.logging_config import get_logger
@@ -43,7 +43,7 @@ from ...schemas import (
     RuleToggleResponse,
 )
 from ...schemas.common import PaginationMeta
-from ..deps import ActiveUser, DBSession, OperatorUser
+from ..deps import ActiveUser, DBSession, OperatorUser, get_actuator_service
 
 logger = get_logger(__name__)
 
@@ -406,15 +406,22 @@ async def toggle_rule(
     request: RuleToggleRequest,
     db: DBSession,
     current_user: OperatorUser,
+    actuator_service: Annotated[
+        "ActuatorService", Depends(get_actuator_service)
+    ],
 ) -> RuleToggleResponse:
     """
     Toggle rule enabled state.
+
+    When disabling a rule: sends OFF to all actuators controlled by this rule
+    (T18-F2 fix: actuator stays on when rule is disabled).
 
     Args:
         rule_id: Rule ID
         request: Toggle request
         db: Database session
         current_user: Operator or admin user
+        actuator_service: ActuatorService for sending OFF on disable
 
     Returns:
         Toggle response
@@ -430,6 +437,36 @@ async def toggle_rule(
 
     await db.flush()
     await db.commit()
+
+    # T18-F2: When disabling rule, send OFF to all actuators it controls
+    if not request.enabled and rule.actions:
+        for action in rule.actions:
+            if action.get("type") in ("actuator_command", "actuator"):
+                esp_id = action.get("esp_id")
+                gpio = action.get("gpio")
+                if esp_id is not None and gpio is not None:
+                    try:
+                        success = await actuator_service.send_command(
+                            esp_id=str(esp_id),
+                            gpio=int(gpio),
+                            command="OFF",
+                            value=0.0,
+                            duration=0,
+                            issued_by=f"rule_toggle:{rule.id}",
+                        )
+                        if success:
+                            logger.info(
+                                f"Rule '{rule.name}' disabled: sent OFF to {esp_id} GPIO {gpio}"
+                            )
+                        else:
+                            logger.warning(
+                                f"Rule '{rule.name}' disabled: OFF to {esp_id} GPIO {gpio} failed"
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            f"Rule '{rule.name}' disabled: failed to send OFF to "
+                            f"{esp_id} GPIO {gpio}: {e}"
+                        )
 
     action = "enabled" if request.enabled else "disabled"
     logger.info(
