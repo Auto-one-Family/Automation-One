@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from ..models.esp import ESPDevice
+from ..models.zone import Zone
 from .base_repo import BaseRepository
 
 
@@ -458,6 +459,22 @@ class ESPRepository(BaseRepository[ESPDevice]):
                 zone_id.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
             )
             zone_id = re.sub(r"[^a-z0-9]+", "_", zone_id).strip("_")
+
+        # Ensure zone exists in the zones table (FK constraint: esp_devices.zone_id → zones.zone_id)
+        # Auto-create the zone if it doesn't exist yet (get-or-create pattern for mock ESPs).
+        if zone_id:
+            existing_zone_stmt = select(Zone).where(Zone.zone_id == zone_id)
+            existing_zone_result = await self.session.execute(existing_zone_stmt)
+            existing_zone = existing_zone_result.scalar_one_or_none()
+            if not existing_zone:
+                display_name = zone_name or zone_id
+                new_zone = Zone(
+                    zone_id=zone_id,
+                    name=display_name,
+                    description="Auto-created for mock ESP",
+                )
+                self.session.add(new_zone)
+                await self.session.flush()
 
         # Generate unique MAC address from device_id
         esp_suffix = device_id.replace("ESP_MOCK_", "").replace("ESP_", "").upper()

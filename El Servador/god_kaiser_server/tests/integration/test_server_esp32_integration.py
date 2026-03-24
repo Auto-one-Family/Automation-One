@@ -915,11 +915,12 @@ class TestPerformance:
 
         # Simulate 100 rapid updates
         topic = "kaiser/god/esp/ESP_12AB34CD/sensor/34/data"
+        base_ts = int(time.time())
 
         with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
             for i in range(100):
                 payload = {
-                    "ts": int(time.time()),
+                    "ts": base_ts + i,  # Unique timestamp per update to avoid IntegrityError
                     "esp_id": "ESP_12AB34CD",
                     "gpio": 34,
                     "sensor_type": "ph",
@@ -1349,11 +1350,12 @@ class TestCompleteWorkflows:
         async def mock_resilient_session():
             yield test_session
 
+        base_ts = int(time.time())
         with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
-            for reading in readings:
+            for idx, reading in enumerate(readings):
                 topic = "kaiser/god/esp/ESP_12AB34CD/sensor/4/data"
                 payload = {
-                    "ts": int(time.time()),
+                    "ts": base_ts + idx,  # Unique timestamp per reading to avoid IntegrityError
                     "esp_id": "ESP_12AB34CD",
                     "gpio": 4,
                     "sensor_type": "temperature",
