@@ -26,14 +26,17 @@ from ...core.logging_config import get_logger
 from ...db.repositories import ESPRepository
 from ...db.repositories.subzone_repo import SubzoneRepository
 from ...db.repositories.zone_repo import ZoneRepository
+from ...schemas.zone import (
+    ZoneListEntry,
+    ZoneListResponse,
+)
 from ...schemas.zone_entity import (
     ZoneCreate,
     ZoneDeleteResponse,
-    ZoneListResponse,
     ZoneResponse,
     ZoneUpdate,
 )
-from ..deps import DBSession, OperatorUser
+from ..deps import ActiveUser, DBSession, OperatorUser
 
 logger = get_logger(__name__)
 
@@ -85,12 +88,12 @@ async def create_zone(
     "",
     response_model=ZoneListResponse,
     summary="List Zones",
-    description="List all zones. Use `status` to filter by lifecycle status.",
-    responses={200: {"description": "List of all zones"}},
+    description="List all zones enriched with device/sensor/actuator counts. Use `status` to filter by lifecycle status.",
+    responses={200: {"description": "List of all zones with device counts"}},
 )
 async def list_zones(
     db: DBSession,
-    current_user: OperatorUser,
+    _user: ActiveUser,
     zone_status: Optional[str] = Query(
         None,
         alias="status",
@@ -98,16 +101,20 @@ async def list_zones(
     ),
 ) -> ZoneListResponse:
     zone_repo = ZoneRepository(db)
+    zone_rows = await zone_repo.list_with_device_counts(status_filter=zone_status)
 
-    if zone_status:
-        zones = await zone_repo.list_by_status(zone_status)
-    else:
-        zones = await zone_repo.list_all()
-
-    return ZoneListResponse(
-        zones=[ZoneResponse.model_validate(z) for z in zones],
-        total=len(zones),
-    )
+    zones = [
+        ZoneListEntry(
+            zone_id=row["zone_id"],
+            zone_name=row["zone_name"],
+            status=row["status"],
+            device_count=row["device_count"],
+            sensor_count=row["sensor_count"],
+            actuator_count=row["actuator_count"],
+        )
+        for row in zone_rows
+    ]
+    return ZoneListResponse(zones=zones, total=len(zones))
 
 
 @router.get(
@@ -123,7 +130,7 @@ async def list_zones(
 async def get_zone(
     zone_id: str,
     db: DBSession,
-    current_user: OperatorUser,
+    _user: ActiveUser,
 ) -> ZoneResponse:
     zone_repo = ZoneRepository(db)
     zone = await zone_repo.get_by_zone_id(zone_id)

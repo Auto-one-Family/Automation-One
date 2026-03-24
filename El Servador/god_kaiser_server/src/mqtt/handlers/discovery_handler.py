@@ -76,6 +76,10 @@ class DiscoveryHandler:
 
             esp_id_str = payload["esp_id"]
 
+            logger.warning(
+                "DiscoveryHandler called — deprecated since T13, use HeartbeatHandler",
+                extra={"esp_id": esp_id_str},
+            )
             logger.info(f"Processing discovery: esp_id={esp_id_str}")
 
             # Step 2: Get database session and repositories

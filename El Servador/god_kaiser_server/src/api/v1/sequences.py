@@ -20,7 +20,7 @@ from ...api.deps import get_current_user
 from ...schemas.sequence import SequenceListResponse, SequenceProgressSchema, SequenceStatsResponse
 from ...services.logic_engine import get_logic_engine
 
-router = APIRouter(prefix="/sequences", tags=["Sequences"])
+router = APIRouter(prefix="/v1/sequences", tags=["Sequences"])
 
 
 def _get_sequence_executor():

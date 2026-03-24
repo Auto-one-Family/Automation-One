@@ -1840,7 +1840,8 @@ async def get_actuator_states(
     "/mock-esp/{esp_id}/messages",
     response_model=MockESPMessagesResponse,
     summary="Get Published Messages",
-    description="Get MQTT messages published by a mock ESP32. Note: Message history is not persisted after migration to SimulationScheduler.",
+    description="DEPRECATED — wird in naechster Version entfernt. Message history is not persisted after migration to SimulationScheduler.",
+    deprecated=True,
 )
 async def get_messages(
     esp_id: str,
@@ -1872,7 +1873,8 @@ async def get_messages(
     "/mock-esp/{esp_id}/messages",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Clear Messages",
-    description="Clear message history for a mock ESP32. (Deprecated - no longer applicable)",
+    description="DEPRECATED — wird in naechster Version entfernt. Clear message history for a mock ESP32. (no longer applicable)",
+    deprecated=True,
 )
 async def clear_messages(
     esp_id: str,

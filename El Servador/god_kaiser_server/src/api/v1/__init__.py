@@ -40,7 +40,6 @@ from .schema_registry import router as schema_registry_router
 # Add endpoints directly to the router files; they will be available immediately.
 from .ai import router as ai_router
 from .kaiser import router as kaiser_router
-from .library import router as library_router
 
 # Create main v1 router
 api_v1_router = APIRouter()
@@ -65,7 +64,6 @@ api_v1_router.include_router(subzone_router)  # Phase 9 - Subzone Management
 api_v1_router.include_router(sequences_router)  # Phase 3 - Sequence Actions
 api_v1_router.include_router(ai_router)  # PLANNED - God Layer AI integration
 api_v1_router.include_router(kaiser_router)  # PLANNED - Kaiser relay node management
-api_v1_router.include_router(library_router)  # PLANNED - OTA sensor library distribution
 api_v1_router.include_router(device_context_router)  # T13-R2 - Multi-Zone Device Context
 api_v1_router.include_router(dashboards_router)  # Dashboard Layout Persistence
 api_v1_router.include_router(webhooks_router)  # Phase 4A.3 - Grafana Webhook
@@ -90,7 +88,6 @@ __all__ = [
     "actuators_router",
     "health_router",
     "kaiser_router",
-    "library_router",
     "logic_router",
     "logs_router",
     "notifications_router",

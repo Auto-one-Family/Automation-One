@@ -158,8 +158,10 @@ async def remove_zone(
 @router.get(
     "/zones",
     response_model=ZoneListResponse,
-    summary="List All Zones",
+    summary="[DEPRECATED] List All Zones",
     description="""
+    DEPRECATED — Use GET /api/v1/zones/ instead.
+
     List all zones from the zones table (Single Source of Truth).
 
     T13-R1: Sourced from zones table, enriched with device/sensor/actuator counts.
@@ -168,6 +170,7 @@ async def remove_zone(
     Use `status` query parameter to filter by zone status.
     Default: shows active and archived zones (excludes deleted).
     """,
+    deprecated=True,
     responses={
         200: {"description": "Zone list with device/sensor/actuator counts"},
     },
