@@ -33,6 +33,7 @@ import { RotateCcw } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { useEspStore } from '@/stores/esp'
 import { tokens } from '@/utils/cssTokens'
+import { getAutoResolution, TIME_RANGE_MINUTES } from '@/utils/autoResolution'
 
 ChartJS.register(
   CategoryScale,
@@ -50,8 +51,8 @@ interface Props {
   espId: string
   gpio: number
   sensorType: string
-  /** Time range in minutes */
-  timeRange?: '1h' | '6h' | '24h' | '7d'
+  /** Time range */
+  timeRange?: '1h' | '6h' | '24h' | '7d' | '30d'
   /** Chart accent color */
   color?: string
   /** Unit suffix */
@@ -86,8 +87,11 @@ const error = ref<string | null>(null)
 interface DataPoint {
   timestamp: Date
   value: number | null
+  minValue?: number | null
+  maxValue?: number | null
 }
 const dataBuffer = shallowRef<DataPoint[]>([])
+const isAggregated = ref(false)
 
 // Stats from API (8.0-D)
 interface SensorStats {
@@ -103,13 +107,7 @@ const stats = ref<SensorStats | null>(null)
 const chartRef = ref<InstanceType<typeof Line> | null>(null)
 const isZoomed = ref(false)
 
-// Time range in minutes
-const timeRangeMinutes: Record<string, number> = {
-  '1h': 60,
-  '6h': 360,
-  '24h': 1440,
-  '7d': 10080,
-}
+// Time range in minutes — uses shared TIME_RANGE_MINUTES from autoResolution
 
 const selectedRange = ref(props.timeRange)
 
@@ -142,7 +140,7 @@ function calculateMedianInterval(points: Array<{ timestamp: Date }>): number {
  * exceeds GAP_THRESHOLD_MULTIPLIER * medianInterval.
  */
 function insertGapMarkers(
-  points: Array<{ timestamp: Date; value: number }>,
+  points: DataPoint[],
   medianInterval: number
 ): DataPoint[] {
   if (points.length < 2 || medianInterval <= 0) return points
@@ -168,11 +166,13 @@ async function loadData() {
   error.value = null
 
   try {
-    const minutes = timeRangeMinutes[selectedRange.value] || 60
+    const minutes = TIME_RANGE_MINUTES[selectedRange.value] || 60
     const from = new Date(Date.now() - minutes * 60 * 1000).toISOString()
     const to = new Date().toISOString()
 
-    const limit = selectedRange.value === '7d' ? 2000 : 1000
+    // Auto-resolution: use server-side aggregation for longer time ranges
+    const resolution = getAutoResolution(minutes)
+    const limit = resolution ? 1000 : (selectedRange.value === '7d' ? 2000 : 1000)
 
     // Parallel: fetch data + stats (8.0-D)
     const [dataResponse, statsResponse] = await Promise.all([
@@ -183,6 +183,7 @@ async function loadData() {
         start_time: from,
         end_time: to,
         limit,
+        resolution,
       }),
       sensorsApi.getStats(props.espId, props.gpio, {
         sensor_type: props.sensorType,
@@ -191,6 +192,8 @@ async function loadData() {
       }).catch(() => null), // Stats failure is non-critical
     ])
 
+    isAggregated.value = resolution != null && dataResponse?.resolution !== 'raw'
+
     if (dataResponse && Array.isArray(dataResponse.readings)) {
       const rawPoints = dataResponse.readings.map((d) => {
         // Use processed_value (calibrated/converted) when available, fall back to raw_value
@@ -198,6 +201,8 @@ async function loadData() {
         return {
           timestamp: new Date(d.timestamp),
           value: typeof val === 'number' ? val : parseFloat(String(val)),
+          minValue: d.min_value ?? null,
+          maxValue: d.max_value ?? null,
         }
       })
 
@@ -299,20 +304,56 @@ function formatStatValue(val: number): string {
 // =============================================================================
 // Chart Configuration
 // =============================================================================
-const chartData = computed(() => ({
-  labels: dataBuffer.value.map(d => d.timestamp),
-  datasets: [{
+const chartData = computed(() => {
+  const labels = dataBuffer.value.map(d => d.timestamp)
+  const datasets: any[] = []
+
+  // MIN/MAX band for aggregated data (rendered as filled area between min and max)
+  const hasMinMax = isAggregated.value && dataBuffer.value.some(d => d.minValue != null)
+
+  if (hasMinMax) {
+    // Max line (upper bound of band)
+    datasets.push({
+      label: 'Max',
+      data: dataBuffer.value.map(d => d.maxValue ?? d.value),
+      borderColor: 'transparent',
+      backgroundColor: `${props.color}10`,
+      borderWidth: 0,
+      pointRadius: 0,
+      tension: 0.3,
+      fill: '+1', // Fill down to the next dataset (min)
+      spanGaps: false,
+    })
+    // Min line (lower bound of band)
+    datasets.push({
+      label: 'Min',
+      data: dataBuffer.value.map(d => d.minValue ?? d.value),
+      borderColor: 'transparent',
+      backgroundColor: 'transparent',
+      borderWidth: 0,
+      pointRadius: 0,
+      tension: 0.3,
+      fill: false,
+      spanGaps: false,
+    })
+  }
+
+  // Main avg line (always present)
+  datasets.push({
+    label: 'Avg',
     data: dataBuffer.value.map(d => d.value),
     borderColor: props.color,
-    backgroundColor: `${props.color}1a`,
+    backgroundColor: hasMinMax ? 'transparent' : `${props.color}1a`,
     borderWidth: 2,
     pointRadius: 0,
     pointHitRadius: 8,
     tension: 0.3,
-    fill: true,
+    fill: !hasMinMax,
     spanGaps: false, // Break line at null values (8.0-C)
-  }],
-}))
+  })
+
+  return { labels, datasets }
+})
 
 const chartOptions = computed(() => {
   const annotations: Record<string, any> = {}
@@ -416,10 +457,23 @@ const chartOptions = computed(() => {
         titleColor: tokens.textSecondary,
         bodyColor: tokens.textPrimary,
         padding: 8,
+        filter: (item: any) => {
+          // Hide Min/Max from tooltip — only show Avg
+          return item.dataset.label === 'Avg' || !item.dataset.label
+        },
         callbacks: {
           label: (ctx: any) => {
             if (ctx.parsed.y == null) return ''
-            return `${ctx.parsed.y?.toFixed(2)}${props.unit ? ' ' + props.unit : ''}`
+            const suffix = props.unit ? ' ' + props.unit : ''
+            const val = `${ctx.parsed.y?.toFixed(2)}${suffix}`
+            if (!isAggregated.value) return val
+            // Show min/max range for aggregated data
+            const idx = ctx.dataIndex
+            const point = dataBuffer.value[idx]
+            if (point?.minValue != null && point?.maxValue != null) {
+              return `Avg: ${val}  (${point.minValue.toFixed(1)}–${point.maxValue.toFixed(1)}${suffix})`
+            }
+            return val
           },
         },
       },
@@ -486,7 +540,7 @@ const chartOptions = computed(() => {
     <div class="historical-chart__header">
       <div class="historical-chart__range-buttons">
         <button
-          v-for="range in ['1h', '6h', '24h', '7d']"
+          v-for="range in ['1h', '6h', '24h', '7d', '30d']"
           :key="range"
           :class="['historical-chart__range-btn', { 'historical-chart__range-btn--active': selectedRange === range }]"
           @click="selectedRange = range as any"
