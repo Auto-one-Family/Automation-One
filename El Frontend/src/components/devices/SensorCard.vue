@@ -5,12 +5,14 @@
  * Config mode: Name, type, ESP-ID, GPIO, settings hint
  * Monitor mode: Name, live value, quality dot, sparkline, ESP-ID
  */
-import { computed, type Component } from 'vue'
+import { computed, ref, type Component } from 'vue'
 import { Settings, ChevronRight, WifiOff, Clock, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity, CircleDot, TrendingUp, TrendingDown, Minus } from 'lucide-vue-next'
 import type { SensorWithContext } from '@/composables/useZoneGrouping'
 import type { TrendDirection } from '@/utils/trendUtils'
 import { qualityToStatus, getDataFreshness, formatRelativeTime } from '@/utils/formatters'
 import { getSensorLabel, getSensorUnit, getSensorDisplayName, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+import { useDeviceContextStore } from '@/shared/stores/deviceContext.store'
+import { useZoneStore } from '@/shared/stores/zone.store'
 
 /** Default fallback icon for unknown sensor types */
 const DEFAULT_SENSOR_ICON = CircleDot
@@ -139,6 +141,57 @@ const subzoneLabel = computed(() => {
   return 'Keine Subzone'
 })
 
+// Mobile sensor context (6.7)
+const deviceContextStore = useDeviceContextStore()
+const zoneStore = useZoneStore()
+const isChangingContext = ref(false)
+
+const isMobile = computed(() => props.sensor.device_scope === 'mobile')
+
+const activeContext = computed(() => {
+  if (!isMobile.value) return null
+  const configId = (props.sensor as SensorWithContext & { config_id?: string }).config_id
+  if (!configId) return null
+  return deviceContextStore.getContext(configId)
+})
+
+const activeZoneName = computed(() => {
+  const zoneId = activeContext.value?.active_zone_id
+  if (!zoneId) return null
+  const entity = zoneStore.zoneEntities.find(z => z.zone_id === zoneId)
+  return entity?.name ?? zoneId
+})
+
+/** Zones available for context switch (mobile sensors) */
+const availableZones = computed(() => {
+  if (!isMobile.value) return []
+  const assignedZones = props.sensor.assigned_zones
+  if (assignedZones && assignedZones.length > 0) {
+    return zoneStore.activeZones.filter(z => assignedZones.includes(z.zone_id))
+  }
+  return zoneStore.activeZones
+})
+
+async function handleZoneContextChange(event: Event): Promise<void> {
+  const select = event.target as HTMLSelectElement
+  const newZoneId = select.value || null
+  const configId = (props.sensor as SensorWithContext & { config_id?: string }).config_id
+  if (!configId) return
+
+  isChangingContext.value = true
+  try {
+    if (newZoneId) {
+      await deviceContextStore.setContext('sensor', configId, newZoneId)
+    } else {
+      await deviceContextStore.clearContext('sensor', configId)
+    }
+  } catch {
+    // Toast already shown by store
+  } finally {
+    isChangingContext.value = false
+  }
+}
+
 function formatValue(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
   return Number.isInteger(value) ? value.toString() : Number(value).toFixed(1)
@@ -216,6 +269,35 @@ function handleClick() {
             <Clock class="w-3 h-3" /> Zeitpunkt unbekannt
           </span>
         </div>
+      </div>
+      <!-- Mobile sensor context hint (6.7) -->
+      <div
+        v-if="mode === 'monitor' && isMobile && activeContext"
+        class="sensor-card__context-hint"
+      >
+        Aktiv in {{ activeZoneName }} seit {{ formatRelativeTime(activeContext.context_since) }}
+      </div>
+      <!-- Mobile sensor zone switch (6.7) -->
+      <div
+        v-if="mode === 'monitor' && isMobile"
+        class="sensor-card__context-controls"
+      >
+        <select
+          :value="activeContext?.active_zone_id ?? ''"
+          :disabled="isChangingContext"
+          class="sensor-card__zone-select"
+          @change="handleZoneContextChange($event)"
+          @click.stop
+        >
+          <option value="">Keine Zone</option>
+          <option
+            v-for="zone in availableZones"
+            :key="zone.zone_id"
+            :value="zone.zone_id"
+          >
+            {{ zone.name }}
+          </option>
+        </select>
       </div>
     </template>
   </div>
@@ -500,5 +582,41 @@ function handleClick() {
 .sensor-card__scope-badge--mobile {
   background: rgba(251, 146, 60, 0.2);
   color: rgb(251, 146, 60);
+}
+
+/* Mobile sensor context hint (6.7) */
+.sensor-card__context-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px dashed var(--glass-border);
+}
+
+/* Mobile sensor zone switch (6.7) */
+.sensor-card__context-controls {
+  margin-top: var(--space-1);
+}
+
+.sensor-card__zone-select {
+  width: 100%;
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  min-height: 44px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.sensor-card__zone-select:hover {
+  border-color: var(--color-iridescent-1);
+}
+
+.sensor-card__zone-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

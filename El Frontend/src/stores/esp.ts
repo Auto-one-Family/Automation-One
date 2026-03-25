@@ -25,6 +25,7 @@ import type {
   DeviceDiscoveredPayload, DeviceApprovedPayload, DeviceRejectedPayload
 } from '@/types'
 import { useZoneStore } from '@/shared/stores/zone.store'
+import { useDeviceContextStore } from '@/shared/stores/deviceContext.store'
 import { useActuatorStore } from '@/shared/stores/actuator.store'
 import { useSensorStore } from '@/shared/stores/sensor.store'
 import { useGpioStore } from '@/shared/stores/gpio.store'
@@ -1237,6 +1238,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   function handleDeviceContextChanged(message: any): void {
     const zoneStore = useZoneStore()
     zoneStore.handleDeviceContextChanged(message)
+    // Update granular context store immediately (6.7)
+    const deviceContextStore = useDeviceContextStore()
+    if (message?.data) {
+      deviceContextStore.handleContextChanged(message.data)
+    }
     // Refresh devices to get updated context from API (T13-R2)
     fetchAll().catch((e: unknown) => {
       logger.warn('Failed to refresh devices after context change', e)

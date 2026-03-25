@@ -18,6 +18,7 @@ import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import { useSwipeNavigation } from '@/composables/useSwipeNavigation'
 import { useEspStore } from '@/stores/esp'
 import { useZoneStore } from '@/shared/stores/zone.store'
+import { useDeviceContextStore } from '@/shared/stores/deviceContext.store'
 import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
 import { useZoneGrouping } from '@/composables/useZoneGrouping'
 import { useSubzoneResolver } from '@/composables/useSubzoneResolver'
@@ -66,6 +67,7 @@ import type { MockSensor, MockActuator } from '@/types'
 import ViewTabBar from '@/components/common/ViewTabBar.vue'
 import SensorCard from '@/components/devices/SensorCard.vue'
 import ActuatorCard from '@/components/devices/ActuatorCard.vue'
+import SharedSensorRefCard from '@/components/devices/SharedSensorRefCard.vue'
 import DashboardViewer from '@/components/dashboard/DashboardViewer.vue'
 import InlineDashboardPanel from '@/components/dashboard/InlineDashboardPanel.vue'
 import BaseSkeleton from '@/shared/design/primitives/BaseSkeleton.vue'
@@ -77,6 +79,7 @@ const router = useRouter()
 const route = useRoute()
 const espStore = useEspStore()
 const zoneStore = useZoneStore()
+const deviceContextStore = useDeviceContextStore()
 const dashStore = useDashboardStore()
 const logicStore = useLogicStore()
 const { groupDevicesByZone } = useZoneDragDrop()
@@ -833,6 +836,28 @@ watch(detailReadings, (readings) => {
   }
 })
 
+/**
+ * Load device contexts for all mobile/multi_zone sensors (6.7).
+ * Iterates over espStore.devices, finds non-zone_local sensors with config_id,
+ * and loads their active context from the API.
+ */
+async function loadMobileDeviceContexts(): Promise<void> {
+  if (deviceContextStore.isLoaded) return
+  const devices: Array<{ configType: 'sensor' | 'actuator'; configId: string }> = []
+  for (const esp of espStore.devices) {
+    const sensors = (esp.sensors as MockSensor[]) || []
+    for (const sensor of sensors) {
+      const s = sensor as MockSensor & { config_id?: string; device_scope?: string }
+      if (s.device_scope && s.device_scope !== 'zone_local' && s.config_id) {
+        devices.push({ configType: 'sensor', configId: s.config_id })
+      }
+    }
+  }
+  if (devices.length > 0) {
+    await deviceContextStore.loadContextsForDevices(devices)
+  }
+}
+
 // Fetch data on mount + deep-link support
 onMounted(() => {
   if (espStore.devices.length === 0) {
@@ -850,6 +875,9 @@ onMounted(() => {
   // Fetch logic rules + execution history for ActuatorCard context
   logicStore.fetchRules()
   logicStore.loadExecutionHistory()
+
+  // Load device contexts for mobile/multi_zone sensors (6.7)
+  loadMobileDeviceContexts()
 
   // Update breadcrumb zone name
   if (selectedZoneId.value) {
@@ -942,6 +970,8 @@ interface ZoneKPI {
   onlineDevices: number
   /** Total ESP devices in this zone */
   totalDevices: number
+  /** Number of mobile sensors "visiting" this zone from other ESPs (6.7) */
+  mobileGuestCount: number
 }
 
 // ZONE_STALE_THRESHOLD_MS imported from @/utils/formatters
@@ -988,6 +1018,31 @@ const HEALTH_STATUS_CONFIG: Record<ZoneHealthStatus, { label: string; colorClass
 function computeZoneKPIs(): ZoneKPI[] {
   const groups = groupDevicesByZone(espStore.devices)
   const deviceZoneMap = new Map<string, ZoneKPI>()
+
+  // Track mobile sensors that should be counted in their active zone (6.7)
+  // Key: target zone ID, Value: count of mobile guest sensors
+  const mobileGuestCounts = new Map<string, number>()
+  // Track mobile sensors to subtract from their home zone
+  const mobileSensorsAwayFromHome = new Map<string, number>()
+
+  // First pass: identify mobile sensors with active contexts
+  for (const group of groups) {
+    if (group.zoneId === ZONE_UNASSIGNED) continue
+    for (const device of group.devices) {
+      const sensors = (device.sensors as MockSensor[]) || []
+      for (const sensor of sensors) {
+        const s = sensor as MockSensor & { config_id?: string; device_scope?: string }
+        if (s.device_scope === 'mobile' && s.config_id) {
+          const activeZoneId = deviceContextStore.getActiveZoneId(s.config_id)
+          if (activeZoneId && activeZoneId !== group.zoneId) {
+            // This sensor is "visiting" another zone
+            mobileGuestCounts.set(activeZoneId, (mobileGuestCounts.get(activeZoneId) ?? 0) + 1)
+            mobileSensorsAwayFromHome.set(group.zoneId, (mobileSensorsAwayFromHome.get(group.zoneId) ?? 0) + 1)
+          }
+        }
+      }
+    }
+  }
 
   for (const group of groups) {
     if (group.zoneId === ZONE_UNASSIGNED) continue
@@ -1037,6 +1092,12 @@ function computeZoneKPIs(): ZoneKPI[] {
       }
     }
 
+    // Adjust sensor counts for mobile sensors (6.7):
+    // Subtract sensors that moved away, add guests from other zones
+    const awayCount = mobileSensorsAwayFromHome.get(group.zoneId) ?? 0
+    const guestCount = mobileGuestCounts.get(group.zoneId) ?? 0
+    sensorCount = sensorCount - awayCount + guestCount
+
     const aggregation = aggregateZoneSensors(group.devices)
     const totalDevices = group.devices.length
     const health = getZoneHealthStatus(alarmCount, activeSensors, sensorCount, onlineDevices, totalDevices, emergencyStoppedCount)
@@ -1055,17 +1116,19 @@ function computeZoneKPIs(): ZoneKPI[] {
       healthReason: health.reason,
       onlineDevices,
       totalDevices,
+      mobileGuestCount: guestCount,
     })
   }
 
   // Merge empty zones from Zone-API (zones without devices)
   for (const apiZone of allZones.value) {
     if (!deviceZoneMap.has(apiZone.zone_id)) {
+      const guestCount = mobileGuestCounts.get(apiZone.zone_id) ?? 0
       const health = getZoneHealthStatus(0, 0, 0, 0, 0, 0)
       deviceZoneMap.set(apiZone.zone_id, {
         zoneId: apiZone.zone_id,
         zoneName: apiZone.zone_name || apiZone.zone_id,
-        sensorCount: 0,
+        sensorCount: guestCount,
         actuatorCount: 0,
         activeSensors: 0,
         activeActuators: 0,
@@ -1076,6 +1139,7 @@ function computeZoneKPIs(): ZoneKPI[] {
         healthReason: health.reason,
         onlineDevices: 0,
         totalDevices: 0,
+        mobileGuestCount: guestCount,
       })
     }
   }
@@ -1198,7 +1262,7 @@ const zoneDeviceGroup = computed<ZoneDeviceSubzone[]>(() => {
       // Named subzones first (alphabetical), "Zone-weit" (null) at end
       if (a.subzoneId === null) return 1
       if (b.subzoneId === null) return -1
-      return a.subzoneName.localeCompare(b.subzoneName)
+      return (a.subzoneName ?? '').localeCompare(b.subzoneName ?? '')
     })
   }
 
@@ -1235,7 +1299,7 @@ const zoneDeviceGroup = computed<ZoneDeviceSubzone[]>(() => {
   return Array.from(subzoneMap.values()).sort((a, b) => {
     if (a.subzoneId === null) return 1
     if (b.subzoneId === null) return -1
-    return a.subzoneName.localeCompare(b.subzoneName)
+    return (a.subzoneName ?? '').localeCompare(b.subzoneName ?? '')
   })
 })
 
@@ -1251,6 +1315,37 @@ const zoneSensorCount = computed(() =>
 const zoneActuatorCount = computed(() =>
   zoneDeviceGroup.value.reduce((sum, sz) => sum + sz.actuators.length, 0)
 )
+
+/**
+ * Shared sensor references for L2 (6.7):
+ * Multi-zone sensors from OTHER zones whose assigned_zones includes the current zone.
+ */
+const sharedSensorRefs = computed(() => {
+  if (!selectedZoneId.value) return []
+  const zoneId = selectedZoneId.value
+  const result: Array<MockSensor & { _homeZoneName: string; _homeZoneId: string; esp_id: string }> = []
+
+  for (const esp of espStore.devices) {
+    // Only look at ESPs NOT in the current zone (to avoid duplication)
+    if (esp.zone_id === zoneId) continue
+    const sensors = (esp.sensors as MockSensor[]) || []
+    for (const sensor of sensors) {
+      const s = sensor as MockSensor & { device_scope?: string; assigned_zones?: string[] }
+      if (
+        s.device_scope === 'multi_zone' &&
+        s.assigned_zones?.includes(zoneId)
+      ) {
+        result.push({
+          ...sensor,
+          _homeZoneName: esp.zone_name || esp.zone_id || '',
+          _homeZoneId: esp.zone_id || '',
+          esp_id: espStore.getDeviceId(esp),
+        })
+      }
+    }
+  }
+  return result
+})
 
 // Reactive breadcrumb update — when devices load after mount, zone_id → zone_name
 watch(selectedZoneName, (name) => {
@@ -1847,6 +1942,9 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
               }]">
                 {{ zone.actuatorCount }} {{ zone.actuatorCount === 1 ? 'Aktor' : 'Aktoren' }}<template v-if="zone.activeActuators > 0"> · {{ zone.activeActuators }} aktiv</template>
               </span>
+              <span v-if="zone.mobileGuestCount > 0" class="monitor-zone-tile__count monitor-zone-tile__count--mobile">
+                + {{ zone.mobileGuestCount }} mobil
+              </span>
             </div>
             <div class="monitor-zone-tile__activity" :class="{ 'monitor-zone-tile__activity--stale': isZoneStale(zone.lastActivity) }">
               <Clock class="w-3 h-3" />
@@ -2143,6 +2241,22 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
 
       <!-- Regeln für diese Zone (zwischen Aktoren und Dashboards) -->
       <ZoneRulesSection :zone-id="selectedZoneId" />
+
+      <!-- Shared Sensors from other zones (6.7) -->
+      <section v-if="sharedSensorRefs.length > 0" class="monitor-shared-equipment">
+        <h3 class="monitor-section__title">
+          Shared Sensors
+          <span class="monitor-section__count">{{ sharedSensorRefs.length }}</span>
+        </h3>
+        <div class="monitor-shared-equipment__grid">
+          <SharedSensorRefCard
+            v-for="sensor in sharedSensorRefs"
+            :key="sensor.config_id || `${sensor.esp_id}-${sensor.gpio}`"
+            :sensor="sensor"
+            :home-zone-id="sensor._homeZoneId"
+          />
+        </div>
+      </section>
 
       <!-- Zone Dashboards -->
       <section v-if="selectedZoneId" class="monitor-dashboards">
@@ -2905,6 +3019,11 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
   color: var(--color-error);
 }
 
+.monitor-zone-tile__count--mobile {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
 .monitor-zone-tile__activity {
   display: flex;
   align-items: center;
@@ -3405,6 +3524,25 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
 }
 
 /* Zone Dashboards section (L2) */
+/* Shared Equipment section (6.7) */
+.monitor-shared-equipment {
+  margin-bottom: var(--space-10);
+}
+
+.monitor-shared-equipment__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.monitor-section__count {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--color-text-muted);
+  margin-left: var(--space-2);
+}
+
 .monitor-dashboards {
   margin-bottom: var(--space-10);
 }
