@@ -12,6 +12,7 @@ import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { tokens } from '@/utils/cssTokens'
 import type { GaugeThreshold } from '@/components/charts/types'
 import type { MockSensor } from '@/types'
+import { useSensorId } from '@/composables/useSensorId'
 
 interface Props {
   sensorId?: string // "espId:gpio:sensorType"
@@ -37,6 +38,9 @@ const localSensorId = ref(props.sensorId || '')
 // Sync from props when they change (e.g. page reload with saved config)
 watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
 
+// Centralized sensorId parsing
+const { espId: parsedEspId, gpio: parsedGpio, sensorType: parsedSensorType, isValid: sensorIdValid } = useSensorId(localSensorId)
+
 const availableSensors = computed(() => {
   const items: { id: string; label: string }[] = []
   const seen = new Set<string>()
@@ -55,24 +59,19 @@ const availableSensors = computed(() => {
   return items
 })
 
-// Current sensor data — uses localSensorId instead of props.sensorId
+// Current sensor data — uses parsed sensorId parts
 const currentSensor = computed(() => {
-  if (!localSensorId.value) return null
-  const parts = localSensorId.value.split(':')
-  const espId = parts[0]
-  const gpio = parseInt(parts[1])
-  const sensorType = parts[2] || null
-  const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
+  if (!sensorIdValid.value) return null
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === parsedEspId.value)
   if (!device) return null
   return ((device.sensors as MockSensor[]) || []).find(s =>
-    s.gpio === gpio && (!sensorType || s.sensor_type === sensorType)
+    s.gpio === parsedGpio.value && (!parsedSensorType.value || s.sensor_type === parsedSensorType.value)
   ) || null
 })
 
-// Sensor type from 3-part sensorId or from currentSensor
+// Sensor type from parsed sensorId or from currentSensor
 const sensorType = computed(() => {
-  const parts = localSensorId.value.split(':')
-  return parts[2] || currentSensor.value?.sensor_type || null
+  return parsedSensorType.value || currentSensor.value?.sensor_type || null
 })
 
 // SENSOR_TYPE_CONFIG defaults as fallback for min/max

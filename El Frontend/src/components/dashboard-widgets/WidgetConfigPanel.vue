@@ -67,24 +67,86 @@ const availableZones = computed(() => {
   return list.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
 })
 
-// Available sensors (deduplicated by espId:gpio:sensorType)
+// Zone filter for sensor selection — separate from widget zone filter
+const selectedSensorZone = ref<string>('')
+
+// Available sensors (deduplicated by espId:gpio:sensorType), filtered by zone
+interface SensorOption {
+  id: string
+  label: string
+  type: string
+  subzoneName: string | null
+}
+
+interface SensorGroup {
+  name: string
+  sensors: SensorOption[]
+}
+
 const availableSensors = computed(() => {
-  const items: { id: string; label: string; type: string }[] = []
+  const items: SensorOption[] = []
   const seen = new Set<string>()
   for (const device of espStore.devices) {
+    // Zone filter: skip devices not in selected zone
+    if (selectedSensorZone.value && device.zone_id !== selectedSensorZone.value) continue
+
     const deviceId = espStore.getDeviceId(device)
     for (const s of (device.sensors as MockSensor[]) || []) {
       const id = `${deviceId}:${s.gpio}:${s.sensor_type}`
       if (seen.has(id)) continue
       seen.add(id)
+
+      // Resolve subzone name for grouping
+      let subzoneName: string | null = null
+      if (s.subzone_id) {
+        // Try to find subzone name from device subzones
+        const subzones = (device as any).subzones as Array<{ id: string; name: string }> | undefined
+        const sz = subzones?.find((sz: { id: string }) => sz.id === s.subzone_id)
+        subzoneName = sz?.name || s.subzone_id
+      }
+
       items.push({
         id,
         label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
         type: s.sensor_type || '',
+        subzoneName,
       })
     }
   }
   return items
+})
+
+// Sensors grouped by subzone (for optgroup rendering)
+const sensorGroups = computed<SensorGroup[]>(() => {
+  if (!selectedSensorZone.value) {
+    // No zone filter: single flat group
+    return [{ name: '', sensors: availableSensors.value }]
+  }
+
+  const groups = new Map<string, SensorOption[]>()
+  const unassigned: SensorOption[] = []
+
+  for (const s of availableSensors.value) {
+    if (s.subzoneName) {
+      const list = groups.get(s.subzoneName) || []
+      list.push(s)
+      groups.set(s.subzoneName, list)
+    } else {
+      unassigned.push(s)
+    }
+  }
+
+  const result: SensorGroup[] = []
+  // Named subzones first, sorted alphabetically
+  for (const [name, sensors] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    result.push({ name, sensors })
+  }
+  // Unassigned at the end
+  if (unassigned.length > 0) {
+    result.push({ name: 'Nicht zugewiesen', sensors: unassigned })
+  }
+
+  return result
 })
 
 // Available actuators
@@ -174,7 +236,24 @@ const widgetTypeLabels: Record<string, string> = {
         />
       </div>
 
-      <!-- Sensor Selection -->
+      <!-- Zone Filter for Sensor Selection -->
+      <div v-if="hasSensorField" class="widget-config-panel__field">
+        <label class="widget-config-panel__label">Zone</label>
+        <select
+          class="widget-config-panel__select"
+          :value="selectedSensorZone"
+          @change="selectedSensorZone = ($event.target as HTMLSelectElement).value"
+        >
+          <option value="">Alle Zonen</option>
+          <option
+            v-for="z in availableZones"
+            :key="z.id"
+            :value="z.id"
+          >{{ z.name }}</option>
+        </select>
+      </div>
+
+      <!-- Sensor Selection (grouped by subzone when zone is selected) -->
       <div v-if="hasSensorField" class="widget-config-panel__field">
         <label class="widget-config-panel__label">Sensor</label>
         <select
@@ -183,11 +262,28 @@ const widgetTypeLabels: Record<string, string> = {
           @change="handleSensorChange(($event.target as HTMLSelectElement).value)"
         >
           <option value="" disabled>— Sensor wählen —</option>
-          <option
-            v-for="s in availableSensors"
-            :key="s.id"
-            :value="s.id"
-          >{{ s.label }}</option>
+          <template v-if="sensorGroups.length === 1 && !sensorGroups[0].name">
+            <!-- Flat list (no zone selected or single group) -->
+            <option
+              v-for="s in sensorGroups[0].sensors"
+              :key="s.id"
+              :value="s.id"
+            >{{ s.label }}</option>
+          </template>
+          <template v-else>
+            <!-- Grouped by subzone -->
+            <optgroup
+              v-for="group in sensorGroups"
+              :key="group.name"
+              :label="group.name"
+            >
+              <option
+                v-for="s in group.sensors"
+                :key="s.id"
+                :value="s.id"
+              >{{ s.label }}</option>
+            </optgroup>
+          </template>
         </select>
       </div>
 
@@ -231,7 +327,7 @@ const widgetTypeLabels: Record<string, string> = {
         <label class="widget-config-panel__label">Zeitraum</label>
         <div class="widget-config-panel__chips">
           <button
-            v-for="range in ['1h', '6h', '24h', '7d']"
+            v-for="range in ['1h', '6h', '24h', '7d', '30d']"
             :key="range"
             :class="['widget-config-panel__chip', { 'widget-config-panel__chip--active': localConfig.timeRange === range }]"
             @click="updateField('timeRange', range)"

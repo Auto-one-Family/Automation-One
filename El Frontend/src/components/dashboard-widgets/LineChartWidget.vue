@@ -15,6 +15,7 @@ import { useEspStore } from '@/stores/esp'
 import LiveLineChart from '@/components/charts/LiveLineChart.vue'
 import type { ChartDataPoint } from '@/components/charts/LiveLineChart.vue'
 import type { MockSensor } from '@/types'
+import { useSensorId } from '@/composables/useSensorId'
 
 interface Props {
   sensorId?: string   // format: "espId:gpio:sensorType"
@@ -53,6 +54,9 @@ const localSensorId = ref(props.sensorId || '')
 // Sync from props when they change (e.g. page reload with saved config)
 watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
 
+// Centralized sensorId parsing
+const { espId: parsedEspId, gpio: parsedGpio, sensorType: parsedSensorType, isValid: sensorIdValid } = useSensorId(localSensorId)
+
 // All available sensors for selection (deduplicated by espId:gpio:sensorType)
 const availableSensors = computed(() => {
   const items: { id: string; label: string; unit: string }[] = []
@@ -73,19 +77,15 @@ const availableSensors = computed(() => {
   return items
 })
 
-// Current sensor data — uses localSensorId instead of props.sensorId
+// Current sensor data — uses parsed sensorId parts
 const currentSensor = computed(() => {
-  if (!localSensorId.value) return null
-  const parts = localSensorId.value.split(':')
-  const espId = parts[0]
-  const gpio = parseInt(parts[1])
-  const sensorType = parts[2] || null
-  const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
+  if (!sensorIdValid.value) return null
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === parsedEspId.value)
   if (!device) return null
   const sensor = ((device.sensors as MockSensor[]) || []).find(s =>
-    s.gpio === gpio && (!sensorType || s.sensor_type === sensorType)
+    s.gpio === parsedGpio.value && (!parsedSensorType.value || s.sensor_type === parsedSensorType.value)
   )
-  return sensor ? { ...sensor, espId, unit: sensor.unit || '' } : null
+  return sensor ? { ...sensor, espId: parsedEspId.value!, unit: sensor.unit || '' } : null
 })
 
 // Watch on last_read instead of raw_value (Bug 1a fix):

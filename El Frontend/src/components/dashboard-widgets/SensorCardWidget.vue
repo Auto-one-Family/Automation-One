@@ -13,6 +13,7 @@ import { getSensorUnit } from '@/utils/sensorDefaults'
 import { useSparklineCache } from '@/composables/useSparklineCache'
 import { calculateTrend } from '@/utils/trendUtils'
 import type { TrendDirection } from '@/utils/trendUtils'
+import { useSensorId } from '@/composables/useSensorId'
 
 interface Props {
   sensorId?: string // "espId:gpio:sensorType"
@@ -32,6 +33,9 @@ const localSensorId = ref(props.sensorId || '')
 // Sync from props when they change (e.g. page reload with saved config)
 watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
 
+// Centralized sensorId parsing
+const { espId: parsedEspId, gpio: parsedGpio, sensorType: parsedSensorType, isValid: sensorIdValid } = useSensorId(localSensorId)
+
 const availableSensors = computed(() => {
   const items: { id: string; label: string }[] = []
   const seen = new Set<string>()
@@ -50,17 +54,13 @@ const availableSensors = computed(() => {
   return items
 })
 
-// Current sensor data — uses localSensorId instead of props.sensorId
+// Current sensor data — uses parsed sensorId parts
 const currentSensor = computed(() => {
-  if (!localSensorId.value) return null
-  const parts = localSensorId.value.split(':')
-  const espId = parts[0]
-  const gpio = parseInt(parts[1])
-  const sensorType = parts[2] || null
-  const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
+  if (!sensorIdValid.value) return null
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === parsedEspId.value)
   if (!device) return null
   return ((device.sensors as MockSensor[]) || []).find(s =>
-    s.gpio === gpio && (!sensorType || s.sensor_type === sensorType)
+    s.gpio === parsedGpio.value && (!parsedSensorType.value || s.sensor_type === parsedSensorType.value)
   ) || null
 })
 
@@ -75,16 +75,12 @@ const qualityClass = computed(() => {
 // Trend from sparkline cache (F-12) — same pattern as MonitorView
 const trend = computed<TrendDirection | undefined>(() => {
   const sensor = currentSensor.value
-  if (!sensor || !localSensorId.value) return undefined
-  const parts = localSensorId.value.split(':')
-  const espId = parts[0]
-  const gpio = parseInt(parts[1], 10)
-  const sensorType = parts[2] || sensor.sensor_type || null
-  if (!espId || isNaN(gpio)) return undefined
-  const key = getSensorKey(espId, gpio, sensorType ?? undefined)
+  if (!sensor || !sensorIdValid.value) return undefined
+  const sType = parsedSensorType.value || sensor.sensor_type || null
+  const key = getSensorKey(parsedEspId.value!, parsedGpio.value!, sType ?? undefined)
   const points = sparklineCache.value.get(key)
   if (!points || points.length < 5) return undefined
-  return calculateTrend(points, sensorType || undefined).direction
+  return calculateTrend(points, sType || undefined).direction
 })
 
 const TREND_ICONS: Record<TrendDirection, typeof TrendingUp> = {

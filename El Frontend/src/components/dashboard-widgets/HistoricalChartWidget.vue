@@ -10,10 +10,11 @@ import { useEspStore } from '@/stores/esp'
 import HistoricalChart from '@/components/charts/HistoricalChart.vue'
 import { BarChart3 } from 'lucide-vue-next'
 import type { MockSensor } from '@/types'
+import { useSensorId } from '@/composables/useSensorId'
 
 interface Props {
   sensorId?: string // "espId:gpio:sensorType"
-  timeRange?: '1h' | '6h' | '24h' | '7d'
+  timeRange?: '1h' | '6h' | '24h' | '7d' | '30d'
   showThresholds?: boolean
 }
 
@@ -27,13 +28,16 @@ const emit = defineEmits<{
 }>()
 
 const espStore = useEspStore()
-const selectedRange = ref<'1h' | '6h' | '24h' | '7d'>(props.timeRange)
+const selectedRange = ref<'1h' | '6h' | '24h' | '7d' | '30d'>(props.timeRange)
 
 // Local sensorId state — survives render() one-shot props (Bug 1b fix)
 const localSensorId = ref(props.sensorId || '')
 
 // Sync from props when they change (e.g. page reload with saved config)
 watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
+
+// Centralized sensorId parsing
+const { espId: parsedEspId, gpio: parsedGpio, sensorType: parsedSensorType, isValid: sensorIdValid } = useSensorId(localSensorId)
 
 watch(selectedRange, (val) => {
   emit('update:config', { timeRange: val })
@@ -57,20 +61,16 @@ const availableSensors = computed(() => {
   return items
 })
 
-// Parsed sensor data — uses localSensorId instead of props.sensorId
+// Parsed sensor data — uses parsed sensorId parts
 const parsedSensor = computed(() => {
-  if (!localSensorId.value) return null
-  const parts = localSensorId.value.split(':')
-  const espId = parts[0]
-  const gpio = parseInt(parts[1])
-  const sensorType = parts[2] || null
-  const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
+  if (!sensorIdValid.value) return null
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === parsedEspId.value)
   if (!device) return null
   const sensor = ((device.sensors as MockSensor[]) || []).find(s =>
-    s.gpio === gpio && (!sensorType || s.sensor_type === sensorType)
+    s.gpio === parsedGpio.value && (!parsedSensorType.value || s.sensor_type === parsedSensorType.value)
   )
   if (!sensor) return null
-  return { espId, gpio, sensor }
+  return { espId: parsedEspId.value!, gpio: parsedGpio.value!, sensor }
 })
 
 function selectSensor(sensorId: string) {
