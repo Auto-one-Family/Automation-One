@@ -675,6 +675,8 @@ export interface SensorConfigCreate {
   device_scope?: DeviceScope
   /** Zones this sensor is assigned to for multi_zone scope (T13-R2) */
   assigned_zones?: string[] | null
+  /** Subzones this sensor is assigned to (T13-R2) */
+  assigned_subzones?: string[] | null
 }
 
 export interface SensorConfigResponse {
@@ -711,6 +713,8 @@ export interface SensorConfigResponse {
   device_scope: DeviceScope | null
   /** Zones this sensor is assigned to for multi_zone scope (T13-R2) */
   assigned_zones: string[] | null
+  /** Subzones this sensor is assigned to (T13-R2) */
+  assigned_subzones?: string[] | null
   latest_value?: number | null
   latest_quality?: QualityLevel | null
   latest_timestamp?: string | null
@@ -723,16 +727,28 @@ export interface SensorConfigResponse {
 // =============================================================================
 
 /**
- * Single sensor reading from history.
- * Matches server schema: SensorReading (schemas/sensor.py:268-308)
+ * Single sensor reading from history (raw or aggregated bucket).
+ * Matches server schema: SensorReading (schemas/sensor.py:488-555)
  */
 export interface SensorReading {
   timestamp: string
   raw_value: number
   processed_value: number | null
   unit: string | null
-  quality: QualityLevel
+  quality: string
+  sensor_type?: string | null
+  zone_id?: string | null
+  subzone_id?: string | null
+  /** Minimum value in bucket (aggregated only) */
+  min_value?: number | null
+  /** Maximum value in bucket (aggregated only) */
+  max_value?: number | null
+  /** Number of samples in bucket (aggregated only) */
+  sample_count?: number | null
 }
+
+/** Valid resolution values for sensor data aggregation */
+export type SensorDataResolution = 'raw' | '1m' | '5m' | '1h' | '1d'
 
 /**
  * Query parameters for sensor data history.
@@ -744,13 +760,20 @@ export interface SensorDataQuery {
   sensor_type?: string
   start_time?: string  // ISO datetime
   end_time?: string    // ISO datetime
-  quality?: QualityLevel
+  quality?: string
   limit?: number       // 1-1000, default 100
+  /** Time resolution for aggregation (raw, 1m, 5m, 1h, 1d) */
+  resolution?: SensorDataResolution
+  /** Cursor: only return data before this timestamp */
+  before_timestamp?: string
+  zone_id?: string
+  subzone_id?: string
+  sensor_config_id?: string
 }
 
 /**
  * Response from sensor data query.
- * Matches server schema: SensorDataResponse (schemas/sensor.py:362-405)
+ * Matches server schema: SensorDataResponse (schemas/sensor.py:612-656)
  */
 export interface SensorDataResponse {
   success: boolean
@@ -759,10 +782,13 @@ export interface SensorDataResponse {
   sensor_type: string | null
   readings: SensorReading[]
   count: number
-  aggregation: string | null
+  /** Resolution applied (raw, 1m, 5m, 1h, 1d) */
+  resolution: string | null
   time_range: {
     start: string
     end: string
+    has_more?: boolean
+    next_cursor?: string
   } | null
 }
 
@@ -860,6 +886,8 @@ export interface ActuatorConfigCreate {
   device_scope?: DeviceScope
   /** Zones this actuator is assigned to for multi_zone scope (T13-R2) */
   assigned_zones?: string[] | null
+  /** Subzones this actuator is assigned to (T13-R2) */
+  assigned_subzones?: string[] | null
 }
 
 export interface ActuatorConfigResponse {
@@ -885,6 +913,8 @@ export interface ActuatorConfigResponse {
   device_scope: DeviceScope | null
   /** Zones this actuator is assigned to for multi_zone scope (T13-R2) */
   assigned_zones: string[] | null
+  /** Subzones this actuator is assigned to (T13-R2) */
+  assigned_subzones?: string[] | null
   current_value?: number | null
   is_active?: boolean
   last_command_at?: string | null

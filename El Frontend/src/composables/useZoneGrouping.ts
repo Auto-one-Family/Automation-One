@@ -39,6 +39,10 @@ export interface SensorWithContext {
   last_read?: string | null
   device_scope?: 'zone_local' | 'multi_zone' | 'mobile' | null
   assigned_zones?: string[]
+  /** Active zone from device_active_context (mobile sensors) */
+  active_zone_id?: string | null
+  /** When the active context was set (ISO DateTime) */
+  context_since?: string | null
 }
 
 export interface ActuatorWithContext {
@@ -58,6 +62,10 @@ export interface ActuatorWithContext {
   last_command_at?: string | null
   device_scope?: 'zone_local' | 'multi_zone' | 'mobile' | null
   assigned_zones?: string[]
+  /** Active zone from device_active_context (mobile actuators) */
+  active_zone_id?: string | null
+  /** When the active context was set (ISO DateTime) */
+  context_since?: string | null
 }
 
 export interface SubzoneGroup {
