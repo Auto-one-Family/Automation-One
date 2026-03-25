@@ -8,7 +8,7 @@ description: |
   Sensor Library erstellen, Logic Engine erweitern, Error-Code definieren.
   NOT FOR: Log-Analyse (server-debug), ESP32-Code (esp32-dev), Frontend (frontend-dev), DB-Schema-Inspektion (db-inspector).
   Keywords: handler, endpoint, repository, service, schema, model, sensor library, logic, error code, implementieren, server, python, fastapi
-model: sonnet
+model: opus
 color: green
 tools: ["Read", "Grep", "Glob", "Bash", "Write", "Edit"]
 skills: ["server-development"]

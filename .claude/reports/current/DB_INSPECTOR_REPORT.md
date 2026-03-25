@@ -1,14 +1,14 @@
 # DB Inspector Report
 
-**Erstellt:** 2026-03-11 (Session)
-**Modus:** B – Spezifisch: PostgreSQL-Erreichbarkeit + Logic Rule TimmsRegen
-**Quellen:** automationone-postgres, cross_esp_logic, logic_execution_history, sensor_data, postgres-exporter Logs
+**Erstellt:** 2026-03-25
+**Modus:** B (Spezifisch: "actuator_states Konsistenz nach INV-1c Refactoring + allgemeiner DB-Status")
+**Quellen:** esp_devices, sensor_configs, sensor_data, actuator_configs, actuator_states, actuator_history, esp_heartbeat_logs, audit_logs, zones, subzone_configs, pg_stat_activity, pg_stat_user_tables, alembic_version
 
 ---
 
 ## 1. Zusammenfassung
 
-**PostgreSQL:** Die Datenbank ist aktuell erreichbar und funktionsfähig. Der Alert „PostgreSQL nicht erreichbar“ (postgres-exporter pg_up == 0) war **echt** – der postgres-exporter hatte Passwort-Auth-Fehler und zeitweise „connection refused“ während eines Postgres-Neustarts. Die Logic Rule **TimmsRegen** existiert in der DB, ist aktiv und wird korrekt ausgeführt; die Execution History zeigt konsistente Trigger bei Luftfeuchte unter 63 %.
+Die Datenbank ist erreichbar und migriert auf Head (`add_sensor_data_dedup`). Der kritischste Befund ist, dass beide `actuator_states`-Eintraege noch den alten State `idle` tragen — nach dem INV-1c Refactoring haetten diese `off` (oder `unknown`) sein sollen. Aktive Sensordaten (SHT31, MOCK_T18V6LOGIC) laufen heute ein. Sieben veraltete Mock-Devices belegen Tabellenplatz, sind aber als `deleted` oder `offline` markiert und unkritisch. Kein Datenverlust, keine Orphan-Records.
 
 ---
 
@@ -16,95 +16,152 @@
 
 | Quelle | Status | Bemerkung |
 |--------|--------|-----------|
-| automationone-postgres | OK | pg_isready: accepting connections |
-| pg_isready | OK | Verbindung möglich |
-| postgres-exporter | FEHLER | Password auth failed, zeitweise connection refused |
-| cross_esp_logic (TimmsRegen) | OK | Regel vorhanden, enabled=true |
-| logic_execution_history | OK | 10+ Einträge für TimmsRegen, alle success |
-| sensor_data | OK | SHT31 Humidity fließt (33–92 %RH) |
+| automationone-postgres (Container) | OK | Up 33 min, healthy |
+| god_kaiser_db (psql-Verbindung) | OK | Verbindung erfolgreich |
+| alembic_version | OK | `add_sensor_data_dedup` (HEAD) |
+| esp_devices | OK | 10 Eintraege (2 real, 8 mock) |
+| sensor_data | OK | 5094 Eintraege, heute aktiv |
+| actuator_states | WARNUNG | `idle` State existiert noch (sollte `off`/`unknown` sein) |
+| actuator_history | OK | 291 Eintraege, command_types korrekt (ON/OFF) |
+| esp_heartbeat_logs | INFO | 1271 Eintraege, letzte von 2026-03-12 |
+| sensor_configs | OK | 10 Eintraege, keine Orphans |
+| actuator_configs | OK | 2 Eintraege, keine Orphans |
 
 ---
 
 ## 3. Befunde
 
-### 3.1 PostgreSQL-Container
+### 3.1 actuator_states: Veraltete `idle`-States (INV-1c Fokus)
 
-- **Schwere:** Niedrig (aktuell behoben)
-- **Detail:** Container `automationone-postgres` läuft seit ca. 12 Minuten (healthy). Postgres war offenbar kürzlich neu gestartet.
-- **Evidenz:** `docker ps` → `Up 12 minutes (healthy)`, `pg_isready` → accepting connections
+- **Schwere:** Mittel
+- **Detail:** Beide Eintraege in `actuator_states` tragen `state = 'idle'`. Nach dem INV-1c Refactoring sollten die gueltigen States `on`, `off`, `pwm` oder `unknown` sein. `idle` ist ein Pre-Refactoring-Wert und koennte im Frontend oder in API-Responses zu Inkonsistenzen fuehren, wenn der neue Code nur neue State-Werte erwartet.
+- **Evidenz:**
+  ```
+  gpio | actuator_type | state | last_command    | data_source  | last_command_timestamp
+  27   | relay         | idle  | (null)          | production   | 2026-03-11 11:58:18+00
+  27   | pump          | idle  | EMERGENCY_STOP  | mock         | 2026-03-11 07:58:07+00
+  ```
+- **Bewertung:** Die actuator_history zeigt korrekte `command_type`-Werte (`ON`, `OFF`, `EMERGENCY_STOP`). Das Problem liegt nur in den persistierten `state`-Werten in `actuator_states`, nicht in der History.
 
-### 3.2 postgres-exporter (pg_up == 0) — **BEHOBEN**
-
-- **Schwere:** Hoch (konfigurativ) → **Fix angewendet**
-- **Detail:** postgres-exporter meldete `pg_up == 0` wegen:
-  1. **Password authentication failed** – DB-Passwort stimmte nicht mit `.env` überein (DB war mit anderem Passwort initialisiert)
-  2. **connection refused** während Postgres-Neustart (10:42 UTC)
-  3. **no such host "postgres"** – kurzzeitige DNS-Auflösungsprobleme
-- **Evidenz:** `docker logs automationone-postgres-exporter --tail 20` (vor Fix)
-- **Fix angewendet:** `ALTER USER god_kaiser WITH PASSWORD 'password';` ausgeführt (entspricht `.env`), postgres-exporter neu gestartet. Logs zeigen nun: `Semantic version changed server=postgres:5432 from=0.0.0 to=16.13.0` → Verbindung OK.
-
-### 3.3 Logic Rule TimmsRegen
-
-- **Schwere:** Keine (Regel korrekt)
-- **Detail:** Regel in `cross_esp_logic`:
-  - `rule_name`: TimmsRegen
-  - `enabled`: true
-  - **Hysteresis:** activate_below 63 %, deactivate_above 70 % (sht31_humidity, ESP_472204, GPIO 0)
-  - **Action:** Aktor ON (ESP_472204, GPIO 27)
-  - `last_triggered`: 2026-03-11 10:53:17 UTC
-- **Evidenz:** DB-Abfrage bestätigt Regel und Konfiguration.
-
-### 3.4 Execution History & Sensor-Daten
+### 3.2 Keine alten `active`-States gefunden
 
 - **Schwere:** Keine
-- **Detail:** `logic_execution_history` zeigt 10+ erfolgreiche Ausführungen mit Luftfeuchte-Werten 32–45 % (alle unter 63 % → korrekt aktiviert). `sensor_data` liefert aktuelle Werte (33.8, 34.5, 40.6, 91.9 %RH).
-- **Evidenz:** Letzte Trigger: value 34.5, 86.6, 34.7, 37.6, 40.6 %RH; alle `success=true`.
+- **Detail:** Es gibt keine `state = 'active'` Eintraege. Nur `idle` ist als veralteter State vorhanden (kein `active`).
+- **Evidenz:** `SELECT DISTINCT state FROM actuator_states` gibt nur `idle` zurueck.
 
-### 3.5 Alert-Text „Luftfeuchte unter 50“
+### 3.3 Stale Mock-Devices (7 Stueck)
 
-- **Schwere:** Niedrig (Display/Redaktion)
-- **Detail:** Die Regel schaltet bei **Luftfeuchte unter 63 %** (activate_below: 63). Der Alert-Text „Luftfeuchte unter 50“ passt nicht exakt zur DB-Konfiguration – möglicherweise vereinfachte Anzeige oder anderer Alert-Quelltext (z. B. Grafana).
-- **Empfehlung:** Alert-Template prüfen und ggf. auf „unter 63 %“ oder dynamischen Schwellwert anpassen.
+- **Schwere:** Niedrig
+- **Detail:** 7 Mock-Devices sind seit dem 2026-03-11 inaktiv (>14 Tage). 6 davon haben `status = 'deleted'`, einer hat `status = 'offline'`. Die geloeschten Devices belegen noch Tabelleneintraege.
+- **Evidenz:**
+  ```
+  MOCK_HYSTEKVZEGKQ | deleted | 2026-03-11
+  MOCK_RULEEL660ZL3 | deleted | 2026-03-11
+  MOCK_SEQ89ZLJWE8  | deleted | 2026-03-11
+  MOCK_SEQ7M4BQYYO  | deleted | 2026-03-11
+  MOCK_RULE0DR561OK | deleted | 2026-03-11
+  MOCK_HYSTRI8BX55Z | deleted | 2026-03-11
+  MOCK_24557EC6     | offline | 2026-03-11
+  ```
+- **Hinweis:** Der `orphaned_mock_cleanup`-Job im MaintenanceService wuerde diese bereinigen, ist aber laut SKILL.md standardmaessig deaktiviert.
+
+### 3.4 Aktive Sensor-Daten heute
+
+- **Schwere:** Keine (positiver Befund)
+- **Detail:** 122 sensor_data-Eintraege heute (2026-03-25), beide vom selben ESP (`c24e4fe9` = MOCK_T18V6LOGIC, `status = online`). Sensortypen: `sht31_temp` und `sht31_humidity`. Neueste Messung: 2026-03-25 09:33:32 UTC.
+
+### 3.5 Heartbeat-Logs: Keine neuen Eintraege seit 2026-03-12
+
+- **Schwere:** Niedrig (Information)
+- **Detail:** Die 1271 Heartbeat-Logs enden am 2026-03-12. Seither werden keine neuen Heartbeats gespeichert. Das koennte bedeuten, dass der Heartbeat-Handler des aktiven Mock-ESPs keine Logs mehr schreibt, oder dass der entsprechende MQTT-Handler nach einem Neustart nicht mehr aktiv ist.
+- **Evidenz:** `MAX(timestamp) = 2026-03-12 10:50:11` bei 1271 Gesamteintraegen, `COUNT(letzte 24h) = 0`.
+
+### 3.6 Tabellen-Bloat: Einige Tabellen benoetigen VACUUM
+
+- **Schwere:** Niedrig
+- **Detail:** Mehrere Tabellen haben ein unguenstiges dead_tup-Verhaeltnis. PostgreSQL erledigt autovacuum automatisch, aber bei kleinen Tabellen mit vielen Updates sind die Prozentwerte hoch.
+- **Evidenz:**
+  ```
+  cross_esp_logic:  40 tote Zeilen bei 1 live  -> 4000% dead_pct
+  kaiser_registry:  16 tote Zeilen bei 0 live  -> 1600%
+  esp_devices:      22 tote Zeilen bei 10 live -> 220%
+  sensor_configs:   12 tote Zeilen bei 10 live -> 120%
+  ```
+- **Hinweis:** Autovacuum-Schwellenwerte beziehen sich auf absolute Zahlen — bei solch kleinen Tabellen (< 100 Zeilen) ist der prozentuale Wert optisch hoch, aber kein echtes Performance-Problem.
+
+### 3.7 Keine Orphaned Records
+
+- **Schwere:** Keine (positiver Befund)
+- **Detail:** Alle sensor_configs und actuator_configs haben gueltige FK-Referenzen zu esp_devices. Kein sensor_data-Eintrag hat `esp_id = NULL`.
+
+### 3.8 Migration auf HEAD
+
+- **Schwere:** Keine (positiver Befund)
+- **Detail:** `alembic_version = add_sensor_data_dedup` — entspricht dem dokumentierten HEAD im SKILL.md.
 
 ---
 
-## 4. Extended Checks (eigenständig durchgeführt)
+## 4. Tabellen-Uebersicht
+
+| Tabelle | Eintraege | Groesse |
+|---------|-----------|---------|
+| sensor_data | 5094 | 3576 kB |
+| esp_heartbeat_logs | 1271 | 1256 kB |
+| audit_logs | 393 | 840 kB |
+| esp_devices | 10 | 560 kB |
+| actuator_history | 291 | 480 kB |
+| sensor_configs | 10 | 384 kB |
+| actuator_states | 2 | 152 kB |
+| subzone_configs | 1 | 128 kB |
+| actuator_configs | 2 | 96 kB |
+| zones | 2 | 64 kB |
+| cross_esp_logic | 1 | 80 kB |
+| user_accounts | 1 | 64 kB |
+| **Gesamt DB** | | **17 MB** |
+
+---
+
+## 5. Extended Checks (eigenstaendig durchgefuehrt)
 
 | Check | Ergebnis |
 |-------|----------|
-| pg_isready | OK – accepting connections |
-| docker ps postgres | OK – Up 12 min, healthy |
-| cross_esp_logic TimmsRegen | OK – Regel vorhanden, enabled |
-| logic_execution_history | OK – 10+ Einträge, alle success |
-| sensor_data sht31_humidity | OK – Daten fließen |
-| esp_devices ESP_472204 | OK – online, last_seen 10:54:48 |
-| postgres-exporter logs | FEHLER – password auth failed |
+| Container `automationone-postgres` | Up 33 min, healthy |
+| DB-Groesse gesamt | 17 MB |
+| Alembic version_num | `add_sensor_data_dedup` (HEAD korrekt) |
+| Aktive Connections | 1 active, 10 idle (normal fuer dev) |
+| Orphaned sensor_configs | 0 |
+| Orphaned actuator_configs | 0 |
+| sensor_data ohne ESP-Referenz (esp_id = NULL) | 0 |
+| Heartbeat-Logs letzte 24h | 0 (kein neuer Heartbeat seit 2026-03-12) |
 
 ---
 
-## 5. Bewertung & Empfehlung
+## 6. Bewertung & Empfehlung
 
-- **Root Cause pg_up == 0:** DB-Passwort stimmte nicht mit `.env` überein (PostgreSQL wurde mit anderem Passwort initialisiert).
-- **Durchgeführte Schritte:**
-  1. `ALTER USER god_kaiser WITH PASSWORD 'password';` ausgeführt (Wert aus `.env`).
-  2. `docker compose restart postgres-exporter` – Verbindung funktioniert, `pg_up 1`.
-- **Offen:** Alert-Text „Luftfeuchte unter 50“ ggf. in Grafana/Notification-Template auf „unter 63 %“ oder dynamisch anpassen.
+### Root Cause (actuator_states idle-Problem)
 
----
+Die `idle`-States in `actuator_states` stammen aus der Zeit vor dem INV-1c Refactoring und wurden nie durch einen DB-Migration-Step auf `off` umgeschrieben. Das neue Server-Modell schreibt korrekte Werte bei neuen Commands, aber die bestehenden Zeilen wurden nicht migriert.
 
-## 6. Referenz-Queries (für spätere Prüfungen)
+### Naechste Schritte
 
-```sql
--- TimmsRegen Regel
-SELECT rule_name, enabled, trigger_conditions::text, last_triggered
-FROM cross_esp_logic WHERE rule_name = 'TimmsRegen';
+1. **actuator_states bereinigen (Prioritaet: Mittel — erfordert Bestaetigung)**
+   Pruefe ob der neue Code `idle` als gueltigen State akzeptiert oder ob es zu API-Fehlern fuehrt.
+   Vorschau-Query (SELECT vor eventuellem UPDATE):
+   ```sql
+   SELECT id, state, actuator_type, gpio, data_source
+   FROM actuator_states WHERE state = 'idle';
+   ```
+   Bei Bestaetigung: `UPDATE actuator_states SET state = 'off' WHERE state = 'idle';`
 
--- Letzte Logic-Executions
-SELECT timestamp, trigger_data->>'value' as humidity, success
-FROM logic_execution_history
-WHERE logic_rule_id = '51343d60-d49c-4496-85b7-ce076e176408'
-ORDER BY timestamp DESC LIMIT 5;
+2. **Stale Mock-Devices (Prioritaet: Niedrig — erfordert Bestaetigung)**
+   Die 6 `deleted` Mocks koennen bei Bestaetigung entfernt werden (CASCADE loescht sensor_configs etc. automatisch).
+   ```sql
+   SELECT device_id, status, last_seen FROM esp_devices
+   WHERE device_id LIKE 'MOCK_%' AND status = 'deleted';
+   ```
 
--- Aktive DB-Connections
-SELECT count(*) FROM pg_stat_activity WHERE datname = 'god_kaiser_db';
-```
+3. **Heartbeat-Logging pruefen (Prioritaet: Info)**
+   Untersuchen warum MOCK_T18V6LOGIC seit dem 2026-03-12 keine Heartbeat-Logs mehr erzeugt, obwohl Sensor-Daten aktiv einlaufen. Relevant fuer den server-debug oder mqtt-debug Agent.
+
+4. **autovacuum abwarten**
+   Die Bloat-Werte bei `cross_esp_logic` und `kaiser_registry` sind kein akutes Problem — autovacuum wird diese bereinigen.

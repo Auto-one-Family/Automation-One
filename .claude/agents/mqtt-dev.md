@@ -7,7 +7,7 @@ description: |
   Subscriber erweitern, Payload-Schema definieren, QoS festlegen.
   NOT FOR: Traffic-Analyse (mqtt-debug), Server-Services (server-dev), ESP32-Firmware (esp32-dev).
   Keywords: topic, handler, publisher, subscriber, payload, qos, mqtt, implementieren, protokoll
-model: sonnet
+model: opus
 color: green
 tools: ["Read", "Grep", "Glob", "Bash", "Write", "Edit"]
 skills: ["mqtt-development"]

@@ -8,7 +8,7 @@ description: |
   Pinia Action hinzufuegen, Filter implementieren, Chart erstellen.
   NOT FOR: Build-Error-Analyse (frontend-debug), Server-Code (server-dev), MQTT-Protokoll (mqtt-dev).
   Keywords: komponente, component, composable, store, pinia, api, view, websocket, type, vue, typescript, tailwind, chart, drag drop, implementieren, frontend
-model: sonnet
+model: opus
 color: green
 tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
 skills: ["frontend-development"]
