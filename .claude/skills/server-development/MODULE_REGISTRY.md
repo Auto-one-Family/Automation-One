@@ -679,7 +679,7 @@ CIRCUIT_BREAKER_MQTT_RECOVERY_TIMEOUT=30
 |-----------|-------|-----------------|
 | ESPRepository | ESPDevice | `get_by_device_id(include_deleted)`, `soft_delete()`, `get_running_mocks()`, `get_online()`, `rebuild_simulation_config(device, sensor_configs)` |
 | SensorRepository | SensorConfig | `get_by_esp_gpio_and_type()`, `get_by_esp_gpio_type_and_i2c()`, `get_by_esp_gpio_type_and_onewire()`, `get_all_by_i2c_address()` |
-| ActuatorRepository | ActuatorConfig | `get_by_esp_and_gpio()`, `get_state()`, `log_command()` |
+| ActuatorRepository | ActuatorConfig | `get_by_esp_and_gpio()`, `get_state()`, `log_command()`, `get_history(esp_id, gpio, limit, data_source, start_time, end_time)`, `reset_states_for_device()`, `clear_emergency_states()` |
 | LogicRepository | CrossESPLogic | `get_rules_by_trigger_sensor()`, `get_enabled_rules()` |
 | AuditLogRepository | AuditLog | `search()`, `get_stats()`, `cleanup_old()` |
 | UserRepository | User | `get_by_username()`, `get_by_email()`, `authenticate()` |

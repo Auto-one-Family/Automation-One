@@ -55,7 +55,7 @@
 | **emergency_stopped** | DB + RAM | DB: `actuator_states.state == 'emergency_stop'`; RAM: `SafetyService._emergency_stop_active` | `actuator.emergency_stopped` (Store + Monitor-Daten) |
 | Config (Name, GPIO, Limits) | DB | `actuator_configs` | Enrichment aus `actuatorsApi.list()` → device.actuators[] |
 
-**Werte `actuator_states.state`:** `idle`, `active`, `error`, `emergency_stop`.
+**Werte `actuator_states.state`:** `on`, `off`, `pwm`, `error`, `emergency_stop`, `unknown`.
 
 ### 2.2 Wer schreibt actuator_states?
 
@@ -63,8 +63,8 @@
 |--------|--------|--------|
 | MQTT Aktor-Status | `mqtt/handlers/actuator_handler.py` | Payload state (on/off/pwm/error) → `update_state(..., state=...)` (kein `emergency_stop` hier; Validator erlaubt nur on/off/pwm/error/unknown) |
 | MQTT Aktor-Alert | `mqtt/handlers/actuator_alert_handler.py` | Bei emergency_stop/runtime_protection/safety_violation → `update_state(..., state="off", ...)` (nicht `emergency_stop`) |
-| Clear Emergency (Fix) | `api/v1/actuators.py` (clear_emergency) | `actuator_repo.clear_emergency_states(esp_ids)` → alle `emergency_stop` → `idle` |
-| Startup | `main.py` (Lifespan) | `clear_all_emergency_states_on_startup()` → alle `emergency_stop` → `idle` |
+| Clear Emergency (Fix) | `api/v1/actuators.py` (clear_emergency) | `actuator_repo.clear_emergency_states(esp_ids)` → alle `emergency_stop` → `off` |
+| Startup | `main.py` (Lifespan) | `clear_all_emergency_states_on_startup()` → alle `emergency_stop` → `off` |
 
 **Wichtig:** „Not-Aus“ in der UI kommt aus **actuator_states.state == 'emergency_stop'** (Monitor-Daten) bzw. aus WebSocket (Store). SafetyService ist nur RAM – blockiert Befehle, liefert aber keine Anzeige nach Neustart.
 

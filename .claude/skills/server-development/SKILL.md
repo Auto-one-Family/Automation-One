@@ -206,7 +206,6 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | webhooks | /v1/webhooks | 1 | Public (Grafana) |
 | ai | /v1/ai | PLANNED | - |
 | kaiser | /v1/kaiser | PLANNED | - |
-| library | /v1/library | PLANNED | - |
 
 ### Neuen Endpoint hinzufügen
 

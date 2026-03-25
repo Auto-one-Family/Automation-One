@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 3.6 | **Aktualisiert:** 2026-03-10
+> **Version:** 3.7 | **Aktualisiert:** 2026-03-24
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
@@ -63,7 +63,7 @@ allowed-tools: Read
 | `/sensors/{sensor_id}` | GET | JWT | Sensor Details |
 | `/sensors` | POST | JWT | Sensor erstellen |
 | `/sensors/{esp_id}/{config_id}` | DELETE | Operator | Sensor-Config löschen (by UUID, Sensordaten bleiben erhalten) |
-| `/sensors/data` | GET | JWT | Query Sensor-Daten (historisch, filterbar nach zone_id, subzone_id) |
+| `/sensors/data` | GET | JWT | Query Sensor-Daten (historisch, filterbar nach zone_id, subzone_id, resolution, before_timestamp) |
 | `/sensors/{sensor_id}/data` | GET | JWT | Sensor-Daten (historisch) |
 | `/sensors/{sensor_id}/stats` | GET | JWT | Sensor-Statistiken. Query: `sensor_type` (Multi-Value-Filter) |
 | `/sensors/types` | GET | JWT | Alle Sensor-Typen |
@@ -85,7 +85,7 @@ allowed-tools: Read
 | `/actuators/{actuator_id}` | GET | JWT | Actuator Details |
 | `/actuators/{actuator_id}/command` | POST | JWT | Actuator steuern |
 | `/actuators/{actuator_id}/state` | POST | JWT | Actuator-State setzen |
-| `/actuators/{actuator_id}/history` | GET | JWT | Actuator-History |
+| `/actuators/{actuator_id}/history` | GET | JWT | Actuator-History (Query: `start_time`, `end_time`, `limit`) |
 | `/actuators/emergency-stop` | POST | JWT | Global Emergency-Stop |
 | `/actuators/clear_emergency` | POST | Operator | Not-Aus aufheben (MQTT clear_emergency an ESP(s)) |
 | `/actuators/{actuator_id}` | DELETE | JWT | Actuator löschen |
@@ -99,7 +99,7 @@ allowed-tools: Read
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
-| `/zone/zones` | GET | JWT | Alle Zonen aus zones-Tabelle (Single Source of Truth), enriched mit Device/Sensor/Actuator Counts. Query: `?status=active\|archived\|deleted` |
+| `/zone/zones` | GET | JWT | **DEPRECATED** — Use GET /zones/ instead. Alle Zonen aus zones-Tabelle, enriched mit Device/Sensor/Actuator Counts. Query: `?status=active\|archived\|deleted` |
 | `/zone/devices/{esp_id}/assign` | POST | Operator | ESP einer Zone zuweisen (MQTT). T13-R1: Zone muss existieren + aktiv sein. `subzone_strategy`: transfer/copy/reset. Response: `ack_received`, `warning` (T14-Fix-B) |
 | `/zone/devices/{esp_id}/zone` | DELETE | Operator | Zone-Zuweisung entfernen |
 | `/zone/devices/{esp_id}` | GET | JWT | Zone-Info für ESP |
@@ -116,8 +116,8 @@ allowed-tools: Read
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
 | `/zones` | POST | Operator | Zone erstellen (zone_id, name, description) |
-| `/zones` | GET | Operator | Alle Zonen listen. Query: `?status=active\|archived\|deleted` (Default: non-deleted) |
-| `/zones/{zone_id}` | GET | Operator | Zone nach zone_id abrufen |
+| `/zones` | GET | JWT | Alle Zonen listen (enriched mit Device/Sensor/Actuator Counts). Query: `?status=active\|archived\|deleted` (Default: non-deleted) |
+| `/zones/{zone_id}` | GET | JWT | Zone nach zone_id abrufen |
 | `/zones/{zone_id}` | PUT | Operator | Zone aktualisieren (name, description) |
 | `/zones/{zone_id}` | PATCH | Operator | Partielle Zone-Aktualisierung (nur übergebene Felder). Synct `esp_devices.zone_name` bei Umbenennung |
 | `/zones/{zone_id}/archive` | POST | Operator | Zone archivieren (Devices müssen vorher entfernt werden, Subzones werden deaktiviert) |
@@ -194,14 +194,14 @@ allowed-tools: Read
 | `/logic/rules/{rule_id}/test` | POST | Operator | Rule testen |
 | `/logic/execution_history` | GET | JWT | Execution History |
 
-### Sequences (`/sequences`) - 4 Endpoints
+### Sequences (`/v1/sequences`) - 4 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
-| `/sequences` | GET | JWT | Alle Sequences |
-| `/sequences/stats` | GET | JWT | Sequence-Statistiken |
-| `/sequences/{sequence_id}` | GET | JWT | Sequence Details |
-| `/sequences/{sequence_id}/cancel` | POST | JWT | Sequence abbrechen |
+| `/v1/sequences` | GET | JWT | Alle Sequences |
+| `/v1/sequences/stats` | GET | JWT | Sequence-Statistiken |
+| `/v1/sequences/{sequence_id}` | GET | JWT | Sequence Details |
+| `/v1/sequences/{sequence_id}/cancel` | POST | JWT | Sequence abbrechen |
 
 ### Sensor Type Defaults (`/sensor-type-defaults`) - 6 Endpoints
 
@@ -812,6 +812,8 @@ Query historische Sensor-Daten (global, filterbar). Phase 0.1: Response enthält
 | `zone_id` | string | Filter nach Zone (Phase 0.1) |
 | `subzone_id` | string | Filter nach Subzone (Phase 0.1) |
 | `limit` | int | Max. Anzahl (1-1000, default 100) |
+| `resolution` | string | Aggregation: `raw` (default), `1m`, `5m`, `1h`, `1d` |
+| `before_timestamp` | datetime | Cursor-Pagination: nur Daten vor diesem Zeitpunkt |
 
 **Response 200 (SensorDataResponse):**
 ```json
@@ -829,12 +831,15 @@ Query historische Sensor-Daten (global, filterbar). Phase 0.1: Response enthält
       "quality": "good",
       "sensor_type": "ph",
       "zone_id": "greenhouse",
-      "subzone_id": "zone_a"
+      "subzone_id": "zone_a",
+      "min_value": 6.5,
+      "max_value": 7.1,
+      "sample_count": 12
     }
   ],
   "count": 1,
-  "aggregation": null,
-  "time_range": {"start": "...", "end": "..."}
+  "resolution": "1h",
+  "time_range": {"start": "...", "end": "...", "has_more": true, "next_cursor": "2026-02-01T09:00:00Z"}
 }
 ```
 
@@ -853,7 +858,7 @@ Historische Sensor-Daten.
 | `start_time` | datetime | Startzeit (ISO) |
 | `end_time` | datetime | Endzeit (ISO) |
 | `limit` | int | Max. Anzahl Einträge |
-| `aggregation` | string | none, hour, day |
+| `resolution` | string | `raw` (default), `1m`, `5m`, `1h`, `1d` |
 
 **Response 200:**
 ```json
@@ -1621,5 +1626,5 @@ Detaillierter Health Check mit Komponenten-Status (JWT erforderlich, ActiveUser)
 | websocket | `websocket/realtime.py` | 1 |
 | ai | `ai.py` | PLANNED (God Layer AI) |
 | kaiser | `kaiser.py` | IMPLEMENTED (Kaiser Relay Node, Hierarchy) |
-| library | `library.py` | PLANNED (OTA Sensor Library) |
+| library | — | REMOVED (INV-1b, war nie implementiert) |
 | device_context | `device_context.py` | 3 (T13-R2 Multi-Zone Device Scope) |
