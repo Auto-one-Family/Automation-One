@@ -399,7 +399,9 @@ class TestSensorRepositoryData:
 
     async def test_get_latest_data_success(self, sensor_repo: SensorRepository, sample_esp_device):
         """Test retrieval of latest sensor data."""
-        # Save multiple data points
+        # Save multiple data points with explicit timestamps to avoid
+        # unique constraint collisions (esp_id, gpio, sensor_type, timestamp)
+        base_ts = datetime.now(timezone.utc)
         for i in range(5):
             await sensor_repo.save_data(
                 esp_id=sample_esp_device.id,
@@ -407,6 +409,7 @@ class TestSensorRepositoryData:
                 sensor_type="temperature",
                 raw_value=2400.0 + i * 10,
                 processed_value=23.0 + i * 0.1,
+                timestamp=base_ts + timedelta(seconds=i),
             )
 
         latest = await sensor_repo.get_latest_data(sample_esp_device.id, 34, limit=3)
