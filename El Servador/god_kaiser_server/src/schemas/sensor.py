@@ -63,6 +63,7 @@ QUALITY_LEVELS = [
     "suspect",
     "critical",
     "error",
+    "aggregated",
     "unknown",
 ]
 
