@@ -277,7 +277,7 @@ const devicesBySubzone = computed<SubzoneGroup[]>(() => {
   groups.sort((a, b) => {
     if (a.subzoneId === null) return 1
     if (b.subzoneId === null) return -1
-    return a.subzoneName.localeCompare(b.subzoneName)
+    return (a.subzoneName ?? '').localeCompare(b.subzoneName ?? '')
   })
 
   return groups

@@ -318,7 +318,7 @@ const zoneGroups = computed(() => {
     if (aEmpty && !bEmpty) return 1
     if (!aEmpty && bEmpty) return -1
     // Alpha within same category
-    return a.zoneName.localeCompare(b.zoneName)
+    return (a.zoneName ?? '').localeCompare(b.zoneName ?? '')
   })
 
   return zones
@@ -360,7 +360,7 @@ const activeZoneEntries = computed((): ZoneDisplayEntry[] => {
     const group = deviceGroupMap.get(ze.zone_id)
     entries.push({
       zoneId: ze.zone_id,
-      zoneName: ze.name,
+      zoneName: ze.name ?? ze.zone_id,
       devices: group?.devices ?? [],
       zoneEntity: ze,
       isArchived: false,
@@ -373,7 +373,7 @@ const activeZoneEntries = computed((): ZoneDisplayEntry[] => {
     if (!seenZoneIds.has(g.zoneId)) {
       entries.push({
         zoneId: g.zoneId,
-        zoneName: g.zoneName,
+        zoneName: g.zoneName ?? g.zoneId,
         devices: g.devices,
         zoneEntity: undefined,
         isArchived: false,
@@ -397,7 +397,7 @@ const activeZoneEntries = computed((): ZoneDisplayEntry[] => {
     if (!aHasProblems && bHasProblems) return 1
     if (aEmpty && !bEmpty) return 1
     if (!aEmpty && bEmpty) return -1
-    return a.zoneName.localeCompare(b.zoneName)
+    return (a.zoneName ?? '').localeCompare(b.zoneName ?? '')
   })
 
   return entries
@@ -409,7 +409,7 @@ const archivedZoneEntries = computed((): ZoneDisplayEntry[] => {
     const devices = filteredEsps.value.filter(d => d.zone_id === ze.zone_id)
     return {
       zoneId: ze.zone_id,
-      zoneName: ze.name,
+      zoneName: ze.name ?? ze.zone_id,
       devices,
       zoneEntity: ze,
       isArchived: true,

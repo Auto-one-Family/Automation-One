@@ -90,7 +90,7 @@ const subzoneGroups = computed((): SubzoneGroup[] => {
   result.sort((a, b) => {
     if (a.subzoneId === null) return 1
     if (b.subzoneId === null) return -1
-    return a.subzoneName.localeCompare(b.subzoneName)
+    return (a.subzoneName ?? '').localeCompare(b.subzoneName ?? '')
   })
   return result
 })

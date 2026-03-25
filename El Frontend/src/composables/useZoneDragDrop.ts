@@ -137,7 +137,7 @@ export function useZoneDragDrop() {
     // Group devices
     for (const device of devices) {
       const zoneId = device.zone_id || ZONE_UNASSIGNED
-      const zoneName = device.zone_name || (zoneId !== ZONE_UNASSIGNED ? zoneIdToDisplayName(zoneId) : ZONE_UNASSIGNED_DISPLAY_NAME)
+      const zoneName = device.zone_name || (zoneId !== ZONE_UNASSIGNED ? zoneIdToDisplayName(zoneId) : ZONE_UNASSIGNED_DISPLAY_NAME) || zoneId
 
       if (!zoneMap.has(zoneId)) {
         zoneMap.set(zoneId, {
@@ -155,7 +155,7 @@ export function useZoneDragDrop() {
     groups.sort((a, b) => {
       if (a.zoneId === ZONE_UNASSIGNED) return 1
       if (b.zoneId === ZONE_UNASSIGNED) return -1
-      return a.zoneName.localeCompare(b.zoneName)
+      return (a.zoneName ?? '').localeCompare(b.zoneName ?? '')
     })
 
     return groups
@@ -176,7 +176,7 @@ export function useZoneDragDrop() {
 
     return Array.from(zones.entries())
       .map(([zoneId, zoneName]) => ({ zoneId, zoneName }))
-      .sort((a, b) => a.zoneName.localeCompare(b.zoneName))
+      .sort((a, b) => (a.zoneName ?? '').localeCompare(b.zoneName ?? ''))
   }
 
   /**

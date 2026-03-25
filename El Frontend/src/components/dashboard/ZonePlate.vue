@@ -197,7 +197,7 @@ const distinctSubzones = computed((): AggregatedSubzone[] => {
   }
 
   return Array.from(subzoneMap.values())
-    .sort((a, b) => a.subzoneName.localeCompare(b.subzoneName))
+    .sort((a, b) => (a.subzoneName ?? '').localeCompare(b.subzoneName ?? ''))
 })
 
 /** Subzone status dot color based on device online status */
