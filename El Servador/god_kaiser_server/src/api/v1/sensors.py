@@ -1239,9 +1239,20 @@ async def query_sensor_data(
         Optional[str], Query(description="Filter by sensor_config UUID (T13-R2)")
     ] = None,
     limit: Annotated[int, Query(ge=1, le=1000, description="Max results")] = 100,
+    resolution: Annotated[
+        Optional[str],
+        Query(
+            pattern=r"^(raw|1m|5m|1h|1d)$",
+            description="Time resolution: raw (default), 1m, 5m, 1h, 1d",
+        ),
+    ] = None,
+    before_timestamp: Annotated[
+        Optional[datetime],
+        Query(description="Cursor: only return data before this timestamp"),
+    ] = None,
 ) -> SensorDataResponse:
     """
-    Query sensor data.
+    Query sensor data with optional time aggregation and cursor pagination.
 
     Args:
         db: Database session
@@ -1252,10 +1263,12 @@ async def query_sensor_data(
         start_time: Start of time range
         end_time: End of time range
         quality: Filter by quality
-        limit: Max results
+        limit: Max results (applies to raw; aggregated has generous cap)
+        resolution: Time aggregation (raw, 1m, 5m, 1h, 1d)
+        before_timestamp: Cursor for pagination — only data before this timestamp
 
     Returns:
-        Sensor data readings
+        Sensor data readings (raw or aggregated)
     """
     esp_repo = ESPRepository(db)
     sensor_repo = SensorRepository(db)
@@ -1269,6 +1282,10 @@ async def query_sensor_data(
         end_time = datetime.now(timezone.utc)
     elif end_time.tzinfo is None:
         end_time = end_time.replace(tzinfo=timezone.utc)
+
+    # Ensure before_timestamp is timezone-aware
+    if before_timestamp and before_timestamp.tzinfo is None:
+        before_timestamp = before_timestamp.replace(tzinfo=timezone.utc)
 
     # Get ESP device ID if specified
     esp_db_id = None
@@ -1288,6 +1305,10 @@ async def query_sensor_data(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid sensor_config_id UUID")
 
+    # Effective resolution (default = raw)
+    effective_resolution = resolution or "raw"
+    is_aggregated = effective_resolution != "raw"
+
     # Query data
     readings = await sensor_repo.query_data(
         esp_id=esp_db_id,
@@ -1300,33 +1321,69 @@ async def query_sensor_data(
         subzone_id=subzone_id,
         sensor_config_id=resolved_config_id,
         limit=limit,
+        resolution=effective_resolution,
+        before_timestamp=before_timestamp,
     )
 
     # Convert to response format
-    reading_responses = [
-        SensorReading(
-            timestamp=r.timestamp,
-            raw_value=r.raw_value,
-            processed_value=r.processed_value,
-            unit=r.unit,
-            quality=r.quality,
-            sensor_type=r.sensor_type,
-            zone_id=r.zone_id,
-            subzone_id=r.subzone_id,
-        )
-        for r in readings
-    ]
+    if is_aggregated:
+        # Aggregated rows: (bucket, avg_raw, avg_processed, min_val, max_val, sample_count, sensor_type, unit)
+        reading_responses = [
+            SensorReading(
+                timestamp=r.bucket,
+                raw_value=float(r.avg_raw) if r.avg_raw is not None else 0.0,
+                processed_value=float(r.avg_processed) if r.avg_processed is not None else None,
+                unit=r.unit,
+                quality="aggregated",
+                sensor_type=r.sensor_type,
+                min_value=float(r.min_val) if r.min_val is not None else None,
+                max_value=float(r.max_val) if r.max_val is not None else None,
+                sample_count=int(r.sample_count),
+            )
+            for r in readings
+        ]
+    else:
+        reading_responses = [
+            SensorReading(
+                timestamp=r.timestamp,
+                raw_value=r.raw_value,
+                processed_value=r.processed_value,
+                unit=r.unit,
+                quality=r.quality,
+                sensor_type=r.sensor_type,
+                zone_id=r.zone_id,
+                subzone_id=r.subzone_id,
+            )
+            for r in readings
+        ]
 
-    return SensorDataResponse(
+    # Cursor pagination metadata
+    has_more = len(reading_responses) == limit
+    next_cursor = None
+    if has_more and reading_responses:
+        next_cursor = reading_responses[-1].timestamp.isoformat()
+
+    response = SensorDataResponse(
         success=True,
         esp_id=esp_id,
         gpio=gpio,
         sensor_type=sensor_type,
         readings=reading_responses,
         count=len(reading_responses),
-        aggregation=None,
+        resolution=effective_resolution,
         time_range={"start": start_time, "end": end_time},
     )
+
+    # Add pagination metadata to response dict
+    # (Using model_extra or direct attribute would need schema change;
+    #  for now we include it via the time_range dict as a pragmatic approach)
+    if next_cursor:
+        response.time_range["next_cursor"] = next_cursor
+        response.time_range["has_more"] = True
+    else:
+        response.time_range["has_more"] = False
+
+    return response
 
 
 # =============================================================================

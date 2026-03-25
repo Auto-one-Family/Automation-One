@@ -136,7 +136,7 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
 
     async def clear_emergency_states(self, esp_ids: list[uuid.UUID]) -> int:
         """
-        Set actuator_states from emergency_stop to idle for given ESPs.
+        Set actuator_states from emergency_stop to off for given ESPs.
 
         Used when clear_emergency is called so the DB matches runtime state
         and the dashboard does not show stale Not-Aus after restart.
@@ -152,14 +152,14 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
                 ActuatorState.esp_id.in_(esp_ids),
                 ActuatorState.state == "emergency_stop",
             )
-            .values(state="idle", current_value=0.0, error_message=None)
+            .values(state="off", current_value=0.0, error_message=None)
         )
         result = await self.session.execute(stmt)
         return result.rowcount or 0
 
     async def clear_all_emergency_states_on_startup(self) -> int:
         """
-        Reset all actuator_states with state=emergency_stop to idle.
+        Reset all actuator_states with state=emergency_stop to off.
 
         Called once at server startup. SafetyService state is in-memory only,
         so after a restart any persisted emergency_stop in DB would show as
@@ -168,28 +168,27 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         stmt = (
             update(ActuatorState)
             .where(ActuatorState.state == "emergency_stop")
-            .values(state="idle", current_value=0.0, error_message=None)
+            .values(state="off", current_value=0.0, error_message=None)
         )
         result = await self.session.execute(stmt)
         return result.rowcount or 0
 
     async def reset_states_for_device(
-        self, esp_id: uuid.UUID, new_state: str = "idle", reason: str = "device_offline"
+        self, esp_id: uuid.UUID, new_state: str = "off", reason: str = "device_offline"
     ) -> int:
         """
         Reset all actuator_states for an ESP to new_state when device goes offline.
 
         Called when ESP goes offline (LWT or heartbeat timeout).
-        Skips actuators already in idle or emergency_stop state.
+        Skips actuators already in off or emergency_stop state.
 
-        Why "idle" not "unknown": "unknown" is not a defined state in ActuatorState.
-        Allowed states: idle, active, error, emergency_stop.
-        "idle" is the safe default — a powerless relay is physically idle.
+        Allowed states: on, off, pwm, error, emergency_stop, unknown.
+        "off" is the safe default — a powerless relay is physically off.
         """
         stmt = (
             update(ActuatorState)
             .where(ActuatorState.esp_id == esp_id)
-            .where(ActuatorState.state.notin_(["idle", "emergency_stop"]))
+            .where(ActuatorState.state.notin_(["off", "emergency_stop"]))
             .values(
                 state=new_state,
                 current_value=0.0,
@@ -293,6 +292,8 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         gpio: int,
         limit: int = 100,
         data_source: Optional[DataSource] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
     ) -> list[ActuatorHistory]:
         """
         Get actuator command history.
@@ -302,12 +303,18 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
             gpio: GPIO pin number
             limit: Maximum number of records
             data_source: Optional data source filter
+            start_time: Optional start of time range filter
+            end_time: Optional end of time range filter
         """
         stmt = select(ActuatorHistory).where(
             ActuatorHistory.esp_id == esp_id, ActuatorHistory.gpio == gpio
         )
         if data_source:
             stmt = stmt.where(ActuatorHistory.data_source == data_source.value)
+        if start_time:
+            stmt = stmt.where(ActuatorHistory.timestamp >= start_time)
+        if end_time:
+            stmt = stmt.where(ActuatorHistory.timestamp <= end_time)
         stmt = stmt.order_by(ActuatorHistory.timestamp.desc()).limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

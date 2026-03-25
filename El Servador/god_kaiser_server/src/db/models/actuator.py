@@ -286,11 +286,15 @@ class ActuatorState(Base):
     )
 
     # State Information
+    # Valid states: on, off, pwm, error, emergency_stop, unknown
+    # "on"  = relay/valve active, "off" = idle/powered-down,
+    # "pwm" = PWM output active, "error" = hardware fault,
+    # "emergency_stop" = safety shutdown, "unknown" = initial/unresolved
     state: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
         index=True,
-        doc="Actuator state (idle, active, error, emergency_stop)",
+        doc="Actuator state (on, off, pwm, error, emergency_stop, unknown)",
     )
 
     last_command_timestamp: Mapped[Optional[datetime]] = mapped_column(

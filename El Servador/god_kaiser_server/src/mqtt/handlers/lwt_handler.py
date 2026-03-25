@@ -116,7 +116,7 @@ class LWTHandler:
                         actuator_repo = ActuatorRepository(session)
                         reset_count = await actuator_repo.reset_states_for_device(
                             esp_id=esp_device.id,
-                            new_state="idle",
+                            new_state="off",
                             reason="lwt_disconnect",
                         )
                         if reset_count > 0:

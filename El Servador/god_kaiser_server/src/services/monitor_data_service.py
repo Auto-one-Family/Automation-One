@@ -171,7 +171,7 @@ class MonitorDataService:
             pwm_value = 0
             emergency_stopped = False
             if state:
-                current_state = state.state == "active" or (state.current_value or 0) > 0
+                current_state = state.state in ("on", "pwm") or (state.current_value or 0) > 0
                 pwm_value = int((state.current_value or 0) * 100)
                 emergency_stopped = state.state == "emergency_stop"
 

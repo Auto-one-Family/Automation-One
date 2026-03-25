@@ -145,7 +145,7 @@ def _model_to_schema_response(
         assigned_zones=actuator.assigned_zones,
         assigned_subzones=actuator.assigned_subzones,
         current_value=state.current_value if state else None,
-        is_active=(state.state == "active") if state else False,
+        is_active=(state.state in ("on", "pwm")) if state else False,
         last_command_at=state.last_command_timestamp if state else None,
         created_at=actuator.created_at,
         updated_at=actuator.updated_at,
@@ -798,7 +798,7 @@ async def get_status(
         gpio=gpio,
         mode=actuator.actuator_type,
         value=state.current_value if state else 0.0,
-        is_active=(state.state == "active") if state else False,
+        is_active=(state.state in ("on", "pwm")) if state else False,
         last_command=state.last_command if state else None,
         last_command_at=state.last_command_timestamp if state else None,
         runtime_seconds=None,  # Would calculate from last_command_timestamp
@@ -1208,7 +1208,7 @@ async def delete_actuator(
     "/{esp_id}/{gpio}/history",
     response_model=ActuatorHistoryResponse,
     summary="Get actuator command history",
-    description="Get command history for an actuator.",
+    description="Get command history for an actuator with optional time filters.",
 )
 async def get_history(
     esp_id: str,
@@ -1216,6 +1216,12 @@ async def get_history(
     db: DBSession,
     current_user: ActiveUser,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    start_time: Annotated[
+        Optional[datetime], Query(description="Start of time range (UTC)")
+    ] = None,
+    end_time: Annotated[
+        Optional[datetime], Query(description="End of time range (UTC)")
+    ] = None,
 ) -> ActuatorHistoryResponse:
     """
     Get actuator command history.
@@ -1226,6 +1232,8 @@ async def get_history(
         db: Database session
         current_user: Authenticated user
         limit: Max entries to return
+        start_time: Optional start of time range filter
+        end_time: Optional end of time range filter
 
     Returns:
         Command history
@@ -1237,8 +1245,20 @@ async def get_history(
     if not esp_device:
         raise ESPNotFoundError(esp_id)
 
-    # Get history entries
-    history = await actuator_repo.get_history(esp_device.id, gpio, limit=limit)
+    # Ensure timezone-aware timestamps
+    if start_time and start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=timezone.utc)
+    if end_time and end_time.tzinfo is None:
+        end_time = end_time.replace(tzinfo=timezone.utc)
+
+    # Get history entries with optional time filters
+    history = await actuator_repo.get_history(
+        esp_device.id,
+        gpio,
+        limit=limit,
+        start_time=start_time,
+        end_time=end_time,
+    )
 
     from ...schemas import ActuatorHistoryEntry
 
@@ -1252,8 +1272,8 @@ async def get_history(
             success=entry.success,
             issued_by=entry.issued_by,
             error_message=entry.error_message,
-            metadata=entry.metadata,
-            timestamp=entry.created_at,
+            metadata=entry.command_metadata,
+            timestamp=entry.timestamp,
         )
         for entry in history
     ]

@@ -486,14 +486,14 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
 
 class SensorReading(BaseModel):
     """
-    Single sensor reading.
+    Single sensor reading (raw or aggregated bucket).
     """
 
-    timestamp: datetime = Field(..., description="Reading timestamp")
-    raw_value: float = Field(..., description="Raw sensor value")
+    timestamp: datetime = Field(..., description="Reading timestamp (or bucket start for aggregated)")
+    raw_value: float = Field(..., description="Raw sensor value (or avg for aggregated)")
     processed_value: Optional[float] = Field(
         None,
-        description="Processed value (after calibration/conversion)",
+        description="Processed value (after calibration/conversion, or avg for aggregated)",
     )
     unit: Optional[str] = Field(
         None,
@@ -515,6 +515,19 @@ class SensorReading(BaseModel):
     subzone_id: Optional[str] = Field(
         None,
         description="Subzone ID at measurement time (Phase 0.1)",
+    )
+    # Aggregation fields (only set when resolution != raw)
+    min_value: Optional[float] = Field(
+        None,
+        description="Minimum processed_value in bucket (aggregated only)",
+    )
+    max_value: Optional[float] = Field(
+        None,
+        description="Maximum processed_value in bucket (aggregated only)",
+    )
+    sample_count: Optional[int] = Field(
+        None,
+        description="Number of samples in bucket (aggregated only)",
     )
 
     @field_validator("quality")
@@ -544,6 +557,9 @@ class SensorReading(BaseModel):
 class SensorDataQuery(BaseModel):
     """
     Sensor data query parameters.
+
+    Note: This schema is kept for documentation/OpenAPI purposes.
+    The actual endpoint uses individual Query() parameters.
     """
 
     esp_id: Optional[str] = Field(
@@ -573,10 +589,10 @@ class SensorDataQuery(BaseModel):
         None,
         description="Filter by quality level",
     )
-    aggregation: Optional[str] = Field(
+    resolution: Optional[str] = Field(
         None,
-        pattern=r"^(none|minute|hour|day)$",
-        description="Time aggregation (none, minute, hour, day)",
+        pattern=r"^(raw|1m|5m|1h|1d)$",
+        description="Time resolution for aggregation (raw, 1m, 5m, 1h, 1d)",
     )
 
     model_config = ConfigDict(
@@ -586,7 +602,7 @@ class SensorDataQuery(BaseModel):
                 "gpio": 34,
                 "start_time": "2025-01-01T00:00:00Z",
                 "end_time": "2025-01-01T23:59:59Z",
-                "aggregation": "hour",
+                "resolution": "1h",
             }
         }
     )
@@ -605,10 +621,10 @@ class SensorDataResponse(BaseResponse):
         description="Sensor readings",
     )
     count: int = Field(..., description="Number of readings returned", ge=0)
-    aggregation: Optional[str] = Field(None, description="Aggregation applied")
-    time_range: Optional[Dict[str, datetime]] = Field(
+    resolution: Optional[str] = Field(None, description="Resolution applied (raw, 1m, 5m, 1h, 1d)")
+    time_range: Optional[Dict[str, Any]] = Field(
         None,
-        description="Actual time range of data",
+        description="Time range and pagination metadata (start, end, has_more, next_cursor)",
     )
 
     model_config = ConfigDict(
@@ -628,8 +644,12 @@ class SensorDataResponse(BaseResponse):
                     }
                 ],
                 "count": 1,
-                "aggregation": None,
-                "time_range": {"start": "2025-01-01T00:00:00Z", "end": "2025-01-01T23:59:59Z"},
+                "resolution": "raw",
+                "time_range": {
+                    "start": "2025-01-01T00:00:00Z",
+                    "end": "2025-01-01T23:59:59Z",
+                    "has_more": False,
+                },
             }
         }
     )

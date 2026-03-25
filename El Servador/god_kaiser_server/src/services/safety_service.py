@@ -199,7 +199,7 @@ class SafetyService:
         if actuator_state and actuator_config.timeout_seconds:
             # Check if actuator has been running too long
             # Note: This is a basic check. Full timeout enforcement is done on ESP32 side.
-            if actuator_state.state == "active":
+            if actuator_state.state in ("on", "pwm"):
                 warnings.append(
                     f"Actuator is already active. Timeout: {actuator_config.timeout_seconds}s"
                 )

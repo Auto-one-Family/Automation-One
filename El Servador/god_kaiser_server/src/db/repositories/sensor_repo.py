@@ -484,6 +484,14 @@ class SensorRepository(BaseRepository[SensorConfig]):
         # Build lookup dict: (esp_id, gpio, sensor_type) → SensorData
         return {(d.esp_id, d.gpio, d.sensor_type): d for d in data_list}
 
+    # Resolution string → PostgreSQL date_trunc interval mapping
+    _RESOLUTION_MAP = {
+        "1m": "minute",
+        "5m": None,  # special: uses date_trunc + integer division trick
+        "1h": "hour",
+        "1d": "day",
+    }
+
     async def query_data(
         self,
         esp_id: Optional[uuid.UUID] = None,
@@ -497,7 +505,9 @@ class SensorRepository(BaseRepository[SensorConfig]):
         subzone_id: Optional[str] = None,
         sensor_config_id: Optional[uuid.UUID] = None,
         limit: int = 100,
-    ) -> list[SensorData]:
+        resolution: Optional[str] = None,
+        before_timestamp: Optional[datetime] = None,
+    ) -> list:
         """
         Query sensor data with optional filters.
 
@@ -513,11 +523,14 @@ class SensorRepository(BaseRepository[SensorConfig]):
             subzone_id: Optional subzone filter (Phase 0.1)
             sensor_config_id: Optional sensor config UUID filter (T13-R2)
             limit: Maximum number of records (default: 100)
+            resolution: Time resolution for aggregation (raw, 1m, 5m, 1h, 1d)
+            before_timestamp: Cursor for pagination — only return data before this timestamp
 
         Returns:
-            List of SensorData instances
+            List of SensorData instances (raw) or list of Row tuples (aggregated)
         """
-        stmt = select(SensorData)
+        # Build common filter conditions
+        filters = []
 
         # T13-R2: If sensor_config_id provided, resolve to esp_id + gpio + sensor_type
         if sensor_config_id is not None:
@@ -526,36 +539,97 @@ class SensorRepository(BaseRepository[SensorConfig]):
             )
             config_obj = config.scalar_one_or_none()
             if config_obj:
-                stmt = stmt.where(SensorData.esp_id == config_obj.esp_id)
+                filters.append(SensorData.esp_id == config_obj.esp_id)
                 if config_obj.gpio is not None:
-                    stmt = stmt.where(SensorData.gpio == config_obj.gpio)
-                stmt = stmt.where(
+                    filters.append(SensorData.gpio == config_obj.gpio)
+                filters.append(
                     func.lower(SensorData.sensor_type) == config_obj.sensor_type.lower()
                 )
 
-        # Apply filters
         if esp_id is not None:
-            stmt = stmt.where(SensorData.esp_id == esp_id)
+            filters.append(SensorData.esp_id == esp_id)
         if gpio is not None:
-            stmt = stmt.where(SensorData.gpio == gpio)
+            filters.append(SensorData.gpio == gpio)
         if sensor_type:
-            stmt = stmt.where(func.lower(SensorData.sensor_type) == sensor_type.lower())
+            filters.append(func.lower(SensorData.sensor_type) == sensor_type.lower())
         if start_time:
-            stmt = stmt.where(SensorData.timestamp >= start_time)
+            filters.append(SensorData.timestamp >= start_time)
         if end_time:
-            stmt = stmt.where(SensorData.timestamp <= end_time)
+            filters.append(SensorData.timestamp <= end_time)
         if quality:
-            stmt = stmt.where(SensorData.quality == quality.lower())
+            filters.append(SensorData.quality == quality.lower())
         if data_source:
-            stmt = stmt.where(SensorData.data_source == data_source.value)
+            filters.append(SensorData.data_source == data_source.value)
         if zone_id is not None:
-            stmt = stmt.where(SensorData.zone_id == zone_id)
+            filters.append(SensorData.zone_id == zone_id)
         if subzone_id is not None:
-            stmt = stmt.where(SensorData.subzone_id == subzone_id)
+            filters.append(SensorData.subzone_id == subzone_id)
+        if before_timestamp is not None:
+            filters.append(SensorData.timestamp < before_timestamp)
 
+        # Aggregated query path
+        if resolution and resolution != "raw" and resolution in self._RESOLUTION_MAP:
+            return await self._query_aggregated(filters, resolution, limit)
+
+        # Raw query path
+        stmt = select(SensorData)
+        if filters:
+            stmt = stmt.where(and_(*filters))
         stmt = stmt.order_by(SensorData.timestamp.desc()).limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def _query_aggregated(
+        self,
+        filters: list,
+        resolution: str,
+        limit: int,
+    ) -> list:
+        """
+        Execute aggregated sensor data query using PostgreSQL date_trunc.
+
+        Returns list of Row tuples with:
+        (bucket, avg_raw, avg_processed, min_val, max_val, sample_count, sensor_type, unit)
+        """
+        from sqlalchemy import literal_column
+
+        trunc_interval = self._RESOLUTION_MAP.get(resolution)
+
+        if resolution == "5m":
+            # 5-minute buckets: floor timestamp to nearest 5-min boundary
+            # PostgreSQL: date_trunc('hour', ts) + INTERVAL '5 min' * floor(extract(minute from ts)/5)
+            bucket = (
+                func.date_trunc("hour", SensorData.timestamp)
+                + literal_column("INTERVAL '5 min'")
+                * func.floor(func.extract("minute", SensorData.timestamp) / 5)
+            ).label("bucket")
+        else:
+            bucket = func.date_trunc(trunc_interval, SensorData.timestamp).label("bucket")
+
+        stmt = (
+            select(
+                bucket,
+                func.avg(SensorData.raw_value).label("avg_raw"),
+                func.avg(SensorData.processed_value).label("avg_processed"),
+                func.min(SensorData.processed_value).label("min_val"),
+                func.max(SensorData.processed_value).label("max_val"),
+                func.count().label("sample_count"),
+                SensorData.sensor_type,
+                func.max(SensorData.unit).label("unit"),
+            )
+            .group_by(bucket, SensorData.sensor_type)
+            .order_by(bucket.desc())
+        )
+
+        if filters:
+            stmt = stmt.where(and_(*filters))
+
+        # No hard limit for aggregated queries (data is already reduced),
+        # but apply a generous safety cap
+        stmt = stmt.limit(min(limit, 10000))
+
+        result = await self.session.execute(stmt)
+        return list(result.all())
 
     async def get_data_range(
         self,
