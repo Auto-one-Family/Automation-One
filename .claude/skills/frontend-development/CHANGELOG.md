@@ -1,7 +1,168 @@
 ## Versions-Historie
 
-**Version:** 9.78
-**Letzte Aktualisierung:** 2026-03-11
+**Version:** 9.92
+**Letzte Aktualisierung:** 2026-03-26
+
+### Aenderungen in v9.92 (V19-F03: VPD-Herkunfts-Information)
+
+- types/index.ts: `interface_type` um `'VIRTUAL'` erweitert (MockSensor, SensorConfigCreate, SensorConfigResponse)
+- sensorDefaults.ts: `VIRTUAL_SENSOR_META` — statische Quell-Informationen fuer server-berechnete Sensoren (VPD: Temperatur + Luftfeuchtigkeit SHT31, Magnus-Tetens)
+- useZoneGrouping.ts: `SensorWithContext` um `interface_type` Feld erweitert, Cast-Typ angepasst
+- MonitorView.vue L2: `interface_type` aus `liveSensor` (espStore) durchgereicht
+- SensorCard.vue: Lucide Info-Icon (14px) + Glassmorphism-Tooltip bei virtuellen Sensoren (VIRTUAL_SENSOR_META match), Hover + Touch-Toggle
+- SensorSatellite.vue + SensorColumn.vue: `interface_type` Prop/Interface um `'VIRTUAL'` erweitert (Typ-Konsistenz)
+
+### Aenderungen in v9.91 (V19-F04: QuickDashboardPanel Sichtbarkeit)
+
+- QuickDashboardPanel.vue: position: absolute → position: fixed (bottom: calc(64px + --space-2), right: 20px) — Panel unabhaengig vom FAB-Container positioniert, kein Clipping durch Elternelemente
+- QuickDashboardPanel.vue: z-index: var(--z-fab) explizit gesetzt, max-height: 60vh statt 420px (viewport-relativ)
+- QuickDashboardPanel.vue: min-height: 120px auf Panel-Container und Empty-State — garantiert sichtbare Mindesthoehe
+- QuickDashboardPanel.vue: @media (hover: none) Touch-Fallback — Edit-Button (opacity: 1) immer sichtbar auf Touch-Geraeten
+- SKILL.md Section 17 Troubleshooting: Neuer Eintrag "FAB Sub-Panel nicht sichtbar"
+
+### Aenderungen in v9.91 (V19-F05: Auto-Dashboard Orphan Cleanup)
+
+- dashboard.store.ts: cleanupOrphanedDashboards() — entfernt auto-generierte Dashboards deren zoneId nicht mehr in zoneEntities existiert; watch() auf zoneEntities.length { once: true } als Store-Init-Trigger (Option A)
+- zone.store.ts: deleteZoneEntity() ruft nach Zone-Loeschung cleanupOrphanedDashboards() auf (Option C, dynamischer Import gegen zirkulaere Abhaengigkeit)
+- Archivierte Zonen (status=archived) gelten als existierend — Safety-Guard bei leerem zoneEntities-Array
+
+### Aenderungen in v9.91 (Fix-F06+F07: API 422 + TypeError bei Chart-Widgets)
+
+- MultiSensorWidget.vue: Manual-Mode chartSensors computed prueft jetzt parseSensorId().isValid — ungueltige sensorIds (leere espId, null gpio) werden ausgefiltert statt als ChartSensor mit espId:'' durchgereicht; Compare-Mode hatte Guard bereits
+- MultiSensorChart.vue: fetchData() ueberspringt Sensoren mit leerem espId/null gpio vor API-Call (Defense-in-Depth gegen 422); chartData y-Werte defensiv mit ?? null gegen undefined abgesichert; Template-Guard v-if="chartData.datasets.length > 0" auf Line-Komponente
+- HistoricalChart.vue: loadData() prueft props.espId und props.sensorType vor API-Call — bei fehlenden Props sofort error.value='Widget-Konfiguration unvollstaendig' ohne Request
+
+### Aenderungen in v9.91 (Fix-F4: Zone-Tile Mini-Dashboards befuellen)
+
+- dashboard.store.ts: DashboardScope um 'zone-tile' erweitert — separate Scope-Kategorie fuer Tile-Dashboards, verhindert Kollision mit generateZoneDashboard() (sucht scope='zone')
+- dashboards.ts API: DashboardCreatePayload + DashboardUpdatePayload scope-Union synchronisiert mit 'zone-tile'
+- MonitorView.vue: getZoneMiniPanelId() filtert jetzt auf scope='zone-tile' statt ueber inlineMonitorPanelsForZone() (Kollisions-Sicherheit)
+- MonitorView.vue: ensureZoneTileDashboard() auto-generiert Tile-Dashboards mit Temp+Humidity Gauge-Widgets beim ersten L1-Laden; createLayout() + Property-Mutation + addWidget()-Chain; Session-Guard tileDashboardsEnsured
+- MonitorView.vue: watch(filteredZoneKPIs) Watcher fuer Auto-Generate nach Zone-Daten-Laden
+
+### Aenderungen in v9.91 (Doc-Fix: Composable-Liste synchronisiert)
+
+- Section 2 Ordnerstruktur: Composable-Zaehler 27 → 31 (3 fehlende nachgetragen: useEmailPostfach, useExportCsv, useWidgetDragFromFab)
+- useExportCsv.ts: CSV-Export Composable fuer Sensor-Daten (PB-04, Multi-Sensor Batch-Download)
+- ExportCsvDialog.vue: Neue Komponente in dashboard-widgets/ — BaseModal mit Zeitraum-Presets (1h–30d), Aggregations-Auswahl (5m/1h/1d/raw), Datenmenge-Warnung >10.000 Zeilen (PB-04)
+- HistoricalChartWidget.vue: Download-Icon im Info-Bereich, oeffnet ExportCsvDialog mit Sensor-Name und Zone-Kontext (PB-04)
+- MultiSensorWidget.vue: Download-Icon in Chip-Leiste, exportiert alle konfigurierten Sensoren als separate CSVs mit 200ms Delay, Toast-Feedback (PB-04); Compare-Mode mit Subzone-Vergleich (PB-05)
+- Section 2 dashboard-widgets/: ExportCsvDialog ergaenzt
+- useWidgetDragFromFab.ts: FAB-to-GridStack Widget-Drag Composable (D3 Editor)
+- useEmailPostfach.ts: Email-Postfach Admin Composable
+
+### Aenderungen in v9.91 (PB-01 — VPD-Widget: Zeitreihe + Backend-Persistierung)
+
+- sensorDefaults.ts: Neuer Eintrag `vpd` in SENSOR_TYPE_CONFIG (label: 'VPD', unit: 'kPa', min: 0, max: 3, decimals: 2, category: 'air', icon: 'Droplets')
+- HistoricalChart.vue: 5 VPD-Zone Box-Annotations via chartjs-plugin-annotation (type: 'box') wenn sensorType === 'vpd': rot (0-0.4 kPa), gelb (0.4-0.8), gruen (0.8-1.2), gelb (1.2-1.6), rot (1.6-3.0). Annotations beeinflussen Y-Achse NICHT (daten-basiertes Auto-Scaling bleibt).
+- useSensorOptions.ts: Keine Aenderung noetig — Backend-Ansatz: sensor_handler.py erstellt SensorConfig-Row fuer VPD automatisch beim ersten Save, damit VPD im Dropdown via device.sensors erscheint.
+
+### Aenderungen in v9.91 (PB-03 — Statistik-Widget)
+
+- Neuer Widget-Typ `statistics` (10. Widget): KPI-Card mit Min/Avg/Max/StdDev aus Stats-Endpoint (`sensorsApi.getStats`)
+- dashboard.store.ts: `'statistics'` zu WidgetType Union, `'30d'` zu timeRange Union, `showStdDev?: boolean` + `showQuality?: boolean` zum Config-Interface
+- useDashboardWidgets.ts: StatisticsWidget Import, componentMap, WIDGET_TYPE_META (category: 'Sensoren', icon: BarChart3, w:4 h:3 minW:3 minH:2), WIDGET_DEFAULT_CONFIGS (timeRange: '7d', showStdDev: true, showQuality: false), 2 Props-Bridge if-Zeilen (showStdDev, showQuality)
+- Neue Komponente StatisticsWidget.vue: useSensorId fuer sensorId-Parsing, Unit aus SENSOR_TYPE_CONFIG (nicht API-Response), watch() mit immediate:true (kein watchEffect), formatNumber (de-DE) mit em-Dash Fallback, optionale Quality-Verteilungs-Bar (gruppiert: excellent+good/fair/rest), responsive Grid (3 oder 4 Spalten je showStdDev)
+- WidgetConfigPanel.vue: `'statistics'` in hasSensorField und hasTimeRange Arrays, widgetTypeLabels-Eintrag, 2 Checkboxen (Standardabweichung anzeigen, Datenqualitaet anzeigen) mit hasStatisticsOptions computed
+- statistics NICHT in TILE_ALLOWED_WIDGET_TYPES (bewusste Design-Entscheidung: zu gross fuer Zone-Tiles)
+- Section 2 Ordnerstruktur: dashboard-widgets/ um StatisticsWidget ergaenzt
+- Section 13 Neues Dashboard-Widget Workflow: aktualisiert auf 4-Stellen-Registrierung in useDashboardWidgets.ts
+- CustomDashboardView Hierarchie: Widget-Katalog auf 10 Widget-Typen aktualisiert
+
+### Aenderungen in v9.90 (D4 — Widget-Inline-Verwaltung im Monitor, Hover-Toolbar)
+
+- InlineDashboardPanel.vue: mode-Prop erweitert von 'inline'|'side-panel' auf 'view'|'manage'|'inline'|'side-panel' (D4); 'manage' = read-only + Hover-Toolbar mit [Konfigurieren] (Settings-Icon) und [Entfernen] (Trash2-Icon)
+- InlineDashboardPanel.vue: Hover-Toolbar mit Glassmorphism (--glass-bg, backdrop-filter: blur(8px)), opacity-Transition bei mouseenter/mouseleave, Touch: immer sichtbar via @media (hover: none) mit 44px Touch-Targets (WCAG)
+- InlineDashboardPanel.vue: [Konfigurieren] oeffnet WidgetConfigPanel (SlideOver, 1:1 wiederverwendet aus Editor); Speichern via dashStore.updateWidgetConfig(layoutId, widgetId, newConfig)
+- InlineDashboardPanel.vue: [Entfernen] mit Bestaetigungsdialog via uiStore.confirm() (danger-Variante); Bestaetigung ruft dashStore.removeWidget(layoutId, widgetId)
+- InlineDashboardPanel.vue: Auth-Gate: isManageMode = mode === 'manage' && authStore.isAuthenticated — keine Toolbar ohne Token
+- InlineDashboardPanel.vue: position: relative auf .inline-dashboard__cell fuer absolute Toolbar-Positionierung
+- MonitorView.vue: 3 InlineDashboardPanel-Instanzen von mode="inline" auf mode="manage" geaendert (L1 ZoneTileCard extra-Slot, L2 Inline-Panels, Bottom-Panels); Side-Panels bleiben mode="side-panel"
+- Section MonitorView Hierarchie: extra-Slot und Inline-Panels L2 Beschreibung um mode="manage" und Hover-Toolbar (D4) ergaenzt
+
+### Aenderungen in v9.89 (D3 — FAB Quick-Add Widget Dialog)
+
+- dashboard.store.ts: 3 neue Actions addWidget(layoutId, config), removeWidget(layoutId, widgetId), updateWidgetConfig(layoutId, widgetId, newConfig) — Widget-Level CRUD mit auto-ID und Server-Sync via saveLayout
+- Neue Komponente AddWidgetDialog.vue in components/monitor/: 3-Schritt BaseModal (Widget-Typ → Zone → Sensor), nutzt useSensorOptions(filterZoneId) + WIDGET_TYPE_META + WIDGET_DEFAULT_CONFIGS; erstellt Zone-Dashboard via generateZoneDashboard falls keins existiert; non-tile Hint bei historical/multi-sensor
+- QuickWidgetPanel.vue: Neuer mode-Prop ('editor'|'monitor'); editor=drag (unveraendert), monitor=click emitiert widget-selected Event; showCatalog computed statt nur isOnEditor; --clickable CSS-Klasse
+- QuickActionBall.vue: Neuer mode-Prop + widget-selected Event-Forwarding; mode wird als v-bind an QuickWidgetPanel durchgereicht wenn activePanel=widgets
+- MonitorView.vue: QuickActionBall (mode="monitor") + AddWidgetDialog eingebunden; handleFabWidgetSelected oeffnet Dialog mit defaultWidgetType und defaultZoneId aus L2-Route
+- Section 2 Ordnerstruktur: monitor/ auf 4 Dateien aktualisiert (+AddWidgetDialog), quick-action/ auf 7 Dateien korrigiert (+QuickWidgetPanel, QuickDashboardPanel)
+- Section MonitorView Hierarchie: QuickActionBall und AddWidgetDialog als Top-Level-Children ergaenzt
+- Section 5 Store-Architektur: dashboard Store Actions um addWidget, removeWidget, updateWidgetConfig ergaenzt
+
+### Aenderungen in v9.88 (D2 — Monitor L1 aufraeumen, losgeloeste Dashboards entfernen)
+
+- MonitorView.vue L1: Cross-Zone Dashboard-Chips Sektion (`<section class="monitor-dashboard-card">`) komplett entfernt inkl. zugehoeriger Script-Variablen (dashboardsCollapsed, toggleDashboardsCollapsed, MAX_CROSS_ZONE_VISIBLE, showAllCrossZone, visibleCrossZoneDashboards) und ~120 Zeilen CSS (.monitor-dashboard-card*, .monitor-dashboard-chip*)
+- MonitorView.vue L1: Losgeloeste InlineDashboardPanels via `dashStore.inlineMonitorPanels` entfernt; Zone-spezifische Mini-Widgets im ZoneTileCard extra-Slot (Phase 3) bleiben
+- MonitorView.vue L1: Empty State Text aktualisiert auf "Noch keine Zonen eingerichtet." + Hint "Weise Geraeten Zonen zu unter Hardware." + CSS .monitor-view__empty-hint
+- MonitorView.vue: Unused Imports entfernt (Pencil, Plus as PlusIcon)
+- router/index.ts: Route `monitor-dashboard` (cross-zone Dashboard-Viewer) ersetzt durch Redirect zu `/editor/:dashboardId`
+- QuickDashboardPanel.vue: `navigateToDashboard` navigiert zu `editor-dashboard` statt `monitor-dashboard`
+- CustomDashboardView.vue: `monitorRouteForLayout` gibt `null` zurueck fuer cross-zone Scope (Route existiert nicht mehr)
+- Section 10 Router: `monitor/dashboard/:dashboardId` aus Protected Routes entfernt, als Deprecated Redirect ergaenzt
+- Section MonitorView L1: Reihenfolge aktualisiert (Cross-Zone-Dashboards + Inline-Panels entfernt), Empty State Text, Inline-Panels L2 Beschreibung
+
+### Aenderungen in v9.87 (D1 — Dashboard-Liste entmuellen)
+
+- dashboard.store.ts: Neue computed `autoGeneratedLayouts` (filtert layouts mit autoGenerated: true); neue Action `bulkDeleteLayouts(layoutIds: string[])` loescht mehrere Layouts in einem Durchlauf mit Server-Sync (DELETE pro serverId), returned Count
+- CustomDashboardView.vue: Per-Item Delete-Button (Trash2) im Layout-Dropdown — hover-sichtbar Desktop, immer sichtbar Touch (@media hover:none), oeffnet ConfirmDialog via uiStore.confirm() vor Loeschung
+- CustomDashboardView.vue: "Auto-generierte aufraeumen" Bulk-Button im Dropdown (nur sichtbar bei autoGeneratedLayouts.length > 0), oeffnet BaseModal mit Checkbox-Liste aller auto-generierten Dashboards (alle vorausgewaehlt), User kann einzelne abwaehlen, Delete-Button mit Count
+- CustomDashboardView.vue: Leerer State bei layouts.length === 0: "Kein Dashboard vorhanden" mit "Neues Dashboard" CTA-Button (oeffnet Layout-Dropdown)
+- Section 5 Store-Tabelle: autoGeneratedLayouts computed und bulkDeleteLayouts Action ergaenzt
+- Section CustomDashboardView Hierarchie: Per-Item Delete, Bulk-Button, No-Dashboard-State, BulkCleanupModal ergaenzt
+- MonitorView.vue: Unused Imports ChevronDown/ChevronUp entfernt (pre-existing TS6133 fix)
+
+### Aenderungen in v9.86 (A1 Phase 3 — Mini-Widgets in Zone-Kacheln)
+
+- InlineDashboardPanel.vue: Neuer optionaler Prop `compact?: boolean` (default false); bei compact=true wird Header mit Dashboard-Name und Edit-Link ausgeblendet (vermeidet nested interactive elements in ZoneTileCard button); CSS: kein Border/Background, kein Grid-Padding, max-height 120px auf Cells
+- MonitorView.vue: ZoneTileCard extra-Slot befuellt mit InlineDashboardPanel im compact-Modus; getZoneMiniPanelId(zoneId) Hilfsfunktion gibt ID des ersten zone-spezifischen Inline-Panels zurueck dessen Widgets alle tile-kompatibel sind; TILE_ALLOWED_WIDGET_TYPES: nur gauge und sensor-card (alarm-list mit minH:4 zu gross); CSS .monitor-zone-tile__mini-widget mit max-height 120px und overflow hidden
+- Section MonitorView L1 Zone-Tiles: extra-Slot Phase 3 Beschreibung ergaenzt
+- Section MonitorView L2 Inline-Panels: Hinweis auf L1 zone-spezifische Mini-Widgets in Kacheln
+
+### Aenderungen in v9.85 (PA-02c — Dashboard→Widget Zone-Kontext-Propagation)
+
+- useDashboardWidgets.ts: Neue Option `zoneId?: Ref<string | undefined>` in UseDashboardWidgetsOptions; wird als Prop an alle gemounteten Widget-Komponenten durchgereicht via mountWidgetToElement(); kein Breaking Change (optional)
+- InlineDashboardPanel.vue: Neuer optionaler Prop `zoneId?: string`; via toRef an useDashboardWidgets weitergegeben; MonitorView L2 reicht selectedZoneId durch
+- CustomDashboardView.vue: Neues `layoutZoneId` computed aus `dashStore.activeLayout?.zoneId`; an useDashboardWidgets und WidgetConfigPanel als Prop durchgereicht
+- WidgetConfigPanel.vue: Neuer optionaler Prop `zoneId?: string`; selectedSensorZone Default auf zoneId gesetzt mit Watch-Sync; bei Zone-Dashboards ist Sensor-Filter automatisch vorgefiltert
+- SensorCardWidget.vue, GaugeWidget.vue, LineChartWidget.vue, HistoricalChartWidget.vue, MultiSensorWidget.vue: Neuer optionaler Prop `zoneId?: string`; localZoneId ref (render() one-shot pattern); useSensorOptions(localZoneId) statt useSensorOptions() — filtert Sensor-Dropdown bei Zone-Kontext
+- MonitorView.vue: InlineDashboardPanel L2 bekommt `:zone-id="selectedZoneId ?? undefined"` fuer Zone-spezifische Panels
+- Section 2 Ordnerstruktur: useDashboardWidgets.ts Kommentar um zoneId propagation ergaenzt
+- Section CustomDashboardView: WidgetConfigPanel Beschreibung um zoneId Prop und Default-Verhalten aktualisiert
+
+### Aenderungen in v9.84 (PA-03b — MultiSensorChart resolution-Integration)
+
+- MultiSensorChart.vue: Import von `getAutoResolution` und `TIME_RANGE_MINUTES` aus `utils/autoResolution.ts`; neues `currentResolution` computed berechnet server-seitige Aggregation basierend auf timeRange-Prop (<=1h → raw, <=6h → 5m, <=7d → 1h, >7d → 1d)
+- MultiSensorChart.vue: API-Call (`sensorsApi.queryData`) sendet jetzt `resolution: currentResolution.value` als Parameter fuer server-seitige Aggregation; bei 7d-Zeitraum werden alle Datenpunkte stuendlich aggregiert statt nach ~1000 Punkten abzuschneiden
+- MultiSensorChart.vue: `MAX_DATA_POINTS` von 1000 auf 5000 erhoeht — dient nur noch als Safety-Cap, nicht als primaere Datenreduktion (resolution uebernimmt das)
+- MultiSensorChart.vue: Tooltip zeigt "(Ø)" Suffix bei aggregierten Daten (wenn `currentResolution` gesetzt, d.h. resolution !== undefined/raw)
+- MultiSensorChart.vue: Kein Min/Max-Band — bewusste Entscheidung: bei mehreren Sensor-Linien wuerden Baender die Ansicht unleserlich machen; nur avg-Linie pro Sensor
+- Section MonitorView L3: Multi-Sensor-Overlay Beschreibung um resolution-Feature ergaenzt
+
+### Aenderungen in v9.83 (PA-02b — Zone-gruppierte Sensor-Auswahl)
+
+- useSensorOptions.ts: Neues Composable in `composables/` — zentralisierte Zone→Subzone→Sensor Gruppierung fuer Dashboard-Widgets; exportiert groupedSensorOptions (SensorOptionGroup[]) und flatSensorOptions (FlatSensorOption[]); Dedup via seen-Set; filterZoneId Parameter fuer Zone-Filterung; Interfaces: SensorOption, SensorSubgroup, SensorOptionGroup, FlatSensorOption
+- WidgetConfigPanel.vue: Sensor-Dropdown nutzt jetzt useSensorOptions mit nativen `<optgroup>` Elementen gruppiert nach Zone/Subzone (Label: "ZoneName" oder "ZoneName / SubzoneName"); lokale SensorOption/SensorGroup Interfaces und seen-Set Dedup entfernt; findSensorType() Hilfsfunktion fuer SENSOR_TYPE_CONFIG Lookup
+- MultiSensorWidget.vue: Beide Sensor-Dropdowns (Chip-Add + Empty-State) nutzen groupedSensorOptions mit `<optgroup>` bzw. Dropdown-Gruppenheadern (.multi-sensor-widget__dropdown-group CSS); eigene seen-Set Dedup entfernt
+- SensorCardWidget.vue, LineChartWidget.vue, HistoricalChartWidget.vue, GaugeWidget.vue: Eigene availableSensors computed mit seen-Set durch flatSensorOptions aus useSensorOptions ersetzt
+- Section 2 Ordnerstruktur: useSensorOptions.ts in Composables-Liste hinzugefuegt
+- Section CustomDashboardView: WidgetConfigPanel Sensor-Selektion Beschreibung aktualisiert (Zone/Subzone optgroup, useSensorOptions)
+
+### Aenderungen in v9.82 (A1 2.1 — Rules-Summary in ZoneTileCard)
+
+- ZoneTileCard.vue: 3 neue optionale Props (rules: LogicRule[], totalRuleCount: number, isRuleActive: (ruleId) => boolean); Rules-Summary Block zwischen KPI-Area und Footer (Zap-Icon, "X Regeln" Label blau bei aktiver Regel, max 2 Regelnamen truncated, "X weitere" Badge, aktive Regel Glow via text-shadow); CSS-Klassen .monitor-zone-tile__rules-summary/rule/rule--active/rules-extra
+- MonitorView.vue: logicStore Import + Props-Uebergabe an ZoneTileCard (:rules, :total-rule-count, :is-rule-active); nutzt logicStore.getRulesForZone(zoneId).slice(0,2) und logicStore.isRuleActive
+- Section MonitorView L1: ZoneTileCard Props-Liste um rules?/totalRuleCount?/isRuleActive? erweitert + Rules-Summary Block dokumentiert
+
+### Aenderungen in v9.81 (A1 1.1–1.3 — Zone-Tile-Extraktion aus MonitorView)
+
+- ZoneTileCard.vue: Neue Komponente in `components/monitor/` — extrahiert aus MonitorView L1 Zone-Tile-Block; Props: zone (ZoneKPI), isStale, healthConfig (optional mit Default); Emit: click; Slots: kpis, extra, footer; Status-Icons via CheckCircle2/AlertTriangle/Minus/XCircle
+- useZoneKPIs.ts: Neues Composable in `composables/` — extrahiert Zone-KPI-Berechnung aus MonitorView; exportiert ZoneKPI, ZoneHealthStatus, HEALTH_STATUS_CONFIG, useZoneKPIs (zoneKPIs, filteredZoneKPIs, isZoneStale, allZones); 300ms Debounce auf espStore.devices Watch, 30s Cooldown auf zonesApi.getAllZones()
+- MonitorView.vue: Redundanter HEALTH_STATUS_CONFIG Import und explizite Prop-Uebergabe entfernt (ZoneTileCard hat eigenen Default); keine lokalen Typ-Definitionen mehr (ZoneKPI, ZoneHealthStatus, getZoneHealthStatus, computeZoneKPIs); 3490 Zeilen (von ~3700)
+- Section 2 Ordnerstruktur: `monitor/` Verzeichnis aktualisiert (ZoneTileCard, ZoneRulesSection, ActiveAutomationsSection — 3 Dateien)
+- Section Composables: useZoneKPIs.ts hinzugefuegt mit Beschreibung
+- Section MonitorView L1: ZoneTileCard.vue Referenz mit Props/Emit/Slots dokumentiert
 
 ### Aenderungen in v9.78 (T18-F3 — Hysterese in graphToRuleData erhalten)
 

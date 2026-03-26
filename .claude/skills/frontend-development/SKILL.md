@@ -15,8 +15,9 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.80
-**Letzte Aktualisierung:** 2026-03-25
+**Version:** 9.92
+**Letzte Aktualisierung:** 2026-03-26
+
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
 
@@ -131,11 +132,11 @@ El Frontend/src/
 │   └── device-schemas/  # JSON-Schemas für Sensoren/Aktoren (DS18B20, SHT31, relay, pwm, etc.)
 ├── components/    # Vue Komponenten (20 Unterverzeichnisse)
 │   ├── calibration/   # CalibrationWizard
-│   ├── charts/        # LiveLineChart, HistoricalChart, GaugeChart, MultiSensorChart
+│   ├── charts/        # LiveLineChart, HistoricalChart (+ VPD Box-Annotations PB-01), GaugeChart, MultiSensorChart
 │   ├── command/       # CommandPalette
 │   ├── common/        # Modal, Toast, Skeleton, ViewTabBar (13 Dateien)
 │   ├── dashboard/     # Dashboard subcomponents (11 Dateien, inkl. DashboardViewer + InlineDashboardPanel)
-│   ├── dashboard-widgets/ # SensorCardWidget, GaugeWidget, LineChartWidget, etc.
+│   ├── dashboard-widgets/ # SensorCardWidget, GaugeWidget, LineChartWidget, StatisticsWidget, ExportCsvDialog, etc.
 │   ├── database/      # DataTable, FilterPanel, Pagination, etc. (6 Dateien)
 │   ├── devices/       # SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection, AlertConfigSection, DeviceAlertConfigSection, RuntimeMaintenanceSection, SubzoneAssignmentSection, DeviceScopeSection, SharedSensorRefCard (10 Dateien)
 │   ├── error/         # ErrorDetailsModal, TroubleshootingPanel
@@ -145,10 +146,10 @@ El Frontend/src/
 │   ├── inventory/     # Wissensdatenbank (Phase K4): InventoryTable, DeviceDetailPanel, SchemaForm, ZoneContextEditor, SubzoneContextEditor (5 Dateien)
 │   ├── logic/         # RuleCardCompact (Monitor L2 Regeln für diese Zone, 1 Datei)
 │   ├── modals/
-│   ├── monitor/       # ZoneRulesSection (L2), ActiveAutomationsSection (L1 Aktive Automatisierungen, 2 Dateien)
+│   ├── monitor/       # ZoneTileCard (L1 Zone-Kachel), ZoneRulesSection (L2), ActiveAutomationsSection (L1 Aktive Automatisierungen), AddWidgetDialog (D3 FAB Quick-Add, 4 Dateien)
 │   ├── rules/         # RuleCard, RuleConfigPanel, RuleFlowEditor, RuleNodePalette, RuleTemplateCard (5 Dateien)
 │   ├── notifications/ # NotificationDrawer, NotificationItem, AlertStatusBar, NotificationPreferences (4 Dateien)
-│   ├── quick-action/  # QuickActionBall (FAB), QuickActionMenu, QuickActionItem, QuickAlertPanel, QuickNavPanel (5 Dateien)
+│   ├── quick-action/  # QuickActionBall (FAB, mode: editor|monitor), QuickActionMenu, QuickActionItem, QuickAlertPanel, QuickNavPanel, QuickWidgetPanel (mode: editor=drag, monitor=click→AddWidgetDialog), QuickDashboardPanel (7 Dateien)
 │   ├── safety/        # EmergencyStopButton
 │   ├── system-monitor/ # 19 Dateien (inkl. HierarchyTab, HealthTab, DiagnoseTab, ReportsTab)
 │   ├── widgets/       # Widget primitives
@@ -166,13 +167,14 @@ El Frontend/src/
 │   ├── main.css         # Hauptstyles (Buttons, Layout)
 │   ├── forms.css        # Shared Form + Modal Styles
 │   └── tailwind.css     # Tailwind Konfiguration
-├── composables/   # 26 Composables
+├── composables/   # 31 Composables
 │   ├── useWebSocket.ts
 │   ├── useToast.ts
 │   ├── useModal.ts
 │   ├── useQueryFilters.ts
 │   ├── useGpioStatus.ts
 │   ├── useSensorId.ts          # sensorId parser (espId:gpio:sensorType, legacy 2-part support)
+│   ├── useSensorOptions.ts     # Zone-grouped sensor options for dashboard widgets (PA-02b, dedup + optgroup)
 │   ├── useSubzoneCRUD.ts
 │   ├── useSubzoneResolver.ts
 │   ├── useZoneDragDrop.ts
@@ -181,10 +183,12 @@ El Frontend/src/
 │   ├── useCalibration.ts
 │   ├── useCommandPalette.ts
 │   ├── useContextMenu.ts
-│   ├── useDashboardWidgets.ts
+│   ├── useDashboardWidgets.ts  # Container-agnostic widget mount/unmount, zoneId propagation (PA-02c)
 │   ├── useDeviceActions.ts
 │   ├── useDeviceMetadata.ts
+│   ├── useEmailPostfach.ts     # Email-Postfach Admin composable
 │   ├── useESPStatus.ts
+│   ├── useExportCsv.ts         # CSV export for sensor data (PB-04, multi-sensor batch)
 │   ├── useGrafana.ts
 │   ├── useKeyboardShortcuts.ts
 │   ├── useNavigationHistory.ts
@@ -192,7 +196,9 @@ El Frontend/src/
 │   ├── useQuickActions.ts
 │   ├── useScrollLock.ts
 │   ├── useSparklineCache.ts
-│   └── useZoneGrouping.ts
+│   ├── useWidgetDragFromFab.ts # FAB-to-GridStack widget drag (D3 Editor)
+│   ├── useZoneGrouping.ts
+│   └── useZoneKPIs.ts          # Zone KPI aggregation (extracted from MonitorView)
 ├── router/        # Route-Definitionen + Guards
 ├── services/      # WebSocket Singleton
 │   └── websocket.ts   # ~625 Zeilen
@@ -313,24 +319,24 @@ SensorsView.vue (?sensor={espId}-gpio{gpio} oder ?focus=sensorId → auto-open D
 ```
 MonitorView.vue (URL-Sync: L1→L2→L3 via route params)
 ├── L1 /monitor — Ready-Gate: BaseSkeleton bei espStore.isLoading, ErrorState bei espStore.error, Content nur nach erfolgreichem Laden
-│   ├── Datenquellen: espStore.devices (KPIs) + zonesApi.getAllZones() via fetchAllZonesGuarded (30s Cooldown, inkl. leere Zonen aus ZoneContext) + zoneStore.activeZones/archivedZones (T13-R3 WP5)
+│   ├── Datenquellen: useZoneKPIs composable (espStore.devices Watch 300ms debounce + zonesApi.getAllZones() 30s Cooldown, inkl. leere Zonen) + zoneStore.activeZones/archivedZones (T13-R3 WP5)
 │   ├── Zone-Filter: Native <select> mit activeZones + <optgroup label="Archiv"> fuer archivedZones; selectedZoneFilter ref; filteredZoneKPIs computed; "Gefiltert" Badge (ListFilter-Icon) bei aktivem Filter; Archived-Banner bei archivierter Zone (T13-R3 WP5)
-│   ├── Zone-Tiles: <button> (keyboard-navigierbar, :focus-visible); CSS-Grid align-items: stretch (gleiche Hoehe pro Zeile), Footer margin-top: auto; Reihenfolge: Zone-Tiles → Aktive Automatisierungen → Cross-Zone-Dashboards → Inline-Panels
+│   ├── Zone-Tiles: ZoneTileCard.vue (Props: zone/isStale/healthConfig/rules?/totalRuleCount?/isRuleActive?, Emit: click, Slots: kpis/extra/footer); Rules-Summary Block (L1 kompakt, max 2 Regeln, Zap-Icon, aktive Regel Glow, "X weitere" Badge, .monitor-zone-tile__rules-summary); CSS-Grid align-items: stretch (gleiche Hoehe pro Zeile), Footer margin-top: auto; Reihenfolge: Zone-Tiles → Aktive Automatisierungen (D2: Cross-Zone-Dashboards + losgeloeste Inline-Panels entfernt); extra-Slot (Phase 3): InlineDashboardPanel compact mode="view" mit getZoneMiniPanelId() — zeigt max 1 zone-tile Dashboard (scope='zone-tile', nur gauge/sensor-card, max 120px Hoehe, keine Toolbar); ensureZoneTileDashboard() auto-generiert Tile-Dashboards mit Temp+Humidity Gauges beim ersten L1-Laden (Session-Guard)
 │   ├── Leere Zonen: ZoneHealthStatus 'empty' (Minus-Icon, opacity 0.7, status "Leer"), NICHT "alarm"
 │   ├── Zone-Tile Footer: "X/Y online" (ESP-Count), Sensor/Aktor-Counts, lastActivity, mobileGuestCount ("+ X mobil" wenn >0, 6.7)
 │   ├── ActiveAutomationsSection: v-if="hasActiveAutomations" (hidden bei 0 enabled Rules, sichtbar waehrend Loading); logicStore.enabledRules, Top 5 als RuleCardCompact (ul/li, :focus-visible), Link "Alle Regeln" → /logic; Zone-Badge Fallback "—"; responsive Grid
-│   ├── Empty State CTA: `<router-link to="/hardware">` Button "Zonen in der Hardware-Ansicht erstellen" (sekundaerer Ghost-Button-Stil, CSS `.monitor-view__empty-cta`) bei leerem zoneKPIs-Array
-│   └── 40px Trennung: var(--space-10) zwischen Zone-Grid, ActiveAutomationsSection, Dashboard-Card, Inline-Panels
+│   ├── Empty State CTA: "Noch keine Zonen eingerichtet." + "Weise Geraeten Zonen zu unter Hardware." mit `<router-link to="/hardware">` (sekundaerer Ghost-Button-Stil, CSS `.monitor-view__empty-cta`) bei leerem zoneKPIs-Array
+│   └── 40px Trennung: var(--space-10) zwischen Zone-Grid und ActiveAutomationsSection
 ├── L2 /monitor/:zoneId — Subzone-First Gruppierung: Zone-Header → Subzone-Accordions (Sensoren+Aktoren zusammen) → Regeln → Zone-Dashboards → Inline-Panels
 │   ├── Datenquelle: zonesApi.getZoneMonitorData (primaer, AbortController bei Zone-Wechsel), Fallback useZoneGrouping + useSubzoneResolver nur bei API-Fehler; Ready-Gate (v-if=!zoneMonitorLoading) + BaseSkeleton waehrend Loading, ErrorState bei Fehler
 │   ├── Datenstruktur: zoneDeviceGroup computed (ZoneDeviceSubzone[]) — unified sensors+actuators pro Subzone; filteredSubzones computed (Subzone-Filter); ersetzt getrennte zoneSensorGroup/zoneActuatorGroup
-│   ├── Inline-Panels L2: inlineMonitorPanelsL2 = cross-zone + zone-spezifische (scope=zone, zoneId=selectedZoneId); L1 nutzt inlineMonitorPanelsCrossZone
+│   ├── Inline-Panels L2: inlineMonitorPanelsL2 mode="manage" = cross-zone + zone-spezifische (scope=zone, zoneId=selectedZoneId); Hover-Toolbar [Konfigurieren][Entfernen] (D4); L1 zeigt NUR zone-spezifische Mini-Widgets IN Kacheln (Phase 3, extra-Slot) — losgeloeste Inline-Panels auf L1 entfernt (D2)
 │   ├── Zone-Header: Name + Sensor/Aktor-Count + Alarm-Count
 │   ├── Subzone-Filter: Native <select> (nur wenn >1 Subzone); selectedSubzoneFilter ref (reset bei Zone-Wechsel); filteredSubzones computed; availableSubzones aus zoneDeviceGroup (T13-R3 WP5)
 │   ├── Subzone-Accordion: v-for subzone in filteredSubzones; Header mit Count-Badge "XS · YA"; Accordion-Header NUR wenn >1 Subzone oder benannte Subzone; Body v-show mit Transition; Smart-Defaults (<=4 alle offen, >4 erste+Zone-weit offen, leere eingeklappt); localStorage-Persistenz
 │   │   ├── Typ-Labels "Sensoren"/"Aktoren": NUR sichtbar wenn BEIDE Typen in der Subzone vorhanden
 │   │   ├── Dashed Trennlinie (.monitor-subzone__separator): NUR zwischen Sensoren und Aktoren wenn beide vorhanden
-│   │   ├── SensorCard.vue[] (mode='monitor', Stale/ESP-Offline-Badges, Trend-Pfeil via :trend Prop, Scope-Badge Multi-Zone/Mobil (T13-R3 WP4), from components/devices/; effectiveQualityStatus: bei Stale→'warning' Override, qualityLabel "Veraltet" statt "OK", border-left: 3px solid var(--color-warning); Mobile: Kontext-Hint "Aktiv in Zone X seit..." + Zone-Wechsel-Dropdown via deviceContextStore (6.7))
+│   │   ├── SensorCard.vue[] (mode='monitor', Stale/ESP-Offline-Badges, Trend-Pfeil via :trend Prop, Scope-Badge Multi-Zone/Mobil (T13-R3 WP4), from components/devices/; effectiveQualityStatus: bei Stale→'warning' Override, qualityLabel "Veraltet" statt "OK", border-left: 3px solid var(--color-warning); Mobile: Kontext-Hint "Aktiv in Zone X seit..." + Zone-Wechsel-Dropdown via deviceContextStore (6.7); Virtual-Sensor Info-Icon: Lucide Info 14px neben Titel bei VIRTUAL_SENSOR_META match, Glassmorphism-Tooltip mit Quell-Sensoren + Formel (V19-F03))
 │   │   │   ├── #sparkline: LiveLineChart (compact, sensor-type → auto Y-Range, thresholds → farbige Schwellwert-Zonen aus SENSOR_TYPE_CONFIG)
 │   │   │   └── [Expanded] 1h-Chart (vue-chartjs Line, sensorsApi.queryData Initial-Fetch)
 │   │   │       ├── "Zeitreihe anzeigen" → openSensorDetail (L3)
@@ -341,8 +347,11 @@ MonitorView.vue (URL-Sync: L1→L2→L3 via route params)
 │   ├── Regeln fuer diese Zone (N): ZoneRulesSection.vue — logicStore.getRulesForZone(zoneId); RuleCardCompact pro Regel; Klick → /logic/:ruleId; Empty State: Link "Zum Regeln-Tab"; Bei >10 Regeln: erste 5 + Link "Weitere X Regeln — Im Regeln-Tab anzeigen"
 │   ├── Shared Sensors (6.7): v-if="sharedSensorRefs.length > 0"; multi_zone Sensoren aus ANDEREN Zonen deren assigned_zones die aktuelle Zone enthaelt; SharedSensorRefCard (kompakt, read-only, dashed border, "via Heimzone" + Navigation-Link)
 │   └── Zone-Dashboards: getDashboardNameSuffix(dash) fuer eindeutige Namen (createdAt oder ID)
-└── L3 /monitor/:zoneId/sensor/:sensorId — SlideOver (Sensor-Detail, Deep-Link-faehig)
-    └── Multi-Sensor-Overlay: Chip-Selektor (max 4 Sensoren), sekundaere Y-Achse bei unterschiedlichen Einheiten
+├── L3 /monitor/:zoneId/sensor/:sensorId — SlideOver (Sensor-Detail, Deep-Link-faehig)
+│   └── Multi-Sensor-Overlay: Chip-Selektor (max 4 Sensoren), sekundaere Y-Achse bei unterschiedlichen Einheiten, server-seitige Aggregation via getAutoResolution (resolution-Parameter im API-Call, Tooltip "(Ø)" bei aggregierten Daten, kein Min/Max-Band)
+├── QuickActionBall (FAB, mode="monitor", fixed bottom-right): Klick auf Widget-Typ → emitiert widget-selected → oeffnet AddWidgetDialog (D3); "Dashboards" → QuickDashboardPanel (position: fixed, z-index: --z-fab, V19-F04)
+│   └── QuickDashboardPanel (position: fixed ueber FAB; Dashboard-Liste gruppiert nach cross-zone/zone; Empty-State min-height 120px; Touch: Edit-Button immer sichtbar @media hover:none)
+└── AddWidgetDialog (BaseModal, 3-Schritt: Widget-Typ → Zone → Sensor; Props: open, defaultZoneId aus L2-Route, defaultWidgetType aus FAB; erstellt Zone-Dashboard via generateZoneDashboard falls keins existiert; nutzt useSensorOptions(filterZoneId) + WIDGET_TYPE_META; addWidget() in dashboard.store; D3)
 ```
 
 ### Komponentenhierarchie (CustomDashboardView / Dashboard Editor)
@@ -352,28 +361,33 @@ CustomDashboardView.vue (/editor, /editor/:dashboardId)
 ├── ViewTabBar.vue (Tab-Navigation)
 ├── Toolbar
 │   ├── Layout-Selector (Dropdown: vorhandene Dashboards + Templates, "Auto"-Badge bei autoGenerated)
+│   │   ├── "Auto-generierte aufräumen" Button (nur sichtbar bei autoGenerated > 0, oeffnet Bulk-Modal)
+│   │   ├── Per-Item Trash2 Delete-Icon (hover-sichtbar Desktop, immer sichtbar Touch, Confirm-Dialog)
 │   │   └── DASHBOARD_TEMPLATES (4 Templates: Zonen-Uebersicht, Sensor-Detail, Multi-Sensor, Leer)
 │   ├── Edit/View-Toggle (Pencil/Eye Icon, isEditing ref)
 │   ├── Widget-Katalog-Toggle (LayoutGrid Icon, showCatalog ref)
 │   ├── Export/Import/Delete Buttons (nur im Edit-Modus sichtbar)
 │   └── "Neues Dashboard" Button (oeffnet direkt im Edit-Mode mit Widget-Katalog)
-├── Widget-Katalog Sidebar (showCatalog, 9 Widget-Typen mit Icon + Label + Description)
+├── Widget-Katalog Sidebar (showCatalog, 10 Widget-Typen mit Icon + Label + Description)
 │   └── addWidget(type) → WIDGET_DEFAULT_CONFIGS + GridStack.addWidget()
 ├── Empty-State (v-if leeres Dashboard im View-Mode: Icon + "Noch keine Widgets" + CTA "Bearbeiten")
+├── No-Dashboard-State (v-if layouts.length === 0: "Kein Dashboard vorhanden" + "Neues Dashboard" CTA)
 ├── GridStack 12-Column Grid (staticGrid im View-Modus, editierbar im Edit-Modus)
 │   └── Dashboard-Widget[] (imperativ via createWidgetElement + mountWidgetComponent)
 │       ├── Widget-Header (Titel + Gear-Icon + X-Remove-Button, nur im Edit-Modus sichtbar)
-│       └── Widget-Body (SensorCardWidget, GaugeWidget, LineChartWidget, etc.)
-└── WidgetConfigPanel.vue (SlideOver, Gear-Icon oeffnet Konfiguration)
-    ├── Titel-Input
-    ├── Sensor Zone-Filter (selectedSensorZone: "Alle Zonen" oder konkrete Zone; filtert Sensor-Dropdown)
-    ├── Sensor-Selektion (gruppiert nach Subzone via optgroup wenn Zone gewaehlt; "Nicht zugewiesen" fuer Sensoren ohne Subzone)
-    ├── Actuator-Selektion (je nach Widget-Typ)
-    ├── Zone-Filter-Dropdown (alarm-list, esp-health, actuator-runtime; "Alle Zonen" oder konkrete Zone aus espStore.devices)
-    ├── Y-Achse Min/Max (Charts + Gauge)
-    ├── Zeitraum-Chips (1h, 6h, 24h, 7d, 30d — Historical + Line)
-    ├── Farb-Palette (8 Farben)
-    └── Threshold-Konfiguration (Alarm/Warn Low/High, auto-populate aus SENSOR_TYPE_CONFIG, sichtbar fuer line-chart + historical + gauge)
+│       └── Widget-Body (SensorCardWidget, GaugeWidget, LineChartWidget, MultiSensorWidget (Compare Mode: Toggle + sensorType/Zone-Dropdowns → Auto-Fill max 4 Subzone-Sensoren mit Subzone-Labels), etc.)
+├── WidgetConfigPanel.vue (SlideOver, Gear-Icon oeffnet Konfiguration; zoneId Prop fuer Zone-Scope Default PA-02c)
+│   ├── Titel-Input
+│   ├── Sensor Zone-Filter (selectedSensorZone: defaults to zoneId Prop bei Zone-Dashboards, "Alle Zonen" bei global; filtert useSensorOptions via filterZoneId)
+│   ├── Sensor-Selektion (gruppiert nach Zone/Subzone via optgroup: "ZoneName" oder "ZoneName / SubzoneName"; useSensorOptions Composable; zentrale Dedup)
+│   ├── Actuator-Selektion (je nach Widget-Typ)
+│   ├── Zone-Filter-Dropdown (alarm-list, esp-health, actuator-runtime; "Alle Zonen" oder konkrete Zone aus espStore.devices)
+│   ├── Y-Achse Min/Max (Charts + Gauge)
+│   ├── Zeitraum-Chips (1h, 6h, 24h, 7d, 30d — Historical + Statistics)
+│   ├── Farb-Palette (8 Farben)
+│   ├── Threshold-Konfiguration (Alarm/Warn Low/High, auto-populate aus SENSOR_TYPE_CONFIG, sichtbar fuer line-chart + historical + gauge)
+│   └── Statistics-Optionen (showStdDev Checkbox, showQuality Checkbox — nur bei statistics Widget)
+└── BulkCleanupModal (BaseModal, Checkbox-Liste aller autoGenerated Dashboards, Bulk-Delete via bulkDeleteLayouts)
 ```
 
 ### Standard Component Template
@@ -444,7 +458,7 @@ onUnmounted(() => { /* cleanup */ })
 | Type | Zeilen | Beschreibung |
 |------|--------|--------------|
 | MockESP / ESPDevice | 275-294 | Device mit Sensors, Actuators, Status |
-| MockSensor | 234-290 | Sensor mit Multi-Value Support, config_id (UUID), interface_type, i2c_address, device_scope, assigned_zones |
+| MockSensor | 234-290 | Sensor mit Multi-Value Support, config_id (UUID), interface_type (inkl. VIRTUAL), i2c_address, device_scope, assigned_zones |
 | MockActuator | 265-273 | Actuator mit PWM, device_scope, assigned_zones |
 | QualityLevel | - | 'excellent' \| 'good' \| 'fair' \| 'poor' \| 'bad' \| 'stale' \| 'error' |
 | MockSystemState | - | 12 States: BOOT, WIFI_SETUP, WIFI_CONNECTED, MQTT_CONNECTING, MQTT_CONNECTED, AWAITING_USER_CONFIG, ZONE_CONFIGURED, SENSORS_CONFIGURED, OPERATIONAL, LIBRARY_DOWNLOADING, SAFE_MODE, ERROR |
@@ -521,8 +535,8 @@ WebSocket-Events = Kontrakt zwischen Frontend und Backend.
 |-------|-------|-------|-------------------|
 | auth | stores/auth.ts | user, tokens, setupRequired | login, logout, refreshTokens |
 | esp | stores/esp.ts | devices[], pendingDevices[] | fetchAll, isMock, gpioStatusMap, onlineDevices (via getESPStatus), offlineDevices |
-| dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb (level, zoneName, deviceName, sensorName, ruleName, dashboardName), layouts[], DASHBOARD_TEMPLATES, DashboardTarget (interface), inlineMonitorPanels (alias), inlineMonitorPanelsCrossZone (computed), inlineMonitorPanelsForZone(zoneId) (fn), sideMonitorPanels (computed), bottomMonitorPanels (computed), hardwarePanels (computed), lastSyncError | toggleStatusFilter, resetFilters, createLayout, saveLayout, createLayoutFromTemplate, deleteLayout, exportLayout, importLayout, setLayoutTarget, generateZoneDashboard, claimAutoLayout, retrySync; fetchLayouts (Server-Merge + Orphan-Sync + autoGenerated-Migration) |
-| zone | stores/zone.store.ts | zoneEntities[], isLoadingZones | handleZoneAssignment (+ Toasts), handleSubzoneAssignment (+ Toasts), fetchZoneEntities, createZone, updateZone, archiveZone, reactivateZone, deleteZoneEntity; activeZones/archivedZones (computed); handleDeviceScopeChanged, handleDeviceContextChanged (T13-R3) |
+| dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb (level, zoneName, deviceName, sensorName, ruleName, dashboardName), layouts[], DASHBOARD_TEMPLATES, DashboardTarget (interface), inlineMonitorPanels (alias), inlineMonitorPanelsCrossZone (computed), inlineMonitorPanelsForZone(zoneId) (fn), sideMonitorPanels (computed), bottomMonitorPanels (computed), hardwarePanels (computed), autoGeneratedLayouts (computed), lastSyncError | toggleStatusFilter, resetFilters, createLayout, saveLayout, createLayoutFromTemplate, deleteLayout, bulkDeleteLayouts(layoutIds), exportLayout, importLayout, setLayoutTarget, generateZoneDashboard, claimAutoLayout, retrySync, addWidget(layoutId, config), removeWidget(layoutId, widgetId), updateWidgetConfig(layoutId, widgetId, newConfig); fetchLayouts (Server-Merge + Orphan-Sync + autoGenerated-Migration); cleanupOrphanedDashboards (V19-F05: auto-delete orphaned zone dashboards, watch on zoneEntities once + after deleteZoneEntity) |
+| zone | stores/zone.store.ts | zoneEntities[], isLoadingZones | handleZoneAssignment (+ Toasts), handleSubzoneAssignment (+ Toasts), fetchZoneEntities, createZone, updateZone, archiveZone, reactivateZone, deleteZoneEntity (+ cleanupOrphanedDashboards V19-F05); activeZones/archivedZones (computed); handleDeviceScopeChanged, handleDeviceContextChanged (T13-R3) |
 | deviceContext | shared/stores/deviceContext.store.ts | contexts (Map\<string, DeviceContextResponse\>), isLoaded | loadContextsForDevices, setContext, clearContext, handleContextChanged (WS), getActiveZoneId, getContext; fuer mobile/multi_zone Sensoren (6.7) |
 | logic | shared/stores/logic.store.ts | rules[], activeExecutions, executionHistory[], historyLoaded | fetchRules, toggleRule, crossEspConnections, getRulesForZone(zoneId), getZonesForRule(rule), getRulesForActuator(espId, gpio), getLastExecutionForActuator(espId, gpio), loadExecutionHistory, pushToHistory, undo, redo, canUndo, canRedo |
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
@@ -755,6 +769,15 @@ type RawSensor = { sensor_type: string; raw_value: number | null; name: string; 
 type GroupedSensor = { baseType: string; label: string; values: { type, label, value, unit, icon, quality }[] }
 type ZoneAggregation = { sensorTypes: { type, label, avg, min, max, count, unit }[]; extraTypeCount: number; deviceCount: number; onlineCount: number }
 type AggCategory = 'temperature' | 'humidity' | 'pressure' | 'light' | 'co2' | 'moisture' | 'ph' | 'ec' | 'flow' | 'other'
+
+// Computed/Virtual Sensor Types (PB-01)
+// 'vpd': { label: 'VPD', unit: 'kPa', min: 0, max: 3, decimals: 2, category: 'air' }
+// VPD = server-computed from sht31_temp + sht31_humidity, persisted as sensor_data with gpio=0
+
+// Virtual Sensor Metadata (V19-F03) — source info for server-computed sensors
+VIRTUAL_SENSOR_META: Record<string, { sources: string[]; formula: string }>
+// vpd → sources: ['Temperatur (SHT31)', 'Luftfeuchtigkeit (SHT31)'], formula: 'Magnus-Tetens (Air-VPD)'
+// Used by SensorCard to show Info-Icon + Tooltip for virtual sensors
 ```
 
 ---
@@ -772,7 +795,6 @@ type AggCategory = 'temperature' | 'humidity' | 'pressure' | 'light' | 'co2' | '
 '/'                                    → DashboardView.vue (?openSettings={id})
 '/hardware'                            → HardwareView.vue (Zone Accordion)
 '/monitor'                             → MonitorView.vue L1 (Zone-Tiles)
-'/monitor/dashboard/:dashboardId'      → MonitorView.vue L3 (Dashboard Viewer, VOR :zoneId wegen Greedy-Matching)
 '/monitor/:zoneId'                     → MonitorView.vue L2 (Subzone-Accordion)
 '/monitor/:zoneId/sensor/:sensorId'    → MonitorView.vue L3 (Sensor-Detail SlideOver)
 '/monitor/:zoneId/dashboard/:dashboardId' → MonitorView.vue L3 (Zone-Dashboard Viewer)
@@ -801,6 +823,7 @@ type AggCategory = 'temperature' | 'humidity' | 'pressure' | 'light' | 'co2' | '
 '/actuators'         → '/sensors?tab=actuators'
 '/custom-dashboard'  → '/editor'
 '/sensor-history'    → '/monitor'
+'/monitor/dashboard/:dashboardId' → '/editor/:dashboardId' (D2: cross-zone Dashboard-Viewer entfernt)
 ```
 
 ### Deep-Link-Pattern
@@ -1037,11 +1060,11 @@ dragPayload: any
 ### Neues Dashboard-Widget
 
 1. Widget-Komponente in `components/dashboard-widgets/` erstellen
-2. In `CustomDashboardView.vue` → `mountWidgetComponent()` einbinden
-3. `widgetTypes` Array erweitern (icon, label, description, defaultW/H)
-4. `WIDGET_DEFAULT_CONFIGS` Record erweitern (Smart-Defaults fuer Config)
-5. CSS: Tailwind + `glass-panel` fuer Konsistenz
-6. Daten aus Store beziehen (nicht direkt API)
+2. 4-Stellen-Registrierung in `composables/useDashboardWidgets.ts`: `componentMap`, `WIDGET_TYPE_META`, `WIDGET_DEFAULT_CONFIGS`, Props-Bridge (if-Zeilen in `mountWidgetToElement`)
+3. `WidgetType` Union in `shared/stores/dashboard.store.ts` erweitern
+4. `WidgetConfigPanel.vue`: `hasSensorField`/`hasTimeRange`/`widgetTypeLabels` je nach Bedarf ergaenzen
+5. Falls neue Config-Props: im flachen Config-Interface in `dashboard.store.ts` als optionale Felder ergaenzen
+6. Scoped CSS mit BEM-Klassen + Design-Tokens (kein Tailwind in dashboard-widgets)
 
 ### Feature mit Settings
 
@@ -1166,6 +1189,7 @@ cleanupWebSocket() {
 | gpioConfig Import-Fehler | Namenskonflikt | Direkt importieren |
 | State-Verlust bei Tab-Wechsel | View nicht in keep-alive `:include` | `defineOptions({ name: 'ViewName' })` + Name in AppShell include-Array |
 | GridStack leer nach Tab-Rueckkehr | `onActivated` fehlt | Re-Init in `onActivated()`, Cleanup in `onDeactivated()` |
+| FAB Sub-Panel nicht sichtbar | `position: absolute` in FAB-Container geclippt | `position: fixed` + explizites `bottom/right` + `z-index: var(--z-fab)` (V19-F04) |
 
 ---
 
@@ -1213,6 +1237,7 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.78 | **Letzte Aktualisierung:** 2026-03-11
+**Version:** 9.92 | **Letzte Aktualisierung:** 2026-03-26
+
 
 > Vollstaendiger Changelog: siehe `CHANGELOG.md` im selben Verzeichnis.

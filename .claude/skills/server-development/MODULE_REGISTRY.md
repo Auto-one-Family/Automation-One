@@ -257,11 +257,25 @@ class ValidationResult:
 
 ### 1.16 ZoneKPIService (Phase K4)
 
-**Datei:** `src/services/zone_kpi_service.py` (227 Zeilen)
+**Datei:** `src/services/zone_kpi_service.py` (235 Zeilen)
 
 | Methode | Parameter | Return | Beschreibung |
 |---------|-----------|--------|--------------|
 | `get_zone_kpis()` | `zone_id: str` | `ZoneKPIs` | VPD, DLI, Health-Score, etc. |
+
+VPD-Berechnung delegiert an `vpd_calculator.calculate_vpd()` (PB-01).
+
+---
+
+### 1.16b VPDCalculator (PB-01)
+
+**Datei:** `src/services/vpd_calculator.py` (29 Zeilen)
+
+Shared VPD-Berechnungsmodul (Magnus-Tetens). Genutzt von `zone_kpi_service.py` (Live-KPI) und `sensor_handler.py` (event-driven Persistierung).
+
+| Funktion | Parameter | Return | Beschreibung |
+|----------|-----------|--------|--------------|
+| `calculate_vpd()` | `temperature_c: float, humidity_rh: float` | `float \| None` | Air-VPD in kPa. None bei ungültigen Eingaben. |
 
 ---
 
@@ -678,7 +692,7 @@ CIRCUIT_BREAKER_MQTT_RECOVERY_TIMEOUT=30
 | Repository | Model | Spezial-Queries |
 |-----------|-------|-----------------|
 | ESPRepository | ESPDevice | `get_by_device_id(include_deleted)`, `soft_delete()`, `get_running_mocks()`, `get_online()`, `rebuild_simulation_config(device, sensor_configs)` |
-| SensorRepository | SensorConfig | `get_by_esp_gpio_and_type()`, `get_by_esp_gpio_type_and_i2c()`, `get_by_esp_gpio_type_and_onewire()`, `get_all_by_i2c_address()` |
+| SensorRepository | SensorConfig | `create_if_not_exists() → (config, created)` (V19-F02), `get_by_esp_gpio_and_type()`, `get_by_esp_gpio_type_and_i2c()`, `get_by_esp_gpio_type_and_onewire()`, `get_all_by_i2c_address()` |
 | ActuatorRepository | ActuatorConfig | `get_by_esp_and_gpio()`, `get_state()`, `log_command()`, `get_history(esp_id, gpio, limit, data_source, start_time, end_time)`, `reset_states_for_device()`, `clear_emergency_states()` |
 | LogicRepository | CrossESPLogic | `get_rules_by_trigger_sensor()`, `get_enabled_rules()` |
 | AuditLogRepository | AuditLog | `search()`, `get_stats()`, `cleanup_old()` |

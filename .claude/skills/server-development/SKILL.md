@@ -267,7 +267,7 @@ class YourRepository(BaseRepository[YourModel]):
 
 ### Multi-Value Sensor Support
 
-**Unique Constraint:** `(esp_id, gpio, sensor_type, onewire_address, i2c_address)`
+**Unique Constraint:** Expression index `unique_esp_gpio_sensor_interface_v2` using `COALESCE(onewire_address, ''), COALESCE(i2c_address::text, '')` — NULL-safe (V19-F02+F13)
 
 ```python
 # SHT31: 2 Configs auf gleichem GPIO
