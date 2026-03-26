@@ -33,14 +33,14 @@ import {
   Filler,
 } from 'chart.js'
 import zoomPlugin from 'chartjs-plugin-zoom'
-import annotationPlugin from 'chartjs-plugin-annotation'
 import 'chartjs-adapter-date-fns'
 import { RotateCcw } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { websocketService } from '@/services/websocket'
-import type { ChartSensor, SensorReading } from '@/types'
+import type { ChartSensor, SensorReading, SensorDataResolution } from '@/types'
 import { createLogger } from '@/utils/logger'
 import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+import { getAutoResolution, TIME_RANGE_MINUTES } from '@/utils/autoResolution'
 
 const log = createLogger('MultiSensorChart')
 
@@ -55,15 +55,14 @@ ChartJS.register(
   Legend,
   TimeScale,
   Filler,
-  zoomPlugin,
-  annotationPlugin
+  zoomPlugin
 )
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-/** Maximum data points per sensor (Memory-Schutz) */
+/** Safety-cap: max data points per sensor after server-side aggregation */
 const MAX_DATA_POINTS = 1000
 
 /** Retry configuration */
@@ -159,6 +158,12 @@ const isZoomed = ref(false)
 /** Zeitraum in Millisekunden */
 const timeRangeMs = computed(() => {
   return TIME_RANGES[props.timeRange]?.ms || TIME_RANGES['24h'].ms
+})
+
+/** Server-side aggregation resolution based on time range */
+const currentResolution = computed<SensorDataResolution | undefined>(() => {
+  const minutes = TIME_RANGE_MINUTES[props.timeRange] ?? 1440
+  return getAutoResolution(minutes)
 })
 
 /** Zeitraum-Label für Anzeige */
@@ -321,7 +326,7 @@ const chartData = computed(() => {
       label: sensor.name,
       data: readings.map((r) => ({
         x: new Date(r.timestamp).getTime(),
-        y: r.processed_value ?? r.raw_value,
+        y: r.processed_value ?? r.raw_value ?? null,
       })),
       borderColor: sensor.color,
       backgroundColor: `${sensor.color}20`,
@@ -436,7 +441,8 @@ const chartOptions = computed(() => {
           label: (item: any) => {
             const sensor = props.sensors[item.datasetIndex]
             const value = item.parsed.y?.toFixed(2) ?? 'N/A'
-            return ` ${sensor.name}: ${value} ${sensor.unit}`
+            const avgSuffix = currentResolution.value ? ' (Ø)' : ''
+            return ` ${sensor.name}: ${value} ${sensor.unit}${avgSuffix}`
           },
         },
       },
@@ -531,6 +537,11 @@ async function fetchData(retryAttempt = 0): Promise<void> {
 
   try {
     const promises = props.sensors.map(async (sensor) => {
+      // Skip sensors with invalid identifiers (prevents 422 from backend)
+      if (!sensor.espId || sensor.gpio == null) {
+        log.debug(`Skipping sensor ${sensor.id} — invalid espId or gpio`)
+        return { id: sensor.id, readings: [] as SensorReading[], error: null }
+      }
       try {
         log.debug(`Querying API for sensor ${sensor.id}`, {
           esp_id: sensor.espId,
@@ -544,6 +555,7 @@ async function fetchData(retryAttempt = 0): Promise<void> {
           start_time: startTime.toISOString(),
           end_time: now.toISOString(),
           limit: MAX_DATA_POINTS,
+          resolution: currentResolution.value,
         })
         log.debug(`API response for ${sensor.id}`, {
           readingsCount: response.readings?.length ?? 0,
@@ -846,6 +858,7 @@ onUnmounted(() => {
     <!-- Chart -->
     <div v-else class="multi-sensor-chart__container" :style="{ height: `${height}px` }">
       <Line
+        v-if="chartData.datasets.length > 0"
         ref="chartRef"
         :data="chartData"
         :options="chartOptions"

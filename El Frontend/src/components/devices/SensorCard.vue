@@ -6,11 +6,11 @@
  * Monitor mode: Name, live value, quality dot, sparkline, ESP-ID
  */
 import { computed, ref, type Component } from 'vue'
-import { Settings, ChevronRight, WifiOff, Clock, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity, CircleDot, TrendingUp, TrendingDown, Minus } from 'lucide-vue-next'
+import { Settings, ChevronRight, WifiOff, Clock, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity, CircleDot, TrendingUp, TrendingDown, Minus, Info } from 'lucide-vue-next'
 import type { SensorWithContext } from '@/composables/useZoneGrouping'
 import type { TrendDirection } from '@/utils/trendUtils'
 import { qualityToStatus, getDataFreshness, formatRelativeTime } from '@/utils/formatters'
-import { getSensorLabel, getSensorUnit, getSensorDisplayName, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+import { getSensorLabel, getSensorUnit, getSensorDisplayName, SENSOR_TYPE_CONFIG, VIRTUAL_SENSOR_META } from '@/utils/sensorDefaults'
 import { useDeviceContextStore } from '@/shared/stores/deviceContext.store'
 import { useZoneStore } from '@/shared/stores/zone.store'
 
@@ -132,6 +132,15 @@ const scopeTooltip = computed(() => {
   return `Bedient: ${zones.join(', ')}`
 })
 
+// Virtual sensor info (V19-F03): tooltip for server-computed sensors
+const virtualMeta = computed(() => VIRTUAL_SENSOR_META[props.sensor.sensor_type] ?? null)
+const showVirtualInfo = ref(false)
+
+function toggleVirtualInfo(event: Event): void {
+  event.stopPropagation()
+  showVirtualInfo.value = !showVirtualInfo.value
+}
+
 // Subzone badge (Phase 2.2): "Keine Subzone" when null/empty
 const subzoneLabel = computed(() => {
   const name = props.sensor.subzone_name ?? ''
@@ -194,7 +203,8 @@ async function handleZoneContextChange(event: Event): Promise<void> {
 
 function formatValue(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
-  return Number.isInteger(value) ? value.toString() : Number(value).toFixed(1)
+  const dec = SENSOR_TYPE_CONFIG[props.sensor.sensor_type]?.decimals ?? 1
+  return Number(value).toFixed(dec)
 }
 
 function handleClick() {
@@ -238,6 +248,16 @@ function handleClick() {
       <div class="sensor-card__header">
         <component :is="sensorIcon" class="sensor-card__type-icon" />
         <span class="sensor-card__name" :title="displayName">{{ displayName }}</span>
+        <span v-if="virtualMeta" class="sensor-card__virtual-info-trigger" @click="toggleVirtualInfo" @mouseenter="showVirtualInfo = true" @mouseleave="showVirtualInfo = false">
+          <Info :size="14" />
+          <div v-show="showVirtualInfo" class="sensor-card__virtual-tooltip">
+            <p class="sensor-card__virtual-tooltip-heading">Berechnet aus:</p>
+            <ul class="sensor-card__virtual-tooltip-list">
+              <li v-for="src in virtualMeta.sources" :key="src">{{ src }}</li>
+            </ul>
+            <p class="sensor-card__virtual-tooltip-formula">Formel: {{ virtualMeta.formula }}</p>
+          </div>
+        </span>
         <div class="sensor-card__quality">
           <span :class="['sensor-card__dot', statusClass]" />
           <span v-if="qualityLabel" :class="['sensor-card__quality-text', `sensor-card__quality-text--${effectiveQualityStatus}`]">{{ qualityLabel }}</span>
@@ -618,5 +638,58 @@ function handleClick() {
 .sensor-card__zone-select:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Virtual sensor info icon + tooltip (V19-F03) */
+.sensor-card__virtual-info-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  color: var(--color-text-muted);
+  cursor: help;
+  flex-shrink: 0;
+}
+
+.sensor-card__virtual-tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  min-width: 200px;
+  padding: var(--space-3);
+  background: var(--glass-bg, rgba(18, 18, 26, 0.92));
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+.sensor-card__virtual-tooltip-heading {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.sensor-card__virtual-tooltip-list {
+  list-style: disc;
+  padding-left: 1rem;
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.sensor-card__virtual-tooltip-list li {
+  margin-bottom: 2px;
+}
+
+.sensor-card__virtual-tooltip-formula {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin: 0;
 }
 </style>

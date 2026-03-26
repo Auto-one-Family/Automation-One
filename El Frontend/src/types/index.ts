@@ -286,8 +286,8 @@ export interface MockSensor {
   // ═══════════════════════════════════════════════════════════════════════════
   // Interface / Address Fields (for Orbital display)
   // ═══════════════════════════════════════════════════════════════════════════
-  /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL */
-  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | null
+  /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL, VIRTUAL */
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL' | null
   /** I2C address (0-127) for I2C sensors */
   i2c_address?: number | null
 
@@ -382,8 +382,8 @@ export interface MockSensorConfig {
   // =========================================================================
   /** OneWire ROM address for DS18B20 sensors (16 hex chars) */
   onewire_address?: string
-  /** Interface type for sensor (I2C, ONEWIRE, ANALOG, DIGITAL) */
-  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL'
+  /** Interface type for sensor (I2C, ONEWIRE, ANALOG, DIGITAL, VIRTUAL) */
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL'
 }
 
 export interface MockActuatorConfig {
@@ -650,8 +650,8 @@ export interface SensorConfigCreate {
   // =========================================================================
   // MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
   // =========================================================================
-  /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL (auto-inferred if not provided) */
-  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL'
+  /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL, VIRTUAL (auto-inferred if not provided) */
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL'
   /** I2C address (0-127) - required for I2C sensors */
   i2c_address?: number | null
   /** OneWire device ROM address - optional, server auto-generates if not provided */

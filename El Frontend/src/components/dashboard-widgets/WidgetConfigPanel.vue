@@ -11,13 +11,16 @@ import { useEspStore } from '@/stores/esp'
 import { SlideOver } from '@/shared/design/primitives'
 import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { CHART_COLORS } from '@/utils/chartColors'
-import type { MockSensor, MockActuator } from '@/types'
+import { useSensorOptions } from '@/composables/useSensorOptions'
+import type { MockActuator } from '@/types'
 
 interface Props {
   open: boolean
   widgetId: string
   widgetType: string
   config: Record<string, any>
+  /** Zone ID for pre-filtering sensor options in zone-scoped dashboards (PA-02c) */
+  zoneId?: string
 }
 
 const props = defineProps<Props>()
@@ -37,13 +40,13 @@ watch(() => props.config, (cfg) => {
 
 // Determine which fields to show based on widget type
 const hasSensorField = computed(() =>
-  ['line-chart', 'gauge', 'sensor-card', 'historical'].includes(props.widgetType)
+  ['line-chart', 'gauge', 'sensor-card', 'historical', 'statistics'].includes(props.widgetType)
 )
 const hasActuatorField = computed(() =>
   ['actuator-card'].includes(props.widgetType)
 )
 const hasTimeRange = computed(() =>
-  ['historical'].includes(props.widgetType)
+  ['historical', 'statistics'].includes(props.widgetType)
 )
 const hasYRange = computed(() =>
   ['line-chart', 'historical', 'gauge'].includes(props.widgetType)
@@ -54,7 +57,16 @@ const hasZoneFilterField = computed(() =>
   ['alarm-list', 'esp-health', 'actuator-runtime'].includes(props.widgetType)
 )
 
-// Available zones (from espStore.devices — no GET /zones endpoint)
+// Zone filter for sensor selection — defaults to dashboard zoneId (PA-02c)
+const selectedSensorZone = ref<string | undefined>(props.zoneId)
+
+// Sync zone filter when dashboard zoneId changes
+watch(() => props.zoneId, (v) => { selectedSensorZone.value = v })
+
+// Centralized sensor options (deduplicated, zone-grouped)
+const { groupedSensorOptions } = useSensorOptions(selectedSensorZone)
+
+// Available zones (derived from grouped sensor options)
 const availableZones = computed(() => {
   const seen = new Set<string>()
   const list: { id: string; name: string }[] = []
@@ -65,88 +77,6 @@ const availableZones = computed(() => {
     }
   }
   return list.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
-})
-
-// Zone filter for sensor selection — separate from widget zone filter
-const selectedSensorZone = ref<string>('')
-
-// Available sensors (deduplicated by espId:gpio:sensorType), filtered by zone
-interface SensorOption {
-  id: string
-  label: string
-  type: string
-  subzoneName: string | null
-}
-
-interface SensorGroup {
-  name: string
-  sensors: SensorOption[]
-}
-
-const availableSensors = computed(() => {
-  const items: SensorOption[] = []
-  const seen = new Set<string>()
-  for (const device of espStore.devices) {
-    // Zone filter: skip devices not in selected zone
-    if (selectedSensorZone.value && device.zone_id !== selectedSensorZone.value) continue
-
-    const deviceId = espStore.getDeviceId(device)
-    for (const s of (device.sensors as MockSensor[]) || []) {
-      const id = `${deviceId}:${s.gpio}:${s.sensor_type}`
-      if (seen.has(id)) continue
-      seen.add(id)
-
-      // Resolve subzone name for grouping
-      let subzoneName: string | null = null
-      if (s.subzone_id) {
-        // Try to find subzone name from device subzones
-        const subzones = (device as any).subzones as Array<{ id: string; name: string }> | undefined
-        const sz = subzones?.find((sz: { id: string }) => sz.id === s.subzone_id)
-        subzoneName = sz?.name || s.subzone_id
-      }
-
-      items.push({
-        id,
-        label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
-        type: s.sensor_type || '',
-        subzoneName,
-      })
-    }
-  }
-  return items
-})
-
-// Sensors grouped by subzone (for optgroup rendering)
-const sensorGroups = computed<SensorGroup[]>(() => {
-  if (!selectedSensorZone.value) {
-    // No zone filter: single flat group
-    return [{ name: '', sensors: availableSensors.value }]
-  }
-
-  const groups = new Map<string, SensorOption[]>()
-  const unassigned: SensorOption[] = []
-
-  for (const s of availableSensors.value) {
-    if (s.subzoneName) {
-      const list = groups.get(s.subzoneName) || []
-      list.push(s)
-      groups.set(s.subzoneName, list)
-    } else {
-      unassigned.push(s)
-    }
-  }
-
-  const result: SensorGroup[] = []
-  // Named subzones first, sorted alphabetically
-  for (const [name, sensors] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    result.push({ name, sensors })
-  }
-  // Unassigned at the end
-  if (unassigned.length > 0) {
-    result.push({ name: 'Nicht zugewiesen', sensors: unassigned })
-  }
-
-  return result
 })
 
 // Available actuators
@@ -164,12 +94,23 @@ const availableActuators = computed(() => {
   return items
 })
 
+// Find sensor type from grouped options for Y-range hints
+function findSensorType(sensorId: string): string | null {
+  for (const group of groupedSensorOptions.value) {
+    for (const subgroup of group.subgroups) {
+      const opt = subgroup.options.find(o => o.value === sensorId)
+      if (opt) return opt.sensorType
+    }
+  }
+  return null
+}
+
 // Current sensor type config for Y-range hints
 const sensorTypeConfig = computed(() => {
   if (!localConfig.value.sensorId) return null
-  const sensor = availableSensors.value.find(s => s.id === localConfig.value.sensorId)
-  if (!sensor) return null
-  return SENSOR_TYPE_CONFIG[sensor.type] || null
+  const type = findSensorType(localConfig.value.sensorId)
+  if (!type) return null
+  return SENSOR_TYPE_CONFIG[type] || null
 })
 
 function updateField(field: string, value: any) {
@@ -179,11 +120,11 @@ function updateField(field: string, value: any) {
 
 function handleSensorChange(sensorId: string) {
   // Auto-populate thresholds from SENSOR_TYPE_CONFIG when sensor changes
-  const sensor = availableSensors.value.find(s => s.id === sensorId)
+  const sType = findSensorType(sensorId)
   const updates: Record<string, any> = { sensorId }
 
-  if (sensor) {
-    const cfg = SENSOR_TYPE_CONFIG[sensor.type]
+  if (sType) {
+    const cfg = SENSOR_TYPE_CONFIG[sType]
     if (cfg) {
       // Auto-fill Y-axis range when not yet set (useful for gauge + charts)
       if (localConfig.value.yMin == null && localConfig.value.yMax == null) {
@@ -203,6 +144,10 @@ function handleActuatorChange(actuatorId: string) {
   updateField('actuatorId', actuatorId)
 }
 
+const hasStatisticsOptions = computed(() =>
+  props.widgetType === 'statistics'
+)
+
 const widgetTypeLabels: Record<string, string> = {
   'line-chart': 'Linien-Chart',
   'gauge': 'Gauge',
@@ -213,6 +158,7 @@ const widgetTypeLabels: Record<string, string> = {
   'esp-health': 'ESP-Health',
   'alarm-list': 'Alarm-Liste',
   'multi-sensor': 'Multi-Sensor-Chart',
+  'statistics': 'Statistik',
 }
 </script>
 
@@ -241,8 +187,8 @@ const widgetTypeLabels: Record<string, string> = {
         <label class="widget-config-panel__label">Zone</label>
         <select
           class="widget-config-panel__select"
-          :value="selectedSensorZone"
-          @change="selectedSensorZone = ($event.target as HTMLSelectElement).value"
+          :value="selectedSensorZone || ''"
+          @change="selectedSensorZone = ($event.target as HTMLSelectElement).value || undefined"
         >
           <option value="">Alle Zonen</option>
           <option
@@ -253,7 +199,7 @@ const widgetTypeLabels: Record<string, string> = {
         </select>
       </div>
 
-      <!-- Sensor Selection (grouped by subzone when zone is selected) -->
+      <!-- Sensor Selection (grouped by Zone / Subzone) -->
       <div v-if="hasSensorField" class="widget-config-panel__field">
         <label class="widget-config-panel__label">Sensor</label>
         <select
@@ -262,27 +208,16 @@ const widgetTypeLabels: Record<string, string> = {
           @change="handleSensorChange(($event.target as HTMLSelectElement).value)"
         >
           <option value="" disabled>— Sensor wählen —</option>
-          <template v-if="sensorGroups.length === 1 && !sensorGroups[0].name">
-            <!-- Flat list (no zone selected or single group) -->
-            <option
-              v-for="s in sensorGroups[0].sensors"
-              :key="s.id"
-              :value="s.id"
-            >{{ s.label }}</option>
-          </template>
-          <template v-else>
-            <!-- Grouped by subzone -->
-            <optgroup
-              v-for="group in sensorGroups"
-              :key="group.name"
-              :label="group.name"
-            >
-              <option
-                v-for="s in group.sensors"
-                :key="s.id"
-                :value="s.id"
-              >{{ s.label }}</option>
-            </optgroup>
+          <template v-for="zoneGroup in groupedSensorOptions" :key="zoneGroup.zoneId ?? '__unassigned'">
+            <template v-for="subgroup in zoneGroup.subgroups" :key="`${zoneGroup.zoneId}_${subgroup.subzoneId ?? '__nosub'}`">
+              <optgroup :label="subgroup.label ? `${zoneGroup.label} / ${subgroup.label}` : zoneGroup.label">
+                <option
+                  v-for="opt in subgroup.options"
+                  :key="opt.value"
+                  :value="opt.value"
+                >{{ opt.label }}</option>
+              </optgroup>
+            </template>
           </template>
         </select>
       </div>
@@ -433,6 +368,28 @@ const widgetTypeLabels: Record<string, string> = {
             />
           </div>
         </div>
+      </div>
+
+      <!-- Statistics options (showStdDev / showQuality) -->
+      <div v-if="hasStatisticsOptions" class="widget-config-panel__field">
+        <label class="widget-config-panel__label-row">
+          <span>Standardabweichung anzeigen</span>
+          <input
+            type="checkbox"
+            :checked="localConfig.showStdDev ?? true"
+            @change="updateField('showStdDev', ($event.target as HTMLInputElement).checked)"
+          />
+        </label>
+      </div>
+      <div v-if="hasStatisticsOptions" class="widget-config-panel__field">
+        <label class="widget-config-panel__label-row">
+          <span>Datenqualitaet anzeigen</span>
+          <input
+            type="checkbox"
+            :checked="localConfig.showQuality ?? false"
+            @change="updateField('showQuality', ($event.target as HTMLInputElement).checked)"
+          />
+        </label>
       </div>
     </div>
   </SlideOver>

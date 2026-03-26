@@ -19,23 +19,23 @@ import { useSwipeNavigation } from '@/composables/useSwipeNavigation'
 import { useEspStore } from '@/stores/esp'
 import { useZoneStore } from '@/shared/stores/zone.store'
 import { useDeviceContextStore } from '@/shared/stores/deviceContext.store'
-import { useZoneDragDrop, ZONE_UNASSIGNED } from '@/composables'
 import { useZoneGrouping } from '@/composables/useZoneGrouping'
+import { useZoneKPIs } from '@/composables/useZoneKPIs'
 import { useSubzoneResolver } from '@/composables/useSubzoneResolver'
 import { useSparklineCache } from '@/composables/useSparklineCache'
-import { aggregateZoneSensors, formatAggregatedValue, getSensorLabel, getSensorUnit, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+import { getSensorLabel, getSensorUnit, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { useLogicStore } from '@/shared/stores/logic.store'
-import { getESPStatus } from '@/composables/useESPStatus'
-import { formatRelativeTime, formatDate, qualityToStatus, DATA_STALE_THRESHOLD_S, ZONE_STALE_THRESHOLD_MS } from '@/utils/formatters'
+import { formatRelativeTime, formatDate, qualityToStatus, DATA_STALE_THRESHOLD_S } from '@/utils/formatters'
 import { calculateTrend } from '@/utils/trendUtils'
 import type { TrendDirection } from '@/utils/trendUtils'
 import { sensorsApi } from '@/api/sensors'
 import { zonesApi } from '@/api/zones'
-import type { SensorReading, SensorStats, ZoneListEntry } from '@/types'
+import type { SensorReading, SensorStats } from '@/types'
 import type { ZoneMonitorData } from '@/types/monitor'
 import type { SensorWithContext, ActuatorWithContext } from '@/composables/useZoneGrouping'
-import { LayoutDashboard, Download, CheckCircle2, XCircle, Clock, TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp, Pencil, Plus as PlusIcon, ListFilter } from 'lucide-vue-next'
+import { LayoutDashboard, Download, Clock, TrendingUp, TrendingDown, Minus, ListFilter } from 'lucide-vue-next'
+import ZoneTileCard from '@/components/monitor/ZoneTileCard.vue'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import TimeRangeSelector, { type TimePreset } from '@/components/charts/TimeRangeSelector.vue'
 import { Line } from 'vue-chartjs'
@@ -63,7 +63,7 @@ import {
   ArrowLeft, Activity, AlertTriangle,
   ChevronLeft, ChevronRight, Settings,
 } from 'lucide-vue-next'
-import type { MockSensor, MockActuator } from '@/types'
+import type { MockSensor } from '@/types'
 import ViewTabBar from '@/components/common/ViewTabBar.vue'
 import SensorCard from '@/components/devices/SensorCard.vue'
 import ActuatorCard from '@/components/devices/ActuatorCard.vue'
@@ -73,7 +73,8 @@ import InlineDashboardPanel from '@/components/dashboard/InlineDashboardPanel.vu
 import BaseSkeleton from '@/shared/design/primitives/BaseSkeleton.vue'
 import ErrorState from '@/shared/design/patterns/ErrorState.vue'
 import ZoneRulesSection from '@/components/monitor/ZoneRulesSection.vue'
-import ActiveAutomationsSection from '@/components/monitor/ActiveAutomationsSection.vue'
+import QuickActionBall from '@/components/quick-action/QuickActionBall.vue'
+import AddWidgetDialog from '@/components/monitor/AddWidgetDialog.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -82,19 +83,13 @@ const zoneStore = useZoneStore()
 const deviceContextStore = useDeviceContextStore()
 const dashStore = useDashboardStore()
 const logicStore = useLogicStore()
-const { groupDevicesByZone } = useZoneDragDrop()
-
 // =============================================================================
-// L1 Zone Filter
+// L1 Zone KPIs (extracted composable)
 // =============================================================================
 
 const selectedZoneFilter = ref<string | null>(null)
 
-const filteredZoneKPIs = computed(() => {
-  const nonEmpty = zoneKPIs.value.filter(z => z.totalDevices > 0)
-  if (!selectedZoneFilter.value) return nonEmpty
-  return nonEmpty.filter(z => z.zoneId === selectedZoneFilter.value)
-})
+const { zoneKPIs, filteredZoneKPIs, isZoneStale, allZones } = useZoneKPIs({ filter: selectedZoneFilter })
 
 const isArchivedZoneSelected = computed(() => {
   if (!selectedZoneFilter.value) return false
@@ -103,11 +98,6 @@ const isArchivedZoneSelected = computed(() => {
 
 const isZoneFilterActive = computed(() => selectedZoneFilter.value !== null)
 
-/** Show ActiveAutomationsSection only when enabled rules exist (or still loading) */
-const hasActiveAutomations = computed(() => {
-  if (logicStore.isLoading) return true
-  return logicStore.enabledRules.length > 0
-})
 
 // =============================================================================
 // L2 Subzone Filter
@@ -137,29 +127,6 @@ const expandedSensorKey = ref<string | null>(null)
 // Sensor key helper (from sparkline cache composable)
 const { sparklineCache, getSensorKey, loadInitialData: loadSparklineHistory } = useSparklineCache()
 
-// Zone list from API (includes empty zones from ZoneContext)
-const allZones = ref<ZoneListEntry[]>([])
-
-let lastZoneFetch = 0
-const ZONE_FETCH_COOLDOWN_MS = 30_000
-
-async function fetchAllZones(): Promise<void> {
-  try {
-    const response = await zonesApi.getAllZones()
-    allZones.value = response.zones
-  } catch {
-    allZones.value = []
-  }
-}
-
-async function fetchAllZonesGuarded(): Promise<void> {
-  const now = Date.now()
-  if (allZones.value.length > 0 && now - lastZoneFetch < ZONE_FETCH_COOLDOWN_MS) {
-    return
-  }
-  lastZoneFetch = now
-  await fetchAllZones()
-}
 
 // Zone monitor data (API primary, fallback via useZoneGrouping)
 const zoneMonitorData = ref<ZoneMonitorData | null>(null)
@@ -864,8 +831,7 @@ onMounted(() => {
     espStore.fetchAll()
   }
 
-  // Fetch all zones (including empty ones from ZoneContext) — guarded against rapid re-mounts
-  fetchAllZonesGuarded()
+  // allZones fetch handled by useZoneKPIs composable (onMounted + guarded)
 
   // Fetch zone entities for filter dropdown (active + archived)
   if (zoneStore.zoneEntities.length === 0) {
@@ -892,8 +858,7 @@ onUnmounted(() => {
   unregisterRight?.()
   // Abort any in-flight zone monitor request
   zoneMonitorAbort.value?.abort()
-  // Cleanup KPI debounce timer
-  if (kpiDebounceTimer) clearTimeout(kpiDebounceTimer)
+  // KPI debounce timer cleanup handled by useZoneKPIs composable
 })
 
 // Graceful fallback: redirect to L1 if zone does not exist
@@ -944,238 +909,7 @@ watch(
   { immediate: true },
 )
 
-// =============================================================================
-// Level 1: Zone KPI Aggregation (using aggregateZoneSensors)
-// =============================================================================
-
-/** Zone health status — traffic-light pattern */
-type ZoneHealthStatus = 'ok' | 'warning' | 'alarm' | 'empty'
-
-interface ZoneKPI {
-  zoneId: string
-  zoneName: string
-  sensorCount: number
-  actuatorCount: number
-  activeSensors: number
-  activeActuators: number
-  alarmCount: number
-  aggregation: ReturnType<typeof aggregateZoneSensors>
-  /** Newest sensor reading timestamp across all devices in this zone */
-  lastActivity: string | null
-  /** Computed zone health status */
-  healthStatus: ZoneHealthStatus
-  /** Human-readable reason for the health status (empty for 'ok') */
-  healthReason: string
-  /** Number of online ESP devices in this zone */
-  onlineDevices: number
-  /** Total ESP devices in this zone */
-  totalDevices: number
-  /** Number of mobile sensors "visiting" this zone from other ESPs (6.7) */
-  mobileGuestCount: number
-}
-
-// ZONE_STALE_THRESHOLD_MS imported from @/utils/formatters
-
-function getZoneHealthStatus(
-  alarmCount: number,
-  activeSensors: number,
-  sensorCount: number,
-  onlineDevices: number,
-  totalDevices: number,
-  emergencyStoppedCount: number,
-): { status: ZoneHealthStatus; reason: string } {
-  // Empty zone: no devices at all — neutral status, not alarm
-  if (totalDevices === 0) {
-    return { status: 'empty', reason: 'Keine Geräte zugeordnet' }
-  }
-  const offlineDevices = totalDevices - onlineDevices
-  // Red: all devices offline OR no active sensors when sensors exist
-  if (totalDevices > 0 && onlineDevices === 0) {
-    return { status: 'alarm', reason: `${totalDevices === 1 ? 'Gerät' : `Alle ${totalDevices} Geräte`} offline` }
-  }
-  if (sensorCount > 0 && activeSensors === 0) {
-    return { status: 'alarm', reason: 'Keine Sensoren aktiv' }
-  }
-  // Yellow: some alarms OR some sensors offline OR emergency-stopped actuators
-  // (matches ZonePlate warning logic in HardwareView for consistency)
-  const reasons: string[] = []
-  if (offlineDevices > 0) reasons.push(`${offlineDevices} ${offlineDevices === 1 ? 'Gerät' : 'Geräte'} offline`)
-  if (alarmCount > 0) reasons.push(`${alarmCount} ${alarmCount === 1 ? 'Sensor' : 'Sensoren'} fehlerhaft`)
-  else if (sensorCount > 0 && activeSensors < sensorCount) reasons.push(`${sensorCount - activeSensors} ${sensorCount - activeSensors === 1 ? 'Sensor' : 'Sensoren'} inaktiv`)
-  if (emergencyStoppedCount > 0) reasons.push(`${emergencyStoppedCount} Not-Aus aktiv`)
-  if (reasons.length > 0) return { status: 'warning', reason: reasons.join(', ') }
-  // Green: everything OK
-  return { status: 'ok', reason: '' }
-}
-
-const HEALTH_STATUS_CONFIG: Record<ZoneHealthStatus, { label: string; colorClass: string }> = {
-  ok: { label: 'Alles OK', colorClass: 'zone-status--ok' },
-  warning: { label: 'Warnung', colorClass: 'zone-status--warning' },
-  alarm: { label: 'Alarm', colorClass: 'zone-status--alarm' },
-  empty: { label: 'Leer', colorClass: 'zone-status--empty' },
-}
-
-function computeZoneKPIs(): ZoneKPI[] {
-  const groups = groupDevicesByZone(espStore.devices)
-  const deviceZoneMap = new Map<string, ZoneKPI>()
-
-  // Track mobile sensors that should be counted in their active zone (6.7)
-  // Key: target zone ID, Value: count of mobile guest sensors
-  const mobileGuestCounts = new Map<string, number>()
-  // Track mobile sensors to subtract from their home zone
-  const mobileSensorsAwayFromHome = new Map<string, number>()
-
-  // First pass: identify mobile sensors with active contexts
-  for (const group of groups) {
-    if (group.zoneId === ZONE_UNASSIGNED) continue
-    for (const device of group.devices) {
-      const sensors = (device.sensors as MockSensor[]) || []
-      for (const sensor of sensors) {
-        const s = sensor as MockSensor & { config_id?: string; device_scope?: string }
-        if (s.device_scope === 'mobile' && s.config_id) {
-          const activeZoneId = deviceContextStore.getActiveZoneId(s.config_id)
-          if (activeZoneId && activeZoneId !== group.zoneId) {
-            // This sensor is "visiting" another zone
-            mobileGuestCounts.set(activeZoneId, (mobileGuestCounts.get(activeZoneId) ?? 0) + 1)
-            mobileSensorsAwayFromHome.set(group.zoneId, (mobileSensorsAwayFromHome.get(group.zoneId) ?? 0) + 1)
-          }
-        }
-      }
-    }
-  }
-
-  for (const group of groups) {
-    if (group.zoneId === ZONE_UNASSIGNED) continue
-
-    let sensorCount = 0
-    let actuatorCount = 0
-    let activeSensors = 0
-    let activeActuators = 0
-    let alarmCount = 0
-    let emergencyStoppedCount = 0
-    let newestTimestamp: string | null = null
-    let onlineDevices = 0
-
-    for (const device of group.devices) {
-      const sensors = (device.sensors as MockSensor[]) || []
-      const actuators = (device.actuators as MockActuator[]) || []
-
-      sensorCount += sensors.length
-      actuatorCount += actuators.length
-      activeSensors += sensors.filter(s => s.quality !== 'error' && s.quality !== 'stale').length
-      activeActuators += actuators.filter(a => a.state).length
-      alarmCount += sensors.filter(s => s.quality === 'error' || s.quality === 'bad').length
-      emergencyStoppedCount += actuators.filter(a => (a as any).emergency_stopped).length
-
-      const status = getESPStatus(device as any)
-      if (status === 'online' || status === 'stale') {
-        onlineDevices++
-      }
-
-      for (const sensor of sensors) {
-        const ts = (sensor as any).last_read || (sensor as any).last_reading_at
-        if (ts) {
-          const parsed = new Date(ts).getTime()
-          if (!isNaN(parsed) && parsed > 1577836800000 && parsed < 4102444800000) {
-            if (!newestTimestamp || ts > newestTimestamp) {
-              newestTimestamp = ts
-            }
-          }
-        }
-      }
-
-      if (!newestTimestamp) {
-        const deviceTs = (device as any).last_seen || (device as any).last_heartbeat
-        if (deviceTs && (!newestTimestamp || deviceTs > newestTimestamp)) {
-          newestTimestamp = deviceTs
-        }
-      }
-    }
-
-    // Adjust sensor counts for mobile sensors (6.7):
-    // Subtract sensors that moved away, add guests from other zones
-    const awayCount = mobileSensorsAwayFromHome.get(group.zoneId) ?? 0
-    const guestCount = mobileGuestCounts.get(group.zoneId) ?? 0
-    sensorCount = sensorCount - awayCount + guestCount
-
-    const aggregation = aggregateZoneSensors(group.devices)
-    const totalDevices = group.devices.length
-    const health = getZoneHealthStatus(alarmCount, activeSensors, sensorCount, onlineDevices, totalDevices, emergencyStoppedCount)
-
-    deviceZoneMap.set(group.zoneId, {
-      zoneId: group.zoneId,
-      zoneName: group.zoneName,
-      sensorCount,
-      actuatorCount,
-      activeSensors,
-      activeActuators,
-      alarmCount,
-      aggregation,
-      lastActivity: newestTimestamp,
-      healthStatus: health.status,
-      healthReason: health.reason,
-      onlineDevices,
-      totalDevices,
-      mobileGuestCount: guestCount,
-    })
-  }
-
-  // Merge empty zones from Zone-API (zones without devices)
-  for (const apiZone of allZones.value) {
-    if (!deviceZoneMap.has(apiZone.zone_id)) {
-      const guestCount = mobileGuestCounts.get(apiZone.zone_id) ?? 0
-      const health = getZoneHealthStatus(0, 0, 0, 0, 0, 0)
-      deviceZoneMap.set(apiZone.zone_id, {
-        zoneId: apiZone.zone_id,
-        zoneName: apiZone.zone_name || apiZone.zone_id,
-        sensorCount: guestCount,
-        actuatorCount: 0,
-        activeSensors: 0,
-        activeActuators: 0,
-        alarmCount: 0,
-        aggregation: aggregateZoneSensors([]),
-        lastActivity: null,
-        healthStatus: health.status,
-        healthReason: health.reason,
-        onlineDevices: 0,
-        totalDevices: 0,
-        mobileGuestCount: guestCount,
-      })
-    }
-  }
-
-  return Array.from(deviceZoneMap.values())
-}
-
-const zoneKPIs = ref<ZoneKPI[]>(computeZoneKPIs())
-let kpiDebounceTimer: ReturnType<typeof setTimeout> | null = null
-
-// Debounced re-compute on device data changes (WS sensor_data events)
-watch(
-  () => espStore.devices,
-  () => {
-    if (kpiDebounceTimer) clearTimeout(kpiDebounceTimer)
-    kpiDebounceTimer = setTimeout(() => {
-      zoneKPIs.value = computeZoneKPIs()
-    }, 300)
-  },
-  { deep: true }
-)
-
-// Immediate re-compute on zone changes (rare, should not be delayed)
-watch(allZones, () => {
-  zoneKPIs.value = computeZoneKPIs()
-})
-
-/** Check if a zone's last activity is stale (>60s ago) */
-function isZoneStale(lastActivity: string | null): boolean {
-  if (!lastActivity) return true
-  const then = new Date(lastActivity).getTime()
-  // Sanity: invalid or unreasonable timestamps (before 2020 or after 2100) are stale
-  if (isNaN(then) || then < 1577836800000 || then > 4102444800000) return true
-  const age = Date.now() - then
-  return age > ZONE_STALE_THRESHOLD_MS
-}
+// Zone KPI types + logic: see @/composables/useZoneKPIs
 
 // =============================================================================
 // Level 1: System Summary (dynamic subtitle)
@@ -1192,23 +926,111 @@ const systemSummary = computed(() => {
   return { zoneCount, totalSensors, activeSensors, totalAlarms, totalActuators, activeActuators }
 })
 
-/** Cross-zone dashboards: max visible on L1 */
-const MAX_CROSS_ZONE_VISIBLE = 4
-const showAllCrossZone = ref(false)
-const dashboardsCollapsed = ref(
-  localStorage.getItem('monitor-dashboards-collapsed') === 'true'
-)
+// =============================================================================
+// L1 Zone Mini-Widgets (Phase 3)
+// =============================================================================
 
-function toggleDashboardsCollapsed() {
-  dashboardsCollapsed.value = !dashboardsCollapsed.value
-  localStorage.setItem('monitor-dashboards-collapsed', String(dashboardsCollapsed.value))
+/** Widget types compact enough for ~70px tile height */
+const TILE_ALLOWED_WIDGET_TYPES = new Set(['gauge', 'sensor-card'])
+
+/**
+ * Returns the first zone-tile dashboard whose widgets are all tile-compatible.
+ * Filters on scope='zone-tile' to avoid collision with full zone dashboards.
+ * Max 1 panel per tile.
+ */
+function getZoneMiniPanelId(zoneId: string): string | undefined {
+  const panels = dashStore.layouts
+    .filter(l => l.scope === 'zone-tile' && l.zoneId === zoneId)
+  for (const panel of panels) {
+    const allAllowed = panel.widgets.length > 0 &&
+      panel.widgets.every(w => TILE_ALLOWED_WIDGET_TYPES.has(w.type))
+    if (allAllowed) return panel.id
+  }
+  return undefined
 }
 
-const visibleCrossZoneDashboards = computed(() => {
-  const all = dashStore.crossZoneDashboards
-  if (showAllCrossZone.value || all.length <= MAX_CROSS_ZONE_VISIBLE) return all
-  return all.slice(0, MAX_CROSS_ZONE_VISIBLE)
-})
+/** Sensor type priority for zone-tile mini-widgets (highest first) */
+const TILE_SENSOR_PRIORITY: string[] = [
+  'temp', 'humi', 'vpd', 'ph', 'ec', 'co2', 'soil', 'light', 'pressure', 'flow',
+]
+
+function getTileSensorPriority(sensorType: string): number {
+  const idx = TILE_SENSOR_PRIORITY.findIndex(p => sensorType.includes(p))
+  return idx >= 0 ? idx : TILE_SENSOR_PRIORITY.length
+}
+
+/**
+ * Ensures a tile mini-dashboard exists for the given zone.
+ * Creates gauge widgets for the top-2 sensor types (by priority).
+ * Uses scope='zone-tile' to avoid collision with generateZoneDashboard().
+ * Migrates stale dashboards with wrong widget dimensions (w≠6 or h≠1).
+ */
+function ensureZoneTileDashboard(zoneId: string, zoneName: string): void {
+  // Migrate stale tile dashboards: fix widget dimensions from old versions (w:3,h:3 → w:6,h:1)
+  const existingId = getZoneMiniPanelId(zoneId)
+  if (existingId) {
+    const existing = dashStore.getLayoutById(existingId)
+    if (existing) {
+      const needsMigration = existing.widgets.some(w => w.w !== 6 || w.h !== 1)
+      if (needsMigration) {
+        existing.widgets.forEach((w, i) => {
+          w.x = i * 6
+          w.y = 0
+          w.w = 6
+          w.h = 1
+        })
+      }
+    }
+    return
+  }
+
+  // Find sensors in this zone
+  const sensors: { espId: string; gpio: number; sensorType: string }[] = []
+  for (const device of espStore.devices) {
+    if (device.zone_id !== zoneId) continue
+    const deviceId = espStore.getDeviceId(device)
+    for (const s of (device.sensors || []) as { gpio: number; sensor_type: string }[]) {
+      sensors.push({ espId: deviceId, gpio: s.gpio, sensorType: s.sensor_type })
+    }
+  }
+  if (sensors.length === 0) return
+
+  // Pick top-2 sensors by priority (deduplicate by base type)
+  const sorted = [...sensors].sort((a, b) => getTileSensorPriority(a.sensorType) - getTileSensorPriority(b.sensorType))
+  const picked: typeof sensors = []
+  const seenBaseTypes = new Set<string>()
+  for (const s of sorted) {
+    const base = TILE_SENSOR_PRIORITY.find(p => s.sensorType.includes(p)) ?? s.sensorType
+    if (seenBaseTypes.has(base)) continue
+    seenBaseTypes.add(base)
+    picked.push(s)
+    if (picked.length >= 2) break
+  }
+
+  // Create layout via store, then set tile-specific properties
+  const layout = dashStore.createLayout(`${zoneName} Tile`)
+  layout.scope = 'zone-tile'
+  layout.zoneId = zoneId
+  layout.autoGenerated = true
+  layout.target = { view: 'monitor', placement: 'inline' }
+
+  // Add gauge widgets — w:6 h:1 for compact tile sizing (2 side-by-side in 12-col grid)
+  for (let i = 0; i < picked.length; i++) {
+    const s = picked[i]
+    dashStore.addWidget(layout.id, {
+      type: 'gauge',
+      x: i * 6, y: 0, w: 6, h: 1,
+      config: {
+        sensorId: `${s.espId}:${s.gpio}:${s.sensorType}`,
+        title: getSensorLabel(s.sensorType),
+        zoneId,
+      },
+    })
+  }
+}
+
+/** Track which zones already have a tile-dashboard (per-zone instead of global guard) */
+const ensuredTileZoneIds = new Set<string>()
 
 // =============================================================================
 // Level 2: Unified subzone-first device grouping
@@ -1245,6 +1067,7 @@ const zoneDeviceGroup = computed<ZoneDeviceSubzone[]>(() => {
           raw_value,
           quality,
           last_read,
+          interface_type: liveSensor?.interface_type ?? null,
           zone_id: data.zone_id,
           zone_name: data.zone_name,
           subzone_id: sz.subzone_id,
@@ -1401,6 +1224,22 @@ watch(
   },
   { immediate: true },
 )
+
+// Auto-generate tile mini-dashboards for L1 zone tiles (gauge widgets only).
+// Per-zone tracking: retries zones whose sensors weren't loaded yet on first trigger.
+watch([filteredZoneKPIs, () => espStore.devices.length], ([zones]) => {
+  if (zones.length === 0) return
+  for (const zone of zones) {
+    if (ensuredTileZoneIds.has(zone.zoneId)) continue
+    // Only attempt when espStore has sensor data for this zone
+    const hasSensors = espStore.devices.some(
+      d => d.zone_id === zone.zoneId && (d.sensors?.length ?? 0) > 0,
+    )
+    if (!hasSensors) continue
+    ensuredTileZoneIds.add(zone.zoneId)
+    ensureZoneTileDashboard(zone.zoneId, zone.zoneName)
+  }
+}, { immediate: true })
 
 // Fetch zone monitor data (API primary for L2) with AbortController for race-condition safety
 async function fetchZoneMonitorData() {
@@ -1724,6 +1563,8 @@ function getSubzoneKey(zoneId: string | null, subzoneId: string | null): string 
 function getSubzoneKPIs(sensors: { sensor_type: string; raw_value: number | null; unit: string; quality: string }[]): string {
   const typeMap = new Map<string, { sum: number; count: number; unit: string }>()
   for (const s of sensors) {
+    // VPD (kPa) must not mix with humidity (%) — both share category 'air'
+    if (s.sensor_type === 'vpd') continue
     // Group by SENSOR_TYPE_CONFIG category (temperature, water, air, etc.)
     const cfg = SENSOR_TYPE_CONFIG[s.sensor_type]
     const groupKey = cfg?.category || 'other'
@@ -1790,6 +1631,19 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
   }
   if (dash.id && dash.id.length >= 6) return ` #${dash.id.slice(-6)}`
   return ''
+}
+
+// =============================================================================
+// FAB Quick-Add Widget Dialog (D3)
+// =============================================================================
+
+const showAddWidgetDialog = ref(false)
+const addWidgetDefaultType = ref<string | undefined>(undefined)
+
+/** FAB widget-selected handler: open AddWidgetDialog with pre-selected type */
+function handleFabWidgetSelected(widgetType: string) {
+  addWidgetDefaultType.value = widgetType
+  showAddWidgetDialog.value = true
 }
 </script>
 
@@ -1877,139 +1731,39 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
       <!-- Empty State (only when loading done + no error + truly empty) -->
       <div v-if="zoneKPIs.length === 0" class="monitor-view__empty">
         <Activity class="w-12 h-12" style="color: var(--color-text-muted)" />
-        <p>Keine Zonen vorhanden.</p>
+        <p>Noch keine Zonen eingerichtet.</p>
+        <p class="monitor-view__empty-hint">Weise Geräten Zonen zu unter Hardware.</p>
         <router-link to="/hardware" class="monitor-view__empty-cta">
-          Zonen in der Hardware-Ansicht erstellen
+          Zur Hardware-Ansicht
         </router-link>
       </div>
 
       <!-- Zone Tiles Grid -->
       <div v-else class="monitor-zone-grid">
-        <button
+        <ZoneTileCard
           v-for="zone in filteredZoneKPIs"
           :key="zone.zoneId"
-          :class="['monitor-zone-tile', `monitor-zone-tile--${zone.healthStatus}`]"
+          :zone="zone"
+          :is-stale="isZoneStale(zone.lastActivity)"
+          :rules="logicStore.getRulesForZone(zone.zoneId).slice(0, 2)"
+          :total-rule-count="logicStore.getRulesForZone(zone.zoneId).length"
+          :is-rule-active="logicStore.isRuleActive"
           @click="goToZone(zone.zoneId)"
         >
-          <!-- Header: Zone Name + Status Ampel -->
-          <div class="monitor-zone-tile__header">
-            <h3 class="monitor-zone-tile__name">{{ zone.zoneName }}</h3>
-            <span :class="['monitor-zone-tile__status', HEALTH_STATUS_CONFIG[zone.healthStatus].colorClass]">
-              <CheckCircle2 v-if="zone.healthStatus === 'ok'" class="w-3.5 h-3.5" />
-              <AlertTriangle v-else-if="zone.healthStatus === 'warning'" class="w-3.5 h-3.5" />
-              <Minus v-else-if="zone.healthStatus === 'empty'" class="w-3.5 h-3.5" />
-              <XCircle v-else class="w-3.5 h-3.5" />
-              <span>{{ HEALTH_STATUS_CONFIG[zone.healthStatus].label }}</span>
-            </span>
-          </div>
-          <!-- Health Reason (only for warning/alarm) -->
-          <div v-if="zone.healthReason" class="monitor-zone-tile__reason">
-            {{ zone.healthReason }}
-          </div>
-
-          <!-- KPIs from aggregateZoneSensors -->
-          <div v-if="zone.aggregation.sensorTypes.length > 0" class="monitor-zone-tile__kpis">
-            <div
-              v-for="st in zone.aggregation.sensorTypes"
-              :key="st.type"
-              class="monitor-zone-tile__kpi"
-            >
-              <span class="monitor-zone-tile__kpi-label">{{ st.label }}</span>
-              <span class="monitor-zone-tile__kpi-value">
-                {{ formatAggregatedValue(st, zone.aggregation.deviceCount) }}
-              </span>
-            </div>
-          </div>
-          <div v-else class="monitor-zone-tile__kpis-empty">
-            Keine Sensordaten
-          </div>
-
-          <!-- Footer: ESP-Count + Sensor/Actuator Counts + Last Activity -->
-          <div class="monitor-zone-tile__footer">
-            <div class="monitor-zone-tile__counts">
-              <span class="monitor-zone-tile__count">
-                {{ zone.totalDevices > 0 ? `${zone.onlineDevices}/${zone.totalDevices} online` : '—' }}
-              </span>
-              <span :class="['monitor-zone-tile__count', {
-                'monitor-zone-tile__count--ok': zone.activeSensors === zone.sensorCount && zone.sensorCount > 0,
-                'monitor-zone-tile__count--warn': zone.activeSensors < zone.sensorCount && zone.activeSensors > 0,
-                'monitor-zone-tile__count--alarm': zone.sensorCount > 0 && zone.activeSensors === 0,
-              }]">
-                {{ zone.activeSensors }}/{{ zone.sensorCount }} Sensoren
-              </span>
-              <span :class="['monitor-zone-tile__count', {
-                'monitor-zone-tile__count--ok': zone.activeActuators > 0,
-              }]">
-                {{ zone.actuatorCount }} {{ zone.actuatorCount === 1 ? 'Aktor' : 'Aktoren' }}<template v-if="zone.activeActuators > 0"> · {{ zone.activeActuators }} aktiv</template>
-              </span>
-              <span v-if="zone.mobileGuestCount > 0" class="monitor-zone-tile__count monitor-zone-tile__count--mobile">
-                + {{ zone.mobileGuestCount }} mobil
-              </span>
-            </div>
-            <div class="monitor-zone-tile__activity" :class="{ 'monitor-zone-tile__activity--stale': isZoneStale(zone.lastActivity) }">
-              <Clock class="w-3 h-3" />
-              <span>{{ zone.lastActivity ? formatRelativeTime(zone.lastActivity) : 'Keine Daten' }}</span>
-            </div>
-          </div>
-        </button>
+          <!-- Phase 3: Zone mini-widget (first compatible zone-specific inline panel) -->
+          <template #extra>
+            <InlineDashboardPanel
+              v-if="getZoneMiniPanelId(zone.zoneId)"
+              :layout-id="getZoneMiniPanelId(zone.zoneId)!"
+              :zone-id="zone.zoneId"
+              :compact="true"
+              mode="view"
+              class="monitor-zone-tile__mini-widget"
+            />
+          </template>
+        </ZoneTileCard>
       </div>
 
-      <!-- Aktive Automatisierungen (L1) — hidden when 0 enabled rules -->
-      <ActiveAutomationsSection v-if="hasActiveAutomations" />
-
-      <!-- Dashboard Overview Card (compact, horizontal chips) -->
-      <section v-if="dashStore.crossZoneDashboards.length > 0" class="monitor-dashboard-card">
-        <div class="monitor-dashboard-card__header">
-          <button class="monitor-dashboard-card__toggle" @click="toggleDashboardsCollapsed">
-            <component :is="dashboardsCollapsed ? ChevronDown : ChevronUp" class="w-4 h-4" />
-            <LayoutDashboard class="w-4 h-4" style="color: var(--color-iridescent-2)" />
-            <span class="monitor-dashboard-card__title">
-              Dashboards ({{ dashStore.crossZoneDashboards.length }})
-            </span>
-          </button>
-          <router-link :to="{ name: 'editor' }" class="monitor-dashboard-card__add" title="Neues Dashboard erstellen">
-            <PlusIcon class="w-3.5 h-3.5" />
-          </router-link>
-        </div>
-        <div v-show="!dashboardsCollapsed" class="monitor-dashboard-card__chips">
-          <div
-            v-for="dash in visibleCrossZoneDashboards"
-            :key="dash.id"
-            class="monitor-dashboard-chip"
-          >
-            <router-link
-              :to="{ name: 'monitor-dashboard', params: { dashboardId: dash.id } }"
-              class="monitor-dashboard-chip__link"
-            >
-              <span class="monitor-dashboard-chip__name">{{ dash.name }}</span>
-              <span class="monitor-dashboard-chip__meta">{{ dash.widgets.length }} Widgets</span>
-            </router-link>
-            <router-link
-              :to="{ name: 'editor-dashboard', params: { dashboardId: dash.serverId || dash.id } }"
-              class="monitor-dashboard-chip__edit"
-              title="Im Editor bearbeiten"
-              @click.stop
-            >
-              <Pencil class="w-3 h-3" />
-            </router-link>
-          </div>
-          <button
-            v-if="dashStore.crossZoneDashboards.length > MAX_CROSS_ZONE_VISIBLE && !showAllCrossZone"
-            class="monitor-dashboard-chip monitor-dashboard-chip--more"
-            @click.stop="showAllCrossZone = true"
-          >
-            +{{ dashStore.crossZoneDashboards.length - MAX_CROSS_ZONE_VISIBLE }} weitere
-          </button>
-        </div>
-      </section>
-
-      <!-- Inline Dashboard Panels (target.view='monitor', placement='inline') -->
-      <InlineDashboardPanel
-        v-for="panel in dashStore.inlineMonitorPanels"
-        :key="panel.id"
-        :layoutId="panel.id"
-        mode="inline"
-      />
       </template>
     </template>
 
@@ -2302,7 +2056,8 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
         v-for="panel in inlineMonitorPanelsL2"
         :key="panel.id"
         :layoutId="panel.id"
-        mode="inline"
+        :zone-id="selectedZoneId ?? undefined"
+        mode="manage"
       />
 
       <div v-if="zoneSensorCount === 0 && zoneActuatorCount === 0" class="monitor-view__empty">
@@ -2320,7 +2075,7 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
           v-for="panel in dashStore.bottomMonitorPanels"
           :key="panel.id"
           :layoutId="panel.id"
-          mode="inline"
+          mode="manage"
         />
       </div>
       </div>
@@ -2476,6 +2231,21 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
         </div>
       </template>
     </SlideOver>
+
+    <!-- FAB (Quick-Add Widget) -->
+    <QuickActionBall
+      mode="monitor"
+      @widget-selected="handleFabWidgetSelected"
+    />
+
+    <!-- Add Widget Dialog (D3) -->
+    <AddWidgetDialog
+      :open="showAddWidgetDialog"
+      :default-zone-id="selectedZoneId ?? undefined"
+      :default-widget-type="addWidgetDefaultType"
+      @update:open="showAddWidgetDialog = $event"
+      @close="showAddWidgetDialog = false"
+    />
   </div>
 </template>
 
@@ -2807,6 +2577,12 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
   margin-bottom: var(--space-10);
 }
 
+.monitor-view__empty-hint {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin-top: calc(-1 * var(--space-2));
+}
+
 .monitor-view__empty-cta {
   display: inline-flex;
   align-items: center;
@@ -2833,7 +2609,7 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--space-4);
-  align-items: stretch;
+  align-items: start;
   margin-bottom: var(--space-10);
 }
 
@@ -2843,198 +2619,9 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
   }
 }
 
-.monitor-zone-tile {
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  padding: var(--space-4);
-  cursor: pointer;
-  transition: all var(--transition-base);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  border-left: 3px solid var(--glass-border);
-  /* Reset button defaults */
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  width: 100%;
-}
-
-.monitor-zone-tile:focus-visible {
-  outline: 2px solid var(--color-iridescent-2);
-  outline-offset: 2px;
-}
-
-.monitor-zone-tile--ok {
-  border-left-color: var(--color-success);
-}
-
-.monitor-zone-tile--warning {
-  border-left-color: var(--color-warning);
-}
-
-.monitor-zone-tile--alarm {
-  border-left-color: var(--color-error);
-}
-
-.monitor-zone-tile:hover {
-  border-color: var(--color-accent);
-  border-left-color: var(--color-accent);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-}
-
-.monitor-zone-tile__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.monitor-zone-tile__name {
-  font-size: var(--text-base);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-/* Status Ampel: Farbe + Text + Icon (doppelte Kodierung) */
-.monitor-zone-tile__status {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.zone-status--ok {
-  color: var(--color-success);
-}
-
-.zone-status--warning {
-  color: var(--color-warning);
-}
-
-.zone-status--alarm {
-  color: var(--color-error);
-}
-
-.zone-status--empty {
-  color: var(--color-text-muted);
-}
-
-.monitor-zone-tile--empty {
-  opacity: 0.7;
-  border-style: dashed;
-}
-
-.monitor-zone-tile__reason {
-  font-size: var(--text-xs, 11px);
-  color: var(--color-text-muted);
-  margin-top: calc(-1 * var(--space-2));
-  padding: 0 var(--space-1);
-}
-
-.monitor-zone-tile--warning .monitor-zone-tile__reason {
-  color: var(--color-warning);
-  opacity: 0.85;
-}
-
-.monitor-zone-tile--alarm .monitor-zone-tile__reason {
-  color: var(--color-error);
-  opacity: 0.85;
-}
-
-/* KPIs */
-.monitor-zone-tile__kpis {
-  display: flex;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-
-.monitor-zone-tile__kpi {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.monitor-zone-tile__kpi-label {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.monitor-zone-tile__kpi-value {
-  font-family: var(--font-mono);
-  font-size: var(--text-lg);
-  font-weight: 700;
-  color: var(--color-text-primary);
-  line-height: 1.2;
-}
-
-.monitor-zone-tile__kpis-empty {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  font-style: italic;
-}
-
-/* Footer: counts + activity — margin-top: auto pushes footer to bottom in equal-height tiles */
-.monitor-zone-tile__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--glass-border);
-  margin-top: auto;
-}
-
-.monitor-zone-tile__counts {
-  display: flex;
-  gap: var(--space-3);
-  font-size: var(--text-xs);
-}
-
-.monitor-zone-tile__count {
-  color: var(--color-text-muted);
-}
-
-.monitor-zone-tile__count--ok {
-  color: var(--color-success);
-}
-
-.monitor-zone-tile__count--warn {
-  color: var(--color-warning);
-}
-
-.monitor-zone-tile__count--alarm {
-  color: var(--color-error);
-}
-
-.monitor-zone-tile__count--mobile {
-  color: var(--color-text-secondary);
-  font-style: italic;
-}
-
-.monitor-zone-tile__activity {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
-.monitor-zone-tile__activity--stale {
-  color: var(--color-warning);
+/* Phase 3: Mini-widget inside zone tile (extra-slot) — height controlled by InlineDashboardPanel rowHeightPx */
+.monitor-zone-tile__mini-widget {
+  border-radius: var(--radius-sm);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -3397,131 +2984,6 @@ function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): stri
 /* ═══════════════════════════════════════════════════════════════════════════
    DASHBOARD LINKS
    ═══════════════════════════════════════════════════════════════════════════ */
-
-/* Dashboard Overview Card (compact, collapsible) */
-.monitor-dashboard-card {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  margin-bottom: var(--space-10);
-}
-
-.monitor-dashboard-card__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--glass-border);
-}
-
-.monitor-dashboard-card__toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  padding: 0;
-  font-size: var(--text-sm);
-}
-
-.monitor-dashboard-card__title {
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.monitor-dashboard-card__add {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  transition: all var(--transition-fast);
-}
-
-.monitor-dashboard-card__add:hover {
-  background: var(--color-bg-quaternary);
-  color: var(--color-iridescent-2);
-}
-
-.monitor-dashboard-card__chips {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  padding: var(--space-3);
-}
-
-.monitor-dashboard-chip {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  transition: all var(--transition-fast);
-  overflow: hidden;
-}
-
-.monitor-dashboard-chip:hover {
-  border-color: var(--color-iridescent-2);
-}
-
-.monitor-dashboard-chip__link {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
-  text-decoration: none;
-  color: inherit;
-}
-
-.monitor-dashboard-chip__name {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 160px;
-}
-
-.monitor-dashboard-chip__meta {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-}
-
-.monitor-dashboard-chip__edit {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-2);
-  color: var(--color-text-muted);
-  border-left: 1px solid var(--glass-border);
-  transition: all var(--transition-fast);
-  align-self: stretch;
-}
-
-.monitor-dashboard-chip__edit:hover {
-  color: var(--color-iridescent-2);
-  background: var(--color-bg-quaternary);
-}
-
-.monitor-dashboard-chip--more {
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--color-accent-bright);
-  cursor: pointer;
-  border-style: dashed;
-}
-
-.monitor-dashboard-chip--more:hover {
-  background: rgba(59, 130, 246, 0.06);
-}
 
 /* Zone Dashboards section (L2) */
 /* Shared Equipment section (6.7) */

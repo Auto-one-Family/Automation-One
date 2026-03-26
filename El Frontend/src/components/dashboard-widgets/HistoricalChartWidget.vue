@@ -7,13 +7,17 @@
  */
 import { ref, computed, watch } from 'vue'
 import { useEspStore } from '@/stores/esp'
+import { useZoneStore } from '@/shared/stores/zone.store'
 import HistoricalChart from '@/components/charts/HistoricalChart.vue'
-import { BarChart3 } from 'lucide-vue-next'
+import ExportCsvDialog from '@/components/dashboard-widgets/ExportCsvDialog.vue'
+import { BarChart3, Download } from 'lucide-vue-next'
 import type { MockSensor } from '@/types'
 import { useSensorId } from '@/composables/useSensorId'
+import { useSensorOptions } from '@/composables/useSensorOptions'
 
 interface Props {
   sensorId?: string // "espId:gpio:sensorType"
+  zoneId?: string   // Zone-scoped sensor filtering (PA-02c)
   timeRange?: '1h' | '6h' | '24h' | '7d' | '30d'
   showThresholds?: boolean
 }
@@ -28,13 +32,17 @@ const emit = defineEmits<{
 }>()
 
 const espStore = useEspStore()
+const zoneStore = useZoneStore()
 const selectedRange = ref<'1h' | '6h' | '24h' | '7d' | '30d'>(props.timeRange)
+const showExportDialog = ref(false)
 
 // Local sensorId state — survives render() one-shot props (Bug 1b fix)
 const localSensorId = ref(props.sensorId || '')
+const localZoneId = ref<string | undefined>(props.zoneId)
 
 // Sync from props when they change (e.g. page reload with saved config)
 watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
+watch(() => props.zoneId, (v) => { localZoneId.value = v })
 
 // Centralized sensorId parsing
 const { espId: parsedEspId, gpio: parsedGpio, sensorType: parsedSensorType, isValid: sensorIdValid } = useSensorId(localSensorId)
@@ -43,23 +51,8 @@ watch(selectedRange, (val) => {
   emit('update:config', { timeRange: val })
 })
 
-const availableSensors = computed(() => {
-  const items: { id: string; label: string }[] = []
-  const seen = new Set<string>()
-  for (const device of espStore.devices) {
-    const deviceId = espStore.getDeviceId(device)
-    for (const s of (device.sensors as MockSensor[]) || []) {
-      const id = `${deviceId}:${s.gpio}:${s.sensor_type}`
-      if (seen.has(id)) continue
-      seen.add(id)
-      items.push({
-        id,
-        label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
-      })
-    }
-  }
-  return items
-})
+// Centralized sensor options (deduplicated, zone-filtered via PA-02c)
+const { flatSensorOptions: availableSensors } = useSensorOptions(localZoneId)
 
 // Parsed sensor data — uses parsed sensorId parts
 const parsedSensor = computed(() => {
@@ -71,6 +64,15 @@ const parsedSensor = computed(() => {
   )
   if (!sensor) return null
   return { espId: parsedEspId.value!, gpio: parsedGpio.value!, sensor }
+})
+
+// Resolved names for ExportCsvDialog
+const resolvedSensorName = computed(() =>
+  parsedSensor.value?.sensor.name || parsedSensorType.value || ''
+)
+const zoneNameFromContext = computed(() => {
+  if (!localZoneId.value) return undefined
+  return zoneStore.zoneEntities.find(z => z.zone_id === localZoneId.value)?.name
 })
 
 function selectSensor(sensorId: string) {
@@ -86,6 +88,13 @@ function selectSensor(sensorId: string) {
         <span class="historical-widget__sensor-name">
           {{ parsedSensor.sensor.name || parsedSensor.sensor.sensor_type }}
         </span>
+        <button
+          class="historical-widget__export-btn"
+          title="Als CSV exportieren"
+          @click="showExportDialog = true"
+        >
+          <Download :size="14" />
+        </button>
       </div>
       <div class="historical-widget__chart">
         <HistoricalChart
@@ -114,6 +123,13 @@ function selectSensor(sensorId: string) {
         >{{ s.label }}</option>
       </select>
     </div>
+
+    <ExportCsvDialog
+      v-model:open="showExportDialog"
+      :sensor-id="localSensorId"
+      :sensor-name="resolvedSensorName"
+      :zone-name="zoneNameFromContext"
+    />
   </div>
 </template>
 
@@ -137,6 +153,36 @@ function selectSensor(sensorId: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.historical-widget__export-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 28px;
+  min-height: 28px;
+  padding: var(--space-1);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.historical-widget__export-btn:hover {
+  opacity: 1;
+  color: var(--color-accent);
+}
+
+@media (hover: none) {
+  .historical-widget__export-btn {
+    opacity: 0.8;
+  }
 }
 
 .historical-widget__chart {

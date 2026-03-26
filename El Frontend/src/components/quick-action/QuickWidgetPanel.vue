@@ -7,6 +7,7 @@
  * Drag closes the FAB menu so the user can see the GridStack editor.
  *
  * On non-editor routes: shows hint to navigate to the editor.
+ * Monitor mode: click emits 'widget-selected' instead of drag (D3).
  */
 
 import { computed, type Component } from 'vue'
@@ -25,6 +26,20 @@ import {
 import { useQuickActionStore } from '@/shared/stores/quickAction.store'
 import { useWidgetDragFromFab } from '@/composables/useWidgetDragFromFab'
 import type { WidgetDragItem } from '@/composables/useWidgetDragFromFab'
+
+interface Props {
+  /** 'editor' = drag-to-grid (default), 'monitor' = click opens AddWidgetDialog */
+  mode?: 'editor' | 'monitor'
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  mode: 'editor',
+})
+
+const emit = defineEmits<{
+  /** Emitted in monitor mode when a widget type is clicked */
+  'widget-selected': [widgetType: string]
+}>()
 
 const ICON_MAP: Record<string, Component> = {
   BarChart3,
@@ -47,6 +62,10 @@ const {
 } = useWidgetDragFromFab()
 
 const isOnEditor = computed(() => route.path.startsWith('/editor'))
+const isMonitorMode = computed(() => props.mode === 'monitor')
+
+/** Show the catalog when on editor OR in monitor mode */
+const showCatalog = computed(() => isOnEditor.value || isMonitorMode.value)
 
 function handleBack(): void {
   quickActionStore.setActivePanel('menu')
@@ -55,8 +74,18 @@ function handleBack(): void {
 function handleKeyAction(event: KeyboardEvent, item: WidgetDragItem): void {
   if (event.key === ' ' || event.key === 'Enter') {
     event.preventDefault()
-    announceWidget(item)
+    if (isMonitorMode.value) {
+      handleMonitorSelect(item)
+    } else {
+      announceWidget(item)
+    }
   }
+}
+
+/** In monitor mode: emit selected widget type and close FAB */
+function handleMonitorSelect(item: WidgetDragItem): void {
+  emit('widget-selected', item.type)
+  quickActionStore.closeMenu()
 }
 
 function navigateToEditor(): void {
@@ -80,8 +109,8 @@ function navigateToEditor(): void {
       <span class="qa-widget-panel__title">Widgets</span>
     </div>
 
-    <!-- Not-on-editor hint -->
-    <div v-if="!isOnEditor" class="qa-widget-panel__hint">
+    <!-- Not-on-editor hint (only when not in monitor mode and not on editor) -->
+    <div v-if="!showCatalog" class="qa-widget-panel__hint">
       <p class="qa-widget-panel__hint-text">
         Wechsle zum Dashboard Editor um Widgets per Drag &amp; Drop zu platzieren.
       </p>
@@ -106,13 +135,19 @@ function navigateToEditor(): void {
             v-for="item in items"
             :key="item.type"
             class="qa-widget-panel__item"
-            :class="{ 'qa-widget-panel__item--announced': announcedWidget?.type === item.type }"
-            draggable="true"
+            :class="{
+              'qa-widget-panel__item--announced': announcedWidget?.type === item.type,
+              'qa-widget-panel__item--clickable': isMonitorMode,
+            }"
+            :draggable="!isMonitorMode"
             role="button"
-            :aria-label="`${item.label} — ${item.description}. Ziehen oder Enter zum Platzieren.`"
+            :aria-label="isMonitorMode
+              ? `${item.label} — ${item.description}. Klicken zum Hinzufuegen.`
+              : `${item.label} — ${item.description}. Ziehen oder Enter zum Platzieren.`"
             tabindex="0"
-            @dragstart="handleDragStart($event, item)"
-            @dragend="handleDragEnd"
+            @dragstart="!isMonitorMode && handleDragStart($event, item)"
+            @dragend="!isMonitorMode && handleDragEnd()"
+            @click="isMonitorMode && handleMonitorSelect(item)"
             @keydown="handleKeyAction($event, item)"
           >
             <component
@@ -123,7 +158,7 @@ function navigateToEditor(): void {
               <span class="qa-widget-panel__item-label">{{ item.label }}</span>
               <span class="qa-widget-panel__item-desc">{{ item.description }}</span>
             </div>
-            <GripVertical class="qa-widget-panel__grip" aria-hidden="true" />
+            <GripVertical v-if="!isMonitorMode" class="qa-widget-panel__grip" aria-hidden="true" />
           </div>
         </div>
       </div>
@@ -275,6 +310,14 @@ function navigateToEditor(): void {
 
 .qa-widget-panel__item:active {
   cursor: grabbing;
+}
+
+.qa-widget-panel__item--clickable {
+  cursor: pointer;
+}
+
+.qa-widget-panel__item--clickable:active {
+  cursor: pointer;
 }
 
 .qa-widget-panel__item:focus-visible {

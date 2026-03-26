@@ -37,6 +37,7 @@ export interface SensorWithContext {
   subzone_id: string | null
   subzone_name: string
   last_read?: string | null
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL' | null
   device_scope?: 'zone_local' | 'multi_zone' | 'mobile' | null
   assigned_zones?: string[]
   /** Active zone from device_active_context (mobile sensors) */
@@ -130,7 +131,8 @@ export function useZoneGrouping(options?: ZoneGroupingOptions | ZoneGroupingFilt
       const sensors = esp.sensors as {
         gpio: number; sensor_type: string; name: string | null;
         raw_value: number; unit: string; quality: QualityLevel;
-        config_id?: string; last_read?: string | null
+        config_id?: string; last_read?: string | null;
+        interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL' | null
       }[] | undefined
       if (!sensors) return []
       const espId = espStore.getDeviceId(esp)

@@ -506,6 +506,34 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     defaultIntervalSeconds: 60,
     recommendedGpios: [32, 33, 34, 35, 36, 39],
   },
+
+  // =========================================================================
+  // COMPUTED / VIRTUAL SENSORS (PB-01)
+  // =========================================================================
+
+  'vpd': {
+    label: 'VPD',
+    unit: 'kPa',
+    min: 0,
+    max: 3,
+    decimals: 2,
+    icon: 'Droplets',
+    defaultValue: 1.0,
+    description: 'Vapor Pressure Deficit. Berechnet aus Temperatur und Luftfeuchte (SHT31).',
+    category: 'air',
+  },
+}
+
+// =============================================================================
+// VIRTUAL SENSOR METADATA (V19-F03)
+// =============================================================================
+
+/** Source information for server-computed (virtual) sensors */
+export const VIRTUAL_SENSOR_META: Record<string, { sources: string[]; formula: string }> = {
+  vpd: {
+    sources: ['Temperatur (SHT31)', 'Luftfeuchtigkeit (SHT31)'],
+    formula: 'Magnus-Tetens (Air-VPD)',
+  },
 }
 
 /**
@@ -1261,6 +1289,7 @@ function getSensorAggCategory(sensorType: string): AggCategory {
   if (lower === 'ph') return 'ph'
   if (lower === 'ec') return 'ec'
   if (lower.includes('flow')) return 'flow'
+  if (lower === 'vpd') return 'other' // VPD (kPa) must not mix with humidity (%)
 
   // Fallback: multi-value base types (e.g. "sht31", "bme280") that don't match
   // string-based checks above. Use SENSOR_TYPE_CONFIG category to determine mapping.
@@ -1371,6 +1400,7 @@ export function aggregateZoneSensors(devices: any[]): ZoneAggregation {
         if (val.value === null || val.value === undefined) continue
         if (val.quality === 'stale') continue // Skip stale data
         if (val.value === 0 && val.quality === 'unknown') continue // Skip DB init value (no live data yet)
+        if (val.type === 'vpd' && val.value <= 0) continue // VPD=0 is physically unrealistic
 
         const category = getSensorAggCategory(val.type)
         if (category === 'other') continue // Skip uncategorized

@@ -62,8 +62,8 @@ interface Props {
   isMultiValue?: boolean
   /** I2C address (0-127) for I2C sensors */
   i2cAddress?: number | null
-  /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL */
-  interfaceType?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | null
+  /** Interface type: I2C, ONEWIRE, ANALOG, DIGITAL, VIRTUAL */
+  interfaceType?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL' | null
   /** Device scope (T13-R3 WP4): zone_local, multi_zone, mobile */
   deviceScope?: 'zone_local' | 'multi_zone' | 'mobile' | null
   /** Assigned zones for multi_zone/mobile devices */

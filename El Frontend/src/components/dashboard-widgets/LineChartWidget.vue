@@ -16,9 +16,11 @@ import LiveLineChart from '@/components/charts/LiveLineChart.vue'
 import type { ChartDataPoint } from '@/components/charts/LiveLineChart.vue'
 import type { MockSensor } from '@/types'
 import { useSensorId } from '@/composables/useSensorId'
+import { useSensorOptions } from '@/composables/useSensorOptions'
 
 interface Props {
   sensorId?: string   // format: "espId:gpio:sensorType"
+  zoneId?: string     // Zone-scoped sensor filtering (PA-02c)
   showThresholds?: boolean
   yMin?: number
   yMax?: number
@@ -50,32 +52,17 @@ const MAX_POINTS = 60
 
 // Local sensorId state — survives render() one-shot props (Bug 1b fix)
 const localSensorId = ref(props.sensorId || '')
+const localZoneId = ref<string | undefined>(props.zoneId)
 
 // Sync from props when they change (e.g. page reload with saved config)
 watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
+watch(() => props.zoneId, (v) => { localZoneId.value = v })
 
 // Centralized sensorId parsing
 const { espId: parsedEspId, gpio: parsedGpio, sensorType: parsedSensorType, isValid: sensorIdValid } = useSensorId(localSensorId)
 
-// All available sensors for selection (deduplicated by espId:gpio:sensorType)
-const availableSensors = computed(() => {
-  const items: { id: string; label: string; unit: string }[] = []
-  const seen = new Set<string>()
-  for (const device of espStore.devices) {
-    const deviceId = espStore.getDeviceId(device)
-    for (const s of (device.sensors as MockSensor[]) || []) {
-      const id = `${deviceId}:${s.gpio}:${s.sensor_type}`
-      if (seen.has(id)) continue
-      seen.add(id)
-      items.push({
-        id,
-        label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
-        unit: s.unit || '',
-      })
-    }
-  }
-  return items
-})
+// Centralized sensor options (deduplicated)
+const { flatSensorOptions: availableSensors } = useSensorOptions(localZoneId)
 
 // Current sensor data — uses parsed sensorId parts
 const currentSensor = computed(() => {

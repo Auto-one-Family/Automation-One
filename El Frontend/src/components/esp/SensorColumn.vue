@@ -30,7 +30,7 @@ export interface SensorItem {
   multi_values?: Record<string, any> | null
   is_multi_value?: boolean
   i2c_address?: number | null
-  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | null
+  interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL' | null
   device_scope?: 'zone_local' | 'multi_zone' | 'mobile' | null
   assigned_zones?: string[] | null
 }

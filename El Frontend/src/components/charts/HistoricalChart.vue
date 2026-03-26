@@ -43,7 +43,6 @@ ChartJS.register(
   Tooltip,
   Filler,
   TimeScale,
-  annotationPlugin,
   zoomPlugin
 )
 
@@ -162,6 +161,15 @@ function insertGapMarkers(
 // Load Historical Data + Stats
 // =============================================================================
 async function loadData() {
+  // Guard: skip API call if required props are missing (prevents 422)
+  if (!props.espId || !props.sensorType) {
+    error.value = 'Widget-Konfiguration unvollständig'
+    loading.value = false
+    dataBuffer.value = []
+    stats.value = null
+    return
+  }
+
   loading.value = true
   error.value = null
 
@@ -441,6 +449,47 @@ const chartOptions = computed(() => {
     }
   }
 
+  // VPD zone background bands (PB-01)
+  // Only active when sensorType is 'vpd'. Box annotations do NOT affect
+  // Y-axis scaling — Chart.js auto-scales to actual data range.
+  if (props.sensorType === 'vpd') {
+    annotations.vpdZoneLow = {
+      type: 'box' as const,
+      yMin: 0.0, yMax: 0.4,
+      backgroundColor: 'rgba(239,68,68,0.08)',
+      borderWidth: 0,
+      label: { display: false },
+    }
+    annotations.vpdZoneSubLow = {
+      type: 'box' as const,
+      yMin: 0.4, yMax: 0.8,
+      backgroundColor: 'rgba(234,179,8,0.08)',
+      borderWidth: 0,
+      label: { display: false },
+    }
+    annotations.vpdZoneOptimal = {
+      type: 'box' as const,
+      yMin: 0.8, yMax: 1.2,
+      backgroundColor: 'rgba(34,197,94,0.10)',
+      borderWidth: 0,
+      label: { display: false },
+    }
+    annotations.vpdZoneSubHigh = {
+      type: 'box' as const,
+      yMin: 1.2, yMax: 1.6,
+      backgroundColor: 'rgba(234,179,8,0.08)',
+      borderWidth: 0,
+      label: { display: false },
+    }
+    annotations.vpdZoneHigh = {
+      type: 'box' as const,
+      yMin: 1.6, yMax: 3.0,
+      backgroundColor: 'rgba(239,68,68,0.08)',
+      borderWidth: 0,
+      label: { display: false },
+    }
+  }
+
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -575,6 +624,7 @@ const chartOptions = computed(() => {
         ref="chartRef"
         :data="chartData"
         :options="chartOptions"
+        :plugins="[annotationPlugin]"
       />
     </div>
 

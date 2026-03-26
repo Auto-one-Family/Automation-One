@@ -11,7 +11,7 @@
  * - Alert badge from notification-inbox.store
  * - Hover: scale(1.08) with overshoot easing
  * - Click: expand to QuickActionMenu
- * - Hidden on login page and viewport < 768px
+ * - Hidden on login page; in editor mode hidden on viewport < 768px
  */
 
 import { ref, computed, onMounted, onUnmounted } from 'vue'
@@ -24,6 +24,20 @@ import QuickAlertPanel from './QuickAlertPanel.vue'
 import QuickNavPanel from './QuickNavPanel.vue'
 import QuickWidgetPanel from './QuickWidgetPanel.vue'
 import QuickDashboardPanel from './QuickDashboardPanel.vue'
+
+interface Props {
+  /** 'editor' = drag-to-grid (default), 'monitor' = click opens AddWidgetDialog */
+  mode?: 'editor' | 'monitor'
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  mode: 'editor',
+})
+
+const emit = defineEmits<{
+  /** Forwarded from QuickWidgetPanel in monitor mode */
+  'widget-selected': [widgetType: string]
+}>()
 
 const route = useRoute()
 const store = useQuickActionStore()
@@ -73,15 +87,16 @@ onUnmounted(() => {
   <div
     v-if="route.meta.requiresAuth !== false"
     ref="fabRef"
-    class="qa-fab"
-    :class="{ 'qa-fab--open': store.isMenuOpen }"
+    :class="['qa-fab', `qa-fab--${mode}`, { 'qa-fab--open': store.isMenuOpen }]"
   >
-    <!-- Sub-Panel: Menu, Alerts, or Navigation -->
+    <!-- Sub-Panel: Menu, Alerts, Navigation, or Widgets -->
     <Transition name="qa-menu-transition" mode="out-in">
       <component
         v-if="store.isMenuOpen"
         :is="activePanelComponent"
         :key="store.activePanel"
+        v-bind="store.activePanel === 'widgets' ? { mode: props.mode } : {}"
+        @widget-selected="(type: string) => emit('widget-selected', type)"
       />
     </Transition>
 
@@ -128,9 +143,9 @@ onUnmounted(() => {
   z-index: var(--z-fab);
 }
 
-/* Hidden on mobile < 768px */
+/* In editor mode: hidden on mobile < 768px (drag workflow not suited for touch) */
 @media (max-width: 767px) {
-  .qa-fab {
+  .qa-fab--editor {
     display: none;
   }
 }

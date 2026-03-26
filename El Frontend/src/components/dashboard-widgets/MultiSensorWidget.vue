@@ -2,21 +2,36 @@
 /**
  * MultiSensorWidget — Multi-sensor chart widget for dashboard
  *
- * Wraps MultiSensorChart.vue for the custom dashboard builder.
- * Allows selecting multiple sensors via chip-based UI.
- * Uses local state to survive render() one-shot props.
+ * Two modes:
+ * - Manual: user picks individual sensors via chip-based UI
+ * - Compare: user picks sensorType + zone, system auto-fills
+ *   all matching subzone sensors as overlay chart with subzone labels
  */
 import { ref, computed, watch } from 'vue'
 import { useEspStore } from '@/stores/esp'
+import { useZoneStore } from '@/shared/stores/zone.store'
 import MultiSensorChart from '@/components/charts/MultiSensorChart.vue'
-import { BarChart3, Plus, X } from 'lucide-vue-next'
+import { BarChart3, Plus, X, Download, GitCompareArrows } from 'lucide-vue-next'
 import { CHART_COLORS } from '@/utils/chartColors'
+import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+import { useSensorOptions } from '@/composables/useSensorOptions'
+import { useExportCsv } from '@/composables/useExportCsv'
+import { useToast } from '@/composables/useToast'
+import { parseSensorId } from '@/composables/useSensorId'
+import { getAutoResolution, TIME_RANGE_MINUTES } from '@/utils/autoResolution'
 import type { MockSensor, ChartSensor } from '@/types'
 
 interface Props {
   /** Comma-separated sensor IDs: "espId:gpio:sensorType,espId:gpio:sensorType" */
   dataSources?: string
+  zoneId?: string
   timeRange?: '1h' | '6h' | '24h' | '7d'
+  /** Compare mode: auto-fill sensors by sensorType + zone */
+  compareMode?: boolean
+  /** Sensor type to compare across subzones (e.g. "sht31_temp") */
+  compareSensorType?: string
+  /** Zone filter for compare mode; empty = use dashboard zoneId */
+  compareZoneId?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -28,16 +43,74 @@ const emit = defineEmits<{
 }>()
 
 const espStore = useEspStore()
+const zoneStore = useZoneStore()
+const { exportSensorCsv, isExporting } = useExportCsv()
+const toast = useToast()
 
 // Local state — survives render() one-shot props (Bug 1b pattern)
 const localDataSources = ref(props.dataSources || '')
 const localTimeRange = ref(props.timeRange)
+const localZoneId = ref<string | undefined>(props.zoneId)
+const localCompareMode = ref(props.compareMode ?? false)
+const localCompareSensorType = ref(props.compareSensorType || '')
+const localCompareZoneId = ref(props.compareZoneId || '')
 
 watch(() => props.dataSources, (v) => { if (v) localDataSources.value = v })
 watch(() => props.timeRange, (v) => { if (v) localTimeRange.value = v })
+watch(() => props.zoneId, (v) => { localZoneId.value = v })
+watch(() => props.compareMode, (v) => { if (v != null) localCompareMode.value = v })
+watch(() => props.compareSensorType, (v) => { if (v) localCompareSensorType.value = v })
+watch(() => props.compareZoneId, (v) => { if (v) localCompareZoneId.value = v })
 
-// Parse selected sensor IDs from comma-separated string
-// Format: "espId:gpio:sensorType,espId:gpio:sensorType" (backward-compatible with "espId:gpio")
+// --- Manual mode sensor options ---
+const { groupedSensorOptions, flatSensorOptions } = useSensorOptions(localZoneId)
+
+// --- Compare mode ---
+const effectiveCompareZoneId = computed(() =>
+  localCompareZoneId.value || localZoneId.value || ''
+)
+const compareZoneIdRef = computed(() => effectiveCompareZoneId.value || undefined)
+const { groupedSensorOptions: compareGroupedOptions } = useSensorOptions(compareZoneIdRef)
+
+/** Available sensor types within the selected compare zone */
+const availableCompareSensorTypes = computed(() => {
+  const typeMap = new Map<string, string>()
+  for (const zone of compareGroupedOptions.value) {
+    for (const subgroup of zone.subgroups) {
+      for (const opt of subgroup.options) {
+        if (!typeMap.has(opt.sensorType)) {
+          typeMap.set(opt.sensorType, SENSOR_TYPE_CONFIG[opt.sensorType]?.label || opt.sensorType)
+        }
+      }
+    }
+  }
+  return [...typeMap.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+})
+
+/** Auto-filled sensors for compare mode (max 4, sorted alphabetically by subzone) */
+const compareSensors = computed(() => {
+  if (!localCompareMode.value || !localCompareSensorType.value) return []
+
+  const raw = compareGroupedOptions.value
+    .flatMap(zone => zone.subgroups)
+    .flatMap(subzone =>
+      subzone.options
+        .filter(opt => opt.sensorType === localCompareSensorType.value)
+        .map(opt => ({
+          sensorId: opt.value,
+          subzoneName: subzone.label || 'Zone-weit',
+          subzoneId: subzone.subzoneId,
+        }))
+    )
+
+  return [...raw]
+    .sort((a, b) => a.subzoneName.localeCompare(b.subzoneName))
+    .slice(0, 4)
+})
+
+// Parse selected sensor IDs from comma-separated string (manual mode)
 const selectedSensorIds = computed(() => {
   if (!localDataSources.value) return []
   return localDataSources.value.split(',').filter(Boolean)
@@ -45,48 +118,64 @@ const selectedSensorIds = computed(() => {
 
 // Build ChartSensor[] for MultiSensorChart
 const chartSensors = computed<ChartSensor[]>(() => {
-  return selectedSensorIds.value.map((sId, idx) => {
-    const parts = sId.split(':')
-    const espId = parts[0]
-    const gpio = parseInt(parts[1])
-    const explicitSensorType = parts[2] || null // new: explicit sensor_type from ID
-    const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
+  if (localCompareMode.value) {
+    // Compare mode: build from auto-filled compareSensors
+    return compareSensors.value
+      .map((cs, index) => {
+        const parsed = parseSensorId(cs.sensorId)
+        if (!parsed.isValid || !parsed.espId || parsed.gpio === null) return null
+
+        const device = espStore.devices.find(d => espStore.getDeviceId(d) === parsed.espId)
+        const sensor = device
+          ? ((device.sensors as MockSensor[]) || []).find(s =>
+              s.gpio === parsed.gpio && (!parsed.sensorType || s.sensor_type === parsed.sensorType)
+            )
+          : null
+        const sensorType = parsed.sensorType || 'unknown'
+
+        return {
+          id: `${parsed.espId}_${parsed.gpio}_${sensorType}`,
+          espId: parsed.espId,
+          gpio: parsed.gpio,
+          sensorType,
+          name: cs.subzoneName,
+          unit: sensor?.unit || SENSOR_TYPE_CONFIG[sensorType]?.unit || '',
+          color: CHART_COLORS[index % CHART_COLORS.length] as string,
+        }
+      })
+      .filter((s): s is ChartSensor => s !== null)
+  }
+
+  // Manual mode: parse from dataSources via parseSensorId (filter invalid)
+  const result: ChartSensor[] = []
+  selectedSensorIds.value.forEach((sId, idx) => {
+    const parsed = parseSensorId(sId)
+    if (!parsed.isValid || !parsed.espId || parsed.gpio === null) return
+
+    const device = espStore.devices.find(d => espStore.getDeviceId(d) === parsed.espId)
     const sensor = device
       ? ((device.sensors as MockSensor[]) || []).find(s =>
-          s.gpio === gpio && (!explicitSensorType || s.sensor_type === explicitSensorType)
+          s.gpio === parsed.gpio && (!parsed.sensorType || s.sensor_type === parsed.sensorType)
         )
       : null
-    const sensorType = explicitSensorType || sensor?.sensor_type || 'unknown'
-    return {
-      id: `${espId}_${gpio}_${sensorType}`,
-      espId,
-      gpio,
+    const sensorType = parsed.sensorType || sensor?.sensor_type || 'unknown'
+    result.push({
+      id: `${parsed.espId}_${parsed.gpio}_${sensorType}`,
+      espId: parsed.espId,
+      gpio: parsed.gpio,
       sensorType,
-      name: sensor?.name || sensor?.sensor_type || `GPIO ${gpio}`,
-      unit: sensor?.unit || '',
-      color: CHART_COLORS[idx % CHART_COLORS.length],
-    }
+      name: sensor?.name || sensor?.sensor_type || `GPIO ${parsed.gpio}`,
+      unit: sensor?.unit || SENSOR_TYPE_CONFIG[sensorType]?.unit || '',
+      color: CHART_COLORS[idx % CHART_COLORS.length] as string,
+    })
   })
+  return result
 })
 
-// All available sensors for "add" dropdown (deduplicated, multi-value sensors listed per sub-type)
-const availableSensors = computed(() => {
-  const items: { id: string; label: string }[] = []
-  const seen = new Set<string>()
-  for (const device of espStore.devices) {
-    const deviceId = espStore.getDeviceId(device)
-    for (const s of (device.sensors as MockSensor[]) || []) {
-      const id = `${deviceId}:${s.gpio}:${s.sensor_type}`
-      if (seen.has(id) || selectedSensorIds.value.includes(id)) continue
-      seen.add(id)
-      items.push({
-        id,
-        label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
-      })
-    }
-  }
-  return items
-})
+// Available sensors excluding already selected ones (manual mode)
+const availableSensors = computed(() =>
+  flatSensorOptions.value.filter(s => !selectedSensorIds.value.includes(s.id))
+)
 
 const showAddDropdown = ref(false)
 
@@ -103,10 +192,109 @@ function removeSensor(sensorId: string) {
   emit('update:config', { dataSources: localDataSources.value })
 }
 
+function toggleCompareMode() {
+  localCompareMode.value = !localCompareMode.value
+  emit('update:config', { compareMode: localCompareMode.value })
+}
+
+function updateCompareSensorType(value: string) {
+  localCompareSensorType.value = value
+  emit('update:config', { compareSensorType: value })
+}
+
+function updateCompareZoneId(value: string) {
+  localCompareZoneId.value = value
+  emit('update:config', { compareZoneId: value })
+}
+
+// --- CSV Export ---
+function getZoneName(): string | undefined {
+  if (!localZoneId.value) return undefined
+  return zoneStore.zoneEntities.find(z => z.zone_id === localZoneId.value)?.name
+}
+
+async function handleExportAll() {
+  const sensors = chartSensors.value
+  if (sensors.length === 0) return
+
+  const rangeMinutes = TIME_RANGE_MINUTES[localTimeRange.value] ?? 1440
+  const resolution = getAutoResolution(rangeMinutes) ?? 'raw'
+  const endTime = new Date()
+  const startTime = new Date(endTime.getTime() - rangeMinutes * 60 * 1000)
+  const zoneName = getZoneName()
+
+  let downloadCount = 0
+  for (let i = 0; i < sensors.length; i++) {
+    const sensor = sensors[i]
+    const parsed = parseSensorId(`${sensor.espId}:${sensor.gpio}:${sensor.sensorType}`)
+    if (!parsed.isValid || parsed.espId === null || parsed.gpio === null) continue
+
+    // 200ms delay between downloads so the browser doesn't block them
+    if (i > 0) await new Promise(r => setTimeout(r, 200))
+
+    await exportSensorCsv({
+      espId: parsed.espId,
+      gpio: parsed.gpio,
+      sensorType: parsed.sensorType ?? '',
+      sensorName: sensor.name,
+      zoneName,
+      startTime,
+      endTime,
+      resolution,
+    })
+    downloadCount++
+  }
+
+  if (downloadCount > 0) {
+    toast.show({ message: `${downloadCount} CSV-Dateien heruntergeladen`, type: 'success' })
+  }
+}
 </script>
 
 <template>
   <div class="multi-sensor-widget">
+    <!-- Mode toggle -->
+    <div class="multi-sensor-widget__mode-toggle">
+      <button
+        class="multi-sensor-widget__toggle-btn"
+        :class="{ 'multi-sensor-widget__toggle-btn--active': localCompareMode }"
+        :title="localCompareMode ? 'Manueller Modus' : 'Vergleichs-Modus'"
+        @click="toggleCompareMode"
+      >
+        <GitCompareArrows :size="14" />
+        <span>Vergleich</span>
+      </button>
+    </div>
+
+    <!-- Compare mode config -->
+    <div v-if="localCompareMode" class="multi-sensor-widget__compare-config">
+      <select
+        class="multi-sensor-widget__select"
+        :value="localCompareZoneId || localZoneId || ''"
+        @change="updateCompareZoneId(($event.target as HTMLSelectElement).value)"
+      >
+        <option value="" disabled>— Zone —</option>
+        <option
+          v-for="zone in zoneStore.activeZones"
+          :key="zone.id"
+          :value="zone.id"
+        >{{ zone.name }}</option>
+      </select>
+      <select
+        class="multi-sensor-widget__select"
+        :value="localCompareSensorType"
+        @change="updateCompareSensorType(($event.target as HTMLSelectElement).value)"
+      >
+        <option value="" disabled>— Sensortyp —</option>
+        <option
+          v-for="st in availableCompareSensorTypes"
+          :key="st.value"
+          :value="st.value"
+        >{{ st.label }}</option>
+      </select>
+    </div>
+
+    <!-- Chart content -->
     <template v-if="chartSensors.length > 0">
       <!-- Sensor chips -->
       <div class="multi-sensor-widget__chips">
@@ -121,24 +309,45 @@ function removeSensor(sensorId: string) {
             :style="{ background: CHART_COLORS[idx % CHART_COLORS.length] }"
           />
           {{ sensor.name }}
-          <button class="multi-sensor-widget__chip-remove" @click="removeSensor(selectedSensorIds[idx])">
+          <button
+            v-if="!localCompareMode"
+            class="multi-sensor-widget__chip-remove"
+            @click="removeSensor(selectedSensorIds[idx])"
+          >
             <X :size="10" />
           </button>
         </span>
+        <!-- Add button (manual mode only) -->
         <button
-          v-if="availableSensors.length > 0"
+          v-if="!localCompareMode && availableSensors.length > 0"
           class="multi-sensor-widget__add-btn"
           @click="showAddDropdown = !showAddDropdown"
         >
           <Plus :size="12" />
         </button>
-        <div v-if="showAddDropdown" class="multi-sensor-widget__dropdown">
-          <div
-            v-for="s in availableSensors"
-            :key="s.id"
-            class="multi-sensor-widget__dropdown-item"
-            @click="addSensor(s.id)"
-          >{{ s.label }}</div>
+        <button
+          class="multi-sensor-widget__export-btn"
+          title="Alle Sensoren als CSV exportieren"
+          :disabled="isExporting"
+          @click="handleExportAll"
+        >
+          <Download :size="12" />
+        </button>
+        <div v-if="!localCompareMode && showAddDropdown" class="multi-sensor-widget__dropdown">
+          <template v-for="zoneGroup in groupedSensorOptions" :key="zoneGroup.zoneId ?? '__unassigned'">
+            <template v-for="subgroup in zoneGroup.subgroups" :key="`${zoneGroup.zoneId}_${subgroup.subzoneId ?? '__nosub'}`">
+              <div class="multi-sensor-widget__dropdown-group">
+                {{ subgroup.label ? `${zoneGroup.label} / ${subgroup.label}` : zoneGroup.label }}
+              </div>
+              <template v-for="opt in subgroup.options" :key="opt.value">
+                <div
+                  v-if="!selectedSensorIds.includes(opt.value)"
+                  class="multi-sensor-widget__dropdown-item"
+                  @click="addSensor(opt.value)"
+                >{{ opt.label }}</div>
+              </template>
+            </template>
+          </template>
         </div>
       </div>
 
@@ -152,21 +361,34 @@ function removeSensor(sensorId: string) {
       </div>
     </template>
 
-    <!-- Empty state: select sensors -->
+    <!-- Empty state -->
     <div v-else class="multi-sensor-widget__empty">
       <BarChart3 class="w-8 h-8" style="opacity: 0.3" />
-      <p>Sensoren für Multi-Chart auswählen:</p>
-      <select
-        class="multi-sensor-widget__select"
-        @change="addSensor(($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"
-      >
-        <option value="" disabled selected>— Sensor hinzufügen —</option>
-        <option
-          v-for="s in availableSensors"
-          :key="s.id"
-          :value="s.id"
-        >{{ s.label }}</option>
-      </select>
+      <template v-if="localCompareMode">
+        <p v-if="!effectiveCompareZoneId">Bitte Zone auswählen</p>
+        <p v-else-if="!localCompareSensorType">Bitte Sensortyp auswählen</p>
+        <p v-else>Keine passenden Sensoren in dieser Zone</p>
+      </template>
+      <template v-else>
+        <p>Sensoren für Multi-Chart auswählen:</p>
+        <select
+          class="multi-sensor-widget__select"
+          @change="addSensor(($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"
+        >
+          <option value="" disabled selected>— Sensor hinzufügen —</option>
+          <template v-for="zoneGroup in groupedSensorOptions" :key="zoneGroup.zoneId ?? '__unassigned'">
+            <template v-for="subgroup in zoneGroup.subgroups" :key="`${zoneGroup.zoneId}_${subgroup.subzoneId ?? '__nosub'}`">
+              <optgroup :label="subgroup.label ? `${zoneGroup.label} / ${subgroup.label}` : zoneGroup.label">
+                <option
+                  v-for="opt in subgroup.options"
+                  :key="opt.value"
+                  :value="opt.value"
+                >{{ opt.label }}</option>
+              </optgroup>
+            </template>
+          </template>
+        </select>
+      </template>
     </div>
   </div>
 </template>
@@ -176,6 +398,52 @@ function removeSensor(sensorId: string) {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+.multi-sensor-widget__mode-toggle {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-1) var(--space-2) 0;
+  flex-shrink: 0;
+}
+
+.multi-sensor-widget__toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-height: 28px;
+}
+
+.multi-sensor-widget__toggle-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text-secondary);
+}
+
+.multi-sensor-widget__toggle-btn--active {
+  border-color: var(--color-accent);
+  background: rgba(96, 165, 250, 0.1);
+  color: var(--color-accent);
+}
+
+.multi-sensor-widget__compare-config {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  flex-shrink: 0;
+}
+
+.multi-sensor-widget__compare-config .multi-sensor-widget__select {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
 }
 
 .multi-sensor-widget__chips {
@@ -239,6 +507,38 @@ function removeSensor(sensorId: string) {
   color: var(--color-accent);
 }
 
+.multi-sensor-widget__export-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.multi-sensor-widget__export-btn:hover {
+  opacity: 1;
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.multi-sensor-widget__export-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+@media (hover: none) {
+  .multi-sensor-widget__export-btn {
+    opacity: 0.8;
+  }
+}
+
 .multi-sensor-widget__dropdown {
   position: absolute;
   top: 100%;
@@ -251,6 +551,20 @@ function removeSensor(sensorId: string) {
   max-height: 200px;
   overflow-y: auto;
   min-width: 200px;
+}
+
+.multi-sensor-widget__dropdown-group {
+  padding: var(--space-1) var(--space-3);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  border-top: 1px solid var(--glass-border);
+}
+
+.multi-sensor-widget__dropdown-group:first-child {
+  border-top: none;
 }
 
 .multi-sensor-widget__dropdown-item {

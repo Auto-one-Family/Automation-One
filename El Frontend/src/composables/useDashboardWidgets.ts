@@ -10,7 +10,7 @@
  * and DOM creation/mount/cleanup logic from CustomDashboardView.
  */
 
-import { getCurrentInstance, h, render, type Component } from 'vue'
+import { getCurrentInstance, h, render, type Component, type Ref } from 'vue'
 
 // Widget components
 import LineChartWidget from '@/components/dashboard-widgets/LineChartWidget.vue'
@@ -22,6 +22,7 @@ import ESPHealthWidget from '@/components/dashboard-widgets/ESPHealthWidget.vue'
 import AlarmListWidget from '@/components/dashboard-widgets/AlarmListWidget.vue'
 import ActuatorRuntimeWidget from '@/components/dashboard-widgets/ActuatorRuntimeWidget.vue'
 import MultiSensorWidget from '@/components/dashboard-widgets/MultiSensorWidget.vue'
+import StatisticsWidget from '@/components/dashboard-widgets/StatisticsWidget.vue'
 
 // Icons for widget catalog
 import {
@@ -56,6 +57,8 @@ export interface UseDashboardWidgetsOptions {
   onConfigUpdate?: (widgetId: string, newConfig: Record<string, any>) => void
   /** Disable interactive controls (e.g. actuator toggle) in monitor context. Default: false */
   readOnly?: boolean
+  /** Zone ID to propagate to widgets for zone-scoped sensor filtering (PA-02c) */
+  zoneId?: Ref<string | undefined>
 }
 
 export interface UseDashboardWidgetsReturn {
@@ -71,7 +74,7 @@ export interface UseDashboardWidgetsReturn {
 
 // ─── Static Data (shared across all instances) ──────────────────────────────
 
-/** Widget component registry — all 9 types */
+/** Widget component registry — all 10 types */
 const widgetComponentMap: Record<string, Component> = {
   'line-chart': LineChartWidget,
   'gauge': GaugeWidget,
@@ -82,6 +85,7 @@ const widgetComponentMap: Record<string, Component> = {
   'alarm-list': AlarmListWidget,
   'actuator-runtime': ActuatorRuntimeWidget,
   'multi-sensor': MultiSensorWidget,
+  'statistics': StatisticsWidget,
 }
 
 /** Widget type metadata for catalog and auto-generation */
@@ -95,6 +99,7 @@ const WIDGET_TYPE_META: WidgetTypeMeta[] = [
   { type: 'actuator-runtime', label: 'Aktor-Laufzeit', description: 'Laufzeitstatistik eines Aktors', icon: BarChart3, w: 4, h: 3, minW: 3, minH: 3, category: 'Aktoren' },
   { type: 'esp-health', label: 'ESP-Health', description: 'Health-Metriken eines ESP32', icon: Cpu, w: 6, h: 3, minW: 4, minH: 3, category: 'System' },
   { type: 'alarm-list', label: 'Alarm-Liste', description: 'Liste aktiver und vergangener Alarme', icon: Bell, w: 4, h: 4, minW: 4, minH: 4, category: 'System' },
+  { type: 'statistics', label: 'Statistik', description: 'Min / Avg / Max und Standardabweichung fuer einen Sensor ueber einen Zeitraum', icon: BarChart3, w: 4, h: 3, minW: 3, minH: 2, category: 'Sensoren' },
 ]
 
 /** Default config per widget type */
@@ -108,6 +113,7 @@ const WIDGET_DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
   'actuator-runtime': {},
   'esp-health': {},
   'alarm-list': {},
+  'statistics': { timeRange: '7d', showStdDev: true, showQuality: false },
 }
 
 /** Gear icon SVG (inline, no external dependency) */
@@ -131,6 +137,7 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
     onRemoveClick,
     onConfigUpdate,
     readOnly = false,
+    zoneId,
   } = options
 
   // Capture appContext in setup() context — CRITICAL: do not move into callbacks
@@ -246,10 +253,20 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
     if (config.warnHigh != null) props.warnHigh = config.warnHigh
     if (config.alarmLow != null) props.alarmLow = config.alarmLow
     if (config.alarmHigh != null) props.alarmHigh = config.alarmHigh
+    if (config.showStdDev != null) props.showStdDev = config.showStdDev
+    if (config.showQuality != null) props.showQuality = config.showQuality
+    if (config.compareMode != null) props.compareMode = config.compareMode
+    if (config.compareSensorType) props.compareSensorType = config.compareSensorType
+    if (config.compareZoneId) props.compareZoneId = config.compareZoneId
 
     // readOnly prop for actuator widgets (monitor context = no toggle)
     if (readOnly && type === 'actuator-card') {
       props.readOnly = true
+    }
+
+    // Zone ID for zone-scoped sensor filtering (PA-02c)
+    if (zoneId?.value) {
+      props.zoneId = zoneId.value
     }
 
     // onUpdate:config handler

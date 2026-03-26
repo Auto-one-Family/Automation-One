@@ -63,7 +63,7 @@ export interface DashboardCreatePayload {
   description?: string
   widgets?: DashboardWidgetDTO[]
   is_shared?: boolean
-  scope?: 'zone' | 'cross-zone' | 'sensor-detail'
+  scope?: 'zone' | 'zone-tile' | 'cross-zone' | 'sensor-detail'
   zone_id?: string
   auto_generated?: boolean
   sensor_id?: string
@@ -76,7 +76,7 @@ export interface DashboardUpdatePayload {
   description?: string
   widgets?: DashboardWidgetDTO[]
   is_shared?: boolean
-  scope?: 'zone' | 'cross-zone' | 'sensor-detail'
+  scope?: 'zone' | 'zone-tile' | 'cross-zone' | 'sensor-detail'
   zone_id?: string
   auto_generated?: boolean
   sensor_id?: string

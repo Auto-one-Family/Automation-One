@@ -5,7 +5,7 @@
  * Fix: Uses local sensorId ref to survive render() one-shot props.
  * 8.1-A: Passes min/max/threshold config to GaugeChart for correct scale and color zones.
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useEspStore } from '@/stores/esp'
 import GaugeChart from '@/components/charts/GaugeChart.vue'
 import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
@@ -13,9 +13,11 @@ import { tokens } from '@/utils/cssTokens'
 import type { GaugeThreshold } from '@/components/charts/types'
 import type { MockSensor } from '@/types'
 import { useSensorId } from '@/composables/useSensorId'
+import { useSensorOptions } from '@/composables/useSensorOptions'
 
 interface Props {
   sensorId?: string // "espId:gpio:sensorType"
+  zoneId?: string   // Zone-scoped sensor filtering (PA-02c)
   yMin?: number
   yMax?: number
   warnLow?: number
@@ -34,30 +36,17 @@ const espStore = useEspStore()
 
 // Local sensorId state — survives render() one-shot props (Bug 1b fix)
 const localSensorId = ref(props.sensorId || '')
+const localZoneId = ref<string | undefined>(props.zoneId)
 
 // Sync from props when they change (e.g. page reload with saved config)
 watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
+watch(() => props.zoneId, (v) => { localZoneId.value = v })
 
 // Centralized sensorId parsing
 const { espId: parsedEspId, gpio: parsedGpio, sensorType: parsedSensorType, isValid: sensorIdValid } = useSensorId(localSensorId)
 
-const availableSensors = computed(() => {
-  const items: { id: string; label: string }[] = []
-  const seen = new Set<string>()
-  for (const device of espStore.devices) {
-    const deviceId = espStore.getDeviceId(device)
-    for (const s of (device.sensors as MockSensor[]) || []) {
-      const id = `${deviceId}:${s.gpio}:${s.sensor_type}`
-      if (seen.has(id)) continue
-      seen.add(id)
-      items.push({
-        id,
-        label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
-      })
-    }
-  }
-  return items
-})
+// Centralized sensor options (deduplicated, zone-filtered via PA-02c)
+const { flatSensorOptions: availableSensors } = useSensorOptions(localZoneId)
 
 // Current sensor data — uses parsed sensorId parts
 const currentSensor = computed(() => {
@@ -127,6 +116,26 @@ const gaugeThresholds = computed<GaugeThreshold[]>(() => {
   return thresholds
 })
 
+// Adaptive gauge size: detect container height to choose sm/md
+const widgetEl = ref<HTMLElement | null>(null)
+const gaugeSize = ref<'sm' | 'md'>('md')
+let resizeObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  if (widgetEl.value) {
+    resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        gaugeSize.value = entry.contentRect.height < 90 ? 'sm' : 'md'
+      }
+    })
+    resizeObserver.observe(widgetEl.value)
+  }
+})
+
+onUnmounted(() => {
+  resizeObserver?.disconnect()
+})
+
 function selectSensor(sensorId: string) {
   localSensorId.value = sensorId  // Immediate local update (Bug 1b fix)
   emit('update:config', { sensorId })
@@ -134,7 +143,7 @@ function selectSensor(sensorId: string) {
 </script>
 
 <template>
-  <div class="gauge-widget">
+  <div ref="widgetEl" class="gauge-widget">
     <template v-if="localSensorId && currentSensor">
       <GaugeChart
         :value="currentSensor.raw_value ?? 0"
@@ -142,7 +151,7 @@ function selectSensor(sensorId: string) {
         :min="effectiveMin"
         :max="effectiveMax"
         :thresholds="gaugeThresholds"
-        size="md"
+        :size="gaugeSize"
       />
     </template>
     <div v-else class="gauge-widget__empty">

@@ -131,6 +131,11 @@ export const useZoneStore = defineStore('zone', () => {
   async function deleteZoneEntity(zoneId: string): Promise<void> {
     await zonesApi.deleteZoneEntity(zoneId)
     zoneEntities.value = zoneEntities.value.filter(z => z.zone_id !== zoneId)
+
+    // Clean up auto-generated dashboards for the deleted zone (V19-F05, Option C)
+    const { useDashboardStore } = await import('@/shared/stores/dashboard.store')
+    const dashboardStore = useDashboardStore()
+    dashboardStore.cleanupOrphanedDashboards()
   }
 
   // =========================================================================

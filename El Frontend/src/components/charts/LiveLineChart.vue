@@ -30,8 +30,7 @@ ChartJS.register(
   LineElement,
   Tooltip,
   Filler,
-  TimeScale,
-  annotationPlugin
+  TimeScale
 )
 
 import type { ChartDataPoint } from './types'
@@ -277,6 +276,7 @@ defineExpose({ addDataPoint, clear })
     <Line
       :data="chartData"
       :options="chartOptions"
+      :plugins="[annotationPlugin]"
     />
   </div>
 </template>

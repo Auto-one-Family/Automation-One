@@ -6,32 +6,50 @@
  * Zero overhead: no drag/resize listeners, no external library.
  * Used for inline/side-panel dashboard embedding in Monitor/Hardware views.
  *
+ * Mode system (D4):
+ * - 'view' / 'inline': Read-only, no toolbar (guests, readonly)
+ * - 'manage': Read-only + hover toolbar for widget config/remove (authenticated users)
+ * - 'side-panel': Side panel layout (single column stacking)
+ *
  * Block 7c: El Frontend/src/components/dashboard/InlineDashboardPanel.vue
  */
-import { onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
+import { onMounted, onUnmounted, computed, nextTick, watch, toRef, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Pencil } from 'lucide-vue-next'
+import { Pencil, Settings, Trash2 } from 'lucide-vue-next'
 import { useDashboardStore, type DashboardWidget } from '@/shared/stores/dashboard.store'
+import { useAuthStore } from '@/shared/stores/auth.store'
+import { useUiStore } from '@/shared/stores/ui.store'
 import { useDashboardWidgets } from '@/composables/useDashboardWidgets'
+import WidgetConfigPanel from '@/components/dashboard-widgets/WidgetConfigPanel.vue'
 import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('InlineDashboardPanel')
 
 interface Props {
   layoutId: string
-  mode?: 'inline' | 'side-panel'
+  mode?: 'view' | 'manage' | 'inline' | 'side-panel'
+  /** Zone ID for zone-scoped sensor filtering in widgets (PA-02c) */
+  zoneId?: string
+  /** Compact mode: hide header + edit link, reduced padding (Phase 3 mini-widgets) */
+  compact?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   mode: 'inline',
+  compact: false,
 })
 
 const dashStore = useDashboardStore()
+const authStore = useAuthStore()
+const uiStore = useUiStore()
+
+const zoneIdRef = toRef(props, 'zoneId')
 
 const { createWidgetElement, mountWidgetToElement, cleanupAllWidgets, widgetComponentMap } = useDashboardWidgets({
   showConfigButton: false,
   showWidgetHeader: false,
   readOnly: true,
+  zoneId: zoneIdRef as import('vue').Ref<string | undefined>,
 })
 
 /** Row height in pixels — synchronized with CustomDashboardView/DashboardViewer cellHeight */
@@ -39,7 +57,13 @@ const ROW_HEIGHT_INLINE = 80
 const ROW_HEIGHT_SIDE = 120
 
 const isSidePanel = computed(() => props.mode === 'side-panel')
-const rowHeightPx = computed(() => `${isSidePanel.value ? ROW_HEIGHT_SIDE : ROW_HEIGHT_INLINE}px`)
+const isManageMode = computed(() => props.mode === 'manage' && authStore.isAuthenticated)
+const ROW_HEIGHT_COMPACT = 70
+const rowHeightPx = computed(() => {
+  if (props.compact) return `${ROW_HEIGHT_COMPACT}px`
+  if (isSidePanel.value) return `${ROW_HEIGHT_SIDE}px`
+  return `${ROW_HEIGHT_INLINE}px`
+})
 
 const layout = computed(() =>
   dashStore.getLayoutById(props.layoutId)
@@ -51,6 +75,38 @@ const editorRoute = computed(() => ({
   name: 'editor-dashboard' as const,
   params: { dashboardId: layout.value?.serverId || props.layoutId },
 }))
+
+// ── Manage Mode: Hover Toolbar & Config (D4) ──
+
+const hoveredWidgetId = ref<string | null>(null)
+const configWidget = ref<DashboardWidget | null>(null)
+
+function openConfig(w: DashboardWidget): void {
+  configWidget.value = w
+}
+
+function closeConfig(): void {
+  configWidget.value = null
+}
+
+function handleConfigUpdate(newConfig: Record<string, any>): void {
+  if (!configWidget.value) return
+  dashStore.updateWidgetConfig(props.layoutId, configWidget.value.id, newConfig)
+}
+
+async function confirmRemove(w: DashboardWidget): Promise<void> {
+  const confirmed = await uiStore.confirm({
+    title: 'Widget entfernen',
+    message: 'Dieses Widget wird aus dem Dashboard entfernt.',
+    confirmText: 'Entfernen',
+    variant: 'danger',
+  })
+  if (confirmed) {
+    dashStore.removeWidget(props.layoutId, w.id)
+  }
+}
+
+// ── Widget Style & Mounting ──
 
 /**
  * Calculate grid cell style from widget position.
@@ -82,6 +138,7 @@ function mountWidgets() {
   cleanupAllWidgets()
 
   nextTick(() => {
+    if (!isMounted) return
     for (const w of widgets.value) {
       if (!isKnownWidgetType(w.type)) {
         logger.warn(`Unknown widget type "${w.type}" — skipping render`)
@@ -104,13 +161,18 @@ function mountWidgets() {
   })
 }
 
-watch(widgets, () => mountWidgets(), { deep: true })
+watch(
+  () => widgets.value.map(w => w.id).join(','),
+  () => mountWidgets()
+)
 
 onMounted(() => {
   if (widgets.value.length > 0) mountWidgets()
 })
 
+let isMounted = true
 onUnmounted(() => {
+  isMounted = false
   cleanupAllWidgets()
 })
 </script>
@@ -118,10 +180,10 @@ onUnmounted(() => {
 <template>
   <div
     v-if="layout && widgets.length > 0"
-    :class="['inline-dashboard', `inline-dashboard--${mode}`]"
+    :class="['inline-dashboard', `inline-dashboard--${mode}`, { 'inline-dashboard--compact': compact }]"
   >
-    <!-- Header -->
-    <div class="inline-dashboard__header">
+    <!-- Header (hidden in compact mode to avoid nested interactive elements) -->
+    <div v-if="!compact" class="inline-dashboard__header">
       <span class="inline-dashboard__name">{{ layout.name }}</span>
       <RouterLink :to="editorRoute" class="inline-dashboard__edit-link" title="Im Editor bearbeiten">
         <Pencil :size="14" />
@@ -135,13 +197,48 @@ onUnmounted(() => {
         :key="w.id"
         class="inline-dashboard__cell"
         :style="widgetStyle(w)"
+        @mouseenter="hoveredWidgetId = w.id"
+        @mouseleave="hoveredWidgetId = null"
       >
+        <!-- Manage toolbar: hover on desktop, always visible on touch (D4) -->
+        <div
+          v-if="isManageMode"
+          :class="['widget-toolbar', { 'widget-toolbar--visible': hoveredWidgetId === w.id }]"
+        >
+          <button
+            class="widget-toolbar__btn"
+            title="Konfigurieren"
+            @click.stop="openConfig(w)"
+          >
+            <Settings :size="14" />
+          </button>
+          <button
+            class="widget-toolbar__btn widget-toolbar__btn--danger"
+            title="Entfernen"
+            @click.stop="confirmRemove(w)"
+          >
+            <Trash2 :size="14" />
+          </button>
+        </div>
+
         <div v-if="isKnownWidgetType(w.type)" :id="`inline-${layoutId}-${w.id}`" class="inline-dashboard__mount" />
         <div v-else class="inline-dashboard__unknown">
           <span>{{ w.type }}</span>
         </div>
       </div>
     </div>
+
+    <!-- Widget Config Panel (SlideOver, reused 1:1 from editor — D4) -->
+    <WidgetConfigPanel
+      v-if="configWidget"
+      :open="!!configWidget"
+      :widget-id="configWidget.id"
+      :widget-type="configWidget.type"
+      :config="configWidget.config || {}"
+      :zone-id="zoneId"
+      @close="closeConfig"
+      @update:config="handleConfigUpdate"
+    />
   </div>
 </template>
 
@@ -201,6 +298,7 @@ onUnmounted(() => {
 }
 
 .inline-dashboard__cell {
+  position: relative;
   min-width: 0;
   overflow: hidden;
   border-radius: var(--radius-sm, 6px);
@@ -237,5 +335,90 @@ onUnmounted(() => {
   font-size: var(--text-xs, 11px);
   font-style: italic;
   opacity: 0.6;
+}
+
+/* Compact mode: reduced padding, no border, constrained height (Phase 3 mini-widgets) */
+.inline-dashboard--compact {
+  border: none;
+  background: transparent;
+}
+
+.inline-dashboard--compact .inline-dashboard__grid {
+  padding: 0;
+  gap: 0;
+}
+
+.inline-dashboard--compact .inline-dashboard__cell {
+  overflow: hidden;
+}
+
+/* ── Manage Mode: Widget Hover Toolbar (D4) ── */
+
+.widget-toolbar {
+  position: absolute;
+  top: var(--space-1, 4px);
+  right: var(--space-1, 4px);
+  z-index: 10;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(30, 30, 45, 0.75);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.06));
+  opacity: 0;
+  transition: opacity var(--transition-fast, 150ms);
+  pointer-events: none;
+}
+
+.widget-toolbar--visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Touch devices: always show toolbar */
+@media (hover: none) {
+  .widget-toolbar {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.widget-toolbar__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary, #b0b0c0);
+  cursor: pointer;
+  border-radius: var(--radius-sm, 6px);
+  transition: all var(--transition-fast, 150ms);
+  padding: 0;
+}
+
+.widget-toolbar__btn:hover {
+  background: var(--glass-bg-light, rgba(255, 255, 255, 0.04));
+  color: var(--color-text-primary, #f0f0f5);
+}
+
+.widget-toolbar__btn--danger:hover {
+  color: var(--color-error, #f87171);
+}
+
+.widget-toolbar__btn:focus-visible {
+  outline: 2px solid var(--color-iridescent-2, #818cf8);
+  outline-offset: 1px;
+}
+
+/* Touch: enlarge touch targets to 44px (WCAG) */
+@media (hover: none) {
+  .widget-toolbar__btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 </style>

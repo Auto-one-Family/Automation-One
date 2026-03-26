@@ -9,14 +9,16 @@ import { ref, computed, watch } from 'vue'
 import { useEspStore } from '@/stores/esp'
 import { Activity, TrendingUp, TrendingDown, Minus } from 'lucide-vue-next'
 import type { MockSensor } from '@/types'
-import { getSensorUnit } from '@/utils/sensorDefaults'
+import { getSensorUnit, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { useSparklineCache } from '@/composables/useSparklineCache'
 import { calculateTrend } from '@/utils/trendUtils'
 import type { TrendDirection } from '@/utils/trendUtils'
 import { useSensorId } from '@/composables/useSensorId'
+import { useSensorOptions } from '@/composables/useSensorOptions'
 
 interface Props {
   sensorId?: string // "espId:gpio:sensorType"
+  zoneId?: string   // Zone-scoped sensor filtering (PA-02c)
 }
 
 const props = defineProps<Props>()
@@ -29,30 +31,17 @@ const { sparklineCache, getSensorKey } = useSparklineCache(30)
 
 // Local sensorId state — survives render() one-shot props (Bug 1b fix)
 const localSensorId = ref(props.sensorId || '')
+const localZoneId = ref<string | undefined>(props.zoneId)
 
 // Sync from props when they change (e.g. page reload with saved config)
 watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
+watch(() => props.zoneId, (v) => { localZoneId.value = v })
 
 // Centralized sensorId parsing
 const { espId: parsedEspId, gpio: parsedGpio, sensorType: parsedSensorType, isValid: sensorIdValid } = useSensorId(localSensorId)
 
-const availableSensors = computed(() => {
-  const items: { id: string; label: string }[] = []
-  const seen = new Set<string>()
-  for (const device of espStore.devices) {
-    const deviceId = espStore.getDeviceId(device)
-    for (const s of (device.sensors as MockSensor[]) || []) {
-      const id = `${deviceId}:${s.gpio}:${s.sensor_type}`
-      if (seen.has(id)) continue
-      seen.add(id)
-      items.push({
-        id,
-        label: `${s.name || s.sensor_type} (${deviceId} GPIO ${s.gpio} — ${s.sensor_type})`,
-      })
-    }
-  }
-  return items
-})
+// Centralized sensor options (deduplicated, zone-filtered via PA-02c)
+const { flatSensorOptions: availableSensors } = useSensorOptions(localZoneId)
 
 // Current sensor data — uses parsed sensorId parts
 const currentSensor = computed(() => {
@@ -62,6 +51,11 @@ const currentSensor = computed(() => {
   return ((device.sensors as MockSensor[]) || []).find(s =>
     s.gpio === parsedGpio.value && (!parsedSensorType.value || s.sensor_type === parsedSensorType.value)
   ) || null
+})
+
+const decimals = computed(() => {
+  const sType = parsedSensorType.value || currentSensor.value?.sensor_type
+  return SENSOR_TYPE_CONFIG[sType ?? '']?.decimals ?? 1
 })
 
 const qualityClass = computed(() => {
@@ -117,7 +111,7 @@ function selectSensor(sensorId: string) {
         </span>
       </div>
       <div class="sensor-card-widget__value">
-        <span class="sensor-card-widget__number">{{ (currentSensor.raw_value ?? 0).toFixed(1) }}</span>
+        <span class="sensor-card-widget__number">{{ (currentSensor.raw_value ?? 0).toFixed(decimals) }}</span>
         <span class="sensor-card-widget__unit">{{ getSensorUnit(currentSensor.sensor_type) !== 'raw' ? getSensorUnit(currentSensor.sensor_type) : (currentSensor.unit || '') }}</span>
       </div>
     </template>

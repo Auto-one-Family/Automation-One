@@ -49,7 +49,7 @@ function handleBack(): void {
 }
 
 function navigateToDashboard(dashboardId: string): void {
-  void router.push({ name: 'monitor-dashboard', params: { dashboardId } })
+  void router.push({ name: 'editor-dashboard', params: { dashboardId } })
   quickActionStore.closeMenu()
 }
 
@@ -168,11 +168,12 @@ function navigateToEditor(dashboardId?: string): void {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .qa-dash-panel {
-  position: absolute;
-  bottom: calc(100% + var(--space-2));
-  right: 0;
+  position: fixed;
+  bottom: calc(64px + var(--space-2));
+  right: 20px;
   width: 280px;
-  max-height: 420px;
+  min-height: 120px;
+  max-height: 60vh;
   display: flex;
   flex-direction: column;
   background: rgba(20, 20, 30, 0.92);
@@ -181,6 +182,7 @@ function navigateToEditor(dashboardId?: string): void {
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--elevation-floating);
+  z-index: var(--z-fab);
   overflow: hidden;
 }
 
@@ -256,6 +258,7 @@ function navigateToEditor(dashboardId?: string): void {
 .qa-dash-panel__empty {
   padding: var(--space-6) var(--space-4);
   text-align: center;
+  min-height: 120px;
 }
 
 .qa-dash-panel__empty-icon {
@@ -399,6 +402,14 @@ function navigateToEditor(dashboardId?: string): void {
 .qa-dash-panel__item-edit:hover {
   background: rgba(255, 255, 255, 0.08);
   color: var(--color-iridescent-1);
+}
+
+/* ═══ TOUCH DEVICES ════════════════════════════════════════════════════════ */
+
+@media (hover: none) {
+  .qa-dash-panel__item-edit {
+    opacity: 1;
+  }
 }
 
 /* ═══ REDUCED MOTION ═══════════════════════════════════════════════════════ */

@@ -92,13 +92,12 @@ const router = createRouter({
           component: lazyView(() => import('@/views/MonitorView.vue')),
           meta: { title: 'Monitor' },
         },
-        // IMPORTANT: monitor/dashboard/:dashboardId MUST come BEFORE monitor/:zoneId
-        // otherwise Vue Router interprets "dashboard" as a zoneId (greedy matching)
+        // DEPRECATED 2026-03-26: monitor-dashboard removed (D2 cleanup), redirect to editor
         {
           path: 'monitor/dashboard/:dashboardId',
-          name: 'monitor-dashboard',
-          component: lazyView(() => import('@/views/MonitorView.vue')),
-          meta: { title: 'Monitor' },
+          redirect: (to) => ({
+            path: `/editor/${to.params.dashboardId}`,
+          }),
         },
         {
           path: 'monitor/:zoneId',
