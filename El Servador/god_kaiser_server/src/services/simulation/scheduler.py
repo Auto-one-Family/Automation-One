@@ -344,6 +344,15 @@ class SimulationScheduler:
                 # Key formats: "cfg_{uuid}" (new), "{gpio}_{sensor_type}" (legacy), "{gpio}" (oldest)
                 sensor_type = sensor_config.get("sensor_type", "GENERIC")
 
+                # Guard: skip virtual (event-driven) sensors — they must never be scheduled.
+                from ...sensors.sensor_type_registry import VIRTUAL_SENSOR_TYPES
+
+                if sensor_type.lower() in VIRTUAL_SENSOR_TYPES:
+                    logger.debug(
+                        f"[{esp_id}] Skipping VIRTUAL sensor {sensor_type} on key {sensor_key}"
+                    )
+                    continue
+
                 # Extract GPIO from config dict (reliable) or key (legacy fallback)
                 if "gpio" in sensor_config:
                     gpio = int(sensor_config["gpio"])
@@ -572,6 +581,15 @@ class SimulationScheduler:
         runtime = self._runtimes.get(esp_id)
         if not runtime:
             logger.warning(f"Cannot add sensor job: Mock {esp_id} not running")
+            return False
+
+        # Guard: virtual (event-driven) sensors must never be scheduled.
+        from ...sensors.sensor_type_registry import VIRTUAL_SENSOR_TYPES
+
+        if sensor_type.lower() in VIRTUAL_SENSOR_TYPES:
+            logger.debug(
+                f"[{esp_id}] Skipping add_sensor_job for VIRTUAL sensor {sensor_type} on GPIO {gpio}"
+            )
             return False
 
         # MULTI-VALUE: Use gpio_sensor_type as key
@@ -1187,7 +1205,12 @@ class SimulationScheduler:
 
         # Create SensorConfig entries in DB and rebuild simulation_config
         from ...db.repositories import SensorRepository
-        from ...sensors.sensor_type_registry import expand_multi_value, is_multi_value_sensor
+        from ...sensors.sensor_type_registry import (
+            expand_multi_value,
+            get_device_type_from_sensor_type,
+            get_i2c_address,
+            is_multi_value_sensor,
+        )
 
         sensor_repo = SensorRepository(session)
         for sensor_data in sensors or []:
@@ -1215,9 +1238,13 @@ class SimulationScheduler:
                     sensor_data.get("name", ""),
                     gpio=gpio,
                 )
+                # Resolve i2c_address + interface_type from registry (V19-F13)
+                device_type = get_device_type_from_sensor_type(sub_types[0]["sensor_type"]) if sub_types else None
+                resolved_i2c = get_i2c_address(device_type) if device_type else None
+                resolved_iface = "I2C" if resolved_i2c is not None else "ANALOG"
                 for sub in sub_types:
                     try:
-                        await sensor_repo.create(
+                        await sensor_repo.create_if_not_exists(
                             esp_id=device.id,
                             gpio=gpio,
                             sensor_type=sub["sensor_type"],
@@ -1225,13 +1252,15 @@ class SimulationScheduler:
                             enabled=True,
                             pi_enhanced=False,
                             sample_interval_ms=int(sim_meta["interval_seconds"] * 1000),
+                            interface_type=resolved_iface,
+                            i2c_address=resolved_i2c,
                             sensor_metadata={"source": "mock_esp", "simulation": sim_meta},
                         )
                     except Exception as e:
                         logger.warning(f"Failed to create SensorConfig {sub['sensor_type']}: {e}")
             else:
                 try:
-                    await sensor_repo.create(
+                    await sensor_repo.create_if_not_exists(
                         esp_id=device.id,
                         gpio=gpio,
                         sensor_type=raw_sensor_type,

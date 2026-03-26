@@ -76,6 +76,8 @@ from ...db.repositories import (
 )
 from ...sensors.sensor_type_registry import (
     expand_multi_value,
+    get_device_type_from_sensor_type,
+    get_i2c_address,
     get_mock_default_raw_value,
     is_multi_value_sensor,
 )
@@ -304,8 +306,12 @@ async def create_mock_esp(
             # Per-subtype default for multi-value sensors (e.g., temp=22, humidity=55)
             raw_for_default = None if is_multi_value else orig_sensor.raw_value
             resolved_raw = get_mock_default_raw_value(sensor_type, raw_for_default)
+            # Resolve i2c_address + interface_type from registry (V19-F13)
+            device_type = get_device_type_from_sensor_type(sensor_type)
+            resolved_i2c = get_i2c_address(device_type) if device_type else None
+            resolved_iface = "I2C" if resolved_i2c is not None else "ANALOG"
             try:
-                await sensor_repo.create(
+                await sensor_repo.create_if_not_exists(
                     esp_id=device.id,
                     gpio=gpio,
                     sensor_type=sensor_type,
@@ -313,6 +319,8 @@ async def create_mock_esp(
                     enabled=True,
                     pi_enhanced=False,
                     sample_interval_ms=30000,
+                    interface_type=resolved_iface,
+                    i2c_address=resolved_i2c,
                     sensor_metadata={
                         "source": "mock_esp",
                         "unit": orig_sensor.unit,
@@ -891,7 +899,12 @@ async def add_sensor(
             resolved_raw = get_mock_default_raw_value(sensor_type, None)
             sim_params = _build_sim_params(resolved_raw)
             # I2C-aware duplicate check: allows same sensor_type at different addresses
+            # Resolve from registry if user didn't provide (V19-F13)
             i2c_addr = getattr(config, "i2c_address", None)
+            if i2c_addr is None:
+                sub_device_type = get_device_type_from_sensor_type(sensor_type)
+                if sub_device_type:
+                    i2c_addr = get_i2c_address(sub_device_type)
             if i2c_addr is not None:
                 existing = await sensor_repo.get_by_esp_gpio_type_and_i2c(
                     device.id, config.gpio, sensor_type, i2c_addr
@@ -916,7 +929,7 @@ async def add_sensor(
                     pi_enhanced=False,
                     sample_interval_ms=int(interval_seconds * 1000),
                     interface_type=interface_type,
-                    i2c_address=getattr(config, "i2c_address", None),
+                    i2c_address=i2c_addr,
                     sensor_metadata={
                         "source": "mock_esp",
                         "unit": sub.get("unit", config.unit),

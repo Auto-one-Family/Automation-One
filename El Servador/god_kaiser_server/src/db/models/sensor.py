@@ -273,16 +273,14 @@ class SensorConfig(Base, TimestampMixin):
     # z.B. SHT31 auf GPIO 21: sht31_temp + sht31_humidity
     # ONEWIRE SUPPORT: Erlaubt mehrere DS18B20 auf demselben GPIO (Bus-Sharing)
     # I2C SUPPORT: Erlaubt mehrere I2C-Sensoren auf verschiedenen Adressen
-    # onewire_address und i2c_address sind nullable → NULL != NULL in UNIQUE (PostgreSQL + SQLite)
+    #
+    # UNIQUENESS: Enforced by expression index unique_esp_gpio_sensor_interface_v2
+    # using COALESCE(onewire_address, ''), COALESCE(i2c_address::text, '')
+    # to handle NULLs correctly. Created via Alembic migration
+    # fix_sensor_unique_constraint_null_coalesce.py (V19-F02+F13).
+    # No SQLAlchemy UniqueConstraint here — expression indexes cannot be
+    # declared in ORM __table_args__.
     __table_args__ = (
-        UniqueConstraint(
-            "esp_id",
-            "gpio",
-            "sensor_type",
-            "onewire_address",
-            "i2c_address",
-            name="unique_esp_gpio_sensor_interface",
-        ),
         Index("idx_sensor_type_enabled", "sensor_type", "enabled"),
     )
 

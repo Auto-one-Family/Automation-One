@@ -83,6 +83,12 @@ SENSOR_TYPE_MAPPING: Dict[str, str] = {
 }
 
 
+# Virtual Sensor Types: computed/event-driven, never scheduled by the simulation scheduler.
+# These sensors must not appear in simulation_config.sensors and must not receive
+# scheduled MQTT publishes. They are calculated on-the-fly from other sensor readings.
+VIRTUAL_SENSOR_TYPES: set[str] = {"vpd"}
+
+
 # Multi-Value Sensor Definitions
 # Defines sensors that provide multiple values (e.g., SHT31: temp + humidity)
 MULTI_VALUE_SENSORS: Dict[str, MultiValueSensorDefinition] = {
@@ -178,6 +184,8 @@ SENSOR_TYPE_MOCK_DEFAULTS: Dict[str, Dict[str, object]] = {
     "light": {"raw_value": 25000.0, "unit": "lux"},
     # Flow: pump off = 0 is correct
     "flow": {"raw_value": 0.0, "unit": "L/min"},
+    # VPD: computed from temperature + humidity (optimal range ~0.8-1.2 kPa)
+    "vpd": {"raw_value": 1.0, "unit": "kPa"},
 }
 
 

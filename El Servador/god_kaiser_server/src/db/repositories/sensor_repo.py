@@ -42,6 +42,57 @@ class SensorRepository(BaseRepository[SensorConfig]):
         await self.session.refresh(sensor)
         return sensor
 
+    async def create_if_not_exists(self, **fields) -> tuple[SensorConfig, bool]:
+        """
+        Create a sensor config only if no duplicate exists; return existing otherwise.
+
+        Uses IntegrityError catch to handle race conditions safely.
+        The COALESCE-based unique index (V19-F02+F13) ensures this works
+        even when onewire_address/i2c_address are NULL.
+
+        Returns:
+            Tuple of (SensorConfig, created: bool).
+            created=True if a new row was inserted, False if existing was returned.
+        """
+        esp_id = fields.get("esp_id")
+        gpio = fields.get("gpio")
+        sensor_type = fields.get("sensor_type", "")
+        i2c_address = fields.get("i2c_address")
+
+        # Check for existing config first (fast path, avoids unnecessary INSERT)
+        if i2c_address is not None:
+            existing = await self.get_by_esp_gpio_type_and_i2c(
+                esp_id, gpio, sensor_type, i2c_address
+            )
+        else:
+            existing = await self.get_by_esp_gpio_and_type(esp_id, gpio, sensor_type)
+        if existing:
+            return existing, False
+
+        # Try to create — catch IntegrityError for race conditions
+        sensor = SensorConfig(**fields)
+        try:
+            self.session.add(sensor)
+            await self.session.flush()
+            await self.session.refresh(sensor)
+            return sensor, True
+        except IntegrityError:
+            await self.session.rollback()
+            logger.debug(
+                "Duplicate sensor_config caught: esp=%s gpio=%s type=%s — returning existing",
+                esp_id, gpio, sensor_type,
+            )
+            # Re-fetch after rollback
+            if i2c_address is not None:
+                existing = await self.get_by_esp_gpio_type_and_i2c(
+                    esp_id, gpio, sensor_type, i2c_address
+                )
+            else:
+                existing = await self.get_by_esp_gpio_and_type(esp_id, gpio, sensor_type)
+            if existing:
+                return existing, False
+            raise
+
     async def get_by_esp_and_gpio(self, esp_id: uuid.UUID, gpio: int) -> Optional[SensorConfig]:
         """
         Get sensor by ESP ID and GPIO (crash-safe for multi-value sensors).

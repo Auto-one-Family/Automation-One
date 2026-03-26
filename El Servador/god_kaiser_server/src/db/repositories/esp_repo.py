@@ -910,6 +910,11 @@ class ESPRepository(BaseRepository[ESPDevice]):
             if not cfg.enabled:
                 continue
 
+            # Virtual sensors (e.g., VPD) are event-driven, never scheduled.
+            # Exclude them from simulation_config to prevent spurious jobs.
+            if cfg.interface_type and cfg.interface_type.upper() == "VIRTUAL":
+                continue  # Virtual sensors are event-driven, never scheduled
+
             key = f"cfg_{cfg.id}"
             gpio = cfg.gpio if cfg.gpio is not None else 0
             sensor_type = cfg.sensor_type or ""

@@ -497,6 +497,7 @@ class SHT31TemperatureProcessor(BaseSensorProcessor):
             # ==================================================================
             # RAW MODE CONVERSION (Sensirion Datasheet)
             # Formula: temp_celsius = -45 + (175 * raw_value / 65535.0)
+            # Real 16-bit RAW range: 0-65535 (maps to -45°C..+130°C)
             # ==================================================================
             raw_int = int(raw_value)
 
@@ -514,9 +515,23 @@ class SHT31TemperatureProcessor(BaseSensorProcessor):
                 )
 
             # Convert RAW to Celsius
-            raw_value = self.RAW_CONVERSION_OFFSET + (
+            converted = self.RAW_CONVERSION_OFFSET + (
                 self.RAW_CONVERSION_SCALE * float(raw_int) / self.RAW_MAX_VALUE
             )
+
+            # Passthrough guard: if the 16-bit conversion yields a physically
+            # implausible result but the original value is already a valid
+            # Celsius reading (e.g. mock devices send 22.0 °C, not 22 as a
+            # 16-bit integer), treat the original value as pre-converted.
+            # A real 16-bit RAW reading for typical room temperature (22°C)
+            # would be ~27445, never a small integer like 22.
+            if not (self.TEMP_MIN <= converted <= self.TEMP_MAX) and (
+                self.TEMP_MIN <= original_raw_value <= self.TEMP_MAX
+            ):
+                # The raw_value is already in Celsius — use it as-is.
+                raw_value = original_raw_value
+            else:
+                raw_value = converted
 
         # Step 1: Validate converted value (now in Celsius)
         validation = self.validate(raw_value)

@@ -19,7 +19,7 @@ Error Codes:
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from ...core.config import get_settings
@@ -493,6 +493,35 @@ class SensorDataHandler:
                     except Exception as e:
                         logger.warning(f"Failed to broadcast sensor data via WebSocket: {e}")
 
+                    # ═══════════════════════════════════════════════════════
+                    # VPD COMPUTATION HOOK (PB-01)
+                    # Event-driven: compute and persist VPD when SHT31 data
+                    # arrives. VPD is stored as sensor_data with gpio=0.
+                    # Quality guard: skip VPD if source reading has quality=error
+                    # to avoid computing VPD from invalid sensor values (P3-fix).
+                    # ═══════════════════════════════════════════════════════
+                    if sensor_type in ("sht31_temp", "sht31_humidity"):
+                        if quality == "error":
+                            logger.warning(
+                                f"Skipping VPD computation: {sensor_type} quality=error "
+                                f"(esp={esp_id_str}, gpio={gpio}, value={processed_value})"
+                            )
+                        else:
+                            try:
+                                await self._try_compute_vpd(
+                                    esp_device=esp_device,
+                                    trigger_sensor_type=sensor_type,
+                                    trigger_gpio=gpio,
+                                    trigger_value=processed_value,
+                                    timestamp=esp32_timestamp,
+                                    data_source=data_source,
+                                    zone_id=zone_id,
+                                    subzone_id=subzone_id,
+                                    session=session,
+                                )
+                            except Exception as e:
+                                logger.debug(f"VPD computation skipped for {esp_id_str}: {e}")
+
                     # Logic Engine Trigger (non-blocking!)
                     try:
                         from ...services.logic_engine import get_logic_engine
@@ -551,6 +580,168 @@ class SensorDataHandler:
                 exc_info=True,
             )
             return False
+
+    # ─── VPD Computation (PB-01) ────────────────────────────────────
+
+    # Max age for partner reading: if the partner value is older than this,
+    # we skip VPD computation to avoid stale cross-sensor calculations.
+    _VPD_MAX_AGE = timedelta(seconds=60)
+
+    async def _try_compute_vpd(
+        self,
+        esp_device,
+        trigger_sensor_type: str,
+        trigger_gpio: int,
+        trigger_value: float,
+        timestamp: datetime,
+        data_source: str,
+        zone_id: Optional[str],
+        subzone_id: Optional[str],
+        session,
+    ) -> None:
+        """Compute and persist VPD if both T and RH are available for this ESP.
+
+        Called after every sht31_temp or sht31_humidity data save. Looks up the
+        partner reading (humidity for temp, temp for humidity) on the SAME gpio.
+        If both values are fresh (within _VPD_MAX_AGE), VPD is calculated, saved
+        as sensor_data with gpio=0, and broadcast via WebSocket.
+
+        On first VPD save for an ESP, a SensorConfig row is created so VPD
+        appears in the frontend sensor dropdown (Block 7).
+        """
+        from ...services.vpd_calculator import calculate_vpd
+
+        sensor_repo = SensorRepository(session)
+
+        # Determine which value we have and which we need
+        if trigger_sensor_type == "sht31_temp":
+            partner_type = "sht31_humidity"
+            temp_value = trigger_value
+            rh_reading = await sensor_repo.get_latest_reading(
+                esp_id=esp_device.id,
+                gpio=trigger_gpio,
+                sensor_type=partner_type,
+            )
+            if rh_reading is None:
+                return
+            if (timestamp - rh_reading.timestamp) > self._VPD_MAX_AGE:
+                return
+            rh_value = rh_reading.processed_value
+        else:
+            # trigger is sht31_humidity
+            partner_type = "sht31_temp"
+            rh_value = trigger_value
+            temp_reading = await sensor_repo.get_latest_reading(
+                esp_id=esp_device.id,
+                gpio=trigger_gpio,
+                sensor_type=partner_type,
+            )
+            if temp_reading is None:
+                return
+            if (timestamp - temp_reading.timestamp) > self._VPD_MAX_AGE:
+                return
+            temp_value = temp_reading.processed_value
+
+        if temp_value is None or rh_value is None:
+            return
+
+        # Calculate VPD
+        vpd = calculate_vpd(float(temp_value), float(rh_value))
+        if vpd is None:
+            return
+
+        # Save VPD as sensor_data with gpio=0 (virtual sensor convention)
+        vpd_data = await sensor_repo.save_data(
+            esp_id=esp_device.id,
+            gpio=0,
+            sensor_type="vpd",
+            raw_value=vpd,
+            processed_value=vpd,
+            unit="kPa",
+            processing_mode="computed",
+            quality="good",
+            timestamp=timestamp,
+            metadata={"source_temp_type": "sht31_temp", "source_rh_type": "sht31_humidity"},
+            data_source=data_source,
+            zone_id=zone_id,
+            subzone_id=subzone_id,
+            device_name=esp_device.name,
+        )
+
+        # Duplicate (same timestamp) — silently skip
+        if vpd_data is None:
+            return
+
+        # Ensure SensorConfig exists for VPD (Block 7 — backend approach)
+        # Uses create_if_not_exists to prevent race condition duplicates (V19-F02)
+        await sensor_repo.create_if_not_exists(
+            esp_id=esp_device.id,
+            gpio=0,
+            sensor_type="vpd",
+            sensor_name="VPD (berechnet)",
+            interface_type="VIRTUAL",
+            enabled=True,
+            pi_enhanced=False,
+            config_status="active",
+        )
+
+        # Update simulation_config so REST API returns current VPD value.
+        # Without this, _build_mock_esp_response defaults to raw_value=0.
+        if esp_device.device_metadata:
+            sim_sensors = (
+                esp_device.device_metadata
+                .get("simulation_config", {})
+                .get("sensors", {})
+            )
+            for entry in sim_sensors.values():
+                if entry.get("sensor_type") == "vpd" and entry.get("gpio") == 0:
+                    entry["raw_value"] = vpd
+                    entry["quality"] = "good"
+                    flag_modified(esp_device, "device_metadata")
+                    break
+
+        await session.commit()
+
+        esp_id_str = esp_device.device_id
+
+        logger.info(
+            f"VPD computed and saved: esp_id={esp_id_str}, vpd={vpd} kPa "
+            f"(T={temp_value}°C, RH={rh_value}%)"
+        )
+
+        # WebSocket broadcast for VPD (separate from original sensor broadcast)
+        try:
+            from ...websocket.manager import WebSocketManager
+            from ...utils.sensor_formatters import format_sensor_message
+
+            ws_manager = await WebSocketManager.get_instance()
+            message = format_sensor_message(
+                sensor_type="vpd",
+                gpio=0,
+                value=vpd,
+                unit="kPa",
+            )
+            await ws_manager.broadcast(
+                "sensor_data",
+                {
+                    "esp_id": esp_id_str,
+                    "message": message,
+                    "severity": "info",
+                    "device_id": esp_id_str,
+                    "gpio": 0,
+                    "sensor_type": "vpd",
+                    "value": vpd,
+                    "unit": "kPa",
+                    "quality": "good",
+                    "timestamp": int(timestamp.timestamp()),
+                    "zone_id": zone_id,
+                    "subzone_id": subzone_id,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to broadcast VPD data via WebSocket: {e}")
+
+    # ─── Threshold Evaluation ─────────────────────────────────────
 
     async def _evaluate_thresholds_and_notify(
         self,

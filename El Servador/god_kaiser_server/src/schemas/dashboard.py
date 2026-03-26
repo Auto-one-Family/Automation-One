@@ -86,7 +86,7 @@ class DashboardCreate(BaseModel):
         False,
         description="Whether dashboard is visible to all users",
     )
-    scope: Optional[Literal["zone", "cross-zone", "sensor-detail"]] = Field(
+    scope: Optional[Literal["zone", "zone-tile", "cross-zone", "sensor-detail"]] = Field(
         None,
         description="Dashboard scope",
     )
@@ -153,7 +153,7 @@ class DashboardUpdate(BaseModel):
         None,
         description="Whether dashboard is visible to all users",
     )
-    scope: Optional[Literal["zone", "cross-zone", "sensor-detail"]] = Field(
+    scope: Optional[Literal["zone", "zone-tile", "cross-zone", "sensor-detail"]] = Field(
         None,
         description="Dashboard scope",
     )

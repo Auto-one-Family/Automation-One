@@ -15,7 +15,6 @@ Used by:
 - WebSocket broadcaster (zone_kpi_update events)
 """
 
-import math
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
@@ -26,6 +25,7 @@ from ..core.logging_config import get_logger
 from ..db.models.esp import ESPDevice
 from ..db.models.sensor import SensorConfig, SensorData
 from ..db.repositories.zone_context_repo import ZoneContextRepository
+from .vpd_calculator import calculate_vpd as _calc_vpd
 
 logger = get_logger(__name__)
 
@@ -33,12 +33,11 @@ logger = get_logger(__name__)
 def _calculate_vpd(temp_c: float, humidity_pct: float) -> float:
     """Calculate Vapor Pressure Deficit (kPa) from temperature and humidity.
 
-    Uses the Magnus-Tetens approximation.
-    VPD = SVP * (1 - RH/100) where SVP = 0.6108 * exp(17.27 * T / (T + 237.3))
+    Delegates to the shared vpd_calculator module (single source of truth).
     """
-    svp = 0.6108 * math.exp((17.27 * temp_c) / (temp_c + 237.3))
-    vpd = svp * (1.0 - humidity_pct / 100.0)
-    return round(max(vpd, 0.0), 3)
+    result = _calc_vpd(temp_c, humidity_pct)
+    # Preserve original behavior: return 0.0 for out-of-range inputs
+    return round(max(result or 0.0, 0.0), 3)
 
 
 class VPDResult:
