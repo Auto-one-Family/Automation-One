@@ -154,6 +154,7 @@ const displayValue = computed(() => {
 <template>
   <div
     class="gauge-chart"
+    :class="{ 'gauge-chart--sm': size === 'sm' }"
     :style="{
       width: `${sizePixels}px`,
       height: `${sizePixels * 0.6}px`,
@@ -225,5 +226,22 @@ const displayValue = computed(() => {
   font-family: var(--font-mono);
   font-size: 9px;
   color: var(--color-text-muted);
+}
+
+/* Compact size: hide range labels, shrink value text to fit 70px containers */
+.gauge-chart--sm .gauge-chart__range {
+  display: none;
+}
+
+.gauge-chart--sm .gauge-chart__value {
+  bottom: 2px;
+}
+
+.gauge-chart--sm .gauge-chart__number {
+  font-size: 1em;
+}
+
+.gauge-chart--sm .gauge-chart__unit {
+  font-size: 0.55em;
 }
 </style>

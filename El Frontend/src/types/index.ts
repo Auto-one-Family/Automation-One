@@ -382,6 +382,8 @@ export interface MockSensorConfig {
   // =========================================================================
   /** OneWire ROM address for DS18B20 sensors (16 hex chars) */
   onewire_address?: string
+  /** I2C address for I2C sensors (e.g., SHT31: 0x44=68 or 0x45=69) */
+  i2c_address?: number | null
   /** Interface type for sensor (I2C, ONEWIRE, ANALOG, DIGITAL, VIRTUAL) */
   interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL'
 }

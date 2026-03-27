@@ -702,8 +702,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           // MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
           // =========================================================================
           interface_type: config.interface_type || interfaceType,
-          // I2C: Use default address from registry (e.g., SHT31 → 0x44)
-          i2c_address: interfaceType === 'I2C' ? defaultI2CAddress : null,
+          // I2C: Use address from config (user selection), fallback to registry default
+          i2c_address: interfaceType === 'I2C' ? (config.i2c_address ?? defaultI2CAddress) : null,
           // OneWire: Use provided ROM address (from scan) or null (server auto-generates)
           onewire_address: config.onewire_address || null,
           // =========================================================================
@@ -784,6 +784,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           unit: existingSensor.unit || '',
           quality: existingSensor.quality || 'good',
           raw_mode: true,
+          interface_type: existingSensor.interface_type ?? undefined,
+          i2c_address: existingSensor.i2c_address ?? null,
           operating_mode: config.operating_mode !== undefined ? config.operating_mode || undefined : existingSensor.operating_mode,
           timeout_seconds: config.timeout_seconds !== undefined ? config.timeout_seconds ?? undefined : existingSensor.timeout_seconds,
         }
@@ -810,7 +812,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           // MULTI-VALUE SENSOR SUPPORT (I2C/OneWire)
           // =========================================================================
           interface_type: interfaceType,
-          i2c_address: interfaceType === 'I2C' ? defaultI2CAddress : null,
+          // I2C: Preserve existing address, fallback to registry default
+          i2c_address: interfaceType === 'I2C' ? (existingSensor.i2c_address ?? defaultI2CAddress) : null,
           onewire_address: null, // Server preserves existing address on update
           // =========================================================================
           // Operating Mode Felder (Phase 2F)
