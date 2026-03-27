@@ -1,8 +1,222 @@
-# Server Dev Report: V1-22 Actuator Command Pipeline — Analyse fuer Offline-ESP Handling
+# Server Dev Report: FW-01 Server-Pipeline Analyse — Delete + Config-Push + OneWire
 
 ## Modus: A (Analyse)
-## Auftrag: Vollstaendige Analyse der Actuator Command Pipeline, Fokus: Commands an Offline-ESPs
-## Datum: 2026-03-10
+## Auftrag: Server-seitige Delete-Pipeline und Config-Push-Logik pruefen (Kontext: Auftrag FW-01)
+## Datum: 2026-03-26
+
+---
+
+## Codebase-Analyse
+
+Analysierte Dateien:
+- `src/api/v1/sensors.py` — `delete_sensor` Endpoint (Zeile 1067–1211)
+- `src/api/v1/actuators.py` — `delete_actuator` Endpoint (Zeile 1102–1199)
+- `src/services/config_builder.py` — `build_combined_config` (Zeile 156–253)
+- `src/services/esp_service.py` — `send_config` (Zeile 368–519)
+- `src/mqtt/publisher.py` — `publish_config`, `publish_system_command`
+- `src/mqtt/topics.py` — TopicBuilder
+- `src/core/constants.py` — Topic-Konstanten und `get_topic_with_kaiser_id()`
+- `src/core/config_mapping.py` — DEFAULT_SENSOR_MAPPINGS / DEFAULT_ACTUATOR_MAPPINGS
+- `src/db/repositories/sensor_repo.py` — `get_by_esp`
+- `El Trabajante/src/main.cpp` — OneWire-Scan-Handler (Zeile 1018–1090)
+
+---
+
+## 1. Sensor-Delete Pipeline
+
+### Ablauf (korrekt)
+
+```
+DELETE /sensors/{esp_id}/{config_id}
+  1. await sensor_repo.delete(sensor.id)         — DB-Delete (kein commit noch)
+  2. remaining_on_gpio = get_all_by_esp_and_gpio  — Query laeuft gegen uncommitted State
+  3. Subzone cleanup (wenn keine Sensoren mehr auf GPIO)
+  4. Rebuild simulation_config (Mock-Cache)
+  5. await db.commit()                            — ERST HIER wird committed
+  6. Subzone count sync
+  7. APScheduler job removal (wenn keine Sensoren mehr auf GPIO)
+  8. Sim-Scheduler job removal (MOCK_ESP32)
+  9. build_combined_config(esp_id, db)            — laedt NACH commit aus DB
+  10. esp_service.send_config(...)                — MQTT Publish
+  11. WebSocket broadcast "sensor_config_deleted"
+```
+
+Befund: KORREKT. Der Config-Push (Schritt 9) laedt nach dem DB-Commit. Der geloeschte Sensor
+ist bereits aus der DB entfernt. `build_combined_config` filtert zusaetzlich `if s.enabled` —
+doppelte Sicherheit. Der geloeschte Sensor kann NICHT mehr im MQTT-Payload erscheinen.
+
+Das urspruengliche Risiko (geloeschter Sensor erscheint wieder im Config-Push) ist NICHT realisiert.
+
+### Kein Cooldown-Problem
+
+Die 120s die im FW-01-Report erwaehnt wurden, kommen aus `src/core/scheduler.py` als
+`misfire_grace_time` des APSchedulers — Toleranz fuer verpasste Jobs, kein Config-Push-Cooldown.
+Es gibt keinen automatischen periodischen Full-State-Push-Mechanismus.
+
+---
+
+## 2. Actuator-Delete Pipeline
+
+### Ablauf
+
+```
+DELETE /actuators/{esp_id}/{gpio}
+  1. publisher.publish_actuator_command("OFF", 0.0)  — OFF-Command VOR Delete
+  2. await actuator_repo.delete(actuator.id)
+  3. await db.commit()
+  4. Subzone count sync
+  5. build_combined_config(esp_id, db)            — laedt NACH commit
+  6. esp_service.send_config(...)                — MQTT Publish
+  7. WebSocket broadcast "actuator_config_deleted"
+```
+
+Befund: KORREKT. Gleiche Logik wie Sensor-Delete. OFF-Command wird VOR dem Delete gesendet.
+
+Kleiner Unterschied zu Sensor-Delete: Kein `remove_gpio_from_all_subzones` beim Actuator-Delete.
+Das ist kein Bug — Aktoren haben typisch exklusiven GPIO.
+
+---
+
+## 3. Config-Push Timing und Format
+
+### Payload-Aufbau
+
+`build_combined_config` laedt via `sensor_repo.get_by_esp()` alle Sensoren (incl. enabled=False),
+filtert dann `active_sensors = [s for s in sensors if s.enabled]`.
+
+Das `config_mapping.py` mappt:
+- `sensor.enabled` → Payload-Feld `"active"` (Bool)
+- `actuator.enabled` → Payload-Feld `"active"` (Bool)
+
+Die Felder heissen im Payload also `"active"`, nicht `"enabled"`. ESP32 muss `"active"` lesen —
+das ist konsistent sofern das ESP32-Parsing `active` verwendet.
+
+### Return-Type-Bug (MITTEL, funktional OK aber Log-Pfad tot)
+
+`esp_service.send_config()` ist deklariert als `-> Dict[str, Any]` und gibt immer ein Dict zurueck
+(z.B. `{"success": True, "sent": True, ...}`).
+
+Die aufrufenden Stellen pruefen:
+```python
+config_sent = await esp_service.send_config(esp_id, combined_config)
+if config_sent:   # prueft Truthy-Wert des Dict, nicht result["success"]
+    logger.info("Config published...")
+else:
+    logger.warning("Config publish failed...")  # <-- TOTER CODE
+```
+
+Ein nicht-leeres Dict ist in Python immer truthy. Das `else`-Warning wird NIEMALS ausgefuehrt,
+auch wenn `result["success"] == False`. Fehler werden aber innerhalb von `send_config` selbst
+geloggt via `logger.error`.
+
+---
+
+## 4. MQTT Payload Format — Config-Push
+
+Topic: `kaiser/{kaiser_id}/esp/{esp_id}/config` (korrekt via TopicBuilder.build_config_topic)
+
+Payload-Struktur:
+```json
+{
+  "sensors": [
+    {
+      "gpio": 4,
+      "sensor_type": "ds18b20",
+      "active": true,
+      "sample_interval_ms": 1000,
+      "raw_mode": true,
+      "interface_type": "ONEWIRE",
+      "onewire_address": "28FF641E..."
+    }
+  ],
+  "actuators": [...],
+  "timestamp": 1711234567,
+  "correlation_id": "uuid"
+}
+```
+
+---
+
+## 5. OneWire-Scan — KRITISCHER BUG
+
+### BUG B6: Pin-Parameter-Nesting-Mismatch (HOCH)
+
+Server sendet (via `publish_system_command`, publisher.py Zeile 306-309):
+```json
+{
+  "command": "onewire/scan",
+  "params": {
+    "pin": 4
+  },
+  "timestamp": 1711234567
+}
+```
+
+ESP32 liest (main.cpp Zeile 1023):
+```cpp
+uint8_t pin = doc["pin"] | HardwareConfig::DEFAULT_ONEWIRE_PIN;
+```
+
+Das ESP liest `doc["pin"]` — direkt auf Root-Ebene. Der Server schickt den Pin unter
+`doc["params"]["pin"]`. Das Feld `doc["pin"]` ist undefined → ESP faellt auf DEFAULT_ONEWIRE_PIN
+zurueck (4 fuer esp32_dev, 6 fuer xiao_esp32c3).
+
+Konsequenz: Der GPIO-Pin den der Nutzer im Frontend waehlt wird ignoriert. ESP scannt immer
+DEFAULT_ONEWIRE_PIN. Wenn Frontend-Default == DEFAULT_ONEWIRE_PIN funktioniert es zufaellig.
+
+Fix (ESP-Seite, minimal-invasiv):
+```cpp
+uint8_t pin = doc["params"]["pin"] | HardwareConfig::DEFAULT_ONEWIRE_PIN;
+```
+
+Das ist der ESP32-seitige Fix aus Auftrag FW-01.
+
+### BUG B7: Hardcoded Response-Topic (NIEDRIG)
+
+Server abonniert (sensors.py Zeile 1794):
+```python
+response_topic = f"kaiser/god/esp/{esp_id}/onewire/scan_result"
+```
+
+ESP32 published auf (main.cpp Zeile 1080):
+```cpp
+String scan_result_topic = "kaiser/god/esp/" + g_system_config.esp_id + "/onewire/scan_result";
+```
+
+Beide Seiten nutzen hardcoded `kaiser/god/` statt `kaiser/{kaiser_id}/`. Alle anderen Topics
+nutzen TopicBuilder/get_topic_with_kaiser_id. Fuer den Default "god" funktioniert es — aber
+bei Multi-Kaiser-Setups wuerde der Server die Antwort nie empfangen.
+
+---
+
+## 6. Befund-Tabelle
+
+| # | Bereich | Schwere | Status |
+|---|---------|---------|--------|
+| B1 | Sensor-Delete Pipeline | OK | Korrekt implementiert |
+| B2 | Actuator-Delete Pipeline | OK | Korrekt, OFF vor Delete |
+| B3 | Config-Push Cooldown | OK | Kein Cooldown vorhanden |
+| B4 | Payload-Feldname active vs enabled | OK | Konsistent |
+| B5 | Return-Type-Bug send_config | MITTEL | Warning-Log ist toter Code |
+| B6 | OneWire Pin-Nesting-Bug | HOCH | params.pin vs doc["pin"] |
+| B7 | OneWire Response-Topic hardcoded | NIEDRIG | Architektur-Inkonsistenz |
+
+---
+
+## Empfehlung
+
+B6 ist der Kern-Bug fuer Auftrag FW-01 OneWire-Scan-Problem. Fix liegt auf ESP-Seite:
+`doc["params"]["pin"]` statt `doc["pin"]` in `El Trabajante/src/main.cpp` Zeile 1023.
+Kein Server-Code muss geaendert werden.
+
+B5 (Return-Type-Bug) ist optionaler Cleanup — kein funktionaler Impact.
+B7 (Topic) hat keinen Handlungsbedarf fuer das Default-Setup.
+
+---
+
+## Original Report (Archiv)
+
+*Vorheriger Inhalt (V1-22 Actuator Command Pipeline) wurde durch diesen Report ersetzt.*
 
 ---
 
