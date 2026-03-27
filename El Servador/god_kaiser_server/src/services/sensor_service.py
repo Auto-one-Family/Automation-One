@@ -116,6 +116,8 @@ class SensorService:
         warning_min: Optional[float] = None,
         warning_max: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        onewire_address: Optional[str] = None,
+        i2c_address: Optional[int] = None,
     ) -> SensorConfig:
         """
         Create or update sensor configuration.
@@ -142,7 +144,18 @@ class SensorService:
         if not esp_device:
             raise ValueError(f"ESP device '{esp_id}' not found")
 
-        existing = await self.sensor_repo.get_by_esp_gpio_and_type(esp_device.id, gpio, sensor_type)
+        # Address-aware lookup: use specific repo method when address is provided
+        # to correctly distinguish multiple sensors on the same GPIO (R20-P1 fix)
+        if onewire_address is not None:
+            existing = await self.sensor_repo.get_by_esp_gpio_type_and_onewire(
+                esp_device.id, gpio, sensor_type, onewire_address
+            )
+        elif i2c_address is not None:
+            existing = await self.sensor_repo.get_by_esp_gpio_type_and_i2c(
+                esp_device.id, gpio, sensor_type, i2c_address
+            )
+        else:
+            existing = await self.sensor_repo.get_by_esp_gpio_and_type(esp_device.id, gpio, sensor_type)
 
         if existing:
             # Update existing
@@ -157,6 +170,10 @@ class SensorService:
             existing.warning_min = warning_min
             existing.warning_max = warning_max
             existing.metadata = metadata or existing.metadata
+            if onewire_address is not None:
+                existing.onewire_address = onewire_address
+            if i2c_address is not None:
+                existing.i2c_address = i2c_address
 
             logger.info(f"Sensor config updated: {esp_id} GPIO {gpio}")
             return existing
@@ -175,6 +192,8 @@ class SensorService:
                 threshold_max=threshold_max,
                 warning_min=warning_min,
                 warning_max=warning_max,
+                onewire_address=onewire_address,
+                i2c_address=i2c_address,
                 metadata=metadata or {},
             )
             await self.sensor_repo.create(sensor)

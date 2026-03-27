@@ -195,6 +195,12 @@ class ConfigPayloadBuilder:
         active_sensors = [s for s in sensors if s.enabled]
         active_actuators = [a for a in actuators if a.enabled]
 
+        # Filter out VIRTUAL sensors — computed server-side (e.g. VPD), never sent to ESP32
+        active_sensors = [
+            s for s in active_sensors
+            if not (getattr(s, "interface_type", None) or "").upper() == "VIRTUAL"
+        ]
+
         # =====================================================================
         # GPIO-Konflikt-Check (Phase 2)
         # Prüft ob mehrere Sensoren/Aktoren auf dem gleichen GPIO konfiguriert sind.

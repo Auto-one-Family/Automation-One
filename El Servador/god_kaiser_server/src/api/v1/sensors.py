@@ -779,13 +779,24 @@ async def create_or_update_sensor(
     # =========================================================================
     # SINGLE-VALUE SENSOR (existing logic unchanged)
     # =========================================================================
-    # Check if sensor already exists (include sensor_type!)
-    existing = await sensor_repo.get_by_esp_gpio_and_type(
-        esp_device.id, gpio, request.sensor_type  # ← CRITICAL: Include sensor_type!
-    )
-
-    # Infer interface_type if not provided
+    # Infer interface_type BEFORE lookup (needed for address-aware matching)
     interface_type = request.interface_type or _infer_interface_type(request.sensor_type)
+
+    # Address-aware lookup: use specific repo method when address is provided
+    # to correctly distinguish multiple sensors on the same GPIO (R20-P1 fix)
+    if interface_type == "ONEWIRE" and request.onewire_address is not None:
+        existing = await sensor_repo.get_by_esp_gpio_type_and_onewire(
+            esp_device.id, gpio, request.sensor_type, request.onewire_address
+        )
+    elif interface_type == "I2C" and request.i2c_address is not None:
+        existing = await sensor_repo.get_by_esp_gpio_type_and_i2c(
+            esp_device.id, gpio, request.sensor_type, request.i2c_address
+        )
+    else:
+        # ANALOG/DIGITAL or no address provided — GPIO alone is unique
+        existing = await sensor_repo.get_by_esp_gpio_and_type(
+            esp_device.id, gpio, request.sensor_type
+        )
 
     # Track validated addresses (may be auto-generated for OneWire)
     validated_onewire_address: Optional[str] = None
@@ -894,6 +905,13 @@ async def create_or_update_sensor(
             existing.assigned_zones = model_fields["assigned_zones"]
         if request.assigned_subzones is not None:
             existing.assigned_subzones = model_fields["assigned_subzones"]
+        # =========================================================================
+        # ADDRESS FIELDS (R20-P1): Update if provided so re-addressing works
+        # =========================================================================
+        if request.onewire_address is not None:
+            existing.onewire_address = request.onewire_address
+        if request.i2c_address is not None:
+            existing.i2c_address = request.i2c_address
         # =========================================================================
         # WRITE-AFTER-VERIFICATION: Reset config_status to pending
         # Status will be updated to "applied" or "failed" by config_handler
