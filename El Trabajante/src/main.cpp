@@ -1020,7 +1020,14 @@ void setup() {
           LOG_I(TAG, "║  ONEWIRE SCAN COMMAND RECEIVED        ║");
           LOG_I(TAG, "╚════════════════════════════════════════╝");
 
-          uint8_t pin = doc["pin"] | HardwareConfig::DEFAULT_ONEWIRE_PIN;
+          // Server sends pin inside "params" object: {"command":"onewire/scan","params":{"pin":13}}
+          // Also support direct "pin" field for backward compatibility
+          uint8_t pin = HardwareConfig::DEFAULT_ONEWIRE_PIN;
+          if (doc["params"].containsKey("pin")) {
+            pin = doc["params"]["pin"].as<uint8_t>();
+          } else if (doc.containsKey("pin")) {
+            pin = doc["pin"].as<uint8_t>();
+          }
           LOG_I(TAG, "OneWire scan on GPIO " + String(pin));
 
           if (!oneWireBusManager.isInitialized()) {
@@ -1035,12 +1042,19 @@ void setup() {
           } else {
             uint8_t current_pin = oneWireBusManager.getPin();
             if (current_pin != pin) {
-              LOG_W(TAG, "OneWire bus active on GPIO " + String(current_pin) +
-                         ", ignoring scan request for GPIO " + String(pin));
-              String error_response = "{\"error\":\"OneWire bus already on different pin\",\"requested_pin\":" +
-                                     String(pin) + ",\"active_pin\":" + String(current_pin) + ",\"seq\":" + String(mqttClient.getNextSeq()) + "}";
-              mqttClient.publish(system_command_topic + "/response", error_response);
-              return;
+              // Bus-Wechsel: end() old bus, begin() on new pin (Single-Bus-Design)
+              LOG_I(TAG, "OneWire bus switching from GPIO " + String(current_pin) +
+                         " to GPIO " + String(pin));
+              oneWireBusManager.end();
+              if (!oneWireBusManager.begin(pin)) {
+                LOG_E(TAG, "Failed to switch OneWire bus to GPIO " + String(pin));
+                // Try to restore old bus
+                oneWireBusManager.begin(current_pin);
+                String error_response = "{\"error\":\"Failed to switch OneWire bus\",\"requested_pin\":" +
+                                       String(pin) + ",\"active_pin\":" + String(current_pin) + ",\"seq\":" + String(mqttClient.getNextSeq()) + "}";
+                mqttClient.publish(system_command_topic + "/response", error_response);
+                return;
+              }
             }
           }
 
@@ -2675,6 +2689,12 @@ bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, Conf
   // Empty string for non-OneWire sensors is valid (analog, I2C, etc.)
   JsonHelpers::extractString(sensor_obj, "onewire_address", config.onewire_address, "");
 
+  // R20-P2: Extract I2C address for multi-device I2C support (e.g. 2x SHT31 at 0x44 + 0x45)
+  int i2c_addr_int = 0;
+  if (JsonHelpers::extractInt(sensor_obj, "i2c_address", i2c_addr_int, 0)) {
+    config.i2c_address = static_cast<uint8_t>(i2c_addr_int);
+  }
+
   bool bool_value = true;
   if (JsonHelpers::extractBool(sensor_obj, "active", bool_value, true)) {
     config.active = bool_value;
@@ -2739,13 +2759,10 @@ bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, Conf
   }
 
   if (!config.active) {
-    if (!sensorManager.removeSensor(config.gpio)) {
+    // R20-P2: Address-based removal for multi-sensor GPIOs
+    // removeSensor() handles both RAM removal AND NVS cleanup (via configManager.removeSensorConfig)
+    if (!sensorManager.removeSensor(config.gpio, config.onewire_address, config.i2c_address)) {
       LOG_W(TAG, "Sensor removal requested, but no sensor on GPIO " + String(config.gpio));
-    }
-    if (!configManager.removeSensorConfig(config.gpio)) {
-      LOG_E(TAG, "Failed to remove sensor config from NVS for GPIO " + String(config.gpio));
-      SET_FAILURE_AND_RETURN(config.gpio, ERROR_NVS_WRITE_FAILED, "NVS_WRITE_FAILED",
-                             "Failed to remove sensor config from NVS");
     }
     LOG_I(TAG, "Sensor removed: GPIO " + String(config.gpio));
     return true;

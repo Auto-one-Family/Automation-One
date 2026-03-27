@@ -1644,6 +1644,16 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
     }
 
     if (stored_gpio == config.gpio && stored_type == config.sensor_type) {
+      // R20-P2: For OneWire sensors, additionally match ROM-Code to distinguish
+      // multiple sensors of same type on same GPIO (e.g. 2x DS18B20 on GPIO 4)
+      if (config.onewire_address.length() > 0) {
+        char owKey[16];
+        snprintf(owKey, sizeof(owKey), NVS_SEN_OW, i);
+        String stored_ow = storageManager.getString(owKey, "");
+        if (stored_ow != config.onewire_address) {
+          continue;  // Different sensor on same GPIO — skip
+        }
+      }
       existing_index = i;
       break;
     }
@@ -1928,9 +1938,11 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
   return loaded_count > 0 || sensor_count == 0;
 }
 
-bool ConfigManager::removeSensorConfig(uint8_t gpio) {
+bool ConfigManager::removeSensorConfig(uint8_t gpio, const String& onewire_address,
+                                       const String& sensor_type) {
   // ============================================
   // 2026-01-15 Phase 1E-B: Use new key schema (≤15 chars)
+  // R20-P2: Address-based matching for multi-sensor GPIOs
   // ============================================
   if (!storageManager.beginNamespace("sensor_config", false)) {
     LOG_E(TAG, "ConfigManager: Failed to open sensor_config namespace");
@@ -1955,10 +1967,30 @@ bool ConfigManager::removeSensorConfig(uint8_t gpio) {
       snprintf(old_key, sizeof(old_key), NVS_SEN_GPIO_OLD, i);
       stored_gpio = storageManager.getUInt8(old_key, 255);
     }
-    if (stored_gpio == gpio) {
-      found_index = i;
-      break;
+    if (stored_gpio != gpio) continue;
+
+    // R20-P2: For OneWire sensors, additionally match ROM-Code
+    if (onewire_address.length() > 0) {
+      char owKey[16];
+      snprintf(owKey, sizeof(owKey), NVS_SEN_OW, i);
+      String stored_ow = storageManager.getString(owKey, "");
+      if (stored_ow != onewire_address) continue;
     }
+
+    // R20-P2: For multi-value sensors, additionally match sensor_type
+    if (sensor_type.length() > 0) {
+      snprintf(key, sizeof(key), NVS_SEN_TYPE, i);
+      String stored_type = storageManager.getString(key, "");
+      if (stored_type.isEmpty()) {
+        char old_key[32];
+        snprintf(old_key, sizeof(old_key), NVS_SEN_TYPE_OLD, i);
+        stored_type = storageManager.getString(old_key, "");
+      }
+      if (stored_type != sensor_type) continue;
+    }
+
+    found_index = i;
+    break;
   }
 
   if (found_index < 0) {
@@ -1995,6 +2027,9 @@ bool ConfigManager::removeSensorConfig(uint8_t gpio) {
     snprintf(next_key, sizeof(next_key), NVS_SEN_INTERVAL, i + 1);
     uint32_t next_interval = storageManager.getULong(next_key, 30000);
 
+    snprintf(next_key, sizeof(next_key), NVS_SEN_OW, i + 1);
+    String next_ow = storageManager.getStringObj(next_key, "");
+
     // Write to current index (new keys only!)
     snprintf(key, sizeof(key), NVS_SEN_GPIO, i);
     storageManager.putUInt8(key, next_gpio);
@@ -2019,6 +2054,9 @@ bool ConfigManager::removeSensorConfig(uint8_t gpio) {
 
     snprintf(key, sizeof(key), NVS_SEN_INTERVAL, i);
     storageManager.putULong(key, next_interval);
+
+    snprintf(key, sizeof(key), NVS_SEN_OW, i);
+    storageManager.putString(key, next_ow);
   }
 
   // Clear last sensor (new keys only!)
@@ -2047,6 +2085,9 @@ bool ConfigManager::removeSensorConfig(uint8_t gpio) {
 
   snprintf(key, sizeof(key), NVS_SEN_INTERVAL, last_idx);
   storageManager.putULong(key, 30000);
+
+  snprintf(key, sizeof(key), NVS_SEN_OW, last_idx);
+  storageManager.putString(key, "");
 
   // Update count (new key only!)
   storageManager.putUInt8(NVS_SEN_COUNT, sensor_count - 1);

@@ -78,8 +78,9 @@ public:
   // Load all sensor configs
   bool loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors, uint8_t& loaded_count);
   
-  // Remove sensor config
-  bool removeSensorConfig(uint8_t gpio);
+  // Remove sensor config (address-based for multi-sensor GPIOs)
+  bool removeSensorConfig(uint8_t gpio, const String& onewire_address = "",
+                          const String& sensor_type = "");
   
   // Validate sensor config
   bool validateSensorConfig(const SensorConfig& config) const;

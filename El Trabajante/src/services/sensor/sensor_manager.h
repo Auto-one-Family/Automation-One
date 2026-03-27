@@ -65,8 +65,9 @@ public:
     // Configure a sensor
     bool configureSensor(const SensorConfig& config);
     
-    // Remove a sensor
-    bool removeSensor(uint8_t gpio);
+    // Remove a sensor (address-based for multi-sensor GPIOs)
+    bool removeSensor(uint8_t gpio, const String& onewire_address = "",
+                      uint8_t i2c_address = 0);
     
     // Get sensor configuration
     SensorConfig getSensorConfig(uint8_t gpio) const;
@@ -152,9 +153,14 @@ private:
     // ============================================
     // HELPER METHODS
     // ============================================
-    // Find sensor config by GPIO
-    SensorConfig* findSensorConfig(uint8_t gpio);
-    const SensorConfig* findSensorConfig(uint8_t gpio) const;
+    // Find sensor config by GPIO (+ optional address for multi-sensor GPIOs)
+    SensorConfig* findSensorConfig(uint8_t gpio,
+        const String& onewire_address = "", uint8_t i2c_address = 0);
+    const SensorConfig* findSensorConfig(uint8_t gpio,
+        const String& onewire_address = "", uint8_t i2c_address = 0) const;
+
+    // Internal: measurement with known config (avoids GPIO-only re-lookup for multi-sensor GPIOs)
+    bool performMeasurementForConfig(SensorConfig* config, SensorReading& reading_out);
     
     // Publish sensor reading via MQTT
     void publishSensorReading(const SensorReading& reading);

@@ -215,27 +215,44 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
     const SensorCapability* capability = findSensorCapability(config.sensor_type);
     bool is_i2c_sensor = (capability != nullptr && capability->is_i2c);
 
-    // Phase 7: Check if sensor already exists (runtime reconfiguration support)
-    SensorConfig* existing = findSensorConfig(config.gpio);
-    if (existing) {
-        // For I2C sensors: Also check if same sensor type exists on same I2C address
-        // (Multi-value sensors like SHT31 share GPIO but have different sensor_types)
-        if (is_i2c_sensor && existing->sensor_type != config.sensor_type) {
-            // Check if this is a multi-value sensor on same device
-            const SensorCapability* existing_cap = findSensorCapability(existing->sensor_type);
+    // Guard: gpio=0 is the backend convention for "no dedicated GPIO" (I2C bus sensors).
+    // Non-I2C sensors must NOT use gpio=0 — it is a boot strap pin and would trigger
+    // analogRead(0) on ADC2, which fails when WiFi is active.
+    if (config.gpio == 0 && !is_i2c_sensor) {
+        LOG_E(TAG, "Sensor Manager: GPIO 0 rejected for non-I2C sensor '" +
+              config.sensor_type + "' (boot strap pin, reserved for I2C bus convention)");
+        errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
+                               "GPIO 0 invalid for non-I2C sensor");
+        return false;
+    }
+
+    // Phase 7 + R20-P2: Address-based lookup for multi-sensor GPIOs
+    // OneWire: match by ROM-Code, I2C: match by device address from capability registry
+    uint8_t lookup_i2c_addr = (capability != nullptr) ? capability->i2c_address : 0;
+    SensorConfig* existing = findSensorConfig(config.gpio,
+        config.onewire_address, lookup_i2c_addr);
+
+    if (!existing && is_i2c_sensor) {
+        // No exact match found — check if a different value type of the same I2C device exists
+        // (Multi-value sensors like SHT31 share GPIO + I2C address but have different sensor_types)
+        for (uint8_t k = 0; k < sensor_count_; k++) {
+            if (sensors_[k].gpio != config.gpio) continue;
+            const SensorCapability* existing_cap = findSensorCapability(sensors_[k].sensor_type);
             if (existing_cap && existing_cap->is_i2c &&
                 existing_cap->i2c_address == capability->i2c_address &&
-                String(existing_cap->device_type) == String(capability->device_type)) {
-                // Same I2C device, different value type - this is allowed
+                String(existing_cap->device_type) == String(capability->device_type) &&
+                sensors_[k].sensor_type != config.sensor_type) {
+                // Same I2C device, different value type — this is a multi-value add/update
 
                 // Check if this sensor_type already exists in sensors_[] (prevent RAM duplicates)
-                for (uint8_t k = 0; k < sensor_count_; k++) {
-                    if (sensors_[k].gpio == config.gpio &&
-                        sensors_[k].sensor_type == config.sensor_type) {
+                for (uint8_t m = 0; m < sensor_count_; m++) {
+                    if (sensors_[m].gpio == config.gpio &&
+                        sensors_[m].sensor_type == config.sensor_type &&
+                        sensors_[m].i2c_address == capability->i2c_address) {
                         // Already exists — update in place instead of adding
-                        sensors_[k] = config;
-                        sensors_[k].active = true;
-                        sensors_[k].i2c_address = capability->i2c_address;
+                        sensors_[m] = config;
+                        sensors_[m].active = true;
+                        sensors_[m].i2c_address = capability->i2c_address;
                         if (!configManager.saveSensorConfig(config)) {
                             LOG_E(TAG, "Sensor Manager: Failed to persist sensor config to NVS");
                         } else {
@@ -255,7 +272,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 
                 sensors_[sensor_count_] = config;
                 sensors_[sensor_count_].active = true;
-                sensors_[sensor_count_].i2c_address = capability->i2c_address;  // Store I2C address
+                sensors_[sensor_count_].i2c_address = capability->i2c_address;
                 sensor_count_++;
 
                 if (!configManager.saveSensorConfig(config)) {
@@ -270,7 +287,9 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                 return true;
             }
         }
+    }
 
+    if (existing) {
         // Runtime reconfiguration: Update existing sensor
         LOG_I(TAG, "Sensor Manager: Updating existing sensor on GPIO " + String(config.gpio));
 
@@ -565,35 +584,53 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
     return true;
 }
 
-bool SensorManager::removeSensor(uint8_t gpio) {
+bool SensorManager::removeSensor(uint8_t gpio, const String& onewire_address,
+                                 uint8_t i2c_address) {
     if (!initialized_) {
         LOG_E(TAG, "Sensor Manager not initialized");
         return false;
     }
 
-    SensorConfig* config = findSensorConfig(gpio);
+    SensorConfig* config = findSensorConfig(gpio, onewire_address, i2c_address);
     if (!config) {
         LOG_W(TAG, "Sensor Manager: Sensor on GPIO " + String(gpio) + " not found");
         return false;
     }
 
-    LOG_I(TAG, "Sensor Manager: Removing sensor on GPIO " + String(gpio));
+    LOG_I(TAG, "Sensor Manager: Removing sensor on GPIO " + String(gpio) +
+             (onewire_address.length() > 0 ? " OW:" + onewire_address : "") +
+             (i2c_address > 0 ? " I2C:0x" + String(i2c_address, HEX) : ""));
 
     // Check if this is an I2C sensor (don't release GPIO - managed by I2CBusManager)
     const SensorCapability* capability = findSensorCapability(config->sensor_type);
     bool is_i2c_sensor = (capability != nullptr && capability->is_i2c);
 
+    // Capture sensor_type before array shift invalidates the pointer
+    String removed_sensor_type = config->sensor_type;
+
+    // For non-I2C sensors: Only release GPIO if no other sensor remains on this GPIO
     if (!is_i2c_sensor) {
-        // Non-I2C sensor: Release GPIO
-        gpio_manager_->releasePin(gpio);
-        LOG_I(TAG, "  ✅ GPIO " + String(gpio) + " released");
+        // Check if another sensor shares this GPIO (OneWire bus sharing)
+        bool other_on_gpio = false;
+        for (uint8_t i = 0; i < sensor_count_; i++) {
+            if (&sensors_[i] != config && sensors_[i].gpio == gpio) {
+                other_on_gpio = true;
+                break;
+            }
+        }
+        if (!other_on_gpio) {
+            gpio_manager_->releasePin(gpio);
+            LOG_I(TAG, "  ✅ GPIO " + String(gpio) + " released (last sensor on pin)");
+        } else {
+            LOG_I(TAG, "  ℹ️ GPIO " + String(gpio) + " kept (other sensors still on bus)");
+        }
     } else {
         LOG_I(TAG, "  ℹ️ I2C sensor - GPIO managed by I2C bus");
     }
 
-    // Remove sensor (shift array)
+    // Remove sensor (shift array) — match by pointer identity (found above)
     for (uint8_t i = 0; i < sensor_count_; i++) {
-        if (sensors_[i].gpio == gpio) {
+        if (&sensors_[i] == config) {
             // Shift remaining sensors
             for (uint8_t j = i; j < sensor_count_ - 1; j++) {
                 sensors_[j] = sensors_[j + 1];
@@ -606,7 +643,7 @@ bool SensorManager::removeSensor(uint8_t gpio) {
     }
 
     // Phase 7: Persist removal to NVS immediately
-    if (!configManager.removeSensorConfig(gpio)) {
+    if (!configManager.removeSensorConfig(gpio, onewire_address, removed_sensor_type)) {
         LOG_E(TAG, "Sensor Manager: Failed to remove sensor config from NVS");
     } else {
         LOG_I(TAG, "  ✅ Configuration removed from NVS");
@@ -660,14 +697,21 @@ bool SensorManager::performMeasurement(uint8_t gpio, SensorReading& reading_out)
         LOG_E(TAG, "Sensor Manager not initialized");
         return false;
     }
-    
-    // Find sensor config
+
+    // Find sensor config (GPIO-only lookup — correct for single-sensor-per-GPIO)
     SensorConfig* config = findSensorConfig(gpio);
     if (!config || !config->active) {
         LOG_W(TAG, "Sensor Manager: Sensor on GPIO " + String(gpio) + " not found or inactive");
         return false;
     }
-    
+    return performMeasurementForConfig(config, reading_out);
+}
+
+// R20-P2: Internal measurement with known config (avoids GPIO-only re-lookup)
+// Used by performAllMeasurements() which iterates sensors_[] directly
+bool SensorManager::performMeasurementForConfig(SensorConfig* config, SensorReading& reading_out) {
+    uint8_t gpio = config->gpio;
+
     // Read raw value based on sensor type (using registry for dynamic detection)
     uint32_t raw_value = 0;
     
@@ -1207,9 +1251,10 @@ void SensorManager::performAllMeasurements() {
             }
         } else {
             // Single-value sensor - standard measurement
+            // R20-P2: Use config-based method to avoid GPIO-only lookup (multi-sensor GPIO)
             LOG_D(TAG, "SensorManager: SINGLE-VALUE measurement START GPIO=" + String(sensors_[i].gpio));
             SensorReading reading;
-            if (performMeasurement(sensors_[i].gpio, reading)) {
+            if (performMeasurementForConfig(&sensors_[i], reading)) {
                 LOG_D(TAG, "SensorManager: SINGLE-VALUE measurement OK, publishing");
                 publishSensorReading(reading);
                 measurement_ok = true;
@@ -1330,6 +1375,13 @@ uint32_t SensorManager::readRawAnalog(uint8_t gpio) {
         return 0;
     }
 
+    // Defense-in-depth: gpio=0 is the I2C bus convention, never a valid analog pin.
+    // Catches sensors stored in NVS from before the configureSensor() guard was added.
+    if (gpio == 0) {
+        LOG_E(TAG, "readRawAnalog: GPIO 0 rejected (boot strap pin, I2C bus convention)");
+        return 0;
+    }
+
     // ADC2/WiFi conflict check: ADC2 pins cannot be used for analog reads when WiFi is active
     // ESP32 hardware limitation - ADC2 peripheral is shared with WiFi radio
     if (gpio_manager_->isADC2Pin(gpio)) {
@@ -1417,20 +1469,42 @@ String SensorManager::getSensorInfo(uint8_t gpio) const {
 // ============================================
 // HELPER METHODS
 // ============================================
-SensorConfig* SensorManager::findSensorConfig(uint8_t gpio) {
+SensorConfig* SensorManager::findSensorConfig(uint8_t gpio,
+    const String& onewire_address, uint8_t i2c_address) {
     for (uint8_t i = 0; i < sensor_count_; i++) {
-        if (sensors_[i].gpio == gpio) {
-            return &sensors_[i];
+        if (sensors_[i].gpio != gpio) continue;
+
+        // OneWire: additionally match ROM-Code
+        if (onewire_address.length() > 0) {
+            if (sensors_[i].onewire_address != onewire_address) continue;
         }
+
+        // I2C: additionally match device address
+        if (i2c_address > 0) {
+            if (sensors_[i].i2c_address != i2c_address) continue;
+        }
+
+        return &sensors_[i];
     }
     return nullptr;
 }
 
-const SensorConfig* SensorManager::findSensorConfig(uint8_t gpio) const {
+const SensorConfig* SensorManager::findSensorConfig(uint8_t gpio,
+    const String& onewire_address, uint8_t i2c_address) const {
     for (uint8_t i = 0; i < sensor_count_; i++) {
-        if (sensors_[i].gpio == gpio) {
-            return &sensors_[i];
+        if (sensors_[i].gpio != gpio) continue;
+
+        // OneWire: additionally match ROM-Code
+        if (onewire_address.length() > 0) {
+            if (sensors_[i].onewire_address != onewire_address) continue;
         }
+
+        // I2C: additionally match device address
+        if (i2c_address > 0) {
+            if (sensors_[i].i2c_address != i2c_address) continue;
+        }
+
+        return &sensors_[i];
     }
     return nullptr;
 }
