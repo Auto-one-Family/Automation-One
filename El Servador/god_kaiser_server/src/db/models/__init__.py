@@ -52,7 +52,7 @@ from .esp_heartbeat import (
 )  # noqa: F401
 from .kaiser import KaiserRegistry, ESPOwnership  # noqa: F401
 from .library import LibraryMetadata  # noqa: F401
-from .logic import CrossESPLogic, LogicExecutionHistory  # noqa: F401
+from .logic import CrossESPLogic, LogicExecutionHistory, LogicHysteresisState  # noqa: F401
 from .notification import (
     Notification,
     NotificationCategory,
@@ -119,6 +119,7 @@ __all__ = [
     "LibraryMetadata",
     "CrossESPLogic",
     "LogicExecutionHistory",
+    "LogicHysteresisState",
     "Notification",
     "NotificationCategory",
     "NotificationPreferences",

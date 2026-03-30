@@ -1160,13 +1160,17 @@ async def delete_sensor(
 
     await db.commit()
 
-    # T13-R1: Sync subzone sensor/actuator counts after sensor delete
+    # R20-P5 + T13-R1: Sync assigned_sensor_config_ids and counts after sensor delete
     try:
+        _subzone_svc = SubzoneService(
+            esp_repo=esp_repo, session=db, publisher=get_mqtt_publisher()
+        )
+        await _subzone_svc.sync_assigned_config_ids(esp_id)
         _subzone_repo = SubzoneRepository(db)
-        if await _subzone_repo.sync_subzone_counts(esp_id, esp_device.id):
-            await db.commit()
+        await _subzone_repo.sync_subzone_counts(esp_id, esp_device.id)
+        await db.commit()
     except Exception:
-        logger.debug("Subzone count sync skipped for %s", esp_id)
+        logger.debug("Subzone sync skipped for %s", esp_id)
 
     logger.info(
         f"Sensor deleted: {esp_id} config_id={config_id} GPIO {gpio} "

@@ -22,6 +22,7 @@ References:
 - El Trabajante/src/models/system_types.h (SubzoneConfig struct)
 """
 
+import re
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -80,9 +81,11 @@ class SubzoneAssignRequest(BaseModel):
     @field_validator("subzone_id")
     @classmethod
     def validate_subzone_id_format(cls, v: str) -> str:
-        """Validate subzone_id contains only valid characters."""
-        if not v.replace("_", "").isalnum():
-            raise ValueError("subzone_id must contain only letters, numbers, and underscores")
+        """Validate subzone_id contains only ASCII letters, numbers, and underscores."""
+        if not re.match(r"^[A-Za-z0-9_]+$", v):
+            raise ValueError(
+                "subzone_id must contain only ASCII letters, numbers, and underscores"
+            )
         return v.lower()
 
     @field_validator("assigned_gpios")

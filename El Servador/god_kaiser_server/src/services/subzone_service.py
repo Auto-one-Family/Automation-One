@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from ..core import constants
 from ..core.logging_config import get_logger
@@ -700,6 +701,9 @@ class SubzoneService:
         # Flush to make changes visible for subsequent queries
         await self.session.flush()
 
+        # R20-P5: Sync assigned_sensor_config_ids (before counts, so counts use updated IDs)
+        await self.sync_assigned_config_ids(device_id)
+
         # T13-R1: Sync sensor_count/actuator_count after subzone GPIO change
         await self._sync_counts_for_device(device_id)
 
@@ -800,3 +804,52 @@ class SubzoneService:
             if subzone.assigned_gpios and gpio in subzone.assigned_gpios:
                 subzone.assigned_gpios = [g for g in subzone.assigned_gpios if g != gpio]
         await self.session.flush()
+
+        # R20-P5: Sync assigned_sensor_config_ids after GPIO removal
+        await self.sync_assigned_config_ids(device_id)
+
+    async def sync_assigned_config_ids(self, device_id: str) -> None:
+        """
+        Recompute assigned_sensor_config_ids for all subzones of a device.
+
+        Resolves the FK type mismatch (SubzoneConfig.esp_id=String vs
+        SensorConfig.esp_id=UUID) by looking up the ESP UUID first.
+
+        This ensures I2C sensors (GPIO=0) are correctly tracked by UUID
+        rather than just GPIO number. Without this, all I2C sensors on
+        GPIO 0 would be indistinguishable in subzone assignment.
+
+        Note: Flushes if changes detected. Caller is responsible for commit().
+        """
+        from ..db.models.sensor import SensorConfig
+
+        device = await self.esp_repo.get_by_device_id(device_id)
+        if not device:
+            return
+
+        # Load all subzones for this device
+        result = await self.session.execute(
+            select(SubzoneConfig).where(SubzoneConfig.esp_id == device_id)
+        )
+        subzones = list(result.scalars().all())
+        if not subzones:
+            return
+
+        # Load all sensor configs for this device (by UUID — FK type mismatch)
+        sensor_result = await self.session.execute(
+            select(SensorConfig).where(SensorConfig.esp_id == device.id)
+        )
+        all_sensors = list(sensor_result.scalars().all())
+
+        changed = False
+        for subzone in subzones:
+            gpios = set(subzone.assigned_gpios or [])
+            new_ids = sorted(str(s.id) for s in all_sensors if s.gpio in gpios)
+            old_ids = sorted(subzone.assigned_sensor_config_ids or [])
+            if new_ids != old_ids:
+                subzone.assigned_sensor_config_ids = new_ids
+                flag_modified(subzone, "assigned_sensor_config_ids")
+                changed = True
+
+        if changed:
+            await self.session.flush()

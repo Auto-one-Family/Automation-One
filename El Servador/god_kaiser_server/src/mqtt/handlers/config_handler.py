@@ -363,12 +363,23 @@ class ConfigHandler:
                     )
 
                     if failure_type == "sensor":
-                        # Use sensor_type from failure for multi-value disambiguation
+                        # Use sensor_type + address from failure for multi-value disambiguation
                         failure_sensor_type = failure.get("sensor_type")
+                        failure_i2c_address = failure.get("i2c_address")
+                        failure_onewire_address = failure.get("onewire_address")
                         if failure_sensor_type:
-                            sensor = await sensor_repo.get_by_esp_gpio_and_type(
-                                esp.id, gpio, failure_sensor_type
-                            )
+                            if failure_i2c_address:
+                                sensor = await sensor_repo.get_by_esp_gpio_type_and_i2c(
+                                    esp.id, gpio, failure_sensor_type, failure_i2c_address
+                                )
+                            elif failure_onewire_address:
+                                sensor = await sensor_repo.get_by_esp_gpio_type_and_onewire(
+                                    esp.id, gpio, failure_sensor_type, failure_onewire_address
+                                )
+                            else:
+                                sensor = await sensor_repo.get_by_esp_gpio_and_type(
+                                    esp.id, gpio, failure_sensor_type
+                                )
                             sensors_to_update = [sensor] if sensor else []
                         else:
                             # No sensor_type in failure: update ALL sensors on this GPIO

@@ -377,6 +377,13 @@ class SensorDataHandler:
                             tz=timezone.utc,
                         )
 
+                    # Build metadata with interface addresses for historical traceability
+                    sensor_metadata = {"raw_mode": raw_mode}
+                    if i2c_address:
+                        sensor_metadata["i2c_address"] = i2c_address
+                    if onewire_address:
+                        sensor_metadata["onewire_address"] = onewire_address
+
                     sensor_data = await sensor_repo.save_data(
                         esp_id=esp_device.id,
                         gpio=gpio,
@@ -387,9 +394,7 @@ class SensorDataHandler:
                         processing_mode=processing_mode,
                         quality=quality,
                         timestamp=esp32_timestamp,
-                        metadata={
-                            "raw_mode": raw_mode,
-                        },
+                        metadata=sensor_metadata,
                         data_source=data_source,
                         zone_id=zone_id,
                         subzone_id=subzone_id,
@@ -488,6 +493,9 @@ class SensorDataHandler:
                                 "timestamp": esp32_timestamp_raw,
                                 "zone_id": zone_id,
                                 "subzone_id": subzone_id,
+                                "config_id": str(sensor_config.id) if sensor_config else None,
+                                "i2c_address": i2c_address if i2c_address else None,
+                                "onewire_address": onewire_address if onewire_address else None,
                             },
                         )
                     except Exception as e:

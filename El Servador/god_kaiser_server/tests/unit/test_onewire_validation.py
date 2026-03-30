@@ -280,3 +280,52 @@ class TestOneWirePayloadValidation:
 
         # ASSERT
         assert onewire_address is None, "onewire_address should be None for non-OneWire sensors"
+
+
+class TestOneWireAddressTransform:
+    """Tests for strip_auto_prefix transform in ConfigMappingEngine (R20-P6)."""
+
+    @pytest.mark.onewire
+    @pytest.mark.sensor
+    def test_sim_address_stripped_to_empty(self):
+        """SIM_ prefixed addresses are transformed to empty string."""
+        from src.core.config_mapping import ConfigMappingEngine
+
+        transform = ConfigMappingEngine.TRANSFORMS["strip_auto_prefix"]
+        assert transform("SIM_A1B2C3D4E5F6") == "", "SIM_ address should become empty string"
+
+    @pytest.mark.onewire
+    @pytest.mark.sensor
+    def test_auto_address_stripped_to_empty(self):
+        """AUTO_ prefixed addresses are transformed to empty string."""
+        from src.core.config_mapping import ConfigMappingEngine
+
+        transform = ConfigMappingEngine.TRANSFORMS["strip_auto_prefix"]
+        assert transform("AUTO_28FF641E8D3C0C79") == "", "AUTO_ address should become empty string"
+
+    @pytest.mark.onewire
+    @pytest.mark.sensor
+    def test_real_rom_code_unchanged(self):
+        """Real 16-char hex ROM codes pass through unchanged."""
+        from src.core.config_mapping import ConfigMappingEngine
+
+        transform = ConfigMappingEngine.TRANSFORMS["strip_auto_prefix"]
+        assert transform("28FF641E8D3C0C79") == "28FF641E8D3C0C79", "Real ROM code should be unchanged"
+
+    @pytest.mark.onewire
+    @pytest.mark.sensor
+    def test_empty_string_unchanged(self):
+        """Empty string passes through unchanged."""
+        from src.core.config_mapping import ConfigMappingEngine
+
+        transform = ConfigMappingEngine.TRANSFORMS["strip_auto_prefix"]
+        assert transform("") == "", "Empty string should remain empty"
+
+    @pytest.mark.onewire
+    @pytest.mark.sensor
+    def test_none_returns_empty_string(self):
+        """None input returns empty string."""
+        from src.core.config_mapping import ConfigMappingEngine
+
+        transform = ConfigMappingEngine.TRANSFORMS["strip_auto_prefix"]
+        assert transform(None) == "", "None should become empty string"

@@ -628,7 +628,10 @@ async def lifespan(app: FastAPI):
             # Setup condition evaluators
             sensor_evaluator = SensorConditionEvaluator()
             time_evaluator = TimeConditionEvaluator()
-            hysteresis_evaluator = HysteresisConditionEvaluator()
+            hysteresis_evaluator = HysteresisConditionEvaluator(
+                session_factory=get_session,
+            )
+            await hysteresis_evaluator.load_states_from_db()
 
             # Phase 4D: Diagnostics Condition Evaluator
             from .services.logic.conditions.diagnostics_evaluator import (
