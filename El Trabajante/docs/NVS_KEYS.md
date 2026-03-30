@@ -182,6 +182,7 @@ String gpio_string = storageManager.getStringObj("subzone_" + subzone_id + "_gpi
 | `actuator_{i}_default_pwm` | uint8_t | N/A | 0-255 | Default PWM Duty Cycle (0-255) |
 
 **Note:** Actuator-Array-Elemente haben **keine Default-Values**. Keys werden nur geschrieben, wenn ein Aktor konfiguriert wird.
+Since R20-P11: NVS writes are skipped for identical config pushes (0 writes) and reduced to 1 write for soft-only changes (name, subzone, etc.). Full 2-write cycle (remove + add) only on structural changes (type, aux_gpio).
 
 ## Kaiser/Zone Configuration
 

@@ -537,8 +537,12 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     // Heartbeat Topics sind IMMER erlaubt (für initiale Registration)
     bool is_heartbeat = topic.indexOf("/system/heartbeat") != -1 &&
                         topic.indexOf("/heartbeat/ack") == -1;
+    // System responses must pass immediately (config_response, zone/ack, subzone/ack)
+    bool is_system_response = topic.indexOf("/config_response") != -1 ||
+                              topic.indexOf("/zone/ack") != -1 ||
+                              topic.indexOf("/subzone/ack") != -1;
 
-    if (!registration_confirmed_ && !is_heartbeat) {
+    if (!registration_confirmed_ && !is_heartbeat && !is_system_response) {
         // Check timeout: Nach 10s Gate automatisch öffnen (Fallback)
         if (registration_start_ms_ > 0 &&
             (millis() - registration_start_ms_) > REGISTRATION_TIMEOUT_MS) {
@@ -644,24 +648,24 @@ bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t
 // ============================================
 // SUBSCRIPTION
 // ============================================
-bool MQTTClient::subscribe(const String& topic) {
+bool MQTTClient::subscribe(const String& topic, uint8_t qos) {
     if (!isConnected()) {
         LOG_E(TAG, "Cannot subscribe, MQTT not connected");
-        errorTracker.logCommunicationError(ERROR_MQTT_SUBSCRIBE_FAILED, 
+        errorTracker.logCommunicationError(ERROR_MQTT_SUBSCRIBE_FAILED,
                                            "Cannot subscribe, not connected");
         return false;
     }
-    
-    bool success = mqtt_.subscribe(topic.c_str());
-    
+
+    bool success = mqtt_.subscribe(topic.c_str(), qos);
+
     if (success) {
-        LOG_I(TAG, "Subscribed to: " + topic);
+        LOG_I(TAG, "Subscribed (QoS " + String(qos) + "): " + topic);
     } else {
         LOG_E(TAG, "Subscribe failed: " + topic);
-        errorTracker.logCommunicationError(ERROR_MQTT_SUBSCRIBE_FAILED, 
+        errorTracker.logCommunicationError(ERROR_MQTT_SUBSCRIBE_FAILED,
                                            ("Subscribe failed: " + topic).c_str());
     }
-    
+
     return success;
 }
 

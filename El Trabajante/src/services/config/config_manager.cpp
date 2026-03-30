@@ -1437,6 +1437,7 @@ static void buildActuatorKey(char* buffer, size_t buffer_size, uint8_t index, co
 #define NVS_SEN_MODE       "sen_%d_mode"     // sen_0_mode = 11 chars ✅
 #define NVS_SEN_INTERVAL   "sen_%d_int"      // sen_0_int = 10 chars ✅ (CRITICAL: was broken!)
 #define NVS_SEN_OW         "sen_%d_ow"       // sen_0_ow = 9 chars ✅ (OneWire ROM-Code)
+#define NVS_SEN_I2C        "sen_%d_i2c"      // sen_0_i2c = 10 chars ✅ (I2C device address)
 
 // Legacy keys (deprecated, some >15 chars - kept for migration only)
 // NOTE: Old keys "sensor_%d_*" were OK for small indices but:
@@ -1654,6 +1655,16 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
           continue;  // Different sensor on same GPIO — skip
         }
       }
+      // SHT31-FIX: For I2C sensors, additionally match i2c_address to distinguish
+      // multiple devices of same type at different addresses (e.g. 2x SHT31 at 0x44 and 0x45).
+      if (config.i2c_address != 0) {
+        char i2cKey[16];
+        snprintf(i2cKey, sizeof(i2cKey), NVS_SEN_I2C, i);
+        uint8_t stored_i2c = storageManager.getUInt8(i2cKey, 0);
+          if (stored_i2c != config.i2c_address) {
+          continue;  // Different I2C device — skip
+        }
+      }
       existing_index = i;
       break;
     }
@@ -1744,6 +1755,14 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
         }
       }
     }
+  }
+
+  // I2C Address (SHT31-FIX: persist address from MQTT payload for multi-device support)
+  // Only save when non-zero to avoid wasting NVS space for non-I2C sensors.
+  // This allows two SHT31 at 0x44 and 0x45 to survive a reboot as distinct entries.
+  if (config.i2c_address != 0) {
+    snprintf(key, sizeof(key), NVS_SEN_I2C, index);
+    success &= storageManager.putUInt8(key, config.i2c_address);
   }
 
   // Update count if new sensor (use new key only!)
@@ -1913,6 +1932,11 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
     snprintf(new_key, sizeof(new_key), NVS_SEN_OW, i);
     config.onewire_address = migrateReadString(new_key, "", "");  // Empty default
 
+    // I2C Address (SHT31-FIX: load persisted address for multi-device support)
+    // No legacy key — new feature. Default 0 = no I2C address stored (pre-fix firmware).
+    snprintf(new_key, sizeof(new_key), NVS_SEN_I2C, i);
+    config.i2c_address = storageManager.getUInt8(new_key, 0);
+
     // Reset runtime fields
     config.last_raw_value = 0;
     config.last_reading = 0;
@@ -1925,7 +1949,8 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
                ", Subzone: " + (config.subzone_id.isEmpty() ? "none" : config.subzone_id) +
                ", Active: " + String(config.active ? "true" : "false") +
                ", Raw: " + String(config.raw_mode ? "true" : "false") +
-               ", Interval: " + String(config.measurement_interval_ms) + "ms");
+               ", Interval: " + String(config.measurement_interval_ms) + "ms" +
+               ", I2C: " + (config.i2c_address ? ("0x" + String(config.i2c_address, HEX)) : "n/a"));
       loaded_count++;
     } else {
       LOG_W(TAG, "ConfigManager: Skipped invalid sensor " + String(i));

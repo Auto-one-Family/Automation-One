@@ -213,23 +213,65 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
     return false;
   }
 
-  // Phase 7: Runtime reconfiguration - check if actuator exists
-  bool is_reconfiguration = hasActuatorOnGPIO(config.gpio);
-  if (is_reconfiguration) {
-    RegisteredActuator* existing = findActuator(config.gpio);
-    if (existing) {
-      LOG_I(TAG, "Actuator Manager: Runtime reconfiguration on GPIO " + String(config.gpio));
-      
-      // Check if type changed
-      bool type_changed = (existing->config.actuator_type != config.actuator_type);
-      if (type_changed) {
-        LOG_I(TAG, "  Actuator type changed: " + existing->config.actuator_type + 
-                 " → " + config.actuator_type);
-        // Emergency stop before type change
-        if (existing->driver) {
-          existing->driver->setBinary(false);
+  // R20-P11: Skip-unchanged + soft-update optimization
+  // Avoids GPIO glitches, NVS wear and log spam on repeated config pushes.
+  bool is_reconfiguration = false;
+  RegisteredActuator* existing = findActuator(config.gpio);
+  if (existing) {
+    is_reconfiguration = true;
+    const ActuatorConfig& prev = existing->config;
+
+    // Structural fields: require full remove + re-create (driver type, secondary pin)
+    bool structural_changed = (prev.actuator_type != config.actuator_type) ||
+                              (prev.aux_gpio      != config.aux_gpio);
+
+    // Soft fields: can be applied in-place without touching GPIO or driver
+    bool soft_changed = (prev.actuator_name   != config.actuator_name)   ||
+                        (prev.subzone_id       != config.subzone_id)       ||
+                        (prev.critical         != config.critical)         ||
+                        (prev.inverted_logic   != config.inverted_logic)   ||
+                        (prev.default_state    != config.default_state)    ||
+                        (prev.default_pwm      != config.default_pwm);
+
+    if (!structural_changed && !soft_changed) {
+      // Fully identical config — nothing to do
+      LOG_I(TAG, "Actuator Manager: GPIO " + String(config.gpio) +
+                 " config unchanged, skipping");
+      return true;
+    }
+
+    if (!structural_changed) {
+      // Soft-only change: update fields in-place, persist NVS once, no GPIO touch
+      LOG_I(TAG, "Actuator Manager: Soft update on GPIO " + String(config.gpio));
+      existing->config.actuator_name  = config.actuator_name;
+      existing->config.subzone_id      = config.subzone_id;
+      existing->config.critical        = config.critical;
+      existing->config.inverted_logic  = config.inverted_logic;
+      existing->config.default_state   = config.default_state;
+      existing->config.default_pwm     = config.default_pwm;
+
+      ActuatorConfig actuators[MAX_ACTUATORS];
+      uint8_t count = 0;
+      for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
+        if (actuators_[i].in_use) {
+          actuators[count++] = actuators_[i].config;
         }
       }
+      if (!configManager.saveActuatorConfig(actuators, count)) {
+        LOG_E(TAG, "Actuator Manager: Failed to persist soft update to NVS");
+      } else {
+        LOG_I(TAG, "  Soft update persisted to NVS");
+      }
+      publishActuatorStatus(config.gpio);
+      return true;
+    }
+
+    // Structural change: full remove + re-create required
+    LOG_I(TAG, "Actuator Manager: Structural reconfiguration on GPIO " + String(config.gpio));
+    LOG_I(TAG, "  Type: " + prev.actuator_type + " -> " + config.actuator_type);
+    // Emergency stop before tearing down the driver
+    if (existing->driver) {
+      existing->driver->setBinary(false);
     }
     removeActuator(config.gpio);
   }
@@ -261,7 +303,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
   slot->gpio = config.gpio;
   slot->in_use = true;
   slot->emergency_stopped = false;
-  
+
   // Always increment: removeActuator() already decremented for reconfiguration,
   // and new actuators need the increment too
   actuator_count_++;
@@ -277,10 +319,10 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
   if (!configManager.saveActuatorConfig(actuators, count)) {
     LOG_E(TAG, "Actuator Manager: Failed to persist config to NVS");
   } else {
-    LOG_I(TAG, "  ✅ Configuration persisted to NVS");
+    LOG_I(TAG, "  Configuration persisted to NVS");
   }
 
-  LOG_I(TAG, "Actuator " + String(is_reconfiguration ? "reconfigured" : "configured") + 
+  LOG_I(TAG, "Actuator " + String(is_reconfiguration ? "reconfigured" : "configured") +
            " on GPIO " + String(config.gpio) + " type: " + config.actuator_type);
   publishActuatorStatus(config.gpio);
   return true;
@@ -750,9 +792,15 @@ bool ActuatorManager::handleActuatorConfig(const String& payload, const String& 
     return false;
   }
 
+  // Skip silently if payload has no 'actuators' key (sensor-only config)
+  if (!doc.containsKey("actuators")) {
+    LOG_D(TAG, "No 'actuators' key in payload — skipping (sensor-only config)");
+    return true;
+  }
+
   JsonArray actuators = doc["actuators"].as<JsonArray>();
   if (actuators.isNull()) {
-    String message = "Actuator config missing 'actuators' array";
+    String message = "Actuator config 'actuators' field is not an array";
     LOG_E(TAG, message);
     ConfigResponseBuilder::publishError(
         ConfigType::ACTUATOR, ConfigErrorCode::MISSING_FIELD, message,

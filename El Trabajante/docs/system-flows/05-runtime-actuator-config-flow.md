@@ -385,133 +385,116 @@ bool ConfigManager::validateActuatorConfig(const ActuatorConfig& config) const {
 
 ---
 
-### STEP 5: Configure Actuator
+### STEP 5: Configure Actuator (with skip-unchanged optimization)
 
-**File:** `src/services/actuator/actuator_manager.cpp` (lines 183-283)
+**File:** `src/services/actuator/actuator_manager.cpp` (lines 187+)
 
-**Code:**
+Since R20-P11 the method uses a 3-path optimization to avoid unnecessary GPIO glitches,
+NVS wear and log spam when the server pushes identical or soft-changed configs.
+
+**Code (simplified — see source for full implementation):**
 
 ```cpp
 bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
-  if (!initialized_ && !begin()) {
-    return false;
-  }
+  if (!initialized_ && !begin()) return false;
 
   ActuatorConfig config = incoming_config;
-  if (!validateActuatorConfig(config)) {
-    return false;
-  }
+  if (!validateActuatorConfig(config)) return false;
 
-  // Phase 7: Handle deactivation (removal)
+  // 1. Deactivation (unchanged)
   if (!config.active) {
-    LOG_INFO("Actuator config deactivating GPIO " + String(config.gpio));
     removeActuator(config.gpio);
     return true;
   }
 
-  // GPIO conflict check (sensor vs actuator)
-  if (sensorManager.hasSensorOnGPIO(config.gpio)) {
-    LOG_ERROR("GPIO " + String(config.gpio) + " already used by sensor");
-    errorTracker.trackError(ERROR_GPIO_CONFLICT,
-                            ERROR_SEVERITY_ERROR,
-                            "GPIO conflict sensor vs actuator");
-    return false;
-  }
+  // 2. GPIO conflict check (sensor vs actuator — defense-in-depth)
+  if (sensorManager.hasSensorOnGPIO(config.gpio)) { return false; }
 
-  // Phase 7: Runtime reconfiguration - check if actuator exists
-  bool is_reconfiguration = hasActuatorOnGPIO(config.gpio);
-  if (is_reconfiguration) {
-    RegisteredActuator* existing = findActuator(config.gpio);
-    if (existing) {
-      LOG_INFO("Actuator Manager: Runtime reconfiguration on GPIO " + String(config.gpio));
-      
-      // Check if type changed
-      bool type_changed = (existing->config.actuator_type != config.actuator_type);
-      if (type_changed) {
-        LOG_INFO("  Actuator type changed: " + existing->config.actuator_type + 
-                 " → " + config.actuator_type);
-        // Emergency stop before type change
-        if (existing->driver) {
-          existing->driver->setState(false);
-        }
-      }
+  // 3. R20-P11: Skip-unchanged + soft-update optimization
+  RegisteredActuator* existing = findActuator(config.gpio);
+  if (existing) {
+    const ActuatorConfig& prev = existing->config;
+
+    bool structural_changed = (prev.actuator_type != config.actuator_type) ||
+                              (prev.aux_gpio      != config.aux_gpio);
+
+    bool soft_changed = (prev.actuator_name != config.actuator_name)   ||
+                        (prev.subzone_id    != config.subzone_id)       ||
+                        (prev.critical      != config.critical)         ||
+                        (prev.inverted_logic!= config.inverted_logic)   ||
+                        (prev.default_state != config.default_state)    ||
+                        (prev.default_pwm   != config.default_pwm);
+
+    if (!structural_changed && !soft_changed) {
+      // PATH A: Fully identical — skip
+      LOG_I(TAG, "config unchanged, skipping");
+      return true;  // No GPIO touch, no NVS write
     }
+
+    if (!structural_changed) {
+      // PATH B: Soft-only change — in-place update, 1x NVS save, no GPIO release
+      existing->config.actuator_name = config.actuator_name;
+      existing->config.subzone_id    = config.subzone_id;
+      existing->config.critical      = config.critical;
+      existing->config.inverted_logic= config.inverted_logic;
+      existing->config.default_state = config.default_state;
+      existing->config.default_pwm   = config.default_pwm;
+      configManager.saveActuatorConfig(actuators, count);
+      publishActuatorStatus(config.gpio);
+      return true;
+    }
+
+    // PATH C: Structural change — full remove + re-create
+    existing->driver->setBinary(false);  // emergency stop before teardown
     removeActuator(config.gpio);
   }
 
-  // Check capacity
-  RegisteredActuator* slot = getFreeSlot();
-  if (!slot) {
-    LOG_ERROR("No actuator slots available");
-    errorTracker.trackError(ERROR_ACTUATOR_INIT_FAILED,
-                            ERROR_SEVERITY_ERROR,
-                            "Actuator slots exhausted");
-    return false;
-  }
-
-  // Create driver
+  // New actuator or after structural remove: create driver, register, persist NVS
   auto driver = createDriver(config.actuator_type);
-  if (!driver) {
-    return false;
-  }
+  if (!driver) return false;
+  if (!driver->begin(config)) return false;
 
-  // Initialize driver
-  if (!driver->begin(config)) {
-    LOG_ERROR("Driver initialization failed for GPIO " + String(config.gpio));
-    errorTracker.trackError(ERROR_ACTUATOR_INIT_FAILED,
-                            ERROR_SEVERITY_ERROR,
-                            "Driver init failed");
-    return false;
-  }
-
-  // Register actuator
   slot->driver = std::move(driver);
-  slot->config = slot->driver->getConfig();  // Get config from driver (may modify)
-  slot->gpio = config.gpio;
-  slot->in_use = true;
-  slot->emergency_stopped = false;
-  
-  if (!is_reconfiguration) {
-    actuator_count_++;
-  }
-
-  // Phase 7: Persist to NVS immediately (save all actuators)
-  ActuatorConfig actuators[MAX_ACTUATORS];
-  uint8_t count = 0;
-  for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
-    if (actuators_[i].in_use) {
-      actuators[count++] = actuators_[i].config;
-    }
-  }
-  if (!configManager.saveActuatorConfig(actuators, count)) {
-    LOG_ERROR("Actuator Manager: Failed to persist config to NVS");
-  } else {
-    LOG_INFO("  ✅ Configuration persisted to NVS");
-  }
-
-  LOG_INFO("Actuator " + String(is_reconfiguration ? "reconfigured" : "configured") + 
-           " on GPIO " + String(config.gpio) + " type: " + config.actuator_type);
-  publishActuatorStatus(config.gpio);
-  return true;
+  slot->config = slot->driver->getConfig();
+  // ... persist to NVS, publish status
 }
 ```
+
+**3-Path Decision Matrix:**
+
+| Path | Condition | GPIO | NVS Writes | Driver | Log |
+|------|-----------|------|------------|--------|-----|
+| A: Unchanged | No fields differ | Untouched | 0 | Untouched | "config unchanged, skipping" |
+| B: Soft-change | Only name/subzone/critical/inverted/default differ | Untouched | 1 | Untouched | "Soft update on GPIO X" |
+| C: Structural | actuator_type or aux_gpio differ (or new actuator) | Release + Re-allocate | 2 | Destroy + Create | "Structural reconfiguration on GPIO X" |
+
+**Compared Fields (all fields from `parseActuatorDefinition`):**
+
+| Category | Fields | Triggers |
+|----------|--------|----------|
+| Structural | `actuator_type`, `aux_gpio` | Path C (full remove + re-create) |
+| Soft | `actuator_name`, `subzone_id`, `critical`, `inverted_logic`, `default_state`, `default_pwm` | Path B (in-place update) |
+| Implicit | `gpio` | Lookup key (not compared, used by `findActuator`) |
+| Pre-checked | `active` | Handled before comparison (removal path) |
 
 **Operations:**
 1. Auto-initialize if not initialized
 2. Validate configuration
 3. Handle deactivation (removal if `active=false`)
 4. Check GPIO conflict with sensors
-5. Check for existing actuator (runtime reconfiguration)
-6. Stop existing actuator if type changed
-7. Remove existing actuator for reconfiguration
-8. Check actuator array capacity (MAX_ACTUATORS: 8 for XIAO, 12 for ESP32)
-9. Create actuator driver
-10. Initialize driver with config
-11. Register in array (config retrieved from driver)
-12. Persist all actuators to NVS
-13. Publish status
+5. Check for existing actuator and compare all config fields
+6. **Path A:** Skip if unchanged (0 NVS writes, no GPIO touch)
+7. **Path B:** Soft-update in-place if only metadata changed (1 NVS write, no GPIO touch)
+8. **Path C:** Full remove + re-create if type/aux_gpio changed (2 NVS writes, GPIO release + allocate)
+9. Check actuator array capacity (MAX_ACTUATORS: 8 for XIAO, 12 for ESP32)
+10. Create actuator driver
+11. Initialize driver with config
+12. Register in array (config retrieved from driver)
+13. Persist all actuators to NVS
+14. Publish status
 
 **Note:** GPIO reservation handled by driver during `begin()`, not here.
+Steps 9-14 only apply to Path C and new actuators (not Path A or B).
 
 ---
 
@@ -752,6 +735,13 @@ Newly configured actuators:
 - Inherit current emergency stop status
 - Cannot be activated if emergency stop active
 
+### Runtime Stability (R20-P11)
+
+Repeated config pushes (e.g. subzone reassignment, heartbeat-triggered config sync):
+- Identical config: actuator state preserved (running actuators stay ON)
+- Soft-change only: GPIO untouched, driver untouched, no glitch on relay/pump pins
+- Structural change: `setBinary(false)` before teardown to prevent uncontrolled pin states
+
 ### GPIO Conflicts
 
 Additional checks vs sensors:
@@ -842,15 +832,17 @@ std::unique_ptr<IActuatorDriver> ActuatorManager::createDriver(const String& act
 
 ## Timing Analysis
 
-| Operation | Duration |
-|-----------|----------|
-| JSON parse | 5-20ms |
-| Field validation | <1ms per field |
-| GPIO conflict check | <1ms |
-| Driver creation | <1ms |
-| Driver initialization | 50-200ms (hardware setup) |
-| NVS write | 10-50ms per actuator |
-| Response publish | 10-20ms |
+| Operation | Duration | Notes |
+|-----------|----------|-------|
+| JSON parse | 5-20ms | |
+| Field validation | <1ms per field | |
+| GPIO conflict check | <1ms | |
+| Config comparison (R20-P11) | <1ms | 8 field comparisons |
+| Soft-update in-place (R20-P11) | <1ms + NVS | Path B: no driver touch |
+| Driver creation | <1ms | Path C only |
+| Driver initialization | 50-200ms (hardware setup) | Path C only |
+| NVS write | 10-50ms per actuator | Path A: 0 writes, Path B: 1 write, Path C: 2 writes |
+| Response publish | 10-20ms | |
 
 **Total:** 100-300ms per actuator
 

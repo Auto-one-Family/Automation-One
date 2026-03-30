@@ -819,26 +819,27 @@ void setup() {
     // WP3: Use TopicBuilder for zone topics
     String zone_assign_topic = TopicBuilder::buildZoneAssignTopic();
 
-    mqttClient.subscribe(system_command_topic);
-    mqttClient.subscribe(config_topic);
-    mqttClient.subscribe(broadcast_emergency_topic);
-    mqttClient.subscribe(actuator_command_wildcard);
-    mqttClient.subscribe(esp_emergency_topic);
-    mqttClient.subscribe(zone_assign_topic);
+    // QoS 1 for commands/config (must arrive), QoS 0 for heartbeat (regular, loss OK)
+    mqttClient.subscribe(system_command_topic, 1);
+    mqttClient.subscribe(config_topic, 1);
+    mqttClient.subscribe(broadcast_emergency_topic, 1);
+    mqttClient.subscribe(actuator_command_wildcard, 1);
+    mqttClient.subscribe(esp_emergency_topic, 1);
+    mqttClient.subscribe(zone_assign_topic, 1);
 
     // Phase 9: Subzone management topics
     String subzone_assign_topic = TopicBuilder::buildSubzoneAssignTopic();
     String subzone_remove_topic = TopicBuilder::buildSubzoneRemoveTopic();
     String subzone_safe_topic = TopicBuilder::buildSubzoneSafeTopic();
-    mqttClient.subscribe(subzone_assign_topic);
-    mqttClient.subscribe(subzone_remove_topic);
-    mqttClient.subscribe(subzone_safe_topic);
+    mqttClient.subscribe(subzone_assign_topic, 1);
+    mqttClient.subscribe(subzone_remove_topic, 1);
+    mqttClient.subscribe(subzone_safe_topic, 1);
 
     // WP3: Build sensor command wildcard from TopicBuilder
     // Wildcard subscription for all sensor GPIOs: kaiser/{id}/esp/{esp_id}/sensor/+/command
     String sensor_command_wildcard = String(TopicBuilder::buildSensorCommandTopic(0));
     sensor_command_wildcard.replace("/0/command", "/+/command");
-    mqttClient.subscribe(sensor_command_wildcard);
+    mqttClient.subscribe(sensor_command_wildcard, 1);
 
     // Phase 2: Heartbeat-ACK topic (Server → ESP for approval status)
     String heartbeat_ack_topic = TopicBuilder::buildSystemHeartbeatAckTopic();
@@ -1595,25 +1596,25 @@ void setup() {
               // Topics that depend on kaiser_id need to be re-subscribed
               LOG_I(TAG, "Kaiser ID changed - re-subscribing to topics...");
 
-              // Re-subscribe to zone topic
-              mqttClient.subscribe(TopicBuilder::buildZoneAssignTopic());
+              // Re-subscribe to zone topic (QoS 1)
+              mqttClient.subscribe(TopicBuilder::buildZoneAssignTopic(), 1);
 
-              // Re-subscribe to sensor command wildcard
+              // Re-subscribe to sensor command wildcard (QoS 1)
               String sensor_cmd_wildcard = String(TopicBuilder::buildSensorCommandTopic(0));
               sensor_cmd_wildcard.replace("/0/command", "/+/command");
-              mqttClient.subscribe(sensor_cmd_wildcard);
+              mqttClient.subscribe(sensor_cmd_wildcard, 1);
 
-              // Re-subscribe to subzone topics
-              mqttClient.subscribe(TopicBuilder::buildSubzoneAssignTopic());
-              mqttClient.subscribe(TopicBuilder::buildSubzoneRemoveTopic());
-              mqttClient.subscribe(TopicBuilder::buildSubzoneSafeTopic());
+              // Re-subscribe to subzone topics (QoS 1)
+              mqttClient.subscribe(TopicBuilder::buildSubzoneAssignTopic(), 1);
+              mqttClient.subscribe(TopicBuilder::buildSubzoneRemoveTopic(), 1);
+              mqttClient.subscribe(TopicBuilder::buildSubzoneSafeTopic(), 1);
 
-              // Re-subscribe to actuator command wildcard
+              // Re-subscribe to actuator command wildcard (QoS 1)
               String actuator_cmd_wildcard = String(TopicBuilder::buildActuatorCommandTopic(0));
               actuator_cmd_wildcard.replace("/0/command", "/+/command");
-              mqttClient.subscribe(actuator_cmd_wildcard);
+              mqttClient.subscribe(actuator_cmd_wildcard, 1);
 
-              // Re-subscribe to heartbeat ack
+              // Re-subscribe to heartbeat ack (QoS 0)
               mqttClient.subscribe(TopicBuilder::buildSystemHeartbeatAckTopic());
 
               LOG_I(TAG, "Topics re-subscribed with new kaiser_id: " + kaiser_id);
@@ -2584,9 +2585,15 @@ void handleSensorConfig(const String& payload) {
     correlationId = doc["correlation_id"].as<String>();
   }
 
+  // Skip silently if payload has no 'sensors' key (actuator-only config)
+  if (!doc.containsKey("sensors")) {
+    LOG_D(TAG, "No 'sensors' key in payload — skipping (actuator-only config)");
+    return;
+  }
+
   JsonArray sensors = doc["sensors"].as<JsonArray>();
   if (sensors.isNull()) {
-    String message = "Sensor config missing 'sensors' array";
+    String message = "Sensor config 'sensors' field is not an array";
     LOG_E(TAG, message);
     ConfigResponseBuilder::publishError(
         ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message,
@@ -2596,11 +2603,11 @@ void handleSensorConfig(const String& payload) {
 
   size_t total = sensors.size();
   if (total == 0) {
-    String message = "Sensor config array is empty";
-    LOG_W(TAG, message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message,
-        JsonVariantConst(), correlationId);
+    // Empty sensor array is valid for actuator-only ESPs
+    LOG_I(TAG, "No sensors configured (actuator-only device)");
+    ConfigResponseBuilder::publishSuccess(ConfigType::SENSOR, 0,
+                                          "No sensors configured",
+                                          correlationId);
     return;
   }
 

@@ -12,6 +12,7 @@
 #include "../../utils/onewire_utils.h"  // For OneWire ROM-Code conversion
 #include "../../error_handling/error_tracker.h"
 #include "../../models/error_codes.h"
+#include "../../models/watchdog_types.h"
 #include "../../models/sensor_types.h"
 #include "../../models/sensor_registry.h"
 #include <map>
@@ -227,32 +228,38 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
     }
 
     // Phase 7 + R20-P2: Address-based lookup for multi-sensor GPIOs
-    // OneWire: match by ROM-Code, I2C: match by device address from capability registry
-    uint8_t lookup_i2c_addr = (capability != nullptr) ? capability->i2c_address : 0;
+    // OneWire: match by ROM-Code, I2C: match by device address from config (payload)
+    // Use config.i2c_address if provided (multi-device support), fall back to capability default.
+    // This allows two SHT31 at 0x44 and 0x45 to be distinguished correctly.
+    uint8_t effective_i2c_address = config.i2c_address;
+    if (effective_i2c_address == 0 && capability != nullptr && capability->i2c_address != 0) {
+        effective_i2c_address = capability->i2c_address;  // Fallback to registry default
+    }
     SensorConfig* existing = findSensorConfig(config.gpio,
-        config.onewire_address, lookup_i2c_addr);
+        config.onewire_address, effective_i2c_address);
 
     if (!existing && is_i2c_sensor) {
         // No exact match found — check if a different value type of the same I2C device exists
         // (Multi-value sensors like SHT31 share GPIO + I2C address but have different sensor_types)
+        // Use effective_i2c_address (from config payload) to correctly match the physical device.
         for (uint8_t k = 0; k < sensor_count_; k++) {
             if (sensors_[k].gpio != config.gpio) continue;
             const SensorCapability* existing_cap = findSensorCapability(sensors_[k].sensor_type);
             if (existing_cap && existing_cap->is_i2c &&
-                existing_cap->i2c_address == capability->i2c_address &&
+                sensors_[k].i2c_address == effective_i2c_address &&
                 String(existing_cap->device_type) == String(capability->device_type) &&
                 sensors_[k].sensor_type != config.sensor_type) {
-                // Same I2C device, different value type — this is a multi-value add/update
+                // Same I2C device (same address), different value type — multi-value add/update
 
                 // Check if this sensor_type already exists in sensors_[] (prevent RAM duplicates)
                 for (uint8_t m = 0; m < sensor_count_; m++) {
                     if (sensors_[m].gpio == config.gpio &&
                         sensors_[m].sensor_type == config.sensor_type &&
-                        sensors_[m].i2c_address == capability->i2c_address) {
+                        sensors_[m].i2c_address == effective_i2c_address) {
                         // Already exists — update in place instead of adding
                         sensors_[m] = config;
                         sensors_[m].active = true;
-                        sensors_[m].i2c_address = capability->i2c_address;
+                        sensors_[m].i2c_address = effective_i2c_address;
                         if (!configManager.saveSensorConfig(config)) {
                             LOG_E(TAG, "Sensor Manager: Failed to persist sensor config to NVS");
                         } else {
@@ -272,7 +279,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 
                 sensors_[sensor_count_] = config;
                 sensors_[sensor_count_].active = true;
-                sensors_[sensor_count_].i2c_address = capability->i2c_address;
+                sensors_[sensor_count_].i2c_address = effective_i2c_address;
                 sensor_count_++;
 
                 if (!configManager.saveSensorConfig(config)) {
@@ -283,7 +290,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 
                 LOG_I(TAG, "Sensor Manager: Added multi-value sensor '" + config.sensor_type +
                          "' on GPIO " + String(config.gpio) + " (I2C 0x" +
-                         String(capability->i2c_address, HEX) + ")");
+                         String(effective_i2c_address, HEX) + ")");
                 return true;
             }
         }
@@ -349,16 +356,17 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 
         // Check 2: I2C address conflict detection
         // (Different device type on same I2C address = conflict)
-        uint8_t i2c_address = capability->i2c_address;
+        // Use effective_i2c_address (from config payload) to support multiple devices
+        // of the same chip type at different addresses (e.g. SHT31 at 0x44 and 0x45).
         for (uint8_t i = 0; i < sensor_count_; i++) {
             if (!sensors_[i].active) continue;
 
             const SensorCapability* existing_cap = findSensorCapability(sensors_[i].sensor_type);
             if (existing_cap && existing_cap->is_i2c &&
-                existing_cap->i2c_address == i2c_address) {
+                sensors_[i].i2c_address == effective_i2c_address) {
                 // Same I2C address - check if same device type (allowed for multi-value)
                 if (String(existing_cap->device_type) != String(capability->device_type)) {
-                    LOG_E(TAG, "Sensor Manager: I2C address 0x" + String(i2c_address, HEX) +
+                    LOG_E(TAG, "Sensor Manager: I2C address 0x" + String(effective_i2c_address, HEX) +
                               " already in use by different device type '" +
                               String(existing_cap->device_type) + "'");
                     errorTracker.trackError(ERROR_I2C_DEVICE_NOT_FOUND, ERROR_SEVERITY_ERROR,
@@ -370,8 +378,8 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         }
 
         // Optional: Check if I2C device is present (skip in simulation)
-        if (!i2c_bus_->isDevicePresent(i2c_address)) {
-            LOG_W(TAG, "Sensor Manager: I2C device at 0x" + String(i2c_address, HEX) +
+        if (!i2c_bus_->isDevicePresent(effective_i2c_address)) {
+            LOG_W(TAG, "Sensor Manager: I2C device at 0x" + String(effective_i2c_address, HEX) +
                         " not responding (may be simulation mode)");
             // Don't fail - Wokwi simulation doesn't have real I2C devices
         }
@@ -383,12 +391,12 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         if (device_type_str == "bme280") {
             // BME280: ctrl_hum (0xF2) = 0x01 (humidity 1x oversampling)
             // MUST be written BEFORE ctrl_meas for changes to take effect
-            Wire.beginTransmission(i2c_address);
+            Wire.beginTransmission(effective_i2c_address);
             Wire.write(0xF2);
             Wire.write(0x01);
             Wire.endTransmission();
             // BME280: ctrl_meas (0xF4) = 0x27 (temp 1x, press 1x, normal mode)
-            Wire.beginTransmission(i2c_address);
+            Wire.beginTransmission(effective_i2c_address);
             Wire.write(0xF4);
             Wire.write(0x27);
             Wire.endTransmission();
@@ -396,7 +404,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
             LOG_I(TAG, "Sensor Manager: BME280 init sequence sent (ctrl_hum + ctrl_meas)");
         } else if (device_type_str == "bmp280") {
             // BMP280: ctrl_meas (0xF4) = 0x27 (temp 1x, press 1x, normal mode)
-            Wire.beginTransmission(i2c_address);
+            Wire.beginTransmission(effective_i2c_address);
             Wire.write(0xF4);
             Wire.write(0x27);
             Wire.endTransmission();
@@ -405,19 +413,22 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         }
 
         // Add I2C sensor (NO GPIO reservation!)
+        // Store effective_i2c_address (from config payload) so that two devices of the
+        // same chip type at different addresses (e.g. SHT31 at 0x44 and 0x45) are
+        // tracked independently and each reads from the correct physical device.
         sensors_[sensor_count_] = config;
         sensors_[sensor_count_].active = true;
-        sensors_[sensor_count_].i2c_address = i2c_address;  // Store I2C address for MQTT payload
+        sensors_[sensor_count_].i2c_address = effective_i2c_address;
         sensor_count_++;
 
-        if (!configManager.saveSensorConfig(config)) {
+        if (!configManager.saveSensorConfig(sensors_[sensor_count_ - 1])) {
             LOG_E(TAG, "Sensor Manager: Failed to persist sensor config to NVS");
         } else {
             LOG_I(TAG, "  ✅ Configuration persisted to NVS");
         }
 
         LOG_I(TAG, "Sensor Manager: Configured I2C sensor '" + config.sensor_type +
-                 "' at address 0x" + String(i2c_address, HEX) +
+                 "' at address 0x" + String(effective_i2c_address, HEX) +
                  " (GPIO " + String(config.gpio) + " is I2C bus)" +
                  " [sensor_count=" + String(sensor_count_) + ", active=true]");
 
@@ -1057,7 +1068,9 @@ uint8_t SensorManager::performMultiValueMeasurement(uint8_t gpio, SensorReading*
     // Protocol selection is automatic based on device_type
     // One I2C read for ALL values (no duplicate transactions)
     uint8_t buffer[16] = {0};  // Buffer for multi-value sensors (up to 8 bytes for BME280)
-    uint8_t device_addr = capability->i2c_address;
+    // Use config->i2c_address (stored at configure-time from MQTT payload) so that
+    // two SHT31 sensors at 0x44 and 0x45 each read from their correct physical device.
+    uint8_t device_addr = config->i2c_address;
     size_t bytes_read = 0;
 
     LOG_D(TAG, "SensorManager: I2C READ START for " + device_type + " addr=0x" + String(device_addr, HEX));
@@ -1216,11 +1229,12 @@ void SensorManager::performAllMeasurements() {
         bool measurement_ok = false;
 
         if (capability && capability->is_multi_value) {
-            // I2C dedup: Skip if this I2C address was already measured this cycle.
-            // performMultiValueMeasurement() reads ALL values (temp+humidity) in one
-            // I2C transaction and publishes all of them. The second config entry for
-            // the same physical sensor would trigger an identical read+publish.
-            uint8_t addr = capability->i2c_address;
+            // I2C dedup: Skip if this exact I2C address was already measured this cycle.
+            // Multi-value sensors (SHT31, BMP280, BME280) are stored as separate configs
+            // (sht31_temp + sht31_humidity) but share one physical I2C address.
+            // Use sensors_[i].i2c_address (stored at configure-time from MQTT payload)
+            // so that two SHT31 at 0x44 and 0x45 are NOT considered duplicates of each other.
+            uint8_t addr = sensors_[i].i2c_address;
             bool already_measured = false;
             for (uint8_t j = 0; j < measured_i2c_count; j++) {
                 if (measured_i2c_addrs[j] == addr) {
@@ -1293,8 +1307,9 @@ void SensorManager::performAllMeasurements() {
             }
         }
 
-        // Feed watchdog between sensor measurements to prevent timeout
-        LOG_D(TAG, "SensorManager: sensor[" + String(i) + "] DONE, yielding");
+        // Feed watchdog between sensor measurements to prevent WDT timeout
+        // during I2C error cascades (Error 1013→1016→1018 loop, see R20-P4)
+        feedWatchdog("SENSOR_LOOP");
         yield();
     }
 

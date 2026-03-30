@@ -61,8 +61,8 @@ public:
   void setTestPublishHook(std::function<void(const String&, const String&)> hook);
   void clearTestPublishHook();
     
-    // Subscription
-    bool subscribe(const String& topic);
+    // Subscription (qos: 0=at most once, 1=at least once)
+    bool subscribe(const String& topic, uint8_t qos = 0);
     bool unsubscribe(const String& topic);
     void setCallback(std::function<void(const String&, const String&)> callback);
     

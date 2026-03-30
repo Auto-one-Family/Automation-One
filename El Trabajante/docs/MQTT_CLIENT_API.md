@@ -654,25 +654,27 @@ mqttClient.publish("test/topic", "payload", 1);  // Echter MQTT-Publish
 
 ### Subscription
 
-#### `bool subscribe(const String& topic)`
-**Beschreibung:** Subscribed zu MQTT-Topic  
+#### `bool subscribe(const String& topic, uint8_t qos = 0)`
+**Beschreibung:** Subscribed zu MQTT-Topic
 **Parameter:**
 - `topic`: MQTT Topic (REQUIRED)
+- `qos`: QoS Level (default: 0, supported: 0 or 1)
 
-**Rückgabe:** `true` bei Erfolg  
+**Rückgabe:** `true` bei Erfolg
 **Fehlerbehandlung:**
 - Nicht verbunden → Loggt Fehler (ERROR_MQTT_SUBSCRIBE_FAILED)
 - Subscribe fehlgeschlagen → Loggt Fehler
 
 **Verhalten:**
 - Prüft Verbindungsstatus
-- Subscribed via `mqtt_.subscribe(topic.c_str())`
-- Loggt Subscription
+- Subscribed via `mqtt_.subscribe(topic.c_str(), qos)`
+- Loggt Subscription mit QoS-Level
 
 **Beispiel:**
 ```cpp
-mqttClient.subscribe("kaiser/god/esp/ESP_12AB34CD/system/command");
-mqttClient.subscribe("kaiser/broadcast/emergency");
+mqttClient.subscribe("kaiser/god/esp/ESP_12AB34CD/system/command", 1);  // QoS 1
+mqttClient.subscribe("kaiser/god/esp/ESP_12AB34CD/config", 1);          // QoS 1
+mqttClient.subscribe("kaiser/god/esp/ESP_12AB34CD/heartbeat/ack");      // QoS 0 (default)
 ```
 
 ---
@@ -1174,10 +1176,10 @@ void setup() {
     
     mqttClient.connect(mqtt_config);
     
-    // Subscribe to topics
-    mqttClient.subscribe(TopicBuilder::buildSystemCommandTopic());
-    mqttClient.subscribe(TopicBuilder::buildConfigTopic());
-    mqttClient.subscribe(TopicBuilder::buildBroadcastEmergencyTopic());
+    // Subscribe to topics (QoS 1 for commands/config, QoS 0 for heartbeat)
+    mqttClient.subscribe(TopicBuilder::buildSystemCommandTopic(), 1);
+    mqttClient.subscribe(TopicBuilder::buildConfigTopic(), 1);
+    mqttClient.subscribe(TopicBuilder::buildBroadcastEmergencyTopic(), 1);
     
     // Set callback
     mqttClient.setCallback([](const String& topic, const String& payload) {
