@@ -90,7 +90,7 @@ export interface ActuatorAction {
   gpio: number
   command: 'ON' | 'OFF' | 'PWM' | 'TOGGLE'
   value?: number // For PWM (0.0-1.0)
-  duration?: number // Auto-off after N seconds
+  duration?: number // Max runtime per execution in seconds (0 = unlimited, device safety limit as fallback)
   duration_seconds?: number // Backend field name (alias for duration)
 }
 
@@ -299,14 +299,26 @@ export function extractConnections(rule: LogicRule): LogicConnection[] {
 }
 
 /**
- * Recursively extract all SensorConditions from condition tree
+ * Recursively extract all SensorConditions from condition tree.
+ * Includes hysteresis conditions (mapped to SensorCondition for linked-rules display).
+ * @public Exported for unit testing (D4).
  */
-function extractSensorConditions(conditions: LogicCondition[]): SensorCondition[] {
+export function extractSensorConditions(conditions: LogicCondition[]): SensorCondition[] {
   const result: SensorCondition[] = []
 
   for (const cond of conditions) {
     if (cond.type === 'sensor' || cond.type === 'sensor_threshold') {
       result.push(cond as SensorCondition)
+    } else if (cond.type === 'hysteresis') {
+      const hCond = cond as HysteresisCondition
+      result.push({
+        type: 'sensor',
+        esp_id: hCond.esp_id,
+        gpio: hCond.gpio,
+        sensor_type: hCond.sensor_type ?? '',
+        operator: '>',
+        value: hCond.activate_above ?? hCond.activate_below ?? 0,
+      } as SensorCondition)
     } else if (cond.type === 'compound') {
       result.push(...extractSensorConditions((cond as CompoundCondition).conditions))
     }

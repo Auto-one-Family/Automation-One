@@ -1381,3 +1381,68 @@ describe('Logic Store - Undo/Redo', () => {
     expect(store.history[49].nodes[0].id).toBe('n54')
   })
 })
+
+// =============================================================================
+// extractSensorConditions (D4 — N6 Fix Verifikation)
+// =============================================================================
+
+import { extractSensorConditions } from '@/types/logic'
+import type { LogicCondition } from '@/types/logic'
+
+describe('extractSensorConditions', () => {
+  it('returns sensor conditions', () => {
+    const conditions: LogicCondition[] = [
+      { type: 'sensor', esp_id: 'ESP_1', gpio: 4, sensor_type: 'DS18B20', operator: '>', value: 25 } as LogicCondition,
+    ]
+    const refs = extractSensorConditions(conditions)
+    expect(refs).toHaveLength(1)
+    expect(refs[0]).toMatchObject({ esp_id: 'ESP_1', gpio: 4, sensor_type: 'DS18B20' })
+  })
+
+  it('includes hysteresis conditions (N6 fix — LinkedRulesSection must show hysteresis rules)', () => {
+    const conditions: LogicCondition[] = [
+      {
+        type: 'hysteresis',
+        esp_id: 'ESP_1',
+        gpio: 0,
+        sensor_type: 'sht31_humidity',
+        activate_below: 45,
+        deactivate_above: 55,
+      } as LogicCondition,
+    ]
+    const refs = extractSensorConditions(conditions)
+    expect(refs).toHaveLength(1)
+    expect(refs[0]).toMatchObject({ esp_id: 'ESP_1', gpio: 0, sensor_type: 'sht31_humidity' })
+  })
+
+  it('recursively extracts from compound conditions', () => {
+    const conditions: LogicCondition[] = [
+      {
+        type: 'compound',
+        logic: 'AND',
+        conditions: [
+          { type: 'sensor', esp_id: 'ESP_2', gpio: 5, sensor_type: 'DS18B20', operator: '<', value: 10 } as LogicCondition,
+          { type: 'hysteresis', esp_id: 'ESP_2', gpio: 6, sensor_type: 'sht31_temp', activate_above: 30, deactivate_below: 26 } as LogicCondition,
+        ],
+      } as LogicCondition,
+    ]
+    const refs = extractSensorConditions(conditions)
+    expect(refs).toHaveLength(2)
+  })
+
+  it('returns empty array for time-only conditions', () => {
+    const conditions: LogicCondition[] = [
+      { type: 'time_window', start_hour: 6, end_hour: 22 } as LogicCondition,
+    ]
+    const refs = extractSensorConditions(conditions)
+    expect(refs).toHaveLength(0)
+  })
+
+  it('does not regress on sensor_threshold type', () => {
+    const conditions: LogicCondition[] = [
+      { type: 'sensor_threshold', esp_id: 'ESP_3', gpio: 7, sensor_type: 'EC', operator: '>=', value: 1.5 } as LogicCondition,
+    ]
+    const refs = extractSensorConditions(conditions)
+    expect(refs).toHaveLength(1)
+  })
+})

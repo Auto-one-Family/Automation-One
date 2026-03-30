@@ -151,6 +151,10 @@ function updateField(key: string, value: unknown) {
   }
 }
 
+function parseNumericOrNull(value: string): number | null {
+  return value === '' ? null : Number(value)
+}
+
 function toggleDay(day: number) {
   const days = (localData.value.daysOfWeek as number[]) || []
   const idx = days.indexOf(day)
@@ -174,12 +178,17 @@ const showMultiValueBaseTypeWarning = computed(() => {
 const typeLabel = computed(() => nodeTypeLabels[nodeType.value] || 'Unbekannt')
 const typeIcon = computed(() => nodeTypeIcons[nodeType.value] || Thermometer)
 
-// Available ESP devices for selectors (with fallback for unknown IDs)
+// Available ESP devices for selectors (with zone context + fallback for unknown IDs)
 const espDevices = computed(() => {
-  const devices = espStore.devices.map((d) => ({
-    id: espStore.getDeviceId(d),
-    name: d.name || espStore.getDeviceId(d),
-  }))
+  const devices = espStore.devices.map((d) => {
+    const id = espStore.getDeviceId(d)
+    const baseName = d.name || id
+    const zoneName = d.zone_name || d.zone_id
+    return {
+      id,
+      name: zoneName ? `${baseName} — ${zoneName}` : baseName,
+    }
+  })
   // If the node's saved espId is not in the device list, show it as unknown
   const currentEspId = localData.value.espId as string
   if (currentEspId && !devices.find(d => d.id === currentEspId)) {
@@ -230,6 +239,10 @@ function handleActuatorEspChange(espId: string) {
   updateField('espId', espId)
   updateField('gpio', undefined)
 }
+
+// L3-FE-3: Duration vs. device safety limit warning — skipped.
+// max_runtime_seconds is on MockActuatorConfig (sent during config push),
+// not on MockActuator (live state in store). Would require extra API call.
 
 // Computed for sensor dropdown: value "gpio:sensorType" for multi-value disambiguation
 const sensorDropdownValue = computed({
@@ -409,7 +422,7 @@ function selectActuator(value: string) {
                   :value="localData.activateAbove"
                   step="0.1"
                   placeholder="z.B. 28"
-                  @input="updateField('activateAbove', Number(($event.target as HTMLInputElement).value))"
+                  @input="updateField('activateAbove', parseNumericOrNull(($event.target as HTMLInputElement).value))"
                 />
               </div>
               <div class="config-field config-field--half">
@@ -420,7 +433,7 @@ function selectActuator(value: string) {
                   :value="localData.deactivateBelow"
                   step="0.1"
                   placeholder="z.B. 24"
-                  @input="updateField('deactivateBelow', Number(($event.target as HTMLInputElement).value))"
+                  @input="updateField('deactivateBelow', parseNumericOrNull(($event.target as HTMLInputElement).value))"
                 />
               </div>
             </div>
@@ -434,7 +447,7 @@ function selectActuator(value: string) {
                   :value="localData.activateBelow"
                   step="0.1"
                   placeholder="z.B. 18"
-                  @input="updateField('activateBelow', Number(($event.target as HTMLInputElement).value))"
+                  @input="updateField('activateBelow', parseNumericOrNull(($event.target as HTMLInputElement).value))"
                 />
               </div>
               <div class="config-field config-field--half">
@@ -445,7 +458,7 @@ function selectActuator(value: string) {
                   :value="localData.deactivateAbove"
                   step="0.1"
                   placeholder="z.B. 22"
-                  @input="updateField('deactivateAbove', Number(($event.target as HTMLInputElement).value))"
+                  @input="updateField('deactivateAbove', parseNumericOrNull(($event.target as HTMLInputElement).value))"
                 />
               </div>
             </div>
@@ -644,7 +657,7 @@ function selectActuator(value: string) {
           </div>
 
           <div class="config-field">
-            <label class="config-label">Auto-Abschaltung (Sek.)</label>
+            <label class="config-label">Maximale Laufzeit pro Ausfuehrung (Sek.)</label>
             <input
               type="number"
               class="config-input"
@@ -654,7 +667,7 @@ function selectActuator(value: string) {
               @input="updateField('duration', Number(($event.target as HTMLInputElement).value) || undefined)"
             />
             <p class="config-hint">
-              0 oder leer = dauerhaft aktiv
+              Wie lange der Aktor maximal laeuft, wenn diese Regel feuert. Nach Ablauf schaltet die Firmware sauber ab — Aktor ist sofort wieder verfuegbar. 0 = kein Limit (Geraete-Sicherheitslimit greift als Fallback).
             </p>
           </div>
         </template>

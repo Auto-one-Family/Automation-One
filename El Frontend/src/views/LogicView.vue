@@ -859,19 +859,15 @@ onUnmounted(() => {
                   {{ exec.execution_time_ms }}ms
                 </span>
               </div>
-              <!-- Expandable details -->
-              <div v-if="expandedHistoryId === exec.id" class="rules-history__detail">
-                <div class="rules-history__detail-row">
-                  <span class="rules-history__detail-label">Trigger:</span>
-                  <span>{{ exec.trigger_reason }}</span>
-                </div>
-                <div v-if="exec.actions_executed.length > 0" class="rules-history__detail-row">
-                  <span class="rules-history__detail-label">Aktionen:</span>
-                  <span v-for="(action, ai) in exec.actions_executed" :key="ai">
-                    {{ formatActionSummary(action) }}{{ ai < exec.actions_executed.length - 1 ? ', ' : '' }}
-                  </span>
-                </div>
-                <div v-if="exec.error_message" class="rules-history__detail-row rules-history__detail-row--error">
+              <!-- Always-visible trigger context -->
+              <div v-if="exec.trigger_reason || exec.actions_executed.length > 0" class="rules-history__summary">
+                <span v-if="exec.trigger_reason" class="rules-history__summary-trigger">{{ exec.trigger_reason }}</span>
+                <span v-if="exec.trigger_reason && exec.actions_executed.length > 0" class="rules-history__summary-sep">→</span>
+                <span v-for="(action, ai) in exec.actions_executed" :key="ai" class="rules-history__summary-action">{{ formatActionSummary(action) }}{{ ai < exec.actions_executed.length - 1 ? ', ' : '' }}</span>
+              </div>
+              <!-- Expandable error details -->
+              <div v-if="exec.error_message && expandedHistoryId === exec.id" class="rules-history__detail">
+                <div class="rules-history__detail-row rules-history__detail-row--error">
                   <span class="rules-history__detail-label">Fehler:</span>
                   <span>{{ exec.error_message }}</span>
                 </div>
@@ -1761,6 +1757,37 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
   flex-shrink: 0;
+}
+
+.rules-history__summary {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding-left: 1rem;
+  margin-top: 0.125rem;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rules-history__summary-trigger {
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rules-history__summary-sep {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  opacity: 0.5;
+}
+
+.rules-history__summary-action {
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rules-history__detail {

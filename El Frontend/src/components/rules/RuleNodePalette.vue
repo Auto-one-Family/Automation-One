@@ -26,6 +26,8 @@ import {
   Zap,
   Puzzle,
   Stethoscope,
+  Snowflake,
+  Flame,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -34,7 +36,7 @@ export interface PaletteItem {
   label: string
   description: string
   icon: Component
-  category: 'condition' | 'logic' | 'action'
+  category: 'condition' | 'logic' | 'action' | 'template'
   defaults?: Record<string, unknown>
 }
 
@@ -195,6 +197,41 @@ const categories = [
         icon: Stethoscope,
         category: 'action' as const,
         defaults: { checkName: '' },
+      },
+    ],
+  },
+  {
+    id: 'template',
+    label: 'Klimasteuerung',
+    collapsed: ref(false),
+    items: [
+      {
+        type: 'sensor',
+        label: 'Kühlung (Hysterese)',
+        description: 'Lüfter/Kühlung: Ein über Schwellwert, Aus unter Schwellwert',
+        icon: Snowflake,
+        category: 'template' as const,
+        defaults: {
+          sensorType: 'sht31_temp',
+          operator: 'hysteresis',
+          isHysteresis: true,
+          activateAbove: 28,
+          deactivateBelow: 24,
+        },
+      },
+      {
+        type: 'sensor',
+        label: 'Befeuchtung (Hysterese)',
+        description: 'Befeuchter: Ein unter Schwellwert, Aus über Schwellwert',
+        icon: Flame,
+        category: 'template' as const,
+        defaults: {
+          sensorType: 'sht31_humidity',
+          operator: 'hysteresis',
+          isHysteresis: true,
+          activateBelow: 45,
+          deactivateAbove: 55,
+        },
       },
     ],
   },
@@ -467,6 +504,19 @@ function matchesSearch(item: PaletteItem): boolean {
 
 .palette__item--action:hover .palette__item-icon {
   background: rgba(192, 132, 252, 0.18);
+}
+
+.palette__item--template .palette__item-icon {
+  background: rgba(251, 191, 36, 0.1);
+  color: var(--color-warning);
+}
+
+.palette__item--template:hover .palette__item-icon {
+  background: rgba(251, 191, 36, 0.18);
+}
+
+.palette__item--template {
+  border-left: 2px solid rgba(251, 191, 36, 0.3);
 }
 
 .palette__item-text {

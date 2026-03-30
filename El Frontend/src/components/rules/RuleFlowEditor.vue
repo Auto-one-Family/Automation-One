@@ -1138,7 +1138,7 @@ defineExpose({
             </div>
             <div v-if="data.duration" class="rule-node__duration">
               <Timer class="rule-node__duration-icon" />
-              {{ data.duration }}s Auto-Off
+              {{ data.duration }}s Limit
             </div>
           </div>
           <div class="rule-node__footer">
