@@ -841,6 +841,7 @@ onMounted(() => {
   // Fetch logic rules + execution history for ActuatorCard context
   logicStore.fetchRules()
   logicStore.loadExecutionHistory()
+  logicStore.subscribeToWebSocket()
 
   // Load device contexts for mobile/multi_zone sensors (6.7)
   loadMobileDeviceContexts()
@@ -1757,7 +1758,7 @@ function handleFabWidgetSelected(widgetType: string) {
               :layout-id="getZoneMiniPanelId(zone.zoneId)!"
               :zone-id="zone.zoneId"
               :compact="true"
-              mode="view"
+              mode="inline"
               class="monitor-zone-tile__mini-widget"
             />
           </template>
@@ -2076,6 +2077,7 @@ function handleFabWidgetSelected(widgetType: string) {
           :key="panel.id"
           :layoutId="panel.id"
           mode="manage"
+          :zone-id="selectedZoneId ?? undefined"
         />
       </div>
       </div>
@@ -2087,6 +2089,7 @@ function handleFabWidgetSelected(widgetType: string) {
           :key="panel.id"
           :layoutId="panel.id"
           mode="side-panel"
+          :zone-id="selectedZoneId ?? undefined"
         />
       </aside>
     </div>

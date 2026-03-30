@@ -88,11 +88,31 @@
   /* ═══════════════════════════════════════════════════════════════════════════
      BORDERS — thin, precise, purposeful
      ═══════════════════════════════════════════════════════════════════════════ */
-  --glass-bg:           rgba(255, 255, 255, 0.02);
+  /* Glass depth hierarchy — 3 levels */
+  /* Level 1: Background panels (navigation, tab bars, section containers) */
+  --glass-bg-l1:     rgba(255, 255, 255, 0.01);
+  --glass-blur-l1:   8px;
+  --glass-border-l1: rgba(255, 255, 255, 0.04);
+  --glass-shadow-l1: 0 4px 16px rgba(0, 0, 0, 0.2);
+
+  /* Level 2: Content cards (widgets, zone tiles, info cards) */
+  --glass-bg-l2:     rgba(255, 255, 255, 0.02);
+  --glass-blur-l2:   12px;
+  --glass-border-l2: rgba(255, 255, 255, 0.06);
+  --glass-shadow-l2: 0 8px 32px rgba(0, 0, 0, 0.4);
+
+  /* Level 3: Overlays (modals, slide-overs, hover toolbars, dropdowns) */
+  --glass-bg-l3:     rgba(255, 255, 255, 0.06);
+  --glass-blur-l3:   16px;
+  --glass-border-l3: rgba(255, 255, 255, 0.12);
+  --glass-shadow-l3: 0 12px 48px rgba(0, 0, 0, 0.5);
+
+  /* Backward-compatible aliases → L2 (no visual change for existing consumers) */
+  --glass-bg:           var(--glass-bg-l2);
   --glass-bg-light:     rgba(255, 255, 255, 0.04);
-  --glass-border:       rgba(255, 255, 255, 0.06);
+  --glass-border:       var(--glass-border-l2);
   --glass-border-hover: rgba(255, 255, 255, 0.12);
-  --glass-shadow:       0 8px 32px rgba(0, 0, 0, 0.4);
+  --glass-shadow:       var(--glass-shadow-l2);
   --glass-shadow-glow:  0 0 20px rgba(96, 165, 250, 0.2);
 
   /* Semantic aliases — point to existing values for consistent usage */
@@ -240,4 +260,19 @@
   --slide-over-width-lg:   560px;
   --slide-over-backdrop:   rgba(0, 0, 0, 0.5);
   --slide-over-duration:   300ms;
+}
+
+/* Fallback for devices without backdrop-filter (Raspberry Pi, older browsers) */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --glass-bg-l1:     rgba(17, 24, 39, 0.80);
+    --glass-bg-l2:     rgba(17, 24, 39, 0.88);
+    --glass-bg-l3:     rgba(17, 24, 39, 0.95);
+    --glass-blur-l1:   0px;
+    --glass-blur-l2:   0px;
+    --glass-blur-l3:   0px;
+    --glass-border-l1: rgba(255, 255, 255, 0.08);
+    --glass-border-l2: rgba(255, 255, 255, 0.10);
+    --glass-border-l3: rgba(255, 255, 255, 0.14);
+  }
 }

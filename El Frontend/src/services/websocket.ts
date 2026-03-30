@@ -163,6 +163,14 @@ class WebSocketService {
       return
     }
 
+    // Skip connection attempt if no auth token is available yet (pre-login state).
+    // The WebSocket will connect later via reconnect or explicit connect() after login.
+    const authStore = useAuthStore()
+    if (!authStore.accessToken) {
+      logger.debug('No access token yet — deferring WebSocket connection')
+      return
+    }
+
     this.setStatus('connecting')
 
     return new Promise((resolve, reject) => {

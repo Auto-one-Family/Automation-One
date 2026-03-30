@@ -48,9 +48,12 @@ const activeTab = computed(() => {
   display: flex;
   gap: 2px;
   padding: 3px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-l1);
+  -webkit-backdrop-filter: blur(var(--glass-blur-l1));
+  backdrop-filter: blur(var(--glass-blur-l1));
+  border: 1px solid var(--glass-border-l1);
   border-radius: var(--radius-md);
+  box-shadow: var(--glass-shadow-l1);
   width: fit-content;
   margin-bottom: var(--space-4);
 }

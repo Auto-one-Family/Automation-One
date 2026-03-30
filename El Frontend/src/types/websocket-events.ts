@@ -52,6 +52,10 @@ export interface SensorDataEvent extends WebSocketEventBase {
     unit: string
     quality: string
     timestamp: number
+    // Address-based matching for multi-sensor GPIOs (Phase 3)
+    config_id?: string
+    i2c_address?: number
+    onewire_address?: string
   }
 }
 

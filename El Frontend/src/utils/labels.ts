@@ -89,9 +89,14 @@ export const ACTUATOR_TYPE_LABELS: Record<string, string> = {
 }
 
 /**
- * Get actuator type label with icon name
+ * Get actuator type label with icon name.
+ *
+ * Prefers hardware_type (original ESP32 logical type like pump/valve/relay)
+ * over the server-normalized actuator_type (digital/pwm/servo) for icon lookup.
+ * This allows differentiated icons even though actuator_configs stores 'digital'
+ * for all relay/pump/valve actuators.
  */
-export function getActuatorTypeInfo(type: string): { label: string; icon: string } {
+export function getActuatorTypeInfo(type: string, hardwareType?: string | null): { label: string; icon: string } {
   const info: Record<string, { label: string; icon: string }> = {
     'relay': { label: 'Relais', icon: 'ToggleRight' },
     'pwm': { label: 'PWM-Ausgang', icon: 'Activity' },
@@ -102,11 +107,13 @@ export function getActuatorTypeInfo(type: string): { label: string; icon: string
     'light': { label: 'Beleuchtung', icon: 'Lightbulb' },
     'motor': { label: 'Motor', icon: 'Cog' },
     // Server-normalized types: actuator_configs stores interface type (digital/pwm/servo)
-    // while ESP32 uses logical type (relay/pump/valve). Map server types to user-friendly display.
-    'digital': { label: 'Relais', icon: 'ToggleRight' },
+    // while ESP32 uses logical type (relay/pump/valve). Map server types as default fallback.
+    'digital': { label: 'Digital', icon: 'ToggleRight' },
     'servo': { label: 'Servo', icon: 'Cog' },
   }
-  return info[type] ?? { label: type, icon: 'Power' }
+  // hardware_type carries the ESP32 logical type (relay/pump/valve) — use it first
+  const lookupType = hardwareType ?? type
+  return info[lookupType] ?? info[type] ?? { label: type, icon: 'Power' }
 }
 
 // =============================================================================

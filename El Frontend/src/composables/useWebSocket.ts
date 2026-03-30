@@ -165,10 +165,12 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
     messageHandlers.get(type)!.add(callback)
 
-    // Only register via service when no subscription exists
-    // (subscription handler already dispatches to messageHandlers)
+    // Only register via service when no subscription exists AND none is pending.
+    // activeFilters is set synchronously, while subscriptionId is set after async connect().
+    // Without the activeFilters check, handlers registered between useWebSocket() and
+    // connect() completion would be dispatched twice (via routeMessage AND listeners).
     let unsubscribeService: (() => void) | null = null
-    if (!subscriptionId.value) {
+    if (!subscriptionId.value && !activeFilters.value) {
       unsubscribeService = websocketService.on(type, callback)
     }
 

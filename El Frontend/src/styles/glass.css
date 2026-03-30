@@ -3,11 +3,11 @@
    ============================================================================ */
 
 @layer components {
-  /* Glass Panel — base glass effect */
+  /* Glass Panel — base glass effect (L2) */
   .glass-panel {
     background: var(--glass-bg);
-    -webkit-backdrop-filter: blur(12px);
-    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(var(--glass-blur-l2));
+    backdrop-filter: blur(var(--glass-blur-l2));
     border: 1px solid var(--glass-border);
     box-shadow: var(--elevation-raised);
   }
@@ -51,12 +51,12 @@
     pointer-events: none;
   }
 
-  /* Glass Card Variant */
+  /* Glass Card Variant (L2) */
   .card-glass {
     @apply card;
     background: var(--glass-bg);
-    -webkit-backdrop-filter: blur(12px);
-    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(var(--glass-blur-l2));
+    backdrop-filter: blur(var(--glass-blur-l2));
     box-shadow: var(--elevation-raised);
   }
 

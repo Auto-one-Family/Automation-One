@@ -607,8 +607,8 @@ const ACTUATOR_CONFIGS_CONFIG: TableConfig = {
     },
     max_runtime_seconds: {
       key: 'max_runtime_seconds',
-      label: 'Max. Laufzeit',
-      description: 'Sicherheits-Timeout (wie lange darf er maximal laufen?)',
+      label: 'Sicherheitslimit',
+      description: 'Geraete-Sicherheitslimit (Emergency Stop bei Ueberschreitung)',
       formatter: (v) => v ? `${v} s` : 'Unbegrenzt',
       icon: 'Timer',
       defaultVisible: true  // ← Wichtig für Operator (Sicherheit!)

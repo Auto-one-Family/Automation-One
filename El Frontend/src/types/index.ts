@@ -290,6 +290,8 @@ export interface MockSensor {
   interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL' | null
   /** I2C address (0-127) for I2C sensors */
   i2c_address?: number | null
+  /** OneWire ROM address for DS18B20 sensors (16 hex chars) */
+  onewire_address?: string | null
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Device Scope Fields (T13-R3 WP4)
@@ -303,6 +305,8 @@ export interface MockSensor {
 export interface MockActuator {
   gpio: number
   actuator_type: string
+  /** Original ESP32 hardware type (relay, pump, valve, pwm) before server normalization */
+  hardware_type?: string | null
   name: string | null
   state: boolean
   pwm_value: number
@@ -898,6 +902,8 @@ export interface ActuatorConfigResponse {
   esp_device_id?: string
   gpio: number
   actuator_type: string
+  /** Original ESP32 hardware type (relay, pump, valve, pwm) before server normalization */
+  hardware_type?: string | null
   name: string
   enabled: boolean
   max_runtime_seconds: number | null

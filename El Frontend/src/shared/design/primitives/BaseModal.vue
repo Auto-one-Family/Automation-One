@@ -137,12 +137,14 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* Modal content with glass effect */
+/* Modal content with glass effect (L3) */
 .modal-content {
-  background-color: var(--color-bg-secondary);
-  border: 1px solid var(--glass-border);
+  background-color: var(--glass-bg-l3);
+  -webkit-backdrop-filter: blur(var(--glass-blur-l3));
+  backdrop-filter: blur(var(--glass-blur-l3));
+  border: 1px solid var(--glass-border-l3);
   border-radius: 0.75rem;
-  box-shadow: var(--glass-shadow);
+  box-shadow: var(--glass-shadow-l3);
 }
 
 .modal-header {
