@@ -15,8 +15,8 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.92
-**Letzte Aktualisierung:** 2026-03-26
+**Version:** 9.96
+**Letzte Aktualisierung:** 2026-03-30
 
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
@@ -132,11 +132,11 @@ El Frontend/src/
 │   └── device-schemas/  # JSON-Schemas für Sensoren/Aktoren (DS18B20, SHT31, relay, pwm, etc.)
 ├── components/    # Vue Komponenten (20 Unterverzeichnisse)
 │   ├── calibration/   # CalibrationWizard
-│   ├── charts/        # LiveLineChart, HistoricalChart (+ VPD Box-Annotations PB-01), GaugeChart, MultiSensorChart
+│   ├── charts/        # LiveLineChart, HistoricalChart (+ VPD Box-Annotations PB-01), GaugeChart, MultiSensorChart (+ Aktor-Overlay P8-A6c)
 │   ├── command/       # CommandPalette
 │   ├── common/        # Modal, Toast, Skeleton, ViewTabBar (13 Dateien)
 │   ├── dashboard/     # Dashboard subcomponents (11 Dateien, inkl. DashboardViewer + InlineDashboardPanel)
-│   ├── dashboard-widgets/ # SensorCardWidget, GaugeWidget, LineChartWidget, StatisticsWidget, ExportCsvDialog, etc.
+│   ├── dashboard-widgets/ # SensorCardWidget, GaugeWidget, LineChartWidget, StatisticsWidget, ActuatorRuntimeWidget, ExportCsvDialog, etc.
 │   ├── database/      # DataTable, FilterPanel, Pagination, etc. (6 Dateien)
 │   ├── devices/       # SensorCard, ActuatorCard, DeviceMetadataSection, LinkedRulesSection, AlertConfigSection, DeviceAlertConfigSection, RuntimeMaintenanceSection, SubzoneAssignmentSection, DeviceScopeSection, SharedSensorRefCard (10 Dateien)
 │   ├── error/         # ErrorDetailsModal, TroubleshootingPanel
@@ -213,7 +213,7 @@ El Frontend/src/
 │   ├── device-metadata.ts  # DeviceMetadata Interface + Utility-Funktionen
 │   ├── event-grouping.ts
 │   └── form-schema.ts
-├── utils/         # 12 Utility-Module
+├── utils/         # 13 Utility-Module
 │   ├── formatters.ts      # ~631 Zeilen
 │   ├── labels.ts
 │   ├── sensorDefaults.ts
@@ -222,6 +222,7 @@ El Frontend/src/
 │   ├── subzoneHelpers.ts  # normalizeSubzoneId (Defense-in-Depth vor API)
 │   ├── trendUtils.ts      # calculateTrend (Linear Regression), TrendDirection, TREND_THRESHOLDS
 │   ├── autoResolution.ts  # getAutoResolution(minutes) → SensorDataResolution, TIME_RANGE_MINUTES
+│   ├── gridLayout.ts      # findFirstFreePosition(widgets, w, h, cols?) → {x,y} — Smart Placement fuer Dashboard-Widgets (FIX-ED-1)
 │   └── ...
 ├── views/         # 17 View-Komponenten
 ├── main.ts        # Bootstrap
@@ -341,7 +342,7 @@ MonitorView.vue (URL-Sync: L1→L2→L3 via route params)
 │   │   │   └── [Expanded] 1h-Chart (vue-chartjs Line, sensorsApi.queryData Initial-Fetch)
 │   │   │       ├── "Zeitreihe anzeigen" → openSensorDetail (L3)
 │   │   │       └── "Konfiguration" → /sensors?sensor={espId}-gpio{gpio}
-│   │   ├── ActuatorCard.vue[] (mode='monitor', read-only: kein Toggle, PWM-Badge bei pwm_value>0, linkedRules mit Status-Dot+Name+Condition, lastExecution mit relativem Zeitstempel, "+N weitere" Link bei >2 Regeln, Scope-Badge Multi-Zone/Mobil (T13-R3 WP4), ESP-Offline-Badge (opacity 0.5, WifiOff) + Stale-Markierung (opacity 0.7, warning border-left), typ-spezifische Icons via getActuatorTypeInfo(), Subzone-Fallback "Zone-weit", from components/devices/)
+│   │   ├── ActuatorCard.vue[] (mode='monitor', read-only: kein Toggle, PWM-Badge bei pwm_value>0, linkedRules mit Status-Dot+Name+Condition, lastExecution mit relativem Zeitstempel, "+N weitere" Link bei >2 Regeln, Scope-Badge Multi-Zone/Mobil (T13-R3 WP4), ESP-Offline-Badge (opacity 0.5, WifiOff) + Stale-Markierung (opacity 0.7, warning border-left), typ-spezifische Icons via getActuatorTypeInfo(actuator_type, hardware_type) — hardware_type bevorzugt für Pumpe/Ventil/Relay-Differenzierung, Subzone-Fallback "Zone-weit", from components/devices/)
 │   │   └── Leere Subzone: "Keine Geraete zugeordnet" (kompakt, kein Link)
 │   ├── "Zone-weit" (statt "Keine Subzone"): Am Ende sortiert, kein farbiger Left-Border, dashed Top-Border; bei einziger Gruppe (nur Zone-weit): kein Accordion-Wrapper, Geraete direkt sichtbar
 │   ├── Regeln fuer diese Zone (N): ZoneRulesSection.vue — logicStore.getRulesForZone(zoneId); RuleCardCompact pro Regel; Klick → /logic/:ruleId; Empty State: Link "Zum Regeln-Tab"; Bei >10 Regeln: erste 5 + Link "Weitere X Regeln — Im Regeln-Tab anzeigen"
@@ -375,18 +376,20 @@ CustomDashboardView.vue (/editor, /editor/:dashboardId)
 ├── GridStack 12-Column Grid (staticGrid im View-Modus, editierbar im Edit-Modus)
 │   └── Dashboard-Widget[] (imperativ via createWidgetElement + mountWidgetComponent)
 │       ├── Widget-Header (Titel + Gear-Icon + X-Remove-Button, nur im Edit-Modus sichtbar)
-│       └── Widget-Body (SensorCardWidget, GaugeWidget, LineChartWidget, MultiSensorWidget (Compare Mode: Toggle + sensorType/Zone-Dropdowns → Auto-Fill max 4 Subzone-Sensoren mit Subzone-Labels), etc.)
-├── WidgetConfigPanel.vue (SlideOver, Gear-Icon oeffnet Konfiguration; zoneId Prop fuer Zone-Scope Default PA-02c)
-│   ├── Titel-Input
-│   ├── Sensor Zone-Filter (selectedSensorZone: defaults to zoneId Prop bei Zone-Dashboards, "Alle Zonen" bei global; filtert useSensorOptions via filterZoneId)
-│   ├── Sensor-Selektion (gruppiert nach Zone/Subzone via optgroup: "ZoneName" oder "ZoneName / SubzoneName"; useSensorOptions Composable; zentrale Dedup)
-│   ├── Actuator-Selektion (je nach Widget-Typ)
-│   ├── Zone-Filter-Dropdown (alarm-list, esp-health, actuator-runtime; "Alle Zonen" oder konkrete Zone aus espStore.devices)
-│   ├── Y-Achse Min/Max (Charts + Gauge)
-│   ├── Zeitraum-Chips (1h, 6h, 24h, 7d, 30d — Historical + Statistics)
-│   ├── Farb-Palette (8 Farben)
-│   ├── Threshold-Konfiguration (Alarm/Warn Low/High, auto-populate aus SENSOR_TYPE_CONFIG, sichtbar fuer line-chart + historical + gauge)
-│   └── Statistics-Optionen (showStdDev Checkbox, showQuality Checkbox — nur bei statistics Widget)
+│       └── Widget-Body (SensorCardWidget, GaugeWidget, LineChartWidget, MultiSensorWidget (Compare Mode: Toggle + sensorType/Zone-Dropdowns → Auto-Fill max 4 Subzone-Sensoren; Aktor-Korrelation P8-A6c: max 2 Aktoren als Hintergrund-Overlay + Schaltmoment-Annotations), etc.)
+├── WidgetConfigPanel.vue (SlideOver, Gear-Icon oeffnet Konfiguration; zoneId Prop fuer Zone-Scope Default PA-02c; 3-Zonen Progressive Disclosure P8-A2)
+│   ├── Zone 1 KERN (immer sichtbar, max 5 Felder):
+│   │   ├── Titel-Input
+│   │   ├── Sensor Zone-Filter (selectedSensorZone: defaults to zoneId Prop bei Zone-Dashboards, "Alle Zonen" bei global; filtert useSensorOptions via filterZoneId)
+│   │   ├── Zone-Filter-Dropdown (alarm-list, esp-health, actuator-runtime; "Alle Zonen" oder konkrete Zone aus espStore.devices)
+│   │   ├── Sensor-Selektion (gruppiert nach Zone/Subzone via optgroup; useSensorOptions Composable) / Actuator-Selektion
+│   │   └── Zeitraum-Chips (1h, 6h, 24h, 7d, 30d — Historical + Statistics)
+│   ├── Zone 2 DARSTELLUNG (details/summary Accordion, eingeklappt):
+│   │   ├── Y-Achse Min/Max (hasYRange: line-chart, historical, gauge; auto-populate via handleSensorChange)
+│   │   ├── Farb-Palette (CHART_COLORS, 8 Farben)
+│   │   └── Threshold-Konfiguration (hasThresholdFields: line-chart, gauge, historical; showThresholds Toggle + Alarm/Warn Low/High)
+│   └── Zone 3 ERWEITERT (details/summary Accordion, eingeklappt, nur statistics):
+│       └── Statistics-Optionen (showStdDev Checkbox, showQuality Checkbox)
 └── BulkCleanupModal (BaseModal, Checkbox-Liste aller autoGenerated Dashboards, Bulk-Delete via bulkDeleteLayouts)
 ```
 
@@ -481,7 +484,7 @@ onUnmounted(() => { /* cleanup */ })
 | Event | Data | Woher |
 |-------|------|-------|
 | sensor_data | esp_id, gpio, value, quality, zone_id, subzone_id (Phase 0.1) | MQTT→Server→WS |
-| actuator_status | esp_id, gpio, state | MQTT→Server→WS |
+| actuator_status | esp_id, gpio, actuator_type (server-normalisiert), hardware_type (ESP32-Typ), state, value, emergency | MQTT→Server→WS |
 | esp_health | esp_id, status, heap, rssi | Heartbeat→Server→WS |
 | config_response | esp_id, status, error_code | ESP→MQTT→Server→WS |
 | device_discovered | esp_id, hardware_type | Auto-Discovery |
@@ -912,18 +915,29 @@ Alle Farben ueber CSS Variables definiert.
 --color-real: #22d3ee  /* Cyan */
 ```
 
-### Glassmorphism-Klassen
+### Glassmorphism — 3-Level Tiefenhierarchie
+
+Drei visuelle Tiefenebenen via Tokens in `styles/tokens.css`:
+
+| Level | Wo | Blur | Bg Alpha | Beispiel-Komponenten |
+|-------|-----|------|----------|---------------------|
+| **L1** | Hintergrund-Panels, Tab-Bars | 8px | 0.01 | ViewTabBar, Section-Container |
+| **L2** | Content-Cards, Zone-Tiles | 12px | 0.02 | ESPCard, SensorCard, ZoneTileCard (via `.glass-panel`/`--glass-bg` Alias) |
+| **L3** | Modals, SlideOvers, Dropdowns | 16px | 0.06 | BaseModal, WidgetConfigPanel SlideOver |
+
+Tokens: `--glass-{bg,blur,border,shadow}-l{1,2,3}`. Bestehende `--glass-bg`, `--glass-border`, `--glass-shadow` sind Aliase auf L2 (kein Breaking Change). `@supports not (backdrop-filter)` Fallback mit Solid-Dark-Backgrounds vorhanden.
 
 ```css
+/* Utility-Klassen (glass.css, L2 default) */
 .glass-panel {
-  background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur-l2));
+  border: 1px solid var(--glass-border);
 }
 
 .glass-overlay {
-  background: rgba(10, 10, 15, 0.8);
-  backdrop-filter: blur(4px);
+  background: var(--backdrop-color);
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 
 .iridescent-border {
@@ -1062,7 +1076,7 @@ dragPayload: any
 1. Widget-Komponente in `components/dashboard-widgets/` erstellen
 2. 4-Stellen-Registrierung in `composables/useDashboardWidgets.ts`: `componentMap`, `WIDGET_TYPE_META`, `WIDGET_DEFAULT_CONFIGS`, Props-Bridge (if-Zeilen in `mountWidgetToElement`)
 3. `WidgetType` Union in `shared/stores/dashboard.store.ts` erweitern
-4. `WidgetConfigPanel.vue`: `hasSensorField`/`hasTimeRange`/`widgetTypeLabels` je nach Bedarf ergaenzen
+4. `WidgetConfigPanel.vue`: `hasSensorField`/`hasTimeRange`/`widgetTypeLabels` je nach Bedarf ergaenzen; Felder in passende Zone einordnen (Zone 1 Kern, Zone 2 Darstellung, Zone 3 Erweitert)
 5. Falls neue Config-Props: im flachen Config-Interface in `dashboard.store.ts` als optionale Felder ergaenzen
 6. Scoped CSS mit BEM-Klassen + Design-Tokens (kein Tailwind in dashboard-widgets)
 
@@ -1237,7 +1251,7 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.92 | **Letzte Aktualisierung:** 2026-03-26
+**Version:** 9.97 | **Letzte Aktualisierung:** 2026-03-30
 
 
 > Vollstaendiger Changelog: siehe `CHANGELOG.md` im selben Verzeichnis.

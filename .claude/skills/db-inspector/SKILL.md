@@ -120,6 +120,7 @@ docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c \
 | `token_blacklist` | Revoked JWT Tokens | expires_at |
 | `zones` | Zone-Definitionen | zone_id (UNIQUE), zone_name, status |
 | `cross_esp_logic` | Logic Engine Rules | conditions (JSON), actions (JSON) |
+| `logic_hysteresis_states` | Hysterese-State Persistenz | FK → cross_esp_logic (CASCADE), UQ(rule_id, condition_index) |
 | `subzone_configs` | Subzone-Definitionen | FK → esp_devices (device_id) |
 
 ### Sensor Unique Constraint
@@ -152,6 +153,7 @@ Ermöglicht:
 | `notifications` | `user_accounts` | CASCADE |
 | `notification_preferences` | `user_accounts` | CASCADE |
 | `logic_execution_history` | `cross_esp_logic` | CASCADE |
+| `logic_hysteresis_states` | `cross_esp_logic` | CASCADE |
 | `plugin_executions` | `plugin_configs` | CASCADE |
 
 **WICHTIG:** ESP gelöscht = Configs gelöscht (CASCADE), aber Zeitreihen-Daten (sensor_data, actuator_history, heartbeat_logs) bleiben erhalten mit `esp_id=NULL` (SET NULL)!
@@ -163,7 +165,7 @@ Ermöglicht:
 ### Aktueller HEAD
 
 ```
-add_sensor_data_dedup (HEAD)
+add_logic_hysteresis_states (HEAD)
 ```
 
 **Hinweis:** Wenn die DB Schema-Fehler bei `sensor_data` meldet (z. B. `column "zone_id" of relation "sensor_data" does not exist`), fehlt die Migration auf der laufenden DB → `alembic upgrade head` im Server-Projekt ausführen (siehe Prüf-Befehle unten).
@@ -172,6 +174,7 @@ add_sensor_data_dedup (HEAD)
 
 | Revision | Datum | Beschreibung |
 |----------|-------|-------------|
+| `add_logic_hysteresis_states` | 2026-03-30 | Persistent hysteresis state for Logic Engine (L2 Hysterese-Härtung) |
 | `add_sensor_data_dedup` | 2026-03-10 | UNIQUE(esp_id, gpio, sensor_type, timestamp) + Duplikat-Bereinigung (Fix-T Block 3) |
 | `fix_actuator_datetime_tz` | 2026-03-10 | actuator_states/history DateTime → timezone=True (BUG-001) |
 | `add_sensor_data_zone_subzone` | 2026-03-06 | sensor_data.zone_id, subzone_id + Indizes (Phase 0.1) |

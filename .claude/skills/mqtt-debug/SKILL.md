@@ -72,7 +72,7 @@ context: inline
 | **F** | Zone Assignment (Server→ESP) | <5s | zone/assign → zone/ack |
 | **G** | Logic Engine (Sensor→Server→Actuator) | varies | sensor/data → Logic Engine → actuator/command (Cross-ESP) |
 
-**Registration Gate Flow:** ESP connect → Gate CLOSED → Heartbeat (bypass) → ACK → Gate OPEN → alle Publishes erlaubt. Fallback: Gate oeffnet nach 10s.
+**Registration Gate Flow:** ESP connect → Gate CLOSED → Heartbeat (bypass) → ACK → Gate OPEN → alle Publishes erlaubt. Fallback: Gate oeffnet nach 10s. System-Responses (config_response, zone/ack, subzone/ack) bypassen das Gate ebenfalls.
 
 ---
 
@@ -103,6 +103,7 @@ context: inline
 |-----------|------|
 | Timeout | 10s (REGISTRATION_TIMEOUT_MS) |
 | Heartbeat | Bypass (immer erlaubt) |
+| System-Responses | Bypass (config_response, zone/ack, subzone/ack) |
 | Alle anderen Publishes | Blockiert bis ACK oder Timeout |
 
 ### Reconnect

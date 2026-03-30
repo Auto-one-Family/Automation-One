@@ -1,6 +1,6 @@
 # Max Runtime — Rule vs. Device: Abgrenzung und Datenfluss
 
-> **Version:** 1.0 | **Datum:** 2026-03-11  
+> **Version:** 1.1 | **Datum:** 2026-03-30
 > **Bezug:** T18-F6, T18-V5-ABSCHLUSSBERICHT §1.5, T18-V6-LOGIC-ENGINE-VOLLANALYSE F6
 
 ---
@@ -18,11 +18,11 @@ Es gibt **zwei getrennte Mechanismen** für Laufzeitbegrenzung:
 
 ---
 
-## 1. Rule duration (Auto-Abschaltung pro Aktion)
+## 1. Rule duration (Maximale Laufzeit pro Ausfuehrung)
 
 ### 1.1 UI und Datenquelle
 
-- **Ort:** Logic Editor → RuleConfigPanel → Aktor-Node → Feld „Auto-Abschaltung (Sek.)“
+- **Ort:** Logic Editor → RuleConfigPanel → Aktor-Node → Feld „Maximale Laufzeit pro Ausfuehrung (Sek.)”
 - **Frontend-Feld:** `duration` (RuleFlowEditor), API: `duration_seconds`
 - **Bedeutung:** Wie lange der Aktor bei **dieser Regel-Aktion** eingeschaltet bleibt (0 = dauerhaft)
 
@@ -46,7 +46,7 @@ RuleConfigPanel (duration)
 
 | Schicht | Datei | Relevanz |
 |---------|-------|----------|
-| Frontend | `RuleConfigPanel.vue` | Feld „Auto-Abschaltung (Sek.)“ → `localData.duration` |
+| Frontend | `RuleConfigPanel.vue` | Feld „Maximale Laufzeit pro Ausfuehrung (Sek.)” → `localData.duration` |
 | Frontend | `RuleFlowEditor.vue` | `graphToRuleData()`: `duration_seconds: node.data.duration ?? 0` |
 | Backend | `logic/actions/actuator_executor.py` | `duration = action.get("duration_seconds") or action.get("duration", 0)` |
 | Backend | `actuator_service.py` | `send_command(..., duration=duration)` |
@@ -59,7 +59,7 @@ RuleConfigPanel (duration)
 
 ### 2.1 UI und Datenquelle
 
-- **Ort:** HardwareView → ActuatorConfigPanel → „Laufzeit & Wartung“ → `max_runtime_seconds`
+- **Ort:** HardwareView → ActuatorConfigPanel → Feld „Geraete-Sicherheitslimit” → `max_runtime_seconds`
 - **DB:** `actuator_configs.safety_constraints` (JSON: `max_runtime`, `cooldown_period`)
 - **API:** `ActuatorConfigCreate/Update` → `max_runtime_seconds` → gemappt in `safety_constraints["max_runtime"]`
 

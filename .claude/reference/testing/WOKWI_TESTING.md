@@ -121,8 +121,14 @@ Status Transitions:
 **Purpose:** Prevents ESP32 from publishing sensor/actuator data before server registration.
 
 **Behavior:**
-- ❌ **CLOSED:** Blocks ALL publishes except `/system/heartbeat`
+- ❌ **CLOSED:** Blocks ALL publishes except whitelisted topics (see below)
 - ✅ **OPEN:** All publishes allowed
+
+**Whitelisted (bypass gate even when CLOSED):**
+- `/system/heartbeat` — always sent for registration
+- `/config_response` — config ACK back to server
+- `/zone/ack` — zone assignment ACK
+- `/subzone/ack` — subzone assignment ACK
 
 **Opening Conditions:**
 1. **Primary:** Heartbeat ACK received (`main.cpp:1671`)

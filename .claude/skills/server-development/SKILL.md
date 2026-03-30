@@ -255,6 +255,7 @@ class YourRepository(BaseRepository[YourModel]):
 | SubzoneConfig | `subzone_configs` | id (UUID PK), esp_id (FK), subzone_id, assigned_gpios (JSON), assigned_sensor_config_ids (JSON), is_active (Bool), safe_mode_active |
 | DeviceZoneChange | `device_zone_changes` | id (UUID PK), esp_id, old_zone_id, new_zone_id, subzone_strategy, affected_subzones (JSON), changed_by, changed_at (T13-R1 Audit) |
 | CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority, cooldown_seconds |
+| LogicHysteresisState | `logic_hysteresis_states` | rule_id (FK CASCADE), condition_index, is_active, last_value, last_activation, last_deactivation, updated_at. UQ(rule_id, condition_index) |
 | SensorData | `sensor_data` | sensor_id (FK), esp_id (FK SET NULL), raw_value, processed_value, zone_id, subzone_id (Phase 0.1), device_name, data_source |
 | AuditLog | `audit_logs` | event_type, severity, source_type |
 | Notification | `notifications` | title, severity (critical/warning/info), source, category, channel, fingerprint (FIX-07 dedup), status (active/acknowledged/resolved), correlation_id, acknowledged_at, acknowledged_by, resolved_at |
@@ -406,8 +407,8 @@ LogicEngine
 ├── Condition Evaluators
 │   ├── SensorConditionEvaluator (Schwellenwerte, optional subzone_id Phase 2.4)
 │   ├── TimeConditionEvaluator (Zeit-Fenster)
-│   ├── HysteresisEvaluator (Zustandsübergänge)
-│   └── CompoundConditionEvaluator (AND/OR/NOT)
+│   ├── HysteresisEvaluator (Zustandsübergänge, DB-persistiert via logic_hysteresis_states)
+│   └── CompoundConditionEvaluator (AND/OR/NOT, setzt condition_index pro Sub-Condition)
 │
 ├── Action Executors
 │   ├── ActuatorActionExecutor (Befehle, Phase 2.4 Subzone-Matching)

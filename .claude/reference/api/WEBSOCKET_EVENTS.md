@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 3.0 | **Aktualisiert:** 2026-03-09
+> **Version:** 3.1 | **Aktualisiert:** 2026-03-30
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
 > **Event-Anzahl:** 36 verschiedene Event-Typen (inkl. device_context_changed, device_scope_changed T13-R2)
@@ -405,7 +405,10 @@ Neuer Sensor-Wert empfangen.
     "quality": "good",
     "timestamp": "2026-02-01T10:23:45Z",
     "zone_id": "greenhouse",
-    "subzone_id": "zone_a"
+    "subzone_id": "zone_a",
+    "config_id": "550e8400-e29b-41d4-a716-446655440000",
+    "i2c_address": 68,
+    "onewire_address": "28FF123456780000"
   }
 }
 ```
@@ -414,6 +417,9 @@ Neuer Sensor-Wert empfangen.
 |------|-----|--------------|
 | `zone_id` | string? | Zone zum Messzeitpunkt (Phase 0.1) |
 | `subzone_id` | string? | Subzone zum Messzeitpunkt (Phase 0.1) |
+| `config_id` | string? | Sensor-Config UUID für address-based GPIO-Matching (R20-P3) |
+| `i2c_address` | number? | I2C-Adresse als Dezimalzahl (nur I2C-Sensoren: SHT31, BME280) |
+| `onewire_address` | string? | OneWire-ROM-Adresse als Hex-String (nur DS18B20) |
 
 ---
 
@@ -498,7 +504,8 @@ Actuator Status Update (nach State-Änderung).
   "data": {
     "esp_id": "ESP_12AB34CD",
     "gpio": 5,
-    "actuator_type": "pump",
+    "actuator_type": "digital",
+    "hardware_type": "pump",
     "state": true,
     "pwm_value": 0,
     "runtime_ms": 3600000,
@@ -507,6 +514,10 @@ Actuator Status Update (nach State-Änderung).
   }
 }
 ```
+
+**Felder:**
+- `actuator_type`: Server-normalisierter Typ (`"digital"`, `"pwm"`, `"servo"`) — konsistent mit `actuator_configs.actuator_type`
+- `hardware_type`: Original-ESP32-Typ (`"relay"`, `"pump"`, `"valve"`, `"pwm"`) — aus `actuator_configs.hardware_type`, für Icon-Mapping im Frontend
 
 **emergency Values:**
 - `normal`: Normalbetrieb

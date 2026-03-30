@@ -85,7 +85,7 @@ allowed-tools: Read
 | `/actuators/{actuator_id}` | GET | JWT | Actuator Details |
 | `/actuators/{actuator_id}/command` | POST | JWT | Actuator steuern |
 | `/actuators/{actuator_id}/state` | POST | JWT | Actuator-State setzen |
-| `/actuators/{actuator_id}/history` | GET | JWT | Actuator-History (Query: `start_time`, `end_time`, `limit`) |
+| `/actuators/{actuator_id}/history` | GET | JWT | Actuator-History (Query: `start_time`, `end_time`, `limit`≤500, `include_aggregation`) |
 | `/actuators/emergency-stop` | POST | JWT | Global Emergency-Stop |
 | `/actuators/clear_emergency` | POST | Operator | Not-Aus aufheben (MQTT clear_emergency an ESP(s)) |
 | `/actuators/{actuator_id}` | DELETE | JWT | Actuator löschen |

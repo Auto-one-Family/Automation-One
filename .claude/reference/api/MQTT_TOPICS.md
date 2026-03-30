@@ -1114,7 +1114,9 @@ topic_builder.buildSensorCommandWildcard(topic, sizeof(topic));
 |-----|------------|----------|
 | **0** | Heartbeat, Diagnostics | At most once (best effort) |
 | **1** | Sensor-Daten, Alerts, Status | At least once |
-| **2** | Commands, Config | Exactly once |
+| **2** | Commands, Config (Server-Publish) | Exactly once |
+
+**ESP32 Subscription-QoS:** PubSubClient unterstuetzt maximal QoS 1. Alle ESP-Subscriptions (Commands, Config, Emergency, Zone, Subzone, Sensor-Commands) nutzen QoS 1. Heartbeat-ACK bleibt QoS 0. Die effektive QoS ist `min(publish_qos, subscribe_qos)`, d.h. QoS 1 fuer vom Server publizierte QoS-2-Topics.
 
 ---
 

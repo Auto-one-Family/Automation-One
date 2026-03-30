@@ -456,7 +456,11 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     }
 
     // Registration Gate Check (verhindert Publish vor Heartbeat-ACK)
-    if (!registration_confirmed_ && !is_heartbeat) {
+    // Whitelisted: heartbeat, config_response, zone/ack, subzone/ack
+    bool is_system_response = topic.indexOf("/config_response") != -1 ||
+                              topic.indexOf("/zone/ack") != -1 ||
+                              topic.indexOf("/subzone/ack") != -1;
+    if (!registration_confirmed_ && !is_heartbeat && !is_system_response) {
         LOG_DEBUG("Publish blocked (awaiting registration)");
         return false;
     }
