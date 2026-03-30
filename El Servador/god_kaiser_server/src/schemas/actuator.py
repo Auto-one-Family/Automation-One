@@ -99,12 +99,35 @@ class ActuatorConfigBase(BaseModel):
         "digital",
         description="Actuator type (digital, pwm, servo)",
     )
+    hardware_type: Optional[str] = Field(
+        None,
+        description="Original ESP32 hardware type (relay, pump, valve, pwm) preserved before normalization",
+    )
     name: Optional[str] = Field(
         None,
         max_length=100,
         description="Human-readable actuator name",
         examples=["Water Pump", "Grow Light", "Vent Fan"],
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def capture_hardware_type(cls, values: Any) -> Any:
+        """
+        Capture the raw ESP32 type into hardware_type before normalization.
+
+        Must run before field_validator so the original value is still available.
+        Only sets hardware_type if the incoming actuator_type is an ESP32 type
+        and hardware_type was not explicitly provided.
+        """
+        if not isinstance(values, dict):
+            return values
+        raw_type = values.get("actuator_type", "")
+        if raw_type and isinstance(raw_type, str):
+            raw_lower = raw_type.lower()
+            if raw_lower in ESP32_ACTUATOR_TYPES and not values.get("hardware_type"):
+                values["hardware_type"] = raw_lower
+        return values
 
     @field_validator("actuator_type")
     @classmethod
@@ -292,6 +315,11 @@ class ActuatorConfigResponse(ActuatorConfigBase, TimestampMixin):
     assigned_subzones: Optional[List[str]] = Field(
         None,
         description="List of subzone_ids for static multi-zone",
+    )
+    # hardware_type from ORM (may differ from base class field: here nullable=True is explicit)
+    hardware_type: Optional[str] = Field(
+        None,
+        description="Original ESP32 hardware type (relay, pump, valve, pwm)",
     )
     # Current state
     current_value: Optional[float] = Field(
@@ -642,13 +670,13 @@ class ActuatorHistoryEntry(BaseModel):
     Actuator command history entry.
     """
 
-    id: int = Field(..., description="History entry ID")
+    id: Any = Field(..., description="History entry ID")
     gpio: int = Field(..., description="GPIO pin")
     actuator_type: str = Field(..., description="Actuator type")
     command_type: str = Field(..., description="Command sent")
-    value: float = Field(..., description="Value sent")
+    value: Optional[float] = Field(None, description="Value sent (None for stop commands)")
     success: bool = Field(..., description="Whether command succeeded")
-    issued_by: str = Field(..., description="Who issued command")
+    issued_by: Optional[str] = Field(None, description="Who issued command")
     error_message: Optional[str] = Field(None, description="Error message if failed")
     metadata: Optional[Dict[str, Any]] = Field(None)
     timestamp: datetime = Field(..., description="Command timestamp")
@@ -656,9 +684,24 @@ class ActuatorHistoryEntry(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ActuatorAggregation(BaseModel):
+    """
+    Aggregated runtime statistics computed from actuator history entries.
+    """
+
+    total_runtime_seconds: float = Field(..., description="Total ON time in seconds")
+    total_cycles: int = Field(..., description="Number of ON commands (set with value > 0)")
+    duty_cycle_percent: float = Field(
+        ..., description="Percentage of time the actuator was ON"
+    )
+    avg_cycle_seconds: float = Field(
+        ..., description="Average duration per ON cycle in seconds"
+    )
+
+
 class ActuatorHistoryResponse(BaseResponse):
     """
-    Actuator history response.
+    Actuator history response with optional aggregation.
     """
 
     esp_id: str = Field(..., description="ESP device ID")
@@ -667,7 +710,16 @@ class ActuatorHistoryResponse(BaseResponse):
         default_factory=list,
         description="History entries",
     )
-    total_count: int = Field(..., description="Total entries matching filter", ge=0)
+    total_count: int = Field(..., description="Number of entries returned (may be limited)", ge=0)
+    aggregation: Optional[ActuatorAggregation] = Field(
+        None, description="Runtime aggregation (when include_aggregation=true)"
+    )
+    from_time: Optional[datetime] = Field(
+        None, description="Start of queried time range"
+    )
+    to_time: Optional[datetime] = Field(
+        None, description="End of queried time range"
+    )
 
 
 # =============================================================================

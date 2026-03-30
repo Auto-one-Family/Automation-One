@@ -53,11 +53,13 @@ from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...mqtt.publisher import Publisher
 from ...mqtt.topics import TopicBuilder
 from ...schemas import (
+    ActuatorAggregation,
     ActuatorCommand,
     ActuatorCommandResponse,
     ActuatorConfigCreate,
     ActuatorConfigListResponse,
     ActuatorConfigResponse,
+    ActuatorHistoryEntry,
     ActuatorHistoryResponse,
     ActuatorState,
     ActuatorStatusResponse,
@@ -1208,35 +1210,30 @@ async def delete_actuator(
     "/{esp_id}/{gpio}/history",
     response_model=ActuatorHistoryResponse,
     summary="Get actuator command history",
-    description="Get command history for an actuator with optional time filters.",
+    description="Get command history for an actuator with optional time filters and aggregation.",
 )
 async def get_history(
     esp_id: str,
     gpio: int,
     db: DBSession,
     current_user: ActiveUser,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    limit: Annotated[int, Query(ge=1, le=500)] = 20,
     start_time: Annotated[
         Optional[datetime], Query(description="Start of time range (UTC)")
     ] = None,
     end_time: Annotated[
         Optional[datetime], Query(description="End of time range (UTC)")
     ] = None,
+    include_aggregation: Annotated[
+        bool, Query(description="Include runtime aggregation in response")
+    ] = False,
 ) -> ActuatorHistoryResponse:
     """
-    Get actuator command history.
+    Get actuator command history with optional runtime aggregation.
 
-    Args:
-        esp_id: ESP device ID
-        gpio: GPIO pin number
-        db: Database session
-        current_user: Authenticated user
-        limit: Max entries to return
-        start_time: Optional start of time range filter
-        end_time: Optional end of time range filter
-
-    Returns:
-        Command history
+    When include_aggregation=true, computes total_runtime_seconds, total_cycles,
+    duty_cycle_percent and avg_cycle_seconds from the history entries in the
+    queried time range.
     """
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
@@ -1260,8 +1257,6 @@ async def get_history(
         end_time=end_time,
     )
 
-    from ...schemas import ActuatorHistoryEntry
-
     entries = [
         ActuatorHistoryEntry(
             id=entry.id,
@@ -1278,12 +1273,87 @@ async def get_history(
         for entry in history
     ]
 
+    aggregation = None
+    if include_aggregation and entries:
+        aggregation = _compute_aggregation(entries, start_time, end_time)
+
     return ActuatorHistoryResponse(
         success=True,
         esp_id=esp_id,
         gpio=gpio,
         entries=entries,
         total_count=len(entries),
+        aggregation=aggregation,
+        from_time=start_time,
+        to_time=end_time,
+    )
+
+
+def _compute_aggregation(
+    entries: list,
+    start_time: Optional[datetime],
+    end_time: Optional[datetime],
+) -> ActuatorAggregation:
+    """Compute runtime aggregation from history entries.
+
+    Calculates ON-intervals by pairing ON/SET/PWM commands (value > 0) with
+    subsequent OFF/STOP/EMERGENCY_STOP commands. If the last ON has no
+    matching OFF, end_time (or now) is used as interval end.
+
+    Matching is case-insensitive to handle REST API values (ON/OFF/PWM),
+    MQTT values (on/off), and legacy DB values (set/stop/emergency_stop).
+    """
+    now = datetime.now(timezone.utc)
+    range_end = end_time or now
+    range_start = start_time or (
+        entries[-1].timestamp if entries else now
+    )
+
+    # Sort entries ascending by timestamp for interval pairing
+    sorted_entries = sorted(entries, key=lambda e: e.timestamp)
+
+    total_runtime = 0.0
+    total_cycles = 0
+    on_start: Optional[datetime] = None
+
+    for entry in sorted_entries:
+        cmd = entry.command_type.lower() if entry.command_type else ""
+        is_on = (
+            cmd in ("set", "on", "pwm")
+            and entry.value is not None
+            and entry.value > 0
+        )
+        is_off = cmd in ("stop", "off", "emergency_stop") or (
+            cmd in ("set", "on", "pwm")
+            and (entry.value is None or entry.value == 0.0)
+        )
+
+        if is_on:
+            if on_start is None:
+                on_start = entry.timestamp
+                total_cycles += 1
+        elif is_off and on_start is not None:
+            delta = (entry.timestamp - on_start).total_seconds()
+            total_runtime += max(delta, 0.0)
+            on_start = None
+
+    # If still ON at end of range, count up to range_end
+    if on_start is not None:
+        delta = (range_end - on_start).total_seconds()
+        total_runtime += max(delta, 0.0)
+
+    # Duty cycle
+    total_range = (range_end - range_start).total_seconds()
+    duty_cycle = (total_runtime / total_range * 100.0) if total_range > 0 else 0.0
+
+    # Avg cycle
+    avg_cycle = total_runtime / total_cycles if total_cycles > 0 else 0.0
+
+    return ActuatorAggregation(
+        total_runtime_seconds=round(total_runtime, 1),
+        total_cycles=total_cycles,
+        duty_cycle_percent=round(min(duty_cycle, 100.0), 1),
+        avg_cycle_seconds=round(avg_cycle, 1),
     )
 
 

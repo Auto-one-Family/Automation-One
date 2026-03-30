@@ -77,7 +77,13 @@ class ActuatorConfig(Base, TimestampMixin):
         String(50),
         nullable=False,
         index=True,
-        doc="Type of actuator (pump, valve, pwm, relay)",
+        doc="Server-normalized actuator type (digital, pwm, servo)",
+    )
+
+    hardware_type: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        doc="Original ESP32 hardware type (relay, pump, valve, pwm) before normalization",
     )
 
     actuator_name: Mapped[str] = mapped_column(

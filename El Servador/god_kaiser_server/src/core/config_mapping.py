@@ -385,11 +385,13 @@ class ConfigMappingEngine:
         # Server stores "digital" but ESP32 expects "relay"
         # See: El Trabajante/src/models/actuator_types.h (ActuatorTypeTokens)
         "actuator_type_to_esp32": map_actuator_type_for_esp32,
-        # BUG-ONEWIRE-CONFIG-001: Strip AUTO_ prefix from OneWire addresses
+        # BUG-ONEWIRE-CONFIG-001 + R20-P6: Strip placeholder prefixes from OneWire addresses
         # ESP32 expects pure 16 hex char ROM-Code (e.g., "28FF641E8D3C0C79")
-        # DB may store "AUTO_28FF641E8D3C0C79" for auto-discovered sensors
+        # DB may store "AUTO_..." (auto-discovered) or "SIM_..." (simulated) addresses
+        # Both are placeholders — real ESPs cannot use them, so return ""
         "strip_auto_prefix": lambda x: (
-            x[5:] if x and isinstance(x, str) and x.startswith("AUTO_") else (x or "")
+            "" if x and isinstance(x, str) and (x.startswith("AUTO_") or x.startswith("SIM_"))
+            else (x or "")
         ),
     }
 

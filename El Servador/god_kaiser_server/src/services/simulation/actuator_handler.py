@@ -664,7 +664,7 @@ class MockActuatorHandler:
         runtime_ms = runtime.actuator_runtime_ms.get(gpio, 0)
         emergency = "active" if runtime.emergency_stopped else "normal"
 
-        # Get actuator type from DB config
+        # Get actuator type from DB config (normalized to server type)
         actuator_type = await self._get_actuator_type(esp_id, gpio)
 
         topic = TopicBuilder.build_actuator_status_topic(esp_id, gpio, kaiser_id)
@@ -720,14 +720,17 @@ class MockActuatorHandler:
                     sim_config = device.device_metadata.get("simulation_config", {})
                     actuators = sim_config.get("actuators", {})
                     actuator_config = actuators.get(str(gpio), {})
-                    return actuator_config.get("actuator_type", "relay")
+                    raw_type = actuator_config.get("actuator_type", "relay")
+                    # Normalize ESP32 type to server type (relay/pump/valve → digital)
+                    from ...schemas.actuator import normalize_actuator_type
+                    return normalize_actuator_type(raw_type)
 
                 break
 
         except Exception as e:
             logger.debug(f"[MockActuator] Could not get actuator type: {e}")
 
-        return "relay"
+        return "digital"
 
     # ================================================================
     # ACTUATOR INITIALIZATION
