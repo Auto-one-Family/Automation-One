@@ -19,6 +19,7 @@ import { useSensorOptions } from '@/composables/useSensorOptions'
 interface Props {
   sensorId?: string // "espId:gpio:sensorType"
   zoneId?: string   // Zone-scoped sensor filtering (PA-02c)
+  title?: string
 }
 
 const props = defineProps<Props>()
@@ -121,7 +122,7 @@ function selectSensor(sensorId: string) {
         class="sensor-card-widget__select"
         @change="selectSensor(($event.target as HTMLSelectElement).value)"
       >
-        <option value="" disabled selected>Sensor wählen</option>
+        <option value="" disabled selected>Sensor wählen{{ props.title ? ` für ${props.title}` : '' }}</option>
         <option v-for="s in availableSensors" :key="s.id" :value="s.id">{{ s.label }}</option>
       </select>
     </div>

@@ -7,11 +7,12 @@
  * - Compare: user picks sensorType + zone, system auto-fills
  *   all matching subzone sensors as overlay chart with subzone labels
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, shallowRef, onMounted, onUnmounted } from 'vue'
 import { useEspStore } from '@/stores/esp'
 import { useZoneStore } from '@/shared/stores/zone.store'
 import MultiSensorChart from '@/components/charts/MultiSensorChart.vue'
-import { BarChart3, Plus, X, Download, GitCompareArrows } from 'lucide-vue-next'
+import type { ActuatorOverlay, ActuatorOverlayBlock, ActuatorOverlayEvent } from '@/components/charts/MultiSensorChart.vue'
+import { BarChart3, Plus, X, Download, GitCompareArrows, Zap } from 'lucide-vue-next'
 import { CHART_COLORS } from '@/utils/chartColors'
 import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { useSensorOptions } from '@/composables/useSensorOptions'
@@ -19,12 +20,22 @@ import { useExportCsv } from '@/composables/useExportCsv'
 import { useToast } from '@/composables/useToast'
 import { parseSensorId } from '@/composables/useSensorId'
 import { getAutoResolution, TIME_RANGE_MINUTES } from '@/utils/autoResolution'
-import type { MockSensor, ChartSensor } from '@/types'
+import { tokens } from '@/utils/cssTokens'
+import { actuatorsApi } from '@/api/actuators'
+import type { ActuatorHistoryEntry } from '@/api/actuators'
+import {
+  ACTUATOR_TIME_RANGE_MS,
+  ACTUATOR_TIME_RANGE_LIMITS,
+  isActuatorOn,
+  isActuatorOff,
+} from '@/composables/useActuatorHistory'
+import type { MockSensor, MockActuator, ChartSensor } from '@/types'
 
 interface Props {
   /** Comma-separated sensor IDs: "espId:gpio:sensorType,espId:gpio:sensorType" */
   dataSources?: string
   zoneId?: string
+  title?: string
   timeRange?: '1h' | '6h' | '24h' | '7d'
   /** Compare mode: auto-fill sensors by sensorType + zone */
   compareMode?: boolean
@@ -32,6 +43,8 @@ interface Props {
   compareSensorType?: string
   /** Zone filter for compare mode; empty = use dashboard zoneId */
   compareZoneId?: string
+  /** Comma-separated actuator IDs: "espId:gpio:actuatorType" (max 2, P8-A6c) */
+  actuatorIds?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -55,12 +68,15 @@ const localCompareMode = ref(props.compareMode ?? false)
 const localCompareSensorType = ref(props.compareSensorType || '')
 const localCompareZoneId = ref(props.compareZoneId || '')
 
+const localActuatorIds = ref(props.actuatorIds || '')
+
 watch(() => props.dataSources, (v) => { if (v) localDataSources.value = v })
 watch(() => props.timeRange, (v) => { if (v) localTimeRange.value = v })
 watch(() => props.zoneId, (v) => { localZoneId.value = v })
 watch(() => props.compareMode, (v) => { if (v != null) localCompareMode.value = v })
 watch(() => props.compareSensorType, (v) => { if (v) localCompareSensorType.value = v })
 watch(() => props.compareZoneId, (v) => { if (v) localCompareZoneId.value = v })
+watch(() => props.actuatorIds, (v) => { if (v != null) localActuatorIds.value = v })
 
 // --- Manual mode sensor options ---
 const { groupedSensorOptions, flatSensorOptions } = useSensorOptions(localZoneId)
@@ -249,6 +265,248 @@ async function handleExportAll() {
     toast.show({ message: `${downloadCount} CSV-Dateien heruntergeladen`, type: 'success' })
   }
 }
+
+// =============================================================================
+// Actuator Correlation (P8-A6c)
+// =============================================================================
+
+const MAX_ACTUATORS = 2
+const ACTUATOR_OVERLAY_COLORS = [tokens.success || '#34d399', tokens.info || '#60a5fa']
+
+/** Parsed actuator IDs from comma-separated string */
+const selectedActuatorIds = computed(() => {
+  if (!localActuatorIds.value) return [] as string[]
+  return localActuatorIds.value.split(',').filter(Boolean)
+})
+
+/** Available actuators from ESP store, grouped by device */
+interface ActuatorOption {
+  id: string  // espId:gpio:actuatorType
+  label: string
+  type: string
+}
+interface EspActuatorGroup {
+  name: string
+  actuators: ActuatorOption[]
+}
+
+const espActuatorOptions = computed<EspActuatorGroup[]>(() => {
+  const groups: EspActuatorGroup[] = []
+  for (const device of espStore.devices) {
+    const deviceId = espStore.getDeviceId(device)
+    const acts = (device.actuators as MockActuator[]) || []
+    if (acts.length === 0) continue
+
+    const options: ActuatorOption[] = acts
+      .filter(a => !selectedActuatorIds.value.includes(`${deviceId}:${a.gpio}:${a.actuator_type}`))
+      .map(a => ({
+        id: `${deviceId}:${a.gpio}:${a.actuator_type}`,
+        label: a.name || `GPIO ${a.gpio}`,
+        type: a.actuator_type,
+      }))
+
+    if (options.length > 0) {
+      groups.push({
+        name: device.name || deviceId,
+        actuators: options,
+      })
+    }
+  }
+  return groups
+})
+
+const showActuatorDropdown = ref(false)
+
+function addActuatorId(actuatorId: string) {
+  const ids = [...selectedActuatorIds.value, actuatorId]
+  localActuatorIds.value = ids.join(',')
+  emit('update:config', { actuatorIds: localActuatorIds.value })
+  showActuatorDropdown.value = false
+}
+
+function removeActuatorId(actuatorId: string) {
+  const ids = selectedActuatorIds.value.filter(id => id !== actuatorId)
+  localActuatorIds.value = ids.join(',')
+  emit('update:config', { actuatorIds: localActuatorIds.value })
+}
+
+function formatActuatorLabel(actuatorId: string): string {
+  const parts = actuatorId.split(':')
+  if (parts.length < 3) return actuatorId
+  const [espId, gpioStr, actType] = parts
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId)
+  const acts = (device?.actuators as MockActuator[]) || []
+  const act = acts.find(a => String(a.gpio) === gpioStr && a.actuator_type === actType)
+  return act?.name || `${actType} (GPIO ${gpioStr})`
+}
+
+/** Actuator history data — fetched from API */
+const actuatorHistoryMap = shallowRef<Map<string, ActuatorHistoryEntry[]>>(new Map())
+const isLoadingActuators = ref(false)
+let actuatorRefreshTimer: ReturnType<typeof setInterval> | null = null
+let actuatorAbortController: AbortController | null = null
+
+async function fetchActuatorHistory(): Promise<void> {
+  // Abort any running fetch before starting a new one
+  actuatorAbortController?.abort()
+  actuatorAbortController = new AbortController()
+  const signal = actuatorAbortController.signal
+
+  const ids = selectedActuatorIds.value
+  if (ids.length === 0) {
+    actuatorHistoryMap.value = new Map()
+    return
+  }
+
+  isLoadingActuators.value = true
+  const now = new Date()
+  const rangeMs = ACTUATOR_TIME_RANGE_MS[localTimeRange.value as keyof typeof ACTUATOR_TIME_RANGE_MS] ?? ACTUATOR_TIME_RANGE_MS['24h']
+  const startTime = new Date(now.getTime() - rangeMs)
+  const limit = ACTUATOR_TIME_RANGE_LIMITS[localTimeRange.value as keyof typeof ACTUATOR_TIME_RANGE_LIMITS] ?? 300
+
+  try {
+    const results = await Promise.all(
+      ids.map(async (id) => {
+        const parts = id.split(':')
+        if (parts.length < 3) return { id, entries: [] as ActuatorHistoryEntry[] }
+        const [espId, gpioStr] = parts
+        const gpio = parseInt(gpioStr, 10)
+        if (isNaN(gpio)) return { id, entries: [] as ActuatorHistoryEntry[] }
+
+        try {
+          const response = await actuatorsApi.getHistory(espId, gpio, {
+            start_time: startTime.toISOString(),
+            end_time: now.toISOString(),
+            limit,
+          }, signal)
+          return { id, entries: response.entries }
+        } catch {
+          return { id, entries: [] as ActuatorHistoryEntry[] }
+        }
+      })
+    )
+
+    // Discard results if this fetch was superseded
+    if (signal.aborted) return
+
+    const newMap = new Map<string, ActuatorHistoryEntry[]>()
+    for (const { id, entries } of results) {
+      newMap.set(id, entries)
+    }
+    actuatorHistoryMap.value = newMap
+  } finally {
+    isLoadingActuators.value = false
+  }
+}
+
+/** Convert history entries into overlay blocks for the chart */
+function historyToOverlayBlocks(entries: ActuatorHistoryEntry[]): ActuatorOverlayBlock[] {
+  if (entries.length === 0) return []
+
+  const sorted = [...entries].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  )
+
+  const blocks: ActuatorOverlayBlock[] = []
+  let onStart: number | null = null
+  let onValue: number | null = null
+  const rangeEnd = Date.now()
+
+  for (const entry of sorted) {
+    const ts = new Date(entry.timestamp).getTime()
+    const on = isActuatorOn(entry)
+    const off = isActuatorOff(entry)
+
+    if (on) {
+      if (onStart === null) {
+        onStart = ts
+        onValue = entry.value
+      }
+    } else if (off && onStart !== null) {
+      blocks.push({ start: onStart, end: ts, value: onValue })
+      onStart = null
+      onValue = null
+    }
+  }
+
+  // Still ON at end of range
+  if (onStart !== null) {
+    blocks.push({ start: onStart, end: rangeEnd, value: onValue })
+  }
+
+  return blocks
+}
+
+/** Extract switch events from history entries */
+function historyToOverlayEvents(entries: ActuatorHistoryEntry[], label: string): ActuatorOverlayEvent[] {
+  if (entries.length === 0) return []
+
+  const sorted = [...entries].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  )
+
+  const events: ActuatorOverlayEvent[] = []
+  let wasOn = false
+
+  for (const entry of sorted) {
+    const on = isActuatorOn(entry)
+    const off = isActuatorOff(entry)
+
+    if (on && !wasOn) {
+      events.push({ timestamp: new Date(entry.timestamp).getTime(), label, isOn: true })
+      wasOn = true
+    } else if (off && wasOn) {
+      events.push({ timestamp: new Date(entry.timestamp).getTime(), label, isOn: false })
+      wasOn = false
+    }
+  }
+
+  return events
+}
+
+/** Pre-processed overlay data for MultiSensorChart */
+const actuatorOverlays = computed<ActuatorOverlay[]>(() => {
+  return selectedActuatorIds.value.map((id, index) => {
+    const entries = actuatorHistoryMap.value.get(id) || []
+    const label = formatActuatorLabel(id)
+    return {
+      id,
+      label,
+      color: ACTUATOR_OVERLAY_COLORS[index % ACTUATOR_OVERLAY_COLORS.length],
+      blocks: historyToOverlayBlocks(entries),
+      events: historyToOverlayEvents(entries, label),
+    }
+  })
+})
+
+// Fetch actuator history when IDs or timeRange change
+watch(
+  [selectedActuatorIds, localTimeRange],
+  () => { fetchActuatorHistory() },
+  { immediate: true }
+)
+
+// Auto-refresh actuator history every 60s
+function startActuatorRefresh() {
+  stopActuatorRefresh()
+  actuatorRefreshTimer = setInterval(fetchActuatorHistory, 60_000)
+}
+
+function stopActuatorRefresh() {
+  if (actuatorRefreshTimer) {
+    clearInterval(actuatorRefreshTimer)
+    actuatorRefreshTimer = null
+  }
+}
+
+onMounted(() => {
+  startActuatorRefresh()
+})
+
+onUnmounted(() => {
+  stopActuatorRefresh()
+  actuatorAbortController?.abort()
+})
 </script>
 
 <template>
@@ -276,8 +534,8 @@ async function handleExportAll() {
         <option value="" disabled>— Zone —</option>
         <option
           v-for="zone in zoneStore.activeZones"
-          :key="zone.id"
-          :value="zone.id"
+          :key="zone.zone_id"
+          :value="zone.zone_id"
         >{{ zone.name }}</option>
       </select>
       <select
@@ -351,12 +609,51 @@ async function handleExportAll() {
         </div>
       </div>
 
+      <!-- Actuator chips (P8-A6c) -->
+      <div v-if="!localCompareMode" class="multi-sensor-widget__actuator-section">
+        <div class="multi-sensor-widget__actuator-chips">
+          <span
+            v-for="actId in selectedActuatorIds"
+            :key="actId"
+            class="multi-sensor-widget__chip multi-sensor-widget__chip--actuator"
+          >
+            <Zap :size="10" class="multi-sensor-widget__chip-icon" />
+            {{ formatActuatorLabel(actId) }}
+            <button class="multi-sensor-widget__chip-remove" @click="removeActuatorId(actId)">
+              <X :size="10" />
+            </button>
+          </span>
+          <button
+            v-if="selectedActuatorIds.length < MAX_ACTUATORS && espActuatorOptions.length > 0"
+            class="multi-sensor-widget__add-btn multi-sensor-widget__add-btn--actuator"
+            title="Aktor hinzufügen"
+            @click="showActuatorDropdown = !showActuatorDropdown"
+          >
+            <Zap :size="10" />
+          </button>
+        </div>
+        <div v-if="showActuatorDropdown" class="multi-sensor-widget__dropdown">
+          <template v-for="espGroup in espActuatorOptions" :key="espGroup.name">
+            <div class="multi-sensor-widget__dropdown-group">{{ espGroup.name }}</div>
+            <div
+              v-for="act in espGroup.actuators"
+              :key="act.id"
+              class="multi-sensor-widget__dropdown-item"
+              @click="addActuatorId(act.id)"
+            >
+              {{ act.label }} ({{ act.type }})
+            </div>
+          </template>
+        </div>
+      </div>
+
       <!-- Chart -->
       <div class="multi-sensor-widget__chart">
         <MultiSensorChart
           :sensors="chartSensors"
           :time-range="localTimeRange"
           :enable-live-updates="true"
+          :actuator-overlays="actuatorOverlays"
         />
       </div>
     </template>
@@ -370,7 +667,7 @@ async function handleExportAll() {
         <p v-else>Keine passenden Sensoren in dieser Zone</p>
       </template>
       <template v-else>
-        <p>Sensoren für Multi-Chart auswählen:</p>
+        <p>Sensoren für Multi-Chart auswählen{{ props.title ? ` für ${props.title}` : '' }}:</p>
         <select
           class="multi-sensor-widget__select"
           @change="addSensor(($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"
@@ -604,5 +901,39 @@ async function handleExportAll() {
   color: var(--color-text-primary);
   font-size: var(--text-sm);
   max-width: 220px;
+}
+
+/* Actuator section (P8-A6c) */
+.multi-sensor-widget__actuator-section {
+  position: relative;
+  padding: 0 var(--space-2) var(--space-1);
+  flex-shrink: 0;
+}
+
+.multi-sensor-widget__actuator-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.multi-sensor-widget__chip--actuator {
+  border-color: color-mix(in srgb, var(--color-success) 50%, transparent);
+  background: color-mix(in srgb, var(--color-success) 8%, transparent);
+}
+
+.multi-sensor-widget__chip-icon {
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--color-success) 80%, transparent);
+}
+
+.multi-sensor-widget__add-btn--actuator {
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+  color: color-mix(in srgb, var(--color-success) 60%, transparent);
+}
+
+.multi-sensor-widget__add-btn--actuator:hover {
+  border-color: color-mix(in srgb, var(--color-success) 70%, transparent);
+  color: var(--color-success);
 }
 </style>

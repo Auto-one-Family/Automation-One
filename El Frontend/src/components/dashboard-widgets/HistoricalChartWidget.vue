@@ -18,6 +18,7 @@ import { useSensorOptions } from '@/composables/useSensorOptions'
 interface Props {
   sensorId?: string // "espId:gpio:sensorType"
   zoneId?: string   // Zone-scoped sensor filtering (PA-02c)
+  title?: string
   timeRange?: '1h' | '6h' | '24h' | '7d' | '30d'
   showThresholds?: boolean
 }
@@ -110,7 +111,7 @@ function selectSensor(sensorId: string) {
     </template>
     <div v-else class="historical-widget__empty">
       <BarChart3 class="w-8 h-8" style="opacity: 0.3" />
-      <p>Sensor für Zeitreihe auswählen:</p>
+      <p>Sensor für Zeitreihe auswählen{{ props.title ? ` für ${props.title}` : '' }}:</p>
       <select
         class="historical-widget__select"
         @change="selectSensor(($event.target as HTMLSelectElement).value)"

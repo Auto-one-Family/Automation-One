@@ -26,12 +26,14 @@ import {
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   Title,
   Tooltip,
   Legend,
   TimeScale,
   Filler,
 } from 'chart.js'
+import annotationPlugin from 'chartjs-plugin-annotation'
 import zoomPlugin from 'chartjs-plugin-zoom'
 import 'chartjs-adapter-date-fns'
 import { RotateCcw } from 'lucide-vue-next'
@@ -50,12 +52,14 @@ ChartJS.register(
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   Title,
   Tooltip,
   Legend,
   TimeScale,
   Filler,
-  zoomPlugin
+  zoomPlugin,
+  annotationPlugin,
 )
 
 // =============================================================================
@@ -82,6 +86,30 @@ const TIME_RANGES = {
 } as const
 
 // =============================================================================
+// Actuator Overlay Types (P8-A6c)
+// =============================================================================
+
+export interface ActuatorOverlayBlock {
+  start: number  // timestamp ms
+  end: number    // timestamp ms
+  value: number | null  // 0.0–1.0 or null for stop
+}
+
+export interface ActuatorOverlayEvent {
+  timestamp: number  // timestamp ms
+  label: string
+  isOn: boolean
+}
+
+export interface ActuatorOverlay {
+  id: string
+  label: string
+  color: string
+  blocks: ActuatorOverlayBlock[]
+  events: ActuatorOverlayEvent[]
+}
+
+// =============================================================================
 // Props & Emits
 // =============================================================================
 
@@ -100,6 +128,8 @@ interface Props {
   yMax?: number
   /** Live-Updates aktivieren */
   enableLiveUpdates?: boolean
+  /** Actuator overlay data for correlation display (P8-A6c) */
+  actuatorOverlays?: ActuatorOverlay[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -109,6 +139,7 @@ const props = withDefaults(defineProps<Props>(), {
   yMin: undefined,
   yMax: undefined,
   enableLiveUpdates: true,
+  actuatorOverlays: () => [],
 })
 
 const emit = defineEmits<{
@@ -249,6 +280,43 @@ const uniqueUnits = computed(() => [...unitGroups.value.keys()])
 /** Whether dual Y-axis is needed (>= 2 different units) */
 const needsDualAxis = computed(() => uniqueUnits.value.length >= 2)
 
+/** Whether actuator overlays are present (P8-A6c) */
+const hasActuatorOverlays = computed(() =>
+  (props.actuatorOverlays || []).some(o => o.blocks.length > 0)
+)
+
+/** Actuator switch-event annotations — max 20 most recent (P8-A6c) */
+const actuatorAnnotations = computed(() => {
+  const overlays = props.actuatorOverlays || []
+  const allEvents: Array<{ timestamp: number; label: string; isOn: boolean; color: string }> = []
+  for (const overlay of overlays) {
+    for (const event of overlay.events) {
+      allEvents.push({ ...event, color: overlay.color })
+    }
+  }
+  // Sort by timestamp, take last 20
+  allEvents.sort((a, b) => a.timestamp - b.timestamp)
+  const recent = allEvents.slice(-20)
+  const annotations: Record<string, unknown> = {}
+  for (let i = 0; i < recent.length; i++) {
+    const e = recent[i]
+    annotations[`act_evt_${i}`] = {
+      type: 'line',
+      scaleID: 'x',
+      value: e.timestamp,
+      borderColor: 'rgba(76, 175, 80, 0.5)',
+      borderWidth: 1,
+      borderDash: [4, 4],
+      label: {
+        display: false,
+        content: `${e.label} ${e.isOn ? 'EIN' : 'AUS'}`,
+        position: 'start',
+      },
+    }
+  }
+  return annotations
+})
+
 /**
  * Compute Y-axis range for sensors with a specific unit.
  * Returns suggestedMin/suggestedMax with 15% padding.
@@ -311,7 +379,8 @@ const computedYRange = computed(() => {
 
 /** Chart-Daten im Chart.js Format */
 const chartData = computed(() => {
-  const datasets = props.sensors.map((sensor) => {
+  // Sensor datasets — rendered ABOVE actuator bars (order: 2)
+  const sensorDatasets = props.sensors.map((sensor) => {
     const readings = combinedData.value.get(sensor.id) || []
     const unit = sensor.unit || ''
     const unitIndex = uniqueUnits.value.indexOf(unit)
@@ -323,6 +392,7 @@ const chartData = computed(() => {
     }
 
     return {
+      type: 'line' as const,
       label: sensor.name,
       data: readings.map((r) => ({
         x: new Date(r.timestamp).getTime(),
@@ -336,10 +406,31 @@ const chartData = computed(() => {
       tension: 0.3,
       fill: false,
       yAxisID,
+      order: 2,
     }
   })
 
-  return { datasets }
+  // Actuator overlay datasets — rendered BEHIND sensor lines (order: 0) (P8-A6c)
+  const actuatorDatasets = (props.actuatorOverlays || []).map((overlay) => ({
+    type: 'bar' as const,
+    label: `${overlay.label} (Status)`,
+    data: overlay.blocks.map((block) => ({
+      x: [block.start, block.end],
+      y: 1,
+    })),
+    yAxisID: 'y-actuator',
+    backgroundColor: overlay.blocks.map((block) =>
+      block.value != null && block.value > 0
+        ? `rgba(76, 175, 80, ${0.12 * block.value})`
+        : 'transparent'
+    ),
+    barPercentage: 1.0,
+    categoryPercentage: 1.0,
+    borderSkipped: false as const,
+    order: 0,
+  }))
+
+  return { datasets: [...actuatorDatasets, ...sensorDatasets] }
 })
 
 /** Chart.js Optionen */
@@ -439,12 +530,35 @@ const chartOptions = computed(() => {
             })
           },
           label: (item: any) => {
-            const sensor = props.sensors[item.datasetIndex]
+            // Actuator overlay datasets come first, then sensor datasets (P8-A6c)
+            const actuatorCount = (props.actuatorOverlays || []).length
+            const sensorIndex = item.datasetIndex - actuatorCount
+            if (sensorIndex < 0) {
+              // This is an actuator dataset — show status label
+              const overlay = (props.actuatorOverlays || [])[item.datasetIndex]
+              return overlay ? ` ${overlay.label}: aktiv` : ''
+            }
+            const sensor = props.sensors[sensorIndex]
+            if (!sensor) return ''
             const value = item.parsed.y?.toFixed(2) ?? 'N/A'
             const avgSuffix = currentResolution.value ? ' (Ø)' : ''
             return ` ${sensor.name}: ${value} ${sensor.unit}${avgSuffix}`
           },
         },
+        // Filter out transparent actuator bars from tooltip
+        filter: (item: any) => {
+          const actuatorCount = (props.actuatorOverlays || []).length
+          if (item.datasetIndex < actuatorCount) {
+            // Only show actuator tooltip if bar is visible (not transparent)
+            const bg = item.element?.options?.backgroundColor
+            return bg != null && bg !== 'transparent'
+          }
+          return true
+        },
+      },
+      // Actuator switch-event annotations (P8-A6c)
+      annotation: {
+        annotations: actuatorAnnotations.value,
       },
       // Zoom/Pan (8.0-A)
       zoom: {
@@ -484,6 +598,14 @@ const chartOptions = computed(() => {
         },
       },
       ...yScales,
+      // Hidden actuator axis (P8-A6c) — only added when overlays exist
+      ...(hasActuatorOverlays.value ? {
+        'y-actuator': {
+          display: false,
+          min: 0,
+          max: 1,
+        },
+      } : {}),
     },
   }
 })
@@ -860,8 +982,8 @@ onUnmounted(() => {
       <Line
         v-if="chartData.datasets.length > 0"
         ref="chartRef"
-        :data="chartData"
-        :options="chartOptions"
+        :data="(chartData as any)"
+        :options="(chartOptions as any)"
       />
 
       <!-- Info-Badge: Datenpunkte & Live-Status & Zoom-Reset -->

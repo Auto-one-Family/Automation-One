@@ -27,7 +27,7 @@ const logger = createLogger('InlineDashboardPanel')
 
 interface Props {
   layoutId: string
-  mode?: 'view' | 'manage' | 'inline' | 'side-panel'
+  mode?: 'manage' | 'inline' | 'side-panel'
   /** Zone ID for zone-scoped sensor filtering in widgets (PA-02c) */
   zoneId?: string
   /** Compact mode: hide header + edit link, reduced padding (Phase 3 mini-widgets) */
@@ -360,7 +360,7 @@ onUnmounted(() => {
   right: var(--space-1, 4px);
   z-index: 10;
   display: flex;
-  gap: 2px;
+  gap: 8px;
   padding: 2px;
   background: rgba(30, 30, 45, 0.75);
   -webkit-backdrop-filter: blur(8px);

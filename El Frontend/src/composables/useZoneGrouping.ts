@@ -49,6 +49,8 @@ export interface SensorWithContext {
 export interface ActuatorWithContext {
   gpio: number
   actuator_type: string
+  /** Original ESP32 hardware type (relay, pump, valve, pwm) before server normalization */
+  hardware_type?: string | null
   name: string | null
   state: boolean
   pwm_value: number

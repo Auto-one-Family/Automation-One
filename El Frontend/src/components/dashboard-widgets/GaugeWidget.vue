@@ -18,6 +18,7 @@ import { useSensorOptions } from '@/composables/useSensorOptions'
 interface Props {
   sensorId?: string // "espId:gpio:sensorType"
   zoneId?: string   // Zone-scoped sensor filtering (PA-02c)
+  title?: string
   yMin?: number
   yMax?: number
   warnLow?: number
@@ -155,7 +156,7 @@ function selectSensor(sensorId: string) {
       />
     </template>
     <div v-else class="gauge-widget__empty">
-      <p>Sensor auswählen:</p>
+      <p>Sensor auswählen{{ props.title ? ` für ${props.title}` : '' }}:</p>
       <select
         class="gauge-widget__select"
         @change="selectSensor(($event.target as HTMLSelectElement).value)"

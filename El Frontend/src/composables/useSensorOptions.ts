@@ -15,6 +15,8 @@ export interface SensorOption {
   sensorType: string
   espId: string
   gpio: number
+  /** Sensor config UUID for alert-config API lookup */
+  configId?: string
 }
 
 export interface SensorSubgroup {
@@ -94,6 +96,7 @@ export function useSensorOptions(
           sensorType: s.sensor_type,
           espId: deviceId,
           gpio: s.gpio,
+          configId: s.config_id,
         })
       }
     }

@@ -40,6 +40,10 @@ interface SensorDataPayload {
   unit: string
   quality?: QualityLevel
   timestamp?: number
+  // Address-based matching for multi-sensor GPIOs (Phase 3)
+  config_id?: string
+  i2c_address?: number
+  onewire_address?: string
 }
 
 /** Message wrapper for sensor_data events */
@@ -84,6 +88,33 @@ function getWorstQuality(values: MultiValueEntry[]): QualityLevel {
   return qualityOrder[worstIndex]
 }
 
+// ============================================================================
+// Helper: Match sensor to incoming WS event data
+// Supports config_id (primary), address-based (I2C/OneWire), and legacy fallback
+// ============================================================================
+function matchSensorToEvent(sensor: MockSensor, data: SensorDataPayload): boolean {
+  // Primary: config_id match (most unique key)
+  if (data.config_id && sensor.config_id) {
+    return sensor.config_id === data.config_id
+  }
+
+  // Base: gpio + sensor_type must match
+  if (sensor.gpio !== data.gpio || sensor.sensor_type !== data.sensor_type) {
+    return false
+  }
+
+  // Address differentiation when available
+  if (data.i2c_address != null && sensor.i2c_address != null) {
+    return sensor.i2c_address === data.i2c_address
+  }
+  if (data.onewire_address && sensor.onewire_address) {
+    return sensor.onewire_address === data.onewire_address
+  }
+
+  // Legacy: no address in event → first match (backward compatibility)
+  return true
+}
+
 export const useSensorStore = defineStore('sensor', () => {
 
   // =========================================================================
@@ -116,11 +147,9 @@ export const useSensorStore = defineStore('sensor', () => {
 
     const sensors = device.sensors as MockSensor[]
 
-    // Post-Fix1: Find exact match by gpio + sensor_type (unique pair).
-    // This handles multi-value sensors correctly — each sub-value has its own entry.
-    const exactMatch = sensors.find(
-      s => s.gpio === gpio && s.sensor_type === sensorType
-    )
+    // Post-Fix1: Find exact match by config_id, address, or gpio+sensor_type.
+    // Handles multi-sensor GPIOs (e.g. 2x DS18B20) via address-based matching.
+    const exactMatch = sensors.find(s => matchSensorToEvent(s, data))
 
     if (exactMatch) {
       if (data.value !== undefined) exactMatch.raw_value = data.value
@@ -242,9 +271,7 @@ export const useSensorStore = defineStore('sensor', () => {
   // HANDLER 3: SINGLE-VALUE (unchanged behavior)
   // ════════════════════════════════════════════════════════════════════════════
   function handleSingleValueSensorData(sensors: MockSensor[], data: SensorDataPayload): void {
-    const sensor = sensors.find(
-      s => s.gpio === data.gpio && s.sensor_type === data.sensor_type
-    )
+    const sensor = sensors.find(s => matchSensorToEvent(s, data))
 
     if (sensor) {
       if (data.value !== undefined) sensor.raw_value = data.value

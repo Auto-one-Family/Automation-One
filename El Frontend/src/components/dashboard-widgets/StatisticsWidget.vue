@@ -148,7 +148,7 @@ function fmt(value: number | null): string {
     <!-- No sensor configured -->
     <div v-if="!sensorId" class="statistics-widget__empty">
       <BarChart3 :size="24" />
-      <span>Sensor auswaehlen</span>
+      <span>Sensor auswählen{{ props.title ? ` für ${props.title}` : '' }}</span>
     </div>
 
     <!-- Loading -->

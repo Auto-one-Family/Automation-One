@@ -21,6 +21,7 @@ import { useSensorOptions } from '@/composables/useSensorOptions'
 interface Props {
   sensorId?: string   // format: "espId:gpio:sensorType"
   zoneId?: string     // Zone-scoped sensor filtering (PA-02c)
+  title?: string
   showThresholds?: boolean
   yMin?: number
   yMax?: number
@@ -125,7 +126,7 @@ function selectSensor(sensorId: string) {
       />
     </template>
     <div v-else class="line-chart-widget__empty">
-      <p>Sensor auswählen:</p>
+      <p>Sensor auswählen{{ props.title ? ` für ${props.title}` : '' }}:</p>
       <select
         class="line-chart-widget__select"
         @change="selectSensor(($event.target as HTMLSelectElement).value)"

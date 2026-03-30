@@ -30,9 +30,11 @@ import { useToast } from '@/composables/useToast'
 import { useDashboardWidgets } from '@/composables/useDashboardWidgets'
 import { useEspStore } from '@/stores/esp'
 import { getSensorDisplayName, formatSensorType } from '@/utils/sensorDefaults'
+import { findFirstFreePosition } from '@/utils/gridLayout'
 import ViewTabBar from '@/components/common/ViewTabBar.vue'
 import WidgetConfigPanel from '@/components/dashboard-widgets/WidgetConfigPanel.vue'
 import BaseModal from '@/shared/design/primitives/BaseModal.vue'
+import InlineDashboardPanel from '@/components/dashboard/InlineDashboardPanel.vue'
 
 const route = useRoute()
 const dashStore = useDashboardStore()
@@ -173,11 +175,30 @@ const availableZones = computed(() => {
   return Array.from(zoneMap, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
 })
 
-function setTarget(view: 'monitor' | 'hardware', placement: 'page' | 'inline' | 'side-panel' | 'bottom-panel') {
+function setTarget(view: 'monitor' | 'hardware', placement: 'inline' | 'side-panel' | 'bottom-panel') {
   const layoutId = dashStore.activeLayoutId
   if (!layoutId) return
   dashStore.setLayoutTarget(layoutId, { view, placement })
   showTargetConfig.value = false
+
+  const placementLabels: Record<string, string> = {
+    'inline': 'Inline (Zonen-Detailansicht)',
+    'side-panel': 'Seitenpanel',
+    'bottom-panel': 'Unteres Panel',
+  }
+  const viewLabels: Record<string, string> = {
+    'monitor': 'Monitor',
+    'hardware': 'Geräte-Übersicht',
+  }
+  const locationHints: Record<string, string> = {
+    'monitor:inline': 'Sichtbar wenn du eine Zone im Monitor öffnest (/monitor/:zone)',
+    'monitor:side-panel': 'Sichtbar als Seitenleiste im Monitor-Layout',
+    'monitor:bottom-panel': 'Sichtbar als unteres Panel im Monitor-Layout',
+    'hardware:side-panel': 'Sichtbar in der Geräte-Übersicht',
+  }
+  const hint = locationHints[`${view}:${placement}`] ?? ''
+  const label = `${viewLabels[view] ?? view} — ${placementLabels[placement] ?? placement}`
+  toast.info(hint ? `Dashboard wird angezeigt: ${label}. ${hint}.` : `Dashboard wird angezeigt: ${label}.`)
 }
 
 function setZoneScope(zoneId: string | null) {
@@ -200,6 +221,7 @@ function clearTarget() {
   dashStore.setLayoutTarget(layoutId, null)
   selectedZoneId.value = null
   showTargetConfig.value = false
+  toast.info('Anzeigeort entfernt.')
 }
 
 /** Find which dashboard currently holds a target slot (for conflict hint) */
@@ -216,7 +238,7 @@ function targetSlotHolder(view: string, placement: string): string | null {
 // Monitor route for "Im Monitor anzeigen" button (based on layout scope)
 const monitorRouteForLayout = computed(() => {
   const layout = dashStore.activeLayout
-  if (!layout?.scope) return null
+  if (!layout) return null
 
   if (layout.scope === 'zone' && layout.zoneId) {
     return {
@@ -225,7 +247,7 @@ const monitorRouteForLayout = computed(() => {
     }
   }
   if (layout.scope === 'cross-zone') {
-    return null
+    return { name: 'monitor' }
   }
   if (layout.scope === 'sensor-detail' && layout.sensorId && layout.zoneId) {
     return {
@@ -235,6 +257,11 @@ const monitorRouteForLayout = computed(() => {
   }
   return null
 })
+
+// Show hint button when layout has no scope set (scope=undefined, zone-tile excluded)
+const showMonitorPlayHint = computed(() =>
+  !!dashStore.activeLayout && !dashStore.activeLayout.scope
+)
 
 const groupedWidgets = computed(() => {
   const groups: Record<string, typeof widgetTypes> = {}
@@ -515,7 +542,17 @@ function addWidget(type: string) {
   const config = { title: widgetDef.label, ...WIDGET_DEFAULT_CONFIGS[type] }
   widgetConfigs.value.set(id, config)
 
+  const currentWidgets = (dashStore.activeLayout?.widgets ?? []).map(w => ({
+    x: w.x ?? 0,
+    y: w.y ?? 0,
+    w: w.w ?? 1,
+    h: w.h ?? 1,
+  }))
+  const pos = findFirstFreePosition(currentWidgets, widgetDef.w, widgetDef.h)
+
   const itemEl = grid.addWidget({
+    x: pos.x,
+    y: pos.y,
     w: widgetDef.w,
     h: widgetDef.h,
     minW: widgetDef.minW,
@@ -844,7 +881,7 @@ function executeBulkDelete() {
       </div>
 
       <div class="dashboard-builder__toolbar-right">
-        <!-- "Im Monitor anzeigen" link (only if dashboard has a scope) -->
+        <!-- "Im Monitor anzeigen" link (scope-navigable dashboards) -->
         <router-link
           v-if="monitorRouteForLayout"
           :to="monitorRouteForLayout"
@@ -853,9 +890,18 @@ function executeBulkDelete() {
         >
           <MonitorPlay class="w-4 h-4" />
         </router-link>
+        <!-- Hint button when no scope is set -->
+        <button
+          v-else-if="showMonitorPlayHint"
+          class="dashboard-builder__tool-btn dashboard-builder__tool-btn--disabled"
+          title="Kein Scope gesetzt — Im Monitor anzeigen nicht möglich"
+          @click="toast.info('Kein Anzeigeort gesetzt. Wähle zuerst einen Scope oder setze einen Anzeigeort über das Pin-Icon.')"
+        >
+          <MonitorPlay class="w-4 h-4 opacity-50" />
+        </button>
 
         <!-- Target Configurator (progressive disclosure) -->
-        <div v-if="dashStore.activeLayoutId && isEditing" class="dashboard-builder__target-wrapper">
+        <div v-if="dashStore.activeLayoutId" class="dashboard-builder__target-wrapper">
           <button
             :class="['dashboard-builder__tool-btn', { 'dashboard-builder__tool-btn--active': activeTarget }]"
             title="Anzeigeort festlegen"
@@ -1028,15 +1074,25 @@ function executeBulkDelete() {
           </button>
         </div>
 
-        <div
-          v-else
-          ref="gridContainer"
-          :class="[
-            'grid-stack',
-            { 'grid-stack--editing': isEditing },
-            { 'grid-stack--drop-target': isEditing && dragStore.isDraggingDashboardWidget },
-          ]"
-        />
+        <div v-else>
+          <!-- View-Modus: InlineDashboardPanel als echter Preview (kein GridStack-Overhead) -->
+          <div v-if="!isEditing" class="dashboard-builder__preview">
+            <InlineDashboardPanel
+              :layout-id="dashStore.activeLayoutId!"
+              mode="inline"
+            />
+          </div>
+          <!-- Edit-Modus: GridStack (v-show damit GridStack-Lifecycle erhalten bleibt) -->
+          <div
+            v-show="isEditing"
+            ref="gridContainer"
+            :class="[
+              'grid-stack',
+              { 'grid-stack--editing': isEditing },
+              { 'grid-stack--drop-target': isEditing && dragStore.isDraggingDashboardWidget },
+            ]"
+          />
+        </div>
       </div>
     </div>
     <!-- Widget Config Panel (SlideOver) -->
@@ -1544,6 +1600,12 @@ function executeBulkDelete() {
 }
 
 /* Empty state for dashboard with 0 widgets in view mode */
+.dashboard-builder__preview {
+  width: 100%;
+  min-height: 400px;
+  padding: var(--space-4);
+}
+
 .dashboard-builder__empty-state {
   display: flex;
   flex-direction: column;
@@ -1700,6 +1762,19 @@ function executeBulkDelete() {
 :deep(.dashboard-widget__remove-btn:hover) {
   background: var(--glass-bg-light);
   color: var(--color-status-alarm);
+}
+
+/* Touch devices: enlarge targets to 44px (WCAG) and always visible */
+@media (pointer: coarse), (hover: none) {
+  .grid-stack--editing :deep(.dashboard-widget__gear-btn),
+  .grid-stack--editing :deep(.dashboard-widget__remove-btn) {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 1;
+  }
 }
 
 :deep(.dashboard-widget__vue-mount) {
