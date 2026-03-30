@@ -119,7 +119,12 @@ api.interceptors.response.use(
     }
 
     const errorRequestId = error.response?.headers?.['x-request-id'] || error.config?.headers?.['X-Request-ID']
-    logger.error(`${error.config?.method?.toUpperCase()} ${error.config?.url} → ${error.response?.status || 'NETWORK_ERROR'}`, {
+    const status = error.response?.status
+    const method = error.config?.method?.toUpperCase()
+    // DELETE + 404 is idempotent — the resource is already gone, which is the desired outcome.
+    // Log as debug instead of error to avoid noise from orphan cleanup etc.
+    const logLevel = (method === 'DELETE' && status === 404) ? 'debug' : 'error'
+    logger[logLevel](`${method} ${error.config?.url} → ${status || 'NETWORK_ERROR'}`, {
       message: error.message,
       requestId: errorRequestId,
     })

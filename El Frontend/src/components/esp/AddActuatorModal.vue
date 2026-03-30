@@ -230,7 +230,7 @@ function onActuatorAuxGpioValidation(valid: boolean, _message: string | null): v
 
       <!-- Max Runtime -->
       <div v-if="newActuator.actuator_type === 'pump'" class="form-group">
-        <label class="form-label">Max. Laufzeit <span class="form-label-hint">Sekunden (0 = kein Limit)</span></label>
+        <label class="form-label">Sicherheitslimit <span class="form-label-hint">Sekunden (0 = kein Limit)</span></label>
         <input v-model.number="newActuator.max_runtime_seconds" type="number" min="0" max="86400" class="form-input" placeholder="3600" />
       </div>
 

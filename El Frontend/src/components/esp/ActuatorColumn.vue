@@ -17,6 +17,8 @@ import ActuatorSatellite from './ActuatorSatellite.vue'
 export interface ActuatorItem {
   gpio: number
   actuator_type: string
+  /** Original ESP32 hardware type (relay, pump, valve, pwm) for icon lookup */
+  hardware_type?: string | null
   name: string | null
   state: boolean
   pwm_value?: number
@@ -55,6 +57,7 @@ const emit = defineEmits<{
       :esp-id="espId"
       :gpio="actuator.gpio"
       :actuator-type="actuator.actuator_type"
+      :hardware-type="actuator.hardware_type"
       :name="actuator.name"
       :state="actuator.state"
       :pwm-value="actuator.pwm_value"

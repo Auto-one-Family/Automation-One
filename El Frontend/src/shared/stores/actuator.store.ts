@@ -27,6 +27,8 @@ interface ActuatorStatusPayload {
   device_id?: string
   gpio: number
   actuator_type?: string
+  /** Original ESP32 hardware type (relay, pump, valve, pwm) */
+  hardware_type?: string | null
   state?: string
   value?: number
   emergency?: string
@@ -118,7 +120,7 @@ export const useActuatorStore = defineStore('actuator', () => {
     const device = devices.find(d => getDeviceId(d) === espId)
     if (!device?.actuators) return
 
-    const actuator = (device.actuators as { gpio: number; state?: boolean; pwm_value?: number; emergency_stopped?: boolean; last_command_at?: string }[]).find(a => a.gpio === gpio)
+    const actuator = (device.actuators as { gpio: number; state?: boolean; pwm_value?: number; emergency_stopped?: boolean; last_command_at?: string; hardware_type?: string | null }[]).find(a => a.gpio === gpio)
     if (!actuator) return
 
     // Map server payload → frontend MockActuator
@@ -129,6 +131,9 @@ export const useActuatorStore = defineStore('actuator', () => {
     if (data.value !== undefined) actuator.pwm_value = data.value
     if (data.emergency !== undefined) {
       actuator.emergency_stopped = data.emergency !== 'normal'
+    }
+    if (data.hardware_type !== undefined) {
+      actuator.hardware_type = data.hardware_type
     }
     actuator.last_command_at = data.timestamp
       ? new Date(data.timestamp * 1000).toISOString()

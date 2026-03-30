@@ -42,6 +42,44 @@ export interface EmergencyStopResponse {
   }>
 }
 
+export interface ActuatorHistoryEntry {
+  id: string
+  gpio: number
+  actuator_type: string
+  command_type: string
+  value: number | null
+  success: boolean
+  issued_by: string | null
+  error_message: string | null
+  metadata: Record<string, unknown> | null
+  timestamp: string
+}
+
+export interface ActuatorAggregation {
+  total_runtime_seconds: number
+  total_cycles: number
+  duty_cycle_percent: number
+  avg_cycle_seconds: number
+}
+
+export interface ActuatorHistoryResponse {
+  success: boolean
+  esp_id: string
+  gpio: number | null
+  entries: ActuatorHistoryEntry[]
+  total_count: number
+  aggregation: ActuatorAggregation | null
+  from_time: string | null
+  to_time: string | null
+}
+
+export interface ActuatorHistoryParams {
+  limit?: number
+  start_time?: string
+  end_time?: string
+  include_aggregation?: boolean
+}
+
 export const actuatorsApi = {
   /**
    * Create or update actuator configuration
@@ -162,6 +200,23 @@ export const actuatorsApi = {
   },
 
   // =========================================================================
+  // History & Aggregation (P8-A6b)
+  // =========================================================================
+
+  async getHistory(
+    espId: string,
+    gpio: number,
+    params?: ActuatorHistoryParams,
+    signal?: AbortSignal
+  ): Promise<ActuatorHistoryResponse> {
+    const response = await api.get<ActuatorHistoryResponse>(
+      `/actuators/${espId}/${gpio}/history`,
+      { params, signal }
+    )
+    return response.data
+  },
+
+  // =========================================================================
   // Runtime Statistics (Phase 4A.8)
   // =========================================================================
 
@@ -182,6 +237,7 @@ export const actuatorsApi = {
     )
     return response.data
   },
+
 }
 
 

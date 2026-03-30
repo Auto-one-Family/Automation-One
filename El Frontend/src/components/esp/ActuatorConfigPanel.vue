@@ -488,12 +488,12 @@ function formatDuration(seconds: number): string {
         <!-- Pump -->
         <template v-if="isPump">
           <div class="actuator-config__field">
-            <label class="actuator-config__label">Max. Laufzeit (Safety)</label>
+            <label class="actuator-config__label">Geraete-Sicherheitslimit</label>
             <div class="actuator-config__input-with-unit">
               <input v-model.number="maxRuntime" type="number" min="1" class="actuator-config__input" />
               <span class="actuator-config__unit">Sek. ({{ formatDuration(maxRuntime) }})</span>
             </div>
-            <span class="actuator-config__helper">Pumpe schaltet IMMER nach dieser Zeit ab</span>
+            <span class="actuator-config__helper">Absolute Sicherheitsgrenze — greift unabhaengig von Regeln, auch bei manuellen Befehlen. Bei Ueberschreitung: Emergency Stop (Aktor gesperrt bis manueller Reset). Standard: 3600 Sek.</span>
           </div>
           <div class="actuator-config__field">
             <label class="actuator-config__label">Mindest-Pause zwischen Laeufen</label>
@@ -507,11 +507,12 @@ function formatDuration(seconds: number): string {
         <!-- Valve -->
         <template v-else-if="isValve">
           <div class="actuator-config__field">
-            <label class="actuator-config__label">Max. Offen-Zeit (Safety)</label>
+            <label class="actuator-config__label">Geraete-Sicherheitslimit</label>
             <div class="actuator-config__input-with-unit">
               <input v-model.number="maxOpenTime" type="number" min="1" class="actuator-config__input" />
               <span class="actuator-config__unit">Sek. ({{ formatDuration(maxOpenTime) }})</span>
             </div>
+            <span class="actuator-config__helper">Absolute Sicherheitsgrenze — greift unabhaengig von Regeln, auch bei manuellen Befehlen. Bei Ueberschreitung: Emergency Stop (Ventil gesperrt bis manueller Reset).</span>
           </div>
           <div class="actuator-config__field actuator-config__field--toggle">
             <label class="actuator-config__label">Normal-Closed (NC)</label>

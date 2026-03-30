@@ -23,8 +23,10 @@ interface Props {
   espId: string
   /** GPIO pin number */
   gpio: number
-  /** Actuator type (e.g., 'relay', 'pump', 'valve') */
+  /** Actuator type (server-normalized, e.g. 'digital', 'pwm') */
   actuatorType: string
+  /** Original ESP32 hardware type (relay, pump, valve, pwm) for icon lookup */
+  hardwareType?: string | null
   /** Actuator name (optional) */
   name?: string | null
   /** Current state (ON/OFF) */
@@ -78,8 +80,8 @@ const effectiveDraggable = computed(() => {
   return props.draggable
 })
 
-// Get actuator type info
-const actuatorInfo = computed(() => getActuatorTypeInfo(props.actuatorType))
+// Get actuator type info — hardware_type preferred for icon lookup (pump/valve/relay differentiation)
+const actuatorInfo = computed(() => getActuatorTypeInfo(props.actuatorType, props.hardwareType))
 
 // Get actuator icon component
 const actuatorIcon = computed(() => {

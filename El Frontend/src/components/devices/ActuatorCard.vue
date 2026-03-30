@@ -64,8 +64,9 @@ const isStale = computed(() => {
 })
 
 // 6.2-C: Type-specific icon via shared getActuatorTypeInfo (same source as ActuatorSatellite)
+// hardware_type carries the ESP32 logical type (relay/pump/valve) for correct icon lookup.
 const actuatorIcon = computed(() => {
-  const iconName = getActuatorTypeInfo(props.actuator.actuator_type).icon.toLowerCase()
+  const iconName = getActuatorTypeInfo(props.actuator.actuator_type, props.actuator.hardware_type).icon.toLowerCase()
   if (iconName.includes('toggle')) return ToggleRight
   if (iconName.includes('waves') || iconName.includes('pump')) return Waves
   if (iconName.includes('branch') || iconName.includes('valve')) return GitBranch
@@ -149,7 +150,7 @@ function handleToggle(event: Event) {
       </div>
       <div class="actuator-card__info">
         <p class="actuator-card__name">{{ displayName }}</p>
-        <p class="actuator-card__meta">{{ actuator.esp_id }} · {{ getActuatorTypeInfo(actuator.actuator_type).label }}</p>
+        <p class="actuator-card__meta">{{ actuator.esp_id }} · {{ getActuatorTypeInfo(actuator.actuator_type, actuator.hardware_type).label }}</p>
         <p class="actuator-card__served">
           <span class="actuator-card__served-label">Bedient:</span>
           <span class="actuator-card__served-value">{{ servedSubzoneLabel }}</span>
