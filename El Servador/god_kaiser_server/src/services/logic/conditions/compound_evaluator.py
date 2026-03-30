@@ -64,7 +64,10 @@ class CompoundConditionEvaluator(BaseConditionEvaluator):
 
         # Evaluate all sub-conditions
         results = []
-        for sub_condition in sub_conditions:
+        for idx, sub_condition in enumerate(sub_conditions):
+            # Set condition_index per sub-condition for correct hysteresis state keys
+            sub_context = {**context, "condition_index": idx}
+
             # Find appropriate evaluator for this sub-condition
             cond_type = sub_condition.get("type", "unknown")
 
@@ -83,7 +86,7 @@ class CompoundConditionEvaluator(BaseConditionEvaluator):
                 continue
 
             try:
-                result = await evaluator.evaluate(sub_condition, context)
+                result = await evaluator.evaluate(sub_condition, sub_context)
                 results.append(result)
             except Exception as e:
                 logger.error(

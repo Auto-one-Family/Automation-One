@@ -481,3 +481,114 @@ class TestHysteresisEvaluator:
         context = self.make_context(rule_id, 22.0)
         result = await evaluator.evaluate(heating_condition, context)
         assert result is True  # Bleibt aktiv
+
+    # === GPIO int() Coercion Tests (L2 Fix N5) ===
+
+    @pytest.mark.asyncio
+    async def test_gpio_float_vs_int_matches(self, evaluator, cooling_condition):
+        """GPIO as float(4.0) in data matches int(4) in condition."""
+        context = {
+            "rule_id": "rule-gpio",
+            "condition_index": 0,
+            "sensor_data": {"esp_id": "ESP_TEST", "gpio": 4.0, "value": 30.0},
+        }
+        result = await evaluator.evaluate(cooling_condition, context)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_gpio_string_vs_int_matches(self, evaluator, cooling_condition):
+        """GPIO as string '4' in data matches int(4) in condition."""
+        context = {
+            "rule_id": "rule-gpio",
+            "condition_index": 0,
+            "sensor_data": {"esp_id": "ESP_TEST", "gpio": "4", "value": 30.0},
+        }
+        result = await evaluator.evaluate(cooling_condition, context)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_gpio_zero_matches(self, evaluator):
+        """GPIO 0 (I2C convention for SHT31) matches correctly."""
+        cond = {
+            "type": "hysteresis",
+            "esp_id": "ESP_TEST",
+            "gpio": 0,
+            "activate_above": 28.0,
+            "deactivate_below": 24.0,
+        }
+        context = {
+            "rule_id": "rule-gpio0",
+            "condition_index": 0,
+            "sensor_data": {"esp_id": "ESP_TEST", "gpio": 0, "value": 30.0},
+        }
+        result = await evaluator.evaluate(cond, context)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_gpio_float_in_condition_matches(self, evaluator):
+        """GPIO as float(5.0) in condition matches int(5) in data."""
+        cond = {
+            "type": "hysteresis",
+            "esp_id": "ESP_TEST",
+            "gpio": 5.0,
+            "activate_above": 28.0,
+            "deactivate_below": 24.0,
+        }
+        context = {
+            "rule_id": "rule-gpio-float",
+            "condition_index": 0,
+            "sensor_data": {"esp_id": "ESP_TEST", "gpio": 5, "value": 30.0},
+        }
+        result = await evaluator.evaluate(cond, context)
+        assert result is True
+
+    # === _hysteresis_just_deactivated Flag Tests (L2) ===
+
+    @pytest.mark.asyncio
+    async def test_deactivation_flag_set_on_cooling(self, evaluator, cooling_condition):
+        """_hysteresis_just_deactivated flag set when cooling deactivates."""
+        # Activate
+        ctx1 = self.make_context("rule-flag", 30.0)
+        await evaluator.evaluate(cooling_condition, ctx1)
+        assert "_hysteresis_just_deactivated" not in ctx1
+
+        # Deactivate
+        ctx2 = self.make_context("rule-flag", 23.0)
+        await evaluator.evaluate(cooling_condition, ctx2)
+        assert ctx2.get("_hysteresis_just_deactivated") is True
+
+    @pytest.mark.asyncio
+    async def test_deactivation_flag_set_on_heating(self, evaluator, heating_condition):
+        """_hysteresis_just_deactivated flag set when heating deactivates."""
+        # Activate
+        ctx1 = self.make_context("rule-flag-h", 16.0)
+        await evaluator.evaluate(heating_condition, ctx1)
+        assert "_hysteresis_just_deactivated" not in ctx1
+
+        # Deactivate
+        ctx2 = self.make_context("rule-flag-h", 23.0)
+        await evaluator.evaluate(heating_condition, ctx2)
+        assert ctx2.get("_hysteresis_just_deactivated") is True
+
+    @pytest.mark.asyncio
+    async def test_deactivation_flag_not_set_on_activation(self, evaluator, cooling_condition):
+        """Flag is NOT set when activating."""
+        ctx = self.make_context("rule-flag-act", 30.0)
+        await evaluator.evaluate(cooling_condition, ctx)
+        assert "_hysteresis_just_deactivated" not in ctx
+
+    @pytest.mark.asyncio
+    async def test_deactivation_flag_not_set_on_non_matching_sensor(self, evaluator, cooling_condition):
+        """Flag is NOT set for non-matching sensor."""
+        # Activate first
+        ctx1 = self.make_context("rule-flag-nm", 30.0)
+        await evaluator.evaluate(cooling_condition, ctx1)
+
+        # Non-matching sensor
+        ctx2 = {
+            "rule_id": "rule-flag-nm",
+            "condition_index": 0,
+            "sensor_data": {"esp_id": "ESP_OTHER", "gpio": 4, "value": 10.0},
+        }
+        await evaluator.evaluate(cooling_condition, ctx2)
+        assert "_hysteresis_just_deactivated" not in ctx2

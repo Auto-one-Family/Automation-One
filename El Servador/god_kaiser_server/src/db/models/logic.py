@@ -1,5 +1,5 @@
 """
-Logic Models: CrossESPLogic, LogicExecutionHistory
+Logic Models: CrossESPLogic, LogicExecutionHistory, LogicHysteresisState
 """
 
 import uuid
@@ -7,7 +7,18 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from pydantic import ValidationError
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
@@ -328,4 +339,85 @@ class LogicExecutionHistory(Base):
         return (
             f"<LogicExecutionHistory(logic_rule_id='{self.logic_rule_id}', "
             f"success={self.success}, timestamp='{self.timestamp.isoformat()}')>"
+        )
+
+
+class LogicHysteresisState(Base):
+    """
+    Persistent hysteresis state for Logic Engine rules.
+
+    Survives server restarts. Without persistence, active hysteresis states
+    reset to inactive on restart, leaving actuators running uncontrolled
+    until the next threshold crossing.
+
+    State-Key: (rule_id, condition_index) — one state per hysteresis condition.
+    CASCADE delete: removing a rule auto-removes its hysteresis state.
+    """
+
+    __tablename__ = "logic_hysteresis_states"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+        doc="Primary key",
+    )
+
+    rule_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cross_esp_logic.id", ondelete="CASCADE"),
+        nullable=False,
+        doc="Foreign key to logic rule",
+    )
+
+    condition_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="Index of the hysteresis condition within the rule",
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Current activation state (True = actuator ON)",
+    )
+
+    last_value: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+        doc="Last processed sensor value",
+    )
+
+    last_activation: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Timestamp of last activation",
+    )
+
+    last_deactivation: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Timestamp of last deactivation",
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        doc="Timestamp of last state update",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "rule_id", "condition_index", name="uq_hysteresis_state_rule_cond"
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<LogicHysteresisState(rule_id='{self.rule_id}', "
+            f"condition_index={self.condition_index}, is_active={self.is_active})>"
         )

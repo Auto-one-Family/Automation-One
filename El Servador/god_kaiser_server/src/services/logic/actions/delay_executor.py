@@ -63,7 +63,9 @@ class DelayActionExecutor(BaseActionExecutor):
             )
 
         try:
-            # Sleep for specified duration
+            # NOTE: asyncio.sleep() blocks this rule's action chain intentionally.
+            # Other rules (separate asyncio tasks) are unaffected.
+            # For non-blocking delay (fire-and-forget next actions), use SequenceActionExecutor.
             logger.debug(f"Delay action: sleeping for {seconds} seconds")
             await asyncio.sleep(seconds)
 

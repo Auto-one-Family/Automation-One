@@ -324,6 +324,10 @@ class LogicEngine:
             trigger_data: Sensor data that triggered the rule
             logic_repo: LogicRepository instance
         """
+        # Concurrency: No engine-level lock by design.
+        # ConflictManager (asyncio.Lock per esp:gpio) prevents concurrent actuator commands.
+        # Cooldown checks have a ~10ms race window under burst load — acceptable for current scale.
+        # Add engine-level lock only if rule evaluation rate exceeds ~100/s.
         start_time = time.time()
 
         try:

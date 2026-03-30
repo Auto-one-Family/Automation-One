@@ -5,17 +5,21 @@ Implementiert Hysterese-Logik für schwellwertbasierte Bedingungen.
 Verhindert "Flattern" bei Werten nahe am Schwellwert.
 
 PATTERN: Folgt BaseConditionEvaluator (siehe sensor_evaluator.py)
-STATE: In-Memory pro Rule+Condition (geht bei Restart verloren → Default: inactive)
+STATE: In-Memory Cache + DB-Persistenz (überlebt Server-Restart)
 
-Phase: Logic Engine Phase 2
+Phase: Logic Engine Phase 2 + L2 Hysterese-Härtung
 Author: AutomationOne Development Team
 """
 
 from dataclasses import dataclass
 from datetime import datetime, UTC
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
+
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 
 from ....core.logging_config import get_logger
+from ....db.models.logic import LogicHysteresisState
 from .base import BaseConditionEvaluator
 
 logger = get_logger(__name__)
@@ -48,6 +52,7 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
     - Heizung: activate_below + deactivate_above (z.B. Heizung)
 
     State-Key Format: "{rule_id}:{condition_index}"
+    State is persisted to DB on every change and loaded on startup.
 
     Beispiel Kühlung:
         {
@@ -69,10 +74,17 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
         }
     """
 
-    def __init__(self):
-        """Initialisiert den Hysterese-Evaluator."""
+    def __init__(self, session_factory: Optional[Callable] = None):
+        """
+        Initialisiert den Hysterese-Evaluator.
+
+        Args:
+            session_factory: Async session factory for DB persistence.
+                             If None, states are only kept in memory.
+        """
         self._states: Dict[str, HysteresisState] = {}
-        logger.info("HysteresisConditionEvaluator initialized")
+        self._session_factory = session_factory
+        logger.info("HysteresisConditionEvaluator initialized (persistence=%s)", session_factory is not None)
 
     def supports(self, condition_type: str) -> bool:
         """
@@ -85,6 +97,73 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
             True wenn condition_type == "hysteresis"
         """
         return condition_type == "hysteresis"
+
+    async def load_states_from_db(self) -> int:
+        """
+        Load all hysteresis states from DB into memory cache.
+
+        Called once during server startup to restore state after restart.
+
+        Returns:
+            Number of states loaded
+        """
+        if not self._session_factory:
+            return 0
+
+        try:
+            async with self._session_factory() as session:
+                result = await session.execute(select(LogicHysteresisState))
+                rows = result.scalars().all()
+                for row in rows:
+                    key = f"{row.rule_id}:{row.condition_index}"
+                    self._states[key] = HysteresisState(
+                        is_active=row.is_active,
+                        last_activation=row.last_activation,
+                        last_deactivation=row.last_deactivation,
+                        last_value=row.last_value,
+                    )
+                logger.info("Loaded %d hysteresis states from DB", len(rows))
+                return len(rows)
+        except Exception as e:
+            logger.error("Failed to load hysteresis states from DB: %s", e, exc_info=True)
+            return 0
+
+    async def _persist_state(self, key: str, state: HysteresisState) -> None:
+        """
+        Persist a state change to DB (upsert).
+
+        Called only when is_active actually changes, not on every evaluation.
+
+        Args:
+            key: State key in format "rule_id:condition_index"
+            state: Current HysteresisState to persist
+        """
+        if not self._session_factory:
+            return
+
+        try:
+            rule_id_str, condition_index_str = key.split(":", 1)
+            async with self._session_factory() as session:
+                stmt = insert(LogicHysteresisState).values(
+                    rule_id=rule_id_str,
+                    condition_index=int(condition_index_str),
+                    is_active=state.is_active,
+                    last_value=state.last_value,
+                    last_activation=state.last_activation,
+                    last_deactivation=state.last_deactivation,
+                ).on_conflict_do_update(
+                    constraint="uq_hysteresis_state_rule_cond",
+                    set_={
+                        "is_active": state.is_active,
+                        "last_value": state.last_value,
+                        "last_activation": state.last_activation,
+                        "last_deactivation": state.last_deactivation,
+                    },
+                )
+                await session.execute(stmt)
+                await session.commit()
+        except Exception as e:
+            logger.error("Failed to persist hysteresis state for %s: %s", key, e, exc_info=True)
 
     async def evaluate(self, condition: Dict, context: Dict) -> bool:
         """
@@ -131,6 +210,7 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
 
         # 3. Hole/Erstelle State für diese Rule+Condition
         state = self._get_state(context)
+        previous_active = state.is_active
         state.last_value = value
 
         # 4. Hysterese-Logik
@@ -199,6 +279,11 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
             )
             return False
 
+        # 5. Persist to DB only on state change
+        if state.is_active != previous_active:
+            key = self._get_state_key(context)
+            await self._persist_state(key, state)
+
         return state.is_active
 
     def _get_state_key(self, context: Dict) -> str:
@@ -246,8 +331,11 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
         if condition.get("esp_id") != sensor_data.get("esp_id"):
             return False
 
-        # GPIO muss matchen
-        if condition.get("gpio") != sensor_data.get("gpio"):
+        # GPIO muss matchen (int coercion: JSON may deliver float or string)
+        try:
+            if int(condition.get("gpio", -1)) != int(sensor_data.get("gpio", -2)):
+                return False
+        except (ValueError, TypeError):
             return False
 
         # Sensor-Type ist optional (case-insensitive: ESP sends lowercase,

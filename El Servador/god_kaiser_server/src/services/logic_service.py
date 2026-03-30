@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from ..core.logging_config import get_logger
 from ..db.models.logic import CrossESPLogic
 from ..db.repositories import LogicRepository
+from ..db.session import get_session
 from ..schemas.logic import (
     ActionResult,
     ConditionResult,
@@ -30,6 +31,7 @@ from .logic.conditions import (
     SensorConditionEvaluator,
     TimeConditionEvaluator,
 )
+from .logic.conditions.diagnostics_evaluator import DiagnosticsConditionEvaluator
 from .logic.validator import LogicValidator, ValidationResult
 
 logger = get_logger(__name__)
@@ -69,11 +71,15 @@ class LogicService:
             sensor_eval = SensorConditionEvaluator()
             time_eval = TimeConditionEvaluator()
             hysteresis_eval = HysteresisConditionEvaluator()
-            compound_eval = CompoundConditionEvaluator([sensor_eval, time_eval, hysteresis_eval])
+            diagnostics_eval = DiagnosticsConditionEvaluator(session_factory=get_session)
+            compound_eval = CompoundConditionEvaluator(
+                [sensor_eval, time_eval, hysteresis_eval, diagnostics_eval]
+            )
             self.condition_evaluators = [
                 sensor_eval,
                 time_eval,
                 hysteresis_eval,
+                diagnostics_eval,
                 compound_eval,
             ]
         else:
