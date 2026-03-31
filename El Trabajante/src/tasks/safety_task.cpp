@@ -1,0 +1,119 @@
+#include "safety_task.h"
+#include <esp_task_wdt.h>
+#include <freertos/portmacro.h>  // StackType_t — stack HWM in bytes
+#include "../services/sensor/sensor_manager.h"
+#include "../services/actuator/actuator_manager.h"
+#include "../services/actuator/safety_controller.h"  // M2: emergencyStopAll() via xTaskNotify
+#include "../services/safety/offline_mode_manager.h" // M3: SAFETY-P4 offline rules on Core 1
+#include "../error_handling/health_monitor.h"
+#include "actuator_command_queue.h"
+#include "sensor_command_queue.h"
+#include "config_update_queue.h"
+#include "../utils/logger.h"
+
+static const char* SAFETY_TAG = "SAFETY";
+
+TaskHandle_t g_safety_task_handle = NULL;
+
+static const uint32_t SAFETY_TASK_STACK_SIZE = 8192;
+static const UBaseType_t SAFETY_TASK_PRIORITY = 5;
+static const BaseType_t SAFETY_TASK_CORE = 1;
+
+// Forward declaration — defined in main.cpp
+extern void checkServerAckTimeout();
+
+void createSafetyTask() {
+    xTaskCreatePinnedToCore(
+        safetyTaskFunction,
+        "SafetyTask",
+        SAFETY_TASK_STACK_SIZE,
+        NULL,
+        SAFETY_TASK_PRIORITY,
+        &g_safety_task_handle,
+        SAFETY_TASK_CORE
+    );
+}
+
+void safetyTaskFunction(void* param) {
+    (void)param;
+    #ifndef WOKWI_SIMULATION
+    esp_task_wdt_add(NULL);
+    #endif
+
+    LOG_I(SAFETY_TAG, "[SAFETY] Safety task running on core " + String(xPortGetCoreID()));
+
+    static uint32_t stack_log_counter = 0;
+
+    for (;;) {
+        // ============================================
+        // M2: Cross-Core Notification Handler
+        // ============================================
+        // Poll notifications from MQTT task (Core 0) — latency < 1 loop cycle (10ms).
+        // Bit-mask cleared atomically; multiple bits can arrive in one cycle.
+        {
+            uint32_t notified = 0;
+            xTaskNotifyWait(0, UINT32_MAX, &notified, 0);  // Non-blocking poll
+
+            if (notified & NOTIFY_EMERGENCY_STOP) {
+                LOG_W(SAFETY_TAG, "[SAFETY-M2] EMERGENCY_STOP received — stopping all actuators");
+                safetyController.emergencyStopAll("MQTT emergency command (Core 0 notify)");
+            }
+            if (notified & NOTIFY_MQTT_DISCONNECTED) {
+                if (offlineModeManager.getOfflineRuleCount() > 0) {
+                    LOG_W(SAFETY_TAG, "[SAFETY-M2] MQTT_DISCONNECTED — " +
+                          String(offlineModeManager.getOfflineRuleCount()) +
+                          " offline rules available, delegating to P4");
+                    // P4 Grace Period runs; rules take over after 30s
+                } else {
+                    if (actuatorManager.isInitialized()) {
+                        actuatorManager.setAllActuatorsToSafeState();
+                    }
+                    LOG_W(SAFETY_TAG, "[SAFETY-M2] MQTT_DISCONNECTED — no offline rules, setting actuators to safe state immediately");
+                }
+            }
+            // NOTIFY_SUBZONE_SAFE: M3 — full GPIO routing via Core 1 queue (not yet implemented)
+        }
+
+        #ifndef WOKWI_SIMULATION
+        esp_task_wdt_reset();
+        #endif
+
+        sensorManager.performAllMeasurements();
+        actuatorManager.processActuatorLoops();
+        checkServerAckTimeout();
+        processActuatorCommandQueue();
+        processSensorCommandQueue();
+        processConfigUpdateQueue();  // SAFETY-RTOS M4.6: drain Core 0→1 config queue
+        healthMonitor.loop();
+
+        // ============================================
+        // M3: SAFETY-P4 Offline Hysteresis (Core 1)
+        // ============================================
+        // checkDelayTimer: transition DISCONNECTING → OFFLINE_ACTIVE after 30 s grace period.
+        // evaluateOfflineRules: apply local actuator rules every 5 s when offline.
+        // Runs on Core 1 because offline rules directly control GPIO/actuators.
+        offlineModeManager.checkDelayTimer();
+        {
+            static unsigned long last_offline_eval = 0;
+            static const unsigned long OFFLINE_EVAL_INTERVAL_MS = 5000;
+            if (offlineModeManager.isOfflineActive()) {
+                if (millis() - last_offline_eval > OFFLINE_EVAL_INTERVAL_MS) {
+                    last_offline_eval = millis();
+                    offlineModeManager.evaluateOfflineRules();
+                }
+            }
+        }
+
+        // Log stack highwater mark every ~60s (6000 * 10ms = 60s)
+        // uxTaskGetStackHighWaterMark returns free stack in words; Xtensa word = 4 bytes.
+        stack_log_counter++;
+        if (stack_log_counter >= 6000) {
+            stack_log_counter = 0;
+            UBaseType_t hwm = uxTaskGetStackHighWaterMark(g_safety_task_handle);
+            LOG_I(SAFETY_TAG, "[SAFETY] Stack HWM: " +
+                  String((uint32_t)(hwm * (uint32_t)sizeof(StackType_t))) + " bytes free");
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}

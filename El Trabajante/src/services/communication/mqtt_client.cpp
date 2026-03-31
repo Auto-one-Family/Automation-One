@@ -3,10 +3,19 @@
 #include "../../services/config/config_manager.h"
 #include "../../services/sensor/sensor_manager.h"
 #include "../../services/actuator/actuator_manager.h"
+#include "../../services/safety/offline_mode_manager.h"
 #include "../../utils/time_manager.h"
 #include "../../drivers/gpio_manager.h"  // Phase 1: GPIO Status
 #include "../../config/feature_flags.h"
 #include <WiFi.h>
+
+#ifndef MQTT_USE_PUBSUBCLIENT
+    #include "../../tasks/safety_task.h"         // g_safety_task_handle, NOTIFY_* bits
+    #include "../../tasks/publish_queue.h"       // M3: Core 1 → Core 0 publish queue
+    #include "../../error_handling/error_tracker.h"
+    // Forward declarations from main.cpp
+    extern void routeIncomingMessage(const char* topic, const char* payload);
+#endif
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "MQTT";
@@ -18,11 +27,22 @@ extern KaiserZone g_kaiser;
 extern SystemConfig g_system_config;
 
 // ============================================
-// CONSTANTS
+// SHARED ATOMIC STATE (SAFETY-RTOS M2)
+// Written by MQTT_EVENT_CONNECTED/DISCONNECTED (Core 0 — MQTT event task).
+// Read by checkServerAckTimeout() in Safety-Task (Core 1) via mqttClient.isConnected().
 // ============================================
+#ifndef MQTT_USE_PUBSUBCLIENT
+std::atomic<bool> g_mqtt_connected{false};
+#endif
+
+// ============================================
+// CONSTANTS (PubSubClient path — seeed/wokwi only)
+// ============================================
+#ifdef MQTT_USE_PUBSUBCLIENT
 const unsigned long RECONNECT_BASE_DELAY_MS = 1000;   // 1 second
 const unsigned long RECONNECT_MAX_DELAY_MS = 60000;   // 60 seconds
 const uint16_t MAX_RECONNECT_ATTEMPTS = 10;
+#endif
 
 // ============================================
 // STATIC MEMBERS
@@ -48,11 +68,16 @@ MQTTClient& MQTTClient::getInstance() {
 // CONSTRUCTOR / DESTRUCTOR
 // ============================================
 MQTTClient::MQTTClient()
-    : mqtt_(wifi_client_),
+    :
+#ifndef MQTT_USE_PUBSUBCLIENT
+      mqtt_client_(nullptr),
+#else
+      mqtt_(wifi_client_),
       offline_buffer_count_(0),
       last_reconnect_attempt_(0),
       reconnect_attempts_(0),
       reconnect_delay_ms_(RECONNECT_BASE_DELAY_MS),
+#endif
       initialized_(false),
       anonymous_mode_(true),
       last_heartbeat_(0),
@@ -60,10 +85,10 @@ MQTTClient::MQTTClient()
       registration_confirmed_(false),
       registration_start_ms_(0),
       publish_seq_(0) {
-  // Circuit Breaker configured:
-  // - 5 failures → OPEN
-  // - 30s recovery timeout
-  // - 10s half-open test timeout
+    // Circuit Breaker configured:
+    // - 5 failures → OPEN
+    // - 30s recovery timeout
+    // - 10s half-open test timeout
 }
 
 MQTTClient::~MQTTClient() {
@@ -78,9 +103,11 @@ bool MQTTClient::begin() {
         LOG_W(TAG, "MQTTClient already initialized");
         return true;
     }
-    
+
+#ifdef MQTT_USE_PUBSUBCLIENT
     mqtt_.setCallback(staticCallback);
-    
+#endif
+
     initialized_ = true;
     LOG_I(TAG, "MQTTClient initialized");
     return true;
@@ -90,389 +117,200 @@ bool MQTTClient::begin() {
 // CONNECTION MANAGEMENT
 // ============================================
 bool MQTTClient::connect(const MQTTConfig& config) {
-    #ifdef ENABLE_AGENT_DEBUG_LOGS
-    // #region agent log
-    { char dbg[384];
-      snprintf(dbg, sizeof(dbg),
-        "[DEBUG]{\"id\":\"mqtt_connect_entry\",\"timestamp\":%lu"
-        ",\"location\":\"mqtt_client.cpp:84\",\"message\":\"MQTT connect() called\""
-        ",\"data\":{\"server\":\"%s\",\"port\":%d,\"client_id\":\"%s\",\"username_len\":%u}"
-        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
-        millis(), config.server.c_str(), config.port, config.client_id.c_str(),
-        (unsigned int)config.username.length());
-      Serial.println(dbg); }
-    // #endregion
-    #endif
-    
     if (!initialized_) {
         LOG_E(TAG, "MQTTClient not initialized");
-        errorTracker.logCommunicationError(ERROR_MQTT_INIT_FAILED, 
-                                           "MQTTClient not initialized");
+        errorTracker.logCommunicationError(ERROR_MQTT_INIT_FAILED, "MQTTClient not initialized");
         return false;
     }
-    
-    // Validate config
+
     if (config.server.length() == 0) {
-        #ifdef ENABLE_AGENT_DEBUG_LOGS
-        // #region agent log
-        { char dbg[256];
-          snprintf(dbg, sizeof(dbg),
-            "[DEBUG]{\"id\":\"mqtt_connect_empty_server\",\"timestamp\":%lu"
-            ",\"location\":\"mqtt_client.cpp:93\",\"message\":\"MQTT server address is empty\""
-            ",\"data\":{},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
-            millis());
-          Serial.println(dbg); }
-        // #endregion
-        #endif
         LOG_E(TAG, "MQTT server address is empty");
-        errorTracker.logCommunicationError(ERROR_MQTT_INIT_FAILED, 
-                                           "MQTT server address is empty");
+        errorTracker.logCommunicationError(ERROR_MQTT_INIT_FAILED, "MQTT server address is empty");
         return false;
     }
-    
+
     current_config_ = config;
-    reconnect_attempts_ = 0;
-    reconnect_delay_ms_ = RECONNECT_BASE_DELAY_MS;
-    
-    // Check authentication mode
     anonymous_mode_ = (config.username.length() == 0);
+
     if (anonymous_mode_) {
         LOG_I(TAG, "MQTT connecting in Anonymous Mode");
     } else {
         LOG_I(TAG, "MQTT connecting with authentication");
     }
-    
-    // Set server
+
+#ifndef MQTT_USE_PUBSUBCLIENT
+    // ============================================
+    // SAFETY-RTOS M2: ESP-IDF MQTT — NON-BLOCKING
+    // esp_mqtt_client_start() returns immediately.
+    // MQTT_EVENT_CONNECTED fires asynchronously when connection is established.
+    // ============================================
+
+    // Build broker URI: "mqtt://hostname:port"
+    char broker_uri[96];
+    snprintf(broker_uri, sizeof(broker_uri), "mqtt://%s:%d",
+             config.server.c_str(), config.port);
+
+    // Build Last-Will topic: kaiser/{k}/esp/{e}/system/will
+    // Use heartbeat topic as base and replace /heartbeat with /will
+    String lw_topic_str = String(TopicBuilder::buildSystemHeartbeatTopic());
+    lw_topic_str.replace("/heartbeat", "/will");
+
+    // Build Last-Will payload (JSON)
+    time_t will_ts = timeManager.getUnixTimestamp();
+    char lw_msg[160];
+    snprintf(lw_msg, sizeof(lw_msg),
+             "{\"status\":\"offline\",\"esp_id\":\"%s\",\"reason\":\"unexpected_disconnect\",\"timestamp\":%lu}",
+             g_system_config.esp_id.c_str(), (unsigned long)will_ts);
+
+    LOG_I(TAG, "Broker URI: " + String(broker_uri));
+    LOG_I(TAG, "Last-Will Topic: " + lw_topic_str);
+
+    // ESP-IDF v4.x flache esp_mqtt_client_config_t (Arduino-ESP32 3.x) — nicht die v5-Nested-Struct.
+    esp_mqtt_client_config_t mqtt_cfg = {};
+    mqtt_cfg.uri = broker_uri;
+    mqtt_cfg.keepalive = config.keepalive;
+    mqtt_cfg.disable_clean_session = 0;
+
+    mqtt_cfg.lwt_topic = lw_topic_str.c_str();
+    mqtt_cfg.lwt_msg = lw_msg;
+    mqtt_cfg.lwt_qos = 1;
+    mqtt_cfg.lwt_retain = 1;
+    mqtt_cfg.lwt_msg_len = 0;
+
+    mqtt_cfg.buffer_size = 4096;
+    mqtt_cfg.out_buffer_size = 2048;
+
+    mqtt_cfg.client_id = config.client_id.c_str();
+    if (!anonymous_mode_) {
+        mqtt_cfg.username = config.username.c_str();
+        mqtt_cfg.password = config.password.c_str();
+    }
+
+    mqtt_cfg.task_stack = 10240;
+    mqtt_cfg.task_prio = 3;
+
+    // Destroy old client if present (e.g. reconnect after config change)
+    if (mqtt_client_ != nullptr) {
+        esp_mqtt_client_stop(mqtt_client_);
+        esp_mqtt_client_destroy(mqtt_client_);
+        mqtt_client_ = nullptr;
+    }
+
+    mqtt_client_ = esp_mqtt_client_init(&mqtt_cfg);
+    if (mqtt_client_ == nullptr) {
+        LOG_E(TAG, "esp_mqtt_client_init() failed — nullptr returned");
+        errorTracker.logCommunicationError(ERROR_MQTT_INIT_FAILED, "esp_mqtt_client_init failed");
+        return false;
+    }
+
+    // Reset Registration Gate
+    registration_confirmed_ = false;
+    registration_start_ms_  = millis();
+
+    // Register event handler (args = this, so handler can access members)
+    esp_mqtt_client_register_event(mqtt_client_, MQTT_EVENT_ANY, mqtt_event_handler, this);
+
+    // Start client — NON-BLOCKING. Connection happens in background MQTT task.
+    esp_err_t err = esp_mqtt_client_start(mqtt_client_);
+    if (err != ESP_OK) {
+        LOG_E(TAG, String("esp_mqtt_client_start() failed: ") + esp_err_to_name(err));
+        errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED,
+                                           "esp_mqtt_client_start failed");
+        esp_mqtt_client_destroy(mqtt_client_);
+        mqtt_client_ = nullptr;
+        return false;
+    }
+
+    // NOTE (M2): connect() returns true immediately — actual MQTT connection is async.
+    // MQTT_EVENT_CONNECTED fires when broker accepts the connection.
+    // Consequence: mqttClient.connect() in setup() will NOT fail even if broker is unreachable.
+    // Portal recovery for MQTT failure now happens via the 5-minute persistent-failure timer
+    // in loop() (CircuitBreaker OPEN → provisionManager.startAPModeForReconfig()).
+    LOG_I(TAG, "[M2] ESP-IDF MQTT client started — connecting in background");
+    return true;
+
+#else
+    // ============================================
+    // PubSubClient path (seeed, wokwi — MQTT_USE_PUBSUBCLIENT=1)
+    // ============================================
+    reconnect_attempts_ = 0;
+    reconnect_delay_ms_ = RECONNECT_BASE_DELAY_MS;
+
     mqtt_.setServer(config.server.c_str(), config.port);
     mqtt_.setKeepAlive(config.keepalive);
 
-    #ifdef ENABLE_AGENT_DEBUG_LOGS
-    // #region agent log
-    { char dbg[384];
-      snprintf(dbg, sizeof(dbg),
-        "[DEBUG]{\"id\":\"mqtt_connect_before_broker\",\"timestamp\":%lu"
-        ",\"location\":\"mqtt_client.cpp:115\",\"message\":\"About to call connectToBroker()\""
-        ",\"data\":{\"server_set\":\"%s\",\"port_set\":%d,\"wifi_status\":%d,\"wifi_connected\":%s}"
-        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\"}",
-        millis(), config.server.c_str(), config.port, WiFi.status(),
-        WiFi.isConnected() ? "true" : "false");
-      Serial.println(dbg); }
-    // #endregion
-    #endif
-    
     return connectToBroker();
-}
-
-bool MQTTClient::connectToBroker() {
-    #ifdef ENABLE_AGENT_DEBUG_LOGS
-    // #region agent log
-    { char dbg[512];
-      snprintf(dbg, sizeof(dbg),
-        "[DEBUG]{\"id\":\"mqtt_connect_broker_entry\",\"timestamp\":%lu"
-        ",\"location\":\"mqtt_client.cpp:119\",\"message\":\"connectToBroker() called\""
-        ",\"data\":{\"server\":\"%s\",\"port\":%d,\"mqtt_state\":%d"
-        ",\"wifi_status\":%d,\"wifi_ssid\":\"%s\",\"wifi_ip\":\"%s\"}"
-        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"C\"}",
-        millis(), current_config_.server.c_str(), current_config_.port, mqtt_.state(),
-        WiFi.status(), WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
-      Serial.println(dbg); }
-    // #endregion
-    #endif
-    
-    LOG_I(TAG, "Connecting to MQTT broker: " + current_config_.server + ":" + String(current_config_.port));
-
-    // Re-set server before every connection attempt to prevent dangling pointer.
-    // PubSubClient::setServer() stores only the char* pointer, not a copy.
-    // If Arduino String reallocates its internal buffer (heap fragmentation),
-    // the old pointer becomes invalid. This fixes DNS resolution errors
-    // like "hostByName(): DNS Failed for <garbage>" on reconnect.
-    mqtt_.setServer(current_config_.server.c_str(), current_config_.port);
-
-    // ============================================
-    // LAST-WILL CONFIGURATION (Critical for ESP failure detection)
-    // ============================================
-    // Build Last-Will Topic: kaiser/{kaiser_id}/esp/{esp_id}/status/will
-    // Use Heartbeat topic and replace /heartbeat with /will
-    String last_will_topic = String(TopicBuilder::buildSystemHeartbeatTopic());
-    last_will_topic.replace("/heartbeat", "/will");
-
-    // Build Last-Will Message: JSON with offline status
-    // Phase 8: Use NTP-synchronized Unix timestamp
-    time_t will_timestamp = timeManager.getUnixTimestamp();
-    String last_will_message = "{\"status\":\"offline\",\"reason\":\"unexpected_disconnect\",\"timestamp\":" +
-                               String((unsigned long)will_timestamp) + "}";
-
-    LOG_I(TAG, "Last-Will Topic: " + last_will_topic);
-    LOG_I(TAG, "Last-Will Message: " + last_will_message);
-
-    // ✅ FIX #2: Auto-Fallback von Port 8883 → 1883
-    // Try configured port first (likely 8883 for TLS)
-    #ifdef ENABLE_AGENT_DEBUG_LOGS
-    // #region agent log
-    { char dbg[384];
-      snprintf(dbg, sizeof(dbg),
-        "[DEBUG]{\"id\":\"mqtt_connect_before_attempt\",\"timestamp\":%lu"
-        ",\"location\":\"mqtt_client.cpp:141\",\"message\":\"About to attempt MQTT connection\""
-        ",\"data\":{\"server\":\"%s\",\"port\":%d,\"hostname_length\":%u}"
-        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
-        millis(), current_config_.server.c_str(), current_config_.port,
-        (unsigned int)current_config_.server.length());
-      Serial.println(dbg); }
-    // #endregion
-    #endif
-    bool connected = attemptMQTTConnection(last_will_topic, last_will_message);
-
-    // If connection failed and port is 8883 (TLS), try fallback to 1883 (plain MQTT)
-    if (!connected && current_config_.port == 8883) {
-        LOG_W(TAG, "╔════════════════════════════════════════╗");
-        LOG_W(TAG, "║  ⚠️  MQTT PORT FALLBACK               ║");
-        LOG_W(TAG, "╚════════════════════════════════════════╝");
-        LOG_W(TAG, "Port 8883 (TLS) failed - trying port 1883 (plain MQTT)");
-        LOG_W(TAG, "Reason: Server may not support TLS on port 8883");
-        LOG_W(TAG, "Empfehlung: Update .env.example MQTT_BROKER_PORT=1883");
-
-        // Update port and retry
-        current_config_.port = 1883;
-        mqtt_.setServer(current_config_.server.c_str(), current_config_.port);
-
-        LOG_I(TAG, "Retrying MQTT connection with port 1883...");
-        connected = attemptMQTTConnection(last_will_topic, last_will_message);
-
-        if (connected) {
-            LOG_I(TAG, "✅ Port-Fallback successful! Connected on port 1883");
-        }
-    }
-
-    if (connected) {
-        #ifdef ENABLE_AGENT_DEBUG_LOGS
-        // #region agent log
-        { char dbg[384];
-          snprintf(dbg, sizeof(dbg),
-            "[DEBUG]{\"id\":\"mqtt_connect_success\",\"timestamp\":%lu"
-            ",\"location\":\"mqtt_client.cpp:164\",\"message\":\"MQTT connection successful\""
-            ",\"data\":{\"server\":\"%s\",\"port\":%d,\"mqtt_state\":%d}"
-            ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
-            millis(), current_config_.server.c_str(), current_config_.port, mqtt_.state());
-          Serial.println(dbg); }
-        // #endregion
-        #endif
-        LOG_I(TAG, "MQTT connected!");
-        reconnect_attempts_ = 0;
-        reconnect_delay_ms_ = RECONNECT_BASE_DELAY_MS;
-
-        // Reset Circuit Breaker on successful connection (Phase 6+)
-        circuit_breaker_.recordSuccess();
-
-        // ============================================
-        // REGISTRATION GATE RESET (Bug #1 Fix)
-        // ============================================
-        registration_confirmed_ = false;
-        registration_start_ms_ = millis();
-        LOG_I(TAG, "Registration gate closed - awaiting heartbeat ACK");
-
-        // Process offline buffer
-        processOfflineBuffer();
-
-        return true;
-    } else {
-        #ifdef ENABLE_AGENT_DEBUG_LOGS
-        // #region agent log
-        { char dbg[384];
-          snprintf(dbg, sizeof(dbg),
-            "[DEBUG]{\"id\":\"mqtt_connect_failed\",\"timestamp\":%lu"
-            ",\"location\":\"mqtt_client.cpp:177\",\"message\":\"MQTT connection failed\""
-            ",\"data\":{\"server\":\"%s\",\"port\":%d,\"mqtt_state\":%d"
-            ",\"server_length\":%u,\"wifi_status\":%d}"
-            ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
-            millis(), current_config_.server.c_str(), current_config_.port, mqtt_.state(),
-            (unsigned int)current_config_.server.length(), WiFi.status());
-          Serial.println(dbg); }
-        // #endregion
-        #endif
-        LOG_E(TAG, "MQTT connection failed, rc=" + String(mqtt_.state()));
-        errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED,
-                                           ("MQTT connection failed, rc=" + String(mqtt_.state())).c_str());
-        return false;
-    }
-}
-
-// ✅ FIX #2: Helper function for connection attempts
-bool MQTTClient::attemptMQTTConnection(const String& last_will_topic, const String& last_will_message) {
-    #ifdef ENABLE_AGENT_DEBUG_LOGS
-    // #region agent log
-    { char dbg[512];
-      snprintf(dbg, sizeof(dbg),
-        "[DEBUG]{\"id\":\"mqtt_attempt_entry\",\"timestamp\":%lu"
-        ",\"location\":\"mqtt_client.cpp:185\",\"message\":\"attemptMQTTConnection() called\""
-        ",\"data\":{\"server\":\"%s\",\"port\":%d,\"anonymous_mode\":%s"
-        ",\"client_id\":\"%s\",\"mqtt_state_before\":%d}"
-        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
-        millis(), current_config_.server.c_str(), current_config_.port,
-        anonymous_mode_ ? "true" : "false",
-        current_config_.client_id.c_str(), mqtt_.state());
-      Serial.println(dbg); }
-    // #endregion
-    #endif
-    
-    bool result = false;
-    if (anonymous_mode_) {
-        // Anonymous connection with Last-Will
-        #ifdef ENABLE_AGENT_DEBUG_LOGS
-        // #region agent log
-        { char dbg[256];
-          snprintf(dbg, sizeof(dbg),
-            "[DEBUG]{\"id\":\"mqtt_attempt_anonymous\",\"timestamp\":%lu"
-            ",\"location\":\"mqtt_client.cpp:188\",\"message\":\"Calling mqtt_.connect() anonymous\""
-            ",\"data\":{\"server\":\"%s\",\"port\":%d}"
-            ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
-            millis(), current_config_.server.c_str(), current_config_.port);
-          Serial.println(dbg); }
-        // #endregion
-        #endif
-        result = mqtt_.connect(
-            current_config_.client_id.c_str(),
-            last_will_topic.c_str(),
-            1,  // QoS 1 (At Least Once)
-            true,  // Retain flag (God-Kaiser kann offline-Status später abrufen)
-            last_will_message.c_str()
-        );
-    } else {
-        // Authenticated connection with Last-Will
-        #ifdef ENABLE_AGENT_DEBUG_LOGS
-        // #region agent log
-        { char dbg[256];
-          snprintf(dbg, sizeof(dbg),
-            "[DEBUG]{\"id\":\"mqtt_attempt_authenticated\",\"timestamp\":%lu"
-            ",\"location\":\"mqtt_client.cpp:197\",\"message\":\"Calling mqtt_.connect() authenticated\""
-            ",\"data\":{\"server\":\"%s\",\"port\":%d}"
-            ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
-            millis(), current_config_.server.c_str(), current_config_.port);
-          Serial.println(dbg); }
-        // #endregion
-        #endif
-        result = mqtt_.connect(
-            current_config_.client_id.c_str(),
-            current_config_.username.c_str(),
-            current_config_.password.c_str(),
-            last_will_topic.c_str(),
-            1,  // QoS 1 (At Least Once)
-            true,  // Retain flag
-            last_will_message.c_str()
-        );
-    }
-
-    #ifdef ENABLE_AGENT_DEBUG_LOGS
-    // #region agent log
-    { char dbg[384];
-      snprintf(dbg, sizeof(dbg),
-        "[DEBUG]{\"id\":\"mqtt_attempt_result\",\"timestamp\":%lu"
-        ",\"location\":\"mqtt_client.cpp:207\",\"message\":\"MQTT connect() returned\""
-        ",\"data\":{\"result\":%s,\"mqtt_state_after\":%d,\"server\":\"%s\",\"port\":%d}"
-        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}",
-        millis(), result ? "true" : "false", mqtt_.state(),
-        current_config_.server.c_str(), current_config_.port);
-      Serial.println(dbg); }
-    // #endregion
-    #endif
-    
-    return result;
+#endif
 }
 
 bool MQTTClient::disconnect() {
+#ifndef MQTT_USE_PUBSUBCLIENT
+    if (mqtt_client_ != nullptr) {
+        esp_mqtt_client_stop(mqtt_client_);
+        esp_mqtt_client_destroy(mqtt_client_);
+        mqtt_client_ = nullptr;
+        g_mqtt_connected.store(false);
+        LOG_I(TAG, "MQTT disconnected (ESP-IDF client destroyed)");
+    }
+    return true;
+#else
     if (mqtt_.connected()) {
         mqtt_.disconnect();
         LOG_I(TAG, "MQTT disconnected");
     }
     return true;
+#endif
 }
 
 bool MQTTClient::isConnected() {
+#ifndef MQTT_USE_PUBSUBCLIENT
+    return g_mqtt_connected.load();
+#else
     return mqtt_.connected();
+#endif
 }
 
 void MQTTClient::reconnect() {
+#ifndef MQTT_USE_PUBSUBCLIENT
+    // ESP-IDF reconnects automatically — no manual reconnect needed.
+    // This method is kept for interface compatibility (called from loop() in PubSubClient path).
+    // In ESP-IDF path loop() does not call reconnect().
+#else
     if (isConnected()) {
         LOG_D(TAG, "MQTT already connected");
-        circuit_breaker_.recordSuccess();  // Reset on successful connection
+        circuit_breaker_.recordSuccess();
         return;
     }
-    
-    // ============================================
-    // CIRCUIT BREAKER CHECK (Phase 6+)
-    // ============================================
+
     if (!circuit_breaker_.allowRequest()) {
-        // Rate-limit debug messages when circuit breaker is OPEN (max once per second)
         static unsigned long last_circuit_breaker_log = 0;
         unsigned long now = millis();
         if (now - last_circuit_breaker_log > 1000) {
             last_circuit_breaker_log = now;
-            #ifdef ENABLE_AGENT_DEBUG_LOGS
-            // #region agent log
-            { char dbg[384];
-              snprintf(dbg, sizeof(dbg),
-                "[DEBUG]{\"id\":\"mqtt_reconnect_circuit_breaker\",\"timestamp\":%lu"
-                ",\"location\":\"mqtt_client.cpp:383\",\"message\":\"Reconnect blocked by Circuit Breaker\""
-                ",\"data\":{\"circuit_open\":true,\"failure_count\":%u}"
-                ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}",
-                now, (unsigned int)circuit_breaker_.getFailureCount());
-              Serial.println(dbg); }
-            // #endregion
-            #endif
             LOG_D(TAG, "MQTT reconnect blocked by Circuit Breaker (waiting for recovery)");
         }
-        return;  // Skip reconnect attempt
+        return;
     }
-    
-    // Check if we should attempt reconnect (respects exponential backoff)
+
     if (!shouldAttemptReconnect()) {
         return;
     }
-    
+
     reconnect_attempts_++;
     last_reconnect_attempt_ = millis();
 
-    // ✅ IMPROVEMENT #3: Keine Reconnect-Limit (Circuit Breaker regelt Fehlerbehandlung)
-    LOG_I(TAG, "Attempting MQTT reconnection (attempt " +
-             String(reconnect_attempts_) + ")");
-
-    // Debug log only when reconnect is actually attempted (after all checks)
-    #ifdef ENABLE_AGENT_DEBUG_LOGS
-    // #region agent log
-    { char dbg[512];
-      snprintf(dbg, sizeof(dbg),
-        "[DEBUG]{\"id\":\"mqtt_reconnect_attempt\",\"timestamp\":%lu"
-        ",\"location\":\"mqtt_client.cpp:407\",\"message\":\"About to call connectToBroker() for reconnect\""
-        ",\"data\":{\"attempt\":%u,\"server\":\"%s\",\"port\":%d"
-        ",\"server_length\":%u,\"circuit_breaker_state\":\"%s\"}"
-        ",\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\"}",
-        millis(), (unsigned int)reconnect_attempts_, current_config_.server.c_str(),
-        current_config_.port, (unsigned int)current_config_.server.length(),
-        circuit_breaker_.isOpen() ? "OPEN" : (circuit_breaker_.isClosed() ? "CLOSED" : "HALF_OPEN"));
-      Serial.println(dbg); }
-    // #endregion
-    #endif
+    LOG_I(TAG, "Attempting MQTT reconnection (attempt " + String(reconnect_attempts_) + ")");
 
     if (!connectToBroker()) {
-        // ❌ RECONNECT FAILED
         circuit_breaker_.recordFailure();
-
-        // Exponential backoff
         reconnect_delay_ms_ = calculateBackoffDelay();
-
-        // ✅ IMPROVEMENT #3: MAX_RECONNECT_ATTEMPTS entfernt!
-        // Circuit Breaker übernimmt Schutz vor unendlichen Reconnects
-        // → Bei 5 Fehlern: 30s Pause automatisch
-
-        // Check if Circuit Breaker opened
         if (circuit_breaker_.isOpen()) {
             LOG_W(TAG, "Circuit Breaker OPENED after reconnect failures");
-            LOG_W(TAG, "  Will retry in 30 seconds");
-            LOG_W(TAG, "  Attempt count: " + String(reconnect_attempts_));
         }
     } else {
-        // ✅ RECONNECT SUCCESS
         circuit_breaker_.recordSuccess();
     }
+#endif
 }
 
 // ============================================
@@ -483,15 +321,13 @@ bool MQTTClient::transitionToAuthenticated(const String& username, const String&
         LOG_W(TAG, "Already in authenticated mode");
         return true;
     }
-    
+
     LOG_I(TAG, "Transitioning from Anonymous to Authenticated mode");
-    
-    // Update config
+
     current_config_.username = username;
     current_config_.password = password;
     anonymous_mode_ = false;
-    
-    // Reconnect with authentication
+
     disconnect();
     return connect(current_config_);
 }
@@ -512,7 +348,7 @@ uint32_t MQTTClient::getCurrentSeq() const {
 }
 
 // ============================================
-// PUBLISHING (WITH CIRCUIT BREAKER - Phase 6+)
+// PUBLISHING (WITH CIRCUIT BREAKER)
 // ============================================
 bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos) {
     if (test_publish_hook_) {
@@ -520,30 +356,22 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         return true;
     }
 
-    // ============================================
-    // CIRCUIT BREAKER CHECK
-    // ============================================
+    // Circuit Breaker: block publishes when broker is persistently down
     if (!circuit_breaker_.allowRequest()) {
         LOG_W(TAG, "MQTT publish blocked by Circuit Breaker (Service DOWN)");
-        LOG_D(TAG, "  Topic: " + topic);
-        LOG_D(TAG, "  Circuit State: OPEN (waiting for recovery)");
-        // Don't add to offline buffer when circuit is open - it will retry on recovery
         return false;
     }
 
-    // ============================================
-    // REGISTRATION GATE CHECK (Bug #1 Fix)
-    // ============================================
-    // Heartbeat Topics sind IMMER erlaubt (für initiale Registration)
+    // Registration Gate: block non-heartbeat publishes until server confirms registration
     bool is_heartbeat = topic.indexOf("/system/heartbeat") != -1 &&
                         topic.indexOf("/heartbeat/ack") == -1;
-    // System responses must pass immediately (config_response, zone/ack, subzone/ack)
     bool is_system_response = topic.indexOf("/config_response") != -1 ||
                               topic.indexOf("/zone/ack") != -1 ||
-                              topic.indexOf("/subzone/ack") != -1;
+                              topic.indexOf("/subzone/ack") != -1 ||
+                              topic.indexOf("/system/command/response") != -1;
+    bool is_error_publish = topic.indexOf("/error") != -1;
 
-    if (!registration_confirmed_ && !is_heartbeat && !is_system_response) {
-        // Check timeout: Nach 10s Gate automatisch öffnen (Fallback)
+    if (!registration_confirmed_ && !is_heartbeat && !is_system_response && !is_error_publish) {
         if (registration_start_ms_ > 0 &&
             (millis() - registration_start_ms_) > REGISTRATION_TIMEOUT_MS) {
             LOG_W(TAG, "Registration timeout - opening gate (fallback)");
@@ -554,9 +382,6 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         }
     }
 
-    // ============================================
-    // EMPTY PAYLOAD GUARD (Bug #2 Fix)
-    // ============================================
     if (payload.length() == 0) {
         LOG_E(TAG, "Empty payload blocked for topic: " + topic);
         errorTracker.logCommunicationError(ERROR_MQTT_PAYLOAD_INVALID,
@@ -564,72 +389,96 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         return false;
     }
 
-    // ============================================
-    // CONNECTION CHECK
-    // ============================================
+#ifndef MQTT_USE_PUBSUBCLIENT
+    if (mqtt_client_ == nullptr) {
+        LOG_W(TAG, "MQTT client not initialized, dropping message: " + topic);
+        return false;
+    }
+
+    // M3: If called from Core 1 (Safety-Task), route through publish queue (Core 1 → Core 0).
+    // Keeps all network I/O on Core 0 and prevents slow publishes from stalling Core 1.
+    if (xPortGetCoreID() == 1) {
+        bool enqueued = queuePublish(topic.c_str(), payload.c_str(), qos, false);
+        if (!enqueued) {
+            LOG_W(TAG, "Publish queue full — dropping: " + topic);
+            circuit_breaker_.recordFailure();
+            return false;
+        }
+        circuit_breaker_.recordSuccess();
+        return true;
+    }
+
+    // Core 0: direct publish via ESP-IDF (thread-safe internally).
+    // Returns msg_id > 0 (QoS 1 queued), 0 (QoS 0 sent), -1 (error), -2 (outbox full).
+    int msg_id = esp_mqtt_client_publish(
+        mqtt_client_,
+        topic.c_str(),
+        payload.c_str(),
+        0,       // length = 0 → use strlen()
+        qos,
+        0        // retain = false (avoid stale state on broker)
+    );
+
+    if (msg_id >= 0) {
+        circuit_breaker_.recordSuccess();
+        LOG_D(TAG, "Published [msg_id=" + String(msg_id) + "]: " + topic);
+        return true;
+    } else if (msg_id == -2) {
+        LOG_W(TAG, "MQTT Outbox full, message dropped: " + topic);
+        circuit_breaker_.recordFailure();
+        return false;
+    } else {
+        // msg_id == -1: error (not connected or internal failure)
+        // Don't count as failure if we're not connected (pre-connection publish attempt)
+        if (g_mqtt_connected.load()) {
+            circuit_breaker_.recordFailure();
+            LOG_E(TAG, "Publish failed (connected but error): " + topic);
+            errorTracker.logCommunicationError(ERROR_MQTT_PUBLISH_FAILED,
+                                               ("Publish failed: " + topic).c_str());
+        } else {
+            LOG_W(TAG, "Publish before MQTT connected, dropping: " + topic);
+        }
+        return false;
+    }
+
+#else
+    // PubSubClient path
     if (!isConnected()) {
         LOG_W(TAG, "MQTT not connected, adding to offline buffer");
-        circuit_breaker_.recordFailure();  // Connection failure counts
+        circuit_breaker_.recordFailure();
         return addToOfflineBuffer(topic, payload, qos);
     }
-    
-    // ============================================
-    // MQTT PUBLISH
-    // ============================================
-    // PubSubClient API: publish(topic, payload, retained)
-    // Third parameter is RETAINED flag, NOT QoS.
-    // PubSubClient always uses QoS 0 for string publishes.
-    // Never retain operational messages — retained emergency/status messages
-    // cause stale state on broker that survives restarts.
+
     bool success = mqtt_.publish(topic.c_str(), payload.c_str(), false);
-    
+
     if (success) {
-        // ✅ SUCCESS
         circuit_breaker_.recordSuccess();
         LOG_D(TAG, "Published: " + topic);
-        
-        // Optional: Payload preview (first 50 chars)
-        if (payload.length() > 50) {
-            LOG_D(TAG, "  Payload: " + payload.substring(0, 50) + "...");
-        } else {
-            LOG_D(TAG, "  Payload: " + payload);
-        }
-        
     } else {
-        // ❌ FAILURE
         circuit_breaker_.recordFailure();
         LOG_E(TAG, "Publish failed: " + topic);
-        errorTracker.logCommunicationError(ERROR_MQTT_PUBLISH_FAILED, 
+        errorTracker.logCommunicationError(ERROR_MQTT_PUBLISH_FAILED,
                                            ("Publish failed: " + topic).c_str());
-        
-        // Check if Circuit Breaker opened
         if (circuit_breaker_.isOpen()) {
             LOG_W(TAG, "Circuit Breaker OPENED after failure threshold");
-            LOG_W(TAG, "  MQTT will be unavailable for 30 seconds");
         }
-        
         addToOfflineBuffer(topic, payload, qos);
     }
-    
+
     return success;
+#endif
 }
 
 bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t qos, uint8_t retries) {
-    // Circuit Breaker is checked inside publish(), so we don't need to check here
-    // But we reduce retries if Circuit Breaker is OPEN to avoid spam
-    
     if (circuit_breaker_.isOpen()) {
         LOG_D(TAG, "SafePublish: Circuit Breaker OPEN, skipping retries");
-        return publish(topic, payload, qos);  // Single attempt only
+        return publish(topic, payload, qos);
     }
-    
-    // FIX #4: Reduced retries (1 retry) with yield() instead of delay()
-    // Circuit Breaker regelt Retry-Logik auf höherer Ebene
+
     if (publish(topic, payload, qos)) {
         return true;
     }
 
-    // Don't retry if Circuit Breaker opened
     if (circuit_breaker_.isOpen()) {
         LOG_D(TAG, "SafePublish: Circuit Breaker OPENED after first attempt");
         return false;
@@ -649,6 +498,24 @@ bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t
 // SUBSCRIPTION
 // ============================================
 bool MQTTClient::subscribe(const String& topic, uint8_t qos) {
+#ifndef MQTT_USE_PUBSUBCLIENT
+    if (mqtt_client_ == nullptr) {
+        LOG_E(TAG, "Cannot subscribe, MQTT client not initialized");
+        return false;
+    }
+    // esp_mqtt_client_subscribe is only effective when connected.
+    // Called from on_connect_callback_ (after MQTT_EVENT_CONNECTED) — this is correct.
+    int msg_id = esp_mqtt_client_subscribe(mqtt_client_, topic.c_str(), qos);
+    if (msg_id >= 0) {
+        LOG_I(TAG, "Subscribe sent (QoS " + String(qos) + "): " + topic);
+        return true;
+    } else {
+        LOG_E(TAG, "Subscribe failed: " + topic);
+        errorTracker.logCommunicationError(ERROR_MQTT_SUBSCRIBE_FAILED,
+                                           ("Subscribe failed: " + topic).c_str());
+        return false;
+    }
+#else
     if (!isConnected()) {
         LOG_E(TAG, "Cannot subscribe, MQTT not connected");
         errorTracker.logCommunicationError(ERROR_MQTT_SUBSCRIBE_FAILED,
@@ -665,29 +532,142 @@ bool MQTTClient::subscribe(const String& topic, uint8_t qos) {
         errorTracker.logCommunicationError(ERROR_MQTT_SUBSCRIBE_FAILED,
                                            ("Subscribe failed: " + topic).c_str());
     }
-
     return success;
+#endif
 }
 
 bool MQTTClient::unsubscribe(const String& topic) {
+#ifndef MQTT_USE_PUBSUBCLIENT
+    if (mqtt_client_ == nullptr) return false;
+    int msg_id = esp_mqtt_client_unsubscribe(mqtt_client_, topic.c_str());
+    if (msg_id >= 0) {
+        LOG_I(TAG, "Unsubscribed from: " + topic);
+        return true;
+    }
+    LOG_E(TAG, "Unsubscribe failed: " + topic);
+    return false;
+#else
     if (!isConnected()) {
         LOG_W(TAG, "Cannot unsubscribe, MQTT not connected");
         return false;
     }
-    
     bool success = mqtt_.unsubscribe(topic.c_str());
-    
     if (success) {
         LOG_I(TAG, "Unsubscribed from: " + topic);
     } else {
         LOG_E(TAG, "Unsubscribe failed: " + topic);
     }
-    
     return success;
+#endif
 }
 
 void MQTTClient::setCallback(std::function<void(const String&, const String&)> callback) {
     message_callback_ = callback;
+}
+
+// ============================================
+// MONITORING / LOOP
+// ============================================
+void MQTTClient::loop() {
+    if (!initialized_) {
+        return;
+    }
+
+#ifndef MQTT_USE_PUBSUBCLIENT
+    // ESP-IDF has its own MQTT task — no manual mqtt_.loop() or reconnect() needed here.
+    // loop() only handles: NTP time sync + periodic heartbeat publishing.
+    timeManager.loop();
+    publishHeartbeat();
+#else
+    // PubSubClient path: handle time sync, MQTT maintenance, heartbeat, and reconnect.
+    timeManager.loop();
+
+    if (isConnected()) {
+        mqtt_.loop();
+        publishHeartbeat();
+    } else {
+        handleDisconnection();
+    }
+#endif
+}
+
+// ============================================
+// M3: PUBLISH QUEUE DRAIN (Core 0 only)
+// ============================================
+#ifndef MQTT_USE_PUBSUBCLIENT
+void MQTTClient::processPublishQueue() {
+    if (mqtt_client_ == nullptr) return;
+    if (g_publish_queue == NULL) return;
+
+    PublishRequest req;
+    while (xQueueReceive(g_publish_queue, &req, 0) == pdTRUE) {
+        esp_mqtt_client_publish(
+            mqtt_client_,
+            req.topic,
+            req.payload,
+            0,               // length = 0 → use strlen()
+            req.qos,
+            req.retain ? 1 : 0
+        );
+    }
+}
+#endif
+
+// ============================================
+// STATUS GETTERS
+// ============================================
+String MQTTClient::getConnectionStatus() {
+#ifndef MQTT_USE_PUBSUBCLIENT
+    return g_mqtt_connected.load() ? "Connected" : "Disconnected";
+#else
+    if (mqtt_.connected()) {
+        return "Connected";
+    }
+    switch (mqtt_.state()) {
+        case MQTT_CONNECTION_TIMEOUT:    return "Connection timeout";
+        case MQTT_CONNECTION_LOST:       return "Connection lost";
+        case MQTT_CONNECT_FAILED:        return "Connect failed";
+        case MQTT_DISCONNECTED:          return "Disconnected";
+        case MQTT_CONNECT_BAD_PROTOCOL:  return "Bad protocol";
+        case MQTT_CONNECT_BAD_CLIENT_ID: return "Bad client ID";
+        case MQTT_CONNECT_UNAVAILABLE:   return "Server unavailable";
+        case MQTT_CONNECT_BAD_CREDENTIALS: return "Bad credentials";
+        case MQTT_CONNECT_UNAUTHORIZED:  return "Unauthorized";
+        default: return "Unknown (" + String(mqtt_.state()) + ")";
+    }
+#endif
+}
+
+uint16_t MQTTClient::getConnectionAttempts() const {
+#ifndef MQTT_USE_PUBSUBCLIENT
+    return 0;  // ESP-IDF manages reconnect internally; not exposed.
+#else
+    return reconnect_attempts_;
+#endif
+}
+
+bool MQTTClient::hasOfflineMessages() const {
+#ifndef MQTT_USE_PUBSUBCLIENT
+    return false;  // ESP-IDF Outbox is opaque; individual message tracking not exposed.
+#else
+    return offline_buffer_count_ > 0;
+#endif
+}
+
+uint16_t MQTTClient::getOfflineMessageCount() const {
+#ifndef MQTT_USE_PUBSUBCLIENT
+    return 0;
+#else
+    return offline_buffer_count_;
+#endif
+}
+
+CircuitState MQTTClient::getCircuitBreakerState() const {
+    return circuit_breaker_.getState();
+}
+
+uint8_t MQTTClient::getCircuitBreakerFailureCount() const {
+    return circuit_breaker_.getFailureCount();
 }
 
 // ============================================
@@ -707,20 +687,20 @@ static uint8_t toProtocolGpioMode(uint8_t arduino_mode) {
 void MQTTClient::publishHeartbeat(bool force) {
     unsigned long current_time = millis();
 
-    // Skip throttle check if force=true (for initial heartbeat after connect/reconnect)
     if (!force && (current_time - last_heartbeat_ < HEARTBEAT_INTERVAL_MS)) {
         return;
     }
 
     last_heartbeat_ = current_time;
-    
-    // Build heartbeat topic
+
+    // M5.4: Heap monitoring — logged alongside every heartbeat for long-term leak detection.
+    LOG_I("MEM", "[MEM] Free heap: " + String(ESP.getFreeHeap()) +
+          " B, min free: " + String(ESP.getMinFreeHeap()) + " B");
+
     const char* topic = TopicBuilder::buildSystemHeartbeatTopic();
-    
-    // Build heartbeat payload (JSON) - Phase 7: Enhanced with Zone Info
-    // Phase 8: Use NTP-synchronized Unix timestamp instead of millis()
+
     time_t unix_timestamp = timeManager.getUnixTimestamp();
-    
+
     String payload = "{";
     payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
     payload += "\"seq\":" + String(getNextSeq()) + ",";
@@ -735,9 +715,6 @@ void MQTTClient::publishHeartbeat(bool force) {
     payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount()) + ",";
     payload += "\"wifi_ip\":\"" + WiFi.localIP().toString() + "\",";
 
-    // ============================================
-    // GPIO STATUS (Phase 1)
-    // ============================================
     std::vector<GPIOPinInfo> reservedPins = gpioManager.getReservedPinsList();
 
     payload += "\"gpio_status\":[";
@@ -745,7 +722,6 @@ void MQTTClient::publishHeartbeat(bool force) {
     for (const auto& pin : reservedPins) {
         if (!first) payload += ",";
         first = false;
-
         payload += "{";
         payload += "\"gpio\":" + String(pin.pin) + ",";
         payload += "\"owner\":\"" + String(pin.owner) + "\",";
@@ -756,17 +732,10 @@ void MQTTClient::publishHeartbeat(bool force) {
     }
     payload += "],";
     payload += "\"gpio_reserved_count\":" + String(reservedPins.size()) + ",";
-    
-    // ============================================
-    // CONFIG STATUS (Observability - Phase 1-3)
-    // ============================================
-    // Include configuration diagnostics for server observability
     payload += "\"config_status\":";
     payload += configManager.getDiagnosticsJSON();
-
     payload += "}";
-    
-    // Publish with QoS 0 (heartbeat doesn't need guaranteed delivery)
+
     publish(topic, payload, 0);
 }
 
@@ -787,51 +756,8 @@ void MQTTClient::confirmRegistration() {
     }
 }
 
-// ============================================
-// MONITORING
-// ============================================
-void MQTTClient::loop() {
-    if (!initialized_) {
-        return;
-    }
-    
-    // Phase 8: Maintain NTP time synchronization
-    timeManager.loop();
-    
-    // Process MQTT loop
-    if (isConnected()) {
-        mqtt_.loop();
-        
-        // Publish heartbeat
-        publishHeartbeat();
-    } else {
-        // Attempt reconnection
-        reconnect();
-    }
-}
-
-void MQTTClient::handleDisconnection() {
-    static bool disconnection_logged = false;
-
-    // ============================================
-    // REGISTRATION GATE RESET (Bug #1 Fix)
-    // ============================================
-    registration_confirmed_ = false;
-    registration_start_ms_ = 0;
-    LOG_D(TAG, "Registration gate closed due to disconnect");
-
-    if (!disconnection_logged) {
-        LOG_W(TAG, "MQTT disconnected");
-        errorTracker.logCommunicationError(ERROR_MQTT_DISCONNECT,
-                                           "MQTT connection lost");
-        disconnection_logged = true;
-    }
-
-    reconnect();
-    
-    if (isConnected()) {
-        disconnection_logged = false;
-    }
+void MQTTClient::setOnConnectCallback(std::function<void()> callback) {
+    on_connect_callback_ = std::move(callback);
 }
 
 void MQTTClient::setTestPublishHook(std::function<void(const String&, const String&)> hook) {
@@ -842,176 +768,329 @@ void MQTTClient::clearTestPublishHook() {
     test_publish_hook_ = nullptr;
 }
 
-bool MQTTClient::shouldAttemptReconnect() const {
-    // ✅ FIX: MAX_RECONNECT_ATTEMPTS-Check ENTFERNT (2026-01-20)
-    // Root-Cause für Watchdog-Timeout: Nach 10 Reconnect-Versuchen wurde
-    // shouldAttemptReconnect()=false, Circuit Breaker blieb OPEN,
-    // feedWatchdog() wurde blockiert → Watchdog Timeout → Reboot.
-    // Der Circuit Breaker regelt die Fehlerbehandlung bereits ausreichend.
-    // Siehe: .claude/Next Steps/Hardware_Tests/Phase_1_Weiterführung.md
+// ============================================
+// ESP-IDF MQTT EVENT HANDLER (SAFETY-RTOS M2)
+// Runs in ESP-IDF MQTT task (Core 0, Priority 3 — below Safety-Task Priority 5).
+// args = MQTTClient* instance (passed during esp_mqtt_client_register_event).
+// ============================================
+#ifndef MQTT_USE_PUBSUBCLIENT
+void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
+                                    int32_t event_id, void* event_data) {
+    MQTTClient* self = static_cast<MQTTClient*>(args);
+    esp_mqtt_event_handle_t event = static_cast<esp_mqtt_event_handle_t>(event_data);
 
-    // ✅ FIX #2: HALF_OPEN bypasses exponential backoff (2026-01-20)
-    // Race Condition: Wenn Circuit Breaker auf HALF_OPEN wechselt, aber
-    // reconnect_delay_ms_ > halfopen_timeout (10s), wird nie ein Reconnect
-    // versucht und HALF_OPEN timeout zurück zu OPEN ohne Test.
-    // Bei HALF_OPEN sofort Reconnect versuchen - das ist der Sinn von HALF_OPEN!
-    if (circuit_breaker_.getState() == CircuitState::HALF_OPEN) {
-        return true;  // Sofort versuchen, kein Backoff!
+    switch (event_id) {
+
+        case MQTT_EVENT_CONNECTED:
+            LOG_I(TAG, "╔════════════════════════════════════════╗");
+            LOG_I(TAG, "║  MQTT_EVENT_CONNECTED                 ║");
+            LOG_I(TAG, "╚════════════════════════════════════════╝");
+
+            // Update shared connection state (atomic — read by Safety-Task Core 1)
+            g_mqtt_connected.store(true);
+
+            // Reset Registration Gate
+            self->registration_confirmed_ = false;
+            self->registration_start_ms_  = millis();
+
+            // Circuit Breaker: connection success resets failure counter
+            self->circuit_breaker_.recordSuccess();
+
+            // SAFETY-P1 Mechanisms A + D + E:
+            // on_connect_callback_ = onMqttConnectCallback() in main.cpp
+            //   → subscribeToAllTopics() (Mechanism A: 11 subscriptions)
+            //   → g_last_server_ack_ms reset (Mechanism D reset)
+            //   → publishAllActuatorStatus() + publishHeartbeat(true) on reconnect (Mechanism E)
+            //   → offlineModeManager.onReconnect() (SAFETY-P4)
+            if (self->on_connect_callback_) {
+                self->on_connect_callback_();
+            }
+            break;
+
+        case MQTT_EVENT_DISCONNECTED:
+            LOG_W(TAG, "╔════════════════════════════════════════╗");
+            LOG_W(TAG, "║  MQTT_EVENT_DISCONNECTED              ║");
+            LOG_W(TAG, "╚════════════════════════════════════════╝");
+
+            // Update shared connection state
+            g_mqtt_connected.store(false);
+
+            // Reset Registration Gate
+            self->registration_confirmed_ = false;
+            self->registration_start_ms_  = 0;
+
+            // Circuit Breaker: disconnect counts as failure
+            self->circuit_breaker_.recordFailure();
+
+            LOG_W(TAG, "MQTT disconnected");
+            errorTracker.logCommunicationError(ERROR_MQTT_DISCONNECT, "MQTT connection lost");
+
+            // SAFETY-P4: Start 30s grace timer for offline hysteresis
+            // Runs on Core 0 (event task) — offlineModeManager is simple timer state.
+            offlineModeManager.onDisconnect();
+
+            // SAFETY-P1 Mechanism B: Notify Safety-Task (Core 1) to set actuators to safe state.
+            // xTaskNotify is ISR-safe and has < 1µs latency.
+            // ESP-IDF reconnects automatically — no manual reconnect() needed!
+            if (g_safety_task_handle != NULL) {
+                xTaskNotify(g_safety_task_handle, NOTIFY_MQTT_DISCONNECTED, eSetBits);
+            }
+            break;
+
+        case MQTT_EVENT_DATA: {
+            // KRITISCH: event->topic and event->data are NOT null-terminated!
+            // All existing handlers (strcmp, strstr, String comparison) expect '\0'.
+            // Without null-termination: buffer-overread → crash.
+
+            // Check for fragmented messages (should not happen with buffer.size=4096,
+            // but guard defensively).
+            if (event->current_data_offset > 0) {
+                ESP_LOGW(TAG, "[M2] Fragmented MQTT_EVENT_DATA received (offset=%d, total=%d) "
+                              "— message discarded. Increase buffer.size if this recurs.",
+                         event->current_data_offset, event->total_data_len);
+                break;
+            }
+
+            // Null-terminate topic (max topic length ~120 chars; buffer has +Reserve)
+            char topic_buf[192];
+            size_t tlen = (event->topic_len < sizeof(topic_buf) - 1)
+                          ? static_cast<size_t>(event->topic_len)
+                          : sizeof(topic_buf) - 1;
+            memcpy(topic_buf, event->topic, tlen);
+            topic_buf[tlen] = '\0';
+
+            // Null-terminate payload (must match buffer.size=4096)
+            char data_buf[4096];
+            size_t dlen = (event->data_len < sizeof(data_buf) - 1)
+                          ? static_cast<size_t>(event->data_len)
+                          : sizeof(data_buf) - 1;
+            memcpy(data_buf, event->data, dlen);
+            data_buf[dlen] = '\0';
+
+            // Logging in routeIncomingMessage() (single place)
+            routeIncomingMessage(topic_buf, data_buf);
+            break;
+        }
+
+        case MQTT_EVENT_SUBSCRIBED:
+            LOG_D(TAG, "MQTT_EVENT_SUBSCRIBED msg_id=" + String(event->msg_id));
+            break;
+
+        case MQTT_EVENT_PUBLISHED:
+            LOG_D(TAG, "MQTT_EVENT_PUBLISHED msg_id=" + String(event->msg_id));
+            break;
+
+        case MQTT_EVENT_ERROR:
+            if (event->error_handle != nullptr) {
+                ESP_LOGE(TAG, "MQTT_EVENT_ERROR type=%d", event->error_handle->error_type);
+                if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+                    ESP_LOGE(TAG, "  TCP transport error: %d (esp_err=%s)",
+                             event->error_handle->esp_transport_sock_errno,
+                             esp_err_to_name(event->error_handle->esp_tls_last_esp_err));
+                } else if (event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) {
+                    ESP_LOGE(TAG, "  Connection refused, reason=%d",
+                             event->error_handle->connect_return_code);
+                }
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+#endif  // !MQTT_USE_PUBSUBCLIENT
+
+// ============================================
+// PUBSUBCLIENT-SPECIFIC IMPLEMENTATIONS
+// (only compiled when MQTT_USE_PUBSUBCLIENT is defined)
+// ============================================
+#ifdef MQTT_USE_PUBSUBCLIENT
+
+bool MQTTClient::connectToBroker() {
+    LOG_I(TAG, "Connecting to MQTT broker: " + current_config_.server + ":" + String(current_config_.port));
+
+    // Re-set server before every connection attempt to prevent dangling pointer.
+    mqtt_.setServer(current_config_.server.c_str(), current_config_.port);
+
+    // Build Last-Will
+    String last_will_topic = String(TopicBuilder::buildSystemHeartbeatTopic());
+    last_will_topic.replace("/heartbeat", "/will");
+
+    time_t will_timestamp = timeManager.getUnixTimestamp();
+    String last_will_message = "{\"status\":\"offline\",\"esp_id\":\"" + g_system_config.esp_id +
+                               "\",\"reason\":\"unexpected_disconnect\",\"timestamp\":" +
+                               String((unsigned long)will_timestamp) + "}";
+
+    LOG_I(TAG, "Last-Will Topic: " + last_will_topic);
+
+    // ✅ FIX #2: Auto-Fallback von Port 8883 → 1883
+    bool connected = attemptMQTTConnection(last_will_topic, last_will_message);
+
+    if (!connected && current_config_.port == 8883) {
+        LOG_W(TAG, "Port 8883 (TLS) failed - trying port 1883 (plain MQTT)");
+        current_config_.port = 1883;
+        mqtt_.setServer(current_config_.server.c_str(), current_config_.port);
+        connected = attemptMQTTConnection(last_will_topic, last_will_message);
+        if (connected) {
+            LOG_I(TAG, "✅ Port-Fallback successful! Connected on port 1883");
+        }
     }
 
-    // Wait for reconnect delay (exponential backoff)
+    if (connected) {
+        LOG_I(TAG, "MQTT connected!");
+        reconnect_attempts_ = 0;
+        reconnect_delay_ms_ = RECONNECT_BASE_DELAY_MS;
+        circuit_breaker_.recordSuccess();
+        registration_confirmed_ = false;
+        registration_start_ms_ = millis();
+        LOG_I(TAG, "Registration gate closed - awaiting heartbeat ACK");
+        processOfflineBuffer();
+        if (on_connect_callback_) {
+            on_connect_callback_();
+        }
+        return true;
+    } else {
+        LOG_E(TAG, "MQTT connection failed, rc=" + String(mqtt_.state()));
+        errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED,
+                                           ("MQTT connection failed, rc=" + String(mqtt_.state())).c_str());
+        return false;
+    }
+}
+
+bool MQTTClient::attemptMQTTConnection(const String& last_will_topic, const String& last_will_message) {
+    bool result = false;
+    if (anonymous_mode_) {
+        result = mqtt_.connect(
+            current_config_.client_id.c_str(),
+            last_will_topic.c_str(),
+            1,     // QoS 1
+            true,  // Retain
+            last_will_message.c_str()
+        );
+    } else {
+        result = mqtt_.connect(
+            current_config_.client_id.c_str(),
+            current_config_.username.c_str(),
+            current_config_.password.c_str(),
+            last_will_topic.c_str(),
+            1,     // QoS 1
+            true,  // Retain
+            last_will_message.c_str()
+        );
+    }
+    return result;
+}
+
+void MQTTClient::handleDisconnection() {
+    static bool disconnection_logged = false;
+
+    registration_confirmed_ = false;
+    registration_start_ms_ = 0;
+    LOG_D(TAG, "Registration gate closed due to disconnect");
+
+    if (actuatorManager.isInitialized()) {
+        if (offlineModeManager.getOfflineRuleCount() > 0) {
+            LOG_W(TAG, "[SAFETY] MQTT disconnected — " +
+                  String(offlineModeManager.getOfflineRuleCount()) +
+                  " offline rules available, delegating to P4");
+        } else {
+            actuatorManager.setAllActuatorsToSafeState();
+            LOG_W(TAG, "[SAFETY] MQTT disconnected — no offline rules, safe state immediately");
+        }
+    }
+
+    // SAFETY-P4: Start 30s grace timer for offline hysteresis
+    offlineModeManager.onDisconnect();
+
+    if (!disconnection_logged) {
+        LOG_W(TAG, "MQTT disconnected");
+        errorTracker.logCommunicationError(ERROR_MQTT_DISCONNECT, "MQTT connection lost");
+        disconnection_logged = true;
+    }
+
+    reconnect();
+
+    if (isConnected()) {
+        disconnection_logged = false;
+    }
+}
+
+bool MQTTClient::shouldAttemptReconnect() const {
+    if (circuit_breaker_.getState() == CircuitState::HALF_OPEN) {
+        return true;
+    }
     unsigned long current_time = millis();
     if (current_time - last_reconnect_attempt_ < reconnect_delay_ms_) {
         return false;
     }
-
     return true;
 }
 
-// ============================================
-// OFFLINE BUFFER MANAGEMENT
-// ============================================
 void MQTTClient::processOfflineBuffer() {
-    if (offline_buffer_count_ == 0) {
-        return;
-    }
-    
+    if (offline_buffer_count_ == 0) return;
+
     LOG_I(TAG, "Processing offline buffer (" + String(offline_buffer_count_) + " messages)");
-    
+
     uint16_t processed = 0;
     for (uint16_t i = 0; i < offline_buffer_count_; i++) {
-        if (publish(offline_buffer_[i].topic, 
-                   offline_buffer_[i].payload, 
-                   offline_buffer_[i].qos)) {
+        if (publish(offline_buffer_[i].topic, offline_buffer_[i].payload, offline_buffer_[i].qos)) {
             processed++;
         } else {
-            // Failed to publish, keep remaining messages in buffer
             break;
         }
     }
-    
-    // Remove processed messages from buffer
+
     if (processed > 0) {
         uint16_t remaining = offline_buffer_count_ - processed;
         for (uint16_t i = 0; i < remaining; i++) {
             offline_buffer_[i] = offline_buffer_[i + processed];
         }
         offline_buffer_count_ = remaining;
-        
-        LOG_I(TAG, "Processed " + String(processed) + " offline messages, " + 
-                 String(remaining) + " remaining");
+        LOG_I(TAG, "Processed " + String(processed) + " offline messages, " +
+                   String(remaining) + " remaining");
     }
 }
 
 bool MQTTClient::addToOfflineBuffer(const String& topic, const String& payload, uint8_t qos) {
-    // Bug #2 Fix: Don't buffer empty payloads
     if (payload.length() == 0) {
         LOG_W(TAG, "Empty payload rejected from offline buffer: " + topic);
         return false;
     }
-
     if (offline_buffer_count_ >= MAX_OFFLINE_MESSAGES) {
         LOG_E(TAG, "Offline buffer full, dropping message");
-        errorTracker.logCommunicationError(ERROR_MQTT_BUFFER_FULL, 
-                                           "Offline buffer full");
+        errorTracker.logCommunicationError(ERROR_MQTT_BUFFER_FULL, "Offline buffer full");
         return false;
     }
-    
-    offline_buffer_[offline_buffer_count_].topic = topic;
-    offline_buffer_[offline_buffer_count_].payload = payload;
-    offline_buffer_[offline_buffer_count_].qos = qos;
+    offline_buffer_[offline_buffer_count_].topic     = topic;
+    offline_buffer_[offline_buffer_count_].payload   = payload;
+    offline_buffer_[offline_buffer_count_].qos       = qos;
     offline_buffer_[offline_buffer_count_].timestamp = millis();
     offline_buffer_count_++;
-    
     LOG_D(TAG, "Added to offline buffer (count: " + String(offline_buffer_count_) + ")");
     return true;
 }
 
-// ============================================
-// EXPONENTIAL BACKOFF CALCULATION
-// ============================================
 unsigned long MQTTClient::calculateBackoffDelay() const {
-    // Exponential backoff: delay * 2^attempts
     unsigned long delay = RECONNECT_BASE_DELAY_MS * (1 << reconnect_attempts_);
-    
-    // Cap at max delay
     if (delay > RECONNECT_MAX_DELAY_MS) {
         delay = RECONNECT_MAX_DELAY_MS;
     }
-    
     return delay;
 }
 
-// ============================================
-// STATUS GETTERS
-// ============================================
-String MQTTClient::getConnectionStatus() {
-    if (mqtt_.connected()) {
-        return "Connected";
-    }
-    
-    switch (mqtt_.state()) {
-        case MQTT_CONNECTION_TIMEOUT:
-            return "Connection timeout";
-        case MQTT_CONNECTION_LOST:
-            return "Connection lost";
-        case MQTT_CONNECT_FAILED:
-            return "Connect failed";
-        case MQTT_DISCONNECTED:
-            return "Disconnected";
-        case MQTT_CONNECT_BAD_PROTOCOL:
-            return "Bad protocol";
-        case MQTT_CONNECT_BAD_CLIENT_ID:
-            return "Bad client ID";
-        case MQTT_CONNECT_UNAVAILABLE:
-            return "Server unavailable";
-        case MQTT_CONNECT_BAD_CREDENTIALS:
-            return "Bad credentials";
-        case MQTT_CONNECT_UNAUTHORIZED:
-            return "Unauthorized";
-        default:
-            return "Unknown (" + String(mqtt_.state()) + ")";
-    }
-}
-
-uint16_t MQTTClient::getConnectionAttempts() const {
-    return reconnect_attempts_;
-}
-
-bool MQTTClient::hasOfflineMessages() const {
-    return offline_buffer_count_ > 0;
-}
-
-uint16_t MQTTClient::getOfflineMessageCount() const {
-    return offline_buffer_count_;
-}
-
-CircuitState MQTTClient::getCircuitBreakerState() const {
-    return circuit_breaker_.getState();
-}
-
-uint8_t MQTTClient::getCircuitBreakerFailureCount() const {
-    return circuit_breaker_.getFailureCount();
-}
-
-// ============================================
-// STATIC CALLBACK FOR PUBSUBCLIENT
-// ============================================
 void MQTTClient::staticCallback(char* topic, byte* payload, unsigned int length) {
-    if (!instance_) {
-        return;
-    }
-    
-    // Convert to String
+    if (!instance_) return;
+
     String topic_str = String(topic);
     String payload_str;
     payload_str.reserve(length);
     for (unsigned int i = 0; i < length; i++) {
         payload_str += (char)payload[i];
     }
-    
-    // Call user callback
+
     if (instance_->message_callback_) {
         instance_->message_callback_(topic_str, payload_str);
     }
 }
+
+#endif  // MQTT_USE_PUBSUBCLIENT
