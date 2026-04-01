@@ -24,6 +24,10 @@ export default defineConfig({
         target: process.env.VITE_WS_TARGET || 'ws://localhost:8000',
         ws: true,
       },
+      '/grafana': {
+        target: process.env.VITE_GRAFANA_TARGET || 'http://localhost:3000',
+        changeOrigin: true,
+      },
     },
   },
 })

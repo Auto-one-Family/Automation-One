@@ -187,14 +187,18 @@ async function handlePageSizeChange(size: number): Promise<void> {
 // Methods - Row Actions
 // ============================================================================
 
-function handleRowClick(record: Record<string, unknown>): void {
+async function handleRowClick(record: Record<string, unknown>): Promise<void> {
   const pkColumn = store.currentSchema?.columns.find(c => c.primary_key)
   const pkValue = pkColumn
     ? String(record[pkColumn.name] || '')
     : String(record['id'] || '')
 
   if (pkValue) {
-    store.loadRecord(pkValue)
+    try {
+      await store.loadRecord(pkValue)
+    } catch (err) {
+      log.error('Failed to load record:', err)
+    }
   }
 }
 

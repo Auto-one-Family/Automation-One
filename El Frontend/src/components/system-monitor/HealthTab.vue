@@ -243,7 +243,10 @@ const grafanaOffline = ref(false)
 
 async function checkGrafana(): Promise<void> {
   try {
-    const res = await fetch(`${GRAFANA_BASE_URL}/api/health`, {
+    const grafanaHealthUrl = import.meta.env.DEV
+      ? '/grafana/api/health'
+      : `${GRAFANA_BASE_URL}/api/health`
+    const res = await fetch(grafanaHealthUrl, {
       method: 'GET',
       signal: AbortSignal.timeout(3000),
     })
