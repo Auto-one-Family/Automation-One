@@ -111,7 +111,7 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
             return 0
 
         try:
-            async with self._session_factory() as session:
+            async for session in self._session_factory():
                 result = await session.execute(select(LogicHysteresisState))
                 rows = result.scalars().all()
                 for row in rows:
@@ -143,7 +143,7 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
 
         try:
             rule_id_str, condition_index_str = key.split(":", 1)
-            async with self._session_factory() as session:
+            async for session in self._session_factory():
                 stmt = insert(LogicHysteresisState).values(
                     rule_id=rule_id_str,
                     condition_index=int(condition_index_str),
