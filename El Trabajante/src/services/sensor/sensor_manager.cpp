@@ -1648,7 +1648,7 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
     payload += reading.sensor_type;
     payload += "\",";
     payload += "\"raw\":";
-    payload += String(reading.raw_value);
+    payload += String((int32_t)reading.raw_value);  // Cast preserves sign for int16_t raw values (e.g. DS18B20)
     payload += ",";
     payload += "\"value\":";
     payload += String(reading.processed_value);
