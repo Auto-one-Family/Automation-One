@@ -1,16 +1,14 @@
 # Frontend Debug Report
 
-**Erstellt:** 2026-03-26
-**Modus:** B (Spezifisch: "VPD-Werte im Frontend – Empfang, Darstellung, Filterung")
-**Quellen:** Docker-Logs (el-frontend), sensorDefaults.ts, sensor.store.ts (shared), esp.ts (store), useSensorOptions.ts, useDashboardWidgets.ts, useZoneKPIs.ts, GaugeWidget.vue, SensorCardWidget.vue, LineChartWidget.vue, HistoricalChartWidget.vue, HistoricalChart.vue, SensorColumn.vue, SensorSatellite.vue, types/index.ts, WEBSOCKET_EVENTS.md (Referenz)
+**Erstellt:** 2026-03-31
+**Modus:** B (Spezifisch: "403 bei POST /actuators/ESP_EA5484/14")
+**Quellen:** `El Frontend/src/api/actuators.ts`, `El Frontend/src/stores/esp.ts` (Z.894-933), `El Frontend/src/components/esp/AddActuatorModal.vue` (Z.120-178), `El Frontend/src/api/esp.ts` (Z.186-191), `El Frontend/src/api/index.ts`, `El Servador/.../api/v1/actuators.py` (Z.404-501), `El Servador/.../api/deps.py` (Z.270-294), `El Servador/.../core/exceptions.py` (Z.586-601), DB-Query, Server-Log
 
 ---
 
 ## 1. Zusammenfassung
 
-VPD ist im Frontend als virtuelle Sensor-Kategorie (PB-01) implementiert: konfiguriert in `SENSOR_TYPE_CONFIG['vpd']` und `VIRTUAL_SENSOR_META.vpd`, aber nicht als eigene Sensor-Klasse behandelt. VPD-Daten werden ueber denselben `sensor_data` WebSocket-Event-Pfad empfangen wie physische Sensoren. Der Server berechnet den VPD-Wert und sendet ihn mit `sensor_type: "vpd"` — das Frontend zeigt ihn genauso wie jeden anderen Sensor.
-
-Drei Luecken gefunden: VPD wird von `getSensorAggCategory()` als `'air' -> 'humidity'` gemappt und damit mit echten Luftfeuchte-Werten (%) in denselben Aggregations-Bucket gemischt (falsche Einheit). VPD=0 hat kein spezifisches Null-Handling. `SensorCardWidget` zeigt VPD mit 1 Dezimalstelle statt den konfigurierten 2.
+Der 403-Fehler stammt nicht aus dem Frontend-Code. Die Ursache liegt vollstaendig auf der Server-Seite: `ESP_EA5484` hat in der Datenbank den Status `offline`, und der Server-Endpoint verweigert jede Konfigurationsoperation an nicht-genehmigten Geraeten mit `DeviceNotApprovedError` (HTTP 403, Error-Code `DEVICE_NOT_APPROVED`, Numeric 5405). Das Frontend ist korrekt implementiert und leitet den Fehler nur weiter. Handlungsbedarf liegt im Device-Status-Management (DB) oder optional in der Frontend-UX (spezifisches Toast-Feedback statt stillem logger.error).
 
 ---
 
@@ -18,76 +16,69 @@ Drei Luecken gefunden: VPD wird von `getSensorAggCategory()` als `'air' -> 'humi
 
 | Quelle | Status | Bemerkung |
 |--------|--------|-----------|
-| Docker-Logs el-frontend | OK | Nur Vite-Start, keine Runtime-Errors |
-| Server Health /api/v1/health/live | OK | alive: true |
-| Server Health /api/v1/health/detailed | BLOCKED | Auth required (401) |
-| sensorDefaults.ts | OK | VPD-Config vorhanden, Aggregations-Bug gefunden |
-| sensor.store.ts (shared) | OK | handleSensorData analysiert, korrekte exactMatch-Logik |
-| esp.ts | OK | Delegiert an sensor.store.ts |
-| useSensorOptions.ts | OK | Kein VPD-Filter — VPD wie physische Sensoren behandelt |
-| useZoneKPIs.ts | FINDING | VPD faellt in humidity-Bucket der Aggregation |
-| GaugeWidget.vue | OK | Skalierung via SENSOR_TYPE_CONFIG korrekt |
-| SensorCardWidget.vue | FINDING | toFixed(1) statt decimals=2 |
-| LineChartWidget.vue | OK | last_read watch korrekt |
-| HistoricalChartWidget.vue | OK | Delegiert korrekt |
-| HistoricalChart.vue | OK | VPD-Zonen-Annotationen vollstaendig |
-| types/index.ts | OK | interface_type VIRTUAL vorhanden |
+| `api/actuators.ts:87-100` | OK | URL-Konstruktion korrekt |
+| `stores/esp.ts:894-933` | OK | Mock/Real-Trennung korrekt, Payload vollstaendig |
+| `AddActuatorModal.vue:158-168` | OK (UX-Luecke) | Store-Aufruf korrekt, aber kein 403-spezifisches Toast |
+| `api/esp.ts:186-191` | OK | `isMockEsp()` klassifiziert ESP_EA5484 korrekt als Real-ESP |
+| `api/index.ts` | OK | Auth-Interceptor, Token-Handling, kein Beitrag zum 403 |
+| DB: esp_devices | FEHLER | ESP_EA5484 hat Status `offline` |
+| Server: `actuators.py:450` | ROOT CAUSE | Status-Guard blockiert mit 403 bei Status != approved/online |
+| Server: `deps.py:288` | OK | OperatorUser-Check — kein Beitrag wenn User Operator/Admin ist |
 
 ---
 
 ## 3. Befunde
 
-### 3.1 VPD-Konfiguration in sensorDefaults.ts
+### 3.1 Root Cause: Device-Status-Guard auf Server-Seite
 
-- **Schwere:** Informativ
-- **Detail:** VPD ist als `SENSOR_TYPE_CONFIG['vpd']` konfiguriert mit `min: 0`, `max: 3`, `unit: 'kPa'`, `decimals: 2`, `category: 'air'`. Zusaetzlich existiert `VIRTUAL_SENSOR_META.vpd` mit Formula-Referenz (Magnus-Tetens). Die Konfiguration ist inhaltlich korrekt.
-- **Evidenz:** `sensorDefaults.ts:514-524` und `sensorDefaults.ts:532-537`
+- **Schwere:** Hoch (funktionaler Block — kein Bug, aber beabsichtigtes Server-Verhalten das den User blockiert)
+- **Detail:** `ESP_EA5484` hat DB-Status `offline`. Der Server-Endpoint `POST /{esp_id}/{gpio}` prueft in `actuators.py:450` explizit `if esp_device.status not in ("approved", "online")` und wirft `DeviceNotApprovedError` mit HTTP 403. Das ist korrektes, beabsichtigtes Verhalten: Konfiguration ist nur an genehmigten Geraeten erlaubt.
+- **Evidenz:**
+  - DB: `SELECT device_id, status FROM esp_devices WHERE device_id LIKE '%EA5484%'` → `ESP_EA5484 | offline`
+  - `exceptions.py:589` `status_code = 403`
+  - `exceptions.py:590` `error_code = "DEVICE_NOT_APPROVED"`
+  - `actuators.py:450-451` `if esp_device.status not in ("approved", "online"): raise DeviceNotApprovedError(esp_id, esp_device.status)`
+  - Response-Body (Server): `"Device 'ESP_EA5484' must be approved before configuration (current status: offline)"`
 
-### 3.2 VPD landet im falschen Aggregations-Bucket (Hauptbefund)
+### 3.2 Frontend-Code ist korrekt — fehlende UX-Rueckmeldung
 
-- **Schwere:** Mittel
-- **Detail:** Die Funktion `getSensorAggCategory()` prueft Sensor-Typen per String-Pattern. VPD trifft keinen dieser Patterns (temp, humid, pressure, co2, light, moisture, ph, ec, flow). Damit faellt VPD in den Fallback-Pfad: `SENSOR_TYPE_CONFIG['vpd'].category = 'air'` wird via `categoryToAgg['air'] = 'humidity'` gemappt. VPD-Werte in kPa landen damit im selben Aggregations-Bucket wie Luftfeuchte-Werte in Prozent. Der Zone-KPI-Durchschnitt wird dadurch verfaelscht — z.B. wenn VPD=1.2 kPa und Luftfeuchte=65% gemittelt werden.
-- **Evidenz:** `sensorDefaults.ts:1281-1308` (getSensorAggCategory), `sensorDefaults.ts:1296-1305` (Fallback-Mapping air->humidity)
+- **Schwere:** Mittel (UX-Problem, kein Logik-Fehler)
+- **Detail:** Das Frontend fuehrt keinen Pre-Check des Device-Status durch. Der 403 landet im `catch`-Block des Store (`esp.ts:930`) der `error.value` setzt und rethrows. `AddActuatorModal.vue:166` faengt den Fehler und loggt ihn nur via `logger.error` — kein `toast.error`, kein spezifisches Feedback fuer "Geraet nicht genehmigt". Der User sieht keinen Toast, nur einen stillen Fehler.
+- **Evidenz:**
+  ```typescript
+  // AddActuatorModal.vue:158-168
+  async function addActuator() {
+    try {
+      await espStore.addActuator(props.espId, newActuator.value)
+      toast.success('Aktor erfolgreich hinzugefügt')
+      // ...
+    } catch (err) {
+      logger.error('Failed to add actuator', err)
+      // FEHLT: toast.error mit spezifischer Meldung
+    }
+  }
+  ```
 
-### 3.3 Kein VPD-spezifisches Null-Wert-Handling
+### 3.3 isMock-Klassifizierung korrekt
 
-- **Schwere:** Mittel
-- **Detail:** In zwei Stellen werden Null-Werte herausgefiltert:
-  - `MonitorView.vue:1559`: `if (s.raw_value === 0 && (!s.quality || s.quality === 'unknown')) continue`
-  - `sensorDefaults.ts:1401`: `if (val.value === 0 && val.quality === 'unknown') continue`
+- **Schwere:** Kein Befund
+- **Detail:** `isMockEsp()` in `esp.ts:186-191` prueft `startsWith('ESP_MOCK_')` und `startsWith('MOCK_')`. `ESP_EA5484` trifft keines — wird korrekt als Real-ESP behandelt. Der Code-Pfad laeuft durch den `else`-Zweig in `esp.ts:905-926` zu `actuatorsApi.createOrUpdate()`.
 
-  Fuer VPD ist raw_value=0 kein valider Messwert (entsteht wenn Server Temp/Humidity noch nicht vorliegen). Wenn der Server VPD=0 mit `quality: "good"` oder `quality: "fair"` sendet, wird der Wert als valid behandelt und angezeigt. Kein VPD-spezifischer Null-Check vorhanden.
-- **Evidenz:** `MonitorView.vue:1557-1559`, `sensorDefaults.ts:1399-1401`
+### 3.4 URL-Konstruktion korrekt
 
-### 3.4 WebSocket sensor_data Empfang fuer VPD — korrekt
+- **Schwere:** Kein Befund
+- **Detail:** `actuators.ts:93` baut `/actuators/${espId}/${gpio}` → `/actuators/ESP_EA5484/14`. Es gibt keinen separaten Endpoint fuer Mock vs. Real. Die Trennung erfolgt im Store vor dem API-Call (Mock → `debugApi`, Real → `actuatorsApi`). Fuer Real-ESPs ist `/actuators/{esp_id}/{gpio}` der korrekte Endpoint.
 
-- **Schwere:** Kein Problem
-- **Detail:** VPD-Daten werden vom Server via `sensor_data` WebSocket-Event gesendet (identischer Pfad wie DS18B20, SHT31). `sensor.store.ts:handleSensorData()` sucht per `exactMatch` nach `gpio + sensor_type`. Wenn der Server VPD mit korrekter `esp_id`, `gpio` und `sensor_type: "vpd"` sendet, greift der exactMatch und `raw_value` wird korrekt aktualisiert. Kein Frontend-Bug in der Empfangslogik.
-- **Evidenz:** `sensor.store.ts:119-131`
+### 3.5 Payload vollstaendig und korrekt
 
-### 3.5 SensorCardWidget zeigt VPD mit falscher Praezision
+- **Schwere:** Kein Befund
+- **Detail:** `esp.ts:909-924` baut `ActuatorConfigCreate` mit allen Pflichtfeldern (`esp_id`, `gpio`, `actuator_type`, `enabled`). Optional-Felder (`name`, `subzone_id`, `max_runtime_seconds`, `cooldown_seconds`, `pwm_frequency`, `metadata`) werden korrekt mit `null` oder berechnetem Wert belegt. Server ueberschreibt `esp_id` und `gpio` aus Path-Params (actuators.py:436) — keine Inkonsistenz moeglich.
 
-- **Schwere:** Niedrig
-- **Detail:** `SensorCardWidget.vue:109` rendert `(currentSensor.raw_value ?? 0).toFixed(1)`. VPD ist in `SENSOR_TYPE_CONFIG['vpd'].decimals = 2` konfiguriert. Das Widget ignoriert `decimals` und nutzt hartkodiertes `.toFixed(1)`. VPD 1.23 kPa wird als "1.2 kPa" dargestellt — ein kPa-Wert ist bei 1 Dezimalstelle zu ungenau.
-- **Evidenz:** `SensorCardWidget.vue:109`, `sensorDefaults.ts:519`
+### 3.6 Nebenthema: LWT-Flood im Server-Log
 
-### 3.6 HistoricalChart VPD-Annotationszonen korrekt
-
-- **Schwere:** Kein Problem — positiver Befund
-- **Detail:** `HistoricalChart.vue:452-491` implementiert vollstaendige VPD-Zonen-Hintergrundbaender (0-0.4 rot, 0.4-0.8 gelb, 0.8-1.2 gruen, 1.2-1.6 gelb, 1.6-3.0 rot). Aktiviert via `props.sensorType === 'vpd'`. Korrekt implementiert.
-- **Evidenz:** `HistoricalChart.vue:455-491`
-
-### 3.7 GaugeWidget Skala fuer VPD korrekt
-
-- **Schwere:** Kein Problem — positiver Befund
-- **Detail:** `GaugeWidget.vue:73-74` nutzt `SENSOR_TYPE_CONFIG` fuer effectiveMin/Max. Fuer VPD ergibt das `min: 0`, `max: 3` — korrekte Skala ohne manuelle Konfiguration.
-- **Evidenz:** `GaugeWidget.vue:67-74`
-
-### 3.8 useSensorOptions — kein VIRTUAL-Kennzeichen
-
-- **Schwere:** Niedrig
-- **Detail:** `useSensorOptions.ts` baut Dropdown-Listen ohne Unterscheidung zwischen physischen und virtuellen Sensoren. `VIRTUAL_SENSOR_META` existiert in sensorDefaults, wird aber in useSensorOptions nicht konsultiert. VPD erscheint im Sensor-Selector wie DS18B20 — kein Hinweis auf berechneten Wert.
-- **Evidenz:** `useSensorOptions.ts:75-97`
+- **Schwere:** Niedrig (separates Problem)
+- **Detail:** ESP_EA5484 erzeugt kontinuierliche LWT-Nachrichten (`unexpected_disconnect`) im Server-Log — mehrere pro Sekunde. Das ist ein MQTT-Reconnect-Loop des physischen Geraets und erklaert den persistenten `offline`-Status.
+- **Evidenz:** `logs/server/god_kaiser.log` — 20+ LWT-Entries fuer ESP_EA5484 im Bereich 16:03-16:04 Uhr
 
 ---
 
@@ -95,63 +86,45 @@ Drei Luecken gefunden: VPD wird von `getSensorAggCategory()` als `'air' -> 'humi
 
 | Check | Ergebnis |
 |-------|----------|
-| `docker compose logs --tail=200 el-frontend` | Nur Vite-Start-Log, keine Runtime-Errors |
-| `curl http://localhost:8000/api/v1/health/live` | alive: true |
-| `curl http://localhost:8000/api/v1/health/detailed` | 401 Auth required |
-| Grep: VPD-Referenzen im Frontend-Source | 3 Dateien: HistoricalChart.vue, sensorDefaults.ts, MonitorView.vue |
-| Grep: Null-Wert-Filter raw_value===0 | 2 Stellen, kein VPD-spezifisches Handling |
-| Grep: sensor_data Handler-Chain | sensor.store.ts -> exactMatch korrekt |
-| Grep: vpd/virtual in esp.ts Store | Kein VPD-Sonderfall im Store |
+| `curl http://localhost:8000/api/v1/health/live` | `{"alive":true}` — Server erreichbar |
+| `docker compose ps` | Alle 12 Services healthy/running |
+| DB: ESP_EA5484 Status | `offline` — Root Cause bestaetigt |
+| `grep "ESP_EA5484" logs/server/god_kaiser.log` | LWT-Flood bestaetigt, kein direkter 403-Log-Eintrag vorhanden |
+| `api/esp.ts:186-191` isMockEsp-Logik | Korrekt, ESP_EA5484 als Real-ESP klassifiziert |
 
 ---
 
 ## 5. Blind-Spot-Fragen (an User)
 
-1. **Erscheint VPD im Widget?** Oeffne ein Dashboard mit SensorCard oder Gauge auf VPD-Sensor. Zeigt es einen Wert, 0.00, oder bleibt es leer?
-
-2. **Was sendet der Server fuer VPD?** Browser Network-Tab -> WS-Frames -> suche nach `"sensor_type": "vpd"`. Oder Server-Log: `grep -i "vpd" logs/server/god_kaiser.log | tail -10`
-
-3. **Welcher GPIO wird fuer VPD verwendet?** GPIO=0 ist typisch fuer virtuelle Sensoren. Pruefe im Pinia-Devtools: `espStore.devices[n].sensors` -> Eintrag mit `sensor_type: "vpd"`. Welchen Wert hat `gpio`?
-
-4. **Erscheint VPD in der ZonePlate?** Wenn ja: In welcher KPI-Zeile (Temperatur oder Luftfeuchte)? Das bestaetigt ob der Aggregations-Bucket-Bug sichtbar ist.
-
-5. **Gibt es Browser-Console-Errors beim Laden von Daten mit VPD-Sensor?** Kopiere alle roten Eintraege hierher.
+1. Welche Rolle hat der eingeloggte User (`viewer`/`operator`/`admin`)? Falls `viewer`, kommt der 403 aus `deps.py:290` (OperatorUser-Check) und nicht aus dem Status-Guard. Beide liefern HTTP 403, aber mit unterschiedlichem `detail`-Text im Response-Body.
+2. Was zeigt die Browser-Console exakt als Response-Body? Der Server-Text `"Device 'ESP_EA5484' must be approved before configuration"` vs. `"Operator or admin privileges required"` erlaubt eindeutige Unterscheidung der 403-Quelle.
+3. Soll ESP_EA5484 manuell auf `approved` gesetzt werden fuer den Test?
 
 ---
 
 ## 6. Bewertung & Empfehlung
 
-### Root Cause (identifizierbar)
+### Root Cause
 
-**Bug A — VPD in Zone-Aggregation fehlerhaft:**
-`getSensorAggCategory('vpd')` mappt ueber den Fallback `'air' -> 'humidity'`. VPD-Werte (kPa) landen im Humidity-Bucket und verursachen falsche Durchschnittswerte in ZonePlate-KPIs.
-
-**Fix:** Expliziter VPD-Check in `getSensorAggCategory()` vor dem Fallback:
-```typescript
-// In getSensorAggCategory(), nach dem flow-Check:
-if (lower === 'vpd') return 'other'  // VPD nicht in Humidity-Bucket mischen
-```
-Alternativ: Eigene AggCategory 'vpd' einfuehren (aufwaendiger, aber sauberer).
-
-**Bug B — SensorCardWidget zeigt VPD mit 1 Dezimalstelle:**
-`SensorCardWidget.vue:109` nutzt hartkodiertes `.toFixed(1)` statt der konfigurierten `decimals: 2`.
-
-**Fix:** In `SensorCardWidget.vue` den `decimals`-Wert aus `SENSOR_TYPE_CONFIG` laden:
-```typescript
-const decimals = computed(() => {
-  const sType = parsedSensorType.value || currentSensor.value?.sensor_type
-  return SENSOR_TYPE_CONFIG[sType ?? '']?.decimals ?? 1
-})
-// Template: {{ (currentSensor.raw_value ?? 0).toFixed(decimals) }}
-```
+`ESP_EA5484` hat DB-Status `offline`. Der Server-Endpoint `POST /actuators/{esp_id}/{gpio}` verweigert Konfigurationsoperationen an Geraeten mit Status != `approved`/`online` mit `DeviceNotApprovedError` (HTTP 403, Numeric 5405). Das Frontend ist korrekt implementiert — der Fehler liegt nicht im Frontend-Code-Pfad.
 
 ### Naechste Schritte
 
-1. Server-Log pruefen (kein Browser noetig): `grep -i "vpd" logs/server/god_kaiser.log | tail -20` — bestaetigt ob VPD-Events gesendet werden und mit welchem GPIO/sensor_type
-2. Bug A in `sensorDefaults.ts:getSensorAggCategory()` beheben — VPD aus Humidity-Bucket heraushalten
-3. Bug B in `SensorCardWidget.vue` beheben — decimals aus SENSOR_TYPE_CONFIG nutzen
+**Option A — Geraet genehmigen (wenn legitim):**
+```sql
+UPDATE esp_devices SET status = 'approved' WHERE device_id = 'ESP_EA5484';
+```
+Danach erneut versuchen. Das Geraet muss anschliessend verbunden sein, damit der Status automatisch auf `online` wechselt.
 
-### Lastintensive Ops (Vorschlag, nicht automatisch ausgefuehrt)
+**Option B — Frontend-UX verbessern (unabhaengig von A, Aufwand gering):**
+`AddActuatorModal.vue:166` sollte den 403-Fall spezifisch behandeln:
+- 403 → `toast.error('Geraet nicht genehmigt. Status muss "approved" oder "online" sein.')`
+- Alternativ: Button deaktivieren wenn `esp.status !== 'approved' && esp.status !== 'online'` (Pre-Check via `espStore.devices`)
+- Zustaendig: `frontend-dev`
 
-- Soll ich `vue-tsc --noEmit` ausfuehren um Type-Korrektheit der vorgeschlagenen Fixes zu pruefen? (ca. 1-3 Min, Befehl: `docker compose exec el-frontend npx vue-tsc --noEmit`)
-- Soll ich `npm run build` fuer einen vollstaendigen Build-Check ausfuehren? (ca. 2-5 Min)
+**Option C — LWT-Flood untersuchen (separates Ticket):**
+Der Reconnect-Loop von ESP_EA5484 deutet auf ein Firmware- oder Netzwerkproblem hin. Solange der ESP im Loop ist, bleibt der Status `offline` und Option A wuerde nur temporaer helfen. Zustaendig: `esp32-debug`.
+
+### Lastintensive Ops
+
+Nicht erforderlich — Root Cause vollstaendig durch leichtgewichtige Checks bestaetigt.
