@@ -1,4 +1,5 @@
 #include "provision_manager.h"
+#include "../../config/firmware_version.h"
 #include "../../services/config/config_manager.h"
 #include "../../services/config/storage_manager.h"
 #include "../../models/error_codes.h"
@@ -220,7 +221,7 @@ const char* ProvisionManager::HTML_LANDING_PAGE = R"rawliteral(
     </div>
 
     <div class="footer">
-      <p>%ESP_ID% | Firmware v4.0.0</p>
+      <p>%ESP_ID% | Firmware v%FIRMWARE_VERSION%</p>
       <p>Heap: %HEAP_FREE% bytes | Uptime: %UPTIME%s</p>
     </div>
   </div>
@@ -851,6 +852,7 @@ void ProvisionManager::handleRoot() {
 
   // Basic placeholders
   html.replace("%ESP_ID%", esp_id_);
+  html.replace("%FIRMWARE_VERSION%", String(KAISER_FIRMWARE_VERSION_STRING));
   html.replace("%UPTIME%", String(getUptimeSeconds()));
   html.replace("%HEAP_FREE%", String(ESP.getFreeHeap()));
 
@@ -1057,7 +1059,7 @@ void ProvisionManager::handleStatus() {
   doc["esp_id"] = esp_id_;
   doc["chip_model"] = ESP.getChipModel();
   doc["mac_address"] = WiFi.macAddress();
-  doc["firmware_version"] = "4.0.0";  // TODO: From build config
+  doc["firmware_version"] = KAISER_FIRMWARE_VERSION_STRING;
   doc["state"] = getStateString();
   doc["uptime_seconds"] = getUptimeSeconds();
   doc["heap_free"] = ESP.getFreeHeap();

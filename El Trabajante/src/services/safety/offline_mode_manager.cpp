@@ -43,8 +43,12 @@ void OfflineModeManager::onReconnect() {
 }
 
 void OfflineModeManager::onServerAckReceived() {
-    if (mode_ == OfflineMode::RECONNECTING) {
+    if (mode_ == OfflineMode::RECONNECTING || mode_ == OfflineMode::OFFLINE_ACTIVE) {
         // Server confirmed → disable offline rules, clear overrides
+        // OFFLINE_ACTIVE: handles the case where MQTT broker stayed connected but
+        // the server process restarted — onMQTTConnect() was never called, so mode
+        // never transitioned to RECONNECTING. The ACK is still the authoritative
+        // signal that the server is back online and P4 rules must stop.
         deactivateOfflineMode();
     } else if (mode_ == OfflineMode::DISCONNECTED) {
         // ACK received before grace period — cancel timer
@@ -186,6 +190,17 @@ void OfflineModeManager::evaluateOfflineRules() {
                        " -> " + (new_state ? "ON" : "OFF") +
                        " (sensor GPIO " + String(rule.sensor_gpio) +
                        " = " + String(val));
+
+            // Option B: write only the changed is_active key to NVS.
+            // Full saveOfflineRulesToNVS() is too stack-heavy for the Safety-Task —
+            // it opens the namespace and rewrites all 8+ keys per rule.
+            // Here we open/write/close for ONE key only, on state changes (infrequent).
+            char state_key[16];
+            snprintf(state_key, sizeof(state_key), "ofr_%d_state", i);
+            if (storageManager.beginNamespace("offline", false)) {
+                storageManager.putUInt8(state_key, rule.is_active ? 1 : 0);
+                storageManager.endNamespace();
+            }
         }
     }
 }
@@ -232,7 +247,15 @@ void OfflineModeManager::parseOfflineRules(JsonObject obj) {
         offline_rules_[i].deactivate_above  = r["deactivate_above"] | 0.0f;
         offline_rules_[i].activate_above    = r["activate_above"] | 0.0f;
         offline_rules_[i].deactivate_below  = r["deactivate_below"] | 0.0f;
-        offline_rules_[i].is_active         = false;
+        // is_active: use server-provided state if present, otherwise preserve existing
+        // value (from NVS load at boot). Prevents config push from resetting a running
+        // hysteresis cycle — especially important when server reconnects after a reboot.
+        if (r.containsKey("current_state_active")) {
+            offline_rules_[i].is_active = r["current_state_active"].as<bool>();
+            LOG_D(TAG, String("[CONFIG] Rule ") + String(i) + ": is_active=" +
+                       (offline_rules_[i].is_active ? "true" : "false") + " (from server push)");
+        }
+        // else: preserve existing value (NVS-loaded or false on first boot)
         offline_rules_[i].server_override   = false;
     }
 
@@ -281,13 +304,23 @@ void OfflineModeManager::loadOfflineRulesFromNVS() {
         snprintf(key, sizeof(key), "ofr_%d_deab", i);
         offline_rules_[i].deactivate_below = storageManager.getFloat(key, 0.0f);
 
-        offline_rules_[i].is_active      = false;
+        snprintf(key, sizeof(key), "ofr_%d_state", i);
+        if (storageManager.keyExists(key)) {
+            offline_rules_[i].is_active = storageManager.getUInt8(key, 0) != 0;
+            LOG_I(TAG, String("[CONFIG] NVS Rule ") + String(i) +
+                       ": is_active=" + (offline_rules_[i].is_active ? "true" : "false") +
+                       " (from NVS)");
+        } else {
+            offline_rules_[i].is_active = false;
+            LOG_D(TAG, String("[CONFIG] NVS Rule ") + String(i) +
+                       ": is_active=false (no NVS key, default)");
+        }
         offline_rules_[i].server_override = false;
     }
 
     storageManager.endNamespace();
 
-    // Initialize shadow copy for change-detection
+    // Initialize shadow copy for change-detection (includes is_active)
     memcpy(offline_rules_shadow_, offline_rules_, sizeof(OfflineRule) * offline_rule_count_);
     shadow_rule_count_ = offline_rule_count_;
 
@@ -301,8 +334,10 @@ void OfflineModeManager::loadOfflineRulesFromNVS() {
 void OfflineModeManager::setServerOverride(uint8_t actuator_gpio) {
     for (uint8_t i = 0; i < offline_rule_count_; i++) {
         if (offline_rules_[i].actuator_gpio == actuator_gpio) {
-            offline_rules_[i].server_override = true;
-            LOG_I(TAG, "[SAFETY-P4] Server override set for actuator GPIO " + String(actuator_gpio));
+            if (!offline_rules_[i].server_override) {  // Guard: log only on first override
+                offline_rules_[i].server_override = true;
+                LOG_I(TAG, "[SAFETY-P4] Server override set for actuator GPIO " + String(actuator_gpio));
+            }
         }
     }
 }
@@ -313,12 +348,60 @@ void OfflineModeManager::setServerOverride(uint8_t actuator_gpio) {
 
 void OfflineModeManager::activateOfflineMode() {
     mode_ = OfflineMode::OFFLINE_ACTIVE;
+
+    // Initialize is_active flags from actual hardware state.
+    // Without this, all rules start at is_active=false regardless of the real actuator
+    // state at the moment of broker disconnect. If the server had an actuator ON when
+    // the broker disconnected, the first P4 evaluation cycle would see is_active=false,
+    // evaluate both thresholds as "not yet active", and potentially command the actuator
+    // to a wrong state before any sensor reading confirms the need.
+    if (offline_rule_count_ > 0 && actuatorManager.isInitialized()) {
+        for (uint8_t i = 0; i < offline_rule_count_; i++) {
+            if (!offline_rules_[i].enabled || offline_rules_[i].actuator_gpio == 255) {
+                continue;
+            }
+            ActuatorConfig cfg = actuatorManager.getActuatorConfig(offline_rules_[i].actuator_gpio);
+
+            // Extended diagnostic: log all three state sources simultaneously.
+            // Distinguishes root causes:
+            //   Ursache A — cfg.current_state wrong (driver getConfig() bug)
+            //   Ursache B — race condition (cfg.current_state has stale value)
+            //   Ursache C — cfg.gpio==255 (GPIO mismatch, actuator not in ActuatorManager)
+            LOG_I(TAG, String("[SAFETY-P4-DIAG] Rule ") + String(i) +
+                       ": rule.actuator_gpio=" + String(offline_rules_[i].actuator_gpio) +
+                       ", cfg.gpio=" + String(cfg.gpio) + " (255=not found)" +
+                       ", cfg.current_state=" + (cfg.current_state ? "ON" : "OFF") +
+                       ", cfg.default_state=" + (cfg.default_state ? "ON" : "OFF") +
+                       ", digitalRead=" + String(digitalRead(offline_rules_[i].actuator_gpio)));
+
+            if (cfg.gpio != 255) {
+                offline_rules_[i].is_active = cfg.current_state;
+            } else {
+                // Ursache C fallback: actuator GPIO not found in ActuatorManager.
+                // Read hardware pin directly — physical pin state cannot lie.
+                int pin_val = digitalRead(offline_rules_[i].actuator_gpio);
+                offline_rules_[i].is_active = (pin_val == HIGH);
+                LOG_W(TAG, String("[SAFETY-P4] Rule ") + String(i) +
+                           ": actuator GPIO " + String(offline_rules_[i].actuator_gpio) +
+                           " not found in ActuatorManager — digitalRead=" +
+                           String(pin_val) + " used as fallback");
+            }
+
+            LOG_I(TAG, String("[SAFETY-P4] Rule ") + String(i) +
+                       ": actuator GPIO " + String(offline_rules_[i].actuator_gpio) +
+                       " is_active initialized from hardware state -> " +
+                       (offline_rules_[i].is_active ? "ON" : "OFF"));
+        }
+    }
+
     LOG_W(TAG, "[SAFETY-P4] Offline mode ACTIVE - " +
                String(offline_rule_count_) + " local rules enabled");
     if (offline_rule_count_ == 0) {
         // Fix 1a/1b should already have set safe state on disconnect,
         // but confirm here as defense-in-depth.
-        actuatorManager.setAllActuatorsToSafeState();
+        if (actuatorManager.isInitialized()) {
+            actuatorManager.setAllActuatorsToSafeState();
+        }
         LOG_W(TAG, "[SAFETY-P4] OFFLINE_ACTIVE with 0 rules — confirming safe state");
     }
     // If rules > 0: nothing — Safety-Task evaluates in <5s automatically
@@ -333,6 +416,11 @@ void OfflineModeManager::deactivateOfflineMode() {
         offline_rules_[i].is_active      = false;
         offline_rules_[i].server_override = false;
     }
+
+    // Persist is_active=false so a subsequent power-cycle doesn't reload stale state.
+    // Called from Communication-Task (Core 0) via onServerAckReceived() — stack is fine.
+    // Uses saveOfflineRulesToNVS() (full write) because all states reset at once.
+    saveOfflineRulesToNVS();
 
     LOG_I(TAG, "[SAFETY-P4] Offline mode DEACTIVATED - back to server control");
 }
@@ -377,11 +465,17 @@ void OfflineModeManager::saveOfflineRulesToNVS() {
 
         snprintf(key, sizeof(key), "ofr_%d_deab", i);
         storageManager.putFloat(key, offline_rules_[i].deactivate_below);
+
+        // Option A: is_active persisted as part of the full save/load cycle.
+        // Written only when saveOfflineRulesToNVS() detects a change (memcmp guard).
+        // Wear protection: hysteresis transitions are infrequent (< ~10/day per rule).
+        snprintf(key, sizeof(key), "ofr_%d_state", i);
+        storageManager.putUInt8(key, offline_rules_[i].is_active ? 1 : 0);
     }
 
     storageManager.endNamespace();
 
-    // Update shadow copy
+    // Update shadow copy (includes is_active so next memcmp is accurate)
     memcpy(offline_rules_shadow_, offline_rules_, sizeof(OfflineRule) * offline_rule_count_);
     shadow_rule_count_ = offline_rule_count_;
 

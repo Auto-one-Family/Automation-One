@@ -1,6 +1,7 @@
 #include "wifi_manager.h"
 #include "../../models/error_codes.h"
 #include "../../utils/time_manager.h"
+#include "../../utils/watchdog_storage.h"
 #ifdef ESP_PLATFORM
 #include "esp_task_wdt.h"
 
@@ -163,6 +164,7 @@ bool WiFiManager::connectToNetwork() {
     if (timeManager.begin()) {
         LOG_I(TAG, "NTP sync successful - Unix timestamp: " + 
                  String((unsigned long)timeManager.getUnixTimestamp()));
+        watchdogStorageTryFinalizeBootRecord();
     } else {
         LOG_W(TAG, "NTP sync failed - timestamps may be inaccurate");
         LOG_W(TAG, "TimeManager will retry in background");

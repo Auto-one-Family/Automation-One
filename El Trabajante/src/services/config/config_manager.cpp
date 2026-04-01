@@ -498,6 +498,8 @@ bool ConfigManager::updateZoneAssignment(const String& zone_id, const String& ma
 #define NVS_SZ_SAFE        "sz_%d_safe"     // sz_0_safe = 9 chars ✅
 #define NVS_SZ_TS          "sz_%d_ts"       // sz_0_ts = 6 chars ✅
 #define NVS_SZ_GPIO        "sz_%d_gpio"     // sz_0_gpio = 9 chars ✅
+#define NVS_SZ_SEN         "sz_%d_sen"      // cached sensor count in subzone
+#define NVS_SZ_ACT         "sz_%d_act"      // cached actuator count in subzone
 
 // Legacy keys (deprecated, variable length >15 chars for most IDs)
 #define NVS_SZ_IDS_OLD     "subzone_ids"    // 11 chars ✅ (but content unchanged)
@@ -696,6 +698,11 @@ bool ConfigManager::saveSubzoneConfig(const SubzoneConfig& config) {
   snprintf(key, sizeof(key), NVS_SZ_GPIO, index);
   success &= storageManager.putString(key, gpio_string);
 
+  snprintf(key, sizeof(key), NVS_SZ_SEN, index);
+  success &= storageManager.putUInt8(key, config.sensor_count);
+  snprintf(key, sizeof(key), NVS_SZ_ACT, index);
+  success &= storageManager.putUInt8(key, config.actuator_count);
+
   // Update count
   uint8_t count = 0;
   if (index_map.length() > 0) {
@@ -800,6 +807,11 @@ bool ConfigManager::loadSubzoneConfig(const String& subzone_id, SubzoneConfig& c
         start_idx = comma_idx + 1;
       }
     }
+
+    snprintf(key, sizeof(key), NVS_SZ_SEN, index);
+    config.sensor_count = storageManager.getUInt8(key, 0);
+    snprintf(key, sizeof(key), NVS_SZ_ACT, index);
+    config.actuator_count = storageManager.getUInt8(key, 0);
 
     storageManager.endNamespace();
     return config.subzone_id.length() > 0;
@@ -966,6 +978,11 @@ bool ConfigManager::removeSubzoneConfig(const String& subzone_id) {
 
     snprintf(key, sizeof(key), NVS_SZ_GPIO, index);
     storageManager.putString(key, "");
+
+    snprintf(key, sizeof(key), NVS_SZ_SEN, index);
+    storageManager.putUInt8(key, 0);
+    snprintf(key, sizeof(key), NVS_SZ_ACT, index);
+    storageManager.putUInt8(key, 0);
 
     // Remove from index map
     removeSubzoneFromIndexMap(subzone_id, index_map);

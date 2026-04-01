@@ -78,6 +78,9 @@ public:
     // Get active sensor count
     uint8_t getActiveSensorCount() const;
 
+    /** Count configured sensors whose subzone_id matches (Phase 9). */
+    uint8_t countSensorsWithSubzone(const String& subzone_id) const;
+
     // ============================================
     // SENSOR READING (PHASE 4)
     // ============================================
@@ -116,6 +119,14 @@ public:
     bool readRawOneWire(uint8_t gpio, const uint8_t rom[8], int16_t& raw_value);
     
     // ============================================
+    // SAFETY-P4: Value Cache
+    // ============================================
+    // Returns last known processed value for a sensor type on a given GPIO.
+    // Returns NAN if no valid cache entry exists or entry is older than
+    // VALUE_CACHE_STALE_MS (5 minutes).
+    float getSensorValue(uint8_t gpio, const char* sensor_type) const;
+
+    // ============================================
     // STATUS QUERIES
     // ============================================
     bool isInitialized() const { return initialized_; }
@@ -139,6 +150,29 @@ private:
     SensorConfig sensors_[MAX_SENSORS];
     uint8_t sensor_count_;
     bool initialized_;
+
+    // ============================================
+    // SAFETY-P4: Value Cache
+    // ============================================
+    // Stores last processed_value per (gpio, sensor_type) pair.
+    // Used by OfflineModeManager to evaluate hysteresis rules without
+    // triggering a new measurement.
+    static constexpr unsigned long VALUE_CACHE_STALE_MS = 300000UL;  // 5 minutes
+    static const uint8_t MAX_VALUE_CACHE_ENTRIES = 20;
+
+    struct ValueCacheEntry {
+        uint8_t       gpio;
+        char          sensor_type[24];
+        float         value;
+        unsigned long timestamp_ms;
+        bool          valid;
+    };
+
+    ValueCacheEntry value_cache_[MAX_VALUE_CACHE_ENTRIES];
+    uint8_t         value_cache_count_ = 0;
+
+    // Update or insert a cache entry (called from publishSensorReading)
+    void updateValueCache(uint8_t gpio, const char* sensor_type, float value);
     
     // Component references
     class MQTTClient* mqtt_client_;
@@ -154,10 +188,14 @@ private:
     // HELPER METHODS
     // ============================================
     // Find sensor config by GPIO (+ optional address for multi-sensor GPIOs)
+    // sensor_type: when non-empty, additionally matches sensor_type — used for I2C
+    // multi-value sensors (e.g. SHT31 sht31_temp vs. sht31_humidity share GPIO+address).
     SensorConfig* findSensorConfig(uint8_t gpio,
-        const String& onewire_address = "", uint8_t i2c_address = 0);
+        const String& onewire_address = "", uint8_t i2c_address = 0,
+        const String& sensor_type = "");
     const SensorConfig* findSensorConfig(uint8_t gpio,
-        const String& onewire_address = "", uint8_t i2c_address = 0) const;
+        const String& onewire_address = "", uint8_t i2c_address = 0,
+        const String& sensor_type = "") const;
 
     // Internal: measurement with known config (avoids GPIO-only re-lookup for multi-sensor GPIOs)
     bool performMeasurementForConfig(SensorConfig* config, SensorReading& reading_out);

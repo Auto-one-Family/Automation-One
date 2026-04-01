@@ -3,6 +3,9 @@
 #include "../drivers/gpio_manager.h"
 #include "../error_handling/error_tracker.h"
 #include "../models/error_codes.h"
+#include "../tasks/rtos_globals.h"  // SAFETY-RTOS M4.3: g_onewire_mutex (scan on Core 0 vs read on Core 1)
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 // ============================================
 // CONDITIONAL HARDWARE CONFIGURATION INCLUDES
@@ -58,6 +61,11 @@ bool OneWireBusManager::begin(uint8_t pin) {
 
     LOG_I(TAG, "OneWire Bus Manager initialization started");
 
+    if (xSemaphoreTake(g_onewire_mutex, portMAX_DELAY) != pdTRUE) {
+        LOG_W(TAG, "OneWire: Mutex unavailable — init aborted");
+        return false;
+    }
+
     // ============================================
     // PIN ASSIGNMENT
     // ============================================
@@ -84,6 +92,7 @@ bool OneWireBusManager::begin(uint8_t pin) {
         errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED,
                                ERROR_SEVERITY_CRITICAL,
                                ("Pin reservation failed: GPIO " + String(pin_)).c_str());
+        xSemaphoreGive(g_onewire_mutex);
         return false;
     }
     
@@ -96,6 +105,7 @@ bool OneWireBusManager::begin(uint8_t pin) {
                                ERROR_SEVERITY_CRITICAL,
                                "Memory allocation failed");
         gpioManager.releasePin(pin_);
+        xSemaphoreGive(g_onewire_mutex);
         return false;
     }
     
@@ -110,7 +120,8 @@ bool OneWireBusManager::begin(uint8_t pin) {
     LOG_I(TAG, "OneWire Bus Manager initialized successfully");
     LOG_I(TAG, "  Board: " + String(BOARD_TYPE));
     LOG_I(TAG, "  Pin: GPIO " + String(pin_));
-    
+
+    xSemaphoreGive(g_onewire_mutex);
     return true;
 }
 
@@ -120,6 +131,11 @@ bool OneWireBusManager::begin(uint8_t pin) {
 void OneWireBusManager::end() {
     if (!initialized_) {
         LOG_W(TAG, "OneWire bus not initialized, nothing to end");
+        return;
+    }
+
+    if (xSemaphoreTake(g_onewire_mutex, portMAX_DELAY) != pdTRUE) {
+        LOG_W(TAG, "OneWire: Mutex unavailable — end() skipped");
         return;
     }
     
@@ -137,6 +153,7 @@ void OneWireBusManager::end() {
     initialized_ = false;
     
     LOG_I(TAG, "OneWire Bus Manager shutdown complete");
+    xSemaphoreGive(g_onewire_mutex);
 }
 
 // ============================================
@@ -145,6 +162,11 @@ void OneWireBusManager::end() {
 bool OneWireBusManager::scanDevices(uint8_t rom_codes[][8], uint8_t max_devices, uint8_t& found_count) {
     if (!initialized_ || onewire_ == nullptr) {
         LOG_E(TAG, "OneWire bus not initialized");
+        return false;
+    }
+
+    if (xSemaphoreTake(g_onewire_mutex, portMAX_DELAY) != pdTRUE) {
+        LOG_W(TAG, "OneWire: Mutex unavailable — scan skipped");
         return false;
     }
     
@@ -187,7 +209,8 @@ bool OneWireBusManager::scanDevices(uint8_t rom_codes[][8], uint8_t max_devices,
     } else {
         LOG_I(TAG, "OneWire bus scan complete: " + String(found_count) + " devices found");
     }
-    
+
+    xSemaphoreGive(g_onewire_mutex);
     return true;
 }
 
@@ -197,6 +220,11 @@ bool OneWireBusManager::scanDevices(uint8_t rom_codes[][8], uint8_t max_devices,
 bool OneWireBusManager::isDevicePresent(const uint8_t rom_code[8]) {
     if (!initialized_ || onewire_ == nullptr) {
         LOG_E(TAG, "OneWire bus not initialized");
+        return false;
+    }
+
+    if (xSemaphoreTake(g_onewire_mutex, portMAX_DELAY) != pdTRUE) {
+        LOG_W(TAG, "OneWire: Mutex unavailable — isDevicePresent skipped");
         return false;
     }
     
@@ -215,10 +243,12 @@ bool OneWireBusManager::isDevicePresent(const uint8_t rom_code[8]) {
         }
         
         if (match) {
+            xSemaphoreGive(g_onewire_mutex);
             return true;
         }
     }
-    
+
+    xSemaphoreGive(g_onewire_mutex);
     return false;
 }
 
@@ -233,6 +263,11 @@ bool OneWireBusManager::readRawTemperature(const uint8_t rom_code[8], int16_t& r
                                "Read failed: bus not initialized");
         return false;
     }
+
+    if (xSemaphoreTake(g_onewire_mutex, portMAX_DELAY) != pdTRUE) {
+        LOG_W(TAG, "OneWire: Mutex unavailable — read skipped");
+        return false;
+    }
     
     // Verify device is present
     if (!onewire_->reset()) {
@@ -240,18 +275,25 @@ bool OneWireBusManager::readRawTemperature(const uint8_t rom_code[8], int16_t& r
         errorTracker.trackError(ERROR_ONEWIRE_READ_FAILED,
                                ERROR_SEVERITY_ERROR,
                                "Bus reset failed");
+        xSemaphoreGive(g_onewire_mutex);
         return false;
     }
     
     // Select device
     onewire_->select(rom_code);
-    
+
     // Start temperature conversion (0x44)
-    onewire_->write(0x44, 1);  // 1 = parasitic power
-    
-    // Wait for conversion (750ms max for 12-bit resolution)
-    // For faster operation, could poll bit 0 of scratchpad
-    delay(750);
+    // External VCC: parasitic power bit = 0. Conversion time up to 750 ms @ 12-bit (datasheet).
+    // Wokwi: the virtual DS18B20 updates the scratchpad only after conversion completes; a short
+    // delay (e.g. 10 ms) reads stale/garbage bytes → scratchpad CRC8 check fails while ROM scan
+    // still works. Match real timing here (same as non-Wokwi path, minus strong pullup).
+    #ifdef WOKWI_SIMULATION
+        onewire_->write(0x44, 0);
+        delay(750);
+    #else
+        onewire_->write(0x44, 1);  // 1 = parasitic power (strong pullup after write)
+        delay(750);
+    #endif
     
     // Reset and select device again
     if (!onewire_->reset()) {
@@ -259,6 +301,7 @@ bool OneWireBusManager::readRawTemperature(const uint8_t rom_code[8], int16_t& r
         errorTracker.trackError(ERROR_ONEWIRE_READ_FAILED,
                                ERROR_SEVERITY_ERROR,
                                "Bus reset failed after conversion");
+        xSemaphoreGive(g_onewire_mutex);
         return false;
     }
     
@@ -279,6 +322,7 @@ bool OneWireBusManager::readRawTemperature(const uint8_t rom_code[8], int16_t& r
         errorTracker.trackError(ERROR_ONEWIRE_READ_FAILED,
                                ERROR_SEVERITY_ERROR,
                                "CRC validation failed");
+        xSemaphoreGive(g_onewire_mutex);
         return false;
     }
     
@@ -292,7 +336,8 @@ bool OneWireBusManager::readRawTemperature(const uint8_t rom_code[8], int16_t& r
     
     LOG_D(TAG, "OneWire raw temperature: " + String(raw_value) + 
               " (will be processed by God-Kaiser)");
-    
+
+    xSemaphoreGive(g_onewire_mutex);
     return true;
 }
 

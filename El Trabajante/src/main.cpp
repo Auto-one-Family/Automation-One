@@ -104,7 +104,12 @@ static bool g_safety_rtos_tasks_created = false;
 // SAFETY-P1: Server-ACK-Timeout Tracking (Mechanism D)
 // ============================================
 static const unsigned long SERVER_ACK_TIMEOUT_MS = 120000UL;  // 2 minutes
-static std::atomic<uint32_t> g_last_server_ack_ms{0};
+// SAFETY-P1 Race-Fix (Bug-2): g_last_server_ack_ms is no longer static so that
+// mqtt_client.cpp can reset it atomically inside MQTT_EVENT_CONNECTED — before
+// on_connect_callback_() is invoked. This closes the ~ms window where the Safety-Task
+// (Core 1) could read mqttClient.isConnected()==true with a stale timestamp and
+// incorrectly trigger the 120 s ACK-timeout path.
+std::atomic<uint32_t> g_last_server_ack_ms{0};
 static std::atomic<bool> g_server_timeout_triggered{false};
 // g_mqtt_connected: defined in mqtt_client.cpp (SAFETY-RTOS M2, #ifndef MQTT_USE_PUBSUBCLIENT)
 // Accessed via mqttClient.isConnected() which reads the atomic in the ESP-IDF path.
@@ -192,12 +197,13 @@ void subscribeToAllTopics() {
   mqttClient.subscribe(sensor_wildcard, 1);
 
   mqttClient.subscribe(TopicBuilder::buildSystemHeartbeatAckTopic());
+  mqttClient.subscribe(TopicBuilder::buildServerStatusTopic(), 1);  // SAFETY-P5: Server LWT (QoS 1)
 
-  LOG_I(TAG, "[SAFETY-P1] All 11 MQTT topics subscribed");
+  LOG_I(TAG, "[SAFETY-P1] All 12 MQTT topics subscribed");
 }
 
 // ============================================
-// SAFETY-P1 on_connect callback (Mechanisms A + D + E)
+// SAFETY-P1 on_connect callback (Mechanisms A + D + E + F)
 // ============================================
 void onMqttConnectCallback() {
   static bool is_first_connect = true;
@@ -209,16 +215,24 @@ void onMqttConnectCallback() {
   g_last_server_ack_ms.store(millis());
   g_server_timeout_triggered.store(false);
 
+  // Mechanism E: Reconnect-only actions (managers must be initialized)
   if (!is_first_connect) {
     // Mechanism E: State sync after reconnect
     LOG_I(TAG, "[SAFETY-P1] MQTT reconnected — syncing actuator state with server");
     if (actuatorManager.isInitialized()) {
       actuatorManager.publishAllActuatorStatus();
     }
-    mqttClient.publishHeartbeat(true);
     offlineModeManager.onReconnect();  // SAFETY-P4: transition to RECONNECTING state
   }
   is_first_connect = false;
+
+  // Mechanism F (FIX): Heartbeat AFTER subscriptions on ALL connects (initial + reconnect).
+  // In the ESP-IDF non-blocking path, connect() returns immediately before MQTT_EVENT_CONNECTED.
+  // This callback fires only AFTER MQTT_EVENT_CONNECTED — connection is guaranteed established.
+  // Replaces the premature publishHeartbeat(true) call in setup() which fired before the
+  // connection was actually established and was silently dropped (QoS-0 dropped when not connected).
+  mqttClient.publishHeartbeat(true);
+  LOG_I(TAG, "[SAFETY-P1] Post-connect heartbeat sent (fast registration)");
 }
 
 // ============================================
@@ -281,7 +295,11 @@ void routeIncomingMessage(const char* t, const char* p) {
             String auth_token = doc["auth_token"].as<String>();
 
             // Validate auth_token — fail-open: if no token configured, accept any emergency
-            String stored_token = storageManager.getStringObj("emergency_auth", "");
+            String stored_token = "";
+            if (storageManager.beginNamespace("system_config", true)) {
+                stored_token = storageManager.getStringObj("emergency_auth", "");
+                storageManager.endNamespace();
+            }
 
             if (stored_token.length() > 0 && auth_token != stored_token) {
                 LOG_E(TAG, "╔════════════════════════════════════════╗");
@@ -335,14 +353,20 @@ void routeIncomingMessage(const char* t, const char* p) {
     // ─── Broadcast emergency ─────────────────────────────────────────────────
     String broadcast_emergency_topic = String(TopicBuilder::buildBroadcastEmergencyTopic());
     if (topic == broadcast_emergency_topic) {
-        DynamicJsonDocument doc(256);
+        // Server payload includes command, reason, issued_by, timestamp (ISO-string ~32 chars),
+        // devices_stopped, actuators_stopped — minimum ~300 bytes; 512 gives safe headroom.
+        DynamicJsonDocument doc(512);
         DeserializationError error = deserializeJson(doc, payload);
 
         if (!error) {
             String auth_token = doc["auth_token"].as<String>();
 
             // Validate auth_token — fail-open
-            String stored_broadcast_token = storageManager.getStringObj("broadcast_em_tok", "");
+            String stored_broadcast_token = "";
+            if (storageManager.beginNamespace("system_config", true)) {
+                stored_broadcast_token = storageManager.getStringObj("broadcast_em_tok", "");
+                storageManager.endNamespace();
+            }
 
             if (stored_broadcast_token.length() > 0 && auth_token != stored_broadcast_token) {
                 LOG_E(TAG, "╔════════════════════════════════════════╗");
@@ -729,17 +753,35 @@ void routeIncomingMessage(const char* t, const char* p) {
                 response_doc["success"] = false;
                 response_doc["error"] = "Token must be 1-64 characters";
             } else if (token_type == "broadcast") {
-                storageManager.putString("broadcast_em_tok", token_value);
-                response_doc["success"] = true;
+                bool saved = false;
+                if (storageManager.beginNamespace("system_config", false)) {
+                    saved = storageManager.putString("broadcast_em_tok", token_value);
+                    storageManager.endNamespace();
+                }
+                response_doc["success"] = saved;
                 response_doc["token_type"] = "broadcast";
-                response_doc["message"] = "Broadcast emergency token updated";
-                LOG_I(TAG, "Broadcast emergency token updated (persisted to NVS)");
+                response_doc["message"] = saved ? "Broadcast emergency token updated"
+                                                : "Failed to persist broadcast token";
+                if (saved) {
+                    LOG_I(TAG, "Broadcast emergency token updated (persisted to NVS)");
+                } else {
+                    LOG_E(TAG, "Failed to persist broadcast emergency token to NVS");
+                }
             } else {
-                storageManager.putString("emergency_auth", token_value);
-                response_doc["success"] = true;
+                bool saved = false;
+                if (storageManager.beginNamespace("system_config", false)) {
+                    saved = storageManager.putString("emergency_auth", token_value);
+                    storageManager.endNamespace();
+                }
+                response_doc["success"] = saved;
                 response_doc["token_type"] = "esp";
-                response_doc["message"] = "ESP emergency token updated";
-                LOG_I(TAG, "ESP emergency token updated (persisted to NVS)");
+                response_doc["message"] = saved ? "ESP emergency token updated"
+                                                : "Failed to persist ESP token";
+                if (saved) {
+                    LOG_I(TAG, "ESP emergency token updated (persisted to NVS)");
+                } else {
+                    LOG_E(TAG, "Failed to persist ESP emergency token to NVS");
+                }
             }
 
             response_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
@@ -1193,6 +1235,52 @@ void routeIncomingMessage(const char* t, const char* p) {
         return;
     }
 
+    // ─── Server Status (LWT) — SAFETY-P5 ─────────────────────────────────────
+    // Handles both: server crashes (broker publishes LWT) and graceful shutdowns
+    // (server publishes "offline" before disconnect). Also handles "online" to
+    // reset P1 timer when server restarts before next heartbeat cycle.
+    if (topic.indexOf("/server/status") >= 0) {
+        DynamicJsonDocument doc(256);
+        DeserializationError error = deserializeJson(doc, payload);
+        if (error) {
+            LOG_W(TAG, "[SAFETY-P5] server/status parse error: " + String(error.c_str()));
+            return;
+        }
+
+        const char* status = doc["status"] | "unknown";
+
+        if (strcmp(status, "offline") == 0) {
+            const char* reason = doc["reason"] | "unknown";
+            LOG_W(TAG, String("[SAFETY-P5] Server OFFLINE (reason: ") + reason + ")");
+
+            if (offlineModeManager.getOfflineRuleCount() > 0) {
+                LOG_W(TAG, String("[SAFETY-P5] ") +
+                      String(offlineModeManager.getOfflineRuleCount()) +
+                      " offline rules — delegating to P4");
+            } else {
+                actuatorManager.setAllActuatorsToSafeState();
+                LOG_W(TAG, "[SAFETY-P5] No offline rules — safe state immediately");
+            }
+            offlineModeManager.onDisconnect();
+
+        } else if (strcmp(status, "online") == 0) {
+            LOG_I(TAG, "[SAFETY-P5] Server ONLINE — resetting P1 timer");
+
+            // Reset P1 timer — prevents false trigger before first heartbeat ACK after restart
+            g_last_server_ack_ms.store(millis());
+
+            // Clear P1 triggered flag if it was set
+            if (g_server_timeout_triggered.load()) {
+                g_server_timeout_triggered.store(false);
+                LOG_I(TAG, "[SAFETY-P5] P1 timeout cleared via server online status");
+            }
+
+            // Trigger P4 recovery if currently in DISCONNECTED/RECONNECTING state
+            offlineModeManager.onServerAckReceived();
+        }
+        return;
+    }
+
     // ─── Heartbeat ACK ───────────────────────────────────────────────────────
     // Runs directly — only touches atomics and configManager (NVS). Safe from any core.
     String heartbeat_ack_topic = TopicBuilder::buildSystemHeartbeatAckTopic();
@@ -1264,6 +1352,12 @@ void routeIncomingMessage(const char* t, const char* p) {
 
             LOG_W(TAG, "  → Device in ERROR state");
             LOG_W(TAG, "  → Manual intervention required");
+        } else if (strcmp(status, "error") == 0) {
+            // SAFETY-P5 Fix-4: Error ACK — server alive, heartbeat had a problem
+            // P1 timer was already reset above (unconditional). Only log the error.
+            const char* error_msg = doc["error"] | "unknown";
+            LOG_W(TAG, String("[HEARTBEAT] Server ACK with error: ") + error_msg);
+            // P1 timer already reset — no action needed
         } else {
             LOG_D(TAG, "Unknown heartbeat ACK status: " + String(status));
         }
@@ -1947,10 +2041,10 @@ void setup() {
     errorTracker.setMqttPublishCallback(errorTrackerMqttCallback, g_system_config.esp_id);
     LOG_I(TAG, "ErrorTracker MQTT publishing enabled");
 
-    // Phase 7: Send initial heartbeat for ESP discovery/registration
-    // force=true bypasses throttle check (fix for initial heartbeat being blocked)
-    mqttClient.publishHeartbeat(true);
-    LOG_I(TAG, "Initial heartbeat sent for ESP registration");
+    // Phase 7: Heartbeat is now sent in onMqttConnectCallback() (Mechanism F) — AFTER MQTT
+    // is connected. In the ESP-IDF non-blocking path, calling publishHeartbeat() here fires
+    // before MQTT_EVENT_CONNECTED and gets silently dropped (QoS-0 dropped when not connected).
+    LOG_I(TAG, "MQTT connected — heartbeat will be sent via on_connect callback (Mechanism F)");
 
     // SAFETY-P1 Mechanism A: Subscriptions handled by onMqttConnectCallback (already called during connect)
     LOG_I(TAG, "MQTT subscriptions established via on_connect_callback");

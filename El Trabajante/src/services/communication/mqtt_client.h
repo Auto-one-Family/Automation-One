@@ -1,8 +1,31 @@
 #ifndef SERVICES_COMMUNICATION_MQTT_CLIENT_H
 #define SERVICES_COMMUNICATION_MQTT_CLIENT_H
 
-#include <PubSubClient.h>
-#include <WiFiClient.h>
+// ============================================
+// MQTT BACKEND SELECTION (SAFETY-RTOS M5.1)
+// ============================================
+// Default (no flag)        → ESP-IDF esp_mqtt_client (non-blocking, eigener FreeRTOS-Task)
+// MQTT_USE_PUBSUBCLIENT=1  → PubSubClient (Arduino, blocking reconnect — seeed/wokwi only)
+// ============================================
+#ifndef MQTT_USE_PUBSUBCLIENT
+    // ACHTUNG Namenskonflikt: Dieses File heisst mqtt_client.h.
+    // Der Arduino-ESP32-SDK liefert die ESP-IDF-MQTT-API als mqtt_client.h (kein esp_mqtt_client.h).
+    // Korrekt: <mqtt_client.h> mit angle brackets.
+    //   PlatformIO haengt -I.../tools/sdk/esp32/include/mqtt/esp-mqtt/include ein.
+    //   Winkel-Brackets (<>) suchen dort DIREKT nach mqtt_client.h — findet SDK-Header.
+    //   Unser Header liegt in src/services/communication/ und ist NICHT via -Isrc direkt sichtbar.
+    //   Daher kein Konflikt solange unser Header nie in src/ (flach) liegt.
+    // FALSCH: "mqtt_client.h" — bindet immer dieses File ein (relative Suche zuerst).
+    // FALSCH: <mqtt/esp-mqtt/include/mqtt_client.h> — sdk root ist kein -I-Pfad.
+    #include <mqtt_client.h>
+    #include <freertos/FreeRTOS.h>
+    #include <freertos/task.h>
+    #include <atomic>
+#else
+    #include <PubSubClient.h>
+    #include <WiFiClient.h>
+#endif
+
 #include <Arduino.h>
 #include <functional>
 #include "../../utils/logger.h"
@@ -25,14 +48,29 @@ struct MQTTConfig {
 };
 
 // ============================================
-// MQTT MESSAGE (for offline buffer)
+// MQTT MESSAGE (offline buffer — PubSubClient path only)
 // ============================================
+#ifdef MQTT_USE_PUBSUBCLIENT
 struct MQTTMessage {
     String topic;
     String payload;
     uint8_t qos;
     unsigned long timestamp;
 };
+#endif
+
+// ============================================
+// SHARED STATE: MQTT connection flag + last server ACK timestamp
+// Written by MQTT_EVENT_CONNECTED/DISCONNECTED (Core 0).
+// Read by Safety-Task checkServerAckTimeout() (Core 1).
+// ============================================
+#ifndef MQTT_USE_PUBSUBCLIENT
+extern std::atomic<bool>     g_mqtt_connected;
+// SAFETY-P1 Race-Fix: reset atomically in MQTT_EVENT_CONNECTED (Core 0) before
+// on_connect_callback_ fires, so Safety-Task (Core 1) never sees the stale
+// pre-reconnect timestamp with mqttClient.isConnected()==true.
+extern std::atomic<uint32_t> g_last_server_ack_ms;
+#endif
 
 // ============================================
 // MQTT CLIENT CLASS (Phase 2 - Communication Layer)
@@ -41,44 +79,52 @@ class MQTTClient {
 public:
     // Singleton Pattern
     static MQTTClient& getInstance();
-    
+
     // Initialization
     bool begin();
-    
+
     // Connection Management
     bool connect(const MQTTConfig& config);
     bool disconnect();
     bool isConnected();
-    void reconnect();
-    
+    void reconnect();  // no-op in ESP-IDF path (automatic reconnect)
+
     // Authentication Transition (Anonymous → Authenticated)
     bool transitionToAuthenticated(const String& username, const String& password);
     bool isAnonymousMode() const;
-    
+
     // Publishing
     bool publish(const String& topic, const String& payload, uint8_t qos = 1);
     bool safePublish(const String& topic, const String& payload, uint8_t qos = 1, uint8_t retries = 3);
-  void setTestPublishHook(std::function<void(const String&, const String&)> hook);
-  void clearTestPublishHook();
-    
+    void setTestPublishHook(std::function<void(const String&, const String&)> hook);
+    void clearTestPublishHook();
+
     // Subscription (qos: 0=at most once, 1=at least once)
     bool subscribe(const String& topic, uint8_t qos = 0);
     bool unsubscribe(const String& topic);
     void setCallback(std::function<void(const String&, const String&)> callback);
-    
+    // SAFETY-P1 Mechanism A: Callback fired after every successful MQTT connect (initial + reconnect)
+    void setOnConnectCallback(std::function<void()> callback);
+
     // Heartbeat
     void publishHeartbeat(bool force = false);
-    
+
     // Status
     String getConnectionStatus();
     uint16_t getConnectionAttempts() const;
     bool hasOfflineMessages() const;
     uint16_t getOfflineMessageCount() const;
-    
-    // Monitoring
-    void loop();  // Call in main loop
-    
-    // Circuit Breaker Access (for Watchdog integration)
+
+    // Monitoring — In ESP-IDF path: handles timeManager + heartbeat only (no reconnect logic)
+    void loop();
+
+#ifndef MQTT_USE_PUBSUBCLIENT
+    // M3: Drain publish queue — called from Communication-Task (Core 0).
+    // Safety-Task (Core 1) enqueues via queuePublish(); Core 0 drains here.
+    void processPublishQueue();
+#endif
+
+    // Circuit Breaker Access (for Watchdog integration + persistent failure timer)
     CircuitState getCircuitBreakerState() const;
     uint8_t getCircuitBreakerFailureCount() const;
 
@@ -91,39 +137,74 @@ public:
     // ============================================
     bool isRegistrationConfirmed() const;
     void confirmRegistration();
+    // Check if registration gate should be force-opened (independent of publish() calls).
+    // Called from Communication-Task loop so the timeout fires even if no publish() is attempted.
+    bool checkRegistrationTimeout();
 
 private:
     MQTTClient();
     ~MQTTClient();
-    
+
     // Prevent copy
     MQTTClient(const MQTTClient&) = delete;
     MQTTClient& operator=(const MQTTClient&) = delete;
-    
-    // Private members
+
+    // ============================================
+    // BACKEND-SPECIFIC MEMBERS
+    // ============================================
+#ifndef MQTT_USE_PUBSUBCLIENT
+    // ESP-IDF MQTT client handle
+    esp_mqtt_client_handle_t mqtt_client_;
+
+    // Static event handler (runs in ESP-IDF MQTT Task, Core 0)
+    // args = MQTTClient* instance (passed during event registration)
+    static void mqtt_event_handler(void* args, esp_event_base_t base,
+                                   int32_t event_id, void* event_data);
+#else
+    // PubSubClient backend
     WiFiClient wifi_client_;
     PubSubClient mqtt_;
-    MQTTConfig current_config_;
-    
-    // Offline buffer
-    static const uint16_t MAX_OFFLINE_MESSAGES = 100;
+
+    // Offline buffer — reduced from 100 to 25 (saves 2400 bytes BSS + prevents
+    // 60KB heap spike when full with large String payloads) (MEM-OPT-3)
+    static const uint16_t MAX_OFFLINE_MESSAGES = 25;
     MQTTMessage offline_buffer_[MAX_OFFLINE_MESSAGES];
     uint16_t offline_buffer_count_;
-    
-    // Connection management
+
+    // Reconnect management (PubSubClient: manual; ESP-IDF: automatic)
     unsigned long last_reconnect_attempt_;
     uint16_t reconnect_attempts_;
     unsigned long reconnect_delay_ms_;
+
+    // PubSubClient-specific helpers
+    bool connectToBroker();
+    bool attemptMQTTConnection(const String& last_will_topic, const String& last_will_message);
+    void handleDisconnection();
+    bool shouldAttemptReconnect() const;
+    void processOfflineBuffer();
+    bool addToOfflineBuffer(const String& topic, const String& payload, uint8_t qos);
+    unsigned long calculateBackoffDelay() const;
+
+    // Static callback for PubSubClient
+    static void staticCallback(char* topic, byte* payload, unsigned int length);
+#endif
+
+    // ============================================
+    // COMMON MEMBERS (both paths)
+    // ============================================
+    MQTTConfig current_config_;
+
     bool initialized_;
     bool anonymous_mode_;
-    
+
     // Heartbeat
     unsigned long last_heartbeat_;
     static const unsigned long HEARTBEAT_INTERVAL_MS = 60000;  // 60 seconds
-    
-    // Callback
+
+    // Callbacks
     std::function<void(const String&, const String&)> message_callback_;
-    
+    std::function<void()> on_connect_callback_;  // SAFETY-P1: fired after every successful connect
+
     // Circuit Breaker (Phase 6+)
     CircuitBreaker circuit_breaker_;
 
@@ -137,19 +218,8 @@ private:
     unsigned long registration_start_ms_;
     static const unsigned long REGISTRATION_TIMEOUT_MS = 10000;
 
-    // Helper methods
-    bool connectToBroker();
-    bool attemptMQTTConnection(const String& last_will_topic, const String& last_will_message);  // ✅ FIX #2: Port fallback helper
-    void handleDisconnection();
-    bool shouldAttemptReconnect() const;
-    void processOfflineBuffer();
-    bool addToOfflineBuffer(const String& topic, const String& payload, uint8_t qos);
-    unsigned long calculateBackoffDelay() const;
-    
-    // Static callback for PubSubClient
-    static void staticCallback(char* topic, byte* payload, unsigned int length);
     static MQTTClient* instance_;
-  static std::function<void(const String&, const String&)> test_publish_hook_;
+    static std::function<void(const String&, const String&)> test_publish_hook_;
 };
 
 // ============================================

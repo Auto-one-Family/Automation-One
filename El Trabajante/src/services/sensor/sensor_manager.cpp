@@ -1,7 +1,10 @@
 #include "sensor_manager.h"
+#include "../../tasks/rtos_globals.h"
 #include "../communication/mqtt_client.h"
 #include "../config/config_manager.h"
 #include "../../drivers/gpio_manager.h"
+#include <cmath>   // NAN, isnan — used by SAFETY-P4 value cache
+#include <cstring> // memset, strncmp, strncpy — used by value cache
 #include <WiFi.h>  // For ADC2/WiFi conflict detection
 #include "../../drivers/i2c_bus.h"
 #include "../../drivers/i2c_sensor_protocol.h"
@@ -99,7 +102,11 @@ SensorManager::SensorManager()
       onewire_bus_(nullptr),
       gpio_manager_(nullptr),
       last_measurement_time_(0),
-      measurement_interval_(30000) {}  // 30s default interval
+      measurement_interval_(30000),  // 30s default interval
+      value_cache_count_(0) {
+    // Zero-initialize value cache
+    memset(value_cache_, 0, sizeof(value_cache_));
+}
 
 SensorManager::~SensorManager() {
     end();
@@ -203,12 +210,15 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         LOG_E(TAG, "Sensor Manager not initialized");
         return false;
     }
+    // SAFETY-RTOS M4: protect sensors_[] against performAllMeasurements (Core 1).
+    xSemaphoreTake(g_sensor_mutex, portMAX_DELAY);
 
     // Validate GPIO
     if (config.gpio == 255) {
         LOG_E(TAG, "Sensor Manager: Invalid GPIO (255)");
         errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                "Invalid GPIO for sensor");
+        xSemaphoreGive(g_sensor_mutex);
         return false;
     }
 
@@ -224,6 +234,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
               config.sensor_type + "' (boot strap pin, reserved for I2C bus convention)");
         errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                "GPIO 0 invalid for non-I2C sensor");
+        xSemaphoreGive(g_sensor_mutex);
         return false;
     }
 
@@ -235,8 +246,13 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
     if (effective_i2c_address == 0 && capability != nullptr && capability->i2c_address != 0) {
         effective_i2c_address = capability->i2c_address;  // Fallback to registry default
     }
+    // For I2C multi-value sensors (e.g. SHT31): pass sensor_type so that sht31_temp
+    // and sht31_humidity (same GPIO + same I2C address) are matched independently.
+    // For OneWire and ADC sensors sensor_type is omitted — ROM-Code already distinguishes
+    // DS18B20 instances; passing sensor_type there would break update-in-place for type changes.
     SensorConfig* existing = findSensorConfig(config.gpio,
-        config.onewire_address, effective_i2c_address);
+        config.onewire_address, effective_i2c_address,
+        is_i2c_sensor ? config.sensor_type : String(""));
 
     if (!existing && is_i2c_sensor) {
         // No exact match found — check if a different value type of the same I2C device exists
@@ -267,6 +283,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                         }
                         LOG_I(TAG, "Sensor Manager: Updated existing multi-value sensor '" +
                                    config.sensor_type + "' on GPIO " + String(config.gpio));
+                        xSemaphoreGive(g_sensor_mutex);
                         return true;
                     }
                 }
@@ -274,6 +291,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                 // Not found — add as new sensor (multi-value support)
                 if (sensor_count_ >= MAX_SENSORS) {
                     LOG_E(TAG, "Sensor Manager: Maximum sensor count reached");
+                    xSemaphoreGive(g_sensor_mutex);
                     return false;
                 }
 
@@ -291,6 +309,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                 LOG_I(TAG, "Sensor Manager: Added multi-value sensor '" + config.sensor_type +
                          "' on GPIO " + String(config.gpio) + " (I2C 0x" +
                          String(effective_i2c_address, HEX) + ")");
+                xSemaphoreGive(g_sensor_mutex);
                 return true;
             }
         }
@@ -328,6 +347,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 
         LOG_I(TAG, "Sensor Manager: Updated sensor on GPIO " + String(config.gpio) +
                  " (" + config.sensor_type + ")");
+        xSemaphoreGive(g_sensor_mutex);
         return true;
     }
 
@@ -336,6 +356,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         LOG_E(TAG, "Sensor Manager: Maximum sensor count reached");
         errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                "Maximum sensor count reached");
+        xSemaphoreGive(g_sensor_mutex);
         return false;
     }
 
@@ -351,6 +372,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
             LOG_E(TAG, "Sensor Manager: I2C bus not initialized");
             errorTracker.trackError(ERROR_I2C_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                    "I2C bus not initialized for I2C sensor");
+            xSemaphoreGive(g_sensor_mutex);
             return false;
         }
 
@@ -371,6 +393,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                               String(existing_cap->device_type) + "'");
                     errorTracker.trackError(ERROR_I2C_DEVICE_NOT_FOUND, ERROR_SEVERITY_ERROR,
                                            "I2C address conflict");
+                    xSemaphoreGive(g_sensor_mutex);
                     return false;
                 }
                 // Same device type on same address is OK (multi-value sensor)
@@ -432,6 +455,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                  " (GPIO " + String(config.gpio) + " is I2C bus)" +
                  " [sensor_count=" + String(sensor_count_) + ", active=true]");
 
+        xSemaphoreGive(g_sensor_mutex);
         return true;
     }
 
@@ -455,20 +479,22 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         
         // 1. Validate ROM-Code format (must be 16 hex chars)
         if (config.onewire_address.length() != 16) {
-            LOG_E(TAG, "SensorManager: Invalid OneWire ROM-Code length (expected 16, got " + 
+            LOG_E(TAG, "SensorManager: Invalid OneWire ROM-Code length (expected 16, got " +
                      String(config.onewire_address.length()) + ")");
             errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                    "Invalid OneWire ROM-Code length");
+            xSemaphoreGive(g_sensor_mutex);
             return false;
         }
         
         // 2. Parse and validate ROM-Code
         uint8_t rom[8];
         if (!OneWireUtils::hexStringToRom(config.onewire_address, rom)) {
-            LOG_E(TAG, "SensorManager: Failed to parse OneWire ROM-Code: " + 
+            LOG_E(TAG, "SensorManager: Failed to parse OneWire ROM-Code: " +
                      config.onewire_address);
             errorTracker.trackError(ERROR_SENSOR_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                    "Failed to parse OneWire ROM-Code");
+            xSemaphoreGive(g_sensor_mutex);
             return false;
         }
         
@@ -485,10 +511,11 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         // 2b. Duplicate ROM-Code Check (prevent same device being registered twice)
         for (uint8_t i = 0; i < sensor_count_; i++) {
             if (sensors_[i].onewire_address == config.onewire_address) {
-                LOG_E(TAG, "SensorManager: OneWire ROM-Code already registered: " + 
+                LOG_E(TAG, "SensorManager: OneWire ROM-Code already registered: " +
                          config.onewire_address + " on GPIO " + String(sensors_[i].gpio));
                 errorTracker.trackError(ERROR_ONEWIRE_DUPLICATE_ROM, ERROR_SEVERITY_ERROR,
                                        ("Duplicate ROM: " + config.onewire_address).c_str());
+                xSemaphoreGive(g_sensor_mutex);
                 return false;
             }
         }
@@ -514,6 +541,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
                      " (expected: free or bus/onewire/" + String(config.gpio) + ")");
             errorTracker.trackError(ERROR_GPIO_CONFLICT, ERROR_SEVERITY_ERROR,
                                    "GPIO conflict for OneWire sensor");
+            xSemaphoreGive(g_sensor_mutex);
             return false;
         }
         
@@ -521,11 +549,12 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         if (onewire_bus_->isInitialized()) {
             uint8_t current_pin = onewire_bus_->getPin();
             if (current_pin != config.gpio) {
-                LOG_E(TAG, "SensorManager: OneWire bus already active on GPIO " + 
-                         String(current_pin) + ", cannot use GPIO " + String(config.gpio) + 
+                LOG_E(TAG, "SensorManager: OneWire bus already active on GPIO " +
+                         String(current_pin) + ", cannot use GPIO " + String(config.gpio) +
                          " (single-bus architecture)");
                 errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                        "Single-bus conflict");
+                xSemaphoreGive(g_sensor_mutex);
                 return false;
             }
             LOG_D(TAG, "SensorManager: OneWire bus already initialized on GPIO " + 
@@ -533,10 +562,11 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         } else {
             // First OneWire sensor → Initialize bus
             if (!onewire_bus_->begin(config.gpio)) {
-                LOG_E(TAG, "SensorManager: Failed to initialize OneWire bus on GPIO " + 
+                LOG_E(TAG, "SensorManager: Failed to initialize OneWire bus on GPIO " +
                          String(config.gpio));
                 errorTracker.trackError(ERROR_ONEWIRE_INIT_FAILED, ERROR_SEVERITY_ERROR,
                                        "OneWire bus init failed");
+                xSemaphoreGive(g_sensor_mutex);
                 return false;
             }
             LOG_I(TAG, "SensorManager: OneWire bus initialized on GPIO " + String(config.gpio));
@@ -544,10 +574,11 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         
         // 5. Verify device presence on bus
         if (!onewire_bus_->isDevicePresent(rom)) {
-            LOG_E(TAG, "SensorManager: OneWire device " + config.onewire_address + 
+            LOG_E(TAG, "SensorManager: OneWire device " + config.onewire_address +
                      " not found on bus (GPIO " + String(config.gpio) + ")");
             errorTracker.trackError(ERROR_ONEWIRE_NO_DEVICES, ERROR_SEVERITY_ERROR,
                                    "OneWire device not found");
+            xSemaphoreGive(g_sensor_mutex);
             return false;
         }
         
@@ -565,6 +596,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
             LOG_E(TAG, "Sensor Manager: GPIO " + String(config.gpio) + " not available");
             errorTracker.trackError(ERROR_GPIO_CONFLICT, ERROR_SEVERITY_ERROR,
                                    "GPIO conflict for sensor");
+            xSemaphoreGive(g_sensor_mutex);
             return false;
         }
 
@@ -573,6 +605,7 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
             LOG_E(TAG, "Sensor Manager: Failed to reserve GPIO " + String(config.gpio));
             errorTracker.trackError(ERROR_GPIO_RESERVED, ERROR_SEVERITY_ERROR,
                                    "Failed to reserve GPIO");
+            xSemaphoreGive(g_sensor_mutex);
             return false;
         }
     }
@@ -589,9 +622,10 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
         LOG_I(TAG, "  ✅ Configuration persisted to NVS");
     }
 
-    LOG_I(TAG, "Sensor Manager: Configured " + String(is_onewire ? "OneWire" : "GPIO") + 
+    LOG_I(TAG, "Sensor Manager: Configured " + String(is_onewire ? "OneWire" : "GPIO") +
              " sensor '" + config.sensor_type + "' on GPIO " + String(config.gpio));
 
+    xSemaphoreGive(g_sensor_mutex);
     return true;
 }
 
@@ -698,6 +732,19 @@ uint8_t SensorManager::getActiveSensorCount() const {
     }
     LOG_D(TAG, "getActiveSensorCount: sensor_count_=" + String(sensor_count_) + ", active=" + String(count));
     return count;
+}
+
+uint8_t SensorManager::countSensorsWithSubzone(const String& subzone_id) const {
+    if (!initialized_ || subzone_id.length() == 0) {
+        return 0;
+    }
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < sensor_count_; i++) {
+        if (sensors_[i].active && sensors_[i].subzone_id == subzone_id) {
+            n++;
+        }
+    }
+    return n;
 }
 
 // ============================================
@@ -1148,9 +1195,13 @@ void SensorManager::performAllMeasurements() {
     if (!initialized_) {
         return;
     }
+    // SAFETY-RTOS M4: protect sensors_[] against configureSensor (Core 0 pre-M4.6 path)
+    // and future callers. Both paths are on Core 1 after M4.6, mutex is defense-in-depth.
+    xSemaphoreTake(g_sensor_mutex, portMAX_DELAY);
 
     // No sensors configured - nothing to do
     if (sensor_count_ == 0) {
+        xSemaphoreGive(g_sensor_mutex);
         return;
     }
 
@@ -1316,6 +1367,7 @@ void SensorManager::performAllMeasurements() {
     // Update global timestamp for compatibility
     last_measurement_time_ = now;
     LOG_D(TAG, "SensorManager::performAllMeasurements() EXIT");
+    xSemaphoreGive(g_sensor_mutex);
 }
 
 // ============================================
@@ -1485,7 +1537,8 @@ String SensorManager::getSensorInfo(uint8_t gpio) const {
 // HELPER METHODS
 // ============================================
 SensorConfig* SensorManager::findSensorConfig(uint8_t gpio,
-    const String& onewire_address, uint8_t i2c_address) {
+    const String& onewire_address, uint8_t i2c_address,
+    const String& sensor_type) {
     for (uint8_t i = 0; i < sensor_count_; i++) {
         if (sensors_[i].gpio != gpio) continue;
 
@@ -1497,6 +1550,12 @@ SensorConfig* SensorManager::findSensorConfig(uint8_t gpio,
         // I2C: additionally match device address
         if (i2c_address > 0) {
             if (sensors_[i].i2c_address != i2c_address) continue;
+        }
+
+        // I2C multi-value sensors (e.g. SHT31): additionally match sensor_type so that
+        // sht31_temp and sht31_humidity (same GPIO + same address) are not confused.
+        if (sensor_type.length() > 0) {
+            if (sensors_[i].sensor_type != sensor_type) continue;
         }
 
         return &sensors_[i];
@@ -1505,7 +1564,8 @@ SensorConfig* SensorManager::findSensorConfig(uint8_t gpio,
 }
 
 const SensorConfig* SensorManager::findSensorConfig(uint8_t gpio,
-    const String& onewire_address, uint8_t i2c_address) const {
+    const String& onewire_address, uint8_t i2c_address,
+    const String& sensor_type) const {
     for (uint8_t i = 0; i < sensor_count_; i++) {
         if (sensors_[i].gpio != gpio) continue;
 
@@ -1519,23 +1579,32 @@ const SensorConfig* SensorManager::findSensorConfig(uint8_t gpio,
             if (sensors_[i].i2c_address != i2c_address) continue;
         }
 
+        // I2C multi-value sensors (e.g. SHT31): additionally match sensor_type so that
+        // sht31_temp and sht31_humidity (same GPIO + same address) are not confused.
+        if (sensor_type.length() > 0) {
+            if (sensors_[i].sensor_type != sensor_type) continue;
+        }
+
         return &sensors_[i];
     }
     return nullptr;
 }
 
 void SensorManager::publishSensorReading(const SensorReading& reading) {
+    // SAFETY-P4: Always update value cache regardless of MQTT connectivity
+    updateValueCache(reading.gpio, reading.sensor_type.c_str(), reading.processed_value);
+
     if (!mqtt_client_ || !mqtt_client_->isConnected()) {
         LOG_W(TAG, "Sensor Manager: MQTT not connected, skipping publish");
         return;
     }
-    
+
     // Build topic
     const char* topic = TopicBuilder::buildSensorDataTopic(reading.gpio);
-    
+
     // Build payload
     String payload = buildMQTTPayload(reading);
-    
+
     // Publish
     if (!mqtt_client_->publish(topic, payload, 1)) {
         LOG_E(TAG, "Sensor Manager: Failed to publish sensor data for GPIO " + String(reading.gpio));
@@ -1612,6 +1681,56 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
     }
 
     payload += "}";
-    
+
     return payload;
+}
+
+// ============================================
+// SAFETY-P4: Value Cache Implementation
+// ============================================
+
+void SensorManager::updateValueCache(uint8_t gpio, const char* sensor_type, float value) {
+    // Search for existing entry
+    for (uint8_t i = 0; i < value_cache_count_; i++) {
+        if (value_cache_[i].gpio == gpio &&
+            strncmp(value_cache_[i].sensor_type, sensor_type, 23) == 0) {
+            value_cache_[i].value        = value;
+            value_cache_[i].timestamp_ms = millis();
+            value_cache_[i].valid        = true;
+            return;
+        }
+    }
+
+    // New entry — insert if space available
+    if (value_cache_count_ < MAX_VALUE_CACHE_ENTRIES) {
+        ValueCacheEntry& entry  = value_cache_[value_cache_count_];
+        entry.gpio              = gpio;
+        strncpy(entry.sensor_type, sensor_type, 23);
+        entry.sensor_type[23]   = '\0';
+        entry.value             = value;
+        entry.timestamp_ms      = millis();
+        entry.valid             = true;
+        value_cache_count_++;
+    }
+}
+
+float SensorManager::getSensorValue(uint8_t gpio, const char* sensor_type) const {
+    for (uint8_t i = 0; i < value_cache_count_; i++) {
+        const ValueCacheEntry& entry = value_cache_[i];
+        if (!entry.valid) {
+            continue;
+        }
+        if (entry.gpio != gpio) {
+            continue;
+        }
+        if (strncmp(entry.sensor_type, sensor_type, 23) != 0) {
+            continue;
+        }
+        // Check stale timeout
+        if (millis() - entry.timestamp_ms >= VALUE_CACHE_STALE_MS) {
+            return NAN;
+        }
+        return entry.value;
+    }
+    return NAN;
 }

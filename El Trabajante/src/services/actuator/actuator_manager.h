@@ -34,6 +34,9 @@ public:
   ActuatorConfig getActuatorConfig(uint8_t gpio) const;
   uint8_t getActiveActuatorCount() const { return actuator_count_; }
 
+  /** Count configured actuators whose subzone_id matches (Phase 9). */
+  uint8_t countActuatorsWithSubzone(const String& subzone_id) const;
+
   // Control operations
   bool controlActuator(uint8_t gpio, float value);
   bool controlActuatorBinary(uint8_t gpio, bool state);
@@ -46,6 +49,8 @@ public:
   bool getEmergencyStopStatus(uint8_t gpio) const;
   bool resumeOperation();
   void processActuatorLoops();
+  // SAFETY-P1: Set all actuators to their configured default_state (called on disconnect/timeout)
+  void setAllActuatorsToSafeState();
 
   // MQTT integration
   bool handleActuatorCommand(const String& topic, const String& payload);

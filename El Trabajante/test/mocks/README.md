@@ -20,11 +20,13 @@ Minimal Arduino API mocks for native x86_64 unit tests. Allows testing Pure-Logi
 
 ```cpp
 #ifdef NATIVE_TEST
-    #include "Arduino.h"  // Mock
+    #include "../mocks/Arduino.h"  // from test/<suite>/ — explicit path
 #else
     #include <Arduino.h>  // Real Arduino API
 #endif
 ```
+
+Native builds need `gcc`/`g++` on `PATH` or under paths probed by `scripts/set_native_toolchain.py` (e.g. Git for Windows `mingw64`).
 
 ## Implemented Features
 

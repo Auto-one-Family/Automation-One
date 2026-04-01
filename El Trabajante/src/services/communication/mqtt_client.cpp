@@ -756,6 +756,17 @@ void MQTTClient::confirmRegistration() {
     }
 }
 
+bool MQTTClient::checkRegistrationTimeout() {
+    if (registration_confirmed_) return true;
+    if (registration_start_ms_ == 0) return false;
+    if ((millis() - registration_start_ms_) > REGISTRATION_TIMEOUT_MS) {
+        LOG_W(TAG, "Registration timeout - opening gate (independent timer fallback)");
+        registration_confirmed_ = true;
+        return true;
+    }
+    return false;
+}
+
 void MQTTClient::setOnConnectCallback(std::function<void()> callback) {
     on_connect_callback_ = std::move(callback);
 }
@@ -789,6 +800,14 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             // Update shared connection state (atomic — read by Safety-Task Core 1)
             g_mqtt_connected.store(true);
 
+            // SAFETY-P1 Race-Fix (Bug-2): reset ACK timestamp immediately after
+            // marking connected, before on_connect_callback_ is invoked.
+            // Without this, Safety-Task (Core 1) can read isConnected()==true with
+            // the stale pre-reconnect timestamp (~209 s ago in the observed failure)
+            // and incorrectly trigger the 120 s ACK-timeout path in that narrow
+            // ~ms window before on_connect_callback_ reaches its own reset.
+            g_last_server_ack_ms.store(millis());
+
             // Reset Registration Gate
             self->registration_confirmed_ = false;
             self->registration_start_ms_  = millis();
@@ -799,7 +818,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             // SAFETY-P1 Mechanisms A + D + E:
             // on_connect_callback_ = onMqttConnectCallback() in main.cpp
             //   → subscribeToAllTopics() (Mechanism A: 11 subscriptions)
-            //   → g_last_server_ack_ms reset (Mechanism D reset)
+            //   → g_last_server_ack_ms reset (Mechanism D reset — second reset, harmless)
             //   → publishAllActuatorStatus() + publishHeartbeat(true) on reconnect (Mechanism E)
             //   → offlineModeManager.onReconnect() (SAFETY-P4)
             if (self->on_connect_callback_) {

@@ -4,6 +4,7 @@
 #include "../../drivers/gpio_manager.h"
 #include "../../error_handling/error_tracker.h"
 #include "../../models/error_codes.h"
+#include "../../services/safety/offline_mode_manager.h"
 #include "actuator_manager.h"
 
 // ESP-IDF TAG convention for structured logging
@@ -49,6 +50,9 @@ bool SafetyController::emergencyStopAll(const String& reason) {
     emergency_reason_ = reason;
     emergency_timestamp_ = millis();
     logEmergencyEvent(reason, 255);
+
+    // SAFETY-P4: Emergency stop overrides offline mode — clear all rule states
+    offlineModeManager.onEmergencyStop();
 
     return actuatorManager.emergencyStopAll();
 }

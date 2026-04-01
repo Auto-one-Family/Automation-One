@@ -5,9 +5,12 @@
 
 Import("env")
 import os
+import shutil
 
 # MinGW-w64 installation paths to search (ordered by preference)
 MINGW_PATHS = [
+    r"C:\Program Files\Git\mingw64\bin",
+    r"C:\Program Files (x86)\Git\mingw64\bin",
     r"C:\ProgramData\mingw64\mingw64\bin",
     r"C:\msys64\mingw64\bin",
     r"C:\msys64\ucrt64\bin",
@@ -22,6 +25,9 @@ def find_mingw():
         if os.path.exists(gcc_path):
             return path
     return None
+
+if shutil.which("gcc") or shutil.which("gcc.exe"):
+    print("[native-toolchain] gcc found on PATH — native tests can use this toolchain")
 
 mingw_bin = find_mingw()
 

@@ -80,8 +80,8 @@ private:
   bool serial_enabled_;
 
   // Fixed Array Circular Buffer (Guide-konform)
-  // Increased from 50 to 100 entries (~14 KB RAM, acceptable for ~260 KB free heap)
-  static const size_t MAX_LOG_ENTRIES = 100;
+  // Reduced from 100 to 50 entries — saves 7400 bytes BSS (MEM-OPT-1)
+  static const size_t MAX_LOG_ENTRIES = 50;
   LogEntry log_buffer_[MAX_LOG_ENTRIES];
   size_t log_buffer_index_;
   size_t log_count_;

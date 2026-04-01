@@ -2,6 +2,7 @@
 
 #include <memory>
 
+#include "../../tasks/rtos_globals.h"  // SAFETY-RTOS M4: g_actuator_mutex
 #include "../../drivers/gpio_manager.h"
 #include "../../error_handling/error_tracker.h"
 #include "../../models/config_types.h"
@@ -9,6 +10,7 @@
 #include "../../services/communication/mqtt_client.h"
 #include "../../services/config/config_manager.h"
 #include "../../services/config/config_response.h"
+#include "../../services/safety/offline_mode_manager.h"
 #include "../../services/sensor/sensor_manager.h"
 #include "../../utils/json_helpers.h"
 #include "../../utils/logger.h"
@@ -188,9 +190,14 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
   if (!initialized_ && !begin()) {
     return false;
   }
+  // SAFETY-RTOS M4: protect actuators_[] against publishAllActuatorStatus (Core 0).
+  // begin() runs in setup() before tasks start — acquired after init guard to avoid
+  // recursive acquisition if begin() ever calls configureActuator internally.
+  xSemaphoreTake(g_actuator_mutex, portMAX_DELAY);
 
   ActuatorConfig config = incoming_config;
   if (!validateActuatorConfig(config)) {
+    xSemaphoreGive(g_actuator_mutex);
     return false;
   }
 
@@ -198,6 +205,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
   if (!config.active) {
     LOG_I(TAG, "Actuator config deactivating GPIO " + String(config.gpio));
     removeActuator(config.gpio);
+    xSemaphoreGive(g_actuator_mutex);
     return true;
   }
 
@@ -210,6 +218,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
     errorTracker.trackError(ERROR_GPIO_CONFLICT,
                             ERROR_SEVERITY_ERROR,
                             "GPIO conflict sensor vs actuator");
+    xSemaphoreGive(g_actuator_mutex);
     return false;
   }
 
@@ -237,6 +246,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
       // Fully identical config — nothing to do
       LOG_I(TAG, "Actuator Manager: GPIO " + String(config.gpio) +
                  " config unchanged, skipping");
+      xSemaphoreGive(g_actuator_mutex);
       return true;
     }
 
@@ -263,6 +273,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
         LOG_I(TAG, "  Soft update persisted to NVS");
       }
       publishActuatorStatus(config.gpio);
+      xSemaphoreGive(g_actuator_mutex);
       return true;
     }
 
@@ -282,11 +293,13 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
     errorTracker.trackError(ERROR_ACTUATOR_INIT_FAILED,
                             ERROR_SEVERITY_ERROR,
                             "Actuator slots exhausted");
+    xSemaphoreGive(g_actuator_mutex);
     return false;
   }
 
   auto driver = createDriver(config.actuator_type);
   if (!driver) {
+    xSemaphoreGive(g_actuator_mutex);
     return false;
   }
 
@@ -295,6 +308,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
     errorTracker.trackError(ERROR_ACTUATOR_INIT_FAILED,
                             ERROR_SEVERITY_ERROR,
                             "Driver init failed");
+    xSemaphoreGive(g_actuator_mutex);
     return false;
   }
 
@@ -325,6 +339,7 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
   LOG_I(TAG, "Actuator " + String(is_reconfiguration ? "reconfigured" : "configured") +
            " on GPIO " + String(config.gpio) + " type: " + config.actuator_type);
   publishActuatorStatus(config.gpio);
+  xSemaphoreGive(g_actuator_mutex);
   return true;
 }
 
@@ -378,6 +393,20 @@ ActuatorConfig ActuatorManager::getActuatorConfig(uint8_t gpio) const {
     return ActuatorConfig();
   }
   return actuator->config;
+}
+
+uint8_t ActuatorManager::countActuatorsWithSubzone(const String& subzone_id) const {
+  if (subzone_id.length() == 0) {
+    return 0;
+  }
+  uint8_t n = 0;
+  for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
+    const RegisteredActuator& a = actuators_[i];
+    if (a.in_use && a.config.subzone_id == subzone_id) {
+      n++;
+    }
+  }
+  return n;
 }
 
 bool ActuatorManager::controlActuator(uint8_t gpio, float value) {
@@ -458,6 +487,8 @@ bool ActuatorManager::controlActuatorBinary(uint8_t gpio, bool state) {
 }
 
 bool ActuatorManager::emergencyStopAll() {
+  // SAFETY-RTOS M4: protect actuators_[] against publishAllActuatorStatus (Core 0).
+  xSemaphoreTake(g_actuator_mutex, portMAX_DELAY);
   for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
     if (!actuators_[i].in_use || !actuators_[i].driver) {
       continue;
@@ -466,6 +497,7 @@ bool ActuatorManager::emergencyStopAll() {
     actuators_[i].emergency_stopped = true;
     publishActuatorAlert(actuators_[i].gpio, "emergency_stop", "Actuator stopped");
   }
+  xSemaphoreGive(g_actuator_mutex);
   return true;
 }
 
@@ -524,7 +556,25 @@ bool ActuatorManager::resumeOperation() {
   return cleared;
 }
 
+void ActuatorManager::setAllActuatorsToSafeState() {
+  if (!initialized_) return;
+  // SAFETY-RTOS M4: protect actuators_[] against publishAllActuatorStatus (Core 0)
+  xSemaphoreTake(g_actuator_mutex, portMAX_DELAY);
+  uint8_t count = 0;
+  for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
+    if (actuators_[i].in_use && actuators_[i].driver) {
+      controlActuatorBinary(actuators_[i].config.gpio, actuators_[i].config.default_state);
+      count++;
+    }
+  }
+  xSemaphoreGive(g_actuator_mutex);
+  LOG_W(TAG, "[SAFETY] " + String(count) + " actuator(s) set to safe state (default_state)");
+}
+
 void ActuatorManager::processActuatorLoops() {
+  // SAFETY-RTOS M4: protect actuators_[] against publishAllActuatorStatus (Core 0).
+  // controlActuatorBinary / emergencyStopActuator called within are NOT mutex owners.
+  xSemaphoreTake(g_actuator_mutex, portMAX_DELAY);
   for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
     if (!actuators_[i].in_use || !actuators_[i].driver) {
       continue;
@@ -578,6 +628,7 @@ void ActuatorManager::processActuatorLoops() {
     actuators_[i].driver->loop();
     actuators_[i].config = actuators_[i].driver->getConfig();
   }
+  xSemaphoreGive(g_actuator_mutex);
 }
 
 uint8_t ActuatorManager::extractGPIOFromTopic(const String& topic) const {
@@ -599,9 +650,12 @@ uint8_t ActuatorManager::extractGPIOFromTopic(const String& topic) const {
 }
 
 bool ActuatorManager::handleActuatorCommand(const String& topic, const String& payload) {
+  // SAFETY-RTOS M4: protect actuators_[] against publishAllActuatorStatus (Core 0).
+  xSemaphoreTake(g_actuator_mutex, portMAX_DELAY);
   uint8_t gpio = extractGPIOFromTopic(topic);
   if (gpio == 255) {
     LOG_E(TAG, "Invalid actuator command topic: " + topic);
+    xSemaphoreGive(g_actuator_mutex);
     return false;
   }
 
@@ -628,6 +682,7 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
     errorTracker.trackError(ERROR_ACTUATOR_NOT_FOUND,
                             ERROR_SEVERITY_ERROR,
                             "Command received for unconfigured actuator");
+    xSemaphoreGive(g_actuator_mutex);
     return false;
   }
 
@@ -636,11 +691,17 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
     LOG_W(TAG, "Actuator GPIO " + String(gpio) + " is emergency stopped");
     publishActuatorResponse(command, false,
                             "Actuator in emergency stop state. Clear emergency first.");
+    xSemaphoreGive(g_actuator_mutex);
     return false;
   }
 
   // F1: Clear any pending duration timer on OFF/PWM/TOGGLE
   actuator->command_duration_end_ms = 0;
+
+  // SAFETY-P4: Server commanded while offline → mark override so rule is skipped
+  if (offlineModeManager.getMode() == OfflineMode::OFFLINE_ACTIVE) {
+    offlineModeManager.setServerOverride(gpio);
+  }
 
   bool success = false;
   String resultMessage = "Command executed";
@@ -674,6 +735,7 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
     publishActuatorStatus(gpio);
   }
 
+  xSemaphoreGive(g_actuator_mutex);
   return success;
 }
 
@@ -775,13 +837,20 @@ bool ActuatorManager::parseActuatorDefinition(const JsonObjectConst& obj,
     config.default_pwm = static_cast<uint8_t>(default_pwm_value);
   }
 
+  // SAFETY-P1 Mechanism C: max_runtime_ms configurable via Config-Push (default: 3600000ms)
+  int max_runtime_value = 0;
+  if (JsonHelpers::extractInt(obj, "max_runtime_ms", max_runtime_value) && max_runtime_value > 0) {
+    config.runtime_protection.max_runtime_ms = static_cast<unsigned long>(max_runtime_value);
+  }
+
   return true;
 }
 
 bool ActuatorManager::handleActuatorConfig(const String& payload, const String& correlation_id) {
   LOG_I(TAG, "Handling actuator configuration from MQTT");
 
-  DynamicJsonDocument doc(4096);
+  // MQTT_MAX_PACKET_SIZE=2048 — payload cannot exceed 2048 bytes (MEM-OPT-4)
+  DynamicJsonDocument doc(2048);
   DeserializationError error = deserializeJson(doc, payload);
   if (error) {
     String message = "Failed to parse actuator config JSON: " + String(error.c_str());
@@ -901,11 +970,15 @@ void ActuatorManager::publishActuatorStatus(uint8_t gpio) {
 }
 
 void ActuatorManager::publishAllActuatorStatus() {
+  // SAFETY-RTOS M4: called from Core 0 (Communication-Task).
+  // Protects actuators_[] against concurrent writes from Core 1 (Safety-Task).
+  xSemaphoreTake(g_actuator_mutex, portMAX_DELAY);
   for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
     if (actuators_[i].in_use) {
       publishActuatorStatus(actuators_[i].gpio);
     }
   }
+  xSemaphoreGive(g_actuator_mutex);
 }
 
 String ActuatorManager::buildResponsePayload(const ActuatorCommand& command,

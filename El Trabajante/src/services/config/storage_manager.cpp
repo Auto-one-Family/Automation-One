@@ -1,6 +1,7 @@
 #include "storage_manager.h"
 #include "../../utils/logger.h"
 #include <nvs_flash.h>
+#include <esp_log.h>
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "NVS";
@@ -100,9 +101,18 @@ bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) 
     current_namespace_[0] = '\0';
   }
   
-  if (!preferences_.begin(namespace_name, read_only)) {
-    // For read-only access, a missing namespace is expected (e.g., new device without subzones)
-    // Only log ERROR for write access failures, use DEBUG for read-only
+  // The Arduino Preferences library calls log_e() internally when nvs_open fails,
+  // even for expected NOT_FOUND cases on a new device. Suppress that noise for
+  // read-only opens; write failures are real errors and must stay visible.
+  if (read_only) {
+    esp_log_level_set("Preferences", ESP_LOG_NONE);
+  }
+  bool ns_result = preferences_.begin(namespace_name, read_only);
+  if (read_only) {
+    esp_log_level_set("Preferences", ESP_LOG_WARN);
+  }
+
+  if (!ns_result) {
     if (read_only) {
       LOG_D(TAG, "StorageManager: Namespace not found (expected for new device): " + String(namespace_name));
     } else {

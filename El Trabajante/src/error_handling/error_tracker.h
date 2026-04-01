@@ -124,7 +124,8 @@ private:
   ErrorTracker& operator=(const ErrorTracker&) = delete;
   
   // Fixed Array Circular Buffer (Guide-konform)
-  static const size_t MAX_ERROR_ENTRIES = 50;
+  // Reduced from 50 to 30 entries — saves 2800 bytes BSS (MEM-OPT-2)
+  static const size_t MAX_ERROR_ENTRIES = 30;
   ErrorEntry error_buffer_[MAX_ERROR_ENTRIES];
   size_t error_buffer_index_;
   size_t error_count_;

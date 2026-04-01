@@ -4,7 +4,7 @@
 // CONDITIONAL ARDUINO INCLUDE
 // ============================================
 #ifdef NATIVE_TEST
-    #include "Arduino.h"  // Mock for native tests
+    #include "../mocks/Arduino.h"  // Same pattern as test_managers (explicit mock path)
 #else
     #include <Arduino.h>  // Real Arduino API
 #endif

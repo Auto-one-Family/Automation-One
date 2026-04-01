@@ -5,6 +5,7 @@
 #include "../drivers/gpio_manager.h"
 #include "../error_handling/error_tracker.h"
 #include "../models/error_codes.h"
+#include "../tasks/rtos_globals.h"  // SAFETY-RTOS M4: g_i2c_mutex
 
 // ============================================
 // I2C BUS RECOVERY CONFIGURATION
@@ -182,16 +183,22 @@ bool I2CBusManager::scanBus(uint8_t addresses[], uint8_t max_addresses, uint8_t&
     }
 
     LOG_I(TAG, "I2C bus scan started (0x08-0x77)");
-    
+
+    // SAFETY-RTOS M4: Wire is not thread-safe — hold mutex for entire scan.
+    if (xSemaphoreTake(g_i2c_mutex, pdMS_TO_TICKS(250)) != pdTRUE) {
+        LOG_W(TAG, "I2C: Mutex timeout — skipping bus scan");
+        return false;
+    }
+
     found_count = 0;
     uint8_t detected = 0;
-    
+
     // Scan I2C address range (0x08-0x77)
     // Addresses 0x00-0x07 and 0x78-0x7F are reserved
     for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
         Wire.beginTransmission(addr);
         uint8_t error = Wire.endTransmission();
-        
+
         if (error == 0) {
             // Device found
             detected++;
@@ -204,17 +211,19 @@ bool I2CBusManager::scanBus(uint8_t addresses[], uint8_t max_addresses, uint8_t&
         } else if (error == 4 || error == 5) {
             LOG_W(TAG, "  Bus error while probing 0x" + String(addr, HEX) + " (code " + String(error) + ")");
         }
-        
+
         delay(1);  // Small delay between scans
     }
-    
+
+    xSemaphoreGive(g_i2c_mutex);
+
     if (detected > found_count) {
         LOG_W(TAG, "I2C bus scan truncated results (" + String(detected) + " detected, " +
                     String(found_count) + " stored)");
     } else {
         LOG_I(TAG, "I2C bus scan complete: " + String(found_count) + " devices found");
     }
-    
+
     return true;
 }
 
@@ -231,16 +240,87 @@ bool I2CBusManager::isDevicePresent(uint8_t address) {
         LOG_E(TAG, "Invalid I2C address: 0x" + String(address, HEX));
         return false;
     }
-    
+
+    // SAFETY-RTOS M4: Wire is not thread-safe.
+    if (xSemaphoreTake(g_i2c_mutex, pdMS_TO_TICKS(250)) != pdTRUE) {
+        LOG_W(TAG, "I2C: Mutex timeout — skipping isDevicePresent 0x" + String(address, HEX));
+        return false;
+    }
     Wire.beginTransmission(address);
     uint8_t error = Wire.endTransmission();
-    
+    xSemaphoreGive(g_i2c_mutex);
+
     return (error == 0);
 }
 
 // ============================================
 // RAW DATA READING
 // ============================================
+bool I2CBusManager::readRawLocked(uint8_t device_address, uint8_t register_address,
+                                  uint8_t* buffer, size_t length) {
+    // Preconditions: initialized_, valid buffer/address — checked by readRaw() or readSensorRaw().
+    // g_i2c_mutex MUST be held (Wire is not thread-safe).
+
+    Wire.beginTransmission(device_address);
+    Wire.write(register_address);
+    uint8_t error = Wire.endTransmission(false);  // false = repeated start
+
+    if (error == 4 || error == 5) {
+        LOG_W(TAG, "I2C bus error detected (code " + String(error) +
+                    ") while addressing device 0x" + String(device_address, HEX));
+
+        if (attemptRecoveryIfNeeded(error)) {
+            LOG_D(TAG, "I2C: Retrying read after recovery...");
+
+            Wire.beginTransmission(device_address);
+            Wire.write(register_address);
+            error = Wire.endTransmission(false);
+
+            if (error == 0) {
+                LOG_D(TAG, "I2C: Retry successful after recovery");
+            } else {
+                LOG_E(TAG, "I2C: Retry failed after recovery (error " + String(error) + ")");
+                errorTracker.trackError(ERROR_I2C_BUS_ERROR, ERROR_SEVERITY_CRITICAL,
+                                       ("I2C retry failed: device 0x" + String(device_address, HEX)).c_str());
+                return false;
+            }
+        } else {
+            LOG_E(TAG, "I2C: Recovery not possible or failed");
+            errorTracker.trackError(ERROR_I2C_BUS_ERROR, ERROR_SEVERITY_CRITICAL,
+                                   ("I2C bus error: device 0x" + String(device_address, HEX)).c_str());
+            return false;
+        }
+    } else if (error != 0) {
+        LOG_E(TAG, "I2C write register failed: device 0x" + String(device_address, HEX) +
+                  ", error " + String(error));
+        errorTracker.trackError(ERROR_I2C_DEVICE_NOT_FOUND, ERROR_SEVERITY_WARNING,
+                               ("Device 0x" + String(device_address, HEX) + " not responding").c_str());
+        return false;
+    }
+
+    LOG_D(TAG, "I2C: requestFrom START addr=0x" + String(device_address, HEX) + " bytes=" + String(length));
+    size_t received = Wire.requestFrom(device_address, (uint8_t)length);
+    LOG_D(TAG, "I2C: requestFrom END received=" + String(received));
+
+    if (received != length) {
+        LOG_E(TAG, "I2C read: Expected " + String(length) + " bytes, got " + String(received));
+        String msg = "Incomplete read from 0x" + String(device_address, HEX);
+        errorTracker.trackError(ERROR_I2C_READ_FAILED,
+                               ERROR_SEVERITY_ERROR,
+                               msg.c_str());
+        return false;
+    }
+
+    for (size_t i = 0; i < length; i++) {
+        buffer[i] = Wire.read();
+    }
+
+    LOG_D(TAG, "I2C read: " + String(length) + " bytes from 0x" +
+              String(device_address, HEX) + " reg 0x" + String(register_address, HEX));
+
+    return true;
+}
+
 bool I2CBusManager::readRaw(uint8_t device_address, uint8_t register_address,
                             uint8_t* buffer, size_t length) {
     if (!initialized_) {
@@ -261,72 +341,15 @@ bool I2CBusManager::readRaw(uint8_t device_address, uint8_t register_address,
         return false;
     }
     
-    // Write register address
-    Wire.beginTransmission(device_address);
-    Wire.write(register_address);
-    uint8_t error = Wire.endTransmission(false);  // false = repeated start
-
-    // Handle bus errors with recovery
-    if (error == 4 || error == 5) {
-        LOG_W(TAG, "I2C bus error detected (code " + String(error) +
-                    ") while addressing device 0x" + String(device_address, HEX));
-
-        // Attempt recovery
-        if (attemptRecoveryIfNeeded(error)) {
-            // Recovery successful - retry the read ONCE
-            LOG_D(TAG, "I2C: Retrying read after recovery...");
-
-            Wire.beginTransmission(device_address);
-            Wire.write(register_address);
-            error = Wire.endTransmission(false);
-
-            if (error == 0) {
-                LOG_D(TAG, "I2C: Retry successful after recovery");
-                // Fall through to read data
-            } else {
-                LOG_E(TAG, "I2C: Retry failed after recovery (error " + String(error) + ")");
-                errorTracker.trackError(ERROR_I2C_BUS_ERROR, ERROR_SEVERITY_CRITICAL,
-                                       ("I2C retry failed: device 0x" + String(device_address, HEX)).c_str());
-                return false;
-            }
-        } else {
-            LOG_E(TAG, "I2C: Recovery not possible or failed");
-            errorTracker.trackError(ERROR_I2C_BUS_ERROR, ERROR_SEVERITY_CRITICAL,
-                                   ("I2C bus error: device 0x" + String(device_address, HEX)).c_str());
-            return false;
-        }
-    } else if (error != 0) {
-        // Other errors (NACK, etc.) - not a bus issue
-        LOG_E(TAG, "I2C write register failed: device 0x" + String(device_address, HEX) +
-                  ", error " + String(error));
-        errorTracker.trackError(ERROR_I2C_DEVICE_NOT_FOUND, ERROR_SEVERITY_WARNING,
-                               ("Device 0x" + String(device_address, HEX) + " not responding").c_str());
+    // SAFETY-RTOS M4: Wire is not thread-safe.
+    if (xSemaphoreTake(g_i2c_mutex, pdMS_TO_TICKS(250)) != pdTRUE) {
+        LOG_W(TAG, "I2C: Mutex timeout — skipping read from 0x" + String(device_address, HEX));
         return false;
     }
-    
-    // Read data
-    LOG_D(TAG, "I2C: requestFrom START addr=0x" + String(device_address, HEX) + " bytes=" + String(length));
-    size_t received = Wire.requestFrom(device_address, (uint8_t)length);
-    LOG_D(TAG, "I2C: requestFrom END received=" + String(received));
 
-    if (received != length) {
-        LOG_E(TAG, "I2C read: Expected " + String(length) + " bytes, got " + String(received));
-        String msg = "Incomplete read from 0x" + String(device_address, HEX);
-        errorTracker.trackError(ERROR_I2C_READ_FAILED,
-                               ERROR_SEVERITY_ERROR,
-                               msg.c_str());
-        return false;
-    }
-    
-    // Copy data to buffer
-    for (size_t i = 0; i < length; i++) {
-        buffer[i] = Wire.read();
-    }
-    
-    LOG_D(TAG, "I2C read: " + String(length) + " bytes from 0x" + 
-              String(device_address, HEX) + " reg 0x" + String(register_address, HEX));
-    
-    return true;
+    bool ok = readRawLocked(device_address, register_address, buffer, length);
+    xSemaphoreGive(g_i2c_mutex);
+    return ok;
 }
 
 // ============================================
@@ -351,16 +374,22 @@ bool I2CBusManager::writeRaw(uint8_t device_address, uint8_t register_address,
         LOG_E(TAG, "I2C write: Invalid address 0x" + String(device_address, HEX));
         return false;
     }
-    
+
+    // SAFETY-RTOS M4: Wire is not thread-safe.
+    if (xSemaphoreTake(g_i2c_mutex, pdMS_TO_TICKS(250)) != pdTRUE) {
+        LOG_W(TAG, "I2C: Mutex timeout — skipping write to 0x" + String(device_address, HEX));
+        return false;
+    }
+
     // Begin transmission
     Wire.beginTransmission(device_address);
-    
+
     // Write register address
     Wire.write(register_address);
-    
+
     // Write data bytes
     size_t written = Wire.write(data, length);
-    
+
     if (written != length) {
         LOG_E(TAG, "I2C write: Expected to write " + String(length) + " bytes, wrote " + String(written));
         String msg = "Incomplete write to 0x" + String(device_address, HEX);
@@ -368,14 +397,15 @@ bool I2CBusManager::writeRaw(uint8_t device_address, uint8_t register_address,
                                ERROR_SEVERITY_ERROR,
                                msg.c_str());
         Wire.endTransmission();
+        xSemaphoreGive(g_i2c_mutex);
         return false;
     }
-    
+
     // End transmission
     uint8_t error = Wire.endTransmission();
-    
+
     if (error != 0) {
-        LOG_E(TAG, "I2C write failed: device 0x" + String(device_address, HEX) + 
+        LOG_E(TAG, "I2C write failed: device 0x" + String(device_address, HEX) +
                   ", error " + String(error));
         uint16_t code = (error == 2 || error == 3) ? ERROR_I2C_DEVICE_NOT_FOUND :
                          (error == 4 || error == 5) ? ERROR_I2C_BUS_ERROR : ERROR_I2C_WRITE_FAILED;
@@ -383,12 +413,15 @@ bool I2CBusManager::writeRaw(uint8_t device_address, uint8_t register_address,
         errorTracker.trackError(code,
                                (code == ERROR_I2C_BUS_ERROR) ? ERROR_SEVERITY_CRITICAL : ERROR_SEVERITY_ERROR,
                                msg.c_str());
+        xSemaphoreGive(g_i2c_mutex);
         return false;
     }
-    
-    LOG_D(TAG, "I2C write: " + String(length) + " bytes to 0x" + 
+
+    xSemaphoreGive(g_i2c_mutex);
+
+    LOG_D(TAG, "I2C write: " + String(length) + " bytes to 0x" +
               String(device_address, HEX) + " reg 0x" + String(register_address, HEX));
-    
+
     return true;
 }
 
@@ -707,6 +740,14 @@ bool I2CBusManager::readSensorRaw(const String& sensor_type, uint8_t i2c_address
     LOG_D(TAG, "I2C: Reading " + sensor_type + " at 0x" + String(addr, HEX) +
               " (protocol: " + String((uint8_t)protocol->protocol_type) + ")");
 
+    // SAFETY-RTOS M4: Wire is not thread-safe.
+    // executeCommandBasedProtocol / executeRegisterBasedProtocol and their internal
+    // attemptRecoveryIfNeeded calls are all within this mutex scope.
+    if (xSemaphoreTake(g_i2c_mutex, pdMS_TO_TICKS(250)) != pdTRUE) {
+        LOG_W(TAG, "I2C: Mutex timeout — skipping readSensorRaw for " + sensor_type);
+        return false;
+    }
+
     // Execute protocol based on type
     bool success = false;
     switch (protocol->protocol_type) {
@@ -742,10 +783,13 @@ bool I2CBusManager::readSensorRaw(const String& sensor_type, uint8_t i2c_address
             LOG_E(TAG, "I2C: Unknown protocol type for " + sensor_type);
             errorTracker.trackError(ERROR_I2C_PROTOCOL_UNSUPPORTED, ERROR_SEVERITY_ERROR,
                                    "Unknown protocol type");
+            xSemaphoreGive(g_i2c_mutex);
             return false;
     }
 
-    // Validate CRC if configured and read succeeded
+    xSemaphoreGive(g_i2c_mutex);
+
+    // Validate CRC if configured and read succeeded (no Wire access — outside mutex)
     if (success && protocol->crc.interleaved) {
         if (!validateInterleavedCRC(protocol, buffer, bytes_read)) {
             // Error already tracked in validateInterleavedCRC
@@ -853,8 +897,8 @@ bool I2CBusManager::executeRegisterBasedProtocol(const I2CSensorProtocol* protoc
                                                   uint8_t* buffer,
                                                   size_t buffer_size,
                                                   size_t& bytes_read) {
-    // Delegate to existing readRaw implementation
-    if (readRaw(i2c_address, protocol->data_register, buffer, protocol->expected_bytes)) {
+    // readSensorRaw() already holds g_i2c_mutex — use readRawLocked to avoid deadlock.
+    if (readRawLocked(i2c_address, protocol->data_register, buffer, protocol->expected_bytes)) {
         bytes_read = protocol->expected_bytes;
         return true;
     }

@@ -196,6 +196,11 @@ private:
     // Calculate CRC8 (table-based for 0x31, bit-by-bit for others)
     uint8_t calculateCRC8(const uint8_t* data, size_t len,
                           uint8_t polynomial, uint8_t init_value);
+
+    // SAFETY-RTOS M4: Same as readRaw() but does NOT take g_i2c_mutex.
+    // Caller MUST already hold g_i2c_mutex (e.g. readSensorRaw → executeRegisterBasedProtocol).
+    bool readRawLocked(uint8_t device_address, uint8_t register_address,
+                       uint8_t* buffer, size_t length);
 };
 
 // ============================================

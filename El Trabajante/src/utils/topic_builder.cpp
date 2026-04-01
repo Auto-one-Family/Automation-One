@@ -17,7 +17,7 @@
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "TOPIC";
-    #define LOG_E(tag, msg) Logger::getInstance().error(tag, msg)
+// LOG_E from logger.h (do not redefine — avoids macro redefinition vs. logger)
 #else
     // Native test mode: Logging disabled
     #define LOG_E(tag, msg) ((void)0)
@@ -172,6 +172,16 @@ const char* TopicBuilder::buildSystemHeartbeatAckTopic() {
   int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
                          "kaiser/%s/esp/%s/system/heartbeat/ack",
                          kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+// SAFETY-P5: kaiser/god/server/status (Server LWT + online/offline events)
+// Server publishes "online"/"offline" here. ESP subscribes to detect server
+// crashes faster than the 120s P1 ACK timeout.
+const char* TopicBuilder::buildServerStatusTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/server/status",
+                         kaiser_id_);
   return validateTopicBuffer(written);
 }
 
