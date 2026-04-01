@@ -1,0 +1,6 @@
+# SAFETY-RTOS M2: Pin ESP-IDF MQTT client task to Core 0 so Safety-Task (Core 1, prio 5)
+# is not preempted by MQTT reconnect/network work. Applied via PlatformIO board_build.sdkconfig_defaults.
+CONFIG_MQTT_TASK_CORE_SELECTION_ENABLED=y
+CONFIG_MQTT_TASK_CORE_SELECTION=0
+# MQTT task stack increased from default 6144 to 10240 — stack overflow on connect with 11 topics
+CONFIG_MQTT_TASK_STACK_SIZE=10240
