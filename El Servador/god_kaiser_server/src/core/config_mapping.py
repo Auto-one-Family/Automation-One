@@ -341,6 +341,15 @@ DEFAULT_ACTUATOR_MAPPINGS: List[Dict[str, Any]] = [
         "field_type": "int",
         "default": 0,
     },
+    {
+        # SAFETY-P1 Mechanism C: max_runtime_ms — from safety_constraints.max_runtime (seconds) → ms
+        # Default: 3600000ms (1h). Server can set lower values per actuator type (e.g. 120000ms for pumps).
+        "source": "safety_constraints.max_runtime",
+        "target": "max_runtime_ms",
+        "field_type": "int",
+        "transform": "seconds_to_ms",
+        "default": None,  # None → seconds_to_ms(None) → 3600000 (1h fallback)
+    },
 ]
 
 
@@ -381,6 +390,8 @@ class ConfigMappingEngine:
         "invert_bool": lambda x: not bool(x) if x is not None else True,
         # Phase 2C: Convert milliseconds to seconds for ESP32 measurement interval
         "ms_to_seconds": lambda x: (int(x) // 1000) if x else 30,
+        # SAFETY-P1: Convert seconds to milliseconds for max_runtime_ms Config-Push
+        "seconds_to_ms": lambda x: (int(x) * 1000) if x else 3600000,
         # BUG-FIX: Convert Server actuator types to ESP32-compatible types
         # Server stores "digital" but ESP32 expects "relay"
         # See: El Trabajante/src/models/actuator_types.h (ActuatorTypeTokens)

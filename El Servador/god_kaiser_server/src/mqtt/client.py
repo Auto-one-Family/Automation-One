@@ -12,6 +12,7 @@ Provides singleton MQTT client with:
 """
 
 import asyncio
+import json
 import logging
 import os
 import ssl
@@ -27,6 +28,7 @@ from ..core.resilience import (
     CircuitBreaker,
     ResilienceRegistry,
 )
+from .topics import TopicBuilder
 
 
 class _MQTTDisconnectRateLimiter(logging.Filter):
@@ -269,6 +271,20 @@ class MQTTClient:
             # Min delay: 1s, Max delay: 60s
             self.client.reconnect_delay_set(min_delay=1, max_delay=60)
             logger.debug("Auto-reconnect configured: min=1s, max=60s (exponential backoff)")
+
+            # LWT: Broker publishes this if server disconnects unexpectedly (SAFETY-P5)
+            _server_status_topic = TopicBuilder.build_server_status_topic()
+            self.client.will_set(
+                topic=_server_status_topic,
+                payload=json.dumps({
+                    "status": "offline",
+                    "timestamp": int(time.time()),
+                    "reason": "unexpected_disconnect",
+                }),
+                qos=1,
+                retain=True,
+            )
+            logger.debug("[SAFETY-P5] LWT configured: %s", _server_status_topic)
 
             # Connect to broker
             logger.info(f"Connecting to MQTT broker: {broker}:{port} (TLS: {use_tls})")
@@ -527,6 +543,22 @@ class MQTTClient:
             if self._circuit_breaker:
                 self._circuit_breaker.reset()
                 logger.info("[resilience] MQTT CircuitBreaker reset on connect")
+
+            # SAFETY-P5: Publish online status (overwrites any retained LWT)
+            try:
+                server_status_topic = TopicBuilder.build_server_status_topic()
+                self.client.publish(
+                    server_status_topic,
+                    json.dumps({
+                        "status": "online",
+                        "timestamp": int(time.time()),
+                    }),
+                    qos=1,
+                    retain=True,
+                )
+                logger.info("[SAFETY-P5] Server status published: online")
+            except Exception as _e:
+                logger.warning("[SAFETY-P5] Failed to publish online status: %s", _e)
 
             # Auto re-subscribe to all topics if this is a reconnection
             if self._subscriber and hasattr(self._subscriber, "subscribe_all"):

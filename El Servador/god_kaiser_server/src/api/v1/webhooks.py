@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 
 from ...core.exceptions import WebhookValidationException
 from ...core.logging_config import get_logger
@@ -277,8 +278,21 @@ async def grafana_alerts_webhook(
             else:
                 skipped += 1  # Deduplicated
                 increment_webhook_received("grafana", "skipped")
+        except IntegrityError as e:
+            # Grafana may send the same alert multiple times concurrently.
+            # The partial unique index on fingerprint raises IntegrityError
+            # when a race condition bypasses the SELECT-before-INSERT dedup check.
+            # Treat as deduplicated: rollback the failed transaction and continue.
+            await db.rollback()
+            skipped += 1
+            increment_webhook_received("grafana", "skipped")
+            logger.warning(
+                f"Grafana alert '{alertname}' deduplicated via IntegrityError "
+                f"(fingerprint='{alert.fingerprint}'): {e}"
+            )
         except Exception as e:
             logger.error(f"Failed to route Grafana alert '{alertname}': {e}")
+            await db.rollback()
             skipped += 1
             increment_webhook_received("grafana", "error")
 

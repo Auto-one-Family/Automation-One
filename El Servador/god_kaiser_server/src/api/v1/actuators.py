@@ -445,9 +445,11 @@ async def create_or_update_actuator(
         raise ESPNotFoundError(esp_id)
 
     # =========================================================================
-    # DEVICE STATUS GUARD - Only approved/online devices can be configured
+    # DEVICE STATUS GUARD - Only approved/online/offline devices can be configured
+    # "offline" = previously approved device that is temporarily disconnected
+    # "pending" = newly discovered device awaiting approval → blocked
     # =========================================================================
-    if esp_device.status not in ("approved", "online"):
+    if esp_device.status not in ("approved", "online", "offline"):
         raise DeviceNotApprovedError(esp_id, esp_device.status)
 
     # =========================================================================

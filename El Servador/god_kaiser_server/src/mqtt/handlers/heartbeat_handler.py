@@ -48,6 +48,8 @@ HEARTBEAT_TIMEOUT_SECONDS = 300
 # Full-State-Push: Reconnect threshold (seconds offline before triggering)
 RECONNECT_THRESHOLD_SECONDS = 60
 # Full-State-Push: Cooldown between pushes (prevent rapid-fire on boot)
+# Note: As of SAFETY-P5 Fix-3, the heartbeat ACK is sent early (before DB writes)
+# and independently of config push. Config push is triggered via _has_pending_config().
 STATE_PUSH_COOLDOWN_SECONDS = 120
 
 # Config-Push: Cooldown between auto config pushes (prevent mismatch loop)
@@ -104,6 +106,9 @@ class HeartbeatHandler:
         Returns:
             True if message processed successfully, False otherwise
         """
+        # Default for Error-ACK scope (SAFETY-P5 Fix-4)
+        esp_id_str: str = "unknown"
+
         try:
             # Step 1: Parse topic
             parsed_topic = TopicBuilder.parse_heartbeat_topic(topic)
@@ -127,6 +132,11 @@ class HeartbeatHandler:
                 logger.error(
                     f"[{error_code}] Invalid heartbeat payload from {esp_id_str}: "
                     f"{validation_result['error']}"
+                )
+                # SAFETY-P5 Fix-4: Error ACK — server alive, payload invalid
+                await self._send_heartbeat_error_ack(
+                    esp_id_str,
+                    f"invalid_payload:{str(validation_result.get('error', ''))[:50]}",
                 )
                 return False
 
@@ -171,6 +181,22 @@ class HeartbeatHandler:
                         datetime.now(timezone.utc) - esp_device.last_seen
                     ).total_seconds()
                     is_reconnect = offline_seconds > RECONNECT_THRESHOLD_SECONDS
+
+                # SAFETY-P5 Fix-3: Send ACK early — before any DB writes (P1 timer reset)
+                # config_available=False here; config push mechanism works independently.
+                if status not in ("rejected", "pending_approval"):
+                    await self._send_heartbeat_ack(
+                        esp_id=esp_id_str,
+                        status=status,
+                        config_available=False,
+                    )
+                    # Log the early ACK for observability (boot-diagnosis in Loki)
+                    # pending/rejected have their own downstream logs
+                    logger.info(
+                        "Early ACK sent for %s (status=%s, pre-db-write)",
+                        esp_id_str,
+                        status,
+                    )
 
                 if status == "rejected":
                     # Check cooldown before rediscovery
@@ -355,24 +381,26 @@ class HeartbeatHandler:
                     logger.warning(f"Failed to broadcast ESP health via WebSocket: {e}")
 
                 # ============================================
-                # Phase 2: Send Heartbeat-ACK to ESP
+                # Phase 2: Config-Push Check (independent of ACK — SAFETY-P5 Fix-3)
                 # ============================================
-                # Allows ESP to transition from PENDING_APPROVAL → OPERATIONAL
-                # without requiring a reboot after admin approval
-                # Check if ESP lost its config (e.g., after reboot)
+                # ACK was already sent early (before DB writes). Config push
+                # runs independently to detect reboot-triggered config loss.
                 esp_sensor_count = payload.get("sensor_count", payload.get("active_sensors", 0))
                 esp_actuator_count = payload.get(
                     "actuator_count", payload.get("active_actuators", 0)
                 )
-                config_pending = await self._has_pending_config(
+                config_push_triggered = await self._has_pending_config(
                     esp_device, session, esp_sensor_count, esp_actuator_count
                 )
-
-                await self._send_heartbeat_ack(
-                    esp_id=esp_id_str,
-                    status="online",  # Device is now online
-                    config_available=config_pending,
-                )
+                # BUG-2 Fix: _has_pending_config sets config_push_sent_at on
+                # esp_device.device_metadata but the session.commit() at line 288
+                # runs BEFORE this call — so the cooldown timestamp is never
+                # persisted. A second heartbeat (ESP still reports sensors=0 while
+                # processing the first config push) reads no cooldown from DB and
+                # fires a duplicate push. Committing here ensures the cooldown is
+                # written before any concurrent heartbeat can read the metadata.
+                if config_push_triggered:
+                    await session.commit()
 
                 return True
 
@@ -381,6 +409,12 @@ class HeartbeatHandler:
                 f"Error handling heartbeat: {e}",
                 exc_info=True,
             )
+            # SAFETY-P5 Fix-4: Error ACK — server alive, internal error occurred
+            if esp_id_str != "unknown":
+                try:
+                    await self._send_heartbeat_error_ack(esp_id_str, "internal_error")
+                except Exception:
+                    pass
             return False
 
         # If processing fell through without explicit return, treat as failure
@@ -1189,7 +1223,7 @@ class HeartbeatHandler:
 
         Fire-and-Forget Pattern:
         - ESP does NOT block waiting for this ACK
-        - QoS 0 (at most once) - not critical if missed
+        - QoS 1 (at least once) — ensures reliable P1 timer reset
         - Next heartbeat will trigger another ACK
 
         Args:
@@ -1218,11 +1252,20 @@ class HeartbeatHandler:
             # Get MQTT client instance
             mqtt_client = MQTTClient.get_instance()
 
-            # Publish with QoS 0 (fire-and-forget, not critical)
-            success = mqtt_client.publish(topic, json.dumps(payload), qos=0)
+            # Publish with QoS 1 (at least once) — ensures reliable P1 timer reset
+            success = mqtt_client.publish(topic, json.dumps(payload), qos=1)
 
             if success:
-                logger.debug(f"Heartbeat ACK sent to {esp_id}: status={status}")
+                # Use INFO for reconnect-relevant statuses to aid boot-diagnosis in Loki
+                if status in ("online", "offline"):
+                    logger.info(
+                        "Heartbeat ACK sent to %s on topic %s (status=%s)",
+                        esp_id,
+                        topic,
+                        status,
+                    )
+                else:
+                    logger.debug(f"Heartbeat ACK sent to {esp_id}: status={status}")
             else:
                 # Not critical - ESP will receive next ACK on next heartbeat
                 logger.warning(f"Failed to send heartbeat ACK to {esp_id}")
@@ -1232,6 +1275,39 @@ class HeartbeatHandler:
         except Exception as e:
             # Not critical - don't fail the heartbeat handler
             logger.warning(f"Error sending heartbeat ACK to {esp_id}: {e}")
+            return False
+
+    async def _send_heartbeat_error_ack(self, esp_id: str, error: str) -> bool:
+        """Send error ACK to prevent P1 false-positive (SAFETY-P5 Fix-4).
+
+        Server is alive even if heartbeat processing failed.
+        ESP resets P1 timer on ANY valid ACK, regardless of status.
+
+        Args:
+            esp_id: ESP device ID
+            error: Short error description for ESP logging
+
+        Returns:
+            True if publish successful
+        """
+        try:
+            from ..client import MQTTClient
+
+            topic = TopicBuilder.build_heartbeat_ack_topic(esp_id)
+            payload = {
+                "status": "error",
+                "error": error,
+                "server_time": int(time_module.time()),
+            }
+            mqtt_client = MQTTClient.get_instance()
+            success = mqtt_client.publish(topic, json.dumps(payload), qos=1)
+            if success:
+                logger.warning("[SAFETY-P5] Error ACK sent to %s: %s", esp_id, error)
+            else:
+                logger.error("[SAFETY-P5] Failed to send error ACK to %s", esp_id)
+            return success
+        except Exception as e:
+            logger.error("[SAFETY-P5] Error ACK exception for %s: %s", esp_id, e)
             return False
 
     async def _has_pending_config(

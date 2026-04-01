@@ -65,6 +65,9 @@ MQTT_TOPIC_BROADCAST_ZONE = "kaiser/broadcast/zone/{zone_id}"
 MQTT_TOPIC_KAISER_COMMAND = "kaiser/{kaiser_id}/command"
 MQTT_TOPIC_KAISER_STATUS = "kaiser/{kaiser_id}/status"
 
+# Server Status (LWT + online/offline events) — SAFETY-P5
+MQTT_TOPIC_SERVER_STATUS = "kaiser/{kaiser_id}/server/status"
+
 # Subscription Patterns (with wildcards) - use {kaiser_id} placeholder
 MQTT_SUBSCRIBE_ESP_ALL = "kaiser/{kaiser_id}/esp/+/#"
 MQTT_SUBSCRIBE_ESP_SENSORS = "kaiser/{kaiser_id}/esp/+/sensor/+/data"

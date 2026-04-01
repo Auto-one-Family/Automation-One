@@ -177,6 +177,18 @@ class TopicBuilder:
         return constants.get_topic_with_kaiser_id(constants.MQTT_TOPIC_ESP_LWT, esp_id=esp_id)
 
     @staticmethod
+    def build_server_status_topic() -> str:
+        """Build server status topic (LWT + online/offline events).
+
+        Used by server to announce its own online/offline state.
+        ESP32 subscribes to detect server crashes faster than the P1 ACK timeout.
+
+        Returns:
+            kaiser/{kaiser_id}/server/status
+        """
+        return constants.get_topic_with_kaiser_id(constants.MQTT_TOPIC_SERVER_STATUS)
+
+    @staticmethod
     def build_pi_enhanced_response_topic(esp_id: str, gpio: int) -> str:
         """
         Build Pi-Enhanced response topic.

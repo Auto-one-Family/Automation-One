@@ -35,6 +35,7 @@ from .core.resilience import ResilienceRegistry, get_health_status
 from .db.repositories import ActuatorRepository, LogicRepository
 from .db.session import dispose_engine, get_engine, get_session, init_db, init_db_circuit_breaker
 from .mqtt.client import MQTTClient
+from .mqtt.topics import TopicBuilder
 from .mqtt.handlers import (
     actuator_handler,
     actuator_response_handler,
@@ -980,6 +981,24 @@ async def lifespan(app: FastAPI):
         # Step 5: Disconnect MQTT client (always stop loop, even if not connected)
         logger.info("Disconnecting MQTT client...")
         mqtt_client = MQTTClient.get_instance()
+
+        # SAFETY-P5: Publish offline status before disconnect (graceful shutdown)
+        try:
+            _server_status_topic = TopicBuilder.build_server_status_topic()
+            mqtt_client.publish(
+                _server_status_topic,
+                json.dumps({
+                    "status": "offline",
+                    "timestamp": int(time.time()),
+                    "reason": "graceful_shutdown",
+                }),
+                qos=1,
+                retain=True,
+            )
+            logger.info("[SAFETY-P5] Server offline status published (graceful shutdown)")
+        except Exception as _shutdown_err:
+            logger.warning("[SAFETY-P5] Failed to publish shutdown status: %s", _shutdown_err)
+
         mqtt_client.disconnect()  # Always call - stops background thread even if not connected
         logger.info("MQTT client disconnected")
 
