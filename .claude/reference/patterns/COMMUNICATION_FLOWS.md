@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Kommunikationsmuster & Datenflüsse
 
-> **Version:** 2.3 | **Aktualisiert:** 2026-03-09
+> **Version:** 2.5 | **Aktualisiert:** 2026-04-01
 > **Quellen:** Code-Traces durch ESP32, Server, Frontend
 > **Verifiziert:** ✅ Alle Pfade mit Datei:Zeile dokumentiert
 
@@ -24,6 +24,7 @@ allowed-tools: Read
 | E | Server→ESP | Config Update | 100-300ms |
 | F | ESP→Server→Frontend | Heartbeat | 20-80ms |
 | G | Server→ESP | Logic Engine Rule Execution | 20-100ms |
+| H | Server→ALL ESPs | Server LWT (SAFETY-P5) | Sofort/~90s |
 
 ---
 
@@ -174,8 +175,8 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
 
 | Fehler | Erkennung | Reaktion | Datei:Zeile |
 |--------|-----------|----------|-------------|
-| MQTT Disconnect | Circuit Breaker | Offline Buffer (100 msg) | mqtt_client.cpp:478-493 |
-| Server Down | No ACK | ESP buffert, Retry QoS 1 | mqtt_client.cpp:512 |
+| MQTT Disconnect | Circuit Breaker; SAFETY-P4 `onDisconnect()` (Grace); safe state nur wenn 0 Offline-Rules | Offline Buffer (100 msg, PubSubClient); P4 `activateOfflineMode()` synct `is_active` aus Hardware-State (verhindert Doppel-AN) | mqtt_client.cpp; safety_task.cpp (ESP-IDF Notify) |
+| Server Down | LWT ~90s (Broker erkennt Crash) oder sofort (Graceful Shutdown via `server/status="offline"`); Fallback: P1-Timeout 120s | ESP: P4-Delegation wenn Offline-Rules; sofort safe state wenn keine; `g_last_server_ack_ms` + P1-Flag reset bei `server/status="online"` | client.py:will_set; main.cpp:routeIncomingMessage /server/status; main.cpp:checkServerAckTimeout |
 | DB Error | Exception | Log, Skip Broadcast | sensor_handler.py:260 |
 | Invalid Payload | Validation | Reject, Log Warning | sensor_handler.py:353 |
 | WebSocket Fail | Best-effort | Continue, Log | sensor_handler.py:310 |
@@ -571,9 +572,15 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
          │                             │                             │ 7. handleEspHealth()
          │                             │                             │    [esp.ts:1327]
          │                             │                             │
-         │ 8. MQTT: heartbeat/ack      │                             │
+         │ 5. MQTT: heartbeat/ack      │                             │
          │◄────────────────────────────│                             │
-         │    [heartbeat_handler.py:303]                             │
+         │    QoS 1, VOR DB-Arbeit     │                             │
+         │    [heartbeat_handler.py]   │                             │
+         │                             │                             │
+         │                             │ 6. DB-Updates               │
+         │                             │    WS: esp_health           │
+         │                             │────────────────────────────►│
+         │                             │    [heartbeat_handler.py:275]
 ```
 
 ### Code-Pfad (Verifiziert)
@@ -763,7 +770,88 @@ Die Logic Engine unterstützt Rules über **mehrere ESPs**:
 
 ---
 
-## 8. WebSocket Event Types (Server → Frontend)
+## 8. Flow H: Server LWT — SAFETY-P5 (Server → ALL ESPs)
+
+### Übersicht
+
+Ereignisbasierter Kanal für Server-Offline-Erkennung. Ergänzt P1 (ACK-Timeout 120s) durch schnellere Erkennung.
+
+| Szenario | Mechanismus | Latenz |
+|----------|-------------|--------|
+| Server-Crash (Broker läuft) | Broker publiziert LWT nach ~90s (1.5× keepalive=60) | ~90s |
+| Graceful Shutdown (SIGTERM/Docker-Stop) | Server publiziert explizit `"offline"` vor disconnect | Sofort |
+| Server-Start | Server publiziert `"online"` in `_on_connect` | Sofort |
+| Server-Hang (kein Crash) | Kein LWT — Fallback: P1 ACK-Timeout 120s | 120s |
+
+### Sequenz-Diagramm (Server-Crash)
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+│  God-Kaiser     │    │   MQTT Broker    │    │     ESP32        │
+│  Server         │    │   Mosquitto      │    │  SafetyTask      │
+└────────┬────────┘    └────────┬─────────┘    └────────┬─────────┘
+         │                      │                        │
+         │ 1. connect()         │                        │
+         │    will_set(         │                        │
+         │     "server/status", │                        │
+         │     "offline",       │                        │
+         │     retain=True)     │                        │
+         │─────────────────────►│                        │
+         │                      │                        │
+         │ 2. _on_connect:      │                        │
+         │    publish("online") │                        │
+         │─────────────────────►│                        │
+         │                      │─ retained "online" ───►│
+         │                      │                        │ (P1-Timer reset)
+         │                      │                        │
+         │ 3. CRASH (kill -9)   │                        │
+         ╳                      │                        │
+         │                      │                        │
+         │         4. ~90s keepalive timeout             │
+         │                      │                        │
+         │                      │ 5. publiziert retained │
+         │                      │    LWT: "offline"      │
+         │                      │    reason: unexpected_ │
+         │                      │────────────────────────►│
+         │                      │                        │
+         │                      │                        │ 6. /server/status Handler
+         │                      │                        │    → Rule-Count-Guard
+         │                      │                        │    → P4 oder safe state
+```
+
+### ESP32-Reaktion
+
+| Bedingung | Reaktion |
+|-----------|----------|
+| `status="offline"` + Offline-Rules vorhanden | P4 übernimmt (`offlineModeManager.onDisconnect()`) |
+| `status="offline"` + keine Offline-Rules | `actuatorManager.setAllActuatorsToSafeState()` + `onDisconnect()` |
+| `status="online"` | P1-Timer reset (`g_last_server_ack_ms = millis()`), P1-Flag clear, P4-Recovery |
+
+### Watchdog-Hierarchie nach SAFETY-P5
+
+```
+L1: MQTT Keep-Alive (60s)       → Broker-Liveness               [bestehend]
+L2: Server-LWT (retained)       → Server-Crash-Erkennung        [NEU — ~90s]
+L3: Heartbeat + ACK (60s/QoS 1) → Server-Responsivität          [gehärtet]
+L4: P1 ACK-Timeout (120s)       → Fallback bei Hang             [bestehend, jetzt Fallback]
+L5: P4 State Machine (30s)      → koordinierter Offline-Mode    [bestehend]
+```
+
+### Code-Referenzen
+
+| Komponente | Datei | Funktion |
+|------------|-------|----------|
+| LWT setzen | `client.py:connect()` | `self.client.will_set()` vor `self.client.connect()` |
+| Online publizieren | `client.py:_on_connect()` | `self.client.publish(server_status, "online")` |
+| Offline publizieren | `main.py:lifespan()` | Shutdown-Phase, vor `disconnect()` |
+| Topic builden (Server) | `topics.py:build_server_status_topic()` | `constants.MQTT_TOPIC_SERVER_STATUS` |
+| Topic builden (ESP32) | `topic_builder.cpp:buildServerStatusTopic()` | `kaiser/%s/server/status` |
+| Subscription | `main.cpp:subscribeToAllTopics()` | Topic #12, QoS 1 |
+| Handler | `main.cpp:routeIncomingMessage()` | `indexOf("/server/status") >= 0` |
+
+---
+
+## 9. WebSocket Event Types (Server → Frontend)
 
 ### Alle Event Types
 
@@ -820,7 +908,7 @@ const ws = useWebSocket({
 
 ---
 
-## 9. Circuit Breaker & Resilience Patterns
+## 10. Circuit Breaker & Resilience Patterns
 
 ### ESP32 Circuit Breaker
 
@@ -859,7 +947,7 @@ Attempt 6+: 60s  (capped)
 
 ---
 
-## 10. Architektur-Prinzip: Server-Centric
+## 11. Architektur-Prinzip: Server-Centric
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -893,7 +981,7 @@ Attempt 6+: 60s  (capped)
 
 ---
 
-## 11. Verwandte Dokumentation
+## 12. Verwandte Dokumentation
 
 | Dokument | Pfad | Beschreibung |
 |----------|------|--------------|

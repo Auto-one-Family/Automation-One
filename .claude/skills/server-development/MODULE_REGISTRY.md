@@ -154,11 +154,11 @@ class ValidationResult:
 
 ### 1.8 ConfigBuilder
 
-**Datei:** `src/services/config_builder.py` (249 Zeilen)
+**Datei:** `src/services/config_builder.py` (482 Zeilen)
 
 | Methode | Parameter | Return | Beschreibung |
 |---------|-----------|--------|--------------|
-| `build_esp_config()` | `esp_id: str` | `dict` | Vollständige ESP-Config |
+| `build_esp_config()` | `esp_id: str` | `dict` | Vollständige ESP-Config inkl. `offline_rules` (`_build_offline_rules` / `_extract_offline_rule`; Skip-Gründe als `warning`, Summary `Built N offline rules for ESP …`) |
 | `build_sensor_config()` | `sensor: SensorConfig` | `dict` | Einzelne Sensor-Config |
 | `build_actuator_config()` | `actuator: ActuatorConfig` | `dict` | Einzelne Actuator-Config |
 | `build_zone_assignment()` | `esp_id, zone_id, zone_name` | `dict` | Zone-Assignment Payload |

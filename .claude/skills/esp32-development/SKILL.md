@@ -34,7 +34,11 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 | **Driver erstellen** | [Actuator-Workflow](#actuator-workflow) | `services/actuator/actuator_drivers/` |
 | **Build verifizieren** | [Build Commands](#build-commands) | `platformio.ini` |
 | **Startup verstehen** | [Init-Reihenfolge](#initialisierungs-reihenfolge-maincpp) | `src/main.cpp` |
+| **Watchdog-NVS / 24h** | MODULE_REGISTRY.md §6.1 | `utils/watchdog_storage.h` |
+| **Firmware-Version (Build)** | `platformio.ini` + `config/firmware_version.h` | `KAISER_FIRMWARE_VERSION_STRING` |
 | **Wokwi ts=0 / NTP** | [Wokwi-Limitierungen](#wokwi-limitierungen-ts0) | Server-Fallback (sensor_handler, heartbeat_handler) |
+| **MQTT-Backend (M2)** | [MQTT-Patterns](#mqtt-patterns) | Standard = ESP-IDF; `MQTT_USE_PUBSUBCLIENT=1` nur seeed/wokwi — `platformio.ini`, `sdkconfig.defaults`, `mqtt_client.h` |
+| **Comm-Task / Publish-Queue (M3)** | [Init-Reihenfolge](#initialisierungs-reihenfolge-maincpp) | `tasks/communication_task.*`, `tasks/publish_queue.*`, `MQTTClient::processPublishQueue()` |
 
 ---
 
@@ -42,18 +46,25 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 ```
 El Trabajante/
 ├── src/
-│   ├── main.cpp              ← Hauptlogik (~1500 Zeilen)
+│   ├── main.cpp              ← Hauptlogik (~3000 Zeilen)
 │   ├── drivers/              ← GPIO, I2C, OneWire, PWM
 │   ├── services/
 │   │   ├── sensor/           ← SensorManager, PiEnhancedProcessor
 │   │   ├── actuator/         ← ActuatorManager, SafetyController
 │   │   ├── communication/    ← MQTTClient, WiFiManager
 │   │   ├── config/           ← ConfigManager, StorageManager
-│   │   └── provisioning/     ← ProvisionManager
+│   │   ├── provisioning/     ← ProvisionManager
+│   │   └── safety/           ← OfflineModeManager (SAFETY-P4)
+│   ├── tasks/                ← FreeRTOS Tasks (SAFETY-RTOS M1+)
+│   │   ├── safety_task.h/.cpp             ← Safety-Task Core 1, Priority 5
+│   │   ├── communication_task.h/.cpp      ← Comm-Task Core 0 (M3): WiFi/MQTT/Timer/Publish-Drain
+│   │   ├── publish_queue.h/.cpp           ← Core 1 → Core 0 Publish-Queue (M3, ESP-IDF-Publish-Pfad)
+│   │   ├── actuator_command_queue.h/.cpp  ← Aktor-Commands Core 0 → 1
+│   │   └── sensor_command_queue.h/.cpp    ← Sensor-Commands Core 0 → 1
 │   ├── models/               ← Types, Error-Codes
 │   ├── error_handling/       ← ErrorTracker, CircuitBreaker, HealthMonitor
-│   ├── utils/                ← Logger, TopicBuilder
-│   └── config/               ← Feature Flags, Hardware-Configs
+│   ├── utils/                ← Logger, TopicBuilder, watchdog_storage
+│   └── config/               ← Feature Flags, firmware_version.h, Hardware-Configs
 │       └── hardware/         ← esp32_dev.h, xiao_esp32c3.h
 └── platformio.ini
 ```
@@ -132,7 +143,7 @@ C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload; C:\
 ```
 1. GPIOManager.initializeAllPinsToSafeMode()  ← MUST BE FIRST!
 2. Logger.begin()
-3. StorageManager.begin()
+3. StorageManager.begin() + watchdogStorageInitEarly() (Namespace `wdt_diag`)
 3.1 Logger: Restore log_level from NVS (system_config namespace)
 4. ConfigManager.begin() + loadAllConfigs()
 5. [Watchdog Configuration]
@@ -145,10 +156,18 @@ C:\Users\PCUser\.platformio\penv\Scripts\pio.exe run -e esp32_dev -t upload; C:\
 11. I2CBusManager.begin() + OneWireBusManager.begin() + PWMController.begin()
 12. SensorManager.begin()
 13. SafetyController.begin()  ← VOR ActuatorManager!
-14. ActuatorManager.begin()
+14. ActuatorManager.begin() + offlineModeManager.loadOfflineRulesFromNVS()
+--- SAFETY-RTOS M1+M3 ---
+15. initActuatorCommandQueue() + initSensorCommandQueue() + initPublishQueue()  ← VOR createSafetyTask()!
+16. createSafetyTask()  ← Core 1, Priority 5, 8KB Stack
+17. esp_task_wdt_delete(loopTask)  ← Safety-Task übernimmt WDT
+18. createCommunicationTask()  ← Core 0, Priority 3 (WiFi/MQTT/Debounce/Heartbeat-Trigger/Publish-Drain)
 ```
 
 **KRITISCH:** GPIOManager MUSS als erstes initialisiert werden!
+**KRITISCH (M1):** Queues VOR Safety-Task erstellen — Task liest sofort daraus!
+
+**Nach vollem setup():** `loop()` ist minimal (`vTaskDelay(1s)`). Wenn `setup()` vor Task-Erstellung endet (z. B. frühes Provisioning), läuft eine Legacy-Schleife in `main.cpp` ohne Comm-/Safety-Tasks.
 
 ---
 
@@ -207,6 +226,8 @@ config.i2c_address = 0x44;          // Für I2C (7-bit Adresse)
 | `ph_sensor` | `ph` | ADC | - |
 | `ec_sensor` | `ec` | ADC | - |
 | `moisture` | `moisture` | ADC | - |
+
+**ADC-Sensoren und Offline-Rules:** `ph`, `ec`, `moisture` liefern im ValueCache nur ADC-Rohwerte (0–4095), da `applyLocalConversion()` für diese Typen keine lokale Umrechnung hat. Offline-Rule-Thresholds sind in physikalischen Einheiten — ein Vergleich wäre sinnlos. `evaluateOfflineRules()` filtert diese Typen via `requiresCalibration()` Guard heraus; betroffene Aktoren bleiben sicher AUS.
 
 ---
 
@@ -269,6 +290,10 @@ ON mit `duration` > 0 im MQTT-Payload → `command_duration_end_ms` gesetzt. `pr
 ---
 
 ## MQTT-Patterns
+
+**Backends (SAFETY-RTOS M2):** `esp32_dev` nutzt standardmässig ESP-IDF `esp_mqtt_client` (eigener Task, Outbox). **`MQTT_USE_PUBSUBCLIENT=1`** (Seeed XIAO, Wokwi): PubSubClient, manueller Offline-Buffer. SDK-Header ESP-IDF: `#include <mqtt_client.h>` (Arduino-ESP32 SDK), nicht mit lokalem `services/communication/mqtt_client.h` verwechseln.
+
+**M3 (ESP-IDF):** Publishes vom Safety-Task (Core 1) gehen über `queuePublish()` → `MQTTClient::processPublishQueue()` im Communication-Task. `processPublishQueue()` existiert nur ohne `MQTT_USE_PUBSUBCLIENT`.
 
 ### Topic-Builder
 ```cpp
@@ -341,6 +366,13 @@ if (!gpioManager.isPinAvailable(gpio)) {
 }
 gpioManager.requestPin(gpio, "sensor", "DS18B20");
 ```
+
+### SAFETY-P1 / P4 bei Netzverlust (Firmware)
+
+- `offlineModeManager.onDisconnect()` läuft bei relevanten Disconnect- und P1-Pfaden immer (30s Grace, danach ggf. `OFFLINE_ACTIVE`).
+- **Keine Offline-Rules im NVS** (`getOfflineRuleCount() == 0`): MQTT-Disconnect-Handler und Server-ACK-Timeout setzen Aktoren **sofort** auf `default_state`.
+- **Mit Offline-Rules:** dieselben Pfade schalten **nicht** sofort auf safe; Zustand bleibt bis zur P4-Auswertung (`evaluateOfflineRules()` im Safety-Task).
+- Not-Aus (`NOTIFY_EMERGENCY_STOP` / `emergencyStopAll`) bleibt unverzögert.
 
 ### Runtime-Protection (Pumps)
 

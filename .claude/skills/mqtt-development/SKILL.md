@@ -37,7 +37,7 @@ ESP32 (El Trabajante/src/)
 ├── utils/topic_builder.cpp       ← Topic-Builder (snprintf-basiert)
 ├── utils/topic_builder.h         ← Topic-Builder Header
 ├── services/communication/
-│   └── mqtt_client.cpp           ← MQTT Client (PubSubClient)
+│   └── mqtt_client.cpp           ← MQTT Client (ESP-IDF default; PubSubClient wenn MQTT_USE_PUBSUBCLIENT=1)
 │       - Circuit Breaker Pattern
 │       - Offline Buffer (10 Messages)
 │       - Registration Gate

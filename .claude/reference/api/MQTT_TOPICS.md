@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.4 | **Aktualisiert:** 2026-03-11
+> **Version:** 2.6 | **Aktualisiert:** 2026-04-01
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
-> **Änderungen:** Server-Subscriptions auf Multi-Kaiser-Wildcards (`kaiser/+/`) umgestellt; duration > 0: ESP Auto-Off implementiert (F1 2026-03-11)
+> **Änderungen:** SAFETY-P5: `server/status` Topic (LWT) hinzugefügt, heartbeat/ack QoS 0→1, ACK-Reihenfolge vor DB-Arbeit, Error-ACK Methode (2026-04-01)
 
 ---
 
@@ -39,7 +39,8 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `kaiser/god/esp/{esp_id}/actuator/{gpio}/alert` | ESP→Server | 1 | Actuator Alert |
 | `kaiser/god/esp/{esp_id}/actuator/emergency` | Server→ESP | 1 | ESP-spezifischer Emergency |
 | `kaiser/god/esp/{esp_id}/system/heartbeat` | ESP→Server | 0 | Heartbeat |
-| `kaiser/god/esp/{esp_id}/system/heartbeat/ack` | Server→ESP | 0 | Heartbeat ACK (Phase 2) |
+| `kaiser/god/esp/{esp_id}/system/heartbeat/ack` | Server→ESP | 1 | Heartbeat ACK (SAFETY-P5: QoS 1) |
+| `kaiser/god/server/status` | Server→ALL | 1 | Server LWT + Online/Offline (SAFETY-P5) |
 | `kaiser/god/esp/{esp_id}/system/command` | Server→ESP | 2 | System-Befehle |
 | `kaiser/god/esp/{esp_id}/system/response` | ESP→Server | 1 | System-Response |
 | `kaiser/god/esp/{esp_id}/system/diagnostics` | ESP→Server | 0 | Diagnostics |
@@ -467,8 +468,8 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat/ack`
 
-**QoS:** 0 (fire-and-forget)
-**Frequency:** Nach jedem empfangenen Heartbeat
+**QoS:** 1 (at least once — SAFETY-P5: garantiert P1-Timer-Reset)
+**Frequency:** Nach jedem empfangenen Heartbeat — gesendet VOR DB-Arbeit (Fix-3)
 
 **Payload:**
 ```json
@@ -484,10 +485,16 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 - `approved`: Gerät genehmigt, noch nicht online
 - `online`: Gerät ist online und aktiv
 - `rejected`: Gerät wurde abgelehnt
+- `error`: Heartbeat empfangen, aber Verarbeitungsfehler (Server lebt — P1-Timer wird trotzdem zurückgesetzt)
+
+**SAFETY-P5 Hinweise:**
+- ACK wird direkt nach ESP-Lookup gesendet — **vor** DB-Writes, Metadata-Update, WebSocket-Broadcast
+- Bei Payload-Validierungsfehler: `_send_heartbeat_error_ack()` verhindert P1-False-Positive
+- `config_available` ist im frühen ACK immer `false` — Config-Push läuft unabhängig
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildSystemHeartbeatAckTopic()` (Zeile 136)
-- **Server:** `heartbeat_handler.py:_send_heartbeat_ack()` (Zeile 912)
+- **Server:** `heartbeat_handler.py:_send_heartbeat_ack()`, `_send_heartbeat_error_ack()`
 
 ---
 
@@ -704,16 +711,63 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 **Payload:**
 ```json
 {
-  "ts": 1735818000,
-  "esp_id": "ESP_12AB34CD",
   "status": "offline",
-  "reason": "unexpected_disconnect"
+  "esp_id": "ESP_12AB34CD",
+  "reason": "unexpected_disconnect",
+  "timestamp": 1735818000
 }
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `mqtt_client.cpp:connect()` - LWT wird bei Verbindungsaufbau gesetzt
+- **ESP32:** `mqtt_client.cpp` in `connect()` / `connectToBroker()` — LWT wird beim Verbindungsaufbau gesetzt (ESP-IDF- und PubSubClient-Pfad)
 - **Server:** `lwt_handler.py:handle_lwt()` (Zeile 35)
+
+---
+
+### 3.10 server/status (Server LWT — SAFETY-P5)
+
+**Topic:** `kaiser/{kaiser_id}/server/status`
+
+**QoS:** 1
+**Retain:** true
+**Richtung:** Server→ALL ESPs (kein ESP-spezifisches Topic)
+
+**Payload (online):**
+```json
+{
+  "status": "online",
+  "timestamp": 1735818000
+}
+```
+
+**Payload (offline):**
+```json
+{
+  "status": "offline",
+  "timestamp": 1735818000,
+  "reason": "unexpected_disconnect"
+}
+```
+
+**reason-Werte:**
+- `unexpected_disconnect`: Broker publiziert LWT bei unerwartetem Server-Crash
+- `graceful_shutdown`: Server publiziert explizit vor `disconnect()` bei SIGTERM/Docker-Stop
+
+**Timing:**
+- Server-Crash: Broker erkennt nach ~90s (1.5× keepalive=60) → publiziert LWT → ESP reagiert sofort
+- Graceful Shutdown: Sofort (explizit gesendet vor disconnect)
+- Server-Start: `"online"` in `_on_connect`-Callback → überschreibt retained `"offline"`
+
+**ESP32-Reaktion:**
+- `offline` + Offline-Rules vorhanden → P4 übernimmt (kein sofortiger Safe-State)
+- `offline` + keine Offline-Rules → `setAllActuatorsToSafeState()` sofort
+- `online` → P1-Timer reset + `g_server_timeout_triggered` clear + P4-Recovery
+
+**Code-Referenzen:**
+- **Server:** `constants.py:MQTT_TOPIC_SERVER_STATUS`, `topics.py:build_server_status_topic()`
+- **Server LWT:** `client.py:connect()` — `will_set()` vor `connect()`, `_on_connect()` — online-Publish
+- **Server Shutdown:** `main.py:lifespan()` — offline-Publish vor `disconnect()`
+- **ESP32:** `topic_builder.cpp:buildServerStatusTopic()`, `main.cpp:routeIncomingMessage()` Handler
 
 ---
 
@@ -766,7 +820,8 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
       "critical": false,
       "inverted": false,
       "default_state": false,
-      "default_pwm": 0
+      "default_pwm": 0,
+      "max_runtime_ms": 120000
     }
   ]
 }

@@ -31,6 +31,8 @@ description: Vollständige API-Referenz aller ESP32-Module. Laden bei Bedarf fü
 | SensorManager | `services/sensor/sensor_manager.h` | ✅ | STEP 12 |
 | SafetyController | `services/actuator/safety_controller.h` | ✅ | STEP 13 (vor Actuator!) |
 | ActuatorManager | `services/actuator/actuator_manager.h` | ✅ | STEP 14 |
+| OfflineModeManager | `services/safety/offline_mode_manager.h` | ✅ | STEP 14.5 (nach Actuator, loadNVS vor MQTT) |
+| Watchdog NVS (utility) | `utils/watchdog_storage.h` | — | Nach `storageManager.begin()`; Finalize nach NTP (`WiFiManager` / `loop`) |
 
 ---
 
@@ -110,6 +112,7 @@ public:
     bool hasSensorOnGPIO(uint8_t gpio) const;
     SensorConfig getSensorConfig(uint8_t gpio) const;
     uint8_t getActiveSensorCount() const;
+    uint8_t countSensorsWithSubzone(const String& subzone_id) const;  // Phase 9
     
     // Measurement
     bool performMeasurement(uint8_t gpio, SensorReading& reading_out);
@@ -143,6 +146,7 @@ public:
     bool hasActuatorOnGPIO(uint8_t gpio) const;
     ActuatorConfig getActuatorConfig(uint8_t gpio) const;
     uint8_t getActiveActuatorCount() const;
+    uint8_t countActuatorsWithSubzone(const String& subzone_id) const;  // Phase 9
     
     // Control
     bool controlActuator(uint8_t gpio, float value);      // 0.0-1.0
@@ -154,6 +158,7 @@ public:
     bool emergencyStopActuator(uint8_t gpio);
     bool clearEmergencyStop();
     bool resumeOperation();
+    void setAllActuatorsToSafeState(); // SAFETY: default_state — unmittelbar bei Disconnect/P1 nur wenn keine Offline-Rules (sonst P4)
     
     // MQTT
     bool handleActuatorCommand(const String& topic, const String& payload);
@@ -227,6 +232,10 @@ extern ConfigManager& configManager;
 
 **Pfad:** `src/services/communication/mqtt_client.h/.cpp`
 
+**Backends:** **Standard (ohne Define, `esp32_dev`):** ESP-IDF MQTT (`esp_mqtt_client_handle_t`, `g_mqtt_connected`, Event-Handler `MQTT_EVENT_*`). **`MQTT_USE_PUBSUBCLIENT=1`** (seeed_xiao, Wokwi): PubSubClient + `offline_buffer_`, `setCallback`. Partition/SDK: optional `sdkconfig.defaults` (`CONFIG_MQTT_TASK_CORE_SELECTION_*`) für MQTT-Task auf Core 0.
+
+**SAFETY-RTOS M3 (nur ESP-IDF):** `void processPublishQueue()` leert `g_publish_queue` (Core 1 → Core 0); Aufruf aus `communication_task.cpp` nach `loop()`. `publish()` auf Core 1 enqueued.
+
 **Dependencies:** WiFiManager, CircuitBreaker, TopicBuilder
 ```cpp
 class MQTTClient {
@@ -248,12 +257,16 @@ public:
     bool safePublish(const String& topic, const String& payload, uint8_t qos = 1, uint8_t retries = 3);
     bool subscribe(const String& topic);
     void setCallback(std::function<void(const String&, const String&)> callback);
+    void setOnConnectCallback(std::function<void()> callback); // SAFETY-P1: fired after every connect/reconnect
     
     // Heartbeat
     void publishHeartbeat(bool force = false);
     
-    // Status
+    // Status / Monitoring (loop(): siehe Communication-Task nach M3)
     void loop();
+#ifndef MQTT_USE_PUBSUBCLIENT
+    void processPublishQueue();  // M3: nur ESP-IDF
+#endif
     CircuitState getCircuitBreakerState() const;
     bool isRegistrationConfirmed() const;
     void confirmRegistration();
@@ -302,6 +315,18 @@ extern TimeManager& timeManager;
 - `NTP_SYNC_TIMEOUT_MS`: 10000 (10s max für Initial-Sync)
 - `NTP_RESYNC_INTERVAL_MS`: 3600000 (Re-Sync alle Stunde)
 - `NTP_MIN_VALID_TIMESTAMP`: 1700000000 (~2023-11)
+
+---
+
+## 6.1 Watchdog NVS (utility)
+
+**Pfad:** `src/utils/watchdog_storage.h/.cpp`
+
+**NVS:** Namespace `wdt_diag` — Keys `hist` (24h-Rolling), `snap` (letzter Snapshot). Details: `El Trabajante/docs/NVS_KEYS.md`.
+
+**API (Free Functions):** `watchdogStorageInitEarly()`, `watchdogStorageTryFinalizeBootRecord()`, `watchdogStorageGetCountLast24h()`, `watchdogStorageSaveDiagnosticsSnapshot()`, `watchdogStorageLogLastSnapshotIfAny()`.
+
+**Firmware-Version (Build):** `src/config/firmware_version.h` — Makro `KAISER_FIRMWARE_VERSION_STRING`; Override in `platformio.ini` z. B. `'-DKAISER_FIRMWARE_VERSION_STRING="4.0.0"'`.
 
 ---
 
@@ -712,6 +737,58 @@ struct RuntimeProtection {
 
 ---
 
+## OfflineModeManager (SAFETY-P4)
+
+**Pfad:** `src/services/safety/offline_mode_manager.h/.cpp`
+```cpp
+enum class OfflineMode : uint8_t { ONLINE, DISCONNECTED, OFFLINE_ACTIVE, RECONNECTING };
+
+class OfflineModeManager {
+public:
+    static OfflineModeManager& getInstance();
+
+    // State-Machine Hooks (in mqtt_client.cpp, safety_controller.cpp, main.cpp)
+    void onDisconnect();           // ONLINE → DISCONNECTED, starts 30s timer (no-op in DISCONNECTED/OFFLINE_ACTIVE/RECONNECTING)
+    void onReconnect();            // OFFLINE_ACTIVE → RECONNECTING (rules keep running)
+    void onServerAckReceived();    // RECONNECTING → ONLINE (deactivates rules)
+    void onEmergencyStop();        // Any → ONLINE (clears all rules)
+
+    // Integration: Safety-Task (checkDelayTimer + evaluateOfflineRules); Legacy-loop ohne RTOS-Tasks wie früher main.cpp
+    void checkDelayTimer();        // DISCONNECTED → OFFLINE_ACTIVE nach 30s
+    void evaluateOfflineRules();   // Hysterese-Auswertung, 5s-Intervall extern; ph/ec/moisture-Rules werden via requiresCalibration()-Guard gefiltert (ADC-Rohwert != phys. Einheit)
+
+    // Config (via handleOfflineRulesConfig in main.cpp)
+    void parseOfflineRules(JsonObject obj);   // 3-Semantiken: fehlt/leer/Inhalt
+    void loadOfflineRulesFromNVS();           // Boot: nach actuatorManager.begin()
+
+    // Server-Override (in actuator_manager.cpp::handleActuatorCommand)
+    void setServerOverride(uint8_t actuator_gpio);
+
+    // Status
+    bool isOfflineActive() const;  // true wenn OFFLINE_ACTIVE oder RECONNECTING
+    OfflineMode getMode() const;
+    uint8_t getOfflineRuleCount() const;  // NVS/Config: 0 → Disconnect-Pfade dürfen sofort safe setzen
+};
+
+extern OfflineModeManager& offlineModeManager;
+```
+
+**State-Transitions:**
+
+| Von | Nach | Trigger |
+|-----|------|---------|
+| ONLINE | DISCONNECTED | `onDisconnect()` |
+| DISCONNECTED | OFFLINE_ACTIVE | `checkDelayTimer()` nach 30s + min. 1 Regel |
+| OFFLINE_ACTIVE | RECONNECTING | `onReconnect()` |
+| RECONNECTING | ONLINE | `onServerAckReceived()` |
+| Any | ONLINE | `onEmergencyStop()` |
+
+**Delay-Konstante:** `OFFLINE_ACTIVATION_DELAY_MS = 30000UL`
+
+**Koordination SAFETY-P1 (Server-ACK-Timeout in `main.cpp::checkServerAckTimeout`) / MQTT-Disconnect:** `onDisconnect()` wird immer aufgerufen. Unmittelbares `setAllActuatorsToSafeState()` nur bei `getOfflineRuleCount() == 0`; sonst Delegation an P4 (kein „falsches AUS” in der Grace-Phase). `activateOfflineMode()` bestätigt bei 0 Rules zusätzlich safe state (Defense-in-Depth). `activateOfflineMode()` initialisiert `is_active` jeder Regel aus dem echten Aktor-Hardware-State (`actuatorManager.getActuatorConfig(gpio).current_state`) — verhindert falsches Doppel-AN bei Mehrfach-Regeln, wenn ein Aktor vor Disconnect bereits AN war. `g_last_server_ack_ms` ist global (`std::atomic<uint32_t>`, nicht `static`) und wird im ESP-IDF `MQTT_EVENT_CONNECTED`-Handler sofort zurückgesetzt — vor Aufruf der `on_connect_callback_` — um die Race-Condition zwischen Core 0 (MQTT-Event) und Safety-Task Core 1 zu schließen.
+
+---
+
 ## Error-Code Ranges
 
 | Range | Category | Examples |
@@ -753,6 +830,15 @@ struct RuntimeProtection {
 | `system` | `esp_id` | String | ESP Identifier |
 | `system` | `state` | uint8 | System State |
 | `system` | `boot_cnt` | uint16 | Boot Counter |
+| `offline` | `ofr_count` | uint8 | Anzahl Offline-Regeln (max 8) |
+| `offline` | `ofr_{i}_en` | uint8 | Regel i aktiv (SAFETY-P4) |
+| `offline` | `ofr_{i}_agpio` | uint8 | Aktor GPIO |
+| `offline` | `ofr_{i}_sgpio` | uint8 | Sensor GPIO |
+| `offline` | `ofr_{i}_svtyp` | String | sensor_value_type (z.B. "sht31_humidity") |
+| `offline` | `ofr_{i}_actb` | float | activate_below |
+| `offline` | `ofr_{i}_deaa` | float | deactivate_above |
+| `offline` | `ofr_{i}_acta` | float | activate_above |
+| `offline` | `ofr_{i}_deab` | float | deactivate_below |
 
 ---
 

@@ -28,7 +28,7 @@ ESP32 != Business-Logic, Datenverarbeitung, Entscheidungen
 |----------|-------|-------|
 | **Heap** | ~160KB | Keine dynamischen Allokationen in Loops |
 | **Stack** | 8KB/Task | Keine grossen lokalen Arrays, keine Rekursion |
-| **Flash** | ~1.2MB Code | PROGMEM fuer konstante Strings |
+| **Flash** | ~1.5MB Code | PROGMEM fuer konstante Strings (partitions_custom.csv: 0x180000) |
 
 ---
 
@@ -57,7 +57,8 @@ ESP32 != Business-Logic, Datenverarbeitung, Entscheidungen
 
 // 3. Externe Libraries
 #include <ArduinoJson.h>
-#include <PubSubClient.h>
+// MQTT: in mqtt_client.h gekapselt — ESP-IDF SDK <mqtt_client.h> oder PubSubClient (siehe MQTT_USE_PUBSUBCLIENT)
+#include <PubSubClient.h>  // nur wenn ohne ESP-IDF-MQTT-Pfad
 
 // 4. Projekt-Header (alphabetisch)
 #include "drivers/gpio_manager.h"

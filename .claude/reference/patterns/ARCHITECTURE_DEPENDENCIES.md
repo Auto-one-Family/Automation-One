@@ -226,10 +226,23 @@ Application Layer (main.cpp setup())
 
 Communication Layer (Singletons)
 ├─> MQTTClient
-│   └─> WiFiManager
+│   ├─> CircuitBreaker (circuit_breaker_("MQTT", 5, 30000, 10000))
+│   └─> WiFiManager (implizit via WiFi-Stack)
 ├─> WiFiManager
-│   └─> CircuitBreaker
+│   └─> CircuitBreaker (circuit_breaker_("WiFi", 10, 60000, 15000))
 └─> HTTPClient (für Pi-Enhanced Processing)
+
+RTOS Layer (SAFETY-RTOS M2/M3, nach Actuator-Init erstellt)
+├─> CommunicationTask (Core 0, Prio 3, Stack 6144)
+│   ├─> WiFiManager.loop()
+│   ├─> MQTTClient.loop() + processPublishQueue()
+│   └─> handleWifiDisconnectDebounce() / handleMqttPersistentFailure()
+├─> SafetyTask (Core 1, Prio 5)
+│   ├─> OfflineModeManager (Offline-Rules, Hysterese)
+│   └─> ActuatorManager (Emergency Stop via xTaskNotify)
+└─> PublishQueue (FreeRTOS Queue, Core 1 → Core 0)
+    ├─> Enqueue: MQTTClient.publish() wenn xPortGetCoreID()==1
+    └─> Drain: MQTTClient.processPublishQueue() im CommunicationTask
 
 Error Handling Layer (Singletons)
 ├─> ErrorTracker
@@ -419,7 +432,7 @@ private:
 4. **Provisioning Check (STEP 6.6):**
    - provisionManager.begin() + startAPMode() (nur wenn !configured)
    - Bei MQTT-Fehler: startAPModeForReconfig() (Config bleibt, AP+STA fuer parallelen Reconnect)
-   - Wenn Provisioning aktiv: return early, loop() handled provisioning
+   - Wenn Provisioning aktiv: return early — ohne Safety-/Comm-Tasks: Legacy-`loop()` in `main.cpp`; nach vollem `setup()`: Provisioning läuft im Communication-Task
 
 5. **Error Handling Layer (STEP 7):**
    - errorTracker.begin() (Error History)
@@ -442,6 +455,10 @@ private:
    - sensorManager.begin() (abhängig von GPIO, MQTT, I2C, OneWire)
    - safetyController.begin() (Safety System)
    - actuatorManager.begin() (abhängig von GPIO, MQTT, Config)
+
+10. **SAFETY-RTOS (nach Actuator-Init):**
+   - `initActuatorCommandQueue()` + `initSensorCommandQueue()` + `initPublishQueue()` (Queues vor Tasks)
+   - `createSafetyTask()` (Core 1) → `esp_task_wdt_delete(loopTask)` → `createCommunicationTask()` (Core 0)
 
 **Warum diese Reihenfolge?**
 - gpioManager.initializeAllPinsToSafeMode() MUSS als erstes laufen (Hardware-Schutz)
@@ -471,8 +488,8 @@ Verfügbare Sensor-Prozessoren:
 
 ---
 
-**Letzte Aktualisierung:** 2026-02-01
-**Version:** 1.1 (Code-Verifizierung + Ergänzungen)
+**Letzte Aktualisierung:** 2026-03-31
+**Version:** 1.2 (SAFETY-RTOS: CommunicationTask, SafetyTask, PublishQueue ergänzt; CircuitBreaker-Deps präzisiert)
 
 **Änderungen in Version 1.1:**
 - SensorManager: Zeilennummern korrigiert (145-149 statt 133-138, 67-71 statt 47-51)
