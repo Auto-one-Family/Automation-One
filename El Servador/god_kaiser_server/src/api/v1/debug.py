@@ -2226,14 +2226,12 @@ async def query_table(
             )
 
             if not has_timestamp_filter:
-                # Default to last 24 hours
-                cutoff = datetime.now(timezone.utc) - timedelta(
-                    hours=DEFAULT_TIME_SERIES_LIMIT_HOURS
+                # Default to last 24 hours — use SQL NOW() to avoid asyncpg
+                # datetime serialization issues with text() parameter binding
+                where_clauses.append(
+                    f"{timestamp_col} >= NOW() - INTERVAL"
+                    f" '{DEFAULT_TIME_SERIES_LIMIT_HOURS} hours'"
                 )
-                param_name = f"p{param_index}"
-                where_clauses.append(f"{timestamp_col} >= :{param_name}")
-                params[param_name] = cutoff.isoformat()
-                param_index += 1
 
         # Process filters
         for key, value in parsed_filters.items():

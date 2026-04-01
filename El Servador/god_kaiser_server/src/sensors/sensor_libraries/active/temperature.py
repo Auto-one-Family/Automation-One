@@ -25,12 +25,13 @@ class DS18B20Processor(BaseSensorProcessor):
     DS18B20 OneWire Temperature Sensor Processor.
 
     The DS18B20 is a digital temperature sensor that uses 1-Wire communication.
-    ESP32-side processing (DallasTemperature library) already converts raw sensor
-    data to Celsius, so this processor focuses on:
-    - Validation of temperature range
-    - Optional calibration offset
-    - Unit conversion (°C, °F, K)
-    - Quality assessment
+    ESP32 uses the raw OneWire library and sends the 12-bit signed integer directly
+    (1 LSB = 0.0625°C). Server performs the conversion to Celsius. This processor:
+    - Converts raw int16 to Celsius (raw_value * 0.0625)
+    - Validates temperature range
+    - Applies optional calibration offset
+    - Handles unit conversion (°C, °F, K)
+    - Assesses data quality
 
     Sensor Specifications:
     - Temperature Range: -55°C to +125°C
@@ -125,8 +126,9 @@ class DS18B20Processor(BaseSensorProcessor):
             # result.value = 77.0 (25°C → °F), result.unit = "°F"
         """
         # Step 0: Check for RAW mode (Pi-Enhanced)
-        # If raw_mode=True, convert 12-bit signed integer to Celsius first
-        raw_mode = params.get("raw_mode", False) if params else False
+        # If raw_mode=True, convert 12-bit signed integer to Celsius first.
+        # Default True: ESP32 always sends raw int16 via OneWire library.
+        raw_mode = params.get("raw_mode", True) if params else True
         original_raw_value = raw_value  # Keep original for metadata
 
         if raw_mode:

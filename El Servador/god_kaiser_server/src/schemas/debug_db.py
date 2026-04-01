@@ -156,7 +156,7 @@ ALLOWED_TABLES = {
 TIME_SERIES_TABLES = {
     "sensor_data": "timestamp",
     "actuator_history": "timestamp",
-    "logic_execution_history": "executed_at",
+    "logic_execution_history": "timestamp",
     "audit_logs": "created_at",
 }
 

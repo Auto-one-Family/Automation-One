@@ -310,6 +310,21 @@ class SensorDataHandler:
                         processing_mode = "local"
                         processed_value = value
 
+                    elif raw_mode and sensor_type == "ds18b20":
+                        # Safety net: DS18B20 raw int16 must always be converted
+                        # to Celsius, even when pi_enhanced=False.
+                        # Formula: raw_int16 * 0.0625 = Celsius (12-bit resolution).
+                        # Without this, raw integers (e.g. 280 for ~17.5°C) would be
+                        # stored directly as the processed_value in Celsius.
+                        DS18B20_RESOLUTION = 0.0625
+                        processing_mode = "raw_conversion"
+                        processed_value = float(raw_value) * DS18B20_RESOLUTION
+                        logger.debug(
+                            "[DS18B20] Raw conversion (pi_enhanced=False): raw=%s → %.2f°C",
+                            raw_value,
+                            processed_value,
+                        )
+
                     # Fallback: if no processing branch produced a value,
                     # use raw_value so processed_value is never NULL in DB
                     if processed_value is None:
@@ -508,7 +523,7 @@ class SensorDataHandler:
                     # Quality guard: skip VPD if source reading has quality=error
                     # to avoid computing VPD from invalid sensor values (P3-fix).
                     # ═══════════════════════════════════════════════════════
-                    if sensor_type in ("sht31_temp", "sht31_humidity"):
+                    if sensor_type == "sht31_temp":
                         if quality == "error":
                             logger.warning(
                                 f"Skipping VPD computation: {sensor_type} quality=error "
