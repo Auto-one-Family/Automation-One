@@ -1,21 +1,14 @@
 # Server Debug Report
 
-**Erstellt:** 2026-03-31
-**Modus:** B — Spezifisch: "POST /api/v1/actuators/ESP_EA5484/14 gibt 403 Forbidden"
-**Request-ID:** 34fde1f1-12d3-4f82-a90e-c92c4e04454c
-**Quellen:**
-- Docker-Container-Log: `docker logs automationone-server`
-- `El Servador/god_kaiser_server/src/api/v1/actuators.py`
-- `El Servador/god_kaiser_server/src/core/exceptions.py`
-- `El Servador/god_kaiser_server/src/mqtt/handlers/lwt_handler.py`
-- `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py`
-- PostgreSQL: `esp_devices`-Tabelle
+**Erstellt:** 2026-04-01
+**Modus:** B (Spezifisch: "Datenbankverbindungs-Probleme und SystemMonitor-bezogene Fehler")
+**Quellen:** Docker logs el-servador (200 Zeilen), Docker logs postgres (100 Zeilen), docker compose ps, Quellcode-Analyse debug.py, sensor_handler.py, schemas/debug_db.py
 
 ---
 
 ## 1. Zusammenfassung
 
-Das Device `ESP_EA5484` hat in der Datenbank den Status `offline`. Der Device-Status-Guard in `actuators.py` Zeile 450 erlaubt Konfigurationsoperationen ausschliesslich fuer Devices mit Status `approved` oder `online`. Da `offline` nicht in dieser Menge liegt, wird `DeviceNotApprovedError` (HTTP 403, Error-Code 5405) geworfen. Handlungsbedarf besteht: Das Device muss zunaechst online gebracht werden (Heartbeat senden) oder — wenn Offline-Konfiguration gewaenscht ist — der Guard muss bewusst erweitert werden.
+Zwei klar isolierte Bugs gefunden. Bug #1 ist der Hauptverursacher der 500-Fehler im System Monitor: In `debug.py:2235` wird ein `datetime`-Objekt via `.isoformat()` als `str` an asyncpg weitergegeben — asyncpg erwartet aber eine `datetime`-Instanz. Bug #2 ist ein VPD-Duplicate-Key-Fehler in `sensor_handler.py`: beide SHT31-Readings (Temp + Humidity) triggern gleichzeitig `_try_compute_vpd()` und versuchen denselben VPD-Eintrag mit identischem Timestamp doppelt zu schreiben. Beide Bugs sind aktiv und reproduzierbar. Handlungsbedarf sofort bei Bug #1.
 
 ---
 
@@ -23,127 +16,100 @@ Das Device `ESP_EA5484` hat in der Datenbank den Status `offline`. Der Device-St
 
 | Quelle | Status | Bemerkung |
 |--------|--------|-----------|
-| `docker logs automationone-server` | OK | Request-ID gefunden, eindeutiger Log-Eintrag |
-| `actuators.py` | OK | Device-Status-Guard auf Zeile 450 identifiziert |
-| `exceptions.py` | OK | `DeviceNotApprovedError` auf Zeile 586-601 |
-| `lwt_handler.py` | OK | Setzt Status auf `offline` via LWT-MQTT-Topic |
-| `heartbeat_handler.py` | OK | Setzt Status auf `online` bei eingehendem Heartbeat |
-| PostgreSQL `esp_devices` | OK | `ESP_EA5484` existiert, Status: `offline` |
+| `docker logs el-servador` | FEHLER gefunden | 2x kritischer Stack-Trace sichtbar |
+| `docker logs postgres` | FEHLER gefunden | Duplicate-Key-Violation, fehlerhafte Queries |
+| `docker compose ps` | OK | Alle 12 Services healthy/running |
+| `src/api/v1/debug.py` | BUG | Zeile 2235: `.isoformat()` statt datetime-Objekt |
+| `src/schemas/debug_db.py` | OK | TIME_SERIES_TABLES korrekt definiert |
+| `src/mqtt/handlers/sensor_handler.py` | BUG | Zeile 526-546: Race Condition bei VPD-Berechnung |
 
 ---
 
 ## 3. Befunde
 
-### 3.1 Root Cause — Device-Status-Guard blockiert Konfiguration
+### 3.1 BUG-1: `debug.py:2235` — datetime wird als String an asyncpg übergeben (System Monitor kaputt)
 
-- **Schwere:** Mittel (kein Bug, korrektes Systemverhalten — aber moegliche UX-Luecke)
-- **Detail:** Der POST-Endpoint `/{esp_id}/{gpio}` prueft vor jeder Konfigurationsoperation den Device-Status. Nur `approved` oder `online` werden akzeptiert.
-- **Exakte Code-Zeile:**
+- **Schwere:** CRITICAL
+- **Datei:Zeile:** `El Servador/god_kaiser_server/src/api/v1/debug.py:2235`
+- **Detail:** In der Funktion `query_table()` wird der automatische Zeitfilter fuer Time-Series-Tabellen (sensor_data, actuator_history, logic_execution_history, audit_logs) als ISO-String uebergeben: `params[param_name] = cutoff.isoformat()`. asyncpg mit dem PostgreSQL-asyncpg-Dialekt kann einen `str` nicht als `TIMESTAMP WITH TIME ZONE` binden — es erwartet eine `datetime`-Instanz.
+- **Evidenz aus Docker-Log:**
   ```
-  El Servador/god_kaiser_server/src/api/v1/actuators.py, Zeile 450:
-  if esp_device.status not in ("approved", "online"):
-      raise DeviceNotApprovedError(esp_id, esp_device.status)
+  asyncpg.exceptions.DataError: invalid input for query argument $1:
+  '2026-03-31T08:28:35.438416+00:00'
+  (expected a datetime.date or datetime.datetime instance, got 'str')
+  [SQL: SELECT COUNT(*) FROM actuator_history WHERE timestamp >= $1]
+  [parameters: ('2026-03-31T08:28:35.438416+00:00',)]
   ```
-- **Exception-Klasse:** `DeviceNotApprovedError` (definiert in `exceptions.py:586`)
-  - HTTP-Status: 403 Forbidden
-  - Error-Code: `DEVICE_NOT_APPROVED`
-  - Numerischer Code: 5405 (ServiceErrorCode.PERMISSION_DENIED)
-  - Message: `Device 'ESP_EA5484' must be approved before configuration (current status: offline)`
+  Traceback zeigt: `File "/app/src/api/v1/debug.py", line 2285, in query_table`
+- **Root Cause:** `cutoff = datetime.now(timezone.utc) - timedelta(hours=24)` erzeugt ein korrektes datetime-Objekt, aber `.isoformat()` konvertiert es zu einem String. asyncpg akzeptiert bei prepared statements mit `$1` keine Strings fuer Timestamp-Spalten.
+- **Konkreter Fix:**
+  ```python
+  # debug.py Zeile 2235 — VORHER (falsch):
+  params[param_name] = cutoff.isoformat()
 
-### 3.2 Bestaetigung durch Log-Eintrag
-
-- **Schwere:** Information
-- **Evidenz (exakt):**
-  ```
-  2026-03-31 16:01:29 - src.core.exception_handlers - WARNING -
-  [34fde1f1-12d3-4f82-a90e-c92c4e04454c] - API error: DEVICE_NOT_APPROVED -
-  Device 'ESP_EA5484' must be approved before configuration (current status: offline)
+  # NACHHER (korrekt):
+  params[param_name] = cutoff
   ```
 
-### 3.3 Device-Zustand in der Datenbank
+### 3.2 BUG-2: `sensor_handler.py` — VPD Duplicate Key Violation (PostgreSQL-Error alle ~30 Sekunden)
 
-- **Schwere:** Information
-- **Detail:** `ESP_EA5484` ist in `esp_devices` registriert (kein `404 ESPNotFoundError`), aber hat Status `offline`. `last_seen` war `2026-03-31 16:00:49 UTC` — das Device hat zuletzt kurz vor dem fehlgeschlagenen Request gesendet, dann aber den Heartbeat verloren oder eine LWT-Nachricht gesendet.
+- **Schwere:** HIGH
+- **Datei:Zeile:** `El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py:526` (VPD-Hook) und `677-692` (`_try_compute_vpd`)
+- **Detail:** Wenn ein ESP-Geraet gleichzeitig `sht31_temp` und `sht31_humidity` in einer MQTT-Nachricht sendet, werden beide Readings parallel verarbeitet. Beide loesen den VPD-Hook aus. Beide rufen `_try_compute_vpd()` auf, finden den Partner-Wert bereits in der DB und versuchen, denselben VPD-Eintrag mit identischem `(esp_id, gpio=0, sensor_type='vpd', timestamp)` zu inserieren. Der zweite INSERT schlaegt mit Unique-Constraint-Verletzung fehl.
+- **Evidenz aus PostgreSQL-Log:**
+  ```
+  ERROR:  duplicate key value violates unique constraint "uq_sensor_data_esp_gpio_type_timestamp"
+  DETAIL:  Key (esp_id, gpio, sensor_type, "timestamp")=
+    (63f776d4-d0fc-4191-b4e3-58c1d77ebb4d, 0, vpd, 2026-04-01 08:28:17+00) already exists.
+  ```
+  Tritt zweimal pro Sensor-Intervall auf (sichtbar um 08:28:16 und 08:28:47).
+- **Bestehende Behandlung:** In `_try_compute_vpd` wird `if vpd_data is None: return` als Duplicate-Guard verwendet (Zeile 694-696). Das greift aber nicht: `sensor_repo.save_data()` schluckt den Fehler nicht intern und gibt nicht `None` zurueck — die PostgreSQL-Exception propagiert. Sie wird weiter oben durch `except Exception as e: logger.debug(...)` auf Debug-Level unterdruckt. Der Fehler ist auf Anwendungsebene "silent", erzeugt aber regelmaeßig ERROR-Logs auf PostgreSQL-Seite und Rollback-Kosten.
+- **Fix-Optionen:**
+  - **Option A (empfohlen):** VPD-Hook nur beim `sht31_temp`-Trigger ausfuehren, `sht31_humidity`-Ast entfernen. In `sensor_handler.py:526` Bedingung von `if sensor_type in ("sht31_temp", "sht31_humidity"):` zu `if sensor_type == "sht31_temp":` aendern. Eliminiert die Race Condition vollstaendig, kein Datenverlust.
+  - **Option B:** In `sensor_repo.save_data()` ein `INSERT ... ON CONFLICT DO NOTHING` ergaenzen.
 
-| device_id | status | last_seen |
-|-----------|--------|-----------|
-| ESP_EA5484 | offline | 2026-03-31 16:00:49 UTC |
+### 3.3 INFO: Frontend 404 bei `GET /api/v1/debug/db/actuator_history/{record_id}`
 
-### 3.4 Status-Lifecycle-Analyse
+- **Schwere:** MEDIUM (Folge-Fehler von BUG-1)
+- **Detail:** Das Frontend ruft `getRecord('actuator_history', '36f25972-4290-4ac7-9414-8229ebc0e188')` auf und erhaelt 404. Das ist kein eigenstaendiger Server-Bug — die Record-ID existiert nicht in der DB, weil der Table-Query-Endpoint durch BUG-1 kaputt war und keine validen IDs geladen werden konnten. Nach Behebung von BUG-1 sollte sich dieses Problem von selbst loesen.
+- **Evidenz:**
+  ```
+  [FRONTEND] [PromiseRejection] Request failed with status code 404
+  (url: http://localhost:5173/system-monitor)
+  database.ts:46 → getRecord → loadRecord (database.store.ts:130)
+  ```
 
-- **Schwere:** Information
-- **Detail:** Der Status-Lifecycle des Servers ist:
-  - `pending_approval` → (Admin-Aktion) → `approved`
-  - `approved` → (erster Heartbeat) → `online` (heartbeat_handler.py:204-206)
-  - `online` → (LWT-Nachricht oder Heartbeat-Timeout) → `offline` (lwt_handler.py:111, heartbeat_handler.py:1508)
-  - `offline` → (naechster Heartbeat) → `online`
+### 3.4 WARNING: I2C sensor config not found (DS18B20 auf gpio=4)
 
-  Das Device `ESP_EA5484` hatte frueheren Status `approved` (oder `online`), wurde aber durch LWT/Timeout auf `offline` gesetzt. Status `offline` war nie vorgesehen fuer Konfigurationsoperationen — das ist designbedingt.
-
-### 3.5 Kein Mock-ESP-Problem
-
-- **Schwere:** Information
-- **Detail:** Die Spalte `is_mock` existiert nicht in `esp_devices`. Es gibt keine Mock-Only-Einschraenkung im Guard. Der 403 ist **ausschliesslich** auf den `offline`-Status zurueckzufuehren, nicht auf eine Real-vs-Mock-Differenzierung.
-
-### 3.6 Auth-Pruefung: JWT ist korrekt
-
-- **Schwere:** Information
-- **Detail:** Der Endpoint verwendet `OperatorUser` als Dependency (`current_user: OperatorUser`). Ein `role=admin`-Token erfuellt diese Anforderung. Der 403 kommt **nicht** vom JWT-Check, sondern vom Device-Status-Guard danach.
+- **Schwere:** LOW / Bekannt
+- **Detail:** `I2C sensor config not found: esp_id=ESP_EA5484, gpio=4, type=ds18b20, addr=0x44. Saving data without config.` — DS18B20 ist ein OneWire-Sensor, wird aber mit `i2c_address=68` (0x44, SHT31-Adresse) im Metadata gefuehrt. Daten werden trotzdem korrekt gespeichert (`processing_mode=raw_conversion`). Kein kritischer Fehler, aber Hinweis auf falsche Sensorconfig-Metadaten im device_metadata JSON.
 
 ---
 
-## 4. Extended Checks (eigenständig durchgeführt)
+## 4. Extended Checks (eigenstaendig durchgefuehrt)
 
 | Check | Ergebnis |
 |-------|----------|
-| `docker logs automationone-server` — Request-ID grep | `DEVICE_NOT_APPROVED` mit Status `offline` bestaetigt |
-| PostgreSQL: `SELECT device_id, status, last_seen FROM esp_devices WHERE device_id = 'ESP_EA5484'` | Status: `offline`, last_seen: 2026-03-31 16:00:49 UTC |
-| PostgreSQL: `SELECT DISTINCT status FROM esp_devices` | Alle vorhandenen Stati: `approved`, `offline` |
-| `actuators.py` Zeile 450 — Guard-Logik | `not in ("approved", "online")` — `offline` wird abgelehnt |
-| `exceptions.py` Zeile 586-601 — Exception-Definition | HTTP 403, numeric code 5405 |
-| `sensors.py` Zeile 599 — gleicher Guard | Identische Pruefung auch im Sensor-Endpoint |
+| `docker compose ps` | Alle 12 Services healthy/running. Kein Container-Problem. |
+| PostgreSQL-Logs | Keine Connection-Fehler. Verbindung stabil. Checkpoint normal. |
+| Server liveness (aus Logs) | `GET /api/v1/health/live` → 200 (0.3ms) |
+| `TIME_SERIES_TABLES` (debug_db.py:156) | Korrekt definiert: sensor_data, actuator_history, logic_execution_history, audit_logs |
+| VPD-Save-Pfad sensor_handler.py:526 | Hook feuert bei sht31_temp UND sht31_humidity — Race Condition bestaetigt |
+| `if vpd_data is None` Guard (Zeile 694) | Greift nicht — Exception propagiert vor dem Return |
+| MQTT-Pipeline sonstig | Normal: Pi-Enhanced OK, sht31_temp/humidity werden korrekt verarbeitet |
 
 ---
 
 ## 5. Bewertung & Empfehlung
 
-- **Root Cause:** `ESP_EA5484` hat Status `offline` in der Datenbank. Der Device-Status-Guard in `actuators.py:450` schliesst `offline`-Devices bewusst aus, da Konfigurationen nur an nachweislich erreichbare (oder frisch genehmigte) Devices gesendet werden sollen.
+### Root Causes
 
-- **Ist das ein Bug?** Nein. Das ist intentionales Systemverhalten gemaess Safety-Design: Ein offline-Device kann keine Konfiguration empfangen und soll nicht konfiguriert werden. Der Fehler-Name `DEVICE_NOT_APPROVED` ist dabei irrefuehrender als noetig — der eigentliche Grund ist `DEVICE_OFFLINE`.
+**BUG-1 (CRITICAL):** `debug.py:2235` — `cutoff.isoformat()` muss `cutoff` (datetime-Objekt) sein. asyncpg akzeptiert keine Strings fuer Timestamp-Parameter in prepared statements. Jede Abfrage auf allen Time-Series-Tabellen im System Monitor schlaegt fehl.
 
-- **Nächste Schritte (3 Optionen — nach Prioritaet):**
+**BUG-2 (HIGH):** `sensor_handler.py:526` — VPD-Computation-Hook feuert bei beiden SHT31-Sensor-Typen. Race Condition bei gleichzeitiger Verarbeitung erzeugt regelmaessige Duplicate-Key-Violations in PostgreSQL. Empfehlung: VPD nur beim `sht31_temp`-Trigger berechnen.
 
-  **Option A (sofort, empfohlen): Device online bringen**
-  1. Sicherstellen dass `ESP_EA5484` physisch laeuft und WLAN/MQTT-Verbindung besteht
-  2. Das Device sendet automatisch Heartbeats → Server setzt Status auf `online`
-  3. Danach POST-Request wiederholen — wird dann durchgehen
+### Nächste Schritte (nach Prioritaet)
 
-  **Option B (Guard erweitern fuer offline konfigurierbare Devices):**
-  Wenn Offline-Konfiguration beabsichtigt ist (Config wird bei naechstem Reconnect gepusht), muss der Guard angepasst werden:
-  ```python
-  # Zeile 450 in actuators.py — aktuell:
-  if esp_device.status not in ("approved", "online"):
-      raise DeviceNotApprovedError(esp_id, esp_device.status)
-
-  # Erweiterung um "offline" erlauben:
-  if esp_device.status not in ("approved", "online", "offline"):
-      raise DeviceNotApprovedError(esp_id, esp_device.status)
-  ```
-  Achtung: Dann muss die Config-Delivery-Logik sicherstellen, dass die Config beim naechsten Reconnect gepusht wird (Config-Push bei `approved`-Heartbeat existiert bereits im heartbeat_handler).
-
-  **Option C (Error-Message verbessern — kein Code-Pfad-Change):**
-  Die Fehlermeldung `DEVICE_NOT_APPROVED` ist missverstaendlich wenn das Device zwar approved war, aber gerade offline ist. Ein dedizierter `DeviceOfflineError` (der bereits in `actuators.py:39` importiert ist) waere praziser.
-
-- **Empfehlung fuer diesen Fall:** Option A — Device starten/reconnecten. Das Systemverhalten ist korrekt.
-
----
-
-## 6. Betroffene Dateien
-
-| Datei | Zeile | Rolle |
-|-------|-------|-------|
-| `El Servador/god_kaiser_server/src/api/v1/actuators.py` | 450-451 | Device-Status-Guard (403-Ausloeser) |
-| `El Servador/god_kaiser_server/src/core/exceptions.py` | 586-601 | `DeviceNotApprovedError`-Definition |
-| `El Servador/god_kaiser_server/src/mqtt/handlers/lwt_handler.py` | 111 | Setzt Status auf `offline` via LWT |
-| `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py` | 204-236 | Setzt Status auf `online` bei Heartbeat |
-| `El Servador/god_kaiser_server/src/api/v1/sensors.py` | 599 | Identischer Guard (Referenz) |
+1. **CRITICAL — Sofort:** `debug.py:2235`: `cutoff.isoformat()` → `cutoff`. Eine Zeile, minimales Risiko.
+2. **HIGH — Zeitnah:** `sensor_handler.py:526`: VPD-Hook-Bedingung von `in ("sht31_temp", "sht31_humidity")` zu `== "sht31_temp"` aendern.
+3. **LOW — Optional:** DS18B20-Sensorconfig-Metadaten: `i2c_address=68` bei OneWire-Sensor ist inhaltlich falsch (kein Blocker, Daten werden korrekt gespeichert).
