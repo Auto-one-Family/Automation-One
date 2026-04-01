@@ -165,6 +165,7 @@ async function addActuator() {
     emit('added')
   } catch (err) {
     logger.error('Failed to add actuator', err)
+    toast.error('Aktor konnte nicht hinzugefügt werden')
   }
 }
 
