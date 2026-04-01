@@ -238,7 +238,7 @@ if (command.command.equalsIgnoreCase("ON")) {
 
 When `command` is `ON` and `duration_s > 0`, the ActuatorManager stores `command_duration_end_ms = millis() + (duration_s * 1000)` in `RegisteredActuator`. Each loop iteration, `processActuatorLoops()` checks: if `millis() >= command_duration_end_ms` and actuator is ON, it calls `controlActuatorBinary(gpio, false)` and clears the timer. This implements RuleConfigPanel "Auto-Abschaltung (Sek.)" behavior. Duration 0 = no auto-off (only device-level `runtime_protection.max_runtime_ms` applies).
 
-**Rule vs. Device:** The `duration` in the MQTT payload comes from the **Rule-Action** (`duration_seconds`), not from ActuatorConfig. Device `max_runtime_seconds` (ActuatorConfigPanel) is stored in DB but not sent to ESP. See `.claude/reference/logic/MAX_RUNTIME_ABGRENZUNG.md` for full documentation.
+**Rule vs. Device:** The `duration` in the MQTT payload comes from the **Rule-Action** (`duration_seconds`), not from ActuatorConfig. Device `max_runtime_ms` is sent via Config-Push (`safety_constraints.max_runtime` in seconds → converted to ms, SAFETY-P1 Mechanism C, 2026-03-30). Default: 3600000ms (1h). See `.claude/reference/logic/MAX_RUNTIME_ABGRENZUNG.md` for full documentation.
 
 **File:** `src/services/actuator/actuator_manager.cpp` (handleActuatorCommand, processActuatorLoops)
 

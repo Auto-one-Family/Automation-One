@@ -106,6 +106,13 @@ storageManager.putBool("id_generated", kaiser.id_generated);
 
 **Hinweis:** Der `subzone_ids` Key ist der Master-Index für alle konfigurierten Subzones. Er wird automatisch bei `saveSubzoneConfig()` und `removeSubzoneConfig()` aktualisiert.
 
+**Indexed Pattern (aktuell, Namespace `subzone_config`, `config_manager.cpp`):**
+
+| Key | Type | Default | Constraint | Description |
+|-----|------|---------|------------|-------------|
+| `sz_%d_sen` | uint8 | `0` | 0-255 | Gespeicherte Sensor-Anzahl pro Subzone (`%d` = Index 0–99) |
+| `sz_%d_act` | uint8 | `0` | 0-255 | Gespeicherte Aktor-Anzahl pro Subzone (`%d` = Index 0–99) |
+
 **Implementation:**
 
 ```cpp
@@ -164,6 +171,39 @@ String gpio_string = storageManager.getStringObj("subzone_" + subzone_id + "_gpi
 - `on_demand`: Sensor misst nur auf MQTT-Command (via `/sensor/{gpio}/command`)
 - `paused`: Sensor misst nicht (GPIO bleibt reserviert)
 - `scheduled`: Sensor misst auf Server-getriggerte Commands (Phase 2D)
+
+#### Offline Rules Configuration (Namespace: `offline`)
+
+**File:** `src/services/safety/offline_mode_manager.cpp`
+
+**SAFETY-P4 Keys (Lokale Hysterese-Regeln bei Netzwerkverlust):**
+
+| Key | Type | Default | Constraint | Description |
+|-----|------|---------|------------|-------------|
+| `ofr_count` | uint8_t | `0` | 0-8 | Anzahl gespeicherter Offline-Regeln |
+| `ofr_{i}_en` | uint8_t | `0` | 0/1 | Regel i aktiv (1) oder nicht (0) |
+| `ofr_{i}_agpio` | uint8_t | `255` | 0-39 | Aktor GPIO-Pin |
+| `ofr_{i}_sgpio` | uint8_t | `255` | 0-39 | Sensor GPIO-Pin |
+| `ofr_{i}_svtyp` | String | `""` | Max 24 chars | sensor_value_type (z.B. "sht31_humidity") |
+| `ofr_{i}_actb` | float | `0.0` | any | activate_below (Heating-Modus) |
+| `ofr_{i}_deaa` | float | `0.0` | any | deactivate_above (Heating-Modus) |
+| `ofr_{i}_acta` | float | `0.0` | any | activate_above (Cooling-Modus) |
+| `ofr_{i}_deab` | float | `0.0` | any | deactivate_below (Cooling-Modus) |
+
+**Hinweis:** i = 0..7. Nullwerte (0.0) = "nicht gesetzt". Modus-Erkennung: `activate_below != 0 || deactivate_above != 0` → Heating; `activate_above != 0 || deactivate_below != 0` → Cooling.
+
+**Change-Detection:** `saveOfflineRulesToNVS()` nutzt `memcmp` gegen Shadow-Copy — NVS wird nur beschrieben wenn sich Regeln geändert haben.
+
+**Boot-Load:** `loadOfflineRulesFromNVS()` in `setup()` nach `actuatorManager.begin()`, vor MQTT-Connect.
+
+#### Watchdog Diagnostics (Namespace: `wdt_diag`)
+
+**File:** `src/utils/watchdog_storage.cpp`
+
+| Key | Type | Default | Constraint | Description |
+|-----|------|---------|------------|-------------|
+| `hist` | String | `""` | Comma-separated UNIX epochs | Watchdog-Timeouts im rollierenden 24h-Fenster (Einträge nach gültiger Systemzeit / NTP) |
+| `snap` | String | `""` | JSON (ArduinoJson) | Letzter Diagnose-Snapshot vor Timeout (`handleWatchdogTimeout`) |
 
 #### Actuator Configuration (Namespace: `actuator_config`)
 
@@ -326,16 +366,18 @@ Das System unterstützt **18 MQTT Topic-Patterns** (nicht nur 13):
 - System: 6 Keys
 - Sensors: 1 + (8 × 20) = 161 Keys (bei 20 Sensoren, **+2 Keys Phase 2C: mode, interval**)
 - Actuators: 1 + (10 × 20) = 201 Keys (bei 20 Aktoren)
-- **TOTAL: ~380 Keys** (bei voller Auslastung)
+- Offline Rules: 1 + (8 × 8) = 65 Keys (bei 8 Regeln, **SAFETY-P4**)
+- **TOTAL: ~445 Keys** (bei voller Auslastung)
 
 **Estimated NVS-Usage:**
 - Strings (avg 30 bytes): ~240 Keys × 30 = 7.2 KB
 - Integers (4 bytes): ~100 Keys × 4 = 400 bytes
-- **TOTAL: ~8 KB** (bei voller Auslastung)
+- Offline Rules (8 × 8 floats + strings): ~1 KB
+- **TOTAL: ~9 KB** (bei voller Auslastung)
 
-**NVS-Partition:** 20 KB (Standard ESP32)  
-**Usage:** ~40% (bei 20 Sensoren + 20 Aktoren)  
-**Safe-Margin:** ✅ 60% frei
+**NVS-Partition:** 20 KB (Standard ESP32)
+**Usage:** ~45% (bei 20 Sensoren + 20 Aktoren + 8 Offline-Regeln)
+**Safe-Margin:** ✅ 55% frei
 
 ## Notes
 
@@ -344,4 +386,5 @@ Das System unterstützt **18 MQTT Topic-Patterns** (nicht nur 13):
 - Float-Keys nutzen Preferences putFloat/getFloat (4 Bytes)
 - Namespaces sind isoliert (kein Key-Konflikt zwischen Namespaces)
 - **WICHTIG:** Sensor/Actuator Configs sind Arrays mit dynamischer Länge (sensor_count/actuator_count)
+- **Watchdog:** Zusätzlich Namespace `wdt_diag` (`hist`, `snap`) — siehe Abschnitt Watchdog Diagnostics
 

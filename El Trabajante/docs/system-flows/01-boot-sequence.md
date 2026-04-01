@@ -991,7 +991,7 @@ LOG_INFO("╚══════════════════════�
 - Starts with an empty registry at boot; actuator definitions arrive via MQTT `/config`
 - Persists changes to NVS (`config_manager.saveActuatorConfig`) when configs are added or removed, but `setup()` does **not** load them back yet
 - Handles MQTT command routing to actuator drivers
-- Publishes actuator status (`buildActuatorStatusTopic`), acknowledgements (`buildActuatorResponseTopic`), and alerts (`buildActuatorAlertTopic`); the main loop also calls `actuatorManager.publishAllActuatorStatus()` every 30 s to refresh telemetry
+- Publishes actuator status (`buildActuatorStatusTopic`), acknowledgements (`buildActuatorResponseTopic`), and alerts (`buildActuatorAlertTopic`); the Communication-Task (SAFETY-RTOS M3) also calls `actuatorManager.publishAllActuatorStatus()` every 30 s to refresh telemetry (Legacy-`loop()` ohne RTOS-Tasks: wie früher in `main.cpp`)
 
 **Actuator Types Supported:**
 - Pump (ON/OFF)
@@ -1005,30 +1005,145 @@ LOG_INFO("╚══════════════════════�
 
 ---
 
-## Boot Sequence Complete
+### STEP 14: SAFETY-RTOS M1+M3 — Queues, Safety Task, Communication Task
 
-After Step 13, the ESP32 is fully initialized and enters the main loop:
+**File:** `src/main.cpp` (STEP „SAFETY-RTOS M1+M3“, nach Actuator-Init)
 
-**File:** `src/main.cpp` (lines 637-669)
+**Code:**
 
 ```cpp
-void loop() {
-  // Phase 2: Communication monitoring (with Circuit Breaker - Phase 6+)
-  wifiManager.loop();      // Monitor WiFi connection
-  mqttClient.loop();       // Process MQTT messages + heartbeat
-  
-  // Phase 4: Sensor measurements
-  sensorManager.performAllMeasurements();
+// ============================================
+// SAFETY-RTOS M1+M3: Queues + Safety Task + Communication Task
+// ============================================
+initActuatorCommandQueue();   // Must be before createSafetyTask()
+initSensorCommandQueue();
+initPublishQueue();           // M3: Core 1 → Core 0 publish queue (ESP-IDF publish path)
+createSafetyTask();
 
-  // Phase 5: Actuator maintenance
-  actuatorManager.processActuatorLoops();
-  static unsigned long last_actuator_status = 0;
-  if (millis() - last_actuator_status > 30000) {
-    actuatorManager.publishAllActuatorStatus();
-    last_actuator_status = millis();
+// Deregister Arduino loopTask from WDT — Safety-Task takes over WDT
+#ifndef WOKWI_SIMULATION
+esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
+#endif
+LOG_I(TAG, "[SAFETY-RTOS M1] Safety task created, loopTask deregistered from WDT");
+
+createCommunicationTask();    // M3: Core 0 — WiFi/MQTT/Debounce/Heartbeat-Trigger/Publish-Drain
+g_safety_rtos_tasks_created = true;
+LOG_I(TAG, "[SAFETY-RTOS M3] Communication task created on Core 0");
+```
+
+**Purpose:** Create a dedicated FreeRTOS task (Core 1, Priority 5) that runs sensor measurements, actuator loops, safety checks and WDT feeding independently of `loop()`
+
+**Safety Task (`src/tasks/safety_task.cpp`):**
+- Pinned to Core 1 (APP_CPU), Priority 5 (higher than loop() at 1)
+- 8 KB stack
+- Calls `esp_task_wdt_add(NULL)` on startup — registers itself with the WDT
+- Loop: `esp_task_wdt_reset()` → `sensorManager.performAllMeasurements()` → `actuatorManager.processActuatorLoops()` → `checkServerAckTimeout()` → queue drains → `healthMonitor.loop()` → SAFETY-P4 offline (`checkDelayTimer`, `evaluateOfflineRules()` when active) → `vTaskDelay(10ms)`
+- Logs stack highwater mark every ~60 s
+
+**Command Queues (`src/tasks/actuator_command_queue.h`, `sensor_command_queue.h`):**
+- `g_actuator_cmd_queue` / `g_sensor_cmd_queue` — size 10 each
+- MQTT command routing uses these queues (Core 0 → Core 1)
+
+**Publish Queue (`src/tasks/publish_queue.h`, M3, ESP-IDF path):**
+- `g_publish_queue` — Core 1 (Safety-Task) → Core 0; `MQTTClient::publish()` on Core 1 enqueues; Communication-Task calls `processPublishQueue()`
+
+**Communication Task (`src/tasks/communication_task.cpp`, M3):**
+- Pinned to Core 0 (PRO_CPU), Priority 3, 6144 B stack
+- Loop: `wifiManager.loop()` → `mqttClient.loop()` (NTP + heartbeat scheduling) → `processPublishQueue()` (ESP-IDF only) → debounce timers → periodic actuator status → `vTaskDelay(50ms)` (operational); provisioning/pending branches as in code
+
+**WDT Deregistration (CRITICAL):**
+- `esp_task_wdt_delete(xTaskGetCurrentTaskHandle())` removes the Arduino `loopTask` from WDT supervision
+- Without this: `loop()` no longer feeds WDT → 60 s reset
+- Skipped under `WOKWI_SIMULATION` (no hardware WDT)
+
+**Atomic Shared State (M1.5 / M2):**
+- `g_last_server_ack_ms` → `std::atomic<uint32_t>` (thread-safe between tasks)
+- `g_server_timeout_triggered` → `std::atomic<bool>`
+- `g_mqtt_connected` → `std::atomic<bool>` (ESP-IDF path; M2)
+
+**Dependencies:** All subsystems (Sensor, Actuator, HealthMonitor) must be initialized before `createSafetyTask()`
+
+---
+
+## Boot Sequence Complete
+
+After Step 14, the ESP32 is fully initialized with three concurrent execution contexts (plus ESP-IDF MQTT internal task when `MQTT_USE_ESP_IDF`):
+
+**`CommunicationTask` (`src/tasks/communication_task.cpp`, Core 0, Priority 3):**
+- `wifiManager.loop()` + `mqttClient.loop()` — WiFi/MQTT + NTP + heartbeat scheduling
+- `mqttClient.processPublishQueue()` — drains Core 1 → Core 0 publish queue (ESP-IDF only)
+- Disconnect-Debounce + MQTT Persistent Failure timers
+- `actuatorManager.publishAllActuatorStatus()` every 30 s
+- `handleWatchdogTimeout()` / boot-counter reset as in code
+
+**`loop()` (Core 1, loopTask, Priority 1):**
+- After full init: **minimal** — `vTaskDelay(1000)` only (Arduino `loop()` must not be empty)
+- If `setup()` returned before tasks were created (early provisioning / failure paths): **legacy** branch in `main.cpp` runs the former single-threaded WiFi/MQTT/provisioning logic (no Communication/Safety tasks)
+
+**`safetyTaskFunction()` (Core 1, SafetyTask, Priority 5):**
+- Sensor measurements, actuator loop timers, P1 ACK-timeout, health monitoring, SAFETY-P4 offline evaluation
+- WDT feeding — runs independently of MQTT blocking
+
+**File:** `src/main.cpp` + `src/tasks/safety_task.cpp` + `src/tasks/communication_task.cpp`
+
+```cpp
+// loop() — after full SAFETY-RTOS init (typical)
+void loop() {
+  vTaskDelay(pdMS_TO_TICKS(1000));
+}
+
+// communicationTaskFunction() — Core 0 (conceptual)
+void communicationTaskFunction(void* param) {
+  wifiManager.loop();
+  mqttClient.loop();
+  // processPublishQueue() wenn MQTT_USE_ESP_IDF
+  // debounce timers, actuator status 30s, ...
+  vTaskDelay(pdMS_TO_TICKS(50));
+}
+
+// safetyTaskFunction() — Core 1
+void safetyTaskFunction(void* param) {
+  esp_task_wdt_add(NULL);
+  for (;;) {
+    esp_task_wdt_reset();
+    sensorManager.performAllMeasurements();
+    actuatorManager.processActuatorLoops();
+    checkServerAckTimeout();
+    processActuatorCommandQueue();
+    processSensorCommandQueue();
+    healthMonitor.loop();
+    offlineModeManager.checkDelayTimer();
+    // evaluateOfflineRules when offline active ...
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
-  
-  // Phase 6+: System health monitoring (every 5 minutes)
+}
+```
+
+**Note (historical):** Before SAFETY-RTOS M1, `loop()` contained sensor/actuator/MQTT together. M1 splits Safety; M3 moves communication to Core 0. MQTT blocking during reconnect no longer stalls sensor reads or safety checks.
+
+```cpp
+// ORIGINAL loop() (pre-M1) — kept here for reference only:
+// wifiManager.loop();
+// mqttClient.loop();
+// sensorManager.performAllMeasurements();
+// actuatorManager.processActuatorLoops();
+// ... SAFETY-P1 Mechanism D inline ...
+// healthMonitor.loop();
+// delay(10);
+```
+
+```cpp
+// CURRENT loop() (post-M1):
+// wifiManager.loop();
+// mqttClient.loop();
+// ... timers only ...
+// actuatorManager.publishAllActuatorStatus();
+// offlineModeManager.checkDelayTimer();
+// delay(10);
+```
+
+```cpp
+// Pre-M1 start of loop():
   static unsigned long last_health_check = 0;
   if (millis() - last_health_check >= 300000) {
     last_health_check = millis();
@@ -1126,10 +1241,27 @@ void loop() {
 **Modules:**
 - Safety Controller
 - Actuator Manager
+- Offline Mode Manager (SAFETY-P4, NVS rule load)
 
 **Critical Success Criteria:**
 - Safety system operational
 - Actuator Manager ready for commands
+
+---
+
+### Phase 6: SAFETY-RTOS M1 (Step 14)
+
+**Notes:** FreeRTOS Safety Task decouples sensor/actuator/safety execution from `loop()`. MQTT blocking (TCP-Timeout up to 30 s) no longer freezes safety checks. Queues are infrastructure for future MQTT migration (M2/M3).
+
+**Modules:**
+- Actuator Command Queue (`src/tasks/actuator_command_queue`)
+- Sensor Command Queue (`src/tasks/sensor_command_queue`)
+- Safety Task (`src/tasks/safety_task`, Core 1, Priority 5, 8 KB Stack)
+
+**Critical Success Criteria:**
+- `[SAFETY] Safety task running on core 1` appears in Serial log
+- loopTask deregistered from WDT (`esp_task_wdt_delete`)
+- No double-call of sensor/actuator functions (removed from loop)
 
 ---
 
@@ -1151,6 +1283,7 @@ Boot sequence is successful when:
 - ✅ Network subsystems print `WiFi connected successfully` and `MQTT connected successfully` (otherwise the device keeps running offline)
 - ✅ `sensorManager` and `actuatorManager` report successful initialization (sensors may additionally log how many configs were re-applied)
 - ✅ GPIO Manager reports “Safe-Mode initialization complete” before any other hardware driver starts
+- ✅ `[SAFETY] Safety task running on core 1` appears after Phase 5 (SAFETY-RTOS M1)
 
 ---
 

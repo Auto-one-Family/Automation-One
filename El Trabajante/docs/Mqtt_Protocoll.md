@@ -1966,6 +1966,128 @@ mosquitto_pub -h localhost \
 
 ---
 
+### 8. system/heartbeat/ack (Server→ESP) — SAFETY-P5
+
+**Topic:** `kaiser/god/esp/{esp_id}/system/heartbeat/ack`
+
+**Richtung:** Server → ESP
+**QoS:** 1 (at least once) — upgraded from QoS 0 (SAFETY-P5)
+**Retain:** false
+
+**Payload (success):**
+```json
+{
+  "status": "ok",
+  "config_available": false,
+  "server_time": 1234567890
+}
+```
+
+**Payload (config pending):**
+```json
+{
+  "status": "ok",
+  "config_available": true,
+  "server_time": 1234567890
+}
+```
+
+**Payload (error — SAFETY-P5 Fix-4):**
+```json
+{
+  "status": "error",
+  "error": "Validation failed: missing esp_id",
+  "server_time": 1234567890
+}
+```
+
+**Status-Werte:**
+
+| Status | Bedeutung | ESP32-Reaktion |
+|--------|-----------|----------------|
+| `ok` | Heartbeat verarbeitet | P1-Timer zurücksetzen |
+| `ok` + `config_available: true` | Config-Update wartet | P1-Timer zurücksetzen, Config-Pull auslösen |
+| `error` | Validierungsfehler | P1-Timer zurücksetzen (Fehler loggen, kein Safe-State) |
+
+**SAFETY-P5 Hinweise:**
+- ACK wird **vor** DB-Operationen gesendet (`config_available` ist dabei immer `false`)
+- Falls anschließend eine pending Config gefunden wird, folgt eine **zweite ACK** mit `config_available: true`
+- Error-ACK verhindert P1-False-Positives bei Validierungsfehlern auf Server-Seite
+
+**Code-Referenz:**
+Server: `src/mqtt/handlers/heartbeat_handler.py` → `_send_heartbeat_ack()`, `_send_heartbeat_error_ack()`
+ESP32: `src/main.cpp` → `routeIncomingMessage()` → heartbeat/ack Handler
+
+---
+
+### 9. server/status (Server→ALL ESPs — SAFETY-P5)
+
+**Topic:** `kaiser/god/server/status`
+
+**Richtung:** Server → Alle ESPs (server-wide, kein `{esp_id}`)
+**QoS:** 1 (at least once)
+**Retain:** true — ESPs erhalten letzten Status direkt nach Connect
+
+**Payload (online):**
+```json
+{
+  "status": "online",
+  "timestamp": 1234567890
+}
+```
+
+**Payload (offline — graceful shutdown):**
+```json
+{
+  "status": "offline",
+  "timestamp": 1234567890,
+  "reason": "graceful_shutdown"
+}
+```
+
+**Payload (offline — LWT / Crash):**
+```json
+{
+  "status": "offline",
+  "timestamp": 1234567890,
+  "reason": "unexpected_disconnect"
+}
+```
+
+**Timing:**
+
+| Ereignis | Verzögerung | Mechanismus |
+|----------|-------------|-------------|
+| Server-Start | ~0s | `_on_connect()` → sofort publish |
+| Graceful Shutdown | ~0s | `lifespan()` → vor `disconnect()` |
+| Server-Crash | ~90s | MQTT-Broker LWT (1.5× keepalive=60s) |
+
+**ESP32-Reaktion:**
+
+| Status | ESP32-Aktion |
+|--------|-------------|
+| `offline` | Rule-Count-Guard: Offline-Rules > 0 → P4 State Machine; sonst `setAllActuatorsToSafeState()` + `offlineModeManager.onDisconnect()` |
+| `online` | P1-Timer zurücksetzen (`g_last_server_ack_ms`), Timeout-Flag löschen, `offlineModeManager.onServerAckReceived()` |
+
+**Watchdog-Hierarchie (L1→L5):**
+
+| Level | Mechanismus | Timeout |
+|-------|-------------|---------|
+| L1 | Keep-Alive (TCP) | 60s |
+| L2 | **Server-LWT** (dieses Topic) | ~90s |
+| L3 | Heartbeat + ACK (QoS 1) | 60s |
+| L4 | P1 ACK-Timeout | 120s |
+| L5 | P4 State Machine | 30s |
+
+**Code-Referenz:**
+Server LWT-Setup: `src/mqtt/client.py` → `connect()` → `will_set()`
+Server Online-Publish: `src/mqtt/client.py` → `_on_connect()`
+Server Offline-Publish (graceful): `src/main.py` → `lifespan()` shutdown
+Topic-Konstante: `src/core/constants.py` → `MQTT_TOPIC_SERVER_STATUS`
+ESP32 Handler: `El Trabajante/src/main.cpp` → `routeIncomingMessage()` → `/server/status` Block
+
+---
+
 ## Hierarchische Topics (Zone-Master-Modus)
 
 ### Übersicht
@@ -2680,32 +2802,22 @@ def on_message(client, userdata, msg):
 
 **ESP32 LWT-Configuration:**
 
-**Topic:** `kaiser/god/esp/{esp_id}/status`
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/will` (TopicBuilder: Heartbeat-Topic mit `/heartbeat` → `/will`)
 
 **Payload:**
 ```json
 {
   "status": "offline",
-  "ts": 1735818000,
-  "reason": "connection_lost"
+  "esp_id": "ESP_12AB34CD",
+  "reason": "unexpected_disconnect",
+  "timestamp": 1735818000
 }
 ```
 
 **QoS:** 1  
 **Retained:** true
 
-**ESP32-Implementierung:**
-```cpp
-void MQTTClient::connect(const MQTTConfig& config) {
-    // Last-Will-Testament
-    String lwt_topic = "kaiser/god/esp/" + config.esp_id + "/status";
-    String lwt_payload = "{\"status\":\"offline\",\"ts\":" + String(time(nullptr)) + ",\"reason\":\"connection_lost\"}";
-    
-    mqtt_client.setWill(lwt_topic.c_str(), lwt_payload.c_str(), true, 1);
-    
-    // Connect...
-}
-```
+**ESP32-Implementierung:** `MQTTClient::connect()` in `src/services/communication/mqtt_client.cpp` — LWT wird für ESP-IDF-MQTT (`esp_mqtt_client_config_t`: `lwt_*`) und für PubSubClient (`mqtt_.connect(..., lwt_topic, ...)`) gesetzt. Siehe auch `.claude/reference/api/MQTT_TOPICS.md` §3.9.
 
 **God-Kaiser-Verhalten:**
 1. Empfängt LWT-Message (ESP32 offline)

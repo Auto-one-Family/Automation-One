@@ -1,17 +1,22 @@
 # MQTT Client API Specification
 ## services/communication/mqtt_client.h/cpp
 
-**Version:** 2.0 (Updated for Phase 2 Implementation)  
+**Version:** 2.1 (SAFETY-P4 Disconnect vs. sofortiges Safe-State, 2026-03-31)  
 **Zweck:** MQTT-Client-Wrapper für ESP32 mit Auto-Reconnect, Offline-Buffering und Heartbeat-System  
 **Status:** ✅ IMPLEMENTED (Phase 2)
+
+**SAFETY-RTOS M2:** Build-Flag `MQTT_USE_PUBSUBCLIENT` (siehe `platformio.ini`) — wenn gesetzt: PubSubClient-Pfad (Offline-Buffer, blocking reconnect). Wenn NICHT gesetzt (Default): **ESP-IDF MQTT** (`#include <mqtt_client.h>` aus dem Arduino-Framework, nicht der lokale Header, Non-Blocking, eigener FreeRTOS-Task). `isConnected()` liest im ESP-IDF-Pfad `g_mqtt_connected` (atomic). Dieses Dokument beschreibt weiterhin primär den PubSubClient-Pfad; Abweichungen sind in `mqtt_client.h`/`mqtt_client.cpp` nach `#ifndef MQTT_USE_PUBSUBCLIENT` dokumentiert.
+
+**SAFETY-RTOS M3:** Im normalen Betrieb (volles `setup()` mit Safety-/Communication-Tasks) ruft **`tasks/communication_task.cpp`** periodisch `mqttClient.loop()` und (nur bei `MQTT_USE_ESP_IDF`) `mqttClient.processPublishQueue()` auf — **nicht** `main.cpp::loop()`. Letzteres ist nach vollem Init minimal (`vTaskDelay`). Bei frühem `setup()`-Return ohne Tasks gilt weiterhin ein Legacy-Zweig in `main.cpp` mit WiFi/MQTT in der Arduino-`loop()`.
 
 ---
 
 ## Abhängigkeiten
 
 ```cpp
-#include <PubSubClient.h>           // Arduino MQTT Library
-#include <WiFiClient.h>             // ESP32 WiFi Client
+// Abhängig vom Build: siehe mqtt_client.h — entweder ESP-IDF MQTT oder:
+#include <PubSubClient.h>           // Arduino MQTT Library (Fallback)
+#include <WiFiClient.h>             // ESP32 WiFi Client (nur PubSubClient-Pfad)
 #include <Arduino.h>
 #include <functional>               // std::function for callbacks
 #include "utils/logger.h"           // Logging (Phase 1)
@@ -52,10 +57,11 @@ struct MQTTMessage {
 ```
 
 **Offline Buffer:**
-- Fixed Array: `MQTTMessage offline_buffer_[100]`
+- Fixed Array: `MQTTMessage offline_buffer_[MAX_OFFLINE_MESSAGES]`
 - Circular Buffer (FIFO)
-- Max 100 Messages
+- Max 25 Messages (`MAX_OFFLINE_MESSAGES = 25`, reduziert von 100 fuer Heap-Einsparung)
 - Processed on reconnection
+- Nur im PubSubClient-Pfad — ESP-IDF-Pfad nutzt internen Outbox
 
 ---
 
@@ -693,7 +699,7 @@ mqttClient.subscribe("kaiser/god/esp/ESP_12AB34CD/heartbeat/ack");      // QoS 0
 ---
 
 #### `void setCallback(std::function<void(const String&, const String&)> callback)`
-**Beschreibung:** Setzt Callback für eingehende Messages  
+**Beschreibung:** Setzt Callback für eingehende Messages
 **Parameter:**
 - `callback`: Lambda/Function mit (topic, payload)
 
@@ -701,6 +707,26 @@ mqttClient.subscribe("kaiser/god/esp/ESP_12AB34CD/heartbeat/ack");      // QoS 0
 - Callback wird bei jedem empfangenen Message aufgerufen
 - WICHTIG: Callback MUSS schnell sein (nicht blockierend)
 - Lange Verarbeitung → in Task auslagern
+
+---
+
+#### `void setOnConnectCallback(std::function<void()> callback)` *(SAFETY-P1 2026-03-30)*
+**Beschreibung:** Setzt Callback der nach jedem erfolgreichen MQTT-Connect ausgelöst wird (initial + reconnect)
+**Parameter:**
+- `callback`: Parameterloser Callback
+
+**Verhalten:**
+- Wird in `connectToBroker()` nach `processOfflineBuffer()` aufgerufen
+- Genutzt für: Re-Subscribe aller Topics (Mech A), Server-ACK-Reset (Mech D), State-Sync nach Reconnect (Mech E)
+- Callback wird VOR `return true` ausgeführt — MQTT ist garantiert verbunden
+
+**Beispiel:**
+```cpp
+mqttClient.setOnConnectCallback([]() {
+    subscribeToAllTopics();
+    g_last_server_ack_ms = millis();
+});
+```
 
 **Beispiel:**
 ```cpp
@@ -791,15 +817,15 @@ void MQTTClient::publishHeartbeat() {
 
 **QoS:** 0 (at most once - heartbeat doesn't need guaranteed delivery)
 
-**Automatic Publishing:** Wird automatisch in `loop()` aufgerufen wenn verbunden
+**Automatic Publishing:** Wird über `MQTTClient::loop()` → `publishHeartbeat()` getriggert wenn verbunden; im normalen Betrieb läuft das im **Communication-Task**, nicht in `main.cpp::loop()`.
 
 ---
 
 ### Monitoring
 
 #### `void loop()`
-**Beschreibung:** MUSS in main loop() aufgerufen werden  
-**File:** `src/services/communication/mqtt_client.cpp` (lines 413-428)
+**Beschreibung:** MUSS regelmässig aufgerufen werden — im **normalen Betrieb** aus `communication_task.cpp` (Core 0); bei Legacy-Boot ohne RTOS-Tasks aus `main.cpp`.  
+**File:** `src/services/communication/mqtt_client.cpp`
 
 **Frequenz:** Jede Iteration (non-blocking)  
 
@@ -832,16 +858,16 @@ void MQTTClient::loop() {
 - Wenn nicht verbunden:
   - Versucht Reconnection via `reconnect()` (mit Exponential Backoff und Circuit Breaker)
 
-**Beispiel:**
+**Beispiel (Zusammen mit WiFi — typisch Communication-Task / früher main loop):**
 ```cpp
-void loop() {
+void communicationTaskFunction(void* param) {
     wifiManager.loop();
-    mqttClient.loop();  // REQUIRED!
-    // ... other code
+    mqttClient.loop();  // REQUIRED für Heartbeat + NTP (ESP-IDF: kein blockierendes reconnect hier)
+    // ...
 }
 ```
 
-**Wichtig:** `loop()` ist **non-blocking** - blockiert nicht länger als ~10-50ms (abhängig von MQTT-Verarbeitung).
+**Wichtig:** `MQTTClient::loop()` ist **non-blocking** im ESP-IDF-Pfad (Reconnect im MQTT-Event-Task). Im PubSubClient-Pfad kann Reconnect blockieren — daher SAFETY-RTOS-Trennung.
 
 ---
 
@@ -899,10 +925,14 @@ void loop() {
 ---
 
 ### `void handleDisconnection()`
-**Beschreibung:** Behandelt Verbindungsabbruch  
+**Beschreibung:** Behandelt Verbindungsabbruch (**nur PubSubClient-Pfad**, z. B. Seeed/Wokwi)
 **Verhalten:**
+- Ruft immer `offlineModeManager.onDisconnect()` (SAFETY-P4: 30s Grace, State-Machine)
+- **Aktoren:** `setAllActuatorsToSafeState()` nur wenn `offlineModeManager.getOfflineRuleCount() == 0`; bei geladenen Offline-Rules bleibt der Zustand unverändert bis P4 `OFFLINE_ACTIVE` und `evaluateOfflineRules()`
 - Loggt Disconnection (nur einmal)
 - Triggert Reconnection
+
+**Hinweis ESP-IDF:** Bei `MQTT_EVENT_DISCONNECTED` erfolgt kein direkter Aufruf von `handleDisconnection()`; stattdessen `onDisconnect()` auf Core 0 und `NOTIFY_MQTT_DISCONNECTED` an den Safety-Task — gleiche Regel für sofortiges Safe-State vs. Delegation an P4 (`tasks/safety_task.cpp`).
 
 ---
 
@@ -1204,7 +1234,8 @@ void loop() {
 ## Integration mit System
 
 ### Verwendet von
-- `src/main.cpp` → Initialisierung und `loop()` Aufruf
+- `src/main.cpp` → Initialisierung; `mqttClient.loop()` nach vollem Init im **Communication-Task**, sonst Legacy-`loop()`-Zweig
+- `src/tasks/communication_task.cpp` → periodischer `mqttClient.loop()` + `processPublishQueue()` (ESP-IDF)
 - `services/sensor/sensor_manager.cpp` → Sensor-Data publishing (Phase 4)
 - `services/actuator/actuator_manager.cpp` → Actuator-Status/-Response/-Alert publishing + Command subscription (Phase 5)
 
@@ -1277,7 +1308,7 @@ ERROR_MQTT_PAYLOAD_INVALID = 3016   // MQTT payload invalid
 
 ### Loop-Call Requirements
 
-**CRITICAL:** `mqttClient.loop()` MUSS in `main.cpp::loop()` aufgerufen werden.
+**CRITICAL:** `mqttClient.loop()` MUSS regelmässig laufen — nach **SAFETY-RTOS M3** im **Communication-Task** (`communication_task.cpp`, typisch alle 50 ms operational), nicht in `main.cpp::loop()`. Sensor-/Aktor-Arbeit läuft im **Safety-Task** (`safety_task.cpp`).
 
 **Frequenz-Requirements:**
 - **Minimum:** 10 Hz (alle 100ms) für reliable Message-Processing
@@ -1287,19 +1318,19 @@ ERROR_MQTT_PAYLOAD_INVALID = 3016   // MQTT payload invalid
 **Timing-Verhalten:**
 - **QoS 0:** Non-blocking, sofortiger Return (~<1ms)
 - **QoS 1:** Wartet auf PUBACK (typisch 5-50ms, max 5s Timeout)
-- **Callback:** Läuft im loop()-Context (MUSS schnell sein, nicht blockierend!)
+- **Callback:** MQTT-Event-/PubSub-Context — MUSS schnell sein, nicht blockierend
 
-**Best Practice:**
+**Best Practice (aktuell):**
 ```cpp
-void loop() {
-    mqttClient.loop();         // Process MQTT (non-blocking)
-    sensorManager.loop();      // Sensor measurements
-    actuatorManager.processActuatorLoops();  // Actuator processing
-    delay(20);                 // 50 Hz loop frequency
-}
+// Communication-Task (Core 0) — siehe communication_task.cpp
+wifiManager.loop();
+mqttClient.loop();
+// processPublishQueue() wenn MQTT_USE_ESP_IDF
+
+// Safety-Task (Core 1) — Sensoren/Aktoren, nicht in mqttClient.loop()
 ```
 
-**Warnung:** Lange Callback-Operationen (>100ms) blockieren MQTT-Processing! Lagere in FreeRTOS-Tasks aus wenn nötig.
+**Warnung:** Lange Callback-Operationen (>100ms) blockieren MQTT-Processing! Schweres Arbeiten liegt im Safety-Task oder in Queues.
 
 ---
 
