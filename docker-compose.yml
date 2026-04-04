@@ -75,6 +75,26 @@ services:
     restart: unless-stopped
 
   # ============================================
+  # NTP Server (for ESP32 time synchronization)
+  # ============================================
+  ntp:
+    image: cturra/ntp:latest
+    container_name: automationone_ntp
+    restart: unless-stopped
+    ports:
+      - "123:123/udp"
+    environment:
+      - NTP_SERVERS=ptbtime1.ptb.de,ptbtime2.ptb.de,pool.ntp.org
+      - LOG_LEVEL=0
+    cap_add:
+      - SYS_TIME
+    tmpfs:
+      - /etc/chrony:rw
+      - /run/chrony:rw
+    networks:
+      - automationone-net
+
+  # ============================================
   # God-Kaiser Server (FastAPI Backend)
   # ============================================
   el-servador:
@@ -326,6 +346,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
+      # Host-Machine-ID: verringert cAdvisor-Warnungen zu fehlender UUID/machine-id im Container
+      - /etc/machine-id:/etc/machine-id:ro
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1"]
       interval: 15s
