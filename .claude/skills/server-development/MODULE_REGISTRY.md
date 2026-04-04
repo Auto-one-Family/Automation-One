@@ -14,17 +14,20 @@ description: Vollständige API-Referenz für God-Kaiser Server Module
 
 ### 1.1 LogicEngine
 
-**Datei:** `src/services/logic_engine.py` (833 Zeilen)
+**Datei:** `src/services/logic_engine.py` (1502 Zeilen)
 
 | Methode | Parameter | Return | Beschreibung |
 |---------|-----------|--------|--------------|
 | `start()` | - | `None` | Startet Engine + Scheduler |
 | `stop()` | - | `None` | Stoppt Engine graceful |
 | `evaluate_sensor_data()` | `esp_id: str, gpio: int, value: float, sensor_type: str` | `None` | Evaluiert Rules für Sensor-Event |
-| `evaluate_timer_triggered_rules()` | - | `None` | Evaluiert time_window Rules (periodisch) |
+| `evaluate_timer_triggered_rules()` | - | `None` | Evaluiert time_window Rules inkl. Compound (Zeit + Sensor/Hysterese) mit vollem Sensor-Context (R1-FIX2) |
 | `_evaluate_rule()` | `rule, trigger_data, logic_repo` | `None` | Einzelne Rule evaluieren + ausführen |
 | `_check_conditions()` | `conditions, context` | `bool` | Conditions prüfen (modulare Evaluatoren) |
-| `_execute_actions()` | `actions, trigger_data, rule_id, rule_name` | `None` | Actions ausführen (mit WS-Broadcast) |
+| `_execute_actions()` | `actions, trigger_data, rule_id, rule_name` | `None` | Actions ausführen — Pre-Check ESP online vor Executor-Aufruf: offline → WARNING + Backoff (`_offline_esp_skip`), online → Executor + WS-Broadcast |
+| `_load_cross_sensor_values()` | `trigger_conditions, trigger_data, session` | `dict` | Letzte Sensor-Werte für Cross-Sensor-Conditions laden (sensor/sensor_threshold/hysteresis) |
+| `_extract_sensor_refs_from_conditions()` | `conditions` | `list[dict]` | Alle Sensor-Referenzen aus Conditions extrahieren (sensor/hysteresis/compound, rekursiv) |
+| `_load_sensor_values_for_timer()` | `rule, session` | `dict` | Sensor-Werte für Timer-Phase-1-Context laden (Staleness-Filter: 5min) |
 
 **Condition Evaluators:**
 
@@ -34,6 +37,7 @@ description: Vollständige API-Referenz für God-Kaiser Server Module
 | TimeConditionEvaluator | `time_window` / `time` | `start_time` (HH:MM), `end_time` (HH:MM), `days_of_week` |
 | HysteresisConditionEvaluator | `hysteresis` | `esp_id`, `gpio`, `sensor_type`, `activate_above`, `deactivate_below`, `activate_below?`, `deactivate_above?` |
 | CompoundConditionEvaluator | `compound` | `logic` (AND/OR), `conditions[]` |
+| DiagnosticsConditionEvaluator | `diagnostics_status` | `check_name` (mqtt/database/…), `expected_status` (healthy/warning/critical/error), `operator` (==, !=) — liest letzten DiagnosticReport aus DB |
 
 **Action Executors:**
 
@@ -43,6 +47,8 @@ description: Vollständige API-Referenz für God-Kaiser Server Module
 | DelayActionExecutor | `delay` | `seconds` (1-3600) |
 | NotificationActionExecutor | `notification` | `channel`, `target`, `message_template` |
 | SequenceActionExecutor | `sequence` | `description?`, `abort_on_failure?`, `steps[]` (name, action, delay_seconds?) |
+| DiagnosticsActionExecutor | `run_diagnostic` | `check_name?` (optional — fehlt → Full Diagnostic via `DiagnosticsService`) |
+| PluginActionExecutor | `plugin` / `autoops_trigger` | `plugin_id` (AutoOps Plugin-Name), `config?` (Override-Dict) — via `PluginService.execute_plugin()` |
 
 ---
 
@@ -100,7 +106,7 @@ class ValidationResult:
 | `create_config()` | `esp_id, config: ActuatorConfigCreate` | `ActuatorConfig` | Neue Actuator-Config |
 | `update_config()` | `actuator_id, config: ActuatorConfigUpdate` | `ActuatorConfig` | Config aktualisieren |
 | `delete_config()` | `actuator_id: int` | `bool` | Config löschen |
-| `log_command()` | `esp_id, gpio, command, response` | `ActuatorHistory` | Command in History loggen |
+| `log_command()` | `esp_id, gpio, actuator_type, command_type, value, success, issued_by?, error_message?, timestamp?, metadata?, data_source?` | `ActuatorHistory` | Command in History loggen |
 
 ---
 
@@ -154,7 +160,7 @@ class ValidationResult:
 
 ### 1.8 ConfigBuilder
 
-**Datei:** `src/services/config_builder.py` (482 Zeilen)
+**Datei:** `src/services/config_builder.py` (749 Zeilen)
 
 | Methode | Parameter | Return | Beschreibung |
 |---------|-----------|--------|--------------|
@@ -162,6 +168,16 @@ class ValidationResult:
 | `build_sensor_config()` | `sensor: SensorConfig` | `dict` | Einzelne Sensor-Config |
 | `build_actuator_config()` | `actuator: ActuatorConfig` | `dict` | Einzelne Actuator-Config |
 | `build_zone_assignment()` | `esp_id, zone_id, zone_name` | `dict` | Zone-Assignment Payload |
+
+**LE-01 Erweiterungen (_extract_offline_rule):**
+
+| Feature | Beschreibung |
+|---------|--------------|
+| `sensor_threshold` → Hysterese | Einfache `>`, `<`, `>=`, `<=` Conditions werden mit `_get_default_deadband()` in Hysterese konvertiert (z.B. Temperatur ±2°C, Feuchte ±5%) |
+| `time_filter` Extraktion | AND-Compound-Regeln mit `time_window`/`time` Condition → `time_filter: {enabled, start_hour, start_minute, end_hour, end_minute}` im JSON |
+| UTC-Konvertierung | `_convert_to_utc(hour, minute, timezone_str)` via `zoneinfo` — lokale Zeitzone → UTC vor Config-Push |
+| P4-GUARD soil_moisture | `soil_moisture` normalisiert zu `moisture` → in `CALIBRATION_REQUIRED_SENSOR_TYPES`; Firmware-Guard nutzt `strncmp("soil", 4)` als Defense-in-Depth |
+| OR-Rejection | OR-Compound-Regeln mit mehreren Conditions → `return None` (nicht abbildbar als einzelne ESP-Rule) |
 
 ---
 
@@ -328,6 +344,67 @@ ACK-gesteuerte MQTT-Kommunikation für kritische Operationen (Zone/Subzone-Assig
 
 ---
 
+### 1.19 StateAdoptionService (SAFETY-P5/CP)
+
+**Datei:** `src/services/state_adoption_service.py` (~142 Zeilen)
+
+Per-ESP Reconnect-Lifecycle-Koordination: ADOPTING → ADOPTED → delta_enforced. Verhindert doppelte Actuator-Commands nach Reconnect.
+
+| Methode | Parameter | Return | Beschreibung |
+|---------|-----------|--------|--------------|
+| `start_reconnect_cycle()` | `esp_id: str, last_offline_seconds: float?` | `None` | Startet neuen Adoptions-Zyklus (Phase: ADOPTING) |
+| `record_adopted_state()` | `esp_id, gpio, state, value` | `None` | Speichert beobachteten Aktor-State während Adoption |
+| `mark_adoption_completed()` | `esp_id: str` | `bool` | Setzt Phase auf ADOPTED |
+| `is_adoption_completed()` | `esp_id: str` | `bool` | True wenn ADOPTED (oder kein Zyklus aktiv) |
+| `is_adopting()` | `esp_id: str` | `bool` | True während ADOPTING |
+| `get_adopted_state()` | `esp_id, gpio` | `Optional[AdoptedActuatorState]` | Beobachteter State für GPIO |
+| `clear_cycle()` | `esp_id: str` | `None` | Zyklus entfernen |
+| `snapshot()` | `esp_id: str` | `Optional[dict]` | Aktueller Zyklus-Snapshot (Debug) |
+
+**Singleton:** `get_state_adoption_service()` — prozess-global, asyncio.Lock-gesichert.
+
+---
+
+### 1.20 RuntimeStateService (P1.2/P1.3)
+
+**Datei:** `src/services/runtime_state_service.py` (~173 Zeilen)
+
+Prozess-weite Runtime-Mode-Zustandsmaschine mit Readiness-Guards.
+
+**RuntimeMode Enum:** `COLD_START` → `WARMING_UP` → `NORMAL_OPERATION` / `DEGRADED_OPERATION` / `RECOVERY_SYNC` → `SHUTDOWN_DRAIN`
+
+| Methode | Parameter | Return | Beschreibung |
+|---------|-----------|--------|--------------|
+| `transition()` | `target: RuntimeMode, reason: str` | `None` | Zustandsübergang (erlaubte Transitionen validiert) |
+| `set_logic_liveness()` | `alive: bool` | `None` | LogicEngine-Liveness setzen |
+| `set_recovery_completed()` | `completed: bool` | `None` | Recovery-Status setzen |
+| `set_worker_health()` | `worker_name: str, healthy: bool` | `None` | Worker-Health setzen (mqtt_subscriber, websocket_manager, inbound_replay_worker) |
+| `set_degraded_reason()` | `reason_code: str, active: bool` | `None` | Degraded-Reason hinzufügen/entfernen |
+| `snapshot()` | - | `dict` | Aktueller State inkl. ready-Flag, checks, transitions |
+
+**Singleton:** `get_runtime_state_service()` — prozess-global.
+**Integration:** `/health/ready` und `/health/detailed` nutzen `snapshot()` für Readiness-Check.
+
+---
+
+### 1.21 InboundInboxService (P0.3)
+
+**Datei:** `src/services/inbound_inbox_service.py` — Durable Inbox für kritische MQTT-Events.
+
+File-backed JSONL Append-Only mit atomarer Rewrite-on-Ack Semantik. Dedup via SHA-256 Content-Hash. Replay-fähig nach Restart.
+
+| Methode | Parameter | Return | Beschreibung |
+|---------|-----------|--------|--------------|
+| `append()` | `topic, payload, correlation_id?, source?` | `str` | Event einfügen, gibt event_id zurück |
+| `list_pending()` | `limit?` | `list[dict]` | Alle pending Events |
+| `ack()` | `event_id: str` | `bool` | Event als verarbeitet markieren |
+| `replay_pending()` | - | `list[dict]` | Alle pending Events für Replay |
+
+**Singleton:** `get_inbound_inbox_service()` — prozess-global.
+**Trigger:** `Subscriber._is_critical_topic()` entscheidet, welche Topics in die Inbox geschrieben werden.
+
+---
+
 ## 2. MQTT Topics & Payloads
 
 ### 2.1 Subscribed Topics (Server empfängt)
@@ -344,6 +421,7 @@ ACK-gesteuerte MQTT-Kommunikation für kritische Operationen (Zone/Subzone-Assig
 | `kaiser/{id}/esp/+/subzone/ack` | 1 | SubzoneAckHandler | `esp_id`, `subzone_id`, `action`, `success` |
 | `kaiser/{id}/esp/+/system/will` | 1 | LWTHandler | `esp_id`, `status`, `reason` |
 | `kaiser/{id}/esp/+/system/error` | 1 | ErrorEventHandler | `esp_id`, `error_code`, `severity`, `message` |
+| `kaiser/{id}/esp/+/system/intent_outcome` | 1 | IntentOutcomeHandler | `intent_id`, `correlation_id`, `flow`, `outcome`, `code`, `reason`, `retryable`, `epoch?` |
 
 ### 2.2 Published Topics (Server sendet)
 
@@ -526,6 +604,7 @@ Wichtige Endpoints:
 | sensor_type_defaults | /v1/sensor-type-defaults | 6 | Operator+ | Sensor-Type Defaults CRUD |
 | sequences | /v1/sequences | 4 | Operator+ | Actuator Sequence Management |
 | device_context | /v1/device-context | 3 | Operator+ | Multi-Zone Device Scope (T13-R2) |
+| intent_outcomes | /v1/intent-outcomes | 2 | Active | Intent/Outcome Contract Visibility (P0.2) |
 
 ---
 
@@ -540,7 +619,7 @@ Wichtige Endpoints:
 | **ActuatorConfig** | `actuator_configs` | `id (PK)`, `esp_id (FK)`, `gpio`, `actuator_type`, `name`, `subzone_id`, `active`, `critical`, `inverted`, `default_state`, `default_pwm` | → ActuatorState, ActuatorHistory |
 | **SensorData** | `sensor_data` | `id (PK)`, `sensor_id (FK)`, `esp_id (FK SET NULL)`, `raw_value`, `processed_value`, `unit`, `quality`, `device_name`, `zone_id`, `subzone_id`, `timestamp` | - |
 | **ActuatorState** | `actuator_states` | `id (PK)`, `actuator_id (FK)`, `state`, `value`, `pwm`, `runtime_ms`, `emergency`, `last_command`, `error_message`, `updated_at` | - |
-| **ActuatorHistory** | `actuator_history` | `id (PK)`, `actuator_id (FK)`, `command`, `value`, `success`, `response`, `timestamp` | - |
+| **ActuatorHistory** | `actuator_history` | `id (PK)`, `esp_id (FK SET NULL)`, `gpio`, `actuator_type`, `command_type`, `value`, `issued_by`, `success`, `error_message`, `timestamp`, `command_metadata (JSON)`, `data_source` | - |
 
 ### 4.2 Logic Models
 
@@ -548,6 +627,8 @@ Wichtige Endpoints:
 |-------|---------|--------|
 | **CrossESPLogic** | `cross_esp_logic` | `id (PK UUID)`, `rule_name (UNIQUE)`, `description`, `enabled`, `trigger_conditions (JSON)`, `logic_operator`, `actions (JSON)`, `priority`, `cooldown_seconds`, `max_executions_per_hour`, `last_triggered`, `metadata (JSON)` |
 | **LogicExecutionHistory** | `logic_execution_history` | `id (PK UUID)`, `logic_rule_id (FK)`, `trigger_data (JSON)`, `actions_executed (JSON)`, `success`, `error_message`, `execution_time_ms`, `timestamp`, `metadata (JSON)` |
+| **CommandIntent** | `command_intents` | `id (PK UUID)`, `intent_id (UNIQUE)`, `correlation_id`, `esp_id`, `flow`, `orchestration_state` (accepted/sent/ack_pending), `first_seen_at`, `last_seen_at` |
+| **CommandOutcome** | `command_outcomes` | `id (PK UUID)`, `intent_id (UNIQUE)`, `correlation_id`, `esp_id`, `flow`, `outcome` (accepted/rejected/applied/persisted/failed/expired), `contract_version`, `semantic_mode`, `is_final`, `code`, `reason`, `retryable`, `generation`, `epoch`, `ttl_ms`, `first_seen_at`, `terminal_at` |
 
 ### 4.3 System Models
 
@@ -693,7 +774,7 @@ CIRCUIT_BREAKER_MQTT_RECOVERY_TIMEOUT=30
 |-----------|-------|-----------------|
 | ESPRepository | ESPDevice | `get_by_device_id(include_deleted)`, `soft_delete()`, `get_running_mocks()`, `get_online()`, `rebuild_simulation_config(device, sensor_configs)` |
 | SensorRepository | SensorConfig | `create_if_not_exists() → (config, created)` (V19-F02), `get_by_esp_gpio_and_type()`, `get_by_esp_gpio_type_and_i2c()`, `get_by_esp_gpio_type_and_onewire()`, `get_all_by_i2c_address()` |
-| ActuatorRepository | ActuatorConfig | `get_by_esp_and_gpio()`, `get_state()`, `log_command()`, `get_history(esp_id, gpio, limit, data_source, start_time, end_time)`, `reset_states_for_device()`, `clear_emergency_states()` |
+| ActuatorRepository | ActuatorConfig | `get_by_esp_and_gpio()`, `get_state()`, `get_active_actuators_for_device(esp_id)`, `log_command()`, `get_history(esp_id, gpio, limit, data_source, start_time, end_time)`, `reset_states_for_device()`, `clear_emergency_states()` |
 | LogicRepository | CrossESPLogic | `get_rules_by_trigger_sensor()`, `get_enabled_rules()` |
 | AuditLogRepository | AuditLog | `search()`, `get_stats()`, `cleanup_old()` |
 | UserRepository | User | `get_by_username()`, `get_by_email()`, `authenticate()` |
@@ -756,7 +837,51 @@ class BaseSensorProcessor(ABC):
 
 ---
 
-## 10. Error Codes (Server: 5000-5999)
+## 10. AutoOps Plugin System
+
+**Verzeichnis:** `src/autoops/`
+
+### Kern-Architektur
+
+| Modul | Datei | Beschreibung |
+|-------|-------|--------------|
+| AutoOpsAgent | `core/agent.py` | Haupt-Orchestrator: `initialize()`, `run_autonomous(plugins?)`, `cleanup()` |
+| GodKaiserClient | `core/api_client.py` | REST-Client für alle Server-Endpoints — `base_url` + `/api{endpoint}` Schema |
+| PluginRegistry | `core/plugin_registry.py` | Auto-Discovery via `@plugin_metadata` Decorator |
+| AutoOpsContext | `core/context.py` | Shared State zwischen Plugins (ESPSpec, DeviceMode, session_id, Counters) |
+| AutoOpsReporter | `core/reporter.py` | Markdown-Report-Generator → `src/autoops/reports/autoops_session_{id}_{date}.md` |
+| ProfileValidator | `core/profile_validator.py` | Profil-Validierung für Plugin-Ausführung |
+
+### Plugins
+
+| Plugin | Datei | Capabilities | Beschreibung |
+|--------|-------|-------------|--------------|
+| HealthCheckPlugin | `plugins/health_check.py` | VALIDATE, MONITOR | Server/Auth/Devices/MQTT/Zones/Sensors prüfen |
+| ESPConfiguratorPlugin | `plugins/esp_configurator.py` | CONFIGURE | Mock-ESP anlegen, Sensoren/Aktoren konfigurieren |
+| DebugFixPlugin | `plugins/debug_fix.py` | DIAGNOSE, FIX | Offline/ERROR-Devices finden, Mock-ESPs auto-fixen |
+| SystemCleanupPlugin | `plugins/system_cleanup.py` | CLEANUP | Stale Mock-ESPs und Ressourcen bereinigen |
+
+### Runner (`runner.py`)
+
+```python
+# Aufruf-Modi
+run_autoops(mode="health")      # Nur HealthCheck
+run_autoops(mode="configure")   # HealthCheck + ESPConfigurator
+run_autoops(mode="debug")       # HealthCheck + DebugFix
+run_autoops(mode="full")        # Alle Plugins
+
+# Wichtige Parameter
+server_url     # Default: http://localhost:8000 (via AUTOOPS_SERVER env)
+username       # Default: "admin" (via AUTOOPS_USER env)
+password       # Default: "Admin123#" (via AUTOOPS_PASSWORD env)
+device_mode    # "mock" (default), "real", "hybrid"
+```
+
+**Bekanntes Problem (Port-Konflikt):** `localhost:8000` kann durch andere lokale Prozesse (z.B. Claude Code MCP-Server) belegt sein — Docker bindet dann Port 8000 nicht an den Host. Runner schlägt fehl mit "API 404". Lösung: `AUTOOPS_SERVER` auf interne Docker-URL setzen oder Runner direkt im Container ausführen.
+
+---
+
+## 11. Error Codes (Server: 5000-5999)
 
 | Range | Kategorie | Beispiele |
 |-------|-----------|-----------|

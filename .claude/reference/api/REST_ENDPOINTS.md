@@ -7,11 +7,11 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 3.7 | **Aktualisiert:** 2026-03-24
+> **Version:** 4.0 | **Aktualisiert:** 2026-04-04
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
-> **Endpoint-Anzahl:** ~238 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry, Dashboards)
+> **Endpoint-Anzahl:** ~240 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry, Dashboards, IntentOutcomes)
 
 ---
 
@@ -82,18 +82,21 @@ allowed-tools: Read
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
 | `/actuators` | GET | JWT | Alle Actuators |
-| `/actuators/{actuator_id}` | GET | JWT | Actuator Details |
-| `/actuators/{actuator_id}/command` | POST | JWT | Actuator steuern |
-| `/actuators/{actuator_id}/state` | POST | JWT | Actuator-State setzen |
-| `/actuators/{actuator_id}/history` | GET | JWT | Actuator-History (Query: `start_time`, `end_time`, `limit`≤500, `include_aggregation`) |
-| `/actuators/emergency-stop` | POST | JWT | Global Emergency-Stop |
+| `/actuators/{esp_id}/{gpio}` | GET | JWT | Actuator Details (ESP+GPIO) |
+| `/actuators/{esp_id}/{gpio}` | POST | Operator | Actuator erstellen/aktualisieren (ESP+GPIO) |
+| `/actuators/{esp_id}/{gpio}/command` | POST | Operator | Actuator steuern |
+| `/actuators/{esp_id}/{gpio}/status` | GET | JWT | Actuator-Status lesen |
+| `/actuators/{esp_id}/{gpio}/history` | GET | JWT | Actuator-History (Query: `start_time`, `end_time`, `limit`≤500, `include_aggregation`) |
+| `/actuators/emergency_stop` | POST | Operator | Global Emergency-Stop |
 | `/actuators/clear_emergency` | POST | Operator | Not-Aus aufheben (MQTT clear_emergency an ESP(s)) |
-| `/actuators/{actuator_id}` | DELETE | JWT | Actuator löschen |
+| `/actuators/emergency-stop` | POST | Operator | **DEPRECATED Alias** fuer `/actuators/emergency_stop` (Sunset: 2026-07-03) |
+| `/actuators/clear-emergency` | POST | Operator | **DEPRECATED Alias** fuer `/actuators/clear_emergency` (Sunset: 2026-07-03) |
+| `/actuators/{esp_id}/{gpio}` | DELETE | Operator | Actuator löschen |
 | `/actuators/by-esp/{esp_id}` | GET | JWT | Actuators nach ESP |
-| `/actuators/{actuator_id}/alert-config` | PATCH | Operator | Per-Actuator Alert-Config setzen (Phase 4A.7) |
-| `/actuators/{actuator_id}/alert-config` | GET | JWT | Per-Actuator Alert-Config abrufen |
-| `/actuators/{actuator_id}/runtime` | GET | JWT | Runtime-Stats + Wartungsstatus (Phase 4A.8) |
-| `/actuators/{actuator_id}/runtime` | PATCH | Operator | Runtime-Stats aktualisieren (Wartungslog) |
+| `/actuators/{actuator_id}/alert-config` | PATCH | Operator | Per-Actuator Alert-Config setzen (UUID) |
+| `/actuators/{actuator_id}/alert-config` | GET | JWT | Per-Actuator Alert-Config abrufen (UUID) |
+| `/actuators/{actuator_id}/runtime` | GET | JWT | Runtime-Stats + Wartungsstatus (UUID) |
+| `/actuators/{actuator_id}/runtime` | PATCH | Operator | Runtime-Stats aktualisieren (Wartungslog, UUID) |
 
 ### Zones (`/zone`) - 7 Endpoints
 
@@ -142,7 +145,9 @@ allowed-tools: Read
 > **Hinweis:** Subzone-Endpoints sind device-scoped (wie Zone-Endpoints).
 > Subzones haben eine eigene `subzone_configs` DB-Tabelle (inkl. `custom_data` JSONB für Subzonen-Metadaten).
 >
-> **subzone_id Normalisierung (Sensors/Actuators Create-Update):** `null`, `""`, `"__none__"` → „Keine Subzone“ = GPIO aus allen Subzonen entfernt. Nutzt `utils/subzone_helpers.normalize_subzone_id()`.
+> **subzone_id Normalisierung (Sensors/Actuators Create-Update):** `null`, `””`, `”__none__”` → „Keine Subzone” = GPIO aus allen Subzonen entfernt. Nutzt `utils/subzone_helpers.normalize_subzone_id()`.
+>
+> **subzone_warning (CP-S1):** Falls die Subzone-Zuweisung nach Sensor/Actuator-Create oder -Update scheitert (z.B. ungültige subzone_id, Zone-Mismatch), wird kein 400 zurückgegeben. Der Sensor/Aktor wird gespeichert, der Config-Push an den ESP wird trotzdem gesendet, und die Response enthält `subzone_warning: “<Fehlermeldung>”`. `subzone_warning: null` bedeutet: Subzone-Zuweisung war erfolgreich. Betrifft: `ActuatorConfigResponse`, `SensorConfigResponse`.
 
 ### Device Context (`/device-context`) - 3 Endpoints (T13-R2)
 
@@ -194,14 +199,24 @@ allowed-tools: Read
 | `/logic/rules/{rule_id}/test` | POST | Operator | Rule testen |
 | `/logic/execution_history` | GET | JWT | Execution History |
 
-### Sequences (`/v1/sequences`) - 4 Endpoints
+### Sequences (`/sequences`) - 4 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
-| `/v1/sequences` | GET | JWT | Alle Sequences |
-| `/v1/sequences/stats` | GET | JWT | Sequence-Statistiken |
-| `/v1/sequences/{sequence_id}` | GET | JWT | Sequence Details |
-| `/v1/sequences/{sequence_id}/cancel` | POST | JWT | Sequence abbrechen |
+| `/sequences` | GET | JWT | Alle Sequences |
+| `/sequences/stats` | GET | JWT | Sequence-Statistiken |
+| `/sequences/{sequence_id}` | GET | JWT | Sequence Details |
+| `/sequences/{sequence_id}/cancel` | POST | JWT | Sequence abbrechen |
+
+### Intent Outcomes (`/intent-outcomes`) - 2 Endpoints
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/intent-outcomes` | GET | JWT | Intent Outcomes auflisten (Filter: esp_id, flow, outcome, limit) |
+| `/intent-outcomes/{intent_id}` | GET | JWT | Terminal Outcome eines Intents abrufen |
+
+> **P0.2 Visibility:** Kanonische Outcome-Records aus `command_outcomes`-Tabelle. Felder: `intent_id`, `correlation_id`, `esp_id`, `flow`, `outcome` (accepted/rejected/applied/persisted/failed/expired), `contract_version`, `semantic_mode`, `legacy_status`, `target_status`, `is_final`, `code`, `reason`, `retryable`, `generation`, `seq`, `epoch`, `ttl_ms`, `ts`, `first_seen_at`, `terminal_at`.
+> **Contract-Härtung (Server Authority):** Unknown/Legacy-Werte werden serverseitig deterministisch kanonisiert; bei Vertragsverletzung wird `code=CONTRACT_UNKNOWN_CODE` gesetzt (bzw. `CONTRACT_MISSING_CORRELATION` bei fehlender `correlation_id`).
 
 ### Sensor Type Defaults (`/sensor-type-defaults`) - 6 Endpoints
 
@@ -288,6 +303,7 @@ allowed-tools: Read
 | `/audit/users` | GET | Admin | Audit nach User |
 | `/audit/timeline` | GET | Admin | Audit-Timeline |
 | `/audit/search` | GET | Admin | Volltext-Suche |
+| `/audit/events/aggregated` | GET | JWT | Aggregierte Events aus mehreren Quellen (`audit_log`, `sensor_data`, `esp_health`, `actuators`) |
 | `/audit/export` | GET | Admin | Audit-Export |
 | `/audit/retention` | GET | Admin | Retention-Einstellungen |
 | `/audit/retention` | PUT | Admin | Retention aktualisieren |
@@ -303,6 +319,8 @@ allowed-tools: Read
 | `/audit/backups/{backup_id}/restore` | POST | Admin | Backup wiederherstellen |
 | `/audit/backups/{backup_id}/download` | GET | Admin | Backup herunterladen |
 | `/audit/retention/auto` | PUT | Admin | Auto-Retention Toggle |
+
+> **Projection-Konsistenz (Step 3):** Bei `GET /audit/events/aggregated` enthalten contract-relevante Quellen in `events[].metadata.contract_payload` eine kanonische Shared-Projection (gleicher Serializer-Layer wie bei WebSocket-Events).
 
 ### Users (`/users`) - 7 Endpoints
 
@@ -401,10 +419,10 @@ allowed-tools: Read
 |----------|--------|------|--------------|
 | `/health` | GET | - | Health Check |
 | `/health/detailed` | GET | JWT | Detaillierter Health Check |
-| `/health/database` | GET | JWT | Database Health |
-| `/health/mqtt` | GET | JWT | MQTT Health |
+| `/health/esp` | GET | JWT | ESP Health Summary |
 | `/health/metrics` | GET | JWT | System Metrics |
-| `/health/esps` | GET | JWT | ESP Health Summary |
+| `/health/live` | GET | - | Liveness Probe |
+| `/health/ready` | GET | - | Readiness Probe (inkl. RuntimeState: logic_liveness, recovery_completed, worker_health) |
 
 ### Dashboards (`/dashboards`) - 5 Endpoints
 
@@ -917,7 +935,7 @@ Alle Actuators auflisten.
 
 ---
 
-### 4.2 GET /actuators/{actuator_id}
+### 4.2 GET /actuators/{esp_id}/{gpio}
 
 Actuator-Details.
 
@@ -925,11 +943,11 @@ Actuator-Details.
 
 ---
 
-### 4.3 POST /actuators/{actuator_id}/command
+### 4.3 POST /actuators/{esp_id}/{gpio}/command
 
 Actuator steuern.
 
-**Auth:** JWT Required
+**Auth:** Operator Required
 
 **Request Body (ActuatorCommand):**
 ```json
@@ -953,11 +971,13 @@ Actuator steuern.
 
 ---
 
-### 4.4 POST /actuators/emergency-stop
+### 4.4 POST /actuators/emergency_stop
 
 Global Emergency-Stop für alle Actuators.
 
-**Auth:** JWT Required
+**Legacy Alias:** `/actuators/emergency-stop` (**deprecated**, Sunset: **2026-07-03**)
+
+**Auth:** Operator Required
 
 **Request Body (EmergencyStopRequest):**
 ```json
@@ -972,6 +992,8 @@ Global Emergency-Stop für alle Actuators.
 ### 4.5 POST /actuators/clear_emergency
 
 Not-Aus aufheben: Emergency-Flag serverseitig und auf allen betroffenen ESPs (bzw. Mocks) zuruecksetzen. Sendet MQTT-Payload `{"command": "clear_emergency", "reason": "..."}` an jedes Geraet (einzeln oder via Broadcast je nach Implementierung). Aktoren sind danach wieder steuerbar.
+
+**Legacy Alias:** `/actuators/clear-emergency` (**deprecated**, Sunset: **2026-07-03**)
 
 **Auth:** JWT (Operator)
 

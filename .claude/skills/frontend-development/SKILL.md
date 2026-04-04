@@ -15,8 +15,8 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.96
-**Letzte Aktualisierung:** 2026-03-30
+**Version:** 9.99
+**Letzte Aktualisierung:** 2026-04-04
 
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
@@ -486,7 +486,18 @@ onUnmounted(() => { /* cleanup */ })
 | sensor_data | esp_id, gpio, value, quality, zone_id, subzone_id (Phase 0.1) | MQTT→Server→WS |
 | actuator_status | esp_id, gpio, actuator_type (server-normalisiert), hardware_type (ESP32-Typ), state, value, emergency | MQTT→Server→WS |
 | esp_health | esp_id, status, heap, rssi | Heartbeat→Server→WS |
-| config_response | esp_id, status, error_code | ESP→MQTT→Server→WS |
+| esp_reconnect_phase | esp_id, phase (`adopting`/`adopted`/`delta_enforced`), offline_seconds? | Heartbeat-Reconnect→Server→WS |
+| config_response | esp_id, status, error_code, correlation_id (pflicht), request_id? | ESP→MQTT→Server→WS (terminal nur per correlation_id) |
+| config_published | esp_id, config_keys[], correlation_id? | Server Publish→WS (non-terminal, pending) |
+| config_failed | esp_id, config_keys[], error, correlation_id (pflicht), request_id? | Server Publish→WS (terminal nur per correlation_id) |
+| actuator_command | esp_id, gpio, command, correlation_id?, request_id? | REST/MQTT→Server→WS (non-terminal, pending) |
+| actuator_response | esp_id, gpio, command, success, correlation_id?, request_id? | ESP→MQTT→Server→WS (terminal) |
+| actuator_command_failed | esp_id, gpio, command, error, correlation_id?, request_id? | Server→WS (terminal, publish/safety failure) |
+| sequence_started | sequence_id, rule_name?, total_steps | Logic Engine→WS (non-terminal, pending) |
+| sequence_step | sequence_id, step, total_steps | Logic Engine→WS (non-terminal, progress) |
+| sequence_completed | sequence_id, success | Logic Engine→WS (terminal) |
+| sequence_error | sequence_id, message | Logic Engine→WS (terminal) |
+| sequence_cancelled | sequence_id, reason? | Logic Engine→WS (terminal) |
 | device_discovered | esp_id, hardware_type | Auto-Discovery |
 | error_event | esp_id, error_code, troubleshooting | ESP→Server→WS |
 | server_log | level, message, exception | Server intern |
@@ -496,9 +507,18 @@ onUnmounted(() => { /* cleanup */ })
 | device_scope_changed (T13-R3) | config_type, config_id, device_scope, assigned_zones | Server→WS (PUT sensors/actuators) |
 | device_context_changed (T13-R3) | config_type, config_id, active_zone_id, active_subzone_id, context_source, changed_by | Server→WS (PUT/DELETE /device-context) |
 | subzone_assignment (T13-R3) | esp_id, subzone_id, status, timestamp, error_code, message | MQTT→Server→WS (subzone ACK) |
+| contract_mismatch | original_event_type, mismatch_reason, correlation_id?, request_id? | Frontend-Mapper (Integrationssignal) |
+| contract_unknown_event | original_event_type, correlation_id?, request_id? | Frontend-Mapper (Integrationssignal) |
 
 **WICHTIG:** Type-Aenderungen IMMER mit Server-Team abstimmen!
 WebSocket-Events = Kontrakt zwischen Frontend und Backend.
+Contract-Consumption im Frontend ist contract-first: keine terminale Heuristik via Timeout, Finalisierung nur via terminale Contract-Events.
+Intent-Lifecycle Zuordnung:
+- Actuator terminal nur via `actuator_response` / `actuator_command_failed`
+- Config terminal nur via `config_response` / `config_failed`
+- Sequence terminal nur via `sequence_completed` / `sequence_error` / `sequence_cancelled`
+- Primaerer Korrelationsschluessel ist `correlation_id`; `request_id` ist optionaler Trace-Kontext und fuer Config-Events nicht durchgaengig verfuegbar.
+- `EventDetailsPanel` zeigt fuer terminale Fehler-/Abbruchfaelle eine einheitliche Operator-Entscheidung (Problemtyp, Prioritaet, Ursache, naechster Schritt).
 
 ### Logic Types (types/logic.ts)
 
@@ -723,6 +743,31 @@ normalizeSubzoneId(val: string | null | undefined): string | null
 slugifyGerman(name: string): string
 // Deutsche Umlaut-Transliteration (ae/oe/ue/ss) VOR Slugify.
 // "Naehrloesung" → "naehrloesung", "Gewaechshaus Alpha" → "gewaechshaus_alpha"
+```
+
+### contractEventMapper.ts
+
+```typescript
+validateContractEvent(eventType, data): { kind: 'ok' | 'mismatch' | 'unknown_event'; reason? }
+getDataSourceForEventType(eventType): 'audit_log' | 'sensor_data' | 'esp_health' | 'actuators' | undefined
+inferFallbackSeverity(eventType, data): 'info' | 'warning' | 'error' | 'critical'
+CONTRACT_OPERATOR_ACTION: 'Contract-Pruefung erforderlich'
+extractEspId(data): string | undefined
+extractCorrelationId(data): string | undefined
+extractRequestId(data): string | undefined
+INTENT_CONTRACT_INVENTORY: actuator/config/sequence (REST-Start + WS-Start/Terminal-Events)
+// Config terminal strictness:
+// config_response/config_failed ohne data.correlation_id => contract_mismatch (nicht finalisierbar)
+getOperatorActionGuidance(event): OperatorActionGuidance | null  // SSOT fuer terminale Operator-Hinweise
+```
+
+### eventTypeLabels.ts
+
+```typescript
+EVENT_TYPE_LABELS: Record<string, string>
+getEventTypeLabel(eventType): string
+// SSOT fuer kurze Event-Typ-Labels im Monitor (UnifiedEventList, EventsTab, SystemMonitorView).
+// Keine lokalen EVENT_TYPE_LABELS-Mappings mehr in Views/Komponenten.
 ```
 
 ### sensorDefaults.ts
@@ -1230,6 +1275,7 @@ cleanupWebSocket() {
 - Pinia Stores fuer State Management
 - Cleanup in `onUnmounted`
 - Deutsche Labels in `utils/labels.ts`
+- Event-Typ-Labels ueber `utils/eventTypeLabels.ts` aufloesen (keine lokalen Label-Maps)
 - `npm run build` zur Verifikation
 - Touch-Targets mindestens 44x44px auf klickbaren Elementen (WCAG)
 - `@media (hover: none)` Block fuer Touch-Geraete bei hover-abhaengigen Elementen
@@ -1251,7 +1297,7 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.97 | **Letzte Aktualisierung:** 2026-03-30
+**Version:** 9.99 | **Letzte Aktualisierung:** 2026-04-04
 
 
 > Vollstaendiger Changelog: siehe `CHANGELOG.md` im selben Verzeichnis.

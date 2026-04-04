@@ -301,6 +301,7 @@ ON mit `duration` > 0 im MQTT-Payload → `command_duration_end_ms` gesetzt. `pr
 TopicBuilder::buildSensorDataTopic(gpio);      // .../sensor/{gpio}/data
 TopicBuilder::buildActuatorCommandTopic(gpio); // .../actuator/{gpio}/command
 TopicBuilder::buildSystemHeartbeatTopic();     // .../system/heartbeat
+TopicBuilder::buildIntentOutcomeTopic();       // .../system/intent_outcome
 TopicBuilder::buildZoneAssignTopic();          // .../zone/assign
 TopicBuilder::buildZoneAckTopic();             // .../zone/ack
 TopicBuilder::buildSubzoneAssignTopic();       // .../subzone/assign

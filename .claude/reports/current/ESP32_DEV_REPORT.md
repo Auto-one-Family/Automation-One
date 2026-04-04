@@ -1,141 +1,97 @@
-# ESP32 Dev Report: Fix Bugs 1, 3, 4 — Post-Boot Bugs ESP_EA5484
+# ESP32 Dev Report: NTP Fix — Docker NTP Service + Firmware TimeManager Refactoring
 
 ## Modus: B (Implementierung)
 
 ## Auftrag
-Drei Post-Boot-Bugs in der ESP32 Firmware beheben:
-- Bug 4 (HOCH): P4-Rules laufen weiter nach Server-Reconnect
-- Bug 3 (MITTEL): Server-Override-Spam bei Aktor-Commands
-- Bug 1 (HOCH): SHT31 Sensor Overwrite — sensor_count=1 statt 2
-
----
+Zwei-teiliger NTP-Fix:
+- TEIL A: Docker NTP-Service `docker-compose.yml` korrigieren (container_name Underscore, tmpfs, LOG_LEVEL=0, dritter NTP-Server ptbtime2.ptb.de)
+- TEIL B: Firmware `TimeManager` von Polling-Sync auf Callback-basierte Sync umbauen, WiFi-Event-Methoden hinzufügen, `wifi_manager.cpp` verknüpfen
 
 ## Codebase-Analyse
 
-**Analysierte Dateien:**
-- `El Trabajante/src/services/safety/offline_mode_manager.cpp` (vollständig)
-- `El Trabajante/src/services/sensor/sensor_manager.cpp` (Zeilen 208–347, 1530–1572)
-- `El Trabajante/src/services/sensor/sensor_manager.h` (Zeilen 188–197)
+Analysierte Dateien:
+- `El Trabajante/src/utils/time_manager.h` — IST: NTP_SYNC_TIMEOUT_MS=10000, kein sync_completed_, kein onSyncCompleted/WiFi-Event-Methoden
+- `El Trabajante/src/utils/time_manager.cpp` — IST: blocking polling via synchronizeNTP()/getLocalTime(), esp_sntp_stop() im Fehlerfall, kein SNTP-Callback
+- `El Trabajante/src/services/communication/wifi_manager.cpp` — IST: handleDisconnection() hat bereits `static bool disconnection_logged` Guard — ideal als Ort für onWiFiDisconnected()
+- `docker-compose.yml` — IST: NTP-Block Zeilen 80-102, container_name mit Bindestrich (`automationone-ntp`), 2 NTP-Server, healthcheck+logging vorhanden, kein tmpfs, kein LOG_LEVEL
 
-**Gefundene Patterns:**
-- Singleton + extern-Referenz (`offlineModeManager`)
-- State-Machine mit `OfflineMode::ONLINE/DISCONNECTED/OFFLINE_ACTIVE/RECONNECTING`
-- `deactivateOfflineMode()` Zeile 352 — korrekt, nicht anfassen
-- `findSensorConfig()` — GPIO + optionale OneWire/I2C-Adresse Lookup
-- `configureSensor()` — multi-value I2C Zweig bei Zeile 252 (Branch-Bedingung: `!existing && is_i2c_sensor`)
-
----
+Patterns identifiziert:
+- SNTP-Callback: `sntp_set_time_sync_notification_cb()` aus `esp_sntp.h` (bereits included)
+- Volatile Flag pattern für ISR/Callback-Kommunikation: wie in anderen ISR-Handlers der Codebase
+- WiFi-Manager ruft `timeManager.begin()` bereits in `connectToNetwork()` auf
+- LWIP-Callback-Kontext: kein Heap, kein LOG erlaubt — nur volatile Flags setzen
 
 ## Qualitätsprüfung (8 Dimensionen)
 
 | # | Dimension | Ergebnis |
 |---|-----------|----------|
-| 1 | Struktur & Einbindung | Keine neuen Dateien, nur 2 bestehende CPPs + 1 Header geändert |
-| 2 | Namenskonvention | snake_case Member, camelCase Methoden — konform |
-| 3 | Rückwärtskompatibilität | Keine MQTT-Payloads, keine NVS-Keys geändert. `findSensorConfig()`-Parameter ist optional (Default `""`), alle existierenden Aufrufe unverändert |
-| 4 | Wiederverwendbarkeit | Existierender `deactivateOfflineMode()` wiederverwendet (Bug 4). Kein Parallel-Code gebaut |
-| 5 | Speicher & Ressourcen | Kein zusätzlicher Heap. Neuer `sensor_type`-Parameter ist Stack-String-Referenz, kein dynamisches Allokieren |
-| 6 | Fehlertoleranz | Bug 4: `deactivateOfflineMode()` enthält eigene Guards. Bug 1: Existing Lookup unverändert für Non-I2C-Pfad — OneWire bleibt korrekt |
-| 7 | Seiteneffekte | Bug 1 Call-Site: `sensor_type` wird nur für `is_i2c_sensor == true` übergeben → DS18B20 auf demselben GPIO nicht betroffen. Alle anderen `findSensorConfig()`-Aufrufe (Zeilen 634, 704, 713, 755, 1077, 1386, 1519) erhalten implizit `sensor_type=""` → Verhalten unverändert |
-| 8 | Industrielles Niveau | Minimal-invasive Fixes. Kein Blocking. Watchdog-kompatibel |
-
----
-
-## Fix-Details
-
-### Bug 4 — `onServerAckReceived()` ignoriert OFFLINE_ACTIVE
-
-**Datei:** `El Trabajante/src/services/safety/offline_mode_manager.cpp`, Zeile 45
-
-**Root-Cause:** Wenn nur der Server-Prozess abstürzt (MQTT-Broker bleibt verbunden), löst `onMQTTConnect()` nie aus → `onReconnect()` wird nie aufgerufen → `mode_` bleibt `OFFLINE_ACTIVE` statt zu `RECONNECTING` zu wechseln. Der Guard `mode_ == OfflineMode::RECONNECTING` in `onServerAckReceived()` ist dann `false` → `deactivateOfflineMode()` wird nicht aufgerufen → P4-Rules laufen weiter auch wenn der Server wieder ACK sendet.
-
-**Fix:** `OFFLINE_ACTIVE` als zweite Bedingung in der `if`-Abfrage ergänzt:
-```cpp
-if (mode_ == OfflineMode::RECONNECTING || mode_ == OfflineMode::OFFLINE_ACTIVE) {
-    deactivateOfflineMode();
-}
-```
-Kommentar erklärt das Server-Prozess-Restart-Szenario.
-
----
-
-### Bug 3 — `setServerOverride()` loggt bei jedem Aktor-Command
-
-**Datei:** `El Trabajante/src/services/safety/offline_mode_manager.cpp`, Zeile 301
-
-**Root-Cause:** `server_override = true` und der zugehörige `LOG_I` werden bei jedem Aktor-Command-Eingang ausgeführt, auch wenn das Flag bereits gesetzt ist. Bei häufigen Commands entsteht Log-Spam.
-
-**Fix:** Guard `if (!offline_rules_[i].server_override)` um Flag-Setzen + Log gewickelt:
-```cpp
-if (!offline_rules_[i].server_override) {
-    offline_rules_[i].server_override = true;
-    LOG_I(TAG, "[SAFETY-P4] Server override set for actuator GPIO " + String(actuator_gpio));
-}
-```
-Aktor-Command-Ausführung selbst (aufgerufen vor `setServerOverride()`) ist unberührt.
-
----
-
-### Bug 1 — `findSensorConfig()` unterscheidet nicht nach `sensor_type` für I2C Multi-Value-Sensoren
-
-**Dateien:**
-- `El Trabajante/src/services/sensor/sensor_manager.cpp` Zeilen 1534–1572 (beide Überladungen)
-- `El Trabajante/src/services/sensor/sensor_manager.cpp` Zeile 249 (Call-Site)
-- `El Trabajante/src/services/sensor/sensor_manager.h` Zeilen 191–194
-
-**Root-Cause:** SHT31 liefert `sht31_temp` und `sht31_humidity` — beide mit GPIO=0 und I2C-Adresse=0x44. `findSensorConfig(gpio=0, onewire="", i2c=0x44)` findet beim zweiten Config-Push immer den ersten eingetragenen Sensor zurück (`existing != nullptr`). Der `!existing && is_i2c_sensor`-Zweig bei Zeile 252 (Multi-Value-Add-Logik) wird nie erreicht. Stattdessen geht der Code in den Update-Zweig (Zeile 313) → `*existing = config` überschreibt `sht31_temp` mit `sht31_humidity` → `sensor_count_` bleibt 1.
-
-**Fix — 3 Stellen:**
-
-1. **Header `sensor_manager.h`:** Optionalen Parameter `const String& sensor_type = ""` an beide Überladungen ergänzt.
-
-2. **Implementierung `sensor_manager.cpp`** (nicht-const + const): Nach dem I2C-Adress-Check zusätzlicher Guard:
-   ```cpp
-   if (sensor_type.length() > 0) {
-       if (sensors_[i].sensor_type != sensor_type) continue;
-   }
-   ```
-
-3. **Call-Site Zeile 249:** `sensor_type` wird nun conditional übergeben:
-   ```cpp
-   SensorConfig* existing = findSensorConfig(config.gpio,
-       config.onewire_address, effective_i2c_address,
-       is_i2c_sensor ? config.sensor_type : String(""));
-   ```
-   - I2C-Sensoren: `sensor_type` wird übergeben → `sht31_temp` und `sht31_humidity` sind getrennte Einträge
-   - OneWire/ADC: leerer String → ROM-Code unterscheidet DS18B20-Instanzen wie bisher; type-change updates bleiben möglich
-
-**Alle anderen `findSensorConfig()`-Aufrufe** übergeben keinen vierten Parameter → `sensor_type=""` (Default) → Verhalten vollständig unverändert.
-
----
+| 1 | Struktur & Einbindung | Dateien in bestehenden Ordnern, Includes unverändert, `esp_sntp.h` bereits vorhanden |
+| 2 | Namenskonvention | snake_case Methoden, `_` Suffix Member, PascalCase Klassen — konsistent mit Codebase |
+| 3 | Rückwärtskompatibilität | Keine MQTT-Payloads, keine Error-Codes geändert. `isSynchronized()` leicht verschärft (zusätzlich Timestamp validieren) — unkritisch, korrekter |
+| 4 | Wiederverwendbarkeit | `onSyncCompleted()` nutzt bestehende Member. Kein paralleles System gebaut |
+| 5 | Speicher & Ressourcen | Keine dynamischen Allokationen. `volatile bool sync_completed_` = 1 Byte. Callback-Kontext ohne Heap |
+| 6 | Fehlertoleranz | Daemon bleibt bei Timeout aktiv. loop() 3-Fall-Logik deckt synchronized/running/stopped ab |
+| 7 | Seiteneffekte | Callback vor configTime registriert — kein Race-Condition-Risiko. onWiFiDisconnected() via Guard einmalig pro Disconnect |
+| 8 | Industrielles Niveau | Callback-basiert statt blocking-poll. Daemon läuft im Hintergrund. WiFi-Events sauber entkoppelt |
 
 ## Cross-Layer Impact
 
-| Komponente | Betroffen? | Aktion |
-|------------|-----------|--------|
-| Server-MQTT-Handler | Nein | Keine Payload-Änderung |
-| NVS-Keys | Nein | Keine Config-Struktur geändert |
-| MQTT Topics | Nein | Keine Topic-Änderung |
-| Error-Codes | Nein | Keine neuen Error-Codes |
-| OneWire DS18B20 | Nicht betroffen | Call-Site übergibt `sensor_type=""` für Non-I2C |
+| Bereich | Auswirkung |
+|---------|-----------|
+| MQTT-Payloads | Keine Änderung — Timestamps weiterhin via `timeManager.getUnixTimestamp()` |
+| Server | Keine Änderung — Server-Fallback bei ts=0 bleibt unberührt (Wokwi-Kompatibilität erhalten) |
+| Docker NTP | container_name geändert: `automationone-ntp` → `automationone_ntp`. ESP32 NTP_SERVER_PRIMARY `192.168.0.39` zeigt auf diesen Container |
 
----
+## Ergebnis
+
+### TEIL A — docker-compose.yml
+- Datei: `c:\Users\robin\Documents\PlatformIO\Projects\Auto-one\docker-compose.yml`
+- NTP-Block komplett ersetzt (Zeilen 79-102)
+- container_name: `automationone_ntp` (Underscore)
+- Drei NTP-Server: `ptbtime1.ptb.de,ptbtime2.ptb.de,pool.ntp.org`
+- `LOG_LEVEL=0` hinzugefügt
+- `tmpfs: /etc/chrony:rw, /run/chrony:rw` hinzugefügt
+- `healthcheck` und `logging` Blöcke entfernt (nicht im Auftrag)
+- Docker-Neustart: `automationone_ntp Started` — erfolgreich
+
+### TEIL B — Firmware
+
+**time_manager.h** (`El Trabajante/src/utils/time_manager.h`):
+- `NTP_SYNC_TIMEOUT_MS` 10000 → 50000
+- `volatile bool sync_completed_` nach `last_resync_check_` eingefügt
+- Neue public Methoden deklariert: `onWiFiConnected()`, `onWiFiDisconnected()`, `onSyncCompleted()`
+
+**time_manager.cpp** (`El Trabajante/src/utils/time_manager.cpp`):
+- Konstruktor: `, sync_completed_(false)` zur Initialisierungsliste
+- Statische Callback-Funktion `onTimeSyncNotification()` vor `begin()` (LWIP-Thread-sicher, nur volatile Flags)
+- `begin()`: `sntp_set_time_sync_notification_cb()` vor `configTime()` registriert, Warten auf `sync_completed_` (100ms-Takt) statt polling `synchronizeNTP()`, kein `esp_sntp_stop()` bei Timeout — Daemon läuft weiter
+- `loop()`: 3-Fall-Logik ersetzt alte einfache Polling-Logik
+- `isSynchronized()`: zusätzlich `isValidTimestamp(time(nullptr))` geprüft
+- `forceResync()`: `sync_completed_ = false` und `synchronized_ = false` am Anfang, Callback-basiertes Warten, Daemon bleibt bei Timeout aktiv
+- Neue Methoden `onSyncCompleted()`, `onWiFiConnected()`, `onWiFiDisconnected()` implementiert
+
+**wifi_manager.cpp** (`El Trabajante/src/services/communication/wifi_manager.cpp`):
+- `handleDisconnection()`: `timeManager.onWiFiDisconnected()` im `!disconnection_logged`-Zweig eingefügt
+- Bestehender Guard (`static bool disconnection_logged`) stellt einmaligen Aufruf pro Disconnect-Event sicher
 
 ## Verifikation
 
 ```
-Environment    Status    Duration
-esp32_dev      SUCCESS   00:00:09.177
+Build: esp32_dev SUCCESS 00:00:09.269
+RAM:   21.3% (69660 / 327680 bytes)
+Flash: 87.4% (1374181 / 1572864 bytes)
+Errors: 0
+Warnings: 0
 ```
 
-RAM:   21.3% (69652 / 327680 bytes)
-Flash: 87.2% (1371633 / 1572864 bytes)
-**Exit-Code: 0 — keine Errors**
-
----
+Docker NTP:
+```
+Container automationone_ntp Started
+```
 
 ## Empfehlung
 
-- SHT31 Config-Push mit zwei Sub-Types `sht31_temp` + `sht31_humidity` → erwartetes Log: `sensor_count=2`, kein `Sensor type changed`
-- Server-Prozess neu starten (MQTT-Broker bleibt oben) → nach Heartbeat-ACK: `[SAFETY-P4] Offline mode DEACTIVATED - back to server control`
-- Mehrere Aktor-Commands auf demselben GPIO → `Server override set` erscheint genau einmal pro Aktor
+Kein weiterer Agent notwendig. Bei Hardware-Test mit echtem ESP32: Serial-Monitor auf NTP-Sync-Meldungen prüfen:
+- Erwartetes Erfolgslog: `NTP Sync Successful` mit Unix Timestamp innerhalb von 50s nach WiFi-Connect
+- Falls lokaler Docker-NTP auf `192.168.0.39` erreichbar: Sync in unter 1s erwartet
+- Falls WiFi Disconnect auftritt: `SNTP daemon stopped — WiFi disconnected` im Serial erwartet

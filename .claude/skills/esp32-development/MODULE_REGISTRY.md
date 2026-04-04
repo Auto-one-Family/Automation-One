@@ -20,6 +20,7 @@ description: Vollständige API-Referenz aller ESP32-Module. Laden bei Bedarf fü
 | Logger (NVS restore) | `utils/logger.h` | — | STEP 5.1 (log_level from NVS) |
 | ConfigManager | `services/config/config_manager.h` | ✅ | STEP 6 |
 | ProvisionManager | `services/provisioning/provision_manager.h` | ✅ | STEP 6.6 |
+| PortalAuthority | `services/provisioning/portal_authority.h` | ✅ | STEP 6.7 (nach ProvisionManager) |
 | ErrorTracker | `error_handling/error_tracker.h` | ✅ | STEP 7 |
 | WiFiManager | `services/communication/wifi_manager.h` | ✅ | STEP 9 |
 | TimeManager | `utils/time_manager.h` | ✅ | Nach WiFi (NTP) |
@@ -162,7 +163,7 @@ public:
     
     // MQTT
     bool handleActuatorCommand(const String& topic, const String& payload);
-    bool handleActuatorConfig(const String& payload, const String& correlation_id = "");
+    bool handleActuatorConfig(JsonArray actuators, const String& correlation_id = "");  // CP-B1: pre-parsed
     void publishActuatorStatus(uint8_t gpio);
     void publishAllActuatorStatus();
 };
@@ -324,7 +325,7 @@ extern TimeManager& timeManager;
 
 **NVS:** Namespace `wdt_diag` — Keys `hist` (24h-Rolling), `snap` (letzter Snapshot). Details: `El Trabajante/docs/NVS_KEYS.md`.
 
-**API (Free Functions):** `watchdogStorageInitEarly()`, `watchdogStorageTryFinalizeBootRecord()`, `watchdogStorageGetCountLast24h()`, `watchdogStorageSaveDiagnosticsSnapshot()`, `watchdogStorageLogLastSnapshotIfAny()`.
+**API (Free Functions):** `watchdogStorageInitEarly()`, `watchdogStorageTryFinalizeBootRecord()`, `watchdogStorageGetCountLast24h()`, `watchdogStorageGetHistNotFoundExpectedCount()`, `watchdogStorageGetHistNotFoundUnexpectedCount()`, `watchdogStorageSaveDiagnosticsSnapshot()`, `watchdogStorageLogLastSnapshotIfAny()`.
 
 **Firmware-Version (Build):** `src/config/firmware_version.h` — Makro `KAISER_FIRMWARE_VERSION_STRING`; Override in `platformio.ini` z. B. `'-DKAISER_FIRMWARE_VERSION_STRING="4.0.0"'`.
 
@@ -758,8 +759,9 @@ public:
     void evaluateOfflineRules();   // Hysterese-Auswertung, 5s-Intervall extern; ph/ec/moisture-Rules werden via requiresCalibration()-Guard gefiltert (ADC-Rohwert != phys. Einheit)
 
     // Config (via handleOfflineRulesConfig in main.cpp)
-    void parseOfflineRules(JsonObject obj);   // 3-Semantiken: fehlt/leer/Inhalt
-    void loadOfflineRulesFromNVS();           // Boot: nach actuatorManager.begin()
+    void parseOfflineRules(JsonObject obj);   // 3-Semantiken: fehlt/leer/Inhalt; LE-01: parst time_filter (start_hour/start_minute/end_hour/end_minute UTC + enabled)
+    void loadOfflineRulesFromNVS();           // Boot: nach actuatorManager.begin(); v1 = Blob-Format; v0 → v1 Migration via _deleteOldIndividualKeys()
+    void saveOfflineRulesToNVS();             // memcmp-Shadow: schreibt NVS nur bei echten Änderungen (Blob v1)
 
     // Server-Override (in actuator_manager.cpp::handleActuatorCommand)
     void setServerOverride(uint8_t actuator_gpio);
@@ -786,6 +788,63 @@ extern OfflineModeManager& offlineModeManager;
 **Delay-Konstante:** `OFFLINE_ACTIVATION_DELAY_MS = 30000UL`
 
 **Koordination SAFETY-P1 (Server-ACK-Timeout in `main.cpp::checkServerAckTimeout`) / MQTT-Disconnect:** `onDisconnect()` wird immer aufgerufen. Unmittelbares `setAllActuatorsToSafeState()` nur bei `getOfflineRuleCount() == 0`; sonst Delegation an P4 (kein „falsches AUS” in der Grace-Phase). `activateOfflineMode()` bestätigt bei 0 Rules zusätzlich safe state (Defense-in-Depth). `activateOfflineMode()` initialisiert `is_active` jeder Regel aus dem echten Aktor-Hardware-State (`actuatorManager.getActuatorConfig(gpio).current_state`) — verhindert falsches Doppel-AN bei Mehrfach-Regeln, wenn ein Aktor vor Disconnect bereits AN war. `g_last_server_ack_ms` ist global (`std::atomic<uint32_t>`, nicht `static`) und wird im ESP-IDF `MQTT_EVENT_CONNECTED`-Handler sofort zurückgesetzt — vor Aufruf der `on_connect_callback_` — um die Race-Condition zwischen Core 0 (MQTT-Event) und Safety-Task Core 1 zu schließen.
+
+---
+
+## PortalAuthority (Provisioning)
+
+**Pfad:** `src/services/provisioning/portal_authority.h/.cpp`
+
+Zuständig für die Entscheidungslogik, ob und wann der ESP32 in den Captive-Portal-Modus wechselt. Trennt die Entscheidungslogik von der WiFi-Verbindungslogik (`ProvisionManager`).
+
+```cpp
+class PortalAuthority {
+public:
+    static PortalAuthority& getInstance();
+    bool shouldStartPortal() const;
+    void notifyConnectFailed();
+    void notifyConnectSuccess();
+    void reset();
+};
+```
+
+---
+
+## IntentContract (Task-Layer)
+
+**Pfad:** `src/tasks/intent_contract.h/.cpp`
+
+Client-seitiger Intent/Outcome-Vertrag für Paket 09. ESP32 meldet Ergebnisse von Command- und Config-Intents via MQTT zurück an den Server.
+
+```cpp
+struct IntentMetadata {
+    char intent_id[64];
+    char correlation_id[64];
+    uint32_t generation;
+    uint32_t created_at_ms;
+    uint32_t ttl_ms;
+    uint32_t epoch_at_accept;
+};
+
+void initIntentMetadata(IntentMetadata* metadata);
+IntentMetadata extractIntentMetadataFromPayload(const char* payload, const char* fallback_prefix);
+bool isIntentExpired(const IntentMetadata& metadata, uint32_t current_epoch);
+bool isRecoveryIntentAllowed(const char* topic, const char* payload);
+
+// Publish outcome to kaiser/{id}/esp/{esp_id}/system/intent_outcome
+bool publishIntentOutcome(const char* flow, const IntentMetadata& metadata,
+                          const char* outcome, const char* code,
+                          const String& reason, bool retryable);
+void processIntentOutcomeOutbox();
+
+uint32_t getSafetyEpoch();
+uint32_t bumpSafetyEpoch(const char* reason);
+```
+
+**Outcome-Werte:** `accepted` | `rejected` | `applied` | `persisted` | `failed` | `expired`
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/intent_outcome` (QoS 1)
+**Outbox-NVS:** Namespace `io_outbox` mit Ringbuffer (`head`, `count`, `s{idx}_*`) und Stats (`retry_total`, `recovered_total`, `drop_total`, `fin_ok_total`).
+`fin_ok_total` ist absichtlich kurz benannt (NVS key length limit).
 
 ---
 
@@ -830,15 +889,11 @@ extern OfflineModeManager& offlineModeManager;
 | `system` | `esp_id` | String | ESP Identifier |
 | `system` | `state` | uint8 | System State |
 | `system` | `boot_cnt` | uint16 | Boot Counter |
+| `offline` | `ofr_ver` | uint8 | Schema-Version (0 = legacy, 1 = Blob v1) |
 | `offline` | `ofr_count` | uint8 | Anzahl Offline-Regeln (max 8) |
-| `offline` | `ofr_{i}_en` | uint8 | Regel i aktiv (SAFETY-P4) |
-| `offline` | `ofr_{i}_agpio` | uint8 | Aktor GPIO |
-| `offline` | `ofr_{i}_sgpio` | uint8 | Sensor GPIO |
-| `offline` | `ofr_{i}_svtyp` | String | sensor_value_type (z.B. "sht31_humidity") |
-| `offline` | `ofr_{i}_actb` | float | activate_below |
-| `offline` | `ofr_{i}_deaa` | float | deactivate_above |
-| `offline` | `ofr_{i}_acta` | float | activate_above |
-| `offline` | `ofr_{i}_deab` | float | deactivate_below |
+| `offline` | `ofr_blob` | Blob | Packed `OfflineRule[]` (56 Bytes/Regel) + CRC8 Trailer (SAFETY-P4 + LE-01) |
+| `io_outbox` | `head` / `count` / `s{idx}_*` | mixed | Pending Intent-Outcome Replay-Ringbuffer |
+| `io_outbox` | `retry_total` / `recovered_total` / `drop_total` / `fin_ok_total` | uint32 | Outcome-Replay/Finalitäts-Stats |
 
 ---
 

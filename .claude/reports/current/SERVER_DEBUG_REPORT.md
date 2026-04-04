@@ -1,14 +1,19 @@
 # Server Debug Report
 
-**Erstellt:** 2026-04-01
-**Modus:** B (Spezifisch: "Datenbankverbindungs-Probleme und SystemMonitor-bezogene Fehler")
-**Quellen:** Docker logs el-servador (200 Zeilen), Docker logs postgres (100 Zeilen), docker compose ps, Quellcode-Analyse debug.py, sensor_handler.py, schemas/debug_db.py
+**Erstellt:** 2026-04-03
+**Modus:** B (Spezifisch: "Config-Push ESP_EA5484 — ESP32 empfängt nur 1 von 2 Aktoren, GPIO 25 fehlt")
+**Quellen:**
+- `El Servador/god_kaiser_server/src/services/config_builder.py` (vollständig, 750 Zeilen)
+- `El Servador/god_kaiser_server/src/db/repositories/actuator_repo.py` (vollständig, 410 Zeilen)
+- `El Servador/god_kaiser_server/src/services/esp_service.py` (Zeilen 350–540)
+- `El Servador/god_kaiser_server/src/mqtt/publisher.py` (Zeilen 200–270)
+- Grep-Suchen über `src/services/`, `src/mqtt/`, `src/api/v1/`
 
 ---
 
 ## 1. Zusammenfassung
 
-Zwei klar isolierte Bugs gefunden. Bug #1 ist der Hauptverursacher der 500-Fehler im System Monitor: In `debug.py:2235` wird ein `datetime`-Objekt via `.isoformat()` als `str` an asyncpg weitergegeben — asyncpg erwartet aber eine `datetime`-Instanz. Bug #2 ist ein VPD-Duplicate-Key-Fehler in `sensor_handler.py`: beide SHT31-Readings (Temp + Humidity) triggern gleichzeitig `_try_compute_vpd()` und versuchen denselben VPD-Eintrag mit identischem Timestamp doppelt zu schreiben. Beide Bugs sind aktiv und reproduzierbar. Handlungsbedarf sofort bei Bug #1.
+Der Server-seitige Config-Builder enthält keinen strukturellen Bug, der einen Aktor selektiv ausschliessen würde. Das Repository-Query (`get_by_esp`) holt alle Aktoren ohne Filter oder LIMIT. Der einzige serverseitige Ausschluss-Mechanismus ist ein Python-seitiger `enabled`-Check (Zeile 276). Der Server loggt die Aktor-Anzahl explizit an drei Stellen vor dem MQTT-Publish — dieses Log ist die entscheidende Evidenz zur Eingrenzung. Die wahrscheinlichste Server-Seite-Ursache ist `enabled=False` für GPIO 25 in der DB. Falls das Log `2 actuators` zeigt, liegt die Ursache auf ESP32-Seite.
 
 ---
 
@@ -16,100 +21,179 @@ Zwei klar isolierte Bugs gefunden. Bug #1 ist der Hauptverursacher der 500-Fehle
 
 | Quelle | Status | Bemerkung |
 |--------|--------|-----------|
-| `docker logs el-servador` | FEHLER gefunden | 2x kritischer Stack-Trace sichtbar |
-| `docker logs postgres` | FEHLER gefunden | Duplicate-Key-Violation, fehlerhafte Queries |
-| `docker compose ps` | OK | Alle 12 Services healthy/running |
-| `src/api/v1/debug.py` | BUG | Zeile 2235: `.isoformat()` statt datetime-Objekt |
-| `src/schemas/debug_db.py` | OK | TIME_SERIES_TABLES korrekt definiert |
-| `src/mqtt/handlers/sensor_handler.py` | BUG | Zeile 526-546: Race Condition bei VPD-Berechnung |
+| `config_builder.py` | Vollständig gelesen (750 Zeilen) | Alle Methoden analysiert |
+| `actuator_repo.py` | Vollständig gelesen (410 Zeilen) | `get_by_esp` Zeile 107–111 |
+| `esp_service.py` | Teilweise gelesen (Zeilen 350–540) | `send_config` vollständig |
+| `publisher.py` | Teilweise gelesen (Zeilen 200–270) | `publish_config` vollständig |
+| god_kaiser.log / Loki | Nicht abgefragt | Server läuft im Docker, Log-Abfrage nicht Teil des Auftrags |
 
 ---
 
 ## 3. Befunde
 
-### 3.1 BUG-1: `debug.py:2235` — datetime wird als String an asyncpg übergeben (System Monitor kaputt)
+### 3.1 SERVER BACKEND ANALYSE
 
-- **Schwere:** CRITICAL
-- **Datei:Zeile:** `El Servador/god_kaiser_server/src/api/v1/debug.py:2235`
-- **Detail:** In der Funktion `query_table()` wird der automatische Zeitfilter fuer Time-Series-Tabellen (sensor_data, actuator_history, logic_execution_history, audit_logs) als ISO-String uebergeben: `params[param_name] = cutoff.isoformat()`. asyncpg mit dem PostgreSQL-asyncpg-Dialekt kann einen `str` nicht als `TIMESTAMP WITH TIME ZONE` binden — es erwartet eine `datetime`-Instanz.
-- **Evidenz aus Docker-Log:**
-  ```
-  asyncpg.exceptions.DataError: invalid input for query argument $1:
-  '2026-03-31T08:28:35.438416+00:00'
-  (expected a datetime.date or datetime.datetime instance, got 'str')
-  [SQL: SELECT COUNT(*) FROM actuator_history WHERE timestamp >= $1]
-  [parameters: ('2026-03-31T08:28:35.438416+00:00',)]
-  ```
-  Traceback zeigt: `File "/app/src/api/v1/debug.py", line 2285, in query_table`
-- **Root Cause:** `cutoff = datetime.now(timezone.utc) - timedelta(hours=24)` erzeugt ein korrektes datetime-Objekt, aber `.isoformat()` konvertiert es zu einem String. asyncpg akzeptiert bei prepared statements mit `$1` keine Strings fuer Timestamp-Spalten.
-- **Konkreter Fix:**
-  ```python
-  # debug.py Zeile 2235 — VORHER (falsch):
-  params[param_name] = cutoff.isoformat()
+#### S1. config_builder.py — Methode für actuators-Sektion
 
-  # NACHHER (korrekt):
-  params[param_name] = cutoff
-  ```
+**Methode:** `ConfigPayloadBuilder.build_combined_config()` — `config_builder.py`, Zeile 234
 
-### 3.2 BUG-2: `sensor_handler.py` — VPD Duplicate Key Violation (PostgreSQL-Error alle ~30 Sekunden)
+**Aufruf-Kette:**
+```
+build_combined_config(esp_device_id, db)
+  1. esp_repo.get_by_device_id(esp_device_id)         # ESP-UUID ermitteln
+  2. actuator_repo.get_by_esp(esp_device.id)           # Zeile 272 — alle Aktoren holen
+  3. [a for a in actuators if a.enabled]               # Zeile 276 — Python-Filter
+  4. GPIO-Konflikt-Check (Zeilen 306–314)              # ConfigConflictError wenn Konflikt
+  5. build_actuator_payload(a) für jeden Aktor         # Zeile 321
+```
 
-- **Schwere:** HIGH
-- **Datei:Zeile:** `El Servador/god_kaiser_server/src/mqtt/handlers/sensor_handler.py:526` (VPD-Hook) und `677-692` (`_try_compute_vpd`)
-- **Detail:** Wenn ein ESP-Geraet gleichzeitig `sht31_temp` und `sht31_humidity` in einer MQTT-Nachricht sendet, werden beide Readings parallel verarbeitet. Beide loesen den VPD-Hook aus. Beide rufen `_try_compute_vpd()` auf, finden den Partner-Wert bereits in der DB und versuchen, denselben VPD-Eintrag mit identischem `(esp_id, gpio=0, sensor_type='vpd', timestamp)` zu inserieren. Der zweite INSERT schlaegt mit Unique-Constraint-Verletzung fehl.
-- **Evidenz aus PostgreSQL-Log:**
-  ```
-  ERROR:  duplicate key value violates unique constraint "uq_sensor_data_esp_gpio_type_timestamp"
-  DETAIL:  Key (esp_id, gpio, sensor_type, "timestamp")=
-    (63f776d4-d0fc-4191-b4e3-58c1d77ebb4d, 0, vpd, 2026-04-01 08:28:17+00) already exists.
-  ```
-  Tritt zweimal pro Sensor-Intervall auf (sichtbar um 08:28:16 und 08:28:47).
-- **Bestehende Behandlung:** In `_try_compute_vpd` wird `if vpd_data is None: return` als Duplicate-Guard verwendet (Zeile 694-696). Das greift aber nicht: `sensor_repo.save_data()` schluckt den Fehler nicht intern und gibt nicht `None` zurueck — die PostgreSQL-Exception propagiert. Sie wird weiter oben durch `except Exception as e: logger.debug(...)` auf Debug-Level unterdruckt. Der Fehler ist auf Anwendungsebene "silent", erzeugt aber regelmaeßig ERROR-Logs auf PostgreSQL-Seite und Rollback-Kosten.
-- **Fix-Optionen:**
-  - **Option A (empfohlen):** VPD-Hook nur beim `sht31_temp`-Trigger ausfuehren, `sht31_humidity`-Ast entfernen. In `sensor_handler.py:526` Bedingung von `if sensor_type in ("sht31_temp", "sht31_humidity"):` zu `if sensor_type == "sht31_temp":` aendern. Eliminiert die Race Condition vollstaendig, kein Datenverlust.
-  - **Option B:** In `sensor_repo.save_data()` ein `INSERT ... ON CONFLICT DO NOTHING` ergaenzen.
+**Repository-Query (`get_by_esp`, `actuator_repo.py` Zeile 107–111) — vollständiges Statement:**
+```python
+stmt = select(ActuatorConfig).where(ActuatorConfig.esp_id == esp_id)
+result = await self.session.execute(stmt)
+return list(result.scalars().all())
+```
 
-### 3.3 INFO: Frontend 404 bei `GET /api/v1/debug/db/actuator_history/{record_id}`
+Entsprechendes SQL:
+```sql
+SELECT actuator_configs.*
+FROM actuator_configs
+WHERE actuator_configs.esp_id = :esp_id
+-- Kein ORDER BY, kein LIMIT, kein weiterer Filter
+```
 
-- **Schwere:** MEDIUM (Folge-Fehler von BUG-1)
-- **Detail:** Das Frontend ruft `getRecord('actuator_history', '36f25972-4290-4ac7-9414-8229ebc0e188')` auf und erhaelt 404. Das ist kein eigenstaendiger Server-Bug — die Record-ID existiert nicht in der DB, weil der Table-Query-Endpoint durch BUG-1 kaputt war und keine validen IDs geladen werden konnten. Nach Behebung von BUG-1 sollte sich dieses Problem von selbst loesen.
-- **Evidenz:**
-  ```
-  [FRONTEND] [PromiseRejection] Request failed with status code 404
-  (url: http://localhost:5173/system-monitor)
-  database.ts:46 → getRecord → loadRecord (database.store.ts:130)
-  ```
+**Alle Filter und Bedingungen in der Aufruf-Kette:**
 
-### 3.4 WARNING: I2C sensor config not found (DS18B20 auf gpio=4)
+| Filter | Ort | Bedingung |
+|--------|-----|-----------|
+| `esp_id` | DB (WHERE-Clause) | Muss zur internen UUID des ESPDevice passen |
+| `enabled` | Python-seitig, `config_builder.py:276` | `a.enabled == True` |
+| VIRTUAL | Python-seitig, `config_builder.py:279–281` | Nur für Sensoren, nicht für Aktoren |
+| GPIO-Konflikt | Python-seitig, `config_builder.py:306–314` | Wirft `ConfigConflictError` — bricht den gesamten Build ab, kein selektiver Ausschluss |
+| `actuator_type` | Nur in `query_paginated` (API-Listenendpoints) | Wird in `build_combined_config` NICHT verwendet |
+| LIMIT | Nicht vorhanden | Weder im Repository noch im Builder |
 
-- **Schwere:** LOW / Bekannt
-- **Detail:** `I2C sensor config not found: esp_id=ESP_EA5484, gpio=4, type=ds18b20, addr=0x44. Saving data without config.` — DS18B20 ist ein OneWire-Sensor, wird aber mit `i2c_address=68` (0x44, SHT31-Adresse) im Metadata gefuehrt. Daten werden trotzdem korrekt gespeichert (`processing_mode=raw_conversion`). Kein kritischer Fehler, aber Hinweis auf falsche Sensorconfig-Metadaten im device_metadata JSON.
+**Würde das Query beide Aktoren (GPIO 14 + GPIO 25) für ESP_EA5484 liefern?**
+
+Ja — vorausgesetzt, beide Aktoren haben in der DB `enabled=True`. Das Query holt bedingungslos alle Einträge der ESP-UUID. Der Python-seitige `enabled`-Filter ist der einzige Ausschluss-Mechanismus für Aktoren.
+
+**Kritischer Hinweis — GPIO-Konflikt-Check:**
+Falls GPIO 25 des Aktors mit einem Sensor auf demselben GPIO kollidiert, wirft der Code `ConfigConflictError`. Diese Exception bricht den gesamten `build_combined_config`-Aufruf ab. In diesem Fall würde auch GPIO 14 nicht gesendet — dieser Pfad erklärt den selektiven Ausfall eines einzelnen Aktors daher nicht.
+
+#### S2. Payload-Aufbau — Reihenfolge der Sektionen
+
+**Reihenfolge (Zeilen 320–331):**
+1. `sensor_payloads` — alle enabled, nicht-VIRTUAL Sensoren (Zeile 320)
+2. `actuator_payloads` — alle enabled Aktoren (Zeile 321)
+3. `offline_rules` — Hysterese-Regeln für lokale ESP32-Ausführung (Zeile 324)
+
+```python
+config = {
+    "sensors": sensor_payloads,
+    "actuators": actuator_payloads,
+    "offline_rules": offline_rules,
+}
+```
+
+**Größenlimit oder Truncation:**
+
+| Sektion | Limit | Truncation |
+|---------|-------|------------|
+| sensors | Keines | Nein |
+| actuators | Keines | Nein |
+| offline_rules | 8 (`MAX_OFFLINE_RULES`) | Ja, mit Warning-Log (Zeile 421–428) |
+| Payload-Bytes gesamt | Keines | Nein |
+
+Es gibt kein Byte-Limit oder JSON-Größenlimit in `publish_config` oder `send_config`. Die MQTT-Bibliothek (`paho-mqtt`) hat standardmäßig kein Payload-Limit unterhalb von 256 MB.
+
+**Logging der Payload-Größe in Bytes:** Nein — wird nicht geloggt.
+
+**Logging der Aktor-Anzahl:** Ja, an drei Stellen:
+
+| Stelle | Datei:Zeile | Log-Text (Format) |
+|--------|-------------|-------------------|
+| `build_combined_config` | `config_builder.py:338–342` | `"Built config payload for {esp_id}: N sensors, N actuators, N offline_rules, zone=..."` |
+| `send_config` | `esp_service.py:470–475` | `"Config sent to {esp_id}: N sensors, N actuators"` |
+| `publish_config` | `publisher.py:252–254` | `"Publishing config to {esp_id}: N sensor(s), N actuator(s)"` |
+
+Alle drei Logzeilen erscheinen für jeden erfolgreichen Config-Push. Sie sind die primäre Evidenzquelle.
+
+#### S3. Root-Cause-Bewertung Server-Seite
+
+**Kann das Problem (fehlender GPIO 25) auf Server-Seite liegen?**
+
+Ja — mit einer einzigen plausiblen Ursache: **GPIO 25 hat `enabled=False` in der DB-Tabelle `actuator_configs`.**
+
+Wenn `enabled=False`, wird der Aktor durch den Python-Filter in `config_builder.py:276` ausgeschlossen und erscheint nicht in `active_actuators`. Die Payload enthält dann nur GPIO 14.
+
+**Alle anderen Server-seitigen Hypothesen sind ausgeschlossen:**
+
+| Hypothese | Ausschluss-Grund |
+|-----------|-----------------|
+| LIMIT im Repository-Query | Kein LIMIT in `get_by_esp` (Zeile 107–111) |
+| Paginierung | Nicht in `build_combined_config` implementiert |
+| Byte-Truncation der Payload | Nicht in `publish_config` oder `send_config` implementiert |
+| Falscher `esp_id`-Key | Würde alle Aktoren betreffen, nicht nur einen |
+| GPIO-Konflikt-Check | Wirft Exception → bricht gesamten Build ab, kein selektiver Ausschluss |
+| `actuator_type`-Filter | Nur in `query_paginated` (API-Listing), nicht in `build_combined_config` |
+| `is_active`-Feld | Kein solches Feld im Actuator-Filter-Pfad, nur `enabled` |
+| offline_rules LIMIT | Betrifft nur `offline_rules`, nicht `actuators`-Array |
+
+**Welche Server-seitige Information fehlt zur endgültigen Klärung:**
+
+Die Log-Zeile `"Built config payload for ESP_EA5484"` aus dem Produktiv-Test vom 2026-04-03. Diese Zeile enthält die Aktor-Anzahl zum Zeitpunkt des Config-Builds und ist der entscheidende Beweis.
+
+**Such-Commands:**
+```bash
+# Lokale Log-Datei:
+grep "Built config payload for ESP_EA5484" logs/server/god_kaiser.log
+
+# Loki (wenn verfügbar):
+curl -sG http://localhost:3100/loki/api/v1/query_range \
+  --data-urlencode 'query={compose_service="el-servador"} |= "Built config payload for ESP_EA5484"' \
+  --data-urlencode 'limit=10'
+```
+
+**Interpretation:**
+- Log zeigt `1 actuators` → `enabled=False` für GPIO 25 ist Root Cause (Server-Seite)
+- Log zeigt `2 actuators` → Server hat korrekt gesendet, Problem liegt auf ESP32-Seite (Firmware-Parsing, Array-Index-Bug, NVS-Schreibfehler)
+
+**Zusätzliche DB-Verifikation (nur SELECT):**
+```sql
+SELECT gpio, actuator_name, actuator_type, enabled
+FROM actuator_configs
+WHERE esp_id = (SELECT id FROM esp_devices WHERE device_id = 'ESP_EA5484')
+ORDER BY gpio;
+```
 
 ---
 
-## 4. Extended Checks (eigenstaendig durchgefuehrt)
+## 4. Extended Checks (eigenständig durchgeführt)
 
 | Check | Ergebnis |
 |-------|----------|
-| `docker compose ps` | Alle 12 Services healthy/running. Kein Container-Problem. |
-| PostgreSQL-Logs | Keine Connection-Fehler. Verbindung stabil. Checkpoint normal. |
-| Server liveness (aus Logs) | `GET /api/v1/health/live` → 200 (0.3ms) |
-| `TIME_SERIES_TABLES` (debug_db.py:156) | Korrekt definiert: sensor_data, actuator_history, logic_execution_history, audit_logs |
-| VPD-Save-Pfad sensor_handler.py:526 | Hook feuert bei sht31_temp UND sht31_humidity — Race Condition bestaetigt |
-| `if vpd_data is None` Guard (Zeile 694) | Greift nicht — Exception propagiert vor dem Return |
-| MQTT-Pipeline sonstig | Normal: Pi-Enhanced OK, sht31_temp/humidity werden korrekt verarbeitet |
+| `get_by_esp` vollständig analysiert | Kein LIMIT, kein `enabled`-Filter auf DB-Ebene — reine WHERE esp_id Abfrage |
+| `build_combined_config` vollständig gelesen | Einziger Aktor-Filter: Python `a.enabled` (Zeile 276) |
+| `esp_service.send_config` analysiert | Loggt `actuator_count` nach `build_combined_config`, vor MQTT-Publish |
+| `publisher.publish_config` analysiert | Kein Byte-Limit, loggt Aktor-Anzahl, QoS 2 |
+| Grep `build_combined_config` über gesamtes `src/` | 8 Aufrufstellen (2x actuators.py, 2x sensors.py, 1x heartbeat_handler.py, 1x debug.py) — alle nutzen denselben Builder-Pfad |
+| `query_paginated` überprüft | Hat `actuator_type`- und `enabled`-Filter, wird aber NICHT von `build_combined_config` aufgerufen |
+| Grep `payload.*len` in `config_builder.py` | Nur Aktor/Sensor-Anzahl in Strings, kein Byte-Limit-Check |
 
 ---
 
 ## 5. Bewertung & Empfehlung
 
-### Root Causes
+**Root Cause (wahrscheinlichste Hypothese, noch nicht bewiesen):**
+Aktor GPIO 25 für ESP_EA5484 hat `enabled=False` in der Tabelle `actuator_configs`. Der Python-seitige Filter in `config_builder.py:276` schliesst ihn aus der Payload aus.
 
-**BUG-1 (CRITICAL):** `debug.py:2235` — `cutoff.isoformat()` muss `cutoff` (datetime-Objekt) sein. asyncpg akzeptiert keine Strings fuer Timestamp-Parameter in prepared statements. Jede Abfrage auf allen Time-Series-Tabellen im System Monitor schlaegt fehl.
+**Beweis-Reihenfolge (nur lesende Operationen):**
 
-**BUG-2 (HIGH):** `sensor_handler.py:526` — VPD-Computation-Hook feuert bei beiden SHT31-Sensor-Typen. Race Condition bei gleichzeitiger Verarbeitung erzeugt regelmaessige Duplicate-Key-Violations in PostgreSQL. Empfehlung: VPD nur beim `sht31_temp`-Trigger berechnen.
+1. Server-Log prüfen: Log-Zeile `"Built config payload for ESP_EA5484"` — zeigt die Aktor-Anzahl zum Zeitpunkt des Config-Push-Events
+2. DB-Abfrage: `SELECT gpio, enabled FROM actuator_configs WHERE esp_id = (SELECT id FROM esp_devices WHERE device_id = 'ESP_EA5484') ORDER BY gpio` — direkte Verifikation des `enabled`-Status beider Aktoren
+3. Falls Server-Log `2 actuators` zeigt und DB beide `enabled=True` hat: Ursache liegt auf ESP32-Seite, ESP32-Debug-Agent aktivieren
 
-### Nächste Schritte (nach Prioritaet)
-
-1. **CRITICAL — Sofort:** `debug.py:2235`: `cutoff.isoformat()` → `cutoff`. Eine Zeile, minimales Risiko.
-2. **HIGH — Zeitnah:** `sensor_handler.py:526`: VPD-Hook-Bedingung von `in ("sht31_temp", "sht31_humidity")` zu `== "sht31_temp"` aendern.
-3. **LOW — Optional:** DS18B20-Sensorconfig-Metadaten: `i2c_address=68` bei OneWire-Sensor ist inhaltlich falsch (kein Blocker, Daten werden korrekt gespeichert).
+**Nächste Schritte (nur Analyse, kein Fix):**
+- Produktiv-Log vom 2026-04-03 nach den drei Log-Zeilen für ESP_EA5484 filtern
+- DB `enabled`-Status für GPIO 14 und GPIO 25 prüfen
+- Bei Server-Bestätigung `2 actuators`: ESP32-seitiges Firmware-Parsing der `actuators`-JSON-Array analysieren (Firmware-Limit, Array-Index-Handling, NVS-Blob-Schreib-Verhalten)

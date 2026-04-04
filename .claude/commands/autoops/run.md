@@ -5,6 +5,7 @@ description: AutoOps - Autonomer Agent für ESP-Konfiguration, Debug & Fix
 # AutoOps - Autonomous Operations Agent
 
 > **Vollautonomer Agent** der ESPs komplett über die REST API konfiguriert, debuggt und dokumentiert - wie ein echter User im Frontend.
+> **Voraussetzung:** God-Kaiser muss erreichbar sein. Standard ist `localhost:8000`; der Runner prueft den Endpoint und nutzt bei Bedarf automatisch die Container-IP von `automationone-server`. Optional kann `AUTOOPS_SERVER` explizit gesetzt werden.
 
 ## Aufgabe
 
@@ -24,7 +25,7 @@ Falls der User keine Sensoren/Aktoren angegeben hat, frage mit `AskUserQuestion`
 cd "El Servador/god_kaiser_server" && python -c "
 import asyncio
 from src.autoops.runner import run_autoops
-result = asyncio.run(run_autoops(mode='health', server_url='http://localhost:8000'))
+result = asyncio.run(run_autoops(mode='health'))
 print('Health:', 'OK' if result.get('all_passed') else 'ISSUES')
 "
 ```
@@ -159,7 +160,7 @@ Der Agent kann **direkt im Browser** arbeiten – wie ein echter User. Nutze die
 
 **Typischer Flow:**
 1. `browser_navigate` → http://localhost:5173
-2. `browser_fill_form` → admin / Admin123#
+2. `browser_fill_form` → admin / admin123
 3. `browser_click` → Anmelden
 4. Dashboard sichtbar → ESP-Karten klicken, Konfigurieren, etc.
 
@@ -168,6 +169,6 @@ Kann mit REST-API-AutoOps kombiniert werden: Zuerst API für Konfiguration, dann
 ## Bei Fehlern
 
 1. **Server nicht erreichbar:** `cd "El Servador/god_kaiser_server" && python -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8000`
-2. **Auth fehlgeschlagen:** Standard-Credentials: admin / Admin123# (oder env: AUTOOPS_PASSWORD)
+2. **Auth fehlgeschlagen:** Standard-Credentials: admin / admin123 (oder env: AUTOOPS_PASSWORD)
 3. **Import-Fehler:** `cd "El Servador/god_kaiser_server" && pip install -e .`
 4. **Plugin nicht gefunden:** Prüfe `autoops/plugins/` ob Datei vorhanden

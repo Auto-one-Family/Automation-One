@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 3.1 | **Aktualisiert:** 2026-03-30
+> **Version:** 3.8 | **Aktualisiert:** 2026-04-04
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
-> **Event-Anzahl:** 36 verschiedene Event-Typen (inkl. device_context_changed, device_scope_changed T13-R2)
+> **Event-Anzahl:** 40 relevante Event-Typen (38 serverseitige Broadcast-Events + 2 Frontend-Contract-Integrationssignale)
 
 ---
 
@@ -21,6 +21,7 @@ allowed-tools: Read
 | Event | Richtung | Trigger | Beschreibung |
 |-------|----------|---------|--------------|
 | `esp_health` | Server→Frontend | Heartbeat | ESP Online-Status, Health-Daten |
+| `esp_reconnect_phase` | Server→Frontend | Reconnect-Handover | Adoption-Phasen: adopting, adopted, delta_enforced |
 | `device_discovered` | Server→Frontend | Neues ESP | Unbekanntes ESP entdeckt |
 | `device_rediscovered` | Server→Frontend | ESP wieder online | Bekanntes ESP kommt zurück |
 | `device_approved` | Server→Frontend | Admin-Aktion | Pending ESP genehmigt |
@@ -49,9 +50,10 @@ allowed-tools: Read
 
 | Event | Richtung | Trigger | Beschreibung |
 |-------|----------|---------|--------------|
-| `config_response` | Server→Frontend | ESP-ACK | ESP bestätigt Config |
+| `config_response` | Server→Frontend | ESP-ACK | ESP bestätigt Config (terminal nur mit `data.correlation_id`) |
 | `config_published` | Server→Frontend | Config gesendet | Config erfolgreich gepublished |
-| `config_failed` | Server→Frontend | Config fehlgeschlagen | Publish-Fehler |
+| `config_failed` | Server→Frontend | Config fehlgeschlagen | Publish-Fehler (terminal nur mit `data.correlation_id`) |
+| `intent_outcome` | Server→Frontend | IntentOutcomeHandler | Kanonischer Intent/Outcome-Status aus MQTT |
 
 ### Zone Events
 
@@ -67,7 +69,7 @@ allowed-tools: Read
 | Event | Richtung | Trigger | Beschreibung |
 |-------|----------|---------|--------------|
 | `logic_execution` | Server→Frontend | Rule ausgeführt | Automation Rule triggered |
-| `notification` | Server→Frontend | Rule-Notification | Benachrichtigung von Rule (Legacy) |
+| `notification` | Server→Frontend | Legacy Rule-Notification | **Deprecated** Legacy-Event (nicht NotificationRouter-basiert, Sunset: 2026-07-03) |
 
 ### Notification Events (Phase 4A)
 
@@ -101,6 +103,8 @@ allowed-tools: Read
 | `system_event` | Server→Frontend | Maintenance | Cleanup, Health-Check, etc. |
 | `error_event` | Server→Frontend | ESP Error | Hardware/Config Fehler |
 | `events_restored` | Server→Frontend | Backup Restore | Audit-Events wiederhergestellt |
+| `contract_mismatch` | Frontend intern | Contract Mapper | Pflichtfeld-/Schema-Mismatch bei WS-Event (Integrationssignal mit Operator-Aktion) |
+| `contract_unknown_event` | Frontend intern | Contract Mapper | Unbekannter Event-Typ ausserhalb Contract (Integrationssignal mit Rohkontext) |
 
 ---
 
@@ -170,7 +174,12 @@ Alle WebSocket-Nachrichten haben folgendes Format:
 | `type` | string | Event-Typ-Identifier |
 | `timestamp` | number | Unix Timestamp (Sekunden) |
 | `correlation_id` | string? | Optional. MQTT-Pipeline: `{esp_id}:{topic}:{seq}:{ts_ms}`. REST-Pipeline: UUID. Nur vorhanden wenn aus MQTT-Handler oder REST-Context gesendet |
+| `data.request_id` | string? | Optional. Request-Trace innerhalb der Event-Payload (derzeit standardisiert fuer `config_response`), kein primaerer Intent-Schluessel |
 | `data` | object | Event-spezifische Payload |
+
+**Projection-Konsistenz (Step 3):**
+- Contract-kritische Events (`config_response`, `actuator_response`, `error_event`, `esp_diagnostics`, `esp_health`) werden serverseitig über einen gemeinsamen Serializer-Layer erzeugt (`event_contract_serializers`).
+- Dadurch sind Feldnamen/Typen zwischen MQTT-Ingest/WebSocket und REST-Aggregation konsistent.
 
 ---
 
@@ -200,6 +209,10 @@ ESP Heartbeat/Status Update. Wird bei jedem Heartbeat vom ESP gesendet.
     "actuator_count": 2,
     "zone_id": "greenhouse",
     "master_zone_id": "main_zone",
+    "contract_violation": false,
+    "contract_code": null,
+    "contract_reason": null,
+    "raw_system_state": null,
     "gpio_status": [
       {
         "gpio": 4,
@@ -212,6 +225,13 @@ ESP Heartbeat/Status Update. Wird bei jedem Heartbeat vom ESP gesendet.
   }
 }
 ```
+
+**Contract-Kontext:**
+- `contract_violation`: `true`, wenn kanonische Vorvalidierung für Heartbeat Vertragsabweichungen erkannt hat
+- `contract_code`: Aktuell `CONTRACT_UNKNOWN_CODE` bei Unknown-Werten
+- `contract_reason`: Detaillierte Vertragsverletzung für Audit/UI
+- `raw_system_state`: Originalwert aus Firmware vor Canonicalisierung
+- Offline-Varianten (`status="offline"`, z.B. LWT/Timeout) folgen derselben Payload-Struktur und enthalten zusätzlich `reason`, optional `source`, `timeout_seconds`, `actuator_states_reset`.
 
 ---
 
@@ -241,10 +261,46 @@ ESP System-Diagnostics Snapshot. Wird alle 60s vom HealthMonitor gesendet.
     "mqtt_cb_state": "CLOSED",
     "wdt_mode": "PRODUCTION",
     "wdt_timeouts_24h": 0,
+    "contract_violation": false,
+    "contract_code": null,
+    "contract_reason": null,
+    "raw_system_state": null,
     "timestamp": 1735818000
   }
 }
 ```
+
+**Contract-Kontext:**
+- `contract_violation`, `contract_code`, `contract_reason`, `raw_system_state` werden bei kanonischer Ingest-Normalisierung mitgesendet
+- Payload wird über den Shared-Serializer erstellt (identisches Feldschema in WS und REST-Projektionen).
+
+---
+
+### 3.1c esp_reconnect_phase
+
+Reconnect-Handover-Phase fuer deterministische State-Uebernahme ohne Flackern.
+
+**Trigger:** Heartbeat-Reconnect-Flow (`ADOPTING -> ADOPTED -> DELTA_ENFORCED`)
+
+**Code-Location:** [heartbeat_handler.py:1357](El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py#L1357)
+
+**Payload:**
+```json
+{
+  "type": "esp_reconnect_phase",
+  "timestamp": 1706787600,
+  "data": {
+    "esp_id": "ESP_12AB34CD",
+    "phase": "adopting",
+    "offline_seconds": 122.4
+  }
+}
+```
+
+**phase Values:**
+- `adopting`: Reconnect erkannt, Device-Istzustand wird gesammelt
+- `adopted`: Adoption abgeschlossen, Enforce-Gate geoeffnet
+- `delta_enforced`: Delta-Vergleich/Evaluation abgeschlossen
 
 ---
 
@@ -335,7 +391,7 @@ Bekanntes ESP-Gerät kommt zurück (zwei Fälle):
 
 ESP-Gerät wurde durch Admin genehmigt.
 
-**Trigger:** `POST /esp/pending/{esp_id}/approve`
+**Trigger:** `POST /esp/devices/{esp_id}/approve`
 
 **Code-Location:** [esp.py:1230](El Servador/god_kaiser_server/src/api/v1/esp.py#L1230)
 
@@ -359,7 +415,7 @@ ESP-Gerät wurde durch Admin genehmigt.
 
 ESP-Gerät wurde durch Admin abgelehnt.
 
-**Trigger:** `POST /esp/pending/{esp_id}/reject`
+**Trigger:** `POST /esp/devices/{esp_id}/reject`
 
 **Code-Location:** [esp.py:1333](El Servador/god_kaiser_server/src/api/v1/esp.py#L1333)
 
@@ -598,14 +654,31 @@ ESP32 bestätigt Command-Ausführung.
   "data": {
     "esp_id": "ESP_12AB34CD",
     "gpio": 5,
-    "actuator_type": "pump",
     "command": "ON",
+    "value": 1.0,
     "success": true,
-    "error_code": null,
-    "message": null
+    "message": "Command executed",
+    "timestamp": 1735818000,
+    "correlation_id": "cmd_abc123",
+    "code": "ACTUATOR_COMMAND_APPLIED",
+    "domain": "actuator",
+    "severity": "info",
+    "terminality": "terminal_success",
+    "retry_policy": "forbidden",
+    "is_final": true,
+    "contract_violation": false,
+    "raw_esp_id": "ESP_12AB34CD",
+    "raw_gpio": 5,
+    "raw_success": true
   }
 }
 ```
+
+**Contract-Hinweise:**
+- Ingest ist canonical-first: Topic (`esp_id`, `gpio`) ist autoritativ; Payload-Mismatches werden als `contract_violation` sichtbar.
+- Unbekannte/inkonsistente Vertragswerte werden serverseitig auf `code="CONTRACT_UNKNOWN_CODE"` normalisiert (kein stiller Fallback).
+- Fehlende `correlation_id` wird robust ersetzt (`missing-corr:act:...`) und als Vertragsproblem markiert.
+- WS-Projektion nutzt denselben Shared-Serializer wie die REST-Aggregations-Projektion.
 
 ---
 
@@ -662,17 +735,45 @@ Config ACK vom ESP nach Config-Update.
   "timestamp": 1706787600,
   "data": {
     "esp_id": "ESP_12AB34CD",
-    "config_id": "cfg_12345",
-    "config_applied": true,
-    "applied_sections": ["sensors", "actuators"],
-    "skipped_sections": [],
-    "restart_required": false,
-    "error": null,
-    "error_code": null,
-    "severity": "info"
+    "config_type": "sensor",
+    "status": "partial_success",
+    "count": 2,
+    "failed_count": 1,
+    "message": "2 configured, 1 failed",
+    "timestamp": 1735818000,
+    "correlation_id": "cfg_abc123",
+    "request_id": "req_42",
+    "error_code": "GPIO_CONFLICT",
+    "error_description": "Der GPIO-Pin wird bereits von einem anderen Sensor oder Aktor verwendet",
+    "failures": [
+      {
+        "type": "sensor",
+        "gpio": 5,
+        "error": "GPIO_CONFLICT",
+        "detail": "Reserved"
+      }
+    ],
+    "domain": "config.sensor",
+    "severity": "warning",
+    "terminality": "terminal_failure",
+    "retry_policy": "allowed",
+    "is_final": true,
+    "contract_violation": false,
+    "raw_status": "partial_success",
+    "raw_type": "sensor",
+    "raw_error_code": "GPIO_CONFLICT"
   }
 }
 ```
+
+**Contract-Hinweise:**
+- Ingest ist canonical-first: Status/Typ/Error-Codes werden vor Handler-Logik kanonisiert.
+- Legacy-Aliase (`failed` -> `error`, `config_type` -> `type`) bleiben kompatibel.
+- Unbekannte Vertragswerte werden auf `CONTRACT_UNKNOWN_CODE` normalisiert und mit `raw_*` Feldern auditierbar gemacht.
+- Fehlende `correlation_id` wird robust ergänzt (`missing-corr:cfg:...`) und als Vertragsproblem markiert.
+- Frontend behandelt terminale Config-Events ohne verwertbare `data.correlation_id` als `contract_mismatch`; betroffene Config-Intents bleiben pending (kein heuristisches Latest-Pending-Fallback).
+- WS-Projektion nutzt denselben Shared-Serializer wie die REST-Aggregations-Projektion.
+- `request_id` wird bei `config_response` optional in `data` projiziert (Trace-Kontext), Frontend-Zuordnung bleibt primär `data.correlation_id`.
 
 ---
 
@@ -697,6 +798,10 @@ Config erfolgreich an ESP gepublished.
 }
 ```
 
+**Contract-Hinweise:**
+- `data.correlation_id` ist der primaere Intent-Schluessel fuer Frontend-Lifecycle-Mapping.
+- `request_id` ist in `data` aktuell optional/nicht standardisiert und darf nicht als Ersatz fuer fehlende `correlation_id` verwendet werden.
+
 ---
 
 ### 6.3 config_failed
@@ -720,6 +825,69 @@ Config Publishing fehlgeschlagen.
   }
 }
 ```
+
+**Contract-Hinweise:**
+- Terminale Zuordnung im Frontend erfolgt primaer ueber `data.correlation_id`.
+- Falls `data.correlation_id` fehlt, ist das ein Integrationssignal (Contract-Drift), kein sauber korrelierbarer Normalfall.
+- Kein heuristisches Finalisieren: ohne eindeutige Korrelation darf kein fremdes/offenes Config-Intent terminalisiert werden.
+
+---
+
+### 6.4 intent_outcome
+
+Kanonisches Intent/Outcome-Event aus dem MQTT-Ingest.
+
+**Trigger:** MQTT Topic `kaiser/{kaiser_id}/esp/{esp_id}/system/intent_outcome`
+
+**Code-Location:** `intent_outcome_handler.py`
+
+**Payload:**
+```json
+{
+  "type": "intent_outcome",
+  "timestamp": 1706787600,
+  "correlation_id": "corr_171217_9",
+  "data": {
+    "esp_id": "ESP_12AB34CD",
+    "intent_id": "act_171217_1",
+    "correlation_id": "corr_171217_9",
+    "flow": "command",
+    "outcome": "persisted",
+    "contract_version": 2,
+    "semantic_mode": "target",
+    "legacy_status": "success",
+    "target_status": "persisted",
+    "is_final": true,
+    "code": "COMMAND_APPLIED",
+    "reason": "Actuator command executed",
+    "retryable": false,
+    "generation": 3,
+    "seq": 42,
+    "epoch": 7,
+    "ttl_ms": 10000,
+    "ts": 1735818000,
+    "first_seen_at": "2026-04-04T08:00:00+00:00",
+    "terminal_at": "2026-04-04T08:00:01+00:00",
+    "domain": "command",
+    "severity": "info",
+    "terminality": "terminal_success",
+    "retry_policy": "forbidden",
+    "contract_violation": false,
+    "raw_flow": "command",
+    "raw_outcome": "success",
+    "reconciliation": {
+      "session_id": "recon-0123abcd4567",
+      "phase": "progress",
+      "position": 4,
+      "total": 12,
+      "started_at": 1735818000
+    }
+  }
+}
+```
+
+**outcome Values:** `accepted`, `rejected`, `applied`, `persisted`, `failed`, `expired`
+**Parität API/WS:** `data` entspricht dem kanonischen Serializer aus `/v1/intent-outcomes` plus WS-spezifischen Feldern (`domain`, `severity`, `terminality`, `retry_policy`, `contract_violation`, `raw_*`, `reconciliation`).
 
 ---
 
@@ -923,9 +1091,11 @@ Automation Rule wurde ausgeführt. Wird pro Action einmal gesendet.
 
 Notification von Automation Rule.
 
-**Trigger:** `NotificationAction` in Rule ausgeführt
+**Trigger:** `NotificationAction` in Rule ausgeführt (Legacy-Pfad)
 
 **Code-Location:** [notification_executor.py:134](El Servador/god_kaiser_server/src/services/logic/actions/notification_executor.py#L134)
+
+**Status:** **Deprecated** (Sunset: **2026-07-03**). Aktive produktive Notifications laufen ueber `notification_new`/`notification_updated`/`notification_unread_count` via `NotificationRouter`.
 
 **Payload:**
 ```json
@@ -985,7 +1155,7 @@ Neue DB-persistierte Notification. Wird vom NotificationRouter nach jeder Notifi
 | `source` | string | `grafana`, `logic_engine`, `mqtt_handler`, `sensor_threshold`, `device_event`, `autoops`, `manual`, `system` |
 | `metadata` | object | Context-spezifisch (esp_id, gpio, rule_id, grafana_uid, etc.) |
 
-> **Event-Routing:** `notification_new` → `notification-inbox.store` (persistente Inbox). Das Legacy-Event `notification` (8.2) geht weiterhin an `notification.store` (Toasts).
+> **Event-Routing:** `notification_new` → `notification-inbox.store` (persistente Inbox). Legacy `notification` sollte nur noch fuer Rueckwaertskompatibilitaet behandelt werden.
 
 ---
 
@@ -1286,6 +1456,11 @@ ESP Hardware/Config Fehler.
     "title": "Sensor-Fehler",
     "category": "hardware",
     "message": "DS18B20 sensor on GPIO 4 not responding",
+    "contract_violation": false,
+    "contract_code": null,
+    "contract_reason": null,
+    "raw_severity": 2,
+    "raw_category": "HARDWARE",
     "troubleshooting": [
       "Verkabelung prüfen",
       "Pull-up Widerstand vorhanden?",
@@ -1297,6 +1472,12 @@ ESP Hardware/Config Fehler.
   }
 }
 ```
+
+**Contract-Kontext:**
+- `contract_violation`: `true`, wenn Severity/Category nur über Contract-Fallback normalisiert wurde
+- `contract_code`: Aktuell `CONTRACT_UNKNOWN_CODE` bei Unknown-Werten
+- `raw_severity`, `raw_category`: Originalfelder aus dem eingehenden MQTT-Payload
+- WS-Projektion nutzt denselben Shared-Serializer wie die REST-Aggregations-Projektion.
 
 ---
 
@@ -1320,6 +1501,69 @@ Audit-Events aus Backup wiederhergestellt.
   }
 }
 ```
+
+---
+
+### 11.4 contract_mismatch (Frontend intern)
+
+Integrationssignal fuer bekannte WS-Event-Typen mit Contract-/Schema-Mismatch.
+
+**Trigger:** Frontend Contract Validator (`validateContractEvent`) erkennt Pflichtfeld- oder Typverletzung.
+
+**Payload:**
+```json
+{
+  "type": "contract_mismatch",
+  "timestamp": 1706787600,
+  "correlation_id": "corr_123",
+  "request_id": "req_123",
+  "data": {
+    "original_event_type": "actuator_response",
+    "contract_issue": "schema_mismatch",
+    "mismatch_reason": "actuator_response ohne success-Boolean",
+    "operator_action": "Contract-Pruefung erforderlich",
+    "raw_context": {
+      "event_type": "actuator_response",
+      "payload": {
+        "esp_id": "ESP_12AB34CD",
+        "gpio": 5
+      }
+    }
+  }
+}
+```
+
+**Hinweis:** `contract_mismatch` ist ein Integrationsproblem (Contract-Drift), kein normaler Betriebsfehler.
+
+---
+
+### 11.5 contract_unknown_event (Frontend intern)
+
+Integrationssignal fuer unbekannte WS-Event-Typen ausserhalb des bekannten Contracts.
+
+**Trigger:** Frontend Contract Validator (`validateContractEvent`) erkennt unbekannten Event-Typ.
+
+**Payload:**
+```json
+{
+  "type": "contract_unknown_event",
+  "timestamp": 1706787600,
+  "correlation_id": "corr_124",
+  "request_id": "req_124",
+  "data": {
+    "original_event_type": "future_event_x",
+    "contract_issue": "unknown_event_type",
+    "mismatch_reason": "Unbekannter Event-Typ \"future_event_x\"",
+    "operator_action": "Contract-Pruefung erforderlich",
+    "raw_context": {
+      "event_type": "future_event_x",
+      "payload": {}
+    }
+  }
+}
+```
+
+**Hinweis:** `contract_unknown_event` wird absichtlich sichtbar gemacht (nicht still verworfen), damit Contract-Drift operativ erkennbar bleibt.
 
 ---
 
@@ -1400,6 +1644,21 @@ onUnmounted(() => {
 })
 ```
 
+### 12.5 Contract-First Consumption (Frontend)
+
+- REST startet Intent nur (`POST /actuators/{espId}/{gpio}/command`), finalisiert aber nicht.
+- REST startet auch Config-/Sequence-Intents nur; Finalisierung erfolgt ausschliesslich ueber terminale WS-Events.
+- Terminale Endlagen werden nur aus WS-Events abgeleitet:
+  - Actuator: `actuator_response`, `actuator_command_failed`
+  - Config: `config_response`, `config_failed`
+  - Sequence: `sequence_completed`, `sequence_error`, `sequence_cancelled`
+- Timeout bleibt non-terminaler Hinweis (kein heuristisches Finalisieren).
+- Unknown-Events oder Schema-Mismatch werden als `contract_unknown_event` / `contract_mismatch` sichtbar gemacht (Integrationsproblem statt Betriebsfehler).
+- `data.correlation_id` ist der primaere Schluessel fuer Intent-Zuordnung; `request_id` ist rein zusaetzlicher Trace-Kontext, sofern vorhanden.
+- Integrationssignale enthalten Operator-Hinweis (`data.operator_action`) und Rohkontext (`data.raw_context`) fuer schnelle Diagnose im Monitor/Detailpanel.
+- Semantik fuer Severity-Fallback und Operator-Aktion wird zentral aus `src/utils/contractEventMapper.ts` abgeleitet (`inferFallbackSeverity`, `CONTRACT_OPERATOR_ACTION`); keine View-lokalen Sonderregeln.
+- `EventDetailsPanel` zeigt fuer terminale Fehler-/Abbruch-Events eine einheitliche Operator-Entscheidung: Problemtyp (`Integrationsproblem`/`Betriebsproblem`), Prioritaet, Ursache und naechster Schritt.
+
 ---
 
 ## 13. Filter-Typen
@@ -1442,7 +1701,7 @@ interface WebSocketFilters {
 | `actuator_handler.py` | `actuator_status` |
 | `actuator_response_handler.py` | `actuator_response` |
 | `actuator_alert_handler.py` | `actuator_alert` |
-| `heartbeat_handler.py` | `esp_health`, `device_discovered`, `device_rediscovered` |
+| `heartbeat_handler.py` | `esp_health`, `esp_reconnect_phase`, `device_discovered`, `device_rediscovered` |
 | `config_handler.py` | `config_response` |
 | `zone_ack_handler.py` | `zone_assignment` |
 | `subzone_ack_handler.py` | `subzone_assignment` |

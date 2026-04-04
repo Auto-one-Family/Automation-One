@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Error-Code Referenz
 
-> **Version:** 1.5 | **Aktualisiert:** 2026-03-05
+> **Version:** 1.6 | **Aktualisiert:** 2026-04-04
 > **Quellen:** `El Trabajante/src/models/error_codes.h`, `El Servador/god_kaiser_server/src/core/error_codes.py`
 > **Letzte Verifizierung:** AGENT 3 Error-Code Spezialist
 
@@ -30,7 +30,7 @@ allowed-tools: Read
 | 4001 | ESP32 | APPLICATION | State Transition ungültig | Logs prüfen |
 | 5001 | Server | CONFIG | ESP nicht gefunden | ESP registrieren |
 | 5202 | Server | VALIDATION | Ungültiger GPIO | Gültigen GPIO verwenden |
-| 5301 | Server | DATABASE | DB Connection failed | PostgreSQL prüfen |
+| 5301 | Server | DATABASE | Transaction Open/Query failed | Persistenzpfad prüfen |
 | 5640 | Server | SEQUENCE | Actuator locked | Warten oder Force-Release |
 | 5700 | Server | LOGIC | Rule nicht gefunden | Rule-Name prüfen |
 | 5780 | Server | SUBZONE | Subzone nicht gefunden | Subzone-Config prüfen |
@@ -192,6 +192,17 @@ allowed-tools: Read
 | 2031 | `STORAGE_READ_FAILED` | Failed to read from storage |
 | 2032 | `STORAGE_WRITE_FAILED` | Failed to write to storage |
 
+### Transactional Persistence Errors (2301-2306)
+
+| Code | Name | Beschreibung |
+|------|------|--------------|
+| 2301 | `TRANSACTION_OPEN_FAILED` | Failed to open persistence transaction |
+| 2302 | `NAMESPACE_CONFLICT` | Persistence namespace conflict detected |
+| 2303 | `WRITE_WITHOUT_TRANSACTION` | Write attempted without active transaction |
+| 2304 | `COMMIT_FAILED` | Persistence transaction commit failed |
+| 2305 | `ROLLBACK_FAILED` | Persistence transaction rollback failed |
+| 2306 | `WRITE_TIMEOUT` | Persistence write timed out |
+
 ### Subzone Errors (2500-2506)
 
 | Code | Name | Beschreibung |
@@ -282,13 +293,14 @@ allowed-tools: Read
 | 4021 | `COMMAND_PARSE_FAILED` | Failed to parse command |
 | 4022 | `COMMAND_EXEC_FAILED` | Command execution failed |
 
-### Payload Errors (4030-4032)
+### Payload Errors (4030-4033)
 
 | Code | Name | Beschreibung |
 |------|------|--------------|
 | 4030 | `PAYLOAD_INVALID` | Payload is invalid or malformed |
 | 4031 | `PAYLOAD_TOO_LARGE` | Payload size exceeds maximum allowed |
 | 4032 | `PAYLOAD_PARSE_FAILED` | Failed to parse payload (JSON syntax error) |
+| 4033 | `CONTRACT_CORRELATION_MISSING` | Contract violation: required `correlation_id` missing |
 
 ### Memory Errors (4040-4042)
 
@@ -384,12 +396,12 @@ allowed-tools: Read
 
 | Code | Name | Beschreibung |
 |------|------|--------------|
-| 5301 | `QUERY_FAILED` | Database query failed |
+| 5301 | `TRANSACTION_OPEN_FAILED` (`QUERY_FAILED` alias) | Database transaction open/query failed |
 | 5302 | `COMMIT_FAILED` | Database commit failed |
 | 5303 | `ROLLBACK_FAILED` | Database rollback failed |
-| 5304 | `CONNECTION_FAILED` | Database connection failed |
-| 5305 | `INTEGRITY_ERROR` | Database integrity constraint violated |
-| 5306 | `MIGRATION_FAILED` | Database migration failed |
+| 5304 | `NAMESPACE_CONFLICT` (`CONNECTION_FAILED` alias) | Persistence namespace conflict / DB connection conflict |
+| 5305 | `WRITE_WITHOUT_TRANSACTION` (`INTEGRITY_ERROR` alias) | Write without transaction / integrity constraint violated |
+| 5306 | `WRITE_TIMEOUT` (`MIGRATION_FAILED` alias) | Persistence write timeout / database migration failed |
 | 5307 | `RECORD_NOT_FOUND` | Database record not found |
 | 5308 | `RECORD_DUPLICATE` | Duplicate database record |
 
@@ -566,7 +578,43 @@ Diese Codes werden in `config_response` Payloads verwendet:
 | `TYPE_MISMATCH` | Field type mismatch in configuration |
 | `MISSING_FIELD` | Required field missing in configuration |
 | `OUT_OF_RANGE` | Value out of allowed range |
+| `PAYLOAD_TOO_LARGE` | Config payload exceeds queue buffer (CONFIG_PAYLOAD_MAX_LEN) — CP-F4 |
+| `CONTRACT_MISSING_CORRELATION` | Config contract verletzt: `correlation_id` fehlt (strict contract, kein lokaler Fallback) |
 | `UNKNOWN_ERROR` | Unknown configuration error |
+
+---
+
+## 13a. Intent-Outcome Contract Codes (String-based)
+
+Diese Codes werden für serverseitige Contract-Verletzungen im `system/intent_outcome` Ingest verwendet:
+
+| Code | Beschreibung |
+|------|--------------|
+| `CONTRACT_UNKNOWN_CODE` | `flow`/`outcome` konnte nicht auf den kanonischen Vertrag gemappt werden (Unknown/Alias drift). |
+| `CONTRACT_MISSING_CORRELATION` | `correlation_id` fehlte im Inbound-Event; Server setzt Fallback-Korrelation und markiert non-retryable. |
+
+---
+
+## 13b. Contract-Code Governance Matrix
+
+Pflichtattribute fuer alle Contract-Faelle (CI-gate-gesichert):
+
+| Code | Domain | Severity | Terminality | Retry-Policy | Operator-Action |
+|------|--------|----------|-------------|--------------|-----------------|
+| `4033 / CONTRACT_CORRELATION_MISSING` | `contract` | `error` | `non_terminal` | `forbidden` | Correlation-ID Pipeline pruefen; betroffene Events im Monitor filtern und Producer fixen. |
+| `CONTRACT_UNKNOWN_CODE` | `contract` | `error` | `terminal_failure` | `forbidden` | Mapping `flow/outcome` gegen kanonischen Vertrag pruefen und Drift im Producer beheben. |
+| `CONTRACT_MISSING_CORRELATION` | `contract` | `error` | `terminal_failure` | `forbidden` | Inbound-Producer auf verpflichtende `correlation_id` korrigieren; Replay erst nach Fix. |
+
+---
+
+## 13c. Operator-Runbook "Contract-Faelle"
+
+| Contract-Fall | Trigger im Monitoring | Sofortdiagnose | Sofortschritt |
+|---------------|-----------------------|----------------|---------------|
+| Missing Correlation | `god_kaiser_ws_missing_correlation_total` steigt | Event im `System Monitor` nach `contract_*` und fehlender `correlation_id` filtern | Producer stoppen/isolieren, Contract fixen, danach Replay starten. |
+| Envelope/Data Divergence | `god_kaiser_ws_envelope_data_divergence_total` steigt | Envelope `correlation_id` gegen `data.correlation_id` vergleichen | Serializer korrigieren, bis dahin Event als Integrationsstoerung behandeln. |
+| Unknown Contract Code | `contract_unknown_code_total{event_type=*}` steigt | Rohpayload + kanonischen Mapping-Pfad vergleichen (`intent_outcome`/System-Events) | Neues Mapping oder Contract-Update einspielen, danach Regressionstest ausfuehren. |
+| Blocked Terminalization | `god_kaiser_contract_terminalization_blocked_total{reason="terminal_authority_guard"}` steigt | Pruefen, ob stale terminal events doppelt eintreffen (dedup key/correlation) | Duplicate Producer Calls beseitigen; nur monotone terminal events zulassen. |
 
 ---
 
@@ -636,7 +684,7 @@ const char* range = getErrorCodeRange(1002);   // → "HARDWARE"
 | State (4001-4003) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
 | Operation (4010-4012) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
 | Command (4020-4022) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
-| Payload (4030-4032) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
+| Payload (4030-4033) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
 | Memory (4040-4042) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
 | System (4050-4052) | ✅ Vollständig | ✅ Vollständig | ✅ OK |
 | Task (4060-4062) | ✅ Vollständig | ✅ Vollständig | ✅ OK |

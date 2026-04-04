@@ -383,7 +383,7 @@ poetry run python scripts/seed_wokwi_esp.py
 
 | Service | Datei | Zeilen | Hauptmethoden |
 |---------|-------|--------|---------------|
-| **LogicEngine** | logic_engine.py | 833 | `start()`, `stop()`, `evaluate_sensor_data()`, `evaluate_timer_triggered_rules()` |
+| **LogicEngine** | logic_engine.py | 1502 | `start()`, `stop()`, `evaluate_sensor_data()`, `evaluate_timer_triggered_rules()` |
 | **SafetyService** | safety_service.py | 264 | `validate_actuator_command()`, `emergency_stop_all()` |
 | **SensorService** | sensor_service.py | 545 | `process_reading()`, `trigger_measurement()` |
 | **ActuatorService** | actuator_service.py | 279 | `send_command()` |
@@ -397,6 +397,7 @@ poetry run python scripts/seed_wokwi_esp.py
 | **AlertSuppressionService** | alert_suppression_service.py | ~180 | `check_suppression()`, `update_config()`, `expire_suppressions()` — ISA-18.2 Shelved Alarms |
 | **DiagnosticsService** | diagnostics_service.py | ~350 | `run_full_diagnostic()`, `cleanup_old_reports()` — 10 modulare System-Checks |
 | **PluginService** | plugin_service.py | ~380 | `execute_plugin()`, `update_schedule()`, `sync_registry_to_db()` — Registry ↔ DB Mediator |
+| **StateAdoptionService** | state_adoption_service.py | ~160 | `start_reconnect_cycle()`, `record_adopted_state()`, `mark_adoption_completed()`, `is_adoption_completed()` — Reconnect-Handover-Gate (adopting → adopted → delta_enforced) |
 | **DeviceScopeService** | device_scope_service.py | - | `get_active_context()` → `ActiveContextData` (NamedTuple), `set_context()`, `resolve_zone()` — 3-Way Resolution, Cache 30s TTL, session-safe (T13-R2+Phase3) |
 | **MQTTCommandBridge** | mqtt_command_bridge.py | ~230 | `send_and_wait_ack()`, `resolve_ack()`, `has_pending()`, `shutdown()` — ACK-gesteuerte MQTT-Kommunikation für Zone/Subzone-Operationen (T13-Phase2) |
 

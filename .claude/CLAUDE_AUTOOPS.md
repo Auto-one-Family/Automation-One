@@ -1,9 +1,9 @@
 # AutoOps - Autonomous Operations Agent Framework
 
 > **Für KI-Agenten:** Plugin-basierter autonomer Agent der ESP32-Geräte vollständig über die REST API konfiguriert, debuggt und dokumentiert.
-> **Version:** 2.3.0
+> **Version:** 2.4.1
 > **Erstellt:** 2026-02-15
-> **Aktualisiert:** 2026-03-09
+> **Aktualisiert:** 2026-04-04
 
 ---
 
@@ -268,7 +268,7 @@ data = await client.query_table("devices", limit=10)
 | `trigger_heartbeat()` | Heartbeat-Button | `POST /v1/debug/mock-esp/{id}/heartbeat` |
 | `set_auto_heartbeat()` | Auto-HB Toggle | `POST /v1/debug/mock-esp/{id}/auto-heartbeat` |
 | `start_simulation()` | Start Simulation | `POST /v1/debug/mock-esp/{id}/simulation/start` |
-| `check_health()` | Health Status | `GET /v1/health` |
+| `check_health()` | Health Status | `GET /v1/health/` |
 | `get_server_health()` | Health Details | `GET /v1/health/detailed` |
 | `get_health_metrics()` | Performance Metrics | `GET /v1/health/metrics` (Prometheus) |
 | `get_liveness()` | Liveness Probe | `GET /v1/health/live` |
@@ -796,5 +796,17 @@ AutoOps kann als Basis für die geplante KI-Integration dienen:
 
 ---
 
-**Letzte Aktualisierung:** 2026-03-09
-**Version:** 2.3.0
+### v2.3 → v2.4 (2026-04-03)
+
+| Bereich | Änderung |
+|---------|----------|
+| **PluginActionExecutor** | AutoOps-Plugins können jetzt direkt von der Logic Engine ausgelöst werden (`type: "plugin"` / `"autoops_trigger"` Action in Regeln, `plugin_id` = Plugin-Name) |
+| **DiagnosticsConditionEvaluator** | Neuer Condition-Typ `diagnostics_status` in Logic Engine — Regeln können auf System-Health-Status reagieren (z.B. "wenn MQTT critical, notify") |
+| **DiagnosticsActionExecutor** | Neuer Action-Typ `run_diagnostic` — Regeln können Diagnostic-Checks auslösen (`check_name` optional — leer = Full Diagnostic) |
+| **Port-Konflikt** | Runner prueft `localhost:8000` aktiv und faellt bei Nicht-Erreichbarkeit automatisch auf die Container-IP von `automationone-server` zurueck; `AUTOOPS_SERVER` kann weiterhin explizit gesetzt werden |
+| **Health-Endpoint** | `check_health()` nutzt explizit `GET /api/v1/health/` (Trailing-Slash), um Redirect-Abhaengigkeit zu vermeiden |
+
+---
+
+**Letzte Aktualisierung:** 2026-04-04
+**Version:** 2.4.1

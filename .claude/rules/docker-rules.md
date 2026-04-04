@@ -78,6 +78,7 @@ Server-Logs nutzen Bind-Mounts; MQTT-Broker, PostgreSQL und ESP32 nur stdout (ke
 | PostgreSQL | 5432 | 5432 | Database |
 | MQTT | 1883 | 1883 | Mosquitto |
 | Frontend | 5173 | 5173 | Vite Dev |
+| NTP | 123 | 123 | UDP — Chrony NTP (PTB-Server, für ESP32-Zeitsync) |
 
 ---
 

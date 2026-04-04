@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Kommunikationsmuster & Datenflüsse
 
-> **Version:** 2.5 | **Aktualisiert:** 2026-04-01
+> **Version:** 2.8 | **Aktualisiert:** 2026-04-04
 > **Quellen:** Code-Traces durch ESP32, Server, Frontend
 > **Verifiziert:** ✅ Alle Pfade mit Datei:Zeile dokumentiert
 
@@ -107,8 +107,7 @@ allowed-tools: Read
   "quality": "good",
   "raw_mode": true,
   "subzone_id": "zone_a",
-  "onewire_address": "28FF123456789ABC",
-  "i2c_address": 68
+  "onewire_address": "28FF123456789ABC"
 }
 ```
 
@@ -176,7 +175,7 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
 | Fehler | Erkennung | Reaktion | Datei:Zeile |
 |--------|-----------|----------|-------------|
 | MQTT Disconnect | Circuit Breaker; SAFETY-P4 `onDisconnect()` (Grace); safe state nur wenn 0 Offline-Rules | Offline Buffer (100 msg, PubSubClient); P4 `activateOfflineMode()` synct `is_active` aus Hardware-State (verhindert Doppel-AN) | mqtt_client.cpp; safety_task.cpp (ESP-IDF Notify) |
-| Server Down | LWT ~90s (Broker erkennt Crash) oder sofort (Graceful Shutdown via `server/status="offline"`); Fallback: P1-Timeout 120s | ESP: P4-Delegation wenn Offline-Rules; sofort safe state wenn keine; `g_last_server_ack_ms` + P1-Flag reset bei `server/status="online"` | client.py:will_set; main.cpp:routeIncomingMessage /server/status; main.cpp:checkServerAckTimeout |
+| Server Down | LWT ~90s (Broker erkennt Crash) oder sofort (Graceful Shutdown via `server/status="offline"`); Fallback: P1-Timeout 120s | ESP: P4-Delegation wenn Offline-Rules; sofort safe state wenn keine; `server/status="online"` nur Liveness-Hinweis, autoritatives Recovery via `heartbeat/ack` | client.py:will_set; main.cpp:routeIncomingMessage /server/status; main.cpp:checkServerAckTimeout |
 | DB Error | Exception | Log, Skip Broadcast | sensor_handler.py:260 |
 | Invalid Payload | Validation | Reject, Log Warning | sensor_handler.py:353 |
 | WebSocket Fail | Best-effort | Continue, Log | sensor_handler.py:310 |
@@ -291,6 +290,15 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
   "correlation_id": "cmd_abc123"
 }
 ```
+
+**Terminale Persistenz-Authority (Server):**
+- Vor History/Audit/WS greift ein write-once/finality-Guard pro dedup-key (`correlation_id` bevorzugt).
+- Stale/Replayed `actuator_response`-Events werden idempotent quittiert und erzeugen keine doppelten Seiteneffekte.
+
+**Frontend Contract-Integrationssignale:**
+- Unknown-Events oder Schema-Mismatch in der WS-Consumption werden als `contract_unknown_event`/`contract_mismatch` sichtbar gemacht.
+- Diese Integrationssignale enthalten `operator_action` und `raw_context` fuer schnelle Diagnose statt stiller Heuristik-Fallbacks.
+- Severity-Fallback und Operator-Aktions-Text stammen zentral aus `src/utils/contractEventMapper.ts` (SSOT), damit Monitor/Details/Toasts dieselbe Semantik nutzen.
 
 ### Timing-Analyse
 
@@ -535,6 +543,34 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
 | `device` | ESP-Name, Zone | Nein |
 | `sensors` | Sensor-Konfiguration | Nein |
 | `actuators` | Actuator-Konfiguration | Nein |
+
+### Finality-Guard für `config_response`
+
+- `config_response` wird serverseitig canonical-first verarbeitet und danach durch eine terminale write-once Authority abgesichert.
+- Bei stale Replay werden DB-Status-Updates (`pending -> applied/failed`), Audit-Logs und WebSocket-Broadcasts nicht erneut ausgeführt.
+
+### Frontend Intent-Consumption (Contract-First)
+
+- `config_published` startet im Frontend den Config-Intent (`pending`), Finalisierung erfolgt nur ueber `config_response` oder `config_failed`.
+- `config_response` und `config_failed` sind terminale Events fuer den Config-Intent-Lifecycle.
+- Server-API-Callsites werten `send_config()` explizit ueber `result.success` aus (kein implizites truthy/falsy Dict-Matching).
+- Primärer Korrelationsschluessel ist `data.correlation_id`; `request_id` ist nur zusaetzlicher Trace-Kontext, sofern vorhanden.
+- Wenn bei terminalen Config-Events keine brauchbare Korrelation vorliegt, ist das ein Integrationssignal (Contract-Drift) und muss als solches sichtbar bleiben.
+
+### CRUD-triggered Config-Pushes (CP-S1)
+
+Config-Pushes werden automatisch nach folgenden API-Operationen gesendet:
+
+| Trigger | Endpoint |
+|---------|----------|
+| Sensor Create/Update | `POST /sensors/{esp_id}/{gpio}` |
+| Sensor Delete | `DELETE /sensors/{esp_id}/{config_id}` |
+| Actuator Create/Update | `POST /actuators/{esp_id}/{gpio}` |
+| Actuator Delete | `DELETE /actuators/{esp_id}/{gpio}` |
+
+**CP-S1 Garantie:** Der Config-Push wird immer nach dem primären DB-Commit gesendet, unabhängig von optionalen Nebenoperationen (Subzone-Zuweisung). Falls `assign_subzone()` mit `ValueError` fehlschlägt, wird `subzone_error` als `subzone_warning`-Feld in der Response zurückgegeben — kein 400, kein blockierter Config-Push.
+
+**Fallback:** Der Heartbeat-Handler (120s Cooldown) deckt den Fall ab, wenn der ESP beim Config-Push offline war.
 
 ---
 
@@ -802,7 +838,7 @@ Ereignisbasierter Kanal für Server-Offline-Erkennung. Ergänzt P1 (ACK-Timeout 
          │    publish("online") │                        │
          │─────────────────────►│                        │
          │                      │─ retained "online" ───►│
-         │                      │                        │ (P1-Timer reset)
+         │                      │                        │ (nur Liveness-Hinweis)
          │                      │                        │
          │ 3. CRASH (kill -9)   │                        │
          ╳                      │                        │
@@ -825,7 +861,12 @@ Ereignisbasierter Kanal für Server-Offline-Erkennung. Ergänzt P1 (ACK-Timeout 
 |-----------|----------|
 | `status="offline"` + Offline-Rules vorhanden | P4 übernimmt (`offlineModeManager.onDisconnect()`) |
 | `status="offline"` + keine Offline-Rules | `actuatorManager.setAllActuatorsToSafeState()` + `onDisconnect()` |
-| `status="online"` | P1-Timer reset (`g_last_server_ack_ms = millis()`), P1-Flag clear, P4-Recovery |
+| `status="online"` | Nur Liveness-Hinweis (kein P1-Reset, kein P4-Recovery) |
+
+**Terminale Persistenz-Authority (Server):**
+- `system/will` nutzt write-once/finality-Guards, damit wiederholte Broker-Replays denselben Offline-Endzustand nicht mehrfach anwenden.
+
+**Vorrangregel:** Autoritative Registration + Recovery erfolgen ausschließlich über `system/heartbeat/ack`.
 
 ### Watchdog-Hierarchie nach SAFETY-P5
 
@@ -882,6 +923,8 @@ L5: P4 State Machine (30s)      → koordinierter Offline-Mode    [bestehend]
 | `notification_unread_count` | notification-inbox.store | - | Unread-Count Sync (Phase 4A) |
 | `error_event` | `handleErrorEvent()` | 2048 | Fehler mit Troubleshooting |
 | `system_event` | `handleSystemEvent()` | 2108 | System-Wartung |
+| `contract_mismatch` | SystemMonitor Contract Mapper | - | Integrationssignal bei bekanntem Event mit Schema-/Pflichtfeld-Mismatch |
+| `contract_unknown_event` | SystemMonitor Contract Mapper | - | Integrationssignal bei unbekanntem WS-Event-Typ |
 
 ### WebSocket Subscriptions (Frontend)
 

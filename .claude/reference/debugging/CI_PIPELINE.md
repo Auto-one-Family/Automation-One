@@ -1,6 +1,6 @@
 # CI/CD Pipeline - AutomationOne
 
-> **Version:** 1.4 | **Aktualisiert:** 2026-03-05
+> **Version:** 1.5 | **Aktualisiert:** 2026-04-04
 > **Zweck:** Vollständige Dokumentation der GitHub Actions Workflows
 > **Themengebiet:** CI/CD, Artifacts, GitHub CLI
 
@@ -179,7 +179,7 @@ concurrency:
 | Job | Beschreibung |
 |-----|--------------|
 | `label-pr` | Automatisches Labeling basierend auf geänderten Dateien |
-| `pr-validation` | Prüft auf große Dateien (>5MB) und sensitive Dateien (.env, Secrets) |
+| `pr-validation` | Prüft auf große Dateien (>5MB), sensitive Dateien und Contract-Governance-Gates |
 
 **Sensitive File Patterns:**
 ```
@@ -187,6 +187,14 @@ concurrency:
 private.key, *.pem, *.key, id_rsa, id_ed25519,
 *.p12, *.pfx, service-account.json, firebase-adminsdk*.json
 ```
+
+**Contract Governance Gate (neu):**
+- Ausführung: `python .github/scripts/contract_governance_gate.py --base-ref "origin/${{ github.base_ref }}"`
+- Blockiert PRs bei:
+  - neuen `CONTRACT_*` Codes ohne Eintrag in `.claude/reference/errors/ERROR_CODES.md`
+  - fehlenden Pflichtattributen in `## 13b. Contract-Code Governance Matrix`
+  - Contract-Source-Änderungen ohne Contract-Testanpassung
+  - Fallback/Heilungs-Änderungen ohne explizites Contract-Signal
 
 ---
 

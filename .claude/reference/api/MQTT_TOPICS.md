@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.6 | **Aktualisiert:** 2026-04-01
+> **Version:** 2.13 | **Aktualisiert:** 2026-04-04
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
-> **Änderungen:** SAFETY-P5: `server/status` Topic (LWT) hinzugefügt, heartbeat/ack QoS 0→1, ACK-Reihenfolge vor DB-Arbeit, Error-ACK Methode (2026-04-01)
+> **Änderungen:** Heartbeat-ACK Contract-Härtung (`handover_epoch`, `ack_type`, `contract_version`, `session_id`), neuer Runtime-State `CONFIG_PENDING_AFTER_RESET`, Heartbeat-Telemetrie (`boot_sequence_id`, `reset_reason`, `segment_start_ts`) + Intent-Outcome-Vertrag v2.9 (degradierte Admission-Codes, disjunkte Expiry-Codes `SAFETY_EPOCH_INVALIDATED`/`TTL_EXPIRED`, robuste Critical-Replay-Semantik) + Canonical-First Ingest für `system/heartbeat`, `system/diagnostics`, `system/error`, `system/will`, `actuator/{gpio}/response`, `config_response` mit sichtbarer Unknown-Normalisierung (`CONTRACT_UNKNOWN_CODE`, `raw_*` Kontexte) + terminale Persistence-Authority (write-once/finality) für `config_response`, `actuator/{gpio}/response`, `system/will` (stale Replay wird idempotent ignoriert) + Firmware-Strict-Contract im Config-Pfad (keine stille `correlation_id`-Fallback-Heilung, expliziter Contract-Fehler) (2026-04-04)
 
 ---
 
@@ -46,6 +46,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `kaiser/god/esp/{esp_id}/system/diagnostics` | ESP→Server | 0 | Diagnostics |
 | `kaiser/god/esp/{esp_id}/system/will` | ESP→Server | 1 | LWT (Last Will) |
 | `kaiser/god/esp/{esp_id}/system/error` | ESP→Server | 1 | Error Event |
+| `kaiser/god/esp/{esp_id}/system/intent_outcome` | ESP→Server | 1 | Intent/Outcome Events |
 | `kaiser/god/esp/{esp_id}/status` | ESP→Server | 1 | System-Status |
 | `kaiser/god/esp/{esp_id}/safe_mode` | ESP→Server | 1 | Safe-Mode Status |
 | `kaiser/god/esp/{esp_id}/config` | Server→ESP | 2 | Config Update |
@@ -92,7 +93,6 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
   "library_version": "1.0.0",
   "raw_mode": true,
   "onewire_address": "28FF123456789ABC",
-  "i2c_address": 68,
   "meta": {
     "vref": 3300,
     "samples": 10,
@@ -123,6 +123,8 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 |------|-----|-----------|--------------|
 | `onewire_address` | string | OneWire-Sensoren | 64-bit ROM-Code (16 Hex-Zeichen, z.B. "28FF641E8D3C0C79") |
 | `i2c_address` | int | I2C-Sensoren | 7-bit I2C-Adresse (0-127, z.B. 68 für 0x44) |
+
+**Hinweis:** `onewire_address` und `i2c_address` schließen sich gegenseitig aus — die Firmware sendet immer nur eines der beiden Felder (Guard via `capability->is_i2c`).
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildSensorDataTopic()` (Zeile 53)
@@ -317,12 +319,16 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```json
 {
   "ts": 1735818000,
+  "esp_id": "ESP_12AB34CD",
+  "seq": 42,
+  "zone_id": "greenhouse",
   "gpio": 5,
   "command": "ON",
   "value": 1.0,
   "duration": 0,
   "success": true,
-  "message": "Command executed"
+  "message": "Command executed",
+  "correlation_id": "cmd_abc123"
 }
 ```
 
@@ -330,14 +336,25 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```json
 {
   "ts": 1735818000,
+  "esp_id": "ESP_12AB34CD",
+  "seq": 43,
+  "zone_id": "greenhouse",
   "gpio": 5,
   "command": "ON",
   "value": 1.0,
   "duration": 0,
   "success": false,
-  "message": "Actuator GPIO 5 is emergency stopped"
+  "message": "Actuator GPIO 5 is emergency stopped",
+  "correlation_id": "cmd_abc123"
 }
 ```
+
+**Contract-Härtung (Server-Ingest):**
+- Topic ist autoritativ für `esp_id` und `gpio`; Payload-Mismatches bleiben als Vertragsverletzung sichtbar.
+- `correlation_id` ist auf Firmware-Seite best effort; fehlende IDs werden serverseitig robust ergänzt (`missing-corr:act:...`).
+- Unbekannte Vertragswerte werden auf `CONTRACT_UNKNOWN_CODE` normalisiert (kein stilles Umschreiben im Handler).
+- Terminale Persistence-Authority erzwingt write-once/finality pro dedup-key (bevor History/Audit/WS geschrieben wird).
+- Stale/Replayed Responses werden als idempotente Duplikate behandelt und ohne Seiteneffekte quittiert.
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildActuatorResponseTopic()` (Zeile 103)
@@ -436,6 +453,9 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
   "master_zone_id": "greenhouse-master",
   "zone_assigned": true,
   "ts": 1735818000,
+  "boot_sequence_id": "ESP_12AB34CD-b42-r1",
+  "reset_reason": "POWERON",
+  "segment_start_ts": 1735817990,
   "uptime": 3600,
   "heap_free": 245760,
   "wifi_rssi": -65,
@@ -455,6 +475,13 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Required Fields:** `ts`, `uptime`, `heap_free` / `free_heap`, `wifi_rssi`
+
+**Contract-Härtung (stufenweise):**
+- `boot_sequence_id`, `reset_reason`, `segment_start_ts` werden zunächst **optional** transportiert
+- Nach `contract_version`-Anhebung kann serverseitig fail-closed validiert werden
+- Bestehende Sender/Fixtures bleiben bis dahin kompatibel
+- Ingest läuft canonical-first: Legacy-Felder (`free_heap`, `active_sensors`, `active_actuators`) werden vor Handler-Logik normalisiert
+- Unbekannte Status-/State-Werte werden als Vertragsverletzung markiert (`CONTRACT_UNKNOWN_CODE`) und mit `raw_system_state` auditierbar weitergegeben
 
 **WICHTIG:** Unbekannte Geräte werden abgelehnt. ESPs müssen via REST-API registriert werden!
 
@@ -476,7 +503,11 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 {
   "status": "online",
   "config_available": false,
-  "server_time": 1735818000
+  "server_time": 1735818000,
+  "handover_epoch": 3,
+  "ack_type": "heartbeat",
+  "contract_version": 2,
+  "session_id": "ESP_12AB34CD:handover:3:1735818000"
 }
 ```
 
@@ -491,6 +522,8 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 - ACK wird direkt nach ESP-Lookup gesendet — **vor** DB-Writes, Metadata-Update, WebSocket-Broadcast
 - Bei Payload-Validierungsfehler: `_send_heartbeat_error_ack()` verhindert P1-False-Positive
 - `config_available` ist im frühen ACK immer `false` — Config-Push läuft unabhängig
+- `handover_epoch` ist verpflichtend (fail-closed Vertrag) und wird aus dem aktiven ESP-Handover-Kontext abgeleitet
+- ESP32 Registration-Gate ist **fail-closed**: kein Gate-Open per Timeout, nur nach gültigem `heartbeat/ack`
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildSystemHeartbeatAckTopic()` (Zeile 136)
@@ -567,6 +600,10 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 {
   "ts": 1735818000,
   "esp_id": "ESP_12AB34CD",
+  "boot_sequence_id": "ESP_12AB34CD-b42-r1",
+  "reset_reason": "POWERON",
+  "segment_start_ts": 1735817990,
+  "metrics_schema_version": 1,
   "heap_free": 150000,
   "heap_min_free": 120000,
   "heap_fragmentation": 15,
@@ -590,6 +627,13 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 **Required fields:** `heap_free` (int), `wifi_rssi` (int)
 **Optional fields:** All others (graceful degradation via `payload.get()`)
 
+**Contract-Härtung (stufenweise):**
+- `metrics_schema_version` fehlt/`1`: Segmentfelder bleiben optional (`boot_sequence_id`, `reset_reason`, `segment_start_ts`)
+- `metrics_schema_version >= 2`: Segmentfelder sind Pflicht (fail-closed Validation im Handler)
+- Upgradepfad bleibt rückwärtskompatibel für bestehende Producer/Consumer bis zur Vertragsanhebung
+- Canonical-first Ingest normalisiert semantische Felder (`system_state`, `mqtt_cb_state`, `wdt_mode`) vor Persistenz/Broadcast
+- Unbekannte Enum-Werte bleiben sichtbar als Vertragsverletzung (`CONTRACT_UNKNOWN_CODE`) inkl. `raw_system_state`
+
 | Field | Type | Description |
 |-------|------|-------------|
 | `boot_reason` | string | ESP-IDF reset reason: UNKNOWN, POWERON, EXT, SW, PANIC, INT_WDT, TASK_WDT, WDT, DEEPSLEEP, BROWNOUT, SDIO |
@@ -598,6 +642,20 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `wdt_mode` | string | Watchdog mode: DISABLED, PROVISIONING, PRODUCTION, SAFE_MODE |
 | `wdt_timeouts_24h` | int | Watchdog timeout events in last 24 hours |
 | `wdt_timeout_pending` | bool | Whether a watchdog timeout flag is currently set |
+| `boot_sequence_id` | string | Eindeutige Bootsegment-ID pro Startzyklus |
+| `reset_reason` | string | Kanonischer Reset-Grund des Segments |
+| `segment_start_ts` | int | Segmentstart als Unix-Zeitstempel (0 wenn Zeit noch unsynchronisiert) |
+| `metrics_schema_version` | int | Vertragsversion für Telemetrie-Schema |
+
+**Langlauf-KPI Aggregationsregel (24h robust über Reboots):**
+- Primärschlüssel pro Segment: `(esp_id, boot_sequence_id)`; Fallback (Legacy): `(esp_id, segment_start_ts, reset_reason)`
+- Zeitgewichtete KPIs nur innerhalb eines Segments aggregieren, danach segmentweise rollen (kein blindes `uptime`-Durchmitteln über Rebootkanten)
+- Segmentwechsel (`boot_sequence_id`-Wechsel) als harte Trennkante behandeln; Delta-basierte Zähler an Segmentanfang neu initialisieren
+
+**Alarmregeln über Segmentgrenzen:**
+- `uptime`-Rücksprung bei neuem `boot_sequence_id` ist **kein** Alarmereignis
+- Rate-/Trend-Alarme (z. B. Heap-Drift) müssen Segmentwechsel als Reset-Bedingung berücksichtigen
+- Flapping-Schutz: Erst alarmieren, wenn Bedingung innerhalb desselben Segments über das definierte Zeitfenster stabil verletzt ist
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildSystemDiagnosticsTopic()` (Zeile 180)
@@ -621,7 +679,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
   "ts": 1735818000,
   "esp_id": "ESP_12AB34CD",
   "error_code": "GPIO_CONFLICT",
-  "severity": "critical",
+  "severity": 3,
   "message": "GPIO 5 already in use",
   "module": "GPIOManager",
   "function": "initializeGPIO",
@@ -635,9 +693,9 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Severity-Levels:**
-- `warning`: Nicht-kritisch, System läuft weiter
-- `error`: Fehler, aber System funktional
-- `critical`: Kritischer Fehler, Safe-Mode oder Reboot erforderlich
+- Primär numerisch (Firmware): `0=info`, `1=warning`, `2=error`, `3=critical`
+- String-Aliase werden canonicalisiert (`"critical"` → `3`, `"error"` → `2`)
+- Unbekannte Severity/Category-Werte werden als Vertragsverletzung markiert (`CONTRACT_UNKNOWN_CODE`) statt still verworfen
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildSystemErrorTopic()` (Zeile 160)
@@ -718,6 +776,12 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 }
 ```
 
+**Reason-Canonicalisierung:**
+- Bekannte Gründe: `unexpected_disconnect`, `network_failure`, `power_loss`, `broker_timeout`, `watchdog_reset`, `crash`
+- Legacy-/Aliaswerte werden normalisiert (z. B. `timeout` → `broker_timeout`)
+- Unbekannte Gründe bleiben sichtbar als Vertragsverletzung (`CONTRACT_UNKNOWN_CODE`) inkl. `raw_reason`
+- Terminale Persistence-Authority schützt den Offline-Endzustand vor Replays (write-once/finality auf Eventebene).
+
 **Code-Referenzen:**
 - **ESP32:** `mqtt_client.cpp` in `connect()` / `connectToBroker()` — LWT wird beim Verbindungsaufbau gesetzt (ESP-IDF- und PubSubClient-Pfad)
 - **Server:** `lwt_handler.py:handle_lwt()` (Zeile 35)
@@ -758,16 +822,66 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 - Graceful Shutdown: Sofort (explizit gesendet vor disconnect)
 - Server-Start: `"online"` in `_on_connect`-Callback → überschreibt retained `"offline"`
 
-**ESP32-Reaktion:**
+**ESP32-Reaktion (Vorrangregel):**
 - `offline` + Offline-Rules vorhanden → P4 übernimmt (kein sofortiger Safe-State)
 - `offline` + keine Offline-Rules → `setAllActuatorsToSafeState()` sofort
-- `online` → P1-Timer reset + `g_server_timeout_triggered` clear + P4-Recovery
+- `online` → nur Liveness-Hinweis (kein P1-Reset, kein Recovery-Trigger)
+- Autoritative Recovery + Registration ausschließlich über `system/heartbeat/ack`
 
 **Code-Referenzen:**
 - **Server:** `constants.py:MQTT_TOPIC_SERVER_STATUS`, `topics.py:build_server_status_topic()`
 - **Server LWT:** `client.py:connect()` — `will_set()` vor `connect()`, `_on_connect()` — online-Publish
 - **Server Shutdown:** `main.py:lifespan()` — offline-Publish vor `disconnect()`
 - **ESP32:** `topic_builder.cpp:buildServerStatusTopic()`, `main.cpp:routeIncomingMessage()` Handler
+
+---
+
+### 3.11 system/intent_outcome (ESP→Server)
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/intent_outcome`
+
+**QoS:** 1  
+**Frequency:** Ereignisbasiert bei Admission/Execute/Expiry  
+**Semantik:** Einheitlicher Outcome-Vertrag fuer Command/Config/Publish-Fluesse
+
+**Payload:**
+```json
+{
+  "seq": 42,
+  "flow": "command",
+  "intent_id": "act_171217_1",
+  "correlation_id": "corr_171217_9",
+  "generation": 3,
+  "created_at_ms": 1712170000,
+  "ttl_ms": 10000,
+  "epoch": 7,
+  "outcome": "accepted",
+  "contract_version": 2,
+  "semantic_mode": "target",
+  "legacy_status": "processing",
+  "target_status": "accepted",
+  "code": "COMMAND_ACCEPTED",
+  "reason": "Actuator command accepted",
+  "retryable": false,
+  "critical": false,
+  "retry_limit": 5,
+  "retry_count": 0,
+  "recovered": false,
+  "delivery_mode": "direct",
+  "ts": 1735818000
+}
+```
+
+**Outcome-Werte:** `accepted`, `rejected`, `applied`, `persisted`, `failed`, `expired`  
+**Code-Klassen (Auszug):** `COMMAND_ACCEPTED`, `REGISTRATION_PENDING`, `CONFIG_PENDING_BLOCKED`, `DEGRADED_MODE_BLOCKED`, `SAFETY_LOCKED`, `QUEUE_FULL`, `VALIDATION_FAIL`, `EXECUTE_FAIL`, `SAFETY_EPOCH_INVALIDATED`, `TTL_EXPIRED`, `SAFETY_QUEUE_FLUSHED`, `MODE_UNSUPPORTED`
+**Server-Kanonisierung (P0.2):** Alias-Mapping serverseitig (`processing→accepted`, `success/ok→persisted`, `error→failed`, `timeout→expired`); unbekannte `flow`/`outcome` werden als Contract-Verletzung mit `code=CONTRACT_UNKNOWN_CODE` verarbeitet.
+**Contract-Hinweis:** Fehlt `correlation_id`, setzt der Server `code=CONTRACT_MISSING_CORRELATION` und markiert den Datensatz als nicht-retrybar. Im Firmware-Config-Flow wird fehlende `correlation_id` zusaetzlich strict als Contract-Verletzung behandelt (kein lokaler Fallback im terminalen Pfad).
+**Contract-Haertung (WP-09):** Fuer `system/intent_outcome` sind keine Legacy-Topic-Aliase mehr zulässig; alte Alias-Namen sind als deprecated zu behandeln und spaetestens bis **2026-07-03** zu entfernen.
+
+**Code-Referenzen:**
+- **ESP32:** `intent_contract.cpp:publishIntentOutcome()`
+- **ESP32:** `topic_builder.cpp:buildIntentOutcomeTopic()`
+- **ESP32:** `main.cpp:routeIncomingMessage()` (Admission-NACK), Queue-Worker in `tasks/*_queue.cpp`
 
 ---
 
@@ -823,9 +937,64 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
       "default_pwm": 0,
       "max_runtime_ms": 120000
     }
+  ],
+  "offline_rules": [
+    {
+      "actuator_gpio": 18,
+      "sensor_gpio": 4,
+      "sensor_value_type": "sht31_temperature",
+      "activate_above": 28.0,
+      "deactivate_below": 24.0,
+      "activate_below": 0.0,
+      "deactivate_above": 0.0,
+      "current_state_active": false
+    },
+    {
+      "actuator_gpio": 20,
+      "sensor_gpio": 4,
+      "sensor_value_type": "sht31_temperature",
+      "activate_above": 28.0,
+      "deactivate_below": 24.0,
+      "activate_below": 0.0,
+      "deactivate_above": 0.0,
+      "current_state_active": false,
+      "time_filter": {
+        "enabled": true,
+        "start_hour": 22,
+        "start_minute": 0,
+        "end_hour": 6,
+        "end_minute": 0
+      }
+    }
   ]
 }
 ```
+
+**offline_rules Felder:**
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `actuator_gpio` | int | GPIO des Aktors auf diesem ESP |
+| `sensor_gpio` | int | GPIO des Sensors (0 = I2C-Konvention) |
+| `sensor_value_type` | string | Kanonischer Sensortyp (z.B. `sht31_temperature`, `ds18b20`) |
+| `activate_above` | float | Cooling-Modus: AN wenn Wert > Schwelle |
+| `deactivate_below` | float | Cooling-Modus: AUS wenn Wert < Schwelle |
+| `activate_below` | float | Heating-Modus: AN wenn Wert < Schwelle |
+| `deactivate_above` | float | Heating-Modus: AUS wenn Wert > Schwelle |
+| `current_state_active` | bool | Aktueller Hysterese-State (aus `logic_hysteresis_states`) |
+| `time_filter` | object? | Optional — nur bei AND-Compound-Regeln mit Zeitfenster |
+
+**time_filter Konventionen:**
+- Stunden/Minuten immer in **UTC** (Server konvertiert lokale Zeitzone vor Push)
+- `end_hour: 24` = Mitternacht exklusiv; für Mitternachts-Wraparound `end_hour < start_hour` (z.B. 22:00–06:00)
+- Fehlt das Feld → ESP setzt `time_filter_enabled = false`
+
+**Server-seitige Konvertierung (LE-01):**
+- Einfache `sensor_threshold`-Regeln (`>`, `<`, `>=`, `<=`) werden server-seitig in Hysterese konvertiert (Auto-Deadband je Sensortyp, z.B. Temperatur ±2°C)
+- AND-Compound-Regeln (Hysterese/Threshold + Zeitfenster) werden als eine Offline-Rule mit `time_filter` kodiert
+- OR-Compounds, Cross-ESP-Regeln, analoge Sensoren (pH/EC/moisture/soil_moisture) werden nicht konvertiert
+
+**Code-Referenzen:** `config_builder.py:_extract_offline_rule()`, `config_builder.py:_get_default_deadband()`
 
 **Operating Modes (Phase 2C):**
 - `continuous`: Regelmäßige Messungen (Standard)
@@ -848,34 +1017,49 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 **Payload (Success):**
 ```json
 {
-  "ts": 1735818000,
-  "esp_id": "ESP_12AB34CD",
-  "config_id": "cfg_12345",
-  "config_applied": true,
-  "applied_sections": ["wifi", "sensors", "actuators"],
-  "skipped_sections": [],
-  "restart_required": false,
-  "restart_scheduled": false,
-  "restart_delay": 0
+  "seq": 17,
+  "status": "success",
+  "type": "sensor",
+  "count": 3,
+  "message": "Configured 3 item(s) successfully",
+  "correlation_id": "cfg_abc123",
+  "request_id": "req_42"
 }
 ```
 
-**Payload (Failure):**
+**Payload (Partial/Failure):**
 ```json
 {
-  "ts": 1735818000,
-  "esp_id": "ESP_12AB34CD",
-  "config_id": "cfg_12345",
-  "config_applied": false,
-  "error": "Invalid GPIO configuration",
-  "failed_section": "sensors",
-  "error_details": {
-    "gpio": 4,
-    "reason": "GPIO already in use by actuator"
-  },
-  "applied_sections": []
+  "seq": 18,
+  "status": "partial_success",
+  "type": "sensor",
+  "count": 2,
+  "failed_count": 1,
+  "message": "2 configured, 1 failed",
+  "failures": [
+    {
+      "type": "sensor",
+      "gpio": 5,
+      "error_code": 1002,
+      "error": "GPIO_CONFLICT",
+      "detail": "GPIO 5 reserved by actuator (pump_1)"
+    }
+  ],
+  "correlation_id": "cfg_abc123",
+  "request_id": "req_42"
 }
 ```
+
+**Legacy-kompatibel:** `status="failed"` und `config_type` werden weiterhin akzeptiert und serverseitig kanonisiert.
+
+**Contract-Härtung (Server-Ingest):**
+- Canonical-first: Status/Typ/Error werden vor Persistenz/Audit/Broadcast normalisiert.
+- Unbekannte Werte werden auf `CONTRACT_UNKNOWN_CODE` gehoben und mit `raw_*` Kontext auditierbar gehalten.
+- Fehlende `correlation_id` wird im Firmware-Config-Pfad strict als Vertragsfehler emittiert (`CONTRACT_MISSING_CORRELATION` / `CONTRACT_CORRELATION_MISSING`); kein lokaler Fallback im terminalen Pfad.
+- Serverseitige Korrelationsergaenzung (`missing-corr:cfg:...`) bleibt als Defense-in-Depth fuer nicht-konforme Fremd-Producer aktiv.
+- `request_id` kann optional als Trace-Feld mitgesendet werden und wird serverseitig in `config_response`-Projektionen weitergereicht (nicht als Matching-Schluessel verwendet).
+- Terminale Persistence-Authority erzwingt write-once/finality vor DB-Statusupdates, Audit-Log und WS-Broadcast.
+- Stale/Replayed ACKs werden deterministisch erkannt und idempotent ohne erneute Seiteneffekte verworfen.
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildConfigResponseTopic()` (Zeile 176)
@@ -925,7 +1109,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 }
 ```
 
-**correlation_id:** Optional. Echoed from zone/assign payload for MQTTCommandBridge ACK matching. If absent, server uses FIFO fallback via (esp_id, command_type).
+**correlation_id:** Von ESP32-ACKs immer gesetzt. Wird vom Command-Payload geerbt oder als Firmware-Fallback-ID generiert.
 
 **status-Werte:** `zone_assigned`, `zone_removed`, `error`
 
@@ -996,7 +1180,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 }
 ```
 
-**correlation_id:** Optional. Echoed from subzone/assign payload for MQTTCommandBridge ACK matching. If absent, server uses FIFO fallback via (esp_id, command_type).
+**correlation_id:** Von ESP32-ACKs immer gesetzt. Wird vom Command-Payload geerbt oder als Firmware-Fallback-ID generiert.
 
 **status-Werte:** `subzone_assigned`, `subzone_removed`, `error`
 
@@ -1117,13 +1301,14 @@ Der Server subscribed zu folgenden Topic-Patterns:
 | `kaiser/+/esp/+/actuator/+/response` | `handle_actuator_response` | `main.py:239` |
 | `kaiser/+/esp/+/actuator/+/alert` | `handle_actuator_alert` | `main.py:244` |
 | `kaiser/+/esp/+/system/heartbeat` | `handle_heartbeat` | `heartbeat_handler.py:61` |
-| `kaiser/+/esp/+/config_response` | `handle_config_response` | `config_handler.py:52` |
+| `kaiser/+/esp/+/config_response` | `handle_config_ack` | `config_handler.py:52` |
 | `kaiser/+/esp/+/zone/ack` | `handle_zone_ack` | `main.py:275` |
 | `kaiser/+/esp/+/subzone/ack` | `handle_subzone_ack` | `main.py:280` |
 | `kaiser/+/esp/+/system/will` | `handle_lwt` | `lwt_handler.py:35` |
 | `kaiser/+/esp/+/system/error` | `handle_system_error` | `main.py:293` |
-| `kaiser/+/esp/+/status` | `handle_status` | `main.py:298` |
-| `kaiser/+/esp/+/safe_mode` | `handle_safe_mode` | `main.py:303` |
+| `kaiser/+/esp/+/system/intent_outcome` | `handle_intent_outcome` | `intent_outcome_handler.py` |
+| `kaiser/+/esp/+/status` | *(nicht registriert)* | *(derzeit kein Handler in `main.py`)* |
+| `kaiser/+/esp/+/safe_mode` | *(nicht registriert)* | *(derzeit kein Handler in `main.py`)* |
 
 **Handler-Registrierung:** `main.py:201-307`
 
@@ -1168,10 +1353,10 @@ topic_builder.buildSensorCommandWildcard(topic, sizeof(topic));
 | QoS | Verwendung | Garantie |
 |-----|------------|----------|
 | **0** | Heartbeat, Diagnostics | At most once (best effort) |
-| **1** | Sensor-Daten, Alerts, Status | At least once |
+| **1** | Sensor-Daten, Alerts, Status, Intent-Outcomes | At least once |
 | **2** | Commands, Config (Server-Publish) | Exactly once |
 
-**ESP32 Subscription-QoS:** PubSubClient unterstuetzt maximal QoS 1. Alle ESP-Subscriptions (Commands, Config, Emergency, Zone, Subzone, Sensor-Commands) nutzen QoS 1. Heartbeat-ACK bleibt QoS 0. Die effektive QoS ist `min(publish_qos, subscribe_qos)`, d.h. QoS 1 fuer vom Server publizierte QoS-2-Topics.
+**ESP32 Subscription-QoS:** PubSubClient unterstuetzt maximal QoS 1. Alle ESP-Subscriptions (Commands, Config, Emergency, Zone, Subzone, Sensor-Commands, Heartbeat-ACK) nutzen QoS 1. Die effektive QoS ist `min(publish_qos, subscribe_qos)`, d.h. QoS 1 fuer vom Server publizierte QoS-2-Topics.
 
 ---
 

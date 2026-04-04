@@ -6,6 +6,8 @@ description: AutoOps Debug & Fix - Autonome System-Diagnose und Reparatur
 
 > **Autonomer Debug-Agent** der das gesamte System scannt, Probleme diagnostiziert, automatisch behebt und alles dokumentiert.
 
+> **Voraussetzung:** God-Kaiser Server muss erreichbar sein. Standard ist `localhost:8000`; der Runner prueft den Endpoint und faellt bei Bedarf automatisch auf die Container-IP von `automationone-server` zurueck. Optional kann `AUTOOPS_SERVER` explizit gesetzt werden.
+
 ## Aufgabe
 
 Führe eine vollständige System-Diagnose durch:

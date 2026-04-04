@@ -81,7 +81,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{category}/{gpio}/{action}
 - **gpio:** Pin-Nummer (0-39) oder weggelassen bei System-Topics
 - **action:** `data`, `command`, `status`, `response`, etc.
 
-### Vollständiges Topic-Schema (22 Topics)
+### Vollständiges Topic-Schema (25 Topics)
 
 | # | Topic | Richtung | QoS | ESP32 Builder | Server Konstante |
 |---|-------|----------|-----|---------------|------------------|
@@ -99,16 +99,17 @@ kaiser/{kaiser_id}/esp/{esp_id}/{category}/{gpio}/{action}
 | 12 | `system/command` | Server→ESP | 2 | `buildSystemCommandTopic()` | `MQTT_TOPIC_ESP_SYSTEM_COMMAND` |
 | 13 | `system/diagnostics` | ESP→Server | 0 | `buildSystemDiagnosticsTopic()` | - |
 | 14 | `system/error` | ESP→Server | 1 | `buildSystemErrorTopic()` | - |
-| 15 | `system/will` | ESP→Server | 1 | (LWT bei connect) | - |
-| 16 | `config` | Server→ESP | 2 | `buildConfigTopic()` | `MQTT_TOPIC_ESP_CONFIG` |
-| 17 | `config_response` | ESP→Server | 2 | `buildConfigResponseTopic()` | `MQTT_TOPIC_ESP_CONFIG_RESPONSE` |
-| 18 | `subzone/assign` | Server→ESP | 1 | `buildSubzoneAssignTopic()` | `MQTT_TOPIC_SUBZONE_ASSIGN` |
-| 19 | `subzone/remove` | Server→ESP | 1 | `buildSubzoneRemoveTopic()` | `MQTT_TOPIC_SUBZONE_REMOVE` |
-| 20 | `subzone/ack` | ESP→Server | 1 | `buildSubzoneAckTopic()` | `MQTT_TOPIC_SUBZONE_ACK` |
-| 21 | `subzone/status` | ESP→Server | 1 | `buildSubzoneStatusTopic()` | `MQTT_TOPIC_SUBZONE_STATUS` |
-| 22 | `subzone/safe` | Server→ESP | 1 | `buildSubzoneSafeTopic()` | `MQTT_TOPIC_SUBZONE_SAFE` |
-| 23 | `zone/assign` | Server→ESP | 1 | `buildZoneAssignTopic()` | - |
-| 24 | `zone/ack` | ESP→Server | 1 | `buildZoneAckTopic()` | - |
+| 15 | `system/intent_outcome` | ESP→Server | 1 | `buildIntentOutcomeTopic()` | - |
+| 16 | `system/will` | ESP→Server | 1 | (LWT bei connect) | - |
+| 17 | `config` | Server→ESP | 2 | `buildConfigTopic()` | `MQTT_TOPIC_ESP_CONFIG` |
+| 18 | `config_response` | ESP→Server | 2 | `buildConfigResponseTopic()` | `MQTT_TOPIC_ESP_CONFIG_RESPONSE` |
+| 19 | `subzone/assign` | Server→ESP | 1 | `buildSubzoneAssignTopic()` | `MQTT_TOPIC_SUBZONE_ASSIGN` |
+| 20 | `subzone/remove` | Server→ESP | 1 | `buildSubzoneRemoveTopic()` | `MQTT_TOPIC_SUBZONE_REMOVE` |
+| 21 | `subzone/ack` | ESP→Server | 1 | `buildSubzoneAckTopic()` | `MQTT_TOPIC_SUBZONE_ACK` |
+| 22 | `subzone/status` | ESP→Server | 1 | `buildSubzoneStatusTopic()` | `MQTT_TOPIC_SUBZONE_STATUS` |
+| 23 | `subzone/safe` | Server→ESP | 1 | `buildSubzoneSafeTopic()` | `MQTT_TOPIC_SUBZONE_SAFE` |
+| 24 | `zone/assign` | Server→ESP | 1 | `buildZoneAssignTopic()` | - |
+| 25 | `zone/ack` | ESP→Server | 1 | `buildZoneAckTopic()` | - |
 | B1 | `kaiser/broadcast/emergency` | Server→ALL | 2 | `buildBroadcastEmergencyTopic()` | - |
 
 ---
@@ -128,7 +129,7 @@ QoS 2: Exactly Once        → Commands (Duplikate = gefährlich!)
 | QoS | Topics | Grund |
 |-----|--------|-------|
 | **0** | `system/heartbeat`, `system/heartbeat/ack`, `system/diagnostics` | Regelmäßig, nächste Nachricht überschreibt |
-| **1** | `sensor/data`, `sensor/batch`, `sensor/response`, `actuator/status`, `actuator/response`, `actuator/alert`, `system/error`, `system/will`, alle `subzone/*` | Daten-Loss unerwünscht, Duplikate verarbeitbar |
+| **1** | `sensor/data`, `sensor/batch`, `sensor/response`, `actuator/status`, `actuator/response`, `actuator/alert`, `system/error`, `system/intent_outcome`, `system/will`, alle `subzone/*` | Daten-Loss unerwünscht, Duplikate verarbeitbar |
 | **2** | `sensor/command`, `actuator/command`, `system/command`, `config`, `config_response`, `broadcast/emergency` | Duplikate können Schaden verursachen |
 
 ### Server-Konstanten (constants.py:193-199)
