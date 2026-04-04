@@ -27,9 +27,16 @@ Expected Payload:
 from datetime import datetime, timezone
 from typing import Optional
 
+from ...core.metrics import (
+    increment_contract_terminalization_blocked,
+    increment_contract_unknown_code,
+)
 from ...core.logging_config import get_logger
-from ...db.repositories import ActuatorRepository, ESPRepository
+from ...db.repositories import ActuatorRepository, CommandContractRepository, ESPRepository
 from ...db.session import resilient_session
+from ...services.device_response_contract import canonicalize_actuator_response
+from ...services.event_contract_serializers import serialize_actuator_response_event
+from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
 
@@ -63,34 +70,85 @@ class ActuatorResponseHandler:
             True if message processed successfully, False otherwise
         """
         try:
-            # Step 1: Validate payload
-            validation_result = self._validate_payload(payload)
-            if not validation_result["valid"]:
-                logger.error(f"Invalid actuator response payload: {validation_result['error']}")
+            # Step 1: Parse topic
+            parsed_topic = TopicBuilder.parse_actuator_response_topic(topic)
+            if not parsed_topic:
+                logger.error("Failed to parse actuator response topic: %s", topic)
                 return False
 
-            esp_id_str = payload["esp_id"]
-            gpio = payload["gpio"]
-            command = payload.get("command", "UNKNOWN")
-            value = payload.get("value", 0.0)
-            success = payload.get("success", False)
-            message = payload.get("message", "")
-            correlation_id = payload.get("correlation_id")
+            # Step 2: Canonical-first normalization
+            canonical = canonicalize_actuator_response(
+                payload,
+                topic_esp_id=parsed_topic["esp_id"],
+                topic_gpio=parsed_topic["gpio"],
+            )
+            esp_id_str = canonical.esp_id
+            gpio = canonical.gpio
+            command = canonical.command
+            value = canonical.value
+            success = canonical.success
+            message = canonical.message
+            correlation_id = canonical.correlation_id
+
+            if canonical.is_contract_violation:
+                increment_contract_unknown_code("actuator_response")
+                logger.warning(
+                    "Contract violation normalized on actuator_response: esp_id=%s raw_esp_id=%s raw_gpio=%s raw_success=%s",
+                    esp_id_str,
+                    canonical.raw_esp_id,
+                    canonical.raw_gpio,
+                    canonical.raw_success,
+                )
 
             logger.debug(
                 f"Processing actuator response: esp_id={esp_id_str}, gpio={gpio}, "
                 f"command={command}, success={success}"
             )
 
-            # Step 2: Convert ESP32 timestamp
-            esp32_timestamp = self._convert_timestamp(payload.get("ts", 0))
+            # Step 3: Convert ESP32 timestamp
+            esp32_timestamp = self._convert_timestamp(canonical.ts)
 
-            # Step 3: Get database session and repositories
+            # Step 4: Get database session and repositories
             async with resilient_session() as session:
                 esp_repo = ESPRepository(session)
                 actuator_repo = ActuatorRepository(session)
+                contract_repo = CommandContractRepository(session)
 
-                # Step 4: Lookup ESP device
+                authority_key = self._build_terminal_authority_key(
+                    esp_id=esp_id_str,
+                    gpio=gpio,
+                    command=command,
+                    correlation_id=correlation_id,
+                    payload=payload,
+                )
+                _, was_stale = await contract_repo.upsert_terminal_event_authority(
+                    event_class="actuator_response",
+                    dedup_key=authority_key,
+                    esp_id=esp_id_str,
+                    outcome="success" if bool(success) else "failed",
+                    correlation_id=correlation_id,
+                    is_final=canonical.is_final,
+                    code=canonical.code,
+                    reason=canonical.message,
+                    retryable=(canonical.retry_policy != "forbidden"),
+                    generation=payload.get("generation"),
+                    seq=payload.get("seq"),
+                    payload_ts=canonical.ts,
+                )
+                if was_stale:
+                    increment_contract_terminalization_blocked(
+                        event_class="actuator_response",
+                        reason="terminal_authority_guard",
+                    )
+                    logger.info(
+                        "Skipping stale actuator_response due to terminal authority guard: esp_id=%s gpio=%s key=%s",
+                        esp_id_str,
+                        gpio,
+                        authority_key,
+                    )
+                    return True
+
+                # Step 5: Lookup ESP device
                 esp_device = await esp_repo.get_by_device_id(esp_id_str)
                 if not esp_device:
                     logger.warning(
@@ -100,7 +158,7 @@ class ActuatorResponseHandler:
                     # Don't fail - still log the response for debugging
                     return True
 
-                # Step 5: Log command response to history
+                # Step 6: Log command response to history
                 await actuator_repo.log_command(
                     esp_id=esp_device.id,
                     gpio=gpio,
@@ -115,10 +173,20 @@ class ActuatorResponseHandler:
                         "duration": payload.get("duration", 0),
                         "response_message": message,
                         "zone_id": payload.get("zone_id", ""),
+                        "code": canonical.code,
+                        "domain": canonical.domain,
+                        "severity": canonical.severity,
+                        "terminality": canonical.terminality,
+                        "retry_policy": canonical.retry_policy,
+                        "is_final": canonical.is_final,
+                        "contract_violation": canonical.is_contract_violation,
+                        "raw_esp_id": canonical.raw_esp_id,
+                        "raw_gpio": canonical.raw_gpio,
+                        "raw_success": canonical.raw_success,
                     },
                 )
 
-                # Step 5b: Audit log with correlation_id for event linking
+                # Step 6b: Audit log with correlation_id for event linking
                 if correlation_id:
                     from ...db.repositories.audit_log_repo import AuditLogRepository
 
@@ -137,7 +205,7 @@ class ActuatorResponseHandler:
                 # Commit transaction
                 await session.commit()
 
-                # Step 6: Log result
+                # Step 7: Log result
                 if success:
                     logger.info(
                         f"✅ Actuator command confirmed: esp_id={esp_id_str}, gpio={gpio}, "
@@ -149,22 +217,35 @@ class ActuatorResponseHandler:
                         f"command={command}, error={message}"
                     )
 
-                # Step 7: WebSocket broadcast (non-blocking)
+                # Step 8: WebSocket broadcast (non-blocking)
                 try:
                     from ...websocket.manager import WebSocketManager
 
                     ws_manager = await WebSocketManager.get_instance()
-                    broadcast_data = {
-                        "esp_id": esp_id_str,
-                        "gpio": gpio,
-                        "command": command,
-                        "value": value,
-                        "success": success,
-                        "message": message,
-                        "timestamp": payload.get("ts", 0),
-                    }
-                    if correlation_id:
-                        broadcast_data["correlation_id"] = correlation_id
+                    broadcast_data = serialize_actuator_response_event(
+                        esp_id=esp_id_str,
+                        gpio=gpio,
+                        command=command,
+                        value=value,
+                        success=success,
+                        message=message,
+                        timestamp=canonical.ts,
+                        correlation_id=correlation_id,
+                    )
+                    broadcast_data.update(
+                        {
+                            "code": canonical.code,
+                            "domain": canonical.domain,
+                            "severity": canonical.severity,
+                            "terminality": canonical.terminality,
+                            "retry_policy": canonical.retry_policy,
+                            "is_final": canonical.is_final,
+                            "contract_violation": canonical.is_contract_violation,
+                            "raw_esp_id": canonical.raw_esp_id,
+                            "raw_gpio": canonical.raw_gpio,
+                            "raw_success": canonical.raw_success,
+                        }
+                    )
                     await ws_manager.broadcast("actuator_response", broadcast_data)
                 except Exception as e:
                     logger.debug(f"WebSocket broadcast skipped: {e}")
@@ -242,6 +323,24 @@ class ActuatorResponseHandler:
         else:
             logger.warning(f"Invalid timestamp {ts_raw} (out of range), using server time")
             return datetime.now(timezone.utc)
+
+    @staticmethod
+    def _build_terminal_authority_key(
+        *,
+        esp_id: str,
+        gpio: int,
+        command: str,
+        correlation_id: Optional[str],
+        payload: dict,
+    ) -> str:
+        """Build stable dedup key for actuator_response terminal events."""
+        if correlation_id:
+            return f"corr:{str(correlation_id).strip().lower()}"
+        ts_part = str(payload.get("ts", "na"))
+        return (
+            f"esp:{esp_id.strip().lower()}:gpio:{int(gpio)}:"
+            f"cmd:{str(command).strip().lower()}:ts:{ts_part}"
+        )
 
 
 # Global handler instance

@@ -29,18 +29,18 @@
 // CONFIGURATION CONSTANTS
 // ============================================
 
-// NTP Servers (Industrial-grade, geographically distributed)
-#define NTP_SERVER_PRIMARY    "pool.ntp.org"
-#define NTP_SERVER_SECONDARY  "time.nist.gov"
-#define NTP_SERVER_TERTIARY   "time.google.com"
+// NTP Servers — priority: local Docker NTP → PTB (German reference) → public fallback
+#define NTP_SERVER_PRIMARY    "192.168.0.39"        // Local Docker NTP (cturra/ntp, always reachable on LAN)
+#define NTP_SERVER_SECONDARY  "ptbtime1.ptb.de"   // PTB — official German time reference
+#define NTP_SERVER_TERTIARY   "pool.ntp.org"       // Public fallback
 
 // Timezone: UTC (Server handles timezone conversion)
 #define NTP_GMT_OFFSET_SEC    0
 #define NTP_DAYLIGHT_OFFSET   0
 
 // Sync Configuration
-#define NTP_SYNC_TIMEOUT_MS       10000   // 10 seconds max wait for initial sync
-#define NTP_RESYNC_INTERVAL_MS    3600000 // Re-sync every hour
+#define NTP_SYNC_TIMEOUT_MS       50000   // 50s — alle 3 Server koennen probiert werden
+#define NTP_RESYNC_INTERVAL_MS    300000  // Re-sync every 5 minutes
 #define NTP_RETRY_DELAY_MS        1000    // Retry delay on failure
 #define NTP_MAX_RETRIES           5       // Max retries per sync attempt
 
@@ -167,13 +167,35 @@ public:
     
     /**
      * @brief Force immediate re-synchronization
-     * 
+     *
      * Blocks until sync completes or times out.
      * Use sparingly to avoid NTP server abuse.
-     * 
+     *
      * @return true if re-sync successful
      */
     bool forceResync();
+
+    // ============================================
+    // WIFI EVENT CALLBACKS
+    // ============================================
+
+    /**
+     * @brief Called when WiFi reconnects — restarts SNTP daemon if needed
+     */
+    void onWiFiConnected();
+
+    /**
+     * @brief Called when WiFi disconnects — stops SNTP daemon to prevent log flood
+     */
+    void onWiFiDisconnected();
+
+    /**
+     * @brief Called by SNTP callback on successful sync (LWIP thread context)
+     *
+     * Sets synchronized_ and sync_completed_ flags.
+     * Must only set volatile flags — no heap allocation, no LOG.
+     */
+    void onSyncCompleted();
     
     /**
      * @brief Set custom NTP servers
@@ -200,9 +222,11 @@ private:
     // ============================================
     bool initialized_;
     bool synchronized_;
+    bool sntp_daemon_running_;        // true while SNTP daemon is active (esp_sntp_init called)
     time_t last_sync_time_;           // Unix timestamp at last sync
     unsigned long last_sync_millis_;  // millis() at last sync
     unsigned long last_resync_check_; // millis() at last resync check
+    volatile bool sync_completed_;    // set by SNTP callback (LWIP thread) on successful sync
     
     // Custom NTP servers (optional)
     const char* ntp_server_primary_;

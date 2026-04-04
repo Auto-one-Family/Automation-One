@@ -14,6 +14,11 @@ from ..models.esp import ESPDevice
 from ..models.enums import DataSource
 from .base_repo import BaseRepository
 
+# ESP timestamps before this date indicate missing NTP sync (ts=0 → epoch conversion).
+# System was developed in 2024; any earlier timestamp is invalid and should be replaced
+# with server time to avoid garbage data in actuator_states.
+MIN_VALID_TS = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
 
 class ActuatorRepository(BaseRepository[ActuatorConfig]):
     """Actuator Repository with actuator-specific queries."""
@@ -198,6 +203,27 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
         result = await self.session.execute(stmt)
         return result.rowcount
 
+    async def get_active_actuators_for_device(self, esp_id: uuid.UUID) -> list[ActuatorState]:
+        """
+        Get all actuator states for a device that are not off or emergency_stop.
+
+        Used before reset_states_for_device() to capture which actuators
+        will be affected, for history logging purposes.
+
+        Args:
+            esp_id: ESP device UUID
+
+        Returns:
+            List of ActuatorState instances with state not in ('off', 'emergency_stop')
+        """
+        result = await self.session.execute(
+            select(ActuatorState).where(
+                ActuatorState.esp_id == esp_id,
+                ActuatorState.state.notin_(["off", "emergency_stop"]),
+            )
+        )
+        return list(result.scalars().all())
+
     async def update_state(
         self,
         esp_id: uuid.UUID,
@@ -217,6 +243,8 @@ class ActuatorRepository(BaseRepository[ActuatorConfig]):
             data_source: Data source (production, mock, test, simulation)
         """
         existing = await self.get_state(esp_id, gpio)
+        if timestamp and timestamp < MIN_VALID_TS:
+            timestamp = None  # ESP timestamp pre-2024 indicates missing NTP sync
         command_timestamp = timestamp or datetime.now(timezone.utc)
 
         if existing:

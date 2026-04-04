@@ -363,19 +363,23 @@ class TestBuildOfflineRulesAsync:
 
     @pytest.mark.asyncio
     async def test_no_matching_rules_returns_empty_list(self):
-        """ESP with only non-hysteresis rules → offline_rules == []."""
+        """ESP with only non-convertible rules → offline_rules == [].
+
+        Uses a pH sensor_threshold rule which is blocked by the P4-GUARD
+        (ADC raw value only on ESP32, no calibration data available).
+        """
         builder = self._builder()
         mock_logic_repo = AsyncMock()
-        # Only a sensor_threshold rule — not hysteresis
+        # pH sensor is in CALIBRATION_REQUIRED_SENSOR_TYPES — P4-GUARD blocks it
         non_hysteresis_rule = _make_rule(
-            rule_name="threshold_rule",
+            rule_name="ph_threshold_rule",
             trigger_conditions={
                 "type": "sensor_threshold",
                 "esp_id": ESP_ID_A,
-                "gpio": 4,
-                "sensor_type": "temperature",
+                "gpio": 34,
+                "sensor_type": "ph",
                 "operator": ">",
-                "value": 30.0,
+                "value": 7.5,
             },
             actions=[_actuator_action(ESP_ID_A)],
         )

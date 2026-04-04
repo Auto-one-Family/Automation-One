@@ -110,6 +110,8 @@ export interface ConfigResponseEvent extends WebSocketEventBase {
     status: 'success' | 'failed'
     error_code?: string
     message?: string
+    correlation_id: string
+    request_id?: string
     timestamp: number
   }
 }
@@ -321,7 +323,8 @@ export interface ConfigFailedEvent extends WebSocketEventBase {
     esp_id: string
     config_keys: string[]
     error: string
-    correlation_id?: string
+    correlation_id: string
+    request_id?: string
   }
 }
 

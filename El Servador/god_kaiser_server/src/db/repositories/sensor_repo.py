@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import and_, delete, func, or_, select, tuple_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -206,6 +207,8 @@ class SensorRepository(BaseRepository[SensorConfig]):
                 SensorConfig.esp_id == esp_id,
                 SensorConfig.enabled
                 == True,  # noqa: E712 — only count enabled configs to match ESP count
+                SensorConfig.interface_type
+                != "VIRTUAL",  # exclude server-side virtual sensors (e.g. VPD) — ESP never receives them
             )
         )
         result = await self.session.execute(stmt)
@@ -342,6 +345,49 @@ class SensorRepository(BaseRepository[SensorConfig]):
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
 
+        # PostgreSQL fast path: idempotent insert without exception noise.
+        bind = self.session.get_bind()
+        dialect_name = bind.dialect.name if bind is not None else ""
+        if dialect_name == "postgresql":
+            insert_stmt = (
+                pg_insert(SensorData)
+                .values(
+                    esp_id=esp_id,
+                    gpio=gpio,
+                    sensor_type=sensor_type,
+                    raw_value=raw_value,
+                    processed_value=processed_value,
+                    unit=unit,
+                    processing_mode=processing_mode,
+                    quality=quality,
+                    timestamp=ts,
+                    sensor_metadata=metadata,  # Model field is sensor_metadata
+                    data_source=data_source,
+                    zone_id=zone_id,
+                    subzone_id=subzone_id,
+                    device_name=device_name,
+                )
+                .on_conflict_do_nothing(
+                    constraint="uq_sensor_data_esp_gpio_type_timestamp"
+                )
+                .returning(SensorData.id)
+            )
+            inserted_id = (await self.session.execute(insert_stmt)).scalar_one_or_none()
+            if inserted_id is None:
+                logger.debug(
+                    "Duplicate sensor_data ignored: esp=%s, gpio=%s, type=%s, ts=%s",
+                    esp_id,
+                    gpio,
+                    sensor_type,
+                    ts,
+                )
+                return None
+
+            created = await self.session.get(SensorData, inserted_id)
+            return created
+
+        # Generic fallback (e.g. SQLite in unit tests): use nested transaction so
+        # duplicate errors do not roll back the surrounding ingest transaction.
         sensor_data = SensorData(
             esp_id=esp_id,
             gpio=gpio,
@@ -359,12 +405,12 @@ class SensorRepository(BaseRepository[SensorConfig]):
             device_name=device_name,
         )
         try:
-            self.session.add(sensor_data)
-            await self.session.flush()
+            async with self.session.begin_nested():
+                self.session.add(sensor_data)
+                await self.session.flush()
             await self.session.refresh(sensor_data)
             return sensor_data
         except IntegrityError:
-            await self.session.rollback()
             logger.debug(
                 "Duplicate sensor_data ignored: esp=%s, gpio=%s, type=%s, ts=%s",
                 esp_id,

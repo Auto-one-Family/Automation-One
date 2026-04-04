@@ -41,7 +41,6 @@ interface Props {
   hasMoreEvents: boolean
   isLoadingMore: boolean
   isPaused: boolean
-  eventTypeLabels: Record<string, string>
   restoredEventIds: Set<string>
   // Filter props (passed to DataSourceSelector)
   filterEspId: string
@@ -141,7 +140,6 @@ function selectEvent(event: UnifiedEvent) {
         :grouped-events="groupedEvents"
         :grouping-enabled="groupingEnabled"
         :is-paused="isPaused"
-        :event-type-labels="eventTypeLabels"
         :restored-event-ids="restoredEventIds"
         @select="selectEvent"
       />

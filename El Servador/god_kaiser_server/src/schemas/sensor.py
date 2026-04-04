@@ -453,6 +453,10 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
         None,
         description="Latest reading timestamp",
     )
+    subzone_warning: Optional[str] = Field(
+        None,
+        description="Warning if subzone assignment failed (sensor was saved successfully)",
+    )
 
     model_config = ConfigDict(
         from_attributes=True,

@@ -1,5 +1,7 @@
 #include "publish_queue.h"
 #include "../utils/logger.h"
+#include "../error_handling/error_tracker.h"
+#include "../models/error_codes.h"
 #include <cstring>
 
 static const char* PQ_TAG = "SYNC";
@@ -22,7 +24,12 @@ void initPublishQueue() {
 // ============================================
 // queuePublish
 // ============================================
-bool queuePublish(const char* topic, const char* payload, uint8_t qos, bool retain) {
+bool queuePublish(const char* topic,
+                  const char* payload,
+                  uint8_t qos,
+                  bool retain,
+                  bool critical,
+                  const IntentMetadata* metadata) {
     if (g_publish_queue == NULL) {
         LOG_W(PQ_TAG, "Publish queue not initialised, dropping: " + String(topic));
         return false;
@@ -35,9 +42,26 @@ bool queuePublish(const char* topic, const char* payload, uint8_t qos, bool reta
     req.payload[sizeof(req.payload) - 1] = '\0';
     req.qos    = qos;
     req.retain = retain;
+    req.critical = critical;
+    req.attempt = 0;
+    IntentMetadata fallback_meta = extractIntentMetadataFromPayload(payload, "pub");
+    req.metadata = fallback_meta;
+    if (metadata != nullptr) {
+        req.metadata = *metadata;
+    }
 
-    if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
+    TickType_t wait_ticks = critical ? pdMS_TO_TICKS(20) : 0;
+    if (xQueueSend(g_publish_queue, &req, wait_ticks) != pdTRUE) {
         LOG_W(PQ_TAG, "[SYNC] Publish queue full — dropping: " + String(topic));
+        errorTracker.logApplicationError(ERROR_TASK_QUEUE_FULL, "Publish queue full");
+        if (critical) {
+            publishIntentOutcome("publish",
+                                 req.metadata,
+                                 "failed",
+                                 "QUEUE_FULL",
+                                 "Critical publish queue full",
+                                 true);
+        }
         return false;
     }
     return true;

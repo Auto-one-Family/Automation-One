@@ -4,12 +4,17 @@ Compound Condition Evaluator
 Evaluates compound conditions with AND/OR logic.
 """
 
-from typing import Dict, List
+from typing import Dict, FrozenSet, List
 
 from ....core.logging_config import get_logger
 from .base import BaseConditionEvaluator
 
 logger = get_logger(__name__)
+
+# Signal flags that evaluators set on the context dict to trigger special actions in
+# _evaluate_rule().  These must be propagated from sub-context back to the parent
+# context after each sub-condition evaluation so that _evaluate_rule() can see them.
+_SIGNAL_FLAGS: FrozenSet[str] = frozenset({"_hysteresis_just_deactivated"})
 
 
 class CompoundConditionEvaluator(BaseConditionEvaluator):
@@ -33,7 +38,7 @@ class CompoundConditionEvaluator(BaseConditionEvaluator):
 
     def supports(self, condition_type: str) -> bool:
         """Check if this evaluator supports compound conditions."""
-        return condition_type == "compound" or "logic" in condition_type.lower()
+        return condition_type in ("compound", "logic")
 
     async def evaluate(self, condition: Dict, context: Dict) -> bool:
         """
@@ -88,6 +93,13 @@ class CompoundConditionEvaluator(BaseConditionEvaluator):
             try:
                 result = await evaluator.evaluate(sub_condition, sub_context)
                 results.append(result)
+                # B1-fix: propagate signal flags from sub-context to parent context.
+                # sub_context is a shallow copy — flags set by evaluators (e.g.
+                # _hysteresis_just_deactivated) are not visible in the parent context
+                # without this step.
+                for flag in _SIGNAL_FLAGS:
+                    if sub_context.get(flag):
+                        context[flag] = True
             except Exception as e:
                 logger.error(
                     f"Error evaluating sub-condition {cond_type}: {e}",

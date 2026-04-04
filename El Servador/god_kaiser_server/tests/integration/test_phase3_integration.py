@@ -538,6 +538,95 @@ class TestNetworkPartitionRecovery:
                                 assert update_call.args[1] == "online"
 
     @pytest.mark.asyncio
+    async def test_reconnect_heartbeat_starts_adoption_phase(
+        self, heartbeat_handler, heartbeat_payload
+    ):
+        """Reconnect triggers explicit ADOPTING phase before delta evaluation."""
+        topic = "kaiser/god/esp/ESP_ADOPT/system/heartbeat"
+
+        with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_db.rollback = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.heartbeat_handler.ESPRepository") as mock_repo_class:
+                mock_device = MagicMock()
+                mock_device.id = 1
+                mock_device.device_id = "ESP_ADOPT"
+                mock_device.status = "offline"
+                mock_device.name = "Adoption ESP"
+                mock_device.device_metadata = {}
+                mock_device.last_seen = datetime.now(timezone.utc) - timedelta(minutes=3)
+                mock_device.zone_id = "zone_1"
+                mock_device.zone_name = "Test Zone"
+                mock_device.master_zone_id = "master"
+                mock_device.kaiser_id = "god"
+                mock_device.ip_address = None
+
+                mock_repo = MagicMock()
+                mock_repo.get_by_device_id = AsyncMock(return_value=mock_device)
+                mock_repo.update_status = AsyncMock()
+                mock_repo.update_last_seen = AsyncMock()
+                mock_repo_class.return_value = mock_repo
+
+                with patch(
+                    "src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository"
+                ) as mock_hb_repo_class:
+                    mock_hb_repo = MagicMock()
+                    mock_hb_repo.log_heartbeat = AsyncMock()
+                    mock_hb_repo_class.return_value = mock_hb_repo
+
+                    with patch(
+                        "src.mqtt.handlers.heartbeat_handler.AuditLogRepository"
+                    ) as mock_audit_class:
+                        mock_audit = MagicMock()
+                        mock_audit.log_device_event = AsyncMock()
+                        mock_audit_class.return_value = mock_audit
+
+                        with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                            mock_ws = AsyncMock()
+                            mock_ws.broadcast = AsyncMock()
+                            mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+
+                            mock_adoption = MagicMock()
+                            mock_adoption.start_reconnect_cycle = AsyncMock()
+                            with patch(
+                                "src.mqtt.handlers.heartbeat_handler.get_state_adoption_service",
+                                return_value=mock_adoption,
+                            ):
+                                with patch.object(
+                                    heartbeat_handler, "_send_heartbeat_ack", AsyncMock()
+                                ):
+                                    with patch.object(
+                                        heartbeat_handler,
+                                        "_complete_adoption_and_trigger_reconnect_eval",
+                                        AsyncMock(),
+                                    ):
+                                        with patch(
+                                            "src.mqtt.handlers.heartbeat_handler.asyncio.create_task",
+                                            return_value=MagicMock(),
+                                        ):
+                                            result = await heartbeat_handler.handle_heartbeat(
+                                                topic, heartbeat_payload
+                                            )
+
+                                            assert result is True
+                                            mock_adoption.start_reconnect_cycle.assert_called_once()
+                                            # Reconnect phase must be visible as adopting in WS.
+                                            reconnect_calls = [
+                                                c
+                                                for c in mock_ws.broadcast.call_args_list
+                                                if c.args and c.args[0] == "esp_reconnect_phase"
+                                            ]
+                                            assert reconnect_calls, "esp_reconnect_phase not broadcasted"
+                                            phase_payload = reconnect_calls[0].args[1]
+                                            assert phase_payload["esp_id"] == "ESP_ADOPT"
+                                            assert phase_payload["phase"] == "adopting"
+                                            assert "offline_seconds" in phase_payload
+
+    @pytest.mark.asyncio
     async def test_full_partition_recovery_cycle(
         self, lwt_handler, heartbeat_handler, lwt_payload, heartbeat_payload
     ):

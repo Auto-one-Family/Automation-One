@@ -7,6 +7,7 @@ Benötigt: DB-Session, Repositories, Event Loop
 Phase 3 Test-Suite: Heartbeat Processing, Auto-Discovery, Status Transitions.
 """
 
+import json
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -336,11 +337,13 @@ class TestDeviceDiscovery:
                             # Discovery should have been called
                             mock_discover.assert_called_once()
                             # ACK should be sent with pending_approval status
-                            mock_ack.assert_called_once_with(
-                                esp_id="ESP_NEW_DEVICE",
-                                status="pending_approval",
-                                config_available=False,
-                            )
+                            mock_ack.assert_called_once()
+                            ack_kwargs = mock_ack.call_args.kwargs
+                            assert ack_kwargs["esp_id"] == "ESP_NEW_DEVICE"
+                            assert ack_kwargs["status"] == "pending_approval"
+                            assert ack_kwargs["config_available"] is False
+                            assert ack_kwargs["handover_epoch"] >= 1
+                            assert "session_id" in ack_kwargs
 
 
 class TestTimeoutDetection:
@@ -425,9 +428,12 @@ class TestRejectedDeviceHandling:
                         result = await handler.handle_heartbeat(topic, valid_payload)
 
                         assert result is True
-                        mock_ack.assert_called_once_with(
-                            esp_id="ESP_REJECTED", status="rejected", config_available=False
-                        )
+                        mock_ack.assert_called_once()
+                        ack_kwargs = mock_ack.call_args.kwargs
+                        assert ack_kwargs["esp_id"] == "ESP_REJECTED"
+                        assert ack_kwargs["status"] == "rejected"
+                        assert ack_kwargs["config_available"] is False
+                        assert ack_kwargs["handover_epoch"] >= 1
 
 
 class TestOnlineDeviceHeartbeat:
@@ -644,3 +650,54 @@ class TestZoneMismatchDetection:
             if elapsed < zone_resync_cooldown_seconds:
                 should_resync = False
         assert should_resync is True
+
+
+class TestHeartbeatErrorAckContract:
+    """Error-ACK must satisfy the same fail-closed contract as normal ACKs."""
+
+    @pytest.fixture
+    def handler(self):
+        return HeartbeatHandler()
+
+    @pytest.mark.asyncio
+    async def test_error_ack_contains_handover_epoch_and_contract_fields(self, handler):
+        with patch("src.mqtt.client.MQTTClient.get_instance") as mock_get_instance:
+            mock_mqtt_client = MagicMock()
+            mock_mqtt_client.publish.return_value = True
+            mock_get_instance.return_value = mock_mqtt_client
+
+            success = await handler._send_heartbeat_error_ack("ESP_TEST", "internal_error")
+
+            assert success is True
+            mock_mqtt_client.publish.assert_called_once()
+            topic, payload_json = mock_mqtt_client.publish.call_args.args[:2]
+            payload = json.loads(payload_json)
+
+            assert topic.endswith("/system/heartbeat/ack")
+            assert payload["status"] == "error"
+            assert payload["error"] == "internal_error"
+            assert payload["handover_epoch"] >= 1
+            assert payload["ack_type"] == "heartbeat"
+            assert payload["contract_version"] == 2
+
+    @pytest.mark.asyncio
+    async def test_error_ack_uses_explicit_contract_context_when_given(self, handler):
+        with patch("src.mqtt.client.MQTTClient.get_instance") as mock_get_instance:
+            mock_mqtt_client = MagicMock()
+            mock_mqtt_client.publish.return_value = True
+            mock_get_instance.return_value = mock_mqtt_client
+
+            success = await handler._send_heartbeat_error_ack(
+                "ESP_TEST",
+                "invalid_payload",
+                handover_epoch=7,
+                session_id="ESP_TEST:handover:7:1234",
+            )
+
+            assert success is True
+            topic, payload_json = mock_mqtt_client.publish.call_args.args[:2]
+            payload = json.loads(payload_json)
+
+            assert topic.endswith("/system/heartbeat/ack")
+            assert payload["handover_epoch"] == 7
+            assert payload["session_id"] == "ESP_TEST:handover:7:1234"

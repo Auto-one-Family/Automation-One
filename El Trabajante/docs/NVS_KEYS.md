@@ -176,21 +176,36 @@ String gpio_string = storageManager.getStringObj("subzone_" + subzone_id + "_gpi
 
 **File:** `src/services/safety/offline_mode_manager.cpp`
 
-**SAFETY-P4 Keys (Lokale Hysterese-Regeln bei Netzwerkverlust):**
+**SAFETY-P4 + LE-01 — Blob-Format v1 (aktuell):**
 
 | Key | Type | Default | Constraint | Description |
 |-----|------|---------|------------|-------------|
+| `ofr_ver` | uint8_t | `0` → `1` | 0/1 | Schema-Version (0 = legacy Individual-Keys, 1 = Blob-Format) |
 | `ofr_count` | uint8_t | `0` | 0-8 | Anzahl gespeicherter Offline-Regeln |
-| `ofr_{i}_en` | uint8_t | `0` | 0/1 | Regel i aktiv (1) oder nicht (0) |
-| `ofr_{i}_agpio` | uint8_t | `255` | 0-39 | Aktor GPIO-Pin |
-| `ofr_{i}_sgpio` | uint8_t | `255` | 0-39 | Sensor GPIO-Pin |
-| `ofr_{i}_svtyp` | String | `""` | Max 24 chars | sensor_value_type (z.B. "sht31_humidity") |
-| `ofr_{i}_actb` | float | `0.0` | any | activate_below (Heating-Modus) |
-| `ofr_{i}_deaa` | float | `0.0` | any | deactivate_above (Heating-Modus) |
-| `ofr_{i}_acta` | float | `0.0` | any | activate_above (Cooling-Modus) |
-| `ofr_{i}_deab` | float | `0.0` | any | deactivate_below (Cooling-Modus) |
+| `ofr_blob` | Blob | — | `(count × sizeof(OfflineRule)) + 1` Bytes | Packed `OfflineRule[]` Array + CRC8/SMBUS Trailer |
 
-**Hinweis:** i = 0..7. Nullwerte (0.0) = "nicht gesetzt". Modus-Erkennung: `activate_below != 0 || deactivate_above != 0` → Heating; `activate_above != 0 || deactivate_below != 0` → Cooling.
+**OfflineRule Struct Layout (Blob-Inhalt, v1, 56 Bytes):**
+
+| Feld | Offset | Typ | Beschreibung |
+|------|--------|-----|--------------|
+| `enabled` | 0 | bool | Regel aktiv? |
+| `actuator_gpio` | 1 | uint8_t | Aktor GPIO-Pin |
+| `sensor_gpio` | 2 | uint8_t | Sensor GPIO-Pin (0 = I2C-Konvention) |
+| `sensor_value_type` | 3 | char[24] | Kanonischer Sensortyp (z.B. "sht31_temperature") |
+| `activate_below` | 28 | float | Heating-Modus: AN wenn < Schwelle |
+| `deactivate_above` | 32 | float | Heating-Modus: AUS wenn > Schwelle |
+| `activate_above` | 36 | float | Cooling-Modus: AN wenn > Schwelle |
+| `deactivate_below` | 40 | float | Cooling-Modus: AUS wenn < Schwelle |
+| `is_active` | 44 | bool | Aktueller Aktor-Zustand |
+| `server_override` | 45 | bool | Server hat manuell geschaltet → Regel pausiert |
+| `time_filter_enabled` | 46 | bool | Hat diese Regel ein Zeitfenster? |
+| `start_hour` | 47 | uint8_t | UTC Stunde Start (0–23) |
+| `start_minute` | 48 | uint8_t | UTC Minute Start (0–59) |
+| `end_hour` | 49 | uint8_t | UTC Stunde Ende (0–24, 24 = Mitternacht exklusiv) |
+| `end_minute` | 50 | uint8_t | UTC Minute Ende (0–59) |
+| `_reserved` | 51 | uint8_t | Alignment-Padding (future: days_of_week Bitfield) |
+
+**Migration (ver=0 → ver=1):** Beim ersten Load mit neuer Firmware werden alte Individual-Keys (`ofr_{i}_en`, `ofr_{i}_agpio`, usw.) gelesen, ins Blob-Format geschrieben und die alten Keys gelöscht (`_deleteOldIndividualKeys()`).
 
 **Change-Detection:** `saveOfflineRulesToNVS()` nutzt `memcmp` gegen Shadow-Copy — NVS wird nur beschrieben wenn sich Regeln geändert haben.
 
@@ -204,6 +219,31 @@ String gpio_string = storageManager.getStringObj("subzone_" + subzone_id + "_gpi
 |-----|------|---------|------------|-------------|
 | `hist` | String | `""` | Comma-separated UNIX epochs | Watchdog-Timeouts im rollierenden 24h-Fenster (Einträge nach gültiger Systemzeit / NTP) |
 | `snap` | String | `""` | JSON (ArduinoJson) | Letzter Diagnose-Snapshot vor Timeout (`handleWatchdogTimeout`) |
+
+#### Intent Outcome Outbox (Namespace: `io_outbox`)
+
+**File:** `src/tasks/intent_contract.cpp`
+
+| Key | Type | Default | Constraint | Description |
+|-----|------|---------|------------|-------------|
+| `head` | uint8_t | `0` | 0-7 | Ringbuffer-Head für Pending-Outcomes |
+| `count` | uint8_t | `0` | 0-8 | Anzahl belegter Outbox-Slots |
+| `retry_total` | uint32_t | `0` | - | Kumulierte Replay-Retry-Versuche |
+| `recovered_total` | uint32_t | `0` | - | Erfolgreich wiederhergestellte Outcomes (Replay) |
+| `drop_total` | uint32_t | `0` | - | Gedroppte kritische Outcomes bei Outbox-Overflow/Retry-Limit |
+| `fin_ok_total` | uint32_t | `0` | Key <= 15 chars | Kumuliert final bestätigte Outcomes (Direkt-Publish + Replay) |
+| `s{idx}_flow` | String | `""` | `idx` 0-7 | Flow je Slot (`command`, `publish`, ...) |
+| `s{idx}_intent` | String | `""` | `idx` 0-7 | Intent-ID je Slot |
+| `s{idx}_corr` | String | `""` | `idx` 0-7 | Correlation-ID je Slot |
+| `s{idx}_gen` | uint32_t | `0` | `idx` 0-7 | Generation je Slot |
+| `s{idx}_created` | uint32_t | `0` | `idx` 0-7 | created_at_ms je Slot |
+| `s{idx}_ttl` | uint32_t | `0` | `idx` 0-7 | ttl_ms je Slot |
+| `s{idx}_epoch` | uint32_t | `0` | `idx` 0-7 | epoch_at_accept je Slot |
+| `s{idx}_outcome` | String | `"failed"` | `idx` 0-7 | Outcome je Slot |
+| `s{idx}_code` | String | `"EXECUTE_FAIL"` | `idx` 0-7 | Fehler-/Statuscode je Slot |
+| `s{idx}_reason` | String | `"Pending outcome replay"` | `idx` 0-7 | Reason je Slot |
+| `s{idx}_retryable` | bool | `true` | `idx` 0-7 | Retry-Flag je Slot |
+| `s{idx}_attempt` | uint8_t | `1` | `idx` 0-7 | Aktueller Attempt je Slot |
 
 #### Actuator Configuration (Namespace: `actuator_config`)
 
@@ -366,14 +406,14 @@ Das System unterstützt **18 MQTT Topic-Patterns** (nicht nur 13):
 - System: 6 Keys
 - Sensors: 1 + (8 × 20) = 161 Keys (bei 20 Sensoren, **+2 Keys Phase 2C: mode, interval**)
 - Actuators: 1 + (10 × 20) = 201 Keys (bei 20 Aktoren)
-- Offline Rules: 1 + (8 × 8) = 65 Keys (bei 8 Regeln, **SAFETY-P4**)
-- **TOTAL: ~445 Keys** (bei voller Auslastung)
+- Offline Rules: 3 Keys (ofr_ver, ofr_count, ofr_blob = Blob v1, **SAFETY-P4 + LE-01**)
+- **TOTAL: ~385 Keys** (bei voller Auslastung)
 
 **Estimated NVS-Usage:**
-- Strings (avg 30 bytes): ~240 Keys × 30 = 7.2 KB
+- Strings (avg 30 bytes): ~200 Keys × 30 = 6.0 KB
 - Integers (4 bytes): ~100 Keys × 4 = 400 bytes
-- Offline Rules (8 × 8 floats + strings): ~1 KB
-- **TOTAL: ~9 KB** (bei voller Auslastung)
+- Offline Rules Blob: 8 × 56 Bytes + 1 CRC + Overhead ≈ 0.5 KB
+- **TOTAL: ~7 KB** (bei voller Auslastung)
 
 **NVS-Partition:** 20 KB (Standard ESP32)
 **Usage:** ~45% (bei 20 Sensoren + 20 Aktoren + 8 Offline-Regeln)

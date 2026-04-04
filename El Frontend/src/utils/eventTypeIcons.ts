@@ -108,6 +108,10 @@ const EVENT_TYPE_ICONS: Record<string, LucideIcon> = {
 
   // Notifications
   notification: Info,
+
+  // Contract integrity
+  contract_mismatch: AlertOctagon,
+  contract_unknown_event: AlertOctagon,
 }
 
 /**

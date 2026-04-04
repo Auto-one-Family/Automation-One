@@ -110,6 +110,11 @@ describe('getEventIcon', () => {
     expect(icon.name).toBe('Info')
   })
 
+  it('returns AlertOctagon icon for contract_mismatch', () => {
+    const icon = getEventIcon('contract_mismatch')
+    expect(icon.name).toBe('AlertOctagon')
+  })
+
   it('returns default Activity icon for unknown event type', () => {
     const icon = getEventIcon('unknown_event_type')
     expect(icon.name).toBe('Activity')
@@ -199,9 +204,9 @@ describe('getAllMappedEventTypes', () => {
     expect(Array.isArray(types)).toBe(true)
   })
 
-  it('returns 32 mapped event types', () => {
+  it('returns 34 mapped event types', () => {
     const types = getAllMappedEventTypes()
-    expect(types).toHaveLength(32)
+    expect(types).toHaveLength(34)
   })
 
   it('includes sensor_data in mapped types', () => {
@@ -276,5 +281,11 @@ describe('getAllMappedEventTypes', () => {
     expect(types).toContain('login_success')
     expect(types).toContain('login_failed')
     expect(types).toContain('logout')
+  })
+
+  it('includes contract integrity events', () => {
+    const types = getAllMappedEventTypes()
+    expect(types).toContain('contract_mismatch')
+    expect(types).toContain('contract_unknown_event')
   })
 })

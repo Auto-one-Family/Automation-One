@@ -35,6 +35,68 @@ from ..sensors.sensor_type_registry import normalize_sensor_type
 logger = get_logger(__name__)
 
 
+def _get_default_deadband(sensor_type: str) -> float:
+    """Return a type-specific deadband for auto-converting a simple threshold to hysteresis.
+
+    Called only for digital sensors that deliver calibrated physical values directly
+    on the ESP32 (temperature, humidity, pressure, CO2, light, flow). Analog sensors
+    that require server-side calibration (ph, ec, moisture, soil_moisture) are
+    filtered out by the P4-GUARD before this function is ever reached.
+    """
+    DEADBAND_MAP = {
+        "sht31_temp": 2.0,       # °C — typical HVAC hysteresis band
+        "ds18b20": 2.0,          # °C
+        "bmp280_temp": 2.0,      # °C
+        "bme280_temp": 2.0,      # °C
+        "sht31_humidity": 5.0,   # %RH — higher variance for humidity
+        "bme280_humidity": 5.0,
+        "bmp280_pressure": 5.0,  # hPa
+        "bme280_pressure": 5.0,
+        "co2": 50.0,             # ppm — large natural fluctuations
+        "light": 100.0,          # lux
+        "flow": 0.5,             # l/min — conservative
+    }
+    for prefix, deadband in DEADBAND_MAP.items():
+        if sensor_type.startswith(prefix):
+            return deadband
+    return 2.0  # Safe fallback for unmapped types
+
+
+def _days_of_week_db_to_tm_mask(raw_days: Any) -> int:
+    """
+    Convert DB weekday list (0=Mon..6=Sun) to tm_wday bitmask (bit0=Sun..bit6=Sat).
+
+    Defaults:
+    - Field missing (None): all days (0x7F)
+    - Empty list: no day active (0x00)
+    - Invalid/non-list or all invalid values: all days (0x7F)
+    """
+    if raw_days is None:
+        return 0x7F
+    if isinstance(raw_days, list) and len(raw_days) == 0:
+        return 0x00
+    if not isinstance(raw_days, list):
+        return 0x7F
+
+    db_to_tm_wday = {0: 1, 1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 0}
+    days_mask = 0
+    for day in raw_days:
+        try:
+            tm_wday = db_to_tm_wday.get(int(day))
+        except (TypeError, ValueError):
+            tm_wday = None
+        if tm_wday is not None:
+            days_mask |= (1 << tm_wday)
+
+    if days_mask == 0:
+        logger.warning(
+            "[CONFIG] Invalid days_of_week values (%s), fallback to all days (0x7F)",
+            raw_days,
+        )
+        return 0x7F
+    return days_mask
+
+
 class ConfigConflictError(Exception):
     """
     Raised when config contains GPIO conflicts.
@@ -98,7 +160,7 @@ class ConfigPayloadBuilder:
     # (0-4095). Offline rule thresholds expressed in physical units (e.g. pH 7.5,
     # EC 1.8 mS/cm) would be compared against raw ADC counts — meaningless and
     # potentially dangerous (e.g. ADC 2048 > pH 7.5 → dosing pump fires).
-    CALIBRATION_REQUIRED_SENSOR_TYPES = {"ph", "ec", "moisture"}
+    CALIBRATION_REQUIRED_SENSOR_TYPES = {"ph", "ec", "moisture", "soil_moisture"}
 
     def __init__(
         self,
@@ -418,6 +480,17 @@ class ConfigPayloadBuilder:
             )
             return None
 
+        # Determine compound operator; used for 3b rejection and 3c time_filter extraction.
+        compound_op: str = getattr(rule, "logic_operator", None) or "AND"
+
+        # 3b: OR-compound rules cannot be expressed as a single ESP hysteresis rule struct.
+        if compound_op == "OR" and len(conditions_list) > 1:
+            logger.info(
+                "[CONFIG] Rule '%s': OR compound not convertible to offline rule",
+                rule.rule_name,
+            )
+            return None
+
         # Locate the first hysteresis condition that belongs to our ESP.
         # Track condition_index to match HysteresisConditionEvaluator's state key format.
         hysteresis_cond: Optional[Dict[str, Any]] = None
@@ -431,16 +504,98 @@ class ConfigPayloadBuilder:
                 break
 
         if hysteresis_cond is None:
-            condition_types = [
-                c.get("type", "MISSING") if isinstance(c, dict) else type(c).__name__
-                for c in conditions_list
-            ]
-            logger.warning(
-                "[CONFIG] Offline-rule skip: rule '%s' — no hysteresis condition found (types: %s)",
-                rule.rule_name,
-                condition_types,
-            )
-            return None
+            # 3a: sensor_threshold / sensor condition fallback.
+            # Simple threshold operators are converted to hysteresis by adding a
+            # type-specific deadband so the ESP firmware can use its existing
+            # hysteresis logic without a new condition type.
+            threshold_cond: Optional[Dict[str, Any]] = None
+            for cond in conditions_list:
+                if not isinstance(cond, dict):
+                    continue
+                if (
+                    cond.get("type") in ("sensor_threshold", "sensor")
+                    and cond.get("esp_id") == esp_id
+                ):
+                    threshold_cond = cond
+                    break
+
+            if threshold_cond is None:
+                condition_types = [
+                    c.get("type", "MISSING") if isinstance(c, dict) else type(c).__name__
+                    for c in conditions_list
+                ]
+                logger.warning(
+                    "[CONFIG] Offline-rule skip: rule '%s' — no hysteresis or threshold "
+                    "condition found (types: %s)",
+                    rule.rule_name,
+                    condition_types,
+                )
+                return None
+
+            # P4-GUARD for threshold path: analog sensors have no calibration data
+            # on the ESP32 — applyLocalConversion() delivers only the ADC raw value.
+            raw_sensor_type: str = threshold_cond.get("sensor_type") or ""
+            normalized_type: str = normalize_sensor_type(raw_sensor_type)
+            if normalized_type in self.CALIBRATION_REQUIRED_SENSOR_TYPES:
+                logger.info(
+                    "[CONFIG] Rule '%s': sensor_type '%s' (normalized: '%s') requires "
+                    "calibration — offline threshold rule skipped.",
+                    rule.rule_name,
+                    raw_sensor_type,
+                    normalized_type,
+                )
+                return None
+
+            op: str = threshold_cond.get("operator", "")
+            raw_value = threshold_cond.get("value")
+            if raw_value is None:
+                logger.info(
+                    "[CONFIG] Rule '%s': threshold condition missing 'value', skipping",
+                    rule.rule_name,
+                )
+                return None
+            try:
+                threshold_value = float(raw_value)
+            except (ValueError, TypeError):
+                logger.info(
+                    "[CONFIG] Rule '%s': threshold 'value' is not numeric, skipping",
+                    rule.rule_name,
+                )
+                return None
+
+            deadband = _get_default_deadband(normalized_type)
+
+            if op in (">", ">="):
+                synth_activate_above: Optional[float] = threshold_value
+                synth_deactivate_below: Optional[float] = threshold_value - deadband
+                synth_activate_below: Optional[float] = None
+                synth_deactivate_above: Optional[float] = None
+            elif op in ("<", "<="):
+                synth_activate_above = None
+                synth_deactivate_below = None
+                synth_activate_below = threshold_value
+                synth_deactivate_above = threshold_value + deadband
+            else:
+                logger.info(
+                    "[CONFIG] Rule '%s': operator '%s' not convertible to offline hysteresis",
+                    rule.rule_name,
+                    op,
+                )
+                return None
+
+            # Build a synthetic hysteresis_cond so the remaining validation and
+            # output-building code can operate on a single unified path.
+            hysteresis_cond = {
+                "type": "hysteresis",
+                "esp_id": esp_id,
+                "gpio": threshold_cond.get("gpio", -1),
+                "sensor_type": normalized_type,
+                "activate_above": synth_activate_above,
+                "deactivate_below": synth_deactivate_below,
+                "activate_below": synth_activate_below,
+                "deactivate_above": synth_deactivate_above,
+            }
+            hysteresis_cond_index = -1  # no DB hysteresis state entry for threshold-converted rules
 
         # Validate that threshold fields form a valid mode
         activate_above: Optional[float] = hysteresis_cond.get("activate_above")
@@ -474,6 +629,18 @@ class ConfigPayloadBuilder:
         sensor_value_type: str = normalize_sensor_type(
             hysteresis_cond.get("sensor_type") or ""
         )
+
+        _MAX_SENSOR_VALUE_TYPE_LEN = 23  # ESP OfflineRule.sensor_value_type[24]
+        if len(sensor_value_type) > _MAX_SENSOR_VALUE_TYPE_LEN:
+            logger.warning(
+                "[CONFIG] Offline-rule fuer Regel '%s' uebersprungen: sensor_value_type '%s' "
+                "ist %d Zeichen lang (max %d fuer ESP OfflineRule struct)",
+                rule.rule_name,
+                sensor_value_type,
+                len(sensor_value_type),
+                _MAX_SENSOR_VALUE_TYPE_LEN,
+            )
+            return None
 
         # Locate actuator action on the SAME ESP
         actions = rule.actions
@@ -544,7 +711,32 @@ class ConfigPayloadBuilder:
                 current_state_active,
             )
 
-        return {
+        # 3c: Extract time_filter from any time_window / time condition.
+        # Only applies to AND-compounds (OR was rejected in 3b) or single-condition rules.
+        time_filter: Optional[Dict[str, Any]] = None
+        if compound_op == "AND" or len(conditions_list) == 1:
+            for cond in conditions_list:
+                if not isinstance(cond, dict):
+                    continue
+                if cond.get("type") in ("time_window", "time"):
+                    tz = str(cond.get("timezone", "UTC") or "UTC")
+                    start_h = int(cond.get("start_hour", 0))
+                    start_m = int(cond.get("start_minute", 0))
+                    end_h = int(cond.get("end_hour", 0))
+                    end_m = int(cond.get("end_minute", 0))
+                    raw_days = cond.get("days_of_week", None)
+                    time_filter = {
+                        "enabled": True,
+                        "start_hour": start_h % 24,
+                        "start_minute": start_m % 60,
+                        "end_hour": end_h % 24,
+                        "end_minute": end_m % 60,
+                        "days_of_week_mask": _days_of_week_db_to_tm_mask(raw_days),
+                        "timezone": tz,
+                    }
+                    break
+
+        offline_rule: Dict[str, Any] = {
             "actuator_gpio": actuator_gpio,
             "sensor_gpio": sensor_gpio,
             "sensor_value_type": sensor_value_type,
@@ -554,3 +746,6 @@ class ConfigPayloadBuilder:
             "deactivate_below": float(deactivate_below) if deactivate_below is not None else 0.0,
             "current_state_active": current_state_active,
         }
+        if time_filter is not None:
+            offline_rule["time_filter"] = time_filter
+        return offline_rule

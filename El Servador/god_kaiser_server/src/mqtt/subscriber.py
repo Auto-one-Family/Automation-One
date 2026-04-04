@@ -12,12 +12,16 @@ Features:
 
 import asyncio
 import json
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional
 
+from ..core.metrics import increment_reconciliation_session
 from ..core.logging_config import get_logger
 from ..core.request_context import clear_request_id, generate_mqtt_correlation_id, set_request_id
+from ..services.inbound_inbox_service import get_inbound_inbox_service
 from .client import MQTTClient
 from .topics import TopicBuilder
 
@@ -42,6 +46,7 @@ class Subscriber:
         """
         self.client = mqtt_client or MQTTClient.get_instance()
         self.handlers: Dict[str, Callable] = {}
+        self._inbound_inbox = get_inbound_inbox_service()
 
         # Capture main event loop for async handler execution
         # CRITICAL: SQLAlchemy AsyncEngine is bound to this loop
@@ -178,9 +183,23 @@ class Subscriber:
             # Find matching handler
             handler = self._find_handler(topic)
             if handler:
+                inbox_event_id = None
+                if self._is_critical_topic(topic):
+                    inbox_event_id = self._append_critical_inbound_event(
+                        topic=topic,
+                        payload=payload,
+                        correlation_id=correlation_id,
+                    )
                 # Submit handler to thread pool for async execution
                 # This prevents blocking MQTT network loop
-                self.executor.submit(self._execute_handler, handler, topic, payload, correlation_id)
+                self.executor.submit(
+                    self._execute_handler,
+                    handler,
+                    topic,
+                    payload,
+                    correlation_id,
+                    inbox_event_id,
+                )
                 self.messages_processed += 1
             else:
                 logger.warning(f"No handler registered for topic: {topic}")
@@ -188,6 +207,48 @@ class Subscriber:
         except Exception as e:
             logger.error(f"Error routing message from {topic}: {e}", exc_info=True)
             self.messages_failed += 1
+
+    def _append_critical_inbound_event(
+        self,
+        topic: str,
+        payload: dict,
+        correlation_id: str,
+    ) -> Optional[str]:
+        """
+        Append critical inbound event via the main loop.
+
+        Using asyncio.run() from the MQTT callback thread can bind DB resources
+        to a foreign event loop and trigger intermittent "bound to different event loop"
+        errors under load/reconnect conditions.
+        """
+        try:
+            loop = self._get_valid_main_loop()
+        except RuntimeError as e:
+            logger.error(
+                "Critical inbound append skipped for topic %s: %s",
+                topic,
+                e,
+            )
+            return None
+
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                self._inbound_inbox.append(
+                    topic=topic,
+                    payload=payload,
+                    correlation_id=correlation_id,
+                    source="live",
+                ),
+                loop,
+            )
+            return future.result(timeout=5.0)
+        except Exception as e:
+            logger.error(
+                "Critical inbound append failed for topic %s: %s",
+                topic,
+                e,
+            )
+            return None
 
     def _get_valid_main_loop(self) -> asyncio.AbstractEventLoop:
         """
@@ -241,8 +302,21 @@ class Subscriber:
         finally:
             clear_request_id(token)
 
+    @staticmethod
+    def _is_critical_topic(topic: str) -> bool:
+        return (
+            "/sensor/" in topic and topic.endswith("/data")
+        ) or topic.endswith("/system/error") or topic.endswith("/config_response") or topic.endswith(
+            "/system/intent_outcome"
+        )
+
     def _execute_handler(
-        self, handler: Callable, topic: str, payload: dict, correlation_id: str = ""
+        self,
+        handler: Callable,
+        topic: str,
+        payload: dict,
+        correlation_id: str = "",
+        inbox_event_id: Optional[str] = None,
     ) -> None:
         """
         Execute handler in thread pool.
@@ -296,9 +370,13 @@ class Subscriber:
                         logger.warning(
                             f"Handler returned False for topic {topic} - processing may have failed"
                         )
+                        self._inbox_mark_attempt(inbox_event_id)
+                    else:
+                        self._inbox_mark_delivered(inbox_event_id)
                 except TimeoutError:
                     logger.error(f"Handler timed out for topic {topic} (30s)")
                     self.messages_failed += 1
+                    self._inbox_mark_attempt(inbox_event_id)
                 except Exception as e:
                     # Check specifically for event loop errors
                     error_str = str(e).lower()
@@ -310,6 +388,7 @@ class Subscriber:
                     else:
                         logger.error(f"Async handler failed for topic {topic}: {e}")
                     self.messages_failed += 1
+                    self._inbox_mark_attempt(inbox_event_id)
             else:
                 # Sync handler - call directly in thread pool
                 # Set CID in thread context for sync handler logging
@@ -320,12 +399,126 @@ class Subscriber:
                         logger.warning(
                             f"Handler returned False for topic {topic} - processing may have failed"
                         )
+                        self._inbox_mark_attempt(inbox_event_id)
+                    else:
+                        self._inbox_mark_delivered(inbox_event_id)
                 finally:
                     clear_request_id(token)
 
         except Exception as e:
             logger.error(f"Handler execution failed for topic {topic}: {e}", exc_info=True)
             self.messages_failed += 1
+            self._inbox_mark_attempt(inbox_event_id)
+
+    def _inbox_mark_delivered(self, inbox_event_id: Optional[str]) -> None:
+        if not inbox_event_id:
+            return
+        try:
+            loop = self._get_valid_main_loop()
+            asyncio.run_coroutine_threadsafe(
+                self._inbound_inbox.mark_delivered(inbox_event_id),
+                loop,
+            ).result(timeout=5.0)
+        except Exception as e:
+            logger.warning("Failed to ack inbox event %s: %s", inbox_event_id, e)
+
+    def _inbox_mark_attempt(self, inbox_event_id: Optional[str]) -> None:
+        if not inbox_event_id:
+            return
+        try:
+            loop = self._get_valid_main_loop()
+            asyncio.run_coroutine_threadsafe(
+                self._inbound_inbox.mark_attempt(inbox_event_id),
+                loop,
+            ).result(timeout=5.0)
+        except Exception as e:
+            logger.warning("Failed to mark inbox attempt %s: %s", inbox_event_id, e)
+
+    async def replay_pending_events(self, limit: int = 200) -> dict[str, int]:
+        """
+        Replay pending critical inbound events from durable inbox.
+        """
+        pending = await self._inbound_inbox.list_pending(limit=limit)
+        replayed = 0
+        failed = 0
+        session_id = f"recon-{uuid4().hex[:12]}"
+        total = len(pending)
+
+        if total > 0:
+            increment_reconciliation_session("start")
+            logger.info(
+                "reconciliation_session_start session_id=%s pending=%s",
+                session_id,
+                total,
+            )
+
+        for idx, event in enumerate(pending, start=1):
+            event_id = event.get("id")
+            topic = event.get("topic")
+            payload = event.get("payload")
+            if not topic or not isinstance(payload, dict):
+                failed += 1
+                if event_id:
+                    await self._inbound_inbox.mark_attempt(event_id)
+                continue
+
+            handler = self._find_handler(topic)
+            if handler is None:
+                failed += 1
+                if event_id:
+                    await self._inbound_inbox.mark_attempt(event_id)
+                continue
+
+            correlation_id = event.get("correlation_id") or generate_mqtt_correlation_id(
+                payload.get("esp_id", "unknown"),
+                topic.rsplit("/", 1)[-1] if "/" in topic else topic,
+                payload.get("seq"),
+            )
+            if event_id:
+                await self._inbound_inbox.mark_attempt(event_id)
+            try:
+                replay_payload = dict(payload)
+                replay_payload["_reconciliation"] = {
+                    "session_id": session_id,
+                    "phase": "start"
+                    if idx == 1
+                    else ("end" if idx == total else "progress"),
+                    "position": idx,
+                    "total": total,
+                    "started_at": int(datetime.now(timezone.utc).timestamp()),
+                }
+                increment_reconciliation_session(replay_payload["_reconciliation"]["phase"])
+                if asyncio.iscoroutinefunction(handler):
+                    result = await self._run_handler_with_cid(
+                        handler, topic, replay_payload, correlation_id
+                    )
+                else:
+                    token = set_request_id(correlation_id)
+                    try:
+                        result = handler(topic, replay_payload)
+                    finally:
+                        clear_request_id(token)
+
+                if result is False:
+                    failed += 1
+                    continue
+
+                replayed += 1
+                if event_id:
+                    await self._inbound_inbox.mark_delivered(event_id)
+            except Exception:
+                failed += 1
+                logger.exception("Replay failed for inbox event_id=%s topic=%s", event_id, topic)
+
+        if total > 0:
+            logger.info(
+                "reconciliation_session_end session_id=%s replayed=%s failed=%s",
+                session_id,
+                replayed,
+                failed,
+            )
+
+        return {"replayed": replayed, "failed": failed, "pending_checked": len(pending)}
 
     def _find_handler(self, topic: str) -> Optional[Callable]:
         """

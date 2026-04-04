@@ -29,6 +29,7 @@ from ...core.resilience import ResilienceRegistry
 from ...db.models.audit_log import AuditLog, AuditSourceType
 from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
 from ...mqtt.client import MQTTClient
+from ...services.runtime_state_service import get_runtime_state_service
 from ...schemas import (
     DatabaseHealth,
     DetailedHealthResponse,
@@ -112,6 +113,7 @@ async def detailed_health(
     """
     mqtt_client = MQTTClient.get_instance()
     websocket_manager = await WebSocketManager.get_instance()
+    runtime_snapshot = await get_runtime_state_service().snapshot()
 
     uptime_seconds = int(time.time() - _server_start_time)
 
@@ -193,6 +195,11 @@ async def detailed_health(
     if not mqtt_client.is_connected():
         status = "degraded"
         warnings.append("MQTT broker disconnected")
+
+    if runtime_snapshot.get("mode") == "DEGRADED_OPERATION":
+        status = "degraded"
+    for reason in runtime_snapshot.get("degraded_reason_codes", []):
+        warnings.append(f"runtime:{reason}")
 
     if resilience_health and not resilience_health.healthy:
         status = "degraded"
@@ -439,10 +446,19 @@ async def readiness_probe(
     """
     mqtt_client = MQTTClient.get_instance()
 
+    runtime_snapshot = await get_runtime_state_service().snapshot()
+
     # Check components
     checks = {
         "database": True,  # If we're here, DB is OK
         "mqtt": mqtt_client.is_connected(),
+        "logic_liveness": bool(runtime_snapshot["checks"].get("logic_liveness")),
+        "recovery_completed": bool(runtime_snapshot["checks"].get("recovery_completed")),
+        "worker_mqtt_subscriber": bool(runtime_snapshot["checks"].get("mqtt_subscriber")),
+        "worker_websocket_manager": bool(runtime_snapshot["checks"].get("websocket_manager")),
+        "worker_inbound_replay_worker": bool(
+            runtime_snapshot["checks"].get("inbound_replay_worker")
+        ),
     }
 
     # Check disk space
@@ -455,10 +471,12 @@ async def readiness_probe(
         checks["disk_space"] = True
 
     # Ready if all critical checks pass
-    ready = checks["database"] and checks["mqtt"]
+    ready = bool(runtime_snapshot.get("ready")) and checks["database"] and checks["mqtt"]
 
     return ReadinessResponse(
         success=ready,
         ready=ready,
         checks=checks,
+        runtime_mode=runtime_snapshot.get("mode"),
+        degraded_reason_codes=runtime_snapshot.get("degraded_reason_codes", []),
     )

@@ -5,6 +5,7 @@ Repository Layer Exports
 from .actuator_repo import ActuatorRepository
 from .audit_log_repo import AuditLogRepository
 from .base_repo import BaseRepository
+from .command_contract_repo import CommandContractRepository
 from .dashboard_repo import DashboardRepository
 from .device_context_repo import DeviceActiveContextRepository
 from .email_log_repo import EmailLogRepository
@@ -24,6 +25,7 @@ from .zone_repo import ZoneRepository
 
 __all__ = [
     "BaseRepository",
+    "CommandContractRepository",
     "DashboardRepository",
     "DeviceActiveContextRepository",
     "EmailLogRepository",

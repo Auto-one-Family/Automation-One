@@ -225,6 +225,14 @@ const char* TopicBuilder::buildConfigResponseTopic() {
   return validateTopicBuffer(written);
 }
 
+// Unified intent outcome stream: kaiser/god/esp/{esp_id}/system/intent_outcome
+const char* TopicBuilder::buildIntentOutcomeTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/system/intent_outcome",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
 // ORPHANED (GHOST) - Server->ESP but ESP never subscribes. See Mqtt_Protocoll.md inventory.
 // Pattern 8: kaiser/broadcast/emergency
 const char* TopicBuilder::buildBroadcastEmergencyTopic() {

@@ -12,7 +12,7 @@ Features:
 
 Usage:
     client = GodKaiserClient("http://localhost:8000")
-    await client.authenticate("admin", "Admin123#")
+    await client.authenticate("admin", "admin123")
 
     esp = await client.create_mock_esp("Test ESP", hardware_type="ESP32_WROOM")
     sensor = await client.add_sensor(esp["device_id"], gpio=4, sensor_type="DS18B20")
@@ -252,7 +252,7 @@ class GodKaiserClient:
         """Check server health (no auth required)."""
         return await self._request(
             "GET",
-            "/v1/health",
+            "/v1/health/",
             action_name="Health Check",
             target="server",
         )

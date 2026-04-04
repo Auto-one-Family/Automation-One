@@ -106,6 +106,7 @@ public:
   // STATUS GETTERS
   // ============================================
   
+  bool isInitialized() const { return initialized_; }
   bool isConfigReceived() const { return config_received_; }
   unsigned long getAPStartTime() const { return ap_start_time_; }
   unsigned long getUptimeSeconds() const;

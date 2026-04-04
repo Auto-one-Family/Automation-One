@@ -296,7 +296,12 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
         Returns:
             State key im Format "rule_id:condition_index"
         """
-        rule_id = context.get("rule_id", "unknown")
+        rule_id = context.get("rule_id")
+        if not rule_id:
+            logger.warning(
+                "HysteresisEvaluator called without rule_id in context — state not persisted correctly"
+            )
+            rule_id = "no_rule_id"
         condition_idx = context.get("condition_index", 0)
         return f"{rule_id}:{condition_idx}"
 
@@ -362,6 +367,60 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
             logger.info(f"Hysteresis state reset for {key}")
         else:
             logger.debug(f"No state to reset for {key}")
+
+    def reset_states_for_rule(self, rule_id: str) -> list[str]:
+        """Reset all hysteresis states for a given rule.
+
+        Called by LogicEngine.on_rule_updated() when a rule is changed via the API.
+        Removes all in-memory states whose key starts with "{rule_id}:".
+
+        Args:
+            rule_id: Regel-UUID as string
+
+        Returns:
+            List of state keys that were active at the time of reset (for logging /
+            deciding whether an OFF command must be sent to the actuator).
+        """
+        keys_to_reset = [k for k in self._states if k.startswith(f"{rule_id}:")]
+        active_keys: list[str] = []
+        for key in keys_to_reset:
+            state = self._states.pop(key, None)
+            if state and state.is_active:
+                active_keys.append(key)
+        if active_keys:
+            logger.info(
+                "Hysteresis states reset for rule %s: %d active state(s) cleared %s",
+                rule_id,
+                len(active_keys),
+                active_keys,
+            )
+        elif keys_to_reset:
+            logger.debug("Hysteresis states reset for rule %s (%d inactive)", rule_id, len(keys_to_reset))
+        return active_keys
+
+    def remove_state(self, key: str) -> bool:
+        """Remove a single hysteresis state by its full key.
+
+        Used by LogicEngine.on_rule_updated() for selective (bumpless transfer)
+        resets: only states whose condition changed are removed; orthogonal
+        states (e.g. a time_window was added/removed alongside an unchanged
+        hysteresis) are kept.
+
+        Args:
+            key: State key in format "{rule_id}:{condition_index}"
+
+        Returns:
+            True if the removed state was active, False if inactive or not found
+        """
+        state = self._states.pop(key, None)
+        if state is not None:
+            if state.is_active:
+                logger.info("Hysteresis state removed (active): %s", key)
+            else:
+                logger.debug("Hysteresis state removed (inactive): %s", key)
+            return state.is_active
+        logger.debug("No hysteresis state to remove for %s", key)
+        return False
 
     def get_all_states(self) -> Dict[str, HysteresisState]:
         """

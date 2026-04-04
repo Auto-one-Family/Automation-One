@@ -12,6 +12,7 @@
  */
 
 import type { UnifiedEvent } from '@/types/websocket-events'
+import { CONTRACT_OPERATOR_ACTION, extractIntegrationIssueSnapshot } from '@/utils/contractEventMapper'
 
 // ============================================================================
 // Types
@@ -34,6 +35,14 @@ export interface TransformedMessage {
   icon: string
   /** Category for color coding */
   category: EventCategory
+}
+
+export interface OperatorActionGuidance {
+  classification: 'integrationsproblem' | 'betriebsproblem'
+  priority: 'warning' | 'error' | 'critical'
+  cause: string
+  nextAction: string
+  isTerminal: boolean
 }
 
 // ============================================================================
@@ -173,6 +182,10 @@ export function transformEventMessage(event: UnifiedEvent): TransformedMessage {
   const data = (event.data || {}) as Record<string, unknown>
 
   switch (event.event_type) {
+    case 'contract_mismatch':
+      return transformContractMismatch(event, data)
+    case 'contract_unknown_event':
+      return transformContractUnknownEvent(event, data)
     case 'esp_health':
       return transformHeartbeat(event, data)
     case 'sensor_data':
@@ -204,6 +217,100 @@ export function transformEventMessage(event: UnifiedEvent): TransformedMessage {
     default:
       return transformDefault(event, category)
   }
+}
+
+/**
+ * Liefert eine einheitliche Operator-Hilfe fuer terminale Fehler-/Abbruch-Events.
+ * Ziel: Ursache + Schwere + naechster Schritt in jedem relevanten UI-Pfad.
+ */
+export function getOperatorActionGuidance(event: UnifiedEvent): OperatorActionGuidance | null {
+  const data = (event.data || {}) as Record<string, unknown>
+
+  if (event.event_type === 'contract_mismatch' || event.event_type === 'contract_unknown_event') {
+    const snapshot = extractIntegrationIssueSnapshot(event)
+    return {
+      classification: 'integrationsproblem',
+      priority: 'critical',
+      cause: snapshot.reason || `Contract-Event "${snapshot.originalEventType || 'unknown'}" nicht verarbeitbar`,
+      nextAction: snapshot.operatorAction || CONTRACT_OPERATOR_ACTION,
+      isTerminal: true,
+    }
+  }
+
+  if (event.event_type === 'actuator_command_failed') {
+    const rawError = typeof data.error === 'string' ? data.error : 'Aktor-Befehl serverseitig fehlgeschlagen'
+    const errorLower = rawError.toLowerCase()
+    const isSafetyRelated = errorLower.includes('safety') || errorLower.includes('not-aus') || errorLower.includes('emergency')
+    return {
+      classification: 'betriebsproblem',
+      priority: 'error',
+      cause: rawError,
+      nextAction: isSafetyRelated
+        ? 'Safety-Freigabe pruefen (Not-Aus, Interlocks), danach Befehl erneut ausloesen'
+        : 'Aktorzustand und Verbindungsweg pruefen, dann Befehl gezielt erneut senden',
+      isTerminal: true,
+    }
+  }
+
+  if (event.event_type === 'actuator_response' && data.success === false) {
+    const rawError = typeof data.message === 'string'
+      ? data.message
+      : typeof data.error === 'string'
+        ? data.error
+        : 'ESP meldet fehlgeschlagene Aktor-Ausfuehrung'
+    return {
+      classification: 'betriebsproblem',
+      priority: 'error',
+      cause: rawError,
+      nextAction: 'Hardwarezustand/GPIO pruefen und nur bei klarer Ursache erneut ausfuehren',
+      isTerminal: true,
+    }
+  }
+
+  if (event.event_type === 'config_failed') {
+    return {
+      classification: 'betriebsproblem',
+      priority: 'error',
+      cause: typeof data.error === 'string' ? data.error : 'Config-Publish fehlgeschlagen',
+      nextAction: 'Config-Validitaet und Zielgeraet pruefen, danach Konfiguration erneut publizieren',
+      isTerminal: true,
+    }
+  }
+
+  if (event.event_type === 'config_response') {
+    const status = String(data.status || '').toLowerCase()
+    if (status === 'failed' || status === 'error') {
+      return {
+        classification: 'betriebsproblem',
+        priority: 'error',
+        cause: typeof data.message === 'string' ? data.message : 'ESP hat Konfiguration abgelehnt',
+        nextAction: 'Konfigurationsparameter korrigieren und die betroffene Config erneut anwenden',
+        isTerminal: true,
+      }
+    }
+  }
+
+  if (event.event_type === 'sequence_error') {
+    return {
+      classification: 'betriebsproblem',
+      priority: 'error',
+      cause: typeof data.message === 'string' ? data.message : 'Sequenz wurde mit Fehler beendet',
+      nextAction: 'Fehler im Sequenzschritt pruefen und Regel/Abhaengigkeiten vor erneutem Start verifizieren',
+      isTerminal: true,
+    }
+  }
+
+  if (event.event_type === 'sequence_cancelled') {
+    return {
+      classification: 'betriebsproblem',
+      priority: 'warning',
+      cause: typeof data.reason === 'string' ? data.reason : 'Sequenz wurde abgebrochen',
+      nextAction: 'Abbruchgrund bestaetigen und Sequenz nur bei weiterhin gueltiger Lage neu starten',
+      isTerminal: true,
+    }
+  }
+
+  return null
 }
 
 function transformHeartbeat(event: UnifiedEvent, data: Record<string, unknown>): TransformedMessage {
@@ -437,9 +544,9 @@ function transformActuatorCommand(event: UnifiedEvent, data: Record<string, unkn
   return {
     type: 'actuator_command',
     title: 'AKTOR-BEFEHL',
-    titleDE: 'Befehl gesendet',
-    summary: `${command}${valueStr} · GPIO ${gpio} · von ${issuedBy}`,
-    description: `Aktor-Befehl "${command}" wurde an GPIO ${gpio} gesendet. Quelle: ${issuedBy}`,
+    titleDE: 'Befehl ausstehend',
+    summary: `Pending · ${command}${valueStr} · GPIO ${gpio} · von ${issuedBy}`,
+    description: `Aktor-Befehl "${command}" ist ausstehend (nicht terminal). Quelle: ${issuedBy}`,
     icon: 'Zap',
     category: 'actuators',
   }
@@ -449,15 +556,62 @@ function transformActuatorCommandFailed(event: UnifiedEvent, data: Record<string
   const command = (data.command || 'Befehl') as string
   const gpio = event.gpio ?? data.gpio
   const error = (data.error || 'Unbekannter Fehler') as string
+  const hasContractIssue = typeof data.contract_issue === 'string' || error === 'Unbekannter Fehler'
 
   return {
     type: 'actuator_command_failed',
     title: 'AKTOR-BEFEHL FEHLGESCHLAGEN',
-    titleDE: 'Befehl fehlgeschlagen',
-    summary: `${command} · GPIO ${gpio} · ${error}`,
-    description: `Aktor-Befehl "${command}" an GPIO ${gpio} fehlgeschlagen: ${error}`,
+    titleDE: hasContractIssue ? 'Integrationsstoerung' : 'Befehl fehlgeschlagen',
+    summary: hasContractIssue
+      ? `${command} · GPIO ${gpio} · ${CONTRACT_OPERATOR_ACTION}`
+      : `${command} · GPIO ${gpio} · ${error}`,
+    description: hasContractIssue
+      ? `Aktor-Befehl "${command}" an GPIO ${gpio} konnte nicht contract-scharf ausgewertet werden. ${CONTRACT_OPERATOR_ACTION}.`
+      : `Aktor-Befehl "${command}" an GPIO ${gpio} fehlgeschlagen: ${error}`,
     icon: 'XCircle',
     category: 'actuators',
+  }
+}
+
+function transformContractMismatch(_event: UnifiedEvent, data: Record<string, unknown>): TransformedMessage {
+  const snapshot = extractIntegrationIssueSnapshot({
+    event_type: 'contract_mismatch',
+    data,
+  })
+  const rawType = snapshot.originalEventType || 'unknown'
+  const reason = snapshot.reason || 'Schema-Mismatch'
+  const action = snapshot.operatorAction || CONTRACT_OPERATOR_ACTION
+  const isConfigTerminalDrift = rawType === 'config_response' || rawType === 'config_failed'
+  return {
+    type: 'contract_mismatch',
+    title: 'CONTRACT-MISMATCH',
+    titleDE: 'Integrationsstoerung',
+    summary: isConfigTerminalDrift
+      ? `Config-Terminalevent nicht finalisierbar: ${reason} · ${action}`
+      : `${rawType}: ${reason} · ${action}`,
+    description: isConfigTerminalDrift
+      ? `Config-Intent bleibt pending: terminales Event (${rawType}) verletzt den Contract (${reason}). ${action}.`
+      : `Event konnte nicht contract-scharf verarbeitet werden (${rawType}). ${action}.`,
+    icon: 'AlertOctagon',
+    category: 'system',
+  }
+}
+
+function transformContractUnknownEvent(_event: UnifiedEvent, data: Record<string, unknown>): TransformedMessage {
+  const snapshot = extractIntegrationIssueSnapshot({
+    event_type: 'contract_unknown_event',
+    data,
+  })
+  const rawType = snapshot.originalEventType || 'unknown'
+  const action = snapshot.operatorAction || CONTRACT_OPERATOR_ACTION
+  return {
+    type: 'contract_unknown_event',
+    title: 'UNKNOWN CONTRACT EVENT',
+    titleDE: 'Integrationsstoerung',
+    summary: `${rawType} nicht im bekannten Contract · ${action}`,
+    description: `Unbekannter Event-Typ "${rawType}" empfangen. ${action}.`,
+    icon: 'AlertOctagon',
+    category: 'system',
   }
 }
 

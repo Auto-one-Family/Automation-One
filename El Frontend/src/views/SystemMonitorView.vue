@@ -29,6 +29,17 @@ import { auditApi, type AuditStatistics, type StatisticsTimeRange, type DataSour
 import type { UnifiedEvent } from '@/types/websocket-events'
 import type { EventOrGroup, GroupingOptions } from '@/types/event-grouping'
 import { groupEventsByTimeWindow } from '@/utils/eventGrouper'
+import { transformEventMessage } from '@/utils/eventTransformer'
+import {
+  buildContractIntegritySignal,
+  extractCorrelationId,
+  extractEspId,
+  extractRequestId,
+  getDataSourceForEventType,
+  inferFallbackSeverity,
+  validateContractEvent,
+  WS_EVENT_TYPES,
+} from '@/utils/contractEventMapper'
 import type { WebSocketMessage } from '@/services/websocket'
 import { X, CheckCircle } from 'lucide-vue-next'
 import { createLogger } from '@/utils/logger'
@@ -62,104 +73,7 @@ const MAX_EVENTS = 5000
 // All event types we subscribe to (from Server WebSocket broadcasts)
 // WICHTIG: Diese Liste muss ALLE event_types aus dem Server enthalten!
 // Server-Referenz: El Servador/.../event_aggregator_service.py category_map
-const ALL_EVENT_TYPES = [
-  // Sensor & Actuator Events
-  'sensor_data',
-  'sensor_health',
-  'actuator_status',
-  'actuator_response',
-  'actuator_alert',
-  'esp_health',
-
-  // Configuration Events
-  'config_response',
-  'config_published',
-  'config_failed',
-
-  // Device Lifecycle Events
-  'device_discovered',
-  'device_rediscovered',
-  'device_approved',
-  'device_rejected',
-  'device_online',
-  'device_offline',
-  'lwt_received',
-
-  // System Events
-  'zone_assignment',
-  'logic_execution',
-  'system_event',
-  'service_start',
-  'service_stop',
-  'emergency_stop',
-
-  // Error Events
-  'error_event',
-  'mqtt_error',
-  'validation_error',
-  'database_error',
-
-  // Auth Events
-  'login_success',
-  'login_failed',
-  'logout',
-
-  // Notifications
-  'notification',
-] as const
-
-// German labels for event types (menschenverständlich)
-// Note: 'events_restored' is handled separately via dedicated WebSocket handler
-// WICHTIG: CSS hat text-transform:uppercase, daher werden diese in Großbuchstaben angezeigt
-// Server-Referenz: El Servador/.../event_aggregator_service.py title_map
-const EVENT_TYPE_LABELS: Record<string, string> = {
-  // Sensor & Actuator Events
-  sensor_data: 'Sensordaten',
-  sensor_health: 'Sensor-Status',
-  actuator_status: 'Aktor-Status',
-  actuator_response: 'Aktor-Antwort',
-  actuator_alert: 'Aktor-Alarm',
-  esp_health: 'Heartbeat',
-
-  // Configuration Events
-  config_response: 'Konfiguration empfangen',
-  config_published: 'Konfiguration gesendet',
-  config_failed: 'Konfigurationsfehler',
-
-  // Device Lifecycle Events
-  device_discovered: 'Neues Gerät',
-  device_rediscovered: 'Gerät wieder da',
-  device_approved: 'Genehmigt',
-  device_rejected: 'Abgelehnt',
-  device_online: 'Gerät online',
-  device_offline: 'Gerät offline',
-  lwt_received: 'Verbindungsabbruch',
-
-  // System Events
-  zone_assignment: 'Zonen-Zuweisung',
-  logic_execution: 'Regel ausgeführt',
-  system_event: 'System',
-  service_start: 'Server-Start',
-  service_stop: 'Server-Stop',
-  emergency_stop: 'Notfall-Stopp',
-
-  // Error Events
-  error_event: 'Fehler',
-  mqtt_error: 'MQTT-Fehler',
-  validation_error: 'Validierungsfehler',
-  database_error: 'Datenbankfehler',
-
-  // Auth Events
-  login_success: 'Anmeldung erfolgreich',
-  login_failed: 'Anmeldung fehlgeschlagen',
-  logout: 'Abmeldung',
-
-  // Notifications
-  notification: 'Benachrichtigung',
-
-  // Special (WebSocket only)
-  events_restored: 'Wiederhergestellt',
-}
+const ALL_EVENT_TYPES = WS_EVENT_TYPES
 
 // ============================================================================
 // State
@@ -467,6 +381,58 @@ function hideToast() {
 function transformToUnifiedEvent(wsMessage: WebSocketMessage): UnifiedEvent {
   const data = wsMessage.data as Record<string, unknown>
   const eventType = wsMessage.type
+  const correlationId = extractCorrelationId(data)
+  const requestId = extractRequestId(data)
+  const contractResult = validateContractEvent(eventType, data)
+
+  if (contractResult.kind === 'unknown_event') {
+    const signal = buildContractIntegritySignal({
+      kind: contractResult.kind,
+      incomingEventType: eventType,
+      reason: contractResult.reason,
+      incomingData: data,
+      correlationId,
+      requestId,
+    })
+    return {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      timestamp: new Date(wsMessage.timestamp * 1000).toISOString(),
+      event_type: signal.eventType,
+      severity: signal.severity,
+      source: 'server',
+      dataSource: 'audit_log',
+      message: signal.message,
+      correlation_id: correlationId,
+      request_id: requestId,
+      data: signal.data,
+      _sourceType: 'websocket',
+    }
+  }
+
+  if (contractResult.kind === 'mismatch') {
+    const signal = buildContractIntegritySignal({
+      kind: contractResult.kind,
+      incomingEventType: eventType,
+      reason: contractResult.reason,
+      incomingData: data,
+      correlationId,
+      requestId,
+    })
+    return {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      timestamp: new Date(wsMessage.timestamp * 1000).toISOString(),
+      event_type: signal.eventType,
+      severity: signal.severity,
+      source: 'server',
+      dataSource: 'audit_log',
+      esp_id: extractEspId(data),
+      message: signal.message,
+      correlation_id: correlationId,
+      request_id: requestId,
+      data: signal.data,
+      _sourceType: 'websocket',
+    }
+  }
 
   // Extract common fields
   const espId = extractEspId(data)
@@ -477,7 +443,7 @@ function transformToUnifiedEvent(wsMessage: WebSocketMessage): UnifiedEvent {
   const message = generateGermanMessage(wsMessage, errorCode)
 
   // ⭐ NEW: Determine dataSource for client-side filtering
-  const dataSource = determineDataSource(eventType)
+  const dataSource = getDataSourceForEventType(eventType)
 
   return {
     id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
@@ -494,91 +460,12 @@ function transformToUnifiedEvent(wsMessage: WebSocketMessage): UnifiedEvent {
     error_category: errorCode ? detectCategory(errorCode) : undefined,
     gpio,
     device_type: typeof data.sensor_type === 'string' ? data.sensor_type : typeof data.actuator_type === 'string' ? data.actuator_type : undefined,
+    correlation_id: correlationId,
+    request_id: requestId,
     data,
     // Phase 4: Tag as WebSocket event (needs client-side filtering)
     _sourceType: 'websocket',
   }
-}
-
-/**
- * Event-Type zu DataSource Mapping
- *
- * WICHTIG: Alle 31 Event-Types aus ALL_EVENT_TYPES muessen hier gemappt sein!
- * Ungmappte Events werden vom DataSource-Filter nicht korrekt gefiltert.
- *
- * Mapping-Logik:
- * - sensor_data: Sensor-Messwerte und Health
- * - esp_health: Device-Status (online/offline, LWT, Heartbeat)
- * - actuators: Aktor-Status, Commands, Alerts
- * - audit_log: Alle anderen System-Events (Config, Auth, Errors, etc.)
- */
-const EVENT_TYPE_TO_DATASOURCE: Record<string, DataSource> = {
-  // === SENSOR_DATA ===
-  'sensor_data': 'sensor_data',
-  'sensor_health': 'sensor_data',
-
-  // === ESP_HEALTH (Device-Status) ===
-  'esp_health': 'esp_health',
-  'device_online': 'esp_health',
-  'device_offline': 'esp_health',
-  'lwt_received': 'esp_health',
-
-  // === ACTUATORS ===
-  'actuator_status': 'actuators',
-  'actuator_response': 'actuators',
-  'actuator_alert': 'actuators',
-
-  // === AUDIT_LOG (System Events) ===
-  // Configuration Events
-  'config_response': 'audit_log',
-  'config_published': 'audit_log',
-  'config_failed': 'audit_log',
-  // Device Lifecycle (Discovery/Approval)
-  'device_discovered': 'audit_log',
-  'device_rediscovered': 'audit_log',
-  'device_approved': 'audit_log',
-  'device_rejected': 'audit_log',
-  // System Operations
-  'zone_assignment': 'audit_log',
-  'logic_execution': 'audit_log',
-  'system_event': 'audit_log',
-  'service_start': 'audit_log',
-  'service_stop': 'audit_log',
-  'emergency_stop': 'audit_log',
-  // Error Events
-  'error_event': 'audit_log',
-  'mqtt_error': 'audit_log',
-  'validation_error': 'audit_log',
-  'database_error': 'audit_log',
-  // Auth Events
-  'login_success': 'audit_log',
-  'login_failed': 'audit_log',
-  'logout': 'audit_log',
-  // Notifications
-  'notification': 'audit_log',
-}
-
-// DEV-Mode Validierung: Warnung bei ungmappten Event-Types
-if (import.meta.env.DEV) {
-  const mappedTypes = new Set(Object.keys(EVENT_TYPE_TO_DATASOURCE))
-  const unmappedTypes = ALL_EVENT_TYPES.filter(type => !mappedTypes.has(type))
-
-  if (unmappedTypes.length > 0) {
-    logger.warn('Unmapped event types detected - will bypass DataSource filtering', { unmappedTypes })
-  }
-}
-
-/**
- * Determine DataSource from event type for client-side filtering
- */
-function determineDataSource(eventType: string): UnifiedEvent['dataSource'] {
-  return EVENT_TYPE_TO_DATASOURCE[eventType]
-}
-
-function extractEspId(data: Record<string, unknown>): string | undefined {
-  if (typeof data.esp_id === 'string') return data.esp_id
-  if (typeof data.device_id === 'string') return data.device_id
-  return undefined
 }
 
 function extractErrorCode(data: Record<string, unknown>): number | string | undefined {
@@ -599,7 +486,6 @@ function extractErrorCode(data: Record<string, unknown>): number | string | unde
  */
 function determineSeverity(wsMessage: WebSocketMessage, _errorCode?: number | string): UnifiedEvent['severity'] {
   const data = wsMessage.data as Record<string, unknown>
-  const type = wsMessage.type
 
   // PRIMÄR: Server-Severity verwenden (wenn vorhanden)
   if (data.severity) {
@@ -609,56 +495,8 @@ function determineSeverity(wsMessage: WebSocketMessage, _errorCode?: number | st
     }
   }
 
-  // FALLBACK: Typ-basierte Bestimmung (nur wenn Server keine Severity schickt)
-
-  // Error events ohne Server-Severity
-  if (type === 'error_event' || type === 'actuator_alert') {
-    return 'error'
-  }
-
-  // ESP health status
-  if (type === 'esp_health') {
-    const status = data.status as string
-    if (status === 'offline') return 'error'
-    if (status === 'timeout') return 'warning'
-    return 'info'
-  }
-
-  // Sensor health
-  if (type === 'sensor_health') {
-    const status = data.status as string
-    if (status === 'timeout' || status === 'stale') return 'warning'
-    return 'info'
-  }
-
-  // Config response
-  if (type === 'config_response') {
-    const status = data.status as string
-    if (status === 'failed') return 'error'
-    return 'info'
-  }
-
-  // Device rejected
-  if (type === 'device_rejected') {
-    return 'warning'
-  }
-
-  // Actuator response
-  if (type === 'actuator_response') {
-    const success = data.success as boolean
-    if (!success) return 'error'
-    return 'info'
-  }
-
-  // System event
-  if (type === 'system_event') {
-    const eventType = data.event_type as string
-    if (eventType?.includes('error') || eventType?.includes('fail')) return 'error'
-    if (eventType?.includes('warn')) return 'warning'
-    return 'info'
-  }
-
-  return 'info'
+  // FALLBACK: zentrale Semantik aus Contract-Mapper
+  return inferFallbackSeverity(wsMessage.type, data)
 }
 
 function determineSource(eventType: string): UnifiedEvent['source'] {
@@ -684,137 +522,25 @@ function determineSource(eventType: string): UnifiedEvent['source'] {
  */
 function generateGermanMessage(wsMessage: WebSocketMessage, _errorCode?: number | string): string {
   const data = wsMessage.data as Record<string, unknown>
-  const type = wsMessage.type
-
-  // PRIMÄR: Server-Message verwenden (wenn vorhanden)
-  // Der Server liefert bereits menschenverständliche deutsche Messages!
-  if (data.message && typeof data.message === 'string') {
-    const espId = extractEspId(data)
-    // Für error_event: ESP-ID anhängen wenn nicht bereits enthalten
-    if ((type === 'error_event' || type === 'actuator_alert') && espId && !data.message.includes(espId)) {
-      return `${data.message} (${espId})`
-    }
-    return data.message
+  const serverMessage = typeof data.message === 'string' ? data.message.trim() : ''
+  if (serverMessage.length > 0) {
+    return serverMessage
+  }
+  const baseEvent: UnifiedEvent = {
+    id: 'preview',
+    timestamp: new Date(wsMessage.timestamp * 1000).toISOString(),
+    event_type: wsMessage.type,
+    severity: 'info',
+    source: determineSource(wsMessage.type),
+    message: typeof data.message === 'string' ? data.message : '',
+    esp_id: extractEspId(data),
+    gpio: typeof data.gpio === 'number' ? data.gpio : undefined,
+    error_code: extractErrorCode(data),
+    data,
   }
 
-  // FALLBACK: Typ-spezifische Messages (nur wenn Server keine Message schickt)
-  switch (type) {
-    case 'sensor_data': {
-      const gpio = data.gpio ?? '?'
-      const value = typeof data.value === 'number' ? data.value.toFixed(1) : '?'
-      const unit = data.unit || ''
-      const sensorType = data.sensor_type || 'Sensor'
-      return `${sensorType} GPIO ${gpio}: ${value}${unit}`
-    }
-
-    case 'sensor_health': {
-      const gpio = data.gpio ?? '?'
-      const status = data.status as string
-      const statusText = status === 'timeout' ? 'Timeout' : status === 'stale' ? 'Veraltet' : 'OK'
-      return `Sensor GPIO ${gpio}: ${statusText}`
-    }
-
-    case 'actuator_status': {
-      const gpio = data.gpio ?? '?'
-      const state = data.state ? 'EIN' : 'AUS'
-      const actuatorType = data.actuator_type || 'Aktor'
-      return `${actuatorType} GPIO ${gpio}: ${state}`
-    }
-
-    case 'actuator_response': {
-      const gpio = data.gpio ?? '?'
-      const success = data.success as boolean
-      const command = data.command || 'Befehl'
-      return success ? `Aktor GPIO ${gpio}: ${command} erfolgreich` : `Aktor GPIO ${gpio}: ${command} fehlgeschlagen`
-    }
-
-    case 'actuator_alert': {
-      const gpio = data.gpio ?? '?'
-      const alertType = data.alert_type as string
-      const alerts: Record<string, string> = {
-        emergency_stop: 'Not-Aus aktiviert',
-        timeout: 'Timeout erreicht',
-        runtime_exceeded: 'Laufzeit überschritten',
-        safety_triggered: 'Sicherheitsstopp',
-      }
-      return `Aktor GPIO ${gpio}: ${alerts[alertType] || alertType}`
-    }
-
-    case 'esp_health': {
-      const espId = extractEspId(data) || 'Unbekannt'
-      const status = data.status as string
-      if (status === 'offline') return `${espId} ist offline`
-      if (status === 'timeout') return `${espId} Heartbeat-Timeout`
-      const heap = typeof data.heap_free === 'number' ? Math.round(data.heap_free / 1024) : '?'
-      const rssi = data.wifi_rssi ?? '?'
-      return `${espId} online (${heap}KB frei, RSSI: ${rssi}dBm)`
-    }
-
-    case 'config_response': {
-      const status = data.status as string
-      const espId = extractEspId(data) || 'Unbekannt'
-      if (status === 'success') return `${espId}: Konfiguration übernommen`
-      const errorMsg = data.message || 'Unbekannter Fehler'
-      return `${espId}: Konfiguration fehlgeschlagen - ${errorMsg}`
-    }
-
-    case 'device_discovered': {
-      const espId = extractEspId(data) || 'Unbekannt'
-      const zoneName = data.zone_name || data.zone_id
-      return zoneName ? `Neues Gerät ${espId} entdeckt (Zone: ${zoneName})` : `Neues Gerät ${espId} entdeckt`
-    }
-
-    case 'device_rediscovered': {
-      const espId = extractEspId(data) || 'Unbekannt'
-      return `Gerät ${espId} wieder online`
-    }
-
-    case 'device_approved': {
-      const deviceId = data.device_id || 'Unbekannt'
-      const approvedBy = data.approved_by || 'Admin'
-      return `Gerät ${deviceId} von ${approvedBy} genehmigt`
-    }
-
-    case 'device_rejected': {
-      const deviceId = data.device_id || 'Unbekannt'
-      const reason = data.rejection_reason || 'Kein Grund angegeben'
-      return `Gerät ${deviceId} abgelehnt: ${reason}`
-    }
-
-    case 'zone_assignment': {
-      const espId = extractEspId(data) || 'Unbekannt'
-      const zoneId = data.zone_id || 'Unbekannt'
-      const status = data.status as string
-      if (status === 'success') return `${espId} Zone ${zoneId} zugewiesen`
-      return `${espId} Zonen-Zuweisung fehlgeschlagen`
-    }
-
-    case 'logic_execution': {
-      const ruleName = data.rule_name || 'Regel'
-      const success = data.success as boolean
-      const actions = data.actions_executed ?? 0
-      if (success) return `Regel "${ruleName}" ausgeführt (${actions} Aktionen)`
-      return `Regel "${ruleName}" fehlgeschlagen`
-    }
-
-    case 'system_event': {
-      return String(data.message || 'System-Ereignis')
-    }
-
-    case 'error_event': {
-      const msg = data.message || 'Unbekannter Fehler'
-      return String(msg)
-    }
-
-    case 'notification': {
-      const title = data.title || 'Benachrichtigung'
-      const msg = data.message || ''
-      return `${title}: ${msg}`
-    }
-
-    default:
-      return `Event: ${type}`
-  }
+  const transformed = transformEventMessage(baseEvent)
+  return transformed.summary || transformed.description || baseEvent.message || `Event: ${wsMessage.type}`
 }
 
 // ============================================================================
@@ -1458,7 +1184,6 @@ watch(activeTab, (newTab) => {
         :has-more-events="hasMoreEvents"
         :is-loading-more="isLoadingMore"
         :is-paused="isPaused"
-        :event-type-labels="EVENT_TYPE_LABELS"
         :restored-event-ids="restoredEventIds"
         :filter-esp-id="filterEspId"
         :filter-levels="filterLevels"
@@ -1525,7 +1250,6 @@ watch(activeTab, (newTab) => {
       <EventDetailsPanel
         v-if="selectedEvent"
         :event="selectedEvent"
-        :event-type-labels="EVENT_TYPE_LABELS"
         @close="closeEventDetails"
         @filter-device="handleFilterDevice"
         @show-server-logs="handleShowServerLogs"

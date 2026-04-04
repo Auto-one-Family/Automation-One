@@ -4,10 +4,15 @@
 #include "../services/communication/mqtt_client.h"
 #include "../services/sensor/sensor_manager.h"
 #include "../services/actuator/actuator_manager.h"
+#include "../services/safety/offline_mode_manager.h"
+#include "../services/config/storage_manager.h"
 #include "../error_handling/error_tracker.h"
 #include "../utils/topic_builder.h"
+#include "../utils/time_manager.h"
 #include "../models/error_codes.h"
 #include "../models/watchdog_types.h"
+#include "../utils/watchdog_storage.h"
+#include <esp_system.h>
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "HEALTH";
@@ -20,6 +25,42 @@ extern KaiserZone g_kaiser;
 extern WatchdogConfig g_watchdog_config;
 extern WatchdogDiagnostics g_watchdog_diagnostics;
 extern volatile bool g_watchdog_timeout_flag;
+
+static String g_diag_boot_sequence_id;
+static uint8_t g_diag_reset_reason = 0;
+static unsigned long g_diag_segment_start_ts = 0;
+
+static const char* resetReasonToString(uint8_t reason) {
+    switch (reason) {
+        case ESP_RST_POWERON: return "POWERON";
+        case ESP_RST_EXT: return "EXT";
+        case ESP_RST_SW: return "SW";
+        case ESP_RST_PANIC: return "PANIC";
+        case ESP_RST_INT_WDT: return "INT_WDT";
+        case ESP_RST_TASK_WDT: return "TASK_WDT";
+        case ESP_RST_WDT: return "WDT";
+        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT: return "BROWNOUT";
+        case ESP_RST_SDIO: return "SDIO";
+        default: return "UNKNOWN";
+    }
+}
+
+static void ensureDiagnosticsBootTelemetryInitialized() {
+    if (g_diag_boot_sequence_id.length() == 0) {
+        g_diag_reset_reason = static_cast<uint8_t>(esp_reset_reason());
+        g_diag_boot_sequence_id =
+            g_system_config.esp_id + "-b" + String(g_system_config.boot_count) + "-r" + String(g_diag_reset_reason);
+    }
+
+    if (g_diag_segment_start_ts == 0) {
+        time_t unix_timestamp = timeManager.getUnixTimestamp();
+        bool time_valid = timeManager.isSynchronized();
+        if (time_valid && unix_timestamp > 0) {
+            g_diag_segment_start_ts = static_cast<unsigned long>(unix_timestamp);
+        }
+    }
+}
 
 // ============================================
 // GLOBAL HEALTH MONITOR INSTANCE
@@ -209,6 +250,7 @@ bool HealthMonitor::hasSignificantChanges(const HealthSnapshot& current,
 // ============================================
 String HealthMonitor::getSnapshotJSON() const {
     HealthSnapshot snapshot = getCurrentSnapshot();
+    ensureDiagnosticsBootTelemetryInitialized();
     
     // Build JSON payload
     String json = "{";
@@ -236,6 +278,7 @@ String HealthMonitor::getSnapshotJSON() const {
         case STATE_AWAITING_USER_CONFIG: state_str = "AWAITING_USER_CONFIG"; break;
         case STATE_ZONE_CONFIGURED: state_str = "ZONE_CONFIGURED"; break;
         case STATE_SENSORS_CONFIGURED: state_str = "SENSORS_CONFIGURED"; break;
+        case STATE_CONFIG_PENDING_AFTER_RESET: state_str = "CONFIG_PENDING_AFTER_RESET"; break;
         case STATE_OPERATIONAL: state_str = "OPERATIONAL"; break;
         case STATE_PENDING_APPROVAL: state_str = "PENDING_APPROVAL"; break;
         case STATE_LIBRARY_DOWNLOADING: state_str = "LIBRARY_DOWNLOADING"; break;
@@ -246,12 +289,12 @@ String HealthMonitor::getSnapshotJSON() const {
     }
     json += "\"system_state\":\"" + state_str + "\"";
 
-    // Boot reason (ESP-IDF esp_reset_reason_t)
-    const char* boot_reasons[] = {"UNKNOWN","POWERON","EXT","SW","PANIC",
-                                   "INT_WDT","TASK_WDT","WDT","DEEPSLEEP","BROWNOUT","SDIO"};
-    uint8_t reason_idx = snapshot.boot_reason;
-    const char* reason_str = (reason_idx < 11) ? boot_reasons[reason_idx] : "UNKNOWN";
+    // Boot/Segment telemetry for long-run KPI segmentation across reboot boundaries.
+    const char* reason_str = resetReasonToString(snapshot.boot_reason);
     json += ",\"boot_reason\":\"" + String(reason_str) + "\"";
+    json += ",\"boot_sequence_id\":\"" + g_diag_boot_sequence_id + "\"";
+    json += ",\"reset_reason\":\"" + String(reason_str) + "\"";
+    json += ",\"segment_start_ts\":" + String(g_diag_segment_start_ts);
 
     // MQTT Circuit Breaker status
     const char* cb_states[] = {"CLOSED","OPEN","HALF_OPEN"};
@@ -263,6 +306,16 @@ String HealthMonitor::getSnapshotJSON() const {
     json += ",\"wdt_mode\":\"" + String(wdt_modes[(uint8_t)snapshot.watchdog_mode]) + "\"";
     json += ",\"wdt_timeouts_24h\":" + String(snapshot.watchdog_timeouts_24h);
     json += ",\"wdt_timeout_pending\":" + String(snapshot.watchdog_timeout_pending ? "true" : "false");
+    json += ",\"metrics_schema_version\":" +
+            String(OfflineModeManager::OFFLINE_AUTHORITY_METRICS_SCHEMA_VERSION);
+    json += ",\"storage_namespace_conflict_count\":" +
+            String(storageManager.getNamespaceConflictCount());
+    json += ",\"storage_no_session_access_count\":" +
+            String(storageManager.getNoSessionAccessCount());
+    json += ",\"hist_not_found_expected_count\":" +
+            String(watchdogStorageGetHistNotFoundExpectedCount());
+    json += ",\"hist_not_found_unexpected_count\":" +
+            String(watchdogStorageGetHistNotFoundUnexpectedCount());
 
     json += "}";
     

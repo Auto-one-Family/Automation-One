@@ -100,6 +100,7 @@ def _model_to_schema_response(
     esp_device_id: Optional[str] = None,
     state: Optional[ActuatorStateModel] = None,
     subzone_id: Optional[str] = None,
+    subzone_warning: Optional[str] = None,
 ) -> ActuatorConfigResponse:
     """
     Map DB model fields to public API schema.
@@ -145,6 +146,10 @@ def _model_to_schema_response(
         # Multi-Zone Device Scope (T13-R2)
         device_scope=actuator.device_scope,
         assigned_zones=actuator.assigned_zones,
+        # assigned_subzones: Legacy field, passed through the API layer but not evaluated
+        # in business logic (logic_engine, config_builder, notification_router, safety).
+        # Primary subzone assignment is via subzone_configs.assigned_gpios. Candidate for
+        # future DB cleanup.
         assigned_subzones=actuator.assigned_subzones,
         current_value=state.current_value if state else None,
         is_active=(state.state in ("on", "pwm")) if state else False,
@@ -152,6 +157,7 @@ def _model_to_schema_response(
         created_at=actuator.created_at,
         updated_at=actuator.updated_at,
         subzone_id=subzone_id,
+        subzone_warning=subzone_warning,
     )
 
 
@@ -600,7 +606,10 @@ async def create_or_update_actuator(
     # SUBZONE ASSIGNMENT (mirrors sensors API)
     # Assign actuator GPIO to subzone or remove from all subzones.
     # Normalize "__none__", "", null → None (Keine Subzone = remove from all)
+    # subzone_error: set when assignment fails — passed to response as warning.
+    # Config-Push MUST always run after the primary DB commit regardless.
     # =========================================================================
+    subzone_error: Optional[str] = None
     try:
         subzone_service = SubzoneService(esp_repo=esp_repo, session=db, publisher=publisher)
         subzone_id_val = normalize_subzone_id(request.subzone_id)
@@ -620,7 +629,7 @@ async def create_or_update_actuator(
     except ValueError as e:
         logger.warning(f"Subzone assignment skipped for {esp_id}/GPIO {gpio}: {e}")
         await db.rollback()
-        raise ValidationException("subzone", str(e))
+        subzone_error = str(e)
     except Exception as e:
         logger.warning(f"Subzone assignment failed for {esp_id}/GPIO {gpio}: {e}")
         await db.rollback()
@@ -634,7 +643,7 @@ async def create_or_update_actuator(
         esp_service: ESPService = get_esp_service(db)
         config_sent = await esp_service.send_config(esp_id, combined_config)
 
-        if config_sent:
+        if config_sent.get("success"):
             logger.info(f"Config published to ESP {esp_id} after actuator create/update")
         else:
             logger.warning(f"Config publish failed for ESP {esp_id} (DB save was successful)")
@@ -646,7 +655,9 @@ async def create_or_update_actuator(
     subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio)
     subzone_id_val = subzone.subzone_id if subzone else None
 
-    return _model_to_schema_response(actuator, esp_id, None, subzone_id=subzone_id_val)
+    return _model_to_schema_response(
+        actuator, esp_id, None, subzone_id=subzone_id_val, subzone_warning=subzone_error
+    )
 
 
 # =============================================================================
@@ -841,6 +852,7 @@ async def emergency_stop(
     db: DBSession,
     current_user: OperatorUser,
     publisher: Annotated[Publisher, Depends(get_mqtt_publisher)],
+    safety_service: Annotated["SafetyService", Depends(get_safety_service)],
 ) -> EmergencyStopResponse:
     """
     Emergency stop all actuators.
@@ -858,6 +870,7 @@ async def emergency_stop(
     """
     esp_repo = ESPRepository(db)
     actuator_repo = ActuatorRepository(db)
+    incident_correlation_id = str(uuid.uuid4())
 
     devices_stopped = 0
     actuators_stopped = 0
@@ -872,6 +885,12 @@ async def emergency_stop(
     else:
         devices = await esp_repo.get_all()
 
+    # Atomic Emergency Step 1: set safety blockade before any publish attempt.
+    if request.esp_id:
+        await safety_service.emergency_stop_esp(request.esp_id)
+    else:
+        await safety_service.emergency_stop_all()
+
     # Stop actuators on each device
     for device in devices:
         device_actuators_stopped = 0
@@ -885,7 +904,7 @@ async def emergency_stop(
             if request.gpio is not None and actuator.gpio != request.gpio:
                 continue
 
-            # Send OFF command
+            # Atomic Emergency Step 2: publish immediate OFF dispatch.
             try:
                 success = publisher.publish_actuator_command(
                     esp_id=device.device_id,
@@ -922,7 +941,10 @@ async def emergency_stop(
                     value=0.0,
                     success=True,
                     issued_by=f"emergency:{current_user.username}",
-                    metadata={"reason": request.reason},
+                    metadata={
+                        "reason": request.reason,
+                        "incident_correlation_id": incident_correlation_id,
+                    },
                 )
             else:
                 device_result["actuators"].append(
@@ -930,7 +952,7 @@ async def emergency_stop(
                         "esp_id": device.device_id,
                         "gpio": actuator.gpio,
                         "success": False,
-                        "message": "MQTT publish failed",
+                        "message": "MQTT publish failed (safety blockade remains active)",
                     }
                 )
 
@@ -958,6 +980,7 @@ async def emergency_stop(
                 "esp_id": request.esp_id,
                 "gpio": request.gpio,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "incident_correlation_id": incident_correlation_id,
             },
         )
     except Exception as audit_error:
@@ -975,6 +998,7 @@ async def emergency_stop(
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "devices_stopped": devices_stopped,
                 "actuators_stopped": actuators_stopped,
+                "incident_correlation_id": incident_correlation_id,
             }
         )
         publisher.client.publish(
@@ -1002,6 +1026,7 @@ async def emergency_stop(
             "devices_stopped": devices_stopped,
             "actuators_stopped": actuators_stopped,
             "issued_by": current_user.username,
+            "incident_correlation_id": incident_correlation_id,
         }
         if request.gpio is not None:
             ws_payload["gpio"] = request.gpio
@@ -1012,7 +1037,7 @@ async def emergency_stop(
     logger.critical(
         f"EMERGENCY STOP executed by {current_user.username}: "
         f"{devices_stopped} devices, {actuators_stopped} actuators stopped. "
-        f"Reason: {request.reason}"
+        f"Reason: {request.reason}, correlation_id={incident_correlation_id}"
     )
 
     return EmergencyStopResponse(
@@ -1063,6 +1088,7 @@ async def clear_emergency(
         devices = await esp_repo.get_all()
 
     payload = json.dumps({"command": "clear_emergency", "reason": request.reason})
+    publish_failures = 0
 
     for device in devices:
         try:
@@ -1071,18 +1097,27 @@ async def clear_emergency(
             devices_cleared += 1
         except Exception as exc:
             logger.warning(f"Clear emergency MQTT publish failed for {device.device_id}: {exc}")
+            publish_failures += 1
 
-    if request.esp_id:
-        await safety_service.clear_emergency_stop(request.esp_id)
+    # Policy: only release safety blockade if clear command publish succeeded.
+    if publish_failures == 0:
+        if request.esp_id:
+            await safety_service.clear_emergency_stop(request.esp_id)
+        else:
+            await safety_service.clear_emergency_stop(None)
     else:
-        await safety_service.clear_emergency_stop(None)
+        logger.error(
+            "Clear emergency incomplete: %s publish failures, safety blockade remains active",
+            publish_failures,
+        )
 
     # Persist cleared state in DB so monitor/zone API shows no emergency after restart
-    esp_ids = [d.id for d in devices]
-    rows_updated = await actuator_repo.clear_emergency_states(esp_ids)
-    if rows_updated:
-        await db.commit()
-        logger.info(f"Cleared {rows_updated} actuator_states from emergency_stop to idle")
+    if publish_failures == 0:
+        esp_ids = [d.id for d in devices]
+        rows_updated = await actuator_repo.clear_emergency_states(esp_ids)
+        if rows_updated:
+            await db.commit()
+            logger.info(f"Cleared {rows_updated} actuator_states from emergency_stop to idle")
 
     logger.info(
         f"EMERGENCY CLEAR executed by {current_user.username}: "
@@ -1090,11 +1125,69 @@ async def clear_emergency(
     )
 
     return ClearEmergencyResponse(
-        success=True,
-        message="Emergency stop cleared",
+        success=publish_failures == 0,
+        message=(
+            "Emergency stop cleared"
+            if publish_failures == 0
+            else "Emergency stop clear partially failed; safety blockade remains active"
+        ),
         devices_cleared=devices_cleared,
         reason=request.reason,
         timestamp=datetime.now(timezone.utc),
+    )
+
+
+@router.post(
+    "/emergency-stop",
+    response_model=EmergencyStopResponse,
+    deprecated=True,
+    include_in_schema=True,
+    summary="[DEPRECATED] Emergency stop (legacy path)",
+)
+async def emergency_stop_legacy(
+    request: EmergencyStopRequest,
+    db: DBSession,
+    current_user: OperatorUser,
+    publisher: Annotated[Publisher, Depends(get_mqtt_publisher)],
+    safety_service: Annotated["SafetyService", Depends(get_safety_service)],
+) -> EmergencyStopResponse:
+    """
+    Deprecated alias for `/emergency_stop`.
+    Sunset policy is documented in contract hardening package WP-09.
+    """
+    return await emergency_stop(
+        request=request,
+        db=db,
+        current_user=current_user,
+        publisher=publisher,
+        safety_service=safety_service,
+    )
+
+
+@router.post(
+    "/clear-emergency",
+    response_model=ClearEmergencyResponse,
+    deprecated=True,
+    include_in_schema=True,
+    summary="[DEPRECATED] Clear emergency (legacy path)",
+)
+async def clear_emergency_legacy(
+    request: ClearEmergencyRequest,
+    db: DBSession,
+    current_user: OperatorUser,
+    publisher: Annotated[Publisher, Depends(get_mqtt_publisher)],
+    safety_service: Annotated["SafetyService", Depends(get_safety_service)],
+) -> ClearEmergencyResponse:
+    """
+    Deprecated alias for `/clear_emergency`.
+    Sunset policy is documented in contract hardening package WP-09.
+    """
+    return await clear_emergency(
+        request=request,
+        db=db,
+        current_user=current_user,
+        publisher=publisher,
+        safety_service=safety_service,
     )
 
 
@@ -1154,6 +1247,34 @@ async def delete_actuator(
         retry=True,
     )
 
+    # Log OFF to history before deleting (Fix L4)
+    # actuator_history.esp_id references esp_devices.id (SET NULL on delete) — not actuator_configs
+    await actuator_repo.log_command(
+        esp_id=esp_device.id,
+        gpio=gpio,
+        actuator_type=actuator.actuator_type,
+        command_type="OFF",
+        value=0.0,
+        success=True,
+        issued_by="system:actuator_delete",
+        error_message=None,
+        timestamp=datetime.now(timezone.utc),
+        metadata={
+            "trigger": "actuator_deleted",
+            "deleted_by": current_user.username,
+        },
+    )
+    logger.info(
+        "Actuator history logged",
+        extra={
+            "esp_id": str(esp_device.id),
+            "gpio": gpio,
+            "command_type": "OFF",
+            "issued_by": "system:actuator_delete",
+            "trigger": "actuator_deleted",
+        },
+    )
+
     # Delete actuator
     await actuator_repo.delete(actuator.id)
     await db.commit()
@@ -1176,7 +1297,7 @@ async def delete_actuator(
         esp_service: ESPService = get_esp_service(db)
         config_sent = await esp_service.send_config(esp_id, combined_config)
 
-        if config_sent:
+        if config_sent.get("success"):
             logger.info(f"Config published to ESP {esp_id} after actuator delete")
         else:
             logger.warning(f"Config publish failed for ESP {esp_id} (DB delete was successful)")

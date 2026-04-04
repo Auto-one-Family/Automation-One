@@ -157,10 +157,12 @@ async def test_zone_assign_ack_timeout():
         patch("src.services.zone_service.ZoneRepository") as MockZoneRepo,
         patch.object(zone_service, "_handle_subzone_strategy", return_value=[]),
         patch.object(zone_service, "_update_mock_esp_zone", new_callable=AsyncMock),
+        patch("src.services.zone_context_service.ZoneContextService") as MockZoneContextService,
     ):
 
         mock_zone = _make_mock_zone_repo("zone_b")
         MockZoneRepo.return_value.get_by_zone_id = AsyncMock(return_value=mock_zone)
+        MockZoneContextService.return_value.sync_zone_name = AsyncMock(return_value=True)
 
         # Use very short timeout for test speed
         with patch.object(bridge, "DEFAULT_TIMEOUT", 0.1):

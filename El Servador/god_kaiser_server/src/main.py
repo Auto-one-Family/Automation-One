@@ -45,6 +45,7 @@ from .mqtt.handlers import (
     discovery_handler,
     error_handler,
     heartbeat_handler,
+    intent_outcome_handler,
     lwt_handler,
     sensor_handler,
     subzone_ack_handler,
@@ -67,6 +68,8 @@ from .services.logic.conditions import (
 )
 from .services.logic_engine import LogicEngine
 from .services.logic_scheduler import LogicScheduler
+from .services.runtime_state_service import RuntimeMode, get_runtime_state_service
+from .services.inbound_inbox_service import get_inbound_inbox_service
 from .services.safety_service import SafetyService
 from .websocket.manager import WebSocketManager
 
@@ -83,6 +86,7 @@ _logic_scheduler: LogicScheduler = None
 _websocket_manager: WebSocketManager = None
 _sequence_executor: SequenceActionExecutor = None
 _mqtt_command_bridge = None  # MQTTCommandBridge instance
+_inbound_replay_task: asyncio.Task | None = None
 
 
 @asynccontextmanager
@@ -98,8 +102,13 @@ async def lifespan(app: FastAPI):
     logger.info("God-Kaiser Server Starting...")
     logger.info("=" * 60)
 
+    global _inbound_replay_task
+
     # ===== STARTUP =====
     try:
+        runtime_state = get_runtime_state_service()
+        await runtime_state.transition(RuntimeMode.WARMING_UP, "lifespan startup begin")
+
         # Step 0: Security Validation
         logger.info("Validating security configuration...")
 
@@ -198,6 +207,7 @@ async def lifespan(app: FastAPI):
             )
         else:
             logger.info("MQTT client connected successfully")
+        await runtime_state.set_degraded_reason("mqtt_disconnected", not connected)
 
         # Step 2b: Clear stale retained emergency-stop message from broker.
         # Emergency-Stop is a one-shot command, not persistent state.
@@ -223,6 +233,7 @@ async def lifespan(app: FastAPI):
             mqtt_client,
             max_workers=settings.mqtt.subscriber_max_workers,
         )
+        await runtime_state.set_worker_health("mqtt_subscriber", True)
 
         # BUG O FIX (2026-01-05): Explicitly set main event loop for async handlers
         # This ensures SQLAlchemy AsyncEngine operations run in the correct event loop,
@@ -284,6 +295,11 @@ async def lifespan(app: FastAPI):
             "kaiser/+/esp/+/system/error", error_handler.handle_error_event
         )
         logger.info("Error handler registered: kaiser/+/esp/+/system/error")
+        _subscriber_instance.register_handler(
+            "kaiser/+/esp/+/system/intent_outcome",
+            intent_outcome_handler.handle_intent_outcome,
+        )
+        logger.info("Intent outcome handler registered: kaiser/+/esp/+/system/intent_outcome")
         # System Diagnostics Handler (HealthMonitor snapshots)
         # Topic: kaiser/+/esp/+/system/diagnostics (WP6: wildcard kaiser_id)
         # ESP32 HealthMonitor publishes diagnostics every 60s (heap, RSSI, uptime, state)
@@ -328,21 +344,27 @@ async def lifespan(app: FastAPI):
 
         # Paket G: Register handler for Mock-ESP actuator commands
         # This allows Mock-ESPs to receive commands sent by the server
-        async def mock_actuator_command_handler(topic: str, payload: dict) -> bool:
-            """Route actuator commands to Mock-ESP handler if target is an active mock."""
+        async def mock_actuator_command_handler(topic: str, payload: dict) -> bool | None:
+            """Route actuator commands to Mock-ESP handler if target is an active mock.
+
+            Returns True if handled by a mock, None if not applicable (real ESP or
+            no active mock). None avoids a spurious subscriber warning for real ESPs.
+            False is reserved for actual handler errors.
+            """
             try:
                 from .services.simulation import get_simulation_scheduler
 
                 sim_scheduler = get_simulation_scheduler()
                 # Convert payload back to JSON string for handler
                 payload_str = json.dumps(payload)
-                return await sim_scheduler.handle_mqtt_message(topic, payload_str)
+                result = await sim_scheduler.handle_mqtt_message(topic, payload_str)
+                return result if result else None  # None = not applicable, False = error
             except RuntimeError:
-                # SimulationScheduler not initialized
-                return False
+                # SimulationScheduler not initialized — not an error for real ESPs
+                return None
             except Exception as e:
                 logger.debug(f"Mock actuator command handler error: {e}")
-                return False
+                return None
 
         # WP6: Wildcard kaiser_id for Mock-ESP handlers
         _subscriber_instance.register_handler(
@@ -605,6 +627,7 @@ async def lifespan(app: FastAPI):
         _websocket_manager = await WebSocketManager.get_instance()
         await _websocket_manager.initialize()
         logger.info("WebSocket Manager initialized")
+        await runtime_state.set_worker_health("websocket_manager", True)
 
         # Step 6: Initialize Safety Service, Actuator Service, and Logic Engine
         logger.info("Initializing services...")
@@ -713,6 +736,7 @@ async def lifespan(app: FastAPI):
                 rate_limiter=rate_limiter,
             )
             await _logic_engine.start()
+            await runtime_state.set_logic_liveness(True)
 
             # Initialize Logic Scheduler
             _logic_scheduler = LogicScheduler(
@@ -728,6 +752,39 @@ async def lifespan(app: FastAPI):
 
             logger.info("Services initialized successfully")
             break  # Exit after first session
+
+        # Step 6.0: Replay critical inbound inbox until stable (P0.3)
+        await runtime_state.set_recovery_completed(False)
+        await runtime_state.transition(RuntimeMode.RECOVERY_SYNC, "inbound replay bootstrap")
+        inbox_service = get_inbound_inbox_service()
+        replay_summary = await _subscriber_instance.replay_pending_events(limit=500)
+        inbox_stats = await inbox_service.stats()
+        logger.info(
+            "Inbound replay bootstrap: replayed=%s failed=%s pending=%s",
+            replay_summary.get("replayed", 0),
+            replay_summary.get("failed", 0),
+            inbox_stats.get("pending", 0),
+        )
+
+        async def _inbound_replay_worker() -> None:
+            await runtime_state.set_worker_health("inbound_replay_worker", True)
+            try:
+                while True:
+                    summary = await _subscriber_instance.replay_pending_events(limit=200)
+                    stats = await inbox_service.stats()
+                    await runtime_state.set_recovery_completed(stats.get("pending", 0) == 0)
+                    if summary.get("failed", 0) > 0:
+                        logger.warning(
+                            "Inbound replay tick failures=%s pending=%s",
+                            summary.get("failed", 0),
+                            stats.get("pending", 0),
+                        )
+                    await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                await runtime_state.set_worker_health("inbound_replay_worker", False)
+                raise
+
+        _inbound_replay_task = asyncio.create_task(_inbound_replay_worker())
 
         # Step 6.1: Sync Plugin Registry to DB (Phase 4C)
         logger.info("Syncing plugin registry to database...")
@@ -896,6 +953,9 @@ async def lifespan(app: FastAPI):
         logger.info("Resilience: Circuit Breakers (mqtt, database, external_api) + Retry + Timeout")
         logger.info("=" * 60)
 
+        final_runtime_mode = RuntimeMode.NORMAL_OPERATION if connected else RuntimeMode.DEGRADED_OPERATION
+        await runtime_state.transition(final_runtime_mode, "startup completed")
+
         yield  # Server runs here
 
     except Exception as e:
@@ -906,6 +966,9 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
     logger.info("God-Kaiser Server Shutting Down...")
     logger.info("=" * 60)
+    runtime_state = get_runtime_state_service()
+    await runtime_state.transition(RuntimeMode.SHUTDOWN_DRAIN, "lifespan shutdown begin")
+    await runtime_state.set_logic_liveness(False)
 
     try:
         # Step 1: Stop Logic Scheduler
@@ -931,6 +994,15 @@ async def lifespan(app: FastAPI):
             logger.info("Shutting down MQTTCommandBridge...")
             await _mqtt_command_bridge.shutdown()
             logger.info("MQTTCommandBridge shutdown complete")
+
+        # Step 2.2b: Stop inbound replay worker
+        if _inbound_replay_task:
+            _inbound_replay_task.cancel()
+            try:
+                await _inbound_replay_task
+            except asyncio.CancelledError:
+                pass
+            _inbound_replay_task = None
 
         # Step 2.3: Stop MaintenanceService FIRST (before scheduler shutdown)
         logger.info("Stopping MaintenanceService...")

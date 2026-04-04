@@ -52,6 +52,7 @@ export interface TimeCondition {
   start_hour: number
   end_hour: number
   days_of_week?: number[] // 0 = Monday, 6 = Sunday (ISO 8601 / Python weekday())
+  timezone?: string // IANA timezone name (e.g. "Europe/Berlin"). Absent = UTC.
 }
 
 export interface HysteresisCondition {

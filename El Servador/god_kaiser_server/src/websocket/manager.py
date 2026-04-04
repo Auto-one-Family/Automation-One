@@ -12,7 +12,12 @@ from fastapi import WebSocket
 from starlette.websockets import WebSocketState
 
 from ..core.logging_config import get_logger
-from ..core.metrics import increment_ws_disconnect
+from ..core.metrics import (
+    increment_ws_contract_mismatch,
+    increment_ws_disconnect,
+    increment_ws_envelope_data_divergence,
+    increment_ws_missing_correlation,
+)
 from ..core.request_context import get_request_id
 from ..utils.time_helpers import unix_timestamp_s
 
@@ -211,17 +216,31 @@ class WebSocketManager:
         async with self._lock:
             timestamp = unix_timestamp_s()
 
-            # Resolve correlation_id: explicit param > ContextVar > omit
-            if correlation_id is None:
-                correlation_id = get_request_id()
+            # Resolve envelope + domain correlations without overriding domain authority.
+            envelope_correlation = correlation_id if correlation_id is not None else get_request_id()
+            data_correlation = self._extract_data_correlation(data)
+            if envelope_correlation is None and data_correlation:
+                envelope_correlation = data_correlation
+
+            if envelope_correlation and data_correlation and envelope_correlation != data_correlation:
+                increment_ws_envelope_data_divergence()
+                increment_ws_contract_mismatch()
+                logger.warning(
+                    "contract_mismatch detected: message_type=%s envelope_correlation_id=%s data_correlation_id=%s",
+                    message_type,
+                    envelope_correlation,
+                    data_correlation,
+                )
+            elif envelope_correlation is None and data_correlation is None:
+                increment_ws_missing_correlation()
 
             message: dict = {
                 "type": message_type,
                 "timestamp": timestamp,
                 "data": data,
             }
-            if correlation_id:
-                message["correlation_id"] = correlation_id
+            if envelope_correlation:
+                message["correlation_id"] = envelope_correlation
 
             # Filter clients based on subscriptions
             clients_to_send = []
@@ -269,6 +288,15 @@ class WebSocketManager:
             # Clean up disconnected clients (use unlocked variant - we hold the lock)
             for client_id in disconnected_clients:
                 await self._disconnect_unlocked(client_id)
+
+    @staticmethod
+    def _extract_data_correlation(data: dict) -> Optional[str]:
+        """Extract normalized domain correlation_id from payload data."""
+        correlation = data.get("correlation_id")
+        if correlation is None:
+            return None
+        text = str(correlation).strip()
+        return text or None
 
     def broadcast_threadsafe(
         self,

@@ -8,6 +8,7 @@ from . import diagnostics_handler
 from . import discovery_handler
 from . import error_handler
 from . import heartbeat_handler
+from . import intent_outcome_handler
 from . import lwt_handler
 from . import sensor_handler
 from . import subzone_ack_handler
@@ -22,6 +23,7 @@ __all__ = [
     "discovery_handler",
     "error_handler",
     "heartbeat_handler",
+    "intent_outcome_handler",
     "lwt_handler",
     "sensor_handler",
     "subzone_ack_handler",

@@ -99,6 +99,9 @@ class SensorDataHandler:
     # Throttle interval for last_seen updates (seconds).
     # Heartbeat timeout is 300s, so 60s ensures last_seen stays current.
     LAST_SEEN_THROTTLE_SECONDS = 60
+    LOGIC_FRESHNESS_SECONDS = 120
+    STALE_DROP_SECONDS = 86400
+    FUTURE_DRIFT_SECONDS = 30
 
     def __init__(self, publisher: Optional[Publisher] = None):
         """
@@ -379,8 +382,11 @@ class SensorDataHandler:
                     # Step 9: Save data to database
                     # Convert ESP32 timestamp to UTC datetime
                     # BUG-05 fix: ts<=0 (Wokwi without NTP) → use server timestamp
+                    # NTP fix: time_valid=false → ESP has no synchronized time → use server timestamp
+                    time_valid = payload.get("time_valid", True)  # Default True for old firmware without flag
                     esp32_timestamp_raw = payload.get("ts", payload.get("timestamp"))
-                    if esp32_timestamp_raw is None or esp32_timestamp_raw <= 0:
+
+                    if not time_valid or esp32_timestamp_raw is None or esp32_timestamp_raw <= 0 or esp32_timestamp_raw < 1577836800:
                         esp32_timestamp = datetime.now(timezone.utc)
                     else:
                         esp32_timestamp = datetime.fromtimestamp(
@@ -391,6 +397,25 @@ class SensorDataHandler:
                             ),
                             tz=timezone.utc,
                         )
+
+                    now_utc = datetime.now(timezone.utc)
+                    event_age_seconds = (now_utc - esp32_timestamp).total_seconds()
+                    stale_for_logic = (
+                        event_age_seconds > self.LOGIC_FRESHNESS_SECONDS
+                        or event_age_seconds < -self.FUTURE_DRIFT_SECONDS
+                    )
+                    stale_drop = event_age_seconds > self.STALE_DROP_SECONDS
+
+                    # Hard drop only for extreme replay data to protect ingest and logic.
+                    if stale_drop:
+                        logger.warning(
+                            "Dropping stale sensor event: esp_id=%s gpio=%s sensor=%s age=%.1fs",
+                            esp_id_str,
+                            gpio,
+                            sensor_type,
+                            event_age_seconds,
+                        )
+                        return True
 
                     # Build metadata with interface addresses for historical traceability
                     sensor_metadata = {"raw_mode": raw_mode}
@@ -545,47 +570,56 @@ class SensorDataHandler:
                             except Exception as e:
                                 logger.debug(f"VPD computation skipped for {esp_id_str}: {e}")
 
-                    # Logic Engine Trigger (non-blocking!)
-                    try:
-                        from ...services.logic_engine import get_logic_engine
+                    # Logic trigger is freshness-gated on event-time.
+                    if stale_for_logic:
+                        logger.info(
+                            "Stale-observe: logic trigger skipped for %s GPIO %s (%s age=%.1fs)",
+                            esp_id_str,
+                            gpio,
+                            sensor_type,
+                            event_age_seconds,
+                        )
+                    else:
+                        try:
+                            from ...services.logic_engine import get_logic_engine
 
-                        async def trigger_logic_evaluation():
-                            try:
-                                logic_engine = get_logic_engine()
-                                if logic_engine:
-                                    await logic_engine.evaluate_sensor_data(
-                                        esp_id=esp_id_str,
-                                        gpio=gpio,
-                                        sensor_type=sensor_type,
-                                        value=processed_value or raw_value,
-                                        zone_id=zone_id,
-                                        subzone_id=subzone_id,
+                            async def trigger_logic_evaluation():
+                                try:
+                                    logic_engine = get_logic_engine()
+                                    if logic_engine:
+                                        await logic_engine.evaluate_sensor_data(
+                                            esp_id=esp_id_str,
+                                            gpio=gpio,
+                                            sensor_type=sensor_type,
+                                            value=processed_value or raw_value,
+                                            zone_id=zone_id,
+                                            subzone_id=subzone_id,
+                                        )
+                                    else:
+                                        logger.debug(
+                                            "Logic Engine not yet initialized, skipping evaluation"
+                                        )
+                                except Exception as e:
+                                    logger.error(f"Error in logic evaluation: {e}", exc_info=True)
+
+                            # Create non-blocking task with done callback for visibility
+                            task = asyncio.create_task(trigger_logic_evaluation())
+
+                            def _on_logic_task_done(t: asyncio.Task) -> None:
+                                if t.cancelled():
+                                    logger.warning(
+                                        f"Logic evaluation task cancelled for {esp_id_str} GPIO {gpio}"
                                     )
-                                else:
-                                    logger.debug(
-                                        "Logic Engine not yet initialized, skipping evaluation"
+                                elif t.exception():
+                                    logger.error(
+                                        f"Logic evaluation task failed for {esp_id_str} GPIO {gpio}: "
+                                        f"{t.exception()}",
+                                        exc_info=t.exception(),
                                     )
-                            except Exception as e:
-                                logger.error(f"Error in logic evaluation: {e}", exc_info=True)
 
-                        # Create non-blocking task with done callback for visibility
-                        task = asyncio.create_task(trigger_logic_evaluation())
-
-                        def _on_logic_task_done(t: asyncio.Task) -> None:
-                            if t.cancelled():
-                                logger.warning(
-                                    f"Logic evaluation task cancelled for {esp_id_str} GPIO {gpio}"
-                                )
-                            elif t.exception():
-                                logger.error(
-                                    f"Logic evaluation task failed for {esp_id_str} GPIO {gpio}: "
-                                    f"{t.exception()}",
-                                    exc_info=t.exception(),
-                                )
-
-                        task.add_done_callback(_on_logic_task_done)
-                    except Exception as e:
-                        logger.warning(f"Failed to trigger logic evaluation: {e}")
+                            task.add_done_callback(_on_logic_task_done)
+                        except Exception as e:
+                            logger.warning(f"Failed to trigger logic evaluation: {e}")
 
                     return True
 

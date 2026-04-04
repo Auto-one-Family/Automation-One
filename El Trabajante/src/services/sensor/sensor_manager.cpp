@@ -1599,6 +1599,14 @@ void SensorManager::publishSensorReading(const SensorReading& reading) {
         return;
     }
 
+    // Registration gate is intentionally fail-closed until heartbeat ACK arrives.
+    // Before ACK, sensor publishes are expected to be blocked and should not be
+    // treated as communication errors.
+    if (!mqtt_client_->isRegistrationConfirmed()) {
+        LOG_W(TAG, "Sensor Manager: Registration pending (no heartbeat ACK), skipping publish");
+        return;
+    }
+
     // Build topic
     const char* topic = TopicBuilder::buildSensorDataTopic(reading.gpio);
 
@@ -1662,7 +1670,10 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
     payload += "\"ts\":";
     payload += String((unsigned long)unix_ts);
     payload += ",";
-    
+    payload += "\"time_valid\":";
+    payload += (timeManager.isSynchronized() ? "true" : "false");
+    payload += ",";
+
     // raw_mode from Reading (Server-Centric: true = server processes RAW data)
     payload += "\"raw_mode\":";
     payload += (reading.raw_mode ? "true" : "false");
@@ -1674,8 +1685,9 @@ String SensorManager::buildMQTTPayload(const SensorReading& reading) const {
         payload += "\"";
     }
 
-    // I2C Address (for device identification when multiple I2C sensors)
-    if (reading.i2c_address != 0) {
+    // I2C Address (only for actual I2C sensors — guard against stale NVS values on non-I2C sensors)
+    const SensorCapability* cap = findSensorCapability(reading.sensor_type);
+    if (reading.i2c_address != 0 && cap != nullptr && cap->is_i2c) {
         payload += ",\"i2c_address\":";
         payload += String(reading.i2c_address);
     }

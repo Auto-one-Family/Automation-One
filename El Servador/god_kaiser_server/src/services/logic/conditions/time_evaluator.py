@@ -6,6 +6,7 @@ Evaluates time window conditions.
 
 from datetime import datetime, timezone
 from typing import Dict
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ....core.logging_config import get_logger
 from .base import BaseConditionEvaluator
@@ -54,6 +55,20 @@ class TimeConditionEvaluator(BaseConditionEvaluator):
                 logger.warning(f"Could not parse current_time: {current_time}")
                 current_time = datetime.now(timezone.utc)
 
+        # B2-fix: convert to condition timezone so start_hour/end_hour are interpreted
+        # in the user's local time rather than UTC.  Existing rules without a "timezone"
+        # field keep their UTC behaviour (backward-compatible).
+        tz_name = condition.get("timezone")
+        if tz_name:
+            try:
+                current_time = current_time.astimezone(ZoneInfo(tz_name))
+            except (ZoneInfoNotFoundError, ValueError):
+                logger.warning(
+                    f"TimeConditionEvaluator: invalid timezone '{tz_name}', falling back to UTC"
+                )
+
+        rule_name = str(context.get("rule_name") or context.get("rule_id") or "unknown_rule")
+
         # Check day of week if specified
         days_of_week = condition.get("days_of_week")
         if days_of_week is not None:
@@ -64,6 +79,12 @@ class TimeConditionEvaluator(BaseConditionEvaluator):
             # Python weekday(): 0=Monday, 6=Sunday
             current_weekday = current_time.weekday()
             if current_weekday not in days_of_week:
+                logger.info(
+                    "Rule '%s' inactive due to TimeWindow: weekday=%s not in allowed=%s",
+                    rule_name,
+                    current_weekday,
+                    days_of_week,
+                )
                 return False
 
         # Get time window
@@ -116,7 +137,22 @@ class TimeConditionEvaluator(BaseConditionEvaluator):
         # Handle wrapping (e.g., 22:00 to 06:00)
         if start_minutes <= end_minutes:
             # Normal case (e.g., 8:00 to 18:00)
-            return start_minutes <= current_minutes < end_minutes
+            in_window = start_minutes <= current_minutes < end_minutes
         else:
             # Wrapping case (e.g., 22:30 to 06:15)
-            return current_minutes >= start_minutes or current_minutes < end_minutes
+            in_window = current_minutes >= start_minutes or current_minutes < end_minutes
+
+        if not in_window:
+            logger.info(
+                "Rule '%s' inactive due to TimeWindow: now=%02d:%02d, window=%02d:%02d-%02d:%02d, timezone=%s",
+                rule_name,
+                current_time.hour,
+                current_time.minute,
+                start_hour,
+                start_minute,
+                end_hour,
+                end_minute,
+                tz_name or "UTC",
+            )
+
+        return in_window

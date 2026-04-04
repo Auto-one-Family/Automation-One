@@ -14,6 +14,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from src.mqtt.handlers.lwt_handler import LWTHandler, get_lwt_handler
 
 
+@pytest.fixture(autouse=True)
+def mock_terminal_authority_repo():
+    """Mock terminal authority repository for all LWTHandler tests."""
+    with patch("src.mqtt.handlers.lwt_handler.CommandContractRepository") as mock_repo_class:
+        mock_repo = MagicMock()
+        mock_repo.upsert_terminal_event_authority = AsyncMock(return_value=(MagicMock(), False))
+        mock_repo_class.return_value = mock_repo
+        yield mock_repo
+
+
 class TestLWTInstantOffline:
     """Test instant offline detection via LWT."""
 
@@ -214,6 +224,41 @@ class TestLWTIdempotency:
                 assert result is True
                 # Should NOT update status (not online)
                 mock_repo.update_status.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stale_terminal_event_skips_offline_transition(self, handler, valid_lwt_payload):
+        """Stale terminal event should not re-apply offline transition."""
+        topic = "kaiser/god/esp/ESP_ONLINE/system/will"
+
+        with patch("src.mqtt.handlers.lwt_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.lwt_handler.ESPRepository") as mock_repo_class:
+                mock_device = MagicMock()
+                mock_device.device_id = "ESP_ONLINE"
+                mock_device.status = "online"
+                mock_device.device_metadata = {}
+                mock_device.last_seen = datetime.now(timezone.utc)
+
+                mock_repo = MagicMock()
+                mock_repo.get_by_device_id = AsyncMock(return_value=mock_device)
+                mock_repo.update_status = AsyncMock()
+                mock_repo_class.return_value = mock_repo
+
+                with patch("src.mqtt.handlers.lwt_handler.CommandContractRepository") as mock_contract:
+                    mock_contract_repo = MagicMock()
+                    mock_contract_repo.upsert_terminal_event_authority = AsyncMock(
+                        return_value=(MagicMock(), True)
+                    )
+                    mock_contract.return_value = mock_contract_repo
+
+                    result = await handler.handle_lwt(topic, valid_lwt_payload)
+
+                    assert result is True
+                    mock_repo.update_status.assert_not_called()
 
 
 class TestLWTUnknownDevice:

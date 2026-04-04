@@ -24,8 +24,11 @@ import argparse
 import asyncio
 import json
 import os
+import subprocess
 import sys
 from typing import Any
+
+import httpx
 
 from .core.agent import AutoOpsAgent
 from .core.context import ActuatorSpec, DeviceMode, ESPSpec, SensorSpec
@@ -99,6 +102,66 @@ ACTUATOR_PRESETS: dict[str, dict[str, Any]] = {
     "FAN": {"actuator_type": "pwm_fan", "name": "Ventilation Fan"},
     "PWM": {"actuator_type": "pwm_fan", "name": "PWM Output"},
 }
+
+
+def _is_server_reachable(base_url: str, timeout_seconds: float = 2.0) -> bool:
+    """Quick reachability probe for the God-Kaiser API."""
+    url = base_url.rstrip("/") + "/api/v1/health/live"
+    try:
+        response = httpx.get(url, timeout=timeout_seconds, follow_redirects=True)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def _detect_docker_server_url() -> str | None:
+    """Resolve backend container IP when localhost does not point to God-Kaiser."""
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "-f",
+                "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                "automationone-server",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except Exception:
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    ip = result.stdout.strip()
+    if not ip:
+        return None
+
+    candidate = f"http://{ip}:8000"
+    return candidate if _is_server_reachable(candidate) else None
+
+
+def _resolve_server_url(server_url: str | None) -> str:
+    """Resolve best server URL for local host + Docker setups."""
+    if server_url:
+        return server_url
+
+    env_url = os.environ.get("AUTOOPS_SERVER")
+    if env_url:
+        return env_url
+
+    default_url = "http://localhost:8000"
+    if _is_server_reachable(default_url):
+        return default_url
+
+    docker_url = _detect_docker_server_url()
+    if docker_url:
+        return docker_url
+
+    return default_url
 
 
 def parse_sensors(sensor_str: str) -> list[SensorSpec]:
@@ -212,9 +275,9 @@ async def run_autoops(
         Session result dict
     """
     # Resolve from environment with correct defaults
-    resolved_url = server_url or os.environ.get("AUTOOPS_SERVER", "http://localhost:8000")
+    resolved_url = _resolve_server_url(server_url)
     resolved_user = username or os.environ.get("AUTOOPS_USER", "admin")
-    resolved_pass = password or os.environ.get("AUTOOPS_PASSWORD", "Admin123#")
+    resolved_pass = password or os.environ.get("AUTOOPS_PASSWORD", "admin123")
 
     agent = AutoOpsAgent(
         server_url=resolved_url,

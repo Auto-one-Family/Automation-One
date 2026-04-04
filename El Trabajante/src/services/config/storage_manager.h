@@ -7,6 +7,7 @@
 #ifdef CONFIG_ENABLE_THREAD_SAFETY
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 #endif
 
 // ============================================
@@ -23,6 +24,12 @@ public:
   // Namespace Management (const char* für API-Konsistenz)
   bool beginNamespace(const char* namespace_name, bool read_only = false);
   void endNamespace();
+  bool beginTransaction();
+  void endTransaction();
+  bool isTransactionActive() const;
+  bool isSessionActive() const;
+  uint32_t getNamespaceConflictCount() const;
+  uint32_t getNoSessionAccessCount() const;
   
   // Primary API: const char* (Guide-konform, zero-copy)
   bool putString(const char* key, const char* value);
@@ -65,16 +72,23 @@ private:
   Preferences preferences_;
   bool namespace_open_;
   char current_namespace_[16];
+  bool transaction_active_;
 
   // Static buffer für getString (Guide-konform)
   static char string_buffer_[256];
 
   // NVS Quota Check Helper
   bool checkNVSQuota(const char* key);
+  bool ensureActiveSession(const char* operation, bool count_no_session = true);
+  void recordNamespaceConflict();
+  void recordNoSessionAccess();
 
 #ifdef CONFIG_ENABLE_THREAD_SAFETY
   SemaphoreHandle_t nvs_mutex_;
+  TaskHandle_t namespace_owner_task_;
 #endif
+  uint32_t namespace_conflict_count_;
+  uint32_t no_session_access_count_;
 };
 
 // ============================================

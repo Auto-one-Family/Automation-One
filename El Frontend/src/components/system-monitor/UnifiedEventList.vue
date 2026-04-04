@@ -34,6 +34,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import type { UnifiedEvent } from '@/types/websocket-events'
 import type { EventOrGroup } from '@/types/event-grouping'
 import { getEventIcon } from '@/utils/eventTypeIcons'
+import { getEventTypeLabel } from '@/utils/eventTypeLabels'
 import { getEventCategory, transformEventMessage } from '@/utils/eventTransformer'
 import RssiIndicator from './RssiIndicator.vue'
 import {
@@ -60,7 +61,6 @@ interface Props {
   groupedEvents: EventOrGroup[]
   groupingEnabled: boolean
   isPaused: boolean
-  eventTypeLabels: Record<string, string>
   restoredEventIds?: Set<string>
 }
 
@@ -488,7 +488,7 @@ onUnmounted(() => {
             {{ formatTime(item.data.timestamp) }}
           </div>
           <div class="event-item__content">
-            <span class="event-item__type">{{ eventTypeLabels[item.data.event_type] || item.data.event_type }}</span>
+            <span class="event-item__type">{{ getEventTypeLabel(item.data.event_type) }}</span>
             <span class="event-item__message">{{ getTransformedMessage(item.data).summary }}</span>
           </div>
           <div class="event-item__meta">
@@ -609,7 +609,7 @@ onUnmounted(() => {
                   {{ formatTime(event.timestamp) }}
                 </div>
                 <div class="event-item__content">
-                  <span class="event-item__type">{{ eventTypeLabels[event.event_type] || event.event_type }}</span>
+                  <span class="event-item__type">{{ getEventTypeLabel(event.event_type) }}</span>
                   <span class="event-item__message">{{ getTransformedMessage(event).summary }}</span>
                 </div>
                 <div class="event-item__meta">
@@ -692,7 +692,7 @@ onUnmounted(() => {
                   {{ formatTime(event.timestamp) }}
                 </div>
                 <div class="event-item__content">
-                  <span class="event-item__type">{{ eventTypeLabels[event.event_type] || event.event_type }}</span>
+                  <span class="event-item__type">{{ getEventTypeLabel(event.event_type) }}</span>
                   <span class="event-item__message">{{ getTransformedMessage(event).summary }}</span>
                 </div>
                 <div class="event-item__meta">
@@ -771,7 +771,7 @@ onUnmounted(() => {
                 {{ formatTime(event.timestamp) }}
               </div>
               <div class="event-item__content">
-                <span class="event-item__type">{{ eventTypeLabels[event.event_type] || event.event_type }}</span>
+                <span class="event-item__type">{{ getEventTypeLabel(event.event_type) }}</span>
                 <span class="event-item__message">{{ getTransformedMessage(event).summary }}</span>
               </div>
               <div class="event-item__meta">

@@ -12,7 +12,7 @@ class StorageLockGuard {
  public:
   explicit StorageLockGuard(SemaphoreHandle_t mutex) : mutex_(mutex), locked_(false) {
     if (mutex_) {
-      locked_ = xSemaphoreTake(mutex_, portMAX_DELAY) == pdTRUE;
+      locked_ = xSemaphoreTakeRecursive(mutex_, portMAX_DELAY) == pdTRUE;
       if (!locked_) {
         LOG_E(TAG, "StorageManager: Failed to acquire mutex");
       }
@@ -23,7 +23,7 @@ class StorageLockGuard {
 
   ~StorageLockGuard() {
     if (mutex_ && locked_) {
-      xSemaphoreGive(mutex_);
+      xSemaphoreGiveRecursive(mutex_);
     }
   }
 
@@ -56,9 +56,13 @@ StorageManager& StorageManager::getInstance() {
 
 StorageManager::StorageManager()
   : namespace_open_(false)
+  , transaction_active_(false)
 #ifdef CONFIG_ENABLE_THREAD_SAFETY
   , nvs_mutex_(nullptr)
+  , namespace_owner_task_(nullptr)
 #endif
+  , namespace_conflict_count_(0)
+  , no_session_access_count_(0)
 {
   current_namespace_[0] = '\0';
 }
@@ -69,7 +73,7 @@ StorageManager::StorageManager()
 bool StorageManager::begin() {
 #ifdef CONFIG_ENABLE_THREAD_SAFETY
   if (nvs_mutex_ == nullptr) {
-    nvs_mutex_ = xSemaphoreCreateMutex();
+    nvs_mutex_ = xSemaphoreCreateRecursiveMutex();
     if (nvs_mutex_ == nullptr) {
       LOG_E(TAG, "StorageManager: Failed to create mutex");
       return false;
@@ -78,9 +82,68 @@ bool StorageManager::begin() {
   }
 #endif
   namespace_open_ = false;
+  transaction_active_ = false;
   current_namespace_[0] = '\0';
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  namespace_owner_task_ = nullptr;
+#endif
+  namespace_conflict_count_ = 0;
+  no_session_access_count_ = 0;
   LOG_I(TAG, "StorageManager: Initialized");
   return true;
+}
+
+bool StorageManager::beginTransaction() {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  if (nvs_mutex_ == nullptr) {
+    return false;
+  }
+  if (xSemaphoreTakeRecursive(nvs_mutex_, pdMS_TO_TICKS(250)) != pdTRUE) {
+    LOG_E(TAG, "StorageManager: beginTransaction lock timeout");
+    return false;
+  }
+  namespace_owner_task_ = xTaskGetCurrentTaskHandle();
+#endif
+  transaction_active_ = true;
+  return true;
+}
+
+void StorageManager::endTransaction() {
+  if (namespace_open_) {
+    preferences_.end();
+    namespace_open_ = false;
+    current_namespace_[0] = '\0';
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+    namespace_owner_task_ = nullptr;
+    if (nvs_mutex_ != nullptr) {
+      // Release namespace-level lock first; transaction lock is released below.
+      xSemaphoreGiveRecursive(nvs_mutex_);
+    }
+#endif
+  }
+
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  if (transaction_active_ && nvs_mutex_ != nullptr) {
+    xSemaphoreGiveRecursive(nvs_mutex_);
+  }
+#endif
+  transaction_active_ = false;
+}
+
+bool StorageManager::isTransactionActive() const {
+  return transaction_active_;
+}
+
+bool StorageManager::isSessionActive() const {
+  return namespace_open_;
+}
+
+uint32_t StorageManager::getNamespaceConflictCount() const {
+  return namespace_conflict_count_;
+}
+
+uint32_t StorageManager::getNoSessionAccessCount() const {
+  return no_session_access_count_;
 }
 
 // ============================================
@@ -88,28 +151,42 @@ bool StorageManager::begin() {
 // ============================================
 bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) {
 #ifdef CONFIG_ENABLE_THREAD_SAFETY
-  StorageLockGuard guard(nvs_mutex_);
-  if (!guard.locked()) {
+  if (nvs_mutex_ == nullptr) {
+    LOG_E(TAG, "StorageManager: Mutex not initialized");
     return false;
   }
+  if (xSemaphoreTakeRecursive(nvs_mutex_, pdMS_TO_TICKS(250)) != pdTRUE) {
+    LOG_E(TAG, "StorageManager: beginNamespace lock timeout");
+    return false;
+  }
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
 #endif
   if (namespace_open_) {
-    LOG_W(TAG, "StorageManager: Namespace already open, closing first");
-    preferences_.end();
-    namespace_open_ = false;
-    LOG_D(TAG, "StorageManager: Closed namespace: " + String(current_namespace_));
-    current_namespace_[0] = '\0';
+    recordNamespaceConflict();
+    LOG_E(
+        TAG,
+        "StorageManager: Session conflict - namespace '" + String(current_namespace_) +
+            "' still open; beginNamespace(" + String(namespace_name) + ") denied"
+    );
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+    xSemaphoreGiveRecursive(nvs_mutex_);
+#endif
+    return false;
   }
   
   // The Arduino Preferences library calls log_e() internally when nvs_open fails,
   // even for expected NOT_FOUND cases on a new device. Suppress that noise for
   // read-only opens; write failures are real errors and must stay visible.
+  // Both "Preferences" and "Preferences.cpp" are used as log tag depending on
+  // Arduino ESP32 version (older versions use filename, newer use component name).
   if (read_only) {
     esp_log_level_set("Preferences", ESP_LOG_NONE);
+    esp_log_level_set("Preferences.cpp", ESP_LOG_NONE);
   }
   bool ns_result = preferences_.begin(namespace_name, read_only);
   if (read_only) {
     esp_log_level_set("Preferences", ESP_LOG_WARN);
+    esp_log_level_set("Preferences.cpp", ESP_LOG_WARN);
   }
 
   if (!ns_result) {
@@ -118,12 +195,18 @@ bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) 
     } else {
       LOG_E(TAG, "StorageManager: Failed to open namespace for write: " + String(namespace_name));
     }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+    xSemaphoreGiveRecursive(nvs_mutex_);
+#endif
     return false;
   }
   
   namespace_open_ = true;
   strncpy(current_namespace_, namespace_name, sizeof(current_namespace_) - 1);
   current_namespace_[sizeof(current_namespace_) - 1] = '\0';
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  namespace_owner_task_ = current_task;
+#endif
   
   LOG_D(TAG, "StorageManager: Opened namespace: " + String(namespace_name));
   return true;
@@ -131,17 +214,58 @@ bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) 
 
 void StorageManager::endNamespace() {
 #ifdef CONFIG_ENABLE_THREAD_SAFETY
-  StorageLockGuard guard(nvs_mutex_);
-  if (!guard.locked()) {
+  if (nvs_mutex_ == nullptr) {
     return;
   }
 #endif
   if (namespace_open_) {
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+    TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+    if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+      LOG_W(
+          TAG,
+          "StorageManager: Task attempted to close namespace owned by another task: " +
+              String(current_namespace_)
+      );
+      return;
+    }
+#endif
     preferences_.end();
     namespace_open_ = false;
     LOG_D(TAG, "StorageManager: Closed namespace: " + String(current_namespace_));
     current_namespace_[0] = '\0';
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+    namespace_owner_task_ = nullptr;
+    xSemaphoreGiveRecursive(nvs_mutex_);
+#endif
   }
+}
+
+bool StorageManager::ensureActiveSession(const char* operation, bool count_no_session) {
+  if (!namespace_open_) {
+    if (count_no_session) {
+      recordNoSessionAccess();
+    }
+    LOG_E(TAG, "StorageManager: No active session for " + String(operation));
+    return false;
+  }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    recordNamespaceConflict();
+    LOG_W(TAG, "StorageManager: " + String(operation) + " denied, namespace owned by another task");
+    return false;
+  }
+#endif
+  return true;
+}
+
+void StorageManager::recordNamespaceConflict() {
+  namespace_conflict_count_++;
+}
+
+void StorageManager::recordNoSessionAccess() {
+  no_session_access_count_++;
 }
 
 // ============================================
@@ -182,9 +306,17 @@ bool StorageManager::putString(const char* key, const char* value) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for putString");
     return false;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: putString denied, namespace owned by another task");
+    return false;
+  }
+#endif
 
   // Check NVS quota before write
   if (!checkNVSQuota(key)) {
@@ -209,9 +341,17 @@ const char* StorageManager::getString(const char* key, const char* default_value
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for getString");
     return default_value;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: getString denied, namespace owned by another task");
+    return default_value;
+  }
+#endif
   
   String value = preferences_.getString(key, default_value ? default_value : "");
   strncpy(string_buffer_, value.c_str(), sizeof(string_buffer_) - 1);
@@ -230,9 +370,17 @@ bool StorageManager::putInt(const char* key, int value) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for putInt");
     return false;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: putInt denied, namespace owned by another task");
+    return false;
+  }
+#endif
 
   if (!checkNVSQuota(key)) {
     return false;
@@ -256,9 +404,17 @@ int StorageManager::getInt(const char* key, int default_value) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for getInt");
     return default_value;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: getInt denied, namespace owned by another task");
+    return default_value;
+  }
+#endif
   
   int value = preferences_.getInt(key, default_value);
   LOG_D(TAG, "StorageManager: Read " + String(key) + " = " + String(value));
@@ -274,9 +430,17 @@ bool StorageManager::putUInt8(const char* key, uint8_t value) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for putUInt8");
     return false;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: putUInt8 denied, namespace owned by another task");
+    return false;
+  }
+#endif
 
   if (!checkNVSQuota(key)) {
     return false;
@@ -299,9 +463,17 @@ uint8_t StorageManager::getUInt8(const char* key, uint8_t default_value) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for getUInt8");
     return default_value;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: getUInt8 denied, namespace owned by another task");
+    return default_value;
+  }
+#endif
   
   return preferences_.getUChar(key, default_value);
 }
@@ -315,9 +487,17 @@ bool StorageManager::putUInt16(const char* key, uint16_t value) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for putUInt16");
     return false;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: putUInt16 denied, namespace owned by another task");
+    return false;
+  }
+#endif
 
   if (!checkNVSQuota(key)) {
     return false;
@@ -340,9 +520,17 @@ uint16_t StorageManager::getUInt16(const char* key, uint16_t default_value) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for getUInt16");
     return default_value;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: getUInt16 denied, namespace owned by another task");
+    return default_value;
+  }
+#endif
   
   return preferences_.getUShort(key, default_value);
 }
@@ -356,9 +544,17 @@ bool StorageManager::putBool(const char* key, bool value) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for putBool");
     return false;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: putBool denied, namespace owned by another task");
+    return false;
+  }
+#endif
 
   if (!checkNVSQuota(key)) {
     return false;
@@ -381,9 +577,17 @@ bool StorageManager::getBool(const char* key, bool default_value) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for getBool");
     return default_value;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: getBool denied, namespace owned by another task");
+    return default_value;
+  }
+#endif
 
   return preferences_.getBool(key, default_value);
 }
@@ -397,9 +601,17 @@ bool StorageManager::putFloat(const char* key, float value) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for putFloat");
     return false;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: putFloat denied, namespace owned by another task");
+    return false;
+  }
+#endif
 
   if (!checkNVSQuota(key)) {
     return false;
@@ -423,9 +635,17 @@ float StorageManager::getFloat(const char* key, float default_value) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for getFloat");
     return default_value;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: getFloat denied, namespace owned by another task");
+    return default_value;
+  }
+#endif
 
   float value = preferences_.getFloat(key, default_value);
   LOG_D(TAG, "StorageManager: Read " + String(key) + " = " + String(value, 4));
@@ -441,9 +661,17 @@ bool StorageManager::putULong(const char* key, unsigned long value) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for putULong");
     return false;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: putULong denied, namespace owned by another task");
+    return false;
+  }
+#endif
 
   if (!checkNVSQuota(key)) {
     return false;
@@ -466,9 +694,17 @@ unsigned long StorageManager::getULong(const char* key, unsigned long default_va
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for getULong");
     return default_value;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: getULong denied, namespace owned by another task");
+    return default_value;
+  }
+#endif
   
   return preferences_.getULong(key, default_value);
 }
@@ -484,9 +720,17 @@ bool StorageManager::clearNamespace() {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for clear");
     return false;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: clearNamespace denied, namespace owned by another task");
+    return false;
+  }
+#endif
   
   bool success = preferences_.clear();
   if (success) {
@@ -506,9 +750,17 @@ bool StorageManager::eraseKey(const char* key) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     LOG_E(TAG, "StorageManager: No namespace open for eraseKey");
     return false;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    LOG_W(TAG, "StorageManager: eraseKey denied, namespace owned by another task");
+    return false;
+  }
+#endif
 
   bool success = preferences_.remove(key);
   if (success) {
@@ -566,8 +818,15 @@ bool StorageManager::keyExists(const char* key) {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     return false;
   }
+#ifdef CONFIG_ENABLE_THREAD_SAFETY
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  if (namespace_owner_task_ != nullptr && namespace_owner_task_ != current_task) {
+    return false;
+  }
+#endif
   
   return preferences_.isKey(key);
 }
@@ -580,6 +839,7 @@ size_t StorageManager::getFreeEntries() {
   }
 #endif
   if (!namespace_open_) {
+    recordNoSessionAccess();
     return 0;
   }
   

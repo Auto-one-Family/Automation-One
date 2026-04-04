@@ -675,9 +675,10 @@ struct ConfigResponsePayload {
 | `GPIO_CONFLICT`    | GPIO ist bereits anderweitig belegt           |
 | `NVS_WRITE_FAILED` | Persistenz-Operation fehlgeschlagen           |
 | `TYPE_MISMATCH`    | Datentyp stimmt nicht mit Erwartung überein   |
-| `MISSING_FIELD`    | Pflichtfeld fehlt im Payload                  |
-| `OUT_OF_RANGE`     | Wert außerhalb zulässigem Bereich             |
-| `UNKNOWN_ERROR`    | Fallback für nicht klassifizierte Fehler      |
+| `MISSING_FIELD`      | Pflichtfeld fehlt im Payload                           |
+| `OUT_OF_RANGE`       | Wert außerhalb zulässigem Bereich                      |
+| `PAYLOAD_TOO_LARGE`  | Config-Payload > CONFIG_PAYLOAD_MAX_LEN (4096 B) — CP-F4 |
+| `UNKNOWN_ERROR`      | Fallback für nicht klassifizierte Fehler               |
 
 ### Usage Pattern
 

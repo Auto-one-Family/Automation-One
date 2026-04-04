@@ -56,6 +56,10 @@ void safetyTaskFunction(void* param) {
 
             if (notified & NOTIFY_EMERGENCY_STOP) {
                 LOG_W(SAFETY_TAG, "[SAFETY-M2] EMERGENCY_STOP received — stopping all actuators");
+                // Prevent post-emergency command tail: drop queued commands before stop.
+                bumpSafetyEpoch("emergency_notify");
+                flushActuatorCommandQueue();
+                flushSensorCommandQueue();
                 safetyController.emergencyStopAll("MQTT emergency command (Core 0 notify)");
             }
             if (notified & NOTIFY_MQTT_DISCONNECTED) {
@@ -110,7 +114,7 @@ void safetyTaskFunction(void* param) {
         if (stack_log_counter >= 6000) {
             stack_log_counter = 0;
             UBaseType_t hwm = uxTaskGetStackHighWaterMark(g_safety_task_handle);
-            LOG_I(SAFETY_TAG, "[SAFETY] Stack HWM: " +
+            LOG_D(SAFETY_TAG, "[SAFETY] Stack HWM: " +
                   String((uint32_t)(hwm * (uint32_t)sizeof(StackType_t))) + " bytes free");
         }
 

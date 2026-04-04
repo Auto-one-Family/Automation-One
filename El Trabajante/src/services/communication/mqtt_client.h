@@ -137,8 +137,8 @@ public:
     // ============================================
     bool isRegistrationConfirmed() const;
     void confirmRegistration();
-    // Check if registration gate should be force-opened (independent of publish() calls).
-    // Called from Communication-Task loop so the timeout fires even if no publish() is attempted.
+    // Registration timeout observer (independent of publish() calls).
+    // IMPORTANT: Fail-closed behavior — timeout never opens the gate without valid ACK.
     bool checkRegistrationTimeout();
 
 private:
@@ -199,7 +199,10 @@ private:
 
     // Heartbeat
     unsigned long last_heartbeat_;
-    static const unsigned long HEARTBEAT_INTERVAL_MS = 60000;  // 60 seconds
+    static const unsigned long HEARTBEAT_INTERVAL_MS = 60000;  // 60 seconds (normal operation)
+    // While registration gate is closed, retry heartbeat faster to avoid long stalls
+    // when the first post-connect heartbeat or ACK is lost.
+    static const unsigned long HEARTBEAT_REGISTRATION_RETRY_MS = 5000;  // 5 seconds
 
     // Callbacks
     std::function<void(const String&, const String&)> message_callback_;
@@ -216,6 +219,7 @@ private:
     // ============================================
     bool registration_confirmed_;
     unsigned long registration_start_ms_;
+    bool registration_timeout_logged_;
     static const unsigned long REGISTRATION_TIMEOUT_MS = 10000;
 
     static MQTTClient* instance_;

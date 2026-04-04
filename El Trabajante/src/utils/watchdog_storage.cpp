@@ -8,6 +8,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <esp_system.h>
+#include <atomic>
 #include <string.h>
 #include <time.h>
 
@@ -24,6 +25,13 @@ static constexpr uint32_t kSecondsPerDay = 86400UL;
 
 static bool s_boot_was_wdt = false;
 static bool s_finalize_done = false;
+static std::atomic<uint32_t> s_hist_not_found_expected_count{0};
+static std::atomic<uint32_t> s_hist_not_found_unexpected_count{0};
+static uint32_t s_last_expected_log_ms = 0;
+static uint32_t s_last_unexpected_log_ms = 0;
+
+static constexpr uint32_t kExpectedNotFoundLogIntervalMs = 300000UL;   // 5 min
+static constexpr uint32_t kUnexpectedNotFoundLogIntervalMs = 60000UL;  // 60 s
 
 static bool openNs(bool read_only) {
   return storageManager.beginNamespace(kNamespace, read_only);
@@ -101,6 +109,12 @@ static String pruneAndAppend(const char* hist, uint32_t new_ts, time_t now) {
 void watchdogStorageInitEarly() {
   s_finalize_done = false;
   s_boot_was_wdt = (esp_reset_reason() == ESP_RST_TASK_WDT);
+
+  // Ensure namespace exists early to avoid periodic read-only NOT_FOUND noise
+  // from watchdogStorageGetCountLast24h() when diagnostics snapshots run.
+  if (openNs(false)) {
+    closeNs();
+  }
 }
 
 void watchdogStorageTryFinalizeBootRecord() {
@@ -146,10 +160,40 @@ uint8_t watchdogStorageGetCountLast24h() {
   if (!openNs(true)) {
     return 0;
   }
+  if (!storageManager.keyExists(kHistKey)) {
+    uint32_t now_ms = millis();
+    bool unexpected_missing =
+        s_boot_was_wdt && s_finalize_done && now >= (time_t)kMinValidEpoch;
+
+    if (unexpected_missing) {
+      uint32_t c = s_hist_not_found_unexpected_count.fetch_add(1) + 1;
+      if (now_ms - s_last_unexpected_log_ms >= kUnexpectedNotFoundLogIntervalMs) {
+        s_last_unexpected_log_ms = now_ms;
+        LOG_W(TAG, "watchdog_history_missing class=unexpected_missing_key count=" + String(c));
+      }
+    } else {
+      uint32_t c = s_hist_not_found_expected_count.fetch_add(1) + 1;
+      if (now_ms - s_last_expected_log_ms >= kExpectedNotFoundLogIntervalMs) {
+        s_last_expected_log_ms = now_ms;
+        LOG_D(TAG, "watchdog_history_missing class=expected_not_found count=" + String(c));
+      }
+    }
+    closeNs();
+    return 0;
+  }
+
   const char* hist = storageManager.getString(kHistKey, "");
   uint8_t n = countEntriesInWindow(hist, now);
   closeNs();
   return n;
+}
+
+uint32_t watchdogStorageGetHistNotFoundExpectedCount() {
+  return s_hist_not_found_expected_count.load();
+}
+
+uint32_t watchdogStorageGetHistNotFoundUnexpectedCount() {
+  return s_hist_not_found_unexpected_count.load();
 }
 
 void watchdogStorageSaveDiagnosticsSnapshot(const WatchdogDiagnostics& diag) {

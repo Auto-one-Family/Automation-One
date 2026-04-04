@@ -10,6 +10,7 @@ import {
   formatUptime,
   formatMemory,
   formatSensorValue,
+  getOperatorActionGuidance,
   transformEventMessage,
   type EventCategory
 } from '@/utils/eventTransformer'
@@ -290,6 +291,22 @@ describe('transformEventMessage - actuator_alert', () => {
   })
 })
 
+describe('transformEventMessage - actuator_command lifecycle', () => {
+  it('marks actuator_command as pending and non-terminal', () => {
+    const event = makeEvent({
+      event_type: 'actuator_command',
+      gpio: 5,
+      data: {
+        command: 'ON',
+        issued_by: 'api'
+      }
+    })
+    const result = transformEventMessage(event)
+    expect(result.titleDE).toBe('Befehl ausstehend')
+    expect(result.summary).toContain('Pending')
+  })
+})
+
 // =============================================================================
 // transformEventMessage - device_offline
 // =============================================================================
@@ -403,5 +420,104 @@ describe('transformEventMessage - unknown event', () => {
     expect(result.type).toBe('custom_event')
     expect(result.title).toBe('CUSTOM EVENT')
     expect(result.summary).toBe('Custom message')
+  })
+})
+
+describe('transformEventMessage - contract integrity events', () => {
+  it('renders contract_mismatch as explicit integration issue', () => {
+    const event = makeEvent({
+      event_type: 'contract_mismatch',
+      data: {
+        original_event_type: 'actuator_response',
+        mismatch_reason: 'missing success'
+      }
+    })
+    const result = transformEventMessage(event)
+    expect(result.titleDE).toBe('Integrationsstoerung')
+    expect(result.summary).toContain('actuator_response')
+    expect(result.summary).toContain('Contract-Pruefung erforderlich')
+  })
+
+  it('renders contract_unknown_event as explicit integration issue', () => {
+    const event = makeEvent({
+      event_type: 'contract_unknown_event',
+      data: {
+        original_event_type: 'future_event_x'
+      }
+    })
+    const result = transformEventMessage(event)
+    expect(result.titleDE).toBe('Integrationsstoerung')
+    expect(result.summary).toContain('future_event_x')
+    expect(result.summary).toContain('Contract-Pruefung erforderlich')
+  })
+
+  it('marks config terminal contract drift as not finalizable', () => {
+    const event = makeEvent({
+      event_type: 'contract_mismatch',
+      data: {
+        original_event_type: 'config_response',
+        mismatch_reason: 'config_response ohne correlation_id (nicht finalisierbar)'
+      }
+    })
+    const result = transformEventMessage(event)
+    expect(result.summary).toContain('nicht finalisierbar')
+    expect(result.description).toContain('bleibt pending')
+  })
+})
+
+describe('getOperatorActionGuidance', () => {
+  it('returns integration guidance for contract mismatch', () => {
+    const event = makeEvent({
+      event_type: 'contract_mismatch',
+      data: {
+        original_event_type: 'config_response',
+        mismatch_reason: 'config_response ohne status'
+      }
+    })
+    const guidance = getOperatorActionGuidance(event)
+    expect(guidance).not.toBeNull()
+    expect(guidance?.classification).toBe('integrationsproblem')
+    expect(guidance?.priority).toBe('critical')
+    expect(guidance?.nextAction).toContain('Contract-Pruefung erforderlich')
+  })
+
+  it('returns terminal actuator failure guidance', () => {
+    const event = makeEvent({
+      event_type: 'actuator_command_failed',
+      data: {
+        command: 'ON',
+        gpio: 5,
+        error: 'MQTT publish timeout'
+      }
+    })
+    const guidance = getOperatorActionGuidance(event)
+    expect(guidance).not.toBeNull()
+    expect(guidance?.classification).toBe('betriebsproblem')
+    expect(guidance?.priority).toBe('error')
+    expect(guidance?.isTerminal).toBe(true)
+  })
+
+  it('returns terminal config failure guidance for config_response failed', () => {
+    const event = makeEvent({
+      event_type: 'config_response',
+      data: {
+        status: 'failed',
+        message: 'validation failed'
+      }
+    })
+    const guidance = getOperatorActionGuidance(event)
+    expect(guidance).not.toBeNull()
+    expect(guidance?.cause).toContain('validation failed')
+    expect(guidance?.nextAction).toContain('erneut')
+  })
+
+  it('returns null for non-terminal pending event', () => {
+    const event = makeEvent({
+      event_type: 'actuator_command',
+      data: {
+        command: 'ON'
+      }
+    })
+    expect(getOperatorActionGuidance(event)).toBeNull()
   })
 })

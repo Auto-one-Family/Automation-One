@@ -24,6 +24,7 @@ from ...core.logging_config import get_logger
 from ...db.models.enums import DataSource
 from ...db.repositories import ActuatorRepository, ESPRepository
 from ...db.session import resilient_session
+from ...services.state_adoption_service import get_state_adoption_service
 from ...schemas.actuator import normalize_actuator_type
 from ..topics import TopicBuilder
 
@@ -166,6 +167,10 @@ class ActuatorStatusHandler:
                 # Step 7: Detect data source (mock/test/production)
                 data_source = self._detect_data_source(esp_device, payload)
 
+                # Step 7a: Capture current state BEFORE update for state-change detection (Fix L1)
+                prev_state_obj = await actuator_repo.get_state(esp_device.id, gpio)
+                prev_state = prev_state_obj.state if prev_state_obj else None
+
                 # Step 8: Update actuator state
                 actuator_state = await actuator_repo.update_state(
                     esp_id=esp_device.id,
@@ -177,6 +182,15 @@ class ActuatorStatusHandler:
                     last_command=last_command,
                     error_message=error,
                     data_source=data_source,
+                )
+
+                # During reconnect handover, actuator status events feed the adoption snapshot.
+                adoption_service = get_state_adoption_service()
+                await adoption_service.record_adopted_state(
+                    esp_id=esp_id_str,
+                    gpio=gpio,
+                    state=state,
+                    value=value,
                 )
 
                 # Step 9: Log to history if command was executed
@@ -196,6 +210,36 @@ class ActuatorStatusHandler:
                             "uptime": payload.get("uptime"),
                         },
                         data_source=data_source,
+                    )
+                # Fix L1: State-change fallback — logs when state transitions without last_command
+                elif prev_state is not None and prev_state != state:
+                    command_type = state.upper()
+                    await actuator_repo.log_command(
+                        esp_id=esp_device.id,
+                        gpio=gpio,
+                        actuator_type=actuator_type,
+                        command_type=command_type,
+                        value=value,
+                        success=True,
+                        issued_by="state_sync",
+                        error_message=None,
+                        timestamp=esp32_timestamp,
+                        metadata={
+                            "trigger": "state_change_detected",
+                            "prev_state": prev_state,
+                            "source": "status_handler",
+                        },
+                        data_source=data_source,
+                    )
+                    logger.info(
+                        "Actuator history logged",
+                        extra={
+                            "esp_id": esp_id_str,
+                            "gpio": gpio,
+                            "command_type": command_type,
+                            "issued_by": "state_sync",
+                            "trigger": "state_change_detected",
+                        },
                     )
 
                 # Commit transaction

@@ -7,7 +7,7 @@ Evaluates logic rules in background, triggers actuator actions based on sensor c
 import asyncio
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from ..core.logging_config import get_logger
@@ -16,21 +16,27 @@ from ..db.repositories import LogicRepository, ESPRepository, SensorRepository
 from ..db.session import get_session
 from ..websocket.manager import WebSocketManager
 from .actuator_service import ActuatorService
+from .state_adoption_service import get_state_adoption_service
 from .logic.actions import (
     ActuatorActionExecutor,
     BaseActionExecutor,
     DelayActionExecutor,
+    DiagnosticsActionExecutor,
     NotificationActionExecutor,
 )
+from .logic.actions.plugin_executor import PluginActionExecutor
 from .logic.conditions import (
     BaseConditionEvaluator,
     CompoundConditionEvaluator,
+    DiagnosticsConditionEvaluator,
     HysteresisConditionEvaluator,
     SensorConditionEvaluator,
     TimeConditionEvaluator,
 )
 
 logger = get_logger(__name__)
+
+_OFFLINE_BACKOFF_SECONDS = 30  # Skip offline-ESP actuator rules for 30s after first failure (safety net)
 
 
 class LogicEngine:
@@ -50,6 +56,7 @@ class LogicEngine:
         action_executors: Optional[List[BaseActionExecutor]] = None,
         conflict_manager=None,
         rate_limiter=None,
+        session_factory=None,
     ):
         """
         Initialize Logic Engine.
@@ -74,11 +81,15 @@ class LogicEngine:
             sensor_eval = SensorConditionEvaluator()
             time_eval = TimeConditionEvaluator()
             hysteresis_eval = HysteresisConditionEvaluator()
-            compound_eval = CompoundConditionEvaluator([sensor_eval, time_eval, hysteresis_eval])
+            diagnostics_eval = DiagnosticsConditionEvaluator(session_factory=session_factory)
+            compound_eval = CompoundConditionEvaluator(
+                [sensor_eval, time_eval, hysteresis_eval, diagnostics_eval]
+            )
             self.condition_evaluators = [
                 sensor_eval,
                 time_eval,
                 hysteresis_eval,
+                diagnostics_eval,
                 compound_eval,
             ]
         else:
@@ -89,7 +100,15 @@ class LogicEngine:
             actuator_exec = ActuatorActionExecutor(actuator_service)
             delay_exec = DelayActionExecutor()
             notification_exec = NotificationActionExecutor()
-            self.action_executors = [actuator_exec, delay_exec, notification_exec]
+            plugin_exec = PluginActionExecutor(session_factory=session_factory)
+            diag_action_exec = DiagnosticsActionExecutor(session_factory=session_factory)
+            self.action_executors = [
+                actuator_exec,
+                delay_exec,
+                notification_exec,
+                plugin_exec,
+                diag_action_exec,
+            ]
         else:
             self.action_executors = action_executors
 
@@ -107,6 +126,9 @@ class LogicEngine:
             self.rate_limiter = RateLimiter(logic_repo=logic_repo)
         else:
             self.rate_limiter = rate_limiter
+
+        # Backoff cache: esp_id -> skip_until timestamp (avoids repeated DB queries for offline ESPs)
+        self._offline_esp_skip: dict[str, datetime] = {}
 
     async def start(self) -> None:
         """
@@ -141,6 +163,28 @@ class LogicEngine:
                 pass
 
         logger.info("Logic Engine stopped")
+
+    def invalidate_offline_backoff(self, esp_id: str) -> None:
+        """Clear offline backoff cache for an ESP after confirmed reconnect.
+
+        Called by heartbeat_handler after update_status("online") is committed.
+        Removes the esp_id from _offline_esp_skip so the next action trigger
+        proceeds immediately without waiting for the backoff TTL to expire.
+
+        Both the modern path (_execute_actions) and the legacy path
+        (_execute_action_legacy) share the same _offline_esp_skip dict,
+        so a single pop() covers both.
+
+        Args:
+            esp_id: ESP device ID to clear from backoff cache
+        """
+        removed = self._offline_esp_skip.pop(esp_id, None)
+        if removed:
+            logger.info(
+                "Offline backoff cache cleared for %s (was set until %s)",
+                esp_id,
+                removed.isoformat(),
+            )
 
     async def evaluate_sensor_data(
         self,
@@ -267,32 +311,85 @@ class LogicEngine:
                     logger.debug("No timer-triggered rules to evaluate")
                     return
 
-                # Prepare context for time-based evaluation
-                context = {
-                    "current_time": datetime.now(timezone.utc),
-                }
-
                 # Evaluate each timer rule with batch-level lock tracking
                 batch_locks = []
                 try:
                     for rule in timer_rules:
-                        # Check if time conditions are met
-                        conditions = rule.trigger_conditions
+                        # Load latest sensor values so compound rules (time + sensor/hysteresis)
+                        # can evaluate correctly in Phase 1.
+                        sensor_values = await self._load_sensor_values_for_timer(rule, session)
 
-                        # Use modular evaluators to check time conditions
-                        conditions_met = await self._check_conditions(conditions, context)
-
-                        if conditions_met:
-                            # Prepare trigger data for timer-based execution
-                            trigger_data = {
-                                "type": "timer",
-                                "timestamp": int(time.time()),
-                                "rule_id": str(rule.id),
+                        # Build primary sensor_data from first available value so hysteresis
+                        # evaluator can call _matches_sensor() and evaluate state transitions.
+                        primary_sensor_data: dict = {}
+                        if sensor_values:
+                            first_val = next(iter(sensor_values.values()))
+                            primary_sensor_data = {
+                                "esp_id": first_val.get("esp_id"),
+                                "gpio": first_val.get("gpio"),
+                                "sensor_type": first_val.get("sensor_type"),
+                                "value": first_val.get("value"),
                             }
 
+                        # Fresh context per rule — prevents state bleed between rules and
+                        # gives each evaluation the full sensor context it needs.
+                        context = {
+                            "current_time": datetime.now(timezone.utc),
+                            "sensor_values": sensor_values,
+                            "sensor_data": primary_sensor_data,
+                            "rule_id": str(rule.id),
+                            "rule_name": rule.rule_name,
+                            "condition_index": 0,
+                        }
+
+                        # Check if conditions are met (Phase 1 — now with sensor context)
+                        conditions = rule.trigger_conditions
+                        conditions_met = await self._check_conditions(conditions, context)
+
+                        # Prepare trigger data for timer-based execution
+                        trigger_data = {
+                            "type": "timer",
+                            "timestamp": int(time.time()),
+                            "rule_id": str(rule.id),
+                        }
+
+                        if conditions_met:
                             await self._evaluate_rule(
                                 rule, trigger_data, logic_repo, batch_locks=batch_locks
                             )
+                        else:
+                            # Pure time-window rule expired → send OFF if recently executed.
+                            # Guard: only fire within 2× cooldown (or 120 s default) to
+                            # avoid OFF spam on every 60-second tick for long-inactive rules.
+                            last_exec = await logic_repo.get_last_execution(rule.id)
+                            if last_exec:
+                                time_since = (
+                                    datetime.now(timezone.utc) - last_exec.timestamp
+                                ).total_seconds()
+                                cooldown_window = (
+                                    rule.cooldown_seconds * 2
+                                    if rule.cooldown_seconds
+                                    else 120
+                                )
+                                if time_since < cooldown_window:
+                                    off_actions = self._build_off_actions(rule.actions)
+                                    if off_actions:
+                                        await self._execute_actions(
+                                            off_actions,
+                                            trigger_data,
+                                            rule.id,
+                                            rule.rule_name,
+                                            rule.priority,
+                                            session=session,
+                                            batch_locks=batch_locks,
+                                        )
+                                        await session.commit()
+                                        logger.info(
+                                            "Timer OFF: rule '%s' conditions_met=False, "
+                                            "OFF sent (last execution %.0fs ago)",
+                                            rule.rule_name,
+                                            time_since,
+                                        )
                 finally:
                     for lock in batch_locks:
                         await self.conflict_manager.release_actuator(
@@ -306,6 +403,69 @@ class LogicEngine:
         except Exception as e:
             logger.error(
                 f"Error evaluating timer-triggered rules: {e}",
+                exc_info=True,
+            )
+
+    async def trigger_reconnect_evaluation(self, esp_id: str) -> None:
+        """Re-evaluate enabled rules whose actions target this ESP after MQTT reconnect.
+
+        Uses ``type=reconnect`` in trigger_data so cooldown does not block on stale
+        execution history from before LWT disconnect. Skips rules without fresh sensor
+        context (same 5-minute staleness window as timer evaluation).
+
+        Args:
+            esp_id: Device ID that reconnected (must match action ``esp_id`` fields).
+        """
+        try:
+            async for session in get_session():
+                logic_repo = LogicRepository(session)
+                all_rules = await logic_repo.get_enabled_rules()
+                reconnect_rules = [
+                    r for r in all_rules if esp_id in self._extract_target_esp_ids(r.actions)
+                ]
+                if not reconnect_rules:
+                    logger.debug("Reconnect evaluation: no rules with actions on %s", esp_id)
+                    return
+
+                batch_locks: list = []
+                try:
+                    for rule in reconnect_rules:
+                        sensor_values = await self._load_sensor_values_for_timer(rule, session)
+                        if not sensor_values:
+                            logger.debug(
+                                "Reconnect evaluation: skip %s (no fresh sensor context)",
+                                rule.rule_name,
+                            )
+                            continue
+
+                        first_val = next(iter(sensor_values.values()))
+                        trigger_data = {
+                            "type": "reconnect",
+                            "esp_id": first_val.get("esp_id"),
+                            "gpio": first_val.get("gpio"),
+                            "sensor_type": first_val.get("sensor_type"),
+                            "value": first_val.get("value"),
+                            "timestamp": int(time.time()),
+                        }
+
+                        await self._evaluate_rule(
+                            rule, trigger_data, logic_repo, batch_locks=batch_locks
+                        )
+                finally:
+                    for lock in batch_locks:
+                        await self.conflict_manager.release_actuator(
+                            esp_id=lock["esp_id"],
+                            gpio=lock["gpio"],
+                            rule_id=lock["rule_id"],
+                        )
+
+                break
+
+        except Exception as e:
+            logger.error(
+                "Error in reconnect evaluation for %s: %s",
+                esp_id,
+                e,
                 exc_info=True,
             )
 
@@ -340,6 +500,7 @@ class LogicEngine:
                 "sensor_values": sensor_values,
                 "current_time": datetime.now(timezone.utc),
                 "rule_id": str(rule.id),
+                "rule_name": rule.rule_name,
                 "condition_index": 0,
             }
             conditions_met = await self._check_conditions(
@@ -390,8 +551,12 @@ class LogicEngine:
                 )
                 return
 
-            # Check cooldown (only for activation — prevents rapid ON-ON-ON)
-            if rule.cooldown_seconds:
+            # Check cooldown (only for activation — prevents rapid ON-ON-ON).
+            # Rule-update triggers bypass cooldown: admin intent must take effect immediately.
+            # Reconnect triggers bypass cooldown: LWT disconnect leaves stale execution history.
+            is_rule_update = trigger_data.get("type") == "rule_update"
+            is_reconnect_trigger = trigger_data.get("type") == "reconnect"
+            if rule.cooldown_seconds and not is_rule_update and not is_reconnect_trigger:
                 last_execution = await logic_repo.get_last_execution(rule.id)
                 if last_execution:
                     time_since_last = datetime.now(timezone.utc) - last_execution.timestamp
@@ -739,6 +904,40 @@ class LogicEngine:
             for action in actions:
                 action_type = action.get("type")
 
+                # Pre-check ESP online status for actuator actions — skip executor call entirely
+                # when ESP is offline. This avoids ERROR noise from actuator_service for an
+                # expected transient state. Reference pattern: sensor_scheduler_service.py:371
+                if action_type in ("actuator_command", "actuator") and session:
+                    esp_id_pre = action.get("esp_id")
+                    gpio_pre = action.get("gpio")
+                    if esp_id_pre:
+                        adoption_service = get_state_adoption_service()
+                        if not await adoption_service.is_adoption_completed(esp_id_pre):
+                            logger.info(
+                                "Rule %s: skip enforce for %s GPIO %s (adoption not completed)",
+                                rule_name,
+                                esp_id_pre,
+                                gpio_pre,
+                            )
+                            continue
+                        skip_until = self._offline_esp_skip.get(esp_id_pre)
+                        if skip_until and datetime.now(timezone.utc) < skip_until:
+                            continue  # Silent skip: still within backoff window
+                        esp_repo_pre = ESPRepository(session)
+                        esp_device_pre = await esp_repo_pre.get_by_device_id(esp_id_pre)
+                        if not esp_device_pre or not esp_device_pre.is_online:
+                            self._offline_esp_skip[esp_id_pre] = datetime.now(
+                                timezone.utc
+                            ) + timedelta(seconds=_OFFLINE_BACKOFF_SECONDS)
+                            logger.warning(
+                                f"Rule {rule_name}: ESP {esp_id_pre} is offline, "
+                                f"skipping actuator action (GPIO {gpio_pre})"
+                            )
+                            continue
+                        else:
+                            # ESP back online — clear backoff so future failures are reported
+                            self._offline_esp_skip.pop(esp_id_pre, None)
+
                 # Use modular executors if available
                 executor_found = False
                 if self.action_executors:
@@ -826,6 +1025,35 @@ class LogicEngine:
                 if "duration_seconds" in action
                 else action.get("duration", 0)
             )
+
+            # Pre-check ESP online status (mirrors modern path; session fetched via get_session())
+            if esp_id:
+                adoption_service = get_state_adoption_service()
+                if not await adoption_service.is_adoption_completed(esp_id):
+                    logger.info(
+                        "Rule %s: legacy enforce skipped for %s GPIO %s (adoption not completed)",
+                        rule_name,
+                        esp_id,
+                        gpio,
+                    )
+                    return
+                skip_until = self._offline_esp_skip.get(esp_id)
+                if skip_until and datetime.now(timezone.utc) < skip_until:
+                    return  # Silent skip: still within backoff window
+                async for session in get_session():
+                    esp_repo_pre = ESPRepository(session)
+                    esp_device_pre = await esp_repo_pre.get_by_device_id(esp_id)
+                    if not esp_device_pre or not esp_device_pre.is_online:
+                        self._offline_esp_skip[esp_id] = datetime.now(
+                            timezone.utc
+                        ) + timedelta(seconds=_OFFLINE_BACKOFF_SECONDS)
+                        logger.warning(
+                            f"Rule {rule_name}: ESP {esp_id} is offline, "
+                            f"skipping actuator action (GPIO {gpio})"
+                        )
+                        return
+                    else:
+                        self._offline_esp_skip.pop(esp_id, None)
 
             success = await self.actuator_service.send_command(
                 esp_id=esp_id,
@@ -926,7 +1154,7 @@ class LogicEngine:
         # Find conditions that reference different sensors than the trigger
         cross_sensor_keys = []
         for cond in conditions_to_check:
-            if cond.get("type") not in ("sensor_threshold", "sensor"):
+            if cond.get("type") not in ("sensor_threshold", "sensor", "hysteresis"):
                 continue
             cond_esp = cond.get("esp_id")
             cond_gpio = cond.get("gpio")
@@ -987,6 +1215,125 @@ class LogicEngine:
 
         return sensor_values
 
+    def _extract_sensor_refs_from_conditions(self, conditions) -> list[dict]:
+        """
+        Extract all sensor references from trigger_conditions.
+
+        Handles three condition types that reference sensor data:
+        - "sensor" / "sensor_threshold": Simple threshold conditions
+        - "hysteresis": Hysteresis conditions (also have esp_id, gpio, sensor_type)
+
+        Handles two compound formats:
+        - {"type": "compound", "conditions": [...]}
+        - {"logic": "AND"|"OR", "conditions": [...]}
+
+        Args:
+            conditions: Condition dict, compound dict, or list of conditions
+
+        Returns:
+            List of dicts with keys: esp_id, gpio, sensor_type
+        """
+        refs: list[dict] = []
+
+        if isinstance(conditions, list):
+            for cond in conditions:
+                refs.extend(self._extract_sensor_refs_from_conditions(cond))
+            return refs
+
+        if not isinstance(conditions, dict):
+            return refs
+
+        cond_type = conditions.get("type", "")
+        if cond_type in ("sensor", "sensor_threshold", "hysteresis"):
+            esp_id = conditions.get("esp_id")
+            gpio = conditions.get("gpio")
+            sensor_type = conditions.get("sensor_type")
+            if esp_id and sensor_type:
+                refs.append({"esp_id": esp_id, "gpio": gpio, "sensor_type": sensor_type})
+        elif cond_type == "compound":
+            for sub in conditions.get("conditions", []):
+                refs.extend(self._extract_sensor_refs_from_conditions(sub))
+        elif conditions.get("logic") in ("AND", "OR") and conditions.get("conditions"):
+            for sub in conditions["conditions"]:
+                refs.extend(self._extract_sensor_refs_from_conditions(sub))
+
+        return refs
+
+    async def _load_sensor_values_for_timer(self, rule, session) -> dict:
+        """
+        Load latest sensor values for all sensor references in a timer rule.
+
+        Used by evaluate_timer_triggered_rules() to enrich Phase-1 context so
+        compound rules (time_window + sensor/hysteresis) can evaluate correctly.
+
+        Stale readings (older than 5 minutes) are excluded so the engine does
+        not fire rules based on outdated data.
+
+        Args:
+            rule: CrossESPLogic rule instance
+            session: Active SQLAlchemy async session
+
+        Returns:
+            Dict mapping "ESP_ID:GPIO:sensor_type" to sensor value dicts.
+            Empty dict if no sensor references or all readings are stale.
+        """
+        sensor_refs = self._extract_sensor_refs_from_conditions(rule.trigger_conditions)
+        if not sensor_refs:
+            return {}
+
+        sensor_values: dict = {}
+        staleness_limit = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+        esp_repo = ESPRepository(session)
+        sensor_repo = SensorRepository(session)
+
+        for ref in sensor_refs:
+            esp_id_str = ref["esp_id"]
+            gpio = ref["gpio"]
+            sensor_type = ref["sensor_type"]
+
+            esp_device = await esp_repo.get_by_device_id(esp_id_str)
+            if not esp_device:
+                logger.debug(f"Timer sensor lookup: ESP {esp_id_str} not found")
+                continue
+
+            reading = await sensor_repo.get_latest_reading(
+                esp_id=esp_device.id,
+                gpio=int(gpio),
+                sensor_type=sensor_type,
+            )
+            if reading is None:
+                logger.debug(f"Timer sensor lookup: no data for {esp_id_str}:{gpio}:{sensor_type}")
+                continue
+
+            if reading.timestamp < staleness_limit:
+                age_s = (datetime.now(timezone.utc) - reading.timestamp).total_seconds()
+                logger.debug(
+                    f"Timer sensor stale: {esp_id_str}:{gpio}:{sensor_type} "
+                    f"(age: {age_s:.0f}s > 300s)"
+                )
+                continue
+
+            display_value = (
+                reading.processed_value
+                if reading.processed_value is not None
+                else reading.raw_value
+            )
+            key = (
+                f"{esp_id_str}:{gpio}:{sensor_type}"
+                if sensor_type
+                else f"{esp_id_str}:{gpio}"
+            )
+            sensor_values[key] = {
+                "esp_id": esp_id_str,
+                "gpio": gpio,
+                "sensor_type": sensor_type,
+                "value": display_value,
+            }
+            logger.debug(f"Timer sensor loaded: {key} = {display_value} ({sensor_type})")
+
+        return sensor_values
+
     def _extract_target_esp_ids(self, actions: list) -> List[str]:
         """
         Extract ESP IDs from actions for rate limiting.
@@ -1013,6 +1360,411 @@ class LogicEngine:
                         if esp_id:
                             esp_ids.add(esp_id)
         return list(esp_ids)
+
+    def _get_hysteresis_evaluator(self) -> Optional[HysteresisConditionEvaluator]:
+        """Return the HysteresisConditionEvaluator from this engine's evaluator list.
+
+        Returns:
+            HysteresisConditionEvaluator instance, or None if not present.
+        """
+        for evaluator in self.condition_evaluators:
+            if isinstance(evaluator, HysteresisConditionEvaluator):
+                return evaluator
+        return None
+
+    def _build_off_actions(self, actions: list) -> list:
+        """Build OFF-variant action list from a rule's ON actions.
+
+        Creates an OFF command for every actuator action. Non-actuator action
+        types (notifications, delays, …) are excluded — OFF only applies to
+        hardware outputs.
+
+        Args:
+            actions: List of action dicts from a CrossESPLogic rule.
+
+        Returns:
+            List of action dicts with command='OFF', value=0.0, duration=0.
+        """
+        return [
+            {**action, "command": "OFF", "value": 0.0, "duration": 0}
+            for action in actions
+            if action.get("type") in ("actuator_command", "actuator")
+        ]
+
+    # --- Bumpless Transfer helpers (Fix 1) ---
+
+    @staticmethod
+    def _extract_hysteresis_conditions(trigger_conditions) -> list[dict]:
+        """Extract all hysteresis-type conditions from a trigger_conditions structure."""
+        if isinstance(trigger_conditions, list):
+            return [c for c in trigger_conditions if c.get("type") == "hysteresis"]
+        if isinstance(trigger_conditions, dict):
+            if trigger_conditions.get("type") == "hysteresis":
+                return [trigger_conditions]
+            if "conditions" in trigger_conditions:
+                return [
+                    c for c in trigger_conditions["conditions"]
+                    if c.get("type") == "hysteresis"
+                ]
+        return []
+
+    @staticmethod
+    def _get_condition_at_index(trigger_conditions, index: int) -> "dict | None":
+        """Return the condition at position *index* in the full (unfiltered) list."""
+        if isinstance(trigger_conditions, list):
+            if 0 <= index < len(trigger_conditions):
+                return trigger_conditions[index]
+            return None
+        if isinstance(trigger_conditions, dict):
+            if "conditions" in trigger_conditions:
+                sub = trigger_conditions["conditions"]
+                if 0 <= index < len(sub):
+                    return sub[index]
+                return None
+            if trigger_conditions.get("type") == "hysteresis" and index == 0:
+                return trigger_conditions
+        return None
+
+    @staticmethod
+    def _find_matching_hysteresis(
+        new_conditions: list[dict], old_cond: dict
+    ) -> "dict | None":
+        """Return the first condition in *new_conditions* pointing to the same sensor as *old_cond*."""
+        for nc in new_conditions:
+            if (
+                nc.get("esp_id") == old_cond.get("esp_id")
+                and nc.get("gpio") == old_cond.get("gpio")
+                and nc.get("sensor_type") == old_cond.get("sensor_type")
+            ):
+                return nc
+        return None
+
+    @staticmethod
+    def _hysteresis_params_changed(old_cond: dict, new_cond: dict) -> bool:
+        """Return True if any threshold value changed between two hysteresis conditions."""
+        _THRESHOLD_KEYS = (
+            "activate_below",
+            "deactivate_above",
+            "activate_above",
+            "deactivate_below",
+        )
+        return any(old_cond.get(k) != new_cond.get(k) for k in _THRESHOLD_KEYS)
+
+    async def on_rule_updated(self, rule_id: str, old_trigger_conditions=None) -> None:
+        """React to a rule update committed via the API.
+
+        Called by logic_service.update_rule() after the DB commit.  Performs
+        three steps in order:
+
+        1. Selective hysteresis state reset ("Bumpless Transfer"): only reset
+           states where the hysteresis condition itself changed.  Orthogonal
+           changes (e.g. adding/removing a time_window) leave the hysteresis
+           state untouched so the actuator does not flap.
+        2. If any state was active (actuator was ON), immediately send an OFF
+           command to the actuator — the new rule config determines whether ON
+           should be re-sent.
+        3. Re-evaluate the rule with the latest sensor values from DB so the
+           new configuration takes effect without waiting for the next sensor
+           event or timer tick.  If no fresh data is available (all readings
+           older than 5 min) the re-evaluation is deferred to the next real
+           sensor event.
+
+        Args:
+            rule_id: Rule UUID as string.
+            old_trigger_conditions: The rule's trigger_conditions *before* the
+                update.  When provided, enables bumpless transfer (only
+                hysteresis states whose conditions actually changed are reset).
+                When None, all hysteresis states for the rule are reset
+                unconditionally (legacy behavior).
+        """
+        try:
+            async for session in get_session():
+                logic_repo = LogicRepository(session)
+
+                # Load rule from DB (needed for Steps 1, 2, and 3)
+                try:
+                    rule = await logic_repo.get_by_id(uuid.UUID(rule_id))
+                except (ValueError, Exception) as exc:
+                    logger.error(
+                        "on_rule_updated: invalid rule_id '%s': %s", rule_id, exc
+                    )
+                    return
+
+                if not rule:
+                    logger.warning("on_rule_updated: rule %s not found in DB", rule_id)
+                    return
+
+                # Step 1: selective hysteresis state reset — "Bumpless Transfer"
+                # Only reset states whose hysteresis condition actually changed.
+                # Orthogonal changes (e.g. adding/removing a time_window alongside
+                # an unchanged hysteresis) must not disrupt the hysteresis state.
+                hysteresis_eval = self._get_hysteresis_evaluator()
+                active_keys: list[str] = []
+                if hysteresis_eval:
+                    if old_trigger_conditions is not None:
+                        new_hysteresis = self._extract_hysteresis_conditions(
+                            rule.trigger_conditions
+                        )
+                        existing_keys = [
+                            k for k in hysteresis_eval._states
+                            if k.startswith(f"{rule_id}:")
+                        ]
+                        for state_key in existing_keys:
+                            try:
+                                condition_index = int(state_key.split(":", 1)[1])
+                            except (ValueError, IndexError):
+                                continue
+                            old_cond = self._get_condition_at_index(
+                                old_trigger_conditions, condition_index
+                            )
+                            if old_cond is None or old_cond.get("type") != "hysteresis":
+                                # State for a non-hysteresis index: clean up
+                                hysteresis_eval.remove_state(state_key)
+                                continue
+                            new_cond = self._find_matching_hysteresis(
+                                new_hysteresis, old_cond
+                            )
+                            if new_cond is None or self._hysteresis_params_changed(
+                                old_cond, new_cond
+                            ):
+                                # Condition removed or thresholds changed → reset
+                                if hysteresis_eval.remove_state(state_key):
+                                    active_keys.append(state_key)
+                            # else: identical condition — preserve state (bumpless transfer)
+                    else:
+                        # No old conditions provided → unconditional reset (legacy fallback)
+                        active_keys = hysteresis_eval.reset_states_for_rule(rule_id)
+
+                # Step 2: send OFF to actuators that were active under the old config
+                if active_keys:
+                    off_trigger = {
+                        "type": "rule_update",
+                        "rule_id": rule_id,
+                        "timestamp": int(time.time()),
+                    }
+                    off_actions = [
+                        {**action, "command": "OFF", "value": 0.0, "duration": 0}
+                        for action in rule.actions
+                        if action.get("type") in ("actuator_command", "actuator")
+                    ]
+                    if off_actions:
+                        logger.info(
+                            "Rule %s updated while %d actuator(s) active — sending OFF",
+                            rule.rule_name,
+                            len(off_actions),
+                        )
+                        await self._execute_actions(
+                            off_actions,
+                            off_trigger,
+                            rule.id,
+                            rule.rule_name,
+                            rule.priority,
+                            session=session,
+                        )
+                        await session.commit()
+
+                # Step 3: disabled-rule and pure-TimeWindow fast-paths
+                #
+                # Step 3a: disabled rule → send OFF (if previously executed) and exit early
+                if not rule.enabled:
+                    last_exec = await logic_repo.get_last_execution(rule.id)
+                    if last_exec:
+                        off_actions = self._build_off_actions(rule.actions)
+                        if off_actions:
+                            off_trigger = {
+                                "type": "rule_update",
+                                "rule_id": rule_id,
+                                "timestamp": int(time.time()),
+                            }
+                            await self._execute_actions(
+                                off_actions,
+                                off_trigger,
+                                rule.id,
+                                rule.rule_name,
+                                rule.priority,
+                                session=session,
+                            )
+                            await session.commit()
+                    logger.info(
+                        "on_rule_updated: rule '%s' is disabled — re-evaluation skipped",
+                        rule.rule_name,
+                    )
+                    break
+
+                # Step 3b: pure TimeWindow (no sensor refs) → evaluate conditions directly.
+                # These rules have no sensor readings to load. _load_sensor_values_for_timer
+                # returns {} and the Stale-Data-Guard below would abort re-evaluation.
+                # Instead, check the time condition directly using the current clock.
+                sensor_refs = self._extract_sensor_refs_from_conditions(rule.trigger_conditions)
+                if not sensor_refs:
+                    re_eval_context = {
+                        "current_time": datetime.now(timezone.utc),
+                        "sensor_values": {},
+                        "sensor_data": {},
+                        "rule_id": str(rule.id),
+                        "rule_name": rule.rule_name,
+                        "condition_index": 0,
+                    }
+                    conditions_met = await self._check_conditions(
+                        rule.trigger_conditions,
+                        re_eval_context,
+                        logic_operator=rule.logic_operator,
+                    )
+                    re_eval_trigger = {
+                        "type": "rule_update",
+                        "rule_id": rule_id,
+                        "timestamp": int(time.time()),
+                    }
+                    if conditions_met:
+                        await self._execute_actions(
+                            rule.actions,
+                            re_eval_trigger,
+                            rule.id,
+                            rule.rule_name,
+                            rule.priority,
+                            session=session,
+                        )
+                        await session.commit()
+                        logger.info(
+                            "on_rule_updated: pure-TimeWindow rule '%s' → "
+                            "conditions_met=True, actions executed",
+                            rule.rule_name,
+                        )
+                    else:
+                        last_exec = await logic_repo.get_last_execution(rule.id)
+                        if last_exec:
+                            off_actions = self._build_off_actions(rule.actions)
+                            if off_actions:
+                                await self._execute_actions(
+                                    off_actions,
+                                    re_eval_trigger,
+                                    rule.id,
+                                    rule.rule_name,
+                                    rule.priority,
+                                    session=session,
+                                )
+                                await session.commit()
+                            logger.info(
+                                "on_rule_updated: pure-TimeWindow rule '%s' → "
+                                "conditions_met=False, OFF sent (last execution: %s)",
+                                rule.rule_name,
+                                last_exec.timestamp,
+                            )
+                        else:
+                            logger.info(
+                                "on_rule_updated: pure-TimeWindow rule '%s' → "
+                                "conditions_met=False, no OFF needed (never executed)",
+                                rule.rule_name,
+                            )
+                    break  # Step 3 complete for sensor-less rules
+
+                # Step 3c: rules with sensor refs → re-evaluate with fresh values from DB
+                sensor_values = await self._load_sensor_values_for_timer(rule, session)
+
+                if not sensor_values:
+                    logger.info(
+                        "on_rule_updated: no fresh sensor data for rule '%s' "
+                        "(all readings older than 5 min). Re-evaluation deferred "
+                        "to next sensor event.",
+                        rule.rule_name,
+                    )
+                    break
+
+                first_val = next(iter(sensor_values.values()))
+                primary_sensor_data: dict = {
+                    "esp_id": first_val.get("esp_id"),
+                    "gpio": first_val.get("gpio"),
+                    "sensor_type": first_val.get("sensor_type"),
+                    "value": first_val.get("value"),
+                }
+
+                re_eval_trigger = {
+                    "type": "rule_update",
+                    "rule_id": rule_id,
+                    "timestamp": int(time.time()),
+                    **primary_sensor_data,
+                }
+                batch_locks: list = []
+                try:
+                    await self._evaluate_rule(
+                        rule, re_eval_trigger, logic_repo, batch_locks=batch_locks
+                    )
+                finally:
+                    for lock in batch_locks:
+                        await self.conflict_manager.release_actuator(
+                            esp_id=lock["esp_id"],
+                            gpio=lock["gpio"],
+                            rule_id=lock["rule_id"],
+                        )
+
+                # Step 4: Post-Re-Eval OFF-Guard (BUG 1 — Compound rule, time-window change)
+                #
+                # Scenario: Bumpless Transfer correctly preserved the hysteresis state
+                # (Step 1 was correct). Re-evaluation called _evaluate_rule which returned
+                # with conditions_met=False but WITHOUT the _hysteresis_just_deactivated
+                # path (sensor is still in deadband, threshold not crossed). The actuator
+                # remains ON even though the compound condition is no longer satisfied.
+                #
+                # Fix: call _check_conditions() directly with the current sensor data
+                # to get the authoritative conditions_met. If False AND active hysteresis
+                # states remain, the compound failed while hysteresis held state → send OFF.
+                #
+                # Using _check_conditions() (not the state proxy) avoids spurious OFF
+                # when conditions_met=True but states are still active (deadband + TW open).
+                post_eval_context = {
+                    "current_time": datetime.now(timezone.utc),
+                    "sensor_values": sensor_values,
+                    "sensor_data": primary_sensor_data,
+                    "rule_id": str(rule.id),
+                    "rule_name": rule.rule_name,
+                    "condition_index": 0,
+                }
+                post_conditions_met = await self._check_conditions(
+                    rule.trigger_conditions,
+                    post_eval_context,
+                    logic_operator=rule.logic_operator,
+                )
+                if not post_conditions_met:
+                    hysteresis_eval = self._get_hysteresis_evaluator()
+                    if hysteresis_eval:
+                        remaining_active = [
+                            key
+                            for key, state in list(hysteresis_eval._states.items())
+                            if key.startswith(f"{rule_id}:") and state.is_active
+                        ]
+                        if remaining_active:
+                            logger.info(
+                                "on_rule_updated: Post-Re-Eval OFF-Guard — rule '%s': "
+                                "%d active hysteresis state(s) after conditions_met=False, "
+                                "sending OFF",
+                                rule.rule_name,
+                                len(remaining_active),
+                            )
+                            for key in remaining_active:
+                                hysteresis_eval.remove_state(key)
+                            off_actions = self._build_off_actions(rule.actions)
+                            if off_actions:
+                                off_guard_trigger = {
+                                    "type": "rule_update",
+                                    "rule_id": rule_id,
+                                    "timestamp": int(time.time()),
+                                }
+                                await self._execute_actions(
+                                    off_actions,
+                                    off_guard_trigger,
+                                    rule.id,
+                                    rule.rule_name,
+                                    rule.priority,
+                                    session=session,
+                                )
+                                await session.commit()
+
+                break  # Exit after first session
+
+        except Exception as e:
+            logger.error(
+                "on_rule_updated failed for rule %s: %s", rule_id, e, exc_info=True
+            )
 
     async def _evaluation_loop(self) -> None:
         """

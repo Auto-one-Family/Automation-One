@@ -34,8 +34,8 @@ steps:
   - wait-serial: "Phase 1: Core Infrastructure READY"
 
   # First initialization happens during boot
-  # Verify correct pin count
-  - wait-serial: "Available Pins: 16"
+  # Verify correct pin count (20: 16 bidirectional + 4 input-only ADC1)
+  - wait-serial: "Available Pins: 20"
 
   # Wait for MQTT connection
   - wait-serial: "MQTT connected"

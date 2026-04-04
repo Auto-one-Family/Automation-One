@@ -5,6 +5,7 @@ Business logic for actuator control, safety checks, command validation.
 """
 
 import uuid
+from math import isclose
 
 from ..core.logging_config import get_logger
 from ..core.metrics import increment_actuator_timeout
@@ -161,6 +162,30 @@ class ActuatorService:
                 actuator_config = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
                 actuator_type = actuator_config.actuator_type if actuator_config else "unknown"
 
+                # Reconnect-safe delta guard: if desired output already equals current
+                # hardware projection, do not send a duplicate command.
+                current_state = await actuator_repo.get_state(esp_device.id, gpio)
+                if self._is_noop_delta(command=command, value=value, current_state=current_state):
+                    logger.info(
+                        "Skipping no-op actuator command (desired==current): esp_id=%s gpio=%s command=%s value=%s",
+                        esp_id,
+                        gpio,
+                        command,
+                        value,
+                    )
+                    await actuator_repo.log_command(
+                        esp_id=esp_device.id,
+                        gpio=gpio,
+                        actuator_type=actuator_type,
+                        command_type=command,
+                        value=value,
+                        success=True,
+                        issued_by=f"{issued_by}:noop_delta",
+                        metadata={"skipped": "desired_equals_current"},
+                    )
+                    await session.commit()
+                    return True
+
                 # Step 3: Publish MQTT command
                 # CRITICAL: value must be 0.0-1.0 (ESP32 converts internally to 0-255)
                 success = self.publisher.publish_actuator_command(
@@ -286,3 +311,24 @@ class ActuatorService:
                 exc_info=True,
             )
             return False
+
+    @staticmethod
+    def _is_noop_delta(command: str, value: float, current_state) -> bool:
+        """Return True when command would not change actuator state."""
+        if current_state is None:
+            return False
+
+        desired_command = str(command or "").upper()
+        current_name = str(getattr(current_state, "state", "") or "").lower()
+        current_value = float(getattr(current_state, "current_value", 0.0) or 0.0)
+
+        if desired_command == "TOGGLE":
+            return False
+        if desired_command == "OFF":
+            return current_name == "off" or isclose(current_value, 0.0, abs_tol=0.01)
+        if desired_command == "ON":
+            return current_name in ("on", "pwm") and current_value > 0.0
+        if desired_command == "PWM":
+            return current_name == "pwm" and isclose(current_value, float(value), abs_tol=0.01)
+
+        return False

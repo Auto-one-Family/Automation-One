@@ -259,7 +259,7 @@ class SimulationScheduler:
         except Exception as e:
             logger.warning(f"Failed to register actuator command handler: {e}")
 
-    async def handle_mqtt_message(self, topic: str, payload_str: str) -> bool:
+    async def handle_mqtt_message(self, topic: str, payload_str: str) -> Optional[bool]:
         """
         Handle incoming MQTT message for mock ESPs.
 
@@ -271,10 +271,10 @@ class SimulationScheduler:
             payload_str: JSON payload string
 
         Returns:
-            True if message was handled by a mock
+            True if handled by a mock, None if not applicable (real ESP / no mock).
         """
         if not self._actuator_handler:
-            return False
+            return None
 
         # Check if this is an actuator command
         if "/actuator/" in topic and topic.endswith("/command"):
@@ -293,7 +293,7 @@ class SimulationScheduler:
         elif topic == "kaiser/broadcast/emergency":
             return await self._actuator_handler.handle_broadcast_emergency(topic, payload_str)
 
-        return False
+        return None
 
     def _extract_esp_id_from_topic(self, topic: str) -> Optional[str]:
         """

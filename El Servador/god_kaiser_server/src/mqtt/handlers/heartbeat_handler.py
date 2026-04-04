@@ -20,6 +20,7 @@ Error Codes:
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import asyncio
 import json
 import time as time_module
 
@@ -27,7 +28,16 @@ from ...core.error_codes import (
     ValidationErrorCode,
 )
 from ...core.logging_config import get_logger
-from ...core.metrics import update_esp_heartbeat_timestamp, update_esp_boot_count
+from ...core.metrics import (
+    increment_heartbeat_ack_valid,
+    increment_heartbeat_contract_reject,
+    increment_contract_unknown_code,
+    increment_connect_attempt,
+    observe_heartbeat_ack_latency_ms,
+    observe_tls_handshake_latency_ms,
+    update_esp_boot_count,
+    update_esp_heartbeat_timestamp,
+)
 from ...core import constants
 from ...db.models.audit_log import AuditEventType, AuditSeverity
 from ...db.models.enums import DataSource
@@ -38,6 +48,9 @@ from ...db.repositories import ESPRepository, ESPHeartbeatRepository
 from ...db.repositories.actuator_repo import ActuatorRepository
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.session import resilient_session
+from ...services.event_contract_serializers import serialize_esp_health_event
+from ...services.system_event_contract import canonicalize_heartbeat
+from ...services.state_adoption_service import get_state_adoption_service
 from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
@@ -51,6 +64,7 @@ RECONNECT_THRESHOLD_SECONDS = 60
 # Note: As of SAFETY-P5 Fix-3, the heartbeat ACK is sent early (before DB writes)
 # and independently of config push. Config push is triggered via _has_pending_config().
 STATE_PUSH_COOLDOWN_SECONDS = 120
+ADOPTION_GRACE_SECONDS = 2.0
 
 # Config-Push: Cooldown between auto config pushes (prevent mismatch loop)
 CONFIG_PUSH_COOLDOWN_SECONDS = 120
@@ -78,6 +92,66 @@ class HeartbeatHandler:
     6. Update last_seen timestamp and metadata
     7. Log health metrics
     """
+
+    def __init__(self) -> None:
+        # Contract context for fail-closed ACK handover validation on ESP side.
+        # Epoch increments only for reconnect cycles; steady-state ACKs still carry
+        # a valid epoch >= 1 so strict devices never receive an incomplete contract.
+        self._handover_epoch_by_esp: dict[str, int] = {}
+        self._session_id_by_esp: dict[str, str] = {}
+
+    def _build_ack_contract_context(
+        self, esp_id: str, is_reconnect: bool, preferred_epoch: Optional[int] = None
+    ) -> tuple[int, str]:
+        """Return (handover_epoch, session_id) for the current ACK."""
+        epoch_counter = self._handover_epoch_by_esp.get(esp_id, 0)
+        preferred = preferred_epoch if isinstance(preferred_epoch, int) and preferred_epoch > 0 else None
+
+        # If ESP reports its active handover epoch, use that as source of truth.
+        if preferred is not None:
+            if preferred != epoch_counter:
+                self._handover_epoch_by_esp[esp_id] = preferred
+                epoch_counter = preferred
+                session_id = f"{esp_id}:handover:{epoch_counter}:{int(time_module.time())}"
+                self._session_id_by_esp[esp_id] = session_id
+            else:
+                session_id = self._session_id_by_esp.get(
+                    esp_id, f"{esp_id}:handover:{epoch_counter}:{int(time_module.time())}"
+                )
+                self._session_id_by_esp[esp_id] = session_id
+            return max(1, epoch_counter), session_id
+
+        if is_reconnect:
+            epoch_counter += 1
+            self._handover_epoch_by_esp[esp_id] = epoch_counter
+            session_id = f"{esp_id}:handover:{epoch_counter}:{int(time_module.time())}"
+            self._session_id_by_esp[esp_id] = session_id
+        else:
+            # Keep an existing reconnect session stable; if none exists use a
+            # deterministic steady-state marker.
+            session_id = self._session_id_by_esp.get(esp_id, f"{esp_id}:steady")
+
+        handover_epoch = max(1, epoch_counter)
+        return handover_epoch, session_id
+
+    @staticmethod
+    def _track_contract_reject_metrics(payload: dict, metadata: dict) -> None:
+        """Track monotonic ACK contract rejects reported by ESP telemetry."""
+        if not isinstance(metadata, dict):
+            return
+        reported_count = payload.get("handover_contract_reject_count")
+        if not isinstance(reported_count, int) or reported_count < 0:
+            return
+        previous_count = metadata.get("handover_contract_reject_count_last")
+        try:
+            previous_count_int = int(previous_count) if previous_count is not None else 0
+        except (TypeError, ValueError):
+            previous_count_int = 0
+        delta = reported_count - max(previous_count_int, 0)
+        if delta > 0:
+            reason = payload.get("handover_contract_last_reject", "UNKNOWN")
+            increment_heartbeat_contract_reject(str(reason), amount=delta)
+        metadata["handover_contract_reject_count_last"] = reported_count
 
     async def handle_heartbeat(self, topic: str, payload: dict) -> bool:
         """
@@ -108,8 +182,21 @@ class HeartbeatHandler:
         """
         # Default for Error-ACK scope (SAFETY-P5 Fix-4)
         esp_id_str: str = "unknown"
+        handover_epoch: int = 1
+        session_id: Optional[str] = None
 
         try:
+            payload = dict(payload)
+            canonical = canonicalize_heartbeat(payload)
+            payload = canonical.payload
+            if canonical.is_contract_violation:
+                increment_contract_unknown_code("heartbeat")
+                logger.warning(
+                    "Heartbeat contract violation normalized: %s (raw=%s)",
+                    canonical.contract_reason,
+                    canonical.raw_fields,
+                )
+
             # Step 1: Parse topic
             parsed_topic = TopicBuilder.parse_heartbeat_topic(topic)
             if not parsed_topic:
@@ -120,6 +207,13 @@ class HeartbeatHandler:
                 return False
 
             esp_id_str = parsed_topic["esp_id"]
+            # Default contract context for branches without reconnect detection.
+            esp_reported_epoch = payload.get("active_handover_epoch")
+            if not isinstance(esp_reported_epoch, int) or esp_reported_epoch <= 0:
+                esp_reported_epoch = None
+            handover_epoch, session_id = self._build_ack_contract_context(
+                esp_id_str, is_reconnect=False, preferred_epoch=esp_reported_epoch
+            )
 
             logger.debug(f"Processing heartbeat: esp_id={esp_id_str}")
 
@@ -137,6 +231,8 @@ class HeartbeatHandler:
                 await self._send_heartbeat_error_ack(
                     esp_id_str,
                     f"invalid_payload:{str(validation_result.get('error', ''))[:50]}",
+                    handover_epoch=handover_epoch,
+                    session_id=session_id,
                 )
                 return False
 
@@ -165,7 +261,11 @@ class HeartbeatHandler:
 
                     # Phase 2: ACK with pending_approval status
                     await self._send_heartbeat_ack(
-                        esp_id=esp_id_str, status="pending_approval", config_available=False
+                        esp_id=esp_id_str,
+                        status="pending_approval",
+                        config_available=False,
+                        handover_epoch=handover_epoch,
+                        session_id=session_id,
                     )
                     return True
 
@@ -176,26 +276,55 @@ class HeartbeatHandler:
 
                 # T13-Phase3: Reconnect detection — BEFORE update_status() overwrites last_seen
                 is_reconnect = False
+                offline_seconds = 0.0
                 if isinstance(esp_device.last_seen, datetime):
                     offline_seconds = (
                         datetime.now(timezone.utc) - esp_device.last_seen
                     ).total_seconds()
                     is_reconnect = offline_seconds > RECONNECT_THRESHOLD_SECONDS
+                handover_epoch, session_id = self._build_ack_contract_context(
+                    esp_id_str,
+                    is_reconnect=is_reconnect,
+                    preferred_epoch=esp_reported_epoch,
+                )
+
+                # Reconnect handover starts with explicit adoption phase.
+                if is_reconnect:
+                    increment_connect_attempt()
+                    adoption_service = get_state_adoption_service()
+                    await adoption_service.start_reconnect_cycle(
+                        esp_id=esp_id_str,
+                        last_offline_seconds=offline_seconds,
+                    )
+                    await self._broadcast_reconnect_phase(
+                        esp_id=esp_id_str,
+                        phase="adopting",
+                        details={"offline_seconds": offline_seconds},
+                    )
 
                 # SAFETY-P5 Fix-3: Send ACK early — before any DB writes (P1 timer reset)
                 # config_available=False here; config push mechanism works independently.
+                # ACK status: use target "online" when the device is not pending/rejected/deleted
+                # so the ESP does not see stale "offline" from the pre-update DB row after LWT.
                 if status not in ("rejected", "pending_approval"):
+                    ack_status = (
+                        "online"
+                        if status not in ("rejected", "pending_approval", "deleted")
+                        else status
+                    )
                     await self._send_heartbeat_ack(
                         esp_id=esp_id_str,
-                        status=status,
+                        status=ack_status,
                         config_available=False,
+                        handover_epoch=handover_epoch,
+                        session_id=session_id,
                     )
                     # Log the early ACK for observability (boot-diagnosis in Loki)
                     # pending/rejected have their own downstream logs
                     logger.info(
                         "Early ACK sent for %s (status=%s, pre-db-write)",
                         esp_id_str,
-                        status,
+                        ack_status,
                     )
 
                 if status == "rejected":
@@ -211,7 +340,11 @@ class HeartbeatHandler:
 
                         # Phase 2: ACK - ESP knows it's rejected
                         await self._send_heartbeat_ack(
-                            esp_id=esp_id_str, status="rejected", config_available=False
+                            esp_id=esp_id_str,
+                            status="rejected",
+                            config_available=False,
+                            handover_epoch=handover_epoch,
+                            session_id=session_id,
                         )
                         return True
 
@@ -223,7 +356,11 @@ class HeartbeatHandler:
 
                     # Phase 2: ACK - ESP knows it's still pending
                     await self._send_heartbeat_ack(
-                        esp_id=esp_id_str, status="pending_approval", config_available=False
+                        esp_id=esp_id_str,
+                        status="pending_approval",
+                        config_available=False,
+                        handover_epoch=handover_epoch,
+                        session_id=session_id,
                     )
                     return True
 
@@ -261,6 +398,14 @@ class HeartbeatHandler:
                     last_seen = datetime.fromtimestamp(ts_value, tz=timezone.utc)
                 await esp_repo.update_status(esp_id_str, "online", last_seen)
 
+                # Log time_valid status — info only, no error (expected during boot)
+                time_valid = payload.get("time_valid", True)  # Default True for old firmware
+                if not time_valid:
+                    logger.info(
+                        "ESP %s: time not synchronized (time_valid=false, using server timestamp)",
+                        esp_id_str,
+                    )
+
                 # Step 5b: Clear stale retained LWT message from broker
                 # After ESP reconnects, the broker still holds the retained
                 # offline LWT message. Publishing empty payload with retain=True
@@ -287,10 +432,22 @@ class HeartbeatHandler:
                 # Commit transaction
                 await session.commit()
 
+                # Fix-1: Invalidate offline backoff cache after confirmed online commit.
+                # Clears _offline_esp_skip so Logic Engine fires actuator actions
+                # immediately after reconnect instead of waiting up to 30s TTL.
+                from ...services.logic_engine import get_logic_engine
+
+                logic_engine = get_logic_engine()
+                if logic_engine is not None:
+                    logic_engine.invalidate_offline_backoff(esp_id_str)
+                    # Reconnect evaluation is gated until adoption is completed.
+                    if is_reconnect:
+                        asyncio.create_task(
+                            self._complete_adoption_and_trigger_reconnect_eval(esp_id_str)
+                        )
+
                 # T13-Phase3: Fire Full-State-Push as background task after commit
                 if is_reconnect and esp_device.zone_id and _command_bridge:
-                    import asyncio
-
                     asyncio.create_task(self._handle_reconnect_state_push(esp_device.device_id))
 
                 # Update Prometheus metrics for Grafana alerting
@@ -298,6 +455,14 @@ class HeartbeatHandler:
                 boot_count = payload.get("boot_count")
                 if boot_count is not None:
                     update_esp_boot_count(esp_id_str, int(boot_count))
+                tls_handshake_latency_ms = payload.get(
+                    "tls_handshake_latency_ms", payload.get("tls_handshake_latency")
+                )
+                if tls_handshake_latency_ms is not None:
+                    try:
+                        observe_tls_handshake_latency_ms(float(tls_handshake_latency_ms))
+                    except (TypeError, ValueError):
+                        pass
 
                 # ============================================
                 # HEARTBEAT HISTORY LOGGING (Time-Series)
@@ -339,43 +504,35 @@ class HeartbeatHandler:
                     from ...websocket.manager import WebSocketManager
 
                     ws_manager = await WebSocketManager.get_instance()
-
-                    # Build unified message (Server-Centric: Single Source of Truth)
-                    # Same format as EventAggregatorService._transform_heartbeat_to_unified()
                     heap_free = payload.get("heap_free", payload.get("free_heap", 0))
-                    heap_kb = heap_free // 1024 if heap_free else 0
                     wifi_rssi = payload.get("wifi_rssi", 0)
                     uptime = payload.get("uptime", 0)
+                    sensor_count = payload.get("sensor_count", payload.get("active_sensors", 0))
+                    actuator_count = payload.get("actuator_count", payload.get("active_actuators", 0))
 
-                    ws_message = f"{esp_id_str} online ({heap_kb}KB frei, RSSI: {wifi_rssi}dBm)"
-                    if uptime and uptime > 0:
-                        hours = uptime // 3600
-                        minutes = (uptime % 3600) // 60
-                        if hours > 0:
-                            ws_message += f" | Uptime: {hours}h {minutes}m"
-                        elif minutes > 0:
-                            ws_message += f" | Uptime: {minutes}m"
-
+                    broadcast_payload = serialize_esp_health_event(
+                        esp_id=esp_id_str,
+                        status="online",
+                        heap_free=heap_free,
+                        wifi_rssi=wifi_rssi,
+                        uptime=uptime,
+                        sensor_count=sensor_count,
+                        actuator_count=actuator_count,
+                        timestamp=payload.get("ts"),
+                        gpio_status=payload.get("gpio_status", []),
+                        gpio_reserved_count=payload.get("gpio_reserved_count", 0),
+                    )
+                    broadcast_payload.update(
+                        {
+                            "contract_violation": canonical.is_contract_violation,
+                            "contract_code": canonical.contract_code,
+                            "contract_reason": canonical.contract_reason,
+                            "raw_system_state": canonical.raw_fields.get("raw_system_state"),
+                        }
+                    )
                     await ws_manager.broadcast(
                         "esp_health",
-                        {
-                            "esp_id": esp_id_str,
-                            "status": "online",
-                            "message": ws_message,  # Unified message for Frontend
-                            "heap_free": heap_free,
-                            "wifi_rssi": wifi_rssi,
-                            "uptime": uptime,
-                            "sensor_count": payload.get(
-                                "sensor_count", payload.get("active_sensors", 0)
-                            ),
-                            "actuator_count": payload.get(
-                                "actuator_count", payload.get("active_actuators", 0)
-                            ),
-                            "timestamp": payload.get("ts"),
-                            # GPIO STATUS (Phase 1)
-                            "gpio_status": payload.get("gpio_status", []),
-                            "gpio_reserved_count": payload.get("gpio_reserved_count", 0),
-                        },
+                        broadcast_payload,
                     )
                 except Exception as e:
                     logger.warning(f"Failed to broadcast ESP health via WebSocket: {e}")
@@ -412,7 +569,12 @@ class HeartbeatHandler:
             # SAFETY-P5 Fix-4: Error ACK — server alive, internal error occurred
             if esp_id_str != "unknown":
                 try:
-                    await self._send_heartbeat_error_ack(esp_id_str, "internal_error")
+                    await self._send_heartbeat_error_ack(
+                        esp_id_str,
+                        "internal_error",
+                        handover_epoch=handover_epoch,
+                        session_id=session_id,
+                    )
                 except Exception:
                     pass
             return False
@@ -894,6 +1056,15 @@ class HeartbeatHandler:
                 "actuator_count", payload.get("active_actuators", 0)
             )
             current_metadata["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
+            if "boot_sequence_id" in payload:
+                current_metadata["boot_sequence_id"] = payload.get("boot_sequence_id")
+            if "reset_reason" in payload:
+                current_metadata["reset_reason"] = payload.get("reset_reason")
+            if "segment_start_ts" in payload:
+                current_metadata["segment_start_ts"] = payload.get("segment_start_ts")
+            if "metrics_schema_version" in payload:
+                current_metadata["metrics_schema_version"] = payload.get("metrics_schema_version")
+            self._track_contract_reject_metrics(payload, current_metadata)
 
             # ============================================
             # GPIO STATUS (Phase 1) - With Pydantic Validation
@@ -1017,6 +1188,48 @@ class HeartbeatHandler:
                 "error": "Field 'wifi_rssi' must be integer",
                 "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
             }
+
+        # Contract upgrade path:
+        # - metrics_schema_version missing/1 => segment fields optional
+        # - metrics_schema_version >=2 => segment fields mandatory (fail-closed)
+        metrics_schema_version = payload.get("metrics_schema_version")
+        if metrics_schema_version is not None and not isinstance(metrics_schema_version, int):
+            return {
+                "valid": False,
+                "error": "Field 'metrics_schema_version' must be integer",
+                "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+            }
+
+        if isinstance(metrics_schema_version, int) and metrics_schema_version >= 2:
+            required_segment_fields = ("boot_sequence_id", "reset_reason", "segment_start_ts")
+            for field in required_segment_fields:
+                if field not in payload:
+                    return {
+                        "valid": False,
+                        "error": f"Missing required field for schema>=2: {field}",
+                        "error_code": ValidationErrorCode.MISSING_REQUIRED_FIELD,
+                    }
+
+            if not isinstance(payload.get("boot_sequence_id"), str):
+                return {
+                    "valid": False,
+                    "error": "Field 'boot_sequence_id' must be string for schema>=2",
+                    "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+                }
+
+            if not isinstance(payload.get("reset_reason"), str):
+                return {
+                    "valid": False,
+                    "error": "Field 'reset_reason' must be string for schema>=2",
+                    "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+                }
+
+            if not isinstance(payload.get("segment_start_ts"), int):
+                return {
+                    "valid": False,
+                    "error": "Field 'segment_start_ts' must be integer for schema>=2",
+                    "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+                }
 
         return {"valid": True, "error": "", "error_code": ValidationErrorCode.NONE}
 
@@ -1212,7 +1425,12 @@ class HeartbeatHandler:
         )
 
     async def _send_heartbeat_ack(
-        self, esp_id: str, status: str, config_available: bool = False
+        self,
+        esp_id: str,
+        status: str,
+        config_available: bool = False,
+        handover_epoch: int = 1,
+        session_id: Optional[str] = None,
     ) -> bool:
         """
         Send heartbeat ACK to ESP device (Phase 2: Bidirectional Approval).
@@ -1236,6 +1454,7 @@ class HeartbeatHandler:
             True if publish successful, False otherwise
         """
         try:
+            ack_started = time_module.perf_counter()
             # Import MQTTClient only when needed (avoid circular imports)
             from ..client import MQTTClient
 
@@ -1247,7 +1466,12 @@ class HeartbeatHandler:
                 "status": status,
                 "config_available": config_available,
                 "server_time": int(time_module.time()),
+                "handover_epoch": max(1, int(handover_epoch)),
+                "ack_type": "heartbeat",
+                "contract_version": 2,
             }
+            if session_id:
+                payload["session_id"] = session_id
 
             # Get MQTT client instance
             mqtt_client = MQTTClient.get_instance()
@@ -1256,6 +1480,8 @@ class HeartbeatHandler:
             success = mqtt_client.publish(topic, json.dumps(payload), qos=1)
 
             if success:
+                observe_heartbeat_ack_latency_ms((time_module.perf_counter() - ack_started) * 1000.0)
+                increment_heartbeat_ack_valid()
                 # Use INFO for reconnect-relevant statuses to aid boot-diagnosis in Loki
                 if status in ("online", "offline"):
                     logger.info(
@@ -1277,7 +1503,13 @@ class HeartbeatHandler:
             logger.warning(f"Error sending heartbeat ACK to {esp_id}: {e}")
             return False
 
-    async def _send_heartbeat_error_ack(self, esp_id: str, error: str) -> bool:
+    async def _send_heartbeat_error_ack(
+        self,
+        esp_id: str,
+        error: str,
+        handover_epoch: Optional[int] = None,
+        session_id: Optional[str] = None,
+    ) -> bool:
         """Send error ACK to prevent P1 false-positive (SAFETY-P5 Fix-4).
 
         Server is alive even if heartbeat processing failed.
@@ -1294,14 +1526,27 @@ class HeartbeatHandler:
             from ..client import MQTTClient
 
             topic = TopicBuilder.build_heartbeat_ack_topic(esp_id)
+            if handover_epoch is None:
+                # Keep error ACKs on the same fail-closed contract as normal ACKs.
+                handover_epoch, default_session_id = self._build_ack_contract_context(
+                    esp_id, is_reconnect=False
+                )
+                if session_id is None:
+                    session_id = default_session_id
             payload = {
                 "status": "error",
                 "error": error,
                 "server_time": int(time_module.time()),
+                "handover_epoch": max(1, int(handover_epoch)),
+                "ack_type": "heartbeat",
+                "contract_version": 2,
             }
+            if session_id:
+                payload["session_id"] = session_id
             mqtt_client = MQTTClient.get_instance()
             success = mqtt_client.publish(topic, json.dumps(payload), qos=1)
             if success:
+                increment_heartbeat_ack_valid()
                 logger.warning("[SAFETY-P5] Error ACK sent to %s: %s", esp_id, error)
             else:
                 logger.error("[SAFETY-P5] Failed to send error ACK to %s", esp_id)
@@ -1309,6 +1554,54 @@ class HeartbeatHandler:
         except Exception as e:
             logger.error("[SAFETY-P5] Error ACK exception for %s: %s", esp_id, e)
             return False
+
+    async def _broadcast_reconnect_phase(
+        self, esp_id: str, phase: str, details: Optional[dict] = None
+    ) -> None:
+        """Expose reconnect handover phases for observability and UI."""
+        try:
+            from ...websocket.manager import WebSocketManager
+
+            ws_manager = await WebSocketManager.get_instance()
+            payload = {
+                "esp_id": esp_id,
+                "phase": phase,
+                "timestamp": int(datetime.now(timezone.utc).timestamp()),
+            }
+            if details:
+                payload.update(details)
+            await ws_manager.broadcast("esp_reconnect_phase", payload)
+        except Exception as phase_error:
+            logger.debug(
+                "Reconnect phase broadcast failed for %s (%s): %s",
+                esp_id,
+                phase,
+                phase_error,
+            )
+
+    async def _complete_adoption_and_trigger_reconnect_eval(self, esp_id: str) -> None:
+        """Finalize adoption before reconnect delta evaluation is allowed."""
+        try:
+            await asyncio.sleep(ADOPTION_GRACE_SECONDS)
+            adoption_service = get_state_adoption_service()
+            await adoption_service.mark_adoption_completed(esp_id)
+            await self._broadcast_reconnect_phase(esp_id=esp_id, phase="adopted")
+
+            from ...services.logic_engine import get_logic_engine
+
+            logic_engine = get_logic_engine()
+            if logic_engine is not None:
+                await logic_engine.trigger_reconnect_evaluation(esp_id)
+                await self._broadcast_reconnect_phase(
+                    esp_id=esp_id, phase="delta_enforced"
+                )
+        except Exception as reconnect_eval_error:
+            logger.error(
+                "Reconnect adoption/evaluation failed for %s: %s",
+                esp_id,
+                reconnect_eval_error,
+                exc_info=True,
+            )
 
     async def _has_pending_config(
         self,
@@ -1471,12 +1764,6 @@ class HeartbeatHandler:
                     )
                     return
 
-                # Set cooldown BEFORE attempting send to prevent retry spam on timeout
-                metadata["full_state_push_sent_at"] = now_ts
-                esp_device.device_metadata = metadata
-                flag_modified(esp_device, "device_metadata")
-                await session.commit()
-
                 # 1. Zone assign via command_bridge (ACK-driven)
                 zone_topic = TopicBuilder.build_zone_assign_topic(device_id)
                 zone_payload = {
@@ -1494,6 +1781,12 @@ class HeartbeatHandler:
                         command_type="zone",
                         timeout=_command_bridge.DEFAULT_TIMEOUT,
                     )
+                    # Set cooldown only after successful zone ACK. If send fails (timeout),
+                    # cooldown is not persisted and next reconnect trigger retries immediately.
+                    metadata["full_state_push_sent_at"] = now_ts
+                    esp_device.device_metadata = metadata
+                    flag_modified(esp_device, "device_metadata")
+                    await session.commit()
                 except Exception as e:
                     logger.warning("Zone ACK timeout during state push for %s: %s", device_id, e)
                     return
@@ -1587,6 +1880,10 @@ class HeartbeatHandler:
                             # Reset actuator states to idle for offline device
                             try:
                                 actuator_repo = ActuatorRepository(session)
+                                # Capture active actuators BEFORE reset for history logging (Fix L3)
+                                active_actuators = (
+                                    await actuator_repo.get_active_actuators_for_device(device.id)
+                                )
                                 reset_count = await actuator_repo.reset_states_for_device(
                                     esp_id=device.id,
                                     new_state="off",
@@ -1597,6 +1894,39 @@ class HeartbeatHandler:
                                     logger.info(
                                         f"[Heartbeat] Reset {reset_count} actuator state(s) to off "
                                         f"for offline device {device.device_id}"
+                                    )
+                                # Log history entry for each actuator that was reset (Fix L3)
+                                now = datetime.now(timezone.utc)
+                                for actuator_state in active_actuators:
+                                    await actuator_repo.log_command(
+                                        esp_id=device.id,
+                                        gpio=actuator_state.gpio,
+                                        actuator_type=actuator_state.actuator_type,
+                                        command_type="OFF",
+                                        value=0.0,
+                                        success=True,
+                                        issued_by="system:heartbeat_timeout",
+                                        error_message=(
+                                            f"Auto-reset: Heartbeat timeout "
+                                            f"({HEARTBEAT_TIMEOUT_SECONDS}s). "
+                                            f"Previous state: {actuator_state.state}"
+                                        ),
+                                        timestamp=now,
+                                        metadata={
+                                            "trigger": "heartbeat_timeout",
+                                            "previous_state": actuator_state.state,
+                                            "previous_value": actuator_state.current_value,
+                                        },
+                                    )
+                                    logger.info(
+                                        "Actuator history logged",
+                                        extra={
+                                            "esp_id": str(device.id),
+                                            "gpio": actuator_state.gpio,
+                                            "command_type": "OFF",
+                                            "issued_by": "system:heartbeat_timeout",
+                                            "trigger": "heartbeat_timeout",
+                                        },
                                     )
                             except Exception as reset_err:
                                 logger.warning(
@@ -1641,18 +1971,17 @@ class HeartbeatHandler:
 
                         ws_manager = await WebSocketManager.get_instance()
                         for device_id in offline_devices:
+                            broadcast_payload = serialize_esp_health_event(
+                                esp_id=device_id,
+                                status="offline",
+                                timestamp=int(now.timestamp()),
+                                reason="heartbeat_timeout",
+                                timeout_seconds=HEARTBEAT_TIMEOUT_SECONDS,
+                                actuator_states_reset=actuator_reset_counts.get(device_id, 0),
+                            )
                             await ws_manager.broadcast(
                                 "esp_health",
-                                {
-                                    "esp_id": device_id,
-                                    "status": "offline",
-                                    "reason": "heartbeat_timeout",
-                                    "timeout_seconds": HEARTBEAT_TIMEOUT_SECONDS,
-                                    "timestamp": int(now.timestamp()),
-                                    "actuator_states_reset": actuator_reset_counts.get(
-                                        device_id, 0
-                                    ),
-                                },
+                                broadcast_payload,
                             )
                             logger.info(f"📡 Broadcast esp_health offline event for {device_id}")
                     except Exception as e:

@@ -1165,6 +1165,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Server: config_ack_handler.py → WS: config_response
    */
   function handleConfigResponse(message: { data: Record<string, unknown> }): void {
+    const actStore = useActuatorStore()
+    actStore.handleConfigResponse(message)
     const cfgStore = useConfigStore()
     cfgStore.handleConfigResponse(message, devices.value, getDeviceId, fetchGpioStatus)
   }
@@ -1488,6 +1490,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Server: config_publisher → WS: config_published
    */
   function handleConfigPublished(message: { data: Record<string, unknown> }): void {
+    const actStore = useActuatorStore()
+    actStore.handleConfigPublished(message)
     useConfigStore().handleConfigPublished(message, devices.value, getDeviceId)
   }
 
@@ -1496,6 +1500,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Server: config_publisher → WS: config_failed
    */
   function handleConfigFailed(message: { data: Record<string, unknown> }): void {
+    const actStore = useActuatorStore()
+    actStore.handleConfigFailed(message)
     useConfigStore().handleConfigFailed(message, devices.value, getDeviceId)
   }
 
@@ -1597,10 +1603,15 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
     // Real ESP: use actuator command API
     try {
-      await actuatorsApi.sendCommand(deviceId, gpio, {
+      const response = await actuatorsApi.sendCommand(deviceId, gpio, {
         command,
         value: value ?? (command === 'ON' ? 1.0 : 0.0),
       })
+      const actStore = useActuatorStore()
+      const responseData = response as unknown as Record<string, unknown>
+      const correlationId = typeof responseData.correlation_id === 'string' ? responseData.correlation_id : undefined
+      const requestId = typeof responseData.request_id === 'string' ? responseData.request_id : undefined
+      actStore.registerCommandIntent(deviceId, gpio, command, correlationId, requestId)
       toast.info(`Befehl ${command} an ${deviceId} GPIO ${gpio} gesendet…`)
     } catch (err: unknown) {
       const msg = extractErrorMessage(err, 'Befehl konnte nicht gesendet werden')

@@ -15,6 +15,7 @@ enum SystemState {
   STATE_AWAITING_USER_CONFIG,
   STATE_ZONE_CONFIGURED,
   STATE_SENSORS_CONFIGURED,
+  STATE_CONFIG_PENDING_AFTER_RESET,         // Runtime is partially configured after reset; only recovery/config lanes allowed
   STATE_OPERATIONAL,
   STATE_PENDING_APPROVAL,                  // ✅ Phase 1: Awaiting server approval (limited operation)
   STATE_LIBRARY_DOWNLOADING,               // ⚠️ OPTIONAL - nur für OTA Library Mode (10%)

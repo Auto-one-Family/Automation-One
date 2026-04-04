@@ -54,7 +54,8 @@ public:
 
   // MQTT integration
   bool handleActuatorCommand(const String& topic, const String& payload);
-  bool handleActuatorConfig(const String& payload, const String& correlation_id = "");
+  // CP-F2: Accepts pre-parsed JsonArray from central Config-Push parse — no internal deserializeJson.
+  bool handleActuatorConfig(JsonArray actuators, const String& correlation_id = "");
   void publishActuatorStatus(uint8_t gpio);
   void publishAllActuatorStatus();
   void publishActuatorResponse(const ActuatorCommand& command, bool success, const String& message);

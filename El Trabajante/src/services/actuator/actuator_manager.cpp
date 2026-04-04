@@ -468,6 +468,13 @@ bool ActuatorManager::controlActuatorBinary(uint8_t gpio, bool state) {
     return false;
   }
 
+  // Adoption-compatible no-op: do not retrigger hardware if state is already correct.
+  if (actuator->config.current_state == state) {
+    LOG_D(TAG, "Actuator GPIO " + String(gpio) + " already " + (state ? "ON" : "OFF") +
+               " — no-op");
+    return true;
+  }
+
   bool success = actuator->driver->setBinary(state);
   actuator->config = actuator->driver->getConfig();
 
@@ -496,6 +503,8 @@ bool ActuatorManager::emergencyStopAll() {
     actuators_[i].driver->emergencyStop("EmergencyStopAll");
     actuators_[i].emergency_stopped = true;
     publishActuatorAlert(actuators_[i].gpio, "emergency_stop", "Actuator stopped");
+    // Push status immediately so frontend can reflect emergency state without heartbeat delay.
+    publishActuatorStatus(actuators_[i].gpio);
   }
   xSemaphoreGive(g_actuator_mutex);
   return true;
@@ -510,6 +519,8 @@ bool ActuatorManager::emergencyStopActuator(uint8_t gpio) {
   actuator->driver->emergencyStop("EmergencyStop");
   actuator->emergency_stopped = true;
   publishActuatorAlert(gpio, "emergency_stop", "Actuator stopped");
+  // Push status immediately so frontend can reflect emergency state without heartbeat delay.
+  publishActuatorStatus(gpio);
   return true;
 }
 
@@ -689,6 +700,11 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
   // Check emergency stop state
   if (actuator->emergency_stopped) {
     LOG_W(TAG, "Actuator GPIO " + String(gpio) + " is emergency stopped");
+    // Re-publish alert + status so server/frontend state converges immediately
+    // even if an earlier emergency event was missed in transit.
+    publishActuatorAlert(gpio, "emergency_stop",
+                         "Actuator in emergency stop state. Clear emergency first.");
+    publishActuatorStatus(gpio);
     publishActuatorResponse(command, false,
                             "Actuator in emergency stop state. Clear emergency first.");
     xSemaphoreGive(g_actuator_mutex);
@@ -846,35 +862,14 @@ bool ActuatorManager::parseActuatorDefinition(const JsonObjectConst& obj,
   return true;
 }
 
-bool ActuatorManager::handleActuatorConfig(const String& payload, const String& correlation_id) {
+bool ActuatorManager::handleActuatorConfig(JsonArray actuators, const String& correlation_id) {
   LOG_I(TAG, "Handling actuator configuration from MQTT");
 
-  // MQTT_MAX_PACKET_SIZE=2048 — payload cannot exceed 2048 bytes (MEM-OPT-4)
-  DynamicJsonDocument doc(2048);
-  DeserializationError error = deserializeJson(doc, payload);
-  if (error) {
-    String message = "Failed to parse actuator config JSON: " + String(error.c_str());
-    LOG_E(TAG, message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::ACTUATOR, ConfigErrorCode::JSON_PARSE_ERROR, message,
-        JsonVariantConst(), correlation_id);
-    return false;
-  }
-
-  // Skip silently if payload has no 'actuators' key (sensor-only config)
-  if (!doc.containsKey("actuators")) {
+  // CP-F2: Caller passes pre-parsed JsonArray from central Config-Push parse.
+  // Null array means 'actuators' key was absent or wrong type (sensor-only config).
+  if (actuators.isNull()) {
     LOG_D(TAG, "No 'actuators' key in payload — skipping (sensor-only config)");
     return true;
-  }
-
-  JsonArray actuators = doc["actuators"].as<JsonArray>();
-  if (actuators.isNull()) {
-    String message = "Actuator config 'actuators' field is not an array";
-    LOG_E(TAG, message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::ACTUATOR, ConfigErrorCode::MISSING_FIELD, message,
-        JsonVariantConst(), correlation_id);
-    return false;
   }
 
   size_t total = actuators.size();
@@ -929,7 +924,7 @@ bool ActuatorManager::handleActuatorConfig(const String& payload, const String& 
     return true;
   }
 
-  return configured > 0;
+  return false;
 }
 
 String ActuatorManager::buildStatusPayload(const ActuatorStatus& status, const ActuatorConfig& config) const {

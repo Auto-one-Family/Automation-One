@@ -271,11 +271,15 @@ class DatabaseErrorCode(IntEnum):
     """Server database error codes (5300-5399)."""
 
     NONE = 0
+    TRANSACTION_OPEN_FAILED = 5301
     QUERY_FAILED = 5301
     COMMIT_FAILED = 5302
     ROLLBACK_FAILED = 5303
+    NAMESPACE_CONFLICT = 5304
     CONNECTION_FAILED = 5304
+    WRITE_WITHOUT_TRANSACTION = 5305
     INTEGRITY_ERROR = 5305
+    WRITE_TIMEOUT = 5306
     MIGRATION_FAILED = 5306
     RECORD_NOT_FOUND = 5307
     RECORD_DUPLICATE = 5308
@@ -600,12 +604,12 @@ SERVER_ERROR_DESCRIPTIONS: Dict[int, str] = {
     5210: "Sensor not found in server database",
     5211: "Actuator not found in server database",
     # Database errors (5300-5399)
-    5301: "Database query failed",
+    5301: "Database transaction open/query failed",
     5302: "Database commit failed",
     5303: "Database rollback failed",
-    5304: "Database connection failed",
-    5305: "Database integrity constraint violated",
-    5306: "Database migration failed",
+    5304: "Persistence namespace conflict or database connection conflict",
+    5305: "Write without transaction or integrity constraint violated",
+    5306: "Persistence write timeout or database migration failed",
     5307: "Database record not found",
     5308: "Duplicate database record (integrity constraint)",
     # Service errors (5400-5499)

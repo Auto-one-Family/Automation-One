@@ -661,6 +661,7 @@ function graphToRuleData(): {
           start_hour: node.data.startHour || 0,
           end_hour: node.data.endHour || 23,
           ...(node.data.daysOfWeek?.length ? { days_of_week: node.data.daysOfWeek } : {}),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         } as TimeCondition)
         break
 

@@ -10,7 +10,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple
 
-from sqlalchemy import String, and_, case, cast, desc, func, select, update
+from sqlalchemy import String, and_, case, cast, desc, func, select, text, update
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import CompileError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.notification import (
@@ -239,6 +241,75 @@ class NotificationRepository(BaseRepository[Notification]):
         )
         result = await self.session.execute(stmt)
         return result.scalar_one() > 0
+
+    async def create_with_fingerprint_dedup(
+        self,
+        notification_data: dict,
+    ) -> tuple[Optional[Notification], bool]:
+        """
+        Atomic INSERT with ON CONFLICT DO NOTHING against the partial unique index
+        ix_notifications_fingerprint_unique.
+
+        Returns (notification, created):
+        - created=True  -> new row inserted
+        - created=False -> duplicate detected, existing active/acknowledged row returned
+
+        Only call when fingerprint is set in notification_data.
+        Falls back to sequential check-then-insert on non-PostgreSQL dialects (test env).
+        """
+        try:
+            stmt = (
+                postgresql.insert(Notification)
+                .values(**notification_data)
+                .on_conflict_do_nothing(
+                    index_elements=["fingerprint"],
+                    index_where=text("fingerprint IS NOT NULL"),
+                )
+                .returning(Notification)
+            )
+            result = await self.session.execute(stmt)
+            row = result.fetchone()
+
+            if row is not None:
+                notification = row[0]
+                await self.session.refresh(notification)
+                return notification, True
+
+            # ON CONFLICT: duplicate — load existing active/acknowledged row
+            dup_stmt = (
+                select(Notification)
+                .where(
+                    and_(
+                        Notification.fingerprint == notification_data["fingerprint"],
+                        Notification.status.in_([AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]),
+                    )
+                )
+                .limit(1)
+            )
+            dup_result = await self.session.execute(dup_stmt)
+            return dup_result.scalar_one_or_none(), False
+
+        except CompileError:
+            # Non-PostgreSQL dialect fallback (SQLite in test environment).
+            # Sequential check-then-insert — no race-condition protection.
+            is_dup = await self.check_fingerprint_duplicate(notification_data["fingerprint"])
+            if is_dup:
+                dup_stmt = (
+                    select(Notification)
+                    .where(
+                        and_(
+                            Notification.fingerprint == notification_data["fingerprint"],
+                            Notification.status.in_(
+                                [AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]
+                            ),
+                        )
+                    )
+                    .limit(1)
+                )
+                dup_result = await self.session.execute(dup_stmt)
+                return dup_result.scalar_one_or_none(), False
+            notification = await self.create(**notification_data)
+            return notification, True
 
     async def check_correlation_duplicate(self, correlation_id: str) -> bool:
         """Check if an active/acknowledged notification with this correlation_id exists.

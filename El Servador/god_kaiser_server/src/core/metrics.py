@@ -224,9 +224,152 @@ ACTUATOR_TIMEOUTS_TOTAL = Counter(
     "Total actuator command timeouts",
 )
 
+WS_MISSING_CORRELATION_TOTAL = Counter(
+    "god_kaiser_ws_missing_correlation_total",
+    "Total WebSocket events without envelope/data correlation_id",
+)
+
+WS_ENVELOPE_DATA_DIVERGENCE_TOTAL = Counter(
+    "god_kaiser_ws_envelope_data_divergence_total",
+    "Total WebSocket events where envelope correlation_id differs from data.correlation_id",
+)
+
+WS_CONTRACT_MISMATCH_TOTAL = Counter(
+    "god_kaiser_ws_contract_mismatch_total",
+    "Total contract mismatch signals emitted by WebSocket contract hardening",
+)
+
+CONTRACT_TERMINALIZATION_BLOCKED_TOTAL = Counter(
+    "god_kaiser_contract_terminalization_blocked_total",
+    "Total terminalization attempts blocked by contract authority guards",
+    ["event_class", "reason"],
+)
+
 SAFETY_TRIGGERS_TOTAL = Counter(
     "god_kaiser_safety_triggers_total",
     "Total safety system trigger events (emergency stops, rate limits, conflict blocks)",
+)
+
+# =============================================================================
+# Package 09 Contract/Readiness Metrics (AP-09A freeze names)
+# =============================================================================
+
+CONFIG_INTENTS_ACCEPTED_TOTAL = Counter(
+    "config_intents_accepted_total",
+    "Total config intents accepted",
+)
+
+CONFIG_INTENTS_APPLIED_TOTAL = Counter(
+    "config_intents_applied_total",
+    "Total config intents applied",
+)
+
+CONFIG_INTENTS_PERSISTED_TOTAL = Counter(
+    "config_intents_persisted_total",
+    "Total config intents persisted (final success in v2 contract)",
+)
+
+CONFIG_INTENTS_FAILED_TOTAL = Counter(
+    "config_intents_failed_total",
+    "Total config intents with final failure outcomes",
+)
+
+CONFIG_COMMIT_DURATION_MS = Histogram(
+    "config_commit_duration_ms",
+    "Config persistence commit duration in milliseconds",
+    buckets=(5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000),
+)
+
+INTENT_DUPLICATE_TOTAL = Counter(
+    "intent_duplicate_total",
+    "Total duplicate/stale intents detected by dedup guard",
+)
+
+INTENT_DEDUP_HITS = Counter(
+    "intent_dedup_hits",
+    "Total idempotent dedup hits for repeated intent processing",
+)
+
+OUTCOME_RETRY_COUNT = Counter(
+    "outcome_retry_count",
+    "Total retries observed on intent_outcome delivery",
+)
+
+OUTCOME_RECOVERED_COUNT = Counter(
+    "outcome_recovered_count",
+    "Total recovered intent_outcomes delivered from retry/outbox path",
+)
+
+OUTCOME_DROP_COUNT_CRITICAL = Gauge(
+    "outcome_drop_count_critical",
+    "Current reported count of critical outcome drops per ESP (must stay 0)",
+    ["esp_id"],
+)
+
+CONTRACT_UNKNOWN_CODE_TOTAL = Counter(
+    "contract_unknown_code_total",
+    "Total unknown/contract-violation codes normalized by server canonicalizer",
+    ["event_type"],
+)
+
+RECONCILIATION_SESSIONS_TOTAL = Counter(
+    "reconciliation_sessions_total",
+    "Total reconciliation replay sessions by phase",
+    ["phase"],
+)
+
+CONNECT_ATTEMPTS_TOTAL = Counter(
+    "connect_attempts",
+    "Total reconnect/connect attempts observed by server-side handlers",
+)
+
+TLS_HANDSHAKE_LATENCY_MS = Histogram(
+    "tls_handshake_latency",
+    "Estimated TLS handshake latency in milliseconds from telemetry payloads",
+    buckets=(5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000),
+)
+
+HEARTBEAT_ACK_LATENCY_MS = Histogram(
+    "heartbeat_ack_latency",
+    "Heartbeat ACK turnaround latency in milliseconds",
+    buckets=(1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500),
+)
+
+HEARTBEAT_ACK_VALID_TOTAL = Counter(
+    "heartbeat_ack_valid_total",
+    "Total heartbeat ACKs sent with valid contract fields",
+)
+
+HEARTBEAT_CONTRACT_REJECT_TOTAL = Counter(
+    "heartbeat_contract_reject_total",
+    "Total heartbeat ACK contract rejections reported by ESP",
+    ["reason"],
+)
+
+DISCONNECT_REASON_DISTRIBUTION = Counter(
+    "disconnect_reason_distribution",
+    "Distribution of disconnect reasons",
+    ["reason"],
+)
+
+READY_TRANSITION_TOTAL = Counter(
+    "ready_transition_total",
+    "Total runtime transitions to ready=true",
+)
+
+READY_BLOCKED_TOTAL = Counter(
+    "ready_blocked_total",
+    "Total readiness computations blocked by guard conditions",
+)
+
+NOT_FOUND_EXPECTED_TOTAL = Counter(
+    "not_found_expected_total",
+    "Total expected not-found events",
+)
+
+NOT_FOUND_UNEXPECTED_TOTAL = Counter(
+    "not_found_unexpected_total",
+    "Total unexpected missing-key events",
 )
 
 SENSOR_IMPLAUSIBLE_TOTAL = Counter(
@@ -455,6 +598,18 @@ def init_metrics() -> None:
     WEBHOOK_RECEIVED_TOTAL.labels(source="grafana", status="processed")
     WEBHOOK_RECEIVED_TOTAL.labels(source="grafana", status="skipped")
     WEBHOOK_RECEIVED_TOTAL.labels(source="grafana", status="error")
+    DISCONNECT_REASON_DISTRIBUTION.labels(reason="unexpected_disconnect")
+    DISCONNECT_REASON_DISTRIBUTION.labels(reason="heartbeat_timeout")
+    DISCONNECT_REASON_DISTRIBUTION.labels(reason="unknown")
+    HEARTBEAT_CONTRACT_REJECT_TOTAL.labels(reason="UNKNOWN")
+    HEARTBEAT_CONTRACT_REJECT_TOTAL.labels(reason="HANDOVER_EPOCH_MISMATCH")
+    HEARTBEAT_CONTRACT_REJECT_TOTAL.labels(reason="MISSING_HANDOVER_EPOCH")
+    CONTRACT_UNKNOWN_CODE_TOTAL.labels(event_type="intent_outcome")
+    CONTRACT_UNKNOWN_CODE_TOTAL.labels(event_type="config_response")
+    CONTRACT_UNKNOWN_CODE_TOTAL.labels(event_type="actuator_response")
+    RECONCILIATION_SESSIONS_TOTAL.labels(phase="start")
+    RECONCILIATION_SESSIONS_TOTAL.labels(phase="progress")
+    RECONCILIATION_SESSIONS_TOTAL.labels(phase="end")
     ALERT_SUPPRESSION_ACTIVE.labels(entity_type="sensor")
     ALERT_SUPPRESSION_ACTIVE.labels(entity_type="actuator")
     ALERT_SUPPRESSION_ACTIVE.labels(entity_type="device")
@@ -599,6 +754,31 @@ def increment_actuator_timeout() -> None:
     ACTUATOR_TIMEOUTS_TOTAL.inc()
 
 
+def increment_ws_missing_correlation() -> None:
+    """Increment WebSocket missing-correlation counter."""
+    WS_MISSING_CORRELATION_TOTAL.inc()
+
+
+def increment_ws_envelope_data_divergence() -> None:
+    """Increment envelope/data divergence counter for WebSocket events."""
+    WS_ENVELOPE_DATA_DIVERGENCE_TOTAL.inc()
+
+
+def increment_ws_contract_mismatch() -> None:
+    """Increment WebSocket contract-mismatch counter."""
+    WS_CONTRACT_MISMATCH_TOTAL.inc()
+
+
+def increment_contract_terminalization_blocked(event_class: str, reason: str) -> None:
+    """Increment blocked terminalization counter for contract guards."""
+    normalized_event_class = (event_class or "unknown").strip().lower() or "unknown"
+    normalized_reason = (reason or "unknown").strip().lower() or "unknown"
+    CONTRACT_TERMINALIZATION_BLOCKED_TOTAL.labels(
+        event_class=normalized_event_class,
+        reason=normalized_reason,
+    ).inc()
+
+
 def increment_sensor_implausible(sensor_type: str, esp_id: str) -> None:
     """Increment implausible sensor value counter."""
     SENSOR_IMPLAUSIBLE_TOTAL.labels(sensor_type=sensor_type, esp_id=esp_id).inc()
@@ -607,6 +787,113 @@ def increment_sensor_implausible(sensor_type: str, esp_id: str) -> None:
 def increment_safety_trigger() -> None:
     """Increment safety system trigger counter."""
     SAFETY_TRIGGERS_TOTAL.inc()
+
+
+def increment_config_intent_outcome(outcome: str) -> None:
+    """Increment AP-09A config outcome counters using canonical outcome."""
+    normalized = str(outcome or "").lower()
+    if normalized == "accepted":
+        CONFIG_INTENTS_ACCEPTED_TOTAL.inc()
+    elif normalized == "applied":
+        CONFIG_INTENTS_APPLIED_TOTAL.inc()
+    elif normalized == "persisted":
+        CONFIG_INTENTS_PERSISTED_TOTAL.inc()
+    elif normalized in {"failed", "expired", "rejected"}:
+        CONFIG_INTENTS_FAILED_TOTAL.inc()
+
+
+def observe_config_commit_duration_ms(duration_ms: float) -> None:
+    """Observe config commit duration in milliseconds."""
+    CONFIG_COMMIT_DURATION_MS.observe(max(float(duration_ms), 0.0))
+
+
+def increment_intent_duplicate() -> None:
+    """Increment dedup/duplicate counter."""
+    INTENT_DUPLICATE_TOTAL.inc()
+    INTENT_DEDUP_HITS.inc()
+
+
+def increment_outcome_retry_count(amount: int = 1) -> None:
+    """Increment retry counter for intent_outcome delivery."""
+    OUTCOME_RETRY_COUNT.inc(max(int(amount), 0))
+
+
+def increment_outcome_recovered_count(amount: int = 1) -> None:
+    """Increment recovered counter for outbox-delivered intent outcomes."""
+    OUTCOME_RECOVERED_COUNT.inc(max(int(amount), 0))
+
+
+def set_outcome_drop_count_critical(esp_id: str, value: int) -> None:
+    """Set current critical-outcome drop count per ESP."""
+    if not esp_id:
+        return
+    OUTCOME_DROP_COUNT_CRITICAL.labels(esp_id=esp_id).set(max(int(value), 0))
+
+
+def increment_contract_unknown_code(event_type: str, amount: int = 1) -> None:
+    """Increment contract-unknown normalization counter."""
+    normalized = (event_type or "unknown").strip().lower() or "unknown"
+    CONTRACT_UNKNOWN_CODE_TOTAL.labels(event_type=normalized).inc(max(int(amount), 1))
+
+
+def increment_reconciliation_session(phase: str, amount: int = 1) -> None:
+    """Increment reconciliation lifecycle marker counter."""
+    normalized = (phase or "progress").strip().lower() or "progress"
+    if normalized not in {"start", "progress", "end"}:
+        normalized = "progress"
+    RECONCILIATION_SESSIONS_TOTAL.labels(phase=normalized).inc(max(int(amount), 1))
+
+
+def increment_connect_attempt(amount: int = 1) -> None:
+    """Increment connect attempt counter."""
+    CONNECT_ATTEMPTS_TOTAL.inc(max(int(amount), 1))
+
+
+def observe_tls_handshake_latency_ms(duration_ms: float) -> None:
+    """Observe TLS handshake latency in milliseconds."""
+    TLS_HANDSHAKE_LATENCY_MS.observe(max(float(duration_ms), 0.0))
+
+
+def observe_heartbeat_ack_latency_ms(duration_ms: float) -> None:
+    """Observe heartbeat ACK roundtrip latency in milliseconds."""
+    HEARTBEAT_ACK_LATENCY_MS.observe(max(float(duration_ms), 0.0))
+
+
+def increment_heartbeat_ack_valid(amount: int = 1) -> None:
+    """Increment successful heartbeat ACK contract counter."""
+    HEARTBEAT_ACK_VALID_TOTAL.inc(max(int(amount), 1))
+
+
+def increment_heartbeat_contract_reject(reason: str | None, amount: int = 1) -> None:
+    """Increment heartbeat ACK contract reject counter by reason."""
+    normalized = (reason or "unknown").strip().upper() or "UNKNOWN"
+    HEARTBEAT_CONTRACT_REJECT_TOTAL.labels(reason=normalized).inc(max(int(amount), 1))
+
+
+def increment_disconnect_reason(reason: str | None) -> None:
+    """Increment disconnect reason distribution counter."""
+    normalized = (reason or "unknown").strip().lower() or "unknown"
+    DISCONNECT_REASON_DISTRIBUTION.labels(reason=normalized).inc()
+
+
+def increment_ready_transition() -> None:
+    """Increment ready-transition counter."""
+    READY_TRANSITION_TOTAL.inc()
+
+
+def increment_ready_blocked() -> None:
+    """Increment ready-blocked counter."""
+    READY_BLOCKED_TOTAL.inc()
+
+
+def increment_not_found_expected() -> None:
+    """Increment expected not-found counter."""
+    NOT_FOUND_EXPECTED_TOTAL.inc()
+
+
+def increment_not_found_unexpected() -> None:
+    """Increment unexpected not-found counter."""
+    NOT_FOUND_UNEXPECTED_TOTAL.inc()
 
 
 def increment_api_error_code(numeric_code: int) -> None:

@@ -29,7 +29,7 @@ ConfigManager::ConfigManager()
     zone_config_loaded_(false),
     system_config_loaded_(false),
     subzone_count_cache_(0),
-    subzone_count_initialized_(false) {
+    subzone_count_initialized_(true) {
 }
 
 // ============================================
@@ -638,8 +638,13 @@ bool ConfigManager::removeSubzoneFromIndexMap(const String& subzone_id, String& 
 bool ConfigManager::saveSubzoneConfig(const SubzoneConfig& config) {
   LOG_I(TAG, "ConfigManager: Saving subzone config: " + config.subzone_id);
 
+  if (!storageManager.beginTransaction()) {
+    LOG_E(TAG, "ConfigManager: Failed to start subzone transaction");
+    return false;
+  }
   if (!storageManager.beginNamespace("subzone_config", false)) {
     LOG_E(TAG, "ConfigManager: Failed to open subzone_config namespace");
+    storageManager.endTransaction();
     return false;
   }
 
@@ -653,6 +658,7 @@ bool ConfigManager::saveSubzoneConfig(const SubzoneConfig& config) {
   if (index < 0 || index > 99) {
     LOG_E(TAG, "ConfigManager: Failed to assign index for subzone " + config.subzone_id);
     storageManager.endNamespace();
+    storageManager.endTransaction();
     return false;
   }
 
@@ -661,6 +667,7 @@ bool ConfigManager::saveSubzoneConfig(const SubzoneConfig& config) {
   if (!success) {
     LOG_E(TAG, "ConfigManager: Failed to save subzone index map");
     storageManager.endNamespace();
+    storageManager.endTransaction();
     return false;
   }
 
@@ -742,6 +749,7 @@ bool ConfigManager::saveSubzoneConfig(const SubzoneConfig& config) {
   }
 
   storageManager.endNamespace();
+  storageManager.endTransaction();
 
   if (success) {
     // BUG-005 FIX: Update cache after saving subzone
@@ -756,8 +764,11 @@ bool ConfigManager::saveSubzoneConfig(const SubzoneConfig& config) {
 }
 
 bool ConfigManager::loadSubzoneConfig(const String& subzone_id, SubzoneConfig& config) {
-  if (!storageManager.beginNamespace("subzone_config", false)) {  // false = read/write for migration
-    return false;
+  // Open read-only — StorageManager suppressor silences NOT_FOUND noise when namespace
+  // doesn't exist yet (new device or all subzones deleted). Migration path calls
+  // saveSubzoneConfig() which opens the namespace separately with read/write.
+  if (!storageManager.beginNamespace("subzone_config", true)) {
+    return false;  // Namespace doesn't exist — no subzones configured
   }
 
   // ============================================
@@ -947,7 +958,12 @@ bool ConfigManager::loadAllSubzoneConfigs(SubzoneConfig configs[], uint8_t max_c
 bool ConfigManager::removeSubzoneConfig(const String& subzone_id) {
   LOG_I(TAG, "ConfigManager: Removing subzone config: " + subzone_id);
 
+  if (!storageManager.beginTransaction()) {
+    LOG_E(TAG, "ConfigManager: Failed to start subzone remove transaction");
+    return false;
+  }
   if (!storageManager.beginNamespace("subzone_config", false)) {
+    storageManager.endTransaction();
     return false;
   }
 
@@ -956,6 +972,7 @@ bool ConfigManager::removeSubzoneConfig(const String& subzone_id) {
   // ============================================
   String index_map = storageManager.getStringObj(NVS_SZ_INDEX_MAP, "");
   int8_t index = getSubzoneIndex(subzone_id, index_map);
+  uint8_t new_count = 0;  // remaining count after removal; updated in indexed path
 
   if (index >= 0) {
     // Clear indexed keys
@@ -997,6 +1014,7 @@ bool ConfigManager::removeSubzoneConfig(const String& subzone_id) {
       }
     }
     storageManager.putUInt8(NVS_SZ_COUNT, count);
+    new_count = count;
 
     LOG_I(TAG, "ConfigManager: Subzone " + subzone_id + " removed (index " + String(index) + ")");
   } else {
@@ -1039,9 +1057,12 @@ bool ConfigManager::removeSubzoneConfig(const String& subzone_id) {
   }
 
   storageManager.endNamespace();
+  storageManager.endTransaction();
 
-  // BUG-005 FIX: Invalidate cache after removing subzone (force re-read on next access)
-  subzone_count_initialized_ = false;
+  // Update in-memory cache directly — avoids NVS re-read on next getSubzoneCount() call.
+  // new_count is 0 when the last subzone was removed or subzone_id was not in index map.
+  subzone_count_cache_ = new_count;
+  subzone_count_initialized_ = true;
 
   LOG_I(TAG, "ConfigManager: Subzone " + subzone_id + " removed");
   return true;
@@ -1215,8 +1236,13 @@ bool ConfigManager::saveSystemConfig(const SystemConfig& config) {
     return true;  // ✅ Signalisiere Erfolg - RAM-Config ist aktiv
   #endif
 
+  if (!storageManager.beginTransaction()) {
+    LOG_E(TAG, "ConfigManager: Failed to start system_config transaction");
+    return false;
+  }
   if (!storageManager.beginNamespace("system_config", false)) {
     LOG_E(TAG, "ConfigManager: Failed to open system_config namespace for writing");
+    storageManager.endTransaction();
     return false;
   }
 
@@ -1230,6 +1256,7 @@ bool ConfigManager::saveSystemConfig(const SystemConfig& config) {
   success &= storageManager.putUInt16(NVS_SYS_BOOT_COUNT, config.boot_count);
 
   storageManager.endNamespace();
+  storageManager.endTransaction();
 
   if (success) {
     system_config_ = config;
@@ -1262,8 +1289,13 @@ bool ConfigManager::isDeviceApproved() const {
 }
 
 void ConfigManager::setDeviceApproved(bool approved, time_t timestamp) {
+  if (!storageManager.beginTransaction()) {
+    LOG_E(TAG, "ConfigManager: Cannot save approval status - transaction error");
+    return;
+  }
   if (!storageManager.beginNamespace("system_config", false)) {
     LOG_E(TAG, "ConfigManager: Cannot save approval status - namespace error");
+    storageManager.endTransaction();
     return;
   }
 
@@ -1273,6 +1305,7 @@ void ConfigManager::setDeviceApproved(bool approved, time_t timestamp) {
   }
 
   storageManager.endNamespace();
+  storageManager.endTransaction();
 
   if (approved) {
     LOG_I(TAG, "ConfigManager: Device approval saved (approved=true, ts=" +
@@ -1489,23 +1522,24 @@ static void buildActuatorKey(char* buffer, size_t buffer_size, uint8_t index, co
  *
  * @note Thread-safe via StorageManager mutex
  * @note Logs migration when fallback occurs
+ * @note Uses keyExists() before getString() to prevent IDF [E] log for missing keys
  */
 String ConfigManager::migrateReadString(const char* new_key,
                                         const char* old_key,
                                         const String& default_value) {
-    // Try new key first
-    String value = storageManager.getStringObj(new_key, "");
-
-    if (value.length() > 0) {
-        // New key exists, use it
-        return value;
+    // Try new key first (keyExists prevents nvs_get_str [E] log for missing keys)
+    if (storageManager.keyExists(new_key)) {
+        return storageManager.getStringObj(new_key, default_value);
     }
 
-    // New key empty, try old key (fallback)
-    value = storageManager.getStringObj(old_key, "");
+    // Skip old key if none defined
+    if (old_key == nullptr || old_key[0] == '\0') {
+        return default_value;
+    }
 
-    if (value.length() > 0) {
-        // Old key exists → MIGRATE
+    // Try old key (migration path)
+    if (storageManager.keyExists(old_key)) {
+        String value = storageManager.getStringObj(old_key, default_value);
         bool write_success = storageManager.putString(new_key, value);
         if (write_success) {
             LOG_I(TAG, "ConfigManager: Migrated NVS key '" +
@@ -1517,7 +1551,7 @@ String ConfigManager::migrateReadString(const char* new_key,
         return value;
     }
 
-    // Both keys empty, return default
+    // Both keys missing, return default
     return default_value;
 }
 
@@ -1623,8 +1657,13 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
   // 2026-01-15 Phase 1E-B: New key schema (≤15 chars) for NVS compatibility
   // NOTE: Only writes to NEW keys - old keys become orphaned but harmless
   // ============================================
+  if (!storageManager.beginTransaction()) {
+    LOG_E(TAG, "ConfigManager: Failed to start sensor_config transaction");
+    return false;
+  }
   if (!storageManager.beginNamespace("sensor_config", false)) {
     LOG_E(TAG, "ConfigManager: Failed to open sensor_config namespace");
+    storageManager.endTransaction();
     return false;
   }
 
@@ -1774,13 +1813,11 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
     }
   }
 
-  // I2C Address (SHT31-FIX: persist address from MQTT payload for multi-device support)
-  // Only save when non-zero to avoid wasting NVS space for non-I2C sensors.
-  // This allows two SHT31 at 0x44 and 0x45 to survive a reboot as distinct entries.
-  if (config.i2c_address != 0) {
-    snprintf(key, sizeof(key), NVS_SEN_I2C, index);
-    success &= storageManager.putUInt8(key, config.i2c_address);
-  }
+  // I2C Address: always write to NVS (including 0) to clear stale values pushed from server.
+  // A config-push with i2c_address=0 (non-I2C sensor) must overwrite any stale NVS value
+  // left from a previous I2C sensor on the same GPIO (e.g. SHT31 -> DS18B20 reconfiguration).
+  snprintf(key, sizeof(key), NVS_SEN_I2C, index);
+  success &= storageManager.putUInt8(key, config.i2c_address);
 
   // Update count if new sensor (use new key only!)
   if (existing_index < 0) {
@@ -1788,6 +1825,7 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
   }
 
   storageManager.endNamespace();
+  storageManager.endTransaction();
 
   if (success) {
     LOG_I(TAG, "ConfigManager: Saved sensor config for GPIO " + String(config.gpio));
@@ -1944,10 +1982,14 @@ bool ConfigManager::loadSensorConfig(SensorConfig sensors[], uint8_t max_sensors
     snprintf(old_key, sizeof(old_key), NVS_SEN_INTERVAL_OLD, i);
     config.measurement_interval_ms = migrateReadUInt32(new_key, old_key, 30000);  // Default: 30s
 
-    // OneWire Address (for DS18B20, DS18S20, DS1822)
-    // No legacy key - this is a new feature (2026-01-15)
+    // OneWire Address — only for ds18b20 (OneWire bus sensors)
+    // I2C sensors (sht31_*, bmp280_*, bme280_*) have no OW address — skip to avoid NVS [E] noise
     snprintf(new_key, sizeof(new_key), NVS_SEN_OW, i);
-    config.onewire_address = migrateReadString(new_key, "", "");  // Empty default
+    if (config.sensor_type == "ds18b20") {
+        config.onewire_address = migrateReadString(new_key, "", "");
+    } else {
+        config.onewire_address = "";
+    }
 
     // I2C Address (SHT31-FIX: load persisted address for multi-device support)
     // No legacy key — new feature. Default 0 = no I2C address stored (pre-fix firmware).
@@ -2202,8 +2244,13 @@ bool ConfigManager::saveActuatorConfig(const ActuatorConfig actuators[], uint8_t
   // 2026-01-15: New key schema (≤15 chars) for NVS compatibility
   // NOTE: Only writes to NEW keys - old keys become orphaned but harmless
   // ============================================
+  if (!storageManager.beginTransaction()) {
+    LOG_E(TAG, "ConfigManager: Failed to start actuator_config transaction");
+    return false;
+  }
   if (!storageManager.beginNamespace("actuator_config", false)) {
     LOG_E(TAG, "ConfigManager: Failed to open actuator_config namespace for writing");
+    storageManager.endTransaction();
     return false;
   }
 
@@ -2213,6 +2260,7 @@ bool ConfigManager::saveActuatorConfig(const ActuatorConfig actuators[], uint8_t
   if (!success) {
     LOG_E(TAG, "ConfigManager: Failed to save actuator count");
     storageManager.endNamespace();
+    storageManager.endTransaction();
     return false;
   }
 
@@ -2273,6 +2321,7 @@ bool ConfigManager::saveActuatorConfig(const ActuatorConfig actuators[], uint8_t
   }
 
   storageManager.endNamespace();
+  storageManager.endTransaction();
 
   if (success) {
     LOG_I(TAG, "ConfigManager: Actuator configurations saved successfully (" +
@@ -2360,6 +2409,9 @@ bool ConfigManager::loadActuatorConfig(ActuatorConfig actuators[], uint8_t max_a
     snprintf(new_key, sizeof(new_key), NVS_ACT_NAME, i);
     snprintf(old_key, sizeof(old_key), NVS_ACT_NAME_OLD, i);
     config.actuator_name = migrateReadString(new_key, old_key, "");
+    if (config.actuator_name.isEmpty()) {
+        config.actuator_name = "Actuator_" + String(config.gpio);
+    }
 
     // Subzone ID - CRITICAL for zone assignment!
     snprintf(new_key, sizeof(new_key), NVS_ACT_SZ, i);

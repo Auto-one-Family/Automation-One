@@ -1,0 +1,355 @@
+"""
+Repository for intent/outcome contract persistence.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+from sqlalchemy import desc, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models.command_contract import CommandIntent, CommandOutcome
+from ...services.intent_outcome_contract import canonicalize_intent_outcome
+
+LEGACY_OUTCOMES = {"accepted", "applied", "rejected", "failed", "expired"}
+
+
+class CommandContractRepository:
+    """Persistence facade for command_intents and command_outcomes."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def upsert_intent(self, payload: dict[str, Any], esp_id: str) -> CommandIntent:
+        """Create/update intent-level row from incoming outcome event."""
+        intent_id = str(payload["intent_id"])
+        stmt = select(CommandIntent).where(CommandIntent.intent_id == intent_id).limit(1)
+        result = await self.session.execute(stmt)
+        intent = result.scalar_one_or_none()
+
+        now = datetime.now(timezone.utc)
+        outcome = str(payload["outcome"]).lower()
+        next_state = "accepted" if outcome == "accepted" else "ack_pending"
+
+        if intent is None:
+            intent = CommandIntent(
+                intent_id=intent_id,
+                correlation_id=str(payload["correlation_id"]),
+                esp_id=esp_id,
+                flow=str(payload["flow"]).lower(),
+                orchestration_state=next_state,
+                first_seen_at=now,
+                last_seen_at=now,
+            )
+            try:
+                async with self.session.begin_nested():
+                    self.session.add(intent)
+                    await self.session.flush()
+                await self.session.refresh(intent)
+                return intent
+            except IntegrityError:
+                # Concurrent insert for same intent_id: reuse persisted row.
+                result = await self.session.execute(stmt)
+                intent = result.scalar_one_or_none()
+                if intent is None:
+                    raise
+
+        intent.correlation_id = str(payload["correlation_id"])
+        intent.esp_id = esp_id
+        intent.flow = str(payload["flow"]).lower()
+        intent.orchestration_state = next_state
+        intent.last_seen_at = now
+        await self.session.flush()
+        await self.session.refresh(intent)
+        return intent
+
+    async def upsert_outcome(
+        self, payload: dict[str, Any], esp_id: str
+    ) -> tuple[CommandOutcome, bool]:
+        """
+        Upsert terminal outcome by intent_id.
+
+        Returns:
+            (outcome_row, was_stale)
+        """
+        intent_id = str(payload["intent_id"])
+        stmt = select(CommandOutcome).where(CommandOutcome.intent_id == intent_id).limit(1)
+        result = await self.session.execute(stmt)
+        existing = result.scalar_one_or_none()
+
+        incoming_generation = self._to_int(payload.get("generation"), default=-1)
+        incoming_seq = self._to_int(payload.get("seq"), default=-1)
+        normalized = self._normalize_contract_fields(payload)
+        now = datetime.now(timezone.utc)
+
+        if existing is None:
+            created = CommandOutcome(
+                intent_id=intent_id,
+                correlation_id=str(payload["correlation_id"]),
+                esp_id=esp_id,
+                flow=str(payload["flow"]).lower(),
+                outcome=normalized["outcome"],
+                contract_version=normalized["contract_version"],
+                semantic_mode=normalized["semantic_mode"],
+                legacy_status=normalized["legacy_status"],
+                target_status=normalized["target_status"],
+                is_final=normalized["is_final"],
+                code=normalized["code"],
+                reason=normalized["reason"],
+                retryable=bool(normalized["retryable"]),
+                generation=self._to_opt_int(payload.get("generation")),
+                seq=self._to_opt_int(payload.get("seq")),
+                epoch=self._to_opt_int(payload.get("epoch")),
+                ttl_ms=self._to_opt_int(payload.get("ttl_ms")),
+                ts=self._to_opt_int(payload.get("ts")),
+                first_seen_at=now,
+                terminal_at=now,
+            )
+            try:
+                async with self.session.begin_nested():
+                    self.session.add(created)
+                    await self.session.flush()
+                await self.session.refresh(created)
+                return created, False
+            except IntegrityError:
+                # Parallel insert won the race. Continue deterministic dedup flow.
+                result = await self.session.execute(stmt)
+                existing = result.scalar_one_or_none()
+                if existing is None:
+                    raise
+
+        existing_generation = existing.generation if existing.generation is not None else -1
+        existing_seq = existing.seq if existing.seq is not None else -1
+
+        # Out-of-order protection: stale generations/sequences are ignored.
+        if (incoming_generation < existing_generation) or (
+            incoming_generation == existing_generation and incoming_seq < existing_seq
+        ):
+            return existing, True
+
+        # Monotonic finality guard: a final outcome remains final.
+        if bool(existing.is_final):
+            incoming_is_final = bool(normalized["is_final"])
+            if not incoming_is_final:
+                return existing, True
+            if str(existing.outcome).lower() != str(normalized["outcome"]).lower():
+                return existing, True
+            # Same final state replay -> idempotent duplicate.
+            return existing, True
+
+        existing.correlation_id = str(payload["correlation_id"])
+        existing.esp_id = esp_id
+        existing.flow = str(payload["flow"]).lower()
+        existing.outcome = normalized["outcome"]
+        existing.contract_version = normalized["contract_version"]
+        existing.semantic_mode = normalized["semantic_mode"]
+        existing.legacy_status = normalized["legacy_status"]
+        existing.target_status = normalized["target_status"]
+        existing.is_final = normalized["is_final"]
+        existing.code = normalized["code"]
+        existing.reason = normalized["reason"]
+        existing.retryable = bool(normalized["retryable"])
+        existing.generation = self._to_opt_int(payload.get("generation"))
+        existing.seq = self._to_opt_int(payload.get("seq"))
+        existing.epoch = self._to_opt_int(payload.get("epoch"))
+        existing.ttl_ms = self._to_opt_int(payload.get("ttl_ms"))
+        existing.ts = self._to_opt_int(payload.get("ts"))
+        existing.terminal_at = now
+        await self.session.flush()
+        await self.session.refresh(existing)
+        return existing, False
+
+    async def upsert_terminal_event_authority(
+        self,
+        *,
+        event_class: str,
+        dedup_key: str,
+        esp_id: str,
+        outcome: str,
+        correlation_id: Optional[str] = None,
+        is_final: bool = True,
+        code: Optional[str] = None,
+        reason: Optional[str] = None,
+        retryable: bool = False,
+        generation: Any = None,
+        seq: Any = None,
+        payload_ts: Any = None,
+    ) -> tuple[CommandOutcome, bool]:
+        """
+        Persist write-once authority for non-intent terminal event classes.
+
+        The row is stored in ``command_outcomes`` using a namespaced ``intent_id``
+        so all terminal event classes share the same monotonic finality guards.
+        """
+        event_class_norm = str(event_class or "unknown").strip().lower()[:32]
+        dedup_norm = str(dedup_key or "").strip().lower()
+        intent_id = f"terminal:{event_class_norm}:{dedup_norm}"
+        corr = str(correlation_id or dedup_norm or intent_id)[:128]
+        outcome_norm = str(outcome or "unknown").strip().lower()[:32]
+
+        stmt = select(CommandOutcome).where(CommandOutcome.intent_id == intent_id).limit(1)
+        result = await self.session.execute(stmt)
+        existing = result.scalar_one_or_none()
+
+        incoming_generation = self._to_int(generation, default=-1)
+        incoming_seq = self._to_int(seq, default=-1)
+        now = datetime.now(timezone.utc)
+
+        if existing is None:
+            insert_stmt = (
+                pg_insert(CommandOutcome)
+                .values(
+                    intent_id=intent_id,
+                    correlation_id=corr,
+                    esp_id=esp_id,
+                    flow=event_class_norm,
+                    outcome=outcome_norm,
+                    contract_version=2,
+                    semantic_mode="target",
+                    legacy_status=outcome_norm,
+                    target_status=outcome_norm,
+                    is_final=bool(is_final),
+                    code=code,
+                    reason=reason,
+                    retryable=bool(retryable),
+                    generation=self._to_opt_int(generation),
+                    seq=self._to_opt_int(seq),
+                    epoch=None,
+                    ttl_ms=None,
+                    ts=self._to_opt_int(payload_ts),
+                    first_seen_at=now,
+                    terminal_at=now,
+                )
+                .on_conflict_do_nothing(index_elements=["intent_id"])
+                .returning(CommandOutcome.id)
+            )
+            inserted_id = (await self.session.execute(insert_stmt)).scalar_one_or_none()
+            if inserted_id is not None:
+                result = await self.session.execute(stmt)
+                created = result.scalar_one_or_none()
+                if created is None:
+                    raise RuntimeError(
+                        f"CommandOutcome inserted but not found afterward (intent_id={intent_id})"
+                    )
+                return created, False
+
+            # Another concurrent worker inserted first. Treat as stale duplicate.
+            result = await self.session.execute(stmt)
+            existing = result.scalar_one_or_none()
+            if existing is None:
+                raise RuntimeError(
+                    f"CommandOutcome conflict path missing existing row (intent_id={intent_id})"
+                )
+            return existing, True
+
+        existing_generation = existing.generation if existing.generation is not None else -1
+        existing_seq = existing.seq if existing.seq is not None else -1
+        if (incoming_generation < existing_generation) or (
+            incoming_generation == existing_generation and incoming_seq < existing_seq
+        ):
+            return existing, True
+
+        if bool(existing.is_final):
+            incoming_is_final = bool(is_final)
+            if not incoming_is_final:
+                return existing, True
+            if str(existing.outcome).lower() != outcome_norm:
+                return existing, True
+            return existing, True
+
+        existing.correlation_id = corr
+        existing.esp_id = esp_id
+        existing.flow = event_class_norm
+        existing.outcome = outcome_norm
+        existing.contract_version = 2
+        existing.semantic_mode = "target"
+        existing.legacy_status = outcome_norm
+        existing.target_status = outcome_norm
+        existing.is_final = bool(is_final)
+        existing.code = code
+        existing.reason = reason
+        existing.retryable = bool(retryable)
+        existing.generation = self._to_opt_int(generation)
+        existing.seq = self._to_opt_int(seq)
+        existing.ts = self._to_opt_int(payload_ts)
+        existing.terminal_at = now
+        await self.session.flush()
+        await self.session.refresh(existing)
+        return existing, False
+
+    async def get_by_intent_id(self, intent_id: str) -> Optional[CommandOutcome]:
+        stmt = select(CommandOutcome).where(CommandOutcome.intent_id == intent_id).limit(1)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def list_recent(
+        self,
+        limit: int = 100,
+        esp_id: Optional[str] = None,
+        flow: Optional[str] = None,
+        outcome: Optional[str] = None,
+    ) -> list[CommandOutcome]:
+        stmt = select(CommandOutcome)
+        if esp_id:
+            stmt = stmt.where(CommandOutcome.esp_id == esp_id)
+        if flow:
+            stmt = stmt.where(CommandOutcome.flow == flow.lower())
+        if outcome:
+            stmt = stmt.where(CommandOutcome.outcome == outcome.lower())
+
+        stmt = stmt.order_by(desc(CommandOutcome.terminal_at)).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    @staticmethod
+    def _to_str(value: Any) -> Optional[str]:
+        return None if value is None else str(value)
+
+    @staticmethod
+    def _to_int(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @classmethod
+    def _normalize_contract_fields(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        canonical = canonicalize_intent_outcome(payload)
+        outcome = canonical.outcome
+
+        contract_version = cls._to_int(payload.get("contract_version"), default=1)
+        if contract_version not in (1, 2):
+            contract_version = 1
+
+        semantic_mode = str(payload.get("semantic_mode") or "").lower()
+        if semantic_mode not in {"legacy", "dual", "target"}:
+            semantic_mode = "legacy" if contract_version == 1 else "target"
+
+        legacy_status = cls._to_str(payload.get("legacy_status"))
+        target_status = cls._to_str(payload.get("target_status"))
+        if not legacy_status and outcome in LEGACY_OUTCOMES:
+            legacy_status = outcome
+        if not target_status:
+            target_status = "persisted" if outcome == "persisted" else outcome
+
+        is_final = canonical.is_final
+        return {
+            "outcome": outcome,
+            "contract_version": contract_version,
+            "semantic_mode": semantic_mode,
+            "legacy_status": legacy_status,
+            "target_status": target_status,
+            "is_final": is_final,
+            "code": canonical.code,
+            "reason": canonical.reason,
+            "retryable": canonical.retryable,
+        }
+
+    @classmethod
+    def _to_opt_int(cls, value: Any) -> Optional[int]:
+        parsed = cls._to_int(value, default=-1)
+        return None if parsed == -1 else parsed

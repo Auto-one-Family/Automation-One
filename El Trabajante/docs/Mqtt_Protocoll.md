@@ -56,6 +56,7 @@ kaiser/
 │   │       ├── system/
 │   │       │   ├── command        # System-Befehle (subscribe)
 │   │       │   ├── heartbeat      # System-Heartbeat (publish)
+│   │       │   ├── intent_outcome # Intent/Outcome-Events (publish)
 │   │       │   └── diagnostics   # System-Diagnostics (publish)
 │   │       ├── zone/
 │   │       │   ├── assign         # Zone Assignment (subscribe) - Phase 7
@@ -1200,6 +1201,44 @@ Libraries werden über MQTT in Chunks übertragen, da MQTT-Payloads limitiert si
 
 ---
 
+### 16. Intent-Outcome (Core-Queue Safety-Vertrag)
+
+**Topic:** `kaiser/god/esp/{esp_id}/system/intent_outcome`
+
+**QoS:** 1
+**Retain:** false
+**Frequency:** Ereignisbasiert (Admission, Execute, Expiry)
+**Module:** `tasks/intent_contract.cpp` + Queue-Worker (`tasks/*_queue.cpp`)
+**TopicBuilder:** `TopicBuilder::buildIntentOutcomeTopic()`
+
+**Payload-Schema:**
+```json
+{
+  "seq": 42,
+  "flow": "command",
+  "intent_id": "act_171217_1",
+  "correlation_id": "corr_171217_9",
+  "generation": 3,
+  "created_at_ms": 1712170000,
+  "ttl_ms": 10000,
+  "epoch": 7,
+  "outcome": "accepted",
+  "code": "NONE",
+  "reason": "Actuator command accepted",
+  "retryable": false,
+  "ts": 1735818000
+}
+```
+
+**Outcome-Werte:** `accepted`, `rejected`, `applied`, `persisted`, `failed`, `expired`
+**Fehlerklassen:** `QUEUE_FULL`, `TIMEOUT`, `VALIDATION_FAIL`, `EXECUTE_FAIL`, `STALE_OR_EXPIRED`, `AUTH_FAIL`, `MODE_UNSUPPORTED`, `REGISTRATION_PENDING`
+**Server-Kanonisierung (P0.2):** Alias-Mapping im Ingest (`processing→accepted`, `success/ok→persisted`, `error→failed`, `timeout→expired`); unbekannte `flow`/`outcome` werden als Contract-Verletzung mit `code=CONTRACT_UNKNOWN_CODE` verarbeitet.
+**Contract-Hinweis:** Fehlt `correlation_id`, setzt der Server `code=CONTRACT_MISSING_CORRELATION` und markiert den Datensatz als nicht-retrybar.
+
+**Hinweis:** Kritische Pfade (Command/Config/Safety) liefern damit terminale Outcomes ohne Silent-Drop.
+
+---
+
 ## MQTT Authentication & Security
 
 ### MQTT Auth Transition (Anonymous → Authenticated)
@@ -1743,6 +1782,25 @@ mosquitto_pub -h localhost \
       "default_state": false,          // Failsafe-Zustand
       "default_pwm": 0                 // PWM-Standard (0-255)
     }
+  ],
+  "offline_rules": [                   // Optional — SAFETY-P4 + LE-01
+    {
+      "actuator_gpio": 18,
+      "sensor_gpio": 4,
+      "sensor_value_type": "sht31_temperature",  // Kanonischer Typ (normalisiert)
+      "activate_above": 28.0,          // Cooling: AN wenn Wert > Schwelle
+      "deactivate_below": 24.0,        // Cooling: AUS wenn Wert < Schwelle
+      "activate_below": 0.0,           // Heating: AN wenn Wert < Schwelle (0.0 = nicht gesetzt)
+      "deactivate_above": 0.0,         // Heating: AUS wenn Wert > Schwelle (0.0 = nicht gesetzt)
+      "current_state_active": false,   // Aktueller Hysterese-State aus DB
+      "time_filter": {                 // Optional — nur bei AND-Compound-Regeln mit Zeitfenster
+        "enabled": true,
+        "start_hour": 22,              // UTC Stunde (0–23)
+        "start_minute": 0,             // UTC Minute (0–59)
+        "end_hour": 6,                 // UTC — Wraparound bei end < start (z.B. 22:00–06:00)
+        "end_minute": 0
+      }
+    }
   ]
 }
 ```
@@ -1977,18 +2035,25 @@ mosquitto_pub -h localhost \
 **Payload (success):**
 ```json
 {
-  "status": "ok",
+  "status": "online",
   "config_available": false,
-  "server_time": 1234567890
+  "server_time": 1234567890,
+  "handover_epoch": 3,
+  "ack_type": "heartbeat",
+  "contract_version": 2,
+  "session_id": "ESP_12AB34CD:handover:3:1234567890"
 }
 ```
 
 **Payload (config pending):**
 ```json
 {
-  "status": "ok",
+  "status": "pending_approval",
   "config_available": true,
-  "server_time": 1234567890
+  "server_time": 1234567890,
+  "handover_epoch": 3,
+  "ack_type": "heartbeat",
+  "contract_version": 2
 }
 ```
 
@@ -1997,7 +2062,10 @@ mosquitto_pub -h localhost \
 {
   "status": "error",
   "error": "Validation failed: missing esp_id",
-  "server_time": 1234567890
+  "server_time": 1234567890,
+  "handover_epoch": 3,
+  "ack_type": "heartbeat",
+  "contract_version": 2
 }
 ```
 
@@ -2005,14 +2073,17 @@ mosquitto_pub -h localhost \
 
 | Status | Bedeutung | ESP32-Reaktion |
 |--------|-----------|----------------|
-| `ok` | Heartbeat verarbeitet | P1-Timer zurücksetzen |
-| `ok` + `config_available: true` | Config-Update wartet | P1-Timer zurücksetzen, Config-Pull auslösen |
+| `online` | Heartbeat verarbeitet, Runtime online | P1-Timer zurücksetzen + Registration-Kontrakt validieren |
+| `pending_approval` | Gerät wartet auf Freigabe | P1-Timer zurücksetzen, Gate bleibt geschlossen |
+| `rejected` | Gerät administrativ abgelehnt | P1-Timer zurücksetzen, Gate bleibt geschlossen |
 | `error` | Validierungsfehler | P1-Timer zurücksetzen (Fehler loggen, kein Safe-State) |
 
 **SAFETY-P5 Hinweise:**
 - ACK wird **vor** DB-Operationen gesendet (`config_available` ist dabei immer `false`)
 - Falls anschließend eine pending Config gefunden wird, folgt eine **zweite ACK** mit `config_available: true`
 - Error-ACK verhindert P1-False-Positives bei Validierungsfehlern auf Server-Seite
+- ACK-Contract enthält verpflichtend `handover_epoch` (fail-closed), plus `ack_type` und `contract_version`
+- Registration-Gate auf ESP32 ist **fail-closed**: Timeout öffnet das Gate nicht, nur ein gültiges `heartbeat/ack`
 
 **Code-Referenz:**
 Server: `src/mqtt/handlers/heartbeat_handler.py` → `_send_heartbeat_ack()`, `_send_heartbeat_error_ack()`
@@ -2067,7 +2138,9 @@ ESP32: `src/main.cpp` → `routeIncomingMessage()` → heartbeat/ack Handler
 | Status | ESP32-Aktion |
 |--------|-------------|
 | `offline` | Rule-Count-Guard: Offline-Rules > 0 → P4 State Machine; sonst `setAllActuatorsToSafeState()` + `offlineModeManager.onDisconnect()` |
-| `online` | P1-Timer zurücksetzen (`g_last_server_ack_ms`), Timeout-Flag löschen, `offlineModeManager.onServerAckReceived()` |
+| `online` | Nur Liveness-Hinweis; **kein** P1-Timer-Reset und **kein** Recovery-Trigger |
+
+**Vorrangregel:** `system/heartbeat/ack` ist die autoritative Quelle für Registration + Recovery, `server/status` ist nur ein Hinweis-Kanal.
 
 **Watchdog-Hierarchie (L1→L5):**
 
@@ -2469,6 +2542,7 @@ local_client.loop_forever()
 | `core/main_loop.cpp` | `heartbeat` | - | 🔴 KRITISCH |
 | `core/system_controller.cpp` | `status`, `safe_mode`, `system/response` | `system/command`, `config`, `broadcast/system_update` | 🔴 KRITISCH |
 | `services/communication/mqtt_client.cpp` | (alle) | (alle) | 🔴 KRITISCH |
+| `tasks/intent_contract.cpp` | `system/intent_outcome` | - | 🔴 KRITISCH |
 | `services/sensor/sensor_manager.cpp` | `sensor/data`, `sensor_batch`, `library/*` | - | 🔴 KRITISCH |
 | `services/actuator/actuator_manager.cpp` | `actuator/status`, `actuator/response`, `actuator/alert` | `actuator/command`, `actuator/emergency`, `broadcast/emergency` | 🔴 KRITISCH |
 | `error_handling/health_monitor.cpp` | `system/diagnostics` | - | 🟡 HOCH |
@@ -2640,6 +2714,7 @@ retry_count++;
 | `library/chunk` | 1152 bytes | ✅ (Chunked) | Base64-Overhead (1024 * 1.33) |
 | `system/diagnostics` | 1024 bytes | ❌ | Diagnostik-Daten |
 | `system/error` | 512 bytes | ❌ | Error-Reports |
+| `system/intent_outcome` | 768 bytes | ❌ | Queue-/Outcome-Telemetrie |
 
 ---
 

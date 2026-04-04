@@ -2,6 +2,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
+#include "intent_contract.h"
+
 // ============================================
 // SAFETY-RTOS M3: Core 1 → Core 0 Publish Queue
 // ============================================
@@ -20,6 +22,9 @@ struct PublishRequest {
     char    payload[PUBLISH_PAYLOAD_MAX_LEN];
     uint8_t qos;
     bool    retain;
+    bool    critical;
+    uint8_t attempt;
+    IntentMetadata metadata;
 };
 
 extern QueueHandle_t g_publish_queue;
@@ -27,6 +32,11 @@ extern QueueHandle_t g_publish_queue;
 // Create the publish queue — call in setup() BEFORE createSafetyTask().
 void initPublishQueue();
 
-// Enqueue a publish request from any task. Non-blocking: drops silently if queue is full.
+// Enqueue a publish request from any task. Non-blocking: returns false if queue is full.
 // Returns true if enqueued, false if dropped.
-bool queuePublish(const char* topic, const char* payload, uint8_t qos, bool retain = false);
+bool queuePublish(const char* topic,
+                  const char* payload,
+                  uint8_t qos,
+                  bool retain = false,
+                  bool critical = false,
+                  const IntentMetadata* metadata = nullptr);

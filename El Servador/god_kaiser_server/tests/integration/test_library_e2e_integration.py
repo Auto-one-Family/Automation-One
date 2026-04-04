@@ -92,8 +92,8 @@ class TestDS18B20RealProcessing:
         return loader.get_processor("ds18b20")
 
     def test_room_temperature_processing(self, processor):
-        """Test processing typical room temperature (23.5°C)."""
-        result = processor.process(raw_value=23.5)
+        """Test processing typical room temperature (23.5°C) in pre-converted mode."""
+        result = processor.process(raw_value=23.5, params={"raw_mode": False})
 
         assert result.value == 23.5
         assert result.unit == "°C"
@@ -101,8 +101,8 @@ class TestDS18B20RealProcessing:
         assert result.metadata["raw_celsius"] == 23.5
 
     def test_cold_temperature_processing(self, processor):
-        """Test processing cold temperature (-10°C)."""
-        result = processor.process(raw_value=-10.0)
+        """Test processing cold temperature (-10°C) in pre-converted mode."""
+        result = processor.process(raw_value=-10.0, params={"raw_mode": False})
 
         assert result.value == -10.0
         assert result.unit == "°C"
@@ -110,40 +110,40 @@ class TestDS18B20RealProcessing:
         assert result.quality in ["good", "fair"]
 
     def test_hot_temperature_processing(self, processor):
-        """Test processing hot temperature (85°C - max accuracy range)."""
-        result = processor.process(raw_value=85.0)
+        """Test processing hot temperature (85°C - max accuracy range) in pre-converted mode."""
+        result = processor.process(raw_value=85.0, params={"raw_mode": False})
 
         assert result.value == 85.0
         assert result.unit == "°C"
         assert result.quality in ["good", "fair"]
 
     def test_extreme_low_temperature(self, processor):
-        """Test processing extreme low temperature (-55°C - sensor limit)."""
-        result = processor.process(raw_value=-55.0)
+        """Test processing extreme low temperature (-55°C - sensor limit) in pre-converted mode."""
+        result = processor.process(raw_value=-55.0, params={"raw_mode": False})
 
         assert result.value == -55.0
         assert result.unit == "°C"
         assert result.quality == "fair"  # At sensor limits
 
     def test_extreme_high_temperature(self, processor):
-        """Test processing extreme high temperature (+125°C - sensor limit)."""
-        result = processor.process(raw_value=125.0)
+        """Test processing extreme high temperature (+125°C - sensor limit) in pre-converted mode."""
+        result = processor.process(raw_value=125.0, params={"raw_mode": False})
 
         assert result.value == 125.0
         assert result.unit == "°C"
         assert result.quality == "fair"  # At sensor limits
 
     def test_fahrenheit_conversion(self, processor):
-        """Test Celsius to Fahrenheit conversion."""
-        result = processor.process(raw_value=0.0, params={"unit": "fahrenheit"})
+        """Test Celsius to Fahrenheit conversion in pre-converted mode."""
+        result = processor.process(raw_value=0.0, params={"raw_mode": False, "unit": "fahrenheit"})
 
         assert result.value == 32.0  # 0°C = 32°F
         assert result.unit == "°F"
 
     def test_calibration_offset(self, processor):
-        """Test calibration offset application."""
+        """Test calibration offset application in pre-converted mode."""
         calibration = {"offset": 0.5}
-        result = processor.process(raw_value=23.0, calibration=calibration)
+        result = processor.process(raw_value=23.0, calibration=calibration, params={"raw_mode": False})
 
         assert result.value == 23.5  # 23.0 + 0.5 offset
         assert result.metadata["calibrated"] is True

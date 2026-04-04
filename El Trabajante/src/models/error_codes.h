@@ -99,6 +99,14 @@
 #define ERROR_STORAGE_READ_FAILED   2031
 #define ERROR_STORAGE_WRITE_FAILED  2032
 
+// Package 09 - transactional persistence errors (AP-01A)
+#define ERROR_TRANSACTION_OPEN_FAILED     2301
+#define ERROR_NAMESPACE_CONFLICT          2302
+#define ERROR_WRITE_WITHOUT_TRANSACTION   2303
+#define ERROR_COMMIT_FAILED               2304
+#define ERROR_ROLLBACK_FAILED             2305
+#define ERROR_WRITE_TIMEOUT               2306
+
 // ============================================
 // COMMUNICATION ERROR CODES (3000-3999)
 // ============================================
@@ -143,6 +151,7 @@
 #define ERROR_PAYLOAD_INVALID       4030
 #define ERROR_PAYLOAD_TOO_LARGE     4031
 #define ERROR_PAYLOAD_PARSE_FAILED  4032
+#define ERROR_CONTRACT_CORRELATION_MISSING 4033
 
 #define ERROR_MEMORY_FULL           4040
 #define ERROR_MEMORY_ALLOCATION     4041
@@ -195,6 +204,18 @@ enum class ConfigErrorCode : uint8_t {
   TYPE_MISMATCH,
   MISSING_FIELD,
   OUT_OF_RANGE,
+  PAYLOAD_TOO_LARGE,
+  QUEUE_FULL,
+  STALE_SCOPE,
+  STALE_SENSOR_SCOPE,
+  STALE_ACTUATOR_SCOPE,
+  STALE_OFFLINE_SCOPE,
+  WRITE_TIMEOUT,
+  COMMIT_FAILED,
+  REPLAY_QUEUE_FULL,
+  OUTBOX_FULL,
+  PERSISTENCE_DRIFT,
+  CONTRACT_MISSING_CORRELATION,
   UNKNOWN_ERROR
 };
 
@@ -216,6 +237,30 @@ inline const char* configErrorCodeToString(ConfigErrorCode code) {
       return "MISSING_FIELD";
     case ConfigErrorCode::OUT_OF_RANGE:
       return "OUT_OF_RANGE";
+    case ConfigErrorCode::PAYLOAD_TOO_LARGE:
+      return "PAYLOAD_TOO_LARGE";
+    case ConfigErrorCode::QUEUE_FULL:
+      return "QUEUE_FULL";
+    case ConfigErrorCode::STALE_SCOPE:
+      return "STALE_SCOPE";
+    case ConfigErrorCode::STALE_SENSOR_SCOPE:
+      return "STALE_SENSOR_SCOPE";
+    case ConfigErrorCode::STALE_ACTUATOR_SCOPE:
+      return "STALE_ACTUATOR_SCOPE";
+    case ConfigErrorCode::STALE_OFFLINE_SCOPE:
+      return "STALE_OFFLINE_SCOPE";
+    case ConfigErrorCode::WRITE_TIMEOUT:
+      return "WRITE_TIMEOUT";
+    case ConfigErrorCode::COMMIT_FAILED:
+      return "COMMIT_FAILED";
+    case ConfigErrorCode::REPLAY_QUEUE_FULL:
+      return "REPLAY_QUEUE_FULL";
+    case ConfigErrorCode::OUTBOX_FULL:
+      return "OUTBOX_FULL";
+    case ConfigErrorCode::PERSISTENCE_DRIFT:
+      return "PERSISTENCE_DRIFT";
+    case ConfigErrorCode::CONTRACT_MISSING_CORRELATION:
+      return "CONTRACT_MISSING_CORRELATION";
     default:
       return "UNKNOWN_ERROR";
   }
@@ -245,6 +290,42 @@ inline ConfigErrorCode stringToConfigErrorCode(const String& code) {
   }
   if (code == "OUT_OF_RANGE") {
     return ConfigErrorCode::OUT_OF_RANGE;
+  }
+  if (code == "PAYLOAD_TOO_LARGE") {
+    return ConfigErrorCode::PAYLOAD_TOO_LARGE;
+  }
+  if (code == "QUEUE_FULL") {
+    return ConfigErrorCode::QUEUE_FULL;
+  }
+  if (code == "STALE_SCOPE") {
+    return ConfigErrorCode::STALE_SCOPE;
+  }
+  if (code == "STALE_SENSOR_SCOPE") {
+    return ConfigErrorCode::STALE_SENSOR_SCOPE;
+  }
+  if (code == "STALE_ACTUATOR_SCOPE") {
+    return ConfigErrorCode::STALE_ACTUATOR_SCOPE;
+  }
+  if (code == "STALE_OFFLINE_SCOPE") {
+    return ConfigErrorCode::STALE_OFFLINE_SCOPE;
+  }
+  if (code == "WRITE_TIMEOUT") {
+    return ConfigErrorCode::WRITE_TIMEOUT;
+  }
+  if (code == "COMMIT_FAILED") {
+    return ConfigErrorCode::COMMIT_FAILED;
+  }
+  if (code == "REPLAY_QUEUE_FULL") {
+    return ConfigErrorCode::REPLAY_QUEUE_FULL;
+  }
+  if (code == "OUTBOX_FULL") {
+    return ConfigErrorCode::OUTBOX_FULL;
+  }
+  if (code == "PERSISTENCE_DRIFT") {
+    return ConfigErrorCode::PERSISTENCE_DRIFT;
+  }
+  if (code == "CONTRACT_MISSING_CORRELATION") {
+    return ConfigErrorCode::CONTRACT_MISSING_CORRELATION;
   }
   return ConfigErrorCode::UNKNOWN_ERROR;
 }
@@ -334,6 +415,12 @@ inline const char* getErrorDescription(uint16_t error_code) {
     case ERROR_STORAGE_INIT_FAILED: return "Failed to initialize storage manager";
     case ERROR_STORAGE_READ_FAILED: return "Failed to read from storage";
     case ERROR_STORAGE_WRITE_FAILED: return "Failed to write to storage";
+    case ERROR_TRANSACTION_OPEN_FAILED: return "Failed to open persistence transaction";
+    case ERROR_NAMESPACE_CONFLICT: return "Persistence namespace conflict detected";
+    case ERROR_WRITE_WITHOUT_TRANSACTION: return "Write attempted without active transaction";
+    case ERROR_COMMIT_FAILED: return "Persistence transaction commit failed";
+    case ERROR_ROLLBACK_FAILED: return "Persistence transaction rollback failed";
+    case ERROR_WRITE_TIMEOUT: return "Persistence write timed out";
 
     // COMMUNICATION (3000-3999)
     case ERROR_WIFI_INIT_FAILED: return "Failed to initialize WiFi module";
@@ -375,6 +462,7 @@ inline const char* getErrorDescription(uint16_t error_code) {
     case ERROR_PAYLOAD_INVALID: return "Payload is invalid or malformed";
     case ERROR_PAYLOAD_TOO_LARGE: return "Payload size exceeds maximum allowed";
     case ERROR_PAYLOAD_PARSE_FAILED: return "Failed to parse payload (JSON syntax error)";
+    case ERROR_CONTRACT_CORRELATION_MISSING: return "Contract violation: required correlation_id missing";
 
     case ERROR_MEMORY_FULL: return "Memory is full (heap exhausted)";
     case ERROR_MEMORY_ALLOCATION: return "Failed to allocate memory";

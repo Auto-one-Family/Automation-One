@@ -111,3 +111,42 @@ async def test_broadcast_threadsafe_passes_cid(ws_manager, mock_websocket):
             None,
             correlation_id="ESP_001:status:99:123456",
         )
+
+
+@pytest.mark.asyncio
+async def test_envelope_data_divergence_emits_contract_metrics(connected_manager, mock_websocket):
+    """Divergence between envelope and data correlation emits mismatch metrics."""
+    with (
+        patch("src.websocket.manager.increment_ws_envelope_data_divergence") as div_metric,
+        patch("src.websocket.manager.increment_ws_contract_mismatch") as mismatch_metric,
+        patch("src.websocket.manager.increment_ws_missing_correlation") as missing_metric,
+    ):
+        await connected_manager.broadcast(
+            "sensor_data",
+            {"esp_id": "ESP_001", "value": 23.5, "correlation_id": "domain-cid"},
+            correlation_id="envelope-cid",
+        )
+
+        message = mock_websocket.send_json.call_args[0][0]
+        assert message["correlation_id"] == "envelope-cid"
+        assert message["data"]["correlation_id"] == "domain-cid"
+        div_metric.assert_called_once()
+        mismatch_metric.assert_called_once()
+        missing_metric.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_missing_correlation_increments_metric(connected_manager, mock_websocket):
+    """Missing envelope and data correlation increments dedicated metric."""
+    with (
+        patch("src.websocket.manager.increment_ws_envelope_data_divergence") as div_metric,
+        patch("src.websocket.manager.increment_ws_contract_mismatch") as mismatch_metric,
+        patch("src.websocket.manager.increment_ws_missing_correlation") as missing_metric,
+    ):
+        await connected_manager.broadcast("sensor_data", {"esp_id": "ESP_001", "value": 21.0})
+
+        message = mock_websocket.send_json.call_args[0][0]
+        assert "correlation_id" not in message
+        missing_metric.assert_called_once()
+        div_metric.assert_not_called()
+        mismatch_metric.assert_not_called()

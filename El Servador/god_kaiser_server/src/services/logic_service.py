@@ -37,6 +37,24 @@ from .logic.validator import LogicValidator, ValidationResult
 logger = get_logger(__name__)
 
 
+def get_affected_esp_ids(rule: CrossESPLogic) -> set[str]:
+    """
+    Extract all ESP IDs referenced by rule actions.
+
+    Used for config-push fanout after rule CRUD/toggle so every affected ESP
+    receives an updated combined configuration.
+    """
+    esp_ids: set[str] = set()
+    for action in rule.actions or []:
+        if not isinstance(action, dict):
+            continue
+        esp_id = action.get("esp_id")
+        if esp_id is None:
+            continue
+        esp_ids.add(str(esp_id))
+    return esp_ids
+
+
 class LogicService:
     """
     Logic Rules Management Service.
@@ -217,6 +235,14 @@ class LogicService:
             for warning in validation_result.warnings:
                 logger.warning(f"Rule update validation warning: {warning}")
 
+        # Capture old trigger_conditions before applying updates so that
+        # on_rule_updated() can perform a selective (bumpless transfer) reset.
+        old_trigger_conditions = (
+            list(rule.trigger_conditions)
+            if isinstance(rule.trigger_conditions, list)
+            else rule.trigger_conditions
+        )
+
         # Apply updates
         for field, value in update_dict.items():
             if field == "name":
@@ -230,6 +256,16 @@ class LogicService:
         await self.logic_repo.session.commit()
 
         logger.info(f"Logic rule updated: '{rule.name}' (ID: {rule.id})")
+
+        # B3-fix: notify the running LogicEngine so it can reset hysteresis state,
+        # send OFF to any actuators that were active, and re-evaluate immediately.
+        from .logic_engine import get_logic_engine
+
+        engine = get_logic_engine()
+        if engine:
+            await engine.on_rule_updated(
+                str(rule.id), old_trigger_conditions=old_trigger_conditions
+            )
 
         return rule
 
@@ -396,6 +432,11 @@ class LogicService:
                 elif action_type == "sequence":
                     steps = action.get("steps", [])
                     details = f"Sequence with {len(steps)} steps"
+                elif action_type in ("plugin", "autoops_trigger"):
+                    details = f"Plugin: {action.get('plugin_id', '?')}"
+                elif action_type == "run_diagnostic":
+                    check = action.get("check_name")
+                    details = f"Diagnostic: {check or 'full'}"
                 else:
                     details = str(action)
 

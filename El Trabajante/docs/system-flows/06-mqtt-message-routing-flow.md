@@ -242,20 +242,26 @@ if (topic == config_topic) {
 }
 ```
 
-**Handlers Called:**
-1. `handleSensorConfig(payload)` - Processes sensor array
-2. `handleActuatorConfig(payload)` - Processes actuator array
+**Handlers Called (CP-B1: Single-Parse Architecture):**
 
-**Handler Implementation:**
+> **CP-B1 (2026-04-03):** Payload wird einmal in `processConfigUpdateQueue()` geparst
+> (module-level `StaticJsonDocument<6144>` in BSS). Alle drei Handler erhalten das
+> bereits geparste `JsonObject root` — kein lokales `DynamicJsonDocument` mehr.
 
-**File:** `src/main.cpp` (lines 674-826)
+1. `handleSensorConfig(root, correlationId)` - Processes sensors array
+2. `handleActuatorConfig(root, correlationId)` - Processes actuators array
+3. `handleOfflineRulesConfig(root, correlationId)` - Processes offline_rules array
+
+**Handler Implementation (pre-CP-B1, als Referenz):**
+
+**File:** `src/main.cpp` (lines 674-826, Stand vor CP-B1)
 
 ```cpp
-// File: src/main.cpp (lines 674-716)
+// VERALTET — nur als konzeptuelle Referenz. Aktuelle Signaturen: (JsonObject, const String&)
 void handleSensorConfig(const String& payload) {
   LOG_INFO("Handling sensor configuration from MQTT");
 
-  DynamicJsonDocument doc(4096);
+  DynamicJsonDocument doc(4096);  // CP-B1: entfernt — zentrales Parse in config_update_queue.cpp
   DeserializationError error = deserializeJson(doc, payload);
   if (error) {
     String message = "Failed to parse sensor config JSON: " + String(error.c_str());
@@ -300,23 +306,24 @@ void handleSensorConfig(const String& payload) {
 **File:** `src/main.cpp` (lines 828-831)
 
 ```cpp
-// File: src/main.cpp (lines 828-831)
+// VERALTET — aktuelle Signatur: handleActuatorConfig(JsonObject doc, const String& correlationId)
 void handleActuatorConfig(const String& payload) {
   LOG_INFO("Handling actuator configuration from MQTT");
-  actuatorManager.handleActuatorConfig(payload);
+  actuatorManager.handleActuatorConfig(payload);  // CP-B1: jetzt JsonArray actuators
 }
 ```
 
 **Actuator Config Handler:**
 
-**File:** `src/services/actuator/actuator_manager.cpp` (lines 626-694)
+**File:** `src/services/actuator/actuator_manager.cpp` (CP-B1: Signatur geändert)
 
 ```cpp
-// File: src/services/actuator/actuator_manager.cpp (lines 626-694)
+// VERALTET — aktuelle Signatur: bool handleActuatorConfig(JsonArray actuators, const String& correlation_id)
+// CP-B1: DynamicJsonDocument und deserializeJson entfernt — pre-parsed array vom Caller
 bool ActuatorManager::handleActuatorConfig(const String& payload) {
   LOG_INFO("Handling actuator configuration from MQTT");
 
-  DynamicJsonDocument doc(4096);
+  DynamicJsonDocument doc(4096);  // CP-B1: entfernt
   DeserializationError error = deserializeJson(doc, payload);
   if (error) {
     String message = "Failed to parse actuator config JSON: " + String(error.c_str());

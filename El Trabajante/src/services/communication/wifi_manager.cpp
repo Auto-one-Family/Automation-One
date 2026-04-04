@@ -257,16 +257,18 @@ void WiFiManager::loop() {
 
 void WiFiManager::handleDisconnection() {
     static bool disconnection_logged = false;
-    
+
     if (!disconnection_logged) {
         LOG_W(TAG, "WiFi disconnected");
-        errorTracker.logCommunicationError(ERROR_WIFI_DISCONNECT, 
+        errorTracker.logCommunicationError(ERROR_WIFI_DISCONNECT,
                                            "WiFi connection lost");
+        // Stop SNTP daemon to prevent log flood while WiFi is down
+        timeManager.onWiFiDisconnected();
         disconnection_logged = true;
     }
-    
+
     reconnect();
-    
+
     if (isConnected()) {
         disconnection_logged = false;
     }

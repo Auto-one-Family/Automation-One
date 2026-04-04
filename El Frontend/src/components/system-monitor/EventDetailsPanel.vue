@@ -27,7 +27,8 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import type { UnifiedEvent } from '@/types/websocket-events'
 import { getSeverityLabel } from '@/utils/errorCodeTranslator'
 import { getEventIcon } from '@/utils/eventTypeIcons'
-import { getEventCategory, transformEventMessage, formatUptime, formatMemory } from '@/utils/eventTransformer'
+import { getEventCategory, getOperatorActionGuidance, transformEventMessage, formatUptime, formatMemory } from '@/utils/eventTransformer'
+import { CONTRACT_OPERATOR_ACTION, extractIntegrationIssueSnapshot } from '@/utils/contractEventMapper'
 import { auditApi } from '@/api/audit'
 import RssiIndicator from './RssiIndicator.vue'
 import EventTimeline from './EventTimeline.vue'
@@ -65,7 +66,6 @@ const log = createLogger('EventDetails')
 
 interface Props {
   event: UnifiedEvent
-  eventTypeLabels: Record<string, string>
 }
 
 const props = defineProps<Props>()
@@ -118,7 +118,15 @@ const correlationLatency = computed(() => {
 
 const eventCategory = computed(() => getEventCategory(props.event))
 const transformedMessage = computed(() => transformEventMessage(props.event))
+const operatorGuidance = computed(() => getOperatorActionGuidance(props.event))
 const eventData = computed(() => (props.event.data || {}) as Record<string, unknown>)
+const integrationIssue = computed(() => extractIntegrationIssueSnapshot(props.event))
+const isNonFinalizableContractDrift = computed(() => {
+  if (!integrationIssue.value.isIntegrationIssue) return false
+  if (integrationIssue.value.issueType !== 'schema_mismatch') return false
+  return integrationIssue.value.originalEventType === 'config_response'
+    || integrationIssue.value.originalEventType === 'config_failed'
+})
 
 /**
  * Determine which sections to show based on event type
@@ -143,6 +151,9 @@ const showErrorDetails = computed(() => {
   const status = eventData.value.status as string | undefined
   return status === 'error' || status === 'failed' || props.event.error_code !== undefined
 })
+
+const showIntegrationIssue = computed(() => integrationIssue.value.isIntegrationIssue)
+const showOperatorGuidance = computed(() => Boolean(operatorGuidance.value))
 
 /**
  * Device Status Metrics (for heartbeat events)
@@ -529,6 +540,38 @@ onUnmounted(() => {
         </p>
       </section>
 
+      <section
+        v-if="showOperatorGuidance && operatorGuidance"
+        class="panel-section panel-section--operator"
+        :class="`panel-section--operator-${operatorGuidance.classification}`"
+      >
+        <div class="section-header">
+          <span class="section-title">Operator-Entscheidung</span>
+        </div>
+        <div class="operator-grid">
+          <div class="operator-item">
+            <span class="operator-label">Problemtyp</span>
+            <span class="operator-value">
+              {{ operatorGuidance.classification === 'integrationsproblem' ? 'Integrationsproblem' : 'Betriebsproblem' }}
+            </span>
+          </div>
+          <div class="operator-item">
+            <span class="operator-label">Prioritaet</span>
+            <span class="operator-priority" :class="`operator-priority--${operatorGuidance.priority}`">
+              {{ operatorGuidance.priority.toUpperCase() }}
+            </span>
+          </div>
+          <div class="operator-item operator-item--full">
+            <span class="operator-label">Ursache</span>
+            <span class="operator-value">{{ operatorGuidance.cause }}</span>
+          </div>
+          <div class="operator-item operator-item--full">
+            <span class="operator-label">Naechster Schritt</span>
+            <span class="operator-action">{{ operatorGuidance.nextAction }}</span>
+          </div>
+        </div>
+      </section>
+
       <!-- =========================================================================
            DETAILS SECTION (Zeitpunkt, Quelle, ESP-ID)
            ========================================================================= -->
@@ -577,6 +620,48 @@ onUnmounted(() => {
               <FileText :size="14" />
               {{ event.request_id ? 'Server-Logs (Request-ID)' : `Server-Logs um ${formatEventTime(event.timestamp)}` }}
             </button>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="showIntegrationIssue" class="panel-section panel-section--integration">
+        <div class="section-header">
+          <span class="section-title">Integrationssignal</span>
+        </div>
+        <div class="integration-grid">
+          <div class="integration-item">
+            <span class="integration-label">Signaltyp</span>
+            <span class="integration-value">
+              {{ integrationIssue.issueType === 'schema_mismatch' ? 'Schema-Mismatch' : 'Unbekannter Event-Typ' }}
+            </span>
+          </div>
+          <div v-if="isNonFinalizableContractDrift" class="integration-item">
+            <span class="integration-label">Zustand</span>
+            <span class="integration-action">Nicht finalisierbar wegen Contract-Verletzung</span>
+          </div>
+          <div v-if="integrationIssue.originalEventType" class="integration-item">
+            <span class="integration-label">Original-Event</span>
+            <span class="integration-value font-mono">{{ integrationIssue.originalEventType }}</span>
+          </div>
+          <div v-if="integrationIssue.reason" class="integration-item integration-item--full">
+            <span class="integration-label">Grund</span>
+            <span class="integration-value">{{ integrationIssue.reason }}</span>
+          </div>
+          <div class="integration-item integration-item--full">
+            <span class="integration-label">Operator-Aktion</span>
+            <span class="integration-action">{{ integrationIssue.operatorAction || CONTRACT_OPERATOR_ACTION }}</span>
+          </div>
+          <div v-if="integrationIssue.correlationId" class="integration-item integration-item--full">
+            <span class="integration-label">Korrelations-ID</span>
+            <span class="integration-value font-mono">{{ integrationIssue.correlationId }}</span>
+          </div>
+          <div v-if="integrationIssue.requestId" class="integration-item integration-item--full">
+            <span class="integration-label">Request-ID</span>
+            <span class="integration-value font-mono">{{ integrationIssue.requestId }}</span>
+          </div>
+          <div v-if="integrationIssue.rawContext" class="integration-item integration-item--full">
+            <span class="integration-label">Rohkontext</span>
+            <pre class="integration-json">{{ JSON.stringify(integrationIssue.rawContext, null, 2) }}</pre>
           </div>
         </div>
       </section>
@@ -1011,6 +1096,25 @@ onUnmounted(() => {
   border-color: rgba(239, 68, 68, 0.12);
 }
 
+.panel-section--integration {
+  background: rgba(139, 92, 246, 0.08);
+  border-color: rgba(139, 92, 246, 0.25);
+}
+
+.panel-section--operator {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.panel-section--operator-integrationsproblem {
+  border-color: rgba(168, 85, 247, 0.35);
+  background: rgba(168, 85, 247, 0.08);
+}
+
+.panel-section--operator-betriebsproblem {
+  border-color: rgba(239, 68, 68, 0.24);
+  background: rgba(239, 68, 68, 0.06);
+}
+
 .section-header {
   margin-bottom: 0.75rem;
 }
@@ -1089,6 +1193,136 @@ onUnmounted(() => {
 
 .detail-value--copyable:hover .copy-icon {
   opacity: 1;
+}
+
+.operator-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.operator-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.operator-item--full {
+  grid-column: 1 / -1;
+}
+
+.operator-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.operator-value {
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+}
+
+.operator-action {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  background: rgba(239, 68, 68, 0.18);
+  color: var(--color-text-primary);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.operator-priority {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.1875rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.operator-priority--warning {
+  background: rgba(251, 191, 36, 0.16);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  color: var(--color-warning);
+}
+
+.operator-priority--error {
+  background: rgba(248, 113, 113, 0.16);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: var(--color-error);
+}
+
+.operator-priority--critical {
+  background: rgba(220, 38, 38, 0.24);
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  color: var(--color-error);
+}
+
+.integration-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.integration-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.integration-item--full {
+  grid-column: 1 / -1;
+}
+
+.integration-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.integration-value {
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+}
+
+.integration-action {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  background: rgba(139, 92, 246, 0.2);
+  color: #d8b4fe;
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.integration-json {
+  margin: 0;
+  padding: 0.625rem;
+  border-radius: 0.5rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  overflow-x: auto;
 }
 
 /* ============================================================================
@@ -1494,6 +1728,14 @@ onUnmounted(() => {
   }
 
   .details-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .integration-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .operator-grid {
     grid-template-columns: 1fr;
   }
 

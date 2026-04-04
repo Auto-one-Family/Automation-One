@@ -17,6 +17,7 @@
 #include "time_manager.h"
 #include "logger.h"
 #include <WiFi.h>
+#include "esp_sntp.h"  // Direct ESP-IDF SNTP API for daemon control (esp_sntp_stop/init)
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "TIME";
@@ -37,12 +38,22 @@ TimeManager& TimeManager::getInstance() {
 TimeManager::TimeManager()
     : initialized_(false)
     , synchronized_(false)
+    , sntp_daemon_running_(false)
+    , sync_completed_(false)
     , last_sync_time_(0)
     , last_sync_millis_(0)
     , last_resync_check_(0)
     , ntp_server_primary_(NTP_SERVER_PRIMARY)
     , ntp_server_secondary_(NTP_SERVER_SECONDARY)
     , ntp_server_tertiary_(NTP_SERVER_TERTIARY) {
+}
+
+// ============================================
+// SNTP CALLBACK (called by LWIP thread on successful sync)
+// Must only set volatile flags — no heap allocation, no LOG calls.
+// ============================================
+static void onTimeSyncNotification(struct timeval* tv) {
+    TimeManager::getInstance().onSyncCompleted();
 }
 
 // ============================================
@@ -54,11 +65,11 @@ bool TimeManager::begin() {
         LOG_W(TAG, "TimeManager already initialized");
         return synchronized_;
     }
-    
+
     LOG_I(TAG, "╔════════════════════════════════════════╗");
     LOG_I(TAG, "║  TimeManager: NTP Initialization       ║");
     LOG_I(TAG, "╚════════════════════════════════════════╝");
-    
+
     // Check WiFi connection
     if (WiFi.status() != WL_CONNECTED) {
         LOG_E(TAG, "TimeManager: WiFi not connected - cannot sync NTP");
@@ -66,7 +77,7 @@ bool TimeManager::begin() {
         initialized_ = true;  // Mark as initialized but not synchronized
         return false;
     }
-    
+
     LOG_I(TAG, "TimeManager: Configuring NTP servers...");
     LOG_I(TAG, "  Primary:   " + String(ntp_server_primary_));
     LOG_I(TAG, "  Secondary: " + String(ntp_server_secondary_));
@@ -79,63 +90,86 @@ bool TimeManager::begin() {
     setenv("TZ", "UTC0", 1);
     tzset();
 
+    // Register callback BEFORE configTime so we don't miss a fast sync
+    sync_completed_ = false;
+    sntp_set_time_sync_notification_cb(onTimeSyncNotification);
+
     // Configure NTP (ESP32 IDF function)
     // Parameters: GMT offset (seconds), Daylight offset (seconds), NTP servers
     configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET,
                ntp_server_primary_,
                ntp_server_secondary_,
                ntp_server_tertiary_);
-    
+
     initialized_ = true;
-    
-    // Perform initial synchronization
-    if (synchronizeNTP(NTP_SYNC_TIMEOUT_MS)) {
+    sntp_daemon_running_ = true;
+
+    // Wait for callback-driven sync (non-polling: daemon queries servers autonomously)
+    unsigned long start = millis();
+    while (!sync_completed_) {
+        if (millis() - start > NTP_SYNC_TIMEOUT_MS) {
+            break;
+        }
+        delay(100);
+    }
+
+    // Mark check time so loop() retries after NTP_RESYNC_INTERVAL_MS, not immediately
+    last_resync_check_ = millis();
+
+    if (sync_completed_) {
         LOG_I(TAG, "╔════════════════════════════════════════╗");
-        LOG_I(TAG, "║  ✅ NTP Sync Successful                ║");
+        LOG_I(TAG, "║  NTP Sync Successful                   ║");
         LOG_I(TAG, "╚════════════════════════════════════════╝");
         LOG_I(TAG, "  Unix Timestamp: " + String((unsigned long)last_sync_time_));
         LOG_I(TAG, "  Formatted:      " + getFormattedTime());
         return true;
     } else {
+        // Do NOT stop the daemon — it will continue probing servers 2 and 3 in background.
+        // onSyncCompleted() will fire when any server responds, setting synchronized_ = true.
         LOG_W(TAG, "╔════════════════════════════════════════╗");
-        LOG_W(TAG, "║  ⚠️  NTP Sync Failed                   ║");
+        LOG_W(TAG, "║  NTP Sync Timeout (daemon still active) ║");
         LOG_W(TAG, "╚════════════════════════════════════════╝");
-        LOG_W(TAG, "  Will retry in background");
-        LOG_W(TAG, "  Timestamps will use estimated time");
+        LOG_W(TAG, "  Daemon running — will sync when server responds");
+        LOG_W(TAG, "  Timestamps will use estimated time until then");
         return false;
     }
 }
 
 void TimeManager::loop() {
-    if (!initialized_) {
-        return;
-    }
-    
+    if (!initialized_) return;
+
     unsigned long now = millis();
-    
-    // Check if re-sync is needed
-    if (now - last_resync_check_ < NTP_RESYNC_INTERVAL_MS) {
+
+    // Fall 1: Synchronisiert — periodisch validieren
+    if (synchronized_) {
+        if (now - last_resync_check_ >= NTP_RESYNC_INTERVAL_MS) {
+            last_resync_check_ = now;
+            if (!isValidTimestamp(time(nullptr))) {
+                synchronized_ = false;
+                LOG_W(TAG, "TimeManager: Time became invalid — marking as unsynced");
+            }
+        }
         return;
     }
-    
-    last_resync_check_ = now;
-    
-    // Check WiFi before attempting resync
-    if (WiFi.status() != WL_CONNECTED) {
-        LOG_D(TAG, "TimeManager: Skipping resync - WiFi disconnected");
+
+    // Fall 2: Daemon laeuft — er probiert Server weiter, Callback setzt synchronized_
+    if (sntp_daemon_running_) {
         return;
     }
-    
-    // Check if we never synchronized successfully
-    if (!synchronized_) {
-        LOG_I(TAG, "TimeManager: Attempting delayed NTP sync...");
-        synchronizeNTP(NTP_SYNC_TIMEOUT_MS / 2);  // Shorter timeout for background sync
-        return;
+
+    // Fall 3: Daemon gestoppt, noch nicht synced — periodisch neu starten
+    if (now - last_resync_check_ >= NTP_RESYNC_INTERVAL_MS) {
+        last_resync_check_ = now;
+        if (WiFi.status() == WL_CONNECTED) {
+            LOG_I(TAG, "TimeManager: Retrying NTP sync...");
+            sync_completed_ = false;
+            configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET,
+                       ntp_server_primary_,
+                       ntp_server_secondary_,
+                       ntp_server_tertiary_);
+            sntp_daemon_running_ = true;
+        }
     }
-    
-    // Periodic re-sync for long-running systems
-    LOG_D(TAG, "TimeManager: Periodic NTP re-sync...");
-    synchronizeNTP(NTP_SYNC_TIMEOUT_MS / 2);
 }
 
 // ============================================
@@ -206,7 +240,7 @@ String TimeManager::getFormattedTime(const char* format) const {
 // ============================================
 
 bool TimeManager::isSynchronized() const {
-    return synchronized_;
+    return synchronized_ && isValidTimestamp(time(nullptr));
 }
 
 bool TimeManager::isSyncFresh() const {
@@ -252,21 +286,45 @@ bool TimeManager::forceResync() {
         LOG_E(TAG, "TimeManager: Cannot resync - not initialized");
         return false;
     }
-    
+
     if (WiFi.status() != WL_CONNECTED) {
         LOG_E(TAG, "TimeManager: Cannot resync - WiFi disconnected");
         return false;
     }
-    
+
     LOG_I(TAG, "TimeManager: Forcing NTP re-synchronization...");
-    
-    // Reconfigure NTP (clears cached time)
+
+    // Reset sync state before restarting daemon
+    sync_completed_ = false;
+    synchronized_ = false;
+
+    // Stop daemon before reconfiguring — configTime/esp_sntp_init asserts if already running
+    if (sntp_daemon_running_) {
+        esp_sntp_stop();
+        sntp_daemon_running_ = false;
+    }
+
     configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET,
                ntp_server_primary_,
                ntp_server_secondary_,
                ntp_server_tertiary_);
-    
-    return synchronizeNTP(NTP_SYNC_TIMEOUT_MS);
+    sntp_daemon_running_ = true;
+
+    // Wait for callback-driven sync
+    unsigned long start = millis();
+    while (!sync_completed_) {
+        if (millis() - start > NTP_SYNC_TIMEOUT_MS) {
+            break;
+        }
+        delay(100);
+    }
+
+    if (!sync_completed_) {
+        // Daemon bleibt laufen — er probiert weiter
+        LOG_W(TAG, "TimeManager: forceResync timeout — daemon still active");
+        return false;
+    }
+    return true;
 }
 
 void TimeManager::setNTPServers(const char* primary, 
@@ -287,6 +345,37 @@ void TimeManager::setNTPServers(const char* primary,
                    ntp_server_primary_,
                    ntp_server_secondary_,
                    ntp_server_tertiary_);
+    }
+}
+
+// ============================================
+// WIFI EVENT CALLBACKS
+// ============================================
+
+void TimeManager::onSyncCompleted() {
+    // Called from LWIP thread — only set volatile flags, no heap, no LOG
+    synchronized_ = true;
+    sync_completed_ = true;
+    last_sync_time_ = time(nullptr);
+    last_sync_millis_ = millis();
+}
+
+void TimeManager::onWiFiConnected() {
+    if (!sntp_daemon_running_ && initialized_) {
+        sync_completed_ = false;
+        configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET,
+                   ntp_server_primary_, ntp_server_secondary_, ntp_server_tertiary_);
+        esp_sntp_init();
+        sntp_daemon_running_ = true;
+        LOG_I(TAG, "SNTP daemon restarted after WiFi reconnect");
+    }
+}
+
+void TimeManager::onWiFiDisconnected() {
+    if (sntp_daemon_running_) {
+        esp_sntp_stop();
+        sntp_daemon_running_ = false;
+        LOG_I(TAG, "SNTP daemon stopped — WiFi disconnected");
     }
 }
 

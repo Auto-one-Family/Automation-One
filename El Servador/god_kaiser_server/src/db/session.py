@@ -136,7 +136,7 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         AsyncSession: SQLAlchemy async session
 
     Usage:
-        async with get_session() as session:
+        async for session in get_session():
             # Use session here
             pass
     """
@@ -181,6 +181,7 @@ async def init_db(max_retries: int = 5, retry_delay: float = 2.0) -> None:
                     actuator,
                     ai,
                     auth,  # TokenBlacklist model
+                    command_contract,  # Intent/outcome persistence
                     esp,
                     kaiser,
                     library,

@@ -249,7 +249,7 @@ describe('AddActuatorModal', () => {
       const wrapper = mountModal()
       await wrapper.find('select').setValue('pump')
       await nextTick()
-      expect(wrapper.text()).toContain('Max. Laufzeit')
+      expect(wrapper.text()).toContain('Sicherheitslimit')
       expect(wrapper.text()).toContain('Cooldown')
     })
 
@@ -350,7 +350,7 @@ describe('AddActuatorModal', () => {
       await wrapper.setProps({ modelValue: true })
       await nextTick()
 
-      expect(wrapper.text()).toContain('Max. Laufzeit')
+      expect(wrapper.text()).toContain('Sicherheitslimit')
       expect(wrapper.text()).toContain('Cooldown')
     })
 

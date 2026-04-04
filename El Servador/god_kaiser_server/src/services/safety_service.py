@@ -57,6 +57,10 @@ class SafetyService:
     Thread-safe for MQTT callback invocations.
     """
 
+    # Process-wide emergency state: shared across all SafetyService instances.
+    _global_emergency_stop_active: dict[str, bool] = {}
+    _global_lock = asyncio.Lock()
+
     def __init__(self, actuator_repo: ActuatorRepository, esp_repo: ESPRepository):
         """
         Initialize Safety Service.
@@ -67,8 +71,9 @@ class SafetyService:
         """
         self.actuator_repo = actuator_repo
         self.esp_repo = esp_repo
-        self._emergency_stop_active: dict[str, bool] = {}  # {esp_id: bool}
-        self._lock = asyncio.Lock()  # Thread-safe for concurrent access
+        # Keep instance fields as aliases to shared process-wide state.
+        self._emergency_stop_active = SafetyService._global_emergency_stop_active
+        self._lock = SafetyService._global_lock
 
     def _is_emergency_stop_active_unlocked(self, esp_id: Optional[str] = None) -> bool:
         """

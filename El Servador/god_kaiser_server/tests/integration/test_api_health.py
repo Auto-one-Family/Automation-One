@@ -160,3 +160,4 @@ class TestKubernetesProbes:
         data = response.json()
         assert "ready" in data
         assert "checks" in data
+        assert "runtime_mode" in data

@@ -469,6 +469,14 @@ class ReadinessResponse(BaseResponse):
         ...,
         description="Individual readiness checks",
     )
+    runtime_mode: Optional[str] = Field(
+        default=None,
+        description="Runtime mode state machine status",
+    )
+    degraded_reason_codes: List[str] = Field(
+        default_factory=list,
+        description="Machine-readable degraded reason codes",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

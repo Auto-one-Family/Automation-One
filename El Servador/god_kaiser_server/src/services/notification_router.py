@@ -108,18 +108,9 @@ class NotificationRouter:
                     return None
             return await self._broadcast_to_all(notification)
 
-        # Step 0: Deduplication check
-        # FIX-07: Fingerprint-based dedup (Grafana alerts) takes priority
-        if notification.fingerprint:
-            is_fp_duplicate = await self.notification_repo.check_fingerprint_duplicate(
-                fingerprint=notification.fingerprint,
-            )
-            if is_fp_duplicate:
-                logger.debug(f"Notification deduplicated by fingerprint: '{notification.title}'")
-                increment_notification_deduplicated()
-                return None
-        else:
-            # Fallback: title-based dedup (configurable window per source)
+        # Step 0: Title-based deduplication (only when no fingerprint;
+        # fingerprint path uses atomic INSERT with ON CONFLICT in Step 1 — FIX-F5)
+        if not notification.fingerprint:
             window = self.DEDUP_WINDOWS.get(notification.source, self.DEDUP_WINDOW_DEFAULT)
             is_duplicate = await self.notification_repo.check_duplicate(
                 user_id=user_id,
@@ -152,7 +143,21 @@ class NotificationRouter:
         if notification.correlation_id:
             create_kwargs["correlation_id"] = notification.correlation_id
 
-        db_notification = await self.notification_repo.create(**create_kwargs)
+        # FIX-F5: Atomic INSERT with ON CONFLICT DO NOTHING for fingerprint notifications.
+        # Eliminates Check-then-Act race condition on the partial unique index.
+        if create_kwargs.get("fingerprint"):
+            db_notification, created = await self.notification_repo.create_with_fingerprint_dedup(
+                create_kwargs
+            )
+            if not created:
+                logger.debug(
+                    "Notification fingerprint dedup (atomic): %s",
+                    create_kwargs["fingerprint"],
+                )
+                increment_notification_deduplicated()
+                return None
+        else:
+            db_notification = await self.notification_repo.create(**create_kwargs)
 
         logger.info(
             f"Notification created: id={db_notification.id}, "

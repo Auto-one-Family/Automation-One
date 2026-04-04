@@ -710,6 +710,8 @@ void ProvisionManager::enterSafeMode() {
 // LOOP (Call regularly during provisioning)
 // ============================================
 void ProvisionManager::loop() {
+  if (!initialized_) return;  // Safety-Guard: DNS-Server nie gestartet → kein Poll
+
   // Process DNS requests for Captive Portal
   // This is non-blocking and must be called frequently
   // Handles Windows/macOS captive portal detection queries

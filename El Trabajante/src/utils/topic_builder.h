@@ -33,6 +33,7 @@ public:
   static const char* buildSystemErrorTopic();                   // Phase 0 Bug-Fix
   static const char* buildConfigTopic();                        // Pattern 7
   static const char* buildConfigResponseTopic();
+  static const char* buildIntentOutcomeTopic();                 // Unified intent outcome stream
   // ORPHANED (GHOST) - Server->ESP but ESP never subscribes. See Mqtt_Protocoll.md inventory.
   static const char* buildBroadcastEmergencyTopic();            // Pattern 8
   

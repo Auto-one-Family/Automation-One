@@ -19,6 +19,7 @@ from .health import router as health_router
 from .logic import router as logic_router
 from .logs import router as logs_router
 from .notifications import router as notifications_router
+from .intent_outcomes import router as intent_outcomes_router
 from .sensors import router as sensors_router
 from .sensor_type_defaults import router as sensor_type_defaults_router
 from .sequences import router as sequences_router
@@ -57,6 +58,7 @@ api_v1_router.include_router(logic_router)
 api_v1_router.include_router(debug_router)
 api_v1_router.include_router(logs_router)  # Frontend error log ingestion
 api_v1_router.include_router(notifications_router)  # Phase 4A.1 - Notification Stack
+api_v1_router.include_router(intent_outcomes_router)  # P0.2 - Canonical intent outcome visibility
 api_v1_router.include_router(users_router)
 api_v1_router.include_router(zone_router)
 api_v1_router.include_router(zones_router)  # Phase 0.3 - Zone Entity CRUD
@@ -91,6 +93,7 @@ __all__ = [
     "logic_router",
     "logs_router",
     "notifications_router",
+    "intent_outcomes_router",
     "sequences_router",
     "subzone_router",
     "users_router",

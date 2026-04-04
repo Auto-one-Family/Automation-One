@@ -24,6 +24,16 @@ void watchdogStorageTryFinalizeBootRecord();
 uint8_t watchdogStorageGetCountLast24h();
 
 /**
+ * Counter for expected missing watchdog history key reads.
+ */
+uint32_t watchdogStorageGetHistNotFoundExpectedCount();
+
+/**
+ * Counter for unexpected missing watchdog history key reads.
+ */
+uint32_t watchdogStorageGetHistNotFoundUnexpectedCount();
+
+/**
  * Persist last diagnostic snapshot (best-effort; provisioning / pre-panic paths).
  */
 void watchdogStorageSaveDiagnosticsSnapshot(const WatchdogDiagnostics& diag);

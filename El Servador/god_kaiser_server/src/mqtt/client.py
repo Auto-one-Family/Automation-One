@@ -235,6 +235,13 @@ class MQTTClient:
         use_tls = use_tls if use_tls is not None else self.settings.mqtt.use_tls
 
         try:
+            from ..core.metrics import increment_connect_attempt
+
+            increment_connect_attempt()
+        except Exception:
+            pass
+
+        try:
             # Create paho-mqtt client with UNIQUE client ID
             # BUG V FIX: Append process ID to prevent multiple instances with same ID
             # MQTT only allows ONE connection per client_id - duplicate IDs cause reconnect loops
@@ -631,6 +638,12 @@ class MQTTClient:
         }
 
         reason = disconnect_reasons.get(rc, f"Unknown reason (code: {rc})")
+        try:
+            from ..core.metrics import increment_disconnect_reason
+
+            increment_disconnect_reason(reason if rc != 0 else "clean_disconnect")
+        except Exception:
+            pass
 
         if rc == 0:
             logger.info(f"MQTT client disconnected: {reason}")

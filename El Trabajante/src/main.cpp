@@ -3,6 +3,7 @@
 // ============================================
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
@@ -14,11 +15,14 @@
 #include "tasks/communication_task.h"    // SAFETY-RTOS M3
 #include "tasks/rtos_globals.h"          // SAFETY-RTOS M4: FreeRTOS mutexes
 #include "tasks/config_update_queue.h"   // SAFETY-RTOS M4.6: Core 0→1 config queue
+#include "tasks/command_admission.h"
+#include "tasks/emergency_broadcast_contract.h"
 #include "drivers/gpio_manager.h"
 #include "utils/logger.h"
 #include "services/config/storage_manager.h"
 #include "services/config/config_manager.h"
 #include "services/config/config_response.h"
+#include "services/config/runtime_readiness_policy.h"
 #include "error_handling/error_tracker.h"
 #include "error_handling/health_monitor.h"
 #include "models/config_types.h"
@@ -61,6 +65,7 @@
 
 // Phase 6: Provisioning System
 #include "services/provisioning/provision_manager.h"
+#include "services/provisioning/portal_authority.h"
 
 // Phase 8: NTP Time Management
 #include "utils/time_manager.h"
@@ -94,6 +99,7 @@ volatile bool g_watchdog_timeout_flag = false;
 // Steuert parallelen Reconnect und Portal-Schliessen bei Erfolg.
 // Non-static: accessed by Communication-Task (M3).
 bool portal_open_due_to_disconnect_ = false;
+bool g_boot_force_offline_autonomy = false;
 
 // SAFETY-RTOS M3: gesetzt nach createCommunicationTask(). setup() kann frueher returnen
 // (Provisioning / WiFi- oder MQTT-Fehler) — dann laufen keine Comm-/Safety-Tasks; loop()
@@ -111,6 +117,25 @@ static const unsigned long SERVER_ACK_TIMEOUT_MS = 120000UL;  // 2 minutes
 // incorrectly trigger the 120 s ACK-timeout path.
 std::atomic<uint32_t> g_last_server_ack_ms{0};
 static std::atomic<bool> g_server_timeout_triggered{false};
+static std::atomic<uint32_t> g_last_mqtt_connect_ms{0};
+// Counts reconnects after the initial MQTT connect in this boot session.
+// Used to distinguish cold-boot connect from true reconnect handling.
+static std::atomic<uint32_t> g_mqtt_reconnect_count{0};
+static std::atomic<uint32_t> g_fw_correlation_fallback_counter{0};
+static std::atomic<uint32_t> g_emergency_parse_error_count{0};
+static std::atomic<uint32_t> g_emergency_contract_mismatch_count{0};
+static std::atomic<uint32_t> g_emergency_malformed_count{0};
+static std::atomic<uint32_t> g_emergency_unsupported_count{0};
+static std::atomic<uint32_t> g_emergency_critical_unknown_count{0};
+static std::atomic<uint32_t> g_emergency_failsafe_trigger_count{0};
+static std::atomic<uint32_t> g_config_pending_enter_count{0};
+static std::atomic<uint32_t> g_config_pending_exit_count{0};
+static std::atomic<uint32_t> g_config_pending_exit_blocked_count{0};
+static std::atomic<uint32_t> g_ack_timeout_transition_count{0};
+static std::atomic<uint32_t> g_ack_restore_transition_count{0};
+static std::atomic<uint32_t> g_ack_timeout_guard_skip_count{0};
+static std::atomic<uint32_t> g_ack_restore_guard_skip_count{0};
+SemaphoreHandle_t g_config_lane_mutex = nullptr;
 // g_mqtt_connected: defined in mqtt_client.cpp (SAFETY-RTOS M2, #ifndef MQTT_USE_PUBSUBCLIENT)
 // Accessed via mqttClient.isConnected() which reads the atomic in the ESP-IDF path.
 
@@ -119,17 +144,41 @@ static std::atomic<bool> g_server_timeout_triggered{false};
 // ============================================
 void subscribeToAllTopics();
 void onMqttConnectCallback();
-void handleSensorConfig(const String& payload);
+// CP-F2: Handlers receive pre-parsed root JsonObject + correlationId from processConfigUpdateQueue.
+bool handleSensorConfig(JsonObject doc, const String& correlationId);
 bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj);
 // Phase 4: Version with failure output parameter for aggregated error reporting
 bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, ConfigFailureItem* failure_out);
-void handleActuatorConfig(const String& payload);
-void handleSensorCommand(const String& topic, const String& payload);  // Phase 2C
-void handleOfflineRulesConfig(const String& payload);                   // SAFETY-P4
+bool handleActuatorConfig(JsonObject doc, const String& correlationId);
+bool handleSensorCommand(const String& topic, const String& payload);  // Phase 2C
+bool handleOfflineRulesConfig(JsonObject doc, const String& correlationId);  // SAFETY-P4
 void checkServerAckTimeout();                                           // SAFETY-RTOS M1
+bool evaluatePendingExit(const char* trigger_source);                   // CONFIG_PENDING_AFTER_RESET central exit gate
 // M2: MQTT message router — called from ESP-IDF mqtt_event_handler (Core 0) and
 //     PubSubClient staticCallback (Core 1). Dispatches to queues or direct handlers.
 void routeIncomingMessage(const char* topic, const char* payload);
+
+class ConfigLaneGuard {
+public:
+  ConfigLaneGuard() : locked_(false) {
+    if (g_config_lane_mutex != nullptr) {
+      // Allow config queue processing (sensor+actuator+offline rules) to finish
+      // before we reject zone/subzone operations as "busy".
+      locked_ = xSemaphoreTake(g_config_lane_mutex, pdMS_TO_TICKS(1200)) == pdTRUE;
+    } else {
+      locked_ = true;
+    }
+  }
+  ~ConfigLaneGuard() {
+    if (locked_ && g_config_lane_mutex != nullptr) {
+      xSemaphoreGive(g_config_lane_mutex);
+    }
+  }
+  bool locked() const { return locked_; }
+
+private:
+  bool locked_;
+};
 
 // ============================================
 // HELPER FUNCTIONS
@@ -143,10 +192,82 @@ void errorTrackerMqttCallback(const char* topic, const char* payload) {
   }
 }
 
-// Helper: Send Subzone ACK (with optional correlation_id for ACK tracking)
+// Helper: Ensure correlation_id is always present on critical response channels.
+static String ensureCorrelationId(const String& correlationId) {
+  if (correlationId.length() > 0) {
+    return correlationId;
+  }
+  uint32_t fallback_idx = g_fw_correlation_fallback_counter.fetch_add(1) + 1;
+  return "fw_" + g_system_config.esp_id + "_" + String(millis()) + "_" + String(fallback_idx);
+}
+
+enum class EmergencyParseClass : uint8_t {
+    MALFORMED = 0,
+    UNSUPPORTED,
+    CRITICAL_UNKNOWN
+};
+
+static const char* emergencyParseClassToString(EmergencyParseClass cls) {
+    switch (cls) {
+        case EmergencyParseClass::MALFORMED:
+            return "malformed";
+        case EmergencyParseClass::UNSUPPORTED:
+            return "unsupported";
+        case EmergencyParseClass::CRITICAL_UNKNOWN:
+            return "critical_unknown";
+        default:
+            return "unknown";
+    }
+}
+
+static EmergencyParseClass classifyEmergencyContractMismatch(const char* detail_code) {
+    if (detail_code == nullptr) {
+        return EmergencyParseClass::CRITICAL_UNKNOWN;
+    }
+    if (strcmp(detail_code, "UNKNOWN_COMMAND_VALUE") == 0) {
+        return EmergencyParseClass::UNSUPPORTED;
+    }
+    if (strcmp(detail_code, "MISSING_COMMAND_FIELD") == 0 ||
+        strcmp(detail_code, "FIELD_TYPE_ACTION") == 0 ||
+        strcmp(detail_code, "FIELD_TYPE_REASON") == 0 ||
+        strcmp(detail_code, "FIELD_TYPE_ISSUED_BY") == 0 ||
+        strcmp(detail_code, "FIELD_TYPE_TIMESTAMP") == 0) {
+        return EmergencyParseClass::MALFORMED;
+    }
+    return EmergencyParseClass::CRITICAL_UNKNOWN;
+}
+
+static uint32_t incrementEmergencyParseClassCounter(EmergencyParseClass cls) {
+    switch (cls) {
+        case EmergencyParseClass::MALFORMED:
+            return g_emergency_malformed_count.fetch_add(1) + 1;
+        case EmergencyParseClass::UNSUPPORTED:
+            return g_emergency_unsupported_count.fetch_add(1) + 1;
+        case EmergencyParseClass::CRITICAL_UNKNOWN:
+            return g_emergency_critical_unknown_count.fetch_add(1) + 1;
+        default:
+            return 0;
+    }
+}
+
+static void triggerBroadcastEmergencyStop(const char* epoch_reason, const String& emergency_reason) {
+#ifndef MQTT_USE_PUBSUBCLIENT
+  if (g_safety_task_handle != NULL) {
+    xTaskNotify(g_safety_task_handle, NOTIFY_EMERGENCY_STOP, eSetBits);
+  }
+#else
+  flushActuatorCommandQueue();
+  flushSensorCommandQueue();
+  bumpSafetyEpoch(epoch_reason);
+  safetyController.emergencyStopAll(emergency_reason);
+#endif
+}
+
+// Helper: Send Subzone ACK with guaranteed correlation_id for ACK tracking.
 void sendSubzoneAck(const String& subzone_id, const String& status, const String& error_message, const String& correlationId = "") {
   String ack_topic = TopicBuilder::buildSubzoneAckTopic();
   DynamicJsonDocument ack_doc(512);
+  String effectiveCorrelationId = ensureCorrelationId(correlationId);
   ack_doc["esp_id"] = g_system_config.esp_id;
   ack_doc["status"] = status;
   ack_doc["subzone_id"] = subzone_id;
@@ -158,9 +279,7 @@ void sendSubzoneAck(const String& subzone_id, const String& status, const String
   }
 
   ack_doc["seq"] = mqttClient.getNextSeq();
-  if (correlationId.length() > 0) {
-    ack_doc["correlation_id"] = correlationId;
-  }
+  ack_doc["correlation_id"] = effectiveCorrelationId;
 
   String ack_payload;
   size_t written = serializeJson(ack_doc, ack_payload);
@@ -172,6 +291,158 @@ void sendSubzoneAck(const String& subzone_id, const String& status, const String
                  "\",\"message\":\"serialization_failed\",\"timestamp\":0}";
   }
   mqttClient.publish(ack_topic, ack_payload, 1);
+}
+
+static bool hasValidLocalAutonomyConfig() {
+  WiFiConfig wifi_config = configManager.getWiFiConfig();
+  if (!wifi_config.configured || wifi_config.ssid.length() == 0) {
+    return false;
+  }
+
+  SensorConfig sensors[10];
+  uint8_t sensor_count = 0;
+  configManager.loadSensorConfig(sensors, 10, sensor_count);
+
+  ActuatorConfig actuators[MAX_ACTUATORS];
+  uint8_t actuator_count = 0;
+  configManager.loadActuatorConfig(actuators, MAX_ACTUATORS, actuator_count);
+
+  uint8_t offline_rule_count = 0;
+  if (storageManager.beginNamespace("offline", true)) {
+    offline_rule_count = storageManager.getUInt8("ofr_count", 0);
+    storageManager.endNamespace();
+  }
+
+  bool has_valid = sensor_count > 0 && actuator_count > 0 && offline_rule_count > 0;
+  if (!has_valid) {
+    LOG_W(TAG, String("[BOOT] Local autonomy guard failed: sensors=") + String(sensor_count) +
+               " actuators=" + String(actuator_count) +
+               " offline_rules=" + String(offline_rule_count));
+  }
+  return has_valid;
+}
+
+static bool isConfigPendingAfterResetState() {
+  return g_system_config.current_state == STATE_CONFIG_PENDING_AFTER_RESET;
+}
+
+static bool isRuntimeDegradedState() {
+  switch (g_system_config.current_state) {
+    case STATE_CONFIG_PENDING_AFTER_RESET:
+    case STATE_SAFE_MODE:
+    case STATE_SAFE_MODE_PROVISIONING:
+    case STATE_ERROR:
+    case STATE_LIBRARY_DOWNLOADING:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static RuntimeReadinessSnapshot collectRuntimeReadinessSnapshot() {
+  RuntimeReadinessSnapshot snapshot{};
+  SensorConfig sensors[10];
+  ActuatorConfig actuators[MAX_ACTUATORS];
+
+  configManager.loadSensorConfig(sensors, 10, snapshot.sensor_count);
+  configManager.loadActuatorConfig(actuators, MAX_ACTUATORS, snapshot.actuator_count);
+  snapshot.offline_rule_count = offlineModeManager.getOfflineRuleCount();
+  return snapshot;
+}
+
+static const char* systemStateToString(SystemState state) {
+  switch (state) {
+    case STATE_BOOT: return "BOOT";
+    case STATE_WIFI_SETUP: return "WIFI_SETUP";
+    case STATE_WIFI_CONNECTED: return "WIFI_CONNECTED";
+    case STATE_MQTT_CONNECTING: return "MQTT_CONNECTING";
+    case STATE_MQTT_CONNECTED: return "MQTT_CONNECTED";
+    case STATE_AWAITING_USER_CONFIG: return "AWAITING_USER_CONFIG";
+    case STATE_ZONE_CONFIGURED: return "ZONE_CONFIGURED";
+    case STATE_SENSORS_CONFIGURED: return "SENSORS_CONFIGURED";
+    case STATE_CONFIG_PENDING_AFTER_RESET: return "CONFIG_PENDING_AFTER_RESET";
+    case STATE_OPERATIONAL: return "OPERATIONAL";
+    case STATE_PENDING_APPROVAL: return "PENDING_APPROVAL";
+    case STATE_LIBRARY_DOWNLOADING: return "LIBRARY_DOWNLOADING";
+    case STATE_SAFE_MODE: return "SAFE_MODE";
+    case STATE_SAFE_MODE_PROVISIONING: return "SAFE_MODE_PROVISIONING";
+    case STATE_ERROR: return "ERROR";
+    default: return "UNKNOWN";
+  }
+}
+
+static void publishConfigPendingTransitionEvent(const char* event_type,
+                                                const char* reason_code,
+                                                const RuntimeReadinessDecision& readiness,
+                                                SystemState state_before,
+                                                SystemState state_after,
+                                                const char* trigger_source) {
+  DynamicJsonDocument event_doc(768);
+  event_doc["seq"] = mqttClient.getNextSeq();
+  event_doc["event_type"] = event_type;
+  event_doc["reason_code"] = reason_code;
+  event_doc["trigger_source"] = trigger_source != nullptr ? trigger_source : "unknown";
+  event_doc["esp_id"] = g_system_config.esp_id;
+  event_doc["state_before"] = systemStateToString(state_before);
+  event_doc["state_after"] = systemStateToString(state_after);
+  event_doc["sensor_count"] = readiness.snapshot.sensor_count;
+  event_doc["actuator_count"] = readiness.snapshot.actuator_count;
+  event_doc["offline_rule_count"] = readiness.snapshot.offline_rule_count;
+  event_doc["runtime_profile"] = runtimeReadinessProfileName(readiness.policy.profile);
+  event_doc["readiness_decision"] = readiness.decision_code;
+  event_doc["config_pending_enter_count"] = g_config_pending_enter_count.load();
+  event_doc["config_pending_exit_count"] = g_config_pending_exit_count.load();
+  event_doc["config_pending_exit_blocked_count"] = g_config_pending_exit_blocked_count.load();
+  event_doc["ts"] = static_cast<unsigned long>(timeManager.getUnixTimestamp());
+
+  String payload;
+  if (serializeJson(event_doc, payload) > 0) {
+    mqttClient.publish(TopicBuilder::buildIntentOutcomeTopic(), payload, 1);
+  }
+}
+
+bool evaluatePendingExit(const char* trigger_source) {
+  if (!isConfigPendingAfterResetState()) {
+    return false;
+  }
+
+  RuntimeReadinessSnapshot snapshot = collectRuntimeReadinessSnapshot();
+  RuntimeReadinessDecision readiness =
+      evaluateRuntimeReadiness(snapshot, defaultRuntimeReadinessPolicy());
+
+  if (!readiness.ready) {
+    g_config_pending_exit_blocked_count.fetch_add(1);
+    publishConfigPendingTransitionEvent("exit_blocked_config_pending",
+                                        "CONFIG_PENDING_EXIT_NOT_READY",
+                                        readiness,
+                                        STATE_CONFIG_PENDING_AFTER_RESET,
+                                        STATE_CONFIG_PENDING_AFTER_RESET,
+                                        trigger_source);
+    LOG_W(TAG, String("[CONFIG] Pending exit blocked: ") + readiness.decision_code +
+               " (sensors=" + String(snapshot.sensor_count) +
+               ", actuators=" + String(snapshot.actuator_count) +
+               ", offline_rules=" + String(snapshot.offline_rule_count) + ")");
+    return false;
+  }
+
+  SystemState target_state = configManager.isDeviceApproved()
+      ? STATE_OPERATIONAL
+      : STATE_PENDING_APPROVAL;
+
+  g_system_config.current_state = target_state;
+  g_system_config.safe_mode_reason = "";
+  configManager.saveSystemConfig(g_system_config);
+
+  g_config_pending_exit_count.fetch_add(1);
+  publishConfigPendingTransitionEvent("exited_config_pending",
+                                      "CONFIG_PENDING_EXIT_READY",
+                                      readiness,
+                                      STATE_CONFIG_PENDING_AFTER_RESET,
+                                      target_state,
+                                      trigger_source);
+  LOG_I(TAG, String("[CONFIG] Exit CONFIG_PENDING_AFTER_RESET -> ") +
+             systemStateToString(target_state));
+  return true;
 }
 
 // ============================================
@@ -207,6 +478,7 @@ void subscribeToAllTopics() {
 // ============================================
 void onMqttConnectCallback() {
   static bool is_first_connect = true;
+  g_last_mqtt_connect_ms.store(millis());
 
   // Mechanism A: Re-subscribe on every connect (initial + reconnect)
   subscribeToAllTopics();
@@ -217,6 +489,7 @@ void onMqttConnectCallback() {
 
   // Mechanism E: Reconnect-only actions (managers must be initialized)
   if (!is_first_connect) {
+    g_mqtt_reconnect_count.fetch_add(1);
     // Mechanism E: State sync after reconnect
     LOG_I(TAG, "[SAFETY-P1] MQTT reconnected — syncing actuator state with server");
     if (actuatorManager.isInitialized()) {
@@ -262,7 +535,90 @@ void routeIncomingMessage(const char* t, const char* p) {
     // processConfigUpdateQueue() on Core 1 calls all three handlers with the same payload.
     String config_topic = String(TopicBuilder::buildConfigTopic());
     if (topic == config_topic) {
-        queueConfigUpdate(ConfigUpdateRequest::CONFIG_PUSH, payload.c_str());
+        IntentMetadata metadata = extractIntentMetadataFromPayloadNoCorrelationFallback(payload.c_str(), "cfg");
+        String corr_id = String(metadata.correlation_id);
+        if (corr_id.length() == 0) {
+            const String reason = "Config contract violation: required correlation_id missing";
+            ConfigResponseBuilder::publishError(
+                ConfigType::SYSTEM,
+                ConfigErrorCode::CONTRACT_MISSING_CORRELATION,
+                reason,
+                JsonVariantConst());
+            publishIntentOutcome("config",
+                                 metadata,
+                                 "failed",
+                                 "CONTRACT_CORRELATION_MISSING",
+                                 reason,
+                                 false);
+            return;
+        }
+        CommandAdmissionContext admission_context{
+            mqttClient.isRegistrationConfirmed(),
+            isConfigPendingAfterResetState(),
+            isRuntimeDegradedState(),
+            false,
+            isRecoveryIntentAllowed(topic.c_str(), payload.c_str()),
+            nullptr
+        };
+        CommandAdmissionDecision admission = shouldAcceptCommand(CommandSubtype::CONFIG, admission_context);
+        if (!admission.accepted) {
+            publishIntentOutcome("config",
+                                 metadata,
+                                 "rejected",
+                                 admission.code,
+                                 String("Config update rejected (reason_code=") + admission.reason_code + ")",
+                                 false);
+            return;
+        }
+        if (!g_safety_rtos_tasks_created) {
+            publishIntentOutcome("config",
+                                 metadata,
+                                 "rejected",
+                                 "MODE_UNSUPPORTED",
+                                 "Config update rejected in legacy fallback mode",
+                                 true);
+            return;
+        }
+        // CP-F4: Reject payload that exceeds queue buffer — truncation causes partial config.
+        size_t payload_len = payload.length();
+        if (payload_len >= CONFIG_PAYLOAD_MAX_LEN) {
+            LOG_E(TAG, "[CONFIG] TRUNCATION: payload=" + String(payload_len) +
+                       " bytes, max=" + String(CONFIG_PAYLOAD_MAX_LEN) + " — config REJECTED (CP-F4)");
+
+            String msg = String("[CONFIG] Payload too large: ") + payload_len +
+                         " bytes, max=" + CONFIG_PAYLOAD_MAX_LEN;
+            ConfigResponseBuilder::publishError(
+                ConfigType::SYSTEM,
+                ConfigErrorCode::PAYLOAD_TOO_LARGE,
+                msg,
+                JsonVariantConst(),
+                corr_id);
+            publishIntentOutcome("config",
+                                 metadata,
+                                 "rejected",
+                                 "VALIDATION_FAIL",
+                                 msg,
+                                 false);
+            return;
+        }
+
+        if (!queueConfigUpdateWithMetadata(ConfigUpdateRequest::CONFIG_PUSH, payload.c_str(), &metadata)) {
+            LOG_E(TAG, "[CONFIG] Queue full/timeout — config push dropped");
+            errorTracker.logApplicationError(ERROR_TASK_QUEUE_FULL, "Config update queue full/timeout");
+
+            ConfigResponseBuilder::publishError(
+                ConfigType::SYSTEM,
+                ConfigErrorCode::QUEUE_FULL,
+                "Config queue full/timeout - please retry",
+                JsonVariantConst(),
+                corr_id);
+            publishIntentOutcome("config",
+                                 metadata,
+                                 "rejected",
+                                 "QUEUE_FULL",
+                                 "Config queue full/timeout",
+                                 true);
+        }
         return;
     }
 
@@ -271,7 +627,50 @@ void routeIncomingMessage(const char* t, const char* p) {
     String actuator_command_prefix = String(TopicBuilder::buildActuatorCommandTopic(0));
     actuator_command_prefix.replace("/0/command", "/");
     if (topic.startsWith(actuator_command_prefix) && topic.endsWith("/command")) {
-        queueActuatorCommand(topic.c_str(), payload.c_str());
+        IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), "act");
+        CommandAdmissionContext admission_context{
+            mqttClient.isRegistrationConfirmed(),
+            isConfigPendingAfterResetState(),
+            isRuntimeDegradedState(),
+            g_system_config.current_state == STATE_SAFE_MODE,
+            isRecoveryIntentAllowed(topic.c_str(), payload.c_str()),
+            nullptr
+        };
+        CommandAdmissionDecision admission = shouldAcceptCommand(CommandSubtype::ACTUATOR, admission_context);
+        if (!admission.accepted) {
+            LOG_W(TAG, String("[ADMISSION] Actuator command rejected: ") + admission.reason_code);
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "rejected",
+                                 admission.code,
+                                 String("Actuator command rejected (reason_code=") + admission.reason_code + ")",
+                                 false);
+            return;
+        }
+        if (!g_safety_rtos_tasks_created) {
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "rejected",
+                                 "MODE_UNSUPPORTED",
+                                 "Actuator command rejected in legacy fallback mode",
+                                 true);
+            return;
+        }
+        if (!queueActuatorCommand(topic.c_str(), payload.c_str(), &metadata)) {
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "rejected",
+                                 "QUEUE_FULL",
+                                 "Actuator command queue full",
+                                 true);
+        } else {
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "accepted",
+                                 admission.code,
+                                 "Actuator command accepted",
+                                 false);
+        }
         return;
     }
 
@@ -280,13 +679,57 @@ void routeIncomingMessage(const char* t, const char* p) {
     String sensor_command_prefix = String(TopicBuilder::buildSensorCommandTopic(0));
     sensor_command_prefix.replace("/0/command", "/");
     if (topic.startsWith(sensor_command_prefix) && topic.endsWith("/command")) {
-        queueSensorCommand(topic.c_str(), payload.c_str());
+        IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), "sensor");
+        CommandAdmissionContext admission_context{
+            mqttClient.isRegistrationConfirmed(),
+            isConfigPendingAfterResetState(),
+            isRuntimeDegradedState(),
+            g_system_config.current_state == STATE_SAFE_MODE,
+            isRecoveryIntentAllowed(topic.c_str(), payload.c_str()),
+            nullptr
+        };
+        CommandAdmissionDecision admission = shouldAcceptCommand(CommandSubtype::SENSOR, admission_context);
+        if (!admission.accepted) {
+            LOG_W(TAG, String("[ADMISSION] Sensor command rejected: ") + admission.reason_code);
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "rejected",
+                                 admission.code,
+                                 String("Sensor command rejected (reason_code=") + admission.reason_code + ")",
+                                 false);
+            return;
+        }
+        if (!g_safety_rtos_tasks_created) {
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "rejected",
+                                 "MODE_UNSUPPORTED",
+                                 "Sensor command rejected in legacy fallback mode",
+                                 true);
+            return;
+        }
+        if (!queueSensorCommand(topic.c_str(), payload.c_str(), &metadata)) {
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "rejected",
+                                 "QUEUE_FULL",
+                                 "Sensor command queue full",
+                                 true);
+        } else {
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "accepted",
+                                 admission.code,
+                                 "Sensor command accepted",
+                                 false);
+        }
         return;
     }
 
     // ─── ESP-specific emergency stop ─────────────────────────────────────────
     String esp_emergency_topic = String(TopicBuilder::buildActuatorEmergencyTopic());
     if (topic == esp_emergency_topic) {
+        IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), "emergency");
         DynamicJsonDocument doc(256);
         DeserializationError error = deserializeJson(doc, payload);
 
@@ -310,6 +753,12 @@ void routeIncomingMessage(const char* t, const char* p) {
                                        "ESP emergency-stop rejected: invalid auth_token");
                 mqttClient.publish(esp_emergency_topic + "/error",
                                   "{\"error\":\"unauthorized\",\"message\":\"Invalid auth_token\",\"seq\":" + String(mqttClient.getNextSeq()) + "}");
+                publishIntentOutcome("command",
+                                     metadata,
+                                     "rejected",
+                                     "UNAUTHORIZED",
+                                     "ESP emergency rejected: invalid auth_token",
+                                     false);
                 return;
             }
 
@@ -328,8 +777,17 @@ void routeIncomingMessage(const char* t, const char* p) {
                     xTaskNotify(g_safety_task_handle, NOTIFY_EMERGENCY_STOP, eSetBits);
                 }
 #else
+                flushActuatorCommandQueue();
+                flushSensorCommandQueue();
+                bumpSafetyEpoch("pubsub_emergency_stop");
                 safetyController.emergencyStopAll("ESP emergency command (authenticated)");
 #endif
+                publishIntentOutcome("command",
+                                     metadata,
+                                     "applied",
+                                     "EMERGENCY_STOP_TRIGGERED",
+                                     "ESP emergency stop accepted and dispatched",
+                                     false);
             } else if (command == "clear_emergency") {
                 LOG_I(TAG, "╔════════════════════════════════════════╗");
                 LOG_I(TAG, "║  AUTHORIZED EMERGENCY-CLEAR TRIGGERED ║");
@@ -339,13 +797,38 @@ void routeIncomingMessage(const char* t, const char* p) {
                     safetyController.resumeOperation();
                     mqttClient.publish(esp_emergency_topic + "/response",
                                       "{\"status\":\"emergency_cleared\",\"timestamp\":" + String(millis()) + ",\"seq\":" + String(mqttClient.getNextSeq()) + "}");
+                    publishIntentOutcome("command",
+                                         metadata,
+                                         "applied",
+                                         "EMERGENCY_CLEAR_APPLIED",
+                                         "ESP emergency clear applied",
+                                         false);
                 } else {
                     mqttClient.publish(esp_emergency_topic + "/error",
                                       "{\"error\":\"clear_failed\",\"message\":\"Safety verification failed\",\"seq\":" + String(mqttClient.getNextSeq()) + "}");
+                    publishIntentOutcome("command",
+                                         metadata,
+                                         "failed",
+                                         "EMERGENCY_CLEAR_REJECTED",
+                                         "ESP emergency clear rejected by safety verification",
+                                         false);
                 }
+            } else {
+                publishIntentOutcome("command",
+                                     metadata,
+                                     "rejected",
+                                     "VALIDATION_FAIL",
+                                     String("Unsupported emergency command: ") + command,
+                                     false);
             }
         } else {
             LOG_E(TAG, "Failed to parse emergency command JSON");
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "failed",
+                                 "EMERGENCY_PARSE_ERROR",
+                                 String("Emergency command parse error: ") + String(error.c_str()),
+                                 false);
         }
         return;
     }
@@ -355,47 +838,131 @@ void routeIncomingMessage(const char* t, const char* p) {
     if (topic == broadcast_emergency_topic) {
         // Server payload includes command, reason, issued_by, timestamp (ISO-string ~32 chars),
         // devices_stopped, actuators_stopped — minimum ~300 bytes; 512 gives safe headroom.
+        IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), "emergency");
         DynamicJsonDocument doc(512);
         DeserializationError error = deserializeJson(doc, payload);
 
-        if (!error) {
-            String auth_token = doc["auth_token"].as<String>();
-
-            // Validate auth_token — fail-open
-            String stored_broadcast_token = "";
-            if (storageManager.beginNamespace("system_config", true)) {
-                stored_broadcast_token = storageManager.getStringObj("broadcast_em_tok", "");
-                storageManager.endNamespace();
-            }
-
-            if (stored_broadcast_token.length() > 0 && auth_token != stored_broadcast_token) {
-                LOG_E(TAG, "╔════════════════════════════════════════╗");
-                LOG_E(TAG, "║  [SECURITY] UNAUTHORIZED BROADCAST     ║");
-                LOG_E(TAG, "║  EMERGENCY-STOP ATTEMPT REJECTED       ║");
-                LOG_E(TAG, "╚════════════════════════════════════════╝");
-                LOG_E(TAG, "[SECURITY] Broadcast emergency-stop rejected: invalid token");
-                errorTracker.trackError(3500, ERROR_SEVERITY_CRITICAL,
-                                       "Broadcast emergency-stop rejected: invalid auth_token");
-                return;
-            }
-
-            LOG_W(TAG, "╔════════════════════════════════════════╗");
-            LOG_W(TAG, "║  BROADCAST EMERGENCY-STOP RECEIVED    ║");
-            LOG_W(TAG, "╚════════════════════════════════════════╝");
-            if (stored_broadcast_token.length() == 0) {
-                LOG_W(TAG, "Broadcast emergency accepted (no token configured - fail-open)");
-            }
-            // M2: Notify Safety-Task in ESP-IDF path; direct call in PubSubClient path.
-#ifndef MQTT_USE_PUBSUBCLIENT
-            if (g_safety_task_handle != NULL) {
-                xTaskNotify(g_safety_task_handle, NOTIFY_EMERGENCY_STOP, eSetBits);
-            }
-#else
-            safetyController.emergencyStopAll("Broadcast emergency (God-Kaiser)");
-#endif
-        } else {
-            LOG_E(TAG, "Failed to parse broadcast emergency JSON");
+        if (error) {
+            uint32_t parse_count = g_emergency_parse_error_count.fetch_add(1) + 1;
+            uint32_t cls_count = incrementEmergencyParseClassCounter(EmergencyParseClass::MALFORMED);
+            String reason = String("Broadcast emergency parse error: ") + String(error.c_str()) +
+                            " (code=EMERGENCY_PARSE_ERROR, class=malformed, count=" +
+                            String(parse_count) + ", class_count=" + String(cls_count) + ")";
+            LOG_E(TAG, reason);
+            errorTracker.logCommunicationError(ERROR_MQTT_PAYLOAD_INVALID, reason.c_str());
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "failed",
+                                 "EMERGENCY_PARSE_ERROR",
+                                 reason,
+                                 false);
+            LOG_W(TAG, "[SAFETY] Broadcast emergency rejected (class=malformed, policy=reject_no_stop)");
+            return;
         }
+
+        JsonObject root = doc.as<JsonObject>();
+        BroadcastEmergencyContractInput contract_input{};
+        contract_input.command_present = root.containsKey("command");
+        contract_input.command_is_string = contract_input.command_present &&
+                                           root["command"].is<const char*>();
+        contract_input.command_value = contract_input.command_is_string
+                                           ? root["command"].as<const char*>()
+                                           : nullptr;
+        contract_input.action_present = root.containsKey("action");
+        contract_input.action_is_string = contract_input.action_present &&
+                                          root["action"].is<const char*>();
+        contract_input.action_value = contract_input.action_is_string
+                                          ? root["action"].as<const char*>()
+                                          : nullptr;
+        contract_input.auth_token_present = root.containsKey("auth_token");
+        contract_input.auth_token_is_string = contract_input.auth_token_present &&
+                                              root["auth_token"].is<const char*>();
+        contract_input.reason_present = root.containsKey("reason");
+        contract_input.reason_is_string = contract_input.reason_present &&
+                                          root["reason"].is<const char*>();
+        contract_input.issued_by_present = root.containsKey("issued_by");
+        contract_input.issued_by_is_string = contract_input.issued_by_present &&
+                                             root["issued_by"].is<const char*>();
+        contract_input.timestamp_present = root.containsKey("timestamp");
+        contract_input.timestamp_is_string = contract_input.timestamp_present &&
+                                             root["timestamp"].is<const char*>();
+
+        BroadcastEmergencyContractResult contract_result =
+            validateBroadcastEmergencyContract(contract_input);
+        if (contract_result.status != BroadcastEmergencyContractStatus::VALID) {
+            uint32_t mismatch_count = g_emergency_contract_mismatch_count.fetch_add(1) + 1;
+            EmergencyParseClass parse_class =
+                classifyEmergencyContractMismatch(contract_result.detail_code);
+            uint32_t cls_count = incrementEmergencyParseClassCounter(parse_class);
+            String reason = String("Broadcast emergency contract mismatch: detail=") +
+                            contract_result.detail_code +
+                            " (code=EMERGENCY_CONTRACT_MISMATCH, class=" +
+                            emergencyParseClassToString(parse_class) + ", count=" +
+                            String(mismatch_count) + ", class_count=" + String(cls_count) + ")";
+            LOG_E(TAG, reason);
+            errorTracker.logCommunicationError(ERROR_MQTT_PAYLOAD_INVALID, reason.c_str());
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "failed",
+                                 "EMERGENCY_CONTRACT_MISMATCH",
+                                 reason,
+                                 false);
+            if (parse_class == EmergencyParseClass::CRITICAL_UNKNOWN) {
+                uint32_t failsafe_count = g_emergency_failsafe_trigger_count.fetch_add(1) + 1;
+                LOG_E(TAG, "[SAFETY] Fail-safe emergency stop triggered (class=critical_unknown, count=" +
+                           String(failsafe_count) + ")");
+                triggerBroadcastEmergencyStop("pubsub_broadcast_emergency_contract_mismatch",
+                                              "Broadcast emergency critical unknown contract state");
+            } else {
+                LOG_W(TAG, String("[SAFETY] Broadcast emergency rejected (class=") +
+                           emergencyParseClassToString(parse_class) + ", policy=reject_no_stop)");
+            }
+            return;
+        }
+
+        String command = String(contract_result.normalized_command);
+        String auth_token = contract_input.auth_token_is_string
+                                ? String(root["auth_token"].as<const char*>())
+                                : "";
+
+        // Validate auth_token — fail-open
+        String stored_broadcast_token = "";
+        if (storageManager.beginNamespace("system_config", true)) {
+            stored_broadcast_token = storageManager.getStringObj("broadcast_em_tok", "");
+            storageManager.endNamespace();
+        }
+
+        if (stored_broadcast_token.length() > 0 && auth_token != stored_broadcast_token) {
+            LOG_E(TAG, "╔════════════════════════════════════════╗");
+            LOG_E(TAG, "║  [SECURITY] UNAUTHORIZED BROADCAST     ║");
+            LOG_E(TAG, "║  EMERGENCY-STOP ATTEMPT REJECTED       ║");
+            LOG_E(TAG, "╚════════════════════════════════════════╝");
+            LOG_E(TAG, "[SECURITY] Broadcast emergency-stop rejected: invalid token");
+            errorTracker.trackError(3500, ERROR_SEVERITY_CRITICAL,
+                                   "Broadcast emergency-stop rejected: invalid auth_token");
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "rejected",
+                                 "UNAUTHORIZED",
+                                 "Broadcast emergency rejected: invalid auth_token",
+                                 false);
+            return;
+        }
+
+        LOG_W(TAG, "╔════════════════════════════════════════╗");
+        LOG_W(TAG, "║  BROADCAST EMERGENCY-STOP RECEIVED    ║");
+        LOG_W(TAG, "╚════════════════════════════════════════╝");
+        if (stored_broadcast_token.length() == 0) {
+            LOG_W(TAG, "Broadcast emergency accepted (no token configured - fail-open)");
+        }
+        publishIntentOutcome("command",
+                             metadata,
+                             "applied",
+                             "BROADCAST_EMERGENCY_STOP_TRIGGERED",
+                             String("Broadcast emergency accepted and dispatched: command=") + command,
+                             false);
+        triggerBroadcastEmergencyStop("pubsub_broadcast_emergency",
+                                      "Broadcast emergency (God-Kaiser)");
         return;
     }
 
@@ -419,6 +986,51 @@ void routeIncomingMessage(const char* t, const char* p) {
         String command = doc["command"].as<String>();
         bool confirm = doc["confirm"] | false;
         LOG_I(TAG, "Command parsed: '" + command + "'");
+
+        IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), "sys");
+        CommandAdmissionContext admission_context{
+            mqttClient.isRegistrationConfirmed(),
+            isConfigPendingAfterResetState(),
+            isRuntimeDegradedState(),
+            false,
+            isRecoveryIntentAllowed(topic.c_str(), payload.c_str()),
+            command.c_str()
+        };
+        CommandAdmissionDecision admission = shouldAcceptCommand(CommandSubtype::SYSTEM, admission_context);
+        if (!admission.accepted) {
+            LOG_W(TAG, String("[ADMISSION] System command rejected: ") + admission.reason_code +
+                       " command=" + command);
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "rejected",
+                                 admission.code,
+                                 String("System command rejected: ") + command +
+                                     " (reason_code=" + admission.reason_code + ")",
+                                 false);
+            DynamicJsonDocument response_doc(320);
+            response_doc["command"] = command;
+            response_doc["success"] = false;
+            response_doc["esp_id"] = g_system_config.esp_id;
+            response_doc["error"] = admission.code;
+            response_doc["reason_code"] = admission.reason_code;
+            response_doc["state"] = "CONFIG_PENDING_AFTER_RESET";
+            response_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+            response_doc["seq"] = mqttClient.getNextSeq();
+            String response;
+            serializeJson(response_doc, response);
+            mqttClient.publish(system_command_topic + "/response", response);
+            return;
+        }
+        if (strcmp(admission.code, "PENDING_ALLOWLIST_ACCEPTED") == 0 ||
+            strcmp(admission.code, "DEGRADED_ALLOWLIST_ACCEPTED") == 0 ||
+            strcmp(admission.code, "RECOVERY_ACCEPTED") == 0) {
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "accepted",
+                                 admission.code,
+                                 String("System command accepted via pending allowlist: ") + command,
+                                 false);
+        }
 
         if (command == "factory_reset" && confirm) {
             LOG_W(TAG, "╔════════════════════════════════════════╗");
@@ -643,6 +1255,8 @@ void routeIncomingMessage(const char* t, const char* p) {
                 xTaskNotify(g_safety_task_handle, NOTIFY_EMERGENCY_STOP, eSetBits);
             }
 #else
+            flushActuatorCommandQueue();
+            flushSensorCommandQueue();
             safetyController.emergencyStopAll("Safe mode activated via MQTT command");
 #endif
 
@@ -815,6 +1429,11 @@ void routeIncomingMessage(const char* t, const char* p) {
     String zone_assign_topic = TopicBuilder::buildZoneAssignTopic();
 
     if (topic == zone_assign_topic) {
+        ConfigLaneGuard config_lane_guard;
+        if (!config_lane_guard.locked()) {
+            LOG_W(TAG, "Zone assignment dropped: config lane busy");
+            return;
+        }
         LOG_I(TAG, "╔════════════════════════════════════════╗");
         LOG_I(TAG, "║  ZONE ASSIGNMENT RECEIVED             ║");
         LOG_I(TAG, "╚════════════════════════════════════════╝");
@@ -832,6 +1451,7 @@ void routeIncomingMessage(const char* t, const char* p) {
             if (doc.containsKey("correlation_id")) {
                 correlationId = doc["correlation_id"].as<String>();
             }
+            correlationId = ensureCorrelationId(correlationId);
 
             // WP1: Empty zone_id = Zone Removal
             if (zone_id.length() == 0) {
@@ -869,9 +1489,7 @@ void routeIncomingMessage(const char* t, const char* p) {
                     ack_doc["master_zone_id"] = "";
                     ack_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
                     ack_doc["seq"] = mqttClient.getNextSeq();
-                    if (correlationId.length() > 0) {
-                        ack_doc["correlation_id"] = correlationId;
-                    }
+                    ack_doc["correlation_id"] = correlationId;
 
                     String ack_payload;
                     size_t written = serializeJson(ack_doc, ack_payload);
@@ -897,9 +1515,7 @@ void routeIncomingMessage(const char* t, const char* p) {
                     err_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
                     err_doc["seq"] = mqttClient.getNextSeq();
                     err_doc["message"] = "Failed to remove zone config";
-                    if (correlationId.length() > 0) {
-                        err_doc["correlation_id"] = correlationId;
-                    }
+                    err_doc["correlation_id"] = correlationId;
                     String error_response;
                     serializeJson(err_doc, error_response);
                     mqttClient.publish(ack_topic, error_response);
@@ -935,9 +1551,7 @@ void routeIncomingMessage(const char* t, const char* p) {
                 err_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
                 err_doc["seq"] = mqttClient.getNextSeq();
                 err_doc["message"] = "Zone validation failed";
-                if (correlationId.length() > 0) {
-                    err_doc["correlation_id"] = correlationId;
-                }
+                err_doc["correlation_id"] = correlationId;
                 String error_response;
                 serializeJson(err_doc, error_response);
                 mqttClient.publish(ack_topic, error_response);
@@ -1002,9 +1616,7 @@ void routeIncomingMessage(const char* t, const char* p) {
                 ack_doc["master_zone_id"] = master_zone_id;
                 ack_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
                 ack_doc["seq"] = mqttClient.getNextSeq();
-                if (correlationId.length() > 0) {
-                    ack_doc["correlation_id"] = correlationId;
-                }
+                ack_doc["correlation_id"] = correlationId;
 
                 String ack_payload;
                 size_t written = serializeJson(ack_doc, ack_payload);
@@ -1031,9 +1643,7 @@ void routeIncomingMessage(const char* t, const char* p) {
                 err_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
                 err_doc["seq"] = mqttClient.getNextSeq();
                 err_doc["message"] = "Failed to save zone config";
-                if (correlationId.length() > 0) {
-                    err_doc["correlation_id"] = correlationId;
-                }
+                err_doc["correlation_id"] = correlationId;
                 String error_response;
                 serializeJson(err_doc, error_response);
                 mqttClient.publish(ack_topic, error_response);
@@ -1048,6 +1658,11 @@ void routeIncomingMessage(const char* t, const char* p) {
     // M3-TODO: Queue to Core 1 (GPIOManager touches GPIO)
     String subzone_assign_topic = TopicBuilder::buildSubzoneAssignTopic();
     if (topic == subzone_assign_topic) {
+        ConfigLaneGuard config_lane_guard;
+        if (!config_lane_guard.locked()) {
+            LOG_W(TAG, "Subzone assignment dropped: config lane busy");
+            return;
+        }
         LOG_I(TAG, "╔════════════════════════════════════════╗");
         LOG_I(TAG, "║  SUBZONE ASSIGNMENT RECEIVED          ║");
         LOG_I(TAG, "╚════════════════════════════════════════╝");
@@ -1066,6 +1681,7 @@ void routeIncomingMessage(const char* t, const char* p) {
             if (doc.containsKey("correlation_id")) {
                 correlationId = doc["correlation_id"].as<String>();
             }
+            correlationId = ensureCorrelationId(correlationId);
 
             if (subzone_id.length() == 0) {
                 LOG_E(TAG, "Subzone assignment failed: subzone_id is empty");
@@ -1149,6 +1765,11 @@ void routeIncomingMessage(const char* t, const char* p) {
     // ─── Subzone Removal ─────────────────────────────────────────────────────
     String subzone_remove_topic = TopicBuilder::buildSubzoneRemoveTopic();
     if (topic == subzone_remove_topic) {
+        ConfigLaneGuard config_lane_guard;
+        if (!config_lane_guard.locked()) {
+            LOG_W(TAG, "Subzone removal dropped: config lane busy");
+            return;
+        }
         LOG_I(TAG, "╔════════════════════════════════════════╗");
         LOG_I(TAG, "║  SUBZONE REMOVAL RECEIVED             ║");
         LOG_I(TAG, "╚════════════════════════════════════════╝");
@@ -1189,6 +1810,11 @@ void routeIncomingMessage(const char* t, const char* p) {
     // ─── Subzone Safe-Mode ───────────────────────────────────────────────────
     String subzone_safe_topic = TopicBuilder::buildSubzoneSafeTopic();
     if (topic == subzone_safe_topic) {
+        ConfigLaneGuard config_lane_guard;
+        if (!config_lane_guard.locked()) {
+            LOG_W(TAG, "Subzone safe-mode dropped: config lane busy");
+            return;
+        }
         LOG_I(TAG, "╔════════════════════════════════════════╗");
         LOG_I(TAG, "║  SUBZONE SAFE-MODE RECEIVED           ║");
         LOG_I(TAG, "╚════════════════════════════════════════╝");
@@ -1237,8 +1863,10 @@ void routeIncomingMessage(const char* t, const char* p) {
 
     // ─── Server Status (LWT) — SAFETY-P5 ─────────────────────────────────────
     // Handles both: server crashes (broker publishes LWT) and graceful shutdowns
-    // (server publishes "offline" before disconnect). Also handles "online" to
-    // reset P1 timer when server restarts before next heartbeat cycle.
+    // (server publishes "offline" before disconnect).
+    // IMPORTANT precedence rule:
+    // - server/status = liveness hint only
+    // - heartbeat/ack = authoritative recovery + registration source
     if (topic.indexOf("/server/status") >= 0) {
         DynamicJsonDocument doc(256);
         DeserializationError error = deserializeJson(doc, payload);
@@ -1251,6 +1879,26 @@ void routeIncomingMessage(const char* t, const char* p) {
 
         if (strcmp(status, "offline") == 0) {
             const char* reason = doc["reason"] | "unknown";
+            unsigned long since_connect_ms = millis() - g_last_mqtt_connect_ms.load();
+            bool after_reconnect = g_mqtt_reconnect_count.load() > 0;
+            bool likely_stale_retain =
+                (strcmp(reason, "unexpected_disconnect") == 0) &&
+                after_reconnect &&
+                (since_connect_ms < 15000UL) &&
+                !mqttClient.isRegistrationConfirmed();
+
+            // SAFETY-P5 hardening:
+            // Ignore retained "offline/unexpected_disconnect" hints right after reconnect.
+            // Authoritative recovery is heartbeat ACK; stale retained LWT can otherwise
+            // force unnecessary offline transitions although transport is already back.
+            if (likely_stale_retain) {
+                LOG_W(
+                    TAG,
+                    "[SAFETY-P5] Ignoring stale server OFFLINE hint right after reconnect "
+                    "(reason=unexpected_disconnect, age_ms=" + String(since_connect_ms) + ")"
+                );
+                return;
+            }
             LOG_W(TAG, String("[SAFETY-P5] Server OFFLINE (reason: ") + reason + ")");
 
             if (offlineModeManager.getOfflineRuleCount() > 0) {
@@ -1261,22 +1909,19 @@ void routeIncomingMessage(const char* t, const char* p) {
                 actuatorManager.setAllActuatorsToSafeState();
                 LOG_W(TAG, "[SAFETY-P5] No offline rules — safe state immediately");
             }
+            LOG_W(TAG, "[SAFETY-P4] disconnect notified (path=P5)");
             offlineModeManager.onDisconnect();
 
         } else if (strcmp(status, "online") == 0) {
-            LOG_I(TAG, "[SAFETY-P5] Server ONLINE — resetting P1 timer");
-
-            // Reset P1 timer — prevents false trigger before first heartbeat ACK after restart
-            g_last_server_ack_ms.store(millis());
-
-            // Clear P1 triggered flag if it was set
-            if (g_server_timeout_triggered.load()) {
-                g_server_timeout_triggered.store(false);
-                LOG_I(TAG, "[SAFETY-P5] P1 timeout cleared via server online status");
+            // SAFETY-P4 bridge for server-only restarts:
+            // If broker transport stayed connected, onMqttConnectCallback() is not triggered.
+            // We still need to enter RECONNECTING (epoch++) so the next ACK contract can validate.
+            if (offlineModeManager.getMode() == OfflineMode::OFFLINE_ACTIVE) {
+                offlineModeManager.onReconnect();
+                LOG_I(TAG, "[SAFETY-P5] Server ONLINE hint received — P4 handover armed (waiting for authoritative heartbeat ACK)");
+            } else {
+                LOG_I(TAG, "[SAFETY-P5] Server ONLINE hint received — waiting for heartbeat ACK as authoritative recovery");
             }
-
-            // Trigger P4 recovery if currently in DISCONNECTED/RECONNECTING state
-            offlineModeManager.onServerAckReceived();
         }
         return;
     }
@@ -1295,15 +1940,54 @@ void routeIncomingMessage(const char* t, const char* p) {
             return;
         }
 
-        // Registration Gate: ANY valid heartbeat ACK = Server hat registriert
-        mqttClient.confirmRegistration();
+        if (!doc.containsKey("status")) {
+            offlineModeManager.onServerAckContractMismatch("MISSING_ACK_STATUS");
+            LOG_W(TAG, "[SAFETY-P4] Heartbeat ACK missing status — reject (fail-closed)");
+            return;
+        }
 
-        // SAFETY-P1 Mechanism D: Track server ACK timestamp
+        if (!doc.containsKey("handover_epoch")) {
+            offlineModeManager.onServerAckContractMismatch("MISSING_HANDOVER_EPOCH");
+            LOG_W(TAG, "[SAFETY-P4] Heartbeat ACK missing handover_epoch — reject (fail-closed)");
+            return;
+        }
+
+        JsonVariant epoch_variant = doc["handover_epoch"];
+        if (!epoch_variant.is<uint32_t>()) {
+            offlineModeManager.onServerAckContractMismatch("INVALID_HANDOVER_EPOCH_TYPE");
+            LOG_W(TAG, "[SAFETY-P4] Heartbeat ACK with non-numeric handover_epoch — reject (fail-closed)");
+            return;
+        }
+
+        uint32_t handover_epoch = epoch_variant.as<uint32_t>();
+        if (handover_epoch == 0) {
+            offlineModeManager.onServerAckContractMismatch("INVALID_HANDOVER_EPOCH");
+            LOG_W(TAG, "[SAFETY-P4] Heartbeat ACK with invalid handover_epoch=0 — reject (fail-closed)");
+            return;
+        }
+
+        const char* reject_code = nullptr;
+        if (!offlineModeManager.validateServerAckContract(handover_epoch, &reject_code)) {
+            offlineModeManager.onServerAckContractMismatch(reject_code != nullptr ? reject_code : "ACK_CONTRACT_MISMATCH");
+            LOG_W(TAG, String("[SAFETY-P4] Heartbeat ACK contract mismatch — reject code=") +
+                       String(reject_code != nullptr ? reject_code : "ACK_CONTRACT_MISMATCH"));
+            return;
+        }
+
+        // Registration Gate: confirm only after full ACK contract validation.
+        mqttClient.confirmRegistration();
+        // SAFETY-P1 Mechanism D: Track server ACK timestamp only for valid contract ACK.
         g_last_server_ack_ms.store(millis());
-        offlineModeManager.onServerAckReceived();  // SAFETY-P4
+        offlineModeManager.onServerAckReceived(handover_epoch);  // SAFETY-P4
         if (g_server_timeout_triggered.load()) {
             g_server_timeout_triggered.store(false);
-            LOG_I(TAG, "[SAFETY-P1] Server ACK restored — normal operation resumed");
+            uint32_t restore_count = g_ack_restore_transition_count.fetch_add(1) + 1;
+            LOG_I(TAG, "[SAFETY-P1] Server ACK restored — normal operation resumed (reason_code=ACK_RESTORE_VALID, transition_count=" +
+                       String(restore_count) + ")");
+        } else {
+            uint32_t guard_skip_count = g_ack_restore_guard_skip_count.fetch_add(1) + 1;
+            LOG_D(TAG, "[SAFETY-P1] ACK restore guard: timeout not active (reason_code=ACK_RESTORE_GUARD_SKIP, guard_skip_count=" +
+                       String(guard_skip_count) + ")");
         }
 
         const char* status = doc["status"] | "unknown";
@@ -1314,14 +1998,29 @@ void routeIncomingMessage(const char* t, const char* p) {
                   String(config_available ? "yes" : "no"));
 
         if (strcmp(status, "approved") == 0 || strcmp(status, "online") == 0) {
+            time_t approval_ts = server_time > 0 ? (time_t)server_time : timeManager.getUnixTimestamp();
+            configManager.setDeviceApproved(true, approval_ts);
+
+            if (isConfigPendingAfterResetState()) {
+                RuntimeReadinessSnapshot snapshot = collectRuntimeReadinessSnapshot();
+                RuntimeReadinessDecision readiness =
+                    evaluateRuntimeReadiness(snapshot, defaultRuntimeReadinessPolicy());
+                g_config_pending_exit_blocked_count.fetch_add(1);
+                publishConfigPendingTransitionEvent("exit_blocked_config_pending",
+                                                    "CONFIG_PENDING_RETAINS_STATE_ON_ACK",
+                                                    readiness,
+                                                    STATE_CONFIG_PENDING_AFTER_RESET,
+                                                    STATE_CONFIG_PENDING_AFTER_RESET,
+                                                    "heartbeat_ack");
+                evaluatePendingExit("heartbeat_ack");
+                return;
+            }
+
             if (g_system_config.current_state == STATE_PENDING_APPROVAL) {
                 LOG_I(TAG, "╔════════════════════════════════════════╗");
                 LOG_I(TAG, "║   DEVICE APPROVED BY SERVER            ║");
                 LOG_I(TAG, "╚════════════════════════════════════════╝");
                 LOG_I(TAG, "Transitioning from PENDING_APPROVAL to OPERATIONAL");
-
-                time_t approval_ts = server_time > 0 ? (time_t)server_time : timeManager.getUnixTimestamp();
-                configManager.setDeviceApproved(true, approval_ts);
 
                 g_system_config.current_state = STATE_OPERATIONAL;
                 configManager.saveSystemConfig(g_system_config);
@@ -1334,6 +2033,21 @@ void routeIncomingMessage(const char* t, const char* p) {
                 }
             }
         } else if (strcmp(status, "pending_approval") == 0) {
+            configManager.setDeviceApproved(false, 0);
+            if (isConfigPendingAfterResetState()) {
+                RuntimeReadinessSnapshot snapshot = collectRuntimeReadinessSnapshot();
+                RuntimeReadinessDecision readiness =
+                    evaluateRuntimeReadiness(snapshot, defaultRuntimeReadinessPolicy());
+                g_config_pending_exit_blocked_count.fetch_add(1);
+                publishConfigPendingTransitionEvent("exit_blocked_config_pending",
+                                                    "CONFIG_PENDING_RETAINS_STATE_ON_ACK",
+                                                    readiness,
+                                                    STATE_CONFIG_PENDING_AFTER_RESET,
+                                                    STATE_CONFIG_PENDING_AFTER_RESET,
+                                                    "heartbeat_ack");
+                evaluatePendingExit("heartbeat_ack");
+                return;
+            }
             if (g_system_config.current_state != STATE_PENDING_APPROVAL) {
                 LOG_I(TAG, "Server reports: PENDING APPROVAL - entering limited mode");
                 g_system_config.current_state = STATE_PENDING_APPROVAL;
@@ -1540,10 +2254,11 @@ void setup() {
     LOG_W(TAG, "Some configurations failed to load - using defaults");
   }
 
-  // Load configs into global variables
-  configManager.loadWiFiConfig(g_wifi_config);
-  configManager.loadZoneConfig(g_kaiser, g_master);
-  configManager.loadSystemConfig(g_system_config);
+  // Use cached values already loaded by loadAllConfigs() — avoid double NVS read
+  g_wifi_config = configManager.getWiFiConfig();
+  g_kaiser = configManager.getKaiser();
+  g_master = configManager.getMasterZone();
+  g_system_config = configManager.getSystemConfig();
 
   // ============================================
   // FIX: Use generated ESP ID when NVS read returns empty
@@ -1583,9 +2298,16 @@ void setup() {
     g_system_config.current_state = STATE_BOOT;
     g_system_config.safe_mode_reason = "";
     g_system_config.boot_count = 0;  // Reset boot counter to prevent false boot-loop detection
-    configManager.saveSystemConfig(g_system_config);
-
-    LOG_I(TAG, "State repaired - proceeding with normal boot flow");
+    bool repairPersisted = configManager.saveSystemConfig(g_system_config);
+    if (!repairPersisted) {
+      LOG_E(TAG, "State repair persist failed - switching to fail-closed provisioning mode");
+      g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
+      g_system_config.safe_mode_reason = "State repair persist failed";
+      LOG_E(TAG, "Operator action required: Re-run provisioning after NVS/storage check");
+      LOG_W(TAG, "State repair incomplete - continuing in STATE_SAFE_MODE_PROVISIONING");
+    } else {
+      LOG_I(TAG, "State repaired - proceeding with normal boot flow");
+    }
   }
 
   // ═══════════════════════════════════════════════════
@@ -1884,58 +2606,83 @@ void setup() {
   if (!wifiManager.connect(wifi_config)) {
     LOG_E(TAG, "WiFi connection failed");
 
-    // ═══════════════════════════════════════════════════
-    // NEW: WiFi failure triggers Provisioning Portal
-    // ═══════════════════════════════════════════════════
-    LOG_C(TAG, "╔════════════════════════════════════════╗");
-    LOG_C(TAG, "║  WIFI CONNECTION FAILED               ║");
-    LOG_C(TAG, "║  Opening Provisioning Portal...       ║");
-    LOG_C(TAG, "╚════════════════════════════════════════╝");
-
-    // Update system state
-    g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
-    g_system_config.safe_mode_reason = "WiFi connection to '" + wifi_config.ssid + "' failed";
-    configManager.saveSystemConfig(g_system_config);
-
-    // Initialize and start Provisioning Manager
-    if (!provisionManager.begin()) {
-      LOG_C(TAG, "ProvisionManager initialization failed!");
-      // LED blink pattern for hardware failure
-      pinMode(LED_PIN, OUTPUT);
-      while (true) {
-        for (int i = 0; i < 5; i++) {
-          digitalWrite(LED_PIN, HIGH);
-          delay(200);
-          digitalWrite(LED_PIN, LOW);
-          delay(200);
-        }
-        delay(2000);
-      }
-    }
-
-    if (provisionManager.startAPMode()) {
-      LOG_I(TAG, "╔════════════════════════════════════════╗");
-      LOG_I(TAG, "║  PROVISIONING PORTAL ACTIVE           ║");
-      LOG_I(TAG, "╚════════════════════════════════════════╝");
-      LOG_I(TAG, "Connect to: AutoOne-" + g_system_config.esp_id);
-      LOG_I(TAG, "Password: provision");
-      LOG_I(TAG, "Open browser: http://192.168.4.1");
-      LOG_I(TAG, "");
-      LOG_I(TAG, "Correct your WiFi credentials in the form.");
-      LOG_I(TAG, "setup() complete - loop() will handle provisioning");
-      return;  // Exit setup() early - loop() will handle provisioning
+    bool has_valid_local_config = hasValidLocalAutonomyConfig();
+    if (has_valid_local_config) {
+      g_boot_force_offline_autonomy = true;
+      g_system_config.current_state = STATE_OPERATIONAL;
+      g_system_config.safe_mode_reason = "Booted in local offline autonomy (WiFi unavailable)";
+      configManager.saveSystemConfig(g_system_config);
+      LOG_W(TAG, "[BOOT] WiFi unavailable, local config valid -> continue with offline autonomy runtime");
     } else {
-      LOG_C(TAG, "Failed to start AP Mode!");
-      // LED blink pattern for AP failure
-      pinMode(LED_PIN, OUTPUT);
-      while (true) {
-        for (int i = 0; i < 4; i++) {
-          digitalWrite(LED_PIN, HIGH);
-          delay(200);
-          digitalWrite(LED_PIN, LOW);
-          delay(200);
+      PortalDecisionContext decision_context;
+      decision_context.portal_already_open = portal_open_due_to_disconnect_;
+      decision_context.boot_force_offline_autonomy = g_boot_force_offline_autonomy;
+      decision_context.has_valid_local_autonomy_config = has_valid_local_config;
+      const char* decision_code = nullptr;
+      if (!mayOpenPortal(PortalOpenReason::WIFI_CONNECT_FAILURE, decision_context, &decision_code)) {
+        LOG_W(TAG, String("[PORTAL] WiFi-failure portal blocked (code=") +
+                   String(decision_code != nullptr ? decision_code : "UNKNOWN") + ")");
+        g_system_config.current_state = STATE_OPERATIONAL;
+        g_system_config.safe_mode_reason = "Portal blocked by authority guard";
+        configManager.saveSystemConfig(g_system_config);
+        g_boot_force_offline_autonomy = true;
+        LOG_W(TAG, "[BOOT] Falling back to local offline autonomy due to portal block");
+      } else {
+
+      // ═══════════════════════════════════════════════════
+      // NEW: WiFi failure triggers Provisioning Portal
+      // ═══════════════════════════════════════════════════
+      LOG_C(TAG, "╔════════════════════════════════════════╗");
+      LOG_C(TAG, "║  WIFI CONNECTION FAILED               ║");
+      LOG_C(TAG, "║  Opening Provisioning Portal...       ║");
+      LOG_C(TAG, "╚════════════════════════════════════════╝");
+
+      // Update system state
+      g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
+      g_system_config.safe_mode_reason = "WiFi connection to '" + wifi_config.ssid + "' failed";
+      configManager.saveSystemConfig(g_system_config);
+
+      // Initialize and start Provisioning Manager
+      if (!provisionManager.begin()) {
+        LOG_C(TAG, "ProvisionManager initialization failed!");
+        // LED blink pattern for hardware failure
+        pinMode(LED_PIN, OUTPUT);
+        while (true) {
+          for (int i = 0; i < 5; i++) {
+            digitalWrite(LED_PIN, HIGH);
+            delay(200);
+            digitalWrite(LED_PIN, LOW);
+            delay(200);
+          }
+          delay(2000);
         }
-        delay(2000);
+      }
+
+      if (provisionManager.startAPMode()) {
+        LOG_I(TAG, "╔════════════════════════════════════════╗");
+        LOG_I(TAG, "║  PROVISIONING PORTAL ACTIVE           ║");
+        LOG_I(TAG, "╚════════════════════════════════════════╝");
+        LOG_I(TAG, "Connect to: AutoOne-" + g_system_config.esp_id);
+        LOG_I(TAG, "Password: provision");
+        LOG_I(TAG, "Open browser: http://192.168.4.1");
+        LOG_I(TAG, "");
+        LOG_I(TAG, "Correct your WiFi credentials in the form.");
+        LOG_I(TAG, "setup() complete - loop() will handle provisioning");
+        return;  // Exit setup() early - loop() will handle provisioning
+      } else {
+        LOG_C(TAG, "Failed to start AP Mode!");
+        // LED blink pattern for AP failure
+        pinMode(LED_PIN, OUTPUT);
+        while (true) {
+          for (int i = 0; i < 4; i++) {
+            digitalWrite(LED_PIN, HIGH);
+            delay(200);
+            digitalWrite(LED_PIN, LOW);
+            delay(200);
+          }
+          delay(2000);
+        }
+      }
       }
     }
   } else {
@@ -1947,6 +2694,11 @@ void setup() {
     LOG_E(TAG, "MQTTClient initialization failed!");
     return;
   }
+
+  // SAFETY-RTOS M3: Publish queue MUST exist before MQTT_EVENT_CONNECTED / on_connect.
+  // Previously init ran after Phase 5; early connect callback could publish from Core 1
+  // before g_publish_queue existed (drops + spurious CircuitBreaker failure).
+  initPublishQueue();
 
   // SAFETY-P1 Mechanism A: Register connect callback before first connect
   mqttClient.setOnConnectCallback(onMqttConnectCallback);
@@ -1963,68 +2715,93 @@ void setup() {
   if (!mqttClient.connect(mqtt_config)) {
     LOG_E(TAG, "MQTT connection failed");
 
-    // ═══════════════════════════════════════════════════
-    // MQTT FAILURE → PROVISIONING PORTAL RECOVERY
-    // ═══════════════════════════════════════════════════
-    // Same pattern as WiFi failure recovery (see STEP 10 above).
-    // If MQTT broker is unreachable, the server IP or MQTT port
-    // in the user's config is likely wrong. Re-open the portal
-    // so the user can correct the configuration.
-    LOG_C(TAG, "╔════════════════════════════════════════╗");
-    LOG_C(TAG, "║  MQTT CONNECTION FAILED                ║");
-    LOG_C(TAG, "║  Opening Provisioning Portal...        ║");
-    LOG_C(TAG, "╚════════════════════════════════════════╝");
-    LOG_C(TAG, "Server: " + mqtt_config.server + ":" + String(mqtt_config.port));
-    LOG_C(TAG, "Possible causes:");
-    LOG_C(TAG, "  1. Wrong MQTT port in configuration");
-    LOG_C(TAG, "  2. Server IP not reachable");
-    LOG_C(TAG, "  3. MQTT broker not running");
-
-    // Update system state
-    g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
-    g_system_config.safe_mode_reason = "MQTT connection to '" + mqtt_config.server +
-                                       ":" + String(mqtt_config.port) + "' failed";
-    configManager.saveSystemConfig(g_system_config);
-
-    // Config NICHT loeschen — Portal mit vorausgefuellter Config oeffnen
-    portal_open_due_to_disconnect_ = true;
-
-    // Initialize and start Provisioning Manager
-    if (!provisionManager.begin()) {
-      LOG_C(TAG, "ProvisionManager initialization failed!");
-      pinMode(LED_PIN, OUTPUT);
-      while (true) {
-        for (int i = 0; i < 6; i++) {  // 6x blink = MQTT failure code
-          digitalWrite(LED_PIN, HIGH);
-          delay(200);
-          digitalWrite(LED_PIN, LOW);
-          delay(200);
-        }
-        delay(2000);
-      }
-    }
-
-    if (provisionManager.startAPModeForReconfig()) {
-      LOG_I(TAG, "╔════════════════════════════════════════╗");
-      LOG_I(TAG, "║  PROVISIONING PORTAL ACTIVE            ║");
-      LOG_I(TAG, "║  Config vorausgefuellt, Reconnect OK   ║");
-      LOG_I(TAG, "╚════════════════════════════════════════╝");
-      LOG_I(TAG, "Connect to: AutoOne-" + g_system_config.esp_id);
-      LOG_I(TAG, "Password: provision");
-      LOG_I(TAG, "Open browser: http://192.168.4.1");
-      LOG_I(TAG, "Correct Server IP / MQTT Port if needed. Reconnect laeuft im Hintergrund.");
-      return;  // Exit setup() early - loop() will handle provisioning + reconnect
+    bool has_valid_local_config = hasValidLocalAutonomyConfig();
+    if (has_valid_local_config) {
+      g_boot_force_offline_autonomy = true;
+      g_system_config.current_state = STATE_OPERATIONAL;
+      g_system_config.safe_mode_reason = "Booted in local offline autonomy (MQTT unavailable)";
+      configManager.saveSystemConfig(g_system_config);
+      LOG_W(TAG, "[BOOT] MQTT unavailable, local config valid -> continue with offline autonomy runtime");
     } else {
-      LOG_C(TAG, "Failed to start AP+STA Mode after MQTT failure!");
-      pinMode(LED_PIN, OUTPUT);
-      while (true) {
-        for (int i = 0; i < 4; i++) {
-          digitalWrite(LED_PIN, HIGH);
-          delay(200);
-          digitalWrite(LED_PIN, LOW);
-          delay(200);
+      PortalDecisionContext decision_context;
+      decision_context.portal_already_open = portal_open_due_to_disconnect_;
+      decision_context.boot_force_offline_autonomy = g_boot_force_offline_autonomy;
+      decision_context.has_valid_local_autonomy_config = has_valid_local_config;
+      const char* decision_code = nullptr;
+      if (!mayOpenPortal(PortalOpenReason::MQTT_CONNECT_FAILURE, decision_context, &decision_code)) {
+        LOG_W(TAG, String("[PORTAL] MQTT-failure portal blocked (code=") +
+                   String(decision_code != nullptr ? decision_code : "UNKNOWN") + ")");
+        g_system_config.current_state = STATE_OPERATIONAL;
+        g_system_config.safe_mode_reason = "Portal blocked by authority guard";
+        configManager.saveSystemConfig(g_system_config);
+        g_boot_force_offline_autonomy = true;
+        LOG_W(TAG, "[BOOT] Falling back to local offline autonomy due to portal block");
+      } else {
+
+      // ═══════════════════════════════════════════════════
+      // MQTT FAILURE → PROVISIONING PORTAL RECOVERY
+      // ═══════════════════════════════════════════════════
+      // Same pattern as WiFi failure recovery (see STEP 10 above).
+      // If MQTT broker is unreachable, the server IP or MQTT port
+      // in the user's config is likely wrong. Re-open the portal
+      // so the user can correct the configuration.
+      LOG_C(TAG, "╔════════════════════════════════════════╗");
+      LOG_C(TAG, "║  MQTT CONNECTION FAILED                ║");
+      LOG_C(TAG, "║  Opening Provisioning Portal...        ║");
+      LOG_C(TAG, "╚════════════════════════════════════════╝");
+      LOG_C(TAG, "Server: " + mqtt_config.server + ":" + String(mqtt_config.port));
+      LOG_C(TAG, "Possible causes:");
+      LOG_C(TAG, "  1. Wrong MQTT port in configuration");
+      LOG_C(TAG, "  2. Server IP not reachable");
+      LOG_C(TAG, "  3. MQTT broker not running");
+
+      // Update system state
+      g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
+      g_system_config.safe_mode_reason = "MQTT connection to '" + mqtt_config.server +
+                                         ":" + String(mqtt_config.port) + "' failed";
+      configManager.saveSystemConfig(g_system_config);
+
+      // Config NICHT loeschen — Portal mit vorausgefuellter Config oeffnen
+      portal_open_due_to_disconnect_ = true;
+
+      // Initialize and start Provisioning Manager
+      if (!provisionManager.begin()) {
+        LOG_C(TAG, "ProvisionManager initialization failed!");
+        pinMode(LED_PIN, OUTPUT);
+        while (true) {
+          for (int i = 0; i < 6; i++) {  // 6x blink = MQTT failure code
+            digitalWrite(LED_PIN, HIGH);
+            delay(200);
+            digitalWrite(LED_PIN, LOW);
+            delay(200);
+          }
+          delay(2000);
         }
-        delay(2000);
+      }
+
+      if (provisionManager.startAPModeForReconfig()) {
+        LOG_I(TAG, "╔════════════════════════════════════════╗");
+        LOG_I(TAG, "║  PROVISIONING PORTAL ACTIVE            ║");
+        LOG_I(TAG, "║  Config vorausgefuellt, Reconnect OK   ║");
+        LOG_I(TAG, "╚════════════════════════════════════════╝");
+        LOG_I(TAG, "Connect to: AutoOne-" + g_system_config.esp_id);
+        LOG_I(TAG, "Password: provision");
+        LOG_I(TAG, "Open browser: http://192.168.4.1");
+        LOG_I(TAG, "Correct Server IP / MQTT Port if needed. Reconnect laeuft im Hintergrund.");
+        return;  // Exit setup() early - loop() will handle provisioning + reconnect
+      } else {
+        LOG_C(TAG, "Failed to start AP+STA Mode after MQTT failure!");
+        pinMode(LED_PIN, OUTPUT);
+        while (true) {
+          for (int i = 0; i < 4; i++) {
+            digitalWrite(LED_PIN, HIGH);
+            delay(200);
+            digitalWrite(LED_PIN, LOW);
+            delay(200);
+          }
+          delay(2000);
+        }
+      }
       }
     }
   } else {
@@ -2157,6 +2934,8 @@ void setup() {
   LOG_I(TAG, "╔════════════════════════════════════════╗");
   LOG_I(TAG, "║   Phase 4: Sensor System               ║");
   LOG_I(TAG, "╚════════════════════════════════════════╝");
+  uint8_t runtime_sensor_count = 0;
+  uint8_t runtime_actuator_count = 0;
 
   // Sensor Manager
   if (!sensorManager.begin()) {
@@ -2174,6 +2953,7 @@ void setup() {
     SensorConfig sensors[10];
     uint8_t loaded_count = 0;
     if (configManager.loadSensorConfig(sensors, 10, loaded_count)) {
+      runtime_sensor_count = loaded_count;
       LOG_I(TAG, "Loaded " + String(loaded_count) + " sensor configs from NVS");
       for (uint8_t i = 0; i < loaded_count; i++) {
         sensorManager.configureSensor(sensors[i]);
@@ -2223,6 +3003,7 @@ void setup() {
     ActuatorConfig actuators[MAX_ACTUATORS];
     uint8_t loaded_actuator_count = 0;
     if (configManager.loadActuatorConfig(actuators, MAX_ACTUATORS, loaded_actuator_count)) {
+      runtime_actuator_count = loaded_actuator_count;
       LOG_I(TAG, "Loaded " + String(loaded_actuator_count) + " actuator configs from NVS");
       for (uint8_t i = 0; i < loaded_actuator_count; i++) {
         actuatorManager.configureActuator(actuators[i]);
@@ -2234,6 +3015,41 @@ void setup() {
 
   // SAFETY-P4: Load persisted offline rules from NVS
   offlineModeManager.loadOfflineRulesFromNVS();
+  uint8_t offline_rule_count = offlineModeManager.getOfflineRuleCount();
+  bool runtime_has_any_config =
+      (runtime_sensor_count > 0) || (runtime_actuator_count > 0) || (offline_rule_count > 0);
+  RuntimeReadinessSnapshot boot_snapshot{
+      runtime_sensor_count,
+      runtime_actuator_count,
+      offline_rule_count
+  };
+  RuntimeReadinessDecision boot_readiness =
+      evaluateRuntimeReadiness(boot_snapshot, defaultRuntimeReadinessPolicy());
+  bool runtime_complete = boot_readiness.ready;
+  if (runtime_has_any_config && !runtime_complete &&
+      g_system_config.current_state != STATE_SAFE_MODE &&
+      g_system_config.current_state != STATE_SAFE_MODE_PROVISIONING &&
+      g_system_config.current_state != STATE_ERROR) {
+    SystemState before_state = g_system_config.current_state;
+    LOG_W(TAG, String("[BOOT] Runtime config partial after reset: sensors=") + String(runtime_sensor_count) +
+               ", actuators=" + String(runtime_actuator_count) +
+               ", offline_rules=" + String(offline_rule_count) +
+               ", policy_decision=" + String(boot_readiness.decision_code));
+    g_system_config.current_state = STATE_CONFIG_PENDING_AFTER_RESET;
+    g_system_config.safe_mode_reason = "CONFIG_PENDING_AFTER_RESET";
+    configManager.saveSystemConfig(g_system_config);
+    g_config_pending_enter_count.fetch_add(1);
+    publishConfigPendingTransitionEvent("entered_config_pending",
+                                        "CONFIG_PENDING_AFTER_RESET",
+                                        boot_readiness,
+                                        before_state,
+                                        STATE_CONFIG_PENDING_AFTER_RESET,
+                                        "boot_runtime_partial");
+  }
+  if (g_boot_force_offline_autonomy) {
+    LOG_W(TAG, "[BOOT] Entering local offline autonomy at startup (network unavailable)");
+    offlineModeManager.onDisconnect();
+  }
 
   LOG_I(TAG, "╔════════════════════════════════════════╗");
   LOG_I(TAG, "║   Phase 5: Actuator System READY      ║");
@@ -2242,6 +3058,12 @@ void setup() {
   // ============================================
   // SAFETY-RTOS M4: Config-Queue (BEFORE tasks; mutexes already created in STEP 2.1)
   // ============================================
+  if (g_config_lane_mutex == nullptr) {
+    g_config_lane_mutex = xSemaphoreCreateMutex();
+    if (g_config_lane_mutex == nullptr) {
+      LOG_C(TAG, "[SYNC] Failed to create config lane mutex");
+    }
+  }
   initConfigUpdateQueue(); // Core 0→1 config push queue (5 slots × 2049 B ≈ 10 KB)
 
   // ============================================
@@ -2250,7 +3072,7 @@ void setup() {
   // Queues MUST be created before tasks — tasks read from queues immediately on start.
   initActuatorCommandQueue();
   initSensorCommandQueue();
-  initPublishQueue();   // M3: Core 1 → Core 0 publish queue
+  // initPublishQueue: moved to Phase 2 (immediately after mqttClient.begin)
 
   createSafetyTask();   // Core 1, Priority 5 — Safety/Sensor/Actuator
 
@@ -2415,20 +3237,32 @@ void handleWatchdogTimeout() {
  *        Called from Safety-Task (core 1). Atomic read/write for cross-core safety.
  */
 void checkServerAckTimeout() {
-  if (mqttClient.isConnected() && g_last_server_ack_ms.load() > 0 && !g_server_timeout_triggered.load()) {
+  if (mqttClient.isConnected() && g_last_server_ack_ms.load() > 0) {
+    if (g_server_timeout_triggered.load()) {
+      uint32_t guard_skip_count = g_ack_timeout_guard_skip_count.fetch_add(1) + 1;
+      LOG_D(TAG, "[SAFETY-P1] ACK timeout guard: already timed out (reason_code=ACK_TIMEOUT_GUARD_ALREADY_TRIGGERED, guard_skip_count=" +
+                 String(guard_skip_count) + ")");
+      return;
+    }
+
     if (millis() - g_last_server_ack_ms.load() > SERVER_ACK_TIMEOUT_MS) {
       g_server_timeout_triggered.store(true);
+      uint32_t timeout_count = g_ack_timeout_transition_count.fetch_add(1) + 1;
       if (offlineModeManager.getOfflineRuleCount() > 0) {
         LOG_W(TAG, "[SAFETY-P1] Server ACK timeout (" + String(SERVER_ACK_TIMEOUT_MS / 1000) +
                    "s) — delegating to P4 (" +
-                   String(offlineModeManager.getOfflineRuleCount()) + " rules)");
+                   String(offlineModeManager.getOfflineRuleCount()) +
+                   " rules, reason_code=ACK_TIMEOUT_TO_P4, transition_count=" +
+                   String(timeout_count) + ")");
       } else {
         if (actuatorManager.isInitialized()) {
           actuatorManager.setAllActuatorsToSafeState();
         }
         LOG_W(TAG, "[SAFETY-P1] Server ACK timeout (" + String(SERVER_ACK_TIMEOUT_MS / 1000) +
-                   "s) — no offline rules, safe state immediately");
+                   "s) — no offline rules, safe state immediately (reason_code=ACK_TIMEOUT_SAFE_STATE, transition_count=" +
+                   String(timeout_count) + ")");
       }
+      LOG_W(TAG, "[SAFETY-P4] disconnect notified (path=P1)");
       offlineModeManager.onDisconnect();  // ALWAYS — starts P4 state machine
     }
   }
@@ -2458,6 +3292,7 @@ static void loopLegacySingleThreadedWhenNoRtosTasks() {
   static bool first_loop_logged = false;
   if (!first_loop_logged) {
     LOG_I(TAG, "=== FIRST LOOP ITERATION (legacy path, no RTOS comm/safety tasks) ===");
+    LOG_W(TAG, "[SAFETY-RTOS] Legacy single-thread fallback active: core-isolation guarantees are NOT active");
     LOG_I(TAG, "System State: " + String(g_system_config.current_state));
     LOG_I(TAG, "Critical Errors: " + String(errorTracker.hasCriticalErrors() ? "YES" : "NO"));
     first_loop_logged = true;
@@ -2508,7 +3343,8 @@ static void loopLegacySingleThreadedWhenNoRtosTasks() {
     return;
   }
 
-  if (g_system_config.current_state == STATE_PENDING_APPROVAL) {
+  if (g_system_config.current_state == STATE_PENDING_APPROVAL ||
+      g_system_config.current_state == STATE_CONFIG_PENDING_AFTER_RESET) {
     wifiManager.loop();
     mqttClient.loop();
 #ifndef MQTT_USE_PUBSUBCLIENT
@@ -2534,23 +3370,41 @@ static void loopLegacySingleThreadedWhenNoRtosTasks() {
 #ifndef MQTT_USE_PUBSUBCLIENT
   mqttClient.processPublishQueue();
 #endif
+  // Legacy fallback: explicitly drain command/config queues in single-thread mode.
+  processActuatorCommandQueue();
+  processSensorCommandQueue();
+  processConfigUpdateQueue();
 
   {
     static const unsigned long PORTAL_OPEN_DEBOUNCE_MS = 30000;
     static unsigned long disconnect_start = 0;
 
-    if (g_system_config.current_state == STATE_OPERATIONAL && !mqttClient.isConnected()) {
+    if (g_system_config.current_state == STATE_OPERATIONAL && !mqttClient.isConnected() && !WiFi.isConnected()) {
       if (disconnect_start == 0) {
         disconnect_start = millis();
-      } else if (millis() - disconnect_start > PORTAL_OPEN_DEBOUNCE_MS && !portal_open_due_to_disconnect_) {
-        LOG_I(TAG, "Config-Portal geoeffnet (Server getrennt), Reconnect laeuft im Hintergrund");
-        g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
-        g_system_config.safe_mode_reason = "MQTT disconnected (" + String(PORTAL_OPEN_DEBOUNCE_MS / 1000) + "s)";
-        configManager.saveSystemConfig(g_system_config);
-        if (provisionManager.startAPModeForReconfig()) {
-          portal_open_due_to_disconnect_ = true;
+      } else if (millis() - disconnect_start > PORTAL_OPEN_DEBOUNCE_MS &&
+                 !portal_open_due_to_disconnect_) {
+        PortalDecisionContext decision_context;
+        decision_context.portal_already_open = portal_open_due_to_disconnect_;
+        decision_context.boot_force_offline_autonomy = g_boot_force_offline_autonomy;
+        decision_context.has_valid_local_autonomy_config = false;
+        const char* decision_code = nullptr;
+        bool portal_allowed = mayOpenPortal(PortalOpenReason::DISCONNECT_DEBOUNCE, decision_context, &decision_code);
+        if (!portal_allowed) {
+          LOG_W(TAG, String("[PORTAL] legacy disconnect portal blocked (code=") +
+                     String(decision_code != nullptr ? decision_code : "UNKNOWN") + ")");
+          disconnect_start = 0;
+          // Keep running in operational degraded mode; no portal escalation.
+        } else {
+          LOG_I(TAG, "Config-Portal geoeffnet (Server getrennt), Reconnect laeuft im Hintergrund");
+          g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
+          g_system_config.safe_mode_reason = "MQTT disconnected (" + String(PORTAL_OPEN_DEBOUNCE_MS / 1000) + "s)";
+          configManager.saveSystemConfig(g_system_config);
+          if (provisionManager.startAPModeForReconfig()) {
+            portal_open_due_to_disconnect_ = true;
+          }
+          disconnect_start = 0;
         }
-        disconnect_start = 0;
       }
     } else {
       disconnect_start = 0;
@@ -2567,18 +3421,33 @@ static void loopLegacySingleThreadedWhenNoRtosTasks() {
         LOG_W(TAG, "MQTT persistent failure timer started (5 min to recovery)");
       } else if (millis() - mqtt_failure_start > MQTT_PERSISTENT_FAILURE_TIMEOUT_MS) {
         if (!portal_open_due_to_disconnect_) {
-          LOG_C(TAG, "╔════════════════════════════════════════╗");
-          LOG_C(TAG, "║  MQTT PERSISTENT FAILURE (5 min)       ║");
-          LOG_C(TAG, "║  Config-Portal oeffnen...              ║");
-          LOG_C(TAG, "╚════════════════════════════════════════╝");
-          g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
-          g_system_config.safe_mode_reason = "MQTT persistent failure (5 min Circuit Breaker OPEN)";
-          configManager.saveSystemConfig(g_system_config);
-          if (provisionManager.startAPModeForReconfig()) {
-            portal_open_due_to_disconnect_ = true;
+          PortalDecisionContext decision_context;
+          decision_context.portal_already_open = portal_open_due_to_disconnect_;
+          decision_context.boot_force_offline_autonomy = g_boot_force_offline_autonomy;
+          decision_context.has_valid_local_autonomy_config = false;
+          const char* decision_code = nullptr;
+          bool portal_allowed = mayOpenPortal(PortalOpenReason::MQTT_PERSISTENT_FAILURE, decision_context, &decision_code);
+          if (!portal_allowed) {
+            LOG_W(TAG, String("[PORTAL] legacy persistent-failure portal blocked (code=") +
+                       String(decision_code != nullptr ? decision_code : "UNKNOWN") + ")");
+            mqtt_failure_start = 0;
+            // Keep running in operational degraded mode; no portal escalation.
+          } else {
+            LOG_C(TAG, "╔════════════════════════════════════════╗");
+            LOG_C(TAG, "║  MQTT PERSISTENT FAILURE (5 min)       ║");
+            LOG_C(TAG, "║  Config-Portal oeffnen...              ║");
+            LOG_C(TAG, "╚════════════════════════════════════════╝");
+            g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
+            g_system_config.safe_mode_reason = "MQTT persistent failure (5 min Circuit Breaker OPEN)";
+            configManager.saveSystemConfig(g_system_config);
+            if (!provisionManager.isInitialized() && !provisionManager.begin()) {
+              LOG_E(TAG, "ProvisionManager init failed — cannot open portal");
+            } else if (provisionManager.startAPModeForReconfig()) {
+              portal_open_due_to_disconnect_ = true;
+            }
+            mqtt_failure_start = 0;
           }
         }
-        mqtt_failure_start = 0;
       }
     } else {
       if (mqtt_failure_start != 0) {
@@ -2618,30 +3487,14 @@ void loop() {
 // ============================================
 // MQTT MESSAGE HANDLERS (PHASE 4)
 // ============================================
-void handleSensorConfig(const String& payload) {
+bool handleSensorConfig(JsonObject doc, const String& correlationId) {
   LOG_I(TAG, "Handling sensor configuration from MQTT");
 
-  // MQTT_MAX_PACKET_SIZE=2048 — payload cannot exceed 2048 bytes (MEM-OPT-4)
-  DynamicJsonDocument doc(2048);
-  DeserializationError error = deserializeJson(doc, payload);
-  if (error) {
-    String message = "Failed to parse sensor config JSON: " + String(error.c_str());
-    LOG_E(TAG, message);
-    ConfigResponseBuilder::publishError(
-        ConfigType::SENSOR, ConfigErrorCode::JSON_PARSE_ERROR, message);
-    return;
-  }
-
-  // Phase 3: Extract correlation_id for event tracking
-  String correlationId = "";
-  if (doc.containsKey("correlation_id")) {
-    correlationId = doc["correlation_id"].as<String>();
-  }
-
+  // CP-F2: doc is pre-parsed by processConfigUpdateQueue — no local deserializeJson.
   // Skip silently if payload has no 'sensors' key (actuator-only config)
   if (!doc.containsKey("sensors")) {
     LOG_D(TAG, "No 'sensors' key in payload — skipping (actuator-only config)");
-    return;
+    return true;
   }
 
   JsonArray sensors = doc["sensors"].as<JsonArray>();
@@ -2651,7 +3504,7 @@ void handleSensorConfig(const String& payload) {
     ConfigResponseBuilder::publishError(
         ConfigType::SENSOR, ConfigErrorCode::MISSING_FIELD, message,
         JsonVariantConst(), correlationId);
-    return;
+    return false;
   }
 
   size_t total = sensors.size();
@@ -2661,7 +3514,7 @@ void handleSensorConfig(const String& payload) {
     ConfigResponseBuilder::publishSuccess(ConfigType::SENSOR, 0,
                                           "No sensors configured",
                                           correlationId);
-    return;
+    return true;
   }
 
   // Phase 4: Collect failures for aggregated response
@@ -2689,6 +3542,7 @@ void handleSensorConfig(const String& payload) {
       fail_count,
       failures,
       correlationId);
+  return fail_count == 0;
 }
 
 // ============================================
@@ -2875,30 +3729,19 @@ bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj) {
   return success;
 }
 
-void handleActuatorConfig(const String& payload) {
+bool handleActuatorConfig(JsonObject doc, const String& correlationId) {
   LOG_I(TAG, "Handling actuator configuration from MQTT");
-
-  // Phase 3: Extract correlation_id for event tracking
-  String correlationId = "";
-  DynamicJsonDocument tempDoc(256);
-  if (deserializeJson(tempDoc, payload) == DeserializationError::Ok) {
-    if (tempDoc.containsKey("correlation_id")) {
-      correlationId = tempDoc["correlation_id"].as<String>();
-    }
-  }
-
-  actuatorManager.handleActuatorConfig(payload, correlationId);
+  // CP-F2: Pass pre-parsed actuators array — no local deserializeJson.
+  return actuatorManager.handleActuatorConfig(doc["actuators"].as<JsonArray>(), correlationId);
 }
 
 // ============================================
 // SAFETY-P4: Offline Rules Config Handler
 // ============================================
-void handleOfflineRulesConfig(const String& payload) {
-  DynamicJsonDocument doc(2048);
-  if (deserializeJson(doc, payload) != DeserializationError::Ok) {
-    return;
-  }
-  offlineModeManager.parseOfflineRules(doc.as<JsonObject>());
+bool handleOfflineRulesConfig(JsonObject doc, const String& correlationId) {
+  (void)correlationId;
+  // CP-F2: Pass pre-parsed root doc — parseOfflineRules extracts "offline_rules" key internally.
+  return offlineModeManager.parseOfflineRules(doc);
 }
 
 // ============================================
@@ -2910,7 +3753,7 @@ void handleOfflineRulesConfig(const String& payload) {
  * Topic: kaiser/{id}/esp/{esp_id}/sensor/{gpio}/command
  * Payload: {"command": "measure", "request_id": "req_12345"}
  */
-void handleSensorCommand(const String& topic, const String& payload) {
+bool handleSensorCommand(const String& topic, const String& payload) {
   LOG_I(TAG, "Sensor command received: " + topic);
 
   // Extract GPIO from topic
@@ -2920,7 +3763,7 @@ void handleSensorCommand(const String& topic, const String& payload) {
 
   if (sensor_pos < 0 || command_pos < 0 || sensor_pos >= command_pos) {
     LOG_E(TAG, "Invalid sensor command topic format: " + topic);
-    return;
+    return false;
   }
 
   // Extract GPIO string between "/sensor/" and "/command"
@@ -2929,7 +3772,7 @@ void handleSensorCommand(const String& topic, const String& payload) {
 
   if (gpio == 0 && gpio_str != "0") {
     LOG_E(TAG, "Failed to parse GPIO from topic: " + topic);
-    return;
+    return false;
   }
 
   // Parse JSON payload
@@ -2938,7 +3781,7 @@ void handleSensorCommand(const String& topic, const String& payload) {
 
   if (error) {
     LOG_E(TAG, "Failed to parse sensor command JSON: " + String(error.c_str()));
-    return;
+    return false;
   }
 
   String command = doc["command"] | "";
@@ -2969,11 +3812,14 @@ void handleSensorCommand(const String& topic, const String& payload) {
 
     if (success) {
       LOG_I(TAG, "Manual measurement completed for GPIO " + String(gpio));
+      return true;
     } else {
       LOG_W(TAG, "Manual measurement failed for GPIO " + String(gpio));
+      return false;
     }
   } else {
     LOG_W(TAG, "Unknown sensor command: " + command);
+    return false;
   }
 }
 

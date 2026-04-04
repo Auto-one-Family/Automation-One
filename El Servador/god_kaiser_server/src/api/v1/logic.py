@@ -30,7 +30,7 @@ from ...core.exceptions import RuleNotFoundException, RuleValidationException
 from ...core.logging_config import get_logger
 from ...db.repositories import LogicRepository
 from ...services.actuator_service import ActuatorService
-from ...services.logic_service import LogicService
+from ...services.logic_service import LogicService, get_affected_esp_ids
 from ...schemas import (
     ExecutionHistoryEntry,
     ExecutionHistoryResponse,
@@ -44,11 +44,47 @@ from ...schemas import (
     RuleToggleResponse,
 )
 from ...schemas.common import PaginationMeta
-from ..deps import ActiveUser, DBSession, OperatorUser, get_actuator_service
+from ..deps import (
+    ActiveUser,
+    DBSession,
+    OperatorUser,
+    get_actuator_service,
+    get_config_builder,
+    get_esp_service,
+)
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/v1/logic", tags=["logic"])
+
+
+async def _push_config_to_affected_esps(db: DBSession, esp_ids: set[str], context: str) -> None:
+    """Build and push combined config for each affected ESP (best effort)."""
+    if not esp_ids:
+        return
+
+    config_builder = get_config_builder(db)
+    esp_service = get_esp_service(db)
+
+    for esp_id in esp_ids:
+        try:
+            combined_config = await config_builder.build_combined_config(esp_id, db)
+            config_sent = await esp_service.send_config(esp_id, combined_config)
+            if config_sent.get("success"):
+                logger.info("Config published to ESP %s after %s", esp_id, context)
+            else:
+                logger.warning(
+                    "Config publish failed for ESP %s after %s (DB save was successful)",
+                    esp_id,
+                    context,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to publish config to ESP %s after %s: %s",
+                esp_id,
+                context,
+                exc,
+            )
 
 
 # =============================================================================
@@ -233,6 +269,11 @@ async def create_rule(
     logger.info(
         f"Logic rule created: '{created.name}' (ID: {created.id}) by {current_user.username}"
     )
+    await _push_config_to_affected_esps(
+        db,
+        get_affected_esp_ids(created),
+        context="logic rule create",
+    )
 
     exec_count = await logic_repo.get_execution_count(created.id)
     last_exec = await logic_repo.get_last_execution(created.id)
@@ -305,6 +346,11 @@ async def update_rule(
     last_exec = await logic_repo.get_last_execution(rule.id)
 
     logger.info(f"Logic rule updated: '{rule.name}' (ID: {rule.id}) by {current_user.username}")
+    await _push_config_to_affected_esps(
+        db,
+        get_affected_esp_ids(rule),
+        context="logic rule update",
+    )
 
     return LogicRuleResponse(
         id=rule.id,
@@ -362,11 +408,18 @@ async def delete_rule(
     if not rule:
         raise RuleNotFoundException(rule_id)
 
+    affected_esp_ids = get_affected_esp_ids(rule)
+
     # Delete rule
     await logic_repo.delete(rule_id)
     await db.commit()
 
     logger.info(f"Logic rule deleted: '{rule.name}' (ID: {rule.id}) by {current_user.username}")
+    await _push_config_to_affected_esps(
+        db,
+        affected_esp_ids,
+        context="logic rule delete",
+    )
 
     return LogicRuleResponse(
         id=rule.id,
@@ -471,6 +524,11 @@ async def toggle_rule(
     logger.info(
         f"Logic rule {action}: '{rule.name}' (ID: {rule.id}) by {current_user.username}"
         + (f" - Reason: {request.reason}" if request.reason else "")
+    )
+    await _push_config_to_affected_esps(
+        db,
+        get_affected_esp_ids(rule),
+        context="logic rule toggle",
     )
 
     return RuleToggleResponse(

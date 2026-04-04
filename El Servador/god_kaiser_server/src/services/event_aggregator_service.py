@@ -44,6 +44,12 @@ from ..db.models.sensor import SensorData
 from ..db.models.esp import ESPDevice
 from ..db.models.esp_heartbeat import ESPHeartbeatLog
 from ..db.models.actuator import ActuatorHistory
+from ..services.event_contract_serializers import (
+    serialize_actuator_response_event,
+    serialize_config_response_event,
+    serialize_error_event,
+    serialize_esp_health_event,
+)
 from ..utils.sensor_formatters import format_sensor_message, format_sensor_title
 
 logger = get_logger(__name__)
@@ -331,25 +337,65 @@ class EventAggregatorService:
         else:
             title = base_title
 
+        metadata: Dict[str, Any] = {
+            "event_type": log.event_type,
+            "source_type": log.source_type,
+            "status": log.status,
+            "error_code": log.error_code,
+            "error_description": log.error_description,
+            "request_id": log.request_id,
+            "correlation_id": log.correlation_id,
+            **(log.details or {}),
+        }
+
+        event_ts = ensure_utc_isoformat(log.created_at)
+        event_ts_seconds = int(log.created_at.replace(tzinfo=timezone.utc).timestamp())
+        details = log.details or {}
+
+        if log.event_type == "config_response":
+            metadata["contract_payload"] = serialize_config_response_event(
+                esp_id=log.source_id or "unknown",
+                config_type=details.get("config_type"),
+                status=log.status or "error",
+                count=details.get("count", 0),
+                failed_count=details.get("failed_count", 0),
+                message=log.message or details.get("message", ""),
+                timestamp=event_ts_seconds,
+                correlation_id=log.correlation_id,
+                request_id=log.request_id,
+                error_code=log.error_code,
+                error_description=log.error_description,
+                failures=details.get("failures"),
+                failed_item=details.get("failed_item"),
+            )
+        elif log.event_type == "mqtt_error":
+            metadata["contract_payload"] = serialize_error_event(
+                esp_id=log.source_id or "unknown",
+                esp_name=log.source_id or "unknown",
+                error_log_id=log.id,
+                error_code=details.get("error_code", log.error_code),
+                severity=log.severity or "error",
+                category=details.get("category"),
+                title=(log.message or f"Fehler {details.get('error_code', log.error_code)}"),
+                message=log.error_description or log.message or "Unbekannter MQTT-Fehler",
+                troubleshooting=details.get("troubleshooting", []),
+                user_action_required=details.get("user_action_required", False),
+                recoverable=details.get("recoverable", True),
+                docs_link=details.get("docs_link"),
+                context=details.get("context", {}),
+                timestamp=details.get("esp_timestamp", event_ts_seconds),
+            )
+
         return {
             "id": f"audit_{log.id}",
-            "timestamp": ensure_utc_isoformat(log.created_at),
+            "timestamp": event_ts,
             "source": "audit_log",
             "category": category,
             "title": title,
             "message": log.message or base_title,
             "severity": log.severity or "info",
             "device_id": device_id,
-            "metadata": {
-                "event_type": log.event_type,
-                "source_type": log.source_type,
-                "status": log.status,
-                "error_code": log.error_code,
-                "error_description": log.error_description,
-                "request_id": log.request_id,
-                "correlation_id": log.correlation_id,
-                **(log.details or {}),
-            },
+            "metadata": metadata,
         }
 
     async def _get_sensor_events(
@@ -496,21 +542,17 @@ class EventAggregatorService:
         "{device_id} online ({heap_kb}KB frei, RSSI: {wifi_rssi}dBm)"
         Mit optionalem Uptime: "| Uptime: Xh Ym"
         """
-        # Einheitliches Message-Format (Server-Centric: Single Source of Truth)
-        heap_kb = heartbeat.heap_free // 1024 if heartbeat.heap_free else 0
-        rssi = heartbeat.wifi_rssi if heartbeat.wifi_rssi is not None else 0
-
-        # Basis-Message: "DEVICE online (RAM, RSSI)"
-        message = f"{heartbeat.device_id} online ({heap_kb}KB frei, RSSI: {rssi}dBm)"
-
-        # Optional: Uptime anhängen
-        if heartbeat.uptime is not None and heartbeat.uptime > 0:
-            hours = heartbeat.uptime // 3600
-            minutes = (heartbeat.uptime % 3600) // 60
-            if hours > 0:
-                message += f" | Uptime: {hours}h {minutes}m"
-            elif minutes > 0:
-                message += f" | Uptime: {minutes}m"
+        contract_payload = serialize_esp_health_event(
+            esp_id=heartbeat.device_id,
+            status="online",
+            heap_free=heartbeat.heap_free,
+            wifi_rssi=heartbeat.wifi_rssi,
+            uptime=heartbeat.uptime,
+            sensor_count=heartbeat.sensor_count,
+            actuator_count=heartbeat.actuator_count,
+            timestamp=int(heartbeat.timestamp.replace(tzinfo=timezone.utc).timestamp()),
+            gpio_reserved_count=heartbeat.gpio_reserved_count or 0,
+        )
 
         # Severity basierend auf health_status (Ampel-System)
         severity_map = {
@@ -526,18 +568,13 @@ class EventAggregatorService:
             "source": "esp_health",
             "category": "ESP-Status",
             "title": f"{heartbeat.device_id}: Heartbeat",
-            "message": message,
+            "message": contract_payload["message"],
             "severity": severity,
             "device_id": heartbeat.device_id,
             "metadata": {
-                "heap_free": heartbeat.heap_free,
-                "wifi_rssi": heartbeat.wifi_rssi,
-                "uptime": heartbeat.uptime,
-                "sensor_count": heartbeat.sensor_count,
-                "actuator_count": heartbeat.actuator_count,
-                "gpio_reserved_count": heartbeat.gpio_reserved_count,
                 "health_status": heartbeat.health_status,
                 "data_source": heartbeat.data_source,
+                "contract_payload": contract_payload,
             },
         }
 
@@ -612,6 +649,16 @@ class EventAggregatorService:
         actuator_name = actuator_type_names.get(history.actuator_type, history.actuator_type)
         command = command_names.get(history.command_type, history.command_type)
 
+        contract_payload = serialize_actuator_response_event(
+            esp_id=device_id,
+            gpio=history.gpio,
+            command=history.command_type,
+            value=history.value if history.value is not None else 0.0,
+            success=history.success,
+            message=history.error_message or "",
+            timestamp=int(history.timestamp.replace(tzinfo=timezone.utc).timestamp()),
+        )
+
         # Message formatieren
         parts = [f"GPIO {history.gpio}"]
         if history.value is not None:
@@ -642,14 +689,10 @@ class EventAggregatorService:
             "severity": severity,
             "device_id": device_id,
             "metadata": {
-                "gpio": history.gpio,
                 "actuator_type": history.actuator_type,
-                "command_type": history.command_type,
-                "value": history.value,
-                "success": history.success,
-                "error_message": history.error_message,
                 "issued_by": history.issued_by,
                 "data_source": history.data_source,
+                "contract_payload": contract_payload,
                 **(history.command_metadata or {}),
             },
         }

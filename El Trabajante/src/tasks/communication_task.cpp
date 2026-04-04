@@ -20,6 +20,7 @@
 #include "../services/communication/mqtt_client.h"
 #include "../services/config/config_manager.h"
 #include "../services/provisioning/provision_manager.h"
+#include "../services/provisioning/portal_authority.h"
 #include "../services/actuator/actuator_manager.h"
 #include "../models/system_types.h"
 #include "../models/config_types.h"
@@ -41,6 +42,7 @@ static const unsigned long MQTT_PERSISTENT_FAILURE_TIMEOUT_MS = 300000;  // 5 mi
 extern SystemConfig g_system_config;
 extern WiFiConfig   g_wifi_config;
 extern bool         portal_open_due_to_disconnect_;
+extern bool         g_boot_force_offline_autonomy;
 
 // ─── External functions from main.cpp ──────────────────────────────────
 extern void handleWatchdogTimeout();
@@ -93,11 +95,22 @@ static void handleProvisioningState() {
 static void handleWifiDisconnectDebounce() {
     static unsigned long disconnect_start = 0;
 
-    if (g_system_config.current_state == STATE_OPERATIONAL && !mqttClient.isConnected()) {
+    if (g_system_config.current_state == STATE_OPERATIONAL && !mqttClient.isConnected() && !WiFi.isConnected()) {
         if (disconnect_start == 0) {
             disconnect_start = millis();
         } else if (millis() - disconnect_start > PORTAL_OPEN_DEBOUNCE_MS
                    && !portal_open_due_to_disconnect_) {
+            PortalDecisionContext decision_context;
+            decision_context.portal_already_open = portal_open_due_to_disconnect_;
+            decision_context.boot_force_offline_autonomy = g_boot_force_offline_autonomy;
+            decision_context.has_valid_local_autonomy_config = false;
+            const char* decision_code = nullptr;
+            if (!mayOpenPortal(PortalOpenReason::DISCONNECT_DEBOUNCE, decision_context, &decision_code)) {
+                LOG_W(COMM_TAG, String("[PORTAL] skip opening on disconnect (code=") +
+                               String(decision_code != nullptr ? decision_code : "UNKNOWN") + ")");
+                disconnect_start = 0;
+                return;
+            }
             LOG_I(COMM_TAG, "Config-Portal geoeffnet (Server getrennt), Reconnect laeuft im Hintergrund");
             g_system_config.current_state = STATE_SAFE_MODE_PROVISIONING;
             g_system_config.safe_mode_reason =
@@ -128,6 +141,17 @@ static void handleMqttPersistentFailure() {
             LOG_W(COMM_TAG, "MQTT persistent failure timer started (5 min to recovery)");
         } else if (millis() - mqtt_failure_start > MQTT_PERSISTENT_FAILURE_TIMEOUT_MS) {
             if (!portal_open_due_to_disconnect_) {
+                PortalDecisionContext decision_context;
+                decision_context.portal_already_open = portal_open_due_to_disconnect_;
+                decision_context.boot_force_offline_autonomy = g_boot_force_offline_autonomy;
+                decision_context.has_valid_local_autonomy_config = false;
+                const char* decision_code = nullptr;
+                if (!mayOpenPortal(PortalOpenReason::MQTT_PERSISTENT_FAILURE, decision_context, &decision_code)) {
+                    LOG_W(COMM_TAG, String("[PORTAL] skip opening after persistent MQTT failure (code=") +
+                                   String(decision_code != nullptr ? decision_code : "UNKNOWN") + ")");
+                    mqtt_failure_start = 0;
+                    return;
+                }
                 LOG_C(COMM_TAG, "╔════════════════════════════════════════╗");
                 LOG_C(COMM_TAG, "║  MQTT PERSISTENT FAILURE (5 min)       ║");
                 LOG_C(COMM_TAG, "║  Config-Portal oeffnen...              ║");
@@ -136,6 +160,10 @@ static void handleMqttPersistentFailure() {
                 g_system_config.safe_mode_reason =
                     "MQTT persistent failure (5 min Circuit Breaker OPEN)";
                 configManager.saveSystemConfig(g_system_config);
+                if (!provisionManager.isInitialized() && !provisionManager.begin()) {
+                    LOG_E(COMM_TAG, "ProvisionManager init failed — cannot open portal");
+                    return;
+                }
                 if (provisionManager.startAPModeForReconfig()) {
                     portal_open_due_to_disconnect_ = true;
                 }
@@ -215,9 +243,10 @@ void communicationTaskFunction(void* param) {
             continue;
         }
 
-        // ── Pending Approval Mode ──────────────────────────────────────
-        // Only keep WiFi+MQTT alive; sensors/actuators remain inactive.
-        if (g_system_config.current_state == STATE_PENDING_APPROVAL) {
+        // ── Restricted Admission Mode ───────────────────────────────────
+        // Keep only WiFi+MQTT alive while control planes stay blocked.
+        if (g_system_config.current_state == STATE_PENDING_APPROVAL ||
+            g_system_config.current_state == STATE_CONFIG_PENDING_AFTER_RESET) {
             wifiManager.loop();
             mqttClient.loop();
 #ifndef MQTT_USE_PUBSUBCLIENT

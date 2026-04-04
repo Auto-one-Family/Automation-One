@@ -14,6 +14,35 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from src.mqtt.handlers.config_handler import ConfigHandler, get_config_handler
 
 
+@pytest.fixture(autouse=True)
+def mock_terminal_authority_repo():
+    """Mock terminal authority repository for all ConfigHandler tests."""
+    with patch("src.mqtt.handlers.config_handler.CommandContractRepository") as mock_repo_class:
+        mock_repo = MagicMock()
+        mock_repo.upsert_terminal_event_authority = AsyncMock(return_value=(MagicMock(), False))
+        mock_repo_class.return_value = mock_repo
+        yield mock_repo
+
+
+@pytest.fixture(autouse=True)
+def mock_config_status_db_writes(request):
+    """
+    Keep handler-flow tests isolated from repository internals.
+
+    Dedicated persistence tests in TestFailureProcessing still exercise the real
+    _process_config_failures implementation.
+    """
+    if "TestFailureProcessing" in request.node.nodeid:
+        yield
+        return
+
+    with (
+        patch.object(ConfigHandler, "_mark_config_applied", new=AsyncMock(return_value=True)),
+        patch.object(ConfigHandler, "_process_config_failures", new=AsyncMock(return_value=True)),
+    ):
+        yield
+
+
 class TestConfigPayloadValidation:
     """Test config response payload validation."""
 
@@ -234,6 +263,46 @@ class TestConfigStatusProcessing:
 
                     result = await handler.handle_config_ack(topic, payload)
                     assert result is True
+
+    @pytest.mark.asyncio
+    async def test_stale_terminal_event_skips_persistence_side_effects(self, handler):
+        """Stale terminal event is acknowledged but not re-applied."""
+        topic = "kaiser/god/esp/ESP_TEST/config_response"
+        payload = {
+            "status": "success",
+            "type": "sensor",
+            "count": 1,
+            "correlation_id": "corr-stale-1",
+        }
+
+        with patch("src.mqtt.handlers.config_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.config_handler.CommandContractRepository") as mock_repo_class:
+                mock_repo = MagicMock()
+                mock_repo.upsert_terminal_event_authority = AsyncMock(
+                    return_value=(MagicMock(), True)
+                )
+                mock_repo_class.return_value = mock_repo
+
+                with patch.object(
+                    handler, "_mark_config_applied", new_callable=AsyncMock
+                ) as mock_mark_applied:
+                    with patch(
+                        "src.mqtt.handlers.config_handler.AuditLogRepository"
+                    ) as mock_audit_repo_class:
+                        mock_audit_repo = MagicMock()
+                        mock_audit_repo.log_config_response = AsyncMock()
+                        mock_audit_repo_class.return_value = mock_audit_repo
+
+                        result = await handler.handle_config_ack(topic, payload)
+
+                        assert result is True
+                        mock_mark_applied.assert_not_called()
+                        mock_audit_repo.log_config_response.assert_not_called()
 
 
 class TestLegacyFormatSupport:
@@ -484,3 +553,38 @@ class TestCorrelationId:
                     mock_repo.log_config_response.assert_called_once()
                     call_kwargs = mock_repo.log_config_response.call_args
                     assert call_kwargs.kwargs.get("correlation_id") == correlation_id
+
+    @pytest.mark.asyncio
+    async def test_request_id_projected_to_websocket_payload(self, handler):
+        """Optional request_id is projected into config_response data payload."""
+        topic = "kaiser/god/esp/ESP_TEST/config_response"
+        payload = {
+            "status": "success",
+            "type": "sensor",
+            "count": 1,
+            "correlation_id": "corr-req-test",
+            "request_id": "req-42",
+        }
+
+        with patch("src.mqtt.handlers.config_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.config_handler.AuditLogRepository") as mock_repo_class:
+                mock_repo = MagicMock()
+                mock_repo.log_config_response = AsyncMock()
+                mock_repo_class.return_value = mock_repo
+
+                ws_manager = AsyncMock()
+                ws_manager.broadcast = AsyncMock()
+                with patch("src.websocket.manager.WebSocketManager") as mock_ws:
+                    mock_ws.get_instance = AsyncMock(return_value=ws_manager)
+
+                    result = await handler.handle_config_ack(topic, payload)
+
+                    assert result is True
+                    ws_manager.broadcast.assert_awaited_once()
+                    event_type, event_payload = ws_manager.broadcast.await_args.args
+                    assert event_type == "config_response"
+                    assert event_payload["request_id"] == "req-42"

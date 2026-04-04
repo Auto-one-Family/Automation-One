@@ -33,8 +33,11 @@ from ...core.error_codes import (
     ValidationErrorCode,
 )
 from ...core.logging_config import get_logger
+from ...core.metrics import increment_contract_unknown_code
 from ...db.repositories import ESPRepository
 from ...db.session import resilient_session
+from ...services.event_contract_serializers import serialize_diagnostics_event
+from ...services.system_event_contract import canonicalize_diagnostics
 from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
@@ -83,6 +86,17 @@ class DiagnosticsHandler:
             True if message processed successfully, False otherwise
         """
         try:
+            payload = dict(payload)
+            canonical = canonicalize_diagnostics(payload)
+            payload = canonical.payload
+            if canonical.is_contract_violation:
+                increment_contract_unknown_code("diagnostics")
+                logger.warning(
+                    "Diagnostics contract violation normalized: %s (raw=%s)",
+                    canonical.contract_reason,
+                    canonical.raw_fields,
+                )
+
             # Step 1: Parse topic
             parsed_topic = TopicBuilder.parse_system_diagnostics_topic(topic)
             if not parsed_topic:
@@ -141,6 +155,14 @@ class DiagnosticsHandler:
                     "wdt_mode": payload.get("wdt_mode"),
                     "wdt_timeouts_24h": payload.get("wdt_timeouts_24h"),
                     "wdt_timeout_pending": payload.get("wdt_timeout_pending"),
+                    "boot_sequence_id": payload.get("boot_sequence_id"),
+                    "reset_reason": payload.get("reset_reason"),
+                    "segment_start_ts": payload.get("segment_start_ts"),
+                    "metrics_schema_version": payload.get("metrics_schema_version"),
+                    "contract_violation": canonical.is_contract_violation,
+                    "contract_code": canonical.contract_code,
+                    "contract_reason": canonical.contract_reason,
+                    "raw_system_state": canonical.raw_fields.get("raw_system_state"),
                     "received_at": datetime.now(timezone.utc).isoformat(),
                 }
                 esp_device.device_metadata = current_metadata
@@ -160,24 +182,19 @@ class DiagnosticsHandler:
                     from ...websocket.manager import WebSocketManager
 
                     ws_manager = await WebSocketManager.get_instance()
-                    await ws_manager.broadcast(
-                        "esp_diagnostics",
-                        {
-                            "esp_id": esp_id_str,
-                            "heap_free": payload.get("heap_free"),
-                            "heap_min_free": payload.get("heap_min_free"),
-                            "heap_fragmentation": payload.get("heap_fragmentation"),
-                            "uptime_seconds": payload.get("uptime_seconds"),
-                            "error_count": payload.get("error_count", 0),
-                            "wifi_rssi": payload.get("wifi_rssi"),
-                            "system_state": payload.get("system_state"),
-                            "boot_reason": payload.get("boot_reason"),
-                            "mqtt_cb_state": payload.get("mqtt_cb_state"),
-                            "wdt_mode": payload.get("wdt_mode"),
-                            "wdt_timeouts_24h": payload.get("wdt_timeouts_24h"),
-                            "timestamp": payload.get("ts"),
-                        },
+                    broadcast_payload = serialize_diagnostics_event(
+                        esp_id=esp_id_str,
+                        payload=payload,
                     )
+                    broadcast_payload.update(
+                        {
+                            "contract_violation": canonical.is_contract_violation,
+                            "contract_code": canonical.contract_code,
+                            "contract_reason": canonical.contract_reason,
+                            "raw_system_state": canonical.raw_fields.get("raw_system_state"),
+                        }
+                    )
+                    await ws_manager.broadcast("esp_diagnostics", broadcast_payload)
                 except Exception as e:
                     logger.warning(f"Failed to broadcast diagnostics via WebSocket: {e}")
 
@@ -231,6 +248,48 @@ class DiagnosticsHandler:
                 "error": "Field 'wifi_rssi' must be integer",
                 "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
             }
+
+        # Contract upgrade path:
+        # - metrics_schema_version missing/1 => segment fields optional (backward compatible)
+        # - metrics_schema_version >=2 => segment fields mandatory (fail-closed)
+        metrics_schema_version = payload.get("metrics_schema_version")
+        if metrics_schema_version is not None and not isinstance(metrics_schema_version, int):
+            return {
+                "valid": False,
+                "error": "Field 'metrics_schema_version' must be integer",
+                "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+            }
+
+        if isinstance(metrics_schema_version, int) and metrics_schema_version >= 2:
+            required_segment_fields = ("boot_sequence_id", "reset_reason", "segment_start_ts")
+            for field in required_segment_fields:
+                if field not in payload:
+                    return {
+                        "valid": False,
+                        "error": f"Missing required field for schema>=2: {field}",
+                        "error_code": ValidationErrorCode.MISSING_REQUIRED_FIELD,
+                    }
+
+            if not isinstance(payload.get("boot_sequence_id"), str):
+                return {
+                    "valid": False,
+                    "error": "Field 'boot_sequence_id' must be string for schema>=2",
+                    "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+                }
+
+            if not isinstance(payload.get("reset_reason"), str):
+                return {
+                    "valid": False,
+                    "error": "Field 'reset_reason' must be string for schema>=2",
+                    "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+                }
+
+            if not isinstance(payload.get("segment_start_ts"), int):
+                return {
+                    "valid": False,
+                    "error": "Field 'segment_start_ts' must be integer for schema>=2",
+                    "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
+                }
 
         return {"valid": True, "error": "", "error_code": ValidationErrorCode.NONE}
 

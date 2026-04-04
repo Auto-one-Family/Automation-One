@@ -99,6 +99,7 @@ def _model_to_response(
     sensor: SensorConfig,
     esp_device_id: Optional[str] = None,
     subzone_id: Optional[str] = None,
+    subzone_warning: Optional[str] = None,
 ) -> SensorConfigResponse:
     """
     Convert SensorConfig model to SensorConfigResponse schema.
@@ -166,12 +167,17 @@ def _model_to_response(
         # Multi-Zone Device Scope (T13-R2)
         device_scope=sensor.device_scope,
         assigned_zones=sensor.assigned_zones,
+        # assigned_subzones: Legacy field, passed through the API layer but not evaluated
+        # in business logic (logic_engine, config_builder, notification_router, safety).
+        # Primary subzone assignment is via subzone_configs.assigned_gpios. Candidate for
+        # future DB cleanup.
         assigned_subzones=sensor.assigned_subzones,
         latest_value=None,  # Will be set by caller if available
         latest_quality=None,
         latest_timestamp=None,
         created_at=sensor.created_at,
         updated_at=sensor.updated_at,
+        subzone_warning=subzone_warning,
     )
 
 
@@ -733,6 +739,9 @@ async def create_or_update_sensor(
             await db.refresh(sensor)
 
         # Subzone assignment (same GPIO for all sub-types)
+        # subzone_error: set when assignment fails — passed to response as warning.
+        # Config-Push MUST always run after the primary DB commit regardless.
+        subzone_error: Optional[str] = None
         try:
             subzone_service = SubzoneService(esp_repo=esp_repo, session=db, publisher=publisher)
             subzone_id_val = normalize_subzone_id(request.subzone_id)
@@ -752,7 +761,7 @@ async def create_or_update_sensor(
         except ValueError as e:
             logger.warning(f"Subzone assignment skipped for {esp_id}/GPIO {gpio}: {e}")
             await db.rollback()
-            raise ValidationException("subzone", str(e))
+            subzone_error = str(e)
         except Exception as e:
             logger.warning(f"Subzone assignment failed for {esp_id}/GPIO {gpio}: {e}")
             await db.rollback()
@@ -760,7 +769,9 @@ async def create_or_update_sensor(
         subzone_repo = SubzoneRepository(db)
         subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio)
         subzone_id_val = subzone.subzone_id if subzone else None
-        first_response = _model_to_response(created_sensors[0], esp_id, subzone_id=subzone_id_val)
+        first_response = _model_to_response(
+            created_sensors[0], esp_id, subzone_id=subzone_id_val, subzone_warning=subzone_error
+        )
 
         # Publish combined config to ESP32 via MQTT (once for all sub-types)
         try:
@@ -768,7 +779,7 @@ async def create_or_update_sensor(
             combined_config = await config_builder.build_combined_config(esp_id, db)
             esp_service: ESPService = get_esp_service(db)
             config_sent = await esp_service.send_config(esp_id, combined_config)
-            if config_sent:
+            if config_sent.get("success"):
                 logger.info(f"Config published to ESP {esp_id} after multi-value sensor create")
             else:
                 logger.warning(f"Config publish failed for ESP {esp_id} (DB save was successful)")
@@ -1027,7 +1038,10 @@ async def create_or_update_sensor(
     # SUBZONE ASSIGNMENT (Phase 1.2)
     # Assign sensor GPIO to subzone or remove from all subzones
     # Block D2: Normalize "__none__" and "" to None (defensive)
+    # subzone_error: set when assignment fails — passed to response as warning.
+    # Config-Push MUST always run after the primary DB commit regardless.
     # =========================================================================
+    subzone_error: Optional[str] = None
     try:
         subzone_service = SubzoneService(esp_repo=esp_repo, session=db, publisher=publisher)
         subzone_id_val = normalize_subzone_id(request.subzone_id)
@@ -1048,7 +1062,7 @@ async def create_or_update_sensor(
         # Subzone validation failed (e.g. subzone not found, zone mismatch)
         logger.warning(f"Subzone assignment skipped for {esp_id}/GPIO {gpio}: {e}")
         await db.rollback()
-        raise ValidationException("subzone", str(e))
+        subzone_error = str(e)
     except Exception as e:
         logger.warning(f"Subzone assignment failed for {esp_id}/GPIO {gpio}: {e}")
         await db.rollback()
@@ -1062,7 +1076,7 @@ async def create_or_update_sensor(
         esp_service: ESPService = get_esp_service(db)
         config_sent = await esp_service.send_config(esp_id, combined_config)
 
-        if config_sent:
+        if config_sent.get("success"):
             logger.info(f"Config published to ESP {esp_id} after sensor create/update")
         else:
             logger.warning(f"Config publish failed for ESP {esp_id} (DB save was successful)")
@@ -1076,7 +1090,7 @@ async def create_or_update_sensor(
     subzone_id_val = subzone.subzone_id if subzone else None
 
     # Convert model to response schema
-    return _model_to_response(sensor, esp_id, subzone_id=subzone_id_val)
+    return _model_to_response(sensor, esp_id, subzone_id=subzone_id_val, subzone_warning=subzone_error)
 
 
 # =============================================================================
@@ -1207,7 +1221,7 @@ async def delete_sensor(
         esp_service: ESPService = get_esp_service(db)
         config_sent = await esp_service.send_config(esp_id, combined_config)
 
-        if config_sent:
+        if config_sent.get("success"):
             logger.info(f"Config published to ESP {esp_id} after sensor delete")
         else:
             logger.warning(f"Config publish failed for ESP {esp_id} (DB delete was successful)")

@@ -36,10 +36,12 @@ from ...core.error_codes import (
     ValidationErrorCode,
 )
 from ...core.logging_config import get_logger
-from ...core.metrics import increment_esp_error
+from ...core.metrics import increment_contract_unknown_code, increment_esp_error
 from ...core.resilience import ServiceUnavailableError
 from ...db.repositories import AuditLogRepository, ESPRepository
 from ...db.session import resilient_session
+from ...services.event_contract_serializers import serialize_error_event
+from ...services.system_event_contract import canonicalize_error_event
 from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
@@ -88,6 +90,17 @@ class ErrorEventHandler:
             True if message processed successfully, False otherwise
         """
         try:
+            payload = dict(payload)
+            canonical = canonicalize_error_event(payload)
+            payload = canonical.payload
+            if canonical.is_contract_violation:
+                increment_contract_unknown_code("error")
+                logger.warning(
+                    "Error-event contract violation normalized: %s (raw=%s)",
+                    canonical.contract_reason,
+                    canonical.raw_fields,
+                )
+
             # Step 1: Parse topic (follows sensor_handler pattern)
             parsed_topic = TopicBuilder.parse_system_error_topic(topic)
             if not parsed_topic:
@@ -139,8 +152,7 @@ class ErrorEventHandler:
 
                     # Step 6: Map severity (ESP32: 0-3 → AuditLog: info/warning/error/critical)
                     # IMPORTANT: ESP severity is TRUTH, server only maps format!
-                    severity_map = {0: "info", 1: "warning", 2: "error", 3: "critical"}
-                    severity = severity_map.get(payload.get("severity", 2), "error")
+                    severity = str(payload.get("severity_label", "error"))
 
                     # Step 7: Save to audit log (follows audit_log_repo pattern)
                     # CRITICAL: Store ESP error COMPLETELY, even if unknown code!
@@ -153,7 +165,7 @@ class ErrorEventHandler:
 
                     error_log = await audit_repo.log_mqtt_error(
                         source_id=esp_id_str,
-                        error_code=str(error_code_int),
+                        error_code=str(canonical.contract_code or error_code_int),
                         error_description=error_description,
                         details={
                             "error_code": error_code_int,
@@ -170,7 +182,13 @@ class ErrorEventHandler:
                             # IMPORTANT: Store RAW ESP message for debugging
                             "esp_raw_message": payload.get("message"),
                             "esp_severity": payload.get("severity"),
+                            "esp_severity_label": severity,
                             "esp_timestamp": payload.get("timestamp"),
+                            "contract_violation": canonical.is_contract_violation,
+                            "contract_code": canonical.contract_code,
+                            "contract_reason": canonical.contract_reason,
+                            "raw_severity": canonical.raw_fields.get("raw_severity"),
+                            "raw_category": canonical.raw_fields.get("raw_category"),
                         },
                     )
 
@@ -197,29 +215,34 @@ class ErrorEventHandler:
                             else f"Fehler {error_code_int}"
                         )
 
-                        await ws_manager.broadcast(
-                            "error_event",
-                            {
-                                "esp_id": esp_id_str,
-                                "esp_name": esp_device.name or esp_id_str,
-                                "error_log_id": str(error_log.id),
-                                "error_code": error_code_int,
-                                "severity": severity,
-                                "category": payload.get("category"),
-                                "title": error_title,
-                                "message": error_description,
-                                "troubleshooting": (
-                                    error_info["troubleshooting"] if error_info else []
-                                ),
-                                "user_action_required": (
-                                    error_info["user_action_required"] if error_info else False
-                                ),
-                                "recoverable": (error_info["recoverable"] if error_info else True),
-                                "docs_link": (error_info.get("docs_link") if error_info else None),
-                                "context": payload.get("context", {}),
-                                "timestamp": payload.get("timestamp"),
-                            },
+                        broadcast_payload = serialize_error_event(
+                            esp_id=esp_id_str,
+                            esp_name=esp_device.name or esp_id_str,
+                            error_log_id=error_log.id,
+                            error_code=error_code_int,
+                            severity=severity,
+                            category=payload.get("category"),
+                            title=error_title,
+                            message=error_description,
+                            troubleshooting=(error_info["troubleshooting"] if error_info else []),
+                            user_action_required=(
+                                error_info["user_action_required"] if error_info else False
+                            ),
+                            recoverable=(error_info["recoverable"] if error_info else True),
+                            docs_link=(error_info.get("docs_link") if error_info else None),
+                            context=payload.get("context", {}),
+                            timestamp=payload.get("timestamp"),
                         )
+                        broadcast_payload.update(
+                            {
+                                "contract_violation": canonical.is_contract_violation,
+                                "contract_code": canonical.contract_code,
+                                "contract_reason": canonical.contract_reason,
+                                "raw_severity": canonical.raw_fields.get("raw_severity"),
+                                "raw_category": canonical.raw_fields.get("raw_category"),
+                            }
+                        )
+                        await ws_manager.broadcast("error_event", broadcast_payload)
                         logger.debug(f"WebSocket broadcast completed for error_event: {esp_id_str}")
                     except Exception as e:
                         logger.warning(f"Failed to broadcast error event via WebSocket: {e}")

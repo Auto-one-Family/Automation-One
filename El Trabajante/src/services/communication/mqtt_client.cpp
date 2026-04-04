@@ -8,10 +8,12 @@
 #include "../../drivers/gpio_manager.h"  // Phase 1: GPIO Status
 #include "../../config/feature_flags.h"
 #include <WiFi.h>
+#include <esp_system.h>
 
 #ifndef MQTT_USE_PUBSUBCLIENT
     #include "../../tasks/safety_task.h"         // g_safety_task_handle, NOTIFY_* bits
     #include "../../tasks/publish_queue.h"       // M3: Core 1 → Core 0 publish queue
+    #include "../../tasks/intent_contract.h"
     #include "../../error_handling/error_tracker.h"
     // Forward declarations from main.cpp
     extern void routeIncomingMessage(const char* topic, const char* payload);
@@ -20,11 +22,52 @@
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "MQTT";
 
+#ifndef MQTT_USE_PUBSUBCLIENT
+static bool isCriticalPublishTopic(const String& topic) {
+    return topic.indexOf("/alert") != -1 ||
+           topic.indexOf("/response") != -1 ||
+           topic.indexOf("/config_response") != -1 ||
+           topic.indexOf("/system/error") != -1 ||
+           topic.indexOf("/system/intent_outcome") != -1;
+}
+#endif
+
 // ============================================
 // EXTERNAL GLOBAL VARIABLES (from main.cpp)
 // ============================================
 extern KaiserZone g_kaiser;
 extern SystemConfig g_system_config;
+
+static String g_boot_sequence_id;
+static uint8_t g_boot_reset_reason = 0;
+static unsigned long g_segment_start_ts = 0;
+
+static const char* resetReasonToString(uint8_t reason) {
+    switch (reason) {
+        case ESP_RST_POWERON: return "POWERON";
+        case ESP_RST_EXT: return "EXT";
+        case ESP_RST_SW: return "SW";
+        case ESP_RST_PANIC: return "PANIC";
+        case ESP_RST_INT_WDT: return "INT_WDT";
+        case ESP_RST_TASK_WDT: return "TASK_WDT";
+        case ESP_RST_WDT: return "WDT";
+        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT: return "BROWNOUT";
+        case ESP_RST_SDIO: return "SDIO";
+        default: return "UNKNOWN";
+    }
+}
+
+static void ensureBootTelemetryInitialized(time_t unix_timestamp, bool time_valid) {
+    if (g_boot_sequence_id.length() == 0) {
+        g_boot_reset_reason = static_cast<uint8_t>(esp_reset_reason());
+        g_boot_sequence_id = g_system_config.esp_id + "-b" + String(g_system_config.boot_count) +
+                             "-r" + String(g_boot_reset_reason);
+    }
+    if (g_segment_start_ts == 0 && time_valid && unix_timestamp > 0) {
+        g_segment_start_ts = static_cast<unsigned long>(unix_timestamp);
+    }
+}
 
 // ============================================
 // SHARED ATOMIC STATE (SAFETY-RTOS M2)
@@ -84,6 +127,7 @@ MQTTClient::MQTTClient()
       circuit_breaker_("MQTT", 5, 30000, 10000),
       registration_confirmed_(false),
       registration_start_ms_(0),
+      registration_timeout_logged_(false),
       publish_seq_(0) {
     // Circuit Breaker configured:
     // - 5 failures → OPEN
@@ -186,7 +230,8 @@ bool MQTTClient::connect(const MQTTConfig& config) {
         mqtt_cfg.password = config.password.c_str();
     }
 
-    mqtt_cfg.task_stack = 10240;
+    mqtt_cfg.task_stack = 16384;  // increased from 10240: static data_buf saves 4096 B on stack,
+                                  // +6144 B headroom for future handlers and config payload growth
     mqtt_cfg.task_prio = 3;
 
     // Destroy old client if present (e.g. reconnect after config change)
@@ -206,6 +251,7 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     // Reset Registration Gate
     registration_confirmed_ = false;
     registration_start_ms_  = millis();
+    registration_timeout_logged_ = false;
 
     // Register event handler (args = this, so handler can access members)
     esp_mqtt_client_register_event(mqtt_client_, MQTT_EVENT_ANY, mqtt_event_handler, this);
@@ -374,8 +420,12 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     if (!registration_confirmed_ && !is_heartbeat && !is_system_response && !is_error_publish) {
         if (registration_start_ms_ > 0 &&
             (millis() - registration_start_ms_) > REGISTRATION_TIMEOUT_MS) {
-            LOG_W(TAG, "Registration timeout - opening gate (fallback)");
-            registration_confirmed_ = true;
+            if (!registration_timeout_logged_) {
+                LOG_W(TAG, "Registration timeout - gate remains CLOSED until valid heartbeat ACK (fail-closed)");
+                registration_timeout_logged_ = true;
+            }
+            LOG_D(TAG, "Publish blocked (registration timeout, no ACK yet): " + topic);
+            return false;
         } else {
             LOG_D(TAG, "Publish blocked (awaiting registration): " + topic);
             return false;
@@ -398,7 +448,9 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     // M3: If called from Core 1 (Safety-Task), route through publish queue (Core 1 → Core 0).
     // Keeps all network I/O on Core 0 and prevents slow publishes from stalling Core 1.
     if (xPortGetCoreID() == 1) {
-        bool enqueued = queuePublish(topic.c_str(), payload.c_str(), qos, false);
+        bool critical = isCriticalPublishTopic(topic);
+        IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), critical ? "critical_pub" : "pub");
+        bool enqueued = queuePublish(topic.c_str(), payload.c_str(), qos, false, critical, &metadata);
         if (!enqueued) {
             LOG_W(TAG, "Publish queue full — dropping: " + topic);
             circuit_breaker_.recordFailure();
@@ -490,7 +542,7 @@ bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t
         return true;
     }
 
-    LOG_E(TAG, "SafePublish failed after retry");
+    LOG_W(TAG, "SafePublish failed after retry");
     return false;
 }
 
@@ -598,10 +650,13 @@ void MQTTClient::loop() {
 void MQTTClient::processPublishQueue() {
     if (mqtt_client_ == nullptr) return;
     if (g_publish_queue == NULL) return;
+    // Drain persisted critical outcomes first so reconnect replay
+    // is not blocked waiting for new command/config traffic.
+    processIntentOutcomeOutbox();
 
     PublishRequest req;
     while (xQueueReceive(g_publish_queue, &req, 0) == pdTRUE) {
-        esp_mqtt_client_publish(
+        int msg_id = esp_mqtt_client_publish(
             mqtt_client_,
             req.topic,
             req.payload,
@@ -609,6 +664,29 @@ void MQTTClient::processPublishQueue() {
             req.qos,
             req.retain ? 1 : 0
         );
+        if (msg_id >= 0) {
+            continue;
+        }
+        const char* drop_code = (msg_id == -2) ? "OUTBOX_FULL" : "EXECUTE_FAIL";
+        String drop_reason = String("Publish dropped for topic ") + String(req.topic);
+        if (req.critical && req.attempt < 3) {
+            req.attempt++;
+            if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
+                publishIntentOutcome("publish",
+                                     req.metadata,
+                                     "failed",
+                                     "QUEUE_FULL",
+                                     "Critical publish retry queue full",
+                                     true);
+            }
+            continue;
+        }
+        publishIntentOutcome("publish",
+                             req.metadata,
+                             "failed",
+                             drop_code,
+                             drop_reason,
+                             req.critical);
     }
 }
 #endif
@@ -686,8 +764,10 @@ static uint8_t toProtocolGpioMode(uint8_t arduino_mode) {
 
 void MQTTClient::publishHeartbeat(bool force) {
     unsigned long current_time = millis();
+    const unsigned long heartbeat_interval_ms =
+        registration_confirmed_ ? HEARTBEAT_INTERVAL_MS : HEARTBEAT_REGISTRATION_RETRY_MS;
 
-    if (!force && (current_time - last_heartbeat_ < HEARTBEAT_INTERVAL_MS)) {
+    if (!force && (current_time - last_heartbeat_ < heartbeat_interval_ms)) {
         return;
     }
 
@@ -695,11 +775,14 @@ void MQTTClient::publishHeartbeat(bool force) {
 
     // M5.4: Heap monitoring — logged alongside every heartbeat for long-term leak detection.
     LOG_I("MEM", "[MEM] Free heap: " + String(ESP.getFreeHeap()) +
-          " B, min free: " + String(ESP.getMinFreeHeap()) + " B");
+          " B, min free: " + String(ESP.getMinFreeHeap()) +
+          " B, max alloc: " + String(ESP.getMaxAllocHeap()) + " B");
 
     const char* topic = TopicBuilder::buildSystemHeartbeatTopic();
 
     time_t unix_timestamp = timeManager.getUnixTimestamp();
+    bool time_valid = timeManager.isSynchronized();
+    ensureBootTelemetryInitialized(unix_timestamp, time_valid);
 
     String payload = "{";
     payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
@@ -708,6 +791,10 @@ void MQTTClient::publishHeartbeat(bool force) {
     payload += "\"master_zone_id\":\"" + g_kaiser.master_zone_id + "\",";
     payload += "\"zone_assigned\":" + String(g_kaiser.zone_assigned ? "true" : "false") + ",";
     payload += "\"ts\":" + String((unsigned long)unix_timestamp) + ",";
+    payload += "\"time_valid\":" + String(time_valid ? "true" : "false") + ",";
+    payload += "\"boot_sequence_id\":\"" + g_boot_sequence_id + "\",";
+    payload += "\"reset_reason\":\"" + String(resetReasonToString(g_boot_reset_reason)) + "\",";
+    payload += "\"segment_start_ts\":" + String(g_segment_start_ts) + ",";
     payload += "\"uptime\":" + String(millis() / 1000) + ",";
     payload += "\"heap_free\":" + String(ESP.getFreeHeap()) + ",";
     payload += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
@@ -732,11 +819,32 @@ void MQTTClient::publishHeartbeat(bool force) {
     }
     payload += "],";
     payload += "\"gpio_reserved_count\":" + String(reservedPins.size()) + ",";
+    payload += "\"metrics_schema_version\":" +
+               String(OfflineModeManager::OFFLINE_AUTHORITY_METRICS_SCHEMA_VERSION) + ",";
+    payload += "\"offline_enter_count\":" + String(offlineModeManager.getOfflineEnterCount()) + ",";
+    payload += "\"adopting_enter_count\":" + String(offlineModeManager.getAdoptingEnterCount()) + ",";
+    payload += "\"adoption_noop_count\":" + String(offlineModeManager.getAdoptionNoopCount()) + ",";
+    payload += "\"adoption_delta_count\":" + String(offlineModeManager.getAdoptionDeltaCount()) + ",";
+    payload += "\"handover_abort_count\":" + String(offlineModeManager.getHandoverAbortCount()) + ",";
+    payload += "\"handover_contract_reject_count\":" +
+               String(offlineModeManager.getHandoverContractRejectCount()) + ",";
+    payload += "\"handover_contract_last_reject\":\"" +
+               String(offlineModeManager.getLastHandoverContractRejectCode()) + "\",";
+    payload += "\"active_handover_epoch\":" + String(offlineModeManager.getActiveHandoverEpoch()) + ",";
+    payload += "\"handover_completed_epoch\":" + String(offlineModeManager.getHandoverCompletedEpoch()) + ",";
+    payload += "\"degraded\":" +
+               String(offlineModeManager.isPersistenceDriftActive() ? "true" : "false") + ",";
+    payload += "\"degraded_reason\":\"" +
+               String(offlineModeManager.getLastPersistenceDriftReason()) + "\",";
+    payload += "\"persistence_drift_count\":" +
+               String(offlineModeManager.getPersistenceDriftCount()) + ",";
     payload += "\"config_status\":";
     payload += configManager.getDiagnosticsJSON();
     payload += "}";
 
-    publish(topic, payload, 0);
+    if (!publish(topic, payload, 0)) {
+        LOG_W(TAG, "Heartbeat publish failed (topic=" + String(topic) + ")");
+    }
 }
 
 // ============================================
@@ -749,6 +857,7 @@ bool MQTTClient::isRegistrationConfirmed() const {
 void MQTTClient::confirmRegistration() {
     if (!registration_confirmed_) {
         registration_confirmed_ = true;
+        registration_timeout_logged_ = false;
         LOG_I(TAG, "╔════════════════════════════════════════╗");
         LOG_I(TAG, "║  REGISTRATION CONFIRMED BY SERVER     ║");
         LOG_I(TAG, "╚════════════════════════════════════════╝");
@@ -760,9 +869,10 @@ bool MQTTClient::checkRegistrationTimeout() {
     if (registration_confirmed_) return true;
     if (registration_start_ms_ == 0) return false;
     if ((millis() - registration_start_ms_) > REGISTRATION_TIMEOUT_MS) {
-        LOG_W(TAG, "Registration timeout - opening gate (independent timer fallback)");
-        registration_confirmed_ = true;
-        return true;
+        if (!registration_timeout_logged_) {
+            LOG_W(TAG, "Registration timeout observed - waiting for explicit heartbeat ACK (gate stays closed)");
+            registration_timeout_logged_ = true;
+        }
     }
     return false;
 }
@@ -811,6 +921,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             // Reset Registration Gate
             self->registration_confirmed_ = false;
             self->registration_start_ms_  = millis();
+            self->registration_timeout_logged_ = false;
 
             // Circuit Breaker: connection success resets failure counter
             self->circuit_breaker_.recordSuccess();
@@ -837,6 +948,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             // Reset Registration Gate
             self->registration_confirmed_ = false;
             self->registration_start_ms_  = 0;
+            self->registration_timeout_logged_ = false;
 
             // Circuit Breaker: disconnect counts as failure
             self->circuit_breaker_.recordFailure();
@@ -846,6 +958,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
 
             // SAFETY-P4: Start 30s grace timer for offline hysteresis
             // Runs on Core 0 (event task) — offlineModeManager is simple timer state.
+            LOG_W(TAG, "[SAFETY-P4] disconnect notified (path=MQTT_EVENT)");
             offlineModeManager.onDisconnect();
 
             // SAFETY-P1 Mechanism B: Notify Safety-Task (Core 1) to set actuators to safe state.
@@ -879,7 +992,9 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             topic_buf[tlen] = '\0';
 
             // Null-terminate payload (must match buffer.size=4096)
-            char data_buf[4096];
+            // static: moves 4096 B from mqtt_task stack to BSS — prevents stack overflow
+            // Safe: esp-mqtt processes MQTT_EVENT_DATA serially within mqtt_task (no reentrancy)
+            static char data_buf[4096];
             size_t dlen = (event->data_len < sizeof(data_buf) - 1)
                           ? static_cast<size_t>(event->data_len)
                           : sizeof(data_buf) - 1;
@@ -962,6 +1077,7 @@ bool MQTTClient::connectToBroker() {
         circuit_breaker_.recordSuccess();
         registration_confirmed_ = false;
         registration_start_ms_ = millis();
+        registration_timeout_logged_ = false;
         LOG_I(TAG, "Registration gate closed - awaiting heartbeat ACK");
         processOfflineBuffer();
         if (on_connect_callback_) {
@@ -1005,6 +1121,7 @@ void MQTTClient::handleDisconnection() {
 
     registration_confirmed_ = false;
     registration_start_ms_ = 0;
+    registration_timeout_logged_ = false;
     LOG_D(TAG, "Registration gate closed due to disconnect");
 
     if (actuatorManager.isInitialized()) {
@@ -1019,6 +1136,7 @@ void MQTTClient::handleDisconnection() {
     }
 
     // SAFETY-P4: Start 30s grace timer for offline hysteresis
+    LOG_W(TAG, "[SAFETY-P4] disconnect notified (path=PubSubClient)");
     offlineModeManager.onDisconnect();
 
     if (!disconnection_logged) {

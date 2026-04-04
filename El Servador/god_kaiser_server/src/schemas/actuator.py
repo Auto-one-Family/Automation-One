@@ -338,6 +338,10 @@ class ActuatorConfigResponse(ActuatorConfigBase, TimestampMixin):
         None,
         description="Subzone this actuator is assigned to (derived from subzone_configs)",
     )
+    subzone_warning: Optional[str] = Field(
+        None,
+        description="Warning if subzone assignment failed (actuator was saved successfully)",
+    )
 
     model_config = ConfigDict(
         from_attributes=True,

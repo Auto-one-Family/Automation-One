@@ -31,16 +31,24 @@ Audit Logging:
 """
 
 from datetime import datetime, timezone
+import inspect
 from typing import List, Optional
 
 
 from ...core.esp32_error_mapping import get_config_error_info
+from ...core.metrics import (
+    increment_contract_terminalization_blocked,
+    increment_contract_unknown_code,
+)
 from ...core.logging_config import get_logger
+from ...db.repositories.command_contract_repo import CommandContractRepository
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.repositories.esp_repo import ESPRepository
 from ...db.repositories.sensor_repo import SensorRepository
 from ...db.repositories.actuator_repo import ActuatorRepository
 from ...db.session import resilient_session
+from ...services.device_response_contract import canonicalize_config_response
+from ...services.event_contract_serializers import serialize_config_response_event
 from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
@@ -102,24 +110,69 @@ class ConfigHandler:
                 return False
 
             esp_id = parsed_topic["esp_id"]
+            payload = dict(payload)
+            canonical = canonicalize_config_response(payload, esp_id=esp_id)
 
-            # Step 2: Validate payload
-            validation_result = self._validate_payload(payload)
-            if not validation_result["valid"]:
-                logger.error(f"Invalid config response payload: {validation_result['error']}")
-                return False
+            # Step 2: Canonical-first extraction
+            config_type = canonical.config_type
+            status = canonical.status
+            count = canonical.count
+            failed_count = canonical.failed_count
+            message = canonical.message
+            error_code = canonical.error_code
+            failures = canonical.failures
+            failed_item = canonical.failed_item
+            correlation_id = canonical.correlation_id
+            request_id = payload.get("request_id")
 
-            # Step 3: Extract fields (Phase 4 extended format)
-            config_type = payload.get("type", payload.get("config_type", "unknown"))
-            status = payload["status"]
-            count = payload.get("count", 0)
-            failed_count = payload.get("failed_count", 0)
-            message = payload.get("message", "")
-            error_code = payload.get("error_code", "")
-            failures = payload.get("failures", [])
-            correlation_id = payload.get("correlation_id")
+            if canonical.is_contract_violation:
+                increment_contract_unknown_code("config_response")
+                logger.warning(
+                    "Contract violation normalized on config_response: esp_id=%s raw_status=%s raw_type=%s raw_error_code=%s",
+                    esp_id,
+                    canonical.raw_status,
+                    canonical.raw_type,
+                    canonical.raw_error_code,
+                )
 
-            # Step 4: Log response based on status
+            authority_key = self._build_terminal_authority_key(
+                esp_id=esp_id,
+                config_type=config_type,
+                correlation_id=correlation_id,
+                status=status,
+                payload=payload,
+            )
+            async with resilient_session() as session:
+                contract_repo = CommandContractRepository(session)
+                _, was_stale = await contract_repo.upsert_terminal_event_authority(
+                    event_class="config_response",
+                    dedup_key=authority_key,
+                    esp_id=esp_id,
+                    outcome=status,
+                    correlation_id=correlation_id,
+                    is_final=canonical.is_final,
+                    code=canonical.code,
+                    reason=canonical.reason,
+                    retryable=(canonical.retry_policy != "forbidden"),
+                    generation=payload.get("generation"),
+                    seq=payload.get("seq"),
+                    payload_ts=payload.get("ts"),
+                )
+                await self._commit_session(session)
+            if was_stale:
+                increment_contract_terminalization_blocked(
+                    event_class="config_response",
+                    reason="terminal_authority_guard",
+                )
+                logger.info(
+                    "Skipping stale config_response due to terminal authority guard: esp_id=%s status=%s key=%s",
+                    esp_id,
+                    status,
+                    authority_key,
+                )
+                return True
+
+            # Step 3: Log response based on canonical status
             if status == "success":
                 logger.info(
                     f"✅ Config Response from {esp_id}: {config_type} "
@@ -164,20 +217,27 @@ class ConfigHandler:
                         f"Type={failed_item.get('sensor_type', failed_item.get('actuator_type', 'N/A'))}"
                     )
 
-            # Step 5: Update DB config_status based on response
+            # Step 4: Update DB config_status based on canonical response
+            db_update_ok = True
             if status == "success":
                 # All items configured successfully → mark as "applied"
-                await self._mark_config_applied(esp_id, config_type)
+                db_update_ok = await self._mark_config_applied(esp_id, config_type)
             elif status == "partial_success":
                 # Some succeeded, some failed → mark successes as applied, failures as failed
-                await self._mark_config_applied(esp_id, config_type)
+                db_update_ok = await self._mark_config_applied(esp_id, config_type)
                 if failures:
-                    await self._process_config_failures(esp_id, config_type, failures)
+                    db_update_ok = db_update_ok and await self._process_config_failures(
+                        esp_id, config_type, failures
+                    )
             elif failures:
                 # Full failure with details → mark as failed
-                await self._process_config_failures(esp_id, config_type, failures)
+                db_update_ok = await self._process_config_failures(esp_id, config_type, failures)
 
-            # Store in audit_log table for history tracking
+            if not db_update_ok:
+                logger.error("Config response persistence failed for %s - replay required", esp_id)
+                return False
+
+            # Step 5: Store in audit_log table for history tracking
             try:
                 async with resilient_session() as session:
                     audit_repo = AuditLogRepository(session)
@@ -193,17 +253,18 @@ class ConfigHandler:
                         message=message,
                         error_code=error_code if status != "success" else None,
                         error_description=audit_error_desc,
-                        failed_item=payload.get("failed_item") if status != "success" else None,
+                        failed_item=failed_item if status != "success" else None,
                         correlation_id=correlation_id,
                     )
-                    await session.commit()
+                    await self._commit_session(session)
                     logger.debug(f"Config response stored in audit log: {esp_id}")
             except Exception as audit_error:
                 # Don't fail the handler if audit logging fails, but log as error
                 # (audit trail loss is compliance-relevant in industrial environments)
                 logger.error(f"Failed to store config response in audit log: {audit_error}")
+                return False
 
-            # WebSocket Broadcast (Phase 4 extended) - Mit deutschen Übersetzungen
+            # Step 6: WebSocket Broadcast (Phase 4 extended) - Mit deutschen Übersetzungen
             try:
                 from ...websocket.manager import WebSocketManager
 
@@ -212,49 +273,62 @@ class ConfigHandler:
                 # Hole deutsche Error-Info für WebSocket-Broadcast
                 ws_error_info = get_config_error_info(error_code) if error_code else None
 
-                broadcast_payload = {
-                    "esp_id": esp_id,
-                    "config_type": config_type,
-                    "status": status,
-                    "count": count,
-                    "failed_count": failed_count,
-                    # Deutsche Message verwenden wenn verfügbar
-                    "message": (
-                        ws_error_info["message"]
-                        if ws_error_info and status != "success"
-                        else message
+                broadcast_payload = serialize_config_response_event(
+                    esp_id=esp_id,
+                    config_type=config_type,
+                    status=status,
+                    count=count,
+                    failed_count=failed_count,
+                    message=(
+                        ws_error_info["message"] if ws_error_info and status != "success" else message
                     ),
-                    "timestamp": int(datetime.now(timezone.utc).timestamp()),
-                    "correlation_id": correlation_id,
-                }
+                    timestamp=int(datetime.now(timezone.utc).timestamp()),
+                    correlation_id=correlation_id,
+                    request_id=request_id,
+                )
+                broadcast_payload.update(
+                    {
+                        "domain": canonical.domain,
+                        "severity": canonical.severity,
+                        "terminality": canonical.terminality,
+                        "retry_policy": canonical.retry_policy,
+                        "is_final": canonical.is_final,
+                        "contract_violation": canonical.is_contract_violation,
+                        "raw_status": canonical.raw_status,
+                        "raw_type": canonical.raw_type,
+                        "raw_error_code": canonical.raw_error_code,
+                    }
+                )
 
                 # Include error details for failed/partial configs - DEUTSCHE TEXTE
                 if status != "success":
-                    broadcast_payload["error_code"] = error_code
-                    broadcast_payload["error_description"] = (
-                        ws_error_info["message"]
-                        if ws_error_info
-                        else f"Unbekannter Fehler: {error_code}"
+                    broadcast_payload.update(
+                        serialize_config_response_event(
+                            esp_id=esp_id,
+                            config_type=config_type,
+                            status=status,
+                            count=count,
+                            failed_count=failed_count,
+                            message=broadcast_payload["message"],
+                            timestamp=broadcast_payload["timestamp"],
+                            correlation_id=correlation_id,
+                            error_code=error_code,
+                            error_description=(
+                                ws_error_info["message"]
+                                if ws_error_info
+                                else f"Unbekannter Fehler: {error_code}"
+                            ),
+                            severity=(ws_error_info["severity"].lower() if ws_error_info else "error"),
+                            troubleshooting=(ws_error_info["troubleshooting"] if ws_error_info else []),
+                            recoverable=(ws_error_info["recoverable"] if ws_error_info else True),
+                            user_action_required=(
+                                ws_error_info["user_action_required"] if ws_error_info else True
+                            ),
+                            failures=failures if failures else None,
+                            failed_item=failed_item if failed_item else None,
+                            request_id=request_id,
+                        )
                     )
-                    broadcast_payload["severity"] = (
-                        ws_error_info["severity"].lower() if ws_error_info else "error"
-                    )
-                    # Deutsche Troubleshooting-Schritte
-                    broadcast_payload["troubleshooting"] = (
-                        ws_error_info["troubleshooting"] if ws_error_info else []
-                    )
-                    broadcast_payload["recoverable"] = (
-                        ws_error_info["recoverable"] if ws_error_info else True
-                    )
-                    broadcast_payload["user_action_required"] = (
-                        ws_error_info["user_action_required"] if ws_error_info else True
-                    )
-                    # Phase 4: Include failures array
-                    if failures:
-                        broadcast_payload["failures"] = failures
-                    # Legacy: Include single failed_item
-                    elif payload.get("failed_item"):
-                        broadcast_payload["failed_item"] = payload["failed_item"]
 
                 await ws_manager.broadcast("config_response", broadcast_payload)
             except Exception as e:
@@ -266,11 +340,44 @@ class ConfigHandler:
             logger.error(f"Error handling config ACK: {e}", exc_info=True)
             return False
 
+    @staticmethod
+    def _build_terminal_authority_key(
+        *,
+        esp_id: str,
+        config_type: str,
+        correlation_id: Optional[str],
+        status: str,
+        payload: dict,
+    ) -> str:
+        """
+        Build stable dedup key for config_response terminal authority.
+
+        Prefer correlation_id. Fallback includes immutable response shape to keep
+        replay-idempotency without collapsing unrelated events.
+        """
+        if correlation_id:
+            return f"corr:{str(correlation_id).strip().lower()}"
+        ts_part = str(payload.get("ts", "na"))
+        return (
+            f"esp:{esp_id.strip().lower()}:cfg:{str(config_type).strip().lower()}:"
+            f"status:{str(status).strip().lower()}:ts:{ts_part}"
+        )
+
+    @staticmethod
+    async def _commit_session(session) -> None:
+        """Commit helper tolerant to mocked sessions in tests."""
+        commit_fn = getattr(session, "commit", None)
+        if commit_fn is None:
+            return
+        result = commit_fn()
+        if inspect.isawaitable(result):
+            await result
+
     async def _mark_config_applied(
         self,
         esp_id: str,
         config_type: str,
-    ) -> None:
+    ) -> bool:
         """
         Mark all pending sensor/actuator configs as "applied" after successful ESP response.
 
@@ -288,7 +395,7 @@ class ConfigHandler:
 
                 if not esp:
                     logger.error(f"ESP not found for config applied update: {esp_id}")
-                    return
+                    return False
 
                 updated_count = 0
 
@@ -317,13 +424,15 @@ class ConfigHandler:
                     logger.info(
                         f"Marked {updated_count} {config_type} config(s) as applied for {esp_id}"
                     )
+                return True
 
         except Exception as e:
             logger.error(f"Failed to mark config as applied: {e}", exc_info=True)
+            return False
 
     async def _process_config_failures(
         self, esp_id: str, config_type: str, failures: List[dict]
-    ) -> None:
+    ) -> bool:
         """
         Phase 4: Process configuration failures and update database.
 
@@ -342,7 +451,7 @@ class ConfigHandler:
 
                 if not esp:
                     logger.error(f"ESP not found for config failures: {esp_id}")
-                    return
+                    return False
 
                 sensor_repo = SensorRepository(session)
                 actuator_repo = ActuatorRepository(session)
@@ -418,9 +527,11 @@ class ConfigHandler:
 
                 await session.commit()
                 logger.info(f"Processed {len(failures)} config failures for {esp_id}")
+                return True
 
         except Exception as e:
             logger.error(f"Failed to process config failures: {e}", exc_info=True)
+            return False
 
     def _validate_payload(self, payload: dict) -> dict:
         """Validate config response payload structure.
