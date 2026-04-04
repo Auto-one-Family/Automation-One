@@ -132,6 +132,26 @@ logs/wokwi/
 # ========== COMPILED OBJECTS ==========
 El\ Trabajante/*.o
 
+# ========== LOKALE AGENT-/SESSION-ARTEFAKTE ==========
+# Archiv und Spiegel-Arbeitsbereiche (nicht ins Repo)
+.claude/archive/
+arbeitsbereiche/
+
+# Neue Markdown-Reports unter current/ (bereits getrackte Dateien bleiben versioniert)
+.claude/reports/current/*.md
+
+# Entwurfs-Duplikate
+**/* copy.md
+
+# Inkrementelle TS-Build-Metadaten (Vite/vue-tsc)
+**/tsconfig*.tsbuildinfo
+
+# Lokale Auftrags-Notizen
+.claude/auftraege/Readme.md
+
+# Entwickler-Notiz neben Produktionscode
+El Trabajante/src/services/communication/mqtt_client.md
+
 # ========== LOCAL CONFIG & ARTIFACTS ==========
 .mcp.json
 .claude/*.local.md
