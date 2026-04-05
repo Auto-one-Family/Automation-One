@@ -194,6 +194,7 @@ async def test_unknown_outcome_is_not_dropped_and_mapped_to_contract_violation()
     handler = IntentOutcomeHandler()
     payload = {
         "intent_id": "intent-unknown",
+        "correlation_id": "corr-unknown-outcome",
         "flow": "command",
         "outcome": "totally_new_state",
         "ts": 1735818000,
@@ -210,7 +211,7 @@ async def test_unknown_outcome_is_not_dropped_and_mapped_to_contract_violation()
         return_value=(
             SimpleNamespace(
                 outcome="failed",
-                correlation_id="missing-corr:intent-unknown",
+                correlation_id="corr-unknown-outcome",
                 flow="command",
                 code="CONTRACT_UNKNOWN_CODE",
                 reason="contract violation",

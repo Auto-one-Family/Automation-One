@@ -528,3 +528,17 @@ class TestTopicBuilderValidation:
         assert TopicBuilder.validate_gpio(4, constants.HARDWARE_TYPE_XIAO_ESP32C3) is True
         assert TopicBuilder.validate_gpio(18, constants.HARDWARE_TYPE_XIAO_ESP32C3) is False
         assert TopicBuilder.validate_gpio(22, constants.HARDWARE_TYPE_XIAO_ESP32C3) is False
+
+
+class TestIntentOutcomeLifecycleTopicParse:
+    def test_parse_intent_outcome_lifecycle_topic(self):
+        parsed = TopicBuilder.parse_intent_outcome_lifecycle_topic(
+            "kaiser/god/esp/ESP_12AB34CD/system/intent_outcome/lifecycle"
+        )
+        assert parsed["esp_id"] == "ESP_12AB34CD"
+        assert parsed["type"] == "intent_outcome_lifecycle"
+
+    def test_parse_intent_outcome_topic_does_not_match_lifecycle(self):
+        assert TopicBuilder.parse_intent_outcome_topic(
+            "kaiser/god/esp/ESP_12AB34CD/system/intent_outcome/lifecycle"
+        ) is None

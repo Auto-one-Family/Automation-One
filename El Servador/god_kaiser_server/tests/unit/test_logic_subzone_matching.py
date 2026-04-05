@@ -8,8 +8,16 @@ import pytest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from src.services.actuator_service import ActuatorSendCommandResult
 from src.services.logic.conditions.sensor_evaluator import SensorConditionEvaluator
 from src.services.logic.actions.actuator_executor import ActuatorActionExecutor
+
+_MOCK_SEND_OK = ActuatorSendCommandResult(
+    success=True,
+    correlation_id="00000000-0000-4000-8000-000000000001",
+    command_sent=True,
+    safety_warnings=[],
+)
 
 
 class TestSensorConditionEvaluatorSubzone:
@@ -112,7 +120,7 @@ class TestActuatorActionExecutorSubzone:
     @pytest.fixture
     async def mock_actuator_service(self):
         service = AsyncMock()
-        service.send_command = AsyncMock(return_value=True)
+        service.send_command = AsyncMock(return_value=_MOCK_SEND_OK)
         return service
 
     @pytest.mark.asyncio

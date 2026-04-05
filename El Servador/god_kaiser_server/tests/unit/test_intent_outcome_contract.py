@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from src.services.intent_outcome_contract import (
     canonicalize_intent_outcome,
+    merge_intent_outcome_nested_data,
     serialize_intent_outcome_row,
 )
 
@@ -22,6 +23,35 @@ def test_canonicalize_legacy_alias_values():
     assert normalized.is_contract_violation is False
     assert normalized.retryable is True
     assert normalized.terminality == "non_terminal"
+
+
+def test_canonicalize_zone_flow_is_known():
+    normalized = canonicalize_intent_outcome(
+        {
+            "flow": "zone",
+            "outcome": "failed",
+            "code": "CONFIG_LANE_BUSY",
+            "retryable": True,
+        }
+    )
+    assert normalized.flow == "zone"
+    assert normalized.is_contract_violation is False
+
+
+def test_merge_intent_outcome_nested_data_fills_top_level():
+    payload = {
+        "flow": "config",
+        "outcome": "failed",
+        "data": {
+            "intent_id": "i1",
+            "correlation_id": "c1",
+            "generation": 2,
+        },
+    }
+    merge_intent_outcome_nested_data(payload)
+    assert payload["intent_id"] == "i1"
+    assert payload["correlation_id"] == "c1"
+    assert payload["generation"] == 2
 
 
 def test_canonicalize_unknown_values_to_contract_violation():

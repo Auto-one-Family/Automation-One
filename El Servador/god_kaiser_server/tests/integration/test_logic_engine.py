@@ -12,13 +12,35 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.services.logic_engine import LogicEngine
+from src.services.actuator_service import ActuatorSendCommandResult
+
+_MOCK_SEND_OK = ActuatorSendCommandResult(
+    success=True,
+    correlation_id="00000000-0000-4000-8000-000000000001",
+    command_sent=True,
+    safety_warnings=[],
+)
+
+
+def _logic_repo_session_mock_online_esp():
+    """logic_repo.session: ESPRepository pre-check in _execute_actions must see an online ESP."""
+    session = MagicMock()
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    exec_result = MagicMock()
+    esp = MagicMock()
+    esp.is_online = True
+    exec_result.scalar_one_or_none.return_value = esp
+    session.execute = AsyncMock(return_value=exec_result)
+    return session
 
 
 @pytest.fixture
 async def mock_actuator_service():
     """Create a mock ActuatorService."""
     service = AsyncMock()
-    service.send_command = AsyncMock(return_value=True)
+    service.send_command = AsyncMock(return_value=_MOCK_SEND_OK)
     return service
 
 
@@ -535,10 +557,7 @@ class TestB1FlagPropagation:
         }
 
         mock_logic_repo_inst = AsyncMock()
-        mock_logic_repo_inst.session = AsyncMock()
-        mock_logic_repo_inst.session.flush = AsyncMock()
-        mock_logic_repo_inst.session.commit = AsyncMock()
-        mock_logic_repo_inst.session.rollback = AsyncMock()
+        mock_logic_repo_inst.session = _logic_repo_session_mock_online_esp()
         mock_logic_repo_inst.get_last_execution = AsyncMock(return_value=None)
         mock_logic_repo_inst.log_execution = AsyncMock()
 
@@ -674,13 +693,10 @@ class TestB3RuleUpdateTrigger:
 
         mock_logic_repo_inst = AsyncMock()
         mock_logic_repo_inst.get_by_id = AsyncMock(return_value=mock_rule)
-        mock_logic_repo_inst.session = AsyncMock()
-        mock_logic_repo_inst.session.flush = AsyncMock()
-        mock_logic_repo_inst.session.commit = AsyncMock()
-        mock_logic_repo_inst.session.rollback = AsyncMock()
+        mock_logic_repo_inst.session = _logic_repo_session_mock_online_esp()
         mock_logic_repo_inst.get_last_execution = AsyncMock(return_value=None)
         mock_logic_repo_inst.log_execution = AsyncMock()
-        mock_session = AsyncMock()
+        mock_session = _logic_repo_session_mock_online_esp()
 
         async def fake_get_session():
             yield mock_session
@@ -735,13 +751,10 @@ class TestB3RuleUpdateTrigger:
 
         mock_logic_repo_inst = AsyncMock()
         mock_logic_repo_inst.get_by_id = AsyncMock(return_value=mock_rule)
-        mock_logic_repo_inst.session = AsyncMock()
-        mock_logic_repo_inst.session.flush = AsyncMock()
-        mock_logic_repo_inst.session.commit = AsyncMock()
-        mock_logic_repo_inst.session.rollback = AsyncMock()
+        mock_logic_repo_inst.session = _logic_repo_session_mock_online_esp()
         mock_logic_repo_inst.get_last_execution = AsyncMock(return_value=None)
         mock_logic_repo_inst.log_execution = AsyncMock()
-        mock_session = AsyncMock()
+        mock_session = _logic_repo_session_mock_online_esp()
 
         async def fake_get_session():
             yield mock_session
@@ -790,13 +803,10 @@ class TestBumplessTransfer:
         """Return context managers that patch get_session and LogicRepository."""
         mock_logic_repo_inst = AsyncMock()
         mock_logic_repo_inst.get_by_id = AsyncMock(return_value=mock_rule)
-        mock_logic_repo_inst.session = AsyncMock()
-        mock_logic_repo_inst.session.flush = AsyncMock()
-        mock_logic_repo_inst.session.commit = AsyncMock()
-        mock_logic_repo_inst.session.rollback = AsyncMock()
+        mock_logic_repo_inst.session = _logic_repo_session_mock_online_esp()
         mock_logic_repo_inst.get_last_execution = AsyncMock(return_value=None)
         mock_logic_repo_inst.log_execution = AsyncMock()
-        mock_session = AsyncMock()
+        mock_session = _logic_repo_session_mock_online_esp()
 
         async def fake_get_session():
             yield mock_session
@@ -956,8 +966,7 @@ class TestBumplessTransfer:
         last_exec.timestamp = datetime.now(timezone.utc) - timedelta(seconds=30)
         mock_logic_repo.get_last_execution = AsyncMock(return_value=last_exec)
         mock_logic_repo.log_execution = AsyncMock()
-        mock_logic_repo.session = AsyncMock()
-        mock_logic_repo.session.commit = AsyncMock()
+        mock_logic_repo.session = _logic_repo_session_mock_online_esp()
 
         # Sensor value matches condition (should trigger ON if cooldown is bypassed)
         trigger_data = {
@@ -1032,12 +1041,10 @@ class TestCompoundPostReEvalOFFGuard:
     def _patch_env(self, mock_rule):
         mock_logic_repo_inst = AsyncMock()
         mock_logic_repo_inst.get_by_id = AsyncMock(return_value=mock_rule)
-        mock_logic_repo_inst.session = AsyncMock()
-        mock_logic_repo_inst.session.commit = AsyncMock()
+        mock_logic_repo_inst.session = _logic_repo_session_mock_online_esp()
         mock_logic_repo_inst.get_last_execution = AsyncMock(return_value=None)
         mock_logic_repo_inst.log_execution = AsyncMock()
-        mock_session = AsyncMock()
-        mock_session.commit = AsyncMock()
+        mock_session = _logic_repo_session_mock_online_esp()
 
         async def fake_get_session():
             yield mock_session
@@ -1185,12 +1192,10 @@ class TestPureTimeWindowRuleUpdate:
     def _patch_env(self, mock_rule, last_execution=None):
         mock_logic_repo_inst = AsyncMock()
         mock_logic_repo_inst.get_by_id = AsyncMock(return_value=mock_rule)
-        mock_logic_repo_inst.session = AsyncMock()
-        mock_logic_repo_inst.session.commit = AsyncMock()
+        mock_logic_repo_inst.session = _logic_repo_session_mock_online_esp()
         mock_logic_repo_inst.get_last_execution = AsyncMock(return_value=last_execution)
         mock_logic_repo_inst.log_execution = AsyncMock()
-        mock_session = AsyncMock()
-        mock_session.commit = AsyncMock()
+        mock_session = _logic_repo_session_mock_online_esp()
 
         async def fake_get_session():
             yield mock_session
@@ -1337,8 +1342,7 @@ class TestTimerSchedulerOFF:
         mock_logic_repo_inst.get_enabled_rules = AsyncMock(return_value=[mock_rule])
         mock_logic_repo_inst.get_last_execution = AsyncMock(return_value=last_exec)
         mock_logic_repo_inst.log_execution = AsyncMock()
-        mock_session = AsyncMock()
-        mock_session.commit = AsyncMock()
+        mock_session = _logic_repo_session_mock_online_esp()
 
         async def fake_get_session():
             yield mock_session
@@ -1380,8 +1384,7 @@ class TestTimerSchedulerOFF:
         mock_logic_repo_inst.get_enabled_rules = AsyncMock(return_value=[mock_rule])
         mock_logic_repo_inst.get_last_execution = AsyncMock(return_value=last_exec)
         mock_logic_repo_inst.log_execution = AsyncMock()
-        mock_session = AsyncMock()
-        mock_session.commit = AsyncMock()
+        mock_session = _logic_repo_session_mock_online_esp()
 
         async def fake_get_session():
             yield mock_session

@@ -68,22 +68,37 @@ async def test_zone_assign_with_transfer_happy_path():
 
     async def simulate_acks():
         await asyncio.sleep(0.05)
-        # Zone ACK
+        # Zone ACK (correlation_id required — no FIFO fallback)
+        zc = bridge._esp_pending[("ESP_TEST01", "zone")][0]
         bridge.resolve_ack(
-            ack_data={"status": "zone_assigned", "zone_id": "zone_b"},
+            ack_data={
+                "status": "zone_assigned",
+                "zone_id": "zone_b",
+                "correlation_id": zc,
+            },
             esp_id="ESP_TEST01",
             command_type="zone",
         )
         await asyncio.sleep(0.05)
         # Subzone ACKs
+        s1 = bridge._esp_pending[("ESP_TEST01", "subzone")][0]
         bridge.resolve_ack(
-            ack_data={"status": "subzone_assigned", "subzone_id": "sz_1"},
+            ack_data={
+                "status": "subzone_assigned",
+                "subzone_id": "sz_1",
+                "correlation_id": s1,
+            },
             esp_id="ESP_TEST01",
             command_type="subzone",
         )
         await asyncio.sleep(0.05)
+        s2 = bridge._esp_pending[("ESP_TEST01", "subzone")][0]
         bridge.resolve_ack(
-            ack_data={"status": "subzone_assigned", "subzone_id": "sz_2"},
+            ack_data={
+                "status": "subzone_assigned",
+                "subzone_id": "sz_2",
+                "correlation_id": s2,
+            },
             esp_id="ESP_TEST01",
             command_type="subzone",
         )
@@ -198,8 +213,13 @@ async def test_zone_assign_error_ack():
 
     async def simulate_error_ack():
         await asyncio.sleep(0.05)
+        zc = bridge._esp_pending[("ESP_TEST01", "zone")][0]
         bridge.resolve_ack(
-            ack_data={"status": "error", "message": "NVS write failed"},
+            ack_data={
+                "status": "error",
+                "message": "NVS write failed",
+                "correlation_id": zc,
+            },
             esp_id="ESP_TEST01",
             command_type="zone",
         )
@@ -310,8 +330,9 @@ async def test_zone_removal_via_bridge():
 
     async def simulate_removal_ack():
         await asyncio.sleep(0.05)
+        zc = bridge._esp_pending[("ESP_TEST01", "zone")][0]
         bridge.resolve_ack(
-            ack_data={"status": "zone_removed"},
+            ack_data={"status": "zone_removed", "correlation_id": zc},
             esp_id="ESP_TEST01",
             command_type="zone",
         )

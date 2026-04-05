@@ -17,6 +17,7 @@ from src.api.v1.logic import (
     update_rule,
 )
 from src.schemas.logic import LogicRuleCreate, LogicRuleUpdate, RuleToggleRequest
+from src.services.actuator_service import ActuatorSendCommandResult
 
 
 def _mock_rule(rule_id: uuid.UUID | None = None, enabled: bool = True):
@@ -124,7 +125,14 @@ async def test_toggle_rule_triggers_config_push():
     rule = _mock_rule(enabled=True)
     request = RuleToggleRequest(enabled=False, reason="maintenance")
     actuator_service = MagicMock()
-    actuator_service.send_command = AsyncMock(return_value=True)
+    actuator_service.send_command = AsyncMock(
+        return_value=ActuatorSendCommandResult(
+            success=True,
+            correlation_id="00000000-0000-4000-8000-000000000001",
+            command_sent=True,
+            safety_warnings=[],
+        )
+    )
 
     with patch("src.api.v1.logic.LogicRepository") as logic_repo_cls, patch(
         "src.api.v1.logic._push_config_to_affected_esps", new_callable=AsyncMock

@@ -5,12 +5,16 @@ Phase: 5 (Week 9-10) - API Layer
 Tests: Actuator endpoints (config, command, status, emergency)
 """
 
+import uuid
+from unittest.mock import patch
+
 import pytest
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.request_context import build_emergency_actuator_correlation_id
 from src.core.security import create_access_token, get_password_hash
-from src.db.models.actuator import ActuatorConfig
+from src.db.models.actuator import ActuatorConfig, ActuatorState
 from src.db.models.esp import ESPDevice
 from src.db.models.user import User
 from src.main import app
@@ -192,6 +196,51 @@ class TestSendCommand:
 
         # May fail if MQTT not connected
         assert response.status_code in [200, 400, 500]
+        if response.status_code == 200:
+            data = response.json()
+            assert "correlation_id" in data
+            uuid.UUID(data["correlation_id"])
+            assert "safety_warnings" in data
+            assert isinstance(data["safety_warnings"], list)
+            assert "command_sent" in data
+
+    @pytest.mark.asyncio
+    async def test_send_command_noop_still_returns_correlation_id(
+        self,
+        auth_headers: dict,
+        test_actuator: ActuatorConfig,
+        test_esp: ESPDevice,
+        db_session: AsyncSession,
+    ):
+        """No-op delta skip: MQTT not published but REST exposes same trace correlation_id."""
+        db_session.add(
+            ActuatorState(
+                esp_id=test_esp.id,
+                gpio=test_actuator.gpio,
+                actuator_type="digital",
+                current_value=1.0,
+                state="on",
+                runtime_seconds=0,
+            )
+        )
+        await db_session.commit()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/v1/actuators/{test_esp.device_id}/{test_actuator.gpio}/command",
+                json={
+                    "command": "ON",
+                    "value": 1.0,
+                    "duration": 0,
+                },
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+        uuid.UUID(data["correlation_id"])
+        assert data["command_sent"] is False
+        assert data["success"] is True
 
     @pytest.mark.asyncio
     async def test_send_pwm_command(
@@ -263,6 +312,7 @@ class TestEmergencyStop:
         data = response.json()
         assert data["success"] is True
         assert data["reason"] == "Test emergency stop"
+        assert data.get("incident_correlation_id")
 
     @pytest.mark.asyncio
     async def test_emergency_stop_single_esp(
@@ -280,6 +330,37 @@ class TestEmergencyStop:
             )
 
         assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_emergency_stop_publish_passes_correlation_id(
+        self,
+        auth_headers: dict,
+        test_actuator: ActuatorConfig,
+        test_esp: ESPDevice,
+        override_mqtt_publisher,
+    ):
+        """Epic 1-03: each emergency OFF publish must include deterministic correlation_id."""
+        fixed_incident = uuid.UUID("aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee")
+        with patch("src.api.v1.actuators.uuid.uuid4", return_value=fixed_incident):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/api/v1/actuators/emergency_stop",
+                    json={
+                        "esp_id": test_esp.device_id,
+                        "reason": "correlation integration test",
+                    },
+                    headers=auth_headers,
+                )
+
+        assert response.status_code == 200
+        assert response.json()["incident_correlation_id"] == str(fixed_incident)
+        override_mqtt_publisher.publish_actuator_command.assert_called()
+        expected = build_emergency_actuator_correlation_id(
+            str(fixed_incident), test_esp.device_id, test_actuator.gpio
+        )
+        for call in override_mqtt_publisher.publish_actuator_command.call_args_list:
+            assert call.kwargs["correlation_id"] == expected
+            assert call.kwargs["gpio"] == test_actuator.gpio
 
 
 class TestGetStatus:

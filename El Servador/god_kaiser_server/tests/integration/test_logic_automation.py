@@ -14,7 +14,21 @@ import pytest
 from unittest.mock import AsyncMock
 
 from tests.esp32.mocks.mock_esp32_client import MockESP32Client
+from src.services.actuator_service import ActuatorSendCommandResult
 from src.services.logic_engine import LogicEngine
+
+_MOCK_SEND_OK = ActuatorSendCommandResult(
+    success=True,
+    correlation_id="00000000-0000-4000-8000-000000000001",
+    command_sent=True,
+    safety_warnings=[],
+)
+_MOCK_SEND_FAIL = ActuatorSendCommandResult(
+    success=False,
+    correlation_id="00000000-0000-4000-8000-000000000002",
+    command_sent=False,
+    safety_warnings=[],
+)
 
 # =========================================================================
 # Fixtures (same pattern as test_logic_engine_resilience.py)
@@ -25,7 +39,7 @@ from src.services.logic_engine import LogicEngine
 async def mock_actuator_service():
     """ActuatorService mock that tracks all calls."""
     service = AsyncMock()
-    service.send_command = AsyncMock(return_value=True)
+    service.send_command = AsyncMock(return_value=_MOCK_SEND_OK)
     return service
 
 
@@ -269,7 +283,7 @@ class TestEngineResilience:
         self, logic_engine: LogicEngine, mock_actuator_service
     ):
         """send_command returning False doesn't crash the engine."""
-        mock_actuator_service.send_command = AsyncMock(return_value=False)
+        mock_actuator_service.send_command = AsyncMock(return_value=_MOCK_SEND_FAIL)
 
         actions = [
             {

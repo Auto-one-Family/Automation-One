@@ -35,9 +35,17 @@ from tests.esp32.mocks.mock_esp32_client import (  # noqa: F401, E402
 )
 
 # Logic Engine imports
+from src.services.actuator_service import ActuatorSendCommandResult  # noqa: E402
 from src.services.logic_engine import LogicEngine  # noqa: E402
 from src.services.logic_service import LogicService  # noqa: E402
 from src.db.repositories.logic_repo import LogicRepository  # noqa: E402
+
+_MOCK_ACTUATOR_SEND_OK = ActuatorSendCommandResult(
+    success=True,
+    correlation_id="00000000-0000-4000-8000-000000000001",
+    command_sent=True,
+    safety_warnings=[],
+)
 
 
 # =============================================================================
@@ -66,7 +74,7 @@ def pytest_configure(config):
 async def mock_actuator_service():
     """Create a mock ActuatorService for testing."""
     service = AsyncMock()
-    service.send_command = AsyncMock(return_value=True)
+    service.send_command = AsyncMock(return_value=_MOCK_ACTUATOR_SEND_OK)
     service.get_state = AsyncMock(return_value={"state": False, "pwm_value": 0.0})
     service.emergency_stop = AsyncMock(return_value=True)
     return service

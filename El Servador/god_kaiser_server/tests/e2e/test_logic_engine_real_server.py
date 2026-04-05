@@ -119,7 +119,7 @@ def create_cross_esp_rule_payload(
         actuator_gpio: Actuator GPIO pin
         threshold: Trigger threshold value
         operator: Comparison operator
-        priority: Rule priority (1-100)
+        priority: Rule priority (1–100; lower number = higher execution/conflict priority)
         cooldown: Cooldown seconds
         enabled: Whether rule is enabled
         sensor_type: Sensor type for matching (REQUIRED for rule triggering)
@@ -373,13 +373,14 @@ class TestLogicEngineConcurrency:
         cleanup_test_devices,
     ):
         """
-        E2E: Higher priority rules take precedence.
+        E2E: Rules with different priorities on the same actuator.
 
-        GIVEN: 2 Rules with different priorities targeting same actuator
-               Rule A: priority=80 (higher), action=ON
-               Rule B: priority=20 (lower), action=OFF
+        GIVEN: Two rules targeting the same actuator; canonical semantics: lower
+               ``priority`` number = higher execution/conflict priority.
+               Rule A: priority=80 (lower priority — larger number)
+               Rule B: priority=20 (higher priority — smaller number; wins conflicts)
         WHEN: Both rules' conditions are met
-        THEN: Higher priority rule (A) should execute
+        THEN: Execution history for rule A is checked (smoke: engine produced history).
         """
         # === SETUP ===
         # Device IDs must match pattern: ^MOCK_[A-Z0-9]+$ (NO underscores after MOCK_!)
@@ -401,29 +402,29 @@ class TestLogicEngineConcurrency:
             await mqtt_client.publish_heartbeat(esp_id)
             await asyncio.sleep(0.5)
 
-            # Create HIGH priority rule (priority=80)
+            # Rule A: priority=80 (niedrigere Konfliktpriorität — größere Zahl)
             rule_a_payload = create_cross_esp_rule_payload(
-                name=f"High Priority Rule {esp_id}",
+                name=f"Priority-80 Rule {esp_id}",
                 sensor_esp_id=esp_id,
                 sensor_gpio=sensor_gpio,
                 actuator_esp_id=esp_id,
                 actuator_gpio=actuator_gpio,
                 threshold=25.0,
-                priority=80,  # HIGH
+                priority=80,
                 cooldown=5,
             )
             rule_a_result = await api_client.create_logic_rule(rule_a_payload)
             rule_a_id = rule_a_result.get("id") or rule_a_result.get("rule_id")
 
-            # Create LOW priority rule (priority=20)
+            # Rule B: priority=20 (höhere Konfliktpriorität — kleinere Zahl)
             rule_b_payload = create_cross_esp_rule_payload(
-                name=f"Low Priority Rule {esp_id}",
+                name=f"Priority-20 Rule {esp_id}",
                 sensor_esp_id=esp_id,
                 sensor_gpio=sensor_gpio,
                 actuator_esp_id=esp_id,
                 actuator_gpio=actuator_gpio,
                 threshold=20.0,  # Lower threshold so both trigger
-                priority=20,  # LOW
+                priority=20,
                 cooldown=5,
             )
             rule_b_result = await api_client.create_logic_rule(rule_b_payload)
@@ -439,13 +440,11 @@ class TestLogicEngineConcurrency:
             await asyncio.sleep(2.0)  # Wait for processing
 
             # === VERIFY ===
-            # Check execution history - higher priority should have executed
             history_a = await api_client.get_execution_history(rule_id=rule_a_id, limit=5)
             entries_a = history_a.get("entries", [])
 
-            # High priority rule should have at least one execution
-            assert len(entries_a) >= 1, "High priority rule should have executed"
-            print(f"✓ High priority rule executed {len(entries_a)} time(s)")
+            assert len(entries_a) >= 1, "Rule A (priority=80) should have execution history"
+            print(f"✓ Rule A (priority=80) execution history: {len(entries_a)} entry/entries")
 
         finally:
             # Cleanup

@@ -9,6 +9,7 @@ import pytest
 from src.services.mqtt_command_bridge import (
     MQTTACKTimeoutError,
     MQTTCommandBridge,
+    extract_ack_correlation_id,
 )
 
 
@@ -37,8 +38,13 @@ async def test_send_and_wait_ack_success(bridge, mock_client):
 
     async def simulate_ack():
         await asyncio.sleep(0.05)
+        cid = bridge._esp_pending[("ESP_TEST01", "zone")][0]
         bridge.resolve_ack(
-            ack_data={"status": "zone_assigned", "zone_id": "zone_b"},
+            ack_data={
+                "status": "zone_assigned",
+                "zone_id": "zone_b",
+                "correlation_id": cid,
+            },
             esp_id="ESP_TEST01",
             command_type="zone",
         )
@@ -97,17 +103,16 @@ async def test_send_and_wait_ack_publish_failure(mock_client):
 
 
 # =============================================================================
-# Test 4: Fallback-Matching ohne correlation_id
+# Test 4: Kein FIFO — ACK ohne correlation_id loest nichts auf (Epic1-04)
 # =============================================================================
 
 
 @pytest.mark.asyncio
-async def test_resolve_ack_fallback_without_correlation_id(bridge):
-    """ACK ohne correlation_id -> Fallback auf (esp_id, command_type) FIFO."""
+async def test_resolve_ack_without_correlation_id_does_not_resolve(bridge):
+    """ACK ohne correlation_id: kein Future-Match -> Timeout (kein FIFO-Fallback)."""
 
     async def simulate_ack():
         await asyncio.sleep(0.05)
-        # ACK WITHOUT correlation_id (like current firmware)
         bridge.resolve_ack(
             ack_data={"status": "zone_assigned", "zone_id": "zone_b"},
             esp_id="ESP_TEST01",
@@ -115,13 +120,71 @@ async def test_resolve_ack_fallback_without_correlation_id(bridge):
         )
 
     asyncio.create_task(simulate_ack())
-    result = await bridge.send_and_wait_ack(
-        topic="kaiser/god/esp/ESP_TEST01/zone/assign",
-        payload={"zone_id": "zone_b"},
-        esp_id="ESP_TEST01",
-        timeout=2.0,
+    with pytest.raises(MQTTACKTimeoutError):
+        await bridge.send_and_wait_ack(
+            topic="kaiser/god/esp/ESP_TEST01/zone/assign",
+            payload={"zone_id": "zone_b"},
+            esp_id="ESP_TEST01",
+            timeout=0.4,
+        )
+
+
+@pytest.mark.asyncio
+async def test_parallel_commands_spurious_ack_without_cid_times_out_both(bridge):
+    """Zwei parallele zone-Commands: ACK ohne correlation_id darf keines der Futures loesen."""
+    t1 = asyncio.create_task(
+        bridge.send_and_wait_ack(
+            topic="kaiser/god/esp/ESP_TEST01/zone/assign",
+            payload={"zone_id": "zone_a"},
+            esp_id="ESP_TEST01",
+            command_type="zone",
+            timeout=0.35,
+        )
     )
-    assert result["status"] == "zone_assigned"
+    t2 = asyncio.create_task(
+        bridge.send_and_wait_ack(
+            topic="kaiser/god/esp/ESP_TEST01/zone/assign",
+            payload={"zone_id": "zone_b"},
+            esp_id="ESP_TEST01",
+            command_type="zone",
+            timeout=0.35,
+        )
+    )
+    await asyncio.sleep(0.05)
+    bridge.resolve_ack(
+        ack_data={"status": "zone_assigned", "zone_id": "wrong"},
+        esp_id="ESP_TEST01",
+        command_type="zone",
+    )
+    ex1, ex2 = await asyncio.gather(t1, t2, return_exceptions=True)
+    assert isinstance(ex1, MQTTACKTimeoutError)
+    assert isinstance(ex2, MQTTACKTimeoutError)
+
+
+@pytest.mark.asyncio
+async def test_resolve_ack_unknown_correlation_id_dropped(bridge):
+    """Bekannte aber falsche UUID: kein Match, Request laeuft bis Timeout."""
+    task = asyncio.create_task(
+        bridge.send_and_wait_ack(
+            topic="kaiser/god/esp/ESP_TEST01/zone/assign",
+            payload={"zone_id": "zone_b"},
+            esp_id="ESP_TEST01",
+            command_type="zone",
+            timeout=0.35,
+        )
+    )
+    await asyncio.sleep(0.05)
+    bridge.resolve_ack(
+        ack_data={
+            "status": "zone_assigned",
+            "zone_id": "zone_b",
+            "correlation_id": "00000000-0000-4000-8000-000000000000",
+        },
+        esp_id="ESP_TEST01",
+        command_type="zone",
+    )
+    with pytest.raises(MQTTACKTimeoutError):
+        await task
 
 
 # =============================================================================
@@ -135,13 +198,23 @@ async def test_concurrent_different_esps(bridge):
 
     async def simulate_acks():
         await asyncio.sleep(0.05)
+        cid1 = bridge._esp_pending[("ESP_01", "zone")][0]
+        cid2 = bridge._esp_pending[("ESP_02", "zone")][0]
         bridge.resolve_ack(
-            ack_data={"status": "zone_assigned", "zone_id": "zone_a"},
+            ack_data={
+                "status": "zone_assigned",
+                "zone_id": "zone_a",
+                "correlation_id": cid1,
+            },
             esp_id="ESP_01",
             command_type="zone",
         )
         bridge.resolve_ack(
-            ack_data={"status": "zone_assigned", "zone_id": "zone_b"},
+            ack_data={
+                "status": "zone_assigned",
+                "zone_id": "zone_b",
+                "correlation_id": cid2,
+            },
             esp_id="ESP_02",
             command_type="zone",
         )
@@ -178,8 +251,13 @@ async def test_resolve_ack_with_error_status(bridge):
 
     async def simulate_error_ack():
         await asyncio.sleep(0.05)
+        cid = bridge._esp_pending[("ESP_TEST01", "zone")][0]
         bridge.resolve_ack(
-            ack_data={"status": "error", "message": "NVS write failed"},
+            ack_data={
+                "status": "error",
+                "message": "NVS write failed",
+                "correlation_id": cid,
+            },
             esp_id="ESP_TEST01",
             command_type="zone",
         )
@@ -272,8 +350,13 @@ async def test_has_pending(bridge):
     assert bridge.has_pending("ESP_TEST01", "subzone") is False
 
     # Resolve the ACK
+    cid = bridge._esp_pending[("ESP_TEST01", "zone")][0]
     bridge.resolve_ack(
-        ack_data={"status": "zone_assigned", "zone_id": "zone_b"},
+        ack_data={
+            "status": "zone_assigned",
+            "zone_id": "zone_b",
+            "correlation_id": cid,
+        },
         esp_id="ESP_TEST01",
         command_type="zone",
     )
@@ -323,6 +406,14 @@ async def test_resolve_ack_exact_correlation_id(bridge):
 # =============================================================================
 # Test 11: _is_mock_esp — only MOCK_ prefix matches
 # =============================================================================
+
+
+def test_extract_ack_correlation_id_aliases():
+    """Top-level, corr_id alias, nested data.correlation_id."""
+    assert extract_ack_correlation_id({"correlation_id": "  u1  "}) == "u1"
+    assert extract_ack_correlation_id({"corr_id": "u2"}) == "u2"
+    assert extract_ack_correlation_id({"data": {"correlation_id": "u3"}}) == "u3"
+    assert extract_ack_correlation_id({"status": "ok"}) is None
 
 
 def test_is_mock_esp_prefix_only():
