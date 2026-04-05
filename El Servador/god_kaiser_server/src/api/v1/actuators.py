@@ -42,6 +42,7 @@ from ...core.exceptions import (
     ValidationException,
 )
 from ...core.logging_config import get_logger
+from ...core.request_context import build_emergency_actuator_correlation_id
 from ...db.models.actuator import ActuatorConfig, ActuatorState as ActuatorStateModel
 from ...db.repositories import (
     ActuatorRepository,
@@ -50,6 +51,7 @@ from ...db.repositories import (
     SubzoneRepository,
 )
 from ...db.repositories.audit_log_repo import AuditLogRepository
+from ...db.repositories.command_contract_repo import CommandContractRepository
 from ...mqtt.publisher import Publisher
 from ...mqtt.topics import TopicBuilder
 from ...schemas import (
@@ -675,7 +677,13 @@ async def create_or_update_actuator(
         409: {"description": "ESP device is offline"},
     },
     summary="Send actuator command",
-    description="Send command to actuator via MQTT. Validated by SafetyService.",
+    description=(
+        "Sendet den Befehl nach SafetyService-Validierung per MQTT (QoS laut Server-Konstante). "
+        "**Finalität:** HTTP 2xx = Server hat den Versuch abgeschlossen (Publish oder No-Op); "
+        "``acknowledged`` ist in der REST-Antwort immer false. "
+        "Geräte-Finalität über MQTT ``.../actuator/.../response`` und WS ``actuator_response``; "
+        "``correlation_id`` verknüpft REST mit WS ``actuator_command`` / ``actuator_command_failed`` und MQTT-Payload."
+    ),
 )
 async def send_command(
     esp_id: str,
@@ -726,7 +734,7 @@ async def send_command(
         raise DeviceOfflineError(esp_id, esp_device.status)
 
     # Send command via service (includes safety validation)
-    success = await actuator_service.send_command(
+    cmd_result = await actuator_service.send_command(
         esp_id=esp_id,
         gpio=gpio,
         command=command.command,
@@ -735,7 +743,7 @@ async def send_command(
         issued_by=f"user:{current_user.username}",
     )
 
-    if not success:
+    if not cmd_result.success:
         # Get last error from safety check
         raise ValidationException(
             "command",
@@ -744,7 +752,8 @@ async def send_command(
 
     logger.info(
         f"Actuator command sent: {esp_id} GPIO {gpio} {command.command} "
-        f"value={command.value} by {current_user.username}"
+        f"value={command.value} by {current_user.username} "
+        f"correlation_id={cmd_result.correlation_id} command_sent={cmd_result.command_sent}"
     )
 
     return ActuatorCommandResponse(
@@ -753,9 +762,10 @@ async def send_command(
         gpio=gpio,
         command=command.command,
         value=command.value,
-        command_sent=True,
+        correlation_id=cmd_result.correlation_id,
+        command_sent=cmd_result.command_sent,
         acknowledged=False,  # ACK is async via MQTT
-        safety_warnings=[],
+        safety_warnings=cmd_result.safety_warnings,
     )
 
 
@@ -845,7 +855,14 @@ async def get_status(
         200: {"description": "Emergency stop executed"},
     },
     summary="Emergency stop",
-    description="CRITICAL: Stop all actuators immediately. Bypasses normal safety checks.",
+    description=(
+        "**Kritischer Pfad:** Setzt serverseitige Safety-Blockade, publiziert pro Aktor OFF mit "
+        "deterministischer ``correlation_id`` pro GPIO, Broadcast ``kaiser/broadcast/emergency``, "
+        "Audit und WS ``actuator_alert`` (mit ``incident_correlation_id`` in der Antwort). "
+        "**Finalität:** HTTP 2xx = Blockade + Publish-Versuche abgeschlossen (Details pro GPIO in ``details``); "
+        "kein Warten auf ESP-Bestätigung. Mögliche Rückmeldungen wie bei normalen Befehlen über "
+        "``actuator/.../response`` (firmware-abhängig)."
+    ),
 )
 async def emergency_stop(
     request: EmergencyStopRequest,
@@ -904,6 +921,10 @@ async def emergency_stop(
             if request.gpio is not None and actuator.gpio != request.gpio:
                 continue
 
+            gpio_correlation_id = build_emergency_actuator_correlation_id(
+                incident_correlation_id, device.device_id, actuator.gpio
+            )
+
             # Atomic Emergency Step 2: publish immediate OFF dispatch.
             try:
                 success = publisher.publish_actuator_command(
@@ -913,6 +934,7 @@ async def emergency_stop(
                     value=0.0,
                     duration=0,
                     retry=True,
+                    correlation_id=gpio_correlation_id,
                 )
             except Exception as exc:
                 logger.error(
@@ -932,6 +954,14 @@ async def emergency_stop(
                     }
                 )
 
+                contract_repo = CommandContractRepository(db)
+                await contract_repo.record_intent_publish_sent(
+                    intent_id=gpio_correlation_id,
+                    correlation_id=gpio_correlation_id,
+                    esp_id=device.device_id,
+                    flow="command",
+                )
+
                 # Log command
                 await actuator_repo.log_command(
                     esp_id=device.id,
@@ -944,6 +974,8 @@ async def emergency_stop(
                     metadata={
                         "reason": request.reason,
                         "incident_correlation_id": incident_correlation_id,
+                        "correlation_id": gpio_correlation_id,
+                        "mqtt_correlation_id": gpio_correlation_id,
                     },
                 )
             else:
@@ -1043,6 +1075,7 @@ async def emergency_stop(
     return EmergencyStopResponse(
         success=True,
         message="Emergency stop executed",
+        incident_correlation_id=incident_correlation_id,
         devices_stopped=devices_stopped,
         actuators_stopped=actuators_stopped,
         reason=request.reason,
@@ -1058,7 +1091,12 @@ async def emergency_stop(
         200: {"description": "Emergency stop cleared"},
     },
     summary="Clear emergency stop",
-    description="Release emergency stop state so actuators can be controlled again. Sends clear_emergency via MQTT to each ESP.",
+    description=(
+        "Hebt die serverseitige Not-Aus-Blockade auf und sendet ``clear_emergency`` per MQTT "
+        "(Topic ``actuator/emergency`` pro ESP). **Finalität:** Bei ``success=true`` wurden alle "
+        "Publishes ausgeführt und die Blockade gelöst; keine HTTP-Wartezeit auf Geräte-ACK. "
+        "Bei Teilpublishes bleibt die Blockade aktiv (siehe Antwort ``message``)."
+    ),
 )
 async def clear_emergency(
     request: ClearEmergencyRequest,
@@ -1143,6 +1181,10 @@ async def clear_emergency(
     deprecated=True,
     include_in_schema=True,
     summary="[DEPRECATED] Emergency stop (legacy path)",
+    description=(
+        "Alias für ``POST /v1/actuators/emergency_stop`` — gleiche Finalität und Antwortschema "
+        "(inkl. ``incident_correlation_id``)."
+    ),
 )
 async def emergency_stop_legacy(
     request: EmergencyStopRequest,
@@ -1170,6 +1212,7 @@ async def emergency_stop_legacy(
     deprecated=True,
     include_in_schema=True,
     summary="[DEPRECATED] Clear emergency (legacy path)",
+    description="Alias für ``POST /v1/actuators/clear_emergency`` — gleiche Finalität.",
 )
 async def clear_emergency_legacy(
     request: ClearEmergencyRequest,
@@ -1204,7 +1247,11 @@ async def clear_emergency_legacy(
         404: {"description": "Actuator not found"},
     },
     summary="Delete actuator configuration",
-    description="Remove actuator configuration. Sends OFF command first.",
+    description=(
+        "Entfernt die Konfiguration nach MQTT-OFF. **Finalität:** OFF wird ohne explizite "
+        "``correlation_id`` im Publisher-Aufruf gesendet (Default-Verhalten); HTTP wartet nicht "
+        "auf ESP-Bestätigung. Weitere Zustände wie bei normalen Actuator-Commands über MQTT/WS."
+    ),
 )
 async def delete_actuator(
     esp_id: str,

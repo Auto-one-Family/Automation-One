@@ -46,7 +46,12 @@ class CommandIntent(Base, TimestampMixin):
         String(32),
         nullable=False,
         default="accepted",
-        doc="Internal state: accepted|sent|ack_pending",
+        doc=(
+            "Non-terminal orchestration: "
+            "sent=server MQTT publish succeeded (see record_intent_publish_sent); "
+            "accepted|ack_pending=from inbound intent_outcome (upsert_intent). "
+            "Typical actuator command: sent then accepted or ack_pending."
+        ),
     )
     first_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

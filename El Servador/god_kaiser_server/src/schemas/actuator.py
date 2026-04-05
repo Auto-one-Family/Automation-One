@@ -423,20 +423,45 @@ class ActuatorCommand(BaseModel):
 class ActuatorCommandResponse(BaseResponse):
     """
     Actuator command response.
+
+    HTTP 2xx bedeutet: Validierung + ggf. MQTT-Publish (oder bewusster No-Op ohne Publish).
+    Geräte-Finalität (ob der Aktor wirklich geschaltet hat) folgt asynchron über
+    MQTT-Topic ``.../actuator/.../response`` und WebSocket-Event ``actuator_response``;
+    optional Korrelation über ``correlation_id`` in MQTT-Payload, History und WS.
     """
 
     esp_id: str = Field(..., description="ESP device ID")
     gpio: int = Field(..., description="GPIO pin")
     command: str = Field(..., description="Command sent")
     value: float = Field(..., description="Value sent (0.0-1.0)")
-    command_sent: bool = Field(..., description="Whether MQTT command was published")
+    correlation_id: str = Field(
+        ...,
+        description=(
+            "UUID dieses Befehlsversuchs; identisch zu WS ``actuator_command`` / "
+            "``actuator_command_failed`` und zur ``correlation_id`` im MQTT-Command-Payload (sofern gesendet)"
+        ),
+    )
+    command_sent: bool = Field(
+        ...,
+        description=(
+            "True, wenn der Server einen MQTT-Actuator-Command veröffentlicht hat; False bei No-Op-Delta "
+            "(Zielzustand = Istzustand, kein Publish) oder wenn der Publish vor dem ACK des Brokers scheitert. "
+            "Kein Nachweis, dass das Gerät den Befehl ausgeführt hat."
+        ),
+    )
     acknowledged: bool = Field(
         False,
-        description="Whether ESP acknowledged command (async)",
+        description=(
+            "In dieser REST-Antwort immer False: Es wird nicht auf eine ESP-Bestätigung gewartet. "
+            "Bestätigung/Ausführung nur über asynchrone Kanäle (MQTT response, WS, History)."
+        ),
     )
     safety_warnings: List[str] = Field(
         default_factory=list,
-        description="Safety warnings (if any)",
+        description=(
+            "Nicht-blockierende SafetyService-Hinweise bei erfolgreicher Validierung; "
+            "Details ggf. auch in Command-History-Metadaten"
+        ),
     )
 
     model_config = ConfigDict(
@@ -447,6 +472,7 @@ class ActuatorCommandResponse(BaseResponse):
                 "gpio": 5,
                 "command": "ON",
                 "value": 1.0,
+                "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
                 "command_sent": True,
                 "acknowledged": False,
                 "safety_warnings": [],
@@ -581,24 +607,36 @@ class EmergencyStopDeviceResult(BaseModel):
 
 class EmergencyStopResponse(BaseResponse):
     """
-    Emergency stop response.
+    Not-Aus-Antwort.
+
+    HTTP 2xx: Safety-Blockade gesetzt und pro GPIO MQTT-OFF versucht (siehe ``details``);
+    zusätzlich Broadcast ``kaiser/broadcast/emergency`` und WS ``actuator_alert``.
+    Es gibt keinen separaten „Emergency-ACK“-Pfad; GPIO-Antworten laufen wie üblich über
+    ``actuator/.../response`` (Echo von ``correlation_id`` firmware-abhängig).
     """
 
+    incident_correlation_id: str = Field(
+        ...,
+        description=(
+            "Eine UUID pro Not-Aus-Request; verbindet Audit-Log, WS-Payload, Broadcast und "
+            "pro-GPIO-MQTT-``correlation_id`` (Format incident:esp:gpio über Hilfsfunktion)"
+        ),
+    )
     devices_stopped: int = Field(
         ...,
-        description="Number of ESPs that received stop command",
+        description="Anzahl ESPs, bei denen mindestens ein OFF erfolgreich publiziert wurde",
         ge=0,
     )
     actuators_stopped: int = Field(
         ...,
-        description="Number of actuators stopped",
+        description="Anzahl Aktoren, für die OFF erfolgreich publiziert wurde",
         ge=0,
     )
-    reason: str = Field(..., description="Emergency stop reason")
-    timestamp: datetime = Field(..., description="Stop command timestamp")
+    reason: str = Field(..., description="Not-Aus-Grund (Audit)")
+    timestamp: datetime = Field(..., description="Zeitstempel Server-seitig (UTC)")
     details: List[EmergencyStopDeviceResult] = Field(
         default_factory=list,
-        description="Per-device actuator stop results",
+        description="Pro Gerät: je Aktor ob MQTT-Publish für OFF erfolgreich war",
     )
 
     model_config = ConfigDict(
@@ -606,6 +644,7 @@ class EmergencyStopResponse(BaseResponse):
             "example": {
                 "success": True,
                 "message": "Emergency stop executed",
+                "incident_correlation_id": "550e8400-e29b-41d4-a716-446655440000",
                 "devices_stopped": 5,
                 "actuators_stopped": 12,
                 "reason": "Manual safety override",
@@ -652,16 +691,20 @@ class ClearEmergencyRequest(BaseModel):
 
 class ClearEmergencyResponse(BaseResponse):
     """
-    Clear emergency stop response.
+    Aufheben der Not-Aus-Blockade.
+
+    HTTP 2xx mit ``success=true``: MQTT ``clear_emergency`` an die betroffenen ESPs publiziert
+    und Safety-Blockade serverseitig gelöst. Es wird nicht auf eine Gerätebestätigung gewartet;
+    Folgezustände über MQTT/WS/Monitor.
     """
 
     devices_cleared: int = Field(
         ...,
-        description="Number of ESPs that received clear command",
+        description="Anzahl ESPs, an die der Clear-Befehl publiziert wurde (unabhängig von Geräte-ACK)",
         ge=0,
     )
-    reason: str = Field(..., description="Clear reason")
-    timestamp: datetime = Field(..., description="Clear command timestamp")
+    reason: str = Field(..., description="Grund für Aufhebung (Audit)")
+    timestamp: datetime = Field(..., description="Zeitstempel Server-seitig (UTC)")
 
 
 # =============================================================================

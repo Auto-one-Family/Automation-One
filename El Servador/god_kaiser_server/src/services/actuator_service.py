@@ -5,17 +5,34 @@ Business logic for actuator control, safety checks, command validation.
 """
 
 import uuid
+from dataclasses import dataclass
 from math import isclose
 
 from ..core.logging_config import get_logger
 from ..core.metrics import increment_actuator_timeout
 from ..db.repositories import ActuatorRepository, ESPRepository
 from ..db.repositories.audit_log_repo import AuditLogRepository
+from ..db.repositories.command_contract_repo import CommandContractRepository
 from ..db.session import get_session
 from ..mqtt.publisher import Publisher
 from .safety_service import SafetyService
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class ActuatorSendCommandResult:
+    """
+    Outcome of ActuatorService.send_command (single request trace).
+
+    correlation_id is generated once per call and matches MQTT / WebSocket payloads
+    when a publish is attempted; for no-op skips it still identifies the REST/logic trace.
+    """
+
+    success: bool
+    correlation_id: str
+    command_sent: bool
+    safety_warnings: list[str]
 
 
 class ActuatorService:
@@ -43,6 +60,20 @@ class ActuatorService:
         self.safety_service = safety_service
         self.publisher = publisher
 
+    async def _iter_command_sessions(self):
+        """
+        Yield (session, actuator_repo) for DB work.
+
+        Per-request FastAPI deps inject a live session — reuse it so REST/tests see the same DB.
+        Global LogicEngine instance holds a closed startup session — fall back to get_session().
+        """
+        if self.actuator_repo.session.is_active:
+            yield self.actuator_repo.session, self.actuator_repo
+            return
+        async for session in get_session():
+            yield session, ActuatorRepository(session)
+            break
+
     async def send_command(
         self,
         esp_id: str,
@@ -51,7 +82,7 @@ class ActuatorService:
         value: float = 1.0,
         duration: int = 0,
         issued_by: str = "logic_engine",
-    ) -> bool:
+    ) -> ActuatorSendCommandResult:
         """
         Send actuator command with safety validation.
 
@@ -70,12 +101,11 @@ class ActuatorService:
             issued_by: Who issued the command (e.g., "logic_engine", "user:123", "system")
 
         Returns:
-            True if command was sent successfully, False otherwise
+            ActuatorSendCommandResult with success, correlation_id, command_sent (MQTT publish),
+            and safety_warnings from SafetyService when valid=True.
         """
+        correlation_id = str(uuid.uuid4())
         try:
-            # Generate correlation_id for end-to-end command tracking
-            correlation_id = str(uuid.uuid4())
-
             # Step 1: Safety validation (CRITICAL - MUST be called before every command!)
             safety_result = await self.safety_service.validate_actuator_command(
                 esp_id=esp_id,
@@ -83,6 +113,7 @@ class ActuatorService:
                 command=command,
                 value=value,
             )
+            warnings = list(safety_result.warnings or [])
 
             if not safety_result.valid:
                 logger.error(
@@ -91,11 +122,10 @@ class ActuatorService:
                 )
 
                 # Log failed command attempt
-                async for session in get_session():
+                async for session, actuator_repo in self._iter_command_sessions():
                     esp_repo = ESPRepository(session)
                     esp_device = await esp_repo.get_by_device_id(esp_id)
                     if esp_device:
-                        actuator_repo = ActuatorRepository(session)
                         await actuator_repo.log_command(
                             esp_id=esp_device.id,
                             gpio=gpio,
@@ -140,7 +170,12 @@ class ActuatorService:
                 except Exception:
                     pass  # WebSocket broadcast is best-effort
 
-                return False
+                return ActuatorSendCommandResult(
+                    success=False,
+                    correlation_id=correlation_id,
+                    command_sent=False,
+                    safety_warnings=[],
+                )
 
             # Log warnings if any
             if safety_result.warnings:
@@ -150,14 +185,18 @@ class ActuatorService:
                     )
 
             # Step 2: Get actuator config for logging
-            async for session in get_session():
+            async for session, actuator_repo in self._iter_command_sessions():
                 esp_repo = ESPRepository(session)
-                actuator_repo = ActuatorRepository(session)
 
                 esp_device = await esp_repo.get_by_device_id(esp_id)
                 if not esp_device:
                     logger.error(f"ESP device not found: {esp_id}")
-                    return False
+                    return ActuatorSendCommandResult(
+                        success=False,
+                        correlation_id=correlation_id,
+                        command_sent=False,
+                        safety_warnings=warnings,
+                    )
 
                 actuator_config = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
                 actuator_type = actuator_config.actuator_type if actuator_config else "unknown"
@@ -184,7 +223,12 @@ class ActuatorService:
                         metadata={"skipped": "desired_equals_current"},
                     )
                     await session.commit()
-                    return True
+                    return ActuatorSendCommandResult(
+                        success=True,
+                        correlation_id=correlation_id,
+                        command_sent=False,
+                        safety_warnings=warnings,
+                    )
 
                 # Step 3: Publish MQTT command
                 # CRITICAL: value must be 0.0-1.0 (ESP32 converts internally to 0-255)
@@ -249,7 +293,20 @@ class ActuatorService:
                     except Exception:
                         pass  # WebSocket broadcast is best-effort
 
-                    return False
+                    return ActuatorSendCommandResult(
+                        success=False,
+                        correlation_id=correlation_id,
+                        command_sent=False,
+                        safety_warnings=warnings,
+                    )
+
+                contract_repo = CommandContractRepository(session)
+                await contract_repo.record_intent_publish_sent(
+                    intent_id=correlation_id,
+                    correlation_id=correlation_id,
+                    esp_id=esp_id,
+                    flow="command",
+                )
 
                 # Step 4: Log successful command
                 await actuator_repo.log_command(
@@ -303,14 +360,24 @@ class ActuatorService:
                     f"issued_by={issued_by}"
                 )
 
-                return True
+                return ActuatorSendCommandResult(
+                    success=True,
+                    correlation_id=correlation_id,
+                    command_sent=True,
+                    safety_warnings=warnings,
+                )
 
         except Exception as e:
             logger.error(
                 f"Error sending actuator command: {e}",
                 exc_info=True,
             )
-            return False
+            return ActuatorSendCommandResult(
+                success=False,
+                correlation_id=correlation_id,
+                command_sent=False,
+                safety_warnings=[],
+            )
 
     @staticmethod
     def _is_noop_delta(command: str, value: float, current_state) -> bool:

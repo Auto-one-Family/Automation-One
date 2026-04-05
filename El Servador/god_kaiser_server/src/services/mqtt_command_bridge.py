@@ -22,6 +22,28 @@ from ..core.constants import QOS_SENSOR_DATA
 logger = logging.getLogger("god_kaiser.mqtt_command_bridge")
 
 
+def extract_ack_correlation_id(raw_payload: dict[str, Any]) -> str | None:
+    """Best-effort correlation_id from zone/subzone ACK payloads (top-level + aliases).
+
+    Firmware should echo server-issued UUIDs as ``correlation_id``; this helper also
+    accepts common aliases and nested ``data.correlation_id`` for older/experimental builds.
+    """
+    for key in ("correlation_id", "corr_id", "corrId"):
+        val = raw_payload.get(key)
+        if val is not None:
+            s = str(val).strip()
+            if s:
+                return s
+    data = raw_payload.get("data")
+    if isinstance(data, dict):
+        val = data.get("correlation_id")
+        if val is not None:
+            s = str(val).strip()
+            if s:
+                return s
+    return None
+
+
 class MQTTACKTimeoutError(Exception):
     """No ACK received within the timeout period."""
 
@@ -40,7 +62,7 @@ class MQTTCommandBridge:
     def __init__(self, mqtt_client: MQTTClient):
         self._mqtt_client = mqtt_client
         self._pending: dict[str, asyncio.Future] = {}
-        # Fallback-Index: (esp_id, command_type) -> deque[correlation_id] (FIFO)
+        # Index for has_pending(): (esp_id, command_type) -> deque[correlation_id]
         self._esp_pending: dict[tuple[str, str], deque[str]] = {}
         broker_host = "N/A"
         broker_port = "N/A"
@@ -70,8 +92,8 @@ class MQTTCommandBridge:
         Args:
             topic: MQTT topic (e.g. kaiser/god/esp/ESP_AB12CD/zone/assign)
             payload: Message payload as dict. correlation_id is added automatically.
-            esp_id: ESP device_id string (e.g. "ESP_AB12CD34") for fallback matching.
-            command_type: "zone" or "subzone" — determines fallback queue.
+            esp_id: ESP device_id string (e.g. "ESP_AB12CD34") for pending tracking.
+            command_type: "zone" or "subzone".
             timeout: Max seconds to wait for ACK. Default 15s.
 
         Returns:
@@ -160,9 +182,9 @@ class MQTTCommandBridge:
     ) -> bool:
         """Resolve a pending Future with ACK data. Called by ACK-Handlers.
 
-        Matching strategy (in order):
-        1. Exact match via correlation_id in ack_data payload
-        2. Fallback: oldest pending Future for (esp_id, command_type) — FIFO
+        Matching is **only** by ``correlation_id`` that exists in ``_pending``.
+        There is **no** FIFO fallback (Epic1-04): a missing or unknown ``correlation_id``
+        would otherwise complete the wrong HTTP request under parallel zone/subzone ops.
 
         Args:
             ack_data: ACK payload from ESP (dict with status, zone_id/subzone_id, etc.)
@@ -172,35 +194,47 @@ class MQTTCommandBridge:
         Returns:
             True if a Future was resolved, False if no match.
         """
-        # Strategy 1: Exact correlation_id match
-        cid = ack_data.get("correlation_id")
+        cid_raw = ack_data.get("correlation_id")
+        cid = str(cid_raw).strip() if cid_raw is not None else ""
+        cid = cid if cid else None
+
+        key = (esp_id, command_type)
+        pending_queue = self._esp_pending.get(key)
+        queue_len = len(pending_queue) if pending_queue else 0
+
         if cid and cid in self._pending:
             future = self._pending[cid]
             if not future.done():
                 future.set_result(ack_data)
                 logger.debug("ACK resolved via correlation_id=%s", cid)
                 return True
+            logger.warning(
+                "ACK dropped: no correlation match (correlation_id=%s already completed, "
+                "esp_id=%s, command_type=%s, pending_queue_len=%d)",
+                cid,
+                esp_id,
+                command_type,
+                queue_len,
+            )
+            return False
 
-        # Strategy 2: Fallback via (esp_id, command_type) — oldest pending Future
-        key = (esp_id, command_type)
-        pending_queue = self._esp_pending.get(key)
-        if pending_queue:
-            while pending_queue:
-                oldest_cid = pending_queue[0]
-                future = self._pending.get(oldest_cid)
-                if future and not future.done():
-                    future.set_result(ack_data)
-                    pending_queue.popleft()
-                    logger.debug(
-                        "ACK resolved via fallback for %s/%s (correlation_id=%s)",
-                        esp_id,
-                        command_type,
-                        oldest_cid,
-                    )
-                    return True
-                pending_queue.popleft()  # Stale entry, skip
-
-        logger.debug("No pending Future for ACK from %s/%s", esp_id, command_type)
+        if cid:
+            logger.warning(
+                "ACK dropped: no correlation match (correlation_id=%s not in pending, "
+                "esp_id=%s, command_type=%s, pending_queue_len=%d)",
+                cid,
+                esp_id,
+                command_type,
+                queue_len,
+            )
+        else:
+            logger.warning(
+                "ACK dropped: no correlation match (missing correlation_id, "
+                "esp_id=%s, command_type=%s, pending_queue_len=%d)",
+                esp_id,
+                command_type,
+                queue_len,
+            )
         return False
 
     def has_pending(self, esp_id: str, command_type: str = "zone") -> bool:

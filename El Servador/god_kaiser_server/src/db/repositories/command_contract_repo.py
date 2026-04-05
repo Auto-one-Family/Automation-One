@@ -17,6 +17,9 @@ from ...services.intent_outcome_contract import canonicalize_intent_outcome
 
 LEGACY_OUTCOMES = {"accepted", "applied", "rejected", "failed", "expired"}
 
+# Inbound intent_outcome already advanced orchestration — never overwrite with "sent".
+_INTENT_ORCH_ADVANCED_FROM_DEVICE = frozenset({"accepted", "ack_pending"})
+
 
 class CommandContractRepository:
     """Persistence facade for command_intents and command_outcomes."""
@@ -25,7 +28,17 @@ class CommandContractRepository:
         self.session = session
 
     async def upsert_intent(self, payload: dict[str, Any], esp_id: str) -> CommandIntent:
-        """Create/update intent-level row from incoming outcome event."""
+        """Create/update ``command_intents`` from inbound ``intent_outcome`` (ESP → Server).
+
+        State rule (orchestration_state):
+        - ``outcome == "accepted"`` → ``accepted`` (ESP acknowledged admission)
+        - any other canonical outcome in this event → ``ack_pending`` (awaiting further
+          terminal progression tracked in ``command_outcomes``)
+
+        This path does **not** set ``sent``; that is written only after the server
+        successfully publishes MQTT when using ``record_intent_publish_sent`` (e.g. actuator
+        commands with ``intent_id``/``correlation_id`` on the wire).
+        """
         intent_id = str(payload["intent_id"])
         stmt = select(CommandIntent).where(CommandIntent.intent_id == intent_id).limit(1)
         result = await self.session.execute(stmt)
@@ -66,6 +79,72 @@ class CommandContractRepository:
         await self.session.flush()
         await self.session.refresh(intent)
         return intent
+
+    async def record_intent_publish_sent(
+        self,
+        *,
+        intent_id: str,
+        correlation_id: str,
+        esp_id: str,
+        flow: str,
+    ) -> CommandIntent:
+        """Persist ``orchestration_state='sent'`` after the broker accepted the publish.
+
+        Preconditions: outbound JSON used the same ``intent_id`` the ESP will echo
+        (actuator commands: ``intent_id`` mirrors ``correlation_id`` in ``Publisher``).
+
+        If a row already exists with ``accepted`` or ``ack_pending`` from a fast
+        ``intent_outcome``, the row is left unchanged (no downgrade).
+        """
+        iid = str(intent_id).strip()
+        stmt = select(CommandIntent).where(CommandIntent.intent_id == iid).limit(1)
+        result = await self.session.execute(stmt)
+        intent = result.scalar_one_or_none()
+        now = datetime.now(timezone.utc)
+        flow_norm = str(flow).lower()
+
+        if intent is not None:
+            if intent.orchestration_state in _INTENT_ORCH_ADVANCED_FROM_DEVICE:
+                return intent
+            intent.correlation_id = str(correlation_id)
+            intent.esp_id = esp_id
+            intent.flow = flow_norm
+            intent.orchestration_state = "sent"
+            intent.last_seen_at = now
+            await self.session.flush()
+            await self.session.refresh(intent)
+            return intent
+
+        intent = CommandIntent(
+            intent_id=iid,
+            correlation_id=str(correlation_id),
+            esp_id=esp_id,
+            flow=flow_norm,
+            orchestration_state="sent",
+            first_seen_at=now,
+            last_seen_at=now,
+        )
+        try:
+            async with self.session.begin_nested():
+                self.session.add(intent)
+                await self.session.flush()
+            await self.session.refresh(intent)
+            return intent
+        except IntegrityError:
+            result = await self.session.execute(stmt)
+            existing = result.scalar_one_or_none()
+            if existing is None:
+                raise
+            if existing.orchestration_state in _INTENT_ORCH_ADVANCED_FROM_DEVICE:
+                return existing
+            existing.correlation_id = str(correlation_id)
+            existing.esp_id = esp_id
+            existing.flow = flow_norm
+            existing.orchestration_state = "sent"
+            existing.last_seen_at = now
+            await self.session.flush()
+            await self.session.refresh(existing)
+            return existing
 
     async def upsert_outcome(
         self, payload: dict[str, Any], esp_id: str
