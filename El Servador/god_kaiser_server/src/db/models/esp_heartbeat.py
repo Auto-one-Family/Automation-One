@@ -14,13 +14,14 @@ Status: IMPLEMENTED
 
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
+from ..types import JSONBCompat
 
 
 class ESPHeartbeatLog(Base):
@@ -158,6 +159,13 @@ class ESPHeartbeatLog(Base):
         doc="Calculated: healthy, degraded, critical",
     )
 
+    # Firmware extension fields (persistence/network/runtime flags, drop counters) — see migration comment.
+    runtime_telemetry: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONBCompat,
+        nullable=True,
+        doc="JSONB snapshot of firmware heartbeat telemetry beyond core metrics",
+    )
+
     def __repr__(self) -> str:
         return (
             f"<ESPHeartbeatLog(device_id='{self.device_id}', "
@@ -195,7 +203,12 @@ class HeartbeatHealthStatus:
     CRITICAL = "critical"
 
 
-def determine_health_status(wifi_rssi: int, heap_free: int) -> str:
+def determine_health_status(
+    wifi_rssi: int,
+    heap_free: int,
+    *,
+    runtime_telemetry: Optional[dict[str, Any]] = None,
+) -> str:
     """
     Determine health status based on metrics.
 
@@ -204,17 +217,40 @@ def determine_health_status(wifi_rssi: int, heap_free: int) -> str:
     Args:
         wifi_rssi: WiFi signal strength in dBm
         heap_free: Free heap memory in bytes
+        runtime_telemetry: Optional firmware flags (persistence/network/runtime degradation).
 
     Returns:
         Health status: "healthy", "degraded", or "critical"
     """
     # Critical: WiFi very weak OR RAM very low
     if wifi_rssi < -80 or heap_free < 10240:  # < 10KB RAM
-        return HeartbeatHealthStatus.CRITICAL
-
+        base = HeartbeatHealthStatus.CRITICAL
     # Degraded: WiFi weak OR RAM low
-    if wifi_rssi < -70 or heap_free < 20480:  # < 20KB RAM
-        return HeartbeatHealthStatus.DEGRADED
+    elif wifi_rssi < -70 or heap_free < 20480:  # < 20KB RAM
+        base = HeartbeatHealthStatus.DEGRADED
+    else:
+        base = HeartbeatHealthStatus.HEALTHY
 
-    # Healthy: All OK
-    return HeartbeatHealthStatus.HEALTHY
+    if not runtime_telemetry:
+        return base
+
+    order = {
+        HeartbeatHealthStatus.HEALTHY: 0,
+        HeartbeatHealthStatus.DEGRADED: 1,
+        HeartbeatHealthStatus.CRITICAL: 2,
+    }
+    rt = runtime_telemetry
+    telemetry_floor = HeartbeatHealthStatus.HEALTHY
+    if rt.get("network_degraded") is True or rt.get("mqtt_circuit_breaker_open") is True:
+        telemetry_floor = HeartbeatHealthStatus.DEGRADED
+    if rt.get("wifi_circuit_breaker_open") is True:
+        telemetry_floor = HeartbeatHealthStatus.DEGRADED
+    if rt.get("persistence_degraded") is True or rt.get("runtime_state_degraded") is True:
+        telemetry_floor = HeartbeatHealthStatus.DEGRADED
+
+    # Never downgrade critical RAM/WiFi to degraded-only; only upgrade toward worse if needed.
+    if order[base] >= order[HeartbeatHealthStatus.CRITICAL]:
+        return base
+    if order[telemetry_floor] > order[base]:
+        return telemetry_floor
+    return base

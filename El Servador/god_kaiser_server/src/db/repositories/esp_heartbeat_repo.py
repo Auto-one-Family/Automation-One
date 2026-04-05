@@ -24,6 +24,30 @@ from ...core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+_RUNTIME_TELEMETRY_KEYS = frozenset(
+    {
+        "persistence_degraded",
+        "persistence_degraded_reason",
+        "runtime_state_degraded",
+        "mqtt_circuit_breaker_open",
+        "wifi_circuit_breaker_open",
+        "network_degraded",
+        "critical_outcome_drop_count",
+        "publish_outbox_drop_count",
+        "persistence_drift_count",
+        "metrics_schema_version",
+    }
+)
+
+
+def extract_heartbeat_runtime_telemetry(payload: dict) -> dict:
+    """Subset of heartbeat JSON for JSONB persistence (avoids duplicating core columns)."""
+    out: dict = {}
+    for key in _RUNTIME_TELEMETRY_KEYS:
+        if key in payload:
+            out[key] = payload[key]
+    return out
+
 
 class ESPHeartbeatRepository(BaseRepository[ESPHeartbeatLog]):
     """
@@ -72,9 +96,14 @@ class ESPHeartbeatRepository(BaseRepository[ESPHeartbeatLog]):
             sensor_count = payload.get("sensor_count", payload.get("active_sensors", 0))
             actuator_count = payload.get("actuator_count", payload.get("active_actuators", 0))
             gpio_reserved_count = payload.get("gpio_reserved_count", 0)
+            runtime_telemetry = extract_heartbeat_runtime_telemetry(payload)
 
             # Calculate health status
-            health_status = determine_health_status(wifi_rssi, heap_free)
+            health_status = determine_health_status(
+                wifi_rssi,
+                heap_free,
+                runtime_telemetry=runtime_telemetry or None,
+            )
 
             # Create heartbeat log entry
             heartbeat = ESPHeartbeatLog(
@@ -89,6 +118,7 @@ class ESPHeartbeatRepository(BaseRepository[ESPHeartbeatLog]):
                 gpio_reserved_count=gpio_reserved_count,
                 data_source=data_source,
                 health_status=health_status,
+                runtime_telemetry=runtime_telemetry or None,
             )
 
             self.session.add(heartbeat)

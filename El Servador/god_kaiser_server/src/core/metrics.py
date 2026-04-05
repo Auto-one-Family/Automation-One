@@ -306,6 +306,30 @@ OUTCOME_DROP_COUNT_CRITICAL = Gauge(
     ["esp_id"],
 )
 
+INTENT_OUTCOME_FIRMWARE_CODE_TOTAL = Counter(
+    "intent_outcome_firmware_code_total",
+    "Observed intent_outcome code strings from firmware (sanitized label)",
+    ["flow", "code"],
+)
+
+INTENT_OUTCOME_LIFECYCLE_TOTAL = Counter(
+    "intent_outcome_lifecycle_total",
+    "CONFIG_PENDING lifecycle events on system/intent_outcome/lifecycle",
+    ["event_type", "schema"],
+)
+
+MQTT_ACK_REASON_CODE_TOTAL = Counter(
+    "mqtt_ack_reason_code_total",
+    "Zone/subzone ACK payloads carrying firmware reason_code",
+    ["ack_kind", "reason_code"],
+)
+
+HEARTBEAT_FIRMWARE_FLAG_TOTAL = Counter(
+    "heartbeat_firmware_flag_total",
+    "Heartbeat messages reporting a true degraded/flag telemetry field",
+    ["flag"],
+)
+
 CONTRACT_UNKNOWN_CODE_TOTAL = Counter(
     "contract_unknown_code_total",
     "Total unknown/contract-violation codes normalized by server canonicalizer",
@@ -606,6 +630,28 @@ def init_metrics() -> None:
     HEARTBEAT_CONTRACT_REJECT_TOTAL.labels(reason="MISSING_HANDOVER_EPOCH")
     CONTRACT_UNKNOWN_CODE_TOTAL.labels(event_type="intent_outcome")
     CONTRACT_UNKNOWN_CODE_TOTAL.labels(event_type="config_response")
+    for _flow in ("config", "zone", "command", "publish"):
+        for _code in (
+            "pending_ring_eviction",
+            "config_lane_busy",
+            "json_parse_error",
+            "publish_outbox_full",
+            "none",
+        ):
+            INTENT_OUTCOME_FIRMWARE_CODE_TOTAL.labels(flow=_flow, code=_code)
+    for _et in ("entered_config_pending", "exit_blocked_config_pending", "exited_config_pending"):
+        INTENT_OUTCOME_LIFECYCLE_TOTAL.labels(event_type=_et, schema="config_pending_lifecycle_v1")
+    for _kind in ("zone", "subzone"):
+        for _rc in ("config_lane_busy", "json_parse_error", "subzone_not_found", "none"):
+            MQTT_ACK_REASON_CODE_TOTAL.labels(ack_kind=_kind, reason_code=_rc)
+    for _flag in (
+        "persistence_degraded",
+        "runtime_state_degraded",
+        "network_degraded",
+        "mqtt_circuit_breaker_open",
+        "wifi_circuit_breaker_open",
+    ):
+        HEARTBEAT_FIRMWARE_FLAG_TOTAL.labels(flag=_flag)
     CONTRACT_UNKNOWN_CODE_TOTAL.labels(event_type="actuator_response")
     RECONCILIATION_SESSIONS_TOTAL.labels(phase="start")
     RECONCILIATION_SESSIONS_TOTAL.labels(phase="progress")
@@ -828,6 +874,57 @@ def set_outcome_drop_count_critical(esp_id: str, value: int) -> None:
     if not esp_id:
         return
     OUTCOME_DROP_COUNT_CRITICAL.labels(esp_id=esp_id).set(max(int(value), 0))
+
+
+def _sanitize_metric_label(value: str, *, max_len: int = 48) -> str:
+    cleaned = (value or "").strip()[:max_len]
+    if not cleaned:
+        return "none"
+    safe = []
+    for ch in cleaned.lower():
+        if ch.isalnum() or ch == "_":
+            safe.append(ch)
+        elif ch in ".:-/@":
+            safe.append("_")
+    out = "".join(safe).strip("_") or "other"
+    return out[:max_len]
+
+
+def observe_intent_outcome_firmware_code(flow: str, code: str) -> None:
+    """Count firmware intent_outcome code strings (bounded labels)."""
+    flow_l = _sanitize_metric_label(flow, max_len=32)
+    code_l = _sanitize_metric_label(code, max_len=48)
+    INTENT_OUTCOME_FIRMWARE_CODE_TOTAL.labels(flow=flow_l, code=code_l).inc()
+
+
+def increment_intent_outcome_lifecycle(event_type: str, schema: str) -> None:
+    """Count CONFIG_PENDING lifecycle telemetry events."""
+    et = _sanitize_metric_label(event_type, max_len=48)
+    sc = _sanitize_metric_label(schema, max_len=48)
+    INTENT_OUTCOME_LIFECYCLE_TOTAL.labels(event_type=et, schema=sc).inc()
+
+
+def increment_mqtt_ack_reason_code(ack_kind: str, reason_code: str) -> None:
+    """Count zone/subzone ACK reason_code values from firmware."""
+    kind = _sanitize_metric_label(ack_kind, max_len=16)
+    rc = _sanitize_metric_label(reason_code, max_len=48)
+    MQTT_ACK_REASON_CODE_TOTAL.labels(ack_kind=kind, reason_code=rc).inc()
+
+
+def observe_heartbeat_firmware_flags(payload: dict) -> None:
+    """Increment counters when boolean telemetry flags are true (low-cardinality flags)."""
+    if not isinstance(payload, dict):
+        return
+    flag_map = (
+        ("persistence_degraded", "persistence_degraded"),
+        ("runtime_state_degraded", "runtime_state_degraded"),
+        ("network_degraded", "network_degraded"),
+        ("mqtt_circuit_breaker_open", "mqtt_circuit_breaker_open"),
+        ("wifi_circuit_breaker_open", "wifi_circuit_breaker_open"),
+    )
+    for key, label in flag_map:
+        if payload.get(key) is True:
+            HEARTBEAT_FIRMWARE_FLAG_TOTAL.labels(flag=label).inc()
 
 
 def increment_contract_unknown_code(event_type: str, amount: int = 1) -> None:

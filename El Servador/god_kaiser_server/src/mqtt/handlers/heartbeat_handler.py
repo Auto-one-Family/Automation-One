@@ -34,6 +34,7 @@ from ...core.metrics import (
     increment_contract_unknown_code,
     increment_connect_attempt,
     observe_heartbeat_ack_latency_ms,
+    observe_heartbeat_firmware_flags,
     observe_tls_handshake_latency_ms,
     update_esp_boot_count,
     update_esp_heartbeat_timestamp,
@@ -45,6 +46,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from ...db.models.esp import ESPDevice
 from ...db.repositories import ESPRepository, ESPHeartbeatRepository
+from ...db.repositories.esp_heartbeat_repo import extract_heartbeat_runtime_telemetry
 from ...db.repositories.actuator_repo import ActuatorRepository
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.session import resilient_session
@@ -99,6 +101,10 @@ class HeartbeatHandler:
         # a valid epoch >= 1 so strict devices never receive an incomplete contract.
         self._handover_epoch_by_esp: dict[str, int] = {}
         self._session_id_by_esp: dict[str, str] = {}
+        # Tracks ESPs for which a config push was triggered during heartbeat processing.
+        # Used to gate the reconnect evaluation: if config is still being pushed,
+        # the Logic Engine must not fire actuator commands before config arrives on ESP.
+        self._config_push_pending_esps: set[str] = set()
 
     def _build_ack_contract_context(
         self, esp_id: str, is_reconnect: bool, preferred_epoch: Optional[int] = None
@@ -219,6 +225,9 @@ class HeartbeatHandler:
 
             # Step 2: Validate payload
             validation_result = self._validate_payload(payload)
+            if validation_result["valid"]:
+                observe_heartbeat_firmware_flags(payload)
+
             if not validation_result["valid"]:
                 error_code = validation_result.get(
                     "error_code", ValidationErrorCode.MISSING_REQUIRED_FIELD
@@ -521,6 +530,7 @@ class HeartbeatHandler:
                         timestamp=payload.get("ts"),
                         gpio_status=payload.get("gpio_status", []),
                         gpio_reserved_count=payload.get("gpio_reserved_count", 0),
+                        runtime_telemetry=extract_heartbeat_runtime_telemetry(payload),
                     )
                     broadcast_payload.update(
                         {
@@ -1580,9 +1590,37 @@ class HeartbeatHandler:
             )
 
     async def _complete_adoption_and_trigger_reconnect_eval(self, esp_id: str) -> None:
-        """Finalize adoption before reconnect delta evaluation is allowed."""
+        """Finalize adoption before reconnect delta evaluation is allowed.
+
+        Config-Push Gate: If a config push was triggered during this heartbeat cycle
+        (ESP reported 0 sensors/actuators but DB has configs), skip the reconnect
+        evaluation. The ESP must receive and apply the config first — firing actuator
+        commands before config arrives causes "No actuator configured on GPIO X" errors.
+        The next heartbeat after the ESP applies the config will re-trigger evaluation.
+        """
         try:
             await asyncio.sleep(ADOPTION_GRACE_SECONDS)
+
+            # Config-Push Gate: skip reconnect eval if config push is pending.
+            # _has_pending_config() marks the ESP in _config_push_pending_esps when
+            # a push is triggered. The set is cleared after the check so subsequent
+            # reconnects are not permanently gated.
+            if esp_id in self._config_push_pending_esps:
+                self._config_push_pending_esps.discard(esp_id)
+                logger.info(
+                    "Reconnect eval skipped for %s: config push pending, "
+                    "waiting for ESP to apply config before firing actuator commands.",
+                    esp_id,
+                )
+                adoption_service = get_state_adoption_service()
+                await adoption_service.mark_adoption_completed(esp_id)
+                await self._broadcast_reconnect_phase(
+                    esp_id=esp_id,
+                    phase="adopted",
+                    details={"config_push_pending": True},
+                )
+                return
+
             adoption_service = get_state_adoption_service()
             await adoption_service.mark_adoption_completed(esp_id)
             await self._broadcast_reconnect_phase(esp_id=esp_id, phase="adopted")
@@ -1677,6 +1715,10 @@ class HeartbeatHandler:
                     f"Triggering auto config push."
                 )
                 import asyncio
+
+                # Mark ESP as config-push-pending so reconnect evaluation is gated
+                # until the ESP applies the new config (prevents "No actuator on GPIO X").
+                self._config_push_pending_esps.add(esp_device.device_id)
 
                 asyncio.create_task(self._auto_push_config(esp_device.device_id))
                 return True
