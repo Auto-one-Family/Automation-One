@@ -38,7 +38,9 @@ import DeviceAlertConfigSection from '@/components/devices/DeviceAlertConfigSect
 import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useUiStore } from '@/shared/stores'
-import { useESPStatus } from '@/composables/useESPStatus'
+import { useESPStatus, getESPStatus } from '@/composables/useESPStatus'
+import { useIntentSignalsStore } from '@/shared/stores/intentSignals.store'
+import { espHealthPresentation } from '@/domain/esp/espHealth'
 import { useToast } from '@/composables/useToast'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { formatUptimeShort, formatHeapSize } from '@/utils/formatters'
@@ -71,6 +73,7 @@ const emit = defineEmits<{
 
 const espStore = useEspStore()
 const uiStore = useUiStore()
+const intentSignalsStore = useIntentSignalsStore()
 const { success: showSuccess, error: showError } = useToast()
 
 // Status via useESPStatus (single source of truth)
@@ -105,6 +108,16 @@ const autoHeartbeatLoading = ref(false)
 // =============================================================================
 
 const espId = computed(() => props.device?.device_id || props.device?.esp_id || '')
+
+const healthPresentation = computed(() => {
+  const vm = props.device?.runtime_health_view
+  if (!vm) return null
+  const st = getESPStatus(props.device)
+  const onlineLike = st === 'online' || st === 'stale'
+  return espHealthPresentation(vm, onlineLike)
+})
+
+const intentDisplay = computed(() => intentSignalsStore.getDisplayForEsp(espId.value))
 
 const displayName = computed(() => props.device?.name || espId.value)
 
@@ -658,6 +671,33 @@ onUnmounted(() => {
                 :style="{ backgroundColor: statusColor }"
               />
               <span class="status-text" :style="{ color: statusColor }">{{ statusText }}</span>
+              <Badge
+                v-if="healthPresentation?.showBadge"
+                variant="warning"
+                size="sm"
+                class="ml-2"
+                :title="healthPresentation.tooltipLines.join('\n')"
+              >
+                {{ healthPresentation.badgeLabel }}
+              </Badge>
+            </div>
+          </div>
+
+          <div v-if="intentDisplay && (intentDisplay.lifecycleSummary || intentDisplay.resultSummary || intentDisplay.correlationShort)" class="info-row info-row--stack">
+            <span class="info-row__label">Vorgang</span>
+            <div class="info-row__value esp-settings__intent-block">
+              <p v-if="intentDisplay.lifecycleSummary" class="text-sm text-muted m-0">
+                {{ intentDisplay.lifecycleSummary }}
+              </p>
+              <p v-if="intentDisplay.resultSummary" class="text-sm m-0">
+                {{ intentDisplay.resultSummary }}
+              </p>
+              <p v-if="intentDisplay.firmwareCode" class="text-xs text-muted m-0 mt-1">
+                Firmware-Code: {{ intentDisplay.firmwareCode }}
+              </p>
+              <p class="text-xs text-muted m-0 mt-1 font-mono">
+                ID: {{ intentDisplay.correlationShort }}
+              </p>
             </div>
           </div>
 
@@ -715,6 +755,33 @@ onUnmounted(() => {
               </span>
               <span class="info-row__value">{{ uptimeDisplay }}</span>
             </div>
+
+            <!-- Geräte-Telemetrie (Heartbeat-Zusatzfelder) -->
+            <template v-if="device.runtime_health_view">
+              <p class="text-xs text-muted mt-2 mb-1">
+                Laufzeit-Details (Geräte-Telemetrie)
+              </p>
+              <ul class="esp-settings__telemetry-list text-xs text-muted m-0 pl-4">
+                <li v-if="device.runtime_health_view.persistenceDegraded">
+                  Persistenz eingeschränkt
+                  <span v-if="device.runtime_health_view.persistenceDegradedReason">
+                    — {{ device.runtime_health_view.persistenceDegradedReason }}
+                  </span>
+                </li>
+                <li v-if="device.runtime_health_view.runtimeStateDegraded">Laufzeitstatus eingeschränkt</li>
+                <li v-if="device.runtime_health_view.networkDegraded">Netzwerk eingeschränkt</li>
+                <li v-if="device.runtime_health_view.mqttCircuitBreakerOpen">MQTT-Circuit-Breaker offen</li>
+                <li v-if="device.runtime_health_view.wifiCircuitBreakerOpen">WiFi-Circuit-Breaker offen</li>
+              </ul>
+              <details v-if="Object.keys(device.runtime_health_view.rawTelemetry).length > 0" class="esp-settings__raw-tel mt-2">
+                <summary class="text-xs cursor-pointer text-muted">Weitere Telemetrie-Schlüssel</summary>
+                <ul class="text-xs font-mono m-0 mt-1 pl-4 max-h-32 overflow-y-auto">
+                  <li v-for="(val, key) in device.runtime_health_view.rawTelemetry" :key="key">
+                    {{ key }}: {{ typeof val === 'object' ? JSON.stringify(val) : String(val) }}
+                  </li>
+                </ul>
+              </details>
+            </template>
           </AccordionSection>
         </div>
       </section>

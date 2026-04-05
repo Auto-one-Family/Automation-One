@@ -99,6 +99,11 @@ export interface ESPDevice {
   updated_at?: string
   /** Subzones assigned to this device (T14-Fix-F: hydrated at page load) */
   subzones?: SubzoneSummary[]
+  /**
+   * Letzter normalisierter esp_health-Laufzeit-Snapshot (P0-C).
+   * Gesetzt im ESP-Store bei Heartbeat-WS; enthält Degradations-Flags + Roh-Telemetrie.
+   */
+  runtime_health_view?: import('@/domain/esp/espHealth').EspHealthViewModel
 }
 
 /** Summary of a subzone assigned to an ESP device (from GET /esp/devices) */

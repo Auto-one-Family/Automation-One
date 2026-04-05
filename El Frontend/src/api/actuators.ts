@@ -13,6 +13,8 @@ export interface ActuatorCommandResponse {
   gpio: number
   command: string
   value: number
+  /** Same UUID as WebSocket `actuator_command` / `actuator_command_failed` for this attempt */
+  correlation_id: string
   command_sent: boolean
   acknowledged: boolean
   safety_warnings: string[]

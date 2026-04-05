@@ -59,6 +59,18 @@ export const WS_EVENT_TYPES = [
   'device_offline',
   'lwt_received',
   'zone_assignment',
+  'subzone_assignment',
+  'device_scope_changed',
+  'device_context_changed',
+  'sensor_config_deleted',
+  'actuator_config_deleted',
+  'notification_new',
+  'notification_updated',
+  'notification_unread_count',
+  'intent_outcome',
+  'intent_outcome_lifecycle',
+  'plugin_execution_started',
+  'plugin_execution_completed',
   'logic_execution',
   'system_event',
   'service_start',
@@ -121,6 +133,18 @@ const EVENT_TYPE_TO_DATASOURCE: Record<string, ContractDataSource> = {
   device_approved: 'audit_log',
   device_rejected: 'audit_log',
   zone_assignment: 'audit_log',
+  subzone_assignment: 'audit_log',
+  device_scope_changed: 'audit_log',
+  device_context_changed: 'audit_log',
+  sensor_config_deleted: 'audit_log',
+  actuator_config_deleted: 'audit_log',
+  notification_new: 'audit_log',
+  notification_updated: 'audit_log',
+  notification_unread_count: 'audit_log',
+  intent_outcome: 'audit_log',
+  intent_outcome_lifecycle: 'audit_log',
+  plugin_execution_started: 'audit_log',
+  plugin_execution_completed: 'audit_log',
   logic_execution: 'audit_log',
   system_event: 'audit_log',
   service_start: 'audit_log',
@@ -270,6 +294,18 @@ export function inferFallbackSeverity(eventType: string, data: Record<string, un
     return 'info'
   }
 
+  if (eventType === 'intent_outcome') {
+    const sev = String(data.severity || '').toLowerCase()
+    if (sev === 'critical') return 'critical'
+    if (sev === 'error') return 'error'
+    if (sev === 'warning') return 'warning'
+    return 'info'
+  }
+
+  if (eventType === 'intent_outcome_lifecycle') {
+    return 'info'
+  }
+
   return 'info'
 }
 
@@ -332,6 +368,45 @@ function validateKnownEventSchema(eventType: string, data: Record<string, unknow
 
   if (eventType === 'sequence_cancelled') {
     if (!hasStringField(data, 'sequence_id')) return 'sequence_cancelled ohne sequence_id'
+  }
+
+  if (eventType === 'intent_outcome') {
+    if (!extractEspId(data)) return 'intent_outcome ohne esp_id/device_id'
+    return null
+  }
+
+  if (eventType === 'intent_outcome_lifecycle') {
+    if (!extractEspId(data)) return 'intent_outcome_lifecycle ohne esp_id/device_id'
+    if (!hasStringField(data, 'event_type')) return 'intent_outcome_lifecycle ohne event_type'
+    return null
+  }
+
+  if (eventType === 'subzone_assignment') {
+    if (!extractEspId(data)) return 'subzone_assignment ohne esp_id/device_id'
+    if (!hasStringField(data, 'status')) return 'subzone_assignment ohne status'
+    return null
+  }
+
+  if (eventType === 'sensor_config_deleted') {
+    if (!extractEspId(data)) return 'sensor_config_deleted ohne esp_id'
+    return null
+  }
+
+  if (eventType === 'actuator_config_deleted') {
+    if (!extractEspId(data)) return 'actuator_config_deleted ohne esp_id'
+    return null
+  }
+
+  if (
+    eventType === 'notification_new' ||
+    eventType === 'notification_updated' ||
+    eventType === 'notification_unread_count' ||
+    eventType === 'device_scope_changed' ||
+    eventType === 'device_context_changed' ||
+    eventType === 'plugin_execution_started' ||
+    eventType === 'plugin_execution_completed'
+  ) {
+    return null
   }
 
   return null

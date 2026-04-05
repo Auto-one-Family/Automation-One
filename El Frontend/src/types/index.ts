@@ -465,7 +465,13 @@ export type MessageType =
   | 'logic_execution'
   | 'system_event'
   | 'notification'
+  | 'notification_new'
+  | 'notification_updated'
+  | 'notification_unread_count'
   | 'error_event'
+  // Intent / Outcome (April 2026 contract)
+  | 'intent_outcome'
+  | 'intent_outcome_lifecycle'
 
 export interface MqttMessage {
   id: string

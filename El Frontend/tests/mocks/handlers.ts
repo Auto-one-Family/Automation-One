@@ -509,8 +509,9 @@ const actuatorHandlers = [
       gpio: Number(gpio),
       command: body.command,
       value: body.value || 0,
+      correlation_id: '00000000-0000-4000-8000-000000000099',
       command_sent: true,
-      acknowledged: true,
+      acknowledged: false,
       safety_warnings: []
     })
   }),

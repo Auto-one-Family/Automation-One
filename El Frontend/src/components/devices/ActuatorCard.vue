@@ -107,8 +107,9 @@ const servedSubzoneLabel = computed(() => {
 // Monitor-mode: show max 2 rules
 const displayedRules = computed(() => (props.linkedRules ?? []).slice(0, 2))
 
-// Monitor-mode: PWM percentage badge
+// Monitor-mode: PWM percentage badge — only for pwm/fan types (not relay/pump/valve/digital)
 const pwmPercent = computed(() => {
+  if (props.actuator.actuator_type !== 'pwm' && props.actuator.actuator_type !== 'fan') return null
   const val = props.actuator.pwm_value
   if (val != null && val > 0) return `${Math.round(val * 100)}%`
   return null

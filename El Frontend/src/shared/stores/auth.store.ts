@@ -134,6 +134,9 @@ export const useAuthStore = defineStore('auth', () => {
       // This ensures proper resource cleanup and prevents memory leaks
       websocketService.disconnect()
 
+      const { useIntentSignalsStore } = await import('@/shared/stores/intentSignals.store')
+      useIntentSignalsStore().clearAll()
+
       clearAuth()
       isLoading.value = false
     }

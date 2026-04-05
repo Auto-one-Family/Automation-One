@@ -13,11 +13,11 @@ import { sensorsApi } from '@/api/sensors'
 import { actuatorsApi } from '@/api/actuators'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { getESPStatus } from '@/composables/useESPStatus'
-import { websocketService } from '@/services/websocket'
+import { websocketService, type WebSocketMessage } from '@/services/websocket'
 import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/logger'
 import type {
-  MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel, MessageType,
+  MockSystemState, MockSensorConfig, MockActuatorConfig, QualityLevel,
   MockESPCreate, OfflineInfo, OfflineReason,
   StatusSource, SensorConfigCreate, ActuatorConfigCreate, MockSensor,
   HeartbeatGpioItem,
@@ -31,6 +31,9 @@ import { useSensorStore } from '@/shared/stores/sensor.store'
 import { useGpioStore } from '@/shared/stores/gpio.store'
 import { useNotificationStore } from '@/shared/stores/notification.store'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
+import { useIntentSignalsStore } from '@/shared/stores/intentSignals.store'
+import { ESP_STORE_WS_SUBSCRIPTION_TYPES } from '@/stores/esp-websocket-subscription'
+import { normalizeEspHealthPayload } from '@/domain/esp/espHealth'
 import { useConfigStore } from '@/shared/stores/config.store'
 import {
   inferInterfaceType,
@@ -131,17 +134,8 @@ export const useEspStore = defineStore('esp', () => {
     autoConnect: true,
     autoReconnect: true,
     filters: {
-      types: [
-        'esp_health', 'sensor_data', 'actuator_status', 'actuator_alert',
-        'config_response', 'zone_assignment', 'subzone_assignment', 'sensor_health',
-        'device_scope_changed', 'device_context_changed',
-        'device_discovered', 'device_approved', 'device_rejected', 'device_rediscovered',
-        'actuator_response', 'actuator_command', 'actuator_command_failed',
-        'config_published', 'config_failed',
-        'sequence_started', 'sequence_step', 'sequence_completed', 'sequence_error', 'sequence_cancelled',
-        'logic_execution',
-        'notification', 'error_event', 'system_event',
-      ] as MessageType[],
+      // P0-A: must match every ws.on type in initWebSocket (see esp-websocket-subscription.ts)
+      types: ESP_STORE_WS_SUBSCRIPTION_TYPES,
     },
   })
 
@@ -1102,6 +1096,9 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         }) ?? []
       }
 
+      const dataRec = data as Record<string, unknown>
+      const runtimeHealthView = normalizeEspHealthPayload(dataRec)
+
       // Replace device with updated copy (triggers Vue reactivity)
       devices.value[deviceIndex] = {
         ...device,
@@ -1117,6 +1114,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         actuators: updatedActuators,
         // Clear offlineInfo when online, set when offline
         offlineInfo: data.status === 'offline' ? offlineInfo : undefined,
+        runtime_health_view: runtimeHealthView,
       }
 
       logger.debug(`esp_health update for ${espId}:`, {
@@ -1570,6 +1568,20 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   }
 
   // =============================================================================
+  // Intent outcome (canonical MQTT contract, April 2026)
+  // =============================================================================
+
+  function handleIntentOutcome(message: { data: Record<string, unknown> }): void {
+    useIntentSignalsStore().ingestOutcome(message.data)
+  }
+
+  function handleIntentOutcomeLifecycle(message: WebSocketMessage): void {
+    const data = message.data as Record<string, unknown>
+    const msgCorr = typeof message.correlation_id === 'string' ? message.correlation_id : undefined
+    useIntentSignalsStore().ingestLifecycle(data, msgCorr)
+  }
+
+  // =============================================================================
   // Actuator Commands (Real ESP + Mock)
   // =============================================================================
 
@@ -1713,6 +1725,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       ws.on('sequence_completed', handleSequenceCompleted),
       ws.on('sequence_error', handleSequenceError),
       ws.on('sequence_cancelled', handleSequenceCancelled),
+      ws.on('intent_outcome', handleIntentOutcome),
+      ws.on('intent_outcome_lifecycle', handleIntentOutcomeLifecycle),
     )
 
     // BUG U FIX: Register callback to refresh ESP data when WebSocket connects/reconnects
@@ -1736,6 +1750,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Call when app is being destroyed or user logs out.
    */
   function cleanupWebSocket(): void {
+    useIntentSignalsStore().clearAll()
     wsUnsubscribers.forEach(unsub => unsub())
     wsUnsubscribers.length = 0
     ws.disconnect()

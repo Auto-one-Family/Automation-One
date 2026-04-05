@@ -500,7 +500,11 @@ function determineSeverity(wsMessage: WebSocketMessage, _errorCode?: number | st
 }
 
 function determineSource(eventType: string): UnifiedEvent['source'] {
-  const espEvents = ['sensor_data', 'actuator_status', 'actuator_response', 'actuator_alert', 'esp_health', 'config_response', 'zone_assignment', 'sensor_health']
+  const espEvents = [
+    'sensor_data', 'actuator_status', 'actuator_response', 'actuator_alert', 'esp_health',
+    'config_response', 'zone_assignment', 'subzone_assignment', 'sensor_health',
+    'intent_outcome', 'intent_outcome_lifecycle',
+  ]
   const mqttEvents = ['sensor_data', 'actuator_status', 'esp_health']
   const logicEvents = ['logic_execution', 'notification']
   const userEvents = ['device_approved', 'device_rejected']
@@ -522,6 +526,25 @@ function determineSource(eventType: string): UnifiedEvent['source'] {
  */
 function generateGermanMessage(wsMessage: WebSocketMessage, _errorCode?: number | string): string {
   const data = wsMessage.data as Record<string, unknown>
+  if (wsMessage.type === 'intent_outcome_lifecycle') {
+    const et = String(data.event_type ?? '')
+    const rc = String(data.reason_code ?? '')
+    return `Zwischenstand (Konfiguration): ${et}${rc ? ` — ${rc}` : ''}`
+  }
+  if (wsMessage.type === 'intent_outcome') {
+    const flow = String(data.flow ?? '')
+    const outcome = String(data.outcome ?? '')
+    const codeRaw = data.code
+    const code = codeRaw != null && String(codeRaw).trim().length > 0 ? String(codeRaw) : ''
+    const terminal =
+      data.is_final === true || String(data.terminality ?? '').toLowerCase().includes('terminal')
+    const prefix = terminal ? 'Ergebnis' : 'Vorgang'
+    const cid = (extractCorrelationId(data) || '').trim()
+    const shortC = cid.length <= 14 ? cid : `…${cid.slice(-10)}`
+    let msg = `${prefix}: ${flow || '?'}/${outcome || '?'}` + (shortC ? ` (${shortC})` : '')
+    if (code) msg += ` · Firmware-Code: ${code}`
+    return msg
+  }
   const serverMessage = typeof data.message === 'string' ? data.message.trim() : ''
   if (serverMessage.length > 0) {
     return serverMessage

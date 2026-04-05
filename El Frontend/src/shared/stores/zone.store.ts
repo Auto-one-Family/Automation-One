@@ -17,6 +17,14 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/logger'
+import {
+  formatZoneAckError,
+  formatZoneAckRemoved,
+  formatZoneAckSuccess,
+  formatSubzoneAckError,
+  formatSubzoneAckSuccess,
+  formatSubzoneRemoved,
+} from '@/domain/zone/ackPresentation'
 import { zonesApi } from '@/api/zones'
 import type { ESPDevice } from '@/api/esp'
 import type {
@@ -36,6 +44,8 @@ interface ZoneAssignmentPayload {
   kaiser_id?: string | null
   timestamp?: number
   message?: string
+  /** Brückengrund (MQTT/Firmware), nicht Intent-Outcome-Code */
+  reason_code?: string | null
 }
 
 /** Payload shape for subzone_assignment WebSocket events */
@@ -47,6 +57,8 @@ interface SubzoneAssignmentPayload {
   timestamp?: number
   error_code?: string
   message?: string
+  /** Brückengrund (MQTT/Firmware), nicht Intent-Outcome-Code */
+  reason_code?: string | null
 }
 
 /**
@@ -196,7 +208,12 @@ export const useZoneStore = defineStore('zone', () => {
 
       const deviceName = device.name || espId
       const zoneName = data.zone_name || data.zone_id || 'Zone'
-      toast.success(`"${deviceName}" wurde zu "${zoneName}" zugewiesen`)
+      const { title, bridgeLine } = formatZoneAckSuccess({
+        deviceName,
+        zoneName,
+        reasonCode: data.reason_code,
+      })
+      toast.success(bridgeLine ? `${title}\n${bridgeLine}` : title)
     } else if (data.status === 'zone_removed') {
       // Capture zone name before clearing fields
       const deviceName = device.name || espId
@@ -210,10 +227,12 @@ export const useZoneStore = defineStore('zone', () => {
         master_zone_id: undefined,
       })
       logger.info(`Zone removed: ${espId}`)
-      toast.success(`"${deviceName}" wurde aus "${zoneName}" entfernt`)
+      const removed = formatZoneAckRemoved({ deviceName, zoneName, reasonCode: data.reason_code })
+      toast.success(removed.bridgeLine ? `${removed.title}\n${removed.bridgeLine}` : removed.title)
     } else if (data.status === 'error') {
       logger.error(`Zone assignment error for ${espId}: ${data.message}`)
-      toast.error(data.message || 'Zone-Zuweisung fehlgeschlagen')
+      const err = formatZoneAckError({ message: data.message, reasonCode: data.reason_code })
+      toast.error(err.bridgeLine ? `${err.headline}\n${err.bridgeLine}` : err.headline)
     } else {
       logger.warn(`Unknown zone_assignment status: ${data.status}`)
     }
@@ -265,15 +284,29 @@ export const useZoneStore = defineStore('zone', () => {
 
     if (data.status === 'subzone_assigned') {
       logger.info(`Subzone confirmed: ${espId} → ${data.subzone_id}`)
-      toast.success(`Subzone zugewiesen: ${device.name || espId}`)
+      const ok = formatSubzoneAckSuccess({
+        deviceLabel: device.name || espId,
+        reasonCode: data.reason_code,
+      })
+      toast.success(ok.bridgeLine ? `${ok.title}\n${ok.bridgeLine}` : ok.title)
       return true
     } else if (data.status === 'subzone_removed') {
       logger.info(`Subzone removed: ${espId}`)
-      toast.success(`Subzone entfernt: ${device.name || espId}`)
+      const rem = formatSubzoneRemoved({
+        deviceLabel: device.name || espId,
+        reasonCode: data.reason_code,
+      })
+      toast.success(rem.bridgeLine ? `${rem.title}\n${rem.bridgeLine}` : rem.title)
       return true
     } else if (data.status === 'error') {
       logger.error(`Subzone assignment error for ${espId}: ${data.message}`)
-      toast.error(data.message || 'Subzone-Zuweisung fehlgeschlagen')
+      const se = formatSubzoneAckError({
+        message: data.message,
+        reasonCode: data.reason_code,
+        errorCode: data.error_code,
+      })
+      const parts = [se.headline, se.bridgeLine, se.errorCodeLine].filter(Boolean) as string[]
+      toast.error(parts.join('\n'))
     } else {
       logger.warn(`Unknown subzone_assignment status: ${data.status}`)
     }

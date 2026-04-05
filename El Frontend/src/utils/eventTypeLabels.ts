@@ -29,6 +29,18 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
 
   // System
   zone_assignment: 'Zonen-Zuweisung',
+  subzone_assignment: 'Subzonen-Zuweisung',
+  device_scope_changed: 'Geraete-Scope',
+  device_context_changed: 'Geraete-Kontext',
+  sensor_config_deleted: 'Sensor-Konfiguration geloescht',
+  actuator_config_deleted: 'Aktor-Konfiguration geloescht',
+  notification_new: 'Benachrichtigung (neu)',
+  notification_updated: 'Benachrichtigung (aktualisiert)',
+  notification_unread_count: 'Ungelesene Benachrichtigungen',
+  intent_outcome: 'Vorgang — Ergebnis',
+  intent_outcome_lifecycle: 'Vorgang — Zwischenstand',
+  plugin_execution_started: 'Plugin gestartet',
+  plugin_execution_completed: 'Plugin beendet',
   logic_execution: 'Regel ausgefuehrt',
   system_event: 'System',
   service_start: 'Server-Start',
