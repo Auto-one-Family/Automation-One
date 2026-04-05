@@ -6,6 +6,12 @@ to audit logging and WebSocket realtime consumers.
 
 Topic: kaiser/{kaiser_id}/esp/{esp_id}/system/intent_outcome
 QoS: 1 (At Least Once)
+
+**Stale / deduplicated deliveries:** When ``upsert_outcome`` reports ``is_stale`` (duplicate
+or out-of-order generation/seq, or monotonic finality guard), the handler still **commits**
+the transaction and returns ``True`` so MQTT ACKs the message, but it **skips** audit log
+and **WebSocket** broadcast. Operators see no duplicate realtime event; persistence was
+already authoritative on the first delivery.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ from ...core.metrics import (
     increment_outcome_recovered_count,
     increment_outcome_retry_count,
     observe_config_commit_duration_ms,
+    observe_intent_outcome_firmware_code,
     set_outcome_drop_count_critical,
 )
 from ...core.logging_config import get_logger
@@ -30,6 +37,7 @@ from ...db.repositories.command_contract_repo import CommandContractRepository
 from ...db.session import resilient_session
 from ...services.intent_outcome_contract import (
     canonicalize_intent_outcome,
+    merge_intent_outcome_nested_data,
     serialize_intent_outcome_row,
 )
 from ..topics import TopicBuilder
@@ -48,6 +56,7 @@ class IntentOutcomeHandler:
                 return False
 
             payload = dict(payload)
+            merge_intent_outcome_nested_data(payload)
             validation_error = self._validate_payload(payload)
             if validation_error:
                 logger.error("Invalid intent_outcome payload: %s", validation_error)
@@ -87,8 +96,10 @@ class IntentOutcomeHandler:
                 intent_id,
                 outcome,
             )
-            if canonical.is_contract_violation:
+            if canonical.is_contract_violation and canonical.code == "CONTRACT_UNKNOWN_CODE":
                 increment_contract_unknown_code("intent_outcome")
+            if payload.get("code"):
+                observe_intent_outcome_firmware_code(str(payload.get("flow") or ""), str(payload.get("code")))
 
             # Persist audit trace for cross-layer correlation.
             try:
@@ -99,6 +110,7 @@ class IntentOutcomeHandler:
                     outcome_row, is_stale = await contract_repo.upsert_outcome(payload, esp_id=esp_id)
 
                     if is_stale:
+                        # Duplicate MQTT delivery: DB already has canonical state; avoid WS noise.
                         increment_intent_duplicate()
                         logger.info(
                             "already_processed intent_outcome dedup hit: intent_id=%s generation=%s seq=%s",

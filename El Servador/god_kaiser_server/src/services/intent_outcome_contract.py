@@ -13,7 +13,17 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 
-CANONICAL_FLOWS = {"command", "config", "publish"}
+# Aligned with El Trabajante publishIntentOutcome(flow, ...) — extend when firmware adds flows.
+CANONICAL_FLOWS = {
+    "command",
+    "config",
+    "publish",
+    "zone",
+    "subzone_assign",
+    "subzone_remove",
+    "subzone_safe",
+    "offline_rules",
+}
 FLOW_ALIASES = {
     "cmd": "command",
     "commands": "command",
@@ -32,6 +42,30 @@ OUTCOME_ALIASES = {
 }
 
 FINAL_OUTCOMES = {"persisted", "rejected", "failed", "expired"}
+
+
+def merge_intent_outcome_nested_data(payload: dict[str, Any]) -> None:
+    """
+    Firmware may nest intent metadata under ``data``; merge into top-level keys in-place
+    before validation/canonicalization (missing or empty top-level only).
+    """
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return
+    for key in (
+        "intent_id",
+        "correlation_id",
+        "generation",
+        "seq",
+        "epoch",
+        "ttl_ms",
+        "created_at_ms",
+    ):
+        if key not in data:
+            continue
+        current = payload.get(key)
+        if current is None or (isinstance(current, str) and not current.strip()):
+            payload[key] = data[key]
 
 
 @dataclass(frozen=True)
@@ -98,7 +132,11 @@ def canonicalize_intent_outcome(payload: Mapping[str, Any]) -> CanonicalIntentOu
     reason = raw_reason
 
     if is_contract_violation:
-        code = "CONTRACT_UNKNOWN_CODE"
+        # Known firmware flow + unknown outcome: keep diagnostic code (e.g. future outcomes).
+        if flow_is_known and not outcome_is_known and raw_code:
+            code = raw_code
+        else:
+            code = "CONTRACT_UNKNOWN_CODE"
         violation_msg = "Contract violation: unknown intent_outcome values"
         detail = ", ".join(contract_issues)
         reason = f"{violation_msg} ({detail})" if detail else violation_msg

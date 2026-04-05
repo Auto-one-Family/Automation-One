@@ -640,6 +640,23 @@ class TopicBuilder:
         return None
 
     @staticmethod
+    def parse_intent_outcome_lifecycle_topic(topic: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse CONFIG_PENDING lifecycle subtopic (not canonical intent_outcome JSON).
+
+        Expected topic: kaiser/{kaiser_id}/esp/{esp_id}/system/intent_outcome/lifecycle
+        """
+        pattern = r"^kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/system/intent_outcome/lifecycle$"
+        match = re.match(pattern, topic)
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "type": "intent_outcome_lifecycle",
+            }
+        return None
+
+    @staticmethod
     def parse_intent_outcome_topic(topic: str) -> Optional[Dict[str, Any]]:
         """
         Parse system intent outcome topic.
@@ -977,6 +994,7 @@ class TopicBuilder:
             cls.parse_config_response_topic,
             cls.parse_discovery_topic,
             cls.parse_system_error_topic,
+            cls.parse_intent_outcome_lifecycle_topic,
             cls.parse_intent_outcome_topic,
             cls.parse_pi_enhanced_request_topic,
             cls.parse_zone_ack_topic,

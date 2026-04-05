@@ -308,7 +308,7 @@ class Subscriber:
             "/sensor/" in topic and topic.endswith("/data")
         ) or topic.endswith("/system/error") or topic.endswith("/config_response") or topic.endswith(
             "/system/intent_outcome"
-        )
+        ) or topic.endswith("/system/intent_outcome/lifecycle")
 
     def _execute_handler(
         self,

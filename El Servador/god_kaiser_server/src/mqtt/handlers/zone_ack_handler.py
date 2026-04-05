@@ -39,6 +39,7 @@ from ...core.error_codes import (
     ValidationErrorCode,
 )
 from ...core.logging_config import get_logger
+from ...core.metrics import increment_mqtt_ack_reason_code
 from ...db.repositories import ESPRepository
 from ...db.repositories.zone_repo import ZoneRepository
 from ...db.session import resilient_session
@@ -47,6 +48,8 @@ from ..topics import TopicBuilder
 
 if TYPE_CHECKING:
     from ...services.mqtt_command_bridge import MQTTCommandBridge
+
+from ...services.mqtt_command_bridge import extract_ack_correlation_id
 
 logger = get_logger(__name__)
 
@@ -127,6 +130,16 @@ class ZoneAckHandler:
             master_zone_id = payload.get("master_zone_id", "")
             timestamp = payload.get("ts", 0)
             error_message = payload.get("message", "")
+            reason_code = payload.get("reason_code")
+            if reason_code:
+                increment_mqtt_ack_reason_code("zone", str(reason_code))
+                logger.info(
+                    "zone/ack reason_code=%s esp_id=%s status=%s correlation_id=%s",
+                    reason_code,
+                    esp_id_str,
+                    status,
+                    extract_ack_correlation_id(payload),
+                )
 
             # Step 3: Process ACK via database session
             async with resilient_session() as session:
@@ -225,6 +238,7 @@ class ZoneAckHandler:
 
                 # Step 5.1: Resolve pending ACK Future (if any)
                 if _command_bridge:
+                    ack_cid = extract_ack_correlation_id(payload)
                     resolved = _command_bridge.resolve_ack(
                         ack_data={
                             "status": status,
@@ -232,7 +246,8 @@ class ZoneAckHandler:
                             "master_zone_id": master_zone_id,
                             "esp_id": esp_id_str,
                             "ts": timestamp,
-                            "correlation_id": payload.get("correlation_id"),
+                            "correlation_id": ack_cid,
+                            "reason_code": reason_code,
                         },
                         esp_id=esp_id_str,
                         command_type="zone",
@@ -241,7 +256,7 @@ class ZoneAckHandler:
                         logger.info(
                             "zone/ack resolved for %s (correlation_id=%s)",
                             esp_id_str,
-                            payload.get("correlation_id", "none"),
+                            ack_cid or "none",
                         )
                     else:
                         logger.debug(
@@ -259,6 +274,7 @@ class ZoneAckHandler:
                     kaiser_id=device.kaiser_id,  # WP4: Add kaiser_id for frontend
                     timestamp=timestamp,
                     message=error_message,
+                    reason_code=reason_code,
                 )
 
                 return True
@@ -336,6 +352,7 @@ class ZoneAckHandler:
         kaiser_id: str,
         timestamp: int,
         message: str,
+        reason_code: Optional[str] = None,
     ) -> None:
         """
         Broadcast zone assignment update via WebSocket.
@@ -365,6 +382,8 @@ class ZoneAckHandler:
 
             if message:
                 event_data["message"] = message
+            if reason_code:
+                event_data["reason_code"] = reason_code
 
             await ws_manager.broadcast("zone_assignment", event_data)
 

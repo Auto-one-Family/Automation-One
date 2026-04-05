@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from pydantic import ValidationError
 
 from ...core.logging_config import get_logger
+from ...core.metrics import increment_mqtt_ack_reason_code
 from ...db.session import resilient_session
 from ...db.repositories import ESPRepository
 from ...schemas.subzone import SubzoneAckPayload
@@ -37,6 +38,8 @@ from ..topics import TopicBuilder
 
 if TYPE_CHECKING:
     from ...services.mqtt_command_bridge import MQTTCommandBridge
+
+from ...services.mqtt_command_bridge import extract_ack_correlation_id
 
 logger = get_logger(__name__)
 
@@ -94,6 +97,8 @@ class SubzoneAckHandler:
             f"Received subzone ACK from {esp_id}: "
             f"status={ack_payload.status}, subzone_id={ack_payload.subzone_id}"
         )
+        if ack_payload.reason_code:
+            increment_mqtt_ack_reason_code("subzone", str(ack_payload.reason_code))
 
         # Process ACK with database session
         async with resilient_session() as session:
@@ -115,6 +120,7 @@ class SubzoneAckHandler:
             # Resolve pending ACK Future for ALL statuses (including error)
             # so the caller gets immediate feedback instead of waiting for timeout
             if _command_bridge:
+                ack_cid = extract_ack_correlation_id(payload)
                 _command_bridge.resolve_ack(
                     ack_data={
                         "status": ack_payload.status,
@@ -122,7 +128,8 @@ class SubzoneAckHandler:
                         "esp_id": esp_id,
                         "ts": ack_payload.timestamp,
                         "error_code": getattr(ack_payload, "error_code", None),
-                        "correlation_id": payload.get("correlation_id"),
+                        "correlation_id": ack_cid,
+                        "reason_code": ack_payload.reason_code,
                     },
                     esp_id=esp_id,
                     command_type="subzone",
@@ -171,6 +178,8 @@ class SubzoneAckHandler:
         if ack_payload.error_code is not None:
             event_data["error_code"] = ack_payload.error_code
             event_data["message"] = ack_payload.message
+        if ack_payload.reason_code:
+            event_data["reason_code"] = ack_payload.reason_code
 
         # Use broadcast() instead of broadcast_thread_safe() for consistency
         ws_manager = await WebSocketManager.get_instance()
