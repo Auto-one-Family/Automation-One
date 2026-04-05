@@ -113,7 +113,7 @@ class ActuatorActionExecutor(BaseActionExecutor):
 
         try:
             # Send command via ActuatorService
-            success = await self.actuator_service.send_command(
+            cmd_result = await self.actuator_service.send_command(
                 esp_id=esp_id,
                 gpio=gpio,
                 command=command,
@@ -121,6 +121,7 @@ class ActuatorActionExecutor(BaseActionExecutor):
                 duration=duration,
                 issued_by=issued_by,
             )
+            success = cmd_result.success
 
             if success:
                 message = f"Actuator command executed: {command} on {esp_id}:GPIO{gpio}"

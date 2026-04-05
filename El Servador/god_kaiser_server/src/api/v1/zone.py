@@ -58,6 +58,11 @@ router = APIRouter(prefix="/v1/zone", tags=["zone"])
     - `copy`: Clone subzones to new zone, originals stay
     - `reset`: Leave subzones in old zone, start fresh
 
+    **Finalität (HTTP):** DB-Änderung committed; bei echten Geräten wartet der Server optional über
+    `MQTTCommandBridge` auf `zone/ack` (Timeout). Felder `mqtt_sent` und `ack_received` im Response-Body
+    präzisieren Broker- vs. Gerätebestätigung; Details siehe `docs/finalitaet-http-mqtt-ws.md`.
+    Asynchron zusätzlich WebSocket `zone_assignment`.
+
     **MQTT Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/zone/assign`
     """,
     responses={
@@ -115,7 +120,11 @@ async def assign_zone(
     response_model=ZoneRemoveResponse,
     status_code=status.HTTP_200_OK,
     summary="Remove Zone Assignment",
-    description="Remove zone assignment from an ESP device.",
+    description=(
+        "Entfernt die Zonenzuweisung. **Finalität:** wie bei Assign — DB + MQTT, bei echten ESPs "
+        "optional Warten auf `zone/ack` über die Bridge; Response-Felder `mqtt_sent` / `ack_received`. "
+        "Siehe `docs/finalitaet-http-mqtt-ws.md`."
+    ),
     responses={
         200: {"description": "Zone removed (check mqtt_sent for MQTT status)"},
         404: {"description": "ESP device not found"},

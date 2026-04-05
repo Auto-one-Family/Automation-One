@@ -498,7 +498,7 @@ async def toggle_rule(
                 gpio = action.get("gpio")
                 if esp_id is not None and gpio is not None:
                     try:
-                        success = await actuator_service.send_command(
+                        cmd_result = await actuator_service.send_command(
                             esp_id=str(esp_id),
                             gpio=int(gpio),
                             command="OFF",
@@ -506,7 +506,7 @@ async def toggle_rule(
                             duration=0,
                             issued_by=f"rule_toggle:{rule.id}",
                         )
-                        if success:
+                        if cmd_result.success:
                             logger.info(
                                 f"Rule '{rule.name}' disabled: sent OFF to {esp_id} GPIO {gpio}"
                             )

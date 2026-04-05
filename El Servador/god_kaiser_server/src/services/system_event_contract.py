@@ -230,6 +230,13 @@ def canonicalize_diagnostics(payload: Mapping[str, Any]) -> CanonicalSystemEvent
 
 
 def canonicalize_heartbeat(payload: Mapping[str, Any]) -> CanonicalSystemEvent:
+    """
+    Normalize heartbeat fields we enforce (system_state, metrics_schema_version, heap aliases).
+
+    Additional firmware keys (e.g. persistence_degraded, critical_outcome_drop_count,
+    mqtt_circuit_breaker_open) are passed through unchanged — they are optional telemetry and
+    must not break ingestion for older clients missing those fields.
+    """
     canonical = dict(payload)
     issues: list[str] = []
 

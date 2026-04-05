@@ -18,7 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 class ConflictResolution(Enum):
-    """Wie ein Konflikt aufgelöst wird."""
+    """Wie ein Konflikt aufgelöst wird.
+
+    HIGHER_PRIORITY_WINS bedeutet: die gewinnende Regel hat die höhere Konfliktpriorität,
+    also die niedrigere numerische ``priority`` (kleinere Zahl im Datenmodell), nicht die
+    größere Zahl im Feld.
+    """
 
     HIGHER_PRIORITY_WINS = "higher_priority_wins"
     FIRST_WINS = "first_wins"

@@ -542,6 +542,7 @@ class EventAggregatorService:
         "{device_id} online ({heap_kb}KB frei, RSSI: {wifi_rssi}dBm)"
         Mit optionalem Uptime: "| Uptime: Xh Ym"
         """
+        rt = getattr(heartbeat, "runtime_telemetry", None) or {}
         contract_payload = serialize_esp_health_event(
             esp_id=heartbeat.device_id,
             status="online",
@@ -552,6 +553,7 @@ class EventAggregatorService:
             actuator_count=heartbeat.actuator_count,
             timestamp=int(heartbeat.timestamp.replace(tzinfo=timezone.utc).timestamp()),
             gpio_reserved_count=heartbeat.gpio_reserved_count or 0,
+            runtime_telemetry=rt,
         )
 
         # Severity basierend auf health_status (Ampel-System)
@@ -561,6 +563,13 @@ class EventAggregatorService:
             "critical": "error",
         }
         severity = severity_map.get(heartbeat.health_status, "info")
+        if isinstance(rt, dict) and (
+            rt.get("persistence_degraded") is True
+            or rt.get("runtime_state_degraded") is True
+            or rt.get("network_degraded") is True
+        ):
+            if severity == "info":
+                severity = "warning"
 
         return {
             "id": f"heartbeat_{heartbeat.id}",
@@ -575,6 +584,7 @@ class EventAggregatorService:
                 "health_status": heartbeat.health_status,
                 "data_source": heartbeat.data_source,
                 "contract_payload": contract_payload,
+                "runtime_telemetry": rt,
             },
         }
 

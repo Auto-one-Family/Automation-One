@@ -196,6 +196,7 @@ def serialize_esp_health_event(
     source: str | None = None,
     timeout_seconds: Any = None,
     actuator_states_reset: Any = None,
+    runtime_telemetry: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_status = str(status)
     base_message = build_esp_health_message(esp_id, heap_free, wifi_rssi, uptime)
@@ -225,4 +226,7 @@ def serialize_esp_health_event(
         payload["timeout_seconds"] = _to_int(timeout_seconds)
     if actuator_states_reset is not None:
         payload["actuator_states_reset"] = _to_int(actuator_states_reset)
+    if runtime_telemetry:
+        for key, value in runtime_telemetry.items():
+            payload[key] = value
     return payload

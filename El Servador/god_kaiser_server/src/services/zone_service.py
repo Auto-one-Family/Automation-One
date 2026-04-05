@@ -355,6 +355,10 @@ class ZoneService:
             self.esp_repo.session.add(audit_entry)
 
         # 5. Publish via MQTT
+        ack_received: Optional[bool] = None
+        warning_msg: Optional[str] = None
+        ack_timeout = self.command_bridge.DEFAULT_TIMEOUT if self.command_bridge else 15.0
+
         if self.command_bridge and not _is_mock_esp(device_id):
             from .mqtt_command_bridge import MQTTACKTimeoutError
 
@@ -364,9 +368,10 @@ class ZoneService:
                     payload=payload,
                     esp_id=device_id,
                     command_type="zone",
-                    timeout=15.0,
+                    timeout=ack_timeout,
                 )
                 mqtt_sent = True
+                ack_received = True
                 if ack.get("status") == "error":
                     logger.error(
                         "ESP %s rejected zone removal: %s",
@@ -377,11 +382,22 @@ class ZoneService:
             except MQTTACKTimeoutError as e:
                 logger.error("Zone removal ACK timeout for %s: %s", device_id, e)
                 mqtt_sent = False
+                ack_received = False
+                warning_msg = (
+                    f"ACK-Timeout: ESP {device_id} hat nicht innerhalb "
+                    f"{ack_timeout}s bestätigt. "
+                    f"Zone wurde in der DB entfernt."
+                )
         else:
             mqtt_sent = self._publish_zone_assignment(topic, payload)
 
         if mqtt_sent:
             logger.info("Zone removal sent to %s", device_id)
+        elif ack_received is False:
+            logger.warning(
+                "Zone removal ACK timeout for %s (DB updated, ESP may not have confirmed)",
+                device_id,
+            )
         else:
             logger.warning(
                 "Zone removal MQTT publish failed for %s (DB updated, ESP may be offline)",
@@ -392,12 +408,21 @@ class ZoneService:
         if _is_mock_esp(device_id):
             await self._update_mock_esp_zone(device_id, None, None, None)
 
+        if mqtt_sent:
+            remove_msg = "Zone removed"
+        elif ack_received is False:
+            remove_msg = "Zone removed (ACK timeout)"
+        else:
+            remove_msg = "Zone removed (MQTT offline)"
+
         return ZoneRemoveResponse(
             success=True,
-            message="Zone removed" if mqtt_sent else "Zone removed (MQTT offline)",
+            message=remove_msg,
             device_id=device_id,
             mqtt_topic=topic,
             mqtt_sent=mqtt_sent,
+            ack_received=ack_received,
+            warning=warning_msg,
         )
 
     # =========================================================================

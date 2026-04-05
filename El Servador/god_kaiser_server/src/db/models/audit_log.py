@@ -105,10 +105,10 @@ class AuditLog(Base, TimestampMixin):
 
     # Event Details
     status: Mapped[str] = mapped_column(
-        String(20),
+        String(50),
         nullable=False,
         index=True,
-        doc="Event status (success, failed, pending)",
+        doc="Event status (success, failed, pending, or lifecycle event_type up to 50 chars)",
     )
 
     message: Mapped[Optional[str]] = mapped_column(

@@ -99,8 +99,10 @@ class SubzoneMetadataUpdate(BaseModel):
     - Duplicate GPIOs are automatically removed
     - ESP performs actual conflict detection
 
-    **Note:** Response indicates MQTT message was sent.
-    Actual confirmation comes asynchronously via WebSocket.
+    **Finalität:** HTTP 2xx = DB + MQTT-Publish; **kein** synchrones Warten auf `subzone/ack`
+    (kein `MQTTCommandBridge` wie bei Zone). `mqtt_sent` bezieht sich nur auf den Broker.
+    Geräte-Finalität über MQTT `subzone/ack` und WebSocket `subzone_assignment`.
+    Kurzüberblick: `docs/finalitaet-http-mqtt-ws.md`.
     """,
 )
 async def assign_subzone(

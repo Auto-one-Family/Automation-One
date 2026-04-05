@@ -241,7 +241,8 @@ class LogicEngine:
 
                 # Evaluate each matching rule with batch-level lock tracking
                 # Locks are held across the entire batch to enable ConflictManager
-                # to block lower-priority rules from overriding higher-priority ones
+                # to block rules with larger priority values (lower conflict priority)
+                # from overriding rules with smaller priority values (higher conflict priority)
                 batch_locks = []
                 try:
                     for rule in matching_rules:
@@ -848,7 +849,7 @@ class LogicEngine:
             trigger_data: Sensor data that triggered the rule
             rule_id: UUID of the rule
             rule_name: Name of the rule
-            rule_priority: Rule priority (lower number = higher priority)
+            rule_priority: Rule priority for conflicts/ordering (lower number = higher priority)
             session: Optional async DB session (Phase 2.4: for SubzoneRepository lookup)
             batch_locks: Optional batch-level lock tracking list.
                 If provided, acquired locks are added here and NOT released
@@ -1055,7 +1056,7 @@ class LogicEngine:
                     else:
                         self._offline_esp_skip.pop(esp_id, None)
 
-            success = await self.actuator_service.send_command(
+            cmd_result = await self.actuator_service.send_command(
                 esp_id=esp_id,
                 gpio=gpio,
                 command=command,
@@ -1063,6 +1064,7 @@ class LogicEngine:
                 duration=duration,
                 issued_by=f"logic:{rule_id}",
             )
+            success = cmd_result.success
 
             # WebSocket broadcast (non-critical, must not interrupt execution)
             try:

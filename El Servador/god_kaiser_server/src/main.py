@@ -46,6 +46,7 @@ from .mqtt.handlers import (
     error_handler,
     heartbeat_handler,
     intent_outcome_handler,
+    intent_outcome_lifecycle_handler,
     lwt_handler,
     sensor_handler,
     subzone_ack_handler,
@@ -300,6 +301,13 @@ async def lifespan(app: FastAPI):
             intent_outcome_handler.handle_intent_outcome,
         )
         logger.info("Intent outcome handler registered: kaiser/+/esp/+/system/intent_outcome")
+        _subscriber_instance.register_handler(
+            "kaiser/+/esp/+/system/intent_outcome/lifecycle",
+            intent_outcome_lifecycle_handler.handle_intent_outcome_lifecycle,
+        )
+        logger.info(
+            "Intent outcome lifecycle handler registered: kaiser/+/esp/+/system/intent_outcome/lifecycle"
+        )
         # System Diagnostics Handler (HealthMonitor snapshots)
         # Topic: kaiser/+/esp/+/system/diagnostics (WP6: wildcard kaiser_id)
         # ESP32 HealthMonitor publishes diagnostics every 60s (heap, RSSI, uptime, state)

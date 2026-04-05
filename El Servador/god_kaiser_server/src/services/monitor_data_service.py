@@ -168,11 +168,13 @@ class MonitorDataService:
 
             state = state_map.get((ac.esp_id, gpio))
             current_state = False
-            pwm_value = 0
+            pwm_value = 0.0
             emergency_stopped = False
             if state:
                 current_state = state.state in ("on", "pwm") or (state.current_value or 0) > 0
-                pwm_value = int((state.current_value or 0) * 100)
+                # Pass normalized 0.0–1.0 value directly; frontend handles display conversion.
+                # Avoids double-multiplication: frontend does val * 100 for % display.
+                pwm_value = float(state.current_value or 0.0)
                 emergency_stopped = state.state == "emergency_stop"
 
             entry = SubzoneActuatorEntry(

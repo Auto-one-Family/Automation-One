@@ -42,7 +42,10 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
 
     async def get_enabled_rules(self) -> list[CrossESPLogic]:
         """
-        Get all enabled rules, sorted by priority (ASC - lower priority number = higher priority).
+        Get all enabled rules, sorted by priority ascending.
+
+        Lower ``priority`` number = higher execution and conflict priority (matches
+        ConflictManager and typical evaluation order).
 
         Returns:
             List of enabled CrossESPLogic rules sorted by priority

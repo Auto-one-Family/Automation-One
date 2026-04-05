@@ -29,7 +29,12 @@ class SubzoneSensorEntry(BaseModel):
 
 
 class SubzoneActuatorEntry(BaseModel):
-    """Actuator entry for monitor display (from actuator_configs + actuator_state)."""
+    """Actuator entry for monitor display (from actuator_configs + actuator_state).
+
+    pwm_value is a normalized 0.0–1.0 float. The frontend is responsible for
+    converting to percentage (val * 100). Storing as raw normalized value avoids
+    double-multiplication when the service layer passes current_value directly.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -38,7 +43,7 @@ class SubzoneActuatorEntry(BaseModel):
     actuator_type: str
     name: Optional[str] = None
     state: bool = False
-    pwm_value: int = 0
+    pwm_value: float = 0.0
     emergency_stopped: bool = False
 
 

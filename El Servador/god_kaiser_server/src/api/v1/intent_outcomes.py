@@ -1,7 +1,8 @@
 """
 Intent Outcome API (P0.2 visibility).
 
-Exposes persisted canonical intent_outcome records for realtime/API parity checks.
+Read-only Auslese der persistierten Intent-/Outcome-Zeilen — **kein** Befehls- oder
+Blocking-Endpoint; Orchestrierung läuft über MQTT und zugehörige Handler.
 """
 
 from __future__ import annotations
@@ -12,10 +13,20 @@ from ..deps import ActiveUser, DBSession
 from ...db.repositories.command_contract_repo import CommandContractRepository
 from ...services.intent_outcome_contract import serialize_intent_outcome_row
 
-router = APIRouter(prefix="/v1/intent-outcomes", tags=["intent-outcomes"])
+router = APIRouter(
+    prefix="/v1/intent-outcomes",
+    tags=["intent-outcomes"],
+)
 
 
-@router.get("", summary="List recent intent outcomes")
+@router.get(
+    "",
+    summary="Letzte Intent-Outcomes auflisten",
+    description=(
+        "**Nur Lesen:** Liefert historische Einträge aus `command_outcomes` (Projektion für API/WS-Parität). "
+        "Dient Observability und Integrationstests — **nicht** zum Auslösen oder Warten auf Befehlsfinalität."
+    ),
+)
 async def list_intent_outcomes(
     db: DBSession,
     _user: ActiveUser,
@@ -32,7 +43,14 @@ async def list_intent_outcomes(
     }
 
 
-@router.get("/{intent_id}", summary="Get terminal outcome for intent")
+@router.get(
+    "/{intent_id}",
+    summary="Outcome zu einer intent_id",
+    description=(
+        "**Nur Lesen:** Eine gespeicherte Outcome-Zeile nach `intent_id`. "
+        "Kein Poll für offene Befehle — für Geräte-Finalität MQTT/WS und domain-spezifische APIs nutzen."
+    ),
+)
 async def get_intent_outcome(
     intent_id: str,
     db: DBSession,

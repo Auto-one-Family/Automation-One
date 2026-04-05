@@ -57,6 +57,25 @@ def generate_mqtt_correlation_id(esp_id: str, topic_suffix: str, seq: Union[int,
     return f"{esp_id}:{topic_suffix}:{seq_part}:{ts_ms}"
 
 
+def build_emergency_actuator_correlation_id(
+    incident_correlation_id: str, esp_id: str, gpio: int
+) -> str:
+    """Deterministic MQTT correlation_id for one emergency OFF publish per GPIO.
+
+    Format matches other server correlation strings (colon-separated, JSON-safe).
+    Maps one-to-one to ``incident_correlation_id`` in audit/WS for E2E support queries.
+
+    Args:
+        incident_correlation_id: UUID string for the whole emergency incident
+        esp_id: Device id (e.g. ESP_…)
+        gpio: Target GPIO for this publish
+
+    Returns:
+        Single string passed to ``Publisher.publish_actuator_command(..., correlation_id=…)``.
+    """
+    return f"{incident_correlation_id}:{esp_id}:{gpio}"
+
+
 def clear_request_id(token: Optional[contextvars.Token] = None) -> None:
     """Clear the request_id from context.
 

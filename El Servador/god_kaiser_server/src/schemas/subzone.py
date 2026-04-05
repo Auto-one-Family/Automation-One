@@ -119,10 +119,11 @@ class SubzoneAssignRequest(BaseModel):
 
 class SubzoneAssignResponse(BaseResponse):
     """
-    Subzone assignment response.
+    Subzonenzuweisung — REST-Antwort.
 
-    Returned after sending subzone assignment via MQTT.
-    Note: ESP confirmation comes asynchronously via subzone/ack topic.
+    **Finalität:** HTTP 2xx = DB-Update und MQTT-Publish abgeschlossen; **kein**
+    ``MQTTCommandBridge``-Warten auf ``subzone/ack``. Bestätigung und NVS-Seite des ESP nur
+    asynchron über MQTT ``subzone/ack`` und WS ``subzone_assignment``.
     """
 
     device_id: str = Field(
@@ -147,7 +148,10 @@ class SubzoneAssignResponse(BaseResponse):
     )
     mqtt_sent: bool = Field(
         ...,
-        description="Whether MQTT message was successfully published",
+        description=(
+            "True, wenn die Zuweisung an den Broker publiziert wurde; "
+            "kein ACK-Flag in dieser Antwort — Geräte-Finalität nur über MQTT/WS"
+        ),
     )
 
     model_config = ConfigDict(
@@ -167,7 +171,7 @@ class SubzoneAssignResponse(BaseResponse):
 
 class SubzoneRemoveResponse(BaseResponse):
     """
-    Subzone removal response.
+    Subzone entfernt — wie ``SubzoneAssignResponse`` ohne Bridge-Wait auf ACK.
     """
 
     device_id: str = Field(
@@ -187,7 +191,10 @@ class SubzoneRemoveResponse(BaseResponse):
     )
     mqtt_sent: bool = Field(
         ...,
-        description="Whether MQTT message was successfully published",
+        description=(
+            "True, wenn die Remove-Nachricht an den Broker publiziert wurde; "
+            "Bestätigung asynchron über ``subzone/ack`` / WS"
+        ),
     )
 
 
@@ -211,13 +218,16 @@ class SafeModeRequest(BaseModel):
 
 class SafeModeResponse(BaseResponse):
     """
-    Safe-mode control response.
+    Safe-Mode-Umschaltung: Fire-and-forget MQTT; kein synchrones ACK in HTTP.
     """
 
-    device_id: str = Field(...)
-    subzone_id: str = Field(...)
-    safe_mode_active: bool = Field(...)
-    mqtt_sent: bool = Field(...)
+    device_id: str = Field(..., description="ESP device ID")
+    subzone_id: str = Field(..., description="Betroffene Subzone")
+    safe_mode_active: bool = Field(..., description="Zielzustand Safe-Mode nach Serverlogik")
+    mqtt_sent: bool = Field(
+        ...,
+        description="Ob die Steuerungsnachricht an den Broker übergeben wurde",
+    )
 
 
 # =============================================================================
@@ -264,6 +274,11 @@ class SubzoneAckPayload(BaseModel):
         None,
         description="Error message (only on status='error')",
         examples=["GPIO 5 already assigned to subzone irrigation_section_B"],
+    )
+    reason_code: Optional[str] = Field(
+        None,
+        max_length=64,
+        description="Stable string from firmware (e.g. CONFIG_LANE_BUSY, JSON_PARSE_ERROR)",
     )
 
     @field_validator("status")

@@ -734,15 +734,25 @@ class SimulationScheduler:
             "zone_id": runtime.zone_id,
             "master_zone_id": runtime.kaiser_id,  # Fixed: Should be kaiser_id, not zone_id
             "zone_assigned": bool(runtime.zone_id),
-            "ts": int(time.time() * 1000),  # Fixed: Milliseconds for consistency with real ESPs
+            "ts": int(time.time()),
             "uptime": int(runtime.uptime_seconds),
             "heap_free": random.randint(40000, 50000),
             "wifi_rssi": random.randint(-60, -40),
             "sensor_count": sensor_count,
             "actuator_count": actuator_count,
-            "state": state,
+            "system_state": state,
+            "metrics_schema_version": 1,
             "mqtt_connected": True,
             "safe_mode": runtime.emergency_stopped,
+            "persistence_degraded": False,
+            "persistence_degraded_reason": "",
+            "runtime_state_degraded": runtime.emergency_stopped,
+            "mqtt_circuit_breaker_open": False,
+            "wifi_circuit_breaker_open": False,
+            "network_degraded": False,
+            "critical_outcome_drop_count": 0,
+            "publish_outbox_drop_count": 0,
+            "persistence_drift_count": 0,
         }
 
         try:
@@ -780,15 +790,23 @@ class SimulationScheduler:
             "zone_id": runtime.zone_id,
             "master_zone_id": runtime.kaiser_id,
             "zone_assigned": bool(runtime.zone_id),
-            "ts": int(time.time() * 1000),
+            "ts": int(time.time()),
             "uptime": int(runtime.uptime_seconds),
             "heap_free": random.randint(40000, 50000),
             "wifi_rssi": random.randint(-60, -40),
             "sensor_count": sensor_count,
             "actuator_count": actuator_count,
-            "state": state,
+            "system_state": state,
+            "metrics_schema_version": 1,
             "mqtt_connected": True,
             "safe_mode": runtime.emergency_stopped,
+            "persistence_degraded": False,
+            "runtime_state_degraded": runtime.emergency_stopped,
+            "mqtt_circuit_breaker_open": False,
+            "wifi_circuit_breaker_open": False,
+            "network_degraded": False,
+            "critical_outcome_drop_count": 0,
+            "publish_outbox_drop_count": 0,
         }
 
     async def _sensor_job(self, esp_id: str, gpio: int, sensor_type: str = "GENERIC") -> None:

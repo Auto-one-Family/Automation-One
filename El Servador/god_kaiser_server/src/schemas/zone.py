@@ -104,10 +104,11 @@ class ZoneAssignRequest(BaseModel):
 
 class ZoneAssignResponse(BaseResponse):
     """
-    Zone assignment response.
+    Antwort auf Zonenzuweisung.
 
-    Returned after sending zone assignment via MQTT.
-    Note: ESP confirmation comes asynchronously via zone/ack topic.
+    **Finalität:** Nach erfolgreichem DB-Commit sendet der Server MQTT ``zone/assign`` und kann bei
+    echten ESPs über ``MQTTCommandBridge`` bis zu ``zone/ack`` warten (Timeout, sonst Fehler/Warnung).
+    ``mqtt_sent`` = Broker-Publish gelungen; ``ack_received`` = explizites ACK vom Gerät bzw. None bei Mock/Pfad ohne Warten.
     """
 
     device_id: str = Field(
@@ -137,13 +138,18 @@ class ZoneAssignResponse(BaseResponse):
     )
     mqtt_sent: bool = Field(
         ...,
-        description="Whether MQTT message was successfully published",
+        description=(
+            "True, wenn die Zuweisungsnachricht an den MQTT-Broker übergeben wurde; "
+            "kein Nachweis der Verarbeitung auf dem ESP"
+        ),
     )
     ack_received: Optional[bool] = Field(
         None,
         description=(
-            "Whether ESP confirmed via zone/ack. "
-            "True=confirmed, False=timeout, None=mock/fire-and-forget."
+            "True: ``zone/ack`` innerhalb des Bridge-Timeouts mit passender Zuordnung erhalten "
+            "(primär über ``correlation_id`` im ACK, sonst FIFO-Fallback pro ESP/``zone`` — "
+            "bei parallelen Requests Vorsicht). False: Timeout oder fehlgeschlagene Zuordnung. "
+            "None: Mock-Gerät oder Pfad ohne ACK-Warten."
         ),
     )
     warning: Optional[str] = Field(
@@ -171,9 +177,9 @@ class ZoneAssignResponse(BaseResponse):
 
 class ZoneRemoveResponse(BaseResponse):
     """
-    Zone removal response.
+    Antwort auf Zonenentfernung.
 
-    Returned after clearing zone assignment.
+    Analog zu ``ZoneAssignResponse``: Bridge kann bei echten ESPs auf ``zone/ack`` warten.
     """
 
     device_id: str = Field(
@@ -188,7 +194,20 @@ class ZoneRemoveResponse(BaseResponse):
     )
     mqtt_sent: bool = Field(
         ...,
-        description="Whether MQTT message was successfully published",
+        description=(
+            "True, wenn die Entfernen-/Zuweisungsnachricht (Clear) an den Broker übergeben wurde"
+        ),
+    )
+    ack_received: Optional[bool] = Field(
+        None,
+        description=(
+            "Wie bei ``ZoneAssignResponse.ack_received``: Bestätigung über ``zone/ack`` nach Bridge-Logik; "
+            "None wenn kein Warten (z. B. Mock)."
+        ),
+    )
+    warning: Optional[str] = Field(
+        None,
+        description="Optional warning (e.g. ACK timeout) — mirrors ZoneAssignResponse semantics.",
     )
 
     model_config = ConfigDict(
@@ -199,6 +218,8 @@ class ZoneRemoveResponse(BaseResponse):
                 "device_id": "ESP_12AB34CD",
                 "mqtt_topic": "kaiser/god/esp/ESP_12AB34CD/zone/assign",
                 "mqtt_sent": True,
+                "ack_received": True,
+                "warning": None,
             }
         }
     )

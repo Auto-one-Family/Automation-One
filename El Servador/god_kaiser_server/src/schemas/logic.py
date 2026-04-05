@@ -28,6 +28,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .common import BaseResponse, PaginatedResponse, TimestampMixin
 
+# Kanonisch mit Laufzeit: logic_repo.get_enabled_rules (priority.asc), ConflictManager
+LOGIC_RULE_PRIORITY_FIELD_DESCRIPTION = (
+    "Priorität für Konfliktauflösung und typische Ausführungsreihenfolge: "
+    "niedrigere Zahl = höhere Priorität (wichtigere Regel). Typischer Bereich 1–100. "
+    "Beispiel: Bei konkurrierenden Regeln gewinnt priority=20 vor priority=80."
+)
+
 # =============================================================================
 # Condition Types
 # =============================================================================
@@ -297,7 +304,7 @@ class LogicRuleCreate(LogicRuleBase):
         50,
         ge=1,
         le=100,
-        description="Rule priority (1=lowest, 100=highest)",
+        description=LOGIC_RULE_PRIORITY_FIELD_DESCRIPTION,
     )
     cooldown_seconds: int = Field(
         60,
@@ -358,7 +365,12 @@ class LogicRuleUpdate(BaseModel):
     actions: Optional[List[Dict[str, Any]]] = Field(None, min_length=1, max_length=10)
     logic_operator: Optional[str] = Field(None, pattern=r"^(AND|OR)$")
     enabled: Optional[bool] = Field(None)
-    priority: Optional[int] = Field(None, ge=1, le=100)
+    priority: Optional[int] = Field(
+        None,
+        ge=1,
+        le=100,
+        description=LOGIC_RULE_PRIORITY_FIELD_DESCRIPTION,
+    )
     cooldown_seconds: Optional[int] = Field(None, ge=0, le=86400)
     max_executions_per_hour: Optional[int] = Field(None, ge=1, le=60)
 
@@ -387,7 +399,7 @@ class LogicRuleResponse(LogicRuleBase, TimestampMixin):
     )
     priority: int = Field(
         ...,
-        description="Rule priority",
+        description=LOGIC_RULE_PRIORITY_FIELD_DESCRIPTION,
     )
     cooldown_seconds: int = Field(
         ...,
