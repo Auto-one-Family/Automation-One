@@ -11,16 +11,20 @@ Features:
 - Log output to logs/wokwi/
 
 Usage:
-  python scripts/run-wokwi-tests.py                    # Run all active CI scenarios
+  python scripts/run-wokwi-tests.py                    # Run local baseline scenarios
   python scripts/run-wokwi-tests.py --category 01-boot # Run specific category
   python scripts/run-wokwi-tests.py --scenario boot_full # Run single scenario
-  python scripts/run-wokwi-tests.py --parallel 4       # Run 4 tests in parallel
+  python scripts/run-wokwi-tests.py --parallel 2 --allow-unsafe-parallel
   python scripts/run-wokwi-tests.py --list             # List available scenarios
 
 Requirements:
 - WOKWI_CLI_TOKEN environment variable set
 - wokwi-cli installed and in PATH
 - Firmware built: pio run -e wokwi_simulation
+
+Note:
+- This script is the local runner entrypoint.
+- CI workflow has its own orchestrated execution path.
 """
 
 import argparse
@@ -145,6 +149,7 @@ RETRY_ON_EXIT_CODES = {42, 1, -1}  # 42=Wokwi timeout, 1=general error, -1=syste
 
 # Reports directory
 REPORTS_DIR = LOG_DIR / "reports"
+SAFE_PARALLEL_DEFAULT = 1
 
 
 class TestStatus(Enum):
@@ -278,12 +283,14 @@ async def stop_mqtt_capture(mqtt_data: Optional[tuple[asyncio.subprocess.Process
 class WokwiTestRunner:
     def __init__(self, parallel: int = 1, verbose: bool = False,
                  build_first: bool = False, mqtt_capture: bool = True,
-                 retries: int = MAX_RETRIES, no_retry: bool = False):
+                 retries: int = MAX_RETRIES, no_retry: bool = False,
+                 allow_unsafe_parallel: bool = False):
         self.parallel = parallel
         self.verbose = verbose
         self.build_first = build_first
         self.mqtt_capture = mqtt_capture
         self.retries = 0 if no_retry else retries
+        self.allow_unsafe_parallel = allow_unsafe_parallel
         self.results: list[TestResult] = []
         self.start_time: Optional[datetime] = None
         self.retry_count = 0  # Track total retries for summary
@@ -291,6 +298,13 @@ class WokwiTestRunner:
     def check_prerequisites(self) -> bool:
         """Check if all prerequisites are met."""
         errors = []
+
+        # G09 hardening: avoid unsafe topic collisions by default.
+        if self.parallel > SAFE_PARALLEL_DEFAULT and not self.allow_unsafe_parallel:
+            errors.append(
+                f"Parallel={self.parallel} blocked (default safety mode is parallel={SAFE_PARALLEL_DEFAULT})"
+            )
+            errors.append("  Use --allow-unsafe-parallel only with isolated ESP IDs/topics")
 
         # Check WOKWI_CLI_TOKEN
         if not os.environ.get("WOKWI_CLI_TOKEN"):
@@ -809,7 +823,7 @@ Examples:
         "--parallel", "-p",
         type=int,
         default=1,
-        help="Number of parallel test executions (default: 1)"
+        help=f"Number of parallel test executions (default: {SAFE_PARALLEL_DEFAULT})"
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -853,6 +867,11 @@ Examples:
         action="store_true",
         help="Disable retry logic (useful for debugging)"
     )
+    parser.add_argument(
+        "--allow-unsafe-parallel",
+        action="store_true",
+        help="Allow parallel>1 execution (unsafe without ESP-ID/topic isolation)"
+    )
 
     args = parser.parse_args()
 
@@ -865,7 +884,8 @@ Examples:
         build_first=args.build,
         mqtt_capture=mqtt_capture,
         retries=args.retries,
-        no_retry=args.no_retry
+        no_retry=args.no_retry,
+        allow_unsafe_parallel=args.allow_unsafe_parallel
     )
 
     exit_code = asyncio.run(runner.run(

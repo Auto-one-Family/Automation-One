@@ -30,6 +30,8 @@
 # Documentation: https://docs.wokwi.com/wokwi-ci/getting-started
 
 name: Wokwi ESP32 Tests
+env:
+  WOKWI_CLI_VERSION: "0.26.1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -65,6 +67,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Install pinned Wokwi CLI
+        run: |
+          bash scripts/wokwi/install_wokwi_cli.sh "$WOKWI_CLI_VERSION"
+
+      - name: Wokwi preflight (hard gate)
+        env:
+          WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+        run: |
+          mkdir -p logs/wokwi/reports/g10
+          python scripts/wokwi/wokwi_preflight.py --expected-version "$WOKWI_CLI_VERSION" --report-file "logs/wokwi/reports/g10/ci-preflight-build-job.md"
 
       - name: Install PlatformIO
         run: |
@@ -132,7 +145,7 @@ jobs:
 
       - name: Install Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run Boot Full Test
@@ -210,7 +223,7 @@ jobs:
 
       - name: Install Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run Heartbeat Test
@@ -284,7 +297,7 @@ jobs:
 
       - name: Install Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run MQTT Connection Test
@@ -351,7 +364,7 @@ jobs:
 
       - name: Install Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run LED ON Test
@@ -366,7 +379,7 @@ jobs:
             --scenario tests/wokwi/scenarios/03-actuator/actuator_led_on.yaml \
             2>&1 | tee actuator_led_on.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
@@ -386,7 +399,7 @@ jobs:
             --scenario tests/wokwi/scenarios/03-actuator/actuator_pwm.yaml \
             2>&1 | tee actuator_pwm.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
@@ -421,7 +434,7 @@ jobs:
             --scenario tests/wokwi/scenarios/03-actuator/actuator_emergency_clear.yaml \
             2>&1 | tee actuator_emergency_clear.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/actuator/emergency" \
@@ -477,7 +490,7 @@ jobs:
 
       - name: Install Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run Zone Assignment Test
@@ -492,7 +505,7 @@ jobs:
             --scenario tests/wokwi/scenarios/04-zone/zone_assignment.yaml \
             2>&1 | tee zone_assignment.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/zone/assign" \
@@ -512,7 +525,7 @@ jobs:
             --scenario tests/wokwi/scenarios/04-zone/subzone_assignment.yaml \
             2>&1 | tee subzone_assignment.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           # Assign zone first (prerequisite for subzone)
           docker exec mosquitto mosquitto_pub \
@@ -575,7 +588,7 @@ jobs:
 
       - name: Install Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run Broadcast Emergency Test
@@ -590,7 +603,7 @@ jobs:
             --scenario tests/wokwi/scenarios/05-emergency/emergency_broadcast.yaml \
             2>&1 | tee emergency_broadcast.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/broadcast/emergency" \
@@ -610,7 +623,7 @@ jobs:
             --scenario tests/wokwi/scenarios/05-emergency/emergency_esp_stop.yaml \
             2>&1 | tee emergency_esp_stop.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/actuator/emergency" \
@@ -666,7 +679,7 @@ jobs:
 
       - name: Install Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run Sensor Config Test
@@ -681,7 +694,7 @@ jobs:
             --scenario tests/wokwi/scenarios/06-config/config_sensor_add.yaml \
             2>&1 | tee config_sensor.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/config" \
@@ -701,7 +714,7 @@ jobs:
             --scenario tests/wokwi/scenarios/06-config/config_actuator_add.yaml \
             2>&1 | tee config_actuator.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/config" \
@@ -753,7 +766,7 @@ jobs:
 
       - name: Install Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run DS18B20 Full Flow Test
@@ -849,7 +862,7 @@ jobs:
 
       - name: Install Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run Binary Actuator Full Flow Test
@@ -864,7 +877,7 @@ jobs:
             --scenario tests/wokwi/scenarios/03-actuator/actuator_binary_full_flow.yaml \
             2>&1 | tee actuator_binary_full_flow.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           # ON Command
           docker exec mosquitto mosquitto_pub \
@@ -891,7 +904,7 @@ jobs:
             --scenario tests/wokwi/scenarios/03-actuator/actuator_pwm_full_flow.yaml \
             2>&1 | tee actuator_pwm_full_flow.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           # PWM 50%
           docker exec mosquitto mosquitto_pub \
@@ -924,7 +937,7 @@ jobs:
             --scenario tests/wokwi/scenarios/03-actuator/actuator_timeout_e2e.yaml \
             2>&1 | tee actuator_timeout_flow.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           # ON with short timeout
           docker exec mosquitto mosquitto_pub \
@@ -981,7 +994,7 @@ jobs:
 
       - name: Install Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run Combined Sensor-Actuator Test
@@ -996,7 +1009,7 @@ jobs:
             --scenario tests/wokwi/scenarios/07-combined/combined_sensor_actuator.yaml \
             2>&1 | tee combined_sensor_actuator.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           # Actuator ON (simulates Logic Engine trigger)
           docker exec mosquitto mosquitto_pub \
@@ -1023,7 +1036,7 @@ jobs:
             --scenario tests/wokwi/scenarios/05-emergency/emergency_stop_full_flow.yaml \
             2>&1 | tee emergency_stop_full_flow.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           # Activate actuator first
           docker exec mosquitto mosquitto_pub \
@@ -1056,7 +1069,7 @@ jobs:
             --scenario tests/wokwi/scenarios/07-combined/multi_device_parallel.yaml \
             2>&1 | tee multi_device_parallel.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           # Send actuator commands (sequential to avoid bare wait deadlock)
           docker exec mosquitto mosquitto_pub \
@@ -1112,7 +1125,7 @@ jobs:
 
       - name: Setup Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Download Firmware
@@ -1199,6 +1212,7 @@ jobs:
   i2c-core-tests:
     runs-on: ubuntu-latest
     needs: build-firmware
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     timeout-minutes: 15
 
     steps:
@@ -1207,7 +1221,7 @@ jobs:
 
       - name: Setup Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Download Firmware
@@ -1311,7 +1325,7 @@ jobs:
 
       - name: Setup Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Download Firmware
@@ -1406,7 +1420,7 @@ jobs:
 
       - name: Setup Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Download Firmware
@@ -1439,7 +1453,7 @@ jobs:
             --scenario tests/wokwi/scenarios/09-pwm/pwm_duty_percent_50.yaml \
             2>&1 | tee pwm_duty_percent_50.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           # Configure PWM actuator on GPIO 25
           docker exec mosquitto mosquitto_pub \
@@ -1476,7 +1490,7 @@ jobs:
             --scenario tests/wokwi/scenarios/09-pwm/pwm_resolution_verify.yaml \
             2>&1 | tee pwm_resolution_verify.log &
           WOKWI_PID=$!
-          sleep 25
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
 
           # Configure PWM actuator on GPIO 25
           docker exec mosquitto mosquitto_pub \
@@ -1540,7 +1554,7 @@ jobs:
 
       - name: Install Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Install mosquitto-clients
@@ -1929,7 +1943,7 @@ jobs:
 
       - name: Setup Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Use I2C Diagram (SHT31 + BME280)
@@ -2016,7 +2030,7 @@ jobs:
 
       - name: Setup Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run All OneWire Tests
@@ -2084,7 +2098,7 @@ jobs:
 
       - name: Setup Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run All Hardware Tests
@@ -2274,7 +2288,7 @@ jobs:
 
       - name: Setup Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run All PWM Extended Tests
@@ -2353,7 +2367,7 @@ jobs:
 
       - name: Setup Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run All NVS Extended Tests
@@ -2432,7 +2446,7 @@ jobs:
 
       - name: Setup Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run All GPIO Extended Tests
@@ -2756,7 +2770,7 @@ jobs:
 
       - name: Install Wokwi CLI
         run: |
-          curl -L https://wokwi.com/ci/install.sh | sh
+          curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
           echo "$HOME/.wokwi/bin" >> $GITHUB_PATH
 
       - name: Run Dynamic Sensor Sweep Tests
@@ -3002,8 +3016,8 @@ jobs:
           echo "| **E2E Actuator Flows** | **3** | **100%** |" >> $GITHUB_STEP_SUMMARY
           echo "| **E2E Combined Flows** | **3** | **100%** |" >> $GITHUB_STEP_SUMMARY
           echo "| **GPIO Core** | **5** | **100%** |" >> $GITHUB_STEP_SUMMARY
-          echo "| **I2C Core** | **5** | **100%** |" >> $GITHUB_STEP_SUMMARY
+          echo "| **I2C Sensor-Kommunikation** | **0 (PR Gate)** | **Hardware-only** |" >> $GITHUB_STEP_SUMMARY
           echo "| **NVS Core** | **5** | **100%** |" >> $GITHUB_STEP_SUMMARY
           echo "| **PWM Core** | **3** | **100%** |" >> $GITHUB_STEP_SUMMARY
           echo "| **Error-Injection** | **10** | **100%** |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Total** | **52** | **100%** |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Total (PR Gate)** | **47** | **100%** |" >> $GITHUB_STEP_SUMMARY

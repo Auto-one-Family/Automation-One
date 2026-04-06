@@ -12,6 +12,9 @@ steps:
   # Wait for heartbeat (system operational)
   - wait-serial: "heartbeat"
 
+  # Deterministisches Injection-Fenster fuer externe MQTT-Publisher
+  - delay: 5000ms
+
   # After config injection:
   # Topic: kaiser/god/esp/{esp_id}/config
   # Payload: {"sensors":[{"gpio":4,"sensor_type":"temp_ds18b20","sensor_name":"Test Sensor","active":true,"raw_mode":true}],"actuators":[]}

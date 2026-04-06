@@ -4,7 +4,7 @@ COMPOSE_DEV := -f docker-compose.yml -f docker-compose.dev.yml
 COMPOSE_TEST := -f docker-compose.yml -f docker-compose.test.yml
 COMPOSE_E2E := -f docker-compose.yml -f docker-compose.e2e.yml
 
-.PHONY: help up down dev dev-down test test-down build clean e2e-up e2e-down e2e-test e2e-test-ui e2e-test-backend e2e-test-backend-smoke e2e-all logs logs-server logs-mqtt logs-frontend logs-db shell-server shell-db db-migrate db-rollback db-status db-backup db-restore mqtt-sub status health monitor-up monitor-down monitor-logs monitor-status loki-errors loki-trace loki-esp loki-health devtools-up devtools-down devtools-logs devtools-status wokwi-build wokwi-seed wokwi-list wokwi-test-quick wokwi-test-full wokwi-test-all wokwi-test-error-injection wokwi-test-scenario wokwi-test-category wokwi-run
+.PHONY: help up down dev dev-down test test-down build clean e2e-up e2e-down e2e-test e2e-test-ui e2e-test-backend e2e-test-backend-smoke e2e-all logs logs-server logs-mqtt logs-frontend logs-db shell-server shell-db db-migrate db-rollback db-status db-backup db-restore mqtt-sub status health monitor-up monitor-down monitor-logs monitor-status loki-errors loki-trace loki-esp loki-health devtools-up devtools-down devtools-logs devtools-status wokwi-check wokwi-build wokwi-seed wokwi-list wokwi-test-quick wokwi-test-full wokwi-test-all wokwi-test-error-injection wokwi-test-scenario wokwi-test-category wokwi-run wokwi-gap-top3 release-gate
 
 help:
 	@echo "AutomationOne Docker Commands:"
@@ -66,6 +66,7 @@ help:
 	@echo "  make devtools-status - DevTools container status"
 	@echo ""
 	@echo "Wokwi ESP32 Simulation Testing:"
+	@echo "  make wokwi-check         - Fast Wokwi preflight (CLI/version/token)"
 	@echo "  make wokwi-build         - Build firmware for all 3 Wokwi ESPs (parallel)"
 	@echo "  make wokwi-build-esp01/02/03 - Build specific ESP firmware"
 	@echo "  make wokwi-seed          - Seed database with 3 Wokwi test devices"
@@ -78,6 +79,8 @@ help:
 	@echo "  make wokwi-test-category CAT=01-boot   - Run category tests"
 	@echo "  make wokwi-run           - Start Wokwi interactively (ESP_00000001)"
 	@echo "  make wokwi-run-esp01/02/03 - Start specific ESP interactively"
+	@echo "  make wokwi-gap-top3      - Run Top-3 gap verification (A/B/C)"
+	@echo "  make release-gate        - Run Top-3 verification + fail simulation"
 
 up:
 	$(COMPOSE) up -d
@@ -229,6 +232,10 @@ devtools-status:
 # ============================================
 # Wokwi ESP32 Simulation Testing
 # ============================================
+wokwi-check:
+	@echo "Running Wokwi preflight..."
+	@python scripts/wokwi/wokwi_preflight.py --expected-version "$${WOKWI_CLI_VERSION:-}"
+
 # Multi-Device Support: Build different ESP IDs for parallel testing
 wokwi-build-esp01:
 	@echo "Building firmware for ESP_00000001 (wokwi_esp01)..."
@@ -378,3 +385,11 @@ wokwi-run-esp03:
 	@echo "Starting Wokwi ESP_00000003 interactively..."
 	@echo "Press Ctrl+C to stop."
 	@cd "El Trabajante" && wokwi-cli . --timeout 0 --firmware .pio/build/wokwi_esp03/firmware.bin
+
+wokwi-gap-top3:
+	@echo "Running Top-3 gaps verification (A/B/C)..."
+	@python scripts/verify_top3_gaps.py
+
+release-gate:
+	@echo "Running release-gate verification with fail simulation..."
+	@python scripts/verify_top3_gaps.py --force-fail-simulation
