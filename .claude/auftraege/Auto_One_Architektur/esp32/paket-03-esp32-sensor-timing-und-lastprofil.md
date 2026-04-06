@@ -1,5 +1,7 @@
 # Paket 03 (optional): ESP32 Sensor Timing und Lastprofil
 
+> **Stand:** 2026-04-05  
+
 ## 1) Zyklus- und Scheduling-Bild
 
 - `safetyTask` (Core 1, Prio 5) laeuft mit `vTaskDelay(10ms)`.
@@ -16,13 +18,13 @@
 | Analog | `analogRead`, GPIO setup | gleichmaessig je Intervall | ADC2/WiFi Konflikt -> Fehlmessungen |
 | OneWire | 750 ms Conversion + Retry-Delay | bei mehreren DS18B20 sequentielle Last | blockierende Delay-Anteile im Messpfad |
 | I2C Multi-Value | mutex, protocol wait (SHT31 ~20 ms), bus I/O | 1 Read erzeugt 2-3 Publishes | bus contention + publish burst |
-| Sensor-Command | Queue-Latenz + Messpfad | ad-hoc bursts durch mehrere Commands | silent drop bei queue full |
+| Sensor-Command | Queue-Latenz + Messpfad + Admission | ad-hoc bursts durch mehrere Commands | drop bei queue full mit Intent-Outcome; admission reject ohne Enqueue |
 
 ## 3) Queue- und Bufferdruck
 
 | Queue/Buffer | Tiefe/Groesse | Producer | Consumer | Verhalten bei Vollstand |
 |---|---|---|---|---|
-| `g_sensor_cmd_queue` | 10 | Core0 Router | Core1 SafetyTask | non-blocking send, potentielle stille Drops |
+| `g_sensor_cmd_queue` | 10 | Core0 Router | Core1 SafetyTask | Standard non-blocking; Recovery-Intent bis 20ms `SendToFront`; sonst Drop mit Intent-Outcome |
 | `g_publish_queue` | 15 | Core1 publish | Core0 comm task | Drop + Warnlog + CB failure |
 | MQTT Outbox (ESP-IDF) | intern | Core0 publish | Broker ACK-Fluss | `msg_id=-2`, Drop |
 | `g_config_update_queue` | 5, 100ms enqueue timeout | Core0 | Core1 | timeout -> Drop + Warnlog |

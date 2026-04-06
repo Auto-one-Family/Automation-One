@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 3.8 | **Aktualisiert:** 2026-04-04
+> **Version:** 3.15 | **Aktualisiert:** 2026-04-06
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
-> **Event-Anzahl:** 40 relevante Event-Typen (38 serverseitige Broadcast-Events + 2 Frontend-Contract-Integrationssignale)
+> **Event-Anzahl:** 42 relevante Event-Typen (39 serverseitige Broadcast-Events + 1 optionaler Plugin-Statuskanal + 2 Frontend-Contract-Integrationssignale)
 
 ---
 
@@ -54,6 +54,7 @@ allowed-tools: Read
 | `config_published` | Server→Frontend | Config gesendet | Config erfolgreich gepublished |
 | `config_failed` | Server→Frontend | Config fehlgeschlagen | Publish-Fehler (terminal nur mit `data.correlation_id`) |
 | `intent_outcome` | Server→Frontend | IntentOutcomeHandler | Kanonischer Intent/Outcome-Status aus MQTT |
+| `intent_outcome_lifecycle` | Server→Frontend | IntentOutcomeLifecycleHandler | CONFIG_PENDING-Lifecycle (`config_pending_lifecycle_v1`) aus MQTT-Subtopic |
 
 ### Zone Events
 
@@ -89,12 +90,13 @@ allowed-tools: Read
 | `sequence_error` | Server→Frontend | Sequence Fehler | Sequence mit Fehler |
 | `sequence_cancelled` | Server→Frontend | Sequence Abbruch | Sequence abgebrochen |
 
-### Plugin Events (Phase 4C)
+### Plugin Events (Phase 4C / F11)
 
 | Event | Richtung | Trigger | Beschreibung |
 |-------|----------|---------|--------------|
 | `plugin_execution_started` | Server→Frontend | PluginService | Plugin-Ausführung gestartet |
 | `plugin_execution_completed` | Server→Frontend | PluginService | Plugin-Ausführung beendet (success/error) |
+| `plugin_execution_status` | Server→Frontend (optional) | PluginService/Worker | Laufstatus mit Fortschritt pro `execution_id` (running/partial/success/failed) |
 
 ### System Events
 
@@ -105,6 +107,18 @@ allowed-tools: Read
 | `events_restored` | Server→Frontend | Backup Restore | Audit-Events wiederhergestellt |
 | `contract_mismatch` | Frontend intern | Contract Mapper | Pflichtfeld-/Schema-Mismatch bei WS-Event (Integrationssignal mit Operator-Aktion) |
 | `contract_unknown_event` | Frontend intern | Contract Mapper | Unbekannter Event-Typ ausserhalb Contract (Integrationssignal mit Rohkontext) |
+
+---
+
+## 0.1 El Frontend — ESP-Store-Subscription (Hinweis)
+
+Der Pinia **ESP-Store** (`El Frontend/src/stores/esp.ts`) nutzt `useWebSocket` mit **`filters.types`**. Jeder dort per `ws.on('…')` registrierte Typ **muss** in dieser Filterliste stehen; sonst liefert der Subscription-Pfad keine Events an die Handler (trotz Registrierung).
+
+- **Kanonische Typenliste:** `El Frontend/src/stores/esp-websocket-subscription.ts` (`ESP_STORE_WS_ON_HANDLER_TYPES` / `ESP_STORE_WS_SUBSCRIPTION_TYPES`).
+- **Mutation-Contract (Frontend):** dieselbe Datei klassifiziert jeden konsumierten Typ explizit auf `replace`/`patch`/`refresh` (`ESP_STORE_WS_MUTATION_CONTRACT`) fuer nachvollziehbare Realtime-Mutationen.
+- **Intent-Outcomes (WS):** `intent_outcome` / `intent_outcome_lifecycle` → `El Frontend/src/shared/stores/intentSignals.store.ts` (Zwischenstand vs. Ergebnis, Firmware-`code` getrennt).
+- **`esp_health`:** Zusätzliche Felder aus gespreizter Laufzeit-Telemetrie → `runtime_health_view` auf `ESPDevice` via `El Frontend/src/domain/esp/espHealth.ts`.
+- **Zone/Subzone-ACK:** optionales `reason_code` (Brückengrund MQTT/Firmware) in Toasts über `El Frontend/src/domain/zone/ackPresentation.ts` (nicht mit Intent-`code` verwechseln).
 
 ---
 
@@ -180,6 +194,7 @@ Alle WebSocket-Nachrichten haben folgendes Format:
 **Projection-Konsistenz (Step 3):**
 - Contract-kritische Events (`config_response`, `actuator_response`, `error_event`, `esp_diagnostics`, `esp_health`) werden serverseitig über einen gemeinsamen Serializer-Layer erzeugt (`event_contract_serializers`).
 - Dadurch sind Feldnamen/Typen zwischen MQTT-Ingest/WebSocket und REST-Aggregation konsistent.
+- `esp_health`-`data` kann zusätzliche Firmware-Telemetrie enthalten (z. B. `persistence_degraded`, `network_degraded`, Outbox-Zähler), die in `event_aggregator_service` unter `metadata.runtime_telemetry` gespiegelt werden.
 
 ---
 
@@ -213,6 +228,10 @@ ESP Heartbeat/Status Update. Wird bei jedem Heartbeat vom ESP gesendet.
     "contract_code": null,
     "contract_reason": null,
     "raw_system_state": null,
+    "persistence_degraded": false,
+    "network_degraded": false,
+    "critical_outcome_drop_count": 0,
+    "publish_outbox_drop_count": 0,
     "gpio_status": [
       {
         "gpio": 4,
@@ -232,6 +251,7 @@ ESP Heartbeat/Status Update. Wird bei jedem Heartbeat vom ESP gesendet.
 - `contract_reason`: Detaillierte Vertragsverletzung für Audit/UI
 - `raw_system_state`: Originalwert aus Firmware vor Canonicalisierung
 - Offline-Varianten (`status="offline"`, z.B. LWT/Timeout) folgen derselben Payload-Struktur und enthalten zusätzlich `reason`, optional `source`, `timeout_seconds`, `actuator_states_reset`.
+- Optional (Firmware ab 2026-04, nicht breaking): u. a. `persistence_degraded`, `persistence_degraded_reason`, `runtime_state_degraded`, `mqtt_circuit_breaker_open`, `wifi_circuit_breaker_open`, `network_degraded`, `critical_outcome_drop_count`, `publish_outbox_drop_count`, `persistence_drift_count`, `metrics_schema_version` — ersetzen das ältere paar `degraded`/`degraded_reason`.
 
 ---
 
@@ -690,7 +710,7 @@ Actuator Alert (Emergency-Stop, Timeout, Fehler).
 
 **Code-Locations:**
 - [actuator_alert_handler.py:189](El Servador/god_kaiser_server/src/mqtt/handlers/actuator_alert_handler.py#L189)
-- [actuators.py:753](El Servador/god_kaiser_server/src/api/v1/actuators.py#L753)
+- [actuators.py (emergency_stop → actuator_alert)](El Servador/god_kaiser_server/src/api/v1/actuators.py)
 
 **Payload:**
 ```json
@@ -707,6 +727,8 @@ Actuator Alert (Emergency-Stop, Timeout, Fehler).
   }
 }
 ```
+
+**API-Not-Aus (`POST /v1/actuators/emergency_stop`):** `data` enthält zusätzlich u.a. `incident_correlation_id`, `devices_stopped`, `actuators_stopped`, `issued_by`, optional `reason`. Dieselbe `incident_correlation_id` steht in der REST-Antwort (`EmergencyStopResponse`). Die zugehörigen MQTT-GPIO-Commands nutzen eine **eigene** pro-Pin-`correlation_id` (Format siehe `MQTT_TOPICS.md` §2.1); sie ist aus `incident_correlation_id` ableitbar, aber nicht identisch mit dem WS-Feld allein. Dieselbe GPIO-Zeichenkette liegt in `actuator_history.command_metadata` (`correlation_id` / `mqtt_correlation_id`); Überblick `El Servador/god_kaiser_server/docs/emergency-stop-mqtt-correlation.md`.
 
 **alert_type Values:**
 - `emergency_stop`: Actuator notgestoppt
@@ -888,6 +910,36 @@ Kanonisches Intent/Outcome-Event aus dem MQTT-Ingest.
 
 **outcome Values:** `accepted`, `rejected`, `applied`, `persisted`, `failed`, `expired`
 **Parität API/WS:** `data` entspricht dem kanonischen Serializer aus `/v1/intent-outcomes` plus WS-spezifischen Feldern (`domain`, `severity`, `terminality`, `retry_policy`, `contract_violation`, `raw_*`, `reconciliation`).
+**Dedup / stale:** Wiederholtes MQTT-`intent_outcome` mit verworfenem Outcome (Finalitäts-/Seq-Guard) löst **keinen** zweiten WS-Broadcast aus (MQTT wird trotzdem ACK’d); siehe Modul-Docstring `intent_outcome_handler.py`.
+**Intent-Metadaten:** optional zusätzlich unter `data.*` verschachtelt (Server merged vor Canonicalisierung).
+
+---
+
+### 6.5 intent_outcome_lifecycle
+
+CONFIG_PENDING-Transitions (nicht kanonisches `intent_outcome`-JSON).
+
+**Trigger:** MQTT Topic `kaiser/{kaiser_id}/esp/{esp_id}/system/intent_outcome/lifecycle`
+
+**Code-Location:** `intent_outcome_lifecycle_handler.py`
+
+**Payload:**
+```json
+{
+  "type": "intent_outcome_lifecycle",
+  "timestamp": 1706787600,
+  "data": {
+    "esp_id": "ESP_12AB34CD",
+    "schema": "config_pending_lifecycle_v1",
+    "event_type": "exited_config_pending",
+    "reason_code": "CONFIG_PENDING_EXIT_READY",
+    "boot_sequence_id": "boot-seq-001",
+    "ts": 1735818000
+  }
+}
+```
+
+**Hinweis:** Vollständiges MQTT-Payload-Schema siehe `El Trabajante/docs/runtime-readiness-policy.md`; Server persistiert u. a. in `audit_logs` (`event_type=intent_outcome_lifecycle`).
 
 ---
 
@@ -914,7 +966,8 @@ Zone Assignment ACK vom ESP.
     "zone_name": "Gewächshaus",
     "kaiser_id": "god",
     "timestamp": 1706787600,
-    "message": ""
+    "message": "",
+    "reason_code": "CONFIG_LANE_BUSY"
   }
 }
 ```
@@ -923,6 +976,8 @@ Zone Assignment ACK vom ESP.
 - `zone_assigned`: Zone erfolgreich zugewiesen
 - `zone_removed`: Zone entfernt
 - `error`: Zuweisung fehlgeschlagen (message enthält Fehlergrund)
+
+**reason_code:** Optional, stabiler String von der Firmware (z. B. `CONFIG_LANE_BUSY`, `JSON_PARSE_ERROR`).
 
 ---
 
@@ -945,7 +1000,8 @@ Subzone Assignment ACK vom ESP.
     "status": "subzone_assigned",
     "timestamp": 1706787600,
     "error_code": null,
-    "message": ""
+    "message": "",
+    "reason_code": "CONFIG_LANE_BUSY"
   }
 }
 ```
@@ -957,6 +1013,7 @@ Subzone Assignment ACK vom ESP.
 
 **error_code:** Optional, nur bei status="error"
 **message:** Optional, nur bei status="error"
+**reason_code:** Optional, stabiler String (z. B. `CONFIG_LANE_BUSY`, `JSON_PARSE_ERROR`, `SUBZONE_NOT_FOUND`)
 
 ---
 
@@ -1351,7 +1408,7 @@ Sequence abgebrochen.
 
 ---
 
-## 10. Plugin Events (Phase 4C)
+## 10. Plugin Events (Phase 4C / F11)
 
 ### 10.1 plugin_execution_started
 
@@ -1404,6 +1461,43 @@ Plugin-Ausführung beendet (success oder error).
 | `status` | string | `success` oder `error` |
 | `duration_seconds` | float | Ausführungsdauer |
 | `error_message` | string? | Fehlermeldung bei status=error |
+
+---
+
+### 10.3 plugin_execution_status (optional)
+
+Optionaler Live-Statuskanal pro `execution_id`. Falls nicht vorhanden, nutzt das Frontend weiterhin `plugin_execution_started` + `plugin_execution_completed` als kompatiblen Fallback.
+
+**Payload (minimales Contract-Set):**
+```json
+{
+  "type": "plugin_execution_status",
+  "data": {
+    "execution_id": "uuid-string",
+    "plugin_id": "health_check",
+    "status": "running",
+    "message": "Step 2/5",
+    "started_at": "2026-04-06T09:00:00Z",
+    "updated_at": "2026-04-06T09:00:05Z",
+    "finished_at": null,
+    "progress_percent": 40,
+    "step": "collect_metrics",
+    "error_code": null,
+    "error_message": null,
+    "correlation_id": "corr_123"
+  }
+}
+```
+
+**Frontend-Lifecycle-Mapping (F11):**
+- `initiated`: Execute-Request versendet, noch kein Running-ACK
+- `running`: Status `running`/`started`
+- `partial`: Status `partial`
+- `success`: terminal erfolgreich
+- `failed`: terminal fehlgeschlagen (`error`/`failed`/`timeout`/`cancelled`)
+
+**Timeout-Guard (Frontend):**
+- Bleibt eine Ausführung nach `initiated` ohne Running-Bestätigung, wird sie lokal mit Diagnosegrund auf `failed` finalisiert.
 
 ---
 
@@ -1646,13 +1740,16 @@ onUnmounted(() => {
 
 ### 12.5 Contract-First Consumption (Frontend)
 
-- REST startet Intent nur (`POST /actuators/{espId}/{gpio}/command`), finalisiert aber nicht.
-- REST startet auch Config-/Sequence-Intents nur; Finalisierung erfolgt ausschliesslich ueber terminale WS-Events.
-- Terminale Endlagen werden nur aus WS-Events abgeleitet:
+- REST startet Intent nur (`POST /actuators/{espId}/{gpio}/command`), finalisiert aber nicht. Die **HTTP-200**-Antwort enthaelt **`correlation_id`** (und `command_sent`, `safety_warnings`) — dieselbe `correlation_id` wie in WS **`actuator_command`** / **`actuator_command_failed`**, wenn der Server diese Events fuer diesen Versuch sendet (kein Publish bei No-Op-Delta, ID trotzdem fuer Trace).
+- REST startet auch Config-/Sequence-Intents nur; Abschluss bleibt asynchron und korrelationsbasiert.
+- Terminale Endlagen werden primaer aus WS-Events abgeleitet:
   - Actuator: `actuator_response`, `actuator_command_failed`
   - Config: `config_response`, `config_failed`
   - Sequence: `sequence_completed`, `sequence_error`, `sequence_cancelled`
-- Timeout bleibt non-terminaler Hinweis (kein heuristisches Finalisieren).
+- Logic-Rule-Lifecycle im Frontend (`logic.store`) ist zweistufig modelliert:
+  - `accepted`/`pending_activation` via REST-ACK (`createRule`/`updateRule`/`toggleRule`)
+  - `pending_execution` + `terminal_success`/`terminal_failed`/`terminal_conflict`/`terminal_integration_issue` via `logic_execution` + `sequence_*` inkl. `terminal_reason_code`/`terminal_reason_text`
+- Frontend-Schutz-Timeouts duerfen offene Intents lokal als `terminal_timeout` finalisieren, wenn innerhalb der definierten Frist kein terminales WS-Event eingeht.
 - Unknown-Events oder Schema-Mismatch werden als `contract_unknown_event` / `contract_mismatch` sichtbar gemacht (Integrationsproblem statt Betriebsfehler).
 - `data.correlation_id` ist der primaere Schluessel fuer Intent-Zuordnung; `request_id` ist rein zusaetzlicher Trace-Kontext, sofern vorhanden.
 - Integrationssignale enthalten Operator-Hinweis (`data.operator_action`) und Rohkontext (`data.raw_context`) fuer schnelle Diagnose im Monitor/Detailpanel.
@@ -1703,6 +1800,8 @@ interface WebSocketFilters {
 | `actuator_alert_handler.py` | `actuator_alert` |
 | `heartbeat_handler.py` | `esp_health`, `esp_reconnect_phase`, `device_discovered`, `device_rediscovered` |
 | `config_handler.py` | `config_response` |
+| `intent_outcome_handler.py` | `intent_outcome` |
+| `intent_outcome_lifecycle_handler.py` | `intent_outcome_lifecycle` |
 | `zone_ack_handler.py` | `zone_assignment` |
 | `subzone_ack_handler.py` | `subzone_assignment` |
 | `error_handler.py` | `error_event` |

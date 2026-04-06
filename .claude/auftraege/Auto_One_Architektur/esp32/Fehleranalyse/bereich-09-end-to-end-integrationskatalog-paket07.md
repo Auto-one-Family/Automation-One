@@ -5,18 +5,18 @@
 ## 1) Was war veraltet?
 
 1. Die alte Aussage "Config hat keinen deterministischen Terminalzustand" ist im jetzigen Stand zu pauschal.  
-   In den Negativpfaden werden heute `config_response` und `intent_outcome` mit `correlation_id` erzeugt (`QUEUE_FULL`, `JSON_PARSE_ERROR`, `CONTRACT_CORRELATION_MISSING`, `STALE_SCOPE`, `COMMIT_FAILED`).
+   In den Negativpfaden werden heute `config_response` und `intent_outcome` mit `correlation_id` erzeugt (`QUEUE_FULL`, `REPLAY_QUEUE_FULL`, `JSON_PARSE_ERROR`, `CONTRACT_CORRELATION_MISSING`, `STALE_SCOPE`, `COMMIT_FAILED`).
 2. Die alte Aussage "Command-Queue-Drops verlieren Kausalitaet bis UI" ist in dieser Form nicht mehr korrekt.  
    Admission-/Queue-Fails erzeugen `intent_outcome`-Terminalevents; Server persistiert diese mit Monotonie-/Finalitaetsguard; Frontend behandelt Terminalitaet idempotent.
 3. Die alte Aussage "ONLINE ist nicht von ACK entkoppelt" ist teilweise veraltet.  
-   `server/status=online` wird als Hinweis behandelt; der autoritative Uebergang erfolgt erst nach valider Heartbeat-ACK-Pruefung (`handover_epoch` + Contract-Validierung).
+   `kaiser/{kaiser_id}/server/status` mit `status=online` wird als Hinweis behandelt; der autoritative Uebergang erfolgt erst nach valider Heartbeat-ACK-Pruefung (`status`, `handover_epoch` + Contract-Match).
 4. Weiterhin korrekt geblieben ist die Kernluecke bei Sensor-Telemetrie: keine harte Ende-zu-Ende-Bestaetigung bis zur Firmware.
 
 ## 2) Was ist jetzt der IST-Stand?
 
 ### E2E-01 Sensorkette (Firmware -> MQTT -> Server -> DB -> UI)
 
-- **Ist-Stand:** Sensorwerte werden ueber `sensor/{gpio}/data` publiziert; es gibt keinen dedizierten Sensor-ACK-Vertrag zur Firmware.
+- **Ist-Stand:** Sensorwerte werden ueber `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/data` publiziert; es gibt keinen dedizierten Sensor-ACK-Vertrag zur Firmware.
 - **Terminalitaet:** Nicht durchgaengig als "genau ein terminales Ergebnis je Messung" modelliert.
 - **DB/UI-Sicht:** Empfangene Daten sind sichtbar; nicht empfangene Daten bleiben nur indirekt erklaerbar.
 - **Bewertung:** **weiterhin offen (hoch)**.
@@ -37,7 +37,7 @@
 
 ### E2E-04 OFFLINE -> RECONNECT -> ONLINE_ACKED
 
-- **Ist-Stand:** Offline/Online-Hinweise sind von der autoritativen Heartbeat-ACK-Validierung getrennt; ACK erfordert gueltige Contract-Felder (`status`, `handover_epoch`) und Contract-Match.
+- **Ist-Stand:** `kaiser/{kaiser_id}/server/status` (Online-/Offline-Hinweis) ist von der autoritativen Heartbeat-ACK-Validierung auf `kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat/ack` getrennt; ACK erfordert gueltige Contract-Felder (`status`, `handover_epoch`) und Contract-Match.
 - **State-Guards:** Stale retained Offline-Hinweise nach Reconnect werden abgefangen; Recovery folgt ACK-Contract statt fruehem Link-Hinweis.
 - **Server-Seite:** Heartbeat-ACK wird mit `handover_epoch` erzeugt; Metriken fuer ACK-/Reconciliation-Lebenszyklus vorhanden.
 - **Bewertung:** **wesentlich verbessert, semantische Trennung ist implementiert**.

@@ -1,5 +1,7 @@
 # Paket 02: ESP32 Trigger-Matrix (P1.2)
 
+> **Stand:** 2026-04-05  
+
 ## 1) Ziel und Notation
 
 Diese Matrix modelliert Runtime-Uebergaenge in der Form:
@@ -41,10 +43,10 @@ ID-Schema:
 | FW-TRIG-024 | Emergency Broadcast | FW-STATE-011/FW-STATE-015/FW-STATE-016 | auth valid/fail-open | emergency stop all | FW-STATE-017 | invalid token/security reject |
 | FW-TRIG-025 | Emergency Clear | FW-STATE-017 | `clearEmergencyStop()` true | resume operation | FW-STATE-011 oder FW-STATE-015 | verification fail -> bleibt emergency |
 | FW-TRIG-026 | Config Push Arrived | FW-STATE-009/FW-STATE-010/FW-STATE-011 | payload < `CONFIG_PAYLOAD_MAX_LEN` | enqueue config update | FW-STATE-012 | payload too large -> config_response error |
-| FW-TRIG-027 | Config Queue Full | FW-STATE-012 | queue send timeout (100ms) | drop config push | FW-STATE-011 | stiller Verlust (kein harter resync) |
+| FW-TRIG-027 | Config Queue Full | FW-STATE-012 | queue send timeout (100ms) | drop config push | FW-STATE-011 | Core0: `config_response` QUEUE_FULL + Intent-Outcome (resync moeglich) |
 | FW-TRIG-028 | Config Queue Drain | FW-STATE-012 | queue item vorhanden | parse once, apply sensor/actuator/offline | FW-STATE-011 | parse fail -> kein negatives config_response |
-| FW-TRIG-029 | Actuator Command Arrived | FW-STATE-011/FW-STATE-015/FW-STATE-016 | topic valid | enqueue actuator command | FW-STATE-013 | queue full -> silent drop |
-| FW-TRIG-030 | Sensor Command Arrived | FW-STATE-011/FW-STATE-015/FW-STATE-016 | topic valid | enqueue sensor command | FW-STATE-013 | queue full -> silent drop |
+| FW-TRIG-029 | Actuator Command Arrived | FW-STATE-011/FW-STATE-015/FW-STATE-016 | topic valid + admission ok | enqueue actuator command | FW-STATE-013 | queue full -> Intent-Outcome `QUEUE_FULL` + Log/ErrorTracker |
+| FW-TRIG-030 | Sensor Command Arrived | FW-STATE-011/FW-STATE-015/FW-STATE-016 | topic valid + admission ok | enqueue sensor command | FW-STATE-013 | wie FW-TRIG-029 |
 | FW-TRIG-031 | Command Queue Drain | FW-STATE-013 | queue item vorhanden | execute on Core1 owner modules | FW-STATE-011 oder overlay bleibt | handler error -> response/error |
 | FW-TRIG-032 | Server Command waehrend OFFLINE_ACTIVE | FW-STATE-015 | actuator exists | `setServerOverride(gpio)` vor execute | FW-STATE-015 | actuator missing -> error response |
 | FW-TRIG-033 | Publish from Core1 | FW-STATE-011/FW-STATE-015 | `xPortGetCoreID()==1` | enqueue `g_publish_queue` | gleicher State | queue full -> publish drop + CB failure |
@@ -55,6 +57,7 @@ ID-Schema:
 | FW-TRIG-038 | Legacy No-Task Runtime | FW-STATE-005/FW-STATE-010 | setup return vor task creation | single-thread fallback loop | FW-STATE-019 | hoehere Latenz, reduzierte Core-Isolation |
 | FW-TRIG-039 | Task-System Aktivierung | FW-STATE-001/FW-STATE-011 | queues+tasks erfolgreich erstellt | SafetyTask + CommTask starten | FW-STATE-011 | bei Task-Create-Fail fallback Legacy |
 | FW-TRIG-040 | Watchdog Feed Blocked | FW-STATE-011/FW-STATE-018 | critical errors oder `STATE_ERROR` | WDT feed blockiert | FW-STATE-018 | reset/reboot cycle |
+| FW-TRIG-041 | Command Admission Reject (Core0) | FW-STATE-009/FW-STATE-010/FW-STATE-011 | `shouldAcceptCommand` false | Intent-Outcome `rejected`, kein Enqueue | gleicher State | Client muss Payload/State anpassen |
 
 ## 3) Trigger-Cluster und Vollstaendigkeit
 

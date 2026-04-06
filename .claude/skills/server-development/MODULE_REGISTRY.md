@@ -96,11 +96,11 @@ class ValidationResult:
 
 ### 1.4 ActuatorService
 
-**Datei:** `src/services/actuator_service.py` (279 Zeilen)
+**Datei:** `src/services/actuator_service.py` (~347 Zeilen)
 
 | Methode | Parameter | Return | Beschreibung |
 |---------|-----------|--------|--------------|
-| `send_command()` | `esp_id, gpio, command, value, duration` | `CommandResult` | Sendet Actuator-Command |
+| `send_command()` | `esp_id, gpio, command, value, duration, issued_by?` | `ActuatorSendCommandResult` | Sendet Actuator-Command; `correlation_id`, `command_sent`, `safety_warnings` |
 | `get_state()` | `esp_id, gpio` | `Optional[ActuatorState]` | Aktueller Actuator-Status |
 | `update_state()` | `esp_id, gpio, state: dict` | `ActuatorState` | State aus MQTT-Status |
 | `create_config()` | `esp_id, config: ActuatorConfigCreate` | `ActuatorConfig` | Neue Actuator-Config |
@@ -327,7 +327,7 @@ ACK-gesteuerte MQTT-Kommunikation für kritische Operationen (Zone/Subzone-Assig
 | Methode | Parameter | Return | Beschreibung |
 |---------|-----------|--------|--------------|
 | `send_and_wait_ack()` | `topic: str, payload: dict, esp_id: str, command_type: str, timeout: float` | `dict` | Publish MQTT + wait for ACK. Injiziert `correlation_id` in Payload. Raises `MQTTACKTimeoutError` |
-| `resolve_ack()` | `ack_data: dict, esp_id: str, command_type: str` | `bool` | Löst pending Future auf. Matching: 1) correlation_id, 2) (esp_id, command_type) FIFO Fallback |
+| `resolve_ack()` | `ack_data: dict, esp_id: str, command_type: str` | `bool` | Löst pending Future auf **nur** bei exakter `correlation_id` in `ack_data` und Treffer in `_pending` (Epic1-04: **kein** FIFO-Fallback). Sonst `False` + WARNING-Log |
 | `has_pending()` | `esp_id: str, command_type: str` | `bool` | Prüft ob pending Operations laufen. Genutzt von HeartbeatHandler zur Zone-Mismatch-Toleranz |
 | `shutdown()` | - | `None` | Cancelt alle pending Futures. Aufgerufen bei Server-Shutdown |
 
@@ -338,7 +338,7 @@ ACK-gesteuerte MQTT-Kommunikation für kritische Operationen (Zone/Subzone-Assig
 | `MQTTACKTimeoutError` | Kein ACK innerhalb Timeout oder MQTT publish fehlgeschlagen |
 
 **Integration:**
-- ACK-Handler (`zone_ack_handler`, `subzone_ack_handler`) rufen `resolve_ack()` auf via Module-Level Setter `set_command_bridge()`
+- ACK-Handler (`zone_ack_handler`, `subzone_ack_handler`) rufen `resolve_ack()` auf via Module-Level Setter `set_command_bridge()`; `correlation_id` für den Match wird aus dem Ro-Payload per `extract_ack_correlation_id()` ermittelt (Top-Level + Aliase)
 - `ZoneService` nutzt Bridge für `assign_zone()` und `remove_zone()` (Real-ESP). Mock-ESP → fire-and-forget
 - Initialisiert in `main.py` Startup Step 3.1 (nach Handler-Registration)
 
@@ -427,7 +427,7 @@ File-backed JSONL Append-Only mit atomarer Rewrite-on-Ack Semantik. Dedup via SH
 
 | Topic Pattern | QoS | Publisher-Methode | Payload-Felder |
 |---------------|-----|-------------------|----------------|
-| `.../actuator/{gpio}/command` | 2 | `publish_actuator_command()` | `command`, `value`, `duration`, `timestamp` |
+| `.../actuator/{gpio}/command` | 2 | `publish_actuator_command()` | `command`, `value`, `duration`, `timestamp`, optional `correlation_id`, optional `intent_id` (= `correlation_id` wenn gesetzt) |
 | `.../sensor/{gpio}/command` | 2 | `publish_sensor_command()` | `command`, `request_id` |
 | `.../config/sensor/{gpio}` | 2 | `publish_sensor_config()` | Vollständige SensorConfig |
 | `.../config/actuator/{gpio}` | 2 | `publish_actuator_config()` | Vollständige ActuatorConfig |
@@ -501,7 +501,7 @@ File-backed JSONL Append-Only mit atomarer Rewrite-on-Ack Semantik. Dedup via SH
 | POST | `/` | Operator | `ActuatorConfigCreate` | `ActuatorConfig` |
 | PUT | `/{actuator_id}` | Operator | `ActuatorConfigUpdate` | `ActuatorConfig` |
 | DELETE | `/{actuator_id}` | Operator | - | `SuccessResponse` |
-| POST | `/{esp_id}/{gpio}/command` | Operator | `ActuatorCommand` | `CommandResult` |
+| POST | `/{esp_id}/{gpio}/command` | Operator | `ActuatorCommand` | `ActuatorCommandResponse` |
 | POST | `/emergency_stop` | Operator | `EmergencyStopRequest` | `SuccessResponse` |
 | GET | `/esp/{esp_id}` | Active | - | `List[ActuatorConfig]` |
 
@@ -625,9 +625,9 @@ Wichtige Endpoints:
 
 | Model | Tabelle | Felder |
 |-------|---------|--------|
-| **CrossESPLogic** | `cross_esp_logic` | `id (PK UUID)`, `rule_name (UNIQUE)`, `description`, `enabled`, `trigger_conditions (JSON)`, `logic_operator`, `actions (JSON)`, `priority`, `cooldown_seconds`, `max_executions_per_hour`, `last_triggered`, `metadata (JSON)` |
+| **CrossESPLogic** | `cross_esp_logic` | `id (PK UUID)`, `rule_name (UNIQUE)`, `description`, `enabled`, `trigger_conditions (JSON)`, `logic_operator`, `actions (JSON)`, `priority` (kleinere Zahl = höhere Ausführungs-/Konfliktpriorität, Load `priority ASC`), `cooldown_seconds`, `max_executions_per_hour`, `last_triggered`, `metadata (JSON)` |
 | **LogicExecutionHistory** | `logic_execution_history` | `id (PK UUID)`, `logic_rule_id (FK)`, `trigger_data (JSON)`, `actions_executed (JSON)`, `success`, `error_message`, `execution_time_ms`, `timestamp`, `metadata (JSON)` |
-| **CommandIntent** | `command_intents` | `id (PK UUID)`, `intent_id (UNIQUE)`, `correlation_id`, `esp_id`, `flow`, `orchestration_state` (accepted/sent/ack_pending), `first_seen_at`, `last_seen_at` |
+| **CommandIntent** | `command_intents` | `id (PK UUID)`, `intent_id (UNIQUE)`, `correlation_id`, `esp_id`, `flow`, `orchestration_state` (**sent** nach MQTT-Publish z. B. Aktor; **accepted**/**ack_pending** aus eingehendem `intent_outcome` via `upsert_intent`), `first_seen_at`, `last_seen_at` |
 | **CommandOutcome** | `command_outcomes` | `id (PK UUID)`, `intent_id (UNIQUE)`, `correlation_id`, `esp_id`, `flow`, `outcome` (accepted/rejected/applied/persisted/failed/expired), `contract_version`, `semantic_mode`, `is_final`, `code`, `reason`, `retryable`, `generation`, `epoch`, `ttl_ms`, `first_seen_at`, `terminal_at` |
 
 ### 4.3 System Models
@@ -670,7 +670,7 @@ Wichtige Endpoints:
 | `SensorConfigCreate` | `interval_ms` | Range | `1000-300000` |
 | `ActuatorConfigCreate` | `gpio` | Range | `0-39` |
 | `ActuatorConfigCreate` | `value` | Range | `0.0-1.0` |
-| `LogicRuleCreate` | `priority` | Range | `1-100` |
+| `LogicRuleCreate` | `priority` | Range + Semantik | `1–100`; kleinere Zahl = höhere Konflikt-/Ausführungspriorität (OpenAPI: gleiche Beschreibung für Create/Update/Response) |
 | `LogicRuleCreate` | `conditions` | Min length | `>= 1` |
 | `LoginRequest` | `password` | Min length | `>= 8` |
 | `RegisterRequest` | `password` | Complexity | Uppercase + Lowercase + Digit + Special |

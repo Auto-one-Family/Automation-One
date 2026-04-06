@@ -51,7 +51,7 @@ Server (El Servador/god_kaiser_server/src/)
 │   ├── subscriber.py             ← Subscriber mit Handler-Registry
 │   ├── offline_buffer.py         ← Offline Buffer (asyncio)
 │   ├── topics.py                 ← TopicBuilder (Python)
-│   └── handlers/                 ← 14 Message-Handler
+│   └── handlers/                 ← 15 Message-Handler
 │       ├── sensor_handler.py
 │       ├── actuator_handler.py
 │       ├── heartbeat_handler.py
@@ -81,7 +81,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{category}/{gpio}/{action}
 - **gpio:** Pin-Nummer (0-39) oder weggelassen bei System-Topics
 - **action:** `data`, `command`, `status`, `response`, etc.
 
-### Vollständiges Topic-Schema (25 Topics)
+### Vollständiges Topic-Schema (26+ Topics)
 
 | # | Topic | Richtung | QoS | ESP32 Builder | Server Konstante |
 |---|-------|----------|-----|---------------|------------------|
@@ -100,6 +100,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{category}/{gpio}/{action}
 | 13 | `system/diagnostics` | ESP→Server | 0 | `buildSystemDiagnosticsTopic()` | - |
 | 14 | `system/error` | ESP→Server | 1 | `buildSystemErrorTopic()` | - |
 | 15 | `system/intent_outcome` | ESP→Server | 1 | `buildIntentOutcomeTopic()` | - |
+| 15b | `system/intent_outcome/lifecycle` | ESP→Server | 1 | `buildIntentOutcomeLifecycleTopic()` | `intent_outcome_lifecycle_handler.py` |
 | 16 | `system/will` | ESP→Server | 1 | (LWT bei connect) | - |
 | 17 | `config` | Server→ESP | 2 | `buildConfigTopic()` | `MQTT_TOPIC_ESP_CONFIG` |
 | 18 | `config_response` | ESP→Server | 2 | `buildConfigResponseTopic()` | `MQTT_TOPIC_ESP_CONFIG_RESPONSE` |
@@ -129,7 +130,7 @@ QoS 2: Exactly Once        → Commands (Duplikate = gefährlich!)
 | QoS | Topics | Grund |
 |-----|--------|-------|
 | **0** | `system/heartbeat`, `system/heartbeat/ack`, `system/diagnostics` | Regelmäßig, nächste Nachricht überschreibt |
-| **1** | `sensor/data`, `sensor/batch`, `sensor/response`, `actuator/status`, `actuator/response`, `actuator/alert`, `system/error`, `system/intent_outcome`, `system/will`, alle `subzone/*` | Daten-Loss unerwünscht, Duplikate verarbeitbar |
+| **1** | `sensor/data`, `sensor/batch`, `sensor/response`, `actuator/status`, `actuator/response`, `actuator/alert`, `system/error`, `system/intent_outcome`, `system/intent_outcome/lifecycle`, `system/will`, alle `subzone/*` | Daten-Loss unerwünscht, Duplikate verarbeitbar |
 | **2** | `sensor/command`, `actuator/command`, `system/command`, `config`, `config_response`, `broadcast/emergency` | Duplikate können Schaden verursachen |
 
 ### Server-Konstanten (constants.py:193-199)
@@ -266,7 +267,7 @@ def build_your_new_topic(esp_id: str, gpio: int) -> str:
 
 **Datei:** `El Servador/god_kaiser_server/src/mqtt/handlers/`
 
-### Handler-Registrierung (main.py:203-306)
+### Handler-Registrierung (main.py lifespan, u. a. 203–310)
 
 ```python
 # lifespan() Funktion
@@ -290,6 +291,8 @@ subscriber.register_handler(
 | `+/subzone/ack` | SubzoneAckHandler | 1 | 239 |
 | `+/system/will` | LWTHandler | 1 | 248 |
 | `+/system/error` | ErrorEventHandler | 1 | 256 |
+| `+/system/intent_outcome` | IntentOutcomeHandler | 1 | ~299 |
+| `+/system/intent_outcome/lifecycle` | IntentOutcomeLifecycleHandler | 1 | ~306 |
 
 ### Neuen Handler hinzufügen
 
@@ -379,9 +382,12 @@ class Publisher:
         }
         if correlation_id:
             payload["correlation_id"] = correlation_id
+            payload["intent_id"] = correlation_id  # IntentMetadata + command_intents.sent (Epic1-05)
 
         return self._publish_with_retry(topic, payload, QOS_ACTUATOR_COMMAND, retry)
 ```
+
+**Not-Aus (REST):** `api/v1/actuators.py` setzt `correlation_id` über `build_emergency_actuator_correlation_id(incident_correlation_id, esp_id, gpio)` (Format `{incident}:{esp_id}:{gpio}`). Bei erfolgreichem Publish: `actuator_history.command_metadata` enthält `incident_correlation_id`, `correlation_id` und `mqtt_correlation_id` (letztere beiden = MQTT-Wert). `incident_correlation_id` zusätzlich in REST `EmergencyStopResponse`. Referenz: `El Servador/god_kaiser_server/docs/emergency-stop-mqtt-correlation.md`; Finalität: `El Servador/god_kaiser_server/docs/finalitaet-http-mqtt-ws.md`.
 
 ### Retry-Pattern mit Exponential Backoff
 
@@ -640,8 +646,8 @@ persistence_location /mosquitto/data/
 | `El Servador/god_kaiser_server/src/mqtt/subscriber.py` | Subscriber + Handler-Routing |
 | `El Servador/god_kaiser_server/src/mqtt/client.py` | MQTT Client Wrapper |
 | `El Servador/god_kaiser_server/src/mqtt/offline_buffer.py` | Async Offline Buffer |
-| `El Servador/god_kaiser_server/src/mqtt/handlers/` | 14 Message-Handler |
-| `El Servador/god_kaiser_server/src/main.py` | Handler-Registrierung (203-306) |
+| `El Servador/god_kaiser_server/src/mqtt/handlers/` | 15 Message-Handler |
+| `El Servador/god_kaiser_server/src/main.py` | Handler-Registrierung (lifespan, u. a. intent_outcome + lifecycle) |
 | `El Servador/god_kaiser_server/src/core/error_codes.py` | Error-Codes 5101-5107 |
 
 ### Docker

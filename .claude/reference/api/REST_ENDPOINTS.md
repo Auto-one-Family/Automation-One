@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 4.0 | **Aktualisiert:** 2026-04-04
+> **Version:** 4.1 | **Aktualisiert:** 2026-04-06
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
@@ -103,8 +103,8 @@ allowed-tools: Read
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
 | `/zone/zones` | GET | JWT | **DEPRECATED** — Use GET /zones/ instead. Alle Zonen aus zones-Tabelle, enriched mit Device/Sensor/Actuator Counts. Query: `?status=active\|archived\|deleted` |
-| `/zone/devices/{esp_id}/assign` | POST | Operator | ESP einer Zone zuweisen (MQTT). T13-R1: Zone muss existieren + aktiv sein. `subzone_strategy`: transfer/copy/reset. Response: `ack_received`, `warning` (T14-Fix-B) |
-| `/zone/devices/{esp_id}/zone` | DELETE | Operator | Zone-Zuweisung entfernen |
+| `/zone/devices/{esp_id}/assign` | POST | Operator | ESP einer Zone zuweisen (MQTT). T13-R1: Zone muss existieren + aktiv sein. `subzone_strategy`: transfer/copy/reset. Response: `ack_received`, `warning` (T14-Fix-B). **MQTTCommandBridge:** `zone/ack` muss die serverseitige `correlation_id` aus `zone/assign` echo’en — sonst REST-ACK-Timeout (`mqtt_sent=false`). |
+| `/zone/devices/{esp_id}/zone` | DELETE | Operator | Zone-Zuweisung entfernen (MQTT, Bridge). Response: `ack_received`, `warning` wie bei Assign; bei ACK-Timeout Meldung „Zone removed (ACK timeout)“. |
 | `/zone/devices/{esp_id}` | GET | JWT | Zone-Info für ESP |
 | `/zone/{zone_id}/devices` | GET | JWT | Alle ESPs in Zone |
 | `/zone/{zone_id}/monitor-data` | GET | JWT | Zone Monitor Data L2 (Sensoren/Aktoren nach Subzone gruppiert) |
@@ -135,7 +135,7 @@ allowed-tools: Read
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
-| `/subzone/devices/{esp_id}/subzones/assign` | POST | Operator | GPIOs einer Subzone zuweisen (MQTT) |
+| `/subzone/devices/{esp_id}/subzones/assign` | POST | Operator | GPIOs einer Subzone zuweisen (MQTT). Response: `mqtt_sent`; kein synchrones Warten auf `subzone/ack` (kein `MQTTCommandBridge` wie Zone). Matrix: `El Servador/god_kaiser_server/docs/finalitaet-http-mqtt-ws.md` |
 | `/subzone/devices/{esp_id}/subzones/{subzone_id}` | DELETE | Operator | Subzone entfernen |
 | `/subzone/devices/{esp_id}/subzones` | GET | JWT | Alle Subzones eines ESP |
 | `/subzone/devices/{esp_id}/subzones/{subzone_id}` | GET | JWT | Subzone Details |
@@ -215,7 +215,12 @@ allowed-tools: Read
 | `/intent-outcomes` | GET | JWT | Intent Outcomes auflisten (Filter: esp_id, flow, outcome, limit) |
 | `/intent-outcomes/{intent_id}` | GET | JWT | Terminal Outcome eines Intents abrufen |
 
+> **Nur Lesen:** Kein Blocking-Command; Observability / API-WS-Parität. Geräte-Finalität über domain-spezifische Pfade — Matrix: `El Servador/god_kaiser_server/docs/finalitaet-http-mqtt-ws.md`.
+
+> **Frontend-Client:** `El Frontend/src/api/intentOutcomes.ts` — Axios `get('intent-outcomes')` bzw. `get('intent-outcomes/{intent_id}')` bei `baseURL` `/api/v1` (kein zweites `/v1/` anhängen).
+
 > **P0.2 Visibility:** Kanonische Outcome-Records aus `command_outcomes`-Tabelle. Felder: `intent_id`, `correlation_id`, `esp_id`, `flow`, `outcome` (accepted/rejected/applied/persisted/failed/expired), `contract_version`, `semantic_mode`, `legacy_status`, `target_status`, `is_final`, `code`, `reason`, `retryable`, `generation`, `seq`, `epoch`, `ttl_ms`, `ts`, `first_seen_at`, `terminal_at`.
+> **Nicht** durch diese GET-API abgedeckt: Tabelle **`command_intents`** (Spalte `orchestration_state`: sent / accepted / ack_pending) — Orchestrierung vor bzw. parallel zu Outcomes; Support-Text `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`.
 > **Contract-Härtung (Server Authority):** Unknown/Legacy-Werte werden serverseitig deterministisch kanonisiert; bei Vertragsverletzung wird `code=CONTRACT_UNKNOWN_CODE` gesetzt (bzw. `CONTRACT_MISSING_CORRELATION` bei fehlender `correlation_id`).
 
 ### Sensor Type Defaults (`/sensor-type-defaults`) - 6 Endpoints
@@ -257,6 +262,10 @@ allowed-tools: Read
 | `/debug/mock-esp/{esp_id}/zone/ack` | POST | JWT | Zone ACK simulieren |
 | `/debug/mock-esp/{esp_id}/subzone/ack` | POST | JWT | Subzone ACK simulieren |
 | `/debug/mock-esp/{esp_id}/config-response` | POST | JWT | Config-Response simulieren |
+| `/debug/load-test/bulk-create` | POST | JWT | Mock-ESPs für Lasttest in Bulk erstellen |
+| `/debug/load-test/simulate` | POST | JWT | Lasttest-Simulation starten |
+| `/debug/load-test/stop` | POST | JWT | Laufende Lasttest-Simulation stoppen |
+| `/debug/load-test/metrics` | GET | JWT | Lasttest-Metriken abrufen |
 | `/debug/db/tables` | GET | JWT | Alle Tabellen |
 | `/debug/db/{table}/schema` | GET | JWT | Tabellen-Schema |
 | `/debug/db/{table}` | GET | JWT | Tabellen-Daten |
@@ -383,6 +392,8 @@ allowed-tools: Read
 | `/plugins/{plugin_id}/enable` | POST | Admin | Plugin aktivieren |
 | `/plugins/{plugin_id}/disable` | POST | Admin | Plugin deaktivieren |
 | `/plugins/{plugin_id}/schedule` | PUT | Admin | Plugin-Schedule setzen/ändern |
+
+> **Hinweis Frontend-Lifecycle:** `POST /plugins/{plugin_id}/execute` liefert die Ausführung mit stabiler `execution_id` (Fallback: `id`), die im Frontend für Ops-Lifecycle-Tracking und Reconciliation verwendet wird.
 
 ### Backups (`/backups`) - 6 Endpoints (Phase A V5.1)
 
@@ -960,14 +971,25 @@ Actuator steuern.
 
 **Commands:** `ON`, `OFF`, `PWM`, `TOGGLE`
 
-**Response 200:**
+**Response 200 (`ActuatorCommandResponse`):**
 ```json
 {
   "success": true,
-  "message": "Command sent",
-  "command_id": "cmd_12345"
+  "esp_id": "ESP_12AB34CD",
+  "gpio": 5,
+  "command": "ON",
+  "value": 1.0,
+  "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
+  "command_sent": true,
+  "acknowledged": false,
+  "safety_warnings": []
 }
 ```
+
+- **`correlation_id`:** Pro Request; gleiche ID wie in WebSocket `actuator_command` / `actuator_command_failed`, wenn der Server diese Events fuer diesen Versuch sendet.
+- **`command_sent`:** `true` nur bei tatsaechlichem MQTT-Publish; `false` z. B. bei No-Op (Zielzustand = aktueller Zustand) — dann weiterhin `correlation_id` fuer Trace.
+- **`acknowledged`:** Immer `false` auf HTTP-Ebene (ESP-ACK laeuft asynchron ueber MQTT).
+- **`safety_warnings`:** Listen von Hinweisen aus `SafetyService`, wenn die Pruefung `valid=true` liefert.
 
 ---
 
@@ -986,6 +1008,23 @@ Global Emergency-Stop für alle Actuators.
   "esp_id": "ESP_12AB34CD"
 }
 ```
+
+**Response 200 (`EmergencyStopResponse`):** u.a. `incident_correlation_id` (UUID pro Request; identisch zu Audit/Broadcast/WS und Basis für pro-GPIO-MQTT-`correlation_id`), `devices_stopped`, `actuators_stopped`, `reason`, `timestamp`, `details`.
+
+```json
+{
+  "success": true,
+  "message": "Emergency stop executed",
+  "incident_correlation_id": "550e8400-e29b-41d4-a716-446655440000",
+  "devices_stopped": 1,
+  "actuators_stopped": 2,
+  "reason": "User request",
+  "timestamp": "2026-04-05T12:00:00Z",
+  "details": []
+}
+```
+
+**Server (MQTT / History):** Pro betroffenem Aktor sendet der Server `OFF` auf `kaiser/.../actuator/{gpio}/command` mit `correlation_id` = `{incident_correlation_id}:{esp_id}:{gpio}` (eine `incident_correlation_id` pro API-Request). Bei erfolgreichem Publish schreibt der Server in `actuator_history.command_metadata` u.a. `incident_correlation_id` sowie dieselbe GPIO-Zeichenkette unter **`correlation_id`** und **`mqtt_correlation_id`** (identisch zum MQTT-Payload). Audit, MQTT-Broadcast `kaiser/broadcast/emergency` und WebSocket `actuator_alert` tragen weiterhin die lesbare `incident_correlation_id`. Kurzreferenz: `El Servador/god_kaiser_server/docs/emergency-stop-mqtt-correlation.md`. Gesamt-Finalität HTTP vs. Gerät: `El Servador/god_kaiser_server/docs/finalitaet-http-mqtt-ws.md`.
 
 ---
 
@@ -1116,6 +1155,8 @@ Neue Rule erstellen.
 }
 ```
 
+**Hinweis `priority`:** Kleinere Zahl = höhere Priorität bei Konfliktauflösung und typischer Ausführungsreihenfolge (1–100), konsistent mit Listen-Sortierung unter 5.1.
+
 **Condition Types:**
 
 | type | Felder | Beschreibung |
@@ -1174,6 +1215,8 @@ Rule aktualisieren (alle Felder optional).
   "priority": 90
 }
 ```
+
+**Hinweis `priority`:** Wie unter 5.2 POST — kleinere Zahl = höhere Priorität bei Konfliktauflösung und typischer Ausführungsreihenfolge (1–100).
 
 **Response 200 (LogicRuleResponse):** Siehe GET /logic/rules Response-Objekt.
 
@@ -1560,6 +1603,7 @@ Detaillierter Health Check mit Komponenten-Status (JWT erforderlich, ActiveUser)
 - `ActuatorAction`, `NotificationAction`, `DelayAction`
 - `LogicRuleBase`, `LogicRuleCreate`, `LogicRuleUpdate`
 - `LogicRuleResponse`, `LogicRuleListResponse`
+- **priority** (`LogicRuleCreate` / `LogicRuleUpdate` / `LogicRuleResponse`): kleinere Zahl = höhere Konflikt- und Ausführungspriorität; Kurzdoku `El Servador/god_kaiser_server/docs/logic-rule-priority.md`
 - `RuleToggleRequest`, `RuleToggleResponse`
 - `RuleTestRequest`, `RuleTestResponse`, `ConditionResult`, `ActionResult`
 - `ExecutionHistoryEntry`, `ExecutionHistoryQuery`, `ExecutionHistoryResponse`

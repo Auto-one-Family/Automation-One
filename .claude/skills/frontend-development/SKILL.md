@@ -15,8 +15,8 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 9.99
-**Letzte Aktualisierung:** 2026-04-04
+**Version:** 10.6
+**Letzte Aktualisierung:** 2026-04-06
 
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
@@ -32,7 +32,7 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 |-------------|-----------------|---------------|
 | **Server + Frontend starten** | `make dev` oder Docker | - |
 | **API-Endpoint finden** | `.claude/reference/api/REST_ENDPOINTS.md` | ~230 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry) |
-| **WebSocket verstehen** | `.claude/reference/api/WEBSOCKET_EVENTS.md` | Events mit Payloads |
+| **WebSocket verstehen** | `.claude/reference/api/WEBSOCKET_EVENTS.md` | Events mit Payloads; ESP-Store: `esp-websocket-subscription.ts` + §0.1 in WEBSOCKET_EVENTS |
 | **Zone zuweisen** | [Section 12: Drag & Drop](#12-drag--drop-system) | `src/components/zones/` |
 | **ESP-Geraet verwalten** | [Section 5: State Management](#5-state-management-pinia) | `src/stores/esp.ts` |
 | **System Monitor** | [Section 10: Router](#10-router--navigation) | `SystemMonitorView.vue` |
@@ -115,10 +115,12 @@ npm run test:coverage # Vitest mit v8 Coverage
 
 ```
 El Frontend/src/
-├── api/           # 19 API-Module
+├── api/           # 28 API-Module
 │   ├── index.ts           # Axios Instance + Interceptors (~89 Zeilen)
+│   ├── uiApiError.ts      # REST-Error-SSOT: toUiApiError()/formatUiApiError() inkl. request_id/retryability
 │   ├── auth.ts            # Login, Logout, Token Refresh
 │   ├── esp.ts             # ESP Device Management
+│   ├── intentOutcomes.ts  # GET /intent-outcomes (Parität zu WS intent_outcome)
 │   ├── sensors.ts         # Sensor CRUD + History
 │   ├── actuators.ts       # Actuator Commands
 │   ├── zones.ts           # Zone Assignment + ZoneEntity CRUD (T13-R3)
@@ -127,6 +129,8 @@ El Frontend/src/
 │   ├── backups.ts         # DB-Backup (Admin)
 │   ├── inventory.ts       # Zone Context, Export, Schema Registry (Phase K4)
 │   ├── logic.ts           # Automation Rules
+│   ├── plugins.ts         # Plugin-Execution, History, Config, Enable/Disable (Phase 4C/F11)
+│   ├── loadtest.ts        # Loadtest bulk/simulate/metrics + Preflight/Capabilities-Fallback (F11)
 │   └── ...
 ├── config/        # Device Schemas (Phase K4)
 │   └── device-schemas/  # JSON-Schemas für Sensoren/Aktoren (DS18B20, SHT31, relay, pwm, etc.)
@@ -159,7 +163,7 @@ El Frontend/src/
 │   │   ├── primitives/  # 13 Komponenten (10 Base + AccordionSection + QualityIndicator + RangeSlider + SlideOver)
 │   │   ├── layout/      # AppShell, Sidebar, TopBar (3 Dateien)
 │   │   └── patterns/    # ConfirmDialog, ContextMenu, EmptyState, ErrorState, ToastContainer (5 Dateien)
-│   └── stores/          # 20 Shared Stores (actuator, alertCenter, auth, config, dashboard, database, deviceContext, diagnostics, dragState, gpio, inventory, logic, notification, notificationInbox, plugins, quickAction, sensor, ui, zone + zone erweitert T13-R3)
+│   └── stores/          # 22 Shared Stores (inkl. ops-lifecycle fuer High-Risk Ops-Tracking)
 ├── styles/        # CSS Design Tokens + Shared Styles (6 Dateien)
 │   ├── tokens.css       # Design Token Definitionen
 │   ├── glass.css        # Glassmorphism Klassen
@@ -167,7 +171,7 @@ El Frontend/src/
 │   ├── main.css         # Hauptstyles (Buttons, Layout)
 │   ├── forms.css        # Shared Form + Modal Styles
 │   └── tailwind.css     # Tailwind Konfiguration
-├── composables/   # 31 Composables
+├── composables/   # 32 Composables
 │   ├── useWebSocket.ts
 │   ├── useToast.ts
 │   ├── useModal.ts
@@ -196,18 +200,24 @@ El Frontend/src/
 │   ├── useQuickActions.ts
 │   ├── useScrollLock.ts
 │   ├── useSparklineCache.ts
+│   ├── monitorConnectivity.ts # F07: Monitor-Zustandsmaschine + Datenmodus-Aufloesung + Reconnect-Orchestrator
 │   ├── useWidgetDragFromFab.ts # FAB-to-GridStack widget drag (D3 Editor)
 │   ├── useZoneGrouping.ts
 │   └── useZoneKPIs.ts          # Zone KPI aggregation (extracted from MonitorView)
+├── domain/        # Domain-Adapter (Contract April 2026)
+│   ├── esp/espHealth.ts   # esp_health + Laufzeit-Telemetrie → ViewModel / Presentation
+│   └── zone/ackPresentation.ts  # Zone/Subzone-ACK Toasts (reason_code = Brückengrund)
 ├── router/        # Route-Definitionen + Guards
 ├── services/      # WebSocket Singleton
 │   └── websocket.ts   # ~625 Zeilen
-├── stores/        # 1 Pinia Store (Legacy, ESP-spezifisch)
-│   └── esp.ts         # ~2500 Zeilen
-├── types/         # 8 Type-Dateien
+├── stores/        # ESP-Pinia + WS-Subscription-Konstanten
+│   ├── esp.ts                      # ~2500 Zeilen
+│   └── esp-websocket-subscription.ts  # filters.types ≡ ws.on-Typen (P0-A)
+├── types/         # 9 Type-Dateien
 │   ├── index.ts           # ~1187 Zeilen (Re-Exports, SensorDataResolution, SensorDataQuery mit resolution/before_timestamp)
 │   ├── monitor.ts         # ZoneMonitorData, SubzoneGroup (Monitor L2)
 │   ├── websocket-events.ts # ~748 Zeilen
+│   ├── ops-lifecycle.ts # High-Risk Ops-Lifecycle Contract (initiated/running/partial/success/failed)
 │   ├── logic.ts
 │   ├── gpio.ts
 │   ├── device-metadata.ts  # DeviceMetadata Interface + Utility-Funktionen
@@ -224,7 +234,7 @@ El Frontend/src/
 │   ├── autoResolution.ts  # getAutoResolution(minutes) → SensorDataResolution, TIME_RANGE_MINUTES
 │   ├── gridLayout.ts      # findFirstFreePosition(widgets, w, h, cols?) → {x,y} — Smart Placement fuer Dashboard-Widgets (FIX-ED-1)
 │   └── ...
-├── views/         # 17 View-Komponenten
+├── views/         # 19 View-Komponenten (inkl. NotFoundView + AccessDeniedView)
 ├── main.ts        # Bootstrap
 ├── App.vue        # Root Component
 └── style.css      # CSS Variablen (~800 Zeilen)
@@ -319,8 +329,10 @@ SensorsView.vue (?sensor={espId}-gpio{gpio} oder ?focus=sensorId → auto-open D
 
 ```
 MonitorView.vue (URL-Sync: L1→L2→L3 via route params)
+├── Globales Connectivity-Banner (F07): Zustandsmaschine `connected|stale|reconnecting|degraded_api|disconnected`; Inputs: WS-Status + API-Fehler + letzter API-Erfolg; Retry-Aktion triggert serialisierte Rehydrate-Pipeline
 ├── L1 /monitor — Ready-Gate: BaseSkeleton bei espStore.isLoading, ErrorState bei espStore.error, Content nur nach erfolgreichem Laden
 │   ├── Datenquellen: useZoneKPIs composable (espStore.devices Watch 300ms debounce + zonesApi.getAllZones() 30s Cooldown, inkl. leere Zonen) + zoneStore.activeZones/archivedZones (T13-R3 WP5)
+│   ├── Datenmoduskennzeichnung (F07): ZoneTileCard zeigt `Live|Hybrid|Snapshot` explizit
 │   ├── Zone-Filter: Native <select> mit activeZones + <optgroup label="Archiv"> fuer archivedZones; selectedZoneFilter ref; filteredZoneKPIs computed; "Gefiltert" Badge (ListFilter-Icon) bei aktivem Filter; Archived-Banner bei archivierter Zone (T13-R3 WP5)
 │   ├── Zone-Tiles: ZoneTileCard.vue (Props: zone/isStale/healthConfig/rules?/totalRuleCount?/isRuleActive?, Emit: click, Slots: kpis/extra/footer); Rules-Summary Block (L1 kompakt, max 2 Regeln, Zap-Icon, aktive Regel Glow, "X weitere" Badge, .monitor-zone-tile__rules-summary); CSS-Grid align-items: stretch (gleiche Hoehe pro Zeile), Footer margin-top: auto; Reihenfolge: Zone-Tiles → Aktive Automatisierungen (D2: Cross-Zone-Dashboards + losgeloeste Inline-Panels entfernt); extra-Slot (Phase 3): InlineDashboardPanel compact mode="view" mit getZoneMiniPanelId() — zeigt max 1 zone-tile Dashboard (scope='zone-tile', nur gauge/sensor-card, max 120px Hoehe, keine Toolbar); ensureZoneTileDashboard() auto-generiert Tile-Dashboards mit Temp+Humidity Gauges beim ersten L1-Laden (Session-Guard)
 │   ├── Leere Zonen: ZoneHealthStatus 'empty' (Minus-Icon, opacity 0.7, status "Leer"), NICHT "alarm"
@@ -330,6 +342,7 @@ MonitorView.vue (URL-Sync: L1→L2→L3 via route params)
 │   └── 40px Trennung: var(--space-10) zwischen Zone-Grid und ActiveAutomationsSection
 ├── L2 /monitor/:zoneId — Subzone-First Gruppierung: Zone-Header → Subzone-Accordions (Sensoren+Aktoren zusammen) → Regeln → Zone-Dashboards → Inline-Panels
 │   ├── Datenquelle: zonesApi.getZoneMonitorData (primaer, AbortController bei Zone-Wechsel), Fallback useZoneGrouping + useSubzoneResolver nur bei API-Fehler; Ready-Gate (v-if=!zoneMonitorLoading) + BaseSkeleton waehrend Loading, ErrorState bei Fehler
+│   ├── Reconnect-Recovery (F07): bei WS-Reconnect serialisiert `espStore.fetchAll()` → `fetchZoneMonitorData()` → optional `fetchDetailData()`; dedupliziert bei Mehrfachtriggern; Sync-Hinweis "Stand synchronisiert um <zeit>"
 │   ├── Datenstruktur: zoneDeviceGroup computed (ZoneDeviceSubzone[]) — unified sensors+actuators pro Subzone; filteredSubzones computed (Subzone-Filter); ersetzt getrennte zoneSensorGroup/zoneActuatorGroup
 │   ├── Inline-Panels L2: inlineMonitorPanelsL2 mode="manage" = cross-zone + zone-spezifische (scope=zone, zoneId=selectedZoneId); Hover-Toolbar [Konfigurieren][Entfernen] (D4); L1 zeigt NUR zone-spezifische Mini-Widgets IN Kacheln (Phase 3, extra-Slot) — losgeloeste Inline-Panels auf L1 entfernt (D2)
 │   ├── Zone-Header: Name + Sensor/Aktor-Count + Alarm-Count
@@ -337,18 +350,19 @@ MonitorView.vue (URL-Sync: L1→L2→L3 via route params)
 │   ├── Subzone-Accordion: v-for subzone in filteredSubzones; Header mit Count-Badge "XS · YA"; Accordion-Header NUR wenn >1 Subzone oder benannte Subzone; Body v-show mit Transition; Smart-Defaults (<=4 alle offen, >4 erste+Zone-weit offen, leere eingeklappt); localStorage-Persistenz
 │   │   ├── Typ-Labels "Sensoren"/"Aktoren": NUR sichtbar wenn BEIDE Typen in der Subzone vorhanden
 │   │   ├── Dashed Trennlinie (.monitor-subzone__separator): NUR zwischen Sensoren und Aktoren wenn beide vorhanden
-│   │   ├── SensorCard.vue[] (mode='monitor', Stale/ESP-Offline-Badges, Trend-Pfeil via :trend Prop, Scope-Badge Multi-Zone/Mobil (T13-R3 WP4), from components/devices/; effectiveQualityStatus: bei Stale→'warning' Override, qualityLabel "Veraltet" statt "OK", border-left: 3px solid var(--color-warning); Mobile: Kontext-Hint "Aktiv in Zone X seit..." + Zone-Wechsel-Dropdown via deviceContextStore (6.7); Virtual-Sensor Info-Icon: Lucide Info 14px neben Titel bei VIRTUAL_SENSOR_META match, Glassmorphism-Tooltip mit Quell-Sensoren + Formel (V19-F03))
+│   │   ├── SensorCard.vue[] (mode='monitor', Stale/ESP-Offline-Badges, Trend-Pfeil via :trend Prop, Scope-Badge Multi-Zone/Mobil (T13-R3 WP4), Datenmodus-Badge `Live|Hybrid|Snapshot` (F07), from components/devices/; effectiveQualityStatus: bei Stale→'warning' Override, qualityLabel "Veraltet" statt "OK", border-left: 3px solid var(--color-warning); Mobile: Kontext-Hint "Aktiv in Zone X seit..." + Zone-Wechsel-Dropdown via deviceContextStore (6.7); Virtual-Sensor Info-Icon: Lucide Info 14px neben Titel bei VIRTUAL_SENSOR_META match, Glassmorphism-Tooltip mit Quell-Sensoren + Formel (V19-F03))
 │   │   │   ├── #sparkline: LiveLineChart (compact, sensor-type → auto Y-Range, thresholds → farbige Schwellwert-Zonen aus SENSOR_TYPE_CONFIG)
 │   │   │   └── [Expanded] 1h-Chart (vue-chartjs Line, sensorsApi.queryData Initial-Fetch)
 │   │   │       ├── "Zeitreihe anzeigen" → openSensorDetail (L3)
 │   │   │       └── "Konfiguration" → /sensors?sensor={espId}-gpio{gpio}
-│   │   ├── ActuatorCard.vue[] (mode='monitor', read-only: kein Toggle, PWM-Badge bei pwm_value>0, linkedRules mit Status-Dot+Name+Condition, lastExecution mit relativem Zeitstempel, "+N weitere" Link bei >2 Regeln, Scope-Badge Multi-Zone/Mobil (T13-R3 WP4), ESP-Offline-Badge (opacity 0.5, WifiOff) + Stale-Markierung (opacity 0.7, warning border-left), typ-spezifische Icons via getActuatorTypeInfo(actuator_type, hardware_type) — hardware_type bevorzugt für Pumpe/Ventil/Relay-Differenzierung, Subzone-Fallback "Zone-weit", from components/devices/)
+│   │   ├── ActuatorCard.vue[] (mode='monitor', read-only: kein Toggle, PWM-Badge bei pwm_value>0, linkedRules mit Status-Dot+Name+Condition, lastExecution mit relativem Zeitstempel, "+N weitere" Link bei >2 Regeln, Scope-Badge Multi-Zone/Mobil (T13-R3 WP4), ESP-Offline-Badge (opacity 0.5, WifiOff) + Stale-Markierung (opacity 0.7, warning border-left), Datenmodus-Badge `Live|Hybrid|Snapshot` + Warntext "Status ggf. veraltet" bei `disconnected|degraded_api` (F07), typ-spezifische Icons via getActuatorTypeInfo(actuator_type, hardware_type) — hardware_type bevorzugt für Pumpe/Ventil/Relay-Differenzierung, Subzone-Fallback "Zone-weit", from components/devices/)
 │   │   └── Leere Subzone: "Keine Geraete zugeordnet" (kompakt, kein Link)
 │   ├── "Zone-weit" (statt "Keine Subzone"): Am Ende sortiert, kein farbiger Left-Border, dashed Top-Border; bei einziger Gruppe (nur Zone-weit): kein Accordion-Wrapper, Geraete direkt sichtbar
 │   ├── Regeln fuer diese Zone (N): ZoneRulesSection.vue — logicStore.getRulesForZone(zoneId); RuleCardCompact pro Regel; Klick → /logic/:ruleId; Empty State: Link "Zum Regeln-Tab"; Bei >10 Regeln: erste 5 + Link "Weitere X Regeln — Im Regeln-Tab anzeigen"
 │   ├── Shared Sensors (6.7): v-if="sharedSensorRefs.length > 0"; multi_zone Sensoren aus ANDEREN Zonen deren assigned_zones die aktuelle Zone enthaelt; SharedSensorRefCard (kompakt, read-only, dashed border, "via Heimzone" + Navigation-Link)
 │   └── Zone-Dashboards: getDashboardNameSuffix(dash) fuer eindeutige Namen (createdAt oder ID)
 ├── L3 /monitor/:zoneId/sensor/:sensorId — SlideOver (Sensor-Detail, Deep-Link-faehig)
+│   ├── F07 Transparenz: "Live jetzt: <wert/zeit>" (Store-Quelle) getrennt von "Historie bis: <zeit>" (API-Quelle), inklusive Stale-Markierung fuer historischen Stand
 │   └── Multi-Sensor-Overlay: Chip-Selektor (max 4 Sensoren), sekundaere Y-Achse bei unterschiedlichen Einheiten, server-seitige Aggregation via getAutoResolution (resolution-Parameter im API-Call, Tooltip "(Ø)" bei aggregierten Daten, kein Min/Max-Band)
 ├── QuickActionBall (FAB, mode="monitor", fixed bottom-right): Klick auf Widget-Typ → emitiert widget-selected → oeffnet AddWidgetDialog (D3); "Dashboards" → QuickDashboardPanel (position: fixed, z-index: --z-fab, V19-F04)
 │   └── QuickDashboardPanel (position: fixed ueber FAB; Dashboard-Liste gruppiert nach cross-zone/zone; Empty-State min-height 120px; Touch: Edit-Button immer sichtbar @media hover:none)
@@ -485,12 +499,14 @@ onUnmounted(() => { /* cleanup */ })
 |-------|------|-------|
 | sensor_data | esp_id, gpio, value, quality, zone_id, subzone_id (Phase 0.1) | MQTT→Server→WS |
 | actuator_status | esp_id, gpio, actuator_type (server-normalisiert), hardware_type (ESP32-Typ), state, value, emergency | MQTT→Server→WS |
-| esp_health | esp_id, status, heap, rssi | Heartbeat→Server→WS |
+| esp_health | esp_id, status, heap, rssi, optional Telemetrie (`persistence_degraded`, `network_degraded`, `critical_outcome_drop_count`, …) | Heartbeat→Server→WS |
 | esp_reconnect_phase | esp_id, phase (`adopting`/`adopted`/`delta_enforced`), offline_seconds? | Heartbeat-Reconnect→Server→WS |
 | config_response | esp_id, status, error_code, correlation_id (pflicht), request_id? | ESP→MQTT→Server→WS (terminal nur per correlation_id) |
 | config_published | esp_id, config_keys[], correlation_id? | Server Publish→WS (non-terminal, pending) |
 | config_failed | esp_id, config_keys[], error, correlation_id (pflicht), request_id? | Server Publish→WS (terminal nur per correlation_id) |
-| actuator_command | esp_id, gpio, command, correlation_id?, request_id? | REST/MQTT→Server→WS (non-terminal, pending) |
+| intent_outcome | esp_id, intent_id, flow, outcome, code, correlation_id, … (kanonisch) | MQTT→Server→WS |
+| intent_outcome_lifecycle | esp_id, schema, event_type, reason_code?, boot_sequence_id?, ts? | MQTT CONFIG_PENDING-Lifecycle→Server→WS |
+| actuator_command | esp_id, gpio, command, correlation_id?, request_id? | REST/MQTT→Server→WS (non-terminal, pending); `correlation_id` = Feld aus REST `ActuatorCommandResponse` bei User-Commands |
 | actuator_response | esp_id, gpio, command, success, correlation_id?, request_id? | ESP→MQTT→Server→WS (terminal) |
 | actuator_command_failed | esp_id, gpio, command, error, correlation_id?, request_id? | Server→WS (terminal, publish/safety failure) |
 | sequence_started | sequence_id, rule_name?, total_steps | Logic Engine→WS (non-terminal, pending) |
@@ -502,27 +518,35 @@ onUnmounted(() => { /* cleanup */ })
 | error_event | esp_id, error_code, troubleshooting | ESP→Server→WS |
 | server_log | level, message, exception | Server intern |
 | plugin_execution_started | execution_id, plugin_id, trigger_source | PluginService→WS |
+| plugin_execution_status (optional) | execution_id, plugin_id, status, message, updated_at, progress_percent?, step?, error_code?, error_message? | PluginService/Worker→WS |
 | sensor_config_deleted | config_id, esp_id, gpio, sensor_type | Server→WS (Delete-Pipeline) |
+| actuator_config_deleted | esp_id, gpio, actuator_type | Server→WS (Delete-Pipeline) |
 | plugin_execution_completed | execution_id, plugin_id, status, duration_seconds, error_message | PluginService→WS |
 | device_scope_changed (T13-R3) | config_type, config_id, device_scope, assigned_zones | Server→WS (PUT sensors/actuators) |
 | device_context_changed (T13-R3) | config_type, config_id, active_zone_id, active_subzone_id, context_source, changed_by | Server→WS (PUT/DELETE /device-context) |
-| subzone_assignment (T13-R3) | esp_id, subzone_id, status, timestamp, error_code, message | MQTT→Server→WS (subzone ACK) |
+| zone_assignment (T13-R3) | esp_id, status, zone_id, master_zone_id, zone_name, kaiser_id, timestamp, message?, reason_code? | MQTT→Server→WS (zone ACK) |
+| subzone_assignment (T13-R3) | esp_id, subzone_id, status, timestamp, error_code, message, reason_code? | MQTT→Server→WS (subzone ACK) |
+| notification_new | (Router-Payload) | NotificationRouter→WS |
+| notification_updated | (Router-Payload) | NotificationRouter→WS |
+| notification_unread_count | count, highest_severity? | NotificationRouter→WS |
 | contract_mismatch | original_event_type, mismatch_reason, correlation_id?, request_id? | Frontend-Mapper (Integrationssignal) |
 | contract_unknown_event | original_event_type, correlation_id?, request_id? | Frontend-Mapper (Integrationssignal) |
 
 **WICHTIG:** Type-Aenderungen IMMER mit Server-Team abstimmen!
 WebSocket-Events = Kontrakt zwischen Frontend und Backend.
-Contract-Consumption im Frontend ist contract-first: keine terminale Heuristik via Timeout, Finalisierung nur via terminale Contract-Events.
+Contract-Consumption im Frontend ist contract-first: terminal_success/terminal_failed kommen aus terminalen Contract-Events; ausbleibende Endevents duerfen ueber lokale Schutz-Timeouts als `terminal_timeout` finalisiert werden.
 Intent-Lifecycle Zuordnung:
 - Actuator terminal nur via `actuator_response` / `actuator_command_failed`
 - Config terminal nur via `config_response` / `config_failed`
 - Sequence terminal nur via `sequence_completed` / `sequence_error` / `sequence_cancelled`
+- Kanonische MQTT-Intents zusaetzlich: `intent_outcome` (terminal je nach Payload) / `intent_outcome_lifecycle` (nicht-terminal) — Anzeige-SSOT `intentSignals.store.ts`; Firmware-`code` nicht als pauschaler Vertragsfehler labeln
 - Primaerer Korrelationsschluessel ist `correlation_id`; `request_id` ist optionaler Trace-Kontext und fuer Config-Events nicht durchgaengig verfuegbar.
+- Wenn terminale Contract-Events ausbleiben, werden offene Aktor-/Config-Intents nach Frist als `terminal_timeout` abgeschlossen (Operator-Hinweis statt Dauer-`pending`).
 - `EventDetailsPanel` zeigt fuer terminale Fehler-/Abbruchfaelle eine einheitliche Operator-Entscheidung (Problemtyp, Prioritaet, Ursache, naechster Schritt).
 
 ### Logic Types (types/logic.ts)
 
-- LogicRule: Conditions + Actions + Cooldown + logic_operator (AND/OR)
+- LogicRule: Conditions + Actions + Cooldown + logic_operator (AND/OR) + priority (1–100; kleinere Zahl = höhere Priorität bei Sortierung/Konflikten, konsistent mit Server/OpenAPI)
 - SensorCondition: Vergleichsoperatoren (>, <, >=, <=, ==, !=, between), optional subzone_id (Phase 2.4)
 - TimeCondition: start_hour, end_hour, days_of_week (0=Monday, 6=Sunday — ISO 8601 / Python weekday())
 - HysteresisCondition: Kühlung (activate_above/deactivate_below) oder Heizung (activate_below/deactivate_above)
@@ -530,7 +554,9 @@ Intent-Lifecycle Zuordnung:
 - ActuatorAction: ON/OFF/PWM/TOGGLE + Duration
 - NotificationAction: channel + target + message_template
 - DelayAction: seconds
-- ExecutionHistoryItem: rule_id, rule_name, triggered_at, trigger_reason, actions_executed, success, error_message?, execution_time_ms
+- RuleLifecycleState: `accepted` | `pending_activation` | `pending_execution` | `terminal_success` | `terminal_failed` | `terminal_conflict` | `terminal_integration_issue`
+- RuleIntentLifecycle: Rule-instanzbezogener Laufzeitstatus inkl. `terminal_reason_code`, `terminal_reason_text`, `correlation_id`, `request_id`, `updated_at`
+- ExecutionHistoryItem: rule_id, rule_name, triggered_at, trigger_reason, actions_executed, success, error_message?, execution_time_ms, lifecycle_state?, terminal_reason_code?, terminal_reason_text?, intent_id?, correlation_id?, request_id?, updated_at?, action_outcomes?
 - LogicConnection: ruleId, sourceEspId/Gpio, targetEspId/Gpio, isCrossEsp
 - extractEspIdsFromRule(rule): Set<string> — alle ESP-IDs aus Conditions (Sensor, Hysteresis) + ActuatorActions; fuer getRulesForZone und getZonesForRule
 - formatConditionShort(rule): string — lesbarer Kurztext aller Conditions ("Temperatur > 28°C UND 06:00–20:00"); nutzt getSensorLabel/getSensorUnit fuer Labels+Einheiten; Operatoren ≥/≤, between, Hysterese, Zeit, Compound→"[Komplex]"; Verbindung via logic_operator (UND/ODER)
@@ -557,19 +583,21 @@ Intent-Lifecycle Zuordnung:
 | Store | Datei | State | Wichtigste Actions |
 |-------|-------|-------|-------------------|
 | auth | stores/auth.ts | user, tokens, setupRequired | login, logout, refreshTokens |
-| esp | stores/esp.ts | devices[], pendingDevices[] | fetchAll, isMock, gpioStatusMap, onlineDevices (via getESPStatus), offlineDevices |
-| dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb (level, zoneName, deviceName, sensorName, ruleName, dashboardName), layouts[], DASHBOARD_TEMPLATES, DashboardTarget (interface), inlineMonitorPanels (alias), inlineMonitorPanelsCrossZone (computed), inlineMonitorPanelsForZone(zoneId) (fn), sideMonitorPanels (computed), bottomMonitorPanels (computed), hardwarePanels (computed), autoGeneratedLayouts (computed), lastSyncError | toggleStatusFilter, resetFilters, createLayout, saveLayout, createLayoutFromTemplate, deleteLayout, bulkDeleteLayouts(layoutIds), exportLayout, importLayout, setLayoutTarget, generateZoneDashboard, claimAutoLayout, retrySync, addWidget(layoutId, config), removeWidget(layoutId, widgetId), updateWidgetConfig(layoutId, widgetId, newConfig); fetchLayouts (Server-Merge + Orphan-Sync + autoGenerated-Migration); cleanupOrphanedDashboards (V19-F05: auto-delete orphaned zone dashboards, watch on zoneEntities once + after deleteZoneEntity) |
+| esp | stores/esp.ts | devices[] (inkl. optional `runtime_health_view`), pendingDevices[] | fetchAll, fetchDevice, `replaceDevices(snapshot)`, `applyDevicePatch(espId, patchFn)` (Write-Boundary fuer Device-Domain), isMock, gpioStatusMap, onlineDevices (via getESPStatus), offlineDevices; WS: `initWebSocket` + Filterliste/Mutation-Contract in `esp-websocket-subscription.ts` |
+| intentSignals | shared/stores/intentSignals.store.ts | byEspId (Intent/Zwischenstand pro Geraet) | ingestOutcome, ingestLifecycle, getDisplayForEsp, clearAll (Logout / esp cleanupWebSocket) |
+| dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb (level, zoneName, deviceName, sensorName, ruleName, dashboardName), layouts[], DASHBOARD_TEMPLATES, DashboardTarget (interface), inlineMonitorPanels (alias), inlineMonitorPanelsCrossZone (computed), inlineMonitorPanelsForZone(zoneId) (fn), sideMonitorPanels (computed), bottomMonitorPanels (computed), hardwarePanels (computed), autoGeneratedLayouts (computed), lastSyncError, syncFlags pro Layout (`local_only`/`dirty`/`server_synced`/`conflict`, inkl. last_sync_*) | toggleStatusFilter, resetFilters, createLayout, saveLayout, createLayoutFromTemplate, deleteLayout, bulkDeleteLayouts(layoutIds), exportLayout, importLayout, setLayoutTarget, setLayoutScope, setLayoutMetadata, generateZoneDashboard, claimAutoLayout, retrySync, flushPendingSyncs, buildLayoutIdentityKey, addWidget(layoutId, config), removeWidget(layoutId, widgetId), updateWidgetConfig(layoutId, widgetId, newConfig); fetchLayouts (Server-Merge mit Dirty-/Zeitregeln + Orphan-Sync + autoGenerated-Migration); cleanupOrphanedDashboards (V19-F05: auto-delete orphaned zone dashboards, watch on zoneEntities once + after deleteZoneEntity) |
 | zone | stores/zone.store.ts | zoneEntities[], isLoadingZones | handleZoneAssignment (+ Toasts), handleSubzoneAssignment (+ Toasts), fetchZoneEntities, createZone, updateZone, archiveZone, reactivateZone, deleteZoneEntity (+ cleanupOrphanedDashboards V19-F05); activeZones/archivedZones (computed); handleDeviceScopeChanged, handleDeviceContextChanged (T13-R3) |
 | deviceContext | shared/stores/deviceContext.store.ts | contexts (Map\<string, DeviceContextResponse\>), isLoaded | loadContextsForDevices, setContext, clearContext, handleContextChanged (WS), getActiveZoneId, getContext; fuer mobile/multi_zone Sensoren (6.7) |
-| logic | shared/stores/logic.store.ts | rules[], activeExecutions, executionHistory[], historyLoaded | fetchRules, toggleRule, crossEspConnections, getRulesForZone(zoneId), getZonesForRule(rule), getRulesForActuator(espId, gpio), getLastExecutionForActuator(espId, gpio), loadExecutionHistory, pushToHistory, undo, redo, canUndo, canRedo |
+| logic | shared/stores/logic.store.ts | rules[], activeExecutions, executionHistory[], historyLoaded, ruleLifecycleByRuleId, lifecycleTransitions | fetchRules, toggleRule, crossEspConnections, getRulesForZone(zoneId), getZonesForRule(rule), getRulesForActuator(espId, gpio), getLastExecutionForActuator(espId, gpio), loadExecutionHistory, `setRuleLifecycle`/`getRuleLifecycleState`, `lifecycleByReasonCode`, pushToHistory, undo, redo, canUndo, canRedo |
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
 | database | stores/database.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
 | quickAction | stores/quickAction.store.ts | isMenuOpen, activePanel (QuickActionPanel: 'menu' \| 'alerts' \| 'navigation'), currentView, contextActions[], globalActions[] | toggleMenu, closeMenu, setActivePanel, setViewContext, setContextActions, executeAction; alertSummary (computed from alert-center + inbox fallback), hasActiveAlerts, isCritical, isWarning |
-| notificationInbox | stores/notification-inbox.store.ts | notifications[], unreadCount, highestSeverity, isDrawerOpen, activeFilter (InboxFilter), sourceFilter (SourceFilterValue) | loadInitial, loadMore, markAsRead, markAllAsRead, toggleDrawer, setSourceFilter; filteredNotifications (Severity + Source); WS-Listener: notification_new, notification_updated, notification_unread_count |
-| alertCenter | stores/alert-center.store.ts | alertStats, activeAlerts[], statusFilter, severityFilter | fetchStats, fetchActiveAlerts, acknowledgeAlert, resolveAlert, startStatsPolling, stopStatsPolling; unresolvedCount, criticalCount, warningCount, hasCritical, mttaFormatted, mttrFormatted (computed) |
+| notificationInbox | stores/notification-inbox.store.ts | notifications[], unreadCount, highestSeverity, isDrawerOpen, activeFilter (InboxFilter), sourceFilter (SourceFilterValue) | loadInitial, loadMore, markAsRead, markAllAsRead, toggleDrawer, setSourceFilter, `applyAlertUpdate(updated)` (einzige Inbox-Write-API fuer Fremdstores); filteredNotifications (Severity + Source); WS-Listener: notification_new, notification_updated, notification_unread_count |
+| alertCenter | stores/alert-center.store.ts | alertStats, activeAlerts[], statusFilter, severityFilter | fetchStats, fetchActiveAlerts, acknowledgeAlert, resolveAlert, startStatsPolling, stopStatsPolling; Inbox-Updates nur via `notificationInbox.applyAlertUpdate()` (kein Direkt-Write in `notifications[]`); unresolvedCount, criticalCount, warningCount, hasCritical, mttaFormatted, mttrFormatted (computed) |
 | diagnostics | shared/stores/diagnostics.store.ts | currentReport, history[], availableChecks[], isRunning | runDiagnostic, runCheck, loadHistory, loadReport, exportReport; lastRunAge (aus currentReport oder history[0]), checksByName, statusCounts (Phase 4D) |
 | inventory | shared/stores/inventory.store.ts | searchQuery, zoneFilter, typeFilter, statusFilter, scopeFilter, sortKey, sortDirection, pageSize, currentPage, visibleColumns, selectedDeviceId, isDetailOpen | toggleSort, setPage, toggleColumn, openDetail, closeDetail, resetFilters; allComponents (unified sensors+actuators), filteredComponents, sortedComponents, paginatedComponents, availableZones, hasNonLocalScope (computed); ComponentItem mit scope/activeZone (T13-R3 WP5) |
-| plugins | shared/stores/plugins.store.ts | plugins[], selectedPlugin, executionHistory[], pluginOptions (computed) | fetchPlugins, fetchPluginDetail, executePlugin, togglePlugin, updateConfig, fetchHistory (Phase 4C) |
+| plugins | shared/stores/plugins.store.ts | plugins[], selectedPlugin, executionHistory[], pluginOptions (computed), executionLifecycleIds | fetchPlugins, fetchPluginDetail, executePlugin, togglePlugin, updateConfig, fetchHistory, startLifecycleMonitoring, stopLifecycleMonitoring, reconcileRunningExecutions (Phase 4C/F11) |
+| opsLifecycle | shared/stores/ops-lifecycle.store.ts | entries[] (OpsLifecycleEntry) | startLifecycle, updateByExecutionId, markRunning/Partial/Success/Failed, runningHighRiskEntries |
 
 ### Store-Konventionen
 
@@ -578,8 +606,11 @@ Intent-Lifecycle Zuordnung:
 - Async Actions mit try/catch + Toast-Feedback
 - WebSocket-Events in Store-Actions verarbeiten
 - KEIN direkter API-Call aus Komponenten
+- Device-Domain-Writes nur ueber `esp.applyDevicePatch()` / `esp.replaceDevices()` (keine Fremdstore-Array-Mutationen)
 
 ### ESP Store WebSocket-Integration
+
+**Kritisch:** `useWebSocket({ filters: { types: [...] } })` — `types` muss **jede** in `initWebSocket` registrierte `ws.on('…')`-Typ enthalten (sonst keine Auslieferung an Handler). Siehe `stores/esp-websocket-subscription.ts` und `WEBSOCKET_EVENTS.md` §0.1.
 
 ```typescript
 // Pattern: WebSocket Event → Store Update → Reactive Render
@@ -628,6 +659,23 @@ timeout: 30000
 
 // Helper Functions
 get<T>, post<T>, put<T>, del<T>, patch<T>
+```
+
+### REST-Error SSOT (`api/uiApiError.ts`)
+
+```typescript
+type UiApiError = {
+  message: string
+  numeric_code: number | null
+  request_id: string | null
+  retryability: 'yes' | 'no' | 'unknown'
+  status: number
+}
+
+toUiApiError(error, fallbackMessage)
+formatUiApiError(uiError)
+// Regel: Keine ad-hoc detail-Parser in Business-Stores/Views.
+// 403 -> retryability='no' + Text "Zugriff verweigert".
 ```
 
 ### Neuen API-Endpunkt hinzufuegen
@@ -692,8 +740,11 @@ onUnmounted(() => {
 | `device-context.ts` | `/device-context/*` | Device Context setzen (PUT), lesen (GET), loeschen (DELETE) — T13-R3, NEU |
 | `backups.ts` | `/backups/*` | DB-Backup erstellen/listen/download/restore (Admin) |
 | `inventory.ts` | (aggregiert) | Geräte-Inventar (Wissensdatenbank, nutzt zone context + export) |
+| `intentOutcomes.ts` | `/intent-outcomes`, `/intent-outcomes/{intent_id}` | Intent-Outcome-Liste/Detail (JWT; Parität zu WS) |
 | `logic.ts` | `/logic/*` | Cross-ESP Automation Rules |
 | `debug.ts` | `/debug/*` | Mock ESP Simulation, Maintenance Status/Config/Trigger |
+| `plugins.ts` | `/plugins/*` | Plugin-Ausführung mit execution_id, History, Config, Enable/Disable |
+| `loadtest.ts` | `/debug/load-test/*` | Bulk-Create, Simulation, Metrics; Preflight/Capabilities mit Fallback |
 | `diagnostics.ts` | `/diagnostics/*` | Diagnose-Checks, Report-History, Export (Phase 4D) |
 | `audit.ts` | `/audit/*` | Audit Log Query + Stats |
 | `logs.ts` | `/logs/*` | Log Viewer + Management |
@@ -759,6 +810,7 @@ INTENT_CONTRACT_INVENTORY: actuator/config/sequence (REST-Start + WS-Start/Termi
 // Config terminal strictness:
 // config_response/config_failed ohne data.correlation_id => contract_mismatch (nicht finalisierbar)
 getOperatorActionGuidance(event): OperatorActionGuidance | null  // SSOT fuer terminale Operator-Hinweise
+// WS_EVENT_TYPES / validateContractEvent: u.a. intent_outcome, intent_outcome_lifecycle, notification_new/updated/unread_count, subzone_assignment (System Monitor Live-Pfad)
 ```
 
 ### eventTypeLabels.ts
@@ -838,6 +890,7 @@ VIRTUAL_SENSOR_META: Record<string, { sources: string[]; formula: string }>
 // Public Routes
 '/login'  → LoginView.vue
 '/setup'  → SetupView.vue
+'/not-found' → NotFoundView.vue (sichtbarer 404-Fehlerzustand)
 
 // Protected Routes (requiresAuth: true)
 '/'                                    → DashboardView.vue (?openSettings={id})
@@ -852,6 +905,7 @@ VIRTUAL_SENSOR_META: Record<string, { sources: string[]; formula: string }>
 '/logic'                               → LogicView.vue
 '/logic/:ruleId'                       → LogicView.vue (Deep-Link: Rule oeffnen)
 '/settings'                            → SettingsView.vue
+'/access-denied'                       → AccessDeniedView.vue (Guard-Fehlerpfad fuer fehlende Admin-Rechte)
 
 // Admin Routes (requiresAdmin: true)
 '/system-monitor' → SystemMonitorView.vue (Tabs: Health, Hierarchy, Database, Logs, MQTT, Events, Reports, Diagnostics — Tabs lazy via defineAsyncComponent)
@@ -897,12 +951,14 @@ router.replace({ name: 'logic' })
 ```typescript
 beforeEach(async (to, from, next) => {
   // 1. Initial Auth-Status Check (einmalig)
-  // 2. Setup-Redirect (kein Admin → /setup)
+  // 2. Setup-Redirect (setup_required=true → /setup)
   // 3. Auth-Check (nicht eingeloggt → /login)
-  // 4. Admin-Check (kein Admin → /dashboard)
+  // 4. Admin-Check (kein Admin auf Admin-Route → /access-denied?from=...)
   // 5. Login-Redirect (eingeloggt → weg von /login)
 })
 ```
+
+**Catch-all Verhalten:** Unbekannte Pfade werden auf `/not-found?from=<original>` umgeleitet (kein Blind-Redirect auf `/hardware`).
 
 ### Lazy Loading (lazyView + Retry)
 
@@ -1086,7 +1142,7 @@ dragPayload: any
 
 7. Frontend: espStore.fetchAll() → UI aktualisiert
    └─> History-Push (fuer Undo, max 20 Eintraege)
-   └─> Toast: Erfolg/Fehler
+   └─> Toast-Finalitaet dedupliziert: zuerst "akzeptiert/in Bearbeitung", Erfolg erst bei terminaler Bestaetigung
 ```
 
 ### Zone-Removal Flow (Zone → UnassignedDropBar)
@@ -1102,7 +1158,7 @@ dragPayload: any
    └─> DELETE /api/v1/zone/devices/{id}/zone
 
 4. Server: DB Update + MQTT Publish → espStore.fetchAll()
-   └─> Toast: Erfolg/Fehler
+   └─> Toast-Finalitaet dedupliziert: Request-Akzeptanz zuerst, terminale Erfolgsrueckmeldung nur einmal
 ```
 
 ---
@@ -1210,6 +1266,19 @@ onUnmounted(() => {
 })
 ```
 
+### Dashboard Store Persistenz-Finalitaet (F08)
+
+```typescript
+// Kanonische Metadaten-Mutationen (kein Direkt-Write auf layouts[])
+dashStore.setLayoutScope(layoutId, 'zone', zoneId)
+dashStore.setLayoutMetadata(layoutId, { target: { view: 'monitor', placement: 'inline' } })
+
+// Best-effort Flush fuer ausstehende Debounce-Syncs
+onBeforeRouteLeave(async () => {
+  await dashStore.flushPendingSyncs('flush')
+})
+```
+
 ### Auth Store Logout
 
 ```typescript
@@ -1276,6 +1345,7 @@ cleanupWebSocket() {
 - Cleanup in `onUnmounted`
 - Deutsche Labels in `utils/labels.ts`
 - Event-Typ-Labels ueber `utils/eventTypeLabels.ts` aufloesen (keine lokalen Label-Maps)
+- REST-Fehler in Stores/Views ueber `api/uiApiError.ts` mappen (kein lokales `response.data.detail`)
 - `npm run build` zur Verifikation
 - Touch-Targets mindestens 44x44px auf klickbaren Elementen (WCAG)
 - `@media (hover: none)` Block fuer Touch-Geraete bei hover-abhaengigen Elementen
@@ -1297,7 +1367,22 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 9.99 | **Letzte Aktualisierung:** 2026-04-04
+**Version:** 10.6 | **Letzte Aktualisierung:** 2026-04-06
 
+- 2026-04-06: F11 Ops-Lifecycle vereinheitlicht — neuer Shared-Contract `types/ops-lifecycle.ts` + `shared/stores/ops-lifecycle.store.ts`; `plugins.store` auf execution_id-zentriertes Lifecycle-Tracking mit Timeout-Guard und Reconciliation erweitert; `LoadTestView` mit Guardrail-Flow (Preflight, typed confirm, Lifecycle, Summary); `SystemConfigView` mit Key-Diff/Risiko und `saved` vs `applied`; `SystemMonitorView` zeigt globale High-Risk-Ops-Banner-Queue.
+
+- 2026-04-06: F09 Logic-UI gehaertet — Rule-Lifecycle-Modell (`accepted`, `pending_*`, `terminal_*`) in `logic.store` dokumentiert, Conflict/Integration-Issue-Endlagen sichtbar gemacht, Validation-Mapping (`loc -> nodeId/field`) via `src/utils/ruleValidationMapper.ts` ergaenzt, Undo/Redo-Metadatensnapshot fuer `priority`/`cooldown_seconds` nachgefuehrt.
+
+- 2026-04-06: F06 Hardware-Finalitaet gehaertet — Intent-Lifecycle fuer Aktor/Config um `terminal_timeout` erweitert; Doku auf deduplizierte Toast-Finalitaet (`accepted/pending` vor terminalem Erfolg) und asynchrone Abschlusslogik aktualisiert.
+
+- 2026-04-06: F08 Persistenz-Haertung Dashboard-Editor — kanonische Store-Actions `setLayoutScope`/`setLayoutMetadata`, Safe-Flush via `flushPendingSyncs` (`beforeunload` + Route-Leave/Unmount), Merge-Haertung bei gleicher `serverId` (Dirty-/Zeitregeln + `conflict`), Name-only-Dedup entfernt zugunsten fachlicher Identity (`buildLayoutIdentityKey`), Sync-Diagnostik in `syncFlags` (`status`, `dirty`, `conflict`, `last_sync_*`).
+
+- 2026-04-06: F07 Monitor-Degradation umgesetzt — globales Connectivity-Banner (`connected|stale|reconnecting|degraded_api|disconnected`), sichtbare Datenmodus-Badges (`Live|Hybrid|Snapshot`) in `ZoneTileCard`/`SensorCard`/`ActuatorCard`, serialisierte Reconnect-Rehydrate-Pipeline (`fetchAll` → aktive Zone-Refetch → optional L3-Refetch), L2-Aktorpfad als echter Hybrid mit expliziter Snapshot-Warnung bei Ausfall, L3-Trennung "Live jetzt" vs "Historie bis".
+
+- 2026-04-06: F02 Design-System/Tokens abgeschlossen — `EmergencyStopButton`, `UnifiedEventList`, `MonitorView`, `SystemMonitorView` auf semantische Tokenpfade konsolidiert; `tailwind.config.js` auf Token-Spiegel umgestellt; `zoneColors.ts` Runtime-Fallback auf tokenbasierte Alpha-Ableitung vereinheitlicht.
+- 2026-04-06: Routing/Guards F01 — neue Views `NotFoundView` und `AccessDeniedView`; Catch-all zeigt nun 404 statt `/hardware`-Blind-Redirect; Admin-Guard leitet auf `/access-denied?from=...` um; `checkAuthStatus()`-Fehlerpfad fuer protected routes auf Login-Recovery gehärtet.
+- 2026-04-06: F03 State-Ownership — `esp` Device-Write-Adapter (`replaceDevices`, `applyDevicePatch`), `notification-inbox.applyAlertUpdate` als Inbox-Write-Boundary, WS-Mutation-Contract in `esp-websocket-subscription.ts`, Delta-Patches fuer `device_scope_changed`/`device_context_changed` mit Refresh-Fallback.
+- 2026-04-06: F04 REST-API-Vertragsklarheit/Finalitaet — `api/uiApiError.ts` als Error-SSOT eingefuehrt; P1-Migration in `auth.store`, `logic.store`, `esp.store`, `UserManagementView`, `SystemConfigView`; Aktorik-Finalitaet auf `accepted | pending | terminal_*` konkretisiert; neuer Unit-Test `tests/unit/api/uiApiError.test.ts`.
+- 2026-04-05: Contract April 2026 Frontend — `esp-websocket-subscription.ts`, `intentSignals.store`, `domain/esp/espHealth`, `domain/zone/ackPresentation`, `api/intentOutcomes`; Doku-Querrefs WEBSOCKET_EVENTS §0.1, REST Intent-Outcomes.
 
 > Vollstaendiger Changelog: siehe `CHANGELOG.md` im selben Verzeichnis.

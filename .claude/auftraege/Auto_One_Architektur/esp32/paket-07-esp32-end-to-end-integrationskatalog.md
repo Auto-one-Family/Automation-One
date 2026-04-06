@@ -2,7 +2,7 @@
 
 ## 1) Ziel
 
-Dieses Dokument finalisiert Block B von P1.7:
+Dieses Dokument finalisiert Block B von P1.7 (Abgleich mit Firmware-IST inkl. `system/intent_outcome` und erweitertem Publish-Drain):
 - E2E-Contract-Mapping fuer die kritischen Ketten ESP32 -> Server -> DB -> UI,
 - klare Zuordnung von Ownern, Garantien und Korrelation,
 - sichtbare QoS-/Semantik-Drifts als Integrationsrisiken.
@@ -44,15 +44,15 @@ ID-Schema:
 |---|---|---|---|---|---|
 | FW-INT-CON-020 | Server sendet config mit `correlation_id` | Server | Request-Schema und Korrelation | erfolgreiche Apply auf Firmware | `correlation_id` |
 | FW-INT-CON-021 | Core0 nimmt Config an und queued | Firmware/Core0 | Queue-Versuch inkl. Size-Check | Queue-full-freiheit | `correlation_id` |
-| FW-INT-CON-022 | Core1 parse/apply | Firmware/Core1 | deterministischer Apply bei gueltiger Payload | parse-fail ist in IST nicht ueberall mit hartem NACK abgeschlossen | `correlation_id` |
-| FW-INT-CON-023 | Firmware sendet `config_response` | Firmware | success/error response bei vielen Pfaden | garantierte response in allen Negativpfaden bisher lueckenhaft | `correlation_id` gespiegelt |
+| FW-INT-CON-022 | Core1 parse/apply | Firmware/Core1 | deterministischer Apply bei gueltiger Payload | Rest-Risiko nur bei nicht erreichbaren Randfaellen ausserhalb Worker | `correlation_id` |
+| FW-INT-CON-023 | Firmware sendet `config_response` | Firmware | success/error response inkl. Queue-full/Parse-Fail (spezifische Codes) + `intent_outcome` | End-to-end nur mit Server-Handler fuer Response+Outcome | `correlation_id` gespiegelt |
 | FW-INT-CON-024 | Server korreliert response und aktualisiert Zustand | Server | Zustand pro Push als success/error klassifizierbar (wenn response empfangen) | Abschluss bei fehlender response nur timeout-basiert | `correlation_id` |
 | FW-INT-CON-025 | DB/UI zeigen config status | Server+DB+UI | sichtbarer Status bei bekanntem Outcome | Unsicherheit bei Timeout ohne NACK | Request timeline |
 
 ### 3.3 Integrationsbewertung
 
-- Dominanter Bruchpunkt: Parse-Fail/Queue-Full ohne durchgaengig normierten `error_code`.
-- Verbindliche P1.7-Lesart: Jeder Config-Request braucht terminalen Ausgang `success|error|timeout`.
+- Dominanter Bruchpunkt (aktuell): Server-/DB-/UI-Seite muss `config_response` und `intent_outcome` konsistent ingestieren und Timeouts daran ausrichten (Firmware liefert die meisten terminalen Negativpfade).
+- Verbindliche P1.7-Lesart: Jeder Config-Request braucht terminalen Ausgang `success|error|timeout` **auf Systemebene**, nicht nur auf dem Geraet.
 
 ## 4) E2E-Kette 3 - Command/Response (Actuator und Sensor Measure)
 
@@ -66,14 +66,14 @@ ID-Schema:
 |---|---|---|---|---|---|
 | FW-INT-CON-040 | Command wird serverseitig erzeugt | Server | definierter command payload | erfolgreiche Ausfuehrung am Geraet | `correlation_id` oder `request_id` |
 | FW-INT-CON-041 | Ingress und Queue auf ESP | Firmware/Core0 | Routing nach Topicfamilie | Queue-full-freiheit | request key |
-| FW-INT-CON-042 | Ausfuehrung auf Core1 | Firmware/Core1 | serialisierte Verarbeitung im Owner-Kontext | Response in jedem Failure-Pfad bei Queue-Drop | request key |
-| FW-INT-CON-043 | Response-Publish | Firmware/Core0/Core1 | Response-Intent, Korrelation wird gespiegelt | Delivery-Endgueltigkeit bei Publish-Fail | `correlation_id`/`request_id` |
+| FW-INT-CON-042 | Ausfuehrung auf Core1 | Firmware/Core1 | serialisierte Verarbeitung im Owner-Kontext | klassische Response bei jedem internen Drop ohne zusaetzliche Outcomes pruefen | request key |
+| FW-INT-CON-043 | Response-Publish / Outcome-Stream | Firmware | `.../response` bei Erfolgspfad; `system/intent_outcome` fuer rejected `QUEUE_FULL` am Ingress und weitere Outcomes in Queues | Delivery-Endgueltigkeit bei Publish-Fail | `correlation_id`/`request_id` + Intent-Metadaten |
 | FW-INT-CON-044 | Server Response-Korrelation | Server | Zuordnung bei empfangener response | stiller Verlust ohne expliziten NACK | gleiche ID |
 | FW-INT-CON-045 | UI Bedienfeedback | Server->UI | Sicht auf bekannte command outcomes | kausale Sicherheit bei fehlender response | request timeline |
 
 ### 4.3 Integrationsbewertung
 
-- Kritische Luecke: Command-Queue-Drop braucht harten NACK statt nur lokaler Telemetrie.
+- Verbleibende Luecke: Command-Queue-full ist als `intent_outcome` sichtbar — Server muss diesen Kanal dem klassischen Command-Response gleichwertig oder uebergeordnet zuordnen (Korrelation, Retry).
 - OFFLINE_ACTIVE-Sonderfall bleibt stabil: server override priorisiert pro Aktor.
 
 ## 5) E2E-Kette 4 - Offline -> Reconnect -> ONLINE_ACKED
@@ -115,8 +115,8 @@ ID-Schema:
 | FW-INT-CON-090 | `heartbeat/ack` Dokumentation vs effektive Subscription | falsche Erwartung zu Delivery-Sicherheit |
 | FW-INT-CON-091 | `config_response` QoS-Darstellung uneinheitlich | Server-Retry kann falsch dimensioniert sein |
 | FW-INT-CON-092 | `server/status=online` als ACK-Ersatz interpretiert | vorzeitiger ONLINE-Eindruck ohne echte Bestaetigung |
-| FW-INT-CON-093 | Queue/Outbox-Drop nur teilbeobachtbar | fehlende Ende-zu-Ende Erklaerbarkeit bei Luecken |
+| FW-INT-CON-093 | Nicht-kritische Publish-Queue-Drops ohne Intent-Outcome; kritische mit Outcome | fehlende Ende-zu-Ende Erklaerbarkeit bleibt ohne Server-Aggregation |
 
 ## 8) Abschluss Block B
 
-Die vier kritischen E2E-Ketten sind fuer P1.7 verbindlich modelliert. Die Stabilitaet ist im Positivpfad gut, die Integrationsschuld liegt in negativen Terminierungsfaellen (Queue-full, Parse-Fail, Outbox-Full) und in semantischer Trennung von Liveness vs ACK-Konsistenz.
+Die vier kritischen E2E-Ketten sind fuer P1.7 verbindlich modelliert. Die Stabilitaet ist im Positivpfad gut; auf der Firmware sind viele negative Terminierungsfaelle fuer Config/Publish entschaerft. Die Integrationsschuld liegt zunehmend in Server/DB/UI (Ingestion von `intent_outcome`, Retry/Timeout-Politik) und in der semantischen Trennung von Liveness vs ACK-Konsistenz.

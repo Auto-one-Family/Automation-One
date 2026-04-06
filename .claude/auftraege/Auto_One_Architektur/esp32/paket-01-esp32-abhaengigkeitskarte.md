@@ -1,6 +1,6 @@
 # Paket 01: ESP32 Abhaengigkeitskarte (P1.1)
 
-> **Stand:** 2026-04-03  
+> **Stand:** 2026-04-05  
 > **Status:** Abgeschlossen (P1.1)  
 > **Ursprung:** Abgeleitet aus `paket-01-esp32-modul-inventar.md` und Firmware-Codeanalyse  
 > **Naechster Schritt:** Input fuer P1.2 Runtime-Lifecycle/State-Model
@@ -23,6 +23,7 @@ Diese Karte dokumentiert die zentralen Modulabhaengigkeiten der Firmware inkl. K
 | FW-MOD-021 | `services/communication/wifi_manager.*` | WLAN Connectivity |
 | FW-MOD-022 | `services/communication/mqtt_client.*` | MQTT Connectivity + Pub/Sub |
 | FW-MOD-024 | `services/config/config_manager.*` | Konfigurationsorchestrierung |
+| FW-MOD-026 | `services/provisioning/provision_manager.*` | AP-/Portal-Provisioning |
 | FW-MOD-027 | `services/config/storage_manager.*` | NVS Zugriff |
 | FW-MOD-028 | `services/safety/offline_mode_manager.*` | Offline-Regelwerk |
 | FW-MOD-030 | `drivers/gpio_manager.*` | Pin-Safety/Ownership |
@@ -30,6 +31,9 @@ Diese Karte dokumentiert die zentralen Modulabhaengigkeiten der Firmware inkl. K
 | FW-MOD-033 | `error_handling/health_monitor.*` | Health-Snapshot |
 | FW-MOD-035 | `utils/topic_builder.*` | Topic-Contracts |
 | FW-MOD-036 | `utils/time_manager.*` | Zeitbasis |
+| FW-MOD-043 | `tasks/intent_contract.*` | Intent-Metadaten, Safety-Epoch, TTL, Outcome-Publish |
+| FW-MOD-044 | `tasks/command_admission.*` | Command-Gating (CONFIG/SENSOR/ACTUATOR/SYSTEM) |
+| FW-MOD-045 | `services/config/runtime_readiness_policy.*` | Runtime-Readiness (Counts/Profile) fuer Events/ACK |
 
 ## 2) Kantenliste (A -> B)
 
@@ -65,6 +69,9 @@ Diese Karte dokumentiert die zentralen Modulabhaengigkeiten der Firmware inkl. K
 | FW-FLOW-028 | `health_monitor` -> `actuator_manager` + `sensor_manager` | aktive Modulcounts / status | locker |
 | FW-FLOW-029 | `time_manager` -> `mqtt_client` | Heartbeat-/Payload-Timestamp-Basis | locker |
 | FW-FLOW-030 | `provision_manager` -> `config_manager` | AP-Config speichern/laden | hart |
+| FW-FLOW-031 | `main.cpp` / `routeIncomingMessage` -> `command_admission` | Vor-Enqueue-Gating Sensor/Aktor/Config (Core0) | hart |
+| FW-FLOW-032 | `actuator_command_queue` / `sensor_command_queue` / `config_update_queue` (Core1) -> `intent_contract` | TTL/Epoch-Invalidierung, Admission erneut, Outcome | hart |
+| FW-FLOW-033 | `intent_contract` -> `mqtt_client` / `g_publish_queue` | `publishIntentOutcome`, Outbox-Drain | locker |
 
 ## 3) Zentrale Knoten (High Coupling)
 
@@ -82,7 +89,7 @@ Diese Karte dokumentiert die zentralen Modulabhaengigkeiten der Firmware inkl. K
 - Auswirkung: hoch, systemweit.
 
 ### F-02: Config-Concurrency ohne Queue-Disziplin
-- Betroffene Kette: MQTT event (Core0) -> `config_update_queue` -> Core1 Handler
+- Betroffene Kette: MQTT event (Core0) -> `command_admission` / `intent_contract` -> `config_update_queue` -> Core1 Handler
 - Risiko: Race auf `sensors_[]` / `actuators_[]`, wenn Queue-Disziplin umgangen wird.
 - Auswirkung: hoch, schwer reproduzierbare Runtime-Fehler.
 

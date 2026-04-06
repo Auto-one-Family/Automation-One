@@ -1,13 +1,15 @@
 # Paket 02: ESP32 Runtime-Lifecycle und State-Model (P1.2)
 
+> **Stand:** 2026-04-05  
+
 ## 1) Ziel, Scope, Quellen
 
 Ziel ist ein belastbares Runtime-Lifecycle-Modell fuer `El Trabajante` von Boot bis Degraded/Recovery, mit klaren Zustands- und Triggerdefinitionen fuer Folgepakete P1.3, P1.5 und P1.6.
 
 Pflicht-Input (P1.1):
-- `architektur-autoone/esp32/paket-01-esp32-modul-inventar.md`
-- `architektur-autoone/esp32/paket-01-esp32-abhaengigkeitskarte.md`
-- `architektur-autoone/esp32/paket-01-esp32-contract-seedlist.md`
+- `.claude/auftraege/Auto_One_Architektur/esp32/paket-01-esp32-modul-inventar.md`
+- `.claude/auftraege/Auto_One_Architektur/esp32/paket-01-esp32-abhaengigkeitskarte.md`
+- `.claude/auftraege/Auto_One_Architektur/esp32/paket-01-esp32-contract-seedlist.md`
 
 Codebasis (read-only analysiert):
 - `El Trabajante/src/main.cpp`
@@ -91,6 +93,7 @@ Hinweis: FW-STATE-019 ist ein impliziter Laufzeitmodus, nicht eigener `SystemSta
 - Config Topic -> `FW-STATE-012` (Core0->Core1 queue).
 - Sensor/Aktor command -> `FW-STATE-013`.
 - Parse-Fail in Config-Queue fuehrt zu Drop ohne zwingenden negativen `config_response` (bekannte Luecke).
+- Sensor/Aktor-Command-Pfad: Vor Enqueue prueft Core0 `command_admission`; bei Queue full Intent-Outcome `QUEUE_FULL` (zusaetzlich zu Log/ErrorTracker).
 
 ---
 
@@ -105,8 +108,9 @@ Hinweis: FW-STATE-019 ist ein impliziter Laufzeitmodus, nicht eigener `SystemSta
 4. **Emergency Notify vs Queue-Backlog**
    - Emergency laeuft als Notify-Pfad mit Prioritaet; Queue-Commands koennen danach noch anstehen.
 5. **Queue Overflow / Drop-Visibility**
-   - command/publish queue non-blocking; bei Vollstand droppen Nachrichten.
-   - config queue wartet 100ms, kann danach ebenfalls droppen.
+   - actuator/sensor command queue: non-blocking (Recovery-Intent bis 20ms Front-Insert); Vollstand mit Log, ErrorTracker und Intent-Outcome.
+   - publish queue non-blocking; bei Vollstand droppen Nachrichten.
+   - config queue wartet 100ms, kann danach droppen; Core0 kann `config_response`+Intent bei Full ausloesen.
 6. **Legacy No-Task Pfad**
    - Bei fruehem setup-return keine Core-Trennung; andere Timing-/Race-Charakteristik als Normalbetrieb.
 

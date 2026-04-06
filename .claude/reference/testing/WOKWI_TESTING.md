@@ -9,6 +9,19 @@
 
 ---
 
+## Entry Points (verbindlich)
+
+- `scripts/run-wokwi-tests.py` = **lokaler Runner** (Developer-Werkzeug)
+- `.github/workflows/wokwi-tests.yml` = **CI-Runner** (Gate/Artefakte)
+- Abweichungen sind bewusst, solange dokumentiert und reproduzierbar.
+
+## I2C Scope-Klarheit
+
+- I2C **Sensor-Kommunikation** gilt im PR-Gate als **hardware-only**.
+- CI deckt weiterhin simulierbare Initialisierungs-/Controller-Aspekte ab.
+
+---
+
 ## Quick Start
 
 ### 1. Prerequisites

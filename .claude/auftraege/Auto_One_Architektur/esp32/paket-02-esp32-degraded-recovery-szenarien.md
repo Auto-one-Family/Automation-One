@@ -1,6 +1,6 @@
 # Paket 02 (optional): ESP32 Degraded-/Recovery-Szenarien
 
-> **Stand:** 2026-04-03  
+> **Stand:** 2026-04-05  
 > **Status:** Optionales Vertiefungsartefakt zu P1.2  
 > **State-Referenz:** `paket-02-esp32-runtime-lifecycle-state-model.md`  
 > **Trigger-Referenz:** `paket-02-esp32-trigger-matrix.md`
@@ -22,7 +22,7 @@ Dieses Zusatzdokument konkretisiert Degraded- und Recovery-Pfade aus P1.2 fuer s
 | DEG-005 | Keine offline rules vorhanden | FW-STATE-012 | sofort `setAllActuatorsToSafeState()` | reconnect normal | harte Verfuegbarkeitsreduktion |
 | DEG-006 | Offline grace abgelaufen | FW-STATE-012 | `activateOfflineMode()` -> local rules | reconnect + ACK | rule-data veraltet/inkonsistent |
 | DEG-007 | Reconnect ohne ACK | FW-STATE-013 | Wechsel nach `RECONNECTING`, Regeln bleiben aktiv | ACK eingetroffen | aktives Regelwerk trotz Broker-Connect |
-| DEG-008 | Config queue full | FW-STATE-010 | queue timeout/drop | neuer config push | fehlender apply-state beim Server |
+| DEG-008 | Config queue full | FW-STATE-010 | queue timeout/drop | neuer config push | Core0 sendet `config_response` QUEUE_FULL + Intent-Outcome; Server kann resyncen |
 | DEG-009 | Config parse fail | FW-STATE-010 | drop in `processConfigUpdateQueue()` | erneuter valider push | fehlender negativer ACK |
 | DEG-010 | Publish queue full | FW-STATE-009/FW-STATE-013 | publish drop + CB failure count | queue drain wieder frei | Status-/Telemetrieverlust |
 | DEG-011 | Offline-rule NVS CRC/size fail | FW-STATE-001/FW-STATE-012 | Regeln auf 0, wartet auf config push | valider config push | offline fallback nur safe-state |
@@ -50,5 +50,5 @@ Dieses Zusatzdokument konkretisiert Degraded- und Recovery-Pfade aus P1.2 fuer s
 - `OFFLINE_ACTIVE` darf nicht vor 30s Grace aktiviert werden.
 - ACK muss `OFFLINE_ACTIVE`/`RECONNECTING` deterministisch nach ONLINE zurueckfuehren.
 - Bei `offline_rule_count == 0` muss auf Disconnect sofort Safe-State passieren.
-- Config-Queue-Fehlerpfade muessen fuer den Server beobachtbar gemacht werden.
+- Config-Queue-Full ist fuer den Server ueber `config_response` + Intent-Outcome beobachtbar; Parse-Fail-Pfad bleibt Luecke.
 - Emergency darf nicht von Queue-Backlog blockiert werden.

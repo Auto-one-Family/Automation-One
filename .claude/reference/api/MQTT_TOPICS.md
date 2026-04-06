@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.13 | **Aktualisiert:** 2026-04-04
+> **Version:** 2.16 | **Aktualisiert:** 2026-04-05
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
-> **Änderungen:** Heartbeat-ACK Contract-Härtung (`handover_epoch`, `ack_type`, `contract_version`, `session_id`), neuer Runtime-State `CONFIG_PENDING_AFTER_RESET`, Heartbeat-Telemetrie (`boot_sequence_id`, `reset_reason`, `segment_start_ts`) + Intent-Outcome-Vertrag v2.9 (degradierte Admission-Codes, disjunkte Expiry-Codes `SAFETY_EPOCH_INVALIDATED`/`TTL_EXPIRED`, robuste Critical-Replay-Semantik) + Canonical-First Ingest für `system/heartbeat`, `system/diagnostics`, `system/error`, `system/will`, `actuator/{gpio}/response`, `config_response` mit sichtbarer Unknown-Normalisierung (`CONTRACT_UNKNOWN_CODE`, `raw_*` Kontexte) + terminale Persistence-Authority (write-once/finality) für `config_response`, `actuator/{gpio}/response`, `system/will` (stale Replay wird idempotent ignoriert) + Firmware-Strict-Contract im Config-Pfad (keine stille `correlation_id`-Fallback-Heilung, expliziter Contract-Fehler) (2026-04-04)
+> **Änderungen:** **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
 
 ---
 
@@ -46,7 +46,8 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `kaiser/god/esp/{esp_id}/system/diagnostics` | ESP→Server | 0 | Diagnostics |
 | `kaiser/god/esp/{esp_id}/system/will` | ESP→Server | 1 | LWT (Last Will) |
 | `kaiser/god/esp/{esp_id}/system/error` | ESP→Server | 1 | Error Event |
-| `kaiser/god/esp/{esp_id}/system/intent_outcome` | ESP→Server | 1 | Intent/Outcome Events |
+| `kaiser/god/esp/{esp_id}/system/intent_outcome` | ESP→Server | 1 | Intent/Outcome Events (kanonisch `buildOutcomePayload`) |
+| `kaiser/god/esp/{esp_id}/system/intent_outcome/lifecycle` | ESP→Server | 1 | CONFIG_PENDING Lifecycle (`config_pending_lifecycle_v1`) |
 | `kaiser/god/esp/{esp_id}/status` | ESP→Server | 1 | System-Status |
 | `kaiser/god/esp/{esp_id}/safe_mode` | ESP→Server | 1 | Safe-Mode Status |
 | `kaiser/god/esp/{esp_id}/config` | Server→ESP | 2 | Config Update |
@@ -236,7 +237,8 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
   "value": 1.0,
   "duration": 0,
   "timestamp": 1234567890,
-  "correlation_id": "cmd_abc123"
+  "correlation_id": "cmd_abc123",
+  "intent_id": "cmd_abc123"
 }
 ```
 
@@ -248,7 +250,12 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `value` | float | Nein | 0.0 - 1.0 für PWM |
 | `duration` | int | Nein | Sekunden (0 = unbegrenzt). Bei > 0: ESP schaltet Aktor nach N Sekunden automatisch aus (Auto-Off, F1 2026-03-11) |
 | `timestamp` | int | Ja | Unix Timestamp |
-| `correlation_id` | string | Nein | End-to-End Tracking ID für Response-Korrelation |
+| `correlation_id` | string | Nein | End-to-End Tracking ID für Response-Korrelation. Normaler REST-Befehl: UUID (`ActuatorService`). **Not-Aus** (`POST /v1/actuators/emergency_stop`): pro GPIO deterministisch `{incident_correlation_id}:{esp_id}:{gpio}` (`build_emergency_actuator_correlation_id` in `core/request_context.py`). |
+| `intent_id` | string | Nein | Wenn `correlation_id` gesetzt: Server setzt **`intent_id` = `correlation_id`** für Intent-Metadaten auf der ESP (`intent_contract.cpp`) und Zeile in `command_intents` (`orchestration_state=sent` nach Publish). Ohne `correlation_id` entfällt das Feld. |
+
+**History (nur Emergency-Stop, serverseitig):** Dieselbe GPIO-`correlation_id` wird bei erfolgreichem Publish in `actuator_history.command_metadata` neben `incident_correlation_id` unter `correlation_id` und `mqtt_correlation_id` abgelegt. Details: `El Servador/god_kaiser_server/docs/emergency-stop-mqtt-correlation.md`. Die UUID `incident_correlation_id` steht zusätzlich in der REST-Antwort `POST /v1/actuators/emergency_stop` (`EmergencyStopResponse`).
+
+**Orchestrierung:** `command_intents` / `orchestration_state` (sent vs. accepted/ack_pending): `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`.
 
 **Commands:**
 
@@ -470,9 +477,20 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
       "safe": false
     }
   ],
-  "gpio_reserved_count": 4
+  "gpio_reserved_count": 4,
+  "persistence_degraded": false,
+  "persistence_degraded_reason": "NONE",
+  "runtime_state_degraded": false,
+  "mqtt_circuit_breaker_open": false,
+  "wifi_circuit_breaker_open": false,
+  "network_degraded": false,
+  "persistence_drift_count": 0,
+  "critical_outcome_drop_count": 0,
+  "publish_outbox_drop_count": 0
 }
 ```
+
+**Degraded-Telemetrie (2026-04):** `persistence_degraded` / `persistence_degraded_reason` = Offline-Rules-Persistence-Drift; `runtime_state_degraded` = FSM (z. B. CONFIG_PENDING, SAFE_MODE); `network_degraded` = MQTT- oder WiFi-Circuit-Breaker OPEN. **`degraded` / `degraded_reason` werden von aktueller Firmware nicht mehr gesendet** (Legacy-Consumer migrieren). `critical_outcome_drop_count` spiegelt NVS-Outcome-Outbox-Verluste; `publish_outbox_drop_count` zählt ESP-IDF-Outbox-`-2`-Drops nicht-kritischer Publishes.
 
 **Required Fields:** `ts`, `uptime`, `heap_free` / `free_heap`, `wifi_rssi`
 
@@ -581,6 +599,8 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
   "message": "Reboot initiated"
 }
 ```
+
+**Parse-Fehler (Firmware 2026-04):** Bei ungültigem JSON auf `system/command` antwortet das ESP auf `system/command/response` mit `success: false`, `error`/`reason_code`: `JSON_PARSE_ERROR`, `correlation_id` (Fallback `fw_*`).
 
 **Code-Referenzen:**
 - **ESP32:** Direkt in `main.cpp` gebaut (keine TopicBuilder-Funktion)
@@ -873,7 +893,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Outcome-Werte:** `accepted`, `rejected`, `applied`, `persisted`, `failed`, `expired`  
-**Code-Klassen (Auszug):** `COMMAND_ACCEPTED`, `REGISTRATION_PENDING`, `CONFIG_PENDING_BLOCKED`, `DEGRADED_MODE_BLOCKED`, `SAFETY_LOCKED`, `QUEUE_FULL`, `VALIDATION_FAIL`, `EXECUTE_FAIL`, `SAFETY_EPOCH_INVALIDATED`, `TTL_EXPIRED`, `SAFETY_QUEUE_FLUSHED`, `MODE_UNSUPPORTED`
+**Code-Klassen (Auszug):** `COMMAND_ACCEPTED`, `REGISTRATION_PENDING`, `CONFIG_PENDING_BLOCKED`, `DEGRADED_MODE_BLOCKED`, `SAFETY_LOCKED`, `QUEUE_FULL`, `PUBLISH_OUTBOX_FULL`, `VALIDATION_FAIL`, `EXECUTE_FAIL`, `SAFETY_EPOCH_INVALIDATED`, `TTL_EXPIRED`, `SAFETY_QUEUE_FLUSHED`, `MODE_UNSUPPORTED`, `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `JSON_PARSE_ERROR`
 **Server-Kanonisierung (P0.2):** Alias-Mapping serverseitig (`processing→accepted`, `success/ok→persisted`, `error→failed`, `timeout→expired`); unbekannte `flow`/`outcome` werden als Contract-Verletzung mit `code=CONTRACT_UNKNOWN_CODE` verarbeitet.
 **Contract-Hinweis:** Fehlt `correlation_id`, setzt der Server `code=CONTRACT_MISSING_CORRELATION` und markiert den Datensatz als nicht-retrybar. Im Firmware-Config-Flow wird fehlende `correlation_id` zusaetzlich strict als Contract-Verletzung behandelt (kein lokaler Fallback im terminalen Pfad).
 **Contract-Haertung (WP-09):** Fuer `system/intent_outcome` sind keine Legacy-Topic-Aliase mehr zulässig; alte Alias-Namen sind als deprecated zu behandeln und spaetestens bis **2026-07-03** zu entfernen.
@@ -882,6 +902,22 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 - **ESP32:** `intent_contract.cpp:publishIntentOutcome()`
 - **ESP32:** `topic_builder.cpp:buildIntentOutcomeTopic()`
 - **ESP32:** `main.cpp:routeIncomingMessage()` (Admission-NACK), Queue-Worker in `tasks/*_queue.cpp`
+
+**Intent-Metadaten im Server-Payload:** Primär top-level (`intent_id`, `correlation_id`, `generation`, …). Optional zusätzlich unter `data.*` gespiegelt — Firmware liest top-level zuerst, dann `data` (`intent_contract.cpp`).
+
+---
+
+### 3.12 system/intent_outcome/lifecycle (ESP→Server)
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/intent_outcome/lifecycle`
+
+**QoS:** 1  
+**Semantik:** Nur **CONFIG_PENDING**-Runtime-Transitions (`entered_config_pending`, `exit_blocked_config_pending`, `exited_config_pending`). **Nicht** mit kanonischem `system/intent_outcome` mischen.
+
+**Pflichtfelder (Schema-Tag):** `schema` = `config_pending_lifecycle_v1`, `boot_sequence_id` (Korrelation zum Heartbeat), plus bestehende Transition-Felder (`event_type`, `reason_code`, Counter, Readiness-Snapshot — siehe `El Trabajante/docs/runtime-readiness-policy.md`).
+
+**Code-Referenzen:**
+- **ESP32:** `topic_builder.cpp:buildIntentOutcomeLifecycleTopic()`, `main.cpp:publishConfigPendingTransitionEvent()`
 
 ---
 
@@ -1109,9 +1145,11 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 }
 ```
 
-**correlation_id:** Von ESP32-ACKs immer gesetzt. Wird vom Command-Payload geerbt oder als Firmware-Fallback-ID generiert.
+**correlation_id:** Muss die **vom Server in `zone/assign` gesetzte** UUID exakt echo’en, damit `MQTTCommandBridge.resolve_ack` das richtige wartende Future trifft. **Kein** FIFO-Fallback: fehlt die ID oder ist sie unbekannt → ACK wird für die Bridge **nicht** zugeordnet (WARNING-Log `ACK dropped: no correlation match`), REST läuft in **Timeout**. Handler lesen auch Aliase (`corr_id`, `corrId`, `data.correlation_id`) via `extract_ack_correlation_id`. Firmware setzt die ID typischerweise aus dem Assign-Payload bzw. Fallback-Generator.
 
 **status-Werte:** `zone_assigned`, `zone_removed`, `error`
+
+**reason_code (optional, string):** z. B. `CONFIG_LANE_BUSY` (Config-Lane belegt), `JSON_PARSE_ERROR` (Payload ungültig).
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildZoneAckTopic()` (Zeile 237)
@@ -1180,9 +1218,11 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 }
 ```
 
-**correlation_id:** Von ESP32-ACKs immer gesetzt. Wird vom Command-Payload geerbt oder als Firmware-Fallback-ID generiert.
+**correlation_id:** Wie bei `zone/ack`: exaktes Echo der serverseitigen UUID aus `subzone/assign` (bzw. `subzone/remove`), **kein** FIFO-Fallback in der Bridge — sonst Timeout statt falscher Zuordnung. Aliase wie oben.
 
 **status-Werte:** `subzone_assigned`, `subzone_removed`, `error`
+
+**reason_code (optional, string):** z. B. `CONFIG_LANE_BUSY`, `JSON_PARSE_ERROR`, `VALIDATION_ERROR`, `SUBZONE_NOT_FOUND` (statt nur numerischem `error_code` bei strukturierten Fehlern).
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildSubzoneAckTopic()` (Zeile 206)
@@ -1307,6 +1347,7 @@ Der Server subscribed zu folgenden Topic-Patterns:
 | `kaiser/+/esp/+/system/will` | `handle_lwt` | `lwt_handler.py:35` |
 | `kaiser/+/esp/+/system/error` | `handle_system_error` | `main.py:293` |
 | `kaiser/+/esp/+/system/intent_outcome` | `handle_intent_outcome` | `intent_outcome_handler.py` |
+| `kaiser/+/esp/+/system/intent_outcome/lifecycle` | `handle_intent_outcome_lifecycle` | `intent_outcome_lifecycle_handler.py` (Audit + WS `intent_outcome_lifecycle`, Metrik `intent_outcome_lifecycle_total`) |
 | `kaiser/+/esp/+/status` | *(nicht registriert)* | *(derzeit kein Handler in `main.py`)* |
 | `kaiser/+/esp/+/safe_mode` | *(nicht registriert)* | *(derzeit kein Handler in `main.py`)* |
 

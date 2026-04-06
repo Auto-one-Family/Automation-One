@@ -302,6 +302,7 @@ TopicBuilder::buildSensorDataTopic(gpio);      // .../sensor/{gpio}/data
 TopicBuilder::buildActuatorCommandTopic(gpio); // .../actuator/{gpio}/command
 TopicBuilder::buildSystemHeartbeatTopic();     // .../system/heartbeat
 TopicBuilder::buildIntentOutcomeTopic();       // .../system/intent_outcome
+TopicBuilder::buildIntentOutcomeLifecycleTopic(); // .../system/intent_outcome/lifecycle (CONFIG_PENDING)
 TopicBuilder::buildZoneAssignTopic();          // .../zone/assign
 TopicBuilder::buildZoneAckTopic();             // .../zone/ack
 TopicBuilder::buildSubzoneAssignTopic();       // .../subzone/assign

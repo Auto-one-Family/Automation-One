@@ -1,8 +1,8 @@
 # Paket 01: ESP32 Modul-Inventar (P1.1)
 
-> **Stand:** 2026-04-03  
+> **Stand:** 2026-04-05  
 > **Status:** Abgeschlossen (P1.1)  
-> **Scope-Quelle:** `arbeitsbereiche/automation-one/architektur-autoone/roadmap-komplettanalyse.md`  
+> **Scope-Quelle:** `.claude/auftraege/Auto_One_Architektur/roadmap-komplettanalyse.md`  
 > **Referenzbasis:** Firmware-Analyse im Auto-one-Repo (`C:/Users/robin/Documents/PlatformIO/Projects/Auto-one`)
 
 ## 1) Ziel und Scope
@@ -90,6 +90,10 @@ Dieses Dokument bildet die belastbare Modul-Landkarte der Firmware `El Trabajant
 | FW-MOD-040 | `utils/onewire_utils.*` | Utilities/Basisinfrastruktur | OneWire ROM-Helfer/Parsing | In: ROM string/bytes; Out: normalized forms | kein | indirekt | niedrig | P1.3 |
 | FW-MOD-041 | `utils/json_helpers.h` | Utilities/Basisinfrastruktur | JSON-Hilfen fuer robustes Parsing | In: JsonObject; Out: typed fields | kein | verhindert Parsingfehler-Pfade | mittel | P1.6 |
 | FW-MOD-042 | `models/*.h` (`config_types`, `sensor_types`, `actuator_types`, `mqtt_messages`, `system_types`, `watchdog_types`, `offline_rule`, `error_codes`) | Utilities/Basisinfrastruktur | zentrale Datentypen + Error-Codes | In/Out: type contracts fuer alle Layer | teilweise NVS-relevante Strukturfelder | starke Safety-Auswirkung bei Schemafehlern | hoch | P1.2 P1.3 P1.4 P1.5 P1.6 P1.7 |
+| FW-MOD-043 | `tasks/intent_contract.*` | Runtime/Boot | Intent-Metadaten (correlation_id, TTL), Safety-Epoch, Outcome-Publish/Outbox | In: JSON-Payloads/Topics; Out: MQTT Outcomes | RAM/NVS pending replay | TTL/Epoch invalidiert Commands/Config-Intents | hoch | P1.2 P1.5 P1.6 |
+| FW-MOD-044 | `tasks/command_admission.*` | Runtime/Boot | Gate fuer CONFIG/SENSOR/ACTUATOR/SYSTEM vor Queue/Execute | In: SystemState, Registration, Recovery-Intent | kein | blockiert unsichere Commands bei Safe/Error/Pending | hoch | P1.2 P1.5 P1.6 |
+| FW-MOD-045 | `services/config/runtime_readiness_policy.*` | Config/Provisioning | Readiness-Entscheid aus Sensor/Aktor/Offline-Rule Counts | In: Snapshot; Out: Decision fuer Events/ACK | kein | beeinflusst Diagnose/ACK-Payload-Felder | mittel | P1.2 P1.6 |
+| FW-MOD-046 | `tasks/emergency_broadcast_contract.h` | Safety/Watchdog/Failsafe | statischer Contract fuer Broadcast-Emergency JSON | In: Payload-Felder; Out: normalisierte Command-Erkennung | kein | Parsing/Auth-Entscheidung Emergency | hoch | P1.5 P1.6 |
 
 ## 5) Kritikalitaets-Ranking (Top-10)
 
@@ -106,13 +110,14 @@ Dieses Dokument bildet die belastbare Modul-Landkarte der Firmware `El Trabajant
 
 ## 6) Verweise auf Folgeartefakte
 
-- Abhaengigkeiten/Knoten/Kanten: `arbeitsbereiche/automation-one/architektur-autoone/esp32/paket-01-esp32-abhaengigkeitskarte.md`
-- Contract-Seedlist (4 Kernketten): `arbeitsbereiche/automation-one/architektur-autoone/esp32/paket-01-esp32-contract-seedlist.md`
+- Abhaengigkeiten/Knoten/Kanten: `.claude/auftraege/Auto_One_Architektur/esp32/paket-01-esp32-abhaengigkeitskarte.md`
+- Contract-Seedlist (4 Kernketten): `.claude/auftraege/Auto_One_Architektur/esp32/paket-01-esp32-contract-seedlist.md`
 
 ## 7) Hand-off in Folgepakete
 
 ### Kernmodule fuer Lifecycle-Analyse (P1.2)
 - `main.cpp`, `safety_task.*`, `communication_task.*`, `config_update_queue.*`
+- `intent_contract.*`, `command_admission.*`, `runtime_readiness_policy.*`
 - `mqtt_client.*`, `wifi_manager.*`, `time_manager.*`
 - `offline_mode_manager.*`, `actuator_manager.*`, `sensor_manager.*`
 

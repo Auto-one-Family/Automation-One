@@ -1,6 +1,6 @@
 # Bereich 05A - Safety und Failsafe-Kette
 
-> Stand: 2026-04-04  
+> Stand: 2026-04-05  
 > Scope: Emergency-Stop, Queue-Interlocks, ACK-/Disconnect-Uebergaenge, Offline-Failsafe.
 
 ## 1) Was war veraltet?
@@ -8,7 +8,8 @@
 ### Veraltet A - "Emergency ist nicht transaktionssicher, Queue-Tail bleibt aktiv" (teilweise falsch)
 
 - Der alte Text unterstellte, dass enqueued Kommandos nach Notstopp unkontrolliert nachlaufen.
-- Aktueller Code flush't bei `NOTIFY_EMERGENCY_STOP` explizit beide Queues (`flushActuatorCommandQueue()`, `flushSensorCommandQueue()`) und erhoeht den Safety-Epoch (`bumpSafetyEpoch(...)`), bevor `emergencyStopAll(...)` ausgefuehrt wird.
+- Aktueller Code verarbeitet `NOTIFY_EMERGENCY_STOP` im Safety-Task in fester Reihenfolge: zuerst `bumpSafetyEpoch(...)`, danach explizit beide Queues (`flushActuatorCommandQueue()`, `flushSensorCommandQueue()`), dann `emergencyStopAll(...)`.
+- Ausnahme Legacy-Pfad `MQTT_USE_PUBSUBCLIENT`: Systembefehl `safe_mode` flusht die Queues und ruft `emergencyStopAll(...)` ohne vorangehenden `bumpSafetyEpoch(...)` auf (alle anderen Emergency-Pfade im selben Build setzen den Epoch weiterhin).
 - Delta: Risiko ist nicht mehr "unguardierter Queue-Tail", sondern verbleibend nur noch "verteilte Trigger-Pfade muessen alle denselben Ablauf nutzen".
 
 ### Veraltet B - "ACK/Disconnect fuehrt typischerweise zu False-Positive-Safe-Transitions" (zu pauschal)
@@ -30,9 +31,10 @@
 
 ### SAF-IST-001 - Emergency-Stop-Pfad ist mehrstufig gehaertet
 
-- ESP- und Broadcast-Emergency werden getrennt verarbeitet.
-- Broadcast-Payload laeuft durch Contract-Validierung; bei `critical_unknown` wird explizit failsafe-stop ausgelost.
-- In RTOS-Pfad erfolgt Stopp ueber Safety-Task-Notify, inkl. Queue-Flush und Epoch-Invaliderung.
+- ESP- und Broadcast-Emergency werden getrennt verarbeitet (jeweils eigener Topic-Zweig, Auth-Token-Keys getrennt).
+- Broadcast-Payload laeuft durch Contract-Validierung; bei `critical_unknown` wird explizit failsafe-stop ausgelost (`triggerBroadcastEmergencyStop(...)`).
+- Standard-Build (ESP-IDF MQTT, ohne `MQTT_USE_PUBSUBCLIENT`): Stopp laeuft ueber `NOTIFY_EMERGENCY_STOP` an den Safety-Task (Core 1) mit Epoch-Bump, Queue-Flush und `emergencyStopAll(...)`.
+- Legacy-Build `MQTT_USE_PUBSUBCLIENT`: ESP-Emergency und Broadcast-Notstop werden im MQTT-Callback synchron mit Flush, Epoch-Bump und `emergencyStopAll(...)` ausgefuehrt; bei `safe_mode` entfaellt der Epoch-Bump (siehe Veraltet A).
 
 ### SAF-IST-002 - ACK-/Disconnect-Kette ist fail-closed modelliert
 
@@ -48,13 +50,13 @@
 ### SAF-IST-004 - Emergency-Clear hat formale Verifikation, aber nur baseline-stark
 
 - `clearEmergencyStop()` prueft `verifySystemSafety()` vor dem Clear.
-- Aktuell basiert die Verifikation primär auf Zeit-/Retry-Feldern, nicht auf einer vollstaendigen Hardware-/Sensor-Readiness-Matrix.
+- Aktuell prueft `verifySystemSafety()` ein Mindestfenster (`verification_timeout_ms` seit `emergency_timestamp_`), verwirft bei `max_retry_attempts == 0`, und kurzschliesst bei `verification_timeout_ms == 0` oder fehlendem Zeitstempel — nicht auf einer vollstaendigen Hardware-/Sensor-Readiness-Matrix.
 
 ## 3) Welche Restluecken bleiben?
 
 ### FA-SAF-001 - Emergency Auth bleibt fail-open bei leerem Token (kritisch)
 
-- **Befund:** Wenn kein Token in NVS konfiguriert ist, werden Emergency-Kommandos explizit akzeptiert ("fail-open").
+- **Befund:** Wenn `emergency_auth` bzw. `broadcast_em_tok` im NVS-Namespace `system_config` leer sind, werden die zugehoerigen Emergency-Kommandos explizit akzeptiert ("fail-open").
 - **Risiko:** Unerwuenschte/unauthorisierte Emergency-Ausloesung im Feldbetrieb bei Fehlkonfiguration.
 - **Prioritaet:** kritisch
 - **Verifikation noetig:** Feldrichtlinie, dass Token provisioning-pflichtig ist und leerer Token als Deploy-Fehler blockiert wird.
@@ -68,8 +70,8 @@
 
 ### FA-SAF-003 - Blocking Delay im Recovery-Pfad (`resumeOperation`) (hoch)
 
-- **Befund:** `SafetyController::resumeOperation()` nutzt `delay(recovery_config_.inter_actuator_delay_ms)` (Default 2000 ms).
-- **Risiko:** Blockierende Sequenz in Safety-Kontext kann Reaktionszeit/Fairness in Randfaellen verschlechtern.
+- **Befund:** `SafetyController::resumeOperation()` nutzt `delay(recovery_config_.inter_actuator_delay_ms)` (Default 2000 ms); produktiver Aufruf aus `routeIncomingMessage` (MQTT-Router) nach erfolgreichem `clearEmergencyStop()`.
+- **Risiko:** Blockierende Sequenz im MQTT-Nachrichtenpfad haelt weitere MQTT-Verarbeitung fuer die Delay-Dauer auf und kann Reaktionszeit/Fairness verschlechtern.
 - **Prioritaet:** hoch
 - **Verifikation noetig:** Nachweis, auf welchem Thread/Kontext `resumeOperation()` produktiv laeuft, und ob Non-Blocking-Umstellung erforderlich ist.
 
@@ -82,6 +84,7 @@
 
 ## 4) Was wurde in der Datei konkret angepasst?
 
+- Reality-Check gegen `El Trabajante/src` (2026-04-05): Reihenfolge im Safety-Task, Legacy-`safe_mode`-Ausnahme, `verifySystemSafety`-Semantik, Aufrufkontext von `resumeOperation`, konkrete NVS-Keys fuer Fail-open.
 - Alte pauschale Findings FA-SAF-002/003/004 wurden auf aktuellen Code-Stand neu bewertet (nicht blind fortgeschrieben).
 - Die Datei ist auf vier Pflichtbloecke umgestellt: veraltet -> IST -> Restluecken -> konkrete Anpassungen.
 - Neue Restluecken sind priorisiert und mit "Verifikation noetig" versehen.
@@ -89,7 +92,7 @@
 
 ## Abnahmekriterien (harte Gates fuer Schritt 5)
 
-- **AK-05A-01 (Bestanden/Nicht bestanden):** Emergency-Stop-Pfad dokumentiert Queue-Flush + Epoch-Invaliderung + `emergencyStopAll` in korrekter Reihenfolge.
+- **AK-05A-01 (Bestanden/Nicht bestanden):** Emergency-Stop-Pfad dokumentiert im Safety-Task die Reihenfolge Epoch-Bump, Queue-Flush, `emergencyStopAll`; Ausnahme `safe_mode` unter `MQTT_USE_PUBSUBCLIENT` ohne Epoch-Bump genannt.
 - **AK-05A-02 (Bestanden/Nicht bestanden):** ACK-Contract-Pruefungen (status + handover_epoch + Typ + Epoch-Match) sind als fail-closed beschrieben.
 - **AK-05A-03 (Bestanden/Nicht bestanden):** Veraltete Aussagen wurden explizit als veraltet markiert und durch IST-Befunde ersetzt.
 - **AK-05A-04 (Bestanden/Nicht bestanden):** Mindestens ein kritisches und ein hohes Restrisiko sind reproduzierbar begruendet und priorisiert.

@@ -1,0 +1,264 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1700 1200" font-family="'Segoe UI', Arial, sans-serif">
+  <defs>
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1B2A4A" flood-opacity="0.1"/>
+    </filter>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="100%" stop-color="#E2E8F0"/>
+    </linearGradient>
+    <linearGradient id="coreGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#EDE9FE"/>
+      <stop offset="100%" stop-color="#DDD6FE"/>
+    </linearGradient>
+    <marker id="arrowGray" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748B"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2563EB"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#059669"/>
+    </marker>
+    <marker id="arrowRed" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#DC2626"/>
+    </marker>
+  </defs>
+
+  <rect width="1700" height="1200" fill="url(#bg)"/>
+
+  <!-- Header -->
+  <text x="850" y="40" text-anchor="middle" font-size="26" font-weight="700" fill="#0F172A">AutomationOne Architektur</text>
+  <text x="850" y="64" text-anchor="middle" font-size="13" fill="#475569" letter-spacing="1">V2 - Konsolidiert - Stand 2026-04-05</text>
+  <line x1="640" y1="74" x2="1060" y2="74" stroke="#6366F1" stroke-width="2" stroke-opacity="0.45"/>
+
+  <!-- Trust boundaries -->
+  <g filter="url(#shadow)">
+    <rect x="140" y="110" width="1090" height="930" rx="14" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.4"/>
+    <rect x="1260" y="110" width="300" height="930" rx="14" fill="#FFF7ED" stroke="#FDBA74" stroke-width="1.4"/>
+  </g>
+  <text x="160" y="132" font-size="10" font-weight="700" fill="#334155" letter-spacing="1">TRUST-BOUNDARY A: OPERATIVER KERN</text>
+  <text x="1280" y="132" font-size="10" font-weight="700" fill="#9A3412" letter-spacing="1">TRUST-BOUNDARY B: OPERATIONS / TOOLING</text>
+
+  <!-- Layer: Web -->
+  <g filter="url(#shadow)">
+    <rect x="180" y="160" width="1010" height="110" rx="10" fill="#EEF2FF" stroke="#A5B4FC" stroke-width="1.5"/>
+  </g>
+  <rect x="180" y="160" width="1010" height="26" rx="10" fill="#4F46E5"/>
+  <rect x="180" y="174" width="1010" height="12" fill="#4F46E5"/>
+  <text x="690" y="178" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="1">WEB DASHBOARD (VUE 3)</text>
+  <g transform="translate(205, 196)">
+    <rect width="150" height="56" rx="6" fill="white" stroke="#C7D2FE"/>
+    <text x="75" y="22" text-anchor="middle" font-size="10" font-weight="600" fill="#3730A3">MonitorView</text>
+    <text x="75" y="38" text-anchor="middle" font-size="8" fill="#6B7280">Live Sensor/Aktor Daten</text>
+    <text x="75" y="49" text-anchor="middle" font-size="8" fill="#6B7280">inkl. Historie</text>
+  </g>
+  <g transform="translate(370, 196)">
+    <rect width="150" height="56" rx="6" fill="white" stroke="#C7D2FE"/>
+    <text x="75" y="22" text-anchor="middle" font-size="10" font-weight="600" fill="#3730A3">HardwareView</text>
+    <text x="75" y="38" text-anchor="middle" font-size="8" fill="#6B7280">3-Level Navigation</text>
+    <text x="75" y="49" text-anchor="middle" font-size="8" fill="#6B7280">ESP Setup / Zuordnung</text>
+  </g>
+  <g transform="translate(535, 196)">
+    <rect width="150" height="56" rx="6" fill="white" stroke="#C7D2FE"/>
+    <text x="75" y="22" text-anchor="middle" font-size="10" font-weight="600" fill="#3730A3">Rule Builder</text>
+    <text x="75" y="38" text-anchor="middle" font-size="8" fill="#6B7280">Condition + Action</text>
+    <text x="75" y="49" text-anchor="middle" font-size="8" fill="#6B7280">Visuell bearbeitbar</text>
+  </g>
+  <g transform="translate(700, 196)">
+    <rect width="150" height="56" rx="6" fill="white" stroke="#C7D2FE"/>
+    <text x="75" y="22" text-anchor="middle" font-size="10" font-weight="600" fill="#3730A3">Device Management</text>
+    <text x="75" y="38" text-anchor="middle" font-size="8" fill="#6B7280">Discovery + Config</text>
+    <text x="75" y="49" text-anchor="middle" font-size="8" fill="#6B7280">Zone/Subzone Mapping</text>
+  </g>
+  <g transform="translate(865, 196)">
+    <rect width="150" height="56" rx="6" fill="#FEF2F2" stroke="#FCA5A5"/>
+    <text x="75" y="22" text-anchor="middle" font-size="10" font-weight="700" fill="#B91C1C">Emergency UI</text>
+    <text x="75" y="38" text-anchor="middle" font-size="8" fill="#B91C1C">Prioritaerer Stop-Pfad</text>
+    <text x="75" y="49" text-anchor="middle" font-size="8" fill="#B91C1C">Ziel: unter 100ms</text>
+  </g>
+
+  <!-- Layer: API/Auth -->
+  <g filter="url(#shadow)">
+    <rect x="220" y="300" width="930" height="72" rx="8" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.4"/>
+  </g>
+  <rect x="220" y="300" width="930" height="22" rx="8" fill="#2563EB" fill-opacity="0.18"/>
+  <text x="685" y="316" text-anchor="middle" font-size="10.5" font-weight="700" fill="#1E3A8A" letter-spacing="0.7">API + SESSION SCHICHT (FASTAPI)</text>
+  <text x="255" y="345" font-size="9" fill="#1E40AF">REST Endpoints (verifiziert: 273) - JWT Auth - Rollen: Admin / Operator / Viewer - WebSocket Events (verifiziert: 40, siehe WEBSOCKET_EVENTS.md)</text>
+  <text x="255" y="360" font-size="8" fill="#475569">Hinweis: Endpunkt- und Eventzaehlung nur gueltig fuer verifizierten Stand, nicht als dauerhafte Konstante.</text>
+
+  <!-- Layer: Intelligence Core -->
+  <g filter="url(#shadow)">
+    <rect x="180" y="400" width="1010" height="285" rx="12" fill="url(#coreGrad)" stroke="#8B5CF6" stroke-width="2"/>
+  </g>
+  <rect x="180" y="400" width="1010" height="30" rx="12" fill="#7C3AED"/>
+  <rect x="180" y="417" width="1010" height="13" fill="#7C3AED"/>
+  <text x="685" y="421" text-anchor="middle" font-size="12.5" font-weight="700" fill="white" letter-spacing="1.2">INTELLIGENZ-KERN (EL SERVADOR)</text>
+  <text x="1145" y="421" text-anchor="end" font-size="8.5" fill="#E9D5FF">Zentrale Entscheidungs- und Integrationsinstanz</text>
+
+  <g transform="translate(205, 446)">
+    <rect width="235" height="122" rx="8" fill="white" fill-opacity="0.9" stroke="#A78BFA"/>
+    <text x="117" y="20" text-anchor="middle" font-size="10" font-weight="700" fill="#6D28D9">Sensor Processing</text>
+    <text x="14" y="43" font-size="8.7" fill="#4B5563">- 9 Sensor Libraries (verifiziert)</text>
+    <text x="14" y="58" font-size="8.7" fill="#4B5563">- Kalibrierung + Qualitaetsmarker</text>
+    <text x="14" y="73" font-size="8.7" fill="#4B5563">- Zeitreihen-Aufbereitung</text>
+    <text x="14" y="88" font-size="8.7" fill="#4B5563">- Drift/Ausreisser Behandlung</text>
+    <text x="14" y="103" font-size="8.7" fill="#4B5563">- Correlation IDs fuer Ketten</text>
+  </g>
+
+  <g transform="translate(455, 446)">
+    <rect width="230" height="122" rx="8" fill="white" fill-opacity="0.9" stroke="#A78BFA"/>
+    <text x="115" y="20" text-anchor="middle" font-size="10" font-weight="700" fill="#6D28D9">Logic / Rule Engine</text>
+    <text x="14" y="43" font-size="8.7" fill="#4B5563">- Schwellwerte, Fenster, Hysterese</text>
+    <text x="14" y="58" font-size="8.7" fill="#4B5563">- UND/ODER + Kettenaktionen</text>
+    <text x="14" y="73" font-size="8.7" fill="#4B5563">- Conflict Manager + Rate Limiter</text>
+    <text x="14" y="88" font-size="8.7" fill="#4B5563">- Priority-Semantik klar dokumentieren</text>
+    <text x="14" y="103" font-size="8.7" fill="#4B5563">- ACK/Korrelationsfluss beachten</text>
+  </g>
+
+  <g transform="translate(700, 446)">
+    <rect width="230" height="122" rx="8" fill="#FFF7ED" fill-opacity="0.95" stroke="#F97316" stroke-width="1.1"/>
+    <text x="115" y="20" text-anchor="middle" font-size="10" font-weight="700" fill="#C2410C">Safety Core</text>
+    <text x="14" y="43" font-size="8.7" fill="#4B5563">- Emergency Stop Priorisierung</text>
+    <text x="14" y="58" font-size="8.7" fill="#4B5563">- Runtime Schutz fuer Pumpen</text>
+    <text x="14" y="73" font-size="8.7" fill="#4B5563">- Loop/Storm Schutzmechanismen</text>
+    <text x="14" y="88" font-size="8.7" fill="#4B5563">- Degraded-first Verhalten</text>
+    <text x="14" y="103" font-size="8.7" fill="#DC2626">- Kritischer Pfad mit harter Prioritaet</text>
+  </g>
+
+  <g transform="translate(945, 446)">
+    <rect width="220" height="122" rx="8" fill="white" fill-opacity="0.9" stroke="#A78BFA" stroke-dasharray="4,3"/>
+    <text x="110" y="20" text-anchor="middle" font-size="10" font-weight="700" fill="#6D28D9">Runtime + Integration</text>
+    <text x="14" y="43" font-size="8.7" fill="#4B5563">- Lifespan/Main Orchestrator</text>
+    <text x="14" y="58" font-size="8.7" fill="#4B5563">- MQTT Client/Subscriber/Handler</text>
+    <text x="14" y="73" font-size="8.7" fill="#4B5563">- Background Services (verifiziert: 5)</text>
+    <text x="14" y="88" font-size="8.7" fill="#4B5563">- Legacy-Fallbacks transparent halten</text>
+    <text x="14" y="103" font-size="8.7" fill="#4B5563">- Contract-Haertung schrittweise</text>
+  </g>
+
+  <g transform="translate(205, 584)">
+    <rect width="960" height="82" rx="6" fill="#F5F3FF" stroke="#C4B5FD"/>
+    <text x="12" y="18" font-size="9" font-weight="700" fill="#6D28D9">Kanonische Runtime-Zustaende</text>
+    <text x="12" y="36" font-size="8.4" fill="#4B5563">COLD_START -> WARMING_UP -> NORMAL_OPERATION -> DEGRADED_OPERATION -> RECOVERY_SYNC -> SHUTDOWN_DRAIN</text>
+    <text x="12" y="55" font-size="8.4" fill="#4B5563">Offene Risiken (bekannt): Inbound Drop bei DB-down, unvollstaendiger intent_outcome-Pfad, ACK-Fallback bei Parallelitaet.</text>
+    <text x="12" y="72" font-size="8.4" fill="#4B5563">Strategie: degrade-first, keine implizite Erfolgsmeldung ohne bestaetigte Endausfuehrung.</text>
+  </g>
+
+  <!-- Persistence -->
+  <g filter="url(#shadow)">
+    <rect x="240" y="715" width="890" height="90" rx="9" fill="#FFF7ED" stroke="#FDBA74" stroke-width="1.4"/>
+  </g>
+  <rect x="240" y="715" width="890" height="24" rx="9" fill="#F97316" fill-opacity="0.18"/>
+  <text x="685" y="732" text-anchor="middle" font-size="11" font-weight="700" fill="#9A3412">DATEN / PERSISTENZ (POSTGRESQL)</text>
+  <text x="270" y="756" font-size="9" fill="#7C2D12">DB Tabellen (verifiziert: 33, ORM __tablename__) - Zeitreihen - Aktor-Historie - Audit Trail - Device Health - Vorhersage-Prep</text>
+  <text x="270" y="775" font-size="8" fill="#57534E">Wichtig: Durable Inbound Replay Queue fuer DB-Ausfall als bekannte Ausbau-Luecke markieren.</text>
+  <text x="270" y="793" font-size="8" fill="#57534E">Schema-Vertragsversion (schema_version) fuer Kernfluesse als Zielbild.</text>
+
+  <!-- MQTT -->
+  <g filter="url(#shadow)">
+    <rect x="260" y="835" width="850" height="56" rx="8" fill="#FFFBEB" stroke="#FCD34D" stroke-width="1.3"/>
+  </g>
+  <text x="685" y="859" text-anchor="middle" font-size="12" font-weight="700" fill="#92400E" letter-spacing="0.9">MQTT NACHRICHTEN-BUS (MOSQUITTO)</text>
+  <text x="685" y="877" text-anchor="middle" font-size="8.8" fill="#A16207">QoS gestuft - Priorisierte Pfade - Netzwerkweiter Notfallkanal - Handler (verifiziert: 13)</text>
+
+  <!-- Edge -->
+  <g filter="url(#shadow)">
+    <rect x="180" y="915" width="1010" height="88" rx="10" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.4"/>
+  </g>
+  <rect x="180" y="915" width="1010" height="24" rx="10" fill="#3B82F6" fill-opacity="0.16"/>
+  <text x="685" y="932" text-anchor="middle" font-size="10.5" font-weight="700" fill="#1E40AF">EDGE GERAETE (ESP32 FIRMWARE / EL TRABAJANTE)</text>
+  <text x="210" y="956" font-size="8.8" fill="#1E3A8A">Sensor-Auslese - Aktor-Steuerung - QoS1 Command Topics - Watchdog - Boot-Loop-Schutz - Safe GPIO Startup</text>
+  <text x="210" y="973" font-size="8.8" fill="#1E3A8A">Konfig-Persistenz + Queueing + Emergency-Epoch-Barriere sind Teil der verifizierten Hardening-Linie.</text>
+  <text x="210" y="990" font-size="8" fill="#475569">Kritischer Punkt aus Loganalyse: NVS Namespace-Kollision unter Parallelitaet als prioritaeres Stabilitaetsthema.</text>
+
+  <!-- Physical -->
+  <g filter="url(#shadow)">
+    <rect x="180" y="1030" width="1010" height="70" rx="10" fill="#ECFDF5" stroke="#86EFAC" stroke-width="1.4"/>
+  </g>
+  <rect x="180" y="1030" width="1010" height="22" rx="10" fill="#10B981" fill-opacity="0.14"/>
+  <text x="685" y="1046" text-anchor="middle" font-size="10.5" font-weight="700" fill="#065F46">PHYSISCHE WELT: SENSOREN + AKTOREN</text>
+  <text x="205" y="1070" font-size="8.8" fill="#065F46">Sensorik: Temperatur, pH, EC, CO2, Bodenfeuchte, Licht, Luftfeuchte, Durchfluss, Druck</text>
+  <text x="205" y="1088" font-size="8.8" fill="#9A3412">Aktorik: Pumpen, Ventile, PWM/Luefter, Beleuchtung, Relays</text>
+
+  <!-- Operations column -->
+  <g filter="url(#shadow)">
+    <rect x="1285" y="165" width="250" height="270" rx="10" fill="#FEF2F2" stroke="#FCA5A5" stroke-width="1.3"/>
+  </g>
+  <rect x="1285" y="165" width="250" height="24" rx="10" fill="#EF4444" fill-opacity="0.17"/>
+  <text x="1410" y="181" text-anchor="middle" font-size="10" font-weight="700" fill="#991B1B">OBSERVABILITY</text>
+  <text x="1305" y="207" font-size="8.8" fill="#7F1D1D">- Grafana (Panels)</text>
+  <text x="1305" y="224" font-size="8.8" fill="#7F1D1D">- Prometheus (Custom Metrics)</text>
+  <text x="1305" y="241" font-size="8.8" fill="#7F1D1D">- Loki (Logs)</text>
+  <text x="1305" y="258" font-size="8.8" fill="#7F1D1D">- Alerting Regeln</text>
+  <text x="1305" y="275" font-size="8.8" fill="#7F1D1D">- CI/CD Pipelines</text>
+  <rect x="1302" y="293" width="215" height="36" rx="6" fill="#FEE2E2" stroke="#EF4444"/>
+  <text x="1410" y="309" text-anchor="middle" font-size="11" font-weight="700" fill="#B91C1C">Automatisierte Tests</text>
+  <text x="1410" y="322" text-anchor="middle" font-size="8.3" fill="#7F1D1D">3.960 (pytest 2319 + vitest 1641, 2026-04-05)</text>
+  <text x="1305" y="352" font-size="8" fill="#7F1D1D">Operations beobachten den gesamten Stack.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="1285" y="460" width="250" height="250" rx="10" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.3"/>
+  </g>
+  <rect x="1285" y="460" width="250" height="24" rx="10" fill="#64748B" fill-opacity="0.2"/>
+  <text x="1410" y="477" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1E293B">SECURITY + GOVERNANCE</text>
+  <text x="1305" y="503" font-size="8.4" fill="#334155">- AuthN: JWT</text>
+  <text x="1305" y="520" font-size="8.4" fill="#334155">- AuthZ: Rollenmodell</text>
+  <text x="1305" y="537" font-size="8.4" fill="#334155">- Audit Trail in Persistenz</text>
+  <text x="1305" y="554" font-size="8.4" fill="#334155">- Secrets/Keys als explizite Schicht dokumentieren</text>
+  <text x="1305" y="571" font-size="8.4" fill="#334155">- Backup/Restore Runbook anhaengen</text>
+  <text x="1305" y="588" font-size="8.4" fill="#334155">- SLO/SLI Zielwerte separat fuehren</text>
+  <text x="1305" y="605" font-size="8.4" fill="#334155">- Schema-Versionierung als Contract-Policy</text>
+  <text x="1305" y="632" font-size="8" fill="#64748B">Diese Punkte sind bewusst explizit als Pflicht-Ergaenzungen markiert.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="1285" y="740" width="250" height="300" rx="10" fill="#EEF2FF" stroke="#A5B4FC" stroke-width="1.3"/>
+  </g>
+  <rect x="1285" y="740" width="250" height="24" rx="10" fill="#4F46E5" fill-opacity="0.2"/>
+  <text x="1410" y="757" text-anchor="middle" font-size="9.5" font-weight="700" fill="#312E81">KPI-QUELLE (V2)</text>
+  <text x="1305" y="783" font-size="8.2" fill="#3730A3">Verifiziert fuer den aktuellen Stand:</text>
+  <text x="1305" y="801" font-size="8.2" fill="#3730A3">- Source-Dateien Server (.py src): ca. 285</text>
+  <text x="1305" y="818" font-size="8.2" fill="#3730A3">- REST Endpoints: 273</text>
+  <text x="1305" y="835" font-size="8.2" fill="#3730A3">- DB Tabellen (ORM): 33</text>
+  <text x="1305" y="852" font-size="8.2" fill="#3730A3">- MQTT Handler: 13</text>
+  <text x="1305" y="869" font-size="8.2" fill="#3730A3">- WebSocket Events: 40</text>
+  <text x="1305" y="886" font-size="8.2" fill="#3730A3">- Sensor Libraries: 9</text>
+  <text x="1305" y="903" font-size="8.2" fill="#3730A3">- Rollen: 3</text>
+  <text x="1305" y="920" font-size="8.2" fill="#3730A3">- Docker Compose services: 14</text>
+  <text x="1305" y="946" font-size="8" fill="#475569">Quelle: agentischer Wissensstand + verifizierte Architekturpakete.</text>
+  <text x="1305" y="963" font-size="8" fill="#475569">Empfehlung: Werte aus Metadaten-Datei generieren.</text>
+
+  <!-- Flow arrows -->
+  <line x1="685" y1="270" x2="685" y2="300" stroke="#2563EB" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <text x="697" y="288" font-size="7.5" fill="#1D4ED8">REST + WS</text>
+
+  <line x1="685" y1="372" x2="685" y2="400" stroke="#64748B" stroke-width="1.7" marker-end="url(#arrowGray)"/>
+  <line x1="685" y1="685" x2="685" y2="715" stroke="#64748B" stroke-width="1.7" marker-end="url(#arrowGray)"/>
+  <line x1="685" y1="805" x2="685" y2="835" stroke="#64748B" stroke-width="1.7" marker-end="url(#arrowGray)"/>
+  <line x1="685" y1="891" x2="685" y2="915" stroke="#64748B" stroke-width="1.7" marker-end="url(#arrowGray)"/>
+  <line x1="685" y1="1003" x2="685" y2="1030" stroke="#64748B" stroke-width="1.7" marker-end="url(#arrowGray)"/>
+
+  <line x1="1170" y1="520" x2="1170" y2="860" stroke="#DC2626" stroke-width="1.8" stroke-dasharray="8,4" marker-end="url(#arrowRed)"/>
+  <text x="1182" y="700" font-size="7.2" fill="#B91C1C" transform="rotate(90,1182,700)">Emergency Prioritaetspfad</text>
+
+  <line x1="240" y1="1070" x2="240" y2="860" stroke="#059669" stroke-width="1.5" stroke-dasharray="6,4" marker-end="url(#arrowGreen)"/>
+  <text x="228" y="965" font-size="7.2" fill="#047857" transform="rotate(-90,228,965)">Sensor Telemetrie aufwaerts</text>
+
+  <!-- Legend -->
+  <g filter="url(#shadow)">
+    <rect x="180" y="1120" width="1010" height="52" rx="8" fill="#FFFFFF" stroke="#CBD5E1"/>
+  </g>
+  <text x="200" y="1140" font-size="9" font-weight="700" fill="#334155">Legende:</text>
+  <line x1="265" y1="1137" x2="300" y2="1137" stroke="#2563EB" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <text x="310" y="1140" font-size="8" fill="#334155">Client/API Datenpfad</text>
+  <line x1="455" y1="1137" x2="490" y2="1137" stroke="#64748B" stroke-width="1.7" marker-end="url(#arrowGray)"/>
+  <text x="500" y="1140" font-size="8" fill="#334155">Standard Verarbeitungspfad</text>
+  <line x1="700" y1="1137" x2="735" y2="1137" stroke="#DC2626" stroke-width="1.8" stroke-dasharray="8,4" marker-end="url(#arrowRed)"/>
+  <text x="745" y="1140" font-size="8" fill="#334155">Prioritaerer Safety-Pfad</text>
+  <line x1="930" y1="1137" x2="965" y2="1137" stroke="#059669" stroke-width="1.5" stroke-dasharray="6,4" marker-end="url(#arrowGreen)"/>
+  <text x="975" y="1140" font-size="8" fill="#334155">Sensordaten aufwaerts</text>
+  <text x="200" y="1158" font-size="7.8" fill="#64748B">Hinweis: V2 trennt bewusst Architektur-Fakten, bekannte Luecken und Zielbild-Elemente.</text>
+
+  <!-- Footer -->
+  <line x1="120" y1="1188" x2="1580" y2="1188" stroke="#CBD5E1" stroke-width="0.8"/>
+  <text x="120" y="1198" font-size="8.2" fill="#64748B">AutomationOne - V2 Konsolidierung - Die Originaldatei bleibt unveraendert als Referenz erhalten.</text>
+</svg>

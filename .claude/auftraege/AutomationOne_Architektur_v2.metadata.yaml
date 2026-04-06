@@ -1,0 +1,58 @@
+version: "2.0"
+diagram_file: ".claude/reports/current/AutomationOne_Architektur_v2.svg"
+kept_reference_file: ".claude/reports/current/AutomationOne_Architektur.svg"
+stand: "2026-04-05"
+purpose: "Konsolidierte Architekturansicht mit verifizierten Kennzahlen und expliziten Luecken."
+
+verified_metrics:
+  server_source_files_approx: 285
+  rest_endpoints: 273
+  database_tables: 33
+  mqtt_handlers: 13
+  websocket_events: 40
+  sensor_processing_libraries: 9
+  background_services: 5
+  roles:
+    - Admin
+    - Operator
+    - Viewer
+  docker_services: 14
+  automated_tests_combined: 3960
+  automated_tests_pytest_collected: 2319
+  automated_tests_vitest: 1641
+
+last_verification:
+  date: "2026-04-05"
+  methods:
+    - "server_source_files_approx: PowerShell Count *.py unter god_kaiser_server/src"
+    - "rest_endpoints: Python Rekursion ueber app.routes (src.main:app), HTTP-Methoden ohne HEAD"
+    - "database_tables: Anzahl __tablename__ in src/db/models/*.py (ORM-Modelle)"
+    - "mqtt_handlers: 13 Handler-Klassen in mqtt/handlers/ ohne base_handler.BaseMQTTHandler"
+    - "websocket_events: .claude/reference/api/WEBSOCKET_EVENTS.md (v3.8, 40 Event-Typen)"
+    - "docker_services: Anzahl Eintraege unter services: in root docker-compose.yml"
+    - "automated_tests: pytest --collect-only (2319) + npx vitest run (1641 passed)"
+
+runtime_states_canonical:
+  - COLD_START
+  - WARMING_UP
+  - NORMAL_OPERATION
+  - DEGRADED_OPERATION
+  - RECOVERY_SYNC
+  - SHUTDOWN_DRAIN
+
+known_risks:
+  - "Inbound-Drop bei DB-down (durable inbound replay queue fehlt)."
+  - "Intent-outcome Pfad serverseitig noch nicht vollstaendig verdrahtet."
+  - "ACK-Fallback ohne harte Korrelationsgarantie in bestimmten Parallelitaetsfaellen."
+  - "NVS Namespace-Kollision unter Firmware-Parallelitaet als Stabilitaetsrisiko."
+
+target_hardening_topics:
+  - "Schema-Versionierung fuer Kernpayloads (z. B. schema_version)."
+  - "Explizite Secrets/Key-Management-Dokumentation."
+  - "Backup/Restore Runbook und Recovery-Tests."
+  - "SLO/SLI Definition und Monitoring-Mapping."
+
+data_governance:
+  source_of_truth_policy: "Kennzahlen in dieser Datei pflegen und in Diagramm uebernehmen."
+  review_interval: "Bei jedem Architekturpaket-Update oder spaetestens monatlich."
+  owner: "automation-experte"

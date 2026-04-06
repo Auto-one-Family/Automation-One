@@ -1,4 +1,4 @@
-# Bereich 05B - Reboot/Powerloss und Speicherkonsistenz (IST-Revision 2026-04-04)
+# Bereich 05B - Reboot/Powerloss und Speicherkonsistenz (IST-Revision 2026-04-05)
 
 > Fokus: Reboot-/Power-Loss-Konsistenz, NVS/RAM-Drift und Persistenzdeterminismus.
 
@@ -15,12 +15,12 @@
 - `FA-P14-005`: Warmup-/Blindphase reduziert, aber nicht vollstaendig als Last-/Recovery-Nachweis geschlossen.
 - `FA-P14-006`: Teilweise no-op/change-detection vorhanden, globale Drosselstrategie bleibt offen.
 - `FA-P14-007`: Legacy-No-Task-Randpfad bleibt reproduzierungs- und timingkritisch.
-- `FA-P14-008`: Konsistenzbruch bei `is_active` als kritischer Single-Source-of-Truth-Befund.
+- `FA-P14-008`: Gemischter Legacy-vs-Blob-Bezug fuer `is_active` nur noch im Migrationsfenster relevant; Runtime-Persistenz laeuft im aktuellen Code durchgaengig ueber Blob v3.
 
 ## 3) Welche Restluecken bleiben?
 
-- **P0:** `FA-P14-001`, `FA-P14-002`, `FA-P14-008`.
-- **P1:** `FA-P14-004`, `FA-P14-006`.
+- **P0:** `FA-P14-001`, `FA-P14-002`.
+- **P1:** `FA-P14-004`, `FA-P14-006`, `FA-P14-008` (Restrisiko Migration/Rollout, nicht mehr Runtime-Dual-Write).
 - **P2:** `FA-P14-003`, `FA-P14-005`, `FA-P14-007` (teilweise verbessert, aber nicht voll verifiziert).
 
 ## 4) Was wurde in der Datei konkret angepasst?
@@ -28,6 +28,7 @@
 - Auf ein einheitliches IST-Revisionsformat umgestellt.
 - Kritische und teilweise ueberholte P14-Befunde sauber getrennt.
 - Prioritaetsbild fuer Reboot-/Powerloss-Risiken konsolidiert.
+- Reality-Check gegen `El Trabajante/src` (2026-04-05): P14-002 Drift-Signale, P14-008 Blob-v3-Runtime-Persistenz, Pfade und Legacy-No-Task-Bezeichner praezisiert.
 
 ## Abnahmekriterien (Schritt bestanden/nicht bestanden)
 
@@ -76,14 +77,14 @@
 - **Externe Wirkung:** Backend sieht ggf. zuletzt gemeldeten Runtime-Stand, Firmware startet danach in anderem Modus.
 - **Speicherorte:** RAM-Status vs. persistierte Statusfelder in NVS.
 - **Parallelaktion/Race:** Reconnect/ACK-Events kurz nach Write-Fail koennen Drift zusaetzlich verschleiern.
-- **Absicherung IST:** Teilweise (Fehler werden als Risiko benannt, aber kein durchgaengiger Drift-Lock).
-- **Absicherung fehlt:** harter degradierter Zustand bei Persistenzfehler + verpflichtender Drift-Event.
+- **Absicherung IST:** Teilweise erweitert — bei NVS-Fehlern in `saveOfflineRulesToNVS()` setzt `OfflineModeManager::setPersistenceDrift(...)`, loest `publishIntentOutcome("offline_rules", ..., "PERSISTENCE_DRIFT", ...)` aus, und der Heartbeat-Payload enthaelt `degraded`, `degraded_reason` und `persistence_drift_count` (`mqtt_client.cpp`).
+- **Absicherung fehlt:** harter operativer Lock/Degrade bei Persistenzfehler (Sichtbarkeit allein ersetzt keinen Safety-Stop) und serverseitig verpflichtende Auswertung der Drift-Felder.
 - **Auswirkung:** **kritisch**, weil Safety-Entscheidung nach Reboot auf stale Status beruhen kann.
 
 ## FA-P14-003 - Deterministische Negativpfade fuer Config-Fehler sind weitgehend vorhanden (teilweise ueberholt)
 
 - **Quellbezug:** `FW-CONS-012`, `FW-STR-011` (Revalidierung gegen aktuellen Stand).
-- **Betroffene Module:** `config_update_queue`, `main`, `ConfigResponseBuilder`, Intent-Outcome-Pfad.
+- **Betroffene Module:** `src/tasks/config_update_queue.cpp`, `src/main.cpp`, `ConfigResponseBuilder` (`src/services/config/config_response.*`), Intent-Outcome-Pfad (`publishIntentOutcome` in `src/tasks/intent_contract.*`).
 - **Aktueller Stand:**
   1. Bei Parse-, Payload-, Generation- und Queue-Fehlern existieren deterministische Fehlerpfade.
   2. Fehlerantworten laufen mit `correlation_id` ueber `ConfigResponseBuilder::publishError(...)`.
@@ -99,7 +100,7 @@
 ## FA-P14-004 - Queue-Drops vor Reboot/unter Last reduzieren Determinismus
 
 - **Quellbezug:** `FW-CONS-014`, `FW-STR-010`.
-- **Betroffene Module:** `g_config_update_queue`, Command-Queues, `g_publish_queue`.
+- **Betroffene Module:** `g_config_update_queue` (`src/tasks/config_update_queue.*`), Command-Queues (`sensor_command_queue`, `actuator_command_queue`, …), `g_publish_queue` (`src/tasks/publish_queue.*`).
 - **Wie der Fehler auftritt:**
   1. Lastspitze/Backpressure fuellt Queue.
   2. Non-blocking/kurze Timeouts fuehren zu Drops.
@@ -120,7 +121,7 @@
   1. Reboot leert RAM-Caches.
   2. Rule-Evaluierung wartet zunaechst auf valide Messwerte.
   3. Bis zum Gate-Pass bleiben Entscheidungen konservativ.
-- **Interner Ablauf:** Es existiert inzwischen ein Warmup-Gate (`OFFLINE_WARMUP_VALID_SAMPLES`, Log "warmup gate passed").
+- **Interner Ablauf:** Es existiert inzwischen ein Warmup-Gate (`OFFLINE_WARMUP_VALID_SAMPLES` in `offline_mode_manager.cpp`, Logzeile mit Text `warmup gate passed` inkl. Sample-Zaehler).
 - **Externe Wirkung:** Blindphase ist reduziert, aber nicht vollstaendig eliminiert.
 - **Speicherorte:** weiterhin primar RAM-getrieben fuer Startphase.
 - **Parallelaktion/Race:** Wiederanlauf Sensorzyklen, MQTT-Reconnect und Rule-Eval bleiben zeitlich gekoppelt.
@@ -147,7 +148,7 @@
 ## FA-P14-007 - Legacy-No-Task Modus untergraebt einheitliche Restore-Erwartung
 
 - **Quellbezug:** `FW-CONS-015` (Timing/Isolation-Luecke).
-- **Betroffene Module:** Bootpfad/Task-Erstellung, Core-Isolation-Annahmen.
+- **Betroffene Module:** Bootpfad/Task-Erstellung (`loopLegacySingleThreadedWhenNoRtosTasks` in `main.cpp` wenn keine RTOS-Tasks), Core-Isolation-Annahmen.
 - **Wie der Fehler auftritt:** Deployment startet in Legacy-Variante mit abweichender Ablaufcharakteristik.
 - **Interner Ablauf:** Annahmen zu Queue-Isolation und Task-Timing sind nicht 1:1 uebertragbar.
 - **Externe Wirkung:** Verhalten unter Last oder nach Reboot weicht geraeteabhaengig ab.
@@ -157,43 +158,43 @@
 - **Absicherung fehlt:** formale Gleichwertigkeitsdefinition oder klare Deaktivierungsregel fuer Legacy.
 - **Auswirkung:** **mittel bis hoch** (insb. fuer Testbarkeit und Feldvergleich).
 
-## FA-P14-008 - Konsistenzbruch durch gemischte Persistenzpfade fuer `is_active` (neu)
+## FA-P14-008 - Konsistenzbruch durch gemischte Persistenzpfade fuer `is_active` (Revalidierung gegen Firmware-Stand 2026-04-05)
 
-- **Quellbezug:** Forensischer Abgleich aktueller Fixlauf (2026-04-04), Rule-Transition- und Restore-Pfade.
-- **Betroffene Module:** `offline_mode_manager`, Rule-Blob-v3 Persistenz (`ofr_blob`/`ofr_ver`), Legacy-Key-Pfad (`ofr_%d_state`).
-- **Wie der Fehler auftritt:**
-  1. Rule-Transition setzt lokal neuen `is_active` Zustand.
-  2. Teilpfad persistiert `is_active` weiterhin als Legacy-Key.
-  3. Haupt-Restore liest Rule-Zustand aus Blob-v3.
-  4. Nach Reboot erscheint der Blob-Stand (potenziell veraltet), nicht zwingend der letzte lokale Rule-Status.
-- **Interner Ablauf:** Zwei konkurrierende Sources of Truth fuer denselben semantischen Zustand.
-- **Externe Wirkung:** Beobachtbares Reboot-Verhalten kann den zuletzt erreichten Rule-Zustand widersprechen.
-- **Speicherorte:** NVS Legacy-Keyspace vs. NVS Blob-v3.
-- **Parallelaktion/Race:** Schnelle Rule-Transitions vor Reboot verstaerken die Inkonsistenz.
-- **Absicherung IST:** keine harte Vereinheitlichung auf ein Persistenzschema.
-- **Absicherung fehlt:** eindeutiges Single-Schema fuer `is_active` inkl. Migrations-/Fallback-Regel.
-- **Auswirkung:** **kritisch**, da Reboot-Determinismus fuer safety-relevante Rule-Zustaende verletzt wird.
+- **Quellbezug:** Forensischer Ausgangsbefund (2026-04-04), abgeglichen mit `offline_mode_manager.cpp` (Load/Save/Migration).
+- **Betroffene Module:** `offline_mode_manager`, Rule-Blob-v3 Persistenz (`ofr_blob`/`ofr_ver`/`ofr_count`), Legacy-Lesepfad nur bei Migration (`ofr_ver==0`, Einzelkeys inkl. `ofr_%d_state`), anschliessend `_deleteOldIndividualKeys()`.
+- **Wie der Fehler historisch gemeint war / Restfenster:**
+  1. Rule-Transition aendert `is_active` in RAM.
+  2. **IST-Code:** Zustandswechsel nach erfolgreicher Aktorik werden ausschliesslich ueber `saveOfflineRulesToNVS()` in Blob v3 geschrieben (Kommentar im Code: Vermeidung gemischter Pfade); es gibt **keinen** aktuellen Schreibpfad auf `ofr_%d_state` in `src/`.
+  3. Restore bei `ofr_ver>=1` liest nur `ofr_blob`; Legacy-Keys werden nur im Migrationszweig (`ver==0`) gelesen, danach migriert und geloescht.
+  4. Restrisiko liegt in **Migrations-/Power-Loss-Fenstern** (Migration nicht abgeschlossen), **Rollout mit aelterer Firmware**, oder **externen NVS-Manipulationen** — nicht im normalen Dual-Write waehrend laufender Rule-Evaluierung.
+- **Interner Ablauf:** Zur Laufzeit eine Persistenz-Quelle (Blob v3); kein paralleler Legacy-Write mehr nachweisbar.
+- **Externe Wirkung:** Nach vollstaendiger Migration sollte Reboot-Determinismus fuer `is_active` dem Blob entsprechen; Abweichungen sind auf Migrationsrandfaelle oder Hardware/NVS-Fehler zu pruefen.
+- **Speicherorte:** NVS Blob v3; Legacy-Keyspace nur transient bis Migration.
+- **Parallelaktion/Race:** Schnelle Transitionsketten + NVS-Commit-Fehler bleiben relevant (siehe Drift-Pfad bei `saveOfflineRulesToNVS()`).
+- **Absicherung IST:** Runtime-Persistenz vereinheitlicht auf Blob v3; Shadow-Vergleich in `saveOfflineRulesToNVS()` reduziert Burst-Writes.
+- **Absicherung fehlt:** formale Abnahme aller Migrations- und Rollout-Szenarien sowie serverseitige Nutzung der Drift-/Degrade-Signale als Policy.
+- **Auswirkung:** **mittel** fuer den aktuellen Hauptpfad (nach Migration), **hoch** solange Geraete im Legacy-`ofr_ver==0`-Zweig oder mit unterbrochener Migration betrieben werden.
 
 ---
 
 ## Priorisierte Verifikation (naechster Ausbau)
 
-1. `is_active`-Persistenz auf **ein** konsistentes Schema (Blob-v3) vereinheitlichen.
-2. Expliziten Drift-Event bei Persistenzfehlern einfuehren (Runtime-vs-NVS sichtbar machen).
+1. Migrations- und Rollout-Abnahme fuer `is_active`/Blob v3 (kein offener Dual-Write mehr im `src/`-Stand), inkl. Power-Loss waehrend `ver==0`-Migration.
+2. Server-Policy zu Heartbeat-`degraded`/`persistence_drift_*` und Intent-Outcome `PERSISTENCE_DRIFT` festziehen (Firmware signalisiert bereits).
 3. Queue-full-Fall fuer safety-relevante Config-Intents mit robustem Retry/Journal absichern.
 4. Legacy-No-Task Modus klar begrenzen oder formal gleichwertig absichern.
 
 ---
 
-## TM-Zusammenfassung (aktualisiert, 2026-04-04)
+## TM-Zusammenfassung (aktualisiert, 2026-04-05)
 
-- Der Bericht ist in der Grundrichtung weiterhin korrekt, aber in drei Punkten aktualisiert:
+- Der Bericht ist in der Grundrichtung weiterhin korrekt, mit folgenden IST-Korrekturen nach Code-Abgleich:
   1. Negativpfade fuer Config-Fehler sind inzwischen deutlich deterministischer.
-  2. Warmstart-Gate fuer Offline-Rule-Evaluierung ist implementiert.
-  3. no-op/change-detection existiert teilweise bereits.
-- Neuer hochrelevanter Befund: Konsistenzbruch bei `is_active` durch gemischten Legacy-vs-Blob-Persistenzpfad.
+  2. Warmup-Gate fuer Offline-Rule-Evaluierung ist implementiert (`OFFLINE_WARMUP_VALID_SAMPLES`).
+  3. no-op/change-detection existiert in `saveOfflineRulesToNVS()` (memcmp gegen Shadow).
+  4. Der Befund „Dual-Write Legacy-Key vs. Blob fuer `is_active`“ trifft auf den aktuellen `src/`-Stand fuer laufende Rule-Transitions **nicht** mehr zu; relevant bleiben Migrations-/Rollout-Fenster und Policy um die bereits vorhandenen Drift-Signale.
 - Prioritaet fuer das naechste Paket:
-  1. `is_active` auf Blob-v3 vereinheitlichen.
-  2. Drift-Event bei Persistenzfehler verpflichtend machen.
+  1. Migration/Rollout- und Power-Loss-Abnahme fuer Offline-Rule-NVS (Blob v3).
+  2. Serverseitige Auswertung von Drift/Degrade (Heartbeat + Intent-Outcome) als verbindliche Reaktion definieren.
   3. Queue-full fuer safety-relevante Intents robust absichern.
   4. Legacy-No-Task kontrolliert begrenzen oder absichern.

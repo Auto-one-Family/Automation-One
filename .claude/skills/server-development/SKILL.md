@@ -122,7 +122,7 @@ Server sendet:  Actuator-Commands, Config-Updates
 
 ## 3. MQTT Layer
 
-**Dateien:** `src/mqtt/` (6,938 Zeilen, 14 Handler)
+**Dateien:** `src/mqtt/` (6,938 Zeilen, 15+ Handler-Module)
 
 ### Handler-Übersicht
 
@@ -139,6 +139,8 @@ Server sendet:  Actuator-Commands, Config-Updates
 | `+/subzone/ack` | SubzoneAckHandler | 1 | 239-242 |
 | `+/system/will` | LWTHandler | 0 | 248-251 |
 | `+/system/error` | ErrorEventHandler | 1 | 256-259 |
+| `+/system/intent_outcome` | IntentOutcomeHandler | 1 | ~299-302 |
+| `+/system/intent_outcome/lifecycle` | IntentOutcomeLifecycleHandler | 1 | ~303-309 |
 | `+/actuator/+/command` | MockActuatorHandler | 1 | 297-300 |
 | `+/actuator/emergency` | MockActuatorHandler | 1 | 302-305 |
 | `broadcast/emergency` | MockActuatorHandler | 1 | 306-309 |
@@ -254,7 +256,7 @@ class YourRepository(BaseRepository[YourModel]):
 | Zone | `zones` | id (UUID PK), zone_id (UNIQUE), name, description, status (active/archived/deleted), deleted_at, deleted_by, created_at, updated_at. FK: esp_devices.zone_id → zones.zone_id (T13-R1) |
 | SubzoneConfig | `subzone_configs` | id (UUID PK), esp_id (FK), subzone_id, assigned_gpios (JSON), assigned_sensor_config_ids (JSON), is_active (Bool), safe_mode_active |
 | DeviceZoneChange | `device_zone_changes` | id (UUID PK), esp_id, old_zone_id, new_zone_id, subzone_strategy, affected_subzones (JSON), changed_by, changed_at (T13-R1 Audit) |
-| CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority, cooldown_seconds |
+| CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority (kleinere Zahl = höhere Ausführungs-/Konfliktpriorität), cooldown_seconds |
 | LogicHysteresisState | `logic_hysteresis_states` | rule_id (FK CASCADE), condition_index, is_active, last_value, last_activation, last_deactivation, updated_at. UQ(rule_id, condition_index) |
 | SensorData | `sensor_data` | sensor_id (FK), esp_id (FK SET NULL), raw_value, processed_value, zone_id, subzone_id (Phase 0.1), device_name, data_source |
 | AuditLog | `audit_logs` | event_type, severity, source_type |
@@ -386,7 +388,7 @@ poetry run python scripts/seed_wokwi_esp.py
 | **LogicEngine** | logic_engine.py | 1502 | `start()`, `stop()`, `evaluate_sensor_data()`, `evaluate_timer_triggered_rules()` |
 | **SafetyService** | safety_service.py | 264 | `validate_actuator_command()`, `emergency_stop_all()` |
 | **SensorService** | sensor_service.py | 545 | `process_reading()`, `trigger_measurement()` |
-| **ActuatorService** | actuator_service.py | 279 | `send_command()` |
+| **ActuatorService** | actuator_service.py | ~347 | `send_command()` → `ActuatorSendCommandResult` |
 | **ESPService** | esp_service.py | 944 | `register()`, `approve()`, `reject()` |
 | **ZoneService** | zone_service.py | ~500 | `assign_zone()`, `remove_zone()` — T13-R1: Zone muss existieren + aktiv sein. subzone_strategy (transfer/copy/reset). DeviceZoneChange Audit |
 | **MonitorDataService** | monitor_data_service.py | - | `get_zone_monitor_data()` — Subzone-Gruppierung für Monitor L2 |
@@ -399,7 +401,7 @@ poetry run python scripts/seed_wokwi_esp.py
 | **PluginService** | plugin_service.py | ~380 | `execute_plugin()`, `update_schedule()`, `sync_registry_to_db()` — Registry ↔ DB Mediator |
 | **StateAdoptionService** | state_adoption_service.py | ~160 | `start_reconnect_cycle()`, `record_adopted_state()`, `mark_adoption_completed()`, `is_adoption_completed()` — Reconnect-Handover-Gate (adopting → adopted → delta_enforced) |
 | **DeviceScopeService** | device_scope_service.py | - | `get_active_context()` → `ActiveContextData` (NamedTuple), `set_context()`, `resolve_zone()` — 3-Way Resolution, Cache 30s TTL, session-safe (T13-R2+Phase3) |
-| **MQTTCommandBridge** | mqtt_command_bridge.py | ~230 | `send_and_wait_ack()`, `resolve_ack()`, `has_pending()`, `shutdown()` — ACK-gesteuerte MQTT-Kommunikation für Zone/Subzone-Operationen (T13-Phase2) |
+| **MQTTCommandBridge** | mqtt_command_bridge.py | ~230 | `send_and_wait_ack()`, `resolve_ack()` (**nur** `correlation_id`-Match, kein FIFO), `extract_ack_correlation_id()`, `has_pending()`, `shutdown()` — Zone/Subzone (T13-Phase2, Epic1-04) |
 
 ### Logic Engine Architektur
 
@@ -463,6 +465,7 @@ LogicEngine
 | **Module APIs** | `MODULE_REGISTRY.md` | Vollständige Service-APIs |
 | **Tests** | `.claude/reference/testing/TEST_WORKFLOW.md` | NUR auf Anfrage |
 | **Datenflüsse** | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | System verstehen |
+| **HTTP-Finalität** | `El Servador/god_kaiser_server/docs/finalitaet-http-mqtt-ws.md` | REST vs. MQTT/WS (Aktor, Zone, Subzone, Emergency) |
 
 ---
 

@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Kommunikationsmuster & Datenflüsse
 
-> **Version:** 2.8 | **Aktualisiert:** 2026-04-04
+> **Version:** 2.10 | **Aktualisiert:** 2026-04-06
 > **Quellen:** Code-Traces durch ESP32, Server, Frontend
 > **Verifiziert:** ✅ Alle Pfade mit Datei:Zeile dokumentiert
 
@@ -270,9 +270,12 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
   "value": 1.0,
   "duration": 0,
   "timestamp": 1735818000,
-  "correlation_id": "cmd_abc123"
+  "correlation_id": "cmd_abc123",
+  "intent_id": "cmd_abc123"
 }
 ```
+
+(God-Kaiser: `intent_id` nur wenn `correlation_id` gesetzt — gleicher Wert; siehe `MQTT_TOPICS.md` §2.1.)
 
 ### Response Payload (ESP→Server)
 
@@ -383,9 +386,12 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
 
 | Topic | Richtung | QoS | Beschreibung |
 |-------|----------|-----|--------------|
+| `kaiser/god/esp/{esp_id}/actuator/{gpio}/command` | Server→ESP | 2 | Pro Aktor: `OFF` mit `correlation_id` = `{incident}:{esp_id}:{gpio}` (Server-Not-Aus vor Broadcast/WS) |
 | `kaiser/broadcast/emergency` | Server→ALL | 2 | Stop-Befehl |
 | `kaiser/god/esp/{esp_id}/actuator/{gpio}/alert` | ESP→Server | 1 | Alert-Status |
 | `kaiser/god/esp/{esp_id}/safe_mode` | ESP→Server | 1 | Safe-Mode bestätigt |
+
+*Hinweis:* Das Sequenzdiagramm oben ist vereinfacht; der reale Server-Pfad sendet zuerst die GPIO-Commands (je Aktor `OFF` mit deterministischer `correlation_id`, siehe `.claude/reference/api/MQTT_TOPICS.md` §2.1 / `El Servador/god_kaiser_server/docs/emergency-stop-mqtt-correlation.md`), danach u.a. Broadcast und WebSocket (siehe `api/v1/actuators.py` `emergency_stop`). Die REST-Antwort enthält `incident_correlation_id` (`EmergencyStopResponse`); Matrix REST vs. MQTT/WS: `El Servador/god_kaiser_server/docs/finalitaet-http-mqtt-ws.md`.
 
 ### Emergency Payload
 
@@ -461,6 +467,8 @@ BMP280 und BME280 arbeiten NICHT im Pi-Enhanced RAW-Mode. Die Bosch-Kompensation
 ```
 
 **Wichtig:** Mock-ESPs umgehen die Bridge (fire-and-forget, kein ACK-Waiting).
+
+**MQTTCommandBridge (Epic1-04):** Schritt 6 (`resolve_ack`) matched **nur** über `correlation_id` aus dem ACK, die zu einem offenen `send_and_wait_ack` gehört. Es gibt **keinen** FIFO-Fallback pro `(esp_id, command_type)` mehr — fehlendes oder falsches Echo → wartender Aufruf **Timeout**, Server loggt `ACK dropped: no correlation match`.
 
 ### MQTT Payloads
 
@@ -782,6 +790,8 @@ If ESP's `zone_id` doesn't match DB, a zone/assign MQTT message is published.
 }
 ```
 
+**Semantik `priority`:** Kleinere Zahl = höhere Ausführungs- und Konfliktpriorität (siehe `reference/api/REST_ENDPOINTS.md` Abschnitt Logic, `El Servador/god_kaiser_server/docs/logic-rule-priority.md`).
+
 ### Cross-ESP Support
 
 Die Logic Engine unterstützt Rules über **mehrere ESPs**:
@@ -801,7 +811,7 @@ Die Logic Engine unterstützt Rules über **mehrere ESPs**:
 | DelayActionExecutor | actions/delay_executor.py | Verzögerungen (`delay`) |
 | NotificationActionExecutor | actions/notification_executor.py | WebSocket Notifications (`notification`) |
 | SequenceActionExecutor | actions/sequence_executor.py | Verkettete Aktionen (`sequence`) |
-| ConflictManager | safety/conflict_manager.py | GPIO-Konflikt-Prüfung, Zone-aware Key `esp_id:gpio:zone_id` (T13-R2) |
+| ConflictManager | safety/conflict_manager.py | GPIO-Konflikt-Prüfung (niedrigere numerische `priority` der Rule = höhere Konfliktpriorität), Zone-aware Key `esp_id:gpio:zone_id` (T13-R2) |
 | RateLimiter | safety/rate_limiter.py | Command-Flooding-Schutz |
 
 ---
@@ -948,6 +958,11 @@ const ws = useWebSocket({
   }
 })
 ```
+
+**F03 Ownership-Hinweis (Frontend):**
+- Device-Domain-Updates laufen zentral ueber `esp`-Write-Adapter (`replaceDevices`, `applyDevicePatch`).
+- Domain-Stores (`zone`, `sensor`, `actuator`) mutieren `esp.devices` nicht mehr direkt, sondern nur ueber diese Adapter.
+- Realtime-Mutationen sind je Eventtyp explizit als `replace`/`patch`/`refresh` klassifiziert (`esp-websocket-subscription.ts`).
 
 ---
 

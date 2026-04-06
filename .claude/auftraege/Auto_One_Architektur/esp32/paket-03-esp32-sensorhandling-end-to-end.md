@@ -1,5 +1,7 @@
 # Paket 03: ESP32 Sensorhandling End-to-End Tiefenanalyse (P1.3)
 
+> **Stand:** 2026-04-05  
+
 ## 1) Ziel, Scope, Quellen
 
 Dieses Dokument analysiert den kompletten Firmware-Sensorpfad in `El Trabajante` von Konfigurationsaufnahme bis MQTT-Publish inkl. Fehler- und Recovery-Verhalten.
@@ -20,6 +22,8 @@ Primarquellen:
 - `El Trabajante/src/drivers/onewire_bus.*`
 - `El Trabajante/src/tasks/safety_task.cpp`
 - `El Trabajante/src/tasks/sensor_command_queue.*`
+- `El Trabajante/src/tasks/command_admission.*`
+- `El Trabajante/src/tasks/intent_contract.*`
 - `El Trabajante/src/tasks/publish_queue.*`
 - `El Trabajante/src/services/communication/mqtt_client.*`
 - `El Trabajante/src/services/safety/offline_mode_manager.*`
@@ -56,6 +60,7 @@ Hinweis zu Entry-Points aus Auftragsrahmen:
 1. **Sensorklasse:** alle (Meta-Flow)
 2. **Registrierung/Init:**
    - MQTT Config Topic kommt auf Core 0 an (`routeIncomingMessage`).
+   - `command_admission` (CONFIG) + Pflicht-`correlation_id`; bei Fehlen Contract-Error ohne Enqueue.
    - Enqueue in `g_config_update_queue` (100 ms Timeout, Queue-Tiefe 5).
    - Core 1 `processConfigUpdateQueue()` parsed einmalig und ruft `handleSensorConfig()`.
    - `parseAndConfigureSensorWithTracking()` validiert Felder, Modus, Intervalle und ruft `sensorManager.configureSensor()`.
@@ -111,16 +116,17 @@ Hinweis zu Entry-Points aus Auftragsrahmen:
 ## FW-SENSOR-FLOW-004 - On-Demand Sensor Command
 
 1. **Sensorklasse:** alle konfigurierten Sensoren.
-2. **Registrierung/Init:** Topic `sensor/+/command` subscribed; Routing Core0->`g_sensor_cmd_queue` (Tiefe 10, non-blocking send).
+2. **Registrierung/Init:** Topic `sensor/+/command` subscribed; Core0: `command_admission` -> `queueSensorCommand` (Tiefe 10; Recovery-Intent optional `SendToFront` bis 20ms).
 3. **Messzyklus:** Trigger durch Command `{ "command":"measure" }`, Ausfuehrung auf Core 1.
-4. **Datenverarbeitung:** `triggerManualMeasurement()` nutzt selben Messpfad wie kontinuierliche Messung.
+4. **Datenverarbeitung:** Core1: TTL/Epoch-Check, erneute `command_admission`, dann `triggerManualMeasurement()` wie kontinuierliche Messung.
 5. **Publish:**
    - Messdaten normal ueber `sensor/{gpio}/data`.
    - Optional Command-Response auf `sensor/{gpio}/response` (QoS 1) bei `request_id`.
+   - Intent-Outcomes (`accepted`/`rejected`/`QUEUE_FULL`/`expired`) parallel ueber Intent-Outbox.
 6. **Cache/Persistenz:** wie Normalpfad.
-7. **Fehlerpfade:** invalid topic/json, unbekannter command, Queue full Drop (keine Rueckmeldung), Messfehler.
+7. **Fehlerpfade:** invalid topic/json, unbekannter command, admission reject, Queue full (Outcome+ErrorTracker), TTL/Epoch expired, Messfehler.
 8. **Safety/Offline:** keine direkte Aktorik; indirekt relevant fuer Value-Cache-Aktualitaet.
-9. **P1.2 Delta:** Queue-send Ergebnis wird nicht geprueft -> potentieller stiller Command-Verlust.
+9. **P1.2 Delta:** Queue-full und Admission sind serverseitig ueber Intent-Outcomes beobachtbar; Publish-Pfad bleibt drop-anfaellig.
 
 ## FW-SENSOR-FLOW-005 - Value-Cache zu Offline-Rule Evaluation
 
@@ -168,7 +174,7 @@ Hinweis zu Entry-Points aus Auftragsrahmen:
 ## 5) Verwerf-/Cache-/Retry-/Fehler-Markierungslogik
 
 - **Verwerfen (Drop):**
-  - Sensor command queue full (silent, da kein Send-Result-Check).
+  - Sensor command queue full: `queueSensorCommand` false, Log + ErrorTracker + Intent-Outcome `QUEUE_FULL` auf Core0.
   - Publish queue full (`queuePublish` false).
   - MQTT outbox full (`esp_mqtt_client_publish == -2`).
   - Ungueltige Sensor command topics/payloads.
@@ -213,4 +219,4 @@ Im Legacy-Pfad ohne Task-Erzeugung entfaellt die saubere Core-Trennung (Core0/1 
 
 ## 8) Kurzfazit
 
-Der Sensorpfad ist technisch vollstaendig von Config-Ingestion bis Server-Publish vorhanden und fuer I2C/OneWire robust verhaertet. Die kritischsten Restluecken liegen nicht in der Grundfunktion, sondern in Beobachtbarkeit und Verlustsignalisierung: silent Drops (Queue/Outbox), parse-fail ohne durchgaengigen negativen Config-ACK, sowie Contract-Drift-Risiken zwischen Doku und effektiver Subscription-Konfiguration.
+Der Sensorpfad ist technisch vollstaendig von Config-Ingestion bis Server-Publish vorhanden und fuer I2C/OneWire robust verhaertet. Die kritischsten Restluecken liegen nicht in der Grundfunktion, sondern in Beobachtbarkeit und Verlustsignalisierung: Publish-Queue/Outbox-Drops ohne dedizierten NACK, parse-fail ohne durchgaengigen negativen Config-ACK, sowie Contract-Drift-Risiken zwischen Doku und effektiver Subscription-Konfiguration (z. B. Heartbeat-ACK Default-QoS 0).

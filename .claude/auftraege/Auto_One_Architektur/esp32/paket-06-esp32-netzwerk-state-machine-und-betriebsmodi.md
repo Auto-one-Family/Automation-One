@@ -15,8 +15,8 @@ ID-Schema:
 ## 2) Quellen und Evidenz
 
 Verwendete Pflichtinputs:
-- Paket 02-05 aus `arbeitsbereiche/automation-one/architektur-autoone/esp32/`
-- Paket-02 Source-of-Truth-Dateien aus `architektur-autoone/esp32/`
+- Paket 02-05 aus `.claude/auftraege/Auto_One_Architektur/esp32/`
+- Ergaenzende Seed-/Inventar-Dateien aus Repo-Root `architektur-autoone/` (z. B. Paket-01-Artefakte; Umfang je nach Branch)
 
 Code-Evidenz (read-only):
 - `El Trabajante/src/main.cpp`
@@ -28,7 +28,7 @@ Code-Evidenz (read-only):
 - `El Trabajante/src/tasks/*_queue.*`
 
 Hinweis:
-- `arbeitsbereiche/automation-one/architektur-autoone/roadmap-komplettanalyse.md` ist im aktuellen Workspace nicht auffindbar; die P1.6-Ableitung basiert daher auf den restlichen Pflichtinputs plus Firmware-Code.
+- `roadmap-komplettanalyse.md` ist im aktuellen Workspace weiterhin nicht als Pflichtdatei auffindbar; die P1.6-Ableitung basiert auf Paket 02-06 unter `.claude/auftraege/Auto_One_Architektur/esp32/` plus Firmware-Code und `.claude/reference/api/MQTT_TOPICS.md`.
 
 Evidenzgrade:
 - **sicher**: direkt aus Codepfad + Paket-02..05 belegt.
@@ -62,7 +62,7 @@ Evidenzgrade:
 | FW-NET-STATE-106 | 006 -> 008 | Heartbeat-ACK valid | parse ok | `confirmRegistration()`, ACK-ts reset | ACK parse fail -> Gate bleibt zu |
 | FW-NET-STATE-107 | 006 -> 007 | Registration timeout | >10s ohne ACK | Gate force-open | Betrieb ohne explizites ACK (degradiert) |
 | FW-NET-STATE-108 | 008/007 -> 009 | MQTT disconnect, server/status=offline, ACK-timeout | kein Guard (disconnect autoritativ) | P4 Grace starten, ggf. Safe-State sofort bei 0 rules | bei Flaps thrashing-Risiko (durch Grace gedaempft) |
-| FW-NET-STATE-109 | 009 -> 008 | Reconnect vor 30s | MQTT up + noch kein OfflineActive | Timer abbrechen, ONLINE | sofortiger Redisconnect -> erneut 009 |
+| FW-NET-STATE-109 | 009 -> 008 | Reconnect vor 30s | MQTT up + noch kein OfflineActive | Timer abbrechen, ONLINE | sofortiger Reconnect-Flap -> erneut 009 |
 | FW-NET-STATE-110 | 009 -> 010 | Grace timer abgelaufen | `millis - disconnect_ts >= 30s` | OFFLINE_ACTIVE aktivieren, Rule-Zustaende init | Rule-Init-Probleme -> Safe-Fallback |
 | FW-NET-STATE-111 | 010 -> 011 | MQTT reconnect | mode==OFFLINE_ACTIVE | RECONNECTING setzen | ohne ACK verbleibt OFFLINE lokal aktiv |
 | FW-NET-STATE-112 | 010/011 -> 008 | Server-ACK (Heartbeat ACK oder `server/status=online`) | ACK parse ok | `deactivateOfflineMode()`, reset + persist rule state | NVS write fail kann Drift erzeugen |
@@ -72,6 +72,7 @@ Evidenzgrade:
 
 | Guard/Timer | Wert | Wirkung |
 |---|---|---|
+| WiFi Connect Timeout (Versuch) | 20000 ms | `WIFI_TIMEOUT_MS` in `wifi_manager.cpp` (pro Connect-Versuch) |
 | Server ACK Timeout | 120000 ms | triggert Disconnect/P4 auch bei scheinbar bestehendem MQTT-Link |
 | Offline Grace | 30000 ms | verhindert sofortige Rule-Aktivierung bei kurzen Flaps |
 | Registration Timeout | 10000 ms | oeffnet Publish-Gate ohne ACK (verfuegbarkeitsorientiert, nicht streng deterministisch) |

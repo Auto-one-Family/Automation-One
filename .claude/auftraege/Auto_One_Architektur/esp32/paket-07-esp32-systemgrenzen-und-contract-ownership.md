@@ -11,8 +11,8 @@ ID-Schema:
 - Systemgrenzen und Ownership: `FW-INT-BOUND-XXX`
 
 Hinweis zur Evidenz:
-- Die Pflichtdatei `roadmap-komplettanalyse.md` war im Workspace nicht auffindbar.
-- Die Konsolidierung basiert auf den vorhandenen Pflichtinputs aus Paket 02-06.
+- Die Pflichtdatei `roadmap-komplettanalyse.md` ist im Workspace weiterhin nicht auffindbar.
+- Die Konsolidierung basiert auf den vorhandenen Pflichtinputs aus Paket 02-06 unter `.claude/auftraege/Auto_One_Architektur/esp32/` sowie Firmware-IST (`main.cpp`, `config_update_queue.cpp`, `intent_contract.*`, `mqtt_client.cpp`).
 
 ## 2) Verbindliches Schichtenmodell
 
@@ -52,8 +52,8 @@ Hinweis zur Evidenz:
 | ID | Schnittstelle | Topic/Payload Owner | ACK/NACK Owner | Error-Code Owner | Kommentar |
 |---|---|---|---|---|---|
 | FW-INT-BOUND-040 | Sensor `.../sensor/{gpio}/data` | Firmware (Schema) + Server (Ingestion-Vertrag) | implizit ueber serverseitige Verarbeitung | Server-Normalbild | Delivery ist at-least-once-nah, nicht exactly-once |
-| FW-INT-BOUND-041 | Config `.../config` / `.../config_response` | Server (request schema), Firmware (response schema) | Firmware terminiert Request mit success/error | Server-Normalbild | Parse/Queue-Fehler muessen deterministisch als error enden |
-| FW-INT-BOUND-042 | Command `.../actuator|sensor/.../command|response` | Server (command), Firmware (response) | Firmware fuer command execution response | Server-Normalbild | Queue-full braucht harten NACK statt nur Log |
+| FW-INT-BOUND-041 | Config `.../config` / `.../config_response` | Server (request schema), Firmware (response schema) | Firmware terminiert Request mit success/error inkl. spezifischer Codes + `intent_outcome` | Server-Normalbild | Server muss Response+Outcome zusammen auswerten |
+| FW-INT-BOUND-042 | Command `.../actuator|sensor/.../command|response` + `.../system/intent_outcome` | Server (command), Firmware (response/outcome) | Firmware: klassischer Response bei Erfolgspfad; rejected `QUEUE_FULL` u. a. ueber Intent-Outcome | Server-Normalbild | Server-NACK-/Retry-Vertrag muss Outcome-Stream einbeziehen |
 | FW-INT-BOUND-043 | Heartbeat/ACK | Firmware sendet heartbeat, Server sendet ACK | Server-Autoritaet fuer ACK | Server | ACK ist finale Bestaetigung fuer ONLINE_ACKED |
 | FW-INT-BOUND-044 | `server/status` | Server | Server (Liveness) | Server | Nur Vor-Signal fuer Recovery, kein Ersatz fuer Heartbeat-ACK |
 | FW-INT-BOUND-045 | Drift-/Persistence-Events | Firmware emittiert | Server bewertet/klassifiziert | Server-Normalbild | UI muss Drift sichtbar machen, nicht kaschieren |
@@ -64,8 +64,8 @@ Hinweis zur Evidenz:
 |---|---|---|---|
 | FW-INT-BOUND-070 | ONLINE ohne Heartbeat-ACK (Gate timeout) | Betrieb moeglich, semantisch unscharf | Zustand wird als `LINK_ONLINE_UNACKED` gefuehrt, nicht als `ONLINE_ACKED` |
 | FW-INT-BOUND-071 | `server/status=online` vor Heartbeat-ACK | kann Offline-Exit triggern | Darf nur `reconnecting_hint` setzen; finale ACK-Bestaetigung bleibt Heartbeat-ACK |
-| FW-INT-BOUND-072 | Queue-full in command/config | heute teils ohne harten NACK | Jede abgewiesene Request muss dedizierte negative Antwort mit Korrelation erzeugen |
-| FW-INT-BOUND-073 | Parse-Fail im Config-Worker | potenziell stiller Drop | Parse-Fail ist verpflichtend `error`-Terminalzustand fuer die Request |
+| FW-INT-BOUND-072 | Queue-full in command/config | Firmware: Config terminal; Command ueber Intent-Outcome | Serverseitig: gleiche Korrelation wie beim Request sicherstellen |
+| FW-INT-BOUND-073 | Parse-Fail im Config-Worker | Firmware: terminal mit Code + Outcome | Server: Timeout/Retry an tatsaechliche Antwort koppeln |
 | FW-INT-BOUND-074 | Runtime-vs-NVS Drift bei Write-Fail | bisher teils nur Log | Drift erzeugt expliziten Degraded-Zustand und operatives Signal bis Repair |
 
 ## 7) Autoritaetsmodell (ACK, ONLINE, Error, Reconciliation)
@@ -77,4 +77,4 @@ Hinweis zur Evidenz:
 
 ## 8) Abschluss Block A
 
-Die Systemgrenzen sind fuer P1.7 verbindlich: Firmware bleibt Safety-/Execution-Owner am Rand, Server ist Vertrags- und Reconciliation-Autoritaet, DB ist Persistenzwahrheit, UI ist abgeleitete Operationssicht. Die bisherigen Grenzfaelle (ACK-Ersatz, stille Drops, Drift ohne Signal) sind damit eindeutig aufgeloest und in nachfolgenden Paketen testbar umsetzbar.
+Die Systemgrenzen sind fuer P1.7 verbindlich: Firmware bleibt Safety-/Execution-Owner am Rand, Server ist Vertrags- und Reconciliation-Autoritaet, DB ist Persistenzwahrheit, UI ist abgeleitete Operationssicht. Firmware-seitig sind viele fruehere stille Config-/Publish-Negativpfade entschaerft; verbleibende Grenzfaelle betonen jetzt Server-Ingestion von `intent_outcome`, ACK-Ersatz-Semantik, und Drift ohne vollstaendiges Ops-Signal.

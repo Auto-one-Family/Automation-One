@@ -1,6 +1,6 @@
 # Paket 01: ESP32 Contract-Seedlist (P1.1)
 
-> **Stand:** 2026-04-03  
+> **Stand:** 2026-04-05  
 > **Status:** Abgeschlossen (P1.1)  
 > **Charakter:** Seed-Stand (grobe Contract-Skizzen, keine finale Feldvalidierung)  
 > **Naechster Schritt:** Verfeinerung in P1.2/P1.3/P1.6
@@ -75,6 +75,7 @@ Erste belastbare Contract-Sammlung fuer die vier Pflichtketten:
   - Parsing zentralisiert und einmalig je Payload (Queue-Pfad, keine parallelen Mehrfach-Deserialisierungen).
   - Anwenden der Konfig auf Core 1 fuer Sensor/Aktor-Owner-Konsistenz.
   - Bei Teilfehlern muss `config_response` differenzierte Fehlerdetails tragen.
+  - Enqueue erfordert gueltige Intent-Metadaten inkl. `correlation_id` (sonst Contract-Error + kein Queueing).
 - **Fehlerfall bei Verletzung:**
   - Queue Overflow/Bypass -> Config-Verlust oder Data-Race.
   - NVS-Schreibfehler -> inkonsistenter Neustartzustand.

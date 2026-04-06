@@ -1,5 +1,7 @@
 # Paket 03: ESP32 Sensor Contract-Matrix (P1.3)
 
+> **Stand:** 2026-04-05  
+
 ## 1) Ziel
 
 Contract-Sicht fuer Sensorpfade: Topic, QoS, Payloadfelder, Einheiten, Guards und Zuordnung zur Server-Ingestion.
@@ -9,9 +11,9 @@ Contract-Sicht fuer Sensorpfade: Topic, QoS, Payloadfelder, Einheiten, Guards un
 | Contract-ID | Richtung | Topic | QoS (Firmware IST) | Pflichtfelder (Firmware-Payload) | Optionalfelder | Guards/Regeln | Server-Ingestion Bezug |
 |---|---|---|---|---|---|---|---|
 | FW-CON-SEN-001 | ESP -> Server | `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/data` | 1 | `esp_id`, `seq`, `zone_id`, `subzone_id`, `gpio`, `sensor_type`, `raw`, `value`, `unit`, `quality`, `ts`, `time_valid`, `raw_mode` | `onewire_address`, `i2c_address` | Topic nur via `TopicBuilder`; `raw_mode` soll true sein; I2C-Adresse nur bei I2C-Capability | `kaiser/+/esp/+/sensor/+/data` -> `sensor_handler.py:77` (laut MQTT_TOPICS Referenz) |
-| FW-CON-SEN-002 | Server -> ESP | `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/command` | Subscribed mit 1 | Payload minimal: `command` (`measure`) | `request_id` | Routing Core0->`g_sensor_cmd_queue`->Core1; topic format muss `.../sensor/{gpio}/command` sein | Trigger fuer on-demand measurement |
+| FW-CON-SEN-002 | Server -> ESP | `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/command` | Subscribed mit 1 | Payload minimal: `command` (`measure`) | `request_id`, Intent-Felder (`correlation_id`, TTL optional) | Core0: `command_admission` vor Enqueue; Recovery-Intent darf `SendToFront` mit kurzem Wait (20ms); Core1: erneute Admission + TTL/Epoch | Trigger fuer on-demand measurement |
 | FW-CON-SEN-003 | ESP -> Server | `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/response` | 1 | Bei request_id: `request_id`, `gpio`, `command`, `success`, `ts`, `seq` | keine | Nur bei `request_id` im Command; bei Queue-Drop keine Antwort | Asynchrone Command-Korrelation |
-| FW-CON-SEN-004 | Server -> ESP | `kaiser/{kaiser_id}/esp/{esp_id}/config` (sensor section) | Subscription 1 (Publish serverseitig meist 2) | Sensorobjekt: `gpio`, `sensor_type`, `sensor_name` | `active`, `raw_mode`, `onewire_address`, `i2c_address`, `operating_mode`, `measurement_interval_seconds`, `subzone_id` | Payloadgroesse <=4095; Queue-Apply auf Core1; parse-fail im Queue-Worker aktuell ohne garantierten negativen ACK | Sensorregistrierung / Reconfig |
+| FW-CON-SEN-004 | Server -> ESP | `kaiser/{kaiser_id}/esp/{esp_id}/config` (sensor section) | Subscription 1 (Publish serverseitig meist 2) | Sensorobjekt: `gpio`, `sensor_type`, `sensor_name` | `active`, `raw_mode`, `onewire_address`, `i2c_address`, `operating_mode`, `measurement_interval_seconds`, `subzone_id` | Payloadgroesse `< CONFIG_PAYLOAD_MAX_LEN` (4096 B, siehe `config_update_queue.h`); Intent `correlation_id` Pflicht fuer Enqueue; Queue-Apply auf Core1; parse-fail im Queue-Worker aktuell ohne garantierten negativen ACK | Sensorregistrierung / Reconfig |
 | FW-CON-SEN-005 | ESP -> Server | `kaiser/{kaiser_id}/esp/{esp_id}/config_response` | i. d. R. 2 fuer Config-Antworten | status/error je Builder | failure-details, correlation | Parse-fail Luecke in `processConfigUpdateQueue` kann Antwort verhindern | Server Config-Sync-Feedback |
 | FW-CON-SEN-006 | Server -> ESP | `kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat/ack` | Subscribed default 0 (Aufruf ohne qos-arg) | ACK payload mit `status` (approved/pending/etc.) | `config_available`, `server_time`, `error` | ACK resetet P1-Timer + beendet ggf. OFFLINE_ACTIVE | Gate fuer Registration + Safety-Recovery |
 | FW-CON-SEN-007 | Server -> ESP | `kaiser/{kaiser_id}/server/status` | 1 | `status` (`online`/`offline`) | `reason` | Bei `offline` startet Offline-Flow; bei `online` Timer-Reset + ACK-Ersatz-Recovery | LWT-basiertes fruehes Server-Liveness-Signal |
@@ -38,7 +40,7 @@ Contract-Sicht fuer Sensorpfade: Topic, QoS, Payloadfelder, Einheiten, Guards un
 
 1. **QoS Drift heartbeat ACK:** Referenzdoku beschreibt teils QoS 1, Firmware subscribed aktuell ohne qos-Arg (default 0).
 2. **Config parse-fail ACK-Luecke:** Bei Queue-Parserfehler fehlt ein garantiertes negatives `config_response`.
-3. **Silent Drop Contracts:** Sensor command queue und publish queue koennen Drops erzeugen, ohne dedizierten nack-contract.
+3. **Publish-Drop Contracts:** Sensor command queue full meldet Intent-Outcome + ErrorTracker; publish queue/outbox koennen weiterhin ohne dedizierten NACK-Contract droppen.
 
 ## 6) Fortschreibung Seedlist (P1.1 -> P1.3)
 

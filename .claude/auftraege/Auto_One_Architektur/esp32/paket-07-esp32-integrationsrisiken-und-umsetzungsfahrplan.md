@@ -16,26 +16,26 @@ ID-Schema:
 | ID | Schnittstelle | Einstufung | Evidenzbasierter Grund | Verifizierbarkeit (Metrik/Test) |
 |---|---|---|---|---|
 | FW-INT-RISK-001 | Sensor publish queue -> outbox | stabil aber degradierbar | Queue/outbox koennen bei Last droppen | `publish_outbox_full_total`, Lasttest mit Backpressure |
-| FW-INT-RISK-002 | Config ingress -> config queue | fragil | Queue-full terminiert nicht immer mit normiertem Fehlercode | `queue_drop_config_total`, Test "queue full -> error response" |
-| FW-INT-RISK-003 | Config worker parse/apply | fragil | Parse-Fail ist nicht durchgaengig harter NACK | Test "invalid JSON -> deterministic error response" |
-| FW-INT-RISK-004 | Command queue actuator/sensor | fragil | Queue-full aktuell oft nur lokale Telemetrie | `queue_drop_cmd_total`, Test "queue full -> command NACK" |
+| FW-INT-RISK-002 | Config ingress -> config queue | stabil (Firmware), integrativ beobachtbar | Queue-full: `QUEUE_FULL` auf `config_response` + `intent_outcome` | Server muss Codes ingestieren; Test "queue full -> error response" |
+| FW-INT-RISK-003 | Config worker parse/apply | stabil (Firmware) | Parse-Fail: `JSON_PARSE_ERROR` + Intent-Outcome | Test "invalid JSON -> deterministic error response" |
+| FW-INT-RISK-004 | Command queue actuator/sensor | fragil (integration) | Queue-full: `intent_outcome` am Ingress; klassischer Response kann fehlen | `queue_drop_cmd_total`, Test "queue full -> intent_outcome + server retry policy" |
 | FW-INT-RISK-005 | Reconnect ACK-Autoritaet | stabil aber degradierbar | Muster robust, aber Liveness/ACK semantisch vermischbar | Eventvergleich `server_status` vs `heartbeat_ack` |
 | FW-INT-RISK-006 | Offline reset persist | fragil | NVS-write-fail kann Drift verursachen | `nvs_write_fail_total`, Power-cut Test beim Reset |
 | FW-INT-RISK-007 | Runtime vs NVS Konsistenz | fragil | Drift-Event nicht ueberall verpflichtend | Event `PERSISTENCE_DRIFT` + Recovery-Test |
-| FW-INT-RISK-008 | QoS-Vertragslage ueber Schichten | stabil aber degradierbar | Doku/Implementierung nicht immer deckungsgleich | Contract-Testmatrix pub/sub QoS |
+| FW-INT-RISK-008 | QoS-Vertragslage ueber Schichten | stabil aber degradierbar | `.claude/reference/api/MQTT_TOPICS.md` vs `main.cpp` subscribe/publish-IST (z. B. heartbeat/ack Default-Subscribe 0) | Contract-Testmatrix pub/sub QoS |
 | FW-INT-RISK-009 | UI Online-Zustand | fragil (integrativ) | bei fehlender Zweiteilung kann "online" ueberinterpretiert werden | UI Test `link_online` vs `ack_online` |
 
 ## 3) Priorisierte Top-Risiken
 
 ### Kritisch
 
-1. `FW-INT-RISK-020` - Parse-Fail ohne harten NACK (Config driftbar, Retry unkontrolliert).
+1. `FW-INT-RISK-020` - Parse-Fail ohne harten NACK auf Firmware-Ebene entschaerft; Restrisiko: Server ignoriert Response/Outcome und erzeugt weiterhin driftbaren Zustand.
 2. `FW-INT-RISK-021` - Persistenzfehler ohne verpflichtendes Drift-Signal (`NVS_WRITE_FAIL`/`PERSISTENCE_DRIFT`).
-3. `FW-INT-RISK-022` - Queue-full in command/config ohne deterministische negative Terminierung.
+3. `FW-INT-RISK-022` - Command-Queue-full ohne serverseitig kanonisches Korrelations-/Retry-Bild (Intent-Outcome vs Response-Topic).
 
 ### Hoch
 
-4. `FW-INT-RISK-030` - Outbox-/Drain-Drops ohne vollstaendige Ende-zu-Ende Sichtbarkeit.
+4. `FW-INT-RISK-030` - Publish-Pfade: nicht-kritische Drops ohne Outcome; kritische mit Outcome — E2E-Sicht erfordert Server-Aggregation.
 5. `FW-INT-RISK-031` - ACK-Autoritaet semantisch unscharf (`server/status=online` vs Heartbeat-ACK).
 6. `FW-INT-RISK-032` - QoS-Drift zwischen Referenzdoku und effektiver Laufzeit.
 
@@ -125,8 +125,8 @@ ID-Schema:
 
 ### Sofortmassnahmen (P0)
 - ACK-Autoritaet hart trennen (Liveness vs Konsistenz-ACK).
-- Canonical Error-Codes aktivieren und in allen Negativpfaden erzwingen.
-- Parse-Fail und Queue-Full als verpflichtende terminale Responses.
+- Canonical Error-Codes auf Server/DB/UI konsistent machen (Firmware liefert bereits viele spezifische Codes + Intent-Outcome).
+- Server-Ingestion: `config_response` **und** `system/intent_outcome` fuer dieselbe Korrelation zusammenfuehren; Command-Pfad: Outcome-Stream in Retry-Politik aufnehmen.
 - Drift-Event und Reconciliation-Session als first-class Integrationsobjekte.
 
 ### Mittelfristig (P1)

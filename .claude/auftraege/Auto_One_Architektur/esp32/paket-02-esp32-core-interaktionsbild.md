@@ -1,5 +1,8 @@
 # Paket 02: ESP32 Core-Interaktionsbild und Queue-Disziplin (P1.2)
 
+> **Stand:** 2026-04-05  
+> **Status:** Abgestimmt mit Firmware `El Trabajante/src` (Intent/Admission-Pfad)
+
 ## 1) Core-Rollenmodell (IST aus Code)
 
 ### Core 0 - Communication Owner
@@ -14,6 +17,7 @@
 ### Shared
 - Atomics: `g_mqtt_connected`, `g_last_server_ack_ms`, `g_server_timeout_triggered`.
 - Queues: actuator/sensor/config/publish.
+- Intent/Admission: `command_admission` (Vor-Enqueue Core0), `intent_contract` (TTL/Epoch auf Core1, Outcomes).
 - Notify-Bits: `NOTIFY_EMERGENCY_STOP`, `NOTIFY_MQTT_DISCONNECTED`, `NOTIFY_SUBZONE_SAFE`.
 
 ---
@@ -23,9 +27,9 @@
 ```text
 MQTT_EVENT_DATA (Core0)
   -> routeIncomingMessage()
-     -> config            -> g_config_update_queue  ----\
-     -> actuator command  -> g_actuator_cmd_queue    ---+--> SafetyTask (Core1)
-     -> sensor command    -> g_sensor_cmd_queue      --/
+     -> config            -> command_admission -> g_config_update_queue  ----\
+     -> actuator command  -> command_admission -> g_actuator_cmd_queue    ---+--> SafetyTask (Core1)
+     -> sensor command    -> command_admission -> g_sensor_cmd_queue      --/
      -> emergency         -> xTaskNotify(NOTIFY_EMERGENCY_STOP)
      -> heartbeat/server  -> atomics + OfflineMode hooks
 
@@ -33,7 +37,7 @@ SafetyTask (Core1)
   -> performAllMeasurements()
   -> processActuatorLoops()
   -> checkServerAckTimeout()
-  -> process*Queue()
+  -> process*Queue()  (Intent TTL/Epoch + Admission erneut, Outcomes bei reject/skip)
   -> offlineModeManager.checkDelayTimer/evaluateOfflineRules()
   -> mqttClient.publish(...) on Core1
         -> g_publish_queue -> CommunicationTask.processPublishQueue() -> Broker I/O (Core0)
@@ -58,9 +62,9 @@ SafetyTask (Core1)
 
 | Queue | Richtung | Producer | Consumer | Blocking-Verhalten | Risiko bei Vollstand |
 |---|---|---|---|---|---|
-| `g_actuator_cmd_queue` | Core0 -> Core1 | `routeIncomingMessage` | `safetyTask` | non-blocking (`xQueueSend(...,0)`) | command drop |
-| `g_sensor_cmd_queue` | Core0 -> Core1 | `routeIncomingMessage` | `safetyTask` | non-blocking | command drop |
-| `g_config_update_queue` | Core0 -> Core1 | `routeIncomingMessage` | `safetyTask` | bis 100ms blockierend | timeout/drop, dann kein sauberer apply |
+| `g_actuator_cmd_queue` | Core0 -> Core1 | `routeIncomingMessage` | `safetyTask` | non-blocking; Recovery-Intent: bis 20ms fuer `SendToFront` | command drop + Intent-Outcome `QUEUE_FULL` (Core0) |
+| `g_sensor_cmd_queue` | Core0 -> Core1 | `routeIncomingMessage` | `safetyTask` | wie Actuator-Queue | wie oben |
+| `g_config_update_queue` | Core0 -> Core1 | `routeIncomingMessage` | `safetyTask` | bis 100ms blockierend | timeout/drop; Core0 kann `config_response`+Intent-Outcome feuern |
 | `g_publish_queue` | Core1 -> Core0 | `mqttClient.publish` (Core1 branch) | `communicationTask` | non-blocking | publish drop + CB failure |
 
 Queue-Invarianten:
@@ -101,8 +105,8 @@ Queue-Invarianten:
 
 ## 6) Degradation-Hotspots (Core-Interaktion)
 
-1. **Silent Drops**
-   - actuator/sensor/publish queue droppen non-blocking bei Vollstand.
+1. **Teilweise beobachtbare Drops**
+   - actuator/sensor queue full: Log + ErrorTracker + Intent-Outcome; publish queue weiterhin still bis auf Logs/CB.
 2. **Config Negative-ACK Luecke**
    - Bei parse fail in `processConfigUpdateQueue()` keine durchgaengige Fehlerantwort.
 3. **Legacy-Single-Thread-Modus**
