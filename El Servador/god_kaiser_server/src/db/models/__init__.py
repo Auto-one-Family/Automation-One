@@ -11,6 +11,7 @@ from . import (  # noqa: F401
     ai,
     audit_log,  # AuditLog model for event tracking
     auth,  # TokenBlacklist model
+    calibration_session,  # Calibration session tracking (S-P2)
     command_contract,  # Intent/outcome contract persistence (P0.1/P0.2)
     dashboard,  # Dashboard layout persistence
     device_context,  # Device active context for multi-zone routing (T13-R2)
@@ -39,6 +40,7 @@ from .actuator import ActuatorConfig, ActuatorState, ActuatorHistory  # noqa: F4
 from .ai import AIPredictions  # noqa: F401
 from .audit_log import AuditLog, AuditEventType, AuditSeverity, AuditSourceType  # noqa: F401
 from .auth import TokenBlacklist  # noqa: F401
+from .calibration_session import CalibrationSession, CalibrationStatus  # noqa: F401
 from .command_contract import CommandIntent, CommandOutcome  # noqa: F401
 from .dashboard import Dashboard  # noqa: F401
 from .device_context import DeviceActiveContext  # noqa: F401
@@ -77,6 +79,9 @@ __all__ = [
     "ai",
     "audit_log",
     "auth",
+    "calibration_session",
+    "CalibrationSession",
+    "CalibrationStatus",
     "command_contract",
     "dashboard",
     "device_zone_change",

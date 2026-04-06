@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.logging_config import get_logger
 from ...db.repositories.sensor_type_defaults_repo import SensorTypeDefaultsRepository
+from ...sensors.sensor_type_registry import normalize_sensor_type
 from ...db.session import get_session
 from ...schemas.sensor_type_defaults import (
     EffectiveConfigResponse,
@@ -87,6 +88,7 @@ async def get_defaults_by_type(
     current_user: ActiveUser = None,
 ) -> SensorTypeDefaultsResponse:
     """Get defaults for a specific sensor type."""
+    sensor_type = normalize_sensor_type(sensor_type)
     repo = SensorTypeDefaultsRepository(session)
     defaults = await repo.get_by_sensor_type(sensor_type)
 
@@ -173,6 +175,7 @@ async def update_defaults(
     current_user: OperatorUser = None,
 ) -> SensorTypeDefaultsResponse:
     """Update defaults for a sensor type."""
+    sensor_type = normalize_sensor_type(sensor_type)
     repo = SensorTypeDefaultsRepository(session)
 
     defaults = await repo.update(
@@ -222,6 +225,7 @@ async def delete_defaults(
     current_user: OperatorUser = None,
 ) -> None:
     """Delete defaults for a sensor type."""
+    sensor_type = normalize_sensor_type(sensor_type)
     repo = SensorTypeDefaultsRepository(session)
 
     deleted = await repo.delete(sensor_type)
@@ -256,6 +260,7 @@ async def get_effective_config(
     current_user: ActiveUser = None,
 ) -> EffectiveConfigResponse:
     """Get effective configuration for a sensor type."""
+    sensor_type = normalize_sensor_type(sensor_type)
     repo = SensorTypeDefaultsRepository(session)
 
     effective = await repo.get_effective_config(sensor_type)

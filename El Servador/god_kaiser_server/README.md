@@ -4,6 +4,10 @@
 
 FastAPI-based backend for AutomationOne IoT framework.
 
+## Documentation
+
+- [Finalität HTTP / MQTT / WebSocket](docs/finalitaet-http-mqtt-ws.md) — was REST-Responses garantieren und wo asynchrone Bestätigung erfolgt
+
 ## Features
 - REST API with JWT authentication
 - WebSocket real-time communication

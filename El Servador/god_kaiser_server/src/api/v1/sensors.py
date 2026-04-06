@@ -65,6 +65,7 @@ from ...sensors.sensor_type_registry import (
     get_all_value_types_for_device,
     get_device_type_from_sensor_type,
     is_multi_value_sensor,
+    normalize_sensor_type,
 )
 from ...services.config_builder import ConfigPayloadBuilder
 from ...services.esp_service import ESPService
@@ -212,7 +213,7 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         sensor_metadata["unit"] = request.unit
 
     return {
-        "sensor_type": request.sensor_type,
+        "sensor_type": normalize_sensor_type(request.sensor_type),
         "sensor_name": request.name or "",  # Schema: name -> Model: sensor_name
         "enabled": request.enabled,
         "sample_interval_ms": request.interval_ms,  # Schema: interval_ms -> Model: sample_interval_ms
@@ -282,6 +283,9 @@ async def list_sensors(
     """
     sensor_repo = SensorRepository(db)
     subzone_repo = SubzoneRepository(db)
+    # Normalize sensor type filter (e.g. "soil_moisture" → "moisture")
+    if sensor_type:
+        sensor_type = normalize_sensor_type(sensor_type)
     offset = (page - 1) * page_size
     rows, total_items = await sensor_repo.query_paginated(
         esp_device_id=esp_id,
@@ -514,6 +518,7 @@ async def get_sensor(
 
     # Multi-value sensor support: use sensor_type for precise lookup
     if sensor_type:
+        sensor_type = normalize_sensor_type(sensor_type)
         sensor = await sensor_repo.get_by_esp_gpio_and_type(esp_device.id, gpio, sensor_type)
     else:
         # Fallback: get all sensors on this GPIO, return first

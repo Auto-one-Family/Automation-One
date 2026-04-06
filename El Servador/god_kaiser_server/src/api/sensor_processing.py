@@ -28,6 +28,7 @@ from ..core.logging_config import get_logger
 from ..db.repositories import ESPRepository, SensorRepository
 from ..db.session import get_session
 from ..sensors.library_loader import get_library_loader
+from ..sensors.sensor_type_registry import normalize_sensor_type
 from .dependencies import check_rate_limit, verify_api_key
 from .schemas import (
     ErrorResponse,
@@ -98,24 +99,28 @@ async def process_sensor_data(
             f"gpio={request.gpio}, type={request.sensor_type}, raw={request.raw_value}"
         )
 
-        # Step 1: Get library loader
+        # Step 1: Normalize sensor type (e.g. "soil_moisture" → "moisture")
+        normalized_type = normalize_sensor_type(request.sensor_type)
+
+        # Step 2: Get library loader
         loader = get_library_loader()
 
-        # Step 2: Get processor for sensor type
-        processor = loader.get_processor(request.sensor_type)
+        # Step 3: Get processor for normalized sensor type
+        processor = loader.get_processor(normalized_type)
 
         if not processor:
             logger.error(
-                f"No processor found for sensor type: {request.sensor_type}. "
+                f"No processor found for sensor type: {normalized_type} "
+                f"(original: {request.sensor_type}). "
                 f"Available: {loader.get_available_sensors()}"
             )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No processor found for sensor type '{request.sensor_type}'. "
+                detail=f"No processor found for sensor type '{normalized_type}'. "
                 f"Available types: {', '.join(loader.get_available_sensors())}",
             )
 
-        # Step 3: Process raw value
+        # Step 4: Process raw value
         try:
             result = processor.process(
                 raw_value=request.raw_value,
@@ -277,14 +282,17 @@ async def calibrate_sensor(
             f"sensor_type={request.sensor_type}, points={len(request.calibration_points)}"
         )
 
-        # Step 1: Get library loader and processor
+        # Step 1: Normalize sensor type (e.g. "soil_moisture" → "moisture")
+        normalized_type = normalize_sensor_type(request.sensor_type)
+
+        # Step 2: Get library loader and processor
         loader = get_library_loader()
-        processor = loader.get_processor(request.sensor_type)
+        processor = loader.get_processor(normalized_type)
 
         if not processor:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No processor found for sensor type '{request.sensor_type}'. "
+                detail=f"No processor found for sensor type '{normalized_type}'. "
                 f"Available: {', '.join(loader.get_available_sensors())}",
             )
 

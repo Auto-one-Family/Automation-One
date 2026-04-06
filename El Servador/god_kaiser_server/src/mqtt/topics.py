@@ -348,6 +348,29 @@ class TopicBuilder:
         return None
 
     @staticmethod
+    def parse_sensor_response_topic(topic: str) -> Optional[Dict[str, any]]:
+        """
+        Parse sensor command response topic (S-P5).
+
+        Args:
+            topic: kaiser/{kaiser_id}/esp/ESP_12AB34CD/sensor/34/response
+
+        Returns:
+            {"kaiser_id": ..., "esp_id": ..., "gpio": ..., "type": "sensor_response"}
+            or None if parse fails
+        """
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/sensor/(\d+)/response"
+        match = re.match(pattern, topic)
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "gpio": int(match.group(3)),
+                "type": "sensor_response",
+            }
+        return None
+
+    @staticmethod
     def parse_actuator_status_topic(topic: str) -> Optional[Dict[str, any]]:
         """
         Parse actuator status topic.

@@ -137,3 +137,30 @@ async def test_replay_adds_reconciliation_session_markers(tmp_path):
     assert summary == {"replayed": 2, "failed": 0, "pending_checked": 2}
     assert seen_phases == ["start", "end"]
     assert len(set(seen_session_ids)) == 1
+
+
+@pytest.mark.asyncio
+async def test_inbound_inbox_parallel_instances_no_unhandled_exceptions(tmp_path):
+    shared_file = tmp_path / "parallel" / "critical-inbound.jsonl"
+    inbox_a = InboundInboxService(file_path=str(shared_file))
+    inbox_b = InboundInboxService(file_path=str(shared_file))
+
+    async def _append_many(prefix: str, inbox: InboundInboxService):
+        for idx in range(10):
+            await inbox.append(
+                topic="kaiser/god/esp/ESP_01/system/intent_outcome",
+                payload={"intent_id": f"{prefix}-{idx}", "outcome": "accepted"},
+                correlation_id=f"{prefix}-{idx}",
+                source="parallel-test",
+            )
+
+    await asyncio.gather(
+        _append_many("a", inbox_a),
+        _append_many("b", inbox_b),
+    )
+
+    inbox_reader = InboundInboxService(file_path=str(shared_file))
+    pending = await inbox_reader.list_pending(limit=100)
+
+    # Focus this integration test on stability and readable file state under concurrent writers.
+    assert len(pending) >= 1

@@ -115,3 +115,8 @@ async def test_non_stale_terminal_event_writes_history():
 
                             assert result is True
                             mock_actuator_repo.log_command.assert_called_once()
+                            mock_ws.broadcast.assert_called_once()
+                            args, kwargs = mock_ws.broadcast.await_args
+                            assert args[0] == "actuator_response"
+                            assert isinstance(args[1], dict)
+                            assert kwargs.get("correlation_id") == payload["correlation_id"]

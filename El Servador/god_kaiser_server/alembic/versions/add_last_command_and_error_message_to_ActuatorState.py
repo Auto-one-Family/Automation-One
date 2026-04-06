@@ -7,8 +7,8 @@ Create Date: 2024-12-03
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 
 # revision identifiers, used by Alembic.
@@ -20,20 +20,40 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Add last_command and error_message columns to actuator_states table."""
-    # Add last_command column
-    op.add_column(
-        'actuator_states',
-        sa.Column('last_command', sa.String(50), nullable=True)
-    )
-    
-    # Add error_message column
-    op.add_column(
-        'actuator_states',
-        sa.Column('error_message', sa.String(500), nullable=True)
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    if "actuator_states" not in inspector.get_table_names():
+        # Fresh schema paths can legitimately miss this legacy table at this
+        # revision point. Keep migration chain forward-only and non-failing.
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("actuator_states")}
+
+    if "last_command" not in existing_columns:
+        op.add_column(
+            "actuator_states",
+            sa.Column("last_command", sa.String(50), nullable=True),
+        )
+
+    if "error_message" not in existing_columns:
+        op.add_column(
+            "actuator_states",
+            sa.Column("error_message", sa.String(500), nullable=True),
+        )
 
 
 def downgrade() -> None:
     """Remove last_command and error_message columns from actuator_states table."""
-    op.drop_column('actuator_states', 'error_message')
-    op.drop_column('actuator_states', 'last_command')
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    if "actuator_states" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("actuator_states")}
+
+    if "error_message" in existing_columns:
+        op.drop_column("actuator_states", "error_message")
+    if "last_command" in existing_columns:
+        op.drop_column("actuator_states", "last_command")

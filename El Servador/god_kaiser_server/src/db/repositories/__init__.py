@@ -3,6 +3,7 @@ Repository Layer Exports
 """
 
 from .actuator_repo import ActuatorRepository
+from .calibration_session_repo import CalibrationSessionRepository
 from .audit_log_repo import AuditLogRepository
 from .base_repo import BaseRepository
 from .command_contract_repo import CommandContractRepository

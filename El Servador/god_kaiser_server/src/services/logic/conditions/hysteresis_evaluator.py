@@ -230,6 +230,20 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
                 logger.error(f"Invalid threshold values for cooling mode: {e}")
                 return False
 
+            # P0-Fix T9: Degenerate case — equal thresholds eliminate the deadband,
+            # defeating the purpose of hysteresis and causing undefined behavior.
+            if activate_above <= deactivate_below:
+                logger.error(
+                    "Hysteresis config error (cooling): activate_above (%.2f) must be "
+                    "> deactivate_below (%.2f). Deadband requires activate > deactivate. "
+                    "[rule=%s, condition=%s]",
+                    activate_above,
+                    deactivate_below,
+                    context.get("rule_id"),
+                    context.get("condition_index"),
+                )
+                return state.is_active  # Hold current state, don't corrupt
+
             if value > activate_above and not state.is_active:
                 state.is_active = True
                 state.last_activation = now
@@ -255,6 +269,19 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
             except (ValueError, TypeError) as e:
                 logger.error(f"Invalid threshold values for heating mode: {e}")
                 return False
+
+            # P0-Fix T9: Degenerate case — equal thresholds eliminate the deadband.
+            if deactivate_above <= activate_below:
+                logger.error(
+                    "Hysteresis config error (heating): deactivate_above (%.2f) must be "
+                    "> activate_below (%.2f). Deadband requires deactivate > activate. "
+                    "[rule=%s, condition=%s]",
+                    deactivate_above,
+                    activate_below,
+                    context.get("rule_id"),
+                    context.get("condition_index"),
+                )
+                return state.is_active  # Hold current state, don't corrupt
 
             if value < activate_below and not state.is_active:
                 state.is_active = True

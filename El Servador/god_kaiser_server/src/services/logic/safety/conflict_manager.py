@@ -84,10 +84,11 @@ class ConflictManager:
     DEFAULT_LOCK_TTL_SECONDS = 60
     SAFETY_PRIORITY = -1000  # Safety-Commands haben immer höchste Priorität
 
-    def __init__(self):
+    def __init__(self, websocket_manager=None):
         self._locks: Dict[str, ActuatorLock] = {}  # "esp_id:gpio" → Lock
         self._mutexes: Dict[str, asyncio.Lock] = {}  # "esp_id:gpio" → asyncio.Lock
         self._conflict_history: List[ConflictInfo] = []
+        self._websocket_manager = websocket_manager  # P0-Fix T9: user notification
 
     def _get_actuator_key(self, esp_id: str, gpio: int, zone_id: Optional[str] = None) -> str:
         """
@@ -210,13 +211,45 @@ class ConflictManager:
                     f"{existing_lock.rule_id} (prio {existing_lock.priority})"
                 )
 
-            # Gleiche oder niedrigere Priorität → FIRST_WINS
+            # Gleiche oder niedrigere Priorität
+            # P1-Fix T9: Deterministic tie-breaker — when priorities are equal,
+            # use lexicographic rule_id comparison instead of arrival order (FIFO).
+            # This ensures the same rule always wins regardless of evaluation order
+            # or server restart timing.
+            elif effective_priority == existing_lock.priority:
+                # Tie: deterministic winner by rule_id (smaller UUID string wins)
+                if rule_id < existing_lock.rule_id:
+                    resolution = ConflictResolution.HIGHER_PRIORITY_WINS
+                    winner = rule_id
+                    self._locks[actuator_key] = ActuatorLock(
+                        rule_id=rule_id,
+                        priority=effective_priority,
+                        command=command,
+                        acquired_at=now,
+                        expires_at=now
+                        + timedelta(seconds=lock_ttl_seconds or self.DEFAULT_LOCK_TTL_SECONDS),
+                        is_safety_critical=is_safety_critical,
+                        active_zone_id=zone_id,
+                    )
+                    logger.warning(
+                        f"Tie-break on {actuator_key}: {rule_id} wins over "
+                        f"{existing_lock.rule_id} (equal priority {effective_priority}, "
+                        f"deterministic rule_id comparison)"
+                    )
+                else:
+                    resolution = ConflictResolution.FIRST_WINS
+                    winner = existing_lock.rule_id
+                    logger.warning(
+                        f"Tie-break on {actuator_key}: {rule_id} blocked by "
+                        f"{existing_lock.rule_id} (equal priority {effective_priority}, "
+                        f"deterministic rule_id comparison)"
+                    )
             else:
                 resolution = ConflictResolution.FIRST_WINS
                 winner = existing_lock.rule_id
                 logger.warning(
                     f"Conflict on {actuator_key}: {rule_id} blocked by {existing_lock.rule_id} "
-                    f"(equal or lower priority)"
+                    f"(lower priority {effective_priority} vs {existing_lock.priority})"
                 )
 
             conflict = ConflictInfo(
@@ -229,6 +262,24 @@ class ConflictManager:
             )
 
             self._conflict_history.append(conflict)
+
+            # P0-Fix T9: Broadcast conflict to user via WebSocket
+            if self._websocket_manager:
+                try:
+                    asyncio.ensure_future(
+                        self._websocket_manager.broadcast(
+                            "logic_conflict",
+                            {
+                                "actuator_key": actuator_key,
+                                "competing_rules": conflict.competing_rules,
+                                "winner_rule_id": conflict.winner_rule_id,
+                                "resolution": conflict.resolution.value,
+                                "message": conflict.message,
+                            },
+                        )
+                    )
+                except Exception as ws_err:
+                    logger.debug("Conflict broadcast failed: %s", ws_err)
 
             return winner == rule_id, conflict
 

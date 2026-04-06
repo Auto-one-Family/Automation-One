@@ -7,11 +7,12 @@ Configures Alembic for async SQLAlchemy 2.0 with PostgreSQL.
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import pool
+from sqlalchemy import inspect, pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
+from alembic.script import ScriptDirectory
 
 # Add src to path for imports
 import sys
@@ -27,6 +28,7 @@ from src.db.models import (  # noqa: F401
     actuator,
     ai,
     auth,
+    calibration_session,
     esp,
     kaiser,
     library,
@@ -90,6 +92,33 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection: Connection) -> None:
     """Run migrations with connection."""
+    inspector = inspect(connection)
+    user_tables = [name for name in inspector.get_table_names() if name != "alembic_version"]
+    if not user_tables:
+        # Legacy compatibility: this repository has no full base-schema migration
+        # for very early revisions. On a truly empty database we bootstrap from the
+        # current SQLAlchemy metadata and stamp head, so `alembic upgrade head`
+        # becomes deterministic for first-time environments.
+        target_metadata.create_all(connection)
+
+        heads = ScriptDirectory.from_config(config).get_heads()
+        if len(heads) != 1:
+            raise RuntimeError(f"Expected single Alembic head, got: {heads}")
+
+        connection.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS alembic_version "
+                "(version_num VARCHAR(32) NOT NULL)"
+            )
+        )
+        connection.execute(text("DELETE FROM alembic_version"))
+        connection.execute(
+            text("INSERT INTO alembic_version (version_num) VALUES (:version_num)"),
+            {"version_num": heads[0]},
+        )
+        connection.commit()
+        return
+
     context.configure(connection=connection, target_metadata=target_metadata)
 
     with context.begin_transaction():

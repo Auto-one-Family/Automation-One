@@ -272,3 +272,89 @@ async def test_unknown_outcome_is_not_dropped_and_mapped_to_contract_violation()
     assert captured_payloads
     assert captured_payloads[0]["code"] == "CONTRACT_UNKNOWN_CODE"
     assert captured_payloads[0]["outcome"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_missing_intent_id_is_normalized_and_persisted():
+    handler = IntentOutcomeHandler()
+    payload = {
+        "correlation_id": "corr-missing-intent",
+        "flow": "config",
+        "outcome": "accepted",
+        "seq": 17,
+        "ts": 1735818000,
+    }
+
+    session = SimpleNamespace(commit=AsyncMock())
+    captured_payloads: list[dict] = []
+
+    contract_repo = MagicMock()
+    contract_repo.upsert_intent = AsyncMock(
+        side_effect=lambda p, esp_id: captured_payloads.append(dict(p))
+    )
+    contract_repo.upsert_outcome = AsyncMock(
+        return_value=(
+            SimpleNamespace(
+                outcome="accepted",
+                correlation_id="corr-missing-intent",
+                flow="config",
+                code="CONTRACT_MISSING_INTENT_ID",
+                reason="Contract violation: missing intent_id",
+                retryable=False,
+                generation=0,
+                seq=17,
+                epoch=0,
+                ttl_ms=0,
+                ts=1735818000,
+                contract_version=2,
+                semantic_mode="target",
+                legacy_status="processing",
+                target_status="accepted",
+                is_final=False,
+                intent_id="missing-intent:ESP_12:corr-missing-intent:17:1735818000",
+                esp_id="ESP_12",
+                first_seen_at=None,
+                terminal_at=None,
+            ),
+            False,
+        )
+    )
+    audit_repo = MagicMock()
+    audit_repo.log_device_event = AsyncMock()
+
+    @asynccontextmanager
+    async def fake_resilient_session():
+        yield session
+
+    with (
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.TopicBuilder.parse_intent_outcome_topic",
+            return_value={"esp_id": "ESP_12"},
+        ),
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.resilient_session",
+            fake_resilient_session,
+        ),
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.CommandContractRepository",
+            return_value=contract_repo,
+        ),
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.AuditLogRepository",
+            return_value=audit_repo,
+        ),
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.WebSocketManager",
+            create=True,
+        ),
+    ):
+        result = await handler.handle_intent_outcome(
+            "kaiser/god/esp/ESP_12/system/intent_outcome",
+            payload,
+        )
+
+    assert result is True
+    assert captured_payloads
+    assert captured_payloads[0]["intent_id"].startswith("missing-intent:ESP_12:")
+    assert captured_payloads[0]["code"] == "CONTRACT_MISSING_INTENT_ID"
+    assert captured_payloads[0]["retryable"] is False

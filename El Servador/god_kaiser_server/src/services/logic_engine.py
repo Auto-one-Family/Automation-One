@@ -116,7 +116,7 @@ class LogicEngine:
         if conflict_manager is None:
             from .logic.safety.conflict_manager import ConflictManager
 
-            self.conflict_manager = ConflictManager()
+            self.conflict_manager = ConflictManager(websocket_manager=websocket_manager)
         else:
             self.conflict_manager = conflict_manager
 
@@ -863,6 +863,13 @@ class LogicEngine:
         # Acquire locks for all actuator actions
         acquired_locks = []
         for action in actuator_actions:
+            # P0-Fix T9: Lock TTL must cover the actuator's duration to prevent
+            # mid-execution override by lower-priority rules.
+            action_duration = action.get("duration_seconds") or action.get("duration", 0)
+            lock_ttl = max(
+                self.conflict_manager.DEFAULT_LOCK_TTL_SECONDS,
+                int(action_duration) + 10 if action_duration else 0,
+            ) or None
 
             can_execute, conflict = await self.conflict_manager.acquire_actuator(
                 esp_id=action.get("esp_id"),
@@ -871,6 +878,7 @@ class LogicEngine:
                 priority=rule_priority,
                 command=action.get("command", "ON"),
                 is_safety_critical=action.get("is_safety_critical", False),
+                lock_ttl_seconds=lock_ttl,
             )
 
             if not can_execute:

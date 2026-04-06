@@ -246,7 +246,11 @@ class ActuatorResponseHandler:
                             "raw_success": canonical.raw_success,
                         }
                     )
-                    await ws_manager.broadcast("actuator_response", broadcast_data)
+                    await ws_manager.broadcast(
+                        "actuator_response",
+                        broadcast_data,
+                        correlation_id=correlation_id,
+                    )
                 except Exception as e:
                     logger.debug(f"WebSocket broadcast skipped: {e}")
 

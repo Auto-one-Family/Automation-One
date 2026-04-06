@@ -57,12 +57,33 @@ class IntentOutcomeHandler:
 
             payload = dict(payload)
             merge_intent_outcome_nested_data(payload)
+            esp_id = parsed_topic["esp_id"]
+
+            if not str(payload.get("intent_id") or "").strip():
+                corr_seed = str(payload.get("correlation_id") or "").strip() or "missing-corr"
+                seq_seed = self._to_non_negative_int(payload.get("seq"), default=0)
+                ts_seed = self._to_non_negative_int(payload.get("ts"), default=int(time.time()))
+                payload["intent_id"] = f"missing-intent:{esp_id}:{corr_seed}:{seq_seed}:{ts_seed}"[:128]
+                payload["code"] = "CONTRACT_MISSING_INTENT_ID"
+                payload["reason"] = "Contract violation: missing intent_id"
+                payload["retryable"] = False
+                logger.warning(
+                    "intent_outcome missing intent_id normalized: esp_id=%s correlation_id=%s seq=%s ts=%s",
+                    esp_id,
+                    corr_seed,
+                    seq_seed,
+                    ts_seed,
+                )
+
             validation_error = self._validate_payload(payload)
             if validation_error:
-                logger.error("Invalid intent_outcome payload: %s", validation_error)
-                return False
+                logger.error(
+                    "Invalid intent_outcome payload (permanent, not retrying): %s topic=%s",
+                    validation_error,
+                    topic,
+                )
+                return True  # ACK: structural failure cannot be resolved by retry
 
-            esp_id = parsed_topic["esp_id"]
             intent_id = str(payload["intent_id"])
             if not str(payload.get("correlation_id") or "").strip():
                 payload["correlation_id"] = f"missing-corr:{intent_id}"

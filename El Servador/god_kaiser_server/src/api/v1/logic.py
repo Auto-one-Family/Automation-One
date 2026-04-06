@@ -410,6 +410,67 @@ async def delete_rule(
 
     affected_esp_ids = get_affected_esp_ids(rule)
 
+    # P0-Fix T9: Send OFF to all actuators before deleting the rule.
+    # Without this, a deleted rule leaves actuators running with no controller.
+    actuator_service = get_actuator_service(db)
+    if rule.actions:
+        for action in rule.actions:
+            if action.get("type") in ("actuator_command", "actuator"):
+                esp_id = action.get("esp_id")
+                gpio = action.get("gpio")
+                if esp_id is not None and gpio is not None:
+                    try:
+                        cmd_result = await actuator_service.send_command(
+                            esp_id=str(esp_id),
+                            gpio=int(gpio),
+                            command="OFF",
+                            value=0.0,
+                            duration=0,
+                            issued_by=f"rule_delete:{rule.id}",
+                        )
+                        if cmd_result.success:
+                            logger.info(
+                                "Rule '%s' deleted: sent OFF to %s GPIO %s",
+                                rule.name,
+                                esp_id,
+                                gpio,
+                            )
+                        else:
+                            logger.warning(
+                                "Rule '%s' deleted: OFF to %s GPIO %s failed",
+                                rule.name,
+                                esp_id,
+                                gpio,
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "Rule '%s' deleted: failed to send OFF to %s GPIO %s: %s",
+                            rule.name,
+                            esp_id,
+                            gpio,
+                            e,
+                        )
+
+    # P0-Fix T9: Reset hysteresis states and conflict locks in LogicEngine
+    from ...services.logic_engine import get_logic_engine
+
+    engine = get_logic_engine()
+    if engine:
+        hysteresis_eval = engine._get_hysteresis_evaluator()
+        if hysteresis_eval:
+            hysteresis_eval.reset_states_for_rule(str(rule_id))
+        # Release any held conflict locks for this rule
+        for action in rule.actions or []:
+            if action.get("type") in ("actuator_command", "actuator"):
+                act_esp = action.get("esp_id")
+                act_gpio = action.get("gpio")
+                if act_esp is not None and act_gpio is not None:
+                    await engine.conflict_manager.release_actuator(
+                        esp_id=str(act_esp),
+                        gpio=int(act_gpio),
+                        rule_id=str(rule_id),
+                    )
+
     # Delete rule
     await logic_repo.delete(rule_id)
     await db.commit()

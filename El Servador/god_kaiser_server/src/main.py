@@ -40,6 +40,7 @@ from .mqtt.handlers import (
     actuator_handler,
     actuator_response_handler,
     actuator_alert_handler,
+    calibration_response_handler,
     config_handler,
     diagnostics_handler,
     discovery_handler,
@@ -315,6 +316,13 @@ async def lifespan(app: FastAPI):
             "kaiser/+/esp/+/system/diagnostics", diagnostics_handler.handle_diagnostics
         )
         logger.info("Diagnostics handler registered: kaiser/+/esp/+/system/diagnostics")
+        # S-P5: Calibration Sensor Response Handler
+        # Processes sensor command responses during active calibration sessions
+        _subscriber_instance.register_handler(
+            "kaiser/+/esp/+/sensor/+/response",
+            calibration_response_handler.handle_sensor_response,
+        )
+        logger.info("Calibration response handler registered: kaiser/+/esp/+/sensor/+/response")
 
         logger.info(f"Registered {len(_subscriber_instance.handlers)} MQTT handlers")
 
@@ -730,7 +738,7 @@ async def lifespan(app: FastAPI):
             from .services.logic.safety.conflict_manager import ConflictManager
             from .services.logic.safety.rate_limiter import RateLimiter
 
-            conflict_manager = ConflictManager()
+            conflict_manager = ConflictManager(websocket_manager=_websocket_manager)
             rate_limiter = RateLimiter(logic_repo=logic_repo)
 
             # Initialize Logic Engine

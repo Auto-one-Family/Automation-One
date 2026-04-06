@@ -509,6 +509,7 @@ class ESPService:
                         "config_keys": list(config.keys()),
                         "correlation_id": correlation_id,
                     },
+                    correlation_id=correlation_id,
                 )
             except Exception as e:
                 logger.warning(f"WebSocket broadcast config_published failed for {device_id}: {e}")
@@ -551,6 +552,7 @@ class ESPService:
                         "error": "MQTT publish failed",
                         "correlation_id": correlation_id,
                     },
+                    correlation_id=correlation_id,
                 )
             except Exception as e:
                 logger.warning(f"WebSocket broadcast config_failed failed for {device_id}: {e}")

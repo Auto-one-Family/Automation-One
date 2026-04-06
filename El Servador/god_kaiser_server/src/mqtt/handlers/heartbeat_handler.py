@@ -557,7 +557,12 @@ class HeartbeatHandler:
                     "actuator_count", payload.get("active_actuators", 0)
                 )
                 config_push_triggered = await self._has_pending_config(
-                    esp_device, session, esp_sensor_count, esp_actuator_count
+                    esp_device,
+                    session,
+                    esp_sensor_count,
+                    esp_actuator_count,
+                    is_reconnect=is_reconnect,
+                    offline_seconds=offline_seconds,
                 )
                 # BUG-2 Fix: _has_pending_config sets config_push_sent_at on
                 # esp_device.device_metadata but the session.commit() at line 288
@@ -1647,6 +1652,8 @@ class HeartbeatHandler:
         session,
         esp_sensor_count: int = 0,
         esp_actuator_count: int = 0,
+        is_reconnect: bool = False,
+        offline_seconds: float = 0.0,
     ) -> bool:
         """
         Check if server has unsent configuration for this ESP.
@@ -1660,6 +1667,8 @@ class HeartbeatHandler:
             session: Active DB session
             esp_sensor_count: sensor_count from heartbeat payload
             esp_actuator_count: actuator_count from heartbeat payload
+            is_reconnect: True when this heartbeat is from reconnect (>60s offline)
+            offline_seconds: Observed offline duration for reconnect telemetry
 
         Returns:
             True if there is pending configuration, False otherwise
@@ -1687,8 +1696,9 @@ class HeartbeatHandler:
                 metadata = esp_device.device_metadata or {}
                 last_push = metadata.get("config_push_sent_at")
                 now_ts = int(time_module.time())
+                bypass_cooldown_for_reconnect = bool(is_reconnect)
 
-                if last_push:
+                if last_push and not bypass_cooldown_for_reconnect:
                     elapsed = now_ts - last_push
                     if elapsed < CONFIG_PUSH_COOLDOWN_SECONDS:
                         logger.debug(
@@ -1702,6 +1712,20 @@ class HeartbeatHandler:
                             db_actuator_count,
                         )
                         return False
+                elif last_push and bypass_cooldown_for_reconnect:
+                    elapsed = now_ts - int(last_push)
+                    logger.info(
+                        "Config push cooldown bypass for reconnect %s "
+                        "(offline=%.1fs, elapsed_since_last_push=%ds, "
+                        "ESP: sensors=%d/actuators=%d, DB: sensors=%d/actuators=%d)",
+                        esp_device.device_id,
+                        float(offline_seconds),
+                        int(elapsed),
+                        esp_sensor_count,
+                        esp_actuator_count,
+                        db_sensor_count,
+                        db_actuator_count,
+                    )
 
                 # Cooldown expired or first push — update metadata and trigger
                 metadata["config_push_sent_at"] = now_ts

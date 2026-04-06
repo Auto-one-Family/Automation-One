@@ -394,8 +394,12 @@ class ConfigHandler:
                 esp = await esp_repo.get_by_device_id(esp_id)
 
                 if not esp:
-                    logger.error(f"ESP not found for config applied update: {esp_id}")
-                    return False
+                    logger.warning(
+                        "ESP not found for config applied update: %s "
+                        "(device may have been removed or is not yet registered, skipping)",
+                        esp_id,
+                    )
+                    return True  # ACK: unregistered device cannot be updated, do not replay
 
                 updated_count = 0
 
@@ -450,8 +454,12 @@ class ConfigHandler:
                 esp = await esp_repo.get_by_device_id(esp_id)
 
                 if not esp:
-                    logger.error(f"ESP not found for config failures: {esp_id}")
-                    return False
+                    logger.warning(
+                        "ESP not found for config failures: %s "
+                        "(device may have been removed or is not yet registered, skipping)",
+                        esp_id,
+                    )
+                    return True  # ACK: unregistered device cannot be updated, do not replay
 
                 sensor_repo = SensorRepository(session)
                 actuator_repo = ActuatorRepository(session)

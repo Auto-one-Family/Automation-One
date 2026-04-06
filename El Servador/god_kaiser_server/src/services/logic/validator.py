@@ -147,7 +147,58 @@ class LogicValidator:
                     f"Invalid cooldown_seconds: {cooldown}. Must be between 0 and 86400"
                 )
 
+        # P0-Fix T9: Validate hysteresis thresholds — deadband must exist
+        self._validate_hysteresis_thresholds(rule_data, result)
+
         return result
+
+    def _validate_hysteresis_thresholds(
+        self, rule_data: Dict[str, Any], result: ValidationResult
+    ) -> None:
+        """Validate hysteresis conditions have valid deadband (no degenerate thresholds).
+
+        Args:
+            rule_data: Rule data dictionary
+            result: ValidationResult to add errors to
+        """
+        conditions = rule_data.get("conditions", [])
+        if isinstance(conditions, dict):
+            if conditions.get("logic") in ("AND", "OR"):
+                conditions = conditions.get("conditions", [])
+            elif conditions.get("type") == "hysteresis":
+                conditions = [conditions]
+            else:
+                conditions = []
+
+        for idx, cond in enumerate(conditions):
+            if cond.get("type") != "hysteresis":
+                continue
+            aa = cond.get("activate_above")
+            db_ = cond.get("deactivate_below")
+            ab = cond.get("activate_below")
+            da = cond.get("deactivate_above")
+
+            if aa is not None and db_ is not None:
+                try:
+                    if float(aa) <= float(db_):
+                        result.add_error(
+                            f"Hysteresis condition [{idx}]: activate_above ({aa}) must be "
+                            f"> deactivate_below ({db_}). Equal or inverted thresholds "
+                            f"eliminate the deadband and cause undefined switching."
+                        )
+                except (ValueError, TypeError):
+                    pass  # Type errors caught by Pydantic
+
+            if ab is not None and da is not None:
+                try:
+                    if float(da) <= float(ab):
+                        result.add_error(
+                            f"Hysteresis condition [{idx}]: deactivate_above ({da}) must be "
+                            f"> activate_below ({ab}). Equal or inverted thresholds "
+                            f"eliminate the deadband and cause undefined switching."
+                        )
+                except (ValueError, TypeError):
+                    pass
 
     def validate_safety(self, rule_data: Dict[str, Any]) -> SafetyResult:
         """
@@ -299,6 +350,10 @@ class LogicValidator:
                         f"({dup['similarity']:.1f}% match)"
                     )
 
+            # P1-Fix T9: Actuator conflict pre-check — warn when multiple rules
+            # target the same actuator (esp_id:gpio) without explicit priority differentiation.
+            self._check_actuator_conflicts(rule_data, existing_rules, result)
+
             # Loop-Detection
             try:
                 loop_result = self.loop_detector.check_new_rule(rule_data, existing_rules)
@@ -320,3 +375,61 @@ class LogicValidator:
                 )
 
         return result
+
+    def _check_actuator_conflicts(
+        self,
+        rule_data: Dict[str, Any],
+        existing_rules: List[Dict[str, Any]],
+        result: ValidationResult,
+    ) -> None:
+        """Warn when a new rule targets actuators already controlled by existing rules.
+
+        Issues a warning (not an error) so the user is informed but not blocked.
+        Includes priority comparison to highlight potential override issues.
+
+        Args:
+            rule_data: New rule data dictionary
+            existing_rules: List of existing rule dicts with "actions" and "name"
+            result: ValidationResult to add warnings to
+        """
+        new_actuators = self._extract_actuator_targets(rule_data.get("actions", []))
+        if not new_actuators:
+            return
+
+        new_priority = rule_data.get("priority", 100)
+
+        for existing in existing_rules:
+            existing_actuators = self._extract_actuator_targets(existing.get("actions", []))
+            overlap = new_actuators & existing_actuators
+            if overlap:
+                existing_name = existing.get("name", "Unknown")
+                existing_priority = existing.get("priority", 100)
+                for key in overlap:
+                    if new_priority == existing_priority:
+                        result.add_warning(
+                            f"Actuator conflict: {key} is already controlled by rule "
+                            f"'{existing_name}' with SAME priority ({existing_priority}). "
+                            f"Set different priorities to ensure deterministic behavior."
+                        )
+                    else:
+                        result.add_warning(
+                            f"Actuator conflict: {key} is already controlled by rule "
+                            f"'{existing_name}' (priority {existing_priority}). "
+                            f"Higher-priority rule will win at runtime."
+                        )
+
+    @staticmethod
+    def _extract_actuator_targets(actions: list) -> set:
+        """Extract set of 'esp_id:gpio' keys from action list."""
+        targets: set = set()
+        if not isinstance(actions, list):
+            return targets
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            if action.get("type") in ("actuator_command", "actuator"):
+                esp_id = action.get("esp_id")
+                gpio = action.get("gpio")
+                if esp_id is not None and gpio is not None:
+                    targets.add(f"{esp_id}:{gpio}")
+        return targets

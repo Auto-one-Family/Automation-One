@@ -83,7 +83,9 @@ class ActuatorActionExecutor(BaseActionExecutor):
             gpio_int = int(gpio)  # Coerce for JSON float (e.g. 5.0) vs assigned_gpios [4,5,6]
             actuator_subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio_int)
             actuator_subzone_id = actuator_subzone.subzone_id if actuator_subzone else None
-            if actuator_subzone_id != trigger_subzone:
+            # Only skip when actuator is explicitly bound to another subzone.
+            # Unassigned actuators (None) are treated as zone-level fallbacks.
+            if actuator_subzone_id is not None and actuator_subzone_id != trigger_subzone:
                 logger.debug(
                     f"Actuator {esp_id}:GPIO{gpio} skipped: serves subzone {actuator_subzone_id}, "
                     f"trigger from subzone {trigger_subzone}"

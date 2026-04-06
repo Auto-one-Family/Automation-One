@@ -28,32 +28,53 @@ def upgrade() -> None:
     # - Severity-based filtering
     # - Source-based lookups
     
-    op.create_index(
-        'ix_audit_logs_created_at',
-        'audit_logs',
-        ['created_at'],
-        unique=False,
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    if 'audit_logs' not in inspector.get_table_names():
+        return
+
+    existing_indexes = {idx["name"] for idx in inspector.get_indexes('audit_logs')}
+
+    if 'ix_audit_logs_created_at' not in existing_indexes:
+        op.create_index(
+            'ix_audit_logs_created_at',
+            'audit_logs',
+            ['created_at'],
+            unique=False,
+        )
     
-    op.create_index(
-        'ix_audit_logs_severity_created_at',
-        'audit_logs',
-        ['severity', 'created_at'],
-        unique=False,
-    )
+    if 'ix_audit_logs_severity_created_at' not in existing_indexes:
+        op.create_index(
+            'ix_audit_logs_severity_created_at',
+            'audit_logs',
+            ['severity', 'created_at'],
+            unique=False,
+        )
     
-    op.create_index(
-        'ix_audit_logs_source_created_at',
-        'audit_logs',
-        ['source_type', 'source_id', 'created_at'],
-        unique=False,
-    )
+    if 'ix_audit_logs_source_created_at' not in existing_indexes:
+        op.create_index(
+            'ix_audit_logs_source_created_at',
+            'audit_logs',
+            ['source_type', 'source_id', 'created_at'],
+            unique=False,
+        )
 
 
 def downgrade() -> None:
-    op.drop_index('ix_audit_logs_source_created_at', table_name='audit_logs')
-    op.drop_index('ix_audit_logs_severity_created_at', table_name='audit_logs')
-    op.drop_index('ix_audit_logs_created_at', table_name='audit_logs')
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    if 'audit_logs' not in inspector.get_table_names():
+        return
+
+    existing_indexes = {idx["name"] for idx in inspector.get_indexes('audit_logs')}
+    if 'ix_audit_logs_source_created_at' in existing_indexes:
+        op.drop_index('ix_audit_logs_source_created_at', table_name='audit_logs')
+    if 'ix_audit_logs_severity_created_at' in existing_indexes:
+        op.drop_index('ix_audit_logs_severity_created_at', table_name='audit_logs')
+    if 'ix_audit_logs_created_at' in existing_indexes:
+        op.drop_index('ix_audit_logs_created_at', table_name='audit_logs')
 
 
 
