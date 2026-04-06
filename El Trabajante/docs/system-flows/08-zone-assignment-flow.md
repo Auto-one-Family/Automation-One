@@ -454,7 +454,7 @@ kaiser/kaiser_production_001/esp/ESP_AB12CD/system/heartbeat
 }
 ```
 
-**correlation_id:** Echoed from zone/assign payload. Enables MQTTCommandBridge exact ACK matching.
+**correlation_id:** Echoed from zone/assign payload. Der Server (`MQTTCommandBridge`) matched wartende Aufrufe **nur** über diese UUID (kein FIFO-Fallback); fehlt das Echo → REST-ACK-Timeout trotz erfolgreicher NVS.
 
 **Error Payload:**
 

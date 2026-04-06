@@ -45,8 +45,14 @@ bool ConfigResponseBuilder::publish(const ConfigResponsePayload& payload) {
 
   bool published = mqttClient.safePublish(topic, json_payload, 1);
   if (published) {
-    LOG_I(TAG, "ConfigResponse published [" + String(configTypeToString(payload.type)) +
-             "] status=" + String(configStatusToString(payload.status)));
+    const char* type_str = configTypeToString(payload.type);
+    const char* status_str = configStatusToString(payload.status);
+    if (type_str == nullptr) type_str = "unknown";
+    if (status_str == nullptr) status_str = "unknown";
+
+    char log_buf[128];
+    snprintf(log_buf, sizeof(log_buf), "ConfigResponse published [%s] status=%s", type_str, status_str);
+    LOG_I(TAG, log_buf);
   } else {
     LOG_E(TAG, "ConfigResponse publish failed for topic: " + topic);
   }
@@ -118,10 +124,16 @@ bool ConfigResponseBuilder::publishWithFailures(
 
   bool published = mqttClient.safePublish(topic, json_payload, 1);
   if (published) {
-    LOG_I(TAG, "ConfigResponse published [" + String(configTypeToString(type)) +
-             "] status=" + String(configStatusToString(status)) +
-             " success=" + String(success_count) +
-             " failed=" + String(fail_count));
+    const char* type_str = configTypeToString(type);
+    const char* status_str = configStatusToString(status);
+    if (type_str == nullptr) type_str = "unknown";
+    if (status_str == nullptr) status_str = "unknown";
+
+    char log_buf[160];
+    snprintf(log_buf, sizeof(log_buf),
+             "ConfigResponse published [%s] status=%s success=%u failed=%u",
+             type_str, status_str, success_count, fail_count);
+    LOG_I(TAG, log_buf);
   } else {
     LOG_E(TAG, "ConfigResponse publish failed for topic: " + topic);
   }

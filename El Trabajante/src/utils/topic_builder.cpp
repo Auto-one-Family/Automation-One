@@ -233,6 +233,14 @@ const char* TopicBuilder::buildIntentOutcomeTopic() {
   return validateTopicBuffer(written);
 }
 
+// Lifecycle telemetry (CONFIG_PENDING enter/exit/blocked) — schema: config_pending_lifecycle_v1
+const char* TopicBuilder::buildIntentOutcomeLifecycleTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/system/intent_outcome/lifecycle",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
 // ORPHANED (GHOST) - Server->ESP but ESP never subscribes. See Mqtt_Protocoll.md inventory.
 // Pattern 8: kaiser/broadcast/emergency
 const char* TopicBuilder::buildBroadcastEmergencyTopic() {

@@ -100,13 +100,19 @@ public:
 
     // ✅ Phase 2C: Trigger manual measurement for on-demand sensors
     // Returns true if measurement was successful
-    bool triggerManualMeasurement(uint8_t gpio);
+    // timeout_ms: Max duration before aborting (E-P3 Timeout-Guard, default 5s)
+    bool triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms = 5000);
 
     // ============================================
     // RAW DATA READING METHODS (PHASE 4)
     // ============================================
     // Read raw analog value
     uint32_t readRawAnalog(uint8_t gpio);
+
+    // E-P2: ADC Validation — checks raw analog value for plausibility
+    // Returns quality string: "good", "suspect" (rail/noise), or "error" (invalid)
+    // Detects: ADC rail (0 or 4095), near-rail (<50 or >4045), disconnected sensor heuristics
+    static const char* validateAdcReading(uint32_t raw, uint8_t gpio);
     
     // Read raw digital value
     uint32_t readRawDigital(uint8_t gpio);

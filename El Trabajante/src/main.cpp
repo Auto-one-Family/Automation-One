@@ -15,6 +15,7 @@
 #include "tasks/communication_task.h"    // SAFETY-RTOS M3
 #include "tasks/rtos_globals.h"          // SAFETY-RTOS M4: FreeRTOS mutexes
 #include "tasks/config_update_queue.h"   // SAFETY-RTOS M4.6: Core 0→1 config queue
+#include "tasks/intent_contract.h"
 #include "tasks/command_admission.h"
 #include "tasks/emergency_broadcast_contract.h"
 #include "drivers/gpio_manager.h"
@@ -264,7 +265,12 @@ static void triggerBroadcastEmergencyStop(const char* epoch_reason, const String
 }
 
 // Helper: Send Subzone ACK with guaranteed correlation_id for ACK tracking.
-void sendSubzoneAck(const String& subzone_id, const String& status, const String& error_message, const String& correlationId = "") {
+// mqtt_reason_code: optional stable string for server (e.g. CONFIG_LANE_BUSY, JSON_PARSE_ERROR).
+void sendSubzoneAck(const String& subzone_id,
+                    const String& status,
+                    const String& error_message,
+                    const String& correlationId = "",
+                    const char* mqtt_reason_code = nullptr) {
   String ack_topic = TopicBuilder::buildSubzoneAckTopic();
   DynamicJsonDocument ack_doc(512);
   String effectiveCorrelationId = ensureCorrelationId(correlationId);
@@ -274,8 +280,14 @@ void sendSubzoneAck(const String& subzone_id, const String& status, const String
   ack_doc["timestamp"] = (unsigned long)timeManager.getUnixTimestamp();
 
   if (status == "error" && error_message.length() > 0) {
-    ack_doc["error_code"] = ERROR_SUBZONE_CONFIG_SAVE_FAILED;
+    if (mqtt_reason_code != nullptr && strlen(mqtt_reason_code) > 0) {
+      ack_doc["reason_code"] = mqtt_reason_code;
+    } else {
+      ack_doc["error_code"] = ERROR_SUBZONE_CONFIG_SAVE_FAILED;
+    }
     ack_doc["message"] = error_message;
+  } else if (mqtt_reason_code != nullptr && strlen(mqtt_reason_code) > 0) {
+    ack_doc["reason_code"] = mqtt_reason_code;
   }
 
   ack_doc["seq"] = mqttClient.getNextSeq();
@@ -291,6 +303,45 @@ void sendSubzoneAck(const String& subzone_id, const String& status, const String
                  "\",\"message\":\"serialization_failed\",\"timestamp\":0}";
   }
   mqttClient.publish(ack_topic, ack_payload, 1);
+}
+
+static void publishZoneConfigLaneBusyAck(const char* payload_cstr) {
+  IntentMetadata meta = extractIntentMetadataFromPayload(payload_cstr, "zone");
+  String corr = ensureCorrelationId(String(meta.correlation_id));
+  String ack_topic = TopicBuilder::buildZoneAckTopic();
+  DynamicJsonDocument err_doc(384);
+  err_doc["esp_id"] = g_system_config.esp_id;
+  err_doc["status"] = "error";
+  err_doc["reason_code"] = "CONFIG_LANE_BUSY";
+  err_doc["message"] = "Config persistence lane busy; retry later";
+  err_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+  err_doc["seq"] = mqttClient.getNextSeq();
+  err_doc["correlation_id"] = corr;
+  String error_response;
+  serializeJson(err_doc, error_response);
+  mqttClient.publish(ack_topic, error_response, 1);
+  publishIntentOutcome("zone",
+                       meta,
+                       "failed",
+                       "CONFIG_LANE_BUSY",
+                       "Zone intent blocked: config lane busy",
+                       true);
+}
+
+static void publishSubzoneConfigLaneBusyAck(const char* payload_cstr, const char* flow_label) {
+  IntentMetadata meta = extractIntentMetadataFromPayload(payload_cstr, "subz");
+  String corr = ensureCorrelationId(String(meta.correlation_id));
+  sendSubzoneAck("unknown",
+                  "error",
+                  "Config persistence lane busy; retry later",
+                  corr,
+                  "CONFIG_LANE_BUSY");
+  publishIntentOutcome(flow_label,
+                       meta,
+                       "failed",
+                       "CONFIG_LANE_BUSY",
+                       "Subzone intent blocked: config lane busy",
+                       true);
 }
 
 static bool hasValidLocalAutonomyConfig() {
@@ -395,9 +446,14 @@ static void publishConfigPendingTransitionEvent(const char* event_type,
   event_doc["config_pending_exit_blocked_count"] = g_config_pending_exit_blocked_count.load();
   event_doc["ts"] = static_cast<unsigned long>(timeManager.getUnixTimestamp());
 
+  event_doc["boot_sequence_id"] = mqttClient.getBootTelemetrySequenceId();
+  event_doc["schema"] = "config_pending_lifecycle_v1";
+
   String payload;
   if (serializeJson(event_doc, payload) > 0) {
-    mqttClient.publish(TopicBuilder::buildIntentOutcomeTopic(), payload, 1);
+    // Variant B (P2): lifecycle transitions on dedicated subtopic — canonical intent_outcome
+    // stays reserved for buildOutcomePayload / publishIntentOutcome.
+    mqttClient.publish(TopicBuilder::buildIntentOutcomeLifecycleTopic(), payload, 1);
   }
 }
 
@@ -449,28 +505,30 @@ bool evaluatePendingExit(const char* trigger_source) {
 // SAFETY-P1 Mechanism A: Centralized MQTT subscription (called on every connect + reconnect)
 // ============================================
 void subscribeToAllTopics() {
-  mqttClient.subscribe(TopicBuilder::buildSystemCommandTopic(), 1);
-  mqttClient.subscribe(TopicBuilder::buildConfigTopic(), 1);
-  mqttClient.subscribe(TopicBuilder::buildBroadcastEmergencyTopic(), 1);
+  // Queue in priority order to avoid post-connect subscribe bursts on weak TCP windows.
+  // Critical control-plane topics come first.
+  mqttClient.queueSubscribe(TopicBuilder::buildSystemHeartbeatAckTopic(), 1, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildConfigTopic(), 1, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildSystemCommandTopic(), 1, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildBroadcastEmergencyTopic(), 1, true);
 
   String actuator_wildcard = String(TopicBuilder::buildActuatorCommandTopic(0));
   actuator_wildcard.replace("/0/command", "/+/command");
-  mqttClient.subscribe(actuator_wildcard, 1);
+  mqttClient.queueSubscribe(actuator_wildcard, 1, true);
 
-  mqttClient.subscribe(TopicBuilder::buildActuatorEmergencyTopic(), 1);
-  mqttClient.subscribe(TopicBuilder::buildZoneAssignTopic(), 1);
-  mqttClient.subscribe(TopicBuilder::buildSubzoneAssignTopic(), 1);
-  mqttClient.subscribe(TopicBuilder::buildSubzoneRemoveTopic(), 1);
-  mqttClient.subscribe(TopicBuilder::buildSubzoneSafeTopic(), 1);
+  mqttClient.queueSubscribe(TopicBuilder::buildActuatorEmergencyTopic(), 1, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildZoneAssignTopic(), 1, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildSubzoneAssignTopic(), 1, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildSubzoneRemoveTopic(), 1, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildSubzoneSafeTopic(), 1, true);
 
   String sensor_wildcard = String(TopicBuilder::buildSensorCommandTopic(0));
   sensor_wildcard.replace("/0/command", "/+/command");
-  mqttClient.subscribe(sensor_wildcard, 1);
+  mqttClient.queueSubscribe(sensor_wildcard, 1, false);
 
-  mqttClient.subscribe(TopicBuilder::buildSystemHeartbeatAckTopic());
-  mqttClient.subscribe(TopicBuilder::buildServerStatusTopic(), 1);  // SAFETY-P5: Server LWT (QoS 1)
+  mqttClient.queueSubscribe(TopicBuilder::buildServerStatusTopic(), 1, false);  // SAFETY-P5: Server LWT (QoS 1)
 
-  LOG_I(TAG, "[SAFETY-P1] All 12 MQTT topics subscribed");
+  LOG_I(TAG, "[SAFETY-P1] Subscription queue prepared (12 topics, staged dispatch)");
 }
 
 // ============================================
@@ -499,13 +557,10 @@ void onMqttConnectCallback() {
   }
   is_first_connect = false;
 
-  // Mechanism F (FIX): Heartbeat AFTER subscriptions on ALL connects (initial + reconnect).
-  // In the ESP-IDF non-blocking path, connect() returns immediately before MQTT_EVENT_CONNECTED.
-  // This callback fires only AFTER MQTT_EVENT_CONNECTED — connection is guaranteed established.
-  // Replaces the premature publishHeartbeat(true) call in setup() which fired before the
-  // connection was actually established and was silently dropped (QoS-0 dropped when not connected).
-  mqttClient.publishHeartbeat(true);
-  LOG_I(TAG, "[SAFETY-P1] Post-connect heartbeat sent (fast registration)");
+  // Send one bootstrap heartbeat only after heartbeat/ack topic was successfully subscribed.
+  // This avoids write pressure exactly in the fragile post-connect subscribe window.
+  mqttClient.requestBootstrapHeartbeatAfterAck();
+  LOG_I(TAG, "[SAFETY-P1] Bootstrap heartbeat armed (after ACK subscribe)");
 }
 
 // ============================================
@@ -570,7 +625,9 @@ void routeIncomingMessage(const char* t, const char* p) {
                                  false);
             return;
         }
-        if (!g_safety_rtos_tasks_created) {
+        // Config updates must remain possible when only the communication task failed.
+        // In that case Safety-Task may still be alive and can drain config queue.
+        if (!g_safety_rtos_tasks_created && g_safety_task_handle == NULL) {
             publishIntentOutcome("config",
                                  metadata,
                                  "rejected",
@@ -647,15 +704,6 @@ void routeIncomingMessage(const char* t, const char* p) {
                                  false);
             return;
         }
-        if (!g_safety_rtos_tasks_created) {
-            publishIntentOutcome("command",
-                                 metadata,
-                                 "rejected",
-                                 "MODE_UNSUPPORTED",
-                                 "Actuator command rejected in legacy fallback mode",
-                                 true);
-            return;
-        }
         if (!queueActuatorCommand(topic.c_str(), payload.c_str(), &metadata)) {
             publishIntentOutcome("command",
                                  metadata,
@@ -697,15 +745,6 @@ void routeIncomingMessage(const char* t, const char* p) {
                                  admission.code,
                                  String("Sensor command rejected (reason_code=") + admission.reason_code + ")",
                                  false);
-            return;
-        }
-        if (!g_safety_rtos_tasks_created) {
-            publishIntentOutcome("command",
-                                 metadata,
-                                 "rejected",
-                                 "MODE_UNSUPPORTED",
-                                 "Sensor command rejected in legacy fallback mode",
-                                 true);
             return;
         }
         if (!queueSensorCommand(topic.c_str(), payload.c_str(), &metadata)) {
@@ -980,6 +1019,26 @@ void routeIncomingMessage(const char* t, const char* p) {
         if (error) {
             LOG_E(TAG, "JSON parse error: " + String(error.c_str()));
             LOG_E(TAG, "Raw payload: " + payload);
+            IntentMetadata meta = extractIntentMetadataFromPayload(payload.c_str(), "sys");
+            DynamicJsonDocument err_doc(320);
+            err_doc["command"] = "";
+            err_doc["success"] = false;
+            err_doc["esp_id"] = g_system_config.esp_id;
+            err_doc["error"] = "JSON_PARSE_ERROR";
+            err_doc["message"] = String("System command JSON parse failed: ") + error.c_str();
+            err_doc["reason_code"] = "JSON_PARSE_ERROR";
+            err_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+            err_doc["seq"] = mqttClient.getNextSeq();
+            err_doc["correlation_id"] = ensureCorrelationId(String(meta.correlation_id));
+            String err_payload;
+            serializeJson(err_doc, err_payload);
+            mqttClient.publish(String(TopicBuilder::buildSystemCommandTopic()) + "/response", err_payload, 1);
+            publishIntentOutcome("command",
+                                 meta,
+                                 "failed",
+                                 "JSON_PARSE_ERROR",
+                                 String("System command JSON parse failed: ") + error.c_str(),
+                                 true);
             return;
         }
 
@@ -1432,6 +1491,7 @@ void routeIncomingMessage(const char* t, const char* p) {
         ConfigLaneGuard config_lane_guard;
         if (!config_lane_guard.locked()) {
             LOG_W(TAG, "Zone assignment dropped: config lane busy");
+            publishZoneConfigLaneBusyAck(p);
             return;
         }
         LOG_I(TAG, "╔════════════════════════════════════════╗");
@@ -1573,7 +1633,8 @@ void routeIncomingMessage(const char* t, const char* p) {
                     String old_subzone_remove = "kaiser/" + old_kaiser_id + "/esp/" + g_system_config.esp_id + "/subzone/remove";
                     String old_subzone_safe = "kaiser/" + old_kaiser_id + "/esp/" + g_system_config.esp_id + "/subzone/safe";
                     String old_actuator_cmd = "kaiser/" + old_kaiser_id + "/esp/" + g_system_config.esp_id + "/actuator/+/command";
-                    String old_heartbeat_ack = "kaiser/" + old_kaiser_id + "/system/heartbeat/ack";
+                    String old_heartbeat_ack = "kaiser/" + old_kaiser_id + "/esp/" +
+                                               g_system_config.esp_id + "/system/heartbeat/ack";
 
                     mqttClient.unsubscribe(old_zone_assign);
                     mqttClient.unsubscribe(old_sensor_cmd);
@@ -1650,6 +1711,26 @@ void routeIncomingMessage(const char* t, const char* p) {
             }
         } else {
             LOG_E(TAG, "Failed to parse zone assignment JSON");
+            IntentMetadata zm = extractIntentMetadataFromPayload(p, "zone");
+            String corr = ensureCorrelationId(String(zm.correlation_id));
+            String ack_topic = TopicBuilder::buildZoneAckTopic();
+            DynamicJsonDocument err_doc(384);
+            err_doc["esp_id"] = g_system_config.esp_id;
+            err_doc["status"] = "error";
+            err_doc["reason_code"] = "JSON_PARSE_ERROR";
+            err_doc["message"] = String("Zone JSON parse failed: ") + error.c_str();
+            err_doc["ts"] = (unsigned long)timeManager.getUnixTimestamp();
+            err_doc["seq"] = mqttClient.getNextSeq();
+            err_doc["correlation_id"] = corr;
+            String error_response;
+            serializeJson(err_doc, error_response);
+            mqttClient.publish(ack_topic, error_response, 1);
+            publishIntentOutcome("zone",
+                                 zm,
+                                 "failed",
+                                 "JSON_PARSE_ERROR",
+                                 String("Zone assignment JSON parse failed: ") + error.c_str(),
+                                 true);
         }
         return;
     }
@@ -1661,6 +1742,7 @@ void routeIncomingMessage(const char* t, const char* p) {
         ConfigLaneGuard config_lane_guard;
         if (!config_lane_guard.locked()) {
             LOG_W(TAG, "Subzone assignment dropped: config lane busy");
+            publishSubzoneConfigLaneBusyAck(p, "subzone_assign");
             return;
         }
         LOG_I(TAG, "╔════════════════════════════════════════╗");
@@ -1757,7 +1839,19 @@ void routeIncomingMessage(const char* t, const char* p) {
             LOG_I(TAG, "✅ Subzone assignment successful: " + subzone_id);
         } else {
             LOG_E(TAG, "Failed to parse subzone assignment JSON");
-            sendSubzoneAck("", "error", "JSON parse failed");
+            IntentMetadata sm = extractIntentMetadataFromPayload(p, "subz");
+            String sc = ensureCorrelationId(String(sm.correlation_id));
+            sendSubzoneAck("unknown",
+                           "error",
+                           String("JSON parse failed: ") + error.c_str(),
+                           sc,
+                           "JSON_PARSE_ERROR");
+            publishIntentOutcome("subzone_assign",
+                                 sm,
+                                 "failed",
+                                 "JSON_PARSE_ERROR",
+                                 String("Subzone assign JSON parse failed: ") + error.c_str(),
+                                 true);
         }
         return;
     }
@@ -1768,6 +1862,7 @@ void routeIncomingMessage(const char* t, const char* p) {
         ConfigLaneGuard config_lane_guard;
         if (!config_lane_guard.locked()) {
             LOG_W(TAG, "Subzone removal dropped: config lane busy");
+            publishSubzoneConfigLaneBusyAck(p, "subzone_remove");
             return;
         }
         LOG_I(TAG, "╔════════════════════════════════════════╗");
@@ -1785,14 +1880,26 @@ void routeIncomingMessage(const char* t, const char* p) {
                 correlationId = doc["correlation_id"].as<String>();
             }
 
+            correlationId = ensureCorrelationId(correlationId);
+
             if (subzone_id.length() == 0) {
                 LOG_E(TAG, "Subzone removal failed: subzone_id is empty");
+                sendSubzoneAck("unknown",
+                               "error",
+                               "subzone_id is required",
+                               correlationId,
+                               "VALIDATION_ERROR");
                 return;
             }
 
             SubzoneConfig config;
             if (!configManager.loadSubzoneConfig(subzone_id, config)) {
                 LOG_W(TAG, "Subzone " + subzone_id + " not found for removal");
+                sendSubzoneAck(subzone_id,
+                               "error",
+                               "subzone not found",
+                               correlationId,
+                               "SUBZONE_NOT_FOUND");
                 return;
             }
 
@@ -1803,6 +1910,20 @@ void routeIncomingMessage(const char* t, const char* p) {
             configManager.removeSubzoneConfig(subzone_id);
             sendSubzoneAck(subzone_id, "subzone_removed", "", correlationId);
             LOG_I(TAG, "✅ Subzone removed: " + subzone_id);
+        } else {
+            IntentMetadata rm = extractIntentMetadataFromPayload(p, "subz");
+            String rc = ensureCorrelationId(String(rm.correlation_id));
+            sendSubzoneAck("unknown",
+                           "error",
+                           String("JSON parse failed: ") + error.c_str(),
+                           rc,
+                           "JSON_PARSE_ERROR");
+            publishIntentOutcome("subzone_remove",
+                                 rm,
+                                 "failed",
+                                 "JSON_PARSE_ERROR",
+                                 String("Subzone remove JSON parse failed: ") + error.c_str(),
+                                 true);
         }
         return;
     }
@@ -1813,6 +1934,7 @@ void routeIncomingMessage(const char* t, const char* p) {
         ConfigLaneGuard config_lane_guard;
         if (!config_lane_guard.locked()) {
             LOG_W(TAG, "Subzone safe-mode dropped: config lane busy");
+            publishSubzoneConfigLaneBusyAck(p, "subzone_safe");
             return;
         }
         LOG_I(TAG, "╔════════════════════════════════════════╗");
@@ -1827,14 +1949,30 @@ void routeIncomingMessage(const char* t, const char* p) {
             String action = doc["action"].as<String>();
             bool safe_mode = doc["safe_mode"] | (action == "enable");
 
+            String safe_corr = "";
+            if (doc.containsKey("correlation_id")) {
+                safe_corr = doc["correlation_id"].as<String>();
+            }
+            safe_corr = ensureCorrelationId(safe_corr);
+
             if (subzone_id.length() == 0) {
                 LOG_E(TAG, "Subzone safe-mode failed: subzone_id is empty");
+                sendSubzoneAck("unknown",
+                               "error",
+                               "subzone_id is required",
+                               safe_corr,
+                               "VALIDATION_ERROR");
                 return;
             }
 
             SubzoneConfig config;
             if (!configManager.loadSubzoneConfig(subzone_id, config)) {
                 LOG_W(TAG, "Subzone " + subzone_id + " not found for safe-mode");
+                sendSubzoneAck(subzone_id,
+                               "error",
+                               "subzone not found",
+                               safe_corr,
+                               "SUBZONE_NOT_FOUND");
                 return;
             }
 
@@ -1857,6 +1995,19 @@ void routeIncomingMessage(const char* t, const char* p) {
             }
         } else {
             LOG_E(TAG, "Failed to parse subzone safe-mode JSON");
+            IntentMetadata fm = extractIntentMetadataFromPayload(p, "subz");
+            String fc = ensureCorrelationId(String(fm.correlation_id));
+            sendSubzoneAck("unknown",
+                           "error",
+                           String("JSON parse failed: ") + error.c_str(),
+                           fc,
+                           "JSON_PARSE_ERROR");
+            publishIntentOutcome("subzone_safe",
+                                 fm,
+                                 "failed",
+                                 "JSON_PARSE_ERROR",
+                                 String("Subzone safe JSON parse failed: ") + error.c_str(),
+                                 true);
         }
         return;
     }
@@ -1915,10 +2066,18 @@ void routeIncomingMessage(const char* t, const char* p) {
         } else if (strcmp(status, "online") == 0) {
             // SAFETY-P4 bridge for server-only restarts:
             // If broker transport stayed connected, onMqttConnectCallback() is not triggered.
-            // We still need to enter RECONNECTING (epoch++) so the next ACK contract can validate.
-            if (offlineModeManager.getMode() == OfflineMode::OFFLINE_ACTIVE) {
+            // Handle both relevant states explicitly:
+            // - OFFLINE_ACTIVE: arm handover (RECONNECTING + epoch++)
+            // - DISCONNECTED: cancel grace timer and return ONLINE
+            //   (prevents false OFFLINE_ACTIVE transition when ONLINE hint arrives during grace)
+            OfflineMode mode = offlineModeManager.getMode();
+            if (mode == OfflineMode::OFFLINE_ACTIVE || mode == OfflineMode::DISCONNECTED) {
                 offlineModeManager.onReconnect();
-                LOG_I(TAG, "[SAFETY-P5] Server ONLINE hint received — P4 handover armed (waiting for authoritative heartbeat ACK)");
+                if (mode == OfflineMode::OFFLINE_ACTIVE) {
+                    LOG_I(TAG, "[SAFETY-P5] Server ONLINE hint received — P4 handover armed (waiting for authoritative heartbeat ACK)");
+                } else {
+                    LOG_I(TAG, "[SAFETY-P5] Server ONLINE hint received during grace period — timer cancelled");
+                }
             } else {
                 LOG_I(TAG, "[SAFETY-P5] Server ONLINE hint received — waiting for heartbeat ACK as authoritative recovery");
             }
@@ -3074,17 +3233,24 @@ void setup() {
   initSensorCommandQueue();
   // initPublishQueue: moved to Phase 2 (immediately after mqttClient.begin)
 
-  createSafetyTask();   // Core 1, Priority 5 — Safety/Sensor/Actuator
+  bool safety_task_created = createSafetyTask();   // Core 1, Priority 5 — Safety/Sensor/Actuator
+  if (safety_task_created) {
+    // Deregister Arduino loopTask from WDT — Safety-Task takes over WDT feeding
+    #ifndef WOKWI_SIMULATION
+    esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
+    #endif
+    LOG_I(TAG, "[SAFETY-RTOS M1] Safety task created, loopTask deregistered from WDT");
+  } else {
+    LOG_C(TAG, "[SAFETY-RTOS M1] Safety task creation failed — keeping loopTask on WDT");
+  }
 
-  // Deregister Arduino loopTask from WDT — Safety-Task takes over WDT feeding
-  #ifndef WOKWI_SIMULATION
-  esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
-  #endif
-  LOG_I(TAG, "[SAFETY-RTOS M1] Safety task created, loopTask deregistered from WDT");
-
-  createCommunicationTask();  // M3: Core 0, Priority 3 — WiFi/MQTT/Portal/Timers
-  g_safety_rtos_tasks_created = true;
-  LOG_I(TAG, "[SAFETY-RTOS M3] Communication task created on Core 0");
+  bool comm_task_created = createCommunicationTask();  // M3: Core 0, Priority 3 — WiFi/MQTT/Portal/Timers
+  g_safety_rtos_tasks_created = safety_task_created && comm_task_created;
+  if (comm_task_created) {
+    LOG_I(TAG, "[SAFETY-RTOS M3] Communication task created on Core 0");
+  } else {
+    LOG_C(TAG, "[SAFETY-RTOS M3] Communication task creation failed — staying in legacy loop fallback");
+  }
 
   // === DIAGNOSTIK: System State nach Setup ===
   LOG_I(TAG, "=== POST-SETUP DIAGNOSTICS ===");
@@ -3288,11 +3454,15 @@ uint8_t getWatchdogCountLast24h() {
 // ============================================
 static void loopLegacySingleThreadedWhenNoRtosTasks() {
   watchdogStorageTryFinalizeBootRecord();
+  const bool safety_task_active = (g_safety_task_handle != NULL);
 
   static bool first_loop_logged = false;
   if (!first_loop_logged) {
-    LOG_I(TAG, "=== FIRST LOOP ITERATION (legacy path, no RTOS comm/safety tasks) ===");
+    LOG_I(TAG, "=== FIRST LOOP ITERATION (legacy path, RTOS fallback) ===");
     LOG_W(TAG, "[SAFETY-RTOS] Legacy single-thread fallback active: core-isolation guarantees are NOT active");
+    if (safety_task_active) {
+      LOG_W(TAG, "[SAFETY-RTOS] Safety task is active while comm task is missing — legacy loop runs network/control-plane only");
+    }
     LOG_I(TAG, "System State: " + String(g_system_config.current_state));
     LOG_I(TAG, "Critical Errors: " + String(errorTracker.hasCriticalErrors() ? "YES" : "NO"));
     first_loop_logged = true;
@@ -3348,6 +3518,11 @@ static void loopLegacySingleThreadedWhenNoRtosTasks() {
     wifiManager.loop();
     mqttClient.loop();
 #ifndef MQTT_USE_PUBSUBCLIENT
+    // Legacy fallback (no Comm-Task): still process config lane so CONFIG_PENDING can recover.
+    // If Safety-Task is active, Core 1 already drains this queue.
+    if (!safety_task_active) {
+      processConfigUpdateQueue();
+    }
     mqttClient.processPublishQueue();
 #endif
     delay(100);
@@ -3370,10 +3545,13 @@ static void loopLegacySingleThreadedWhenNoRtosTasks() {
 #ifndef MQTT_USE_PUBSUBCLIENT
   mqttClient.processPublishQueue();
 #endif
-  // Legacy fallback: explicitly drain command/config queues in single-thread mode.
-  processActuatorCommandQueue();
-  processSensorCommandQueue();
-  processConfigUpdateQueue();
+  // Legacy fallback: drain queues only in pure single-thread mode.
+  // When Safety-Task exists but Comm-Task is missing, queue consumers run on Core 1.
+  if (!safety_task_active) {
+    processActuatorCommandQueue();
+    processSensorCommandQueue();
+    processConfigUpdateQueue();
+  }
 
   {
     static const unsigned long PORTAL_OPEN_DEBOUNCE_MS = 30000;
@@ -3465,7 +3643,7 @@ static void loopLegacySingleThreadedWhenNoRtosTasks() {
 
   offlineModeManager.checkDelayTimer();
   static unsigned long last_offline_eval = 0;
-  if (offlineModeManager.isOfflineActive()) {
+  if (!safety_task_active && offlineModeManager.isOfflineActive()) {
     if (millis() - last_offline_eval > 5000) {
       last_offline_eval = millis();
       offlineModeManager.evaluateOfflineRules();
@@ -3753,7 +3931,8 @@ bool handleOfflineRulesConfig(JsonObject doc, const String& correlationId) {
  * Topic: kaiser/{id}/esp/{esp_id}/sensor/{gpio}/command
  * Payload: {"command": "measure", "request_id": "req_12345"}
  */
-bool handleSensorCommand(const String& topic, const String& payload) {
+bool handleSensorCommand(const String& topic, const String& payload,
+                         const IntentMetadata& metadata) {
   LOG_I(TAG, "Sensor command received: " + topic);
 
   // Extract GPIO from topic
@@ -3792,16 +3971,25 @@ bool handleSensorCommand(const String& topic, const String& payload) {
 
     bool success = sensorManager.triggerManualMeasurement(gpio);
 
-    // Send response if request_id was provided
+    // Send response with request_id and intent metadata (E-P4)
     if (request_id.length() > 0) {
       String response_topic = String(TopicBuilder::buildSensorResponseTopic(gpio));
-      DynamicJsonDocument response(256);
+      DynamicJsonDocument response(384);
       response["request_id"] = request_id;
       response["gpio"] = gpio;
       response["command"] = "measure";
       response["success"] = success;
       response["ts"] = timeManager.getUnixTimestamp();
       response["seq"] = mqttClient.getNextSeq();
+
+      // E-P4: Include intent metadata for server-side correlation
+      if (strlen(metadata.intent_id) > 0) {
+        response["intent_id"] = metadata.intent_id;
+      }
+      if (strlen(metadata.correlation_id) > 0) {
+        response["correlation_id"] = metadata.correlation_id;
+      }
+      response["ttl_ms"] = metadata.ttl_ms;
 
       String response_payload;
       serializeJson(response, response_payload);

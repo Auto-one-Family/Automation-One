@@ -12,7 +12,8 @@ static const char* SENS_Q_TAG = "SYNC";
 
 // Forward declaration — defined in main.cpp
 // Runs on Core 1 (Safety-Task context) after being queued from Core 0 (ESP-IDF MQTT task).
-extern bool handleSensorCommand(const String& topic, const String& payload);
+extern bool handleSensorCommand(const String& topic, const String& payload,
+                                const IntentMetadata& metadata);
 
 QueueHandle_t g_sensor_cmd_queue = NULL;
 extern SystemConfig g_system_config;
@@ -116,7 +117,7 @@ void processSensorCommandQueue(uint8_t max_items) {
             processed++;
             continue;
         }
-        bool ok = handleSensorCommand(String(cmd.topic), String(cmd.payload));
+        bool ok = handleSensorCommand(String(cmd.topic), String(cmd.payload), cmd.metadata);
         publishIntentOutcome("command",
                              cmd.metadata,
                              ok ? "applied" : "failed",

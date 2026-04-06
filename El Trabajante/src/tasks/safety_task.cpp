@@ -15,15 +15,18 @@ static const char* SAFETY_TAG = "SAFETY";
 
 TaskHandle_t g_safety_task_handle = NULL;
 
-static const uint32_t SAFETY_TASK_STACK_SIZE = 8192;
+// PUBLISH_PAYLOAD_MAX_LEN increased 1024→2048: PublishRequest on stack grew by 1024 bytes.
+// Keep intended 12 KB stack budget (convert bytes -> FreeRTOS words explicitly).
+static const uint32_t SAFETY_TASK_STACK_BYTES = 12288;
+static const uint32_t SAFETY_TASK_STACK_SIZE = SAFETY_TASK_STACK_BYTES / sizeof(StackType_t);
 static const UBaseType_t SAFETY_TASK_PRIORITY = 5;
 static const BaseType_t SAFETY_TASK_CORE = 1;
 
 // Forward declaration — defined in main.cpp
 extern void checkServerAckTimeout();
 
-void createSafetyTask() {
-    xTaskCreatePinnedToCore(
+bool createSafetyTask() {
+    BaseType_t created = xTaskCreatePinnedToCore(
         safetyTaskFunction,
         "SafetyTask",
         SAFETY_TASK_STACK_SIZE,
@@ -32,6 +35,17 @@ void createSafetyTask() {
         &g_safety_task_handle,
         SAFETY_TASK_CORE
     );
+    if (created != pdPASS || g_safety_task_handle == NULL) {
+        LOG_E(SAFETY_TAG,
+              "[SAFETY] Failed to create safety task (stack_words=" +
+              String((uint32_t)SAFETY_TASK_STACK_SIZE) +
+              ", stack_bytes=" + String((uint32_t)SAFETY_TASK_STACK_BYTES) +
+              ", free_heap=" + String(ESP.getFreeHeap()) +
+              ", min_free_heap=" + String(ESP.getMinFreeHeap()) +
+              ", max_alloc=" + String(ESP.getMaxAllocHeap()) + ")");
+        return false;
+    }
+    return true;
 }
 
 void safetyTaskFunction(void* param) {

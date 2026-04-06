@@ -4,7 +4,7 @@
 
 #include "intent_contract.h"
 
-static const uint8_t SENSOR_CMD_QUEUE_SIZE = 10;
+static const uint8_t SENSOR_CMD_QUEUE_SIZE = 20;
 
 struct SensorCommand {
     char topic[128];

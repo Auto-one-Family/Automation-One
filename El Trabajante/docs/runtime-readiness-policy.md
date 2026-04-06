@@ -47,3 +47,13 @@ Zusaetzlich werden Counter transportiert:
 - `config_pending_enter_count`
 - `config_pending_exit_count`
 - `config_pending_exit_blocked_count`
+
+## MQTT-Transport (Firmware ab 2026-04)
+
+Lifecycle-Transition-Events (`entered_config_pending`, `exit_blocked_config_pending`, `exited_config_pending`) werden **nicht** mehr auf dem kanonischen Topic `.../system/intent_outcome` veroeffentlicht (dort nur `buildOutcomePayload`-Outcomes), sondern auf:
+
+- `kaiser/{kaiser_id}/esp/{esp_id}/system/intent_outcome/lifecycle`
+
+Payload-Schema-Tag: `schema` = `config_pending_lifecycle_v1`. Zusaetzlich enthaelt jedes Event `boot_sequence_id` (Korrelation zum Heartbeat / Boot-Segment).
+
+Server-Folgeauftrag: separater Handler/Subscription fuer `intent_outcome/lifecycle` oder Wildcard `.../intent_outcome/#`.

@@ -34,6 +34,8 @@ public:
   static const char* buildConfigTopic();                        // Pattern 7
   static const char* buildConfigResponseTopic();
   static const char* buildIntentOutcomeTopic();                 // Unified intent outcome stream
+  // CONFIG_PENDING / runtime lifecycle transitions (raw schema v1) — not mixed with kanonischem Outcome-JSON
+  static const char* buildIntentOutcomeLifecycleTopic();
   // ORPHANED (GHOST) - Server->ESP but ESP never subscribes. See Mqtt_Protocoll.md inventory.
   static const char* buildBroadcastEmergencyTopic();            // Pattern 8
   

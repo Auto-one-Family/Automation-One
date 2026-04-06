@@ -30,7 +30,10 @@ static const char* COMM_TAG = "COMM";
 
 static TaskHandle_t s_comm_task_handle = NULL;
 
-static const uint32_t    COMM_TASK_STACK_SIZE = 6144;
+// FreeRTOS stack depth is in words, not bytes.
+// Keep the intended 6 KB stack budget and convert explicitly.
+static const uint32_t    COMM_TASK_STACK_BYTES = 10240;
+static const uint32_t    COMM_TASK_STACK_SIZE = COMM_TASK_STACK_BYTES / sizeof(StackType_t);
 static const UBaseType_t COMM_TASK_PRIORITY   = 3;    // Below Safety-Task (5)
 static const BaseType_t  COMM_TASK_CORE       = 0;    // PRO_CPU (WiFi-Stack co-located)
 
@@ -282,14 +285,45 @@ void communicationTaskFunction(void* param) {
 // ============================================
 // createCommunicationTask
 // ============================================
-void createCommunicationTask() {
-    xTaskCreatePinnedToCore(
-        communicationTaskFunction,
-        "CommTask",
+bool createCommunicationTask() {
+    // Robust boot behavior with safety floor:
+    // never go below 8 KB for this task (network + MQTT + portal + logging).
+    const uint32_t stack_candidates[] = {
         COMM_TASK_STACK_SIZE,
-        NULL,
-        COMM_TASK_PRIORITY,
-        &s_comm_task_handle,
-        COMM_TASK_CORE
-    );
+        9216 / sizeof(StackType_t),
+        8192 / sizeof(StackType_t)
+    };
+
+    for (uint8_t i = 0; i < (sizeof(stack_candidates) / sizeof(stack_candidates[0])); ++i) {
+        const uint32_t stack_depth = stack_candidates[i];
+        s_comm_task_handle = NULL;
+        BaseType_t created = xTaskCreatePinnedToCore(
+            communicationTaskFunction,
+            "CommTask",
+            stack_depth,
+            NULL,
+            COMM_TASK_PRIORITY,
+            &s_comm_task_handle,
+            COMM_TASK_CORE
+        );
+        if (created == pdPASS && s_comm_task_handle != NULL) {
+            LOG_I(COMM_TAG,
+                  "[COMM] Communication task created (stack_depth=" +
+                  String((uint32_t)stack_depth) + ", stack_bytes=" +
+                  String((uint32_t)(stack_depth * sizeof(StackType_t))) + ")");
+            return true;
+        }
+
+        LOG_W(COMM_TAG,
+              "[COMM] Task create attempt failed (stack_depth=" +
+              String((uint32_t)stack_depth) + ", stack_bytes=" +
+              String((uint32_t)(stack_depth * sizeof(StackType_t))) +
+              ", free_heap=" + String(ESP.getFreeHeap()) +
+              ", min_free_heap=" + String(ESP.getMinFreeHeap()) +
+              ", max_alloc=" + String(ESP.getMaxAllocHeap()) + ")");
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    LOG_E(COMM_TAG, "[COMM] Failed to create communication task after retries");
+    return false;
 }

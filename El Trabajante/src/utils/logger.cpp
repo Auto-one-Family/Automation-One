@@ -62,11 +62,14 @@ void Logger::log(LogLevel level, const char* tag, const char* message) {
     return;
   }
 
+  const char* safe_tag = (tag != nullptr && tag[0] != '\0') ? tag : "LOGGER";
+  const char* safe_message = (message != nullptr) ? message : "<null>";
+
   if (serial_enabled_) {
-    writeToSerial(level, tag, message);
+    writeToSerial(level, safe_tag, safe_message);
   }
 
-  addToBuffer(level, tag, message);
+  addToBuffer(level, safe_tag, safe_message);
 }
 
 void Logger::debug(const char* tag, const char* message) {
@@ -160,19 +163,24 @@ LogLevel Logger::getLogLevelFromString(const char* level_str) {
 void Logger::writeToSerial(LogLevel level, const char* tag, const char* message) {
   unsigned long timestamp = millis();
   const char* level_str = getLogLevelString(level);
+  const char* safe_level = (level_str != nullptr) ? level_str : "UNKNOWN";
+  const char* safe_tag = (tag != nullptr && tag[0] != '\0') ? tag : "LOGGER";
+  const char* safe_message = (message != nullptr) ? message : "<null>";
 
   // Format: [millis] [LEVEL   ] [TAG     ] message
-  Serial.printf("[%10lu] [%-8s] [%-8s] %s\n", timestamp, level_str, tag, message);
+  Serial.printf("[%10lu] [%-8s] [%-8s] %s\n", timestamp, safe_level, safe_tag, safe_message);
 }
 
 void Logger::addToBuffer(LogLevel level, const char* tag, const char* message) {
   size_t index = log_buffer_index_;
+  const char* safe_tag = (tag != nullptr && tag[0] != '\0') ? tag : "LOGGER";
+  const char* safe_message = (message != nullptr) ? message : "<null>";
 
   log_buffer_[index].timestamp = millis();
   log_buffer_[index].level = level;
-  strncpy(log_buffer_[index].tag, tag, sizeof(log_buffer_[index].tag) - 1);
+  strncpy(log_buffer_[index].tag, safe_tag, sizeof(log_buffer_[index].tag) - 1);
   log_buffer_[index].tag[sizeof(log_buffer_[index].tag) - 1] = '\0';
-  strncpy(log_buffer_[index].message, message, sizeof(log_buffer_[index].message) - 1);
+  strncpy(log_buffer_[index].message, safe_message, sizeof(log_buffer_[index].message) - 1);
   log_buffer_[index].message[sizeof(log_buffer_[index].message) - 1] = '\0';
 
   log_buffer_index_ = (log_buffer_index_ + 1) % MAX_LOG_ENTRIES;

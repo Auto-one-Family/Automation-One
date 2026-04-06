@@ -56,7 +56,8 @@ kaiser/
 │   │       ├── system/
 │   │       │   ├── command        # System-Befehle (subscribe)
 │   │       │   ├── heartbeat      # System-Heartbeat (publish)
-│   │       │   ├── intent_outcome # Intent/Outcome-Events (publish)
+│   │       │   ├── intent_outcome # Intent/Outcome kanonisch (publish)
+│   │       │   ├── intent_outcome/lifecycle # CONFIG_PENDING lifecycle (publish, Schema v1)
 │   │       │   └── diagnostics   # System-Diagnostics (publish)
 │   │       ├── zone/
 │   │       │   ├── assign         # Zone Assignment (subscribe) - Phase 7
@@ -282,9 +283,20 @@ Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
       "safe": false                    // In Safe-Mode? (false = aktiv genutzt)
     }
   ],
-  "gpio_reserved_count": 4             // Anzahl reservierter Pins - OPTIONAL (Phase 1)
+  "gpio_reserved_count": 4,            // Anzahl reservierter Pins - OPTIONAL (Phase 1)
+  "persistence_degraded": false,      // Persistence-Drift (Offline-Rules) — ab 2026-04
+  "persistence_degraded_reason": "NONE",
+  "runtime_state_degraded": false,    // FSM: CONFIG_PENDING, SAFE_MODE, …
+  "mqtt_circuit_breaker_open": false,
+  "wifi_circuit_breaker_open": false,
+  "network_degraded": false,          // MQTT-CB oder WiFi-CB OPEN
+  "persistence_drift_count": 0,
+  "critical_outcome_drop_count": 0,   // NVS intent_outbox Superseded/Drops
+  "publish_outbox_drop_count": 0      // ESP-IDF Outbox -2, nicht-kritisch (nur ESP-IDF-Pfad)
 }
 ```
+
+**Hinweis (2026-04):** Die Felder `degraded` / `degraded_reason` (früher nur Persistence-Drift) werden **nicht mehr** gesendet; Consumer auf `persistence_degraded*` und `runtime_state_degraded` / `network_degraded` umstellen.
 
 **gpio_status Array (Phase 1 - GPIO-Status-Übertragung):**
 
@@ -1231,11 +1243,14 @@ Libraries werden über MQTT in Chunks übertragen, da MQTT-Payloads limitiert si
 ```
 
 **Outcome-Werte:** `accepted`, `rejected`, `applied`, `persisted`, `failed`, `expired`
-**Fehlerklassen:** `QUEUE_FULL`, `TIMEOUT`, `VALIDATION_FAIL`, `EXECUTE_FAIL`, `STALE_OR_EXPIRED`, `AUTH_FAIL`, `MODE_UNSUPPORTED`, `REGISTRATION_PENDING`
-**Server-Kanonisierung (P0.2):** Alias-Mapping im Ingest (`processing→accepted`, `success/ok→persisted`, `error→failed`, `timeout→expired`); unbekannte `flow`/`outcome` werden als Contract-Verletzung mit `code=CONTRACT_UNKNOWN_CODE` verarbeitet.
+**Fehlerklassen:** `QUEUE_FULL`, `PUBLISH_OUTBOX_FULL`, `TIMEOUT`, `VALIDATION_FAIL`, `EXECUTE_FAIL`, `STALE_OR_EXPIRED`, `AUTH_FAIL`, `MODE_UNSUPPORTED`, `REGISTRATION_PENDING`, `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `JSON_PARSE_ERROR`
+**Server-Kanonisierung (P0.2):** Alias-Mapping im Ingest (`processing→accepted`, `success/ok→persisted`, `error→failed`, `timeout→expired`); kanonische `flow`-Werte u. a. `command`, `config`, `publish`, `zone`, `subzone_assign`, `subzone_remove`, `subzone_safe`, `offline_rules`. Unbekannte `flow`/`outcome` werden als Contract-Verletzung verarbeitet (`code=CONTRACT_UNKNOWN_CODE`, ausser bekanntem Flow mit unbekanntem Outcome und gesetztem Firmware-`code`).
 **Contract-Hinweis:** Fehlt `correlation_id`, setzt der Server `code=CONTRACT_MISSING_CORRELATION` und markiert den Datensatz als nicht-retrybar.
+**Metadaten:** Top-level `intent_id` / `correlation_id` / …; optional zusätzlich unter `data.*` (Firmware bevorzugt Top-level).
 
 **Hinweis:** Kritische Pfade (Command/Config/Safety) liefern damit terminale Outcomes ohne Silent-Drop.
+
+**Subtopic Lifecycle (nicht kanonisches Outcome-JSON):** `kaiser/{kaiser_id}/esp/{esp_id}/system/intent_outcome/lifecycle` — nur CONFIG_PENDING-Transitions; `schema`=`config_pending_lifecycle_v1`, `boot_sequence_id` siehe `docs/runtime-readiness-policy.md`. **TopicBuilder:** `buildIntentOutcomeLifecycleTopic()`. **Server:** Subscription `kaiser/+/esp/+/system/intent_outcome/lifecycle`, Handler `intent_outcome_lifecycle_handler.py` (Audit + WebSocket).
 
 ---
 
@@ -1641,6 +1656,8 @@ mosquitto_pub -h localhost \
 }
 ```
 
+**Optional (vom Server):** `timestamp` (Unix-Sekunden), `correlation_id` (String) und — wenn `correlation_id` gesetzt — **`intent_id`** mit dem **gleichen** Wert (God-Kaiser: stabiler Schlüssel für `command_intents` und `IntentMetadata` in `intent_contract.cpp`). Bei **REST-Not-Aus** setzt God-Kaiser pro GPIO `correlation_id` = `{incident_correlation_id}:{esp_id}:{gpio}` (E2E-Zuordnung; siehe `.claude/reference/api/MQTT_TOPICS.md` §2.1). Dieselbe Zeichenkette landet bei erfolgreichem Publish in `actuator_history.command_metadata` als `correlation_id` und `mqtt_correlation_id` (Überblick: `El Servador/god_kaiser_server/docs/emergency-stop-mqtt-correlation.md`). Orchestrierung Server-DB: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`. Die Firmware kann die ID in `actuator/.../response` echo’en (best effort); fehlt sie, ergänzt der Server synthetische Korrelation.
+
 **Unterstützte Commands:**
 - `ON`: Aktor einschalten (Binary)
 - `OFF`: Aktor ausschalten (Binary)
@@ -2019,6 +2036,7 @@ mosquitto_pub -h localhost \
 - Für Initial-Setup siehe [Provisioning Documentation](Dynamic%20Zones%20and%20Provisioning/PROVISIONING.md)
 - ESP muss zuerst über REST API registriert werden (`POST /api/v1/esp/register`)
 - Auto-Discovery via Heartbeat ist deaktiviert
+- **Server:** `MQTTCommandBridge` ordnet `zone/ack` nur zu, wenn `correlation_id` die UUID aus `zone/assign` exakt echo’t (kein FIFO-Fallback); sonst REST-Timeout.
 
 **Siehe auch:** [Zone Assignment Flow](../system-flows/08-zone-assignment-flow.md) für detaillierten Flow
 
@@ -2543,6 +2561,7 @@ local_client.loop_forever()
 | `core/system_controller.cpp` | `status`, `safe_mode`, `system/response` | `system/command`, `config`, `broadcast/system_update` | 🔴 KRITISCH |
 | `services/communication/mqtt_client.cpp` | (alle) | (alle) | 🔴 KRITISCH |
 | `tasks/intent_contract.cpp` | `system/intent_outcome` | - | 🔴 KRITISCH |
+| `main.cpp` (CONFIG_PENDING) | `system/intent_outcome/lifecycle` | - | 🔴 KRITISCH |
 | `services/sensor/sensor_manager.cpp` | `sensor/data`, `sensor_batch`, `library/*` | - | 🔴 KRITISCH |
 | `services/actuator/actuator_manager.cpp` | `actuator/status`, `actuator/response`, `actuator/alert` | `actuator/command`, `actuator/emergency`, `broadcast/emergency` | 🔴 KRITISCH |
 | `error_handling/health_monitor.cpp` | `system/diagnostics` | - | 🟡 HOCH |

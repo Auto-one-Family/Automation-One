@@ -163,6 +163,14 @@ void GPIOManager::initializeAllPinsToSafeMode() {
 // Implements comprehensive validation and conflict detection
 
 bool GPIOManager::requestPin(uint8_t gpio, const char* owner, const char* component_name) {
+    if (owner == nullptr || owner[0] == '\0') {
+        LOG_E(TAG, "GPIOManager: requestPin rejected (owner missing) for GPIO " + String(gpio));
+        return false;
+    }
+    if (component_name == nullptr) {
+        component_name = "";
+    }
+
     // VALIDATION 1: Check if pin is reserved
     if (isReservedPin(gpio)) {
         LOG_E(TAG, "GPIOManager: Attempted to request reserved pin " + String(gpio));
@@ -501,11 +509,11 @@ uint8_t GPIOManager::getAvailablePinCount() const {
 std::vector<GPIOPinInfo> GPIOManager::getReservedPinsList() const {
     std::vector<GPIOPinInfo> reserved;
 
-    // Pre-allocate for performance and to prevent heap fragmentation
-    // MAX_SENSORS + MAX_ACTUATORS + System-Pins (I2C, SPI, etc.)
-    reserved.reserve(16);
-
     try {
+        // Pre-allocate close to actual upper bound to avoid intermediate reallocations.
+        // Must stay inside try: reserve() may throw on allocation failure.
+        reserved.reserve(pins_.size());
+
         for (const auto& pin_info : pins_) {
             // Nur Pins die NICHT in Safe-Mode sind (also aktiv reserviert)
             // UND einen Owner haben (doppelte Sicherheit)
@@ -513,8 +521,13 @@ std::vector<GPIOPinInfo> GPIOManager::getReservedPinsList() const {
                 reserved.push_back(pin_info);
             }
         }
-    } catch (const std::exception& e) {
-        LOG_E(TAG, "GPIOManager::getReservedPinsList() failed: " + String(e.what()));
+    } catch (const std::bad_alloc&) {
+        // Keep error logging allocation-free in low-memory scenarios.
+        LOG_E(TAG, "GPIOManager::getReservedPinsList() failed: std::bad_alloc");
+        // Return empty list on error - don't crash the heartbeat
+        return std::vector<GPIOPinInfo>();
+    } catch (const std::exception&) {
+        LOG_E(TAG, "GPIOManager::getReservedPinsList() failed: std::exception");
         // Return empty list on error - don't crash the heartbeat
         return std::vector<GPIOPinInfo>();
     } catch (...) {

@@ -101,7 +101,11 @@ public:
 
     // Subscription (qos: 0=at most once, 1=at least once)
     bool subscribe(const String& topic, uint8_t qos = 0);
+    // Queue-based subscribe for staged post-connect recovery (ESP-IDF).
+    bool queueSubscribe(const String& topic, uint8_t qos = 0, bool critical = false);
     bool unsubscribe(const String& topic);
+    // Trigger one fast registration heartbeat once heartbeat/ack subscription is active.
+    void requestBootstrapHeartbeatAfterAck();
     void setCallback(std::function<void(const String&, const String&)> callback);
     // SAFETY-P1 Mechanism A: Callback fired after every successful MQTT connect (initial + reconnect)
     void setOnConnectCallback(std::function<void()> callback);
@@ -122,6 +126,8 @@ public:
     // M3: Drain publish queue — called from Communication-Task (Core 0).
     // Safety-Task (Core 1) enqueues via queuePublish(); Core 0 drains here.
     void processPublishQueue();
+    // Drain deferred subscribe queue (one topic per tick with backoff).
+    void processSubscriptionQueue();
 #endif
 
     // Circuit Breaker Access (for Watchdog integration + persistent failure timer)
@@ -131,6 +137,12 @@ public:
     // Sequence number for cross-layer correlation
     uint32_t getNextSeq();
     uint32_t getCurrentSeq() const;
+
+    // Boot segment id (ESP reset reason + boot_count) for correlating lifecycle events
+    String getBootTelemetrySequenceId() const;
+
+    // ESP-IDF MQTT client outbox full (-2) drops for non-critical publishes (telemetry only)
+    uint32_t getPublishOutboxNoncriticalDropCount() const;
 
     // ============================================
     // REGISTRATION GATE (Bug #1 Fix)
@@ -153,6 +165,19 @@ private:
     // BACKEND-SPECIFIC MEMBERS
     // ============================================
 #ifndef MQTT_USE_PUBSUBCLIENT
+    struct PendingSubscription {
+        String topic;
+        uint8_t qos;
+        uint8_t attempts;
+        bool critical;
+        unsigned long next_attempt_ms;
+    };
+
+    static const uint8_t MAX_PENDING_SUBSCRIPTIONS = 16;
+    static const uint8_t MAX_SUBSCRIBE_RETRIES = 6;
+    static const unsigned long SUBSCRIBE_RETRY_BASE_MS = 200;
+    static const unsigned long SUBSCRIBE_RETRY_MAX_MS = 5000;
+
     // ESP-IDF MQTT client handle
     esp_mqtt_client_handle_t mqtt_client_;
 
@@ -160,6 +185,9 @@ private:
     // args = MQTTClient* instance (passed during event registration)
     static void mqtt_event_handler(void* args, esp_event_base_t base,
                                    int32_t event_id, void* event_data);
+
+    bool enqueueSubscription_(const String& topic, uint8_t qos, bool critical, bool front = false);
+    void clearSubscriptionQueue_();
 #else
     // PubSubClient backend
     WiFiClient wifi_client_;
@@ -221,6 +249,12 @@ private:
     unsigned long registration_start_ms_;
     bool registration_timeout_logged_;
     static const unsigned long REGISTRATION_TIMEOUT_MS = 10000;
+
+#ifndef MQTT_USE_PUBSUBCLIENT
+    PendingSubscription pending_subscriptions_[MAX_PENDING_SUBSCRIPTIONS];
+    uint8_t pending_subscription_count_;
+    bool bootstrap_heartbeat_pending_;
+#endif
 
     static MQTTClient* instance_;
     static std::function<void(const String&, const String&)> test_publish_hook_;

@@ -4,16 +4,19 @@
 #include "../../services/sensor/sensor_manager.h"
 #include "../../services/actuator/actuator_manager.h"
 #include "../../services/safety/offline_mode_manager.h"
+#include "../../services/communication/wifi_manager.h"
 #include "../../utils/time_manager.h"
 #include "../../drivers/gpio_manager.h"  // Phase 1: GPIO Status
 #include "../../config/feature_flags.h"
 #include <WiFi.h>
 #include <esp_system.h>
+#include <atomic>
+
+#include "../../tasks/intent_contract.h"
 
 #ifndef MQTT_USE_PUBSUBCLIENT
     #include "../../tasks/safety_task.h"         // g_safety_task_handle, NOTIFY_* bits
     #include "../../tasks/publish_queue.h"       // M3: Core 1 → Core 0 publish queue
-    #include "../../tasks/intent_contract.h"
     #include "../../error_handling/error_tracker.h"
     // Forward declarations from main.cpp
     extern void routeIncomingMessage(const char* topic, const char* payload);
@@ -23,6 +26,8 @@
 static const char* TAG = "MQTT";
 
 #ifndef MQTT_USE_PUBSUBCLIENT
+static std::atomic<uint32_t> g_publish_outbox_noncritical_drops{0};
+
 static bool isCriticalPublishTopic(const String& topic) {
     return topic.indexOf("/alert") != -1 ||
            topic.indexOf("/response") != -1 ||
@@ -128,6 +133,10 @@ MQTTClient::MQTTClient()
       registration_confirmed_(false),
       registration_start_ms_(0),
       registration_timeout_logged_(false),
+#ifndef MQTT_USE_PUBSUBCLIENT
+      pending_subscription_count_(0),
+      bootstrap_heartbeat_pending_(false),
+#endif
       publish_seq_(0) {
     // Circuit Breaker configured:
     // - 5 failures → OPEN
@@ -222,7 +231,7 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     mqtt_cfg.lwt_msg_len = 0;
 
     mqtt_cfg.buffer_size = 4096;
-    mqtt_cfg.out_buffer_size = 2048;
+    mqtt_cfg.out_buffer_size = 4096;
 
     mqtt_cfg.client_id = config.client_id.c_str();
     if (!anonymous_mode_) {
@@ -393,6 +402,21 @@ uint32_t MQTTClient::getCurrentSeq() const {
     return publish_seq_;
 }
 
+String MQTTClient::getBootTelemetrySequenceId() const {
+    time_t unix_timestamp = timeManager.getUnixTimestamp();
+    bool time_valid = timeManager.isSynchronized();
+    ensureBootTelemetryInitialized(unix_timestamp, time_valid);
+    return g_boot_sequence_id;
+}
+
+uint32_t MQTTClient::getPublishOutboxNoncriticalDropCount() const {
+#ifndef MQTT_USE_PUBSUBCLIENT
+    return g_publish_outbox_noncritical_drops.load();
+#else
+    return 0;
+#endif
+}
+
 // ============================================
 // PUBLISHING (WITH CIRCUIT BREAKER)
 // ============================================
@@ -478,6 +502,21 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     } else if (msg_id == -2) {
         LOG_W(TAG, "MQTT Outbox full, message dropped: " + topic);
         circuit_breaker_.recordFailure();
+        // Avoid recursive publishIntentOutcome when the failing publish IS intent_outcome
+        // (publishIntentOutcome already persists to NVS on publish failure).
+        if (isCriticalPublishTopic(topic) && topic.indexOf("/system/intent_outcome") < 0) {
+            IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), "pub");
+            publishIntentOutcome("publish",
+                                 metadata,
+                                 "failed",
+                                 "PUBLISH_OUTBOX_FULL",
+                                 String("ESP-IDF MQTT outbox full: ") + topic,
+                                 true);
+        } else if (topic.indexOf("/system/intent_outcome") >= 0) {
+            LOG_W(TAG, "intent_outcome publish hit outbox full — NVS replay path handles persistence");
+        } else {
+            g_publish_outbox_noncritical_drops.fetch_add(1);
+        }
         return false;
     } else {
         // msg_id == -1: error (not connected or internal failure)
@@ -588,6 +627,76 @@ bool MQTTClient::subscribe(const String& topic, uint8_t qos) {
 #endif
 }
 
+bool MQTTClient::queueSubscribe(const String& topic, uint8_t qos, bool critical) {
+#ifndef MQTT_USE_PUBSUBCLIENT
+    return enqueueSubscription_(topic, qos, critical);
+#else
+    (void)critical;
+    return subscribe(topic, qos);
+#endif
+}
+
+void MQTTClient::requestBootstrapHeartbeatAfterAck() {
+#ifndef MQTT_USE_PUBSUBCLIENT
+    bootstrap_heartbeat_pending_ = true;
+#endif
+}
+
+#ifndef MQTT_USE_PUBSUBCLIENT
+bool MQTTClient::enqueueSubscription_(const String& topic, uint8_t qos, bool critical, bool front) {
+    if (topic.length() == 0) {
+        return false;
+    }
+
+    for (uint8_t i = 0; i < pending_subscription_count_; ++i) {
+        if (pending_subscriptions_[i].topic == topic) {
+            if (qos > pending_subscriptions_[i].qos) {
+                pending_subscriptions_[i].qos = qos;
+            }
+            pending_subscriptions_[i].critical = pending_subscriptions_[i].critical || critical;
+            if (front && i > 0) {
+                PendingSubscription existing = pending_subscriptions_[i];
+                for (int j = i; j > 0; --j) {
+                    pending_subscriptions_[j] = pending_subscriptions_[j - 1];
+                }
+                pending_subscriptions_[0] = existing;
+            }
+            return true;
+        }
+    }
+
+    if (pending_subscription_count_ >= MAX_PENDING_SUBSCRIPTIONS) {
+        LOG_E(TAG, "Subscription queue full, dropping topic: " + topic);
+        errorTracker.logCommunicationError(ERROR_MQTT_SUBSCRIBE_FAILED,
+                                           ("Subscription queue full: " + topic).c_str());
+        return false;
+    }
+
+    PendingSubscription sub;
+    sub.topic = topic;
+    sub.qos = qos;
+    sub.attempts = 0;
+    sub.critical = critical;
+    sub.next_attempt_ms = millis();
+
+    if (front) {
+        for (int j = pending_subscription_count_; j > 0; --j) {
+            pending_subscriptions_[j] = pending_subscriptions_[j - 1];
+        }
+        pending_subscriptions_[0] = sub;
+    } else {
+        pending_subscriptions_[pending_subscription_count_] = sub;
+    }
+
+    pending_subscription_count_++;
+    return true;
+}
+
+void MQTTClient::clearSubscriptionQueue_() {
+    pending_subscription_count_ = 0;
+}
+#endif
+
 bool MQTTClient::unsubscribe(const String& topic) {
 #ifndef MQTT_USE_PUBSUBCLIENT
     if (mqtt_client_ == nullptr) return false;
@@ -627,8 +736,9 @@ void MQTTClient::loop() {
 
 #ifndef MQTT_USE_PUBSUBCLIENT
     // ESP-IDF has its own MQTT task — no manual mqtt_.loop() or reconnect() needed here.
-    // loop() only handles: NTP time sync + periodic heartbeat publishing.
+    // loop() handles: NTP time sync + staged subscribe recovery + periodic heartbeat.
     timeManager.loop();
+    processSubscriptionQueue();
     publishHeartbeat();
 #else
     // PubSubClient path: handle time sync, MQTT maintenance, heartbeat, and reconnect.
@@ -643,6 +753,65 @@ void MQTTClient::loop() {
 #endif
 }
 
+#ifndef MQTT_USE_PUBSUBCLIENT
+void MQTTClient::processSubscriptionQueue() {
+    if (!g_mqtt_connected.load() || mqtt_client_ == nullptr || pending_subscription_count_ == 0) {
+        return;
+    }
+
+    PendingSubscription& sub = pending_subscriptions_[0];
+    unsigned long now = millis();
+    if (now < sub.next_attempt_ms) {
+        return;
+    }
+
+    int msg_id = esp_mqtt_client_subscribe(mqtt_client_, sub.topic.c_str(), sub.qos);
+    if (msg_id >= 0) {
+        LOG_I(TAG, "Subscribe sent (QoS " + String(sub.qos) + "): " + sub.topic);
+        bool is_ack_topic = sub.topic.indexOf("/system/heartbeat/ack") != -1;
+
+        for (uint8_t i = 1; i < pending_subscription_count_; ++i) {
+            pending_subscriptions_[i - 1] = pending_subscriptions_[i];
+        }
+        pending_subscription_count_--;
+
+        if (is_ack_topic && bootstrap_heartbeat_pending_) {
+            publishHeartbeat(true);
+            bootstrap_heartbeat_pending_ = false;
+            LOG_I(TAG, "[SYNC] Bootstrap heartbeat sent after ACK subscription");
+        }
+        return;
+    }
+
+    sub.attempts++;
+    unsigned long backoff = SUBSCRIBE_RETRY_BASE_MS << (sub.attempts > 4 ? 4 : sub.attempts);
+    if (backoff > SUBSCRIBE_RETRY_MAX_MS) {
+        backoff = SUBSCRIBE_RETRY_MAX_MS;
+    }
+    sub.next_attempt_ms = now + backoff;
+
+    if (sub.attempts >= MAX_SUBSCRIBE_RETRIES) {
+        String failed_topic = sub.topic;
+        bool critical = sub.critical;
+        uint8_t qos = sub.qos;
+        for (uint8_t i = 1; i < pending_subscription_count_; ++i) {
+            pending_subscriptions_[i - 1] = pending_subscriptions_[i];
+        }
+        pending_subscription_count_--;
+        LOG_E(TAG, "Subscribe failed permanently after retries: " + failed_topic);
+        errorTracker.logCommunicationError(ERROR_MQTT_SUBSCRIBE_FAILED,
+                                           ("Subscribe failed permanently: " + failed_topic).c_str());
+        if (critical) {
+            enqueueSubscription_(failed_topic, qos, true, true);
+        }
+        return;
+    }
+
+    LOG_W(TAG, "Subscribe retry " + String(sub.attempts) + "/" + String(MAX_SUBSCRIBE_RETRIES) +
+               " scheduled in " + String(backoff) + "ms: " + sub.topic);
+}
+#endif
+
 // ============================================
 // M3: PUBLISH QUEUE DRAIN (Core 0 only)
 // ============================================
@@ -654,7 +823,9 @@ void MQTTClient::processPublishQueue() {
     // is not blocked waiting for new command/config traffic.
     processIntentOutcomeOutbox();
 
-    PublishRequest req;
+    // Stack guard for legacy fallback path:
+    // PublishRequest is large (~2 KB payload envelope); keep it out of loopTask stack.
+    static PublishRequest req;
     while (xQueueReceive(g_publish_queue, &req, 0) == pdTRUE) {
         int msg_id = esp_mqtt_client_publish(
             mqtt_client_,
@@ -667,7 +838,7 @@ void MQTTClient::processPublishQueue() {
         if (msg_id >= 0) {
             continue;
         }
-        const char* drop_code = (msg_id == -2) ? "OUTBOX_FULL" : "EXECUTE_FAIL";
+        const char* drop_code = (msg_id == -2) ? "PUBLISH_OUTBOX_FULL" : "EXECUTE_FAIL";
         String drop_reason = String("Publish dropped for topic ") + String(req.topic);
         if (req.critical && req.attempt < 3) {
             req.attempt++;
@@ -784,7 +955,11 @@ void MQTTClient::publishHeartbeat(bool force) {
     bool time_valid = timeManager.isSynchronized();
     ensureBootTelemetryInitialized(unix_timestamp, time_valid);
 
-    String payload = "{";
+    String payload;
+    // Keep heartbeat assembly deterministic and reduce heap fragmentation.
+    // 1900 B covers typical status payload including gpio_status entries.
+    payload.reserve(1900);
+    payload = "{";
     payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
     payload += "\"seq\":" + String(getNextSeq()) + ",";
     payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
@@ -802,7 +977,17 @@ void MQTTClient::publishHeartbeat(bool force) {
     payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount()) + ",";
     payload += "\"wifi_ip\":\"" + WiFi.localIP().toString() + "\",";
 
-    std::vector<GPIOPinInfo> reservedPins = gpioManager.getReservedPinsList();
+    std::vector<GPIOPinInfo> reservedPins;
+    const uint32_t free_heap_before_gpio = ESP.getFreeHeap();
+    const uint32_t max_alloc_before_gpio = ESP.getMaxAllocHeap();
+    // gpio_status telemetry is optional; skip aggressively when memory headroom is tight.
+    if (max_alloc_before_gpio >= 16384 && free_heap_before_gpio >= 46000) {
+        reservedPins = gpioManager.getReservedPinsList();
+    } else {
+        LOG_W(TAG, "Heartbeat: skipping gpio_status due to low memory headroom "
+                   "(free_heap=" + String(free_heap_before_gpio) +
+                   " B, max_alloc=" + String(max_alloc_before_gpio) + " B)");
+    }
 
     payload += "\"gpio_status\":[";
     bool first = true;
@@ -832,12 +1017,39 @@ void MQTTClient::publishHeartbeat(bool force) {
                String(offlineModeManager.getLastHandoverContractRejectCode()) + "\",";
     payload += "\"active_handover_epoch\":" + String(offlineModeManager.getActiveHandoverEpoch()) + ",";
     payload += "\"handover_completed_epoch\":" + String(offlineModeManager.getHandoverCompletedEpoch()) + ",";
-    payload += "\"degraded\":" +
-               String(offlineModeManager.isPersistenceDriftActive() ? "true" : "false") + ",";
-    payload += "\"degraded_reason\":\"" +
-               String(offlineModeManager.getLastPersistenceDriftReason()) + "\",";
+    // Heartbeat health: split "degraded" semantics — persistence drift vs FSM vs network CB
+    // (Rule: do not overload a single "degraded" flag for unrelated subsystems.)
+    {
+        bool persistence_degraded = offlineModeManager.isPersistenceDriftActive();
+        bool runtime_state_degraded = false;
+        switch (g_system_config.current_state) {
+            case STATE_CONFIG_PENDING_AFTER_RESET:
+            case STATE_SAFE_MODE:
+            case STATE_SAFE_MODE_PROVISIONING:
+            case STATE_ERROR:
+            case STATE_LIBRARY_DOWNLOADING:
+                runtime_state_degraded = true;
+                break;
+            default:
+                break;
+        }
+        bool mqtt_cb_open = circuit_breaker_.getState() == CircuitState::OPEN;
+        bool wifi_cb_open = wifiManager.getCircuitBreakerState() == CircuitState::OPEN;
+        bool network_degraded = mqtt_cb_open || wifi_cb_open;
+        payload += "\"persistence_degraded\":" + String(persistence_degraded ? "true" : "false") + ",";
+        payload += "\"persistence_degraded_reason\":\"" +
+                   String(offlineModeManager.getLastPersistenceDriftReason()) + "\",";
+        payload += "\"runtime_state_degraded\":" + String(runtime_state_degraded ? "true" : "false") + ",";
+        payload += "\"mqtt_circuit_breaker_open\":" + String(mqtt_cb_open ? "true" : "false") + ",";
+        payload += "\"wifi_circuit_breaker_open\":" + String(wifi_cb_open ? "true" : "false") + ",";
+        payload += "\"network_degraded\":" + String(network_degraded ? "true" : "false") + ",";
+    }
     payload += "\"persistence_drift_count\":" +
                String(offlineModeManager.getPersistenceDriftCount()) + ",";
+    payload += "\"critical_outcome_drop_count\":" +
+               String(getCriticalOutcomeDropCountTelemetry()) + ",";
+    payload += "\"publish_outbox_drop_count\":" +
+               String(getPublishOutboxNoncriticalDropCount()) + ",";
     payload += "\"config_status\":";
     payload += configManager.getDiagnosticsJSON();
     payload += "}";
@@ -922,6 +1134,8 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->registration_confirmed_ = false;
             self->registration_start_ms_  = millis();
             self->registration_timeout_logged_ = false;
+            self->clearSubscriptionQueue_();
+            self->bootstrap_heartbeat_pending_ = false;
 
             // Circuit Breaker: connection success resets failure counter
             self->circuit_breaker_.recordSuccess();
@@ -949,6 +1163,8 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->registration_confirmed_ = false;
             self->registration_start_ms_  = 0;
             self->registration_timeout_logged_ = false;
+            self->clearSubscriptionQueue_();
+            self->bootstrap_heartbeat_pending_ = false;
 
             // Circuit Breaker: disconnect counts as failure
             self->circuit_breaker_.recordFailure();

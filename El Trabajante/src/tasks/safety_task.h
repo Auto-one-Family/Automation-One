@@ -14,5 +14,5 @@ static const uint32_t NOTIFY_EMERGENCY_STOP    = 0x01;  // Emergency stop all ac
 static const uint32_t NOTIFY_MQTT_DISCONNECTED = 0x02;  // MQTT disconnect → setAllActuatorsToSafeState
 static const uint32_t NOTIFY_SUBZONE_SAFE      = 0x04;  // Subzone safe-mode change (M3: full GPIO routing via Core 1)
 
-void createSafetyTask();
+bool createSafetyTask();
 void safetyTaskFunction(void* param);

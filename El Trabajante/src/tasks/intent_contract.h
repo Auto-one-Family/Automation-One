@@ -39,3 +39,7 @@ void processIntentOutcomeOutbox();
 
 uint32_t getSafetyEpoch();
 uint32_t bumpSafetyEpoch(const char* reason);
+
+// NVS-backed counter (loaded lazily) — same semantics as intent_outcome payload field
+// outcome_drop_count_critical; exposed for heartbeat telemetry.
+uint32_t getCriticalOutcomeDropCountTelemetry();

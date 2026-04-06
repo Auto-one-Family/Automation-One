@@ -123,8 +123,19 @@ static bool loadPendingAt(uint8_t idx, ConfigUpdateRequest* req_out) {
     if (s_config_pending_prefs.isKey(corr_key.c_str())) {
         corr = s_config_pending_prefs.getString(corr_key.c_str(), "");
     }
-    strncpy(req_out->metadata.intent_id, intent.c_str(), sizeof(req_out->metadata.intent_id) - 1);
-    req_out->metadata.intent_id[sizeof(req_out->metadata.intent_id) - 1] = '\0';
+    // Guard: NVS-key absent or empty (e.g. after firmware migration or NVS corruption).
+    // Fall back to payload extraction so intent_id is never published as "".
+    if (intent.length() == 0) {
+        IntentMetadata extracted =
+            extractIntentMetadataFromPayload(req_out->json_payload, "cfg_replay");
+        strncpy(req_out->metadata.intent_id, extracted.intent_id,
+                sizeof(req_out->metadata.intent_id) - 1);
+        req_out->metadata.intent_id[sizeof(req_out->metadata.intent_id) - 1] = '\0';
+    } else {
+        strncpy(req_out->metadata.intent_id, intent.c_str(),
+                sizeof(req_out->metadata.intent_id) - 1);
+        req_out->metadata.intent_id[sizeof(req_out->metadata.intent_id) - 1] = '\0';
+    }
     strncpy(req_out->metadata.correlation_id, corr.c_str(), sizeof(req_out->metadata.correlation_id) - 1);
     req_out->metadata.correlation_id[sizeof(req_out->metadata.correlation_id) - 1] = '\0';
     req_out->metadata.generation = s_config_pending_prefs.getUInt(slotKey(idx, "gen").c_str(), 0);
@@ -154,7 +165,16 @@ static void persistPendingIntent(const ConfigUpdateRequest& req) {
     uint8_t insert = static_cast<uint8_t>((head + count) % CONFIG_PENDING_CAPACITY);
 
     if (count >= CONFIG_PENDING_CAPACITY) {
-        // Bounded ring: overwrite oldest entry when full.
+        // Bounded ring: overwrite oldest entry when full — terminal outcome for evicted intent (P0).
+        static ConfigUpdateRequest evicted;
+        if (loadPendingAt(head, &evicted)) {
+            publishIntentOutcome("config",
+                                 evicted.metadata,
+                                 "failed",
+                                 "PENDING_RING_EVICTION",
+                                 "cfg_pending ring full — oldest intent superseded (retry recommended)",
+                                 true);
+        }
         clearPendingAt(head);
         head = static_cast<uint8_t>((head + 1) % CONFIG_PENDING_CAPACITY);
         count = CONFIG_PENDING_CAPACITY - 1;

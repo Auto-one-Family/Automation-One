@@ -208,17 +208,29 @@ static void clearOutboxEntryAt(uint8_t idx) {
 }
 
 static bool enqueueCriticalOutcome(const PendingOutcomeEntry& entry) {
+    loadOutboxStatsIfNeeded();
     if (!beginOutcomeOutboxPrefs(false)) {
         return false;
     }
     uint8_t head = s_outcome_outbox_prefs.getUChar("head", 0);
     uint8_t count = s_outcome_outbox_prefs.getUChar("count", 0);
+
+    // P0 Strategy A: NVS outcome outbox full → evict oldest pending replay slot so a new
+    // critical outcome is never silently dropped. Superseded entry is counted in
+    // outcome_drop_count_critical (heartbeat + outcome payload telemetry).
     if (count >= OUTCOME_OUTBOX_CAPACITY) {
-        s_outcome_outbox_prefs.end();
-        return false;
+        clearOutboxEntryAt(head);
+        head = static_cast<uint8_t>((head + 1) % OUTCOME_OUTBOX_CAPACITY);
+        count--;
+        s_outcome_drop_count_critical++;
+        LOG_W(IC_TAG,
+              "Critical outcome outbox full — evicted oldest NVS slot to enqueue new critical");
+        s_outcome_outbox_prefs.putUInt(kOutboxStatDropTotalKey, s_outcome_drop_count_critical);
     }
+
     uint8_t idx = static_cast<uint8_t>((head + count) % OUTCOME_OUTBOX_CAPACITY);
     saveOutboxEntryAt(idx, entry);
+    s_outcome_outbox_prefs.putUChar("head", head);
     s_outcome_outbox_prefs.putUChar("count", static_cast<uint8_t>(count + 1));
     s_outcome_outbox_prefs.end();
     return true;
@@ -238,7 +250,9 @@ static bool buildOutcomePayload(const char* flow,
         return false;
     }
 
-    DynamicJsonDocument doc(640);
+    // 26 fields × 12 bytes/slot = 312, plus ~463 bytes for key+value strings.
+    // Using 1024 gives a safe 250-byte margin against overflow-silent field drops.
+    DynamicJsonDocument doc(1024);
     doc["seq"] = mqttClient.getNextSeq();
     doc["flow"] = flow != nullptr ? flow : "unknown";
     doc["intent_id"] = metadata.intent_id;
@@ -373,17 +387,23 @@ static IntentMetadata extractIntentMetadataFromPayloadInternal(const char* paylo
     IntentMetadata metadata;
     initIntentMetadata(&metadata);
 
-    // Parse only metadata keys so extraction remains stable even for large payloads
-    // (e.g. full config pushes with big sensors/actuators arrays).
+    // Contract: primary fields are top-level (intent_id, correlation_id, generation, …).
+    // Optional nested mirror under "data" is supported when the server wraps metadata
+    // (data.intent_id, data.correlation_id, …). Top-level wins if both are present.
     // 384 B was too tight for some large config payloads and caused false-negative
     // "missing correlation_id" contract violations.
     StaticJsonDocument<1024> doc;
-    StaticJsonDocument<128> filter;
+    StaticJsonDocument<256> filter;
     filter["intent_id"] = true;
     filter["correlation_id"] = true;
     filter["generation"] = true;
     filter["created_at_ms"] = true;
     filter["ttl_ms"] = true;
+    filter["data"]["intent_id"] = true;
+    filter["data"]["correlation_id"] = true;
+    filter["data"]["generation"] = true;
+    filter["data"]["created_at_ms"] = true;
+    filter["data"]["ttl_ms"] = true;
     bool parsed = false;
     if (payload != nullptr && strlen(payload) > 0) {
         DeserializationError err = deserializeJson(doc,
@@ -393,11 +413,33 @@ static IntentMetadata extractIntentMetadataFromPayloadInternal(const char* paylo
     }
 
     if (parsed) {
+        JsonObject data_obj = doc["data"].as<JsonObject>();
         String intent_id = doc["intent_id"] | "";
+        if (intent_id.length() == 0 && !data_obj.isNull()) {
+            intent_id = data_obj["intent_id"] | "";
+        }
         String corr_id = doc["correlation_id"] | "";
+        if (corr_id.length() == 0 && !data_obj.isNull()) {
+            corr_id = data_obj["correlation_id"] | "";
+        }
         metadata.generation = doc["generation"] | 0;
-        metadata.created_at_ms = doc["created_at_ms"] | static_cast<uint32_t>(millis());
+        if (metadata.generation == 0 && !data_obj.isNull()) {
+            metadata.generation = data_obj["generation"] | 0;
+        }
+        {
+            uint32_t default_now = static_cast<uint32_t>(millis());
+            if (!doc["created_at_ms"].isNull()) {
+                metadata.created_at_ms = doc["created_at_ms"].as<uint32_t>();
+            } else if (!data_obj.isNull() && !data_obj["created_at_ms"].isNull()) {
+                metadata.created_at_ms = data_obj["created_at_ms"].as<uint32_t>();
+            } else {
+                metadata.created_at_ms = default_now;
+            }
+        }
         metadata.ttl_ms = doc["ttl_ms"] | 0;
+        if (metadata.ttl_ms == 0 && !data_obj.isNull()) {
+            metadata.ttl_ms = data_obj["ttl_ms"] | 0;
+        }
 
         if (intent_id.length() == 0) {
             intent_id = buildFallbackId(fallback_prefix, s_intent_fallback_counter);
@@ -476,12 +518,29 @@ bool publishIntentOutcome(const char* flow,
                           bool retryable) {
     loadOutboxStatsIfNeeded();
     const char* normalized_outcome = outcome != nullptr ? outcome : "failed";
+
+    // Defensive guard: intent_id must never be empty in the published payload.
+    // An empty intent_id (e.g. from NVS migration, corruption or missing field) causes
+    // permanent server-side rejection ("Missing required field: intent_id").
+    // Generate a fallback so the event is at least traceable rather than silently broken.
+    IntentMetadata safe_metadata = metadata;
+    if (strlen(safe_metadata.intent_id) == 0) {
+        String fallback = buildFallbackId(flow != nullptr ? flow : "unknown",
+                                         s_intent_fallback_counter);
+        strncpy(safe_metadata.intent_id, fallback.c_str(), sizeof(safe_metadata.intent_id) - 1);
+        safe_metadata.intent_id[sizeof(safe_metadata.intent_id) - 1] = '\0';
+        LOG_W(IC_TAG, String("publishIntentOutcome: empty intent_id — generated fallback [") +
+                      String(safe_metadata.intent_id) + "] flow=" +
+                      String(flow != nullptr ? flow : "null") +
+                      " outcome=" + String(normalized_outcome));
+    }
+    const IntentMetadata& active_metadata = safe_metadata;
     bool critical = isCriticalOutcomeClass(flow, normalized_outcome);
     if (isTerminalOutcome(normalized_outcome)) {
         bool allow_publish = true;
         bool regression_blocked = false;
         portENTER_CRITICAL(&s_intent_final_mux);
-        int existing_idx = findFinalIntentEntry(metadata.intent_id);
+        int existing_idx = findFinalIntentEntry(active_metadata.intent_id);
         if (existing_idx >= 0) {
             if (strcmp(s_intent_final_store[existing_idx].final_outcome, normalized_outcome) == 0) {
                 allow_publish = false;
@@ -489,14 +548,14 @@ bool publishIntentOutcome(const char* flow,
                 allow_publish = false;
                 regression_blocked = true;
                 LOG_W(IC_TAG, "Intent final outcome regression blocked [" +
-                              String(metadata.intent_id) + "] old=" +
+                              String(active_metadata.intent_id) + "] old=" +
                               String(s_intent_final_store[existing_idx].final_outcome) +
                               " new=" + String(normalized_outcome));
             }
         } else {
             IntentFinalEntry& slot = s_intent_final_store[s_intent_final_write_index];
             memset(&slot, 0, sizeof(slot));
-            strncpy(slot.intent_id, metadata.intent_id, sizeof(slot.intent_id) - 1);
+            strncpy(slot.intent_id, active_metadata.intent_id, sizeof(slot.intent_id) - 1);
             strncpy(slot.final_outcome, normalized_outcome, sizeof(slot.final_outcome) - 1);
             slot.final_ts = millis();
             slot.valid = true;
@@ -510,7 +569,7 @@ bool publishIntentOutcome(const char* flow,
 
     String payload;
     if (!buildOutcomePayload(flow,
-                             metadata,
+                             active_metadata,
                              normalized_outcome,
                              code,
                              reason,
@@ -534,11 +593,11 @@ bool publishIntentOutcome(const char* flow,
         persistOutboxStats();
     }
     if (!ok) {
-        LOG_W(IC_TAG, "Intent outcome publish failed [" + String(metadata.intent_id) + "]");
+        LOG_W(IC_TAG, "Intent outcome publish failed [" + String(active_metadata.intent_id) + "]");
         if (critical) {
             PendingOutcomeEntry entry = {};
             strncpy(entry.flow, flow != nullptr ? flow : "unknown", sizeof(entry.flow) - 1);
-            entry.metadata = metadata;
+            entry.metadata = active_metadata;
             strncpy(entry.outcome, normalized_outcome, sizeof(entry.outcome) - 1);
             strncpy(entry.code, code != nullptr ? code : "UNKNOWN_ERROR", sizeof(entry.code) - 1);
             strncpy(entry.reason, reason.c_str(), sizeof(entry.reason) - 1);
@@ -548,10 +607,11 @@ bool publishIntentOutcome(const char* flow,
             s_outcome_retry_count++;
             if (!enqueueCriticalOutcome(entry)) {
                 s_outcome_drop_count_critical++;
-                LOG_E(IC_TAG, "Critical outcome outbox full — dropped [" + String(metadata.intent_id) + "]");
+                LOG_E(IC_TAG, "Critical outcome NVS persist failed after eviction attempt [" +
+                                  String(active_metadata.intent_id) + "]");
             } else {
                 persisted_for_replay = true;
-                LOG_W(IC_TAG, "Critical outcome persisted for replay [" + String(metadata.intent_id) + "]");
+                LOG_W(IC_TAG, "Critical outcome persisted for replay [" + String(active_metadata.intent_id) + "]");
             }
             persistOutboxStats();
         }
@@ -571,4 +631,9 @@ uint32_t bumpSafetyEpoch(const char* reason) {
     }
     LOG_W(IC_TAG, msg);
     return next_epoch;
+}
+
+uint32_t getCriticalOutcomeDropCountTelemetry() {
+    loadOutboxStatsIfNeeded();
+    return s_outcome_drop_count_critical;
 }

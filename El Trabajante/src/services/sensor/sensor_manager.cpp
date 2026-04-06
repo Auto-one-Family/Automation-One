@@ -986,6 +986,8 @@ bool SensorManager::performMeasurementForConfig(SensorConfig* config, SensorRead
             } else {
                 // Analog sensor (pH, EC, Moisture, etc.)
                 raw_value = readRawAnalog(gpio);
+                // E-P2: ADC quality check for analog sensors
+                reading_out.quality = String(validateAdcReading(raw_value, gpio));
             }
         }
     } else {
@@ -993,10 +995,12 @@ bool SensorManager::performMeasurementForConfig(SensorConfig* config, SensorRead
         String lower_type = config->sensor_type;
         lower_type.toLowerCase();
         
-        if (lower_type.indexOf("ph") >= 0 || lower_type.indexOf("ec") >= 0 || 
+        if (lower_type.indexOf("ph") >= 0 || lower_type.indexOf("ec") >= 0 ||
             lower_type.indexOf("moisture") >= 0) {
             // Likely analog sensor
             raw_value = readRawAnalog(gpio);
+            // E-P2: ADC quality check
+            reading_out.quality = String(validateAdcReading(raw_value, gpio));
         } else if (lower_type.indexOf("ds18b20") >= 0 || lower_type.indexOf("onewire") >= 0) {
             // Likely OneWire sensor - use ROM-Code from config
             if (config->onewire_address.length() != 16) {
@@ -1037,6 +1041,8 @@ bool SensorManager::performMeasurementForConfig(SensorConfig* config, SensorRead
         } else {
             // Fallback: try analog
             raw_value = readRawAnalog(gpio);
+            // E-P2: ADC quality check
+            reading_out.quality = String(validateAdcReading(raw_value, gpio));
         }
     }
     
@@ -1381,7 +1387,7 @@ void SensorManager::setMeasurementInterval(unsigned long interval_ms) {
 // ============================================
 // MANUAL MEASUREMENT (PHASE 2C - On-Demand)
 // ============================================
-bool SensorManager::triggerManualMeasurement(uint8_t gpio) {
+bool SensorManager::triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms) {
     if (!initialized_) {
         LOG_E(TAG, "SensorManager: Not initialized, cannot trigger manual measurement");
         return false;
@@ -1400,10 +1406,16 @@ bool SensorManager::triggerManualMeasurement(uint8_t gpio) {
         return false;
     }
 
-    LOG_I(TAG, "SensorManager: Manual measurement triggered for GPIO " + String(gpio) +
-             " (mode: " + config->operating_mode + ")");
+    // E-P3: Log Circuit-Breaker state for manual override awareness
+    if (config->cb_state == SensorCBState::OPEN) {
+        LOG_I(TAG, "SensorManager: Note: Sensor CB is OPEN on GPIO " + String(gpio) +
+                 " but proceeding (manual override)");
+    }
 
-    unsigned long now = millis();
+    LOG_I(TAG, "SensorManager: Manual measurement triggered for GPIO " + String(gpio) +
+             " (mode: " + config->operating_mode + ", timeout: " + String(timeout_ms) + "ms)");
+
+    unsigned long start_ms = millis();
 
     // Check if this is a multi-value sensor
     const SensorCapability* capability = findSensorCapability(config->sensor_type);
@@ -1413,19 +1425,38 @@ bool SensorManager::triggerManualMeasurement(uint8_t gpio) {
         SensorReading readings[4];  // Max 4 values per sensor
         uint8_t count = performMultiValueMeasurement(gpio, readings, 4);
 
+        // E-P3: Timeout-Guard — check elapsed time after measurement
+        unsigned long elapsed = millis() - start_ms;
+        if (elapsed > timeout_ms) {
+            LOG_W(TAG, "SensorManager: Manual measurement TIMEOUT on GPIO " + String(gpio) +
+                     " (elapsed: " + String(elapsed) + "ms, limit: " + String(timeout_ms) + "ms)");
+            errorTracker.trackError(ERROR_SENSOR_TIMEOUT, ERROR_SEVERITY_WARNING,
+                                   "Manual measurement exceeded timeout");
+            // Still return result — measurement may have succeeded despite timeout
+        }
+
         if (count == 0) {
             LOG_E(TAG, "SensorManager: Manual multi-value measurement failed for GPIO " + String(gpio));
             return false;
         }
 
-        config->last_reading = now;
+        config->last_reading = start_ms;
         return true;
     } else {
         // Single-value sensor - standard measurement
         SensorReading reading;
         if (performMeasurement(gpio, reading)) {
+            // E-P3: Timeout-Guard — check elapsed time after measurement
+            unsigned long elapsed = millis() - start_ms;
+            if (elapsed > timeout_ms) {
+                LOG_W(TAG, "SensorManager: Manual measurement TIMEOUT on GPIO " + String(gpio) +
+                         " (elapsed: " + String(elapsed) + "ms, limit: " + String(timeout_ms) + "ms)");
+                errorTracker.trackError(ERROR_SENSOR_TIMEOUT, ERROR_SEVERITY_WARNING,
+                                       "Manual measurement exceeded timeout");
+            }
+
             publishSensorReading(reading);
-            config->last_reading = now;
+            config->last_reading = start_ms;
             return true;
         }
 
@@ -1464,6 +1495,27 @@ uint32_t SensorManager::readRawAnalog(uint8_t gpio) {
 
     // Read analog value (ESP32: 0-4095)
     return analogRead(gpio);
+}
+
+// E-P2: ADC Validation — classify raw ADC reading quality
+// Returns "good", "suspect", or "error" quality string for MQTT payload.
+// Server uses this to decide whether to accept the raw value for calibration.
+const char* SensorManager::validateAdcReading(uint32_t raw, uint8_t gpio) {
+    // Hard bounds: ESP32 12-bit ADC range is 0..4095
+    // Exact rail values indicate disconnected sensor or saturation
+    if (raw == 0 || raw == 4095) {
+        LOG_W(TAG, "ADC rail on GPIO " + String(gpio) + ": raw=" + String(raw) + " (disconnected or saturated)");
+        return "suspect";
+    }
+
+    // Near-rail zone: within 50 counts of rails (ADC noise floor / ceiling)
+    // Not an error but flagged for operator awareness during calibration
+    if (raw < 50 || raw > 4045) {
+        LOG_I(TAG, "ADC near-rail on GPIO " + String(gpio) + ": raw=" + String(raw) + " (close to ADC boundary)");
+        return "suspect";
+    }
+
+    return "good";
 }
 
 uint32_t SensorManager::readRawDigital(uint8_t gpio) {
@@ -1607,8 +1659,9 @@ void SensorManager::publishSensorReading(const SensorReading& reading) {
         return;
     }
 
-    // Build topic
-    const char* topic = TopicBuilder::buildSensorDataTopic(reading.gpio);
+    // Copy topic immediately — topic_buffer_ is shared static; another task could
+    // overwrite it between the build call and the publish call (FreeRTOS preemption).
+    String topic = String(TopicBuilder::buildSensorDataTopic(reading.gpio));
 
     // Build payload
     String payload = buildMQTTPayload(reading);

@@ -35,6 +35,26 @@ bool queuePublish(const char* topic,
         return false;
     }
 
+    size_t topic_len = strlen(topic);
+    size_t payload_len = strlen(payload);
+    if (topic_len >= PUBLISH_TOPIC_MAX_LEN || payload_len >= PUBLISH_PAYLOAD_MAX_LEN) {
+        LOG_E(PQ_TAG, "[SYNC] Publish rejected (oversize) topic_len=" + String((uint32_t)topic_len) +
+              " payload_len=" + String((uint32_t)payload_len));
+        IntentMetadata oversize_meta = extractIntentMetadataFromPayload(payload, "pub");
+        if (metadata != nullptr) {
+            oversize_meta = *metadata;
+        }
+        if (critical) {
+            publishIntentOutcome("publish",
+                                 oversize_meta,
+                                 "failed",
+                                 "PAYLOAD_TOO_LARGE",
+                                 "Critical publish payload exceeds queue envelope",
+                                 true);
+        }
+        return false;
+    }
+
     PublishRequest req;
     strncpy(req.topic, topic, sizeof(req.topic) - 1);
     req.topic[sizeof(req.topic) - 1] = '\0';

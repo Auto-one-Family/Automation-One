@@ -4,9 +4,11 @@
 #   app0/app1: 1.5MB (0x180000) instead of 1.25MB (0x130000) — +256KB per slot
 #   nvs:       32KB  (0x8000)   instead of 20KB  (0x5000)    — +12KB for offline rules
 # ESP-IDF: app partitions MUST start at 0x10000 alignment (64KB). Gap 0x13000–0x1FFFF unused.
+# Added coredump partition for panic diagnostics on real ESP32 devices.
 # Total: 4MB exactly (0x400000)
 nvs,       data,  nvs,     0x9000,   0x8000,
 otadata,   data,  ota,     0x11000,  0x2000,
 app0,      app,   ota_0,   0x20000,  0x180000,
 app1,      app,   ota_1,   0x1A0000, 0x180000,
-spiffs,    data,  spiffs,  0x320000, 0xE0000,
+spiffs,    data,  spiffs,  0x320000, 0xD0000,
+coredump,  data,  coredump,0x3F0000, 0x10000,

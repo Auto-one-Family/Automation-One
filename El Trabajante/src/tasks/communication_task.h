@@ -18,7 +18,8 @@
 // ============================================
 
 // Create and pin Communication-Task to Core 0, Priority 3.
-void createCommunicationTask();
+// Returns false when the task could not be created so caller can keep legacy loop fallback active.
+bool createCommunicationTask();
 
 // Task function (runs endlessly on Core 0).
 void communicationTaskFunction(void* param);

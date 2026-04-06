@@ -13,9 +13,12 @@
 // Core 0 keeps Core 1 unblocked and makes debugging deterministic.
 // ============================================
 
-static const uint8_t  PUBLISH_QUEUE_SIZE      = 15;     // 15 * ~1156 B = ~17 KB heap
+// Memory guard (ESP32 without PSRAM):
+// 15 slots consumed ~33 KB heap and repeatedly prevented CommTask creation on real devices.
+// 8 slots still absorb short bursts while preserving headroom for Core-0 network task startup.
+static const uint8_t  PUBLISH_QUEUE_SIZE      = 8;      // 8 * ~2180 B = ~18 KB heap
 static const uint16_t PUBLISH_TOPIC_MAX_LEN   = 128;
-static const uint16_t PUBLISH_PAYLOAD_MAX_LEN = 1024;   // Heartbeat payloads can exceed 512 B
+static const uint16_t PUBLISH_PAYLOAD_MAX_LEN = 2048;   // Heartbeat with 10+ GPIO entries exceeds 1024 B
 
 struct PublishRequest {
     char    topic[PUBLISH_TOPIC_MAX_LEN];

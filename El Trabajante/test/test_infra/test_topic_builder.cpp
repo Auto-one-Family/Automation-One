@@ -151,6 +151,14 @@ void test_topic_builder_id_substitution() {
   TEST_ASSERT_EQUAL_STRING("kaiser/custom_kaiser/esp/custom_esp/sensor/10/data", topic);
 }
 
+void test_topic_builder_intent_outcome_lifecycle() {
+  TopicBuilder::setEspId("esp_x");
+  TopicBuilder::setKaiserId("god");
+
+  const char* topic = TopicBuilder::buildIntentOutcomeLifecycleTopic();
+  TEST_ASSERT_EQUAL_STRING("kaiser/god/esp/esp_x/system/intent_outcome/lifecycle", topic);
+}
+
 // ============================================
 // UNITY SETUP
 // ============================================
@@ -177,6 +185,7 @@ void setup() {
   RUN_TEST(test_topic_builder_config);
   RUN_TEST(test_topic_builder_broadcast_emergency);
   RUN_TEST(test_topic_builder_id_substitution);
+  RUN_TEST(test_topic_builder_intent_outcome_lifecycle);
 
   UNITY_END();
 
