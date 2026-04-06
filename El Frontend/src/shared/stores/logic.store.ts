@@ -10,12 +10,21 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { logicApi } from '@/api/logic'
+import { formatUiApiError, toUiApiError } from '@/api/uiApiError'
 import type { LogicRuleCreate, LogicRuleUpdate } from '@/api/logic'
 import { extractConnections, extractEspIdsFromRule } from '@/types/logic'
 import { createLogger } from '@/utils/logger'
-import type { LogicRule, LogicConnection, ExecutionHistoryItem, ActuatorAction } from '@/types/logic'
+import type {
+  LogicRule,
+  LogicConnection,
+  ExecutionHistoryItem,
+  ActuatorAction,
+  RuleLifecycleState,
+  RuleIntentLifecycle,
+} from '@/types/logic'
 import { websocketService, type WebSocketMessage } from '@/services/websocket'
 import { useEspStore } from '@/stores/esp'
+import { extractCorrelationId, extractRequestId, validateContractEvent } from '@/utils/contractEventMapper'
 
 const logger = createLogger('LogicStore')
 
@@ -27,10 +36,12 @@ interface LogicExecutionEvent {
   rule_id: string
   rule_name: string
   trigger: {
-    esp_id: string
-    gpio: number
-    sensor_type: string
-    value: number
+    type?: string
+    esp_id?: string
+    gpio?: number
+    sensor_type?: string
+    value?: number
+    rule_id?: string
   }
   action: {
     esp_id: string
@@ -39,29 +50,34 @@ interface LogicExecutionEvent {
   }
   success: boolean
   timestamp: number
+  correlation_id?: string
+  request_id?: string
+  error_code?: string
+  error?: string
 }
 
-/**
- * Extract error message from Axios error response.
- */
-function extractErrorMessage(err: unknown, fallback: string): string {
-  const axiosError = err as {
-    response?: { data?: { detail?: string | Array<{ msg?: string; loc?: string[] }> } }
-  }
-  const detail = axiosError.response?.data?.detail
+interface SequenceCompletedEvent {
+  sequence_id: string
+  rule_id?: string
+  rule_name?: string
+  success: boolean
+  error_code?: string
+  error?: string
+}
 
-  if (!detail) return fallback
+interface SequenceErrorEvent {
+  sequence_id: string
+  rule_id?: string
+  rule_name?: string
+  error_code?: string
+  message: string
+}
 
-  if (Array.isArray(detail)) {
-    return detail
-      .map((d) => {
-        const field = d.loc?.slice(1).join('.') || 'unknown'
-        return `${field}: ${d.msg || 'validation error'}`
-      })
-      .join('; ')
-  }
-
-  return detail
+interface SequenceCancelledEvent {
+  sequence_id: string
+  rule_id?: string
+  rule_name?: string
+  reason?: string
 }
 
 export const useLogicStore = defineStore('logic', () => {
@@ -82,6 +98,8 @@ export const useLogicStore = defineStore('logic', () => {
   const executionHistory = ref<ExecutionHistoryItem[]>([])
   const isLoadingHistory = ref(false)
   const historyLoaded = ref(false)
+  const ruleLifecycleByRuleId = ref<Record<string, RuleIntentLifecycle>>({})
+  const lifecycleTransitions = ref<RuleIntentLifecycle[]>([])
 
   /** WebSocket subscription ID */
   let wsSubscriptionId: string | null = null
@@ -111,6 +129,171 @@ export const useLogicStore = defineStore('logic', () => {
   /** Enabled rule count */
   const enabledCount = computed(() => enabledRules.value.length)
 
+  const terminalLifecycleStates = new Set<RuleLifecycleState>([
+    'terminal_success',
+    'terminal_failed',
+    'terminal_conflict',
+    'terminal_integration_issue',
+  ])
+
+  const lifecycleByReasonCode = computed<Record<string, number>>(() => {
+    const counts: Record<string, number> = {}
+    Object.values(ruleLifecycleByRuleId.value).forEach((entry) => {
+      if (!entry.terminal_reason_code) return
+      counts[entry.terminal_reason_code] = (counts[entry.terminal_reason_code] ?? 0) + 1
+    })
+    return counts
+  })
+
+  function toIso(tsMs = Date.now()): string {
+    return new Date(tsMs).toISOString()
+  }
+
+  function asString(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : undefined
+  }
+
+  function resolveRuleIdByName(ruleName?: string): string | undefined {
+    if (!ruleName) return undefined
+    return rules.value.find((rule) => rule.name === ruleName)?.id
+  }
+
+  function inferConflictReason(text?: string): { code?: string; message?: string } {
+    if (!text) return {}
+    const normalized = text.toLowerCase()
+    if (normalized.includes('priority')) {
+      return { code: 'conflict_priority_lost', message: 'Prioritaetskonflikt: Regel wurde von hoeherer Prioritaet uebersteuert.' }
+    }
+    if (normalized.includes('cooldown')) {
+      return { code: 'conflict_cooldown_blocked', message: 'Konflikt: Regel wurde durch Cooldown blockiert.' }
+    }
+    if (normalized.includes('interlock') || normalized.includes('safety') || normalized.includes('not-aus')) {
+      return { code: 'conflict_safety_interlock', message: 'Konflikt: Safety-Interlock blockiert die Ausfuehrung.' }
+    }
+    if (normalized.includes('locked') || normalized.includes('lock')) {
+      return { code: 'conflict_target_locked', message: 'Konflikt: Ziel ist durch eine andere Regel gesperrt.' }
+    }
+    return {}
+  }
+
+  function upsertLifecycle(entry: RuleIntentLifecycle): RuleIntentLifecycle {
+    const existing = ruleLifecycleByRuleId.value[entry.rule_id]
+    if (existing) {
+      const prevTs = Date.parse(existing.updated_at)
+      const nextTs = Date.parse(entry.updated_at)
+      if (!Number.isNaN(prevTs) && !Number.isNaN(nextTs) && nextTs < prevTs) {
+        return existing
+      }
+    }
+
+    ruleLifecycleByRuleId.value = {
+      ...ruleLifecycleByRuleId.value,
+      [entry.rule_id]: entry,
+    }
+    lifecycleTransitions.value.unshift(entry)
+    if (lifecycleTransitions.value.length > 500) lifecycleTransitions.value.pop()
+    return entry
+  }
+
+  function setRuleLifecycle(params: {
+    ruleId: string
+    state: RuleLifecycleState
+    intentId?: string
+    correlationId?: string
+    requestId?: string
+    terminalReasonCode?: string
+    terminalReasonText?: string
+    actionOutcomes?: Record<string, unknown>[]
+    updatedAt?: string
+  }): RuleIntentLifecycle {
+    const next: RuleIntentLifecycle = {
+      rule_id: params.ruleId,
+      intent_id: params.intentId,
+      correlation_id: params.correlationId,
+      request_id: params.requestId,
+      state: params.state,
+      terminal_reason_code: params.terminalReasonCode,
+      terminal_reason_text: params.terminalReasonText,
+      updated_at: params.updatedAt ?? toIso(),
+      action_outcomes: params.actionOutcomes,
+    }
+    return upsertLifecycle(next)
+  }
+
+  function getRuleLifecycle(ruleId: string): RuleIntentLifecycle | null {
+    return ruleLifecycleByRuleId.value[ruleId] ?? null
+  }
+
+  function applyAccepted(ruleId: string, intentId?: string, correlationId?: string, requestId?: string): void {
+    setRuleLifecycle({
+      ruleId,
+      intentId,
+      correlationId,
+      requestId,
+      state: 'accepted',
+    })
+  }
+
+  function applyPendingActivation(ruleId: string, intentId?: string, correlationId?: string, requestId?: string): void {
+    setRuleLifecycle({
+      ruleId,
+      intentId,
+      correlationId,
+      requestId,
+      state: 'pending_activation',
+    })
+  }
+
+  function applyPendingExecution(ruleId: string, intentId?: string, correlationId?: string, requestId?: string): void {
+    setRuleLifecycle({
+      ruleId,
+      intentId,
+      correlationId,
+      requestId,
+      state: 'pending_execution',
+    })
+  }
+
+  function applyTerminalLifecycle(params: {
+    ruleId: string
+    intentId?: string
+    correlationId?: string
+    requestId?: string
+    success: boolean
+    reasonCode?: string
+    reasonText?: string
+    actionOutcomes?: Record<string, unknown>[]
+    integrationIssue?: boolean
+  }): void {
+    const inferredConflict = inferConflictReason(params.reasonCode || params.reasonText)
+    const reasonCode = params.reasonCode ?? inferredConflict.code
+    const reasonText = params.reasonText ?? inferredConflict.message
+
+    let state: RuleLifecycleState
+    if (params.integrationIssue) {
+      state = 'terminal_integration_issue'
+    } else if (params.success) {
+      state = 'terminal_success'
+    } else if (reasonCode?.startsWith('conflict_')) {
+      state = 'terminal_conflict'
+    } else {
+      state = 'terminal_failed'
+    }
+
+    setRuleLifecycle({
+      ruleId: params.ruleId,
+      intentId: params.intentId,
+      correlationId: params.correlationId,
+      requestId: params.requestId,
+      state,
+      terminalReasonCode: reasonCode,
+      terminalReasonText: reasonText,
+      actionOutcomes: params.actionOutcomes,
+    })
+  }
+
   // =============================================================================
   // Actions
   // =============================================================================
@@ -131,7 +314,7 @@ export const useLogicStore = defineStore('logic', () => {
       rules.value = response.data || []
       logger.debug('Fetched rules', { count: rules.value.length })
     } catch (err) {
-      error.value = extractErrorMessage(err, 'Fehler beim Laden der Logic Rules')
+      error.value = formatUiApiError(toUiApiError(err, 'Fehler beim Laden der Logic Rules'))
       logger.error('fetchRules error', err)
     } finally {
       isLoading.value = false
@@ -156,7 +339,7 @@ export const useLogicStore = defineStore('logic', () => {
       }
       return rule
     } catch (err) {
-      error.value = extractErrorMessage(err, `Fehler beim Laden der Regel ${ruleId}`)
+      error.value = formatUiApiError(toUiApiError(err, `Fehler beim Laden der Regel ${ruleId}`))
       logger.error('fetchRule error', err)
       return null
     } finally {
@@ -181,10 +364,14 @@ export const useLogicStore = defineStore('logic', () => {
       if (rule) {
         rule.enabled = response.enabled
       }
+      const correlationId = asString((response as unknown as Record<string, unknown>).correlation_id)
+      const requestId = asString((response as unknown as Record<string, unknown>).request_id)
+      applyAccepted(ruleId, undefined, correlationId, requestId)
+      applyPendingActivation(ruleId, undefined, correlationId, requestId)
       logger.info('Rule toggled', { ruleId, enabled: response.enabled })
       return response.enabled
     } catch (err) {
-      error.value = extractErrorMessage(err, 'Fehler beim Umschalten der Regel')
+      error.value = formatUiApiError(toUiApiError(err, 'Fehler beim Umschalten der Regel'))
       logger.error('toggleRule error', err)
       throw err
     }
@@ -201,7 +388,7 @@ export const useLogicStore = defineStore('logic', () => {
       logger.info('Rule test completed', { ruleId, wouldTrigger: response.would_trigger })
       return response.would_trigger
     } catch (err) {
-      error.value = extractErrorMessage(err, 'Fehler beim Testen der Regel')
+      error.value = formatUiApiError(toUiApiError(err, 'Fehler beim Testen der Regel'))
       logger.error('testRule error', err)
       throw err
     }
@@ -216,10 +403,12 @@ export const useLogicStore = defineStore('logic', () => {
     try {
       const created = await logicApi.createRule(data)
       rules.value.push(created)
+      applyAccepted(created.id)
+      applyPendingActivation(created.id)
       logger.info('Rule created', { id: created.id, name: created.name })
       return created
     } catch (err) {
-      error.value = extractErrorMessage(err, 'Fehler beim Erstellen der Regel')
+      error.value = formatUiApiError(toUiApiError(err, 'Fehler beim Erstellen der Regel'))
       logger.error('createRule error', err)
       throw err
     }
@@ -237,10 +426,12 @@ export const useLogicStore = defineStore('logic', () => {
       if (index !== -1) {
         rules.value[index] = updated
       }
+      applyAccepted(ruleId)
+      applyPendingActivation(ruleId)
       logger.info('Rule updated', { id: ruleId })
       return updated
     } catch (err) {
-      error.value = extractErrorMessage(err, 'Fehler beim Aktualisieren der Regel')
+      error.value = formatUiApiError(toUiApiError(err, 'Fehler beim Aktualisieren der Regel'))
       logger.error('updateRule error', err)
       throw err
     }
@@ -257,7 +448,7 @@ export const useLogicStore = defineStore('logic', () => {
       rules.value = rules.value.filter((r) => r.id !== ruleId)
       logger.info('Rule deleted', { id: ruleId })
     } catch (err) {
-      error.value = extractErrorMessage(err, 'Fehler beim Löschen der Regel')
+      error.value = formatUiApiError(toUiApiError(err, 'Fehler beim Löschen der Regel'))
       logger.error('deleteRule error', err)
       throw err
     }
@@ -379,6 +570,20 @@ export const useLogicStore = defineStore('logic', () => {
     error.value = null
   }
 
+  function getRuleLifecycleState(ruleId: string): RuleLifecycleState | null {
+    return ruleLifecycleByRuleId.value[ruleId]?.state ?? null
+  }
+
+  function getLifecycleEntry(ruleId: string): RuleIntentLifecycle | null {
+    return getRuleLifecycle(ruleId)
+  }
+
+  function isTerminalLifecycle(ruleId: string): boolean {
+    const state = getRuleLifecycleState(ruleId)
+    if (!state) return false
+    return terminalLifecycleStates.has(state)
+  }
+
   // =============================================================================
   // Execution History (REST + WebSocket merge)
   // =============================================================================
@@ -396,6 +601,31 @@ export const useLogicStore = defineStore('logic', () => {
 
       const response = await logicApi.getExecutionHistory(params)
       const restEntries = response.entries || []
+
+      for (const entry of restEntries) {
+        const conflict = inferConflictReason(entry.error_message)
+        if (entry.success) {
+          applyTerminalLifecycle({
+            ruleId: entry.rule_id,
+            intentId: entry.intent_id,
+            correlationId: entry.correlation_id,
+            requestId: entry.request_id,
+            success: true,
+            actionOutcomes: entry.action_outcomes,
+          })
+        } else {
+          applyTerminalLifecycle({
+            ruleId: entry.rule_id,
+            intentId: entry.intent_id,
+            correlationId: entry.correlation_id,
+            requestId: entry.request_id,
+            success: false,
+            reasonCode: entry.terminal_reason_code ?? conflict.code,
+            reasonText: entry.terminal_reason_text ?? entry.error_message ?? conflict.message,
+            actionOutcomes: entry.action_outcomes,
+          })
+        }
+      }
 
       // Merge with existing entries: REST entries as base, deduplicate by id
       const merged = new Map<string, ExecutionHistoryItem>()
@@ -430,58 +660,159 @@ export const useLogicStore = defineStore('logic', () => {
   // WebSocket Integration
   // =============================================================================
 
-  /**
-   * Handle incoming logic_execution WebSocket events.
-   * Updates activeExecutions for visual feedback.
-   */
+  function addExecutionHistoryEntry(entry: ExecutionHistoryItem): void {
+    executionHistory.value.unshift(entry)
+    if (executionHistory.value.length > 50) executionHistory.value.pop()
+  }
+
   function handleLogicExecutionEvent(message: WebSocketMessage): void {
     if (message.type !== 'logic_execution') return
-
     const event = message.data as unknown as LogicExecutionEvent
     if (!event.rule_id) return
 
-    logger.debug('Logic execution', { ruleName: event.rule_name, success: event.success })
-
-    // Add to recent executions (keep last 20)
-    recentExecutions.value.unshift(event)
-    if (recentExecutions.value.length > 20) {
-      recentExecutions.value.pop()
+    const contractCheck = validateContractEvent('logic_execution', event as unknown as Record<string, unknown>)
+    if (contractCheck.kind !== 'ok') {
+      applyTerminalLifecycle({
+        ruleId: event.rule_id,
+        success: false,
+        integrationIssue: true,
+        reasonCode: 'integration_contract_mismatch',
+        reasonText: contractCheck.reason,
+      })
+      return
     }
 
-    // Also add to merged execution history if loaded
+    const correlationId = extractCorrelationId(event as unknown as Record<string, unknown>) ?? event.correlation_id
+    const requestId = extractRequestId(event as unknown as Record<string, unknown>) ?? event.request_id
+    const intentId = correlationId ?? `logic_execution:${event.rule_id}:${event.timestamp}`
+    const triggeredAt = new Date(event.timestamp * 1000).toISOString()
+    const conflict = inferConflictReason(event.error_code || event.error)
+
+    applyPendingExecution(event.rule_id, intentId, correlationId, requestId)
+    applyTerminalLifecycle({
+      ruleId: event.rule_id,
+      intentId,
+      correlationId,
+      requestId,
+      success: event.success,
+      reasonCode: event.error_code ?? conflict.code,
+      reasonText: event.error ?? conflict.message,
+      actionOutcomes: [{ esp_id: event.action.esp_id, gpio: event.action.gpio, command: event.action.command }],
+    })
+
+    recentExecutions.value.unshift(event)
+    if (recentExecutions.value.length > 20) recentExecutions.value.pop()
+
     if (historyLoaded.value) {
-      const historyEntry: ExecutionHistoryItem = {
+      addExecutionHistoryEntry({
         id: `ws-${event.rule_id}-${event.timestamp}`,
         rule_id: event.rule_id,
         rule_name: event.rule_name,
-        triggered_at: new Date(event.timestamp * 1000).toISOString(),
-        trigger_reason: `${event.trigger.sensor_type} = ${event.trigger.value}`,
+        triggered_at: triggeredAt,
+        trigger_reason:
+          event.trigger.sensor_type != null
+            ? `${event.trigger.sensor_type} = ${event.trigger.value}`
+            : event.trigger.type === 'timer'
+              ? 'Zeitbasierter Trigger'
+              : (event.trigger.type ?? 'Unbekannter Trigger'),
         actions_executed: [{ esp_id: event.action.esp_id, gpio: event.action.gpio, command: event.action.command }],
         success: event.success,
         execution_time_ms: 0,
-      }
-      executionHistory.value.unshift(historyEntry)
-      if (executionHistory.value.length > 50) {
-        executionHistory.value.pop()
-      }
+        intent_id: intentId,
+        correlation_id: correlationId,
+        request_id: requestId,
+        lifecycle_state: event.success ? 'terminal_success' : (conflict.code ? 'terminal_conflict' : 'terminal_failed'),
+        terminal_reason_code: event.success ? undefined : (event.error_code ?? conflict.code),
+        terminal_reason_text: event.success ? undefined : (event.error ?? conflict.message),
+        updated_at: toIso(),
+        action_outcomes: [{ esp_id: event.action.esp_id, gpio: event.action.gpio, command: event.action.command }],
+      })
     }
 
-    // Mark rule as active (for visual feedback)
-    const ruleId = event.rule_id
-    activeExecutions.value.set(ruleId, Date.now())
+    activeExecutions.value.set(event.rule_id, Date.now())
+    setTimeout(() => activeExecutions.value.delete(event.rule_id), 2000)
 
-    // Clear active state after 2 seconds
-    setTimeout(() => {
-      activeExecutions.value.delete(ruleId)
-    }, 2000)
-
-    // Update rule's last_triggered and execution_count if we have the rule
-    const rule = rules.value.find((r) => r.id === ruleId)
+    const rule = rules.value.find((r) => r.id === event.rule_id)
     if (rule) {
-      rule.last_triggered = new Date(event.timestamp * 1000).toISOString()
+      rule.last_triggered = triggeredAt
       rule.execution_count = (rule.execution_count ?? 0) + 1
       rule.last_execution_success = event.success
     }
+  }
+
+  function handleSequenceEvent(message: WebSocketMessage): void {
+    if (
+      message.type !== 'sequence_started' &&
+      message.type !== 'sequence_step' &&
+      message.type !== 'sequence_completed' &&
+      message.type !== 'sequence_error' &&
+      message.type !== 'sequence_cancelled'
+    ) {
+      return
+    }
+
+    const data = message.data as Record<string, unknown>
+    const ruleId =
+      asString(data.rule_id) ??
+      resolveRuleIdByName(asString(data.rule_name))
+    if (!ruleId) return
+
+    const requestId = extractRequestId(data)
+    const sequenceId = asString(data.sequence_id)
+    const intentId = sequenceId ?? `sequence:${ruleId}:${Date.now()}`
+
+    if (message.type === 'sequence_started' || message.type === 'sequence_step') {
+      applyPendingExecution(ruleId, intentId, sequenceId, requestId)
+      return
+    }
+
+    if (message.type === 'sequence_completed') {
+      const completed = data as unknown as SequenceCompletedEvent
+      const success = Boolean(completed.success)
+      const conflict = inferConflictReason(completed.error_code || completed.error)
+      applyTerminalLifecycle({
+        ruleId,
+        intentId,
+        correlationId: sequenceId,
+        requestId,
+        success,
+        reasonCode: completed.error_code ?? conflict.code,
+        reasonText: completed.error ?? conflict.message,
+      })
+      return
+    }
+
+    if (message.type === 'sequence_error') {
+      const errored = data as unknown as SequenceErrorEvent
+      const conflict = inferConflictReason(errored.error_code || errored.message)
+      applyTerminalLifecycle({
+        ruleId,
+        intentId,
+        correlationId: sequenceId,
+        requestId,
+        success: false,
+        reasonCode: errored.error_code ?? conflict.code,
+        reasonText: errored.message ?? conflict.message,
+      })
+      return
+    }
+
+    const cancelled = data as unknown as SequenceCancelledEvent
+    const conflict = inferConflictReason(cancelled.reason)
+    applyTerminalLifecycle({
+      ruleId,
+      intentId,
+      correlationId: sequenceId,
+      requestId,
+      success: false,
+      reasonCode: conflict.code ?? 'sequence_cancelled',
+      reasonText: cancelled.reason ?? conflict.message ?? 'Sequenz wurde abgebrochen.',
+    })
+  }
+
+  function handleLifecycleEvents(message: WebSocketMessage): void {
+    handleLogicExecutionEvent(message)
+    handleSequenceEvent(message)
   }
 
   /**
@@ -491,10 +822,10 @@ export const useLogicStore = defineStore('logic', () => {
     if (wsSubscriptionId) return // Already subscribed
 
     wsSubscriptionId = websocketService.subscribe(
-      { types: ['logic_execution'] },
-      handleLogicExecutionEvent
+      { types: ['logic_execution', 'sequence_started', 'sequence_step', 'sequence_completed', 'sequence_error', 'sequence_cancelled'] },
+      handleLifecycleEvents
     )
-    logger.debug('Subscribed to WebSocket for logic_execution events')
+    logger.debug('Subscribed to WebSocket for logic lifecycle events')
   }
 
   /**
@@ -529,6 +860,10 @@ export const useLogicStore = defineStore('logic', () => {
   interface RuleHistoryEntry {
     nodes: any[]
     edges: any[]
+    metadata?: {
+      priority?: number
+      cooldown_seconds?: number
+    }
     timestamp: number
   }
 
@@ -546,13 +881,18 @@ export const useLogicStore = defineStore('logic', () => {
    * Push a snapshot to history.
    * Called after every graph change in the rule editor.
    */
-  function pushToHistory(nodes: any[], edges: any[]) {
+  function pushToHistory(
+    nodes: any[],
+    edges: any[],
+    metadata?: { priority?: number; cooldown_seconds?: number }
+  ) {
     // Discard any "future" entries if we undid something and then changed
     history.value = history.value.slice(0, historyIndex.value + 1)
 
     history.value.push({
       nodes: JSON.parse(JSON.stringify(nodes)),
       edges: JSON.parse(JSON.stringify(edges)),
+      metadata: metadata ? JSON.parse(JSON.stringify(metadata)) : undefined,
       timestamp: Date.now(),
     })
 
@@ -655,6 +995,8 @@ export const useLogicStore = defineStore('logic', () => {
     error,
     activeExecutions,
     recentExecutions,
+    ruleLifecycleByRuleId,
+    lifecycleTransitions,
 
     // Getters
     connections,
@@ -662,6 +1004,7 @@ export const useLogicStore = defineStore('logic', () => {
     enabledRules,
     ruleCount,
     enabledCount,
+    lifecycleByReasonCode,
 
     // Actions
     fetchRules,
@@ -680,6 +1023,9 @@ export const useLogicStore = defineStore('logic', () => {
     getRulesForActuator,
     getLastExecutionForActuator,
     clearError,
+    getRuleLifecycleState,
+    getLifecycleEntry,
+    isTerminalLifecycle,
 
     // Execution History
     executionHistory,

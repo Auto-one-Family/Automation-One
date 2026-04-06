@@ -371,6 +371,17 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     logger.debug(`WS unread count: ${unreadCount.value}`)
   }
 
+  /**
+   * Single write boundary for alert lifecycle updates coming from other stores.
+   * Returns false when the notification is unknown in the current inbox page.
+   */
+  function applyAlertUpdate(updated: NotificationDTO): boolean {
+    const idx = notifications.value.findIndex((n) => n.id === updated.id)
+    if (idx < 0) return false
+    notifications.value[idx] = updated
+    return true
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Browser Notifications
   // ═══════════════════════════════════════════════════════════════════════════
@@ -432,5 +443,6 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     handleWSNotificationNew,
     handleWSNotificationUpdated,
     handleWSUnreadCount,
+    applyAlertUpdate,
   }
 })

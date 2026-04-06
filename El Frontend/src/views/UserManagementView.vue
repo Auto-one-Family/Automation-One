@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { usersApi, type User, type UserCreate, type UserUpdate, type UserRole } from '@/api/users'
+import { formatUiApiError, toUiApiError } from '@/api/uiApiError'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import {
   Plus, Edit, Trash2, Key, RefreshCw, AlertCircle, Check, X,
@@ -9,6 +11,7 @@ import {
 import BaseModal from '@/shared/design/primitives/BaseModal.vue'
 
 const authStore = useAuthStore()
+const router = useRouter()
 
 // State
 const users = ref<User[]>([])
@@ -56,8 +59,7 @@ async function loadUsers(): Promise<void> {
   try {
     users.value = await usersApi.listUsers()
   } catch (err: unknown) {
-    const axiosError = err as { response?: { data?: { detail?: string } } }
-    error.value = axiosError.response?.data?.detail || 'Failed to load users'
+    error.value = formatUiApiError(toUiApiError(err, 'Benutzer konnten nicht geladen werden'))
   } finally {
     isLoading.value = false
   }
@@ -85,8 +87,7 @@ async function createUser(): Promise<void> {
     await loadUsers()
     setTimeout(() => successMessage.value = null, 3000)
   } catch (err: unknown) {
-    const axiosError = err as { response?: { data?: { detail?: string } } }
-    error.value = axiosError.response?.data?.detail || 'Failed to create user'
+    error.value = formatUiApiError(toUiApiError(err, 'Benutzer konnte nicht erstellt werden'))
   } finally {
     isLoading.value = false
   }
@@ -116,8 +117,7 @@ async function updateUser(): Promise<void> {
     await loadUsers()
     setTimeout(() => successMessage.value = null, 3000)
   } catch (err: unknown) {
-    const axiosError = err as { response?: { data?: { detail?: string } } }
-    error.value = axiosError.response?.data?.detail || 'Failed to update user'
+    error.value = formatUiApiError(toUiApiError(err, 'Benutzer konnte nicht aktualisiert werden'))
   } finally {
     isLoading.value = false
   }
@@ -141,8 +141,7 @@ async function deleteUser(): Promise<void> {
     await loadUsers()
     setTimeout(() => successMessage.value = null, 3000)
   } catch (err: unknown) {
-    const axiosError = err as { response?: { data?: { detail?: string } } }
-    error.value = axiosError.response?.data?.detail || 'Failed to delete user'
+    error.value = formatUiApiError(toUiApiError(err, 'Benutzer konnte nicht gelöscht werden'))
   } finally {
     isLoading.value = false
   }
@@ -172,8 +171,7 @@ async function resetPassword(): Promise<void> {
     successMessage.value = 'Password reset successfully'
     setTimeout(() => successMessage.value = null, 3000)
   } catch (err: unknown) {
-    const axiosError = err as { response?: { data?: { detail?: string } } }
-    error.value = axiosError.response?.data?.detail || 'Failed to reset password'
+    error.value = formatUiApiError(toUiApiError(err, 'Passwort konnte nicht zurückgesetzt werden'))
   } finally {
     isLoading.value = false
   }
@@ -201,8 +199,7 @@ async function changeOwnPassword(): Promise<void> {
     successMessage.value = 'Password changed successfully'
     setTimeout(() => successMessage.value = null, 3000)
   } catch (err: unknown) {
-    const axiosError = err as { response?: { data?: { detail?: string } } }
-    error.value = axiosError.response?.data?.detail || 'Failed to change password'
+    error.value = formatUiApiError(toUiApiError(err, 'Passwort konnte nicht geändert werden'))
   } finally {
     isLoading.value = false
   }
@@ -221,6 +218,15 @@ function formatDate(dateStr: string): string {
 }
 
 const isCurrentUser = computed(() => (user: User) => String(user.id) === String(authStore.user?.id))
+const isForbiddenError = computed(() => (error.value ?? '').includes('Zugriff verweigert'))
+
+function goBack(): void {
+  router.back()
+}
+
+function goHome(): void {
+  router.push('/')
+}
 
 onMounted(() => {
   loadUsers()
@@ -249,6 +255,11 @@ onMounted(() => {
       <AlertCircle class="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
       <div class="flex-1">
         <p class="text-sm text-red-400">{{ error }}</p>
+        <div v-if="isForbiddenError" class="mt-3 flex flex-wrap gap-2">
+          <button class="btn-secondary text-xs" @click="goBack">Zurück</button>
+          <button class="btn-secondary text-xs" @click="goHome">Zur Startansicht</button>
+          <button class="btn-secondary text-xs" @click="loadUsers">Erneut versuchen</button>
+        </div>
       </div>
       <button class="text-red-400 hover:text-red-300" @click="error = null">
         <X class="w-4 h-4" />

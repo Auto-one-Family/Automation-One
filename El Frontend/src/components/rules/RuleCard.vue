@@ -11,7 +11,7 @@ import { computed, ref } from 'vue'
 import { Zap, Clock, Trash2, AlertCircle } from 'lucide-vue-next'
 import { formatDistanceToNow } from 'date-fns'
 import { de } from 'date-fns/locale'
-import type { LogicRule, SensorCondition, ActuatorAction } from '@/types/logic'
+import type { LogicRule, SensorCondition, ActuatorAction, RuleIntentLifecycle } from '@/types/logic'
 
 interface Props {
   /** The logic rule */
@@ -22,6 +22,7 @@ interface Props {
   isActive?: boolean
   /** Number of executions in last 24h */
   executionCount?: number
+  lifecycle?: RuleIntentLifecycle | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -39,8 +40,26 @@ const isToggling = ref(false)
 
 /** Status label + color based on enabled state and last execution */
 const statusInfo = computed(() => {
-  if (props.rule.last_execution_success === false) {
+  if (props.lifecycle?.state === 'terminal_conflict') {
+    return { label: 'Konflikt', cssClass: 'rule-card__status-label--warning' }
+  }
+  if (props.lifecycle?.state === 'terminal_integration_issue') {
+    return { label: 'Integration', cssClass: 'rule-card__status-label--error' }
+  }
+  if (props.lifecycle?.state === 'terminal_failed') {
     return { label: 'Fehler', cssClass: 'rule-card__status-label--error' }
+  }
+  if (props.lifecycle?.state === 'terminal_success') {
+    return { label: 'Erfolg', cssClass: 'rule-card__status-label--active' }
+  }
+  if (props.lifecycle?.state === 'accepted') {
+    return { label: 'Angenommen', cssClass: 'rule-card__status-label--pending' }
+  }
+  if (props.lifecycle?.state === 'pending_activation') {
+    return { label: 'Aktivierung...', cssClass: 'rule-card__status-label--pending' }
+  }
+  if (props.lifecycle?.state === 'pending_execution') {
+    return { label: 'Ausfuehrung...', cssClass: 'rule-card__status-label--pending' }
   }
   if (props.rule.enabled) {
     return { label: 'Aktiv', cssClass: 'rule-card__status-label--active' }
@@ -49,7 +68,12 @@ const statusInfo = computed(() => {
 })
 
 /** Whether last execution failed */
-const hasError = computed(() => props.rule.last_execution_success === false)
+const hasError = computed(
+  () =>
+    props.lifecycle?.state === 'terminal_failed' ||
+    props.lifecycle?.state === 'terminal_integration_issue' ||
+    props.rule.last_execution_success === false
+)
 
 async function handleToggle() {
   isToggling.value = true
@@ -135,6 +159,13 @@ const lastTriggeredText = computed(() => {
       <span class="rule-card__name">{{ rule.name }}</span>
       <span class="rule-card__status-label" :class="statusInfo.cssClass">
         {{ statusInfo.label }}
+      </span>
+      <span
+        v-if="lifecycle?.state === 'terminal_conflict' && lifecycle.terminal_reason_code"
+        class="rule-card__reason-code"
+        :title="lifecycle.terminal_reason_text || lifecycle.terminal_reason_code"
+      >
+        {{ lifecycle.terminal_reason_code }}
       </span>
       <AlertCircle
         v-if="hasError"
@@ -287,6 +318,27 @@ const lastTriggeredText = computed(() => {
 
 .rule-card__status-label--error {
   color: var(--color-status-error);
+}
+
+.rule-card__status-label--pending {
+  color: var(--color-warning);
+}
+
+.rule-card__status-label--warning {
+  color: var(--color-warning);
+}
+
+.rule-card__reason-code {
+  font-size: 9px;
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  max-width: 120px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rule-card__error-icon {

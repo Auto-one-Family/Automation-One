@@ -43,6 +43,7 @@ export interface StructuredApiError {
 export function parseApiError(error: AxiosError): StructuredApiError {
   const response = error.response
   const statusCode = response?.status ?? 0
+  const headerRequestId = response?.headers?.['x-request-id']
 
   // GodKaiserException format: { success: false, error: { code, numeric_code, ... } }
   const errorData = (response?.data as Record<string, unknown>)?.error as Record<string, unknown> | undefined
@@ -53,7 +54,12 @@ export function parseApiError(error: AxiosError): StructuredApiError {
       numericCode: typeof errorData.numeric_code === 'number' ? errorData.numeric_code : null,
       message: String(errorData.message ?? error.message),
       details: (errorData.details as Record<string, unknown>) ?? {},
-      requestId: typeof errorData.request_id === 'string' ? errorData.request_id : null,
+      requestId:
+        typeof errorData.request_id === 'string'
+          ? errorData.request_id
+          : typeof headerRequestId === 'string'
+            ? headerRequestId
+            : null,
       statusCode,
     }
   }

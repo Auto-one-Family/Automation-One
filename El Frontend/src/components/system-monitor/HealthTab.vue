@@ -9,7 +9,7 @@
  * - Cross-tab navigation to Events tab
  */
 
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Cpu, Wifi, AlertTriangle, HeartPulse, ArrowUpDown, ExternalLink, RefreshCw, Bell, Server, Radio, BarChart3, GitBranch, Puzzle, Play, WifiOff, Wrench } from 'lucide-vue-next'
 import StatCard from '@/components/dashboard/StatCard.vue'
 import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
@@ -267,13 +267,8 @@ const monitoringUnhealthy = computed(() => {
 
 onMounted(() => {
   fetchHealth()
-  alertStore.startStatsPolling()
   checkGrafana()
   loadMaintenanceData()
-})
-
-onUnmounted(() => {
-  alertStore.stopStatsPolling()
 })
 </script>
 

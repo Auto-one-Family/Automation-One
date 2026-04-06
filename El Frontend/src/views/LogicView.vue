@@ -23,7 +23,7 @@ defineOptions({ name: 'LogicView' })
  * @see RuleConfigPanel.vue - Node configuration
  */
 
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Plus,
@@ -59,6 +59,12 @@ import RuleConfigPanel from '@/components/rules/RuleConfigPanel.vue'
 import RuleTemplateCard from '@/components/rules/RuleTemplateCard.vue'
 import RuleCard from '@/components/rules/RuleCard.vue'
 import { ruleTemplates, type RuleTemplate } from '@/config/rule-templates'
+import {
+  extractRuleValidationIssues,
+  mapRuleValidationIssues,
+  type RuleMetadataValidationErrors,
+  type RuleNodeValidationErrors,
+} from '@/utils/ruleValidationMapper'
 
 const logger = createLogger('LogicView')
 const route = useRoute()
@@ -92,6 +98,10 @@ function toggleTemplatesCollapsed() {
 // New rule form
 const newRuleName = ref('')
 const newRuleDescription = ref('')
+const rulePriority = ref(5)
+const ruleCooldownSeconds = ref<number | undefined>(0)
+const metadataValidationErrors = ref<RuleMetadataValidationErrors>({})
+const nodeValidationErrors = ref<RuleNodeValidationErrors>({})
 
 // Editor ref
 const editorRef = ref<InstanceType<typeof RuleFlowEditor> | null>(null)
@@ -110,6 +120,31 @@ const toolbarTitle = computed(() => {
   if (isCreatingNew.value) return 'Neue Regel'
   if (selectedRule.value) return selectedRule.value.name
   return 'Regel auswählen'
+})
+
+const hasRuleContext = computed(() => isCreatingNew.value || Boolean(selectedRule.value))
+
+function resetValidationState(): void {
+  metadataValidationErrors.value = {}
+  nodeValidationErrors.value = {}
+  editorRef.value?.clearValidationErrors()
+}
+
+function syncMetadataFromSelectedRule(): void {
+  if (selectedRule.value) {
+    rulePriority.value = selectedRule.value.priority ?? 5
+    ruleCooldownSeconds.value = selectedRule.value.cooldown_seconds ?? 0
+    return
+  }
+  if (isCreatingNew.value) {
+    rulePriority.value = 5
+    ruleCooldownSeconds.value = 0
+  }
+}
+
+watch(selectedRule, () => {
+  syncMetadataFromSelectedRule()
+  resetValidationState()
 })
 
 // ======================== LIFECYCLE ========================
@@ -150,6 +185,8 @@ async function selectRule(ruleId: string) {
   isCreatingNew.value = false
   hasUnsavedChanges.value = false
   showRuleDropdown.value = false
+  syncMetadataFromSelectedRule()
+  resetValidationState()
 
   // URL-sync: update URL to /logic/:ruleId
   const rule = logicStore.getRuleById(ruleId)
@@ -172,8 +209,11 @@ async function startNewRule() {
   hasUnsavedChanges.value = false
   newRuleName.value = ''
   newRuleDescription.value = ''
+  rulePriority.value = 5
+  ruleCooldownSeconds.value = 0
   showRuleDropdown.value = false
   editorRef.value?.clearCanvas()
+  resetValidationState()
 
   // URL-sync: reset to /logic
   dashStore.breadcrumb.ruleName = ''
@@ -197,7 +237,10 @@ async function useTemplate(template: RuleTemplate) {
   hasUnsavedChanges.value = true
   newRuleName.value = template.rule.name
   newRuleDescription.value = template.rule.description || ''
+  rulePriority.value = template.rule.priority ?? 5
+  ruleCooldownSeconds.value = template.rule.cooldown_seconds ?? 0
   showRuleDropdown.value = false
+  resetValidationState()
 
   // 2. Wait for the editor to mount (it's in a v-else block that requires isCreatingNew)
   await nextTick()
@@ -223,11 +266,15 @@ function cancelNewRule() {
   newRuleName.value = ''
   newRuleDescription.value = ''
   hasUnsavedChanges.value = false
+  rulePriority.value = 5
+  ruleCooldownSeconds.value = 0
+  resetValidationState()
 }
 
 async function saveRule() {
   if (!editorRef.value) return
 
+  resetValidationState()
   const graphData = editorRef.value.graphToRuleData()
 
   if (graphData.conditions.length === 0) {
@@ -257,6 +304,8 @@ async function saveRule() {
         conditions: graphData.conditions as unknown[],
         logic_operator: graphData.logic_operator,
         actions: graphData.actions as unknown[],
+        priority: graphData.priority ?? rulePriority.value,
+        cooldown_seconds: graphData.cooldown_seconds ?? ruleCooldownSeconds.value,
       })
 
       selectedRuleId.value = created.id
@@ -266,9 +315,13 @@ async function saveRule() {
       logger.info('Rule created', { id: created.id, name: created.name })
     } else if (selectedRule.value) {
       await logicStore.updateRule(selectedRule.value.id, {
+        name: selectedRule.value.name,
+        description: selectedRule.value.description,
         conditions: graphData.conditions as unknown[],
         logic_operator: graphData.logic_operator,
         actions: graphData.actions as unknown[],
+        priority: graphData.priority ?? rulePriority.value,
+        cooldown_seconds: graphData.cooldown_seconds ?? ruleCooldownSeconds.value,
       })
 
       hasUnsavedChanges.value = false
@@ -276,8 +329,20 @@ async function saveRule() {
       logger.info('Rule updated', { id: selectedRule.value.id })
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Speichern fehlgeschlagen'
-    toast.error(msg)
+    const issues = extractRuleValidationIssues(err)
+    if (issues.length > 0) {
+      const mapped = mapRuleValidationIssues(issues, {
+        conditionNodeIds: graphData.conditionNodeIds,
+        actionNodeIds: graphData.actionNodeIds,
+      })
+      nodeValidationErrors.value = mapped.nodeErrors
+      metadataValidationErrors.value = mapped.metadataErrors
+      editorRef.value?.setValidationErrors(mapped.nodeErrors)
+      toast.error(mapped.summary[0] ?? 'Validierung fehlgeschlagen')
+    } else {
+      const msg = err instanceof Error ? err.message : 'Speichern fehlgeschlagen'
+      toast.error(msg)
+    }
     logger.error('Save failed', err)
   } finally {
     isSaving.value = false
@@ -400,6 +465,19 @@ function onGraphChanged() {
   hasUnsavedChanges.value = true
 }
 
+function onMetadataRestored(metadata: { priority?: number; cooldown_seconds?: number }) {
+  rulePriority.value = metadata.priority ?? 5
+  ruleCooldownSeconds.value = metadata.cooldown_seconds ?? 0
+  hasUnsavedChanges.value = true
+}
+
+function clearMetadataFieldError(field: string): void {
+  if (!metadataValidationErrors.value[field]) return
+  const next = { ...metadataValidationErrors.value }
+  delete next[field]
+  metadataValidationErrors.value = next
+}
+
 // ======================== EXECUTION HISTORY ========================
 
 function onToggleHistory() {
@@ -411,6 +489,7 @@ function onToggleHistory() {
 
 const historyRuleFilter = ref('')
 const historyStatusFilter = ref('')
+const historyReasonCodeFilter = ref('')
 const expandedHistoryId = ref<string | null>(null)
 
 const filteredHistory = computed(() => {
@@ -422,6 +501,9 @@ const filteredHistory = computed(() => {
     items = items.filter(e => e.success)
   } else if (historyStatusFilter.value === 'error') {
     items = items.filter(e => !e.success)
+  }
+  if (historyReasonCodeFilter.value) {
+    items = items.filter(e => e.terminal_reason_code === historyReasonCodeFilter.value)
   }
   return items
 })
@@ -549,6 +631,36 @@ onUnmounted(() => {
             class="new-rule-input new-rule-input--desc"
             placeholder="Beschreibung (optional)"
           />
+        </div>
+
+        <div v-if="hasRuleContext" class="rule-metadata-inputs">
+          <label class="rule-meta-field">
+            <span>Priorität</span>
+            <input
+              v-model.number="rulePriority"
+              type="number"
+              min="1"
+              max="100"
+              class="new-rule-input new-rule-input--meta"
+              :class="{ 'new-rule-input--invalid': metadataValidationErrors.priority?.length }"
+              @input="hasUnsavedChanges = true; clearMetadataFieldError('priority')"
+            />
+          </label>
+          <label class="rule-meta-field">
+            <span>Cooldown (s)</span>
+            <input
+              :value="ruleCooldownSeconds ?? ''"
+              type="number"
+              min="0"
+              class="new-rule-input new-rule-input--meta"
+              :class="{ 'new-rule-input--invalid': metadataValidationErrors.cooldown_seconds?.length }"
+              @input="ruleCooldownSeconds = Number(($event.target as HTMLInputElement).value || 0); hasUnsavedChanges = true; clearMetadataFieldError('cooldown_seconds')"
+            />
+          </label>
+        </div>
+        <div v-if="metadataValidationErrors.priority?.length || metadataValidationErrors.cooldown_seconds?.length" class="rule-metadata-errors">
+          <span v-if="metadataValidationErrors.priority?.length">{{ metadataValidationErrors.priority[0] }}</span>
+          <span v-if="metadataValidationErrors.cooldown_seconds?.length">{{ metadataValidationErrors.cooldown_seconds[0] }}</span>
         </div>
       </div>
 
@@ -698,6 +810,7 @@ onUnmounted(() => {
                 :is-selected="selectedRuleId === rule.id"
                 :is-active="logicStore.isRuleActive(rule.id)"
                 :execution-count="rule.execution_count ?? 0"
+                :lifecycle="logicStore.getLifecycleEntry(rule.id)"
                 @select="selectRule"
                 @toggle="onRuleCardToggle"
                 @delete="onRuleCardDelete"
@@ -783,13 +896,16 @@ onUnmounted(() => {
         <RuleFlowEditor
           ref="editorRef"
           :rule="selectedRule"
+          :metadata="{ priority: rulePriority, cooldown_seconds: ruleCooldownSeconds }"
           @node-selected="onNodeSelected"
           @graph-changed="onGraphChanged"
+          @metadata-restored="onMetadataRestored"
         />
 
         <!-- Config Panel -->
         <RuleConfigPanel
           :node="selectedNode"
+          :validation-errors="selectedNode ? (nodeValidationErrors[selectedNode.id] || {}) : {}"
           @update:data="onNodeDataUpdate"
           @close="selectedNode = null"
           @delete-node="onDeleteNode"
@@ -826,6 +942,20 @@ onUnmounted(() => {
                 <option value="">Alle</option>
                 <option value="success">Nur Erfolg</option>
                 <option value="error">Nur Fehler</option>
+              </select>
+              <select
+                v-model="historyReasonCodeFilter"
+                class="rules-history__filter-select"
+                aria-label="Grundcode-Filter"
+              >
+                <option value="">Alle Gruende</option>
+                <option
+                  v-for="(count, reasonCode) in logicStore.lifecycleByReasonCode"
+                  :key="reasonCode"
+                  :value="reasonCode"
+                >
+                  {{ reasonCode }} ({{ count }})
+                </option>
               </select>
             </div>
             <button class="rules-history__close" @click="showHistory = false" aria-label="Historie schließen">
@@ -870,6 +1000,14 @@ onUnmounted(() => {
                 <div class="rules-history__detail-row rules-history__detail-row--error">
                   <span class="rules-history__detail-label">Fehler:</span>
                   <span>{{ exec.error_message }}</span>
+                </div>
+                <div v-if="exec.terminal_reason_code" class="rules-history__detail-row">
+                  <span class="rules-history__detail-label">Grundcode:</span>
+                  <span>{{ exec.terminal_reason_code }}</span>
+                </div>
+                <div v-if="exec.terminal_reason_text" class="rules-history__detail-row">
+                  <span class="rules-history__detail-label">Grund:</span>
+                  <span>{{ exec.terminal_reason_text }}</span>
                 </div>
               </div>
             </div>
@@ -1118,6 +1256,21 @@ onUnmounted(() => {
   gap: 0.5rem;
 }
 
+.rule-metadata-inputs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.rule-meta-field {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--color-text-muted);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .new-rule-input {
   padding: 0.4375rem 0.625rem;
   font-size: 0.8125rem;
@@ -1132,6 +1285,23 @@ onUnmounted(() => {
 
 .new-rule-input--desc {
   width: 240px;
+}
+
+.new-rule-input--meta {
+  width: 92px;
+}
+
+.new-rule-input--invalid {
+  border-color: var(--color-error);
+}
+
+.rule-metadata-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--color-error);
+  font-size: 0.6875rem;
+  margin-left: 0.5rem;
 }
 
 .new-rule-input:focus {

@@ -472,6 +472,15 @@ export type MessageType =
   // Intent / Outcome (April 2026 contract)
   | 'intent_outcome'
   | 'intent_outcome_lifecycle'
+  // Calibration lifecycle (S-P6)
+  | 'calibration_session_started'
+  | 'calibration_session_finalized'
+  | 'calibration_session_applied'
+  | 'calibration_session_rejected'
+  | 'calibration_point_added'
+  | 'calibration_point_rejected'
+  | 'calibration_measurement_received'
+  | 'calibration_measurement_failed'
 
 export interface MqttMessage {
   id: string

@@ -9,6 +9,8 @@
  */
 import type { MessageType } from '@/types'
 
+export type RealtimeMutationType = 'replace' | 'patch' | 'refresh'
+
 /** Message types registered via ws.on() in esp.store.ts initWebSocket */
 export const ESP_STORE_WS_ON_HANDLER_TYPES = [
   'actuator_alert',
@@ -51,3 +53,49 @@ export const ESP_STORE_WS_ON_HANDLER_TYPES = [
 export const ESP_STORE_WS_SUBSCRIPTION_TYPES: MessageType[] = [
   ...ESP_STORE_WS_ON_HANDLER_TYPES,
 ]
+
+/**
+ * Explicit mutation contract for every WS type consumed by the esp store.
+ * - replace: full-entity replacement from snapshot payload
+ * - patch: targeted in-place delta on a bounded entity
+ * - refresh: fallback full refresh via fetchAll/fetchDevice
+ */
+export const ESP_STORE_WS_MUTATION_CONTRACT: Record<
+  (typeof ESP_STORE_WS_ON_HANDLER_TYPES)[number],
+  RealtimeMutationType
+> = {
+  actuator_alert: 'patch',
+  actuator_command: 'patch',
+  actuator_command_failed: 'patch',
+  actuator_config_deleted: 'patch',
+  actuator_response: 'patch',
+  actuator_status: 'patch',
+  config_failed: 'patch',
+  config_published: 'patch',
+  config_response: 'patch',
+  device_approved: 'refresh',
+  device_context_changed: 'patch',
+  device_discovered: 'patch',
+  device_rediscovered: 'patch',
+  device_rejected: 'patch',
+  device_scope_changed: 'patch',
+  esp_health: 'patch',
+  error_event: 'patch',
+  intent_outcome: 'patch',
+  intent_outcome_lifecycle: 'patch',
+  notification: 'patch',
+  notification_new: 'patch',
+  notification_updated: 'patch',
+  notification_unread_count: 'patch',
+  sensor_config_deleted: 'patch',
+  sensor_data: 'patch',
+  sensor_health: 'patch',
+  sequence_cancelled: 'patch',
+  sequence_completed: 'patch',
+  sequence_error: 'patch',
+  sequence_started: 'patch',
+  sequence_step: 'patch',
+  subzone_assignment: 'patch',
+  system_event: 'patch',
+  zone_assignment: 'patch',
+}

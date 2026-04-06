@@ -788,7 +788,16 @@ describe('Logic Store - WebSocket Integration', () => {
       store.subscribeToWebSocket()
 
       expect(websocketService.subscribe).toHaveBeenCalledWith(
-        { types: ['logic_execution'] },
+        {
+          types: [
+            'logic_execution',
+            'sequence_started',
+            'sequence_step',
+            'sequence_completed',
+            'sequence_error',
+            'sequence_cancelled',
+          ],
+        },
         expect.any(Function)
       )
     })
@@ -941,6 +950,48 @@ describe('Logic Store - WebSocket Integration', () => {
 
       const rule = store.getRuleById('rule-001')
       expect(rule?.last_triggered).toBeDefined()
+    })
+
+    it('maps successful execution to terminal_success lifecycle', async () => {
+      const store = useLogicStore()
+      await store.fetchRules()
+      store.subscribeToWebSocket()
+
+      const callback = (websocketService.subscribe as ReturnType<typeof vi.fn>).mock.calls[0][1]
+      callback({
+        type: 'logic_execution',
+        data: {
+          rule_id: 'rule-001',
+          rule_name: 'Temperature Fan Control',
+          trigger: { type: 'sensor', sensor_type: 'ds18b20', value: 26 },
+          action: { esp_id: 'ESP_TEST_002', gpio: 16, command: 'ON' },
+          success: true,
+          timestamp: Date.now() / 1000,
+        },
+        timestamp: Date.now(),
+      })
+
+      expect(store.getRuleLifecycleState('rule-001')).toBe('terminal_success')
+    })
+
+    it('maps conflict failures to terminal_conflict', async () => {
+      const store = useLogicStore()
+      await store.fetchRules()
+      store.subscribeToWebSocket()
+
+      const callback = (websocketService.subscribe as ReturnType<typeof vi.fn>).mock.calls[0][1]
+      callback({
+        type: 'sequence_error',
+        data: {
+          sequence_id: 'seq-1',
+          rule_id: 'rule-001',
+          message: 'cooldown blocked',
+        },
+        timestamp: Date.now(),
+      })
+
+      expect(store.getRuleLifecycleState('rule-001')).toBe('terminal_conflict')
+      expect(store.getLifecycleEntry('rule-001')?.terminal_reason_code).toBe('conflict_cooldown_blocked')
     })
 
     it('ignores events without rule_id', () => {
@@ -1294,6 +1345,12 @@ describe('Logic Store - Undo/Redo', () => {
 
     expect(store.history.length).toBe(1)
     expect(store.historyIndex).toBe(0)
+  })
+
+  it('pushToHistory stores metadata snapshot', () => {
+    const store = useLogicStore()
+    store.pushToHistory([{ id: 'n1' }], [], { priority: 7, cooldown_seconds: 120 })
+    expect(store.history[0].metadata).toEqual({ priority: 7, cooldown_seconds: 120 })
   })
 
   it('can undo after 2 pushes', () => {

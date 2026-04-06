@@ -16,10 +16,10 @@
  * - German human-readable messages
  *
  * KATEGORIE-FARBEN (linke Border + Icon):
- * - esp-status (Blau #3B82F6):    Heartbeat, Online/Offline, LWT
- * - sensors (Emerald #10B981):    Sensor-Messwerte
- * - actuators (Amber #F59E0B):    Aktor-Status, Commands, Alerts
- * - system (Violet #8B5CF6):      Config, Auth, Errors, Lifecycle
+ * - esp-status (Token category-esp-status): Heartbeat, Online/Offline, LWT
+ * - sensors (Token category-sensors):       Sensor-Messwerte
+ * - actuators (Token category-actuators):   Aktor-Status, Commands, Alerts
+ * - system (Token category-system):         Config, Auth, Errors, Lifecycle
  *
  * SEVERITY (Hintergrund-Tint + rechtes Icon):
  * - info: Kein Tint, Info-Icon
@@ -865,8 +865,8 @@ onUnmounted(() => {
 }
 
 .event-item:hover {
-  background-color: rgba(255, 255, 255, 0.03);
-  box-shadow: inset 0 0 20px rgba(255, 255, 255, 0.02);
+  background-color: color-mix(in srgb, var(--color-text-inverse) 3%, transparent);
+  box-shadow: inset 0 0 20px color-mix(in srgb, var(--color-text-inverse) 2%, transparent);
 }
 
 /* ============================================================================
@@ -883,26 +883,26 @@ onUnmounted(() => {
 
 /* ESP-Status (Blue) */
 .event-item--category-esp-status .event-item__category-bar {
-  background-color: var(--color-accent);
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.4);
+  background-color: var(--color-category-esp-status);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-category-esp-status) 45%, transparent);
 }
 
 /* Sensors (Emerald) */
 .event-item--category-sensors .event-item__category-bar {
-  background-color: #10b981;
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+  background-color: var(--color-category-sensors);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-category-sensors) 45%, transparent);
 }
 
 /* Actuators (Amber) */
 .event-item--category-actuators .event-item__category-bar {
-  background-color: #f59e0b;
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+  background-color: var(--color-category-actuators);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-category-actuators) 45%, transparent);
 }
 
 /* System (Violet) */
 .event-item--category-system .event-item__category-bar {
-  background-color: #8b5cf6;
-  box-shadow: 0 0 8px rgba(139, 92, 246, 0.4);
+  background-color: var(--color-category-system);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-category-system) 45%, transparent);
 }
 
 /* ============================================================================
@@ -913,21 +913,21 @@ onUnmounted(() => {
 }
 
 .event-item--severity-warning {
-  background-color: rgba(245, 158, 11, 0.03);
+  background-color: color-mix(in srgb, var(--color-warning) 10%, transparent);
 }
 
 .event-item--severity-error {
-  background-color: rgba(239, 68, 68, 0.04);
+  background-color: color-mix(in srgb, var(--color-error) 12%, transparent);
 }
 
 .event-item--severity-critical {
-  background-color: rgba(239, 68, 68, 0.06);
+  background-color: color-mix(in srgb, var(--color-error) 16%, transparent);
   animation: pulse-subtle 2s ease-in-out infinite;
 }
 
 @keyframes pulse-subtle {
-  0%, 100% { background-color: rgba(239, 68, 68, 0.06); }
-  50% { background-color: rgba(239, 68, 68, 0.08); }
+  0%, 100% { background-color: color-mix(in srgb, var(--color-error) 16%, transparent); }
+  50% { background-color: color-mix(in srgb, var(--color-error) 22%, transparent); }
 }
 
 .event-item__icon {
@@ -945,23 +945,23 @@ onUnmounted(() => {
 
 /* Category-based icon styling */
 .event-item--category-esp-status .event-item__icon {
-  background-color: rgba(59, 130, 246, 0.12);
-  color: var(--color-info);
+  background-color: var(--color-category-esp-bg);
+  color: var(--color-category-esp-status);
 }
 
 .event-item--category-sensors .event-item__icon {
-  background-color: rgba(16, 185, 129, 0.12);
-  color: var(--color-success);
+  background-color: var(--color-category-sensors-bg);
+  color: var(--color-category-sensors);
 }
 
 .event-item--category-actuators .event-item__icon {
-  background-color: rgba(245, 158, 11, 0.12);
-  color: var(--color-warning);
+  background-color: var(--color-category-actuators-bg);
+  color: var(--color-category-actuators);
 }
 
 .event-item--category-system .event-item__icon {
-  background-color: rgba(139, 92, 246, 0.12);
-  color: var(--color-mock);
+  background-color: var(--color-category-system-bg);
+  color: var(--color-category-system);
 }
 
 /* NOTE: Icon color is now ALWAYS determined by category (not severity)
@@ -1147,7 +1147,7 @@ onUnmounted(() => {
   z-index: 10;
   background-color: var(--color-bg-secondary);
   border-bottom: 1px solid var(--glass-border);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-bg-primary) 15%, transparent);
 }
 
 /* Inline Date Separator for date changes within virtual scroll */
@@ -1195,20 +1195,20 @@ onUnmounted(() => {
 
 /* Server Start - Grün, unauffällig */
 .lifecycle-separator--start {
-  color: rgba(34, 197, 94, 0.6);
+  color: color-mix(in srgb, var(--color-success) 65%, transparent);
 }
 
 .lifecycle-separator--start .lifecycle-separator__label {
-  border-color: rgba(34, 197, 94, 0.4);
+  border-color: color-mix(in srgb, var(--color-success) 45%, transparent);
 }
 
 /* Server Stop - Orange, unauffällig */
 .lifecycle-separator--stop {
-  color: rgba(251, 146, 60, 0.6);
+  color: color-mix(in srgb, var(--color-warning) 65%, transparent);
 }
 
 .lifecycle-separator--stop .lifecycle-separator__label {
-  border-color: rgba(251, 146, 60, 0.4);
+  border-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
 }
 
 /* ============================================================================
@@ -1216,22 +1216,22 @@ onUnmounted(() => {
    ============================================================================ */
 
 .event-item--restored {
-  border-left: 3px solid var(--color-success, #22c55e) !important;
-  background-color: color-mix(in srgb, var(--color-success, #22c55e) 8%, transparent);
+  border-left: 3px solid var(--color-success) !important;
+  background-color: color-mix(in srgb, var(--color-success) 8%, transparent);
   animation: restored-pulse 2s ease-out;
   position: relative;
 }
 
 .event-item--restored:hover {
-  background-color: color-mix(in srgb, var(--color-success, #22c55e) 12%, transparent);
+  background-color: color-mix(in srgb, var(--color-success) 12%, transparent);
 }
 
 @keyframes restored-pulse {
   0% {
-    background-color: color-mix(in srgb, var(--color-success, #22c55e) 20%, transparent);
+    background-color: color-mix(in srgb, var(--color-success) 20%, transparent);
   }
   100% {
-    background-color: color-mix(in srgb, var(--color-success, #22c55e) 8%, transparent);
+    background-color: color-mix(in srgb, var(--color-success) 8%, transparent);
   }
 }
 
@@ -1245,8 +1245,8 @@ onUnmounted(() => {
   width: 1.25rem;
   height: 1.25rem;
   border-radius: 50%;
-  background-color: var(--color-success, #22c55e);
-  color: white;
+  background-color: var(--color-success);
+  color: var(--color-text-inverse);
   animation: badge-pop 0.3s ease-out;
 }
 
@@ -1312,7 +1312,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--color-text-inverse) 2%, transparent);
   border-bottom: 1px solid var(--glass-border);
   cursor: pointer;
   transition: all 0.15s;
@@ -1320,7 +1320,7 @@ onUnmounted(() => {
 }
 
 .event-group__header:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--color-text-inverse) 4%, transparent);
 }
 
 .event-group--expanded .event-group__header {
@@ -1329,9 +1329,9 @@ onUnmounted(() => {
 
 /* Category colors for group headers */
 .event-group__header--esp-status { border-left-color: var(--color-accent); }
-.event-group__header--sensors { border-left-color: #10b981; }
-.event-group__header--actuators { border-left-color: #f59e0b; }
-.event-group__header--system { border-left-color: #8b5cf6; }
+.event-group__header--sensors { border-left-color: var(--color-category-sensors); }
+.event-group__header--actuators { border-left-color: var(--color-category-actuators); }
+.event-group__header--system { border-left-color: var(--color-category-system); }
 
 .event-group__expand-icon {
   color: var(--color-text-muted);
@@ -1367,7 +1367,7 @@ onUnmounted(() => {
 
 .event-group__count {
   padding: 0.125rem 0.5rem;
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--color-text-inverse) 5%, transparent);
   border-radius: 9999px;
   font-weight: 500;
 }
@@ -1390,7 +1390,7 @@ onUnmounted(() => {
 /* Group Children */
 .event-group__children {
   border-bottom: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.01);
+  background: color-mix(in srgb, var(--color-text-inverse) 1%, transparent);
   overflow: hidden;
 }
 
@@ -1405,7 +1405,7 @@ onUnmounted(() => {
   top: 0;
   bottom: 0;
   width: 1px;
-  background: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--color-text-inverse) 10%, transparent);
 }
 
 /* Expand/Collapse Transition */
@@ -1434,7 +1434,11 @@ onUnmounted(() => {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(239, 68, 68, 0.03) 0%, rgba(239, 68, 68, 0.01) 100%);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-error) 3%, transparent) 0%,
+    color-mix(in srgb, var(--color-error) 1%, transparent) 100%
+  );
   border-radius: 0.5rem;
   pointer-events: none;
 }
@@ -1445,11 +1449,11 @@ onUnmounted(() => {
 
 .event-group__header--emergency {
   border-left-color: var(--color-error) !important;
-  background: rgba(239, 68, 68, 0.08);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
 }
 
 .event-group__header--emergency:hover {
-  background: rgba(239, 68, 68, 0.12);
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
 }
 
 .event-group__emergency-badge {
@@ -1458,7 +1462,7 @@ onUnmounted(() => {
   justify-content: center;
   width: 2rem;
   height: 2rem;
-  background: rgba(239, 68, 68, 0.15);
+  background: color-mix(in srgb, var(--color-error) 15%, transparent);
   border-radius: 0.5rem;
   color: var(--color-error);
   flex-shrink: 0;
@@ -1496,7 +1500,7 @@ onUnmounted(() => {
 
 .event-group__count-badge--emergency {
   padding: 0.125rem 0.5rem;
-  background: rgba(239, 68, 68, 0.15);
+  background: color-mix(in srgb, var(--color-error) 15%, transparent);
   color: var(--color-error);
   font-weight: 600;
   font-size: 0.75rem;
@@ -1506,12 +1510,12 @@ onUnmounted(() => {
 /* Emergency Summary Panel */
 .event-group__emergency-summary {
   padding: 0.75rem;
-  border-bottom: 1px solid rgba(239, 68, 68, 0.1);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-error) 10%, transparent);
 }
 
 .emergency-summary {
-  background: rgba(239, 68, 68, 0.05);
-  border: 1px solid rgba(239, 68, 68, 0.15);
+  background: color-mix(in srgb, var(--color-error) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-error) 15%, transparent);
   border-radius: 0.5rem;
   overflow: hidden;
 }
@@ -1521,7 +1525,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
   padding: 0.625rem 0.75rem;
-  background: rgba(239, 68, 68, 0.08);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
   color: var(--color-error);
   font-weight: 600;
   font-size: 0.8125rem;
@@ -1559,8 +1563,8 @@ onUnmounted(() => {
 
 .gpio-badge {
   padding: 0.125rem 0.5rem;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-error) 20%, transparent);
   border-radius: 0.25rem;
   font-family: monospace;
   font-size: 0.75rem;
@@ -1569,13 +1573,13 @@ onUnmounted(() => {
 
 /* Trigger Event Highlight */
 .event-item--trigger {
-  background: rgba(239, 68, 68, 0.05) !important;
+  background: color-mix(in srgb, var(--color-error) 5%, transparent) !important;
 }
 
 .event-item__trigger-badge {
   padding: 0.125rem 0.5rem;
   background: var(--color-error);
-  color: white;
+  color: var(--color-text-inverse);
   font-size: 0.625rem;
   font-weight: 700;
   border-radius: 0.25rem;
@@ -1584,8 +1588,8 @@ onUnmounted(() => {
 
 /* Emergency expanded children */
 .event-group--emergency .event-group__children {
-  border-color: rgba(239, 68, 68, 0.15);
-  background: rgba(239, 68, 68, 0.02);
+  border-color: color-mix(in srgb, var(--color-error) 15%, transparent);
+  background: color-mix(in srgb, var(--color-error) 2%, transparent);
 }
 
 /* Mobile adjustments for groups */

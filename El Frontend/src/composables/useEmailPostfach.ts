@@ -24,6 +24,7 @@ export function useEmailPostfach() {
   const error = ref<string | null>(null)
   const pagination = ref<PaginationMeta | null>(null)
   const selectedEntry = ref<EmailLogEntry | null>(null)
+  const lastLoadedAt = ref<string | null>(null)
 
   // Filter state
   const statusFilter = ref<EmailLogStatus | ''>('')
@@ -52,6 +53,7 @@ export function useEmailPostfach() {
       const res = await notificationsApi.getEmailLog(filters.value)
       emails.value = res.data
       pagination.value = res.pagination
+      lastLoadedAt.value = new Date().toISOString()
     } catch (err: unknown) {
       const axiosError = err as { response?: { data?: { detail?: string } } }
       error.value = axiosError.response?.data?.detail ?? 'E-Mail-Log konnte nicht geladen werden'
@@ -106,6 +108,7 @@ export function useEmailPostfach() {
     error,
     pagination,
     selectedEntry,
+    lastLoadedAt,
     statusFilter,
     dateFrom,
     dateTo,

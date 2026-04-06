@@ -207,6 +207,18 @@ describe('ESP Store - fetchAll', () => {
     const uniqueIds = [...new Set(deviceIds)]
     expect(uniqueIds.length).toBe(deviceIds.length)
   })
+
+  it('should replace stale local snapshot on fetchAll', async () => {
+    const store = useEspStore()
+    store.replaceDevices([
+      { ...mockESPDevice, device_id: 'ESP_STALE_001', esp_id: 'ESP_STALE_001' },
+    ])
+
+    await store.fetchAll()
+
+    const ids = store.devices.map((d) => d.device_id || d.esp_id)
+    expect(ids).not.toContain('ESP_STALE_001')
+  })
 })
 
 // =============================================================================
@@ -951,6 +963,32 @@ describe('ESP Store - Utility Actions', () => {
 
       // updateDeviceInList only updates existing devices, does not add new ones
       expect(store.devices.length).toBe(0)
+    })
+  })
+
+  describe('device write adapters', () => {
+    it('replaceDevices should atomically replace the full device list', () => {
+      const store = useEspStore()
+      store.devices = [{ ...mockESPDevice, device_id: 'ESP_OLD', esp_id: 'ESP_OLD' }]
+
+      store.replaceDevices([{ ...mockESPDevice, device_id: 'ESP_NEW', esp_id: 'ESP_NEW' }])
+
+      expect(store.devices).toHaveLength(1)
+      expect(store.devices[0].device_id).toBe('ESP_NEW')
+    })
+
+    it('applyDevicePatch should patch only the targeted device', () => {
+      const store = useEspStore()
+      store.devices = [
+        { ...mockESPDevice, device_id: 'ESP_A', esp_id: 'ESP_A', name: 'A' },
+        { ...mockESPDevice, device_id: 'ESP_B', esp_id: 'ESP_B', name: 'B' },
+      ]
+
+      const patched = store.applyDevicePatch('ESP_B', (device) => ({ ...device, name: 'B-Updated' }))
+
+      expect(patched).toBe(true)
+      expect(store.devices.find((d) => d.device_id === 'ESP_A')?.name).toBe('A')
+      expect(store.devices.find((d) => d.device_id === 'ESP_B')?.name).toBe('B-Updated')
     })
   })
 })

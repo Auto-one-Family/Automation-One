@@ -22,6 +22,12 @@ export interface ToastOptions {
   duration?: number
   persistent?: boolean
   actions?: ToastAction[]
+  /**
+   * Optionaler stabiler Deduplizierungs-Schlüssel.
+   * Nutze ihn bei REST+WS-Kombinationen, um doppelte Operator-Rückmeldungen
+   * für dieselbe Fachaktion zu verhindern.
+   */
+  dedupeKey?: string
 }
 
 export interface Toast extends ToastOptions {
@@ -60,7 +66,12 @@ export function useToast() {
 
     // Dedup: skip if identical toast exists within time window
     const duplicate = state.toasts.find(
-      t => t.message === options.message && t.type === options.type && (now - t.createdAt) < DEDUP_WINDOW_MS
+      t => {
+        const withinWindow = (now - t.createdAt) < DEDUP_WINDOW_MS
+        if (!withinWindow) return false
+        if (options.dedupeKey && t.dedupeKey) return t.dedupeKey === options.dedupeKey
+        return t.message === options.message && t.type === options.type
+      }
     )
     if (duplicate) {
       return duplicate.id

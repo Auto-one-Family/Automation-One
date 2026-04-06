@@ -27,10 +27,13 @@ const ICON_MAP: Record<string, Component> = {
 interface Props {
   sensor: SensorWithContext
   mode: 'monitor' | 'config'
+  dataMode?: 'Live' | 'Hybrid' | 'Snapshot'
   trend?: TrendDirection
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  dataMode: 'Hybrid',
+})
 
 const emit = defineEmits<{
   configure: [sensor: SensorWithContext]
@@ -259,6 +262,9 @@ function handleClick() {
           </div>
         </span>
         <div class="sensor-card__quality">
+          <span :class="['sensor-card__mode-badge', `sensor-card__mode-badge--${dataMode.toLowerCase()}`]">
+            {{ dataMode }}
+          </span>
           <span :class="['sensor-card__dot', statusClass]" />
           <span v-if="qualityLabel" :class="['sensor-card__quality-text', `sensor-card__quality-text--${effectiveQualityStatus}`]">{{ qualityLabel }}</span>
         </div>
@@ -417,6 +423,29 @@ function handleClick() {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+}
+
+.sensor-card__mode-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 1.1;
+  color: var(--color-text-secondary);
+}
+
+.sensor-card__mode-badge--live {
+  color: var(--color-success);
+}
+
+.sensor-card__mode-badge--hybrid {
+  color: var(--color-info);
+}
+
+.sensor-card__mode-badge--snapshot {
+  color: var(--color-warning);
 }
 
 .sensor-card__dot {

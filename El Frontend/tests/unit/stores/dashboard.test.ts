@@ -48,6 +48,17 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ showSuccess: vi.fn(), showError: vi.fn(), showWarning: vi.fn(), showInfo: vi.fn() }),
 }))
 
+const dashboardsApiMock = {
+  list: vi.fn(async () => ({ success: true, data: [] })),
+  create: vi.fn(async () => ({ success: true, data: { id: 'srv-created' } })),
+  update: vi.fn(async () => ({ success: true })),
+  delete: vi.fn(async () => ({ success: true })),
+}
+
+vi.mock('@/api/dashboards', () => ({
+  dashboardsApi: dashboardsApiMock,
+}))
+
 // Now import the store under test (AFTER mocks are set up)
 const { useDashboardStore } = await import('@/shared/stores/dashboard.store')
 
@@ -64,6 +75,8 @@ describe('dashboard store', () => {
     setActivePinia(createPinia())
     mockDevices.value = []
     mockPendingDevices.value = []
+    vi.clearAllMocks()
+    dashboardsApiMock.list.mockResolvedValue({ success: true, data: [] })
   })
 
   describe('initial state', () => {
@@ -434,6 +447,287 @@ describe('dashboard store', () => {
 
       mockPendingDevices.value = [{ esp_id: 'ESP_NEW_001' }, { esp_id: 'ESP_NEW_002' }]
       expect(store.pendingCount).toBe(2)
+    })
+  })
+
+  describe('fetchLayouts sync boundaries', () => {
+    it('merged server + local layouts keep local_only sync flag', async () => {
+      dashboardsApiMock.list.mockResolvedValueOnce({
+        success: true,
+        data: [
+          {
+            id: 'srv-1',
+            name: 'Server Dash',
+            description: '',
+            widgets: [],
+            created_at: '2026-04-06T00:00:00Z',
+            updated_at: '2026-04-06T00:00:00Z',
+            scope: null,
+            zone_id: null,
+            auto_generated: false,
+            sensor_id: null,
+            target: null,
+          },
+        ],
+      })
+
+      const store = useDashboardStore()
+      store.layouts = [
+        {
+          id: 'local-1',
+          name: 'Local Dash',
+          createdAt: '2026-04-06T00:00:00Z',
+          updatedAt: '2026-04-06T00:00:00Z',
+          widgets: [],
+        } as any,
+      ]
+
+      await store.fetchLayouts()
+
+      const local = store.layouts.find((l) => l.id === 'local-1')
+      const server = store.layouts.find((l) => l.serverId === 'srv-1')
+      expect(local?.syncFlags?.local_only).toBe(true)
+      expect(server?.syncFlags?.server_synced).toBe(true)
+    })
+
+    it('orphans without serverId trigger create sync', async () => {
+      vi.useFakeTimers()
+      dashboardsApiMock.list.mockResolvedValueOnce({ success: true, data: [] })
+
+      const store = useDashboardStore()
+      store.layouts = [
+        {
+          id: 'orphan-1',
+          name: 'Orphan Dash',
+          createdAt: '2026-04-06T00:00:00Z',
+          updatedAt: '2026-04-06T00:00:00Z',
+          widgets: [],
+        } as any,
+      ]
+
+      await store.fetchLayouts()
+      vi.advanceTimersByTime(2100)
+      await Promise.resolve()
+
+      expect(dashboardsApiMock.create).toHaveBeenCalled()
+      vi.useRealTimers()
+    })
+
+    it('keeps dirty local layout when local updatedAt is newer than server', async () => {
+      vi.useFakeTimers()
+      dashboardsApiMock.list.mockResolvedValueOnce({
+        success: true,
+        data: [
+          {
+            id: 'srv-keep-local',
+            name: 'Server Name',
+            description: '',
+            widgets: [],
+            created_at: '2026-04-06T00:00:00Z',
+            updated_at: '2026-04-06T00:00:10Z',
+            scope: null,
+            zone_id: null,
+            auto_generated: false,
+            sensor_id: null,
+            target: null,
+          },
+        ],
+      })
+
+      const store = useDashboardStore()
+      store.layouts = [
+        {
+          id: 'local-keep-local',
+          serverId: 'srv-keep-local',
+          name: 'Local Newer',
+          createdAt: '2026-04-06T00:00:00Z',
+          updatedAt: '2026-04-06T00:01:00Z',
+          widgets: [],
+          syncFlags: {
+            local_only: false,
+            server_synced: false,
+            stale_server_id: null,
+            status: 'dirty',
+            dirty: true,
+            conflict: false,
+            last_sync_attempt_at: null,
+            last_sync_result_at: null,
+            last_sync_message: null,
+          },
+        } as any,
+      ]
+
+      await store.fetchLayouts()
+      const merged = store.layouts.find((l) => l.serverId === 'srv-keep-local')
+      expect(merged?.name).toBe('Local Newer')
+      expect(merged?.syncFlags?.status).toBe('dirty')
+
+      vi.advanceTimersByTime(2100)
+      await Promise.resolve()
+      expect(dashboardsApiMock.update).toHaveBeenCalled()
+      vi.useRealTimers()
+    })
+
+    it('uses newer server layout when local layout is clean', async () => {
+      dashboardsApiMock.list.mockResolvedValueOnce({
+        success: true,
+        data: [
+          {
+            id: 'srv-server-newer',
+            name: 'Server Newest',
+            description: '',
+            widgets: [],
+            created_at: '2026-04-06T00:00:00Z',
+            updated_at: '2026-04-06T00:02:00Z',
+            scope: null,
+            zone_id: null,
+            auto_generated: false,
+            sensor_id: null,
+            target: null,
+          },
+        ],
+      })
+
+      const store = useDashboardStore()
+      store.layouts = [
+        {
+          id: 'local-clean',
+          serverId: 'srv-server-newer',
+          name: 'Old Local',
+          createdAt: '2026-04-06T00:00:00Z',
+          updatedAt: '2026-04-06T00:01:00Z',
+          widgets: [],
+          syncFlags: {
+            local_only: false,
+            server_synced: true,
+            stale_server_id: null,
+            status: 'server_synced',
+            dirty: false,
+            conflict: false,
+            last_sync_attempt_at: null,
+            last_sync_result_at: null,
+            last_sync_message: null,
+          },
+        } as any,
+      ]
+
+      await store.fetchLayouts()
+      const merged = store.layouts.find((l) => l.serverId === 'srv-server-newer')
+      expect(merged?.name).toBe('Server Newest')
+      expect(merged?.syncFlags?.status).toBe('server_synced')
+    })
+
+    it('marks conflict when local is dirty but server is newer', async () => {
+      dashboardsApiMock.list.mockResolvedValueOnce({
+        success: true,
+        data: [
+          {
+            id: 'srv-conflict',
+            name: 'Server Advanced',
+            description: '',
+            widgets: [],
+            created_at: '2026-04-06T00:00:00Z',
+            updated_at: '2026-04-06T00:03:00Z',
+            scope: null,
+            zone_id: null,
+            auto_generated: false,
+            sensor_id: null,
+            target: null,
+          },
+        ],
+      })
+
+      const store = useDashboardStore()
+      store.layouts = [
+        {
+          id: 'local-conflict',
+          serverId: 'srv-conflict',
+          name: 'Local Dirty Older',
+          createdAt: '2026-04-06T00:00:00Z',
+          updatedAt: '2026-04-06T00:01:00Z',
+          widgets: [],
+          syncFlags: {
+            local_only: false,
+            server_synced: false,
+            stale_server_id: null,
+            status: 'dirty',
+            dirty: true,
+            conflict: false,
+            last_sync_attempt_at: null,
+            last_sync_result_at: null,
+            last_sync_message: null,
+          },
+        } as any,
+      ]
+
+      await store.fetchLayouts()
+      const merged = store.layouts.find((l) => l.serverId === 'srv-conflict')
+      expect(merged?.name).toBe('Local Dirty Older')
+      expect(merged?.syncFlags?.status).toBe('conflict')
+      expect(merged?.syncFlags?.conflict).toBe(true)
+    })
+  })
+
+  describe('identity and flush helpers', () => {
+    it('builds different identity keys for same name with different scope/target', () => {
+      const store = useDashboardStore()
+      const keyA = store.buildLayoutIdentityKey({
+        name: 'Grow Dashboard',
+        scope: 'zone',
+        zoneId: 'zone-a',
+        sensorId: undefined,
+        target: { view: 'monitor', placement: 'inline' },
+      })
+      const keyB = store.buildLayoutIdentityKey({
+        name: 'Grow Dashboard',
+        scope: 'cross-zone',
+        zoneId: undefined,
+        sensorId: undefined,
+        target: { view: 'monitor', placement: 'bottom-panel' },
+      })
+      expect(keyA).not.toBe(keyB)
+    })
+
+    it('flushPendingSyncs sends dirty debounced layout immediately', async () => {
+      vi.useFakeTimers()
+      const store = useDashboardStore()
+      store.layouts = [
+        {
+          id: 'flush-layout',
+          serverId: 'srv-flush',
+          name: 'Flush Layout',
+          createdAt: '2026-04-06T00:00:00Z',
+          updatedAt: '2026-04-06T00:00:00Z',
+          widgets: [],
+          syncFlags: {
+            local_only: false,
+            server_synced: true,
+            stale_server_id: null,
+            status: 'server_synced',
+            dirty: false,
+            conflict: false,
+            last_sync_attempt_at: null,
+            last_sync_result_at: null,
+            last_sync_message: null,
+          },
+        } as any,
+      ]
+
+      store.saveLayout('flush-layout', [
+        {
+          id: 'w1',
+          type: 'line-chart',
+          x: 0,
+          y: 0,
+          w: 3,
+          h: 2,
+          config: {},
+        },
+      ] as any)
+
+      await store.flushPendingSyncs('flush')
+      expect(dashboardsApiMock.update).toHaveBeenCalled()
+      vi.useRealTimers()
     })
   })
 })

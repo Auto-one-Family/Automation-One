@@ -26,6 +26,7 @@ const {
   error,
   pagination,
   selectedEntry,
+  lastLoadedAt,
   statusFilter,
   dateFrom,
   dateTo,
@@ -63,6 +64,9 @@ onMounted(() => {
       </h1>
       <p class="postfach__subtitle">
         Systemrelevante E-Mails: Alerts, Digest, Test-Emails
+      </p>
+      <p v-if="lastLoadedAt" class="postfach__subtitle">
+        Datenstand: {{ formatDateTime(lastLoadedAt) }}
       </p>
     </header>
 

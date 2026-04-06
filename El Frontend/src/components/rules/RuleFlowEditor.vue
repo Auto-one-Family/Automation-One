@@ -55,6 +55,10 @@ import '@vue-flow/minimap/dist/style.css'
 
 interface Props {
   rule: LogicRule | null
+  metadata?: {
+    priority?: number
+    cooldown_seconds?: number
+  }
 }
 
 const props = defineProps<Props>()
@@ -62,6 +66,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   'node-selected': [node: Node | null]
   'graph-changed': []
+  'metadata-restored': [metadata: { priority?: number; cooldown_seconds?: number }]
 }>()
 
 const logicStore = useLogicStore()
@@ -101,6 +106,7 @@ const isDragOver = ref(false)
 let nodeIdCounter = 0
 let pendingFitView = false
 let templateLoadGuard = false  // Prevents watch from clearing nodes after loadFromRuleData
+const validationErrorsByNodeId = ref<Record<string, Record<string, string[]>>>({})
 
 // Initial node dimensions prevent Vue Flow clampNodeExtent crash (dimensions undefined before render)
 const NODE_INIT_DIMS: Record<string, { width: number; height: number }> = {
@@ -241,7 +247,8 @@ function onDrop(event: DragEvent) {
   // Snapshot for undo after adding node
   logicStore.pushToHistory(
     JSON.parse(JSON.stringify(nodes.value)),
-    JSON.parse(JSON.stringify(edges.value))
+    JSON.parse(JSON.stringify(edges.value)),
+    props.metadata
   )
 
   emit('graph-changed')
@@ -353,7 +360,8 @@ onConnect((connection: Connection) => {
   // Push to undo history
   logicStore.pushToHistory(
     JSON.parse(JSON.stringify(nodes.value)),
-    JSON.parse(JSON.stringify(edges.value))
+    JSON.parse(JSON.stringify(edges.value)),
+    props.metadata
   )
 
   emit('graph-changed')
@@ -370,7 +378,8 @@ onNodeClick(({ node }) => {
 onNodeDragStop(() => {
   logicStore.pushToHistory(
     JSON.parse(JSON.stringify(nodes.value)),
-    JSON.parse(JSON.stringify(edges.value))
+    JSON.parse(JSON.stringify(edges.value)),
+    props.metadata
   )
 })
 
@@ -614,9 +623,15 @@ function graphToRuleData(): {
   conditions: LogicCondition[]
   actions: LogicAction[]
   logic_operator: 'AND' | 'OR'
+  priority?: number
+  cooldown_seconds?: number
+  conditionNodeIds: string[]
+  actionNodeIds: string[]
 } {
   const conditions: LogicCondition[] = []
   const actions: LogicAction[] = []
+  const conditionNodeIds: string[] = []
+  const actionNodeIds: string[] = []
   let logicOperator: 'AND' | 'OR' = 'AND'
 
   for (const node of nodes.value) {
@@ -640,6 +655,7 @@ function graphToRuleData(): {
             hyst.deactivate_above = Number(node.data.deactivateAbove)
           }
           conditions.push(hyst)
+          conditionNodeIds.push(node.id)
         } else {
           conditions.push({
             type: 'sensor',
@@ -651,6 +667,7 @@ function graphToRuleData(): {
             ...(node.data.min !== undefined ? { min: node.data.min } : {}),
             ...(node.data.max !== undefined ? { max: node.data.max } : {}),
           } as SensorCondition)
+          conditionNodeIds.push(node.id)
         }
         break
       }
@@ -663,6 +680,7 @@ function graphToRuleData(): {
           ...(node.data.daysOfWeek?.length ? { days_of_week: node.data.daysOfWeek } : {}),
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         } as TimeCondition)
+        conditionNodeIds.push(node.id)
         break
 
       case 'logic':
@@ -684,6 +702,7 @@ function graphToRuleData(): {
           value: pwmVal,
           ...(node.data.duration ? { duration_seconds: node.data.duration } : { duration_seconds: 0 }),
         } as ActuatorAction)
+        actionNodeIds.push(node.id)
         break
       }
 
@@ -694,6 +713,7 @@ function graphToRuleData(): {
           target: node.data.target || '',
           message_template: node.data.messageTemplate || '',
         } as NotificationAction)
+        actionNodeIds.push(node.id)
         break
 
       case 'delay':
@@ -701,6 +721,7 @@ function graphToRuleData(): {
           type: 'delay',
           seconds: node.data.seconds || 60,
         } as DelayAction)
+        actionNodeIds.push(node.id)
         break
 
       case 'plugin': {
@@ -716,6 +737,7 @@ function graphToRuleData(): {
           plugin_id: node.data.pluginId || '',
           config,
         } as PluginAction)
+        actionNodeIds.push(node.id)
         break
       }
 
@@ -726,6 +748,7 @@ function graphToRuleData(): {
           expected_status: node.data.expectedStatus || 'critical',
           operator: (node.data.operator as '==' | '!=' | undefined) || '==',
         } as DiagnosticsCondition)
+        conditionNodeIds.push(node.id)
         break
 
       case 'run_diagnostic':
@@ -733,11 +756,20 @@ function graphToRuleData(): {
           type: 'run_diagnostic',
           ...(node.data.checkName ? { check_name: node.data.checkName as string } : {}),
         } as DiagnosticsAction)
+        actionNodeIds.push(node.id)
         break
     }
   }
 
-  return { conditions, actions, logic_operator: logicOperator }
+  return {
+    conditions,
+    actions,
+    logic_operator: logicOperator,
+    priority: props.metadata?.priority,
+    cooldown_seconds: props.metadata?.cooldown_seconds,
+    conditionNodeIds,
+    actionNodeIds,
+  }
 }
 
 // ======================== LOAD RULE INTO GRAPH ========================
@@ -786,7 +818,8 @@ function deleteNode(nodeId: string) {
   // Snapshot BEFORE deletion for undo
   logicStore.pushToHistory(
     JSON.parse(JSON.stringify(nodes.value)),
-    JSON.parse(JSON.stringify(edges.value))
+    JSON.parse(JSON.stringify(edges.value)),
+    props.metadata
   )
 
   // Remove connected edges first
@@ -816,7 +849,8 @@ function duplicateNode(nodeId: string) {
   // Snapshot after duplication
   logicStore.pushToHistory(
     JSON.parse(JSON.stringify(nodes.value)),
-    JSON.parse(JSON.stringify(edges.value))
+    JSON.parse(JSON.stringify(edges.value)),
+    props.metadata
   )
 
   emit('graph-changed')
@@ -870,6 +904,7 @@ function performUndo() {
   if (state) {
     setNodes(state.nodes)
     setEdges(state.edges)
+    if (state.metadata) emit('metadata-restored', state.metadata)
     emit('graph-changed')
   }
 }
@@ -879,8 +914,21 @@ function performRedo() {
   if (state) {
     setNodes(state.nodes)
     setEdges(state.edges)
+    if (state.metadata) emit('metadata-restored', state.metadata)
     emit('graph-changed')
   }
+}
+
+function setValidationErrors(errors: Record<string, Record<string, string[]>>) {
+  validationErrorsByNodeId.value = errors
+}
+
+function clearValidationErrors() {
+  validationErrorsByNodeId.value = {}
+}
+
+function hasNodeValidationError(nodeId: string): boolean {
+  return Boolean(validationErrorsByNodeId.value[nodeId] && Object.keys(validationErrorsByNodeId.value[nodeId]).length > 0)
 }
 
 function handleKeyboard(e: KeyboardEvent) {
@@ -944,6 +992,8 @@ defineExpose({
   duplicateNode,
   clearCanvas,
   loadFromRuleData,
+  setValidationErrors,
+  clearValidationErrors,
   fitView: () => fitView({ padding: 0.3 }),
 })
 </script>
@@ -1022,7 +1072,7 @@ defineExpose({
       <template #node-sensor="{ data, id }">
         <div
           class="rule-node rule-node--sensor"
-          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--unconfigured': !data.espId }"
+          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--unconfigured': !data.espId, 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="source" :position="Position.Right" class="handle-source" />
           <div class="rule-node__header">
@@ -1077,7 +1127,7 @@ defineExpose({
       <template #node-time="{ data, id }">
         <div
           class="rule-node rule-node--time"
-          :class="{ 'rule-node--active': isNodeActive(id) }"
+          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="source" :position="Position.Right" class="handle-source" />
           <div class="rule-node__header">
@@ -1106,7 +1156,7 @@ defineExpose({
       <template #node-logic="{ data, id }">
         <div
           class="rule-node rule-node--logic"
-          :class="{ 'rule-node--active': isNodeActive(id) }"
+          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
           <Handle type="source" :position="Position.Right" class="handle-source" />
@@ -1123,7 +1173,7 @@ defineExpose({
       <template #node-actuator="{ data, id }">
         <div
           class="rule-node rule-node--actuator"
-          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--unconfigured': !data.espId }"
+          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--unconfigured': !data.espId, 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
           <div class="rule-node__header">
@@ -1157,7 +1207,7 @@ defineExpose({
       <template #node-notification="{ data, id }">
         <div
           class="rule-node rule-node--notification"
-          :class="{ 'rule-node--active': isNodeActive(id) }"
+          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
           <div class="rule-node__header">
@@ -1184,7 +1234,7 @@ defineExpose({
       <template #node-delay="{ data, id }">
         <div
           class="rule-node rule-node--delay"
-          :class="{ 'rule-node--active': isNodeActive(id) }"
+          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
           <div class="rule-node__header">
@@ -1204,7 +1254,7 @@ defineExpose({
       <template #node-plugin="{ data, id }">
         <div
           class="rule-node rule-node--plugin"
-          :class="{ 'rule-node--active': isNodeActive(id) }"
+          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
           <div class="rule-node__header">
@@ -1225,7 +1275,7 @@ defineExpose({
       <template #node-diagnostics_status="{ data, id }">
         <div
           class="rule-node rule-node--diagnostics"
-          :class="{ 'rule-node--active': isNodeActive(id) }"
+          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="source" :position="Position.Right" class="handle-source" />
           <div class="rule-node__header">
@@ -1248,7 +1298,7 @@ defineExpose({
       <template #node-run_diagnostic="{ data, id }">
         <div
           class="rule-node rule-node--diagnostics"
-          :class="{ 'rule-node--active': isNodeActive(id) }"
+          :class="{ 'rule-node--active': isNodeActive(id), 'rule-node--validation-error': hasNodeValidationError(id) }"
         >
           <Handle type="target" :position="Position.Left" class="handle-target" />
           <div class="rule-node__header">
@@ -1411,6 +1461,11 @@ defineExpose({
 /* Active flash (rule executing) */
 .rule-node--active {
   animation: node-execution-flash 0.8s ease;
+}
+
+.rule-node--validation-error {
+  border-color: var(--color-error);
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.35), 0 8px 32px rgba(0, 0, 0, 0.35);
 }
 
 @keyframes node-execution-flash {

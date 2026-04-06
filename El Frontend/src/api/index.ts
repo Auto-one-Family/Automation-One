@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/shared/stores/auth.store'
+import { toUiApiError } from '@/api/uiApiError'
 import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('API')
@@ -118,6 +119,7 @@ api.interceptors.response.use(
       }
     }
 
+    const uiError = toUiApiError(error, error.message)
     const errorRequestId = error.response?.headers?.['x-request-id'] || error.config?.headers?.['X-Request-ID']
     const status = error.response?.status
     const method = error.config?.method?.toUpperCase()
@@ -125,7 +127,9 @@ api.interceptors.response.use(
     // Log as debug instead of error to avoid noise from orphan cleanup etc.
     const logLevel = (method === 'DELETE' && status === 404) ? 'debug' : 'error'
     logger[logLevel](`${method} ${error.config?.url} → ${status || 'NETWORK_ERROR'}`, {
-      message: error.message,
+      message: uiError.message,
+      numericCode: uiError.numeric_code,
+      retryability: uiError.retryability,
       requestId: errorRequestId,
     })
     return Promise.reject(error)

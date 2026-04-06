@@ -65,6 +65,7 @@ const ROUTE_META: Record<string, { label: string; iconName: string }> = {
   '/maintenance': { label: 'Wartung', iconName: 'Wrench' },
   '/load-test': { label: 'Lasttest', iconName: 'Zap' },
   '/system-config': { label: 'Systemkonfiguration', iconName: 'Settings' },
+  '/access-denied': { label: 'Zugriff verweigert', iconName: 'FileText' },
 }
 
 const ICON_MAP: Record<string, Component> = {

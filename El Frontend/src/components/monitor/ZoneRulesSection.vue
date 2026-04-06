@@ -96,6 +96,7 @@ watch(() => props.zoneId, (zoneId) => {
           :key="rule.id"
           :rule="rule"
           :is-active="isRuleActive(rule.id)"
+          :lifecycle="logicStore.getLifecycleEntry(rule.id)"
         />
       </div>
       <div

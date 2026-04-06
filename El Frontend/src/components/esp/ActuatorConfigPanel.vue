@@ -29,6 +29,7 @@ import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSect
 import DeviceScopeSection from '@/components/devices/DeviceScopeSection.vue'
 import { deviceContextApi } from '@/api/device-context'
 import { useZoneStore } from '@/shared/stores/zone.store'
+import { useActuatorStore } from '@/shared/stores/actuator.store'
 import { normalizeSubzoneId } from '@/utils/subzoneHelpers'
 import type { DeviceScope } from '@/types'
 import type { DeviceMetadata } from '@/types/device-metadata'
@@ -52,6 +53,7 @@ const emit = defineEmits<{
 
 const toast = useToast()
 const espStore = useEspStore()
+const actuatorStore = useActuatorStore()
 const uiStore = useUiStore()
 const zoneStore = useZoneStore()
 
@@ -268,7 +270,7 @@ async function emergencyStop() {
         reason: 'Manueller Stopp ueber Konfigurations-Panel',
       })
     }
-    toast.warning('Emergency-Stop ausgeloest')
+    toast.warning(`${isMock.value ? '[Simulation] ' : ''}Emergency-Stop ausgelöst`)
   } catch {
     toast.error('Emergency-Stop fehlgeschlagen')
   } finally {
@@ -293,7 +295,15 @@ async function confirmAndDelete() {
   deleting.value = true
   try {
     await actuatorsApi.delete(props.espId, props.gpio)
-    toast.success('Aktor entfernt')
+    if (isMock.value) {
+      toast.success('[Simulation] Aktor entfernt', {
+        dedupeKey: `actuator-delete:${props.espId}:${props.gpio}`,
+      })
+    } else {
+      toast.info('Löschauftrag akzeptiert - warte auf Geräte-Rückmeldung', {
+        dedupeKey: `actuator-delete:${props.espId}:${props.gpio}`,
+      })
+    }
     emit('deleted')
   } catch {
     toast.error('Aktor konnte nicht entfernt werden')
@@ -311,7 +321,7 @@ async function handleSave() {
     if (isMock.value) {
       // Mock: config lives in device_metadata, just show success
       // Name/description changes are cosmetic for mock devices
-      toast.success('Aktor-Konfiguration gespeichert')
+      toast.success('[Simulation] Aktor-Konfiguration gespeichert')
       emit('saved')
     } else {
       // Real: save to server via actuators API (Backend expects max_runtime_seconds, cooldown_seconds, metadata)
@@ -354,9 +364,57 @@ async function handleSave() {
       }
 
       config.metadata = meta
-      await actuatorsApi.createOrUpdate(props.espId, props.gpio, config as any)
-      toast.success('Aktor-Konfiguration gespeichert')
-      emit('saved')
+      const result = await actuatorsApi.createOrUpdate(props.espId, props.gpio, config as any)
+      const response = result as unknown as Record<string, unknown>
+      const correlationId = typeof response.correlation_id === 'string' ? response.correlation_id : undefined
+      const requestId = typeof response.request_id === 'string' ? response.request_id : undefined
+      const handles = [correlationId ? `Korrelation: ${correlationId}` : '', requestId ? `Request-ID: ${requestId}` : '']
+        .filter(Boolean)
+        .join(' | ')
+      const scope = `actuator:${props.gpio}:${props.actuatorType}`
+      const summary = `Aktor-Konfiguration ${props.actuatorType} an GPIO ${props.gpio}`
+      const subjectId = actuatorStore.registerConfigIntentFromRest({
+        espId: props.espId,
+        scope,
+        correlationId,
+        requestId,
+        summary,
+      })
+      toast.info(
+        `Konfigurationsauftrag akzeptiert: ${summary}.${handles ? ` ${handles}` : ''}`,
+        {
+          dedupeKey: `config-accepted:${correlationId ?? requestId ?? `${props.espId}:${scope}`}`,
+        },
+      )
+      const terminal = await actuatorStore.waitForConfigTerminal({
+        subjectId,
+        correlationId,
+        timeoutMs: 65_000,
+      })
+      if (!terminal) {
+        toast.error('Konfigurationsstatus unklar: Keine terminale Rückmeldung empfangen. Bitte erneut prüfen.', {
+          persistent: true,
+          dedupeKey: `config-await-timeout:${correlationId ?? requestId ?? subjectId}`,
+        })
+        return
+      }
+      if (terminal.state === 'terminal_success') {
+        toast.success('Aktor-Konfiguration wurde vom Gerät bestätigt')
+        emit('saved')
+        return
+      }
+      if (terminal.state === 'terminal_timeout') {
+        toast.error('Konfigurations-Timeout: Gerät hat nicht terminal geantwortet. Bitte erneut versuchen.', {
+          persistent: true,
+          dedupeKey: `config-terminal-timeout:${correlationId ?? requestId ?? subjectId}`,
+        })
+        return
+      }
+      toast.error('Konfiguration wurde nicht bestätigt. Details im Event-Monitor prüfen.', {
+        persistent: true,
+        dedupeKey: `config-terminal-failed:${correlationId ?? requestId ?? subjectId}`,
+      })
+      return
     }
   } catch (err) {
     const msg = (err as any)?.response?.data?.detail ?? 'Fehler beim Speichern'
@@ -380,6 +438,9 @@ function formatDuration(seconds: number): string {
     <div v-if="loading" class="actuator-config__loading">Lade Konfiguration...</div>
 
     <template v-else>
+      <section v-if="isMock" class="actuator-config__simulation-badge" aria-label="Simulation Hinweis">
+        [Simulation] Mock-ESP - Aktionen werden simuliert.
+      </section>
       <!-- ═══ ZONE 1: BASIC (Control + Identity) ═════════════════════════ -->
 
       <!-- Control Panel -->
@@ -715,6 +776,16 @@ function formatDuration(seconds: number): string {
   gap: var(--space-3);
   padding-bottom: var(--space-4);
   border-bottom: 1px solid var(--glass-border);
+}
+
+.actuator-config__simulation-badge {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  background: rgba(167, 139, 250, 0.1);
+  color: var(--color-mock);
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .actuator-config__section:last-of-type { border-bottom: none; }

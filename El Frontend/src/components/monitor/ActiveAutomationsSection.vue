@@ -91,6 +91,7 @@ onMounted(() => {
             :rule="rule"
             :is-active="isRuleActive(rule.id)"
             :zone-names="logicStore.getZonesForRule(rule)"
+            :lifecycle="logicStore.getLifecycleEntry(rule.id)"
           />
         </li>
       </ul>

@@ -23,6 +23,7 @@ import {
   type NotificationSeverity,
 } from '@/api/notifications'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('AlertCenterStore')
@@ -96,6 +97,10 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
    * Fetch alert statistics from server.
    */
   async function fetchStats(): Promise<void> {
+    const authStore = useAuthStore()
+    if (!authStore.isAuthenticated) {
+      return
+    }
     if (isLoadingStats.value) return
     isLoadingStats.value = true
 
@@ -184,6 +189,11 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
    * Start polling for alert stats.
    */
   function startStatsPolling(): void {
+    const authStore = useAuthStore()
+    if (!authStore.isAuthenticated) {
+      logger.debug('Alert stats polling skipped (not authenticated)')
+      return
+    }
     stopStatsPolling()
     fetchStats()
     statsPollTimer = setInterval(fetchStats, STATS_POLL_INTERVAL_MS)
@@ -216,10 +226,7 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
 
     // Update in inbox store
     const inboxStore = useNotificationInboxStore()
-    const inboxIdx = inboxStore.notifications.findIndex((n) => n.id === id)
-    if (inboxIdx >= 0) {
-      inboxStore.notifications[inboxIdx] = updated
-    }
+    inboxStore.applyAlertUpdate(updated)
   }
 
   return {

@@ -7,7 +7,7 @@
  *
  * Phase 4B.2.1
  */
-import { onMounted, onUnmounted, computed } from 'vue'
+import { computed } from 'vue'
 import { AlertTriangle, CheckCircle, Clock, Activity } from 'lucide-vue-next'
 import { useAlertCenterStore } from '@/shared/stores'
 import { useEspStore } from '@/stores/esp'
@@ -30,13 +30,6 @@ const showBar = computed(() => {
   return s.active_count > 0 || s.acknowledged_count > 0 || s.resolved_today_count > 0
 })
 
-onMounted(() => {
-  alertStore.startStatsPolling()
-})
-
-onUnmounted(() => {
-  alertStore.stopStatsPolling()
-})
 </script>
 
 <template>

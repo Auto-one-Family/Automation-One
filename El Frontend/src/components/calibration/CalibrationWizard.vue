@@ -4,193 +4,53 @@
  *
  * Step-by-step sensor calibration for pH/EC 2-point linear calibration.
  * Flow: Select sensor -> Capture point 1 -> Capture point 2 -> Confirm -> Done
+ *
+ * State management delegated to useCalibrationWizard composable (F-P1).
  */
 
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { ArrowLeft, Check, FlaskConical, RefreshCw, X } from 'lucide-vue-next'
-import { calibrationApi } from '@/api/calibration'
-import { useUiStore } from '@/shared/stores/ui.store'
-import type { CalibrationPoint, CalibrateResponse } from '@/api/calibration'
 import { useEspStore } from '@/stores/esp'
+import { useCalibrationWizard } from '@/composables/useCalibrationWizard'
 import CalibrationStep from './CalibrationStep.vue'
 
 const espStore = useEspStore()
-const uiStore = useUiStore()
 
-// Wizard state machine
-type WizardPhase = 'select' | 'point1' | 'point2' | 'confirm' | 'done' | 'error'
-const phase = ref<WizardPhase>('select')
-
-// Selected sensor
-const selectedEspId = ref('')
-const selectedGpio = ref<number | null>(null)
-const selectedSensorType = ref('')
-
-// EC-Preset (nur bei sensor_type === 'ec')
-const ecPreset = ref<EcPresetId>('1413_12880')
-
-// Captured calibration points
-const points = ref<CalibrationPoint[]>([])
-
-// Result
-const calibrationResult = ref<CalibrateResponse | null>(null)
-const errorMessage = ref('')
-const isSubmitting = ref(false)
+// All wizard state from composable
+const {
+  phase,
+  selectedEspId,
+  selectedGpio,
+  selectedSensorType,
+  ecPreset,
+  points,
+  calibrationResult,
+  errorMessage,
+  isSubmitting,
+  isMeasuring,
+  lastRawValue,
+  measurementQuality,
+  currentSessionId,
+  sensorTypePresets,
+  EC_PRESETS,
+  currentPreset,
+  getSuggestedReference,
+  getReferenceLabel,
+  selectSensor,
+  onPoint1Captured,
+  onPoint2Captured,
+  submitCalibration,
+  triggerLiveMeasurement,
+  deletePoint,
+  goBack,
+  handleAbort,
+  reset,
+} = useCalibrationWizard()
 
 // Available ESPs from store
 const availableDevices = computed(() =>
   espStore.devices.filter(d => espStore.getDeviceId(d))
 )
-
-/** EC-Kalibrier-Presets (NIST-zertifizierte Standards) */
-const EC_PRESETS = {
-  '0_1413': { point1: 0, point2: 1413, label: '0 / 1413 µS/cm' },
-  '1413_12880': { point1: 1413, point2: 12880, label: '1413 / 12.880 µS/cm' },
-} as const
-
-type EcPresetId = keyof typeof EC_PRESETS | 'custom'
-
-const sensorTypePresets: Record<string, { label: string; point1Label: string; point1Ref: number; point2Label: string; point2Ref: number }> = {
-  ph: {
-    label: 'pH-Sensor',
-    point1Label: 'pH 4.0 Pufferloesung',
-    point1Ref: 4.0,
-    point2Label: 'pH 7.0 Pufferloesung',
-    point2Ref: 7.0,
-  },
-  ec: {
-    label: 'EC-Sensor',
-    point1Label: '1413 µS/cm KCl-Standard',
-    point1Ref: 1413,
-    point2Label: '12.880 µS/cm KCl-Standard',
-    point2Ref: 12880,
-  },
-  moisture: {
-    label: 'Feuchtigkeitssensor',
-    point1Label: 'Trockener Zustand (0%)',
-    point1Ref: 0,
-    point2Label: 'Vollstaendig nass (100%)',
-    point2Ref: 100,
-  },
-  soil_moisture: {
-    label: 'Feuchtigkeitssensor',
-    point1Label: 'Trockener Zustand (0%)',
-    point1Ref: 0,
-    point2Label: 'Vollstaendig nass (100%)',
-    point2Ref: 100,
-  },
-  temperature: {
-    label: 'Temperatursensor',
-    point1Label: 'Eiswasser (0°C)',
-    point1Ref: 0,
-    point2Label: 'Kochendes Wasser (100°C)',
-    point2Ref: 100,
-  },
-}
-
-const currentPreset = computed(() => sensorTypePresets[selectedSensorType.value])
-
-/** EC: Referenzwerte aus Preset oder undefined bei Custom */
-const ecPointRefs = computed(() => {
-  if (selectedSensorType.value !== 'ec') return null
-  const p = ecPreset.value
-  if (p === 'custom') return { point1: undefined, point2: undefined }
-  const preset = EC_PRESETS[p]
-  return preset ? { point1: preset.point1, point2: preset.point2 } : null
-})
-
-/** suggestedReference fuer CalibrationStep (EC nutzt ecPreset) */
-function getSuggestedReference(stepNumber: 1 | 2): number | undefined {
-  if (selectedSensorType.value === 'ec' && ecPointRefs.value) {
-    return stepNumber === 1 ? ecPointRefs.value.point1 : ecPointRefs.value.point2
-  }
-  const preset = currentPreset.value
-  return stepNumber === 1 ? preset?.point1Ref : preset?.point2Ref
-}
-
-/** referenceLabel fuer CalibrationStep (EC nutzt ecPreset) */
-function getReferenceLabel(stepNumber: 1 | 2): string | undefined {
-  if (selectedSensorType.value === 'ec' && ecPreset.value !== 'custom') {
-    const p = ecPreset.value
-    const preset = EC_PRESETS[p as keyof typeof EC_PRESETS]
-    if (preset) {
-      return stepNumber === 1
-        ? `${preset.point1} µS/cm KCl-Standard`
-        : `${preset.point2} µS/cm KCl-Standard`
-    }
-  }
-  const preset = currentPreset.value
-  return stepNumber === 1 ? preset?.point1Label : preset?.point2Label
-}
-
-function selectSensor(espId: string, gpio: number, sensorType: string) {
-  selectedEspId.value = espId
-  selectedGpio.value = gpio
-  selectedSensorType.value = sensorType
-  points.value = []
-  calibrationResult.value = null
-  errorMessage.value = ''
-  phase.value = 'point1'
-}
-
-function onPoint1Captured(point: CalibrationPoint) {
-  points.value = [point]
-  phase.value = 'point2'
-}
-
-function onPoint2Captured(point: CalibrationPoint) {
-  points.value = [points.value[0], point]
-  phase.value = 'confirm'
-}
-
-async function submitCalibration() {
-  if (selectedGpio.value === null || points.value.length < 2) return
-  isSubmitting.value = true
-  errorMessage.value = ''
-  try {
-    const response = await calibrationApi.calibrate({
-      esp_id: selectedEspId.value,
-      gpio: selectedGpio.value,
-      sensor_type: selectedSensorType.value,
-      calibration_points: points.value,
-      method: 'linear',
-      save_to_config: true,
-    })
-    calibrationResult.value = response
-    phase.value = response.success ? 'done' : 'error'
-    if (!response.success) {
-      errorMessage.value = response.message ?? 'Kalibrierung fehlgeschlagen'
-    }
-  } catch (err: unknown) {
-    phase.value = 'error'
-    errorMessage.value = err instanceof Error ? err.message : 'Unbekannter Fehler'
-  } finally {
-    isSubmitting.value = false
-  }
-}
-
-function reset() {
-  phase.value = 'select'
-  selectedEspId.value = ''
-  selectedGpio.value = null
-  selectedSensorType.value = ''
-  ecPreset.value = '1413_12880'
-  points.value = []
-  calibrationResult.value = null
-  errorMessage.value = ''
-}
-
-async function handleAbort() {
-  if (points.value.length > 0) {
-    const confirmed = await uiStore.confirm({
-      title: 'Kalibrierung abbrechen?',
-      message: 'Erfasste Daten gehen verloren. Wirklich abbrechen?',
-      variant: 'danger',
-    })
-    if (!confirmed) return
-  }
-  reset()
-}
 </script>
 
 <template>
@@ -242,10 +102,10 @@ async function handleAbort() {
     <!-- Phase: Capture Point 1 -->
     <div v-if="phase === 'point1'" class="calibration-wizard__phase">
       <div class="calibration-wizard__actions">
-        <button class="calibration-wizard__abort-btn" @click="handleAbort">
+        <button class="calibration-wizard__abort-btn" :disabled="isSubmitting" @click="handleAbort">
           <X :size="14" /> Abbrechen
         </button>
-        <button class="calibration-wizard__back-btn" @click="phase = 'select'">
+        <button class="calibration-wizard__back-btn" :disabled="isSubmitting" @click="goBack">
           <ArrowLeft :size="14" /> Zurueck
         </button>
       </div>
@@ -269,17 +129,21 @@ async function handleAbort() {
         :sensor-type="selectedSensorType"
         :suggested-reference="getSuggestedReference(1)"
         :reference-label="getReferenceLabel(1)"
+        :last-raw-value="lastRawValue"
+        :is-measuring="isMeasuring"
+        :measurement-quality="measurementQuality"
         @captured="onPoint1Captured"
+        @request-measurement="triggerLiveMeasurement"
       />
     </div>
 
     <!-- Phase: Capture Point 2 -->
     <div v-if="phase === 'point2'" class="calibration-wizard__phase">
       <div class="calibration-wizard__actions">
-        <button class="calibration-wizard__abort-btn" @click="handleAbort">
+        <button class="calibration-wizard__abort-btn" :disabled="isSubmitting" @click="handleAbort">
           <X :size="14" /> Abbrechen
         </button>
-        <button class="calibration-wizard__back-btn" @click="phase = 'point1'">
+        <button class="calibration-wizard__back-btn" :disabled="isSubmitting" @click="goBack">
           <ArrowLeft :size="14" /> Zurueck zu Punkt 1
         </button>
       </div>
@@ -303,7 +167,11 @@ async function handleAbort() {
         :sensor-type="selectedSensorType"
         :suggested-reference="getSuggestedReference(2)"
         :reference-label="getReferenceLabel(2)"
+        :last-raw-value="lastRawValue"
+        :is-measuring="isMeasuring"
+        :measurement-quality="measurementQuality"
         @captured="onPoint2Captured"
+        @request-measurement="triggerLiveMeasurement"
       />
     </div>
 
@@ -330,11 +198,23 @@ async function handleAbort() {
             RAW {{ points[0]?.raw.toFixed(1) }} → Ref {{ points[0]?.reference }}
           </span>
         </div>
+        <div v-if="currentSessionId && points[0]?.point_id" class="calibration-wizard__summary-row">
+          <span class="calibration-wizard__summary-label">Punkt 1 bearbeiten</span>
+          <button class="calibration-wizard__inline-action-btn" @click="deletePoint('dry')">
+            Punkt 1 loeschen
+          </button>
+        </div>
         <div class="calibration-wizard__summary-row">
           <span class="calibration-wizard__summary-label">Punkt 2</span>
           <span class="calibration-wizard__summary-mono">
             RAW {{ points[1]?.raw.toFixed(1) }} → Ref {{ points[1]?.reference }}
           </span>
+        </div>
+        <div v-if="currentSessionId && points[1]?.point_id" class="calibration-wizard__summary-row">
+          <span class="calibration-wizard__summary-label">Punkt 2 bearbeiten</span>
+          <button class="calibration-wizard__inline-action-btn" @click="deletePoint('wet')">
+            Punkt 2 loeschen
+          </button>
         </div>
         <div class="calibration-wizard__summary-row">
           <span class="calibration-wizard__summary-label">Methode</span>
@@ -343,10 +223,10 @@ async function handleAbort() {
       </div>
 
       <div class="calibration-wizard__actions">
-        <button class="calibration-wizard__abort-btn" @click="handleAbort">
+        <button class="calibration-wizard__abort-btn" :disabled="isSubmitting" @click="handleAbort">
           <X :size="14" /> Abbrechen
         </button>
-        <button class="calibration-wizard__back-btn" @click="phase = 'point2'">
+        <button class="calibration-wizard__back-btn" :disabled="isSubmitting" @click="goBack">
           <ArrowLeft :size="14" /> Zurueck
         </button>
         <button
@@ -381,7 +261,7 @@ async function handleAbort() {
       <h3 class="calibration-wizard__subtitle calibration-wizard__subtitle--error">Fehler</h3>
       <p class="calibration-wizard__error-msg">{{ errorMessage }}</p>
       <div class="calibration-wizard__actions">
-        <button class="calibration-wizard__back-btn" @click="phase = 'confirm'">
+        <button class="calibration-wizard__back-btn" @click="goBack">
           <ArrowLeft :size="14" /> Zurueck
         </button>
         <button class="calibration-wizard__submit-btn" @click="reset">
@@ -592,6 +472,21 @@ async function handleAbort() {
   font-size: 0.8125rem;
 }
 
+.calibration-wizard__inline-action-btn {
+  padding: 0.375rem 0.625rem;
+  font-size: 0.75rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--color-warning, #fbbf24);
+  background: transparent;
+  color: var(--color-warning, #fbbf24);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.calibration-wizard__inline-action-btn:hover {
+  background: rgba(251, 191, 36, 0.12);
+}
+
 /* Actions */
 .calibration-wizard__actions {
   display: flex;
@@ -617,6 +512,11 @@ async function handleAbort() {
   border-color: var(--color-text-muted, #8585a0);
 }
 
+.calibration-wizard__back-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .calibration-wizard__abort-btn {
   display: inline-flex;
   align-items: center;
@@ -635,6 +535,11 @@ async function handleAbort() {
   border-color: var(--color-error, #ef4444);
   color: var(--color-error, #ef4444);
   background: rgba(239, 68, 68, 0.08);
+}
+
+.calibration-wizard__abort-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .calibration-wizard__submit-btn {

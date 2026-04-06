@@ -176,6 +176,35 @@ export interface ExecutionHistoryItem {
   success: boolean
   error_message?: string
   execution_time_ms: number
+  intent_id?: string
+  correlation_id?: string
+  request_id?: string
+  lifecycle_state?: RuleLifecycleState
+  terminal_reason_code?: string
+  terminal_reason_text?: string
+  updated_at?: string
+  action_outcomes?: Record<string, unknown>[]
+}
+
+export type RuleLifecycleState =
+  | 'accepted'
+  | 'pending_activation'
+  | 'pending_execution'
+  | 'terminal_success'
+  | 'terminal_failed'
+  | 'terminal_conflict'
+  | 'terminal_integration_issue'
+
+export interface RuleIntentLifecycle {
+  rule_id: string
+  intent_id?: string
+  correlation_id?: string
+  request_id?: string
+  state: RuleLifecycleState
+  terminal_reason_code?: string
+  terminal_reason_text?: string
+  updated_at: string
+  action_outcomes?: Record<string, unknown>[]
 }
 
 // =============================================================================

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   ESP_STORE_WS_ON_HANDLER_TYPES,
+  ESP_STORE_WS_MUTATION_CONTRACT,
   ESP_STORE_WS_SUBSCRIPTION_TYPES,
 } from '@/stores/esp-websocket-subscription'
 
@@ -25,6 +26,19 @@ describe('esp websocket subscription (P0-A)', () => {
     ] as const
     for (const t of critical) {
       expect(ESP_STORE_WS_SUBSCRIPTION_TYPES).toContain(t)
+    }
+  })
+
+  it('classifies every handler type in mutation contract', () => {
+    const contractKeys = Object.keys(ESP_STORE_WS_MUTATION_CONTRACT).sort()
+    const handlerKeys = [...ESP_STORE_WS_ON_HANDLER_TYPES].sort()
+    expect(contractKeys).toEqual(handlerKeys)
+  })
+
+  it('uses only valid mutation types', () => {
+    const valid = new Set(['replace', 'patch', 'refresh'])
+    for (const kind of Object.values(ESP_STORE_WS_MUTATION_CONTRACT)) {
+      expect(valid.has(kind)).toBe(true)
     }
   })
 })

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi } from '@/api/auth'
+import { formatUiApiError, toUiApiError } from '@/api/uiApiError'
 import { websocketService } from '@/services/websocket'
 import { createLogger } from '@/utils/logger'
 import type { User, LoginRequest, SetupRequest } from '@/types'
@@ -77,8 +78,7 @@ export const useAuthStore = defineStore('auth', () => {
       // User is included in login response
       user.value = response.user
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Login failed'
+      error.value = formatUiApiError(toUiApiError(err, 'Login fehlgeschlagen'))
       throw err
     } finally {
       isLoading.value = false
@@ -97,8 +97,7 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = response.user
       setupRequired.value = false
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { detail?: string } } }
-      error.value = axiosError.response?.data?.detail || 'Setup failed'
+      error.value = formatUiApiError(toUiApiError(err, 'Setup fehlgeschlagen'))
       throw err
     } finally {
       isLoading.value = false

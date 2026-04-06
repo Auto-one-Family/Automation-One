@@ -34,6 +34,7 @@ import type { MockSensor, MockActuator } from '@/types'
 
 interface Props {
   node: Node | null
+  validationErrors?: Record<string, string[]>
 }
 
 const props = defineProps<Props>()
@@ -168,6 +169,12 @@ function isDayActive(day: number): boolean {
 }
 
 const nodeType = computed(() => props.node?.type || '')
+const hasValidationErrors = computed(() => Object.keys(props.validationErrors ?? {}).length > 0)
+
+function fieldError(field: string): string | null {
+  const list = props.validationErrors?.[field]
+  return list?.[0] ?? null
+}
 
 // Warn when rule uses base type (SHT31, BME280) instead of explicit sub-type
 const showMultiValueBaseTypeWarning = computed(() => {
@@ -319,12 +326,21 @@ function selectActuator(value: string) {
 
       <!-- Body -->
       <div class="config-panel__body">
+        <div v-if="hasValidationErrors" class="config-validation-summary">
+          <strong>Validierungsfehler:</strong>
+          <ul>
+            <li v-for="(messages, field) in validationErrors" :key="field">
+              {{ field }}: {{ messages[0] }}
+            </li>
+          </ul>
+        </div>
         <!-- ======================== SENSOR CONFIG ======================== -->
         <template v-if="nodeType === 'sensor'">
           <div class="config-field">
             <label class="config-label">ESP-Gerät</label>
             <select
               class="config-select"
+              :class="{ 'config-input--invalid': fieldError('espId') }"
               :value="localData.espId"
               @change="handleSensorEspChange(($event.target as HTMLSelectElement).value)"
             >
@@ -333,6 +349,7 @@ function selectActuator(value: string) {
                 {{ esp.name }}
               </option>
             </select>
+            <p v-if="fieldError('espId')" class="config-hint config-hint--error">{{ fieldError('espId') }}</p>
           </div>
 
           <!-- Device-aware sensor selection -->
@@ -397,6 +414,7 @@ function selectActuator(value: string) {
             <label class="config-label">Operator</label>
             <select
               class="config-select"
+              :class="{ 'config-input--invalid': fieldError('operator') }"
               :value="localData.operator"
               @change="(e) => {
                 const v = (e.target as HTMLSelectElement).value
@@ -408,6 +426,7 @@ function selectActuator(value: string) {
                 {{ opt.label }}
               </option>
             </select>
+            <p v-if="fieldError('operator')" class="config-hint config-hint--error">{{ fieldError('operator') }}</p>
           </div>
 
           <!-- Hysterese: Kühlung (Ein > X, Aus < Y) oder Heizung (Ein < X, Aus > Y) -->
@@ -492,10 +511,12 @@ function selectActuator(value: string) {
             <input
               type="number"
               class="config-input"
+              :class="{ 'config-input--invalid': fieldError('value') }"
               :value="localData.value"
               step="0.1"
               @input="updateField('value', Number(($event.target as HTMLInputElement).value))"
             />
+            <p v-if="fieldError('value')" class="config-hint config-hint--error">{{ fieldError('value') }}</p>
           </div>
         </template>
 
@@ -577,6 +598,7 @@ function selectActuator(value: string) {
             <label class="config-label">ESP-Gerät</label>
             <select
               class="config-select"
+              :class="{ 'config-input--invalid': fieldError('espId') }"
               :value="localData.espId"
               @change="handleActuatorEspChange(($event.target as HTMLSelectElement).value)"
             >
@@ -585,6 +607,7 @@ function selectActuator(value: string) {
                 {{ esp.name }}
               </option>
             </select>
+            <p v-if="fieldError('espId')" class="config-hint config-hint--error">{{ fieldError('espId') }}</p>
           </div>
 
           <!-- Device-aware actuator selection -->
@@ -634,6 +657,7 @@ function selectActuator(value: string) {
             <label class="config-label">Befehl</label>
             <select
               class="config-select"
+              :class="{ 'config-input--invalid': fieldError('command') }"
               :value="localData.command"
               @change="updateField('command', ($event.target as HTMLSelectElement).value)"
             >
@@ -641,6 +665,7 @@ function selectActuator(value: string) {
                 {{ opt.label }}
               </option>
             </select>
+            <p v-if="fieldError('command')" class="config-hint config-hint--error">{{ fieldError('command') }}</p>
           </div>
 
           <div v-if="localData.command === 'PWM'" class="config-field">
@@ -955,6 +980,20 @@ function selectActuator(value: string) {
   gap: 0.375rem;
 }
 
+.config-validation-summary {
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  background: rgba(248, 113, 113, 0.08);
+  color: var(--color-error);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.625rem;
+  font-size: 0.75rem;
+}
+
+.config-validation-summary ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+}
+
 .config-field--half {
   flex: 1;
 }
@@ -991,6 +1030,10 @@ function selectActuator(value: string) {
 .config-textarea:focus {
   border-color: rgba(129, 140, 248, 0.4);
   box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.06);
+}
+
+.config-input--invalid {
+  border-color: var(--color-error);
 }
 
 .config-input::placeholder,
@@ -1042,6 +1085,10 @@ function selectActuator(value: string) {
 .config-hint--warn {
   color: var(--color-warning);
   font-style: italic;
+}
+
+.config-hint--error {
+  color: var(--color-error);
 }
 
 .config-toggle-group {

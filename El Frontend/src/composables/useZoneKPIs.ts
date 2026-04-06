@@ -102,6 +102,8 @@ export function useZoneKPIs(options: UseZoneKPIsOptions = {}) {
 
   // Zone list from API (includes empty zones from ZoneContext)
   const allZones = ref<ZoneListEntry[]>([])
+  const zoneApiDegraded = ref(false)
+  const lastZoneApiSuccessAt = ref<number | null>(null)
 
   let lastZoneFetch = 0
   const ZONE_FETCH_COOLDOWN_MS = 30_000
@@ -110,8 +112,11 @@ export function useZoneKPIs(options: UseZoneKPIsOptions = {}) {
     try {
       const response = await zonesApi.getAllZones()
       allZones.value = response.zones
+      zoneApiDegraded.value = false
+      lastZoneApiSuccessAt.value = Date.now()
     } catch {
       allZones.value = []
+      zoneApiDegraded.value = true
     }
   }
 
@@ -316,5 +321,7 @@ export function useZoneKPIs(options: UseZoneKPIsOptions = {}) {
     isZoneStale,
     allZones,
     fetchAllZonesGuarded,
+    zoneApiDegraded,
+    lastZoneApiSuccessAt,
   }
 }

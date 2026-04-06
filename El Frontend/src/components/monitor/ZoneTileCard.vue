@@ -10,6 +10,7 @@ import type { LogicRule } from '@/types/logic'
 interface Props {
   zone: ZoneKPI
   isStale?: boolean
+  dataMode?: 'Live' | 'Hybrid' | 'Snapshot'
   healthConfig?: Record<ZoneHealthStatus, { label: string; colorClass: string }>
   rules?: LogicRule[]
   totalRuleCount?: number
@@ -18,6 +19,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   isStale: false,
+  dataMode: 'Hybrid',
   healthConfig: () => DEFAULT_HEALTH_CONFIG,
   rules: () => [],
   totalRuleCount: 0,
@@ -55,6 +57,12 @@ function handleClick(): void {
         <Minus v-else-if="zone.healthStatus === 'empty'" class="w-3.5 h-3.5" />
         <XCircle v-else class="w-3.5 h-3.5" />
         <span>{{ healthConfig[zone.healthStatus].label }}</span>
+      </span>
+    </div>
+    <div class="monitor-zone-tile__mode-row">
+      <span class="monitor-zone-tile__mode-label">Datenmodus</span>
+      <span :class="['monitor-zone-tile__mode-badge', `monitor-zone-tile__mode-badge--${dataMode.toLowerCase()}`]">
+        {{ dataMode }}
       </span>
     </div>
     <!-- Health Reason (only for warning/alarm) -->
@@ -230,6 +238,41 @@ function handleClick(): void {
   color: var(--color-text-muted);
   margin-top: calc(-1 * var(--space-2));
   padding: 0 var(--space-1);
+}
+
+.monitor-zone-tile__mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: calc(-1 * var(--space-2));
+}
+
+.monitor-zone-tile__mode-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.monitor-zone-tile__mode-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  padding: 2px 8px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.monitor-zone-tile__mode-badge--live {
+  color: var(--color-success);
+}
+
+.monitor-zone-tile__mode-badge--hybrid {
+  color: var(--color-info);
+}
+
+.monitor-zone-tile__mode-badge--snapshot {
+  color: var(--color-warning);
 }
 
 .monitor-zone-tile--warning .monitor-zone-tile__reason {

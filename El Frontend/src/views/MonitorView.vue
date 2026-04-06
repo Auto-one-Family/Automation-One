@@ -23,6 +23,12 @@ import { useZoneGrouping } from '@/composables/useZoneGrouping'
 import { useZoneKPIs } from '@/composables/useZoneKPIs'
 import { useSubzoneResolver } from '@/composables/useSubzoneResolver'
 import { useSparklineCache } from '@/composables/useSparklineCache'
+import { useWebSocket } from '@/composables/useWebSocket'
+import {
+  createMonitorRecoveryOrchestrator,
+  resolveMonitorConnectivityState,
+  resolveMonitorDataMode,
+} from '@/composables/monitorConnectivity'
 import { getSensorLabel, getSensorUnit, SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { useLogicStore } from '@/shared/stores/logic.store'
@@ -75,6 +81,8 @@ import ErrorState from '@/shared/design/patterns/ErrorState.vue'
 import ZoneRulesSection from '@/components/monitor/ZoneRulesSection.vue'
 import QuickActionBall from '@/components/quick-action/QuickActionBall.vue'
 import AddWidgetDialog from '@/components/monitor/AddWidgetDialog.vue'
+import { getChartColors } from '@/utils/chartColors'
+import { tokens } from '@/utils/cssTokens'
 
 const router = useRouter()
 const route = useRoute()
@@ -83,13 +91,21 @@ const zoneStore = useZoneStore()
 const deviceContextStore = useDeviceContextStore()
 const dashStore = useDashboardStore()
 const logicStore = useLogicStore()
+const monitorWs = useWebSocket({ autoConnect: true, autoReconnect: true })
 // =============================================================================
 // L1 Zone KPIs (extracted composable)
 // =============================================================================
 
 const selectedZoneFilter = ref<string | null>(null)
 
-const { zoneKPIs, filteredZoneKPIs, isZoneStale, allZones } = useZoneKPIs({ filter: selectedZoneFilter })
+const {
+  zoneKPIs,
+  filteredZoneKPIs,
+  isZoneStale,
+  allZones,
+  zoneApiDegraded,
+  lastZoneApiSuccessAt,
+} = useZoneKPIs({ filter: selectedZoneFilter })
 
 const isArchivedZoneSelected = computed(() => {
   if (!selectedZoneFilter.value) return false
@@ -133,6 +149,9 @@ const zoneMonitorData = ref<ZoneMonitorData | null>(null)
 const zoneMonitorLoading = ref(false)
 const zoneMonitorError = ref<string | null>(null)
 const zoneMonitorAbort = ref<AbortController | null>(null)
+const lastZoneMonitorApiSuccessAt = ref<number | null>(null)
+const lastDetailApiSuccessAt = ref<number | null>(null)
+const lastRecoverySyncAt = ref<number | null>(null)
 
 // Subzone resolver for fallback (GPIO → subzone map) — lazy: only triggered on API error
 const subzoneResolver = useSubzoneResolver(selectedZoneId, { lazy: true })
@@ -184,7 +203,11 @@ function getSensorTrend(espId: string, gpio: number, sensorType?: string): Trend
 // Chart colors (shared between expanded panel + L3 overlay)
 // =============================================================================
 
-const CHART_COLORS = ['#a78bfa', '#34d399', '#f97316', '#3b82f6', '#ec4899']
+function getChartColor(index: number): string {
+  const palette = getChartColors()
+  if (palette.length === 0) return tokens.accent || tokens.info
+  return palette[index % palette.length] || tokens.accent || tokens.info
+}
 
 // =============================================================================
 // Expanded Panel: 1h Chart with Initial Fetch
@@ -268,8 +291,8 @@ const expandedChartData = computed(() => {
         x: new Date(r.timestamp).getTime(),
         y: r.processed_value ?? r.raw_value,
       })),
-      borderColor: CHART_COLORS[0],
-      backgroundColor: `${CHART_COLORS[0]}20`,
+      borderColor: getChartColor(0),
+      backgroundColor: `${getChartColor(0)}20`,
       borderWidth: 2,
       pointRadius: expandedChartReadings.value.length > 100 ? 0 : 2,
       pointHoverRadius: 4,
@@ -290,13 +313,13 @@ const expandedChartOptions = computed(() => {
     plugins: {
       legend: { display: false },
       tooltip: {
-        backgroundColor: 'rgba(7,7,13,0.92)',
-        borderColor: 'rgba(133,133,160,0.3)',
+        backgroundColor: tokens.backdropColor,
+        borderColor: tokens.glassBorder,
         borderWidth: 1,
         titleFont: { family: 'JetBrains Mono', size: 11 },
         bodyFont: { family: 'JetBrains Mono', size: 12 },
-        titleColor: '#8585a0',
-        bodyColor: '#eaeaf2',
+        titleColor: tokens.textSecondary,
+        bodyColor: tokens.textPrimary,
         padding: 10,
         callbacks: {
           title: (items: TooltipItem<'line'>[]) => {
@@ -313,14 +336,14 @@ const expandedChartOptions = computed(() => {
         time: {
           displayFormats: { second: 'HH:mm:ss', minute: 'HH:mm', hour: 'HH:mm' },
         },
-        grid: { color: 'rgba(29,29,42,0.8)' },
-        ticks: { color: '#484860', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 6 },
+        grid: { color: tokens.glassBorder },
+        ticks: { color: tokens.textMuted, font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 6 },
         border: { display: false },
       },
       y: {
-        grid: { color: 'rgba(29,29,42,0.8)' },
+        grid: { color: tokens.glassBorder },
         ticks: {
-          color: CHART_COLORS[0],
+          color: getChartColor(0),
           font: { family: 'JetBrains Mono', size: 10 },
           callback: (val: string | number) => `${val} ${unit}`,
         },
@@ -423,6 +446,7 @@ async function fetchDetailData() {
       limit: 1000,
     })
     detailReadings.value = response.readings ?? []
+    lastDetailApiSuccessAt.value = Date.now()
   } catch (err) {
     detailError.value = err instanceof Error ? err.message : 'Fehler beim Laden'
     detailReadings.value = []
@@ -508,7 +532,7 @@ async function fetchOverlaySensorData(sensorKey: string) {
 /** Get the chart color for an overlay sensor by its index in overlaySensorIds */
 function getOverlayColor(sensorKey: string): string {
   const idx = overlaySensorIds.value.indexOf(sensorKey)
-  return CHART_COLORS[(idx + 1) % CHART_COLORS.length]
+  return getChartColor(idx + 1)
 }
 
 const detailChartData = computed(() => {
@@ -528,8 +552,8 @@ const detailChartData = computed(() => {
         x: new Date(r.timestamp).getTime(),
         y: r.processed_value ?? r.raw_value,
       })),
-      borderColor: CHART_COLORS[0],
-      backgroundColor: `${CHART_COLORS[0]}20`,
+      borderColor: getChartColor(0),
+      backgroundColor: `${getChartColor(0)}20`,
       borderWidth: 2,
       pointRadius: detailReadings.value.length > 200 ? 0 : 2,
       pointHoverRadius: 4,
@@ -546,7 +570,7 @@ const detailChartData = computed(() => {
     if (!readings?.length) continue
 
     const overlaySensor = availableOverlaySensors.value.find(s => s.key === key)
-    const color = CHART_COLORS[(i + 1) % CHART_COLORS.length]
+    const color = getChartColor(i + 1)
     const sameUnit = overlaySensor?.unit === sensor?.unit
 
     datasets.push({
@@ -589,14 +613,14 @@ const detailChartOptions = computed(() => {
       time: {
         displayFormats: { second: 'HH:mm:ss', minute: 'HH:mm', hour: 'HH:mm', day: 'dd.MM' },
       },
-      grid: { color: 'rgba(29,29,42,0.8)' },
-      ticks: { color: '#484860', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 8 },
+      grid: { color: tokens.glassBorder },
+      ticks: { color: tokens.textMuted, font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 8 },
       border: { display: false },
     },
     y: {
-      grid: { color: 'rgba(29,29,42,0.8)' },
+      grid: { color: tokens.glassBorder },
       ticks: {
-        color: CHART_COLORS[0],
+        color: getChartColor(0),
         font: { family: 'JetBrains Mono', size: 10 },
         callback: (val: string | number) => `${val} ${unit}`,
       },
@@ -614,7 +638,7 @@ const detailChartOptions = computed(() => {
       position: 'right',
       grid: { drawOnChartArea: false },
       ticks: {
-        color: CHART_COLORS[1 % CHART_COLORS.length],
+        color: getChartColor(1),
         font: { family: 'JetBrains Mono', size: 10 },
         callback: (val: string | number) => `${val} ${secondaryUnit}`,
       },
@@ -631,7 +655,7 @@ const detailChartOptions = computed(() => {
       legend: {
         display: hasOverlays,
         labels: {
-          color: '#b0b0c0',
+          color: tokens.textSecondary,
           font: { family: 'JetBrains Mono', size: 10 },
           boxWidth: 12,
           boxHeight: 2,
@@ -639,13 +663,13 @@ const detailChartOptions = computed(() => {
         },
       },
       tooltip: {
-        backgroundColor: 'rgba(7,7,13,0.92)',
-        borderColor: 'rgba(133,133,160,0.3)',
+        backgroundColor: tokens.backdropColor,
+        borderColor: tokens.glassBorder,
         borderWidth: 1,
         titleFont: { family: 'JetBrains Mono', size: 11 },
         bodyFont: { family: 'JetBrains Mono', size: 12 },
-        titleColor: '#8585a0',
-        bodyColor: '#eaeaf2',
+        titleColor: tokens.textSecondary,
+        bodyColor: tokens.textPrimary,
         padding: 10,
         callbacks: {
           title: (items: TooltipItem<'line'>[]) => {
@@ -717,6 +741,27 @@ const detailIsStale = computed(() => {
   const lastUpdate = detailLiveValue.value?.lastUpdate
   if (!lastUpdate) return false
   return Date.now() - new Date(lastUpdate).getTime() > DATA_STALE_THRESHOLD_S * 1000
+})
+
+const detailHistoryLatestAt = computed<string | null>(() => {
+  if (detailReadings.value.length === 0) return null
+  const newest = detailReadings.value[detailReadings.value.length - 1]
+  return newest?.timestamp ?? null
+})
+
+const detailHistoryIsStale = computed(() => {
+  if (!detailHistoryLatestAt.value) return true
+  const ageMs = Date.now() - new Date(detailHistoryLatestAt.value).getTime()
+  return ageMs > DATA_STALE_THRESHOLD_S * 1000
+})
+
+const overlayHistoryLatest = computed(() => {
+  const latest = new Map<string, string | null>()
+  for (const key of overlaySensorIds.value) {
+    const readings = overlaySensorReadings.value.get(key) ?? []
+    latest.set(key, readings.length > 0 ? readings[readings.length - 1].timestamp : null)
+  }
+  return latest
 })
 
 /** Trend calculation from readings (last 10% vs first 10%) */
@@ -862,6 +907,39 @@ onUnmounted(() => {
   // KPI debounce timer cleanup handled by useZoneKPIs composable
 })
 
+const monitorRecovery = createMonitorRecoveryOrchestrator(async () => {
+  await espStore.fetchAll()
+  if (selectedZoneId.value) {
+    await fetchZoneMonitorData()
+  }
+  if (showSensorDetail.value && selectedDetailSensor.value) {
+    await fetchDetailData()
+  }
+  lastRecoverySyncAt.value = Date.now()
+})
+
+async function runMonitorRecovery(): Promise<void> {
+  await monitorRecovery.trigger()
+}
+
+async function retryMonitorConnectivity(): Promise<void> {
+  if (monitorWs.connectionStatus.value !== 'connected') {
+    await monitorWs.connect()
+  }
+  await runMonitorRecovery()
+}
+
+watch(
+  () => monitorWs.connectionStatus.value,
+  (status, prevStatus) => {
+    if (status === 'connected' && prevStatus && prevStatus !== 'connected') {
+      runMonitorRecovery().catch(() => {
+        // Recovery errors surface via existing store/API error channels.
+      })
+    }
+  },
+)
+
 // Graceful fallback: redirect to L1 if zone does not exist
 // Check both device zones and allZones (includes empty zones from ZoneContext)
 watch(
@@ -925,6 +1003,96 @@ const systemSummary = computed(() => {
   const totalActuators = zones.reduce((sum, z) => sum + z.actuatorCount, 0)
   const activeActuators = zones.reduce((sum, z) => sum + z.activeActuators, 0)
   return { zoneCount, totalSensors, activeSensors, totalAlarms, totalActuators, activeActuators }
+})
+
+const monitorLastApiSuccessAt = computed(() => {
+  const candidates = [
+    lastZoneApiSuccessAt.value,
+    lastZoneMonitorApiSuccessAt.value,
+    lastDetailApiSuccessAt.value,
+  ].filter((value): value is number => value != null)
+  if (candidates.length === 0) return null
+  return Math.max(...candidates)
+})
+
+const monitorConnectivityState = computed(() => resolveMonitorConnectivityState({
+  wsStatus: monitorWs.connectionStatus.value,
+  hasZoneApiError: zoneApiDegraded.value || zoneMonitorError.value != null,
+  hasDetailApiError: showSensorDetail.value && detailError.value.length > 0,
+  lastApiSuccessAt: monitorLastApiSuccessAt.value,
+}))
+
+const monitorBannerTitle = computed(() => {
+  switch (monitorConnectivityState.value) {
+    case 'connected':
+      return 'Live aktiv'
+    case 'stale':
+      return 'Live unvollständig, Snapshot aktiv'
+    case 'reconnecting':
+      return 'Reconnect läuft'
+    case 'degraded_api':
+      return 'API degradiert'
+    case 'disconnected':
+      return 'Live-Verbindung getrennt'
+    default:
+      return 'Monitor-Status'
+  }
+})
+
+const monitorBannerMessage = computed(() => {
+  switch (monitorConnectivityState.value) {
+    case 'connected':
+      return 'WebSocket und API sind synchron.'
+    case 'stale':
+      return 'Live-Daten sind verzögert. Bitte Snapshot prüfen und Synchronisierung anstoßen.'
+    case 'reconnecting':
+      return 'Verbindung wird wiederhergestellt. Snapshot bleibt aktiv.'
+    case 'degraded_api':
+      return zoneMonitorError.value || detailError.value || 'API-Datenpfad gestört. Snapshot/Fallback aktiv.'
+    case 'disconnected':
+      return 'Keine Live-Events. Status kann veraltet sein.'
+    default:
+      return ''
+  }
+})
+
+const monitorBannerClass = computed(() => {
+  switch (monitorConnectivityState.value) {
+    case 'connected':
+      return 'monitor-connectivity--connected'
+    case 'stale':
+    case 'reconnecting':
+      return 'monitor-connectivity--warning'
+    default:
+      return 'monitor-connectivity--critical'
+  }
+})
+
+const monitorZoneTileDataMode = computed(() => resolveMonitorDataMode({
+  hasSnapshotBase: true,
+  hasLiveOverlay: true,
+  monitorState: monitorConnectivityState.value,
+}))
+
+const monitorSensorCardDataMode = computed(() => resolveMonitorDataMode({
+  hasSnapshotBase: !zoneMonitorError.value,
+  hasLiveOverlay: true,
+  monitorState: monitorConnectivityState.value,
+}))
+
+const monitorActuatorCardDataMode = computed(() => resolveMonitorDataMode({
+  hasSnapshotBase: !zoneMonitorError.value,
+  hasLiveOverlay: true,
+  monitorState: monitorConnectivityState.value,
+}))
+
+const showActuatorSnapshotWarning = computed(() =>
+  monitorConnectivityState.value === 'disconnected' || monitorConnectivityState.value === 'degraded_api',
+)
+
+const monitorSyncHint = computed(() => {
+  if (!lastRecoverySyncAt.value) return null
+  return `Stand synchronisiert um ${new Date(lastRecoverySyncAt.value).toLocaleTimeString('de-DE')}`
 })
 
 // =============================================================================
@@ -1077,6 +1245,42 @@ const zoneDeviceGroup = computed<ZoneDeviceSubzone[]>(() => {
       }) as SensorWithContext[],
       actuators: sz.actuators.map(a => ({
         ...a,
+        state: (() => {
+          const liveDevice = devices.find(d => espStore.getDeviceId(d) === a.esp_id)
+          const liveActuator = (liveDevice?.actuators as ActuatorWithContext[] | undefined)?.find(
+            candidate => candidate.gpio === a.gpio,
+          )
+          return liveActuator?.state ?? a.state
+        })(),
+        pwm_value: (() => {
+          const liveDevice = devices.find(d => espStore.getDeviceId(d) === a.esp_id)
+          const liveActuator = (liveDevice?.actuators as ActuatorWithContext[] | undefined)?.find(
+            candidate => candidate.gpio === a.gpio,
+          )
+          return liveActuator?.pwm_value ?? a.pwm_value
+        })(),
+        emergency_stopped: (() => {
+          const liveDevice = devices.find(d => espStore.getDeviceId(d) === a.esp_id)
+          const liveActuator = (liveDevice?.actuators as ActuatorWithContext[] | undefined)?.find(
+            candidate => candidate.gpio === a.gpio,
+          )
+          return liveActuator?.emergency_stopped ?? a.emergency_stopped
+        })(),
+        last_command_at: (() => {
+          const liveDevice = devices.find(d => espStore.getDeviceId(d) === a.esp_id)
+          const liveActuator = (liveDevice?.actuators as ActuatorWithContext[] | undefined)?.find(
+            candidate => candidate.gpio === a.gpio,
+          )
+          return liveActuator?.last_command_at ?? (a as Partial<ActuatorWithContext>).last_command_at ?? null
+        })(),
+        esp_state: (() => {
+          const liveDevice = devices.find(d => espStore.getDeviceId(d) === a.esp_id)
+          return liveDevice?.system_state ?? (a as Partial<ActuatorWithContext>).esp_state
+        })(),
+        last_seen: (() => {
+          const liveDevice = devices.find(d => espStore.getDeviceId(d) === a.esp_id)
+          return liveDevice?.last_seen ?? (a as Partial<ActuatorWithContext>).last_seen ?? null
+        })(),
         zone_id: data.zone_id,
         zone_name: data.zone_name,
         subzone_id: sz.subzone_id,
@@ -1270,6 +1474,7 @@ async function fetchZoneMonitorData() {
   try {
     const data = await zonesApi.getZoneMonitorData(zoneId, controller.signal)
     zoneMonitorData.value = data
+    lastZoneMonitorApiSuccessAt.value = Date.now()
   } catch (e) {
     // Ignore AbortError — expected when user switches zones quickly
     if (e instanceof DOMException && e.name === 'AbortError') return
@@ -1653,6 +1858,21 @@ function handleFabWidgetSelected(widgetType: string) {
     <!-- View Tab Bar (Hardware / Monitor / Dashboard) -->
     <ViewTabBar />
 
+    <div :class="['monitor-connectivity', monitorBannerClass]">
+      <div class="monitor-connectivity__text">
+        <strong>{{ monitorBannerTitle }}</strong>
+        <span>{{ monitorBannerMessage }}</span>
+        <span v-if="monitorSyncHint" class="monitor-connectivity__sync">{{ monitorSyncHint }}</span>
+      </div>
+      <button
+        v-if="monitorConnectivityState !== 'connected'"
+        class="monitor-connectivity__retry"
+        @click="retryMonitorConnectivity"
+      >
+        Erneut synchronisieren
+      </button>
+    </div>
+
     <!-- L3 Dashboard View (Cross-Zone or Zone-specific) -->
     <template v-if="isDashboardView">
       <DashboardViewer :layoutId="selectedDashboardId!" showHeader />
@@ -1746,6 +1966,7 @@ function handleFabWidgetSelected(widgetType: string) {
           :key="zone.zoneId"
           :zone="zone"
           :is-stale="isZoneStale(zone.lastActivity)"
+          :data-mode="monitorZoneTileDataMode"
           :rules="logicStore.getRulesForZone(zone.zoneId).slice(0, 2)"
           :total-rule-count="logicStore.getRulesForZone(zone.zoneId).length"
           :is-rule-active="logicStore.isRuleActive"
@@ -1906,6 +2127,7 @@ function handleFabWidgetSelected(widgetType: string) {
                   <SensorCard
                     :sensor="sensor"
                     mode="monitor"
+                    :data-mode="monitorSensorCardDataMode"
                     :trend="getSensorTrend(sensor.esp_id, sensor.gpio, sensor.sensor_type)"
                     @click="toggleExpanded(getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type))"
                   >
@@ -1975,6 +2197,8 @@ function handleFabWidgetSelected(widgetType: string) {
                   :key="`${actuator.esp_id}-${actuator.gpio}`"
                   :actuator="actuator"
                   mode="monitor"
+                  :data-mode="monitorActuatorCardDataMode"
+                  :show-snapshot-warning="showActuatorSnapshotWarning"
                   :linked-rules="logicStore.getRulesForActuator(actuator.esp_id, actuator.gpio)"
                   :last-execution="logicStore.getLastExecutionForActuator(actuator.esp_id, actuator.gpio)"
                   @toggle="toggleActuator"
@@ -2130,8 +2354,16 @@ function handleFabWidgetSelected(widgetType: string) {
               <Clock :size="12" />
               Veraltet
             </span>
-            <span v-if="detailLiveValue?.lastUpdate" class="sensor-detail__last-update">
-              {{ formatRelativeTime(detailLiveValue.lastUpdate) }}
+            <span class="sensor-detail__source-line">
+              Live jetzt:
+              <strong v-if="detailLiveValue?.lastUpdate">{{ formatRelativeTime(detailLiveValue.lastUpdate) }}</strong>
+              <strong v-else>unbekannt</strong>
+            </span>
+            <span class="sensor-detail__source-line">
+              Historie bis:
+              <strong v-if="detailHistoryLatestAt">{{ formatRelativeTime(detailHistoryLatestAt) }}</strong>
+              <strong v-else>keine Daten</strong>
+              <span v-if="detailHistoryIsStale" class="sensor-detail__history-stale">Snapshot</span>
             </span>
           </div>
         </div>
@@ -2190,6 +2422,18 @@ function handleFabWidgetSelected(widgetType: string) {
             <div class="sensor-detail__chart-header">
               <span class="sensor-detail__point-count">
                 {{ detailReadings.length }} Datenpunkte
+              </span>
+              <span class="sensor-detail__point-count">
+                Stand: {{ detailHistoryLatestAt ? formatRelativeTime(detailHistoryLatestAt) : 'unbekannt' }}
+              </span>
+            </div>
+            <div v-if="overlaySensorIds.length > 0" class="sensor-detail__overlay-stand">
+              <span
+                v-for="sensorKey in overlaySensorIds"
+                :key="sensorKey"
+                class="sensor-detail__overlay-stand-chip"
+              >
+                Overlay: {{ overlayHistoryLatest.get(sensorKey) ? formatRelativeTime(overlayHistoryLatest.get(sensorKey)!) : 'keine Daten' }}
               </span>
             </div>
             <div class="sensor-detail__chart" style="height: 300px">
@@ -2260,6 +2504,57 @@ function handleFabWidgetSelected(widgetType: string) {
   gap: var(--space-4);
 }
 
+.monitor-connectivity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  background: var(--color-bg-secondary);
+}
+
+.monitor-connectivity__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.monitor-connectivity__text strong {
+  font-size: var(--text-sm);
+}
+
+.monitor-connectivity__text span {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.monitor-connectivity__sync {
+  color: var(--color-text-muted);
+}
+
+.monitor-connectivity__retry {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.monitor-connectivity--connected {
+  border-color: color-mix(in srgb, var(--color-success) 45%, var(--glass-border));
+}
+
+.monitor-connectivity--warning {
+  border-color: color-mix(in srgb, var(--color-warning) 45%, var(--glass-border));
+}
+
+.monitor-connectivity--critical {
+  border-color: color-mix(in srgb, var(--color-error) 45%, var(--glass-border));
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    ZONE / SUBZONE FILTER (WP5)
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -2291,8 +2586,8 @@ function handleFabWidgetSelected(widgetType: string) {
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-secondary);
-  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.08));
-  border-radius: var(--radius-md, 10px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
   appearance: none;
   cursor: pointer;
   transition: border-color 0.2s;
@@ -2315,8 +2610,8 @@ function handleFabWidgetSelected(widgetType: string) {
 .monitor-zone-filter__badge {
   font-size: var(--text-xs);
   padding: 2px 8px;
-  border-radius: var(--radius-sm, 6px);
-  background: rgba(129, 140, 248, 0.15);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-iridescent-2) 15%, transparent);
   color: var(--color-iridescent-2);
   font-weight: 500;
 }
@@ -2326,9 +2621,9 @@ function handleFabWidgetSelected(widgetType: string) {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  background: rgba(251, 191, 36, 0.1);
-  border: 1px solid rgba(251, 191, 36, 0.25);
-  border-radius: var(--radius-md, 10px);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
   color: var(--color-warning);
   font-size: var(--text-sm);
 }
@@ -2601,7 +2896,7 @@ function handleFabWidgetSelected(widgetType: string) {
 .monitor-view__empty-cta:hover {
   border-color: var(--color-iridescent-2);
   color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--color-text-inverse) 4%, transparent);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2786,7 +3081,7 @@ function handleFabWidgetSelected(widgetType: string) {
   font-size: var(--text-xs, 11px);
   color: var(--color-text-muted);
   padding: var(--space-3) var(--space-4);
-  border: 1px dashed var(--glass-border, rgba(255, 255, 255, 0.08));
+  border: 1px dashed var(--glass-border);
   border-radius: var(--radius-sm);
   text-align: center;
   grid-column: 1 / -1;
@@ -2822,8 +3117,8 @@ function handleFabWidgetSelected(widgetType: string) {
 }
 
 .monitor-subzone__action-btn--danger:hover {
-  background: rgba(239, 68, 68, 0.1);
-  border-color: rgba(239, 68, 68, 0.3);
+  background: var(--color-error-bg);
+  border-color: var(--color-error-border);
   color: var(--color-error);
 }
 
@@ -2832,8 +3127,8 @@ function handleFabWidgetSelected(widgetType: string) {
 }
 
 .monitor-subzone__action-btn--confirm:hover {
-  background: rgba(34, 197, 94, 0.1);
-  border-color: rgba(34, 197, 94, 0.3);
+  background: var(--color-success-bg);
+  border-color: var(--color-success-border);
   color: var(--color-success);
 }
 
@@ -2856,7 +3151,7 @@ function handleFabWidgetSelected(widgetType: string) {
 .monitor-subzone__rename-input:focus {
   outline: none;
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.15);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 15%, transparent);
 }
 
 .monitor-subzone__create-form {
@@ -3035,7 +3330,7 @@ function handleFabWidgetSelected(widgetType: string) {
 
 .monitor-dashboard-link:hover {
   border-color: var(--color-iridescent-2);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-bg-primary) 30%, transparent);
 }
 
 .monitor-dashboard-link__info {
@@ -3063,7 +3358,7 @@ function handleFabWidgetSelected(widgetType: string) {
   font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
-  background: rgba(167, 139, 250, 0.15);
+  background: color-mix(in srgb, var(--color-iridescent-3) 15%, transparent);
   color: var(--color-iridescent-3);
   border-radius: 3px;
 }
@@ -3089,7 +3384,7 @@ function handleFabWidgetSelected(widgetType: string) {
 
 .monitor-dashboard-link__claim:hover {
   border-color: var(--color-iridescent-2);
-  background: rgba(129, 140, 248, 0.06);
+  background: color-mix(in srgb, var(--color-iridescent-2) 6%, transparent);
 }
 
 .monitor-dashboard-empty__link {
@@ -3108,7 +3403,7 @@ function handleFabWidgetSelected(widgetType: string) {
 .monitor-dashboard-empty__link:hover {
   color: var(--color-iridescent-2);
   border-color: var(--color-iridescent-2);
-  background: rgba(129, 140, 248, 0.06);
+  background: color-mix(in srgb, var(--color-iridescent-2) 6%, transparent);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -3133,7 +3428,7 @@ function handleFabWidgetSelected(widgetType: string) {
 
 .monitor-sensor-card__detail-btn:hover {
   border-color: var(--color-accent);
-  background: rgba(59, 130, 246, 0.06);
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
 }
 
 .monitor-sensor-card__detail-btn--secondary {
@@ -3142,8 +3437,8 @@ function handleFabWidgetSelected(widgetType: string) {
 
 .monitor-sensor-card__detail-btn--secondary:hover {
   color: var(--color-text-primary);
-  border-color: var(--color-border-hover, rgba(255, 255, 255, 0.12));
-  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--glass-border-hover);
+  background: color-mix(in srgb, var(--color-text-inverse) 4%, transparent);
 }
 
 .monitor-sensor-card__actions {
@@ -3175,7 +3470,7 @@ function handleFabWidgetSelected(widgetType: string) {
   font-size: var(--text-xs);
   font-weight: 600;
   color: var(--color-iridescent-2);
-  background: rgba(129, 140, 248, 0.1);
+  background: color-mix(in srgb, var(--color-iridescent-2) 10%, transparent);
   padding: 1px 6px;
   border-radius: 100px;
 }
@@ -3239,7 +3534,8 @@ function handleFabWidgetSelected(widgetType: string) {
 
 .sensor-detail__hero-meta {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-direction: column;
   gap: var(--space-2);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
@@ -3261,6 +3557,25 @@ function handleFabWidgetSelected(widgetType: string) {
 
 .sensor-detail__last-update {
   color: var(--color-text-muted);
+}
+
+.sensor-detail__source-line {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.sensor-detail__source-line strong {
+  color: var(--color-text-secondary);
+}
+
+.sensor-detail__history-stale {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  padding: 1px 6px;
+  color: var(--color-warning);
 }
 
 /* Section 4: Statistics Row */
@@ -3389,6 +3704,22 @@ function handleFabWidgetSelected(widgetType: string) {
   color: var(--color-text-muted);
 }
 
+.sensor-detail__overlay-stand {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.sensor-detail__overlay-stand-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  border: 1px solid var(--glass-border);
+  padding: 2px 8px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
 .sensor-detail__chart {
   position: relative;
   width: 100%;
@@ -3438,13 +3769,13 @@ function handleFabWidgetSelected(widgetType: string) {
 }
 
 .sensor-detail__overlay-chip:hover:not(:disabled) {
-  border-color: var(--color-border-hover, rgba(255, 255, 255, 0.12));
+  border-color: var(--glass-border-hover);
   color: var(--color-text-primary);
 }
 
 .sensor-detail__overlay-chip--active {
-  background: rgba(167, 139, 250, 0.1);
-  border-color: rgba(167, 139, 250, 0.3);
+  background: color-mix(in srgb, var(--color-iridescent-3) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-iridescent-3) 30%, transparent);
   color: var(--color-text-primary);
 }
 

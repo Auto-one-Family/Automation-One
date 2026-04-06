@@ -315,6 +315,9 @@ function handleDragAdd(event: any) {
   if (!device) return
 
   const fromZoneId = device.zone_id || null
+  if (fromZoneId === props.zoneId) {
+    return
+  }
   emit('device-dropped', {
     device,
     fromZoneId,

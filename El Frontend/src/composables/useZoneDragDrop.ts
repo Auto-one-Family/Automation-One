@@ -218,7 +218,10 @@ export function useZoneDragDrop() {
       // Success toast
       const deviceName = device.name || deviceId
       const zoneName = zoneIdToDisplayName(toZoneId)
-      toast.success(`"${deviceName}" wurde zu "${zoneName}" zugewiesen`)
+      const isSimulation = espStore.isMock(deviceId)
+      toast.info(`${isSimulation ? '[Simulation] ' : ''}Zuweisungsauftrag akzeptiert: "${deviceName}" → "${zoneName}"`, {
+        dedupeKey: `zone-assign-accepted:${deviceId}:${toZoneId}`,
+      })
 
       // Record in history for undo
       pushToHistory({
@@ -297,7 +300,10 @@ export function useZoneDragDrop() {
       // Success toast
       const deviceName = device.name || deviceId
       const zoneName = originalZoneName || zoneIdToDisplayName(originalZoneId)
-      toast.success(`"${deviceName}" wurde aus "${zoneName}" entfernt`)
+      const isSimulation = espStore.isMock(deviceId)
+      toast.info(`${isSimulation ? '[Simulation] ' : ''}Entfernungsauftrag akzeptiert: "${deviceName}" aus "${zoneName}"`, {
+        dedupeKey: `zone-remove-accepted:${deviceId}:${originalZoneId}`,
+      })
 
       // Record in history for undo
       pushToHistory({

@@ -7,17 +7,20 @@
  * config dialog, and execution history.
  */
 
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Puzzle, Settings, History, RefreshCw } from 'lucide-vue-next'
 import { usePluginsStore } from '@/shared/stores/plugins.store'
+import { useOpsLifecycleStore } from '@/shared/stores/ops-lifecycle.store'
 import PluginCard from '@/components/plugins/PluginCard.vue'
 import PluginConfigDialog from '@/components/plugins/PluginConfigDialog.vue'
 import PluginExecutionHistory from '@/components/plugins/PluginExecutionHistory.vue'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
 import type { PluginDetailDTO } from '@/api/plugins'
+import { formatRelativeTime } from '@/utils/formatters'
 
 const pluginsStore = usePluginsStore()
+const opsLifecycle = useOpsLifecycleStore()
 
 // ======================== STATE ========================
 
@@ -45,6 +48,24 @@ const activePlugin = computed<PluginDetailDTO | null>(() =>
 
 const enabledCount = computed(() => pluginsStore.enabledPlugins.length)
 const totalCount = computed(() => pluginsStore.plugins.length)
+const pluginOpsEntries = computed(() =>
+  opsLifecycle.sortedEntries.filter((entry) => entry.scope === 'plugin_execute'),
+)
+
+const latestPluginOps = computed(() => pluginOpsEntries.value[0] ?? null)
+
+const activePluginOps = computed(() => {
+  if (!activePluginId.value) return []
+  return pluginOpsEntries.value.filter((entry) => entry.plugin_id === activePluginId.value).slice(0, 5)
+})
+
+const STATUS_LABELS: Record<string, string> = {
+  initiated: 'Initiiert',
+  running: 'Läuft',
+  partial: 'Teilweise',
+  success: 'Erfolgreich',
+  failed: 'Fehlgeschlagen',
+}
 
 // ======================== METHODS ========================
 
@@ -95,7 +116,13 @@ async function refreshPlugins() {
 // ======================== LIFECYCLE ========================
 
 onMounted(async () => {
+  pluginsStore.startLifecycleMonitoring()
   await pluginsStore.fetchPlugins()
+  await pluginsStore.reconcileRunningExecutions()
+})
+
+onUnmounted(() => {
+  pluginsStore.stopLifecycleMonitoring()
 })
 </script>
 
@@ -136,6 +163,20 @@ onMounted(async () => {
           />
         </button>
       </div>
+    </div>
+
+    <div v-if="latestPluginOps" class="plugins-view__ops-banner">
+      <span class="plugins-view__ops-label">Ops-Lifecycle</span>
+      <span
+        class="plugins-view__ops-status"
+        :class="`plugins-view__ops-status--${latestPluginOps.status}`"
+      >
+        {{ STATUS_LABELS[latestPluginOps.status] }}
+      </span>
+      <span class="plugins-view__ops-text">{{ latestPluginOps.title }}</span>
+      <span class="plugins-view__ops-time">
+        {{ formatRelativeTime(new Date(latestPluginOps.updated_at)) }}
+      </span>
     </div>
 
     <!-- Plugin Grid -->
@@ -201,6 +242,39 @@ onMounted(async () => {
               Konfiguration
             </button>
           </div>
+
+          <AccordionSection
+            v-if="activePluginOps.length > 0"
+            title="Lifecycle (High-Risk)"
+            storage-key="ao-plugin-lifecycle"
+          >
+            <div class="plugin-detail__lifecycle-list">
+              <div
+                v-for="entry in activePluginOps"
+                :key="entry.id"
+                class="plugin-detail__lifecycle-item"
+              >
+                <span
+                  class="plugin-detail__lifecycle-badge"
+                  :class="`plugin-detail__lifecycle-badge--${entry.status}`"
+                >
+                  {{ STATUS_LABELS[entry.status] }}
+                </span>
+                <div class="plugin-detail__lifecycle-body">
+                  <div class="plugin-detail__lifecycle-title">
+                    {{ entry.summary || entry.title }}
+                  </div>
+                  <div class="plugin-detail__lifecycle-meta">
+                    <span v-if="entry.execution_id">Execution: {{ entry.execution_id }}</span>
+                    <span>{{ formatRelativeTime(new Date(entry.updated_at)) }}</span>
+                  </div>
+                  <div v-if="entry.reason_text" class="plugin-detail__lifecycle-reason">
+                    {{ entry.reason_text }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </AccordionSection>
 
           <!-- Capabilities -->
           <AccordionSection
@@ -358,6 +432,71 @@ onMounted(async () => {
   gap: 0.75rem;
 }
 
+.plugins-view__ops-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.plugins-view__ops-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.plugins-view__ops-status {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+}
+
+.plugins-view__ops-status--initiated,
+.plugin-detail__lifecycle-badge--initiated {
+  color: var(--color-info);
+  border-color: color-mix(in srgb, var(--color-info) 35%, transparent);
+}
+
+.plugins-view__ops-status--running,
+.plugin-detail__lifecycle-badge--running {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+}
+
+.plugins-view__ops-status--partial,
+.plugin-detail__lifecycle-badge--partial {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+}
+
+.plugins-view__ops-status--success,
+.plugin-detail__lifecycle-badge--success {
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 35%, transparent);
+}
+
+.plugins-view__ops-status--failed,
+.plugin-detail__lifecycle-badge--failed {
+  color: var(--color-error);
+  border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
+}
+
+.plugins-view__ops-text {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.plugins-view__ops-time {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
 .plugins-view__empty {
   grid-column: 1 / -1;
   display: flex;
@@ -483,5 +622,49 @@ onMounted(async () => {
   color: var(--color-iridescent-2);
   border-radius: var(--radius-sm);
   border: 1px solid rgba(129, 140, 248, 0.15);
+}
+
+.plugin-detail__lifecycle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+
+.plugin-detail__lifecycle-item {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.plugin-detail__lifecycle-badge {
+  font-size: var(--text-xs);
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  white-space: nowrap;
+}
+
+.plugin-detail__lifecycle-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.plugin-detail__lifecycle-title {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.plugin-detail__lifecycle-meta {
+  display: flex;
+  gap: 0.5rem;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.plugin-detail__lifecycle-reason {
+  font-size: var(--text-xs);
+  color: var(--color-error);
 }
 </style>

@@ -61,16 +61,63 @@ interface SubzoneAssignmentPayload {
   reason_code?: string | null
 }
 
-/**
- * Find device index in the devices array by esp_id.
- * Uses the same defensive pattern as esp.store.ts (findDeviceByEspIdDefensive).
- */
-function findDeviceIndex(
-  devices: ESPDevice[],
-  espId: string,
-  getDeviceId: (d: ESPDevice) => string,
-): number {
-  return devices.findIndex(d => getDeviceId(d) === espId)
+type DevicePatchFn = (device: ESPDevice) => ESPDevice
+type ApplyDevicePatch = (espId: string, patchFn: DevicePatchFn) => boolean
+
+function patchDeviceDomainByConfig(
+  device: ESPDevice,
+  payload: Record<string, unknown>,
+  patchType: 'scope' | 'context',
+): { nextDevice: ESPDevice; patched: boolean } {
+  const configType = String(payload.config_type || '').toLowerCase()
+  const configId = payload.config_id as string | undefined
+  const gpio = payload.gpio as number | undefined
+
+  if (configType === 'sensor' && Array.isArray(device.sensors)) {
+    const sensors = (device.sensors as unknown as Array<Record<string, unknown>>).map((sensor) => ({ ...sensor }))
+    const idx = sensors.findIndex((sensor) => {
+      if (configId && typeof sensor.config_id === 'string') return sensor.config_id === configId
+      if (gpio !== undefined && typeof sensor.gpio === 'number') return sensor.gpio === gpio
+      return false
+    })
+    if (idx < 0) return { nextDevice: device, patched: false }
+
+    const target = sensors[idx]
+    if (patchType === 'scope') {
+      if (payload.device_scope !== undefined) target.device_scope = payload.device_scope
+      if (payload.assigned_zones !== undefined) target.assigned_zones = payload.assigned_zones
+    } else {
+      if (payload.active_zone_id !== undefined) target.active_zone_id = payload.active_zone_id
+      if (payload.active_subzone_id !== undefined) target.active_subzone_id = payload.active_subzone_id
+      if (payload.context_source !== undefined) target.context_source = payload.context_source
+      if (payload.context_since !== undefined) target.context_since = payload.context_since
+    }
+    return { nextDevice: { ...device, sensors: sensors as unknown as ESPDevice['sensors'] }, patched: true }
+  }
+
+  if (configType === 'actuator' && Array.isArray(device.actuators)) {
+    const actuators = (device.actuators as unknown as Array<Record<string, unknown>>).map((actuator) => ({ ...actuator }))
+    const idx = actuators.findIndex((actuator) => {
+      if (configId && typeof actuator.config_id === 'string') return actuator.config_id === configId
+      if (gpio !== undefined && typeof actuator.gpio === 'number') return actuator.gpio === gpio
+      return false
+    })
+    if (idx < 0) return { nextDevice: device, patched: false }
+
+    const target = actuators[idx]
+    if (patchType === 'scope') {
+      if (payload.device_scope !== undefined) target.device_scope = payload.device_scope
+      if (payload.assigned_zones !== undefined) target.assigned_zones = payload.assigned_zones
+    } else {
+      if (payload.active_zone_id !== undefined) target.active_zone_id = payload.active_zone_id
+      if (payload.active_subzone_id !== undefined) target.active_subzone_id = payload.active_subzone_id
+      if (payload.context_source !== undefined) target.context_source = payload.context_source
+      if (payload.context_since !== undefined) target.context_since = payload.context_since
+    }
+    return { nextDevice: { ...device, actuators: actuators as unknown as ESPDevice['actuators'] }, patched: true }
+  }
+
+  return { nextDevice: device, patched: false }
 }
 
 export const useZoneStore = defineStore('zone', () => {
@@ -172,9 +219,8 @@ export const useZoneStore = defineStore('zone', () => {
    */
   function handleZoneAssignment(
     message: { data: Record<string, unknown> },
-    devices: ESPDevice[],
-    getDeviceId: (d: ESPDevice) => string,
-    setDevice: (index: number, device: ESPDevice) => void,
+    applyDevicePatch: ApplyDevicePatch,
+    getDeviceSnapshot: (espId: string) => ESPDevice | null,
   ): void {
     const data = message.data as unknown as ZoneAssignmentPayload
     const espId = data.esp_id || data.device_id
@@ -184,13 +230,11 @@ export const useZoneStore = defineStore('zone', () => {
       return
     }
 
-    const deviceIndex = findDeviceIndex(devices, espId, getDeviceId)
-    if (deviceIndex === -1) {
+    const snapshot = getDeviceSnapshot(espId)
+    if (!snapshot) {
       logger.debug(`Zone assignment for unknown device: ${espId}`)
       return
     }
-
-    const device = devices[deviceIndex]
 
     const toast = useToast()
 
@@ -203,10 +247,10 @@ export const useZoneStore = defineStore('zone', () => {
       if (data.master_zone_id !== undefined) updates.master_zone_id = data.master_zone_id
       if (data.kaiser_id !== undefined) updates.kaiser_id = data.kaiser_id
 
-      setDevice(deviceIndex, { ...device, ...updates })
+      applyDevicePatch(espId, (device) => ({ ...device, ...updates }))
       logger.info(`Zone confirmed: ${espId} → ${data.zone_id}${data.zone_name ? ` (${data.zone_name})` : ''} (reactivity triggered)`)
 
-      const deviceName = device.name || espId
+      const deviceName = snapshot.name || espId
       const zoneName = data.zone_name || data.zone_id || 'Zone'
       const { title, bridgeLine } = formatZoneAckSuccess({
         deviceName,
@@ -216,16 +260,16 @@ export const useZoneStore = defineStore('zone', () => {
       toast.success(bridgeLine ? `${title}\n${bridgeLine}` : title)
     } else if (data.status === 'zone_removed') {
       // Capture zone name before clearing fields
-      const deviceName = device.name || espId
-      const zoneName = device.zone_name || device.zone_id || 'Zone'
+      const deviceName = snapshot.name || espId
+      const zoneName = snapshot.zone_name || snapshot.zone_id || 'Zone'
 
       // Clear zone fields on removal. kaiser_id remains unchanged (WP2-F24)
-      setDevice(deviceIndex, {
+      applyDevicePatch(espId, (device) => ({
         ...device,
         zone_id: undefined,
         zone_name: undefined,
         master_zone_id: undefined,
-      })
+      }))
       logger.info(`Zone removed: ${espId}`)
       const removed = formatZoneAckRemoved({ deviceName, zoneName, reasonCode: data.reason_code })
       toast.success(removed.bridgeLine ? `${removed.title}\n${removed.bridgeLine}` : removed.title)
@@ -261,9 +305,8 @@ export const useZoneStore = defineStore('zone', () => {
    */
   function handleSubzoneAssignment(
     message: { data: Record<string, unknown> },
-    devices: ESPDevice[],
-    getDeviceId: (d: ESPDevice) => string,
-    _setDevice: (index: number, device: ESPDevice) => void,
+    applyDevicePatch: ApplyDevicePatch,
+    getDeviceSnapshot: (espId: string) => ESPDevice | null,
   ): boolean {
     const toast = useToast()
     const data = message.data as unknown as SubzoneAssignmentPayload
@@ -274,30 +317,39 @@ export const useZoneStore = defineStore('zone', () => {
       return false
     }
 
-    const deviceIndex = findDeviceIndex(devices, espId, getDeviceId)
-    if (deviceIndex === -1) {
+    const snapshot = getDeviceSnapshot(espId)
+    if (!snapshot) {
       logger.debug(`Subzone assignment for unknown device: ${espId}`)
       return false
     }
 
-    const device = devices[deviceIndex]
-
     if (data.status === 'subzone_assigned') {
+      const patched = applyDevicePatch(espId, (device) => {
+        if (data.subzone_id === undefined) return device
+        return { ...device, subzone_id: data.subzone_id }
+      })
       logger.info(`Subzone confirmed: ${espId} → ${data.subzone_id}`)
       const ok = formatSubzoneAckSuccess({
-        deviceLabel: device.name || espId,
+        deviceLabel: snapshot.name || espId,
         reasonCode: data.reason_code,
       })
       toast.success(ok.bridgeLine ? `${ok.title}\n${ok.bridgeLine}` : ok.title)
-      return true
+      // Delta patch reicht in der Regel aus; nur fallback-refresh wenn Patch nicht möglich.
+      return !patched
     } else if (data.status === 'subzone_removed') {
+      const patched = applyDevicePatch(espId, (device) => ({
+        ...device,
+        subzone_id: undefined,
+        subzone_name: undefined,
+      }))
       logger.info(`Subzone removed: ${espId}`)
       const rem = formatSubzoneRemoved({
-        deviceLabel: device.name || espId,
+        deviceLabel: snapshot.name || espId,
         reasonCode: data.reason_code,
       })
       toast.success(rem.bridgeLine ? `${rem.title}\n${rem.bridgeLine}` : rem.title)
-      return true
+      // Delta patch reicht in der Regel aus; nur fallback-refresh wenn Patch nicht möglich.
+      return !patched
     } else if (data.status === 'error') {
       logger.error(`Subzone assignment error for ${espId}: ${data.message}`)
       const se = formatSubzoneAckError({
@@ -319,39 +371,72 @@ export const useZoneStore = defineStore('zone', () => {
 
   /**
    * Handle device_scope_changed WebSocket event.
-   * Triggered when a sensor/actuator's device_scope or assigned_zones change.
-   * Defensively refreshes ESP data via espStore.fetchAll().
+   * Returns true when a delta patch was applied.
    */
-  function handleDeviceScopeChanged(message: { data: Record<string, unknown> }): void {
+  function handleDeviceScopeChanged(
+    message: { data: Record<string, unknown> },
+    applyDevicePatch: ApplyDevicePatch,
+    getDeviceSnapshot: (espId: string) => ESPDevice | null,
+  ): boolean {
     try {
       const toast = useToast()
       const data = message.data
       const configType = data.config_type as string || 'device'
       const espId = data.esp_id as string || ''
+      const fallbackDeviceId = data.device_id as string || ''
+      const resolvedEspId = espId || fallbackDeviceId
+
+      if (!resolvedEspId) return false
+      if (!getDeviceSnapshot(resolvedEspId)) return false
+
+      let patchedByDomain = false
+      const patched = applyDevicePatch(resolvedEspId, (device) => {
+        const result = patchDeviceDomainByConfig(device, data, 'scope')
+        patchedByDomain = result.patched
+        return result.nextDevice
+      })
 
       logger.info(`Device scope changed: ${configType} on ${espId}`, data)
       toast.info(`Geräte-Scope aktualisiert${espId ? ` (${espId})` : ''}`)
+      return patched && patchedByDomain
     } catch (e) {
       logger.error('Error handling device_scope_changed', e)
+      return false
     }
   }
 
   /**
    * Handle device_context_changed WebSocket event.
-   * Triggered when a sensor/actuator's active zone/subzone context changes.
-   * Defensively refreshes ESP data via espStore.fetchAll().
+   * Returns true when a delta patch was applied.
    */
-  function handleDeviceContextChanged(message: { data: Record<string, unknown> }): void {
+  function handleDeviceContextChanged(
+    message: { data: Record<string, unknown> },
+    applyDevicePatch: ApplyDevicePatch,
+    getDeviceSnapshot: (espId: string) => ESPDevice | null,
+  ): boolean {
     try {
       const toast = useToast()
       const data = message.data
       const configType = data.config_type as string || 'device'
       const activeZone = data.active_zone_id as string || ''
+      const espId = data.esp_id as string || data.device_id as string || ''
+
+      if (!espId) return false
+      if (!getDeviceSnapshot(espId)) return false
+
+      let patchedByDomain = false
+      const patched = applyDevicePatch(espId, (device) => {
+        const result = patchDeviceDomainByConfig(device, data, 'context')
+        patchedByDomain = result.patched
+        return result.nextDevice
+      })
 
       logger.info(`Device context changed: ${configType} → zone ${activeZone}`, data)
       toast.info(`Geräte-Kontext aktualisiert${activeZone ? ` (Zone: ${activeZone})` : ''}`)
+      return patched && patchedByDomain
     } catch (e) {
       logger.error('Error handling device_context_changed', e)
+      return false
     }
   }
 

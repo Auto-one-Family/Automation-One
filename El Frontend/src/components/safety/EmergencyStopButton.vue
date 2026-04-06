@@ -81,8 +81,8 @@ async function handleClearEmergency() {
     <div v-if="showConfirm" class="emergency-overlay" role="dialog" aria-modal="true" :aria-labelledby="isEmergencyActive ? 'emergency-clear-title' : 'emergency-stop-title'" @click.self="showConfirm = false">
       <div class="emergency-dialog">
         <div class="emergency-dialog__icon">
-          <RotateCcw v-if="isEmergencyActive" class="w-10 h-10 text-green-400" />
-          <OctagonX v-else class="w-10 h-10 text-red-400" />
+          <RotateCcw v-if="isEmergencyActive" class="w-10 h-10 emergency-dialog__icon--success" />
+          <OctagonX v-else class="w-10 h-10 emergency-dialog__icon--error" />
         </div>
         <h3 :id="isEmergencyActive ? 'emergency-clear-title' : 'emergency-stop-title'" class="emergency-dialog__title">
           {{ isEmergencyActive ? 'NOT-AUS AUFHEBEN' : 'NOTFALL-STOPP' }}
@@ -140,15 +140,15 @@ async function handleClearEmergency() {
   font-size: var(--text-sm);
   font-weight: 700;
   letter-spacing: var(--tracking-wide);
-  color: #fca5a5;
+  color: var(--color-error);
   background: linear-gradient(135deg,
-    rgba(239, 68, 68, 0.2) 0%,
-    rgba(185, 28, 28, 0.15) 100%
+    color-mix(in srgb, var(--color-error) 22%, transparent) 0%,
+    color-mix(in srgb, var(--color-error) 14%, transparent) 100%
   );
-  border: 1.5px solid rgba(239, 68, 68, 0.5);
+  border: 1.5px solid var(--color-error-border);
   box-shadow:
-    0 0 12px rgba(239, 68, 68, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    0 0 12px color-mix(in srgb, var(--color-error) 26%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--color-text-inverse) 8%, transparent);
   cursor: pointer;
   transition: all var(--transition-fast);
   position: relative;
@@ -163,7 +163,7 @@ async function handleClearEmergency() {
   border-radius: inherit;
   background: radial-gradient(
     ellipse at center,
-    rgba(239, 68, 68, 0.15) 0%,
+    color-mix(in srgb, var(--color-error) 22%, transparent) 0%,
     transparent 70%
   );
   animation: emergency-idle-glow 3s ease-in-out infinite;
@@ -176,16 +176,24 @@ async function handleClearEmergency() {
 }
 
 .emergency-btn:hover:not(:disabled) {
-  color: #fee2e2;
+  color: var(--color-text-inverse);
   background: linear-gradient(135deg,
-    rgba(239, 68, 68, 0.35) 0%,
-    rgba(185, 28, 28, 0.25) 100%
+    color-mix(in srgb, var(--color-error) 34%, transparent) 0%,
+    color-mix(in srgb, var(--color-error) 24%, transparent) 100%
   );
   box-shadow:
-    0 0 24px rgba(239, 68, 68, 0.35),
-    0 0 8px rgba(239, 68, 68, 0.2);
-  border-color: rgba(239, 68, 68, 0.7);
+    0 0 24px color-mix(in srgb, var(--color-error) 42%, transparent),
+    0 0 8px color-mix(in srgb, var(--color-error) 22%, transparent);
+  border-color: color-mix(in srgb, var(--color-error) 70%, transparent);
   transform: scale(1.03);
+}
+
+.emergency-btn:focus-visible {
+  outline: 2px solid var(--color-text-inverse);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--color-error) 28%, transparent),
+    0 0 18px color-mix(in srgb, var(--color-error) 38%, transparent);
 }
 
 .emergency-btn:disabled {
@@ -208,7 +216,7 @@ async function handleClearEmergency() {
 }
 
 .emergency-btn--active:hover:not(:disabled) {
-  color: color-mix(in srgb, var(--color-success) 90%, white);
+  color: color-mix(in srgb, var(--color-success) 90%, var(--color-text-inverse));
   background: linear-gradient(135deg,
     color-mix(in srgb, var(--color-success) 35%, transparent) 0%,
     color-mix(in srgb, var(--color-success) 25%, transparent) 100%
@@ -224,27 +232,35 @@ async function handleClearEmergency() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(7, 7, 13, 0.85);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  background: var(--backdrop-color);
+  -webkit-backdrop-filter: blur(var(--backdrop-blur));
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 
 .emergency-dialog {
   background: var(--color-bg-secondary);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  border: 1px solid var(--color-error-border);
   border-radius: var(--radius-lg);
   padding: var(--space-6);
   max-width: 360px;
   width: 90%;
   text-align: center;
   box-shadow:
-    0 0 60px rgba(239, 68, 68, 0.15),
+    0 0 60px color-mix(in srgb, var(--color-error) 22%, transparent),
     var(--elevation-floating);
   animation: scale-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .emergency-dialog__icon {
   margin-bottom: var(--space-3);
+}
+
+.emergency-dialog__icon--success {
+  color: var(--color-success);
+}
+
+.emergency-dialog__icon--error {
+  color: var(--color-error);
 }
 
 .emergency-dialog__title {

@@ -31,6 +31,7 @@ import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSect
 import DeviceScopeSection from '@/components/devices/DeviceScopeSection.vue'
 import { deviceContextApi } from '@/api/device-context'
 import { useZoneStore } from '@/shared/stores/zone.store'
+import { useActuatorStore } from '@/shared/stores/actuator.store'
 import type { DeviceScope } from '@/types'
 import type { DeviceMetadata } from '@/types/device-metadata'
 import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
@@ -59,6 +60,7 @@ const emit = defineEmits<{
 
 const toast = useToast()
 const espStore = useEspStore()
+const actuatorStore = useActuatorStore()
 const uiStore = useUiStore()
 const calibration = useCalibration()
 const zoneStore = useZoneStore()
@@ -287,6 +289,7 @@ function setCronExpression(expression: string) {
 // Delete
 // =============================================================================
 const deleting = ref(false)
+const isMockEsp = computed(() => espApi.isMockEsp(props.espId))
 
 async function confirmAndDelete() {
   const confirmed = await uiStore.confirm({
@@ -310,7 +313,15 @@ async function confirmAndDelete() {
       toast.error('Sensor-Config-ID fehlt — Löschung nicht möglich')
       return
     }
-    toast.success('Sensor entfernt')
+    if (isMockEsp.value) {
+      toast.success('[Simulation] Sensor entfernt', {
+        dedupeKey: `sensor-delete:${props.espId}:${props.gpio}:${props.sensorType}`,
+      })
+    } else {
+      toast.info('Löschauftrag akzeptiert - warte auf Geräte-Rückmeldung', {
+        dedupeKey: `sensor-delete:${props.espId}:${props.gpio}:${props.sensorType}`,
+      })
+    }
     emit('deleted')
   } catch {
     toast.error('Sensor konnte nicht entfernt werden')
@@ -389,8 +400,61 @@ async function handleSave() {
     if (result?.id) {
       sensorDbId.value = String(result.id)
     }
-    toast.success('Sensor-Konfiguration gespeichert')
-    emit('saved')
+    if (isMockEsp.value) {
+      toast.success('[Simulation] Sensor-Konfiguration gespeichert')
+      emit('saved')
+    } else {
+      const response = result as unknown as Record<string, unknown>
+      const correlationId = typeof response.correlation_id === 'string' ? response.correlation_id : undefined
+      const requestId = typeof response.request_id === 'string' ? response.request_id : undefined
+      const handles = [correlationId ? `Korrelation: ${correlationId}` : '', requestId ? `Request-ID: ${requestId}` : '']
+        .filter(Boolean)
+        .join(' | ')
+      const scope = `sensor:${props.gpio}:${props.sensorType}`
+      const summary = `Sensor-Konfiguration ${props.sensorType} an GPIO ${props.gpio}`
+      const subjectId = actuatorStore.registerConfigIntentFromRest({
+        espId: props.espId,
+        scope,
+        correlationId,
+        requestId,
+        summary,
+      })
+      toast.info(
+        `Konfigurationsauftrag akzeptiert: ${summary}.${handles ? ` ${handles}` : ''}`,
+        {
+          dedupeKey: `config-accepted:${correlationId ?? requestId ?? `${props.espId}:${scope}`}`,
+        },
+      )
+      const terminal = await actuatorStore.waitForConfigTerminal({
+        subjectId,
+        correlationId,
+        timeoutMs: 65_000,
+      })
+      if (!terminal) {
+        toast.error('Konfigurationsstatus unklar: Keine terminale Rückmeldung empfangen. Bitte erneut prüfen.', {
+          persistent: true,
+          dedupeKey: `config-await-timeout:${correlationId ?? requestId ?? subjectId}`,
+        })
+        return
+      }
+      if (terminal.state === 'terminal_success') {
+        toast.success('Sensor-Konfiguration wurde vom Gerät bestätigt')
+        emit('saved')
+        return
+      }
+      if (terminal.state === 'terminal_timeout') {
+        toast.error('Konfigurations-Timeout: Gerät hat nicht terminal geantwortet. Bitte erneut versuchen.', {
+          persistent: true,
+          dedupeKey: `config-terminal-timeout:${correlationId ?? requestId ?? subjectId}`,
+        })
+        return
+      }
+      toast.error('Konfiguration wurde nicht bestätigt. Details im Event-Monitor prüfen.', {
+        persistent: true,
+        dedupeKey: `config-terminal-failed:${correlationId ?? requestId ?? subjectId}`,
+      })
+      return
+    }
   } catch (err) {
     const msg = (err as any)?.response?.data?.detail ?? 'Fehler beim Speichern'
     toast.error(msg)
@@ -405,6 +469,9 @@ async function handleSave() {
     <div v-if="loading" class="sensor-config__loading">Lade Konfiguration...</div>
 
     <template v-else>
+      <section v-if="isMockEsp" class="sensor-config__simulation-badge" aria-label="Simulation Hinweis">
+        [Simulation] Mock-ESP - Aktionen werden simuliert.
+      </section>
       <!-- ═══ ZONE 1: BASIC (always visible) ══════════════════════════════ -->
       <section class="sensor-config__section">
         <h3 class="sensor-config__section-title">Grundeinstellungen</h3>
@@ -957,6 +1024,16 @@ async function handleSave() {
   gap: var(--space-3);
   padding-bottom: var(--space-4);
   border-bottom: 1px solid var(--glass-border);
+}
+
+.sensor-config__simulation-badge {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  background: rgba(167, 139, 250, 0.1);
+  color: var(--color-mock);
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .sensor-config__section-title {

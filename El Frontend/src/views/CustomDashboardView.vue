@@ -16,7 +16,7 @@ defineOptions({ name: 'CustomDashboardView' })
 
 import { ref, watch, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, computed } from 'vue'
 import { onClickOutside } from '@vueuse/core'
-import { useRoute } from 'vue-router'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { GridStack, type GridItemHTMLElement, type GridStackNode } from 'gridstack'
 import 'gridstack/dist/gridstack.min.css'
 import {
@@ -202,17 +202,10 @@ function setTarget(view: 'monitor' | 'hardware', placement: 'inline' | 'side-pan
 }
 
 function setZoneScope(zoneId: string | null) {
-  const layout = dashStore.activeLayout
-  if (!layout) return
-  const idx = dashStore.layouts.findIndex(l => l.id === layout.id)
-  if (idx === -1) return
+  const layoutId = dashStore.activeLayoutId
+  if (!layoutId) return
   selectedZoneId.value = zoneId
-  dashStore.layouts[idx] = {
-    ...dashStore.layouts[idx],
-    scope: zoneId ? 'zone' : 'cross-zone',
-    zoneId: zoneId || undefined,
-    updatedAt: new Date().toISOString(),
-  }
+  dashStore.setLayoutScope(layoutId, zoneId ? 'zone' : 'cross-zone', zoneId || undefined)
 }
 
 function clearTarget() {
@@ -454,6 +447,13 @@ onUnmounted(() => {
 
   // Clear breadcrumb
   dashStore.breadcrumb.dashboardName = ''
+
+  // Best-effort flush for pending debounced syncs
+  void dashStore.flushPendingSyncs('flush')
+})
+
+onBeforeRouteLeave(async () => {
+  await dashStore.flushPendingSyncs('flush')
 })
 
 // keep-alive lifecycle: Preserve GridStack state across tab switches

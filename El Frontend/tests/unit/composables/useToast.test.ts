@@ -259,6 +259,24 @@ describe('useToast - Deduplication', () => {
 
     expect(toasts.value).toHaveLength(1)
   })
+
+  it('dedupliziert unterschiedliche messages über dedupeKey', () => {
+    const { show, toasts } = useToast()
+
+    const id1 = show({
+      message: 'REST: Löschauftrag akzeptiert',
+      type: 'info',
+      dedupeKey: 'delete:sensor:esp1:gpio5',
+    })
+    const id2 = show({
+      message: 'WS: Sensor entfernt',
+      type: 'info',
+      dedupeKey: 'delete:sensor:esp1:gpio5',
+    })
+
+    expect(toasts.value).toHaveLength(1)
+    expect(id1).toBe(id2)
+  })
 })
 
 // =============================================================================

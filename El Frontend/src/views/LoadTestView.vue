@@ -1,19 +1,30 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { loadTestApi, type MetricsResponse } from '@/api/loadtest'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
+import {
+  loadTestApi,
+  type MetricsResponse,
+  type LoadTestCapabilities,
+  type LoadTestPreflightResponse,
+} from '@/api/loadtest'
 import {
   Zap, Plus, Play, Square, RefreshCw, AlertCircle, Check, X,
   Server, Thermometer, Power, MessageSquare, Clock
 } from 'lucide-vue-next'
 import { createLogger } from '@/utils/logger'
+import { useOpsLifecycleStore } from '@/shared/stores/ops-lifecycle.store'
 
 const logger = createLogger('LoadTest')
+const opsLifecycle = useOpsLifecycleStore()
 
 // State
 const metrics = ref<MetricsResponse | null>(null)
 const isLoading = ref(false)
 const error = ref<string | null>(null)
 const successMessage = ref<string | null>(null)
+const capabilities = ref<LoadTestCapabilities | null>(null)
+const preflight = ref<LoadTestPreflightResponse | null>(null)
+const typedConfirm = ref('')
+const lastSummary = ref<string | null>(null)
 
 // Bulk create form
 const bulkCount = ref(10)
@@ -28,6 +39,25 @@ const simDuration = ref(60)
 // Metrics refresh
 const metricsInterval = ref<ReturnType<typeof setInterval> | null>(null)
 const isSimulating = ref(false)
+const activeSimulationLifecycleId = ref<string | null>(null)
+
+const preflightPayload = computed(() => ({
+  bulk_count: bulkCount.value,
+  sensors_per_device: bulkSensors.value,
+  actuators_per_device: bulkActuators.value,
+  interval_ms: simInterval.value,
+  duration_seconds: simDuration.value,
+}))
+
+const needsTypedConfirm = computed(() =>
+  (preflight.value?.impact === 'high') || bulkCount.value >= 50,
+)
+
+const canRunHighRiskAction = computed(() => {
+  if (!preflight.value?.allowed) return false
+  if (!needsTypedConfirm.value) return true
+  return typedConfirm.value.trim().toUpperCase() === 'START'
+})
 
 // Methods
 async function loadMetrics(): Promise<void> {
@@ -38,9 +68,41 @@ async function loadMetrics(): Promise<void> {
   }
 }
 
+async function loadCapabilities(): Promise<void> {
+  capabilities.value = await loadTestApi.getCapabilities()
+  bulkCount.value = Math.min(bulkCount.value, capabilities.value.max_bulk_count)
+  bulkSensors.value = Math.min(bulkSensors.value, capabilities.value.max_sensors_per_device)
+  bulkActuators.value = Math.min(bulkActuators.value, capabilities.value.max_actuators_per_device)
+  simInterval.value = Math.max(simInterval.value, capabilities.value.min_interval_ms)
+  simInterval.value = Math.min(simInterval.value, capabilities.value.max_interval_ms)
+  simDuration.value = Math.max(simDuration.value, capabilities.value.min_duration_seconds)
+  simDuration.value = Math.min(simDuration.value, capabilities.value.max_duration_seconds)
+}
+
+async function runPreflight(): Promise<void> {
+  preflight.value = await loadTestApi.preflight(preflightPayload.value)
+  if (preflight.value.allowed) {
+    successMessage.value = 'Preflight erfolgreich.'
+    setTimeout(() => successMessage.value = null, 2500)
+  } else {
+    error.value = preflight.value.message
+  }
+}
+
 async function bulkCreate(): Promise<void> {
+  if (!canRunHighRiskAction.value) {
+    error.value = 'Preflight/Bestätigung unvollständig. Bitte Guardrail-Schritte abschließen.'
+    return
+  }
   isLoading.value = true
   error.value = null
+  const lifecycleId = opsLifecycle.startLifecycle({
+    scope: 'loadtest_bulk_create',
+    title: 'Loadtest: Bulk-Create Mock-ESPs',
+    risk: 'high',
+    summary: 'Bulk-Create initiiert',
+  })
+  opsLifecycle.markRunning(lifecycleId, 'Bulk-Create läuft')
 
   try {
     const response = await loadTestApi.bulkCreate({
@@ -51,19 +113,34 @@ async function bulkCreate(): Promise<void> {
     })
     
     successMessage.value = response.message
+    lastSummary.value = `Bulk-Create: ${response.created_count} Geräte erstellt. Nächster sicherer Schritt: Metriken prüfen und erst danach Simulation starten.`
+    opsLifecycle.markSuccess(lifecycleId, lastSummary.value)
     await loadMetrics()
     setTimeout(() => successMessage.value = null, 5000)
   } catch (err: unknown) {
     const axiosError = err as { response?: { data?: { detail?: string } } }
     error.value = axiosError.response?.data?.detail || 'Failed to create mock ESPs'
+    opsLifecycle.markFailed(lifecycleId, error.value, 'loadtest_bulk_create_failed')
   } finally {
     isLoading.value = false
   }
 }
 
 async function startSimulation(): Promise<void> {
+  if (!canRunHighRiskAction.value) {
+    error.value = 'Preflight/Bestätigung unvollständig. Bitte Guardrail-Schritte abschließen.'
+    return
+  }
   isLoading.value = true
   error.value = null
+  const lifecycleId = opsLifecycle.startLifecycle({
+    scope: 'loadtest_simulation',
+    title: 'Loadtest: Simulation starten',
+    risk: 'high',
+    summary: 'Simulation initiiert',
+  })
+  activeSimulationLifecycleId.value = lifecycleId
+  opsLifecycle.markRunning(lifecycleId, 'Simulation läuft')
 
   try {
     const response = await loadTestApi.startSimulation({
@@ -73,6 +150,8 @@ async function startSimulation(): Promise<void> {
     
     isSimulating.value = true
     successMessage.value = response.message
+    lastSummary.value = `Simulation gestartet${response.simulation_id ? ` (ID: ${response.simulation_id})` : ''}. Kill-Switch bleibt aktiv.`
+    opsLifecycle.markPartial(lifecycleId, 'Simulation aktiv - manuelles Stop erforderlich')
     await loadMetrics()
     
     // Start metrics refresh
@@ -83,6 +162,7 @@ async function startSimulation(): Promise<void> {
   } catch (err: unknown) {
     const axiosError = err as { response?: { data?: { detail?: string } } }
     error.value = axiosError.response?.data?.detail || 'Failed to start simulation'
+    opsLifecycle.markFailed(lifecycleId, error.value, 'loadtest_start_failed')
   } finally {
     isLoading.value = false
   }
@@ -97,6 +177,11 @@ async function stopSimulation(): Promise<void> {
     
     isSimulating.value = false
     successMessage.value = response.message
+    lastSummary.value = 'Simulation gestoppt. Nächster sicherer Schritt: Metriken/Logs auf Nebenwirkungen prüfen.'
+    if (activeSimulationLifecycleId.value) {
+      opsLifecycle.markSuccess(activeSimulationLifecycleId.value, lastSummary.value)
+      activeSimulationLifecycleId.value = null
+    }
     
     // Stop metrics refresh
     if (metricsInterval.value) {
@@ -109,6 +194,9 @@ async function stopSimulation(): Promise<void> {
   } catch (err: unknown) {
     const axiosError = err as { response?: { data?: { detail?: string } } }
     error.value = axiosError.response?.data?.detail || 'Failed to stop simulation'
+    if (activeSimulationLifecycleId.value) {
+      opsLifecycle.markFailed(activeSimulationLifecycleId.value, error.value, 'loadtest_stop_failed')
+    }
   } finally {
     isLoading.value = false
   }
@@ -122,6 +210,7 @@ function formatUptime(seconds: number): string {
 
 // Lifecycle
 onMounted(() => {
+  loadCapabilities()
   loadMetrics()
 })
 
@@ -164,6 +253,51 @@ onUnmounted(() => {
     >
       <Check class="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
       <p class="text-sm text-green-400">{{ successMessage }}</p>
+    </div>
+
+    <!-- Guardrail -->
+    <div class="card p-4 space-y-3">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h3 class="text-sm font-semibold text-dark-100">Guardrail (Preflight → Confirm → Tracking)</h3>
+          <p class="text-xs text-dark-400">
+            High-Risk-Aktionen starten erst nach Preflight und expliziter Bestätigung.
+          </p>
+        </div>
+        <button class="btn-secondary" :disabled="isLoading" @click="runPreflight">
+          Preflight prüfen
+        </button>
+      </div>
+
+      <div v-if="preflight" class="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
+        <div class="p-2 rounded bg-dark-800/60 border border-dark-700">
+          <div class="text-dark-400 text-xs">Impact</div>
+          <div class="font-medium capitalize" :class="preflight.impact === 'high' ? 'text-red-400' : preflight.impact === 'medium' ? 'text-yellow-400' : 'text-green-400'">
+            {{ preflight.impact }}
+          </div>
+        </div>
+        <div class="p-2 rounded bg-dark-800/60 border border-dark-700">
+          <div class="text-dark-400 text-xs">Forecast Geräte</div>
+          <div class="font-medium text-dark-100">{{ preflight.forecast.estimated_devices }}</div>
+        </div>
+        <div class="p-2 rounded bg-dark-800/60 border border-dark-700">
+          <div class="text-dark-400 text-xs">Forecast Messages</div>
+          <div class="font-medium text-dark-100">{{ preflight.forecast.estimated_messages }}</div>
+        </div>
+        <div class="p-2 rounded bg-dark-800/60 border border-dark-700">
+          <div class="text-dark-400 text-xs">Load/s</div>
+          <div class="font-medium text-dark-100">{{ preflight.forecast.expected_load_per_second }}</div>
+        </div>
+      </div>
+
+      <div v-if="needsTypedConfirm" class="space-y-2">
+        <label class="label">Typed Confirm (High-Risk): Tippe <code>START</code></label>
+        <input v-model="typedConfirm" type="text" class="input w-full md:w-72" placeholder="START" />
+      </div>
+
+      <div v-if="lastSummary" class="p-3 rounded bg-blue-500/10 border border-blue-500/30 text-xs text-blue-300">
+        {{ lastSummary }}
+      </div>
     </div>
 
     <!-- Metrics Cards -->
@@ -237,7 +371,7 @@ onUnmounted(() => {
                 v-model.number="bulkCount"
                 type="number"
                 min="1"
-                max="100"
+                :max="capabilities?.max_bulk_count ?? 100"
                 class="input w-full"
               />
             </div>
@@ -258,7 +392,7 @@ onUnmounted(() => {
                 v-model.number="bulkSensors"
                 type="number"
                 min="0"
-                max="10"
+                :max="capabilities?.max_sensors_per_device ?? 10"
                 class="input w-full"
               />
             </div>
@@ -268,7 +402,7 @@ onUnmounted(() => {
                 v-model.number="bulkActuators"
                 type="number"
                 min="0"
-                max="10"
+                :max="capabilities?.max_actuators_per_device ?? 10"
                 class="input w-full"
               />
             </div>
@@ -276,7 +410,7 @@ onUnmounted(() => {
           
           <button
             class="btn-primary w-full"
-            :disabled="isLoading"
+            :disabled="isLoading || !canRunHighRiskAction"
             @click="bulkCreate"
           >
             <Plus class="w-4 h-4 mr-2" />
@@ -301,8 +435,8 @@ onUnmounted(() => {
               <input
                 v-model.number="simInterval"
                 type="number"
-                min="100"
-                max="60000"
+                :min="capabilities?.min_interval_ms ?? 100"
+                :max="capabilities?.max_interval_ms ?? 60000"
                 step="100"
                 class="input w-full"
               />
@@ -312,8 +446,8 @@ onUnmounted(() => {
               <input
                 v-model.number="simDuration"
                 type="number"
-                min="10"
-                max="3600"
+                :min="capabilities?.min_duration_seconds ?? 10"
+                :max="capabilities?.max_duration_seconds ?? 3600"
                 class="input w-full"
               />
             </div>
@@ -334,7 +468,7 @@ onUnmounted(() => {
           <div class="grid grid-cols-2 gap-4">
             <button
               class="btn-primary"
-              :disabled="isLoading || isSimulating"
+              :disabled="isLoading || isSimulating || !canRunHighRiskAction"
               @click="startSimulation"
             >
               <Play class="w-4 h-4 mr-2" />
@@ -346,7 +480,7 @@ onUnmounted(() => {
               @click="stopSimulation"
             >
               <Square class="w-4 h-4 mr-2" />
-              Stop
+              Kill Switch / Stop
             </button>
           </div>
         </div>

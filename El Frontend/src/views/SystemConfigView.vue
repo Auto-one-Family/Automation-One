@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { configApi, type ConfigEntry } from '@/api/config'
+import { formatUiApiError, toUiApiError } from '@/api/uiApiError'
+import { useOpsLifecycleStore } from '@/shared/stores/ops-lifecycle.store'
 import {
   Settings, RefreshCw, Save, AlertCircle, Check, X, Edit, Lock, Eye, EyeOff
 } from 'lucide-vue-next'
@@ -10,6 +13,8 @@ const configs = ref<ConfigEntry[]>([])
 const isLoading = ref(false)
 const error = ref<string | null>(null)
 const successMessage = ref<string | null>(null)
+const saveLifecycleState = ref<'idle' | 'saved' | 'applied' | 'saved_only'>('idle')
+const typedConfirm = ref('')
 
 // Edit state
 const editingKey = ref<string | null>(null)
@@ -18,6 +23,8 @@ const showSecretValues = ref<Set<string>>(new Set())
 
 // Filter state
 const selectedType = ref<string>('')
+const router = useRouter()
+const opsLifecycle = useOpsLifecycleStore()
 
 // Computed
 const configTypes = computed(() => {
@@ -41,6 +48,60 @@ const groupedConfigs = computed(() => {
   return groups
 })
 
+const isForbiddenError = computed(() => (error.value ?? '').includes('Zugriff verweigert'))
+
+const activeEditConfig = computed(() =>
+  editingKey.value
+    ? configs.value.find((entry) => entry.config_key === editingKey.value) ?? null
+    : null,
+)
+
+const parsedEditValue = computed(() => {
+  try {
+    return JSON.parse(editValue.value)
+  } catch {
+    return editValue.value
+  }
+})
+
+const editDiff = computed(() => {
+  if (!activeEditConfig.value) return null
+  const before = activeEditConfig.value.config_value
+  const after = parsedEditValue.value
+  if (JSON.stringify(before) === JSON.stringify(after)) {
+    return null
+  }
+  return {
+    key: activeEditConfig.value.config_key,
+    before,
+    after,
+  }
+})
+
+const editRisk = computed<'low' | 'medium' | 'high'>(() => {
+  const key = activeEditConfig.value?.config_key.toLowerCase() ?? ''
+  if (!key) return 'low'
+  if (/(jwt|secret|password|token|database|mqtt|auth|broker|security)/.test(key)) return 'high'
+  if (/(cache|timeout|retry|poll|interval|threshold)/.test(key)) return 'medium'
+  return 'low'
+})
+
+const requiresTypedConfirm = computed(() => editRisk.value === 'high')
+
+const canSaveEdit = computed(() => {
+  if (!editDiff.value) return false
+  if (!requiresTypedConfirm.value) return true
+  return typedConfirm.value.trim().toUpperCase() === 'APPLY'
+})
+
+function goBack(): void {
+  router.back()
+}
+
+function goHome(): void {
+  router.push('/')
+}
+
 // Methods
 async function loadConfigs(): Promise<void> {
   isLoading.value = true
@@ -49,8 +110,7 @@ async function loadConfigs(): Promise<void> {
   try {
     configs.value = await configApi.listConfig()
   } catch (err: unknown) {
-    const axiosError = err as { response?: { data?: { detail?: string } } }
-    error.value = axiosError.response?.data?.detail || 'Failed to load configuration'
+    error.value = formatUiApiError(toUiApiError(err, 'Konfiguration konnte nicht geladen werden'))
   } finally {
     isLoading.value = false
   }
@@ -62,18 +122,34 @@ function startEdit(config: ConfigEntry): void {
   editValue.value = typeof config.config_value === 'string' 
     ? config.config_value 
     : JSON.stringify(config.config_value, null, 2)
+  typedConfirm.value = ''
+  saveLifecycleState.value = 'idle'
 }
 
 function cancelEdit(): void {
   editingKey.value = null
   editValue.value = ''
+  typedConfirm.value = ''
+  saveLifecycleState.value = 'idle'
 }
 
 async function saveConfig(): Promise<void> {
   if (!editingKey.value) return
+  if (!canSaveEdit.value) {
+    error.value = 'Änderung nicht freigegeben. Diff prüfen und ggf. typed confirm setzen.'
+    return
+  }
 
   isLoading.value = true
   error.value = null
+  const configKey = editingKey.value
+  const saveLifecycleId = opsLifecycle.startLifecycle({
+    scope: 'system_config_save',
+    title: `SystemConfig speichern: ${configKey}`,
+    risk: editRisk.value === 'high' ? 'high' : 'medium',
+    summary: 'Save initiiert',
+  })
+  opsLifecycle.markRunning(saveLifecycleId, 'Konfiguration wird persistiert')
 
   try {
     // Try to parse as JSON, fall back to string
@@ -84,16 +160,39 @@ async function saveConfig(): Promise<void> {
       value = editValue.value
     }
 
-    await configApi.updateConfig(editingKey.value, value)
+    const response = await configApi.updateConfig(editingKey.value, value)
+    opsLifecycle.markSuccess(saveLifecycleId, 'Konfiguration persistent gespeichert')
+    saveLifecycleState.value = 'saved'
+
+    const applyLifecycleId = opsLifecycle.startLifecycle({
+      scope: 'system_config_apply',
+      title: `SystemConfig anwenden: ${configKey}`,
+      risk: editRisk.value === 'high' ? 'high' : 'medium',
+      summary: 'Runtime-Übernahme wird geprüft',
+    })
+    opsLifecycle.markRunning(applyLifecycleId, 'Prüfe Runtime-Übernahme')
+
+    const runtimeApplied = Boolean((response as unknown as { runtime_applied?: boolean }).runtime_applied)
+    if (runtimeApplied) {
+      opsLifecycle.markSuccess(applyLifecycleId, 'Änderung runtime-seitig aktiv')
+      saveLifecycleState.value = 'applied'
+    } else {
+      opsLifecycle.markPartial(applyLifecycleId, 'Nur gespeichert; Runtime-Anwendung nicht bestätigt')
+      saveLifecycleState.value = 'saved_only'
+    }
     
     editingKey.value = null
     editValue.value = ''
-    successMessage.value = 'Configuration saved successfully'
+    typedConfirm.value = ''
+    successMessage.value = runtimeApplied
+      ? 'Konfiguration gespeichert und angewendet.'
+      : 'Konfiguration gespeichert. Runtime-Anwendung noch nicht bestätigt.'
     await loadConfigs()
     setTimeout(() => successMessage.value = null, 3000)
   } catch (err: unknown) {
-    const axiosError = err as { response?: { data?: { detail?: string } } }
-    error.value = axiosError.response?.data?.detail || 'Failed to save configuration'
+    error.value = formatUiApiError(toUiApiError(err, 'Konfiguration konnte nicht gespeichert werden'))
+    opsLifecycle.markFailed(saveLifecycleId, error.value, 'system_config_save_failed')
+    saveLifecycleState.value = 'idle'
   } finally {
     isLoading.value = false
   }
@@ -160,7 +259,14 @@ onMounted(() => {
       class="p-4 rounded-lg bg-red-500/10 border border-red-500/30 flex items-start gap-3"
     >
       <AlertCircle class="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-      <p class="text-sm text-red-400 flex-1">{{ error }}</p>
+      <div class="flex-1">
+        <p class="text-sm text-red-400">{{ error }}</p>
+        <div v-if="isForbiddenError" class="mt-3 flex flex-wrap gap-2">
+          <button class="btn-secondary text-xs" @click="goBack">Zurück</button>
+          <button class="btn-secondary text-xs" @click="goHome">Zur Startansicht</button>
+          <button class="btn-secondary text-xs" @click="loadConfigs">Erneut versuchen</button>
+        </div>
+      </div>
       <button class="text-red-400 hover:text-red-300" @click="error = null">
         <X class="w-4 h-4" />
       </button>
@@ -228,11 +334,38 @@ onMounted(() => {
                   rows="3"
                   placeholder="Enter value (JSON or string)"
                 />
+                <div
+                  v-if="editDiff"
+                  class="mt-2 p-2 rounded border text-xs"
+                  :class="editRisk === 'high' ? 'border-red-500/40 bg-red-500/10 text-red-300'
+                    : editRisk === 'medium' ? 'border-yellow-500/40 bg-yellow-500/10 text-yellow-300'
+                      : 'border-green-500/40 bg-green-500/10 text-green-300'"
+                >
+                  <p><strong>Preflight:</strong> Diff erkannt für <code>{{ editDiff.key }}</code> (Risk: {{ editRisk }})</p>
+                  <p class="mt-1"><strong>Before:</strong> {{ JSON.stringify(editDiff.before) }}</p>
+                  <p><strong>After:</strong> {{ JSON.stringify(editDiff.after) }}</p>
+                </div>
+                <div v-if="requiresTypedConfirm" class="mt-2">
+                  <label class="text-xs text-dark-400">Typed Confirm: <code>APPLY</code></label>
+                  <input
+                    v-model="typedConfirm"
+                    type="text"
+                    class="input w-full font-mono text-sm mt-1"
+                    placeholder="APPLY"
+                  />
+                </div>
+                <div v-if="saveLifecycleState !== 'idle'" class="mt-2 text-xs text-dark-300">
+                  <span v-if="saveLifecycleState === 'saved'" class="text-blue-300">Status: saved</span>
+                  <span v-else-if="saveLifecycleState === 'applied'" class="text-green-300">Status: saved + applied</span>
+                  <span v-else-if="saveLifecycleState === 'saved_only'" class="text-yellow-300">
+                    Status: saved, applied noch offen - bitte Runtime/Services prüfen.
+                  </span>
+                </div>
                 <div class="flex justify-end gap-2 mt-2">
                   <button class="btn-ghost btn-sm" @click="cancelEdit">
                     Cancel
                   </button>
-                  <button class="btn-primary btn-sm" :disabled="isLoading" @click="saveConfig">
+                  <button class="btn-primary btn-sm" :disabled="isLoading || !canSaveEdit" @click="saveConfig">
                     <Save class="w-3 h-3 mr-1" />
                     Save
                   </button>

@@ -11,6 +11,27 @@ import { useAuthStore } from '@/shared/stores/auth.store'
  */
 const MAX_IMPORT_RETRIES = 2
 const RETRY_DELAY_MS = 200
+const LEGACY_REDIRECT_TELEMETRY_KEY = 'router.legacyRedirectTelemetry.v1'
+const LEGACY_DECOMMISSION_PLAN = {
+  measurement: 'active',
+  warning: 'planned',
+  softRemovalOrder: ['P3', 'P2', 'P1'],
+  hardRemovalOrder: ['P2', 'P1'],
+} as const
+const LEGACY_REDIRECT_PATTERNS: RegExp[] = [
+  /^\/custom-dashboard$/,
+  /^\/dashboard-legacy$/,
+  /^\/devices(?:\/.*)?$/,
+  /^\/mock-esp(?:\/.*)?$/,
+  /^\/database$/,
+  /^\/logs$/,
+  /^\/audit$/,
+  /^\/mqtt-log$/,
+  /^\/maintenance$/,
+  /^\/actuators$/,
+  /^\/sensor-history$/,
+  /^\/monitor\/dashboard\/[^/]+$/,
+]
 
 function lazyView(factory: () => Promise<{ default: Component }>): () => Promise<{ default: Component }> {
   return async () => {
@@ -226,6 +247,12 @@ const router = createRouter({
           redirect: '/system-monitor?tab=health',
         },
         {
+          path: 'access-denied',
+          name: 'access-denied',
+          component: lazyView(() => import('@/views/AccessDeniedView.vue')),
+          meta: { title: 'Zugriff verweigert' },
+        },
+        {
           path: 'plugins',
           name: 'plugins',
           component: lazyView(() => import('@/views/PluginsView.vue')),
@@ -284,8 +311,18 @@ const router = createRouter({
 
     // Catch-all redirect
     {
+      path: '/not-found',
+      name: 'not-found',
+      component: lazyView(() => import('@/views/NotFoundView.vue')),
+      meta: { requiresAuth: false },
+    },
+
+    {
       path: '/:pathMatch(.*)*',
-      redirect: '/hardware',
+      redirect: (to) => ({
+        name: 'not-found',
+        query: { from: to.fullPath },
+      }),
     },
   ],
 })
@@ -310,13 +347,45 @@ router.onError((error, to) => {
   }
 })
 
+router.afterEach((to) => {
+  const redirectedFromPath = to.redirectedFrom?.path
+  if (!redirectedFromPath) {
+    return
+  }
+  const isLegacyRedirect = LEGACY_REDIRECT_PATTERNS.some((pattern) => pattern.test(redirectedFromPath))
+  if (isLegacyRedirect) {
+    const raw = localStorage.getItem(LEGACY_REDIRECT_TELEMETRY_KEY)
+    const telemetry = raw ? JSON.parse(raw) as Record<string, { count: number; last_to: string; last_at: string }> : {}
+    const current = telemetry[redirectedFromPath] ?? { count: 0, last_to: '', last_at: '' }
+    telemetry[redirectedFromPath] = {
+      count: current.count + 1,
+      last_to: to.fullPath,
+      last_at: new Date().toISOString(),
+    }
+    localStorage.setItem(LEGACY_REDIRECT_TELEMETRY_KEY, JSON.stringify(telemetry))
+    console.info('[Router] Legacy redirect used', {
+      from: redirectedFromPath,
+      to: to.fullPath,
+      rollout_plan: LEGACY_DECOMMISSION_PLAN,
+      redirect_count: telemetry[redirectedFromPath].count,
+    })
+  }
+})
+
 // Navigation guards
 router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
 
   // Wait for auth status check if not done yet
   if (authStore.setupRequired === null) {
-    await authStore.checkAuthStatus()
+    try {
+      await authStore.checkAuthStatus()
+    } catch {
+      if (to.meta.requiresAuth) {
+        return next({ name: 'login', query: { redirect: to.fullPath } })
+      }
+      return next()
+    }
   }
 
   // Redirect to setup if required
@@ -331,7 +400,10 @@ router.beforeEach(async (to, _from, next) => {
 
   // Check if route requires admin
   if (to.meta.requiresAdmin && !authStore.isAdmin) {
-    return next({ name: 'hardware' })
+    return next({
+      name: 'access-denied',
+      query: { from: to.fullPath },
+    })
   }
 
   // Redirect authenticated users away from login/setup

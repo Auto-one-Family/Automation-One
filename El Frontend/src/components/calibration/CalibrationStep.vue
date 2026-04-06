@@ -7,7 +7,6 @@
  */
 
 import { ref, computed, watch } from 'vue'
-import { sensorsApi } from '@/api/sensors'
 
 interface Props {
   stepNumber: number
@@ -19,17 +18,23 @@ interface Props {
   suggestedReference?: number
   /** Label for the reference solution */
   referenceLabel?: string
+  /** Latest live raw value from WebSocket */
+  lastRawValue?: number | null
+  /** Current measurement quality */
+  measurementQuality?: string
+  /** Loading state while measurement request is in-flight */
+  isMeasuring?: boolean
 }
 
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
   (e: 'captured', payload: { raw: number; reference: number }): void
+  (e: 'request-measurement'): void
 }>()
 
-const rawValue = ref<number | null>(null)
+const rawValue = ref<number | null>(props.lastRawValue ?? null)
 const referenceValue = ref<number>(props.suggestedReference ?? 0)
-const isReading = ref(false)
 
 watch(
   () => props.suggestedReference,
@@ -42,30 +47,44 @@ const readError = ref<string | null>(null)
 
 const canCapture = computed(() => rawValue.value !== null && referenceValue.value !== undefined)
 
-async function readCurrentValue() {
-  isReading.value = true
-  readError.value = null
-  try {
-    const response = await sensorsApi.queryData({
-      esp_id: props.espId,
-      gpio: props.gpio,
-      sensor_type: props.sensorType,
-      limit: 1,
-    })
-    if (response.readings.length > 0) {
-      rawValue.value = response.readings[0].raw_value
-    } else {
-      readError.value = 'Kein aktueller Messwert verfuegbar'
+watch(
+  () => props.lastRawValue,
+  (val) => {
+    if (val !== null && val !== undefined && Number.isFinite(val)) {
+      rawValue.value = val
+      readError.value = null
     }
-  } catch {
-    readError.value = 'Fehler beim Lesen des Sensorwerts'
-  } finally {
-    isReading.value = false
-  }
+  },
+)
+
+function requestMeasurement() {
+  readError.value = null
+  emit('request-measurement')
 }
 
+watch(
+  () => props.measurementQuality,
+  (quality) => {
+    if (quality === 'error') {
+      readError.value = 'Messung fehlgeschlagen'
+    }
+  },
+)
+
+watch(
+  () => props.isMeasuring,
+  (isMeasuring) => {
+    if (!isMeasuring && rawValue.value === null && !readError.value) {
+      readError.value = 'Kein aktueller Messwert verfuegbar'
+    }
+  },
+)
+
 function capture() {
-  if (rawValue.value === null) return
+  if (rawValue.value === null) {
+    readError.value = 'Bitte zuerst einen Messwert aufnehmen'
+    return
+  }
   emit('captured', { raw: rawValue.value, reference: referenceValue.value })
 }
 </script>
@@ -91,17 +110,17 @@ function capture() {
       </div>
       <button
         class="calibration-step__read-btn"
-        :disabled="isReading"
-        @click="readCurrentValue"
+        :disabled="Boolean(isMeasuring)"
+        @click="requestMeasurement"
       >
-        {{ isReading ? 'Lese...' : 'Wert lesen' }}
+        {{ isMeasuring ? 'Messe...' : 'Messung starten' }}
       </button>
       <div v-if="readError" class="calibration-step__error-row">
         <span class="calibration-step__error">{{ readError }}</span>
         <button
           class="calibration-step__retry-btn"
-          :disabled="isReading"
-          @click="readCurrentValue"
+          :disabled="Boolean(isMeasuring)"
+          @click="requestMeasurement"
         >
           Erneut versuchen
         </button>

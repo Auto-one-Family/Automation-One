@@ -11,6 +11,7 @@ import { espApi, type ESPDevice, type ESPDeviceUpdate, type ESPDeviceCreate } fr
 import { debugApi } from '@/api/debug'
 import { sensorsApi } from '@/api/sensors'
 import { actuatorsApi } from '@/api/actuators'
+import { formatUiApiError, toUiApiError } from '@/api/uiApiError'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { getESPStatus } from '@/composables/useESPStatus'
 import { websocketService, type WebSocketMessage } from '@/services/websocket'
@@ -46,19 +47,7 @@ import { isPwmActuator } from '@/utils/actuatorDefaults'
  * Extract error message from Axios error response.
  */
 function extractErrorMessage(err: unknown, fallback: string): string {
-  const axiosError = err as { response?: { data?: { detail?: string | Array<{ msg?: string; loc?: string[] }> } } }
-  const detail = axiosError.response?.data?.detail
-
-  if (!detail) return fallback
-
-  if (Array.isArray(detail)) {
-    return detail.map(d => {
-      const field = d.loc?.slice(1).join('.') || 'unknown'
-      return `${field}: ${d.msg || 'validation error'}`
-    }).join('; ')
-  }
-
-  return detail
+  return formatUiApiError(toUiApiError(err, fallback))
 }
 
 // ============================================
@@ -141,6 +130,7 @@ export const useEspStore = defineStore('esp', () => {
 
   // Store unsubscribe functions for cleanup
   const wsUnsubscribers: (() => void)[] = []
+  let subzoneRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
   // Getters
   const selectedDevice = computed(() =>
@@ -244,6 +234,21 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     return device.device_id || device.esp_id || ''
   }
 
+  function replaceDevices(snapshot: ESPDevice[]): void {
+    devices.value = snapshot
+  }
+
+  function applyDevicePatch(
+    espId: string,
+    patchFn: (device: ESPDevice) => ESPDevice,
+  ): boolean {
+    const result = findDeviceByEspIdDefensive(espId)
+    if (!result) return false
+    const nextDevice = patchFn(result.device)
+    devices.value[result.index] = nextDevice
+    return true
+  }
+
   // =========================================================================
   // GPIO Status - delegated to gpio.store.ts
   // =========================================================================
@@ -306,7 +311,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       }
 
       logger.info('Loaded devices', { count: dedupedDevices.length })
-      devices.value = dedupedDevices
+      replaceDevices(dedupedDevices)
     } catch (err: unknown) {
       error.value = extractErrorMessage(err, 'Failed to fetch ESP devices')
       throw err
@@ -323,13 +328,13 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       const device = await espApi.getDevice(deviceId)
       
       // Update device in list if exists, otherwise add
-      const index = devices.value.findIndex(d => 
+      const index = devices.value.findIndex(d =>
         getDeviceId(d) === getDeviceId(device)
       )
       if (index !== -1) {
-        devices.value[index] = device
+        applyDevicePatch(getDeviceId(device), () => device)
       } else {
-        devices.value.push(device)
+        replaceDevices([...devices.value, device])
       }
       
       return device
@@ -996,7 +1001,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       getDeviceId(d) === getDeviceId(device)
     )
     if (index !== -1) {
-      devices.value[index] = device
+      applyDevicePatch(getDeviceId(device), () => device)
     }
   }
 
@@ -1087,6 +1092,13 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       // Reset actuator states to idle when device goes offline with reset count
       let updatedActuators = device.actuators
       if (data.status === 'offline' && data.actuator_states_reset && data.actuator_states_reset > 0) {
+        const resetEpochMs = Date.now()
+        const actStore = useActuatorStore()
+        const knownGpios = ((device.actuators as Array<{ gpio?: number }> | undefined) ?? [])
+          .map((actuator) => actuator.gpio)
+          .filter((gpio): gpio is number => typeof gpio === 'number')
+        actStore.markActuatorResetEpoch(espId, resetEpochMs, undefined, knownGpios)
+
         updatedActuators = (device.actuators as any[])?.map((actuator: any) => {
           if (actuator.state !== 'idle' && actuator.state !== 'emergency_stop'
               && actuator.state !== false) {
@@ -1137,7 +1149,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    */
   function handleActuatorAlert(message: { data: Record<string, unknown> }): void {
     const actStore = useActuatorStore()
-    actStore.handleActuatorAlert(message, devices.value, getDeviceId)
+    actStore.handleActuatorAlert(
+      message,
+      applyDevicePatch,
+      () => devices.value.map((device) => getDeviceId(device)),
+    )
   }
 
   /**
@@ -1146,7 +1162,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    */
   function handleSensorData(message: { data: Record<string, unknown> }): void {
     const sensorStore = useSensorStore()
-    sensorStore.handleSensorData(message as unknown as Parameters<typeof sensorStore.handleSensorData>[0], devices.value, getDeviceId)
+    sensorStore.handleSensorData(
+      message as unknown as Parameters<typeof sensorStore.handleSensorData>[0],
+      applyDevicePatch,
+    )
   }
 
   /**
@@ -1155,7 +1174,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    */
   function handleActuatorStatus(message: { data: Record<string, unknown> }): void {
     const actStore = useActuatorStore()
-    actStore.handleActuatorStatus(message as unknown as Parameters<typeof actStore.handleActuatorStatus>[0], devices.value, getDeviceId)
+    actStore.handleActuatorStatus(
+      message as unknown as Parameters<typeof actStore.handleActuatorStatus>[0],
+      applyDevicePatch,
+    )
   }
 
   /**
@@ -1195,9 +1217,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     const zoneStore = useZoneStore()
     zoneStore.handleZoneAssignment(
       message,
-      devices.value,
-      getDeviceId,
-      (idx, dev) => { devices.value[idx] = dev },
+      applyDevicePatch,
+      (espId: string) => findDeviceByEspIdDefensive(espId)?.device ?? null,
     )
   }
 
@@ -1209,15 +1230,21 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     const zoneStore = useZoneStore()
     const needsRefresh = zoneStore.handleSubzoneAssignment(
       message,
-      devices.value,
-      getDeviceId,
-      (idx, dev) => { devices.value[idx] = dev },
+      applyDevicePatch,
+      (espId: string) => findDeviceByEspIdDefensive(espId)?.device ?? null,
     )
-    // Refresh devices to get updated subzones[] from API (T14-Fix-F)
+    // Refresh only as fallback when delta patching is insufficient.
+    // Debounced to avoid REST+WS double refresh storms.
     if (needsRefresh) {
-      fetchAll().catch((e: unknown) => {
-        logger.warn('Failed to refresh devices after subzone change', e)
-      })
+      if (subzoneRefreshTimer) {
+        clearTimeout(subzoneRefreshTimer)
+      }
+      subzoneRefreshTimer = setTimeout(() => {
+        fetchAll().catch((e: unknown) => {
+          logger.warn('Failed to refresh devices after subzone change', e)
+        })
+        subzoneRefreshTimer = null
+      }, 250)
     }
   }
 
@@ -1227,11 +1254,17 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    */
   function handleDeviceScopeChanged(message: any): void {
     const zoneStore = useZoneStore()
-    zoneStore.handleDeviceScopeChanged(message)
-    // Refresh devices to get updated scope from API (T13-R2)
-    fetchAll().catch((e: unknown) => {
-      logger.warn('Failed to refresh devices after scope change', e)
-    })
+    const patched = zoneStore.handleDeviceScopeChanged(
+      message,
+      applyDevicePatch,
+      (espId: string) => findDeviceByEspIdDefensive(espId)?.device ?? null,
+    )
+    // Fallback only when patching is not possible
+    if (!patched) {
+      fetchAll().catch((e: unknown) => {
+        logger.warn('Failed to refresh devices after scope change', e)
+      })
+    }
   }
 
   /**
@@ -1240,16 +1273,22 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    */
   function handleDeviceContextChanged(message: any): void {
     const zoneStore = useZoneStore()
-    zoneStore.handleDeviceContextChanged(message)
+    const patched = zoneStore.handleDeviceContextChanged(
+      message,
+      applyDevicePatch,
+      (espId: string) => findDeviceByEspIdDefensive(espId)?.device ?? null,
+    )
     // Update granular context store immediately (6.7)
     const deviceContextStore = useDeviceContextStore()
     if (message?.data) {
       deviceContextStore.handleContextChanged(message.data)
     }
-    // Refresh devices to get updated context from API (T13-R2)
-    fetchAll().catch((e: unknown) => {
-      logger.warn('Failed to refresh devices after context change', e)
-    })
+    // Fallback only when patching is not possible
+    if (!patched) {
+      fetchAll().catch((e: unknown) => {
+        logger.warn('Failed to refresh devices after context change', e)
+      })
+    }
   }
 
   // ===========================================================================
@@ -1355,7 +1394,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    */
   function handleSensorHealth(message: { data: Record<string, unknown> }): void {
     const sensorStore = useSensorStore()
-    sensorStore.handleSensorHealth(message as unknown as Parameters<typeof sensorStore.handleSensorHealth>[0], findDeviceByEspIdDefensive)
+    sensorStore.handleSensorHealth(
+      message as unknown as Parameters<typeof sensorStore.handleSensorHealth>[0],
+      applyDevicePatch,
+    )
   }
 
   /**
@@ -1381,7 +1423,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
     if (device.sensors.length < before) {
       const toast = useToast()
-      toast.info(`Sensor entfernt (${data.sensor_type})`, { duration: 3000 })
+      toast.info(`Sensor entfernt (${data.sensor_type})`, {
+        duration: 3000,
+        dedupeKey: `sensor-delete:${data.esp_id}:${data.gpio}:${data.sensor_type}`,
+      })
     }
   }
 
@@ -1408,7 +1453,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
     if (device.actuators.length < before) {
       const toast = useToast()
-      toast.info(`Aktor entfernt (GPIO ${data.gpio})`, { duration: 3000 })
+      toast.info(`Aktor entfernt (GPIO ${data.gpio})`, {
+        duration: 3000,
+        dedupeKey: `actuator-delete:${data.esp_id}:${data.gpio}`,
+      })
     }
   }
 
@@ -1605,12 +1653,28 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         const state = command === 'ON' || command === 'TOGGLE'
         await debugApi.setActuatorState(deviceId, gpio, state, value)
         await fetchDevice(deviceId)
+        toast.success(`[Simulation] Befehl ausgeführt: ${command} an ${deviceId} GPIO ${gpio}`, {
+          dedupeKey: `sim-actuator-command:${deviceId}:${gpio}:${command}:${value ?? 'na'}`,
+        })
       } catch (err: unknown) {
-        const msg = extractErrorMessage(err, 'Mock-Befehl konnte nicht gesendet werden')
+        const msg = extractErrorMessage(err, '[Simulation] Mock-Befehl konnte nicht gesendet werden')
         toast.error(msg, { persistent: true })
         throw err
       }
       return
+    }
+
+    const device = devices.value.find(d => getDeviceId(d) === deviceId)
+    if (device) {
+      const status = getESPStatus(device)
+      if (status === 'offline' || status === 'error') {
+        const msg =
+          status === 'offline'
+            ? `Befehl nicht gesendet: ${deviceId} ist offline.`
+            : `Befehl nicht gesendet: ${deviceId} ist im Fehlerzustand.`
+        toast.error(msg, { persistent: true })
+        throw new Error(msg)
+      }
     }
 
     // Real ESP: use actuator command API
@@ -1624,9 +1688,21 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       const correlationId = typeof responseData.correlation_id === 'string' ? responseData.correlation_id : undefined
       const requestId = typeof responseData.request_id === 'string' ? responseData.request_id : undefined
       actStore.registerCommandIntent(deviceId, gpio, command, correlationId, requestId)
-      toast.info(`Befehl ${command} an ${deviceId} GPIO ${gpio} gesendet…`)
+      const handles = [correlationId ? `Korrelation: ${correlationId}` : '', requestId ? `Request-ID: ${requestId}` : '']
+        .filter(Boolean)
+        .join(' | ')
+      toast.info(
+        `Befehl akzeptiert: ${command} an ${deviceId} GPIO ${gpio}.${handles ? ` ${handles}` : ''}`,
+        {
+          dedupeKey: `actuator-accepted:${deviceId}:${gpio}:${correlationId ?? requestId ?? command}`,
+        },
+      )
     } catch (err: unknown) {
-      const msg = extractErrorMessage(err, 'Befehl konnte nicht gesendet werden')
+      const uiError = toUiApiError(err, 'Befehl konnte nicht gesendet werden')
+      const msg =
+        uiError.status === 409
+          ? `Befehl nicht ausgeführt: Gerät ist offline oder aktuell blockiert.\n${formatUiApiError(uiError)}`
+          : formatUiApiError(uiError)
       toast.error(msg, { persistent: true })
       throw err
     }
@@ -1751,6 +1827,10 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    */
   function cleanupWebSocket(): void {
     useIntentSignalsStore().clearAll()
+    if (subzoneRefreshTimer) {
+      clearTimeout(subzoneRefreshTimer)
+      subzoneRefreshTimer = null
+    }
     wsUnsubscribers.forEach(unsub => unsub())
     wsUnsubscribers.length = 0
     ws.disconnect()
@@ -1823,6 +1903,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     selectDevice,
     clearError,
     updateDeviceInList,
+    replaceDevices,
+    applyDevicePatch,
 
     // WebSocket management
     initWebSocket,

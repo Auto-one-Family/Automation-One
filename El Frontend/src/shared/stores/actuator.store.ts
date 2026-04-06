@@ -41,14 +41,22 @@ interface ActuatorStatusMessage {
   data: ActuatorStatusPayload
 }
 
-type IntentState = 'created' | 'pending' | 'terminal'
+type FinalityState =
+  | 'accepted'
+  | 'pending'
+  | 'terminal_success'
+  | 'terminal_failed'
+  | 'terminal_timeout'
+  | 'terminal_integration_issue'
 type IntentType = 'actuator' | 'config' | 'sequence'
-type IntentTerminalOutcome = 'success' | 'failed' | 'integration_issue'
+type IntentTerminalOutcome = 'success' | 'failed' | 'timeout' | 'integration_issue'
 type IntentTerminalSource =
   | 'actuator_response'
   | 'actuator_command_failed'
+  | 'actuator_timeout'
   | 'config_response'
   | 'config_failed'
+  | 'config_timeout'
   | 'sequence_completed'
   | 'sequence_error'
   | 'sequence_cancelled'
@@ -58,7 +66,7 @@ interface IntentRecord {
   key: string
   intentType: IntentType
   subjectId: string
-  state: IntentState
+  state: FinalityState
   terminalOutcome: IntentTerminalOutcome | null
   correlationId?: string
   requestId?: string
@@ -89,11 +97,40 @@ interface ContractIssueContext {
   correlationId?: string
 }
 
+type DevicePatchFn = (device: ESPDevice) => ESPDevice
+type ApplyDevicePatch = (espId: string, patchFn: DevicePatchFn) => boolean
+
 export const useActuatorStore = defineStore('actuator', () => {
+  function isTerminalState(state: FinalityState): boolean {
+    return state === 'terminal_success' || state === 'terminal_failed' || state === 'terminal_timeout' || state === 'terminal_integration_issue'
+  }
+
+  function toTerminalState(outcome: IntentTerminalOutcome): FinalityState {
+    if (outcome === 'success') return 'terminal_success'
+    if (outcome === 'failed') return 'terminal_failed'
+    if (outcome === 'timeout') return 'terminal_timeout'
+    return 'terminal_integration_issue'
+  }
+
+  function buildHandleSuffix(correlationId?: string, requestId?: string): string {
+    const parts: string[] = []
+    if (correlationId) parts.push(`Korrelation: ${correlationId}`)
+    if (requestId) parts.push(`Request-ID: ${requestId}`)
+    if (parts.length === 0) return ''
+    return ` (${parts.join(' | ')})`
+  }
+
 
   // Pending commands awaiting firmware confirmation (key: `${esp_id}:${gpio}`)
   const pendingCommands = new Map<string, ReturnType<typeof setTimeout>>()
-  const ACTUATOR_RESPONSE_TIMEOUT_MS = 10_000
+  const ACTUATOR_RESPONSE_TIMEOUT_MS = 30_000
+  const pendingConfigTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+  const CONFIG_RESPONSE_TIMEOUT_MS = 45_000
+  /**
+   * Offline-/Reset-Epoch je Aktor (key: `${esp_id}:${gpio}`).
+   * Dient als Guard gegen verspätete actuator_status Events nach Offline-Reset.
+   */
+  const actuatorResetEpochMsByKey = new Map<string, number>()
   const MAX_INTENT_HISTORY = 200
   const intents = new Map<string, IntentRecord>()
 
@@ -155,7 +192,7 @@ export const useActuatorStore = defineStore('actuator', () => {
     const ts = nowMs()
 
     // Idempotente Endlage: niemals nach terminal wieder öffnen.
-    if (existing?.state === 'terminal') return existing
+    if (existing && isTerminalState(existing.state)) return existing
 
     const key = getIntentKey(params.intentType, params.subjectId)
     const next: IntentRecord = existing
@@ -164,7 +201,7 @@ export const useActuatorStore = defineStore('actuator', () => {
           command: params.command ?? existing.command,
           gpio: params.gpio ?? existing.gpio,
           summary: params.summary ?? existing.summary,
-          state: existing.state === 'created' ? 'pending' : existing.state,
+          state: existing.state === 'accepted' ? 'pending' : existing.state,
           updatedAt: ts,
           correlationId: params.correlationId ?? existing.correlationId,
           requestId: params.requestId ?? existing.requestId,
@@ -177,7 +214,7 @@ export const useActuatorStore = defineStore('actuator', () => {
           command: params.command,
           gpio: params.gpio,
           summary: params.summary,
-          state: params.preserveCreated ? 'created' : 'pending',
+          state: params.preserveCreated ? 'accepted' : 'pending',
           terminalOutcome: null,
           correlationId: params.correlationId,
           requestId: params.requestId,
@@ -203,7 +240,7 @@ export const useActuatorStore = defineStore('actuator', () => {
   }): IntentRecord {
     const existing = findIntent(params.intentType, params.subjectId, params.correlationId)
     const ts = nowMs()
-    if (existing?.state === 'terminal') return existing
+    if (existing && isTerminalState(existing.state)) return existing
 
     const base = existing ?? createOrUpdateIntentPending({
       intentType: params.intentType,
@@ -217,7 +254,7 @@ export const useActuatorStore = defineStore('actuator', () => {
 
     const next: IntentRecord = {
       ...base,
-      state: 'terminal',
+      state: toTerminalState(params.outcome),
       terminalOutcome: params.outcome,
       terminalAt: ts,
       terminalSource: params.source,
@@ -240,7 +277,7 @@ export const useActuatorStore = defineStore('actuator', () => {
     correlationId?: string,
   ): void {
     const intent = findIntent(intentType, subjectId, correlationId)
-    if (!intent || intent.state === 'terminal') return
+    if (!intent || isTerminalState(intent.state)) return
     const trimmed = hint.trim()
     if (!trimmed) return
     if (intent.nonTerminalHints[intent.nonTerminalHints.length - 1] === trimmed) return
@@ -251,7 +288,7 @@ export const useActuatorStore = defineStore('actuator', () => {
 
   function isIntentTerminal(intentType: IntentType, subjectId: string, correlationId?: string): boolean {
     const intent = findIntent(intentType, subjectId, correlationId)
-    return intent?.state === 'terminal'
+    return !!intent && isTerminalState(intent.state)
   }
 
   function notifyContractIssue(context: ContractIssueContext): void {
@@ -262,6 +299,105 @@ export const useActuatorStore = defineStore('actuator', () => {
       { persistent: true }
     )
     logger.error(`Contract mismatch in ${context.eventType}: ${context.details}`, { correlation_id: context.correlationId })
+  }
+
+  function parseActuatorTimestampMs(raw: unknown): number | null {
+    if (typeof raw !== 'number' || Number.isNaN(raw)) return null
+    // Server sends Unix seconds in actuator_status; defensively support ms too.
+    return raw > 1_000_000_000_000 ? raw : raw * 1000
+  }
+
+  function scheduleActuatorTimeout(
+    espId: string,
+    gpio: number,
+    command: string,
+    deviceName: string,
+    correlationId?: string,
+    requestId?: string,
+  ): void {
+    const key = `${espId}:${gpio}`
+    const existing = pendingCommands.get(key)
+    if (existing) clearTimeout(existing)
+
+    const timeoutId = setTimeout(() => {
+      pendingCommands.delete(key)
+      const subjectId = `${espId}:${gpio}`
+      if (isIntentTerminal('actuator', subjectId, correlationId)) return
+
+      finalizeIntent({
+        intentType: 'actuator',
+        subjectId,
+        gpio,
+        command,
+        correlationId,
+        requestId,
+        outcome: 'timeout',
+        source: 'actuator_timeout',
+        summary: `Timeout: Keine terminale Rueckmeldung für "${command}" innerhalb ${Math.round(ACTUATOR_RESPONSE_TIMEOUT_MS / 1000)}s`,
+      })
+      appendNonTerminalHint('actuator', subjectId, `Timeout: Keine Bestätigung für "${command}"`, correlationId)
+
+      const toast = useToast()
+      toast.error(
+        `${deviceName} GPIO ${gpio}: Timeout - keine terminale Rueckmeldung für "${command}"${buildHandleSuffix(correlationId, requestId)}`,
+        {
+          persistent: true,
+          dedupeKey: `actuator-timeout:${espId}:${gpio}:${correlationId ?? command}`,
+        }
+      )
+    }, ACTUATOR_RESPONSE_TIMEOUT_MS)
+
+    pendingCommands.set(key, timeoutId)
+  }
+
+  function getConfigTimeoutKeys(subjectId: string, correlationId?: string, requestId?: string): string[] {
+    const keys = [`subject:${subjectId}`]
+    if (correlationId) keys.push(`correlation:${correlationId}`)
+    if (requestId) keys.push(`request:${requestId}`)
+    return keys
+  }
+
+  function clearConfigTimeout(subjectId: string, correlationId?: string, requestId?: string): void {
+    const keys = getConfigTimeoutKeys(subjectId, correlationId, requestId)
+    const handles = new Set<ReturnType<typeof setTimeout>>()
+    for (const key of keys) {
+      const handle = pendingConfigTimeouts.get(key)
+      if (handle) handles.add(handle)
+      pendingConfigTimeouts.delete(key)
+    }
+    for (const handle of handles) clearTimeout(handle)
+  }
+
+  function scheduleConfigTimeout(
+    subjectId: string,
+    summary: string,
+    correlationId?: string,
+    requestId?: string,
+  ): void {
+    clearConfigTimeout(subjectId, correlationId, requestId)
+    const keys = getConfigTimeoutKeys(subjectId, correlationId, requestId)
+    const timeoutId = setTimeout(() => {
+      for (const key of keys) pendingConfigTimeouts.delete(key)
+      if (isIntentTerminal('config', subjectId, correlationId)) return
+      finalizeIntent({
+        intentType: 'config',
+        subjectId,
+        summary: `Timeout: ${summary} ohne terminale Antwort innerhalb ${Math.round(CONFIG_RESPONSE_TIMEOUT_MS / 1000)}s`,
+        correlationId,
+        requestId,
+        outcome: 'timeout',
+        source: 'config_timeout',
+      })
+      const toast = useToast()
+      toast.error(
+        `Konfigurations-Timeout: ${summary}${buildHandleSuffix(correlationId, requestId)}. Bitte erneut versuchen oder Diagnose prüfen.`,
+        {
+          persistent: true,
+          dedupeKey: `config-timeout:${correlationId ?? requestId ?? subjectId}`,
+        },
+      )
+    }, CONFIG_RESPONSE_TIMEOUT_MS)
+    for (const key of keys) pendingConfigTimeouts.set(key, timeoutId)
   }
 
   // =========================================================================
@@ -275,8 +411,8 @@ export const useActuatorStore = defineStore('actuator', () => {
    */
   function handleActuatorAlert(
     message: { data: Record<string, unknown> },
-    devices: ESPDevice[],
-    getDeviceId: (d: ESPDevice) => string,
+    applyDevicePatch: ApplyDevicePatch,
+    getDeviceIds: () => string[],
   ): void {
     const data = message.data
     const espId = data.esp_id as string || data.device_id as string
@@ -290,30 +426,32 @@ export const useActuatorStore = defineStore('actuator', () => {
 
     const isEmergencyAlert = alertType === 'emergency_stop' || alertType === 'runtime_protection' || alertType === 'safety_violation'
 
-    // "ALL" means all devices affected (system-wide emergency)
-    const targetDevices = espId === 'ALL'
-      ? devices
-      : devices.filter(d => getDeviceId(d) === espId)
+    const targetIds = espId === 'ALL' ? getDeviceIds() : [espId]
 
-    for (const device of targetDevices) {
-      if (!device?.actuators) continue
-      const actuators = device.actuators as { gpio: number; emergency_stopped?: boolean; state?: boolean }[]
+    for (const targetId of targetIds) {
+      applyDevicePatch(targetId, (device) => {
+        if (!device?.actuators) return device
+        const actuators = (device.actuators as unknown as Array<Record<string, unknown>>)
+          .map((act) => ({ ...act }))
 
-      if (gpio === undefined) {
-        if (isEmergencyAlert) {
-          for (const act of actuators) {
-            act.emergency_stopped = true
-            act.state = false
+        if (gpio === undefined) {
+          if (isEmergencyAlert) {
+            for (const act of actuators) {
+              act.emergency_stopped = true
+              act.state = false
+            }
+          }
+        } else {
+          const actuator = actuators.find(a => a.gpio === gpio)
+          if (!actuator) return device
+          if (isEmergencyAlert) {
+            actuator.emergency_stopped = true
+            actuator.state = false
           }
         }
-      } else {
-        const actuator = actuators.find(a => a.gpio === gpio)
-        if (!actuator) continue
-        if (isEmergencyAlert) {
-          actuator.emergency_stopped = true
-          actuator.state = false
-        }
-      }
+
+        return { ...device, actuators: actuators as unknown as ESPDevice['actuators'] }
+      })
     }
 
     logger.info(`Actuator alert: ${espId} GPIO ${gpio ?? 'ALL'} - ${alertType}`)
@@ -330,8 +468,7 @@ export const useActuatorStore = defineStore('actuator', () => {
    */
   function handleActuatorStatus(
     message: ActuatorStatusMessage,
-    devices: ESPDevice[],
-    getDeviceId: (d: ESPDevice) => string,
+    applyDevicePatch: ApplyDevicePatch,
   ): void {
     const data = message.data
     const espId = data.esp_id || data.device_id
@@ -339,27 +476,44 @@ export const useActuatorStore = defineStore('actuator', () => {
 
     if (!espId || gpio === undefined) return
 
-    const device = devices.find(d => getDeviceId(d) === espId)
-    if (!device?.actuators) return
+    applyDevicePatch(espId, (device) => {
+      if (!device?.actuators) return device
 
-    const actuator = (device.actuators as { gpio: number; state?: boolean; pwm_value?: number; emergency_stopped?: boolean; last_command_at?: string; hardware_type?: string | null }[]).find(a => a.gpio === gpio)
-    if (!actuator) return
+      const statusTsMs = parseActuatorTimestampMs(data.timestamp)
+      const staleGuardKey = `${espId}:${gpio}`
+      const resetEpochMs = actuatorResetEpochMsByKey.get(staleGuardKey)
+      if (resetEpochMs !== undefined && statusTsMs !== null && statusTsMs < resetEpochMs) {
+        logger.warn('Ignoring stale actuator_status after offline reset', {
+          esp_id: espId,
+          gpio,
+          status_ts_ms: statusTsMs,
+          reset_epoch_ms: resetEpochMs,
+        })
+        return device
+      }
 
-    // Map server payload → frontend MockActuator
-    // Server: state="on"|"off"|"pwm" → Frontend: state=boolean
-    if (data.state !== undefined) {
-      actuator.state = data.state === 'on' || data.state === 'pwm'
-    }
-    if (data.value !== undefined) actuator.pwm_value = data.value
-    if (data.emergency !== undefined) {
-      actuator.emergency_stopped = data.emergency !== 'normal'
-    }
-    if (data.hardware_type !== undefined) {
-      actuator.hardware_type = data.hardware_type
-    }
-    actuator.last_command_at = data.timestamp
-      ? new Date(data.timestamp * 1000).toISOString()
-      : new Date().toISOString()
+      const actuators = (device.actuators as unknown as Array<Record<string, unknown>>).map((actuator) => ({ ...actuator }))
+      const actuator = actuators.find(a => a.gpio === gpio)
+      if (!actuator) return device
+
+      // Map server payload → frontend MockActuator
+      // Server: state="on"|"off"|"pwm" → Frontend: state=boolean
+      if (data.state !== undefined) {
+        actuator.state = data.state === 'on' || data.state === 'pwm'
+      }
+      if (data.value !== undefined) actuator.pwm_value = data.value
+      if (data.emergency !== undefined) {
+        actuator.emergency_stopped = data.emergency !== 'normal'
+      }
+      if (data.hardware_type !== undefined) {
+        actuator.hardware_type = data.hardware_type
+      }
+      actuator.last_command_at = data.timestamp
+        ? new Date(data.timestamp * 1000).toISOString()
+        : new Date().toISOString()
+
+      return { ...device, actuators: actuators as unknown as ESPDevice['actuators'] }
+    })
   }
 
   // =========================================================================
@@ -435,7 +589,7 @@ export const useActuatorStore = defineStore('actuator', () => {
         requestId,
       })
       toast.error(
-        `${deviceName} GPIO ${gpio}: Befehl fehlgeschlagen${errorCode ? ` (${errorCode})` : ''}${msg ? ` - ${msg}` : ''}${!errorCode && !msg ? ` - ${CONTRACT_OPERATOR_ACTION}` : ''}`,
+        `${deviceName} GPIO ${gpio}: Befehl fehlgeschlagen${errorCode ? ` (${errorCode})` : ''}${msg ? ` - ${msg}` : ''}${!errorCode && !msg ? ` - ${CONTRACT_OPERATOR_ACTION}` : ''}${buildHandleSuffix(correlationId, requestId)}`,
         { persistent: true }
       )
     }
@@ -480,21 +634,13 @@ export const useActuatorStore = defineStore('actuator', () => {
       requestId,
     })
 
-    const key = `${espId}:${gpio}`
     const deviceName = devices.find(d => getDeviceId(d) === espId)?.name || espId
-
-    // Cancel previous pending timeout (new command supersedes old one)
-    const existing = pendingCommands.get(key)
-    if (existing) clearTimeout(existing)
-
     const toast = useToast()
-    const timeoutId = setTimeout(() => {
-      pendingCommands.delete(key)
-      appendNonTerminalHint('actuator', `${espId}:${gpio}`, `Timeout: Keine Bestätigung für "${command}"`, correlationId)
-      toast.warning(`${deviceName} GPIO ${gpio}: Vorlaeufiger Hinweis - keine Bestätigung für "${command}" erhalten`)
-    }, ACTUATOR_RESPONSE_TIMEOUT_MS)
+    toast.info(`Befehl in Bearbeitung: ${deviceName} GPIO ${gpio} (${command})${buildHandleSuffix(correlationId, requestId)}`, {
+      dedupeKey: `actuator-accepted:${espId}:${gpio}:${correlationId ?? requestId ?? command}`,
+    })
 
-    pendingCommands.set(key, timeoutId)
+    scheduleActuatorTimeout(espId, gpio, command, deviceName, correlationId, requestId)
   }
 
   /**
@@ -543,7 +689,7 @@ export const useActuatorStore = defineStore('actuator', () => {
     const toast = useToast()
     const deviceName = devices.find(d => getDeviceId(d) === espId)?.name || espId
     toast.error(
-      `${deviceName} GPIO ${gpio}: Befehl fehlgeschlagen - ${error}${error === 'Unbekannter Fehler' ? ` (${CONTRACT_OPERATOR_ACTION})` : ''}`,
+      `${deviceName} GPIO ${gpio}: Befehl fehlgeschlagen - ${error}${error === 'Unbekannter Fehler' ? ` (${CONTRACT_OPERATOR_ACTION})` : ''}${buildHandleSuffix(correlationId, requestId)}`,
       { persistent: true }
     )
   }
@@ -580,6 +726,7 @@ export const useActuatorStore = defineStore('actuator', () => {
       correlationId,
       requestId,
     })
+    scheduleConfigTimeout(subjectId, summary, correlationId, requestId)
   }
 
   function handleConfigResponse(message: { data: Record<string, unknown> }): void {
@@ -617,6 +764,7 @@ export const useActuatorStore = defineStore('actuator', () => {
     const subjectId = existing.subjectId
 
     if (isIntentTerminal('config', subjectId, correlationId)) return
+    clearConfigTimeout(subjectId, correlationId, requestId)
 
     finalizeIntent({
       intentType: 'config',
@@ -663,6 +811,7 @@ export const useActuatorStore = defineStore('actuator', () => {
     const subjectId = existing.subjectId
 
     if (isIntentTerminal('config', subjectId, correlationId)) return
+    clearConfigTimeout(subjectId, correlationId, requestId)
 
     finalizeIntent({
       intentType: 'config',
@@ -807,11 +956,13 @@ export const useActuatorStore = defineStore('actuator', () => {
   function clearPendingCommands(): void {
     pendingCommands.forEach((timeout) => clearTimeout(timeout))
     pendingCommands.clear()
+    pendingConfigTimeouts.forEach((timeout) => clearTimeout(timeout))
+    pendingConfigTimeouts.clear()
   }
 
   /**
    * Register intent at REST command creation boundary.
-   * Sequenz: created -> pending -> terminal
+   * Sequenz: accepted -> pending -> terminal_*
    */
   function registerCommandIntent(
     espId: string,
@@ -829,11 +980,106 @@ export const useActuatorStore = defineStore('actuator', () => {
       requestId,
       preserveCreated: true,
     })
-    if (created.state === 'created') {
-      created.state = 'pending'
+    if (created.state === 'accepted') {
       created.updatedAt = nowMs()
       saveIntent(created)
     }
+    scheduleActuatorTimeout(espId, gpio, command, espId, correlationId, requestId)
+  }
+
+  function registerConfigIntentFromRest(params: {
+    espId: string
+    scope: string
+    correlationId?: string
+    requestId?: string
+    summary?: string
+  }): string {
+    const subjectId = params.correlationId || params.requestId || `rest:${params.espId}:${params.scope}:${nowMs()}`
+    const summary = params.summary ?? `Konfigurationsauftrag ${params.scope} angenommen`
+    const created = createOrUpdateIntentPending({
+      intentType: 'config',
+      subjectId,
+      summary,
+      correlationId: params.correlationId,
+      requestId: params.requestId,
+      preserveCreated: true,
+    })
+    if (created.state === 'accepted') {
+      created.updatedAt = nowMs()
+      saveIntent(created)
+    }
+    scheduleConfigTimeout(subjectId, summary, params.correlationId, params.requestId)
+    return subjectId
+  }
+
+  function waitForIntentTerminal(params: {
+    intentType: IntentType
+    subjectId: string
+    correlationId?: string
+    timeoutMs?: number
+    pollIntervalMs?: number
+  }): Promise<IntentRecord | null> {
+    const timeoutMs = params.timeoutMs ?? 60_000
+    const pollIntervalMs = Math.max(50, params.pollIntervalMs ?? 150)
+    const resolveCurrent = (): IntentRecord | undefined => {
+      const current = findIntent(params.intentType, params.subjectId, params.correlationId)
+      return current && isTerminalState(current.state) ? current : undefined
+    }
+    const immediate = resolveCurrent()
+    if (immediate) return Promise.resolve(immediate)
+    return new Promise((resolve) => {
+      const startedAt = nowMs()
+      const intervalId = setInterval(() => {
+        const terminal = resolveCurrent()
+        if (terminal) {
+          clearInterval(intervalId)
+          resolve(terminal)
+          return
+        }
+        if (nowMs() - startedAt >= timeoutMs) {
+          clearInterval(intervalId)
+          resolve(null)
+        }
+      }, pollIntervalMs)
+    })
+  }
+
+  function waitForConfigTerminal(params: {
+    subjectId: string
+    correlationId?: string
+    timeoutMs?: number
+  }): Promise<IntentRecord | null> {
+    return waitForIntentTerminal({
+      intentType: 'config',
+      subjectId: params.subjectId,
+      correlationId: params.correlationId,
+      timeoutMs: params.timeoutMs,
+    })
+  }
+
+  /**
+   * Markiert den letzten Offline-/Reset-Zeitpunkt für einen Aktor.
+   * Wenn gpio fehlt, wird die Epoch für alle Aktoren eines Geräts gesetzt.
+   */
+  function markActuatorResetEpoch(
+    espId: string,
+    epochMs: number,
+    gpio?: number,
+    knownGpios: number[] = [],
+  ): void {
+    if (!Number.isFinite(epochMs) || epochMs <= 0) return
+    if (typeof gpio === 'number') {
+      actuatorResetEpochMsByKey.set(`${espId}:${gpio}`, epochMs)
+      return
+    }
+    if (knownGpios.length === 0) return
+    for (const g of knownGpios) {
+      actuatorResetEpochMsByKey.set(`${espId}:${g}`, epochMs)
+    }
+  }
+
+  function getIntentSnapshot(): IntentRecord[] {
+    return Array.from(intents.values())
   }
 
   return {
@@ -853,5 +1099,10 @@ export const useActuatorStore = defineStore('actuator', () => {
     handleSequenceCancelled,
     clearPendingCommands,
     registerCommandIntent,
+    registerConfigIntentFromRest,
+    waitForIntentTerminal,
+    waitForConfigTerminal,
+    markActuatorResetEpoch,
+    getIntentSnapshot,
   }
 })

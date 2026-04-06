@@ -141,6 +141,7 @@ export function useOrbitalDragDrop(espId: Ref<string> | ComputedRef<string>) {
     const jsonData = event.dataTransfer?.getData('application/json')
     if (!jsonData) {
       log('DROP - no JSON data, ignoring')
+      dragStore.endDrag()
       return
     }
 
@@ -152,17 +153,24 @@ export function useOrbitalDragDrop(espId: Ref<string> | ComputedRef<string>) {
         logger.info('[DnD] Opening AddSensorModal', { sensorType: payload.sensorType, espId: espId.value })
         droppedSensorType.value = payload.sensorType || null
         showAddSensorModal.value = true
+        return
       } else if (payload.action === 'add-actuator') {
         logger.info('[DnD] Opening AddActuatorModal', { actuatorType: payload.actuatorType, espId: espId.value })
         droppedActuatorType.value = payload.actuatorType || null
         showAddActuatorModal.value = true
+        return
       } else if (payload.type === 'sensor') {
         log('DROP - sensor for chart, should be handled by AnalysisDropZone')
+        return
       } else {
         log('DROP - unknown payload type', { type: payload.type, action: payload.action })
+        dragStore.endDrag()
+        return
       }
     } catch (error) {
       log('DROP ERROR - failed to parse', { error })
+      dragStore.endDrag()
+      return
     }
   }
 
@@ -174,12 +182,20 @@ export function useOrbitalDragDrop(espId: Ref<string> | ComputedRef<string>) {
   watch(showAddSensorModal, (isOpen) => {
     if (!isOpen) {
       droppedSensorType.value = null
+      // Explizites Cleanup bei Modal-Cancel/Close: verhindert hängenbleibenden globalen Drag-State.
+      if (dragStore.isAnyDragActive) {
+        dragStore.endDrag()
+      }
       logger.info('[DnD] Sensor modal closed, droppedSensorType reset')
     }
   })
   watch(showAddActuatorModal, (isOpen) => {
     if (!isOpen) {
       droppedActuatorType.value = null
+      // Explizites Cleanup bei Modal-Cancel/Close: verhindert hängenbleibenden globalen Drag-State.
+      if (dragStore.isAnyDragActive) {
+        dragStore.endDrag()
+      }
       logger.info('[DnD] Actuator modal closed, droppedActuatorType reset')
     }
   })

@@ -7,7 +7,7 @@
  */
 
 import { ref, computed, onMounted, onUnmounted, watch, getCurrentInstance } from 'vue'
-import { websocketService, type WebSocketMessage, type WebSocketFilters } from '@/services/websocket'
+import { websocketService, type WebSocketMessage, type WebSocketFilters, type WebSocketStatus } from '@/services/websocket'
 import type { MessageType } from '@/types'
 import { createLogger } from '@/utils/logger'
 
@@ -37,11 +37,19 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     filters,
   } = options
 
+  const readServiceStatus = (): WebSocketStatus => {
+    if (typeof websocketService.getStatus === 'function') {
+      return websocketService.getStatus()
+    }
+    return websocketService.isConnected() ? 'connected' : 'disconnected'
+  }
+
   // Connection state
   const isConnected = ref(websocketService.isConnected())
   const isConnecting = ref(false)
   const connectionError = ref<string | null>(null)
   const reconnectAttempts = ref(0)
+  const serviceStatus = ref<WebSocketStatus>(readServiceStatus())
 
   // Subscription state
   const subscriptionId = ref<string | null>(null)
@@ -56,12 +64,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const messageHandlers = new Map<string, Set<(message: WebSocketMessage) => void>>()
 
   // Computed
-  const connectionStatus = computed(() => {
-    if (isConnecting.value) return 'connecting'
-    if (isConnected.value) return 'connected'
-    if (connectionError.value) return 'error'
-    return 'disconnected'
-  })
+  const connectionStatus = computed(() => serviceStatus.value)
 
   // =============================================================================
   // Connection Management
@@ -77,10 +80,12 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
     isConnecting.value = true
     connectionError.value = null
+    serviceStatus.value = 'connecting'
 
     try {
       await websocketService.connect()
-      isConnected.value = websocketService.isConnected()
+      isConnected.value = true
+      serviceStatus.value = 'connected'
       
       // Subscribe with filters if provided
       if (activeFilters.value) {
@@ -90,6 +95,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       logger.error('Connection error', error)
       connectionError.value = error instanceof Error ? error.message : 'Connection failed'
       isConnected.value = false
+      serviceStatus.value = 'error'
     } finally {
       isConnecting.value = false
     }
@@ -107,6 +113,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     websocketService.disconnect()
     isConnected.value = false
     isConnecting.value = false
+    serviceStatus.value = 'disconnected'
   }
 
   // =============================================================================
@@ -227,9 +234,12 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     if (statusInterval) return // Already running
 
     const checkStatus = () => {
-      const connected = websocketService.isConnected()
-      if (connected !== isConnected.value) {
-        isConnected.value = connected
+      const status = readServiceStatus()
+      serviceStatus.value = status
+      isConnected.value = status === 'connected'
+      isConnecting.value = status === 'connecting'
+      if (status !== 'error') {
+        connectionError.value = null
       }
     }
 
@@ -243,9 +253,11 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     if (unsubscribeStatusChange) return // Already registered
 
     unsubscribeStatusChange = websocketService.onStatusChange((status) => {
-      const connected = status === 'connected'
-      if (connected !== isConnected.value) {
-        isConnected.value = connected
+      serviceStatus.value = status
+      isConnected.value = status === 'connected'
+      isConnecting.value = status === 'connecting'
+      if (status !== 'error') {
+        connectionError.value = null
       }
     })
   }

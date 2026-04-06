@@ -17,61 +17,78 @@ function getStyle(): CSSStyleDeclaration {
  * Read a CSS custom property value from :root.
  *
  * @param name - The CSS variable name including `--` prefix, e.g. `'--color-success'`
- * @returns The trimmed value string, e.g. `'#34d399'`
+ * @returns The trimmed value string, e.g. `'rgb(52, 211, 153)'`
  *
  * @example
  * ```ts
  * import { getCssToken } from '@/utils/cssTokens'
  *
- * const successColor = getCssToken('--color-success') // '#34d399'
- * const chartColor = getCssToken('--color-accent')    // '#3b82f6'
+ * const successColor = getCssToken('--color-success')
+ * const chartColor = getCssToken('--color-accent')
  * ```
  */
-export function getCssToken(name: string): string {
+export function getCssToken(name: string, fallbacks: string[] = []): string {
   if (typeof document === 'undefined') return ''
-  return getStyle().getPropertyValue(name).trim()
+
+  const style = getStyle()
+  const primary = style.getPropertyValue(name).trim()
+  if (primary) return primary
+
+  for (const fallback of fallbacks) {
+    const value = style.getPropertyValue(fallback).trim()
+    if (value) return value
+  }
+
+  return ''
 }
 
 /**
  * Pre-defined token accessors for commonly used colors in charts and JS contexts.
  * These resolve at call time — safe to use in computed properties.
+ *
+ * Runtime fallback policy:
+ * - Primary token from the requested semantic slot.
+ * - If missing: semantic fallback chain (other tokens), never free hex literals.
+ * - If still missing: empty string (consumer decides local behavior).
  */
 export const tokens = {
   // Status colors
-  get success() { return getCssToken('--color-success') || '#34d399' },
-  get warning() { return getCssToken('--color-warning') || '#fbbf24' },
-  get error() { return getCssToken('--color-error') || '#f87171' },
-  get info() { return getCssToken('--color-info') || '#60a5fa' },
+  get success() { return getCssToken('--color-success', ['--color-info']) },
+  get warning() { return getCssToken('--color-warning', ['--color-info']) },
+  get error() { return getCssToken('--color-error', ['--color-warning']) },
+  get info() { return getCssToken('--color-info', ['--color-accent']) },
 
   // Accent
-  get accent() { return getCssToken('--color-accent') || '#3b82f6' },
-  get accentBright() { return getCssToken('--color-accent-bright') || '#60a5fa' },
+  get accent() { return getCssToken('--color-accent', ['--color-info']) },
+  get accentBright() { return getCssToken('--color-accent-bright', ['--color-accent']) },
 
   // Device distinction
-  get mock() { return getCssToken('--color-mock') || '#a78bfa' },
-  get real() { return getCssToken('--color-real') || '#22d3ee' },
+  get mock() { return getCssToken('--color-mock', ['--color-iridescent-3']) },
+  get real() { return getCssToken('--color-real', ['--color-info']) },
 
   // Sensor status
-  get statusGood() { return getCssToken('--color-status-good') || '#22c55e' },
-  get statusWarning() { return getCssToken('--color-status-warning') || '#eab308' },
-  get statusAlarm() { return getCssToken('--color-status-alarm') || '#ef4444' },
-  get statusOffline() { return getCssToken('--color-status-offline') || '#6b7280' },
+  get statusGood() { return getCssToken('--color-status-good', ['--color-success']) },
+  get statusWarning() { return getCssToken('--color-status-warning', ['--color-warning']) },
+  get statusAlarm() { return getCssToken('--color-status-alarm', ['--color-error']) },
+  get statusOffline() { return getCssToken('--color-status-offline', ['--color-text-muted']) },
 
   // Text
-  get textPrimary() { return getCssToken('--color-text-primary') || '#eaeaf2' },
-  get textSecondary() { return getCssToken('--color-text-secondary') || '#8585a0' },
-  get textMuted() { return getCssToken('--color-text-muted') || '#484860' },
+  get textPrimary() { return getCssToken('--color-text-primary', ['--color-text-secondary']) },
+  get textSecondary() { return getCssToken('--color-text-secondary', ['--color-text-muted']) },
+  get textMuted() { return getCssToken('--color-text-muted', ['--color-text-secondary']) },
+  get textInverse() { return getCssToken('--color-text-inverse', ['--color-text-primary']) },
 
   // Backgrounds
-  get bgPrimary() { return getCssToken('--color-bg-primary') || '#07070d' },
-  get bgSecondary() { return getCssToken('--color-bg-secondary') || '#0d0d16' },
-  get bgTertiary() { return getCssToken('--color-bg-tertiary') || '#15151f' },
+  get bgPrimary() { return getCssToken('--color-bg-primary', ['--color-bg-secondary']) },
+  get bgSecondary() { return getCssToken('--color-bg-secondary', ['--color-bg-tertiary']) },
+  get bgTertiary() { return getCssToken('--color-bg-tertiary', ['--color-bg-secondary']) },
+  get backdropColor() { return getCssToken('--backdrop-color', ['--color-bg-primary']) },
 
   // Threshold zone backgrounds
-  get zoneAlarm() { return getCssToken('--color-zone-alarm') || 'rgba(239, 68, 68, 0.15)' },
-  get zoneWarning() { return getCssToken('--color-zone-warning') || 'rgba(234, 179, 8, 0.10)' },
-  get zoneNormal() { return getCssToken('--color-zone-normal') || 'rgba(34, 197, 94, 0.10)' },
+  get zoneAlarm() { return getCssToken('--color-zone-alarm', ['--color-error-bg']) },
+  get zoneWarning() { return getCssToken('--color-zone-warning', ['--color-warning-bg']) },
+  get zoneNormal() { return getCssToken('--color-zone-normal', ['--color-success-bg']) },
 
   // Glass
-  get glassBorder() { return getCssToken('--glass-border') || 'rgba(255, 255, 255, 0.06)' },
+  get glassBorder() { return getCssToken('--glass-border', ['--color-border']) },
 }

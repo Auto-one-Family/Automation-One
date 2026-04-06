@@ -20,11 +20,16 @@ import { getActuatorTypeInfo } from '@/utils/labels'
 interface Props {
   actuator: ActuatorWithContext
   mode: 'monitor' | 'config'
+  dataMode?: 'Live' | 'Hybrid' | 'Snapshot'
+  showSnapshotWarning?: boolean
   linkedRules?: LogicRule[]
   lastExecution?: ExecutionHistoryItem | null
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  dataMode: 'Hybrid',
+  showSnapshotWarning: false,
+})
 
 const emit = defineEmits<{
   configure: [actuator: ActuatorWithContext]
@@ -164,6 +169,9 @@ function handleToggle(event: Event) {
     </div>
     <div class="actuator-card__body">
       <div class="actuator-card__badges">
+        <span :class="['actuator-card__mode-badge', `actuator-card__mode-badge--${dataMode.toLowerCase()}`]">
+          {{ dataMode }}
+        </span>
         <span :class="['badge', actuator.state ? 'badge-success' : 'badge-gray']">
           {{ actuator.state ? 'Ein' : 'Aus' }}
         </span>
@@ -196,6 +204,12 @@ function handleToggle(event: Event) {
       >
         {{ actuator.state ? 'Ausschalten' : 'Einschalten' }}
       </button>
+    </div>
+    <div
+      v-if="mode === 'monitor' && showSnapshotWarning"
+      class="actuator-card__snapshot-warning"
+    >
+      Status ggf. veraltet
     </div>
 
     <!-- Monitor-mode: Linked rules -->
@@ -352,6 +366,35 @@ function handleToggle(event: Event) {
   padding: 1px 6px;
   border-radius: var(--radius-sm);
   flex-shrink: 0;
+}
+
+.actuator-card__mode-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 1.1;
+  color: var(--color-text-secondary);
+}
+
+.actuator-card__mode-badge--live {
+  color: var(--color-success);
+}
+
+.actuator-card__mode-badge--hybrid {
+  color: var(--color-info);
+}
+
+.actuator-card__mode-badge--snapshot {
+  color: var(--color-warning);
+}
+
+.actuator-card__snapshot-warning {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-warning);
 }
 
 /* Rules section */

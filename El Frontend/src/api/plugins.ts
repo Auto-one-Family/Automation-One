@@ -33,12 +33,19 @@ export interface PluginDetailDTO extends PluginDTO {
 
 export interface PluginExecutionDTO {
   id: string
+  execution_id?: string
   plugin_id: string
   started_at: string | null
+  updated_at?: string | null
   finished_at?: string | null
-  status: 'success' | 'error' | 'failure' | 'running' | 'timeout'
+  status: 'queued' | 'accepted' | 'started' | 'running' | 'partial' | 'success' | 'completed' | 'error' | 'failure' | 'failed' | 'timeout' | 'cancelled'
+  message?: string | null
+  progress_percent?: number | null
+  step?: string | null
+  error_code?: string | number | null
   triggered_by: string
   triggered_by_user?: number | null
+  correlation_id?: string | null
   result: Record<string, unknown> | null
   error_message: string | null
   duration_seconds: number | null
@@ -61,6 +68,22 @@ export interface ExecutePluginRequest {
 
 export interface UpdatePluginConfigRequest {
   config: Record<string, unknown>
+}
+
+export interface PluginExecutionStatusEvent {
+  execution_id: string
+  plugin_id: string
+  status: string
+  message?: string
+  started_at?: string
+  updated_at?: string
+  finished_at?: string
+  progress_percent?: number
+  step?: string
+  error_code?: string | number
+  error_message?: string
+  triggered_by?: string
+  correlation_id?: string
 }
 
 // =============================================================================
@@ -95,7 +118,12 @@ export const pluginsApi = {
       `/plugins/${pluginId}/execute`,
       request ?? {},
     )
-    return response.data
+    const payload = response.data
+    return {
+      ...payload,
+      execution_id: payload.execution_id ?? payload.id,
+      updated_at: payload.updated_at ?? payload.started_at ?? null,
+    }
   },
 
   /**
@@ -123,7 +151,26 @@ export const pluginsApi = {
       `/plugins/${pluginId}/history`,
       { params: { limit } },
     )
-    return response.data
+    return response.data.map((entry) => ({
+      ...entry,
+      execution_id: entry.execution_id ?? entry.id,
+      updated_at: entry.updated_at ?? entry.finished_at ?? entry.started_at ?? null,
+    }))
+  },
+
+  /**
+   * Optional endpoint for currently running executions.
+   * Falls back to plugin list hydration in the store if unsupported.
+   */
+  async getRunningExecutions(): Promise<PluginExecutionDTO[]> {
+    const response = await api.get<PluginExecutionDTO[]>('/plugins/executions', {
+      params: { status: 'running' },
+    })
+    return response.data.map((entry) => ({
+      ...entry,
+      execution_id: entry.execution_id ?? entry.id,
+      updated_at: entry.updated_at ?? entry.finished_at ?? entry.started_at ?? null,
+    }))
   },
 
   /**

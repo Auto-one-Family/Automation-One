@@ -10,7 +10,7 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Clock, AlertCircle } from 'lucide-vue-next'
 import { formatRelativeTime } from '@/utils/formatters'
-import type { LogicRule, SensorCondition, ActuatorAction } from '@/types/logic'
+import type { LogicRule, SensorCondition, ActuatorAction, RuleIntentLifecycle } from '@/types/logic'
 
 interface Props {
   rule: LogicRule
@@ -18,6 +18,7 @@ interface Props {
   isActive?: boolean
   /** Zone names for L1 Monitor (answers "Where?"). L2 omits — zone is implicit. */
   zoneNames?: string[]
+  lifecycle?: RuleIntentLifecycle | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -29,8 +30,26 @@ const router = useRouter()
 
 /** Status dot + label based on enabled and last execution */
 const statusInfo = computed(() => {
-  if (props.rule.last_execution_success === false) {
+  if (props.lifecycle?.state === 'terminal_conflict') {
+    return { label: 'Konflikt', cssClass: 'rule-card-compact__status--warning' }
+  }
+  if (props.lifecycle?.state === 'terminal_integration_issue') {
+    return { label: 'Integration', cssClass: 'rule-card-compact__status--error' }
+  }
+  if (props.lifecycle?.state === 'terminal_failed') {
     return { label: 'Fehler', cssClass: 'rule-card-compact__status--error' }
+  }
+  if (props.lifecycle?.state === 'terminal_success') {
+    return { label: 'Erfolg', cssClass: 'rule-card-compact__status--active' }
+  }
+  if (props.lifecycle?.state === 'accepted') {
+    return { label: 'Angenommen', cssClass: 'rule-card-compact__status--pending' }
+  }
+  if (props.lifecycle?.state === 'pending_activation') {
+    return { label: 'Aktivierung...', cssClass: 'rule-card-compact__status--pending' }
+  }
+  if (props.lifecycle?.state === 'pending_execution') {
+    return { label: 'Ausfuehrung...', cssClass: 'rule-card-compact__status--pending' }
   }
   if (props.rule.enabled) {
     return { label: 'Aktiv', cssClass: 'rule-card-compact__status--active' }
@@ -38,7 +57,12 @@ const statusInfo = computed(() => {
   return { label: 'Deaktiviert', cssClass: 'rule-card-compact__status--disabled' }
 })
 
-const hasError = computed(() => props.rule.last_execution_success === false)
+const hasError = computed(
+  () =>
+    props.lifecycle?.state === 'terminal_failed' ||
+    props.lifecycle?.state === 'terminal_integration_issue' ||
+    props.rule.last_execution_success === false
+)
 
 /** Dynamic aria-label including status for screen readers (ARIA-live announces changes). */
 const statusAriaLabel = computed(() => {
@@ -235,6 +259,14 @@ function navigateToRule() {
 
 .rule-card-compact__status--error {
   color: var(--color-status-alarm);
+}
+
+.rule-card-compact__status--warning {
+  color: var(--color-warning);
+}
+
+.rule-card-compact__status--pending {
+  color: var(--color-warning);
 }
 
 .rule-card-compact__error-icon {

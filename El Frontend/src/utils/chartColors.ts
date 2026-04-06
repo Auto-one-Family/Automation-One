@@ -1,21 +1,32 @@
 /**
  * Shared chart color palette for dashboard widgets.
  *
- * These 8 colors align with the design system (iridescent, status, accent):
- * - Blue (#60a5fa), Green (#34d399), Amber (#fbbf24), Red (#f87171)
- * - Purple (#a78bfa), Cyan (#22d3ee), Orange (#fb923c), Pink (#f472b6)
+ * Token-bound palette for charts/widgets.
+ * Colors are resolved from `tokens.css` at runtime (SSOT).
  *
  * Used by: WidgetConfigPanel (color swatches), MultiSensorWidget (line colors)
  */
-export const CHART_COLORS = [
-  '#60a5fa',
-  '#34d399',
-  '#fbbf24',
-  '#f87171',
-  '#a78bfa',
-  '#22d3ee',
-  '#fb923c',
-  '#f472b6',
+import { getCssToken, tokens } from '@/utils/cssTokens'
+
+export const CHART_COLOR_TOKENS = [
+  '--color-iridescent-1',
+  '--color-success',
+  '--color-warning',
+  '--color-error',
+  '--color-iridescent-3',
+  '--color-real',
+  '--color-iridescent-4',
+  '--color-accent',
 ] as const
 
-export type ChartColor = (typeof CHART_COLORS)[number]
+export const CHART_COLORS = CHART_COLOR_TOKENS.map((token) => `var(${token})`) as readonly string[]
+
+function resolveChartToken(token: string): string {
+  return getCssToken(token, ['--color-accent', '--color-info']) || tokens.accent || tokens.info
+}
+
+export function getChartColors(): string[] {
+  return CHART_COLOR_TOKENS.map((token) => resolveChartToken(token))
+}
+
+export type ChartColor = string

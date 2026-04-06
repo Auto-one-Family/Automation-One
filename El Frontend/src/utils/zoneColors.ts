@@ -2,15 +2,17 @@
  * Zone Colors Utility
  *
  * Provides consistent, deterministic color assignment for zones based on ID hash.
- * Uses the iridescent color palette from the design system.
+ * Uses token-bound colors from the design system.
  */
+
+import { getCssToken, tokens } from '@/utils/cssTokens'
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
 export interface ZoneColorInfo {
-  /** Primary color (hex) */
+  /** Primary color (resolved CSS color) */
   primary: string
   /** RGB values for CSS rgba() usage */
   rgb: string
@@ -30,21 +32,52 @@ export interface ZoneColorInfo {
  * Zone color palette using design system colors.
  * Order designed for visual distinction between adjacent zones.
  */
-const ZONE_COLORS: Array<{ hex: string; rgb: string }> = [
-  { hex: '#60a5fa', rgb: '96, 165, 250' },   // Iridescent Blue
-  { hex: '#34d399', rgb: '52, 211, 153' },   // Success Green
-  { hex: '#a78bfa', rgb: '167, 139, 250' },  // Iridescent Purple
-  { hex: '#22d3ee', rgb: '34, 211, 238' },   // Cyan (Real)
-  { hex: '#fbbf24', rgb: '251, 191, 36' },   // Warning Amber
-  { hex: '#c084fc', rgb: '192, 132, 252' },  // Iridescent Violet
-  { hex: '#818cf8', rgb: '129, 140, 248' },  // Iridescent Indigo
-  { hex: '#f472b6', rgb: '244, 114, 182' },  // Pink
-]
+const ZONE_COLOR_TOKENS = [
+  '--color-iridescent-1',
+  '--color-success',
+  '--color-iridescent-3',
+  '--color-real',
+  '--color-warning',
+  '--color-iridescent-4',
+  '--color-iridescent-2',
+  '--color-accent',
+] as const
 
-/** Default color for zones without ID or unassigned devices */
-const DEFAULT_ZONE_COLOR: { hex: string; rgb: string } = {
-  hex: '#6b7280',  // Gray-500
-  rgb: '107, 114, 128'
+const DEFAULT_ZONE_COLOR_TOKEN = '--color-text-muted'
+
+function toRgbChannels(value: string): string | null {
+  const hexMatch = value.trim().match(/^#([0-9a-fA-F]{6})$/)
+  if (hexMatch) {
+    const hex = hexMatch[1]
+    const r = parseInt(hex.slice(0, 2), 16)
+    const g = parseInt(hex.slice(2, 4), 16)
+    const b = parseInt(hex.slice(4, 6), 16)
+    return `${r}, ${g}, ${b}`
+  }
+
+  const rgbMatch = value.trim().match(/^rgba?\(\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})/i)
+  if (rgbMatch) {
+    return `${rgbMatch[1]}, ${rgbMatch[2]}, ${rgbMatch[3]}`
+  }
+
+  return null
+}
+
+function resolveTokenColor(tokenName: string): { primary: string; rgb: string } {
+  const primary =
+    getCssToken(tokenName, [DEFAULT_ZONE_COLOR_TOKEN]) ||
+    tokens.textMuted ||
+    tokens.textSecondary
+
+  const rgb = toRgbChannels(primary) ?? ''
+  return { primary, rgb }
+}
+
+function toColorAlpha(primary: string, rgb: string, alphaPercent: number): string {
+  if (rgb) {
+    return `rgba(${rgb}, ${alphaPercent / 100})`
+  }
+  return `color-mix(in srgb, ${primary} ${alphaPercent}%, transparent)`
 }
 
 // =============================================================================
@@ -84,24 +117,25 @@ function hashString(str: string): number {
  */
 export function getZoneColor(zoneId: string | null | undefined): ZoneColorInfo {
   if (!zoneId) {
+    const defaultColor = resolveTokenColor(DEFAULT_ZONE_COLOR_TOKEN)
     return {
-      primary: DEFAULT_ZONE_COLOR.hex,
-      rgb: DEFAULT_ZONE_COLOR.rgb,
-      background: `rgba(${DEFAULT_ZONE_COLOR.rgb}, 0.05)`,
-      border: `rgba(${DEFAULT_ZONE_COLOR.rgb}, 0.2)`,
-      borderHover: `rgba(${DEFAULT_ZONE_COLOR.rgb}, 0.4)`,
+      primary: defaultColor.primary,
+      rgb: defaultColor.rgb,
+      background: toColorAlpha(defaultColor.primary, defaultColor.rgb, 5),
+      border: toColorAlpha(defaultColor.primary, defaultColor.rgb, 20),
+      borderHover: toColorAlpha(defaultColor.primary, defaultColor.rgb, 40),
     }
   }
 
-  const colorIndex = hashString(zoneId) % ZONE_COLORS.length
-  const color = ZONE_COLORS[colorIndex]
+  const colorIndex = hashString(zoneId) % ZONE_COLOR_TOKENS.length
+  const color = resolveTokenColor(ZONE_COLOR_TOKENS[colorIndex])
 
   return {
-    primary: color.hex,
+    primary: color.primary,
     rgb: color.rgb,
-    background: `rgba(${color.rgb}, 0.05)`,
-    border: `rgba(${color.rgb}, 0.2)`,
-    borderHover: `rgba(${color.rgb}, 0.4)`,
+    background: toColorAlpha(color.primary, color.rgb, 5),
+    border: toColorAlpha(color.primary, color.rgb, 20),
+    borderHover: toColorAlpha(color.primary, color.rgb, 40),
   }
 }
 
@@ -120,15 +154,15 @@ export function getZoneColorRGB(zoneId: string | null | undefined): string {
  * Useful when you want predictable color order.
  */
 export function getZoneColorByIndex(index: number): ZoneColorInfo {
-  const safeIndex = Math.abs(index) % ZONE_COLORS.length
-  const color = ZONE_COLORS[safeIndex]
+  const safeIndex = Math.abs(index) % ZONE_COLOR_TOKENS.length
+  const color = resolveTokenColor(ZONE_COLOR_TOKENS[safeIndex])
 
   return {
-    primary: color.hex,
+    primary: color.primary,
     rgb: color.rgb,
-    background: `rgba(${color.rgb}, 0.05)`,
-    border: `rgba(${color.rgb}, 0.2)`,
-    borderHover: `rgba(${color.rgb}, 0.4)`,
+    background: toColorAlpha(color.primary, color.rgb, 5),
+    border: toColorAlpha(color.primary, color.rgb, 20),
+    borderHover: toColorAlpha(color.primary, color.rgb, 40),
   }
 }
 
@@ -136,7 +170,10 @@ export function getZoneColorByIndex(index: number): ZoneColorInfo {
  * Get all available zone colors (for color picker UI).
  */
 export function getAllZoneColors(): Array<{ hex: string; rgb: string }> {
-  return [...ZONE_COLORS]
+  return ZONE_COLOR_TOKENS.map((tokenName) => {
+    const color = resolveTokenColor(tokenName)
+    return { hex: color.primary, rgb: color.rgb }
+  })
 }
 
 /**

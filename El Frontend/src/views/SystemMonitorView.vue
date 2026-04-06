@@ -24,6 +24,7 @@ import { useWebSocket } from '@/composables/useWebSocket'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { useEspStore } from '@/stores/esp'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
+import { useOpsLifecycleStore } from '@/shared/stores/ops-lifecycle.store'
 import { detectCategory } from '@/utils/errorCodeTranslator'
 import { auditApi, type AuditStatistics, type StatisticsTimeRange, type DataSource, type UnifiedEventFromAPI } from '@/api/audit'
 import type { UnifiedEvent } from '@/types/websocket-events'
@@ -83,6 +84,7 @@ const route = useRoute()
 const authStore = useAuthStore()
 const espStore = useEspStore()
 const inboxStore = useNotificationInboxStore()
+const opsLifecycleStore = useOpsLifecycleStore()
 const selectedEvent = ref<UnifiedEvent | null>(null)
 
 // Live-Pause State (persisted in localStorage)
@@ -285,6 +287,18 @@ const eventCounts = computed(() => {
   }
   return { events, logs, mqtt }
 })
+
+const opsBannerEntries = computed(() =>
+  opsLifecycleStore.runningHighRiskEntries.slice(0, 5),
+)
+
+const OPS_STATUS_LABELS: Record<string, string> = {
+  initiated: 'Initiiert',
+  running: 'Läuft',
+  partial: 'Teilweise',
+  success: 'Erfolgreich',
+  failed: 'Fehlgeschlagen',
+}
 
 const uniqueEspIds = computed(() => {
   const ids = new Set<string>()
@@ -1129,6 +1143,28 @@ watch(activeTab, (newTab) => {
       @open-cleanup-panel="showCleanupPanel = true"
     />
 
+    <div v-if="opsBannerEntries.length > 0" class="ops-banner">
+      <div class="ops-banner__title">High-Risk Jobs</div>
+      <div class="ops-banner__list">
+        <div
+          v-for="entry in opsBannerEntries"
+          :key="entry.id"
+          class="ops-banner__item"
+        >
+          <span class="ops-banner__name">{{ entry.title }}</span>
+          <span
+            class="ops-banner__status"
+            :class="`ops-banner__status--${entry.status}`"
+          >
+            {{ OPS_STATUS_LABELS[entry.status] }}
+          </span>
+          <span v-if="entry.execution_id" class="ops-banner__meta">
+            {{ entry.execution_id }}
+          </span>
+        </div>
+      </div>
+    </div>
+
     <!-- Statistics Bar (collapsible) - ENTFERNT: showStats immer false, Stats nun via Cleanup-Panel -->
     <Transition name="slide-down">
       <div v-if="showStats && statistics" class="stats-bar">
@@ -1355,6 +1391,71 @@ watch(activeTab, (newTab) => {
   /* ⭐ Page-Scroll: Kein overflow: hidden - Seite scrollt als Ganzes */
 }
 
+.ops-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-lg);
+  border-bottom: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--color-bg-secondary) 96%, transparent);
+}
+
+.ops-banner__title {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-top: 0.375rem;
+}
+
+.ops-banner__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.ops-banner__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  background: var(--color-bg-tertiary);
+}
+
+.ops-banner__name {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.ops-banner__status {
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.ops-banner__status--initiated {
+  color: var(--color-info);
+}
+
+.ops-banner__status--running,
+.ops-banner__status--partial {
+  color: var(--color-warning);
+}
+
+.ops-banner__status--success {
+  color: var(--color-success);
+}
+
+.ops-banner__status--failed {
+  color: var(--color-error);
+}
+
+.ops-banner__meta {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
 /* .monitor-tab-content ENTFERNT - nicht verwendet, könnte Verwirrung stiften */
 
 /* ============================================================================
@@ -1370,14 +1471,14 @@ watch(activeTab, (newTab) => {
   border-radius: var(--radius-full);
   background: var(--gradient-iridescent);
   box-shadow:
-    0 4px 20px rgba(96, 165, 250, 0.4),
+    0 4px 20px color-mix(in srgb, var(--color-accent-bright) 40%, transparent),
     var(--glass-shadow-glow);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  color: white;
+  border: 2px solid color-mix(in srgb, var(--color-text-inverse) 20%, transparent);
+  color: var(--color-text-inverse);
   transition: all var(--transition-slow);
 }
 
@@ -1402,8 +1503,8 @@ watch(activeTab, (newTab) => {
 .filter-fab:hover {
   transform: scale(1.1) translateY(-2px);
   box-shadow:
-    0 8px 30px rgba(96, 165, 250, 0.5),
-    0 0 40px rgba(96, 165, 250, 0.3);
+    0 8px 30px color-mix(in srgb, var(--color-accent-bright) 50%, transparent),
+    0 0 40px color-mix(in srgb, var(--color-accent-bright) 30%, transparent);
 }
 
 .filter-fab:hover::before {
@@ -1421,8 +1522,8 @@ watch(activeTab, (newTab) => {
     var(--color-iridescent-4) 100%
   );
   box-shadow:
-    0 4px 20px rgba(167, 139, 250, 0.4),
-    0 0 30px rgba(192, 132, 252, 0.3);
+    0 4px 20px color-mix(in srgb, var(--color-iridescent-3) 40%, transparent),
+    0 0 30px color-mix(in srgb, var(--color-iridescent-4) 30%, transparent);
 }
 
 .filter-fab--active::before {
@@ -1431,8 +1532,8 @@ watch(activeTab, (newTab) => {
 
 .filter-fab--active:hover {
   box-shadow:
-    0 8px 30px rgba(167, 139, 250, 0.5),
-    0 0 50px rgba(192, 132, 252, 0.4);
+    0 8px 30px color-mix(in srgb, var(--color-iridescent-3) 50%, transparent),
+    0 0 50px color-mix(in srgb, var(--color-iridescent-4) 40%, transparent);
 }
 
 /* Badge */
@@ -1440,15 +1541,15 @@ watch(activeTab, (newTab) => {
   position: absolute;
   top: -6px;
   right: -6px;
-  background: linear-gradient(135deg, var(--color-error) 0%, #f43f5e 100%);
-  color: white;
+  background: linear-gradient(135deg, var(--color-error) 0%, var(--gradient-danger-end) 100%);
+  color: var(--color-text-inverse);
   font-size: 0.75rem;
   font-weight: 700;
   padding: 0.125rem 0.5rem;
   border-radius: var(--radius-full);
   min-width: 22px;
   text-align: center;
-  box-shadow: 0 2px 8px rgba(248, 113, 113, 0.5);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-error) 50%, transparent);
   border: 2px solid var(--color-bg-primary);
 }
 
@@ -1458,7 +1559,7 @@ watch(activeTab, (newTab) => {
 .filter-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(10, 10, 15, 0.7);
+  background: color-mix(in srgb, var(--color-bg-primary) 70%, transparent);
   z-index: calc(var(--z-fixed) - 1);
   backdrop-filter: blur(6px);
 }
@@ -1571,7 +1672,7 @@ watch(activeTab, (newTab) => {
   transform: translateX(-50%);
   z-index: var(--z-sticky);
   padding: var(--space-sm) var(--space-md);
-  background: rgba(0, 0, 0, 0.95);
+  background: color-mix(in srgb, var(--color-bg-primary) 95%, transparent);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   color: var(--color-text-primary);
@@ -1584,8 +1685,8 @@ watch(activeTab, (newTab) => {
   visibility: hidden;
   transition: opacity 0.2s, visibility 0.2s;
   box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.4),
-    0 0 1px rgba(255, 255, 255, 0.1);
+    0 4px 16px color-mix(in srgb, var(--color-bg-primary) 40%, transparent),
+    0 0 1px color-mix(in srgb, var(--color-text-inverse) 10%, transparent);
   pointer-events: none;
 }
 
@@ -1596,7 +1697,7 @@ watch(activeTab, (newTab) => {
   left: 50%;
   transform: translateX(-50%);
   border: 6px solid transparent;
-  border-bottom-color: rgba(0, 0, 0, 0.95);
+  border-bottom-color: color-mix(in srgb, var(--color-bg-primary) 95%, transparent);
 }
 
 .stats-bar__item--with-tooltip:hover .stats-bar__tooltip {
@@ -1622,24 +1723,24 @@ watch(activeTab, (newTab) => {
 
 .stats-bar__item:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--color-bg-primary) 20%, transparent);
 }
 
 /* Error Card - Red glow */
 .stats-bar__item--error {
   background: linear-gradient(135deg,
-    rgba(248, 113, 113, 0.08) 0%,
-    rgba(248, 113, 113, 0.03) 100%
+    color-mix(in srgb, var(--color-error) 8%, transparent) 0%,
+    color-mix(in srgb, var(--color-error) 3%, transparent) 100%
   );
-  border-color: rgba(248, 113, 113, 0.25);
+  border-color: color-mix(in srgb, var(--color-error) 25%, transparent);
 }
 
 .stats-bar__item--error::before {
-  background: linear-gradient(135deg, var(--color-error) 0%, #f43f5e 100%);
+  background: linear-gradient(135deg, var(--color-error) 0%, var(--gradient-danger-end) 100%);
 }
 
 .stats-bar__item--error:hover {
-  box-shadow: 0 0 25px rgba(248, 113, 113, 0.25);
+  box-shadow: 0 0 25px color-mix(in srgb, var(--color-error) 25%, transparent);
 }
 
 .stats-bar__item--error .stats-bar__value {
@@ -1649,18 +1750,18 @@ watch(activeTab, (newTab) => {
 /* Warning Card - Amber glow */
 .stats-bar__item--warning {
   background: linear-gradient(135deg,
-    rgba(251, 191, 36, 0.08) 0%,
-    rgba(251, 191, 36, 0.03) 100%
+    color-mix(in srgb, var(--color-warning) 8%, transparent) 0%,
+    color-mix(in srgb, var(--color-warning) 3%, transparent) 100%
   );
-  border-color: rgba(251, 191, 36, 0.25);
+  border-color: color-mix(in srgb, var(--color-warning) 25%, transparent);
 }
 
 .stats-bar__item--warning::before {
-  background: linear-gradient(135deg, var(--color-warning) 0%, #f59e0b 100%);
+  background: linear-gradient(135deg, var(--color-warning) 0%, var(--gradient-warning-end) 100%);
 }
 
 .stats-bar__item--warning:hover {
-  box-shadow: 0 0 25px rgba(251, 191, 36, 0.25);
+  box-shadow: 0 0 25px color-mix(in srgb, var(--color-warning) 25%, transparent);
 }
 
 .stats-bar__item--warning .stats-bar__value {
@@ -1718,13 +1819,13 @@ watch(activeTab, (newTab) => {
 .time-range-btn--active {
   background: var(--gradient-iridescent);
   border-color: var(--color-iridescent-1);
-  color: white;
+  color: var(--color-text-inverse);
   box-shadow: var(--glass-shadow-glow);
 }
 
 .time-range-btn--active:hover {
   transform: translateY(-2px);
-  box-shadow: 0 0 30px rgba(96, 165, 250, 0.4);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--color-accent-bright) 40%, transparent);
 }
 
 /* Stats content layout */
@@ -1791,7 +1892,7 @@ watch(activeTab, (newTab) => {
   align-items: center;
   justify-content: center;
   padding: var(--space-lg);
-  background-color: rgba(10, 10, 15, 0.85);
+  background-color: var(--backdrop-color);
   backdrop-filter: blur(8px);
 }
 
@@ -1806,7 +1907,7 @@ watch(activeTab, (newTab) => {
   border-radius: var(--radius-2xl);
   box-shadow:
     var(--glass-shadow),
-    0 0 40px rgba(96, 165, 250, 0.1);
+    0 0 40px color-mix(in srgb, var(--color-accent-bright) 10%, transparent);
   overflow: hidden;
 }
 
@@ -1826,7 +1927,7 @@ watch(activeTab, (newTab) => {
   border-bottom: 1px solid var(--glass-border);
   flex-shrink: 0;
   background: linear-gradient(135deg,
-    rgba(96, 165, 250, 0.05) 0%,
+    color-mix(in srgb, var(--color-accent-bright) 5%, transparent) 0%,
     transparent 100%
   );
 }
@@ -1885,7 +1986,7 @@ watch(activeTab, (newTab) => {
   border-top: 1px solid var(--glass-border);
   flex-shrink: 0;
   background: linear-gradient(0deg,
-    rgba(96, 165, 250, 0.03) 0%,
+    color-mix(in srgb, var(--color-accent-bright) 3%, transparent) 0%,
     transparent 100%
   );
 }
@@ -1913,7 +2014,7 @@ watch(activeTab, (newTab) => {
 .input:focus {
   outline: none;
   border-color: var(--color-iridescent-1);
-  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent-bright) 15%, transparent);
   background: var(--color-bg-quaternary);
 }
 
@@ -2042,7 +2143,7 @@ watch(activeTab, (newTab) => {
 /* Primary - Iridescent Gradient */
 .btn-primary {
   background: var(--gradient-iridescent);
-  color: white;
+  color: var(--color-text-inverse);
   box-shadow: var(--glass-shadow-glow);
 }
 
@@ -2057,7 +2158,7 @@ watch(activeTab, (newTab) => {
 
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 0 30px rgba(96, 165, 250, 0.4);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--color-accent-bright) 40%, transparent);
 }
 
 .btn-primary:hover::before {
@@ -2085,16 +2186,16 @@ watch(activeTab, (newTab) => {
 /* Danger - Red Glow */
 .btn-danger {
   background: linear-gradient(135deg,
-    rgba(248, 113, 113, 0.9) 0%,
-    rgba(244, 63, 94, 0.9) 100%
+    color-mix(in srgb, var(--color-error) 90%, transparent) 0%,
+    color-mix(in srgb, var(--gradient-danger-end) 90%, transparent) 100%
   );
-  color: white;
-  border-color: rgba(248, 113, 113, 0.5);
+  color: var(--color-text-inverse);
+  border-color: color-mix(in srgb, var(--color-error) 50%, transparent);
 }
 
 .btn-danger:hover {
   transform: translateY(-2px);
-  box-shadow: 0 0 25px rgba(248, 113, 113, 0.4);
+  box-shadow: 0 0 25px color-mix(in srgb, var(--color-error) 40%, transparent);
 }
 
 .btn-primary:disabled,
@@ -2127,33 +2228,33 @@ watch(activeTab, (newTab) => {
   border-radius: var(--radius-xl);
   box-shadow:
     var(--glass-shadow),
-    0 8px 32px rgba(0, 0, 0, 0.4);
+    0 8px 32px color-mix(in srgb, var(--color-bg-primary) 40%, transparent);
   backdrop-filter: blur(12px);
   cursor: pointer;
   max-width: calc(100vw - 2rem);
 }
 
 .toast--success {
-  border-color: rgba(34, 197, 94, 0.4);
+  border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
   background: linear-gradient(135deg,
-    rgba(34, 197, 94, 0.15) 0%,
-    rgba(34, 197, 94, 0.05) 100%
+    color-mix(in srgb, var(--color-success) 15%, transparent) 0%,
+    color-mix(in srgb, var(--color-success) 5%, transparent) 100%
   );
 }
 
 .toast--error {
-  border-color: rgba(248, 113, 113, 0.4);
+  border-color: color-mix(in srgb, var(--color-error) 40%, transparent);
   background: linear-gradient(135deg,
-    rgba(248, 113, 113, 0.15) 0%,
-    rgba(248, 113, 113, 0.05) 100%
+    color-mix(in srgb, var(--color-error) 15%, transparent) 0%,
+    color-mix(in srgb, var(--color-error) 5%, transparent) 100%
   );
 }
 
 .toast--info {
-  border-color: rgba(96, 165, 250, 0.4);
+  border-color: color-mix(in srgb, var(--color-info) 40%, transparent);
   background: linear-gradient(135deg,
-    rgba(96, 165, 250, 0.15) 0%,
-    rgba(96, 165, 250, 0.05) 100%
+    color-mix(in srgb, var(--color-info) 15%, transparent) 0%,
+    color-mix(in srgb, var(--color-info) 5%, transparent) 100%
   );
 }
 

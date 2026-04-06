@@ -56,6 +56,9 @@ interface SensorHealthMessage {
   data: SensorHealthEvent
 }
 
+type DevicePatchFn = (device: ESPDevice) => ESPDevice
+type ApplyDevicePatch = (espId: string, patchFn: DevicePatchFn) => boolean
+
 /**
  * Normalize raw timestamp from server WebSocket event to ISO string.
  *
@@ -69,6 +72,11 @@ function normalizeRawTimestamp(ts: number | undefined | null): string {
   // Sanity: if result is unreasonable (before year 2000 or after 2100), use now
   if (ms < 946684800000 || ms > 4102444800000) return new Date().toISOString()
   return new Date(ms).toISOString()
+}
+
+function parseSensorTimestampMs(raw: unknown): number | null {
+  if (typeof raw !== 'number' || Number.isNaN(raw)) return null
+  return raw > 1_000_000_000_000 ? raw : raw * 1000
 }
 
 // ============================================================================
@@ -132,8 +140,7 @@ export const useSensorStore = defineStore('sensor', () => {
    */
   function handleSensorData(
     message: SensorDataMessage,
-    devices: ESPDevice[],
-    getDeviceId: (d: ESPDevice) => string,
+    applyDevicePatch: ApplyDevicePatch,
   ): void {
     const data = message.data
     const espId = data.esp_id || data.device_id
@@ -142,41 +149,55 @@ export const useSensorStore = defineStore('sensor', () => {
 
     if (!espId || gpio === undefined) return
 
-    const device = devices.find(d => getDeviceId(d) === espId)
-    if (!device?.sensors) return
+    const patched = applyDevicePatch(espId, (device) => {
+      if (!device.sensors) return device
+      const sensorTsMs = parseSensorTimestampMs(data.timestamp)
+      const offlineInfo = (device as unknown as { offlineInfo?: { timestamp?: number } }).offlineInfo
+      const offlineSinceMs = typeof offlineInfo?.timestamp === 'number' ? offlineInfo.timestamp : null
+      if (sensorTsMs !== null && offlineSinceMs !== null && sensorTsMs < offlineSinceMs) {
+        logger.debug(`Ignoring stale sensor_data for ${espId}:${gpio} (${sensorType}) after offline epoch`)
+        return device
+      }
 
-    const sensors = device.sensors as MockSensor[]
+      const sensors = (device.sensors as MockSensor[]).map((sensor) => ({
+        ...sensor,
+        multi_values: sensor.multi_values ? { ...sensor.multi_values } : sensor.multi_values,
+      }))
 
-    // Post-Fix1: Find exact match by config_id, address, or gpio+sensor_type.
-    // Handles multi-sensor GPIOs (e.g. 2x DS18B20) via address-based matching.
-    const exactMatch = sensors.find(s => matchSensorToEvent(s, data))
+      // Post-Fix1: Find exact match by config_id, address, or gpio+sensor_type.
+      // Handles multi-sensor GPIOs (e.g. 2x DS18B20) via address-based matching.
+      const exactMatch = sensors.find(s => matchSensorToEvent(s, data))
 
-    if (exactMatch) {
-      if (data.value !== undefined) exactMatch.raw_value = data.value
-      if (data.quality) exactMatch.quality = data.quality
-      if (data.unit) exactMatch.unit = data.unit
-      exactMatch.last_read = normalizeRawTimestamp(data.timestamp)
-      return
+      if (exactMatch) {
+        if (data.value !== undefined) exactMatch.raw_value = data.value
+        if (data.quality) exactMatch.quality = data.quality
+        if (data.unit) exactMatch.unit = data.unit
+        exactMatch.last_read = normalizeRawTimestamp(data.timestamp)
+        return { ...device, sensors }
+      }
+
+      // Fallback: legacy multi-value merge for sensors not yet in array
+      const knownDeviceType = getDeviceTypeFromSensorType(sensorType)
+      if (knownDeviceType) {
+        handleKnownMultiValueSensor(sensors, data, knownDeviceType)
+        return { ...device, sensors }
+      }
+
+      // Dynamic multi-value detection (different type on same GPIO)
+      const existingSensor = sensors.find(s => s.gpio === gpio)
+      if (existingSensor && existingSensor.sensor_type !== sensorType && !existingSensor.is_multi_value) {
+        handleDynamicMultiValueSensor(existingSensor, data)
+        return { ...device, sensors }
+      }
+
+      // Single-value sensor (or first value of unknown multi-value)
+      handleSingleValueSensorData(sensors, data)
+      return { ...device, sensors }
+    })
+
+    if (!patched) {
+      logger.debug(`sensor_data: Device not found for ${espId}`)
     }
-
-    // Fallback: legacy multi-value merge for sensors not yet in array
-    const knownDeviceType = getDeviceTypeFromSensorType(sensorType)
-
-    if (knownDeviceType) {
-      handleKnownMultiValueSensor(sensors, data, knownDeviceType)
-      return
-    }
-
-    // Dynamic multi-value detection (different type on same GPIO)
-    const existingSensor = sensors.find(s => s.gpio === gpio)
-
-    if (existingSensor && existingSensor.sensor_type !== sensorType && !existingSensor.is_multi_value) {
-      handleDynamicMultiValueSensor(existingSensor, data)
-      return
-    }
-
-    // Single-value sensor (or first value of unknown multi-value)
-    handleSingleValueSensorData(sensors, data)
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -292,7 +313,7 @@ export const useSensorStore = defineStore('sensor', () => {
    */
   function handleSensorHealth(
     message: SensorHealthMessage,
-    findDeviceByEspId: (espId: string) => { device: ESPDevice; index: number } | null,
+    applyDevicePatch: ApplyDevicePatch,
   ): void {
     const event = message.data as SensorHealthEvent
 
@@ -301,48 +322,50 @@ export const useSensorStore = defineStore('sensor', () => {
       return
     }
 
-    const result = findDeviceByEspId(event.esp_id)
-    if (!result) {
+    const patched = applyDevicePatch(event.esp_id, (device) => {
+      if (!device.sensors) {
+        logger.debug(`sensor_health: Device ${event.esp_id} has no sensors`)
+        return device
+      }
+
+      const sensors = (device.sensors as Array<{
+        gpio: number
+        is_stale?: boolean
+        stale_reason?: string
+        last_reading_at?: string | null
+        operating_mode?: string
+        timeout_seconds?: number
+      }>).map((sensor) => ({ ...sensor }))
+
+      const sensorIndex = sensors.findIndex(s => s.gpio === event.gpio)
+      if (sensorIndex === -1) {
+        logger.debug(`sensor_health: Sensor GPIO ${event.gpio} not found on ${event.esp_id}`)
+        return device
+      }
+
+      const sensor = sensors[sensorIndex]
+      sensor.is_stale = event.is_stale
+      sensor.stale_reason = event.stale_reason
+      sensor.last_reading_at = event.last_reading_at
+      sensor.operating_mode = event.operating_mode
+      sensor.timeout_seconds = event.timeout_seconds
+
+      if (event.is_stale) {
+        logger.warn(`Sensor stale: ${event.esp_id} GPIO ${event.gpio} ` +
+          `(${event.sensor_type}) - ${event.stale_reason}, ` +
+          `overdue by ${event.seconds_overdue}s`
+        )
+      } else {
+        logger.debug(`Sensor health updated: ${event.esp_id} GPIO ${event.gpio} ` +
+          `is_stale=${event.is_stale}`
+        )
+      }
+
+      return { ...device, sensors: sensors as unknown as MockSensor[] }
+    })
+
+    if (!patched) {
       logger.debug(`sensor_health: Device not found: ${event.esp_id}`)
-      return
-    }
-
-    const { device } = result
-    if (!device.sensors) {
-      logger.debug(`sensor_health: Device ${event.esp_id} has no sensors`)
-      return
-    }
-
-    const sensors = device.sensors as Array<{
-      gpio: number
-      is_stale?: boolean
-      stale_reason?: string
-      last_reading_at?: string | null
-      operating_mode?: string
-      timeout_seconds?: number
-    }>
-    const sensorIndex = sensors.findIndex(s => s.gpio === event.gpio)
-    if (sensorIndex === -1) {
-      logger.debug(`sensor_health: Sensor GPIO ${event.gpio} not found on ${event.esp_id}`)
-      return
-    }
-
-    const sensor = sensors[sensorIndex]
-    sensor.is_stale = event.is_stale
-    sensor.stale_reason = event.stale_reason
-    sensor.last_reading_at = event.last_reading_at
-    sensor.operating_mode = event.operating_mode
-    sensor.timeout_seconds = event.timeout_seconds
-
-    if (event.is_stale) {
-      logger.warn(`Sensor stale: ${event.esp_id} GPIO ${event.gpio} ` +
-        `(${event.sensor_type}) - ${event.stale_reason}, ` +
-        `overdue by ${event.seconds_overdue}s`
-      )
-    } else {
-      logger.debug(`Sensor health updated: ${event.esp_id} GPIO ${event.gpio} ` +
-        `is_stale=${event.is_stale}`
-      )
     }
   }
 

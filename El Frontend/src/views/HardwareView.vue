@@ -247,6 +247,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (dragStore.isAnyDragActive) {
+    dragStore.endDrag()
+  }
   dashStore.deactivate()
   logicStore.unsubscribeFromWebSocket()
 })
@@ -469,19 +472,31 @@ function isMockDevice(device: ESPDevice): boolean {
   return espStore.isMock(espStore.getDeviceId(device))
 }
 
-function handleUnassignedDragAdd(event: any) {
+function endAnyDragIfActive(): void {
+  if (dragStore.isAnyDragActive) {
+    dragStore.endDrag()
+  }
+}
+
+async function handleUnassignedDragAdd(event: any) {
   const deviceId = event?.item?.dataset?.deviceId
-  if (!deviceId) return
+  if (!deviceId) {
+    return
+  }
 
   const device = espStore.devices.find(d =>
     espStore.getDeviceId(d) === deviceId
   )
-  if (!device) return
+  if (!device) {
+    return
+  }
 
   // Device was dropped into unassigned — remove from zone
   if (device.zone_id) {
-    handleRemoveFromZone(device)
+    await handleRemoveFromZone(device)
+    return
   }
+  return
 }
 
 function handleUnassignedDragStart() {
@@ -530,6 +545,7 @@ async function handleZoneCreate() {
 }
 
 function cancelZoneCreate() {
+  endAnyDragIfActive()
   showCreateZoneForm.value = false
   newZoneName.value = ''
   selectedEspForNewZone.value = ''
@@ -721,12 +737,23 @@ function handleOpenEspConfigFromPanel(device: ESPDevice) {
 }
 
 function handleSettingsClose() {
+  endAnyDragIfActive()
   isSettingsOpen.value = false
   if (settingsCloseTimer) clearTimeout(settingsCloseTimer)
   settingsCloseTimer = setTimeout(() => {
     settingsDevice.value = null
     settingsCloseTimer = null
   }, 200)
+}
+
+function closeSensorConfigPanel() {
+  endAnyDragIfActive()
+  showSensorConfig.value = false
+}
+
+function closeActuatorConfigPanel() {
+  endAnyDragIfActive()
+  showActuatorConfig.value = false
 }
 
 function handleDeviceDeleted(_payload: { deviceId: string }) {
@@ -1152,7 +1179,7 @@ function formatTimeAgo(timestamp: number): string {
       :title="configSensorData?.sensorType || 'Sensor'"
       width="lg"
       elevation="high"
-      @close="showSensorConfig = false"
+      @close="closeSensorConfigPanel"
     >
       <SensorConfigPanel
         v-if="configSensorData"
@@ -1162,8 +1189,8 @@ function formatTimeAgo(timestamp: number): string {
         :unit="configSensorData.unit"
         :config-id="configSensorData.configId"
         :show-metadata="false"
-        @deleted="showSensorConfig = false; espStore.fetchDevice(configSensorData!.espId)"
-        @saved="showSensorConfig = false; espStore.fetchDevice(configSensorData!.espId)"
+        @deleted="closeSensorConfigPanel(); espStore.fetchDevice(configSensorData!.espId)"
+        @saved="closeSensorConfigPanel(); espStore.fetchDevice(configSensorData!.espId)"
       />
     </SlideOver>
 
@@ -1173,7 +1200,7 @@ function formatTimeAgo(timestamp: number): string {
       :title="configActuatorData?.actuatorType || 'Aktor'"
       width="lg"
       elevation="high"
-      @close="showActuatorConfig = false"
+      @close="closeActuatorConfigPanel"
     >
       <ActuatorConfigPanel
         v-if="configActuatorData"
@@ -1181,8 +1208,8 @@ function formatTimeAgo(timestamp: number): string {
         :gpio="configActuatorData.gpio"
         :actuator-type="configActuatorData.actuatorType"
         :show-metadata="false"
-        @deleted="showActuatorConfig = false; espStore.fetchDevice(configActuatorData!.espId)"
-        @saved="showActuatorConfig = false; espStore.fetchDevice(configActuatorData!.espId)"
+        @deleted="closeActuatorConfigPanel(); espStore.fetchDevice(configActuatorData!.espId)"
+        @saved="closeActuatorConfigPanel(); espStore.fetchDevice(configActuatorData!.espId)"
       />
     </SlideOver>
 
