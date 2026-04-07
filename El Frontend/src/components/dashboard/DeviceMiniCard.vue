@@ -17,13 +17,14 @@ import type { ESPDevice } from '@/api/esp'
 import type { Component } from 'vue'
 import { computed, ref } from 'vue'
 import {
-  Settings2, MoreVertical, Trash2, ArrowRightLeft,
   Thermometer, Droplets, Droplet, Zap, Sun, Gauge, Wind, Activity, Waves, Cloud, ToggleLeft, Layers,
+  ToggleRight, GitBranch, Fan, Flame, Lightbulb, Cog, Power,
 } from 'lucide-vue-next'
 import ESPCardBase from '@/components/esp/ESPCardBase.vue'
 import { getESPStatus, getESPStatusDisplay, type ESPStatus } from '@/composables/useESPStatus'
-import { useUiStore } from '@/shared/stores/ui.store'
 import { groupSensorsByBaseType, type RawSensor } from '@/utils/sensorDefaults'
+import { getActuatorTypeInfo } from '@/utils/labels'
+import type { MockActuator } from '@/types'
 
 interface Props {
   device: ESPDevice
@@ -34,13 +35,8 @@ const props = defineProps<Props>()
 
 const emit = defineEmits<{
   (e: 'click', payload: { deviceId: string; originRect: DOMRect }): void
-  (e: 'settings', device: ESPDevice): void
-  (e: 'delete', deviceId: string): void
-  (e: 'change-zone', device: ESPDevice): void
-  (e: 'monitor-nav', device: ESPDevice): void
 }>()
 
-const uiStore = useUiStore()
 const cardRef = ref<InstanceType<typeof ESPCardBase> | null>(null)
 
 /** Device ID (needed locally for emit payloads) */
@@ -53,7 +49,6 @@ const deviceId = computed(() => {
 const deviceStatus = computed<ESPStatus>(() => getESPStatus(props.device))
 const statusDisplay = computed(() => getESPStatusDisplay(deviceStatus.value))
 const isDeviceOnline = computed(() => deviceStatus.value === 'online')
-const statusColor = computed(() => statusDisplay.value.color)
 const statusText = computed(() => statusDisplay.value.text)
 
 /** Relative time for stale/offline devices */
@@ -75,7 +70,8 @@ const lastSeenText = computed(() => {
 // ── Sensor Icon Map ──────────────────────────────────────────────────────
 const SENSOR_ICON_MAP: Record<string, Component> = {
   Thermometer, Droplet, Droplets, Zap, Sun, Gauge, Wind, Activity,
-  Waves, Cloud, ToggleLeft, Layers,
+  Waves, Cloud, ToggleLeft, Layers, ToggleRight, GitBranch, Fan,
+  Flame, Lightbulb, Cog, Power,
 }
 
 function resolveIcon(iconName: string): Component {
@@ -91,7 +87,7 @@ interface SensorDisplay {
   icon: Component
 }
 
-const MAX_VISIBLE_SENSORS = 4
+const MAX_VISIBLE_ROWS = 6
 
 /** Map quality to CSS color for value text */
 function qualityToValueColor(quality: 'normal' | 'warning' | 'stale' | 'unknown', isOnline: boolean): string {
@@ -118,7 +114,7 @@ const sensorDisplays = computed((): SensorDisplay[] => {
 
   for (const group of grouped) {
     for (const val of group.values) {
-      if (result.length >= MAX_VISIBLE_SENSORS) break
+      if (result.length >= MAX_VISIBLE_ROWS) break
       result.push({
         label: val.label,
         value: formatValue(val.value, val.quality),
@@ -127,19 +123,85 @@ const sensorDisplays = computed((): SensorDisplay[] => {
         icon: resolveIcon(val.icon),
       })
     }
-    if (result.length >= MAX_VISIBLE_SENSORS) break
+    if (result.length >= MAX_VISIBLE_ROWS) break
   }
 
   return result
 })
 
-/** Number of sensor value rows beyond the visible limit */
-const extraSensorsCount = computed(() => {
+/** Total number of grouped sensor values */
+const totalSensorValues = computed(() => {
   const sensors = props.device.sensors as RawSensor[] | undefined
   if (!sensors) return 0
   const grouped = groupSensorsByBaseType(sensors)
-  const totalValues = grouped.reduce((sum, g) => sum + g.values.length, 0)
-  return Math.max(0, totalValues - MAX_VISIBLE_SENSORS)
+  return grouped.reduce((sum, g) => sum + g.values.length, 0)
+})
+
+interface ActuatorDisplay {
+  label: string
+  value: string
+  valueColor: string
+  icon: Component
+}
+
+function resolveActuatorValue(actuator: MockActuator): string {
+  const type = actuator.hardware_type ?? actuator.actuator_type
+  if ((type === 'pwm' || type === 'fan') && actuator.pwm_value > 0) {
+    return `${Math.round(actuator.pwm_value)}%`
+  }
+  return actuator.state ? 'EIN' : 'AUS'
+}
+
+function resolveActuatorValueColor(actuator: MockActuator): string {
+  const type = actuator.hardware_type ?? actuator.actuator_type
+  if ((type === 'pwm' || type === 'fan') && actuator.pwm_value > 0) {
+    return 'var(--color-success)'
+  }
+  return actuator.state ? 'var(--color-success)' : 'var(--color-text-muted)'
+}
+
+function resolveActuatorIcon(type: string, hardwareType?: string | null): Component {
+  const { icon } = getActuatorTypeInfo(type, hardwareType)
+  return resolveIcon(icon)
+}
+
+const actuatorDisplays = computed((): ActuatorDisplay[] => {
+  const actuators = (props.device.actuators as MockActuator[] | undefined) ?? []
+  if (actuators.length === 0) return []
+
+  return actuators.map((actuator) => ({
+    label: actuator.name || getActuatorTypeInfo(actuator.actuator_type, actuator.hardware_type).label,
+    value: resolveActuatorValue(actuator),
+    valueColor: resolveActuatorValueColor(actuator),
+    icon: resolveActuatorIcon(actuator.actuator_type, actuator.hardware_type),
+  }))
+})
+
+const visibleSensorDisplays = computed(() => {
+  const availableRows = Math.max(0, MAX_VISIBLE_ROWS - (actuatorDisplays.value.length > 0 ? 1 : 0))
+  return sensorDisplays.value.slice(0, availableRows)
+})
+
+const visibleActuatorDisplays = computed(() => {
+  const usedRows = visibleSensorDisplays.value.length
+  const availableRows = Math.max(0, MAX_VISIBLE_ROWS - usedRows)
+  return actuatorDisplays.value.slice(0, availableRows)
+})
+
+const extraSensorsCount = computed(() => {
+  return Math.max(0, totalSensorValues.value - visibleSensorDisplays.value.length)
+})
+
+const extraActuatorsCount = computed(() => {
+  return Math.max(0, actuatorDisplays.value.length - visibleActuatorDisplays.value.length)
+})
+
+const dataOverflowText = computed(() => {
+  const parts: string[] = []
+  if (extraSensorsCount.value > 0) parts.push(`${extraSensorsCount.value} Sensoren`)
+  if (extraActuatorsCount.value > 0) parts.push(`${extraActuatorsCount.value} Aktoren`)
+  if (parts.length === 0) return ''
+  return `+${parts.join(' · ')} weitere`
 })
 
 /** Fallback text when no sensor data */
@@ -174,36 +236,6 @@ function handleClick() {
     emit('click', { deviceId: deviceId.value, originRect: rect })
   }
 }
-
-function handleSettings(event: MouseEvent) {
-  event.stopPropagation()
-  emit('settings', props.device)
-}
-
-function handleMonitorNav(event: MouseEvent) {
-  event.stopPropagation()
-  emit('monitor-nav', props.device)
-}
-
-function openCardMenu(event: MouseEvent) {
-  event.stopPropagation()
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  uiStore.openContextMenu(rect.right, rect.bottom, [
-    {
-      id: 'change-zone',
-      label: 'Zone ändern',
-      icon: ArrowRightLeft,
-      action: () => emit('change-zone', props.device),
-    },
-    {
-      id: 'delete',
-      label: 'Löschen',
-      icon: Trash2,
-      variant: 'danger',
-      action: () => emit('delete', deviceId.value),
-    },
-  ])
-}
 </script>
 
 <template>
@@ -222,12 +254,8 @@ function openCardMenu(event: MouseEvent) {
       <!-- Status line: dot + text + last seen + sensor count -->
       <div class="device-mini-card__status-line">
         <span
-          class="device-mini-card__status-dot"
-          :style="{ backgroundColor: statusColor }"
-        />
-        <span
-          class="device-mini-card__status-text"
-          :style="{ color: statusColor }"
+          class="device-mini-card__status-chip"
+          :class="`device-mini-card__status-chip--${deviceStatus}`"
         >{{ statusText }}</span>
         <span v-if="lastSeenText" class="device-mini-card__last-seen">· {{ lastSeenText }}</span>
         <span v-if="sensorCount > 0 || actuatorCount > 0" class="device-mini-card__sensor-count">{{ sensorCount }}S<template v-if="actuatorCount > 0"> / {{ actuatorCount }}A</template></span>
@@ -238,10 +266,16 @@ function openCardMenu(event: MouseEvent) {
         {{ subzoneName }}
       </div>
 
-      <!-- Sensor values with type icons (max 4, no spark-bars) -->
-      <div v-if="sensorDisplays.length > 0" class="device-mini-card__sensors">
+      <!-- Sensor + actuator values (stabile Hoehe, max 4 Zeilen) -->
+      <div
+        v-if="visibleSensorDisplays.length > 0 || visibleActuatorDisplays.length > 0"
+        class="device-mini-card__sensors"
+      >
+        <div v-if="visibleSensorDisplays.length > 0" class="device-mini-card__section-title">
+          Sensoren
+        </div>
         <div
-          v-for="(sensor, idx) in sensorDisplays"
+          v-for="(sensor, idx) in visibleSensorDisplays"
           :key="idx"
           class="device-mini-card__sensor"
         >
@@ -250,41 +284,32 @@ function openCardMenu(event: MouseEvent) {
           <span class="device-mini-card__sensor-value" :style="{ color: sensor.valueColor }">{{ sensor.value }}</span>
           <span class="device-mini-card__sensor-unit">{{ sensor.unit }}</span>
         </div>
-        <div v-if="extraSensorsCount > 0" class="device-mini-card__sensors-overflow">
-          +{{ extraSensorsCount }} weitere
+
+        <div
+          v-if="visibleActuatorDisplays.length > 0"
+          class="device-mini-card__section-title device-mini-card__section-title--actuator"
+        >
+          Aktoren
+        </div>
+        <div
+          v-for="(actuator, idx) in visibleActuatorDisplays"
+          :key="`act-${idx}`"
+          class="device-mini-card__sensor device-mini-card__sensor--actuator"
+        >
+          <component :is="actuator.icon" class="device-mini-card__sensor-icon device-mini-card__sensor-icon--actuator" />
+          <span class="device-mini-card__sensor-name" :title="actuator.label">{{ actuator.label }}</span>
+          <span class="device-mini-card__sensor-value" :style="{ color: actuator.valueColor }">{{ actuator.value }}</span>
+        </div>
+
+        <div v-if="dataOverflowText" class="device-mini-card__sensors-overflow">
+          {{ dataOverflowText }}
         </div>
       </div>
 
-      <!-- Fallback: sensor count text -->
-      <div v-else-if="sensorFallback" class="device-mini-card__values">
-        {{ sensorFallback }}
-      </div>
-
-      <!-- Action Row: Primary monitor link + settings + overflow -->
-      <div class="device-mini-card__actions" @click.stop>
-        <button
-          class="device-mini-card__action-btn device-mini-card__action-btn--primary"
-          title="Im Monitor anzeigen"
-          @click="handleMonitorNav($event)"
-        >
-          <Activity :size="13" />
-          <span class="device-mini-card__action-label">Monitor</span>
-        </button>
-        <span class="device-mini-card__actions-spacer" />
-        <button
-          class="device-mini-card__action-btn"
-          title="Konfigurieren"
-          @click="handleSettings($event)"
-        >
-          <Settings2 :size="13" />
-        </button>
-        <button
-          class="device-mini-card__action-btn"
-          title="Weitere Aktionen"
-          @click.stop="openCardMenu($event)"
-        >
-          <MoreVertical :size="13" />
-        </button>
+      <!-- Fallback: keeps card height stable -->
+      <div v-else class="device-mini-card__values">
+        <span v-if="sensorFallback">{{ sensorFallback }}</span>
+        <span v-else>Keine Sensoren oder Aktoren</span>
       </div>
     </template>
   </ESPCardBase>
@@ -294,17 +319,22 @@ function openCardMenu(event: MouseEvent) {
 /* ── Root overrides on ESPCardBase for mini card styling ── */
 .device-mini-card {
   background: var(--color-bg-tertiary);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3);
   cursor: pointer;
   transition:
     background var(--transition-fast),
     border-color var(--transition-fast),
     transform var(--transition-fast),
     box-shadow var(--transition-fast);
-  min-width: 150px;
+  min-width: 180px;
   max-width: 100%;
   position: relative;
   overflow: hidden;
+}
+
+.device-mini-card.esp-card-base {
+  border-left-width: 1px;
+  border-left-color: var(--glass-border);
 }
 
 /* Shimmer sweep on hover */
@@ -332,14 +362,14 @@ function openCardMenu(event: MouseEvent) {
 .device-mini-card:hover {
   background: var(--color-bg-quaternary);
   border-color: var(--glass-border-hover);
-  transform: translateY(-2px) scale(1.01);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.26);
   filter: brightness(1.05);
 }
 
 /* Tactile touch feedback */
 .device-mini-card:active {
-  transform: scale(0.97);
+  transform: scale(0.99);
   transition-duration: 60ms;
 }
 
@@ -416,19 +446,45 @@ function openCardMenu(event: MouseEvent) {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  font-size: var(--text-xs);
-  line-height: 1;
+  min-height: 20px;
 }
 
-.device-mini-card__status-dot {
-  width: 5px;
-  height: 5px;
+.device-mini-card__status-chip {
+  display: inline-flex;
+  align-items: center;
   border-radius: var(--radius-full);
-  flex-shrink: 0;
+  border: 1px solid var(--glass-border);
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 1.2;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.device-mini-card__status-text {
-  font-weight: 500;
+.device-mini-card__status-chip--online {
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+}
+
+.device-mini-card__status-chip--stale,
+.device-mini-card__status-chip--safemode {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+}
+
+.device-mini-card__status-chip--error {
+  color: var(--color-error);
+  border-color: color-mix(in srgb, var(--color-error) 40%, transparent);
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+}
+
+.device-mini-card__status-chip--offline,
+.device-mini-card__status-chip--unknown {
+  color: var(--color-text-muted);
+  border-color: var(--glass-border);
+  background: color-mix(in srgb, var(--color-bg-quaternary) 60%, transparent);
 }
 
 .device-mini-card__last-seen {
@@ -455,19 +511,37 @@ function openCardMenu(event: MouseEvent) {
   text-overflow: ellipsis;
   white-space: nowrap;
   opacity: 0.7;
+  margin-bottom: 2px;
 }
 
 /* ── Sensor values with icons and spark-bars ── */
 .device-mini-card__sensors {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+  min-height: 108px;
+  justify-content: flex-start;
+}
+
+.device-mini-card__section-title {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  font-weight: 600;
+  padding-top: 2px;
+}
+
+.device-mini-card__section-title--actuator {
+  margin-top: 2px;
+  border-top: 1px dashed var(--glass-border);
+  padding-top: 4px;
 }
 
 .device-mini-card__sensor {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
 }
 
 .device-mini-card__sensor-icon {
@@ -478,10 +552,19 @@ function openCardMenu(event: MouseEvent) {
   opacity: 0.7;
 }
 
+.device-mini-card__sensor--actuator .device-mini-card__sensor-name {
+  color: var(--color-text-primary);
+}
+
+.device-mini-card__sensor-icon--actuator {
+  color: var(--color-accent-bright);
+  opacity: 0.8;
+}
+
 .device-mini-card__sensor-name {
   flex: 1;
   min-width: 0;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -490,7 +573,7 @@ function openCardMenu(event: MouseEvent) {
 
 .device-mini-card__sensor-value {
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   color: var(--color-text-primary);
   min-width: 0;
@@ -499,15 +582,15 @@ function openCardMenu(event: MouseEvent) {
 
 .device-mini-card__sensor-unit {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 10px;
   color: var(--color-text-secondary);
   flex-shrink: 0;
 }
 
 .device-mini-card__sensors-overflow {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--color-text-muted);
-  padding-left: 14px;
+  padding-left: 16px;
 }
 
 /* ── Stale/offline state ── */
@@ -521,81 +604,11 @@ function openCardMenu(event: MouseEvent) {
 
 /* Fallback text */
 .device-mini-card__values {
-  font-size: var(--text-xs);
-  font-family: var(--font-mono);
-  color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ── Action Row ── */
-.device-mini-card__actions {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding-top: var(--space-1);
-  border-top: 1px solid transparent;
-  margin-top: auto;
-  opacity: 0.4;
-  transition: opacity var(--transition-fast), border-color var(--transition-fast);
-}
-
-.device-mini-card:hover .device-mini-card__actions,
-.device-mini-card:focus-within .device-mini-card__actions {
-  opacity: 1;
-  border-top-color: var(--glass-border);
-}
-
-/* Touch devices: always fully visible */
-@media (hover: none) {
-  .device-mini-card__actions {
-    opacity: 1;
-    border-top-color: var(--glass-border);
-  }
-}
-
-.device-mini-card__actions-spacer {
-  flex: 1;
-}
-
-.device-mini-card__action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  min-width: 44px;
-  min-height: 44px;
-  padding: 2px var(--space-1);
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 10px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: color var(--transition-fast), background var(--transition-fast);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.device-mini-card__action-btn:hover {
-  color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-/* Primary action: Monitor link with accent color */
-.device-mini-card__action-btn--primary {
-  color: var(--color-accent-bright);
-}
-
-.device-mini-card__action-btn--primary:hover {
-  color: var(--color-accent-bright);
-  background: rgba(96, 165, 250, 0.1);
-}
-
-.device-mini-card__action-label {
-  line-height: 1;
+  min-height: 108px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
 }
 
 /* Mobile: allow full width */

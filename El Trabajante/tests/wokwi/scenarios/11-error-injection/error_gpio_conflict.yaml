@@ -13,7 +13,9 @@ name: Error Injection - GPIO Conflict
 version: 1
 steps:
   - wait-serial: "Phase 5: Actuator System READY"
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "REGISTRATION"
+  - wait-serial: "heartbeat"
   # External MQTT config injection happens here (sleep 25 in CI)
   # Two sensors on GPIO 4 in one message → second sensor triggers GPIO_CONFLICT
   - wait-serial: "ConfigResponse published"

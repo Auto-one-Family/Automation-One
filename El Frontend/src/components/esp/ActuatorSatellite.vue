@@ -16,6 +16,7 @@ import { computed, ref } from 'vue'
 import { Power, ToggleRight, Waves, GitBranch, Fan, Flame, Lightbulb, Cog } from 'lucide-vue-next'
 import { Badge } from '@/shared/design'
 import { getActuatorTypeInfo } from '@/utils/labels'
+import { formatRelativeTime } from '@/utils/formatters'
 import { useDragStateStore } from '@/shared/stores/dragState.store'
 
 interface Props {
@@ -33,6 +34,14 @@ interface Props {
   state: boolean
   /** PWM value (0-255, if applicable) */
   pwmValue?: number
+  /** Last acknowledged command timestamp */
+  lastCommandAt?: string | null
+  /** Last logic trigger timestamp */
+  lastTriggeredAt?: string | null
+  /** Raw trigger reason from rule execution */
+  triggerReason?: string | null
+  /** Rule name that triggered the last execution */
+  triggerRuleName?: string | null
   /** Whether actuator is emergency stopped */
   emergencyStopped?: boolean
   /** Whether this actuator is selected/highlighted */
@@ -114,6 +123,52 @@ const scopeTooltip = computed(() => {
   return ''
 })
 
+function humanizeTriggerReason(reason: string | null | undefined): string | null {
+  if (!reason) return null
+
+  const normalized = reason.trim().toLowerCase()
+  if (!normalized) return null
+
+  if (normalized.includes('sensor') || normalized.includes('threshold')) {
+    return 'Sensorbedingung erfuellt'
+  }
+  if (normalized.includes('hysteresis')) {
+    return 'Hysterese-Bedingung erfuellt'
+  }
+  if (normalized.includes('time') || normalized.includes('schedule')) {
+    return 'Zeitfenster aktiv'
+  }
+  if (normalized.includes('manual')) {
+    return 'Manuell ausgeloest'
+  }
+  if (normalized.includes('startup') || normalized.includes('boot')) {
+    return 'Systemstart'
+  }
+
+  const cleaned = reason.split('_').join(' ').trim()
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1)
+}
+
+const lastActionText = computed(() => {
+  if (props.lastTriggeredAt) return formatRelativeTime(props.lastTriggeredAt)
+  if (props.lastCommandAt) return formatRelativeTime(props.lastCommandAt)
+  return null
+})
+
+const triggerReasonLabel = computed(() => humanizeTriggerReason(props.triggerReason))
+
+const hasContextInfo = computed(() =>
+  Boolean(lastActionText.value || triggerReasonLabel.value || props.triggerRuleName)
+)
+
+const cardTitle = computed(() => {
+  const parts = [`${props.name || actuatorInfo.value.label} (GPIO ${props.gpio})`]
+  if (lastActionText.value) parts.push(`Zuletzt: ${lastActionText.value}`)
+  if (props.triggerRuleName) parts.push(`Regel: ${props.triggerRuleName}`)
+  if (triggerReasonLabel.value) parts.push(`Grund: ${triggerReasonLabel.value}`)
+  return parts.join('\n')
+})
+
 // Status display
 const statusDisplay = computed(() => {
   if (props.emergencyStopped) {
@@ -181,46 +236,70 @@ function handleDragEnd(event: DragEvent) {
         'actuator-satellite--active': state && !emergencyStopped,
         'actuator-satellite--emergency': emergencyStopped,
         'actuator-satellite--dragging': isDragging,
-        'actuator-satellite--draggable': effectiveDraggable
+        'actuator-satellite--draggable': effectiveDraggable,
+        'actuator-satellite--with-context': hasContextInfo,
       }
     ]"
     :data-esp-id="espId"
     :data-gpio="gpio"
     data-satellite-type="actuator"
     :draggable="effectiveDraggable"
-    :title="`${name || actuatorInfo.label} (GPIO ${gpio})`"
+    :title="cardTitle"
     @click="handleClick"
     @dragstart="handleDragStart"
     @dragend="handleDragEnd"
   >
-    <!-- Compact vertical layout: Icon → Status → Label -->
-    <div
-      class="actuator-satellite__icon"
-      :class="[
-        `actuator-satellite__icon--${statusDisplay.variant}`,
-        { 'actuator-satellite__icon--active': state && !emergencyStopped }
-      ]"
-    >
-      <component :is="actuatorIcon" class="w-4 h-4" />
+    <div class="actuator-satellite__top">
+      <div
+        class="actuator-satellite__icon"
+        :class="[
+          `actuator-satellite__icon--${statusDisplay.variant}`,
+          { 'actuator-satellite__icon--active': state && !emergencyStopped }
+        ]"
+      >
+        <component :is="actuatorIcon" class="w-4 h-4" />
+      </div>
+
+      <div class="actuator-satellite__main">
+        <div class="actuator-satellite__title-row">
+          <span class="actuator-satellite__label" :title="name || actuatorInfo.label">
+            {{ name || actuatorInfo.label }}
+          </span>
+          <span class="actuator-satellite__gpio-badge">GPIO {{ gpio }}</span>
+        </div>
+
+        <div class="actuator-satellite__meta-row">
+          <Badge
+            :variant="statusDisplay.variant"
+            size="xs"
+            :pulse="state && !emergencyStopped"
+            class="actuator-satellite__badge"
+          >
+            {{ statusDisplay.text }}
+          </Badge>
+
+          <span
+            v-if="scopeBadge"
+            :class="['actuator-satellite__scope-badge', scopeBadge.cls]"
+            :title="scopeTooltip"
+          >
+            {{ scopeBadge.text }}
+          </span>
+        </div>
+      </div>
     </div>
 
-    <!-- Status Badge (prominent) -->
-    <Badge
-      :variant="statusDisplay.variant"
-      size="xs"
-      :pulse="state && !emergencyStopped"
-      class="actuator-satellite__badge"
-    >
-      {{ statusDisplay.text }}
-    </Badge>
-
-    <!-- Scope Badge (T13-R3 WP4) -->
-    <span v-if="scopeBadge" :class="['actuator-satellite__scope-badge', scopeBadge.cls]" :title="scopeTooltip">{{ scopeBadge.text }}</span>
-
-    <!-- Label (compact) -->
-    <span class="actuator-satellite__label" :title="name || actuatorInfo.label">
-      {{ name || actuatorInfo.label }}
-    </span>
+    <div v-if="hasContextInfo" class="actuator-satellite__context">
+      <span v-if="lastActionText" class="actuator-satellite__context-line">
+        Zuletzt: {{ lastActionText }}
+      </span>
+      <span v-if="triggerRuleName" class="actuator-satellite__context-line actuator-satellite__context-line--rule">
+        {{ triggerRuleName }}
+      </span>
+      <span v-if="triggerReasonLabel" class="actuator-satellite__context-line">
+        {{ triggerReasonLabel }}
+      </span>
+    </div>
 
     <!-- Connection indicator (if has connections) -->
     <div v-if="showConnections" class="actuator-satellite__connection-indicator" />
@@ -237,21 +316,28 @@ function handleDragEnd(event: DragEvent) {
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.5rem;
+  align-items: stretch;
+  gap: 0.3125rem;
+  padding: 0.5625rem;
   background: rgba(30, 32, 40, 0.9);
   border: 1px solid var(--glass-border);
   border-radius: 0.5rem;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  min-width: 52px;
-  max-width: 180px;
+  width: 100%;
+  min-width: 0;
+  min-height: 88px;
+  max-width: none;
   backdrop-filter: blur(10px);
   /* Enhanced floating effect */
   box-shadow:
     0 2px 8px rgba(0, 0, 0, 0.2),
     0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.actuator-satellite--with-context {
+  min-height: 112px;
+  padding: 0.625rem;
 }
 
 .actuator-satellite:hover {
@@ -298,6 +384,14 @@ function handleDragEnd(event: DragEvent) {
   50% { opacity: 0.7; }
 }
 
+/* Top section with icon + content */
+.actuator-satellite__top {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+}
+
 /* Icon - compact circle */
 .actuator-satellite__icon {
   width: 2rem;
@@ -308,6 +402,30 @@ function handleDragEnd(event: DragEvent) {
   border-radius: 50%;
   flex-shrink: 0;
   transition: all 0.2s;
+}
+
+.actuator-satellite__main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.actuator-satellite__title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.actuator-satellite__meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.375rem;
+  min-width: 0;
 }
 
 .actuator-satellite__icon--success {
@@ -336,15 +454,15 @@ function handleDragEnd(event: DragEvent) {
 
 /* Badge - centered */
 .actuator-satellite__badge {
-  /* Badge styling handled by component */
+  align-self: flex-start;
 }
 
 /* Label - compact, up to 2 lines */
 .actuator-satellite__label {
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   color: var(--color-text-secondary);
-  text-align: center;
+  text-align: left;
   max-width: 100%;
   line-height: 1.2;
   /* Allow up to 2 lines for longer names */
@@ -354,6 +472,45 @@ function handleDragEnd(event: DragEvent) {
   overflow: hidden;
   text-overflow: ellipsis;
   max-height: 2.4em;
+}
+
+.actuator-satellite__gpio-badge {
+  font-family: var(--font-mono);
+  font-size: 0.5rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.0625rem 0.25rem;
+  border-radius: 0.125rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.actuator-satellite__context {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+  width: 100%;
+  margin-top: 0.125rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.actuator-satellite__context-line {
+  width: 100%;
+  text-align: left;
+  color: var(--color-text-muted);
+  font-size: 0.5625rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.actuator-satellite__context-line--rule {
+  color: var(--color-text-secondary);
+  font-weight: 500;
 }
 
 /* Scope badges (T13-R3 WP4) */

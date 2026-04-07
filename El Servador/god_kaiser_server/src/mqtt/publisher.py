@@ -110,6 +110,7 @@ class Publisher:
         esp_id: str,
         gpio: int,
         command: str = "measure",
+        correlation_id: Optional[str] = None,
         retry: bool = True,
     ) -> tuple[bool, str]:
         """
@@ -119,6 +120,7 @@ class Publisher:
             esp_id: Target ESP device ID
             gpio: Target sensor GPIO pin
             command: Command type ("measure", etc.)
+            correlation_id: Optional stable contract key (when omitted, UUID is generated)
             retry: Whether to retry on failure
 
         Returns:
@@ -126,13 +128,16 @@ class Publisher:
         """
         import uuid
 
-        request_id = str(uuid.uuid4())
+        request_id = str(correlation_id).strip() if correlation_id else str(uuid.uuid4())
 
         topic = TopicBuilder.build_sensor_command_topic(esp_id, gpio)
 
         payload = {
             "command": command,
             "request_id": request_id,
+            # Keep sensor-measure contract aligned with actuator command contract.
+            "correlation_id": request_id,
+            "intent_id": request_id,
             "timestamp": int(time.time()),
         }
 

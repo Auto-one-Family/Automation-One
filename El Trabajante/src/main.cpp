@@ -151,7 +151,8 @@ bool parseAndConfigureSensor(const JsonObjectConst& sensor_obj);
 // Phase 4: Version with failure output parameter for aggregated error reporting
 bool parseAndConfigureSensorWithTracking(const JsonObjectConst& sensor_obj, ConfigFailureItem* failure_out);
 bool handleActuatorConfig(JsonObject doc, const String& correlationId);
-bool handleSensorCommand(const String& topic, const String& payload);  // Phase 2C
+SensorCommandExecutionResult handleSensorCommand(const String& topic, const String& payload,
+                                                 const IntentMetadata& metadata);  // Phase 2C
 bool handleOfflineRulesConfig(JsonObject doc, const String& correlationId);  // SAFETY-P4
 void checkServerAckTimeout();                                           // SAFETY-RTOS M1
 bool evaluatePendingExit(const char* trigger_source);                   // CONFIG_PENDING_AFTER_RESET central exit gate
@@ -610,6 +611,7 @@ void routeIncomingMessage(const char* t, const char* p) {
         CommandAdmissionContext admission_context{
             mqttClient.isRegistrationConfirmed(),
             isConfigPendingAfterResetState(),
+            g_system_config.current_state == STATE_PENDING_APPROVAL,
             isRuntimeDegradedState(),
             false,
             isRecoveryIntentAllowed(topic.c_str(), payload.c_str()),
@@ -688,6 +690,7 @@ void routeIncomingMessage(const char* t, const char* p) {
         CommandAdmissionContext admission_context{
             mqttClient.isRegistrationConfirmed(),
             isConfigPendingAfterResetState(),
+            g_system_config.current_state == STATE_PENDING_APPROVAL,
             isRuntimeDegradedState(),
             g_system_config.current_state == STATE_SAFE_MODE,
             isRecoveryIntentAllowed(topic.c_str(), payload.c_str()),
@@ -728,9 +731,32 @@ void routeIncomingMessage(const char* t, const char* p) {
     sensor_command_prefix.replace("/0/command", "/");
     if (topic.startsWith(sensor_command_prefix) && topic.endsWith("/command")) {
         IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), "sensor");
+        recordIntentChainStage(metadata, "ingress_seen", "command", "INGRESS", "sensor command ingress");
+        DynamicJsonDocument sensor_doc(384);
+        DeserializationError sensor_parse_error = deserializeJson(sensor_doc, payload);
+        if (sensor_parse_error) {
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "rejected",
+                                 "INVALID_JSON",
+                                 "Sensor command payload is not valid JSON",
+                                 false);
+            return;
+        }
+        String sensor_command = sensor_doc["command"] | "";
+        if (sensor_command != "measure") {
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "rejected",
+                                 "UNKNOWN_COMMAND",
+                                 String("Unsupported sensor command: ") + sensor_command,
+                                 false);
+            return;
+        }
         CommandAdmissionContext admission_context{
             mqttClient.isRegistrationConfirmed(),
             isConfigPendingAfterResetState(),
+            g_system_config.current_state == STATE_PENDING_APPROVAL,
             isRuntimeDegradedState(),
             g_system_config.current_state == STATE_SAFE_MODE,
             isRecoveryIntentAllowed(topic.c_str(), payload.c_str()),
@@ -738,6 +764,11 @@ void routeIncomingMessage(const char* t, const char* p) {
         };
         CommandAdmissionDecision admission = shouldAcceptCommand(CommandSubtype::SENSOR, admission_context);
         if (!admission.accepted) {
+            recordIntentChainStage(metadata,
+                                   "admission_reject",
+                                   "command",
+                                   admission.code,
+                                   admission.reason_code);
             LOG_W(TAG, String("[ADMISSION] Sensor command rejected: ") + admission.reason_code);
             publishIntentOutcome("command",
                                  metadata,
@@ -747,6 +778,11 @@ void routeIncomingMessage(const char* t, const char* p) {
                                  false);
             return;
         }
+        recordIntentChainStage(metadata,
+                               "admission_accept",
+                               "command",
+                               admission.code,
+                               admission.reason_code);
         if (!queueSensorCommand(topic.c_str(), payload.c_str(), &metadata)) {
             publishIntentOutcome("command",
                                  metadata,
@@ -1050,6 +1086,7 @@ void routeIncomingMessage(const char* t, const char* p) {
         CommandAdmissionContext admission_context{
             mqttClient.isRegistrationConfirmed(),
             isConfigPendingAfterResetState(),
+            g_system_config.current_state == STATE_PENDING_APPROVAL,
             isRuntimeDegradedState(),
             false,
             isRecoveryIntentAllowed(topic.c_str(), payload.c_str()),
@@ -2175,13 +2212,18 @@ void routeIncomingMessage(const char* t, const char* p) {
                 return;
             }
 
-            if (g_system_config.current_state == STATE_PENDING_APPROVAL) {
+            if (g_system_config.current_state == STATE_PENDING_APPROVAL ||
+                g_system_config.current_state == STATE_ERROR) {
                 LOG_I(TAG, "╔════════════════════════════════════════╗");
                 LOG_I(TAG, "║   DEVICE APPROVED BY SERVER            ║");
                 LOG_I(TAG, "╚════════════════════════════════════════╝");
-                LOG_I(TAG, "Transitioning from PENDING_APPROVAL to OPERATIONAL");
+                if (g_system_config.current_state == STATE_ERROR) {
+                    LOG_W(TAG, "Recovering from ERROR state after valid approval ACK");
+                }
+                LOG_I(TAG, "Transitioning to OPERATIONAL");
 
                 g_system_config.current_state = STATE_OPERATIONAL;
+                g_system_config.safe_mode_reason = "";
                 configManager.saveSystemConfig(g_system_config);
 
                 LOG_I(TAG, "  → Sensors/Actuators now ENABLED");
@@ -3931,8 +3973,9 @@ bool handleOfflineRulesConfig(JsonObject doc, const String& correlationId) {
  * Topic: kaiser/{id}/esp/{esp_id}/sensor/{gpio}/command
  * Payload: {"command": "measure", "request_id": "req_12345"}
  */
-bool handleSensorCommand(const String& topic, const String& payload,
-                         const IntentMetadata& metadata) {
+SensorCommandExecutionResult handleSensorCommand(const String& topic, const String& payload,
+                                                 const IntentMetadata& metadata) {
+  SensorCommandExecutionResult result{false, "failed", "EXECUTE_FAIL", "Sensor command execution failed", true};
   LOG_I(TAG, "Sensor command received: " + topic);
 
   // Extract GPIO from topic
@@ -3942,7 +3985,9 @@ bool handleSensorCommand(const String& topic, const String& payload,
 
   if (sensor_pos < 0 || command_pos < 0 || sensor_pos >= command_pos) {
     LOG_E(TAG, "Invalid sensor command topic format: " + topic);
-    return false;
+    result.code = "INVALID_TOPIC";
+    result.reason = "Invalid sensor command topic format";
+    return result;
   }
 
   // Extract GPIO string between "/sensor/" and "/command"
@@ -3951,34 +3996,59 @@ bool handleSensorCommand(const String& topic, const String& payload,
 
   if (gpio == 0 && gpio_str != "0") {
     LOG_E(TAG, "Failed to parse GPIO from topic: " + topic);
-    return false;
+    result.code = "INVALID_GPIO";
+    result.reason = "Failed to parse GPIO from topic";
+    return result;
   }
 
   // Parse JSON payload
-  DynamicJsonDocument doc(256);
+  DynamicJsonDocument doc(512);
   DeserializationError error = deserializeJson(doc, payload);
 
   if (error) {
     LOG_E(TAG, "Failed to parse sensor command JSON: " + String(error.c_str()));
-    return false;
+    result.code = "INVALID_JSON";
+    result.reason = "Failed to parse sensor command JSON";
+    return result;
   }
 
   String command = doc["command"] | "";
   String request_id = doc["request_id"] | "";
 
   if (command == "measure") {
-    LOG_I(TAG, "Manual measurement requested for GPIO " + String(gpio));
+    uint32_t timeout_ms = 5000;
+    if (!doc["timeout_ms"].isNull()) {
+      uint32_t requested_timeout = doc["timeout_ms"].as<uint32_t>();
+      // Keep runtime deterministic and prevent pathological long blocking calls.
+      if (requested_timeout < 1) {
+        timeout_ms = 1;
+      } else if (requested_timeout > 60000) {
+        timeout_ms = 60000;
+      } else {
+        timeout_ms = requested_timeout;
+      }
+    }
+    LOG_I(TAG, "Manual measurement requested for GPIO " + String(gpio) +
+                   " (timeout_ms=" + String(timeout_ms) + ")");
 
-    bool success = sensorManager.triggerManualMeasurement(gpio);
+    ManualMeasurementResult measurement = sensorManager.triggerManualMeasurement(gpio, timeout_ms);
+    bool success = measurement.measurement_ok && measurement.publish_ok && !measurement.timeout_reached;
 
     // Send response with request_id and intent metadata (E-P4)
     if (request_id.length() > 0) {
       String response_topic = String(TopicBuilder::buildSensorResponseTopic(gpio));
-      DynamicJsonDocument response(384);
+      DynamicJsonDocument response(512);
       response["request_id"] = request_id;
       response["gpio"] = gpio;
       response["command"] = "measure";
       response["success"] = success;
+      response["measurement_ok"] = measurement.measurement_ok;
+      response["publish_ok"] = measurement.publish_ok;
+      response["timeout"] = measurement.timeout_reached;
+      response["reason_code"] = measurement.reason_code;
+      response["quality"] = measurement.quality;
+      response["sensor_type"] = measurement.sensor_type;
+      response["raw"] = measurement.raw_value;
       response["ts"] = timeManager.getUnixTimestamp();
       response["seq"] = mqttClient.getNextSeq();
 
@@ -4000,14 +4070,34 @@ bool handleSensorCommand(const String& topic, const String& payload,
 
     if (success) {
       LOG_I(TAG, "Manual measurement completed for GPIO " + String(gpio));
-      return true;
+      result.ok = true;
+      result.outcome = "applied";
+      result.code = "NONE";
+      result.reason = "Sensor measurement delivered";
+      result.retryable = false;
+      return result;
     } else {
       LOG_W(TAG, "Manual measurement failed for GPIO " + String(gpio));
-      return false;
+      if (measurement.timeout_reached) {
+        result.ok = false;
+        result.outcome = "expired";
+        result.code = "MEASURE_TIMEOUT";
+        result.reason = "Manual measurement exceeded timeout";
+        result.retryable = true;
+        return result;
+      }
+      result.ok = false;
+      result.outcome = "failed";
+      result.code = measurement.reason_code.length() > 0 ? measurement.reason_code : "EXECUTE_FAIL";
+      result.reason = "Manual measurement failed before durable delivery";
+      result.retryable = true;
+      return result;
     }
   } else {
     LOG_W(TAG, "Unknown sensor command: " + command);
-    return false;
+    result.code = "UNKNOWN_COMMAND";
+    result.reason = "Unknown sensor command";
+    return result;
   }
 }
 

@@ -41,7 +41,7 @@ steps:
   - wait-serial: "Phase 1: Core Infrastructure READY"
 
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # Initial heartbeat should show I2C system pins
   # (auto-reserved during GPIO init)

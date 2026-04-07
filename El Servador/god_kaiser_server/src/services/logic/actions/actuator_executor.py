@@ -123,9 +123,30 @@ class ActuatorActionExecutor(BaseActionExecutor):
                 duration=duration,
                 issued_by=issued_by,
             )
-            success = cmd_result.success
 
-            if success:
+            if cmd_result.success and not cmd_result.command_sent:
+                # No-op: actuator already in desired state — skip silently.
+                # This prevents log spam and redundant WS broadcasts when the
+                # rule engine re-evaluates while the actuator is still running.
+                logger.debug(
+                    "Actuator noop skipped: %s already %s on %s:GPIO%s",
+                    esp_id,
+                    command,
+                    esp_id,
+                    gpio,
+                )
+                return ActionResult(
+                    success=True,
+                    message=f"Actuator noop skipped: {command} on {esp_id}:GPIO{gpio} (already in desired state)",
+                    data={
+                        "esp_id": esp_id,
+                        "gpio": gpio,
+                        "command": command,
+                        "noop": True,
+                    },
+                )
+
+            if cmd_result.success:
                 message = f"Actuator command executed: {command} on {esp_id}:GPIO{gpio}"
                 if duration > 0:
                     message += f" (duration: {duration}s)"

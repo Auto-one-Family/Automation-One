@@ -23,6 +23,7 @@ import {
   type NotificationListFilters,
 } from '@/api/notifications'
 import { createLogger } from '@/utils/logger'
+import { useAuthStore } from '@/shared/stores/auth.store'
 
 const logger = createLogger('NotificationInboxStore')
 
@@ -61,6 +62,15 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
   const hasMore = ref(true)
   const currentPage = ref(1)
   const totalItems = ref(0)
+
+  function isCurrentUserEvent(data: Record<string, unknown>): boolean {
+    const eventUserIdRaw = data.user_id as string | number | undefined
+    const eventUserId = eventUserIdRaw != null ? String(eventUserIdRaw) : null
+    if (eventUserId == null) return true
+    const authStore = useAuthStore()
+    if (!authStore.user?.id) return true
+    return String(authStore.user.id) === eventUserId
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Computed
@@ -275,6 +285,8 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
    * Adds new notification at the top of the list.
    */
   function handleWSNotificationNew(data: Record<string, unknown>): void {
+    if (!isCurrentUserEvent(data)) return
+
     const notification: NotificationDTO = {
       id: data.id as string,
       user_id: data.user_id as number,
@@ -330,6 +342,8 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
    * Updates existing notification (e.g., after mark-as-read).
    */
   function handleWSNotificationUpdated(data: Record<string, unknown>): void {
+    if (!isCurrentUserEvent(data)) return
+
     const id = data.id as string
     const idx = notifications.value.findIndex((n) => n.id === id)
     if (idx < 0) return
@@ -365,6 +379,8 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
    * Authoritative badge count from server.
    */
   function handleWSUnreadCount(data: Record<string, unknown>): void {
+    if (!isCurrentUserEvent(data)) return
+
     unreadCount.value = (data.unread_count as number) || 0
     highestSeverity.value = (data.highest_severity as NotificationSeverity) || null
 

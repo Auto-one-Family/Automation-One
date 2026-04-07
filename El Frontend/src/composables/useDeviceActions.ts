@@ -25,6 +25,15 @@ import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('DeviceActions')
 
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
 export function useDeviceActions(device: () => ESPDevice) {
   const espStore = useEspStore()
   const toast = useToast()
@@ -48,26 +57,44 @@ export function useDeviceActions(device: () => ESPDevice) {
     const status = device().status || 'unknown'
     if (status === 'online') return { label: 'Online', variant: 'success' }
     if (status === 'offline') return { label: 'Offline', variant: 'gray' }
-    if (status === 'error') return { label: 'Error', variant: 'danger' }
-    return { label: 'Unknown', variant: 'gray' }
+    if (status === 'error') return { label: 'Fehler', variant: 'danger' }
+    return { label: 'Unbekannt', variant: 'gray' }
   })
 
   // ── WiFi ───────────────────────────────────────────────────────────
 
-  const wifiInfo = computed<WifiStrengthInfo>(() => getWifiStrength(device().wifi_rssi))
+  const resolvedWifiRssi = computed<number | null>(() => {
+    const d = device()
+    const metadata = (d.metadata || {}) as Record<string, unknown>
+
+    return (
+      toFiniteNumber(d.wifi_rssi) ??
+      toFiniteNumber((d as Record<string, unknown>).rssi) ??
+      toFiniteNumber(metadata.last_wifi_rssi) ??
+      toFiniteNumber(metadata.wifi_rssi) ??
+      null
+    )
+  })
+
+  const wifiInfo = computed<WifiStrengthInfo>(() => getWifiStrength(resolvedWifiRssi.value))
 
   const wifiColorClass = computed(() => {
     switch (wifiInfo.value.quality) {
       case 'excellent': case 'good': return 'wifi--good'
       case 'fair': return 'wifi--fair'
+      case 'unknown': return 'wifi--unknown'
       default: return 'wifi--poor'
     }
   })
 
+  const wifiDisplayLabel = computed(() =>
+    wifiInfo.value.quality === 'unknown' ? 'Keine Daten' : wifiInfo.value.label
+  )
+
   const wifiTooltip = computed(() =>
-    device().wifi_rssi
-      ? `WiFi: ${device().wifi_rssi} dBm (${wifiInfo.value.label})`
-      : 'WiFi: Keine Daten'
+    resolvedWifiRssi.value !== null
+      ? `WiFi: ${resolvedWifiRssi.value} dBm (${wifiInfo.value.label})`
+      : 'WiFi: Keine Telemetrie'
   )
 
   // ── Heartbeat ──────────────────────────────────────────────────────
@@ -172,6 +199,7 @@ export function useDeviceActions(device: () => ESPDevice) {
     // WiFi
     wifiInfo,
     wifiColorClass,
+    wifiDisplayLabel,
     wifiTooltip,
 
     // Heartbeat

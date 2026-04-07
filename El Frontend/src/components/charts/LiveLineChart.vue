@@ -88,6 +88,62 @@ const props = withDefaults(defineProps<Props>(), {
   yMax: undefined,
 })
 
+const sensorRange = computed(() => {
+  const config = props.sensorType ? SENSOR_TYPE_CONFIG[props.sensorType] : undefined
+  const min = props.yMin ?? config?.min
+  const max = props.yMax ?? config?.max
+  return {
+    min: Number.isFinite(min) ? min : undefined,
+    max: Number.isFinite(max) ? max : undefined,
+  }
+})
+
+/**
+ * Compact mode should still be an "at a glance" sparkline.
+ * We therefore avoid full-range flattening while keeping sane bounds.
+ */
+const compactYBounds = computed(() => {
+  if (!props.compact) return null
+
+  const values = dataBuffer.value
+    .map(point => point.value)
+    .filter((value): value is number => Number.isFinite(value))
+
+  if (values.length === 0) return null
+
+  const dataMin = Math.min(...values)
+  const dataMax = Math.max(...values)
+  const dataSpan = dataMax - dataMin
+  const rangeSpan = sensorRange.value.min != null && sensorRange.value.max != null
+    ? Math.max(sensorRange.value.max - sensorRange.value.min, 0)
+    : 0
+
+  // Keep some minimum visual range to avoid noisy over-amplification.
+  const minVisualSpan = Math.max(rangeSpan * 0.03, 0.2)
+  const targetSpan = Math.max(dataSpan, minVisualSpan)
+  const padding = targetSpan * 0.15
+
+  let min = dataMin - padding
+  let max = dataMax + padding
+
+  if (dataSpan < minVisualSpan) {
+    const extra = (minVisualSpan - dataSpan) / 2
+    min -= extra
+    max += extra
+  }
+
+  if (sensorRange.value.min != null) min = Math.max(min, sensorRange.value.min)
+  if (sensorRange.value.max != null) max = Math.min(max, sensorRange.value.max)
+
+  if (max <= min) {
+    const center = values[values.length - 1] ?? dataMin
+    min = center - minVisualSpan / 2
+    max = center + minVisualSpan / 2
+  }
+
+  return { min, max }
+})
+
 // Internal data buffer
 const dataBuffer = shallowRef<ChartDataPoint[]>([...props.data])
 
@@ -109,7 +165,8 @@ const chartData = computed(() => ({
     borderWidth: props.compact ? 1.5 : 2,
     pointRadius: 0,
     pointHitRadius: props.compact ? 0 : 8,
-    tension: 0.3,
+    tension: props.compact ? 0.2 : 0.3,
+    cubicInterpolationMode: 'monotone' as const,
     fill: props.fill,
   }],
 }))
@@ -225,15 +282,15 @@ const chartOptions = computed(() => {
       },
       y: {
         display: !isCompact,
-        // Y-axis range: explicit props > SENSOR_TYPE_CONFIG lookup > auto
-        ...(props.yMin != null ? { suggestedMin: props.yMin }
-          : props.sensorType && SENSOR_TYPE_CONFIG[props.sensorType]
-            ? { suggestedMin: SENSOR_TYPE_CONFIG[props.sensorType].min }
-            : {}),
-        ...(props.yMax != null ? { suggestedMax: props.yMax }
-          : props.sensorType && SENSOR_TYPE_CONFIG[props.sensorType]
-            ? { suggestedMax: SENSOR_TYPE_CONFIG[props.sensorType].max }
-            : {}),
+        ...(isCompact && compactYBounds.value
+          ? { min: compactYBounds.value.min, max: compactYBounds.value.max }
+          : {}),
+        ...(!isCompact && sensorRange.value.min != null
+          ? { suggestedMin: sensorRange.value.min }
+          : {}),
+        ...(!isCompact && sensorRange.value.max != null
+          ? { suggestedMax: sensorRange.value.max }
+          : {}),
         grid: {
           display: !isCompact && props.showGrid,
           color: 'rgba(29, 29, 42, 0.8)',

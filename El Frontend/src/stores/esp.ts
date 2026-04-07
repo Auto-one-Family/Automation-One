@@ -1109,14 +1109,39 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       }
 
       const dataRec = data as Record<string, unknown>
+      const metrics = (dataRec.metrics as Record<string, unknown> | undefined) || undefined
+      const pickNumeric = (...candidates: unknown[]): number | undefined => {
+        for (const candidate of candidates) {
+          if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate
+          if (typeof candidate === 'string' && candidate.trim().length > 0) {
+            const parsed = Number(candidate)
+            if (Number.isFinite(parsed)) return parsed
+          }
+        }
+        return undefined
+      }
+      const resolvedHeap = pickNumeric(
+        dataRec.heap_free,
+        dataRec.heap,
+        dataRec.free_heap,
+        metrics?.heap_free,
+        metrics?.heap,
+        metrics?.free_heap,
+      )
+      const resolvedWifiRssi = pickNumeric(
+        dataRec.wifi_rssi,
+        dataRec.rssi,
+        metrics?.wifi_rssi,
+        metrics?.rssi,
+      )
       const runtimeHealthView = normalizeEspHealthPayload(dataRec)
 
       // Replace device with updated copy (triggers Vue reactivity)
       devices.value[deviceIndex] = {
         ...device,
         uptime: data.uptime ?? device.uptime,
-        heap_free: data.heap_free ?? device.heap_free,
-        wifi_rssi: data.wifi_rssi ?? device.wifi_rssi,
+        heap_free: resolvedHeap ?? device.heap_free,
+        wifi_rssi: resolvedWifiRssi ?? device.wifi_rssi,
         sensor_count: data.sensor_count ?? device.sensor_count,
         actuator_count: data.actuator_count ?? device.actuator_count,
         last_seen: newLastSeen,

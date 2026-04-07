@@ -18,6 +18,14 @@ from tests.esp32.mocks.mock_esp32_client import (
 )
 from src.services.safety_service import SafetyService
 
+
+@pytest.fixture(autouse=True)
+def clear_emergency_stop_state():
+    """Reset SafetyService global E-Stop state before and after each test."""
+    SafetyService._global_emergency_stop_active.clear()
+    yield
+    SafetyService._global_emergency_stop_active.clear()
+
 # =========================================================================
 # ESP32 Emergency Recovery Workflow
 # =========================================================================

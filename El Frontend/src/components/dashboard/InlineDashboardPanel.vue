@@ -13,7 +13,7 @@
  *
  * Block 7c: El Frontend/src/components/dashboard/InlineDashboardPanel.vue
  */
-import { onMounted, onUnmounted, computed, nextTick, watch, toRef, ref } from 'vue'
+import { onMounted, onUnmounted, onActivated, onDeactivated, computed, nextTick, watch, toRef, ref, getCurrentInstance } from 'vue'
 import { RouterLink } from 'vue-router'
 import { Pencil, Settings, Trash2 } from 'lucide-vue-next'
 import { useDashboardStore, type DashboardWidget } from '@/shared/stores/dashboard.store'
@@ -38,6 +38,7 @@ const props = withDefaults(defineProps<Props>(), {
   mode: 'inline',
   compact: false,
 })
+const componentUid = getCurrentInstance()?.uid ?? Math.floor(Math.random() * 1_000_000)
 
 const dashStore = useDashboardStore()
 const authStore = useAuthStore()
@@ -145,7 +146,7 @@ function mountWidgets() {
         continue
       }
 
-      const containerId = `inline-${props.layoutId}-${w.id}`
+      const containerId = getContainerId(w.id)
       const container = document.getElementById(containerId)
       if (!container) continue
 
@@ -161,6 +162,11 @@ function mountWidgets() {
   })
 }
 
+/** Instance-scoped mount container ID (prevents duplicate IDs across kept-alive views) */
+function getContainerId(widgetId: string): string {
+  return `inline-${componentUid}-${props.layoutId}-${widgetId}`
+}
+
 watch(
   () => widgets.value.map(w => w.id).join(','),
   () => mountWidgets()
@@ -168,6 +174,16 @@ watch(
 
 onMounted(() => {
   if (widgets.value.length > 0) mountWidgets()
+})
+
+// Keep-alive re-entry: force remount to restore manual Vue mounts after tab switches.
+onActivated(() => {
+  if (widgets.value.length > 0) mountWidgets()
+})
+
+// Keep-alive leave: unmount all widget roots to avoid stale mounts.
+onDeactivated(() => {
+  cleanupAllWidgets()
 })
 
 let isMounted = true
@@ -221,7 +237,7 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div v-if="isKnownWidgetType(w.type)" :id="`inline-${layoutId}-${w.id}`" class="inline-dashboard__mount" />
+        <div v-if="isKnownWidgetType(w.type)" :id="getContainerId(w.id)" class="inline-dashboard__mount" />
         <div v-else class="inline-dashboard__unknown">
           <span>{{ w.type }}</span>
         </div>

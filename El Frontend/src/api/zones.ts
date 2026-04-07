@@ -143,7 +143,7 @@ export const zonesApi = {
   },
 
   /**
-   * Hard-delete a zone entity.
+   * Delete a zone entity (server-side soft-delete).
    */
   async deleteZoneEntity(zoneId: string): Promise<{ success: boolean; message: string }> {
     const response = await api.delete<{ success: boolean; message: string }>(`/zones/${zoneId}`)

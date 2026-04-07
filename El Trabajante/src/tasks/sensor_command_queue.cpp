@@ -12,8 +12,8 @@ static const char* SENS_Q_TAG = "SYNC";
 
 // Forward declaration — defined in main.cpp
 // Runs on Core 1 (Safety-Task context) after being queued from Core 0 (ESP-IDF MQTT task).
-extern bool handleSensorCommand(const String& topic, const String& payload,
-                                const IntentMetadata& metadata);
+extern SensorCommandExecutionResult handleSensorCommand(const String& topic, const String& payload,
+                                                        const IntentMetadata& metadata);
 
 QueueHandle_t g_sensor_cmd_queue = NULL;
 extern SystemConfig g_system_config;
@@ -46,6 +46,11 @@ bool queueSensorCommand(const char* topic, const char* payload, const IntentMeta
         errorTracker.logApplicationError(ERROR_TASK_QUEUE_FULL, "Sensor command queue full");
         return false;
     }
+    recordIntentChainStage(cmd.metadata,
+                           "queue_enqueued",
+                           "command",
+                           recovery_intent ? "RECOVERY_QUEUE_ENQUEUED" : "QUEUE_ENQUEUED",
+                           "sensor command queued for core1 execution");
     if (recovery_intent) {
         LOG_I(SENS_Q_TAG, "[SYNC] Recovery sensor intent prioritized to queue front");
     }
@@ -99,6 +104,7 @@ void processSensorCommandQueue(uint8_t max_items) {
         CommandAdmissionContext admission_context{
             mqttClient.isRegistrationConfirmed(),
             g_system_config.current_state == STATE_CONFIG_PENDING_AFTER_RESET,
+            g_system_config.current_state == STATE_PENDING_APPROVAL,
             g_system_config.current_state == STATE_SAFE_MODE ||
                 g_system_config.current_state == STATE_SAFE_MODE_PROVISIONING ||
                 g_system_config.current_state == STATE_ERROR,
@@ -117,13 +123,28 @@ void processSensorCommandQueue(uint8_t max_items) {
             processed++;
             continue;
         }
-        bool ok = handleSensorCommand(String(cmd.topic), String(cmd.payload), cmd.metadata);
+        recordIntentChainStage(cmd.metadata,
+                               "execute_started",
+                               "command",
+                               "EXECUTE_STARTED",
+                               "sensor command execution started");
+        SensorCommandExecutionResult result =
+            handleSensorCommand(String(cmd.topic), String(cmd.payload), cmd.metadata);
+        recordIntentChainStage(cmd.metadata,
+                               "execute_finished",
+                               "command",
+                               result.code.length() > 0 ? result.code.c_str() : "EXECUTE_FINISHED",
+                               "sensor command execution finished");
+        const char* outcome = result.outcome.length() > 0 ? result.outcome.c_str() : "failed";
+        const char* code = result.code.length() > 0 ? result.code.c_str() : "EXECUTE_FAIL";
         publishIntentOutcome("command",
                              cmd.metadata,
-                             ok ? "applied" : "failed",
-                             ok ? "NONE" : "EXECUTE_FAIL",
-                             ok ? "Sensor command applied" : "Sensor command execution failed",
-                             !ok);
+                             outcome,
+                             code,
+                             result.reason.length() > 0
+                                 ? result.reason
+                                 : (result.ok ? "Sensor command applied" : "Sensor command execution failed"),
+                             result.retryable);
         processed++;
     }
 }

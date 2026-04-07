@@ -49,27 +49,26 @@ class CommandContractRepository:
         next_state = "accepted" if outcome == "accepted" else "ack_pending"
 
         if intent is None:
-            intent = CommandIntent(
-                intent_id=intent_id,
-                correlation_id=str(payload["correlation_id"]),
-                esp_id=esp_id,
-                flow=str(payload["flow"]).lower(),
-                orchestration_state=next_state,
-                first_seen_at=now,
-                last_seen_at=now,
+            insert_stmt = (
+                pg_insert(CommandIntent)
+                .values(
+                    intent_id=intent_id,
+                    correlation_id=str(payload["correlation_id"]),
+                    esp_id=esp_id,
+                    flow=str(payload["flow"]).lower(),
+                    orchestration_state=next_state,
+                    first_seen_at=now,
+                    last_seen_at=now,
+                )
+                .on_conflict_do_nothing(index_elements=["intent_id"])
             )
-            try:
-                async with self.session.begin_nested():
-                    self.session.add(intent)
-                    await self.session.flush()
-                await self.session.refresh(intent)
-                return intent
-            except IntegrityError:
-                # Concurrent insert for same intent_id: reuse persisted row.
-                result = await self.session.execute(stmt)
-                intent = result.scalar_one_or_none()
-                if intent is None:
-                    raise
+            await self.session.execute(insert_stmt)
+            result = await self.session.execute(stmt)
+            intent = result.scalar_one_or_none()
+            if intent is None:
+                raise RuntimeError(
+                    f"CommandIntent insert/select anomaly for intent_id={intent_id}"
+                )
 
         intent.correlation_id = str(payload["correlation_id"])
         intent.esp_id = esp_id
@@ -115,36 +114,34 @@ class CommandContractRepository:
             await self.session.refresh(intent)
             return intent
 
-        intent = CommandIntent(
-            intent_id=iid,
-            correlation_id=str(correlation_id),
-            esp_id=esp_id,
-            flow=flow_norm,
-            orchestration_state="sent",
-            first_seen_at=now,
-            last_seen_at=now,
+        insert_stmt = (
+            pg_insert(CommandIntent)
+            .values(
+                intent_id=iid,
+                correlation_id=str(correlation_id),
+                esp_id=esp_id,
+                flow=flow_norm,
+                orchestration_state="sent",
+                first_seen_at=now,
+                last_seen_at=now,
+            )
+            .on_conflict_do_nothing(index_elements=["intent_id"])
         )
-        try:
-            async with self.session.begin_nested():
-                self.session.add(intent)
-                await self.session.flush()
-            await self.session.refresh(intent)
-            return intent
-        except IntegrityError:
-            result = await self.session.execute(stmt)
-            existing = result.scalar_one_or_none()
-            if existing is None:
-                raise
-            if existing.orchestration_state in _INTENT_ORCH_ADVANCED_FROM_DEVICE:
-                return existing
-            existing.correlation_id = str(correlation_id)
-            existing.esp_id = esp_id
-            existing.flow = flow_norm
-            existing.orchestration_state = "sent"
-            existing.last_seen_at = now
-            await self.session.flush()
-            await self.session.refresh(existing)
+        await self.session.execute(insert_stmt)
+        result = await self.session.execute(stmt)
+        existing = result.scalar_one_or_none()
+        if existing is None:
+            raise RuntimeError(f"CommandIntent insert/select anomaly for intent_id={iid}")
+        if existing.orchestration_state in _INTENT_ORCH_ADVANCED_FROM_DEVICE:
             return existing
+        existing.correlation_id = str(correlation_id)
+        existing.esp_id = esp_id
+        existing.flow = flow_norm
+        existing.orchestration_state = "sent"
+        existing.last_seen_at = now
+        await self.session.flush()
+        await self.session.refresh(existing)
+        return existing
 
     async def upsert_outcome(
         self, payload: dict[str, Any], esp_id: str

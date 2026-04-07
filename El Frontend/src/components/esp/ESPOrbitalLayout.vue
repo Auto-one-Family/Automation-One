@@ -29,6 +29,7 @@ import type { ESPDevice } from '@/api/esp'
 import type { MockSensor, MockActuator, ChartSensor } from '@/types'
 import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/shared/stores/dragState.store'
+import { useLogicStore } from '@/shared/stores/logic.store'
 import { useZoneDragDrop } from '@/composables/useZoneDragDrop'
 import { useDeviceActions } from '@/composables/useDeviceActions'
 import { useGpioStatus } from '@/composables/useGpioStatus'
@@ -41,15 +42,19 @@ interface Props {
   showConnections?: boolean
   /** Compact mode for dashboard view (default: false) */
   compactMode?: boolean
+  /** Actuator layout mode: stacked (default) or 2-column grid */
+  actuatorLayout?: 'stack' | 'grid'
 }
 
 const props = withDefaults(defineProps<Props>(), {
   showConnections: true,
-  compactMode: false
+  compactMode: false,
+  actuatorLayout: 'stack',
 })
 
 const espStore = useEspStore()
 const dragStore = useDragStateStore()
+const logicStore = useLogicStore()
 const { handleDeviceDrop, handleRemoveFromZone, getAvailableZones } = useZoneDragDrop()
 
 const emit = defineEmits<{
@@ -70,7 +75,7 @@ const emit = defineEmits<{
 const actions = useDeviceActions(() => props.device)
 const {
   espId, isMock, displayName, isOnline, systemState, stateInfo,
-  wifiInfo, wifiColorClass, wifiTooltip,
+  wifiInfo, wifiColorClass, wifiDisplayLabel, wifiTooltip,
   heartbeatLoading, isHeartbeatFresh, heartbeatTooltip, heartbeatText,
   isEditingName, editedName, isSavingName, saveError, nameInputRef,
   startEditName, cancelEditName, handleNameKeydown,
@@ -129,6 +134,20 @@ const sensors = computed<MockSensor[]>(() => {
 
 const actuators = computed<MockActuator[]>(() => {
   return (props.device?.actuators as MockActuator[]) || []
+})
+
+const actuatorRuntimeMap = computed(() => {
+  const map: Record<number, { lastTriggeredAt?: string | null; triggerReason?: string | null; triggerRuleName?: string | null }> = {}
+  for (const actuator of actuators.value) {
+    const lastExecution = logicStore.getLastExecutionForActuator(espId.value, actuator.gpio)
+    if (!lastExecution) continue
+    map[actuator.gpio] = {
+      lastTriggeredAt: lastExecution.triggered_at,
+      triggerReason: lastExecution.trigger_reason ?? null,
+      triggerRuleName: lastExecution.rule_name ?? null,
+    }
+  }
+  return map
 })
 
 const totalItems = computed(() => {
@@ -313,7 +332,7 @@ function handleActuatorClick(gpio: number) {
                 <span :class="['esp-info-compact__wifi-bar', { active: wifiInfo.bars >= 3 }]" />
                 <span :class="['esp-info-compact__wifi-bar', { active: wifiInfo.bars >= 4 }]" />
               </div>
-              <span :class="['esp-info-compact__wifi-label', wifiColorClass]">{{ wifiInfo.label }}</span>
+              <span :class="['esp-info-compact__wifi-label', wifiColorClass]">{{ wifiDisplayLabel }}</span>
             </div>
           </div>
 
@@ -376,6 +395,9 @@ function handleActuatorClick(gpio: number) {
       :esp-id="espId"
       :actuators="actuators"
       :selected-gpio="selectedGpio !== null && selectedType === 'actuator' ? selectedGpio : null"
+      :actuator-runtime-map="actuatorRuntimeMap"
+      :layout="actuatorLayout"
+      :show-rules-section="compactMode"
       :show-connections="showConnections"
       class="esp-horizontal-layout__column esp-horizontal-layout__column--actuators"
       :class="{ 'esp-horizontal-layout__column--empty': actuators.length === 0 }"

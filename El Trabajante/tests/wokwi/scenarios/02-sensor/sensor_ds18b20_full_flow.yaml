@@ -10,7 +10,7 @@ steps:
   - wait-serial: "Phase 2: Communication Layer READY"
 
   # MQTT connected (setup Phase 2)
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # OneWire bus initialization (setup Phase 3 - after MQTT, before loop)
   - wait-serial: "OneWire"

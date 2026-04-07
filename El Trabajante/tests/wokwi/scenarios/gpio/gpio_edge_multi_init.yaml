@@ -38,7 +38,7 @@ steps:
   - wait-serial: "Available Pins: 20"
 
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # External MQTT injection: configure sensor on GPIO 4 (CI helper script)
 

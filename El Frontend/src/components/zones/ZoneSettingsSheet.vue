@@ -135,16 +135,26 @@ async function saveDescription() {
 // ── Status ───────────────────────────────────────────────────────────────
 const isActive = computed(() => props.zone.status === 'active')
 const isArchived = computed(() => props.zone.status === 'archived')
+const canDeleteZone = computed(() => props.deviceCount === 0)
 
 // ── Actions ──────────────────────────────────────────────────────────────
 const isActionLoading = ref(false)
 
 async function handleArchive() {
+  if (props.deviceCount > 0) {
+    await uiStore.confirm({
+      title: 'Archivierung aktuell gesperrt',
+      message: `Zone "${props.zone.name}" hat noch ${props.deviceCount} Gerät${props.deviceCount !== 1 ? 'e' : ''} zugewiesen. Bitte Geräte zuerst verschieben oder entfernen.`,
+      variant: 'warning',
+      confirmText: 'Verstanden',
+      cancelText: 'Schließen',
+    })
+    return
+  }
+
   const confirmed = await uiStore.confirm({
     title: 'Zone archivieren',
-    message: props.deviceCount > 0
-      ? `Zone "${props.zone.name}" mit ${props.deviceCount} Gerät${props.deviceCount !== 1 ? 'en' : ''} wird archiviert. Die Geräte bleiben zugewiesen.`
-      : `Zone "${props.zone.name}" wird archiviert.`,
+    message: `Zone "${props.zone.name}" wird archiviert. Historische Daten bleiben erhalten und du kannst parallel eine neue Zone für neue Durchläufe verwenden.`,
     variant: 'warning',
     confirmText: 'Archivieren',
   })
@@ -178,13 +188,26 @@ async function handleReactivate() {
 }
 
 async function handleDelete() {
-  const confirmed = await uiStore.confirm({
+  if (!canDeleteZone.value) {
+    showError('Zone kann erst gelöscht werden, wenn keine Geräte mehr zugewiesen sind')
+    return
+  }
+
+  const firstConfirm = await uiStore.confirm({
     title: 'Zone löschen',
-    message: `Zone "${props.zone.name}" wird unwiderruflich gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.`,
+    message: `Löschen ist endgültig. Für Datenhistorie nutze stattdessen "Zone archivieren". Zone "${props.zone.name}" wird aus dem aktiven Betrieb und Archiv entfernt.`,
     variant: 'danger',
-    confirmText: 'Zone löschen',
+    confirmText: 'Weiter',
   })
-  if (!confirmed) return
+  if (!firstConfirm) return
+
+  const secondConfirm = await uiStore.confirm({
+    title: 'Letzte Sicherheitsabfrage',
+    message: `Bitte bestätige erneut: Zone "${props.zone.name}" wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.`,
+    variant: 'danger',
+    confirmText: 'Endgültig löschen',
+  })
+  if (!secondConfirm) return
 
   isActionLoading.value = true
   try {
@@ -361,22 +384,29 @@ function close() {
         </div>
       </section>
 
-      <!-- DANGER ZONE (only when 0 devices) -->
-      <section v-if="deviceCount === 0" class="sheet-section sheet-section--danger">
+      <!-- DELETE (double-confirmed) -->
+      <section class="sheet-section sheet-section--danger">
         <h4 class="sheet-section__title">
           <AlertTriangle class="w-4 h-4" />
-          Gefahrenzone
+          Löschen
         </h4>
         <div class="sheet-section__content">
           <button
             class="action-btn action-btn--danger-outline"
-            :disabled="isActionLoading"
+            :disabled="isActionLoading || !canDeleteZone"
             @click="handleDelete"
           >
             <Loader2 v-if="isActionLoading" class="w-4 h-4 animate-spin" />
             <Trash2 v-else class="w-4 h-4" />
             <span>Zone löschen</span>
           </button>
+          <p class="action-hint action-hint--danger">
+            Löschen ist doppelt abgesichert und endgültig. Für Historie und alte Durchläufe immer archivieren.
+          </p>
+          <p v-if="!canDeleteZone" class="action-hint">
+            Löschen aktuell gesperrt: {{ deviceCount }} Gerät{{ deviceCount !== 1 ? 'e' : '' }} sind noch zugewiesen.
+            Bitte Geräte zuerst in eine andere Zone verschieben oder entkoppeln.
+          </p>
         </div>
       </section>
     </div>
@@ -669,5 +699,16 @@ function close() {
 .action-btn--danger-outline:hover:not(:disabled) {
   background: rgba(239, 68, 68, 0.1);
   border-color: rgba(239, 68, 68, 0.5);
+}
+
+.action-hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.action-hint--danger {
+  color: var(--color-error);
 }
 </style>

@@ -8,7 +8,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useEspStore } from '@/stores/esp'
 import GaugeChart from '@/components/charts/GaugeChart.vue'
-import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+import { SENSOR_TYPE_CONFIG, getSensorUnit } from '@/utils/sensorDefaults'
 import { tokens } from '@/utils/cssTokens'
 import type { GaugeThreshold } from '@/components/charts/types'
 import type { MockSensor } from '@/types'
@@ -62,6 +62,14 @@ const currentSensor = computed(() => {
 // Sensor type from parsed sensorId or from currentSensor
 const sensorType = computed(() => {
   return parsedSensorType.value || currentSensor.value?.sensor_type || null
+})
+
+// Unit fallback for mock sensors that do not carry `unit` consistently
+const displayUnit = computed(() => {
+  const type = sensorType.value
+  if (!type) return currentSensor.value?.unit || ''
+  const resolved = getSensorUnit(type)
+  return resolved !== 'raw' ? resolved : (currentSensor.value?.unit || '')
 })
 
 // SENSOR_TYPE_CONFIG defaults as fallback for min/max
@@ -148,7 +156,7 @@ function selectSensor(sensorId: string) {
     <template v-if="localSensorId && currentSensor">
       <GaugeChart
         :value="currentSensor.raw_value ?? 0"
-        :unit="currentSensor.unit || ''"
+        :unit="displayUnit"
         :min="effectiveMin"
         :max="effectiveMax"
         :thresholds="gaugeThresholds"

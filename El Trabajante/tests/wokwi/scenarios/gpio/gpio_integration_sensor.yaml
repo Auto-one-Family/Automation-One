@@ -36,7 +36,7 @@ steps:
   - wait-serial: "Sensor Manager initialized"
 
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # External MQTT injection: configure DS18B20 temperature sensor (CI helper script)
 

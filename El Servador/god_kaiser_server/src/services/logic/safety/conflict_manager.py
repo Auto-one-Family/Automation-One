@@ -143,6 +143,7 @@ class ConflictManager:
         async with mutex:
             now = datetime.now(timezone.utc)
             existing_lock = self._locks.get(actuator_key)
+            effective_priority = self.SAFETY_PRIORITY if is_safety_critical else priority
 
             # Cleanup: Abgelaufene Locks entfernen
             if existing_lock and existing_lock.expires_at and existing_lock.expires_at < now:
@@ -168,12 +169,12 @@ class ConflictManager:
             if existing_lock.rule_id == rule_id:
                 existing_lock.command = command
                 existing_lock.acquired_at = now
+                existing_lock.priority = effective_priority
+                existing_lock.is_safety_critical = is_safety_critical
                 logger.debug(f"Actuator {actuator_key} renewed by rule {rule_id}")
                 return True, None
 
             # Konflikt! Resolution bestimmen
-            effective_priority = self.SAFETY_PRIORITY if is_safety_critical else priority
-
             # Safety-kritische Commands gewinnen immer
             if is_safety_critical and not existing_lock.is_safety_critical:
                 resolution = ConflictResolution.SAFETY_WINS
@@ -307,6 +308,33 @@ class ConflictManager:
                 logger.debug(f"Actuator {actuator_key} released by rule {rule_id}")
                 return True
             return False
+
+    def has_active_lock_for_rule(
+        self,
+        esp_id: str,
+        gpio: int,
+        rule_id: str,
+        command: str,
+    ) -> bool:
+        """
+        Check if a non-expired lock exists for the given rule + actuator + command.
+
+        Used by the LogicEngine to detect re-execution of the same command
+        while the actuator is still running (e.g. duration-based ON that has not
+        yet expired).  This avoids resetting the ESP32 duration timer with
+        redundant MQTT publishes.
+
+        Returns:
+            True if an active lock exists for this rule+actuator with the same command.
+        """
+        actuator_key = self._get_actuator_key(esp_id, gpio)
+        lock = self._locks.get(actuator_key)
+        if lock is None:
+            return False
+        now = datetime.now(timezone.utc)
+        if lock.expires_at and lock.expires_at < now:
+            return False
+        return lock.rule_id == rule_id and lock.command == command
 
     def get_active_conflicts(self) -> List[ConflictInfo]:
         """Returns die letzten 100 Konflikte für Debugging."""

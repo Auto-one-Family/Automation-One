@@ -12,7 +12,7 @@ name: PWM Integration Full Flow
 version: 1
 steps:
   # === PHASE 1: System Ready ===
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
   - wait-serial: "heartbeat"
 
   # === PHASE 2: Configure PWM Actuator ===

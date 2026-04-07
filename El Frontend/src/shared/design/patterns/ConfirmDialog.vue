@@ -81,12 +81,14 @@ watch(isOpen, async (open) => {
         <button
           ref="cancelBtnRef"
           class="confirm-dialog__btn confirm-dialog__btn--cancel"
+          data-testid="confirm-dialog-cancel-button"
           @click="handleCancel"
         >
           {{ cancelText }}
         </button>
         <button
           :class="['confirm-dialog__btn', confirmBtnClass]"
+          data-testid="confirm-dialog-confirm-button"
           @click="handleConfirm"
         >
           {{ confirmText }}

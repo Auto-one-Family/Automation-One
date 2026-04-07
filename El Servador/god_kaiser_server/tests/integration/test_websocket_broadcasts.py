@@ -121,6 +121,31 @@ class TestHeartbeatWebSocketBroadcast:
                     assert isinstance(result, bool)
 
 
+def _mock_resilient_session():
+    """Return a context manager patch for config_handler.resilient_session.
+
+    Provides an async-capable mock DB session so repository methods that
+    call ``await session.execute(...)`` do not raise TypeError.
+    """
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    mock_result.scalars.return_value.all.return_value = []
+
+    mock_db = MagicMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.commit = AsyncMock()
+    mock_db.flush = AsyncMock()
+    mock_db.refresh = AsyncMock()
+
+    mock_session = MagicMock()
+    mock_session.__aenter__ = AsyncMock(return_value=mock_db)
+    mock_session.__aexit__ = AsyncMock(return_value=None)
+    return patch(
+        "src.mqtt.handlers.config_handler.resilient_session",
+        return_value=mock_session,
+    )
+
+
 class TestConfigWebSocketBroadcast:
     """Test WebSocket broadcasts from Config Handler."""
 
@@ -137,15 +162,17 @@ class TestConfigWebSocketBroadcast:
             "message": "Configured 3 sensor(s) successfully",
         }
 
-        # Mock WebSocketManager at the actual import location
-        with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
-            mock_ws_class.get_instance = AsyncMock(return_value=mock_websocket_manager)
+        with _mock_resilient_session():
+            with patch("src.mqtt.handlers.config_handler.CommandContractRepository") as mock_contract:
+                mock_contract.return_value.upsert_terminal_event_authority = AsyncMock(
+                    return_value=(MagicMock(), False)
+                )
+                with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                    mock_ws_class.get_instance = AsyncMock(return_value=mock_websocket_manager)
 
-            # Execute handler
-            result = await config_handler.handle_config_ack(topic, payload)
+                    result = await config_handler.handle_config_ack(topic, payload)
 
-            # Verify handler processed successfully
-            assert result is True
+                    assert result is True
 
     @pytest.mark.asyncio
     async def test_config_broadcast_graceful_degradation(self, config_handler: ConfigHandler):
@@ -158,14 +185,16 @@ class TestConfigWebSocketBroadcast:
             "message": "Configured 3 sensor(s) successfully",
         }
 
-        # Mock WebSocketManager to raise exception
-        with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
-            mock_ws_class.get_instance = AsyncMock(side_effect=Exception("WebSocket error"))
+        with _mock_resilient_session():
+            with patch("src.mqtt.handlers.config_handler.CommandContractRepository") as mock_contract:
+                mock_contract.return_value.upsert_terminal_event_authority = AsyncMock(
+                    return_value=(MagicMock(), False)
+                )
+                with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                    mock_ws_class.get_instance = AsyncMock(side_effect=Exception("WebSocket error"))
 
-            # Handler should not raise exception, should handle gracefully
-            result = await config_handler.handle_config_ack(topic, payload)
-            # Should still process config ACK even if WebSocket fails
-            assert result is True
+                    result = await config_handler.handle_config_ack(topic, payload)
+                    assert result is True
 
     @pytest.mark.asyncio
     async def test_config_broadcast_with_error_status(self, config_handler: ConfigHandler):
@@ -179,15 +208,17 @@ class TestConfigWebSocketBroadcast:
             "error_code": "MISSING_FIELD",
         }
 
-        # Mock WebSocketManager at the actual import location
-        with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
-            mock_ws_class.get_instance = AsyncMock(return_value=AsyncMock())
+        with _mock_resilient_session():
+            with patch("src.mqtt.handlers.config_handler.CommandContractRepository") as mock_contract:
+                mock_contract.return_value.upsert_terminal_event_authority = AsyncMock(
+                    return_value=(MagicMock(), False)
+                )
+                with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                    mock_ws_class.get_instance = AsyncMock(return_value=AsyncMock())
 
-            # Execute handler
-            result = await config_handler.handle_config_ack(topic, payload)
+                    result = await config_handler.handle_config_ack(topic, payload)
 
-            # Verify handler processed successfully
-            assert result is True
+                    assert result is True
 
 
 class TestWebSocketBroadcastNoClients:

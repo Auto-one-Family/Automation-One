@@ -64,6 +64,7 @@ class Subscriber:
         self.executor = ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="mqtt_handler_"
         )
+        self._is_shutting_down = False
 
         # Performance metrics
         self.messages_processed = 0
@@ -161,6 +162,10 @@ class Subscriber:
             payload_str: Message payload (JSON string)
         """
         try:
+            if self._is_shutting_down:
+                logger.debug("Dropping MQTT message during shutdown: %s", topic)
+                return
+
             # Skip empty payloads (used to clear retained messages per MQTT spec)
             if not payload_str or not payload_str.strip():
                 logger.debug(f"Empty payload on topic {topic} (retained message cleared)")
@@ -192,14 +197,24 @@ class Subscriber:
                     )
                 # Submit handler to thread pool for async execution
                 # This prevents blocking MQTT network loop
-                self.executor.submit(
-                    self._execute_handler,
-                    handler,
-                    topic,
-                    payload,
-                    correlation_id,
-                    inbox_event_id,
-                )
+                try:
+                    self.executor.submit(
+                        self._execute_handler,
+                        handler,
+                        topic,
+                        payload,
+                        correlation_id,
+                        inbox_event_id,
+                    )
+                except RuntimeError as submit_err:
+                    submit_msg = str(submit_err).lower()
+                    if self._is_shutting_down or "cannot schedule new futures after shutdown" in submit_msg:
+                        logger.debug(
+                            "Dropping MQTT message during executor shutdown for topic %s",
+                            topic,
+                        )
+                        return
+                    raise
                 self.messages_processed += 1
             else:
                 logger.warning(f"No handler registered for topic: {topic}")
@@ -589,6 +604,7 @@ class Subscriber:
             timeout: Max wait time in seconds (ignored in Python 3.14+)
         """
         logger.info("Shutting down MQTT subscriber...")
+        self._is_shutting_down = True
         # Python 3.9-3.13 supports timeout parameter, Python 3.14+ removed it
         # Use cancel_futures instead for faster shutdown
         try:

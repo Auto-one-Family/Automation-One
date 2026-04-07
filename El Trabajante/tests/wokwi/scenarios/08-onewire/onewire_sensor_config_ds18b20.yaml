@@ -10,7 +10,7 @@ steps:
   - wait-serial: "Phase 5: Actuator System READY"
 
   # MQTT connected for receiving config
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # When sensor config is received for DS18B20:
   # 1. OneWire sensor detected

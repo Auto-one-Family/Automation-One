@@ -30,7 +30,7 @@ steps:
   - wait-serial: "Phase 1: Core Infrastructure READY"
 
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # I2C pins (21, 22) are already reserved by system
   # We can use: 4, 5, 14, 15, 16, 17, 18, 19, 23, 25, 26, 27, 32, 33 (14 pins)

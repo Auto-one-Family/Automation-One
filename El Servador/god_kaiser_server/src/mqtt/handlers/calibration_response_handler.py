@@ -25,10 +25,13 @@ Expected response payload from ESP32 (E-P4 enhanced):
 Resilience: Uses resilient_session() with circuit breaker protection.
 """
 
+import asyncio
 from typing import Optional
 
 from ...core.logging_config import get_logger
 from ...db.repositories.calibration_session_repo import CalibrationSessionRepository
+from ...db.repositories.esp_repo import ESPRepository
+from ...db.repositories.sensor_repo import SensorRepository
 from ...db.session import resilient_session
 from ...sensors.sensor_type_registry import normalize_sensor_type
 from ..topics import TopicBuilder
@@ -88,27 +91,86 @@ class CalibrationResponseHandler:
             )
             return True
 
-        raw_value = payload.get("raw", payload.get("raw_value"))
-        if raw_value is None:
-            logger.warning(
-                "CalibrationResponseHandler: No raw value in response for %s/GPIO%d",
-                esp_id, gpio,
-            )
-            return True
-
         quality = payload.get("quality", "good")
         intent_id = payload.get("intent_id")
         correlation_id = payload.get("correlation_id")
         sensor_type = payload.get("sensor_type", "unknown")
 
         # Step 3: Check for active calibration session
+        active_session = None
+        normalized_type = normalize_sensor_type(sensor_type) if sensor_type else "unknown"
         try:
             async with resilient_session() as session:
-                normalized_type = normalize_sensor_type(sensor_type)
                 cal_repo = CalibrationSessionRepository(session)
-                active_session = await cal_repo.get_active_session(
-                    esp_id, gpio, normalized_type,
-                )
+                esp_repo = ESPRepository(session)
+                sensor_repo = SensorRepository(session)
+                if normalized_type != "unknown":
+                    active_session = await cal_repo.get_active_session(
+                        esp_id, gpio, normalized_type,
+                    )
+                if not active_session:
+                    recent_sessions = await cal_repo.get_sessions_for_sensor(
+                        esp_id=esp_id,
+                        gpio=gpio,
+                        sensor_type=None,
+                        limit=5,
+                    )
+                    active_session = next(
+                        (candidate for candidate in recent_sessions if not candidate.is_terminal),
+                        None,
+                    )
+                    if active_session:
+                        normalized_type = active_session.sensor_type
+
+                raw_value = payload.get("raw", payload.get("raw_value"))
+                if raw_value is None:
+                    # Firmware measure-ACK currently omits raw value; resolve latest DB reading.
+                    # Retry briefly because sensor_data persistence can lag behind ACK by a few hundred ms.
+                    lookup_sensor_type = (
+                        active_session.sensor_type if active_session else (
+                            None if normalized_type == "unknown" else normalized_type
+                        )
+                    )
+                    esp_device = await esp_repo.get_by_device_id(esp_id)
+                    if not esp_device:
+                        logger.warning(
+                            "CalibrationResponseHandler: ESP %s not found for DB raw-value fallback",
+                            esp_id,
+                        )
+                        await self._broadcast_calibration_event(
+                            "calibration_measurement_failed",
+                            esp_id=esp_id,
+                            gpio=gpio,
+                            error="ESP fuer Messwert-Fallback nicht gefunden",
+                            correlation_id=correlation_id,
+                        )
+                        return True
+                    for _ in range(3):
+                        latest = await sensor_repo.get_latest_reading(
+                            esp_device.id,
+                            gpio,
+                            sensor_type=lookup_sensor_type,
+                        )
+                        if latest and latest.raw_value is not None:
+                            raw_value = float(latest.raw_value)
+                            quality = latest.quality or quality
+                            break
+                        await asyncio.sleep(0.25)
+                if raw_value is None:
+                    logger.warning(
+                        "CalibrationResponseHandler: No raw value available for %s/GPIO%d "
+                        "(response payload and DB fallback empty)",
+                        esp_id,
+                        gpio,
+                    )
+                    await self._broadcast_calibration_event(
+                        "calibration_measurement_failed",
+                        esp_id=esp_id,
+                        gpio=gpio,
+                        error="Kein Messwert aus Sensorantwort ableitbar",
+                        correlation_id=correlation_id,
+                    )
+                    return True
 
                 if not active_session:
                     # No active calibration — this is a normal sensor response

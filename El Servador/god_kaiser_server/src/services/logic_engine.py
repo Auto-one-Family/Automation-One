@@ -490,6 +490,11 @@ class LogicEngine:
         # Cooldown checks have a ~10ms race window under burst load — acceptable for current scale.
         # Add engine-level lock only if rule evaluation rate exceeds ~100/s.
         start_time = time.time()
+        rule_id_snapshot = getattr(rule, "id", None)
+        rule_name_snapshot = str(getattr(rule, "rule_name", "unknown_rule"))
+        trigger_snapshot = dict(trigger_data) if isinstance(trigger_data, dict) else {}
+        actions_raw = getattr(rule, "actions", None) or []
+        actions_snapshot = list(actions_raw) if isinstance(actions_raw, list) else []
 
         try:
             # Evaluate conditions first (needed for hysteresis deactivation path)
@@ -526,7 +531,7 @@ class LogicEngine:
                         f"Rule {rule.rule_name} hysteresis deactivated: "
                         f"sending OFF to {len(off_actions)} actuator(s)"
                     )
-                    await self._execute_actions(
+                    execution_result = await self._execute_actions(
                         off_actions,
                         trigger_data,
                         rule.id,
@@ -535,13 +540,39 @@ class LogicEngine:
                         session=logic_repo.session,
                         batch_locks=batch_locks,
                     )
+                    if not isinstance(execution_result, dict):
+                        logger.error(
+                            "Rule %s: _execute_actions returned non-dict type %s (coercing)",
+                            rule_name_snapshot,
+                            type(execution_result).__name__,
+                        )
+                        execution_result = {
+                            "blocked_by_conflict": False,
+                            "conflict_info": None,
+                            "action_results": [],
+                        }
                     execution_time_ms = int((time.time() - start_time) * 1000)
+                    blocked_by_conflict = execution_result.get("blocked_by_conflict", False)
+                    conflict_info = execution_result.get("conflict_info") or {}
+                    conflict_message = conflict_info.get(
+                        "message",
+                        "Rule execution blocked due to actuator conflict",
+                    )
                     await logic_repo.log_execution(
                         rule_id=rule.id,
                         trigger_data=trigger_data,
                         actions=off_actions,
-                        success=True,
+                        success=not blocked_by_conflict,
                         execution_ms=execution_time_ms,
+                        error_message=conflict_message if blocked_by_conflict else None,
+                        metadata=(
+                            {
+                                "terminal_reason_code": "conflict_priority_lost",
+                                "conflict_info": conflict_info,
+                            }
+                            if blocked_by_conflict
+                            else None
+                        ),
                     )
                     await logic_repo.session.commit()
                 return
@@ -584,7 +615,7 @@ class LogicEngine:
             # Execute actions (conditions_met from earlier evaluation)
             logger.info(f"Rule {rule.rule_name} triggered: executing {len(rule.actions)} actions")
 
-            await self._execute_actions(
+            execution_result = await self._execute_actions(
                 rule.actions,
                 trigger_data,
                 rule.id,
@@ -593,25 +624,53 @@ class LogicEngine:
                 session=logic_repo.session,
                 batch_locks=batch_locks,
             )
+            if not isinstance(execution_result, dict):
+                logger.error(
+                    "Rule %s: _execute_actions returned non-dict type %s (coercing)",
+                    rule_name_snapshot,
+                    type(execution_result).__name__,
+                )
+                execution_result = {
+                    "blocked_by_conflict": False,
+                    "conflict_info": None,
+                    "action_results": [],
+                }
 
             # Update last_triggered timestamp
             rule.last_triggered = datetime.now(timezone.utc)
 
             # Log successful execution
             execution_time_ms = int((time.time() - start_time) * 1000)
+            blocked_by_conflict = execution_result.get("blocked_by_conflict", False)
+            conflict_info = execution_result.get("conflict_info") or {}
+            conflict_message = conflict_info.get(
+                "message",
+                "Rule execution blocked due to actuator conflict",
+            )
             await logic_repo.log_execution(
                 rule_id=rule.id,
                 trigger_data=trigger_data,
                 actions=rule.actions,
-                success=True,
+                success=not blocked_by_conflict,
                 execution_ms=execution_time_ms,
+                error_message=conflict_message if blocked_by_conflict else None,
+                metadata=(
+                    {
+                        "terminal_reason_code": "conflict_priority_lost",
+                        "conflict_info": conflict_info,
+                    }
+                    if blocked_by_conflict
+                    else None
+                ),
             )
             await logic_repo.session.commit()
 
         except Exception as e:
             increment_logic_error()
             logger.error(
-                f"Error evaluating rule {rule.rule_name}: {e}",
+                "Error evaluating rule %s: %s",
+                rule_name_snapshot,
+                e,
                 exc_info=True,
             )
 
@@ -619,17 +678,23 @@ class LogicEngine:
             try:
                 await logic_repo.session.rollback()
                 execution_time_ms = int((time.time() - start_time) * 1000)
-                await logic_repo.log_execution(
-                    rule_id=rule.id,
-                    trigger_data=trigger_data,
-                    actions=rule.actions,
-                    success=False,
-                    execution_ms=execution_time_ms,
-                    error_message=str(e),
-                )
-                await logic_repo.session.commit()
+                if isinstance(rule_id_snapshot, uuid.UUID):
+                    await logic_repo.log_execution(
+                        rule_id=rule_id_snapshot,
+                        trigger_data=trigger_snapshot,
+                        actions=actions_snapshot,
+                        success=False,
+                        execution_ms=execution_time_ms,
+                        error_message=str(e),
+                    )
+                    await logic_repo.session.commit()
+                else:
+                    logger.warning(
+                        "Skipping execution error log: invalid rule id snapshot (%s)",
+                        rule_id_snapshot,
+                    )
             except Exception as log_err:
-                logger.error(f"Failed to log execution error: {log_err}")
+                logger.error("Failed to log execution error for %s: %s", rule_name_snapshot, log_err)
 
     async def _check_conditions(
         self, conditions, sensor_data: dict, logic_operator: str = "AND"
@@ -840,7 +905,7 @@ class LogicEngine:
         rule_priority: int = 100,
         session=None,
         batch_locks: list | None = None,
-    ) -> None:
+    ) -> dict:
         """
         Execute actions for a triggered rule using modular executors.
 
@@ -855,10 +920,42 @@ class LogicEngine:
                 If provided, acquired locks are added here and NOT released
                 in this method (caller is responsible for batch release).
         """
+        execution_outcome = {
+            "blocked_by_conflict": False,
+            "conflict_info": None,
+            "action_results": [],
+        }
+
         # Extract actuator actions for conflict management
         actuator_actions = [
             action for action in actions if action.get("type") in ("actuator_command", "actuator")
         ]
+
+        # Duration-aware guard: if this rule already holds an active lock for
+        # the same actuator+command (e.g. duration-based ON still running), skip
+        # the entire action batch.  This prevents resetting the ESP32 auto-off
+        # timer with redundant MQTT publishes every evaluation cycle.
+        for action in actuator_actions:
+            action_duration = action.get("duration_seconds") or action.get("duration", 0)
+            action_command = action.get("command", "ON")
+            if action_duration and int(action_duration) > 0:
+                act_esp = action.get("esp_id")
+                act_gpio = action.get("gpio")
+                if act_esp and act_gpio is not None:
+                    if self.conflict_manager.has_active_lock_for_rule(
+                        esp_id=act_esp,
+                        gpio=int(act_gpio),
+                        rule_id=str(rule_id),
+                        command=action_command,
+                    ):
+                        logger.debug(
+                            "Rule %s: skipping %s on %s:GPIO%s — duration lock still active",
+                            rule_name,
+                            action_command,
+                            act_esp,
+                            act_gpio,
+                        )
+                        return execution_outcome
 
         # Acquire locks for all actuator actions
         acquired_locks = []
@@ -883,15 +980,58 @@ class LogicEngine:
 
             if not can_execute:
                 increment_safety_trigger()
+                conflict_info = {
+                    "actuator_key": (
+                        conflict.actuator_key
+                        if conflict
+                        else f"{action.get('esp_id')}:{action.get('gpio')}"
+                    ),
+                    "winner_rule_id": conflict.winner_rule_id if conflict else None,
+                    "competing_rules": conflict.competing_rules if conflict else [str(rule_id)],
+                    "resolution": conflict.resolution.value if conflict else "blocked",
+                    "message": (
+                        conflict.message
+                        if conflict
+                        else "Actuator command blocked due to conflict"
+                    ),
+                }
                 logger.warning(
-                    f"Actuator conflict for rule {rule_name}: {conflict.message if conflict else 'Unknown conflict'}"
+                    "Actuator conflict for rule %s: %s",
+                    rule_name,
+                    conflict_info["message"],
                 )
+                # Ensure conflict is visible on existing UI path.
+                try:
+                    await self.websocket_manager.broadcast(
+                        "logic_execution",
+                        {
+                            "rule_id": str(rule_id),
+                            "rule_name": rule_name,
+                            "trigger": trigger_data,
+                            "action": action,
+                            "success": False,
+                            "error_code": "conflict_priority_lost",
+                            "error": conflict_info["message"],
+                            "conflict": conflict_info,
+                            "timestamp": trigger_data.get("timestamp"),
+                        },
+                    )
+                except Exception as ws_err:
+                    logger.warning(
+                        "WebSocket conflict broadcast failed for rule %s: %s",
+                        rule_name,
+                        ws_err,
+                    )
                 # Rollback already acquired locks
                 for lock in acquired_locks:
                     await self.conflict_manager.release_actuator(
                         esp_id=lock["esp_id"], gpio=lock["gpio"], rule_id=lock["rule_id"]
                     )
-                return
+                return {
+                    "blocked_by_conflict": True,
+                    "conflict_info": conflict_info,
+                    "action_results": [],
+                }
 
             acquired_locks.append(
                 {
@@ -954,40 +1094,79 @@ class LogicEngine:
                         if executor.supports(action_type):
                             executor_found = True
                             try:
-                                result = await executor.execute(action, context)
+                                action_result = await executor.execute(action, context)
 
-                                # WebSocket broadcast (non-critical, must not interrupt execution)
-                                try:
-                                    await self.websocket_manager.broadcast(
-                                        "logic_execution",
-                                        {
-                                            "rule_id": str(rule_id),
-                                            "rule_name": rule_name,
-                                            "trigger": trigger_data,
-                                            "action": action,
-                                            "success": result.success,
-                                            "message": result.message,
-                                            "timestamp": trigger_data.get("timestamp"),
-                                        },
-                                    )
-                                except Exception as ws_err:
-                                    logger.warning(
-                                        f"WebSocket broadcast failed for rule {rule_name}: {ws_err}"
-                                    )
+                                # WebSocket broadcast (non-critical, must not interrupt execution).
+                                # Skip broadcast for noop results to avoid flooding the frontend
+                                # with redundant "logic_execution" events while actuator is active.
+                                _is_noop = (
+                                    action_result.data.get("noop", False)
+                                    if action_result.data
+                                    else False
+                                )
+                                if not _is_noop:
+                                    try:
+                                        await self.websocket_manager.broadcast(
+                                            "logic_execution",
+                                            {
+                                                "rule_id": str(rule_id),
+                                                "rule_name": rule_name,
+                                                "trigger": trigger_data,
+                                                "action": action,
+                                                "success": action_result.success,
+                                                "message": action_result.message,
+                                                "timestamp": trigger_data.get("timestamp"),
+                                            },
+                                        )
+                                    except Exception as ws_err:
+                                        logger.warning(
+                                            f"WebSocket broadcast failed for rule {rule_name}: {ws_err}"
+                                        )
 
-                                if result.success:
-                                    logger.info(
-                                        f"Rule {rule_name} executed action: {action_type} - {result.message}"
+                                execution_outcome["action_results"].append(
+                                    {
+                                        "type": action_type,
+                                        "success": bool(action_result.success),
+                                        "message": action_result.message,
+                                        "data": action_result.data if action_result.data else None,
+                                    }
+                                )
+
+                                if action_result.success:
+                                    # Distinguish real executions from noop skips
+                                    is_noop = (
+                                        action_result.data.get("noop", False)
+                                        if action_result.data
+                                        else False
                                     )
+                                    if is_noop:
+                                        logger.debug(
+                                            "Rule %s: noop skip for %s - %s",
+                                            rule_name,
+                                            action_type,
+                                            action_result.message,
+                                        )
+                                    else:
+                                        logger.info(
+                                            f"Rule {rule_name} executed action: {action_type} - {action_result.message}"
+                                        )
                                 else:
                                     logger.error(
-                                        f"Rule {rule_name} failed to execute action: {action_type} - {result.message}"
+                                        f"Rule {rule_name} failed to execute action: {action_type} - {action_result.message}"
                                     )
 
                             except Exception as e:
                                 logger.error(
                                     f"Error executing action {action_type} for rule {rule_name}: {e}",
                                     exc_info=True,
+                                )
+                                execution_outcome["action_results"].append(
+                                    {
+                                        "type": action_type,
+                                        "success": False,
+                                        "message": str(e),
+                                        "data": None,
+                                    }
                                 )
 
                             break
@@ -1005,6 +1184,7 @@ class LogicEngine:
                     await self.conflict_manager.release_actuator(
                         esp_id=lock["esp_id"], gpio=lock["gpio"], rule_id=lock["rule_id"]
                     )
+        return execution_outcome
 
     async def _execute_action_legacy(
         self,

@@ -12,6 +12,7 @@ enum class CommandSubtype : uint8_t {
 struct CommandAdmissionContext {
     bool registration_confirmed;
     bool config_pending_after_reset;
+    bool approval_pending;
     bool runtime_degraded;
     bool safety_locked;
     bool recovery_intent;

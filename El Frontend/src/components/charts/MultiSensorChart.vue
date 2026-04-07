@@ -76,6 +76,9 @@ const RETRY_CONFIG = {
   maxDelay: 10000,
 } as const
 
+/** Millisecond threshold to distinguish unix seconds from unix milliseconds */
+const TIMESTAMP_MS_THRESHOLD = 1_000_000_000_000
+
 /** Time range configurations */
 const TIME_RANGES = {
   '1h': { ms: 60 * 60 * 1000, label: '1 Stunde' },
@@ -180,6 +183,8 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null
 /** Zoom state (8.0-A) */
 const chartRef = ref<InstanceType<typeof Line> | null>(null)
 const isZoomed = ref(false)
+const timelineAnchorMs = ref(Date.now())
+const isChartHoverActive = ref(false)
 
 
 // =============================================================================
@@ -191,6 +196,9 @@ const timeRangeMs = computed(() => {
   return TIME_RANGES[props.timeRange]?.ms || TIME_RANGES['24h'].ms
 })
 
+const timelineStartMs = computed(() => timelineAnchorMs.value - timeRangeMs.value)
+const timelineEndMs = computed(() => timelineAnchorMs.value)
+
 /** Server-side aggregation resolution based on time range */
 const currentResolution = computed<SensorDataResolution | undefined>(() => {
   const minutes = TIME_RANGE_MINUTES[props.timeRange] ?? 1440
@@ -201,6 +209,8 @@ const currentResolution = computed<SensorDataResolution | undefined>(() => {
 const timeRangeLabel = computed(() => {
   return TIME_RANGES[props.timeRange]?.label || '24 Stunden'
 })
+
+const isCompactChart = computed(() => props.height <= 180)
 
 /** Kombinierte Daten: Historisch + Live */
 const combinedData = computed(() => {
@@ -394,10 +404,14 @@ const chartData = computed(() => {
     return {
       type: 'line' as const,
       label: sensor.name,
-      data: readings.map((r) => ({
-        x: new Date(r.timestamp).getTime(),
-        y: r.processed_value ?? r.raw_value ?? null,
-      })),
+      data: readings.flatMap((r) => {
+        const timestampMs = toTimestampMs(r.timestamp)
+        if (timestampMs == null) return []
+        return [{
+          x: timestampMs,
+          y: r.processed_value ?? r.raw_value ?? null,
+        }]
+      }),
       borderColor: sensor.color,
       backgroundColor: `${sensor.color}20`,
       borderWidth: 2,
@@ -498,12 +512,23 @@ const chartOptions = computed(() => {
   return {
     responsive: true,
     maintainAspectRatio: false,
+    layout: {
+      padding: {
+        top: 4,
+        right: isCompactChart.value ? 4 : 8,
+        bottom: isCompactChart.value ? 22 : 8,
+        left: 4,
+      },
+    },
     animation: {
       duration: 300,
     },
     interaction: {
       mode: 'index' as const,
       intersect: false,
+    },
+    onHover: (_event: unknown, activeElements: unknown[]) => {
+      isChartHoverActive.value = activeElements.length > 0
     },
     plugins: {
       legend: {
@@ -513,13 +538,21 @@ const chartOptions = computed(() => {
         backgroundColor: 'rgba(0, 0, 0, 0.85)',
         titleColor: '#fff',
         bodyColor: '#fff',
-        padding: 12,
+        padding: isCompactChart.value ? 8 : 12,
         cornerRadius: 8,
-        displayColors: true,
+        displayColors: !isCompactChart.value,
         callbacks: {
           title: (items: any[]) => {
             if (items.length === 0) return ''
             const date = new Date(items[0].parsed.x)
+            if (isCompactChart.value) {
+              return date.toLocaleString('de-DE', {
+                day: '2-digit',
+                month: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            }
             return date.toLocaleString('de-DE', {
               day: '2-digit',
               month: '2-digit',
@@ -581,6 +614,8 @@ const chartOptions = computed(() => {
     scales: {
       x: {
         type: 'time' as const,
+        min: timelineStartMs.value,
+        max: timelineEndMs.value,
         time: {
           displayFormats: {
             second: 'HH:mm:ss',
@@ -594,7 +629,11 @@ const chartOptions = computed(() => {
         },
         ticks: {
           color: 'rgba(255, 255, 255, 0.5)',
-          maxTicksLimit: 8,
+          maxTicksLimit: isCompactChart.value ? 5 : 8,
+          autoSkip: true,
+          autoSkipPadding: isCompactChart.value ? 14 : 8,
+          minRotation: isCompactChart.value ? 40 : 0,
+          maxRotation: isCompactChart.value ? 40 : 0,
         },
       },
       ...yScales,
@@ -625,6 +664,74 @@ function resetZoom() {
 // Methods
 // =============================================================================
 
+function toTimestampMs(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value < TIMESTAMP_MS_THRESHOLD ? Math.trunc(value * 1000) : Math.trunc(value)
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    const numeric = Number(trimmed)
+    if (Number.isFinite(numeric)) {
+      return numeric < TIMESTAMP_MS_THRESHOLD ? Math.trunc(numeric * 1000) : Math.trunc(numeric)
+    }
+    const parsed = Date.parse(trimmed)
+    return Number.isNaN(parsed) ? null : parsed
+  }
+  return null
+}
+
+function normalizeReadings(readings: SensorReading[]): SensorReading[] {
+  const normalized = readings
+    .map((reading) => {
+      const timestampMs = toTimestampMs(reading.timestamp)
+      if (timestampMs == null) return null
+      return {
+        ...reading,
+        timestamp: new Date(timestampMs).toISOString(),
+      }
+    })
+    .filter((reading): reading is SensorReading => reading !== null)
+    .sort((a, b) => {
+      const left = toTimestampMs(a.timestamp) ?? 0
+      const right = toTimestampMs(b.timestamp) ?? 0
+      return left - right
+    })
+
+  const deduplicated: SensorReading[] = []
+  let lastTimestampMs: number | null = null
+
+  for (const reading of normalized) {
+    const timestampMs = toTimestampMs(reading.timestamp)
+    if (timestampMs == null) continue
+
+    if (timestampMs === lastTimestampMs && deduplicated.length > 0) {
+      // Prefer latest value for identical timestamp
+      deduplicated[deduplicated.length - 1] = reading
+      continue
+    }
+
+    deduplicated.push(reading)
+    lastTimestampMs = timestampMs
+  }
+
+  return deduplicated.slice(-MAX_DATA_POINTS)
+}
+
+function getLatestTimestampMs(dataBySensor: Map<string, SensorReading[]>): number | null {
+  let latest: number | null = null
+  for (const readings of dataBySensor.values()) {
+    for (const reading of readings) {
+      const timestampMs = toTimestampMs(reading.timestamp)
+      if (timestampMs == null) continue
+      if (latest == null || timestampMs > latest) {
+        latest = timestampMs
+      }
+    }
+  }
+  return latest
+}
+
 /**
  * Lädt historische Daten für alle Sensoren.
  * Verwendet Retry-Logik bei Fehlern.
@@ -650,6 +757,7 @@ async function fetchData(retryAttempt = 0): Promise<void> {
   }
 
   const now = new Date()
+  timelineAnchorMs.value = now.getTime()
   const startTime = new Date(now.getTime() - timeRangeMs.value)
 
   log.debug('Fetching data', {
@@ -696,14 +804,19 @@ async function fetchData(retryAttempt = 0): Promise<void> {
     let successCount = 0
 
     results.forEach(({ id, readings }) => {
-      newData.set(id, readings)
-      if (readings.length > 0) {
+      const normalizedReadings = normalizeReadings(readings)
+      newData.set(id, normalizedReadings)
+      if (normalizedReadings.length > 0) {
         successCount++
-        emit('dataLoaded', id, readings.length)
+        emit('dataLoaded', id, normalizedReadings.length)
       }
     })
 
     sensorData.value = newData
+    const latestTimestamp = getLatestTimestampMs(newData)
+    if (latestTimestamp != null) {
+      timelineAnchorMs.value = Math.max(timelineAnchorMs.value, latestTimestamp)
+    }
 
     log.debug('fetchData complete', {
       successCount,
@@ -820,9 +933,9 @@ function handleSensorDataMessage(sensor: ChartSensor, message: any): void {
 
   // Erstelle SensorReading aus WebSocket-Daten
   const reading: SensorReading = {
-    timestamp: data.timestamp
-      ? new Date(typeof data.timestamp === 'number' ? data.timestamp * 1000 : data.timestamp).toISOString()
-      : new Date().toISOString(),
+    timestamp: new Date(
+      toTimestampMs(data.timestamp) ?? Date.now()
+    ).toISOString(),
     raw_value: data.raw_value ?? data.value ?? 0,
     processed_value: data.processed_value ?? null,
     unit: data.unit ?? sensor.unit,
@@ -831,12 +944,16 @@ function handleSensorDataMessage(sensor: ChartSensor, message: any): void {
 
   // Füge zu Live-Daten hinzu
   const currentLive = liveDataPoints.value.get(sensor.id) || []
-  const updatedLive = [...currentLive, reading].slice(-MAX_DATA_POINTS)
+  const updatedLive = normalizeReadings([...currentLive, reading])
 
   // Erstelle neue Map für Reaktivität
   const newLiveData = new Map(liveDataPoints.value)
   newLiveData.set(sensor.id, updatedLive)
   liveDataPoints.value = newLiveData
+  const readingTimestamp = toTimestampMs(reading.timestamp)
+  if (readingTimestamp != null) {
+    timelineAnchorMs.value = Math.max(timelineAnchorMs.value, readingTimestamp)
+  }
 
   log.debug(`Live data updated for ${sensor.id}`, { totalPoints: updatedLive.length })
 }
@@ -986,32 +1103,39 @@ onUnmounted(() => {
         :options="(chartOptions as any)"
       />
 
-      <!-- Info-Badge: Datenpunkte & Live-Status & Zoom-Reset -->
-      <div class="multi-sensor-chart__info">
-        <button
-          v-if="isZoomed"
-          class="multi-sensor-chart__reset-zoom"
-          title="Zoom zurücksetzen"
-          @click="resetZoom"
-        >
-          <RotateCcw :size="12" />
-        </button>
-        <span class="multi-sensor-chart__info-points">
-          {{ totalDataPoints }} Punkte
-        </span>
-        <span v-if="needsDualAxis" class="multi-sensor-chart__info-dual">
-          2Y
-        </span>
-        <span v-if="enableLiveUpdates && hasLiveData" class="multi-sensor-chart__info-live">
-          <span class="multi-sensor-chart__live-dot" />
-          Live
-        </span>
-      </div>
-
       <!-- Loading Overlay (beim Refresh) -->
       <div v-if="isLoading" class="multi-sensor-chart__loading-overlay">
         <div class="multi-sensor-chart__spinner multi-sensor-chart__spinner--small" />
       </div>
+    </div>
+
+    <!-- Meta-Leiste unter dem Chart (kein Overlay über Daten/Tooltip) -->
+    <div
+      v-if="totalDataPoints > 0"
+      :class="[
+        'multi-sensor-chart__info',
+        { 'multi-sensor-chart__info--compact': isCompactChart },
+        { 'multi-sensor-chart__info--hidden': isCompactChart && isChartHoverActive },
+      ]"
+    >
+      <button
+        v-if="isZoomed"
+        class="multi-sensor-chart__reset-zoom"
+        title="Zoom zurücksetzen"
+        @click="resetZoom"
+      >
+        <RotateCcw :size="12" />
+      </button>
+      <span class="multi-sensor-chart__info-points">
+        {{ totalDataPoints }} Punkte
+      </span>
+      <span v-if="needsDualAxis" class="multi-sensor-chart__info-dual">
+        2Y
+      </span>
+      <span v-if="enableLiveUpdates && hasLiveData" class="multi-sensor-chart__info-live">
+        <span class="multi-sensor-chart__live-dot" />
+        Live
+      </span>
     </div>
   </div>
 </template>
@@ -1110,18 +1234,32 @@ onUnmounted(() => {
 
 /* Info Badge */
 .multi-sensor-chart__info {
-  position: absolute;
-  bottom: 6px;
-  right: 6px;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 0.375rem;
-  padding: 0.1875rem 0.375rem;
-  background: rgba(0, 0, 0, 0.65);
-  border-radius: 0.1875rem;
-  font-size: 0.5625rem;
+  margin-top: 0.375rem;
+  padding: 0.25rem 0.375rem;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.3125rem;
+  font-size: 0.625rem;
   color: var(--color-text-muted);
   backdrop-filter: blur(4px);
+}
+
+.multi-sensor-chart__info--compact {
+  justify-content: flex-start;
+  gap: 0.25rem;
+  margin-top: 0.3125rem;
+  padding: 0.1875rem 0.3125rem;
+  font-size: 0.5625rem;
+}
+
+.multi-sensor-chart__info--hidden {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .multi-sensor-chart__info-points {

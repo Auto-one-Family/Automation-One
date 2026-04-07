@@ -8,7 +8,7 @@ name: ADC Full Sweep Test
 version: 1
 steps:
   # Boot and connect
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # Registration gate
   - wait-serial: "REGISTRATION"

@@ -16,7 +16,6 @@ import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp } from 'lucide-vue-n
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import NotificationItem from '@/components/notifications/NotificationItem.vue'
 import NotificationPreferences from '@/components/notifications/NotificationPreferences.vue'
-import AlertStatusBar from '@/components/notifications/AlertStatusBar.vue'
 import {
   useNotificationInboxStore,
   type InboxFilter,
@@ -34,6 +33,7 @@ const authStore = useAuthStore()
 
 type StatusFilter = 'all' | 'active' | 'acknowledged' | 'resolved'
 const activeStatusFilter = ref<StatusFilter>('all')
+const isResolvingAll = ref(false)
 
 const filterTabs: { key: InboxFilter; label: string }[] = [
   { key: 'all', label: 'Alle' },
@@ -87,8 +87,15 @@ function handleMarkRead(id: string): void {
   inboxStore.markAsRead(id)
 }
 
-function handleMarkAllRead(): void {
-  inboxStore.markAllAsRead()
+async function handleResolveAll(): Promise<void> {
+  if (isResolvingAll.value || alertStore.unresolvedCount === 0) return
+  isResolvingAll.value = true
+  try {
+    await alertStore.resolveAllAlerts()
+    await inboxStore.loadInitial()
+  } finally {
+    isResolvingAll.value = false
+  }
 }
 
 async function handleAcknowledge(id: string): Promise<void> {
@@ -140,9 +147,6 @@ watch(
   >
     <!-- Custom header actions (injected via default slot, header area) -->
     <template #default>
-      <!-- Alert Status Summary -->
-      <AlertStatusBar />
-
       <!-- Header Actions Row -->
       <div class="drawer__header-actions">
         <div class="drawer__tabs">
@@ -162,12 +166,14 @@ watch(
         <div class="drawer__actions">
           <button
             class="drawer__action-btn"
-            title="Alle als gelesen markieren"
-            :disabled="inboxStore.unreadCount === 0"
-            @click="handleMarkAllRead"
+            title="Alle aktiven Alerts erledigen"
+            :disabled="alertStore.unresolvedCount === 0 || isResolvingAll"
+            @click="handleResolveAll"
           >
             <CheckCheck class="drawer__action-icon" />
-            <span class="drawer__action-label">Alle gelesen</span>
+            <span class="drawer__action-label">
+              {{ isResolvingAll ? 'Erledige...' : 'Alle erledigen' }}
+            </span>
           </button>
           <button
             class="drawer__action-btn"

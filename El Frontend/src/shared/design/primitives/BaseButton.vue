@@ -40,7 +40,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const buttonClasses = computed(() => {
-  const classes: string[] = []
+  const classes: string[] = ['btn']
 
   // Variant classes
   const variantClasses: Record<ButtonVariant, string> = {

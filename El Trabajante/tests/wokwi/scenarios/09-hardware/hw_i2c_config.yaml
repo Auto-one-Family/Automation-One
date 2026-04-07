@@ -51,7 +51,7 @@ steps:
   - wait-serial: "Phase 1: Core Infrastructure READY"
 
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # TEST: External MQTT injection - try to use I2C SDA pin GPIO 21 (CI helper script)
   # This should fail because I2C pins are auto-reserved

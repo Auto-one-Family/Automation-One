@@ -580,6 +580,21 @@ async def toggle_rule(
                             f"Rule '{rule.name}' disabled: failed to send OFF to "
                             f"{esp_id} GPIO {gpio}: {e}"
                         )
+        # Keep conflict locks consistent with disable/delete behavior.
+        from ...services.logic_engine import get_logic_engine
+
+        engine = get_logic_engine()
+        if engine:
+            for action in rule.actions:
+                if action.get("type") in ("actuator_command", "actuator"):
+                    act_esp = action.get("esp_id")
+                    act_gpio = action.get("gpio")
+                    if act_esp is not None and act_gpio is not None:
+                        await engine.conflict_manager.release_actuator(
+                            esp_id=str(act_esp),
+                            gpio=int(act_gpio),
+                            rule_id=str(rule_id),
+                        )
 
     action = "enabled" if request.enabled else "disabled"
     logger.info(

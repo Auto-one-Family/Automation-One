@@ -22,6 +22,8 @@ import {
   Trash2,
   RefreshCw,
   Archive,
+  Download,
+  PlusCircle,
   Clock,
   Settings,
   AlertTriangle,
@@ -45,6 +47,11 @@ import {
   type AutoCleanupStatus,
   type BackupRetentionConfig,
 } from '@/api/audit'
+import {
+  backupsApi,
+  type DatabaseBackupInfo,
+} from '@/api/backups'
+import { formatUiApiError, toUiApiError } from '@/api/uiApiError'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { createLogger } from '@/utils/logger'
 
@@ -86,6 +93,12 @@ const isRestoringBackup = ref<string | null>(null)
 const isDeletingBackup = ref<string | null>(null)
 const isSavingRetention = ref(false)
 const isSavingBackupRetention = ref(false)
+const isLoadingDatabaseBackups = ref(false)
+const isCreatingDatabaseBackup = ref(false)
+const isCleaningDatabaseBackups = ref(false)
+const isRestoringDatabaseBackup = ref<string | null>(null)
+const isDeletingDatabaseBackup = ref<string | null>(null)
+const isDownloadingDatabaseBackup = ref<string | null>(null)
 
 // Data
 const statistics = ref<AuditStatistics | null>(null)
@@ -94,6 +107,7 @@ const retentionConfig = ref<RetentionConfig | null>(null)
 const autoCleanupStatus = ref<AutoCleanupStatus | null>(null)
 const cleanupResult = ref<CleanupResult | null>(null)
 const backupRetentionConfig = ref<BackupRetentionConfig | null>(null)
+const databaseBackups = ref<DatabaseBackupInfo[]>([])
 
 // Cleanup dialog state
 const showCleanupDialog = ref(false)
@@ -103,6 +117,21 @@ const isDeleting = ref(false)
 
 // UI state - cleanup completion result (shown after dialog closes)
 const completedCleanupResult = ref<CleanupResult | null>(null)
+type TerminalState = 'success' | 'failed' | 'partial' | 'timeout'
+
+interface OperationTerminalFeedback {
+  state: TerminalState
+  title: string
+  detail: string
+  timestamp: string
+}
+
+const dbBackupFeedback = ref<OperationTerminalFeedback | null>(null)
+const showDatabaseRestoreDialog = ref(false)
+const databaseRestoreCandidate = ref<DatabaseBackupInfo | null>(null)
+const databaseRestoreConfirmChecked = ref(false)
+const databaseRestoreConfirmText = ref('')
+const DB_RESTORE_CONFIRM_TOKEN = 'RESTORE'
 
 // Retention form
 const retentionForm = ref<RetentionConfigUpdate>({
@@ -124,11 +153,18 @@ const retentionForm = ref<RetentionConfigUpdate>({
 // ============================================================================
 
 const hasActiveBackups = computed(() => backups.value.filter(b => !b.expired).length > 0)
+const hasDatabaseBackups = computed(() => databaseBackups.value.length > 0)
 
 const isAdmin = computed(() => authStore.isAdmin)
 const isOperatorOrAdmin = computed(() => authStore.isOperator)
 const canPreview = computed(() => isOperatorOrAdmin.value)
 const canCleanup = computed(() => isAdmin.value)
+const canRunDatabaseBackupRestore = computed(() => (
+  isAdmin.value
+  && !!databaseRestoreCandidate.value
+  && databaseRestoreConfirmChecked.value
+  && databaseRestoreConfirmText.value.trim().toUpperCase() === DB_RESTORE_CONFIRM_TOKEN
+))
 
 // Retention dropdown options
 const retentionOptions = [
@@ -201,13 +237,19 @@ const formatExpiresIn = (expiresAt: string | null) => {
 // ============================================================================
 
 async function loadAll() {
-  await Promise.all([
+  const tasks: Promise<unknown>[] = [
     loadAutoCleanupStatus(),
     loadStatistics(),
     loadBackups(),
     loadRetentionConfig(),
     loadBackupRetentionConfig(),
-  ])
+  ]
+
+  if (isAdmin.value) {
+    tasks.push(loadDatabaseBackups())
+  }
+
+  await Promise.all(tasks)
 }
 
 async function loadAutoCleanupStatus() {
@@ -247,6 +289,25 @@ async function loadBackups() {
     logger.error(' Failed to load backups:', err)
   } finally {
     isLoadingBackups.value = false
+  }
+}
+
+async function loadDatabaseBackups() {
+  if (!isAdmin.value) {
+    databaseBackups.value = []
+    return
+  }
+
+  isLoadingDatabaseBackups.value = true
+  try {
+    const response = await backupsApi.listBackups()
+    databaseBackups.value = response.backups
+  } catch (err) {
+    logger.error(' Failed to load database backups:', err)
+    const uiError = toUiApiError(err, 'Database-Backups konnten nicht geladen werden')
+    setDbBackupFeedback('failed', 'Database-Backup Liste fehlgeschlagen', formatUiApiError(uiError))
+  } finally {
+    isLoadingDatabaseBackups.value = false
   }
 }
 
@@ -400,6 +461,178 @@ async function deleteBackup(backupId: string) {
     logger.error(' Delete backup failed:', err)
   } finally {
     isDeletingBackup.value = null
+  }
+}
+
+function setDbBackupFeedback(
+  state: TerminalState,
+  title: string,
+  detail: string,
+) {
+  dbBackupFeedback.value = {
+    state,
+    title,
+    detail,
+    timestamp: new Date().toISOString(),
+  }
+}
+
+function mapErrorState(error: unknown): TerminalState {
+  const uiError = toUiApiError(error, 'Aktion fehlgeschlagen')
+  if (uiError.status === 408 || uiError.message.toLowerCase().includes('timeout')) {
+    return 'timeout'
+  }
+  return 'failed'
+}
+
+async function createDatabaseBackup() {
+  if (!isAdmin.value) return
+
+  isCreatingDatabaseBackup.value = true
+  try {
+    const response = await backupsApi.createBackup()
+    await loadDatabaseBackups()
+    setDbBackupFeedback(
+      'success',
+      'Database-Backup erstellt',
+      `${response.backup.filename} wurde erfolgreich angelegt.`,
+    )
+  } catch (err) {
+    logger.error(' Create database backup failed:', err)
+    const state = mapErrorState(err)
+    const uiError = toUiApiError(err, 'Database-Backup konnte nicht erstellt werden')
+    setDbBackupFeedback(state, 'Database-Backup fehlgeschlagen', formatUiApiError(uiError))
+  } finally {
+    isCreatingDatabaseBackup.value = false
+  }
+}
+
+async function cleanupDatabaseBackups() {
+  if (!isAdmin.value) return
+
+  isCleaningDatabaseBackups.value = true
+  try {
+    const response = await backupsApi.cleanupBackups()
+    await loadDatabaseBackups()
+
+    const state: TerminalState = response.total_deleted > 0 && response.remaining > 0
+      ? 'partial'
+      : 'success'
+    setDbBackupFeedback(
+      state,
+      state === 'partial' ? 'Database-Backup Cleanup teilweise abgeschlossen' : 'Database-Backup Cleanup abgeschlossen',
+      `${response.total_deleted} gelöscht, ${response.remaining} verbleiben.`,
+    )
+  } catch (err) {
+    logger.error(' Cleanup database backups failed:', err)
+    const state = mapErrorState(err)
+    const uiError = toUiApiError(err, 'Database-Backup-Cleanup konnte nicht ausgeführt werden')
+    setDbBackupFeedback(state, 'Database-Backup Cleanup fehlgeschlagen', formatUiApiError(uiError))
+  } finally {
+    isCleaningDatabaseBackups.value = false
+  }
+}
+
+function openDatabaseRestoreDialog(backup: DatabaseBackupInfo) {
+  databaseRestoreCandidate.value = backup
+  databaseRestoreConfirmChecked.value = false
+  databaseRestoreConfirmText.value = ''
+  showDatabaseRestoreDialog.value = true
+}
+
+function closeDatabaseRestoreDialog() {
+  showDatabaseRestoreDialog.value = false
+  databaseRestoreCandidate.value = null
+  databaseRestoreConfirmChecked.value = false
+  databaseRestoreConfirmText.value = ''
+}
+
+async function confirmDatabaseRestore() {
+  if (!databaseRestoreCandidate.value || !canRunDatabaseBackupRestore.value) {
+    return
+  }
+
+  const backupId = databaseRestoreCandidate.value.backup_id
+  isRestoringDatabaseBackup.value = backupId
+  try {
+    const response = await backupsApi.restoreBackup(backupId)
+    closeDatabaseRestoreDialog()
+    await Promise.all([loadDatabaseBackups(), loadStatistics()])
+    setDbBackupFeedback(
+      'success',
+      'Database-Restore abgeschlossen',
+      `${response.filename} wurde in ${response.duration_seconds.toFixed(2)}s wiederhergestellt.`,
+    )
+  } catch (err) {
+    logger.error(' Restore database backup failed:', err)
+    const state = mapErrorState(err)
+    const uiError = toUiApiError(err, 'Database-Restore konnte nicht ausgeführt werden')
+    setDbBackupFeedback(state, 'Database-Restore fehlgeschlagen', formatUiApiError(uiError))
+  } finally {
+    isRestoringDatabaseBackup.value = null
+  }
+}
+
+async function deleteDatabaseBackup(backupId: string) {
+  if (!isAdmin.value) return
+
+  isDeletingDatabaseBackup.value = backupId
+  try {
+    const response = await backupsApi.deleteBackup(backupId)
+    await loadDatabaseBackups()
+    setDbBackupFeedback(
+      'success',
+      'Database-Backup gelöscht',
+      `${response.backup_id} wurde gelöscht.`,
+    )
+  } catch (err) {
+    logger.error(' Delete database backup failed:', err)
+    const state = mapErrorState(err)
+    const uiError = toUiApiError(err, 'Database-Backup konnte nicht gelöscht werden')
+    setDbBackupFeedback(state, 'Database-Backup löschen fehlgeschlagen', formatUiApiError(uiError))
+  } finally {
+    isDeletingDatabaseBackup.value = null
+  }
+}
+
+async function downloadDatabaseBackup(backup: DatabaseBackupInfo) {
+  if (!isAdmin.value) return
+
+  isDownloadingDatabaseBackup.value = backup.backup_id
+  try {
+    const downloadUrl = backupsApi.getDownloadUrl(backup.backup_id)
+    const headers: Record<string, string> = {}
+    if (authStore.accessToken) {
+      headers.Authorization = `Bearer ${authStore.accessToken}`
+    }
+
+    const response = await fetch(downloadUrl, { headers })
+    if (!response.ok) {
+      throw new Error(`Download fehlgeschlagen (${response.status})`)
+    }
+
+    const blob = await response.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = backup.filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(objectUrl)
+
+    setDbBackupFeedback(
+      'success',
+      'Database-Backup heruntergeladen',
+      `${backup.filename} wurde lokal gespeichert.`,
+    )
+  } catch (err) {
+    logger.error(' Download database backup failed:', err)
+    const state = mapErrorState(err)
+    const uiError = toUiApiError(err, 'Database-Backup konnte nicht heruntergeladen werden')
+    setDbBackupFeedback(state, 'Database-Backup Download fehlgeschlagen', formatUiApiError(uiError))
+  } finally {
+    isDownloadingDatabaseBackup.value = null
   }
 }
 
@@ -642,11 +875,11 @@ onMounted(() => {
                 </div>
               </section>
 
-              <!-- 4. BACKUPS -->
+              <!-- 4. AUDIT BACKUP -->
               <section class="panel-section">
                 <div class="section-header">
                   <Archive class="w-4 h-4" />
-                  <span>Backups</span>
+                  <span>Audit Backup</span>
                   <span v-if="hasActiveBackups" class="badge">{{ backups.filter(b => !b.expired).length }} verfügbar</span>
                   <button
                     class="refresh-btn"
@@ -656,6 +889,10 @@ onMounted(() => {
                     <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': isLoadingBackups }" />
                   </button>
                 </div>
+
+                <p class="surface-note">
+                  Wirkung: sichert Audit-Events vor Cleanup. Risiko: gering. Rückgängig: Restore einzelner Events möglich.
+                </p>
 
                 <div v-if="backups.length > 0" class="backup-list">
                   <div
@@ -716,7 +953,7 @@ onMounted(() => {
                 <div v-else class="empty-state">
                   <Archive class="w-8 h-8" />
                   <span>Keine Backups vorhanden</span>
-                  <small>Backups werden automatisch vor Bereinigungen erstellt</small>
+                  <small>Audit-Backups werden vor Bereinigungen erstellt</small>
                 </div>
 
                 <!-- Backup Retention Configuration (Admin only) -->
@@ -751,6 +988,125 @@ onMounted(() => {
                   <small class="backup-retention-hint">
                     {{ selectedBackupRetention === 0 ? 'Backups werden niemals automatisch gelöscht' : `Neue Backups laufen nach ${selectedBackupRetention} Tagen ab` }}
                   </small>
+                </div>
+              </section>
+
+              <!-- 5. DATABASE BACKUP -->
+              <section class="panel-section panel-section--database">
+                <div class="section-header">
+                  <Database class="w-4 h-4" />
+                  <span>Database Backup</span>
+                  <span v-if="hasDatabaseBackups" class="badge">{{ databaseBackups.length }} verfügbar</span>
+                  <button
+                    class="refresh-btn"
+                    @click="loadDatabaseBackups"
+                    :disabled="isLoadingDatabaseBackups"
+                  >
+                    <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': isLoadingDatabaseBackups }" />
+                  </button>
+                </div>
+
+                <p class="surface-note surface-note--warning">
+                  Wirkung: Snapshot der gesamten operativen Datenbank. Risiko: Restore überschreibt aktuellen Stand. Rückgängig: nur über separates Backup.
+                </p>
+
+                <div class="db-action-row">
+                  <button
+                    class="action-btn"
+                    @click="createDatabaseBackup"
+                    :disabled="isCreatingDatabaseBackup || !isAdmin"
+                    title="POST /v1/backups/database/create"
+                  >
+                    <RefreshCw v-if="isCreatingDatabaseBackup" class="w-4 h-4 animate-spin" />
+                    <PlusCircle v-else class="w-4 h-4" />
+                    <span>Create</span>
+                  </button>
+
+                  <button
+                    class="action-btn action-btn--danger"
+                    @click="cleanupDatabaseBackups"
+                    :disabled="isCleaningDatabaseBackups || !isAdmin"
+                    title="POST /v1/backups/database/cleanup"
+                  >
+                    <RefreshCw v-if="isCleaningDatabaseBackups" class="w-4 h-4 animate-spin" />
+                    <Trash2 v-else class="w-4 h-4" />
+                    <span>Cleanup</span>
+                  </button>
+                </div>
+
+                <div v-if="dbBackupFeedback" class="db-feedback" :class="`db-feedback--${dbBackupFeedback.state}`">
+                  <div class="result-header">
+                    <CheckCircle class="w-5 h-5" v-if="dbBackupFeedback.state === 'success'" />
+                    <AlertTriangle class="w-5 h-5" v-else />
+                    <span>{{ dbBackupFeedback.title }}</span>
+                  </div>
+                  <p class="db-feedback__detail">{{ dbBackupFeedback.detail }}</p>
+                  <small class="db-feedback__timestamp">{{ formatTimeAgo(dbBackupFeedback.timestamp) }}</small>
+                </div>
+
+                <div v-if="databaseBackups.length > 0" class="backup-list">
+                  <div
+                    v-for="backup in databaseBackups"
+                    :key="backup.backup_id"
+                    class="backup-item"
+                  >
+                    <div class="backup-info">
+                      <div class="backup-icon">
+                        <Database class="w-4 h-4" />
+                      </div>
+                      <div class="backup-details">
+                        <span class="backup-id">{{ backup.filename }}</span>
+                        <span class="backup-meta">
+                          {{ backup.size_human }} · {{ formatTimeAgo(backup.created_at) }}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div class="backup-status">
+                      <span class="status-expires">Datenbank</span>
+                    </div>
+
+                    <div class="backup-actions">
+                      <button
+                        class="backup-action-btn"
+                        @click="downloadDatabaseBackup(backup)"
+                        :disabled="isDownloadingDatabaseBackup === backup.backup_id"
+                        title="GET /v1/backups/database/{id}/download"
+                      >
+                        <RefreshCw v-if="isDownloadingDatabaseBackup === backup.backup_id" class="w-4 h-4 animate-spin" />
+                        <Download v-else class="w-4 h-4" />
+                      </button>
+                      <button
+                        class="backup-action-btn backup-action-btn--restore"
+                        @click="openDatabaseRestoreDialog(backup)"
+                        :disabled="isRestoringDatabaseBackup === backup.backup_id"
+                        title="POST /v1/backups/database/{id}/restore"
+                      >
+                        <RefreshCw v-if="isRestoringDatabaseBackup === backup.backup_id" class="w-4 h-4 animate-spin" />
+                        <RotateCcw v-else class="w-4 h-4" />
+                      </button>
+                      <button
+                        class="backup-action-btn backup-action-btn--delete"
+                        @click="deleteDatabaseBackup(backup.backup_id)"
+                        :disabled="isDeletingDatabaseBackup === backup.backup_id"
+                        title="DELETE /v1/backups/database/{id}"
+                      >
+                        <RefreshCw v-if="isDeletingDatabaseBackup === backup.backup_id" class="w-4 h-4 animate-spin" />
+                        <Trash2 v-else class="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-else-if="isLoadingDatabaseBackups" class="loading-placeholder">
+                  <RefreshCw class="w-5 h-5 animate-spin" />
+                  <span>Lade Database-Backups...</span>
+                </div>
+
+                <div v-else class="empty-state">
+                  <Database class="w-8 h-8" />
+                  <span>Keine Database-Backups vorhanden</span>
+                  <small>Mit „Create“ kann sofort ein Snapshot erzeugt werden</small>
                 </div>
               </section>
             </div>
@@ -827,6 +1183,73 @@ onMounted(() => {
                   <RefreshCw v-if="isDeleting" class="w-4 h-4 animate-spin" />
                   <Trash2 v-else class="w-4 h-4" />
                   Endgültig löschen
+                </button>
+              </footer>
+            </div>
+          </div>
+        </Transition>
+
+        <Transition name="fade">
+          <div
+            v-if="showDatabaseRestoreDialog"
+            class="cleanup-dialog-overlay"
+            @click.self="closeDatabaseRestoreDialog"
+          >
+            <div class="cleanup-dialog cleanup-dialog--danger">
+              <header class="dialog-header dialog-header--danger">
+                <AlertTriangle class="w-5 h-5" />
+                <h3>Database-Restore (destruktiv)</h3>
+                <button class="close-btn" @click="closeDatabaseRestoreDialog">
+                  <X class="w-5 h-5" />
+                </button>
+              </header>
+
+              <div class="dialog-content" v-if="databaseRestoreCandidate">
+                <div class="dialog-summary dialog-summary--danger">
+                  <AlertTriangle class="w-6 h-6 summary-icon" />
+                  <div>
+                    <p class="summary-count">Achtung: Dieser Restore überschreibt den aktuellen Datenbankzustand.</p>
+                    <p class="result-message-muted">
+                      Datei: <strong>{{ databaseRestoreCandidate.filename }}</strong>
+                    </p>
+                    <p class="result-message-muted">
+                      Größe: {{ databaseRestoreCandidate.size_human }} · erstellt {{ formatTimeAgo(databaseRestoreCandidate.created_at) }}
+                    </p>
+                  </div>
+                </div>
+
+                <div class="dialog-options">
+                  <label class="checkbox-label">
+                    <input type="checkbox" v-model="databaseRestoreConfirmChecked" />
+                    <span>Ich bestätige, dass dies eine destruktive Operation ist.</span>
+                  </label>
+                  <label class="confirm-text-label">
+                    <span>Zur finalen Bestätigung bitte <strong>{{ DB_RESTORE_CONFIRM_TOKEN }}</strong> eingeben:</span>
+                    <input
+                      v-model="databaseRestoreConfirmText"
+                      type="text"
+                      class="confirm-text-input"
+                      autocomplete="off"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <footer class="dialog-footer">
+                <button class="btn-secondary" @click="closeDatabaseRestoreDialog">
+                  Abbrechen
+                </button>
+                <button
+                  class="btn-danger"
+                  @click="confirmDatabaseRestore"
+                  :disabled="!canRunDatabaseBackupRestore || (databaseRestoreCandidate ? isRestoringDatabaseBackup === databaseRestoreCandidate.backup_id : false)"
+                >
+                  <RefreshCw
+                    v-if="databaseRestoreCandidate && isRestoringDatabaseBackup === databaseRestoreCandidate.backup_id"
+                    class="w-4 h-4 animate-spin"
+                  />
+                  <RotateCcw v-else class="w-4 h-4" />
+                  Restore endgültig ausführen
                 </button>
               </footer>
             </div>
@@ -966,6 +1389,21 @@ onMounted(() => {
   border-radius: var(--radius-xl);
 }
 
+.panel-section--database {
+  border-color: color-mix(in srgb, var(--color-error) 30%, var(--glass-border));
+}
+
+.surface-note {
+  margin: 0 0 var(--space-md);
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.surface-note--warning {
+  color: var(--color-warning);
+}
+
 .section-header {
   display: flex;
   align-items: center;
@@ -1074,6 +1512,12 @@ onMounted(() => {
   margin-top: var(--space-md);
 }
 
+.db-action-row {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
 .action-btn {
   display: inline-flex;
   align-items: center;
@@ -1112,6 +1556,40 @@ onMounted(() => {
   background: var(--color-bg-quaternary);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
+}
+
+.db-feedback {
+  margin-bottom: var(--space-md);
+  padding: var(--space-md);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--glass-border);
+  background: var(--color-bg-quaternary);
+}
+
+.db-feedback--success {
+  border-color: color-mix(in srgb, var(--color-success) 35%, transparent);
+}
+
+.db-feedback--failed,
+.db-feedback--timeout {
+  border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
+}
+
+.db-feedback--partial {
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+}
+
+.db-feedback__detail {
+  margin: 0;
+  white-space: pre-line;
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+}
+
+.db-feedback__timestamp {
+  display: block;
+  margin-top: var(--space-xs);
+  color: var(--color-text-muted);
 }
 
 .cleanup-result--success {
@@ -1563,6 +2041,10 @@ onMounted(() => {
   overflow: hidden;
 }
 
+.cleanup-dialog--danger {
+  border-color: color-mix(in srgb, var(--color-error) 45%, transparent);
+}
+
 .dialog-header {
   display: flex;
   align-items: center;
@@ -1578,6 +2060,10 @@ onMounted(() => {
   color: var(--color-text-primary);
   margin: 0;
   flex: 1;
+}
+
+.dialog-header--danger {
+  color: var(--color-error);
 }
 
 .dialog-content {
@@ -1600,6 +2086,14 @@ onMounted(() => {
   );
   border: 1px solid rgba(251, 191, 36, 0.3);
   border-radius: var(--radius-lg);
+}
+
+.dialog-summary--danger {
+  background: linear-gradient(135deg,
+    rgba(248, 113, 113, 0.12) 0%,
+    rgba(248, 113, 113, 0.06) 100%
+  );
+  border-color: rgba(248, 113, 113, 0.35);
 }
 
 .summary-icon {
@@ -1659,6 +2153,29 @@ onMounted(() => {
   background: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
+}
+
+.confirm-text-label {
+  margin-top: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.confirm-text-input {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+}
+
+.confirm-text-input:focus {
+  outline: none;
+  border-color: var(--color-iridescent-1);
 }
 
 .dialog-footer {

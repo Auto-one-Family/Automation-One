@@ -7,7 +7,7 @@ name: Emergency Stop Full Flow Test
 version: 1
 steps:
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # Registration gate: opens on server confirmation or 10s timeout fallback
   - wait-serial: "REGISTRATION"

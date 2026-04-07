@@ -1,4 +1,5 @@
 #pragma once
+#include <Arduino.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
@@ -10,6 +11,14 @@ struct SensorCommand {
     char topic[128];
     char payload[512];
     IntentMetadata metadata;
+};
+
+struct SensorCommandExecutionResult {
+    bool ok;
+    String outcome;
+    String code;
+    String reason;
+    bool retryable;
 };
 
 extern QueueHandle_t g_sensor_cmd_queue;

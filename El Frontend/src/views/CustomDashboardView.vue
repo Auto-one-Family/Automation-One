@@ -465,6 +465,10 @@ onActivated(() => {
   if (!grid) {
     nextTick(() => initGrid())
   }
+  // keep-alive return path: rebuild GridStack widget mounts in edit mode
+  else if (isEditing.value && dashStore.activeLayout) {
+    nextTick(() => loadWidgetsToGrid(dashStore.activeLayout!.widgets))
+  }
   // Restore breadcrumb
   const layout = dashStore.activeLayout
   if (layout) {

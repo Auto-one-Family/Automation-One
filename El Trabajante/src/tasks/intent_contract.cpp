@@ -6,6 +6,8 @@
 #include <cstring>
 #include <esp_log.h>
 #include <freertos/portmacro.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 
 #include "../services/communication/mqtt_client.h"
 #include "../utils/logger.h"
@@ -17,7 +19,9 @@ static std::atomic<uint32_t> s_intent_fallback_counter{0};
 static std::atomic<uint32_t> s_corr_fallback_counter{0};
 static std::atomic<uint32_t> s_safety_epoch{0};
 static constexpr uint8_t INTENT_FINAL_STORE_CAPACITY = 32;
-static constexpr uint8_t OUTCOME_OUTBOX_CAPACITY = 8;
+// Queue-pressure can generate >30 terminal outcomes in short bursts.
+// Keep enough NVS replay slots so critical terminals are not evicted immediately.
+static constexpr uint8_t OUTCOME_OUTBOX_CAPACITY = 48;
 static constexpr uint8_t OUTCOME_OUTBOX_RETRY_LIMIT = 5;
 static Preferences s_outcome_outbox_prefs;
 static bool s_outbox_stats_loaded = false;
@@ -30,6 +34,8 @@ static const char* kOutboxStatRecoveredTotalKey = "recovered_total";
 static const char* kOutboxStatDropTotalKey = "drop_total";
 // NVS keys are limited in length, keep this short.
 static const char* kOutboxStatFinalConfirmedTotalKey = "fin_ok_total";
+static SemaphoreHandle_t s_outbox_mutex = nullptr;
+static portMUX_TYPE s_outbox_mutex_init_mux = portMUX_INITIALIZER_UNLOCKED;
 
 struct IntentFinalEntry {
     char intent_id[INTENT_ID_MAX_LEN];
@@ -104,6 +110,54 @@ static String buildFallbackId(const char* prefix, std::atomic<uint32_t>& counter
     return p + "_" + String(millis()) + "_" + String(idx);
 }
 
+static SemaphoreHandle_t getOutboxMutex() {
+    if (s_outbox_mutex != nullptr) {
+        return s_outbox_mutex;
+    }
+    portENTER_CRITICAL(&s_outbox_mutex_init_mux);
+    if (s_outbox_mutex == nullptr) {
+        s_outbox_mutex = xSemaphoreCreateMutex();
+    }
+    portEXIT_CRITICAL(&s_outbox_mutex_init_mux);
+    return s_outbox_mutex;
+}
+
+static bool acquireOutboxLock(TickType_t wait_ticks = pdMS_TO_TICKS(200)) {
+    if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) {
+        // setup()-Phase: single-threaded path, no mutex required.
+        return true;
+    }
+    SemaphoreHandle_t mutex = getOutboxMutex();
+    if (mutex == nullptr) {
+        return false;
+    }
+    return xSemaphoreTake(mutex, wait_ticks) == pdTRUE;
+}
+
+static void releaseOutboxLock() {
+    if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) {
+        return;
+    }
+    if (s_outbox_mutex != nullptr) {
+        xSemaphoreGive(s_outbox_mutex);
+    }
+}
+
+class OutboxLockGuard {
+public:
+    explicit OutboxLockGuard(TickType_t wait_ticks = pdMS_TO_TICKS(200))
+        : locked_(acquireOutboxLock(wait_ticks)) {}
+    ~OutboxLockGuard() {
+        if (locked_) {
+            releaseOutboxLock();
+        }
+    }
+    bool locked() const { return locked_; }
+
+private:
+    bool locked_;
+};
+
 static bool beginOutcomeOutboxPrefs(bool read_only) {
     esp_log_level_set("Preferences", ESP_LOG_NONE);
     esp_log_level_set("Preferences.cpp", ESP_LOG_NONE);
@@ -117,7 +171,7 @@ static String outboxKey(uint8_t idx, const char* suffix) {
     return "s" + String(idx) + "_" + String(suffix);
 }
 
-static void loadOutboxStatsIfNeeded() {
+static void loadOutboxStatsLocked() {
     if (s_outbox_stats_loaded) {
         return;
     }
@@ -134,7 +188,21 @@ static void loadOutboxStatsIfNeeded() {
     s_outbox_stats_loaded = true;
 }
 
+static void loadOutboxStatsIfNeeded() {
+    OutboxLockGuard guard;
+    if (!guard.locked()) {
+        LOG_W(IC_TAG, "Outbox stats lock timeout (load)");
+        return;
+    }
+    loadOutboxStatsLocked();
+}
+
 static void persistOutboxStats() {
+    OutboxLockGuard guard;
+    if (!guard.locked()) {
+        LOG_W(IC_TAG, "Outbox stats lock timeout (persist)");
+        return;
+    }
     if (!beginOutcomeOutboxPrefs(false)) {
         return;
     }
@@ -208,7 +276,12 @@ static void clearOutboxEntryAt(uint8_t idx) {
 }
 
 static bool enqueueCriticalOutcome(const PendingOutcomeEntry& entry) {
-    loadOutboxStatsIfNeeded();
+    OutboxLockGuard guard;
+    if (!guard.locked()) {
+        LOG_E(IC_TAG, "Outbox lock timeout while enqueueing critical outcome");
+        return false;
+    }
+    loadOutboxStatsLocked();
     if (!beginOutcomeOutboxPrefs(false)) {
         return false;
     }
@@ -286,7 +359,12 @@ static bool buildOutcomePayload(const char* flow,
 }
 
 void processIntentOutcomeOutbox() {
-    loadOutboxStatsIfNeeded();
+    OutboxLockGuard guard;
+    if (!guard.locked()) {
+        LOG_W(IC_TAG, "Outbox lock timeout during replay");
+        return;
+    }
+    loadOutboxStatsLocked();
     if (!mqttClient.isConnected()) {
         return;
     }
@@ -331,6 +409,11 @@ void processIntentOutcomeOutbox() {
         }
 
         if (mqttClient.safePublish(topic, replay_payload, 1, 1)) {
+            recordIntentChainStage(entry.metadata,
+                                   "outcome_publish_ok",
+                                   entry.flow,
+                                   entry.code,
+                                   "critical outcome replay delivered");
             clearOutboxEntryAt(head);
             head = static_cast<uint8_t>((head + 1) % OUTCOME_OUTBOX_CAPACITY);
             count--;
@@ -510,6 +593,39 @@ bool isRecoveryIntentAllowed(const char* topic, const char* payload) {
     return cmd == "clear_emergency";
 }
 
+void recordIntentChainStage(const IntentMetadata& metadata,
+                            const char* stage,
+                            const char* flow,
+                            const char* code,
+                            const char* detail) {
+    if (stage == nullptr || strlen(stage) == 0 || strlen(metadata.intent_id) == 0) {
+        return;
+    }
+
+    DynamicJsonDocument event_doc(512);
+    event_doc["seq"] = mqttClient.getNextSeq();
+    event_doc["event_type"] = "intent_chain_stage";
+    event_doc["schema"] = "intent_chain_stage_v1";
+    event_doc["flow"] = flow != nullptr ? flow : "command";
+    event_doc["stage"] = stage;
+    event_doc["intent_id"] = metadata.intent_id;
+    event_doc["correlation_id"] = metadata.correlation_id;
+    event_doc["generation"] = metadata.generation;
+    event_doc["epoch"] = metadata.epoch_at_accept;
+    if (code != nullptr && strlen(code) > 0) {
+        event_doc["code"] = code;
+    }
+    if (detail != nullptr && strlen(detail) > 0) {
+        event_doc["detail"] = detail;
+    }
+    event_doc["ts"] = static_cast<unsigned long>(timeManager.getUnixTimestamp());
+
+    String payload;
+    if (serializeJson(event_doc, payload) > 0) {
+        mqttClient.publish(TopicBuilder::buildIntentOutcomeLifecycleTopic(), payload, 1);
+    }
+}
+
 bool publishIntentOutcome(const char* flow,
                           const IntentMetadata& metadata,
                           const char* outcome,
@@ -535,6 +651,14 @@ bool publishIntentOutcome(const char* flow,
                       " outcome=" + String(normalized_outcome));
     }
     const IntentMetadata& active_metadata = safe_metadata;
+    bool command_flow = flow != nullptr && strcmp(flow, "command") == 0;
+    if (command_flow) {
+        recordIntentChainStage(active_metadata,
+                               "outcome_publish_attempted",
+                               flow,
+                               code,
+                               "attempting outcome publish");
+    }
     bool critical = isCriticalOutcomeClass(flow, normalized_outcome);
     if (isTerminalOutcome(normalized_outcome)) {
         bool allow_publish = true;
@@ -589,10 +713,24 @@ bool publishIntentOutcome(const char* flow,
     bool ok = mqttClient.safePublish(topic, payload, 1);
     bool persisted_for_replay = false;
     if (ok) {
+        if (command_flow) {
+            recordIntentChainStage(active_metadata,
+                                   "outcome_publish_ok",
+                                   flow,
+                                   code,
+                                   "outcome publish delivered");
+        }
         s_outcome_final_confirmed_count++;
         persistOutboxStats();
     }
     if (!ok) {
+        if (command_flow) {
+            recordIntentChainStage(active_metadata,
+                                   "outcome_publish_failed",
+                                   flow,
+                                   code,
+                                   "outcome publish failed");
+        }
         LOG_W(IC_TAG, "Intent outcome publish failed [" + String(active_metadata.intent_id) + "]");
         if (critical) {
             PendingOutcomeEntry entry = {};

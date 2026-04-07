@@ -69,6 +69,108 @@ async def logic_engine(mock_logic_repo, mock_actuator_service, mock_websocket_ma
     return engine
 
 
+class TestLogicHotpathContractStabilization:
+    """P0: _execute_actions/_evaluate_rule contract and error-path hardening."""
+
+    @pytest.mark.asyncio
+    async def test_execute_actions_returns_stable_dict_on_success(self, logic_engine: LogicEngine):
+        fake_executor = MagicMock()
+        fake_executor.supports = MagicMock(return_value=True)
+        fake_executor.execute = AsyncMock(
+            return_value=MagicMock(success=True, message="ok", data={"noop": False})
+        )
+        logic_engine.action_executors = [fake_executor]
+
+        result = await logic_engine._execute_actions(
+            actions=[{"type": "custom_action"}],
+            trigger_data={"timestamp": 1},
+            rule_id=uuid.uuid4(),
+            rule_name="contract-success",
+        )
+
+        assert isinstance(result, dict)
+        assert result["blocked_by_conflict"] is False
+        assert result["conflict_info"] is None
+        assert isinstance(result.get("action_results"), list)
+        assert result["action_results"][0]["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_execute_actions_returns_stable_dict_on_conflict(self, logic_engine: LogicEngine):
+        resolution = MagicMock()
+        resolution.value = "blocked"
+        conflict = MagicMock()
+        conflict.actuator_key = "ESP_CONFLICT:5"
+        conflict.winner_rule_id = "rule-winner"
+        conflict.competing_rules = ["rule-winner", "rule-loser"]
+        conflict.resolution = resolution
+        conflict.message = "conflict"
+
+        logic_engine.conflict_manager.has_active_lock_for_rule = MagicMock(return_value=False)
+        logic_engine.conflict_manager.acquire_actuator = AsyncMock(return_value=(False, conflict))
+        logic_engine.conflict_manager.release_actuator = AsyncMock()
+
+        result = await logic_engine._execute_actions(
+            actions=[
+                {
+                    "type": "actuator_command",
+                    "esp_id": "ESP_CONFLICT",
+                    "gpio": 5,
+                    "command": "ON",
+                }
+            ],
+            trigger_data={"timestamp": 1},
+            rule_id=uuid.uuid4(),
+            rule_name="contract-conflict",
+        )
+
+        assert isinstance(result, dict)
+        assert result["blocked_by_conflict"] is True
+        assert isinstance(result.get("conflict_info"), dict)
+        assert isinstance(result.get("action_results"), list)
+
+    @pytest.mark.asyncio
+    async def test_evaluate_rule_error_path_logs_with_snapshots(
+        self, logic_engine: LogicEngine
+    ):
+        mock_rule = MagicMock()
+        mock_rule.id = uuid.uuid4()
+        mock_rule.rule_name = "snapshot-rule"
+        mock_rule.logic_operator = "AND"
+        mock_rule.cooldown_seconds = None
+        mock_rule.max_executions_per_hour = None
+        mock_rule.priority = 1
+        mock_rule.trigger_conditions = {"type": "sensor", "esp_id": "ESP_1", "gpio": 4}
+        mock_rule.actions = [{"type": "actuator_command", "esp_id": "ESP_1", "gpio": 5}]
+
+        mock_logic_repo = AsyncMock()
+        mock_logic_repo.session = _logic_repo_session_mock_online_esp()
+        mock_logic_repo.get_last_execution = AsyncMock(return_value=None)
+        mock_logic_repo.log_execution = AsyncMock()
+
+        trigger_data = {
+            "esp_id": "ESP_1",
+            "gpio": 4,
+            "sensor_type": "humidity",
+            "value": 42.0,
+            "timestamp": int(datetime.now(timezone.utc).timestamp()),
+        }
+
+        logic_engine._load_cross_sensor_values = AsyncMock(
+            return_value={"ESP_1:4:humidity": {"value": 42.0}}
+        )
+        logic_engine._check_conditions = AsyncMock(return_value=True)
+        logic_engine._execute_actions = AsyncMock(side_effect=RuntimeError("boom"))
+
+        await logic_engine._evaluate_rule(mock_rule, trigger_data, mock_logic_repo)
+
+        mock_logic_repo.session.rollback.assert_awaited_once()
+        mock_logic_repo.log_execution.assert_awaited_once()
+        kwargs = mock_logic_repo.log_execution.call_args.kwargs
+        assert kwargs["rule_id"] == mock_rule.id
+        assert kwargs["trigger_data"] == trigger_data
+        assert kwargs["actions"] == mock_rule.actions
+
+
 class TestLogicEngineSchemaCompatibility:
     """Test Logic Engine schema compatibility fixes."""
 

@@ -118,31 +118,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          cat > /tmp/mosquitto/mosquitto.conf << 'EOF'
-          listener 1883 0.0.0.0
-          allow_anonymous true
-          persistence false
-          log_dest stderr
-          log_type all
-          connection_messages true
-          EOF
-
-          docker run -d \
-            --name mosquitto \
-            -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-
-          echo "Waiting for Mosquitto to start..."
-          for i in {1..30}; do
-            if docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null; then
-              echo "Mosquitto is ready!"
-              break
-            fi
-            sleep 1
-          done
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Install Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -214,13 +190,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          sleep 5
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Install Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -288,13 +258,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          sleep 5
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Install Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -313,7 +277,7 @@ jobs:
             2>&1 | tee wokwi_mqtt_output.log || true
 
           echo "=== MQTT Connection Test Results ==="
-          grep -q "MQTT connected" wokwi_mqtt_output.log && echo "MQTT OK" || echo "MQTT MISSING"
+          grep -q "MQTT connected successfully" wokwi_mqtt_output.log && echo "MQTT OK" || echo "MQTT MISSING"
           grep -q "heartbeat" wokwi_mqtt_output.log && echo "Heartbeat OK" || echo "Heartbeat MISSING"
 
       - name: Stop Mosquitto
@@ -348,20 +312,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          cat > /tmp/mosquitto/mosquitto.conf << 'CONF'
-          listener 1883 0.0.0.0
-          allow_anonymous true
-          persistence false
-          CONF
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          for i in {1..30}; do
-            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
-            sleep 1
-          done
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Install Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -379,7 +330,7 @@ jobs:
             --scenario tests/wokwi/scenarios/03-actuator/actuator_led_on.yaml \
             2>&1 | tee actuator_led_on.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
@@ -399,7 +350,7 @@ jobs:
             --scenario tests/wokwi/scenarios/03-actuator/actuator_pwm.yaml \
             2>&1 | tee actuator_pwm.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
@@ -434,7 +385,7 @@ jobs:
             --scenario tests/wokwi/scenarios/03-actuator/actuator_emergency_clear.yaml \
             2>&1 | tee actuator_emergency_clear.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/actuator/emergency" \
@@ -474,20 +425,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          cat > /tmp/mosquitto/mosquitto.conf << 'CONF'
-          listener 1883 0.0.0.0
-          allow_anonymous true
-          persistence false
-          CONF
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          for i in {1..30}; do
-            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
-            sleep 1
-          done
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Install Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -505,7 +443,7 @@ jobs:
             --scenario tests/wokwi/scenarios/04-zone/zone_assignment.yaml \
             2>&1 | tee zone_assignment.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/zone/assign" \
@@ -525,7 +463,7 @@ jobs:
             --scenario tests/wokwi/scenarios/04-zone/subzone_assignment.yaml \
             2>&1 | tee subzone_assignment.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           # Assign zone first (prerequisite for subzone)
           docker exec mosquitto mosquitto_pub \
@@ -572,20 +510,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          cat > /tmp/mosquitto/mosquitto.conf << 'CONF'
-          listener 1883 0.0.0.0
-          allow_anonymous true
-          persistence false
-          CONF
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          for i in {1..30}; do
-            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
-            sleep 1
-          done
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Install Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -603,7 +528,7 @@ jobs:
             --scenario tests/wokwi/scenarios/05-emergency/emergency_broadcast.yaml \
             2>&1 | tee emergency_broadcast.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/broadcast/emergency" \
@@ -623,7 +548,7 @@ jobs:
             --scenario tests/wokwi/scenarios/05-emergency/emergency_esp_stop.yaml \
             2>&1 | tee emergency_esp_stop.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/actuator/emergency" \
@@ -663,20 +588,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          cat > /tmp/mosquitto/mosquitto.conf << 'CONF'
-          listener 1883 0.0.0.0
-          allow_anonymous true
-          persistence false
-          CONF
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          for i in {1..30}; do
-            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
-            sleep 1
-          done
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Install Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -694,7 +606,7 @@ jobs:
             --scenario tests/wokwi/scenarios/06-config/config_sensor_add.yaml \
             2>&1 | tee config_sensor.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/config" \
@@ -714,7 +626,7 @@ jobs:
             --scenario tests/wokwi/scenarios/06-config/config_actuator_add.yaml \
             2>&1 | tee config_actuator.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/config" \
@@ -754,16 +666,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          for i in {1..30}; do
-            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
-            sleep 1
-          done
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Install Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -846,20 +749,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          cat > /tmp/mosquitto/mosquitto.conf << 'CONF'
-          listener 1883 0.0.0.0
-          allow_anonymous true
-          persistence false
-          CONF
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          for i in {1..30}; do
-            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
-            sleep 1
-          done
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Install Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -877,13 +767,12 @@ jobs:
             --scenario tests/wokwi/scenarios/03-actuator/actuator_binary_full_flow.yaml \
             2>&1 | tee actuator_binary_full_flow.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           # ON Command
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
             -m '{"command":"ON","value":1.0}'
-          sleep 5
 
           # OFF Command
           docker exec mosquitto mosquitto_pub \
@@ -904,7 +793,7 @@ jobs:
             --scenario tests/wokwi/scenarios/03-actuator/actuator_pwm_full_flow.yaml \
             2>&1 | tee actuator_pwm_full_flow.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           # PWM 50%
           docker exec mosquitto mosquitto_pub \
@@ -937,7 +826,7 @@ jobs:
             --scenario tests/wokwi/scenarios/03-actuator/actuator_timeout_e2e.yaml \
             2>&1 | tee actuator_timeout_flow.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           # ON with short timeout
           docker exec mosquitto mosquitto_pub \
@@ -978,20 +867,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          cat > /tmp/mosquitto/mosquitto.conf << 'CONF'
-          listener 1883 0.0.0.0
-          allow_anonymous true
-          persistence false
-          CONF
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          for i in {1..30}; do
-            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
-            sleep 1
-          done
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Install Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -1009,7 +885,7 @@ jobs:
             --scenario tests/wokwi/scenarios/07-combined/combined_sensor_actuator.yaml \
             2>&1 | tee combined_sensor_actuator.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           # Actuator ON (simulates Logic Engine trigger)
           docker exec mosquitto mosquitto_pub \
@@ -1036,7 +912,7 @@ jobs:
             --scenario tests/wokwi/scenarios/05-emergency/emergency_stop_full_flow.yaml \
             2>&1 | tee emergency_stop_full_flow.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           # Activate actuator first
           docker exec mosquitto mosquitto_pub \
@@ -1048,7 +924,6 @@ jobs:
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/broadcast/emergency" \
             -m '{"auth_token":"master_token"}'
-          sleep 5
 
           # Clear emergency
           docker exec mosquitto mosquitto_pub \
@@ -1069,7 +944,7 @@ jobs:
             --scenario tests/wokwi/scenarios/07-combined/multi_device_parallel.yaml \
             2>&1 | tee multi_device_parallel.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           # Send actuator commands (sequential to avoid bare wait deadlock)
           docker exec mosquitto mosquitto_pub \
@@ -1136,13 +1011,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          sleep 5
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Run GPIO Boot First Test
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
@@ -1232,13 +1101,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          sleep 5
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Use I2C Diagram (SHT31 + BME280)
         run: |
           cp "El Trabajante/tests/wokwi/diagrams/diagram_i2c.json" "El Trabajante/diagram.json"
@@ -1336,13 +1199,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          sleep 5
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Run NVS Init Success Test
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
@@ -1431,16 +1288,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          for i in {1..30}; do
-            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
-            sleep 1
-          done
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Run PWM Duty Percent 50 Test (MQTT Injection)
         env:
           WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
@@ -1453,13 +1301,12 @@ jobs:
             --scenario tests/wokwi/scenarios/09-pwm/pwm_duty_percent_50.yaml \
             2>&1 | tee pwm_duty_percent_50.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           # Configure PWM actuator on GPIO 25
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[],"actuators":[{"gpio":25,"actuator_type":"pwm","actuator_name":"TestPWM","active":true}]}'
-          sleep 5
 
           # Set 50% duty cycle
           docker exec mosquitto mosquitto_pub \
@@ -1490,13 +1337,12 @@ jobs:
             --scenario tests/wokwi/scenarios/09-pwm/pwm_resolution_verify.yaml \
             2>&1 | tee pwm_resolution_verify.log &
           WOKWI_PID=$!
-          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected" --timeout-seconds 60 --fallback-sleep-seconds 35
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
 
           # Configure PWM actuator on GPIO 25
           docker exec mosquitto mosquitto_pub \
             -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[],"actuators":[{"gpio":25,"actuator_type":"pwm","actuator_name":"ResPWM","active":true}]}'
-          sleep 5
 
           # Set 50% duty cycle to verify resolution
           docker exec mosquitto mosquitto_pub \
@@ -1538,20 +1384,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          cat > /tmp/mosquitto/mosquitto.conf << 'CONF'
-          listener 1883 0.0.0.0
-          allow_anonymous true
-          persistence false
-          CONF
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          for i in {1..30}; do
-            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
-            sleep 1
-          done
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Install Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -1573,18 +1406,9 @@ jobs:
             > error_sensor_timeout.log 2>&1 &
           WOKWI_PID=$!
 
-          # Wait for MQTT connection instead of fixed sleep
-          for i in $(seq 1 60); do
-            if grep -q "MQTT connected" error_sensor_timeout.log 2>/dev/null; then
-              echo "MQTT connected after ${i}s"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "WARNING: MQTT connection timeout after 60s"
-            fi
-            sleep 1
-          done
-          sleep 2
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "REGISTRATION" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "heartbeat" --timeout-seconds 60
 
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":32,"sensor_type":"ds18b20","sensor_name":"GhostSensor","active":true,"raw_mode":true}],"actuators":[]}'
@@ -1606,18 +1430,9 @@ jobs:
             > error_mqtt_disconnect.log 2>&1 &
           WOKWI_PID=$!
 
-          # Wait for MQTT connection instead of fixed sleep
-          for i in $(seq 1 60); do
-            if grep -q "MQTT connected" error_mqtt_disconnect.log 2>/dev/null; then
-              echo "MQTT connected after ${i}s"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "WARNING: MQTT connection timeout after 60s"
-            fi
-            sleep 1
-          done
-          sleep 2
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "REGISTRATION" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "heartbeat" --timeout-seconds 60
 
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":4,"sensor_type":"ds18b20","sensor_name":"MQTTTestSensor","active":true}],"actuators":[]}'
@@ -1639,18 +1454,9 @@ jobs:
             > error_gpio_conflict.log 2>&1 &
           WOKWI_PID=$!
 
-          # Wait for MQTT connection instead of fixed sleep
-          for i in $(seq 1 60); do
-            if grep -q "MQTT connected" error_gpio_conflict.log 2>/dev/null; then
-              echo "MQTT connected after ${i}s"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "WARNING: MQTT connection timeout after 60s"
-            fi
-            sleep 1
-          done
-          sleep 2
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "REGISTRATION" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "heartbeat" --timeout-seconds 60
 
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":4,"sensor_type":"ds18b20","sensor_name":"TempSensor1","active":true,"raw_mode":true},{"gpio":4,"sensor_type":"moisture","sensor_name":"MoistureSensor","active":true,"raw_mode":true}],"actuators":[]}'
@@ -1672,22 +1478,12 @@ jobs:
             > error_watchdog_trigger.log 2>&1 &
           WOKWI_PID=$!
 
-          # Wait for MQTT connection instead of fixed sleep
-          for i in $(seq 1 60); do
-            if grep -q "MQTT connected" error_watchdog_trigger.log 2>/dev/null; then
-              echo "MQTT connected after ${i}s"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "WARNING: MQTT connection timeout after 60s"
-            fi
-            sleep 1
-          done
-          sleep 2
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "REGISTRATION" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "heartbeat" --timeout-seconds 60
 
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":4,"sensor_type":"ds18b20","sensor_name":"S1","active":true},{"gpio":15,"sensor_type":"dht22","sensor_name":"S2","active":true}],"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"A1","active":true}]}'
-          sleep 5
           mosquitto_pub -h localhost -t "kaiser/broadcast/emergency" \
             -m '{"auth_token":"master_token"}'
           sleep 2
@@ -1711,18 +1507,9 @@ jobs:
             > error_config_invalid_json.log 2>&1 &
           WOKWI_PID=$!
 
-          # Wait for MQTT connection instead of fixed sleep
-          for i in $(seq 1 60); do
-            if grep -q "MQTT connected" error_config_invalid_json.log 2>/dev/null; then
-              echo "MQTT connected after ${i}s"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "WARNING: MQTT connection timeout after 60s"
-            fi
-            sleep 1
-          done
-          sleep 2
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "REGISTRATION" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "heartbeat" --timeout-seconds 60
 
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors": [{"gpio": 4, "sensor_type": "ds18b20", "broken'
@@ -1744,22 +1531,12 @@ jobs:
             > error_actuator_timeout.log 2>&1 &
           WOKWI_PID=$!
 
-          # Wait for MQTT connection instead of fixed sleep
-          for i in $(seq 1 60); do
-            if grep -q "MQTT connected" error_actuator_timeout.log 2>/dev/null; then
-              echo "MQTT connected after ${i}s"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "WARNING: MQTT connection timeout after 60s"
-            fi
-            sleep 1
-          done
-          sleep 2
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "REGISTRATION" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "heartbeat" --timeout-seconds 60
 
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[],"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"TestLED","active":true}]}'
-          sleep 5
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/actuator/5/command" \
             -m '{"command":"ON","value":1.0}'
           wait $WOKWI_PID && EXIT_CODE=0 || EXIT_CODE=$?
@@ -1780,18 +1557,9 @@ jobs:
             > error_emergency_cascade.log 2>&1 &
           WOKWI_PID=$!
 
-          # Wait for MQTT connection instead of fixed sleep
-          for i in $(seq 1 60); do
-            if grep -q "MQTT connected" error_emergency_cascade.log 2>/dev/null; then
-              echo "MQTT connected after ${i}s"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "WARNING: MQTT connection timeout after 60s"
-            fi
-            sleep 1
-          done
-          sleep 2
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "REGISTRATION" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "heartbeat" --timeout-seconds 60
 
           chmod +x tests/wokwi/helpers/emergency_cascade.sh
           bash tests/wokwi/helpers/emergency_cascade.sh localhost
@@ -1813,18 +1581,9 @@ jobs:
             > error_i2c_bus_stuck.log 2>&1 &
           WOKWI_PID=$!
 
-          # Wait for MQTT connection instead of fixed sleep
-          for i in $(seq 1 60); do
-            if grep -q "MQTT connected" error_i2c_bus_stuck.log 2>/dev/null; then
-              echo "MQTT connected after ${i}s"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "WARNING: MQTT connection timeout after 60s"
-            fi
-            sleep 1
-          done
-          sleep 2
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "REGISTRATION" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "heartbeat" --timeout-seconds 60
 
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":21,"sensor_type":"temperature_sht31","sensor_name":"GhostI2C","active":true,"i2c_address":68}],"actuators":[]}'
@@ -1846,18 +1605,9 @@ jobs:
             > error_nvs_corrupt.log 2>&1 &
           WOKWI_PID=$!
 
-          # Wait for MQTT connection instead of fixed sleep
-          for i in $(seq 1 60); do
-            if grep -q "MQTT connected" error_nvs_corrupt.log 2>/dev/null; then
-              echo "MQTT connected after ${i}s"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "WARNING: MQTT connection timeout after 60s"
-            fi
-            sleep 1
-          done
-          sleep 2
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "REGISTRATION" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "heartbeat" --timeout-seconds 60
 
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/system/command" \
             -m '{"command":"factory_reset","confirm":true}'
@@ -1879,18 +1629,9 @@ jobs:
             > error_heap_pressure.log 2>&1 &
           WOKWI_PID=$!
 
-          # Wait for MQTT connection instead of fixed sleep
-          for i in $(seq 1 60); do
-            if grep -q "MQTT connected" error_heap_pressure.log 2>/dev/null; then
-              echo "MQTT connected after ${i}s"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "WARNING: MQTT connection timeout after 60s"
-            fi
-            sleep 1
-          done
-          sleep 2
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "MQTT connected successfully" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "REGISTRATION" --timeout-seconds 60
+          python ../scripts/wokwi/wait_for_serial_readiness.py --auto-latest-log --pattern "heartbeat" --timeout-seconds 60
 
           mosquitto_pub -h localhost -t "kaiser/god/esp/ESP_00000001/config" \
             -m '{"sensors":[{"gpio":4,"sensor_type":"ds18b20","sensor_name":"S1","active":true},{"gpio":15,"sensor_type":"dht22","sensor_name":"S2","active":true},{"gpio":32,"sensor_type":"ds18b20","sensor_name":"S3","active":true,"raw_mode":true},{"gpio":33,"sensor_type":"moisture","sensor_name":"S4","active":true,"raw_mode":true},{"gpio":34,"sensor_type":"ds18b20","sensor_name":"S5","active":true,"raw_mode":true},{"gpio":35,"sensor_type":"moisture","sensor_name":"S6","active":true,"raw_mode":true},{"gpio":36,"sensor_type":"ds18b20","sensor_name":"S7","active":true,"raw_mode":true},{"gpio":39,"sensor_type":"moisture","sensor_name":"S8","active":true,"raw_mode":true}],"actuators":[{"gpio":5,"actuator_type":"led","actuator_name":"A1","active":true},{"gpio":25,"actuator_type":"relay","actuator_name":"A2","active":true},{"gpio":26,"actuator_type":"relay","actuator_name":"A3","active":true},{"gpio":23,"actuator_type":"led","actuator_name":"A4","active":true},{"gpio":13,"actuator_type":"led","actuator_name":"A5","active":true},{"gpio":14,"actuator_type":"led","actuator_name":"A6","active":true}]}'
@@ -1934,13 +1675,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          sleep 5
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Setup Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -2021,13 +1756,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          sleep 5
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Setup Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -2089,13 +1818,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          sleep 5
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Setup Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -2223,7 +1946,7 @@ jobs:
 
             # Wait for MQTT connection (up to 60s) before injecting
             for i in {1..60}; do
-              grep -q "MQTT connected" "${name}.log" 2>/dev/null && break
+              grep -q "MQTT connected successfully" "${name}.log" 2>/dev/null && break
               sleep 1
             done
 
@@ -2276,16 +1999,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          for i in {1..30}; do
-            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
-            sleep 1
-          done
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Setup Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -2358,13 +2072,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          sleep 5
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Setup Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -2437,13 +2145,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          sleep 5
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Setup Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -2705,7 +2407,7 @@ jobs:
 
             # Wait for MQTT connection (up to 60s) before injecting
             for i in {1..60}; do
-              grep -q "MQTT connected" "${name}.log" 2>/dev/null && break
+              grep -q "MQTT connected successfully" "${name}.log" 2>/dev/null && break
               sleep 1
             done
 
@@ -2758,16 +2460,7 @@ jobs:
 
       - name: Start Mosquitto MQTT Broker
         run: |
-          mkdir -p /tmp/mosquitto
-          echo -e "listener 1883 0.0.0.0\nallow_anonymous true\npersistence false" > /tmp/mosquitto/mosquitto.conf
-          docker run -d --name mosquitto -p 1883:1883 \
-            -v /tmp/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro \
-            eclipse-mosquitto:2
-          for i in {1..30}; do
-            docker exec mosquitto mosquitto_pub -t 'health/check' -m 'ping' 2>/dev/null && break
-            sleep 1
-          done
-
+          bash scripts/wokwi/ci_mqtt_contract.sh start-broker --job "$GITHUB_JOB" --timeout-seconds 30
       - name: Install Wokwi CLI
         run: |
           curl -L https://wokwi.com/ci/install.sh | sh -s "$WOKWI_CLI_VERSION"
@@ -2879,7 +2572,7 @@ jobs:
           fi
 
           if [ -f all-logs/wokwi_mqtt_output.log ]; then
-            if grep -q "MQTT connected" all-logs/wokwi_mqtt_output.log; then
+            if grep -q "MQTT connected successfully" all-logs/wokwi_mqtt_output.log; then
               echo "| MQTT Connection | :white_check_mark: PASS |" >> $GITHUB_STEP_SUMMARY
             else
               echo "| MQTT Connection | :x: FAIL |" >> $GITHUB_STEP_SUMMARY

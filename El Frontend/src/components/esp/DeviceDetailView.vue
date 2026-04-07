@@ -114,26 +114,111 @@ function handleActuatorClick(gpio: number) {
   border-radius: var(--radius-lg);
   padding: var(--space-4);
   min-height: 400px;
+  width: min(100%, 1560px);
+  max-width: 1560px;
+  margin-inline: auto;
 }
 
 .device-detail-view__content {
   position: relative;
+  width: 100%;
 }
 
 /* Override ESPOrbitalLayout width constraints for full-page Level 3 view */
 .device-detail-view__content :deep(.esp-horizontal-layout) {
-  max-width: none;
+  width: min(100%, 1460px);
+  max-width: 1460px;
+  margin-inline: auto;
+  justify-content: center;
+  gap: clamp(0.75rem, 1.4vw, 1.5rem);
 }
 
-/* Allow sensor/actuator columns to grow taller */
+/* Let columns grow naturally; use page scroll instead of nested inner scroll */
 .device-detail-view__content :deep(.esp-horizontal-layout__column--sensors),
 .device-detail-view__content :deep(.esp-horizontal-layout__column--actuators) {
-  max-height: 60vh;
-  overflow-y: auto;
+  width: clamp(190px, 16vw, 260px);
+  max-width: none;
+  max-height: none;
+  overflow: visible;
 }
 
 /* Widen the analysis/chart area */
 .device-detail-view__content :deep(.esp-horizontal-layout__center) {
-  flex: 2;
+  flex: 1 1 clamp(420px, 34vw, 760px);
+  width: auto;
+  max-width: clamp(560px, 46vw, 820px);
+  min-width: clamp(360px, 30vw, 560px);
+}
+
+.device-detail-view__content :deep(.esp-info-compact) {
+  min-height: 100%;
+}
+
+/* Standard/Normal-Zoom: sauber gestapelt statt gequetschte 3-Spalten */
+@media (max-width: 1700px) {
+  .device-detail-view__content :deep(.esp-horizontal-layout) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-3);
+    width: min(100%, 980px);
+    justify-content: stretch;
+  }
+
+  .device-detail-view__content :deep(.esp-horizontal-layout__column) {
+    width: 100%;
+    max-width: none;
+  }
+
+  .device-detail-view__content :deep(.esp-horizontal-layout__column--sensors) {
+    order: 1;
+  }
+
+  .device-detail-view__content :deep(.esp-horizontal-layout__center) {
+    order: 2;
+    width: 100%;
+    max-width: none;
+  }
+
+  .device-detail-view__content :deep(.esp-horizontal-layout__column--actuators) {
+    order: 3;
+  }
+
+  /*
+   * Detail/Range-zoom mode:
+   * Actuators should be neatly side-by-side at the bottom.
+   */
+  .device-detail-view__content :deep(.esp-horizontal-layout__column--actuators .actuator-column) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(170px, 220px));
+    justify-content: center;
+    gap: var(--space-3);
+  }
+}
+
+/* Erst auf sehr breiten Screens wieder klassisches 3-Spalten-Gefuehl */
+@media (min-width: 1701px) {
+  .device-detail-view__content :deep(.esp-horizontal-layout) {
+    width: 100%;
+  }
+
+  /*
+   * Orbital desktop mode:
+   * Keep actuators stacked vertically on the right column.
+   */
+  .device-detail-view__content :deep(.esp-horizontal-layout__column--actuators .actuator-column) {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 1100px) {
+  .device-detail-view {
+    width: 100%;
+    padding: var(--space-3);
+  }
+
+  .device-detail-view__content :deep(.esp-horizontal-layout) {
+    width: 100%;
+  }
 }
 </style>

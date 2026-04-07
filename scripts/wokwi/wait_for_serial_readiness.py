@@ -22,6 +22,16 @@ def append_report(report_file: Path | None, line: str) -> None:
         handle.write(f"{line}\n")
 
 
+def build_tail_excerpt(text: str, tail_lines: int) -> str:
+    if tail_lines <= 0:
+        return ""
+    lines = text.splitlines()
+    if not lines:
+        return "(log file is empty)"
+    excerpt = lines[-tail_lines:]
+    return "\n".join(excerpt)
+
+
 def resolve_log_path(explicit: str | None, auto_latest: bool) -> Path | None:
     if explicit:
         return Path(explicit)
@@ -35,10 +45,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Wait for serial readiness pattern")
     parser.add_argument("--log-file")
     parser.add_argument("--auto-latest-log", action="store_true")
-    parser.add_argument("--pattern", default="MQTT connected")
+    parser.add_argument("--pattern", default="MQTT connected successfully")
     parser.add_argument("--timeout-seconds", type=int, default=60)
     parser.add_argument("--poll-seconds", type=float, default=1.0)
-    parser.add_argument("--fallback-sleep-seconds", type=int, default=35)
+    parser.add_argument("--tail-lines", type=int, default=40)
+    # Legacy argument kept for backward compatibility, but fixed fallback sleeps are disabled.
+    parser.add_argument("--fallback-sleep-seconds", type=int, default=0)
     parser.add_argument("--report-file")
     args = parser.parse_args()
 
@@ -53,12 +65,13 @@ def main() -> int:
     append_report(report_path, f"- Wait start: {now_iso()}")
 
     deadline = time.time() + max(args.timeout_seconds, 0)
+    latest_text = ""
     while time.time() <= deadline:
         try:
-            text = log_file.read_text(encoding="utf-8", errors="replace")
+            latest_text = log_file.read_text(encoding="utf-8", errors="replace")
         except OSError:
-            text = ""
-        if args.pattern in text:
+            latest_text = ""
+        if args.pattern in latest_text:
             ts = now_iso()
             print(f"[READY] Pattern matched in {log_file}")
             print(ts)
@@ -68,21 +81,18 @@ def main() -> int:
 
     if args.fallback_sleep_seconds > 0:
         print(
-            f"[WARN] No readiness match after {args.timeout_seconds}s, "
-            f"using fallback sleep {args.fallback_sleep_seconds}s."
+            "[WARN] --fallback-sleep-seconds is deprecated and ignored; "
+            "readiness falls back to hard timeout."
         )
-        # TODO(g04): remove fallback once all scenarios expose deterministic readiness markers.
-        time.sleep(args.fallback_sleep_seconds)
-        ts = now_iso()
-        print(ts)
-        append_report(report_path, "- Readiness matched: fallback-used")
-        append_report(report_path, f"- Fallback end: {ts}")
-        return 0
 
-    print(
-        f"[ERROR] Readiness timeout after {args.timeout_seconds}s for {log_file}",
-        file=sys.stderr,
-    )
+    print(f"[ERROR] Readiness timeout after {args.timeout_seconds}s for {log_file}", file=sys.stderr)
+    excerpt = build_tail_excerpt(latest_text, args.tail_lines)
+    if excerpt:
+        print(f"[ERROR] Last {args.tail_lines} log lines before timeout:", file=sys.stderr)
+        print(excerpt, file=sys.stderr)
+        append_report(report_path, f"- Timeout excerpt ({args.tail_lines} lines):")
+        for line in excerpt.splitlines():
+            append_report(report_path, f"  {line}")
     return 21
 
 

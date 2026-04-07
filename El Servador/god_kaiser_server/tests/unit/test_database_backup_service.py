@@ -338,31 +338,74 @@ class TestRestoreBackup:
         sql_dump = b"-- PostgreSQL database dump\nCREATE TABLE test (id int);\n"
         _create_fake_backup(backup_service.backup_dir, "20260303_020000", sql_dump)
 
-        mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(return_value=(b"", b""))
-        mock_process.returncode = 0
+        mock_process_psql_version = AsyncMock()
+        mock_process_psql_version.communicate = AsyncMock(return_value=(b"psql (PostgreSQL) 16.12\n", b""))
+        mock_process_psql_version.returncode = 0
 
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            result = await backup_service.restore_backup("20260303_020000")
+        mock_process_restore = AsyncMock()
+        mock_process_restore.communicate = AsyncMock(return_value=(b"", b""))
+        mock_process_restore.returncode = 0
+
+        call_count = 0
+
+        async def mock_create_subprocess(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return mock_process_psql_version
+            return mock_process_restore
+
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_create_subprocess):
+            preflight = await backup_service.run_restore_preflight("20260303_020000")
+            result = await backup_service.restore_backup(
+                "20260303_020000",
+                preflight_id=preflight["preflight_id"],
+                run_id="test-run",
+            )
 
         assert result["status"] == "restored"
         assert result["backup_id"] == "20260303_020000"
+        assert result["run_id"] == "test-run"
 
     @pytest.mark.asyncio
     async def test_restore_nonexistent(self, backup_service):
-        """Test restore of nonexistent backup."""
+        """Test preflight for nonexistent backup."""
         with pytest.raises(ValueError, match="not found"):
-            await backup_service.restore_backup("99991231_235959")
+            await backup_service.run_restore_preflight("99991231_235959")
+
+    @pytest.mark.asyncio
+    async def test_restore_requires_preflight(self, backup_service):
+        """Restore must be blocked when no preflight token is supplied."""
+        _create_fake_backup(backup_service.backup_dir, "20260303_020000")
+        with pytest.raises(RuntimeError, match="preflight"):
+            await backup_service.restore_backup("20260303_020000")
 
     @pytest.mark.asyncio
     async def test_restore_failure(self, backup_service):
         """Test restore when psql fails."""
         _create_fake_backup(backup_service.backup_dir, "20260303_020000")
 
-        mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(return_value=(b"", b"ERROR: relation exists"))
-        mock_process.returncode = 1
+        mock_process_psql_version = AsyncMock()
+        mock_process_psql_version.communicate = AsyncMock(return_value=(b"psql (PostgreSQL) 16.12\n", b""))
+        mock_process_psql_version.returncode = 0
 
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+        mock_process_restore = AsyncMock()
+        mock_process_restore.communicate = AsyncMock(return_value=(b"", b"ERROR: relation exists"))
+        mock_process_restore.returncode = 1
+
+        call_count = 0
+
+        async def mock_create_subprocess(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return mock_process_psql_version
+            return mock_process_restore
+
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_create_subprocess):
+            preflight = await backup_service.run_restore_preflight("20260303_020000")
             with pytest.raises(RuntimeError, match="psql restore failed"):
-                await backup_service.restore_backup("20260303_020000")
+                await backup_service.restore_backup(
+                    "20260303_020000",
+                    preflight_id=preflight["preflight_id"],
+                )

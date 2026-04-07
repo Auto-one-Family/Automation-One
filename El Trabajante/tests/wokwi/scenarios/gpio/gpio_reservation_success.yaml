@@ -26,7 +26,7 @@ steps:
   - wait-serial: "Phase 1: Core Infrastructure READY"
 
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # External MQTT config injection happens here (CI helper script)
 

@@ -25,7 +25,9 @@ Status: IMPLEMENTED
 import asyncio
 import gzip
 import os
+import shutil
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -118,6 +120,9 @@ class DatabaseBackupService:
 
     def __init__(self, backup_settings: DatabaseBackupSettings):
         self._settings = backup_settings
+        self._restore_lock = asyncio.Lock()
+        self._restore_preflight_tokens: Dict[str, Dict[str, Any]] = {}
+        self._active_restore_run_id: Optional[str] = None
 
         # Resolve backup directory relative to god_kaiser_server/
         project_root = Path(__file__).parent.parent.parent  # god_kaiser_server/
@@ -134,6 +139,70 @@ class DatabaseBackupService:
     @property
     def backup_dir(self) -> Path:
         return self._backup_dir
+
+    async def run_restore_preflight(self, backup_id: str) -> Dict[str, Any]:
+        """
+        Run mandatory preflight checks and issue one-time restore token.
+
+        A restore operation is only allowed if a valid preflight token
+        exists and is consumed by restore_backup().
+        """
+        backup = await self.get_backup(backup_id)
+        if not backup:
+            raise ValueError(f"Backup {backup_id} not found")
+
+        if self._restore_lock.locked():
+            raise RuntimeError("Another restore is already in progress")
+
+        await self._check_psql()
+        uncompressed_bytes = await self._verify_backup_integrity(backup.filepath)
+
+        disk_usage = shutil.disk_usage(self._backup_dir)
+        required_free = max(backup.size_bytes * 2, 50 * 1024 * 1024)
+        if disk_usage.free < required_free:
+            raise RuntimeError(
+                "Insufficient free disk space for restore preflight: "
+                f"required={required_free} bytes, free={disk_usage.free} bytes"
+            )
+
+        preflight_id = str(uuid.uuid4())
+        created_at = datetime.now(timezone.utc)
+        expires_at = created_at + timedelta(minutes=5)
+        self._restore_preflight_tokens[preflight_id] = {
+            "backup_id": backup_id,
+            "created_at": created_at,
+            "expires_at": expires_at,
+            "size_bytes": backup.size_bytes,
+            "uncompressed_bytes": uncompressed_bytes,
+        }
+
+        return {
+            "preflight_id": preflight_id,
+            "backup_id": backup_id,
+            "filename": backup.filename,
+            "size_bytes": backup.size_bytes,
+            "size_human": _human_size(backup.size_bytes),
+            "uncompressed_bytes": uncompressed_bytes,
+            "free_disk_bytes": disk_usage.free,
+            "required_free_bytes": required_free,
+            "created_at": created_at.isoformat(),
+            "expires_at": expires_at.isoformat(),
+            "status": "ready",
+        }
+
+    def get_restore_runtime_state(self) -> Dict[str, Any]:
+        """Return current restore runtime state for transparency."""
+        now = datetime.now(timezone.utc)
+        tokens = 0
+        for token_data in self._restore_preflight_tokens.values():
+            if token_data["expires_at"] > now:
+                tokens += 1
+
+        return {
+            "restore_in_progress": self._restore_lock.locked(),
+            "active_restore_run_id": self._active_restore_run_id,
+            "valid_preflight_tokens": tokens,
+        }
 
     async def create_backup(self) -> BackupInfo:
         """
@@ -378,7 +447,13 @@ class DatabaseBackupService:
             "remaining": len(remaining) - deleted_count,
         }
 
-    async def restore_backup(self, backup_id: str) -> Dict[str, Any]:
+    async def restore_backup(
+        self,
+        backup_id: str,
+        *,
+        preflight_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Restore a database from backup using psql.
 
@@ -394,58 +469,88 @@ class DatabaseBackupService:
             ValueError: If backup not found.
             RuntimeError: If restore fails.
         """
+        if not preflight_id:
+            raise RuntimeError("Restore preflight is required before restore execution")
+
+        now = datetime.now(timezone.utc)
+        token = self._restore_preflight_tokens.get(preflight_id)
+        if not token:
+            raise RuntimeError("Invalid or already consumed restore preflight token")
+        if token["backup_id"] != backup_id:
+            raise RuntimeError("Restore preflight token does not match backup_id")
+        if token["expires_at"] <= now:
+            self._restore_preflight_tokens.pop(preflight_id, None)
+            raise RuntimeError("Restore preflight token expired. Run preflight again")
+        if self._restore_lock.locked():
+            raise RuntimeError("Another restore is already in progress")
+
         backup = await self.get_backup(backup_id)
         if not backup:
             raise ValueError(f"Backup {backup_id} not found")
 
         start_time = time.monotonic()
+        effective_run_id = run_id or str(uuid.uuid4())
 
-        logger.warning(f"Starting database restore from backup: {backup.filename}")
+        async with self._restore_lock:
+            self._restore_preflight_tokens.pop(preflight_id, None)
+            self._active_restore_run_id = effective_run_id
+            try:
+                logger.warning(
+                    f"Starting database restore from backup: {backup.filename} "
+                    f"(run_id={effective_run_id})"
+                )
 
-        # Decompress backup
-        with gzip.open(backup.filepath, "rb") as f:
-            sql_content = f.read()
+                # Decompress backup
+                with gzip.open(backup.filepath, "rb") as f:
+                    sql_content = f.read()
 
-        # Build psql command
-        cmd = [
-            "psql",
-            f"--host={self._settings.pg_host}",
-            f"--port={self._settings.pg_port}",
-            f"--username={self._settings.pg_user}",
-            f"--dbname={self._settings.pg_database}",
-            "--no-password",
-            "--single-transaction",
-        ]
+                # Build psql command
+                cmd = [
+                    "psql",
+                    f"--host={self._settings.pg_host}",
+                    f"--port={self._settings.pg_port}",
+                    f"--username={self._settings.pg_user}",
+                    f"--dbname={self._settings.pg_database}",
+                    "--no-password",
+                    "--single-transaction",
+                ]
 
-        env = os.environ.copy()
-        env["PGPASSWORD"] = self._settings.pg_password
+                env = os.environ.copy()
+                env["PGPASSWORD"] = self._settings.pg_password
 
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                )
 
-        stdout, stderr = await process.communicate(input=sql_content)
+                stdout, stderr = await process.communicate(input=sql_content)
 
-        duration = time.monotonic() - start_time
+                duration = time.monotonic() - start_time
 
-        if process.returncode != 0:
-            error_msg = stderr.decode("utf-8", errors="replace").strip()
-            logger.error(f"Database restore failed (exit {process.returncode}): {error_msg}")
-            raise RuntimeError(f"psql restore failed (exit {process.returncode}): {error_msg}")
+                if process.returncode != 0:
+                    error_msg = stderr.decode("utf-8", errors="replace").strip()
+                    logger.error(f"Database restore failed (exit {process.returncode}): {error_msg}")
+                    raise RuntimeError(f"psql restore failed (exit {process.returncode}): {error_msg}")
 
-        logger.info(f"Database restored successfully from {backup.filename} ({duration:.1f}s)")
+                logger.info(
+                    f"Database restored successfully from {backup.filename} "
+                    f"({duration:.1f}s, run_id={effective_run_id})"
+                )
 
-        return {
-            "backup_id": backup_id,
-            "filename": backup.filename,
-            "size_bytes": backup.size_bytes,
-            "duration_seconds": round(duration, 2),
-            "status": "restored",
-        }
+                return {
+                    "backup_id": backup_id,
+                    "filename": backup.filename,
+                    "size_bytes": backup.size_bytes,
+                    "duration_seconds": round(duration, 2),
+                    "status": "restored",
+                    "run_id": effective_run_id,
+                    "preflight_id": preflight_id,
+                }
+            finally:
+                self._active_restore_run_id = None
 
     async def _check_pg_dump(self) -> None:
         """Verify pg_dump is available in the container."""
@@ -481,6 +586,50 @@ class DatabaseBackupService:
         except Exception:
             pass
         return None
+
+    async def _check_psql(self) -> None:
+        """Verify psql is available in the runtime environment."""
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "psql",
+                "--version",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await process.communicate()
+            if process.returncode != 0:
+                raise RuntimeError("psql returned non-zero exit code")
+            logger.debug(f"psql available: {stdout.decode().strip()}")
+        except FileNotFoundError:
+            raise RuntimeError(
+                "psql not found. Install postgresql-client in the Docker image. "
+                "Add 'postgresql-client' to apt-get install in Dockerfile Runtime Stage."
+            )
+
+    async def _verify_backup_integrity(self, filepath: Path) -> int:
+        """
+        Validate gzip integrity and return uncompressed byte size.
+        """
+        if not filepath.exists():
+            raise RuntimeError(f"Backup file missing: {filepath}")
+        if filepath.stat().st_size <= 0:
+            raise RuntimeError(f"Backup file empty: {filepath}")
+
+        uncompressed_bytes = 0
+        try:
+            with gzip.open(filepath, "rb") as gz_file:
+                while True:
+                    chunk = gz_file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    uncompressed_bytes += len(chunk)
+        except OSError as exc:
+            raise RuntimeError(f"Backup integrity check failed: {exc}") from exc
+
+        if uncompressed_bytes <= 0:
+            raise RuntimeError("Backup integrity check failed: empty SQL content")
+
+        return uncompressed_bytes
 
 
 # =============================================================================

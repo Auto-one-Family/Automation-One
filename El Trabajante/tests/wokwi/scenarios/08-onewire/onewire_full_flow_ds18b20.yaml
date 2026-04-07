@@ -14,7 +14,7 @@ steps:
   # ============================================
   # PHASE 2: COMMUNICATION (MQTT)
   # ============================================
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
   - wait-serial: "Phase 2: Communication Layer READY"
 
   # ============================================

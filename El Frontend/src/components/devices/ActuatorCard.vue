@@ -16,6 +16,7 @@ import type { LogicRule, ExecutionHistoryItem } from '@/types/logic'
 import { formatConditionShort } from '@/types/logic'
 import { formatRelativeTime, ZONE_STALE_THRESHOLD_MS } from '@/utils/formatters'
 import { getActuatorTypeInfo } from '@/utils/labels'
+import { getSensorLabel, getSensorUnit } from '@/utils/sensorDefaults'
 
 interface Props {
   actuator: ActuatorWithContext
@@ -39,6 +40,8 @@ const emit = defineEmits<{
 const displayName = computed(() =>
   props.actuator.name || `GPIO ${props.actuator.gpio}`
 )
+
+const stateLabel = computed(() => (props.actuator.state ? 'Ein' : 'Aus'))
 
 // Scope badge (T13-R3 WP4): only show for non-default scopes with DB config
 const scopeBadge = computed(() => {
@@ -120,6 +123,65 @@ const pwmPercent = computed(() => {
   return null
 })
 
+function toRoundedValue(value: unknown): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '?'
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
+}
+
+function parseTriggerPayload(raw: string): Record<string, unknown> | null {
+  const trimmed = raw.trim()
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null
+  try {
+    return JSON.parse(trimmed) as Record<string, unknown>
+  } catch {
+    // Backend liefert teils Python-ähnliche Dict-Strings mit einfachen Quotes.
+    try {
+      const normalized = trimmed.replace(/'/g, '"')
+      return JSON.parse(normalized) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+}
+
+function formatTriggerReason(reason: string | null | undefined): string {
+  const text = typeof reason === 'string' ? reason.trim() : ''
+  if (!text) return 'Ausloeser wurde nicht uebermittelt'
+
+  const parsed = parseTriggerPayload(text)
+  if (parsed) {
+    const sensorType = typeof parsed.sensor_type === 'string' ? parsed.sensor_type : null
+    const value = parsed.value
+    const zoneId = typeof parsed.zone_id === 'string' ? parsed.zone_id : null
+    const subzoneId = typeof parsed.subzone_id === 'string' ? parsed.subzone_id : null
+    const sourceEsp = typeof parsed.esp_id === 'string' ? parsed.esp_id : null
+
+    if (sensorType) {
+      const label = getSensorLabel(sensorType)
+      const unit = getSensorUnit(sensorType)
+      const parts = [`${label}: ${toRoundedValue(value)}${unit}`]
+      if (zoneId) parts.push(`Zone ${zoneId}`)
+      if (subzoneId) parts.push(`Subzone ${subzoneId}`)
+      if (sourceEsp) parts.push(sourceEsp)
+      return parts.join(' · ')
+    }
+
+    if (sourceEsp) return `Ausgeloest durch ${sourceEsp}`
+    return 'Ausloeserdetails liegen vor, konnten aber nicht lesbar aufbereitet werden'
+  }
+
+  return text.length > 120 ? `${text.slice(0, 117)}...` : text
+}
+
+const lastExecutionReasonLabel = computed(() => formatTriggerReason(props.lastExecution?.trigger_reason))
+
+const dataModeHint = computed(() => {
+  if (isEspOffline.value) return 'Kein Live-Status: ESP ist aktuell offline.'
+  if (isStale.value || isActuatorStale.value) return 'Letzter bekannter Zustand; Rueckmeldung ist veraltet.'
+  if (props.dataMode === 'Snapshot') return 'Snapshot: Anzeige basiert auf dem letzten bekannten Stand.'
+  return ''
+})
+
 function handleClick() {
   if (props.mode === 'config') {
     emit('configure', props.actuator)
@@ -155,10 +217,15 @@ function handleToggle(event: Event) {
         <component :is="actuatorIcon" :class="['w-5 h-5', actuator.state ? 'text-green-400' : 'text-dark-400']" />
       </div>
       <div class="actuator-card__info">
-        <p class="actuator-card__name">{{ displayName }}</p>
+        <div class="actuator-card__title-row">
+          <p class="actuator-card__name">{{ displayName }}</p>
+          <span :class="['actuator-card__state-primary', props.actuator.state ? 'actuator-card__state-primary--on' : 'actuator-card__state-primary--off']">
+            {{ stateLabel }}
+          </span>
+        </div>
         <p class="actuator-card__meta">{{ actuator.esp_id }} · {{ getActuatorTypeInfo(actuator.actuator_type, actuator.hardware_type).label }}</p>
         <p class="actuator-card__served">
-          <span class="actuator-card__served-label">Bedient:</span>
+          <span class="actuator-card__served-label">Subzone:</span>
           <span class="actuator-card__served-value">{{ servedSubzoneLabel }}</span>
         </p>
       </div>
@@ -171,9 +238,6 @@ function handleToggle(event: Event) {
       <div class="actuator-card__badges">
         <span :class="['actuator-card__mode-badge', `actuator-card__mode-badge--${dataMode.toLowerCase()}`]">
           {{ dataMode }}
-        </span>
-        <span :class="['badge', actuator.state ? 'badge-success' : 'badge-gray']">
-          {{ actuator.state ? 'Ein' : 'Aus' }}
         </span>
         <span v-if="mode === 'monitor' && pwmPercent" class="actuator-card__pwm-badge">
           {{ pwmPercent }}
@@ -237,9 +301,16 @@ function handleToggle(event: Event) {
     <!-- Monitor-mode: Last execution -->
     <div v-if="mode === 'monitor' && lastExecution" class="actuator-card__last-execution">
       Zuletzt: {{ formatRelativeTime(lastExecution.triggered_at) }}
-      <span v-if="lastExecution.trigger_reason" class="actuator-card__execution-reason">
-        ({{ lastExecution.trigger_reason }})
+      <span
+        v-if="lastExecutionReasonLabel"
+        class="actuator-card__execution-reason"
+        :title="lastExecutionReasonLabel"
+      >
+        ({{ lastExecutionReasonLabel }})
       </span>
+    </div>
+    <div v-if="mode === 'monitor' && dataModeHint" class="actuator-card__freshness-hint">
+      {{ dataModeHint }}
     </div>
   </div>
 </template>
@@ -307,6 +378,33 @@ function handleToggle(event: Event) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.actuator-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.actuator-card__state-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.actuator-card__state-primary--on {
+  color: var(--color-success);
+}
+
+.actuator-card__state-primary--off {
+  color: var(--color-text-muted);
 }
 
 .actuator-card__meta {
@@ -471,6 +569,12 @@ function handleToggle(event: Event) {
 
 .actuator-card__execution-reason {
   color: var(--color-text-secondary);
+}
+
+.actuator-card__freshness-hint {
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
 }
 
 /* Scope badges (T13-R3 WP4) */

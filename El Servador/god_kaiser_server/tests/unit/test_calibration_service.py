@@ -2,11 +2,35 @@
 
 import pytest
 
+from src.db.models.esp import ESPDevice
+from src.db.models.sensor import SensorConfig
 from src.services.calibration_service import CalibrationError, CalibrationService
+
+
+async def _create_bound_sensor(
+    db_session,
+    *,
+    esp_id: str,
+    gpio: int,
+    sensor_type: str = "moisture",
+) -> None:
+    esp = ESPDevice(device_id=esp_id, hardware_type="ESP32_WROOM", status="online")
+    db_session.add(esp)
+    await db_session.flush()
+    sensor = SensorConfig(
+        esp_id=esp.id,
+        gpio=gpio,
+        sensor_type=sensor_type,
+        sensor_name=f"{sensor_type}-sensor-{gpio}",
+        enabled=True,
+    )
+    db_session.add(sensor)
+    await db_session.flush()
 
 
 @pytest.mark.asyncio
 async def test_calibration_service_add_finalize_apply_flow(db_session):
+    await _create_bound_sensor(db_session, esp_id="ESP_TEST_001", gpio=4)
     service = CalibrationService(db_session)
     session = await service.start_session(
         esp_id="ESP_TEST_001",
@@ -169,6 +193,7 @@ async def test_delete_point_removes_role_and_keeps_collecting(db_session):
 
 @pytest.mark.asyncio
 async def test_apply_is_idempotent(db_session):
+    await _create_bound_sensor(db_session, esp_id="ESP_TEST_001", gpio=9)
     service = CalibrationService(db_session)
     session = await service.start_session(
         esp_id="ESP_TEST_001",

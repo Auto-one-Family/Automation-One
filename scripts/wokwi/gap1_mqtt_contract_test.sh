@@ -33,6 +33,7 @@ CONFIG_SCENARIO="tests/wokwi/scenarios/06-config/config_sensor_add.yaml"
 WOKWI_TIMEOUT=90000
 PROCESS_TIMEOUT=120
 MQTT_WAIT_MAX=60
+BROKER_WAIT_MAX=30
 REPEAT_COUNT=3
 SMOKE_ONLY=false
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -89,8 +90,14 @@ log_info "Timestamp: $TIMESTAMP"
 mkdir -p "$SERIAL_LOG_DIR" "$MQTT_LOG_DIR" "$REPORT_DIR"
 
 # Pruefen: Docker laeuft?
-if ! docker ps --format "{{.Names}}" | grep -q mqtt 2>/dev/null; then
-  log_fail "Kein MQTT-Broker Container gefunden. 'docker compose up -d' ausfuehren."
+if ! docker info >/dev/null 2>&1; then
+  log_fail "Docker Daemon nicht erreichbar."
+  exit 1
+fi
+
+# Pruefen: Broker Container vorhanden?
+if ! docker ps --format "{{.Names}}" | grep -q "automationone-mqtt" 2>/dev/null; then
+  log_fail "Kein MQTT-Broker Container 'automationone-mqtt' gefunden. 'docker compose up -d' ausfuehren."
   exit 1
 fi
 
@@ -103,17 +110,31 @@ else
   exit 1
 fi
 
-# Pruefen: Broker Healthcheck
-if docker exec automationone-mqtt mosquitto_pub -t 'test/gap1/ping' -m 'pong' 2>/dev/null; then
-  log_pass "MQTT Broker Healthcheck bestanden"
-else
-  log_fail "MQTT Broker antwortet nicht auf Healthcheck"
+# Pruefen: Broker Healthcheck (loop-basiert)
+BROKER_READY=false
+for i in $(seq 1 "$BROKER_WAIT_MAX"); do
+  if docker exec automationone-mqtt mosquitto_pub -t 'test/gap1/ping' -m "pong-$i" 2>/dev/null; then
+    log_pass "MQTT Broker Healthcheck bestanden (nach ${i}s)"
+    BROKER_READY=true
+    break
+  fi
+  sleep 1
+done
+if [ "$BROKER_READY" != "true" ]; then
+  log_fail "MQTT Broker antwortet nicht innerhalb ${BROKER_WAIT_MAX}s auf Healthcheck"
+  docker logs --tail 150 automationone-mqtt || true
   exit 1
 fi
 
 # Pruefen: Wokwi CLI verfuegbar?
 if ! command -v wokwi-cli &>/dev/null; then
   log_fail "wokwi-cli nicht gefunden. Installation: https://docs.wokwi.com/wokwi-ci/getting-started"
+  exit 1
+fi
+
+# Pruefen: Wokwi Token vorhanden?
+if [ -z "${WOKWI_CLI_TOKEN:-}" ]; then
+  log_fail "WOKWI_CLI_TOKEN ist nicht gesetzt."
   exit 1
 fi
 
@@ -191,6 +212,11 @@ if [ "$MQTT_READY" != "true" ]; then
   kill $WOKWI_PID 2>/dev/null || true
   wait $WOKWI_PID 2>/dev/null || true
   echo "MQTT_READY=false nach ${MQTT_WAIT_MAX}s" >> "$INJECT_LOG"
+  {
+    echo "----- Letzte 120 Zeilen Injection-Log -----"
+    tail -n 120 "$INJECT_LOG" || true
+    echo "----- Ende Injection-Log -----"
+  } >> "$INJECT_LOG"
 else
   sleep 2  # Buffer
 
@@ -275,6 +301,7 @@ cat > "$REPORT" << EOF
 **Datum:** $(date -Iseconds)
 **Branch:** $BRANCH
 **Commit:** $COMMIT
+**Testtyp:** $( [ "$SMOKE_ONLY" = true ] && echo "smoke-only" || echo "full-contract" )
 **Wiederholungen:** $REPEAT_COUNT
 
 ## Ergebnisse

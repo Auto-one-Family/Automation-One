@@ -13,6 +13,8 @@ name: Error Injection - Invalid JSON Config
 version: 1
 steps:
   - wait-serial: "Phase 5: Actuator System READY"
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "REGISTRATION"
+  - wait-serial: "heartbeat"
   # External MQTT injection of malformed JSON happens here (sleep 25 in CI)
   - wait-serial: "Failed to parse"

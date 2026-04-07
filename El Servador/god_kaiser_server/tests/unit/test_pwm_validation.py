@@ -22,6 +22,14 @@ from unittest.mock import MagicMock, AsyncMock
 from src.services.safety_service import SafetyService, SafetyCheckResult
 
 
+@pytest.fixture(autouse=True)
+def clear_emergency_stop_state():
+    """Reset SafetyService global E-Stop state before and after each test."""
+    SafetyService._global_emergency_stop_active.clear()
+    yield
+    SafetyService._global_emergency_stop_active.clear()
+
+
 class TestPWMValueRangeValidation:
     """Tests for PWM value range validation (0.0 - 1.0)."""
 

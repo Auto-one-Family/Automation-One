@@ -7,7 +7,7 @@ name: OneWire MQTT Scan Command
 version: 1
 steps:
   # Boot sequence with MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # Wait for system to be fully ready
   - wait-serial: "Phase 5: Actuator System READY"

@@ -16,6 +16,7 @@ Endpoints:
 - PATCH /v1/notifications/{id}/read      - Mark as read
 - PATCH /v1/notifications/{id}/acknowledge - Acknowledge alert (Phase 4B)
 - PATCH /v1/notifications/{id}/resolve    - Resolve alert (Phase 4B)
+- PATCH /v1/notifications/resolve-all     - Resolve all unresolved alerts
 - PATCH /v1/notifications/read-all       - Mark all as read
 - POST /v1/notifications/send            - Admin send notification
 - GET  /v1/notifications/preferences     - Get user preferences
@@ -52,6 +53,7 @@ from ...db.repositories.notification_repo import (
 from ...schemas.common import BaseResponse, PaginationMeta
 from ...schemas.notification import (
     AlertActiveListResponse,
+    AlertBulkResolveResponse,
     AlertStatsResponse,
     EmailLogListResponse,
     EmailLogResponse,
@@ -448,6 +450,36 @@ async def resolve_alert(
     await router_service.broadcast_unread_count(user.id)
 
     return NotificationResponse.model_validate(notification)
+
+
+# =============================================================================
+# PATCH /v1/notifications/resolve-all — Resolve all unresolved alerts
+# =============================================================================
+
+
+@router.patch(
+    "/resolve-all",
+    response_model=AlertBulkResolveResponse,
+    summary="Resolve all unresolved alerts",
+    description="Resolve all active/acknowledged alerts for the current user.",
+)
+async def resolve_all_alerts(
+    db: DBSession,
+    user: ActiveUser,
+):
+    repo = NotificationRepository(db)
+    resolved_count = await repo.resolve_all_alerts(user.id)
+    await db.commit()
+
+    # Broadcast updated unread count (bulk operation; no per-item events).
+    router_service = NotificationRouter(db)
+    await router_service.broadcast_unread_count(user.id)
+
+    return AlertBulkResolveResponse(
+        success=True,
+        message=f"Resolved {resolved_count} alerts",
+        resolved_count=resolved_count,
+    )
 
 
 # =============================================================================

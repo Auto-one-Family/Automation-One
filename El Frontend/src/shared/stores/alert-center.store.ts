@@ -43,6 +43,7 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
   const statusFilter = ref<AlertStatus>('active')
   const severityFilter = ref<NotificationSeverity | null>(null)
   let statsPollTimer: ReturnType<typeof setInterval> | null = null
+  let statsInFlight: Promise<void> | null = null
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Computed
@@ -96,25 +97,36 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
   /**
    * Fetch alert statistics from server.
    */
-  async function fetchStats(): Promise<void> {
+  async function fetchStats(options: { force?: boolean } = {}): Promise<void> {
     const authStore = useAuthStore()
     if (!authStore.isAuthenticated) {
       return
     }
-    if (isLoadingStats.value) return
-    isLoadingStats.value = true
-
-    try {
-      alertStats.value = await notificationsApi.getAlertStats()
-      logger.debug(
-        `Stats loaded: ${alertStats.value.active_count} active, ` +
-          `${alertStats.value.acknowledged_count} acknowledged`,
-      )
-    } catch (err) {
-      logger.error('Failed to fetch alert stats', err)
-    } finally {
-      isLoadingStats.value = false
+    if (isLoadingStats.value) {
+      if (!options.force) {
+        if (statsInFlight) await statsInFlight
+        return
+      }
+      if (statsInFlight) await statsInFlight
     }
+
+    statsInFlight = (async () => {
+      isLoadingStats.value = true
+      try {
+        alertStats.value = await notificationsApi.getAlertStats()
+        logger.debug(
+          `Stats loaded: ${alertStats.value.active_count} active, ` +
+            `${alertStats.value.acknowledged_count} acknowledged`,
+        )
+      } catch (err) {
+        logger.error('Failed to fetch alert stats', err)
+      } finally {
+        isLoadingStats.value = false
+        statsInFlight = null
+      }
+    })()
+
+    await statsInFlight
   }
 
   /**
@@ -151,7 +163,7 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
       _updateAlertInLists(id, updated)
 
       // Refresh stats
-      await fetchStats()
+      await fetchStats({ force: true })
 
       logger.info(`Alert acknowledged: ${id}`)
       return true
@@ -175,12 +187,47 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
       activeAlerts.value = activeAlerts.value.filter((a) => a.id !== id)
 
       // Refresh stats
-      await fetchStats()
+      await fetchStats({ force: true })
 
       logger.info(`Alert resolved: ${id}`)
       return true
     } catch (err) {
       logger.error(`Failed to resolve alert ${id}`, err)
+      return false
+    }
+  }
+
+  /**
+   * Resolve all unresolved alerts (active + acknowledged) for current user.
+   */
+  async function resolveAllAlerts(): Promise<boolean> {
+    try {
+      const result = await notificationsApi.resolveAllAlerts()
+
+      const now = new Date().toISOString()
+      const inboxStore = useNotificationInboxStore()
+      for (const notification of inboxStore.notifications) {
+        if (notification.status === 'active' || notification.status === 'acknowledged') {
+          notification.status = 'resolved'
+          notification.resolved_at = notification.resolved_at || now
+          notification.is_read = true
+          notification.read_at = notification.read_at || now
+        }
+      }
+
+      activeAlerts.value = []
+      if (alertStats.value) {
+        alertStats.value = {
+          ...alertStats.value,
+          active_count: 0,
+          acknowledged_count: 0,
+        }
+      }
+      await fetchStats({ force: true })
+      logger.info(`All unresolved alerts resolved (${result.resolved_count})`)
+      return true
+    } catch (err) {
+      logger.error('Failed to resolve all alerts', err)
       return false
     }
   }
@@ -252,6 +299,7 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
     fetchActiveAlerts,
     acknowledgeAlert,
     resolveAlert,
+    resolveAllAlerts,
     startStatsPolling,
     stopStatsPolling,
   }

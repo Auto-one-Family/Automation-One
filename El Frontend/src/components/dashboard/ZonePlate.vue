@@ -22,12 +22,12 @@ import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/shared/stores'
 import { useUiStore } from '@/shared/stores/ui.store'
 import { useSubzoneCRUD } from '@/composables/useSubzoneCRUD'
-import { ChevronDown, MoreVertical, Pencil, Trash2, Activity, Plus, Check, X } from 'lucide-vue-next'
+import { Pencil, Trash2, Plus, Check, X } from 'lucide-vue-next'
 import { PackageOpen } from 'lucide-vue-next'
 import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
 import { EmptyState } from '@/shared/design/patterns'
 import DeviceMiniCard from './DeviceMiniCard.vue'
-import { aggregateZoneSensors, formatAggregatedValue } from '@/utils/sensorDefaults'
+import { aggregateZoneSensors } from '@/utils/sensorDefaults'
 import { getESPStatus } from '@/composables/useESPStatus'
 import type { ZoneContextSummary, ZoneEntity } from '@/types'
 import { Settings } from 'lucide-vue-next'
@@ -56,7 +56,6 @@ const emit = defineEmits<{
   (e: 'settings', device: ESPDevice): void
   (e: 'change-zone', device: ESPDevice): void
   (e: 'rename', payload: { zoneId: string; newName: string }): void
-  (e: 'delete', zoneId: string): void
   (e: 'device-delete', deviceId: string): void
   (e: 'monitor-nav', device: ESPDevice): void
   (e: 'zone-settings', zoneId: string): void
@@ -115,9 +114,10 @@ const statusVariant = computed(() => {
 const zoneAggregation = computed(() => aggregateZoneSensors(props.devices))
 
 const aggregatedValues = computed(() => {
-  return zoneAggregation.value.sensorTypes.map(agg =>
-    formatAggregatedValue(agg, stats.value.total)
-  )
+  return zoneAggregation.value.sensorTypes.map((agg) => {
+    const avgRounded = Number.isInteger(agg.avg) ? `${agg.avg}` : agg.avg.toFixed(1)
+    return `${avgRounded}\u2009${agg.unit}`
+  })
 })
 
 const extraTypeCount = computed(() => zoneAggregation.value.extraTypeCount)
@@ -238,48 +238,6 @@ function cancelRename() {
   isRenaming.value = false
 }
 
-// ── Overflow Menu ────────────────────────────────────────────────────────
-function openOverflowMenu(event: MouseEvent) {
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  uiStore.openContextMenu(rect.right, rect.bottom, [
-    {
-      id: 'rename',
-      label: 'Umbenennen',
-      icon: Pencil,
-      action: () => startRename(),
-    },
-    {
-      id: 'delete',
-      label: 'Löschen',
-      icon: Trash2,
-      variant: 'danger',
-      action: () => handleZoneDelete(),
-    },
-  ])
-}
-
-async function handleZoneDelete() {
-  const deviceCount = stats.value.total
-  const confirmed = await uiStore.confirm({
-    title: 'Zone löschen',
-    message: deviceCount > 0
-      ? `Alle ${deviceCount} Geräte in "${props.zoneName}" werden aus der Zone entfernt. Die Geräte werden nicht gelöscht.`
-      : `Zone "${props.zoneName}" wird entfernt.`,
-    variant: 'danger',
-    confirmText: 'Zone löschen',
-  })
-  if (confirmed) {
-    emit('delete', props.zoneId)
-  }
-}
-
-// ── Toggle Handler ────────────────────────────────────────────────────────
-function handleHeaderClick(toggle: () => void) {
-  if (dragStore.isAnyDragActive) return
-  if (isRenaming.value) return
-  toggle()
-}
-
 function handleDeviceClick(payload: { deviceId: string; originRect: DOMRect }) {
   emit('device-click', payload)
 }
@@ -349,22 +307,15 @@ function handleDragEnd() {
     :aria-label="`Zone ${zoneName}: ${stats.online}/${stats.total} Geräte online`"
   >
     <AccordionSection
-      :model-value="isExpanded"
+      :model-value="true"
       class="zone-plate__accordion"
-      @update:model-value="(val: boolean) => emit('update:isExpanded', val)"
     >
       <!-- Custom zone header -->
-      <template #header="{ isOpen, toggle }">
+      <template #header>
         <div
           class="zone-plate__header"
-          :aria-expanded="isOpen"
-          @click="handleHeaderClick(toggle)"
+          :aria-expanded="true"
         >
-          <ChevronDown
-            class="zone-plate__chevron"
-            :class="{ 'zone-plate__chevron--collapsed': !isOpen }"
-          />
-
           <!-- Zone name: inline editable -->
           <template v-if="isRenaming">
             <input
@@ -431,25 +382,6 @@ function handleDragEnd() {
             <Settings class="zone-plate__settings-icon" />
           </button>
 
-          <!-- Monitor quick-link -->
-          <RouterLink
-            :to="{ name: 'monitor-zone', params: { zoneId: zoneId } }"
-            class="zone-plate__monitor-link"
-            title="Zone im Monitor anzeigen"
-            @click.stop
-          >
-            <Activity class="zone-plate__monitor-icon" />
-            <span class="zone-plate__monitor-label">Monitor</span>
-          </RouterLink>
-
-          <!-- Overflow menu -->
-          <button
-            class="zone-plate__menu-btn"
-            title="Zone-Aktionen"
-            @click.stop="openOverflowMenu($event)"
-          >
-            <MoreVertical class="zone-plate__menu-icon" />
-          </button>
         </div>
 
         <!-- B3: Subzone chips (with CRUD — disabled for archived zones) -->
@@ -665,7 +597,7 @@ function handleDragEnd() {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  cursor: pointer;
+  cursor: default;
   user-select: none;
   padding: var(--space-1) 0;
 }
@@ -676,18 +608,6 @@ function handleDragEnd() {
 
 .zone-plate__header:hover .zone-plate__edit-btn {
   opacity: 1;
-}
-
-.zone-plate__chevron {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  color: var(--color-text-muted);
-  transition: transform var(--transition-fast);
-}
-
-.zone-plate__chevron--collapsed {
-  transform: rotate(-90deg);
 }
 
 .zone-plate__title {
@@ -761,6 +681,7 @@ function handleDragEnd() {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  flex: 1;
   margin-left: var(--space-2);
 }
 
@@ -813,7 +734,7 @@ function handleDragEnd() {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 2px 0 0 22px; /* Indent to align with title (past chevron) */
+  padding: 2px 0 0 0;
 }
 
 .zone-plate__subzone-chip {
@@ -956,83 +877,12 @@ function handleDragEnd() {
   flex-shrink: 0;
 }
 
-/* Monitor quick-link */
-.zone-plate__monitor-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  min-width: 44px;
-  min-height: 44px;
-  padding: 2px var(--space-1);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-  transition: color var(--transition-fast), background var(--transition-fast), opacity var(--transition-fast);
-  opacity: 0.4;
-  text-decoration: none;
-  font-size: 10px;
-  font-weight: 500;
-}
-
-.zone-plate__header:hover .zone-plate__monitor-link,
-.zone-plate__header:focus-within .zone-plate__monitor-link {
-  opacity: 1;
-}
-
-.zone-plate__monitor-link:hover {
-  color: var(--color-accent-bright);
-  background: rgba(96, 165, 250, 0.08);
-}
-
-.zone-plate__monitor-icon {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-}
-
-.zone-plate__monitor-label {
-  display: none;
-}
-
-@media (min-width: 768px) {
-  .zone-plate__monitor-label {
-    display: inline;
-  }
-}
-
-/* Overflow menu button */
-.zone-plate__menu-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
-  min-height: 44px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: color var(--transition-fast), background var(--transition-fast);
-  padding: 0;
-}
-
-.zone-plate__menu-btn:hover {
-  color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.zone-plate__menu-icon {
-  width: 14px;
-  height: 14px;
-}
-
 /* ═══════ Body (expanded content) ═══════ */
 
 /* Device grid — auto-fill stretches cards when few devices */
 .zone-plate__devices {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 8px;
   min-height: 32px;
   padding-top: var(--space-1);
@@ -1197,9 +1047,9 @@ function handleDragEnd() {
 @media (hover: none) {
   .zone-plate__edit-btn,
   .zone-plate__settings-btn,
-  .zone-plate__monitor-link,
   .zone-plate__subzone-hover-actions {
     opacity: 1;
   }
 }
+
 </style>

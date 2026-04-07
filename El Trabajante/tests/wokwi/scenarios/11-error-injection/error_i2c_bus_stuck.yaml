@@ -13,7 +13,9 @@ name: Error Injection - I2C Bus Stuck
 version: 1
 steps:
   - wait-serial: "Phase 5: Actuator System READY"
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "REGISTRATION"
+  - wait-serial: "heartbeat"
   # External MQTT config injection happens here (sleep 25 in CI)
   # I2C sensor at address 68 on GPIO 21 — no physical device → I2C error
   - wait-serial: "ConfigResponse published"

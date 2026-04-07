@@ -9,14 +9,13 @@
  * Used inside ESPSettingsSheet as SlideOver panel (HardwareView only, Route /hardware).
  */
 
-import { ref, computed, onMounted, watch } from 'vue'
-import { Save, RotateCcw, Beaker, Gauge, Settings, Cpu, Trash2, X } from 'lucide-vue-next'
+import { ref, computed, onMounted } from 'vue'
+import { Save, Beaker, Gauge, Settings, Cpu, Trash2 } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { espApi } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useUiStore } from '@/shared/stores/ui.store'
 import { useToast } from '@/composables/useToast'
-import { useCalibration } from '@/composables/useCalibration'
 import { inferInterfaceType } from '@/utils/sensorDefaults'
 import { roundToDecimals } from '@/utils/formatters'
 import { SENSOR_TYPE_CONFIG, getSensorUnit } from '@/utils/sensorDefaults'
@@ -36,6 +35,7 @@ import type { DeviceScope } from '@/types'
 import type { DeviceMetadata } from '@/types/device-metadata'
 import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
 import type { SensorConfigCreate } from '@/types'
+import CalibrationWizard from '@/components/calibration/CalibrationWizard.vue'
 
 interface Props {
   espId: string
@@ -62,7 +62,6 @@ const toast = useToast()
 const espStore = useEspStore()
 const actuatorStore = useActuatorStore()
 const uiStore = useUiStore()
-const calibration = useCalibration()
 const zoneStore = useZoneStore()
 
 // =============================================================================
@@ -118,9 +117,6 @@ const warnLow = ref(0)
 const warnHigh = ref(100)
 const alarmHigh = ref(100)
 
-// Calibration
-const currentRawValue = ref(0)
-
 // Device Metadata
 const metadata = ref<DeviceMetadata>({})
 
@@ -135,6 +131,24 @@ const isI2C = computed(() => interfaceType.value === 'I2C')
 const isOneWire = computed(() => interfaceType.value === 'ONEWIRE')
 const isAnalog = computed(() => interfaceType.value === 'ANALOG')
 const isDigital = computed(() => props.sensorType.toLowerCase().includes('flow'))
+const contextDevice = computed(() =>
+  espStore.devices.find((device) => espStore.getDeviceId(device) === props.espId),
+)
+const contextSensor = computed(() => {
+  const normalizedType = String(props.sensorType || '').toLowerCase()
+  return (contextDevice.value?.sensors ?? []).find((sensor: any) =>
+    Number(sensor.gpio) === props.gpio
+    && String(sensor.sensor_type ?? '').toLowerCase() === normalizedType,
+  ) ?? null
+})
+const zoneContextLabel = computed(() =>
+  (contextDevice.value as any)?.zone_name
+  || (contextDevice.value as any)?.zone_id
+  || 'nicht zugewiesen',
+)
+const subzoneContextLabel = computed(() =>
+  (contextSensor.value as any)?.subzone_id || subzoneId.value || 'Zone-weit',
+)
 
 const needsCalibration = computed(() => {
   const t = props.sensorType.toLowerCase()
@@ -264,21 +278,6 @@ onMounted(async () => {
   }
 })
 
-// Watch live sensor value for calibration
-watch(
-  () => {
-    const device = espStore.devices.find(d => espStore.getDeviceId(d) === props.espId)
-    const sensors = (device?.sensors as any[]) || []
-    return sensors.find(s => s.gpio === props.gpio)
-  },
-  (sensor) => {
-    if (sensor && typeof sensor.raw_value === 'number') {
-      currentRawValue.value = sensor.raw_value
-    }
-  },
-  { immediate: true, deep: true }
-)
-
 function setCronExpression(expression: string) {
   scheduleConfig.value = expression.trim()
     ? { type: 'cron', expression: expression.trim() }
@@ -391,11 +390,6 @@ async function handleSave() {
 
     config.metadata = mergeDeviceMetadata(null, metadata.value)
 
-    const calData = calibration.getCalibrationData()
-    if (calData) {
-      config.calibration = calData
-    }
-
     const result = await sensorsApi.createOrUpdate(props.espId, props.gpio, config as unknown as SensorConfigCreate)
     if (result?.id) {
       sensorDbId.value = String(result.id)
@@ -475,6 +469,12 @@ async function handleSave() {
       <!-- ═══ ZONE 1: BASIC (always visible) ══════════════════════════════ -->
       <section class="sensor-config__section">
         <h3 class="sensor-config__section-title">Grundeinstellungen</h3>
+        <div class="sensor-config__context-anchor">
+          <span class="sensor-config__context-label">Kontextanker</span>
+          <span class="sensor-config__context-item">Zone: {{ zoneContextLabel }}</span>
+          <span class="sensor-config__context-item">Subzone: {{ subzoneContextLabel }}</span>
+          <span class="sensor-config__context-item sensor-config__context-item--mono">ESP: {{ espId }} / GPIO {{ gpio }}</span>
+        </div>
 
         <div class="sensor-config__field">
           <label class="sensor-config__label">Name</label>
@@ -630,177 +630,13 @@ async function handleSave() {
         :storage-key="`${accordionKey}-calibration`"
         :icon="Beaker"
       >
-        <!-- Current raw value display -->
-        <div class="sensor-config__cal-current">
-          <span class="sensor-config__cal-label">Aktueller Rohwert:</span>
-          <span class="sensor-config__cal-value">{{ currentRawValue.toFixed(0) }} ADC</span>
-        </div>
-
-        <!-- Not started -->
-        <template v-if="!calibration.isActive.value">
-          <button
-            class="sensor-config__cal-start"
-            @click="calibration.startCalibration(
-              sensorType.toLowerCase() === 'ph' ? 'pH'
-              : sensorType.toLowerCase() === 'moisture' || sensorType.toLowerCase() === 'soil_moisture' ? 'moisture'
-              : 'EC'
-            )"
-          >
-            <Beaker class="w-4 h-4" />
-            Kalibrierung starten
-          </button>
-        </template>
-
-        <!-- pH Calibration Wizard -->
-        <template v-else-if="calibration.calibrationType.value === 'pH'">
-          <!-- Step 1: pH 4.0 -->
-          <div v-if="calibration.step.value === 'point1'" class="sensor-config__cal-step">
-            <h4>Schritt 1: pH 4.0 Pufferloesung</h4>
-            <p>Sensor in pH 4.0 Loesung tauchen und warten bis der Wert stabil ist.</p>
-            <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
-            <div class="sensor-config__cal-actions">
-              <button class="sensor-config__cal-btn" @click="calibration.setPoint1(currentRawValue, 4.0)">
-                Kalibrierungspunkt 1 setzen (pH 4.0)
-              </button>
-              <button class="sensor-config__cal-btn sensor-config__cal-btn--abort" @click="calibration.resetCalibration()">
-                <X class="w-3 h-3" />
-                Abbrechen
-              </button>
-            </div>
-          </div>
-
-          <!-- Step 2: pH 7.0 -->
-          <div v-else-if="calibration.step.value === 'point2'" class="sensor-config__cal-step">
-            <h4>Schritt 2: pH 7.0 Pufferloesung</h4>
-            <p>Sensor in pH 7.0 Loesung tauchen und warten bis der Wert stabil ist.</p>
-            <div class="sensor-config__cal-raw">
-              Punkt 1: {{ calibration.point1.value?.rawValue.toFixed(0) }} ADC &rarr; pH 4.0 &#10003;
-            </div>
-            <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
-            <div class="sensor-config__cal-actions">
-              <button class="sensor-config__cal-btn" @click="calibration.setPoint2(currentRawValue, 7.0)">
-                Kalibrierungspunkt 2 setzen (pH 7.0)
-              </button>
-              <button class="sensor-config__cal-btn sensor-config__cal-btn--abort" @click="calibration.resetCalibration()">
-                <X class="w-3 h-3" />
-                Abbrechen
-              </button>
-            </div>
-          </div>
-
-          <!-- Complete -->
-          <div v-else-if="calibration.step.value === 'complete'" class="sensor-config__cal-step sensor-config__cal-step--complete">
-            <h4>Kalibrierung abgeschlossen &#10003;</h4>
-            <div class="sensor-config__cal-result">
-              <span>Steigung: {{ calibration.result.value?.slope }}</span>
-              <span>Offset: {{ calibration.result.value?.offset }}</span>
-            </div>
-            <div class="sensor-config__cal-actions">
-              <button class="sensor-config__cal-btn sensor-config__cal-btn--save" @click="handleSave">
-                Kalibrierung speichern
-              </button>
-              <button class="sensor-config__cal-btn sensor-config__cal-btn--reset" @click="calibration.resetCalibration()">
-                <RotateCcw class="w-3 h-3" />
-                Zuruecksetzen
-              </button>
-            </div>
-          </div>
-        </template>
-
-        <!-- EC Calibration Wizard -->
-        <template v-else-if="calibration.calibrationType.value === 'EC'">
-          <!-- Step 1: Dry -->
-          <div v-if="calibration.step.value === 'point1'" class="sensor-config__cal-step">
-            <h4>Schritt 1: Trockene Elektrode (Luft)</h4>
-            <p>Elektrode in der Luft halten (trocken).</p>
-            <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
-            <div class="sensor-config__cal-actions">
-              <button class="sensor-config__cal-btn" @click="calibration.setPoint1(currentRawValue, 0)">
-                Nullpunkt setzen
-              </button>
-              <button class="sensor-config__cal-btn sensor-config__cal-btn--abort" @click="calibration.resetCalibration()">
-                <X class="w-3 h-3" />
-                Abbrechen
-              </button>
-            </div>
-          </div>
-
-          <!-- Step 2: Solution -->
-          <div v-else-if="calibration.step.value === 'point2'" class="sensor-config__cal-step">
-            <h4>Schritt 2: Kalibrierlosung</h4>
-            <p>Elektrode in Kalibrierlosung (1413 &micro;S/cm) tauchen.</p>
-            <div class="sensor-config__cal-raw">Rohwert: <strong>{{ currentRawValue.toFixed(0) }}</strong> ADC</div>
-            <div class="sensor-config__cal-actions">
-              <button class="sensor-config__cal-btn" @click="calibration.setPoint2(currentRawValue, 1413)">
-                Kalibrierungspunkt setzen (1413 &micro;S/cm)
-              </button>
-              <button class="sensor-config__cal-btn sensor-config__cal-btn--abort" @click="calibration.resetCalibration()">
-                <X class="w-3 h-3" />
-                Abbrechen
-              </button>
-            </div>
-          </div>
-
-          <!-- Complete -->
-          <div v-else-if="calibration.step.value === 'complete'" class="sensor-config__cal-step sensor-config__cal-step--complete">
-            <h4>EC-Kalibrierung abgeschlossen &#10003;</h4>
-            <div class="sensor-config__cal-result">
-              <span>Faktor: {{ calibration.result.value?.slope }}</span>
-              <span>Offset: {{ calibration.result.value?.offset }}</span>
-            </div>
-            <div class="sensor-config__cal-actions">
-              <button class="sensor-config__cal-btn sensor-config__cal-btn--save" @click="handleSave">
-                Kalibrierung speichern
-              </button>
-              <button class="sensor-config__cal-btn sensor-config__cal-btn--reset" @click="calibration.resetCalibration()">
-                <RotateCcw class="w-3 h-3" />
-                Zuruecksetzen
-              </button>
-            </div>
-          </div>
-        </template>
-
-        <!-- Moisture Calibration (dry/wet ADC boundaries) -->
-        <template v-else-if="calibration.calibrationType.value === 'moisture'">
-          <div class="sensor-config__cal-step">
-            <h4>Bodenfeuchte-Kalibrierung</h4>
-            <p>ADC-Grenzwerte fuer trockenen und nassen Boden festlegen.</p>
-
-            <div class="sensor-config__field">
-              <label class="sensor-config__label">Trocken-Wert (ADC)</label>
-              <input
-                v-model.number="calibration.dryValue.value"
-                type="number"
-                class="sensor-config__input"
-                min="0"
-                max="4095"
-              />
-              <span class="sensor-config__helper">ADC-Wert bei trockenem Boden (typisch ~3200)</span>
-            </div>
-
-            <div class="sensor-config__field">
-              <label class="sensor-config__label">Nass-Wert (ADC)</label>
-              <input
-                v-model.number="calibration.wetValue.value"
-                type="number"
-                class="sensor-config__input"
-                min="0"
-                max="4095"
-              />
-              <span class="sensor-config__helper">ADC-Wert bei nassem Boden (typisch ~1500)</span>
-            </div>
-
-            <div class="sensor-config__cal-actions">
-              <button class="sensor-config__cal-btn sensor-config__cal-btn--save" @click="handleSave">
-                Kalibrierung speichern
-              </button>
-              <button class="sensor-config__cal-btn sensor-config__cal-btn--reset" @click="calibration.resetCalibration()">
-                <RotateCcw class="w-3 h-3" />
-                Zuruecksetzen
-              </button>
-            </div>
-          </div>
-        </template>
+        <CalibrationWizard
+          compact
+          :skip-select="true"
+          :esp-id="espId"
+          :gpio="gpio"
+          :sensor-type="sensorType"
+        />
       </AccordionSection>
 
       <!-- ═══ ZONE 3: EXPERT (Hardware + Preview) ═════════════════════════ -->
@@ -1043,6 +879,30 @@ async function handleSave() {
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
   margin: 0;
+}
+
+.sensor-config__context-anchor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+}
+
+.sensor-config__context-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.sensor-config__context-item {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.sensor-config__context-item--mono {
+  font-family: var(--font-mono);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

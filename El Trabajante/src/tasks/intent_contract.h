@@ -15,6 +15,19 @@ struct IntentMetadata {
     uint32_t epoch_at_accept;
 };
 
+struct IntentChainCounters {
+    uint32_t ingress_seen;
+    uint32_t admission_accept;
+    uint32_t admission_reject;
+    uint32_t queue_enqueued;
+    uint32_t execute_started;
+    uint32_t execute_finished;
+    uint32_t outcome_publish_attempted;
+    uint32_t outcome_publish_ok;
+    uint32_t outcome_publish_failed;
+    uint32_t observer_seen;
+};
+
 enum class IntentInvalidationReason : uint8_t {
     NONE = 0,
     SAFETY_EPOCH_INVALIDATED = 1,
@@ -28,6 +41,11 @@ IntentMetadata extractIntentMetadataFromPayloadNoCorrelationFallback(const char*
 bool isIntentExpired(const IntentMetadata& metadata, uint32_t current_epoch);
 IntentInvalidationReason getIntentInvalidationReason(const IntentMetadata& metadata, uint32_t current_epoch);
 bool isRecoveryIntentAllowed(const char* topic, const char* payload);
+void recordIntentChainStage(const IntentMetadata& metadata,
+                            const char* stage,
+                            const char* flow = "command",
+                            const char* code = nullptr,
+                            const char* detail = nullptr);
 
 bool publishIntentOutcome(const char* flow,
                           const IntentMetadata& metadata,

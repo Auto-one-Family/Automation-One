@@ -18,7 +18,9 @@ name: Error Injection - Watchdog Stability Under Load
 version: 1
 steps:
   - wait-serial: "Phase 5: Actuator System READY"
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "REGISTRATION"
+  - wait-serial: "heartbeat"
   # External MQTT config injection happens here (sleep 25 in CI)
   - wait-serial: "ConfigResponse published"
   # External emergency trigger + clear happens after config

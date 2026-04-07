@@ -24,7 +24,7 @@ import type { ZoneEntity } from '@/types'
 import { useZoneDragDrop, ZONE_UNASSIGNED, useKeyboardShortcuts, useSwipeNavigation } from '@/composables'
 import { useToast } from '@/composables/useToast'
 import { zonesApi } from '@/api/zones'
-import { Plus, Filter, GitBranch, Workflow, MapPin, XCircle, ChevronDown } from 'lucide-vue-next'
+import { Plus, Filter, GitBranch, MapPin, XCircle, ChevronDown } from 'lucide-vue-next'
 import { getESPStatus } from '@/composables/useESPStatus'
 import { createLogger } from '@/utils/logger'
 
@@ -349,6 +349,28 @@ interface ZoneDisplayEntry {
   isArchived: boolean
 }
 
+function toUserFriendlyZoneName(zoneId: string, ...candidates: Array<string | null | undefined>): string {
+  for (const candidate of candidates) {
+    const normalized = candidate?.trim()
+    if (normalized && normalized !== zoneId) {
+      return normalized
+    }
+  }
+
+  const fallback = candidates.find(value => value && value.trim())?.trim()
+  if (fallback) {
+    return fallback
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+  }
+
+  return zoneId
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
 const activeZoneEntries = computed((): ZoneDisplayEntry[] => {
   const deviceGroupMap = new Map<string, { zoneName: string; devices: ESPDevice[] }>()
   for (const g of zoneGroups.value) {
@@ -363,7 +385,7 @@ const activeZoneEntries = computed((): ZoneDisplayEntry[] => {
     const group = deviceGroupMap.get(ze.zone_id)
     entries.push({
       zoneId: ze.zone_id,
-      zoneName: ze.name ?? ze.zone_id,
+      zoneName: toUserFriendlyZoneName(ze.zone_id, ze.name, group?.zoneName),
       devices: group?.devices ?? [],
       zoneEntity: ze,
       isArchived: false,
@@ -410,9 +432,10 @@ const activeZoneEntries = computed((): ZoneDisplayEntry[] => {
 const archivedZoneEntries = computed((): ZoneDisplayEntry[] => {
   return zoneStore.archivedZones.map(ze => {
     const devices = filteredEsps.value.filter(d => d.zone_id === ze.zone_id)
+    const deviceZoneName = devices.find(d => d.zone_name)?.zone_name
     return {
       zoneId: ze.zone_id,
-      zoneName: ze.name ?? ze.zone_id,
+      zoneName: toUserFriendlyZoneName(ze.zone_id, ze.name, deviceZoneName),
       devices,
       zoneEntity: ze,
       isArchived: true,
@@ -769,45 +792,41 @@ function handleZoneUpdated(payload: { deviceId: string; zoneId: string; zoneName
 }
 
 // =============================================================================
-// Zone Management (Rename / Delete) — zones are string fields, not DB entities
+// Zone Management (Rename) — zones are string fields, not DB entities
 // =============================================================================
 
 /** Rename zone: reassign all ESPs in the zone with the new zone_name */
 async function handleZoneRename(payload: { zoneId: string; newName: string }) {
+  const newName = payload.newName.trim()
+  if (!newName) return
+
+  const zoneEntity = zoneEntityMap.value.get(payload.zoneId)
   const devicesInZone = espStore.devices.filter(d => d.zone_id === payload.zoneId)
-  if (devicesInZone.length === 0) return
+  if (!zoneEntity && devicesInZone.length === 0) return
 
   try {
+    // Keep DB entity display name in sync with what users entered.
+    if (zoneEntity && zoneEntity.name !== newName) {
+      await zoneStore.updateZone(payload.zoneId, { name: newName })
+    }
+
     for (const device of devicesInZone) {
       const devId = espStore.getDeviceId(device)
+      if (device.zone_name === newName) continue
       await zonesApi.assignZone(devId, {
         zone_id: payload.zoneId,
-        zone_name: payload.newName,
+        zone_name: newName,
       })
     }
-    showSuccess(`Zone umbenannt zu "${payload.newName}"`)
-    await espStore.fetchAll()
+
+    if (devicesInZone.length > 0) {
+      await espStore.fetchAll()
+    }
+
+    showSuccess(`Zone umbenannt zu "${newName}"`)
   } catch (err) {
     showError(err instanceof Error ? err.message : 'Zone konnte nicht umbenannt werden')
     logger.error(`Failed to rename zone ${payload.zoneId}`, err)
-  }
-}
-
-/** Delete zone: remove all ESPs from the zone (devices are NOT deleted) */
-async function handleZoneDelete(zoneId: string) {
-  const devicesInZone = espStore.devices.filter(d => d.zone_id === zoneId)
-  if (devicesInZone.length === 0) return
-
-  try {
-    for (const device of devicesInZone) {
-      const devId = espStore.getDeviceId(device)
-      await zonesApi.removeZone(devId)
-    }
-    showSuccess('Zone gelöscht — Geräte sind jetzt unzugewiesen')
-    await espStore.fetchAll()
-  } catch (err) {
-    showError(err instanceof Error ? err.message : 'Zone konnte nicht gelöscht werden')
-    logger.error(`Failed to delete zone ${zoneId}`, err)
   }
 }
 
@@ -849,41 +868,12 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   showActuatorConfig.value = true
 }
 
-// Rules Activity
-const latestExecution = computed(() => logicStore.recentExecutions[0] ?? null)
-
-function formatTimeAgo(timestamp: number): string {
-  const seconds = Math.floor((Date.now() - timestamp * 1000) / 1000)
-  if (seconds < 60) return 'gerade eben'
-  if (seconds < 3600) return `vor ${Math.floor(seconds / 60)} Min.`
-  if (seconds < 86400) return `vor ${Math.floor(seconds / 3600)} Std.`
-  return `vor ${Math.floor(seconds / 86400)} Tagen`
-}
 </script>
 
 <template>
   <div :class="['hardware-view', currentLevel === 2 ? 'hardware-view--detail' : '']">
     <!-- View Tab Bar (Übersicht / Monitor / Editor) -->
     <ViewTabBar />
-
-    <!-- Rules Activity Ribbon -->
-    <div v-if="logicStore.ruleCount > 0 || logicStore.recentExecutions.length > 0" class="rules-ribbon">
-      <div class="rules-ribbon__status">
-        <Workflow class="rules-ribbon__icon" />
-        <span>{{ logicStore.enabledCount }} / {{ logicStore.ruleCount }} Regeln aktiv</span>
-        <span v-if="logicStore.activeExecutions.size > 0" class="rules-ribbon__pulse" />
-      </div>
-      <div class="rules-ribbon__divider" />
-      <div v-if="latestExecution" class="rules-ribbon__last-exec">
-        <span class="rules-ribbon__exec-dot" :class="latestExecution.success ? 'rules-ribbon__exec-dot--ok' : 'rules-ribbon__exec-dot--fail'" />
-        <span>{{ latestExecution.rule_name }}</span>
-        <span class="rules-ribbon__time">{{ formatTimeAgo(latestExecution.timestamp) }}</span>
-      </div>
-      <div v-else class="rules-ribbon__last-exec">
-        <span class="rules-ribbon__time">Noch keine Ausführungen</span>
-      </div>
-      <RouterLink to="/logic" class="rules-ribbon__link">Regeln verwalten →</RouterLink>
-    </div>
 
     <!-- Loading / Empty State (grouped to prevent white flash on device deletion) -->
     <LoadingState v-if="espStore.isLoading && espStore.devices.length === 0" text="Lade ESP-Geräte..." />
@@ -915,7 +905,10 @@ function formatTimeAgo(timestamp: number): string {
 
     <!-- Two-Level Hardware View -->
     <div v-else class="hardware-content" :class="{ 'hardware-content--has-side': dashStore.hardwarePanels.length > 0 }">
-      <div class="hardware-main-layout">
+      <div
+        class="hardware-main-layout"
+        :class="{ 'hardware-main-layout--detail': currentLevel === 2 }"
+      >
         <div ref="zoomContainerRef" class="zoom-container">
 
           <!-- LEVEL 1: Zone Accordion Overview -->
@@ -939,7 +932,6 @@ function formatTimeAgo(timestamp: number): string {
                 @device-dropped="onDeviceDropped"
                 @change-zone="handleChangeZone"
                 @rename="handleZoneRename"
-                @delete="handleZoneDelete"
                 @device-delete="handleDelete"
                 @settings="handleSettings"
                 @monitor-nav="onDeviceMonitorNav"
@@ -1244,7 +1236,22 @@ function formatTimeAgo(timestamp: number): string {
   transition: background-color var(--transition-slow);
 }
 
-.hardware-view--detail { background-color: var(--color-bg-level-3); }
+.hardware-view--detail {
+  background-color: var(--color-bg-level-3);
+  gap: var(--space-2);
+}
+
+/* Pull the detail header area closer under tabs. */
+.hardware-view--detail :deep(.device-detail-view) {
+  padding-top: var(--space-2);
+  width: 100%;
+  max-width: none;
+}
+
+/* Align component sidebar lower to avoid top misalignment. */
+.hardware-view--detail :deep(.component-sidebar) {
+  margin-top: var(--space-3);
+}
 
 /* ═══ Hardware Content with optional Side-Panel (Block 7d) ═══ */
 
@@ -1282,8 +1289,27 @@ function formatTimeAgo(timestamp: number): string {
 
 .hardware-main-layout {
   display: flex;
-  gap: 0;
+  gap: var(--space-3);
   min-height: 400px;
+}
+
+.hardware-main-layout--detail {
+  align-items: flex-start;
+}
+
+.hardware-main-layout--detail .zoom-container {
+  display: flex;
+  justify-content: stretch;
+}
+
+.hardware-main-layout--detail .zoom-level--active {
+  width: 100%;
+}
+
+@media (min-width: 1440px) {
+  .hardware-main-layout--detail {
+    gap: var(--space-4);
+  }
 }
 
 .zoom-container {
@@ -1320,38 +1346,6 @@ function formatTimeAgo(timestamp: number): string {
   border: 1px dashed var(--glass-border);
   border-radius: var(--radius-md);
 }
-
-/* Rules Ribbon */
-.rules-ribbon {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-1) var(--space-3);
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  font-size: var(--text-xs);
-}
-
-.rules-ribbon__status {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--color-text-secondary);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.rules-ribbon__icon { width: 14px; height: 14px; flex-shrink: 0; }
-.rules-ribbon__pulse { width: 7px; height: 7px; border-radius: var(--radius-full); background: var(--color-iridescent-1); animation: rules-pulse 1.5s ease-in-out infinite; }
-.rules-ribbon__divider { width: 1px; height: 16px; background: var(--glass-border); flex-shrink: 0; }
-.rules-ribbon__last-exec { display: flex; align-items: center; gap: var(--space-1); color: var(--color-text-muted); min-width: 0; overflow: hidden; }
-.rules-ribbon__exec-dot { width: 6px; height: 6px; border-radius: var(--radius-full); flex-shrink: 0; }
-.rules-ribbon__exec-dot--ok { background: var(--color-success); }
-.rules-ribbon__exec-dot--fail { background: var(--color-error); }
-.rules-ribbon__time { color: var(--color-text-muted); opacity: 0.7; white-space: nowrap; }
-.rules-ribbon__link { margin-left: auto; color: var(--color-accent-bright); font-weight: 500; font-size: var(--text-xs); text-decoration: none; white-space: nowrap; }
-.rules-ribbon__link:hover { color: var(--color-iridescent-2); }
 
 /* Cross-ESP Toggle */
 .cross-esp-toggle {

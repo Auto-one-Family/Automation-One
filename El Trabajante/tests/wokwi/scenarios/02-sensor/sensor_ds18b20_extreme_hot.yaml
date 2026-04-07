@@ -9,7 +9,7 @@ name: DS18B20 Extreme Hot Temperature Test
 version: 1
 steps:
   # Boot and connect
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # Registration gate
   - wait-serial: "REGISTRATION"

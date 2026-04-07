@@ -322,6 +322,19 @@ export function getDeviceTypeLabel(type: string): string {
 }
 
 // =============================================================================
+// SETTINGS LABELS
+// =============================================================================
+
+/**
+ * Settings-Texte als zentrale Keys (i18n-faehige Struktur ohne vue-i18n Runtime).
+ * Kann spaeter 1:1 auf echte i18n-Keys gemappt werden.
+ */
+export const SETTINGS_LABELS = {
+  logout: 'Abmelden',
+  logoutAllDevices: 'Auf allen Geraeten abmelden',
+} as const
+
+// =============================================================================
 // ACTION LABELS
 // =============================================================================
 

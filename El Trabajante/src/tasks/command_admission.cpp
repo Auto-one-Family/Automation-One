@@ -51,6 +51,23 @@ CommandAdmissionDecision shouldAcceptCommand(CommandSubtype subtype, const Comma
         return {true, "PENDING_ALLOWLIST_ACCEPTED", "PENDING_ALLOWLIST_ACCEPTED"};
     }
 
+    if (context.approval_pending) {
+        bool allowed_in_pending = context.recovery_intent || subtype == CommandSubtype::CONFIG;
+        if (!allowed_in_pending && subtype == CommandSubtype::SYSTEM) {
+            allowed_in_pending = isSystemCommandAllowedInPending(context.system_command);
+        }
+        if (!allowed_in_pending) {
+            return {false, "PENDING_APPROVAL_BLOCKED", "PENDING_APPROVAL"};
+        }
+        if (context.recovery_intent) {
+            return {true, "RECOVERY_ACCEPTED", "RECOVERY_ACCEPTED"};
+        }
+        if (subtype == CommandSubtype::CONFIG) {
+            return {true, "PENDING_APPROVAL_CONFIG_ACCEPTED", "PENDING_APPROVAL_CONFIG_ACCEPTED"};
+        }
+        return {true, "PENDING_APPROVAL_ALLOWLIST_ACCEPTED", "PENDING_APPROVAL_ALLOWLIST_ACCEPTED"};
+    }
+
     if (context.runtime_degraded) {
         bool allowed_in_degraded = context.recovery_intent || subtype == CommandSubtype::CONFIG;
         if (!allowed_in_degraded && subtype == CommandSubtype::SYSTEM) {

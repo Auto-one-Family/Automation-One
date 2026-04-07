@@ -12,7 +12,7 @@ steps:
   - wait-serial: "PWM Controller initialized successfully"
 
   # Wait for MQTT connection (system ready)
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # Note: To test double init, a specific test command via MQTT would be needed
   # For now, verify initial state is stable

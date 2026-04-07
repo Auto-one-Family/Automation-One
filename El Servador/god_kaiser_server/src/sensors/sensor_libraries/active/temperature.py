@@ -127,8 +127,9 @@ class DS18B20Processor(BaseSensorProcessor):
         """
         # Step 0: Check for RAW mode (Pi-Enhanced)
         # If raw_mode=True, convert 12-bit signed integer to Celsius first.
-        # Default True: ESP32 always sends raw int16 via OneWire library.
-        raw_mode = params.get("raw_mode", True) if params else True
+        # Default False: backward-compatible (ESP sends pre-converted Celsius).
+        # Set params["raw_mode"] = True for Pi-Enhanced raw int16 mode.
+        raw_mode = params.get("raw_mode", False) if params else False
         original_raw_value = raw_value  # Keep original for metadata
 
         if raw_mode:
@@ -528,7 +529,7 @@ class SHT31TemperatureProcessor(BaseSensorProcessor):
             # A real 16-bit RAW reading for typical room temperature (22°C)
             # would be ~27445, never a small integer like 22.
             if not (self.TEMP_MIN <= converted <= self.TEMP_MAX) and (
-                self.TEMP_MIN <= original_raw_value <= self.TEMP_MAX
+                0 < original_raw_value <= self.TEMP_MAX
             ):
                 # The raw_value is already in Celsius — use it as-is.
                 raw_value = original_raw_value

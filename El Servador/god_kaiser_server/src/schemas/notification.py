@@ -246,6 +246,12 @@ class AlertActiveListResponse(BaseResponse):
     pagination: PaginationMeta
 
 
+class AlertBulkResolveResponse(BaseResponse):
+    """Bulk resolve response for unresolved alerts."""
+
+    resolved_count: int = Field(0, ge=0, description="Number of resolved alerts")
+
+
 # =============================================================================
 # Notification Preferences Schemas
 # =============================================================================

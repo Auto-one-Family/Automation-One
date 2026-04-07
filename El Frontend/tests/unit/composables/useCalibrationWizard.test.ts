@@ -18,6 +18,7 @@ vi.mock('@/composables/useWebSocket', () => ({
 const calibrationApiMock = vi.hoisted(() => ({
   calibrate: vi.fn(),
   startSession: vi.fn(),
+  getSession: vi.fn(),
   addPoint: vi.fn(),
   finalizeSession: vi.fn(),
   applySession: vi.fn(),
@@ -48,6 +49,8 @@ import { useCalibrationWizard } from '@/composables/useCalibrationWizard'
 describe('useCalibrationWizard', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    sessionStorage.clear()
+    localStorage.clear()
     wsHandlers.clear()
     Object.values(calibrationApiMock).forEach((fn) => fn.mockReset())
     uiStoreMock.confirm.mockReset()
@@ -72,6 +75,7 @@ describe('useCalibrationWizard', () => {
         gpio: 4,
         raw_value: 1111.5,
         quality: 'good',
+        intent_id: 'intent-1',
       },
     })
 
@@ -112,6 +116,14 @@ describe('useCalibrationWizard', () => {
       calibration_result: { slope: 1, offset: 0 },
       failure_reason: null,
     })
+    calibrationApiMock.getSession.mockResolvedValue({
+      id: 'session-1',
+      status: 'applied',
+      method: 'linear_2point',
+      sensor_type: 'moisture',
+      calibration_result: { slope: 1, offset: 0 },
+      failure_reason: null,
+    })
 
     const wizard = useCalibrationWizard({
       skipSelect: true,
@@ -128,6 +140,7 @@ describe('useCalibrationWizard', () => {
     expect(calibrationApiMock.addPoint).toHaveBeenCalledTimes(2)
     expect(calibrationApiMock.finalizeSession).toHaveBeenCalledTimes(1)
     expect(calibrationApiMock.applySession).toHaveBeenCalledTimes(1)
+    expect(calibrationApiMock.getSession).toHaveBeenCalled()
     expect(wizard.phase.value).toBe('done')
   })
 

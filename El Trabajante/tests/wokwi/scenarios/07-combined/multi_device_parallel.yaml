@@ -7,7 +7,7 @@ name: Multi-Device Parallel Operation Test
 version: 1
 steps:
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # All sensors should read and publish
   - wait-serial: "Published"

@@ -7,6 +7,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import create_access_token, get_password_hash
+from src.db.models.esp import ESPDevice
+from src.db.models.sensor import SensorConfig
 from src.db.models.user import User
 from src.main import app
 
@@ -61,6 +63,23 @@ def viewer_headers(viewer_user: User) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+@pytest.fixture
+async def bound_sensor_for_apply(db_session: AsyncSession) -> None:
+    esp = ESPDevice(device_id="ESP_TEST_001", hardware_type="ESP32_WROOM", status="online")
+    db_session.add(esp)
+    await db_session.flush()
+
+    sensor = SensorConfig(
+        esp_id=esp.id,
+        gpio=10,
+        sensor_type="moisture",
+        sensor_name="moisture-calib-gpio10",
+        enabled=True,
+    )
+    db_session.add(sensor)
+    await db_session.commit()
+
+
 async def _start_session(
     client: AsyncClient,
     headers: dict[str, str],
@@ -83,7 +102,10 @@ async def _start_session(
 
 
 @pytest.mark.asyncio
-async def test_calibration_session_full_route_flow(operator_headers: dict[str, str]):
+async def test_calibration_session_full_route_flow(
+    operator_headers: dict[str, str],
+    bound_sensor_for_apply: None,
+):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         start_response = await client.post(
             "/api/v1/calibration/sessions",
@@ -190,6 +212,56 @@ async def test_calibration_session_overwrite_flow(operator_headers: dict[str, st
         assert len(points) == 1
         assert points[0]["id"] == point_id_before
         assert points[0]["raw"] == 905.0
+
+
+@pytest.mark.asyncio
+async def test_calibration_apply_requires_persisted_sensor_binding(
+    operator_headers: dict[str, str]
+):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        session_id = await _start_session(client, operator_headers, gpio=48, esp_id="ESP_NO_SENSOR_001")
+
+        dry_response = await client.post(
+            f"/api/v1/calibration/sessions/{session_id}/points",
+            headers=operator_headers,
+            json={
+                "raw_value": 910.0,
+                "reference_value": 0.0,
+                "point_role": "dry",
+            },
+        )
+        assert dry_response.status_code == 200
+
+        wet_response = await client.post(
+            f"/api/v1/calibration/sessions/{session_id}/points",
+            headers=operator_headers,
+            json={
+                "raw_value": 620.0,
+                "reference_value": 100.0,
+                "point_role": "wet",
+            },
+        )
+        assert wet_response.status_code == 200
+
+        finalize_response = await client.post(
+            f"/api/v1/calibration/sessions/{session_id}/finalize",
+            headers=operator_headers,
+        )
+        assert finalize_response.status_code == 200
+
+        apply_response = await client.post(
+            f"/api/v1/calibration/sessions/{session_id}/apply",
+            headers=operator_headers,
+        )
+        assert apply_response.status_code == 409
+        assert apply_response.json()["detail"]["code"] == "APPLY_PERSISTENCE_REQUIRED"
+
+        session_response = await client.get(
+            f"/api/v1/calibration/sessions/{session_id}",
+            headers=operator_headers,
+        )
+        assert session_response.status_code == 200
+        assert session_response.json()["status"] == "failed"
 
 
 @pytest.mark.asyncio

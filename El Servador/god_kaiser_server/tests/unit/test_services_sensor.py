@@ -601,3 +601,73 @@ class TestSensorServiceEdgeCases:
 
         # ASSERT
         assert result is None, "get_latest_reading should return None for unknown ESP"
+
+
+class TestSensorServiceTriggerMeasurementContract:
+    """Contract persistence tests for manual measurement trigger flow."""
+
+    @pytest.mark.sensor
+    @pytest.mark.asyncio
+    async def test_trigger_measurement_persists_sent_intent(self):
+        mock_esp = MagicMock(id=1, status="online")
+        mock_esp_repo = MagicMock()
+        mock_esp_repo.get_by_device_id = AsyncMock(return_value=mock_esp)
+
+        mock_sensor = MagicMock(enabled=True, sensor_type="moisture")
+        mock_sensor_repo = MagicMock()
+        mock_sensor_repo.get_all_by_esp_and_gpio = AsyncMock(return_value=[mock_sensor])
+        mock_sensor_repo.session = MagicMock()
+
+        mock_publisher = MagicMock()
+        mock_publisher.publish_sensor_command = MagicMock(return_value=(True, "rid-1"))
+
+        service = SensorService(
+            sensor_repo=mock_sensor_repo,
+            esp_repo=mock_esp_repo,
+            publisher=mock_publisher,
+        )
+
+        with patch("src.services.sensor_service.CommandContractRepository") as repo_cls:
+            repo_instance = repo_cls.return_value
+            repo_instance.record_intent_publish_sent = AsyncMock()
+
+            result = await service.trigger_measurement(esp_id="ESP_TEST001", gpio=4)
+
+        assert result["success"] is True
+        assert result["request_id"] == "rid-1"
+        repo_instance.record_intent_publish_sent.assert_awaited_once_with(
+            intent_id="rid-1",
+            correlation_id="rid-1",
+            esp_id="ESP_TEST001",
+            flow="command",
+        )
+
+    @pytest.mark.sensor
+    @pytest.mark.asyncio
+    async def test_trigger_measurement_ignores_contract_persist_failure(self):
+        mock_esp = MagicMock(id=1, status="online")
+        mock_esp_repo = MagicMock()
+        mock_esp_repo.get_by_device_id = AsyncMock(return_value=mock_esp)
+
+        mock_sensor = MagicMock(enabled=True, sensor_type="moisture")
+        mock_sensor_repo = MagicMock()
+        mock_sensor_repo.get_all_by_esp_and_gpio = AsyncMock(return_value=[mock_sensor])
+        mock_sensor_repo.session = MagicMock()
+
+        mock_publisher = MagicMock()
+        mock_publisher.publish_sensor_command = MagicMock(return_value=(True, "rid-2"))
+
+        service = SensorService(
+            sensor_repo=mock_sensor_repo,
+            esp_repo=mock_esp_repo,
+            publisher=mock_publisher,
+        )
+
+        with patch("src.services.sensor_service.CommandContractRepository") as repo_cls:
+            repo_instance = repo_cls.return_value
+            repo_instance.record_intent_publish_sent = AsyncMock(side_effect=RuntimeError("db down"))
+
+            result = await service.trigger_measurement(esp_id="ESP_TEST002", gpio=5)
+
+        assert result["success"] is True
+        assert result["request_id"] == "rid-2"

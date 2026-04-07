@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 
 from src.db.repositories.sensor_repo import SensorRepository
 
@@ -489,7 +490,8 @@ class TestSensorRepositoryCalibration:
         )
 
         assert updated is not None
-        assert updated.calibration_data == cal_data
+        assert updated.calibration_data is not None
+        assert updated.calibration_data.get("derived") == cal_data
 
     async def test_update_calibration_with_sensor_type_multi_value(
         self, sensor_repo: SensorRepository, sample_esp_device
@@ -521,7 +523,8 @@ class TestSensorRepositoryCalibration:
 
         assert updated is not None
         assert updated.sensor_type == "sht31_temp"
-        assert updated.calibration_data == cal_temp
+        assert updated.calibration_data is not None
+        assert updated.calibration_data.get("derived") == cal_temp
 
         # sht31_humidity must be unchanged
         humidity_config = await sensor_repo.get_by_esp_gpio_and_type(
@@ -529,7 +532,8 @@ class TestSensorRepositoryCalibration:
         )
         assert humidity_config is not None
         assert (
-            humidity_config.calibration_data is None or humidity_config.calibration_data != cal_temp
+            humidity_config.calibration_data is None
+            or humidity_config.calibration_data.get("derived") != cal_temp
         )
 
     async def test_update_calibration_multi_value_without_sensor_type_raises(
@@ -562,3 +566,51 @@ class TestSensorRepositoryCalibration:
 
         assert "Multiple sensor configs" in str(exc_info.value)
         assert "sensor_type" in str(exc_info.value)
+
+    async def test_get_calibration_key_usage_handles_null_jsonnull_and_object(
+        self, sensor_repo: SensorRepository, sample_esp_device
+    ):
+        """Defensive query must ignore SQL NULL/JSON null and only parse JSON objects."""
+        await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=31,
+            sensor_type="moisture",
+            sensor_name="Null SQL",
+            interface_type="ANALOG",
+            enabled=True,
+            calibration_data=None,
+        )
+        await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=32,
+            sensor_type="moisture",
+            sensor_name="Null JSON",
+            interface_type="ANALOG",
+            enabled=True,
+            calibration_data={"placeholder": 1},
+        )
+        await sensor_repo.create(
+            esp_id=sample_esp_device.id,
+            gpio=33,
+            sensor_type="moisture",
+            sensor_name="Object",
+            interface_type="ANALOG",
+            enabled=True,
+            calibration_data={"offset": 1.23, "slope": 0.99},
+        )
+
+        # Force JSON null in SQLite JSON column (distinct from SQL NULL).
+        await sensor_repo.session.execute(
+            text(
+                "UPDATE sensor_configs "
+                "SET calibration_data = json('null') "
+                "WHERE gpio = :gpio"
+            ),
+            {"gpio": 32},
+        )
+        await sensor_repo.session.commit()
+
+        usage = await sensor_repo.get_calibration_key_usage()
+        assert usage.get("offset") == 1
+        assert usage.get("slope") == 1
+        assert "placeholder" not in usage

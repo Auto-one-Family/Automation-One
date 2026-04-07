@@ -45,7 +45,7 @@ steps:
   - wait-serial: "Phase 1: Core Infrastructure READY"
 
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # TEST 1: External MQTT injection - actuator on GPIO 34 (CI helper script)
   # This MUST fail because GPIO 34 is not in SAFE_GPIO_PINS

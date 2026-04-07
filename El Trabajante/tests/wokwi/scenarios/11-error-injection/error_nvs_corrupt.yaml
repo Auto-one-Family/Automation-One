@@ -13,7 +13,9 @@ name: Error Injection - NVS Factory Reset
 version: 1
 steps:
   - wait-serial: "Phase 5: Actuator System READY"
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "REGISTRATION"
+  - wait-serial: "heartbeat"
   # External factory_reset command injected via mosquitto_pub
   # Firmware requires confirm:true in payload
   - wait-serial: "FACTORY RESET via MQTT"

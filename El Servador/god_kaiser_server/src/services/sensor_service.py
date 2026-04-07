@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional
 from ..core.logging_config import get_logger
 from ..db.models.sensor import SensorConfig, SensorData
 from ..db.repositories import ESPRepository, SensorRepository
+from ..db.repositories.command_contract_repo import CommandContractRepository
 from ..mqtt.publisher import Publisher
 from ..sensors.library_loader import LibraryLoader as SensorLibraryLoader
 
@@ -589,6 +590,7 @@ class SensorService:
             esp_id=esp_id,
             gpio=gpio,
             command="measure",
+            correlation_id=None,
         )
 
         if not success:
@@ -597,6 +599,10 @@ class SensorService:
         logger.info(
             f"Measurement triggered for {esp_id}/GPIO {gpio} "
             f"(sensor_type: {sensor.sensor_type}, request_id: {request_id})"
+        )
+        await self._persist_measurement_intent_sent(
+            intent_id=request_id,
+            esp_id=esp_id,
         )
 
         return {
@@ -607,3 +613,30 @@ class SensorService:
             "sensor_type": sensor.sensor_type,
             "message": "Measurement command sent",
         }
+
+    async def _persist_measurement_intent_sent(self, *, intent_id: str, esp_id: str) -> None:
+        """
+        Persist outgoing measurement intent as orchestration_state='sent'.
+
+        This keeps manual sensor measurements in the same command contract spine
+        as actuator commands: sent -> accepted/ack_pending -> terminal outcome.
+        """
+        session = getattr(self.sensor_repo, "session", None)
+        if session is None:
+            return
+        try:
+            contract_repo = CommandContractRepository(session)
+            await contract_repo.record_intent_publish_sent(
+                intent_id=intent_id,
+                correlation_id=intent_id,
+                esp_id=esp_id,
+                flow="command",
+            )
+        except Exception:
+            logger.warning(
+                "Measurement intent contract persistence failed (continuing): "
+                "intent_id=%s esp_id=%s",
+                intent_id,
+                esp_id,
+                exc_info=True,
+            )

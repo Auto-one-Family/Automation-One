@@ -13,9 +13,10 @@ name: Error Injection - MQTT Activity After Config
 version: 1
 steps:
   - wait-serial: "Phase 5: Actuator System READY"
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "REGISTRATION"
+  - wait-serial: "heartbeat"
   # Deterministisches Injection-Fenster fuer externe MQTT-Config Injection
-  - delay: 5000ms
   # External MQTT config injection happens here
   # Sensor on GPIO 4 (DS18B20 connected in diagram.json) → config succeeds
   - wait-serial: "ConfigResponse published"

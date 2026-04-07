@@ -9,6 +9,7 @@ import {
   Shield, Eye, Settings, UserCheck, UserX
 } from 'lucide-vue-next'
 import BaseModal from '@/shared/design/primitives/BaseModal.vue'
+import BaseButton from '@/shared/design/primitives/BaseButton.vue'
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -237,14 +238,22 @@ onMounted(() => {
   <div class="h-full overflow-auto space-y-6">
     <!-- Header Actions -->
     <div class="flex flex-wrap items-center gap-2 justify-end">
-        <button class="btn-secondary" @click="openChangePasswordModal">
+        <BaseButton
+          variant="secondary"
+          data-testid="user-management-change-password-button"
+          @click="openChangePasswordModal"
+        >
           <Key class="w-4 h-4 mr-2" />
           Change My Password
-        </button>
-        <button class="btn-primary" @click="openCreateModal">
+        </BaseButton>
+        <BaseButton
+          variant="primary"
+          data-testid="user-management-add-user-button"
+          @click="openCreateModal"
+        >
           <Plus class="w-4 h-4 mr-2" />
           Add User
-        </button>
+        </BaseButton>
     </div>
 
     <!-- Alerts -->
@@ -412,10 +421,20 @@ onMounted(() => {
       </div>
       <template #footer>
         <div class="flex justify-end gap-2">
-          <button class="btn-secondary" @click="showCreateModal = false">Cancel</button>
-          <button class="btn-primary" :disabled="isLoading" @click="createUser">
+          <BaseButton
+            variant="secondary"
+            :disabled="isLoading"
+            @click="showCreateModal = false"
+          >
+            Cancel
+          </BaseButton>
+          <BaseButton
+            variant="primary"
+            :disabled="isLoading"
+            @click="createUser"
+          >
             Create User
-          </button>
+          </BaseButton>
         </div>
       </template>
     </BaseModal>
@@ -512,14 +531,20 @@ onMounted(() => {
       </div>
       <template #footer>
         <div class="flex justify-end gap-2">
-          <button class="btn-secondary" @click="showChangePasswordModal = false">Cancel</button>
-          <button
-            class="btn-primary"
+          <BaseButton
+            variant="secondary"
+            :disabled="isLoading"
+            @click="showChangePasswordModal = false"
+          >
+            Cancel
+          </BaseButton>
+          <BaseButton
+            variant="primary"
             :disabled="isLoading || !currentPassword || !newPassword || newPassword !== confirmPassword"
             @click="changeOwnPassword"
           >
             Change Password
-          </button>
+          </BaseButton>
         </div>
       </template>
     </BaseModal>

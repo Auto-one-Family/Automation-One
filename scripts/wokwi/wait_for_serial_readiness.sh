@@ -10,10 +10,10 @@ set -euo pipefail
 
 LOG_FILE=""
 AUTO_LATEST=false
-PATTERN="MQTT connected"
+PATTERN="MQTT connected successfully"
 TIMEOUT_SECONDS=60
 POLL_SECONDS=1
-FALLBACK_SLEEP_SECONDS=35
+FALLBACK_SLEEP_SECONDS=0
 REPORT_FILE=""
 
 while [[ $# -gt 0 ]]; do
@@ -88,19 +88,7 @@ for i in $(seq 1 "${TIMEOUT_SECONDS}"); do
 done
 
 if [[ "${FALLBACK_SLEEP_SECONDS}" -gt 0 ]]; then
-  echo "[WARN] Readiness not matched after ${TIMEOUT_SECONDS}s. Using temporary fallback sleep ${FALLBACK_SLEEP_SECONDS}s."
-  # TODO(g04): remove fallback path once all scenarios expose deterministic readiness markers.
-  sleep "${FALLBACK_SLEEP_SECONDS}"
-  TS="$(date -Iseconds)"
-  echo "${TS}"
-  if [[ -n "${REPORT_FILE}" ]]; then
-    {
-      echo "- Readiness matched: fallback-used"
-      echo "- Fallback sleep seconds: ${FALLBACK_SLEEP_SECONDS}"
-      echo "- Fallback end: ${TS}"
-    } >> "${REPORT_FILE}"
-  fi
-  exit 0
+  echo "[WARN] --fallback-sleep-seconds is deprecated and ignored; readiness uses hard timeout."
 fi
 
 echo "[ERROR] Readiness timeout after ${TIMEOUT_SECONDS}s (${LOG_FILE})" >&2

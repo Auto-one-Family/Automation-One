@@ -15,7 +15,7 @@ import { LayoutDashboard, Activity, PenTool } from 'lucide-vue-next'
 const route = useRoute()
 
 const tabs = [
-  { path: '/hardware', label: 'Übersicht', icon: LayoutDashboard },
+  { path: '/hardware', label: 'Geräte', icon: LayoutDashboard },
   { path: '/monitor', label: 'Monitor', icon: Activity },
   { path: '/editor', label: 'Editor', icon: PenTool },
 ] as const
@@ -54,13 +54,16 @@ const activeTab = computed(() => {
   border: 1px solid var(--glass-border-l1);
   border-radius: var(--radius-md);
   box-shadow: var(--glass-shadow-l1);
-  width: fit-content;
-  margin-bottom: var(--space-4);
+  min-height: 41px;
+  width: 100%;
+  margin-bottom: var(--space-2);
 }
 
 .view-tab-bar__tab {
   display: flex;
+  flex: 1 1 0;
   align-items: center;
+  justify-content: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-sm);
@@ -113,13 +116,7 @@ const activeTab = computed(() => {
 }
 
 @media (max-width: 480px) {
-  .view-tab-bar {
-    width: 100%;
-  }
-
   .view-tab-bar__tab {
-    flex: 1;
-    justify-content: center;
     padding: var(--space-2) var(--space-2);
   }
 

@@ -8,7 +8,7 @@ name: DS18B20 Temperature Sweep
 version: 1
 steps:
   # Boot and connect
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # Registration gate: opens on server confirmation or 10s timeout fallback
   - wait-serial: "REGISTRATION"

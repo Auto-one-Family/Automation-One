@@ -16,7 +16,7 @@
  */
 
 import { ref, computed } from 'vue'
-import { X, ChartLine, Plus, Settings } from 'lucide-vue-next'
+import { X, ChartLine, Plus } from 'lucide-vue-next'
 import MultiSensorChart from '@/components/charts/MultiSensorChart.vue'
 import type { ChartSensor } from '@/types'
 import { createLogger } from '@/utils/logger'
@@ -53,11 +53,6 @@ const isDragOver = ref(false)
 const selectedSensors = ref<ChartSensor[]>([])
 const timeRange = ref<'1h' | '6h' | '24h' | '7d' | '30d'>('24h')
 
-// Y-Axis configuration (undefined = auto)
-const yAxisMin = ref<number | undefined>(undefined)
-const yAxisMax = ref<number | undefined>(undefined)
-const showYAxisSettings = ref(false)
-
 // Chart colors palette
 const chartColors = [
   tokens.mock,
@@ -79,8 +74,6 @@ const timeRangeOptions = [
 // Computed
 const hasReachedMax = computed(() => selectedSensors.value.length >= props.maxSensors)
 const isEmpty = computed(() => selectedSensors.value.length === 0)
-
-
 // Safely get className as string (handles SVG elements where className is SVGAnimatedString)
 function getClassName(element: Element | null): string {
   if (!element) return ''
@@ -292,49 +285,6 @@ function clearAll() {
           </button>
         </div>
 
-        <!-- Y-Axis Settings Toggle -->
-        <button
-          :class="[
-            'analysis-drop-zone__settings-btn',
-            { 'analysis-drop-zone__settings-btn--active': showYAxisSettings },
-          ]"
-          @click="showYAxisSettings = !showYAxisSettings"
-          title="Y-Achse einstellen"
-        >
-          <Settings class="w-4 h-4" />
-        </button>
-      </div>
-    </div>
-
-    <!-- Y-Axis Settings Panel -->
-    <div v-if="showYAxisSettings && !isEmpty" class="analysis-drop-zone__y-axis-settings">
-      <div class="analysis-drop-zone__y-axis-row">
-        <label class="analysis-drop-zone__y-axis-label">Y-Achse:</label>
-        <div class="analysis-drop-zone__y-axis-inputs">
-          <input
-            type="number"
-            :value="yAxisMin"
-            @input="yAxisMin = ($event.target as HTMLInputElement).value ? Number(($event.target as HTMLInputElement).value) : undefined"
-            placeholder="Min (auto)"
-            class="analysis-drop-zone__y-axis-input"
-          />
-          <span class="analysis-drop-zone__y-axis-separator">–</span>
-          <input
-            type="number"
-            :value="yAxisMax"
-            @input="yAxisMax = ($event.target as HTMLInputElement).value ? Number(($event.target as HTMLInputElement).value) : undefined"
-            placeholder="Max (auto)"
-            class="analysis-drop-zone__y-axis-input"
-          />
-        </div>
-        <button
-          v-if="yAxisMin !== undefined || yAxisMax !== undefined"
-          class="analysis-drop-zone__y-axis-reset"
-          @click="yAxisMin = undefined; yAxisMax = undefined"
-          title="Auto-Skalierung"
-        >
-          Auto
-        </button>
       </div>
     </div>
 
@@ -389,8 +339,6 @@ function clearAll() {
       <MultiSensorChart
         :sensors="selectedSensors"
         :time-range="timeRange"
-        :y-min="yAxisMin"
-        :y-max="yAxisMax"
         :height="compact ? 160 : 300"
       />
 
@@ -455,98 +403,6 @@ function clearAll() {
   color: var(--color-text-muted);
 }
 
-.analysis-drop-zone__settings-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.375rem;
-  border-radius: 0.375rem;
-  background: transparent;
-  border: 1px solid var(--glass-border);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.analysis-drop-zone__settings-btn:hover {
-  border-color: var(--color-iridescent-1);
-  color: var(--color-text-primary);
-}
-
-.analysis-drop-zone__settings-btn--active {
-  background: var(--color-iridescent-1);
-  border-color: var(--color-iridescent-1);
-  color: white;
-}
-
-/* Y-Axis Settings Panel */
-.analysis-drop-zone__y-axis-settings {
-  background: var(--color-bg-tertiary);
-  border-radius: 0.375rem;
-  padding: 0.5rem 0.75rem;
-}
-
-.analysis-drop-zone__y-axis-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.analysis-drop-zone__y-axis-label {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
-.analysis-drop-zone__y-axis-inputs {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.analysis-drop-zone__y-axis-input {
-  width: 70px;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-  border-radius: 0.25rem;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--glass-border);
-  color: var(--color-text-primary);
-  outline: none;
-  transition: border-color 0.15s;
-}
-
-.analysis-drop-zone__y-axis-input:focus {
-  border-color: var(--color-iridescent-1);
-}
-
-.analysis-drop-zone__y-axis-input::placeholder {
-  color: var(--color-text-muted);
-  font-size: 0.625rem;
-}
-
-.analysis-drop-zone__y-axis-separator {
-  color: var(--color-text-muted);
-  font-size: 0.75rem;
-}
-
-.analysis-drop-zone__y-axis-reset {
-  padding: 0.25rem 0.5rem;
-  font-size: 0.625rem;
-  border-radius: 0.25rem;
-  background: transparent;
-  border: 1px solid var(--glass-border);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.analysis-drop-zone__y-axis-reset:hover {
-  border-color: var(--color-iridescent-1);
-  color: var(--color-iridescent-1);
-}
-
 .analysis-drop-zone__time-btn {
   padding: 0.25rem 0.5rem;
   border-radius: 0.25rem;
@@ -607,6 +463,8 @@ function clearAll() {
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
+  position: relative;
+  z-index: 1;
 }
 
 .analysis-drop-zone__legend-item {
@@ -676,11 +534,16 @@ function clearAll() {
 .analysis-drop-zone__actions {
   display: flex;
   justify-content: flex-end;
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--glass-border);
 }
 
 .analysis-drop-zone__clear-btn {
-  padding: 0.375rem 0.75rem;
+  min-height: 2rem;
+  padding: 0.375rem 0.875rem;
   font-size: 0.75rem;
+  font-weight: 500;
   border-radius: 0.375rem;
   background: transparent;
   border: 1px solid var(--glass-border);
@@ -721,6 +584,12 @@ function clearAll() {
 
 .analysis-drop-zone--compact .analysis-drop-zone__controls {
   gap: 0.375rem;
+  flex-wrap: wrap;
+  width: 100%;
+  justify-content: space-between;
+  padding-top: 0.25rem;
+  padding-bottom: 0;
+  margin-bottom: 0;
 }
 
 .analysis-drop-zone--compact .analysis-drop-zone__time-range {
@@ -743,7 +612,8 @@ function clearAll() {
 .analysis-drop-zone--compact .analysis-drop-zone__legend {
   gap: 0.375rem;
   flex-wrap: wrap;
-  padding: 0.25rem 0;
+  padding: 0;
+  margin-top: 0.125rem;
 }
 
 .analysis-drop-zone--compact .analysis-drop-zone__legend-item {
@@ -773,71 +643,21 @@ function clearAll() {
   margin-left: 0.125rem;
 }
 
-/* Settings button */
-.analysis-drop-zone--compact .analysis-drop-zone__settings-btn {
-  padding: 0.25rem;
-  border-radius: 0.25rem;
-}
-
-.analysis-drop-zone--compact .analysis-drop-zone__settings-btn .w-4 {
-  width: 0.8125rem;
-  height: 0.8125rem;
-}
-
-/* Y-Axis Settings - better layout for narrow width */
-.analysis-drop-zone--compact .analysis-drop-zone__y-axis-settings {
-  padding: 0.5rem 0.625rem;
-  margin-top: 0.125rem;
-  border-radius: 0.375rem;
-}
-
-.analysis-drop-zone--compact .analysis-drop-zone__y-axis-row {
-  gap: 0.375rem;
-}
-
-.analysis-drop-zone--compact .analysis-drop-zone__y-axis-label {
-  font-size: 0.6875rem;
-  min-width: 3rem;
-}
-
-.analysis-drop-zone--compact .analysis-drop-zone__y-axis-inputs {
-  gap: 0.25rem;
-  flex: 1;
-}
-
-.analysis-drop-zone--compact .analysis-drop-zone__y-axis-input {
-  width: 3.5rem;
-  padding: 0.25rem 0.375rem;
-  font-size: 0.6875rem;
-  border-radius: 0.25rem;
-}
-
-.analysis-drop-zone--compact .analysis-drop-zone__y-axis-input::placeholder {
-  font-size: 0.5625rem;
-}
-
-.analysis-drop-zone--compact .analysis-drop-zone__y-axis-separator {
-  font-size: 0.6875rem;
-  padding: 0 0.125rem;
-}
-
-.analysis-drop-zone--compact .analysis-drop-zone__y-axis-reset {
-  font-size: 0.5625rem;
-  padding: 0.1875rem 0.4375rem;
-  border-radius: 0.25rem;
-  white-space: nowrap;
-}
-
 /* Actions - compact clear button */
 .analysis-drop-zone--compact .analysis-drop-zone__actions {
   margin-top: 0.25rem;
   padding-top: 0.375rem;
-  border-top: 1px solid var(--glass-border);
+  border-top: none;
+  justify-content: stretch;
 }
 
 .analysis-drop-zone--compact .analysis-drop-zone__clear-btn {
-  padding: 0.3125rem 0.625rem;
+  width: 100%;
+  min-height: 2.125rem;
+  padding: 0.375rem 0.75rem;
   font-size: 0.6875rem;
+  border-radius: 0.5rem;
+  text-align: center;
 }
 
 /* Add-more indicator during drag */

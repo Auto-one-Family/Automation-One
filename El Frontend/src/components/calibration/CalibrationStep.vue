@@ -6,7 +6,7 @@
  * Shows instructions, a live raw-value display, and a reference input.
  */
 
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 
 interface Props {
   stepNumber: number
@@ -24,6 +24,7 @@ interface Props {
   measurementQuality?: string
   /** Loading state while measurement request is in-flight */
   isMeasuring?: boolean
+  isFreshMeasurement?: boolean
 }
 
 const props = defineProps<Props>()
@@ -35,6 +36,14 @@ const emit = defineEmits<{
 
 const rawValue = ref<number | null>(props.lastRawValue ?? null)
 const referenceValue = ref<number>(props.suggestedReference ?? 0)
+let measurementTimeout: ReturnType<typeof setTimeout> | null = null
+
+function clearMeasurementTimeout() {
+  if (measurementTimeout) {
+    clearTimeout(measurementTimeout)
+    measurementTimeout = null
+  }
+}
 
 watch(
   () => props.suggestedReference,
@@ -45,7 +54,11 @@ watch(
 )
 const readError = ref<string | null>(null)
 
-const canCapture = computed(() => rawValue.value !== null && referenceValue.value !== undefined)
+const canCapture = computed(() =>
+  rawValue.value !== null &&
+  referenceValue.value !== undefined &&
+  props.isFreshMeasurement === true,
+)
 
 watch(
   () => props.lastRawValue,
@@ -59,6 +72,13 @@ watch(
 
 function requestMeasurement() {
   readError.value = null
+  clearMeasurementTimeout()
+  // Messwerte koennen nach ACK zeitverzoegert eintreffen (MQTT + Persistenz + WS).
+  measurementTimeout = setTimeout(() => {
+    if (rawValue.value === null && !props.isMeasuring) {
+      readError.value = 'Kein aktueller Messwert verfuegbar'
+    }
+  }, 3000)
   emit('request-measurement')
 }
 
@@ -66,27 +86,36 @@ watch(
   () => props.measurementQuality,
   (quality) => {
     if (quality === 'error') {
+      clearMeasurementTimeout()
       readError.value = 'Messung fehlgeschlagen'
     }
   },
 )
 
-watch(
-  () => props.isMeasuring,
-  (isMeasuring) => {
-    if (!isMeasuring && rawValue.value === null && !readError.value) {
-      readError.value = 'Kein aktueller Messwert verfuegbar'
-    }
-  },
-)
-
 function capture() {
+  if (!props.isFreshMeasurement) {
+    readError.value = 'Bitte zuerst eine frische Messung ausloesen'
+    return
+  }
   if (rawValue.value === null) {
     readError.value = 'Bitte zuerst einen Messwert aufnehmen'
     return
   }
   emit('captured', { raw: rawValue.value, reference: referenceValue.value })
 }
+
+watch(
+  () => props.lastRawValue,
+  (val) => {
+    if (val !== null && val !== undefined && Number.isFinite(val)) {
+      clearMeasurementTimeout()
+    }
+  },
+)
+
+onUnmounted(() => {
+  clearMeasurementTimeout()
+})
 </script>
 
 <template>

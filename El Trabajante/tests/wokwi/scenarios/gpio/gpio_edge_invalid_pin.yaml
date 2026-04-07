@@ -37,7 +37,7 @@ steps:
   - wait-serial: "Phase 1: Core Infrastructure READY"
 
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # External MQTT injection: Test 1 - sensor on GPIO 255 (CI helper script)
 

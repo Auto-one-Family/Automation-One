@@ -135,40 +135,16 @@ class ActuatorService:
         """
         Validate safety in a dedicated fresh DB session.
 
-        This avoids using stale startup sessions captured by long-lived service instances.
+        This avoids using stale startup sessions captured by long-lived service instances
+        and prevents cross-task session sharing in the actuator hot path.
         """
-        # Keep explicit mocks/test doubles and healthy request-scoped services working.
-        # Fallback to fresh DB context only when injected service is stale or unusable.
-        try:
-            safety_repo = getattr(self.safety_service, "actuator_repo", None)
-            if not isinstance(safety_repo, ActuatorRepository):
-                return await self.safety_service.validate_actuator_command(
-                    esp_id=esp_id,
-                    gpio=gpio,
-                    command=command,
-                    value=value,
-                )
-            safety_session = getattr(safety_repo, "session", None)
-            if safety_session is None:
-                return await self.safety_service.validate_actuator_command(
-                    esp_id=esp_id,
-                    gpio=gpio,
-                    command=command,
-                    value=value,
-                )
-            sync_session = getattr(safety_session, "sync_session", None)
-            is_closed = bool(sync_session is not None and getattr(sync_session, "closed", False))
-            if getattr(safety_session, "is_active", False) and not is_closed:
-                return await self.safety_service.validate_actuator_command(
-                    esp_id=esp_id,
-                    gpio=gpio,
-                    command=command,
-                    value=value,
-                )
-        except Exception:
-            logger.debug(
-                "Injected safety service unavailable, switching to fresh context",
-                exc_info=True,
+        # Keep explicit test doubles (MagicMock/AsyncMock) working in unit tests.
+        if not isinstance(self.safety_service, SafetyService):
+            return await self.safety_service.validate_actuator_command(
+                esp_id=esp_id,
+                gpio=gpio,
+                command=command,
+                value=value,
             )
 
         async with self._command_transaction(
@@ -182,6 +158,112 @@ class ActuatorService:
                 command=command,
                 value=value,
             )
+
+    @staticmethod
+    def _format_fail_reason(*, issued_by: str, reason: str) -> str:
+        base_reason = str(reason or "unknown_failure").strip()
+        issuer = str(issued_by or "unknown")
+        return f"{base_reason} (issued_by={issuer})"
+
+    async def _persist_terminal_failure(
+        self,
+        *,
+        esp_id: str,
+        gpio: int,
+        command: str,
+        value: float,
+        issued_by: str,
+        correlation_id: str,
+        failure_code: str,
+        failure_reason: str,
+        context: ActuatorCommandContext | None = None,
+        transport_fail: bool = False,
+        persist_command_audit: bool = True,
+    ) -> None:
+        """
+        Persist deterministic terminal failure state for command branches.
+
+        - transport_fail=False: write command_outcomes terminal row under intent_id=correlation_id.
+        - transport_fail=True: write command_transport_fail terminal authority row.
+        """
+        async with self._command_transaction(
+            correlation_id=correlation_id,
+            phase="persist_terminal_failure",
+        ) as (session, actuator_repo, esp_repo):
+            contract_repo = CommandContractRepository(session)
+            enriched_reason = self._format_fail_reason(
+                issued_by=issued_by,
+                reason=failure_reason,
+            )
+
+            if transport_fail:
+                await contract_repo.upsert_terminal_event_authority(
+                    event_class="command_transport_fail",
+                    dedup_key=correlation_id,
+                    esp_id=esp_id,
+                    outcome="failed",
+                    correlation_id=correlation_id,
+                    code=failure_code,
+                    reason=enriched_reason,
+                    retryable=False,
+                    is_final=True,
+                )
+            else:
+                await contract_repo.upsert_outcome(
+                    payload={
+                        "intent_id": correlation_id,
+                        "correlation_id": correlation_id,
+                        "flow": "command",
+                        "outcome": "failed",
+                        "contract_version": 2,
+                        "semantic_mode": "target",
+                        "legacy_status": "failed",
+                        "target_status": "failed",
+                        "is_final": True,
+                        "code": failure_code,
+                        "reason": enriched_reason,
+                        "retryable": False,
+                    },
+                    esp_id=esp_id,
+                )
+
+            if persist_command_audit:
+                resolved_context = context
+                if resolved_context is None:
+                    esp_device = await esp_repo.get_by_device_id(esp_id)
+                    if esp_device:
+                        actuator_config = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
+                        resolved_context = ActuatorCommandContext(
+                            esp_uuid=esp_device.id,
+                            actuator_type=(
+                                actuator_config.actuator_type if actuator_config else "unknown"
+                            ),
+                            is_noop=False,
+                        )
+
+                if resolved_context is not None:
+                    await actuator_repo.log_command(
+                        esp_id=resolved_context.esp_uuid,
+                        gpio=gpio,
+                        actuator_type=resolved_context.actuator_type,
+                        command_type=command,
+                        value=value,
+                        success=False,
+                        issued_by=issued_by,
+                        error_message=failure_reason,
+                    )
+
+                audit_repo = AuditLogRepository(session)
+                await audit_repo.log_actuator_command(
+                    esp_id=esp_id,
+                    gpio=gpio,
+                    command=command,
+                    value=value,
+                    issued_by=issued_by,
+                    success=False,
+                    error_message=failure_reason,
+                    correlation_id=correlation_id,
+                )
 
     async def _load_command_context(
         self,
@@ -413,6 +495,8 @@ class ActuatorService:
             and safety_warnings from SafetyService when valid=True.
         """
         correlation_id = str(uuid.uuid4())
+        context: ActuatorCommandContext | None = None
+        command_sent = False
         try:
             # Step 1: Safety validation (CRITICAL - MUST be called before every command!)
             safety_result = await self._validate_safety_with_fresh_context(
@@ -440,6 +524,24 @@ class ActuatorService:
                     error_message=safety_result.error,
                     correlation_id=correlation_id,
                 )
+                try:
+                    await self._persist_terminal_failure(
+                        esp_id=esp_id,
+                        gpio=gpio,
+                        command=command,
+                        value=value,
+                        issued_by=issued_by,
+                        correlation_id=correlation_id,
+                        failure_code="SAFETY_REJECTED",
+                        failure_reason=f"Safety check failed: {safety_result.error}",
+                        persist_command_audit=False,
+                    )
+                except Exception:
+                    logger.error(
+                        "Terminal fail persistence failed after safety rejection: correlation_id=%s",
+                        correlation_id,
+                        exc_info=True,
+                    )
 
                 # WebSocket broadcast: command failed
                 try:
@@ -485,6 +587,23 @@ class ActuatorService:
             )
             if context is None:
                 logger.error(f"ESP device not found: {esp_id}")
+                try:
+                    await self._persist_terminal_failure(
+                        esp_id=esp_id,
+                        gpio=gpio,
+                        command=command,
+                        value=value,
+                        issued_by=issued_by,
+                        correlation_id=correlation_id,
+                        failure_code="ESP_NOT_FOUND",
+                        failure_reason=f"ESP device not found: {esp_id}",
+                    )
+                except Exception:
+                    logger.error(
+                        "Terminal fail persistence failed for missing ESP: correlation_id=%s",
+                        correlation_id,
+                        exc_info=True,
+                    )
                 return ActuatorSendCommandResult(
                     success=False,
                     correlation_id=correlation_id,
@@ -544,6 +663,25 @@ class ActuatorService:
                     context=context,
                     correlation_id=correlation_id,
                 )
+                try:
+                    await self._persist_terminal_failure(
+                        esp_id=esp_id,
+                        gpio=gpio,
+                        command=command,
+                        value=value,
+                        issued_by=issued_by,
+                        correlation_id=correlation_id,
+                        failure_code="MQTT_PUBLISH_FAILED",
+                        failure_reason="MQTT publish failed",
+                        context=context,
+                        persist_command_audit=False,
+                    )
+                except Exception:
+                    logger.error(
+                        "Terminal fail persistence failed for publish failure: correlation_id=%s",
+                        correlation_id,
+                        exc_info=True,
+                    )
 
                 # WebSocket broadcast: MQTT publish failed
                 try:
@@ -572,6 +710,7 @@ class ActuatorService:
                     command_sent=False,
                     safety_warnings=warnings,
                 )
+            command_sent = True
 
             # Step 4: Persist successful dispatch in dedicated DB transaction
             await self._persist_publish_success(
@@ -624,6 +763,29 @@ class ActuatorService:
                 f"Error sending actuator command: {e}",
                 exc_info=True,
             )
+            try:
+                await self._persist_terminal_failure(
+                    esp_id=esp_id,
+                    gpio=gpio,
+                    command=command,
+                    value=value,
+                    issued_by=issued_by,
+                    correlation_id=correlation_id,
+                    failure_code=(
+                        "SEND_COMMAND_EXCEPTION_POST_DISPATCH"
+                        if command_sent
+                        else "SEND_COMMAND_EXCEPTION_PRE_DISPATCH"
+                    ),
+                    failure_reason=f"Error sending actuator command: {e}",
+                    context=context,
+                    transport_fail=command_sent,
+                )
+            except Exception:
+                logger.error(
+                    "Terminal fail persistence failed in exception branch: correlation_id=%s",
+                    correlation_id,
+                    exc_info=True,
+                )
             return ActuatorSendCommandResult(
                 success=False,
                 correlation_id=correlation_id,

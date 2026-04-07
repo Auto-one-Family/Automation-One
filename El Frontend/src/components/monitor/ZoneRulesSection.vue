@@ -65,7 +65,10 @@ watch(() => props.zoneId, (zoneId) => {
 
 <template>
   <section v-if="zoneId" class="zone-rules-section monitor-section">
-    <h3 class="monitor-section__title">Regeln für diese Zone ({{ rulesForZone.length }})</h3>
+    <div class="zone-rules-section__header">
+      <h3 class="monitor-section__title">Zonenweite Regeln ({{ rulesForZone.length }})</h3>
+      <span class="zone-rules-section__scope">Wirken auf ganze Zone</span>
+    </div>
 
     <!-- Empty State -->
     <div
@@ -90,15 +93,23 @@ watch(() => props.zoneId, (zoneId) => {
 
     <!-- Rules Grid -->
     <div v-else class="zone-rules-section__content">
-      <div class="monitor-card-grid">
-        <RuleCardCompact
+      <ul
+        class="zone-rules-section__grid monitor-card-grid"
+        role="list"
+      >
+        <li
           v-for="rule in displayedRules"
           :key="rule.id"
-          :rule="rule"
-          :is-active="isRuleActive(rule.id)"
-          :lifecycle="logicStore.getLifecycleEntry(rule.id)"
-        />
-      </div>
+          class="zone-rules-section__grid-item"
+        >
+          <RuleCardCompact
+            :rule="rule"
+            :is-active="isRuleActive(rule.id)"
+            :lifecycle="logicStore.getLifecycleEntry(rule.id)"
+            :quick-actions="true"
+          />
+        </li>
+      </ul>
       <div
         v-if="hasMoreRules"
         class="zone-rules-section__more"
@@ -121,10 +132,66 @@ watch(() => props.zoneId, (zoneId) => {
 </template>
 
 <style scoped>
+.zone-rules-section.monitor-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--color-info);
+  border-radius: var(--radius-md);
+  background: var(--glass-bg);
+}
+
+.zone-rules-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.monitor-section__title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  margin: 0;
+}
+
+.zone-rules-section__scope {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+}
+
 .zone-rules-section__content {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
+}
+
+.zone-rules-section__grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.zone-rules-section__grid.monitor-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+  gap: var(--space-3);
+}
+
+.zone-rules-section__grid-item {
+  min-width: 0;
 }
 
 .zone-rules-section__more {

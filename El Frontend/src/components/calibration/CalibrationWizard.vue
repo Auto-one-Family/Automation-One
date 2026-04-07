@@ -8,13 +8,29 @@
  * State management delegated to useCalibrationWizard composable (F-P1).
  */
 
-import { computed } from 'vue'
-import { ArrowLeft, Check, FlaskConical, RefreshCw, X } from 'lucide-vue-next'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import { Activity, ArrowLeft, Check, FlaskConical, Radar, RefreshCw, ShieldCheck, X } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
 import { useCalibrationWizard } from '@/composables/useCalibrationWizard'
 import CalibrationStep from './CalibrationStep.vue'
 
 const espStore = useEspStore()
+
+interface Props {
+  skipSelect?: boolean
+  espId?: string
+  gpio?: number
+  sensorType?: string
+  compact?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  skipSelect: false,
+  espId: undefined,
+  gpio: undefined,
+  sensorType: undefined,
+  compact: false,
+})
 
 // All wizard state from composable
 const {
@@ -30,6 +46,11 @@ const {
   isMeasuring,
   lastRawValue,
   measurementQuality,
+  isFreshMeasurement,
+  measurementRequestId,
+  lifecycleState,
+  lifecycleMessage,
+  hasUnsavedWork,
   currentSessionId,
   sensorTypePresets,
   EC_PRESETS,
@@ -44,20 +65,228 @@ const {
   deletePoint,
   goBack,
   handleAbort,
+  confirmLeave,
   reset,
-} = useCalibrationWizard()
+} = useCalibrationWizard({
+  skipSelect: props.skipSelect,
+  espId: props.espId,
+  gpio: props.gpio,
+  sensorType: props.sensorType,
+})
 
 // Available ESPs from store
 const availableDevices = computed(() =>
   espStore.devices.filter(d => espStore.getDeviceId(d))
 )
+
+const normalizedSelectedType = computed(() => String(selectedSensorType.value || '').toLowerCase())
+const selectedDevice = computed(() =>
+  availableDevices.value.find((device) => espStore.getDeviceId(device) === selectedEspId.value),
+)
+const selectedSensorContext = computed(() => {
+  if (!selectedDevice.value || selectedGpio.value == null) {
+    return null
+  }
+  const sensorTypeNeedle = normalizedSelectedType.value
+  const sensor = (selectedDevice.value.sensors ?? []).find((entry: any) =>
+    Number(entry.gpio) === selectedGpio.value
+    && (
+      !sensorTypeNeedle
+      || String(entry.sensor_type ?? '').toLowerCase() === sensorTypeNeedle
+      || (
+        sensorTypeNeedle === 'moisture'
+        && String(entry.sensor_type ?? '').toLowerCase() === 'soil_moisture'
+      )
+    ),
+  )
+  return sensor ?? null
+})
+
+const deviceConnectivity = computed(() => {
+  if (!selectedDevice.value) return 'offline'
+  return (selectedDevice.value as any).is_online ? 'online' : 'offline'
+})
+
+const lifecycleTone = computed<'neutral' | 'success' | 'warning' | 'critical'>(() => {
+  if (lifecycleState.value === 'terminal_success') return 'success'
+  if (lifecycleState.value === 'terminal_timeout' || lifecycleState.value === 'pending') return 'warning'
+  if (
+    lifecycleState.value === 'terminal_failed'
+    || lifecycleState.value === 'terminal_integration_issue'
+  ) {
+    return 'critical'
+  }
+  return 'neutral'
+})
+
+const lifecycleLabel = computed(() => {
+  const labels: Record<string, string> = {
+    idle: 'Idle',
+    accepted: 'Accepted',
+    pending: 'Pending',
+    terminal_success: 'Terminal Success',
+    terminal_failed: 'Terminal Failed',
+    terminal_timeout: 'Terminal Timeout',
+    terminal_integration_issue: 'Terminal Integration Issue',
+  }
+  return labels[lifecycleState.value] ?? lifecycleState.value
+})
+
+const qualityStatus = computed<'good' | 'suspect' | 'error'>(() => {
+  const quality = String(measurementQuality.value ?? '').toLowerCase()
+  if (quality === 'error' || lifecycleTone.value === 'critical') return 'error'
+  if (quality === 'good' && isFreshMeasurement.value) return 'good'
+  return 'suspect'
+})
+
+const qualityLabel = computed(() => {
+  if (qualityStatus.value === 'good') return 'Good'
+  if (qualityStatus.value === 'error') return 'Error'
+  return 'Suspect'
+})
+
+type MasteryStageId = 'prep' | 'capture' | 'validate' | 'terminal'
+const phaseRank: Record<string, number> = {
+  select: 0,
+  point1: 1,
+  point2: 1,
+  confirm: 2,
+  done: 3,
+  error: 3,
+}
+const masteryStages = computed(() => {
+  const currentRank = phaseRank[phase.value] ?? 0
+  const terminalCta = lifecycleState.value === 'terminal_success'
+    ? 'Naechster Sensor oder Betrieb fortsetzen.'
+    : lifecycleState.value === 'terminal_timeout'
+      ? 'Session pruefen und Kalibrierung erneut ausfuehren.'
+      : lifecycleState.value === 'terminal_failed' || lifecycleState.value === 'terminal_integration_issue'
+        ? 'Fehlerursache pruefen und letzte Aktion wiederholen.'
+        : 'Auf terminale Rueckmeldung warten.'
+  const stages: Array<{ id: MasteryStageId; label: string; action: string; rank: number }> = [
+    { id: 'prep', label: 'Vorbereitung', action: 'Sensor, Zone und Subzone bestaetigen.', rank: 0 },
+    { id: 'capture', label: 'Messpunktaufnahme', action: 'Frische Messung starten und Punkt uebernehmen.', rank: 1 },
+    { id: 'validate', label: 'Validierung', action: 'Punkte vergleichen und Kalibrierauftrag senden.', rank: 2 },
+    { id: 'terminal', label: 'Terminaler Abschluss', action: terminalCta, rank: 3 },
+  ]
+  return stages.map((stage) => ({
+    ...stage,
+    isDone: currentRank > stage.rank,
+    isCurrent: currentRank === stage.rank,
+  }))
+})
+
+const currentNextAction = computed(() =>
+  masteryStages.value.find((stage) => stage.isCurrent)?.action
+  ?? masteryStages.value[masteryStages.value.length - 1]?.action
+  ?? '',
+)
+
+const feedbackClass = ref('')
+let feedbackTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(lifecycleState, (state) => {
+  if (feedbackTimer) {
+    clearTimeout(feedbackTimer)
+    feedbackTimer = null
+  }
+  if (state === 'terminal_success') {
+    feedbackClass.value = 'calibration-wizard--fx-success'
+  } else if (state === 'terminal_timeout') {
+    feedbackClass.value = 'calibration-wizard--fx-timeout'
+  } else if (state === 'terminal_failed' || state === 'terminal_integration_issue') {
+    feedbackClass.value = 'calibration-wizard--fx-error'
+  } else {
+    feedbackClass.value = ''
+  }
+  if (feedbackClass.value) {
+    feedbackTimer = setTimeout(() => {
+      feedbackClass.value = ''
+    }, 200)
+  }
+})
+
+onUnmounted(() => {
+  if (feedbackTimer) {
+    clearTimeout(feedbackTimer)
+    feedbackTimer = null
+  }
+})
+
+const availableDeviceSensors = computed(() =>
+  availableDevices.value.map((device) => {
+    const sensors = (device.sensors ?? []).filter((sensor: any) => {
+      if (!normalizedSelectedType.value) {
+        return false
+      }
+      const sensorType = String(sensor.sensor_type ?? '').toLowerCase()
+      if (normalizedSelectedType.value === 'moisture') {
+        return sensorType === 'moisture' || sensorType === 'soil_moisture'
+      }
+      return sensorType === normalizedSelectedType.value
+    })
+    return {
+      device,
+      sensors,
+    }
+  }),
+)
+
+defineExpose({
+  confirmLeave,
+  hasUnsavedWork,
+})
 </script>
 
 <template>
-  <div class="calibration-wizard">
-    <div class="calibration-wizard__header">
+  <div class="calibration-wizard" :class="[{ 'calibration-wizard--compact': compact }, feedbackClass]">
+    <div v-if="!compact" class="calibration-wizard__header">
       <FlaskConical :size="20" class="calibration-wizard__icon" />
       <h2 class="calibration-wizard__title">Sensor-Kalibrierung</h2>
+    </div>
+
+    <div class="calibration-wizard__hud" role="status" aria-live="polite">
+      <div class="calibration-wizard__hud-head">
+        <div class="calibration-wizard__hud-chip" :class="`calibration-wizard__hud-chip--${deviceConnectivity}`">
+          <Radar :size="14" />
+          Device {{ deviceConnectivity === 'online' ? 'Online' : 'Offline' }}
+        </div>
+        <div class="calibration-wizard__hud-chip" :class="`calibration-wizard__hud-chip--${lifecycleTone}`">
+          <Activity :size="14" />
+          Contract {{ lifecycleLabel }}
+        </div>
+        <div class="calibration-wizard__hud-chip" :class="`calibration-wizard__hud-chip--${qualityStatus}`">
+          <ShieldCheck :size="14" />
+          Qualitaet {{ qualityLabel }}
+        </div>
+      </div>
+      <div class="calibration-wizard__hud-context">
+        <span class="calibration-wizard__hud-context-key">Kontext</span>
+        <span class="calibration-wizard__summary-mono">{{ selectedEspId || '—' }}</span>
+        <span>GPIO {{ selectedGpio ?? '—' }}</span>
+        <span>Zone {{ (selectedDevice as any)?.zone_name || (selectedDevice as any)?.zone_id || 'nicht zugewiesen' }}</span>
+        <span>Subzone {{ (selectedSensorContext as any)?.subzone_id || 'Zone-weit' }}</span>
+      </div>
+      <p v-if="lifecycleMessage" class="calibration-wizard__hud-message">{{ lifecycleMessage }}</p>
+    </div>
+
+    <div class="calibration-wizard__mastery">
+      <div class="calibration-wizard__mastery-row">
+        <div
+          v-for="stage in masteryStages"
+          :key="stage.id"
+          class="calibration-wizard__mastery-stage"
+          :class="{
+            'calibration-wizard__mastery-stage--done': stage.isDone,
+            'calibration-wizard__mastery-stage--current': stage.isCurrent,
+          }"
+        >
+          {{ stage.label }}
+        </div>
+      </div>
+      <p class="calibration-wizard__mastery-next">
+        <strong>Naechste Aktion:</strong> {{ currentNextAction }}
+      </p>
     </div>
 
     <!-- Phase: Select Sensor -->
@@ -80,16 +309,16 @@ const availableDevices = computed(() =>
 
       <div v-if="selectedSensorType" class="calibration-wizard__device-list">
         <p class="calibration-wizard__label">ESP-Geraet und GPIO waehlen:</p>
-        <div v-for="device in availableDevices" :key="espStore.getDeviceId(device)" class="calibration-wizard__device-row">
-          <span class="calibration-wizard__device-name">{{ device.name || espStore.getDeviceId(device) }}</span>
+        <div v-for="entry in availableDeviceSensors" :key="espStore.getDeviceId(entry.device)" class="calibration-wizard__device-row">
+          <span class="calibration-wizard__device-name">{{ entry.device.name || espStore.getDeviceId(entry.device) }}</span>
           <div class="calibration-wizard__gpio-chips">
             <button
-              v-for="sensor in (device.sensors ?? [])"
-              :key="`${espStore.getDeviceId(device)}-${(sensor as any).gpio}`"
+              v-for="sensor in entry.sensors"
+              :key="`${espStore.getDeviceId(entry.device)}-${(sensor as any).gpio}-${String((sensor as any).sensor_type ?? '')}`"
               class="calibration-wizard__gpio-chip"
-              @click="selectSensor(espStore.getDeviceId(device), (sensor as any).gpio, selectedSensorType)"
+              @click="selectSensor(espStore.getDeviceId(entry.device), (sensor as any).gpio, String((sensor as any).sensor_type ?? selectedSensorType))"
             >
-              GPIO {{ (sensor as any).gpio }}
+              GPIO {{ (sensor as any).gpio }} - {{ String((sensor as any).sensor_type ?? '') }}
             </button>
           </div>
         </div>
@@ -132,6 +361,7 @@ const availableDevices = computed(() =>
         :last-raw-value="lastRawValue"
         :is-measuring="isMeasuring"
         :measurement-quality="measurementQuality"
+        :is-fresh-measurement="isFreshMeasurement"
         @captured="onPoint1Captured"
         @request-measurement="triggerLiveMeasurement"
       />
@@ -170,6 +400,7 @@ const availableDevices = computed(() =>
         :last-raw-value="lastRawValue"
         :is-measuring="isMeasuring"
         :measurement-quality="measurementQuality"
+        :is-fresh-measurement="isFreshMeasurement"
         @captured="onPoint2Captured"
         @request-measurement="triggerLiveMeasurement"
       />
@@ -222,6 +453,14 @@ const availableDevices = computed(() =>
         </div>
       </div>
 
+      <details class="calibration-wizard__details">
+        <summary>Diagnose und Rohdaten</summary>
+        <div class="calibration-wizard__summary-row">
+          <span class="calibration-wizard__summary-label">Mess-Request</span>
+          <span class="calibration-wizard__summary-mono">{{ measurementRequestId ?? 'nicht gesetzt' }}</span>
+        </div>
+      </details>
+
       <div class="calibration-wizard__actions">
         <button class="calibration-wizard__abort-btn" :disabled="isSubmitting" @click="handleAbort">
           <X :size="14" /> Abbrechen
@@ -248,9 +487,10 @@ const availableDevices = computed(() =>
       <p class="calibration-wizard__desc">
         {{ calibrationResult?.message ?? 'Parameter wurden gespeichert.' }}
       </p>
-      <div v-if="calibrationResult?.calibration" class="calibration-wizard__result-data">
+      <details v-if="calibrationResult?.calibration" class="calibration-wizard__details calibration-wizard__result-data">
+        <summary>Forensik: Kalibrierparameter anzeigen</summary>
         <pre class="calibration-wizard__result-pre">{{ JSON.stringify(calibrationResult.calibration, null, 2) }}</pre>
-      </div>
+      </details>
       <button class="calibration-wizard__submit-btn" @click="reset">
         <RefreshCw :size="14" /> Weitere Kalibrierung
       </button>
@@ -279,6 +519,118 @@ const availableDevices = computed(() =>
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+}
+
+.calibration-wizard--compact {
+  max-width: 100%;
+}
+
+.calibration-wizard__hud {
+  padding: 0.75rem;
+  border-radius: 0.625rem;
+  border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
+  background: var(--color-bg-secondary, #111118);
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.calibration-wizard__hud-head {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.calibration-wizard__hud-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.75rem;
+  border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
+  color: var(--color-text-secondary, #b0b0c0);
+}
+
+.calibration-wizard__hud-chip--online,
+.calibration-wizard__hud-chip--good,
+.calibration-wizard__hud-chip--success {
+  border-color: rgba(52, 211, 153, 0.45);
+  color: var(--color-success, #34d399);
+}
+
+.calibration-wizard__hud-chip--offline,
+.calibration-wizard__hud-chip--critical,
+.calibration-wizard__hud-chip--error {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: var(--color-error, #f87171);
+}
+
+.calibration-wizard__hud-chip--warning,
+.calibration-wizard__hud-chip--suspect,
+.calibration-wizard__hud-chip--neutral {
+  border-color: rgba(251, 191, 36, 0.45);
+  color: var(--color-warning, #fbbf24);
+}
+
+.calibration-wizard__hud-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #b0b0c0);
+}
+
+.calibration-wizard__hud-context-key {
+  color: var(--color-text-muted, #8585a0);
+}
+
+.calibration-wizard__hud-message {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #b0b0c0);
+}
+
+.calibration-wizard__mastery {
+  border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
+  border-radius: 0.625rem;
+  background: var(--color-bg-secondary, #111118);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.calibration-wizard__mastery-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.calibration-wizard__mastery-stage {
+  padding: 0.45rem 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
+  font-size: 0.6875rem;
+  text-align: center;
+  color: var(--color-text-muted, #8585a0);
+}
+
+.calibration-wizard__mastery-stage--current {
+  border-color: rgba(167, 139, 250, 0.5);
+  color: var(--color-text-primary, #eaeaf2);
+  background: rgba(167, 139, 250, 0.08);
+}
+
+.calibration-wizard__mastery-stage--done {
+  border-color: rgba(52, 211, 153, 0.45);
+  color: var(--color-success, #34d399);
+}
+
+.calibration-wizard__mastery-next {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #b0b0c0);
 }
 
 .calibration-wizard__header {
@@ -601,5 +953,49 @@ const availableDevices = computed(() =>
   font-size: 0.875rem;
   color: var(--color-error, #ef4444);
   margin: 0;
+}
+
+.calibration-wizard__details {
+  border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
+  border-radius: 0.5rem;
+  padding: 0.625rem;
+  background: var(--color-bg-secondary, #111118);
+}
+
+.calibration-wizard__details summary {
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #b0b0c0);
+}
+
+.calibration-wizard--fx-success {
+  animation: calibrationWizardSuccess 180ms ease-out;
+}
+
+.calibration-wizard--fx-timeout {
+  animation: calibrationWizardTimeout 200ms ease-out;
+}
+
+.calibration-wizard--fx-error {
+  animation: calibrationWizardError 180ms ease-out;
+}
+
+@keyframes calibrationWizardSuccess {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.008); }
+  100% { transform: scale(1); }
+}
+
+@keyframes calibrationWizardTimeout {
+  0% { transform: translateX(0); }
+  35% { transform: translateX(3px); }
+  70% { transform: translateX(-3px); }
+  100% { transform: translateX(0); }
+}
+
+@keyframes calibrationWizardError {
+  0% { filter: brightness(1); }
+  50% { filter: brightness(1.12); }
+  100% { filter: brightness(1); }
 }
 </style>

@@ -40,6 +40,7 @@ from src.db.models import (  # noqa: F401, E402 - imports needed for SQLAlchemy 
     ai,
     audit_log,
     auth,
+    command_contract,
     dashboard,
     diagnostic,
     esp,
@@ -432,6 +433,19 @@ async def override_actuator_service(test_engine: AsyncEngine):
     from src.services.actuator_service import ActuatorService  # noqa: E402
     from src.services.safety_service import SafetyService  # noqa: E402
 
+    # Session factory that uses the test engine (not the global production engine)
+    test_session_maker = sessionmaker(
+        bind=test_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+
+    async def test_session_factory():
+        async with test_session_maker() as session:
+            yield session
+
     def override_get_actuator_service_func(db: AsyncSession = Depends(get_db)):
         """
         Override function that receives db session from FastAPI dependency injection.
@@ -451,11 +465,13 @@ async def override_actuator_service(test_engine: AsyncEngine):
         mock_publisher.publish_actuator_command.return_value = True
         mock_publisher._publish_with_retry.return_value = True
 
-        # Create ActuatorService with mocked publisher
+        # Create ActuatorService with mocked publisher and test session factory
+        # to avoid using the global production engine in _command_transaction
         actuator_service = ActuatorService(
             actuator_repo=actuator_repo,
             safety_service=safety_service,
             publisher=mock_publisher,
+            session_factory=test_session_factory,
         )
 
         return actuator_service

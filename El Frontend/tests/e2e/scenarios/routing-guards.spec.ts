@@ -63,7 +63,10 @@ test.describe('Routing und Guards ohne bestehende Session', () => {
 
     await page.goto('/system-monitor')
 
-    await expect(page).toHaveURL(/\/access-denied\?from=%2Fsystem-monitor$/)
+    await expect(page).toHaveURL(/\/access-denied(?:\?.*)?$/)
+    const currentUrl = new URL(page.url())
+    expect(currentUrl.pathname).toBe('/access-denied')
+    expect(currentUrl.searchParams.get('from')).toBe('/system-monitor')
     await expect(page.getByText('Zugriff verweigert')).toBeVisible()
   })
 })

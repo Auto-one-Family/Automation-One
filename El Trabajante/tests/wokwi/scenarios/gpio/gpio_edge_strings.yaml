@@ -31,7 +31,7 @@ steps:
   - wait-serial: "Phase 1: Core Infrastructure READY"
 
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # GPIO-EDGE-002: External MQTT injection - very long component name (CI helper script)
 

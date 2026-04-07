@@ -44,7 +44,7 @@ steps:
   - wait-serial: "Safety Controller initialized"
 
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # External MQTT injection: configure multiple actuators (CI helper script)
 

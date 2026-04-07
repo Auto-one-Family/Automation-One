@@ -57,7 +57,7 @@ steps:
   - wait-serial: "Phase 1: Core Infrastructure READY"
 
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # TEST 1: External MQTT injection - sensor on WROOM-specific GPIO 32 (CI helper script)
   # GPIO 32 is only available on WROOM, not on XIAO

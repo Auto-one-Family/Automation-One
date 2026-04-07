@@ -13,11 +13,11 @@
   flex-direction: row;
   align-items: flex-start;
   justify-content: center; /* Center content when columns are hidden */
-  gap: 0.5rem; /* Reduced gap for tighter layout */
+  gap: clamp(0.5rem, 1vw, 1rem);
   padding: 0; /* Removed padding - card provides its own */
   min-height: auto;
-  /* Shrink container to fit content */
-  width: fit-content;
+  width: min(100%, 1220px);
+  margin-inline: auto;
 }
 
 /* =============================================================================
@@ -29,8 +29,8 @@
   flex-direction: column;
   gap: 0.375rem;
   /* Dynamic width based on content */
-  width: fit-content;
-  max-width: 180px;
+  width: clamp(170px, 18vw, 240px);
+  max-width: 240px;
   flex-shrink: 0;
 }
 
@@ -40,7 +40,7 @@
   flex-direction: column;
   gap: 0.375rem;
   align-items: stretch;
-  width: 180px;
+  width: clamp(170px, 18vw, 240px);
 }
 
 /* Sensors column: Empty state - minimal footprint */
@@ -51,7 +51,7 @@
 /* Sensors column: Multi-column mode (>5 sensors) = 2 columns side by side */
 .esp-horizontal-layout__column--sensors.esp-horizontal-layout__column--multi-row {
   display: grid;
-  grid-template-columns: repeat(2, 180px);
+  grid-template-columns: repeat(2, clamp(160px, 16vw, 220px));
   gap: 0.375rem;
   width: auto;
 }
@@ -59,7 +59,7 @@
 /* Actuators column */
 .esp-horizontal-layout__column--actuators {
   align-items: stretch;
-  width: 180px;
+  width: clamp(170px, 18vw, 240px);
 }
 
 .esp-horizontal-layout__column--actuators.esp-horizontal-layout__column--empty {
@@ -125,9 +125,9 @@
    Center Column (ESP Card)
    ============================================================================= */
 .esp-horizontal-layout__center {
-  flex: 0 1 auto; /* Don't grow, can shrink, auto width */
-  min-width: 140px;
-  max-width: 240px;
+  flex: 0 1 clamp(320px, 34vw, 520px);
+  min-width: clamp(300px, 30vw, 420px);
+  max-width: clamp(360px, 38vw, 560px);
 }
 
 /* =============================================================================
@@ -136,24 +136,24 @@
 .esp-info-compact {
   position: relative; /* Für absolute Positionierung des Overlay-Dropzone */
   width: 100%;
-  background-color: var(--color-bg-secondary);
-  border: 1px solid var(--glass-border);
-  border-radius: 0.5rem;
-  padding: 0.5rem 0.625rem;
+  background: var(--glass-bg-l2);
+  border: 1px solid var(--glass-border-l2);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: 0.4375rem;
+  gap: var(--space-2);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(8px);
+  box-shadow: var(--glass-shadow-l2);
+  backdrop-filter: blur(var(--glass-blur-l2));
   outline: none;
   overflow: visible; /* Damit Overlay sichtbar ist */
   user-select: none; /* Verhindert Text-Selection während Drag (blaues Leuchten) */
 }
 
 .esp-info-compact:hover {
-  border-color: rgba(96, 165, 250, 0.4);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  border-color: var(--glass-border-hover);
+  box-shadow: var(--elevation-floating);
 }
 
 .esp-info-compact:focus-visible {
@@ -172,33 +172,33 @@
    ============================================================================= */
 
 .esp-info-compact--mock {
-  border-left: 3px solid var(--color-mock, #a78bfa);
-  border-color: rgba(167, 139, 250, 0.25);
+  border-left: 3px solid var(--color-mock);
+  border-color: color-mix(in srgb, var(--color-mock) 40%, var(--glass-border-l2));
   box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.15),
-    0 0 20px rgba(167, 139, 250, 0.08);
+    var(--glass-shadow-l2),
+    0 0 20px color-mix(in srgb, var(--color-mock) 18%, transparent);
 }
 
 .esp-info-compact--mock:hover {
-  border-color: rgba(167, 139, 250, 0.4);
+  border-color: color-mix(in srgb, var(--color-mock) 55%, var(--glass-border-l2));
   box-shadow:
-    0 6px 20px rgba(0, 0, 0, 0.25),
-    0 0 25px rgba(167, 139, 250, 0.12);
+    var(--elevation-floating),
+    0 0 25px color-mix(in srgb, var(--color-mock) 25%, transparent);
 }
 
 .esp-info-compact--real {
-  border-left: 3px solid var(--color-real, #22d3ee);
-  border-color: rgba(34, 211, 238, 0.2);
+  border-left: 3px solid var(--color-real);
+  border-color: color-mix(in srgb, var(--color-real) 35%, var(--glass-border-l2));
   box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.15),
-    0 0 20px rgba(34, 211, 238, 0.06);
+    var(--glass-shadow-l2),
+    0 0 20px color-mix(in srgb, var(--color-real) 16%, transparent);
 }
 
 .esp-info-compact--real:hover {
-  border-color: rgba(34, 211, 238, 0.35);
+  border-color: color-mix(in srgb, var(--color-real) 50%, var(--glass-border-l2));
   box-shadow:
-    0 6px 20px rgba(0, 0, 0, 0.25),
-    0 0 25px rgba(34, 211, 238, 0.1);
+    var(--elevation-floating),
+    0 0 25px color-mix(in srgb, var(--color-real) 22%, transparent);
 }
 
 /* Top Row: Name + Settings (flexbox with space-between) */
@@ -214,7 +214,7 @@
 .esp-info-compact__info-row {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -417,17 +417,16 @@
 }
 
 .esp-info-compact__wifi-label {
-  font-size: 0.5625rem;
+  font-size: var(--text-xs);
   font-weight: 500;
   white-space: nowrap;
 }
 
-/* WiFi color classes - these are shared with Tailwind classes */
-.text-emerald-400 { color: var(--color-success); }
-.text-yellow-400 { color: #facc15; }
-.text-orange-400 { color: #fb923c; }
-.text-red-400 { color: var(--color-error); }
-.text-slate-500 { color: #64748b; }
+/* WiFi quality color classes */
+.wifi--good { color: var(--color-success); }
+.wifi--fair { color: var(--color-warning); }
+.wifi--poor { color: var(--color-error); }
+.wifi--unknown { color: var(--color-text-muted); }
 
 /* =============================================================================
    Heartbeat Indicator (Phase 1.2)
@@ -600,6 +599,11 @@
     max-width: 160px;
   }
 
+  .esp-horizontal-layout__column--actuators {
+    max-width: 160px;
+    width: clamp(140px, 18vw, 160px);
+  }
+
   .esp-horizontal-layout__center {
     max-width: 240px;
   }
@@ -610,19 +614,24 @@
    ============================================================================= */
 @media (min-width: 1024px) {
   .esp-horizontal-layout {
-    gap: 0.875rem;
+    gap: clamp(0.75rem, 1.3vw, 1.25rem);
   }
 
   .esp-horizontal-layout__column {
-    max-width: 140px;
+    max-width: 240px;
+  }
+
+  .esp-horizontal-layout__column--actuators {
+    max-width: 240px;
+    width: clamp(170px, 18vw, 240px);
   }
 
   .esp-horizontal-layout__center {
-    max-width: 300px;
+    max-width: clamp(380px, 40vw, 560px);
   }
 
   .esp-horizontal-layout__satellite {
-    max-width: 130px;
+    max-width: none;
   }
 }
 

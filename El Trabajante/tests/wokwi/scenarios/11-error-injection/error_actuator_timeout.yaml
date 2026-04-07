@@ -16,9 +16,10 @@ name: Error Injection - Actuator Timeout
 version: 1
 steps:
   - wait-serial: "Phase 5: Actuator System READY"
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "REGISTRATION"
+  - wait-serial: "heartbeat"
   # External MQTT config injection happens here (sleep 25 in CI)
   - wait-serial: "ConfigResponse published"
-  - delay: 5000ms
   # External actuator ON command injected via mosquitto_pub
   - wait-serial: "Actuator"

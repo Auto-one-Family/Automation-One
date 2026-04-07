@@ -462,6 +462,36 @@ class NotificationRepository(BaseRepository[Notification]):
         await self.session.refresh(notification)
         return notification
 
+    async def resolve_all_alerts(self, user_id: int) -> int:
+        """
+        Resolve all unresolved alerts (active + acknowledged) for a user.
+
+        Also marks alerts as read to keep unread counters consistent.
+
+        Returns:
+            Number of resolved alerts
+        """
+        now = datetime.now(timezone.utc)
+        stmt = (
+            update(Notification)
+            .where(
+                and_(
+                    Notification.user_id == user_id,
+                    Notification.status.in_([AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]),
+                )
+            )
+            .values(
+                status=AlertStatus.RESOLVED,
+                resolved_at=now,
+                is_read=True,
+                read_at=func.coalesce(Notification.read_at, now),
+                updated_at=now,
+            )
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
+
     async def auto_resolve_by_correlation(self, correlation_id: str) -> int:
         """
         Auto-resolve all active/acknowledged alerts with matching correlation_id.

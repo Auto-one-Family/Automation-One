@@ -16,8 +16,6 @@
 
 import { ref, computed, watch, type Component } from 'vue'
 import {
-  ChevronLeft,
-  ChevronRight,
   Thermometer,
   Droplet,
   Droplets,
@@ -47,9 +45,6 @@ import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('ComponentSidebar')
 const dragStore = useDragStateStore()
-
-// Sidebar collapsed state
-const isCollapsed = ref(false)
 
 // Reactive state for dragging
 const draggingItem = ref<string | null>(null)
@@ -200,34 +195,16 @@ function onDragEnd() {
   draggingItem.value = null
 }
 
-function toggleSidebar() {
-  isCollapsed.value = !isCollapsed.value
-}
 </script>
 
 <template>
-  <aside
-    class="component-sidebar"
-    :class="{ 'component-sidebar--collapsed': isCollapsed }"
-  >
-    <!-- Toggle Button -->
-    <button
-      class="component-sidebar__toggle"
-      @click="toggleSidebar"
-      :title="isCollapsed ? 'Komponenten einblenden' : 'Komponenten ausblenden'"
-    >
-      <component :is="isCollapsed ? ChevronLeft : ChevronRight" class="w-4 h-4" />
-    </button>
-
-    <!-- Sidebar Content -->
-    <div v-show="!isCollapsed" class="component-sidebar__content">
-      <!-- Header -->
+  <aside class="component-sidebar">
+    <div class="component-sidebar__content">
       <div class="component-sidebar__header">
         <span class="component-sidebar__title">Komponenten</span>
         <span class="component-sidebar__hint">Auf ESP ziehen</span>
       </div>
 
-      <!-- Items Grid -->
       <div class="component-sidebar__items">
         <div
           v-for="item in allItems"
@@ -258,19 +235,18 @@ function toggleSidebar() {
 <style scoped>
 .component-sidebar {
   position: relative;
-  width: clamp(80px, 6rem, 120px);
-  min-width: clamp(80px, 6rem, 120px);
+  width: clamp(88px, 6.5rem, 128px);
+  min-width: clamp(88px, 6.5rem, 128px);
   flex-shrink: 0;
   background: var(--color-bg-secondary);
   border-left: 1px solid var(--glass-border);
   display: flex;
   flex-direction: column;
-  transition: width 0.2s ease, min-width 0.2s ease;
   overflow: hidden;
 }
 
 /* Scroll indicator — gradient fade at bottom when content overflows */
-.component-sidebar:not(.component-sidebar--collapsed)::after {
+.component-sidebar::after {
   content: '';
   position: absolute;
   bottom: 0;
@@ -280,36 +256,6 @@ function toggleSidebar() {
   background: linear-gradient(to bottom, transparent, var(--color-bg-secondary));
   pointer-events: none;
   z-index: 1;
-}
-
-.component-sidebar--collapsed {
-  width: 24px;
-  min-width: 24px;
-}
-
-.component-sidebar__toggle {
-  position: absolute;
-  left: -12px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 24px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--glass-border);
-  border-radius: 0.375rem 0 0 0.375rem;
-  cursor: pointer;
-  color: var(--color-text-muted);
-  transition: all 0.2s;
-  z-index: 10;
-}
-
-.component-sidebar__toggle:hover {
-  background: var(--color-bg-secondary);
-  color: var(--color-text-primary);
-  border-color: var(--color-iridescent-1);
 }
 
 .component-sidebar__content {

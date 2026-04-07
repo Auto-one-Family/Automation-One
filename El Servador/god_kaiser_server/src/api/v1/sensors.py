@@ -84,6 +84,7 @@ from ...services.sensor_scheduler_service import SensorSchedulerService
 from ...services.sensor_service import SensorService
 from ...services.gpio_validation_service import GpioValidationService
 from ...services.subzone_service import SubzoneService
+from ...services.calibration_payloads import canonicalize_calibration_data
 from ...utils.subzone_helpers import normalize_subzone_id
 
 logger = get_logger(__name__)
@@ -218,7 +219,10 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         "enabled": request.enabled,
         "sample_interval_ms": request.interval_ms,  # Schema: interval_ms -> Model: sample_interval_ms
         "pi_enhanced": pi_enhanced,  # Schema: processing_mode -> Model: pi_enhanced
-        "calibration_data": request.calibration,  # Schema: calibration -> Model: calibration_data
+        "calibration_data": canonicalize_calibration_data(
+            request.calibration,
+            source="api_v1_sensors",
+        ),  # Schema: calibration -> Model: calibration_data
         "thresholds": thresholds if thresholds else None,
         "sensor_metadata": sensor_metadata,  # Schema: metadata + description/unit -> Model: sensor_metadata
         # =========================================================================

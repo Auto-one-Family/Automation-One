@@ -18,6 +18,15 @@
 // SENSOR MANAGER CLASS
 // ============================================
 // Singleton class managing sensor operations
+struct ManualMeasurementResult {
+    bool measurement_ok = false;
+    bool publish_ok = false;
+    bool timeout_reached = false;
+    String reason_code = "UNKNOWN";
+    String quality = "unknown";
+    int32_t raw_value = 0;
+    String sensor_type;
+};
 
 class SensorManager {
 public:
@@ -99,9 +108,9 @@ public:
     void setMeasurementInterval(unsigned long interval_ms);
 
     // ✅ Phase 2C: Trigger manual measurement for on-demand sensors
-    // Returns true if measurement was successful
+    // Returns full outcome contract projection for queue-worker mapping.
     // timeout_ms: Max duration before aborting (E-P3 Timeout-Guard, default 5s)
-    bool triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms = 5000);
+    ManualMeasurementResult triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms = 5000);
 
     // ============================================
     // RAW DATA READING METHODS (PHASE 4)
@@ -207,7 +216,7 @@ private:
     bool performMeasurementForConfig(SensorConfig* config, SensorReading& reading_out);
     
     // Publish sensor reading via MQTT
-    void publishSensorReading(const SensorReading& reading);
+    bool publishSensorReading(const SensorReading& reading);
     
     // Build MQTT payload from sensor reading
     String buildMQTTPayload(const SensorReading& reading) const;

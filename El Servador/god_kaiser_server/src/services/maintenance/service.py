@@ -284,6 +284,25 @@ class MaintenanceService:
             },
         }
 
+    def reconcile_after_restore(self) -> Dict[str, Any]:
+        """
+        Reconcile in-memory maintenance runtime state after DB restore.
+
+        A destructive restore can invalidate cache assumptions, therefore we
+        reset volatile state so subsequent cycles rebuild from DB truth.
+        """
+        self._stats_cache = {
+            "last_updated": None,
+            "total_esps": 0,
+            "online_esps": 0,
+            "offline_esps": 0,
+            "total_sensors": 0,
+            "total_actuators": 0,
+        }
+        self._job_results.clear()
+        logger.info("MaintenanceService runtime cache reconciled after database restore")
+        return {"reconciled": True, "cleared_job_results": True, "stats_cache_reset": True}
+
     # ================================================================
     # CLEANUP JOBS
     # ================================================================

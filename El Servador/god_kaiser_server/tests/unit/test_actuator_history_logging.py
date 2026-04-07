@@ -189,9 +189,15 @@ class TestL2LWTHandlerHistory:
                         "src.mqtt.handlers.lwt_handler.AuditLogRepository"
                     ) as mock_audit:
                         mock_audit.return_value.log_device_event = AsyncMock()
-                        with patch("src.websocket.manager.WebSocketManager") as mock_ws:
-                            mock_ws.get_instance = AsyncMock(return_value=AsyncMock())
-                            return await handler.handle_lwt(topic, payload)
+                        with patch(
+                            "src.mqtt.handlers.lwt_handler.CommandContractRepository"
+                        ) as mock_contract:
+                            mock_contract.return_value.upsert_terminal_event_authority = AsyncMock(
+                                return_value=(None, False)
+                            )
+                            with patch("src.websocket.manager.WebSocketManager") as mock_ws:
+                                mock_ws.get_instance = AsyncMock(return_value=AsyncMock())
+                                return await handler.handle_lwt(topic, payload)
 
     async def test_logs_off_for_each_active_actuator(self, handler, lwt_payload):
         """LWT disconnect: one OFF history entry per active actuator."""

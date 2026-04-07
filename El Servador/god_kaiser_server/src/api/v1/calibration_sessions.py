@@ -341,6 +341,10 @@ async def apply_calibration(
         await db.commit()
         return _session_to_response(session)
     except CalibrationError as e:
+        # Persist fail-closed apply transitions (e.g. APPLY_PERSISTENCE_REQUIRED)
+        # before surfacing contract error to the API caller.
+        if e.code == "APPLY_PERSISTENCE_REQUIRED":
+            await db.commit()
         raise _calibration_http_exception(e)
 
 
@@ -423,6 +427,7 @@ def _status_from_calibration_error(error_code: str) -> int:
         "POINTS_COMPLETE",
         "SESSION_EXPIRED",
         "NO_RESULT",
+        "APPLY_PERSISTENCE_REQUIRED",
     }:
         return status.HTTP_409_CONFLICT
     if error_code in {

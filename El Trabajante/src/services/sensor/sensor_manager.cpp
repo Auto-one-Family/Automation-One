@@ -1063,7 +1063,10 @@ bool SensorManager::performMeasurementForConfig(SensorConfig* config, SensorRead
     reading_out.raw_value = raw_value;
     reading_out.processed_value = conv.value;
     reading_out.unit = conv.unit;
-    reading_out.quality = "good";
+    // Keep quality from raw-path validators (e.g. ADC near-rail -> suspect).
+    if (reading_out.quality.length() == 0) {
+        reading_out.quality = "good";
+    }
     reading_out.timestamp = millis();
     reading_out.valid = true;
     reading_out.error_message = "";
@@ -1387,23 +1390,29 @@ void SensorManager::setMeasurementInterval(unsigned long interval_ms) {
 // ============================================
 // MANUAL MEASUREMENT (PHASE 2C - On-Demand)
 // ============================================
-bool SensorManager::triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms) {
+ManualMeasurementResult SensorManager::triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms) {
+    ManualMeasurementResult result;
+    result.reason_code = "UNKNOWN";
+
     if (!initialized_) {
         LOG_E(TAG, "SensorManager: Not initialized, cannot trigger manual measurement");
-        return false;
+        result.reason_code = "NOT_INITIALIZED";
+        return result;
     }
 
     // Find sensor configuration
     SensorConfig* config = findSensorConfig(gpio);
     if (!config) {
         LOG_E(TAG, "SensorManager: Sensor not found on GPIO " + String(gpio));
-        return false;
+        result.reason_code = "SENSOR_NOT_FOUND";
+        return result;
     }
 
     // Check if sensor is active
     if (!config->active) {
         LOG_W(TAG, "SensorManager: Cannot measure inactive sensor on GPIO " + String(gpio));
-        return false;
+        result.reason_code = "SENSOR_INACTIVE";
+        return result;
     }
 
     // E-P3: Log Circuit-Breaker state for manual override awareness
@@ -1414,6 +1423,7 @@ bool SensorManager::triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms) 
 
     LOG_I(TAG, "SensorManager: Manual measurement triggered for GPIO " + String(gpio) +
              " (mode: " + config->operating_mode + ", timeout: " + String(timeout_ms) + "ms)");
+    result.sensor_type = config->sensor_type;
 
     unsigned long start_ms = millis();
 
@@ -1428,20 +1438,28 @@ bool SensorManager::triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms) 
         // E-P3: Timeout-Guard — check elapsed time after measurement
         unsigned long elapsed = millis() - start_ms;
         if (elapsed > timeout_ms) {
+            result.timeout_reached = true;
             LOG_W(TAG, "SensorManager: Manual measurement TIMEOUT on GPIO " + String(gpio) +
                      " (elapsed: " + String(elapsed) + "ms, limit: " + String(timeout_ms) + "ms)");
             errorTracker.trackError(ERROR_SENSOR_TIMEOUT, ERROR_SEVERITY_WARNING,
                                    "Manual measurement exceeded timeout");
-            // Still return result — measurement may have succeeded despite timeout
         }
 
         if (count == 0) {
             LOG_E(TAG, "SensorManager: Manual multi-value measurement failed for GPIO " + String(gpio));
-            return false;
+            result.reason_code = result.timeout_reached ? "MEASURE_TIMEOUT" : "MEASUREMENT_FAILED";
+            result.measurement_ok = false;
+            result.publish_ok = false;
+            return result;
         }
 
+        result.measurement_ok = true;
+        result.publish_ok = mqtt_client_ && mqtt_client_->isConnected() && mqtt_client_->isRegistrationConfirmed();
+        result.reason_code = result.timeout_reached ? "MEASURE_TIMEOUT" : (result.publish_ok ? "NONE" : "PUBLISH_SKIPPED");
+        result.quality = "good";
+        result.raw_value = static_cast<int32_t>(readings[0].raw_value);
         config->last_reading = start_ms;
-        return true;
+        return result;
     } else {
         // Single-value sensor - standard measurement
         SensorReading reading;
@@ -1449,19 +1467,33 @@ bool SensorManager::triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms) 
             // E-P3: Timeout-Guard — check elapsed time after measurement
             unsigned long elapsed = millis() - start_ms;
             if (elapsed > timeout_ms) {
+                result.timeout_reached = true;
                 LOG_W(TAG, "SensorManager: Manual measurement TIMEOUT on GPIO " + String(gpio) +
                          " (elapsed: " + String(elapsed) + "ms, limit: " + String(timeout_ms) + "ms)");
                 errorTracker.trackError(ERROR_SENSOR_TIMEOUT, ERROR_SEVERITY_WARNING,
                                        "Manual measurement exceeded timeout");
             }
 
-            publishSensorReading(reading);
+            bool publish_ok = publishSensorReading(reading);
+            result.measurement_ok = true;
+            result.publish_ok = publish_ok;
+            result.quality = reading.quality;
+            result.raw_value = static_cast<int32_t>(reading.raw_value);
+            result.sensor_type = reading.sensor_type;
+            if (result.timeout_reached) {
+                result.reason_code = "MEASURE_TIMEOUT";
+            } else if (!publish_ok) {
+                result.reason_code = "PUBLISH_SKIPPED";
+            } else {
+                result.reason_code = "NONE";
+            }
             config->last_reading = start_ms;
-            return true;
+            return result;
         }
 
         LOG_E(TAG, "SensorManager: Manual measurement failed for GPIO " + String(gpio));
-        return false;
+        result.reason_code = result.timeout_reached ? "MEASURE_TIMEOUT" : "MEASUREMENT_FAILED";
+        return result;
     }
 }
 
@@ -1642,13 +1674,13 @@ const SensorConfig* SensorManager::findSensorConfig(uint8_t gpio,
     return nullptr;
 }
 
-void SensorManager::publishSensorReading(const SensorReading& reading) {
+bool SensorManager::publishSensorReading(const SensorReading& reading) {
     // SAFETY-P4: Always update value cache regardless of MQTT connectivity
     updateValueCache(reading.gpio, reading.sensor_type.c_str(), reading.processed_value);
 
     if (!mqtt_client_ || !mqtt_client_->isConnected()) {
         LOG_W(TAG, "Sensor Manager: MQTT not connected, skipping publish");
-        return;
+        return false;
     }
 
     // Registration gate is intentionally fail-closed until heartbeat ACK arrives.
@@ -1656,7 +1688,7 @@ void SensorManager::publishSensorReading(const SensorReading& reading) {
     // treated as communication errors.
     if (!mqtt_client_->isRegistrationConfirmed()) {
         LOG_W(TAG, "Sensor Manager: Registration pending (no heartbeat ACK), skipping publish");
-        return;
+        return false;
     }
 
     // Copy topic immediately — topic_buffer_ is shared static; another task could
@@ -1671,7 +1703,9 @@ void SensorManager::publishSensorReading(const SensorReading& reading) {
         LOG_E(TAG, "Sensor Manager: Failed to publish sensor data for GPIO " + String(reading.gpio));
         errorTracker.trackError(ERROR_MQTT_PUBLISH_FAILED, ERROR_SEVERITY_ERROR,
                                "Failed to publish sensor data");
+        return false;
     }
+    return true;
 }
 
 String SensorManager::buildMQTTPayload(const SensorReading& reading) const {

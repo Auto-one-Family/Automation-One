@@ -75,6 +75,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
    */
   async function connect(): Promise<void> {
     if (isConnecting.value || isConnected.value) {
+      // Wenn bereits verbunden, muessen late-subscribers ihre Filter trotzdem registrieren.
+      if (isConnected.value && activeFilters.value && !subscriptionId.value) {
+        subscribe(activeFilters.value)
+      }
       return
     }
 

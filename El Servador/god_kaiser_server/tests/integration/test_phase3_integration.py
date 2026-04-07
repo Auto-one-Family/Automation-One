@@ -65,21 +65,35 @@ class TestFullConfigCycle:
         }
 
         with patch("src.mqtt.handlers.config_handler.resilient_session") as mock_session:
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
             mock_db = MagicMock()
+            mock_db.execute = AsyncMock(return_value=mock_result)
+            mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.refresh = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch("src.mqtt.handlers.config_handler.AuditLogRepository") as mock_audit_class:
-                mock_audit = MagicMock()
-                mock_audit.log_config_response = AsyncMock()
-                mock_audit_class.return_value = mock_audit
+            with patch(
+                "src.mqtt.handlers.config_handler.CommandContractRepository"
+            ) as mock_contract_class:
+                mock_contract_class.return_value.upsert_terminal_event_authority = AsyncMock(
+                    return_value=(MagicMock(), False)
+                )
 
-                with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
-                    mock_ws = AsyncMock()
-                    mock_ws.broadcast = AsyncMock()
-                    mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+                with patch("src.mqtt.handlers.config_handler.AuditLogRepository") as mock_audit_class:
+                    mock_audit = MagicMock()
+                    mock_audit.log_config_response = AsyncMock()
+                    mock_audit_class.return_value = mock_audit
 
-                    result = await config_handler.handle_config_ack(topic, payload)
+                    with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                        mock_ws = AsyncMock()
+                        mock_ws.broadcast = AsyncMock()
+                        mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+
+                        result = await config_handler.handle_config_ack(topic, payload)
 
                     # Handler should succeed
                     assert result is True
@@ -119,53 +133,71 @@ class TestFullConfigCycle:
         }
 
         with patch("src.mqtt.handlers.config_handler.resilient_session") as mock_session:
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
             mock_db = MagicMock()
+            mock_db.execute = AsyncMock(return_value=mock_result)
+            mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.refresh = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch("src.mqtt.handlers.config_handler.ESPRepository") as mock_esp_repo_class:
-                mock_esp = MagicMock()
-                mock_esp.id = 1
-                mock_esp.device_id = "ESP_PARTIAL_TEST"
-                mock_esp_repo = MagicMock()
-                mock_esp_repo.get_by_device_id = AsyncMock(return_value=mock_esp)
-                mock_esp_repo_class.return_value = mock_esp_repo
+            with patch(
+                "src.mqtt.handlers.config_handler.CommandContractRepository"
+            ) as mock_contract_class:
+                mock_contract_class.return_value.upsert_terminal_event_authority = AsyncMock(
+                    return_value=(MagicMock(), False)
+                )
 
-                with patch(
-                    "src.mqtt.handlers.config_handler.SensorRepository"
-                ) as mock_sensor_repo_class:
-                    mock_sensor = MagicMock()
-                    mock_sensor.id = 100
-                    mock_sensor_repo = MagicMock()
-                    mock_sensor_repo.get_by_esp_and_gpio = AsyncMock(return_value=mock_sensor)
-                    mock_sensor_repo.get_all_by_esp_and_gpio = AsyncMock(return_value=[mock_sensor])
-                    mock_sensor_repo.get_by_esp = AsyncMock(return_value=[mock_sensor])
-                    mock_sensor_repo.update = AsyncMock()
-                    mock_sensor_repo_class.return_value = mock_sensor_repo
+                with patch("src.mqtt.handlers.config_handler.ESPRepository") as mock_esp_repo_class:
+                    mock_esp = MagicMock()
+                    mock_esp.id = 1
+                    mock_esp.device_id = "ESP_PARTIAL_TEST"
+                    mock_esp_repo = MagicMock()
+                    mock_esp_repo.get_by_device_id = AsyncMock(return_value=mock_esp)
+                    mock_esp_repo_class.return_value = mock_esp_repo
 
-                    with patch("src.mqtt.handlers.config_handler.ActuatorRepository"):
-                        with patch(
-                            "src.mqtt.handlers.config_handler.AuditLogRepository"
-                        ) as mock_audit_class:
-                            mock_audit = MagicMock()
-                            mock_audit.log_config_response = AsyncMock()
-                            mock_audit_class.return_value = mock_audit
+                    with patch(
+                        "src.mqtt.handlers.config_handler.SensorRepository"
+                    ) as mock_sensor_repo_class:
+                        mock_sensor = MagicMock()
+                        mock_sensor.id = 100
+                        mock_sensor_repo = MagicMock()
+                        mock_sensor_repo.get_by_esp_and_gpio = AsyncMock(return_value=mock_sensor)
+                        mock_sensor_repo.get_all_by_esp_and_gpio = AsyncMock(
+                            return_value=[mock_sensor]
+                        )
+                        mock_sensor_repo.get_by_esp = AsyncMock(return_value=[mock_sensor])
+                        mock_sensor_repo.update = AsyncMock()
+                        mock_sensor_repo_class.return_value = mock_sensor_repo
 
-                            with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
-                                mock_ws = AsyncMock()
-                                mock_ws.broadcast = AsyncMock()
-                                mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+                        with patch("src.mqtt.handlers.config_handler.ActuatorRepository"):
+                            with patch(
+                                "src.mqtt.handlers.config_handler.AuditLogRepository"
+                            ) as mock_audit_class:
+                                mock_audit = MagicMock()
+                                mock_audit.log_config_response = AsyncMock()
+                                mock_audit_class.return_value = mock_audit
 
-                                result = await config_handler.handle_config_ack(topic, payload)
+                                with patch(
+                                    "src.websocket.manager.WebSocketManager"
+                                ) as mock_ws_class:
+                                    mock_ws = AsyncMock()
+                                    mock_ws.broadcast = AsyncMock()
+                                    mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
 
-                                assert result is True
+                                    result = await config_handler.handle_config_ack(topic, payload)
 
-                                # Sensor should be updated with failed status
-                                mock_sensor_repo.update.assert_called_once()
-                                update_call = mock_sensor_repo.update.call_args
-                                assert update_call.args[0] == 100  # sensor id
-                                assert update_call.kwargs["config_status"] == "failed"
-                                assert update_call.kwargs["config_error"] == "GPIO_CONFLICT"
+                                    assert result is True
+
+                                    # Sensor should be updated with failed status
+                                    mock_sensor_repo.update.assert_called_once()
+                                    update_call = mock_sensor_repo.update.call_args
+                                    assert update_call.args[0] == 100  # sensor id
+                                    assert update_call.kwargs["config_status"] == "failed"
+                                    assert update_call.kwargs["config_error"] == "GPIO_CONFLICT"
 
 
 class TestDiscoveryApprovalOnlineFlow:
@@ -419,8 +451,14 @@ class TestNetworkPartitionRecovery:
         topic = "kaiser/god/esp/ESP_PARTITION/system/will"
 
         with patch("src.mqtt.handlers.lwt_handler.resilient_session") as mock_session:
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
             mock_db = MagicMock()
+            mock_db.execute = AsyncMock(return_value=mock_result)
             mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.refresh = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -436,29 +474,40 @@ class TestNetworkPartitionRecovery:
                 mock_repo.update_status = AsyncMock()
                 mock_repo_class.return_value = mock_repo
 
-                with patch("src.mqtt.handlers.lwt_handler.AuditLogRepository") as mock_audit_class:
-                    mock_audit = MagicMock()
-                    mock_audit.log_device_event = AsyncMock()
-                    mock_audit_class.return_value = mock_audit
+                with patch(
+                    "src.mqtt.handlers.lwt_handler.CommandContractRepository"
+                ) as mock_contract_class:
+                    mock_contract_class.return_value.upsert_terminal_event_authority = AsyncMock(
+                        return_value=(MagicMock(), False)
+                    )
 
-                    with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
-                        mock_ws = AsyncMock()
-                        mock_ws.broadcast = AsyncMock()
-                        mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+                    with patch(
+                        "src.mqtt.handlers.lwt_handler.AuditLogRepository"
+                    ) as mock_audit_class:
+                        mock_audit = MagicMock()
+                        mock_audit.log_device_event = AsyncMock()
+                        mock_audit_class.return_value = mock_audit
 
-                        result = await lwt_handler.handle_lwt(topic, lwt_payload)
+                        with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                            mock_ws = AsyncMock()
+                            mock_ws.broadcast = AsyncMock()
+                            mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
 
-                        assert result is True
+                            result = await lwt_handler.handle_lwt(topic, lwt_payload)
 
-                        # Status should be updated to offline
-                        mock_repo.update_status.assert_called_once_with("ESP_PARTITION", "offline")
+                            assert result is True
 
-                        # WebSocket should broadcast offline status
-                        mock_ws.broadcast.assert_called()
-                        ws_call = mock_ws.broadcast.call_args
-                        assert ws_call.args[0] == "esp_health"
-                        assert ws_call.args[1]["status"] == "offline"
-                        assert ws_call.args[1]["source"] == "lwt"
+                            # Status should be updated to offline
+                            mock_repo.update_status.assert_called_once_with(
+                                "ESP_PARTITION", "offline"
+                            )
+
+                            # WebSocket should broadcast offline status
+                            mock_ws.broadcast.assert_called()
+                            ws_call = mock_ws.broadcast.call_args
+                            assert ws_call.args[0] == "esp_health"
+                            assert ws_call.args[1]["status"] == "offline"
+                            assert ws_call.args[1]["source"] == "lwt"
 
     @pytest.mark.asyncio
     async def test_reconnect_heartbeat_brings_device_online(
@@ -643,9 +692,15 @@ class TestNetworkPartitionRecovery:
 
         # Step 1: Device is online, LWT arrives
         with patch("src.mqtt.handlers.lwt_handler.resilient_session") as mock_lwt_session:
-            mock_db = MagicMock()
-            mock_db.commit = AsyncMock()
-            mock_lwt_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_lwt_result = MagicMock()
+            mock_lwt_result.scalar_one_or_none.return_value = None
+            mock_lwt_result.scalars.return_value.all.return_value = []
+            mock_lwt_db = MagicMock()
+            mock_lwt_db.execute = AsyncMock(return_value=mock_lwt_result)
+            mock_lwt_db.commit = AsyncMock()
+            mock_lwt_db.flush = AsyncMock()
+            mock_lwt_db.refresh = AsyncMock()
+            mock_lwt_session.return_value.__aenter__ = AsyncMock(return_value=mock_lwt_db)
             mock_lwt_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
             with patch("src.mqtt.handlers.lwt_handler.ESPRepository") as mock_repo_class:
@@ -665,18 +720,27 @@ class TestNetworkPartitionRecovery:
                 mock_repo.update_status = AsyncMock(side_effect=lwt_update_status)
                 mock_repo_class.return_value = mock_repo
 
-                with patch("src.mqtt.handlers.lwt_handler.AuditLogRepository") as mock_audit_class:
-                    mock_audit = MagicMock()
-                    mock_audit.log_device_event = AsyncMock()
-                    mock_audit_class.return_value = mock_audit
+                with patch(
+                    "src.mqtt.handlers.lwt_handler.CommandContractRepository"
+                ) as mock_contract_class:
+                    mock_contract_class.return_value.upsert_terminal_event_authority = AsyncMock(
+                        return_value=(MagicMock(), False)
+                    )
 
-                    with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
-                        mock_ws = AsyncMock()
-                        mock_ws.broadcast = AsyncMock()
-                        mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+                    with patch(
+                        "src.mqtt.handlers.lwt_handler.AuditLogRepository"
+                    ) as mock_audit_class:
+                        mock_audit = MagicMock()
+                        mock_audit.log_device_event = AsyncMock()
+                        mock_audit_class.return_value = mock_audit
 
-                        lwt_result = await lwt_handler.handle_lwt(lwt_topic, lwt_payload)
-                        assert lwt_result is True
+                        with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                            mock_ws = AsyncMock()
+                            mock_ws.broadcast = AsyncMock()
+                            mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+
+                            lwt_result = await lwt_handler.handle_lwt(lwt_topic, lwt_payload)
+                            assert lwt_result is True
 
         assert "offline" in status_history
 
@@ -762,29 +826,42 @@ class TestCrossHandlerInteraction:
         }
 
         with patch("src.mqtt.handlers.config_handler.resilient_session") as mock_session:
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
             mock_db = MagicMock()
+            mock_db.execute = AsyncMock(return_value=mock_result)
             mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.refresh = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch("src.mqtt.handlers.config_handler.AuditLogRepository") as mock_audit_class:
-                mock_audit = MagicMock()
-                mock_audit.log_config_response = AsyncMock()
-                mock_audit_class.return_value = mock_audit
+            with patch(
+                "src.mqtt.handlers.config_handler.CommandContractRepository"
+            ) as mock_contract_class:
+                mock_contract_class.return_value.upsert_terminal_event_authority = AsyncMock(
+                    return_value=(MagicMock(), False)
+                )
 
-                with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
-                    mock_ws = AsyncMock()
-                    mock_ws.broadcast = AsyncMock()
-                    mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+                with patch("src.mqtt.handlers.config_handler.AuditLogRepository") as mock_audit_class:
+                    mock_audit = MagicMock()
+                    mock_audit.log_config_response = AsyncMock()
+                    mock_audit_class.return_value = mock_audit
 
-                    result = await config_handler.handle_config_ack(config_topic, config_payload)
+                    with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                        mock_ws = AsyncMock()
+                        mock_ws.broadcast = AsyncMock()
+                        mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
 
-                    assert result is True
+                        result = await config_handler.handle_config_ack(config_topic, config_payload)
 
-                    # WebSocket should broadcast config_response event
-                    ws_calls = mock_ws.broadcast.call_args_list
-                    assert len(ws_calls) == 1
-                    assert ws_calls[0].args[0] == "config_response"
+                        assert result is True
+
+                        # WebSocket should broadcast config_response event
+                        ws_calls = mock_ws.broadcast.call_args_list
+                        assert len(ws_calls) == 1
+                        assert ws_calls[0].args[0] == "config_response"
 
     @pytest.mark.asyncio
     async def test_lwt_after_config_error_doesnt_conflict(self):
@@ -803,25 +880,38 @@ class TestCrossHandlerInteraction:
         }
 
         with patch("src.mqtt.handlers.config_handler.resilient_session") as mock_session:
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
             mock_db = MagicMock()
-            mock_db.commit = AsyncMock()  # session.commit() is awaited
+            mock_db.execute = AsyncMock(return_value=mock_result)
+            mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.refresh = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch("src.mqtt.handlers.config_handler.AuditLogRepository") as mock_audit_class:
-                mock_audit = MagicMock()
-                mock_audit.log_config_response = AsyncMock()
-                mock_audit_class.return_value = mock_audit
+            with patch(
+                "src.mqtt.handlers.config_handler.CommandContractRepository"
+            ) as mock_contract_class:
+                mock_contract_class.return_value.upsert_terminal_event_authority = AsyncMock(
+                    return_value=(MagicMock(), False)
+                )
 
-                with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
-                    mock_ws = AsyncMock()
-                    mock_ws.broadcast = AsyncMock()
-                    mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+                with patch("src.mqtt.handlers.config_handler.AuditLogRepository") as mock_audit_class:
+                    mock_audit = MagicMock()
+                    mock_audit.log_config_response = AsyncMock()
+                    mock_audit_class.return_value = mock_audit
 
-                    config_result = await config_handler.handle_config_ack(
-                        config_topic, config_payload
-                    )
-                    assert config_result is True
+                    with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                        mock_ws = AsyncMock()
+                        mock_ws.broadcast = AsyncMock()
+                        mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+
+                        config_result = await config_handler.handle_config_ack(
+                            config_topic, config_payload
+                        )
+                        assert config_result is True
 
         # Then: LWT arrives (device disconnected during error handling)
         lwt_handler = get_lwt_handler()
@@ -832,8 +922,14 @@ class TestCrossHandlerInteraction:
         }
 
         with patch("src.mqtt.handlers.lwt_handler.resilient_session") as mock_session:
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
             mock_db = MagicMock()
-            mock_db.commit = AsyncMock()  # session.commit() is awaited
+            mock_db.execute = AsyncMock(return_value=mock_result)
+            mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.refresh = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -854,13 +950,20 @@ class TestCrossHandlerInteraction:
                     mock_audit.log_device_event = AsyncMock()
                     mock_audit_class.return_value = mock_audit
 
-                    with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
-                        mock_ws = AsyncMock()
-                        mock_ws.broadcast = AsyncMock()
-                        mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+                    with patch(
+                        "src.mqtt.handlers.lwt_handler.CommandContractRepository"
+                    ) as mock_contract_class:
+                        mock_contract_class.return_value.upsert_terminal_event_authority = (
+                            AsyncMock(return_value=(None, False))
+                        )
 
-                        lwt_result = await lwt_handler.handle_lwt(lwt_topic, lwt_payload)
+                        with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                            mock_ws = AsyncMock()
+                            mock_ws.broadcast = AsyncMock()
+                            mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
 
-                        # Both handlers should succeed independently
-                        assert lwt_result is True
-                        mock_repo.update_status.assert_called_once_with(esp_id, "offline")
+                            lwt_result = await lwt_handler.handle_lwt(lwt_topic, lwt_payload)
+
+                            # Both handlers should succeed independently
+                            assert lwt_result is True
+                            mock_repo.update_status.assert_called_once_with(esp_id, "offline")

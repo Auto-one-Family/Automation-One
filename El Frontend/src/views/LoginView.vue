@@ -16,7 +16,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { useWebSocket } from '@/composables/useWebSocket'
-import { LogIn, Eye, EyeOff, AlertCircle, Cpu } from 'lucide-vue-next'
+import { resolvePostLoginRedirect } from '@/utils/redirectContract'
+import { LogIn, Eye, EyeOff, AlertCircle, Cpu, Check } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -67,6 +68,13 @@ const connectionDotClass = computed(() => {
   }
 })
 
+const footerStatusText = computed(() => {
+  if (!authStore.accessToken) return 'Anmeldung erforderlich'
+  if (isConnected.value) return 'God-Kaiser Server'
+  if (connectionStatus.value === 'connecting') return 'Verbinde...'
+  return 'Server getrennt'
+})
+
 async function handleLogin() {
   if (!isValid.value) return
 
@@ -83,8 +91,8 @@ async function handleLogin() {
     loginSuccess.value = true
     await new Promise(r => setTimeout(r, 450))
 
-    const redirect = route.query.redirect as string
-    router.push(redirect || '/')
+    const targetPath = resolvePostLoginRedirect(route.query.redirect, '/')
+    router.push(targetPath)
   } catch {
     // Error is handled in store
   }
@@ -196,22 +204,23 @@ const particles = Array.from({ length: 18 }, (_, i) => ({
           </div>
 
           <!-- Remember Me -->
-          <div class="login-form__row">
+          <label for="remember" class="login-form__row login-form__checkbox-wrap">
             <input
               id="remember"
               v-model="rememberMe"
               type="checkbox"
-              class="login-form__checkbox"
+              class="login-form__checkbox-input"
             />
-            <label for="remember" class="login-form__checkbox-label">
-              Angemeldet bleiben (7 Tage)
-            </label>
-          </div>
+            <span class="login-form__checkbox-box" aria-hidden="true">
+              <Check class="login-form__checkbox-icon" />
+            </span>
+            <span class="login-form__checkbox-label">Angemeldet bleiben (7 Tage)</span>
+          </label>
 
           <!-- Submit -->
           <button
             type="submit"
-            class="login-form__submit btn-primary"
+            class="login-form__submit btn btn-primary"
             :disabled="!isValid || authStore.isLoading"
           >
             <span v-if="authStore.isLoading" class="login-form__submit-content">
@@ -233,7 +242,7 @@ const particles = Array.from({ length: 18 }, (_, i) => ({
       <footer class="login-footer login-entrance login-entrance--3">
         <span class="login-footer__dot" :class="connectionDotClass" />
         <span class="login-footer__status">
-          {{ isConnected ? 'God-Kaiser Server' : connectionStatus === 'connecting' ? 'Verbinde...' : 'Server getrennt' }}
+          {{ footerStatusText }}
         </span>
         <template v-if="isConnected && serverHealth">
           <span class="login-footer__sep">·</span>
@@ -533,14 +542,70 @@ const particles = Array.from({ length: 18 }, (_, i) => ({
   gap: var(--space-2);
 }
 
-.login-form__checkbox {
-  width: 1rem;
-  height: 1rem;
+.login-form__checkbox-wrap {
+  min-height: 44px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.login-form__checkbox-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.login-form__checkbox-box {
+  width: 1.125rem;
+  height: 1.125rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border);
   background-color: var(--color-bg-tertiary);
-  cursor: pointer;
-  accent-color: var(--color-iridescent-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.login-form__checkbox-icon {
+  width: 0.75rem;
+  height: 0.75rem;
+  color: var(--color-bg-primary);
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.login-form__checkbox-wrap:hover .login-form__checkbox-box {
+  border-color: rgba(129, 140, 248, 0.7);
+}
+
+.login-form__checkbox-input:focus-visible + .login-form__checkbox-box {
+  border-color: var(--color-iridescent-2);
+  box-shadow:
+    0 0 0 2px var(--color-bg-primary),
+    0 0 0 4px rgba(129, 140, 248, 0.32),
+    0 0 12px rgba(96, 165, 250, 0.18);
+}
+
+.login-form__checkbox-input:checked + .login-form__checkbox-box {
+  border-color: var(--color-iridescent-2);
+  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-3));
+}
+
+.login-form__checkbox-input:checked + .login-form__checkbox-box .login-form__checkbox-icon {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .login-form__checkbox-label {

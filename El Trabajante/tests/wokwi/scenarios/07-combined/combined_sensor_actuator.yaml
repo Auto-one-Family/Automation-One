@@ -7,7 +7,7 @@ name: Combined Sensor-Actuator Flow Test
 version: 1
 steps:
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # Sensors active - data published
   - wait-serial: "Published"

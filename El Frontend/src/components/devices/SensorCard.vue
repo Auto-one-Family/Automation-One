@@ -144,13 +144,13 @@ function toggleVirtualInfo(event: Event): void {
   showVirtualInfo.value = !showVirtualInfo.value
 }
 
-// Subzone badge (Phase 2.2): "Keine Subzone" when null/empty
+// Subzone badge (Phase 2.2): canonical fallback "Zone-weit" when null/empty
 const subzoneLabel = computed(() => {
   const name = props.sensor.subzone_name ?? ''
   const id = props.sensor.subzone_id ?? ''
   if (typeof name === 'string' && name.trim()) return name
   if (typeof id === 'string' && id.trim()) return id
-  return 'Keine Subzone'
+  return 'Zone-weit'
 })
 
 // Mobile sensor context (6.7)

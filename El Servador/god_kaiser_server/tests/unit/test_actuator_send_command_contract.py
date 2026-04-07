@@ -10,12 +10,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 from src.db.models.actuator import ActuatorConfig, ActuatorState
-from src.db.models.command_contract import CommandIntent
+from src.db.models.command_contract import CommandIntent, CommandOutcome
 from src.db.models.esp import ESPDevice
 from src.db.repositories.actuator_repo import ActuatorRepository
 from src.db.repositories.audit_log_repo import AuditLogRepository
 from src.services.actuator_service import ActuatorService
-from src.services.safety_service import SafetyCheckResult
+from src.services.safety_service import SafetyCheckResult, SafetyService
+
+
+@pytest.fixture(autouse=True)
+def clear_emergency_stop_state():
+    """Reset SafetyService global E-Stop state before and after each test."""
+    SafetyService._global_emergency_stop_active.clear()
+    yield
+    SafetyService._global_emergency_stop_active.clear()
 
 
 @pytest.fixture
@@ -188,7 +196,7 @@ async def test_send_command_propagates_safety_warnings_when_valid(
 
 
 @pytest.mark.asyncio
-async def test_send_command_midflow_exception_aborts_followup_db_ops(
+async def test_send_command_midflow_exception_records_transport_fail(
     db_session,
     test_engine,
     cmd_test_esp_actuator,
@@ -209,15 +217,11 @@ async def test_send_command_midflow_exception_aborts_followup_db_ops(
     )
 
     with _patch_ws(), patch.object(
-        ActuatorRepository,
-        "log_command",
+        ActuatorService,
+        "_persist_publish_success",
         new_callable=AsyncMock,
         side_effect=RuntimeError("forced mid-flow failure"),
-    ), patch.object(
-        AuditLogRepository,
-        "log_actuator_command",
-        new_callable=AsyncMock,
-    ) as audit_log_mock:
+    ):
         result = await svc.send_command(
             esp_id=esp.device_id,
             gpio=ac.gpio,
@@ -228,7 +232,15 @@ async def test_send_command_midflow_exception_aborts_followup_db_ops(
 
     assert result.success is False
     assert result.command_sent is False
-    assert audit_log_mock.await_count == 0
+    transport_intent_id = f"terminal:command_transport_fail:{result.correlation_id.lower()}"
+    terminal_row = (
+        await db_session.execute(
+            select(CommandOutcome).where(CommandOutcome.intent_id == transport_intent_id)
+        )
+    ).scalar_one_or_none()
+    assert terminal_row is not None
+    assert terminal_row.outcome == "failed"
+    assert terminal_row.is_final is True
 
 
 @pytest.mark.asyncio
@@ -292,3 +304,137 @@ async def test_send_command_parallel_with_stale_injected_session_uses_fresh_cont
     assert all(result.success for result in results)
     assert all(result.command_sent for result in results)
     assert "closed transaction" not in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_send_command_ignores_injected_safetyservice_session_and_uses_fresh_isolation(
+    db_session,
+    test_engine,
+    cmd_test_esp_actuator,
+):
+    esp, ac = cmd_test_esp_actuator
+    actuator_repo = ActuatorRepository(db_session)
+    esp_repo = MagicMock()
+    safety_service = SafetyService(actuator_repo, esp_repo)
+    safety_service.validate_actuator_command = AsyncMock(
+        side_effect=RuntimeError("must_not_use_injected_safety_service")
+    )
+
+    publisher = MagicMock()
+    publisher.publish_actuator_command.return_value = True
+    svc = ActuatorService(
+        actuator_repo,
+        safety_service,
+        publisher,
+        session_factory=_test_session_factory(test_engine),
+    )
+
+    with _patch_ws():
+        result = await svc.send_command(
+            esp_id=esp.device_id,
+            gpio=ac.gpio,
+            command="ON",
+            value=1.0,
+            issued_by="parallel_isolation_test",
+        )
+
+    assert result.success is True
+    assert result.command_sent is True
+    safety_service.validate_actuator_command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_command_pre_dispatch_exception_persists_terminal_fail(
+    db_session,
+    test_engine,
+    cmd_test_esp_actuator,
+):
+    esp, ac = cmd_test_esp_actuator
+    actuator_repo = ActuatorRepository(db_session)
+    safety = MagicMock()
+    safety.validate_actuator_command = AsyncMock(
+        return_value=SafetyCheckResult(valid=True, warnings=None)
+    )
+    publisher = MagicMock()
+    publisher.publish_actuator_command.return_value = True
+    svc = ActuatorService(
+        actuator_repo,
+        safety,
+        publisher,
+        session_factory=_test_session_factory(test_engine),
+    )
+
+    with _patch_ws(), patch.object(
+        ActuatorService,
+        "_load_command_context",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("forced pre-dispatch failure"),
+    ):
+        result = await svc.send_command(
+            esp_id=esp.device_id,
+            gpio=ac.gpio,
+            command="ON",
+            value=1.0,
+            issued_by="logic:test_rule",
+        )
+
+    assert result.success is False
+    assert result.command_sent is False
+    terminal_row = (
+        await db_session.execute(
+            select(CommandOutcome).where(CommandOutcome.intent_id == result.correlation_id)
+        )
+    ).scalar_one_or_none()
+    assert terminal_row is not None
+    assert terminal_row.outcome == "failed"
+    assert terminal_row.is_final is True
+    assert terminal_row.code == "SEND_COMMAND_EXCEPTION_PRE_DISPATCH"
+
+
+@pytest.mark.asyncio
+async def test_send_command_post_dispatch_exception_persists_transport_fail_authority(
+    db_session,
+    test_engine,
+    cmd_test_esp_actuator,
+):
+    esp, ac = cmd_test_esp_actuator
+    actuator_repo = ActuatorRepository(db_session)
+    safety = MagicMock()
+    safety.validate_actuator_command = AsyncMock(
+        return_value=SafetyCheckResult(valid=True, warnings=None)
+    )
+    publisher = MagicMock()
+    publisher.publish_actuator_command.return_value = True
+    svc = ActuatorService(
+        actuator_repo,
+        safety,
+        publisher,
+        session_factory=_test_session_factory(test_engine),
+    )
+
+    with _patch_ws(), patch.object(
+        ActuatorService,
+        "_persist_publish_success",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("forced post-dispatch persistence failure"),
+    ):
+        result = await svc.send_command(
+            esp_id=esp.device_id,
+            gpio=ac.gpio,
+            command="ON",
+            value=1.0,
+            issued_by="logic:test_rule",
+        )
+
+    assert result.success is False
+    assert result.command_sent is False
+    transport_intent_id = f"terminal:command_transport_fail:{result.correlation_id.lower()}"
+    transport_row = (
+        await db_session.execute(
+            select(CommandOutcome).where(CommandOutcome.intent_id == transport_intent_id)
+        )
+    ).scalar_one_or_none()
+    assert transport_row is not None
+    assert transport_row.outcome == "failed"
+    assert transport_row.is_final is True
+    assert transport_row.code == "SEND_COMMAND_EXCEPTION_POST_DISPATCH"

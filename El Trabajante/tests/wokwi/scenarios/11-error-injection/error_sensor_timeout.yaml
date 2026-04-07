@@ -12,7 +12,9 @@ name: Error Injection - Sensor Read Timeout
 version: 1
 steps:
   - wait-serial: "Phase 5: Actuator System READY"
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "REGISTRATION"
+  - wait-serial: "heartbeat"
   # External MQTT config injection happens here (sleep 25 in CI)
   # Sensor on GPIO 32 has no DS18B20 attached → config fails
   - wait-serial: "ConfigResponse published"

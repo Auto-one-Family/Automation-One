@@ -93,6 +93,7 @@ void processActuatorCommandQueue(uint8_t max_items) {
         CommandAdmissionContext admission_context{
             mqttClient.isRegistrationConfirmed(),
             g_system_config.current_state == STATE_CONFIG_PENDING_AFTER_RESET,
+            g_system_config.current_state == STATE_PENDING_APPROVAL,
             g_system_config.current_state == STATE_SAFE_MODE ||
                 g_system_config.current_state == STATE_SAFE_MODE_PROVISIONING ||
                 g_system_config.current_state == STATE_ERROR,

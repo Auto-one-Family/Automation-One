@@ -20,7 +20,7 @@ steps:
   - wait-serial: "Default Resolution: 12 bits"
 
   # Wait for system ready
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # Configure PWM actuator and verify duty range
   # Topic: kaiser/god/esp/{esp_id}/config

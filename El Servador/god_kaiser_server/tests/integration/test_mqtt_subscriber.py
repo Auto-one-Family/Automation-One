@@ -260,6 +260,70 @@ class TestErrorIsolation:
                 subscriber.shutdown(wait=False)
 
 
+class TestShutdownRoutingGuard:
+    """Regression: _route_message must not submit after executor shutdown."""
+
+    def test_route_message_drops_during_shutdown_without_error_noise(self):
+        with patch("src.mqtt.subscriber.MQTTClient") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client_class.get_instance.return_value = mock_client
+
+            subscriber = Subscriber(max_workers=2)
+            try:
+
+                async def handler(topic, payload):
+                    return True
+
+                subscriber.register_handler("kaiser/god/esp/+/system/heartbeat", handler)
+                subscriber._is_shutting_down = True
+                subscriber.executor.submit = MagicMock(
+                    side_effect=RuntimeError("cannot schedule new futures after shutdown")
+                )
+
+                failed_before = subscriber.messages_failed
+                processed_before = subscriber.messages_processed
+                subscriber._route_message(
+                    "kaiser/god/esp/ESP_1/system/heartbeat",
+                    '{"esp_id":"ESP_1","seq":1}',
+                )
+
+                subscriber.executor.submit.assert_not_called()
+                assert subscriber.messages_failed == failed_before
+                assert subscriber.messages_processed == processed_before
+            finally:
+                subscriber.shutdown(wait=False)
+
+    def test_route_message_handles_submit_runtimeerror_as_shutdown_drop(self):
+        with patch("src.mqtt.subscriber.MQTTClient") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client_class.get_instance.return_value = mock_client
+
+            subscriber = Subscriber(max_workers=2)
+            try:
+
+                async def handler(topic, payload):
+                    return True
+
+                subscriber.register_handler("kaiser/god/esp/+/system/heartbeat", handler)
+                subscriber._is_shutting_down = False
+                subscriber.executor.submit = MagicMock(
+                    side_effect=RuntimeError("cannot schedule new futures after shutdown")
+                )
+
+                failed_before = subscriber.messages_failed
+                processed_before = subscriber.messages_processed
+                subscriber._route_message(
+                    "kaiser/god/esp/ESP_1/system/heartbeat",
+                    '{"esp_id":"ESP_1","seq":1}',
+                )
+
+                subscriber.executor.submit.assert_called_once()
+                assert subscriber.messages_failed == failed_before
+                assert subscriber.messages_processed == processed_before
+            finally:
+                subscriber.shutdown(wait=False)
+
+
 class TestEventLoopBinding:
     """Test event loop binding (Bug O fix)."""
 

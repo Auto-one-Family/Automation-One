@@ -24,10 +24,16 @@ from ..db.models.calibration_session import CalibrationSession, CalibrationStatu
 from ..db.repositories import ESPRepository, SensorRepository
 from ..db.repositories.calibration_session_repo import CalibrationSessionRepository
 from ..sensors.sensor_type_registry import normalize_sensor_type
+from .calibration_payloads import (
+    build_canonical_calibration_result,
+    canonicalize_calibration_data,
+)
 
 logger = get_logger(__name__)
 _SESSION_LOCKS: dict[uuid.UUID, asyncio.Lock] = {}
 _SESSION_LOCKS_GUARD = asyncio.Lock()
+_SENSOR_SESSION_LOCKS: dict[tuple[str, int, str], asyncio.Lock] = {}
+_SENSOR_SESSION_LOCKS_GUARD = asyncio.Lock()
 _ROLE_PENDING_OVERWRITES: dict[tuple[uuid.UUID, str], int] = {}
 _ROLE_PENDING_GUARD = asyncio.Lock()
 _OVERWRITE_ARBITRATION_WINDOW_SECONDS = 0.100
@@ -132,6 +138,18 @@ class CalibrationService:
         async with lock:
             yield
 
+    @staticmethod
+    @asynccontextmanager
+    async def _sensor_lock(sensor_key: tuple[str, int, str]):
+        """Serialize start-session race for one logical sensor key."""
+        async with _SENSOR_SESSION_LOCKS_GUARD:
+            lock = _SENSOR_SESSION_LOCKS.get(sensor_key)
+            if lock is None:
+                lock = asyncio.Lock()
+                _SENSOR_SESSION_LOCKS[sensor_key] = lock
+        async with lock:
+            yield
+
     # ── S-P6: WebSocket broadcast helper ──────────────────────────────────
 
     @staticmethod
@@ -175,40 +193,41 @@ class CalibrationService:
         # Normalize sensor type (S-P1)
         normalized_type = normalize_sensor_type(sensor_type)
 
-        # Check for existing active session — expire it
-        existing = await self.repo.get_active_session(esp_id, gpio, normalized_type)
-        if existing:
-            logger.info(
-                "Expiring existing active calibration session %s for %s/GPIO%d",
-                existing.id, esp_id, gpio,
-            )
-            await self.repo.update_status(
-                existing.id,
-                CalibrationStatus.EXPIRED,
-                failure_reason="Superseded by new calibration session",
-            )
+        async with self._sensor_lock((esp_id, gpio, normalized_type)):
+            # Check for existing active session — expire it
+            existing = await self.repo.get_active_session(esp_id, gpio, normalized_type)
+            if existing:
+                logger.info(
+                    "Expiring existing active calibration session %s for %s/GPIO%d",
+                    existing.id, esp_id, gpio,
+                )
+                await self.repo.update_status(
+                    existing.id,
+                    CalibrationStatus.EXPIRED,
+                    failure_reason="Superseded by new calibration session",
+                )
 
-        # Find sensor config (optional — may not exist yet for unconfigured sensors)
-        sensor_config_id = None
-        esp_device = await self.esp_repo.get_by_device_id(esp_id)
-        if esp_device:
-            sensor = await self.sensor_repo.get_by_esp_gpio_and_type(
-                esp_device.id, gpio, normalized_type,
-            )
-            if sensor:
-                sensor_config_id = sensor.id
+            # Find sensor config (optional — may not exist yet for unconfigured sensors)
+            sensor_config_id = None
+            esp_device = await self.esp_repo.get_by_device_id(esp_id)
+            if esp_device:
+                sensor = await self.sensor_repo.get_by_esp_gpio_and_type(
+                    esp_device.id, gpio, normalized_type,
+                )
+                if sensor:
+                    sensor_config_id = sensor.id
 
-        # Create session
-        cal_session = await self.repo.create(
-            esp_id=esp_id,
-            gpio=gpio,
-            sensor_type=normalized_type,
-            sensor_config_id=sensor_config_id,
-            method=method,
-            expected_points=expected_points,
-            initiated_by=initiated_by,
-            correlation_id=correlation_id,
-        )
+            # Create session
+            cal_session = await self.repo.create(
+                esp_id=esp_id,
+                gpio=gpio,
+                sensor_type=normalized_type,
+                sensor_config_id=sensor_config_id,
+                method=method,
+                expected_points=expected_points,
+                initiated_by=initiated_by,
+                correlation_id=correlation_id,
+            )
 
         logger.info(
             "Started calibration session %s: %s/GPIO%d type=%s method=%s",
@@ -542,7 +561,14 @@ class CalibrationService:
             )
             raise CalibrationError(f"Calibration computation failed: {e}", "COMPUTE_FAILED")
 
-        updated = await self.repo.set_result(session_id, result)
+        canonical_result = build_canonical_calibration_result(
+            method=cal_session.method,
+            points=points,
+            derived=result,
+            source="calibration_session_finalize",
+        )
+
+        updated = await self.repo.set_result(session_id, canonical_result)
         if not updated:
             raise CalibrationError("Failed to set result", "SET_RESULT_FAILED")
 
@@ -560,7 +586,7 @@ class CalibrationService:
                 "gpio": cal_session.gpio,
                 "sensor_type": cal_session.sensor_type,
                 "status": updated.status.value if updated else "unknown",
-                "result": result,
+                "result": canonical_result,
             },
             correlation_id=cal_session.correlation_id,
         )
@@ -592,21 +618,64 @@ class CalibrationService:
         if not cal_session.calibration_result:
             raise CalibrationError("No calibration result to apply", "NO_RESULT")
 
-        # Apply to sensor config if we have a reference
-        if cal_session.sensor_config_id:
-            sensor = await self.sensor_repo.get_by_id(cal_session.sensor_config_id)
-            if sensor:
-                sensor.calibration_data = cal_session.calibration_result
-                await self.session.flush()
-                logger.info(
-                    "Applied calibration to sensor %s (session %s)",
-                    sensor.id, session_id,
-                )
-            else:
-                logger.warning(
-                    "Sensor config %s not found for session %s — marking applied anyway",
-                    cal_session.sensor_config_id, session_id,
-                )
+        if not cal_session.sensor_config_id:
+            await self.repo.update_status(
+                session_id,
+                CalibrationStatus.FAILED,
+                failure_reason="Apply blocked: no sensor_config_id bound to session",
+            )
+            raise CalibrationError(
+                "Cannot apply without bound sensor configuration",
+                "APPLY_PERSISTENCE_REQUIRED",
+            )
+
+        sensor = await self.sensor_repo.get_by_id(cal_session.sensor_config_id)
+        if not sensor:
+            await self.repo.update_status(
+                session_id,
+                CalibrationStatus.FAILED,
+                failure_reason="Apply failed: sensor configuration not found",
+            )
+            raise CalibrationError(
+                "Target sensor configuration not found for apply",
+                "APPLY_PERSISTENCE_REQUIRED",
+            )
+
+        canonical_payload = canonicalize_calibration_data(
+            cal_session.calibration_result,
+            default_method=cal_session.method,
+            source="calibration_session_apply",
+        )
+        if canonical_payload is None:
+            await self.repo.update_status(
+                session_id,
+                CalibrationStatus.FAILED,
+                failure_reason="Apply failed: invalid calibration_result payload",
+            )
+            raise CalibrationError(
+                "Invalid calibration result payload for apply",
+                "APPLY_PERSISTENCE_REQUIRED",
+            )
+
+        try:
+            sensor.calibration_data = canonical_payload
+            await self.session.flush()
+            await self.session.refresh(sensor)
+        except Exception as exc:
+            await self.repo.update_status(
+                session_id,
+                CalibrationStatus.FAILED,
+                failure_reason=f"Apply persistence failed: {exc}",
+            )
+            raise CalibrationError(
+                "Calibration persistence write failed",
+                "APPLY_PERSISTENCE_REQUIRED",
+            ) from exc
+
+        logger.info(
+            "Applied calibration to sensor %s (session %s)",
+            sensor.id, session_id,
+        )
 
         updated = await self.repo.update_status(session_id, CalibrationStatus.APPLIED)
         if not updated:
@@ -621,7 +690,7 @@ class CalibrationService:
                 "gpio": cal_session.gpio,
                 "sensor_type": cal_session.sensor_type,
                 "status": "APPLIED",
-                "calibration_result": cal_session.calibration_result,
+                "calibration_result": canonical_payload,
             },
             correlation_id=cal_session.correlation_id,
         )

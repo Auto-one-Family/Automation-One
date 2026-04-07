@@ -21,7 +21,9 @@ name: Error Injection - Emergency Cascade
 version: 1
 steps:
   - wait-serial: "Phase 5: Actuator System READY"
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
+  - wait-serial: "REGISTRATION"
+  - wait-serial: "heartbeat"
   # External config + actuator activation + emergency cascade via helper script
   - wait-serial: "ConfigResponse published"
   - wait-serial: "BROADCAST EMERGENCY-STOP RECEIVED"

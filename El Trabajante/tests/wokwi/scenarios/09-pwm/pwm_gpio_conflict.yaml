@@ -8,7 +8,7 @@ name: PWM GPIO Conflict Detection
 version: 1
 steps:
   # Wait for system ready
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
   - wait-serial: "heartbeat"
 
   # === First: Configure a Sensor on GPIO 25 ===

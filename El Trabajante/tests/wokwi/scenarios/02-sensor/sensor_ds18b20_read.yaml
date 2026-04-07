@@ -7,7 +7,7 @@ name: DS18B20 Sensor Read Test
 version: 1
 steps:
   # MQTT connected (setup Phase 2)
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # OneWire bus initialization logged (setup Phase 3 - after MQTT, before loop)
   - wait-serial: "OneWire Bus Manager"

@@ -1414,6 +1414,68 @@ async def reject_device(
     )
 
 
+@router.post(
+    "/devices/{esp_id}/set-pending",
+    response_model=ESPApprovalResponse,
+    responses={
+        200: {"description": "Device moved to pending approval"},
+        404: {"description": "Device not found"},
+        400: {"description": "Device cannot be moved to pending approval"},
+    },
+    summary="Move ESP to pending approval",
+    description="Forces a device back to pending_approval for deterministic registration handshake tests.",
+)
+async def set_device_pending(
+    esp_id: str,
+    db: DBSession,
+    current_user: OperatorUser,
+) -> ESPApprovalResponse:
+    esp_repo = ESPRepository(db)
+    device = await esp_repo.get_by_device_id(esp_id)
+
+    if not device:
+        raise ESPNotFoundError(esp_id)
+
+    if device.status in ("deleted",):
+        raise ValidationException(
+            "status", f"Device '{esp_id}' cannot be moved to pending approval (status: {device.status})"
+        )
+
+    old_status = device.status
+    device.status = "pending_approval"
+    device.approved_at = None
+    device.approved_by = None
+    device.rejection_reason = None
+
+    try:
+        audit_repo = AuditLogRepository(db)
+        await audit_repo.log_device_event(
+            esp_id=esp_id,
+            event_type=AuditEventType.DEVICE_REDISCOVERED,
+            status="success",
+            message=f"Device moved to pending_approval by {current_user.username}",
+            details={
+                "changed_by": current_user.username,
+                "changed_by_id": str(current_user.id),
+                "previous_status": old_status,
+                "new_status": "pending_approval",
+            },
+            severity=AuditSeverity.INFO,
+        )
+    except Exception as audit_error:
+        logger.warning(f"Failed to audit log device_pending_transition: {audit_error}")
+
+    await db.commit()
+
+    logger.info(f"Device moved to pending_approval: {esp_id} by {current_user.username}")
+    return ESPApprovalResponse(
+        success=True,
+        message=f"Device '{esp_id}' moved to pending approval",
+        device_id=esp_id,
+        status="pending_approval",
+    )
+
+
 # =========================================================================
 # ALERT CONFIGURATION (Phase 4A.7 — Device-Level Alert Suppression)
 # =========================================================================

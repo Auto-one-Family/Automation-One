@@ -9,7 +9,7 @@ name: PWM Channel Duplicate GPIO Test
 version: 1
 steps:
   # Wait for system ready
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # Wait for heartbeat
   - wait-serial: "heartbeat"

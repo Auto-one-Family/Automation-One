@@ -6,12 +6,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import and_, delete, func, or_, select, tuple_
+from sqlalchemy import and_, delete, func, or_, select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.logging_config import get_logger
+from ...services.calibration_payloads import canonicalize_calibration_data
 from ..models.sensor import SensorConfig, SensorData
 from ..models.esp import ESPDevice
 from ..models.enums import DataSource
@@ -805,7 +806,10 @@ class SensorRepository(BaseRepository[SensorConfig]):
         if not sensor_config:
             return None
 
-        sensor_config.calibration_data = calibration_data
+        sensor_config.calibration_data = canonicalize_calibration_data(
+            calibration_data,
+            source="sensor_repo_update",
+        )
         await self.session.flush()
         await self.session.refresh(sensor_config)
         return sensor_config
@@ -845,7 +849,59 @@ class SensorRepository(BaseRepository[SensorConfig]):
             sensor_config = configs[0]
         if not sensor_config:
             return None
-        return sensor_config.calibration_data
+        return canonicalize_calibration_data(
+            sensor_config.calibration_data,
+            source="sensor_repo_read",
+        )
+
+    async def get_calibration_key_usage(self) -> dict[str, int]:
+        """
+        Analyze calibration_data keys defensively (NULL/json-null/object safe).
+
+        Returns:
+            Dict mapping calibration key -> number of sensor rows containing that key.
+        """
+        try:
+            dialect_name = self.session.bind.dialect.name
+        except (AttributeError, TypeError):
+            dialect_name = ""
+
+        if dialect_name == "postgresql":
+            stmt = text(
+                """
+                SELECT k.key, COUNT(*) AS usage_count
+                FROM sensor_configs sc
+                CROSS JOIN LATERAL jsonb_object_keys(
+                    CASE
+                        WHEN sc.calibration_data IS NULL THEN NULL::jsonb
+                        WHEN jsonb_typeof(sc.calibration_data::jsonb) = 'object' THEN sc.calibration_data::jsonb
+                        ELSE NULL::jsonb
+                    END
+                ) AS k(key)
+                GROUP BY k.key
+                ORDER BY k.key
+                """
+            )
+        else:
+            # SQLite-compatible fallback for unit tests and local analysis.
+            stmt = text(
+                """
+                SELECT je.key AS key, COUNT(*) AS usage_count
+                FROM sensor_configs sc
+                JOIN json_each(
+                    CASE
+                        WHEN sc.calibration_data IS NULL THEN NULL
+                        WHEN json_type(sc.calibration_data) = 'object' THEN sc.calibration_data
+                        ELSE NULL
+                    END
+                ) AS je
+                GROUP BY je.key
+                ORDER BY je.key
+                """
+            )
+
+        result = await self.session.execute(stmt)
+        return {str(row.key): int(row.usage_count) for row in result}
 
     async def get_stats(
         self,

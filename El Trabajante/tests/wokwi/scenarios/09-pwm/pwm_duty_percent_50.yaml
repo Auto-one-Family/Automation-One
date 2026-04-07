@@ -8,7 +8,7 @@ name: PWM Duty Cycle 50 Percent
 version: 1
 steps:
   # Wait for system ready
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # Wait for heartbeat
   - wait-serial: "heartbeat"

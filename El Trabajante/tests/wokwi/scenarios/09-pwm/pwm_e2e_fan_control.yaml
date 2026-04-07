@@ -7,7 +7,7 @@ name: PWM E2E Fan Control Simulation
 version: 1
 steps:
   # Wait for system ready
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
   - wait-serial: "heartbeat"
 
   # === Configure PWM Fan ===

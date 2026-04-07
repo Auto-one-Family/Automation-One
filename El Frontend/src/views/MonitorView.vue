@@ -21,6 +21,7 @@ import { useZoneStore } from '@/shared/stores/zone.store'
 import { useDeviceContextStore } from '@/shared/stores/deviceContext.store'
 import { useZoneGrouping } from '@/composables/useZoneGrouping'
 import { useZoneKPIs } from '@/composables/useZoneKPIs'
+import type { ZoneHealthStatus } from '@/composables/useZoneKPIs'
 import { useSubzoneResolver } from '@/composables/useSubzoneResolver'
 import { useSparklineCache } from '@/composables/useSparklineCache'
 import { useWebSocket } from '@/composables/useWebSocket'
@@ -40,7 +41,7 @@ import { zonesApi } from '@/api/zones'
 import type { SensorReading, SensorStats } from '@/types'
 import type { ZoneMonitorData } from '@/types/monitor'
 import type { SensorWithContext, ActuatorWithContext } from '@/composables/useZoneGrouping'
-import { LayoutDashboard, Download, Clock, TrendingUp, TrendingDown, Minus, ListFilter } from 'lucide-vue-next'
+import { Download, Clock, TrendingUp, TrendingDown, Minus, ListFilter } from 'lucide-vue-next'
 import ZoneTileCard from '@/components/monitor/ZoneTileCard.vue'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import TimeRangeSelector, { type TimePreset } from '@/components/charts/TimeRangeSelector.vue'
@@ -67,7 +68,7 @@ ChartJS.register(
 )
 import {
   ArrowLeft, Activity, AlertTriangle,
-  ChevronLeft, ChevronRight, Settings,
+  ChevronLeft, ChevronRight,
 } from 'lucide-vue-next'
 import type { MockSensor } from '@/types'
 import ViewTabBar from '@/components/common/ViewTabBar.vue'
@@ -107,9 +108,34 @@ const {
   lastZoneApiSuccessAt,
 } = useZoneKPIs({ filter: selectedZoneFilter })
 
+const zoneFilterOptions = computed(() => {
+  const fromEntities = zoneStore.zoneEntities.map(zone => ({
+    zoneId: zone.zone_id,
+    name: zone.name || zone.zone_id,
+    archived: zone.status === 'archived',
+  }))
+  if (fromEntities.length > 0) {
+    return fromEntities
+  }
+  // Fallback: render zone names from KPI data when ZoneEntity list is not available yet.
+  return zoneKPIs.value.map(zone => ({
+    zoneId: zone.zoneId,
+    name: zone.zoneName || zone.zoneId,
+    archived: false,
+  }))
+})
+
+const activeZoneFilterOptions = computed(() =>
+  zoneFilterOptions.value.filter(zone => !zone.archived),
+)
+
+const archivedZoneFilterOptions = computed(() =>
+  zoneFilterOptions.value.filter(zone => zone.archived),
+)
+
 const isArchivedZoneSelected = computed(() => {
   if (!selectedZoneFilter.value) return false
-  return zoneStore.archivedZones.some(z => z.zone_id === selectedZoneFilter.value)
+  return archivedZoneFilterOptions.value.some(zone => zone.zoneId === selectedZoneFilter.value)
 })
 
 const isZoneFilterActive = computed(() => selectedZoneFilter.value !== null)
@@ -151,7 +177,6 @@ const zoneMonitorError = ref<string | null>(null)
 const zoneMonitorAbort = ref<AbortController | null>(null)
 const lastZoneMonitorApiSuccessAt = ref<number | null>(null)
 const lastDetailApiSuccessAt = ref<number | null>(null)
-const lastRecoverySyncAt = ref<number | null>(null)
 
 // Subzone resolver for fallback (GPIO → subzone map) — lazy: only triggered on API error
 const subzoneResolver = useSubzoneResolver(selectedZoneId, { lazy: true })
@@ -915,18 +940,10 @@ const monitorRecovery = createMonitorRecoveryOrchestrator(async () => {
   if (showSensorDetail.value && selectedDetailSensor.value) {
     await fetchDetailData()
   }
-  lastRecoverySyncAt.value = Date.now()
 })
 
 async function runMonitorRecovery(): Promise<void> {
   await monitorRecovery.trigger()
-}
-
-async function retryMonitorConnectivity(): Promise<void> {
-  if (monitorWs.connectionStatus.value !== 'connected') {
-    await monitorWs.connect()
-  }
-  await runMonitorRecovery()
 }
 
 watch(
@@ -990,21 +1007,6 @@ watch(
 
 // Zone KPI types + logic: see @/composables/useZoneKPIs
 
-// =============================================================================
-// Level 1: System Summary (dynamic subtitle)
-// =============================================================================
-
-const systemSummary = computed(() => {
-  const zones = zoneKPIs.value
-  const zoneCount = zones.length
-  const totalSensors = zones.reduce((sum, z) => sum + z.sensorCount, 0)
-  const activeSensors = zones.reduce((sum, z) => sum + z.activeSensors, 0)
-  const totalAlarms = zones.reduce((sum, z) => sum + z.alarmCount, 0)
-  const totalActuators = zones.reduce((sum, z) => sum + z.actuatorCount, 0)
-  const activeActuators = zones.reduce((sum, z) => sum + z.activeActuators, 0)
-  return { zoneCount, totalSensors, activeSensors, totalAlarms, totalActuators, activeActuators }
-})
-
 const monitorLastApiSuccessAt = computed(() => {
   const candidates = [
     lastZoneApiSuccessAt.value,
@@ -1022,57 +1024,6 @@ const monitorConnectivityState = computed(() => resolveMonitorConnectivityState(
   lastApiSuccessAt: monitorLastApiSuccessAt.value,
 }))
 
-const monitorBannerTitle = computed(() => {
-  switch (monitorConnectivityState.value) {
-    case 'connected':
-      return 'Live aktiv'
-    case 'stale':
-      return 'Live unvollständig, Snapshot aktiv'
-    case 'reconnecting':
-      return 'Reconnect läuft'
-    case 'degraded_api':
-      return 'API degradiert'
-    case 'disconnected':
-      return 'Live-Verbindung getrennt'
-    default:
-      return 'Monitor-Status'
-  }
-})
-
-const monitorBannerMessage = computed(() => {
-  switch (monitorConnectivityState.value) {
-    case 'connected':
-      return 'WebSocket und API sind synchron.'
-    case 'stale':
-      return 'Live-Daten sind verzögert. Bitte Snapshot prüfen und Synchronisierung anstoßen.'
-    case 'reconnecting':
-      return 'Verbindung wird wiederhergestellt. Snapshot bleibt aktiv.'
-    case 'degraded_api':
-      return zoneMonitorError.value || detailError.value || 'API-Datenpfad gestört. Snapshot/Fallback aktiv.'
-    case 'disconnected':
-      return 'Keine Live-Events. Status kann veraltet sein.'
-    default:
-      return ''
-  }
-})
-
-const monitorBannerClass = computed(() => {
-  switch (monitorConnectivityState.value) {
-    case 'connected':
-      return 'monitor-connectivity--connected'
-    case 'stale':
-    case 'reconnecting':
-      return 'monitor-connectivity--warning'
-    default:
-      return 'monitor-connectivity--critical'
-  }
-})
-
-const monitorZoneTileDataMode = computed(() => resolveMonitorDataMode({
-  hasSnapshotBase: true,
-  hasLiveOverlay: true,
-  monitorState: monitorConnectivityState.value,
-}))
 
 const monitorSensorCardDataMode = computed(() => resolveMonitorDataMode({
   hasSnapshotBase: !zoneMonitorError.value,
@@ -1089,11 +1040,6 @@ const monitorActuatorCardDataMode = computed(() => resolveMonitorDataMode({
 const showActuatorSnapshotWarning = computed(() =>
   monitorConnectivityState.value === 'disconnected' || monitorConnectivityState.value === 'degraded_api',
 )
-
-const monitorSyncHint = computed(() => {
-  if (!lastRecoverySyncAt.value) return null
-  return `Stand synchronisiert um ${new Date(lastRecoverySyncAt.value).toLocaleTimeString('de-DE')}`
-})
 
 // =============================================================================
 // L1 Zone Mini-Widgets (Phase 3)
@@ -1336,6 +1282,31 @@ const selectedZoneName = computed(() => {
   const device = espStore.devices.find(d => d.zone_id === selectedZoneId.value)
   return device?.zone_name || selectedZoneId.value
 })
+
+const selectedZoneKpi = computed(() =>
+  zoneKPIs.value.find(zone => zone.zoneId === selectedZoneId.value) ?? null,
+)
+
+const zoneHealthLabelMap: Record<ZoneHealthStatus, string> = {
+  ok: 'Stabil',
+  warning: 'Warnung',
+  alarm: 'Kritisch',
+  empty: 'Leer',
+}
+
+const selectedZoneHealthStatus = computed<ZoneHealthStatus | null>(() =>
+  selectedZoneKpi.value?.healthStatus ?? null,
+)
+
+const selectedZoneHealthLabel = computed(() => {
+  const status = selectedZoneHealthStatus.value
+  if (status == null) return 'Unbekannt'
+  return zoneHealthLabelMap[status]
+})
+
+const selectedZoneHealthReason = computed(() =>
+  selectedZoneKpi.value?.healthReason ?? null,
+)
 
 const zoneSensorCount = computed(() =>
   zoneDeviceGroup.value.reduce((sum, sz) => sum + sz.sensors.length, 0)
@@ -1597,6 +1568,10 @@ function toggleSubzone(subzoneKey: string) {
   }
 }
 
+function shouldShowSubzoneAccordionHeader(subzoneId: string | null): boolean {
+  return filteredSubzones.value.length > 1 || subzoneId !== null
+}
+
 // Apply smart defaults once data becomes available (zoneSensorGroup may be null on initial load)
 const smartDefaultsApplied = ref(false)
 
@@ -1665,11 +1640,6 @@ const nextNavZoneId = computed(() => {
   return idx >= 0 && idx < sortedZoneIds.value.length - 1
     ? sortedZoneIds.value[idx + 1]
     : null
-})
-
-const zonePositionLabel = computed(() => {
-  if (currentZoneIndex.value < 0) return ''
-  return `${currentZoneIndex.value + 1}/${sortedZoneIds.value.length}`
 })
 
 /** L2 inline panels: cross-zone + zone-specific for selectedZoneId (E3) */
@@ -1807,38 +1777,6 @@ function getWorstQualityStatus(sensors: { quality: string }[]): 'good' | 'warnin
   return worst
 }
 
-// Zone alarm count (API when available, else computed from sensors)
-const zoneAlarmCount = computed(() => {
-  const data = zoneMonitorData.value
-  if (data && !zoneMonitorError.value) return data.alarm_count
-  if (zoneDeviceGroup.value.length === 0) return 0
-  let count = 0
-  for (const sz of zoneDeviceGroup.value) {
-    for (const s of sz.sensors) {
-      if (qualityToStatus(s.quality) === 'alarm') count++
-    }
-  }
-  return count
-})
-
-function handleClaimLayout(layoutId: string) {
-  dashStore.claimAutoLayout(layoutId)
-  router.push({ name: 'editor-dashboard', params: { dashboardId: layoutId } })
-}
-
-/** Compact date suffix for dashboard names (e.g. " (12.02.)") — ensures uniqueness */
-function getDashboardNameSuffix(dash: { createdAt?: string; id?: string }): string {
-  if (dash.createdAt) {
-    const d = formatDate(dash.createdAt)
-    if (d !== '-') {
-      const short = d.slice(0, 5)
-      if (short) return ` (${short}.)`
-    }
-  }
-  if (dash.id && dash.id.length >= 6) return ` #${dash.id.slice(-6)}`
-  return ''
-}
-
 // =============================================================================
 // FAB Quick-Add Widget Dialog (D3)
 // =============================================================================
@@ -1857,21 +1795,6 @@ function handleFabWidgetSelected(widgetType: string) {
   <div class="monitor-view">
     <!-- View Tab Bar (Hardware / Monitor / Dashboard) -->
     <ViewTabBar />
-
-    <div :class="['monitor-connectivity', monitorBannerClass]">
-      <div class="monitor-connectivity__text">
-        <strong>{{ monitorBannerTitle }}</strong>
-        <span>{{ monitorBannerMessage }}</span>
-        <span v-if="monitorSyncHint" class="monitor-connectivity__sync">{{ monitorSyncHint }}</span>
-      </div>
-      <button
-        v-if="monitorConnectivityState !== 'connected'"
-        class="monitor-connectivity__retry"
-        @click="retryMonitorConnectivity"
-      >
-        Erneut synchronisieren
-      </button>
-    </div>
 
     <!-- L3 Dashboard View (Cross-Zone or Zone-specific) -->
     <template v-if="isDashboardView">
@@ -1895,22 +1818,6 @@ function handleFabWidgetSelected(widgetType: string) {
         @retry="espStore.fetchAll()"
       />
       <template v-else>
-      <!-- L1 Header: Dynamic system summary (no redundant page title — ViewTabBar shows "Monitor") -->
-      <div class="monitor-l1-header">
-        <p class="monitor-l1-header__summary" :class="{ 'monitor-l1-header__summary--alarm': systemSummary.totalAlarms > 0 }">
-          {{ systemSummary.zoneCount }} {{ systemSummary.zoneCount === 1 ? 'Zone' : 'Zonen' }}
-          <span class="monitor-l1-header__dot">&middot;</span>
-          {{ systemSummary.activeSensors }}/{{ systemSummary.totalSensors }} Sensoren online
-          <template v-if="systemSummary.totalAlarms > 0">
-            <span class="monitor-l1-header__dot">&middot;</span>
-            <span class="monitor-l1-header__alarm-text">
-              <AlertTriangle class="w-3.5 h-3.5" />
-              {{ systemSummary.totalAlarms }} {{ systemSummary.totalAlarms === 1 ? 'Alarm' : 'Alarme' }}
-            </span>
-          </template>
-        </p>
-      </div>
-
       <!-- L1 Zone Filter -->
       <div v-if="zoneKPIs.length > 0" class="monitor-zone-filter">
         <div class="monitor-zone-filter__select-wrap">
@@ -1921,17 +1828,17 @@ function handleFabWidgetSelected(widgetType: string) {
           >
             <option :value="null">Alle Zonen</option>
             <option
-              v-for="z in zoneStore.activeZones"
-              :key="z.zone_id"
-              :value="z.zone_id"
+              v-for="z in activeZoneFilterOptions"
+              :key="z.zoneId"
+              :value="z.zoneId"
             >
               {{ z.name }}
             </option>
-            <optgroup v-if="zoneStore.archivedZones.length > 0" label="Archiv">
+            <optgroup v-if="archivedZoneFilterOptions.length > 0" label="Archiv">
               <option
-                v-for="z in zoneStore.archivedZones"
-                :key="z.zone_id"
-                :value="z.zone_id"
+                v-for="z in archivedZoneFilterOptions"
+                :key="z.zoneId"
+                :value="z.zoneId"
               >
                 {{ z.name }} (Archiv)
               </option>
@@ -1966,7 +1873,6 @@ function handleFabWidgetSelected(widgetType: string) {
           :key="zone.zoneId"
           :zone="zone"
           :is-stale="isZoneStale(zone.lastActivity)"
-          :data-mode="monitorZoneTileDataMode"
           :rules="logicStore.getRulesForZone(zone.zoneId).slice(0, 2)"
           :total-rule-count="logicStore.getRulesForZone(zone.zoneId).length"
           :is-rule-active="logicStore.isRuleActive"
@@ -2000,10 +1906,16 @@ function handleFabWidgetSelected(widgetType: string) {
         @retry="fetchZoneMonitorData()"
       />
       <div v-else ref="monitorContentRef">
-      <div class="monitor-view__header">
-        <button class="monitor-view__back" @click="goBack">
+      <section
+        class="monitor-zone-detail"
+        :class="selectedZoneHealthStatus ? `monitor-zone-detail--${selectedZoneHealthStatus}` : ''"
+      >
+      <div
+        class="monitor-view__header"
+        :class="{ 'monitor-view__header--with-zone-nav': sortedZoneIds.length > 1 }"
+      >
+        <button class="monitor-view__back" aria-label="Zurück" title="Zurück" @click="goBack">
           <ArrowLeft class="w-4 h-4" />
-          <span>Zurück</span>
         </button>
 
         <!-- Zone-to-Zone Navigation -->
@@ -2011,17 +1923,19 @@ function handleFabWidgetSelected(widgetType: string) {
           <button
             class="monitor-view__zone-nav-btn"
             :disabled="!prevNavZoneId"
+            aria-label="Vorherige Zone"
             title="Vorherige Zone"
             @click="goToPrevZone"
           >
             <ChevronLeft class="w-4 h-4" />
           </button>
           <span class="monitor-view__zone-nav-label">
-            {{ selectedZoneName }} ({{ zonePositionLabel }})
+            {{ selectedZoneName }}
           </span>
           <button
             class="monitor-view__zone-nav-btn"
             :disabled="!nextNavZoneId"
+            aria-label="Nächste Zone"
             title="Nächste Zone"
             @click="goToNextZone"
           >
@@ -2029,32 +1943,18 @@ function handleFabWidgetSelected(widgetType: string) {
           </button>
         </div>
 
-        <div class="monitor-view__header-info">
-          <h2 v-if="sortedZoneIds.length <= 1" class="monitor-view__title">{{ selectedZoneName }}</h2>
-          <p class="monitor-view__zone-kpis">
-            {{ zoneSensorCount }} {{ zoneSensorCount === 1 ? 'Sensor' : 'Sensoren' }}
-            <span class="monitor-view__kpi-dot">&middot;</span>
-            {{ zoneActuatorCount }} {{ zoneActuatorCount === 1 ? 'Aktor' : 'Aktoren' }}
-            <template v-if="zoneAlarmCount > 0">
-              <span class="monitor-view__kpi-dot">&middot;</span>
-              <span class="monitor-view__kpi-alarm">
-                <AlertTriangle class="w-3 h-3" />
-                {{ zoneAlarmCount }} {{ zoneAlarmCount === 1 ? 'Alarm' : 'Alarme' }}
-              </span>
-            </template>
-          </p>
+        <div v-else class="monitor-view__header-info">
+          <h2 class="monitor-view__title">{{ selectedZoneName }}</h2>
         </div>
 
-        <!-- HardwareView-Link -->
-        <router-link
-          v-if="selectedZoneId"
-          :to="{ name: 'hardware-zone', params: { zoneId: selectedZoneId } }"
-          class="monitor-view__config-link"
-          title="Hardware-Konfiguration"
-        >
-          <Settings :size="16" />
-        </router-link>
+        <div class="monitor-view__header-status" :class="selectedZoneHealthStatus ? `monitor-view__header-status--${selectedZoneHealthStatus}` : ''">
+          <span class="monitor-view__header-status-dot" />
+          <span class="monitor-view__header-status-text">{{ selectedZoneHealthLabel }}</span>
+        </div>
       </div>
+      <p v-if="selectedZoneHealthReason" class="monitor-view__header-reason">
+        {{ selectedZoneHealthReason }}
+      </p>
 
       <!-- L2 Subzone Filter (only when >1 subzone) -->
       <div v-if="availableSubzones.length > 1" class="monitor-zone-filter">
@@ -2080,7 +1980,7 @@ function handleFabWidgetSelected(widgetType: string) {
       </div>
 
       <!-- Unified Subzone-First Section (sensors + actuators per subzone) -->
-      <section v-if="filteredSubzones.length > 0" class="monitor-section">
+      <section v-if="filteredSubzones.length > 0" class="monitor-section monitor-section--subzones">
         <div
           v-for="subzone in filteredSubzones"
           :key="subzone.subzoneId ?? '__zoneweit__'"
@@ -2089,7 +1989,7 @@ function handleFabWidgetSelected(widgetType: string) {
         >
           <!-- Accordion-Header: only when >1 subzone OR named subzone -->
           <button
-            v-if="filteredSubzones.length > 1 || subzone.subzoneId !== null"
+            v-if="shouldShowSubzoneAccordionHeader(subzone.subzoneId)"
             @click="toggleSubzone(getSubzoneKey(selectedZoneId, subzone.subzoneId))"
             class="monitor-subzone__header"
             :class="{ 'monitor-subzone__header--zoneweit': subzone.subzoneId === null }"
@@ -2104,10 +2004,25 @@ function handleFabWidgetSelected(widgetType: string) {
             </span>
             <span class="monitor-subzone__kpis" v-if="getSubzoneKPIs(subzone.sensors)">{{ getSubzoneKPIs(subzone.sensors) }}</span>
           </button>
+          <div
+            v-else
+            class="monitor-subzone__header monitor-subzone__header--static monitor-subzone__header--zoneweit"
+          >
+            <span :class="['monitor-subzone__status-dot', `monitor-subzone__status-dot--${getWorstQualityStatus(subzone.sensors)}`]" />
+            <span class="monitor-subzone__name">{{ subzone.subzoneName }}</span>
+            <span class="monitor-subzone__count">
+              {{ subzone.sensors.length }}S · {{ subzone.actuators.length }}A
+            </span>
+            <span class="monitor-subzone__kpis" v-if="getSubzoneKPIs(subzone.sensors)">{{ getSubzoneKPIs(subzone.sensors) }}</span>
+            <span class="monitor-subzone__optional-hint">Keine Subzone konfiguriert</span>
+          </div>
 
           <!-- Accordion-Body -->
           <Transition name="accordion">
-          <div v-show="isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId)) || filteredSubzones.length === 1">
+          <div
+            v-show="!shouldShowSubzoneAccordionHeader(subzone.subzoneId) || isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId))"
+            class="monitor-subzone__content"
+          >
 
             <!-- Sensors -->
             <template v-if="subzone.sensors.length > 0">
@@ -2217,9 +2132,12 @@ function handleFabWidgetSelected(widgetType: string) {
           </Transition>
         </div>
       </section>
+      </section>
 
-      <!-- Regeln für diese Zone (zwischen Aktoren und Dashboards) -->
-      <ZoneRulesSection :zone-id="selectedZoneId" />
+      <!-- Zonenweite Regeln (bewusst getrennt von Subzone-Bloecken) -->
+      <div class="monitor-zonewide-rules">
+        <ZoneRulesSection :zone-id="selectedZoneId" />
+      </div>
 
       <!-- Shared Sensors from other zones (6.7) -->
       <section v-if="sharedSensorRefs.length > 0" class="monitor-shared-equipment">
@@ -2234,45 +2152,6 @@ function handleFabWidgetSelected(widgetType: string) {
             :sensor="sensor"
             :home-zone-id="sensor._homeZoneId"
           />
-        </div>
-      </section>
-
-      <!-- Zone Dashboards -->
-      <section v-if="selectedZoneId" class="monitor-dashboards">
-        <h3 class="monitor-section__title">Zone-Dashboards</h3>
-        <div v-if="dashStore.zoneDashboards(selectedZoneId).length === 0" class="monitor-dashboard-empty">
-          <router-link :to="{ name: 'editor' }" class="monitor-dashboard-empty__link">
-            <LayoutDashboard class="w-4 h-4" />
-            <span>Dashboard erstellen</span>
-          </router-link>
-        </div>
-        <div class="monitor-dashboard-links">
-          <div
-            v-for="dash in dashStore.zoneDashboards(selectedZoneId!)"
-            :key="dash.id"
-            class="monitor-dashboard-link-wrap"
-          >
-            <router-link
-              :to="{ name: 'monitor-zone-dashboard', params: { zoneId: selectedZoneId!, dashboardId: dash.id } }"
-              class="monitor-dashboard-link"
-            >
-              <LayoutDashboard class="w-4 h-4" style="color: var(--color-iridescent-2)" />
-              <div class="monitor-dashboard-link__info">
-                <span class="monitor-dashboard-link__name">{{ dash.name }}{{ getDashboardNameSuffix(dash) }}</span>
-                <span class="monitor-dashboard-link__meta">
-                  {{ dash.widgets.length }} Widgets
-                  <span v-if="dash.autoGenerated" class="monitor-dashboard-link__auto">Auto</span>
-                </span>
-              </div>
-            </router-link>
-            <button
-              v-if="dash.autoGenerated"
-              class="monitor-dashboard-link__claim"
-              @click="handleClaimLayout(dash.id)"
-            >
-              Anpassen
-            </button>
-          </div>
         </div>
       </section>
 
@@ -2501,58 +2380,12 @@ function handleFabWidgetSelected(widgetType: string) {
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-}
-
-.monitor-connectivity {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--glass-border);
-  background: var(--color-bg-secondary);
-}
-
-.monitor-connectivity__text {
-  display: flex;
-  flex-direction: column;
   gap: var(--space-1);
 }
 
-.monitor-connectivity__text strong {
-  font-size: var(--text-sm);
-}
-
-.monitor-connectivity__text span {
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
-}
-
-.monitor-connectivity__sync {
-  color: var(--color-text-muted);
-}
-
-.monitor-connectivity__retry {
-  min-height: 44px;
-  padding: 0 var(--space-4);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--glass-border);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-}
-
-.monitor-connectivity--connected {
-  border-color: color-mix(in srgb, var(--color-success) 45%, var(--glass-border));
-}
-
-.monitor-connectivity--warning {
-  border-color: color-mix(in srgb, var(--color-warning) 45%, var(--glass-border));
-}
-
-.monitor-connectivity--critical {
-  border-color: color-mix(in srgb, var(--color-error) 45%, var(--glass-border));
+/* ViewTabBar hat eigenen margin-bottom; im Monitor steuern wir den Abstand zentral */
+.monitor-view :deep(.view-tab-bar) {
+  margin-bottom: 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2635,7 +2468,7 @@ function handleFabWidgetSelected(widgetType: string) {
 .monitor-layout {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-1);
   flex: 1;
 }
 
@@ -2648,16 +2481,33 @@ function handleFabWidgetSelected(widgetType: string) {
 .monitor-layout__main-col {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-1);
   min-width: 0;
 }
 
 .monitor-layout__main {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-1);
   min-width: 0;
 }
+
+.monitor-zone-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  margin-bottom: var(--space-2);
+}
+
+.monitor-zone-detail--ok { border-left-color: var(--color-success); }
+.monitor-zone-detail--warning { border-left-color: var(--color-warning); }
+.monitor-zone-detail--alarm { border-left-color: var(--color-error); }
+.monitor-zone-detail--empty { border-left-color: var(--color-text-muted); opacity: 0.9; }
 
 .monitor-layout__bottom {
   display: flex;
@@ -2693,66 +2543,43 @@ function handleFabWidgetSelected(widgetType: string) {
   font-weight: 700;
   color: var(--color-text-primary);
   margin: 0;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   L1 HEADER — Dynamic system summary
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-.monitor-l1-header {
-  display: flex;
-  align-items: center;
-}
-
-.monitor-l1-header__summary {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  flex-wrap: wrap;
-}
-
-.monitor-l1-header__summary--alarm {
-  color: var(--color-text-secondary);
-}
-
-.monitor-l1-header__dot {
-  color: var(--color-text-muted);
-  margin: 0 var(--space-1);
-}
-
-.monitor-l1-header__alarm-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--color-warning);
-  font-weight: 600;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .monitor-view__header {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-10);
+  gap: var(--space-2);
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  margin-bottom: 0;
+  padding: 0 0 var(--space-2);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.monitor-view__header--with-zone-nav {
+  justify-content: flex-start;
 }
 
 /* Zone-to-Zone Navigation (Prev/Next on L2) */
 .monitor-view__zone-nav {
   display: flex;
   align-items: center;
-  gap: var(--space-xs);
-  margin-left: auto;
+  gap: var(--space-1);
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: center;
 }
 
 .monitor-view__zone-nav-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 44px;
+  height: 44px;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
@@ -2763,7 +2590,7 @@ function handleFabWidgetSelected(widgetType: string) {
 }
 
 .monitor-view__zone-nav-btn:disabled {
-  opacity: 0.3;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
@@ -2773,17 +2600,21 @@ function handleFabWidgetSelected(widgetType: string) {
 }
 
 .monitor-view__zone-nav-label {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  min-width: 80px;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-primary);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1;
+  padding: 0 var(--space-1);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(60vw, 340px);
+  justify-content: center;
 }
 
 @media (max-width: 640px) {
-  .monitor-view__zone-nav-label {
-    display: none;
-  }
   .monitor-view__zone-nav {
     gap: var(--space-1);
   }
@@ -2792,13 +2623,15 @@ function handleFabWidgetSelected(widgetType: string) {
 .monitor-view__back {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
-  font-size: var(--text-sm);
+  flex-shrink: 0;
   cursor: pointer;
   transition: all var(--transition-fast);
 }
@@ -2806,62 +2639,60 @@ function handleFabWidgetSelected(widgetType: string) {
 .monitor-view__back:hover {
   color: var(--color-text-primary);
   border-color: var(--glass-border-hover);
+  background: var(--glass-bg-light);
+  transform: translateX(-2px);
 }
 
 .monitor-view__header-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-}
-
-.monitor-view__config-link {
-  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  text-align: center;
+  gap: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.monitor-view__header-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px 8px;
   border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  background: var(--glass-bg);
   border: 1px solid var(--glass-border);
-  transition: all var(--transition-fast);
-  margin-left: auto;
-  text-decoration: none;
+  background: var(--glass-bg);
   flex-shrink: 0;
 }
 
-.monitor-view__config-link:hover {
-  color: var(--color-text-primary);
-  background: var(--color-surface-hover);
-  border-color: var(--glass-border-hover);
+.monitor-view__header-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
 }
 
-.monitor-view__config-link:focus-visible {
-  outline: 2px solid var(--color-iridescent-2);
-  outline-offset: 2px;
+.monitor-view__header-status--ok .monitor-view__header-status-dot { background: var(--color-success); }
+.monitor-view__header-status--warning .monitor-view__header-status-dot { background: var(--color-warning); }
+.monitor-view__header-status--alarm .monitor-view__header-status-dot { background: var(--color-error); }
+
+.monitor-view__header-status-text {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  font-weight: 600;
 }
 
-.monitor-view__zone-kpis {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
+.monitor-view__header-reason {
+  margin: calc(-1 * var(--space-1)) 0 0;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
-  margin: 0;
-  flex-wrap: wrap;
 }
 
-.monitor-view__kpi-dot {
-  color: var(--color-text-muted);
-  margin: 0 2px;
-}
-
-.monitor-view__kpi-alarm {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  color: var(--color-warning);
-  font-weight: 600;
+/* Defensive: falls alter Markup-Stand aktiv ist, KPI-Zeile/Back-Text ausblenden */
+.monitor-view__zone-kpis,
+.monitor-view__zone-kpi,
+.monitor-view__back span {
+  display: none;
 }
 
 .monitor-view__empty {
@@ -2905,21 +2736,33 @@ function handleFabWidgetSelected(widgetType: string) {
 
 .monitor-zone-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   align-items: start;
   margin-bottom: var(--space-10);
+  --monitor-separator-color: var(--glass-border-hover);
 }
 
-@media (max-width: 639px) {
-  .monitor-zone-grid {
-    grid-template-columns: 1fr;
-  }
+.monitor-zone-grid :deep(.monitor-zone-tile) {
+  position: relative;
+}
+
+.monitor-zone-grid :deep(.monitor-zone-tile + .monitor-zone-tile)::before {
+  content: '';
+  position: absolute;
+  left: var(--space-4);
+  right: var(--space-4);
+  top: calc(-1 * var(--space-2));
+  border-top: 2px dashed var(--monitor-separator-color);
+  pointer-events: none;
 }
 
 /* Phase 3: Mini-widget inside zone tile (extra-slot) — height controlled by InlineDashboardPanel rowHeightPx */
 .monitor-zone-tile__mini-widget {
   border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  padding: var(--space-1);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2931,6 +2774,10 @@ function handleFabWidgetSelected(widgetType: string) {
   flex-direction: column;
   gap: var(--space-3);
   margin-bottom: var(--space-10);
+}
+
+.monitor-section--subzones {
+  margin-bottom: var(--space-4);
 }
 
 .monitor-section__title {
@@ -2946,13 +2793,14 @@ function handleFabWidgetSelected(widgetType: string) {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-bg);
 }
 
 .monitor-subzone--unassigned {
-  border-left: none;
-  border-top: 1px dashed var(--glass-border);
-  border-radius: var(--radius-sm, 6px);
-  padding-top: var(--space-2);
+  border-style: dashed;
 }
 
 .monitor-subzone--unassigned .monitor-subzone__header {
@@ -2973,6 +2821,10 @@ function handleFabWidgetSelected(widgetType: string) {
   text-align: left;
   color: var(--color-text-primary);
   font-size: var(--text-sm);
+}
+
+.monitor-subzone__header--static {
+  cursor: default;
 }
 
 .monitor-subzone__header:hover {
@@ -3017,6 +2869,12 @@ function handleFabWidgetSelected(widgetType: string) {
   white-space: nowrap;
 }
 
+.monitor-subzone__optional-hint {
+  margin-left: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
 .monitor-subzone__count {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
@@ -3025,7 +2883,7 @@ function handleFabWidgetSelected(widgetType: string) {
 
 .monitor-subzone__separator {
   border: none;
-  border-top: 1px dashed var(--glass-border);
+  border-top: 1px dashed var(--monitor-separator-color);
   margin: var(--space-3) 0;
 }
 
@@ -3039,8 +2897,19 @@ function handleFabWidgetSelected(widgetType: string) {
 }
 
 .monitor-subzone__header--zoneweit {
-  border-left: none;
-  border-top: 1px dashed var(--glass-border);
+  border-style: dashed;
+}
+
+.monitor-subzone__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.monitor-zonewide-rules {
+  margin-bottom: var(--space-4);
+  padding-top: 0;
+  border-top: 1px dashed var(--monitor-separator-color);
 }
 
 .monitor-subzone__empty {
@@ -3301,109 +3170,6 @@ function handleFabWidgetSelected(widgetType: string) {
   font-weight: 400;
   color: var(--color-text-muted);
   margin-left: var(--space-2);
-}
-
-.monitor-dashboards {
-  margin-bottom: var(--space-10);
-}
-
-/* Legacy dashboard link styles (still used in Zone L2) */
-.monitor-dashboard-links {
-  display: flex;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-
-.monitor-dashboard-link {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  text-decoration: none;
-  color: inherit;
-  transition: all var(--transition-fast);
-  min-width: 180px;
-}
-
-.monitor-dashboard-link:hover {
-  border-color: var(--color-iridescent-2);
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-bg-primary) 30%, transparent);
-}
-
-.monitor-dashboard-link__info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.monitor-dashboard-link__name {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.monitor-dashboard-link__meta {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.monitor-dashboard-link__auto {
-  padding: 1px 4px;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  background: color-mix(in srgb, var(--color-iridescent-3) 15%, transparent);
-  color: var(--color-iridescent-3);
-  border-radius: 3px;
-}
-
-.monitor-dashboard-link-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.monitor-dashboard-link__claim {
-  padding: 2px var(--space-2);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--color-iridescent-2);
-  background: transparent;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  align-self: flex-start;
-}
-
-.monitor-dashboard-link__claim:hover {
-  border-color: var(--color-iridescent-2);
-  background: color-mix(in srgb, var(--color-iridescent-2) 6%, transparent);
-}
-
-.monitor-dashboard-empty__link {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  border: 1px dashed var(--glass-border);
-  border-radius: var(--radius-sm);
-  text-decoration: none;
-  transition: all var(--transition-fast);
-}
-
-.monitor-dashboard-empty__link:hover {
-  color: var(--color-iridescent-2);
-  border-color: var(--color-iridescent-2);
-  background: color-mix(in srgb, var(--color-iridescent-2) 6%, transparent);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

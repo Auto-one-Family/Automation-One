@@ -270,7 +270,9 @@ class TestSafetyServiceEmergencyStop:
         actuator_repo.get_by_esp.return_value = []
         actuator_repo.get_state.return_value = None
 
-        return SafetyService(actuator_repo=actuator_repo, esp_repo=esp_repo)
+        SafetyService._global_emergency_stop_active.clear()
+        yield SafetyService(actuator_repo=actuator_repo, esp_repo=esp_repo)
+        SafetyService._global_emergency_stop_active.clear()
 
     @pytest.mark.asyncio
     async def test_global_emergency_blocks_all_commands(self, safety_service):

@@ -44,7 +44,7 @@ steps:
   - wait-serial: "All pins successfully set to Safe-Mode"
 
   # Wait for MQTT connection
-  - wait-serial: "MQTT connected"
+  - wait-serial: "MQTT connected successfully"
 
   # External MQTT injection: configure actuator (CI helper script)
 

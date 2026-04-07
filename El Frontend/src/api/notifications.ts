@@ -196,6 +196,12 @@ export interface AlertStatsDTO {
   mean_time_to_resolve_s: number | null
 }
 
+export interface AlertBulkResolveResponse {
+  success: boolean
+  message: string
+  resolved_count: number
+}
+
 // =============================================================================
 // Notifications API
 // =============================================================================
@@ -315,6 +321,14 @@ export const notificationsApi = {
     const response = await api.patch<NotificationDTO>(
       `/notifications/${id}/resolve`,
     )
+    return response.data
+  },
+
+  /**
+   * Resolve all unresolved alerts (active + acknowledged) for current user.
+   */
+  async resolveAllAlerts(): Promise<AlertBulkResolveResponse> {
+    const response = await api.patch<AlertBulkResolveResponse>('/notifications/resolve-all')
     return response.data
   },
 

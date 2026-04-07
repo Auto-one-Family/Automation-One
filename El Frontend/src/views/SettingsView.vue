@@ -3,7 +3,8 @@ import { ref } from 'vue'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { useUiStore } from '@/shared/stores'
 import { useRouter } from 'vue-router'
-import { Settings, User, LogOut, Server } from 'lucide-vue-next'
+import { Settings, User, LogOut, Server, UserPlus } from 'lucide-vue-next'
+import { SETTINGS_LABELS } from '@/utils/labels'
 
 const authStore = useAuthStore()
 const uiStore = useUiStore()
@@ -58,13 +59,30 @@ async function handleLogoutAll() {
         </div>
 
         <div class="flex gap-3 pt-4 border-t border-dark-700">
-          <button class="btn-secondary" @click="handleLogout">
-            <LogOut class="w-4 h-4 mr-2" />
-            Sign Out
+          <button
+            v-if="authStore.user?.role === 'admin'"
+            class="btn-secondary"
+            data-testid="settings-add-user-button"
+            @click="router.push('/users')"
+          >
+            <UserPlus class="w-4 h-4 mr-2" />
+            Neuen Benutzer hinzufügen
           </button>
-          <button class="btn-ghost text-red-400 hover:bg-red-500/10" @click="handleLogoutAll">
+          <button
+            class="btn-secondary"
+            data-testid="settings-logout-button"
+            @click="handleLogout"
+          >
             <LogOut class="w-4 h-4 mr-2" />
-            Sign Out All Devices
+            {{ SETTINGS_LABELS.logout }}
+          </button>
+          <button
+            class="btn-ghost text-red-400 hover:bg-red-500/10"
+            data-testid="settings-logout-all-button"
+            @click="handleLogoutAll"
+          >
+            <LogOut class="w-4 h-4 mr-2" />
+            {{ SETTINGS_LABELS.logoutAllDevices }}
           </button>
         </div>
       </div>

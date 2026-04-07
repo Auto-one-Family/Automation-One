@@ -25,13 +25,10 @@ import { useEspStore } from '@/stores/esp'
 import {
   LogOut, ChevronDown, Menu, Filter,
   Plus, Sparkles, Radio, AlertTriangle,
-  LayoutGrid, Activity,
 } from 'lucide-vue-next'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
-import NotificationBadge from '@/components/notifications/NotificationBadge.vue'
 import AlertStatusBar from '@/components/notifications/AlertStatusBar.vue'
 import StatusPill from '@/components/dashboard/StatusPill.vue'
-import ColorLegend from '@/components/common/ColorLegend.vue'
 
 const emit = defineEmits<{
   'toggle-sidebar': []
@@ -83,81 +80,26 @@ const isRouteBasedView = computed(() =>
   isHardwareRoute.value || isMonitorRoute.value || isEditorRoute.value || isLogicRoute.value
 )
 
-/** Route-based breadcrumb segments */
-const routeBreadcrumbs = computed(() => {
-  const crumbs: Array<{ label: string; to?: string; current: boolean }> = []
-
-  if (isHardwareRoute.value) {
-    crumbs.push({ label: 'Hardware', to: '/hardware', current: !route.params.zoneId })
-    if (route.params.zoneId) {
-      const zoneName = dashStore.breadcrumb.zoneName || (route.params.zoneId as string)
-      crumbs.push({
-        label: zoneName,
-        to: `/hardware/${route.params.zoneId}`,
-        current: !route.params.espId,
-      })
-    }
-    if (route.params.espId) {
-      const deviceName = dashStore.breadcrumb.deviceName || (route.params.espId as string)
-      crumbs.push({ label: deviceName, current: true })
-    }
-  } else if (isMonitorRoute.value) {
-    const hasSensor = !!route.params.sensorId
-    const hasDashboard = !!route.params.dashboardId
-    const hasChild = hasSensor || hasDashboard
-    crumbs.push({ label: 'Monitor', to: '/monitor', current: !route.params.zoneId && !hasDashboard })
-    if (route.params.zoneId) {
-      const zoneName = dashStore.breadcrumb.zoneName || (route.params.zoneId as string)
-      crumbs.push({
-        label: zoneName,
-        to: `/monitor/${route.params.zoneId}`,
-        current: !hasChild,
-      })
-    }
-    if (hasSensor) {
-      const sensorName = dashStore.breadcrumb.sensorName || (route.params.sensorId as string)
-      crumbs.push({ label: sensorName, current: true })
-    }
-    if (hasDashboard) {
-      const dashboardName = dashStore.breadcrumb.dashboardName || 'Dashboard'
-      crumbs.push({ label: dashboardName, current: true })
-    }
-  } else if (isEditorRoute.value) {
-    const hasDashboard = !!route.params.dashboardId
-    crumbs.push({ label: 'Editor', to: '/editor', current: !hasDashboard })
-    if (hasDashboard) {
-      const dashboardName = dashStore.breadcrumb.dashboardName || (route.params.dashboardId as string)
-      crumbs.push({ label: dashboardName, current: true })
-    }
-  } else if (isLogicRoute.value) {
-    const hasRule = !!route.params.ruleId
-    crumbs.push({ label: 'Automatisierung', to: '/logic', current: !hasRule })
-    if (hasRule) {
-      const ruleName = dashStore.breadcrumb.ruleName || (route.params.ruleId as string)
-      crumbs.push({ label: ruleName, current: true })
-    }
-  }
-
-  return crumbs
-})
-
-/** Cross-tab link: when on Monitor zone → link to Hardware zone (and vice versa) */
-const crossTabLink = computed(() => {
-  const zoneId = route.params.zoneId as string | undefined
-  if (!zoneId) return null
-
-  if (isMonitorRoute.value) {
-    return { to: `/hardware/${zoneId}`, title: 'In der Übersicht anzeigen', icon: LayoutGrid }
-  }
-  if (isHardwareRoute.value) {
-    return { to: `/monitor/${zoneId}`, title: 'Im Monitor anzeigen', icon: Activity }
-  }
-  return null
-})
-
-function navigateCrumb(to: string | undefined) {
-  if (to) router.push(to)
-}
+const headerMetrics = computed(() => ([
+  {
+    key: 'real',
+    label: 'Real',
+    value: dashStore.deviceCounts.real,
+    variant: 'header__metric-chip--real',
+  },
+  {
+    key: 'mock',
+    label: 'Mock',
+    value: dashStore.deviceCounts.mock,
+    variant: 'header__metric-chip--mock',
+  },
+  {
+    key: 'offline',
+    label: 'Offline',
+    value: dashStore.statusCounts.offline,
+    variant: 'header__metric-chip--offline',
+  },
+]))
 
 async function handleLogout() {
   showUserMenu.value = false
@@ -174,38 +116,21 @@ async function handleLogout() {
         <Menu class="header__hamburger-icon" />
       </button>
 
-      <!-- Route-based Breadcrumb (Hardware / Monitor views) -->
-      <nav v-if="isRouteBasedView && routeBreadcrumbs.length > 0" class="header__breadcrumb" aria-label="Navigation">
-        <template v-for="(crumb, idx) in routeBreadcrumbs" :key="idx">
-          <span v-if="idx > 0" class="header__crumb-sep" aria-hidden="true">›</span>
-          <button
-            v-if="!crumb.current && crumb.to"
-            class="header__crumb"
-            @click="navigateCrumb(crumb.to)"
-          >{{ crumb.label }}</button>
-          <span v-else class="header__crumb--current">{{ crumb.label }}</span>
-        </template>
-        <!-- Cross-tab link: Monitor ↔ Hardware -->
-        <RouterLink
-          v-if="crossTabLink"
-          :to="crossTabLink.to"
-          class="header__cross-link"
-          :title="crossTabLink.title"
-        >
-          <component :is="crossTabLink.icon" class="header__cross-link-icon" />
-        </RouterLink>
-      </nav>
-
-      <!-- Non-Dashboard: Page Title -->
-      <span v-else class="header__page-title">{{ pageTitle }}</span>
+      <span class="header__page-title">{{ pageTitle }}</span>
     </div>
 
     <!-- ═══ CENTER: Dashboard Controls ═══ -->
     <div v-if="dashStore.showControls" class="header__controls">
-      <!-- Compact Status Chip (Online/Total) -->
-      <div class="header__status-chip" :title="`${dashStore.statusCounts.online} online, ${dashStore.statusCounts.offline} offline`">
-        <span class="header__status-dot" :class="dashStore.statusCounts.online > 0 ? 'header__status-dot--online' : 'header__status-dot--offline'" />
-        <span class="header__status-text">{{ dashStore.statusCounts.online }}/{{ dashStore.deviceCounts.all }} Online</span>
+      <!-- Compact metrics chips -->
+      <div class="header__metrics" aria-label="Dashboard-Metriken">
+        <span
+          v-for="metric in headerMetrics"
+          :key="metric.key"
+          class="header__metric-chip"
+          :class="metric.variant"
+        >
+          {{ metric.label }} {{ metric.value }}
+        </span>
       </div>
 
       <!-- Problem Alert (inline) -->
@@ -263,9 +188,6 @@ async function handleLogout() {
 
     <!-- ═══ RIGHT: Actions + System ═══ -->
     <div class="header__right">
-      <!-- Color Legend (icon-only) -->
-      <ColorLegend />
-
       <!-- Pending/Unassigned Badge (visible on ALL routes) -->
       <button
         :class="[
@@ -300,15 +222,12 @@ async function handleLogout() {
         </button>
       </template>
 
-      <div class="header__divider" />
-
-      <!-- Alert Status (Phase 4B — ISA-18.2) -->
-      <AlertStatusBar />
-
-      <!-- Notification Bell -->
-      <NotificationBadge />
-
-      <div class="header__divider" />
+      <div class="header__alerts-group">
+        <div class="header__divider" />
+        <!-- Alert Status (Phase 4B — ISA-18.2) -->
+        <AlertStatusBar />
+        <div class="header__divider" />
+      </div>
 
       <!-- Emergency Stop -->
       <EmergencyStopButton />
@@ -410,6 +329,11 @@ async function handleLogout() {
   position: relative;
   z-index: var(--z-dropdown);
   gap: var(--space-3);
+  --header-control-size: 32px;
+  --header-action-padding-y: 4px;
+  --header-action-padding-x: var(--space-2);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* ═══ LEFT SECTION ══════════════════════════════════════════════════════ */
@@ -559,6 +483,39 @@ async function handleLogout() {
   white-space: nowrap;
   flex-shrink: 0;
   cursor: default;
+}
+
+.header__metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.header__metric-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.header__metric-chip--real {
+  color: var(--color-real);
+}
+
+.header__metric-chip--mock {
+  color: var(--color-mock);
+}
+
+.header__metric-chip--offline {
+  color: var(--color-warning);
 }
 
 .header__status-dot {
@@ -717,6 +674,124 @@ async function handleLogout() {
   .header__crumb--current {
     max-width: 100px;
   }
+
+  .header__divider {
+    height: 16px;
+  }
+
+  .header__right {
+    gap: var(--space-1);
+  }
+}
+
+@media (max-width: 767px) {
+  .header {
+    padding: 0 var(--space-2);
+    gap: var(--space-2);
+  }
+
+  .header__left {
+    max-width: 42%;
+  }
+
+  .header__controls {
+    justify-content: flex-start;
+  }
+
+  .header__metrics {
+    display: none;
+  }
+
+  .header__right {
+    gap: var(--space-1);
+  }
+
+  .header__connection {
+    display: none;
+  }
+}
+
+/* Medium widths: keep single-row and reduce low-priority noise */
+@media (max-width: 900px) {
+  .header {
+    flex-wrap: nowrap;
+    align-items: center;
+    padding: 0 var(--space-2);
+  }
+
+  .header__left {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .header__controls {
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    gap: var(--space-1);
+  }
+
+  .header__breadcrumb {
+    gap: var(--space-1);
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .header__crumb,
+  .header__crumb--current {
+    max-width: clamp(72px, 18vw, 132px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
+    vertical-align: bottom;
+  }
+
+  .header__alerts-group,
+  .header__action-btn--create {
+    display: none;
+  }
+
+  .header__right {
+    gap: var(--space-1);
+  }
+}
+
+/* Compact displays: reduce visual blur and increase edge contrast */
+@media (max-width: 1366px), (max-height: 820px) {
+  .header {
+    border-bottom-color: var(--glass-border-hover);
+  }
+
+  .header__status-chip,
+  .header__metric-chip,
+  .header__type-segment,
+  .header__action-btn--default {
+    background: var(--color-bg-tertiary);
+    border-color: var(--glass-border-hover);
+    box-shadow: none;
+  }
+
+  .header__action-btn--pending {
+    animation: none;
+    background: rgba(96, 165, 250, 0.12);
+    border-color: rgba(129, 140, 248, 0.35);
+  }
+
+  .header__action-btn--pending::before {
+    animation: none;
+    opacity: 0.65;
+  }
+
+  .header__action-btn--pending:hover {
+    transform: none;
+    box-shadow: none;
+  }
+
+  .header__dot--connected,
+  .header__dot--connecting {
+    animation: none;
+    box-shadow: none;
+  }
 }
 
 /* ═══ RIGHT SECTION ═════════════════════════════════════════════════════ */
@@ -726,6 +801,14 @@ async function handleLogout() {
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
+  min-width: 0;
+}
+
+.header__alerts-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 /* ── Action Buttons (Dashboard) ── */
@@ -733,7 +816,8 @@ async function handleLogout() {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 4px var(--space-2);
+  padding: var(--header-action-padding-y) var(--header-action-padding-x);
+  min-height: var(--header-control-size);
   font-size: var(--text-xs);
   font-weight: 500;
   border-radius: var(--radius-sm);
@@ -744,8 +828,8 @@ async function handleLogout() {
 }
 
 .header__action-btn-icon {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   flex-shrink: 0;
 }
 
@@ -753,7 +837,7 @@ async function handleLogout() {
   display: none;
 }
 
-@media (min-width: 768px) {
+@media (min-width: 1280px) {
   .header__action-btn-label {
     display: inline;
   }
@@ -835,7 +919,8 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 0 var(--space-1);
+  padding: 0 6px;
+  min-height: var(--header-control-size);
   cursor: default;
 }
 
@@ -879,7 +964,8 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 2px;
+  padding: 3px;
+  min-height: var(--header-control-size);
   border-radius: var(--radius-sm);
   transition: all var(--transition-fast);
 }
@@ -889,8 +975,8 @@ async function handleLogout() {
 }
 
 .header__user-avatar {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-full);
   background: linear-gradient(135deg, var(--color-bg-tertiary), var(--color-bg-quaternary));
   border: 1px solid var(--glass-border);
@@ -1007,6 +1093,47 @@ async function handleLogout() {
 .header-mobile-filters__segment .header__type-btn {
   flex: 1;
   justify-content: center;
+}
+
+@media (min-width: 1536px) {
+  .header {
+    --header-control-size: 40px;
+    --header-action-padding-y: 8px;
+    --header-action-padding-x: var(--space-3);
+  }
+
+  .header__right {
+    gap: var(--space-3);
+  }
+
+  .header__action-btn {
+    font-size: var(--text-sm);
+  }
+
+  .header__action-btn-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .header__divider {
+    height: 24px;
+  }
+
+  .header__dot {
+    width: 8px;
+    height: 8px;
+  }
+
+  .header__user-avatar {
+    width: 30px;
+    height: 30px;
+    font-size: var(--text-sm);
+  }
+
+  .header__chevron {
+    width: 14px;
+    height: 14px;
+  }
 }
 
 /* ═══ TRANSITIONS ═══════════════════════════════════════════════════════ */

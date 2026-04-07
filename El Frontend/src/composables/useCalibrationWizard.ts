@@ -12,7 +12,7 @@
  * Phase: F-P1 (State-Refactor)
  */
 
-import { ref, computed, onUnmounted, getCurrentInstance, type Ref, type ComputedRef } from 'vue'
+import { ref, computed, onUnmounted, getCurrentInstance, watch, type Ref, type ComputedRef } from 'vue'
 import { calibrationApi } from '@/api/calibration'
 import type { CalibrationPoint, CalibrateResponse } from '@/api/calibration'
 import { sensorsApi } from '@/api/sensors'
@@ -69,6 +69,12 @@ export interface UseCalibrationWizardReturn {
   lastRawValue: Ref<number | null>
   measurementQuality: Ref<string>
   currentSessionId: Ref<string | null>
+  isFreshMeasurement: Ref<boolean>
+  lastMeasurementAt: Ref<number | null>
+  measurementRequestId: Ref<string | null>
+  lifecycleState: Ref<CalibrationLifecycleState>
+  lifecycleMessage: Ref<string>
+  hasUnsavedWork: ComputedRef<boolean>
 
   // Presets
   sensorTypePresets: Record<string, SensorTypePreset>
@@ -90,6 +96,7 @@ export interface UseCalibrationWizardReturn {
   deletePoint: (role: 'dry' | 'wet') => Promise<void>
   goBack: () => void
   handleAbort: () => Promise<void>
+  confirmLeave: () => Promise<boolean>
   reset: () => void
 }
 
@@ -140,6 +147,33 @@ export const SENSOR_TYPE_PRESETS: Record<string, SensorTypePreset> = {
   },
 }
 
+export type CalibrationLifecycleState =
+  | 'idle'
+  | 'accepted'
+  | 'pending'
+  | 'terminal_success'
+  | 'terminal_failed'
+  | 'terminal_timeout'
+  | 'terminal_integration_issue'
+
+interface CalibrationDraft {
+  phase: WizardPhase
+  selectedEspId: string
+  selectedGpio: number | null
+  selectedSensorType: string
+  ecPreset: EcPresetId
+  points: CalibrationPoint[]
+  currentSessionId: string | null
+}
+
+const DRAFT_STORAGE_KEY = 'calibration.wizard.draft.v2'
+const TERMINAL_SESSION_STATUSES = new Set(['applied', 'rejected', 'failed', 'expired'])
+
+function normalizeCalibrationSensorType(sensorType: string): string {
+  const normalized = sensorType.trim().toLowerCase()
+  return normalized === 'soil_moisture' ? 'moisture' : normalized
+}
+
 // ─── Composable ───────────────────────────────────────────────────────────────
 
 export function useCalibrationWizard(
@@ -169,6 +203,12 @@ export function useCalibrationWizard(
   const lastRawValue = ref<number | null>(null)
   const measurementQuality = ref('unknown')
   const currentSessionId = ref<string | null>(null)
+  const isFreshMeasurement = ref(false)
+  const lastMeasurementAt = ref<number | null>(null)
+  const measurementRequestId = ref<string | null>(null)
+  const measurementTriggerAt = ref<number | null>(null)
+  const lifecycleState = ref<CalibrationLifecycleState>('idle')
+  const lifecycleMessage = ref('')
 
   const ws = useWebSocket({
     filters: {
@@ -192,9 +232,28 @@ export function useCalibrationWizard(
       return
     }
 
+    const intentId = typeof data.intent_id === 'string' ? data.intent_id : null
+    const correlationId = typeof data.correlation_id === 'string' ? data.correlation_id : null
+    if (!intentId && !correlationId) {
+      isFreshMeasurement.value = false
+      lifecycleState.value = 'terminal_integration_issue'
+      lifecycleMessage.value = 'Messung ohne intent/correlation erhalten und verworfen.'
+      return
+    }
+
+    const eventReceivedAt = Date.now()
+    const triggeredAt = measurementTriggerAt.value ?? 0
+    if (eventReceivedAt < triggeredAt) {
+      return
+    }
+
     const rawValue = Number(data.raw_value ?? data.raw)
     if (Number.isFinite(rawValue)) {
       setLastRawValue(rawValue, String(data.quality ?? 'good'))
+      lastMeasurementAt.value = eventReceivedAt
+      isFreshMeasurement.value = true
+      lifecycleState.value = 'pending'
+      lifecycleMessage.value = 'Frische Messung empfangen.'
     }
   })
 
@@ -207,6 +266,8 @@ export function useCalibrationWizard(
       return
     }
     measurementQuality.value = 'error'
+    isFreshMeasurement.value = false
+    lifecycleState.value = 'terminal_failed'
     errorMessage.value = String(data.error ?? 'Messung fehlgeschlagen')
   })
 
@@ -224,6 +285,11 @@ export function useCalibrationWizard(
 
   // ── Computed ────────────────────────────────────────────────────────────
   const currentPreset = computed(() => SENSOR_TYPE_PRESETS[selectedSensorType.value])
+  const hasUnsavedWork = computed(() =>
+    Boolean(currentSessionId.value) ||
+    points.value.length > 0 ||
+    ['point1', 'point2', 'confirm'].includes(phase.value),
+  )
 
   /** EC reference values from preset, or undefined for custom */
   const ecPointRefs = computed(() => {
@@ -259,13 +325,31 @@ export function useCalibrationWizard(
   // ── Actions ─────────────────────────────────────────────────────────────
 
   function selectSensor(espId: string, gpio: number, sensorType: string) {
+    const normalizedSensorType = normalizeCalibrationSensorType(sensorType)
+    if (!SENSOR_TYPE_PRESETS[normalizedSensorType]) {
+      phase.value = 'error'
+      errorMessage.value = `Sensor-Typ '${sensorType}' wird im Kalibrierwizard nicht unterstuetzt.`
+      return
+    }
+
+    if (!Number.isInteger(gpio) || gpio < 0 || gpio > 48) {
+      phase.value = 'error'
+      errorMessage.value = `GPIO '${gpio}' ist ungueltig.`
+      return
+    }
+
     selectedEspId.value = espId
     selectedGpio.value = gpio
-    selectedSensorType.value = sensorType
+    selectedSensorType.value = normalizedSensorType
     points.value = []
     calibrationResult.value = null
     errorMessage.value = ''
     phase.value = 'point1'
+    lifecycleState.value = 'idle'
+    lifecycleMessage.value = ''
+    isFreshMeasurement.value = false
+    measurementRequestId.value = null
+    measurementTriggerAt.value = null
   }
 
   async function ensureSessionStarted(): Promise<string> {
@@ -320,6 +404,7 @@ export function useCalibrationWizard(
       point_role: role,
       point_id: typeof persisted?.id === 'string' ? persisted.id : undefined,
     }
+    isFreshMeasurement.value = false
 
     if (hasExistingRole) {
       points.value = points.value.map((existing) =>
@@ -370,6 +455,8 @@ export function useCalibrationWizard(
     }
 
     isSubmitting.value = true
+    lifecycleState.value = 'accepted'
+    lifecycleMessage.value = 'Kalibrierauftrag akzeptiert.'
     errorMessage.value = ''
     try {
       const sessionId = await ensureSessionStarted()
@@ -387,28 +474,63 @@ export function useCalibrationWizard(
         }
       }
 
-      let sessionState = await calibrationApi.finalizeSession(sessionId)
-      sessionState = await calibrationApi.applySession(sessionId)
+      lifecycleState.value = 'pending'
+      lifecycleMessage.value = 'Kalibrierung wird finalisiert...'
+      await calibrationApi.finalizeSession(sessionId)
+      lifecycleMessage.value = 'Kalibrierung wird angewendet...'
+      await calibrationApi.applySession(sessionId)
+      const sessionState = await waitForTerminalSession(sessionId)
+      const normalizedStatus = String(sessionState.status || '').toLowerCase()
+
+      if (!TERMINAL_SESSION_STATUSES.has(normalizedStatus)) {
+        lifecycleState.value = 'terminal_timeout'
+        lifecycleMessage.value = `Keine terminale Session-Rueckmeldung erhalten (Status: ${normalizedStatus || 'unbekannt'}).`
+        phase.value = 'error'
+        errorMessage.value = lifecycleMessage.value
+        return
+      }
 
       calibrationResult.value = {
-        success: String(sessionState.status).toLowerCase() === 'applied',
+        success: normalizedStatus === 'applied',
         calibration: sessionState.calibration_result ?? {},
         sensor_type: sessionState.sensor_type,
         method: sessionState.method,
-        saved: String(sessionState.status).toLowerCase() === 'applied',
+        saved: normalizedStatus === 'applied',
         message: sessionState.failure_reason ?? null,
+      }
+      if (normalizedStatus === 'applied') {
+        lifecycleState.value = 'terminal_success'
+        lifecycleMessage.value = 'Kalibrierung erfolgreich terminal bestaetigt.'
+      } else {
+        lifecycleState.value = normalizedStatus === 'expired' ? 'terminal_timeout' : 'terminal_failed'
+        lifecycleMessage.value = calibrationResult.value.message ?? `Kalibrierung endete mit Status '${normalizedStatus}'.`
       }
       phase.value = calibrationResult.value.success ? 'done' : 'error'
       if (!calibrationResult.value.success) {
-        errorMessage.value = calibrationResult.value.message ?? 'Kalibrierung fehlgeschlagen'
+        errorMessage.value = lifecycleMessage.value
       }
     } catch (err: unknown) {
       phase.value = 'error'
+      lifecycleState.value = 'terminal_failed'
       const uiError = toUiApiError(err, 'Kalibrierung fehlgeschlagen')
-      errorMessage.value = formatUiApiError(uiError)
+      lifecycleMessage.value = formatUiApiError(uiError)
+      errorMessage.value = lifecycleMessage.value
     } finally {
       isSubmitting.value = false
     }
+  }
+
+  async function waitForTerminalSession(sessionId: string): Promise<Awaited<ReturnType<typeof calibrationApi.getSession>>> {
+    const maxAttempts = 10
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const session = await calibrationApi.getSession(sessionId)
+      const normalizedStatus = String(session.status || '').toLowerCase()
+      if (TERMINAL_SESSION_STATUSES.has(normalizedStatus)) {
+        return session
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    }
+    return calibrationApi.getSession(sessionId)
   }
 
   /**
@@ -425,6 +547,9 @@ export function useCalibrationWizard(
   async function triggerLiveMeasurement(): Promise<void> {
     if (selectedGpio.value === null || !selectedEspId.value) return
     isMeasuring.value = true
+    isFreshMeasurement.value = false
+    lifecycleState.value = 'accepted'
+    lifecycleMessage.value = 'Messauftrag akzeptiert.'
     errorMessage.value = ''
     try {
       if (!currentSessionId.value) {
@@ -437,10 +562,16 @@ export function useCalibrationWizard(
         })
         currentSessionId.value = session.id
       }
-      await sensorsApi.triggerMeasurement(selectedEspId.value, selectedGpio.value)
+      const triggerResult = await sensorsApi.triggerMeasurement(selectedEspId.value, selectedGpio.value)
+      measurementRequestId.value = triggerResult.request_id
+      measurementTriggerAt.value = Date.now()
+      lifecycleState.value = 'pending'
+      lifecycleMessage.value = `Messung angefordert (Request-ID: ${triggerResult.request_id}).`
     } catch (err: unknown) {
       errorMessage.value = err instanceof Error ? err.message : 'Messung fehlgeschlagen'
       measurementQuality.value = 'error'
+      lifecycleState.value = 'terminal_failed'
+      lifecycleMessage.value = errorMessage.value
     } finally {
       isMeasuring.value = false
     }
@@ -520,6 +651,97 @@ export function useCalibrationWizard(
     reset()
   }
 
+  async function confirmLeave(): Promise<boolean> {
+    if (!hasUnsavedWork.value || isSubmitting.value) {
+      return true
+    }
+    return uiStore.confirm({
+      title: 'Kalibrierung verlassen?',
+      message: 'Es gibt einen laufenden Kalibriervorgang. Entwurf bleibt gespeichert, wirklich verlassen?',
+      variant: 'warning',
+      confirmText: 'Verlassen',
+    })
+  }
+
+  function saveDraft(): void {
+    const draft: CalibrationDraft = {
+      phase: phase.value,
+      selectedEspId: selectedEspId.value,
+      selectedGpio: selectedGpio.value,
+      selectedSensorType: selectedSensorType.value,
+      ecPreset: ecPreset.value,
+      points: points.value,
+      currentSessionId: currentSessionId.value,
+    }
+    sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft))
+  }
+
+  function clearDraft(): void {
+    sessionStorage.removeItem(DRAFT_STORAGE_KEY)
+  }
+
+  function restoreDraft(): void {
+    const rawDraft = sessionStorage.getItem(DRAFT_STORAGE_KEY)
+    if (!rawDraft) {
+      return
+    }
+    try {
+      const parsed = JSON.parse(rawDraft) as Partial<CalibrationDraft>
+      if (!parsed || !parsed.selectedEspId || parsed.selectedGpio == null || !parsed.selectedSensorType) {
+        return
+      }
+      if (
+        options.espId &&
+        options.gpio !== undefined &&
+        options.sensorType &&
+        (
+          options.espId !== parsed.selectedEspId ||
+          options.gpio !== parsed.selectedGpio ||
+          normalizeCalibrationSensorType(options.sensorType) !== normalizeCalibrationSensorType(parsed.selectedSensorType)
+        )
+      ) {
+        return
+      }
+      selectedEspId.value = parsed.selectedEspId
+      selectedGpio.value = parsed.selectedGpio
+      selectedSensorType.value = normalizeCalibrationSensorType(parsed.selectedSensorType)
+      ecPreset.value = parsed.ecPreset ?? '1413_12880'
+      points.value = Array.isArray(parsed.points) ? parsed.points : []
+      currentSessionId.value = parsed.currentSessionId ?? null
+      phase.value = parsed.phase ?? (options.skipSelect ? 'point1' : 'select')
+      lifecycleState.value = 'pending'
+      lifecycleMessage.value = 'Entwurf wiederhergestellt.'
+    } catch {
+      // Invalid draft payload, ignore.
+    }
+  }
+
+  function handleBeforeUnload(event: BeforeUnloadEvent): void {
+    if (!hasUnsavedWork.value) {
+      return
+    }
+    saveDraft()
+    event.preventDefault()
+    event.returnValue = ''
+  }
+
+  if (typeof window !== 'undefined') {
+    restoreDraft()
+    window.addEventListener('beforeunload', handleBeforeUnload)
+  }
+
+  watch(
+    [phase, points, selectedEspId, selectedGpio, selectedSensorType, currentSessionId],
+    () => {
+      if (hasUnsavedWork.value) {
+        saveDraft()
+      } else {
+        clearDraft()
+      }
+    },
+    { deep: true },
+  )
+
   /** Reset to initial state */
   function reset() {
     phase.value = options.skipSelect ? 'point1' : 'select'
@@ -534,6 +756,21 @@ export function useCalibrationWizard(
     lastRawValue.value = null
     measurementQuality.value = 'unknown'
     currentSessionId.value = null
+    isFreshMeasurement.value = false
+    lastMeasurementAt.value = null
+    measurementRequestId.value = null
+    measurementTriggerAt.value = null
+    lifecycleState.value = 'idle'
+    lifecycleMessage.value = ''
+    clearDraft()
+  }
+
+  if (getCurrentInstance()) {
+    onUnmounted(() => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('beforeunload', handleBeforeUnload)
+      }
+    })
   }
 
   return {
@@ -558,6 +795,12 @@ export function useCalibrationWizard(
     lastRawValue,
     measurementQuality,
     currentSessionId,
+    isFreshMeasurement,
+    lastMeasurementAt,
+    measurementRequestId,
+    lifecycleState,
+    lifecycleMessage,
+    hasUnsavedWork,
 
     // Presets
     sensorTypePresets: SENSOR_TYPE_PRESETS,
@@ -579,6 +822,7 @@ export function useCalibrationWizard(
     deletePoint,
     goBack,
     handleAbort,
+    confirmLeave,
     reset,
   }
 }
