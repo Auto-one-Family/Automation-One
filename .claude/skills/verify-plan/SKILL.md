@@ -6,7 +6,8 @@ description: |
   API-Endpunkte und Abhängigkeiten. Gibt dem Technical Manager
   präzise Korrektur-Hinweise als Chat-Antwort.
   Verwenden bei: TM-Plan prüfen, verify-plan, Reality-Check,
-  Plan verifizieren, Befehl gegenprüfen, TM-Befehl checken
+  Plan verifizieren, Befehl gegenprüfen, TM-Befehl checken.
+  Bei auto-debugger-Gate: verbindlicher Chat-Block OUTPUT FÜR ORCHESTRATOR.
 allowed-tools: Read, Grep, Glob, Bash, Edit
 user-invocable: true
 argument-hint: "[plan description or file path]"
@@ -186,6 +187,9 @@ Für jeden erwarteten Output:
      Archiv → .claude/reports/archive/
 ```
 
+**Ausnahme (Orchestrator):** Erwartet der Plan einen **auto-debugger**-Artefaktordner, ist  
+`.claude/reports/current/auto-debugger-runs/<run_id>/` bzw. `.claude/reports/current/incidents/<incident_id>/` das **gebundene** Ziel für `VERIFY-PLAN-REPORT.md` — nicht „beliebig unter reports/“, sondern genau dieser Run-Ordner (siehe Regeln, Report-Pfad).
+
 #### 2i: Test-Infrastruktur-Validierung
 
 | Aspekt | Prüfung | Referenz |
@@ -263,6 +267,41 @@ Für jeden erwarteten Output:
 [2-3 Sätze: Ist der Plan ausführbar? Was muss der TM ändern?]
 ```
 
+---
+
+## OUTPUT FÜR ORCHESTRATOR (auto-debugger) — verbindlicher Zusatz-Block
+
+**Zweck:** Maschinenlesbare, stabile Struktur, die **`auto-debugger`** nutzt, um **`TASK-PACKAGES.md`** und danach **`SPECIALIST-PROMPTS.md`** an Verify-Erkenntnisse anzupassen — **ohne** die Prüflogik oben zu ersetzen (Golden Path: Phase 1–2, Modus A/B).
+
+**Wann Pflicht:** Wenn der Verify-Lauf als **Gate** für einen **auto-debugger**-Run gilt und ein **`TASK-PACKAGES.md`** im **gebundenen** Artefaktordner existiert oder explizit im Kontext referenziert ist:
+
+- `.claude/reports/current/auto-debugger-runs/<run_id>/TASK-PACKAGES.md`, oder  
+- `.claude/reports/current/incidents/<incident_id>/TASK-PACKAGES.md`
+
+**Dann:** Immer **zusätzlich** zu Modus A/B (Chat und ggf. Plan-Edit) den folgenden Markdown-Abschnitt in die **Chat-Antwort** aufnehmen — Überschrift und Unterüberschriften **wörtlich** beibehalten, Tabellen/Inhalte vollständig füllen (auch wenn leer: „keine“ / „—“).
+
+```markdown
+## OUTPUT FÜR ORCHESTRATOR (auto-debugger)
+
+### PKG → Delta
+| PKG | Delta (Pfad, Testbefehl/-pfad, Reihenfolge, Risiko, HW-Gate, verworfene Teile) |
+|-----|-----------------------------------------------------------------------------------|
+| PKG-01 | … |
+
+### PKG → empfohlene Dev-Rolle
+| PKG | Rolle (z. B. server-dev, frontend-dev, esp32-dev, mqtt-dev) |
+|-----|---------------------------------------------------------------|
+| PKG-01 | … |
+
+### Cross-PKG-Abhängigkeiten
+- PKG-XX → PKG-YY: [ein Satz: warum / was zuerst]
+
+### BLOCKER
+- [Was Implementierung verzögert; fehlende HW/Evidenz; externe Abhängigkeit]
+```
+
+**Mindestinhalt:** (a) pro betroffenem Paket mindestens eine **Delta**-Zeile, (b) **empfohlene Dev-Rolle** pro PKG mit Umsetzungsanteil, (c) **Kanten** zwischen PKGs wo relevant, (d) alle **BLOCKER** explizit. Formulierungen so, dass **`auto-debugger`** den Block **1:1** zum Patchen von `TASK-PACKAGES.md` verwenden kann (konkrete Pfade, konkrete Testkommandos).
+
 **Bei Test-Flow-Plan (F1 in flow_reference.md):** Zusätzliche Sektion hinzufügen:
 
 ```
@@ -307,10 +346,12 @@ Für jeden erwarteten Output:
 
 ## Regeln
 
-1. Du schreibst den Plan nicht neu; du korrigierst präzise an der Stelle (wenn Plan-Datei vorhanden). Ohne Plan-Datei: Chat-Ausgabe. Du ERSTELLST keine neuen Dateien (außer Korrekturen in der Plan-Datei).
-2. Du schreibst KEINEN Report nach .claude/reports/
-3. Dein Output ist AUSSCHLIESSLICH eine Chat-Antwort (oder Korrektur in der Plan-Datei bei Modus A)
-4. Wenn der Plan keine Probleme hat: Sag das klar und kurz
+1. Du schreibst den Plan nicht neu; du korrigierst präzise an der Stelle (wenn Plan-Datei vorhanden). Ohne Plan-Datei: Chat-Ausgabe.
+2. **Eine klare Report-/Datei-Regel:**
+   - **Isolierter TM-/verify-plan-Lauf** (kein auto-debugger-Gate): Du **erstellst keine neuen Dateien** außer **Korrekturen in der referenzierten Plan-Datei** (Modus A). Du schreibst **keinen** freien Zusatzreport nach `.claude/reports/` — Ausgabe ist **Chat** (inkl. ggf. **OUTPUT FÜR ORCHESTRATOR** nur wenn obiger Pflichtfall zutrifft; sonst weglassen).
+   - **auto-debugger-Gate** mit gebundenem Artefaktordner (`incidents/<id>/` oder `auto-debugger-runs/<run_id>/`): **`VERIFY-PLAN-REPORT.md` genau in diesem Ordner** ist **zulässig und erwünscht** — gebundener Report-Pfad, keine „weichen“ Reports an beliebiger Stelle. Typischerweise schreibt der **ausführende Orchestrator** (`auto-debugger`) diese Datei nach Anwendung dieses Skills; Inhalt und der Chat-Block **OUTPUT FÜR ORCHESTRATOR** müssen zusammenpassen.
+3. **Chat-Ausgabe:** Immer die fachliche Verify-Antwort (Modus B bzw. ergänzend zu Modus A). Im **auto-debugger-Gate-Pflichtfall** zusätzlich immer den Abschnitt **OUTPUT FÜR ORCHESTRATOR (auto-debugger)**.
+4. Wenn der Plan keine Probleme hat: Sag das klar und kurz.
 5. Wenn der Plan Probleme hat: Sei präzise, nicht vage – gib dem TM exakte Pfade, exakte Namen, exakte Fixes
 6. Prüfe NUR was im Plan referenziert wird – keine Vollanalyse. Bei Quality Gates: Prüfe auch implizite Referenzen (z.B. wenn „Sensor hinzufügen“ steht, prüfe MQTT-Topics und API).
 7. Ignoriere Rechtschreibfehler im Plan – fokussiere auf technische Korrektheit
@@ -325,6 +366,7 @@ Für jeden erwarteten Output:
 | Plan prüfen | **verify-plan** (dieser Skill) |
 | Plan korrigieren | TM (claude.ai) – verify-plan kann bei Plan-Datei präzise Korrekturen einfügen |
 | Plan ausführen | Dev-Agents / Debug-Agents |
+| TASK-PACKAGES nach Verify anpassen, SPECIALIST-PROMPTS rollenweise | **auto-debugger** (nutzt Chat-Block **OUTPUT FÜR ORCHESTRATOR**) |
 | System analysieren | system-control (Briefing- oder Ops-Modus) |
 | Reports konsolidieren | /collect-reports |
 | Reports meta-analysieren | meta-analyst |
@@ -344,7 +386,7 @@ Für jeden erwarteten Output:
 | Output | Chat-Antwort mit Korrekturen (oder Inline-Korrektur in Plan-Datei bei Modus A) |
 | Tools | Read, Grep, Glob, Bash, Edit |
 | Modus | Edit bei Plan-Datei; Chat bei nur Kontext |
-| Schreibt Dateien | Nur Korrekturen in referenzierter Plan-Datei (Modus A) |
+| Schreibt Dateien | Modus A: nur Korrekturen in referenzierter Plan-Datei; auto-debugger-Gate: `VERIFY-PLAN-REPORT.md` im gebundenen Run-Ordner (Orchestrator) |
 | Dauer | 1-3 Minuten |
 
 ---

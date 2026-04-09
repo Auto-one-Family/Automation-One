@@ -17,7 +17,7 @@ Diese Informationen bleiben nach /compact erhalten:
 - Sensor-Konfiguration NUR in HardwareView (SensorConfigPanel). Komponenten-Tab (/sensors) = Wissensdatenbank
 - Mock vs. Real ESP klar trennen. Zone auf Geraetebene, Subzone pro Sensor
 - Build: `pio run` (ESP32), `pytest` (Server), `npm run build` (Frontend)
-- 13 Agents (4 Dev, 5 Debug, 4 System), 22 Skills, path-scoped Rules
+- 14 Agents (4 Dev, 5 Debug, 4 System, 1 Orchestrierung), 23+ Skills, path-scoped Rules
 - Sub-Agent Routing: parallel bei unabhaengigen Domaenen, sequentiell bei Abhaengigkeiten
 - Conventional Commits, ruff (Python), prettier (TS/Vue), strict TypeScript
 
@@ -70,6 +70,26 @@ Jede Sub-Agent-Invocation muss enthalten:
 - **"zusammen" = parallel.** NUR wenn User explizit "zusammen" schreibt
 - **Plan Mode:** Parallel erlaubt, ohne Pause arbeiten
 
+### Orchestrator: auto-debugger (Incident & Analyse-Artefakte)
+
+**Wann `auto-debugger` statt Einzel-Debug-Agent:**
+
+- Mehrschicht-**Incident** mit Pflichtsequenz: Lagebild, Korrelation, TASK-Packages, Spezialisten-Prompts, Konsolidierung, **`/verify-plan`-Gate** vor Implementierung.
+- **Additive Verbesserung** bestehender Markdown-Analyseberichte (`docs/analysen/` o. a.) unter klarem Scope — evidenzbasiert, repo-verifiziert.
+- Du brauchst **einen** durchgaengigen Artefakt-Ordner (`.claude/reports/current/incidents/<id>/` bzw. `auto-debugger-runs/<run_id>/`) statt isolierter Einzelreports.
+
+**Wann weiterhin Einzel-Agenten:** reine Log-Triage in einer Schicht → `server-debug`, `frontend-debug`, `mqtt-debug`, `esp32-debug`; DB → `db-inspector`; reine Test-Log-Analyse → `test-log-analyst`; reine Querschnitts-Doku ohne Orchestrierung → `meta-analyst`.
+
+**Steuerdatei-Pflicht:** Strukturierter Lauf startet mit einer Datei unter **`.claude/auftraege/auto-debugger/inbox/`** (Vorlage: `STEUER-VORLAGE.md`). Im Chat z. B. `@.claude/auftraege/auto-debugger/inbox/STEUER-….md`. Ohne gueltige Steuerdatei: nur Klaerung, keine vollstaendige Artefaktstruktur.
+
+**Git-Arbeitsbranch:** Orchestrierte und delegierte **Code-Änderungen** nur auf Branch **`auto-debugger/work`** (von `master`); Details und Spezialisten-Pflicht siehe `.claude/agents/auto-debugger.md` (0a) und Skill `auto-debugger`.
+
+**Skill:** `.claude/skills/auto-debugger/SKILL.md` — **Pflichtgate:** Skill **`verify-plan`** vor Implementierung aus abgeleiteten `TASK-PACKAGES.md`.
+
+**Kette (ein Satz):** `TASK-PACKAGES.md` → Inhalt gemäss **`verify-plan`** (inkl. Chat-Block **OUTPUT FÜR ORCHESTRATOR**) → **`VERIFY-PLAN-REPORT.md`** → **Plan-Anpassung** (`TASK-PACKAGES.md` mutieren) durch **`auto-debugger`** → **`SPECIALIST-PROMPTS.md`** rollenweise → Dev-Agenten auf Branch **`auto-debugger/work`**.
+
+**Slash-Command (optional):** `.claude/commands/auto-debugger.md` mit Argument `path` zur Steuerdatei.
+
 ---
 
 ## Skills (Entwicklung)
@@ -88,6 +108,7 @@ Jede Sub-Agent-Invocation muss enthalten:
 | Agent-Flow pruefen, IST-SOLL, Agent-Korrektur | `agent-manager` |
 | Git-Commit vorbereiten, Changes analysieren | `git-commit` |
 | /verify-plan, TM-Plan Reality-Check | `verify-plan` |
+| auto-debugger, Incident-Orchestrierung, Artefakt-Verbesserung | `auto-debugger` |
 | KI-Audit, Bereich auf KI-Fehler pruefen | `ki-audit` |
 
 ## Dev-Agenten (Pattern-konforme Implementierung)
@@ -115,6 +136,12 @@ Jede Sub-Agent-Invocation muss enthalten:
 | `mqtt-debug` | Topic, Payload, QoS, Publish, Subscribe, Broker |
 | `frontend-debug` | Build-Error, TypeScript, Vite, WebSocket, Pinia, Vue-Component |
 | `meta-analyst` | Cross-Report-Vergleich, Widersprueche, Problemketten (LETZTE Analyse-Instanz) |
+
+## Orchestrierung (Incident & Artefakte)
+
+| Agent | Trigger-Keywords | Rolle |
+|-------|------------------|-------|
+| `auto-debugger` | Incident-Artefakte, Korrelation, TASK-PACKAGES, verify-plan-Gate, Steuerdatei inbox | Lagebild → Korrelation → erste Pakete/Prompts → Verify + VERIFY-PLAN-REPORT → **TASK-PACKAGES anpassen** → **SPECIALIST-PROMPTS** → Dev-Umsetzung; Steuerdatei siehe oben |
 
 ---
 

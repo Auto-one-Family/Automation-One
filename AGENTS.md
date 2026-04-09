@@ -67,3 +67,7 @@ AutomationOne is a server-centric IoT framework with three main components. See 
 - Backend Poetry virtualenv is stored in-project at `El Servador/god_kaiser_server/.venv` (configured via `poetry config virtualenvs.in-project true`).
 - The `Makefile` provides convenient Docker Compose shortcuts; see `make help` for all targets.
 - ESP32 firmware (`El Trabajante/`) is optional for dev — Mock ESPs can be created via the Debug API.
+
+## Claude Code — Orchestrator `auto-debugger` (optional)
+
+For structured **incident** or **markdown artefact improvement** workflows in-repo, use the **`auto-debugger`** agent with a **control file** under [`.claude/auftraege/auto-debugger/inbox/`](.claude/auftraege/auto-debugger/inbox/) (template: [`STEUER-VORLAGE.md`](.claude/auftraege/auto-debugger/STEUER-VORLAGE.md)). Chat example: `@.claude/auftraege/auto-debugger/inbox/STEUER-….md`. **Work branch:** `auto-debugger/work` (branched from `master`) — check out before runs; delegated dev work should commit only there. **Flow:** `TASK-PACKAGES.md` → apply **`verify-plan`** (orchestrator output block in skill) → **`VERIFY-PLAN-REPORT.md`** → **`auto-debugger`** revises **`TASK-PACKAGES.md`** → updates **`SPECIALIST-PROMPTS.md`** per dev role → hand off to dev agents. Router details: [`.claude/CLAUDE.md`](.claude/CLAUDE.md) (Orchestrator section). Skill: [`.claude/skills/auto-debugger/SKILL.md`](.claude/skills/auto-debugger/SKILL.md). Slash command: [`.claude/commands/auto-debugger.md`](.claude/commands/auto-debugger.md).

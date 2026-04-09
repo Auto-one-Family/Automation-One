@@ -1,6 +1,6 @@
 # AutomationOne — Agent-Profile
 
-> **Version:** 1.6 | **Stand:** 2026-03-07
+> **Version:** 1.7 | **Stand:** 2026-04-10
 > **Zweck:** SOLL-Definition aller Agents, Skills und Referenzen für agent-manager und System-Übersicht
 > **Genutzt von:** agent-manager (primär), system-control, Technical Manager
 
@@ -107,19 +107,30 @@
 - **Referenzen:** LOG_LOCATIONS.md, CI_PIPELINE.md, TEST_ENGINE_REFERENCE.md, TEST_WORKFLOW.md, flow_reference.md
 - **Andere Agenten:** Keine; eigenständiger Flow (F4)
 
-## 1.14 auto-ops (Plugin-Agent)
+## 1.14 auto-debugger
+- **Datei:** `.claude/agents/auto-debugger.md`
+- **Rolle:** Orchestrierung Incident-Workflow und additive Markdown-Artefakt-Verbesserung. Lagebild, CORRELATION-MAP, TASK-PACKAGES, SPECIALIST-PROMPTS, VERIFY-PLAN-REPORT; Steuerdatei unter `.claude/auftraege/auto-debugger/inbox/`. **Nach Verify:** `TASK-PACKAGES.md` an Verify-Ergebnis anpassen, `SPECIALIST-PROMPTS.md` rollenweise abstimmen, dann Übergabe an Dev-Agenten (keine Produkt-Implementierung durch den Orchestrator in dieser Phase).
+- **Kette:** TASK-PACKAGES → verify-plan (OUTPUT FÜR ORCHESTRATOR) → VERIFY-PLAN-REPORT → Plan-Anpassung → SPECIALIST-PROMPTS → Dev-Agenten (`auto-debugger/work`).
+- **Git:** Arbeitsbranch fix **`auto-debugger/work`** (von `master`); alle delegierten Dev-/Schreibaufträge nur auf diesem Branch.
+- **Model:** inherit
+- **Tools:** Read, Write, Edit, Grep, Glob, Bash (nur eingeschränkt für Git Branch-Check/Checkout — siehe Agent 0a)
+- **Skills:** auto-debugger, verify-plan (Pflichtgate vor Implementierung aus Paketen)
+- **Referenzen:** Konzept `docs/analysen/KONZEPT-auto-debugger-frontend-flow-api-alertcenter-2026-04-09.md`, Einzel-Debug-Agenten (ohne Logik-Duplikation)
+- **Andere Agenten:** Koordiniert Einbindung von server-debug, frontend-debug, mqtt-debug, esp32-debug, db-inspector, test-log-analyst, optional meta-analyst
+
+## 1.15 auto-ops (Plugin-Agent)
 - **Datei:** `.claude/local-marketplace/auto-ops/agents/auto-ops.md`
 - **Rolle:** Autonomous Operations Agent (v2.0). 5 Rollen: Operations, Backend Inspector Delegation, Frontend Inspector Delegation, Driver, Hardware-Test Orchestrator (F4).
 - **Skills:** system-health, docker-operations, esp32-operations, database-operations, loki-queries, error-codes, mqtt-analysis, boot-sequences, frontend-patterns, cross-layer-correlation
 - **MCP Tools:** Playwright (10 Tools), Sequential Thinking (`mcp__MCP_DOCKER__sequentialthinking`)
 - **Andere Agenten:** Delegiert an backend-inspector, frontend-inspector, esp32-debug, server-debug, mqtt-debug, frontend-debug, meta-analyst
 
-## 1.15 backend-inspector (Plugin-Agent)
+## 1.16 backend-inspector (Plugin-Agent)
 - **Datei:** `.claude/local-marketplace/auto-ops/agents/backend-inspector.md`
 - **Rolle:** Cross-Layer Backend-Diagnose (ESP → MQTT → Server → DB). Loki-first, debug-status.ps1 als Einstieg.
 - **MCP Tools:** Sequential Thinking (`mcp__MCP_DOCKER__sequentialthinking`), KEIN Playwright
 
-## 1.16 frontend-inspector (Plugin-Agent)
+## 1.17 frontend-inspector (Plugin-Agent)
 - **Datei:** `.claude/local-marketplace/auto-ops/agents/frontend-inspector.md`
 - **Rolle:** Cross-Layer Frontend-Diagnose (Browser → Vue → Pinia → API → Server → DB). Playwright MCP fuer echten Browser-Zugang.
 - **MCP Tools:** Playwright (10 Tools), Sequential Thinking (`mcp__MCP_DOCKER__sequentialthinking`)
@@ -131,6 +142,7 @@
 | Skill | Zweck | Genutzt von |
 |-------|-------|-------------|
 | agent-manager | IST-SOLL-Vergleich, Flow vs. Agent-Dateien, Korrekturen | agent-manager |
+| auto-debugger | Incident-Workflow, Artefakt-Verbesserung, Steuerdatei inbox, verify-plan-Gate, Post-Verify TASK-PACKAGES + SPECIALIST-PROMPTS | auto-debugger |
 | collect-reports | Reports in CONSOLIDATED_REPORT.md zusammenführen | Robin (manuell) |
 | collect-system-status | IST-Stand aus Code (Docker, Backend, Frontend) | — |
 | db-inspector | DB-Wissen, Schema, Diagnose-Queries | db-inspector |
