@@ -15,8 +15,8 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 10.6
-**Letzte Aktualisierung:** 2026-04-06
+**Version:** 10.7
+**Letzte Aktualisierung:** 2026-04-11
 
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
@@ -185,6 +185,7 @@ El Frontend/src/
 │   ├── useSwipeNavigation.ts
 │   ├── useConfigResponse.ts
 │   ├── useCalibration.ts
+│   ├── useCalibrationWizard.ts   # Kalibrier-Wizard F-P1; Live-Messung: POST measure + Cooldown wie SensorValueCard
 │   ├── useCommandPalette.ts
 │   ├── useContextMenu.ts
 │   ├── useDashboardWidgets.ts  # Container-agnostic widget mount/unmount, zoneId propagation (PA-02c)
@@ -1367,7 +1368,9 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 10.6 | **Letzte Aktualisierung:** 2026-04-06
+**Version:** 10.7 | **Letzte Aktualisierung:** 2026-04-11
+
+- 2026-04-11: Composables-Index — `useCalibrationWizard.ts` (Kalibrier-Wizard, Live-`triggerMeasurement` mit 2 s Post-HTTP-Cooldown, Parität `SensorValueCard`).
 
 - 2026-04-06: F11 Ops-Lifecycle vereinheitlicht — neuer Shared-Contract `types/ops-lifecycle.ts` + `shared/stores/ops-lifecycle.store.ts`; `plugins.store` auf execution_id-zentriertes Lifecycle-Tracking mit Timeout-Guard und Reconciliation erweitert; `LoadTestView` mit Guardrail-Flow (Preflight, typed confirm, Lifecycle, Summary); `SystemConfigView` mit Key-Diff/Risiko und `saved` vs `applied`; `SystemMonitorView` zeigt globale High-Risk-Ops-Banner-Queue.
 
