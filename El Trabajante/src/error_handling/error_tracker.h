@@ -64,7 +64,8 @@ public:
   void trackError(uint16_t error_code, const char* message);  // Default severity: ERROR
   
   // Convenience Methods — pass full codes from models/error_codes.h when available; small
-  // numeric offsets (tests/archive) still map via ERROR_* + code when outside the category span.
+  // numeric offsets still map via category base + code when outside the band (bands use
+  // fixed 1000–1999 / 2000–2999 / 3000–3999 / 4000–4999 per models/error_codes.h).
   void logHardwareError(uint16_t code, const char* message);
   void logServiceError(uint16_t code, const char* message);
   void logCommunicationError(uint16_t code, const char* message);

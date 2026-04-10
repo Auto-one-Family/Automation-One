@@ -6,6 +6,17 @@
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "ERRTRAK";
 
+// Exclusive upper edges per models/error_codes.h — do not use the next enum enumerator
+// as an upper bound (e.g. ERROR_APPLICATION auto-incrementing after ERROR_COMMUNICATION),
+// which would mis-classify 3001–3999 and double-add the category base (INC-2026-04-10).
+namespace {
+constexpr uint16_t kErrHardwareBandEndExcl = 2000;
+constexpr uint16_t kErrServiceBandEndExcl = 3000;
+constexpr uint16_t kErrCommunicationBandEndExcl = 4000;
+constexpr uint16_t kErrApplicationBandEndExcl = 5000;
+constexpr uint16_t kErrApplicationBandBase = 4000;
+}  // namespace
+
 // ============================================
 // ERROR RATE LIMITING (F8 — MQTT Flood Prevention)
 // ============================================
@@ -104,7 +115,7 @@ void ErrorTracker::trackError(uint16_t error_code, const char* message) {
 // CONVENIENCE METHODS
 // ============================================
 void ErrorTracker::logHardwareError(uint16_t code, const char* message) {
-  if (code >= ERROR_HARDWARE && code < ERROR_SERVICE) {
+  if (code >= ERROR_HARDWARE && code < kErrHardwareBandEndExcl) {
     trackError(code, ERROR_SEVERITY_ERROR, message);
   } else {
     trackError(static_cast<uint16_t>(ERROR_HARDWARE + code), ERROR_SEVERITY_ERROR, message);
@@ -112,7 +123,7 @@ void ErrorTracker::logHardwareError(uint16_t code, const char* message) {
 }
 
 void ErrorTracker::logServiceError(uint16_t code, const char* message) {
-  if (code >= ERROR_SERVICE && code < ERROR_COMMUNICATION) {
+  if (code >= ERROR_SERVICE && code < kErrServiceBandEndExcl) {
     trackError(code, ERROR_SEVERITY_ERROR, message);
   } else {
     trackError(static_cast<uint16_t>(ERROR_SERVICE + code), ERROR_SEVERITY_ERROR, message);
@@ -120,7 +131,7 @@ void ErrorTracker::logServiceError(uint16_t code, const char* message) {
 }
 
 void ErrorTracker::logCommunicationError(uint16_t code, const char* message) {
-  if (code >= ERROR_COMMUNICATION && code < ERROR_APPLICATION) {
+  if (code >= ERROR_COMMUNICATION && code < kErrCommunicationBandEndExcl) {
     trackError(code, ERROR_SEVERITY_ERROR, message);
   } else {
     trackError(static_cast<uint16_t>(ERROR_COMMUNICATION + code), ERROR_SEVERITY_ERROR, message);
@@ -128,10 +139,10 @@ void ErrorTracker::logCommunicationError(uint16_t code, const char* message) {
 }
 
 void ErrorTracker::logApplicationError(uint16_t code, const char* message) {
-  if (code >= ERROR_APPLICATION && code < 5000) {
+  if (code >= kErrApplicationBandBase && code < kErrApplicationBandEndExcl) {
     trackError(code, ERROR_SEVERITY_ERROR, message);
   } else {
-    trackError(static_cast<uint16_t>(ERROR_APPLICATION + code), ERROR_SEVERITY_ERROR, message);
+    trackError(static_cast<uint16_t>(kErrApplicationBandBase + code), ERROR_SEVERITY_ERROR, message);
   }
 }
 
