@@ -104,19 +104,35 @@ void ErrorTracker::trackError(uint16_t error_code, const char* message) {
 // CONVENIENCE METHODS
 // ============================================
 void ErrorTracker::logHardwareError(uint16_t code, const char* message) {
-  trackError(ERROR_HARDWARE + code, ERROR_SEVERITY_ERROR, message);
+  if (code >= ERROR_HARDWARE && code < ERROR_SERVICE) {
+    trackError(code, ERROR_SEVERITY_ERROR, message);
+  } else {
+    trackError(static_cast<uint16_t>(ERROR_HARDWARE + code), ERROR_SEVERITY_ERROR, message);
+  }
 }
 
 void ErrorTracker::logServiceError(uint16_t code, const char* message) {
-  trackError(ERROR_SERVICE + code, ERROR_SEVERITY_ERROR, message);
+  if (code >= ERROR_SERVICE && code < ERROR_COMMUNICATION) {
+    trackError(code, ERROR_SEVERITY_ERROR, message);
+  } else {
+    trackError(static_cast<uint16_t>(ERROR_SERVICE + code), ERROR_SEVERITY_ERROR, message);
+  }
 }
 
 void ErrorTracker::logCommunicationError(uint16_t code, const char* message) {
-  trackError(ERROR_COMMUNICATION + code, ERROR_SEVERITY_ERROR, message);
+  if (code >= ERROR_COMMUNICATION && code < ERROR_APPLICATION) {
+    trackError(code, ERROR_SEVERITY_ERROR, message);
+  } else {
+    trackError(static_cast<uint16_t>(ERROR_COMMUNICATION + code), ERROR_SEVERITY_ERROR, message);
+  }
 }
 
 void ErrorTracker::logApplicationError(uint16_t code, const char* message) {
-  trackError(ERROR_APPLICATION + code, ERROR_SEVERITY_ERROR, message);
+  if (code >= ERROR_APPLICATION && code < 5000) {
+    trackError(code, ERROR_SEVERITY_ERROR, message);
+  } else {
+    trackError(static_cast<uint16_t>(ERROR_APPLICATION + code), ERROR_SEVERITY_ERROR, message);
+  }
 }
 
 // ============================================
