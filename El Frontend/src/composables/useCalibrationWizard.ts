@@ -169,6 +169,9 @@ interface CalibrationDraft {
 const DRAFT_STORAGE_KEY = 'calibration.wizard.draft.v2'
 const TERMINAL_SESSION_STATUSES = new Set(['applied', 'rejected', 'failed', 'expired'])
 
+/** Mindestabstand nach Mess-HTTP wie SensorValueCard (ESP + MQTT). */
+const MEASUREMENT_TRIGGER_COOLDOWN_MS = 2000
+
 function normalizeCalibrationSensorType(sensorType: string): string {
   const normalized = sensorType.trim().toLowerCase()
   return normalized === 'soil_moisture' ? 'moisture' : normalized
@@ -207,8 +210,16 @@ export function useCalibrationWizard(
   const lastMeasurementAt = ref<number | null>(null)
   const measurementRequestId = ref<string | null>(null)
   const measurementTriggerAt = ref<number | null>(null)
+  const measureCooldownTimerId = ref<ReturnType<typeof setTimeout> | null>(null)
   const lifecycleState = ref<CalibrationLifecycleState>('idle')
   const lifecycleMessage = ref('')
+
+  function clearMeasureCooldownTimer(): void {
+    if (measureCooldownTimerId.value !== null) {
+      clearTimeout(measureCooldownTimerId.value)
+      measureCooldownTimerId.value = null
+    }
+  }
 
   const ws = useWebSocket({
     filters: {
@@ -272,6 +283,7 @@ export function useCalibrationWizard(
   })
 
   const cleanupWebSocketBindings = () => {
+    clearMeasureCooldownTimer()
     unsubscribeMeasurement()
     unsubscribeMeasurementFailed()
     ws.cleanup()
@@ -350,6 +362,8 @@ export function useCalibrationWizard(
     isFreshMeasurement.value = false
     measurementRequestId.value = null
     measurementTriggerAt.value = null
+    clearMeasureCooldownTimer()
+    isMeasuring.value = false
   }
 
   async function ensureSessionStarted(): Promise<string> {
@@ -546,6 +560,9 @@ export function useCalibrationWizard(
    */
   async function triggerLiveMeasurement(): Promise<void> {
     if (selectedGpio.value === null || !selectedEspId.value) return
+    if (isMeasuring.value) return
+
+    clearMeasureCooldownTimer()
     isMeasuring.value = true
     isFreshMeasurement.value = false
     lifecycleState.value = 'accepted'
@@ -573,7 +590,11 @@ export function useCalibrationWizard(
       lifecycleState.value = 'terminal_failed'
       lifecycleMessage.value = errorMessage.value
     } finally {
-      isMeasuring.value = false
+      clearMeasureCooldownTimer()
+      measureCooldownTimerId.value = setTimeout(() => {
+        isMeasuring.value = false
+        measureCooldownTimerId.value = null
+      }, MEASUREMENT_TRIGGER_COOLDOWN_MS)
     }
   }
 
@@ -752,6 +773,7 @@ export function useCalibrationWizard(
     points.value = []
     calibrationResult.value = null
     errorMessage.value = ''
+    clearMeasureCooldownTimer()
     isMeasuring.value = false
     lastRawValue.value = null
     measurementQuality.value = 'unknown'
@@ -770,6 +792,7 @@ export function useCalibrationWizard(
       if (typeof window !== 'undefined') {
         window.removeEventListener('beforeunload', handleBeforeUnload)
       }
+      clearMeasureCooldownTimer()
     })
   }
 

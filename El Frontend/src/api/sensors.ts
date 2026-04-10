@@ -202,7 +202,7 @@ export const sensorsApi = {
 
   // ===========================================================================
   // On-Demand Measurement (Phase 2D)
-  // Server: POST /sensors/{esp_id}/{gpio}/measure (sensors.py:727-773)
+  // Server: POST /sensors/{esp_id}/{gpio}/measure (sensors.py:1649-1695)
   // ===========================================================================
 
   /**

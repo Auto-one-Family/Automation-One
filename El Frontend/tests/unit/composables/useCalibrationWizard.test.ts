@@ -38,10 +38,12 @@ vi.mock('@/shared/stores/ui.store', () => ({
   useUiStore: () => uiStoreMock,
 }))
 
+const sensorsApiMock = vi.hoisted(() => ({
+  triggerMeasurement: vi.fn().mockResolvedValue({ request_id: 'req-1' }),
+}))
+
 vi.mock('@/api/sensors', () => ({
-  sensorsApi: {
-    triggerMeasurement: vi.fn().mockResolvedValue(undefined),
-  },
+  sensorsApi: sensorsApiMock,
 }))
 
 import { useCalibrationWizard } from '@/composables/useCalibrationWizard'
@@ -55,6 +57,8 @@ describe('useCalibrationWizard', () => {
     Object.values(calibrationApiMock).forEach((fn) => fn.mockReset())
     uiStoreMock.confirm.mockReset()
     uiStoreMock.confirm.mockResolvedValue(true)
+    sensorsApiMock.triggerMeasurement.mockReset()
+    sensorsApiMock.triggerMeasurement.mockResolvedValue({ request_id: 'req-1' })
   })
 
   it('verarbeitet calibration_measurement_received und setzt lastRawValue', () => {
@@ -273,5 +277,41 @@ describe('useCalibrationWizard', () => {
     expect(calibrationApiMock.finalizeSession).not.toHaveBeenCalled()
     expect(calibrationApiMock.applySession).not.toHaveBeenCalled()
     expect(wizard.phase.value).toBe('error')
+  })
+
+  it('sperrt triggerLiveMeasurement fuer 2s nach HTTP (Paritaet SensorValueCard)', async () => {
+    vi.useFakeTimers()
+    try {
+      calibrationApiMock.startSession.mockResolvedValue({
+        id: 'session-measure',
+        status: 'pending',
+        method: 'linear_2point',
+        sensor_type: 'moisture',
+        calibration_points: { points: [] },
+      })
+
+      const wizard = useCalibrationWizard({
+        skipSelect: true,
+        espId: 'ESP_M',
+        gpio: 4,
+        sensorType: 'moisture',
+      })
+      wizard.selectSensor('ESP_M', 4, 'moisture')
+
+      const first = wizard.triggerLiveMeasurement()
+      void wizard.triggerLiveMeasurement()
+      await first
+
+      expect(sensorsApiMock.triggerMeasurement).toHaveBeenCalledTimes(1)
+      expect(wizard.isMeasuring.value).toBe(true)
+
+      vi.advanceTimersByTime(2000)
+      expect(wizard.isMeasuring.value).toBe(false)
+
+      await wizard.triggerLiveMeasurement()
+      expect(sensorsApiMock.triggerMeasurement).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
