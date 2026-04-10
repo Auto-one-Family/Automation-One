@@ -241,6 +241,8 @@ allowed-tools: Read
 | 3015 | `MQTT_BUFFER_FULL` | MQTT offline buffer is full (messages dropped) |
 | 3016 | `MQTT_PAYLOAD_INVALID` | MQTT payload is invalid or malformed |
 
+**Hinweis:** In älteren Steuer- oder Suchtexten taucht gelegentlich fälschlich **„6016“** im Zusammenhang mit EMERGENCY-Parse oder ungültigem MQTT-Payload auf — kanonisch ist für diese Klasse **3016** (`ERROR_MQTT_PAYLOAD_INVALID` / `MQTT_PAYLOAD_INVALID`).
+
 ### Security Errors (3500-3501)
 
 | Code | Name | Beschreibung |

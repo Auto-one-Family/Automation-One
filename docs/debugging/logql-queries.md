@@ -2,7 +2,9 @@
 
 > Reference for the most common debug situations.
 > All queries work in Grafana Explore, Debug-Console Dashboard, and via Loki API.
-> See also: `scripts/loki-query.sh` for CLI usage, `docs/debugging/debug-workflow.md` for scenario-based debugging.
+> See also: `scripts/loki-query.sh` for CLI usage, `docs/debugging/debug-workflow.md` for scenario-based debugging, **`docs/debugging/correlation-id-playbook.md`** for REST vs. MQTT IDs and copy-paste LogQL.
+
+**Triage (A/B/C):** Sehr breite Queries (z. B. `level="ERROR"` über alle Services oder reiner Volltext `|= "error"`) ziehen oft **Klasse-C-Artefakte** mit — Feldnamen, JSON-Fragmente, harmloser Text. Treffer **pro Zeile** nach `docs/analysen/IST-docker-log-triage-observability-signal-vs-noise-2026-04-09.md` einordnen; die untenstehenden Einstiegs-Queries bleiben absichtlich breit und ersetzen keine strenge Produktpfad-Analyse.
 
 ---
 
@@ -61,6 +63,20 @@ Replace `$CORRELATION_ID` with the request_id from server logs or a known identi
 
 **When:** A sensor value arrives wrong at the frontend — trace where it went wrong.
 **Expected:** All log entries across all services that mention the correlation ID.
+
+---
+
+## Correlation-ID-Playbook (REST vs. MQTT)
+
+**Kanonische Beschreibung** (Namenskonflikt `request_id`, drei LogQL-Grundszenarien, Verweise auf `request_context.py` / `subscriber.py`): **`docs/debugging/correlation-id-playbook.md`**.
+
+Kurzfassung — **nicht** HTTP-UUID und MQTT-CID ohne Kontextprüfung kreuzen; Volltext IST: `docs/analysen/IST-observability-correlation-contracts-2026-04-09.md`.
+
+- **REST-UUID:** `{compose_service="el-servador"} |= "$HTTP_REQUEST_UUID"`
+- **MQTT-CID:** `{compose_service="el-servador"} |= "$MQTT_CID"`
+- **Gerät + Zeitfenster:** `{compose_service=~"el-servador|esp32-serial-logger|mqtt-broker"} |= "$ESP_ID"` — Zeitrange in Grafana setzen.
+
+**Parse-Fehler** (ohne Payload-CID, aber mit synthetischer `mqtt_parse_fail_id`): `{compose_service="el-servador"} |~ "mqtt_parse_fail_id"` — alternativ `|~ "Invalid JSON payload"`. Details: `docs/debugging/correlation-id-playbook.md` §3.
 
 ---
 
@@ -175,6 +191,34 @@ Beide unterstützen: `errors [min]`, `trace <cid>`, `esp <esp-id>`, `health`
 
 ---
 
+## failure_class (Server logs, Pilot I08)
+
+**Situation:** Filter MQTT-/sensor-related failures by a small stable taxonomy field (no PII in the field value).
+
+**Wichtig (Docker stdout vs. Datei):** Der Container nutzt **TextFormatter** auf der Konsole — dort steht `failure_class=…` am **Zeilenende** (kein JSON pro Zeile). Die **Datei** `logs/server/god_kaiser.log` (Bind-Mount) nutzt bei `LOG_FORMAT=json` echtes **JSON** mit Schlüssel `"failure_class"`.
+
+**Loki / Docker (Textzeilen):**
+
+```logql
+{compose_service="el-servador"} |= "failure_class"
+```
+
+Nur Parse-Fehler (Substring wie in den Logs):
+
+```logql
+{compose_service="el-servador"} |~ "failure_class=mqtt_json_parse"
+```
+
+**Datei-JSON oder rein JSON-prozessierte Zeilen** (wenn `| json` auf der Zeile funktioniert):
+
+```logql
+{compose_service="el-servador"} | json | failure_class=~"mqtt_json_parse|mqtt_route|sensor_payload_validation"
+```
+
+**Reference:** `El Servador/god_kaiser_server/src/core/logging_config.py` (Whitelist `_STRUCTURED_JSON_FIELDS`), Call-Sites: `mqtt/subscriber.py`, `mqtt/handlers/sensor_handler.py`.
+
+---
+
 ## Structured Metadata Queries
 
 With Alloy pipeline v2 (native config), additional fields are available as structured metadata:
@@ -182,6 +226,10 @@ With Alloy pipeline v2 (native config), additional fields are available as struc
 ```logql
 # Filter by Python module (el-servador)
 {compose_service="el-servador"} | logger="src.mqtt.handlers.sensor_handler"
+
+# Optional: business correlation_id (Alloy extracts from log *message* when the line contains `correlation_id=…`;
+# not every server line has it — REST-heavy paths often only have `request_id` metadata)
+{compose_service="el-servador"} | correlation_id="$CID"
 
 # Filter by Vue component (el-frontend)
 {compose_service="el-frontend"} | component="SensorCard"
