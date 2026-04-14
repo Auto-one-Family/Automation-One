@@ -35,6 +35,10 @@ const props = defineProps<Props>()
 
 const emit = defineEmits<{
   (e: 'click', payload: { deviceId: string; originRect: DOMRect }): void
+  (e: 'settings', device: ESPDevice): void
+  (e: 'change-zone', device: ESPDevice): void
+  (e: 'monitor-nav', device: ESPDevice): void
+  (e: 'device-delete', deviceId: string): void
 }>()
 
 const cardRef = ref<InstanceType<typeof ESPCardBase> | null>(null)
@@ -236,6 +240,23 @@ function handleClick() {
     emit('click', { deviceId: deviceId.value, originRect: rect })
   }
 }
+
+function handleSettings() {
+  emit('settings', props.device)
+}
+
+function handleChangeZone() {
+  emit('change-zone', props.device)
+}
+
+function handleMonitorNav() {
+  emit('monitor-nav', props.device)
+}
+
+function handleDeviceDelete() {
+  if (!deviceId.value) return
+  emit('device-delete', deviceId.value)
+}
 </script>
 
 <template>
@@ -246,6 +267,10 @@ function handleClick() {
     :class="['device-mini-card', { 'device-mini-card--stale': !isDeviceOnline }]"
     @click="handleClick"
     @keydown.enter.prevent="handleClick"
+    @settings="handleSettings"
+    @change-zone="handleChangeZone"
+    @monitor-nav="handleMonitorNav"
+    @delete="handleDeviceDelete"
   >
     <!-- Header actions slot intentionally empty — settings moved to action row -->
 

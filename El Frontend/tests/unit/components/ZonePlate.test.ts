@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import ZonePlate from '@/components/dashboard/ZonePlate.vue'
+import DeviceMiniCard from '@/components/dashboard/DeviceMiniCard.vue'
 
 // lucide-vue-next is mocked globally in tests/setup.ts
 
@@ -102,11 +103,14 @@ describe('ZonePlate', () => {
     expect(w.text()).toContain('Bewässerung')
   })
 
-  it('emits update:isExpanded on header click', async () => {
-    const w = mountPlate({ isExpanded: true })
-    await w.find('.zone-plate__header').trigger('click')
-    expect(w.emitted('update:isExpanded')).toBeTruthy()
-    expect(w.emitted('update:isExpanded')![0][0]).toBe(false)
+  it('forwards device-delete from card as zone-level device-delete event', async () => {
+    const w = mountPlate()
+    const card = w.findComponent(DeviceMiniCard)
+    card.vm.$emit('device-delete', 'ESP_001')
+    await w.vm.$nextTick()
+
+    expect(w.emitted('device-delete')).toBeTruthy()
+    expect(w.emitted('device-delete')?.[0]).toEqual(['ESP_001'])
   })
 
   it('has healthy class when all online', () => {

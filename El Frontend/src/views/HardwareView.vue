@@ -27,6 +27,7 @@ import { zonesApi } from '@/api/zones'
 import { Plus, Filter, GitBranch, MapPin, XCircle, ChevronDown } from 'lucide-vue-next'
 import { getESPStatus } from '@/composables/useESPStatus'
 import { createLogger } from '@/utils/logger'
+import { shouldFallbackToHardwareOverview } from '@/utils/hardwareRouteGuard'
 
 const logger = createLogger('HardwareView')
 
@@ -583,6 +584,26 @@ const selectedDevice = computed(() => {
   return espStore.devices.find(d => espStore.getDeviceId(d) === selectedEspId.value) ?? null
 })
 
+watch(
+  selectedDevice,
+  (nextDevice, previousDevice) => {
+    const shouldFallback = shouldFallbackToHardwareOverview({
+      currentLevel: currentLevel.value,
+      selectedEspId: selectedEspId.value,
+      nextDeviceExists: nextDevice !== null,
+      previousDeviceExists: previousDevice !== null,
+    })
+    if (!shouldFallback) return
+    if (!previousDevice) return
+
+    logger.info('L2 fallback to L1: selected device missing', {
+      selectedEspId: selectedEspId.value,
+      previousDeviceId: espStore.getDeviceId(previousDevice),
+    })
+    router.replace({ name: 'hardware' })
+  },
+)
+
 const selectedZoneName = computed(() => {
   if (!selectedZoneId.value) return ''
   const zoneDevices = espStore.devices.filter(d => d.zone_id === selectedZoneId.value)
@@ -998,7 +1019,7 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
                         @click="onDeviceCardClick"
                         @change-zone="handleChangeZone"
                         @settings="handleSettings"
-                        @delete="handleDelete"
+                        @device-delete="handleDelete"
                       />
                     </div>
                   </VueDraggable>

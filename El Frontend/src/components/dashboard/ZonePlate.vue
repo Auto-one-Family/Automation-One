@@ -113,10 +113,11 @@ const statusVariant = computed(() => {
 // ── B1: Zone Sensor Aggregation ──────────────────────────────────────────
 const zoneAggregation = computed(() => aggregateZoneSensors(props.devices))
 
-const aggregatedValues = computed(() => {
+/** Pipe-separated segments with Ø prefix (aligned with Monitor L1 ZoneTileCard KPI semantics) */
+const aggregatedSegments = computed(() => {
   return zoneAggregation.value.sensorTypes.map((agg) => {
     const avgRounded = Number.isInteger(agg.avg) ? `${agg.avg}` : agg.avg.toFixed(1)
-    return `${avgRounded}\u2009${agg.unit}`
+    return { type: agg.type, text: `${avgRounded}\u2009${agg.unit}` }
   })
 })
 
@@ -340,9 +341,16 @@ function handleDragEnd() {
             </button>
           </template>
 
-          <!-- B1: Aggregated sensor values (pipe-separated by type) -->
-          <span v-if="aggregatedValues.length > 0" class="zone-plate__agg-values">
-            {{ aggregatedValues.join(' | ') }}
+          <!-- B1: Aggregated sensor values (pipe-separated; Ø = Zonenmittel, konsistent mit Monitor L1) -->
+          <span
+            v-if="aggregatedSegments.length > 0"
+            class="zone-plate__agg-values"
+            title="Zonenmittel pro Sensorkategorie (ohne stale)"
+          >
+            <template v-for="(seg, i) in aggregatedSegments" :key="seg.type">
+              <template v-if="i > 0"> | </template>
+              <span class="zone-plate__agg-avg" aria-hidden="true">Ø</span>{{ seg.text }}
+            </template>
             <span v-if="extraTypeCount > 0" class="zone-plate__agg-extra">+{{ extraTypeCount }}</span>
           </span>
 
@@ -493,7 +501,7 @@ function handleDragEnd() {
             @click="handleDeviceClick"
             @settings="handleDeviceSettings"
             @change-zone="handleDeviceChangeZone"
-            @delete="handleDeviceDelete"
+            @device-delete="handleDeviceDelete"
             @monitor-nav="handleDeviceMonitorNav"
           />
         </div>
@@ -683,6 +691,13 @@ function handleDragEnd() {
   min-width: 0;
   flex: 1;
   margin-left: var(--space-2);
+}
+
+.zone-plate__agg-avg {
+  font-size: 0.85em;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  margin-right: 1px;
 }
 
 /* Extra type count badge */
