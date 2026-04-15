@@ -18,8 +18,8 @@ alwaysApply: false
 |-------------|-----|-------|
 | Heartbeat | 0 | Regelmaessig, Verlust OK |
 | Sensor Data | 1 | Wichtig, aber nicht kritisch |
-| Actuator Command | 1 | Muss ankommen |
-| Emergency Stop | 1 | MUSS ankommen |
+| Actuator Command | 2 | Exactly-once fuer sicherheitskritische Befehle |
+| Emergency Stop | 2 | Sicherheitskritisch, keine Duplikate/Verluste |
 
 ## Cross-Layer Konsistenz
 - Server-Handler und ESP32-Publisher muessen dasselbe Topic-Schema verwenden
