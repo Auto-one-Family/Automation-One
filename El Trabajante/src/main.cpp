@@ -203,6 +203,18 @@ static String ensureCorrelationId(const String& correlationId) {
   return "fw_" + g_system_config.esp_id + "_" + String(millis()) + "_" + String(fallback_idx);
 }
 
+static bool hasRevocationDeleteHint(const String& raw_value) {
+  if (raw_value.length() == 0) {
+    return false;
+  }
+  String value = raw_value;
+  value.toUpperCase();
+  return value.indexOf("DELETE") >= 0 ||
+         value.indexOf("REVOK") >= 0 ||
+         value.indexOf("TOMBSTONE") >= 0 ||
+         value.indexOf("UPSTREAM") >= 0;
+}
+
 enum class EmergencyParseClass : uint8_t {
     MALFORMED = 0,
     UNSUPPORTED,
@@ -2186,7 +2198,16 @@ void routeIncomingMessage(const char* t, const char* p) {
                        String(guard_skip_count) + ")");
         }
 
+        IntentMetadata ack_metadata = extractIntentMetadataFromPayload(payload.c_str(), "hb_ack");
         const char* status = doc["status"] | "unknown";
+        String ack_reason_code = doc["reason_code"] | "";
+        String ack_revocation_source = doc["revocation_source"] | "";
+        String ack_correlation_id = doc["correlation_id"] | "";
+        bool ack_upstream_deleted = doc["upstream_deleted"] | false;
+        bool ack_delete_intent = doc["delete_intent"] | false;
+        if (ack_correlation_id.length() == 0 && strlen(ack_metadata.correlation_id) > 0) {
+            ack_correlation_id = ack_metadata.correlation_id;
+        }
         bool config_available = doc["config_available"] | false;
         unsigned long server_time = doc["server_time"] | 0;
 
@@ -2254,12 +2275,41 @@ void routeIncomingMessage(const char* t, const char* p) {
                 g_system_config.current_state = STATE_PENDING_APPROVAL;
             }
         } else if (strcmp(status, "rejected") == 0) {
+            bool upstream_delete_reject = ack_upstream_deleted ||
+                                          ack_delete_intent ||
+                                          hasRevocationDeleteHint(ack_reason_code) ||
+                                          hasRevocationDeleteHint(ack_revocation_source);
             LOG_W(TAG, "╔════════════════════════════════════════╗");
             LOG_W(TAG, "║   DEVICE REJECTED BY SERVER            ║");
             LOG_W(TAG, "╚════════════════════════════════════════╝");
+            LOG_W(TAG, String("[ADMISSION] heartbeat_ack rejected: reason_code=") +
+                       (ack_reason_code.length() > 0 ? ack_reason_code : "NONE") +
+                       ", revocation_source=" +
+                       (ack_revocation_source.length() > 0 ? ack_revocation_source : "NONE") +
+                       ", upstream_deleted=" + String(ack_upstream_deleted ? "true" : "false") +
+                       ", delete_intent=" + String(ack_delete_intent ? "true" : "false") +
+                       ", intent_id=" + String(ack_metadata.intent_id) +
+                       ", correlation_id=" +
+                       (ack_correlation_id.length() > 0 ? ack_correlation_id : String("NONE")));
+
+            String rejection_reason = upstream_delete_reject
+                                          ? String("Heartbeat rejected via upstream delete/revocation path")
+                                          : String("Heartbeat rejected by server administrator");
+            rejection_reason += " (reason_code=" +
+                                (ack_reason_code.length() > 0 ? ack_reason_code : String("NONE")) +
+                                ", revocation_source=" +
+                                (ack_revocation_source.length() > 0 ? ack_revocation_source : String("NONE")) +
+                                ", correlation_id=" +
+                                (ack_correlation_id.length() > 0 ? ack_correlation_id : String("NONE")) + ")";
+            publishIntentOutcome("heartbeat",
+                                 ack_metadata,
+                                 "rejected",
+                                 upstream_delete_reject ? "UPSTREAM_DELETE_REVOKED" : "HEARTBEAT_REJECTED",
+                                 rejection_reason,
+                                 false);
 
             errorTracker.trackError(ERROR_DEVICE_REJECTED, ERROR_SEVERITY_ERROR,
-                                   "Device rejected by server administrator");
+                                   rejection_reason.c_str());
 
             configManager.setDeviceApproved(false, 0);
             g_system_config.current_state = STATE_ERROR;

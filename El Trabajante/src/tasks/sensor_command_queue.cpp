@@ -18,6 +18,21 @@ extern SensorCommandExecutionResult handleSensorCommand(const String& topic, con
 QueueHandle_t g_sensor_cmd_queue = NULL;
 extern SystemConfig g_system_config;
 
+// Sensor command queue overflow counter (cumulative, never reset)
+static uint32_t g_sensor_cmd_queue_overflow_count = 0;
+
+static void logSensorQueueCorrelation(const char* stage,
+                                      const SensorCommand& cmd,
+                                      const char* reason_code) {
+    LOG_I(SENS_Q_TAG, String("[CORR] sensor_queue stage=") +
+                      (stage != nullptr ? stage : "unknown") +
+                      ", topic=" + String(cmd.topic) +
+                      ", intent_id=" + String(cmd.metadata.intent_id) +
+                      ", correlation_id=" + String(cmd.metadata.correlation_id) +
+                      ", epoch=" + String(cmd.metadata.epoch_at_accept) +
+                      ", reason_code=" + (reason_code != nullptr ? reason_code : "NONE"));
+}
+
 void initSensorCommandQueue() {
     g_sensor_cmd_queue = xQueueCreate(SENSOR_CMD_QUEUE_SIZE, sizeof(SensorCommand));
     if (g_sensor_cmd_queue == NULL) {
@@ -42,8 +57,11 @@ bool queueSensorCommand(const char* topic, const char* payload, const IntentMeta
                         ? xQueueSendToFront(g_sensor_cmd_queue, &cmd, pdMS_TO_TICKS(20))
                         : xQueueSend(g_sensor_cmd_queue, &cmd, 0);
     if (queued != pdTRUE) {
-        LOG_W(SENS_Q_TAG, "[SYNC] Sensor command queue full — dropping: " + String(cmd.topic));
+        LOG_W(SENS_Q_TAG, "[SYNC] Sensor command queue full — dropping: " + String(cmd.topic) +
+                          ", intent_id=" + String(cmd.metadata.intent_id) +
+                          ", correlation_id=" + String(cmd.metadata.correlation_id));
         errorTracker.logApplicationError(ERROR_TASK_QUEUE_FULL, "Sensor command queue full");
+        g_sensor_cmd_queue_overflow_count++;
         return false;
     }
     recordIntentChainStage(cmd.metadata,
@@ -51,6 +69,9 @@ bool queueSensorCommand(const char* topic, const char* payload, const IntentMeta
                            "command",
                            recovery_intent ? "RECOVERY_QUEUE_ENQUEUED" : "QUEUE_ENQUEUED",
                            "sensor command queued for core1 execution");
+    logSensorQueueCorrelation("queue_enqueued",
+                              cmd,
+                              recovery_intent ? "RECOVERY_QUEUE_ENQUEUED" : "QUEUE_ENQUEUED");
     if (recovery_intent) {
         LOG_I(SENS_Q_TAG, "[SYNC] Recovery sensor intent prioritized to queue front");
     }
@@ -114,6 +135,7 @@ void processSensorCommandQueue(uint8_t max_items) {
         };
         CommandAdmissionDecision admission = shouldAcceptCommand(CommandSubtype::SENSOR, admission_context);
         if (!admission.accepted) {
+            logSensorQueueCorrelation("admission_reject", cmd, admission.reason_code);
             publishIntentOutcome("command",
                                  cmd.metadata,
                                  "rejected",
@@ -123,6 +145,7 @@ void processSensorCommandQueue(uint8_t max_items) {
             processed++;
             continue;
         }
+        logSensorQueueCorrelation("admission_accept", cmd, admission.reason_code);
         recordIntentChainStage(cmd.metadata,
                                "execute_started",
                                "command",
@@ -137,6 +160,7 @@ void processSensorCommandQueue(uint8_t max_items) {
                                "sensor command execution finished");
         const char* outcome = result.outcome.length() > 0 ? result.outcome.c_str() : "failed";
         const char* code = result.code.length() > 0 ? result.code.c_str() : "EXECUTE_FAIL";
+        logSensorQueueCorrelation("execute_finished", cmd, code);
         publishIntentOutcome("command",
                              cmd.metadata,
                              outcome,
@@ -147,4 +171,8 @@ void processSensorCommandQueue(uint8_t max_items) {
                              result.retryable);
         processed++;
     }
+}
+
+uint32_t getSensorCommandQueueOverflowCount() {
+    return g_sensor_cmd_queue_overflow_count;
 }

@@ -27,6 +27,7 @@ struct PublishRequest {
     bool    retain;
     bool    critical;
     uint8_t attempt;
+    unsigned long next_retry_ms;  // For AUT-6: Backoff-aware retry scheduling
     IntentMetadata metadata;
 };
 

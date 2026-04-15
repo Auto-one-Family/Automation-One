@@ -27,3 +27,4 @@ void initSensorCommandQueue();
 bool queueSensorCommand(const char* topic, const char* payload, const IntentMetadata* metadata = nullptr);
 void flushSensorCommandQueue();
 void processSensorCommandQueue(uint8_t max_items = 4);
+uint32_t getSensorCommandQueueOverflowCount();

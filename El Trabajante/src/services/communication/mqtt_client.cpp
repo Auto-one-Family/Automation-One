@@ -13,6 +13,7 @@
 #include <atomic>
 
 #include "../../tasks/intent_contract.h"
+#include "../../tasks/sensor_command_queue.h"   // For queue overflow telemetry (AUT-5)
 
 #ifndef MQTT_USE_PUBSUBCLIENT
     #include "../../tasks/safety_task.h"         // g_safety_task_handle, NOTIFY_* bits
@@ -34,6 +35,28 @@ static bool isCriticalPublishTopic(const String& topic) {
            topic.indexOf("/config_response") != -1 ||
            topic.indexOf("/system/error") != -1 ||
            topic.indexOf("/system/intent_outcome") != -1;
+}
+
+static bool shouldLogAdmissionCorrelation(const String& topic) {
+    return topic.indexOf("/command") != -1 ||
+           topic.indexOf("/config") != -1 ||
+           topic.indexOf("/zone/") != -1 ||
+           topic.indexOf("/subzone/") != -1;
+}
+
+static void logAdmissionCorrelationBlockedPublish(const String& topic,
+                                                  const String& payload,
+                                                  const char* reason_code) {
+    if (!shouldLogAdmissionCorrelation(topic)) {
+        return;
+    }
+    IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), "admission");
+    LOG_W(TAG, String("[ADMISSION] Publish blocked (reason_code=") +
+               (reason_code != nullptr ? reason_code : "UNKNOWN") +
+               ", topic=" + topic +
+               ", intent_id=" + String(metadata.intent_id) +
+               ", correlation_id=" + String(metadata.correlation_id) +
+               ", epoch=" + String(metadata.epoch_at_accept) + ")");
 }
 #endif
 
@@ -136,6 +159,7 @@ MQTTClient::MQTTClient()
 #ifndef MQTT_USE_PUBSUBCLIENT
       pending_subscription_count_(0),
       bootstrap_heartbeat_pending_(false),
+      pending_bootstrap_ack_subscribe_msg_id_(-1),
 #endif
       publish_seq_(0) {
     // Circuit Breaker configured:
@@ -448,9 +472,11 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
                 LOG_W(TAG, "Registration timeout - gate remains CLOSED until valid heartbeat ACK (fail-closed)");
                 registration_timeout_logged_ = true;
             }
+            logAdmissionCorrelationBlockedPublish(topic, payload, "REGISTRATION_TIMEOUT");
             LOG_D(TAG, "Publish blocked (registration timeout, no ACK yet): " + topic);
             return false;
         } else {
+            logAdmissionCorrelationBlockedPublish(topic, payload, "REGISTRATION_PENDING");
             LOG_D(TAG, "Publish blocked (awaiting registration): " + topic);
             return false;
         }
@@ -694,6 +720,7 @@ bool MQTTClient::enqueueSubscription_(const String& topic, uint8_t qos, bool cri
 
 void MQTTClient::clearSubscriptionQueue_() {
     pending_subscription_count_ = 0;
+    pending_bootstrap_ack_subscribe_msg_id_ = -1;
 }
 #endif
 
@@ -775,10 +802,12 @@ void MQTTClient::processSubscriptionQueue() {
         }
         pending_subscription_count_--;
 
+        // Defer bootstrap heartbeat until MQTT_EVENT_SUBSCRIBED for this msg_id.
+        // Sending immediately after esp_mqtt_client_subscribe() races the broker: the first
+        // server ACK can be published before the subscription is active → ESP never sees it.
         if (is_ack_topic && bootstrap_heartbeat_pending_) {
-            publishHeartbeat(true);
-            bootstrap_heartbeat_pending_ = false;
-            LOG_I(TAG, "[SYNC] Bootstrap heartbeat sent after ACK subscription");
+            pending_bootstrap_ack_subscribe_msg_id_ = msg_id;
+            LOG_I(TAG, "[SYNC] Bootstrap heartbeat deferred until SUBSCRIBED (msg_id=" + String(msg_id) + ")");
         }
         return;
     }
@@ -816,6 +845,19 @@ void MQTTClient::processSubscriptionQueue() {
 // M3: PUBLISH QUEUE DRAIN (Core 0 only)
 // ============================================
 #ifndef MQTT_USE_PUBSUBCLIENT
+
+// Helper: Check if topic is sensor_data (for AUT-6 retry logic)
+static bool isSensorDataTopic(const String& topic) {
+    return topic.indexOf("/sensor_data/") != -1 || topic.indexOf("/sensor/") != -1;
+}
+
+// Helper: Get backoff delay in ms for retry attempt (100ms → 500ms → 1000ms)
+static uint32_t getRetryBackoffMs(uint8_t attempt) {
+    static const uint32_t backoff_delays[] = { 100, 500, 1000 };
+    if (attempt >= 3) return 1000;
+    return backoff_delays[attempt];
+}
+
 void MQTTClient::processPublishQueue() {
     if (mqtt_client_ == nullptr) return;
     if (g_publish_queue == NULL) return;
@@ -826,7 +868,20 @@ void MQTTClient::processPublishQueue() {
     // Stack guard for legacy fallback path:
     // PublishRequest is large (~2 KB payload envelope); keep it out of loopTask stack.
     static PublishRequest req;
+    unsigned long now_ms = millis();
+
+    // Non-blocking receive: process one request at a time (pdMS_TO_TICKS(0) = no wait)
     while (xQueueReceive(g_publish_queue, &req, 0) == pdTRUE) {
+        // AUT-6: Check if request is waiting for backoff delay
+        if (now_ms < req.next_retry_ms) {
+            // Not ready yet — put back in queue for later retry
+            if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
+                LOG_W(TAG, "Publish retry queue full during backoff, dropping: " + String(req.topic));
+                g_publish_outbox_noncritical_drops.fetch_add(1);
+            }
+            break;  // Stop processing (backoff mechanism prevents queue starvation)
+        }
+
         int msg_id = esp_mqtt_client_publish(
             mqtt_client_,
             req.topic,
@@ -836,28 +891,65 @@ void MQTTClient::processPublishQueue() {
             req.retain ? 1 : 0
         );
         if (msg_id >= 0) {
-            continue;
+            continue;  // Success — next request
         }
+
+        // AUT-6: Retry logic for sensor_data topics (max 3 attempts with backoff)
+        bool is_sensor_data = isSensorDataTopic(String(req.topic));
         const char* drop_code = (msg_id == -2) ? "PUBLISH_OUTBOX_FULL" : "EXECUTE_FAIL";
         String drop_reason = String("Publish dropped for topic ") + String(req.topic);
-        if (req.critical && req.attempt < 3) {
+
+        // Retry if: (1) critical with < 3 attempts OR (2) sensor_data with < 3 attempts
+        bool should_retry = (req.critical && req.attempt < 3) ||
+                           (is_sensor_data && req.attempt < 3);
+
+        if (should_retry) {
             req.attempt++;
+            // Schedule retry with exponential backoff (100ms → 500ms → 1000ms)
+            uint32_t backoff_ms = getRetryBackoffMs(req.attempt - 1);
+            req.next_retry_ms = now_ms + backoff_ms;
+
+            LOG_D(TAG, "Publish retry scheduled (attempt " + String(req.attempt) + "/3, " +
+                       String(backoff_ms) + "ms backoff): " + String(req.topic));
+
+            // Re-enqueue for later retry (non-blocking)
             if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
-                publishIntentOutcome("publish",
-                                     req.metadata,
-                                     "failed",
-                                     "QUEUE_FULL",
-                                     "Critical publish retry queue full",
-                                     true);
+                LOG_W(TAG, "Publish retry queue full, dropping: " + String(req.topic));
+                errorTracker.logCommunicationError(ERROR_MQTT_PUBLISH_FAILED,
+                                                   ("Publish retry queue full: " + String(req.topic)).c_str());
+                if (req.critical) {
+                    publishIntentOutcome("publish",
+                                         req.metadata,
+                                         "failed",
+                                         "QUEUE_FULL",
+                                         "Critical publish retry queue full",
+                                         true);
+                } else if (is_sensor_data) {
+                    // Non-critical sensor_data failure
+                    g_publish_outbox_noncritical_drops.fetch_add(1);
+                }
             }
             continue;
         }
-        publishIntentOutcome("publish",
-                             req.metadata,
-                             "failed",
-                             drop_code,
-                             drop_reason,
-                             req.critical);
+
+        // No more retries — drop the message
+        LOG_W(TAG, "Publish dropped after retries: " + String(req.topic));
+        errorTracker.logCommunicationError(ERROR_MQTT_PUBLISH_FAILED,
+                                           ("Publish failed after retries: " + String(req.topic)).c_str());
+
+        if (is_sensor_data) {
+            // Track non-critical sensor_data drops (AUT-6)
+            g_publish_outbox_noncritical_drops.fetch_add(1);
+        }
+
+        if (req.critical) {
+            publishIntentOutcome("publish",
+                                 req.metadata,
+                                 "failed",
+                                 drop_code,
+                                 drop_reason,
+                                 true);
+        }
     }
 }
 #endif
@@ -1050,6 +1142,8 @@ void MQTTClient::publishHeartbeat(bool force) {
                String(getCriticalOutcomeDropCountTelemetry()) + ",";
     payload += "\"publish_outbox_drop_count\":" +
                String(getPublishOutboxNoncriticalDropCount()) + ",";
+    payload += "\"sensor_command_queue_overflow_count\":" +
+               String(getSensorCommandQueueOverflowCount()) + ",";
     payload += "\"config_status\":";
     payload += configManager.getDiagnosticsJSON();
     payload += "}";
@@ -1136,6 +1230,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->registration_timeout_logged_ = false;
             self->clearSubscriptionQueue_();
             self->bootstrap_heartbeat_pending_ = false;
+            self->pending_bootstrap_ack_subscribe_msg_id_ = -1;
 
             // Circuit Breaker: connection success resets failure counter
             self->circuit_breaker_.recordSuccess();
@@ -1165,6 +1260,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->registration_timeout_logged_ = false;
             self->clearSubscriptionQueue_();
             self->bootstrap_heartbeat_pending_ = false;
+            self->pending_bootstrap_ack_subscribe_msg_id_ = -1;
 
             // Circuit Breaker: disconnect counts as failure
             self->circuit_breaker_.recordFailure();
@@ -1222,9 +1318,19 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             break;
         }
 
-        case MQTT_EVENT_SUBSCRIBED:
-            LOG_D(TAG, "MQTT_EVENT_SUBSCRIBED msg_id=" + String(event->msg_id));
+        case MQTT_EVENT_SUBSCRIBED: {
+            const int mid = event->msg_id;
+            LOG_I(TAG, "MQTT_EVENT_SUBSCRIBED msg_id=" + String(mid));
+            if (self->bootstrap_heartbeat_pending_ &&
+                self->pending_bootstrap_ack_subscribe_msg_id_ >= 0 &&
+                mid == self->pending_bootstrap_ack_subscribe_msg_id_) {
+                self->publishHeartbeat(true);
+                self->bootstrap_heartbeat_pending_ = false;
+                self->pending_bootstrap_ack_subscribe_msg_id_ = -1;
+                LOG_I(TAG, "[SYNC] Bootstrap heartbeat sent after SUBSCRIBED (ACK topic active)");
+            }
             break;
+        }
 
         case MQTT_EVENT_PUBLISHED:
             LOG_D(TAG, "MQTT_EVENT_PUBLISHED msg_id=" + String(event->msg_id));

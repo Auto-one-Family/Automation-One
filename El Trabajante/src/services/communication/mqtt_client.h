@@ -254,6 +254,8 @@ private:
     PendingSubscription pending_subscriptions_[MAX_PENDING_SUBSCRIPTIONS];
     uint8_t pending_subscription_count_;
     bool bootstrap_heartbeat_pending_;
+    /** msg_id from esp_mqtt_client_subscribe(heartbeat/ack); bootstrap HB after MQTT_EVENT_SUBSCRIBED */
+    int pending_bootstrap_ack_subscribe_msg_id_;
 #endif
 
     static MQTTClient* instance_;

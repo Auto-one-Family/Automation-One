@@ -64,6 +64,7 @@ bool queuePublish(const char* topic,
     req.retain = retain;
     req.critical = critical;
     req.attempt = 0;
+    req.next_retry_ms = 0;  // AUT-6: No backoff delay on initial enqueue
     IntentMetadata fallback_meta = extractIntentMetadataFromPayload(payload, "pub");
     req.metadata = fallback_meta;
     if (metadata != nullptr) {
