@@ -67,6 +67,8 @@ AutomationOne is a server-centric IoT framework with three main components. See 
 - Backend Poetry virtualenv is stored in-project at `El Servador/god_kaiser_server/.venv` (configured via `poetry config virtualenvs.in-project true`).
 - The `Makefile` provides convenient Docker Compose shortcuts; see `make help` for all targets.
 - ESP32 firmware (`El Trabajante/`) is optional for dev — Mock ESPs can be created via the Debug API.
+- Before running `docker compose up`, copy `.env.example` to `.env` at the repo root — Docker Compose reads env vars from it.
+- `vue-tsc --noEmit` has 3 pre-existing type errors (unused imports and a type cast) — these are not regressions.
 
 ## Claude Code — Orchestrator `auto-debugger` (optional)
 
