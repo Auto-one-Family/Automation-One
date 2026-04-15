@@ -834,6 +834,8 @@ poetry run pytest tests/e2e/ -v
 
 ## 🤝 Contributing
 
+**Linear + Cursor (Issues, MCP, Cloud Agent):** siehe `docs/contributing/LINEAR_CURSOR_SETUP.md` und Vorlage `mcp.json.example` → lokale `.mcp.json` (nicht versioniert).
+
 1. Fork Repository
 2. Create Feature-Branch: `git checkout -b feature/amazing-feature`
 3. Commit Changes: `git commit -m 'Add amazing feature'`

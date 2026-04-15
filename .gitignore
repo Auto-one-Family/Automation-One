@@ -147,6 +147,15 @@ arbeitsbereiche/
 # Inkrementelle TS-Build-Metadaten (Vite/vue-tsc)
 **/tsconfig*.tsbuildinfo
 
+# Alte Frontend-Build-Kopie (lokal)
+El Frontend/dist.old/
+
+# Cursor/Claude lokale Worktrees
+.claude/worktrees/
+
+# Editor-Backups neben Quellcode
+**/*.bak
+
 # Lokale Auftrags-Notizen
 .claude/auftraege/Readme.md
 
