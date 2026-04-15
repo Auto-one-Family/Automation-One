@@ -624,8 +624,8 @@ function handleClick() {
 }
 
 .sensor-card__badge--mock {
-  color: rgb(251, 146, 60);
-  background: rgba(251, 146, 60, 0.15);
+  color: var(--color-mock);
+  background: var(--color-mock-bg);
 }
 
 /* Scope badges (T13-R3 WP4) */
