@@ -804,6 +804,7 @@ Die Logic Engine unterstützt Rules über **mehrere ESPs**:
 | Komponente | Datei | Beschreibung |
 |------------|-------|--------------|
 | SensorConditionEvaluator | conditions/sensor_evaluator.py | Sensor-Schwellwert-Prüfung (`sensor`, `sensor_threshold`), optional `subzone_id` (Phase 2.4), `zone_id` Filter (T13-R2) |
+| SensorDiffConditionEvaluator | conditions/sensor_diff_evaluator.py | Sensor-Differenz-Prüfung (`sensor_diff`): Differenz zwischen zwei Sensoren gleichen Typs prüfen |
 | TimeConditionEvaluator | conditions/time_evaluator.py | Zeit-basierte Bedingungen (`time_window`, `time`) |
 | CompoundConditionEvaluator | conditions/compound_evaluator.py | AND/OR Verknüpfungen (`compound`) |
 | HysteresisConditionEvaluator | conditions/hysteresis_evaluator.py | Hysterese (`hysteresis`) |

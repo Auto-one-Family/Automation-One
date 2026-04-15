@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 4.1 | **Aktualisiert:** 2026-04-06
+> **Version:** 4.2 | **Aktualisiert:** 2026-04-14
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
@@ -36,7 +36,7 @@ allowed-tools: Read
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
-| `/esp/devices` | GET | JWT | Alle ESPs auflisten (ohne pending_approval). Query: `include_deleted=true` zeigt soft-deleted Devices (Admin) |
+| `/esp/devices` | GET | JWT | Alle ESPs auflisten (ohne pending_approval). Query: `runtime_only=true` (Default, Laufzeitsicht), `runtime_only=false` + `include_deleted=true` für Historie/Audit |
 | `/esp/devices` | POST | Operator | Neues ESP registrieren |
 | `/esp/devices/pending` | GET | Operator | **Pending Devices auflisten** |
 | `/esp/devices/{esp_id}` | GET | JWT | ESP Details |
@@ -186,7 +186,7 @@ allowed-tools: Read
 
 > **Hierarchy-Response:** Subzonen enthalten `sensors[]` und `actuators[]` (aus assigned_gpios + sensor_configs/actuator_configs). "Keine Subzone" Gruppe fuer ESPs ohne Subzone. Nutzt: `HierarchyTab.vue`, System-Monitor.
 
-### Logic/Automation (`/logic`) - 8 Endpoints
+### Logic/Automation (`/logic`) - 11 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
@@ -198,6 +198,9 @@ allowed-tools: Read
 | `/logic/rules/{rule_id}/toggle` | POST | Operator | Rule aktivieren/deaktivieren |
 | `/logic/rules/{rule_id}/test` | POST | Operator | Rule testen |
 | `/logic/execution_history` | GET | JWT | Execution History |
+| `/logic/templates` | GET | JWT | Rule-Templates auflisten |
+| `/logic/templates/{template_id}` | GET | JWT | Template-Informationen |
+| `/logic/templates/{template_id}/instantiate` | POST | Operator | Neue Rule aus Template erstellen |
 
 ### Sequences (`/sequences`) - 4 Endpoints
 
@@ -602,7 +605,7 @@ Logout (optional alle Sessions).
 
 ### 2.1 GET /esp/devices
 
-Alle ESP-Geräte auflisten.
+Alle ESP-Geräte auflisten (Runtime- oder Historienansicht).
 
 **Auth:** JWT Required
 
@@ -611,9 +614,10 @@ Alle ESP-Geräte auflisten.
 | Parameter | Typ | Default | Beschreibung |
 |-----------|-----|---------|--------------|
 | `zone_id` | string | - | Filter nach Zone |
-| `status` | string | - | online, offline |
-| `include_sensors` | bool | false | Sensoren inkludieren |
-| `include_actuators` | bool | false | Actuators inkludieren |
+| `status` | string | - | Filter nach Device-Status |
+| `hardware_type` | string | - | Filter nach Hardware-Typ |
+| `include_deleted` | bool | false | Soft-deleted Devices einschließen (nur wenn `runtime_only=false`) |
+| `runtime_only` | bool | true | Laufzeitsicht erzwingen (`deleted_at IS NULL`, Status `deleted` ausgeblendet) |
 | `page` | int | 1 | Seite (1-indexed) |
 | `page_size` | int | 20 | Einträge pro Seite |
 
@@ -1359,6 +1363,191 @@ Execution History abfragen (nicht rule-scoped).
 
 ---
 
+### 5.9 GET /logic/templates
+
+Rule-Templates auflisten.
+
+**Auth:** JWT Required
+
+**Query-Parameter:**
+
+| Parameter | Typ | Default | Beschreibung |
+|-----------|-----|---------|--------------|
+| `category` | string | - | Filter nach Kategorie (z.B. "sensor_monitoring", "alert") |
+| `limit` | int | 50 | Max Ergebnisse (1-100) |
+
+**Response 200 (TemplateListResponse):**
+```json
+{
+  "success": true,
+  "templates": [
+    {
+      "id": "tpl_sensor_pair_diff",
+      "name": "Sensor Pair Difference Monitor",
+      "description": "Überwachen der Differenz zwischen zwei Sensoren desselben Typs",
+      "category": "sensor_monitoring",
+      "parameters": [
+        {
+          "key": "sensor1_id",
+          "type": "string",
+          "description": "Erste Sensor-ID (UUID)",
+          "required": true
+        },
+        {
+          "key": "sensor2_id",
+          "type": "string",
+          "description": "Zweite Sensor-ID (UUID)",
+          "required": true
+        },
+        {
+          "key": "max_diff",
+          "type": "number",
+          "description": "Maximale Differenz (sensortyp-abhängig)",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "total_count": 1
+}
+```
+
+---
+
+### 5.10 GET /logic/templates/{template_id}
+
+Template-Informationen abrufen.
+
+**Auth:** JWT Required
+
+**Path-Parameter:**
+
+| Parameter | Typ | Beschreibung |
+|-----------|-----|--------------|
+| `template_id` | string | Template-ID (z.B. "tpl_sensor_pair_diff") |
+
+**Response 200 (TemplateDetailResponse):**
+```json
+{
+  "success": true,
+  "template": {
+    "id": "tpl_sensor_pair_diff",
+    "name": "Sensor Pair Difference Monitor",
+    "description": "Überwachen der Differenz zwischen zwei Sensoren desselben Typs",
+    "category": "sensor_monitoring",
+    "parameters": [
+      {
+        "key": "sensor1_id",
+        "type": "string",
+        "description": "Erste Sensor-ID (UUID)",
+        "required": true,
+        "example": "550e8400-e29b-41d4-a716-446655440000"
+      },
+      {
+        "key": "sensor2_id",
+        "type": "string",
+        "description": "Zweite Sensor-ID (UUID)",
+        "required": true,
+        "example": "550e8400-e29b-41d4-a716-446655440001"
+      },
+      {
+        "key": "max_diff",
+        "type": "number",
+        "description": "Maximale Differenz",
+        "required": true,
+        "example": 0.5
+      }
+    ],
+    "sample_rule": {
+      "name": "pH Abweichung Monitor",
+      "description": "Alert wenn pH-Differenz zwischen zwei Sensoren > 0.5 Einheiten",
+      "conditions": [
+        {
+          "type": "sensor_diff",
+          "sensor1_id": "550e8400-e29b-41d4-a716-446655440000",
+          "sensor2_id": "550e8400-e29b-41d4-a716-446655440001",
+          "operator": "greater_than",
+          "threshold": 0.5
+        }
+      ],
+      "actions": [
+        {
+          "type": "alert",
+          "severity": "warning"
+        }
+      ]
+    }
+  }
+}
+```
+
+---
+
+### 5.11 POST /logic/templates/{template_id}/instantiate
+
+Neue Rule aus Template erstellen.
+
+**Auth:** Operator Required
+
+**Path-Parameter:**
+
+| Parameter | Typ | Beschreibung |
+|-----------|-----|--------------|
+| `template_id` | string | Template-ID |
+
+**Request Body (TemplateInstantiateRequest):**
+```json
+{
+  "rule_name": "pH Abweichung Monitor - Bereich A",
+  "rule_description": "Überwache pH-Differenz in Bereich A",
+  "parameters": {
+    "sensor1_id": "550e8400-e29b-41d4-a716-446655440000",
+    "sensor2_id": "550e8400-e29b-41d4-a716-446655440001",
+    "max_diff": 0.5
+  },
+  "enabled": true
+}
+```
+
+**Response 201 (LogicRuleResponse):**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440010",
+  "name": "pH Abweichung Monitor - Bereich A",
+  "description": "Überwache pH-Differenz in Bereich A",
+  "enabled": true,
+  "conditions": [
+    {
+      "type": "sensor_diff",
+      "sensor1_id": "550e8400-e29b-41d4-a716-446655440000",
+      "sensor2_id": "550e8400-e29b-41d4-a716-446655440001",
+      "operator": "greater_than",
+      "threshold": 0.5
+    }
+  ],
+  "actions": [
+    {
+      "type": "alert",
+      "severity": "warning"
+    }
+  ],
+  "logic_operator": "AND",
+  "priority": 50,
+  "created_at": "2026-04-14T10:30:00Z",
+  "updated_at": "2026-04-14T10:30:00Z"
+}
+```
+
+**Error 404 (TemplateNotFound):**
+```json
+{
+  "success": false,
+  "error": "Template not found: tpl_invalid"
+}
+```
+
+---
+
 ## 6. Debug/Mock-ESP (`/debug`)
 
 ### 6.1 POST /debug/mock-esp
@@ -1673,7 +1862,7 @@ Detaillierter Health Check mit Komponenten-Status (JWT erforderlich, ActiveUser)
 | zone | `zone.py` | 5 |
 | zone_context | `zone_context.py` | 7 |
 | subzone | `subzone.py` | 6 |
-| logic | `logic.py` | 8 |
+| logic | `logic.py` | 11 |
 | sequences | `sequences.py` | 4 |
 | sensor_type_defaults | `sensor_type_defaults.py` | 6 |
 | debug | `debug.py` | ~60 |

@@ -179,17 +179,17 @@ Report nach `.claude/reports/current/AGENT_MANAGEMENT_REPORT.md` (Format siehe A
 - **Dateien:** Agent: `.claude/agents/frontend/frontend-debug-agent.md`, Skill: `.claude/skills/frontend-debug/SKILL.md`
 
 ### db-inspector
-- **Fokus:** PostgreSQL – Schema, Migrations, Queries, Device-Registration, Cleanup
+- **Fokus:** PostgreSQL – Schema, Migrations, Queries, Device-Registration, Invarianten, MQTT→DB-Korrelation (Evidence)
 - **Modi:** A (Health-Check) / B (Problem)
-- **Besonderheit:** Docker PostgreSQL primär, SQLite Fallback. Cleanup nur nach Bestätigung.
+- **Besonderheit:** Read-only SQL (Default); Cleanup nur nach expliziter menschlicher Freigabe. Vertrag/Templates: `.claude/reference/db-inspector/`.
 - **Report:** DB_INSPECTOR_REPORT.md
-- **Dateien:** Agent: `.claude/agents/db-inspector.md`, Skill: `.claude/skills/db-inspector/SKILL.md`
+- **Dateien:** Agent: `.claude/agents/db-inspector.md`, Skill: `.claude/skills/db-inspector/SKILL.md`, Referenz: `.claude/reference/db-inspector/`
 
 ### meta-analyst
-- **Fokus:** Alle Debug-Reports vergleichen – Timeline, Widersprüche, Kausalketten
-- **Modi:** A (allgemein) / B (Cross-Layer Problem)
-- **Besonderheit:** LETZTE Analyse-Instanz. Sucht KEINE Lösungen. Kein Bash.
-- **Report:** META_ANALYSIS.md
+- **Fokus (Default):** Nutzerauftrag + Repo – Cross-System Evidenz, Pattern-Konsistenz, **Developer-Handoffs** für `*-dev`
+- **Modi:** A Code-Handoff / B fokussiert / C Legacy nur Reports (Timeline, Widersprüche)
+- **Besonderheit:** Implementiert nicht; keine Topic-/API-Erfindung (SSOT + Code). Optional `META_DEV_HANDOFF.md`.
+- **Report:** `META_DEV_HANDOFF.md` (Default), `META_ANALYSIS.md` (Legacy)
 - **Dateien:** Agent: `.claude/agents/meta-analyst.md`, Skill: `.claude/skills/meta-analyst/SKILL.md`
 
 ### esp32-dev, server-dev, mqtt-dev, frontend-dev

@@ -27,9 +27,9 @@ allowed-tools: Read
 | **Server Debug** (FastAPI, Handler, Error 5xxx, god_kaiser.log) | server-debug | `.claude/skills/server-debug/` |
 | **MQTT Debug** (Topic, Payload, QoS, Broker-Traffic) | mqtt-debug | `.claude/skills/mqtt-debug/` |
 | **Frontend Debug** (Vite, WebSocket, Pinia, Build-Errors) | frontend-debug | `.claude/skills/frontend-debug/` |
-| **DB Inspector** (Schema, Query, Migration, Alembic, Cleanup) | db-inspector | `.claude/skills/db-inspector/` |
+| **DB Inspector** (Schema, Migration, Invarianten, MQTT→DB, Reports) | db-inspector | `.claude/skills/db-inspector/` + `.claude/reference/db-inspector/` |
 | **System Control** (Start, Stop, Build, Flash, Briefing, Session-Planning) | system-control | `.claude/skills/system-control/` |
-| **Meta Analyst** (Cross-Report-Vergleich, Widersprüche, Problemketten) | meta-analyst | `.claude/skills/meta-analyst/` |
+| **Meta Analyst** (Cross-System Code + Developer-Handoff; optional Report-Legacy) | meta-analyst | `.claude/skills/meta-analyst/` |
 | **Test-Log-Analyse** (pytest, Vitest, Playwright, Wokwi, CI) | test-log-analyst | `.claude/skills/test-log-analyst/` |
 | **Agent-Manager** (Flow vs. Agent, IST-SOLL, Korrekturen) | agent-manager | `.claude/skills/agent-manager/` |
 | **Git-Commit** (Changes analysieren, Conventional Commits) | git-commit | `.claude/skills/git-commit/` |

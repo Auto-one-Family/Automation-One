@@ -5,15 +5,18 @@ description: |
   MUST BE USED when: checking device registration, sensor data, audit logs,
   verifying database state, debugging data persistence issues, finding orphaned records,
   cleaning up stale data, analyzing data volume, checking schema.
-  NOT FOR: Server-Logs (server-debug), MQTT-Traffic (mqtt-debug), Code-Änderungen.
+  NOT FOR: Server-Logs (server-debug), MQTT-Traffic (mqtt-debug), Produktcode-Änderungen,
+  Firmware-Implementierung (esp32-dev); Serienbefund bleibt esp32-debug, DB-Stichprobe db-inspector.
   Proactively inspect database when debugging data issues.
-allowed-tools: Read, Bash, Grep, Glob
+allowed-tools: Read, Write, Bash, Grep, Glob
 ---
 
 # DB Inspector - Skill Dokumentation
 
 > **Architektur:** Server-Centric. PostgreSQL ist Single Source of Truth.
 > **Fokus:** Schema-Inspektion, Migration-Status, Retention-Jobs, Backup/Restore
+
+**Referenzpaket (Vertrag, Templates, Korrelation, Security):** `.claude/reference/db-inspector/` — dort auch **Alembic-HEAD** und Report-TOC pflegen, nicht hier duplizieren.
 
 ---
 
@@ -110,7 +113,7 @@ docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c \
 |---------|----------|---------------------|
 | `esp_devices` | Device Registry | status, zone_id, capabilities |
 | `sensor_configs` | Sensor-Config pro GPIO | UNIQUE(esp_id, gpio, sensor_type, onewire_address, i2c_address) |
-| `sensor_data` | Time-Series Messwerte (inkl. zone_id, subzone_id Phase 0.1) | FK → sensor_configs, UNIQUE(esp_id, gpio, sensor_type, timestamp) |
+| `sensor_data` | Time-Series Messwerte (zone_id, subzone_id zum Messzeitpunkt) | FK → `esp_devices.id` (ON DELETE SET NULL), UNIQUE `uq_sensor_data_esp_gpio_type_timestamp` auf `(esp_id, gpio, sensor_type, timestamp)`; Insert-Dedup: `ON CONFLICT DO NOTHING` in `SensorRepository.save_data` |
 | `actuator_configs` | Aktuator-Config + Safety | FK → esp_devices |
 | `actuator_states` | Echtzeit-Zustand | FK → actuator_configs |
 | `actuator_history` | Command History | FK → actuator_configs |
@@ -121,7 +124,7 @@ docker exec automationone-postgres psql -U god_kaiser -d god_kaiser_db -c \
 | `zones` | Zone-Definitionen | zone_id (UNIQUE), zone_name, status |
 | `cross_esp_logic` | Logic Engine Rules | conditions (JSON), actions (JSON) |
 | `logic_hysteresis_states` | Hysterese-State Persistenz | FK → cross_esp_logic (CASCADE), UQ(rule_id, condition_index) |
-| `subzone_configs` | Subzone-Definitionen | FK → esp_devices (device_id) |
+| `subzone_configs` | Subzone-Definitionen | `esp_id` ist **String** `esp_devices.device_id` (FK); GPIO-Liste in `assigned_gpios` (JSON) |
 
 ### Sensor Unique Constraint
 
@@ -162,29 +165,25 @@ Ermöglicht:
 
 ## 4. Alembic Migrations
 
-### Aktueller HEAD
+### Aktueller HEAD (Repo — immer mit Befehl verifizieren)
 
+```bash
+cd "El Servador/god_kaiser_server" && python -m alembic heads
 ```
-add_logic_hysteresis_states (HEAD)
-```
 
-**Hinweis:** Wenn die DB Schema-Fehler bei `sensor_data` meldet (z. B. `column "zone_id" of relation "sensor_data" does not exist`), fehlt die Migration auf der laufenden DB → `alembic upgrade head` im Server-Projekt ausführen (siehe Prüf-Befehle unten).
+**HEAD im Repo:** mit `python -m alembic heads` bzw. `poetry run alembic heads` aus `god_kaiser_server/` ermitteln und in Reports **nur** mit Befehlsausgabe zitieren (siehe `MODEL_TABLE_MATRIX.md` / `README.md`).
 
-### Migration-History (letzte 8)
+**Hinweis:** Wenn die DB Schema-Fehler meldet (z. B. fehlende Spalte), `SELECT version_num FROM alembic_version;` mit Repo-HEAD abgleichen — **Upgrade nur durch Deployment/Mensch**, nicht durch den Inspector.
 
-| Revision | Datum | Beschreibung |
-|----------|-------|-------------|
-| `add_logic_hysteresis_states` | 2026-03-30 | Persistent hysteresis state for Logic Engine (L2 Hysterese-Härtung) |
-| `add_sensor_data_dedup` | 2026-03-10 | UNIQUE(esp_id, gpio, sensor_type, timestamp) + Duplikat-Bereinigung (Fix-T Block 3) |
-| `fix_actuator_datetime_tz` | 2026-03-10 | actuator_states/history DateTime → timezone=True (BUG-001) |
-| `add_sensor_data_zone_subzone` | 2026-03-06 | sensor_data.zone_id, subzone_id + Indizes (Phase 0.1) |
-| `add_subzone_custom_data` | – | subzone_configs.custom_data |
-| `950ad9ce87bb` | 2026-02-04 | UNIQUE erweitert um i2c_address |
-| `24e8638e14a5` | 2026-01-27 | request_id zu audit_log |
-| `245078bda463` | 2026-01-27 | Merge heads |
-| `fix_onewire_constraint` | 2026-01-27 | UNIQUE + onewire_address |
-| `add_discovery_approval_fields` | 2026-01-27 | Discovery/Approval Felder |
-| `add_esp_heartbeat_logs` | 2026-01-24 | esp_heartbeat_logs Tabelle |
+### Migration-History (Auszug — vollständig unter `alembic/versions/`)
+
+| Revision | Beschreibung (Kurz) |
+|----------|---------------------|
+| *(HEAD = Ausgabe `alembic heads`)* | z. B. `calibration_sessions` wenn Rev im Repo aktiv |
+| `add_sensor_data_dedup` | UNIQUE `uq_sensor_data_esp_gpio_type_timestamp` + Dedup-Cleanup |
+| `add_sensor_data_zone_subzone` | `sensor_data.zone_id`, `subzone_id` |
+| `add_logic_hysteresis_states` | Logic Engine Hysterese-Persistenz |
+| `950ad9ce87bb` | `sensor_configs` UNIQUE inkl. `i2c_address` |
 
 ### Docker-Compose Commands
 
@@ -561,39 +560,22 @@ GROUP BY state;
 
 **Output:** `.claude/reports/current/DB_INSPECTOR_REPORT.md`
 
-```markdown
-# DB Inspector Report
+**Vollständiges TOC (Pflichtabschnitte):** `.claude/reference/db-inspector/REPORT_TEMPLATE.md`  
+**Beispiel (synthetisch):** `.claude/reference/db-inspector/BEISPIEL_REPORT.md`
 
-**Erstellt:** [Timestamp]
-**Modus:** A (Allgemeine Analyse) / B (Spezifisch: "[Problembeschreibung]")
-**Quellen:** [Auflistung analysierter Tabellen und Checks]
+**Write-Tool:** nur für den Report-Pfad oben.
 
 ---
 
-## 1. Zusammenfassung
-[2-3 Sätze: Was wurde gefunden? Wie schwer? Handlungsbedarf?]
+## 11.1 Invarianten-SQL (Baseline, immer mit LIMIT)
 
-## 2. Analysierte Quellen
-| Quelle | Status | Bemerkung |
-|--------|--------|-----------|
-| automationone-postgres | OK/FEHLER | [Container-Status] |
-| pg_isready | OK/FEHLER | [Healthcheck] |
+Copy-paste: `.claude/reference/db-inspector/VERTRAG.md` (Abschnitt Invarianten-SQL — **sieben** Baselines inkl. Subzone-String-FK und Zonen-Soft-Delete) und `.claude/reference/db-inspector/MQTT_DB_KORRELATION.md`.
 
-## 3. Befunde
-### 3.1 [Kategorie]
-- **Schwere:** Kritisch/Hoch/Mittel/Niedrig
-- **Detail:** [Beschreibung]
-- **Evidenz:** [SQL-Ergebnis oder Messwert]
+---
 
-## 4. Extended Checks (eigenständig durchgeführt)
-| Check | Ergebnis |
-|-------|----------|
-| [pg_isready / curl / docker compose ps / alembic] | [Ergebnis] |
+## 11.2 Schichten-Brücke
 
-## 5. Bewertung & Empfehlung
-- **Root Cause:** [Wenn identifizierbar]
-- **Nächste Schritte:** [Empfehlung]
-```
+Pro Befund mindestens **eine** Referenz zu Handler/Repo (`El Servador/god_kaiser_server/src/...`), REST/WS (`.claude/reference/api/`) oder Frontend-Konvention (`websocket_utils`: Broadcast mit `device_id`).
 
 ---
 
@@ -601,21 +583,25 @@ GROUP BY state;
 
 | Wann | Datei | Zweck |
 |------|-------|-------|
+| Vertrag / Security | `.claude/reference/db-inspector/VERTRAG.md` | Input/Output, Tabus, Orchestrierung |
+| Model ↔ Tabelle | `.claude/reference/db-inspector/MODEL_TABLE_MATRIX.md` | Kernmatrix für Report-Abschnitt 2.1 |
+| MQTT→DB | `.claude/reference/db-inspector/MQTT_DB_KORRELATION.md` | Topic/Keys → Spalten |
 | Wenn vorhanden | `logs/current/STATUS.md` | Session-Kontext (optional) |
 | Bei Schema-Fragen | `.claude/reference/testing/SYSTEM_OPERATIONS_REFERENCE.md` | Schema, Queries |
 | Bei Error-Codes | `.claude/reference/errors/ERROR_CODES.md` | Server-Errors 5300-5399 (DB) |
 | Bei Alembic | `El Servador/god_kaiser_server/alembic/versions/` | Migration History |
 | Bei Server-Logs | `logs/server/god_kaiser.log` | DB-bezogene Fehler |
 | Bei Flows | `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Datenflüsse |
+| Repo-Treffer / Pflege | `.claude/reference/db-inspector/IST_AUDIT_TREFFER.md` | Wo db-inspector im Repo genannt wird |
 
 ---
 
 ## 13. Regeln
 
-- **NIEMALS** Code ändern oder erstellen
-- **NIEMALS** DELETE ohne Bestätigung
-- **NIEMALS** Schema-Struktur ändern
-- **IMMER** SELECT vor DELETE zeigen
+- **NIEMALS** Produktcode ändern oder erstellen
+- **NIEMALS** DDL/DML auf der DB im Standard-Lauf (nur `SELECT` mit `LIMIT`); siehe `.claude/reference/db-inspector/SICHERHEITSREVIEW.md`
+- **NIEMALS** Schema-Struktur ändern — Alembic ist die autoritative Schreibbahn
+- **IMMER** Schema-Aussagen mit Evidence (Migration, Modell, Stichprobe) belegen
 - **STATUS.md** ist optional – nutze wenn vorhanden, arbeite ohne wenn nicht
-- **Eigenständig erweitern** bei Auffälligkeiten statt delegieren
-- **Report immer** nach `.claude/reports/current/DB_INSPECTOR_REPORT.md`
+- **Eigenständig erweitern** bei Auffälligkeiten; Schichten-Map für andere Debug-Agenten liefern
+- **Report immer** nach `.claude/reports/current/DB_INSPECTOR_REPORT.md` (TOC aus `REPORT_TEMPLATE.md`)

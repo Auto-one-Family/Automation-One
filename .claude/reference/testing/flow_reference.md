@@ -11,7 +11,7 @@
 
 | ID | Flow-Name | Trigger | Endzustand |
 |----|-----------|---------|------------|
-| F1 | Test-Flow | Robin startet Session | META_ANALYSIS.md beim TM |
+| F1 | Test-Flow | Robin startet Session | `META_ANALYSIS.md` (Legacy) und/oder `META_DEV_HANDOFF.md` / Chat-Handoffs beim TM |
 | F2 | Dev-Flow | TM entscheidet nach Test-Flow | Implementierung verifiziert |
 | F3 | Docker-Monitoring Setup | Robin: "Monitoring aufsetzen" | Monitoring-Stack läuft |
 | F4 | Hardware-Test-Flow | `/hardware-test` oder `hw-test --profile` | HW_TEST_FINAL_REPORT.md mit Scorecard |
@@ -24,7 +24,7 @@
 
 **Ziel:** Systematische Analyse des Systemzustands. Alle Probleme identifizieren, dokumentieren, priorisieren.
 **Trigger:** Robin führt `session.sh` aus und schreibt "Session gestartet" in VS Code.
-**Ergebnis:** META_ANALYSIS.md mit vollständiger Problemliste beim Technical Manager.
+**Ergebnis:** `META_ANALYSIS.md` (Report-Korrelation, Legacy) und/oder **code-first** `META_DEV_HANDOFF.md` mit Developer-Paketen; beim Technical Manager oder direkt an Dev-Agents.
 
 ### F1.2 Schritte
 
@@ -121,20 +121,15 @@ SCHRITT 7: TM BEAUFTRAGT META-ANALYSE
 ├── Formuliert: meta-analyst Befehl
 └── Nächster Schritt: Robin führt meta-analyst aus → SCHRITT 8
 
-SCHRITT 8: META-ANALYST (LETZTE ANALYSE-INSTANZ)
+SCHRITT 8: META-ANALYST (Cross-System / optional LETZTE Report-Instanz)
 ├── Wer: meta-analyst (Agent in VS Code)
-├── Trigger: Robin kopiert TM-Befehl in VS Code Chat
-├── Liest: ALLE Reports in .claude/reports/current/
-├── Erzeugt: .claude/reports/current/META_ANALYSIS.md
-│   Inhalt:
-│   ├── Zeitliche Korrelation zwischen Reports
-│   ├── Widersprüche zwischen Agent-Befunden
-│   ├── Kausalketten (A verursacht B verursacht C)
-│   ├── Lücken (was wurde NICHT untersucht)
-│   └── Priorisierte Problemliste
-├── REGEL: meta-analyst sucht KEINE Lösungen
-├── REGEL: meta-analyst ist die LETZTE Analyse-Instanz
-└── Nächster Schritt: Robin kopiert META_ANALYSIS.md zum TM
+├── Trigger: TM-Befehl **oder** direkter Robin-Auftrag (Code-first)
+├── Default neu: Repo mit Read/Grep/Glob, Patterns aus *-development Skills; **Developer-Handoffs** für esp32-/server-/frontend-/mqtt-dev
+├── Legacy: Liest ALLE Reports in .claude/reports/current/ → META_ANALYSIS.md (Timeline, Widersprüche, Kaskaden)
+├── Erzeugt: .claude/reports/current/META_DEV_HANDOFF.md (Default persistiert) und/oder META_ANALYSIS.md (Legacy)
+├── REGEL: Keine Produktcode-Änderung durch meta-analyst; keine erfundenen Topics/APIs
+├── REGEL (Legacy): Widersprüche dokumentieren statt „raten“
+└── Nächster Schritt: Robin kopiert Ausgabe zum TM **oder** startet *-dev mit den Paketen
     TM entscheidet: Weitere Analyse oder → F2 Dev-Flow
 ```
 

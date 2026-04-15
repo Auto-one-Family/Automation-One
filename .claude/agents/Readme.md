@@ -16,7 +16,7 @@
 | **server-debug** | `server-debug.md` | cyan | God-Kaiser Server JSON-Log Analyse |
 | **mqtt-debug** | `mqtt-debug.md` | cyan | MQTT Traffic Analyse, Broker-Health |
 | **frontend-debug** | `frontend-debug.md` | cyan | Vue 3 Source-Code + Docker-Log Analyse |
-| **meta-analyst** | `meta-analyst.md` | magenta | Cross-Report Korrelation, Widersprueche |
+| **meta-analyst** | `meta-analyst.md` | magenta | Cross-System Code, Dev-Handoffs; optional Report-Legacy |
 
 ### System-Operators
 
@@ -105,7 +105,8 @@ Agenten werden durch ihre Description und Example-Bloecke automatisch getriggert
 - "ESP32 Boot-Problem" → esp32-debug
 - "MQTT Messages kommen nicht an" → mqtt-debug
 - "Dashboard zeigt keine Daten" → frontend-debug
-- "Vergleiche alle Reports" → meta-analyst
+- "Cross-System prüfen / Dev-Handoff" → meta-analyst
+- "Vergleiche alle Reports" → meta-analyst (Legacy)
 - "Sensor hinzufuegen" → esp32-dev
 
 ### Manuell
@@ -124,8 +125,8 @@ Analysiere mit esp32-debug die Serial-Logs
 | server-debug | Server JSON-Log | `logs/server/god_kaiser.log` |
 | mqtt-debug | MQTT-Traffic | `logs/mqtt/mqtt_traffic.log` |
 | frontend-debug | Source-Code + Docker | `El Frontend/`, Docker-Logs |
-| db-inspector | PostgreSQL | Docker exec psql |
-| meta-analyst | Alle Reports | `.claude/reports/current/` |
+| db-inspector | PostgreSQL + Alembic + Evidence-SQL | Docker exec psql; Templates unter `.claude/reference/db-inspector/` |
+| meta-analyst | Nutzerauftrag + Repo (Default); optional Reports | `El Trabajante/`, `El Servador/`, `El Frontend/`, `.claude/reports/current/` |
 | test-log-analyst | Test-Output | `logs/backend/`, `logs/frontend/`, `logs/wokwi/` |
 
 ---
@@ -141,7 +142,7 @@ Alle Agenten schreiben Reports nach: `.claude/reports/current/`
 | mqtt-debug | `MQTT_DEBUG_REPORT.md` |
 | frontend-debug | `FRONTEND_DEBUG_REPORT.md` |
 | db-inspector | `DB_INSPECTOR_REPORT.md` |
-| meta-analyst | `META_ANALYSIS.md` |
+| meta-analyst | `META_DEV_HANDOFF.md` (Default), `META_ANALYSIS.md` (Legacy) |
 | agent-manager | `AGENT_MANAGEMENT_REPORT.md` |
 | test-log-analyst | `.claude/reports/Testrunner/test.md` |
 

@@ -78,7 +78,7 @@ Jede Sub-Agent-Invocation muss enthalten:
 - **Additive Verbesserung** bestehender Markdown-Analyseberichte (`docs/analysen/` o. a.) unter klarem Scope — evidenzbasiert, repo-verifiziert.
 - Du brauchst **einen** durchgaengigen Artefakt-Ordner (`.claude/reports/current/incidents/<id>/` bzw. `auto-debugger-runs/<run_id>/`) statt isolierter Einzelreports.
 
-**Wann weiterhin Einzel-Agenten:** reine Log-Triage in einer Schicht → `server-debug`, `frontend-debug`, `mqtt-debug`, `esp32-debug`; DB → `db-inspector`; reine Test-Log-Analyse → `test-log-analyst`; reine Querschnitts-Doku ohne Orchestrierung → `meta-analyst`.
+**Wann weiterhin Einzel-Agenten:** reine Log-Triage in einer Schicht → `server-debug`, `frontend-debug`, `mqtt-debug`, `esp32-debug`; DB → `db-inspector`; reine Test-Log-Analyse → `test-log-analyst`; Querschnitt aus Auftrag + Code (Handoff an Dev) → `meta-analyst` (Report-only = Legacy).
 
 **Steuerdatei-Pflicht:** Strukturierter Lauf startet mit einer Datei unter **`.claude/auftraege/auto-debugger/inbox/`** (Vorlage: `STEUER-VORLAGE.md`). Im Chat z. B. `@.claude/auftraege/auto-debugger/inbox/STEUER-….md`. Ohne gueltige Steuerdatei: nur Klaerung, keine vollstaendige Artefaktstruktur.
 
@@ -135,7 +135,7 @@ Jede Sub-Agent-Invocation muss enthalten:
 | `server-debug` | FastAPI, Handler, Error 5xxx, god_kaiser.log |
 | `mqtt-debug` | Topic, Payload, QoS, Publish, Subscribe, Broker |
 | `frontend-debug` | Build-Error, TypeScript, Vite, WebSocket, Pinia, Vue-Component |
-| `meta-analyst` | Cross-Report-Vergleich, Widersprueche, Problemketten (LETZTE Analyse-Instanz) |
+| `meta-analyst` | Cross-System Code-Analyse, Pattern-Konsistenz, Developer-Handoff (Auftraege fuer *-dev); optional Report-Legacy |
 
 ## Orchestrierung (Incident & Artefakte)
 
@@ -156,6 +156,7 @@ Jede Sub-Agent-Invocation muss enthalten:
 | `reference/testing/` | agent_profiles, flow_reference, TEST_WORKFLOW |
 | `reference/security/` | PRODUCTION_CHECKLIST |
 | `reference/TM_WORKFLOW.md` | Test-Flow, Dev-Flow, Agent-Aktivierungsreihenfolge |
+| `.claude/skills/mqtt-development/SKILL.md` | MQTT Pattern-First (Server + El Trabajante): Topics, QoS, Handler, LWT, Circuit Breaker, MQTTCommandBridge — mit Evidence-Tabelle |
 
 ## Regeln
 

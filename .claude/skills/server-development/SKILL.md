@@ -189,7 +189,7 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | esp | /v1/esp | 17 | Active/Operator |
 | sensors | /v1/sensors | 16 | Active/Operator |
 | actuators | /v1/actuators | 12 | Active/Operator |
-| logic | /v1/logic | 8 | Operator+ |
+| logic | /v1/logic | 11 | Operator+ |
 | health | /v1/health | 6 | Mixed |
 | audit | /v1/audit | 21 | Admin/Active |
 | debug | /v1/debug | 59 | Admin |

@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.16 | **Aktualisiert:** 2026-04-05
+> **Version:** 2.17 | **Aktualisiert:** 2026-04-14
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
-> **Änderungen:** **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
+> **Änderungen:** **PKG-05 (2026-04-14):** `system/heartbeat/ack` Reject-Diagnose erweitert (optionale Felder `reason_code`, `revocation_source`, `upstream_deleted`, `delete_intent`, `correlation_id` für Revocation/Upstream-Delete-Auswertung auf ESP-Seite). Intent-Outcome-Codes ergänzt: `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`. Zuvor: **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
 
 ---
 
@@ -536,6 +536,13 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 - `rejected`: Gerät wurde abgelehnt
 - `error`: Heartbeat empfangen, aber Verarbeitungsfehler (Server lebt — P1-Timer wird trotzdem zurückgesetzt)
 
+**Optionale Reject-Diagnosefelder (`status="rejected"`):**
+- `reason_code` (string): serverseitiger Ablehnungsgrund (z. B. Delete-/Revocation-Code)
+- `revocation_source` (string): Upstream-Quelle der Revocation/Deletion
+- `upstream_deleted` (bool): explizites Tombstone/Delete-Flag
+- `delete_intent` (bool): zeigt Delete-Intent im Upstream-Kontext
+- `correlation_id` (string): korreliert ACK-Diagnose mit Intent-/Admission-Logkette
+
 **SAFETY-P5 Hinweise:**
 - ACK wird direkt nach ESP-Lookup gesendet — **vor** DB-Writes, Metadata-Update, WebSocket-Broadcast
 - Bei Payload-Validierungsfehler: `_send_heartbeat_error_ack()` verhindert P1-False-Positive
@@ -893,7 +900,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Outcome-Werte:** `accepted`, `rejected`, `applied`, `persisted`, `failed`, `expired`  
-**Code-Klassen (Auszug):** `COMMAND_ACCEPTED`, `REGISTRATION_PENDING`, `CONFIG_PENDING_BLOCKED`, `DEGRADED_MODE_BLOCKED`, `SAFETY_LOCKED`, `QUEUE_FULL`, `PUBLISH_OUTBOX_FULL`, `VALIDATION_FAIL`, `EXECUTE_FAIL`, `SAFETY_EPOCH_INVALIDATED`, `TTL_EXPIRED`, `SAFETY_QUEUE_FLUSHED`, `MODE_UNSUPPORTED`, `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `JSON_PARSE_ERROR`
+**Code-Klassen (Auszug):** `COMMAND_ACCEPTED`, `REGISTRATION_PENDING`, `CONFIG_PENDING_BLOCKED`, `DEGRADED_MODE_BLOCKED`, `SAFETY_LOCKED`, `QUEUE_FULL`, `PUBLISH_OUTBOX_FULL`, `VALIDATION_FAIL`, `EXECUTE_FAIL`, `SAFETY_EPOCH_INVALIDATED`, `TTL_EXPIRED`, `SAFETY_QUEUE_FLUSHED`, `MODE_UNSUPPORTED`, `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `JSON_PARSE_ERROR`, `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`
 **Server-Kanonisierung (P0.2):** Alias-Mapping serverseitig (`processing→accepted`, `success/ok→persisted`, `error→failed`, `timeout→expired`); unbekannte `flow`/`outcome` werden als Contract-Verletzung mit `code=CONTRACT_UNKNOWN_CODE` verarbeitet.
 **Contract-Hinweis:** Fehlt `correlation_id`, setzt der Server `code=CONTRACT_MISSING_CORRELATION` und markiert den Datensatz als nicht-retrybar. Im Firmware-Config-Flow wird fehlende `correlation_id` zusaetzlich strict als Contract-Verletzung behandelt (kein lokaler Fallback im terminalen Pfad).
 **Contract-Haertung (WP-09):** Fuer `system/intent_outcome` sind keine Legacy-Topic-Aliase mehr zulässig; alte Alias-Namen sind als deprecated zu behandeln und spaetestens bis **2026-07-03** zu entfernen.

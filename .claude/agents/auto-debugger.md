@@ -136,7 +136,7 @@ Erzeuge und pflege:
 4. **CORRELATION-MAP.md** ausfuellen — **feld-bewusst** (HTTP-`request_id` und MQTT-CID nicht blind mischen).  
 5. **Hypothesen & Scope** ins Lagebild; offene Punkte markieren.  
 6. **TASK-PACKAGES.md** und erste **SPECIALIST-PROMPTS.md** — kleine, testbare Pakete; Verweise auf passende Agenten-Rollen (nur Koordination).  
-7. **Konsolidierung:** Widersprueche zwischen Schichten explizit benennen; optional Hinweis auf `meta-analyst` fuer reine Querschnitts-Dokumentation ohne Loesungsauftrag.  
+7. **Konsolidierung:** Widersprueche zwischen Schichten explizit benennen; optional Hinweis auf `meta-analyst` fuer **Code-Querschnitt + Developer-Handoff** (nicht Incident-Plan ersetzen).  
 8. **/verify-plan-Gate:** Skill `verify-plan` anwenden auf Inhalt von `TASK-PACKAGES.md` (und relevante Planstellen). Chat-Ausgabe muss im Pflichtfall den Block **OUTPUT FÜR ORCHESTRATOR (auto-debugger)** enthalten (siehe Skill). Vollstaendiges Ergebnis in **VERIFY-PLAN-REPORT.md** im gleichen Artefaktordner schreiben (gebundener Pfad).  
 9. **Post-Verify Plan-Anpassung (Pflicht):** **`TASK-PACKAGES.md` mutieren** — Verify-Deltas uebernehmen (Pfade, Testbefehle/-pfade, Reihenfolge, HW-Gates, verworfene oder aufgeteilte Teilpakete, geschaerfte Akzeptanzkriterien). Nicht nur Chat-Kommentar: die Datei im Repo aktualisieren.  
 10. **SPECIALIST-PROMPTS.md** **rollenweise neu ausrichten:** ein Block pro im Run vorkommender Dev-Rolle (`server-dev`, `frontend-dev`, `esp32-dev`, `mqtt-dev`, …); nur zugehoerige PKG-Anteile; **Querverweise** auf die **nach Schritt 9 gueltigen** PKG-Nummern; **gemeinsame Reihenfolge** und Schnittstellen-Hinweise (z. B. „nach PKG-01“, „blockiert bis …“). Keine Doppelarbeit zwischen Rollen.  
@@ -205,9 +205,9 @@ Uebernehme Erkenntnisse aus dem ersten Block in den zweiten (Querverweise im Lag
 | Frontend | `frontend-debug` | idem |
 | MQTT | `mqtt-debug` | idem |
 | ESP32 | `esp32-debug` | idem |
-| DB | `db-inspector` | idem |
+| DB | `db-inspector` | idem; Steuer-Gate: `.claude/auftraege/auto-debugger/STEUER-VORLAGE.md` → Abschnitt **Gate: db-inspector** |
 | Test-Logs | `test-log-analyst` | idem |
-| Cross-Reports | `meta-analyst` | optional nach parallel vorliegenden Reports |
+| Cross-System / Dev-Handoff | `meta-analyst` | optional: Repo-Evidenz + Auftraege fuer *-dev; Report-Legacy wenn nur Reports |
 | Reality-Check | **Skill `verify-plan`** | **Pflichtgate** vor Implementierung; danach **TASK-PACKAGES**/**SPECIALIST-PROMPTS** gemäss Post-Verify-Phase (Skill auto-debugger) |
 
 ---

@@ -205,7 +205,7 @@ Für faktenbasierte Prüfung immer nutzen:
 | Aufgabe | Zuständig |
 |---------|-----------|
 | Laufzeit-Debug (Logs, Crashes) | server-debug, esp32-debug, mqtt-debug, frontend-debug |
-| Cross-Report-Korrelation | meta-analyst |
+| Cross-System Code + Dev-Handoff; optional Report-Korrelation | meta-analyst |
 | TM-Plan gegen Codebase | verify-plan |
 | DB-Schema, Cleanup | db-inspector |
 | KI-typische Struktur-/Logik-/Config-Fehler in angegebenem Bereich | **ki-audit** |

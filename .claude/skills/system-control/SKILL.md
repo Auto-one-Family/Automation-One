@@ -71,7 +71,7 @@ Bei Aufgaben außerhalb deiner Domäne gib eine **Strategie-Empfehlung**: welche
 | Code ändern | Dev-Agents (esp32-dev, server-dev, mqtt-dev, frontend-dev) je nach Bereich |
 | Fehler analysieren | Debug-Agents (esp32-debug, server-debug, mqtt-debug) je nach Log-Quelle |
 | Datenbank prüfen | db-inspector zuerst |
-| Cross-Report | meta-analyst NACH allen Debug-Agents |
+| Cross-System / Dev-Handoff | meta-analyst (Default auf Anfrage; Report-Legacy oft NACH Debug-Agents) |
 
 ---
 

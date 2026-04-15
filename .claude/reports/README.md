@@ -23,7 +23,7 @@ reports/
 | esp32-debug | `current/ESP32_REPORT.md` |
 | server-debug | `current/SERVER_REPORT.md` |
 | mqtt-debug | `current/MQTT_REPORT.md` |
-| meta-analyst | `current/SYSTEM_REPORT.md` |
+| meta-analyst | `current/META_DEV_HANDOFF.md` (Default), `current/META_ANALYSIS.md` (Legacy Reports) |
 
 ## Report schreiben
 

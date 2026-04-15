@@ -59,7 +59,7 @@ Jeder Agent im System MUSS diese Prinzipien erfüllen. Du prüfst bei jeder Anpa
 | Agent | Bereich | Modi | Tools | Report | Trigger |
 |-------|---------|------|-------|--------|---------|
 | system-control | System-Ops, Briefing | Full-Stack, Hardware-Test, Trockentest, CI, Ops, Briefing, Dokument | Read, Write, Bash, Grep, Glob | SESSION_BRIEFING.md / SYSTEM_CONTROL_REPORT.md | "session gestartet", Start/Stop, curl, make |
-| db-inspector | PostgreSQL, Schema | A (Health-Check) / B (Problem) | Read, Bash, Grep, Glob | DB_INSPECTOR_REPORT.md | Schema, Query, Migration, Device-Check |
+| db-inspector | PostgreSQL, Schema | A (Health-Check) / B (Problem) | Read, Write, Bash, Grep, Glob | DB_INSPECTOR_REPORT.md | Schema, Query, Migration, Device-Check |
 
 ### Debug-Agenten (Read-Only Analyse)
 
@@ -74,7 +74,7 @@ Jeder Agent im System MUSS diese Prinzipien erfüllen. Du prüfst bei jeder Anpa
 
 | Agent | Bereich | Modi | Tools | Report | Trigger |
 |-------|---------|------|-------|--------|---------|
-| meta-analyst | Cross-Report-Vergleich | A (allgemein) / B (Cross-Layer) | Read, Grep, Glob | META_ANALYSIS.md | NACH allen Debug-Agents, Widersprüche, Korrelation |
+| meta-analyst | Cross-System Code-Analyse + Dev-Handoff; optional Report-Legacy | A (Code-Handoff) / B (fokussiert) / C (Reports) | Read, Write, Grep, Glob | META_DEV_HANDOFF.md / META_ANALYSIS.md | Auf Anfrage oder nach Debug-Session; Aufträge für *-dev |
 
 ### Entwickler-Agenten (Pattern-konforme Implementierung)
 
@@ -118,7 +118,7 @@ start_session.sh → STATUS.md
                       ▼
           /collect-reports → CONSOLIDATED_REPORT.md → [TM]
                       ▼
-              meta-analyst → META_ANALYSIS.md → [TM]
+              meta-analyst → META_DEV_HANDOFF.md / META_ANALYSIS.md → Robin → *-dev
                       ▼
               TM entscheidet → Dev-Flow (F2)
                       │
@@ -139,7 +139,7 @@ start_session.sh → STATUS.md
 | system-control (Ops) | SC_REPORT.md | ALLE Debug-Agents |
 | Debug-Agents | *_REPORT.md | /collect-reports, meta-analyst |
 | /collect-reports | CONSOLIDATED_REPORT.md | TM (extern), meta-analyst |
-| meta-analyst | META_ANALYSIS.md | TM (extern) |
+| meta-analyst | META_DEV_HANDOFF.md / META_ANALYSIS.md | Robin → *-dev |
 | TM | Dev-Aufträge | Dev-Agents |
 | Debug-Reports | Problemanalysen | Dev-Agents (als Bugfix-Input) |
 

@@ -369,11 +369,11 @@ Für jeden erwarteten Output:
 | TASK-PACKAGES nach Verify anpassen, SPECIALIST-PROMPTS rollenweise | **auto-debugger** (nutzt Chat-Block **OUTPUT FÜR ORCHESTRATOR**) |
 | System analysieren | system-control (Briefing- oder Ops-Modus) |
 | Reports konsolidieren | /collect-reports |
-| Reports meta-analysieren | meta-analyst |
+| Cross-System / Dev-Handoff; Reports meta-analysieren (Legacy) | meta-analyst |
 
 **verify-plan vs. Test-Flow:**
 - verify-plan prüft **TM-Pläne**, nicht den Test-Flow selbst
-- Der Test-Flow (Session → Briefing → system-control → Debug-Agents → collect-reports → meta-analyst) wird in flow_reference.md definiert
+- Der Test-Flow (Session → Briefing → system-control → Debug-Agents → collect-reports → meta-analyst) wird in flow_reference.md definiert; **meta-analyst** kann zusätzlich **auf Anfrage** code-first vor den Reports laufen
 - verify-plan stellt sicher, dass ein TM-Plan diesen Flow korrekt referenziert (z.B. system-control vor Debug-Agents)
 - verify-plan kann bei Test-Flow-Plänen Agent-Befehle **anpassen**, damit sie kontext-sicher funktionieren
 
@@ -393,7 +393,7 @@ Für jeden erwarteten Output:
 
 ## Anhang A: Agent-Inventar (IST-Zustand)
 
-### Debug-Agents (nur Read/Grep/Glob)
+### Debug-Agents (nur Read/Grep/Glob) + meta-analyst (Handoff-Reports)
 
 | Agent-Name | Datei | Tools |
 |------------|-------|-------|
@@ -401,7 +401,7 @@ Für jeden erwarteten Output:
 | `server-debug` | `.claude/agents/server/server-debug-agent.md` | Read, Grep, Glob |
 | `mqtt-debug` | `.claude/agents/mqtt/mqtt-debug-agent.md` | Read, Grep, Glob |
 | `frontend-debug` | `.claude/agents/frontend/frontend-debug-agent.md` | Read, Grep, Glob |
-| `meta-analyst` | `.claude/agents/meta-analyst.md` | Read, Grep, Glob |
+| `meta-analyst` | `.claude/agents/meta-analyst.md` | Read, Write, Grep, Glob |
 
 ### Dev-Agents (Read + Write + Edit + Bash + Grep + Glob)
 
@@ -417,7 +417,7 @@ Für jeden erwarteten Output:
 | Agent-Name | Datei | Tools |
 |------------|-------|-------|
 | `system-control` | `.claude/agents/system-control.md` | Read, Write, Bash, Grep, Glob |
-| `db-inspector` | `.claude/agents/db-inspector.md` | Read, Bash, Grep, Glob |
+| `db-inspector` | `.claude/agents/db-inspector.md` | Read, Write, Bash, Grep, Glob |
 | `agent-manager` | `.claude/agents/agent-manager/agent-manager.md` | Read, Write, Edit, Bash, Grep, Glob |
 
 **Hinweis:** Dateinamen-Konvention ist INKONSISTENT:

@@ -1,10 +1,11 @@
 ---
 name: mqtt-development
 description: |
-  MQTT Pattern-konformer Code-Analyst und Implementierer.
-  Analysiert existierende Patterns auf Server UND ESP32, garantiert Protokoll-Konsistenz.
+  MQTT Pattern-konformer Code-Analyst und Implementierer fuer El Servador UND El Trabajante.
+  Evidenzpflicht: Topics/QoS nur aus Repo-Builder, Constants, Tests, MQTT_TOPICS.md.
+  Respektiert MQTTCommandBridge, LWT, Circuit Breaker, Offline-Pfade.
   Aktivieren bei: Topic hinzufuegen, Handler erstellen, Publisher erweitern,
-  Subscriber erweitern, Payload-Schema definieren, QoS festlegen.
+  Subscriber erweitern, Payload-Schema definieren, QoS festlegen, Firmware-Server-Abgleich.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 argument-hint: "[Beschreibe was implementiert werden soll]"
 ---
@@ -14,6 +15,64 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 > **Architektur:** Server-Centric. ESP32 = dumme Agenten. ALLE Logik auf Server.
 > **Protokoll:** MQTT 3.1.1 via Mosquitto Broker (Docker)
 > **Topic-Schema:** `kaiser/{kaiser_id}/esp/{esp_id}/{category}/{gpio}/{action}`
+
+---
+
+## Evidence-Tabelle (Repo-Ist)
+
+Vor größeren MQTT-Änderungen: Pfade verifizieren; keine Topic-Namen erfinden.
+
+| Schicht | Pfad (relativ Repo-Wurzel) | Rolle (1 Satz) | Skill deckt heute? |
+|---------|----------------------------|----------------|---------------------|
+| Broker-Compose / `mosquitto.conf` | `docker-compose.yml` (Service `mqtt-broker`); `docker/mosquitto/mosquitto.conf` | Compose startet Mosquitto und mountet `mosquitto.conf` als Broker-Konfiguration (Listener, Limits, Dev-`allow_anonymous`). | ja |
+| Server MQTT-Einstieg | `El Servador/god_kaiser_server/src/mqtt/client.py`; `subscriber.py`; `publisher.py`; `topics.py` | paho-Client, Topic-Build, Subscription-Routing zu Handlern, ausgehendes Publish inkl. Retry/Resilience-Anbindung. | ja |
+| Handler-Ordner | `El Servador/god_kaiser_server/src/mqtt/handlers/` | Eingehende Messages pro Wildcard-Pattern: Persistenz, WebSocket, Fehlerlogging, ACK-Weiterleitung an Brücke. | ja |
+| Firmware MQTT-Client | `El Trabajante/src/services/communication/mqtt_client.cpp`; `mqtt_client.h`; `El Trabajante/src/utils/topic_builder.cpp`; `topic_builder.h` | ESP-seitig Publish/Subscribe, LWT, Circuit Breaker, Offline-Buffer, optional PubSubClient-Pfad (`MQTT_USE_PUBSUBCLIENT`). | ja |
+| Offline / Safety / Circuit Breaker / Bridge | `El Servador/god_kaiser_server/src/mqtt/offline_buffer.py`; `El Servador/god_kaiser_server/src/services/mqtt_command_bridge.py`; `El Trabajante/src/services/safety/offline_mode_manager.cpp`; `El Trabajante/src/services/safety/offline_mode_manager.h` | Server puffert MQTT bei Broker-Ausfall; `MQTTCommandBridge` korreliert Zone/Subzone-ACKs per `correlation_id`; Firmware: Grace-Timer → `OFFLINE_ACTIVE` und lokale Regeln. | ja |
+| Tests / Wokwi MQTT | `El Servador/god_kaiser_server/tests/integration/test_heartbeat_handler.py`; `tests/integration/test_zone_bridge.py`; `tests/unit/test_mqtt_command_bridge.py`; `tests/esp32/test_mqtt_last_will.py`; `tests/esp32/test_mqtt_fallback.py`; `tests/esp32/test_communication.py`; `El Trabajante/test/_archive/comm_mqtt_client.cpp` | Pytest- und ESP32-Testartefakte als Contract-Referenz für Handler, LWT, Bridge, Transport-Kanten. | teils |
+
+**IST-Topic- und QoS-Verankerung:** Vollständige Tabellen und Begründungen in [Abschnitt 1–2](#1-topic-architektur); maschinenlesbare SSOT in `.claude/reference/api/MQTT_TOPICS.md`; Builder-Strings in `topic_builder.cpp` und Platzhalter in `El Servador/god_kaiser_server/src/core/constants.py`. Beispiel-Flows im Repo dokumentiert: **Heartbeat** (`system/heartbeat` / `ack`, QoS 0), **Aktor-Befehl** (`actuator/.../command`, QoS 2 + optional `correlation_id` im Publisher), **LWT** (`system/will`, QoS 1, Broker → `lwt_handler`), **Zone/Subzone-ACK** mit Echo `correlation_id` für `MQTTCommandBridge.resolve_ack` (siehe `MQTT_TOPICS.md` und `mqtt_command_bridge.py`).
+
+---
+
+## Professionelle Betriebsstandards (Kurz)
+
+- **Broker-Härtung:** In Produktion keine anonymen Clients; TLS, Authentifizierung und ACLs aktivieren. Im Repo ist `docker/mosquitto/mosquitto.conf` die Konfigurations-SSOT (Compose mountet sie nach `/mosquitto/config/mosquitto.conf`); Dev-`allow_anonymous true` ist bewusst markiert — für Prod siehe `.claude/reference/security/PRODUCTION_CHECKLIST.md`.
+- **Hohe Verfügbarkeit:** Eclipse Mosquitto bietet kein natives Clustering wie ein DB-Cluster; HA ist eine **Betriebsentscheidung** (z. B. VM/K8s, Bridge/Federation, getrennte Edge-Broker) — hier keine Architektur-Umschreibung des App-Codes vorschlagen, sondern Anforderungen an Verfügbarkeit/Recovery klar benennen.
+- **Koordination:** Hub-and-Spoke über den Broker; geräteübergreifende Abläufe laufen über **Server-Logik** (REST, Regeln, MQTTCommandBridge), nicht über direkte ESP-zu-ESP-Kommunikation als Default.
+- **Last und Transport:** Keepalive und Broker-Timeouts (`exceeded timeout` o. ä.) als Symptom für Blockaden oder Netzprobleme werten; Bursts (z. B. viele parallele `measure`/Kalibrier-Kommandos) und Backpressure explizit mitdenken — Rate-Limits und UI-Disziplin mit Server/Firmware abstimmen.
+- **Disconnect-Runbook (drei parallele Sichten):** Bei Transport-Problemen **Serial/Firmware-Log** (`[MQTT]`, Circuit Breaker), **Server-Log** (`god_kaiser`, Resilience/MQTT-Logger) und **Broker-Traffic** (`make mqtt-sub` / `mqtt-debug`) gemeinsam auswerten — nicht nur eine Quelle.
+
+**Interne Vertiefung (eingecheckt):**
+
+- `.claude/reference/api/MQTT_TOPICS.md` — Topics, Changelog, `correlation_id`-Regeln.
+- `El Servador/god_kaiser_server/docs/emergency-stop-mqtt-correlation.md` — Not-Halt und MQTT-Korrelation.
+- `El Servador/god_kaiser_server/docs/finalitaet-http-mqtt-ws.md` — Finalität über Schichten.
+- `El Trabajante/docs/system-flows/08-zone-assignment-flow.md` — Zone-Assign inkl. Bridge-Erwartung.
+- `docs/mqtt-injection-analysis.md` — Sicherheits-/Last-Sicht MQTT.
+
+---
+
+## Soll-Verhalten (MQTT) — verbindlich für Agenten
+
+1. **Pattern-First:** Vor Änderungen mit `Grep`/`Glob` nach bestehenden Handlern, `Publisher`-Methoden, `TopicBuilder`/`topic_builder` und Tests suchen; gleiche Exception-/Log-Patterns und QoS wie der nächstliegende bestehende Codepfad.
+2. **Eine Hypothese pro Paket:** Transport (Keepalive, TLS-URI, Broker-Timeout, TCP) vs. Nachrichtenvertrag (`correlation_id`, JSON-Schema, Idempotenz) vs. Broker-Konfiguration (ACL, Listener, `max_inflight_messages`) **getrennt** diskutieren und belegen — nicht in einem Satz vermischen.
+3. **Offline-first:** Neue Funktionen, die „online“ sind, kurz beschreiben: Was passiert nach **30 s Grace** bzw. bei `OfflineMode::OFFLINE_ACTIVE` auf der Firmware (`offline_mode_manager.*`)? Greifen lokale Regeln / Default-Zustände?
+4. **Keine Topic-Erfindung:** Neue Segmente nur, wenn sie parallel in `topic_builder.*`, `constants.py`/`topics.py`, ggf. `MQTT_TOPICS.md` und Tests nachziehbar sind.
+5. **TLS-Profil:** Build-Flags (`sdkconfig`, `platformio.ini`, `MQTT_*` Umgebungsvariablen) und URI-Schema (`mqtt://` vs. `mqtts://`) müssen zu den **beobachteten** Logs passen; Dev (lokaler Broker 1883) vs. Prod (TLS, Zertifikate) explizit trennen.
+6. **Tests bevorzugen:** Wo Pytest- oder Firmware-Tests existieren, Contracts dort erweitern (`tests/integration/test_*handler*.py`, `test_mqtt_command_bridge.py`, `tests/esp32/test_mqtt_*.py`); reine Handtests nur ergänzend.
+
+**Kernkomponenten nicht umgehen oder duplizieren:** **MQTTCommandBridge** (`send_and_wait_ack` / `resolve_ack` nur mit passender `correlation_id`), **LWT** (ESP-Will-Topic → `lwt_handler`), **Circuit Breaker** auf Server- und Firmware-MQTT-Client, **Offline-Buffer** (Server async, Firmware Ring), **Registration Gate** auf dem ESP vor dem regulären Publish.
+
+---
+
+## Anti-Patterns (MQTT-spezifisch)
+
+- Zweiten parallelen **MQTT-Client** im Server-Prozess einführen (bestehende Singleton-/Lifespan-Kette in `main.py` erweitern).
+- **Blockierende** Sensorik oder lange `delay`/`sleep` im MQTT-Callback- oder Publish-Hotpath (Firmware: Regeln in `firmware.mdc`; Server: async statt blockierend).
+- **QoS 2 pauschal** „weil sicher“ — nur nutzen, wo Duplikate Schaden anrichten (siehe [Abschnitt 2](#2-qos-strategie)); sonst Last und Latenz erhöhen.
+- **Retained** ohne Team-Policy setzen (LWT/Retained-Interaktionen und Broker-State verstehen, siehe `mqtt-debug`-Skill / `MQTT_TOPICS.md`).
+- **Kalibrier- oder Burst-Pfade** (viele `measure`-Kommandos) ohne Abstimmung mit **Rate-Limits**, UI-Throttling und Server-Last — Disconnects und `exceeded timeout` riskieren.
 
 ---
 
@@ -51,7 +110,7 @@ Server (El Servador/god_kaiser_server/src/)
 │   ├── subscriber.py             ← Subscriber mit Handler-Registry
 │   ├── offline_buffer.py         ← Offline Buffer (asyncio)
 │   ├── topics.py                 ← TopicBuilder (Python)
-│   └── handlers/                 ← 15 Message-Handler
+│   └── handlers/                 ← Message-Handler (siehe Ordner; + base_handler)
 │       ├── sensor_handler.py
 │       ├── actuator_handler.py
 │       ├── heartbeat_handler.py
@@ -133,7 +192,7 @@ QoS 2: Exactly Once        → Commands (Duplikate = gefährlich!)
 | **1** | `sensor/data`, `sensor/batch`, `sensor/response`, `actuator/status`, `actuator/response`, `actuator/alert`, `system/error`, `system/intent_outcome`, `system/intent_outcome/lifecycle`, `system/will`, alle `subzone/*` | Daten-Loss unerwünscht, Duplikate verarbeitbar |
 | **2** | `sensor/command`, `actuator/command`, `system/command`, `config`, `config_response`, `broadcast/emergency` | Duplikate können Schaden verursachen |
 
-### Server-Konstanten (constants.py:193-199)
+### Server-Konstanten (`constants.py`, u. a. QoS-Zeilen ~207–211)
 
 ```python
 QOS_SENSOR_DATA = 1       # At least once
@@ -634,6 +693,8 @@ persistence_location /mosquitto/data/
 | `El Trabajante/src/utils/topic_builder.h` | Topic-Builder Header |
 | `El Trabajante/src/services/communication/mqtt_client.cpp` | MQTT Client mit Circuit Breaker |
 | `El Trabajante/src/services/communication/mqtt_client.h` | MQTT Client Header |
+| `El Trabajante/src/services/safety/offline_mode_manager.cpp` | Grace 30s → `OFFLINE_ACTIVE`, MQTT-Disconnect-Verhalten |
+| `El Trabajante/src/services/safety/offline_mode_manager.h` | Offline-Modus-Enum und Konstanten (`OFFLINE_ACTIVATION_DELAY_MS`) |
 | `El Trabajante/src/models/error_codes.h` | Error-Codes 3010-3016 |
 
 ### Server
@@ -646,7 +707,8 @@ persistence_location /mosquitto/data/
 | `El Servador/god_kaiser_server/src/mqtt/subscriber.py` | Subscriber + Handler-Routing |
 | `El Servador/god_kaiser_server/src/mqtt/client.py` | MQTT Client Wrapper |
 | `El Servador/god_kaiser_server/src/mqtt/offline_buffer.py` | Async Offline Buffer |
-| `El Servador/god_kaiser_server/src/mqtt/handlers/` | 15 Message-Handler |
+| `El Servador/god_kaiser_server/src/services/mqtt_command_bridge.py` | `MQTTCommandBridge`: ACK-Warten (`send_and_wait_ack`), `resolve_ack` |
+| `El Servador/god_kaiser_server/src/mqtt/handlers/` | Message-Handler-Module + `base_handler.py` (IST: Ordner listen) |
 | `El Servador/god_kaiser_server/src/main.py` | Handler-Registrierung (lifespan, u. a. intent_outcome + lifecycle) |
 | `El Servador/god_kaiser_server/src/core/error_codes.py` | Error-Codes 5101-5107 |
 

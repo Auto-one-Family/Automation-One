@@ -206,7 +206,7 @@ Enthaelt: Iteration-Tabelle, Statistik, Out-of-Range Events, Heartbeat-Luecken.
 
 ### Phase 6: Meta-Analyse + Final Report
 
-1. **Task(meta-analyst):** "Modus B: Hardware-Test. Analysiere HW_TEST_PHASE_SETUP.md, HW_TEST_PHASE_VERIFY.md, HW_TEST_PHASE_STABILITY.md und alle Debug-Reports. Fokus: Sensor-Daten-Pipeline Konsistenz."
+1. **Task(meta-analyst):** "Hardware-Test: Analysiere HW_TEST_PHASE_SETUP.md, HW_TEST_PHASE_VERIFY.md, HW_TEST_PHASE_STABILITY.md und alle Debug-Reports (Pipeline-Konsistenz). Optional danach: relevante Repo-Pfade gegen Patterns prüfen und **Developer-Handoffs** formulieren, falls Fixes nötig."
 2. **Final Report generieren:** `.claude/reports/current/HW_TEST_FINAL_REPORT.md`
 
 ```markdown

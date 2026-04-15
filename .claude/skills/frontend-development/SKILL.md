@@ -1319,6 +1319,7 @@ cleanupWebSocket() {
 | State-Verlust bei Tab-Wechsel | View nicht in keep-alive `:include` | `defineOptions({ name: 'ViewName' })` + Name in AppShell include-Array |
 | GridStack leer nach Tab-Rueckkehr | `onActivated` fehlt | Re-Init in `onActivated()`, Cleanup in `onDeactivated()` |
 | FAB Sub-Panel nicht sichtbar | `position: absolute` in FAB-Container geclippt | `position: fixed` + explizites `bottom/right` + `z-index: var(--z-fab)` (V19-F04) |
+| Monitor-Chart crasht mit `borderCapStyle`-Fehler | Ungueltige Annotation-Werte (NaN/String) oder leere Annotation-Konfiguration | Annotationen vor Render numerisch validieren, nur bei gueltigen Eintraegen aktivieren (`LiveLineChart`, `HistoricalChart`, `MultiSensorChart`) |
 
 ---
 
@@ -1368,7 +1369,9 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 10.7 | **Letzte Aktualisierung:** 2026-04-11
+**Version:** 10.8 | **Letzte Aktualisierung:** 2026-04-14
+
+- 2026-04-14: Chart-Stabilitaet Monitor/L3 gehaertet — Annotation-Guards gegen ungueltige Threshold-/Event-Werte (`toFiniteNumber`, finite timestamp check), `borderCapStyle` defensiv gesetzt und Annotation-Plugin nur mit gueltigen Annotationen aktiviert (`LiveLineChart.vue`, `HistoricalChart.vue`, `MultiSensorChart.vue`).
 
 - 2026-04-11: Composables-Index — `useCalibrationWizard.ts` (Kalibrier-Wizard, Live-`triggerMeasurement` mit 2 s Post-HTTP-Cooldown, Parität `SensorValueCard`).
 

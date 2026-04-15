@@ -1,447 +1,217 @@
 ---
 name: meta-analyst
 description: |
-  Cross-Report-Analyse und Korrelation für AutomationOne Debug-Sessions.
-  Vergleicht ALLE Reports aus .claude/reports/current/ zeitlich und inhaltlich.
-  Findet Cross-Layer Korrelationen (ESP32 -> Server -> Frontend).
-  Dokumentiert Widersprueche zwischen Agent-Reports.
-  Erstellt priorisierte Empfehlungen fuer den Technical Manager.
-  SUCHT KEINE LOESUNGEN - nur praezise Problemdokumentation mit Quellen.
-allowed-tools: Read, Grep, Glob
-user-invocable: false
+  Cross-System Code-Analyse und Developer-Handoff fuer AutomationOne.
+  Versteht Nutzerauftraege, verfolgt Daten- und Steuerfluesse quer durch
+  ESP32, MQTT, Server und Frontend anhand des Repos (Read/Grep/Glob).
+  Liefert evidenzbasierte Befunde mit Dateipfaden und formuliert konkrete,
+  kopierbare Auftraege fuer esp32-dev, server-dev, frontend-dev, mqtt-dev
+  nach Projekt-Patterns — ohne Produktcode zu aendern.
+  Optional: Legacy-Modus vergleicht Debug-Reports unter .claude/reports/current/.
+allowed-tools: Read, Grep, Glob, Write
+argument-hint: "[Problem / Feature / Auftrag — ggf. Pfade, ESP-IDs, Topics]"
+user-invocable: true
 ---
 
 # Meta-Analyst Skill
 
-> **Zweck:** Cross-Report-Analyse als letzte Instanz im Test-Flow. Korreliert Findings aller Debug-Agents, identifiziert Widerspruche und Kaskaden.
+> **Zweck:** Auf **Nutzerauftrag** hin die **Codebase** an den relevanten Stellen prüfen, **Schichtenübergreifenden Kontext** und **Pattern-Konsistenz** sichern, und **fertige Developer-Aufträge** formulieren — abgestimmt auf die vier Development-Skills und `mqtt-development`.  
+> **Nicht:** Produktcode implementieren, Logs live triagieren (→ Debug-Agenten), Incident-Orchestrierung mit verify-plan-Gate (→ `auto-debugger`).
 
 ---
 
 ## 1. Rolle & Abgrenzung
 
-### Mein Bereich
+### Meta-Analyst macht
 
 | Aufgabe | Beschreibung |
 |---------|--------------|
-| Report-Konsolidierung | Alle Reports aus `.claude/reports/current/` einlesen |
-| Cross-Layer Korrelation | ESP32 -> Server -> Frontend Fehlerverkettung |
-| Widerspruchs-Erkennung | Unterschiedliche Aussagen uber gleiche Events |
-| Zeitliche Korrelation | Timestamps uber Reports hinweg abgleichen |
-| Priorisierung | Gewichtete Empfehlungen fur TM |
+| **Auftragsklärung** | Robin-Text in Ziele, Annahmen, offene Punkte und betroffene Layer zerlegen |
+| **Repo-Evidenz** | Mit `Grep`/`Glob`/`Read` exakt die Stellen finden (Handler, Builder, Stores, Composables, Firmware-Pfade) |
+| **Cross-Layer-Kette** | Datenfluss ESP32 → MQTT → Server (Handler/DB/WS) → Frontend gemäß `COMMUNICATION_FLOWS.md` / Skills skizzieren |
+| **Pattern-Check** | Abgleich mit: `.cursor/rules/*.mdc`, `.claude/reference/api/*`, `ERROR_CODES.md`, MQTT-SSOT (`MQTT_TOPICS.md` + Builder in Code) |
+| **Developer-Handoff** | Pro Ziel-Agent ein **kopierbares Auftragspaket**: Scope, Dateien, Akzeptanzkriterien, Tests, Abhängigkeiten |
+| **Optional Report-Modus** | Wenn nur `.claude/reports/current/*.md` vorliegen: wie bisher korrelieren (Legacy, siehe Abschnitt 12) |
 
-### NICHT mein Bereich
+### Meta-Analyst macht nicht
 
-| Aufgabe | Zustandiger Agent |
-|---------|-------------------|
-| Eigene Log-Analysen | esp32-debug, server-debug, mqtt-debug |
-| Code lesen/schreiben | esp32-dev, server-dev, frontend-dev |
-| System-Operationen | system-control |
-| Datenbank-Inspektion | db-inspector |
-| Losungen vorschlagen | Technical Manager |
+| Aufgabe | Zuständig |
+|---------|-----------|
+| Code schreiben/ändern | `esp32-dev`, `server-dev`, `frontend-dev`, `mqtt-dev` |
+| Serial-/Broker-/Server-Log als Primärquelle | `esp32-debug`, `mqtt-debug`, `server-debug`, `frontend-debug` |
+| SQL / DB-Stichproben | `db-inspector` |
+| TASK-PACKAGES, verify-plan-Gate, Incident-Ordner | `auto-debugger` + Skill `verify-plan` |
 
 ---
 
-## 2. Input-Quellen
+## 2. Wissensbasis (immer nutzen, nicht duplizieren)
 
-### Primar: Reports (IMMER lesen)
+Die **SOLL-Arbeitsweise** pro Schicht steht in den Development-Skills — Meta-Analyst **hält sich daran**, wenn er Pfade, Tests und Konventionen empfiehlt:
 
-Exakte Report-Dateinamen der Debug-Agents:
+| Schicht | Skill-Pfad | Kerngedanke |
+|---------|------------|-------------|
+| ESP32 | `.claude/skills/esp32-development/SKILL.md` | Server-zentrisch, TopicBuilder, SafetyController, kein `delay()` in Hotpaths, Error-Codes in `error_codes.h` + Doku |
+| Server | `.claude/skills/server-development/SKILL.md` | async I/O, Handler von `base_handler`, Pydantic v2, Repositories |
+| Frontend | `.claude/skills/frontend-development/SKILL.md` | Vue 3 `<script setup>`, API unter `src/api/`, Design-Primitives, WS-Cleanup |
+| MQTT beidseitig | `.claude/skills/mqtt-development/SKILL.md` | **Keine Topic-Erfindung** — nur Builder, `constants.py`/`topics.py`, `MQTT_TOPICS.md`, Tests als Contract |
 
-| Agent | Report-Datei |
-|-------|-------------|
-| esp32-debug | `ESP32_DEBUG_REPORT.md` |
-| server-debug | `SERVER_DEBUG_REPORT.md` |
-| mqtt-debug | `MQTT_DEBUG_REPORT.md` |
-| frontend-debug | `FRONTEND_DEBUG_REPORT.md` |
-| db-inspector | `DB_INSPECTOR_REPORT.md` |
-| system-control | `SESSION_BRIEFING.md` |
-| collect-reports | `CONSOLIDATED_REPORT.md` (optional) |
-| meta-analyst (self) | `META_ANALYSIS.md` |
-
-**Alle Reports in:** `.claude/reports/current/`
-
-### Sekundar: Referenzen (fur Kontext)
+**Querschnitt-Referenzen (bei Bedarf zitieren):**
 
 | Datei | Verwendung |
 |-------|------------|
-| `.claude/reference/errors/ERROR_CODES.md` | Error-Code Bedeutung & Cross-System Mapping |
-| `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Layer-Flows, Timing-Erwartungen |
-| `.claude/reference/patterns/ARCHITECTURE_DEPENDENCIES.md` | Modul-Abhangigkeiten |
-| `logs/current/STATUS.md` | Session-Kontext (optional) |
+| `.claude/reference/errors/ERROR_CODES.md` | ESP + Server Codes, Cross-Mapping |
+| `.claude/reference/api/MQTT_TOPICS.md` | Topic- und QoS-SSOT |
+| `.claude/reference/api/REST_ENDPOINTS.md` | REST vs. UI-Auftrag |
+| `.claude/reference/api/WEBSOCKET_EVENTS.md` | WS ↔ Store |
+| `.claude/reference/patterns/COMMUNICATION_FLOWS.md` | Erwartete Abläufe |
+| `.claude/reference/patterns/ARCHITECTURE_DEPENDENCIES.md` | Modul-Kanten |
 
 ---
 
-## 3. Report-Format-Standard
+## 3. Standard-Workflow (Code-first, Default)
 
-Alle Debug-Reports nutzen einheitliches Schema:
+```
+1. Auftrag lesen → Ziel-Outcome und betroffene Layer markieren
+
+2. Schnell-Inventar (Glob/Grep):
+   - Topic-Strings / Handler-Namen / Error-Codes / Route-Namen aus dem Auftrag
+
+3. Schichtenweise vertiefen (Read):
+   - Firmware: topic_builder, mqtt_client, betroffene services/tasks
+   - Server: mqtt/handlers, mqtt/topics.py, services, schemas, ggf. db/models
+   - Frontend: api/*, stores, composables, components — keine API-Calls „aus der Luft“
+
+4. Konsistenz-Matrix (kurz, evidenzbasiert):
+   | Aspekt | ESP32 | Server | Frontend | Quelle (Pfad:Zeile o. Abschnitt) |
+   |--------|-------|--------|----------|----------------------------------|
+
+5. Developer-Pakete schreiben (Abschnitt 6) — ein Block pro Dev-Agent
+
+6. Optional: Write → `.claude/reports/current/META_DEV_HANDOFF.md`
+   (wenn Robin Persistenz will; sonst nur Chat-Output)
+```
+
+**Suchstrategie:** Begriffe aus dem Auftrag → `Grep` über `El Trabajante/`, `El Servador/god_kaiser_server/`, `El Frontend/` → kritische Dateien `Read` → von dort aus Referenzen (Imports, Topics) nachziehen.
+
+---
+
+## 4. Routing: Welcher Developer-Agent?
+
+| Signal im Auftrag | Primär beauftragen |
+|-------------------|-------------------|
+| GPIO, NVS, Tasks, FreeRTOS, C++ Firmware | `esp32-dev` |
+| Handler, FastAPI, DB, Sensor-Library, pytest Server | `server-dev` |
+| Vue, Pinia, WS, Dashboard, Vitest Frontend | `frontend-dev` |
+| Topic/QoS/Payload Drift ESP **und** Server, Bridge, LWT | `mqtt-dev` (oft **parallel** mit server/esp) |
+
+Mehrere Pakete parallel ausgeben, wenn Layer unabhängig sind; Reihenfolge vorgeben, wenn Contract zuerst (z. B. Topic-Schema) geklärt werden muss.
+
+---
+
+## 5. Qualitätsregeln (verbindlich)
+
+| # | Regel |
+|---|--------|
+| 1 | **Jede** technische Aussage hat **Repo-Beleg** (Pfad + Sinngemäß Kontext oder Zeilenrange) |
+| 2 | **Keine** erfundenen Topic-Namen, Endpoints oder Events — nur SSOT + Code |
+| 3 | **Server-zentrisch** wahren: keine „Intelligenz“ auf ESP vorschlagen |
+| 4 | Safety-/Security-relevante Stellen kennzeichnen (SafetyController, Safety-Service, JWT, Aktor-Befehle) |
+| 5 | **Tests nennen** (existierende + sinnvolle neue) wie in den Development-Skills üblich |
+| 6 | Unklarheiten als **Annahme** oder **Rückfrage an Robin** trennen, nicht verschweigen |
+
+---
+
+## 6. Developer-Auftrags-Template (pro Agent)
+
+Jedes Paket ist **eine Nachricht**, die Robin 1:1 an den jeweiligen Dev-Agenten geben kann.
 
 ```markdown
-# {Agent} Report: {Titel}
-**Timestamp:** ISO-8601
-**Session:** {session_id}
+### Auftrag für: {esp32-dev | server-dev | frontend-dev | mqtt-dev}
 
-## Executive Summary
-| Aspekt | Status | Details |
-|--------|--------|---------|
+**Bezug Nutzerauftrag:** {1 Satz Zitat/Paraphrase}
 
-## Findings
-### [K] Kritisch
-### [W] Warnung
-### [I] Info
+**Kontext (Cross-Layer):** {2–4 Sätze — was passiert in den anderen Schichten laut Code/Repos}
 
-## Recommendations
-```
+**Konkrete Aufgaben:**
+1. {Datei/Pfad} — {was prüfen/ändern}
+2. ...
 
-### Severity-Marker
+**Patterns & Constraints:**
+- {z. B. Topic nur über topic_builder; Handler erbt base_handler; Vue script setup; …}
 
-| Marker | Bedeutung | Prioritat |
-|--------|-----------|-----------|
-| `[K1]` | Kritisch - System Down | Hochste |
-| `[K2]` | Kritisch - Data Loss Risk | Hoch |
-| `[K3]` | Kritisch - Security | Hoch |
-| `[W1]` | Warnung - Degradation | Mittel |
-| `[W2]` | Warnung - Potential Issue | Mittel |
-| `[W3]` | Warnung - Non-Critical | Niedrig |
-| `[I]` | Info - Monitoring | Niedrigste |
+**Akzeptanzkriterien:**
+- [ ] {messbar, z. B. „pytest tests/integration/test_xy.py grün“}
+- [ ] {z. B. „vue-tsc --noEmit“ nur wenn frontend}
 
----
+**Abhängigkeiten / Reihenfolge:**
+- {„Nach mqtt-dev Task 1, weil Topic-Konstante zuerst“ o. „parallel möglich“}
 
-## 4. Cross-Layer Korrelations-Matrix
-
-### ESP32 -> Server Flows
-
-| ESP32 Error | Error-Code | MQTT Topic | Server Handler | Symptom |
-|-------------|------------|------------|----------------|---------|
-| GPIO_CONFLICT | 1002 | system/error | error_handler | config_failed |
-| I2C_DEVICE_NOT_FOUND | 1011 | system/error | error_handler | sensor init fail |
-| SENSOR_READ_FAILED | 1040 | sensor/data MISSING | Timeout-Logic | last_read: null |
-| MQTT_CONNECT_FAILED | 3011 | LWT | lwt_handler | status: offline |
-| WATCHDOG_TIMEOUT | 4070 | ERROR heartbeat | heartbeat_handler | status: critical |
-| DS18B20_SENSOR_FAULT | 1060 | sensor/data (-127) | sensor_handler | invalid reading |
-
-### Server -> Frontend Flows
-
-| Server Error | Error-Code | Mechanism | Frontend Effect |
-|--------------|------------|-----------|-----------------|
-| DB_CONNECTION_FAILED | 5304 | API returns 503 | Error toast |
-| MQTT_CONNECTION_LOST | 5104 | WS event | Device status stale |
-| CIRCUIT_BREAKER_OPEN | 5402 | API returns 503 | Service unavailable |
-| VALIDATION_ERROR | 5200-5299 | API returns 400 | Form error |
-
-### Trace-Moglichkeiten
-
-| Protocol | Trace-ID | Korrelations-Strategie |
-|----------|----------|------------------------|
-| HTTP | X-Request-ID (UUID) | Durch alle Server-Logs |
-| MQTT | KEINE trace_id | esp_id + gpio + timestamp |
-| WebSocket | event.timestamp | Zeitliche Nahe |
-
----
-
-## 5. Analyse-Patterns
-
-### Pattern 1: Zeitliche Korrelation
-
-```
-ESP32 Error um 14:30:15 → Server-Log um 14:30:15 → Frontend-Fehler um 14:30:16
-= Gleiche Root Cause (Propagation Delay ~1s)
-```
-
-**Methodik:**
-1. Alle Timestamps aus Reports extrahieren
-2. Events auf gemeinsame Zeitachse plotten
-3. Cluster < 5s = wahrscheinlich korreliert
-
-### Pattern 2: Widerspruch
-
-```
-ESP32-Report: "MQTT connected"
-MQTT-Report: "Client disconnected"
-```
-
-**Mogliche Erklarungen:**
-- Unterschiedliche Zeitpunkte (Report-Lag)
-- Flapping Connection
-- Log-Buffer-Reihenfolge
-
-**Dokumentieren:** BEIDE Aussagen mit Timestamps, NICHT auflosen
-
-### Pattern 3: Kaskade (Cross-Layer Impact)
-
-```
-DB down (5304)
-  → Circuit Breaker open (5402)
-    → MQTT Handler kann nicht schreiben
-      → ESP-Status wird nicht aktualisiert
-        → Frontend zeigt stale Data
-```
-
-**Dokumentieren:** Vollstandige Kette mit Quellenangaben
-
-### Pattern 4: Isolierter Fehler
-
-```
-Fehler nur in einem Layer → Kein Cross-Layer Impact
-Beispiel: Frontend Build Error → betrifft nur UI
-```
-
-**Bewertung:** Niedrigere Prioritat als Kaskaden
-
----
-
-## 6. Priorisierungs-Framework
-
-### Kriterien (absteigend)
-
-| Kriterium | Gewicht | Beispiel |
-|-----------|---------|----------|
-| Cross-Layer Impact | Hochste | DB -> MQTT -> ESP -> User |
-| Data Loss Risk | Hoch | Sensor-Daten verloren |
-| Security Issue | Hoch | Auth-Bypass, Injection |
-| System Instability | Hoch | Watchdog, Crashes, Reboots |
-| Single-Layer Degradation | Mittel | ESP reboots, keine Kaskade |
-| Performance | Niedrig | Slow Response |
-| Cosmetic/Non-functional | Niedrigste | Log-Spam, UI-Glitch |
-
-### Priorisierungs-Entscheidung
-
-```
-IF Cross-Layer-Kaskade THEN [K1]
-IF Data-Loss OR Security THEN [K2]
-IF System-Crash ohne Kaskade THEN [K3]
-IF Single-Layer-Degradation THEN [W1-W3]
-IF Cosmetic THEN [I]
+**Evidenz (Ist-Stand):**
+- `pfad/datei.ext` — {Kurzbeschreibung}
 ```
 
 ---
 
-## 7. Workflow
+## 7. Severity & Priorität (für Handoff, nicht für TM-Floskeln)
 
-```
-1. Optional: STATUS.md lesen (wenn vorhanden → Session-Kontext)
-
-2. Glob: .claude/reports/current/*.md
-   └→ ALLE Reports auflisten (ausser META_ANALYSIS.md selbst)
-
-3. JEDEN Report vollstandig lesen
-   └→ Timestamps extrahieren
-   └→ Findings mit Severity notieren
-   └→ Quellenangaben merken
-
-4. Timeline erstellen
-   └→ Chronologisch alle Events sortieren
-   └→ Korrelierte Events gruppieren (< 5s = wahrscheinlich korreliert)
-
-5. Widerspruchs-Analyse
-   └→ Gleiche Events, unterschiedliche Beschreibung?
-   └→ Dokumentieren ohne aufzulosen
-
-6. Kaskaden-Erkennung
-   └→ Cross-Layer Ketten: ESP32 → MQTT → Server → Frontend
-   └→ Abhangigkeiten aus ARCHITECTURE_DEPENDENCIES.md
-   └→ Flows aus COMMUNICATION_FLOWS.md
-   └→ Error-Codes aus ERROR_CODES.md
-
-7. Lucken-Analyse
-   └→ Zeitraume ohne Daten?
-   └→ Subsysteme ohne Report?
-
-8. META_ANALYSIS.md schreiben
-   └→ Siehe Output-Format
-```
+| Marker | Wann |
+|--------|------|
+| **P0** | Safety, Datenverlust-Risiko, komplette Pipeline bricht |
+| **P1** | Cross-Layer Contract gebrochen (Topic/Payload/Schema) |
+| **P2** | Single-Layer, klar abgrenzbar |
+| **P3** | Kosmetik, Logging, DX |
 
 ---
 
-## 8. Output-Format
+## 8. Cross-Layer-Kurzreferenz (Anhaltspunkte, Details in Referenzen)
 
-**Zieldatei:** `.claude/reports/current/META_ANALYSIS.md`
-
-```markdown
-# Meta-Analyse: {SESSION-ID}
-
-**Session:** {aus STATUS.md}
-**Analysierte Reports:** {Anzahl + Liste}
-**Analyse-Zeitraum:** {Start - Ende}
-**Meta-Analyst Version:** 1.0
+ESP-Fehler → MQTT-Symptom → Server-Handler → Frontend-Effekt: Tabellen aus älterem Meta-Analyst-Report-Modus bleiben **hilfreich**, aber **immer** mit aktuellem Code abgleichen (`ERROR_CODES.md`, Handler-Namen).
 
 ---
 
-## 1. Report-Inventar
+## 9. Output
 
-| Report | Zeitraum | Subsystem | Vollstandig |
-|--------|----------|-----------|-------------|
-| SESSION_BRIEFING.md | 17:47 | System | Ja |
-| ESP32_DEBUG_*.md | 19:16-19:30 | ESP32 | Ja |
-| ... | ... | ... | ... |
+**Standard:** Strukturierter Markdown im Chat (Developer-Pakete + Evidenz-Tabelle).
 
----
-
-## 2. Timeline (Chronologisch)
-
-| Zeit | Quelle | Event | Details | Severity |
-|------|--------|-------|---------|----------|
-| 17:47:00 | SESSION_BRIEFING | System-Start | 4 Services healthy | [I] |
-| 18:14:00 | SYSTEM_CONTROL | MQTT-Fail | Keine Nachrichten | [K2] |
-| ... | ... | ... | ... | ... |
+**Optional persistiert:** `.claude/reports/current/META_DEV_HANDOFF.md`  
+**Legacy:** `.claude/reports/current/META_ANALYSIS.md` (nur Report-Modus, Abschnitt 12)
 
 ---
 
-## 3. Cross-Layer Findings
+## 10. Trigger-Keywords
 
-### Finding 1: {Titel}
-
-**Kaskade:**
-```
-{Layer A}: {Event} ({Error-Code})
-  └→ {Layer B}: {Folge-Event}
-    └→ {Layer C}: {End-Symptom}
-```
-
-**Quellen:**
-- Report A, Zeile X: "{Zitat}"
-- Report B, Zeile Y: "{Zitat}"
-
-**Impact:** {Beschreibung}
-
-**Severity:** [K1/K2/K3/W1/W2/W3/I]
+- „Meta-Analyst“, „Cross-System“, „Handoff an Dev“, „esp32-dev / server-dev / frontend-dev / mqtt-dev Auftrag formulieren“
+- „Ist das konsistent mit MQTT_TOPICS / REST / WS?“
+- „Welche Dateien muss ich anfassen?“
+- Legacy: „Reports vergleichen“, „META_ANALYSIS“, „Cross-Report“
 
 ---
 
-## 4. Widerspruche
+## 11. Abgrenzung zu anderen Rollen
 
-### Widerspruch 1: {Titel}
-
-| Aspekt | Report A | Report B |
-|--------|----------|----------|
-| Aussage | "{Zitat A}" | "{Zitat B}" |
-| Timestamp | HH:MM:SS | HH:MM:SS |
-| Quelle | Report:Zeile | Report:Zeile |
-
-**Diskrepanz:** {Konkrete Beschreibung}
-
-**Mogliche Erklarung:** {Hypothese - NICHT Losung}
+| Rolle | Meta-Analyst |
+|-------|----------------|
+| `collect-reports` | Sammelt Reports; Meta nutzt sie optional, Fokus ist Code |
+| `verify-plan` | Prüft Pläne gegen Repo; Meta liefert **implementierungsnahe** Aufträge aus Auftrag + Code |
+| `ki-audit` | Stil typischer KI-Fehler; Meta = Architektur/Konsistenz/Handoff |
+| `auto-debugger` | Incident-Artefakte + Gate; Meta ersetzt das nicht |
 
 ---
 
-## 5. Analyse-Lucken
+## 12. Legacy: Report-only Cross-Analyse
 
-| Zeitraum/Bereich | Kein Report | Relevanz |
-|------------------|-------------|----------|
-| 18:40-19:00 | Keine Logs | Mittel - Events verpasst? |
-| Frontend-Debug | Nicht erstellt | Niedrig - kein Frontend-Test |
+Wenn **kein** konkreter Code-Auftrag, sondern **nur** Debug-Reports unter `.claude/reports/current/` ausgewertet werden sollen:
 
----
-
-## 6. Priorisierte Problemliste
-
-| Prio | Problem | Quelle(n) | Typ |
-|------|---------|-----------|-----|
-| [K1] | {Root-Cause Problem} | Report1, Report2 | Kaskade |
-| [K2] | {Folgeproblem} | Report3 | Single-Layer |
-| [W1] | {Warning} | Report4 | Potenzial |
-| ... | ... | ... | ... |
+1. Alle `*.md` dort außer `META_ANALYSIS.md` / `META_DEV_HANDOFF.md` einlesen  
+2. Timeline, Widersprüche, Kaskaden wie in früheren Skill-Versionen  
+3. Ausgabe: `META_ANALYSIS.md` — **Empfehlungen** dürfen jetzt **explizit** „Developer-Pakete“ enthalten (Übergang zum neuen Default), weiterhin **keine** eigenständige Log-Triage ohne Reports  
 
 ---
 
-## 7. Empfehlungen fur Technical Manager
+## 13. Error-Code Quick-Reference (Kurz)
 
-**KEINE Losungen** - nur Empfehlungen zur weiteren Analyse:
-
-- [ ] {Bereich X benotigt tiefere Analyse durch Agent Y}
-- [ ] {Widerspruch Z sollte durch erneutes Testen geklart werden}
-- [ ] {Zeitraum T hat Lucken - Logs manuell prufen}
+ESP32: 1000–4999 · Server: 5000–5699 — Details: `.claude/reference/errors/ERROR_CODES.md`.
 
 ---
 
-## 8. Offene Fragen
-
-| Frage | Relevanz | Empfohlene Klarung |
-|-------|----------|-------------------|
-| {Frage 1} | Hoch | {Methode} |
-| {Frage 2} | Mittel | {Methode} |
-
----
-
-**Ende der Meta-Analyse**
-**Erstellt:** {ISO-Timestamp}
-```
-
----
-
-## 9. Regeln
-
-| # | Regel | Begrundung |
-|---|-------|------------|
-| 1 | KEINE Losungen vorschlagen | TM entscheidet |
-| 2 | JEDE Aussage mit Quelle | Nachvollziehbarkeit |
-| 3 | Timestamps kritisch prufen | Basis fur Kausalitat |
-| 4 | Widerspruche nicht auflosen | Nur dokumentieren |
-| 5 | Vollstandigkeit prufen | Auch fehlende Reports |
-| 6 | Kausalitat nur wenn belegt | Nicht raten |
-| 7 | Root-Causes priorisieren | Dev-Flow Effizienz |
-| 8 | STATUS.md ist optional | Nutze wenn vorhanden |
-| 9 | CONSOLIDATED_REPORT optional | Arbeite direkt mit Einzel-Reports |
-| 10 | Eigenstandig erweitern | Bei Auffälligkeiten weitere Reports einbeziehen |
-| 11 | Report immer nach META_ANALYSIS.md | `.claude/reports/current/META_ANALYSIS.md` |
-
----
-
-## 10. Error-Code Quick-Reference
-
-### ESP32 (1000-4999)
-
-| Range | Kategorie | Beispiele |
-|-------|-----------|-----------|
-| 1000-1009 | GPIO | 1002 GPIO_CONFLICT, 1003 GPIO_INIT_FAILED |
-| 1010-1018 | I2C | 1011 I2C_NOT_FOUND, 1014 I2C_BUS_ERROR, 1015 I2C_BUS_STUCK, 1018 I2C_BUS_RECOVERED |
-| 1020-1029 | OneWire | 1021 ONEWIRE_NO_DEVICES, 1026 ONEWIRE_DEVICE_NOT_FOUND |
-| 1030-1032 | PWM | 1030 PWM_INIT_FAILED, 1031 PWM_CHANNEL_FULL |
-| 1040-1043 | Sensor | 1040 READ_FAILED, 1041 SENSOR_INIT_FAILED, 1043 SENSOR_TIMEOUT |
-| 1050-1053 | Actuator | 1050 ACTUATOR_SET_FAILED, 1051 ACTUATOR_INIT_FAILED |
-| 1060-1063 | DS18B20 | 1060 SENSOR_FAULT (-127°C), 1061 POWER_ON_RESET (85°C), 1063 DISCONNECTED_RUNTIME |
-| 2000-2999 | Service/NVS | 2001 NVS_INIT, 2010 CONFIG_INVALID, 2500-2506 SUBZONE |
-| 3000-3999 | Communication | 3011 MQTT_CONNECT, 3012 MQTT_PUBLISH, 3020 HTTP_INIT |
-| 4000-4999 | Application | 4070-4072 WATCHDOG, 4200-4202 DISCOVERY |
-
-### Server (5000-5699)
-
-| Range | Kategorie | Beispiele |
-|-------|-----------|-----------|
-| 5000-5099 | Config | 5001 ESP_NOT_FOUND, 5007 ESP_OFFLINE |
-| 5100-5199 | MQTT | 5104 CONNECTION_LOST, 5106 BROKER_UNAVAILABLE |
-| 5200-5299 | Validation | 5201 INVALID_ESP_ID, 5205 MISSING_FIELD |
-| 5300-5399 | Database | 5301 QUERY_FAILED, 5304 CONNECTION_FAILED |
-| 5400-5499 | Service | 5402 DEPENDENCY_MISSING, 5403 TIMEOUT |
-| 5500-5599 | Audit | 5501 AUDIT_LOG_FAILED, 5502 RETENTION_CLEANUP_FAILED |
-| 5600-5699 | Sequence | 5610 SEQ_ALREADY_RUNNING, 5640 ACTUATOR_LOCKED, 5642 SAFETY_BLOCKED |
-
----
-
-## 11. Trigger-Keywords
-
-- "Cross-Report-Analyse"
-- "Meta-Analyse erstellen"
-- "Reports vergleichen"
-- "Widerspruche finden"
-- "Problemketten identifizieren"
-- "Kaskaden-Analyse"
-- "Finale Analyse"
-
----
-
-## 12. Abgrenzung zu anderen Agents
-
-| Agent | Aufgabe | Meta-Analyst Verhaltnis |
-|-------|---------|------------------------|
-| esp32-debug | ESP32 Logs analysieren | Vergleicht dessen Report |
-| server-debug | Server Logs analysieren | Vergleicht dessen Report |
-| mqtt-debug | MQTT Traffic analysieren | Vergleicht dessen Report |
-| frontend-debug | Frontend analysieren | Vergleicht dessen Report |
-| collect-reports | Reports konsolidieren | Liest CONSOLIDATED_REPORT |
-| system-control | Session-Briefing | Liest SESSION_BRIEFING |
-
-**Meta-Analyst ist der EINZIGE Agent der Reports miteinander vergleicht.**
-
----
-
-*Cross-Report-Analyse fur Technical Manager. Keine Losungen - nur prazise Problemdokumentation.*
+*Cross-System Vorbereitung für Developer-Agenten. Evidenz aus dem Repo. Patterns aus den Development-Skills.*

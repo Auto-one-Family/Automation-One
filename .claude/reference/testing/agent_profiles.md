@@ -1,6 +1,6 @@
 # AutomationOne — Agent-Profile
 
-> **Version:** 1.7 | **Stand:** 2026-04-10
+> **Version:** 1.8 | **Stand:** 2026-04-10
 > **Zweck:** SOLL-Definition aller Agents, Skills und Referenzen für agent-manager und System-Übersicht
 > **Genutzt von:** agent-manager (primär), system-control, Technical Manager
 
@@ -18,10 +18,10 @@
 
 ## 1.2 db-inspector
 - **Datei:** `.claude/agents/db-inspector.md`
-- **Rolle:** Datenbank-Inspektion und Cleanup für PostgreSQL/SQLite. Prüft Schema, Migrations, Orphaned Records.
-- **Skills:** Keine explizit referenziert
-- **Referenzen:** SYSTEM_OPERATIONS_REFERENCE.md, ERROR_CODES.md, LOG_LOCATIONS.md
-- **Andere Agenten:** Delegiert an server-debug, mqtt-debug, esp32-debug; bei Code-Änderungen an Entwickler.
+- **Rolle:** Datenbank-Inspektion (read-only SQL), Alembic-Abgleich, Invarianten-Stichproben, MQTT/REST/WS→DB-Korrelation mit Evidence; Reports nach Template.
+- **Skills:** `.claude/skills/db-inspector/SKILL.md` (implizit gleicher Name)
+- **Referenzen:** `.claude/reference/db-inspector/` (VERTRAG, REPORT_TEMPLATE, MODEL_TABLE_MATRIX, MQTT_DB_KORRELATION, SICHERHEITSREVIEW), SYSTEM_OPERATIONS_REFERENCE.md, ERROR_CODES.md, LOG_LOCATIONS.md
+- **Andere Agenten:** Liefert Befunde + Schichten-Map für server-debug, mqtt-debug, esp32-debug, frontend-debug; Produktcode nur Dev-Agenten.
 
 ## 1.3 esp32-dev
 - **Datei:** `.claude/agents/esp32-dev.md`
@@ -55,12 +55,12 @@
 
 ## 1.7 meta-analyst
 - **Datei:** `.claude/agents/meta-analyst.md`
-- **Rolle:** Cross-Report-Analyse. Vergleicht alle Reports, findet Widersprüche und Kausalität. Schreibt eigene Reports (Write-Tool).
-- **Model:** haiku (Kosten-Optimierung, reine Textanalyse)
-- **Tools:** Read, Write, Grep, Glob (KEIN Bash — liest nur Reports, führt keine Befehle aus)
-- **Skills:** meta-analyst (implizit)
-- **Referenzen:** STATUS.md, Reports in `.claude/reports/current/`, CONSOLIDATED_REPORT.md
-- **Andere Agenten:** esp32-debug, server-debug, mqtt-debug, collect-reports
+- **Rolle:** Cross-System **Code-first**: Auftrag verstehen, Repo evidenzbasiert prüfen (ESP/MQTT/Server/Frontend), Pattern-Konsistenz, **konkrete Auftragspakete** für `esp32-dev`, `server-dev`, `frontend-dev`, `mqtt-dev`. Optional Legacy: nur Debug-Reports korrelieren → `META_ANALYSIS.md`.
+- **Model:** sonnet (Querschnittslesung + präzise Handoffs)
+- **Tools:** Read, Write, Grep, Glob (kein Produktcode-Edit; Write für Handoff-/Meta-Reports)
+- **Skills:** meta-analyst (implizit) + inhaltlich die vier `*-development` Skills / `mqtt-development` als Konventions-SSOT
+- **Referenzen:** `.claude/skills/{esp32,server,frontend,mqtt}-development/SKILL.md`, `.claude/reference/api/`, `ERROR_CODES.md`, `COMMUNICATION_FLOWS.md`; optional Reports unter `.claude/reports/current/`
+- **Andere Agenten:** Liefert Eingaben an `*-dev`; Log-Triage bleibt bei `*-debug`; Incidents bei `auto-debugger`
 
 ## 1.8 mqtt-dev
 - **Datei:** `.claude/agents/mqtt-dev.md`
@@ -153,7 +153,7 @@
 | frontend-development | Frontend-Entwicklung, Vue 3, Pinia, Tailwind | frontend-dev |
 | git-commit | Git-Changes analysieren, Commit-Plan | Robin |
 | git-health | Git-/Repo-Analyse | Robin |
-| meta-analyst | Cross-Report-Analyse, Korrelation | meta-analyst |
+| meta-analyst | Cross-System Code-Analyse, Dev-Handoff, optional Report-Korrelation | meta-analyst |
 | mqtt-debug | MQTT-Debug, Broker, Circuit Breaker | mqtt-debug |
 | mqtt-development | MQTT-Implementierung (Server + ESP32) | mqtt-dev |
 | server-debug | Server-Log-Analyse, Handler, Error-Codes | server-debug |

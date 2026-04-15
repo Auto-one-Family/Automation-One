@@ -133,7 +133,7 @@ Für Briefing und Strategie-Empfehlungen kennst du alle Agenten:
 | server-debug | Server-Log | Handler, Error 5000–5699 | god_kaiser.log analysieren |
 | mqtt-debug | MQTT-Traffic | Topic-Sequenzen, Timing | mqtt_traffic.log analysieren |
 | frontend-debug | Frontend Build/Runtime | Vite, WebSocket, Pinia | Build-Error, Frontend-Probleme |
-| meta-analyst | Cross-Report | Widersprüche, Kausalität | NACH allen Debug-Agents |
+| meta-analyst | Cross-System / Handoff | Code-Evidenz, Dev-Aufträge; Report-Legacy nach Debug-Agents |
 | esp32-dev, server-dev, mqtt-dev, frontend-dev | Code-Implementierung | Pattern-konform implementieren | Code-Änderungen nötig |
 
 ---
