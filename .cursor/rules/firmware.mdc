@@ -1,10 +1,29 @@
 ---
-description: ESP32 C++ Firmware Review Rules — Safety-Critical (El Trabajante)
-globs: ["El Trabajante/**/*.cpp", "El Trabajante/**/*.h", "El Trabajante/**/*.ino"]
+description: "ESP32 C++ Firmware — Safety-Critical (El Trabajante)"
+globs: "El Trabajante/**/*.cpp,El Trabajante/**/*.h,El Trabajante/**/*.ino"
 alwaysApply: true
 ---
 
 # El Trabajante — Firmware Review Rules (Safety-Critical)
+
+## Architektur-Constraint: Server-Centric (UNVERAENDERLICH)
+
+```
+ESP32 = Rohdaten senden + Befehle empfangen
+ESP32 != Business-Logic, Datenverarbeitung, Entscheidungen
+```
+
+- NIEMALS Sensor-Kalibrierung auf ESP32 (nur RAW-Werte)
+- NIEMALS Logik-Auswertung auf ESP32
+- NIEMALS State-Management ueber Reboots (ausser NVS Config)
+
+## Memory-Constraints
+
+| Resource | Limit | Regel |
+|----------|-------|-------|
+| Heap | ~160KB | Keine dynamischen Allokationen in Loops |
+| Stack | 8KB/Task | Keine grossen lokalen Arrays, keine Rekursion |
+| Flash | ~1.5MB Code | PROGMEM fuer konstante Strings |
 
 ## Blocking & Timing
 - KEIN `delay()` in der Haupt-Loop — blockiert MQTT-Client und Watchdog
@@ -17,11 +36,35 @@ alwaysApply: true
 - JSON-Parsing mit `JsonDocument` mit definierter Kapazitaet (ArduinoJson)
 - Heap-Allokationen in ISRs sind verboten
 - Task-Stack-Groessen explizit definieren (nicht FreeRTOS Default)
+- RAII mit `std::unique_ptr` — kein raw `new`/`delete`
+
+## C++ Konventionen
+- Klassen: PascalCase (`SensorManager`, `ActuatorDriver`)
+- Methoden: camelCase (`begin()`, `getValue()`, `handleMessage()`)
+- Member-Variablen: snake_case mit `_` Suffix (`sensor_count_`, `is_initialized_`)
+- Konstanten: UPPER_SNAKE_CASE (`MAX_SENSORS`, `DEFAULT_TIMEOUT`)
+
+## Include-Reihenfolge
+
+```cpp
+// 1. Zugehoeriger Header
+#include "sensor_manager.h"
+// 2. C/C++ Standard
+#include <Arduino.h>
+#include <memory>
+// 3. Externe Libraries
+#include <ArduinoJson.h>
+// 4. Projekt-Header (alphabetisch)
+#include "drivers/gpio_manager.h"
+#include "utils/logger.h"
+```
 
 ## Hardware-Abstraktion
 - Alle GPIO-Pins ueber GPIOManager (`drivers/gpio_manager.h`) registrieren — kein direktes `pinMode`/`digitalWrite`
 - Hardware-Zugriff NUR ueber HAL-Interface (`drivers/hal/igpio_hal.h`) fuer Testbarkeit
 - Mock-Implementation unter `test/mocks/mock_gpio_hal.h` bei Tests verwenden
+- Pin-Reservation IMMER zuerst: `gpioManager.isPinAvailable(gpio)` → `requestPin()`
+- Safe-Mode MUSS als ERSTES in `setup()` stehen: `gpioManager.initializeAllPinsToSafeMode()`
 
 ## MQTT
 - Topics ueber TopicBuilder (`utils/topic_builder.h`) konstruieren — kein manueller String-Bau
@@ -38,9 +81,29 @@ alwaysApply: true
 - WiFi-Reconnect mit Exponential Backoff
 
 ## Error-Codes
-- Firmware-Bereich 1000-4999 einhalten (HARDWARE 1000-1999, SERVICE 2000-2999, COMMUNICATION 3000-3999, APPLICATION 4000-4999)
+- Firmware-Bereich 1000-4999 (HARDWARE 1000-1999, SERVICE 2000-2999, COMMUNICATION 3000-3999, APPLICATION 4000-4999)
 - Neue Codes in `models/error_codes.h` UND `.claude/reference/errors/ERROR_CODES.md` dokumentieren
+- Logging: `LOG_INFO`, `LOG_WARNING`, `LOG_ERROR` Macros verwenden
 
-## Architektur
-- ESP32 = dumme Agenten — KEINE Logik auf Firmware, nur Datensammlung und Aktor-Ausfuehrung
-- Server-Zentrisch: Alle Entscheidungen trifft El Servador
+## Singleton-Pattern (Manager-Klassen)
+
+```cpp
+class XManager {
+public:
+    static XManager& getInstance() {
+        static XManager instance;
+        return instance;
+    }
+    XManager(const XManager&) = delete;
+    XManager& operator=(const XManager&) = delete;
+};
+```
+
+## Verbotene Aktionen
+- Business-Logic auf ESP32 (Server-Centric Architektur)
+- `new`/`delete` (Memory-Leaks, Fragmentation)
+- Blocking Calls in Loop (Watchdog Timeout)
+- Hardcoded MQTT Topics (TopicBuilder verwenden)
+- Magic Numbers (Konstanten definieren)
+- Rekursion (Stack Overflow Risk)
+- Arduino `String` Klasse (Heap-Fragmentierung)

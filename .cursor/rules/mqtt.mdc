@@ -1,0 +1,43 @@
+---
+description: "MQTT Cross-Layer Rules — Server und Firmware gemeinsam"
+globs: "El Servador/**/mqtt/**,El Trabajante/**/mqtt*,El Trabajante/**/topic*"
+alwaysApply: false
+---
+
+# MQTT Cross-Layer Rules
+
+## Topic-Schema
+- Schema: `kaiser/{kaiser_id}/esp/{esp_id}/...`
+- Konstruktion IMMER ueber TopicBuilder (Server: `mqtt.topics.TopicBuilder`, Firmware: `utils/topic_builder.h`)
+- Kein manueller String-Bau fuer Topics
+- Keine Wildcard-Publishes
+
+## QoS-Level
+
+| Message-Typ | QoS | Grund |
+|-------------|-----|-------|
+| Heartbeat | 0 | Regelmaessig, Verlust OK |
+| Sensor Data | 1 | Wichtig, aber nicht kritisch |
+| Actuator Command | 1 | Muss ankommen |
+| Emergency Stop | 1 | MUSS ankommen |
+
+## Cross-Layer Konsistenz
+- Server-Handler und ESP32-Publisher muessen dasselbe Topic-Schema verwenden
+- Jede neue MQTT-Topic-Subscription im Server braucht einen Handler in `mqtt/handlers/`
+- Referenz: `.claude/reference/api/MQTT_TOPICS.md`
+
+## Handler-Anforderungen (Server-Seite)
+- MUESSEN von `base_handler.py` erben
+- MUESSEN ALLE Exceptions fangen und loggen
+- Duerfen nie still fehlschlagen
+- Brauchen Tests fuer: valide Message, invalide Message, fehlende Felder
+
+## Firmware-Seite
+- Topics ueber `TopicBuilder::buildSensorDataTopic()` etc.
+- Sensor-Daten immer mit `raw_mode: true`
+- JSON-Payload mit definierter JsonDocument-Kapazitaet
+
+## Circuit Breaker
+- Darf nicht umgangen werden
+- Offline-Buffer fuer kritische Messages
+- LWT (Last Will and Testament) fuer Disconnect-Erkennung

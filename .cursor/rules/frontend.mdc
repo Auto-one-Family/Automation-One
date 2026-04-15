@@ -1,6 +1,6 @@
 ---
-description: Vue 3 TypeScript Frontend Review Rules (El Frontend)
-globs: ["El Frontend/**/*.vue", "El Frontend/**/*.ts", "El Frontend/**/*.tsx"]
+description: "Vue 3 TypeScript Frontend Review Rules (El Frontend)"
+globs: "El Frontend/**/*.vue,El Frontend/**/*.ts,El Frontend/**/*.tsx"
 alwaysApply: true
 ---
 
@@ -15,14 +15,40 @@ alwaysApply: true
 ## State Management
 - Pinia Stores fuer geteilten State (`src/stores/`, `src/shared/stores/`)
 - Kein lokaler reaktiver State fuer Daten die komponentenuebergreifend gebraucht werden
+- Store-Struktur: Setup Syntax mit `defineStore('name', () => { ... })`
+- Data Flow: API (src/api/) → Store (src/stores/) → Component (src/components/)
 
 ## WebSocket & Cleanup
 - WebSocket-Events MUESSEN in `onUnmounted()` aufgeraeumt werden — Memory Leaks!
 - Event-Listener und Subscriptions in `onUnmounted()` entfernen
+- Pattern: `unsubscribers.push(on('event', handler))` → cleanup in `onUnmounted`
 
 ## API-Aufrufe
 - Gehoeren in `src/api/` Clients (18 Module: esp, sensors, actuators, zones, auth, etc.)
 - NICHT direkt in Komponenten — immer ueber API-Client-Layer
+- Im Store aufrufen, nicht im Component
+
+## TypeScript-Konventionen
+- Komponenten: PascalCase (`ESPCard.vue`, `SensorSatellite.vue`)
+- Composables: camelCase mit `use` Prefix (`useWebSocket`, `useToast`)
+- Stores: camelCase mit `use` Prefix (`useEspStore`, `useAuthStore`)
+- Types/Interfaces: PascalCase (`ESPDevice`, `SensorConfig`)
+- Konstanten: UPPER_SNAKE_CASE (`MAX_SENSORS`, `API_TIMEOUT`)
+
+## Import-Reihenfolge
+
+```typescript
+// 1. Vue Core
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+// 2. Vue Router / Pinia
+import { useRoute } from 'vue-router'
+import { useEspStore } from '@/stores/esp'
+// 3. Externe Libraries
+import { format } from 'date-fns'
+// 4. Lokale Imports (@/ Alias)
+import { espApi } from '@/api/esp'
+import type { ESPDevice } from '@/types'
+```
 
 ## Design-System (Pflicht)
 - Primitives aus `src/shared/design/primitives/`: BaseButton, BaseCard, BaseModal, BaseToggle, BaseInput, BaseSelect, BaseBadge, BaseSkeleton, BaseSpinner
@@ -35,6 +61,9 @@ alwaysApply: true
 - Dark Theme ONLY — keine Light-Mode Styles
 - Design Tokens aus `src/styles/tokens.css` verwenden: `var(--color-*)`, `var(--space-*)`, `var(--radius-*)`
 - Farben NIEMALS als hex hardcoden
+- Tailwind Config Referenz: dark-50..950, iridescent-1..4, accent, success, warning, danger, info
+- Glass: `.glass-panel`, `.glass-overlay`, `.iridescent-border` aus glass.css
+- Typography: `var(--text-xs|sm|base|lg|xl|2xl|display)`, Font: Outfit
 
 ## Icons & Imports
 - Icons ausschliesslich aus `lucide-vue-next` — KEIN neues Icon-Paket
@@ -46,3 +75,28 @@ alwaysApply: true
 
 ## Accessibility
 - Alle interaktiven Elemente brauchen `aria-label` oder sichtbaren Text
+
+## Error-Handling
+- Try-Catch in allen async Functions
+- Error-State in Components: `<ErrorState v-else-if="error" :message="error" @retry="load" />`
+- Toast fuer User-Feedback: `toast.error('Laden fehlgeschlagen')`
+
+## Figma MCP Integration
+- Figma-Output (React + Tailwind) in AutomationOne Konventionen uebersetzen
+- React → Vue 3 (Script Setup + Composition API)
+- Farben NIEMALS hex hardcoden → `var(--color-*)` aus tokens.css
+- Spacing: 4px Grid `var(--space-1)` bis `var(--space-12)`
+- Assets nach `El Frontend/public/assets/` speichern
+
+## Testing
+- Vitest fuer Unit-Tests
+- Testbenennung: `describe('<Modul>')` + `it('should <verhalten>')`
+- Dateien: `<Modul>.test.ts` / `<Modul>.spec.ts`
+
+## Verbotene Aktionen
+- Options API (Composition API ist Standard)
+- Relative Imports zu src/ (@/ Alias verwenden)
+- API-Calls direkt in Components (immer ueber Stores)
+- Fehlende Cleanup in onUnmounted (Memory Leaks)
+- Inline Styles (Tailwind CSS verwenden)
+- `any` Type (explizite Types definieren)

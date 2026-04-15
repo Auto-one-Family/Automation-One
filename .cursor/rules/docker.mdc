@@ -1,0 +1,47 @@
+---
+description: "Docker und Infrastructure Rules fuer AutomationOne"
+globs: "docker-compose*,Makefile,scripts/docker/*,Dockerfile*,docker/**"
+alwaysApply: false
+---
+
+# Docker Rules
+
+## Verification Requirements
+- Alle Aenderungen an Docker-Dateien mit `make status` und `make health` verifizieren
+- Test Compose overrides (dev, test) duerfen Base-Konfiguration nicht brechen
+
+## Security
+- Keine hardcoded Secrets in `docker-compose.yml` — `.env` oder Docker Secrets verwenden
+- Referenz: `.claude/reference/security/PRODUCTION_CHECKLIST.md`
+
+## Service Requirements
+Jeder neue Service braucht:
+- Healthcheck: `test: ["CMD", "curl", "-f", "http://localhost:PORT/health"]`
+- Restart Policy: `restart: unless-stopped`
+- Defined Network: `networks: - automationone-network`
+
+## Naming Conventions
+- Named Volumes: `automationone-{service}-{purpose}`
+- Bind-Mount Logs: `./logs/{service}/`
+- Containers: `automationone-{service}`
+- Networks: `automationone-{purpose}`
+
+## Port Mapping
+
+| Service | Host | Container | Note |
+|---------|------|-----------|------|
+| Server | 8000 | 8000 | FastAPI |
+| PostgreSQL | 5432 | 5432 | Database |
+| MQTT | 1883 | 1883 | Mosquitto |
+| Frontend | 5173 | 5173 | Vite Dev |
+| NTP | 123 | 123 | UDP — Chrony |
+
+## Loki-Debug (Agent-Nutzung)
+
+| Befehl | Was | Wann |
+|--------|-----|------|
+| `make loki-errors` | Fehler der letzten 5 Min | Erster Debug-Schritt |
+| `make loki-trace CID=<id>` | Correlation-ID verfolgen | Datenfluss-Analyse |
+| `make loki-esp ESP=<id>` | Alle Logs eines ESPs | ESP-spezifisches Debug |
+
+Voraussetzung: `make monitor-up` (Loki auf localhost:3100)

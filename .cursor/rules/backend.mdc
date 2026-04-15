@@ -1,34 +1,78 @@
 ---
-description: Python/FastAPI Backend Review Rules for El Servador
-globs: ["El Servador/**/*.py", "tests/**/*.py"]
+description: "Python/FastAPI Backend Review Rules for El Servador"
+globs: "El Servador/**/*.py,tests/**/*.py"
 alwaysApply: true
 ---
 
 # El Servador — Backend Review Rules
 
+## Architektur-Prinzipien
+
+### Server = Intelligenz
+
+```
+Server = Validierung + Transformation + Business-Logic + Persistenz
+ESP32 = Dumme Agenten (RAW-Daten rein, Commands raus)
+```
+
+### 3-Schichten-Architektur
+
+```
+API Layer (api/v1/)     → Request/Response, Validation, Auth
+Service Layer (services/) → Business Logic, Orchestration
+Data Layer (db/, mqtt/)  → Persistence, Communication
+```
+
+- API-Endpoints rufen Services auf
+- Services rufen Repositories auf
+- Repositories machen DB-Queries
+- **NIEMALS** DB-Queries direkt in API-Endpoints
+
 ## Async & I/O
 - Endpoints MUESSEN `async def` verwenden fuer I/O-Operationen (DB, MQTT, HTTP)
 - DB-Sessions via `async with get_session() as session` — kein manuelles close
 - Kein `time.sleep()` in async Code — `asyncio.sleep()` verwenden
+- ORM-Relationships mit `selectinload()` laden — kein lazy load in async Context (MissingGreenlet)
 
 ## MQTT-Handler (`src/mqtt/handlers/`)
 - MUESSEN von `base_handler.py` erben
 - MUESSEN ALLE Exceptions fangen und als Error-Event loggen
 - Duerfen nie still fehlschlagen — jeder Fehler muss geloggt werden
 - Brauchen Tests fuer: valide Message, invalide Message, fehlende Felder
+- Topics ueber TopicBuilder konstruieren — kein manueller String-Bau
 
 ## Pydantic v2
 - `model_config = ConfigDict(from_attributes=True)` statt deprecated `class Config`
 - `model_validate()` statt deprecated `from_orm()`
 - Schemas fuer ALLE Request/Response-Bodies — kein `dict` als Return-Type
 
+## Python-Konventionen
+- Klassen: PascalCase (`SensorService`, `ESPRepository`)
+- Funktionen/Methoden: snake_case (`get_sensor_data()`, `handle_message()`)
+- Konstanten: UPPER_SNAKE_CASE (`MAX_SENSORS`, `DEFAULT_TIMEOUT`)
+- Type Hints IMMER — `async def get_sensor(sensor_id: uuid.UUID, db: AsyncSession) -> Optional[SensorConfig]`
+
+## Import-Reihenfolge
+
+```python
+# 1. Standard Library
+import asyncio
+from datetime import datetime, timezone
+# 2. Third-party
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+# 3. Local imports (relative)
+from ..db.repositories import SensorRepository
+```
+
 ## Sensor-Libraries
 - MUESSEN `process()` und `calibrate()` als Interface-Methoden implementieren
 - Sensor-Werte ausserhalb Plausibilitaetsgrenzen: `quality: "error"` setzen
 
 ## Error-Codes
-- Server-Bereich 5000-5699 einhalten (CONFIG 5000-5099, MQTT 5100-5199, VALIDATION 5200-5299, DATABASE 5300-5399, SERVICE 5400-5499)
+- Server-Bereich 5000-5699 (CONFIG 5000-5099, MQTT 5100-5199, VALIDATION 5200-5299, DATABASE 5300-5399, SERVICE 5400-5499, INTERNAL 5600-5699)
 - Neue Codes in `.claude/reference/errors/ERROR_CODES.md` dokumentieren
+- Logging via `get_logger(__name__)` — `logger.error("msg: %s", err, exc_info=True)`
 
 ## Safety-Critical
 - Aenderungen an `safety_service.py`, `logic_engine.py`, `actuator_service.py` sind safety-relevant
@@ -38,12 +82,24 @@ alwaysApply: true
 ## Security
 - Kein String-Formatting/f-Strings fuer SQL-Queries — parametrisiert verwenden
 - Alle Endpoints ausser Health-Checks brauchen JWT-Auth
+- Auth-Dependencies: `get_current_active_user`, `get_current_operator_user`, `get_current_admin_user`
 - Keine hardcoded Secrets
 
 ## Deprecation
-- `datetime.utcnow()` -> `datetime.now(UTC)`
+- `datetime.utcnow()` → `datetime.now(timezone.utc)`
+- `DateTime` in Models IMMER mit `timezone=True`
 - `psutil` Import mit `try/except ImportError` schuetzen
 
 ## Testing
 - Jeder neue Endpoint braucht mindestens einen Unit-Test in `tests/unit/` oder `tests/integration/`
-- pytest-Fixtures muessen aufgeraeumt werden (kein DB-State-Leak)
+- pytest mit fixtures aus conftest.py, async Tests mit pytest-asyncio
+- Fixtures muessen aufgeraeumt werden (kein DB-State-Leak)
+- Testbenennung: `test_<was>_<szenario>` (z.B. `test_sensor_data_validates_range`)
+
+## Verbotene Aktionen
+- DB-Queries in API-Endpoints (Repository-Pattern verletzt)
+- Sync I/O in async Functions (blockiert Event Loop)
+- Hardcoded MQTT-Topics (TopicBuilder verwenden)
+- Actuator ohne Safety-Check
+- Magic Numbers (Konstanten in config.py)
+- `datetime.now()` ohne timezone

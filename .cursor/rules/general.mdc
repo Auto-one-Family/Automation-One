@@ -1,0 +1,42 @@
+---
+description: "Allgemeine Entwicklungsregeln fuer AutomationOne — gelten immer"
+globs: "**"
+alwaysApply: true
+---
+
+# Allgemeine Entwicklungsregeln
+
+## Verbotene Aktionen (immer beachten)
+- NIE bestehende Dateien loeschen ohne explizite Anweisung
+- NIE die Git-History umschreiben (kein force-push, kein rebase auf main)
+- NIE Umgebungsvariablen oder Secrets in versionierte Dateien schreiben
+- NIE automatisch deployen — nur auf explizite Anweisung
+
+## Code-Stil-Grundregeln
+- Python: ruff als Formatter und Linter, Type Hints Pflicht
+- TypeScript: strict mode, keine any-Casts ohne Begruendung
+- Vue: Composition API mit `<script setup>`, Props typisiert
+- C++ (ESP32): PlatformIO, keine Arduino-IDE-Eigenheiten
+- Commit-Messages: Conventional Commits (feat/fix/chore/refactor/docs/test)
+
+## Aenderungs-Prinzip
+- Eine logische Aenderung pro Commit
+- Tests muessen nach jeder Aenderung gruen sein
+- Build-Verifikation: `pio run` (ESP32), `pytest` (Server), `npm run build` (Frontend)
+- Bei Unsicherheit: nachfragen statt annehmen
+
+## Safety-Critical Regeln
+- Alle Aktor-Befehle MUESSEN durch Safety-Check laufen — direktes Schalten ohne Check ist ein Bug
+- Emergency-Stop-Logik Aenderungen sind IMMER CRITICAL
+- Circuit-Breaker-Logik darf nie umgangen werden (DB, MQTT, externe APIs)
+
+## Security
+- Keine Secrets oder Credentials hardcoded (JWT_SECRET_KEY, DB-Passwoerter, API-Keys)
+- Alle API-Endpoints ausser Health-Checks brauchen JWT-Auth
+- SQL-Queries parametrisiert — kein String-Formatting/f-Strings
+- MQTT-Topics muessen dem Schema `kaiser/{kaiser_id}/esp/{esp_id}/...` folgen
+
+## Server-Zentrisch (Architektur-Prinzip)
+- Logik NIEMALS auf ESP32 implementieren
+- ESP32 = dumme Agenten: Rohdaten senden + Befehle empfangen
+- Alle Entscheidungen trifft El Servador
