@@ -98,6 +98,46 @@ class TestListDevices:
         data = response.json()
         assert all(d["zone_id"] == "test-zone" for d in data["data"])
 
+    @pytest.mark.asyncio
+    async def test_list_devices_runtime_vs_include_deleted(
+        self, auth_headers: dict, db_session: AsyncSession
+    ):
+        """runtime_only hides deleted rows; historical mode can include them."""
+        deleted_esp = ESPDevice(
+            device_id="ESP_DEADBEAF",
+            name="Deleted Runtime Test",
+            hardware_type="ESP32_WROOM",
+            status="deleted",
+            device_metadata={},
+        )
+        db_session.add(deleted_esp)
+        await db_session.flush()
+        from datetime import datetime, timezone
+
+        deleted_esp.deleted_at = datetime.now(timezone.utc)
+        deleted_esp.deleted_by = "pytest"
+        await db_session.commit()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            runtime_response = await client.get(
+                "/api/v1/esp/devices",
+                params={"include_deleted": True, "runtime_only": True},
+                headers=auth_headers,
+            )
+            historical_response = await client.get(
+                "/api/v1/esp/devices",
+                params={"include_deleted": True, "runtime_only": False},
+                headers=auth_headers,
+            )
+
+        assert runtime_response.status_code == 200
+        runtime_ids = {entry["device_id"] for entry in runtime_response.json()["data"]}
+        assert "ESP_DEADBEAF" not in runtime_ids
+
+        assert historical_response.status_code == 200
+        historical_ids = {entry["device_id"] for entry in historical_response.json()["data"]}
+        assert "ESP_DEADBEAF" in historical_ids
+
 
 class TestGetDevice:
     """Test getting single device."""

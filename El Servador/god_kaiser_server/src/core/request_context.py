@@ -17,6 +17,9 @@ import uuid
 _request_id_ctx: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "request_id", default=None
 )
+_correlation_id_ctx: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "correlation_id", default=None
+)
 
 
 def get_request_id() -> Optional[str]:
@@ -74,6 +77,33 @@ def build_emergency_actuator_correlation_id(
         Single string passed to ``Publisher.publish_actuator_command(..., correlation_id=…)``.
     """
     return f"{incident_correlation_id}:{esp_id}:{gpio}"
+
+
+def get_correlation_id() -> Optional[str]:
+    """Return the current correlation_id (or None)."""
+    return _correlation_id_ctx.get()
+
+
+def set_correlation_id(correlation_id: str) -> contextvars.Token:
+    """Set the correlation_id for the current context.
+
+    Returns token for proper cleanup via clear_correlation_id(token).
+    Backwards-compatible: callers that ignore the return value still work.
+    """
+    return _correlation_id_ctx.set(correlation_id)
+
+
+def clear_correlation_id(token: Optional[contextvars.Token] = None) -> None:
+    """Clear the correlation_id from context.
+
+    Args:
+        token: If provided, resets ContextVar to the state before set_correlation_id().
+               If None, sets the value to None (backwards-compatible fallback).
+    """
+    if token is not None:
+        _correlation_id_ctx.reset(token)
+    else:
+        _correlation_id_ctx.set(None)
 
 
 def clear_request_id(token: Optional[contextvars.Token] = None) -> None:

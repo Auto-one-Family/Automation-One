@@ -111,7 +111,7 @@ class CalibrationSession(Base, TimestampMixin):
         String(30),
         nullable=False,
         default="linear_2point",
-        doc="Calibration method (linear_2point, moisture_2point, offset)",
+        doc="Calibration method (linear_2point, linear, moisture_2point, offset, ph_2point, ec_1point, ec_2point)",
     )
 
     expected_points: Mapped[int] = mapped_column(
@@ -126,7 +126,10 @@ class CalibrationSession(Base, TimestampMixin):
         JSONBCompat,
         nullable=True,
         default=None,
-        doc="Array of {raw, reference, quality, timestamp, intent_id} objects",
+        doc=(
+            "Array of {raw, reference, quality, timestamp, intent_id, point_role} objects. "
+            "point_role: moisture(dry|wet), pH(buffer_high|buffer_low), EC(reference|air), linear(dry|wet), offset(dry|wet)"
+        ),
     )
 
     calibration_result: Mapped[Optional[dict]] = mapped_column(

@@ -266,12 +266,20 @@ class CalibrationService:
         """
         Add a calibration measurement point to the session.
 
+        point_role values:
+        - Moisture calibration: "dry", "wet"
+        - pH calibration: "buffer_high", "buffer_low"
+        - EC calibration: "reference", "air"
+
         Raises:
             CalibrationError: If session is terminal or already has enough points
         """
         normalized_role = point_role.strip().lower()
-        if normalized_role not in {"dry", "wet"}:
-            raise CalibrationError("point_role must be one of: dry, wet", "VALIDATION_ERROR")
+        valid_roles = {"dry", "wet", "buffer_high", "buffer_low", "reference", "air"}
+        if normalized_role not in valid_roles:
+            raise CalibrationError(
+                f"point_role must be one of: {', '.join(sorted(valid_roles))}", "VALIDATION_ERROR"
+            )
 
         role_key = (session_id, normalized_role)
         if overwrite:
@@ -539,12 +547,39 @@ class CalibrationService:
         points_data = cal_session.calibration_points or {"points": []}
         points = points_data.get("points", [])
 
+        # Validate points based on method
         roles = {str(point.get("point_role", "")).lower() for point in points if isinstance(point, dict)}
-        if "dry" not in roles or "wet" not in roles:
-            raise CalibrationError(
-                "Finalize requires both 'dry' and 'wet' points",
-                "INSUFFICIENT_POINTS",
-            )
+
+        if cal_session.method == "moisture_2point":
+            if "dry" not in roles or "wet" not in roles:
+                raise CalibrationError(
+                    "Finalize requires both 'dry' and 'wet' points for moisture_2point",
+                    "INSUFFICIENT_POINTS",
+                )
+        elif cal_session.method == "ph_2point":
+            if "buffer_high" not in roles or "buffer_low" not in roles:
+                raise CalibrationError(
+                    "Finalize requires both 'buffer_high' and 'buffer_low' points for ph_2point",
+                    "INSUFFICIENT_POINTS",
+                )
+        elif cal_session.method == "ec_1point":
+            if "reference" not in roles:
+                raise CalibrationError(
+                    "Finalize requires 'reference' point for ec_1point",
+                    "INSUFFICIENT_POINTS",
+                )
+        elif cal_session.method == "ec_2point":
+            if "air" not in roles or "reference" not in roles:
+                raise CalibrationError(
+                    "Finalize requires both 'air' and 'reference' points for ec_2point",
+                    "INSUFFICIENT_POINTS",
+                )
+        elif cal_session.method in ("linear_2point", "linear"):
+            if "dry" not in roles or "wet" not in roles:
+                raise CalibrationError(
+                    "Finalize requires both 'dry' and 'wet' points",
+                    "INSUFFICIENT_POINTS",
+                )
 
         # Compute calibration based on method
         try:
@@ -772,6 +807,12 @@ class CalibrationService:
             return CalibrationService._compute_linear_2point(sensor_type, points)
         elif method == "offset":
             return CalibrationService._compute_offset(sensor_type, points)
+        elif method == "ph_2point":
+            return CalibrationService._compute_ph_2point(points)
+        elif method == "ec_1point":
+            return CalibrationService._compute_ec_1point(points)
+        elif method == "ec_2point":
+            return CalibrationService._compute_ec_2point(points)
         else:
             raise ValueError(f"Unknown calibration method: {method}")
 
@@ -841,5 +882,179 @@ class CalibrationService:
             "point1_raw": raw,
             "point1_ref": ref,
             "sensor_type": sensor_type,
+            "calibrated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @staticmethod
+    def _compute_ph_2point(points: list[dict]) -> dict:
+        """
+        pH 2-point calibration using Nernst equation.
+
+        Formula: pH = slope * raw_mV + offset
+
+        Slope should be negative (around -59.16 mV/pH at 25°C).
+        Validation: slope_deviation from ideal must be within ±15%.
+
+        Raises:
+            ValueError: If slope is not negative or deviates too much from ideal
+        """
+        if len(points) < 2:
+            raise ValueError("Need at least 2 points for pH 2-point calibration")
+
+        # Find buffer_high and buffer_low points
+        high_point = None
+        low_point = None
+
+        for p in points:
+            role = str(p.get("point_role", "")).lower()
+            if role == "buffer_high":
+                high_point = p
+            elif role == "buffer_low":
+                low_point = p
+
+        if not high_point or not low_point:
+            raise ValueError("pH 2-point requires 'buffer_high' and 'buffer_low' points")
+
+        raw_high = float(high_point["raw"])
+        ref_high = float(high_point["reference"])
+        raw_low = float(low_point["raw"])
+        ref_low = float(low_point["reference"])
+
+        if abs(raw_high - raw_low) < 1e-6:
+            raise ValueError("Raw values too close — cannot compute slope")
+
+        # Linear regression: pH = slope * mV + offset
+        slope = (ref_high - ref_low) / (raw_high - raw_low)
+        offset = ref_high - slope * raw_high
+
+        # Validation: slope must be negative (Nernst equation)
+        if slope >= 0:
+            raise ValueError(f"pH slope must be negative (got {slope}). Check electrode polarity.")
+
+        # Ideal slope at 25°C: Nernst predicts 59.16 mV/pH
+        # Our slope is in pH/mV, so ideal is 1/59.16 ≈ -0.01689 pH/mV (negative because inverted)
+        # Compute response (mV/pH) from our slope for validation
+        ideal_response_mv_per_ph = 59.16
+        measured_response_mv_per_ph = abs(1.0 / slope) if slope != 0 else 0
+
+        slope_deviation_pct = abs(measured_response_mv_per_ph - ideal_response_mv_per_ph) / ideal_response_mv_per_ph * 100
+
+        if slope_deviation_pct > 15.0:
+            raise ValueError(
+                f"pH response {measured_response_mv_per_ph:.2f} mV/pH deviates {slope_deviation_pct:.1f}% from ideal {ideal_response_mv_per_ph:.2f} "
+                f"(limit ±15%). Electrode may be degraded."
+            )
+
+        return {
+            "type": "ph_2point",
+            "slope": round(slope, 4),
+            "offset": round(offset, 4),
+            "slope_deviation_pct": round(slope_deviation_pct, 2),
+            "point_high_raw": raw_high,
+            "point_high_ref": ref_high,
+            "point_low_raw": raw_low,
+            "point_low_ref": ref_low,
+            "measured_response_mv_per_ph": round(measured_response_mv_per_ph, 2),
+            "ideal_response_mv_per_ph": ideal_response_mv_per_ph,
+            "calibrated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @staticmethod
+    def _compute_ec_1point(points: list[dict]) -> dict:
+        """
+        EC 1-point calibration using cell factor.
+
+        Formula: EC = cell_factor * raw_value
+        cell_factor = reference_value / raw_value
+
+        Validation: cell_factor must be between 0.5 and 2.0
+
+        Raises:
+            ValueError: If cell_factor is out of acceptable range
+        """
+        if len(points) < 1:
+            raise ValueError("Need at least 1 point for EC 1-point calibration")
+
+        # Find reference point
+        ref_point = None
+        for p in points:
+            role = str(p.get("point_role", "")).lower()
+            if role == "reference":
+                ref_point = p
+                break
+
+        if not ref_point:
+            raise ValueError("EC 1-point requires 'reference' point")
+
+        raw = float(ref_point["raw"])
+        reference = float(ref_point["reference"])
+
+        if abs(raw) < 1e-6:
+            raise ValueError("Raw value too close to zero — cannot compute cell factor")
+
+        cell_factor = reference / raw
+
+        # Validation: cell_factor should be reasonable (0.5 to 2.0)
+        if not (0.5 <= cell_factor <= 2.0):
+            raise ValueError(
+                f"EC cell_factor {cell_factor:.3f} out of range [0.5, 2.0]. "
+                f"Check reference solution or probe."
+            )
+
+        return {
+            "type": "ec_1point",
+            "cell_factor": round(cell_factor, 6),
+            "point_raw": raw,
+            "point_reference": reference,
+            "calibrated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @staticmethod
+    def _compute_ec_2point(points: list[dict]) -> dict:
+        """
+        EC 2-point calibration (air + reference).
+
+        Formula: EC = slope * raw + offset
+        Air point (0 mS/cm) provides offset; reference provides slope.
+
+        Raises:
+            ValueError: If points are invalid or too close
+        """
+        if len(points) < 2:
+            raise ValueError("Need at least 2 points for EC 2-point calibration")
+
+        # Find air and reference points
+        air_point = None
+        ref_point = None
+
+        for p in points:
+            role = str(p.get("point_role", "")).lower()
+            if role == "air":
+                air_point = p
+            elif role == "reference":
+                ref_point = p
+
+        if not air_point or not ref_point:
+            raise ValueError("EC 2-point requires 'air' and 'reference' points")
+
+        raw_air = float(air_point["raw"])
+        ref_air = float(air_point["reference"])  # Should be 0
+        raw_ref = float(ref_point["raw"])
+        ref_ref = float(ref_point["reference"])
+
+        if abs(raw_ref - raw_air) < 1e-6:
+            raise ValueError("Raw values too close — cannot compute slope")
+
+        slope = (ref_ref - ref_air) / (raw_ref - raw_air)
+        offset = ref_air - slope * raw_air
+
+        return {
+            "type": "ec_2point",
+            "slope": round(slope, 6),
+            "offset": round(offset, 4),
+            "point_air_raw": raw_air,
+            "point_air_ref": ref_air,
+            "point_reference_raw": raw_ref,
+            "point_reference_ref": ref_ref,
             "calibrated_at": datetime.now(timezone.utc).isoformat(),
         }

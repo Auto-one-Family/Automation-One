@@ -102,6 +102,11 @@ class SensorConfigBase(BaseModel):
         max_length=20,
         description="Physical unit, e.g. °C, %, pH",
     )
+    measurement_role: Optional[str] = Field(
+        None,
+        pattern=r"^(inflow|runoff)$",
+        description="Domain role: 'inflow', 'runoff', or None for unassigned",
+    )
 
     @field_validator("sensor_type")
     @classmethod

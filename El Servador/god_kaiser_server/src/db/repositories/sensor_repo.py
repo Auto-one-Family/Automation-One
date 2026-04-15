@@ -256,6 +256,8 @@ class SensorRepository(BaseRepository[SensorConfig]):
         esp_device_id: Optional[str] = None,
         sensor_type: Optional[str] = None,
         enabled: Optional[bool] = None,
+        runtime_only: bool = True,
+        include_deleted: bool = False,
         offset: int = 0,
         limit: int = 20,
     ) -> tuple[list[tuple[SensorConfig, Optional[str]]], int]:
@@ -271,6 +273,10 @@ class SensorRepository(BaseRepository[SensorConfig]):
             filters.append(func.lower(SensorConfig.sensor_type) == sensor_type.lower())
         if enabled is not None:
             filters.append(SensorConfig.enabled == enabled)
+        if runtime_only:
+            filters.append(ESPDevice.deleted_at.is_(None))
+        elif not include_deleted:
+            filters.append(ESPDevice.deleted_at.is_(None))
 
         count_stmt = (
             select(func.count(SensorConfig.id))

@@ -373,3 +373,163 @@ class TestSensorValidation:
 
         # Should reject duplicate GPIO
         assert response.status_code in [400, 409]
+
+
+class TestMeasurementRole:
+    """Test measurement_role domain contract."""
+
+    @pytest.mark.asyncio
+    async def test_create_sensor_with_measurement_role(
+        self, auth_headers: dict, test_esp: ESPDevice
+    ):
+        """Test creating sensor with measurement_role."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/v1/sensors/{test_esp.device_id}/36",
+                json={
+                    "esp_id": test_esp.device_id,
+                    "gpio": 36,
+                    "sensor_type": "flow",
+                    "name": "Inflow Meter",
+                    "enabled": True,
+                    "interval_ms": 30000,
+                    "processing_mode": "pi_enhanced",
+                    "measurement_role": "inflow",
+                },
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["measurement_role"] == "inflow"
+        assert data["gpio"] == 36
+
+    @pytest.mark.asyncio
+    async def test_create_sensor_with_runoff_role(
+        self, auth_headers: dict, test_esp: ESPDevice
+    ):
+        """Test creating sensor with runoff measurement role."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/v1/sensors/{test_esp.device_id}/37",
+                json={
+                    "esp_id": test_esp.device_id,
+                    "gpio": 37,
+                    "sensor_type": "flow",
+                    "name": "Runoff Meter",
+                    "enabled": True,
+                    "interval_ms": 30000,
+                    "processing_mode": "pi_enhanced",
+                    "measurement_role": "runoff",
+                },
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["measurement_role"] == "runoff"
+        assert data["gpio"] == 37
+
+    @pytest.mark.asyncio
+    async def test_create_sensor_without_measurement_role(
+        self, auth_headers: dict, test_esp: ESPDevice
+    ):
+        """Test creating sensor without measurement_role (defaults to None)."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/v1/sensors/{test_esp.device_id}/38",
+                json={
+                    "esp_id": test_esp.device_id,
+                    "gpio": 38,
+                    "sensor_type": "temperature",
+                    "name": "Ambient Temp",
+                    "enabled": True,
+                    "interval_ms": 30000,
+                    "processing_mode": "pi_enhanced",
+                },
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["measurement_role"] is None
+
+    @pytest.mark.asyncio
+    async def test_update_sensor_measurement_role(
+        self, auth_headers: dict, test_sensor: SensorConfig, test_esp: ESPDevice
+    ):
+        """Test updating sensor with new measurement_role."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/v1/sensors/{test_esp.device_id}/{test_sensor.gpio}",
+                json={
+                    "esp_id": test_esp.device_id,
+                    "gpio": test_sensor.gpio,
+                    "sensor_type": "ph",
+                    "name": "Test pH Sensor",
+                    "enabled": True,
+                    "interval_ms": 30000,
+                    "processing_mode": "pi_enhanced",
+                    "measurement_role": "inflow",
+                },
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["measurement_role"] == "inflow"
+
+    @pytest.mark.asyncio
+    async def test_invalid_measurement_role(
+        self, auth_headers: dict, test_esp: ESPDevice
+    ):
+        """Test that invalid measurement_role is rejected."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/v1/sensors/{test_esp.device_id}/39",
+                json={
+                    "esp_id": test_esp.device_id,
+                    "gpio": 39,
+                    "sensor_type": "flow",
+                    "name": "Invalid Role Sensor",
+                    "enabled": True,
+                    "interval_ms": 30000,
+                    "processing_mode": "pi_enhanced",
+                    "measurement_role": "invalid_role",
+                },
+                headers=auth_headers,
+            )
+
+        # Should reject invalid measurement_role
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_measurement_role_persisted_in_metadata(
+        self, auth_headers: dict, test_esp: ESPDevice, db_session: AsyncSession
+    ):
+        """Test that measurement_role is correctly persisted in sensor_metadata."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/v1/sensors/{test_esp.device_id}/32",
+                json={
+                    "esp_id": test_esp.device_id,
+                    "gpio": 32,
+                    "sensor_type": "flow",
+                    "name": "Test Flow Sensor",
+                    "enabled": True,
+                    "interval_ms": 30000,
+                    "processing_mode": "pi_enhanced",
+                    "measurement_role": "inflow",
+                },
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        sensor_id = response.json()["id"]
+
+        # Verify in database directly
+        from src.db.repositories import SensorRepository
+        sensor_repo = SensorRepository(db_session)
+        sensor = await sensor_repo.get_by_id(sensor_id)
+        assert sensor is not None
+        assert sensor.sensor_metadata.get("measurement_role") == "inflow"

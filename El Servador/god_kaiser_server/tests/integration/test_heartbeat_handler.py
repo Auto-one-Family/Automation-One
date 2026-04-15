@@ -8,6 +8,7 @@ Phase 3 Test-Suite: Heartbeat Processing, Auto-Discovery, Status Transitions.
 """
 
 import json
+import os
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -344,6 +345,89 @@ class TestDeviceDiscovery:
                             assert ack_kwargs["config_available"] is False
                             assert ack_kwargs["handover_epoch"] >= 1
                             assert "session_id" in ack_kwargs
+
+    @pytest.mark.asyncio
+    async def test_soft_deleted_device_restored_on_heartbeat(self, handler, valid_payload):
+        """Heartbeat for soft-deleted device_id restores row instead of failing INSERT."""
+        topic = "kaiser/god/esp/ESP_SOFT_DEL/system/heartbeat"
+
+        with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.rollback = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.heartbeat_handler.ESPRepository") as mock_repo_class:
+                tombstone = MagicMock()
+                tombstone.device_id = "ESP_SOFT_DEL"
+                tombstone.deleted_at = datetime.now(timezone.utc)
+                tombstone.deleted_by = "admin"
+                tombstone.status = "deleted"
+                tombstone.device_metadata = {"heartbeat_count": 0}
+
+                mock_repo = MagicMock()
+                mock_repo.get_by_device_id = AsyncMock(side_effect=[None, tombstone])
+                mock_repo_class.return_value = mock_repo
+
+                with patch.object(
+                    handler, "_discover_new_device", new_callable=AsyncMock
+                ) as mock_discover:
+                    with patch.object(
+                        handler, "_broadcast_device_discovered", new_callable=AsyncMock
+                    ):
+                        with patch.object(
+                            handler, "_send_heartbeat_ack", new_callable=AsyncMock
+                        ) as mock_ack:
+                            result = await handler.handle_heartbeat(topic, valid_payload)
+
+                            assert result is True
+                            mock_discover.assert_not_called()
+                            assert tombstone.deleted_at is None
+                            assert tombstone.deleted_by is None
+                            assert tombstone.status == "pending_approval"
+                            mock_ack.assert_called_once()
+                            assert mock_ack.call_args.kwargs["status"] == "pending_approval"
+
+    @pytest.mark.asyncio
+    async def test_soft_deleted_device_restore_blocked_by_policy(self, handler, valid_payload):
+        """Restore can be blocked with ESP_SOFT_DELETE_RESTORE_POLICY=deny."""
+        topic = "kaiser/god/esp/ESP_SOFT_DEL/system/heartbeat"
+
+        with patch.dict(os.environ, {"ESP_SOFT_DELETE_RESTORE_POLICY": "deny"}, clear=False):
+            with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
+                mock_db = MagicMock()
+                mock_db.commit = AsyncMock()
+                mock_db.flush = AsyncMock()
+                mock_db.rollback = AsyncMock()
+                mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+                mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+                with patch("src.mqtt.handlers.heartbeat_handler.ESPRepository") as mock_repo_class:
+                    tombstone = MagicMock()
+                    tombstone.device_id = "ESP_SOFT_DEL"
+                    tombstone.deleted_at = datetime.now(timezone.utc)
+                    tombstone.deleted_by = "admin"
+                    tombstone.status = "deleted"
+                    tombstone.device_metadata = {"heartbeat_count": 0}
+
+                    mock_repo = MagicMock()
+                    mock_repo.get_by_device_id = AsyncMock(side_effect=[None, tombstone])
+                    mock_repo_class.return_value = mock_repo
+
+                    with patch.object(
+                        handler, "_broadcast_device_discovered", new_callable=AsyncMock
+                    ) as mock_broadcast:
+                        with patch.object(
+                            handler, "_send_heartbeat_ack", new_callable=AsyncMock
+                        ) as mock_ack:
+                            result = await handler.handle_heartbeat(topic, valid_payload)
+
+                            assert result is True
+                            assert tombstone.deleted_at is not None
+                            mock_broadcast.assert_not_called()
+                            mock_ack.assert_not_called()
 
 
 class TestTimeoutDetection:

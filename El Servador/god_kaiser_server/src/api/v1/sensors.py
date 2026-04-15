@@ -158,6 +158,7 @@ def _model_to_response(
         metadata=sensor.sensor_metadata,  # Model: sensor_metadata -> Schema: metadata
         description=(sensor.sensor_metadata or {}).get("description"),
         unit=(sensor.sensor_metadata or {}).get("unit"),
+        measurement_role=(sensor.sensor_metadata or {}).get("measurement_role"),
         # Config status from ESP32 verification (Phase 2: write-after-verification)
         config_status=sensor.config_status,
         config_error=sensor.config_error,
@@ -206,12 +207,14 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
     # Infer interface_type if not provided
     interface_type = request.interface_type or _infer_interface_type(request.sensor_type)
 
-    # Merge description/unit into sensor_metadata (Config-Panel-Optimierung: persist user input)
+    # Merge description/unit/measurement_role into sensor_metadata (Config-Panel-Optimierung: persist user input)
     sensor_metadata = dict(request.metadata or {})
     if request.description is not None:
         sensor_metadata["description"] = request.description
     if request.unit is not None:
         sensor_metadata["unit"] = request.unit
+    if request.measurement_role is not None:
+        sensor_metadata["measurement_role"] = request.measurement_role
 
     return {
         "sensor_type": normalize_sensor_type(request.sensor_type),
@@ -690,6 +693,7 @@ async def create_or_update_sensor(
                     if (
                         request.description is not None
                         or request.unit is not None
+                        or request.measurement_role is not None
                         or request.metadata is not None
                     ):
                         meta = dict(existing_vt.sensor_metadata or {})
@@ -904,6 +908,7 @@ async def create_or_update_sensor(
         if (
             request.description is not None
             or request.unit is not None
+            or request.measurement_role is not None
             or request.metadata is not None
         ):
             meta = dict(existing.sensor_metadata or {})

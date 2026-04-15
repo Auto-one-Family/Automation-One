@@ -32,6 +32,7 @@ from .core.exception_handlers import (
 from .core.exceptions import GodKaiserException
 from .core.logging_config import get_logger, setup_logging
 from .core.resilience import ResilienceRegistry, get_health_status
+from .core.task_registry import cancel_all_background_tasks
 from .db.repositories import ActuatorRepository, LogicRepository
 from .db.session import dispose_engine, get_engine, get_session, init_db, init_db_circuit_breaker
 from .mqtt.client import MQTTClient
@@ -1053,6 +1054,14 @@ async def lifespan(app: FastAPI):
             )
         except Exception as e:
             logger.warning(f"  Central Scheduler shutdown warning: {e}")
+
+        # Step 2.6: Cancel all background tasks
+        logger.info("Cancelling background tasks...")
+        try:
+            cancelled = await cancel_all_background_tasks(timeout=10.0)
+            logger.info("Cancelled %d background tasks during shutdown", cancelled)
+        except Exception as e:
+            logger.warning(f"Background task cancellation warning: {e}")
 
         # Step 3: Shutdown WebSocket Manager
         if _websocket_manager:

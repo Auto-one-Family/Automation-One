@@ -28,6 +28,7 @@ from ...core.error_codes import (
     ValidationErrorCode,
 )
 from ...core.logging_config import get_logger
+from ...core.task_registry import create_tracked_task
 from ...core.metrics import (
     increment_heartbeat_ack_valid,
     increment_heartbeat_contract_reject,
@@ -451,13 +452,17 @@ class HeartbeatHandler:
                     logic_engine.invalidate_offline_backoff(esp_id_str)
                     # Reconnect evaluation is gated until adoption is completed.
                     if is_reconnect:
-                        asyncio.create_task(
-                            self._complete_adoption_and_trigger_reconnect_eval(esp_id_str)
+                        create_tracked_task(
+                            self._complete_adoption_and_trigger_reconnect_eval(esp_id_str),
+                            name=f"reconnect_adoption_{esp_id_str}",
                         )
 
                 # T13-Phase3: Fire Full-State-Push as background task after commit
                 if is_reconnect and esp_device.zone_id and _command_bridge:
-                    asyncio.create_task(self._handle_reconnect_state_push(esp_device.device_id))
+                    create_tracked_task(
+                        self._handle_reconnect_state_push(esp_device.device_id),
+                        name=f"reconnect_state_push_{esp_device.device_id}",
+                    )
 
                 # Update Prometheus metrics for Grafana alerting
                 update_esp_heartbeat_timestamp(esp_id_str)
@@ -538,6 +543,7 @@ class HeartbeatHandler:
                             "contract_code": canonical.contract_code,
                             "contract_reason": canonical.contract_reason,
                             "raw_system_state": canonical.raw_fields.get("raw_system_state"),
+                            "correlation_id": self._extract_correlation_id(payload),
                         }
                     )
                     await ws_manager.broadcast(
@@ -1638,6 +1644,9 @@ class HeartbeatHandler:
                 await self._broadcast_reconnect_phase(
                     esp_id=esp_id, phase="delta_enforced"
                 )
+
+            # Signal full convergence after successful reconnect evaluation
+            await self._broadcast_reconnect_phase(esp_id=esp_id, phase="converged")
         except Exception as reconnect_eval_error:
             logger.error(
                 "Reconnect adoption/evaluation failed for %s: %s",
@@ -1744,7 +1753,10 @@ class HeartbeatHandler:
                 # until the ESP applies the new config (prevents "No actuator on GPIO X").
                 self._config_push_pending_esps.add(esp_device.device_id)
 
-                asyncio.create_task(self._auto_push_config(esp_device.device_id))
+                create_tracked_task(
+                        self._auto_push_config(esp_device.device_id),
+                        name=f"auto_push_config_{esp_device.device_id}",
+                    )
                 return True
 
             return False

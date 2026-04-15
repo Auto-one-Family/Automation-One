@@ -10,14 +10,15 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .config import get_settings
-from .request_context import get_request_id
+from .request_context import get_request_id, get_correlation_id
 
 
 class RequestIdFilter(logging.Filter):
-    """Filter that adds request_id to every log record."""
+    """Filter that adds request_id and correlation_id to every log record."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.request_id = get_request_id() or "-"
+        record.correlation_id = get_correlation_id() or "-"
         return True
 
 
@@ -49,6 +50,11 @@ class JSONFormatter(logging.Formatter):
         if request_id and request_id != "-":
             log_data["request_id"] = request_id
 
+        # Add correlation_id for cross-layer tracing (MQTT context)
+        correlation_id = getattr(record, "correlation_id", "-")
+        if correlation_id and correlation_id != "-":
+            log_data["correlation_id"] = correlation_id
+
         # Add exception info if present
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
@@ -73,9 +79,11 @@ class TextFormatter(logging.Formatter):
         Returns:
             str: Formatted log message
         """
-        # Ensure request_id exists to avoid formatting errors
+        # Ensure request_id and correlation_id exist to avoid formatting errors
         if not hasattr(record, "request_id"):
             record.request_id = "-"
+        if not hasattr(record, "correlation_id"):
+            record.correlation_id = "-"
         return super().format(record)
 
 

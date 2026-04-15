@@ -757,3 +757,185 @@ async def get_execution_history(
         total_count=len(entries),
         success_rate=success_rate,
     )
+
+
+# =============================================================================
+# Templates
+# =============================================================================
+
+
+@router.get(
+    "/templates",
+    response_model=dict,
+    summary="List available rule templates",
+    description="Get list of available rule templates for creation.",
+)
+async def list_templates(
+    db: DBSession,
+    current_user: ActiveUser,
+) -> dict:
+    """
+    List all available rule templates.
+
+    Args:
+        db: Database session
+        current_user: Authenticated user
+
+    Returns:
+        List of template IDs and metadata
+    """
+    from ...services.logic.template_loader import get_template_loader
+
+    loader = get_template_loader()
+    template_ids = loader.list_templates()
+
+    templates = []
+    for template_id in template_ids:
+        try:
+            info = loader.get_template_info(template_id)
+            templates.append(info)
+        except Exception as e:
+            logger.warning(f"Failed to load template info for {template_id}: {e}")
+
+    return {
+        "success": True,
+        "templates": templates,
+        "total_count": len(templates),
+    }
+
+
+@router.get(
+    "/templates/{template_id}",
+    response_model=dict,
+    responses={
+        200: {"description": "Template info retrieved"},
+        404: {"description": "Template not found"},
+    },
+    summary="Get template details",
+    description="Get detailed information about a specific template.",
+)
+async def get_template(
+    template_id: str,
+    db: DBSession,
+    current_user: ActiveUser,
+) -> dict:
+    """
+    Get template details and parameter schema.
+
+    Args:
+        template_id: Template identifier
+        db: Database session
+        current_user: Authenticated user
+
+    Returns:
+        Template metadata and parameter schema
+    """
+    from ...services.logic.template_loader import get_template_loader, TemplateLoadError
+
+    loader = get_template_loader()
+    try:
+        info = loader.get_template_info(template_id)
+        return {"success": True, "template": info}
+    except TemplateLoadError:
+        raise RuleNotFoundException(template_id)
+
+
+@router.post(
+    "/templates/{template_id}/instantiate",
+    response_model=LogicRuleResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create rule from template",
+    description="Instantiate a template with parameters and create a rule.",
+)
+async def instantiate_template(
+    template_id: str,
+    request: dict,
+    db: DBSession,
+    current_user: OperatorUser,
+) -> LogicRuleResponse:
+    """
+    Instantiate a template with parameters and create a logic rule.
+
+    Args:
+        template_id: Template identifier
+        request: Template parameters and rule metadata
+        db: Database session
+        current_user: Operator or admin user
+
+    Returns:
+        Created rule
+    """
+    from ...services.logic.template_loader import get_template_loader, TemplateLoadError
+
+    loader = get_template_loader()
+
+    try:
+        # Extract rule name and description from request
+        rule_name = request.get("rule_name")
+        rule_description = request.get("description", "")
+        template_params = request.get("parameters", {})
+
+        if not rule_name:
+            raise ValueError("rule_name is required")
+
+        # Instantiate template
+        instantiated = loader.instantiate(template_id, **template_params)
+
+        # Create rule from instantiated template
+        rule_data = LogicRuleCreate(
+            name=rule_name,
+            description=rule_description,
+            conditions=instantiated.get("trigger_conditions", []),
+            actions=instantiated.get("actions", []),
+            logic_operator=instantiated.get("logic_operator", "AND"),
+            enabled=request.get("enabled", True),
+            priority=instantiated.get("priority", 50),
+            cooldown_seconds=instantiated.get("cooldown_seconds"),
+            max_executions_per_hour=instantiated.get("max_executions_per_hour"),
+        )
+
+        # Create rule
+        logic_repo = LogicRepository(db)
+        logic_service = LogicService(logic_repo)
+
+        try:
+            created = await logic_service.create_rule(rule_data)
+        except ValueError as e:
+            raise RuleValidationException(str(e))
+
+        logger.info(
+            f"Rule created from template '{template_id}': "
+            f"'{created.name}' (ID: {created.id}) by {current_user.username}"
+        )
+
+        await _push_config_to_affected_esps(
+            db,
+            get_affected_esp_ids(created),
+            context="logic rule create from template",
+        )
+
+        exec_count = await logic_repo.get_execution_count(created.id)
+        last_exec = await logic_repo.get_last_execution(created.id)
+
+        return LogicRuleResponse(
+            id=created.id,
+            name=created.name,
+            description=created.description,
+            conditions=created.conditions,
+            actions=created.actions,
+            logic_operator=created.logic_operator,
+            enabled=created.enabled,
+            priority=created.priority,
+            cooldown_seconds=created.cooldown_seconds,
+            max_executions_per_hour=created.max_executions_per_hour,
+            last_triggered=created.last_triggered,
+            execution_count=exec_count,
+            last_execution_success=last_exec.success if last_exec else None,
+            created_at=created.created_at,
+            updated_at=created.updated_at,
+        )
+
+    except TemplateLoadError as e:
+        raise RuleNotFoundException(template_id)
+    except ValueError as e:
+        raise RuleValidationException(str(e))

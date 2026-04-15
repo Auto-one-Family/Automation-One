@@ -169,6 +169,12 @@ async def list_devices(
     include_deleted: Annotated[
         bool, Query(description="Include soft-deleted devices (admin/audit)")
     ] = False,
+    runtime_only: Annotated[
+        bool,
+        Query(
+            description="Runtime view only (default). Set false for historical/audit listings."
+        ),
+    ] = True,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> ESPDeviceListResponse:
@@ -181,7 +187,8 @@ async def list_devices(
         zone_id: Optional zone filter
         status_filter: Optional status filter
         hardware_type: Optional hardware type filter
-        include_deleted: Include soft-deleted devices (for audit)
+        include_deleted: Include soft-deleted devices (historical/audit view only)
+        runtime_only: If true, enforce runtime-safe active device view
         page: Page number
         page_size: Items per page
 
@@ -193,16 +200,23 @@ async def list_devices(
     actuator_repo = ActuatorRepository(db)
     subzone_repo = SubzoneRepository(db)
 
-    # Get all devices (with filters)
-    # By default, exclude pending_approval devices - they should be accessed via /devices/pending
+    # Runtime vs historical filter semantics:
+    # - runtime_only=True: always active runtime view (deleted rows hidden)
+    # - runtime_only=False: historical mode; include_deleted can opt in deleted rows
+    effective_include_deleted = include_deleted and not runtime_only
+    devices = await esp_repo.get_all(include_deleted=effective_include_deleted)
+
+    # Optional in-memory filters to keep runtime/historical semantics consistent
+    # across all query variants.
     if zone_id:
-        devices = await esp_repo.get_by_zone(zone_id)
-    elif status_filter:
-        devices = await esp_repo.get_by_status(status_filter)
-    elif hardware_type:
-        devices = await esp_repo.get_by_hardware_type(hardware_type)
-    else:
-        devices = await esp_repo.get_all(include_deleted=include_deleted)
+        devices = [d for d in devices if d.zone_id == zone_id]
+    if status_filter:
+        devices = [d for d in devices if d.status == status_filter]
+    if hardware_type:
+        devices = [d for d in devices if d.hardware_type == hardware_type]
+
+    if runtime_only:
+        devices = [d for d in devices if d.deleted_at is None and d.status != "deleted"]
 
     # Filter out pending_approval devices unless explicitly requested
     if status_filter != "pending_approval":

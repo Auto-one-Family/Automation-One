@@ -29,6 +29,7 @@ from .logic.conditions import (
     CompoundConditionEvaluator,
     HysteresisConditionEvaluator,
     SensorConditionEvaluator,
+    SensorDiffConditionEvaluator,
     TimeConditionEvaluator,
 )
 from .logic.conditions.diagnostics_evaluator import DiagnosticsConditionEvaluator
@@ -87,14 +88,16 @@ class LogicService:
         # Setup default condition evaluators
         if condition_evaluators is None:
             sensor_eval = SensorConditionEvaluator()
+            sensor_diff_eval = SensorDiffConditionEvaluator()
             time_eval = TimeConditionEvaluator()
             hysteresis_eval = HysteresisConditionEvaluator()
             diagnostics_eval = DiagnosticsConditionEvaluator(session_factory=get_session)
             compound_eval = CompoundConditionEvaluator(
-                [sensor_eval, time_eval, hysteresis_eval, diagnostics_eval]
+                [sensor_eval, sensor_diff_eval, time_eval, hysteresis_eval, diagnostics_eval]
             )
             self.condition_evaluators = [
                 sensor_eval,
+                sensor_diff_eval,
                 time_eval,
                 hysteresis_eval,
                 diagnostics_eval,

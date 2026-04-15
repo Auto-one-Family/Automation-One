@@ -30,6 +30,7 @@ from ...core.error_codes import (
     get_error_code_description,
 )
 from ...core.logging_config import get_logger
+from ...core.task_registry import create_tracked_task
 from ...core.metrics import increment_sensor_implausible, update_sensor_value
 from ...utils.sensor_formatters import format_sensor_message
 from ...utils.zone_subzone_resolver import resolve_zone_subzone_for_sensor
@@ -603,7 +604,10 @@ class SensorDataHandler:
                                     logger.error(f"Error in logic evaluation: {e}", exc_info=True)
 
                             # Create non-blocking task with done callback for visibility
-                            task = asyncio.create_task(trigger_logic_evaluation())
+                            task = create_tracked_task(
+                                trigger_logic_evaluation(),
+                                name=f"logic_eval_{esp_id_str}_{gpio}",
+                            )
 
                             def _on_logic_task_done(t: asyncio.Task) -> None:
                                 if t.cancelled():

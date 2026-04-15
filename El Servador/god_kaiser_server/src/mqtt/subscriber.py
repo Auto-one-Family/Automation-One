@@ -20,7 +20,13 @@ from typing import Callable, Dict, Optional
 
 from ..core.metrics import increment_reconciliation_session
 from ..core.logging_config import get_logger
-from ..core.request_context import clear_request_id, generate_mqtt_correlation_id, set_request_id
+from ..core.request_context import (
+    clear_request_id,
+    clear_correlation_id,
+    generate_mqtt_correlation_id,
+    set_request_id,
+    set_correlation_id,
+)
 from ..services.inbound_inbox_service import get_inbound_inbox_service
 from .client import MQTTClient
 from .topics import TopicBuilder
@@ -311,11 +317,13 @@ class Subscriber:
             payload: Parsed payload dict
             correlation_id: Cross-layer correlation ID (esp_id:topic:seq:ts)
         """
-        token = set_request_id(correlation_id)
+        token_cid = set_correlation_id(correlation_id)
+        token_req = set_request_id(correlation_id)
         try:
             return await handler(topic, payload)
         finally:
-            clear_request_id(token)
+            clear_correlation_id(token_cid)
+            clear_request_id(token_req)
 
     @staticmethod
     def _is_critical_topic(topic: str) -> bool:
@@ -407,7 +415,8 @@ class Subscriber:
             else:
                 # Sync handler - call directly in thread pool
                 # Set CID in thread context for sync handler logging
-                token = set_request_id(correlation_id) if correlation_id else None
+                token_cid = set_correlation_id(correlation_id) if correlation_id else None
+                token_req = set_request_id(correlation_id) if correlation_id else None
                 try:
                     result = handler(topic, payload)
                     if result is False:
@@ -418,7 +427,8 @@ class Subscriber:
                     else:
                         self._inbox_mark_delivered(inbox_event_id)
                 finally:
-                    clear_request_id(token)
+                    clear_correlation_id(token_cid)
+                    clear_request_id(token_req)
 
         except Exception as e:
             logger.error(f"Handler execution failed for topic {topic}: {e}", exc_info=True)

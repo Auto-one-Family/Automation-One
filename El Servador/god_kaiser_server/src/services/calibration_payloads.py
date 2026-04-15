@@ -24,12 +24,12 @@ def canonicalize_calibration_data(
     """
     Normalize calibration payloads into canonical schema.
 
-    Canonical schema:
+    Canonical schema (all methods):
     {
-      "method": str,
-      "points": list[dict],
-      "derived": dict,
-      "metadata": dict
+      "method": str,  # linear_2point, moisture_2point, offset, ph_2point, ec_1point, ec_2point
+      "points": list[dict],  # Original measurement points with point_role, raw, reference
+      "derived": dict,  # Computed parameters (slope, offset, cell_factor, etc.)
+      "metadata": dict  # {schema_version, source, normalized_at}
     }
     """
     if payload is None:
@@ -87,7 +87,17 @@ def build_canonical_calibration_result(
     derived: dict,
     source: str = "calibration_session",
 ) -> dict:
-    """Build canonical payload for newly computed calibration results."""
+    """
+    Build canonical payload for newly computed calibration results.
+
+    Supports all calibration methods:
+    - moisture_2point: {slope, offset, ...}
+    - linear_2point: {slope, offset, ...}
+    - offset: {offset, ...}
+    - ph_2point: {slope, offset, slope_deviation_pct, measured_response_mv_per_ph, ...}
+    - ec_1point: {cell_factor, ...}
+    - ec_2point: {slope, offset, ...}
+    """
     return {
         "method": method,
         "points": points if isinstance(points, list) else [],

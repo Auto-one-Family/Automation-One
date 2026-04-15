@@ -178,6 +178,71 @@ class HysteresisCondition(BaseModel):
         return v
 
 
+class SensorDiffCondition(BaseModel):
+    """
+    Sensor Pair Difference Condition.
+
+    Triggers when the difference between two sensors meets threshold criteria.
+    Universal across sensor types - compares numeric values only.
+
+    Example:
+        {
+            "type": "sensor_diff",
+            "sensor_a_id": "550e8400-e29b-41d4-a716-446655440000",
+            "sensor_b_id": "550e8400-e29b-41d4-a716-446655440001",
+            "operator": "gt",
+            "value": 0.8,
+            "consecutive_count": 3
+        }
+    """
+
+    type: Literal["sensor_diff"] = Field(
+        ..., description="Condition type (must be 'sensor_diff')"
+    )
+    sensor_a_id: str = Field(
+        ...,
+        description="UUID of first sensor (A)",
+        min_length=36,
+        max_length=36,
+    )
+    sensor_b_id: str = Field(
+        ...,
+        description="UUID of second sensor (B)",
+        min_length=36,
+        max_length=36,
+    )
+    operator: Literal[">", ">=", "<", "<=", "==", "!="] = Field(
+        ..., description="Comparison operator for (B - A)"
+    )
+    value: float = Field(
+        ..., description="Threshold value: (sensor_b - sensor_a) [operator] value"
+    )
+    consecutive_count: int = Field(
+        default=1,
+        description="Number of consecutive measurements exceeding threshold to trigger",
+        ge=1,
+        le=100,
+    )
+
+    @field_validator("sensor_a_id", "sensor_b_id")
+    @classmethod
+    def validate_uuid_format(cls, v: str) -> str:
+        """Validate UUID format (36 chars with hyphens)."""
+        # Simple format check: 8-4-4-4-12
+        parts = v.split("-")
+        if len(parts) != 5 or len("".join(parts)) != 32:
+            raise ValueError(f"Invalid UUID format: {v}")
+        return v
+
+    @field_validator("sensor_b_id")
+    @classmethod
+    def validate_different_sensors(cls, v: str, info):
+        """Ensure sensor_a_id and sensor_b_id are different."""
+        if "sensor_a_id" in info.data and v == info.data["sensor_a_id"]:
+            raise ValueError("sensor_a_id and sensor_b_id must be different")
+        return v
+
+
 class CompoundCondition(BaseModel):
     """
     Compound Condition (AND/OR logic).
@@ -200,7 +265,11 @@ class CompoundCondition(BaseModel):
 
 # Union type for all condition types
 ConditionType = Union[
-    SensorThresholdCondition, TimeWindowCondition, HysteresisCondition, CompoundCondition
+    SensorThresholdCondition,
+    TimeWindowCondition,
+    HysteresisCondition,
+    SensorDiffCondition,
+    CompoundCondition,
 ]
 
 
@@ -343,6 +412,8 @@ def validate_condition(condition: dict) -> ConditionType:
         return TimeWindowCondition(**condition)
     elif cond_type == "hysteresis":
         return HysteresisCondition(**condition)
+    elif cond_type == "sensor_diff":
+        return SensorDiffCondition(**condition)
     elif "logic" in condition and "conditions" in condition:
         # Compound condition - recursively validate sub-conditions
         validated_sub_conditions = [

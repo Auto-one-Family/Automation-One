@@ -12,7 +12,7 @@ Author: AutomationOne Development Team
 """
 
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Callable, Dict, Optional
 
 from sqlalchemy import select
@@ -219,7 +219,7 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
         activate_below = condition.get("activate_below")
         deactivate_above = condition.get("deactivate_above")
 
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
 
         # Mode A: Kühlung (activate_above / deactivate_below)
         if activate_above is not None and deactivate_below is not None:
