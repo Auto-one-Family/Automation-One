@@ -37,6 +37,7 @@ export interface SensorWithContext {
   subzone_id: string | null
   subzone_name: string
   last_read?: string | null
+  is_stale?: boolean
   interface_type?: 'I2C' | 'ONEWIRE' | 'ANALOG' | 'DIGITAL' | 'VIRTUAL' | null
   device_scope?: 'zone_local' | 'multi_zone' | 'mobile' | null
   assigned_zones?: string[]

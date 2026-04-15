@@ -50,16 +50,16 @@ const sensorLabel = computed(() =>
 
 // Effective quality status: stale overrides actual quality
 const effectiveQualityStatus = computed(() =>
-  isStale.value ? 'warning' : qualityToStatus(props.sensor.quality)
+  isStale.value ? 'offline' : qualityToStatus(props.sensor.quality)
 )
 
 const statusClass = computed(() =>
   `sensor-card__dot--${effectiveQualityStatus.value}`
 )
 
-// Data freshness indicator (stale after 120s)
+// Data freshness indicator (stale after 120s, or server-flagged as stale)
 const freshness = computed(() => getDataFreshness(props.sensor.last_read))
-const isStale = computed(() => freshness.value === 'stale')
+const isStale = computed(() => freshness.value === 'stale' || props.sensor.is_stale === true)
 // Value present but no timestamp known
 const isTimestampUnknown = computed(() =>
   freshness.value === 'unknown' && props.sensor.raw_value != null
@@ -145,6 +145,11 @@ function toggleVirtualInfo(event: Event): void {
 }
 
 // Subzone badge (Phase 2.2): canonical fallback "Zone-weit" when null/empty
+const isFromMockDevice = computed(() => {
+  const id = props.sensor.esp_id ?? ''
+  return id.startsWith('ESP_MOCK_') || id.startsWith('MOCK_')
+})
+
 const subzoneLabel = computed(() => {
   const name = props.sensor.subzone_name ?? ''
   const id = props.sensor.subzone_id ?? ''
@@ -207,7 +212,10 @@ async function handleZoneContextChange(event: Event): Promise<void> {
 function formatValue(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
   const dec = SENSOR_TYPE_CONFIG[props.sensor.sensor_type]?.decimals ?? 1
-  return Number(value).toFixed(dec)
+  return new Intl.NumberFormat('de-DE', {
+    minimumFractionDigits: dec,
+    maximumFractionDigits: dec,
+  }).format(Number(value))
 }
 
 function handleClick() {
@@ -283,6 +291,7 @@ function handleClick() {
       <div class="sensor-card__footer">
         <span class="sensor-card__esp">{{ sensor.esp_id }}</span>
         <div class="sensor-card__footer-badges">
+          <span v-if="isFromMockDevice" class="sensor-card__badge sensor-card__badge--mock">Mock</span>
           <span class="sensor-card__subzone-badge">{{ subzoneLabel }}</span>
           <span v-if="scopeBadge" :class="['sensor-card__scope-badge', scopeBadge.cls]" :title="scopeTooltip">{{ scopeBadge.text }}</span>
           <span v-if="isEspOffline" class="sensor-card__badge sensor-card__badge--offline">
@@ -490,6 +499,7 @@ function handleClick() {
 
 .sensor-card__value {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-1);
   margin-bottom: var(--space-1);
@@ -500,6 +510,8 @@ function handleClick() {
   font-weight: 700;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   color: var(--color-text-primary);
+  overflow-wrap: break-word;
+  word-break: break-all;
 }
 
 .sensor-card__unit {
@@ -609,6 +621,11 @@ function handleClick() {
 .sensor-card__badge--unknown {
   color: var(--color-text-muted);
   background: rgba(112, 112, 128, 0.1);
+}
+
+.sensor-card__badge--mock {
+  color: rgb(251, 146, 60);
+  background: rgba(251, 146, 60, 0.15);
 }
 
 /* Scope badges (T13-R3 WP4) */
