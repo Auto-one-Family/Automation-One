@@ -335,6 +335,7 @@ export const useSensorStore = defineStore('sensor', () => {
         last_reading_at?: string | null
         operating_mode?: string
         timeout_seconds?: number
+        freshness_hours?: number | null
       }>).map((sensor) => ({ ...sensor }))
 
       const sensorIndex = sensors.findIndex(s => s.gpio === event.gpio)
