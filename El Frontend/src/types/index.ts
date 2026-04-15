@@ -264,10 +264,14 @@ export interface MockSensor {
   operating_mode?: SensorOperatingMode
   timeout_seconds?: number
   is_stale?: boolean
-  stale_reason?: 'timeout_exceeded' | 'no_data' | 'sensor_error'
+  stale_reason?: 'timeout_exceeded' | 'no_data' | 'sensor_error' | 'freshness_exceeded'
   last_reading_at?: string | null
   // Phase 2F: Schedule configuration
   schedule_config?: { type: string; expression: string } | null
+  // Sensor-Lifecycle: Freshness & Calibration
+  measurement_freshness_hours?: number | null
+  calibration_interval_days?: number | null
+  freshness_hours?: number | null
   // Config verification status from ESP32
   config_status?: 'pending' | 'applied' | 'failed' | null
   config_error?: string | null
@@ -567,9 +571,11 @@ export interface SensorHealthEvent {
   sensor_type: string
   sensor_name: string | null
   is_stale: boolean
-  stale_reason: 'timeout_exceeded' | 'no_data' | 'sensor_error'
+  stale_reason: 'timeout_exceeded' | 'no_data' | 'sensor_error' | 'freshness_exceeded'
   last_reading_at: string | null
   timeout_seconds: number
+  /** Freshness limit in hours for on-demand/scheduled sensors */
+  freshness_hours?: number | null
   seconds_overdue: number
   operating_mode: SensorOperatingMode
   config_source: 'instance' | 'type_default' | 'system_default'
@@ -690,6 +696,10 @@ export interface SensorConfigCreate {
   timeout_warning_enabled?: boolean
   /** Schedule-Konfiguration für scheduled-Modus */
   schedule_config?: Record<string, unknown> | null
+  /** Hours after which on-demand/scheduled measurement is stale */
+  measurement_freshness_hours?: number | null
+  /** Days between recommended recalibrations */
+  calibration_interval_days?: number | null
   /** Subzone ID to assign this sensor to. Null/empty = remove from all subzones */
   subzone_id?: string | null
   /** Device scope: zone_local, multi_zone, mobile (T13-R2) */
@@ -730,6 +740,10 @@ export interface SensorConfigResponse {
   timeout_seconds?: number | null
   /** Schedule config for scheduled mode: { type: 'cron', expression: string } */
   schedule_config?: { type: string; expression: string } | Record<string, unknown> | null
+  /** Hours after which on-demand/scheduled measurement is stale */
+  measurement_freshness_hours?: number | null
+  /** Days between recommended recalibrations */
+  calibration_interval_days?: number | null
   /** Device scope: zone_local, multi_zone, mobile (T13-R2) */
   device_scope: DeviceScope | null
   /** Zones this sensor is assigned to for multi_zone scope (T13-R2) */

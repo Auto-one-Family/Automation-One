@@ -349,6 +349,9 @@ export const useSensorStore = defineStore('sensor', () => {
       sensor.last_reading_at = event.last_reading_at
       sensor.operating_mode = event.operating_mode
       sensor.timeout_seconds = event.timeout_seconds
+      if (event.freshness_hours != null) {
+        sensor.freshness_hours = event.freshness_hours
+      }
 
       if (event.is_stale) {
         logger.warn(`Sensor stale: ${event.esp_id} GPIO ${event.gpio} ` +

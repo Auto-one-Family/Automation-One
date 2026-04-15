@@ -47,6 +47,7 @@ class StaleReason:
     TIMEOUT_EXCEEDED = "timeout_exceeded"
     NO_DATA = "no_data"
     SENSOR_ERROR = "sensor_error"
+    FRESHNESS_EXCEEDED = "freshness_exceeded"
 
 
 # =============================================================================
@@ -71,15 +72,7 @@ def compute_effective_config_from_cached(
         sensor: SensorConfig with potential instance overrides
 
     Returns:
-        Dict with effective configuration:
-        {
-            "operating_mode": str,
-            "measurement_interval_seconds": int,
-            "timeout_seconds": int,
-            "timeout_warning_enabled": bool,
-            "supports_on_demand": bool,
-            "source": str  # "system_default", "type_default", or "instance"
-        }
+        Dict with effective configuration including lifecycle fields.
     """
     # System defaults (lowest priority)
     effective: Dict[str, Any] = {
@@ -88,6 +81,8 @@ def compute_effective_config_from_cached(
         "timeout_seconds": 180,
         "timeout_warning_enabled": True,
         "supports_on_demand": False,
+        "measurement_freshness_hours": None,
+        "calibration_interval_days": None,
     }
     source = "system_default"
 
@@ -101,6 +96,10 @@ def compute_effective_config_from_cached(
         effective["timeout_seconds"] = type_defaults.timeout_seconds
         effective["timeout_warning_enabled"] = type_defaults.timeout_warning_enabled
         effective["supports_on_demand"] = type_defaults.supports_on_demand
+        if hasattr(type_defaults, "measurement_freshness_hours"):
+            effective["measurement_freshness_hours"] = type_defaults.measurement_freshness_hours
+        if hasattr(type_defaults, "calibration_interval_days"):
+            effective["calibration_interval_days"] = type_defaults.calibration_interval_days
         source = "type_default"
 
     # Instance overrides (highest priority)
@@ -112,6 +111,12 @@ def compute_effective_config_from_cached(
         source = "instance"
     if sensor.timeout_warning_enabled is not None:
         effective["timeout_warning_enabled"] = sensor.timeout_warning_enabled
+        source = "instance"
+    if hasattr(sensor, "measurement_freshness_hours") and sensor.measurement_freshness_hours is not None:
+        effective["measurement_freshness_hours"] = sensor.measurement_freshness_hours
+        source = "instance"
+    if hasattr(sensor, "calibration_interval_days") and sensor.calibration_interval_days is not None:
+        effective["calibration_interval_days"] = sensor.calibration_interval_days
         source = "instance"
 
     effective["source"] = source
@@ -378,20 +383,261 @@ async def check_sensor_timeouts(
             else:
                 sensors_healthy += 1
 
+        # =====================================================================
+        # PHASE 5: Freshness check for on-demand/scheduled sensors
+        # =====================================================================
+
+        freshness_sensors: List[Any] = []
+        freshness_stale = 0
+        freshness_checked = 0
+
+        for sensor in sensors:
+            if sensor.esp_id in offline_esp_ids:
+                continue
+
+            sensor_key = (sensor.esp_id, sensor.gpio, sensor.sensor_type)
+            effective = sensor_effective_configs.get(sensor_key)
+            if not effective:
+                effective = compute_effective_config_from_cached(type_defaults_map, sensor)
+                sensor_effective_configs[sensor_key] = effective
+
+            op_mode = effective["operating_mode"]
+            freshness_hours = effective.get("measurement_freshness_hours")
+
+            if op_mode in ("on_demand", "scheduled") and freshness_hours and freshness_hours > 0:
+                freshness_sensors.append(sensor)
+
+        if freshness_sensors:
+            freshness_keys = [
+                (s.esp_id, s.gpio, s.sensor_type) for s in freshness_sensors
+            ]
+            freshness_readings = await sensor_repo.get_latest_readings_batch_by_config(
+                freshness_keys
+            )
+
+            for sensor in freshness_sensors:
+                sensor_key = (sensor.esp_id, sensor.gpio, sensor.sensor_type)
+                effective = sensor_effective_configs[sensor_key]
+                freshness_hours = effective["measurement_freshness_hours"]
+                freshness_seconds = freshness_hours * 3600
+                freshness_checked += 1
+
+                latest = freshness_readings.get(sensor_key)
+
+                if latest is None:
+                    is_stale = True
+                    age_seconds = float("inf")
+                    last_reading_at = None
+                    stale_reason = StaleReason.NO_DATA
+                else:
+                    last_reading_at_dt = latest.timestamp
+                    if last_reading_at_dt.tzinfo is None:
+                        last_reading_at_dt = last_reading_at_dt.replace(tzinfo=timezone.utc)
+                    age_seconds = (now - last_reading_at_dt).total_seconds()
+                    is_stale = age_seconds > freshness_seconds
+                    last_reading_at = last_reading_at_dt.isoformat()
+                    stale_reason = StaleReason.FRESHNESS_EXCEEDED
+
+                if is_stale:
+                    freshness_stale += 1
+                    sensors_stale += 1
+                    seconds_overdue = (
+                        int(age_seconds - freshness_seconds)
+                        if age_seconds != float("inf")
+                        else 0
+                    )
+                    device_id = device_id_cache.get(sensor.esp_id, str(sensor.esp_id))
+                    stale_info = {
+                        "esp_id": device_id,
+                        "gpio": sensor.gpio,
+                        "sensor_type": sensor.sensor_type,
+                        "sensor_name": sensor.sensor_name,
+                        "last_reading_at": last_reading_at,
+                        "freshness_hours": freshness_hours,
+                        "seconds_overdue": seconds_overdue,
+                        "config_source": effective["source"],
+                    }
+                    stale_details.append(stale_info)
+
+                    age_display = (
+                        f"{age_seconds / 3600:.1f}h"
+                        if age_seconds != float("inf")
+                        else "never"
+                    )
+                    logger.warning(
+                        f"Sensor freshness exceeded: ESP {device_id} GPIO {sensor.gpio} "
+                        f"({sensor.sensor_type}) - measurement age {age_display} "
+                        f"(limit: {freshness_hours}h)"
+                    )
+
+                    device_id_resolved = device_id_cache.get(sensor.esp_id)
+                    if device_id_resolved:
+                        try:
+                            await ws_manager.broadcast(
+                                "sensor_health",
+                                {
+                                    "esp_id": device_id_resolved,
+                                    "gpio": sensor.gpio,
+                                    "sensor_type": sensor.sensor_type,
+                                    "sensor_name": sensor.sensor_name,
+                                    "is_stale": True,
+                                    "stale_reason": stale_reason,
+                                    "last_reading_at": last_reading_at,
+                                    "timeout_seconds": 0,
+                                    "freshness_hours": freshness_hours,
+                                    "seconds_overdue": seconds_overdue,
+                                    "operating_mode": effective["operating_mode"],
+                                    "config_source": effective["source"],
+                                    "timestamp": int(now.timestamp()),
+                                },
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to broadcast freshness event: {e}"
+                            )
+                            errors.append(f"Freshness broadcast failed: {e}")
+
+                        # Route notification via NotificationRouter
+                        try:
+                            from src.schemas.notification import NotificationCreate
+                            from src.services.notification_router import NotificationRouter
+
+                            router = NotificationRouter(session)
+                            sensor_name = sensor.sensor_name or f"{sensor.sensor_type} GPIO {sensor.gpio}"
+                            notification = NotificationCreate(
+                                severity="warning",
+                                category="data_quality",
+                                title=f"Messung veraltet: {sensor_name}",
+                                body=(
+                                    f"Sensor '{sensor_name}' ({sensor.sensor_type}) auf "
+                                    f"{device_id_resolved} hat seit {age_display} keine "
+                                    f"Messung erhalten (Limit: {freshness_hours}h). "
+                                    f"Bitte erneut messen."
+                                ),
+                                source="freshness_reminder",
+                                metadata={
+                                    "esp_id": device_id_resolved,
+                                    "gpio": sensor.gpio,
+                                    "sensor_type": sensor.sensor_type,
+                                    "operating_mode": effective["operating_mode"],
+                                    "measurement_age_seconds": int(age_seconds)
+                                    if age_seconds != float("inf")
+                                    else None,
+                                    "freshness_hours": freshness_hours,
+                                },
+                                fingerprint=f"freshness_{device_id_resolved}_{sensor.gpio}_{sensor.sensor_type}",
+                            )
+                            await router.route(notification)
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to route freshness notification: {e}"
+                            )
+
+        # =====================================================================
+        # PHASE 6: Calibration reminder check
+        # =====================================================================
+
+        calibration_due = 0
+
+        for sensor in sensors:
+            if sensor.esp_id in offline_esp_ids:
+                continue
+
+            sensor_key = (sensor.esp_id, sensor.gpio, sensor.sensor_type)
+            effective = sensor_effective_configs.get(sensor_key)
+            if not effective:
+                effective = compute_effective_config_from_cached(type_defaults_map, sensor)
+
+            cal_interval = effective.get("calibration_interval_days")
+            if not cal_interval or cal_interval <= 0:
+                continue
+
+            calibrated_at = None
+            if sensor.calibration_data and isinstance(sensor.calibration_data, dict):
+                cal_ts = sensor.calibration_data.get("calibrated_at")
+                if cal_ts:
+                    try:
+                        if isinstance(cal_ts, str):
+                            from datetime import datetime as dt_cls
+
+                            calibrated_at = dt_cls.fromisoformat(cal_ts.replace("Z", "+00:00"))
+                        elif isinstance(cal_ts, (int, float)):
+                            calibrated_at = datetime.fromtimestamp(cal_ts, tz=timezone.utc)
+                    except (ValueError, TypeError):
+                        pass
+
+            if calibrated_at is None:
+                continue
+
+            if calibrated_at.tzinfo is None:
+                calibrated_at = calibrated_at.replace(tzinfo=timezone.utc)
+
+            cal_age_days = (now - calibrated_at).total_seconds() / 86400
+
+            if cal_age_days > cal_interval:
+                calibration_due += 1
+                device_id = device_id_cache.get(sensor.esp_id, str(sensor.esp_id))
+                device_id_resolved = device_id_cache.get(sensor.esp_id)
+
+                logger.info(
+                    f"Calibration due: ESP {device_id} GPIO {sensor.gpio} "
+                    f"({sensor.sensor_type}) - last calibrated {cal_age_days:.0f}d ago "
+                    f"(interval: {cal_interval}d)"
+                )
+
+                if device_id_resolved:
+                    try:
+                        from src.schemas.notification import NotificationCreate
+                        from src.services.notification_router import NotificationRouter
+
+                        router = NotificationRouter(session)
+                        sensor_name = sensor.sensor_name or f"{sensor.sensor_type} GPIO {sensor.gpio}"
+                        notification = NotificationCreate(
+                            severity="info",
+                            category="maintenance",
+                            title=f"Kalibrierung fällig: {sensor_name}",
+                            body=(
+                                f"Sensor '{sensor_name}' ({sensor.sensor_type}) auf "
+                                f"{device_id_resolved} wurde zuletzt vor "
+                                f"{cal_age_days:.0f} Tagen kalibriert "
+                                f"(Intervall: {cal_interval} Tage). "
+                                f"Rekalibrierung empfohlen."
+                            ),
+                            source="calibration_reminder",
+                            metadata={
+                                "esp_id": device_id_resolved,
+                                "gpio": sensor.gpio,
+                                "sensor_type": sensor.sensor_type,
+                                "calibration_age_days": round(cal_age_days, 1),
+                                "calibration_interval_days": cal_interval,
+                            },
+                            fingerprint=f"calibration_{device_id_resolved}_{sensor.gpio}_{sensor.sensor_type}",
+                        )
+                        await router.route(notification)
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to route calibration notification: {e}"
+                        )
+
     except Exception as e:
         logger.error(f"Sensor health check failed: {e}")
         errors.append(str(e))
 
     # Calculate performance metrics
     processing_time_ms = (time.perf_counter() - start_time) * 1000
-    queries_executed = 3 if sensors_to_check else 2  # get_enabled + get_all + batch (if needed)
+    queries_executed = 3 if sensors_to_check else 2
+    if freshness_sensors:
+        queries_executed += 1
 
     result = {
         "job_name": "sensor_health_check",
-        "sensors_checked": sensors_checked,
+        "sensors_checked": sensors_checked + freshness_checked,
         "sensors_stale": sensors_stale,
         "sensors_healthy": sensors_healthy,
         "sensors_skipped": sensors_skipped,
+        "freshness_checked": freshness_checked,
+        "freshness_stale": freshness_stale,
+        "calibration_due": calibration_due,
         "stale_details": stale_details,
         "errors": errors,
         "performance": {
@@ -403,8 +649,9 @@ async def check_sensor_timeouts(
 
     logger.info(
         f"Sensor health check complete: "
-        f"{sensors_checked} checked, {sensors_stale} stale, {sensors_healthy} healthy, "
-        f"{sensors_skipped} skipped | "
+        f"{sensors_checked} timeout-checked, {freshness_checked} freshness-checked, "
+        f"{sensors_stale} stale, {sensors_healthy} healthy, "
+        f"{sensors_skipped} skipped, {calibration_due} calibration due | "
         f"{queries_executed} queries in {processing_time_ms:.1f}ms"
     )
 

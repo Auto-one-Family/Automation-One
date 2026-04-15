@@ -11,7 +11,7 @@
  */
 
 import { computed, ref } from 'vue'
-import { Gauge, Info, Edit, Trash2, AlertTriangle, Activity, Clock, Calendar, Pause, HelpCircle, Play } from 'lucide-vue-next'
+import { Gauge, Info, Edit, Trash2, AlertTriangle, Activity, Clock, Calendar, Pause, HelpCircle, Play, Beaker, Timer } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { useToast } from '@/composables/useToast'
 import { Badge } from '@/shared/design'
@@ -20,7 +20,7 @@ import {
   getSensorLabel,
 } from '@/utils/sensorDefaults'
 import { getQualityInfo, getGpioDescription } from '@/utils/labels'
-import { formatRelativeTime, formatNumber, formatSensorStatus, getModeLabel } from '@/utils/formatters'
+import { formatRelativeTime, formatNumber, formatSensorStatus, getModeLabel, getMeasurementFreshness, formatStaleReason } from '@/utils/formatters'
 import type { SensorOperatingMode } from '@/types'
 import { createLogger } from '@/utils/logger'
 
@@ -42,6 +42,11 @@ interface Sensor {
   is_stale?: boolean
   stale_reason?: string
   last_reading_at?: string | null
+  // Sensor-Lifecycle fields
+  measurement_freshness_hours?: number | null
+  freshness_hours?: number | null
+  calibration_interval_days?: number | null
+  calibration_data?: Record<string, unknown> | null
 }
 
 interface Props {
@@ -147,9 +152,52 @@ const sensorStatus = computed(() => {
   return formatSensorStatus({
     operating_mode: props.sensor.operating_mode,
     is_stale: props.sensor.is_stale,
+    stale_reason: props.sensor.stale_reason,
     last_reading_at: props.sensor.last_reading_at || props.sensor.updated_at,
     timeout_seconds: props.sensor.timeout_seconds,
   })
+})
+
+// Sensor-Lifecycle: Measurement freshness for on-demand/scheduled sensors
+const effectiveFreshnessHours = computed(() =>
+  props.sensor.freshness_hours ?? props.sensor.measurement_freshness_hours ?? null
+)
+
+const measurementFreshness = computed(() => {
+  const mode = props.sensor.operating_mode
+  if (!mode || mode === 'continuous' || mode === 'paused') return null
+  return getMeasurementFreshness(
+    props.sensor.last_reading_at || props.sensor.updated_at,
+    effectiveFreshnessHours.value,
+  )
+})
+
+const showFreshnessIndicator = computed(() =>
+  measurementFreshness.value !== null && measurementFreshness.value.level !== 'unknown'
+)
+
+// Sensor-Lifecycle: Calibration status
+const calibrationStatus = computed(() => {
+  const calData = props.sensor.calibration_data
+  if (!calData || typeof calData !== 'object') return null
+
+  const calibratedAt = calData.calibrated_at as string | undefined
+  if (!calibratedAt) return null
+
+  const interval = props.sensor.calibration_interval_days
+  if (!interval || interval <= 0) return { isDue: false, label: null, daysAgo: 0 }
+
+  const calDate = new Date(calibratedAt as string)
+  const ageDays = Math.floor((Date.now() - calDate.getTime()) / 86400000)
+  const isDue = ageDays > interval
+
+  return {
+    isDue,
+    label: isDue
+      ? `Kalibrierung fällig (vor ${ageDays} Tagen)`
+      : `Kalibriert vor ${ageDays} Tagen`,
+    daysAgo: ageDays,
+  }
 })
 
 // Map icon names to components
@@ -226,6 +274,39 @@ const badgeVariant = computed((): BadgeVariant => {
           Stale
         </Badge>
 
+        <!-- Sensor-Lifecycle: Freshness-Indikator für On-Demand/Scheduled -->
+        <Badge
+          v-if="showFreshnessIndicator && measurementFreshness"
+          :variant="measurementFreshness.variant === 'error' ? 'danger' : measurementFreshness.variant"
+          size="sm"
+          :title="measurementFreshness.label"
+        >
+          <Timer class="w-3 h-3 mr-1" />
+          {{ measurementFreshness.ageLabel }}
+        </Badge>
+
+        <!-- Sensor-Lifecycle: Freshness exceeded stale badge -->
+        <Badge
+          v-if="sensor.is_stale && sensor.stale_reason === 'freshness_exceeded'"
+          variant="danger"
+          size="sm"
+          :title="formatStaleReason(sensor.stale_reason)"
+        >
+          <AlertTriangle class="w-3 h-3 mr-1" />
+          Messung empfohlen
+        </Badge>
+
+        <!-- Sensor-Lifecycle: Kalibrierungs-Indikator -->
+        <Badge
+          v-if="calibrationStatus?.isDue"
+          variant="warning"
+          size="sm"
+          :title="calibrationStatus.label"
+        >
+          <Beaker class="w-3 h-3 mr-1" />
+          Kalibrierung fällig
+        </Badge>
+
         <!-- Subzone Badge -->
         <Badge v-if="sensor.subzone_id" variant="gray" size="sm">
           {{ sensor.subzone_id }}
@@ -296,6 +377,18 @@ const badgeVariant = computed((): BadgeVariant => {
           <div v-if="sensor.timeout_seconds && sensor.timeout_seconds > 0" class="sensor-value-card__detail-row">
             <span>Timeout</span>
             <span>{{ sensor.timeout_seconds }}s</span>
+          </div>
+          <div v-if="effectiveFreshnessHours" class="sensor-value-card__detail-row">
+            <span>Freshness-Limit</span>
+            <span>{{ effectiveFreshnessHours }}h</span>
+          </div>
+          <div v-if="calibrationStatus && calibrationStatus.daysAgo > 0" class="sensor-value-card__detail-row">
+            <span>Kalibrierung</span>
+            <span>vor {{ calibrationStatus.daysAgo }} Tagen</span>
+          </div>
+          <div v-if="sensor.calibration_interval_days" class="sensor-value-card__detail-row">
+            <span>Kalibrier-Intervall</span>
+            <span>{{ sensor.calibration_interval_days }} Tage</span>
           </div>
           <div v-if="sensorConfig?.description" class="sensor-value-card__description">
             {{ sensorConfig.description }}

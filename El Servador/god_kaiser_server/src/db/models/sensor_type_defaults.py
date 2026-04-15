@@ -118,6 +118,19 @@ class SensorTypeDefaults(Base, TimestampMixin):
         doc="Default schedule configuration (cron expression or time list)",
     )
 
+    # Sensor-Lifecycle: Freshness & Calibration
+    measurement_freshness_hours: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Hours after which an on-demand/scheduled measurement is considered stale (NULL = no limit)",
+    )
+
+    calibration_interval_days: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Days between recommended recalibrations (NULL = no reminder)",
+    )
+
     def __repr__(self) -> str:
         return (
             f"<SensorTypeDefaults(sensor_type='{self.sensor_type}', "

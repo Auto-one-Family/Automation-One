@@ -577,6 +577,7 @@ export interface SensorStatusInfo {
 export function formatSensorStatus(sensor: {
   operating_mode?: SensorOperatingMode
   is_stale?: boolean
+  stale_reason?: string
   last_reading_at?: string | null
   timeout_seconds?: number
 }): SensorStatusInfo {
@@ -602,6 +603,16 @@ export function formatSensorStatus(sensor: {
       }
 
     case 'on_demand':
+      if (sensor.is_stale && sensor.stale_reason === 'freshness_exceeded') {
+        return {
+          label: sensor.last_reading_at
+            ? `Messung veraltet: ${formatRelativeTime(sensor.last_reading_at)}`
+            : 'Messung dringend empfohlen',
+          variant: 'error',
+          icon: 'AlertTriangle',
+          showLastReading: false,
+        }
+      }
       return {
         label: sensor.last_reading_at
           ? `Letzte Messung: ${formatRelativeTime(sensor.last_reading_at)}`
@@ -647,6 +658,102 @@ export function getModeLabel(mode: SensorOperatingMode | undefined): string {
     case 'scheduled': return 'Geplant'
     case 'paused': return 'Pausiert'
     default: return 'Unbekannt'
+  }
+}
+
+// =============================================================================
+// MEASUREMENT FRESHNESS (Sensor-Lifecycle)
+// =============================================================================
+
+export type MeasurementFreshnessLevel = 'fresh' | 'aging' | 'stale' | 'unknown'
+
+export interface MeasurementFreshnessInfo {
+  level: MeasurementFreshnessLevel
+  label: string
+  variant: SensorStatusVariant
+  ageLabel: string
+}
+
+/**
+ * Berechnet Mess-Alter-Status für On-Demand/Scheduled Sensoren.
+ *
+ * @param lastReadingAt - Zeitpunkt der letzten Messung
+ * @param freshnessHours - Konfiguriertes Freshness-Limit in Stunden
+ * @returns Freshness-Info mit Level, Label und Variante
+ */
+export function getMeasurementFreshness(
+  lastReadingAt: string | null | undefined,
+  freshnessHours: number | null | undefined,
+): MeasurementFreshnessInfo {
+  if (!lastReadingAt) {
+    return {
+      level: 'unknown',
+      label: 'Noch keine Messung',
+      variant: 'gray',
+      ageLabel: '—',
+    }
+  }
+
+  const ageSeconds = getAgeSeconds(lastReadingAt)
+  if (ageSeconds === null) {
+    return {
+      level: 'unknown',
+      label: 'Unbekannt',
+      variant: 'gray',
+      ageLabel: '—',
+    }
+  }
+
+  const ageLabel = formatRelativeTime(lastReadingAt) ?? '—'
+
+  if (!freshnessHours || freshnessHours <= 0) {
+    return {
+      level: 'fresh',
+      label: `Letzte Messung: ${ageLabel}`,
+      variant: 'info',
+      ageLabel,
+    }
+  }
+
+  const freshnessSeconds = freshnessHours * 3600
+  const halfFreshnessSeconds = freshnessSeconds / 2
+
+  if (ageSeconds > freshnessSeconds) {
+    return {
+      level: 'stale',
+      label: `Messung veraltet (${ageLabel})`,
+      variant: 'error',
+      ageLabel,
+    }
+  }
+
+  if (ageSeconds > halfFreshnessSeconds) {
+    return {
+      level: 'aging',
+      label: `Messung wird alt (${ageLabel})`,
+      variant: 'warning',
+      ageLabel,
+    }
+  }
+
+  return {
+    level: 'fresh',
+    label: `Letzte Messung: ${ageLabel}`,
+    variant: 'success',
+    ageLabel,
+  }
+}
+
+/**
+ * Übersetzt stale_reason in lesbares Label.
+ */
+export function formatStaleReason(reason: string | undefined): string {
+  switch (reason) {
+    case 'timeout_exceeded': return 'Timeout überschritten'
+    case 'no_data': return 'Keine Daten empfangen'
+    case 'sensor_error': return 'Sensor-Fehler'
+    case 'freshness_exceeded': return 'Messung veraltet'
+    default: return reason ?? 'Unbekannt'
   }
 }
 

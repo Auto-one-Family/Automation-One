@@ -878,6 +878,30 @@ class SensorDataHandler:
             else ""
         )
 
+        # Compute measurement age for mode-context enrichment
+        measurement_age_seconds = None
+        effective_operating_mode = sensor_config.operating_mode or "continuous"
+        if sensor_config.sensor_metadata and isinstance(sensor_config.sensor_metadata, dict):
+            latest_ts = sensor_config.sensor_metadata.get("latest_timestamp")
+            if latest_ts:
+                try:
+                    from datetime import datetime as _dt, timezone as _tz
+
+                    if isinstance(latest_ts, str):
+                        ts_dt = _dt.fromisoformat(latest_ts.replace("Z", "+00:00"))
+                    elif isinstance(latest_ts, (int, float)):
+                        ts_dt = _dt.fromtimestamp(latest_ts, tz=_tz.utc)
+                    else:
+                        ts_dt = None
+                    if ts_dt:
+                        if ts_dt.tzinfo is None:
+                            ts_dt = ts_dt.replace(tzinfo=_tz.utc)
+                        measurement_age_seconds = int(
+                            (_dt.now(_tz.utc) - ts_dt).total_seconds()
+                        )
+                except (ValueError, TypeError, OSError):
+                    pass
+
         alert_metadata = {
             "esp_id": esp_id_str,
             "gpio": gpio,
@@ -886,6 +910,8 @@ class SensorDataHandler:
             "value": value,
             "severity": severity,
             "thresholds": thresholds,
+            "operating_mode": effective_operating_mode,
+            "measurement_age_seconds": measurement_age_seconds,
         }
 
         # Phase 4B: Correlation ID for grouping related threshold alerts
