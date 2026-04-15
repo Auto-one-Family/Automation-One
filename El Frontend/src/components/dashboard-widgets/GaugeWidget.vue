@@ -8,16 +8,45 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useEspStore } from '@/stores/esp'
 import GaugeChart from '@/components/charts/GaugeChart.vue'
-import { SENSOR_TYPE_CONFIG, getSensorUnit } from '@/utils/sensorDefaults'
+import {
+  SENSOR_TYPE_CONFIG,
+  getSensorUnit,
+  aggregateZoneSensors,
+  getAggCategoryGaugeRange,
+  getSensorAggCategory,
+  type AggCategory,
+} from '@/utils/sensorDefaults'
 import { tokens } from '@/utils/cssTokens'
 import type { GaugeThreshold } from '@/components/charts/types'
 import type { MockSensor } from '@/types'
 import { useSensorId } from '@/composables/useSensorId'
 import { useSensorOptions } from '@/composables/useSensorOptions'
+import { useZoneDragDrop } from '@/composables/useZoneDragDrop'
+
+/** Monitor L1 zone-tile: gauge = spot sensor vs Ø row above */
+const GAUGE_TILE_SPOT_TOOLTIP =
+  'Messwert eines Sensors in dieser Zone (Auswahl nach Priorität). Das Zonenmittel (Ø) steht in der KPI-Zeile darüber.'
+
+const GAUGE_TILE_SPOT_ARIA =
+  'Repräsentativ: ein Sensor in der Zone. Zonenmittel siehe KPI-Zeile oben.'
+
+const GAUGE_TILE_ZONE_AVG_TOOLTIP =
+  'Zonenmittel (Ø) aus derselben Aggregation wie die KPI-Zeile oben (Kategorie gemittelt, veraltete Werte ausgeschlossen).'
+
+const GAUGE_TILE_ZONE_AVG_ARIA =
+  'Zonenmittel wie KPI-Zeile oben, gleiche Berechnung pro Kategorie.'
 
 interface Props {
   sensorId?: string // "espId:gpio:sensorType"
   zoneId?: string   // Zone-scoped sensor filtering (PA-02c)
+  /** `zone_avg`: Wert aus {@link aggregateZoneSensors} für `aggCategory` (gleiche Quelle wie ZoneTileCard-Ø). */
+  valueSource?: 'sensor' | 'zone_avg'
+  /** Kategorie für `valueSource === 'zone_avg'` (Pflicht bei zone_avg). */
+  aggCategory?: AggCategory
+  /** When true (compact zone-tile panel), show Repräsentativ label + tooltip (vs Zonenmittel Ø). */
+  tileSpotSemantics?: boolean
+  /** Compact zone-tile: Gauge zeigt Zonenmittel wie KPI-Zeile (kein Repräsentativ-Spot). */
+  tileZoneAvgSemantics?: boolean
   title?: string
   yMin?: number
   yMax?: number
@@ -28,12 +57,17 @@ interface Props {
   showThresholds?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  tileSpotSemantics: false,
+  tileZoneAvgSemantics: false,
+  valueSource: 'sensor',
+})
 const emit = defineEmits<{
   'update:config': [config: { sensorId: string }]
 }>()
 
 const espStore = useEspStore()
+const { groupDevicesByZone } = useZoneDragDrop()
 
 // Local sensorId state — survives render() one-shot props (Bug 1b fix)
 const localSensorId = ref(props.sensorId || '')
@@ -48,6 +82,36 @@ const { espId: parsedEspId, gpio: parsedGpio, sensorType: parsedSensorType, isVa
 
 // Centralized sensor options (deduplicated, zone-filtered via PA-02c)
 const { flatSensorOptions: availableSensors } = useSensorOptions(localZoneId)
+
+/** Geräte in dieser Zone — gleiche Gruppierung wie useZoneKPIs für aggregateZoneSensors */
+const zoneGroupDevices = computed(() => {
+  if (!props.zoneId) return []
+  const groups = groupDevicesByZone(espStore.devices as any[])
+  const g = groups.find(x => x.zoneId === props.zoneId)
+  return g?.devices ?? []
+})
+
+const zoneAggregation = computed(() => aggregateZoneSensors(zoneGroupDevices.value))
+
+const resolvedAggCategory = computed<AggCategory | null>(() => {
+  if (props.aggCategory) return props.aggCategory
+  if (props.valueSource === 'zone_avg' && sensorType.value) {
+    const c = getSensorAggCategory(sensorType.value)
+    return c === 'other' ? null : c
+  }
+  return null
+})
+
+const effectiveZoneAvgRow = computed(() => {
+  if (props.valueSource !== 'zone_avg') return null
+  const cat = resolvedAggCategory.value
+  if (!cat) return null
+  return zoneAggregation.value.sensorTypes.find(st => st.type === cat) ?? null
+})
+
+const useZoneAvgChannel = computed(
+  () => props.valueSource === 'zone_avg' && !!props.zoneId && !!effectiveZoneAvgRow.value && effectiveZoneAvgRow.value.count > 0,
+)
 
 // Current sensor data — uses parsed sensorId parts
 const currentSensor = computed(() => {
@@ -66,6 +130,9 @@ const sensorType = computed(() => {
 
 // Unit fallback for mock sensors that do not carry `unit` consistently
 const displayUnit = computed(() => {
+  if (useZoneAvgChannel.value && effectiveZoneAvgRow.value) {
+    return effectiveZoneAvgRow.value.unit
+  }
   const type = sensorType.value
   if (!type) return currentSensor.value?.unit || ''
   const resolved = getSensorUnit(type)
@@ -78,9 +145,35 @@ const sensorTypeDefaults = computed(() => {
   return SENSOR_TYPE_CONFIG[sensorType.value] ?? null
 })
 
-// Effective min/max: config > SENSOR_TYPE_CONFIG > 0/100
-const effectiveMin = computed(() => props.yMin ?? sensorTypeDefaults.value?.min ?? 0)
-const effectiveMax = computed(() => props.yMax ?? sensorTypeDefaults.value?.max ?? 100)
+const aggGaugeRange = computed(() => {
+  const cat = resolvedAggCategory.value
+  if (!cat) return null
+  return getAggCategoryGaugeRange(cat)
+})
+
+// Effective min/max: config > zone-avg category scale > SENSOR_TYPE_CONFIG > 0/100
+const effectiveMin = computed(() => {
+  if (props.yMin != null) return props.yMin
+  if (useZoneAvgChannel.value && aggGaugeRange.value) return aggGaugeRange.value.min
+  return sensorTypeDefaults.value?.min ?? 0
+})
+const effectiveMax = computed(() => {
+  if (props.yMax != null) return props.yMax
+  if (useZoneAvgChannel.value && aggGaugeRange.value) return aggGaugeRange.value.max
+  return sensorTypeDefaults.value?.max ?? 100
+})
+
+const gaugeChartValue = computed(() => {
+  if (useZoneAvgChannel.value && effectiveZoneAvgRow.value) {
+    return effectiveZoneAvgRow.value.avg
+  }
+  return currentSensor.value?.raw_value ?? 0
+})
+
+const showGaugeChart = computed(() => {
+  if (useZoneAvgChannel.value) return true
+  return !!(localSensorId.value && currentSensor.value)
+})
 
 // Build GaugeThreshold[] from threshold props
 // Pattern: alarmLow < warnLow < warnHigh < alarmHigh
@@ -152,17 +245,48 @@ function selectSensor(sensorId: string) {
 </script>
 
 <template>
-  <div ref="widgetEl" class="gauge-widget">
-    <template v-if="localSensorId && currentSensor">
+  <div
+    ref="widgetEl"
+    class="gauge-widget"
+    :class="{
+      'gauge-widget--tile-spot': props.tileSpotSemantics,
+      'gauge-widget--tile-zone-avg': props.tileZoneAvgSemantics,
+    }"
+    :title="props.tileSpotSemantics ? GAUGE_TILE_SPOT_TOOLTIP : (props.tileZoneAvgSemantics ? GAUGE_TILE_ZONE_AVG_TOOLTIP : undefined)"
+    :role="props.tileSpotSemantics || props.tileZoneAvgSemantics ? 'group' : undefined"
+    :aria-label="props.tileSpotSemantics ? GAUGE_TILE_SPOT_ARIA : (props.tileZoneAvgSemantics ? GAUGE_TILE_ZONE_AVG_ARIA : undefined)"
+  >
+    <span
+      v-if="props.tileSpotSemantics"
+      class="gauge-widget__spot-label"
+      :title="GAUGE_TILE_SPOT_TOOLTIP"
+      aria-hidden="true"
+    >Repräsentativ</span>
+    <span
+      v-if="props.tileZoneAvgSemantics"
+      class="gauge-widget__zone-avg-label"
+      :title="GAUGE_TILE_ZONE_AVG_TOOLTIP"
+      aria-hidden="true"
+    >Zonenmittel</span>
+    <div
+      v-if="showGaugeChart"
+      class="gauge-widget__chart"
+    >
       <GaugeChart
-        :value="currentSensor.raw_value ?? 0"
+        :value="gaugeChartValue"
         :unit="displayUnit"
         :min="effectiveMin"
         :max="effectiveMax"
         :thresholds="gaugeThresholds"
         :size="gaugeSize"
       />
-    </template>
+    </div>
+    <div
+      v-else-if="props.valueSource === 'zone_avg' && props.zoneId"
+      class="gauge-widget__empty gauge-widget__empty--zone-avg"
+    >
+      <p>Keine Sensordaten</p>
+    </div>
     <div v-else class="gauge-widget__empty">
       <p>Sensor auswählen{{ props.title ? ` für ${props.title}` : '' }}:</p>
       <select
@@ -183,6 +307,38 @@ function selectSensor(sensorId: string) {
 <style scoped>
 .gauge-widget {
   height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gauge-widget--tile-spot,
+.gauge-widget--tile-zone-avg {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  min-height: 0;
+}
+
+.gauge-widget__spot-label,
+.gauge-widget__zone-avg-label {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  line-height: 1.1;
+  margin-bottom: var(--space-1);
+}
+
+.gauge-widget__zone-avg-label {
+  color: var(--color-text-secondary);
+}
+
+.gauge-widget__chart {
+  flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;

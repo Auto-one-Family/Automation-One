@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { usersApi, type User, type UserCreate, type UserUpdate, type UserRole } from '@/api/users'
 import { formatUiApiError, toUiApiError } from '@/api/uiApiError'
@@ -45,6 +45,14 @@ const newPassword = ref('')
 const currentPassword = ref('')
 const confirmPassword = ref('')
 
+let successTimeout: ReturnType<typeof setTimeout> | null = null
+
+// Helper function to manage success message timeout
+function clearSuccessAfterDelay() {
+  if (successTimeout) clearTimeout(successTimeout)
+  successTimeout = setTimeout(() => { successMessage.value = null }, 3000)
+}
+
 // Role options
 const ROLES: { value: UserRole; label: string; icon: typeof Shield; color: string }[] = [
   { value: 'admin', label: 'Admin', icon: Shield, color: 'text-red-400' },
@@ -86,7 +94,7 @@ async function createUser(): Promise<void> {
     showCreateModal.value = false
     successMessage.value = 'User created successfully'
     await loadUsers()
-    setTimeout(() => successMessage.value = null, 3000)
+    clearSuccessAfterDelay()
   } catch (err: unknown) {
     error.value = formatUiApiError(toUiApiError(err, 'Benutzer konnte nicht erstellt werden'))
   } finally {
@@ -116,7 +124,7 @@ async function updateUser(): Promise<void> {
     showEditModal.value = false
     successMessage.value = 'User updated successfully'
     await loadUsers()
-    setTimeout(() => successMessage.value = null, 3000)
+    clearSuccessAfterDelay()
   } catch (err: unknown) {
     error.value = formatUiApiError(toUiApiError(err, 'Benutzer konnte nicht aktualisiert werden'))
   } finally {
@@ -140,7 +148,7 @@ async function deleteUser(): Promise<void> {
     showDeleteModal.value = false
     successMessage.value = 'User deleted successfully'
     await loadUsers()
-    setTimeout(() => successMessage.value = null, 3000)
+    clearSuccessAfterDelay()
   } catch (err: unknown) {
     error.value = formatUiApiError(toUiApiError(err, 'Benutzer konnte nicht gelöscht werden'))
   } finally {
@@ -170,7 +178,7 @@ async function resetPassword(): Promise<void> {
     await usersApi.resetPassword(selectedUser.value.id, newPassword.value)
     showResetPasswordModal.value = false
     successMessage.value = 'Password reset successfully'
-    setTimeout(() => successMessage.value = null, 3000)
+    clearSuccessAfterDelay()
   } catch (err: unknown) {
     error.value = formatUiApiError(toUiApiError(err, 'Passwort konnte nicht zurückgesetzt werden'))
   } finally {
@@ -198,7 +206,7 @@ async function changeOwnPassword(): Promise<void> {
     await usersApi.changeOwnPassword(currentPassword.value, newPassword.value)
     showChangePasswordModal.value = false
     successMessage.value = 'Password changed successfully'
-    setTimeout(() => successMessage.value = null, 3000)
+    clearSuccessAfterDelay()
   } catch (err: unknown) {
     error.value = formatUiApiError(toUiApiError(err, 'Passwort konnte nicht geändert werden'))
   } finally {
@@ -231,6 +239,12 @@ function goHome(): void {
 
 onMounted(() => {
   loadUsers()
+})
+
+onUnmounted(() => {
+  if (successTimeout) {
+    clearTimeout(successTimeout)
+  }
 })
 </script>
 

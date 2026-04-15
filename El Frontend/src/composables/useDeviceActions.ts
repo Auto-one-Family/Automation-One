@@ -69,7 +69,7 @@ export function useDeviceActions(device: () => ESPDevice) {
 
     return (
       toFiniteNumber(d.wifi_rssi) ??
-      toFiniteNumber((d as Record<string, unknown>).rssi) ??
+      toFiniteNumber((d as unknown as Record<string, unknown>).rssi) ??
       toFiniteNumber(metadata.last_wifi_rssi) ??
       toFiniteNumber(metadata.wifi_rssi) ??
       null

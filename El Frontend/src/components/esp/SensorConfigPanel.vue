@@ -10,7 +10,7 @@
  */
 
 import { ref, computed, onMounted } from 'vue'
-import { Save, Beaker, Gauge, Settings, Cpu, Trash2 } from 'lucide-vue-next'
+import { Save, Gauge, Settings, Cpu, Trash2 } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { espApi } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
@@ -35,7 +35,6 @@ import type { DeviceScope } from '@/types'
 import type { DeviceMetadata } from '@/types/device-metadata'
 import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
 import type { SensorConfigCreate } from '@/types'
-import CalibrationWizard from '@/components/calibration/CalibrationWizard.vue'
 
 interface Props {
   espId: string
@@ -149,11 +148,6 @@ const zoneContextLabel = computed(() =>
 const subzoneContextLabel = computed(() =>
   (contextSensor.value as any)?.subzone_id || subzoneId.value || 'Zone-weit',
 )
-
-const needsCalibration = computed(() => {
-  const t = props.sensorType.toLowerCase()
-  return t === 'ph' || t === 'ec' || t === 'moisture' || t === 'soil_moisture'
-})
 
 /** ADC1-only pins for analog sensors */
 const adc1Pins = [32, 33, 34, 35, 36, 39]
@@ -621,22 +615,6 @@ async function handleSave() {
             <input v-model.number="alarmHigh" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
           </div>
         </div>
-      </AccordionSection>
-
-      <!-- Calibration (pH/EC only) -->
-      <AccordionSection
-        v-if="needsCalibration"
-        title="Kalibrierung"
-        :storage-key="`${accordionKey}-calibration`"
-        :icon="Beaker"
-      >
-        <CalibrationWizard
-          compact
-          :skip-select="true"
-          :esp-id="espId"
-          :gpio="gpio"
-          :sensor-type="sensorType"
-        />
       </AccordionSection>
 
       <!-- ═══ ZONE 3: EXPERT (Hardware + Preview) ═════════════════════════ -->

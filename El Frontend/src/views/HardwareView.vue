@@ -251,6 +251,10 @@ onUnmounted(() => {
   if (dragStore.isAnyDragActive) {
     dragStore.endDrag()
   }
+  if (settingsCloseTimer) {
+    clearTimeout(settingsCloseTimer)
+    settingsCloseTimer = null
+  }
   dashStore.deactivate()
   logicStore.unsubscribeFromWebSocket()
 })

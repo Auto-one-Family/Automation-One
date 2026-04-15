@@ -71,15 +71,6 @@ const pendingAndUnassignedCount = computed(() =>
   espStore.pendingDevices.length + espStore.unassignedDevices.length
 )
 
-/** Route detection for breadcrumb display */
-const isHardwareRoute = computed(() => route.path.startsWith('/hardware'))
-const isMonitorRoute = computed(() => route.path.startsWith('/monitor'))
-const isEditorRoute = computed(() => route.path.startsWith('/editor'))
-const isLogicRoute = computed(() => route.path.startsWith('/logic'))
-const isRouteBasedView = computed(() =>
-  isHardwareRoute.value || isMonitorRoute.value || isEditorRoute.value || isLogicRoute.value
-)
-
 const headerMetrics = computed(() => ([
   {
     key: 'real',

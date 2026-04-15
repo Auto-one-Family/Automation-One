@@ -9,7 +9,7 @@
  */
 
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { Activity, ArrowLeft, Check, FlaskConical, Radar, RefreshCw, ShieldCheck, X } from 'lucide-vue-next'
+import { Activity, AlertCircle, ArrowLeft, Check, FlaskConical, Loader, Radar, RefreshCw, ShieldCheck, X } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
 import { useCalibrationWizard } from '@/composables/useCalibrationWizard'
 import CalibrationStep from './CalibrationStep.vue'
@@ -38,7 +38,6 @@ const {
   selectedEspId,
   selectedGpio,
   selectedSensorType,
-  ecPreset,
   points,
   calibrationResult,
   errorMessage,
@@ -53,7 +52,6 @@ const {
   hasUnsavedWork,
   currentSessionId,
   sensorTypePresets,
-  EC_PRESETS,
   currentPreset,
   getSuggestedReference,
   getReferenceLabel,
@@ -145,12 +143,13 @@ const qualityLabel = computed(() => {
   return 'Suspect'
 })
 
-type MasteryStageId = 'prep' | 'capture' | 'validate' | 'terminal'
+type MasteryStageId = 'prep' | 'capture' | 'validate' | 'finalize' | 'terminal'
 const phaseRank: Record<string, number> = {
   select: 0,
   point1: 1,
   point2: 1,
   confirm: 2,
+  finalizing: 2.5,
   done: 3,
   error: 3,
 }
@@ -338,21 +337,16 @@ defineExpose({
           <ArrowLeft :size="14" /> Zurueck
         </button>
       </div>
-      <div v-if="selectedSensorType === 'ec'" class="calibration-wizard__ec-preset-row">
-        <label class="calibration-wizard__label" for="ec-preset">Kalibrierloesung</label>
-        <select
-          id="ec-preset"
-          v-model="ecPreset"
-          class="calibration-wizard__ec-preset"
-        >
-          <option value="0_1413">{{ EC_PRESETS['0_1413'].label }}</option>
-          <option value="1413_12880">{{ EC_PRESETS['1413_12880'].label }}</option>
-          <option value="custom">Eigene Werte</option>
-        </select>
+      <!-- Hint texts for each sensor type -->
+      <div v-if="selectedSensorType === 'ph'" class="calibration-wizard__hint">
+        <p>Sonde mit destilliertem Wasser zwischen den Pufferlösungen spülen. 30 Sekunden stabilisieren lassen.</p>
+      </div>
+      <div v-if="selectedSensorType === 'ec'" class="calibration-wizard__hint">
+        <p>Referenzlösung auf Raumtemperatur bringen (25°C ±2°C). Sonde vollständig eintauchen.</p>
       </div>
       <CalibrationStep
         :step-number="1"
-        :total-steps="2"
+        :total-steps="currentPreset?.expectedPoints ?? 2"
         :esp-id="selectedEspId"
         :gpio="selectedGpio!"
         :sensor-type="selectedSensorType"
@@ -367,8 +361,8 @@ defineExpose({
       />
     </div>
 
-    <!-- Phase: Capture Point 2 -->
-    <div v-if="phase === 'point2'" class="calibration-wizard__phase">
+    <!-- Phase: Capture Point 2 (nur fuer 2-Punkt-Sensoren) -->
+    <div v-if="phase === 'point2' && currentPreset?.expectedPoints === 2" class="calibration-wizard__phase">
       <div class="calibration-wizard__actions">
         <button class="calibration-wizard__abort-btn" :disabled="isSubmitting" @click="handleAbort">
           <X :size="14" /> Abbrechen
@@ -377,21 +371,13 @@ defineExpose({
           <ArrowLeft :size="14" /> Zurueck zu Punkt 1
         </button>
       </div>
-      <div v-if="selectedSensorType === 'ec'" class="calibration-wizard__ec-preset-row">
-        <label class="calibration-wizard__label" for="ec-preset-2">Kalibrierloesung</label>
-        <select
-          id="ec-preset-2"
-          v-model="ecPreset"
-          class="calibration-wizard__ec-preset"
-        >
-          <option value="0_1413">{{ EC_PRESETS['0_1413'].label }}</option>
-          <option value="1413_12880">{{ EC_PRESETS['1413_12880'].label }}</option>
-          <option value="custom">Eigene Werte</option>
-        </select>
+      <!-- Hint for pH second point -->
+      <div v-if="selectedSensorType === 'ph'" class="calibration-wizard__hint">
+        <p>Sonde mit destilliertem Wasser zwischen den Pufferlösungen spülen. 30 Sekunden stabilisieren lassen.</p>
       </div>
       <CalibrationStep
         :step-number="2"
-        :total-steps="2"
+        :total-steps="currentPreset?.expectedPoints ?? 2"
         :esp-id="selectedEspId"
         :gpio="selectedGpio!"
         :sensor-type="selectedSensorType"
@@ -423,6 +409,53 @@ defineExpose({
           <span class="calibration-wizard__summary-label">GPIO</span>
           <span class="calibration-wizard__summary-mono">{{ selectedGpio }}</span>
         </div>
+        <!-- Dynamic point display based on sensor type -->
+      <template v-if="selectedSensorType === 'ph'">
+        <div class="calibration-wizard__summary-row">
+          <span class="calibration-wizard__summary-label">High-Buffer</span>
+          <span class="calibration-wizard__summary-mono">
+            RAW {{ points.find(p => p.point_role === 'buffer_high')?.raw.toFixed(1) ?? '—' }} →
+            Ref {{ points.find(p => p.point_role === 'buffer_high')?.reference ?? '—' }}
+          </span>
+        </div>
+        <div v-if="currentSessionId && points.find(p => p.point_role === 'buffer_high')?.point_id" class="calibration-wizard__summary-row">
+          <span class="calibration-wizard__summary-label">High-Buffer bearbeiten</span>
+          <button class="calibration-wizard__inline-action-btn" @click="deletePoint('buffer_high')">
+            Loeschen
+          </button>
+        </div>
+        <div class="calibration-wizard__summary-row">
+          <span class="calibration-wizard__summary-label">Low-Buffer</span>
+          <span class="calibration-wizard__summary-mono">
+            RAW {{ points.find(p => p.point_role === 'buffer_low')?.raw.toFixed(1) ?? '—' }} →
+            Ref {{ points.find(p => p.point_role === 'buffer_low')?.reference ?? '—' }}
+          </span>
+        </div>
+        <div v-if="currentSessionId && points.find(p => p.point_role === 'buffer_low')?.point_id" class="calibration-wizard__summary-row">
+          <span class="calibration-wizard__summary-label">Low-Buffer bearbeiten</span>
+          <button class="calibration-wizard__inline-action-btn" @click="deletePoint('buffer_low')">
+            Loeschen
+          </button>
+        </div>
+      </template>
+
+      <template v-else-if="selectedSensorType === 'ec'">
+        <div class="calibration-wizard__summary-row">
+          <span class="calibration-wizard__summary-label">Referenzloesung</span>
+          <span class="calibration-wizard__summary-mono">
+            RAW {{ points.find(p => p.point_role === 'reference')?.raw.toFixed(1) ?? '—' }} →
+            Ref {{ points.find(p => p.point_role === 'reference')?.reference ?? '—' }}
+          </span>
+        </div>
+        <div v-if="currentSessionId && points.find(p => p.point_role === 'reference')?.point_id" class="calibration-wizard__summary-row">
+          <span class="calibration-wizard__summary-label">Referenzloesung bearbeiten</span>
+          <button class="calibration-wizard__inline-action-btn" @click="deletePoint('reference')">
+            Loeschen
+          </button>
+        </div>
+      </template>
+
+      <template v-else>
         <div class="calibration-wizard__summary-row">
           <span class="calibration-wizard__summary-label">Punkt 1</span>
           <span class="calibration-wizard__summary-mono">
@@ -447,10 +480,21 @@ defineExpose({
             Punkt 2 loeschen
           </button>
         </div>
-        <div class="calibration-wizard__summary-row">
-          <span class="calibration-wizard__summary-label">Methode</span>
-          <span>2-Punkt Linear</span>
-        </div>
+      </template>
+
+      <div class="calibration-wizard__summary-row">
+        <span class="calibration-wizard__summary-label">Methode</span>
+        <span>
+          {{ selectedSensorType === 'ph' ? 'pH 2-Punkt Linear' : selectedSensorType === 'ec' ? 'EC 1-Punkt' : '2-Punkt Linear' }}
+        </span>
+      </div>
+
+      <div v-if="currentSessionId" class="calibration-wizard__summary-row">
+        <span class="calibration-wizard__summary-label">Session-ID</span>
+        <span class="calibration-wizard__summary-mono" :title="`Fuer Rueckverfolgbarkeit: ${currentSessionId}`">
+          {{ currentSessionId.substring(0, 8) }}...
+        </span>
+      </div>
       </div>
 
       <details class="calibration-wizard__details">
@@ -478,6 +522,31 @@ defineExpose({
       </div>
     </div>
 
+    <!-- Phase: Finalizing -->
+    <div v-if="phase === 'finalizing'" class="calibration-wizard__phase calibration-wizard__phase--center">
+      <div class="calibration-wizard__finalizing-spinner">
+        <Loader :size="40" class="calibration-wizard__spinner-icon" />
+      </div>
+      <h3 class="calibration-wizard__subtitle">Kalibrierung wird angewendet</h3>
+      <p class="calibration-wizard__desc calibration-wizard__finalizing-message">
+        {{ lifecycleMessage || 'Bitte warten...' }}
+      </p>
+      <details v-if="lifecycleState === 'pending'" class="calibration-wizard__details calibration-wizard__finalizing-details">
+        <summary>Session-Details anzeigen</summary>
+        <div class="calibration-wizard__summary-row">
+          <span class="calibration-wizard__summary-label">Status</span>
+          <span class="calibration-wizard__summary-mono">{{ lifecycleState }}</span>
+        </div>
+        <div class="calibration-wizard__summary-row">
+          <span class="calibration-wizard__summary-label">Nachricht</span>
+          <span class="calibration-wizard__summary-mono">{{ lifecycleMessage }}</span>
+        </div>
+      </details>
+      <p v-if="lifecycleState === 'terminal_timeout'" class="calibration-wizard__timeout-notice">
+        Maximale Wartezeit ohne terminale Rueckmeldung ueberschritten. Sitzung wird abgebrochen.
+      </p>
+    </div>
+
     <!-- Phase: Done -->
     <div v-if="phase === 'done'" class="calibration-wizard__phase calibration-wizard__phase--center">
       <div class="calibration-wizard__done-icon">
@@ -487,10 +556,53 @@ defineExpose({
       <p class="calibration-wizard__desc">
         {{ calibrationResult?.message ?? 'Parameter wurden gespeichert.' }}
       </p>
+
+      <!-- pH-specific results -->
+      <template v-if="selectedSensorType === 'ph' && calibrationResult?.calibration">
+        <div class="calibration-wizard__result-grid">
+          <div v-if="calibrationResult.calibration.slope !== undefined" class="calibration-wizard__result-item">
+            <div class="calibration-wizard__result-label">Slope (mV/pH)</div>
+            <div class="calibration-wizard__result-value">{{ Number(calibrationResult.calibration.slope).toFixed(2) }}</div>
+            <div class="calibration-wizard__result-hint">Idealwert: -59,16 mV/pH</div>
+          </div>
+          <div v-if="calibrationResult.calibration.offset !== undefined" class="calibration-wizard__result-item">
+            <div class="calibration-wizard__result-label">Offset (mV)</div>
+            <div class="calibration-wizard__result-value">{{ Number(calibrationResult.calibration.offset).toFixed(2) }}</div>
+            <div class="calibration-wizard__result-hint">Kalibrier-Referenz</div>
+          </div>
+          <div v-if="calibrationResult.calibration.slope_deviation_pct !== undefined" class="calibration-wizard__result-item">
+            <div class="calibration-wizard__result-label">Abweichung</div>
+            <div class="calibration-wizard__result-value">{{ Number(calibrationResult.calibration.slope_deviation_pct).toFixed(2) }}%</div>
+            <div class="calibration-wizard__result-hint">
+              {{ Number(calibrationResult.calibration.slope_deviation_pct) < 5 ? 'Ausgezeichnet' : Number(calibrationResult.calibration.slope_deviation_pct) < 10 ? 'Gut' : 'Akzeptabel' }}
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- EC-specific results -->
+      <template v-if="selectedSensorType === 'ec' && calibrationResult?.calibration">
+        <div class="calibration-wizard__result-grid">
+          <div v-if="calibrationResult.calibration.cell_factor !== undefined" class="calibration-wizard__result-item">
+            <div class="calibration-wizard__result-label">Zellfaktor</div>
+            <div class="calibration-wizard__result-value">{{ Number(calibrationResult.calibration.cell_factor).toFixed(3) }}</div>
+            <div class="calibration-wizard__result-hint">
+              {{ Number(calibrationResult.calibration.cell_factor) >= 0.9 && Number(calibrationResult.calibration.cell_factor) <= 1.1 ? 'Gut' : Number(calibrationResult.calibration.cell_factor) >= 0.7 && Number(calibrationResult.calibration.cell_factor) <= 1.3 ? 'Reinigen empfohlen' : 'Sonde ersetzen' }}
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Generic result data -->
       <details v-if="calibrationResult?.calibration" class="calibration-wizard__details calibration-wizard__result-data">
-        <summary>Forensik: Kalibrierparameter anzeigen</summary>
+        <summary>Kalibrierparameter (vollstaendig)</summary>
         <pre class="calibration-wizard__result-pre">{{ JSON.stringify(calibrationResult.calibration, null, 2) }}</pre>
       </details>
+
+      <div v-if="currentSessionId" class="calibration-wizard__session-info">
+        <small>Session-ID: <code>{{ currentSessionId }}</code></small>
+      </div>
+
       <button class="calibration-wizard__submit-btn" @click="reset">
         <RefreshCw :size="14" /> Weitere Kalibrierung
       </button>
@@ -498,14 +610,30 @@ defineExpose({
 
     <!-- Phase: Error -->
     <div v-if="phase === 'error'" class="calibration-wizard__phase calibration-wizard__phase--center">
-      <h3 class="calibration-wizard__subtitle calibration-wizard__subtitle--error">Fehler</h3>
+      <div class="calibration-wizard__error-icon">
+        <AlertCircle :size="32" />
+      </div>
+      <h3 class="calibration-wizard__subtitle calibration-wizard__subtitle--error">
+        {{ lifecycleState === 'terminal_timeout' ? 'Timeout: Kalibrierung nicht abgeschlossen' : 'Fehler' }}
+      </h3>
       <p class="calibration-wizard__error-msg">{{ errorMessage }}</p>
       <div class="calibration-wizard__actions">
-        <button class="calibration-wizard__back-btn" @click="goBack">
+        <button
+          v-if="lifecycleState === 'terminal_timeout'"
+          class="calibration-wizard__back-btn"
+          @click="goBack"
+        >
+          <ArrowLeft :size="14" /> Session pruefen
+        </button>
+        <button
+          v-else
+          class="calibration-wizard__back-btn"
+          @click="goBack"
+        >
           <ArrowLeft :size="14" /> Zurueck
         </button>
         <button class="calibration-wizard__submit-btn" @click="reset">
-          Neu starten
+          {{ lifecycleState === 'terminal_timeout' ? 'Erneut versuchen' : 'Neu starten' }}
         </button>
       </div>
     </div>
@@ -932,6 +1060,70 @@ defineExpose({
   justify-content: center;
 }
 
+.calibration-wizard__hint {
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--color-text-primary, #eaeaf2);
+  margin-bottom: 0.5rem;
+}
+
+.calibration-wizard__hint p {
+  margin: 0;
+}
+
+.calibration-wizard__result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.calibration-wizard__result-item {
+  background: var(--color-bg-secondary, #111118);
+  border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
+  border-radius: 0.625rem;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.calibration-wizard__result-label {
+  font-size: 0.75rem;
+  color: var(--color-text-muted, #8585a0);
+  font-weight: 500;
+}
+
+.calibration-wizard__result-value {
+  font-size: 1.25rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--color-iridescent-1, #a78bfa);
+  font-weight: 600;
+}
+
+.calibration-wizard__result-hint {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary, #b0b0c0);
+}
+
+.calibration-wizard__session-info {
+  font-size: 0.75rem;
+  color: var(--color-text-muted, #8585a0);
+  text-align: center;
+  margin: 0.5rem 0;
+}
+
+.calibration-wizard__session-info code {
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--color-bg-secondary, #111118);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  word-break: break-all;
+}
+
 .calibration-wizard__result-data {
   width: 100%;
   max-width: 400px;
@@ -953,6 +1145,59 @@ defineExpose({
   font-size: 0.875rem;
   color: var(--color-error, #ef4444);
   margin: 0;
+}
+
+.calibration-wizard__error-icon {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--color-error, #ef4444);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Finalizing Phase */
+.calibration-wizard__finalizing-spinner {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  background: rgba(167, 139, 250, 0.15);
+  color: var(--color-iridescent-1, #a78bfa);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.calibration-wizard__spinner-icon {
+  animation: spin 1s linear infinite;
+}
+
+.calibration-wizard__finalizing-message {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary, #b0b0c0);
+  margin: 0;
+}
+
+.calibration-wizard__finalizing-details {
+  border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
+  border-radius: 0.5rem;
+  padding: 0.625rem;
+  background: var(--color-bg-secondary, #111118);
+  width: 100%;
+  max-width: 400px;
+}
+
+.calibration-wizard__timeout-notice {
+  font-size: 0.8125rem;
+  color: var(--color-warning, #fbbf24);
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 0.375rem;
+  padding: 0.625rem 0.75rem;
+  margin: 0;
+  line-height: 1.4;
 }
 
 .calibration-wizard__details {
@@ -997,5 +1242,10 @@ defineExpose({
   0% { filter: brightness(1); }
   50% { filter: brightness(1.12); }
   100% { filter: brightness(1); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

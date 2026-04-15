@@ -22,7 +22,7 @@ import { useWebSocket } from '@/composables/useWebSocket'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type WizardPhase = 'select' | 'point1' | 'point2' | 'confirm' | 'done' | 'error'
+export type WizardPhase = 'select' | 'point1' | 'point2' | 'confirm' | 'finalizing' | 'done' | 'error'
 
 export type CalibrationSensorType = 'ph' | 'ec' | 'moisture' | 'soil_moisture' | 'temperature'
 
@@ -32,8 +32,10 @@ export interface SensorTypePreset {
   label: string
   point1Label: string
   point1Ref: number
-  point2Label: string
-  point2Ref: number
+  point2Label?: string
+  point2Ref?: number
+  expectedPoints: 1 | 2
+  calibrationMethod: 'moisture_2point' | 'ph_2point' | 'ec_1point'
 }
 
 export interface UseCalibrationWizardOptions {
@@ -92,8 +94,8 @@ export interface UseCalibrationWizardReturn {
   submitCalibration: () => Promise<void>
   triggerLiveMeasurement: () => Promise<void>
   setLastRawValue: (rawValue: number | null, quality?: string) => void
-  overwritePoint: (role: 'dry' | 'wet', point: CalibrationPoint) => Promise<void>
-  deletePoint: (role: 'dry' | 'wet') => Promise<void>
+  overwritePoint: (role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference', point: CalibrationPoint) => Promise<void>
+  deletePoint: (role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference') => Promise<void>
   goBack: () => void
   handleAbort: () => Promise<void>
   confirmLeave: () => Promise<boolean>
@@ -112,17 +114,19 @@ export const EC_PRESETS = {
 export const SENSOR_TYPE_PRESETS: Record<string, SensorTypePreset> = {
   ph: {
     label: 'pH-Sensor',
-    point1Label: 'pH 4.0 Pufferloesung',
-    point1Ref: 4.0,
-    point2Label: 'pH 7.0 Pufferloesung',
-    point2Ref: 7.0,
+    point1Label: 'pH-Pufferloesung (z.B. pH 7,0)',
+    point1Ref: 7.0,
+    point2Label: 'pH-Pufferloesung (z.B. pH 4,0)',
+    point2Ref: 4.0,
+    expectedPoints: 2,
+    calibrationMethod: 'ph_2point',
   },
   ec: {
     label: 'EC-Sensor',
-    point1Label: '1413 µS/cm KCl-Standard',
+    point1Label: 'Referenzloesung (z.B. 1413 µS/cm)',
     point1Ref: 1413,
-    point2Label: '12.880 µS/cm KCl-Standard',
-    point2Ref: 12880,
+    expectedPoints: 1,
+    calibrationMethod: 'ec_1point',
   },
   moisture: {
     label: 'Feuchtigkeitssensor',
@@ -130,6 +134,8 @@ export const SENSOR_TYPE_PRESETS: Record<string, SensorTypePreset> = {
     point1Ref: 0,
     point2Label: 'Vollstaendig nass (100%)',
     point2Ref: 100,
+    expectedPoints: 2,
+    calibrationMethod: 'moisture_2point',
   },
   soil_moisture: {
     label: 'Feuchtigkeitssensor',
@@ -137,6 +143,8 @@ export const SENSOR_TYPE_PRESETS: Record<string, SensorTypePreset> = {
     point1Ref: 0,
     point2Label: 'Vollstaendig nass (100%)',
     point2Ref: 100,
+    expectedPoints: 2,
+    calibrationMethod: 'moisture_2point',
   },
   temperature: {
     label: 'Temperatursensor',
@@ -144,6 +152,8 @@ export const SENSOR_TYPE_PRESETS: Record<string, SensorTypePreset> = {
     point1Ref: 0,
     point2Label: 'Kochendes Wasser (100°C)',
     point2Ref: 100,
+    expectedPoints: 2,
+    calibrationMethod: 'moisture_2point',
   },
 }
 
@@ -314,23 +324,43 @@ export function useCalibrationWizard(
   // ── Helpers ─────────────────────────────────────────────────────────────
 
   function getSuggestedReference(stepNumber: 1 | 2): number | undefined {
+    const preset = currentPreset.value
+    const expectedPoints = preset?.expectedPoints ?? 2
+
+    // For 1-point sensors (EC), only return point1
+    if (expectedPoints === 1) {
+      return stepNumber === 1 ? preset?.point1Ref : undefined
+    }
+
+    // For EC with custom preset, use ecPointRefs
     if (selectedSensorType.value === 'ec' && ecPointRefs.value) {
       return stepNumber === 1 ? ecPointRefs.value.point1 : ecPointRefs.value.point2
     }
-    const preset = currentPreset.value
+
+    // For others (pH, moisture)
     return stepNumber === 1 ? preset?.point1Ref : preset?.point2Ref
   }
 
   function getReferenceLabel(stepNumber: 1 | 2): string | undefined {
+    const preset = currentPreset.value
+    const expectedPoints = preset?.expectedPoints ?? 2
+
+    // For 1-point sensors (EC), only return point1 label
+    if (expectedPoints === 1) {
+      return stepNumber === 1 ? preset?.point1Label : undefined
+    }
+
+    // For EC with preset
     if (selectedSensorType.value === 'ec' && ecPreset.value !== 'custom') {
-      const preset = EC_PRESETS[ecPreset.value as keyof typeof EC_PRESETS]
-      if (preset) {
+      const ecPresetData = EC_PRESETS[ecPreset.value as keyof typeof EC_PRESETS]
+      if (ecPresetData) {
         return stepNumber === 1
-          ? `${preset.point1} µS/cm KCl-Standard`
-          : `${preset.point2} µS/cm KCl-Standard`
+          ? `${ecPresetData.point1} µS/cm KCl-Standard`
+          : `${ecPresetData.point2} µS/cm KCl-Standard`
       }
     }
-    const preset = currentPreset.value
+
+    // For others (pH, moisture)
     return stepNumber === 1 ? preset?.point1Label : preset?.point2Label
   }
 
@@ -368,19 +398,23 @@ export function useCalibrationWizard(
 
   async function ensureSessionStarted(): Promise<string> {
     if (currentSessionId.value) return currentSessionId.value
+    const preset = currentPreset.value
+    if (!preset) {
+      throw new Error('Sensortyp-Preset nicht gefunden')
+    }
     const session = await calibrationApi.startSession({
       esp_id: selectedEspId.value,
       gpio: selectedGpio.value ?? 0,
       sensor_type: selectedSensorType.value,
-      method: 'linear_2point',
-      expected_points: 2,
+      method: preset.calibrationMethod,
+      expected_points: preset.expectedPoints,
     })
     currentSessionId.value = session.id
     return session.id
   }
 
   async function persistPoint(
-    role: 'dry' | 'wet',
+    role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference',
     point: CalibrationPoint,
     options: { confirmOverwrite?: boolean } = {},
   ): Promise<boolean> {
@@ -391,9 +425,14 @@ export function useCalibrationWizard(
     const sessionId = await ensureSessionStarted()
     const hasExistingRole = points.value.some((existing) => existing.point_role === role)
     if (hasExistingRole && options.confirmOverwrite) {
+      const roleLabel = role === 'buffer_high' ? 'High-Buffer'
+        : role === 'buffer_low' ? 'Low-Buffer'
+        : role === 'reference' ? 'Referenzloesung'
+        : role === 'dry' ? 'Trockenzustand'
+        : 'Nasszustand'
       const overwriteConfirmed = await uiStore.confirm({
         title: 'Kalibrierpunkt ueberschreiben?',
-        message: `Der Punkt '${role}' existiert bereits. Soll er durch den neuen Messwert ersetzt werden?`,
+        message: `Der Punkt '${roleLabel}' existiert bereits. Soll er durch den neuen Messwert ersetzt werden?`,
         variant: 'warning',
         confirmText: 'Ueberschreiben',
       })
@@ -404,7 +443,7 @@ export function useCalibrationWizard(
     const sessionState = await calibrationApi.addPoint(sessionId, {
       raw_value: point.raw,
       reference_value: point.reference,
-      point_role: role,
+      point_role: role as any,
       overwrite: hasExistingRole,
       quality: measurementQuality.value || 'good',
     })
@@ -427,30 +466,39 @@ export function useCalibrationWizard(
       return true
     }
 
-    if (role === 'dry') {
-      points.value = [
-        normalizedPoint,
-        ...points.value.filter((entry) => entry.point_role !== 'dry'),
-      ]
-      return true
-    }
-
-    points.value = [
-      ...points.value.filter((entry) => entry.point_role !== 'wet'),
-      normalizedPoint,
-    ]
+    // Append new point in proper order
+    points.value = [...points.value, normalizedPoint]
     return true
   }
 
   async function onPoint1Captured(point: CalibrationPoint): Promise<void> {
-    const persisted = await persistPoint('dry', point, { confirmOverwrite: true })
+    const preset = currentPreset.value
+
+    let pointRole: 'buffer_high' | 'dry' | 'reference'
+    if (selectedSensorType.value === 'ph') {
+      pointRole = 'buffer_high'
+    } else if (selectedSensorType.value === 'ec') {
+      pointRole = 'reference'
+    } else {
+      pointRole = 'dry'
+    }
+
+    const persisted = await persistPoint(pointRole, point, { confirmOverwrite: true })
     if (persisted) {
-      phase.value = 'point2'
+      // EC 1-point: go directly to confirm
+      // pH & Moisture 2-point: go to point2
+      if (preset?.expectedPoints === 1) {
+        phase.value = 'confirm'
+      } else {
+        phase.value = 'point2'
+      }
     }
   }
 
   async function onPoint2Captured(point: CalibrationPoint): Promise<void> {
-    const persisted = await persistPoint('wet', point, { confirmOverwrite: true })
+    const pointRole = selectedSensorType.value === 'ph' ? 'buffer_low' : 'wet'
+
+    const persisted = await persistPoint(pointRole, point, { confirmOverwrite: true })
     if (persisted) {
       phase.value = 'confirm'
     }
@@ -459,12 +507,19 @@ export function useCalibrationWizard(
   async function submitCalibration(): Promise<void> {
     if (selectedGpio.value === null) return
 
+    const preset = currentPreset.value
+    if (!preset) {
+      phase.value = 'error'
+      errorMessage.value = 'Sensortyp-Preset nicht gefunden.'
+      return
+    }
+
     const validPoints = points.value.filter((point) =>
       Number.isFinite(point.raw) && Number.isFinite(point.reference),
     )
-    if (validPoints.length < 2) {
+    if (validPoints.length < preset.expectedPoints) {
       phase.value = 'error'
-      errorMessage.value = `Kalibrierung benötigt 2 gueltige Punkte, vorhanden: ${validPoints.length}.`
+      errorMessage.value = `Kalibrierung benötigt ${preset.expectedPoints} gueltige Punkte, vorhanden: ${validPoints.length}.`
       return
     }
 
@@ -472,9 +527,20 @@ export function useCalibrationWizard(
     lifecycleState.value = 'accepted'
     lifecycleMessage.value = 'Kalibrierauftrag akzeptiert.'
     errorMessage.value = ''
+    phase.value = 'finalizing'
     try {
       const sessionId = await ensureSessionStarted()
-      const requiredRoles: Array<'dry' | 'wet'> = ['dry', 'wet']
+
+      // Get required roles based on sensor type
+      let requiredRoles: Array<string> = []
+      if (selectedSensorType.value === 'ph') {
+        requiredRoles = ['buffer_high', 'buffer_low']
+      } else if (selectedSensorType.value === 'ec') {
+        requiredRoles = ['reference']
+      } else {
+        requiredRoles = ['dry', 'wet']
+      }
+
       const hasAllRoles = requiredRoles.every((role) =>
         points.value.some((point) => point.point_role === role),
       )
@@ -483,7 +549,7 @@ export function useCalibrationWizard(
           const role = requiredRoles[index]
           const point = validPoints[index]
           if (!points.value.some((entry) => entry.point_role === role)) {
-            await persistPoint(role, point)
+            await persistPoint(role as any, point)
           }
         }
       }
@@ -570,12 +636,16 @@ export function useCalibrationWizard(
     errorMessage.value = ''
     try {
       if (!currentSessionId.value) {
+        const preset = currentPreset.value
+        if (!preset) {
+          throw new Error('Sensortyp-Preset nicht gefunden')
+        }
         const session = await calibrationApi.startSession({
           esp_id: selectedEspId.value,
           gpio: selectedGpio.value,
           sensor_type: selectedSensorType.value,
-          method: 'linear_2point',
-          expected_points: 2,
+          method: preset.calibrationMethod,
+          expected_points: preset.expectedPoints,
         })
         currentSessionId.value = session.id
       }
@@ -603,20 +673,25 @@ export function useCalibrationWizard(
     measurementQuality.value = quality
   }
 
-  async function overwritePoint(role: 'dry' | 'wet', point: CalibrationPoint): Promise<void> {
+  async function overwritePoint(role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference', point: CalibrationPoint): Promise<void> {
     if (!currentSessionId.value) {
       throw new Error('Keine aktive Kalibrier-Session vorhanden')
     }
     await persistPoint(role, point, { confirmOverwrite: true })
   }
 
-  async function deletePoint(role: 'dry' | 'wet'): Promise<void> {
+  async function deletePoint(role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference'): Promise<void> {
     if (!currentSessionId.value) {
       throw new Error('Keine aktive Kalibrier-Session vorhanden')
     }
+    const roleLabel = role === 'buffer_high' ? 'High-Buffer'
+      : role === 'buffer_low' ? 'Low-Buffer'
+      : role === 'reference' ? 'Referenzloesung'
+      : role === 'dry' ? 'Trockenzustand'
+      : 'Nasszustand'
     const confirmed = await uiStore.confirm({
       title: 'Kalibrierpunkt loeschen?',
-      message: `Soll der Punkt '${role}' wirklich aus der Session entfernt werden?`,
+      message: `Soll der Punkt '${roleLabel}' wirklich aus der Session entfernt werden?`,
       variant: 'warning',
       confirmText: 'Loeschen',
     })
@@ -628,7 +703,15 @@ export function useCalibrationWizard(
     }
     await calibrationApi.deletePoint(currentSessionId.value, target.point_id)
     points.value = points.value.filter((point) => point.point_role !== role)
-    phase.value = role === 'dry' ? 'point1' : 'point2'
+
+    // Determine which phase to go back to
+    if (role === 'reference') {
+      phase.value = 'point1'
+    } else if (role === 'buffer_high' || role === 'dry') {
+      phase.value = 'point1'
+    } else {
+      phase.value = 'point2'
+    }
   }
 
   /** Navigate back one phase */
@@ -639,6 +722,7 @@ export function useCalibrationWizard(
       point1: 'select',
       point2: 'point1',
       confirm: 'point2',
+      finalizing: 'confirm',
       error: 'confirm',
     }
     const target = backMap[phase.value]
@@ -781,6 +865,7 @@ export function useCalibrationWizard(
     isFreshMeasurement.value = false
     lastMeasurementAt.value = null
     measurementRequestId.value = null
+    measurementTriggerAt.value = null
     measurementTriggerAt.value = null
     lifecycleState.value = 'idle'
     lifecycleMessage.value = ''

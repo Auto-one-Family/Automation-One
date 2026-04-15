@@ -30,7 +30,7 @@ interface Props {
   mode?: 'manage' | 'inline' | 'side-panel'
   /** Zone ID for zone-scoped sensor filtering in widgets (PA-02c) */
   zoneId?: string
-  /** Compact mode: hide header + edit link, reduced padding (Phase 3 mini-widgets) */
+  /** Compact mode: hide header, reduced padding (L1 zone-tile; Editor-Stift in ZoneTileCard) */
   compact?: boolean
 }
 
@@ -45,12 +45,14 @@ const authStore = useAuthStore()
 const uiStore = useUiStore()
 
 const zoneIdRef = toRef(props, 'zoneId')
+const compactTileGaugeSemantics = toRef(props, 'compact')
 
 const { createWidgetElement, mountWidgetToElement, cleanupAllWidgets, widgetComponentMap } = useDashboardWidgets({
   showConfigButton: false,
   showWidgetHeader: false,
   readOnly: true,
   zoneId: zoneIdRef as import('vue').Ref<string | undefined>,
+  compactTileGaugeSemantics,
 })
 
 /** Row height in pixels — synchronized with CustomDashboardView/DashboardViewer cellHeight */
@@ -168,8 +170,8 @@ function getContainerId(widgetId: string): string {
 }
 
 watch(
-  () => widgets.value.map(w => w.id).join(','),
-  () => mountWidgets()
+  () => `${widgets.value.map(w => w.id).join(',')}|${props.compact ? '1' : '0'}`,
+  () => mountWidgets(),
 )
 
 onMounted(() => {

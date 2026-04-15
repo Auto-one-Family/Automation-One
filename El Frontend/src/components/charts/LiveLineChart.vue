@@ -144,6 +144,17 @@ const compactYBounds = computed(() => {
   return { min, max }
 })
 
+function toFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  return undefined
+}
+
 // Internal data buffer
 const dataBuffer = shallowRef<ChartDataPoint[]>([...props.data])
 
@@ -177,45 +188,53 @@ const thresholdAnnotations = computed(() => {
 
   const annotations: Record<string, any> = {}
   const t = props.thresholds
+  const alarmLow = toFiniteNumber(t.alarmLow)
+  const warnLow = toFiniteNumber(t.warnLow)
+  const warnHigh = toFiniteNumber(t.warnHigh)
+  const alarmHigh = toFiniteNumber(t.alarmHigh)
 
-  if (t.alarmLow != null) {
+  if (alarmLow != null) {
     annotations.alarmLow = {
       type: 'line',
-      yMin: t.alarmLow,
-      yMax: t.alarmLow,
+      yMin: alarmLow,
+      yMax: alarmLow,
       borderColor: 'rgba(239, 68, 68, 0.5)',
       borderWidth: 1,
       borderDash: [4, 4],
+      borderCapStyle: 'butt',
     }
   }
-  if (t.warnLow != null) {
+  if (warnLow != null) {
     annotations.warnLow = {
       type: 'line',
-      yMin: t.warnLow,
-      yMax: t.warnLow,
+      yMin: warnLow,
+      yMax: warnLow,
       borderColor: 'rgba(234, 179, 8, 0.4)',
       borderWidth: 1,
       borderDash: [4, 4],
+      borderCapStyle: 'butt',
     }
   }
-  if (t.warnHigh != null) {
+  if (warnHigh != null) {
     annotations.warnHigh = {
       type: 'line',
-      yMin: t.warnHigh,
-      yMax: t.warnHigh,
+      yMin: warnHigh,
+      yMax: warnHigh,
       borderColor: 'rgba(234, 179, 8, 0.4)',
       borderWidth: 1,
       borderDash: [4, 4],
+      borderCapStyle: 'butt',
     }
   }
-  if (t.alarmHigh != null) {
+  if (alarmHigh != null) {
     annotations.alarmHigh = {
       type: 'line',
-      yMin: t.alarmHigh,
-      yMax: t.alarmHigh,
+      yMin: alarmHigh,
+      yMax: alarmHigh,
       borderColor: 'rgba(239, 68, 68, 0.5)',
       borderWidth: 1,
       borderDash: [4, 4],
+      borderCapStyle: 'butt',
     }
   }
 

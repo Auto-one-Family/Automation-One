@@ -314,4 +314,213 @@ describe('useCalibrationWizard', () => {
       vi.useRealTimers()
     }
   })
+
+  // ─── pH-Sensor Tests (2-Point: buffer_high, buffer_low) ───────────────
+
+  it('haendelt pH-2-Punkt-Flow mit buffer_high und buffer_low', async () => {
+    calibrationApiMock.startSession.mockResolvedValue({
+      id: 'ph-session-1',
+      status: 'pending',
+      method: 'ph_2point',
+      sensor_type: 'ph',
+      expected_points: 2,
+      calibration_points: { points: [] },
+    })
+    calibrationApiMock.addPoint
+      .mockResolvedValueOnce({
+        id: 'ph-session-1',
+        status: 'collecting',
+        method: 'ph_2point',
+        sensor_type: 'ph',
+        calibration_points: { points: [{ id: 'ph-1', point_role: 'buffer_high' }] },
+      })
+      .mockResolvedValueOnce({
+        id: 'ph-session-1',
+        status: 'collecting',
+        method: 'ph_2point',
+        sensor_type: 'ph',
+        calibration_points: {
+          points: [
+            { id: 'ph-1', point_role: 'buffer_high' },
+            { id: 'ph-2', point_role: 'buffer_low' },
+          ],
+        },
+      })
+    calibrationApiMock.finalizeSession.mockResolvedValue({
+      id: 'ph-session-1',
+      status: 'finalizing',
+      method: 'ph_2point',
+      sensor_type: 'ph',
+      calibration_result: { slope: -59.16, offset: 0, slope_deviation_pct: 2.3 },
+      failure_reason: null,
+    })
+    calibrationApiMock.applySession.mockResolvedValue({
+      id: 'ph-session-1',
+      status: 'applied',
+      method: 'ph_2point',
+      sensor_type: 'ph',
+      calibration_result: { slope: -59.16, offset: 0, slope_deviation_pct: 2.3 },
+      failure_reason: null,
+    })
+    calibrationApiMock.getSession.mockResolvedValue({
+      id: 'ph-session-1',
+      status: 'applied',
+      method: 'ph_2point',
+      sensor_type: 'ph',
+      calibration_result: { slope: -59.16, offset: 0, slope_deviation_pct: 2.3 },
+      failure_reason: null,
+    })
+
+    const wizard = useCalibrationWizard({
+      skipSelect: true,
+      espId: 'ESP_PH_001',
+      gpio: 6,
+      sensorType: 'ph',
+    })
+
+    // Phase 1: Capture buffer_high
+    expect(wizard.phase.value).toBe('point1')
+    await wizard.onPoint1Captured({ raw: 2000, reference: 7.0 })
+    expect(wizard.phase.value).toBe('point2')
+    expect(wizard.points.value[0]).toEqual(
+      expect.objectContaining({ point_role: 'buffer_high' }),
+    )
+
+    // Phase 2: Capture buffer_low
+    await wizard.onPoint2Captured({ raw: 3500, reference: 4.0 })
+    expect(wizard.phase.value).toBe('confirm')
+    expect(wizard.points.value[1]).toEqual(
+      expect.objectContaining({ point_role: 'buffer_low' }),
+    )
+
+    // Submit: Should call with ph_2point method
+    await wizard.submitCalibration()
+    expect(calibrationApiMock.startSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'ph_2point',
+        expected_points: 2,
+      }),
+    )
+    expect(wizard.phase.value).toBe('done')
+  })
+
+  it('unterstuetzt pH-Referenzwert-Anpassung durch Gaertner', async () => {
+    calibrationApiMock.startSession.mockResolvedValue({
+      id: 'ph-custom-1',
+      status: 'pending',
+      method: 'ph_2point',
+      sensor_type: 'ph',
+      expected_points: 2,
+      calibration_points: { points: [] },
+    })
+    calibrationApiMock.addPoint.mockResolvedValue({
+      id: 'ph-custom-1',
+      status: 'collecting',
+      method: 'ph_2point',
+      sensor_type: 'ph',
+      calibration_points: { points: [{ id: 'ph-custom', point_role: 'buffer_high' }] },
+    })
+
+    const wizard = useCalibrationWizard({
+      skipSelect: true,
+      espId: 'ESP_PH_001',
+      gpio: 6,
+      sensorType: 'ph',
+    })
+
+    // User gibt eigenen Referenzwert ein (z.B. 6.86 statt 7.0)
+    await wizard.onPoint1Captured({ raw: 2000, reference: 6.86 })
+
+    expect(calibrationApiMock.addPoint).toHaveBeenCalledWith(
+      'ph-custom-1',
+      expect.objectContaining({
+        reference_value: 6.86,
+        point_role: 'buffer_high',
+      }),
+    )
+  })
+
+  // ─── EC-Sensor Tests (1-Point: reference) ──────────────────────────
+
+  it('haendelt EC-1-Punkt-Flow mit reference-role', async () => {
+    calibrationApiMock.startSession.mockResolvedValue({
+      id: 'ec-session-1',
+      status: 'pending',
+      method: 'ec_1point',
+      sensor_type: 'ec',
+      expected_points: 1,
+      calibration_points: { points: [] },
+    })
+    calibrationApiMock.addPoint.mockResolvedValue({
+      id: 'ec-session-1',
+      status: 'collecting',
+      method: 'ec_1point',
+      sensor_type: 'ec',
+      calibration_points: { points: [{ id: 'ec-1', point_role: 'reference' }] },
+    })
+    calibrationApiMock.finalizeSession.mockResolvedValue({
+      id: 'ec-session-1',
+      status: 'finalizing',
+      method: 'ec_1point',
+      sensor_type: 'ec',
+      calibration_result: { cell_factor: 1.05 },
+      failure_reason: null,
+    })
+    calibrationApiMock.applySession.mockResolvedValue({
+      id: 'ec-session-1',
+      status: 'applied',
+      method: 'ec_1point',
+      sensor_type: 'ec',
+      calibration_result: { cell_factor: 1.05 },
+      failure_reason: null,
+    })
+    calibrationApiMock.getSession.mockResolvedValue({
+      id: 'ec-session-1',
+      status: 'applied',
+      method: 'ec_1point',
+      sensor_type: 'ec',
+      calibration_result: { cell_factor: 1.05 },
+      failure_reason: null,
+    })
+
+    const wizard = useCalibrationWizard({
+      skipSelect: true,
+      espId: 'ESP_EC_001',
+      gpio: 7,
+      sensorType: 'ec',
+    })
+
+    // EC: Phase 1 Capture -> directly to Confirm (no point2)
+    expect(wizard.phase.value).toBe('point1')
+    await wizard.onPoint1Captured({ raw: 1413, reference: 1413 })
+    expect(wizard.phase.value).toBe('confirm')
+    expect(wizard.points.value[0]).toEqual(
+      expect.objectContaining({ point_role: 'reference' }),
+    )
+
+    // Submit: Should call with ec_1point method and expected_points=1
+    await wizard.submitCalibration()
+    expect(calibrationApiMock.startSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'ec_1point',
+        expected_points: 1,
+      }),
+    )
+    expect(wizard.phase.value).toBe('done')
+    expect(wizard.calibrationResult.value?.calibration).toEqual(
+      expect.objectContaining({ cell_factor: 1.05 }),
+    )
+  })
+
+  it('EC-1-Punkt: point2-Phase wird nicht angezeigt (expectedPoints=1)', () => {
+    const wizard = useCalibrationWizard({
+      skipSelect: true,
+      espId: 'ESP_EC_001',
+      gpio: 7,
+      sensorType: 'ec',
+    })
+
+    expect(wizard.currentPreset.value?.expectedPoints).toBe(1)
+    expect(wizard.currentPreset.value?.calibrationMethod).toBe('ec_1point')
+  })
 })

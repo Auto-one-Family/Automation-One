@@ -28,7 +28,8 @@ export type TypeFilter = 'all' | 'mock' | 'real'
 /** Widget type identifiers */
 export type WidgetType = 'line-chart' | 'gauge' | 'sensor-card' |
   'historical' | 'actuator-card' | 'actuator-runtime' |
-  'esp-health' | 'alarm-list' | 'multi-sensor' | 'statistics'
+  'esp-health' | 'alarm-list' | 'multi-sensor' | 'statistics' |
+  'fertigation-pair'
 
 /** Single widget configuration */
 export interface DashboardWidget {

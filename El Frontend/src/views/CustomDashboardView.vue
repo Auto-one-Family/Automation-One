@@ -7,8 +7,8 @@ defineOptions({ name: 'CustomDashboardView' })
  * Route: /editor, /editor/:dashboardId
  *
  * Features:
- * - GridStack.js 12-column layout grid
- * - Widget catalog sidebar (drag to add)
+ * - GridStack.js 12-column layout grid (immer Bearbeiten — kein separater Ansichtsmodus)
+ * - Widget catalog sidebar (per +-Button ein-/ausblendbar)
  * - Widget configuration inline
  * - Layout save/load from localStorage
  * - Multiple named layouts
@@ -21,7 +21,7 @@ import { GridStack, type GridItemHTMLElement, type GridStackNode } from 'gridsta
 import 'gridstack/dist/gridstack.min.css'
 import {
   LayoutGrid, Plus, Trash2, Download, Upload,
-  ChevronDown, Pencil, Eye, MonitorPlay, MapPin, AlertTriangle,
+  ChevronDown, MonitorPlay, MapPin, AlertTriangle,
 } from 'lucide-vue-next'
 import { useDashboardStore, type WidgetType } from '@/shared/stores/dashboard.store'
 import { useUiStore } from '@/shared/stores'
@@ -34,7 +34,6 @@ import { findFirstFreePosition } from '@/utils/gridLayout'
 import ViewTabBar from '@/components/common/ViewTabBar.vue'
 import WidgetConfigPanel from '@/components/dashboard-widgets/WidgetConfigPanel.vue'
 import BaseModal from '@/shared/design/primitives/BaseModal.vue'
-import InlineDashboardPanel from '@/components/dashboard/InlineDashboardPanel.vue'
 
 const route = useRoute()
 const dashStore = useDashboardStore()
@@ -102,10 +101,9 @@ let grid: GridStack | null = null
 const gridContainer = ref<HTMLElement | null>(null)
 
 // UI State
-const showCatalog = ref(false)
+const showCatalog = ref(true)
 const showLayoutDropdown = ref(false)
 const newLayoutName = ref('')
-const isEditing = ref(false)
 const layoutSelectorRef = ref<HTMLElement | null>(null)
 
 // Guard: prevents autoSave during loadWidgetsToGrid (race condition with grid.on('removed'))
@@ -310,7 +308,7 @@ function initGrid() {
 
   // Handle external widget drops from FAB QuickWidgetPanel (HTML5 DnD)
   grid.on('dropped', (_event: Event, _previousNode: GridStackNode, newNode: GridStackNode) => {
-    if (!newNode.el || !isEditing.value) return
+    if (!newNode.el) return
 
     const payload = dragStore.dashboardWidgetPayload
     if (!payload) return
@@ -322,31 +320,9 @@ function initGrid() {
     dragStore.endDrag()
   })
 
-  // Apply edit mode state after init (default: view mode = locked)
-  if (!isEditing.value) {
-    grid.enableMove(false)
-    grid.enableResize(false)
-    grid.opts.removable = false
-  }
-}
-
-/** Toggle between edit and view mode */
-function toggleEditMode() {
-  isEditing.value = !isEditing.value
-  if (!grid) return
-
-  if (isEditing.value) {
-    grid.enableMove(true)
-    grid.enableResize(true)
-    grid.opts.removable = true
-    showCatalog.value = true
-  } else {
-    grid.enableMove(false)
-    grid.enableResize(false)
-    grid.opts.removable = false
-    showCatalog.value = false
-    configPanelOpen.value = false
-  }
+  grid.enableMove(true)
+  grid.enableResize(true)
+  grid.opts.removable = true
 }
 
 // Re-initialize GridStack when a layout is created or switched.
@@ -370,7 +346,7 @@ function retrySyncCurrentLayout() {
 /** Handle keyboard widget placement from FAB (Space/Enter on widget chip) */
 function handleWidgetPlaceAnnounced(e: Event): void {
   const detail = (e as CustomEvent).detail
-  if (detail?.type && isEditing.value) {
+  if (detail?.type) {
     addWidget(detail.type)
   }
 }
@@ -466,7 +442,7 @@ onActivated(() => {
     nextTick(() => initGrid())
   }
   // keep-alive return path: rebuild GridStack widget mounts in edit mode
-  else if (isEditing.value && dashStore.activeLayout) {
+  else if (dashStore.activeLayout) {
     nextTick(() => loadWidgetsToGrid(dashStore.activeLayout!.widgets))
   }
   // Restore breadcrumb
@@ -633,8 +609,6 @@ function handleCreateLayout() {
     isLoadingWidgets = false
   }
 
-  // New dashboards open directly in edit mode
-  isEditing.value = true
   showCatalog.value = true
   if (grid) {
     grid.enableMove(true)
@@ -650,8 +624,6 @@ function handleCreateFromTemplate(templateId: string) {
   if (!layout) return
   showLayoutDropdown.value = false
 
-  // ALL new dashboards open in edit mode (template widgets have sensorId: undefined)
-  isEditing.value = true
   showCatalog.value = true
   nextTick(() => {
     if (grid) {
@@ -978,24 +950,21 @@ function executeBulkDelete() {
 
         <button
           v-if="dashStore.activeLayoutId"
-          :class="['dashboard-builder__tool-btn', { 'dashboard-builder__tool-btn--active': isEditing }]"
-          :title="isEditing ? 'Ansichtsmodus' : 'Bearbeiten'"
-          @click="toggleEditMode"
+          :class="['dashboard-builder__tool-btn', { 'dashboard-builder__tool-btn--active': showCatalog }]"
+          title="Widget-Katalog ein- oder ausblenden"
+          aria-label="Widget-Katalog ein- oder ausblenden"
+          @click="showCatalog = !showCatalog"
         >
-          <Pencil v-if="isEditing" class="w-4 h-4" />
-          <Eye v-else class="w-4 h-4" />
-        </button>
-        <button v-if="isEditing" class="dashboard-builder__tool-btn" title="Katalog" @click="showCatalog = !showCatalog">
           <Plus class="w-4 h-4" />
         </button>
         <button class="dashboard-builder__tool-btn" title="Exportieren" @click="handleExport">
           <Download class="w-4 h-4" />
         </button>
-        <button v-if="isEditing" class="dashboard-builder__tool-btn" title="Importieren" @click="handleImport">
+        <button class="dashboard-builder__tool-btn" title="Importieren" @click="handleImport">
           <Upload class="w-4 h-4" />
         </button>
         <button
-          v-if="dashStore.activeLayoutId && isEditing"
+          v-if="dashStore.activeLayoutId"
           class="dashboard-builder__tool-btn dashboard-builder__tool-btn--danger"
           title="Dashboard löschen"
           @click="handleDeleteLayout"
@@ -1022,7 +991,7 @@ function executeBulkDelete() {
 
     <div class="dashboard-builder__content">
       <!-- Widget Catalog Sidebar (only in edit mode) -->
-      <aside v-if="showCatalog && isEditing" class="dashboard-builder__catalog">
+      <aside v-if="showCatalog" class="dashboard-builder__catalog">
         <h3 class="dashboard-builder__catalog-title">Widget-Katalog</h3>
         <p v-if="!dashStore.activeLayoutId" class="dashboard-builder__catalog-hint">
           Erstelle zuerst ein Dashboard
@@ -1033,7 +1002,7 @@ function executeBulkDelete() {
             v-for="widget in widgets"
             :key="widget.type"
             class="dashboard-builder__catalog-item"
-            :disabled="!dashStore.activeLayoutId || !isEditing"
+            :disabled="!dashStore.activeLayoutId"
             @click="addWidget(widget.type)"
           >
             <component :is="widget.icon" class="w-4 h-4 flex-shrink-0" />
@@ -1062,38 +1031,13 @@ function executeBulkDelete() {
           <p v-else>Erstelle ein neues Dashboard oder wähle ein bestehendes aus.</p>
         </div>
 
-        <!-- Empty-State: leeres Dashboard im View-Mode -->
-        <div
-          v-else-if="dashStore.activeLayout && dashStore.activeLayout.widgets.length === 0 && !isEditing"
-          class="dashboard-builder__empty-state"
-        >
-          <LayoutGrid class="w-12 h-12" style="opacity: 0.3" />
-          <p class="dashboard-builder__empty-title">Noch keine Widgets</p>
-          <p class="dashboard-builder__empty-hint">
-            Wechsle in den Bearbeitungsmodus um Widgets hinzuzufuegen.
-          </p>
-          <button class="dashboard-builder__empty-cta" @click="toggleEditMode">
-            <Pencil class="w-4 h-4" />
-            Bearbeiten
-          </button>
-        </div>
-
         <div v-else>
-          <!-- View-Modus: InlineDashboardPanel als echter Preview (kein GridStack-Overhead) -->
-          <div v-if="!isEditing" class="dashboard-builder__preview">
-            <InlineDashboardPanel
-              :layout-id="dashStore.activeLayoutId!"
-              mode="inline"
-            />
-          </div>
-          <!-- Edit-Modus: GridStack (v-show damit GridStack-Lifecycle erhalten bleibt) -->
           <div
-            v-show="isEditing"
             ref="gridContainer"
             :class="[
               'grid-stack',
-              { 'grid-stack--editing': isEditing },
-              { 'grid-stack--drop-target': isEditing && dragStore.isDraggingDashboardWidget },
+              'grid-stack--editing',
+              { 'grid-stack--drop-target': dragStore.isDraggingDashboardWidget },
             ]"
           />
         </div>
@@ -1600,24 +1544,6 @@ function executeBulkDelete() {
   height: 100%;
   gap: var(--space-3);
   color: var(--color-text-muted);
-  text-align: center;
-}
-
-/* Empty state for dashboard with 0 widgets in view mode */
-.dashboard-builder__preview {
-  width: 100%;
-  min-height: 400px;
-  padding: var(--space-4);
-}
-
-.dashboard-builder__empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  min-height: 300px;
-  color: var(--color-text-secondary);
   text-align: center;
 }
 

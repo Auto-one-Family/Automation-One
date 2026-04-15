@@ -330,6 +330,7 @@ const router = createRouter({
 // Dynamic import failure recovery — when browser runs out of resources
 // (ERR_INSUFFICIENT_RESOURCES) or chunks fail to load, reload the page once.
 const RELOAD_COOLDOWN_MS = 10_000
+let scheduledReloadTimer: number | null = null
 router.onError((error, to) => {
   if (
     error.message?.includes('Failed to fetch dynamically imported module') ||
@@ -338,9 +339,25 @@ router.onError((error, to) => {
   ) {
     const lastReload = sessionStorage.getItem('__route_reload_ts')
     const now = Date.now()
-    if (lastReload && now - Number(lastReload) < RELOAD_COOLDOWN_MS) {
-      console.error('[Router] Dynamic import failed repeatedly, not reloading again', to.fullPath)
+    const elapsedSinceReload = lastReload ? now - Number(lastReload) : RELOAD_COOLDOWN_MS
+    if (elapsedSinceReload < RELOAD_COOLDOWN_MS) {
+      const retryInMs = RELOAD_COOLDOWN_MS - elapsedSinceReload
+      if (scheduledReloadTimer !== null) {
+        window.clearTimeout(scheduledReloadTimer)
+      }
+      scheduledReloadTimer = window.setTimeout(() => {
+        sessionStorage.setItem('__route_reload_ts', String(Date.now()))
+        window.location.assign(to.fullPath)
+      }, retryInMs)
+      console.warn('[Router] Dynamic import failed repeatedly, scheduled reload retry', {
+        path: to.fullPath,
+        retry_in_ms: retryInMs,
+      })
       return
+    }
+    if (scheduledReloadTimer !== null) {
+      window.clearTimeout(scheduledReloadTimer)
+      scheduledReloadTimer = null
     }
     sessionStorage.setItem('__route_reload_ts', String(now))
     window.location.assign(to.fullPath)

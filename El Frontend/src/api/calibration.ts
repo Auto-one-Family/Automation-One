@@ -4,7 +4,7 @@ import api from './index'
 export interface CalibrationPoint {
   raw: number
   reference: number
-  point_role?: 'dry' | 'wet'
+  point_role?: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference'
   point_id?: string
 }
 
@@ -38,7 +38,7 @@ export interface CalibrationSessionResponse {
   expected_points: number
   points_collected?: number
   calibration_points: {
-    points: Array<CalibrationPoint & { id?: string; point_role?: 'dry' | 'wet' }>
+    points: Array<CalibrationPoint & { id?: string; point_role?: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference' }>
     history?: Array<Record<string, unknown>>
   } | null
   calibration_result: Record<string, unknown> | null
@@ -61,7 +61,7 @@ export interface StartSessionRequest {
 export interface AddPointRequest {
   raw_value: number
   reference_value: number
-  point_role: 'dry' | 'wet'
+  point_role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference'
   overwrite?: boolean
   quality?: string
   intent_id?: string
@@ -72,7 +72,7 @@ export interface AddPointRequest {
 export interface UpdatePointRequest {
   raw_value: number
   reference_value: number
-  point_role: 'dry' | 'wet'
+  point_role: 'dry' | 'wet' | 'buffer_high' | 'buffer_low' | 'reference'
   quality?: string
   intent_id?: string
   measured_at?: string

@@ -537,6 +537,33 @@ export const VIRTUAL_SENSOR_META: Record<string, { sources: string[]; formula: s
 }
 
 /**
+ * Air-VPD (kPa) from dry-bulb temperature (°C) and relative humidity (%RH).
+ * Tetens-style saturation vapor pressure (kPa), aligned with {@link VIRTUAL_SENSOR_META} vpd.
+ */
+export function computeAirVpdKpaFromTempRh(tempC: number, rhPercent: number): number | null {
+  if (!Number.isFinite(tempC) || !Number.isFinite(rhPercent)) return null
+  if (rhPercent < 0 || rhPercent > 100) return null
+  if (tempC < -40 || tempC > 60) return null
+  const es = 0.6108 * Math.exp((17.27 * tempC) / (tempC + 237.3))
+  const ea = (rhPercent / 100) * es
+  const vpd = es - ea
+  if (!Number.isFinite(vpd) || vpd < 0) return null
+  return vpd
+}
+
+/**
+ * Zonal VPD from Monitor L1 Ø-KPI buckets (temperature + humidity category averages).
+ */
+export function computeZoneVpdKpaFromKpiSensorTypes(
+  sensorTypes: Array<{ type: string; avg: number; count: number }>,
+): number | null {
+  const t = sensorTypes.find(s => s.type === 'temperature')
+  const rh = sensorTypes.find(s => s.type === 'humidity')
+  if (!t || !rh || t.count === 0 || rh.count === 0) return null
+  return computeAirVpdKpaFromTempRh(t.avg, rh.avg)
+}
+
+/**
  * Get the correct unit for a sensor type
  * @param sensorType - The sensor type key (e.g., 'pH', 'DS18B20')
  * @returns The unit string or 'raw' if unknown
@@ -1273,12 +1300,22 @@ export function groupSensorsByBaseType(sensors: RawSensor[]): GroupedSensor[] {
 /**
  * Abstract sensor category for zone aggregation (device-independent)
  */
-type AggCategory = 'temperature' | 'humidity' | 'pressure' | 'light' | 'co2' | 'moisture' | 'ph' | 'ec' | 'flow' | 'other'
+export type AggCategory =
+  | 'temperature'
+  | 'humidity'
+  | 'pressure'
+  | 'light'
+  | 'co2'
+  | 'moisture'
+  | 'ph'
+  | 'ec'
+  | 'flow'
+  | 'other'
 
 /**
  * Map a sensor_type to an abstract category for aggregation
  */
-function getSensorAggCategory(sensorType: string): AggCategory {
+export function getSensorAggCategory(sensorType: string): AggCategory {
   const lower = sensorType.toLowerCase()
   if (lower.includes('temp') || lower === 'ds18b20') return 'temperature'
   if (lower.includes('humid')) return 'humidity'
@@ -1349,6 +1386,88 @@ const CATEGORY_UNITS: Record<AggCategory, string> = {
   ec: 'µS/cm',
   flow: 'L/min',
   other: '',
+}
+
+/**
+ * Y-Achsen-Defaults für kompakte Gauges, wenn der Wert aus {@link aggregateZoneSensors}
+ * (AggCategory) kommt — konsistent mit ZoneTileCard-KPI, nicht mit Einzelsensor-IDs.
+ */
+const AGG_CATEGORY_GAUGE_RANGE: Record<Exclude<AggCategory, 'other'>, { min: number; max: number }> = {
+  temperature: { min: -20, max: 55 },
+  humidity: { min: 0, max: 100 },
+  pressure: { min: 800, max: 1100 },
+  light: { min: 0, max: 100_000 },
+  co2: { min: 300, max: 5000 },
+  moisture: { min: 0, max: 100 },
+  ph: { min: 0, max: 14 },
+  ec: { min: 0, max: 5000 },
+  flow: { min: 0, max: 100 },
+}
+
+export function getAggCategoryGaugeRange(category: AggCategory): { min: number; max: number } | null {
+  if (category === 'other') return null
+  return AGG_CATEGORY_GAUGE_RANGE[category]
+}
+
+/**
+ * Monitor L1 zone-tile Auto-Gauges (Preset „Klima (Ø)“): Pick-Reihenfolge für `ensureZoneTileDashboard` in MonitorView.
+ * Kein `vpd`: VPD wird in {@link aggregateZoneSensors} nicht als Kategorie geführt — ein VPD-Spot-Gauge würde die Ø-KPI-Zeile nicht spiegeln.
+ */
+export const ZONE_TILE_AUTO_SENSOR_PRIORITY: readonly string[] = [
+  'temp', 'humi', 'ph', 'ec', 'co2', 'soil', 'light', 'pressure', 'flow',
+]
+
+/** Sort key for {@link ZONE_TILE_AUTO_SENSOR_PRIORITY} (Monitor L1 zone-tile lead sensor pick). */
+export function getZoneTileSensorPriority(sensorType: string): number {
+  const st = sensorType.toLowerCase()
+  const idx = ZONE_TILE_AUTO_SENSOR_PRIORITY.findIndex(p => st.includes(p))
+  return idx >= 0 ? idx : ZONE_TILE_AUTO_SENSOR_PRIORITY.length
+}
+
+/**
+ * Monitor L2 subzone accordion header: KPI string aligned with {@link aggregateZoneSensors}
+ * (same AggCategory buckets, units, priority, max 3 segments). Does not mix unrelated
+ * physical quantities that shared SENSOR_TYPE_CONFIG.category "air".
+ */
+export function formatSubzoneKpiLine(
+  sensors: { sensor_type: string; raw_value: number | null; unit: string; quality: string }[],
+): string {
+  const buckets = new Map<AggCategory, { sum: number; count: number }>()
+
+  for (const s of sensors) {
+    if (s.raw_value === null || s.raw_value === undefined) continue
+    if (s.quality === 'stale') continue
+    if (s.raw_value === 0 && (!s.quality || s.quality === 'unknown')) continue
+    if (s.sensor_type === 'vpd' && s.raw_value <= 0) continue
+
+    const category = getSensorAggCategory(s.sensor_type)
+    if (category === 'other') continue
+
+    if (!buckets.has(category)) {
+      buckets.set(category, { sum: 0, count: 0 })
+    }
+    const entry = buckets.get(category)!
+    entry.sum += s.raw_value
+    entry.count++
+  }
+
+  const ordered: { category: AggCategory; avg: number }[] = []
+  for (const [category, v] of buckets) {
+    if (v.count === 0) continue
+    ordered.push({
+      category,
+      avg: v.count > 1 ? v.sum / v.count : v.sum,
+    })
+  }
+  ordered.sort((a, b) => CATEGORY_PRIORITY[a.category] - CATEGORY_PRIORITY[b.category])
+
+  const parts: string[] = []
+  for (const { category, avg } of ordered.slice(0, 3)) {
+    const unit = CATEGORY_UNITS[category]
+    const num = Number.isInteger(avg) ? String(avg) : avg.toFixed(1)
+    parts.push(`${num}${unit}`)
+  }
+  return parts.join(' · ')
 }
 
 /**

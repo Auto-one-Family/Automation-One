@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CheckCircle2, AlertTriangle, Minus, XCircle, Zap } from 'lucide-vue-next'
+import { RouterLink } from 'vue-router'
+import type { RouteLocationRaw } from 'vue-router'
+import { CheckCircle2, AlertTriangle, Minus, XCircle, Zap, Pencil } from 'lucide-vue-next'
 import type { ZoneKPI, ZoneHealthStatus } from '@/composables/useZoneKPIs'
 import { HEALTH_STATUS_CONFIG as DEFAULT_HEALTH_CONFIG } from '@/composables/useZoneKPIs'
 import type { LogicRule } from '@/types/logic'
 import { formatNumber } from '@/utils/formatters'
+import { useAuthStore } from '@/shared/stores/auth.store'
 
 interface Props {
   zone: ZoneKPI
@@ -13,6 +16,8 @@ interface Props {
   rules?: LogicRule[]
   totalRuleCount?: number
   isRuleActive?: (ruleId: string) => boolean
+  /** Editor-Link für zone-tile-Layout (Monitor L1); Klick stoppt Tile-Navigation */
+  zoneTileEditorTo?: RouteLocationRaw | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -20,7 +25,10 @@ const props = withDefaults(defineProps<Props>(), {
   healthConfig: () => DEFAULT_HEALTH_CONFIG,
   rules: () => [],
   totalRuleCount: 0,
+  zoneTileEditorTo: null,
 })
+
+const authStore = useAuthStore()
 
 const hasAnyActiveRule = computed(() => {
   if (!props.isRuleActive || !props.rules.length) return false
@@ -43,6 +51,13 @@ function formatKpiNumber(st: ZoneKPI['aggregation']['sensorTypes'][number]): str
   if (st.count === 0) return '—'
   return formatNumber(st.avg, 1, '—')
 }
+
+/** KPI-Zeile = Zonenmittel (Ø); Zoneinsight darunter = VPD + 24h-Spanne (kein zweites Klima-Tacho als Standard). */
+const ZONE_KPI_GROUP_TOOLTIP =
+  'Zonenmittel (Ø): Mittelwert je Kategorie über die Zone; veraltete Werte werden ausgeschlossen. Zoneinsight nutzt dieselbe Ø-Quelle für VPD (T/RH) und eine 24h-Min–Max-Spanne für einen Leittemperatursensor.'
+
+const ZONE_KPI_GROUP_ARIA =
+  'Zonenmittel, Durchschnitt pro Kategorie. Zoneinsight: Vapor Pressure Deficit und Temperaturspanne 24 Stunden.'
 </script>
 
 <template>
@@ -50,16 +65,28 @@ function formatKpiNumber(st: ZoneKPI['aggregation']['sensorTypes'][number]): str
     :class="['monitor-zone-tile', `monitor-zone-tile--${zone.healthStatus}`]"
     @click="handleClick"
   >
-    <!-- Header: Zone Name + Status Ampel -->
+    <!-- Header: Zone Name + Editor (zone-tile) + Status Ampel -->
     <div class="monitor-zone-tile__header">
       <h3 class="monitor-zone-tile__name">{{ zone.zoneName }}</h3>
-      <span :class="['monitor-zone-tile__status', healthConfig[zone.healthStatus].colorClass]">
-        <CheckCircle2 v-if="zone.healthStatus === 'ok'" class="w-3.5 h-3.5" />
-        <AlertTriangle v-else-if="zone.healthStatus === 'warning'" class="w-3.5 h-3.5" />
-        <Minus v-else-if="zone.healthStatus === 'empty'" class="w-3.5 h-3.5" />
-        <XCircle v-else class="w-3.5 h-3.5" />
-        <span>{{ healthConfig[zone.healthStatus].label }}</span>
-      </span>
+      <div class="monitor-zone-tile__header-actions">
+        <RouterLink
+          v-if="zoneTileEditorTo && authStore.isAuthenticated"
+          :to="zoneTileEditorTo"
+          class="monitor-zone-tile__editor"
+          title="Zone-Kachel-Dashboard im Editor anpassen"
+          aria-label="Zone-Kachel-Dashboard im Editor anpassen"
+          @click.stop
+        >
+          <Pencil class="monitor-zone-tile__editor-icon" />
+        </RouterLink>
+        <span :class="['monitor-zone-tile__status', healthConfig[zone.healthStatus].colorClass]">
+          <CheckCircle2 v-if="zone.healthStatus === 'ok'" class="w-3.5 h-3.5" />
+          <AlertTriangle v-else-if="zone.healthStatus === 'warning'" class="w-3.5 h-3.5" />
+          <Minus v-else-if="zone.healthStatus === 'empty'" class="w-3.5 h-3.5" />
+          <XCircle v-else class="w-3.5 h-3.5" />
+          <span>{{ healthConfig[zone.healthStatus].label }}</span>
+        </span>
+      </div>
     </div>
     <!-- Health Reason (only for warning/alarm) -->
     <div v-if="zone.healthReason" class="monitor-zone-tile__reason">
@@ -68,7 +95,13 @@ function formatKpiNumber(st: ZoneKPI['aggregation']['sensorTypes'][number]): str
 
     <!-- KPIs from aggregateZoneSensors -->
     <slot name="kpis">
-      <div v-if="zone.aggregation.sensorTypes.length > 0" class="monitor-zone-tile__kpis">
+      <div
+        v-if="zone.aggregation.sensorTypes.length > 0"
+        class="monitor-zone-tile__kpis"
+        role="group"
+        :title="ZONE_KPI_GROUP_TOOLTIP"
+        :aria-label="ZONE_KPI_GROUP_ARIA"
+      >
         <div
           v-for="st in zone.aggregation.sensorTypes"
           :key="st.type"
@@ -187,6 +220,43 @@ function formatKpiNumber(st: ZoneKPI['aggregation']['sensorTypes'][number]): str
   gap: var(--space-2);
 }
 
+.monitor-zone-tile__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.monitor-zone-tile__editor {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: calc(-1 * var(--space-2));
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+}
+
+.monitor-zone-tile__editor:hover,
+.monitor-zone-tile__editor:focus-visible {
+  color: var(--color-iridescent-2);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-iridescent-2);
+}
+
+.monitor-zone-tile__editor-icon {
+  width: 18px;
+  height: 18px;
+}
+
+@media (hover: none) {
+  .monitor-zone-tile__editor {
+    color: var(--color-text-secondary);
+  }
+}
+
 .monitor-zone-tile__name {
   font-size: var(--text-base);
   font-weight: 600;
@@ -212,7 +282,6 @@ function formatKpiNumber(st: ZoneKPI['aggregation']['sensorTypes'][number]): str
   font-weight: 600;
   white-space: nowrap;
   flex-shrink: 0;
-  margin-left: auto;
   align-self: flex-start;
 }
 

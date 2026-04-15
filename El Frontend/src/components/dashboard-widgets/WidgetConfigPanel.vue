@@ -69,9 +69,13 @@ const hasStatisticsOptions = computed(() =>
   props.widgetType === 'statistics'
 )
 
-// Zone 3 is visible only for statistics widgets
+const isFertigationPair = computed(() =>
+  props.widgetType === 'fertigation-pair'
+)
+
+// Zone 3 is visible only for statistics or fertigation-pair widgets
 const hasZone3 = computed(() =>
-  hasStatisticsOptions.value
+  hasStatisticsOptions.value || isFertigationPair.value
 )
 
 // Zone filter for sensor selection — defaults to dashboard zoneId (PA-02c)
@@ -248,6 +252,7 @@ const widgetTypeLabels: Record<string, string> = {
   'alarm-list': 'Alarm-Liste',
   'multi-sensor': 'Multi-Sensor-Chart',
   'statistics': 'Statistik',
+  'fertigation-pair': 'Fertigation-Paar',
 }
 </script>
 
@@ -349,6 +354,80 @@ const widgetTypeLabels: Record<string, string> = {
             :value="a.id"
           >{{ a.label }}</option>
         </select>
+      </div>
+
+      <!-- ═══ Fertigation-Pair Config ═══ -->
+
+      <!-- Inflow Sensor Selection -->
+      <div v-if="isFertigationPair" class="widget-config-panel__field">
+        <label class="widget-config-panel__label">Inflow-Sensor</label>
+        <select
+          class="widget-config-panel__select"
+          :value="localConfig.inflowSensorId || ''"
+          @change="updateField('inflowSensorId', ($event.target as HTMLSelectElement).value)"
+        >
+          <option value="" disabled>— Inflow-Sensor wählen —</option>
+          <template v-for="zoneGroup in groupedSensorOptions" :key="zoneGroup.zoneId ?? '__unassigned'">
+            <template v-for="subgroup in zoneGroup.subgroups" :key="`${zoneGroup.zoneId}_${subgroup.subzoneId ?? '__nosub'}`">
+              <optgroup :label="subgroup.label ? `${zoneGroup.label} / ${subgroup.label}` : zoneGroup.label">
+                <option
+                  v-for="opt in subgroup.options"
+                  :key="opt.value"
+                  :value="opt.value"
+                >{{ opt.label }}</option>
+              </optgroup>
+            </template>
+          </template>
+        </select>
+      </div>
+
+      <!-- Runoff Sensor Selection -->
+      <div v-if="isFertigationPair" class="widget-config-panel__field">
+        <label class="widget-config-panel__label">Runoff-Sensor</label>
+        <select
+          class="widget-config-panel__select"
+          :value="localConfig.runoffSensorId || ''"
+          @change="updateField('runoffSensorId', ($event.target as HTMLSelectElement).value)"
+        >
+          <option value="" disabled>— Runoff-Sensor wählen —</option>
+          <template v-for="zoneGroup in groupedSensorOptions" :key="zoneGroup.zoneId ?? '__unassigned'">
+            <template v-for="subgroup in zoneGroup.subgroups" :key="`${zoneGroup.zoneId}_${subgroup.subzoneId ?? '__nosub'}`">
+              <optgroup :label="subgroup.label ? `${zoneGroup.label} / ${subgroup.label}` : zoneGroup.label">
+                <option
+                  v-for="opt in subgroup.options"
+                  :key="opt.value"
+                  :value="opt.value"
+                >{{ opt.label }}</option>
+              </optgroup>
+            </template>
+          </template>
+        </select>
+      </div>
+
+      <!-- Sensor Type (EC / pH) -->
+      <div v-if="isFertigationPair" class="widget-config-panel__field">
+        <label class="widget-config-panel__label">Sensortyp</label>
+        <select
+          class="widget-config-panel__select"
+          :value="localConfig.sensorType || 'ec'"
+          @change="updateField('sensorType', ($event.target as HTMLSelectElement).value)"
+        >
+          <option value="ec">EC (Leitfähigkeit)</option>
+          <option value="ph">pH</option>
+        </select>
+      </div>
+
+      <!-- Time Range (Fertigation-Pair) -->
+      <div v-if="isFertigationPair" class="widget-config-panel__field">
+        <label class="widget-config-panel__label">Zeitraum</label>
+        <div class="widget-config-panel__chips">
+          <button
+            v-for="range in ['1h', '6h', '24h', '7d', '30d']"
+            :key="range"
+            :class="['widget-config-panel__chip', { 'widget-config-panel__chip--active': localConfig.timeRange === range }]"
+            @click="updateField('timeRange', range)"
+          >{{ range }}</button>
+        </div>
       </div>
 
       <!-- Time Range (Historical, Statistics) -->
@@ -505,6 +584,30 @@ const widgetTypeLabels: Record<string, string> = {
           <span>Erweitert</span>
         </summary>
         <div class="config-section__body">
+
+          <!-- Fertigation-Pair: Schwellen -->
+          <template v-if="isFertigationPair">
+            <div class="widget-config-panel__field">
+              <label class="widget-config-panel__label">Warning-Schwelle (Differenz)</label>
+              <input
+                type="number"
+                step="0.1"
+                class="widget-config-panel__input widget-config-panel__input--small"
+                :value="localConfig.diffWarningThreshold ?? 0.5"
+                @input="updateField('diffWarningThreshold', ($event.target as HTMLInputElement).value ? Number(($event.target as HTMLInputElement).value) : 0.5)"
+              />
+            </div>
+            <div class="widget-config-panel__field">
+              <label class="widget-config-panel__label">Critical-Schwelle (Differenz)</label>
+              <input
+                type="number"
+                step="0.1"
+                class="widget-config-panel__input widget-config-panel__input--small"
+                :value="localConfig.diffCriticalThreshold ?? 0.8"
+                @input="updateField('diffCriticalThreshold', ($event.target as HTMLInputElement).value ? Number(($event.target as HTMLInputElement).value) : 0.8)"
+              />
+            </div>
+          </template>
 
           <!-- Statistics: Standard deviation -->
           <div class="widget-config-panel__field">

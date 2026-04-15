@@ -197,7 +197,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { debugApi, type MaintenanceStatusResponse, type MaintenanceConfigResponse } from '@/api/debug'
 import BaseSkeleton from '@/shared/design/primitives/BaseSkeleton.vue'
 import { createLogger } from '@/utils/logger'
@@ -208,6 +208,7 @@ const loading = ref(true)
 const status = ref<MaintenanceStatusResponse | null>(null)
 const config = ref<MaintenanceConfigResponse | null>(null)
 const triggering = ref<string | null>(null)
+let refreshInterval: ReturnType<typeof setInterval> | null = null
 
 async function loadData() {
   loading.value = true
@@ -264,7 +265,14 @@ function formatDate(dateStr: string | null): string {
 onMounted(() => {
   loadData()
   // Auto-refresh alle 30 Sekunden
-  setInterval(loadData, 30000)
+  refreshInterval = setInterval(loadData, 30000)
+})
+
+onUnmounted(() => {
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
+    refreshInterval = null
+  }
 })
 </script>
 

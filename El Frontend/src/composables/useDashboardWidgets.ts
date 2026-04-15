@@ -10,7 +10,7 @@
  * and DOM creation/mount/cleanup logic from CustomDashboardView.
  */
 
-import { getCurrentInstance, h, render, type Component, type Ref } from 'vue'
+import { getCurrentInstance, h, render, type Component, type Ref, unref } from 'vue'
 
 // Widget components
 import LineChartWidget from '@/components/dashboard-widgets/LineChartWidget.vue'
@@ -23,10 +23,11 @@ import AlarmListWidget from '@/components/dashboard-widgets/AlarmListWidget.vue'
 import ActuatorRuntimeWidget from '@/components/dashboard-widgets/ActuatorRuntimeWidget.vue'
 import MultiSensorWidget from '@/components/dashboard-widgets/MultiSensorWidget.vue'
 import StatisticsWidget from '@/components/dashboard-widgets/StatisticsWidget.vue'
+import FertigationPairWidget from '@/components/dashboard-widgets/FertigationPairWidget.vue'
 
 // Icons for widget catalog
 import {
-  BarChart3, Gauge, Activity, Zap, Bell, Cpu,
+  BarChart3, Gauge, Activity, Zap, Bell, Cpu, Droplets,
 } from 'lucide-vue-next'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -59,6 +60,11 @@ export interface UseDashboardWidgetsOptions {
   readOnly?: boolean
   /** Zone ID to propagate to widgets for zone-scoped sensor filtering (PA-02c) */
   zoneId?: Ref<string | undefined>
+  /**
+   * When true (Monitor L1 zone-tile `compact` panel), gauge widgets get spot-vs-zone KPI hints.
+   * Ref so keep-alive / prop changes re-mount with correct semantics via existing watch on widgets.
+   */
+  compactTileGaugeSemantics?: Ref<boolean>
 }
 
 export interface UseDashboardWidgetsReturn {
@@ -74,7 +80,7 @@ export interface UseDashboardWidgetsReturn {
 
 // ─── Static Data (shared across all instances) ──────────────────────────────
 
-/** Widget component registry — all 10 types */
+/** Widget component registry — all 11 types */
 const widgetComponentMap: Record<string, Component> = {
   'line-chart': LineChartWidget,
   'gauge': GaugeWidget,
@@ -86,6 +92,7 @@ const widgetComponentMap: Record<string, Component> = {
   'actuator-runtime': ActuatorRuntimeWidget,
   'multi-sensor': MultiSensorWidget,
   'statistics': StatisticsWidget,
+  'fertigation-pair': FertigationPairWidget,
 }
 
 /** Widget type metadata for catalog and auto-generation */
@@ -100,6 +107,7 @@ const WIDGET_TYPE_META: WidgetTypeMeta[] = [
   { type: 'esp-health', label: 'ESP-Health', description: 'Health-Metriken eines ESP32', icon: Cpu, w: 6, h: 3, minW: 4, minH: 3, category: 'System' },
   { type: 'alarm-list', label: 'Alarm-Liste', description: 'Liste aktiver und vergangener Alarme', icon: Bell, w: 4, h: 4, minW: 4, minH: 4, category: 'System' },
   { type: 'statistics', label: 'Statistik', description: 'Min / Avg / Max und Standardabweichung fuer einen Sensor ueber einen Zeitraum', icon: BarChart3, w: 4, h: 3, minW: 3, minH: 2, category: 'Sensoren' },
+  { type: 'fertigation-pair', label: 'Fertigation-Paar', description: 'Inflow vs. Runoff Vergleich (EC/pH) mit Differenz-Trend', icon: Droplets, w: 6, h: 4, minW: 4, minH: 3, category: 'Sensoren' },
 ]
 
 /** Default config per widget type */
@@ -114,6 +122,7 @@ const WIDGET_DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
   'esp-health': {},
   'alarm-list': {},
   'statistics': { timeRange: '7d', showStdDev: true, showQuality: false },
+  'fertigation-pair': { sensorType: 'ec', timeRange: '24h', diffWarningThreshold: 0.5, diffCriticalThreshold: 0.8 },
 }
 
 /** Gear icon SVG (inline, no external dependency) */
@@ -138,6 +147,7 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
     onConfigUpdate,
     readOnly = false,
     zoneId,
+    compactTileGaugeSemantics,
   } = options
 
   // Capture appContext in setup() context — CRITICAL: do not move into callbacks
@@ -237,6 +247,10 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
     // Build props from config
     const props: Record<string, any> = {}
     if (config.sensorId) props.sensorId = config.sensorId
+    if (config.valueSource === 'zone_avg' || config.valueSource === 'sensor') {
+      props.valueSource = config.valueSource
+    }
+    if (config.aggCategory) props.aggCategory = config.aggCategory
     if (config.actuatorId) props.actuatorId = config.actuatorId
     if (config.timeRange) props.timeRange = config.timeRange
     if (config.showThresholds != null) props.showThresholds = config.showThresholds
@@ -259,6 +273,15 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
     if (config.compareSensorType) props.compareSensorType = config.compareSensorType
     if (config.compareZoneId) props.compareZoneId = config.compareZoneId
 
+    // FertigationPairWidget props
+    if (config.inflowSensorId) props.inflowSensorId = config.inflowSensorId
+    if (config.runoffSensorId) props.runoffSensorId = config.runoffSensorId
+    if (config.sensorType) props.sensorType = config.sensorType
+    if (config.diffWarningThreshold != null) props.diffWarningThreshold = config.diffWarningThreshold
+    if (config.diffCriticalThreshold != null) props.diffCriticalThreshold = config.diffCriticalThreshold
+    if (config.referenceBands) props.referenceBands = config.referenceBands
+    if (config.title) props.title = config.title
+
     // readOnly prop for actuator widgets (monitor context = no toggle)
     if (readOnly && type === 'actuator-card') {
       props.readOnly = true
@@ -267,6 +290,15 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
     // Zone ID for zone-scoped sensor filtering (PA-02c)
     if (zoneId?.value) {
       props.zoneId = zoneId.value
+    }
+
+    // L1 zone-tile: Spot-Gauge vs Zonenmittel (gleiche Aggregation wie ZoneTileCard-Ø)
+    if (type === 'gauge' && unref(compactTileGaugeSemantics)) {
+      if (config.valueSource === 'zone_avg') {
+        props.tileZoneAvgSemantics = true
+      } else {
+        props.tileSpotSemantics = true
+      }
     }
 
     // onUpdate:config handler

@@ -116,6 +116,17 @@ let medianIntervalMs = 0
 /** Multiplier: gap if time between points exceeds median * this */
 const GAP_THRESHOLD_MULTIPLIER = 3
 
+function toFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  return undefined
+}
+
 // =============================================================================
 // Gap Detection (8.0-C)
 // =============================================================================
@@ -367,17 +378,23 @@ const chartOptions = computed(() => {
   const annotations: Record<string, any> = {}
 
   if (props.showThresholds && props.thresholds) {
-    if (props.thresholds.alarmLow != null) {
+    const alarmLow = toFiniteNumber(props.thresholds.alarmLow)
+    const warnLow = toFiniteNumber(props.thresholds.warnLow)
+    const warnHigh = toFiniteNumber(props.thresholds.warnHigh)
+    const alarmHigh = toFiniteNumber(props.thresholds.alarmHigh)
+
+    if (alarmLow != null) {
       annotations.alarmLow = {
         type: 'line',
-        yMin: props.thresholds.alarmLow,
-        yMax: props.thresholds.alarmLow,
+        yMin: alarmLow,
+        yMax: alarmLow,
         borderColor: 'rgba(239, 68, 68, 0.6)',
         borderWidth: 1,
         borderDash: [4, 4],
+        borderCapStyle: 'butt',
         label: {
           display: true,
-          content: `Alarm \u2193 ${props.thresholds.alarmLow}`,
+          content: `Alarm \u2193 ${alarmLow}`,
           position: 'start',
           font: { size: 9, family: 'JetBrains Mono' },
           color: 'rgba(239, 68, 68, 0.8)',
@@ -386,39 +403,42 @@ const chartOptions = computed(() => {
       }
     }
 
-    if (props.thresholds.warnLow != null) {
+    if (warnLow != null) {
       annotations.warnLow = {
         type: 'line',
-        yMin: props.thresholds.warnLow,
-        yMax: props.thresholds.warnLow,
+        yMin: warnLow,
+        yMax: warnLow,
         borderColor: 'rgba(234, 179, 8, 0.5)',
         borderWidth: 1,
         borderDash: [4, 4],
+        borderCapStyle: 'butt',
       }
     }
 
-    if (props.thresholds.warnHigh != null) {
+    if (warnHigh != null) {
       annotations.warnHigh = {
         type: 'line',
-        yMin: props.thresholds.warnHigh,
-        yMax: props.thresholds.warnHigh,
+        yMin: warnHigh,
+        yMax: warnHigh,
         borderColor: 'rgba(234, 179, 8, 0.5)',
         borderWidth: 1,
         borderDash: [4, 4],
+        borderCapStyle: 'butt',
       }
     }
 
-    if (props.thresholds.alarmHigh != null) {
+    if (alarmHigh != null) {
       annotations.alarmHigh = {
         type: 'line',
-        yMin: props.thresholds.alarmHigh,
-        yMax: props.thresholds.alarmHigh,
+        yMin: alarmHigh,
+        yMax: alarmHigh,
         borderColor: 'rgba(239, 68, 68, 0.6)',
         borderWidth: 1,
         borderDash: [4, 4],
+        borderCapStyle: 'butt',
         label: {
           display: true,
-          content: `Alarm \u2191 ${props.thresholds.alarmHigh}`,
+          content: `Alarm \u2191 ${alarmHigh}`,
           position: 'start',
           font: { size: 9, family: 'JetBrains Mono' },
           color: 'rgba(239, 68, 68, 0.8)',
@@ -429,17 +449,19 @@ const chartOptions = computed(() => {
   }
 
   // Stats Avg annotation line (8.0-D) — subtler than thresholds
-  if (stats.value) {
+  const avgValue = toFiniteNumber(stats.value?.avg)
+  if (avgValue != null) {
     annotations.avgLine = {
       type: 'line',
-      yMin: stats.value.avg,
-      yMax: stats.value.avg,
+      yMin: avgValue,
+      yMax: avgValue,
       borderColor: 'rgba(176, 176, 192, 0.4)',
       borderWidth: 1,
       borderDash: [6, 3],
+      borderCapStyle: 'butt',
       label: {
         display: true,
-        content: `Avg: ${formatStatValue(stats.value.avg)}${props.unit ? ' ' + props.unit : ''}`,
+        content: `Avg: ${formatStatValue(avgValue)}${props.unit ? ' ' + props.unit : ''}`,
         position: 'end',
         font: { size: 9, family: 'JetBrains Mono' },
         color: 'rgba(176, 176, 192, 0.7)',
@@ -490,6 +512,9 @@ const chartOptions = computed(() => {
     }
   }
 
+  const hasAnnotations = Object.keys(annotations).length > 0
+  const safeAnnotations = hasAnnotations ? annotations : {}
+
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -526,9 +551,9 @@ const chartOptions = computed(() => {
           },
         },
       },
-      annotation: {
-        annotations,
-      },
+      // Keep a stable object shape for chartjs-plugin-annotation.
+      // Some plugin versions can crash when `annotation` toggles to undefined.
+      annotation: { annotations: safeAnnotations },
       // Zoom/Pan (8.0-A)
       zoom: {
         pan: {

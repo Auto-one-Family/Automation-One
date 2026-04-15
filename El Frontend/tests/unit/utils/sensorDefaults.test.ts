@@ -20,7 +20,14 @@ import {
   getDeviceTypeFromSensorType,
   getSensorTypesForDevice,
   inferInterfaceType,
-  getDefaultI2CAddress
+  getDefaultI2CAddress,
+  formatSubzoneKpiLine,
+  getSensorAggCategory,
+  getAggCategoryGaugeRange,
+  ZONE_TILE_AUTO_SENSOR_PRIORITY,
+  computeAirVpdKpaFromTempRh,
+  computeZoneVpdKpaFromKpiSensorTypes,
+  getZoneTileSensorPriority,
 } from '@/utils/sensorDefaults'
 
 // =============================================================================
@@ -581,5 +588,102 @@ describe('getDefaultI2CAddress', () => {
 
   it('returns 0x76 for bmp280', () => {
     expect(getDefaultI2CAddress('bmp280_temp')).toBe(0x76)
+  })
+})
+
+// =============================================================================
+// formatSubzoneKpiLine / getSensorAggCategory (L2 vs zone aggregation SSOT)
+// =============================================================================
+
+describe('getSensorAggCategory', () => {
+  it('maps humidity, pressure, co2 to distinct categories', () => {
+    expect(getSensorAggCategory('sht31_humidity')).toBe('humidity')
+    expect(getSensorAggCategory('bmp280_pressure')).toBe('pressure')
+    expect(getSensorAggCategory('co2')).toBe('co2')
+  })
+
+  it('maps vpd to other', () => {
+    expect(getSensorAggCategory('vpd')).toBe('other')
+  })
+})
+
+describe('formatSubzoneKpiLine', () => {
+  const good = (type: string, value: number) => ({
+    sensor_type: type,
+    raw_value: value,
+    unit: '',
+    quality: 'good',
+  })
+
+  it('does not mix RH, pressure, and CO2 into one average', () => {
+    const line = formatSubzoneKpiLine([
+      good('sht31_humidity', 55),
+      good('bmp280_pressure', 1010),
+      good('co2', 900),
+    ])
+    expect(line).toBe('55%RH · 1010hPa · 900ppm')
+  })
+
+  it('skips stale readings', () => {
+    const line = formatSubzoneKpiLine([
+      good('sht31_temp', 22),
+      { sensor_type: 'sht31_humidity', raw_value: 40, unit: '', quality: 'stale' },
+    ])
+    expect(line).toBe('22°C')
+  })
+
+  it('skips vpd (other category)', () => {
+    const line = formatSubzoneKpiLine([{ sensor_type: 'vpd', raw_value: 1.2, unit: 'kPa', quality: 'good' }])
+    expect(line).toBe('')
+  })
+})
+
+// =============================================================================
+// getAggCategoryGaugeRange / ZONE_TILE_AUTO_SENSOR_PRIORITY (L1 zone-tile MVP)
+// =============================================================================
+
+describe('getAggCategoryGaugeRange', () => {
+  it('returns min/max for temperature', () => {
+    expect(getAggCategoryGaugeRange('temperature')).toEqual({ min: -20, max: 55 })
+  })
+
+  it('returns null for other', () => {
+    expect(getAggCategoryGaugeRange('other')).toBeNull()
+  })
+})
+
+describe('ZONE_TILE_AUTO_SENSOR_PRIORITY', () => {
+  it('does not include vpd token (VPD not in zone Ø aggregation)', () => {
+    expect(ZONE_TILE_AUTO_SENSOR_PRIORITY.some(t => t === 'vpd')).toBe(false)
+    expect(ZONE_TILE_AUTO_SENSOR_PRIORITY.slice(0, 2)).toEqual(['temp', 'humi'])
+  })
+})
+
+describe('computeAirVpdKpaFromTempRh / computeZoneVpdKpaFromKpiSensorTypes', () => {
+  it('computes VPD from T and RH (snapshot)', () => {
+    const v = computeAirVpdKpaFromTempRh(22, 55)
+    expect(v).not.toBeNull()
+    expect(v!).toBeGreaterThan(0.9)
+    expect(v!).toBeLessThan(1.5)
+  })
+
+  it('returns null without both KPI buckets', () => {
+    expect(computeZoneVpdKpaFromKpiSensorTypes([{ type: 'temperature', avg: 22, count: 1 }])).toBeNull()
+  })
+
+  it('computes zone VPD from Ø temperature + humidity rows', () => {
+    const v = computeZoneVpdKpaFromKpiSensorTypes([
+      { type: 'temperature', avg: 22, count: 2 },
+      { type: 'humidity', avg: 55, count: 2 },
+    ])
+    expect(v).not.toBeNull()
+    expect(v!).toBeGreaterThan(0.9)
+    expect(v!).toBeLessThan(1.5)
+  })
+})
+
+describe('getZoneTileSensorPriority', () => {
+  it('orders temp before soil', () => {
+    expect(getZoneTileSensorPriority('soil_moisture')).toBeGreaterThan(getZoneTileSensorPriority('sht31_temp'))
   })
 })

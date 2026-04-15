@@ -301,6 +301,7 @@ const actuatorAnnotations = computed(() => {
   const allEvents: Array<{ timestamp: number; label: string; isOn: boolean; color: string }> = []
   for (const overlay of overlays) {
     for (const event of overlay.events) {
+      if (!Number.isFinite(event.timestamp)) continue
       allEvents.push({ ...event, color: overlay.color })
     }
   }
@@ -317,6 +318,7 @@ const actuatorAnnotations = computed(() => {
       borderColor: 'rgba(76, 175, 80, 0.5)',
       borderWidth: 1,
       borderDash: [4, 4],
+      borderCapStyle: 'butt',
       label: {
         display: false,
         content: `${e.label} ${e.isOn ? 'EIN' : 'AUS'}`,
@@ -326,6 +328,8 @@ const actuatorAnnotations = computed(() => {
   }
   return annotations
 })
+
+const hasActuatorAnnotations = computed(() => Object.keys(actuatorAnnotations.value).length > 0)
 
 /**
  * Compute Y-axis range for sensors with a specific unit.
@@ -351,6 +355,7 @@ function computeRangeForUnit(unit: string): { min: number | undefined; max: numb
 
   const range = maxVal - minVal
   const padding = range > 0 ? range * 0.15 : 1
+
   return {
     min: Math.floor((minVal - padding) * 10) / 10,
     max: Math.ceil((maxVal + padding) * 10) / 10,
@@ -451,6 +456,7 @@ const chartData = computed(() => {
 const chartOptions = computed(() => {
   // Build Y-axis scales (8.0-B)
   const yScales: Record<string, any> = {}
+  const safeActuatorAnnotations = hasActuatorAnnotations.value ? actuatorAnnotations.value : {}
 
   if (needsDualAxis.value) {
     // Left axis (first unit)
@@ -589,10 +595,9 @@ const chartOptions = computed(() => {
           return true
         },
       },
-      // Actuator switch-event annotations (P8-A6c)
-      annotation: {
-        annotations: actuatorAnnotations.value,
-      },
+      // Keep a stable annotation object to avoid plugin runtime crashes
+      // when options are toggled during reactive updates.
+      annotation: { annotations: safeActuatorAnnotations },
       // Zoom/Pan (8.0-A)
       zoom: {
         pan: {
