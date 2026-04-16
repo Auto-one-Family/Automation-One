@@ -80,14 +80,16 @@ AutomationOne ist ein IoT-Framework mit 3 Schichten:
 
 ### Gotchas
 
-- `docker-compose.yml` references external network `shared-infra-net` — must create with `docker network create shared-infra-net` before starting services
-- Docker daemon in Cloud VM needs `fuse-overlayfs` storage driver and `iptables-legacy` for nested container support
-- Backend env vars use `DATABASE_URL` with `postgresql+asyncpg://` scheme (async driver), not plain `postgresql://`
-- Default dev password is `CHANGE_ME_USE_STRONG_PASSWORD` — Docker PostgreSQL container is created with it
-- First-time setup requires admin user via `POST /api/v1/auth/setup` with `{"username":"admin","password":"Admin123!","email":"admin@automationone.dev"}`
-- Backend Poetry virtualenv is in-project at `El Servador/god_kaiser_server/.venv`
-- `Makefile` provides Docker Compose shortcuts; see `make help`
-- ESP32 firmware (`El Trabajante/`) is optional for dev — Mock ESPs via Debug API
+- The `docker-compose.yml` references an external network `shared-infra-net` — create it with `docker network create shared-infra-net` before starting services.
+- The Docker daemon in the Cloud VM needs `fuse-overlayfs` storage driver and `iptables-legacy` for nested container support.
+- Backend env vars use `DATABASE_URL` with `postgresql+asyncpg://` scheme (async driver), not plain `postgresql://`.
+- Default `.env.example` password is `CHANGE_ME_USE_STRONG_PASSWORD` — use for dev; the Docker PostgreSQL container is created with it.
+- Before running `docker compose up`, copy `.env.example` to `.env` at the repo root — Docker Compose reads env vars from it.
+- First-time setup requires creating an admin user via `POST /api/v1/auth/setup` with `{"username":"admin","password":"Admin123!","email":"admin@automationone.dev"}`.
+- Backend Poetry virtualenv is stored in-project at `El Servador/god_kaiser_server/.venv` (configure via `poetry config virtualenvs.in-project true`).
+- The `Makefile` provides Docker Compose shortcuts; see `make help` for targets.
+- ESP32 firmware (`El Trabajante/`) is optional for dev — Mock ESPs can be created via the Debug API.
+- `vue-tsc --noEmit` may show a few pre-existing type issues (unused imports, type cast) — verify whether your change introduced new errors before treating as regressions.
 
 ---
 
