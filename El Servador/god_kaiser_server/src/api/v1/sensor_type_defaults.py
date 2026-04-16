@@ -142,6 +142,8 @@ async def create_defaults(
         supports_on_demand=data.supports_on_demand,
         description=data.description,
         schedule_config=data.schedule_config,
+        measurement_freshness_hours=data.measurement_freshness_hours,
+        calibration_interval_days=data.calibration_interval_days,
     )
 
     await session.commit()
@@ -187,6 +189,8 @@ async def update_defaults(
         supports_on_demand=data.supports_on_demand,
         description=data.description,
         schedule_config=data.schedule_config,
+        measurement_freshness_hours=data.measurement_freshness_hours,
+        calibration_interval_days=data.calibration_interval_days,
     )
 
     if not defaults:

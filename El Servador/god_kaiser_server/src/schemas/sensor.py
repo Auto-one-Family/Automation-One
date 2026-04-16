@@ -230,6 +230,18 @@ class SensorConfigCreate(SensorConfigBase):
         None,
         description="Schedule configuration for scheduled mode",
     )
+    measurement_freshness_hours: Optional[int] = Field(
+        None,
+        ge=1,
+        le=8760,
+        description="Hours after which measurement is stale. NULL = use SensorTypeDefaults",
+    )
+    calibration_interval_days: Optional[int] = Field(
+        None,
+        ge=1,
+        le=365,
+        description="Days between recalibrations. NULL = use SensorTypeDefaults",
+    )
 
     subzone_id: Optional[str] = Field(
         None,
@@ -271,6 +283,8 @@ class SensorConfigCreate(SensorConfigBase):
                 "warning_max": 7.5,
                 "operating_mode": "continuous",
                 "timeout_seconds": 180,
+                "measurement_freshness_hours": 24,
+                "calibration_interval_days": 30,
             }
         }
     )
@@ -318,6 +332,18 @@ class SensorConfigUpdate(BaseModel):
     schedule_config: Optional[Dict[str, Any]] = Field(
         None,
         description="Schedule configuration for scheduled mode",
+    )
+    measurement_freshness_hours: Optional[int] = Field(
+        None,
+        ge=1,
+        le=8760,
+        description="Hours after which measurement is stale. NULL = use SensorTypeDefaults",
+    )
+    calibration_interval_days: Optional[int] = Field(
+        None,
+        ge=1,
+        le=365,
+        description="Days between recalibrations. NULL = use SensorTypeDefaults",
     )
     # =========================================================================
     # MULTI-ZONE DEVICE SCOPE (T13-R2)
@@ -431,6 +457,14 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     config_error_detail: Optional[str] = Field(
         None,
         description="Error detail if config_status=failed",
+    )
+    measurement_freshness_hours: Optional[int] = Field(
+        None,
+        description="Hours after which measurement is stale",
+    )
+    calibration_interval_days: Optional[int] = Field(
+        None,
+        description="Days between recalibrations",
     )
     # Multi-Zone Device Scope (T13-R2)
     device_scope: Optional[str] = Field(

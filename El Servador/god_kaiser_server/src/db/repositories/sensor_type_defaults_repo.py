@@ -48,6 +48,8 @@ class SensorTypeDefaultsRepository:
         supports_on_demand: bool = False,
         description: Optional[str] = None,
         schedule_config: Optional[dict] = None,
+        measurement_freshness_hours: Optional[int] = None,
+        calibration_interval_days: Optional[int] = None,
     ) -> SensorTypeDefaults:
         """
         Create a new sensor type default configuration.
@@ -61,6 +63,8 @@ class SensorTypeDefaultsRepository:
             supports_on_demand: Whether sensor supports manual triggering
             description: User-facing description
             schedule_config: Default schedule configuration
+            measurement_freshness_hours: Freshness limit in hours
+            calibration_interval_days: Calibration interval in days
 
         Returns:
             Created SensorTypeDefaults instance
@@ -77,6 +81,8 @@ class SensorTypeDefaultsRepository:
             supports_on_demand=supports_on_demand,
             description=description,
             schedule_config=schedule_config,
+            measurement_freshness_hours=measurement_freshness_hours,
+            calibration_interval_days=calibration_interval_days,
         )
 
         self.session.add(defaults)
@@ -170,6 +176,8 @@ class SensorTypeDefaultsRepository:
         supports_on_demand: Optional[bool] = None,
         description: Optional[str] = None,
         schedule_config: Optional[dict] = None,
+        measurement_freshness_hours: Optional[int] = None,
+        calibration_interval_days: Optional[int] = None,
     ) -> Optional[SensorTypeDefaults]:
         """
         Update sensor type defaults.
@@ -199,6 +207,10 @@ class SensorTypeDefaultsRepository:
             defaults.description = description
         if schedule_config is not None:
             defaults.schedule_config = schedule_config
+        if measurement_freshness_hours is not None:
+            defaults.measurement_freshness_hours = measurement_freshness_hours
+        if calibration_interval_days is not None:
+            defaults.calibration_interval_days = calibration_interval_days
 
         await self.session.flush()
         await self.session.refresh(defaults)
@@ -258,6 +270,8 @@ class SensorTypeDefaultsRepository:
             "timeout_seconds": 180,
             "timeout_warning_enabled": True,
             "supports_on_demand": False,
+            "measurement_freshness_hours": None,
+            "calibration_interval_days": None,
         }
         source = "system_default"
 
@@ -269,11 +283,18 @@ class SensorTypeDefaultsRepository:
             effective["timeout_seconds"] = type_defaults.timeout_seconds
             effective["timeout_warning_enabled"] = type_defaults.timeout_warning_enabled
             effective["supports_on_demand"] = type_defaults.supports_on_demand
+            if hasattr(type_defaults, "measurement_freshness_hours"):
+                effective["measurement_freshness_hours"] = type_defaults.measurement_freshness_hours
+            if hasattr(type_defaults, "calibration_interval_days"):
+                effective["calibration_interval_days"] = type_defaults.calibration_interval_days
             source = "type_default"
 
         # Instance override (highest priority)
         if instance_override:
-            for key in ["operating_mode", "timeout_seconds", "timeout_warning_enabled"]:
+            for key in [
+                "operating_mode", "timeout_seconds", "timeout_warning_enabled",
+                "measurement_freshness_hours", "calibration_interval_days",
+            ]:
                 if instance_override.get(key) is not None:
                     effective[key] = instance_override[key]
                     source = "instance"

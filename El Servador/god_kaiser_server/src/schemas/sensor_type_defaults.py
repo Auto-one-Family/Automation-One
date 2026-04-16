@@ -89,6 +89,20 @@ class SensorTypeDefaultsCreate(BaseModel):
         description="Default schedule configuration for scheduled mode",
     )
 
+    measurement_freshness_hours: Optional[int] = Field(
+        None,
+        ge=1,
+        le=8760,
+        description="Hours after which on-demand/scheduled measurement is considered stale (NULL = no limit)",
+    )
+
+    calibration_interval_days: Optional[int] = Field(
+        None,
+        ge=1,
+        le=365,
+        description="Days between recommended recalibrations (NULL = no reminder)",
+    )
+
     @field_validator("operating_mode")
     @classmethod
     def validate_mode(cls, v: str) -> str:
@@ -109,6 +123,8 @@ class SensorTypeDefaultsCreate(BaseModel):
                 "timeout_warning_enabled": False,
                 "supports_on_demand": True,
                 "description": "PH-Sensoren werden manuell bei Bedarf ausgelöst",
+                "measurement_freshness_hours": 24,
+                "calibration_interval_days": 30,
             }
         }
     )
@@ -157,6 +173,20 @@ class SensorTypeDefaultsUpdate(BaseModel):
         description="Default schedule configuration",
     )
 
+    measurement_freshness_hours: Optional[int] = Field(
+        None,
+        ge=1,
+        le=8760,
+        description="Hours after which measurement is stale (NULL = no limit)",
+    )
+
+    calibration_interval_days: Optional[int] = Field(
+        None,
+        ge=1,
+        le=365,
+        description="Days between recalibrations (NULL = no reminder)",
+    )
+
     @field_validator("operating_mode")
     @classmethod
     def validate_mode(cls, v: Optional[str]) -> Optional[str]:
@@ -182,6 +212,8 @@ class SensorTypeDefaultsResponse(BaseModel):
     supports_on_demand: bool = Field(..., description="Supports manual measurements")
     description: Optional[str] = Field(None, description="Usage description")
     schedule_config: Optional[Dict[str, Any]] = Field(None, description="Schedule configuration")
+    measurement_freshness_hours: Optional[int] = Field(None, description="Freshness limit in hours")
+    calibration_interval_days: Optional[int] = Field(None, description="Calibration interval in days")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
 
@@ -207,6 +239,8 @@ class EffectiveConfigResponse(BaseModel):
     timeout_seconds: int = Field(..., description="Effective timeout")
     timeout_warning_enabled: bool = Field(..., description="Effective warning setting")
     supports_on_demand: bool = Field(..., description="Supports on-demand")
+    measurement_freshness_hours: Optional[int] = Field(None, description="Effective freshness limit")
+    calibration_interval_days: Optional[int] = Field(None, description="Effective calibration interval")
     source: str = Field(
         ...,
         description="Configuration source: 'instance', 'type_default', or 'system_default'",
@@ -221,6 +255,8 @@ class EffectiveConfigResponse(BaseModel):
                 "timeout_seconds": 0,
                 "timeout_warning_enabled": False,
                 "supports_on_demand": True,
+                "measurement_freshness_hours": 24,
+                "calibration_interval_days": 30,
                 "source": "type_default",
             }
         }

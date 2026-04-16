@@ -108,6 +108,19 @@ class SensorOperatingMode(str, Enum):
         return mode == cls.CONTINUOUS
 
     @classmethod
+    def requires_freshness_check(cls, mode: "SensorOperatingMode") -> bool:
+        """
+        Check if operating mode requires measurement freshness monitoring.
+
+        On-demand and scheduled sensors don't have timeouts but need
+        freshness checks to warn when measurement values are too old.
+
+        Returns:
+            True if mode should trigger freshness warnings
+        """
+        return mode in (cls.ON_DEMAND, cls.SCHEDULED)
+
+    @classmethod
     def is_active_mode(cls, mode: "SensorOperatingMode") -> bool:
         """
         Check if operating mode allows measurements.

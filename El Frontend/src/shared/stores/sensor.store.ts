@@ -335,6 +335,7 @@ export const useSensorStore = defineStore('sensor', () => {
         last_reading_at?: string | null
         operating_mode?: string
         timeout_seconds?: number
+        freshness_hours?: number | null
       }>).map((sensor) => ({ ...sensor }))
 
       const sensorIndex = sensors.findIndex(s => s.gpio === event.gpio)
@@ -349,6 +350,9 @@ export const useSensorStore = defineStore('sensor', () => {
       sensor.last_reading_at = event.last_reading_at
       sensor.operating_mode = event.operating_mode
       sensor.timeout_seconds = event.timeout_seconds
+      if (event.freshness_hours != null) {
+        sensor.freshness_hours = event.freshness_hours
+      }
 
       if (event.is_stale) {
         logger.warn(`Sensor stale: ${event.esp_id} GPIO ${event.gpio} ` +

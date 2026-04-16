@@ -1501,10 +1501,26 @@ class LogicEngine:
 
             if reading.timestamp < staleness_limit:
                 age_s = (datetime.now(timezone.utc) - reading.timestamp).total_seconds()
-                logger.debug(
-                    f"Timer sensor stale: {esp_id_str}:{gpio}:{sensor_type} "
-                    f"(age: {age_s:.0f}s > 300s)"
+
+                # Check operating mode for better logging context
+                sensor_config = await sensor_repo.get_by_esp_gpio_and_type(
+                    esp_id=esp_device.id, gpio=int(gpio), sensor_type=sensor_type
                 )
+                op_mode = "continuous"
+                if sensor_config and sensor_config.operating_mode:
+                    op_mode = sensor_config.operating_mode
+
+                if op_mode in ("on_demand", "scheduled"):
+                    logger.warning(
+                        f"Timer sensor stale ({op_mode}): {esp_id_str}:{gpio}:{sensor_type} "
+                        f"(age: {age_s:.0f}s) — rule '{rule.rule_name}' skipped for this sensor. "
+                        f"User should re-measure."
+                    )
+                else:
+                    logger.debug(
+                        f"Timer sensor stale: {esp_id_str}:{gpio}:{sensor_type} "
+                        f"(age: {age_s:.0f}s > 300s)"
+                    )
                 continue
 
             display_value = (

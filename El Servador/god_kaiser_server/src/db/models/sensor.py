@@ -211,6 +211,19 @@ class SensorConfig(Base, TimestampMixin):
         doc="Timestamp of last manual measurement request (for on_demand mode)",
     )
 
+    # Sensor-Lifecycle: Freshness & Calibration (instance overrides)
+    measurement_freshness_hours: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Hours after which measurement is stale (NULL = use type default)",
+    )
+
+    calibration_interval_days: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Days between recalibrations (NULL = use type default)",
+    )
+
     # =========================================================================
     # MULTI-ZONE DEVICE SCOPE (T13-R2)
     # =========================================================================

@@ -38,6 +38,8 @@ NOTIFICATION_SOURCES = [
     "manual",
     "system",
     "ai_anomaly_service",  # Phase K4 / L2.2 — KI-Anomalie → Notification-Pipeline
+    "freshness_reminder",  # Sensor-Lifecycle: Messwert-Alter überschritten
+    "calibration_reminder",  # Sensor-Lifecycle: Kalibrierung fällig
 ]
 NOTIFICATION_CATEGORIES = [
     "connectivity",
