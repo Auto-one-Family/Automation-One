@@ -102,9 +102,7 @@ const sensorRange = computed(() => {
  * Compact mode should still be an "at a glance" sparkline.
  * We therefore avoid full-range flattening while keeping sane bounds.
  */
-const compactYBounds = computed(() => {
-  if (!props.compact) return null
-
+const dynamicYBounds = computed(() => {
   const values = dataBuffer.value
     .map(point => point.value)
     .filter((value): value is number => Number.isFinite(value))
@@ -118,7 +116,6 @@ const compactYBounds = computed(() => {
     ? Math.max(sensorRange.value.max - sensorRange.value.min, 0)
     : 0
 
-  // Keep some minimum visual range to avoid noisy over-amplification.
   const minVisualSpan = Math.max(rangeSpan * 0.03, 0.2)
   const targetSpan = Math.max(dataSpan, minVisualSpan)
   const padding = targetSpan * 0.15
@@ -142,6 +139,11 @@ const compactYBounds = computed(() => {
   }
 
   return { min, max }
+})
+
+const compactYBounds = computed(() => {
+  if (!props.compact) return null
+  return dynamicYBounds.value
 })
 
 function toFiniteNumber(value: unknown): number | undefined {
@@ -304,10 +306,13 @@ const chartOptions = computed(() => {
         ...(isCompact && compactYBounds.value
           ? { min: compactYBounds.value.min, max: compactYBounds.value.max }
           : {}),
-        ...(!isCompact && sensorRange.value.min != null
+        ...(!isCompact && dynamicYBounds.value
+          ? { suggestedMin: dynamicYBounds.value.min, suggestedMax: dynamicYBounds.value.max }
+          : {}),
+        ...(!isCompact && !dynamicYBounds.value && sensorRange.value.min != null
           ? { suggestedMin: sensorRange.value.min }
           : {}),
-        ...(!isCompact && sensorRange.value.max != null
+        ...(!isCompact && !dynamicYBounds.value && sensorRange.value.max != null
           ? { suggestedMax: sensorRange.value.max }
           : {}),
         grid: {

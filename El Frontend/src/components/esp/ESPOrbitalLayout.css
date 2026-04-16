@@ -51,7 +51,7 @@
 /* Sensors column: Multi-column mode (>5 sensors) = 2 columns side by side */
 .esp-horizontal-layout__column--sensors.esp-horizontal-layout__column--multi-row {
   display: grid;
-  grid-template-columns: repeat(2, clamp(160px, 16vw, 220px));
+  grid-template-columns: repeat(2, clamp(180px, 18vw, 240px));
   gap: 0.375rem;
   width: auto;
 }
@@ -125,9 +125,9 @@
    Center Column (ESP Card)
    ============================================================================= */
 .esp-horizontal-layout__center {
-  flex: 0 1 clamp(320px, 34vw, 520px);
-  min-width: clamp(300px, 30vw, 420px);
-  max-width: clamp(360px, 38vw, 560px);
+  flex: 0 1 clamp(300px, 34vw, 520px);
+  min-width: 280px;
+  max-width: 560px;
 }
 
 /* =============================================================================
@@ -572,18 +572,23 @@
     align-items: center;
   }
 
+  .esp-horizontal-layout__column--sensors.esp-horizontal-layout__column--multi-row {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
   .esp-horizontal-layout__column--actuators {
     order: 1; /* Actuators below center */
     align-items: center;
   }
 
   .esp-horizontal-layout__center {
-    max-width: 280px;
+    max-width: clamp(220px, 80vw, 280px);
     order: 0;
   }
 
   .esp-horizontal-layout__satellite {
-    max-width: 140px;
+    max-width: clamp(120px, 42vw, 160px);
   }
 }
 

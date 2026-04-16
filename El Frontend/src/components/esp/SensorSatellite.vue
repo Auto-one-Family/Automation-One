@@ -553,7 +553,7 @@ function handleDragEnd(event: DragEvent) {
 }
 
 .sensor-satellite__label {
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   color: var(--color-text-secondary);
   flex: 1;
@@ -571,7 +571,7 @@ function handleDragEnd(event: DragEvent) {
 
 .sensor-satellite__gpio-badge {
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: 0.5rem;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.3);
   background: rgba(255, 255, 255, 0.04);
@@ -582,7 +582,7 @@ function handleDragEnd(event: DragEvent) {
 
 /* Scope badges (T13-R3 WP4) */
 .sensor-satellite__scope-badge {
-  font-size: 7px;
+  font-size: 0.4375rem;
   font-weight: 600;
   padding: 0.0625rem 0.25rem;
   border-radius: 0.125rem;
