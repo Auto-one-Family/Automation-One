@@ -6,11 +6,11 @@
 #include "../../services/safety/offline_mode_manager.h"
 #include "../../services/communication/wifi_manager.h"
 #include "../../utils/time_manager.h"
-#include "../../drivers/gpio_manager.h"  // Phase 1: GPIO Status
 #include "../../config/feature_flags.h"
 #include <WiFi.h>
 #include <esp_system.h>
 #include <atomic>
+#include <errno.h>
 
 #include "../../tasks/intent_contract.h"
 #include "../../tasks/sensor_command_queue.h"   // For queue overflow telemetry (AUT-5)
@@ -26,16 +26,27 @@
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "MQTT";
 
-#ifndef MQTT_USE_PUBSUBCLIENT
-static std::atomic<uint32_t> g_publish_outbox_noncritical_drops{0};
-
+// Shared by safePublish (both backends) and processPublishQueue (ESP-IDF only).
 static bool isCriticalPublishTopic(const String& topic) {
     return topic.indexOf("/alert") != -1 ||
            topic.indexOf("/response") != -1 ||
            topic.indexOf("/config_response") != -1 ||
+           topic.indexOf("/zone/ack") != -1 ||
+           topic.indexOf("/subzone/ack") != -1 ||
            topic.indexOf("/system/error") != -1 ||
            topic.indexOf("/system/intent_outcome") != -1;
 }
+
+#ifndef MQTT_USE_PUBSUBCLIENT
+static std::atomic<uint32_t> g_publish_outbox_noncritical_drops{0};
+// True while routeIncomingMessage() executes inside MQTT_EVENT_DATA callback.
+// Publishing directly from this context can re-enter MQTT internals on Core 0.
+static std::atomic<bool> g_in_mqtt_event_callback{false};
+
+static constexpr unsigned long MANAGED_RECONNECT_BASE_DELAY_MS = 1500;
+static constexpr unsigned long MANAGED_RECONNECT_MAX_DELAY_MS = 12000;
+// Give ESP-IDF auto-reconnect a head-start before issuing manual reconnect calls.
+static constexpr unsigned long MANAGED_RECONNECT_AUTO_GRACE_MS = 15000;
 
 static bool shouldLogAdmissionCorrelation(const String& topic) {
     return topic.indexOf("/command") != -1 ||
@@ -58,6 +69,52 @@ static void logAdmissionCorrelationBlockedPublish(const String& topic,
                ", correlation_id=" + String(metadata.correlation_id) +
                ", epoch=" + String(metadata.epoch_at_accept) + ")");
 }
+
+static bool isWritePathTimeoutErrno(int sock_errno) {
+    return sock_errno == ETIMEDOUT || sock_errno == EAGAIN || sock_errno == EWOULDBLOCK ||
+           sock_errno == 119;  // historical ESP32 marker from field logs
+}
+
+static bool isWritePathTimeoutSignal(int sock_errno, int tls_stack_err) {
+    if (isWritePathTimeoutErrno(sock_errno)) {
+        return true;
+    }
+
+    // Some IDF paths propagate timeout errno only via tls_stack_err.
+    const int normalized_stack_errno = (tls_stack_err < 0) ? -tls_stack_err : tls_stack_err;
+    return isWritePathTimeoutErrno(normalized_stack_errno);
+}
+
+static bool isTlsConnectTimeout(esp_err_t tls_err) {
+    const char* tls_name = esp_err_to_name(tls_err);
+    return tls_name != nullptr && strstr(tls_name, "CONNECTION_TIMEOUT") != nullptr;
+}
+
+// AUT-67 (EA-14): ESP-IDF v4.x does NOT propagate errno from esp_transport_write()
+// into event->error_handle when the write path times out ("Writing didn't complete
+// in specified timeout: errno=119"). The event arrives as
+//   error_type = MQTT_ERROR_TYPE_TCP_TRANSPORT
+//   esp_transport_sock_errno = 0
+//   esp_tls_stack_err        = 0
+//   esp_tls_last_esp_err     = ESP_OK
+// i.e. **all transport fields neutral** while the kernel-level ESP_LOG has already
+// printed the timeout. Genuine TCP errors always carry a non-zero sock_errno;
+// genuine TLS errors always carry a non-ESP_OK tls_last_err. Therefore an
+// all-neutral TCP_TRANSPORT event is with very high probability the IDF-internal
+// write-path timeout. We classify it as such so that the write_timeouts counter
+// reflects reality and the last_transport_errno marker stays meaningful for
+// SafePublish/Backpressure heuristics that consume it.
+static bool isSilentWritePathError(int sock_errno, int tls_stack_err, esp_err_t tls_last_err) {
+    return sock_errno == 0 && tls_stack_err == 0 && tls_last_err == ESP_OK;
+}
+#else
+static void logAdmissionCorrelationBlockedPublish(const String& topic,
+                                                  const String& payload,
+                                                  const char* reason_code) {
+    (void)topic;
+    (void)payload;
+    (void)reason_code;
+}
 #endif
 
 // ============================================
@@ -65,6 +122,7 @@ static void logAdmissionCorrelationBlockedPublish(const String& topic,
 // ============================================
 extern KaiserZone g_kaiser;
 extern SystemConfig g_system_config;
+extern uint32_t getEmergencyRejectedNoTokenCount();
 
 static String g_boot_sequence_id;
 static uint8_t g_boot_reset_reason = 0;
@@ -160,8 +218,18 @@ MQTTClient::MQTTClient()
       pending_subscription_count_(0),
       bootstrap_heartbeat_pending_(false),
       pending_bootstrap_ack_subscribe_msg_id_(-1),
+      bootstrap_heartbeat_send_pending_(false),
+      next_managed_reconnect_ms_(0),
+      managed_reconnect_attempts_(0),
+      transport_write_timeout_count_(0),
+      tls_connect_timeout_count_(0),
+      tcp_transport_error_count_(0),
+      last_transport_errno_(0),
+      last_disconnect_ms_(0),
+      pending_session_announce_msg_id_(-1),
 #endif
-      publish_seq_(0) {
+      publish_seq_(0),
+      safe_publish_retry_count_(0) {
     // Circuit Breaker configured:
     // - 5 failures → OPEN
     // - 30s recovery timeout
@@ -254,8 +322,13 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     mqtt_cfg.lwt_retain = 1;
     mqtt_cfg.lwt_msg_len = 0;
 
+    // Keep conservative MQTT buffers to preserve heap headroom on ESP32 WROOM.
+    // Large payloads are now handled via MQTT_EVENT_DATA fragment reassembly below,
+    // so we no longer need aggressive buffer inflation here.
     mqtt_cfg.buffer_size = 4096;
-    mqtt_cfg.out_buffer_size = 4096;
+    // Extra outbox headroom reduces transport write pressure during command bursts
+    // (e.g. calibration/manual measurement + heartbeat + responses).
+    mqtt_cfg.out_buffer_size = 8192;
 
     mqtt_cfg.client_id = config.client_id.c_str();
     if (!anonymous_mode_) {
@@ -266,6 +339,10 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     mqtt_cfg.task_stack = 16384;  // increased from 10240: static data_buf saves 4096 B on stack,
                                   // +6144 B headroom for future handlers and config payload growth
     mqtt_cfg.task_prio = 3;
+
+    // Do not force custom network/reconnect timeouts here.
+    // ESP-IDF defaults are currently more stable in the observed field setup
+    // (EA5484 + second ESP) than the aggressive explicit overrides.
 
     // Destroy old client if present (e.g. reconnect after config change)
     if (mqtt_client_ != nullptr) {
@@ -285,6 +362,13 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     registration_confirmed_ = false;
     registration_start_ms_  = millis();
     registration_timeout_logged_ = false;
+    next_managed_reconnect_ms_ = 0;
+    managed_reconnect_attempts_ = 0;
+    transport_write_timeout_count_ = 0;
+    tls_connect_timeout_count_ = 0;
+    tcp_transport_error_count_ = 0;
+    last_transport_errno_ = 0;
+    last_disconnect_ms_ = 0;
 
     // Register event handler (args = this, so handler can access members)
     esp_mqtt_client_register_event(mqtt_client_, MQTT_EVENT_ANY, mqtt_event_handler, this);
@@ -441,6 +525,10 @@ uint32_t MQTTClient::getPublishOutboxNoncriticalDropCount() const {
 #endif
 }
 
+uint32_t MQTTClient::getSafePublishRetryCount() const {
+    return safe_publish_retry_count_;
+}
+
 // ============================================
 // PUBLISHING (WITH CIRCUIT BREAKER)
 // ============================================
@@ -459,10 +547,18 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     // Registration Gate: block non-heartbeat publishes until server confirms registration
     bool is_heartbeat = topic.indexOf("/system/heartbeat") != -1 &&
                         topic.indexOf("/heartbeat/ack") == -1;
+    // Keep terminal acknowledgements flowing even before registration ACK:
+    // otherwise frontend intents can timeout although firmware executed command.
+    bool is_actuator_response = topic.indexOf("/actuator/") != -1 &&
+                                topic.indexOf("/response") != -1;
+    bool is_sensor_response = topic.indexOf("/sensor/") != -1 &&
+                              topic.indexOf("/response") != -1;
     bool is_system_response = topic.indexOf("/config_response") != -1 ||
                               topic.indexOf("/zone/ack") != -1 ||
                               topic.indexOf("/subzone/ack") != -1 ||
-                              topic.indexOf("/system/command/response") != -1;
+                              topic.indexOf("/system/command/response") != -1 ||
+                              is_actuator_response ||
+                              is_sensor_response;
     bool is_error_publish = topic.indexOf("/error") != -1;
 
     if (!registration_confirmed_ && !is_heartbeat && !is_system_response && !is_error_publish) {
@@ -496,8 +592,9 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
     }
 
     // M3: If called from Core 1 (Safety-Task), route through publish queue (Core 1 → Core 0).
-    // Keeps all network I/O on Core 0 and prevents slow publishes from stalling Core 1.
-    if (xPortGetCoreID() == 1) {
+    // Additionally, never publish directly from MQTT_EVENT_DATA callback context on Core 0:
+    // this avoids re-entrant MQTT/newlib paths while inside esp_mqtt_task.
+    if (xPortGetCoreID() == 1 || g_in_mqtt_event_callback.load()) {
         bool critical = isCriticalPublishTopic(topic);
         IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), critical ? "critical_pub" : "pub");
         bool enqueued = queuePublish(topic.c_str(), payload.c_str(), qos, false, critical, &metadata);
@@ -512,11 +609,13 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
 
     // Core 0: direct publish via ESP-IDF (thread-safe internally).
     // Returns msg_id > 0 (QoS 1 queued), 0 (QoS 0 sent), -1 (error), -2 (outbox full).
+    // PKG-16: pass explicit payload length so IDF skips its internal strlen()
+    // on a possibly-NULL c_str() buffer (observed failure mode under OOM).
     int msg_id = esp_mqtt_client_publish(
         mqtt_client_,
         topic.c_str(),
         payload.c_str(),
-        0,       // length = 0 → use strlen()
+        static_cast<int>(payload.length()),
         qos,
         0        // retain = false (avoid stale state on broker)
     );
@@ -532,11 +631,21 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
         // (publishIntentOutcome already persists to NVS on publish failure).
         if (isCriticalPublishTopic(topic) && topic.indexOf("/system/intent_outcome") < 0) {
             IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), "pub");
+            // PKG-16: build reason string via snprintf on a stack buffer instead of
+            // Arduino String concat. We are already in the OUTBOX-FULL path where
+            // heap pressure is likely — another `String("...") + topic` concat can
+            // silently allocate-fail and leave a buffer that downstream strncpy
+            // dereferences as NULL (historical LoadProhibited signature).
+            char reason_buf[192];
+            snprintf(reason_buf, sizeof(reason_buf),
+                     "ESP-IDF MQTT outbox full: %s",
+                     topic.c_str());
+            reason_buf[sizeof(reason_buf) - 1] = '\0';
             publishIntentOutcome("publish",
                                  metadata,
                                  "failed",
                                  "PUBLISH_OUTBOX_FULL",
-                                 String("ESP-IDF MQTT outbox full: ") + topic,
+                                 String(reason_buf),
                                  true);
         } else if (topic.indexOf("/system/intent_outcome") >= 0) {
             LOG_W(TAG, "intent_outcome publish hit outbox full — NVS replay path handles persistence");
@@ -587,27 +696,43 @@ bool MQTTClient::publish(const String& topic, const String& payload, uint8_t qos
 }
 
 bool MQTTClient::safePublish(const String& topic, const String& payload, uint8_t qos, uint8_t retries) {
-    if (circuit_breaker_.isOpen()) {
-        LOG_D(TAG, "SafePublish: Circuit Breaker OPEN, skipping retries");
-        return publish(topic, payload, qos);
+    const uint8_t max_attempts = static_cast<uint8_t>(retries) + 1;
+    const bool critical = isCriticalPublishTopic(topic);
+
+    for (uint8_t attempt = 0; attempt < max_attempts; ++attempt) {
+        if (circuit_breaker_.isOpen()) {
+            if (attempt == 0 && critical) {
+                LOG_D(TAG, "SafePublish: CB OPEN, critical topic — single attempt");
+                return publish(topic, payload, qos);
+            }
+            LOG_D(TAG, "SafePublish: CB OPEN, aborting after " +
+                       String(attempt) + "/" + String(max_attempts) + " attempts");
+            return false;
+        }
+
+        if (publish(topic, payload, qos)) {
+            if (attempt > 0) {
+                LOG_D(TAG, "SafePublish: OK on attempt " +
+                           String(attempt + 1) + "/" + String(max_attempts));
+            }
+            return true;
+        }
+
+        if (attempt + 1 >= max_attempts) {
+            break;
+        }
+
+        safe_publish_retry_count_++;
+
+        // Exponential backoff: 50 / 100 / 200 / 250(cap) ms + 0..31ms jitter
+        unsigned long backoff_ms = 50UL << (attempt > 3 ? 3 : attempt);
+        if (backoff_ms > 250) backoff_ms = 250;
+        backoff_ms += (esp_random() & 0x1FU);
+        vTaskDelay(pdMS_TO_TICKS(backoff_ms));
     }
 
-    if (publish(topic, payload, qos)) {
-        return true;
-    }
-
-    if (circuit_breaker_.isOpen()) {
-        LOG_D(TAG, "SafePublish: Circuit Breaker OPENED after first attempt");
-        return false;
-    }
-
-    yield();  // Non-blocking statt delay(100)
-
-    if (publish(topic, payload, qos)) {
-        return true;
-    }
-
-    LOG_W(TAG, "SafePublish failed after retry");
+    LOG_W(TAG, "SafePublish failed after " + String(max_attempts) +
+               " attempts: " + topic);
     return false;
 }
 
@@ -763,9 +888,12 @@ void MQTTClient::loop() {
 
 #ifndef MQTT_USE_PUBSUBCLIENT
     // ESP-IDF has its own MQTT task — no manual mqtt_.loop() or reconnect() needed here.
-    // loop() handles: NTP time sync + staged subscribe recovery + periodic heartbeat.
+    // loop() handles: NTP time sync + staged subscribe recovery + periodic heartbeat
+    // + managed reconnect jitter to avoid multi-device reconnect herding.
     timeManager.loop();
+    processManagedReconnect_();
     processSubscriptionQueue();
+    processBootstrapHeartbeatAfterSubscribe();
     publishHeartbeat();
 #else
     // PubSubClient path: handle time sync, MQTT maintenance, heartbeat, and reconnect.
@@ -781,6 +909,98 @@ void MQTTClient::loop() {
 }
 
 #ifndef MQTT_USE_PUBSUBCLIENT
+void MQTTClient::processBootstrapHeartbeatAfterSubscribe() {
+    if (!bootstrap_heartbeat_send_pending_) {
+        return;
+    }
+
+    if (!g_mqtt_connected.load()) {
+        // Keep pending until reconnect callback resets/arms the proper bootstrap path.
+        return;
+    }
+
+    publishHeartbeat(true);
+    bootstrap_heartbeat_send_pending_ = false;
+    LOG_I(TAG, "[SYNC] Bootstrap heartbeat sent after SUBSCRIBED (deferred to loop)");
+}
+
+unsigned long MQTTClient::computeReconnectJitterMs_(uint16_t attempt) const {
+    const unsigned long capped_attempt = (attempt > 6U) ? 6U : static_cast<unsigned long>(attempt);
+    const unsigned long exp_backoff = MANAGED_RECONNECT_BASE_DELAY_MS << capped_attempt;
+    const unsigned long bounded_backoff = (exp_backoff > MANAGED_RECONNECT_MAX_DELAY_MS)
+                                              ? MANAGED_RECONNECT_MAX_DELAY_MS
+                                              : exp_backoff;
+
+    unsigned long entropy = static_cast<unsigned long>(esp_random() & 0x3FFU);  // 0..1023
+    if (g_system_config.esp_id.length() > 0) {
+        entropy ^= static_cast<unsigned long>(g_system_config.esp_id.charAt(g_system_config.esp_id.length() - 1));
+    }
+    const unsigned long jitter = entropy % 650U;  // 0..649ms
+    return bounded_backoff + jitter;
+}
+
+void MQTTClient::scheduleManagedReconnect_(const char* reason, unsigned long base_delay_ms) {
+    if (g_mqtt_connected.load()) {
+        next_managed_reconnect_ms_ = 0;
+        managed_reconnect_attempts_ = 0;
+        return;
+    }
+
+    const unsigned long now = millis();
+    const unsigned long minimum_delay = (base_delay_ms > MANAGED_RECONNECT_MAX_DELAY_MS)
+                                            ? MANAGED_RECONNECT_MAX_DELAY_MS
+                                            : base_delay_ms;
+    const unsigned long computed_delay =
+        computeReconnectJitterMs_(managed_reconnect_attempts_ > 0 ? managed_reconnect_attempts_ : 1);
+    const unsigned long delay_ms = (computed_delay < minimum_delay) ? minimum_delay : computed_delay;
+    next_managed_reconnect_ms_ = now + delay_ms;
+
+    LOG_W(TAG, String("[INC-EA5484] managed reconnect scheduled in ") + String(delay_ms) +
+                   "ms (attempt=" + String(managed_reconnect_attempts_) +
+                   ", reason=" + String(reason != nullptr ? reason : "unknown") +
+                   ", write_timeouts=" + String(transport_write_timeout_count_) +
+                   ", tls_timeouts=" + String(tls_connect_timeout_count_) +
+                   ", tcp_errors_other=" + String(tcp_transport_error_count_) +
+                   ", last_errno=" + String(last_transport_errno_) + ")");
+}
+
+void MQTTClient::processManagedReconnect_() {
+    if (mqtt_client_ == nullptr || g_mqtt_connected.load()) {
+        next_managed_reconnect_ms_ = 0;
+        managed_reconnect_attempts_ = 0;
+        last_disconnect_ms_ = 0;
+        return;
+    }
+
+    if (next_managed_reconnect_ms_ == 0 || millis() < next_managed_reconnect_ms_) {
+        return;
+    }
+
+    // ESP-IDF auto-reconnect is enabled by default. Avoid issuing manual reconnect
+    // requests immediately after disconnect to prevent reconnect-race amplification.
+    if (last_disconnect_ms_ > 0) {
+        unsigned long now = millis();
+        unsigned long grace_until = last_disconnect_ms_ + MANAGED_RECONNECT_AUTO_GRACE_MS;
+        if (now < grace_until) {
+            next_managed_reconnect_ms_ = grace_until;
+            LOG_I(TAG, "[INC-EA5484] managed reconnect deferred (auto-reconnect grace)");
+            return;
+        }
+    }
+
+    ++managed_reconnect_attempts_;
+    esp_err_t err = esp_mqtt_client_reconnect(mqtt_client_);
+    if (err != ESP_OK) {
+        LOG_W(TAG, String("[INC-EA5484] managed reconnect request failed: ") + esp_err_to_name(err));
+        scheduleManagedReconnect_("esp_mqtt_client_reconnect_failed");
+        return;
+    }
+
+    LOG_I(TAG, String("[INC-EA5484] managed reconnect requested (attempt=") +
+               String(managed_reconnect_attempts_) + ")");
+    scheduleManagedReconnect_("awaiting_connect_event");
+}
+
 void MQTTClient::processSubscriptionQueue() {
     if (!g_mqtt_connected.load() || mqtt_client_ == nullptr || pending_subscription_count_ == 0) {
         return;
@@ -858,61 +1078,68 @@ static uint32_t getRetryBackoffMs(uint8_t attempt) {
     return backoff_delays[attempt];
 }
 
+// Drain limit per communication tick to avoid publish micro-bursts that can
+// saturate the TCP write path (observed as errno=11 under load).
+static constexpr uint8_t PUBLISH_DRAIN_BUDGET_PER_TICK = 3;
+
 void MQTTClient::processPublishQueue() {
     if (mqtt_client_ == nullptr) return;
     if (g_publish_queue == NULL) return;
-    // Drain persisted critical outcomes first so reconnect replay
-    // is not blocked waiting for new command/config traffic.
+    if (isPublishQueuePaused()) return;
     processIntentOutcomeOutbox();
 
-    // Stack guard for legacy fallback path:
-    // PublishRequest is large (~2 KB payload envelope); keep it out of loopTask stack.
     static PublishRequest req;
     unsigned long now_ms = millis();
+    uint8_t drained_this_tick = 0;
 
-    // Non-blocking receive: process one request at a time (pdMS_TO_TICKS(0) = no wait)
-    while (xQueueReceive(g_publish_queue, &req, 0) == pdTRUE) {
-        // AUT-6: Check if request is waiting for backoff delay
+    while (drained_this_tick < PUBLISH_DRAIN_BUDGET_PER_TICK &&
+           xQueueReceive(g_publish_queue, &req, 0) == pdTRUE) {
         if (now_ms < req.next_retry_ms) {
-            // Not ready yet — put back in queue for later retry
             if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
                 LOG_W(TAG, "Publish retry queue full during backoff, dropping: " + String(req.topic));
                 g_publish_outbox_noncritical_drops.fetch_add(1);
             }
-            break;  // Stop processing (backoff mechanism prevents queue starvation)
+            break;
         }
 
         int msg_id = esp_mqtt_client_publish(
             mqtt_client_,
             req.topic,
             req.payload,
-            0,               // length = 0 → use strlen()
+            0,
             req.qos,
             req.retain ? 1 : 0
         );
+        drained_this_tick++;
         if (msg_id >= 0) {
-            continue;  // Success — next request
+            continue;
         }
 
-        // AUT-6: Retry logic for sensor_data topics (max 3 attempts with backoff)
         bool is_sensor_data = isSensorDataTopic(String(req.topic));
         const char* drop_code = (msg_id == -2) ? "PUBLISH_OUTBOX_FULL" : "EXECUTE_FAIL";
         String drop_reason = String("Publish dropped for topic ") + String(req.topic);
 
-        // Retry if: (1) critical with < 3 attempts OR (2) sensor_data with < 3 attempts
+        // AUT-55: Under queue pressure (fill >= watermark), only retry critical messages.
+        // Non-critical sensor_data retries are shed to preserve queue headroom.
+        uint8_t queue_fill = static_cast<uint8_t>(uxQueueMessagesWaiting(g_publish_queue));
+        bool under_pressure = (queue_fill >= PUBLISH_QUEUE_SHED_WATERMARK);
+        bool connected_now = g_mqtt_connected.load();
+        bool transport_backpressure = isWritePathTimeoutErrno(last_transport_errno_);
+
         bool should_retry = (req.critical && req.attempt < 3) ||
-                           (is_sensor_data && req.attempt < 3);
+                           (is_sensor_data && req.attempt < 3 &&
+                            !under_pressure &&
+                            connected_now &&
+                            !transport_backpressure);
 
         if (should_retry) {
             req.attempt++;
-            // Schedule retry with exponential backoff (100ms → 500ms → 1000ms)
             uint32_t backoff_ms = getRetryBackoffMs(req.attempt - 1);
             req.next_retry_ms = now_ms + backoff_ms;
 
             LOG_D(TAG, "Publish retry scheduled (attempt " + String(req.attempt) + "/3, " +
                        String(backoff_ms) + "ms backoff): " + String(req.topic));
 
-            // Re-enqueue for later retry (non-blocking)
             if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
                 LOG_W(TAG, "Publish retry queue full, dropping: " + String(req.topic));
                 errorTracker.logCommunicationError(ERROR_MQTT_PUBLISH_FAILED,
@@ -925,20 +1152,19 @@ void MQTTClient::processPublishQueue() {
                                          "Critical publish retry queue full",
                                          true);
                 } else if (is_sensor_data) {
-                    // Non-critical sensor_data failure
                     g_publish_outbox_noncritical_drops.fetch_add(1);
                 }
             }
             continue;
         }
 
-        // No more retries — drop the message
-        LOG_W(TAG, "Publish dropped after retries: " + String(req.topic));
+        LOG_W(TAG, String("Publish dropped") +
+              (under_pressure && is_sensor_data ? " (backpressure shed)" : " after retries") +
+              ": " + String(req.topic));
         errorTracker.logCommunicationError(ERROR_MQTT_PUBLISH_FAILED,
-                                           ("Publish failed after retries: " + String(req.topic)).c_str());
+                                           ("Publish failed: " + String(req.topic)).c_str());
 
         if (is_sensor_data) {
-            // Track non-critical sensor_data drops (AUT-6)
             g_publish_outbox_noncritical_drops.fetch_add(1);
         }
 
@@ -951,6 +1177,54 @@ void MQTTClient::processPublishQueue() {
                                  true);
         }
     }
+}
+#endif
+
+#ifndef MQTT_USE_PUBSUBCLIENT
+bool MQTTClient::publishSessionAnnounce(uint32_t epoch) {
+    if (mqtt_client_ == nullptr) {
+        return false;
+    }
+
+    char topic[128];
+    snprintf(topic, sizeof(topic), "kaiser/god/esp/%s/session/announce", g_system_config.esp_id.c_str());
+    topic[sizeof(topic) - 1] = '\0';
+
+    time_t unix_timestamp = timeManager.getUnixTimestamp();
+    bool time_valid = timeManager.isSynchronized();
+    ensureBootTelemetryInitialized(unix_timestamp, time_valid);
+    unsigned long boot_ts = g_segment_start_ts;
+    if (boot_ts == 0) {
+        boot_ts = (unix_timestamp > 0) ? static_cast<unsigned long>(unix_timestamp) : (millis() / 1000UL);
+    }
+
+    char payload[192];
+    snprintf(payload,
+             sizeof(payload),
+             "{\"esp_id\":\"%s\",\"session_epoch\":%lu,\"boot_ts\":\"%lu\"}",
+             g_system_config.esp_id.c_str(),
+             static_cast<unsigned long>(epoch),
+             boot_ts);
+    payload[sizeof(payload) - 1] = '\0';
+
+    const int msg_id = esp_mqtt_client_publish(
+        mqtt_client_,
+        topic,
+        payload,
+        0,
+        1,  // QoS 1
+        0   // retain = false
+    );
+
+    if (msg_id < 0) {
+        pending_session_announce_msg_id_ = -1;
+        LOG_W(TAG, String("[INC-EA5484] session/announce publish failed epoch=") + String(epoch));
+        return false;
+    }
+
+    pending_session_announce_msg_id_ = msg_id;
+    LOG_I(TAG, String("[INC-EA5484] session/announce published epoch=") + String(epoch));
+    return true;
 }
 #endif
 
@@ -1014,23 +1288,19 @@ uint8_t MQTTClient::getCircuitBreakerFailureCount() const {
 // ============================================
 // HEARTBEAT SYSTEM
 // ============================================
-static uint8_t toProtocolGpioMode(uint8_t arduino_mode) {
-    // Map Arduino pinMode values to protocol enum (0=INPUT, 1=OUTPUT, 2=INPUT_PULLUP).
-    if (arduino_mode == INPUT_PULLUP) {
-        return 2;
-    }
-    if (arduino_mode == OUTPUT) {
-        return 1;
-    }
-    return 0;
-}
-
 void MQTTClient::publishHeartbeat(bool force) {
     unsigned long current_time = millis();
     const unsigned long heartbeat_interval_ms =
         registration_confirmed_ ? HEARTBEAT_INTERVAL_MS : HEARTBEAT_REGISTRATION_RETRY_MS;
 
     if (!force && (current_time - last_heartbeat_ < heartbeat_interval_ms)) {
+        return;
+    }
+
+    // Do not build/publish heartbeats while disconnected.
+    // This reduces heap churn and retry pressure in reconnect windows,
+    // including forced bootstrap heartbeat paths.
+    if (!isConnected()) {
         return;
     }
 
@@ -1042,6 +1312,9 @@ void MQTTClient::publishHeartbeat(bool force) {
           " B, max alloc: " + String(ESP.getMaxAllocHeap()) + " B");
 
     const char* topic = TopicBuilder::buildSystemHeartbeatTopic();
+    // TopicBuilder returns a shared static buffer; copy immediately so logs keep
+    // the original heartbeat topic even if nested publishes overwrite the buffer.
+    const String heartbeat_topic = String(topic);
 
     time_t unix_timestamp = timeManager.getUnixTimestamp();
     bool time_valid = timeManager.isSynchronized();
@@ -1049,8 +1322,9 @@ void MQTTClient::publishHeartbeat(bool force) {
 
     String payload;
     // Keep heartbeat assembly deterministic and reduce heap fragmentation.
-    // 1900 B covers typical status payload including gpio_status entries.
-    payload.reserve(1900);
+    // reserve padded to 768 to cover all forensic counters + longest
+    // config_status correlation_id (AUT-68 slim target <=512 B payload).
+    payload.reserve(768);
     payload = "{";
     payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
     payload += "\"seq\":" + String(getNextSeq()) + ",";
@@ -1069,33 +1343,10 @@ void MQTTClient::publishHeartbeat(bool force) {
     payload += "\"actuator_count\":" + String(actuatorManager.getActiveActuatorCount()) + ",";
     payload += "\"wifi_ip\":\"" + WiFi.localIP().toString() + "\",";
 
-    std::vector<GPIOPinInfo> reservedPins;
-    const uint32_t free_heap_before_gpio = ESP.getFreeHeap();
-    const uint32_t max_alloc_before_gpio = ESP.getMaxAllocHeap();
-    // gpio_status telemetry is optional; skip aggressively when memory headroom is tight.
-    if (max_alloc_before_gpio >= 16384 && free_heap_before_gpio >= 46000) {
-        reservedPins = gpioManager.getReservedPinsList();
-    } else {
-        LOG_W(TAG, "Heartbeat: skipping gpio_status due to low memory headroom "
-                   "(free_heap=" + String(free_heap_before_gpio) +
-                   " B, max_alloc=" + String(max_alloc_before_gpio) + " B)");
-    }
+    // PKG-17: gpio_status removed from heartbeat (redundant with REST
+    // GET /api/v1/devices/{id}/gpio-status and actuator/+/status).
+    // Reclaims ~8.2 kB permanent heap via halved PUBLISH_PAYLOAD_MAX_LEN.
 
-    payload += "\"gpio_status\":[";
-    bool first = true;
-    for (const auto& pin : reservedPins) {
-        if (!first) payload += ",";
-        first = false;
-        payload += "{";
-        payload += "\"gpio\":" + String(pin.pin) + ",";
-        payload += "\"owner\":\"" + String(pin.owner) + "\",";
-        payload += "\"component\":\"" + String(pin.component_name) + "\",";
-        payload += "\"mode\":" + String(toProtocolGpioMode(pin.mode)) + ",";
-        payload += "\"safe\":" + String(pin.in_safe_mode ? "true" : "false");
-        payload += "}";
-    }
-    payload += "],";
-    payload += "\"gpio_reserved_count\":" + String(reservedPins.size()) + ",";
     payload += "\"metrics_schema_version\":" +
                String(OfflineModeManager::OFFLINE_AUTHORITY_METRICS_SCHEMA_VERSION) + ",";
     payload += "\"offline_enter_count\":" + String(offlineModeManager.getOfflineEnterCount()) + ",";
@@ -1142,14 +1393,27 @@ void MQTTClient::publishHeartbeat(bool force) {
                String(getCriticalOutcomeDropCountTelemetry()) + ",";
     payload += "\"publish_outbox_drop_count\":" +
                String(getPublishOutboxNoncriticalDropCount()) + ",";
+#ifndef MQTT_USE_PUBSUBCLIENT
+    {
+        PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
+        payload += "\"publish_queue_fill\":" + String(pq_stats.fill_level) + ",";
+        payload += "\"publish_queue_hwm\":" + String(pq_stats.high_watermark) + ",";
+        payload += "\"publish_queue_shed_count\":" + String(pq_stats.shed_count) + ",";
+        payload += "\"publish_queue_drop_count\":" + String(pq_stats.drop_count) + ",";
+    }
+#endif
     payload += "\"sensor_command_queue_overflow_count\":" +
                String(getSensorCommandQueueOverflowCount()) + ",";
+    payload += "\"safe_publish_retry_count\":" +
+               String(safe_publish_retry_count_) + ",";
+    payload += "\"emergency_rejected_no_token_total\":" +
+               String(getEmergencyRejectedNoTokenCount()) + ",";
     payload += "\"config_status\":";
     payload += configManager.getDiagnosticsJSON();
     payload += "}";
 
-    if (!publish(topic, payload, 0)) {
-        LOG_W(TAG, "Heartbeat publish failed (topic=" + String(topic) + ")");
+    if (!publish(heartbeat_topic, payload, 0)) {
+        LOG_W(TAG, "Heartbeat publish failed (topic=" + heartbeat_topic + ")");
     }
 }
 
@@ -1208,7 +1472,7 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
 
     switch (event_id) {
 
-        case MQTT_EVENT_CONNECTED:
+        case MQTT_EVENT_CONNECTED: {
             LOG_I(TAG, "╔════════════════════════════════════════╗");
             LOG_I(TAG, "║  MQTT_EVENT_CONNECTED                 ║");
             LOG_I(TAG, "╚════════════════════════════════════════╝");
@@ -1231,6 +1495,27 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->clearSubscriptionQueue_();
             self->bootstrap_heartbeat_pending_ = false;
             self->pending_bootstrap_ack_subscribe_msg_id_ = -1;
+            self->bootstrap_heartbeat_send_pending_ = false;
+            self->next_managed_reconnect_ms_ = 0;
+            self->managed_reconnect_attempts_ = 0;
+            self->transport_write_timeout_count_ = 0;
+            self->tls_connect_timeout_count_ = 0;
+            self->tcp_transport_error_count_ = 0;
+            self->last_transport_errno_ = 0;
+            self->last_disconnect_ms_ = 0;
+            self->pending_session_announce_msg_id_ = -1;
+
+            // AUT-69 Step 1: Hold queue drain until session/announce is acknowledged
+            // or guard timeout unblocks progress.
+            pauseForAnnounceAck();
+            uint32_t announce_epoch = offlineModeManager.getActiveHandoverEpoch();
+            if (offlineModeManager.getMode() == OfflineMode::OFFLINE_ACTIVE) {
+                announce_epoch++;
+            }
+            if (announce_epoch == 0) {
+                announce_epoch = 1;
+            }
+            self->publishSessionAnnounce(announce_epoch);
 
             // Circuit Breaker: connection success resets failure counter
             self->circuit_breaker_.recordSuccess();
@@ -1245,11 +1530,22 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
                 self->on_connect_callback_();
             }
             break;
+        }
 
         case MQTT_EVENT_DISCONNECTED:
             LOG_W(TAG, "╔════════════════════════════════════════╗");
             LOG_W(TAG, "║  MQTT_EVENT_DISCONNECTED              ║");
             LOG_W(TAG, "╚════════════════════════════════════════╝");
+
+            // INC-2026-04-11-ea5484-mqtt-transport-keepalive (PKG-01):
+            // Telemetrie-Marker mit uptime + free heap + WiFi-RSSI, damit Disconnect-
+            // Ursache bei naechstem HW-Repro (Broker-Timeout vs. Socket-Stall vs.
+            // WLAN-Drop) ohne weiteren Code-Druck korreliert werden kann.
+            LOG_W(TAG, String("[INC-EA5484] disconnect marker uptime_ms=") +
+                       String(millis()) +
+                       " free_heap=" + String(ESP.getFreeHeap()) +
+                       " wifi_rssi=" + String(WiFi.RSSI()) +
+                       " wifi_connected=" + String(WiFi.isConnected() ? "true" : "false"));
 
             // Update shared connection state
             g_mqtt_connected.store(false);
@@ -1261,6 +1557,10 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->clearSubscriptionQueue_();
             self->bootstrap_heartbeat_pending_ = false;
             self->pending_bootstrap_ack_subscribe_msg_id_ = -1;
+            self->bootstrap_heartbeat_send_pending_ = false;
+            self->pending_session_announce_msg_id_ = -1;
+            resumeAfterAnnounceAck("guard_timeout");
+            self->last_disconnect_ms_ = millis();
 
             // Circuit Breaker: disconnect counts as failure
             self->circuit_breaker_.recordFailure();
@@ -1279,42 +1579,117 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             if (g_safety_task_handle != NULL) {
                 xTaskNotify(g_safety_task_handle, NOTIFY_MQTT_DISCONNECTED, eSetBits);
             }
+
+            // Managed reconnect with jitter to reduce reconnect herding when multiple
+            // devices drop within the same transport instability window.
+            // Avoid duplicate scheduling when MQTT_EVENT_ERROR already queued a reconnect.
+            if (self->next_managed_reconnect_ms_ == 0) {
+                self->scheduleManagedReconnect_("mqtt_disconnected", MANAGED_RECONNECT_BASE_DELAY_MS);
+            } else {
+                LOG_D(TAG, "[INC-EA5484] reconnect already scheduled (skip duplicate in DISCONNECTED)");
+            }
             break;
 
         case MQTT_EVENT_DATA: {
             // KRITISCH: event->topic and event->data are NOT null-terminated!
             // All existing handlers (strcmp, strstr, String comparison) expect '\0'.
             // Without null-termination: buffer-overread → crash.
+            //
+            // INC-2026-04-11-ea5484-mqtt-transport-keepalive:
+            // Handle fragmented MQTT_EVENT_DATA frames instead of discarding them.
+            // This is required for larger config payloads (e.g. sensors+actuators+offline_rules)
+            // where esp-mqtt can deliver chunks across multiple callbacks.
+            static char topic_buf[192];
+            static char data_buf[8192];
+            static size_t expected_len = 0;
+            static size_t received_len = 0;
+            static bool assembling = false;
 
-            // Check for fragmented messages (should not happen with buffer.size=4096,
-            // but guard defensively).
-            if (event->current_data_offset > 0) {
-                ESP_LOGW(TAG, "[M2] Fragmented MQTT_EVENT_DATA received (offset=%d, total=%d) "
-                              "— message discarded. Increase buffer.size if this recurs.",
-                         event->current_data_offset, event->total_data_len);
+            const int total_len_raw = (event->total_data_len > 0) ? event->total_data_len : event->data_len;
+            const size_t total_len = static_cast<size_t>(total_len_raw);
+            const size_t offset = (event->current_data_offset > 0)
+                                      ? static_cast<size_t>(event->current_data_offset)
+                                      : 0U;
+            const bool starts_new_message = (offset == 0);
+
+            if (starts_new_message) {
+                if (total_len >= sizeof(data_buf)) {
+                    ESP_LOGE(TAG,
+                             "[M2] MQTT_EVENT_DATA too large for reassembly buffer "
+                             "(total=%u, capacity=%u) — message dropped",
+                             static_cast<unsigned>(total_len),
+                             static_cast<unsigned>(sizeof(data_buf) - 1));
+                    assembling = false;
+                    expected_len = 0;
+                    received_len = 0;
+                    break;
+                }
+
+                // Capture topic only on first chunk.
+                size_t tlen = (event->topic_len < static_cast<int>(sizeof(topic_buf) - 1))
+                                  ? static_cast<size_t>(event->topic_len)
+                                  : sizeof(topic_buf) - 1;
+                memcpy(topic_buf, event->topic, tlen);
+                topic_buf[tlen] = '\0';
+
+                expected_len = total_len;
+                received_len = 0;
+                assembling = true;
+            } else if (!assembling) {
+                ESP_LOGW(TAG,
+                         "[M2] Fragment continuation without active assembly "
+                         "(offset=%u, total=%u) — chunk dropped",
+                         static_cast<unsigned>(offset),
+                         static_cast<unsigned>(total_len));
                 break;
             }
 
-            // Null-terminate topic (max topic length ~120 chars; buffer has +Reserve)
-            char topic_buf[192];
-            size_t tlen = (event->topic_len < sizeof(topic_buf) - 1)
-                          ? static_cast<size_t>(event->topic_len)
-                          : sizeof(topic_buf) - 1;
-            memcpy(topic_buf, event->topic, tlen);
-            topic_buf[tlen] = '\0';
+            if (!assembling || offset >= sizeof(data_buf)) {
+                ESP_LOGW(TAG,
+                         "[M2] Invalid fragment bounds (offset=%u, buffer=%u) — message dropped",
+                         static_cast<unsigned>(offset),
+                         static_cast<unsigned>(sizeof(data_buf)));
+                assembling = false;
+                expected_len = 0;
+                received_len = 0;
+                break;
+            }
 
-            // Null-terminate payload (must match buffer.size=4096)
-            // static: moves 4096 B from mqtt_task stack to BSS — prevents stack overflow
-            // Safe: esp-mqtt processes MQTT_EVENT_DATA serially within mqtt_task (no reentrancy)
-            static char data_buf[4096];
-            size_t dlen = (event->data_len < sizeof(data_buf) - 1)
-                          ? static_cast<size_t>(event->data_len)
-                          : sizeof(data_buf) - 1;
-            memcpy(data_buf, event->data, dlen);
-            data_buf[dlen] = '\0';
+            if (!starts_new_message && offset != received_len) {
+                ESP_LOGW(TAG,
+                         "[M2] Fragment offset mismatch (expected=%u, got=%u) — resetting assembly",
+                         static_cast<unsigned>(received_len),
+                         static_cast<unsigned>(offset));
+                assembling = false;
+                expected_len = 0;
+                received_len = 0;
+                break;
+            }
 
-            // Logging in routeIncomingMessage() (single place)
+            const size_t max_copy = expected_len > offset ? (expected_len - offset) : 0U;
+            size_t chunk_len = static_cast<size_t>(event->data_len);
+            if (chunk_len > max_copy) {
+                chunk_len = max_copy;
+            }
+            if (offset + chunk_len >= sizeof(data_buf)) {
+                chunk_len = (sizeof(data_buf) - 1) - offset;
+            }
+
+            memcpy(data_buf + offset, event->data, chunk_len);
+            received_len = offset + chunk_len;
+
+            if (received_len < expected_len) {
+                break;  // Wait for remaining fragments.
+            }
+
+            data_buf[expected_len] = '\0';
+            g_in_mqtt_event_callback.store(true);
             routeIncomingMessage(topic_buf, data_buf);
+            g_in_mqtt_event_callback.store(false);
+
+            assembling = false;
+            expected_len = 0;
+            received_len = 0;
             break;
         }
 
@@ -1324,25 +1699,96 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             if (self->bootstrap_heartbeat_pending_ &&
                 self->pending_bootstrap_ack_subscribe_msg_id_ >= 0 &&
                 mid == self->pending_bootstrap_ack_subscribe_msg_id_) {
-                self->publishHeartbeat(true);
+                if (!g_mqtt_connected.load()) {
+                    LOG_W(TAG, "[SYNC] Ignoring stale SUBSCRIBED bootstrap trigger while disconnected");
+                    self->bootstrap_heartbeat_pending_ = false;
+                    self->pending_bootstrap_ack_subscribe_msg_id_ = -1;
+                    self->bootstrap_heartbeat_send_pending_ = false;
+                    break;
+                }
+                self->bootstrap_heartbeat_send_pending_ = true;
                 self->bootstrap_heartbeat_pending_ = false;
                 self->pending_bootstrap_ack_subscribe_msg_id_ = -1;
-                LOG_I(TAG, "[SYNC] Bootstrap heartbeat sent after SUBSCRIBED (ACK topic active)");
+                LOG_I(TAG, "[SYNC] Bootstrap heartbeat armed after SUBSCRIBED (ACK topic active)");
             }
             break;
         }
 
         case MQTT_EVENT_PUBLISHED:
             LOG_D(TAG, "MQTT_EVENT_PUBLISHED msg_id=" + String(event->msg_id));
+            if (self->pending_session_announce_msg_id_ >= 0 &&
+                event->msg_id == self->pending_session_announce_msg_id_) {
+                self->pending_session_announce_msg_id_ = -1;
+                resumeAfterAnnounceAck("ack");
+            }
             break;
 
         case MQTT_EVENT_ERROR:
+            // INC-2026-04-11-ea5484-mqtt-transport-keepalive (PKG-01):
+            // Zusaetzlich errno (z.B. 119/EWOULDBLOCK = Schreib-Timeout) und uptime
+            // ausgeben, damit Transport-Schreibtimeout von TLS-Handshake-Timeout im
+            // Log eindeutig unterscheidbar ist. Keine Aenderung am LWT-Contract.
             if (event->error_handle != nullptr) {
-                ESP_LOGE(TAG, "MQTT_EVENT_ERROR type=%d", event->error_handle->error_type);
+                ESP_LOGE(TAG, "MQTT_EVENT_ERROR type=%d uptime_ms=%lu",
+                         event->error_handle->error_type,
+                         (unsigned long)millis());
                 if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
-                    ESP_LOGE(TAG, "  TCP transport error: %d (esp_err=%s)",
-                             event->error_handle->esp_transport_sock_errno,
-                             esp_err_to_name(event->error_handle->esp_tls_last_esp_err));
+                    const int sock_errno = event->error_handle->esp_transport_sock_errno;
+                    const int tls_stack = event->error_handle->esp_tls_stack_err;
+                    const esp_err_t tls_last = event->error_handle->esp_tls_last_esp_err;
+
+                    const bool write_timeout_explicit = isWritePathTimeoutSignal(sock_errno, tls_stack);
+                    const bool tls_timeout = isTlsConnectTimeout(tls_last);
+                    // AUT-67: catch IDF-stealth write timeout (all fields neutral
+                    // while IDF ESP_LOG already printed errno=119). Only treat as
+                    // write timeout when NOT simultaneously a TLS-connect timeout
+                    // (preserves correct attribution on TLS reconnect failures).
+                    const bool write_timeout_silent =
+                        !write_timeout_explicit && !tls_timeout &&
+                        isSilentWritePathError(sock_errno, tls_stack, tls_last);
+                    const bool write_timeout = write_timeout_explicit || write_timeout_silent;
+
+                    ESP_LOGE(TAG,
+                             "  [INC-EA5484] TCP transport error sock_errno=%d (%s) "
+                             "tls_stack=%d esp_tls_last=%s classified=%s",
+                             sock_errno,
+                             strerror(sock_errno),
+                             tls_stack,
+                             esp_err_to_name(tls_last),
+                             write_timeout_silent ? "write_timeout_silent"
+                                                  : write_timeout_explicit ? "write_timeout"
+                                                  : tls_timeout ? "tls_timeout"
+                                                  : "tcp_other");
+
+                    // Preserve meaningful marker for SafePublish retry/backpressure
+                    // heuristic: 119 = IDF write-path timeout (EWOULDBLOCK-ish).
+                    // Real sock_errno wins if present; otherwise surface the silent
+                    // timeout as 119 so `isWritePathTimeoutErrno(last_transport_errno_)`
+                    // downstream (mqtt_client.cpp:1110) classifies correctly.
+                    if (sock_errno != 0) {
+                        self->last_transport_errno_ = sock_errno;
+                    } else if (write_timeout_silent) {
+                        self->last_transport_errno_ = 119;
+                    } else {
+                        self->last_transport_errno_ = 0;
+                    }
+
+                    if (write_timeout) {
+                        self->transport_write_timeout_count_++;
+                    }
+                    if (tls_timeout) {
+                        self->tls_connect_timeout_count_++;
+                    }
+                    if (!write_timeout && !tls_timeout) {
+                        self->tcp_transport_error_count_++;
+                    }
+
+                    // Write-path EAGAIN/EWOULDBLOCK errors often precede DISCONNECTED and
+                    // represent temporary send-buffer pressure. Let DISCONNECTED own the
+                    // reconnect scheduling to avoid duplicate backoff state transitions.
+                    if (tls_timeout) {
+                        self->scheduleManagedReconnect_("mqtt_transport_error");
+                    }
                 } else if (event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) {
                     ESP_LOGE(TAG, "  Connection refused, reason=%d",
                              event->error_handle->connect_return_code);
@@ -1553,3 +1999,4 @@ void MQTTClient::staticCallback(char* topic, byte* payload, unsigned int length)
 }
 
 #endif  // MQTT_USE_PUBSUBCLIENT
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      

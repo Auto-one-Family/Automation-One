@@ -128,6 +128,8 @@ public:
     void processPublishQueue();
     // Drain deferred subscribe queue (one topic per tick with backoff).
     void processSubscriptionQueue();
+    // Send deferred bootstrap heartbeat outside MQTT event callback context.
+    void processBootstrapHeartbeatAfterSubscribe();
 #endif
 
     // Circuit Breaker Access (for Watchdog integration + persistent failure timer)
@@ -143,6 +145,9 @@ public:
 
     // ESP-IDF MQTT client outbox full (-2) drops for non-critical publishes (telemetry only)
     uint32_t getPublishOutboxNoncriticalDropCount() const;
+
+    // AUT-57: safePublish retry telemetry (total retries across all calls)
+    uint32_t getSafePublishRetryCount() const;
 
     // ============================================
     // REGISTRATION GATE (Bug #1 Fix)
@@ -188,6 +193,10 @@ private:
 
     bool enqueueSubscription_(const String& topic, uint8_t qos, bool critical, bool front = false);
     void clearSubscriptionQueue_();
+    void scheduleManagedReconnect_(const char* reason, unsigned long base_delay_ms = 1500);
+    void processManagedReconnect_();
+    unsigned long computeReconnectJitterMs_(uint16_t attempt) const;
+    bool publishSessionAnnounce(uint32_t epoch);
 #else
     // PubSubClient backend
     WiFiClient wifi_client_;
@@ -242,6 +251,9 @@ private:
     // Sequence number for correlation (monotonically increasing per publish)
     uint32_t publish_seq_;
 
+    // AUT-57: cumulative retry count across all safePublish calls (telemetry only)
+    uint32_t safe_publish_retry_count_;
+
     // ============================================
     // REGISTRATION GATE (Bug #1 Fix)
     // ============================================
@@ -256,6 +268,15 @@ private:
     bool bootstrap_heartbeat_pending_;
     /** msg_id from esp_mqtt_client_subscribe(heartbeat/ack); bootstrap HB after MQTT_EVENT_SUBSCRIBED */
     int pending_bootstrap_ack_subscribe_msg_id_;
+    bool bootstrap_heartbeat_send_pending_;
+    unsigned long next_managed_reconnect_ms_;
+    uint16_t managed_reconnect_attempts_;
+    uint32_t transport_write_timeout_count_;
+    uint32_t tls_connect_timeout_count_;
+    uint32_t tcp_transport_error_count_;
+    int32_t last_transport_errno_;
+    unsigned long last_disconnect_ms_;
+    int pending_session_announce_msg_id_;
 #endif
 
     static MQTTClient* instance_;
