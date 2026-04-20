@@ -1612,13 +1612,16 @@ ESP32_TASK_ERROR_MESSAGES: Dict[int, Dict[str, Any]] = {
     },
     4062: {
         "category": "APPLICATION",
+        "subcategory": "MQTT_PUBLISH_BACKPRESSURE",
         "severity": "WARNING",
         "message_de": "FreeRTOS Task-Queue voll",
-        "message_user_de": "System-Warnung: Aufgaben-Warteschlange ist voll",
+        "message_user_de": "System-Warnung: MQTT-Veroeffentlichung unter Last (kurzfristiger Burst)",
         "troubleshooting_de": [
             "1. System verarbeitet Aufgaben langsamer als neue ankommen",
             "2. Ältere Aufgaben werden verworfen",
             "3. Sensor-Polling-Rate reduzieren",
+            "4. Backpressure: Queue-Fuellstand aus Heartbeat pruefen (publish_queue_hwm, shed/drop)",
+            "5. Bei anhaltendem Druck: Firmware-Emitter-Raten fuer Non-Critical-Pfade reduzieren",
         ],
         "docs_link": "/docs/system/tasks#queues",
         "recoverable": True,
