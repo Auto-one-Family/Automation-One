@@ -394,7 +394,7 @@ function handleToggle(event: Event) {
   padding: 1px 6px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 700;
   letter-spacing: 0.02em;
 }
@@ -472,7 +472,7 @@ function handleToggle(event: Event) {
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border);
   padding: 1px 6px;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   line-height: 1.1;
   color: var(--color-text-secondary);
 }
@@ -581,10 +581,10 @@ function handleToggle(event: Event) {
 .actuator-card__scope-badge {
   display: inline-flex;
   align-items: center;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 500;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   white-space: nowrap;
   cursor: default;
 }
@@ -604,10 +604,10 @@ function handleToggle(event: Event) {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 500;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   white-space: nowrap;
 }
 

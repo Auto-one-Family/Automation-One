@@ -149,6 +149,9 @@ export const NOTIFICATION_SOURCE_LABELS: Record<string, string> = {
   grafana: 'Infrastruktur',
   mqtt_handler: 'Aktor',
   logic_engine: 'Regel',
+  ai_anomaly_service: 'KI-Anomalie',
+  freshness_reminder: 'Frische-Hinweis',
+  calibration_reminder: 'Kalibrier-Hinweis',
   manual: 'System',
   system: 'System',
   device_event: 'System',
@@ -162,6 +165,33 @@ export const NOTIFICATION_SOURCE_LABELS: Record<string, string> = {
 export function getNotificationSourceLabel(source: string | null | undefined): string {
   if (!source) return ''
   return NOTIFICATION_SOURCE_LABELS[source] ?? source
+}
+
+export const NOTIFICATION_SEVERITY_LABELS: Record<string, string> = {
+  critical: 'Kritisch',
+  warning: 'Warnung',
+  info: 'Info',
+}
+
+export function getNotificationSeverityLabel(severity: string | null | undefined): string {
+  if (!severity) return ''
+  return NOTIFICATION_SEVERITY_LABELS[severity] ?? severity
+}
+
+export const NOTIFICATION_CATEGORY_LABELS: Record<string, string> = {
+  connectivity: 'Konnektivität',
+  data_quality: 'Datenqualität',
+  infrastructure: 'Infrastruktur',
+  lifecycle: 'Lifecycle',
+  maintenance: 'Wartung',
+  security: 'Sicherheit',
+  system: 'System',
+  ai_anomaly: 'KI-Anomalie',
+}
+
+export function getNotificationCategoryLabel(category: string | null | undefined): string {
+  if (!category) return ''
+  return NOTIFICATION_CATEGORY_LABELS[category] ?? category
 }
 
 // =============================================================================

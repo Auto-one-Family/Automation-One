@@ -351,7 +351,7 @@ MonitorView.vue (URL-Sync: L1→L2→L3 via route params)
 │   ├── Subzone-Accordion: v-for subzone in filteredSubzones; Header mit Count-Badge "XS · YA"; Accordion-Header NUR wenn >1 Subzone oder benannte Subzone; Body v-show mit Transition; Smart-Defaults (<=4 alle offen, >4 erste+Zone-weit offen, leere eingeklappt); localStorage-Persistenz
 │   │   ├── Typ-Labels "Sensoren"/"Aktoren": NUR sichtbar wenn BEIDE Typen in der Subzone vorhanden
 │   │   ├── Dashed Trennlinie (.monitor-subzone__separator): NUR zwischen Sensoren und Aktoren wenn beide vorhanden
-│   │   ├── SensorCard.vue[] (mode='monitor', Stale/ESP-Offline-Badges, Trend-Pfeil via :trend Prop, Scope-Badge Multi-Zone/Mobil (T13-R3 WP4), Datenmodus-Badge `Live|Hybrid|Snapshot` (F07), from components/devices/; effectiveQualityStatus: bei Stale→'warning' Override, qualityLabel "Veraltet" statt "OK", border-left: 3px solid var(--color-warning); Mobile: Kontext-Hint "Aktiv in Zone X seit..." + Zone-Wechsel-Dropdown via deviceContextStore (6.7); Virtual-Sensor Info-Icon: Lucide Info 14px neben Titel bei VIRTUAL_SENSOR_META match, Glassmorphism-Tooltip mit Quell-Sensoren + Formel (V19-F03))
+│   │   ├── SensorCard.vue[] (mode='monitor', Stale/ESP-Offline-Badges, Trend-Pfeil via :trend Prop, Scope-Badge Multi-Zone/Mobil (T13-R3 WP4), Datenmodus-Badge `Live|Hybrid|Snapshot` (F07), from components/devices/; effectiveQualityStatus: bei Stale→`stale` (eigener Status), qualityLabel "Veraltet", eigene Stale-Farbkodierung getrennt von Warning; Mobile: Kontext-Hint "Aktiv in Zone X seit..." + Zone-Wechsel-Dropdown via deviceContextStore (6.7); Virtual-Sensor Info-Icon: Lucide Info 14px neben Titel bei VIRTUAL_SENSOR_META match, Glassmorphism-Tooltip mit Quell-Sensoren + Formel (V19-F03))
 │   │   │   ├── #sparkline: LiveLineChart (compact, sensor-type → auto Y-Range, thresholds → farbige Schwellwert-Zonen aus SENSOR_TYPE_CONFIG)
 │   │   │   └── [Expanded] 1h-Chart (vue-chartjs Line, sensorsApi.queryData Initial-Fetch)
 │   │   │       ├── "Zeitreihe anzeigen" → openSensorDetail (L3)
@@ -1372,6 +1372,8 @@ cleanupWebSocket() {
 **Version:** 10.8 | **Letzte Aktualisierung:** 2026-04-14
 
 - 2026-04-14: Chart-Stabilitaet Monitor/L3 gehaertet — Annotation-Guards gegen ungueltige Threshold-/Event-Werte (`toFiniteNumber`, finite timestamp check), `borderCapStyle` defensiv gesetzt und Annotation-Plugin nur mit gueltigen Annotationen aktiviert (`LiveLineChart.vue`, `HistoricalChart.vue`, `MultiSensorChart.vue`).
+
+- 2026-04-17: AUT-27 Status-Semantik nachgezogen — `qualityToStatus()` behandelt `stale` als eigenen Status (nicht warning/offline); SensorCard/QualityIndicator/Monitor-Statusdarstellung visuell und semantisch getrennt fuer `stale` vs. `warning`.
 
 - 2026-04-11: Composables-Index — `useCalibrationWizard.ts` (Kalibrier-Wizard, Live-`triggerMeasurement` mit 2 s Post-HTTP-Cooldown, Parität `SensorValueCard`).
 

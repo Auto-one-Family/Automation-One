@@ -852,7 +852,7 @@ onUnmounted(() => {
 
 .multi-sensor-widget__dropdown-group {
   padding: var(--space-1) var(--space-3);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 600;
   color: var(--color-text-muted);
   text-transform: uppercase;

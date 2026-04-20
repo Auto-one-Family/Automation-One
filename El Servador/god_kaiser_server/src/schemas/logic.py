@@ -79,6 +79,14 @@ class SensorCondition(BaseModel):
         None,
         description="Optional subzone filter (Phase 2.4): rule fires only when trigger_data.subzone_id matches",
     )
+    require_fresh_data: Optional[bool] = Field(
+        False,
+        description=(
+            "AUT-41: When True, condition evaluates False if the sensor value is stale "
+            "(on_demand/scheduled sensors only; age > measurement_freshness_hours). "
+            "Continuous sensors and sensors without freshness config are unaffected."
+        ),
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -89,6 +97,7 @@ class SensorCondition(BaseModel):
                 "operator": ">",
                 "value": 7.5,
                 "sensor_type": "ph",
+                "require_fresh_data": False,
             }
         }
     )

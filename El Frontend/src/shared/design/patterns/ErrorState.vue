@@ -93,7 +93,7 @@ const emit = defineEmits<{
   padding: 1rem;
   background-color: rgba(248, 113, 113, 0.1);
   border: 1px solid rgba(248, 113, 113, 0.3);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
 }
 
 .error-state__icon {

@@ -80,10 +80,10 @@ async def test_route_normal_flow(db_session, sample_user, mock_ws_manager, mock_
     assert result.title == "Test Alert"
     assert result.severity == "warning"
 
-    # WS broadcast should have been called
-    mock_ws_manager.broadcast.assert_called()
-    call_args = mock_ws_manager.broadcast.call_args
-    assert call_args[0][0] == "notification_new"
+    # WS broadcasts should include notification_new + unread count refresh
+    broadcast_calls = [call.args[0] for call in mock_ws_manager.broadcast.call_args_list]
+    assert "notification_new" in broadcast_calls
+    assert "notification_unread_count" in broadcast_calls
 
 
 # =============================================================================

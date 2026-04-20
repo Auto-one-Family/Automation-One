@@ -369,12 +369,12 @@ describe('getSensorTypeOptions', () => {
 // =============================================================================
 
 describe('formatSensorValueWithUnit', () => {
-  it('formats DS18B20 value with unit', () => {
-    expect(formatSensorValueWithUnit(23.5, 'DS18B20')).toBe('23.5 °C')
+  it('formats DS18B20 value with de-DE locale', () => {
+    expect(formatSensorValueWithUnit(23.5, 'DS18B20')).toBe('23,5 °C')
   })
 
-  it('formats pH value with unit', () => {
-    expect(formatSensorValueWithUnit(7.0, 'pH')).toBe('7.00 pH')
+  it('formats pH value with de-DE locale', () => {
+    expect(formatSensorValueWithUnit(7.0, 'pH')).toBe('7,00 pH')
   })
 
   it('returns dash for null value', () => {
@@ -385,12 +385,12 @@ describe('formatSensorValueWithUnit', () => {
     expect(formatSensorValueWithUnit(undefined as any, 'DS18B20')).toBe('-')
   })
 
-  it('formats humidity value', () => {
-    expect(formatSensorValueWithUnit(65.5, 'sht31_humidity')).toBe('65.5 %RH')
+  it('formats humidity value with de-DE locale', () => {
+    expect(formatSensorValueWithUnit(65.5, 'sht31_humidity')).toBe('65,5 %RH')
   })
 
-  it('formats EC value', () => {
-    expect(formatSensorValueWithUnit(1200, 'EC')).toBe('1200 µS/cm')
+  it('formats EC value with thousands separator (AUT-26)', () => {
+    expect(formatSensorValueWithUnit(1200, 'EC')).toBe('1.200 µS/cm')
   })
 
   it('formats unknown type without config', () => {

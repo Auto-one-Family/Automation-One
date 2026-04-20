@@ -138,6 +138,11 @@ async def run_async_migrations() -> None:
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
+        # Alembic runs DDL inside nested/sync transactions; the async connection
+        # still needs an explicit commit before __aexit__, otherwise the outer
+        # transaction is rolled back and migrations appear to "succeed" in logs
+        # without persisting (asyncpg + run_sync).
+        await connection.commit()
 
     await connectable.dispose()
 

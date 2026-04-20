@@ -184,7 +184,7 @@ onUnmounted(() => {
 .calibration-step {
   background: var(--color-bg-secondary, #111118);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   padding: 1.25rem;
   display: flex;
   flex-direction: column;
@@ -199,11 +199,11 @@ onUnmounted(() => {
 
 .calibration-step__badge {
   background: var(--color-iridescent-1, #a78bfa);
-  color: #fff;
+  color: var(--color-text-inverse);
   font-size: 0.6875rem;
   font-weight: 600;
   padding: 0.125rem 0.5rem;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
 }
 
 .calibration-step__title {
@@ -227,7 +227,7 @@ onUnmounted(() => {
   gap: 0.5rem;
   padding: 1rem;
   background: var(--color-bg-tertiary, #0d0d14);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 
 .calibration-step__reading-label {
@@ -251,7 +251,7 @@ onUnmounted(() => {
 .calibration-step__read-btn {
   padding: 0.375rem 1rem;
   font-size: 0.75rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   background: var(--color-bg-secondary, #111118);
   color: var(--color-text-primary, #eaeaf2);
@@ -284,7 +284,7 @@ onUnmounted(() => {
 .calibration-step__retry-btn {
   padding: 0.375rem 1rem;
   font-size: 0.75rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-warning, #fbbf24);
   background: transparent;
   color: var(--color-warning, #fbbf24);
@@ -316,7 +316,7 @@ onUnmounted(() => {
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
   font-family: 'JetBrains Mono', monospace;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   background: var(--color-bg-tertiary, #0d0d14);
   color: var(--color-text-primary, #eaeaf2);
@@ -332,10 +332,10 @@ onUnmounted(() => {
   padding: 0.625rem 1.25rem;
   font-size: 0.8125rem;
   font-weight: 600;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   border: none;
   background: var(--color-iridescent-1, #a78bfa);
-  color: #fff;
+  color: var(--color-text-inverse);
   cursor: pointer;
   transition: all 0.15s;
 }

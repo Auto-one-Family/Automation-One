@@ -638,7 +638,7 @@ onMounted(() => {
   font-family: var(--font-mono);
   background: rgba(255, 255, 255, 0.06);
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   font-size: 0.6875rem;
 }
 
@@ -921,7 +921,7 @@ onMounted(() => {
 .problem-tag {
   font-size: 0.6875rem;
   padding: 0.125rem 0.5rem;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   font-weight: 500;
 }
 
@@ -942,7 +942,7 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   padding: 0.125rem 0.625rem;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -988,7 +988,7 @@ onMounted(() => {
   background: var(--glass-bg);
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--z-dropdown);
 }
 
 .health-table th {

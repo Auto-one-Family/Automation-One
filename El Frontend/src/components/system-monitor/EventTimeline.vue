@@ -235,7 +235,7 @@ function getEventCategoryClass(event: UnifiedEvent): string {
 }
 
 .timeline-single__text {
-  color: #707080;
+  color: var(--color-text-muted);
   font-size: 0.875rem;
 }
 
@@ -276,7 +276,7 @@ function getEventCategoryClass(event: UnifiedEvent): string {
   font-weight: 600;
   font-family: monospace;
   padding: 0.125rem 0.375rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   white-space: nowrap;
 }
 
@@ -357,9 +357,9 @@ function getEventCategoryClass(event: UnifiedEvent): string {
   justify-content: center;
   background: rgba(15, 15, 20, 0.95);
   border: 2px solid rgba(255, 255, 255, 0.2);
-  color: #707080;
+  color: var(--color-text-muted);
   transition: all 0.15s ease;
-  z-index: 1;
+  z-index: var(--z-dropdown);
 }
 
 .timeline-node--current .timeline-node__dot {
@@ -370,9 +370,9 @@ function getEventCategoryClass(event: UnifiedEvent): string {
 
 /* Kategorie-Farben fuer Dot */
 .timeline-node--esp-status .timeline-node__dot { border-color: var(--color-accent); color: var(--color-accent); }
-.timeline-node--sensors .timeline-node__dot { border-color: #10b981; color: #10b981; }
-.timeline-node--actuators .timeline-node__dot { border-color: #f59e0b; color: #f59e0b; }
-.timeline-node--system .timeline-node__dot { border-color: #8b5cf6; color: #8b5cf6; }
+.timeline-node--sensors .timeline-node__dot { border-color: var(--color-category-sensors); color: var(--color-category-sensors); }
+.timeline-node--actuators .timeline-node__dot { border-color: var(--color-category-actuators); color: var(--color-category-actuators); }
+.timeline-node--system .timeline-node__dot { border-color: var(--color-category-system); color: var(--color-category-system); }
 
 /* Node-Card */
 .timeline-node__card {
@@ -381,7 +381,7 @@ function getEventCategoryClass(event: UnifiedEvent): string {
   padding: 0.5rem 0.625rem;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   text-align: center;
   transition: all 0.15s ease;
 }
@@ -423,13 +423,13 @@ function getEventCategoryClass(event: UnifiedEvent): string {
   display: block;
   font-size: 0.75rem;
   font-family: monospace;
-  color: #707080;
+  color: var(--color-text-muted);
   margin-bottom: 0.125rem;
 }
 
 .timeline-node__message {
   font-size: 0.625rem;
-  color: #a0a0b0;
+  color: var(--color-text-secondary);
   margin: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -446,7 +446,7 @@ function getEventCategoryClass(event: UnifiedEvent): string {
   text-transform: uppercase;
   background: rgba(96, 165, 250, 0.15);
   color: var(--color-info);
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
 }
 
 /* Mobile Latency Labels (hidden on desktop) */
@@ -522,7 +522,7 @@ function getEventCategoryClass(event: UnifiedEvent): string {
     margin-left: 2.5rem;
     margin-bottom: 0.75rem;
     padding: 0.125rem 0.5rem;
-    border-radius: 0.25rem;
+    border-radius: var(--radius-xs);
     font-size: 0.6875rem;
     font-weight: 600;
     font-family: monospace;

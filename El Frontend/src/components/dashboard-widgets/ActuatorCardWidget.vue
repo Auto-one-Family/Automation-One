@@ -222,7 +222,7 @@ function selectActuator(id: string) {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
   margin-top: var(--space-1);
 }

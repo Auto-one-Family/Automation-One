@@ -252,6 +252,17 @@ class ESPDevice(Base, TimestampMixin):
         return self.status == "online"
 
     @property
+    def config_pending(self) -> bool:
+        """Check if device is in CONFIG_PENDING_AFTER_RESET state.
+
+        Derived from system_state stored in device_metadata by the heartbeat handler.
+        When True, actuator commands should NOT be dispatched — the firmware will
+        reject them with CONFIG_PENDING_BLOCKED.
+        """
+        metadata = self.device_metadata or {}
+        return metadata.get("system_state") == "CONFIG_PENDING_AFTER_RESET"
+
+    @property
     def max_sensors(self) -> int:
         """Get maximum number of sensors from capabilities"""
         return self.capabilities.get("max_sensors", 0)

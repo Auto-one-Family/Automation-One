@@ -180,6 +180,8 @@ class SensorTypeRegistrationService:
         timeout = getattr(processor_class, "RECOMMENDED_TIMEOUT_SECONDS", 180)
         interval = getattr(processor_class, "RECOMMENDED_INTERVAL_SECONDS", 30)
         supports_on_demand = getattr(processor_class, "SUPPORTS_ON_DEMAND", False)
+        freshness_hours = getattr(processor_class, "RECOMMENDED_FRESHNESS_HOURS", None)
+        calibration_days = getattr(processor_class, "RECOMMENDED_CALIBRATION_INTERVAL_DAYS", None)
 
         # Derive timeout_warning_enabled from timeout value
         # If timeout > 0, warnings should be enabled
@@ -199,12 +201,15 @@ class SensorTypeRegistrationService:
                 timeout_warning_enabled=timeout_warning_enabled,
                 supports_on_demand=supports_on_demand,
                 description=description,
+                measurement_freshness_hours=freshness_hours,
+                calibration_interval_days=calibration_days,
             )
 
             logger.info(
                 f"Auto-registered sensor type '{sensor_type}': "
                 f"mode={mode}, timeout={timeout}s, interval={interval}s, "
-                f"on_demand={supports_on_demand}"
+                f"on_demand={supports_on_demand}, "
+                f"freshness={freshness_hours}h, calibration={calibration_days}d"
             )
 
             return {
@@ -213,6 +218,8 @@ class SensorTypeRegistrationService:
                 "timeout": timeout,
                 "interval": interval,
                 "supports_on_demand": supports_on_demand,
+                "freshness_hours": freshness_hours,
+                "calibration_days": calibration_days,
             }
 
         except Exception as e:

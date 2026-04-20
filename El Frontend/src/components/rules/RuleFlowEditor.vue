@@ -1347,7 +1347,7 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 5;
+  z-index: var(--z-dropdown);
   pointer-events: none;
 }
 
@@ -1400,7 +1400,7 @@ defineExpose({
   background: rgba(129, 140, 248, 0.04);
   border: 2px dashed rgba(129, 140, 248, 0.3);
   border-radius: var(--radius-lg);
-  z-index: 10;
+  z-index: var(--z-dropdown);
   pointer-events: none;
 }
 
@@ -1509,7 +1509,7 @@ defineExpose({
 }
 
 .rule-node--diagnostics::before {
-  background: linear-gradient(90deg, #22d3ee, rgba(34, 211, 238, 0.3));
+  background: linear-gradient(90deg, var(--color-real), rgba(34, 211, 238, 0.3));
 }
 
 /* Node inner layout */
@@ -1534,7 +1534,7 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   flex-shrink: 0;
 }
 
@@ -1575,7 +1575,7 @@ defineExpose({
 
 .rule-node__icon-wrap--diagnostics {
   background: rgba(34, 211, 238, 0.12);
-  color: #22d3ee;
+  color: var(--color-real);
 }
 
 .rule-node__icon {
@@ -1598,7 +1598,7 @@ defineExpose({
   font-size: 0.5625rem;
   font-weight: 600;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: rgba(255, 255, 255, 0.05);
   color: var(--color-text-muted);
   letter-spacing: 0.02em;
@@ -1625,7 +1625,7 @@ defineExpose({
   letter-spacing: 0.06em;
   padding: 1px 4px;
   background: rgba(255,255,255,0.04);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .rule-node__detail-value {
@@ -1786,7 +1786,7 @@ defineExpose({
   background: var(--color-bg-primary);
   border: 2.5px solid rgba(129, 140, 248, 0.6);
   transition: all 0.15s var(--ease-out);
-  z-index: 5;
+  z-index: var(--z-dropdown);
 }
 
 /* Invisible hit area expansion for easier grabbing */
@@ -1988,7 +1988,7 @@ defineExpose({
   position: absolute;
   top: 0.625rem;
   left: 0.625rem;
-  z-index: 5;
+  z-index: var(--z-dropdown);
   display: flex;
   gap: 2px;
   background: var(--color-bg-secondary);

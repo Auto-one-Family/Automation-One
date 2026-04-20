@@ -989,7 +989,7 @@ onUnmounted(() => {
   top: 0;
   background: rgba(15, 15, 20, 0.98);
   backdrop-filter: blur(12px);
-  z-index: 10;
+  z-index: var(--z-dropdown);
 }
 
 .panel-header__left {
@@ -1012,7 +1012,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.375rem;
   padding: 0.25rem 0.625rem;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   font-size: 0.6875rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -1055,7 +1055,7 @@ onUnmounted(() => {
   justify-content: center;
   width: 2.25rem;
   height: 2.25rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--color-text-muted);
@@ -1081,7 +1081,7 @@ onUnmounted(() => {
 
 .panel-section {
   padding: 1rem;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
@@ -1152,7 +1152,7 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.25rem;
   padding: 0.625rem 0.75rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.04);
 }
@@ -1206,7 +1206,7 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.25rem;
   padding: 0.625rem 0.75rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -1232,7 +1232,7 @@ onUnmounted(() => {
   display: inline-flex;
   width: fit-content;
   padding: 0.25rem 0.5rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background: rgba(239, 68, 68, 0.18);
   color: var(--color-text-primary);
   border: 1px solid rgba(239, 68, 68, 0.4);
@@ -1244,7 +1244,7 @@ onUnmounted(() => {
   display: inline-flex;
   width: fit-content;
   padding: 0.1875rem 0.5rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.03em;
@@ -1279,7 +1279,7 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.25rem;
   padding: 0.625rem 0.75rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -1305,7 +1305,7 @@ onUnmounted(() => {
   display: inline-flex;
   width: fit-content;
   padding: 0.25rem 0.5rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background: rgba(139, 92, 246, 0.2);
   color: #d8b4fe;
   border: 1px solid rgba(139, 92, 246, 0.35);
@@ -1316,7 +1316,7 @@ onUnmounted(() => {
 .integration-json {
   margin: 0;
   padding: 0.625rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--color-text-secondary);
@@ -1342,7 +1342,7 @@ onUnmounted(() => {
 
 .metric-card {
   padding: 0.875rem;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.05);
   display: flex;
@@ -1370,7 +1370,7 @@ onUnmounted(() => {
 
 .metric-bar {
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
   margin-top: 0.25rem;
@@ -1378,12 +1378,12 @@ onUnmounted(() => {
 
 .metric-bar__fill {
   height: 100%;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   transition: width 0.5s ease;
 }
 
 .metric-bar__fill--good { background: var(--color-success); }
-.metric-bar__fill--warning { background: #f59e0b; }
+.metric-bar__fill--warning { background: var(--color-warning); }
 .metric-bar__fill--critical { background: var(--color-error); }
 
 .metric-sublabel {
@@ -1392,7 +1392,7 @@ onUnmounted(() => {
 }
 
 .text-good { color: var(--color-success); }
-.text-fair { color: #f59e0b; }
+.text-fair { color: var(--color-warning); }
 .text-weak { color: var(--color-error); }
 
 /* ============================================================================
@@ -1440,7 +1440,7 @@ onUnmounted(() => {
   font-size: 0.625rem;
   font-weight: 700;
   padding: 0.125rem 0.375rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   background: rgba(139, 92, 246, 0.15);
   color: var(--color-mock);
   text-transform: uppercase;
@@ -1467,7 +1467,7 @@ onUnmounted(() => {
 .error-code-badge {
   display: inline-block;
   padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.2);
   font-family: var(--font-mono, monospace);
@@ -1513,7 +1513,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.25rem;
   padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   font-size: 0.75rem;
   font-weight: 600;
 }
@@ -1541,7 +1541,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.75rem;
   padding: 0.5rem 0.75rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background: rgba(239, 68, 68, 0.05);
   border: 1px solid rgba(239, 68, 68, 0.1);
   font-size: 0.8125rem;
@@ -1574,7 +1574,7 @@ onUnmounted(() => {
   padding: 0.75rem 1rem;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -1597,7 +1597,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.375rem;
   padding: 0.375rem 0.625rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   font-size: 0.75rem;
   color: var(--color-text-secondary);
   background: rgba(255, 255, 255, 0.04);
@@ -1626,7 +1626,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.375rem;
   padding: 0.5rem 0.75rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--color-text-secondary);
@@ -1664,7 +1664,7 @@ onUnmounted(() => {
 
 .json-content {
   margin-top: 0.5rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -1673,7 +1673,7 @@ onUnmounted(() => {
   padding: 1rem;
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   font-family: var(--font-mono, monospace);
   font-size: 0.75rem;
   line-height: 1.5;
@@ -1823,7 +1823,7 @@ onUnmounted(() => {
   padding: 0.75rem 1rem;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -1847,7 +1847,7 @@ onUnmounted(() => {
 .correlated-header__count {
   padding: 0.125rem 0.5rem;
   background: rgba(96, 165, 250, 0.15);
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--color-info);
@@ -1865,7 +1865,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.25rem;
   padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   font-size: 0.75rem;
   font-weight: 600;
   font-family: monospace;
@@ -1887,7 +1887,7 @@ onUnmounted(() => {
 }
 
 .correlated-chevron {
-  color: #707080;
+  color: var(--color-text-muted);
   transition: transform 0.2s;
 }
 
@@ -1905,7 +1905,7 @@ onUnmounted(() => {
   gap: 0.5rem;
   padding: 1rem;
   font-size: 0.875rem;
-  color: #707080;
+  color: var(--color-text-muted);
 }
 
 .correlated-state--error {
@@ -1923,17 +1923,17 @@ onUnmounted(() => {
 }
 
 .correlation-id-label {
-  color: #707080;
+  color: var(--color-text-muted);
 }
 
 .correlation-id-value {
   flex: 1;
   padding: 0.125rem 0.375rem;
   background: rgba(255, 255, 255, 0.05);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   font-family: monospace;
   font-size: 0.6875rem;
-  color: #b0b0c0;
+  color: var(--color-text-secondary);
   word-break: break-all;
 }
 
@@ -1941,8 +1941,8 @@ onUnmounted(() => {
   padding: 0.375rem;
   background: rgba(255, 255, 255, 0.05);
   border: none;
-  border-radius: 0.25rem;
-  color: #707080;
+  border-radius: var(--radius-xs);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.15s;
   display: flex;
@@ -1960,8 +1960,8 @@ onUnmounted(() => {
   font-size: 0.75rem;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 0.25rem;
-  color: #a0a0b0;
+  border-radius: var(--radius-xs);
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: all 0.15s;
 }

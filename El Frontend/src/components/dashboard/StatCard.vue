@@ -121,7 +121,7 @@ const trendClasses = computed(() => {
   gap: 1rem;
   padding: 1.25rem;
   background-color: var(--color-bg-secondary);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   border: 1px solid var(--glass-border);
   transition: all 0.3s ease;
 }
@@ -149,7 +149,7 @@ const trendClasses = computed(() => {
 
 .stat-card__icon {
   padding: 0.75rem;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   flex-shrink: 0;
 }
 

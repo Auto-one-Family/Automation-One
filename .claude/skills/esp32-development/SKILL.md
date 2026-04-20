@@ -301,6 +301,8 @@ ON mit `duration` > 0 im MQTT-Payload → `command_duration_end_ms` gesetzt. `pr
 TopicBuilder::buildSensorDataTopic(gpio);      // .../sensor/{gpio}/data
 TopicBuilder::buildActuatorCommandTopic(gpio); // .../actuator/{gpio}/command
 TopicBuilder::buildSystemHeartbeatTopic();     // .../system/heartbeat
+// AUT-69: session/announce wird direkt in MQTTClient::publishSessionAnnounce()
+// publisht (kaiser/{k}/esp/{id}/session/announce), nicht über TopicBuilder.
 TopicBuilder::buildIntentOutcomeTopic();       // .../system/intent_outcome
 TopicBuilder::buildIntentOutcomeLifecycleTopic(); // .../system/intent_outcome/lifecycle (CONFIG_PENDING)
 TopicBuilder::buildZoneAssignTopic();          // .../zone/assign
@@ -336,6 +338,7 @@ void publishSensorReading(const SensorReading& reading) {
 |---------|-----|
 | Sensor Data | 1 |
 | Actuator Commands | 1 |
+| Session Announce | 1 |
 | Heartbeat | 0 |
 | Emergency Stop | 1 |
 

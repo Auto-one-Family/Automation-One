@@ -595,9 +595,8 @@ const chartOptions = computed(() => {
           return true
         },
       },
-      // Keep a stable annotation object to avoid plugin runtime crashes
-      // when options are toggled during reactive updates.
-      annotation: { annotations: safeActuatorAnnotations },
+      // Keep annotation plugin disabled unless we have valid entries.
+      ...(hasActuatorAnnotations.value ? { annotation: { annotations: safeActuatorAnnotations } } : {}),
       // Zoom/Pan (8.0-A)
       zoom: {
         pan: {
@@ -1197,7 +1196,7 @@ onUnmounted(() => {
   margin-top: 0.5rem;
   padding: 0.375rem 0.75rem;
   font-size: 0.75rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border);
   color: var(--color-text-primary);
@@ -1218,7 +1217,7 @@ onUnmounted(() => {
   margin-top: 0.375rem;
   padding: 0.1875rem 0.4375rem;
   background: rgba(52, 211, 153, 0.1);
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   font-size: 0.5625rem;
   color: var(--color-success);
 }
@@ -1248,7 +1247,7 @@ onUnmounted(() => {
   padding: 0.25rem 0.375rem;
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--glass-border);
-  border-radius: 0.3125rem;
+  border-radius: var(--radius-sm);
   font-size: 0.625rem;
   color: var(--color-text-muted);
   backdrop-filter: blur(4px);
@@ -1275,7 +1274,7 @@ onUnmounted(() => {
 .multi-sensor-chart__info-dual {
   padding: 0 0.25rem;
   background: rgba(96, 165, 250, 0.2);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   color: var(--color-iridescent-1);
   font-weight: 600;
   font-size: 0.5rem;
@@ -1297,7 +1296,7 @@ onUnmounted(() => {
   width: 20px;
   height: 20px;
   border: 1px solid rgba(133, 133, 160, 0.3);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: rgba(0, 0, 0, 0.4);
   color: var(--color-text-secondary);
   cursor: pointer;
@@ -1320,7 +1319,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.3);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   pointer-events: none;
 }
 

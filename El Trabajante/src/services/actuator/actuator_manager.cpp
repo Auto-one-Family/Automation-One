@@ -582,6 +582,42 @@ void ActuatorManager::setAllActuatorsToSafeState() {
   LOG_W(TAG, "[SAFETY] " + String(count) + " actuator(s) set to safe state (default_state)");
 }
 
+void ActuatorManager::setUncoveredActuatorsToSafeState() {
+  if (!initialized_) return;
+  xSemaphoreTake(g_actuator_mutex, portMAX_DELAY);
+  uint8_t held = 0, forced = 0;
+  for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
+    if (!actuators_[i].in_use || !actuators_[i].driver) continue;
+    uint8_t gpio = actuators_[i].config.gpio;
+    bool is_on = actuators_[i].config.current_state;
+
+    if (offlineModeManager.hasCoveringRule(gpio)) {
+      if (is_on) {
+        held++;
+        LOG_I(TAG, "[SAFETY] GPIO " + String(gpio) +
+                   " offline_rule_hold (P4 coverage, critical=" +
+                   String(actuators_[i].config.critical ? "true" : "false") + ")");
+        publishActuatorAlert(gpio, "offline_rule_hold",
+                             "Actuator held ON — offline rule coverage active");
+      }
+    } else {
+      controlActuatorBinary(gpio, actuators_[i].config.default_state);
+      if (is_on) {
+        forced++;
+        LOG_W(TAG, "[SAFETY] GPIO " + String(gpio) +
+                   " safety_forced_off (no P4 rule" +
+                   String(actuators_[i].config.critical ? ", CRITICAL" : "") + ")");
+        publishActuatorAlert(gpio, "safety_forced_off",
+                             String("No offline rule — forced to default_state") +
+                             (actuators_[i].config.critical ? " (critical)" : ""));
+      }
+    }
+  }
+  xSemaphoreGive(g_actuator_mutex);
+  LOG_W(TAG, "[SAFETY] Disconnect+rules: held=" + String(held) +
+             " forced=" + String(forced));
+}
+
 void ActuatorManager::processActuatorLoops() {
   // SAFETY-RTOS M4: protect actuators_[] against publishAllActuatorStatus (Core 0).
   // controlActuatorBinary / emergencyStopActuator called within are NOT mutex owners.
@@ -600,6 +636,7 @@ void ActuatorManager::processActuatorLoops() {
       LOG_I(TAG, "Actuator duration elapsed: GPIO " + String(actuators_[i].config.gpio) +
                   " auto-OFF after command duration");
       actuators_[i].command_duration_end_ms = 0;
+      actuators_[i].last_command_source = "firmware:auto_duration";
       controlActuatorBinary(actuators_[i].config.gpio, false);
       actuators_[i].config = actuators_[i].driver->getConfig();
       publishActuatorStatus(actuators_[i].config.gpio);
@@ -677,6 +714,10 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
   command.duration_s = extractJSONUInt32(payload, "duration", 0);
   command.timestamp = millis();
   command.correlation_id = extractJSONString(payload, "correlation_id");
+  command.issued_by = extractJSONString(payload, "issued_by");
+  if (command.issued_by.length() == 0) {
+    command.issued_by = "system:unknown";
+  }
 
   // BUG-008 Fix: Check if actuator exists before processing command
   RegisteredActuator* actuator = findActuator(gpio);
@@ -721,8 +762,17 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
 
   bool success = false;
   String resultMessage = "Command executed";
+  // Avoid duplicate actuator status publishes:
+  // controlActuator/controlActuatorBinary already publish status on effective changes.
+  // We only force a publish from this handler when command is a binary no-op
+  // (already ON/OFF), because the control helper short-circuits in that case.
+  bool expect_internal_status_publish = true;
+
+  // Make command_source visible in the first status frame emitted by control helpers.
+  actuator->last_command_source = command.issued_by;
 
   if (command.command.equalsIgnoreCase("ON")) {
+    expect_internal_status_publish = !actuator->config.current_state;
     success = controlActuatorBinary(gpio, true);
     if (success && command.duration_s > 0) {
       actuator->command_duration_end_ms = millis() + (static_cast<unsigned long>(command.duration_s) * 1000UL);
@@ -731,12 +781,15 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
     }
     if (!success) resultMessage = "Failed to turn actuator ON";
   } else if (command.command.equalsIgnoreCase("OFF")) {
+    expect_internal_status_publish = actuator->config.current_state;
     success = controlActuatorBinary(gpio, false);
     if (!success) resultMessage = "Failed to turn actuator OFF";
   } else if (command.command.equalsIgnoreCase("PWM")) {
+    expect_internal_status_publish = true;
     success = controlActuator(gpio, command.value);
     if (!success) resultMessage = "Failed to set PWM value";
   } else if (command.command.equalsIgnoreCase("TOGGLE")) {
+    expect_internal_status_publish = true;
     success = controlActuatorBinary(gpio, !actuator->config.current_state);
     if (!success) resultMessage = "Failed to toggle actuator";
   } else {
@@ -748,7 +801,9 @@ bool ActuatorManager::handleActuatorCommand(const String& topic, const String& p
   if (success) {
     LOG_I(TAG, "Actuator command executed: GPIO " + String(gpio) +
              " " + command.command + " = " + String(command.value));
-    publishActuatorStatus(gpio);
+    if (!expect_internal_status_publish) {
+      publishActuatorStatus(gpio);
+    }
   }
 
   xSemaphoreGive(g_actuator_mutex);
@@ -947,6 +1002,10 @@ String ActuatorManager::buildStatusPayload(const ActuatorStatus& status, const A
   payload += "\"pwm\":" + String(status.current_pwm) + ",";
   payload += "\"runtime_ms\":" + String(status.runtime_ms) + ",";
   payload += "\"emergency\":\"" + String(emergencyStateToString(status.emergency_state)) + "\"";
+  const RegisteredActuator* registered = findActuator(status.gpio);
+  if (registered && registered->last_command_source.length() > 0) {
+    payload += ",\"command_source\":\"" + registered->last_command_source + "\"";
+  }
   payload += "}";
   return payload;
 }
@@ -961,7 +1020,9 @@ void ActuatorManager::publishActuatorStatus(uint8_t gpio) {
   actuator->config = actuator->driver->getConfig();
   String payload = buildStatusPayload(status, actuator->config);
   const char* topic = TopicBuilder::buildActuatorStatusTopic(gpio);
-  mqttClient.safePublish(String(topic), payload, 1);
+  // Status is high-frequency telemetry. Keep QoS1, but avoid safePublish retry bursts
+  // under broker/outbox backpressure (AUT-55 pressure scenario).
+  mqttClient.publish(String(topic), payload, 1);
 }
 
 void ActuatorManager::publishAllActuatorStatus() {
@@ -999,6 +1060,9 @@ String ActuatorManager::buildResponsePayload(const ActuatorCommand& command,
   payload += "\"message\":\"" + message + "\"";
   if (command.correlation_id.length() > 0) {
     payload += ",\"correlation_id\":\"" + command.correlation_id + "\"";
+  }
+  if (command.issued_by.length() > 0) {
+    payload += ",\"issued_by\":\"" + command.issued_by + "\"";
   }
   payload += "}";
   return payload;

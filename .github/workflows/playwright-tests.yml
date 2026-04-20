@@ -164,6 +164,16 @@ jobs:
           E2E_TEST_USER: admin
           E2E_TEST_PASSWORD: Admin123#
 
+      - name: Run Playwright visual regression tests
+        working-directory: El Frontend
+        run: npx playwright test --config=playwright.visual.config.ts --project=visual --reporter=html,list,junit
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:5173
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: ../../logs/frontend/playwright/playwright-visual-results.xml
+          CI: true
+          E2E_TEST_USER: admin
+          E2E_TEST_PASSWORD: Admin123#
+
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -171,8 +181,10 @@ jobs:
           name: playwright-report
           path: |
             El Frontend/playwright-report/
+            El Frontend/playwright-report-visual/
             El Frontend/test-results/
             logs/frontend/playwright/playwright-results.xml
+            logs/frontend/playwright/playwright-visual-results.xml
           retention-days: 7
 
       - name: Upload traces on failure
@@ -239,5 +251,6 @@ jobs:
         with:
           files: |
             results/**/playwright-results.xml
+            results/**/playwright-visual-results.xml
           check_name: Playwright E2E Test Results
           comment_mode: always

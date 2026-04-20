@@ -12,6 +12,8 @@ import { useAuthStore } from '@/shared/stores/auth.store'
 interface Props {
   zone: ZoneKPI
   isStale?: boolean
+  /** Number of sensors on mock/simulated ESPs in this zone */
+  mockSensorCount?: number
   healthConfig?: Record<ZoneHealthStatus, { label: string; colorClass: string }>
   rules?: LogicRule[]
   totalRuleCount?: number
@@ -22,11 +24,16 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   isStale: false,
+  mockSensorCount: 0,
   healthConfig: () => DEFAULT_HEALTH_CONFIG,
   rules: () => [],
   totalRuleCount: 0,
   zoneTileEditorTo: null,
 })
+
+const realSensorCount = computed(() =>
+  Math.max(0, props.zone.sensorCount - props.mockSensorCount)
+)
 
 const authStore = useAuthStore()
 
@@ -156,6 +163,9 @@ const ZONE_KPI_GROUP_ARIA =
             'monitor-zone-tile__count--alarm': zone.sensorCount > 0 && zone.activeSensors === 0,
           }]">
             Sensoren: {{ zone.activeSensors }}/{{ zone.sensorCount }} aktiv
+          </span>
+          <span v-if="mockSensorCount > 0" class="monitor-zone-tile__count monitor-zone-tile__count--mock-split">
+            {{ realSensorCount }} Real · {{ mockSensorCount }} Sim
           </span>
           <span :class="['monitor-zone-tile__count', {
             'monitor-zone-tile__count--ok': zone.activeActuators > 0,
@@ -326,7 +336,7 @@ const ZONE_KPI_GROUP_ARIA =
 /* KPIs */
 .monitor-zone-tile__kpis {
   display: grid;
-  grid-template-columns: repeat(3, minmax(110px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr));
   gap: var(--space-2);
 }
 
@@ -348,6 +358,9 @@ const ZONE_KPI_GROUP_ARIA =
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .monitor-zone-tile__kpi-value {
@@ -356,15 +369,19 @@ const ZONE_KPI_GROUP_ARIA =
   gap: var(--space-1);
   white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
   font-family: var(--font-mono);
   color: var(--color-text-primary);
   line-height: 1.2;
+  min-width: 0;
 }
 
 .monitor-zone-tile__kpi-number {
   font-size: var(--text-xl);
   font-weight: 700;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .monitor-zone-tile__kpi-avg {
@@ -399,16 +416,10 @@ const ZONE_KPI_GROUP_ARIA =
 .monitor-zone-tile__counts {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
-  gap: var(--space-2);
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
   font-size: var(--text-xs);
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.monitor-zone-tile__counts::-webkit-scrollbar {
-  display: none;
 }
 
 .monitor-zone-tile__count {
@@ -432,6 +443,11 @@ const ZONE_KPI_GROUP_ARIA =
 .monitor-zone-tile__count--mobile {
   color: var(--color-text-secondary);
   font-style: italic;
+}
+
+.monitor-zone-tile__count--mock-split {
+  color: var(--color-mock);
+  font-size: var(--text-xxs);
 }
 
 /* Rules Summary */

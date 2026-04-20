@@ -2117,7 +2117,7 @@ onMounted(() => {
 
 .severity-badge {
   padding: 0.25rem 0.75rem;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   font-size: 0.75rem;
   font-weight: 500;
 }

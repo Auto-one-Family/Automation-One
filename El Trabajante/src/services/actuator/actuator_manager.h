@@ -51,6 +51,8 @@ public:
   void processActuatorLoops();
   // SAFETY-P1: Set all actuators to their configured default_state (called on disconnect/timeout)
   void setAllActuatorsToSafeState();
+  // AUT-66: Force actuators without covering offline rule to default_state; leave covered ones for P4
+  void setUncoveredActuatorsToSafeState();
 
   // MQTT integration
   bool handleActuatorCommand(const String& topic, const String& payload);
@@ -72,6 +74,7 @@ private:
     ActuatorConfig config;
     bool emergency_stopped = false;
     unsigned long command_duration_end_ms = 0;  // F1: Auto-Off timer (0 = inactive)
+    String last_command_source = "";
   };
 
   #ifndef MAX_ACTUATORS

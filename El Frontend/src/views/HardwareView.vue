@@ -1719,7 +1719,8 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
 @media (max-width: 640px) {
   .hardware-view { padding-bottom: 80px; }
   .zone-accordion-list { gap: var(--space-3); }
-  .hardware-main-layout { flex-direction: column; }
+  /* Keep detail view sidebar beside content even under browser zoom. */
+  .hardware-main-layout:not(.hardware-main-layout--detail) { flex-direction: column; }
   .zone-create-form { flex-wrap: wrap; }
 }
 </style>

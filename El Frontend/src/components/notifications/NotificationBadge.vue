@@ -104,7 +104,7 @@ const severityClass = computed(() => {
   height: 16px;
   padding: 0 4px;
   border-radius: var(--radius-full);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 16px;

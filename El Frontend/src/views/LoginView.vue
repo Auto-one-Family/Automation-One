@@ -350,7 +350,7 @@ const particles = Array.from({ length: 18 }, (_, i) => ({
   width: 100%;
   max-width: 24rem;
   position: relative;
-  z-index: 1;
+  z-index: var(--z-dropdown);
 }
 
 /* ── Header ── */
@@ -379,7 +379,7 @@ const particles = Array.from({ length: 18 }, (_, i) => ({
   width: 2.5rem;
   height: 2.5rem;
   position: relative;
-  z-index: 1;
+  z-index: var(--z-dropdown);
 }
 
 .login-logo__scanline {

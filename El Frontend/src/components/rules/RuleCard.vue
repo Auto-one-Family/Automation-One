@@ -302,7 +302,7 @@ const lastTriggeredText = computed(() => {
 }
 
 .rule-card__status-label {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 600;
   letter-spacing: 0.03em;
   flex-shrink: 0;
@@ -329,7 +329,7 @@ const lastTriggeredText = computed(() => {
 }
 
 .rule-card__reason-code {
-  font-size: 9px;
+  font-size: var(--text-xxs);
   color: var(--color-warning);
   background: rgba(251, 191, 36, 0.12);
   border: 1px solid rgba(251, 191, 36, 0.2);
@@ -349,7 +349,7 @@ const lastTriggeredText = computed(() => {
 }
 
 .rule-card__name {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--color-text-primary);
   flex: 1;
@@ -396,7 +396,7 @@ const lastTriggeredText = computed(() => {
 }
 
 .rule-card__badge {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-family: var(--font-mono);
   padding: 1px 6px;
   border-radius: var(--radius-sm);
@@ -427,7 +427,7 @@ const lastTriggeredText = computed(() => {
 }
 
 .rule-card__arrow {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 
@@ -443,7 +443,7 @@ const lastTriggeredText = computed(() => {
   display: flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-family: var(--font-mono);
   color: var(--color-text-muted);
 }

@@ -1,0 +1,107 @@
+# ============================================================
+# STATUS: SUPERSEDED (2026-04-17)
+# ============================================================
+# Dieser Patch ist nur noch historisches Artefakt und laesst sich
+# nicht mehr sauber per `git apply` auf HEAD anwenden:
+#
+#   * Zeilen-Anker @@ -267 @@ / @@ -1251 @@ / @@ -1337 @@ sind stale.
+#     HEAD hat `mqtt_cfg.task_prio = 3` auf Zeile 336,
+#     MQTT_EVENT_DISCONNECTED auf 1520, MQTT_EVENT_ERROR auf 1704.
+#
+# Was aus diesem Patch IN HEAD ist:
+#   * [INC-EA5484] disconnect-Marker in MQTT_EVENT_DISCONNECTED
+#     (mqtt_client.cpp:1529-1533, uptime/free_heap/rssi/wifi_connected).
+#   * [INC-EA5484] MQTT_EVENT_ERROR-Telemetrie mit uptime_ms +
+#     strerror(sock_errno) + tls_stack-Feld (mqtt_client.cpp:1704-1747).
+#
+# Was BEWUSST VERWORFEN wurde:
+#   * mqtt_cfg.network_timeout_ms = 10000 und reconnect_timeout_ms = 5000.
+#     Begruendung im Code auf mqtt_client.cpp:338-340:
+#     "ESP-IDF defaults are currently more stable in the observed field
+#      setup (EA5484 + second ESP) than the aggressive explicit overrides."
+#
+# Was UEBER den Patch hinaus in HEAD steckt (deckt Ticket-Loesungsansatz
+# Punkt 1+2 "getrennte Counter" + "Exponential-Backoff + Jitter"):
+#   * isWritePathTimeoutSignal / isTlsConnectTimeout (mqtt_client.cpp:93-110)
+#   * transport_write_timeout_count_ / tls_connect_timeout_count_ /
+#     tcp_transport_error_count_ (Member-Counter, getrennt gefuehrt)
+#   * computeReconnectJitterMs_ (mqtt_client.cpp:910-923):
+#     Exponential-Backoff 1500ms << min(attempt, 6), cap 12s,
+#     Jitter 0..649ms mit esp_id-last-char Entropy zur Desync.
+#   * scheduleManagedReconnect_ + Auto-Reconnect-Grace-Window
+#     (MANAGED_RECONNECT_AUTO_GRACE_MS, mqtt_client.cpp:964-971).
+#   * Anti-Doppel-Schedule-Guard in DISCONNECTED-Branch
+#     (mqtt_client.cpp:1569-1573).
+#
+# Referenz: Linear AUT-54, VERIFY-PLAN-REPORT-2026-04-17-issues.md
+# (Sektion "AUT-54 EA-01" und OUTPUT-FUER-ORCHESTRATOR-Mapping).
+#
+# Naechste Schritte liegen NICHT mehr im Code, sondern in Evidence:
+#   * B-NET-01    (Broker-Rohlog automationone-mqtt im UTC-Fenster)
+#   * B-TLS-URI-01 (TLS vs Plain MQTT-URI-Klasse am Feldgeraet)
+#   * B-SERIAL-01 (monotone Zeitbasis Serial <-> Broker)
+#   * B-ALLOY-01   (Monitoring/Alloy-Pfad automationone-alloy)
+#   * 4h-Dauerlauf 2+ ESPs parallel, kein zyklischer TLS-Timeout-Loop.
+# ============================================================
+
+diff --git a/El Trabajante/src/services/communication/mqtt_client.cpp b/El Trabajante/src/services/communication/mqtt_client.cpp
+--- a/El Trabajante/src/services/communication/mqtt_client.cpp
++++ b/El Trabajante/src/services/communication/mqtt_client.cpp
+@@ -267,6 +267,18 @@ bool MQTTClient::connect(const MQTTConfig& config) {
+                                   // +6144 B headroom for future handlers and config payload growth
+     mqtt_cfg.task_prio = 3;
+
++    // ============================================
++    // INC-2026-04-11-ea5484-mqtt-transport-keepalive (PKG-01)
++    // ============================================
++    // Explizite Transport-Timeouts: ESP-IDF-Defaults sind implementierungsabhaengig.
++    // network_timeout_ms deckelt blockierende Socket-Writes (beobachtet errno 119
++    // = EWOULDBLOCK / Schreib-Timeout im Incident). reconnect_timeout_ms verkuerzt
++    // die Wartezeit nach Broker-seitigem "exceeded timeout" disconnect.
++    // Kein Ersatz fuer Root-Cause-Analyse ohne HW-Repro (B-NET-01 / B-SERIAL-01);
++    // macht das Verhalten aber deterministisch und diagnostizierbar.
++    mqtt_cfg.network_timeout_ms  = 10000;   // 10 s TCP/TLS socket I/O timeout (explizit)
++    mqtt_cfg.reconnect_timeout_ms = 5000;   // 5 s Auto-Reconnect-Delay nach Disconnect
++
+     // Destroy old client if present (e.g. reconnect after config change)
+     if (mqtt_client_ != nullptr) {
+         esp_mqtt_client_stop(mqtt_client_);
+@@ -1251,6 +1263,16 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
+             LOG_W(TAG, "║  MQTT_EVENT_DISCONNECTED              ║");
+             LOG_W(TAG, "╚════════════════════════════════════════╝");
+
++            // INC-2026-04-11-ea5484-mqtt-transport-keepalive (PKG-01):
++            // Telemetrie-Marker mit uptime + free heap + WiFi-RSSI, damit Disconnect-
++            // Ursache bei naechstem HW-Repro (Broker-Timeout vs. Socket-Stall vs.
++            // WLAN-Drop) ohne weiteren Code-Druck korreliert werden kann.
++            LOG_W(TAG, String("[INC-EA5484] disconnect marker uptime_ms=") +
++                       String(millis()) +
++                       " free_heap=" + String(ESP.getFreeHeap()) +
++                       " wifi_rssi=" + String(WiFi.RSSI()) +
++                       " wifi_connected=" + String(WiFi.isConnected() ? "true" : "false"));
++
+             // Update shared connection state
+             g_mqtt_connected.store(false);
+
+@@ -1337,11 +1359,19 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
+             break;
+
+         case MQTT_EVENT_ERROR:
++            // INC-2026-04-11-ea5484-mqtt-transport-keepalive (PKG-01):
++            // Zusaetzlich errno (z.B. 119/EWOULDBLOCK = Schreib-Timeout) und uptime
++            // ausgeben, damit Transport-Schreibtimeout von TLS-Handshake-Timeout im
++            // Log eindeutig unterscheidbar ist. Keine Aenderung am LWT-Contract.
+             if (event->error_handle != nullptr) {
+-                ESP_LOGE(TAG, "MQTT_EVENT_ERROR type=%d", event->error_handle->error_type);
++                ESP_LOGE(TAG, "MQTT_EVENT_ERROR type=%d uptime_ms=%lu",
++                         event->error_handle->error_type,
++                         (unsigned long)millis());
+                 if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+-                    ESP_LOGE(TAG, "  TCP transport error: %d (esp_err=%s)",
++                    ESP_LOGE(TAG, "  [INC-EA5484] TCP transport error sock_errno=%d (%s) "
++                                  "esp_tls_last=%s",
+                              event->error_handle->esp_transport_sock_errno,
++                             strerror(event->error_handle->esp_transport_sock_errno),
+                              esp_err_to_name(event->error_handle->esp_tls_last_esp_err));
+                 } else if (event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) {
+                     ESP_LOGE(TAG, "  Connection refused, reason=%d",

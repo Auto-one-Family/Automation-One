@@ -21,6 +21,8 @@
     "test:css:a11y": "npx playwright test --config=playwright.css.config.ts tests/e2e/css/accessibility.spec.ts tests/e2e/css/color-contrast.spec.ts --project=chromium",
     "test:css:responsive": "npx playwright test --config=playwright.css.config.ts tests/e2e/css/responsive-layout.spec.ts",
     "test:css:update-snapshots": "npx playwright test --config=playwright.css.config.ts tests/e2e/css/visual-regression.spec.ts --update-snapshots --project=chromium",
+    "test:visual": "npx playwright test --config=playwright.visual.config.ts --project=visual",
+    "test:visual:update-snapshots": "npx playwright test --config=playwright.visual.config.ts --project=visual --update-snapshots",
     "test:playwright": "npx playwright test",
     "test:playwright:ui": "npx playwright test --ui"
   },

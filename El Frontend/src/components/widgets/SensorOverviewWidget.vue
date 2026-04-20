@@ -161,7 +161,7 @@ onUnmounted(() => {
 <style scoped>
 .sensor-widget__select {
   padding: 2px 6px;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-family: var(--font-mono);
   color: var(--color-text-secondary);
   background: transparent;
@@ -199,7 +199,7 @@ onUnmounted(() => {
 }
 
 .sensor-widget__empty-text {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: var(--font-mono);
   color: var(--color-text-muted);
 }

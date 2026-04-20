@@ -89,6 +89,9 @@ public:
     bool isAdopting() const { return mode_ == OfflineMode::ADOPTING; }
     OfflineMode getMode() const { return mode_; }
     uint8_t getOfflineRuleCount() const { return offline_rule_count_; }
+
+    // AUT-66: Check whether an enabled offline rule covers this actuator GPIO
+    bool hasCoveringRule(uint8_t actuator_gpio) const;
     uint32_t getOfflineEnterCount() const { return offline_enter_count_; }
     uint32_t getAdoptingEnterCount() const { return adopting_enter_count_; }
     uint32_t getAdoptionNoopCount() const { return adoption_noop_count_; }

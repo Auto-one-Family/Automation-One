@@ -212,7 +212,7 @@ const hiddenRulesCount = computed<number>(() => Math.max(0, linkedRules.value.le
   gap: 0.25rem;
   padding: 0.75rem 0.5rem;
   border: 1px dashed var(--glass-border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: rgba(255, 255, 255, 0.2);
   font-size: 0.5625rem;
   text-transform: uppercase;
@@ -274,7 +274,7 @@ const hiddenRulesCount = computed<number>(() => Math.max(0, linkedRules.value.le
   border-radius: var(--radius-full);
   border: 1px solid var(--glass-border);
   background: var(--color-bg-tertiary);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 

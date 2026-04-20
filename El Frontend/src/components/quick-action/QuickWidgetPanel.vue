@@ -282,7 +282,7 @@ function navigateToEditor(): void {
 
 .qa-widget-panel__group-label {
   display: block;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -354,7 +354,7 @@ function navigateToEditor(): void {
 
 .qa-widget-panel__item-desc {
   display: block;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;

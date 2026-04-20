@@ -148,7 +148,7 @@ const useMultiRow = computed(() => props.sensors.length > 5)
   gap: 0.25rem;
   padding: 0.75rem 0.5rem;
   border: 1px dashed var(--glass-border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: rgba(255, 255, 255, 0.2);
   font-size: 0.5625rem;
   text-transform: uppercase;

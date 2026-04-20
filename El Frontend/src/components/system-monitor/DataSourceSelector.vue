@@ -508,7 +508,7 @@ onMounted(() => {
   background: rgba(255, 255, 255, 0.02);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.02),
     0 4px 16px rgba(0, 0, 0, 0.15),
@@ -567,7 +567,7 @@ onMounted(() => {
   align-items: center;
   gap: 0.5rem;                             /* 8px gap between icon and text */
   padding: 0.5rem 0.875rem;                /* Larger padding for better touch */
-  border-radius: 0.5rem;                   /* Slightly less round - modern look */
+  border-radius: var(--radius-md);                   /* Slightly less round - modern look */
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--color-text-secondary);
@@ -620,7 +620,7 @@ onMounted(() => {
   justify-content: center;
   width: 1.5rem;                           /* 24px */
   height: 1.5rem;
-  border-radius: 0.375rem;                 /* 6px radius */
+  border-radius: var(--radius-sm);                 /* 6px radius */
   flex-shrink: 0;
 }
 
@@ -692,7 +692,7 @@ onMounted(() => {
   height: 2.25rem;                         /* 36px */
   padding: 0 0.875rem;
   padding-right: 2rem;                     /* Space for dropdown arrow */
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: var(--color-text-primary);
@@ -746,7 +746,7 @@ onMounted(() => {
   gap: 0.375rem;                           /* 6px between icon and label */
   height: 2.25rem;                         /* 36px */
   padding: 0 0.875rem;
-  border-radius: 0.5rem;                   /* Match other buttons */
+  border-radius: var(--radius-md);                   /* Match other buttons */
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   cursor: pointer;
@@ -813,7 +813,7 @@ onMounted(() => {
   display: inline-flex;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.125rem;                       /* Inner padding for "floating" effect */
 }
 
@@ -828,7 +828,7 @@ onMounted(() => {
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
-  border-radius: 0.375rem;                 /* Inner segments have radius */
+  border-radius: var(--radius-sm);                 /* Inner segments have radius */
   cursor: pointer;
   transition: all 0.15s ease;
   position: relative;
@@ -860,7 +860,7 @@ onMounted(() => {
   gap: 0.375rem;
   padding: 0 0.625rem;
   background: rgba(129, 140, 248, 0.2);
-  color: #a5b4fc;
+  color: var(--color-iridescent-2);
 }
 
 .time-segment--custom:hover {
@@ -1151,7 +1151,7 @@ onMounted(() => {
   padding: 0.5rem 0.75rem;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   color: var(--color-text-muted);
   font-size: 0.8125rem;
   cursor: pointer;

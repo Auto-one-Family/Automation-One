@@ -390,7 +390,7 @@ function exportCsv() {
   gap: 0.875rem;
   background: var(--color-bg-secondary, #111118);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   padding: 1rem;
 }
 
@@ -419,7 +419,7 @@ function exportCsv() {
 .sensor-history__input {
   padding: 0.5rem 0.625rem;
   font-size: 0.8125rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   background: var(--color-bg-tertiary, #0d0d14);
   color: var(--color-text-primary, #eaeaf2);
@@ -491,7 +491,7 @@ function exportCsv() {
   padding: 0.375rem 0.75rem;
   font-size: 0.6875rem;
   font-weight: 500;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   background: var(--color-bg-secondary, #111118);
   color: var(--color-text-muted, #8585a0);
@@ -509,7 +509,7 @@ function exportCsv() {
   width: 100%;
   background: var(--color-bg-secondary, #111118);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   padding: 0.75rem;
 }
 </style>

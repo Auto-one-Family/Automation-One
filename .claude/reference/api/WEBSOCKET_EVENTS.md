@@ -569,6 +569,9 @@ Sensor-Konfiguration wurde gelöscht (T08-Fix-D Ghost-Cleanup).
 Actuator Status Update (nach State-Änderung).
 
 **Trigger:** MQTT Topic `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/status`
+Event-Push-Pattern: ESP32 publiziert NUR bei State-Change (kein periodisches Full-Dump mehr — siehe AUT-68 PKG-17).
+
+**Rate-Limit:** Bypass-aktiv — wird NICHT durch das 10 msg/sec-Limit gedropt (kritischer GPIO-State darf nie verloren gehen, siehe Sektion 15).
 
 **Code-Location:** [actuator_handler.py:228](El Servador/god_kaiser_server/src/mqtt/handlers/actuator_handler.py#L228)
 
@@ -1821,8 +1824,25 @@ interface WebSocketFilters {
 
 ## 15. Rate Limiting
 
-- **Server-seitig:** 10 Nachrichten pro Sekunde pro Client
+- **Server-seitig:** 10 Nachrichten pro Sekunde pro Client (Per-Client-Sliding-Window)
 - **Client-seitig:** Warning bei >10 msg/sec
+- **Implementierung:** `src/websocket/manager.py → _rate_limit_bypass_types`
+
+### Bypass-Liste (kritische Realtime-Events)
+
+Folgende Event-Typen umgehen das Rate-Limit und werden auch unter Burst-Last garantiert ausgeliefert:
+
+| Event | Grund |
+|-------|-------|
+| `actuator_status` | GPIO-State-Change — Safety-Relevant, nie droppen (AUT-68) |
+| `esp_health` | Online/Offline-Signal — UI muss sofort reagieren |
+| `device_discovered` | Neu-Provisionierung — einmaliges Event |
+| `device_rediscovered` | Reconnect — Delta-Sync-Trigger |
+| `notification_new` | Alert/Warning — darf nicht verloren gehen |
+| `notification_updated` | Status-Wechsel einer Notification |
+| `notification_unread_count` | Badge-Aktualisierung |
+
+> Nicht-Bypass-Events (z. B. `sensor_data` bei 1 Hz × N Sensoren) werden bei Überschreitung gedropt.
 
 ---
 

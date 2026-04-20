@@ -1,122 +1,77 @@
-# Server Dev Report: 3 Bug-Fixes (audit_log Overflow, pwm_value, Config-Push Gate)
+# Server Dev Report: AUT-63 Broadcast-Emergency Contract Fix
 
 ## Modus: B (Implementierung)
 
 ## Auftrag
-3 kritische/hohe Bugs im AutomationOne Server beheben:
-- Bug 1 (KRITISCH): `audit_log.status` VARCHAR(20) Overflow mit Reconciliation-Loop
-- Bug 2 (HIGH): `monitor_data_service.py` pwm_value Doppel-Multiplikation
-- Bug 3 (HIGH): Logic Engine feuert Aktuator-Commands vor Config-Push-Abschluss
+
+Linear Issue AUT-63: Broadcast-Emergency Contract zwischen Server und Firmware angleichen.
+Firmware akzeptiert nur lowercase `emergency_stop` / `stop_all`, Server sendete uppercase `EMERGENCY_STOP`.
+Resultat: Firmware-Rejection mit Error 3016 (EMERGENCY_CONTRACT_MISMATCH / UNKNOWN_COMMAND_VALUE).
 
 ## Codebase-Analyse
 
-**Analysierte Dateien:**
-- `src/db/models/audit_log.py` Zeile 107: `status: Mapped[str] = mapped_column(String(20), ...)`. Zeile 83: `severity` = `String(20)` (max. "critical" = 8 Zeichen, kein Problem).
-- `src/mqtt/handlers/intent_outcome_lifecycle_handler.py` Zeile 59: `status=event_type` (ungekuerzt, event_type wie "exit_blocked_config_pending" = 26 Zeichen > VARCHAR(20)).
-- `src/services/monitor_data_service.py` Zeile 175: `pwm_value = int((state.current_value or 0) * 100)`.
-- `src/schemas/monitor.py` — `SubzoneActuatorEntry.pwm_value: int = 0`.
-- `src/mqtt/handlers/heartbeat_handler.py` — `handle_heartbeat` (Zeile 443-452): Logic Engine Reconnect-Eval wird als Task geplant VOR `_has_pending_config()` (Zeile 555). `_complete_adoption_and_trigger_reconnect_eval` schlaeft 2s (`ADOPTION_GRACE_SECONDS`) und feuert dann sofort.
-
-**Relevante Patterns:**
-- Alembic Migration: `alembic/versions/increase_audit_logs_request_id_varchar_255.py` als Referenz.
-- Handler-Instanzvariablen: `_handover_epoch_by_esp`, `_session_id_by_esp` als Set-Analogie.
-- Migration-Head: `esp_hb_runtime_telemetry`.
+| Datei | Befund |
+|-------|--------|
+| `El Servador/.../api/v1/actuators.py` Z.1027 | `"command": "EMERGENCY_STOP"` (uppercase) |
+| `El Trabajante/.../emergency_broadcast_contract.h` Z.44-45 | `isSupportedBroadcastEmergencyCommand()` akzeptiert nur `"stop_all"` und `"emergency_stop"` (lowercase) |
+| `El Trabajante/.../06-mqtt-message-routing-flow.md` | Broadcast-Topic `kaiser/broadcast/emergency` bestätigt, Handler ruft `safetyController.emergencyStopAll()` |
 
 ## Qualitaetspruefung (8 Dimensionen)
 
-| # | Dimension | Status |
-|---|-----------|--------|
-| 1 | Struktur & Einbindung | Bestehende Dateien erweitert, kein neues Modul. Alembic-Migration folgt exakt dem Referenz-Pattern. |
-| 2 | Namenskonvention | `_config_push_pending_esps: set[str]` — snake_case, korrekt. |
-| 3 | Rueckwaertskompatibilitaet | VARCHAR-Erweiterung ist backward-kompatibel. `pwm_value: float` ist typ-aendernd — Frontend muss geprueft werden. |
-| 4 | Wiederverwendbarkeit | Instanzvariable im bestehenden `HeartbeatHandler`. Kein neues Service-Layer noetig. |
-| 5 | Speicher & Ressourcen | `_config_push_pending_esps` Set: Element wird nach Gate sofort via `discard` entfernt. Kein Memory-Leak. |
-| 6 | Fehlertoleranz | `event_type[:50]` Truncation als Sicherheitsnetz. Alembic downgrade Warning dokumentiert. |
-| 7 | Seiteneffekte | Bug 3 aendert nur das Timing von Reconnect-Eval wenn Config-Push ausstehend ist. Bug 2 aendert Typ `int → float`. |
-| 8 | Industrielles Niveau | Vollstaendige Implementierung, keine Stubs. Erklaerende Log-Meldungen. |
+| # | Dimension | Ergebnis |
+|---|-----------|----------|
+| 1 | Struktur & Einbindung | Keine neue Datei, nur bestehende geändert ✅ |
+| 2 | Namenskonvention | `broadcast_data` dict, snake_case ✅ |
+| 3 | Rueckwaertskompatibilitaet | Firmware erwartet lowercase — Änderung stellt Kompatibilität _her_ ✅ |
+| 4 | Wiederverwendbarkeit | Nutzt bestehenden `publisher.client.publish()` Pfad ✅ |
+| 5 | Speicher & Ressourcen | Keine Änderung an Async/Session ✅ |
+| 6 | Fehlertoleranz | Payload-Validierung vor Publish hinzugefügt, `reason` Fallback auf `"emergency"` ✅ |
+| 7 | Seiteneffekte | Kein shared State geändert, kein Safety-Service betroffen ✅ |
+| 8 | Industrielles Niveau | Kein Stub, vollständiger Test ✅ |
 
 ## Cross-Layer Impact
 
-| Aenderung | Geprueft |
-|-----------|----------|
-| `SubzoneActuatorEntry.pwm_value: int → float` | Frontend `ActuatorCard.vue` erwartet laut Auftrag `val * 100` fuer Anzeige — `float` 0.0-1.0 ist korrekt. TypeScript-Typen muessen geprueft werden. Empfehlung: frontend-dev beauftragen. |
-| `audit_log.status VARCHAR(50)` | Keine REST-API-Aenderung. Nur DB-Schema. |
-| Config-Push Gate | ESP32: kein Impact (Config-Push-Flow unveraendert). Logic Engine: triggert spaeter nach Reconnect wenn Config ausstehend. |
+| Bereich | Impact |
+|---------|--------|
+| Firmware (El Trabajante) | Kein Firmware-Change nötig — Firmware war korrekt, Server war falsch |
+| Frontend (El Frontend) | Nicht betroffen — Broadcast geht nur an ESPs, nicht ans Frontend |
+| WebSocket | Nicht geändert — WS-Broadcast behält `alert_type: "emergency_stop"` (lowercase, war schon korrekt) |
 
-## Ergebnis
+## Ergebnis: Geänderte Dateien
 
-### Bug 1: audit_log.status VARCHAR(50)
+### 1. `El Servador/god_kaiser_server/src/api/v1/actuators.py`
 
-**Geaenderte Dateien:**
+**Was:** Broadcast-Payload `command`-Feld von `"EMERGENCY_STOP"` auf `"emergency_stop"` geändert.
+**Warum:** Firmware-Contract `isSupportedBroadcastEmergencyCommand()` akzeptiert nur lowercase.
 
-1. `El Servador/god_kaiser_server/src/db/models/audit_log.py` Zeile 107-112:
-   - `String(20)` → `String(50)` fuer `status` Spalte
+**Hardening:**
+- `reason` Fallback auf `"emergency"` wenn `request.reason` None/leer (verhindert leeren Payload-Wert)
+- Explizite Validierung `broadcast_data.get("command")` vor `json.dumps` (defensive Guard gegen zukünftige Refactoring-Fehler)
 
-2. `El Servador/god_kaiser_server/src/mqtt/handlers/intent_outcome_lifecycle_handler.py` Zeile 59:
-   - `status=event_type` → `status=event_type[:50]` (Truncation als Sicherheitsnetz)
+### 2. `El Servador/god_kaiser_server/tests/integration/test_api_actuators.py`
 
-3. **NEU:** `El Servador/god_kaiser_server/alembic/versions/extend_audit_log_status_varchar_50.py`:
-   - Neue Migration, Revises: `esp_hb_runtime_telemetry`
-   - `op.alter_column("audit_logs", "status", VARCHAR(20) → VARCHAR(50))`
-
-**Zusatz:** `severity: String(20)` (Zeile 83) ist kein Problem — laengster Wert "critical" = 8 Zeichen.
-
-### Bug 2: pwm_value Doppel-Multiplikation
-
-**Geaenderte Dateien:**
-
-1. `El Servador/god_kaiser_server/src/schemas/monitor.py`:
-   - `SubzoneActuatorEntry.pwm_value: int = 0` → `pwm_value: float = 0.0`
-
-2. `El Servador/god_kaiser_server/src/services/monitor_data_service.py` Zeile 170-176:
-   - `pwm_value = 0` → `pwm_value = 0.0`
-   - `int((state.current_value or 0) * 100)` → `float(state.current_value or 0.0)`
-
-### Bug 3: Config-Push Gate fuer Logic Engine Reconnect-Eval
-
-**Geaenderte Datei:** `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py`
-
-a) `HeartbeatHandler.__init__`: Neue Instanzvariable `_config_push_pending_esps: set[str] = set()`
-
-b) `_has_pending_config()`: Wenn Config-Push getriggert wird, `self._config_push_pending_esps.add(esp_device.device_id)` vor `asyncio.create_task`.
-
-c) `_complete_adoption_and_trigger_reconnect_eval()`: Prueft ob `esp_id in self._config_push_pending_esps`. Wenn ja: discard, log, mark_adoption_completed, broadcast "adopted" mit `config_push_pending: True`, return (kein `trigger_reconnect_evaluation`).
-
-**Ablauf nach Fix:**
-```
-ESP bootet → sensor_count=0, actuator_count=0
-Heartbeat → _has_pending_config() erkennt Mismatch
-          → _config_push_pending_esps.add("ESP_XXX")
-          → asyncio.create_task(_auto_push_config)    <- Config wird gepusht
-          → is_reconnect=True → asyncio.create_task(_complete_adoption...)
-                → sleep(2s)
-                → "ESP_XXX" in _config_push_pending_esps -> True
-                → discard, skip trigger_reconnect_evaluation
-                → broadcast adopted {config_push_pending: True}
-                <- Kein Aktuator-Command!
-ESP empfaengt Config → naechster Heartbeat mit sensor_count>0
-_has_pending_config() → kein Mismatch → kein Gate
-Logic Engine Reconnect-Eval → jetzt korrekt
-```
-
-## Alembic upgrade head
-
-`alembic upgrade head` schlaegt mit der SQLite-Test-DB fehl (pre-existierender Zustand: `actuator_states` fehlt in SQLite-Test-DB). PostgreSQL-Produktion ist nicht betroffen.
-
-In Docker-Umgebung:
-```bash
-docker compose exec el-servador sh -c "cd /app && alembic upgrade head"
-```
+**Was:** Neuer Test `test_emergency_broadcast_payload_matches_firmware_contract` in `TestEmergencyStop`.
+**Warum:** Contract-Test sichert ab, dass der Broadcast-Command-Wert im Firmware-akzeptierten Set `{"emergency_stop", "stop_all"}` liegt.
+**Prüft zusätzlich:** `reason`, `timestamp`, `incident_correlation_id` sind nicht leer.
 
 ## Verifikation
 
-ruff check `--select E,F` auf allen geaenderten Dateien: **Keine neuen Fehler eingebracht.**
-Alle gemeldeten Fehler (E501, F541, E712) existierten bereits vor dieser Aenderung.
+```
+$ python -m pytest tests/integration/test_api_actuators.py::TestEmergencyStop -v
+4 passed in 2.84s
 
-## Empfehlungen
+$ python -m pytest tests/integration/test_api_actuators.py -v
+20 passed in 14.37s
+```
 
-1. **frontend-dev beauftragen**: `SubzoneActuatorEntry.pwm_value` ist jetzt `float` statt `int`. TypeScript-Typen in `El Frontend/src/` pruefen (insbesondere `ActuatorCard.vue` und zugehoerige API-Typen).
+## Verbleibende Risiken
 
-2. **Hardware-Test**: Wokwi/Real-ESP mit Reboot — nach Config-Push pruefen ob naechster Heartbeat die Logic Engine korrekt triggert.
+| Risiko | Schwere | Empfehlung |
+|--------|---------|------------|
+| `clear_emergency` Payload (Z.1128) sendet schon lowercase `"clear_emergency"` — kein Fix nötig | — | Kein Handlungsbedarf |
+| Per-Actuator OFF-Commands (Z.933) senden `"OFF"` uppercase | niedrig | Separates Issue — der Actuator-Command-Pfad nutzt `publish_actuator_command()`, nicht den Broadcast-Pfad. Firmware-ActuatorHandler akzeptiert case-insensitive. |
+| Kein E2E-Test mit echtem Broker | mittel | Wokwi-Scenario `05-emergency` existiert, sollte nach Merge verifiziert werden |
 
-3. **Alembic upgrade in Docker**: Bei naechstem Deployment sicherstellen dass Migration `extend_audit_log_status_varchar_50` auf PostgreSQL ausgefuehrt wird.
+## Empfehlung
+
+Kein weiterer Agent-Einsatz nötig. Firmware-Seite war bereits korrekt. Issue AUT-63 ist serverseitig vollständig umgesetzt.

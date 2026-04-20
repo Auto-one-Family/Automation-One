@@ -588,7 +588,7 @@ function handleDragEnd() {
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
-  z-index: 1;
+  z-index: var(--z-dropdown);
 }
 
 /* ═══════ Accordion override ═══════ */
@@ -702,7 +702,7 @@ function handleDragEnd() {
 
 /* Extra type count badge */
 .zone-plate__agg-extra {
-  font-size: 9px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
   margin-left: 2px;
 }
@@ -722,7 +722,7 @@ function handleDragEnd() {
 .zone-plate__stats {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   white-space: nowrap;
@@ -748,20 +748,20 @@ function handleDragEnd() {
 .zone-plate__subzone-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-1);
   padding: 2px 0 0 0;
 }
 
 .zone-plate__subzone-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 1px 8px;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -787,7 +787,7 @@ function handleDragEnd() {
 }
 
 .zone-plate__subzone-chip-count {
-  font-size: 9px;
+  font-size: var(--text-xxs);
   font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
   opacity: 0.8;
@@ -847,13 +847,13 @@ function handleDragEnd() {
 
 /* Inline subzone rename input */
 .zone-plate__subzone-rename-input {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 500;
   color: var(--color-text-primary);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-iridescent-1);
   border-radius: var(--radius-sm);
-  padding: 1px 6px;
+  padding: 1px var(--space-2);
   outline: none;
   width: 80px;
   max-width: 120px;
@@ -862,7 +862,7 @@ function handleDragEnd() {
 /* Chip in editing/creating mode */
 .zone-plate__subzone-chip--editing {
   gap: 2px;
-  padding: 1px 2px 1px 4px;
+  padding: 1px 2px 1px var(--space-1);
   border-color: var(--color-iridescent-1);
   background: rgba(96, 165, 250, 0.04);
   cursor: default;
@@ -870,7 +870,7 @@ function handleDragEnd() {
 
 /* Add subzone "+" chip */
 .zone-plate__subzone-chip--add {
-  padding: 1px 6px;
+  padding: 1px var(--space-2);
   border-style: dashed;
   color: var(--color-text-muted);
   opacity: 0.5;
@@ -898,7 +898,7 @@ function handleDragEnd() {
 .zone-plate__devices {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 8px;
+  gap: var(--space-2);
   min-height: 32px;
   padding-top: var(--space-1);
 }
@@ -910,12 +910,12 @@ function handleDragEnd() {
 /* Subzone label inline within flat drag list */
 .zone-plate__subzone-label {
   width: 100%;
-  font-size: 9px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
   font-weight: 500;
-  padding: 2px 4px 0;
+  padding: 2px var(--space-1) 0;
   opacity: 0.6;
   flex-basis: 100%;
 }
@@ -1003,7 +1003,7 @@ function handleDragEnd() {
 
 /* ═══════ Archived badge ═══════ */
 .zone-plate__archived-badge {
-  font-size: 9px;
+  font-size: var(--text-xxs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;

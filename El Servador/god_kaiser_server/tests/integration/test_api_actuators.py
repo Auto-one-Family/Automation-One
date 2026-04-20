@@ -362,6 +362,50 @@ class TestEmergencyStop:
             assert call.kwargs["correlation_id"] == expected
             assert call.kwargs["gpio"] == test_actuator.gpio
 
+    @pytest.mark.asyncio
+    async def test_emergency_broadcast_payload_matches_firmware_contract(
+        self,
+        auth_headers: dict,
+        test_actuator: ActuatorConfig,
+        test_esp: ESPDevice,
+        override_mqtt_publisher,
+    ):
+        """AUT-63: broadcast command must be lowercase per firmware contract
+        (emergency_broadcast_contract.h accepts only 'emergency_stop' | 'stop_all')."""
+        import json
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/actuators/emergency_stop",
+                json={
+                    "esp_id": test_esp.device_id,
+                    "reason": "broadcast contract test",
+                },
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+
+        broadcast_calls = [
+            c
+            for c in override_mqtt_publisher.client.publish.call_args_list
+            if c.kwargs.get("topic") == "kaiser/broadcast/emergency"
+            or (c.args and c.args[0] == "kaiser/broadcast/emergency")
+        ]
+        assert len(broadcast_calls) == 1, f"Expected 1 broadcast publish, got {len(broadcast_calls)}"
+
+        call = broadcast_calls[0]
+        raw_payload = call.kwargs.get("payload") or call.args[1]
+        payload = json.loads(raw_payload)
+
+        FIRMWARE_ACCEPTED = {"emergency_stop", "stop_all"}
+        assert payload["command"] in FIRMWARE_ACCEPTED, (
+            f"Broadcast command '{payload['command']}' not in firmware-accepted set {FIRMWARE_ACCEPTED}"
+        )
+        assert payload.get("reason"), "Broadcast payload must include non-empty 'reason'"
+        assert payload.get("timestamp"), "Broadcast payload must include 'timestamp'"
+        assert payload.get("incident_correlation_id"), "Broadcast payload must include 'incident_correlation_id'"
+
 
 class TestGetStatus:
     """Test actuator status endpoint."""

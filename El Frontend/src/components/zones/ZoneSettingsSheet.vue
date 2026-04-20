@@ -449,7 +449,7 @@ function close() {
 .sheet-section--danger {
   background-color: rgba(239, 68, 68, 0.04);
   border: 1px solid rgba(239, 68, 68, 0.15);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.875rem;
 }
 
@@ -497,7 +497,7 @@ function close() {
   font-size: 0.75rem;
   background-color: var(--color-bg-tertiary);
   padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 
 /* ── Name Edit ── */
@@ -508,7 +508,7 @@ function close() {
   cursor: pointer;
   padding: 0.25rem 0.5rem;
   margin: -0.25rem -0.5rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   transition: background-color 0.15s ease;
 }
 
@@ -565,7 +565,7 @@ function close() {
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background-color: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
@@ -648,7 +648,7 @@ function close() {
   padding: 0.625rem 1rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.15s ease;
   border: none;

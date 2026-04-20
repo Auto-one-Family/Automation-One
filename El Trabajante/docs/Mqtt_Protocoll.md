@@ -55,6 +55,7 @@ kaiser/
 │   │       │   └── emergency      # Emergency-Stop (subscribe)
 │   │       ├── system/
 │   │       │   ├── command        # System-Befehle (subscribe)
+│   │       │   ├── session/announce # Reconnect Session-Announce (publish)
 │   │       │   ├── heartbeat      # System-Heartbeat (publish)
 │   │       │   ├── intent_outcome # Intent/Outcome kanonisch (publish)
 │   │       │   ├── intent_outcome/lifecycle # CONFIG_PENDING lifecycle (publish, Schema v1)
@@ -274,16 +275,9 @@ Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
   "wifi_rssi": -65,                    // WiFi Signal Strength (dBm) - REQUIRED
   "sensor_count": 3,                   // Anzahl aktiver Sensoren - OPTIONAL (or "active_sensors")
   "actuator_count": 2,                 // Anzahl aktiver Aktoren - OPTIONAL (or "active_actuators")
-  "gpio_status": [                     // GPIO-Status Array - OPTIONAL (Phase 1)
-    {
-      "gpio": 4,                       // GPIO-Pin-Nummer
-      "owner": "sensor",               // Besitzer: "sensor", "actuator", "system"
-      "component": "DS18B20",          // Komponenten-Name
-      "mode": 1,                       // Pin-Mode: 0=INPUT, 1=OUTPUT, 2=INPUT_PULLUP
-      "safe": false                    // In Safe-Mode? (false = aktiv genutzt)
-    }
-  ],
-  "gpio_reserved_count": 4,            // Anzahl reservierter Pins - OPTIONAL (Phase 1)
+  // gpio_status[] + gpio_reserved_count ENTFERNT (AUT-68 PKG-17, ab 2026-04)
+  // GPIO-Runtime-State wird jetzt Event-Push per actuator/{gpio}/status publiziert.
+  // Pin-Assignment (owner/component) bleibt via Config-API/NVS abrufbar.
   "persistence_degraded": false,      // Persistence-Drift (Offline-Rules) — ab 2026-04
   "persistence_degraded_reason": "NONE",
   "runtime_state_degraded": false,    // FSM: CONFIG_PENDING, SAFE_MODE, …
@@ -291,24 +285,24 @@ Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
   "wifi_circuit_breaker_open": false,
   "network_degraded": false,          // MQTT-CB oder WiFi-CB OPEN
   "persistence_drift_count": 0,
-  "critical_outcome_drop_count": 0,   // NVS intent_outbox Superseded/Drops
-  "publish_outbox_drop_count": 0      // ESP-IDF Outbox -2, nicht-kritisch (nur ESP-IDF-Pfad)
+  "critical_outcome_drop_count": 0,        // NVS intent_outbox Superseded/Drops
+  "publish_outbox_drop_count": 0,          // ESP-IDF Outbox -2, nicht-kritisch (nur ESP-IDF-Pfad)
+  "sensor_command_queue_overflow_count": 0 // Verwerfungen in sensor_command_queue bei Overflow
 }
 ```
 
 **Hinweis (2026-04):** Die Felder `degraded` / `degraded_reason` (früher nur Persistence-Drift) werden **nicht mehr** gesendet; Consumer auf `persistence_degraded*` und `runtime_state_degraded` / `network_degraded` umstellen.
 
-**gpio_status Array (Phase 1 - GPIO-Status-Übertragung):**
+**GPIO-Status (DEPRECATED, entfernt ab AUT-68 PKG-17 / 2026-04):**
 
-| Feld | Typ | Beschreibung |
-|------|-----|--------------|
-| `gpio` | int | GPIO-Pin-Nummer |
-| `owner` | string | Besitzer: `"sensor"`, `"actuator"`, `"system"` |
-| `component` | string | Komponenten-Name (z.B. `"DS18B20"`, `"pump_1"`, `"I2C_SDA"`) |
-| `mode` | int | Hardware-Mode: `0`=INPUT, `1`=OUTPUT, `2`=INPUT_PULLUP |
-| `safe` | bool | `true` = Pin in Safe-Mode, `false` = aktiv genutzt |
+Das `gpio_status[]`-Array und `gpio_reserved_count` wurden aus dem Heartbeat-Payload entfernt, um Heap-Pressure (~8 KB permanent in Publish-Queue) zu reduzieren und `PUBLISH_PAYLOAD_MAX_LEN` von 2048 → 1024 senken zu können.
 
-**Hinweis:** `gpio_status` enthält nur Pins die **NICHT** in Safe-Mode sind (also aktiv reserviert). Pins in Safe-Mode werden nicht gelistet.
+**Ersatz:**
+- **Runtime-State (State/PWM/Emergency):** Event-Push via MQTT Topic `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/status` (QoS 1, publish-on-change — siehe Sektion Actuator-Status).
+- **Pin-Assignment (owner/component/mode):** Via Config-API (`GET /api/v1/esp/{esp_id}/pins`) oder `system/config-response` MQTT-Reply.
+- **Safe-Mode-Pins:** Werden nicht mehr übertragen; per Definition = alle nicht reservierten Pins.
+
+Server-Handler (`heartbeat_handler.py`) parst die Felder tolerant als Optional: fehlende `gpio_status`/`gpio_reserved_count` erzeugen keine Schema-Fehler. Bestehende DB-Spalten (`esp_devices.gpio_status_cache`) werden **nicht** überschrieben (stale-tolerant).
 
 **Server-Kompatibilität (Stand: 2025-12-08):**
 Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
@@ -351,6 +345,40 @@ Current implementation sends heartbeat every 60 seconds (forced) only.
 - `LIBRARY_DOWNLOADING`: Library-Download läuft
 - `SAFE_MODE`: Safe-Mode aktiv
 - `ERROR`: Fehler-Zustand
+
+---
+
+### 3a. Session-Announce (Reconnect-Ordering)
+
+**Topic:** `kaiser/god/esp/{esp_id}/session/announce`
+
+**QoS:** 1 (at least once)  
+**Retain:** false  
+**Frequency:** Bei jedem `MQTT_EVENT_CONNECTED` vor der normalen Publish-Sequenz  
+**Module:** `services/communication/mqtt_client.cpp` → `publishSessionAnnounce()`
+
+**Payload-Schema:**
+```json
+{
+  "handover_epoch": 3,
+  "reason": "reconnect",
+  "ts_ms": 1735818000000,
+  "connect_seq": 7
+}
+```
+
+**AUT-69 Step-1 Verhalten:**
+1. `MQTT_EVENT_CONNECTED` pausiert die Publish-Queue (`pauseForAnnounceAck()`).
+2. Firmware publisht `session/announce`.
+3. Queue-Resume bei Announce-PUBACK (`reason=ack`) oder nach 300ms Guard-Timeout (`reason=guard_timeout`).
+
+**Feld-Ausrichtung (AUT-69 Step-2, CLARIFY B-SESS-02):**
+- Kanonisches Feld: `handover_epoch`
+- Server-Fallback (Legacy): `session_epoch`
+
+**Serial-Marker:**
+- `[INC-EA5484] session/announce published epoch=<n>`
+- `[INC-EA5484] queue resumed (reason=ack|guard_timeout)`
 
 ---
 
@@ -2850,6 +2878,7 @@ def on_message(client, userdata, msg):
 | `sensor/data` | 30s | Timer | ✅ (2s - 5min) |
 | `sensor_batch` | 60s | Timer | ✅ |
 | `heartbeat` | 60s | Timer + Change | ❌ |
+| `session/announce` | - | On MQTT reconnect | ❌ |
 | `status` | 5min | Timer + Change | ❌ |
 | `actuator/status` | - | On Change | ❌ |
 | `actuator/response` | - | After Command | ❌ |
@@ -2873,6 +2902,7 @@ def on_message(client, userdata, msg):
 
 | Topic | Retained | Begründung |
 |-------|----------|------------|
+| `session/announce` | ❌ | Reconnect-Ereignis, nicht als Broker-Lastzustand verwenden |
 | `sensor/data` | ❌ | Zu viele Updates, veraltete Daten |
 | `sensor_batch` | ❌ | Zu viele Updates, veraltete Daten |
 | `heartbeat` | ❌ | Ändert sich ständig, nicht relevant für neue Subscriber |
@@ -3941,13 +3971,20 @@ def test_actuator_control(mock_esp32):
 ---
 
 **Status:** ✅ Spezifikation produktionsreif & vollständig
-**Version:** 2.2 (Test Topics hinzugefügt)
-**Last Updated:** 2025-11-26
+**Version:** 2.3 (Session-Announce ergänzt)
+**Last Updated:** 2026-04-20
 **Author:** System-Architektur-Team
 
 ---
 
 ## Changelog
+
+### Version 2.3 (2026-04-20) - AUT-69 SESSION-ANNOUNCE
+
+**Neu hinzugefügt:**
+1. ✅ Topic `kaiser/god/esp/{esp_id}/session/announce` dokumentiert (QoS 1, retain=false)
+2. ✅ Reconnect-Ordering beschrieben (Queue-Pause bis PUBACK oder 300ms Guard-Timeout)
+3. ✅ Serial-Marker für Live-Verify ergänzt (`[INC-EA5484] ...`)
 
 ### Version 2.2 (2025-11-26) - TEST TOPICS HINZUGEFÜGT
 

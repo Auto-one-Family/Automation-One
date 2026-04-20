@@ -130,7 +130,7 @@ function applyCustom() {
   padding: 0.375rem 0.75rem;
   font-size: 0.75rem;
   font-weight: 500;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   background: var(--color-bg-secondary, #111118);
   color: var(--color-text-muted, #8585a0);
@@ -171,7 +171,7 @@ function applyCustom() {
   padding: 0.375rem 0.5rem;
   font-size: 0.75rem;
   font-family: 'JetBrains Mono', monospace;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   background: var(--color-bg-tertiary, #0d0d14);
   color: var(--color-text-primary, #eaeaf2);
@@ -187,10 +187,10 @@ function applyCustom() {
   padding: 0.375rem 0.875rem;
   font-size: 0.75rem;
   font-weight: 600;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border: none;
   background: var(--color-iridescent-1, #a78bfa);
-  color: #fff;
+  color: var(--color-text-inverse);
   cursor: pointer;
   transition: all 0.15s;
 }

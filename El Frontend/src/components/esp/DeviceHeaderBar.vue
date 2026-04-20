@@ -119,12 +119,12 @@ const subzoneName = computed(() => props.device.subzone_name || null)
 }
 
 .device-header-bar__badge {
-  font-size: 9px;
+  font-size: var(--text-xxs);
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   font-weight: 600;
   flex-shrink: 0;
 }

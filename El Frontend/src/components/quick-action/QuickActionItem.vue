@@ -108,7 +108,7 @@ function handleClick() {
   height: 14px;
   padding: 0 3px;
   border-radius: var(--radius-full);
-  font-size: 9px;
+  font-size: var(--text-xxs);
   font-weight: 700;
   line-height: 14px;
   text-align: center;
@@ -141,7 +141,7 @@ function handleClick() {
   color: var(--color-text-muted);
   opacity: 0.6;
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
   font-family: var(--font-mono);

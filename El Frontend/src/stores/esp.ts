@@ -32,6 +32,7 @@ import { useSensorStore } from '@/shared/stores/sensor.store'
 import { useGpioStore } from '@/shared/stores/gpio.store'
 import { useNotificationStore } from '@/shared/stores/notification.store'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
+import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
 import { useIntentSignalsStore } from '@/shared/stores/intentSignals.store'
 import { ESP_STORE_WS_SUBSCRIPTION_TYPES } from '@/stores/esp-websocket-subscription'
 import { normalizeEspHealthPayload } from '@/domain/esp/espHealth'
@@ -753,6 +754,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       timeout_warning_enabled: boolean | null
       enabled: boolean
       schedule_config: { type: string; expression: string } | null
+      measurement_freshness_hours: number | null
+      calibration_interval_days: number | null
     }>
   ): Promise<void> {
     error.value = null
@@ -775,7 +778,12 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         // MOCK-ESP: Debug-API verwenden oder Sensor neu erstellen
         // =========================================================================
         // Mock ESPs können Sensoren über addSensor mit überschriebenen Werten aktualisieren
-        const mockConfig: MockSensorConfig & { operating_mode?: string; timeout_seconds?: number } = {
+        const mockConfig: MockSensorConfig & {
+          operating_mode?: string
+          timeout_seconds?: number
+          measurement_freshness_hours?: number | null
+          calibration_interval_days?: number | null
+        } = {
           gpio: gpio,
           sensor_type: existingSensor.sensor_type,
           name: config.name !== undefined ? config.name || '' : existingSensor.name || '',
@@ -787,6 +795,8 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           i2c_address: existingSensor.i2c_address ?? null,
           operating_mode: config.operating_mode !== undefined ? config.operating_mode || undefined : existingSensor.operating_mode,
           timeout_seconds: config.timeout_seconds !== undefined ? config.timeout_seconds ?? undefined : existingSensor.timeout_seconds,
+          measurement_freshness_hours: config.measurement_freshness_hours !== undefined ? config.measurement_freshness_hours : existingSensor.measurement_freshness_hours,
+          calibration_interval_days: config.calibration_interval_days !== undefined ? config.calibration_interval_days : existingSensor.calibration_interval_days,
         }
 
         // Remove sensor first, then re-add with updated config
@@ -830,6 +840,13 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
           schedule_config: config.schedule_config !== undefined
             ? (config.schedule_config ?? undefined)
             : (existingSensor.schedule_config as { type: string; expression: string } ?? undefined),
+          // Sensor-Lifecycle: Freshness & Calibration (AUT-39)
+          measurement_freshness_hours: config.measurement_freshness_hours !== undefined
+            ? (config.measurement_freshness_hours ?? undefined)
+            : (existingSensor.measurement_freshness_hours ?? undefined),
+          calibration_interval_days: config.calibration_interval_days !== undefined
+            ? (config.calibration_interval_days ?? undefined)
+            : (existingSensor.calibration_interval_days ?? undefined),
           // Preserve existing metadata
           calibration: undefined,
           threshold_min: undefined,
@@ -1528,14 +1545,17 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
   function handleNotificationNew(message: { data: Record<string, unknown> }): void {
     useNotificationInboxStore().handleWSNotificationNew(message.data)
+    useAlertCenterStore().scheduleStatsRefresh()
   }
 
   function handleNotificationUpdated(message: { data: Record<string, unknown> }): void {
     useNotificationInboxStore().handleWSNotificationUpdated(message.data)
+    useAlertCenterStore().scheduleStatsRefresh()
   }
 
   function handleNotificationUnreadCount(message: { data: Record<string, unknown> }): void {
     useNotificationInboxStore().handleWSUnreadCount(message.data)
+    useAlertCenterStore().scheduleStatsRefresh()
   }
 
   // =============================================================================
@@ -1960,4 +1980,3 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     isRomCodeSelected,
   }
 })
-

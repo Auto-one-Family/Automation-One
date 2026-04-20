@@ -154,6 +154,7 @@ const showTimeRangeSelector = ref(false)
 // Filter state
 const activeTab = ref<TabId>('events')
 const filterEspId = ref<string>('')
+const filterCorrelationId = ref<string>('')
 const filterLevels = ref<Set<string>>(new Set(['info', 'warning', 'error', 'critical']))
 const filterTimeRange = ref<'all' | '1h' | '6h' | '24h' | '7d' | '30d' | 'custom'>('all')
 
@@ -235,6 +236,11 @@ const filteredEvents = computed(() => {
     events = events.filter(e => {
       return e.esp_id?.toLowerCase().includes(espFilter)
     })
+  }
+
+  if (filterCorrelationId.value) {
+    const correlationFilter = filterCorrelationId.value.toLowerCase()
+    events = events.filter(e => (e.correlation_id ?? '').toLowerCase().includes(correlationFilter))
   }
 
   // Filter by severity level (KATEGORISCH - ALLE Events filtern!)
@@ -1079,6 +1085,10 @@ onUnmounted(() => {
 // immediate: true ensures this runs on mount, eliminating duplicate init in onMounted
 watch(() => route.query.esp, (newEsp) => {
   filterEspId.value = newEsp ? String(newEsp) : ''
+}, { immediate: true })
+
+watch(() => route.query.correlation, (newCorrelation) => {
+  filterCorrelationId.value = newCorrelation ? String(newCorrelation) : ''
 }, { immediate: true })
 
 // Watch for server-side filter changes to trigger reload
@@ -2072,7 +2082,7 @@ watch(activeTab, (newTab) => {
 }
 
 .rounded-lg {
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 
 .text-sm {

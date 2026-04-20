@@ -167,6 +167,8 @@ def _model_to_response(
         operating_mode=sensor.operating_mode,
         timeout_seconds=sensor.timeout_seconds,
         schedule_config=sensor.schedule_config,
+        measurement_freshness_hours=sensor.measurement_freshness_hours,
+        calibration_interval_days=sensor.calibration_interval_days,
         # Multi-Zone Device Scope (T13-R2)
         device_scope=sensor.device_scope,
         assigned_zones=sensor.assigned_zones,
@@ -242,6 +244,8 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         "timeout_seconds": request.timeout_seconds,
         "timeout_warning_enabled": request.timeout_warning_enabled,
         "schedule_config": request.schedule_config,
+        "measurement_freshness_hours": request.measurement_freshness_hours,
+        "calibration_interval_days": request.calibration_interval_days,
         # =========================================================================
         # MULTI-ZONE DEVICE SCOPE (T13-R2)
         # =========================================================================
@@ -704,6 +708,12 @@ async def create_or_update_sensor(
                     existing_vt.timeout_seconds = model_fields["timeout_seconds"]
                     existing_vt.timeout_warning_enabled = model_fields["timeout_warning_enabled"]
                     existing_vt.schedule_config = model_fields["schedule_config"]
+                    existing_vt.measurement_freshness_hours = model_fields[
+                        "measurement_freshness_hours"
+                    ]
+                    existing_vt.calibration_interval_days = model_fields[
+                        "calibration_interval_days"
+                    ]
                     # Multi-Zone Device Scope (T13-R2)
                     if request.device_scope is not None:
                         existing_vt.device_scope = model_fields["device_scope"]
@@ -922,6 +932,8 @@ async def create_or_update_sensor(
         existing.timeout_seconds = model_fields["timeout_seconds"]
         existing.timeout_warning_enabled = model_fields["timeout_warning_enabled"]
         existing.schedule_config = model_fields["schedule_config"]
+        existing.measurement_freshness_hours = model_fields["measurement_freshness_hours"]
+        existing.calibration_interval_days = model_fields["calibration_interval_days"]
         # =========================================================================
         # MULTI-ZONE DEVICE SCOPE (T13-R2)
         # Only update if explicitly provided (don't reset to defaults on partial update)

@@ -69,6 +69,7 @@ class Publisher:
         duration: int = 0,
         retry: bool = True,
         correlation_id: Optional[str] = None,
+        issued_by: Optional[str] = None,
     ) -> bool:
         """
         Publish actuator command to ESP.
@@ -93,6 +94,8 @@ class Publisher:
             "duration": duration,
             "timestamp": int(time.time()),
         }
+        if issued_by:
+            payload["issued_by"] = issued_by
         if correlation_id:
             payload["correlation_id"] = correlation_id
             # Stable contract key for command_intents + firmware IntentMetadata (intent_contract.cpp).

@@ -361,6 +361,7 @@ function transformActuatorStatus(event: UnifiedEvent, data: Record<string, unkno
   const state = data.state as boolean
   const value = typeof data.value === 'number' ? data.value : undefined
   const gpio = event.gpio ?? data.gpio
+  const commandSource = typeof data.command_source === 'string' ? data.command_source.trim() : ''
 
   const actuatorName = ACTUATOR_NAMES[actuatorType.toLowerCase()] || actuatorType
   const stateStr = state ? 'EIN' : 'AUS'
@@ -370,8 +371,8 @@ function transformActuatorStatus(event: UnifiedEvent, data: Record<string, unkno
     type: 'actuator_status',
     title: 'AKTOR-STATUS',
     titleDE: actuatorName,
-    summary: `${actuatorName}: ${stateStr}${valueStr} · GPIO ${gpio}`,
-    description: `${actuatorName} ist jetzt ${stateStr.toLowerCase()}`,
+    summary: `${actuatorName}: ${stateStr}${valueStr} · GPIO ${gpio}${commandSource ? ` · via ${commandSource}` : ''}`,
+    description: `${actuatorName} ist jetzt ${stateStr.toLowerCase()}${commandSource ? ` (Quelle: ${commandSource})` : ''}`,
     icon: 'Power',
     category: 'actuators',
   }
@@ -381,17 +382,18 @@ function transformActuatorResponse(event: UnifiedEvent, data: Record<string, unk
   const success = data.success as boolean
   const command = (data.command || 'Befehl') as string
   const gpio = event.gpio ?? data.gpio
+  const issuedBy = typeof data.issued_by === 'string' ? data.issued_by.trim() : ''
 
   return {
     type: 'actuator_response',
     title: 'AKTOR-ANTWORT',
     titleDE: success ? 'Befehl erfolgreich' : 'Befehl fehlgeschlagen',
     summary: success
-      ? `${command} · GPIO ${gpio} · Erfolgreich`
-      : `${command} · GPIO ${gpio} · Fehlgeschlagen`,
+      ? `${command} · GPIO ${gpio} · Erfolgreich${issuedBy ? ` · via ${issuedBy}` : ''}`
+      : `${command} · GPIO ${gpio} · Fehlgeschlagen${issuedBy ? ` · via ${issuedBy}` : ''}`,
     description: success
-      ? `Aktor-Befehl "${command}" wurde erfolgreich ausgeführt`
-      : `Aktor-Befehl "${command}" konnte nicht ausgeführt werden`,
+      ? `Aktor-Befehl "${command}" wurde erfolgreich ausgeführt${issuedBy ? ` (Quelle: ${issuedBy})` : ''}`
+      : `Aktor-Befehl "${command}" konnte nicht ausgeführt werden${issuedBy ? ` (Quelle: ${issuedBy})` : ''}`,
     icon: success ? 'CheckCircle' : 'XCircle',
     category: 'actuators',
   }

@@ -374,7 +374,7 @@ const chartData = computed(() => {
   return { labels, datasets }
 })
 
-const chartOptions = computed(() => {
+const resolvedAnnotations = computed(() => {
   const annotations: Record<string, any> = {}
 
   if (props.showThresholds && props.thresholds) {
@@ -512,8 +512,17 @@ const chartOptions = computed(() => {
     }
   }
 
-  const hasAnnotations = Object.keys(annotations).length > 0
-  const safeAnnotations = hasAnnotations ? annotations : {}
+  return annotations
+})
+
+const hasResolvedAnnotations = computed(() => Object.keys(resolvedAnnotations.value).length > 0)
+
+const chartPlugins = computed(() => (
+  hasResolvedAnnotations.value ? [annotationPlugin] : []
+))
+
+const chartOptions = computed(() => {
+  const safeAnnotations = hasResolvedAnnotations.value ? resolvedAnnotations.value : {}
 
   return {
     responsive: true,
@@ -551,9 +560,8 @@ const chartOptions = computed(() => {
           },
         },
       },
-      // Keep a stable object shape for chartjs-plugin-annotation.
-      // Some plugin versions can crash when `annotation` toggles to undefined.
-      annotation: { annotations: safeAnnotations },
+      // Keep annotation plugin/options disabled unless we have valid annotations.
+      ...(hasResolvedAnnotations.value ? { annotation: { annotations: safeAnnotations } } : {}),
       // Zoom/Pan (8.0-A)
       zoom: {
         pan: {
@@ -649,7 +657,7 @@ const chartOptions = computed(() => {
         ref="chartRef"
         :data="chartData"
         :options="chartOptions"
-        :plugins="[annotationPlugin]"
+        :plugins="chartPlugins"
       />
     </div>
 

@@ -485,7 +485,7 @@ watch(
   font-size: 0.875rem;
   background-color: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   color: var(--color-text-primary);
   cursor: pointer;
   transition:
@@ -571,7 +571,7 @@ watch(
   min-height: 3.5rem;
   background-color: var(--color-bg-secondary);
   border: 2px solid var(--glass-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s ease;
 }

@@ -5,7 +5,7 @@
  * Uses SlideOver.vue primitive (width="lg" = 560px).
  * Features:
  * - Header: Title + Settings gear + "Alle gelesen" button
- * - Filter tabs: Alle | Kritisch | Warnungen | System
+ * - Filter tabs: Alle | Kritisch | Warnungen | Infos
  * - Grouped by Heute/Gestern/Älter
  * - Lazy loading: first 50, then "Mehr laden" button
  * - ESC and click-outside close (SlideOver feature)
@@ -39,7 +39,7 @@ const filterTabs: { key: InboxFilter; label: string }[] = [
   { key: 'all', label: 'Alle' },
   { key: 'critical', label: 'Kritisch' },
   { key: 'warning', label: 'Warnungen' },
-  { key: 'system', label: 'System' },
+  { key: 'info', label: 'Infos' },
 ]
 
 /** Source filter chips: Alle | Sensor | Infrastruktur | Aktor | Regel | System */
@@ -49,6 +49,9 @@ const sourceChips: { value: SourceFilterValue; label: string }[] = [
   { value: 'grafana', label: 'Infrastruktur' },
   { value: 'mqtt_handler', label: 'Aktor' },
   { value: 'logic_engine', label: 'Regel' },
+  { value: 'ai_anomaly_service', label: 'KI-Anomalie' },
+  { value: 'freshness_reminder', label: 'Frische' },
+  { value: 'calibration_reminder', label: 'Kalibrierung' },
   { value: '__system__', label: 'System' },
 ]
 
@@ -345,13 +348,13 @@ watch(
 }
 
 .drawer__tab {
-  padding: 4px var(--space-3);
+  padding: var(--space-1) var(--space-3);
   font-size: var(--text-xs);
   font-weight: 500;
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   transition: all var(--transition-fast);
   white-space: nowrap;
@@ -379,7 +382,7 @@ watch(
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 4px var(--space-2);
+  padding: var(--space-1) var(--space-2);
   font-size: var(--text-xs);
   font-weight: 500;
   color: var(--color-text-secondary);
@@ -420,7 +423,7 @@ watch(
 }
 
 .drawer__status-tab {
-  padding: 3px var(--space-2);
+  padding: var(--space-1) var(--space-2);
   font-size: var(--text-xs);
   font-weight: 500;
   color: var(--color-text-muted);
@@ -455,7 +458,7 @@ watch(
 
 .drawer__source-chip {
   padding: 2px var(--space-2);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 500;
   color: var(--color-text-muted);
   background: transparent;
@@ -494,7 +497,7 @@ watch(
   border-bottom: 1px solid var(--glass-border);
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--z-dropdown);
 }
 
 /* Loading State */
@@ -521,7 +524,7 @@ watch(
 }
 
 .drawer__empty-icon {
-  font-size: 32px;
+  font-size: var(--text-display);
   opacity: 0.4;
 }
 
@@ -668,7 +671,7 @@ watch(
 
 .drawer__email-retry {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   margin-left: var(--space-1);
 }
 

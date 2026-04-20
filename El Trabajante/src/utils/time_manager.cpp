@@ -104,10 +104,11 @@ bool TimeManager::begin() {
     initialized_ = true;
     sntp_daemon_running_ = true;
 
-    // Wait for callback-driven sync (non-polling: daemon queries servers autonomously)
+    // Boot must not stall behind slow NTP replies:
+    // wait only a short bounded window, then continue with background sync.
     unsigned long start = millis();
     while (!sync_completed_) {
-        if (millis() - start > NTP_SYNC_TIMEOUT_MS) {
+        if (millis() - start > NTP_BOOT_WAIT_MS) {
             break;
         }
         delay(100);
@@ -124,13 +125,12 @@ bool TimeManager::begin() {
         LOG_I(TAG, "  Formatted:      " + getFormattedTime());
         return true;
     } else {
-        // Do NOT stop the daemon — it will continue probing servers 2 and 3 in background.
-        // onSyncCompleted() will fire when any server responds, setting synchronized_ = true.
+        // Do NOT stop the daemon — it continues probing in background.
         LOG_W(TAG, "╔════════════════════════════════════════╗");
-        LOG_W(TAG, "║  NTP Sync Timeout (daemon still active) ║");
+        LOG_W(TAG, "║  NTP Boot Wait elapsed                 ║");
         LOG_W(TAG, "╚════════════════════════════════════════╝");
-        LOG_W(TAG, "  Daemon running — will sync when server responds");
-        LOG_W(TAG, "  Timestamps will use estimated time until then");
+        LOG_W(TAG, "  Continuing boot without blocking MQTT");
+        LOG_W(TAG, "  SNTP daemon active — sync completes asynchronously");
         return false;
     }
 }

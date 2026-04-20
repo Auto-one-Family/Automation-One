@@ -554,7 +554,7 @@ onUnmounted(() => {
 .duty-bar {
   display: flex;
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
   margin-top: var(--space-1);
 }

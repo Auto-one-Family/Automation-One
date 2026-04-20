@@ -365,7 +365,7 @@ async function handleEmergencyStop() {
 .esp-config__pin-type {
   font-family: var(--font-mono);
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--text-xxs);
 }
 
 /* Actions */

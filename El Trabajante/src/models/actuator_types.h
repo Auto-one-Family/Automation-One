@@ -67,6 +67,7 @@ struct ActuatorCommand {
   uint32_t duration_s = 0;    // Optional hold duration
   unsigned long timestamp = 0;
   String correlation_id = ""; // End-to-end command tracking (UUID from server)
+  String issued_by = "";      // Source context (e.g. user:robin, logic_engine)
 };
 
 struct ActuatorStatus {

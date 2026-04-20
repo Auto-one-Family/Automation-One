@@ -683,7 +683,11 @@ export function formatSensorValueWithUnit(value: number | null, sensorType: stri
   const config = SENSOR_TYPE_CONFIG[sensorType]
   if (!config) return `${value}`
 
-  return `${value.toFixed(config.decimals)} ${config.unit}`
+  const formatted = new Intl.NumberFormat('de-DE', {
+    minimumFractionDigits: config.decimals,
+    maximumFractionDigits: config.decimals,
+  }).format(value)
+  return `${formatted} ${config.unit}`
 }
 
 /**

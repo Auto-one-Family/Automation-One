@@ -115,10 +115,10 @@ function goToHomeZone(): void {
 .shared-ref-card__badge {
   display: inline-flex;
   align-items: center;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 500;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: rgba(96, 165, 250, 0.2);
   color: rgb(96, 165, 250);
   white-space: nowrap;

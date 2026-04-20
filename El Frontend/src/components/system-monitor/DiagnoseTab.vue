@@ -479,7 +479,7 @@ onMounted(() => {
 }
 
 .check-card__metric-label {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -524,7 +524,7 @@ onMounted(() => {
 
 .check-card__timing {
   display: block;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   text-align: right;
   margin-top: var(--space-2);

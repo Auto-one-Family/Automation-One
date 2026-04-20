@@ -40,6 +40,7 @@
 
 // Sync Configuration
 #define NTP_SYNC_TIMEOUT_MS       50000   // 50s — alle 3 Server koennen probiert werden
+#define NTP_BOOT_WAIT_MS          1500    // max. blockierende Wartezeit waehrend Boot
 #define NTP_RESYNC_INTERVAL_MS    300000  // Re-sync every 5 minutes
 #define NTP_RETRY_DELAY_MS        1000    // Retry delay on failure
 #define NTP_MAX_RETRIES           5       // Max retries per sync attempt
@@ -81,7 +82,8 @@ public:
      * @brief Initialize NTP time synchronization
      * 
      * Call this AFTER WiFi is connected.
-     * Blocks until time is synchronized or timeout.
+     * Starts SNTP daemon immediately and wartet beim Boot nur kurz
+     * (NTP_BOOT_WAIT_MS). Weitere Synchronisation laeuft asynchron.
      * 
      * @return true if time synchronized successfully
      */

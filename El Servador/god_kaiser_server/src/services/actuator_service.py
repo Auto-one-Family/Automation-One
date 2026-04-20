@@ -646,6 +646,7 @@ class ActuatorService:
                 duration=duration,
                 retry=True,
                 correlation_id=correlation_id,
+                issued_by=issued_by,
             )
 
             if not success:

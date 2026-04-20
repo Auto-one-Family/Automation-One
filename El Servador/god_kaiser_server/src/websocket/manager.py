@@ -44,6 +44,18 @@ class WebSocketManager:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._rate_limit_window = timedelta(seconds=1)  # 1 second window
         self._rate_limit_max = 10  # Max 10 messages per second
+        # Critical lifecycle events must never be dropped by per-client WS throttling.
+        # Otherwise UI can miss online transitions and notification updates under burst load.
+        self._rate_limit_bypass_types = {
+            # Critical GPIO state changes (AUT-68) — must never be dropped under load
+            "actuator_status",
+            "device_discovered",
+            "device_rediscovered",
+            "esp_health",
+            "notification_new",
+            "notification_unread_count",
+            "notification_updated",
+        }
 
     @classmethod
     async def get_instance(cls) -> "WebSocketManager":
@@ -273,8 +285,11 @@ class WebSocketManager:
             # Send to all matching clients
             disconnected_clients = []
             for client_id in clients_to_send:
-                # Check rate limit
-                if not self._check_rate_limit(client_id):
+                # Check rate limit (except for critical lifecycle events)
+                if (
+                    message_type not in self._rate_limit_bypass_types
+                    and not self._check_rate_limit(client_id)
+                ):
                     logger.debug(f"Rate limit exceeded for client {client_id}, skipping message")
                     continue
 

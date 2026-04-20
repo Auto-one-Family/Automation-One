@@ -30,6 +30,7 @@ const logger = createLogger('AlertCenterStore')
 
 /** Polling interval for alert stats (30s) */
 const STATS_POLL_INTERVAL_MS = 30_000
+const REALTIME_STATS_REFRESH_DEBOUNCE_MS = 600
 
 export const useAlertCenterStore = defineStore('alert-center', () => {
   // ═══════════════════════════════════════════════════════════════════════════
@@ -44,6 +45,7 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
   const severityFilter = ref<NotificationSeverity | null>(null)
   let statsPollTimer: ReturnType<typeof setInterval> | null = null
   let statsInFlight: Promise<void> | null = null
+  let realtimeStatsRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Computed
@@ -257,6 +259,20 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
     }
   }
 
+  /**
+   * Trigger a near-realtime stats refresh after WS notification events.
+   * Debounced to avoid REST storms when multiple events arrive in a burst.
+   */
+  function scheduleStatsRefresh(): void {
+    if (realtimeStatsRefreshTimer) {
+      clearTimeout(realtimeStatsRefreshTimer)
+    }
+    realtimeStatsRefreshTimer = setTimeout(() => {
+      void fetchStats({ force: true })
+      realtimeStatsRefreshTimer = null
+    }, REALTIME_STATS_REFRESH_DEBOUNCE_MS)
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Internal
   // ═══════════════════════════════════════════════════════════════════════════
@@ -302,5 +318,6 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
     resolveAllAlerts,
     startStatsPolling,
     stopStatsPolling,
+    scheduleStatsRefresh,
   }
 })

@@ -877,7 +877,7 @@ onUnmounted(() => {
   align-self: stretch;
   flex-shrink: 0;
   margin-right: 0.75rem;
-  border-radius: 0 2px 2px 0;
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
   transition: all 0.2s ease;
 }
 
@@ -936,7 +936,7 @@ onUnmounted(() => {
   justify-content: center;
   width: 2rem;
   height: 2rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background-color: var(--color-bg-tertiary);
   color: var(--color-text-muted);
   flex-shrink: 0;
@@ -1017,7 +1017,7 @@ onUnmounted(() => {
 .event-item__error {
   font-size: 0.6875rem;
   padding: 0.125rem 0.375rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   background-color: var(--color-bg-tertiary);
   color: var(--color-text-muted);
   font-family: var(--font-mono, monospace);
@@ -1144,7 +1144,7 @@ onUnmounted(() => {
 .date-separator--sticky {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: var(--z-dropdown);
   background-color: var(--color-bg-secondary);
   border-bottom: 1px solid var(--glass-border);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--color-bg-primary) 15%, transparent);
@@ -1368,7 +1368,7 @@ onUnmounted(() => {
 .event-group__count {
   padding: 0.125rem 0.5rem;
   background: color-mix(in srgb, var(--color-text-inverse) 5%, transparent);
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   font-weight: 500;
 }
 
@@ -1439,7 +1439,7 @@ onUnmounted(() => {
     color-mix(in srgb, var(--color-error) 3%, transparent) 0%,
     color-mix(in srgb, var(--color-error) 1%, transparent) 100%
   );
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   pointer-events: none;
 }
 
@@ -1463,7 +1463,7 @@ onUnmounted(() => {
   width: 2rem;
   height: 2rem;
   background: color-mix(in srgb, var(--color-error) 15%, transparent);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   color: var(--color-error);
   flex-shrink: 0;
   animation: emergency-pulse 2s ease-in-out infinite;
@@ -1504,7 +1504,7 @@ onUnmounted(() => {
   color: var(--color-error);
   font-weight: 600;
   font-size: 0.75rem;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
 }
 
 /* Emergency Summary Panel */
@@ -1516,7 +1516,7 @@ onUnmounted(() => {
 .emergency-summary {
   background: color-mix(in srgb, var(--color-error) 5%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-error) 15%, transparent);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -1565,7 +1565,7 @@ onUnmounted(() => {
   padding: 0.125rem 0.5rem;
   background: color-mix(in srgb, var(--color-error) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-error) 20%, transparent);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   font-family: monospace;
   font-size: 0.75rem;
   color: var(--color-error);
@@ -1582,7 +1582,7 @@ onUnmounted(() => {
   color: var(--color-text-inverse);
   font-size: 0.625rem;
   font-weight: 700;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   letter-spacing: 0.05em;
 }
 

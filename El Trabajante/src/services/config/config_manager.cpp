@@ -1289,6 +1289,40 @@ bool ConfigManager::isDeviceApproved() const {
 }
 
 void ConfigManager::setDeviceApproved(bool approved, time_t timestamp) {
+  // ============================================
+  // INC-2026-04-11-ea5484-mqtt-transport-keepalive (PKG-04)
+  // ============================================
+  // Heartbeat-ACKs (status=online/approved) landen im Sekundentakt hier. Ohne
+  // Dedup schreibt jeder ACK NVS, obwohl sich weder approved-Flag noch der
+  // Timestamp-Slot fachlich aendern. Resultat waren repetitive
+  // "Device approval saved"-Logs pro ACK plus unnoetiger Flash-Wear.
+  //
+  // Idempotenz-Guard: lese aktuellen NVS-State und schreibe nur, wenn sich
+  // entweder der bool-State aendert oder ein fachlich sinnvoller
+  // Timestamp-Wechsel vorliegt. Approval-Recovery (false -> true) schreibt.
+  // Revocation (true -> false) schreibt. Wiederholte Liveness-ACKs bei
+  // unveraendertem State bleiben RAM-only.
+  //
+  // Akzeptanz: ACK-Contract (status/handover_epoch) bleibt unveraendert —
+  // der Aufrufer (main.cpp Heartbeat-ACK Branch) ruft diesen Setter weiter
+  // bei jedem ACK; der NVS-Write wird hier geguarded.
+  bool current_approved = isDeviceApproved();
+  time_t current_ts = getApprovalTimestamp();
+
+  bool state_changed = (current_approved != approved);
+  // Timestamp-Update ist nur relevant wenn approved=true UND ein neuer,
+  // plausibler Timestamp vorliegt (timestamp > 0) UND sich vom gespeicherten
+  // unterscheidet. approved=false ignoriert Timestamp (cleared state).
+  bool ts_changed = approved && timestamp > 0 && (time_t)current_ts != timestamp;
+
+  if (!state_changed && !ts_changed) {
+    LOG_D(TAG, "ConfigManager: Device approval unchanged (approved=" +
+              String(approved ? "true" : "false") +
+              ", ts=" + String((unsigned long)timestamp) +
+              ") - skipping NVS write");
+    return;
+  }
+
   if (!storageManager.beginTransaction()) {
     LOG_E(TAG, "ConfigManager: Cannot save approval status - transaction error");
     return;
@@ -1299,8 +1333,11 @@ void ConfigManager::setDeviceApproved(bool approved, time_t timestamp) {
     return;
   }
 
-  storageManager.putBool(NVS_DEV_APPROVED, approved);
-  if (timestamp > 0) {
+  // Schreibe Bool nur bei echtem Zustandswechsel — spart NVS-Seitenumschreiben.
+  if (state_changed) {
+    storageManager.putBool(NVS_DEV_APPROVED, approved);
+  }
+  if (ts_changed) {
     storageManager.putULong(NVS_APPR_TS, (unsigned long)timestamp);
   }
 
@@ -1309,7 +1346,9 @@ void ConfigManager::setDeviceApproved(bool approved, time_t timestamp) {
 
   if (approved) {
     LOG_I(TAG, "ConfigManager: Device approval saved (approved=true, ts=" +
-             String((unsigned long)timestamp) + ")");
+             String((unsigned long)timestamp) +
+             ", state_changed=" + String(state_changed ? "true" : "false") +
+             ", ts_changed=" + String(ts_changed ? "true" : "false") + ")");
   } else {
     LOG_I(TAG, "ConfigManager: Device approval cleared (pending/rejected)");
   }

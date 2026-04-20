@@ -17,7 +17,14 @@ import {
   Activity, Workflow, BarChart3, ShieldCheck, Mail
 } from 'lucide-vue-next'
 import { formatRelativeTime } from '@/utils/formatters'
-import { getEmailStatusLabel, getNotificationSourceLabel } from '@/utils/labels'
+import {
+  getEmailStatusLabel,
+  getNotificationCategoryLabel,
+  getNotificationSeverityLabel,
+  getNotificationSourceLabel,
+} from '@/utils/labels'
+import { useEspStore } from '@/stores/esp'
+import { buildEspContextRoute } from '@/utils/notificationNavigation'
 import type { NotificationDTO } from '@/api/notifications'
 import { GRAFANA_BASE_URL } from '@/composables/useGrafana'
 
@@ -33,6 +40,7 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
+const espStore = useEspStore()
 const isExpanded = ref(false)
 
 const severityDotClass = computed(() => {
@@ -48,6 +56,11 @@ const metadata = computed(() => props.notification.metadata || {})
 const hasEspId = computed(() => !!metadata.value.esp_id)
 const hasRuleId = computed(() => !!metadata.value.rule_id)
 const hasSensorType = computed(() => !!metadata.value.sensor_type)
+const hasMeasurementAgeAtAlert = computed(() => {
+  const age = metadata.value.measurement_age_seconds
+  const mode = metadata.value.operating_mode
+  return typeof age === 'number' && age >= 0 && mode !== 'continuous'
+})
 
 // Email delivery status from metadata (Phase C V1.1)
 const emailStatus = computed(() => metadata.value.email_status as string | undefined)
@@ -93,9 +106,26 @@ const sourceBadgeClass = computed(() => {
     case 'grafana': return 'item__source-badge--infra'
     case 'mqtt_handler': return 'item__source-badge--actuator'
     case 'logic_engine': return 'item__source-badge--rule'
+    case 'ai_anomaly_service': return 'item__source-badge--rule'
+    case 'freshness_reminder':
+    case 'calibration_reminder':
+      return 'item__source-badge--sensor'
     default: return 'item__source-badge--default'
   }
 })
+
+function formatMeasurementAgeAtAlert(secondsRaw: unknown): string {
+  if (typeof secondsRaw !== 'number' || Number.isNaN(secondsRaw) || secondsRaw < 0) {
+    return 'Unbekannt'
+  }
+  const totalSeconds = Math.floor(secondsRaw)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+
+  if (hours > 0) return `${hours}h ${minutes}m`
+  if (minutes > 0) return `${minutes}m`
+  return `${totalSeconds}s`
+}
 
 function handleMarkRead(): void {
   if (!props.notification.is_read) {
@@ -112,10 +142,9 @@ function handleResolve(): void {
 }
 
 function navigateToSensor(): void {
-  const espId = metadata.value.esp_id as string
-  if (espId) {
-    router.push({ path: '/hardware', query: { openSettings: espId } })
-  }
+  const target = buildEspContextRoute(props.notification, espStore.devices)
+  if (!target) return
+  router.push(target)
 }
 
 function navigateToRule(): void {
@@ -123,6 +152,17 @@ function navigateToRule(): void {
   if (ruleId) {
     router.push(`/logic/${ruleId}`)
   }
+}
+
+function navigateToCorrelation(): void {
+  if (!props.notification.correlation_id) return
+  router.push({
+    path: '/system-monitor',
+    query: {
+      tab: 'events',
+      correlation: props.notification.correlation_id,
+    },
+  })
 }
 </script>
 
@@ -172,15 +212,29 @@ function navigateToRule(): void {
           </div>
           <div v-if="notification.category" class="item__detail">
             <span class="item__detail-label">Kategorie</span>
-            <span class="item__detail-value">{{ notification.category }}</span>
+            <span class="item__detail-value">{{ getNotificationCategoryLabel(notification.category) }}</span>
+          </div>
+          <div v-if="notification.severity" class="item__detail">
+            <span class="item__detail-label">Schweregrad</span>
+            <span class="item__detail-value">{{ getNotificationSeverityLabel(notification.severity) }}</span>
           </div>
           <div v-if="hasEspId" class="item__detail">
             <span class="item__detail-label">ESP</span>
             <span class="item__detail-value">{{ metadata.esp_id }}</span>
           </div>
+          <div v-if="notification.correlation_id" class="item__detail">
+            <span class="item__detail-label">Korrelation</span>
+            <span class="item__detail-value">{{ notification.correlation_id }}</span>
+          </div>
           <div v-if="hasSensorType" class="item__detail">
             <span class="item__detail-label">Sensor</span>
             <span class="item__detail-value">{{ metadata.sensor_type }}</span>
+          </div>
+          <div v-if="hasMeasurementAgeAtAlert" class="item__detail">
+            <span class="item__detail-label">Messwertalter beim Alert</span>
+            <span class="item__detail-value">
+              {{ formatMeasurementAgeAtAlert(metadata.measurement_age_seconds) }}
+            </span>
           </div>
           <div v-if="hasEmailInfo" class="item__detail">
             <span class="item__detail-label">Email</span>
@@ -223,11 +277,20 @@ function navigateToRule(): void {
           <button
             v-if="hasEspId"
             class="item__action"
-            title="Zum Sensor"
+            title="Zum Gerät"
             @click.stop="navigateToSensor"
           >
             <Activity class="item__action-icon" />
-            Zum Sensor
+            Zum Gerät
+          </button>
+          <button
+            v-if="notification.correlation_id"
+            class="item__action"
+            title="Im Ereignis-Monitor anzeigen"
+            @click.stop="navigateToCorrelation"
+          >
+            <Activity class="item__action-icon" />
+            Ereignis-Details
           </button>
           <button
             v-if="hasRuleId"
@@ -323,9 +386,9 @@ function navigateToRule(): void {
 .item__source-badge {
   flex-shrink: 0;
   padding: 1px var(--space-1);
-  font-size: 9px;
+  font-size: var(--text-xxs);
   font-weight: 600;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   line-height: 1.4;
@@ -361,9 +424,9 @@ function navigateToRule(): void {
 .item__status {
   flex-shrink: 0;
   padding: 1px var(--space-1);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 600;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   line-height: 1.4;
@@ -388,12 +451,12 @@ function navigateToRule(): void {
 .item__auto-badge {
   flex-shrink: 0;
   padding: 1px var(--space-1);
-  font-size: 9px;
+  font-size: var(--text-xxs);
   font-weight: 600;
   color: var(--color-text-muted);
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--glass-border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -460,7 +523,7 @@ function navigateToRule(): void {
 }
 
 .item__detail-label {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -504,7 +567,7 @@ function navigateToRule(): void {
 
 .item__email-provider {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--text-xxs);
 }
 
 /* Action Buttons */

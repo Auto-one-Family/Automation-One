@@ -356,7 +356,7 @@ function clearAll() {
 .analysis-drop-zone {
   background: var(--color-bg-secondary);
   border: 1px solid var(--glass-border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   padding: 1rem;
   display: flex;
   flex-direction: column;
@@ -405,7 +405,7 @@ function clearAll() {
 
 .analysis-drop-zone__time-btn {
   padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   font-size: 0.75rem;
   font-weight: 500;
   background: transparent;
@@ -434,7 +434,7 @@ function clearAll() {
   gap: 0.5rem;
   padding: 3rem 2rem;
   border: 2px dashed var(--glass-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   color: var(--color-text-muted);
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -464,7 +464,7 @@ function clearAll() {
   gap: 0.5rem;
   align-items: center;
   position: relative;
-  z-index: 1;
+  z-index: var(--z-dropdown);
 }
 
 .analysis-drop-zone__legend-item {
@@ -473,7 +473,7 @@ function clearAll() {
   gap: 0.375rem;
   padding: 0.25rem 0.5rem;
   background: var(--color-bg-tertiary);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   font-size: 0.75rem;
 }
 
@@ -518,7 +518,7 @@ function clearAll() {
   width: 2rem;
   height: 2rem;
   border: 2px dashed var(--glass-border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.2s;
@@ -544,7 +544,7 @@ function clearAll() {
   padding: 0.375rem 0.875rem;
   font-size: 0.75rem;
   font-weight: 500;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background: transparent;
   border: 1px solid var(--glass-border);
   color: var(--color-text-muted);
@@ -569,7 +569,7 @@ function clearAll() {
 .analysis-drop-zone--compact {
   padding: 0.625rem;
   gap: 0.625rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 
 .analysis-drop-zone--compact .analysis-drop-zone__header {
@@ -619,7 +619,7 @@ function clearAll() {
 .analysis-drop-zone--compact .analysis-drop-zone__legend-item {
   padding: 0.3125rem 0.5rem;
   font-size: 0.6875rem;
-  border-radius: 0.3125rem;
+  border-radius: var(--radius-sm);
   gap: 0.25rem;
 }
 
@@ -656,7 +656,7 @@ function clearAll() {
   min-height: 2.125rem;
   padding: 0.375rem 0.75rem;
   font-size: 0.6875rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   text-align: center;
 }
 

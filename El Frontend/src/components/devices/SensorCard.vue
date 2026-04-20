@@ -48,21 +48,27 @@ const sensorLabel = computed(() =>
   getSensorLabel(props.sensor.sensor_type) || props.sensor.sensor_type
 )
 
-// Effective quality status: stale overrides actual quality
-const effectiveQualityStatus = computed(() =>
-  isStale.value ? 'offline' : qualityToStatus(props.sensor.quality)
-)
-
-const statusClass = computed(() =>
-  `sensor-card__dot--${effectiveQualityStatus.value}`
-)
-
 // Data freshness indicator (stale after 120s, or server-flagged as stale)
 const freshness = computed(() => getDataFreshness(props.sensor.last_read))
 const isStale = computed(() => freshness.value === 'stale' || props.sensor.is_stale === true)
 // Value present but no timestamp known
 const isTimestampUnknown = computed(() =>
   freshness.value === 'unknown' && props.sensor.raw_value != null
+)
+// No data at all: no value and no valid timestamp
+const hasNoData = computed(() =>
+  props.sensor.raw_value == null && !props.sensor.last_read
+)
+
+// Effective quality status: defense-in-depth via timestamp age check
+const effectiveQualityStatus = computed(() => {
+  if (hasNoData.value) return 'offline'
+  if (isStale.value) return 'stale'
+  return qualityToStatus(props.sensor.quality, { lastRead: props.sensor.last_read })
+})
+
+const statusClass = computed(() =>
+  `sensor-card__dot--${effectiveQualityStatus.value}`
 )
 
 // ESP offline indicator
@@ -96,12 +102,12 @@ const resolvedUnit = computed(() => {
 
 // Quality text label for accessibility (dual encoding: color + text)
 const qualityLabel = computed(() => {
-  if (isStale.value) return 'Veraltet'
-  const status = qualityToStatus(props.sensor.quality)
+  const status = effectiveQualityStatus.value
   const labels: Record<string, string> = {
     good: 'OK',
     warning: 'Warnung',
     alarm: 'Kritisch',
+    stale: 'Veraltet',
     offline: 'Offline',
   }
   return labels[status] ?? ''
@@ -235,6 +241,7 @@ function handleClick() {
       mode === 'monitor' ? `sensor-card--${effectiveQualityStatus}` : '',
       mode === 'monitor' && isStale ? 'sensor-card--stale' : '',
       mode === 'monitor' && isEspOffline ? 'sensor-card--esp-offline' : '',
+      mode === 'monitor' && isFromMockDevice ? 'sensor-card--mock' : '',
     ]"
     @click="handleClick"
   >
@@ -270,6 +277,7 @@ function handleClick() {
           </div>
         </span>
         <div class="sensor-card__quality">
+          <span v-if="isFromMockDevice" class="sensor-card__sim-badge">Sim</span>
           <span :class="['sensor-card__mode-badge', `sensor-card__mode-badge--${dataMode.toLowerCase()}`]">
             {{ dataMode }}
           </span>
@@ -278,11 +286,16 @@ function handleClick() {
         </div>
       </div>
       <div class="sensor-card__value">
-        <span class="sensor-card__number">{{ formatValue(sensor.raw_value) }}</span>
-        <span class="sensor-card__unit">{{ resolvedUnit }}</span>
-        <span v-if="trend" class="sensor-card__trend" :title="TREND_TITLES[trend]">
-          <component :is="TREND_ICONS[trend]" :size="14" />
-        </span>
+        <template v-if="hasNoData">
+          <span class="sensor-card__number sensor-card__number--no-data">Keine Daten</span>
+        </template>
+        <template v-else>
+          <span class="sensor-card__number">{{ formatValue(sensor.raw_value) }}</span>
+          <span class="sensor-card__unit">{{ resolvedUnit }}</span>
+          <span v-if="trend" class="sensor-card__trend" :title="TREND_TITLES[trend]">
+            <component :is="TREND_ICONS[trend]" :size="14" />
+          </span>
+        </template>
       </div>
       <!-- Sparkline slot: parent can inject a mini chart -->
       <div v-if="$slots.sparkline" class="sensor-card__sparkline">
@@ -291,17 +304,20 @@ function handleClick() {
       <div class="sensor-card__footer">
         <span class="sensor-card__esp">{{ sensor.esp_id }}</span>
         <div class="sensor-card__footer-badges">
-          <span v-if="isFromMockDevice" class="sensor-card__badge sensor-card__badge--mock">Mock</span>
+          <span v-if="isFromMockDevice" class="sensor-card__badge sensor-card__badge--mock">Sim</span>
           <span class="sensor-card__subzone-badge">{{ subzoneLabel }}</span>
           <span v-if="scopeBadge" :class="['sensor-card__scope-badge', scopeBadge.cls]" :title="scopeTooltip">{{ scopeBadge.text }}</span>
           <span v-if="isEspOffline" class="sensor-card__badge sensor-card__badge--offline">
             <WifiOff class="w-3 h-3" /> ESP offline
           </span>
+          <span v-else-if="hasNoData" class="sensor-card__badge sensor-card__badge--no-data">
+            <Clock class="w-3 h-3" /> Keine Daten
+          </span>
           <span v-else-if="isStale" class="sensor-card__badge sensor-card__badge--stale">
-            <Clock class="w-3 h-3" /> {{ formatRelativeTime(sensor.last_read) }}
+            <Clock class="w-3 h-3" /> Zuletzt: {{ formatRelativeTime(sensor.last_read) }}
           </span>
           <span v-else-if="isTimestampUnknown" class="sensor-card__badge sensor-card__badge--unknown" title="Zeitpunkt des Messwerts unbekannt">
-            <Clock class="w-3 h-3" /> Zeitpunkt unbekannt
+            <Clock class="w-3 h-3" /> Zuletzt: unbekannt
           </span>
         </div>
       </div>
@@ -425,13 +441,18 @@ function handleClick() {
   font-size: var(--text-sm);
   font-weight: 500;
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sensor-card__quality {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .sensor-card__mode-badge {
@@ -439,8 +460,8 @@ function handleClick() {
   align-items: center;
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border);
-  padding: 1px 6px;
-  font-size: 10px;
+  padding: 1px var(--space-2);
+  font-size: var(--text-xxs);
   line-height: 1.1;
   color: var(--color-text-secondary);
 }
@@ -465,7 +486,7 @@ function handleClick() {
 }
 
 .sensor-card__quality-text {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 500;
   letter-spacing: 0.02em;
 }
@@ -473,6 +494,7 @@ function handleClick() {
 .sensor-card__quality-text--good { color: var(--color-success); }
 .sensor-card__quality-text--warning { color: var(--color-warning); }
 .sensor-card__quality-text--alarm { color: var(--color-error); }
+.sensor-card__quality-text--stale { color: rgb(251, 146, 60); }
 .sensor-card__quality-text--offline { color: var(--color-text-muted); }
 
 .sensor-card__sparkline {
@@ -493,6 +515,10 @@ function handleClick() {
   background: var(--color-error);
 }
 
+.sensor-card__dot--stale {
+  background: rgb(251, 146, 60);
+}
+
 .sensor-card__dot--offline {
   background: var(--color-text-muted);
 }
@@ -506,12 +532,13 @@ function handleClick() {
 }
 
 .sensor-card__number {
-  font-size: 1.5rem;
+  font-size: clamp(1.125rem, 3vw, 1.5rem);
   font-weight: 700;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   color: var(--color-text-primary);
   overflow-wrap: break-word;
   word-break: break-all;
+  min-width: 0;
 }
 
 .sensor-card__unit {
@@ -528,24 +555,27 @@ function handleClick() {
 
 .sensor-card__footer {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--space-1) var(--space-2);
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .sensor-card__footer-badges {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
   flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .sensor-card__subzone-badge {
   display: inline-flex;
   align-items: center;
   font-size: var(--text-xs);
-  padding: 2px 8px;
+  padding: 2px var(--space-2);
   border-radius: var(--radius-sm);
   background: var(--color-bg-quaternary, rgba(255, 255, 255, 0.06));
   color: var(--color-text-secondary);
@@ -557,7 +587,7 @@ function handleClick() {
 }
 
 .sensor-card__esp {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
@@ -565,6 +595,7 @@ function handleClick() {
 .sensor-card--good { border-color: rgba(52, 211, 153, 0.15); }
 .sensor-card--warning { border-color: rgba(251, 191, 36, 0.15); }
 .sensor-card--alarm { border-color: rgba(248, 113, 113, 0.15); }
+.sensor-card--stale { border-color: rgba(251, 146, 60, 0.15); }
 .sensor-card--offline { border-color: var(--glass-border); }
 
 /* Stale data indicator */
@@ -601,11 +632,16 @@ function handleClick() {
 .sensor-card__badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  font-size: 10px;
+  gap: var(--space-1);
+  font-size: var(--text-xxs);
   font-weight: 500;
-  padding: 1px 5px;
-  border-radius: 3px;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
 }
 
 .sensor-card__badge--stale {
@@ -623,19 +659,64 @@ function handleClick() {
   background: rgba(112, 112, 128, 0.1);
 }
 
+.sensor-card__badge--no-data {
+  color: var(--color-text-muted);
+  background: rgba(112, 112, 128, 0.1);
+}
+
+.sensor-card__number--no-data {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  font-family: inherit;
+}
+
+.sensor-card__sparkline-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
 .sensor-card__badge--mock {
   color: var(--color-mock);
   background: var(--color-mock-bg);
+}
+
+/* Mock device visual distinction */
+.sensor-card--mock {
+  border-color: color-mix(in srgb, var(--color-mock) 25%, var(--glass-border));
+  background: color-mix(in srgb, var(--color-mock) 4%, var(--color-bg-tertiary));
+}
+
+.sensor-card--mock:hover {
+  border-color: color-mix(in srgb, var(--color-mock) 40%, var(--glass-border));
+}
+
+.sensor-card__sim-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-2);
+  font-size: var(--text-xxs);
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--color-mock);
+  background: var(--color-mock-bg);
+  letter-spacing: 0.03em;
 }
 
 /* Scope badges (T13-R3 WP4) */
 .sensor-card__scope-badge {
   display: inline-flex;
   align-items: center;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 500;
-  padding: 1px 6px;
-  border-radius: 3px;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-xs);
   white-space: nowrap;
   cursor: default;
 }
@@ -671,7 +752,7 @@ function handleClick() {
   background: var(--color-bg-secondary);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
-  padding: 4px 8px;
+  padding: var(--space-1) var(--space-2);
   min-height: 44px;
   cursor: pointer;
   transition: border-color var(--transition-fast);
@@ -704,7 +785,7 @@ function handleClick() {
   top: calc(100% + 6px);
   left: 50%;
   transform: translateX(-50%);
-  z-index: 20;
+  z-index: var(--z-tooltip);
   min-width: 200px;
   padding: var(--space-3);
   background: var(--glass-bg, rgba(18, 18, 26, 0.92));

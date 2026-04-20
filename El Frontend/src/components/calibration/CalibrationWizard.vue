@@ -238,7 +238,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="calibration-wizard" :class="[{ 'calibration-wizard--compact': compact }, feedbackClass]">
+  <div class="calibration-wizard" data-testid="calibration-wizard" :class="[{ 'calibration-wizard--compact': compact }, feedbackClass]">
     <div v-if="!compact" class="calibration-wizard__header">
       <FlaskConical :size="20" class="calibration-wizard__icon" />
       <h2 class="calibration-wizard__title">Sensor-Kalibrierung</h2>
@@ -523,7 +523,7 @@ defineExpose({
     </div>
 
     <!-- Phase: Finalizing -->
-    <div v-if="phase === 'finalizing'" class="calibration-wizard__phase calibration-wizard__phase--center">
+    <div v-if="phase === 'finalizing'" data-testid="finalizing-phase" class="calibration-wizard__phase calibration-wizard__phase--center">
       <div class="calibration-wizard__finalizing-spinner">
         <Loader :size="40" class="calibration-wizard__spinner-icon" />
       </div>
@@ -548,7 +548,7 @@ defineExpose({
     </div>
 
     <!-- Phase: Done -->
-    <div v-if="phase === 'done'" class="calibration-wizard__phase calibration-wizard__phase--center">
+    <div v-if="phase === 'done'" data-testid="calibration-success" class="calibration-wizard__phase calibration-wizard__phase--center">
       <div class="calibration-wizard__done-icon">
         <Check :size="32" />
       </div>
@@ -609,7 +609,7 @@ defineExpose({
     </div>
 
     <!-- Phase: Error -->
-    <div v-if="phase === 'error'" class="calibration-wizard__phase calibration-wizard__phase--center">
+    <div v-if="phase === 'error'" data-testid="calibration-error" class="calibration-wizard__phase calibration-wizard__phase--center">
       <div class="calibration-wizard__error-icon">
         <AlertCircle :size="32" />
       </div>
@@ -655,7 +655,7 @@ defineExpose({
 
 .calibration-wizard__hud {
   padding: 0.75rem;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-md);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   background: var(--color-bg-secondary, #111118);
   display: flex;
@@ -673,7 +673,7 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.375rem 0.5rem;
   font-size: 0.75rem;
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
@@ -721,7 +721,7 @@ defineExpose({
 
 .calibration-wizard__mastery {
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  border-radius: 0.625rem;
+  border-radius: var(--radius-md);
   background: var(--color-bg-secondary, #111118);
   padding: 0.75rem;
   display: flex;
@@ -737,7 +737,7 @@ defineExpose({
 
 .calibration-wizard__mastery-stage {
   padding: 0.45rem 0.5rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   font-size: 0.6875rem;
   text-align: center;
@@ -822,7 +822,7 @@ defineExpose({
 
 .calibration-wizard__type-card {
   padding: 0.875rem;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-md);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   background: var(--color-bg-secondary, #111118);
   color: var(--color-text-primary, #eaeaf2);
@@ -860,7 +860,7 @@ defineExpose({
   padding: 0.625rem 0.75rem;
   background: var(--color-bg-secondary, #111118);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 
 .calibration-wizard__device-name {
@@ -878,7 +878,7 @@ defineExpose({
   padding: 0.25rem 0.625rem;
   font-size: 0.6875rem;
   font-family: 'JetBrains Mono', monospace;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   background: var(--color-bg-tertiary, #0d0d14);
   color: var(--color-text-muted, #8585a0);
@@ -909,7 +909,7 @@ defineExpose({
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
   font-family: inherit;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133, 133, 160, 0.12));
   background: var(--color-bg-tertiary, #0d0d14);
   color: var(--color-text-primary, #eaeaf2);
@@ -927,7 +927,7 @@ defineExpose({
 .calibration-wizard__summary {
   background: var(--color-bg-secondary, #111118);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  border-radius: 0.625rem;
+  border-radius: var(--radius-md);
   padding: 1rem;
   display: flex;
   flex-direction: column;
@@ -955,7 +955,7 @@ defineExpose({
 .calibration-wizard__inline-action-btn {
   padding: 0.375rem 0.625rem;
   font-size: 0.75rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-warning, #fbbf24);
   background: transparent;
   color: var(--color-warning, #fbbf24);
@@ -980,7 +980,7 @@ defineExpose({
   gap: 0.375rem;
   padding: 0.5rem 0.875rem;
   font-size: 0.75rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   background: var(--color-bg-secondary, #111118);
   color: var(--color-text-primary, #eaeaf2);
@@ -1003,7 +1003,7 @@ defineExpose({
   gap: 0.375rem;
   padding: 0.5rem 0.875rem;
   font-size: 0.75rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-text-muted, #8585a0);
   background: transparent;
   color: var(--color-text-secondary, #8585a0);
@@ -1029,10 +1029,10 @@ defineExpose({
   padding: 0.625rem 1.25rem;
   font-size: 0.8125rem;
   font-weight: 600;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   border: none;
   background: var(--color-iridescent-1, #a78bfa);
-  color: #fff;
+  color: var(--color-text-inverse);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -1063,7 +1063,7 @@ defineExpose({
 .calibration-wizard__hint {
   background: rgba(251, 191, 36, 0.1);
   border: 1px solid rgba(251, 191, 36, 0.3);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.75rem;
   font-size: 0.875rem;
   color: var(--color-text-primary, #eaeaf2);
@@ -1084,7 +1084,7 @@ defineExpose({
 .calibration-wizard__result-item {
   background: var(--color-bg-secondary, #111118);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  border-radius: 0.625rem;
+  border-radius: var(--radius-md);
   padding: 0.75rem;
   display: flex;
   flex-direction: column;
@@ -1120,7 +1120,7 @@ defineExpose({
   font-family: 'JetBrains Mono', monospace;
   background: var(--color-bg-secondary, #111118);
   padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   word-break: break-all;
 }
 
@@ -1132,7 +1132,7 @@ defineExpose({
 .calibration-wizard__result-pre {
   background: var(--color-bg-tertiary, #0d0d14);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.75rem;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.75rem;
@@ -1182,7 +1182,7 @@ defineExpose({
 
 .calibration-wizard__finalizing-details {
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.625rem;
   background: var(--color-bg-secondary, #111118);
   width: 100%;
@@ -1194,7 +1194,7 @@ defineExpose({
   color: var(--color-warning, #fbbf24);
   background: rgba(251, 191, 36, 0.1);
   border: 1px solid rgba(251, 191, 36, 0.3);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   padding: 0.625rem 0.75rem;
   margin: 0;
   line-height: 1.4;
@@ -1202,7 +1202,7 @@ defineExpose({
 
 .calibration-wizard__details {
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.625rem;
   background: var(--color-bg-secondary, #111118);
 }

@@ -133,7 +133,7 @@ function handleKeydown(e: KeyboardEvent) {
 .reject-modal__icon {
   flex-shrink: 0;
   padding: 0.5rem;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -181,7 +181,7 @@ function handleKeydown(e: KeyboardEvent) {
   color: var(--color-text-primary);
   background-color: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   outline: none;
   transition: border-color 0.15s ease;
 }
@@ -208,7 +208,7 @@ function handleKeydown(e: KeyboardEvent) {
   padding: 0.5rem 1rem;
   font-size: 0.875rem;
   font-weight: 500;
-  border-radius: 0.625rem;
+  border-radius: var(--radius-md);
   border: none;
   cursor: pointer;
   transition: all 0.12s ease;

@@ -10,7 +10,9 @@ Nach Reset darf die Firmware den Pending-Zustand nur verlassen, wenn die Runtime
 
 - Default-Profil: `sensor_required`
 - Pflicht: mindestens ein Aktor (`actuator_count > 0`)
-- Pflicht: mindestens eine Offline-Rule (`offline_rule_count > 0`)
+- Offline-Rules sind fuer Pending-Exit optional.
+  - Bei `offline_rule_count == 0` bleibt Disconnect-Verhalten fail-safe:
+    Aktoren werden sofort auf `default_state` gesetzt.
 - Sensoren:
   - `sensor_required`: mindestens ein Sensor (`sensor_count > 0`)
   - `sensor_optional`: Sensoren sind optional (fuer spaetere profile-basierte Setups)
@@ -20,13 +22,13 @@ Nach Reset darf die Firmware den Pending-Zustand nur verlassen, wenn die Runtime
 - `CONFIG_PENDING_EXIT_READY`
 - `MISSING_SENSORS`
 - `MISSING_ACTUATORS`
-- `MISSING_OFFLINE_RULES`
+- `OFFLINE_RULES_ONLY_AUTO_EXIT` (Offline-Rules vorhanden, aber keine Aktoren)
 
 ## State-Transition-Regeln
 
 - Enter: `entered_config_pending` bei partieller Runtime-Basis nach Boot.
+- Heartbeat-ACK in `CONFIG_PENDING_AFTER_RESET` triggert keinen Pending-Exit mehr; die Pruefung ist auf `config_commit` verschoben.
 - Blocked Exit: `exit_blocked_config_pending` mit reason:
-  - `CONFIG_PENDING_RETAINS_STATE_ON_ACK` (ACK darf Pending nicht direkt verlassen)
   - `CONFIG_PENDING_EXIT_NOT_READY` (Policy nicht erfuellt)
 - Erfolgreicher Exit: `exited_config_pending` mit reason `CONFIG_PENDING_EXIT_READY`.
 

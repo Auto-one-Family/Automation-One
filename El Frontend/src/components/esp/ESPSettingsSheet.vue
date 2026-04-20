@@ -116,6 +116,10 @@ const healthPresentation = computed(() => {
   const onlineLike = st === 'online' || st === 'stale'
   return espHealthPresentation(vm, onlineLike)
 })
+const runtimeHealthDetails = computed(() => {
+  const lines = healthPresentation.value?.tooltipLines ?? []
+  return lines.filter(line => line !== 'Keine Degradations-Marker gesetzt')
+})
 
 const intentDisplay = computed(() => intentSignalsStore.getDisplayForEsp(espId.value))
 
@@ -758,21 +762,20 @@ onUnmounted(() => {
 
             <!-- Geräte-Telemetrie (Heartbeat-Zusatzfelder) -->
             <template v-if="device.runtime_health_view">
-              <p class="text-xs text-muted mt-2 mb-1">
+              <p v-if="runtimeHealthDetails.length > 0" class="text-xs text-muted mt-2 mb-1">
                 Laufzeit-Details (Geräte-Telemetrie)
               </p>
-              <ul class="esp-settings__telemetry-list text-xs text-muted m-0 pl-4">
-                <li v-if="device.runtime_health_view.persistenceDegraded">
-                  Persistenz eingeschränkt
-                  <span v-if="device.runtime_health_view.persistenceDegradedReason">
-                    — {{ device.runtime_health_view.persistenceDegradedReason }}
-                  </span>
+              <ul v-if="runtimeHealthDetails.length > 0" class="esp-settings__telemetry-list text-xs text-muted m-0 pl-4">
+                <li v-for="line in runtimeHealthDetails" :key="line">
+                  {{ line }}
                 </li>
-                <li v-if="device.runtime_health_view.runtimeStateDegraded">Laufzeitstatus eingeschränkt</li>
-                <li v-if="device.runtime_health_view.networkDegraded">Netzwerk eingeschränkt</li>
-                <li v-if="device.runtime_health_view.mqttCircuitBreakerOpen">MQTT-Circuit-Breaker offen</li>
-                <li v-if="device.runtime_health_view.wifiCircuitBreakerOpen">WiFi-Circuit-Breaker offen</li>
               </ul>
+              <p
+                v-if="healthPresentation?.recommendedAction"
+                class="esp-settings__recommended-action text-xs m-0 mt-2"
+              >
+                <strong>Nächster Schritt:</strong> {{ healthPresentation.recommendedAction }}
+              </p>
               <details v-if="Object.keys(device.runtime_health_view.rawTelemetry).length > 0" class="esp-settings__raw-tel mt-2">
                 <summary class="text-xs cursor-pointer text-muted">Weitere Telemetrie-Schlüssel</summary>
                 <ul class="text-xs font-mono m-0 mt-1 pl-4 max-h-32 overflow-y-auto">
@@ -1033,7 +1036,7 @@ onUnmounted(() => {
 .sheet-section--mock {
   background-color: rgba(168, 85, 247, 0.04);
   border: 1px solid rgba(168, 85, 247, 0.15);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.875rem;
 }
 
@@ -1045,7 +1048,7 @@ onUnmounted(() => {
 .sheet-section--info {
   background-color: rgba(96, 165, 250, 0.04);
   border: 1px solid rgba(96, 165, 250, 0.15);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.875rem;
 }
 
@@ -1057,7 +1060,7 @@ onUnmounted(() => {
 .sheet-section--danger {
   background-color: rgba(239, 68, 68, 0.04);
   border: 1px solid rgba(239, 68, 68, 0.15);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 0.875rem;
 }
 
@@ -1156,7 +1159,7 @@ onUnmounted(() => {
   cursor: pointer;
   padding: 0.25rem 0.5rem;
   margin: -0.25rem -0.5rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   transition: background-color 0.15s ease;
 }
 
@@ -1213,7 +1216,7 @@ onUnmounted(() => {
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background-color: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
@@ -1245,7 +1248,7 @@ onUnmounted(() => {
   font-size: 0.75rem;
   background-color: var(--color-bg-tertiary);
   padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 
 .info-row--compact {
@@ -1355,7 +1358,7 @@ onUnmounted(() => {
   padding: 0.625rem 1rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.15s ease;
   border: none;
@@ -1398,7 +1401,7 @@ onUnmounted(() => {
   padding: 0.75rem;
   background-color: rgba(168, 85, 247, 0.06);
   border: 1px solid rgba(168, 85, 247, 0.15);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   margin-top: 0.5rem;
 }
 
@@ -1423,7 +1426,7 @@ onUnmounted(() => {
   height: 26px;
   background-color: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border);
-  border-radius: 13px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s ease;
   flex-shrink: 0;
@@ -1476,7 +1479,7 @@ onUnmounted(() => {
   color: var(--color-text-primary);
   background-color: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   text-align: center;
 }
 
@@ -1514,4 +1517,8 @@ onUnmounted(() => {
 .ml-1 { margin-left: 0.25rem; }
 .ml-2 { margin-left: 0.5rem; }
 .mt-2 { margin-top: 0.5rem; }
+
+.esp-settings__recommended-action {
+  color: var(--color-warning);
+}
 </style>

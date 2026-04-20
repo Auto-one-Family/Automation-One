@@ -43,11 +43,12 @@ export function calculateTrend(
   points: ChartDataPoint[],
   sensorType?: string
 ): TrendResult {
-  if (points.length < 5) return { direction: 'stable', slope: 0 }
+  const valid = points.filter(p => p.value != null) as { value: number; timestamp: string | Date }[]
+  if (valid.length < 5) return { direction: 'stable', slope: 0 }
 
   const threshold = sensorType != null ? (TREND_THRESHOLDS[sensorType] ?? DEFAULT_TREND_THRESHOLD) : DEFAULT_TREND_THRESHOLD
-  const n = points.length
-  const values = points.map(p => p.value)
+  const n = valid.length
+  const values = valid.map(p => p.value)
 
   const meanX = (n - 1) / 2
   const meanY = values.reduce((a, b) => a + b, 0) / n

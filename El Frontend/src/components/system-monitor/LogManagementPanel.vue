@@ -427,7 +427,7 @@ onUnmounted(() => {
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  border-radius: 1rem;
+  border-radius: var(--radius-lg);
   background: rgba(15, 15, 20, 0.95);
   backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -474,7 +474,7 @@ onUnmounted(() => {
   color: var(--color-text-muted);
   background: none;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -508,7 +508,7 @@ onUnmounted(() => {
   color: rgb(248, 113, 113);
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.2);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 
 .mgmt-error button {
@@ -529,7 +529,7 @@ onUnmounted(() => {
   color: rgb(74, 222, 128);
   background: rgba(34, 197, 94, 0.1);
   border: 1px solid rgba(34, 197, 94, 0.2);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 
 .mgmt-success button {
@@ -546,7 +546,7 @@ onUnmounted(() => {
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
   border: 1px solid rgba(34, 197, 94, 0.3) !important;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 
 .mgmt-success__download:hover {
@@ -570,7 +570,7 @@ onUnmounted(() => {
    ============================================================================= */
 .mgmt-section {
   padding: 1rem;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
@@ -609,7 +609,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.625rem;
   padding: 0.75rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
@@ -650,7 +650,7 @@ onUnmounted(() => {
   border: none;
   cursor: pointer;
   padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 
 .mgmt-select-all:hover {
@@ -667,7 +667,7 @@ onUnmounted(() => {
 }
 
 .mgmt-file {
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   transition: background-color 0.15s;
 }
 
@@ -785,7 +785,7 @@ onUnmounted(() => {
   color: white;
   background-color: rgb(220, 38, 38);
   border: none;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -809,14 +809,14 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.5);
-  border-radius: 1rem;
+  border-radius: var(--radius-lg);
 }
 
 .mgmt-confirm {
   width: 90%;
   max-width: 24rem;
   padding: 1.5rem;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   background: rgba(25, 25, 30, 0.98);
   border: 1px solid rgba(239, 68, 68, 0.2);
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
@@ -853,7 +853,7 @@ onUnmounted(() => {
   font-family: var(--font-mono);
   color: var(--color-text-muted);
   background: rgba(0, 0, 0, 0.3);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   max-height: 8rem;
   overflow-y: auto;
 }
@@ -879,7 +879,7 @@ onUnmounted(() => {
   color: white;
   background-color: rgb(220, 38, 38);
   border: none;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: background-color 0.15s;
 }

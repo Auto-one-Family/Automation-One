@@ -146,7 +146,7 @@ async def test_cross_layer_calibration_happy_path(
         )
         assert start_response.status_code == 201
         session_id = start_response.json()["id"]
-        assert start_response.json()["status"] == "collecting"
+        assert start_response.json()["status"] == "pending"
 
         # Step 2: Add dry point
         dry_response = await client.post(
@@ -183,12 +183,13 @@ async def test_cross_layer_calibration_happy_path(
         finalized_session = finalize_response.json()
         assert finalized_session["status"] == "finalizing"
 
-        # Verify calibration result was computed
+        # Verify calibration result was computed (canonical envelope)
         result = finalized_session.get("calibration_result")
         assert result is not None
-        assert result.get("type") == "linear_2point"
-        assert "slope" in result
-        assert "offset" in result
+        assert result.get("method") == "linear_2point"
+        derived = result.get("derived", {})
+        assert "slope" in derived
+        assert "offset" in derived
 
         # Step 5: Apply calibration (persist to sensor config)
         apply_response = await client.post(
@@ -270,12 +271,13 @@ async def test_cross_layer_calibration_esp_offline_timeout(
             headers=operator_headers,
         )
 
-        # Should fail with INSUFFICIENT_POINTS error
-        assert finalize_response.status_code == 400
+        # Should fail — not enough points (need 2, have 1)
+        # INSUFFICIENT_POINTS maps to 409 Conflict in the API contract
+        assert finalize_response.status_code == 409
         error_detail = finalize_response.json().get("detail", {})
         assert error_detail.get("code") == "INSUFFICIENT_POINTS"
 
-        # Verify session is still in collecting state (can retry)
+        # Session remains in COLLECTING (mutable — user can add more points)
         get_response = await client.get(
             f"/api/v1/calibration/sessions/{session_id}",
             headers=operator_headers,
@@ -562,9 +564,9 @@ async def test_calibration_service_full_lifecycle(db_session: AsyncSession):
         expected_points=2,
         initiated_by="service_test",
     )
-    assert session.status.value == "collecting"
+    assert session.status.value == "pending"
 
-    # Add points
+    # Add points (first add_point transitions PENDING → COLLECTING)
     session = await service.add_point(
         session_id=session.id,
         raw=500.0,
@@ -585,16 +587,17 @@ async def test_calibration_service_full_lifecycle(db_session: AsyncSession):
     session = await service.finalize(session.id)
     assert session.status.value == "finalizing"
     assert session.calibration_result is not None
-    assert session.calibration_result.get("type") == "linear_2point"
+    assert session.calibration_result.get("method") == "linear_2point"
+    assert "slope" in session.calibration_result.get("derived", {})
 
     # Apply
     session = await service.apply(session.id)
     assert session.status.value == "applied"
 
-    # Verify sensor was updated
+    # Verify sensor was updated (canonical calibration_data envelope)
     updated_sensor = await db_session.get(SensorConfig, sensor.id)
     assert updated_sensor.calibration_data is not None
-    assert updated_sensor.calibration_data.get("type") == "linear_2point"
+    assert updated_sensor.calibration_data.get("method") == "linear_2point"
 
 
 @pytest.mark.asyncio
@@ -608,11 +611,11 @@ async def test_calibration_service_error_handling(db_session: AsyncSession):
     session = await service.start_session(
         esp_id="ESP_NONEXISTENT",
         gpio=99,
-        sensor_type="unknown_type",  # Will be normalized
+        sensor_type="unknown_type",
         method="linear_2point",
         expected_points=2,
     )
-    assert session.status.value == "collecting"
+    assert session.status.value == "pending"
 
     # Test: add invalid point role
     with pytest.raises(CalibrationError) as exc:
@@ -634,7 +637,19 @@ async def test_calibration_service_error_handling(db_session: AsyncSession):
         )
     assert exc.value.code == "VALIDATION_ERROR"
 
-    # Test: finalize with insufficient points
+    # Test: finalize from PENDING state (no valid points added → INVALID_STATE)
+    with pytest.raises(CalibrationError) as exc:
+        await service.finalize(session.id)
+    assert exc.value.code == "INVALID_STATE"
+
+    # Test: finalize with insufficient points (add one valid point → COLLECTING, then finalize)
+    session = await service.add_point(
+        session_id=session.id,
+        raw=100.0,
+        reference=10.0,
+        point_role="dry",
+    )
+    assert session.status.value == "collecting"
     with pytest.raises(CalibrationError) as exc:
         await service.finalize(session.id)
     assert exc.value.code == "INSUFFICIENT_POINTS"

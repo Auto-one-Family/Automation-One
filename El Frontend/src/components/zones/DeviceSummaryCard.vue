@@ -15,6 +15,8 @@
 import { computed, ref, watch, onUnmounted } from 'vue'
 import type { ESPDevice } from '@/api/esp'
 import ESPCardBase from '@/components/esp/ESPCardBase.vue'
+import { getESPStatus } from '@/composables/useESPStatus'
+import { espHealthPresentation } from '@/domain/esp/espHealth'
 import {
   Heart,
   Settings2,
@@ -78,8 +80,15 @@ const actuatorCount = computed(() => {
   return actuators?.length ?? props.device.actuator_count ?? 0
 })
 
-/** Health percentage (0-100) for health-bar.
- *  Heuristic: online=100, safe_mode=60, error=20, offline=40 */
+const runtimeHealthBadge = computed(() => {
+  const vm = props.device.runtime_health_view
+  if (!vm) return null
+  const status = getESPStatus(props.device)
+  const onlineLike = status === 'online' || status === 'stale'
+  return espHealthPresentation(vm, onlineLike)
+})
+
+/** Connection indicator (0-100) for bottom bar (not runtime-health severity). */
 const healthPercent = computed(() => {
   if (props.device.status === 'online' || props.device.connected === true) return 100
   if (props.isMock) {
@@ -152,6 +161,16 @@ function handleSettings(event: MouseEvent) {
   >
     <!-- Content: live sensor values OR fallback counts + actions -->
     <template #default="{ lastSeenText }">
+      <div class="device-summary-card__status-line">
+        <span
+          v-if="runtimeHealthBadge?.showBadge"
+          class="device-summary-card__status-chip"
+          :title="runtimeHealthBadge.tooltipLines.join('\n')"
+        >
+          {{ runtimeHealthBadge.badgeLabel }}
+        </span>
+      </div>
+
       <!-- Live sensor values -->
       <div v-if="liveSensors.length > 0" class="device-summary-card__live-data">
         <div
@@ -198,7 +217,7 @@ function handleSettings(event: MouseEvent) {
 
     <!-- Health bar at bottom edge -->
     <template #footer>
-      <div class="device-summary-card__health-bar">
+      <div class="device-summary-card__health-bar" title="Verbindungsindikator">
         <div
           class="device-summary-card__health-fill"
           :style="{
@@ -282,7 +301,7 @@ function handleSettings(event: MouseEvent) {
 /* Match original badge styling */
 :deep(.esp-card-base__badge) {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--text-xxs);
 }
 
 /* Status dot glow on hover */
@@ -309,6 +328,27 @@ function handleSettings(event: MouseEvent) {
   flex-wrap: wrap;
   border-radius: var(--radius-sm);
   padding: 2px 0;
+}
+
+.device-summary-card__status-line {
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--space-1);
+}
+
+.device-summary-card__status-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-full);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 40%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  color: var(--color-warning);
+  padding: 1px var(--space-2);
+  font-size: var(--text-xxs);
+  line-height: 1.2;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .device-summary-card__live-value {
@@ -397,6 +437,6 @@ function handleSettings(event: MouseEvent) {
 .device-summary-card__health-fill {
   height: 100%;
   transition: width var(--transition-slow), background-color var(--transition-slow);
-  border-radius: 0 2px 0 0;
+  border-radius: 0 var(--radius-xs) 0 0;
 }
 </style>

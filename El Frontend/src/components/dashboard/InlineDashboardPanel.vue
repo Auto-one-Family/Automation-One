@@ -376,7 +376,7 @@ onUnmounted(() => {
   position: absolute;
   top: var(--space-1, 4px);
   right: var(--space-1, 4px);
-  z-index: 10;
+  z-index: var(--z-dropdown);
   display: flex;
   gap: 8px;
   padding: 2px;

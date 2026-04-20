@@ -214,7 +214,7 @@ async function createEsp() {
   padding: 0.75rem 1rem;
   background-color: rgba(248, 113, 113, 0.1);
   border: 1px solid rgba(248, 113, 113, 0.3);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   color: var(--color-error);
   font-size: 0.875rem;
 }
@@ -238,7 +238,7 @@ async function createEsp() {
 .checkbox {
   width: 1rem;
   height: 1rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--glass-border);
   background-color: var(--color-bg-tertiary);
   cursor: pointer;
@@ -270,7 +270,7 @@ async function createEsp() {
   flex-direction: column;
   background-color: var(--color-bg-secondary);
   border: 1px solid var(--glass-border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   box-shadow: var(--glass-shadow);
 }
 
@@ -291,7 +291,7 @@ async function createEsp() {
 
 .modal-close {
   padding: 0.5rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   color: var(--color-text-muted);
   transition: all 0.2s;
   background: none;

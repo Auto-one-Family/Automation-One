@@ -1077,6 +1077,19 @@ void OfflineModeManager::loadOfflineRulesFromNVS() {
 }
 
 // ============================================
+// AUT-66: COVERING RULE QUERY
+// ============================================
+
+bool OfflineModeManager::hasCoveringRule(uint8_t actuator_gpio) const {
+    for (uint8_t i = 0; i < offline_rule_count_; i++) {
+        if (offline_rules_[i].enabled && offline_rules_[i].actuator_gpio == actuator_gpio) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// ============================================
 // SERVER-OVERRIDE
 // ============================================
 

@@ -26,6 +26,7 @@ import time as time_module
 
 from cachetools import TTLCache
 from ...core.error_codes import ValidationErrorCode
+from ...core.config import get_settings
 from ...core.logging_config import get_logger
 from ...core.task_registry import create_tracked_task
 from ...core.metrics import (
@@ -58,8 +59,8 @@ from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
 
-# Heartbeat timeout: device considered offline after 5 minutes
-HEARTBEAT_TIMEOUT_SECONDS = 300
+# Heartbeat timeout: device considered offline after configured threshold
+HEARTBEAT_TIMEOUT_SECONDS = get_settings().maintenance.heartbeat_timeout_seconds
 
 # Full-State-Push: Reconnect threshold (seconds offline before triggering)
 RECONNECT_THRESHOLD_SECONDS = 60

@@ -1020,19 +1020,22 @@ async def emergency_stop(
 
     # ───────────────────────────────────────────────────────────
     # MQTT BROADCAST: Emergency Stop for late-joining ESPs
+    # Firmware contract (emergency_broadcast_contract.h) accepts
+    # only lowercase: "emergency_stop" | "stop_all"
     # ───────────────────────────────────────────────────────────
     try:
-        broadcast_payload = json.dumps(
-            {
-                "command": "EMERGENCY_STOP",
-                "reason": request.reason,
-                "issued_by": current_user.username,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "devices_stopped": devices_stopped,
-                "actuators_stopped": actuators_stopped,
-                "incident_correlation_id": incident_correlation_id,
-            }
-        )
+        broadcast_data = {
+            "command": "emergency_stop",
+            "reason": request.reason or "emergency",
+            "issued_by": current_user.username,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "devices_stopped": devices_stopped,
+            "actuators_stopped": actuators_stopped,
+            "incident_correlation_id": incident_correlation_id,
+        }
+        if not broadcast_data.get("command"):
+            raise ValueError("broadcast payload missing required 'command' field")
+        broadcast_payload = json.dumps(broadcast_data)
         publisher.client.publish(
             topic="kaiser/broadcast/emergency",
             payload=broadcast_payload,

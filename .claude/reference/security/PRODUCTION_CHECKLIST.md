@@ -142,6 +142,61 @@ app.add_middleware(
 
 ---
 
+## ESP32 Emergency Token (AUT-62)
+
+### Build-Flag: `EMERGENCY_TOKEN_REQUIRED`
+
+| Environment | Flag | Verhalten |
+|-------------|------|-----------|
+| `esp32_dev` | `0` | Fail-open: Emergency ohne Token wird akzeptiert |
+| `esp32_prod` | `1` | Fail-closed: Emergency ohne Token wird ABGEWIESEN |
+| `wokwi_*` | erbt von `esp32_dev` | Fail-open |
+
+### NVS-Keys
+
+| Key | Namespace | Beschreibung |
+|-----|-----------|--------------|
+| `emergency_auth` | `system_config` | ESP-spezifischer Emergency-Token (1-64 Zeichen) |
+| `broadcast_em_tok` | `system_config` | Broadcast-Emergency-Token (1-64 Zeichen) |
+
+### Token-Provisioning
+
+Token werden per MQTT-Command gesetzt (System-Command-Topic):
+
+```json
+{"command": "set_emergency_token", "token_type": "esp", "token": "<TOKEN>"}
+{"command": "set_emergency_token", "token_type": "broadcast", "token": "<TOKEN>"}
+```
+
+**Empfehlung:** Token = 32-Byte Hex-String (64 Zeichen). Generierung z.B.:
+```bash
+openssl rand -hex 32
+```
+
+### Token-Rotation
+
+1. Neuen Token generieren
+2. Per MQTT-Command `set_emergency_token` an ESP senden
+3. Server-seitigen Token ebenfalls aktualisieren
+4. Alten Token nach Bestätigung verwerfen
+
+**TODO:** Automatische Token-Rotation per MQTT-Admin-Command (Follow-up Issue).
+
+### Telemetrie
+
+Counter `emergency_rejected_no_token_total` im Heartbeat zeigt die Anzahl
+abgewiesener Emergency-Commands ohne Token (nur bei `EMERGENCY_TOKEN_REQUIRED=1`).
+
+### Prod-Deployment Schritte
+
+1. `pio run -e esp32_prod` zum Bauen des Prod-Firmware-Images
+2. Token vor oder nach Flash per MQTT-Command setzen
+3. Heartbeat prüfen: `emergency_rejected_no_token_total` muss `0` sein
+4. Emergency-Test mit Token: muss akzeptiert werden
+5. Emergency-Test ohne Token: muss mit `REJECTED`-Log abgewiesen werden
+
+---
+
 ## Pre-Deployment Checklist
 
 - [ ] JWT_SECRET_KEY set via environment (not hardcoded)
@@ -154,6 +209,9 @@ app.add_middleware(
 - [ ] Database port not exposed to public network
 - [ ] All secrets stored in `.env` (gitignored) or Docker Secrets
 - [ ] `.env.example` provided (without actual secrets)
+- [ ] ESP32 Emergency-Token provisioniert (NVS-Keys `emergency_auth` + `broadcast_em_tok`)
+- [ ] Prod-Build mit `-DEMERGENCY_TOKEN_REQUIRED=1` (`pio run -e esp32_prod`)
+- [ ] Emergency-Rejection ohne Token verifiziert (Serial-Log `[INC-EA5484] emergency rejected no_token`)
 
 ---
 

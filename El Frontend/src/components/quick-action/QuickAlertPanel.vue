@@ -3,7 +3,7 @@
  * QuickAlertPanel — Top-5 active alerts shown as sub-panel in the FAB.
  *
  * Data source: notification-inbox.store.ts (no own fetch).
- * Actions: Ack (markAsRead), Navigate (deep-link), Details (expand).
+ * Actions: Ack/Resolve, Navigate (deep-link), Details (expand).
  * Mute: Calls sensorsApi.updateAlertConfig() to suppress alerts per sensor.
  * Footer: "Alle Alerts anzeigen" opens the full NotificationDrawer.
  */
@@ -30,6 +30,12 @@ import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { sensorsApi } from '@/api/sensors'
 import { formatRelativeTime } from '@/utils/formatters'
+import {
+  getNotificationSeverityLabel,
+  getNotificationSourceLabel,
+  getNotificationCategoryLabel,
+} from '@/utils/labels'
+import { buildEspContextRoute } from '@/utils/notificationNavigation'
 import type { NotificationDTO } from '@/api/notifications'
 
 type QuickAlertFilter = 'active' | 'acknowledged' | 'all'
@@ -137,37 +143,40 @@ async function handleBatchAcknowledge(): Promise<void> {
   }
 }
 
-/**
- * Navigate to the relevant Monitor/Hardware view for an alert.
- *
- * Routing strategy (server-centric — zone resolved from espStore):
- * 1. esp_id + zone → /monitor/:zoneId (Monitor L2, shows device in zone context)
- * 2. esp_id without zone → /?openSettings=espId (Dashboard, opens ESP detail)
- * 3. No esp_id → no navigation (button hidden in template)
- */
 function handleNavigate(notification: NotificationDTO): void {
-  const meta = notification.metadata || {}
-  const espId = meta.esp_id as string | undefined
+  const target = buildEspContextRoute(notification, espStore.devices)
+  if (!target) return
+  void router.push(target)
+  quickActionStore.closeMenu()
+}
 
-  if (!espId) return
-
-  // Resolve zone from device registry (espStore is single source of truth)
-  const device = espStore.devices.find(d => d.esp_id === espId)
-  const zoneId = device?.zone_id
-
-  if (zoneId) {
-    // Device is assigned to a zone → Monitor L2 (zone overview with live data)
-    void router.push(`/monitor/${zoneId}`)
-  } else {
-    // Device has no zone → Dashboard with ESP settings open
-    void router.push(`/?openSettings=${espId}`)
-  }
-
+function handleOpenEventDetails(notification: NotificationDTO): void {
+  if (!notification.correlation_id) return
+  void router.push({
+    path: '/system-monitor',
+    query: {
+      tab: 'events',
+      correlation: notification.correlation_id,
+    },
+  })
   quickActionStore.closeMenu()
 }
 
 function toggleExpand(id: string): void {
   expandedId.value = expandedId.value === id ? null : id
+}
+
+function formatMeasurementAgeAtAlert(secondsRaw: unknown): string {
+  if (typeof secondsRaw !== 'number' || Number.isNaN(secondsRaw) || secondsRaw < 0) {
+    return 'Unbekannt'
+  }
+  const totalSeconds = Math.floor(secondsRaw)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+
+  if (hours > 0) return `${hours}h ${minutes}m`
+  if (minutes > 0) return `${minutes}m`
+  return `${totalSeconds}s`
 }
 
 function toggleSnoozeDropdown(notificationId: string): void {
@@ -400,15 +409,38 @@ function handleShowAll(): void {
                   :is="alert.severity === 'critical' || alert.severity === 'warning' ? AlertTriangle : Info"
                   class="alert-item__detail-icon"
                 />
-                <span class="alert-item__detail-label">{{ alert.severity }}</span>
+                <span class="alert-item__detail-label">{{ getNotificationSeverityLabel(alert.severity) }}</span>
               </div>
               <div v-if="alert.source" class="alert-item__detail">
-                <span class="alert-item__detail-text">Quelle: {{ alert.source }}</span>
+                <span class="alert-item__detail-text">Quelle: {{ getNotificationSourceLabel(alert.source) }}</span>
+              </div>
+              <div v-if="alert.category" class="alert-item__detail">
+                <span class="alert-item__detail-text">Kategorie: {{ getNotificationCategoryLabel(alert.category) }}</span>
               </div>
               <div v-if="alert.metadata?.esp_id" class="alert-item__detail">
                 <span class="alert-item__detail-text">ESP: {{ alert.metadata.esp_id }}</span>
               </div>
+              <div v-if="alert.correlation_id" class="alert-item__detail">
+                <span class="alert-item__detail-text">Korrelation: {{ alert.correlation_id }}</span>
+              </div>
+              <div
+                v-if="typeof alert.metadata?.measurement_age_seconds === 'number' && alert.metadata?.operating_mode !== 'continuous'"
+                class="alert-item__detail"
+              >
+                <span class="alert-item__detail-text">
+                  Messwertalter beim Alert: {{ formatMeasurementAgeAtAlert(alert.metadata?.measurement_age_seconds) }}
+                </span>
+              </div>
             </div>
+            <button
+              v-if="alert.correlation_id"
+              class="alert-item__action alert-item__action--details-link"
+              title="Im Ereignis-Monitor anzeigen"
+              @click.stop="handleOpenEventDetails(alert)"
+            >
+              <ExternalLink class="alert-item__action-icon" />
+              Ereignis-Details
+            </button>
             <!-- Snooze Timer: show remaining suppression time -->
             <div
               v-if="getSuppressionUntil(alert)"
@@ -554,7 +586,7 @@ function handleShowAll(): void {
 
 .qa-alert-panel__filter {
   padding: 2px var(--space-2);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 500;
   color: var(--color-text-muted);
   background: transparent;
@@ -582,7 +614,7 @@ function handleShowAll(): void {
   gap: 3px;
   margin-left: auto;
   padding: 2px var(--space-2);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 600;
   color: var(--color-warning);
   background: transparent;
@@ -727,6 +759,13 @@ function handleShowAll(): void {
   background: rgba(52, 211, 153, 0.12);
 }
 
+.alert-item__action--details-link {
+  width: auto;
+  padding: 0 var(--space-2);
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
 .alert-item__action-icon {
   width: 13px;
   height: 13px;
@@ -756,7 +795,7 @@ function handleShowAll(): void {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 

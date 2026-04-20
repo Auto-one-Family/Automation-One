@@ -208,7 +208,7 @@ function handleAlarmHigh(e: Event) {
 .range-slider__track {
   position: relative;
   height: 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--glass-border);
 }
 
@@ -228,7 +228,7 @@ function handleAlarmHigh(e: Event) {
   -webkit-appearance: none;
   appearance: none;
   pointer-events: none;
-  z-index: 2;
+  z-index: var(--z-dropdown);
 }
 
 .range-slider__input::-webkit-slider-thumb {
@@ -313,7 +313,7 @@ function handleAlarmHigh(e: Event) {
 }
 
 .range-slider__label-text {
-  font-size: 9px;
+  font-size: var(--text-xxs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -336,7 +336,7 @@ function handleAlarmHigh(e: Event) {
   justify-content: space-between;
   margin-top: var(--space-1);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 </style>

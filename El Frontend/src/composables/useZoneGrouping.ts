@@ -83,6 +83,12 @@ export interface ZoneGroup {
   zoneName: string
   subzones: SubzoneGroup[]
   sensorCount: number
+  mockSensorCount: number
+}
+
+/** Checks whether an ESP ID belongs to a mock/simulated device */
+export function isMockEspId(espId: string): boolean {
+  return espId.startsWith('ESP_MOCK_') || espId.startsWith('MOCK_')
 }
 
 export interface ActuatorSubzoneGroup {
@@ -201,6 +207,7 @@ export function useZoneGrouping(options?: ZoneGroupingOptions | ZoneGroupingFilt
     for (const [zoneId, subMap] of zoneMap) {
       const subzones: SubzoneGroup[] = []
       let total = 0
+      let mockTotal = 0
       for (const [szId, sensors] of subMap) {
         const subzoneName: string = szId === SUBZONE_NONE
           ? (zoneId === ZONE_UNASSIGNED ? '' : 'Keine Subzone')
@@ -211,6 +218,7 @@ export function useZoneGrouping(options?: ZoneGroupingOptions | ZoneGroupingFilt
           sensors,
         })
         total += sensors.length
+        mockTotal += sensors.filter(s => isMockEspId(s.esp_id)).length
       }
       subzones.sort((a, b) => {
         if (a.subzoneId === null) return 1
@@ -222,6 +230,7 @@ export function useZoneGrouping(options?: ZoneGroupingOptions | ZoneGroupingFilt
         zoneName: zoneId === ZONE_UNASSIGNED ? 'Nicht zugewiesen' : (filteredSensors.value.find(s => s.zone_id === zoneId)?.zone_name || zoneId || ''),
         subzones,
         sensorCount: total,
+        mockSensorCount: mockTotal,
       })
     }
     result.sort((a, b) => {

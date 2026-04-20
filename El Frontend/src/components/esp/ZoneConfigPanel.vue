@@ -288,7 +288,7 @@ const subzones = computed(() => {
 
 .zone-config__device-id {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 </style>

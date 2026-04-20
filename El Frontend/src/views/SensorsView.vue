@@ -433,10 +433,10 @@ function toggleZoneFilter(zone: string) {
   min-width: 18px;
   height: 18px;
   padding: 0 4px;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   background: var(--color-accent);
   color: white;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 600;
 }
 
@@ -449,7 +449,7 @@ function toggleZoneFilter(zone: string) {
   position: absolute;
   top: 100%;
   right: 0;
-  z-index: 20;
+  z-index: var(--z-sticky);
   margin-top: var(--space-1);
   padding: var(--space-2);
   background: var(--color-bg-secondary);

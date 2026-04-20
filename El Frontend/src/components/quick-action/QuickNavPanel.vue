@@ -213,10 +213,10 @@ function handleQuickSearch(): void {
 
 .qa-nav-panel__kbd {
   margin-left: auto;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-family: var(--font-mono);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--glass-border);
   color: var(--color-text-muted);
@@ -233,7 +233,7 @@ function handleQuickSearch(): void {
   align-items: center;
   gap: var(--space-1);
   padding: var(--space-1) var(--space-2);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;

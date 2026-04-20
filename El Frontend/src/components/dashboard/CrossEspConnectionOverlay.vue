@@ -422,7 +422,7 @@ watch(
 }
 
 .cross-esp-overlay__label {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   fill: var(--color-text-secondary);
   pointer-events: none;
   font-weight: 500;

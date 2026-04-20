@@ -29,6 +29,8 @@ export interface EditableSensor {
   operating_mode?: string | null
   timeout_seconds?: number | null
   schedule_config?: { type: string; expression: string } | null
+  measurement_freshness_hours?: number | null
+  calibration_interval_days?: number | null
 }
 
 interface Props {
@@ -60,6 +62,8 @@ const editingSensor = ref<{
   operating_mode: string | null
   timeout_seconds: number | null
   schedule_config: { type: string; expression: string } | null
+  measurement_freshness_hours: number | null
+  calibration_interval_days: number | null
   typeDefaultMode: string
   typeDefaultTimeout: number
 } | null>(null)
@@ -100,6 +104,8 @@ watch(() => props.modelValue, (open) => {
       timeout_seconds: props.sensor.timeout_seconds !== undefined && props.sensor.timeout_seconds !== typeDefaultTimeout
         ? props.sensor.timeout_seconds : null,
       schedule_config: scheduleConfig,
+      measurement_freshness_hours: props.sensor.measurement_freshness_hours ?? null,
+      calibration_interval_days: props.sensor.calibration_interval_days ?? null,
       typeDefaultMode,
       typeDefaultTimeout,
     }
@@ -167,6 +173,8 @@ async function saveEditSensor() {
       operating_mode: editingSensor.value.operating_mode,
       timeout_seconds: editingSensor.value.timeout_seconds,
       schedule_config: scheduleConfig,
+      measurement_freshness_hours: editingSensor.value.measurement_freshness_hours,
+      calibration_interval_days: editingSensor.value.calibration_interval_days,
     })
 
     toast.success(`Sensor "${getSensorLabel(editingSensor.value.sensor_type)}" (GPIO ${gpio}) aktualisiert`)
@@ -267,6 +275,34 @@ async function triggerMeasureNow() {
               <template v-if="editHasTimeoutOverride">⚠️ Individuell (Default: {{ editingSensor.typeDefaultTimeout }}s)</template>
               <template v-else>Type-Default: {{ editingSensor.typeDefaultTimeout }}s</template>
             </p>
+          </div>
+
+          <!-- Sensor-Lifecycle: Freshness & Calibration (AUT-39) -->
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Mess-Alter (Stunden)</label>
+              <input
+                v-model.number="editingSensor.measurement_freshness_hours"
+                type="number"
+                min="0"
+                step="1"
+                class="form-input"
+                placeholder="leer = kein Limit"
+              />
+              <p class="form-hint">Ab wann ein Messwert als veraltet gilt</p>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Kalibrier-Intervall (Tage)</label>
+              <input
+                v-model.number="editingSensor.calibration_interval_days"
+                type="number"
+                min="0"
+                step="1"
+                class="form-input"
+                placeholder="leer = keine Erinnerung"
+              />
+              <p class="form-hint">Empfohlener Rekalibrierungszyklus</p>
+            </div>
           </div>
 
           <!-- Mode-specific info boxes -->

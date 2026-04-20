@@ -45,14 +45,11 @@ const emit = defineEmits<{
 const inputId = computed(() => props.id || `input-${Math.random().toString(36).slice(2, 9)}`)
 
 const inputClasses = computed(() => [
-  'w-full px-4 py-2.5 bg-dark-800 border rounded-lg',
-  'text-dark-100 placeholder-dark-400',
-  'focus:outline-none focus:ring-2 focus:border-transparent',
+  'base-input w-full px-4 py-2.5 border rounded-lg',
+  'focus:outline-none',
   'transition-all duration-200',
   'touch-target',
-  props.error
-    ? 'border-red-500 focus:ring-red-500'
-    : 'border-dark-600 focus:ring-blue-500',
+  props.error ? 'base-input--error' : '',
   props.disabled ? 'opacity-50 cursor-not-allowed' : '',
   props.clearable && props.modelValue ? 'pr-10' : '',
 ])
@@ -74,10 +71,10 @@ function clear() {
     <label
       v-if="label"
       :for="inputId"
-      class="block text-sm font-medium text-dark-300 mb-1.5"
+      class="base-input__label block text-sm font-medium mb-1.5"
     >
       {{ label }}
-      <span v-if="required" class="text-red-400 ml-0.5">*</span>
+      <span v-if="required" class="base-input__required ml-0.5">*</span>
     </label>
 
     <!-- Input wrapper -->
@@ -100,7 +97,7 @@ function clear() {
       <button
         v-if="clearable && modelValue"
         type="button"
-        class="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-dark-400 hover:text-dark-200 transition-colors"
+        class="base-input__clear absolute right-2 top-1/2 -translate-y-1/2 p-1 transition-colors"
         @click="clear"
       >
         <X class="w-4 h-4" />
@@ -108,13 +105,62 @@ function clear() {
     </div>
 
     <!-- Error message -->
-    <p v-if="error" class="mt-1.5 text-sm text-red-400">
+    <p v-if="error" class="base-input__error mt-1.5 text-sm">
       {{ error }}
     </p>
 
     <!-- Helper text -->
-    <p v-else-if="helper" class="mt-1.5 text-sm text-dark-400">
+    <p v-else-if="helper" class="base-input__helper mt-1.5 text-sm">
       {{ helper }}
     </p>
   </div>
 </template>
+
+<style scoped>
+.base-input__label {
+  color: var(--color-text-secondary);
+}
+
+.base-input__required {
+  color: var(--color-error);
+}
+
+.base-input {
+  background: var(--color-bg-tertiary);
+  border-color: var(--glass-border-l2);
+  color: var(--color-text-primary);
+}
+
+.base-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.base-input:focus {
+  border-color: transparent;
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+.base-input--error {
+  border-color: var(--color-error);
+}
+
+.base-input--error:focus {
+  box-shadow: 0 0 0 2px var(--color-error);
+}
+
+.base-input__clear {
+  color: var(--color-text-muted);
+}
+
+.base-input__clear:hover {
+  color: var(--color-text-primary);
+}
+
+.base-input__error {
+  color: var(--color-error);
+}
+
+.base-input__helper {
+  color: var(--color-text-muted);
+}
+</style>

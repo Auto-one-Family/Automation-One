@@ -75,7 +75,7 @@ const category = RULE_TEMPLATE_CATEGORIES[props.template.category]
 }
 
 .rule-template-card__category {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -85,14 +85,14 @@ const category = RULE_TEMPLATE_CATEGORIES[props.template.category]
 }
 
 .rule-template-card__title {
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0;
 }
 
 .rule-template-card__description {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-muted);
   margin: 0;
   line-height: 1.4;
@@ -102,7 +102,7 @@ const category = RULE_TEMPLATE_CATEGORIES[props.template.category]
   align-self: flex-start;
   margin-top: var(--space-1);
   padding: var(--space-1) var(--space-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--color-accent);
   background: transparent;

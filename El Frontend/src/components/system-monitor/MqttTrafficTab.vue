@@ -721,7 +721,7 @@ watch(
   font-size: 0.875rem;
   background-color: var(--color-bg-primary);
   border: 1px solid var(--glass-border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: var(--color-text-primary);
 }
 
@@ -748,7 +748,7 @@ watch(
   color: var(--color-text-muted);
   background-color: var(--color-bg-primary);
   border: 1px solid var(--glass-border);
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -836,7 +836,7 @@ watch(
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.025em;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   flex-shrink: 0;
 }
 
@@ -913,7 +913,7 @@ watch(
   color: var(--color-text-muted);
   background: none;
   border: 1px solid var(--glass-border);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -930,7 +930,7 @@ watch(
   line-height: 1.5;
   color: var(--color-text-secondary);
   background-color: var(--color-bg-tertiary);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;

@@ -80,8 +80,12 @@ void safetyTaskFunction(void* param) {
                 if (offlineModeManager.getOfflineRuleCount() > 0) {
                     LOG_W(SAFETY_TAG, "[SAFETY-M2] MQTT_DISCONNECTED — " +
                           String(offlineModeManager.getOfflineRuleCount()) +
-                          " offline rules available, delegating to P4");
-                    // P4 Grace Period runs; rules take over after 30s
+                          " offline rules available, delegating covered actuators to P4");
+                    // AUT-66: Uncovered actuators forced to safe state immediately;
+                    // covered actuators remain under P4 grace period + rule evaluation.
+                    if (actuatorManager.isInitialized()) {
+                        actuatorManager.setUncoveredActuatorsToSafeState();
+                    }
                 } else {
                     if (actuatorManager.isInitialized()) {
                         actuatorManager.setAllActuatorsToSafeState();

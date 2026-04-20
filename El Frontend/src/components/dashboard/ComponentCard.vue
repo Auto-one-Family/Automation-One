@@ -153,7 +153,7 @@ const displayName = computed(() =>
   padding: 0.625rem 0.75rem;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   min-width: 140px;
   max-width: 220px;
   transition: all 0.15s ease;

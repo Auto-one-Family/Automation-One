@@ -148,10 +148,12 @@ function handleActuatorClick(gpio: number) {
   width: auto;
   max-width: clamp(560px, 46vw, 820px);
   min-width: clamp(360px, 30vw, 560px);
+  align-self: flex-start;
 }
 
 .device-detail-view__content :deep(.esp-info-compact) {
-  min-height: 100%;
+  min-height: auto;
+  height: auto;
 }
 
 /* Standard/Normal-Zoom: sauber gestapelt statt gequetschte 3-Spalten */

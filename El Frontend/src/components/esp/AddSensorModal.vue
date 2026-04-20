@@ -562,7 +562,7 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
   padding: 1rem;
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(96, 165, 250, 0.08));
   border: 1px solid rgba(96, 165, 250, 0.2);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
 }
 
 .onewire-scan-header {
@@ -598,7 +598,7 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
   background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-bright) 100%);
   color: white;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   font-weight: 500;
   font-size: 0.8125rem;
   cursor: pointer;
@@ -638,7 +638,7 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: var(--color-text-secondary);
   cursor: pointer;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
@@ -672,7 +672,7 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
   padding: 0.75rem;
   background: var(--color-bg-secondary);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -712,7 +712,7 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
   padding: 0.75rem;
   background: rgba(52, 211, 153, 0.1);
   border: 1px solid rgba(52, 211, 153, 0.3);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: var(--color-success);
   font-size: 0.8125rem;
   margin-top: 0.5rem;
@@ -738,7 +738,7 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
   color: var(--color-accent-bright);
   background: rgba(96, 165, 250, 0.1);
   padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 
 .onewire-bulk-add-btn {
@@ -753,7 +753,7 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
   padding: 0.75rem;
   background: rgba(248, 113, 113, 0.1);
   border: 1px solid rgba(248, 113, 113, 0.3);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: var(--color-error);
   font-size: 0.8125rem;
   margin-top: 1rem;
@@ -772,7 +772,7 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
   padding: 1rem;
   background: var(--color-bg-tertiary);
   border: 1px dashed rgba(255, 255, 255, 0.15);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
   font-size: 0.8125rem;
   justify-content: center;

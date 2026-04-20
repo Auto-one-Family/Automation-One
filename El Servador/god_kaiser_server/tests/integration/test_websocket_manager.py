@@ -337,6 +337,73 @@ class TestRateLimiting:
 
         assert "client_1" not in manager._rate_limiter
 
+    @pytest.mark.asyncio
+    async def test_rate_limit_drops_non_bypass_events(self, manager, mock_websocket):
+        """Non-bypass event type (sensor_data) is throttled under burst load."""
+        await manager.connect(mock_websocket, "client_1")
+        await manager.subscribe("client_1", {})
+
+        # Rate limit is 3 per second in this fixture. Burst 10 of a non-bypass type.
+        for i in range(10):
+            await manager.broadcast("sensor_data", {"esp_id": "ESP_1", "value": i})
+
+        # Only the first 3 should actually reach the client.
+        assert mock_websocket.send_json.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_actuator_status_bypasses_rate_limit_under_burst(
+        self, manager, mock_websocket
+    ):
+        """AUT-68: burst of 20 actuator_status events in <1s — none dropped.
+
+        Regression test: actuator_status carries GPIO state changes, which must
+        NEVER be silently dropped by per-client WS rate limiting (burst load
+        during multi-GPIO operations would otherwise lose state transitions).
+        """
+        await manager.connect(mock_websocket, "client_1")
+        await manager.subscribe("client_1", {})
+
+        # Pre-condition: actuator_status is registered as a bypass type.
+        assert "actuator_status" in manager._rate_limit_bypass_types
+
+        # Burst 20 events back-to-back (well above the 3 msg/s test limit).
+        for i in range(20):
+            await manager.broadcast(
+                "actuator_status",
+                {"esp_id": "ESP_1", "gpio": 18, "state": "on" if i % 2 else "off"},
+            )
+
+        # ALL 20 events must reach the client — no drops.
+        assert mock_websocket.send_json.call_count == 20
+
+    @pytest.mark.asyncio
+    async def test_esp_health_bypasses_rate_limit_under_burst(self, manager, mock_websocket):
+        """esp_health remains a rate-limit-bypass event under burst load (regression)."""
+        await manager.connect(mock_websocket, "client_1")
+        await manager.subscribe("client_1", {})
+
+        assert "esp_health" in manager._rate_limit_bypass_types
+
+        for i in range(20):
+            await manager.broadcast(
+                "esp_health", {"esp_id": "ESP_1", "status": "online", "seq": i}
+            )
+
+        assert mock_websocket.send_json.call_count == 20
+
+    def test_rate_limit_bypass_contains_all_critical_realtime_events(self, manager):
+        """Catalogue check: bypass set covers all critical realtime event types (AUT-68)."""
+        expected = {
+            "actuator_status",
+            "device_discovered",
+            "device_rediscovered",
+            "esp_health",
+            "notification_new",
+            "notification_unread_count",
+            "notification_updated",
+        }
+        assert manager._rate_limit_bypass_types == expected
+
 
 class TestThreadSafety:
     """Test thread-safe operations."""

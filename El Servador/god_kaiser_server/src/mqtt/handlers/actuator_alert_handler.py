@@ -236,6 +236,18 @@ class ActuatorAlertHandler:
                             "gpio": gpio,
                             "alert_type": alert_type,
                             "zone_id": zone_id,
+                            "severity": severity,
+                            "category": category,
+                            "alert_message": title,
+                            "troubleshooting": (
+                                alert_info["troubleshooting"] if alert_info else []
+                            ),
+                            "recoverable": (
+                                alert_info["recoverable"] if alert_info else True
+                            ),
+                            "user_action_required": (
+                                alert_info["user_action_required"] if alert_info else False
+                            ),
                         },
                         source="mqtt_handler",
                     )

@@ -143,7 +143,7 @@ onUnmounted(() => {
   -webkit-backdrop-filter: blur(var(--glass-blur-l3));
   backdrop-filter: blur(var(--glass-blur-l3));
   border: 1px solid var(--glass-border-l3);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   box-shadow: var(--glass-shadow-l3);
 }
 
@@ -164,7 +164,7 @@ onUnmounted(() => {
 
 .modal-close-btn {
   padding: 0.5rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   color: var(--color-text-muted);
   transition: all 0.2s;
   min-height: 44px;

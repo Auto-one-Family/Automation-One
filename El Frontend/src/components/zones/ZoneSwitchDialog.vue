@@ -252,7 +252,7 @@ function handleClose() {
 }
 
 .zone-switch__recommended {
-  font-size: 9px;
+  font-size: var(--text-xxs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;

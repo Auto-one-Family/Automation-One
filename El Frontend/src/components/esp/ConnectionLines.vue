@@ -285,7 +285,7 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: 1;
+  z-index: var(--z-dropdown);
 }
 
 .connection-lines {
@@ -315,7 +315,7 @@ onUnmounted(() => {
 }
 
 .connection-text {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   fill: var(--color-text-secondary);
   pointer-events: none;
   opacity: 0.7;

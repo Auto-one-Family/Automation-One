@@ -89,6 +89,12 @@ class ActuatorResponseHandler:
             success = canonical.success
             message = canonical.message
             correlation_id = canonical.correlation_id
+            issued_by_raw = payload.get("issued_by")
+            issued_by = (
+                issued_by_raw.strip()
+                if isinstance(issued_by_raw, str) and issued_by_raw.strip()
+                else None
+            )
 
             if canonical.is_contract_violation:
                 increment_contract_unknown_code("actuator_response")
@@ -173,6 +179,7 @@ class ActuatorResponseHandler:
                         "duration": payload.get("duration", 0),
                         "response_message": message,
                         "zone_id": payload.get("zone_id", ""),
+                        "issued_by": issued_by,
                         "code": canonical.code,
                         "domain": canonical.domain,
                         "severity": canonical.severity,
@@ -231,6 +238,7 @@ class ActuatorResponseHandler:
                         message=message,
                         timestamp=canonical.ts,
                         correlation_id=correlation_id,
+                        issued_by=issued_by,
                     )
                     broadcast_data.update(
                         {

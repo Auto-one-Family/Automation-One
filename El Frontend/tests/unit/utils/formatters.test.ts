@@ -86,6 +86,23 @@ describe('formatSensorValue', () => {
     expect(formatSensorValue(undefined)).toBe('-')
     expect(formatSensorValue(NaN)).toBe('-')
   })
+
+  it('formats EC with de-DE thousands separator (AUT-26)', () => {
+    expect(formatSensorValue(1234, 'µS/cm', 0)).toBe('1.234 µS/cm')
+  })
+
+  it('formats CO2 with de-DE thousands separator (AUT-26)', () => {
+    expect(formatSensorValue(2500, 'ppm', 0)).toBe('2.500 ppm')
+  })
+
+  it('formats pH with comma decimal separator (AUT-26)', () => {
+    expect(formatSensorValue(6.8, 'pH', 1)).toBe('6,8 pH')
+  })
+
+  it('formats small values correctly (AUT-26)', () => {
+    expect(formatSensorValue(42, '°C', 1)).toBe('42,0 °C')
+    expect(formatSensorValue(999, 'ppm', 0)).toBe('999 ppm')
+  })
 })
 
 describe('formatPercent', () => {

@@ -181,6 +181,7 @@ const chartData = computed(() => ({
     tension: props.compact ? 0.2 : 0.3,
     cubicInterpolationMode: 'monotone' as const,
     fill: props.fill,
+    spanGaps: false,
   }],
 }))
 
@@ -243,6 +244,8 @@ const thresholdAnnotations = computed(() => {
   return annotations
 })
 
+const hasResolvedAnnotations = computed(() => Object.keys(thresholdAnnotations.value).length > 0)
+
 const chartOptions = computed(() => {
   const isCompact = props.compact
 
@@ -271,9 +274,9 @@ const chartOptions = computed(() => {
               label: (ctx: any) => `${ctx.parsed.y}${props.unit ? ' ' + props.unit : ''}`,
             },
           },
-      annotation: isCompact
-        ? { annotations: {} }
-        : { annotations: thresholdAnnotations.value },
+      ...(!isCompact && hasResolvedAnnotations.value
+        ? { annotation: { annotations: thresholdAnnotations.value } }
+        : {}),
     },
     scales: {
       x: {

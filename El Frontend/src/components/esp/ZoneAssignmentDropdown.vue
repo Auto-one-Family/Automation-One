@@ -112,7 +112,7 @@ function handleSelect(event: Event) {
   flex: 1;
   min-width: 0;
   padding: 2px 4px;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-family: var(--font-mono);
   color: var(--color-text-secondary);
   background: transparent;

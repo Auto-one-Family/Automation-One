@@ -327,9 +327,9 @@ const pageNumbers = computed(() => {
   display: inline-block;
   margin-left: var(--space-2);
   padding: 1px 6px;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 600;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   background: rgba(167, 139, 250, 0.15);
   color: var(--color-mock);
   vertical-align: middle;

@@ -31,9 +31,13 @@ import { deviceContextApi } from '@/api/device-context'
 import { useZoneStore } from '@/shared/stores/zone.store'
 import { useActuatorStore } from '@/shared/stores/actuator.store'
 import { normalizeSubzoneId } from '@/utils/subzoneHelpers'
+import { createLogger } from '@/utils/logger'
 import type { DeviceScope } from '@/types'
 import type { DeviceMetadata } from '@/types/device-metadata'
 import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
+import PendingConfigBanner from './PendingConfigBanner.vue'
+
+const configLogger = createLogger('ActuatorConfigPanel')
 
 interface Props {
   espId: string
@@ -64,6 +68,8 @@ const loading = ref(true)
 const saving = ref(false)
 const actuatorDbId = ref<string | null>(null)
 const commandLoading = ref(false)
+const lastConfigSubjectId = ref<string | null>(null)
+const lastConfigCorrelationId = ref<string | null>(null)
 
 // Basic fields
 const name = ref('')
@@ -380,6 +386,8 @@ async function handleSave() {
         requestId,
         summary,
       })
+      lastConfigSubjectId.value = subjectId
+      lastConfigCorrelationId.value = correlationId ?? null
       toast.info(
         `Konfigurationsauftrag akzeptiert: ${summary}.${handles ? ` ${handles}` : ''}`,
         {
@@ -392,25 +400,35 @@ async function handleSave() {
         timeoutMs: 65_000,
       })
       if (!terminal) {
-        toast.error('Konfigurationsstatus unklar: Keine terminale Rückmeldung empfangen. Bitte erneut prüfen.', {
-          persistent: true,
+        configLogger.info('config_pending_over_timeout: UI-Wartezeit abgelaufen', {
+          subject_id: subjectId,
+          correlation_id: correlationId,
+        })
+        toast.warning('Konfigurationsauftrag ausstehend: Noch keine Geräte-Rückmeldung. Status wird im Panel angezeigt.', {
           dedupeKey: `config-await-timeout:${correlationId ?? requestId ?? subjectId}`,
         })
         return
       }
       if (terminal.state === 'terminal_success') {
+        lastConfigSubjectId.value = null
+        lastConfigCorrelationId.value = null
         toast.success('Aktor-Konfiguration wurde vom Gerät bestätigt')
         emit('saved')
         return
       }
       if (terminal.state === 'terminal_timeout') {
-        toast.error('Konfigurations-Timeout: Gerät hat nicht terminal geantwortet. Bitte erneut versuchen.', {
-          persistent: true,
+        configLogger.info('config_pending_over_timeout: Store-Timeout erreicht', {
+          subject_id: subjectId,
+          correlation_id: correlationId,
+        })
+        toast.warning('Konfigurationsauftrag ausstehend: Gerät hat nicht innerhalb der Frist geantwortet.', {
           dedupeKey: `config-terminal-timeout:${correlationId ?? requestId ?? subjectId}`,
         })
         return
       }
-      toast.error('Konfiguration wurde nicht bestätigt. Details im Event-Monitor prüfen.', {
+      lastConfigSubjectId.value = null
+      lastConfigCorrelationId.value = null
+      toast.error('Konfiguration fehlgeschlagen. Details im Event-Monitor prüfen.', {
         persistent: true,
         dedupeKey: `config-terminal-failed:${correlationId ?? requestId ?? subjectId}`,
       })
@@ -736,6 +754,13 @@ function formatDuration(seconds: number): string {
         />
       </AccordionSection>
 
+      <!-- ═══ PENDING CONFIG STATUS (AUT-64) ═══════════════════════════════ -->
+      <PendingConfigBanner
+        :subject-id="lastConfigSubjectId"
+        :correlation-id="lastConfigCorrelationId"
+        @retry="handleSave"
+      />
+
       <!-- ═══ ACTIONS ══════════════════════════════════════════════════════ -->
       <div class="actuator-config__actions">
         <button
@@ -888,7 +913,7 @@ function formatDuration(seconds: number): string {
 .actuator-config__pwm-labels {
   display: flex;
   justify-content: space-between;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 
@@ -948,7 +973,7 @@ function formatDuration(seconds: number): string {
 }
 
 .actuator-config__helper {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 

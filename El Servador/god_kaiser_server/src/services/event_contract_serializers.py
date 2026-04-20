@@ -53,6 +53,7 @@ def serialize_actuator_response_event(
     message: Any,
     timestamp: Any,
     correlation_id: str | None = None,
+    issued_by: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "esp_id": esp_id,
@@ -65,6 +66,8 @@ def serialize_actuator_response_event(
     }
     if correlation_id:
         payload["correlation_id"] = correlation_id
+    if issued_by:
+        payload["issued_by"] = issued_by
     return payload
 
 

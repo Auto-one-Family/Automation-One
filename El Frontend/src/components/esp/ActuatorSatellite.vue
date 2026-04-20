@@ -321,7 +321,7 @@ function handleDragEnd(event: DragEvent) {
   padding: 0.5625rem;
   background: rgba(30, 32, 40, 0.9);
   border: 1px solid var(--glass-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   width: 100%;
@@ -481,7 +481,7 @@ function handleDragEnd(event: DragEvent) {
   color: rgba(255, 255, 255, 0.35);
   background: rgba(255, 255, 255, 0.04);
   padding: 0.0625rem 0.25rem;
-  border-radius: 0.125rem;
+  border-radius: var(--radius-xs);
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -518,7 +518,7 @@ function handleDragEnd(event: DragEvent) {
   font-size: 7px;
   font-weight: 600;
   padding: 0.0625rem 0.25rem;
-  border-radius: 0.125rem;
+  border-radius: var(--radius-xs);
   white-space: nowrap;
   cursor: default;
 }

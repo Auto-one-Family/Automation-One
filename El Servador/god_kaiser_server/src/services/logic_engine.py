@@ -11,7 +11,12 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from ..core.logging_config import get_logger
-from ..core.metrics import increment_logic_error, increment_safety_trigger
+from ..core.metrics import (
+    increment_logic_error,
+    increment_logic_dispatch_skipped_config_pending,
+    increment_logic_dispatch_skipped_offline,
+    increment_safety_trigger,
+)
 from ..db.repositories import LogicRepository, ESPRepository, SensorRepository
 from ..db.session import get_session
 from ..websocket.manager import WebSocketManager
@@ -38,6 +43,7 @@ from .logic.conditions import (
 logger = get_logger(__name__)
 
 _OFFLINE_BACKOFF_SECONDS = 30  # Skip offline-ESP actuator rules for 30s after first failure (safety net)
+_CONFIG_PENDING_BACKOFF_SECONDS = 15  # Skip config-pending-ESP actuator rules for 15s (shorter: state transitions fast)
 
 
 class LogicEngine:
@@ -132,6 +138,8 @@ class LogicEngine:
 
         # Backoff cache: esp_id -> skip_until timestamp (avoids repeated DB queries for offline ESPs)
         self._offline_esp_skip: dict[str, datetime] = {}
+        # AUT-60: Separate backoff for CONFIG_PENDING_AFTER_RESET ESPs
+        self._config_pending_skip: dict[str, datetime] = {}
 
     async def start(self) -> None:
         """
@@ -185,6 +193,23 @@ class LogicEngine:
         if removed:
             logger.info(
                 "Offline backoff cache cleared for %s (was set until %s)",
+                esp_id,
+                removed.isoformat(),
+            )
+
+    def invalidate_config_pending_backoff(self, esp_id: str) -> None:
+        """Clear config_pending backoff cache when ESP exits CONFIG_PENDING_AFTER_RESET.
+
+        Called by heartbeat_handler when system_state transitions away from
+        CONFIG_PENDING_AFTER_RESET (e.g. to OPERATIONAL).
+
+        Args:
+            esp_id: ESP device ID to clear from backoff cache
+        """
+        removed = self._config_pending_skip.pop(esp_id, None)
+        if removed:
+            logger.info(
+                "Config pending backoff cache cleared for %s (was set until %s)",
                 esp_id,
                 removed.isoformat(),
             )
@@ -581,9 +606,27 @@ class LogicEngine:
                 return
 
             if not conditions_met:
-                logger.debug(
-                    f"Rule {rule.rule_name} conditions not met for trigger: {trigger_data}"
-                )
+                # AUT-41: structured warning when stale sensor data caused conditions to fail
+                stale_reasons = context.get("_stale_reasons")
+                if stale_reasons:
+                    for reason in stale_reasons:
+                        logger.warning(
+                            "Rule '%s' condition not met due to stale sensor data: "
+                            "sensor=%s:%s (%s), mode=%s, age=%.0fs, "
+                            "freshness_limit=%.0fs (measurement_freshness_hours=%s)",
+                            rule.rule_name,
+                            reason.get("esp_id"),
+                            reason.get("gpio"),
+                            reason.get("sensor_type"),
+                            reason.get("operating_mode"),
+                            reason.get("age_seconds", 0),
+                            reason.get("freshness_limit_seconds", 0),
+                            reason.get("measurement_freshness_hours"),
+                        )
+                else:
+                    logger.debug(
+                        f"Rule {rule.rule_name} conditions not met for trigger: {trigger_data}"
+                    )
                 return
 
             # Check cooldown (only for activation — prevents rapid ON-ON-ON).
@@ -1075,20 +1118,56 @@ class LogicEngine:
                         skip_until = self._offline_esp_skip.get(esp_id_pre)
                         if skip_until and datetime.now(timezone.utc) < skip_until:
                             continue  # Silent skip: still within backoff window
+                        # AUT-60: config_pending backoff (separate from offline)
+                        cp_skip_until = self._config_pending_skip.get(esp_id_pre)
+                        if cp_skip_until and datetime.now(timezone.utc) < cp_skip_until:
+                            continue  # Silent skip: still within config_pending backoff
                         esp_repo_pre = ESPRepository(session)
                         esp_device_pre = await esp_repo_pre.get_by_device_id(esp_id_pre)
                         if not esp_device_pre or not esp_device_pre.is_online:
                             self._offline_esp_skip[esp_id_pre] = datetime.now(
                                 timezone.utc
                             ) + timedelta(seconds=_OFFLINE_BACKOFF_SECONDS)
+                            increment_logic_dispatch_skipped_offline()
                             logger.warning(
                                 f"Rule {rule_name}: ESP {esp_id_pre} is offline, "
                                 f"skipping actuator action (GPIO {gpio_pre})"
                             )
                             continue
+                        # AUT-60: Config Pending Readiness Gate
+                        if esp_device_pre.config_pending:
+                            self._config_pending_skip[esp_id_pre] = datetime.now(
+                                timezone.utc
+                            ) + timedelta(seconds=_CONFIG_PENDING_BACKOFF_SECONDS)
+                            increment_logic_dispatch_skipped_config_pending()
+                            logger.warning(
+                                "Rule %s: ESP %s is in CONFIG_PENDING_AFTER_RESET, "
+                                "skipping actuator action (GPIO %s). "
+                                "Firmware would reject with CONFIG_PENDING_BLOCKED.",
+                                rule_name,
+                                esp_id_pre,
+                                gpio_pre,
+                            )
+                            execution_outcome["action_results"].append(
+                                {
+                                    "type": action_type,
+                                    "success": False,
+                                    "message": (
+                                        f"Rejected: ESP {esp_id_pre} is in "
+                                        f"CONFIG_PENDING_AFTER_RESET (GPIO {gpio_pre})"
+                                    ),
+                                    "data": {
+                                        "reason": "config_pending",
+                                        "esp_id": esp_id_pre,
+                                        "gpio": gpio_pre,
+                                    },
+                                }
+                            )
+                            continue
                         else:
-                            # ESP back online — clear backoff so future failures are reported
+                            # ESP back online and not config_pending — clear backoffs
                             self._offline_esp_skip.pop(esp_id_pre, None)
+                            self._config_pending_skip.pop(esp_id_pre, None)
 
                 # Use modular executors if available
                 executor_found = False
@@ -1232,6 +1311,10 @@ class LogicEngine:
                 skip_until = self._offline_esp_skip.get(esp_id)
                 if skip_until and datetime.now(timezone.utc) < skip_until:
                     return  # Silent skip: still within backoff window
+                # AUT-60: config_pending backoff (separate from offline)
+                cp_skip_until = self._config_pending_skip.get(esp_id)
+                if cp_skip_until and datetime.now(timezone.utc) < cp_skip_until:
+                    return  # Silent skip: still within config_pending backoff
                 async for session in get_session():
                     esp_repo_pre = ESPRepository(session)
                     esp_device_pre = await esp_repo_pre.get_by_device_id(esp_id)
@@ -1239,13 +1322,30 @@ class LogicEngine:
                         self._offline_esp_skip[esp_id] = datetime.now(
                             timezone.utc
                         ) + timedelta(seconds=_OFFLINE_BACKOFF_SECONDS)
+                        increment_logic_dispatch_skipped_offline()
                         logger.warning(
                             f"Rule {rule_name}: ESP {esp_id} is offline, "
                             f"skipping actuator action (GPIO {gpio})"
                         )
                         return
+                    # AUT-60: Config Pending Readiness Gate
+                    if esp_device_pre.config_pending:
+                        self._config_pending_skip[esp_id] = datetime.now(
+                            timezone.utc
+                        ) + timedelta(seconds=_CONFIG_PENDING_BACKOFF_SECONDS)
+                        increment_logic_dispatch_skipped_config_pending()
+                        logger.warning(
+                            "Rule %s: ESP %s is in CONFIG_PENDING_AFTER_RESET, "
+                            "skipping actuator action (GPIO %s). "
+                            "Firmware would reject with CONFIG_PENDING_BLOCKED.",
+                            rule_name,
+                            esp_id,
+                            gpio,
+                        )
+                        return
                     else:
                         self._offline_esp_skip.pop(esp_id, None)
+                        self._config_pending_skip.pop(esp_id, None)
 
             cmd_result = await self.actuator_service.send_command(
                 esp_id=esp_id,
@@ -1392,10 +1492,30 @@ class LogicEngine:
                         if reading.processed_value is not None
                         else reading.raw_value
                     )
-                    sensor_values[sensor_key] = {
+                    entry = {
                         "value": display_value,
                         "sensor_type": reading.sensor_type,
                     }
+                    # AUT-41: enrich with freshness metadata for require_fresh_data
+                    age_seconds = (
+                        datetime.now(timezone.utc) - reading.timestamp
+                    ).total_seconds()
+                    entry["age_seconds"] = age_seconds
+                    sensor_config = await sensor_repo.get_by_esp_gpio_and_type(
+                        esp_id=esp_device.id, gpio=gpio, sensor_type=sensor_type
+                    )
+                    if sensor_config:
+                        entry["operating_mode"] = (
+                            sensor_config.operating_mode or "continuous"
+                        )
+                        entry["measurement_freshness_hours"] = getattr(
+                            sensor_config, "measurement_freshness_hours", None
+                        )
+                    else:
+                        entry["operating_mode"] = "continuous"
+                        entry["measurement_freshness_hours"] = None
+
+                    sensor_values[sensor_key] = entry
                     logger.debug(
                         f"Cross-sensor loaded: {sensor_key} = {display_value} "
                         f"({reading.sensor_type})"
@@ -1499,16 +1619,16 @@ class LogicEngine:
                 logger.debug(f"Timer sensor lookup: no data for {esp_id_str}:{gpio}:{sensor_type}")
                 continue
 
+            # AUT-41: load sensor config once (needed for staleness logging + freshness metadata)
+            sensor_config = await sensor_repo.get_by_esp_gpio_and_type(
+                esp_id=esp_device.id, gpio=int(gpio), sensor_type=sensor_type
+            )
+            op_mode = "continuous"
+            if sensor_config and sensor_config.operating_mode:
+                op_mode = sensor_config.operating_mode
+
             if reading.timestamp < staleness_limit:
                 age_s = (datetime.now(timezone.utc) - reading.timestamp).total_seconds()
-
-                # Check operating mode for better logging context
-                sensor_config = await sensor_repo.get_by_esp_gpio_and_type(
-                    esp_id=esp_device.id, gpio=int(gpio), sensor_type=sensor_type
-                )
-                op_mode = "continuous"
-                if sensor_config and sensor_config.operating_mode:
-                    op_mode = sensor_config.operating_mode
 
                 if op_mode in ("on_demand", "scheduled"):
                     logger.warning(
@@ -1533,12 +1653,19 @@ class LogicEngine:
                 if sensor_type
                 else f"{esp_id_str}:{gpio}"
             )
-            sensor_values[key] = {
+            age_s = (datetime.now(timezone.utc) - reading.timestamp).total_seconds()
+            entry = {
                 "esp_id": esp_id_str,
                 "gpio": gpio,
                 "sensor_type": sensor_type,
                 "value": display_value,
+                "age_seconds": age_s,
+                "operating_mode": op_mode,
+                "measurement_freshness_hours": getattr(
+                    sensor_config, "measurement_freshness_hours", None
+                ) if sensor_config else None,
             }
+            sensor_values[key] = entry
             logger.debug(f"Timer sensor loaded: {key} = {display_value} ({sensor_type})")
 
         return sensor_values

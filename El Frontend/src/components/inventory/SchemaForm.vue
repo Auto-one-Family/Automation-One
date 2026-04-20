@@ -259,7 +259,7 @@ function displayReadOnlyValue(key: string, prop: SchemaProperty): string {
 }
 
 .schema-form__hint {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   line-height: 1.3;
 }

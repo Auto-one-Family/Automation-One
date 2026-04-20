@@ -20,7 +20,7 @@ import { useSwipeNavigation } from '@/composables/useSwipeNavigation'
 import { useEspStore } from '@/stores/esp'
 import { useZoneStore } from '@/shared/stores/zone.store'
 import { useDeviceContextStore } from '@/shared/stores/deviceContext.store'
-import { useZoneGrouping } from '@/composables/useZoneGrouping'
+import { useZoneGrouping, isMockEspId } from '@/composables/useZoneGrouping'
 import { useZoneKPIs } from '@/composables/useZoneKPIs'
 import type { ZoneHealthStatus } from '@/composables/useZoneKPIs'
 import { useSubzoneResolver } from '@/composables/useSubzoneResolver'
@@ -174,7 +174,7 @@ const isZoneDetail = computed(() => !!selectedZoneId.value)
 const expandedSensorKey = ref<string | null>(null)
 
 // Sensor key helper (from sparkline cache composable)
-const { sparklineCache, getSensorKey, loadInitialData: loadSparklineHistory } = useSparklineCache()
+const { sparklineCache, getSensorKey, loadInitialData: loadSparklineHistory, getSparklineForDisplay } = useSparklineCache()
 
 
 // Zone monitor data (API primary, fallback via useZoneGrouping)
@@ -189,8 +189,18 @@ const lastDetailApiSuccessAt = ref<number | null>(null)
 const subzoneResolver = useSubzoneResolver(selectedZoneId, { lazy: true })
 
 // Zone grouping composable (fallback when API fails)
-const { sensorsByZone, actuatorsByZone } = useZoneGrouping({
+const { sensorsByZone, actuatorsByZone, allSensors } = useZoneGrouping({
   subzoneResolver: subzoneResolver.resolverMap,
+})
+
+const zoneMockSensorCounts = computed(() => {
+  const counts = new Map<string, number>()
+  for (const sensor of allSensors.value) {
+    const zId = sensor.zone_id
+    if (!zId || !isMockEspId(sensor.esp_id)) continue
+    counts.set(zId, (counts.get(zId) ?? 0) + 1)
+  }
+  return counts
 })
 
 function toggleExpanded(sensorKey: string) {
@@ -229,6 +239,11 @@ function getSensorTrend(espId: string, gpio: number, sensorType?: string): Trend
   const points = sparklineCache.value.get(key)
   if (!points || points.length < MIN_TREND_POINTS) return undefined
   return calculateTrend(points, sensorType).direction
+}
+
+function getDisplaySparkline(sensor: { esp_id: string; gpio: number; sensor_type?: string; operating_mode?: string | null }) {
+  const key = getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type)
+  return getSparklineForDisplay(key, (sensor as any).operating_mode)
 }
 
 // =============================================================================
@@ -657,11 +672,11 @@ const detailChartOptions = computed(() => {
         callback: (val: string | number) => `${val} ${unit}`,
       },
       border: { display: false },
-      // SENSOR_TYPE_CONFIG Y-axis defaults (suggestedMin/suggestedMax)
-      ...(detailSensorTypeConfig.value ? {
-        suggestedMin: detailSensorTypeConfig.value.min,
-        suggestedMax: detailSensorTypeConfig.value.max,
-      } : {}),
+      ...(detailDynamicYBounds.value
+        ? { suggestedMin: detailDynamicYBounds.value.min, suggestedMax: detailDynamicYBounds.value.max }
+        : detailSensorTypeConfig.value
+          ? { suggestedMin: detailSensorTypeConfig.value.min, suggestedMax: detailSensorTypeConfig.value.max }
+          : {}),
     },
   }
 
@@ -766,6 +781,50 @@ const detailLiveValue = computed(() => {
 const detailSensorTypeConfig = computed(() => {
   if (!selectedDetailSensor.value) return null
   return SENSOR_TYPE_CONFIG[selectedDetailSensor.value.sensorType] ?? null
+})
+
+/** Data-range-based Y-axis bounds for the L3 detail chart (AUT-29) */
+const detailDynamicYBounds = computed(() => {
+  const readings = detailReadings.value
+  if (readings.length === 0) return null
+
+  const values = readings
+    .map(r => r.processed_value ?? r.raw_value)
+    .filter((v): v is number => Number.isFinite(v))
+  if (values.length === 0) return null
+
+  const dataMin = Math.min(...values)
+  const dataMax = Math.max(...values)
+  const dataSpan = dataMax - dataMin
+
+  const cfg = detailSensorTypeConfig.value
+  const rangeSpan = cfg ? Math.max(cfg.max - cfg.min, 0) : 0
+
+  const minVisualSpan = Math.max(rangeSpan * 0.03, 0.5)
+  const targetSpan = Math.max(dataSpan, minVisualSpan)
+  const padding = targetSpan * 0.10
+
+  let min = dataMin - padding
+  let max = dataMax + padding
+
+  if (dataSpan < minVisualSpan) {
+    const extra = (minVisualSpan - dataSpan) / 2
+    min -= extra
+    max += extra
+  }
+
+  if (cfg) {
+    min = Math.max(min, cfg.min)
+    max = Math.min(max, cfg.max)
+  }
+
+  if (max <= min) {
+    const center = values[values.length - 1] ?? dataMin
+    min = center - minVisualSpan / 2
+    max = center + minVisualSpan / 2
+  }
+
+  return { min, max }
 })
 
 /** Stale indicator: no update within DATA_STALE_THRESHOLD_S */
@@ -1734,13 +1793,14 @@ function getSubzoneKPIs(sensors: { sensor_type: string; raw_value: number | null
   return formatSubzoneKpiLine(sensors)
 }
 
-// Worst-case quality status for a set of sensors
-function getWorstQualityStatus(sensors: { quality: string }[]): 'good' | 'warning' | 'alarm' | 'offline' {
-  let worst: 'good' | 'warning' | 'alarm' | 'offline' = 'good'
+// Worst-case quality status for a set of sensors (defense-in-depth via timestamp check)
+function getWorstQualityStatus(sensors: { quality: string; last_read?: string | null }[]): 'good' | 'warning' | 'alarm' | 'stale' | 'offline' {
+  let worst: 'good' | 'warning' | 'alarm' | 'stale' | 'offline' = 'good'
   for (const s of sensors) {
-    const status = qualityToStatus(s.quality)
+    const status = qualityToStatus(s.quality, { lastRead: s.last_read })
     if (status === 'alarm') return 'alarm'
-    if (status === 'warning') worst = 'warning'
+    if (status === 'warning' && worst !== 'warning') worst = 'warning'
+    if (status === 'stale' && worst === 'good') worst = 'stale'
     if (status === 'offline' && worst === 'good') worst = 'offline'
   }
   return worst
@@ -1842,6 +1902,7 @@ function handleFabWidgetSelected(widgetType: string) {
           :key="zone.zoneId"
           :zone="zone"
           :is-stale="isZoneStale(zone.lastActivity)"
+          :mock-sensor-count="zoneMockSensorCounts.get(zone.zoneId) ?? 0"
           :rules="logicStore.getRulesForZone(zone.zoneId).slice(0, 2)"
           :total-rule-count="logicStore.getRulesForZone(zone.zoneId).length"
           :is-rule-active="logicStore.isRuleActive"
@@ -2020,8 +2081,8 @@ function handleFabWidgetSelected(widgetType: string) {
                   >
                     <template #sparkline>
                       <LiveLineChart
-                        v-if="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type))?.length"
-                        :data="sparklineCache.get(getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type))!"
+                        v-if="getDisplaySparkline(sensor)?.length"
+                        :data="getDisplaySparkline(sensor)!"
                         compact
                         height="32px"
                         :max-data-points="30"
@@ -2029,6 +2090,7 @@ function handleFabWidgetSelected(widgetType: string) {
                         :thresholds="getDefaultThresholds(sensor.sensor_type)"
                         :show-thresholds="!!getDefaultThresholds(sensor.sensor_type)"
                       />
+                      <span v-else class="sensor-card__sparkline-placeholder">Keine Daten</span>
                     </template>
                   </SensorCard>
 
@@ -2353,6 +2415,8 @@ function handleFabWidgetSelected(widgetType: string) {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 /* ViewTabBar hat eigenen margin-bottom; im Monitor steuern wir den Abstand zentral */
@@ -2386,7 +2450,7 @@ function handleFabWidgetSelected(widgetType: string) {
 }
 
 .monitor-zone-filter__select {
-  padding: 6px 32px 6px 30px;
+  padding: var(--space-2) var(--space-8) var(--space-2) calc(var(--space-8) - 2px);
   font-size: var(--text-sm);
   font-family: inherit;
   color: var(--color-text-primary);
@@ -2414,7 +2478,7 @@ function handleFabWidgetSelected(widgetType: string) {
 
 .monitor-zone-filter__badge {
   font-size: var(--text-xs);
-  padding: 2px 8px;
+  padding: 2px var(--space-2);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--color-iridescent-2) 15%, transparent);
   color: var(--color-iridescent-2);
@@ -2630,7 +2694,7 @@ function handleFabWidgetSelected(widgetType: string) {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 2px 8px;
+  padding: 2px var(--space-2);
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border);
   background: var(--glass-bg);
@@ -2712,21 +2776,26 @@ function handleFabWidgetSelected(widgetType: string) {
   gap: var(--space-4);
   align-items: start;
   margin-bottom: var(--space-10);
+  max-width: 100%;
+  overflow: hidden;
   --monitor-separator-color: var(--glass-border-hover);
+}
+
+@media (min-width: 1024px) {
+  .monitor-zone-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1600px) {
+  .monitor-zone-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .monitor-zone-grid :deep(.monitor-zone-tile) {
   position: relative;
-}
-
-.monitor-zone-grid :deep(.monitor-zone-tile + .monitor-zone-tile)::before {
-  content: '';
-  position: absolute;
-  left: var(--space-4);
-  right: var(--space-4);
-  top: calc(-1 * var(--space-2));
-  border-top: 2px dashed var(--monitor-separator-color);
-  pointer-events: none;
+  min-width: 0;
 }
 
 .monitor-zone-tile__extra-stack {
@@ -2836,6 +2905,7 @@ function handleFabWidgetSelected(widgetType: string) {
 .monitor-subzone__status-dot--good { background: var(--color-success); }
 .monitor-subzone__status-dot--warning { background: var(--color-warning); }
 .monitor-subzone__status-dot--alarm { background: var(--color-error); }
+.monitor-subzone__status-dot--stale { background: rgb(251, 146, 60); }
 .monitor-subzone__status-dot--offline { background: var(--color-text-muted); }
 
 .monitor-subzone__kpis {
@@ -3035,8 +3105,9 @@ function handleFabWidgetSelected(widgetType: string) {
 
 .monitor-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   gap: var(--space-3);
+  max-width: 100%;
 }
 
 /* Sensor Card wrapper (SensorCard handles its own visual styling) */
@@ -3215,8 +3286,8 @@ function handleFabWidgetSelected(widgetType: string) {
   font-weight: 600;
   color: var(--color-iridescent-2);
   background: color-mix(in srgb, var(--color-iridescent-2) 10%, transparent);
-  padding: 1px 6px;
-  border-radius: 100px;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
 }
 
 .sensor-detail__esp-name {
@@ -3288,7 +3359,7 @@ function handleFabWidgetSelected(widgetType: string) {
 .sensor-detail__stale-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--space-1);
   color: var(--color-warning);
   font-weight: 600;
   animation: breathe 2s ease-in-out infinite;
@@ -3318,7 +3389,7 @@ function handleFabWidgetSelected(widgetType: string) {
   align-items: center;
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border);
-  padding: 1px 6px;
+  padding: 1px var(--space-2);
   color: var(--color-warning);
 }
 
@@ -3343,7 +3414,7 @@ function handleFabWidgetSelected(widgetType: string) {
 }
 
 .sensor-detail__stat-label {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 600;
   color: var(--color-text-muted);
   text-transform: uppercase;
@@ -3358,12 +3429,12 @@ function handleFabWidgetSelected(widgetType: string) {
 }
 
 .sensor-detail__stat-unit {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 
 .sensor-detail__stat-time {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
 }
@@ -3457,9 +3528,9 @@ function handleFabWidgetSelected(widgetType: string) {
 .sensor-detail__overlay-stand-chip {
   display: inline-flex;
   align-items: center;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--glass-border);
-  padding: 2px 8px;
+  padding: 2px var(--space-2);
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
 }
@@ -3500,13 +3571,13 @@ function handleFabWidgetSelected(widgetType: string) {
 .sensor-detail__overlay-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
   border: 1px solid var(--glass-border);
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   cursor: pointer;
   transition: all var(--transition-fast);
   white-space: nowrap;
@@ -3541,6 +3612,6 @@ function handleFabWidgetSelected(widgetType: string) {
 
 .sensor-detail__overlay-unit {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--text-xxs);
 }
 </style>

@@ -98,8 +98,8 @@ const assistiveLabel = computed(() => {
 .alert-status-bar {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2, 8px);
-  padding: 6px var(--space-3, 12px);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   min-height: 34px;
   border-radius: var(--radius-sm, 6px);
   background: rgba(255, 255, 255, 0.03);
@@ -137,9 +137,9 @@ const assistiveLabel = computed(() => {
 
 .alert-status-bar__state {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   border-left: 1px solid var(--glass-border);
-  padding-left: var(--space-2, 8px);
+  padding-left: var(--space-2);
 }
 
 .text-error {
@@ -153,12 +153,12 @@ const assistiveLabel = computed(() => {
 .alert-status-bar__chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
   border-radius: var(--radius-full);
   background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -184,8 +184,8 @@ const assistiveLabel = computed(() => {
 @media (max-width: 1023px) {
   .alert-status-bar {
     max-width: 280px;
-    padding: 6px var(--space-2, 8px);
-    gap: var(--space-1, 4px);
+    padding: var(--space-2) var(--space-2);
+    gap: var(--space-1);
   }
 }
 
@@ -207,7 +207,7 @@ const assistiveLabel = computed(() => {
   .alert-status-bar {
     min-height: 44px;
     max-width: 210px;
-    padding: 0 var(--space-2, 8px);
+    padding: 0 var(--space-2);
   }
 }
 
@@ -215,9 +215,9 @@ const assistiveLabel = computed(() => {
   .alert-status-bar {
     min-height: 40px;
     max-width: min(42vw, 720px);
-    padding: 8px var(--space-4, 16px);
+    padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm, 13px);
-    gap: var(--space-3, 12px);
+    gap: var(--space-3);
   }
 
   .alert-status-bar__icon {
@@ -226,12 +226,12 @@ const assistiveLabel = computed(() => {
   }
 
   .alert-status-bar__state {
-    font-size: 11px;
+    font-size: var(--text-xs);
   }
 
   .alert-status-bar__chip {
-    padding: 3px 8px;
-    font-size: 11px;
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
   }
 }
 </style>

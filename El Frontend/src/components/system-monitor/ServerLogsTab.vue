@@ -815,7 +815,7 @@ watch(selectedFile, () => {
   font-size: 0.8125rem;
   background-color: var(--color-bg-primary);
   border: 1px solid var(--glass-border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: var(--color-text-primary);
 }
 
@@ -855,7 +855,7 @@ watch(selectedFile, () => {
   font-size: 0.8125rem;
   background-color: var(--color-bg-primary);
   border: 1px solid var(--glass-border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: var(--color-text-primary);
 }
 
@@ -1057,7 +1057,7 @@ watch(selectedFile, () => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.025em;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   flex-shrink: 0;
 }
 
@@ -1112,7 +1112,7 @@ watch(selectedFile, () => {
 .log-entry__details {
   margin: 0.5rem 1rem 0.75rem 2.5rem;
   padding: 1rem;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   background: rgba(15, 15, 20, 0.85);
   backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1128,7 +1128,7 @@ watch(selectedFile, () => {
   gap: 0.75rem;
   padding: 0.75rem;
   margin-bottom: 1rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   background: linear-gradient(
     135deg,
     rgba(59, 130, 246, 0.08) 0%,
@@ -1198,7 +1198,7 @@ watch(selectedFile, () => {
   padding: 0.125rem 0.5rem;
   font-size: 0.6875rem;
   font-weight: 500;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   width: fit-content;
 }
 
@@ -1309,7 +1309,7 @@ watch(selectedFile, () => {
   color: var(--color-text-secondary);
   background-color: rgba(0, 0, 0, 0.3);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1347,7 +1347,7 @@ watch(selectedFile, () => {
   color: var(--color-text-muted);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -1472,7 +1472,7 @@ watch(selectedFile, () => {
   padding: 0.375rem 0.5rem 0.375rem 0.625rem;
   background: rgba(139, 92, 246, 0.15);
   border: 1px solid rgba(139, 92, 246, 0.25);
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   font-size: 0.75rem;
   font-weight: 500;
   color: var(--color-mock);

@@ -347,7 +347,7 @@ function handleNavClick() {
   transform: translateY(-50%);
   width: 3px;
   height: 0;
-  border-radius: 0 2px 2px 0;
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
   background: var(--color-accent);
   transition: height var(--transition-base), box-shadow var(--transition-base);
 }

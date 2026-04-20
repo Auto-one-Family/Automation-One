@@ -18,7 +18,6 @@
 #include "../../models/watchdog_types.h"
 #include "../../models/sensor_types.h"
 #include "../../models/sensor_registry.h"
-#include <map>
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "SENSOR";
@@ -35,8 +34,53 @@ constexpr int16_t DS18B20_RAW_POWER_ON_RESET = 1360;  // +85°C: Factory default
 constexpr int16_t DS18B20_RAW_MIN_VALID = -880;       // -55°C: Datasheet minimum
 constexpr int16_t DS18B20_RAW_MAX_VALID = 2000;       // +125°C: Datasheet maximum
 
-// Track first reading per sensor (key: gpio_romcode, value: reading count)
-static std::map<String, uint32_t> ds18b20_reading_counts;
+// Track first readings per DS18B20 without heap allocations.
+// std::map<String,...> can allocate in the safety task and abort on low memory.
+struct Ds18b20ReadingCounter {
+    bool used = false;
+    uint8_t gpio = 255;
+    char onewire_address[24] = {0};
+    uint32_t count = 0;
+};
+
+static constexpr uint8_t MAX_DS18B20_READING_COUNTERS = 16;
+static Ds18b20ReadingCounter ds18b20_reading_counters[MAX_DS18B20_READING_COUNTERS];
+
+static uint32_t getAndIncrementDs18b20ReadingCount(uint8_t gpio, const String& onewire_address) {
+    int free_idx = -1;
+    for (uint8_t i = 0; i < MAX_DS18B20_READING_COUNTERS; ++i) {
+        if (!ds18b20_reading_counters[i].used) {
+            if (free_idx < 0) {
+                free_idx = i;
+            }
+            continue;
+        }
+
+        if (ds18b20_reading_counters[i].gpio == gpio &&
+            strncmp(ds18b20_reading_counters[i].onewire_address,
+                    onewire_address.c_str(),
+                    sizeof(ds18b20_reading_counters[i].onewire_address)) == 0) {
+            uint32_t previous = ds18b20_reading_counters[i].count;
+            ds18b20_reading_counters[i].count++;
+            return previous;
+        }
+    }
+
+    if (free_idx >= 0) {
+        Ds18b20ReadingCounter& entry = ds18b20_reading_counters[free_idx];
+        entry.used = true;
+        entry.gpio = gpio;
+        strncpy(entry.onewire_address, onewire_address.c_str(), sizeof(entry.onewire_address) - 1);
+        entry.onewire_address[sizeof(entry.onewire_address) - 1] = '\0';
+        entry.count = 1;
+        return 0;
+    }
+
+    // Defensive fallback: if counter table is full, behave as "not first reading"
+    // to avoid false-positive power-on-reset filtering.
+    LOG_W(TAG, "DS18B20 reading counter table full - using fallback count");
+    return 1;
+}
 
 // ============================================
 // SENSOR CIRCUIT BREAKER CONSTANTS
@@ -880,8 +924,7 @@ bool SensorManager::performMeasurementForConfig(SensorConfig* config, SensorRead
                 // 5. DS18B20 SPECIAL VALUE DETECTION (Defense-in-Depth)
                 // ============================================
                 // Track readings per sensor for power-on-reset detection
-                String sensor_key = String(gpio) + "_" + config->onewire_address;
-                uint32_t reading_count = ds18b20_reading_counts[sensor_key]++;
+                uint32_t reading_count = getAndIncrementDs18b20ReadingCount(gpio, config->onewire_address);
 
                 // 5a. SENSOR FAULT: -127°C (RAW = -2032)
                 // This indicates: disconnected sensor, CRC failure, or bus error

@@ -23,6 +23,7 @@ export type NotificationCategory =
   | 'maintenance'
   | 'security'
   | 'system'
+  | 'ai_anomaly'
 export type NotificationSource =
   | 'logic_engine'
   | 'mqtt_handler'
@@ -32,6 +33,9 @@ export type NotificationSource =
   | 'autoops'
   | 'manual'
   | 'system'
+  | 'ai_anomaly_service'
+  | 'freshness_reminder'
+  | 'calibration_reminder'
 
 export interface NotificationDTO {
   id: string

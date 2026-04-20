@@ -83,6 +83,8 @@ export function normalizeEspHealthPayload(raw: Record<string, unknown>): EspHeal
 
   const rejectStartup = asNum(raw.handover_contract_reject_startup) ?? 0
   const rejectRuntime = asNum(raw.handover_contract_reject_runtime) ?? 0
+  const rejectRawTotal = asNum(raw.handover_contract_reject) ?? 0
+  const rejectTotal = Math.max(rejectStartup + rejectRuntime, rejectRawTotal)
 
   return {
     persistenceDegraded: asBool(raw.persistence_degraded),
@@ -95,7 +97,7 @@ export function normalizeEspHealthPayload(raw: Record<string, unknown>): EspHeal
       epoch: asNum(raw.handover_epoch) ?? asNum(raw.session_epoch) ?? null,
       rejectStartup,
       rejectRuntime,
-      rejectTotal: rejectStartup + rejectRuntime,
+      rejectTotal,
     },
     rawTelemetry,
   }
@@ -122,6 +124,12 @@ export function espHealthPresentation(
   if (vm.networkDegraded) lines.push('Netzwerk eingeschränkt')
   if (vm.mqttCircuitBreakerOpen) lines.push('MQTT-Circuit-Breaker offen')
   if (vm.wifiCircuitBreakerOpen) lines.push('WiFi-Circuit-Breaker offen')
+  if (vm.handover.rejectTotal > 0) {
+    const epochText = vm.handover.epoch === null ? '' : ` (Epoche ${vm.handover.epoch})`
+    lines.push(
+      `Übergabe-Konflikte erkannt${epochText}: Start ${vm.handover.rejectStartup}, Laufzeit ${vm.handover.rejectRuntime}`,
+    )
+  }
 
   const unknownKeys = Object.keys(vm.rawTelemetry).filter(
     k =>
@@ -149,7 +157,8 @@ export function espHealthPresentation(
     vm.runtimeStateDegraded ||
     vm.networkDegraded ||
     vm.mqttCircuitBreakerOpen ||
-    vm.wifiCircuitBreakerOpen
+    vm.wifiCircuitBreakerOpen ||
+    vm.handover.rejectTotal > 0
 
   const showBadge = deviceReportsOnline && hasDegradation
 

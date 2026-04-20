@@ -13,6 +13,9 @@
 #include "../utils/logger.h"
 #include "../utils/time_manager.h"
 #include "../utils/topic_builder.h"
+#ifndef MQTT_USE_PUBSUBCLIENT
+#include "publish_queue.h"
+#endif
 
 static const char* IC_TAG = "INTENT";
 static std::atomic<uint32_t> s_intent_fallback_counter{0};
@@ -413,7 +416,7 @@ void processIntentOutcomeOutbox() {
                                    "outcome_publish_ok",
                                    entry.flow,
                                    entry.code,
-                                   "critical outcome replay delivered");
+                                   "[INC-EA5484] critical outcome replay delivered");
             clearOutboxEntryAt(head);
             head = static_cast<uint8_t>((head + 1) % OUTCOME_OUTBOX_CAPACITY);
             count--;
@@ -622,7 +625,15 @@ void recordIntentChainStage(const IntentMetadata& metadata,
 
     String payload;
     if (serializeJson(event_doc, payload) > 0) {
+#ifndef MQTT_USE_PUBSUBCLIENT
+        // [INC-EA5484] AUT-56: Route lifecycle through publish queue for retry resilience.
+        const char* lifecycle_topic = TopicBuilder::buildIntentOutcomeLifecycleTopic();
+        if (!queuePublish(lifecycle_topic, payload.c_str(), 1, false, true, nullptr)) {
+            LOG_W(IC_TAG, "[INC-EA5484] Lifecycle chain-stage enqueue failed: " + String(stage));
+        }
+#else
         mqttClient.publish(TopicBuilder::buildIntentOutcomeLifecycleTopic(), payload, 1);
+#endif
     }
 }
 
@@ -663,6 +674,7 @@ bool publishIntentOutcome(const char* flow,
     if (isTerminalOutcome(normalized_outcome)) {
         bool allow_publish = true;
         bool regression_blocked = false;
+        char previous_final_outcome[16] = {0};
         portENTER_CRITICAL(&s_intent_final_mux);
         int existing_idx = findFinalIntentEntry(active_metadata.intent_id);
         if (existing_idx >= 0) {
@@ -671,10 +683,9 @@ bool publishIntentOutcome(const char* flow,
             } else {
                 allow_publish = false;
                 regression_blocked = true;
-                LOG_W(IC_TAG, "Intent final outcome regression blocked [" +
-                              String(active_metadata.intent_id) + "] old=" +
-                              String(s_intent_final_store[existing_idx].final_outcome) +
-                              " new=" + String(normalized_outcome));
+                strncpy(previous_final_outcome,
+                        s_intent_final_store[existing_idx].final_outcome,
+                        sizeof(previous_final_outcome) - 1);
             }
         } else {
             IntentFinalEntry& slot = s_intent_final_store[s_intent_final_write_index];
@@ -686,6 +697,12 @@ bool publishIntentOutcome(const char* flow,
             s_intent_final_write_index = static_cast<uint8_t>((s_intent_final_write_index + 1) % INTENT_FINAL_STORE_CAPACITY);
         }
         portEXIT_CRITICAL(&s_intent_final_mux);
+        if (regression_blocked) {
+            LOG_W(IC_TAG, "Intent final outcome regression blocked [" +
+                          String(active_metadata.intent_id) + "] old=" +
+                          String(previous_final_outcome) +
+                          " new=" + String(normalized_outcome));
+        }
         if (!allow_publish) {
             return !regression_blocked;
         }
@@ -731,7 +748,7 @@ bool publishIntentOutcome(const char* flow,
                                    code,
                                    "outcome publish failed");
         }
-        LOG_W(IC_TAG, "Intent outcome publish failed [" + String(active_metadata.intent_id) + "]");
+        LOG_W(IC_TAG, "[INC-EA5484] Intent outcome publish failed [" + String(active_metadata.intent_id) + "]");
         if (critical) {
             PendingOutcomeEntry entry = {};
             strncpy(entry.flow, flow != nullptr ? flow : "unknown", sizeof(entry.flow) - 1);
@@ -745,11 +762,11 @@ bool publishIntentOutcome(const char* flow,
             s_outcome_retry_count++;
             if (!enqueueCriticalOutcome(entry)) {
                 s_outcome_drop_count_critical++;
-                LOG_E(IC_TAG, "Critical outcome NVS persist failed after eviction attempt [" +
+                LOG_E(IC_TAG, "[INC-EA5484] Critical outcome NVS persist failed after eviction attempt [" +
                                   String(active_metadata.intent_id) + "]");
             } else {
                 persisted_for_replay = true;
-                LOG_W(IC_TAG, "Critical outcome persisted for replay [" + String(active_metadata.intent_id) + "]");
+                LOG_W(IC_TAG, "[INC-EA5484] Critical outcome persisted for replay [" + String(active_metadata.intent_id) + "]");
             }
             persistOutboxStats();
         }

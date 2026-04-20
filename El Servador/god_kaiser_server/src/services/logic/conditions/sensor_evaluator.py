@@ -4,9 +4,11 @@ Sensor Condition Evaluator
 Evaluates sensor threshold conditions.
 Supports cross-sensor evaluation by looking up latest values
 from context["sensor_values"] for non-trigger sensors.
+
+AUT-41: Optional freshness-aware evaluation via require_fresh_data flag.
 """
 
-from typing import Dict
+from typing import Dict, Optional
 
 from ....core.logging_config import get_logger
 from .base import BaseConditionEvaluator
@@ -93,6 +95,14 @@ class SensorConditionEvaluator(BaseConditionEvaluator):
             if trigger_zone != cond_zone:
                 return False
 
+        # AUT-41: Freshness check (only when require_fresh_data=True)
+        if condition.get("require_fresh_data"):
+            stale_reason = self._check_freshness(condition, context, trigger_matches)
+            if stale_reason is not None:
+                stale_reasons = context.setdefault("_stale_reasons", [])
+                stale_reasons.append(stale_reason)
+                return False
+
         return self._compare(condition, actual_value)
 
     def _matches_trigger(self, condition: Dict, sensor_data: Dict) -> bool:
@@ -137,6 +147,58 @@ class SensorConditionEvaluator(BaseConditionEvaluator):
                     return None
             return cross_data.get("value")
         return None
+
+    def _check_freshness(
+        self, condition: Dict, context: Dict, trigger_matches: bool
+    ) -> Optional[Dict]:
+        """AUT-41: Check if sensor value is stale for require_fresh_data conditions.
+
+        Rules:
+        - continuous mode: never stale (backward compat)
+        - on_demand/scheduled: stale when age > measurement_freshness_hours * 3600
+        - No measurement_freshness_hours configured: not stale (no hard block)
+        - Trigger sensor (just received via MQTT): always fresh (age ≈ 0)
+
+        Returns:
+            None if fresh, or a stale-reason dict for context propagation.
+        """
+        if trigger_matches:
+            meta = context.get("sensor_data", {})
+        else:
+            sensor_values = context.get("sensor_values", {})
+            cond_sensor_type = condition.get("sensor_type")
+            if cond_sensor_type:
+                typed_key = f"{condition.get('esp_id')}:{condition.get('gpio')}:{cond_sensor_type}"
+                meta = sensor_values.get(typed_key, {})
+            else:
+                sensor_key = f"{condition.get('esp_id')}:{condition.get('gpio')}"
+                meta = sensor_values.get(sensor_key, {})
+
+        operating_mode = meta.get("operating_mode", "continuous")
+        if operating_mode == "continuous":
+            return None
+
+        freshness_hours = meta.get("measurement_freshness_hours")
+        if not freshness_hours or freshness_hours <= 0:
+            return None
+
+        age_seconds = meta.get("age_seconds")
+        if age_seconds is None:
+            return None
+
+        freshness_limit_seconds = freshness_hours * 3600
+        if age_seconds <= freshness_limit_seconds:
+            return None
+
+        return {
+            "esp_id": condition.get("esp_id"),
+            "gpio": condition.get("gpio"),
+            "sensor_type": condition.get("sensor_type"),
+            "operating_mode": operating_mode,
+            "age_seconds": age_seconds,
+            "freshness_limit_seconds": freshness_limit_seconds,
+            "measurement_freshness_hours": freshness_hours,
+        }
 
     def _compare(self, condition: Dict, actual_value) -> bool:
         """Compare actual value against threshold using the condition's operator."""

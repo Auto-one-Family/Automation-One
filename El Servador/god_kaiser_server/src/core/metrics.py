@@ -219,6 +219,16 @@ LOGIC_ERRORS_TOTAL = Counter(
     "Total logic engine evaluation errors",
 )
 
+LOGIC_DISPATCH_SKIPPED_CONFIG_PENDING_TOTAL = Counter(
+    "god_kaiser_logic_dispatch_skipped_config_pending_total",
+    "Actuator dispatches skipped because ESP is in CONFIG_PENDING_AFTER_RESET",
+)
+
+LOGIC_DISPATCH_SKIPPED_OFFLINE_TOTAL = Counter(
+    "god_kaiser_logic_dispatch_skipped_offline_total",
+    "Actuator dispatches skipped because ESP is offline",
+)
+
 ACTUATOR_TIMEOUTS_TOTAL = Counter(
     "god_kaiser_actuator_timeouts_total",
     "Total actuator command timeouts",
@@ -793,6 +803,16 @@ def increment_http_error(status_code: int) -> None:
 def increment_logic_error() -> None:
     """Increment logic engine error counter."""
     LOGIC_ERRORS_TOTAL.inc()
+
+
+def increment_logic_dispatch_skipped_config_pending() -> None:
+    """Increment counter for actuator dispatches skipped due to CONFIG_PENDING_AFTER_RESET."""
+    LOGIC_DISPATCH_SKIPPED_CONFIG_PENDING_TOTAL.inc()
+
+
+def increment_logic_dispatch_skipped_offline() -> None:
+    """Increment counter for actuator dispatches skipped due to ESP offline."""
+    LOGIC_DISPATCH_SKIPPED_OFFLINE_TOTAL.inc()
 
 
 def increment_actuator_timeout() -> None:

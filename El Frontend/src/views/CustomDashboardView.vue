@@ -1622,11 +1622,11 @@ function executeBulkDelete() {
 
 :deep(.dashboard-widget__type) {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
   background: var(--color-bg-quaternary);
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 :deep(.dashboard-widget__gear-btn) {

@@ -325,6 +325,13 @@ class ConfigPayloadBuilder:
         # Build offline rules for local hysteresis control during network loss
         offline_rules = await self._build_offline_rules(db, esp_device)
 
+        # AUT-59: Validate offline_rules consistency against config frame.
+        # Rules referencing actuator/sensor GPIOs not present in this config
+        # frame would cause a pending-exit blockade on the ESP32 firmware.
+        offline_rules = self._validate_offline_rules_consistency(
+            offline_rules, sensor_payloads, actuator_payloads, esp_device_id
+        )
+
         # Build combined config
         config = {
             "sensors": sensor_payloads,
@@ -437,6 +444,71 @@ class ConfigPayloadBuilder:
         )
 
         return offline_rules
+
+    def _validate_offline_rules_consistency(
+        self,
+        offline_rules: List[Dict[str, Any]],
+        sensor_payloads: List[Dict[str, Any]],
+        actuator_payloads: List[Dict[str, Any]],
+        esp_id: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        Filter offline_rules that reference GPIOs absent from the config frame.
+
+        AUT-59: An offline_rule whose actuator_gpio or sensor_gpio has no
+        matching entry in the actuator/sensor payload arrays would cause the
+        ESP32 firmware to enter a pending-exit blockade.  This guard removes
+        such rules before the config is published.
+
+        Args:
+            offline_rules: Offline rule dicts from _build_offline_rules
+            sensor_payloads: Sensor payloads that will be sent in this config
+            actuator_payloads: Actuator payloads that will be sent in this config
+            esp_id: Device ID for logging context
+
+        Returns:
+            Filtered list containing only consistent offline rules
+        """
+        if not offline_rules:
+            return offline_rules
+
+        actuator_gpios = {int(a["gpio"]) for a in actuator_payloads if "gpio" in a}
+        sensor_gpios = {int(s["gpio"]) for s in sensor_payloads if "gpio" in s}
+
+        consistent: List[Dict[str, Any]] = []
+        stripped_details: List[Dict[str, Any]] = []
+
+        for rule in offline_rules:
+            a_gpio = rule.get("actuator_gpio")
+            s_gpio = rule.get("sensor_gpio")
+            reasons: List[str] = []
+
+            if a_gpio is not None and int(a_gpio) not in actuator_gpios:
+                reasons.append(f"actuator_gpio={a_gpio} not in config actuators")
+            if s_gpio is not None and int(s_gpio) not in sensor_gpios:
+                reasons.append(f"sensor_gpio={s_gpio} not in config sensors")
+
+            if reasons:
+                stripped_details.append({
+                    "actuator_gpio": a_gpio,
+                    "sensor_gpio": s_gpio,
+                    "sensor_value_type": rule.get("sensor_value_type", ""),
+                    "reasons": reasons,
+                })
+            else:
+                consistent.append(rule)
+
+        if stripped_details:
+            logger.warning(
+                "[CONFIG] AUT-59: ESP %s — stripped %d/%d offline_rules "
+                "(referenced GPIOs absent in config frame): %s",
+                esp_id,
+                len(stripped_details),
+                len(offline_rules),
+                stripped_details,
+            )
+
+        return consistent
 
     def _extract_offline_rule(
         self,

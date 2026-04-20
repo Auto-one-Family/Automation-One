@@ -22,6 +22,7 @@ import {
 } from 'lucide-vue-next'
 import ESPCardBase from '@/components/esp/ESPCardBase.vue'
 import { getESPStatus, getESPStatusDisplay, type ESPStatus } from '@/composables/useESPStatus'
+import { espHealthPresentation } from '@/domain/esp/espHealth'
 import { groupSensorsByBaseType, type RawSensor } from '@/utils/sensorDefaults'
 import { getActuatorTypeInfo } from '@/utils/labels'
 import type { MockActuator } from '@/types'
@@ -55,23 +56,11 @@ const statusDisplay = computed(() => getESPStatusDisplay(deviceStatus.value))
 const isDeviceOnline = computed(() => deviceStatus.value === 'online')
 const statusText = computed(() => statusDisplay.value.text)
 
-const handoverBadge = computed(() => {
-  const handover = props.device.runtime_health_view?.handover
-  if (!handover) {
-    return {
-      epochLabel: '—',
-      rejectStartup: 0,
-      rejectRuntime: 0,
-      isWarning: false,
-    }
-  }
-
-  return {
-    epochLabel: handover.epoch === null ? '—' : String(handover.epoch),
-    rejectStartup: handover.rejectStartup,
-    rejectRuntime: handover.rejectRuntime,
-    isWarning: handover.rejectRuntime > 0,
-  }
+const runtimeHealthBadge = computed(() => {
+  const vm = props.device.runtime_health_view
+  if (!vm) return null
+  const onlineLike = deviceStatus.value === 'online' || deviceStatus.value === 'stale'
+  return espHealthPresentation(vm, onlineLike)
 })
 
 /** Relative time for stale/offline devices */
@@ -301,15 +290,15 @@ function handleDeviceDelete() {
           class="device-mini-card__status-chip"
           :class="`device-mini-card__status-chip--${deviceStatus}`"
         >{{ statusText }}</span>
+        <span
+          v-if="runtimeHealthBadge?.showBadge"
+          class="device-mini-card__status-chip device-mini-card__status-chip--stale"
+          :title="runtimeHealthBadge.tooltipLines.join('\n')"
+        >
+          {{ runtimeHealthBadge.badgeLabel }}
+        </span>
         <span v-if="lastSeenText" class="device-mini-card__last-seen">· {{ lastSeenText }}</span>
         <span v-if="sensorCount > 0 || actuatorCount > 0" class="device-mini-card__sensor-count">{{ sensorCount }}S<template v-if="actuatorCount > 0"> / {{ actuatorCount }}A</template></span>
-      </div>
-
-      <div
-        class="device-mini-card__handover-badge"
-        :class="{ 'device-mini-card__handover-badge--warning': handoverBadge.isWarning }"
-      >
-        Handover · epoch={{ handoverBadge.epochLabel }} · rejects: startup={{ handoverBadge.rejectStartup }} / runtime={{ handoverBadge.rejectRuntime }}
       </div>
 
       <!-- Subzone indicator -->
@@ -549,31 +538,6 @@ function handleDeviceDelete() {
   font-size: var(--text-xxs);
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
-}
-
-.device-mini-card__handover-badge {
-  margin-top: 2px;
-  margin-bottom: 2px;
-  display: inline-flex;
-  align-items: center;
-  max-width: 100%;
-  border-radius: var(--radius-full);
-  border: 1px solid color-mix(in srgb, var(--color-success) 35%, transparent);
-  background: color-mix(in srgb, var(--color-success) 10%, transparent);
-  color: color-mix(in srgb, var(--color-success) 75%, var(--color-text-primary));
-  padding: 2px var(--space-2);
-  font-size: var(--text-xxs);
-  font-family: var(--font-mono);
-  line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.device-mini-card__handover-badge--warning {
-  border-color: color-mix(in srgb, var(--color-warning) 55%, transparent);
-  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
-  color: color-mix(in srgb, var(--color-warning) 80%, var(--color-text-primary));
 }
 
 /* ── Subzone indicator ── */

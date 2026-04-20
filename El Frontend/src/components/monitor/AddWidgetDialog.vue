@@ -348,7 +348,7 @@ function handleAdd() {
 }
 
 .add-widget-dialog__type-label {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 500;
   text-align: center;
   white-space: nowrap;

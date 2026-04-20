@@ -75,7 +75,7 @@ const displayName = computed(() =>
   align-items: flex-start;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   font-size: 0.8125rem;
   cursor: pointer;
   transition: all 0.15s ease;

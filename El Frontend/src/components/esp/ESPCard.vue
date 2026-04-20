@@ -940,7 +940,7 @@ const offlineTimeAbsolute = computed(() => {
   position: relative;
   display: flex;
   background-color: var(--color-bg-secondary);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   border: 1px solid var(--glass-border);
   overflow: hidden;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -1055,7 +1055,7 @@ const offlineTimeAbsolute = computed(() => {
   cursor: pointer;
   padding: 0.25rem 0.5rem;
   margin: -0.25rem -0.5rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   transition: background-color 0.15s ease;
   min-width: 0; /* Erlaubt Text-Truncation in Flexbox */
   max-width: 100%;
@@ -1151,7 +1151,7 @@ const offlineTimeAbsolute = computed(() => {
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background-color: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
@@ -1484,7 +1484,7 @@ const offlineTimeAbsolute = computed(() => {
   color: var(--color-warning);
   background-color: rgba(251, 191, 36, 0.08);
   border: 1px solid rgba(251, 191, 36, 0.2);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
 }
 
 .esp-card__orphaned-warning span {
@@ -1519,7 +1519,7 @@ const offlineTimeAbsolute = computed(() => {
   color: var(--color-text-primary);
   background: linear-gradient(135deg, rgba(96, 165, 250, 0.12), rgba(139, 92, 246, 0.08));
   border: 1px solid rgba(96, 165, 250, 0.25);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   text-decoration: none;
   transition: all 0.2s ease;
 }
@@ -1546,7 +1546,7 @@ const offlineTimeAbsolute = computed(() => {
   color: var(--color-text-muted);
   background-color: transparent;
   border: 1px solid var(--glass-border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -1636,7 +1636,7 @@ const offlineTimeAbsolute = computed(() => {
 
 /* Actuator dots: rounded squares */
 .esp-card__satellite-dot--actuator {
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 
 /* State-based colors */
@@ -1668,7 +1668,7 @@ const offlineTimeAbsolute = computed(() => {
 .esp-card__satellite-dot:hover {
   transform: scale(1.5);
   box-shadow: 0 0 8px currentColor;
-  z-index: 1;
+  z-index: var(--z-dropdown);
 }
 
 /* Emergency pulsing */
@@ -1701,7 +1701,7 @@ const offlineTimeAbsolute = computed(() => {
   font-size: 0.8125rem;
   font-weight: 500;
   background-color: rgba(0, 0, 0, 0.2);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: help;
 }
 

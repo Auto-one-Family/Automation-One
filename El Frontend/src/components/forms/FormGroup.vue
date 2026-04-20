@@ -84,7 +84,7 @@ function toggle(): void {
 }
 
 .form-group__title {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--color-text-secondary);
   text-transform: uppercase;
@@ -104,7 +104,7 @@ function toggle(): void {
 }
 
 .form-group__description {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   margin: var(--space-1) 0 0;
 }

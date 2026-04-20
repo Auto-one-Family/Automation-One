@@ -224,7 +224,7 @@ const displayValue = computed(() => {
 .gauge-chart__min,
 .gauge-chart__max {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 

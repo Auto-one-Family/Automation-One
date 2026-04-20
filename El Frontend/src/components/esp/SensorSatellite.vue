@@ -122,8 +122,8 @@ const sensorIcon = computed(() => {
 
 /** Number of values (1, 2, or 3) */
 const valueCount = computed(() => {
-  if (!props.isMultiValue || !props.multiValues) return 1
-  return Object.keys(props.multiValues).length
+  if (!props.isMultiValue) return 1
+  return Math.max(1, formattedValues.value.length)
 })
 
 /** Device configuration from registry */
@@ -194,11 +194,11 @@ const scopeTooltip = computed(() => {
 
 /** Aggregated quality (worst across all values) */
 const displayQuality = computed((): QualityLevel => {
-  if (!props.isMultiValue || !props.multiValues) {
+  if (!props.isMultiValue || normalizedMultiValueEntries.value.length === 0) {
     return props.quality || 'good'
   }
 
-  const qualities = Object.values(props.multiValues).map(v => v.quality)
+  const qualities = normalizedMultiValueEntries.value.map(([, value]) => value.quality)
   return getWorstQuality(qualities)
 })
 
@@ -226,9 +226,36 @@ interface FormattedValue {
   order: number
 }
 
+function normalizeSensorType(sensorType: string): string {
+  return sensorType.trim().toLowerCase()
+}
+
+const normalizedMultiValueEntries = computed((): Array<[string, MultiValueEntry]> => {
+  if (!props.multiValues) return []
+
+  const deduped = new Map<string, [string, MultiValueEntry]>()
+  for (const [sensorType, entry] of Object.entries(props.multiValues)) {
+    const normalizedType = normalizeSensorType(sensorType)
+    const existing = deduped.get(normalizedType)
+    if (!existing) {
+      deduped.set(normalizedType, [sensorType, entry])
+      continue
+    }
+
+    // Keep the freshest entry when casing variants collide (e.g. ec vs EC).
+    const existingTs = existing[1].timestamp ?? 0
+    const incomingTs = entry.timestamp ?? 0
+    if (incomingTs >= existingTs) {
+      deduped.set(normalizedType, [sensorType, entry])
+    }
+  }
+
+  return Array.from(deduped.values())
+})
+
 const formattedValues = computed((): FormattedValue[] => {
   // Single-value mode
-  if (!props.isMultiValue || !props.multiValues) {
+  if (!props.isMultiValue || normalizedMultiValueEntries.value.length === 0) {
     return [{
       key: props.sensorType,
       value: formatNumber(props.value, sensorConfig.value.decimals),
@@ -240,7 +267,7 @@ const formattedValues = computed((): FormattedValue[] => {
   }
 
   // Multi-value mode: Sort by registry order if available
-  return Object.entries(props.multiValues)
+  return normalizedMultiValueEntries.value
     .map(([sensorType, entry]) => {
       const valueConfig = getValueConfigForSensorType(sensorType)
       const typeConfig = SENSOR_TYPE_CONFIG[sensorType]
@@ -417,10 +444,10 @@ function handleDragEnd(event: DragEvent) {
   flex-direction: column;
   gap: 0.25rem;
   padding: 0.5rem 0.625rem;
-  background: #141720;
+  background: var(--color-bg-tertiary);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-left: 2px solid rgba(96, 165, 250, 0.4);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   min-width: 0;
@@ -477,7 +504,7 @@ function handleDragEnd(event: DragEvent) {
 /* Hover - clean elevation with subtle scale */
 .sensor-satellite:hover {
   border-color: var(--glass-border-hover);
-  background: #181c28;
+  background: var(--color-bg-hover);
   transform: scale(1.02);
   box-shadow:
     0 4px 12px rgba(0, 0, 0, 0.4),
@@ -527,7 +554,7 @@ function handleDragEnd(event: DragEvent) {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   flex-shrink: 0;
   transition: all 0.2s ease;
 }
@@ -549,7 +576,7 @@ function handleDragEnd(event: DragEvent) {
 
 .sensor-satellite__icon--gray {
   background: rgba(107, 114, 128, 0.12);
-  color: #9ca3af;
+  color: var(--color-text-secondary);
 }
 
 .sensor-satellite__label {
@@ -576,7 +603,7 @@ function handleDragEnd(event: DragEvent) {
   color: rgba(255, 255, 255, 0.3);
   background: rgba(255, 255, 255, 0.04);
   padding: 0.0625rem 0.1875rem;
-  border-radius: 0.125rem;
+  border-radius: var(--radius-xs);
   flex-shrink: 0;
 }
 
@@ -585,7 +612,7 @@ function handleDragEnd(event: DragEvent) {
   font-size: 0.4375rem;
   font-weight: 600;
   padding: 0.0625rem 0.25rem;
-  border-radius: 0.125rem;
+  border-radius: var(--radius-xs);
   flex-shrink: 0;
   white-space: nowrap;
   cursor: default;
@@ -593,7 +620,7 @@ function handleDragEnd(event: DragEvent) {
 
 .sensor-satellite__scope-badge--multi-zone {
   background: rgba(96, 165, 250, 0.2);
-  color: rgb(96, 165, 250);
+  color: var(--color-info);
 }
 
 .sensor-satellite__scope-badge--mobile {
@@ -656,7 +683,7 @@ function handleDragEnd(event: DragEvent) {
 .sensor-satellite__value-number {
   font-family: var(--font-mono);
   font-weight: 700;
-  color: #f0f4ff;
+  color: var(--color-text-primary);
   line-height: 1;
   letter-spacing: -0.04em;
 }

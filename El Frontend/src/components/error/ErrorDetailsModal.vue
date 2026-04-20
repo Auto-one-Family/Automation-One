@@ -305,7 +305,7 @@ onUnmounted(() => {
   max-width: 520px;
   max-height: 85vh;
   overflow-y: auto;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   background: var(--color-bg-secondary, #1a1a2e);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
@@ -366,7 +366,7 @@ onUnmounted(() => {
   justify-content: center;
   width: 2rem;
   height: 2rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--color-text-muted);
@@ -490,7 +490,7 @@ onUnmounted(() => {
   line-height: 1.5;
   color: var(--color-text-secondary);
   background: rgba(0, 0, 0, 0.2);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   padding: 0.5rem;
   overflow-x: auto;
   max-height: 150px;

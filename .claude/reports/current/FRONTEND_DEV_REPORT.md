@@ -1,75 +1,119 @@
-# Frontend Dev Report: ActuatorCard pwmPercent Type Guard
+# Frontend Dev Report: AUT-64 Config-Timeout als Pending-Finalität
 
 ## Modus: B (Implementierung)
-
-## Auftrag
-`ActuatorCard.vue` — pwmPercent computed property soll nur noch für `pwm`- und `fan`-Aktortypen einen Wert liefern. Relais, Pumpen, Ventile und digitale Aktoren sollen kein PWM-Prozentzeichen-Badge mehr anzeigen, auch wenn ihr `pwm_value == 1.0` (ON-Zustand) ist.
-
-Hintergrund: Server-Fix in `monitor_data_service.py` sendet `pwm_value` jetzt als normalisiertes Float 0.0–1.0 (war zuvor für Relay-ON-Zustände 1.0 und für PWM-Dimmer z.B. 0.255 = 25.5%). Die Formel `Math.round(val * 100)%` ist nach dem Server-Fix korrekt — aber ohne Type Guard würde ein Relay mit `pwm_value=1.0` als "100%" angezeigt.
+## Auftrag: Linear-Issue AUT-64 — Frontend Config-Timeout als ausstehende Finalität erkennbar machen
 
 ## Codebase-Analyse
 
 Analysierte Dateien:
-- `El Frontend/src/components/devices/ActuatorCard.vue` (474 Zeilen) — Zieldatei, `pwmPercent` auf Zeile 111–115
-- `El Frontend/src/components/esp/ActuatorSatellite.vue` Zeilen 123–130 — Referenz-Implementation des Type Guards
-- `El Frontend/src/types/monitor.ts` — `SubzoneActuatorEntry.pwm_value: number` (Typ korrekt als `number`, deckt float 0.0–1.0 ab, kein Type-Change nötig)
+- `El Frontend/src/components/esp/ActuatorConfigPanel.vue` — handleSave() mit waitForConfigTerminal
+- `El Frontend/src/components/esp/SensorConfigPanel.vue` — identisches Pattern
+- `El Frontend/src/shared/stores/actuator.store.ts` — Intent-State-Machine, Config-Lifecycle
+- `El Frontend/src/composables/useToast.ts` — Toast-API (warning/error/info)
+- `El Frontend/src/utils/logger.ts` — Structured Logger
+- `El Frontend/src/styles/tokens.css` — Design-Tokens (warning/info-Farben)
+- `El Frontend/src/components/dashboard/ActionBar.vue` — Referenz für UI-Pattern
+- `El Frontend/src/router/index.ts` — SystemMonitor-Route für Deep-Link
 
-Gefundenes Referenz-Pattern (`ActuatorSatellite.vue` Zeile 123):
-```typescript
-if (props.actuatorType === 'pwm' || props.actuatorType === 'fan') {
-```
-Exakt dieses Muster wurde auf `ActuatorCard.vue` übertragen.
+Gefundene Patterns:
+- Toast mit dedupeKey für idempotente Benachrichtigungen
+- BEM-CSS mit Design-Token-Variablen (tokens.css)
+- Spinner-Pattern: `Loader2` + `animate-spin` (Lucide)
+- RefreshCw für Retry-Buttons
+- reactive Map in Pinia Stores (Vue 3.2+ Map-Reaktivität)
 
-## Qualitätsprüfung (8 Dimensionen)
+## Qualitätsprüfung (8-Dimensionen-Checkliste)
 
-| # | Dimension | Status |
-|---|-----------|--------|
-| 1 | Struktur & Einbindung | OK — Datei liegt korrekt in `components/devices/`, kein struktureller Eingriff |
-| 2 | Namenskonvention | OK — keine Umbenennung, nur Logik-Anpassung |
-| 3 | Rückwärtskompatibilität | OK — `pwmPercent` ist computed-intern, kein Prop-Contract, keine externe Abhängigkeit |
-| 4 | Wiederverwendbarkeit | OK — Pattern direkt aus `ActuatorSatellite.vue` übernommen (SSOT-Konsistenz) |
-| 5 | Speicher & Ressourcen | OK — minimale Änderung, kein Bundle-Impact |
-| 6 | Fehlertoleranz | OK — frühzeitiger `return null` verhindert falsche Anzeige für alle Non-PWM-Typen |
-| 7 | Seiteneffekte | OK — Template-Zeile 186 (`v-if="actuator.actuator_type === 'pwm' && !pwmPercent"`) bleibt konsistent, da `pwmPercent` für `pwm`-Typ mit val=0 immer noch `null` zurückgibt |
-| 8 | Industrielles Niveau | OK — TypeScript strict, kein `any`, kein Cleanup nötig (reines computed) |
+| # | Dimension | Status | Details |
+|---|-----------|--------|---------|
+| 1 | Struktur & Einbindung | ✅ | PendingConfigBanner in components/esp/, Store-Erweiterung in shared/stores/ |
+| 2 | Namenskonvention | ✅ | PascalCase Komponente, camelCase Funktionen, BEM-CSS |
+| 3 | Rückwärtskompatibilität | ✅ | Nur additive Änderungen; bestehende toast.error bei config_failed bleibt |
+| 4 | Wiederverwendbarkeit | ✅ | PendingConfigBanner wiederverwendbar für Actuator + Sensor Panels |
+| 5 | Speicher & Ressourcen | ✅ | reactive(Map) statt plain Map — minimaler Overhead, kein Memory-Leak |
+| 6 | Fehlertoleranz | ✅ | Defensiv gegen fehlende correlation_id (unknown:… Fallback) |
+| 7 | Seiteneffekte | ✅ | Keine Store-Leaks, Banner reactivity via computed → kein manuelles Cleanup nötig |
+| 8 | Industrielles Niveau | ✅ | TypeScript strict, aria-live, Design-Token-konform |
 
 ## Cross-Layer Impact
 
-| Geprüft | Ergebnis |
-|---------|----------|
-| `SubzoneActuatorEntry.pwm_value` Typ in `types/monitor.ts` | `number` — kompatibel mit float 0.0–1.0, kein Type-Change nötig |
-| Server-Contract | Server liefert normalisiert 0.0–1.0, Formel `Math.round(val * 100)%` ist korrekt |
-| `ActuatorSatellite.vue` | Hatte Type Guard bereits — `ActuatorCard` ist jetzt konsistent |
+| Betroffener Bereich | Prüfergebnis |
+|---------------------|-------------|
+| Server (config_published/response/failed) | Kein Server-Code geändert. Frontend interpretiert bestehende Events defensiver. |
+| WebSocket-Kontrakt | Unverändert. correlation_id wird so genutzt wie sie kommt (inkl. unknown:… Fallback) |
+| AUT-65 Abhängigkeit | Code arbeitet mit beiden Szenarien: konsistente und unknown:… correlation_ids |
 
 ## Ergebnis
 
-Geänderte Datei: `El Frontend/src/components/devices/ActuatorCard.vue` Zeilen 111–115
+### Modifizierte Dateien
 
-Vorher:
-```typescript
-const pwmPercent = computed(() => {
-  const val = props.actuator.pwm_value
-  if (val != null && val > 0) return `${Math.round(val * 100)}%`
-  return null
-})
-```
+1. **`El Frontend/src/shared/stores/actuator.store.ts`**
+   - L18: `import { reactive, computed } from 'vue'` hinzugefügt
+   - L152: `intents = reactive(new Map())` statt `new Map()` (reaktiv für UI-Binding)
+   - L407-429: `scheduleConfigTimeout` — `toast.error` → `toast.warning`, Observability-Log `config_pending_over_timeout` hinzugefügt
+   - L1153-1198: Neue Funktionen `pendingConfigOrders` (computed), `findConfigIntentBySubject()`, `dismissConfigTimeout()`
+   - L1211-1213: Neue Exports
 
-Nachher:
-```typescript
-// Monitor-mode: PWM percentage badge — only for pwm/fan types (not relay/pump/valve/digital)
-const pwmPercent = computed(() => {
-  if (props.actuator.actuator_type !== 'pwm' && props.actuator.actuator_type !== 'fan') return null
-  const val = props.actuator.pwm_value
-  if (val != null && val > 0) return `${Math.round(val * 100)}%`
-  return null
-})
-```
+2. **`El Frontend/src/components/esp/ActuatorConfigPanel.vue`**
+   - L30-36: Import PendingConfigBanner, createLogger
+   - L66-67: `lastConfigSubjectId`, `lastConfigCorrelationId` refs
+   - L376-419: `handleSave()` — timeout-Pfade: `toast.error` → `toast.warning`, Observability-Logs, Pending-State-Tracking, Error-Toast NUR bei terminal_failed/integration_issue
+   - L742-747: PendingConfigBanner Template-Integration vor Actions
+
+3. **`El Frontend/src/components/esp/SensorConfigPanel.vue`**
+   - L31-37: Import PendingConfigBanner, createLogger
+   - L71-72: `lastConfigSubjectId`, `lastConfigCorrelationId` refs
+   - L407-457: `handleSave()` — identische Timeout-Umstellung wie ActuatorConfigPanel
+   - L832-837: PendingConfigBanner Template-Integration vor Actions
+
+4. **`El Frontend/src/components/esp/PendingConfigBanner.vue`** (NEU)
+   - Reusable inline-Komponente für Config-Pending-Status
+   - Spinner (Loader2) für active pending, AlertTriangle für timeout
+   - correlation_id Anzeige (gekürzt wenn lang)
+   - Deep-Link zu `/system-monitor?tab=events`
+   - Retry-Button (emits retry, dismissed timeout-Intent, löst neuen Save aus)
+   - Dismiss-Button für Timeout-Intents
+   - `aria-live="polite"`, `role="status"`
+   - BEM-CSS mit Design-Tokens
 
 ## Verifikation
 
-`npm run build` — Exit-Code 0, keine TypeScript-Fehler, keine Errors.
-Build-Zeit: 11.47s, 3074 Module transformiert.
+- **`npm run build`**: Exit-Code 0 ✅ (vue-tsc -b + vite build)
+- **`npx vue-tsc --noEmit`**: Exit-Code 0 ✅
+- **Linter**: Keine Fehler ✅
+
+### Akzeptanzkriterien-Abgleich
+
+| Kriterium | Status | Details |
+|-----------|--------|---------|
+| `config_published` ohne terminales Event → Pending-Status sichtbar, kein Hard-Error | ✅ | Warning-Toast + PendingConfigBanner (Spinner + "Konfigurationsauftrag läuft") |
+| Nach nachgeliefertem `config_response` schließt Pending sauber auf success/failed | ✅ | `waitForConfigTerminal` resolved, Banner verschwindet bei terminal_success, refs werden null gesetzt |
+| `npm run build` grün | ✅ | Exit 0 |
+| `vue-tsc --noEmit` grün | ✅ | Exit 0 |
+| Error-Toast NUR bei explizitem config_failed/Contract-Mismatch | ✅ | `terminal_failed`/`terminal_integration_issue` → toast.error; timeout → toast.warning |
+| A11y: Pending-State mit aria-live + Spinner statt X-Icon | ✅ | `aria-live="polite"`, `role="status"`, Loader2-Spinner |
+| Observability: config_pending_over_timeout → console.info | ✅ | Structured JSON-Log via createLogger in Store + Config-Panels |
+| Retry-Aktion mit neuer correlation_id | ✅ | PendingConfigBanner emits retry → handleSave() generiert neue correlation_id via REST |
+| Persistente Statusfläche mit correlation_id + Deep-Link | ✅ | PendingConfigBanner zeigt correlation_id, Link zu /system-monitor?tab=events |
+
+## Testbeschreibung
+
+Manuelle Verifikation möglich:
+1. Config-Panel öffnen → Speichern klicken
+2. Server-seitig config_response unterdrücken (oder Gerät offline)
+3. Nach ~45-65s: Warning-Toast erscheint, PendingConfigBanner zeigt Spinner + "Konfigurationsauftrag läuft"
+4. Nach Store-Timeout: Banner wechselt zu Warning-Icon + "Konfigurationsauftrag ausstehend" mit Retry-Button
+5. Retry-Button klicken → neuer Save-Auftrag mit neuer correlation_id
+6. config_response nachliefern → Banner verschwindet, Success-Toast
+7. config_failed senden → Error-Toast (NICHT Warning)
+
+Vitest-Unit-Test möglich über actuator.store Mock (pendingConfigOrders reactive computed testen).
 
 ## Empfehlung
 
-Kein weiterer Agent nötig. Die Änderung ist isoliert auf das Frontend. Der Server-Fix in `monitor_data_service.py` wurde laut Auftragsbeschreibung bereits angewendet.
+Kein weiterer Agent nötig für AUT-64. Falls AUT-65 (WS correlation_id Konsistenz) Änderungen am Envelope bringt, ist der Frontend-Code bereits defensiv implementiert.
+
+---
+**Timestamp:** 2026-04-17
+**Agent:** frontend-dev
+**Linear:** AUT-64

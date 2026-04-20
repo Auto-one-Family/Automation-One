@@ -1,171 +1,100 @@
-# ESP32 Dev Report: Fix intent_outcome publish mit leerem intent_id
+# ESP32 Dev Report: AUT-57 — safePublish retries-Parameter Fix
 
 ## Modus: B (Implementierung)
 
 ## Auftrag
-Der Server meldet `Invalid intent_outcome payload (permanent, not retrying): Missing required field: intent_id` fuer ein drittes Payload auf Topic `kaiser/god/esp/{ESP_ID}/system/intent_outcome` nach accepted/applied-Sequenz.
-
-## Codebase-Analyse: Welche Dateien analysiert, welche Patterns gefunden
-
-Alle Publish-Stellen auf intent_outcome:
-- `tasks/intent_contract.cpp:511` — `publishIntentOutcome()` (zentraler Wrapper)
-- `tasks/intent_contract.cpp:286` — `processIntentOutcomeOutbox()` (NVS-Replay)
-- `buildIntentOutcomeTopic()` wird NUR in diesen beiden Funktionen fuer Publishes genutzt.
-
-Aufrufstellen `publishIntentOutcome`:
-- `main.cpp` (29x), `actuator_command_queue.cpp` (4x), `sensor_command_queue.cpp` (4x), `config_update_queue.cpp` (24x), `offline_mode_manager.cpp` (2x), `mqtt_client.cpp` (3x), `publish_queue.cpp` (1x)
-
-Identifizierter Bug: `loadPendingAt()` in `config_update_queue.cpp` Zeile 115-127.
-`initIntentMetadata()` setzt `intent_id = ""`. Danach wird aus NVS geladen — wenn Key fehlt oder leer ist, bleibt `intent_id = ""`. Das passiert bei NVS-Migration nach Firmware-Update oder Corruption.
-
-Ausloeser des dritten Events:
-`replayPendingIntents()` laedt einen cfg_pending-Eintrag ohne intent_key → `accepted`-Publish mit `intent_id: ""`. Danach `processConfigUpdateQueue` → `persisted` mit `intent_id: ""`. Server wertet `""` als "fehlend".
-
-## Qualitaetspruefung (8 Dimensionen)
-
-| # | Dimension | Ergebnis |
-|---|-----------|----------|
-| 1 | Struktur | Fix in bestehenden Dateien, kein neues File |
-| 2 | Namenskonvention | `safe_metadata`, `active_metadata`, `fallback` — snake_case korrekt |
-| 3 | Rueckwaertskompatibilitaet | Keine Payload-Schema-Aenderung; Fallback-IDs sind valide Strings |
-| 4 | Wiederverwendbarkeit | `extractIntentMetadataFromPayload` + `buildFallbackId` wiederverwendet |
-| 5 | Speicher | +`sizeof(IntentMetadata)` ~164 B Stack in publishIntentOutcome, kein Heap |
-| 6 | Fehlertoleranz | Defensiv: leeres intent_id wird abgefangen, geloggt (LOG_W), Fallback generiert |
-| 7 | Seiteneffekte | Keine: nur lokale Variable, kein externer State veraendert |
-| 8 | Industrielles Niveau | Fallback + Warning-Log = Tracierbarkeit erhalten |
-
-## Cross-Layer Impact
-
-Keine Aenderung an MQTT-Topic-Struktur oder Payload-Schema.
-Server-Handler bleiben unveraendert.
-Fallback-IDs (`cfg_replay_XXXXX_N`) sind valide intent_ids die der Server akzeptiert.
-
-## Ergebnis: Implementierte Aenderungen
-
-### Fix 1: config_update_queue.cpp:115 — loadPendingAt
-
-`c:\Users\robin\Documents\PlatformIO\Projects\Auto-one\El Trabajante\src\tasks\config_update_queue.cpp`
-
-Nach dem NVS-Load: Wenn `intent` leer, wird `extractIntentMetadataFromPayload(json_payload, "cfg_replay")` aufgerufen um einen Fallback-intent_id aus dem gespeicherten JSON-Payload zu extrahieren.
-
-### Fix 2: intent_contract.cpp:520 — publishIntentOutcome
-
-`c:\Users\robin\Documents\PlatformIO\Projects\Auto-one\El Trabajante\src\tasks\intent_contract.cpp`
-
-Defensive Guard am Einstiegspunkt: kopiert `metadata` nach `safe_metadata`, generiert Fallback-intent_id wenn leer. Alle nachfolgenden Operationen verwenden `active_metadata` (Alias auf `safe_metadata`).
-
-## Verifikation
-
-```
-Build: esp32_dev — SUCCESS
-RAM:   34.5% (112964 / 327680 bytes)
-Flash: 93.2% (1465313 / 1572864 bytes)
-Dauer: 00:00:09.126
-```
-
-## Empfehlung
-
-Server-dev: Validation pruefen ob `intent_id: ""` korrekt als "fehlend" erkannt wird.
-Nach naechstem Flash: NVS-Namespace `cfg_pending` bei Bedarf clearen (wenn alte Eintraege ohne intent_key vorhanden).
-
----
-
-# Vorheriger Report (archiviert)
-
-# ESP32 Dev Report: NTP Fix — Docker NTP Service + Firmware TimeManager Refactoring
-
-## Modus: B (Implementierung)
-
-## Auftrag
-Zwei-teiliger NTP-Fix:
-- TEIL A: Docker NTP-Service `docker-compose.yml` korrigieren (container_name Underscore, tmpfs, LOG_LEVEL=0, dritter NTP-Server ptbtime2.ptb.de)
-- TEIL B: Firmware `TimeManager` von Polling-Sync auf Callback-basierte Sync umbauen, WiFi-Event-Methoden hinzufügen, `wifi_manager.cpp` verknüpfen
+SafePublish ignoriert `retries`-Parameter effektiv und macht nur 2 Versuche.
+Umbau auf echte retry-gesteuerte Schleife mit Backoff+Jitter und CB-Respekt.
 
 ## Codebase-Analyse
 
-Analysierte Dateien:
-- `El Trabajante/src/utils/time_manager.h` — IST: NTP_SYNC_TIMEOUT_MS=10000, kein sync_completed_, kein onSyncCompleted/WiFi-Event-Methoden
-- `El Trabajante/src/utils/time_manager.cpp` — IST: blocking polling via synchronizeNTP()/getLocalTime(), esp_sntp_stop() im Fehlerfall, kein SNTP-Callback
-- `El Trabajante/src/services/communication/wifi_manager.cpp` — IST: handleDisconnection() hat bereits `static bool disconnection_logged` Guard — ideal als Ort für onWiFiDisconnected()
-- `docker-compose.yml` — IST: NTP-Block Zeilen 80-102, container_name mit Bindestrich (`automationone-ntp`), 2 NTP-Server, healthcheck+logging vorhanden, kein tmpfs, kein LOG_LEVEL
+### Analysierte Dateien
+- `El Trabajante/src/services/communication/mqtt_client.h` (277 Zeilen)
+- `El Trabajante/src/services/communication/mqtt_client.cpp` (1768 Zeilen)
+- `El Trabajante/src/error_handling/circuit_breaker.h` (API-Referenz)
+- 8 Callsites: main.cpp, intent_contract.cpp (×2), actuator_manager.cpp (×3), config_response.cpp (×2)
 
-Patterns identifiziert:
-- SNTP-Callback: `sntp_set_time_sync_notification_cb()` aus `esp_sntp.h` (bereits included)
-- Volatile Flag pattern für ISR/Callback-Kommunikation: wie in anderen ISR-Handlers der Codebase
-- WiFi-Manager ruft `timeManager.begin()` bereits in `connectToNetwork()` auf
-- LWIP-Callback-Kontext: kein Heap, kein LOG erlaubt — nur volatile Flags setzen
+### Befund (IST-Zustand)
+```cpp
+// Zeile 633-656: retries-Parameter wird KOMPLETT ignoriert
+bool safePublish(..., uint8_t retries) {
+    // CB check → publish → CB check → yield → publish → return false
+    // = immer genau 2 Versuche, unabhängig von retries
+}
+```
 
-## Qualitätsprüfung (8 Dimensionen)
+### Patterns gefunden
+- `computeReconnectJitterMs_()`: Exponential backoff + `esp_random()` Jitter — Referenz-Pattern
+- `isCriticalPublishTopic()`: Bereits vorhanden für Kritikalitätsprüfung (war aber nur im ESP-IDF ifdef)
+- `delay()` / `vTaskDelay()`: Standardmechanismus für nicht-blockierende Pausen in FreeRTOS
+
+## Qualitätsprüfung (8-Dimensionen-Checkliste)
 
 | # | Dimension | Ergebnis |
 |---|-----------|----------|
-| 1 | Struktur & Einbindung | Dateien in bestehenden Ordnern, Includes unverändert, `esp_sntp.h` bereits vorhanden |
-| 2 | Namenskonvention | snake_case Methoden, `_` Suffix Member, PascalCase Klassen — konsistent mit Codebase |
-| 3 | Rückwärtskompatibilität | Keine MQTT-Payloads, keine Error-Codes geändert. `isSynchronized()` leicht verschärft (zusätzlich Timestamp validieren) — unkritisch, korrekter |
-| 4 | Wiederverwendbarkeit | `onSyncCompleted()` nutzt bestehende Member. Kein paralleles System gebaut |
-| 5 | Speicher & Ressourcen | Keine dynamischen Allokationen. `volatile bool sync_completed_` = 1 Byte. Callback-Kontext ohne Heap |
-| 6 | Fehlertoleranz | Daemon bleibt bei Timeout aktiv. loop() 3-Fall-Logik deckt synchronized/running/stopped ab |
-| 7 | Seiteneffekte | Callback vor configTime registriert — kein Race-Condition-Risiko. onWiFiDisconnected() via Guard einmalig pro Disconnect |
-| 8 | Industrielles Niveau | Callback-basiert statt blocking-poll. Daemon läuft im Hintergrund. WiFi-Events sauber entkoppelt |
+| 1 | Struktur & Einbindung | ✅ Keine neuen Dateien, gleiche Ordnerstruktur |
+| 2 | Namenskonvention | ✅ `safe_publish_retry_count_` mit `_` Suffix, snake_case |
+| 3 | Rückwärtskompatibilität | ✅ Signatur unverändert, Default retries=3 bleibt. Verhalten jetzt korrekt: retries=1 → 2 Versuche (vorher auch ~2), retries=3 → 4 Versuche (vorher 2) |
+| 4 | Wiederverwendbarkeit | ✅ Nutzt existierendes `isCriticalPublishTopic()`, `esp_random()` Pattern |
+| 5 | Speicher & Ressourcen | ✅ +4 Bytes RAM (uint32_t Counter). Kein Heap, keine dynamische Allokation |
+| 6 | Fehlertoleranz | ✅ CB-Check vor jedem Attempt. Kritische Topics bekommen einen Versuch auch bei CB OPEN |
+| 7 | Seiteneffekte | ✅ `isCriticalPublishTopic()` aus `#ifndef` Guard herausgezogen → jetzt in beiden Backends verfügbar (war vorher nur ESP-IDF). Kein Breaking Change |
+| 8 | Industrielles Niveau | ✅ Exponential backoff (50/100/200/250ms cap) + Jitter (0-31ms). Kein Blocking in ISR. delay() = vTaskDelay auf ESP32 |
 
 ## Cross-Layer Impact
 
-| Bereich | Auswirkung |
-|---------|-----------|
-| MQTT-Payloads | Keine Änderung — Timestamps weiterhin via `timeManager.getUnixTimestamp()` |
-| Server | Keine Änderung — Server-Fallback bei ts=0 bleibt unberührt (Wokwi-Kompatibilität erhalten) |
-| Docker NTP | container_name geändert: `automationone-ntp` → `automationone_ntp`. ESP32 NTP_SERVER_PRIMARY `192.168.0.39` zeigt auf diesen Container |
+| Bereich | Impact |
+|---------|--------|
+| Server (heartbeat_handler) | Neues Telemetrie-Feld `safe_publish_retry_count` im Heartbeat-Payload — Server ignoriert unbekannte Felder (JSON) |
+| Frontend (ESPHealthWidget) | Kein Impact — Frontend zeigt nur bekannte Felder an |
+| MQTT-Payloads | Heartbeat-Payload +1 JSON-Feld (ca. 35 Bytes). Kein Topic geändert |
+| Error-Codes | Keine neuen Codes. Bestehende `ERROR_MQTT_PUBLISH_FAILED` unverändert |
 
-## Ergebnis
+## Ergebnis: Geänderte Dateien
 
-### TEIL A — docker-compose.yml
-- Datei: `c:\Users\robin\Documents\PlatformIO\Projects\Auto-one\docker-compose.yml`
-- NTP-Block komplett ersetzt (Zeilen 79-102)
-- container_name: `automationone_ntp` (Underscore)
-- Drei NTP-Server: `ptbtime1.ptb.de,ptbtime2.ptb.de,pool.ntp.org`
-- `LOG_LEVEL=0` hinzugefügt
-- `tmpfs: /etc/chrony:rw, /run/chrony:rw` hinzugefügt
-- `healthcheck` und `logging` Blöcke entfernt (nicht im Auftrag)
-- Docker-Neustart: `automationone_ntp Started` — erfolgreich
+### A) `El Trabajante/src/services/communication/mqtt_client.cpp`
 
-### TEIL B — Firmware
+1. **`isCriticalPublishTopic()` verschoben** (Zeile ~30): Aus `#ifndef MQTT_USE_PUBSUBCLIENT` Guard herausgezogen, damit beide MQTT-Backends darauf zugreifen können.
 
-**time_manager.h** (`El Trabajante/src/utils/time_manager.h`):
-- `NTP_SYNC_TIMEOUT_MS` 10000 → 50000
-- `volatile bool sync_completed_` nach `last_resync_check_` eingefügt
-- Neue public Methoden deklariert: `onWiFiConnected()`, `onWiFiDisconnected()`, `onSyncCompleted()`
+2. **`safePublish()` komplett umgeschrieben**: Echte Retry-Schleife `for (attempt = 0; attempt < retries+1; ++attempt)` mit:
+   - CB-Check **vor jedem** Attempt (früher Abbruch)
+   - Kritische Topics: 1 Versuch auch bei CB OPEN (bestehendes Verhalten erhalten)
+   - Exponential Backoff: 50ms → 100ms → 200ms → 250ms (cap)
+   - Jitter: `esp_random() & 0x1F` = 0-31ms pro Retry
+   - `delay()` = `vTaskDelay()` auf ESP32 (RTOS-kompatibel, yield-basiert)
 
-**time_manager.cpp** (`El Trabajante/src/utils/time_manager.cpp`):
-- Konstruktor: `, sync_completed_(false)` zur Initialisierungsliste
-- Statische Callback-Funktion `onTimeSyncNotification()` vor `begin()` (LWIP-Thread-sicher, nur volatile Flags)
-- `begin()`: `sntp_set_time_sync_notification_cb()` vor `configTime()` registriert, Warten auf `sync_completed_` (100ms-Takt) statt polling `synchronizeNTP()`, kein `esp_sntp_stop()` bei Timeout — Daemon läuft weiter
-- `loop()`: 3-Fall-Logik ersetzt alte einfache Polling-Logik
-- `isSynchronized()`: zusätzlich `isValidTimestamp(time(nullptr))` geprüft
-- `forceResync()`: `sync_completed_ = false` und `synchronized_ = false` am Anfang, Callback-basiertes Warten, Daemon bleibt bei Timeout aktiv
-- Neue Methoden `onSyncCompleted()`, `onWiFiConnected()`, `onWiFiDisconnected()` implementiert
+3. **Constructor**: `safe_publish_retry_count_(0)` initialisiert.
 
-**wifi_manager.cpp** (`El Trabajante/src/services/communication/wifi_manager.cpp`):
-- `handleDisconnection()`: `timeManager.onWiFiDisconnected()` im `!disconnection_logged`-Zweig eingefügt
-- Bestehender Guard (`static bool disconnection_logged`) stellt einmaligen Aufruf pro Disconnect-Event sicher
+4. **Getter**: `getSafePublishRetryCount()` implementiert.
+
+5. **Heartbeat-Payload**: `safe_publish_retry_count` Feld eingefügt (zwischen `sensor_command_queue_overflow_count` und `config_status`).
+
+### B) `El Trabajante/src/services/communication/mqtt_client.h`
+
+1. **Public API**: `uint32_t getSafePublishRetryCount() const;` hinzugefügt.
+2. **Private Member**: `uint32_t safe_publish_retry_count_;` hinzugefügt.
 
 ## Verifikation
 
 ```
-Build: esp32_dev SUCCESS 00:00:09.269
-RAM:   21.3% (69660 / 327680 bytes)
-Flash: 87.4% (1374181 / 1572864 bytes)
-Errors: 0
-Warnings: 0
+pio run -e esp32_dev → SUCCESS (13.03s)
+RAM:   36.7% (120220 / 327680 bytes)
+Flash: 95.1% (1495161 / 1572864 bytes)
+Exit Code: 0
 ```
 
-Docker NTP:
-```
-Container automationone_ntp Started
-```
+Keine Tests für `safePublish` im Repo vorhanden (`El Trabajante/test/` hat keinen safePublish-Test).
+
+## Restrisiken
+
+| Risiko | Schwere | Mitigation |
+|--------|---------|------------|
+| **delay() in MQTT-Event-Context**: `safePublish` kann aus dem ESP-IDF MQTT-Event-Handler aufgerufen werden (z.B. config_response). Bei retries=3 max ~443ms Blockierung des MQTT-Tasks. | Mittel | Default retries=3 ergibt worst-case ~443ms. MQTT-Task hat interne 100ms-Loops. Bei Latenz-Sensitivität retries auf 1 setzen. |
+| **Core-1 Retries wenig effektiv**: Vom Safety-Task (Core 1) routet `publish()` über die Queue — Queue-Enqueue ist schnell (~µs). Retries bei Queue-Full sinnvoll, bei normalem Betrieb nicht. | Niedrig | Kein Schaden — Queue-Retry ist billig. |
+| **Heartbeat-Payload wächst**: +35 Bytes pro Heartbeat. | Niedrig | payload.reserve(1900) hat Headroom. Heartbeat-Buffer ist 4096 Bytes. |
+| **Kein Reset des Counters**: `safe_publish_retry_count_` ist kumulativ über die gesamte Laufzeit. | Info | Reboot setzt zurück. Für Delta-Analyse: Server kann letzten Wert speichern. |
 
 ## Empfehlung
 
-Kein weiterer Agent notwendig. Bei Hardware-Test mit echtem ESP32: Serial-Monitor auf NTP-Sync-Meldungen prüfen:
-- Erwartetes Erfolgslog: `NTP Sync Successful` mit Unix Timestamp innerhalb von 50s nach WiFi-Connect
-- Falls lokaler Docker-NTP auf `192.168.0.39` erreichbar: Sync in unter 1s erwartet
-- Falls WiFi Disconnect auftritt: `SNTP daemon stopped — WiFi disconnected` im Serial erwartet
+- **server-dev**: Optional `safe_publish_retry_count` in `heartbeat_handler.py` als Telemetrie-Feld persistieren (nicht blockierend).
+- **Kein mqtt-dev nötig**: Keine Topic-Änderung, nur Payload-Erweiterung.

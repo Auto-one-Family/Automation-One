@@ -760,14 +760,31 @@ export function formatStaleReason(reason: string | undefined): string {
 /**
  * Maps sensor quality level to a simplified status category.
  * Used for status-dot coloring in MonitorView and similar views.
+ *
+ * Defense-in-depth: when `opts.lastRead` is provided, data age is checked
+ * independently of the quality flag. This catches cases where the server's
+ * quality field is stale/incorrect but the timestamp reveals old data.
+ *
+ * Backward-compatible: calling without opts preserves original behaviour.
  */
-export type SensorStatus = 'good' | 'warning' | 'alarm' | 'offline'
+export type SensorStatus = 'good' | 'warning' | 'alarm' | 'stale' | 'offline'
 
-export function qualityToStatus(quality: string): SensorStatus {
+export interface QualityToStatusOpts {
+  lastRead?: string | Date | null
+  staleThresholdS?: number
+}
+
+export function qualityToStatus(quality: string, opts?: QualityToStatusOpts): SensorStatus {
+  if (opts?.lastRead != null) {
+    const ageS = getAgeSeconds(opts.lastRead)
+    const threshold = opts.staleThresholdS ?? DATA_STALE_THRESHOLD_S
+    if (ageS !== null && ageS > threshold) return 'stale'
+  }
+
   if (quality === 'good' || quality === 'excellent') return 'good'
   if (quality === 'fair') return 'warning'
   if (quality === 'poor' || quality === 'bad' || quality === 'error') return 'alarm'
-  if (quality === 'stale') return 'offline'
+  if (quality === 'stale') return 'stale'
   return 'good'
 }
 

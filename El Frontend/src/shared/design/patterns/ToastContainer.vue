@@ -118,7 +118,7 @@ async function handleAction(toastId: string, action: ToastAction) {
   align-items: flex-start;
   gap: 0.75rem;
   padding: 1rem;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   background-color: var(--color-bg-secondary);
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
@@ -197,7 +197,7 @@ async function handleAction(toastId: string, action: ToastAction) {
   padding: 0.375rem 0.75rem;
   font-size: 0.75rem;
   font-weight: 500;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   border: none;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -235,7 +235,7 @@ async function handleAction(toastId: string, action: ToastAction) {
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   transition: all 0.2s ease;
 }
 

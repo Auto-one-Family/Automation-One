@@ -1501,7 +1501,7 @@ onUnmounted(() => {
   max-width: 740px;
   padding: 2rem;
   position: relative;
-  z-index: 1;
+  z-index: var(--z-dropdown);
   animation: empty-fade-in 0.5s ease-out;
 }
 

@@ -424,7 +424,7 @@ const badgeVariant = computed((): BadgeVariant => {
   gap: 0.75rem;
   padding: 1rem;
   background-color: var(--color-bg-tertiary);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   transition: background-color 0.2s;
 }
 
@@ -437,12 +437,12 @@ const badgeVariant = computed((): BadgeVariant => {
 }
 
 .sensor-value-card__icon {
-  width: 2.5rem;
-  height: 2.5rem;
+  width: clamp(1.5rem, 4vw, 2.5rem);
+  height: clamp(1.5rem, 4vw, 2.5rem);
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   background-color: rgba(167, 139, 250, 0.2);
   color: var(--color-mock);
   flex-shrink: 0;
@@ -473,6 +473,8 @@ const badgeVariant = computed((): BadgeVariant => {
   align-items: baseline;
   gap: 0.25rem;
   margin: 0.5rem 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .sensor-value-card__value {
@@ -480,11 +482,17 @@ const badgeVariant = computed((): BadgeVariant => {
   font-weight: 700;
   font-family: 'JetBrains Mono', monospace;
   color: var(--color-text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sensor-value-card__unit {
   font-size: 0.875rem;
   color: var(--color-text-secondary);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .sensor-value-card__badges {
@@ -515,7 +523,7 @@ const badgeVariant = computed((): BadgeVariant => {
   margin-top: 0.5rem;
   padding: 0.5rem;
   background-color: var(--color-bg-secondary);
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 
 .sensor-value-card__detail-row {
@@ -554,7 +562,7 @@ const badgeVariant = computed((): BadgeVariant => {
 
 .sensor-value-card__action-btn {
   padding: 0.5rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   background: transparent;
   border: none;
@@ -583,7 +591,7 @@ const badgeVariant = computed((): BadgeVariant => {
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
   font-weight: 500;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   transition: all 0.2s;
   background-color: rgba(59, 130, 246, 0.2);
   color: rgb(96, 165, 250);

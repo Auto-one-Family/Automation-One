@@ -261,7 +261,7 @@ const isFilterActive = (filter: StatusFilter) => props.activeFilters.has(filter)
   color: var(--color-text-muted);
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   transition: all var(--transition-fast);
   white-space: nowrap;

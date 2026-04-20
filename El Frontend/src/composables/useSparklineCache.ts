@@ -20,6 +20,8 @@ export type { ChartDataPoint }
 const DEFAULT_MAX_POINTS = 30
 const DEDUP_INTERVAL_MS = 5000
 const MAX_CONCURRENT_REQUESTS = 5
+const ON_DEMAND_GAP_THRESHOLD_MS = 120_000
+const MIN_DISPLAY_POINTS = 2
 
 export interface SensorIdentifier {
   esp_id: string
@@ -155,10 +157,49 @@ export function useSparklineCache(maxPoints: number = DEFAULT_MAX_POINTS) {
     { deep: true }
   )
 
+  /**
+   * Returns display-ready sparkline data for a sensor.
+   * For on_demand/scheduled sensors: inserts null gaps between distant points
+   * so Chart.js breaks the line instead of drawing misleading connections.
+   * Returns null when insufficient data (< MIN_DISPLAY_POINTS real values).
+   */
+  function getSparklineForDisplay(
+    key: string,
+    operatingMode?: string | null
+  ): ChartDataPoint[] | null {
+    const points = sparklineCache.value.get(key)
+    if (!points || points.length < MIN_DISPLAY_POINTS) return null
+
+    const isSporadic = operatingMode === 'on_demand' || operatingMode === 'scheduled'
+    if (!isSporadic) return points
+
+    const result: ChartDataPoint[] = [points[0]]
+    for (let i = 1; i < points.length; i++) {
+      const prev = points[i - 1]
+      const curr = points[i]
+      const gap = new Date(curr.timestamp).getTime() - new Date(prev.timestamp).getTime()
+      if (gap > ON_DEMAND_GAP_THRESHOLD_MS) {
+        const midTime = new Date(
+          new Date(prev.timestamp).getTime() + gap / 2
+        )
+        result.push({ timestamp: midTime, value: null })
+      }
+      result.push(curr)
+    }
+    return result
+  }
+
+  function hasMinSparklineData(key: string, minPoints = MIN_DISPLAY_POINTS): boolean {
+    const points = sparklineCache.value.get(key)
+    return !!points && points.length >= minPoints
+  }
+
   return {
     sparklineCache,
     getSensorKey,
     loadInitialData,
     initialLoadInFlight,
+    getSparklineForDisplay,
+    hasMinSparklineData,
   }
 }

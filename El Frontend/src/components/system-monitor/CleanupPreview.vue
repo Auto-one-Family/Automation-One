@@ -190,7 +190,7 @@ function severityLabel(severity: string): string {
   padding: 1.25rem;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   margin-top: 1rem;
 }
 
@@ -228,7 +228,7 @@ function severityLabel(severity: string): string {
 
 .severity-badge {
   padding: 0.25rem 0.75rem;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   font-size: 0.75rem;
   font-weight: 500;
 }
@@ -290,7 +290,7 @@ function severityLabel(severity: string): string {
   padding: 0.75rem;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: rgba(255, 255, 255, 0.7);
   cursor: pointer;
   transition: all 0.3s ease;
@@ -314,7 +314,7 @@ function severityLabel(severity: string): string {
   padding: 1rem;
   background: rgba(251, 191, 36, 0.1);
   border: 1px solid rgba(251, 191, 36, 0.3);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .large-stats p {
@@ -340,7 +340,7 @@ function severityLabel(severity: string): string {
 .sample-info {
   padding: 1rem;
   background: rgba(255, 255, 255, 0.02);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .sample-info > p {
@@ -371,7 +371,7 @@ function severityLabel(severity: string): string {
 
 .sample-events::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .sample-events::-webkit-scrollbar-thumb:hover {
@@ -386,7 +386,7 @@ function severityLabel(severity: string): string {
   padding: 0.75rem;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: white;
   font-weight: 500;
   cursor: pointer;

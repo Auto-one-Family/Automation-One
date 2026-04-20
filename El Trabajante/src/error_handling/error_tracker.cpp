@@ -248,12 +248,21 @@ void ErrorTracker::clearErrors() {
 // HELPER METHODS
 // ============================================
 void ErrorTracker::addToBuffer(uint16_t error_code, ErrorSeverity severity, const char* message) {
+  // PKG-16 (INC-2026-04-11-ea5484): Null-safety defensive under OOM.
+  // Arduino String::c_str() can surface as nullptr when an upstream concat
+  // failed to allocate (observed in field log as '[ERRTRAK] <null>' bursts
+  // immediately preceding a LoadProhibited crash). strcmp/strncpy on NULL is
+  // undefined and has been the smoking-gun crash candidate. Fall back to a
+  // constant literal so dedup and buffer writes stay well-defined even when
+  // the caller lost its message under heap pressure.
+  const char* safe_message = (message != nullptr) ? message : "<oom-fallback>";
+
   // Check if this error already exists in recent entries (last 5) - occurrence counting
   for (int i = 0; i < 5 && i < (int)error_count_; i++) {
     int check_index = (error_buffer_index_ - 1 - i + MAX_ERROR_ENTRIES) % MAX_ERROR_ENTRIES;
     ErrorEntry& entry = error_buffer_[check_index];
     
-    if (entry.error_code == error_code && strcmp(entry.message, message) == 0) {
+    if (entry.error_code == error_code && strcmp(entry.message, safe_message) == 0) {
       entry.occurrence_count++;
       entry.timestamp = millis();  // Update timestamp
       return;  // Don't add duplicate
@@ -265,7 +274,7 @@ void ErrorTracker::addToBuffer(uint16_t error_code, ErrorSeverity severity, cons
   error_buffer_[index].timestamp = millis();
   error_buffer_[index].error_code = error_code;
   error_buffer_[index].severity = severity;
-  strncpy(error_buffer_[index].message, message, sizeof(error_buffer_[index].message) - 1);
+  strncpy(error_buffer_[index].message, safe_message, sizeof(error_buffer_[index].message) - 1);
   error_buffer_[index].message[sizeof(error_buffer_[index].message) - 1] = '\0';
   error_buffer_[index].occurrence_count = 1;
   
@@ -279,10 +288,15 @@ void ErrorTracker::addToBuffer(uint16_t error_code, ErrorSeverity severity, cons
 }
 
 void ErrorTracker::logErrorToLogger(uint16_t error_code, ErrorSeverity severity, const char* message) {
-  String log_msg = "[" + String(error_code) + "] [" + 
-                   String(getCategoryString(error_code)) + "] " + 
-                   String(message);
-  
+  // PKG-16: defensive against callers that pass nullptr (e.g. reason.c_str()
+  // after failed String concat under OOM). Logger itself also guards, but we
+  // make intent explicit here to produce a searchable '<oom-fallback>' marker
+  // instead of an empty tail.
+  const char* safe_message = (message != nullptr) ? message : "<oom-fallback>";
+  String log_msg = "[" + String(error_code) + "] [" +
+                   String(getCategoryString(error_code)) + "] " +
+                   String(safe_message);
+
   switch (severity) {
     case ERROR_SEVERITY_WARNING:
       LOG_W(TAG, log_msg.c_str());

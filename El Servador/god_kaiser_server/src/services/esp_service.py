@@ -34,6 +34,7 @@ from ..db.models.esp import ESPDevice
 from ..db.repositories import ESPRepository
 from ..db.repositories.audit_log_repo import AuditLogRepository
 from ..mqtt.publisher import Publisher
+from .event_contract_serializers import serialize_config_response_event
 
 logger = get_logger(__name__)
 
@@ -365,6 +366,92 @@ class ESPService:
     # Commands
     # =========================================================================
 
+    @staticmethod
+    def _is_mock_device(device: ESPDevice, device_id: str) -> bool:
+        hardware_type = str(getattr(device, "hardware_type", "") or "").upper()
+        if hardware_type == "MOCK_ESP32":
+            return True
+        return device_id.startswith("MOCK_") or device_id.startswith("ESP_MOCK_")
+
+    @staticmethod
+    def _infer_config_response_type(config: Dict[str, Any]) -> str:
+        sensor_count = len(config.get("sensors", []))
+        actuator_count = len(config.get("actuators", []))
+        offline_rule_count = len(config.get("offline_rules", []))
+        if sensor_count > 0 and actuator_count == 0 and offline_rule_count == 0:
+            return "sensor"
+        if actuator_count > 0 and sensor_count == 0 and offline_rule_count == 0:
+            return "actuator"
+        return "system"
+
+    @staticmethod
+    def _infer_config_response_count(config: Dict[str, Any], config_type: str) -> int:
+        if config_type == "sensor":
+            return len(config.get("sensors", []))
+        if config_type == "actuator":
+            return len(config.get("actuators", []))
+        return (
+            len(config.get("sensors", []))
+            + len(config.get("actuators", []))
+            + len(config.get("offline_rules", []))
+        )
+
+    def _strip_inconsistent_offline_rules(
+        self,
+        config: Dict[str, Any],
+        device_id: str,
+        correlation_id: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        AUT-59: Remove offline_rules whose actuator/sensor GPIOs are absent
+        from the config frame.  Mutates config["offline_rules"] in place and
+        returns details of stripped rules (empty list when everything is clean).
+
+        This is a defense-in-depth guard — the primary validation lives in
+        ConfigPayloadBuilder._validate_offline_rules_consistency.
+        """
+        offline_rules = config.get("offline_rules")
+        if not offline_rules:
+            return []
+
+        actuator_gpios = {int(a["gpio"]) for a in config.get("actuators", []) if "gpio" in a}
+        sensor_gpios = {int(s["gpio"]) for s in config.get("sensors", []) if "gpio" in s}
+
+        consistent = []
+        stripped: List[Dict[str, Any]] = []
+
+        for rule in offline_rules:
+            a_gpio = rule.get("actuator_gpio")
+            s_gpio = rule.get("sensor_gpio")
+            drop = False
+
+            if a_gpio is not None and int(a_gpio) not in actuator_gpios:
+                drop = True
+            if s_gpio is not None and int(s_gpio) not in sensor_gpios:
+                drop = True
+
+            if drop:
+                stripped.append({
+                    "actuator_gpio": a_gpio,
+                    "sensor_gpio": s_gpio,
+                    "sensor_value_type": rule.get("sensor_value_type", ""),
+                })
+            else:
+                consistent.append(rule)
+
+        if stripped:
+            config["offline_rules"] = consistent
+            logger.warning(
+                "AUT-59: Stripped %d inconsistent offline_rules from config for %s "
+                "(correlation_id=%s): %s",
+                len(stripped),
+                device_id,
+                correlation_id,
+                stripped,
+            )
+
+        return stripped
+
     async def send_config(
         self,
         device_id: str,
@@ -447,8 +534,19 @@ class ESPService:
                     "MQTT broker will queue message until device reconnects."
                 )
 
-        # Publish config via MQTT (inject correlation_id for Phase 3 tracking)
-        config_with_correlation = {**config, "correlation_id": correlation_id}
+        # AUT-59: Defense-in-depth — strip offline_rules that reference GPIOs
+        # absent from the same config frame before publishing.
+        stripped = self._strip_inconsistent_offline_rules(config, device_id, correlation_id)
+
+        # Publish config via MQTT with stable intent handles for contract tracking.
+        # Keep correlation_id as primary key and mirror it in request_id/intent_id
+        # for firmware paths that still rely on those fields.
+        config_with_correlation = {
+            **config,
+            "correlation_id": correlation_id,
+            "request_id": correlation_id,
+            "intent_id": correlation_id,
+        }
         logger.debug(
             "Config payload for %s: %s",
             device_id,
@@ -497,6 +595,30 @@ class ESPService:
             except Exception as audit_err:
                 logger.warning(f"Failed to write audit log for config publish: {audit_err}")
 
+            # AUT-59: Audit + WS for stripped offline_rules
+            if stripped:
+                try:
+                    audit_repo_strip = AuditLogRepository(self.esp_repo.session)
+                    await audit_repo_strip.create(
+                        event_type=AuditEventType.CONFIG_OFFLINE_RULES_STRIPPED,
+                        severity=AuditSeverity.WARNING,
+                        source_type=AuditSourceType.ESP32,
+                        source_id=device_id,
+                        status="warning",
+                        message=(
+                            f"AUT-59: {len(stripped)} offline_rules stripped from config "
+                            f"for {device_id} (referenced GPIOs absent in config frame)"
+                        ),
+                        correlation_id=correlation_id,
+                        details={
+                            "esp_id": device_id,
+                            "stripped_rules": stripped,
+                            "correlation_id": correlation_id,
+                        },
+                    )
+                except Exception as audit_err:
+                    logger.warning(f"Failed to write audit log for stripped rules: {audit_err}")
+
             # WebSocket broadcast: config published
             try:
                 from ..websocket.manager import WebSocketManager
@@ -508,9 +630,30 @@ class ESPService:
                         "esp_id": device_id,
                         "config_keys": list(config.keys()),
                         "correlation_id": correlation_id,
+                        "queued": not is_online,
+                        "device_status": device.status or "unknown",
+                        "offline_rules_stripped": len(stripped) if stripped else 0,
                     },
                     correlation_id=correlation_id,
                 )
+                if self._is_mock_device(device, device_id):
+                    config_type = self._infer_config_response_type(config)
+                    item_count = self._infer_config_response_count(config, config_type)
+                    mock_ack_payload = serialize_config_response_event(
+                        esp_id=device_id,
+                        config_type=config_type,
+                        status="success",
+                        count=item_count,
+                        failed_count=0,
+                        message="Mock-ESP Konfiguration serverseitig bestaetigt",
+                        timestamp=int(datetime.now(timezone.utc).timestamp()),
+                        correlation_id=correlation_id,
+                    )
+                    await ws_manager.broadcast(
+                        "config_response",
+                        mock_ack_payload,
+                        correlation_id=correlation_id,
+                    )
             except Exception as e:
                 logger.warning(f"WebSocket broadcast config_published failed for {device_id}: {e}")
         else:

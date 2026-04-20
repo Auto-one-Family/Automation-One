@@ -613,7 +613,7 @@ function isProcessing(deviceId: string): boolean {
   font-weight: 600;
   color: white;
   background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-3));
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

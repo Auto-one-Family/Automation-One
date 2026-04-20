@@ -28,7 +28,7 @@ import { useAuthStore } from '@/shared/stores/auth.store'
 const logger = createLogger('NotificationInboxStore')
 
 /** Filter tabs in the drawer */
-export type InboxFilter = 'all' | 'critical' | 'warning' | 'system'
+export type InboxFilter = 'all' | 'critical' | 'warning' | 'info'
 
 /** Source filter: null = all, or backend source value. "__system__" = manual|system|device_event|autoops */
 export type SourceFilterValue = string | null
@@ -88,7 +88,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
             return n.severity === 'critical'
           case 'warning':
             return n.severity === 'warning'
-          case 'system':
+          case 'info':
             return n.severity === 'info'
           default:
             return true
@@ -356,6 +356,24 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     }
     if (data.read_at !== undefined) {
       notifications.value[idx].read_at = data.read_at as string | null
+    }
+    if (data.metadata !== undefined) {
+      notifications.value[idx].metadata = (data.metadata as Record<string, unknown>) || {}
+    }
+    if (data.title !== undefined) {
+      notifications.value[idx].title = data.title as string
+    }
+    if (data.body !== undefined) {
+      notifications.value[idx].body = (data.body as string) || null
+    }
+    if (data.source !== undefined) {
+      notifications.value[idx].source = data.source as NotificationDTO['source']
+    }
+    if (data.category !== undefined) {
+      notifications.value[idx].category = data.category as NotificationDTO['category']
+    }
+    if (data.updated_at !== undefined) {
+      notifications.value[idx].updated_at = data.updated_at as string | null
     }
     // Phase 4B: Alert lifecycle fields
     if (data.status !== undefined) {

@@ -54,7 +54,8 @@ Neuer Auftrag / Problem
 2. Issue enthaelt: Kontextblock mit Repo-Evidenz, Akzeptanzkriterien, Testhinweise
 3. Kurzer verify-plan auf den betroffenen Diff-Umfang
 4. Dev-Agent implementiert (ggf. via `/do` Skill fuer praezise Ausfuehrung)
-5. Build-Verifikation gemaess Verifikationskriterien-Tabelle in CLAUDE.md
+5. Build-Verifikation gemaess Verifikationskriterien-Tabelle
+6. Kontext-Analyse + /updatedocs (Pflicht — siehe Abschnitt 13) in CLAUDE.md
 
 **Dokumentation im Issue:** "Fast-Track gemaess TM-Regel — Begruendung: [einzeilige Erklaerung]"
 
@@ -119,7 +120,8 @@ Neuer Auftrag / Problem
    - frontend-dev bei UI-Aenderungen (haengt von server-dev REST/WS ab)
 6. /do Skill fuer praezise Plan-Ausfuehrung wo noetig
 7. Build-Verifikation gemaess Verifikationskriterien-Tabelle
-8. Zurueck zu F1 Test-Flow zur Verifikation
+8. Kontext-Analyse + /updatedocs (Pflicht — siehe Abschnitt 13)
+9. Zurueck zu F1 Test-Flow zur Verifikation
 ```
 
 ### Agent-Abhaengigkeiten (Reihenfolge bei Cross-Layer)
@@ -298,6 +300,7 @@ Agenten laden automatisch die Rules ihres Bereichs. TM muss diese kennen:
 | `/git-commit` | Nach Implementierung — TM referenziert: "Commit nach Verifikation" |
 | `agent-manager` | Bei Agent-Qualitaetsproblemen — TM kann IST/SOLL-Pruefung anfordern |
 | `/ki-audit` | Bei Verdacht auf KI-Fehler in bestehendem Code — TM kann Audit anfordern |
+| `/updatedocs` | **Pflicht nach jeder Implementierung** — aktualisiert alle betroffenen Docs chirurgisch (Abschnitt 13) |
 
 ---
 
@@ -322,6 +325,59 @@ Ziel: spaetere Retrospektive ohne grossen Overhead.
 - **Jedes Issue muss ohne muendliche Erklaerung verstaendlich sein** (selbsttragend)
 - **Conventional Commits** — fix/feat/chore/refactor/docs/test
 - **Build-Verifikation** — kein Commit ohne gruene Verifikation (Tabelle in CLAUDE.md)
+
+---
+
+---
+
+## 13. Post-Implementierung: Kontext-Analyse + /updatedocs (Pflicht)
+
+Nach **jeder** Code-Aenderung durch einen Dev-Agenten — egal ob Fast-Track, F2 oder auto-debugger — ist folgender Abschluss-Schritt Pflicht:
+
+### Schritt 1: Kontext-Analyse
+
+Der ausfuehrende Agent (oder ein frischer Agent-Aufruf) analysiert die gerade durchgefuehrten Aenderungen im Gesamtkontext:
+
+- Welche Dateien wurden geaendert?
+- Welcher Aenderungstyp liegt vor? (Neuer Service, API-Endpoint, MQTT-Topic, Port, Error-Code, NVS-Key, WebSocket-Event, Agent/Skill, Docker-Config, Log-Pfad)
+- Welche Abhaengigkeiten zu Dokumentationsdateien bestehen?
+
+### Schritt 2: /updatedocs ausfuehren
+
+`/updatedocs` wird mit einer Zusammenfassung der Aenderungen aufgerufen. Der Skill:
+
+1. Matcht den Aenderungstyp gegen seine **Abhaengigkeits-Matrix** (11 Kategorien, von Docker-Service bis NVS-Key)
+2. Identifiziert ALLE betroffenen Dokumentationsdateien im Repo
+3. Liest jede betroffene Datei KOMPLETT
+4. Editiert **chirurgisch** — nur betroffene Zeilen, bestehendes Pattern exakt kopieren
+5. Liefert einen Bericht: welche Dateien geaendert, was pro Datei aktualisiert
+
+### Betroffene Dokumente (Beispiele aus der Matrix)
+
+| Aenderungstyp | Typisch betroffene Docs |
+|---------------|------------------------|
+| API-Endpoint | `reference/api/REST_ENDPOINTS.md`, Frontend/Server Skills |
+| MQTT-Topic | `reference/api/MQTT_TOPICS.md`, `El Trabajante/docs/Mqtt_Protocoll.md`, MQTT/ESP32 Skills |
+| Error-Code | `reference/errors/ERROR_CODES.md` |
+| WebSocket-Event | `reference/api/WEBSOCKET_EVENTS.md`, Frontend Skill |
+| Docker-Service/Port | `rules/docker-rules.md`, `SYSTEM_OPERATIONS_REFERENCE.md`, `LOG_LOCATIONS.md` |
+| Neuer Agent/Skill | `CLAUDE.md` Agent/Skill-Tabelle, `agents/Readme.md`, `skills/README.md` |
+| NVS-Key | `El Trabajante/docs/NVS_KEYS.md`, ESP32 MODULE_REGISTRY |
+
+### Regeln
+
+- /updatedocs aendert **nur Dokumentation**, keinen Code
+- /updatedocs schreibt nie Dateien neu, sondern editiert chirurgisch
+- Wenn ein Dev-Agent Code aendert aber /updatedocs nicht aufgerufen wird: **Workflow-Verletzung**
+- Bei Unsicherheit ob Docs betroffen sind: `grep -r "geaenderter_wert" .claude/ --include="*.md" -l`
+
+### Integration in Issue-Akzeptanzkriterien
+
+Jedes Implementierungs-Issue MUSS als letztes Akzeptanzkriterium enthalten:
+
+```
+- [ ] /updatedocs ausgefuehrt — betroffene Docs aktualisiert
+```
 
 ---
 

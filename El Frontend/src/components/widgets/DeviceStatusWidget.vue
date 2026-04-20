@@ -111,7 +111,7 @@ const onlinePercentage = computed(() =>
 }
 
 .device-status-widget__gauge-label {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-family: var(--font-mono);
   color: var(--color-text-muted);
   text-transform: uppercase;

@@ -318,10 +318,10 @@ watch(() => palette.query.value, () => {
 
 .palette__hint kbd {
   padding: 1px 4px;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   background: var(--color-bg-tertiary, #15151f);
   border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.06));
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   font-family: inherit;
 }
 

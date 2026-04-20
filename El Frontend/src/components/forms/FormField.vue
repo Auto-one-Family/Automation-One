@@ -126,7 +126,7 @@ function handleInput(value: unknown): void {
 }
 
 .form-field__label {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--color-text-secondary);
 }
@@ -143,7 +143,7 @@ function handleInput(value: unknown): void {
   appearance: none;
   -webkit-appearance: none;
   background: var(--color-bg-tertiary);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   outline: none;
 }
 
@@ -159,19 +159,19 @@ function handleInput(value: unknown): void {
 
 .form-field__range-value {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--color-text-primary);
   min-width: 40px;
   text-align: right;
 }
 
 .form-field__helper {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
 .form-field__error {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-status-error);
 }
 </style>

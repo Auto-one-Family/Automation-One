@@ -416,7 +416,7 @@ function handleDragEnd() {
 
 .unassigned-tray__cards::-webkit-scrollbar-thumb {
   background: var(--glass-border);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 
 /* ── Device Card ── */
@@ -520,7 +520,7 @@ function handleDragEnd() {
   display: flex;
   align-items: center;
   gap: 2px;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 
@@ -530,7 +530,7 @@ function handleDragEnd() {
 
 .unassigned-card__row-sensors {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-variant-numeric: tabular-nums;
   color: var(--color-text-secondary);
   white-space: nowrap;
@@ -545,7 +545,7 @@ function handleDragEnd() {
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--color-text-muted);
   opacity: 0;
   transition: all var(--transition-fast);

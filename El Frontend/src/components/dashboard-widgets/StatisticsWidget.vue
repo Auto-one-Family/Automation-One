@@ -330,7 +330,7 @@ function fmt(value: number | null): string {
 .statistics-widget__quality-bar {
   display: flex;
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
   background: var(--color-bg-tertiary);
 }

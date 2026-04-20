@@ -416,12 +416,13 @@ export const useDashboardStore = defineStore('dashboard', () => {
   function deleteLayout(layoutId: string) {
     const layout = layouts.value.find(l => l.id === layoutId)
     const serverId = layout?.serverId
+    const shouldDeleteRemotely = layout ? shouldDeleteOnServer(layout) : false
     layouts.value = layouts.value.filter(l => l.id !== layoutId)
     if (activeLayoutId.value === layoutId) {
       activeLayoutId.value = layouts.value[0]?.id ?? null
     }
     persistLayouts()
-    if (serverId) deleteLayoutFromServer(serverId)
+    if (serverId && shouldDeleteRemotely) deleteLayoutFromServer(serverId)
   }
 
   /** Export layout as JSON string (ensures description is always present) */
@@ -570,14 +571,37 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
         const serverIdSet = new Set(serverLayouts.map((layout) => layout.serverId).filter(Boolean))
         const localOnly = localSnapshot.filter((layout) => !layout.serverId || !serverIdSet.has(layout.serverId))
-        const normalizedLocalOnly = localOnly.map((layout) => ({
-          ...layout,
-          syncFlags: buildSyncFlags(
-            layout.serverId,
-            layout.syncFlags?.stale_server_id ?? null,
-            layout.syncFlags ?? {},
-          ),
-        }))
+        const normalizedLocalOnly = localOnly.map((layout) => {
+          if (layout.serverId && !serverIdSet.has(layout.serverId)) {
+            const staleServerId = layout.serverId
+            const clearedServerIdLayout: DashboardLayout = {
+              ...layout,
+              serverId: undefined,
+            }
+            return {
+              ...clearedServerIdLayout,
+              syncFlags: buildSyncFlags(undefined, staleServerId, {
+                ...layout.syncFlags,
+                status: 'local_only',
+                local_only: true,
+                server_synced: false,
+                dirty: true,
+                conflict: false,
+                stale_server_id: staleServerId,
+                last_sync_message: `Server-Dashboard fehlt (serverId=${staleServerId}), Neu-Sync erforderlich`,
+              }),
+            }
+          }
+
+          return {
+            ...layout,
+            syncFlags: buildSyncFlags(
+              layout.serverId,
+              layout.syncFlags?.stale_server_id ?? null,
+              layout.syncFlags ?? {},
+            ),
+          }
+        })
 
         layouts.value = [...mergedLayouts, ...normalizedLocalOnly]
         persistLayouts()
@@ -630,6 +654,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
   /** Per-layout debounce timers (prevents losing edits when switching dashboards) */
   const _saveDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const _syncInFlight = new Set<string>()
+  const _deleteInFlightServerIds = new Set<string>()
   const SAVE_DEBOUNCE_MS = 2000
 
   /** Build server payload from a local layout */
@@ -675,6 +700,13 @@ export const useDashboardStore = defineStore('dashboard', () => {
       syncFlags: updater(current),
     }
     persistLayouts()
+  }
+
+  function shouldDeleteOnServer(layout: DashboardLayout): boolean {
+    if (!layout.serverId) return false
+    if (layout.syncFlags?.status === 'local_only') return false
+    if (layout.syncFlags?.stale_server_id === layout.serverId) return false
+    return true
   }
 
   async function performSyncLayout(
@@ -818,6 +850,11 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
   /** Delete layout from server (fire-and-forget, 404 = already gone = OK) */
   async function deleteLayoutFromServer(serverId: string): Promise<void> {
+    if (_deleteInFlightServerIds.has(serverId)) {
+      logger.debug(`Skip duplicate delete request for server dashboard ${serverId}`)
+      return
+    }
+    _deleteInFlightServerIds.add(serverId)
     try {
       await dashboardsApi.delete(serverId)
       logger.debug(`Deleted layout from server (serverId=${serverId})`)
@@ -828,6 +865,8 @@ export const useDashboardStore = defineStore('dashboard', () => {
       } else {
         logger.warn(`Failed to delete layout from server (serverId=${serverId})`, e)
       }
+    } finally {
+      _deleteInFlightServerIds.delete(serverId)
     }
   }
 
@@ -932,13 +971,20 @@ export const useDashboardStore = defineStore('dashboard', () => {
    */
   function bulkDeleteLayouts(layoutIds: string[]): number {
     let deleted = 0
+    const serverIdsToDelete = new Set<string>()
     for (const id of layoutIds) {
       const layout = layouts.value.find(l => l.id === id)
       if (!layout) continue
       const serverId = layout.serverId
+      const shouldDeleteRemotely = shouldDeleteOnServer(layout)
       layouts.value = layouts.value.filter(l => l.id !== id)
-      if (serverId) deleteLayoutFromServer(serverId)
+      if (serverId && shouldDeleteRemotely) {
+        serverIdsToDelete.add(serverId)
+      }
       deleted++
+    }
+    for (const serverId of serverIdsToDelete) {
+      void deleteLayoutFromServer(serverId)
     }
     if (activeLayoutId.value && !layouts.value.find(l => l.id === activeLayoutId.value)) {
       activeLayoutId.value = layouts.value[0]?.id ?? null

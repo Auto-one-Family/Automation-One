@@ -47,6 +47,8 @@ class PHSensorProcessor(BaseSensorProcessor):
     RECOMMENDED_TIMEOUT_SECONDS = 0  # No timeout for on-demand sensors
     RECOMMENDED_INTERVAL_SECONDS = 0  # No automatic measurements
     SUPPORTS_ON_DEMAND = True
+    RECOMMENDED_FRESHNESS_HOURS = 24
+    RECOMMENDED_CALIBRATION_INTERVAL_DAYS = 30
 
     # ESP32 ADC configuration
     ADC_MAX = 4095  # 12-bit ADC

@@ -68,6 +68,8 @@ class MoistureSensorProcessor(BaseSensorProcessor):
     RECOMMENDED_TIMEOUT_SECONDS = 300  # 5 minutes timeout
     RECOMMENDED_INTERVAL_SECONDS = 60  # Read every 60 seconds
     SUPPORTS_ON_DEMAND = False
+    RECOMMENDED_FRESHNESS_HOURS = 2
+    RECOMMENDED_CALIBRATION_INTERVAL_DAYS = 90
 
     # ESP32 ADC configuration
     ADC_MAX = 4095  # 12-bit ADC (ESP32 ADC1: GPIO32-39 only, ADC2 conflicts with WiFi!)

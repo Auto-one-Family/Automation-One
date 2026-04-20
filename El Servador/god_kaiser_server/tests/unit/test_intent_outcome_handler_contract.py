@@ -358,3 +358,181 @@ async def test_missing_intent_id_is_normalized_and_persisted():
     assert captured_payloads[0]["intent_id"].startswith("missing-intent:ESP_12:")
     assert captured_payloads[0]["code"] == "CONTRACT_MISSING_INTENT_ID"
     assert captured_payloads[0]["retryable"] is False
+
+
+@pytest.mark.asyncio
+async def test_duplicate_intent_outcome_is_deduped_and_acked():
+    """AUT-56: Verify that duplicate MQTT delivery of the same intent_outcome
+    is idempotently ACKed without duplicate audit/WS events."""
+    handler = IntentOutcomeHandler()
+    payload = {
+        "intent_id": "intent-dup-test",
+        "correlation_id": "corr-dup-test",
+        "flow": "command",
+        "outcome": "applied",
+        "ts": 1735818000,
+        "generation": 3,
+        "seq": 10,
+    }
+
+    session = SimpleNamespace(commit=AsyncMock())
+    contract_repo = MagicMock()
+    contract_repo.upsert_intent = AsyncMock()
+    contract_repo.upsert_outcome = AsyncMock(
+        return_value=(
+            SimpleNamespace(
+                outcome="applied",
+                correlation_id="corr-dup-test",
+                flow="command",
+                code="COMMAND_ACCEPTED",
+                reason="ok",
+                retryable=False,
+                generation=3,
+                seq=10,
+                epoch=1,
+                ttl_ms=0,
+                ts=1735818000,
+                contract_version=2,
+                semantic_mode="target",
+                legacy_status="processing",
+                target_status="applied",
+                is_final=False,
+                intent_id="intent-dup-test",
+                esp_id="ESP_DUP",
+                first_seen_at=None,
+                terminal_at=None,
+            ),
+            True,  # is_stale=True — this IS the dedup signal
+        )
+    )
+    audit_repo = MagicMock()
+    audit_repo.log_device_event = AsyncMock()
+
+    @asynccontextmanager
+    async def fake_resilient_session():
+        yield session
+
+    with (
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.TopicBuilder.parse_intent_outcome_topic",
+            return_value={"esp_id": "ESP_DUP"},
+        ),
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.resilient_session",
+            fake_resilient_session,
+        ),
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.CommandContractRepository",
+            return_value=contract_repo,
+        ),
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.AuditLogRepository",
+            return_value=audit_repo,
+        ),
+    ):
+        result = await handler.handle_intent_outcome(
+            "kaiser/god/esp/ESP_DUP/system/intent_outcome",
+            payload,
+        )
+
+    assert result is True, "Duplicate must be ACKed (return True)"
+    contract_repo.upsert_outcome.assert_awaited_once()
+    audit_repo.log_device_event.assert_not_called(), "Stale duplicate must not create audit entry"
+    session.commit.assert_awaited_once(), "Stale duplicate must still commit the transaction"
+
+
+@pytest.mark.asyncio
+async def test_recovered_intent_outcome_increments_metrics():
+    """AUT-56: NVS-replayed outcome (recovered=True, retry_count>0)
+    must still be persisted and broadcast normally."""
+    handler = IntentOutcomeHandler()
+    payload = {
+        "intent_id": "intent-recovered",
+        "correlation_id": "corr-recovered",
+        "flow": "command",
+        "outcome": "failed",
+        "code": "EXECUTE_FAIL",
+        "reason": "Actuator command execution failed",
+        "ts": 1735818000,
+        "generation": 2,
+        "seq": 5,
+        "retry_count": 3,
+        "recovered": True,
+        "delivery_mode": "recovered",
+        "outcome_drop_count_critical": 1,
+    }
+
+    outcome_row = SimpleNamespace(
+        outcome="failed",
+        correlation_id="corr-recovered",
+        flow="command",
+        code="EXECUTE_FAIL",
+        reason="Actuator command execution failed",
+        retryable=False,
+        generation=2,
+        seq=5,
+        epoch=1,
+        ttl_ms=0,
+        ts=1735818000,
+        contract_version=2,
+        semantic_mode="target",
+        legacy_status="failed",
+        target_status="failed",
+        is_final=True,
+        intent_id="intent-recovered",
+        esp_id="ESP_REC",
+        first_seen_at=None,
+        terminal_at=None,
+    )
+    session = SimpleNamespace(commit=AsyncMock())
+    contract_repo = MagicMock()
+    contract_repo.upsert_intent = AsyncMock()
+    contract_repo.upsert_outcome = AsyncMock(return_value=(outcome_row, False))
+    audit_repo = MagicMock()
+    audit_repo.log_device_event = AsyncMock()
+
+    @asynccontextmanager
+    async def fake_resilient_session():
+        yield session
+
+    with (
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.TopicBuilder.parse_intent_outcome_topic",
+            return_value={"esp_id": "ESP_REC"},
+        ),
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.resilient_session",
+            fake_resilient_session,
+        ),
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.CommandContractRepository",
+            return_value=contract_repo,
+        ),
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.AuditLogRepository",
+            return_value=audit_repo,
+        ),
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.WebSocketManager",
+            create=True,
+        ),
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.increment_outcome_retry_count"
+        ) as mock_retry_metric,
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.increment_outcome_recovered_count"
+        ) as mock_recovered_metric,
+        patch(
+            "src.mqtt.handlers.intent_outcome_handler.set_outcome_drop_count_critical"
+        ) as mock_drop_metric,
+    ):
+        result = await handler.handle_intent_outcome(
+            "kaiser/god/esp/ESP_REC/system/intent_outcome",
+            payload,
+        )
+
+    assert result is True
+    audit_repo.log_device_event.assert_awaited_once()
+    mock_retry_metric.assert_called_once_with(3)
+    mock_recovered_metric.assert_called_once()
+    mock_drop_metric.assert_called_once_with("ESP_REC", 1)

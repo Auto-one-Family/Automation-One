@@ -295,6 +295,9 @@ class ActuatorStatusHandler:
                         "emergency": payload.get("emergency", "normal"),
                         "timestamp": esp32_timestamp_raw,
                     }
+                    command_source = payload.get("command_source")
+                    if isinstance(command_source, str) and command_source.strip():
+                        broadcast_data["command_source"] = command_source.strip()
                     if correlation_id:
                         broadcast_data["correlation_id"] = correlation_id
                     await ws_manager.broadcast("actuator_status", broadcast_data)

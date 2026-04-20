@@ -133,6 +133,9 @@
 #define ERROR_DNS_FAILED            3031
 #define ERROR_CONNECTION_LOST       3032
 
+// AUT-62: Emergency fail-closed rejection (3500-3509)
+#define ERROR_EMERGENCY_REJECTED_NO_TOKEN 3501
+
 // ============================================
 // APPLICATION ERROR CODES (4000-4999)
 // ============================================
@@ -445,6 +448,7 @@ inline const char* getErrorDescription(uint16_t error_code) {
     case ERROR_NETWORK_UNREACHABLE: return "Network is unreachable";
     case ERROR_DNS_FAILED: return "DNS lookup failed (hostname not resolved)";
     case ERROR_CONNECTION_LOST: return "Network connection lost";
+    case ERROR_EMERGENCY_REJECTED_NO_TOKEN: return "Emergency rejected: no token configured (fail-closed prod mode)";
 
     // APPLICATION (4000-4999)
     case ERROR_STATE_INVALID: return "Invalid system state";

@@ -650,7 +650,7 @@ async function saveQuickSettings(): Promise<void> {
 }
 
 .rule-card-compact__field-label {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--color-text-muted);
@@ -719,7 +719,7 @@ async function saveQuickSettings(): Promise<void> {
 }
 
 .rule-card-compact__history-title {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--color-text-muted);
@@ -745,7 +745,7 @@ async function saveQuickSettings(): Promise<void> {
 }
 
 .rule-card-compact__history-command {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--color-text-secondary);
@@ -760,7 +760,7 @@ async function saveQuickSettings(): Promise<void> {
 }
 
 .rule-card-compact__history-time {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 
@@ -837,7 +837,7 @@ async function saveQuickSettings(): Promise<void> {
 }
 
 .rule-card-compact__name {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--color-text-primary);
   flex: 1;
@@ -847,7 +847,7 @@ async function saveQuickSettings(): Promise<void> {
 }
 
 .rule-card-compact__status {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 600;
   letter-spacing: 0.03em;
   flex-shrink: 0;
@@ -901,7 +901,7 @@ async function saveQuickSettings(): Promise<void> {
 }
 
 .rule-card-compact__badge {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary);
   padding: 2px 6px;
@@ -916,7 +916,7 @@ async function saveQuickSettings(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 

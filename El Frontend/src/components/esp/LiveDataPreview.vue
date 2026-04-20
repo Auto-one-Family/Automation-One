@@ -146,7 +146,7 @@ const QUALITY_COLORS: Record<string, string> = {
 
 .live-preview__value {
   font-family: var(--font-mono);
-  font-size: 24px;
+  font-size: var(--text-2xl);
   font-weight: 600;
   color: var(--color-text-primary);
   line-height: 1;
@@ -158,13 +158,13 @@ const QUALITY_COLORS: Record<string, string> = {
 
 .live-preview__unit {
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 
 .live-preview__quality {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   text-transform: uppercase;
   margin-left: auto;
 }

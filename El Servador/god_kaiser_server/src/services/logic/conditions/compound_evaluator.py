@@ -70,8 +70,13 @@ class CompoundConditionEvaluator(BaseConditionEvaluator):
         # Evaluate all sub-conditions
         results = []
         for idx, sub_condition in enumerate(sub_conditions):
-            # Set condition_index per sub-condition for correct hysteresis state keys
-            sub_context = {**context, "condition_index": idx}
+            # Set condition_index per sub-condition for correct hysteresis state keys.
+            # AUT-41: exclude _stale_reasons from shallow copy to prevent duplication
+            # during propagation — each sub-condition starts with a clean list.
+            sub_context = {
+                k: v for k, v in context.items() if k != "_stale_reasons"
+            }
+            sub_context["condition_index"] = idx
 
             # Find appropriate evaluator for this sub-condition
             cond_type = sub_condition.get("type", "unknown")
@@ -100,6 +105,10 @@ class CompoundConditionEvaluator(BaseConditionEvaluator):
                 for flag in _SIGNAL_FLAGS:
                     if sub_context.get(flag):
                         context[flag] = True
+                # AUT-41: propagate stale reasons from sub-context to parent context
+                sub_stale = sub_context.get("_stale_reasons")
+                if sub_stale:
+                    context.setdefault("_stale_reasons", []).extend(sub_stale)
             except Exception as e:
                 logger.error(
                     f"Error evaluating sub-condition {cond_type}: {e}",

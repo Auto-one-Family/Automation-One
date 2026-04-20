@@ -115,17 +115,16 @@ describe('getESPStatus', () => {
   })
 
   describe('priority ordering', () => {
-    it('status "online" takes precedence over old heartbeat', () => {
-      // Old heartbeat but server says online
+    it('status "online" is downgraded when heartbeat is too old', () => {
+      // Old heartbeat with stale server status should not stay online forever
       const ts = new Date(1_700_000_000_000 - 600_000).toISOString()
       const device = makeDevice({ status: 'online', last_seen: ts })
-      expect(getESPStatus(device)).toBe('online')
+      expect(getESPStatus(device)).toBe('offline')
     })
 
-    it('connected=true takes precedence over status "offline"', () => {
+    it('status "offline" takes precedence over connected=true', () => {
       const device = makeDevice({ status: 'offline', connected: true })
-      // connected is checked before offline — returns online
-      expect(getESPStatus(device)).toBe('online')
+      expect(getESPStatus(device)).toBe('offline')
     })
 
     it('error takes precedence over heartbeat timing', () => {
@@ -359,10 +358,9 @@ describe('getESPStatus - Advanced Priority Scenarios', () => {
     dateSpy.mockRestore()
   })
 
-  it('status "offline" loses to connected=true (connected checked first)', () => {
+  it('status "offline" wins against connected=true', () => {
     const device = makeDevice({ status: 'offline', connected: true })
-    // In getESPStatus: connected=true is checked before status=offline
-    expect(getESPStatus(device)).toBe('online')
+    expect(getESPStatus(device)).toBe('offline')
   })
 
   it('error via system_state ERROR ignores fresh heartbeat', () => {

@@ -2,18 +2,21 @@
 /**
  * QualityIndicator — Status Dot with Label
  *
- * Four states:
+ * Five states:
  * - good: green, steady
  * - warning: yellow, steady
  * - alarm: red, pulsing
+ * - stale: orange, steady (data outdated but device reachable)
  * - offline: gray, steady
  *
  * Used in SensorCards, SensorSatellites, and MonitorView.
  */
 
+import type { SensorStatus } from '@/utils/formatters'
+
 interface Props {
   /** Current quality status */
-  status: 'good' | 'warning' | 'alarm' | 'offline'
+  status: SensorStatus
   /** Show label text next to dot */
   showLabel?: boolean
   /** Size variant */
@@ -29,6 +32,7 @@ const statusLabels: Record<string, string> = {
   good: 'Normal',
   warning: 'Warnung',
   alarm: 'Alarm',
+  stale: 'Veraltet',
   offline: 'Offline',
 }
 
@@ -36,6 +40,7 @@ const statusTitles: Record<string, string> = {
   good: 'Normal: Werte im erwarteten Bereich',
   warning: 'Warnung: Wert nahe Schwellwert',
   alarm: 'Alarm: Schwellwert überschritten',
+  stale: 'Veraltet: Daten nicht mehr aktuell',
   offline: 'Offline: Keine Daten verfügbar',
 }
 </script>
@@ -93,6 +98,11 @@ const statusTitles: Record<string, string> = {
   animation: alarm-pulse 1.5s ease-in-out infinite;
 }
 
+.quality-indicator--stale .quality-indicator__dot {
+  background: rgb(251, 146, 60);
+  box-shadow: 0 0 4px rgba(251, 146, 60, 0.4);
+}
+
 .quality-indicator--offline .quality-indicator__dot {
   background: var(--color-status-offline);
   box-shadow: none;
@@ -124,6 +134,10 @@ const statusTitles: Record<string, string> = {
 
 .quality-indicator--alarm .quality-indicator__label {
   color: var(--color-status-alarm);
+}
+
+.quality-indicator--stale .quality-indicator__label {
+  color: rgb(251, 146, 60);
 }
 
 .quality-indicator--offline .quality-indicator__label {

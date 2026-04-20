@@ -70,6 +70,14 @@ const STATUS_DISPLAY: Record<ESPStatus, StatusDisplay> = {
 const HEARTBEAT_STALE_MS = 90_000   // 1.5x default 60s interval
 const HEARTBEAT_OFFLINE_MS = 300_000 // 5 minutes
 
+function statusFromHeartbeatAge(ts: string | null | undefined): ESPStatus | null {
+  if (!ts) return null
+  const age = Date.now() - new Date(ts).getTime()
+  if (age < HEARTBEAT_STALE_MS) return 'online'
+  if (age < HEARTBEAT_OFFLINE_MS) return 'stale'
+  return 'offline'
+}
+
 /**
  * Pure function: calculate ESP status from device data.
  * Use this in list iterations (v-for) where the composable can't be called per-item.
@@ -80,7 +88,6 @@ export function getESPStatus(device: ESPDevice): ESPStatus {
   const systemState = (device as any).system_state as string | undefined
   if (device.status === 'error' || systemState === 'ERROR') return 'error'
   if (device.status === 'safemode' || systemState === 'SAFE_MODE') return 'safemode'
-  if (device.status === 'online' || device.connected === true) return 'online'
   if (device.status === 'offline') return 'offline'
 
   // Priority 1.5: pending_approval — never show as 'online' via heartbeat fallback
@@ -88,25 +95,27 @@ export function getESPStatus(device: ESPDevice): ESPStatus {
   // status must remain 'unknown' until explicitly approved (BUG-06 fix)
   if (device.status === 'pending_approval') return 'unknown'
 
-  // Priority 2: "approved" status — device approved but no heartbeat yet
-  // Treat as online if last_seen is recent, otherwise offline
-  if (device.status === 'approved') {
-    const ts = device.last_seen || device.last_heartbeat
-    if (ts) {
-      const age = Date.now() - new Date(ts).getTime()
-      if (age < HEARTBEAT_OFFLINE_MS) return 'online'
-    }
-    return 'offline'
+  const ts = device.last_seen || device.last_heartbeat
+
+  // Priority 2: explicit online/connected — but still heartbeat-age aware.
+  // This prevents "stuck online" badges when the server status has not
+  // switched to offline yet (e.g. no LWT, timeout still pending).
+  if (device.status === 'online' || device.connected === true) {
+    const agedStatus = statusFromHeartbeatAge(ts)
+    return agedStatus ?? 'online'
   }
 
-  // Priority 3: Heartbeat-based timing (for devices without explicit status)
-  const ts = device.last_seen || device.last_heartbeat
-  if (ts) {
-    const age = Date.now() - new Date(ts).getTime()
-    if (age < HEARTBEAT_STALE_MS) return 'online'
-    if (age < HEARTBEAT_OFFLINE_MS) return 'stale'
-    return 'offline'
+  // Priority 3: "approved" status — device approved but no heartbeat yet
+  // Treat as online if last_seen is recent, otherwise offline.
+  if (device.status === 'approved') {
+    const agedStatus = statusFromHeartbeatAge(ts)
+    if (agedStatus === 'offline') return 'offline'
+    return 'online'
   }
+
+  // Priority 4: Heartbeat-based timing (for devices without explicit status)
+  const agedStatus = statusFromHeartbeatAge(ts)
+  if (agedStatus) return agedStatus
 
   return 'unknown'
 }

@@ -335,7 +335,7 @@ function handleTabClick(tabId: TabId) {
   min-width: 1.25rem;
   height: 1.25rem;
   padding: 0 0.375rem;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   font-size: 0.625rem;
   font-weight: 600;
   background-color: var(--color-bg-quaternary);
@@ -427,7 +427,7 @@ function handleTabClick(tabId: TabId) {
   width: 1rem;
   height: 1rem;
   position: relative;
-  z-index: 1;
+  z-index: var(--z-dropdown);
 }
 
 /* ============================================================================

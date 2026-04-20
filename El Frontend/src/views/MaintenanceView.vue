@@ -316,7 +316,7 @@ onUnmounted(() => {
   gap: 1rem;
   padding: 1rem;
   background: var(--bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
 }
 
@@ -365,7 +365,7 @@ onUnmounted(() => {
 .config-card {
   padding: 1rem;
   background: var(--bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
 }
 
@@ -424,7 +424,7 @@ onUnmounted(() => {
 
 .job-card {
   background: var(--bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   padding: 1rem;
 }
@@ -461,7 +461,7 @@ onUnmounted(() => {
   background: var(--primary-color);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   font-size: 0.875rem;
 }
@@ -525,7 +525,7 @@ onUnmounted(() => {
   padding: 0.5rem;
   background: var(--info-bg);
   color: var(--info-color);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 0.875rem;
 }
 

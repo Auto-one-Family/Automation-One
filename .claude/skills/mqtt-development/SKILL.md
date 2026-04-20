@@ -153,6 +153,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{category}/{gpio}/{action}
 | 7 | `actuator/{gpio}/response` | ESP→Server | 1 | `buildActuatorResponseTopic()` | - |
 | 8 | `actuator/{gpio}/alert` | ESP→Server | 1 | `buildActuatorAlertTopic()` | - |
 | 9 | `actuator/emergency` | Server→ESP | 1 | `buildActuatorEmergencyTopic()` | - |
+| 9a | `session/announce` | ESP→Server | 1 | *(direkt aus `mqtt_client.cpp`, kein TopicBuilder)* | - |
 | 10 | `system/heartbeat` | ESP→Server | 0 | `buildSystemHeartbeatTopic()` | `MQTT_TOPIC_ESP_HEARTBEAT` |
 | 11 | `system/heartbeat/ack` | Server→ESP | 0 | `buildSystemHeartbeatAckTopic()` | `MQTT_TOPIC_ESP_HEARTBEAT_ACK` |
 | 12 | `system/command` | Server→ESP | 2 | `buildSystemCommandTopic()` | `MQTT_TOPIC_ESP_SYSTEM_COMMAND` |
@@ -189,7 +190,7 @@ QoS 2: Exactly Once        → Commands (Duplikate = gefährlich!)
 | QoS | Topics | Grund |
 |-----|--------|-------|
 | **0** | `system/heartbeat`, `system/heartbeat/ack`, `system/diagnostics` | Regelmäßig, nächste Nachricht überschreibt |
-| **1** | `sensor/data`, `sensor/batch`, `sensor/response`, `actuator/status`, `actuator/response`, `actuator/alert`, `system/error`, `system/intent_outcome`, `system/intent_outcome/lifecycle`, `system/will`, alle `subzone/*` | Daten-Loss unerwünscht, Duplikate verarbeitbar |
+| **1** | `sensor/data`, `sensor/batch`, `sensor/response`, `actuator/status`, `actuator/response`, `actuator/alert`, `session/announce`, `system/error`, `system/intent_outcome`, `system/intent_outcome/lifecycle`, `system/will`, alle `subzone/*` | Daten-Loss unerwünscht, Duplikate verarbeitbar |
 | **2** | `sensor/command`, `actuator/command`, `system/command`, `config`, `config_response`, `broadcast/emergency` | Duplikate können Schaden verursachen |
 
 ### Server-Konstanten (`constants.py`, u. a. QoS-Zeilen ~207–211)

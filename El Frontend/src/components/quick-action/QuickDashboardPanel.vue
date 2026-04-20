@@ -305,7 +305,7 @@ function navigateToEditor(dashboardId?: string): void {
 
 .qa-dash-panel__group-label {
   display: block;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -369,7 +369,7 @@ function navigateToEditor(dashboardId?: string): void {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 

@@ -578,7 +578,7 @@ async function handleLogout() {
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   transition: all var(--transition-fast);
   white-space: nowrap;
@@ -604,7 +604,7 @@ async function handleLogout() {
 }
 
 .header__type-count {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-variant-numeric: tabular-nums;
   opacity: 0.6;
 }

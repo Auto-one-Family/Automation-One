@@ -259,7 +259,7 @@ function resetFilters() {
   padding: 0.75rem;
   background: rgba(31, 41, 55, 0.5);
   border: 1px solid rgba(75, 85, 99, 0.5);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
 }
 
 .filter-section {
@@ -284,7 +284,7 @@ function resetFilters() {
   color: var(--color-text-secondary, #9ca3af);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -315,7 +315,7 @@ function resetFilters() {
   color: var(--color-text-primary, #f3f4f6);
   background-color: var(--color-bg-tertiary, #1f2937);
   border: 1px solid rgba(75, 85, 99, 0.5);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
@@ -338,7 +338,7 @@ function resetFilters() {
 .reset-btn {
   padding: 0.375rem 0.75rem;
   font-size: 0.875rem;
-  color: var(--color-emerald-400, #34d399);
+  color: var(--color-success);
   background: transparent;
   border: none;
   cursor: pointer;
@@ -348,7 +348,7 @@ function resetFilters() {
 }
 
 .reset-btn:hover {
-  color: var(--color-emerald-300, #6ee7b7);
+  color: var(--color-success);
 }
 
 /* Mobile Responsive */

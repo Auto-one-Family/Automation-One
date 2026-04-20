@@ -218,7 +218,7 @@ function formatNumber(num: number): string {
   display: flex;
   gap: 1rem;
   padding: 1.25rem;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   transition: all 0.3s ease;
   background: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border);
@@ -253,7 +253,7 @@ function formatNumber(num: number): string {
   justify-content: center;
   width: 48px;
   height: 48px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
 }
 
 .banner-active .banner-icon {
@@ -317,7 +317,7 @@ function formatNumber(num: number): string {
   margin-top: 0.25rem;
   background: rgba(251, 191, 36, 0.1);
   border: 1px solid rgba(251, 191, 36, 0.2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--color-warning);
 }
 
@@ -348,7 +348,7 @@ function formatNumber(num: number): string {
   justify-content: center;
   background: var(--color-bg-quaternary);
   border: 1px solid var(--glass-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.2s ease;
@@ -371,7 +371,7 @@ function formatNumber(num: number): string {
   padding: 0.625rem 1rem;
   background: var(--gradient-iridescent);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: white;
   font-weight: 500;
   font-size: 0.8125rem;

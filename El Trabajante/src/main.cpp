@@ -72,6 +72,12 @@
 #include "utils/time_manager.h"
 #include "utils/watchdog_storage.h"
 
+// AUT-62: Compile-time default for emergency token policy.
+// Prod builds override via -DEMERGENCY_TOKEN_REQUIRED=1 in platformio.ini.
+#ifndef EMERGENCY_TOKEN_REQUIRED
+#define EMERGENCY_TOKEN_REQUIRED 0
+#endif
+
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "BOOT";
 
@@ -80,6 +86,7 @@ static const char* TAG = "BOOT";
 // ============================================
 // ✅ FIX #3+#4: LED pin for hardware safe-mode feedback
 const uint8_t LED_PIN = 2;  // ESP32 onboard LED (GPIO2)
+static const time_t APPROVAL_TS_PERSIST_INTERVAL_S = 24 * 60 * 60;  // AUT-61: max one approval-ts write/day
 
 // ============================================
 // GLOBAL VARIABLES
@@ -129,6 +136,7 @@ static std::atomic<uint32_t> g_emergency_malformed_count{0};
 static std::atomic<uint32_t> g_emergency_unsupported_count{0};
 static std::atomic<uint32_t> g_emergency_critical_unknown_count{0};
 static std::atomic<uint32_t> g_emergency_failsafe_trigger_count{0};
+static std::atomic<uint32_t> g_emergency_rejected_no_token_count{0};
 static std::atomic<uint32_t> g_config_pending_enter_count{0};
 static std::atomic<uint32_t> g_config_pending_exit_count{0};
 static std::atomic<uint32_t> g_config_pending_exit_blocked_count{0};
@@ -203,6 +211,85 @@ static String ensureCorrelationId(const String& correlationId) {
   return "fw_" + g_system_config.esp_id + "_" + String(millis()) + "_" + String(fallback_idx);
 }
 
+static int parseActuatorGpioFromCommandTopic(const String& topic) {
+  String actuator_command_prefix = String(TopicBuilder::buildActuatorCommandTopic(0));
+  actuator_command_prefix.replace("/0/command", "/");
+  if (!topic.startsWith(actuator_command_prefix) || !topic.endsWith("/command")) {
+    return -1;
+  }
+
+  int gpio_start = actuator_command_prefix.length();
+  int gpio_end = topic.length() - String("/command").length();
+  if (gpio_end <= gpio_start) {
+    return -1;
+  }
+
+  String gpio_token = topic.substring(gpio_start, gpio_end);
+  if (gpio_token.length() == 0) {
+    return -1;
+  }
+  for (size_t i = 0; i < gpio_token.length(); ++i) {
+    if (!isDigit(gpio_token.charAt(i))) {
+      return -1;
+    }
+  }
+
+  int gpio = gpio_token.toInt();
+  if (gpio < 0 || gpio > 255) {
+    return -1;
+  }
+  return gpio;
+}
+
+static void publishActuatorAdmissionRejectedResponse(const String& topic,
+                                                     const String& payload,
+                                                     const IntentMetadata& metadata,
+                                                     const CommandAdmissionDecision& admission) {
+  int gpio = parseActuatorGpioFromCommandTopic(topic);
+  if (gpio < 0) {
+    return;
+  }
+
+  DynamicJsonDocument command_doc(256);
+  DeserializationError parse_error = deserializeJson(command_doc, payload);
+  String command = "UNKNOWN";
+  float value = 0.0f;
+  uint32_t duration_s = 0;
+  String issued_by;
+  if (!parse_error) {
+    command = command_doc["command"] | "UNKNOWN";
+    value = command_doc["value"] | 0.0f;
+    duration_s = command_doc["duration"] | 0;
+    issued_by = command_doc["issued_by"] | "";
+  }
+
+  DynamicJsonDocument response_doc(512);
+  response_doc["esp_id"] = g_system_config.esp_id;
+  response_doc["seq"] = mqttClient.getNextSeq();
+  response_doc["zone_id"] = g_kaiser.zone_id;
+  response_doc["ts"] = static_cast<unsigned long>(timeManager.getUnixTimestamp());
+  response_doc["gpio"] = gpio;
+  response_doc["command"] = command;
+  response_doc["value"] = value;
+  response_doc["duration"] = duration_s;
+  response_doc["success"] = false;
+  response_doc["message"] = String("Rejected before execution (reason_code=") + admission.reason_code + ")";
+  if (strlen(metadata.correlation_id) > 0) {
+    response_doc["correlation_id"] = metadata.correlation_id;
+  }
+  if (issued_by.length() > 0) {
+    response_doc["issued_by"] = issued_by;
+  }
+
+  String response_payload;
+  if (serializeJson(response_doc, response_payload) == 0) {
+    return;
+  }
+  mqttClient.safePublish(String(TopicBuilder::buildActuatorResponseTopic(static_cast<uint8_t>(gpio))),
+                         response_payload,
+                         1);
+}
+
 static bool hasRevocationDeleteHint(const String& raw_value) {
   if (raw_value.length() == 0) {
     return false;
@@ -262,6 +349,10 @@ static uint32_t incrementEmergencyParseClassCounter(EmergencyParseClass cls) {
         default:
             return 0;
     }
+}
+
+uint32_t getEmergencyRejectedNoTokenCount() {
+    return g_emergency_rejected_no_token_count.load();
 }
 
 static void triggerBroadcastEmergencyStop(const char* epoch_reason, const String& emergency_reason) {
@@ -405,11 +496,10 @@ static bool isRuntimeDegradedState() {
 
 static RuntimeReadinessSnapshot collectRuntimeReadinessSnapshot() {
   RuntimeReadinessSnapshot snapshot{};
-  SensorConfig sensors[10];
-  ActuatorConfig actuators[MAX_ACTUATORS];
-
-  configManager.loadSensorConfig(sensors, 10, snapshot.sensor_count);
-  configManager.loadActuatorConfig(actuators, MAX_ACTUATORS, snapshot.actuator_count);
+  // Keep this path callback-safe: heartbeat ACK handling must avoid NVS reads.
+  // Runtime readiness is derived from active in-memory managers + offline rule cache.
+  snapshot.sensor_count = sensorManager.getActiveSensorCount();
+  snapshot.actuator_count = actuatorManager.getActiveActuatorCount();
   snapshot.offline_rule_count = offlineModeManager.getOfflineRuleCount();
   return snapshot;
 }
@@ -464,9 +554,15 @@ static void publishConfigPendingTransitionEvent(const char* event_type,
 
   String payload;
   if (serializeJson(event_doc, payload) > 0) {
-    // Variant B (P2): lifecycle transitions on dedicated subtopic — canonical intent_outcome
-    // stays reserved for buildOutcomePayload / publishIntentOutcome.
+#ifndef MQTT_USE_PUBSUBCLIENT
+    // [INC-EA5484] AUT-56: Route lifecycle through publish queue for retry resilience.
+    const char* lifecycle_topic = TopicBuilder::buildIntentOutcomeLifecycleTopic();
+    if (!queuePublish(lifecycle_topic, payload.c_str(), 1, false, true, nullptr)) {
+      LOG_W(TAG, "[INC-EA5484] Lifecycle transition enqueue failed: " + String(event_type));
+    }
+#else
     mqttClient.publish(TopicBuilder::buildIntentOutcomeLifecycleTopic(), payload, 1);
+#endif
   }
 }
 
@@ -606,12 +702,14 @@ void routeIncomingMessage(const char* t, const char* p) {
         IntentMetadata metadata = extractIntentMetadataFromPayloadNoCorrelationFallback(payload.c_str(), "cfg");
         String corr_id = String(metadata.correlation_id);
         if (corr_id.length() == 0) {
+            String fallback_corr_id = ensureCorrelationId(corr_id);
             const String reason = "Config contract violation: required correlation_id missing";
             ConfigResponseBuilder::publishError(
                 ConfigType::SYSTEM,
                 ConfigErrorCode::CONTRACT_MISSING_CORRELATION,
                 reason,
-                JsonVariantConst());
+                JsonVariantConst(),
+                fallback_corr_id);
             publishIntentOutcome("config",
                                  metadata,
                                  "failed",
@@ -717,6 +815,8 @@ void routeIncomingMessage(const char* t, const char* p) {
                                  admission.code,
                                  String("Actuator command rejected (reason_code=") + admission.reason_code + ")",
                                  false);
+            // Emit terminal actuator_response on admission reject so frontend does not timeout waiting.
+            publishActuatorAdmissionRejectedResponse(topic, payload, metadata, admission);
             return;
         }
         if (!queueActuatorCommand(topic.c_str(), payload.c_str(), &metadata)) {
@@ -850,7 +950,21 @@ void routeIncomingMessage(const char* t, const char* p) {
             }
 
             if (stored_token.length() == 0) {
+#if EMERGENCY_TOKEN_REQUIRED
+                g_emergency_rejected_no_token_count.fetch_add(1);
+                LOG_E(TAG, "[INC-EA5484] emergency rejected no_token (EMERGENCY_TOKEN_REQUIRED=1)");
+                errorTracker.trackError(ERROR_EMERGENCY_REJECTED_NO_TOKEN, ERROR_SEVERITY_CRITICAL,
+                                       "ESP emergency rejected: no token configured (fail-closed)");
+                publishIntentOutcome("command",
+                                     metadata,
+                                     "rejected",
+                                     "NO_TOKEN_CONFIGURED",
+                                     "ESP emergency rejected: no token configured (prod fail-closed)",
+                                     false);
+                return;
+#else
                 LOG_W(TAG, "ESP emergency accepted (no token configured - fail-open)");
+#endif
             }
 
             if (command == "emergency_stop") {
@@ -1036,12 +1150,27 @@ void routeIncomingMessage(const char* t, const char* p) {
             return;
         }
 
+        if (stored_broadcast_token.length() == 0) {
+#if EMERGENCY_TOKEN_REQUIRED
+            g_emergency_rejected_no_token_count.fetch_add(1);
+            LOG_E(TAG, "[INC-EA5484] broadcast emergency rejected no_token (EMERGENCY_TOKEN_REQUIRED=1)");
+            errorTracker.trackError(ERROR_EMERGENCY_REJECTED_NO_TOKEN, ERROR_SEVERITY_CRITICAL,
+                                   "Broadcast emergency rejected: no token configured (fail-closed)");
+            publishIntentOutcome("command",
+                                 metadata,
+                                 "rejected",
+                                 "NO_TOKEN_CONFIGURED",
+                                 "Broadcast emergency rejected: no token configured (prod fail-closed)",
+                                 false);
+            return;
+#else
+            LOG_W(TAG, "Broadcast emergency accepted (no token configured - fail-open)");
+#endif
+        }
+
         LOG_W(TAG, "╔════════════════════════════════════════╗");
         LOG_W(TAG, "║  BROADCAST EMERGENCY-STOP RECEIVED    ║");
         LOG_W(TAG, "╚════════════════════════════════════════╝");
-        if (stored_broadcast_token.length() == 0) {
-            LOG_W(TAG, "Broadcast emergency accepted (no token configured - fail-open)");
-        }
         publishIntentOutcome("command",
                              metadata,
                              "applied",
@@ -2216,20 +2345,35 @@ void routeIncomingMessage(const char* t, const char* p) {
 
         if (strcmp(status, "approved") == 0 || strcmp(status, "online") == 0) {
             time_t approval_ts = server_time > 0 ? (time_t)server_time : timeManager.getUnixTimestamp();
-            configManager.setDeviceApproved(true, approval_ts);
+            const bool already_approved = configManager.isDeviceApproved();
+            const time_t persisted_approval_ts = configManager.getApprovalTimestamp();
+            bool should_persist_approval = !already_approved;
+
+            if (!should_persist_approval) {
+                const bool missing_persisted_ts = persisted_approval_ts <= 0;
+                const bool refresh_due = approval_ts > persisted_approval_ts &&
+                                         (approval_ts - persisted_approval_ts) >= APPROVAL_TS_PERSIST_INTERVAL_S;
+                should_persist_approval = missing_persisted_ts || refresh_due;
+
+                if (!should_persist_approval) {
+                    const long next_refresh_in = static_cast<long>(APPROVAL_TS_PERSIST_INTERVAL_S) -
+                                                 static_cast<long>(approval_ts - persisted_approval_ts);
+                    LOG_D(TAG, "Approval ACK dedup at call-site: skip NVS write (persisted_ts=" +
+                              String(static_cast<unsigned long>(persisted_approval_ts)) +
+                              ", incoming_ts=" + String(static_cast<unsigned long>(approval_ts)) +
+                              ", next_refresh_in_s=" + String(next_refresh_in > 0 ? next_refresh_in : 0) + ")");
+                }
+            }
+
+            if (should_persist_approval) {
+                configManager.setDeviceApproved(true, approval_ts);
+            }
 
             if (isConfigPendingAfterResetState()) {
-                RuntimeReadinessSnapshot snapshot = collectRuntimeReadinessSnapshot();
-                RuntimeReadinessDecision readiness =
-                    evaluateRuntimeReadiness(snapshot, defaultRuntimeReadinessPolicy());
-                g_config_pending_exit_blocked_count.fetch_add(1);
-                publishConfigPendingTransitionEvent("exit_blocked_config_pending",
-                                                    "CONFIG_PENDING_RETAINS_STATE_ON_ACK",
-                                                    readiness,
-                                                    STATE_CONFIG_PENDING_AFTER_RESET,
-                                                    STATE_CONFIG_PENDING_AFTER_RESET,
-                                                    "heartbeat_ack");
-                evaluatePendingExit("heartbeat_ack");
+                // Do not evaluate pending-exit on every heartbeat ACK.
+                // Pending-exit is evaluated on config_commit in config_update_queue, where
+                // configuration changes actually happen. This keeps MQTT callback load low.
+                LOG_D(TAG, "[CONFIG] Pending-exit check deferred (trigger=heartbeat_ack, reason=AWAITING_CONFIG_COMMIT)");
                 return;
             }
 
@@ -2257,17 +2401,9 @@ void routeIncomingMessage(const char* t, const char* p) {
         } else if (strcmp(status, "pending_approval") == 0) {
             configManager.setDeviceApproved(false, 0);
             if (isConfigPendingAfterResetState()) {
-                RuntimeReadinessSnapshot snapshot = collectRuntimeReadinessSnapshot();
-                RuntimeReadinessDecision readiness =
-                    evaluateRuntimeReadiness(snapshot, defaultRuntimeReadinessPolicy());
-                g_config_pending_exit_blocked_count.fetch_add(1);
-                publishConfigPendingTransitionEvent("exit_blocked_config_pending",
-                                                    "CONFIG_PENDING_RETAINS_STATE_ON_ACK",
-                                                    readiness,
-                                                    STATE_CONFIG_PENDING_AFTER_RESET,
-                                                    STATE_CONFIG_PENDING_AFTER_RESET,
-                                                    "heartbeat_ack");
-                evaluatePendingExit("heartbeat_ack");
+                // Same as approved/online branch: keep callback path lightweight and
+                // avoid repeated pending-exit churn on periodic ACKs.
+                LOG_D(TAG, "[CONFIG] Pending-exit check deferred (trigger=heartbeat_ack, status=pending_approval)");
                 return;
             }
             if (g_system_config.current_state != STATE_PENDING_APPROVAL) {
@@ -3277,6 +3413,11 @@ void setup() {
   RuntimeReadinessDecision boot_readiness =
       evaluateRuntimeReadiness(boot_snapshot, defaultRuntimeReadinessPolicy());
   bool runtime_complete = boot_readiness.ready;
+  // AUT-59: Log when orphaned offline rules trigger auto-exit instead of pending dead-end
+  if (runtime_complete && offline_rule_count > 0 && runtime_actuator_count == 0) {
+    LOG_W(TAG, String("[BOOT] AUT-59: Orphaned offline rules (count=") +
+               String(offline_rule_count) + ", actuators=0) — auto-exit, rules are inert");
+  }
   if (runtime_has_any_config && !runtime_complete &&
       g_system_config.current_state != STATE_SAFE_MODE &&
       g_system_config.current_state != STATE_SAFE_MODE_PROVISIONING &&
@@ -4113,7 +4254,19 @@ SensorCommandExecutionResult handleSensorCommand(const String& topic, const Stri
 
       String response_payload;
       serializeJson(response, response_payload);
-      mqttClient.publish(response_topic, response_payload, 1);
+      // Under publish pressure, give Core 0 a brief drain window so command responses
+      // are less likely to collide with sensor-data bursts.
+#ifndef MQTT_USE_PUBSUBCLIENT
+      if (g_publish_queue != NULL) {
+        for (uint8_t wait_cycles = 0;
+             wait_cycles < 5 &&
+             uxQueueMessagesWaiting(g_publish_queue) >= PUBLISH_QUEUE_SHED_WATERMARK;
+             ++wait_cycles) {
+          vTaskDelay(pdMS_TO_TICKS(20));
+        }
+      }
+#endif
+      mqttClient.safePublish(response_topic, response_payload, 1, 2);
 
       LOG_D(TAG, "Sensor command response sent: " + response_payload);
     }

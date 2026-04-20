@@ -385,7 +385,7 @@ onMounted(fetchHierarchy)
   color: var(--color-iridescent-3);
   background: rgba(167, 139, 250, 0.1);
   padding: 0 var(--space-1);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   text-transform: capitalize;
 }
 
@@ -402,15 +402,15 @@ onMounted(fetchHierarchy)
 }
 
 .tree-node__safe {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-warning);
   background: rgba(251, 191, 36, 0.1);
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .tree-node__device-id {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
   font-family: var(--font-mono);
 }

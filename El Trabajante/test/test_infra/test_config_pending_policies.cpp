@@ -6,12 +6,12 @@
 void setUp(void) {}
 void tearDown(void) {}
 
-void test_runtime_readiness_blocked_when_offline_rules_missing() {
+void test_runtime_readiness_ready_when_offline_rules_missing() {
     RuntimeReadinessSnapshot snapshot{1, 1, 0};
     RuntimeReadinessDecision decision =
         evaluateRuntimeReadiness(snapshot, defaultRuntimeReadinessPolicy());
-    TEST_ASSERT_FALSE(decision.ready);
-    TEST_ASSERT_EQUAL_STRING("MISSING_OFFLINE_RULES", decision.decision_code);
+    TEST_ASSERT_TRUE(decision.ready);
+    TEST_ASSERT_EQUAL_STRING("CONFIG_PENDING_EXIT_READY", decision.decision_code);
 }
 
 void test_runtime_readiness_ready_when_basis_complete() {
@@ -20,6 +20,30 @@ void test_runtime_readiness_ready_when_basis_complete() {
         evaluateRuntimeReadiness(snapshot, defaultRuntimeReadinessPolicy());
     TEST_ASSERT_TRUE(decision.ready);
     TEST_ASSERT_EQUAL_STRING("CONFIG_PENDING_EXIT_READY", decision.decision_code);
+}
+
+void test_runtime_readiness_auto_exit_offline_rules_only() {
+    RuntimeReadinessSnapshot snapshot{0, 0, 3};
+    RuntimeReadinessDecision decision =
+        evaluateRuntimeReadiness(snapshot, defaultRuntimeReadinessPolicy());
+    TEST_ASSERT_TRUE(decision.ready);
+    TEST_ASSERT_EQUAL_STRING("OFFLINE_RULES_ONLY_AUTO_EXIT", decision.decision_code);
+}
+
+void test_runtime_readiness_auto_exit_offline_rules_with_sensors() {
+    RuntimeReadinessSnapshot snapshot{2, 0, 1};
+    RuntimeReadinessDecision decision =
+        evaluateRuntimeReadiness(snapshot, defaultRuntimeReadinessPolicy());
+    TEST_ASSERT_TRUE(decision.ready);
+    TEST_ASSERT_EQUAL_STRING("OFFLINE_RULES_ONLY_AUTO_EXIT", decision.decision_code);
+}
+
+void test_runtime_readiness_blocked_without_offline_rules_no_actuators() {
+    RuntimeReadinessSnapshot snapshot{1, 0, 0};
+    RuntimeReadinessDecision decision =
+        evaluateRuntimeReadiness(snapshot, defaultRuntimeReadinessPolicy());
+    TEST_ASSERT_FALSE(decision.ready);
+    TEST_ASSERT_EQUAL_STRING("MISSING_ACTUATORS", decision.decision_code);
 }
 
 void test_system_command_rejected_in_pending_when_not_allowlisted() {
@@ -88,8 +112,11 @@ void setup() {
     delay(2000);
 #endif
     UNITY_BEGIN();
-    RUN_TEST(test_runtime_readiness_blocked_when_offline_rules_missing);
+    RUN_TEST(test_runtime_readiness_ready_when_offline_rules_missing);
     RUN_TEST(test_runtime_readiness_ready_when_basis_complete);
+    RUN_TEST(test_runtime_readiness_auto_exit_offline_rules_only);
+    RUN_TEST(test_runtime_readiness_auto_exit_offline_rules_with_sensors);
+    RUN_TEST(test_runtime_readiness_blocked_without_offline_rules_no_actuators);
     RUN_TEST(test_system_command_rejected_in_pending_when_not_allowlisted);
     RUN_TEST(test_system_command_allowed_in_pending_by_allowlist);
     RUN_TEST(test_actuator_command_rejected_in_pending_without_recovery);

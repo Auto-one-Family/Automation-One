@@ -41,16 +41,13 @@ const emit = defineEmits<{
 const selectId = computed(() => props.id || `select-${Math.random().toString(36).slice(2, 9)}`)
 
 const selectClasses = computed(() => [
-  'w-full px-4 py-2.5 bg-dark-800 border rounded-lg',
-  'text-dark-100',
-  'focus:outline-none focus:ring-2 focus:border-transparent',
+  'base-select w-full px-4 py-2.5 border rounded-lg',
+  'focus:outline-none',
   'transition-all duration-200',
   'appearance-none cursor-pointer',
   'touch-target',
   'pr-10', // Space for chevron
-  props.error
-    ? 'border-red-500 focus:ring-red-500'
-    : 'border-dark-600 focus:ring-blue-500',
+  props.error ? 'base-select--error' : '',
   props.disabled ? 'opacity-50 cursor-not-allowed' : '',
 ])
 
@@ -66,10 +63,10 @@ function handleChange(event: Event) {
     <label
       v-if="label"
       :for="selectId"
-      class="block text-sm font-medium text-dark-300 mb-1.5"
+      class="base-select__label block text-sm font-medium mb-1.5"
     >
       {{ label }}
-      <span v-if="required" class="text-red-400 ml-0.5">*</span>
+      <span v-if="required" class="base-select__required ml-0.5">*</span>
     </label>
 
     <!-- Select wrapper -->
@@ -97,17 +94,17 @@ function handleChange(event: Event) {
 
       <!-- Chevron icon -->
       <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-        <ChevronDown class="w-5 h-5 text-dark-400" />
+        <ChevronDown class="base-select__chevron w-5 h-5" />
       </div>
     </div>
 
     <!-- Error message -->
-    <p v-if="error" class="mt-1.5 text-sm text-red-400">
+    <p v-if="error" class="base-select__error mt-1.5 text-sm">
       {{ error }}
     </p>
 
     <!-- Helper text -->
-    <p v-else-if="helper" class="mt-1.5 text-sm text-dark-400">
+    <p v-else-if="helper" class="base-select__helper mt-1.5 text-sm">
       {{ helper }}
     </p>
   </div>
@@ -117,5 +114,44 @@ function handleChange(event: Event) {
 /* Remove default select arrow in some browsers */
 select {
   background-image: none;
+}
+
+.base-select__label {
+  color: var(--color-text-secondary);
+}
+
+.base-select__required {
+  color: var(--color-error);
+}
+
+.base-select {
+  background: var(--color-bg-tertiary);
+  border-color: var(--glass-border-l2);
+  color: var(--color-text-primary);
+}
+
+.base-select:focus {
+  border-color: transparent;
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+.base-select--error {
+  border-color: var(--color-error);
+}
+
+.base-select--error:focus {
+  box-shadow: 0 0 0 2px var(--color-error);
+}
+
+.base-select__chevron {
+  color: var(--color-text-muted);
+}
+
+.base-select__error {
+  color: var(--color-error);
+}
+
+.base-select__helper {
+  color: var(--color-text-muted);
 }
 </style>

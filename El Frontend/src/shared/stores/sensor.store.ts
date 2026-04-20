@@ -59,18 +59,35 @@ interface SensorHealthMessage {
 type DevicePatchFn = (device: ESPDevice) => ESPDevice
 type ApplyDevicePatch = (espId: string, patchFn: DevicePatchFn) => boolean
 
+function normalizeSensorType(sensorType: string | undefined | null): string {
+  return (sensorType ?? '').trim().toLowerCase()
+}
+
+function resolveMultiValueKey(
+  multiValues: Record<string, MultiValueEntry>,
+  incomingSensorType: string,
+): string {
+  const normalizedIncoming = normalizeSensorType(incomingSensorType)
+  const existingKey = Object.keys(multiValues).find(
+    key => normalizeSensorType(key) === normalizedIncoming,
+  )
+  return existingKey ?? incomingSensorType
+}
+
 /**
  * Normalize raw timestamp from server WebSocket event to ISO string.
+ *
+ * Returns null when timestamp is missing or invalid — no Fake-NOW fallback.
+ * Callers must keep the previous valid last_read when this returns null.
  *
  * Server sends esp32_timestamp_raw which can be in seconds OR milliseconds.
  * Mirrors server-side logic: if > 1e10, treat as milliseconds; else seconds.
  * (sensor_handler.py line 315-322)
  */
-function normalizeRawTimestamp(ts: number | undefined | null): string {
-  if (!ts) return new Date().toISOString()
+function normalizeRawTimestamp(ts: number | undefined | null): string | null {
+  if (!ts) return null
   const ms = ts > 1e10 ? ts : ts * 1000
-  // Sanity: if result is unreasonable (before year 2000 or after 2100), use now
-  if (ms < 946684800000 || ms > 4102444800000) return new Date().toISOString()
+  if (ms < 946684800000 || ms > 4102444800000) return null
   return new Date(ms).toISOString()
 }
 
@@ -107,7 +124,10 @@ function matchSensorToEvent(sensor: MockSensor, data: SensorDataPayload): boolea
   }
 
   // Base: gpio + sensor_type must match
-  if (sensor.gpio !== data.gpio || sensor.sensor_type !== data.sensor_type) {
+  if (
+    sensor.gpio !== data.gpio ||
+    normalizeSensorType(sensor.sensor_type) !== normalizeSensorType(data.sensor_type)
+  ) {
     return false
   }
 
@@ -172,7 +192,8 @@ export const useSensorStore = defineStore('sensor', () => {
         if (data.value !== undefined) exactMatch.raw_value = data.value
         if (data.quality) exactMatch.quality = data.quality
         if (data.unit) exactMatch.unit = data.unit
-        exactMatch.last_read = normalizeRawTimestamp(data.timestamp)
+        const ts = normalizeRawTimestamp(data.timestamp)
+        if (ts !== null) exactMatch.last_read = ts
         return { ...device, sensors }
       }
 
@@ -185,7 +206,11 @@ export const useSensorStore = defineStore('sensor', () => {
 
       // Dynamic multi-value detection (different type on same GPIO)
       const existingSensor = sensors.find(s => s.gpio === gpio)
-      if (existingSensor && existingSensor.sensor_type !== sensorType && !existingSensor.is_multi_value) {
+      if (
+        existingSensor &&
+        normalizeSensorType(existingSensor.sensor_type) !== normalizeSensorType(sensorType) &&
+        !existingSensor.is_multi_value
+      ) {
         handleDynamicMultiValueSensor(existingSensor, data)
         return { ...device, sensors }
       }
@@ -220,7 +245,7 @@ export const useSensorStore = defineStore('sensor', () => {
         unit: data.unit,
         quality: data.quality ?? 'good',
         raw_mode: true,
-        last_read: new Date().toISOString(),
+        last_read: normalizeRawTimestamp(data.timestamp),
         device_type: deviceType,
         is_multi_value: true,
         multi_values: {}
@@ -234,7 +259,8 @@ export const useSensorStore = defineStore('sensor', () => {
       sensor.device_type = deviceType
     }
 
-    sensor.multi_values[data.sensor_type] = {
+    const multiValueKey = resolveMultiValueKey(sensor.multi_values, data.sensor_type)
+    sensor.multi_values[multiValueKey] = {
       value: data.value,
       unit: data.unit,
       quality: data.quality ?? 'good',
@@ -251,7 +277,8 @@ export const useSensorStore = defineStore('sensor', () => {
     }
 
     sensor.quality = getWorstQuality(Object.values(sensor.multi_values))
-    sensor.last_read = normalizeRawTimestamp(data.timestamp)
+    const knownTs = normalizeRawTimestamp(data.timestamp)
+    if (knownTs !== null) sensor.last_read = knownTs
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -276,7 +303,8 @@ export const useSensorStore = defineStore('sensor', () => {
       existingSensor.name = `Multi-Sensor GPIO ${existingSensor.gpio}`
     }
 
-    existingSensor.multi_values![data.sensor_type] = {
+    const multiValueKey = resolveMultiValueKey(existingSensor.multi_values!, data.sensor_type)
+    existingSensor.multi_values![multiValueKey] = {
       value: data.value,
       unit: data.unit,
       quality: data.quality ?? 'good',
@@ -285,7 +313,8 @@ export const useSensorStore = defineStore('sensor', () => {
     }
 
     existingSensor.quality = getWorstQuality(Object.values(existingSensor.multi_values!))
-    existingSensor.last_read = normalizeRawTimestamp(data.timestamp)
+    const dynTs = normalizeRawTimestamp(data.timestamp)
+    if (dynTs !== null) existingSensor.last_read = dynTs
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -298,7 +327,8 @@ export const useSensorStore = defineStore('sensor', () => {
       if (data.value !== undefined) sensor.raw_value = data.value
       if (data.quality) sensor.quality = data.quality
       if (data.unit) sensor.unit = data.unit
-      sensor.last_read = normalizeRawTimestamp(data.timestamp)
+      const singleTs = normalizeRawTimestamp(data.timestamp)
+      if (singleTs !== null) sensor.last_read = singleTs
     }
   }
 

@@ -286,9 +286,9 @@ function updateMetadata(data: Record<string, unknown>) {
 
 .detail-panel__mock-badge {
   padding: 1px 8px;
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 600;
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   background: rgba(167, 139, 250, 0.15);
   color: var(--color-mock);
 }
@@ -313,7 +313,7 @@ function updateMetadata(data: Record<string, unknown>) {
 }
 
 .detail-panel__info-label {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 500;
   color: var(--color-text-muted);
   text-transform: uppercase;

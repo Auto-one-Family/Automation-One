@@ -30,9 +30,10 @@
 **Flow:**
 ```
 1. Create calibration session (POST /api/v1/calibration/sessions)
-   → Session starts in COLLECTING state
+   → Session starts in PENDING state (no points yet)
 
 2. Add dry calibration point (raw=900, reference=0)
+   → PENDING → COLLECTING transition on first point add
    → points_collected = 1
 
 3. Add wet calibration point (raw=600, reference=100)
@@ -51,14 +52,15 @@
 ```
 
 **Expected Assertions:**
-- POST /sessions returns 201 Created with session_id
+- POST /sessions returns 201 Created with status=PENDING
 - Both point additions return 200 OK with points_collected incremented
-- Finalize returns 200 with status=FINALIZING and result.type='linear_2point'
+- Finalize returns 200 with status=FINALIZING and calibration_result.method='linear_2point'
 - Apply returns 200 with status=APPLIED
 - Final GET session returns status=APPLIED
 
 **Key Validations:**
-- Calibration result contains: type, slope, offset, point1_raw, point1_ref, point2_raw, point2_ref
+- Calibration result uses canonical envelope: `method`, `points`, `derived`, `metadata`
+- Derived calibration values contain `slope` and `offset`
 - Computed slope and offset are correct (verified mathematically)
 - Sensor configuration is updated with calibration_data
 
@@ -78,21 +80,22 @@
 **Flow:**
 ```
 1. Create calibration session
-   → Session in COLLECTING state
+   → Session in PENDING state
 
 2. Add only dry point (raw=900, reference=0)
+   → PENDING → COLLECTING transition
    → points_collected = 1
 
 3. Attempt finalize without wet point
    → Service checks: need 2 points, have 1
    → Raises CalibrationError("INSUFFICIENT_POINTS")
-   → HTTP response 400 Bad Request with error code
+   → HTTP response 409 Conflict with error code
 
 4. Verify session remains in COLLECTING state (allows retry)
 ```
 
 **Expected Assertions:**
-- Finalize returns 400 with detail.code='INSUFFICIENT_POINTS'
+- Finalize returns 409 with detail.code='INSUFFICIENT_POINTS'
 - Session status remains COLLECTING (mutable)
 - User can retry adding wet point later
 
@@ -198,9 +201,9 @@
 **Flow:**
 ```
 1. start_session() → Create new session
-   → Verify status = COLLECTING
+   → Verify status = PENDING
 
-2. add_point(dry) → Add first calibration point
+2. add_point(dry) → Add first calibration point (PENDING → COLLECTING)
    → Verify points_collected = 1
 
 3. add_point(wet) → Add second calibration point
@@ -208,7 +211,7 @@
 
 4. finalize() → Compute calibration
    → Verify status = FINALIZING
-   → Verify calibration_result.type = linear_2point
+   → Verify calibration_result.method = linear_2point
 
 5. apply() → Persist to SensorConfig
    → Verify status = APPLIED
@@ -217,7 +220,7 @@
 ```
 
 **Expected Assertions:**
-- Session status transitions: COLLECTING → FINALIZING → APPLIED
+- Session status transitions: PENDING → COLLECTING → FINALIZING → APPLIED
 - calibration_result computed correctly
 - SensorConfig.calibration_data populated and persisted
 
@@ -250,9 +253,17 @@ add_point(..., raw=float("inf"))
 - **Expected:** CalibrationError with code='VALIDATION_ERROR'
 - **Message:** "raw_value must be a finite number"
 
-### 6c: Insufficient Points
+### 6c: Finalize from PENDING (no valid points)
 ```python
-finalize(session_id)  # Only 1 point collected, need 2
+finalize(session_id)  # Session still PENDING, not COLLECTING
+```
+- **Expected:** CalibrationError with code='INVALID_STATE'
+- **Message:** "Cannot finalize from state: pending"
+
+### 6d: Insufficient Points (COLLECTING but incomplete)
+```python
+add_point(session_id, raw=100, reference=10, point_role="dry")  # → COLLECTING
+finalize(session_id)  # 1/2 points collected
 ```
 - **Expected:** CalibrationError with code='INSUFFICIENT_POINTS'
 - **Message:** "Need 2 points, have 1"
@@ -260,7 +271,8 @@ finalize(session_id)  # Only 1 point collected, need 2
 **Coverage:**
 - Input validation in CalibrationService
 - Finite number checks (prevents NaN/Inf propagation)
-- State validation (can't finalize with incomplete data)
+- State validation (finalize requires COLLECTING, not PENDING)
+- Point count validation (can't finalize with incomplete data)
 
 ---
 
@@ -427,6 +439,6 @@ pytest tests/integration/test_cross_layer_calibration.py -v -s
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** 2026-04-13  
+**Document Version:** 1.1  
+**Last Updated:** 2026-04-17  
 **Author:** server-dev Agent (AUT-10)

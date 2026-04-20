@@ -255,7 +255,7 @@ function onDragEnd() {
   height: 24px;
   background: linear-gradient(to bottom, transparent, var(--color-bg-secondary));
   pointer-events: none;
-  z-index: 1;
+  z-index: var(--z-dropdown);
 }
 
 .component-sidebar__content {
@@ -306,7 +306,7 @@ function onDragEnd() {
   padding: 0.375rem 0.25rem;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: grab;
   transition: all 0.15s ease;
   user-select: none;
@@ -385,7 +385,7 @@ function onDragEnd() {
 
 .component-sidebar__items::-webkit-scrollbar-thumb {
   background: var(--glass-border);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 
 .component-sidebar__items::-webkit-scrollbar-thumb:hover {

@@ -100,6 +100,12 @@ class BaseSensorProcessor(ABC):
     Set to True for sensors like pH meters, EC meters that are used point-wise.
     """
 
+    RECOMMENDED_FRESHNESS_HOURS: int | None = None
+    """Hours after which an on-demand/scheduled measurement is considered stale (None = no limit)."""
+
+    RECOMMENDED_CALIBRATION_INTERVAL_DAYS: int | None = None
+    """Days between recommended recalibrations (None = no reminder)."""
+
     @abstractmethod
     def process(
         self,

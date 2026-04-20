@@ -23,8 +23,10 @@
 
 // Queue depth tuned for heap headroom on ESP32 (no PSRAM):
 // 5 * 4244 B consumed >21 KB and contributed to CommTask create failures.
-// 3 slots still cover bursts; pending replay remains durable via cfg_pending NVS ring.
-static const uint8_t  CONFIG_UPDATE_QUEUE_SIZE = 3;
+// PKG-17 (AUT-68): reduced 3 -> 1 to enforce SSOT — parallel config-writes are
+// race-unsafe, and pending replay remains durable via cfg_pending NVS ring.
+// Frees ~2 KB of statically reserved queue heap budget.
+static const uint8_t  CONFIG_UPDATE_QUEUE_SIZE = 1;
 static const uint16_t CONFIG_PAYLOAD_MAX_LEN   = 4096;  // Full-state Config-Push JSON — matches MQTT buffer_size (CP-F4)
 // CP-F2: Central single-parse doc size — allocated in BSS (module-level static in
 // config_update_queue.cpp, no heap/stack pressure). ArduinoJson overhead ~3x JSON

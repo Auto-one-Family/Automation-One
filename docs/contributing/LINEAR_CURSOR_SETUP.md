@@ -1,17 +1,19 @@
-# Linear und Cursor für dieses Repository
+# Linear, Sentry und Cursor für dieses Repository
 
 Dieses Dokument bezieht sich auf das Git-Remote **`Auto-one-Family/Automation-One`**. Passe Owner/Repo an, falls dein Fork anders heißt.
 
-## Kurzklärung: Was „herunterladen“ bedeutet
+## Kurzklärung: Was "herunterladen" bedeutet
 
-- **Linear** läuft als Web-App und optional als **Desktop-App**: [linear.app/download](https://linear.app/download). Es gibt nichts Repo-internes zu „installieren“, außer Konfiguration und Integrationen.
-- **Cursor** verbindet sich mit Linear über das **Cursor-Dashboard** (Cloud Agents) und/oder über **MCP** (lokaler Chat/Agent mit Linear-API).
+- **Linear** läuft als Web-App und optional als **Desktop-App**: [linear.app/download](https://linear.app/download).
+- **Sentry** läuft als SaaS/On-Prem Plattform; für Cursor wird die MCP-Anbindung konfiguriert.
+- **Cursor** verbindet sich mit Linear/Sentry über MCP (lokaler Chat/Agent) und optional über Dashboard-Integrationen (Cloud Agents).
 
 ---
 
 ## 1. Linear-Projekt passend zu diesem Repo
 
 1. In Linear ein **Team** wählen (oder anlegen), in dem die AutomationOne-Arbeit läuft.
+   - Aktives Team in diesem Workspace: [AutoOne / AUT](https://linear.app/autoone/team/AUT/active)
 2. **Projekt** anlegen, z. B. `AutomationOne`, und mit dem Team verknüpfen.
 3. **GitHub verbinden** (Linear → Settings → Integrations → GitHub): Repository **`Auto-one-Family/Automation-One`** auswählen.  
    Damit verknüpfen sich Branches und Pull Requests automatisch mit Issues, wenn du die Issue-ID im Branch-Namen nutzt (siehe Abschnitt 4).
@@ -37,7 +39,7 @@ Für **Background-/Cloud-Agenten**, die aus Linear starten und PRs erstellen kö
 
 ---
 
-## 3. Lokales Cursor: Linear per MCP (dieses Repo)
+## 3. Lokales Cursor: Linear + Sentry per MCP (dieses Repo)
 
 Das Repo ignoriert **`/.mcp.json`** (siehe `.gitignore`), damit keine Tokens lokal aus Versehen committed werden.
 
@@ -53,11 +55,40 @@ Das Repo ignoriert **`/.mcp.json`** (siehe `.gitignore`), damit keine Tokens lok
    Copy-Item mcp.json.example .mcp.json
    ```
 
-2. Falls du **bereits** eine `.mcp.json` hast: den Block unter `mcpServers.linear` aus `mcp.json.example` **manuell** in deine Datei einfügen (nur ein Schlüssel `linear` pro Datei).
+2. Falls du **bereits** eine `.mcp.json` hast: die Blöcke unter `mcpServers.linear` und `mcpServers.sentry` aus `mcp.json.example` **manuell** in deine Datei einfügen (pro Name jeweils nur ein Schlüssel).
 
-3. Cursor neu starten oder unter **Einstellungen → MCP** den Server **linear** aktivieren.
+3. Cursor neu starten oder unter **Einstellungen → MCP** die Server **linear** und **sentry** aktivieren.
 
-4. Beim ersten Zugriff folgt die **OAuth-/Anmelde-Führung** von Linear (über `mcp-remote` und `https://mcp.linear.app/mcp`). Details können sich ändern; bei Abweichungen die aktuelle Seite [Linear: Cursor MCP](https://linear.app/integrations/cursor-mcp) nutzen.
+4. Beim ersten Zugriff folgt die **OAuth-/Anmelde-Führung**:
+   - Linear via `https://mcp.linear.app/mcp`
+   - Sentry via `https://mcp.sentry.dev/mcp`
+
+### Wichtiger Hinweis: globale Cursor-MCP-Datei
+
+Wenn du MCP-Server **global** statt repo-lokal verwaltest, liegt die wirksame Datei unter:
+
+- `C:\Users\<dein-user>\.cursor\mcp.json`
+
+In diesem Fall müssen `linear` und `sentry` dort eingetragen sein (nicht nur in `/.mcp.json` im Repository).
+
+### Was wurde für dieses Repo standardisiert?
+
+Die Vorlage `mcp.json.example` enthält jetzt beide Server:
+
+```json
+{
+  "mcpServers": {
+    "linear": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.linear.app/mcp"]
+    },
+    "sentry": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.sentry.dev/mcp"]
+    }
+  }
+}
+```
 
 ### Alternative (Personal API Token)
 
@@ -65,7 +96,21 @@ Wenn du keinen Remote-MCP nutzen willst, existieren Community-Pakete mit **`LINE
 
 ---
 
-## 4. Branch- und Commit-Konventionen (GitHub ↔ Linear)
+## 4. Agenten-Zugriff prüfen (Linear/Sentry)
+
+Wenn die MCP-Server korrekt aktiv sind, tauchen sie im Cursor-MCP-Panel auf und Agenten können deren Tools verwenden.
+
+Prüfpfad:
+
+1. Cursor neu starten (wichtig nach Änderungen in `.mcp.json`).
+2. In Cursor unter MCP prüfen, dass **linear** und **sentry** den Status "connected" zeigen.
+3. Optional einen kurzen Test-Call machen (z. B. Issues listen in Linear, Projektinfos in Sentry).
+
+Hinweis: Solange `linear`/`sentry` nicht als aktive MCP-Server geladen sind, haben Agenten keinen Zugriff auf diese Tools.
+
+---
+
+## 5. Branch- und Commit-Konventionen (GitHub ↔ Linear)
 
 | Element | Konvention |
 |--------|------------|
@@ -76,19 +121,21 @@ Interne Analysen im Repo verwenden teils Platzhalter wie `#AUTO-LX-L01`; in Line
 
 ---
 
-## 5. Checkliste
+## 6. Checkliste
 
 - [ ] Linear-Team + Projekt für AutomationOne
 - [ ] GitHub-Integration auf **`Auto-one-Family/Automation-One`**
 - [ ] Optional: Label-Gruppe **`repo`** mit Label **`Auto-one-Family/Automation-One`**
 - [ ] Cursor Dashboard: Linear + GitHub + Default-Repo für Cloud Agents
-- [ ] Lokal: `mcp.json.example` → **`.mcp.json`**, MCP **linear** in Cursor aktiv
+- [ ] Lokal: `mcp.json.example` → **`.mcp.json`**, MCP **linear** + **sentry** in Cursor aktiv
+- [ ] MCP Smoke-Test erfolgreich (Linear-Team/Issues abrufbar, Sentry-`whoami` erfolgreich)
 - [ ] Branches mit **echtem** Issue-Präfix aus deinem Linear-Team
 
 ---
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 - **MCP verbindet nicht:** Cursor neu starten; unter MCP die Logs prüfen; prüfen, ob `npx` im PATH ist.
+- **Sentry MCP verbindet nicht:** Prüfen, ob der Server auf `https://mcp.sentry.dev/mcp` konfiguriert ist und OAuth-Freigabe abgeschlossen wurde.
 - **Cloud Agent baut im falschen Repo:** `[repo=Auto-one-Family/Automation-One]` oder **`repo`**-Label setzen (Abschnitt 2).
-- **Kein „Connect“ bei Linear in Cursor:** Nur **Cursor-Admins** können die Organisation-Integration installieren — Admin bitten oder persönlichen Workspace testen.
+- **Kein "Connect" bei Linear in Cursor:** Nur **Cursor-Admins** können die Organisation-Integration installieren — Admin bitten oder persönlichen Workspace testen.

@@ -150,7 +150,7 @@ function handleWidgetKeydown(e: KeyboardEvent, item: WidgetDragItem): void {
   align-items: center;
   gap: 4px;
   padding: var(--space-1) var(--space-3);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -184,7 +184,7 @@ function handleWidgetKeydown(e: KeyboardEvent, item: WidgetDragItem): void {
 .qa-widget-strip__category {
   display: block;
   padding: 2px var(--space-1);
-  font-size: 9px;
+  font-size: var(--text-xxs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -231,7 +231,7 @@ function handleWidgetKeydown(e: KeyboardEvent, item: WidgetDragItem): void {
 .qa-widget-strip__hint {
   display: block;
   padding: 2px var(--space-3);
-  font-size: 9px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
   opacity: 0.4;
   text-align: center;

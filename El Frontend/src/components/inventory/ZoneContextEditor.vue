@@ -570,7 +570,7 @@ watch(() => props.zoneId, loadContext)
 .zone-context__cycle-details {
   display: flex;
   gap: var(--space-2);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 </style>

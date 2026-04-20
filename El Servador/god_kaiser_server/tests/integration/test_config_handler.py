@@ -588,3 +588,7 @@ class TestCorrelationId:
                     event_type, event_payload = ws_manager.broadcast.await_args.args
                     assert event_type == "config_response"
                     assert event_payload["request_id"] == "req-42"
+                    assert (
+                        ws_manager.broadcast.await_args.kwargs.get("correlation_id")
+                        == payload["correlation_id"]
+                    )

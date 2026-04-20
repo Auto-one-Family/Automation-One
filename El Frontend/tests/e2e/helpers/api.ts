@@ -15,11 +15,106 @@
 import type { APIRequestContext, Page } from '@playwright/test'
 
 const TOKEN_KEY = 'el_frontend_access_token'
+const REFRESH_TOKEN_KEY = 'el_frontend_refresh_token'
 
 /** API base URL - backend port (E2E: 8000). Matches global-setup login. */
 function getApiBase(pageUrl: string): string {
-  const origin = new URL(pageUrl).origin
-  return process.env.PLAYWRIGHT_API_BASE ?? origin.replace('5173', '8000')
+  if (process.env.PLAYWRIGHT_API_BASE) {
+    try {
+      return new URL(process.env.PLAYWRIGHT_API_BASE).origin
+    } catch {
+      return process.env.PLAYWRIGHT_API_BASE.replace(/\/api\/v1\/?$/i, '')
+    }
+  }
+
+  try {
+    const resolved = new URL(pageUrl)
+    if (resolved.protocol.startsWith('http')) {
+      resolved.port = '8000'
+      return resolved.origin
+    }
+  } catch {
+    // Fallback below
+  }
+
+  return 'http://localhost:8000'
+}
+
+interface LoginResponse {
+  tokens: {
+    access_token: string
+    refresh_token: string
+  }
+}
+
+async function getAuthToken(
+  page: Page,
+  request: APIRequestContext,
+  apiBase: string
+): Promise<string> {
+  const localStorageToken = await page
+    .evaluate((key: string) => localStorage.getItem(key), TOKEN_KEY)
+    .catch(() => null)
+
+  if (localStorageToken) {
+    return localStorageToken
+  }
+
+  const username = process.env.E2E_TEST_USER || 'admin'
+  const password = process.env.E2E_TEST_PASSWORD || 'Admin123#'
+  const response = await request.post(`${apiBase}/api/v1/auth/login`, {
+    headers: { 'Content-Type': 'application/json' },
+    data: { username, password },
+    timeout: 15000,
+  })
+
+  let authResponse = response
+  if (!authResponse.ok()) {
+    const setupResponse = await request.post(`${apiBase}/api/v1/auth/setup`, {
+      headers: { 'Content-Type': 'application/json' },
+      data: {
+        username,
+        email: process.env.E2E_TEST_EMAIL || 'admin@example.com',
+        password,
+        full_name: 'E2E Test Admin',
+      },
+      timeout: 15000,
+    })
+
+    authResponse = setupResponse
+  }
+
+  if (!authResponse.ok()) {
+    const errorText = await authResponse.text()
+    throw new Error(`API login/setup failed at ${apiBase}: ${authResponse.status()} - ${errorText}`)
+  }
+
+  const payload = await authResponse.json() as LoginResponse
+
+  await page.evaluate(
+    ({
+      tokenKey,
+      refreshTokenKey,
+      accessToken,
+      refreshToken,
+    }: {
+      tokenKey: string
+      refreshTokenKey: string
+      accessToken: string
+      refreshToken: string
+    }) => {
+      localStorage.setItem(tokenKey, accessToken)
+      localStorage.setItem(refreshTokenKey, refreshToken)
+    },
+    {
+      tokenKey: TOKEN_KEY,
+      refreshTokenKey: REFRESH_TOKEN_KEY,
+      accessToken: payload.tokens.access_token,
+      refreshToken: payload.tokens.refresh_token,
+    }
+  ).catch(() => {})
+
+  return payload.tokens.access_token
 }
 
 export interface CreateMockEspOptions {
@@ -58,15 +153,10 @@ export async function createMockEspWithSensors(
     throw new Error('createMockEspWithSensors: options must be { espId: string, sensors?: [], actuators?: [] }')
   }
 
-  const apiBase = `${getApiBase(page.url())}/api/v1`
+  const backendBase = getApiBase(page.url())
+  const apiBase = `${backendBase}/api/v1`
 
-  const token = await page.evaluate(
-    (key: string) => localStorage.getItem(key),
-    TOKEN_KEY
-  )
-  if (!token) {
-    throw new Error('No auth token in localStorage - ensure page has loaded with auth state')
-  }
+  const token = await getAuthToken(page, request, backendBase)
 
   const sensors = (options.sensors || []).map((s) => ({
     gpio: s.gpio,
@@ -129,12 +219,10 @@ export async function deleteMockEsp(
   request: APIRequestContext,
   espId: string
 ): Promise<void> {
-  const apiBase = `${getApiBase(page.url())}/api/v1`
+  const backendBase = getApiBase(page.url())
+  const apiBase = `${backendBase}/api/v1`
 
-  const token = await page.evaluate(
-    (key: string) => localStorage.getItem(key),
-    TOKEN_KEY
-  )
+  const token = await getAuthToken(page, request, backendBase).catch(() => null)
   if (!token) return
 
   await request.delete(`${apiBase}/debug/mock-esp/${espId}`, {

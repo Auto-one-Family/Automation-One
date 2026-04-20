@@ -587,4 +587,4 @@ log.error('Failed to load data', error)
 - **Store:** `/El Frontend/src/stores/dashboard.ts` (Pinia)
 - **Types:** `/El Frontend/src/types/index.ts` (WidgetTypeMeta, DashboardWidget, etc.)
 - **Example (Fertigation):** `/El Frontend/src/components/dashboard-widgets/FertigationPairWidget.vue`
-- **Integrationsref:** `/docs/FERTIGATION_WIDGET_INTEGRATION.md`
+- **Integrationsref:** `/docs/analysen/konzept-fertigation-ux-integration-2026-04-14.md`

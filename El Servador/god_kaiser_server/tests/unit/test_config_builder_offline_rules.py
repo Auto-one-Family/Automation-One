@@ -499,3 +499,146 @@ class TestBuildOfflineRulesAsync:
         result = await builder._build_offline_rules(mock_db, esp)
 
         assert result == [], "Should return empty list on DB failure, not propagate exception"
+
+
+class TestValidateOfflineRulesConsistency:
+    """AUT-59: Tests for _validate_offline_rules_consistency."""
+
+    def _builder(self) -> ConfigPayloadBuilder:
+        return ConfigPayloadBuilder()
+
+    def test_consistent_rules_pass_through(self):
+        """Rules whose GPIOs exist in the config frame are kept."""
+        builder = self._builder()
+        sensor_payloads = [{"gpio": 4, "sensor_type": "ds18b20"}]
+        actuator_payloads = [{"gpio": 18, "actuator_type": "relay"}]
+        offline_rules = [
+            {
+                "actuator_gpio": 18,
+                "sensor_gpio": 4,
+                "sensor_value_type": "ds18b20",
+                "activate_below": 18.0,
+                "deactivate_above": 22.0,
+                "activate_above": 0.0,
+                "deactivate_below": 0.0,
+            }
+        ]
+
+        result = builder._validate_offline_rules_consistency(
+            offline_rules, sensor_payloads, actuator_payloads, ESP_ID_A
+        )
+
+        assert len(result) == 1
+        assert result[0]["actuator_gpio"] == 18
+
+    def test_missing_actuator_gpio_strips_rule(self):
+        """Rule referencing actuator_gpio absent from actuator payloads is removed."""
+        builder = self._builder()
+        sensor_payloads = [{"gpio": 4, "sensor_type": "ds18b20"}]
+        actuator_payloads = [{"gpio": 22, "actuator_type": "relay"}]
+        offline_rules = [
+            {
+                "actuator_gpio": 18,
+                "sensor_gpio": 4,
+                "sensor_value_type": "ds18b20",
+                "activate_below": 18.0,
+                "deactivate_above": 22.0,
+                "activate_above": 0.0,
+                "deactivate_below": 0.0,
+            }
+        ]
+
+        result = builder._validate_offline_rules_consistency(
+            offline_rules, sensor_payloads, actuator_payloads, ESP_ID_A
+        )
+
+        assert len(result) == 0
+
+    def test_missing_sensor_gpio_strips_rule(self):
+        """Rule referencing sensor_gpio absent from sensor payloads is removed."""
+        builder = self._builder()
+        sensor_payloads = [{"gpio": 7, "sensor_type": "sht31_temp"}]
+        actuator_payloads = [{"gpio": 18, "actuator_type": "relay"}]
+        offline_rules = [
+            {
+                "actuator_gpio": 18,
+                "sensor_gpio": 4,
+                "sensor_value_type": "ds18b20",
+                "activate_below": 18.0,
+                "deactivate_above": 22.0,
+                "activate_above": 0.0,
+                "deactivate_below": 0.0,
+            }
+        ]
+
+        result = builder._validate_offline_rules_consistency(
+            offline_rules, sensor_payloads, actuator_payloads, ESP_ID_A
+        )
+
+        assert len(result) == 0
+
+    def test_empty_actuators_strips_all_rules(self):
+        """No actuators in config frame → all offline_rules stripped."""
+        builder = self._builder()
+        sensor_payloads = [{"gpio": 4, "sensor_type": "ds18b20"}]
+        actuator_payloads = []
+        offline_rules = [
+            {
+                "actuator_gpio": 18,
+                "sensor_gpio": 4,
+                "sensor_value_type": "ds18b20",
+                "activate_below": 18.0,
+                "deactivate_above": 22.0,
+                "activate_above": 0.0,
+                "deactivate_below": 0.0,
+            }
+        ]
+
+        result = builder._validate_offline_rules_consistency(
+            offline_rules, sensor_payloads, actuator_payloads, ESP_ID_A
+        )
+
+        assert len(result) == 0
+
+    def test_empty_offline_rules_returns_empty(self):
+        """No offline_rules → empty list returned directly."""
+        builder = self._builder()
+
+        result = builder._validate_offline_rules_consistency(
+            [], [{"gpio": 4}], [{"gpio": 18}], ESP_ID_A
+        )
+
+        assert result == []
+
+    def test_mixed_consistent_and_inconsistent(self):
+        """Only inconsistent rules are stripped, consistent ones kept."""
+        builder = self._builder()
+        sensor_payloads = [{"gpio": 4, "sensor_type": "ds18b20"}]
+        actuator_payloads = [{"gpio": 18, "actuator_type": "relay"}]
+        offline_rules = [
+            {
+                "actuator_gpio": 18,
+                "sensor_gpio": 4,
+                "sensor_value_type": "ds18b20",
+                "activate_below": 18.0,
+                "deactivate_above": 22.0,
+                "activate_above": 0.0,
+                "deactivate_below": 0.0,
+            },
+            {
+                "actuator_gpio": 99,
+                "sensor_gpio": 4,
+                "sensor_value_type": "ds18b20",
+                "activate_below": 20.0,
+                "deactivate_above": 25.0,
+                "activate_above": 0.0,
+                "deactivate_below": 0.0,
+            },
+        ]
+
+        result = builder._validate_offline_rules_consistency(
+            offline_rules, sensor_payloads, actuator_payloads, ESP_ID_A
+        )
+
+        assert len(result) == 1
+        assert result[0]["actuator_gpio"] == 18

@@ -441,7 +441,7 @@ onMounted(async () => {
   font-weight: 500;
   background-color: var(--color-bg-primary);
   border: 1px solid var(--glass-border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   color: var(--color-text-primary);
   cursor: pointer;
   min-width: 12rem;

@@ -349,7 +349,7 @@ async function saveConfig() {
   inset: 0;
   background-color: var(--color-bg-secondary);
   border: 1px solid var(--glass-border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   transition: var(--transition-fast);
 }
 

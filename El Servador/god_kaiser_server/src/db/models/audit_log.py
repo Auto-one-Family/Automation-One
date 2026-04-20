@@ -225,6 +225,9 @@ class AuditEventType:
     ACTUATOR_COMMAND = "actuator_command"
     ACTUATOR_COMMAND_FAILED = "actuator_command_failed"
 
+    # Config Validation Events
+    CONFIG_OFFLINE_RULES_STRIPPED = "config_offline_rules_stripped"
+
     # Error Events
     MQTT_ERROR = "mqtt_error"
     DATABASE_ERROR = "database_error"

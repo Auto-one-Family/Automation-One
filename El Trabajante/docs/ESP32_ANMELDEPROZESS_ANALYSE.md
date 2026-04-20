@@ -33,6 +33,13 @@ Der ESP32-Anmeldeprozess im AutomationOne-Framework ist ein mehrstufiger Workflo
 - Bei MQTT-Disconnect kann ESP nicht wissen ob Approval erfolgt ist
 - Heartbeat-ACK mit `status: "pending_approval"` überschreibt lokalen Approval-Status nicht
 
+### Update 2026-04-17 (Transport-/Pending-Hardening)
+- `CONFIG_PENDING_AFTER_RESET`: Heartbeat-ACK triggert keinen direkten Pending-Exit mehr; die Exit-Pruefung erfolgt auf `config_commit` (reduziert Last im MQTT-Callback-Pfad).
+- Runtime-Readiness-Snapshot nutzt aktive In-Memory-Manager (`sensorManager`/`actuatorManager`) statt NVS-Reloads im ACK-Pfad.
+- Bootstrap-Heartbeat nach ACK-Subscription wird deferred im normalen MQTT-Loop gesendet (nicht mehr direkt in `MQTT_EVENT_SUBSCRIBED`).
+- Stale `MQTT_EVENT_SUBSCRIBED`-Bootstrap-Trigger werden bei disconnected Zustand verworfen.
+- `publishHeartbeat(force=true)` sendet nicht mehr im disconnected Zustand.
+
 ---
 
 ## 2. Boot-Sequenz

@@ -346,7 +346,7 @@ function formatErrorTime(isoString: string): string {
 .health-summary {
   background: var(--glass-bg, rgba(255, 255, 255, 0.03));
   border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.08));
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   margin: 0.75rem 1rem;
   padding: 0.75rem 1rem;
   backdrop-filter: blur(10px);
@@ -424,7 +424,7 @@ function formatErrorTime(isoString: string): string {
   align-items: center;
   gap: 0.375rem;
   padding: 0.375rem 0.75rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
@@ -461,7 +461,7 @@ function formatErrorTime(isoString: string): string {
   align-items: center;
   gap: 0.375rem;
   padding: 0.375rem 0.75rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   font-size: 0.75rem;
   font-weight: 600;
   border: 1px solid transparent;
@@ -485,7 +485,7 @@ function formatErrorTime(isoString: string): string {
   align-items: center;
   gap: 0.375rem;
   padding: 0.5rem 0.875rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--color-text-secondary, #9ca3af);
@@ -568,7 +568,7 @@ function formatErrorTime(isoString: string): string {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   font-size: 0.8125rem;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid transparent;
@@ -640,7 +640,7 @@ function formatErrorTime(isoString: string): string {
   gap: 0.5rem;
   margin: 0.75rem 0 0;
   padding: 0.625rem 0.75rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.02);
   font-size: 0.75rem;
   color: var(--color-text-muted, #6b7280);

@@ -330,7 +330,11 @@ class ConfigHandler:
                         )
                     )
 
-                await ws_manager.broadcast("config_response", broadcast_payload)
+                await ws_manager.broadcast(
+                    "config_response",
+                    broadcast_payload,
+                    correlation_id=correlation_id,
+                )
             except Exception as e:
                 logger.warning(f"Failed to broadcast config response via WebSocket: {e}")
 

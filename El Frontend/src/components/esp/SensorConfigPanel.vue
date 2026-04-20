@@ -31,10 +31,14 @@ import DeviceScopeSection from '@/components/devices/DeviceScopeSection.vue'
 import { deviceContextApi } from '@/api/device-context'
 import { useZoneStore } from '@/shared/stores/zone.store'
 import { useActuatorStore } from '@/shared/stores/actuator.store'
+import { createLogger } from '@/utils/logger'
 import type { DeviceScope } from '@/types'
 import type { DeviceMetadata } from '@/types/device-metadata'
 import { parseDeviceMetadata, mergeDeviceMetadata } from '@/types/device-metadata'
 import type { SensorConfigCreate } from '@/types'
+import PendingConfigBanner from './PendingConfigBanner.vue'
+
+const configLogger = createLogger('SensorConfigPanel')
 
 interface Props {
   espId: string
@@ -69,6 +73,8 @@ const zoneStore = useZoneStore()
 const loading = ref(true)
 const saving = ref(false)
 const sensorDbId = ref<string | null>(null)
+const lastConfigSubjectId = ref<string | null>(null)
+const lastConfigCorrelationId = ref<string | null>(null)
 
 // Basic fields
 const name = ref('')
@@ -90,6 +96,10 @@ const operatingMode = ref<'continuous' | 'on_demand' | 'scheduled' | 'paused'>('
 const timeoutSeconds = ref(0)
 // schedule_config (Auftrag 5): nur bei operating_mode=scheduled relevant
 const scheduleConfig = ref<{ type: string; expression: string } | null>(null)
+
+// Sensor-Lifecycle: Freshness & Calibration (AUT-39)
+const measurementFreshnessHours = ref<number | null>(null)
+const calibrationIntervalDays = ref<number | null>(null)
 
 /** Cron presets for scheduled mode (matches EditSensorModal) */
 const CRON_PRESETS = [
@@ -201,6 +211,10 @@ onMounted(async () => {
           ? { type: 'cron', expression: sc.expression }
           : null
 
+      // Sensor-Lifecycle: Freshness & Calibration (AUT-39)
+      measurementFreshnessHours.value = (configExt.measurement_freshness_hours as number) ?? null
+      calibrationIntervalDays.value = (configExt.calibration_interval_days as number) ?? null
+
       if (config.threshold_min != null) alarmLow.value = roundToDecimals(config.threshold_min, 2)
       if (config.warning_min != null) warnLow.value = roundToDecimals(config.warning_min, 2)
       if (config.warning_max != null) warnHigh.value = roundToDecimals(config.warning_max, 2)
@@ -235,6 +249,8 @@ onMounted(async () => {
           sc?.expression && sc?.type === 'cron'
             ? { type: 'cron', expression: sc.expression }
             : null
+        measurementFreshnessHours.value = (sensor as any).measurement_freshness_hours ?? null
+        calibrationIntervalDays.value = (sensor as any).calibration_interval_days ?? null
       } else {
         unitValue.value = defaultUnit.value
       }
@@ -345,6 +361,8 @@ async function handleSave() {
       warning_max: warnHigh.value,
       operating_mode: operatingMode.value,
       timeout_seconds: timeoutSeconds.value,
+      measurement_freshness_hours: measurementFreshnessHours.value,
+      calibration_interval_days: calibrationIntervalDays.value,
     }
 
     // schedule_config (Auftrag 5): nur bei scheduled senden
@@ -407,6 +425,8 @@ async function handleSave() {
         requestId,
         summary,
       })
+      lastConfigSubjectId.value = subjectId
+      lastConfigCorrelationId.value = correlationId ?? null
       toast.info(
         `Konfigurationsauftrag akzeptiert: ${summary}.${handles ? ` ${handles}` : ''}`,
         {
@@ -419,25 +439,35 @@ async function handleSave() {
         timeoutMs: 65_000,
       })
       if (!terminal) {
-        toast.error('Konfigurationsstatus unklar: Keine terminale Rückmeldung empfangen. Bitte erneut prüfen.', {
-          persistent: true,
+        configLogger.info('config_pending_over_timeout: UI-Wartezeit abgelaufen', {
+          subject_id: subjectId,
+          correlation_id: correlationId,
+        })
+        toast.warning('Konfigurationsauftrag ausstehend: Noch keine Geräte-Rückmeldung. Status wird im Panel angezeigt.', {
           dedupeKey: `config-await-timeout:${correlationId ?? requestId ?? subjectId}`,
         })
         return
       }
       if (terminal.state === 'terminal_success') {
+        lastConfigSubjectId.value = null
+        lastConfigCorrelationId.value = null
         toast.success('Sensor-Konfiguration wurde vom Gerät bestätigt')
         emit('saved')
         return
       }
       if (terminal.state === 'terminal_timeout') {
-        toast.error('Konfigurations-Timeout: Gerät hat nicht terminal geantwortet. Bitte erneut versuchen.', {
-          persistent: true,
+        configLogger.info('config_pending_over_timeout: Store-Timeout erreicht', {
+          subject_id: subjectId,
+          correlation_id: correlationId,
+        })
+        toast.warning('Konfigurationsauftrag ausstehend: Gerät hat nicht innerhalb der Frist geantwortet.', {
           dedupeKey: `config-terminal-timeout:${correlationId ?? requestId ?? subjectId}`,
         })
         return
       }
-      toast.error('Konfiguration wurde nicht bestätigt. Details im Event-Monitor prüfen.', {
+      lastConfigSubjectId.value = null
+      lastConfigCorrelationId.value = null
+      toast.error('Konfiguration fehlgeschlagen. Details im Event-Monitor prüfen.', {
         persistent: true,
         dedupeKey: `config-terminal-failed:${correlationId ?? requestId ?? subjectId}`,
       })
@@ -570,6 +600,34 @@ async function handleSave() {
             @input="setCronExpression(($event.target as HTMLInputElement).value)"
           />
           <span class="sensor-config__helper">Format: Minute Stunde Tag Monat Wochentag</span>
+        </div>
+
+        <!-- Sensor-Lifecycle: Freshness & Calibration (AUT-39) -->
+        <div class="sensor-config__row">
+          <div class="sensor-config__field sensor-config__field--half">
+            <label class="sensor-config__label">Mess-Alter (Stunden)</label>
+            <input
+              v-model.number="measurementFreshnessHours"
+              type="number"
+              min="0"
+              step="1"
+              class="sensor-config__input"
+              placeholder="leer = kein Limit"
+            />
+            <span class="sensor-config__helper">Nach dieser Zeit gilt ein Messwert als veraltet</span>
+          </div>
+          <div class="sensor-config__field sensor-config__field--half">
+            <label class="sensor-config__label">Kalibrier-Intervall (Tage)</label>
+            <input
+              v-model.number="calibrationIntervalDays"
+              type="number"
+              min="0"
+              step="1"
+              class="sensor-config__input"
+              placeholder="leer = keine Erinnerung"
+            />
+            <span class="sensor-config__helper">Empfohlener Rekalibrierungszyklus</span>
+          </div>
         </div>
       </section>
 
@@ -788,6 +846,13 @@ async function handleSave() {
         />
       </AccordionSection>
 
+      <!-- ═══ PENDING CONFIG STATUS (AUT-64) ═══════════════════════════════ -->
+      <PendingConfigBanner
+        :subject-id="lastConfigSubjectId"
+        :correlation-id="lastConfigCorrelationId"
+        @retry="handleSave"
+      />
+
       <!-- ═══ ACTIONS ══════════════════════════════════════════════════════ -->
       <div class="sensor-config__actions">
         <button
@@ -998,7 +1063,7 @@ async function handleSave() {
 }
 
 .sensor-config__helper {
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
 }
 

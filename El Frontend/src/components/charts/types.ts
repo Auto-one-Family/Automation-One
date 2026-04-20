@@ -1,6 +1,6 @@
 export interface ChartDataPoint {
   timestamp: string | Date
-  value: number
+  value: number | null
   label?: string
 }
 

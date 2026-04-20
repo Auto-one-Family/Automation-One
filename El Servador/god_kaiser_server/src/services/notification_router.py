@@ -176,6 +176,7 @@ class NotificationRouter:
         # Step 3: WebSocket broadcast
         if prefs.websocket_enabled:
             await self._broadcast_websocket(db_notification)
+            await self.broadcast_unread_count(user_id)
 
         # Step 4: Email routing (based on severity + quiet hours + digest)
         if prefs.email_enabled and self.email_service.is_available:
@@ -219,6 +220,7 @@ class NotificationRouter:
             data = {
                 "id": str(notification.id),
                 "user_id": notification.user_id,
+                "channel": notification.channel,
                 "severity": notification.severity,
                 "category": notification.category,
                 "title": notification.title,
@@ -364,6 +366,7 @@ class NotificationRouter:
             extra["email_status"] = "sent" if success else "failed"
             extra["email_provider"] = provider
             notification.extra_data = extra
+            await self.broadcast_notification_updated(notification)
         except Exception as e:
             logger.error(f"Failed to log email send: {e}")
 
@@ -457,6 +460,15 @@ class NotificationRouter:
             data = {
                 "id": str(notification.id),
                 "user_id": notification.user_id,
+                "title": notification.title,
+                "body": notification.body,
+                "source": notification.source,
+                "category": notification.category,
+                "metadata": notification.extra_data,
+                "correlation_id": notification.correlation_id,
+                "updated_at": (
+                    notification.updated_at.isoformat() if notification.updated_at else None
+                ),
                 "is_read": notification.is_read,
                 "is_archived": notification.is_archived,
                 "read_at": notification.read_at.isoformat() if notification.read_at else None,
@@ -473,6 +485,7 @@ class NotificationRouter:
                 ),
             }
             await ws_manager.broadcast("notification_updated", data)
+            increment_ws_notification_broadcast("notification_updated")
             logger.debug(f"WebSocket broadcast: notification_updated for {notification.id}")
         except Exception as e:
             logger.error(f"Failed to broadcast notification_updated: {e}")

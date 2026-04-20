@@ -234,6 +234,7 @@ class ConfigErrorCode(IntEnum):
     CONFIG_TIMEOUT = 5006
     ESP_OFFLINE = 5007
     ESP_COMMAND_FAILED = 5008
+    CONFIG_OFFLINE_RULES_INCONSISTENT = 5009
 
 
 class MQTTErrorCode(IntEnum):

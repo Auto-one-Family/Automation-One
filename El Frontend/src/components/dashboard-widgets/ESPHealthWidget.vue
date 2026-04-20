@@ -210,9 +210,9 @@ function navigateToDevice(device: ESPDevice) {
 }
 
 .esp-health-widget__mock-badge {
-  font-size: 9px;
+  font-size: var(--text-xxs);
   font-weight: 600;
-  padding: 1px 4px;
+  padding: 1px var(--space-1);
   border-radius: var(--radius-sm);
   background: var(--color-bg-quaternary);
   color: var(--color-text-muted);

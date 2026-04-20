@@ -542,7 +542,7 @@ async function removeZone() {
   margin-bottom: 0.75rem;
   background-color: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   color: var(--color-error, #ef4444);
   font-size: 0.875rem;
 }
@@ -560,7 +560,7 @@ async function removeZone() {
   margin-bottom: 0.75rem;
   background-color: rgba(34, 197, 94, 0.1);
   border: 1px solid rgba(34, 197, 94, 0.3);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   color: var(--color-success, #22c55e);
   font-size: 0.875rem;
 }
@@ -593,7 +593,7 @@ async function removeZone() {
   font-family: 'JetBrains Mono', monospace;
   background-color: var(--color-bg-tertiary);
   padding: 0.125rem 0.375rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
   font-size: 0.6875rem;
 }
 

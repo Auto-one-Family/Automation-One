@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.17 | **Aktualisiert:** 2026-04-14
+> **Version:** 2.20 | **Aktualisiert:** 2026-04-20
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
-> **Änderungen:** **PKG-05 (2026-04-14):** `system/heartbeat/ack` Reject-Diagnose erweitert (optionale Felder `reason_code`, `revocation_source`, `upstream_deleted`, `delete_intent`, `correlation_id` für Revocation/Upstream-Delete-Auswertung auf ESP-Seite). Intent-Outcome-Codes ergänzt: `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`. Zuvor: **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
+> **Änderungen:** **AUT-69 (2026-04-20):** `session/announce` an Server-Consumer angepasst (`handle_session_announce` registriert), Session-Feld-Alias dokumentiert (**kanonisch `handover_epoch`, Fallback `session_epoch`**) und Heartbeat-Metriken um `handover_contract_reject_startup`/`handover_contract_reject_runtime` plus Summenfeld `handover_contract_reject` erweitert. Zuvor: **AUT-54 (2026-04-17):** Bootstrap-Heartbeat nach `heartbeat/ack`-Subscription wird auf ESP32 nur noch deferred im normalen Loop gesendet (nicht mehr direkt im `MQTT_EVENT_SUBSCRIBED`-Callback). Stale `MQTT_EVENT_SUBSCRIBED` bei bereits getrennter Verbindung werden verworfen; `publishHeartbeat(force=true)` sendet nie im disconnected Zustand. Zuvor: **AUT-5 (2026-04-17):** Heartbeat-Payload um `sensor_command_queue_overflow_count` ergänzt (Overflow-Telemetrie der Sensor-Command-Queue). Zuvor: **PKG-05 (2026-04-14):** `system/heartbeat/ack` Reject-Diagnose erweitert (optionale Felder `reason_code`, `revocation_source`, `upstream_deleted`, `delete_intent`, `correlation_id` für Revocation/Upstream-Delete-Auswertung auf ESP-Seite). Intent-Outcome-Codes ergänzt: `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`. Zuvor: **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
 
 ---
 
@@ -38,6 +38,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `kaiser/god/esp/{esp_id}/actuator/{gpio}/response` | ESP→Server | 1 | Command Response |
 | `kaiser/god/esp/{esp_id}/actuator/{gpio}/alert` | ESP→Server | 1 | Actuator Alert |
 | `kaiser/god/esp/{esp_id}/actuator/emergency` | Server→ESP | 1 | ESP-spezifischer Emergency |
+| `kaiser/god/esp/{esp_id}/session/announce` | ESP→Server | 1 | Reconnect Session-Announce (AUT-69) |
 | `kaiser/god/esp/{esp_id}/system/heartbeat` | ESP→Server | 0 | Heartbeat |
 | `kaiser/god/esp/{esp_id}/system/heartbeat/ack` | Server→ESP | 1 | Heartbeat ACK (SAFETY-P5: QoS 1) |
 | `kaiser/god/server/status` | Server→ALL | 1 | Server LWT + Online/Offline (SAFETY-P5) |
@@ -486,11 +487,12 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
   "network_degraded": false,
   "persistence_drift_count": 0,
   "critical_outcome_drop_count": 0,
-  "publish_outbox_drop_count": 0
+  "publish_outbox_drop_count": 0,
+  "sensor_command_queue_overflow_count": 0
 }
 ```
 
-**Degraded-Telemetrie (2026-04):** `persistence_degraded` / `persistence_degraded_reason` = Offline-Rules-Persistence-Drift; `runtime_state_degraded` = FSM (z. B. CONFIG_PENDING, SAFE_MODE); `network_degraded` = MQTT- oder WiFi-Circuit-Breaker OPEN. **`degraded` / `degraded_reason` werden von aktueller Firmware nicht mehr gesendet** (Legacy-Consumer migrieren). `critical_outcome_drop_count` spiegelt NVS-Outcome-Outbox-Verluste; `publish_outbox_drop_count` zählt ESP-IDF-Outbox-`-2`-Drops nicht-kritischer Publishes.
+**Degraded-Telemetrie (2026-04):** `persistence_degraded` / `persistence_degraded_reason` = Offline-Rules-Persistence-Drift; `runtime_state_degraded` = FSM (z. B. CONFIG_PENDING, SAFE_MODE); `network_degraded` = MQTT- oder WiFi-Circuit-Breaker OPEN. **`degraded` / `degraded_reason` werden von aktueller Firmware nicht mehr gesendet** (Legacy-Consumer migrieren). `critical_outcome_drop_count` spiegelt NVS-Outcome-Outbox-Verluste; `publish_outbox_drop_count` zählt ESP-IDF-Outbox-`-2`-Drops nicht-kritischer Publishes; `sensor_command_queue_overflow_count` zählt verworfene Sensor-Commands bei Queue-Overflow.
 
 **Required Fields:** `ts`, `uptime`, `heap_free` / `free_heap`, `wifi_rssi`
 
@@ -506,6 +508,39 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 **Code-Referenzen:**
 - **ESP32:** `mqtt_client.cpp:publishHeartbeat()` (Zeile ~435)
 - **Server:** `heartbeat_handler.py:handle_heartbeat()` (Zeile 61)
+
+**AUT-69 Counter-Split (Server-Ingest):**
+- `handover_contract_reject_startup` zählt Reject-Deltas im ersten 1s-Fenster nach Session-Connect
+- `handover_contract_reject_runtime` zählt Reject-Deltas nach dem Startup-Fenster
+- `handover_contract_reject` bleibt als Backward-kompatible Summe (`startup + runtime`)
+
+---
+
+### 3.1a session/announce (ESP→Server)
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/session/announce`
+
+**QoS:** 1  
+**Retain:** false  
+**Frequency:** Bei `MQTT_EVENT_CONNECTED` (vor der normalen Publish-Sequenz)
+
+**Payload:**
+```json
+{
+  "handover_epoch": 3,
+  "reason": "reconnect",
+  "ts_ms": 1735818000000,
+  "connect_seq": 7
+}
+```
+
+**Feld-Mapping (AUT-69 CLARIFY B-SESS-02):**
+- Kanonischer Feldname: `handover_epoch`
+- Legacy-Fallback im Server: `session_epoch`
+
+**Code-Referenzen:**
+- **ESP32:** `mqtt_client.cpp:publishSessionAnnounce()`
+- **Server:** `heartbeat_handler.py:handle_session_announce()`
 
 ---
 
@@ -549,6 +584,8 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 - `config_available` ist im frühen ACK immer `false` — Config-Push läuft unabhängig
 - `handover_epoch` ist verpflichtend (fail-closed Vertrag) und wird aus dem aktiven ESP-Handover-Kontext abgeleitet
 - ESP32 Registration-Gate ist **fail-closed**: kein Gate-Open per Timeout, nur nach gültigem `heartbeat/ack`
+- ESP32 Bootstrap-Heartbeat nach ACK-Subscription wird deferred im Loop verarbeitet (nicht im MQTT-Event-Callback), um Callback-Last und Reconnect-Races zu minimieren
+- Stale `MQTT_EVENT_SUBSCRIBED`-Bootstrap-Trigger werden bei disconnected Zustand verworfen
 
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildSystemHeartbeatAckTopic()` (Zeile 136)
@@ -900,13 +937,18 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```
 
 **Outcome-Werte:** `accepted`, `rejected`, `applied`, `persisted`, `failed`, `expired`  
-**Code-Klassen (Auszug):** `COMMAND_ACCEPTED`, `REGISTRATION_PENDING`, `CONFIG_PENDING_BLOCKED`, `DEGRADED_MODE_BLOCKED`, `SAFETY_LOCKED`, `QUEUE_FULL`, `PUBLISH_OUTBOX_FULL`, `VALIDATION_FAIL`, `EXECUTE_FAIL`, `SAFETY_EPOCH_INVALIDATED`, `TTL_EXPIRED`, `SAFETY_QUEUE_FLUSHED`, `MODE_UNSUPPORTED`, `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `JSON_PARSE_ERROR`, `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`
+**Code-Klassen (Auszug):** `COMMAND_ACCEPTED`, `REGISTRATION_PENDING`, `CONFIG_PENDING_BLOCKED`, `DEGRADED_MODE_BLOCKED`, `SAFETY_LOCKED`, `QUEUE_FULL`, `PUBLISH_OUTBOX_FULL`, `PAYLOAD_TOO_LARGE`, `VALIDATION_FAIL`, `EXECUTE_FAIL`, `SAFETY_EPOCH_INVALIDATED`, `TTL_EXPIRED`, `SAFETY_QUEUE_FLUSHED`, `MODE_UNSUPPORTED`, `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `JSON_PARSE_ERROR`, `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`
 **Server-Kanonisierung (P0.2):** Alias-Mapping serverseitig (`processing→accepted`, `success/ok→persisted`, `error→failed`, `timeout→expired`); unbekannte `flow`/`outcome` werden als Contract-Verletzung mit `code=CONTRACT_UNKNOWN_CODE` verarbeitet.
 **Contract-Hinweis:** Fehlt `correlation_id`, setzt der Server `code=CONTRACT_MISSING_CORRELATION` und markiert den Datensatz als nicht-retrybar. Im Firmware-Config-Flow wird fehlende `correlation_id` zusaetzlich strict als Contract-Verletzung behandelt (kein lokaler Fallback im terminalen Pfad).
 **Contract-Haertung (WP-09):** Fuer `system/intent_outcome` sind keine Legacy-Topic-Aliase mehr zulässig; alte Alias-Namen sind als deprecated zu behandeln und spaetestens bis **2026-07-03** zu entfernen.
 
+**Zustellungsrobustheit (AUT-56, 2026-04-17):**
+- **Kanonisches Outcome** (`publishIntentOutcome`): `safePublish()` QoS 1 mit 2 Retries + exponential Backoff. Bei Publish-Fail: kritische Outcomes werden in NVS-Outbox (48 Slots, Ring-Buffer) persistiert und bei Reconnect automatisch replayed (`processIntentOutcomeOutbox()`). `delivery_mode` = `"direct"` (Erstversuch) oder `"recovered"` (NVS-Replay). `retry_count` / `recovered` zeigen dem Server den Replay-Kontext.
+- **Server-Dedup:** `upsert_outcome()` prüft `intent_id` + `generation` + `seq` für Out-of-order-Protection. Monotonic Finality Guard: ein finaler Outcome bleibt final. Idempotente Duplikate werden ACKed ohne Audit/WS-Seiteneffekte (`is_stale`).
+- **Incident-Marker:** `[INC-EA5484]` in Firmware-Logs für Publish-Failures und NVS-Replay-Events.
+
 **Code-Referenzen:**
-- **ESP32:** `intent_contract.cpp:publishIntentOutcome()`
+- **ESP32:** `intent_contract.cpp:publishIntentOutcome()`, `processIntentOutcomeOutbox()` (NVS-Replay)
 - **ESP32:** `topic_builder.cpp:buildIntentOutcomeTopic()`
 - **ESP32:** `main.cpp:routeIncomingMessage()` (Admission-NACK), Queue-Worker in `tasks/*_queue.cpp`
 
@@ -923,8 +965,11 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 
 **Pflichtfelder (Schema-Tag):** `schema` = `config_pending_lifecycle_v1`, `boot_sequence_id` (Korrelation zum Heartbeat), plus bestehende Transition-Felder (`event_type`, `reason_code`, Counter, Readiness-Snapshot — siehe `El Trabajante/docs/runtime-readiness-policy.md`).
 
+**Zustellungsrobustheit (AUT-56, 2026-04-17):** Lifecycle-Events werden über die AUT-55-Publish-Queue (`queuePublish`, `critical=true`) geroutet. Damit profitieren sie von den gleichen Retry-Mechanismen (3 Versuche + Backoff) wie andere kritische Publishes. Vor AUT-56 gingen Lifecycle-Events über einen Raw-Publish ohne Retry — bei Outbox-Druck (Error 3012) waren sie silent-drop-anfällig. `recordIntentChainStage()` (intent_chain_stage_v1) und `publishConfigPendingTransitionEvent()` (config_pending_lifecycle_v1) sind beide gehärtet.
+
 **Code-Referenzen:**
 - **ESP32:** `topic_builder.cpp:buildIntentOutcomeLifecycleTopic()`, `main.cpp:publishConfigPendingTransitionEvent()`
+- **ESP32:** `intent_contract.cpp:recordIntentChainStage()` (intent_chain_stage_v1)
 
 ---
 
@@ -1347,6 +1392,7 @@ Der Server subscribed zu folgenden Topic-Patterns:
 | `kaiser/+/esp/+/actuator/+/status` | `handle_actuator_status` | `actuator_handler.py:45` |
 | `kaiser/+/esp/+/actuator/+/response` | `handle_actuator_response` | `main.py:239` |
 | `kaiser/+/esp/+/actuator/+/alert` | `handle_actuator_alert` | `main.py:244` |
+| `kaiser/+/esp/+/session/announce` | `handle_session_announce` | `heartbeat_handler.py` |
 | `kaiser/+/esp/+/system/heartbeat` | `handle_heartbeat` | `heartbeat_handler.py:61` |
 | `kaiser/+/esp/+/config_response` | `handle_config_ack` | `config_handler.py:52` |
 | `kaiser/+/esp/+/zone/ack` | `handle_zone_ack` | `main.py:275` |
@@ -1401,7 +1447,7 @@ topic_builder.buildSensorCommandWildcard(topic, sizeof(topic));
 | QoS | Verwendung | Garantie |
 |-----|------------|----------|
 | **0** | Heartbeat, Diagnostics | At most once (best effort) |
-| **1** | Sensor-Daten, Alerts, Status, Intent-Outcomes | At least once |
+| **1** | Sensor-Daten, Alerts, Status, Intent-Outcomes, Session-Announce | At least once |
 | **2** | Commands, Config (Server-Publish) | Exactly once |
 
 **ESP32 Subscription-QoS:** PubSubClient unterstuetzt maximal QoS 1. Alle ESP-Subscriptions (Commands, Config, Emergency, Zone, Subzone, Sensor-Commands, Heartbeat-ACK) nutzen QoS 1. Die effektive QoS ist `min(publish_qos, subscribe_qos)`, d.h. QoS 1 fuer vom Server publizierte QoS-2-Topics.

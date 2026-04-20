@@ -65,7 +65,7 @@ defineProps<Props>()
 }
 
 .subzone-area__count {
-  font-size: 9px;
+  font-size: var(--text-xxs);
   font-family: var(--font-mono);
   font-weight: 600;
   color: var(--color-text-secondary);
