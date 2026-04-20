@@ -169,6 +169,15 @@ class ConfigHandler:
                     esp_id,
                     status,
                     authority_key,
+                    extra={
+                        "event_class": "CONFIG_GUARD",
+                        "action": "skip_stale_response",
+                        "reason": "terminal_authority",
+                        "status": "expected",
+                        "esp_id": esp_id,
+                        "config_type": config_type,
+                        "authority_key": authority_key,
+                    },
                 )
                 return True
 
