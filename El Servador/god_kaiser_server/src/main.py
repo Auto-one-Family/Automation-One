@@ -271,6 +271,10 @@ async def lifespan(app: FastAPI):
             "kaiser/+/esp/+/system/heartbeat", heartbeat_handler.handle_heartbeat
         )
         _subscriber_instance.register_handler(
+            "kaiser/+/esp/+/session/announce",
+            heartbeat_handler.get_heartbeat_handler().handle_session_announce,
+        )
+        _subscriber_instance.register_handler(
             "kaiser/+/discovery/esp32_nodes", discovery_handler.handle_discovery
         )
         _subscriber_instance.register_handler(

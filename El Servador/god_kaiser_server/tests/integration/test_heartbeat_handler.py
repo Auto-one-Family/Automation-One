@@ -9,11 +9,13 @@ Phase 3 Test-Suite: Heartbeat Processing, Auto-Discovery, Status Transitions.
 
 import json
 import os
+import time
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.mqtt.handlers.heartbeat_handler import HeartbeatHandler, get_heartbeat_handler
+from src.schemas.esp import SessionAnnouncePayload
 
 
 class TestHeartbeatPayloadValidation:
@@ -52,6 +54,27 @@ class TestHeartbeatPayloadValidation:
         }
         result = handler._validate_payload(payload)
         assert result["valid"] is True
+
+    def test_pkg17_slim_payload_without_gpio_fields_passes_validation(self, handler):
+        """PKG-17 regression: Payload without any gpio-related fields must pass validation.
+
+        PKG-17 removes the following fields from firmware heartbeats to reduce payload size:
+          - gpio_status, gpio_reserved_count, gpio_status_cached,
+            gpio_status_cache_age_ms, payload_degraded, degraded_fields,
+            heartbeat_degraded_count
+
+        Server must tolerate all of these being absent without treating it as an error.
+        """
+        payload = {
+            "ts": int(datetime.now(timezone.utc).timestamp()),
+            "uptime": 3600,
+            "heap_free": 98304,
+            "wifi_rssi": -45,
+            # PKG-17: none of the gpio-related fields are present
+        }
+        result = handler._validate_payload(payload)
+        assert result["valid"] is True
+        assert result["error"] == ""
 
     def test_missing_ts_fails(self, handler):
         """Missing ts field fails validation."""
@@ -162,6 +185,188 @@ class TestHeartbeatPayloadValidation:
         payload = {}
         result = handler._validate_payload(payload)
         assert result["valid"] is False
+
+
+class TestContractRejectCounterSplit:
+    """AUT-69: startup/runtime split for handover contract rejects."""
+
+    @pytest.fixture
+    def handler(self):
+        return HeartbeatHandler()
+
+    def test_reject_within_startup_window_increments_startup_counter(self, handler):
+        esp_id = "ESP_AUT69_STARTUP"
+        handler._last_session_connected_ts_by_esp[esp_id] = time.monotonic()
+        payload = {
+            "handover_contract_reject_count": 1,
+            "handover_contract_last_reject": "MISSING_ACTIVE_SESSION_EPOCH",
+        }
+        metadata = {}
+
+        handler._track_contract_reject_metrics(esp_id, payload, metadata)
+
+        assert metadata["handover_contract_reject_startup"] == 1
+        assert metadata["handover_contract_reject_runtime"] == 0
+        assert metadata["handover_contract_reject"] == 1
+
+    def test_reject_after_startup_window_increments_runtime_counter(self, handler):
+        esp_id = "ESP_AUT69_RUNTIME"
+        handler._last_session_connected_ts_by_esp[esp_id] = time.monotonic() - 1.5
+        payload = {
+            "handover_contract_reject_count": 2,
+            "handover_contract_last_reject": "MISSING_ACTIVE_SESSION_EPOCH",
+        }
+        metadata = {
+            "handover_contract_reject_count_last": 1,
+            "handover_contract_reject_startup": 1,
+            "handover_contract_reject_runtime": 0,
+        }
+
+        handler._track_contract_reject_metrics(esp_id, payload, metadata)
+
+        assert metadata["handover_contract_reject_startup"] == 1
+        assert metadata["handover_contract_reject_runtime"] == 1
+        assert metadata["handover_contract_reject"] == 2
+
+    def test_payload_without_new_fields_keeps_backward_compatibility(self, handler):
+        metadata = {"stable_key": "stable_value"}
+        payload = {"ts": int(datetime.now(timezone.utc).timestamp())}
+
+        handler._track_contract_reject_metrics("ESP_AUT69_COMPAT", payload, metadata)
+
+        assert metadata == {"stable_key": "stable_value"}
+
+    def test_alias_mapping_accepts_both_handover_and_session_epoch(self):
+        from_handover = SessionAnnouncePayload.from_payload(
+            {"handover_epoch": 5, "reason": "reconnect", "ts_ms": 1000}
+        )
+        from_session = SessionAnnouncePayload.from_payload(
+            {"session_epoch": 6, "reason": "boot", "ts_ms": 2000}
+        )
+
+        assert from_handover.handover_epoch == 5
+        assert from_session.handover_epoch == 6
+
+
+class TestHeartbeatMetadataDegradedFlags:
+    """AUT-68: Metadata persistence for PKG-17 slim-payload flags.
+
+    Covers edge cases for payload_degraded, degraded_fields and the
+    stale-gpio_status semantics when a follow-up heartbeat omits
+    gpio_status.
+    """
+
+    @pytest.fixture
+    def handler(self):
+        return get_heartbeat_handler()
+
+    @pytest.fixture
+    def esp_device(self):
+        device = MagicMock()
+        device.device_id = "ESP_DEGRADED_001"
+        device.device_metadata = {}
+        device.zone_id = None
+        return device
+
+    @pytest.fixture
+    def mock_session(self):
+        s = MagicMock()
+        s.commit = AsyncMock()
+        s.flush = AsyncMock()
+        return s
+
+    @pytest.mark.asyncio
+    async def test_payload_degraded_flag_persisted_without_gpio_status(
+        self, handler, esp_device, mock_session
+    ):
+        """payload_degraded=true alone (no gpio_status) is accepted and persisted."""
+        payload = {
+            "ts": int(datetime.now(timezone.utc).timestamp()),
+            "uptime": 100,
+            "heap_free": 50000,
+            "wifi_rssi": -60,
+            "payload_degraded": True,
+            # Intentionally no gpio_status, no degraded_fields
+        }
+
+        await handler._update_esp_metadata(esp_device, payload, mock_session)
+
+        assert esp_device.device_metadata.get("payload_degraded") is True
+        # No gpio_status written when payload does not contain it.
+        assert "gpio_status" not in esp_device.device_metadata
+
+    @pytest.mark.asyncio
+    async def test_degraded_fields_list_validated_and_persisted(
+        self, handler, esp_device, mock_session
+    ):
+        """degraded_fields=[...] is accepted, filtered to str, and persisted as a list."""
+        payload = {
+            "ts": int(datetime.now(timezone.utc).timestamp()),
+            "uptime": 100,
+            "heap_free": 50000,
+            "wifi_rssi": -60,
+            "payload_degraded": True,
+            "degraded_fields": ["gpio_status", "", 42, None, "other"],  # mixed types
+        }
+
+        await handler._update_esp_metadata(esp_device, payload, mock_session)
+
+        stored = esp_device.device_metadata.get("degraded_fields")
+        assert isinstance(stored, list)
+        # Only non-empty string entries are kept (see _update_esp_metadata filter).
+        assert stored == ["gpio_status", "other"]
+
+    @pytest.mark.asyncio
+    async def test_gpio_status_is_not_cleared_when_next_heartbeat_omits_it(
+        self, handler, esp_device, mock_session
+    ):
+        """Second heartbeat without gpio_status does NOT delete stored gpio_status.
+
+        Documented behavior (AUT-68): The handler updates metadata additively —
+        if a later heartbeat drops gpio_status (PKG-17 slim payload), the
+        previously stored gpio_status REMAINS in device_metadata (stale-tolerant).
+        This is intentional: firmware only resends gpio_status on change, so the
+        server keeps the last-known authoritative snapshot.
+        """
+        # Heartbeat #1: carries a gpio_status entry
+        payload1 = {
+            "ts": int(datetime.now(timezone.utc).timestamp()),
+            "uptime": 100,
+            "heap_free": 50000,
+            "wifi_rssi": -60,
+            "gpio_status": [
+                {
+                    "gpio": 18,
+                    "owner": "actuator",
+                    "component": "pump_1",
+                    "mode": 2,  # Arduino OUTPUT → normalized to 1
+                    "safe": False,
+                }
+            ],
+            "gpio_reserved_count": 1,
+        }
+        await handler._update_esp_metadata(esp_device, payload1, mock_session)
+
+        first_snapshot = esp_device.device_metadata.get("gpio_status")
+        assert isinstance(first_snapshot, list)
+        assert len(first_snapshot) == 1
+        assert first_snapshot[0]["gpio"] == 18
+
+        # Heartbeat #2: PKG-17 slim payload — no gpio_status, no degraded flags
+        payload2 = {
+            "ts": int(datetime.now(timezone.utc).timestamp()) + 10,
+            "uptime": 110,
+            "heap_free": 49000,
+            "wifi_rssi": -62,
+        }
+        await handler._update_esp_metadata(esp_device, payload2, mock_session)
+
+        # Stale semantics: gpio_status from heartbeat #1 is RETAINED.
+        retained = esp_device.device_metadata.get("gpio_status")
+        assert retained == first_snapshot, (
+            "gpio_status must be retained across heartbeats that omit it "
+            "(AUT-68 stale-tolerant semantics, PKG-17 slim payload)"
+        )
 
 
 class TestHeartbeatTopicParsing:

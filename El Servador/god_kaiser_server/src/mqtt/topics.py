@@ -161,6 +161,13 @@ class TopicBuilder:
         )
 
     @staticmethod
+    def build_session_announce_topic(esp_id: str) -> str:
+        """Build session announce topic for reconnect ordering."""
+        return constants.get_topic_with_kaiser_id(
+            constants.MQTT_TOPIC_ESP_SESSION_ANNOUNCE, esp_id=esp_id
+        )
+
+    @staticmethod
     def build_lwt_topic(esp_id: str) -> str:
         """
         Build LWT (Last-Will-Testament) topic for clearing retained messages.
@@ -387,7 +394,7 @@ class TopicBuilder:
             or None if parse fails
         """
         # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/actuator/{gpio}/status
-        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/actuator/(\d+)/status"
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([a-zA-Z0-9_-]+)/actuator/(\d+)/status"
         match = re.match(pattern, topic)
 
         if match:
@@ -417,7 +424,7 @@ class TopicBuilder:
             or None if parse fails
         """
         # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/actuator/{gpio}/response
-        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/actuator/(\d+)/response"
+        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([a-zA-Z0-9_-]+)/actuator/(\d+)/response"
         match = re.match(pattern, topic)
 
         if match:
@@ -485,6 +492,19 @@ class TopicBuilder:
                 "kaiser_id": match.group(1),
                 "esp_id": match.group(2),
                 "type": "heartbeat",
+            }
+        return None
+
+    @staticmethod
+    def parse_session_announce_topic(topic: str) -> Optional[Dict[str, Any]]:
+        """Parse ESP session announce topic."""
+        pattern = r"^kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/session/announce$"
+        match = re.match(pattern, topic)
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "type": "session_announce",
             }
         return None
 
@@ -1012,6 +1032,7 @@ class TopicBuilder:
             cls.parse_actuator_response_topic,
             cls.parse_actuator_alert_topic,
             cls.parse_heartbeat_topic,
+            cls.parse_session_announce_topic,
             cls.parse_lwt_topic,
             cls.parse_health_status_topic,
             cls.parse_config_response_topic,

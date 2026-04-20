@@ -24,9 +24,7 @@ import asyncio
 import json
 import time as time_module
 
-from ...core.error_codes import (
-    ValidationErrorCode,
-)
+from ...core.error_codes import ValidationErrorCode
 from ...core.logging_config import get_logger
 from ...core.task_registry import create_tracked_task
 from ...core.metrics import (
@@ -54,6 +52,7 @@ from ...db.session import resilient_session
 from ...services.event_contract_serializers import serialize_esp_health_event
 from ...services.system_event_contract import canonicalize_heartbeat
 from ...services.state_adoption_service import get_state_adoption_service
+from ...schemas.esp import SessionAnnouncePayload
 from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
@@ -68,6 +67,7 @@ RECONNECT_THRESHOLD_SECONDS = 60
 # and independently of config push. Config push is triggered via _has_pending_config().
 STATE_PUSH_COOLDOWN_SECONDS = 120
 ADOPTION_GRACE_SECONDS = 2.0
+SESSION_STARTUP_REJECT_WINDOW_SECONDS = 1.0
 
 # Config-Push: Cooldown between auto config pushes (prevent mismatch loop)
 CONFIG_PUSH_COOLDOWN_SECONDS = 120
@@ -102,10 +102,24 @@ class HeartbeatHandler:
         # a valid epoch >= 1 so strict devices never receive an incomplete contract.
         self._handover_epoch_by_esp: dict[str, int] = {}
         self._session_id_by_esp: dict[str, str] = {}
+        self._last_session_connected_ts_by_esp: dict[str, float] = {}
         # Tracks ESPs for which a config push was triggered during heartbeat processing.
         # Used to gate the reconnect evaluation: if config is still being pushed,
         # the Logic Engine must not fire actuator commands before config arrives on ESP.
         self._config_push_pending_esps: set[str] = set()
+
+    @staticmethod
+    def _extract_correlation_id(payload: dict) -> Optional[str]:
+        """
+        Extract correlation_id from heartbeat payload for WS projection.
+
+        Heartbeats may not carry correlation metadata in every path.
+        Return None instead of raising to keep heartbeat processing non-fatal.
+        """
+        correlation_id = payload.get("correlation_id")
+        if isinstance(correlation_id, str) and correlation_id.strip():
+            return correlation_id
+        return None
 
     def _build_ack_contract_context(
         self, esp_id: str, is_reconnect: bool, preferred_epoch: Optional[int] = None
@@ -142,7 +156,37 @@ class HeartbeatHandler:
         return handover_epoch, session_id
 
     @staticmethod
-    def _track_contract_reject_metrics(payload: dict, metadata: dict) -> None:
+    def _resolve_handover_epoch(payload: dict) -> Optional[int]:
+        """Resolve canonical handover epoch with legacy alias support."""
+        raw = payload.get("handover_epoch", payload.get("session_epoch"))
+        if isinstance(raw, int) and raw > 0:
+            return raw
+        return None
+
+    def _register_session_connected(
+        self,
+        esp_id: str,
+        connected_ts: Optional[float] = None,
+        announced_epoch: Optional[int] = None,
+    ) -> None:
+        """Store latest session-connect timestamp and optional epoch per ESP."""
+        self._last_session_connected_ts_by_esp[esp_id] = (
+            float(connected_ts) if connected_ts is not None else time_module.monotonic()
+        )
+        if isinstance(announced_epoch, int) and announced_epoch > 0:
+            self._handover_epoch_by_esp[esp_id] = announced_epoch
+            self._session_id_by_esp[esp_id] = (
+                f"{esp_id}:handover:{announced_epoch}:{int(time_module.time())}"
+            )
+
+    def _is_startup_reject_window(self, esp_id: str) -> bool:
+        """Return True for rejects within the first second after connect."""
+        connected_ts = self._last_session_connected_ts_by_esp.get(esp_id)
+        if connected_ts is None:
+            return False
+        return (time_module.monotonic() - connected_ts) <= SESSION_STARTUP_REJECT_WINDOW_SECONDS
+
+    def _track_contract_reject_metrics(self, esp_id: str, payload: dict, metadata: dict) -> None:
         """Track monotonic ACK contract rejects reported by ESP telemetry."""
         if not isinstance(metadata, dict):
             return
@@ -158,7 +202,40 @@ class HeartbeatHandler:
         if delta > 0:
             reason = payload.get("handover_contract_last_reject", "UNKNOWN")
             increment_heartbeat_contract_reject(str(reason), amount=delta)
+            startup_count = int(metadata.get("handover_contract_reject_startup", 0) or 0)
+            runtime_count = int(metadata.get("handover_contract_reject_runtime", 0) or 0)
+            if self._is_startup_reject_window(esp_id):
+                startup_count += delta
+            else:
+                runtime_count += delta
+            metadata["handover_contract_reject_startup"] = startup_count
+            metadata["handover_contract_reject_runtime"] = runtime_count
+            metadata["handover_contract_reject"] = startup_count + runtime_count
         metadata["handover_contract_reject_count_last"] = reported_count
+
+    async def handle_session_announce(self, topic: str, payload: dict) -> bool:
+        """Register session/announce to classify startup reject telemetry."""
+        parsed_topic = TopicBuilder.parse_session_announce_topic(topic)
+        if not parsed_topic:
+            logger.warning("Invalid session/announce topic: %s", topic)
+            return False
+        esp_id = parsed_topic["esp_id"]
+        try:
+            parsed = SessionAnnouncePayload.from_payload(payload)
+        except ValueError as err:
+            logger.warning("Invalid session/announce payload for %s: %s", esp_id, err)
+            return False
+        self._register_session_connected(
+            esp_id=esp_id,
+            announced_epoch=parsed.handover_epoch,
+        )
+        logger.debug(
+            "Session announce registered for %s (epoch=%s, reason=%s)",
+            esp_id,
+            parsed.handover_epoch,
+            parsed.reason,
+        )
+        return True
 
     async def handle_heartbeat(self, topic: str, payload: dict) -> bool:
         """
@@ -214,6 +291,7 @@ class HeartbeatHandler:
                 return False
 
             esp_id_str = parsed_topic["esp_id"]
+            self._register_session_connected(esp_id=esp_id_str)
             # Default contract context for branches without reconnect detection.
             esp_reported_epoch = payload.get("active_handover_epoch")
             if not isinstance(esp_reported_epoch, int) or esp_reported_epoch <= 0:
@@ -1077,6 +1155,39 @@ class HeartbeatHandler:
                 "actuator_count", payload.get("active_actuators", 0)
             )
             current_metadata["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
+
+            # AUT-60: Persist system_state for Logic Engine config_pending gate
+            if "system_state" in payload:
+                prev_state = current_metadata.get("system_state")
+                current_metadata["system_state"] = payload["system_state"]
+
+                # Clear Logic Engine config_pending backoff when leaving CONFIG_PENDING
+                if (
+                    prev_state == "CONFIG_PENDING_AFTER_RESET"
+                    and payload["system_state"] != "CONFIG_PENDING_AFTER_RESET"
+                ):
+                    try:
+                        from ...services.logic_engine import get_logic_engine
+
+                        logic_engine = get_logic_engine()
+                        if logic_engine is not None:
+                            logic_engine.invalidate_config_pending_backoff(
+                                esp_device.device_id
+                            )
+                            logger.info(
+                                "Config pending backoff cleared for %s "
+                                "(system_state %s -> %s)",
+                                esp_device.device_id,
+                                prev_state,
+                                payload["system_state"],
+                            )
+                    except Exception as cp_err:
+                        logger.warning(
+                            "Failed to clear config_pending backoff for %s: %s",
+                            esp_device.device_id,
+                            cp_err,
+                        )
+
             if "boot_sequence_id" in payload:
                 current_metadata["boot_sequence_id"] = payload.get("boot_sequence_id")
             if "reset_reason" in payload:
@@ -1085,7 +1196,7 @@ class HeartbeatHandler:
                 current_metadata["segment_start_ts"] = payload.get("segment_start_ts")
             if "metrics_schema_version" in payload:
                 current_metadata["metrics_schema_version"] = payload.get("metrics_schema_version")
-            self._track_contract_reject_metrics(payload, current_metadata)
+            self._track_contract_reject_metrics(esp_device.device_id, payload, current_metadata)
 
             # ============================================
             # GPIO STATUS (Phase 1) - With Pydantic Validation
@@ -1113,6 +1224,21 @@ class HeartbeatHandler:
                         f"GPIO status validation failed for {esp_device.device_id}, "
                         f"skipping GPIO metadata update"
                     )
+
+            if "payload_degraded" in payload:
+                current_metadata["payload_degraded"] = bool(payload.get("payload_degraded"))
+            if "degraded_fields" in payload:
+                raw_degraded_fields = payload.get("degraded_fields", [])
+                if isinstance(raw_degraded_fields, list):
+                    current_metadata["degraded_fields"] = [
+                        str(field)
+                        for field in raw_degraded_fields
+                        if isinstance(field, str) and field
+                    ]
+            if "heartbeat_degraded_count" in payload:
+                current_metadata["heartbeat_degraded_count"] = payload.get(
+                    "heartbeat_degraded_count"
+                )
 
             esp_device.device_metadata = current_metadata
             flag_modified(esp_device, "device_metadata")
@@ -1747,8 +1873,6 @@ class HeartbeatHandler:
                     f"DB has sensors={db_sensor_count}/actuators={db_actuator_count}. "
                     f"Triggering auto config push."
                 )
-                import asyncio
-
                 # Mark ESP as config-push-pending so reconnect evaluation is gated
                 # until the ESP applies the new config (prevents "No actuator on GPIO X").
                 self._config_push_pending_esps.add(esp_device.device_id)

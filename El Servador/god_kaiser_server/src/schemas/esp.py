@@ -693,6 +693,21 @@ class ESPHealthMetrics(BaseModel):
         description="Number of active actuators",
         ge=0,
     )
+    handover_contract_reject: Optional[int] = Field(
+        0,
+        ge=0,
+        description="Backward-compatible total reject counter (startup + runtime)",
+    )
+    handover_contract_reject_startup: Optional[int] = Field(
+        0,
+        ge=0,
+        description="Reject counter in first second after MQTT connect",
+    )
+    handover_contract_reject_runtime: Optional[int] = Field(
+        0,
+        ge=0,
+        description="Reject counter after startup window",
+    )
     timestamp: int = Field(
         ...,
         description="Heartbeat timestamp (Unix seconds)",
@@ -706,10 +721,31 @@ class ESPHealthMetrics(BaseModel):
                 "wifi_rssi": -65,
                 "sensor_count": 3,
                 "actuator_count": 2,
+                "handover_contract_reject": 0,
+                "handover_contract_reject_startup": 0,
+                "handover_contract_reject_runtime": 0,
                 "timestamp": 1735818000,
             }
         }
     )
+
+
+class SessionAnnouncePayload(BaseModel):
+    """Session announce payload with canonical handover_epoch field."""
+
+    handover_epoch: int = Field(..., ge=1, description="Canonical handover epoch")
+    reason: str = Field(..., pattern=r"^(boot|reconnect)$", description="Session announce reason")
+    ts_ms: int = Field(..., ge=0, description="Publish timestamp in milliseconds")
+    connect_seq: Optional[int] = Field(None, ge=0, description="Optional connect sequence counter")
+
+    @classmethod
+    def from_payload(cls, payload: Dict[str, Any]) -> "SessionAnnouncePayload":
+        """Accept legacy session_epoch while normalizing to handover_epoch."""
+        if not isinstance(payload, dict):
+            raise ValueError("session announce payload must be object")
+        normalized = dict(payload)
+        normalized["handover_epoch"] = payload.get("handover_epoch", payload.get("session_epoch"))
+        return cls(**normalized)
 
 
 class ESPHealthResponse(BaseResponse):

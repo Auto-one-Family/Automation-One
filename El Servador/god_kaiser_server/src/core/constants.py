@@ -19,6 +19,7 @@ MQTT_TOPIC_ESP_RESPONSE = "kaiser/{kaiser_id}/esp/{esp_id}/response"
 MQTT_TOPIC_ESP_PI_ENHANCED_REQUEST = "kaiser/{kaiser_id}/esp/{esp_id}/pi_enhanced/request"
 MQTT_TOPIC_ESP_DISCOVERY = "kaiser/{kaiser_id}/discovery/esp32_nodes"  # DEPRECATED: Use heartbeat
 MQTT_TOPIC_ESP_HEARTBEAT = "kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat"
+MQTT_TOPIC_ESP_SESSION_ANNOUNCE = "kaiser/{kaiser_id}/esp/{esp_id}/session/announce"
 MQTT_TOPIC_ESP_LWT = "kaiser/{kaiser_id}/esp/{esp_id}/system/will"
 
 # God-Kaiser → ESP (Outgoing)

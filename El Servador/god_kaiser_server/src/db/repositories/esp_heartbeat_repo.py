@@ -35,7 +35,13 @@ _RUNTIME_TELEMETRY_KEYS = frozenset(
         "critical_outcome_drop_count",
         "publish_outbox_drop_count",
         "persistence_drift_count",
+        "payload_degraded",
+        "degraded_fields",
+        "heartbeat_degraded_count",
         "metrics_schema_version",
+        "handover_contract_reject",
+        "handover_contract_reject_startup",
+        "handover_contract_reject_runtime",
     }
 )
 
@@ -97,6 +103,9 @@ class ESPHeartbeatRepository(BaseRepository[ESPHeartbeatLog]):
             actuator_count = payload.get("actuator_count", payload.get("active_actuators", 0))
             gpio_reserved_count = payload.get("gpio_reserved_count", 0)
             runtime_telemetry = extract_heartbeat_runtime_telemetry(payload)
+            runtime_telemetry.setdefault("handover_contract_reject", 0)
+            runtime_telemetry.setdefault("handover_contract_reject_startup", 0)
+            runtime_telemetry.setdefault("handover_contract_reject_runtime", 0)
 
             # Calculate health status
             health_status = determine_health_status(
