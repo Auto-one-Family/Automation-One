@@ -42,6 +42,8 @@ _RUNTIME_TELEMETRY_KEYS = frozenset(
         "handover_contract_reject",
         "handover_contract_reject_startup",
         "handover_contract_reject_runtime",
+        "handover_epoch",
+        "session_epoch",
     }
 )
 

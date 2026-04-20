@@ -74,6 +74,7 @@ export interface ActuatorStatusEvent extends WebSocketEventBase {
     value: number
     emergency_stopped: boolean
     timestamp: number
+    command_source?: string
   }
 }
 
@@ -93,6 +94,11 @@ export interface ESPHealthEvent extends WebSocketEventBase {
     uptime: number
     sensor_count: number
     actuator_count: number
+    handover_contract_reject_startup?: number
+    handover_contract_reject_runtime?: number
+    handover_contract_reject?: number
+    handover_epoch?: number
+    session_epoch?: number
     gpio_status?: Record<string, boolean>
     timestamp: number
   }
@@ -558,6 +564,7 @@ export interface ActuatorResponseEvent extends WebSocketEventBase {
     success: boolean
     error_code?: number
     message?: string
+    issued_by?: string
   }
 }
 

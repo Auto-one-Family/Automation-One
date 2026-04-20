@@ -55,6 +55,25 @@ const statusDisplay = computed(() => getESPStatusDisplay(deviceStatus.value))
 const isDeviceOnline = computed(() => deviceStatus.value === 'online')
 const statusText = computed(() => statusDisplay.value.text)
 
+const handoverBadge = computed(() => {
+  const handover = props.device.runtime_health_view?.handover
+  if (!handover) {
+    return {
+      epochLabel: '—',
+      rejectStartup: 0,
+      rejectRuntime: 0,
+      isWarning: false,
+    }
+  }
+
+  return {
+    epochLabel: handover.epoch === null ? '—' : String(handover.epoch),
+    rejectStartup: handover.rejectStartup,
+    rejectRuntime: handover.rejectRuntime,
+    isWarning: handover.rejectRuntime > 0,
+  }
+})
+
 /** Relative time for stale/offline devices */
 const lastSeenText = computed(() => {
   if (isDeviceOnline.value) return ''
@@ -286,6 +305,13 @@ function handleDeviceDelete() {
         <span v-if="sensorCount > 0 || actuatorCount > 0" class="device-mini-card__sensor-count">{{ sensorCount }}S<template v-if="actuatorCount > 0"> / {{ actuatorCount }}A</template></span>
       </div>
 
+      <div
+        class="device-mini-card__handover-badge"
+        :class="{ 'device-mini-card__handover-badge--warning': handoverBadge.isWarning }"
+      >
+        Handover · epoch={{ handoverBadge.epochLabel }} · rejects: startup={{ handoverBadge.rejectStartup }} / runtime={{ handoverBadge.rejectRuntime }}
+      </div>
+
       <!-- Subzone indicator -->
       <div v-if="subzoneName" class="device-mini-card__subzone">
         {{ subzoneName }}
@@ -419,7 +445,7 @@ function handleDeviceDelete() {
 
 :deep(.esp-drag-handle)::before {
   content: '⠿';
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1;
   color: var(--color-text-muted);
   opacity: 0.25;
@@ -461,7 +487,7 @@ function handleDeviceDelete() {
 /* Match original badge styling */
 :deep(.esp-card-base__badge) {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--text-xxs);
 }
 
 /* (Settings button moved to action row) */
@@ -479,8 +505,8 @@ function handleDeviceDelete() {
   align-items: center;
   border-radius: var(--radius-full);
   border: 1px solid var(--glass-border);
-  padding: 1px 6px;
-  font-size: 10px;
+  padding: 1px var(--space-2);
+  font-size: var(--text-xxs);
   line-height: 1.2;
   font-weight: 600;
   white-space: nowrap;
@@ -514,20 +540,45 @@ function handleDeviceDelete() {
 
 .device-mini-card__last-seen {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--text-xxs);
 }
 
 .device-mini-card__sensor-count {
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
 
+.device-mini-card__handover-badge {
+  margin-top: 2px;
+  margin-bottom: 2px;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border-radius: var(--radius-full);
+  border: 1px solid color-mix(in srgb, var(--color-success) 35%, transparent);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  color: color-mix(in srgb, var(--color-success) 75%, var(--color-text-primary));
+  padding: 2px var(--space-2);
+  font-size: var(--text-xxs);
+  font-family: var(--font-mono);
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-mini-card__handover-badge--warning {
+  border-color: color-mix(in srgb, var(--color-warning) 55%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  color: color-mix(in srgb, var(--color-warning) 80%, var(--color-text-primary));
+}
+
 /* ── Subzone indicator ── */
 .device-mini-card__subzone {
-  font-size: 9px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
@@ -543,13 +594,13 @@ function handleDeviceDelete() {
 .device-mini-card__sensors {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-1);
   min-height: 108px;
   justify-content: flex-start;
 }
 
 .device-mini-card__section-title {
-  font-size: 9px;
+  font-size: var(--text-xxs);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
@@ -560,13 +611,13 @@ function handleDeviceDelete() {
 .device-mini-card__section-title--actuator {
   margin-top: 2px;
   border-top: 1px dashed var(--glass-border);
-  padding-top: 4px;
+  padding-top: var(--space-1);
 }
 
 .device-mini-card__sensor {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .device-mini-card__sensor-icon {
@@ -589,7 +640,7 @@ function handleDeviceDelete() {
 .device-mini-card__sensor-name {
   flex: 1;
   min-width: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -598,7 +649,7 @@ function handleDeviceDelete() {
 
 .device-mini-card__sensor-value {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-base);
   font-variant-numeric: tabular-nums;
   color: var(--color-text-primary);
   min-width: 0;
@@ -607,15 +658,15 @@ function handleDeviceDelete() {
 
 .device-mini-card__sensor-unit {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-xxs);
   color: var(--color-text-secondary);
   flex-shrink: 0;
 }
 
 .device-mini-card__sensors-overflow {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
-  padding-left: 16px;
+  padding-left: var(--space-4);
 }
 
 /* ── Stale/offline state ── */
@@ -632,7 +683,7 @@ function handleDeviceDelete() {
   display: flex;
   align-items: center;
   min-height: 108px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-secondary);
 }
 

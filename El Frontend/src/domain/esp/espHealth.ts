@@ -10,6 +10,12 @@ export interface EspHealthViewModel {
   networkDegraded: boolean
   mqttCircuitBreakerOpen: boolean
   wifiCircuitBreakerOpen: boolean
+  handover: {
+    epoch: number | null
+    rejectStartup: number
+    rejectRuntime: number
+    rejectTotal: number
+  }
   /** Telemetry keys not mapped above (debug / forward-compatible) */
   rawTelemetry: Record<string, unknown>
 }
@@ -22,6 +28,11 @@ const MAPPED_TELEMETRY_FLAG_KEYS = new Set([
   'network_degraded',
   'mqtt_circuit_breaker_open',
   'wifi_circuit_breaker_open',
+  'handover_contract_reject_startup',
+  'handover_contract_reject_runtime',
+  'handover_contract_reject',
+  'handover_epoch',
+  'session_epoch',
 ])
 
 const STANDARD_TOP_LEVEL_KEYS = new Set([
@@ -53,6 +64,15 @@ function asStr(v: unknown): string | null {
   return typeof v === 'string' && v.trim().length > 0 ? v : null
 }
 
+function asNum(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string' && v.trim().length > 0) {
+    const parsed = Number(v)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
 export function normalizeEspHealthPayload(raw: Record<string, unknown>): EspHealthViewModel {
   const rawTelemetry: Record<string, unknown> = {}
 
@@ -61,6 +81,9 @@ export function normalizeEspHealthPayload(raw: Record<string, unknown>): EspHeal
     rawTelemetry[key] = value
   }
 
+  const rejectStartup = asNum(raw.handover_contract_reject_startup) ?? 0
+  const rejectRuntime = asNum(raw.handover_contract_reject_runtime) ?? 0
+
   return {
     persistenceDegraded: asBool(raw.persistence_degraded),
     persistenceDegradedReason: asStr(raw.persistence_degraded_reason),
@@ -68,6 +91,12 @@ export function normalizeEspHealthPayload(raw: Record<string, unknown>): EspHeal
     networkDegraded: asBool(raw.network_degraded),
     mqttCircuitBreakerOpen: asBool(raw.mqtt_circuit_breaker_open),
     wifiCircuitBreakerOpen: asBool(raw.wifi_circuit_breaker_open),
+    handover: {
+      epoch: asNum(raw.handover_epoch) ?? asNum(raw.session_epoch) ?? null,
+      rejectStartup,
+      rejectRuntime,
+      rejectTotal: rejectStartup + rejectRuntime,
+    },
     rawTelemetry,
   }
 }
