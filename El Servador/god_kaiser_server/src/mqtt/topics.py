@@ -683,6 +683,41 @@ class TopicBuilder:
         return None
 
     @staticmethod
+    def parse_queue_pressure_topic(topic: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse queue pressure topic (PKG-01a, INC-2026-04-20).
+
+        Expected topic: kaiser/{kaiser_id}/esp/{esp_id}/system/queue_pressure
+
+        ESP32 firmware publishes queue-pressure events (e.g., outbound MQTT
+        send-queue near capacity during offline buffering) to this topic so
+        the server can surface observability signals for the offline-mode
+        hardening workflow.
+
+        Args:
+            topic: MQTT topic string
+
+        Returns:
+            {
+                "kaiser_id": str,
+                "esp_id": str,
+                "type": "queue_pressure"
+            }
+            or None if parse fails
+        """
+        # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/system/queue_pressure
+        pattern = r"^kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/system/queue_pressure$"
+        match = re.match(pattern, topic)
+
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "type": "queue_pressure",
+            }
+        return None
+
+    @staticmethod
     def parse_intent_outcome_lifecycle_topic(topic: str) -> Optional[Dict[str, Any]]:
         """
         Parse CONFIG_PENDING lifecycle subtopic (not canonical intent_outcome JSON).
@@ -955,6 +990,24 @@ class TopicBuilder:
         return f"kaiser/{kaiser_id}/esp/{esp_id}/system/diagnostics"
 
     @staticmethod
+    def build_queue_pressure_topic(esp_id: str, kaiser_id: str = "god") -> str:
+        """
+        Build queue pressure topic (PKG-01a, INC-2026-04-20).
+
+        Used by ESPs (El Trabajante) to publish queue-pressure events when
+        the outbound MQTT send-queue approaches capacity during offline
+        buffering. Consumed by the server-side observability pipeline.
+
+        Args:
+            esp_id: ESP device ID
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/system/queue_pressure
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/system/queue_pressure"
+
+    @staticmethod
     def build_library_event_topic(esp_id: str, event: str, kaiser_id: str = "god") -> str:
         """
         Build library event topic.
@@ -1038,6 +1091,7 @@ class TopicBuilder:
             cls.parse_config_response_topic,
             cls.parse_discovery_topic,
             cls.parse_system_error_topic,
+            cls.parse_queue_pressure_topic,
             cls.parse_intent_outcome_lifecycle_topic,
             cls.parse_intent_outcome_topic,
             cls.parse_pi_enhanced_request_topic,
