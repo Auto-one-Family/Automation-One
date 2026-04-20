@@ -24,6 +24,7 @@ import asyncio
 import json
 import time as time_module
 
+from cachetools import TTLCache
 from ...core.error_codes import ValidationErrorCode
 from ...core.logging_config import get_logger
 from ...core.task_registry import create_tracked_task
@@ -100,9 +101,12 @@ class HeartbeatHandler:
         # Contract context for fail-closed ACK handover validation on ESP side.
         # Epoch increments only for reconnect cycles; steady-state ACKs still carry
         # a valid epoch >= 1 so strict devices never receive an incomplete contract.
-        self._handover_epoch_by_esp: dict[str, int] = {}
+        # 24h TTL covers realistic debug windows; maxsize prevents unbounded growth.
+        self._handover_epoch_by_esp: TTLCache[str, int] = TTLCache(maxsize=10_000, ttl=86_400)
         self._session_id_by_esp: dict[str, str] = {}
-        self._last_session_connected_ts_by_esp: dict[str, float] = {}
+        self._last_session_connected_ts_by_esp: TTLCache[str, float] = TTLCache(
+            maxsize=10_000, ttl=86_400
+        )
         # Tracks ESPs for which a config push was triggered during heartbeat processing.
         # Used to gate the reconnect evaluation: if config is still being pushed,
         # the Logic Engine must not fire actuator commands before config arrives on ESP.

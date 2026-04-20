@@ -65,3 +65,13 @@ def test_alias_mapping_accepts_both_handover_and_session_epoch() -> None:
 
     assert from_handover.handover_epoch == 5
     assert from_session.handover_epoch == 6
+
+
+def test_handover_caches_enforce_maxsize() -> None:
+    """Injektion über maxsize hinaus evicted ältere Einträge."""
+    handler = HeartbeatHandler()
+
+    for i in range(10_500):
+        handler._handover_epoch_by_esp[f"test-esp-{i:06d}"] = i
+
+    assert len(handler._handover_epoch_by_esp) <= 10_000

@@ -39,6 +39,7 @@ python-dateutil = "^2.8.2"
 pytz = "^2024.1"
 pyyaml = "^6.0"  # Required by AutoOps profile_validator
 jsonschema = "^4.21.0"  # Phase K4 L0.2 — Backend Schema-Registry validation
+cachetools = "^5.3"
 
 # HTTP Client
 httpx = "^0.26.0"
