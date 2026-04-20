@@ -266,3 +266,70 @@
 | **Abhängigkeiten** | Server-/Frontend-Verify sind **grün** (kein Blocker), laufen parallel zum Firmware-Flash. |
 | **Git (Pflicht)** | Änderungen und Commits nur auf `auto-debugger/work`; kein Commit auf `master`, kein Force-Push. |
 | **Follow-up (nicht Teil PKG-17)** | `AUT-69 [EA-16]` für `device_metadata`-Concurrency-Hardening und optional Option-2-Telemetry-Split separat nach Live-Verify. |
+
+---
+
+## PKG-18 — Firmware: Standby-Resume Transporthärtung (Disconnect-Loop entschärfen)
+
+| Feld | Inhalt |
+|------|--------|
+| **Owner** | `esp32-dev` |
+| **Risiko** | Mittel (MQTT-Hotpath, Reconnect-Strategie, Circuit-Breaker-Nachbarschaft). |
+| **Scope** | `El Trabajante/src/services/communication/mqtt_client.cpp`, `El Trabajante/src/tasks/publish_queue.cpp`, `El Trabajante/src/tasks/publish_queue.h`; Fokus auf Resume-nahe Write-Timeout-Kaskade (`write_timeout_silent` -> `write_timeout(errno=11)` -> `tls_timeout` -> CB OPEN). |
+| **Zielbild** | Unter identischem Standby/Resume-Szenario sinkt die Wiederholrate der Disconnect-Schleife deutlich (kein enges Reconnect-Flapping mit sofortigem Folgedisconnect); Diagnose-Reason bleibt eindeutig. |
+| **Tests / Verifikation** | `cd "El Trabajante" && ~/.platformio/penv/Scripts/pio.exe run -e esp32_dev`; Runtime-Reprofenster 10 min nach Resume mit Fokus auf `MQTT_EVENT_DISCONNECTED`, `write_timeout*`, `ESP_ERR_ESP_TLS_CONNECTION_TIMEOUT`, CB-Transitions. |
+| **Akzeptanz** | Kein Breaking-Change an MQTT-Topics/LWT/Intent-Contracts; Telemetrie bleibt rückwärtskompatibel; **Änderungen und Commits ausschließlich auf `auto-debugger/work`**. |
+| **Abhängigkeiten** | Nutzt Erkenntnisse aus PKG-19 (Broker-/Transportseite), blockiert PKG-20 nicht. |
+
+---
+
+## PKG-19 — MQTT/Server: Broker- und LWT-Kette im Standby-Fenster stabilisieren
+
+| Feld | Inhalt |
+|------|--------|
+| **Owner** | `mqtt-dev` (primär) + `server-dev` (LWT/Heartbeat-Folgekette) |
+| **Risiko** | Mittel (Broker-Konfig/Restart-Verhalten und Server-Folgeevents). |
+| **Scope** | `docker/mosquitto/mosquitto.conf`, `docker-compose.yml`, `El Servador/god_kaiser_server/src/mqtt/handlers/lwt_handler.py`, `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py`; Ziel ist Trennung von primärem Device-Transportfehler vs. infra-induced churn. |
+| **Zielbild** | Broker-Restarts im Standby-Zeitfenster sind kausal eingeordnet und, falls konfigurationsbedingt, reduziert; LWT-/offline-Events bleiben konsistent und nicht doppelt eskaliert. |
+| **Tests / Verifikation** | `cd "El Servador/god_kaiser_server" && ./.venv/Scripts/python.exe -m pytest --import-mode=importlib tests/mqtt/test_heartbeat_handler.py tests/integration/test_lwt_handler.py tests/integration/test_heartbeat_handler.py -q`; ergänzend Laufzeitprüfung im Standby-Reprofenster mit Broker/Server-Logs im selben UTC-Fenster. |
+| **Akzeptanz** | Keine Secret-Leaks in Artefakten; keine Topic-Breaking-Changes; **Änderungen und Commits ausschließlich auf `auto-debugger/work`**. |
+| **Abhängigkeiten** | Liefert Input für PKG-18 Root-Cause-Feinjustierung und PKG-21 Abnahmebewertung. |
+
+---
+
+## PKG-20 — Frontend: Flapping/Loop-Transparenz im Monitor-UX
+
+| Feld | Inhalt |
+|------|--------|
+| **Owner** | `frontend-dev` |
+| **Risiko** | Niedrig bis mittel (UI/Store-Darstellung, keine Backend-Contracts). |
+| **Scope** | `El Frontend/src/shared/design/layout/TopBar.vue`, `El Frontend/src/views/MonitorView.vue`, `El Frontend/src/composables/monitorConnectivity.ts`, `El Frontend/src/views/SystemMonitorView.vue`, `El Frontend/src/stores/esp.ts`; Standby-Loop explizit als instabiler Zustand kenntlich machen. |
+| **Zielbild** | UI unterscheidet klar zwischen "Server verbunden" und "Device flapping"; Operator sieht Loop-Indikator (Disconnect-/Reconnect-Dichte) statt nur statischem Offline-Zustand. |
+| **Tests / Verifikation** | `cd "El Frontend" && npm run build`; `cd "El Frontend" && npx vue-tsc --noEmit`. |
+| **Akzeptanz** | Keine Regression an bestehender Navigation/Stores; Anzeige bleibt ohne neue Backend-Felder robust; **Änderungen und Commits ausschließlich auf `auto-debugger/work`**. |
+| **Abhängigkeiten** | Kann parallel zu PKG-18/19 starten, finale Text-/Statusfeinjustierung nach PKG-21-Auswertung. |
+
+---
+
+## PKG-21 — Test- und Laufzeitabnahme Standby-Resume (E2E-logisch, HW-nah)
+
+| Feld | Inhalt |
+|------|--------|
+| **Owner** | `test-log-analyst` |
+| **Risiko** | Niedrig (read-only Analyse), aber Gate-kritisch für Abschlussbewertung. |
+| **Scope** | Auswertung der Build-/Test-Ausgaben und Runtime-Logs nach Umsetzung von PKG-18 bis PKG-20; Schwerpunkt auf 10-Minuten-Resume-Fenster für `ESP_EA5484`. |
+| **Zielbild** | Klare GO/NO-GO-Aussage: kein erneuter Standby-Disconnect-Loop im Zielmuster, keine CB-OPEN-Spirale, keine irreführende UI-Lage. |
+| **Tests / Verifikation** | Konsolidierte Analyse von: Firmware-Build (`pio run -e esp32_dev`), Server-Tests (`pytest`), Frontend-Build/Typecheck (`npm run build`, `vue-tsc`) sowie Runtime-Logfenster. |
+| **Akzeptanz** | Ergebnis als strukturierter Befund mit Rest-Risiken/BLOCKERN; keine Produktcodeänderung; **Artefakt-Updates und Commits ausschließlich auf `auto-debugger/work`**. |
+| **Abhängigkeiten** | Startet nach ersten Implementierungsständen aus PKG-18/19/20. |
+
+---
+
+## Verify-Einarbeitung (Delta-Log 2026-04-20 — Standby-Disconnect-Loop)
+
+| Quelle | Änderung am Paketplan |
+|--------|------------------------|
+| `verify-plan` (Repo-Ist gegen Steuerlauf) | Neue PKGs als schlanke Umsetzungskette fixiert: **PKG-18 (esp32-dev)**, **PKG-19 (mqtt-dev + server-dev)**, **PKG-20 (frontend-dev)**, **PKG-21 (test-log-analyst)**. |
+| `verify-plan` | Branch-Gate in allen neuen Akzeptanzkriterien verschärft: ausschließlich `auto-debugger/work`, kein Commit auf `master`. |
+| `verify-plan` | Reihenfolge präzisiert: PKG-18 und PKG-19 parallel möglich; PKG-20 parallel umsetzbar; PKG-21 als formales Laufzeit-Gate nach den ersten Umsetzungen. |
+| `verify-plan` | Korrelation-Join klargezogen: Notification-Felder zuerst, HTTP `request_id` nur bei echter Feld-Evidence, `esp_id`+Zeitfenster und synthetische MQTT-CID für Standby-Episode als primäre Incident-Kette. |

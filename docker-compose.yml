@@ -59,12 +59,16 @@ services:
       # Log-Mount deaktiviert: Mosquitto nutzt stdout-only seit v3.1
       # Reaktivieren zusammen mit log_dest file in mosquitto.conf falls File-Logging benötigt wird
       # - ./logs/mqtt:/mosquitto/log
+    # INC-2026-04-11 (PKG-19): more resilient after host sleep/wake.
+    # -W 5 (was 3) tolerates transient broker slowness on resume;
+    # retries 5 (was 3) avoids premature unhealthy marking that blocks
+    # el-servador dependency start; start_period 15 s covers cold starts.
     healthcheck:
-      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "5"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 10s
+      retries: 5
+      start_period: 15s
     logging:
       driver: json-file
       options:

@@ -186,3 +186,66 @@ Weiterhin **nicht** durch den Orchestrator. Start erst nach Handover an `esp32-d
 - URL: `https://linear.app/autoone/issue/AUT-68/ea-15-heartbeat-slimming-and-heap-budget-reduktion-h6-root-cause-mqtt`
 - Aktion: Kommentar mit Verify-Mutationen A1-A9 (Funktionsname, exakte Zeilen, entfernte AUT-58-Restreferenzen, 60s-Klarstellung, Follow-up-Hinweis `AUT-69 [EA-16]`).
 - Label-Wunsch additiv: `ESP32`, `Improvement` (neben vorhandenem `Bug`).
+
+---
+
+## /verify-plan Ergebnis — Steuerlauf 2026-04-20 (Standby Disconnect Loop)
+
+**Plan:** Incident-Orchestrierung für `STEUER-standby-disconnect-loop-fix-ea5484-2026-04-20.md` mit Artefaktmutation (keine Produktimplementierung).  
+**Geprüft:** 10 Pfade, 5 Rollen, 4 Services/Artefaktquellen, 4 neue PKGs (18-21).
+
+### Bestätigt
+
+- Ziel-`incident_id` und gebundener Artefaktordner sind konsistent (`INC-2026-04-11-ea5484-mqtt-transport-keepalive`).
+- Referenzpfade aus der Steuerdatei sind vorhanden (`BERICHT-...`, `EVIDENZ-loki-alloy-queries.txt`, Incident-Artefakte).
+- Branch-IST passt zur Vorgabe (`auto-debugger/work`), daher nur Reporting ohne Checkout.
+- Die geforderten Codepfade für `esp32-dev`/`mqtt-dev`/`server-dev`/`frontend-dev` existieren im Repo-Ist.
+- Post-Verify-Schritt ist für `TASK-PACKAGES.md` und `SPECIALIST-PROMPTS.md` umsetzbar, ohne neue externe Abhängigkeiten.
+
+### Korrekturen / Deltas (in TASK-PACKAGES übernommen)
+
+| Kategorie | Planannahme | Repo-Ist / Verify-Befund | Umsetzung |
+|-----------|-------------|--------------------------|-----------|
+| Korrelation | `esp_id`-Kette dominiert bestehend | Pflichtreihenfolge muss explizit 1..5 dokumentiert sein | In `CORRELATION-MAP.md` als eigener Reihenfolge-Block ergänzt. |
+| Rollenabdeckung | `mqtt-dev oder server-dev` ausreichend | Für Standby-Loop sind Broker- + LWT/Heartbeat-Kette gemeinsam relevant | PKG-19 als gekoppelte Rolle `mqtt-dev + server-dev`. |
+| Abschlussgate | Umsetzung geplant, aber Abnahmekette implizit | Abschluss braucht dedizierten Test-/Log-Gate | PKG-21 (`test-log-analyst`) ergänzt. |
+| Branch-Pflicht | global erwähnt | In neuen PKGs fehlte pro Paket explizite Akzeptanzformulierung | Branch-Pflicht in allen neuen PKGs 18-21 explizit verankert. |
+
+### Fehlende Vorbedingungen
+
+- [ ] Frische, zusammenhängende Runtime-Logs für das 10-Min-Resume-Fenster (nach Dev-Umsetzung) liegen noch nicht vor.
+- [ ] Harte Notification-Feld-Evidence (`correlation_id`, `fingerprint`, `parent_notification_id`) aus derselben Episode fehlt weiterhin.
+- [ ] Request-ID-basierte HTTP-Join-Paare fehlen weiterhin in den gelieferten Evidenzdateien.
+
+### Zusammenfassung für TM
+
+Der Plan ist als Orchestrierungs- und Delegationslauf ausführbar und wurde artefaktseitig auf einen verify-konformen Stand gebracht. Neue Umsetzungskette PKG-18 bis PKG-21 ist rollenrein, branch-konform und konfliktfrei sequenziert. Inhaltliche Restunsicherheit liegt weiterhin auf Evidenzebene (Notification-/HTTP-Join-Felder), nicht in der Artefaktstruktur.
+
+## OUTPUT FÜR ORCHESTRATOR (auto-debugger)
+
+### PKG → Delta
+| PKG | Delta (Pfad, Testbefehl/-pfad, Reihenfolge, Risiko, HW-Gate, verworfene Teile) |
+|-----|-----------------------------------------------------------------------------------|
+| PKG-18 | Neu: Firmware-Standby-Resume-Härtung auf `mqtt_client.cpp`/`publish_queue.*`; Test `cd "El Trabajante" && ~/.platformio/penv/Scripts/pio.exe run -e esp32_dev`; HW-Gate = 10-Min-Resume mit `ESP_EA5484`. |
+| PKG-19 | Neu: gekoppeltes MQTT/Server-Paket auf `mosquitto.conf`, `docker-compose.yml`, `lwt_handler.py`, `heartbeat_handler.py`; Test `cd "El Servador/god_kaiser_server" && ./.venv/Scripts/python.exe -m pytest --import-mode=importlib tests/mqtt/test_heartbeat_handler.py tests/integration/test_lwt_handler.py tests/integration/test_heartbeat_handler.py -q`; Fokus auf Broker/LWT-Kausalität. |
+| PKG-20 | Neu: Frontend-Flapping-Transparenz auf `TopBar.vue`, `MonitorView.vue`, `monitorConnectivity.ts`, `SystemMonitorView.vue`, `esp.ts`; Tests `npm run build` + `vue-tsc --noEmit`. |
+| PKG-21 | Neu: Abschluss-Gate durch `test-log-analyst`; konsolidiert Build-/Test-/Runtime-Outputs in GO/NO-GO-Befund; keine Produktcodeänderung. |
+
+### PKG → empfohlene Dev-Rolle
+| PKG | Rolle (z. B. server-dev, frontend-dev, esp32-dev, mqtt-dev) |
+|-----|---------------------------------------------------------------|
+| PKG-18 | `esp32-dev` |
+| PKG-19 | `mqtt-dev` + `server-dev` |
+| PKG-20 | `frontend-dev` |
+| PKG-21 | `test-log-analyst` |
+
+### Cross-PKG-Abhängigkeiten
+- PKG-18 -> PKG-21: Runtime- und Build-Ergebnisse aus PKG-18 sind Pflichtinput für den finalen GO/NO-GO-Check.
+- PKG-19 -> PKG-18: Broker/LWT-Einordnung aus PKG-19 schärft die Kausalbewertung der Transportfixes aus PKG-18.
+- PKG-20 -> PKG-21: UI-Flapping-Indikatoren müssen im Abschlussgate als sichtbar/nicht sichtbar bewertet werden.
+- PKG-18 und PKG-20 können parallel implementiert werden; PKG-21 startet erst nach ersten Umsetzungsständen.
+
+### BLOCKER
+- Fehlende harte Notification-Feldwerte aus derselben Episode (`correlation_id`, `fingerprint`, `parent_notification_id`).
+- Fehlende HTTP-`request_id`-Korrelationen im bereitgestellten Standby-Evidenzset.
+- Runtime-Abnahme (10-Min-Resume) noch nicht durchgeführt, daher keine finale Wirksamkeitsbestätigung der neuen PKGs.

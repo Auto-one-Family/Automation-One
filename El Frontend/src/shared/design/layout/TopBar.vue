@@ -55,6 +55,15 @@ const connectionDotClass = computed(() => {
 })
 
 const connectionTooltip = computed(() => {
+  if (espStore.hasFlappingDevices) {
+    const n = espStore.flappingDeviceCount
+    const serverPart = connectionStatus.value === 'connected'
+      ? 'Server verbunden'
+      : connectionStatus.value === 'connecting'
+        ? 'Verbinde...'
+        : 'Server getrennt'
+    return `${serverPart} · ${n} Gerät${n > 1 ? 'e' : ''} instabil`
+  }
   switch (connectionStatus.value) {
     case 'connected': return 'Server verbunden'
     case 'connecting': return 'Verbinde...'
@@ -223,8 +232,16 @@ async function handleLogout() {
       <!-- Emergency Stop -->
       <EmergencyStopButton />
 
-      <!-- Connection Dot + User -->
+      <!-- Connection Dot + Flapping Indicator + User -->
       <div class="header__connection" :title="connectionTooltip">
+        <span
+          v-if="espStore.hasFlappingDevices"
+          class="header__flapping-badge"
+          :title="`${espStore.flappingDeviceCount} Gerät${espStore.flappingDeviceCount > 1 ? 'e' : ''} mit instabiler Verbindung`"
+        >
+          <AlertTriangle class="header__flapping-icon" />
+          <span class="header__flapping-count">{{ espStore.flappingDeviceCount }}</span>
+        </span>
         <span class="header__dot" :class="connectionDotClass" />
       </div>
 
@@ -700,6 +717,10 @@ async function handleLogout() {
   .header__connection {
     display: none;
   }
+
+  .header__flapping-badge {
+    display: none;
+  }
 }
 
 /* Medium widths: keep single-row and reduce low-priority noise */
@@ -782,6 +803,10 @@ async function handleLogout() {
   .header__dot--connecting {
     animation: none;
     box-shadow: none;
+  }
+
+  .header__flapping-badge {
+    animation: none;
   }
 }
 
@@ -942,6 +967,38 @@ async function handleLogout() {
 
 .header__dot--disconnected {
   background-color: var(--color-text-muted);
+}
+
+/* ── Flapping Indicator (PKG-20) ── */
+.header__flapping-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  color: var(--color-warning);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  animation: flapping-pulse 2s ease-in-out infinite;
+  cursor: default;
+}
+
+.header__flapping-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.header__flapping-count {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes flapping-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 /* Connection label removed — tooltip-only via :title attribute */
@@ -1176,7 +1233,8 @@ async function handleLogout() {
   .header__dot--connected,
   .header__dot--connecting,
   .header__action-btn--pending,
-  .header__action-btn--pending::before {
+  .header__action-btn--pending::before,
+  .header__flapping-badge {
     animation: none;
   }
 }

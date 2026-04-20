@@ -336,8 +336,11 @@ export const auditApi = {
    * Enables tracking of related events (e.g., config_published → config_response).
    */
   async getCorrelatedEvents(correlationId: string, limit: number = 50): Promise<AuditLog[]> {
+    // Backend validates limit <= 200 (FastAPI Query constraint).
+    // Clamp defensively to prevent 422s from UI callers.
+    const safeLimit = Math.max(1, Math.min(200, Math.floor(limit)))
     const response = await api.get<AuditLog[]>(
-      `/audit/events/correlated/${encodeURIComponent(correlationId)}?limit=${limit}`
+      `/audit/events/correlated/${encodeURIComponent(correlationId)}?limit=${safeLimit}`
     )
     return response.data
   },

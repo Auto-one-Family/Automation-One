@@ -20,6 +20,8 @@ interface Props {
   isRuleActive?: (ruleId: string) => boolean
   /** Editor-Link für zone-tile-Layout (Monitor L1); Klick stoppt Tile-Navigation */
   zoneTileEditorTo?: RouteLocationRaw | null
+  /** Number of devices flapping (PKG-20) */
+  flappingCount?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -29,6 +31,7 @@ const props = withDefaults(defineProps<Props>(), {
   rules: () => [],
   totalRuleCount: 0,
   zoneTileEditorTo: null,
+  flappingCount: 0,
 })
 
 const realSensorCount = computed(() =>
@@ -98,6 +101,12 @@ const ZONE_KPI_GROUP_ARIA =
     <!-- Health Reason (only for warning/alarm) -->
     <div v-if="zone.healthReason" class="monitor-zone-tile__reason">
       {{ zone.healthReason }}
+    </div>
+
+    <!-- Flapping Badge (PKG-20) -->
+    <div v-if="flappingCount > 0" class="monitor-zone-tile__flapping">
+      <AlertTriangle class="w-3 h-3" />
+      <span>{{ flappingCount }} {{ flappingCount === 1 ? 'Gerät' : 'Geräte' }} instabil</span>
     </div>
 
     <!-- KPIs from aggregateZoneSensors -->
@@ -331,6 +340,32 @@ const ZONE_KPI_GROUP_ARIA =
 .monitor-zone-tile--alarm .monitor-zone-tile__reason {
   color: var(--color-error);
   opacity: 0.85;
+}
+
+/* Flapping Badge (PKG-20) */
+.monitor-zone-tile__flapping {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  color: var(--color-warning);
+  font-size: var(--text-xs, 11px);
+  font-weight: 500;
+  animation: flapping-zone-pulse 2.5s ease-in-out infinite;
+}
+
+@keyframes flapping-zone-pulse {
+  0%, 100% { opacity: 1; border-color: rgba(251, 191, 36, 0.25); }
+  50% { opacity: 0.7; border-color: rgba(251, 191, 36, 0.5); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .monitor-zone-tile__flapping {
+    animation: none;
+  }
 }
 
 /* KPIs */

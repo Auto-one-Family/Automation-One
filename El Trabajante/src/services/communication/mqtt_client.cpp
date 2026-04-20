@@ -48,6 +48,16 @@ static constexpr unsigned long MANAGED_RECONNECT_MAX_DELAY_MS = 12000;
 // Give ESP-IDF auto-reconnect a head-start before issuing manual reconnect calls.
 static constexpr unsigned long MANAGED_RECONNECT_AUTO_GRACE_MS = 15000;
 
+// PKG-18 (INC-2026-04-11-ea5484): Standby-resume disconnect loop hardening.
+// After this many write timeouts without intervening connect-success,
+// boost reconnect delay and extend post-reconnect queue stabilization.
+static constexpr uint32_t WRITE_TIMEOUT_ESCALATION_THRESHOLD = 3;
+// Boosted reconnect base delay after write-timeout episodes (vs 1500ms default).
+static constexpr unsigned long MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS = 5000;
+// Post-reconnect queue hold after write-timeout history — lets TCP/TLS
+// handshake and first keepalive round-trip complete before queue drain.
+static constexpr uint32_t POST_RECONNECT_TRANSPORT_SETTLE_MS = 2000;
+
 static bool shouldLogAdmissionCorrelation(const String& topic) {
     return topic.indexOf("/command") != -1 ||
            topic.indexOf("/config") != -1 ||
@@ -1092,7 +1102,12 @@ void MQTTClient::processPublishQueue() {
     unsigned long now_ms = millis();
     uint8_t drained_this_tick = 0;
 
-    while (drained_this_tick < PUBLISH_DRAIN_BUDGET_PER_TICK &&
+    // PKG-18: Reduce drain rate when last transport error was a write-path timeout.
+    // Prevents saturating a recovering socket with queued publishes after resume.
+    const uint8_t drain_budget = isWritePathTimeoutErrno(last_transport_errno_)
+                                     ? 1U : PUBLISH_DRAIN_BUDGET_PER_TICK;
+
+    while (drained_this_tick < drain_budget &&
            xQueueReceive(g_publish_queue, &req, 0) == pdTRUE) {
         if (now_ms < req.next_retry_ms) {
             if (xQueueSend(g_publish_queue, &req, 0) != pdTRUE) {
@@ -1498,6 +1513,11 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->bootstrap_heartbeat_send_pending_ = false;
             self->next_managed_reconnect_ms_ = 0;
             self->managed_reconnect_attempts_ = 0;
+
+            // PKG-18: Capture write-timeout history before counter reset.
+            // Used below to decide post-reconnect queue stabilization duration.
+            const uint32_t prior_write_timeouts = self->transport_write_timeout_count_;
+
             self->transport_write_timeout_count_ = 0;
             self->tls_connect_timeout_count_ = 0;
             self->tcp_transport_error_count_ = 0;
@@ -1507,7 +1527,18 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
 
             // AUT-69 Step 1: Hold queue drain until session/announce is acknowledged
             // or guard timeout unblocks progress.
-            pauseForAnnounceAck();
+            // PKG-18: Extend hold when reconnecting after write-timeout instability
+            // to let transport stabilize before draining queued publishes.
+            {
+                uint32_t announce_guard_ms = 300;
+                if (prior_write_timeouts >= WRITE_TIMEOUT_ESCALATION_THRESHOLD) {
+                    announce_guard_ms = POST_RECONNECT_TRANSPORT_SETTLE_MS;
+                    LOG_I(TAG, String("[PKG-18] transport recovery hold ") +
+                               String(announce_guard_ms) + "ms (prior_write_timeouts=" +
+                               String(prior_write_timeouts) + ")");
+                }
+                pauseForAnnounceAck(announce_guard_ms);
+            }
             uint32_t announce_epoch = offlineModeManager.getActiveHandoverEpoch();
             if (offlineModeManager.getMode() == OfflineMode::OFFLINE_ACTIVE) {
                 announce_epoch++;
@@ -1584,7 +1615,17 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             // devices drop within the same transport instability window.
             // Avoid duplicate scheduling when MQTT_EVENT_ERROR already queued a reconnect.
             if (self->next_managed_reconnect_ms_ == 0) {
-                self->scheduleManagedReconnect_("mqtt_disconnected", MANAGED_RECONNECT_BASE_DELAY_MS);
+                // PKG-18: Boost reconnect delay when write timeouts preceded the disconnect.
+                // Breaks the tight reconnect-flap cycle after standby/resume by giving
+                // the TCP/TLS stack more time to stabilize before the next attempt.
+                unsigned long reconnect_base = MANAGED_RECONNECT_BASE_DELAY_MS;
+                if (self->transport_write_timeout_count_ >= WRITE_TIMEOUT_ESCALATION_THRESHOLD) {
+                    reconnect_base = MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS;
+                    LOG_W(TAG, String("[PKG-18] reconnect delay boosted to ") +
+                               String(reconnect_base) + "ms (write_timeouts=" +
+                               String(self->transport_write_timeout_count_) + ")");
+                }
+                self->scheduleManagedReconnect_("mqtt_disconnected", reconnect_base);
             } else {
                 LOG_D(TAG, "[INC-EA5484] reconnect already scheduled (skip duplicate in DISCONNECTED)");
             }

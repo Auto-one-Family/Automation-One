@@ -4,6 +4,20 @@
 
 ---
 
+## 0. Pflichtreihenfolge Korrelation (Steuerlauf 2026-04-20)
+
+| Reihenfolge | Korrelationsanker | Evidence in diesem Lauf | Status |
+|-------------|-------------------|--------------------------|--------|
+| **1** | Notification-Felder (`correlation_id`, `fingerprint`, `parent_notification_id`) | Keine neuen Notification-Datensaetze im Standby-Unterordner; Feldgruppe als Primäranker explizit reserviert und nicht mit WS-only Signalen vermischt. Quelle: `standby-disconnect-loop-2026-04-20/BERICHT-standby-disconnect-loop-2026-04-20.md` (UI-Alert-Cluster als Symptom, nicht als Notification-ID-Beweis). | **offen / nicht belegt** |
+| **2** | HTTP `X-Request-ID` / `request_id` | Keine request_id in den bereitgestellten Standby-Evidenzen extrahierbar; HTTP bleibt Kontextsignal ohne harte Join-ID. Quelle: `standby-disconnect-loop-2026-04-20/EVIDENZ-loki-alloy-queries.txt`. | **offen / nur Kontext** |
+| **3** | `esp_id` + Zeitfenster | `ESP_EA5484` als stabiler Primärschlüssel über Serial/Broker/Server-Kette; Zeitfenster mit Disconnect-/LWT-Wellen aus Standby-Bericht. | **belegt** |
+| **4** | MQTT-CID (synthetisch wenn nötig) | Für die Standby-Loop-Episode wird eine synthetische CID `CID-STBY-EA5484-2026-04-20` als Incident-Join-Marke geführt, damit MQTT-Zeilen nicht fälschlich mit HTTP-IDs gemischt werden. | **belegt (synthetisch)** |
+| **5** | Titel / Dedup-Key | Titel nur als letzter Kollisionsschutz (`standby-disconnect-loop`) genutzt; keine Root-Cause-Zuordnung nur aus Titel. | **belegt (sekundär)** |
+
+**Abgrenzung (Pflicht):** ISA-18.2/NotificationRouter und WS-`error_event` bleiben getrennte Ketten; ohne harte Feld-Evidence keine Vermischung.
+
+---
+
 ## 1. Primärschlüssel
 
 | Schlüssel | Wert |

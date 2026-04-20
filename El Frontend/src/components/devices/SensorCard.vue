@@ -7,6 +7,7 @@
  */
 import { computed, ref, type Component } from 'vue'
 import { Settings, ChevronRight, WifiOff, Clock, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity, CircleDot, TrendingUp, TrendingDown, Minus, Info } from 'lucide-vue-next'
+import { isMockEspId } from '@/composables/useZoneGrouping'
 import type { SensorWithContext } from '@/composables/useZoneGrouping'
 import type { TrendDirection } from '@/utils/trendUtils'
 import { qualityToStatus, getDataFreshness, formatRelativeTime } from '@/utils/formatters'
@@ -152,8 +153,14 @@ function toggleVirtualInfo(event: Event): void {
 
 // Subzone badge (Phase 2.2): canonical fallback "Zone-weit" when null/empty
 const isFromMockDevice = computed(() => {
-  const id = props.sensor.esp_id ?? ''
-  return id.startsWith('ESP_MOCK_') || id.startsWith('MOCK_')
+  return isMockEspId(props.sensor.esp_id ?? '')
+})
+
+const sourceBadge = computed(() => {
+  if (isFromMockDevice.value) {
+    return { text: 'Mock', cls: 'sensor-card__source-badge--mock' }
+  }
+  return { text: 'Real', cls: 'sensor-card__source-badge--real' }
 })
 
 const subzoneLabel = computed(() => {
@@ -277,7 +284,7 @@ function handleClick() {
           </div>
         </span>
         <div class="sensor-card__quality">
-          <span v-if="isFromMockDevice" class="sensor-card__sim-badge">Sim</span>
+          <span :class="['sensor-card__source-badge', sourceBadge.cls]">{{ sourceBadge.text }}</span>
           <span :class="['sensor-card__mode-badge', `sensor-card__mode-badge--${dataMode.toLowerCase()}`]">
             {{ dataMode }}
           </span>
@@ -304,7 +311,6 @@ function handleClick() {
       <div class="sensor-card__footer">
         <span class="sensor-card__esp">{{ sensor.esp_id }}</span>
         <div class="sensor-card__footer-badges">
-          <span v-if="isFromMockDevice" class="sensor-card__badge sensor-card__badge--mock">Sim</span>
           <span class="sensor-card__subzone-badge">{{ subzoneLabel }}</span>
           <span v-if="scopeBadge" :class="['sensor-card__scope-badge', scopeBadge.cls]" :title="scopeTooltip">{{ scopeBadge.text }}</span>
           <span v-if="isEspOffline" class="sensor-card__badge sensor-card__badge--offline">
@@ -494,7 +500,7 @@ function handleClick() {
 .sensor-card__quality-text--good { color: var(--color-success); }
 .sensor-card__quality-text--warning { color: var(--color-warning); }
 .sensor-card__quality-text--alarm { color: var(--color-error); }
-.sensor-card__quality-text--stale { color: rgb(251, 146, 60); }
+.sensor-card__quality-text--stale { color: var(--color-status-warning); }
 .sensor-card__quality-text--offline { color: var(--color-text-muted); }
 
 .sensor-card__sparkline {
@@ -516,7 +522,7 @@ function handleClick() {
 }
 
 .sensor-card__dot--stale {
-  background: rgb(251, 146, 60);
+  background: var(--color-status-warning);
 }
 
 .sensor-card__dot--offline {
@@ -681,11 +687,6 @@ function handleClick() {
   font-style: italic;
 }
 
-.sensor-card__badge--mock {
-  color: var(--color-mock);
-  background: var(--color-mock-bg);
-}
-
 /* Mock device visual distinction */
 .sensor-card--mock {
   border-color: color-mix(in srgb, var(--color-mock) 25%, var(--glass-border));
@@ -696,7 +697,7 @@ function handleClick() {
   border-color: color-mix(in srgb, var(--color-mock) 40%, var(--glass-border));
 }
 
-.sensor-card__sim-badge {
+.sensor-card__source-badge {
   display: inline-flex;
   align-items: center;
   border-radius: var(--radius-sm);
@@ -704,9 +705,17 @@ function handleClick() {
   font-size: var(--text-xxs);
   font-weight: 600;
   line-height: 1.1;
+  letter-spacing: 0.03em;
+}
+
+.sensor-card__source-badge--mock {
   color: var(--color-mock);
   background: var(--color-mock-bg);
-  letter-spacing: 0.03em;
+}
+
+.sensor-card__source-badge--real {
+  color: var(--color-real);
+  background: color-mix(in srgb, var(--color-real) 16%, transparent);
 }
 
 /* Scope badges (T13-R3 WP4) */
@@ -722,13 +731,13 @@ function handleClick() {
 }
 
 .sensor-card__scope-badge--multi-zone {
-  background: rgba(96, 165, 250, 0.2);
-  color: rgb(96, 165, 250);
+  background: var(--color-info-bg);
+  color: var(--color-info);
 }
 
 .sensor-card__scope-badge--mobile {
-  background: rgba(251, 146, 60, 0.2);
-  color: rgb(251, 146, 60);
+  background: var(--color-accent-bg);
+  color: var(--color-accent-bright);
 }
 
 /* Mobile sensor context hint (6.7) */

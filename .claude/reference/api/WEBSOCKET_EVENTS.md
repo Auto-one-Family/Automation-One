@@ -231,16 +231,8 @@ ESP Heartbeat/Status Update. Wird bei jedem Heartbeat vom ESP gesendet.
     "persistence_degraded": false,
     "network_degraded": false,
     "critical_outcome_drop_count": 0,
-    "publish_outbox_drop_count": 0,
-    "gpio_status": [
-      {
-        "gpio": 4,
-        "owner": "sensor",
-        "component": "DS18B20",
-        "mode": 1,
-        "safe": false
-      }
-    ]
+    "publish_outbox_drop_count": 0
+    // gpio_status: optional, nur aus DB-Cache (Firmware ≥ AUT-68 PKG-17 sendet das Array nicht mehr im Live-Heartbeat)
   }
 }
 ```

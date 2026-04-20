@@ -238,3 +238,117 @@ cd "El Servador/god_kaiser_server" && poetry run ruff check src/mqtt/handlers/he
 cd "El Frontend" && npm run build
 cd "El Frontend" && npx vue-tsc --noEmit
 ```
+
+---
+
+## Steuerlauf 2026-04-20 — Standby-Disconnect-Loop (PKG-18 bis PKG-21)
+
+**Verbindliche Reihenfolge nach Verify (konfliktfrei):**
+1. `esp32-dev` startet mit **PKG-18** (Transporthärtung)  
+2. parallel `mqtt-dev` + `server-dev` bearbeiten **PKG-19** (Broker/LWT-Kette)  
+3. parallel `frontend-dev` bearbeitet **PKG-20** (Flapping-UX)  
+4. danach `test-log-analyst` führt **PKG-21** als Gate-Auswertung aus
+
+## Rolle: esp32-dev — PKG-18
+
+### Git (Pflicht)
+- Arbeitsbranch: **`auto-debugger/work`**.
+- Vor allen Dateiänderungen: `git checkout auto-debugger/work` und mit `git branch --show-current` verifizieren.
+- Alle Commits dieses Auftrags nur auf diesem Branch; **kein** Commit direkt auf `master`; kein `git push --force` auf Shared-Remotes.
+
+**AUFTRAG:**  
+Stabilisiere den Standby-Resume-Transportpfad für `ESP_EA5484` (PKG-18), ohne Topic-/Contract-Breaking-Changes. Fokus auf die Kette `write_timeout_silent` -> `write_timeout(errno=11)` -> `tls_timeout` -> `CB OPEN`.
+
+**DATEIEN (Scope):**
+- `El Trabajante/src/services/communication/mqtt_client.cpp`
+- `El Trabajante/src/tasks/publish_queue.cpp`
+- `El Trabajante/src/tasks/publish_queue.h`
+
+**TESTS:**
+```text
+cd "El Trabajante" && ~/.platformio/penv/Scripts/pio.exe run -e esp32_dev
+```
+
+**RUNTIME-VERIFY (Pflicht):**
+- 10-Minuten-Resume-Fenster für `ESP_EA5484`
+- keine enge Disconnect-Spirale, kein schneller CB-OPEN-Rückfall
+- Fehlergründe bleiben diagnostisch eindeutig
+
+---
+
+## Rolle: mqtt-dev + server-dev — PKG-19
+
+### Git (Pflicht)
+- Arbeitsbranch: **`auto-debugger/work`**.
+- Vor allen Dateiänderungen: `git checkout auto-debugger/work` und mit `git branch --show-current` verifizieren.
+- Alle Commits dieses Auftrags nur auf diesem Branch; **kein** Commit direkt auf `master`; kein `git push --force` auf Shared-Remotes.
+
+**AUFTRAG:**  
+Ordne Broker-Restarts und LWT/Heartbeat-Folgekette im Standby-Fenster kausal ein und stabilisiere konfigurationsseitige Mitursachen (PKG-19). Keine Vermischung mit WS-only Fehlerkette ohne Evidence.
+
+**DATEIEN (Scope):**
+- `docker/mosquitto/mosquitto.conf`
+- `docker-compose.yml`
+- `El Servador/god_kaiser_server/src/mqtt/handlers/lwt_handler.py`
+- `El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py`
+
+**TESTS:**
+```text
+cd "El Servador/god_kaiser_server" && poetry run pytest tests/mqtt/handlers -q
+```
+
+**HINWEIS:**
+- Keine Secrets in Reports/Prompts.
+- Falls Broker-Restart extern verursacht ist: als BLOCKER dokumentieren statt spekulativ patchen.
+
+---
+
+## Rolle: frontend-dev — PKG-20
+
+### Git (Pflicht)
+- Arbeitsbranch: **`auto-debugger/work`**.
+- Vor allen Dateiänderungen: `git checkout auto-debugger/work` und mit `git branch --show-current` verifizieren.
+- Alle Commits dieses Auftrags nur auf diesem Branch; **kein** Commit direkt auf `master`; kein `git push --force` auf Shared-Remotes.
+
+**AUFTRAG:**  
+Mache Device-Flapping im Standby-Loop sichtbar (PKG-20), damit "Server verbunden" und "Gerät instabil" nicht mehr verwechselt werden.
+
+**DATEIEN (Scope):**
+- `El Frontend/src/shared/design/layout/TopBar.vue`
+- `El Frontend/src/views/MonitorView.vue`
+- `El Frontend/src/composables/monitorConnectivity.ts`
+- `El Frontend/src/views/SystemMonitorView.vue`
+- `El Frontend/src/stores/esp.ts`
+
+**TESTS:**
+```text
+cd "El Frontend" && npm run build
+cd "El Frontend" && npx vue-tsc --noEmit
+```
+
+**AKZEPTANZ:**
+- Loop-/Flapping-Hinweis sichtbar
+- keine Regression in Monitor- oder Dashboard-Navigation
+
+---
+
+## Rolle: test-log-analyst — PKG-21
+
+### Git (Pflicht)
+- Arbeitsbranch: **`auto-debugger/work`**.
+- Vor allen Dateiänderungen: `git checkout auto-debugger/work` und mit `git branch --show-current` verifizieren.
+- Alle Commits dieses Auftrags nur auf diesem Branch; **kein** Commit direkt auf `master`; kein `git push --force` auf Shared-Remotes.
+
+**AUFTRAG:**  
+Bewerte die Umsetzung aus PKG-18/19/20 gegen die Incident-DoD im 10-Minuten-Resume-Fenster (PKG-21). Ergebnis ist GO/NO-GO mit Rest-Risiken.
+
+**INPUT (Artefakte):**
+- Firmware-Build-Output (`pio run -e esp32_dev`)
+- Server-Testausgaben (`pytest`)
+- Frontend-Build/Typecheck (`npm run build`, `vue-tsc`)
+- Runtime-Logs zum Resume-Fenster (`ESP_EA5484`)
+
+**OUTPUT (Pflichtinhalt):**
+- Trefferlisten für `write_timeout*`, `tls_timeout`, `MQTT_EVENT_DISCONNECTED`, `CB OPEN`
+- UI-Validierung: Flapping transparent ja/nein
+- klare BLOCKER-Liste oder GO-Freigabe

@@ -1,0 +1,29 @@
+Loki health:
+- OK: Loki is ready
+- Streams: alloy, mqtt-broker, el-servador, ...
+
+Loki query (compose_service="mqtt-broker", last 2h, filter "mosquitto version 2.1.2 terminating"):
+- [10:20:37] 2026-04-20T10:20:37Z: mosquitto version 2.1.2 terminating
+
+Loki query (compose_service="el-servador", filter "LWT received: ESP ESP_EA5484 disconnected unexpectedly"):
+- [11:57:39] ... LWT received: ESP ESP_EA5484 disconnected unexpectedly (reason: unexpected_disconnect)
+- [11:57:25] ... LWT received: ESP ESP_EA5484 disconnected unexpectedly (reason: unexpected_disconnect)
+- [11:56:54] ... LWT received: ESP ESP_EA5484 disconnected unexpectedly (reason: unexpected_disconnect)
+- [11:56:09] ... LWT received: ESP ESP_EA5484 disconnected unexpectedly (reason: unexpected_disconnect)
+- [11:46:19] ... LWT received: ESP ESP_EA5484 disconnected unexpectedly (reason: unexpected_disconnect)
+- [11:38:08] ... LWT received: ESP ESP_EA5484 disconnected unexpectedly (reason: unexpected_disconnect)
+- [10:22:56] ... LWT received: ESP ESP_EA5484 disconnected unexpectedly (reason: unexpected_disconnect)
+- [10:20:59] ... LWT received: ESP ESP_EA5484 disconnected unexpectedly (reason: unexpected_disconnect)
+- [10:20:37] ... LWT received: ESP ESP_EA5484 disconnected unexpectedly (reason: unexpected_disconnect)
+- [10:12:09] ... LWT received: ESP ESP_EA5484 disconnected unexpectedly (reason: unexpected_disconnect)
+
+Loki query (compose_service="alloy", regex "(error|warn|failed|timeout)"):
+- [11:21:59] level=error ... error inspecting Docker container ... context canceled
+- [11:21:54] level=error ... No such container
+- [11:11:55] level=error ... No such container
+- [10:20:44] level=error ... No such container
+- [10:20:39] level=error ... could not fetch logs for container ... dead or marked for removal
+
+Hinweis:
+- Alloy UI zeigt Komponenten als healthy (siehe Screenshot `alloy-01-home.png`).
+- Die Alloy-Fehler passen zu Container-Churn, nicht zu einem dauerhaften Alloy-Ausfall.

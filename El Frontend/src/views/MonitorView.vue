@@ -12,7 +12,7 @@ defineOptions({ name: 'MonitorView' })
  * L3 SlideOver — Sensor detail with historical time series
  */
 
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, type ComponentPublicInstance } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
@@ -34,9 +34,12 @@ import {
 import {
   getSensorLabel,
   getSensorUnit,
+  getSensorDisplayName,
+  getSensorAggCategory,
   SENSOR_TYPE_CONFIG,
   formatSubzoneKpiLine,
 } from '@/utils/sensorDefaults'
+import { getActuatorTypeInfo } from '@/utils/labels'
 import { useDashboardStore, type DashboardLayout } from '@/shared/stores/dashboard.store'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { formatRelativeTime, qualityToStatus, DATA_STALE_THRESHOLD_S } from '@/utils/formatters'
@@ -91,6 +94,7 @@ import QuickActionBall from '@/components/quick-action/QuickActionBall.vue'
 import AddWidgetDialog from '@/components/monitor/AddWidgetDialog.vue'
 import { getChartColors } from '@/utils/chartColors'
 import { tokens } from '@/utils/cssTokens'
+import { getZoneTileRenderableWidgets } from '@/utils/zoneTileWidgets'
 
 const router = useRouter()
 const route = useRoute()
@@ -153,10 +157,22 @@ const isZoneFilterActive = computed(() => selectedZoneFilter.value !== null)
 // =============================================================================
 
 const selectedSubzoneFilter = ref<string | null>(null)
+type MonitorSourceFilter = 'all' | 'real' | 'mock'
+type MonitorSourceType = 'real' | 'mock'
+const selectedSourceFilter = ref<MonitorSourceFilter>('all')
 
 const filteredSubzones = computed(() => {
-  if (!selectedSubzoneFilter.value) return zoneDeviceGroup.value
-  return zoneDeviceGroup.value.filter(sz => sz.subzoneId === selectedSubzoneFilter.value)
+  const bySubzone = !selectedSubzoneFilter.value
+    ? zoneDeviceGroup.value
+    : zoneDeviceGroup.value.filter(sz => sz.subzoneId === selectedSubzoneFilter.value)
+
+  return bySubzone
+    .map((subzone) => ({
+      ...subzone,
+      sensors: subzone.sensors.filter(sensor => matchesSourceFilter(sensor.esp_id)),
+      actuators: subzone.actuators.filter(actuator => matchesSourceFilter(actuator.esp_id)),
+    }))
+    .filter(subzone => subzone.sensors.length > 0 || subzone.actuators.length > 0)
 })
 
 /** Unique subzone list for the L2 filter dropdown */
@@ -203,11 +219,90 @@ const zoneMockSensorCounts = computed(() => {
   return counts
 })
 
+const SOURCE_SORT_PRIORITY: Record<MonitorSourceType, number> = {
+  real: 0,
+  mock: 1,
+}
+
+const sensorCardElementMap = new Map<string, HTMLElement>()
+
+function registerSensorCardElement(sensorKey: string, element: Element | ComponentPublicInstance | null): void {
+  const host = element instanceof Element
+    ? element
+    : (element as ComponentPublicInstance | null)?.$el instanceof Element
+      ? (element as ComponentPublicInstance).$el
+      : null
+
+  if (host instanceof HTMLElement) {
+    sensorCardElementMap.set(sensorKey, host)
+  } else {
+    sensorCardElementMap.delete(sensorKey)
+  }
+}
+
+function resolveSourceType(espId: string): MonitorSourceType {
+  return isMockEspId(espId) ? 'mock' : 'real'
+}
+
+function matchesSourceFilter(espId: string): boolean {
+  if (selectedSourceFilter.value === 'all') return true
+  return resolveSourceType(espId) === selectedSourceFilter.value
+}
+
+function resolveSensorDisplayName(sensor: Pick<SensorWithContext, 'sensor_type' | 'name' | 'gpio'>): string {
+  return getSensorDisplayName({ sensor_type: sensor.sensor_type, name: sensor.name }) || `GPIO ${sensor.gpio}`
+}
+
+function resolveActuatorDisplayName(actuator: Pick<ActuatorWithContext, 'name' | 'gpio' | 'actuator_type' | 'hardware_type'>): string {
+  const name = typeof actuator.name === 'string' ? actuator.name.trim() : ''
+  if (name.length > 0) return name
+  const typeLabel = getActuatorTypeInfo(actuator.actuator_type, actuator.hardware_type).label
+  return `${typeLabel} GPIO ${actuator.gpio}`
+}
+
+function compareSensorsMetricFirst(a: SensorWithContext, b: SensorWithContext): number {
+  const metricA = getSensorAggCategory(a.sensor_type)
+  const metricB = getSensorAggCategory(b.sensor_type)
+  if (metricA !== metricB) return metricA.localeCompare(metricB)
+
+  const sourceA = SOURCE_SORT_PRIORITY[resolveSourceType(a.esp_id)]
+  const sourceB = SOURCE_SORT_PRIORITY[resolveSourceType(b.esp_id)]
+  if (sourceA !== sourceB) return sourceA - sourceB
+
+  const nameCmp = resolveSensorDisplayName(a).localeCompare(resolveSensorDisplayName(b), 'de')
+  if (nameCmp !== 0) return nameCmp
+
+  return `${a.esp_id}:${a.gpio}:${a.sensor_type}`.localeCompare(`${b.esp_id}:${b.gpio}:${b.sensor_type}`)
+}
+
+function compareActuatorsStable(a: ActuatorWithContext, b: ActuatorWithContext): number {
+  const sourceA = SOURCE_SORT_PRIORITY[resolveSourceType(a.esp_id)]
+  const sourceB = SOURCE_SORT_PRIORITY[resolveSourceType(b.esp_id)]
+  if (sourceA !== sourceB) return sourceA - sourceB
+
+  const nameCmp = resolveActuatorDisplayName(a).localeCompare(resolveActuatorDisplayName(b), 'de')
+  if (nameCmp !== 0) return nameCmp
+
+  return `${a.esp_id}:${a.gpio}:${a.actuator_type}`.localeCompare(`${b.esp_id}:${b.gpio}:${b.actuator_type}`)
+}
+
+function sortSensorsMetricFirst(sensors: SensorWithContext[]): SensorWithContext[] {
+  return [...sensors].sort(compareSensorsMetricFirst)
+}
+
+function sortActuatorsStable(actuators: ActuatorWithContext[]): ActuatorWithContext[] {
+  return [...actuators].sort(compareActuatorsStable)
+}
+
 function toggleExpanded(sensorKey: string) {
   const wasExpanded = expandedSensorKey.value === sensorKey
   expandedSensorKey.value = wasExpanded ? null : sensorKey
   if (!wasExpanded) {
     fetchExpandedChartData(sensorKey)
+    nextTick(() => {
+      const cardElement = sensorCardElementMap.get(sensorKey)
+      cardElement?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
   }
 }
 
@@ -1111,22 +1206,12 @@ const showActuatorSnapshotWarning = computed(() =>
 // L1 Zone Mini-Widgets (Phase 3)
 // =============================================================================
 
-/** Widget types compact enough for ~70px tile height */
-const TILE_ALLOWED_WIDGET_TYPES = new Set(['gauge', 'sensor-card'])
-
 /**
  * Returns the first zone-tile dashboard (empty shell or tile-compatible widgets).
  * Filters on scope='zone-tile' to avoid collision with full zone dashboards.
  */
 function getZoneMiniPanelId(zoneId: string): string | undefined {
-  const panels = dashStore.layouts
-    .filter(l => l.scope === 'zone-tile' && l.zoneId === zoneId)
-  for (const panel of panels) {
-    if (panel.widgets.length === 0) return panel.id
-    const allAllowed = panel.widgets.every(w => TILE_ALLOWED_WIDGET_TYPES.has(w.type))
-    if (allAllowed) return panel.id
-  }
-  return undefined
+  return dashStore.getCanonicalZoneTileLayout(zoneId)?.id
 }
 
 /** Legacy auto-generated L1 preset: zwei Klima-Gauges — durch Zoneinsight ersetzt (Widgets leeren). */
@@ -1137,10 +1222,9 @@ function isLegacyAutoDualGaugeZoneTile(layout: DashboardLayout): boolean {
 }
 
 function hasZoneTileRenderableWidgets(zoneId: string): boolean {
-  const id = getZoneMiniPanelId(zoneId)
-  if (!id) return false
-  const layout = dashStore.getLayoutById(id)
-  return !!layout && layout.widgets.length > 0
+  const layout = dashStore.getCanonicalZoneTileLayout(zoneId)
+  if (!layout) return false
+  return getZoneTileRenderableWidgets(layout.widgets).length > 0
 }
 
 function getZoneTileEditorRoute(zoneId: string): RouteLocationRaw | null {
@@ -1160,41 +1244,21 @@ function getZoneTileEditorRoute(zoneId: string): RouteLocationRaw | null {
  * Migriert alte Auto-2×Gauge-Layouts zu leerem Preset; Dimensionen w:6,h:1 für verbleibende Widgets.
  */
 function ensureZoneTileDashboard(zoneId: string, zoneName: string): void {
-  const existingId = getZoneMiniPanelId(zoneId)
-  if (existingId) {
-    const existing = dashStore.getLayoutById(existingId)
-    if (existing) {
-      if (isLegacyAutoDualGaugeZoneTile(existing)) {
-        existing.widgets = []
-      }
-      const needsDimMigration = existing.widgets.some(w => w.w !== 6 || w.h !== 1)
-      if (needsDimMigration) {
-        existing.widgets.forEach((w, i) => {
-          w.x = i * 6
-          w.y = 0
-          w.w = 6
-          w.h = 1
-        })
-      }
-    }
-    return
+  const layout = dashStore.ensureZoneTileShell(zoneId, zoneName)
+  if (!layout) return
+
+  const metadataPatch: Partial<Pick<DashboardLayout, 'scope' | 'zoneId' | 'autoGenerated' | 'target'>> = {}
+  if (layout.scope !== 'zone-tile') metadataPatch.scope = 'zone-tile'
+  if (layout.zoneId !== zoneId) metadataPatch.zoneId = zoneId
+  if (layout.autoGenerated == null) metadataPatch.autoGenerated = true
+  if (layout.target) metadataPatch.target = undefined
+  if (Object.keys(metadataPatch).length > 0) {
+    dashStore.setLayoutMetadata(layout.id, metadataPatch)
   }
 
-  const sensors: { espId: string; gpio: number; sensorType: string }[] = []
-  for (const device of espStore.devices) {
-    if (device.zone_id !== zoneId) continue
-    const deviceId = espStore.getDeviceId(device)
-    for (const s of (device.sensors || []) as { gpio: number; sensor_type: string }[]) {
-      sensors.push({ espId: deviceId, gpio: s.gpio, sensorType: s.sensor_type })
-    }
+  if (isLegacyAutoDualGaugeZoneTile(layout)) {
+    dashStore.saveLayout(layout.id, [])
   }
-  if (sensors.length === 0) return
-
-  const layout = dashStore.createLayout(`${zoneName} Tile`)
-  layout.scope = 'zone-tile'
-  layout.zoneId = zoneId
-  layout.autoGenerated = true
-  layout.target = { view: 'monitor', placement: 'inline' }
 }
 
 /** Track which zones already have a tile-dashboard (per-zone instead of global guard) */
@@ -1222,7 +1286,7 @@ const zoneDeviceGroup = computed<ZoneDeviceSubzone[]>(() => {
     return data.subzones.map(sz => ({
       subzoneId: sz.subzone_id,
       subzoneName: sz.subzone_id === null ? 'Zone-weit' : sz.subzone_name,
-      sensors: sz.sensors.map(s => {
+      sensors: sortSensorsMetricFirst(sz.sensors.map(s => {
         const device = devices.find(d => espStore.getDeviceId(d) === s.esp_id)
         const liveSensor = (device?.sensors as MockSensor[] | undefined)?.find(
           (sens) => sens.gpio === s.gpio && sens.sensor_type === s.sensor_type
@@ -1240,9 +1304,12 @@ const zoneDeviceGroup = computed<ZoneDeviceSubzone[]>(() => {
           zone_name: data.zone_name,
           subzone_id: sz.subzone_id,
           subzone_name: sz.subzone_name,
+          esp_state: device?.system_state,
+          device_scope: liveSensor?.device_scope ?? (s as Partial<SensorWithContext>).device_scope ?? null,
+          assigned_zones: liveSensor?.assigned_zones ?? (s as Partial<SensorWithContext>).assigned_zones ?? [],
         }
-      }) as SensorWithContext[],
-      actuators: sz.actuators.map(a => ({
+      }) as SensorWithContext[]),
+      actuators: sortActuatorsStable(sz.actuators.map(a => ({
         ...a,
         state: (() => {
           const liveDevice = devices.find(d => espStore.getDeviceId(d) === a.esp_id)
@@ -1284,7 +1351,7 @@ const zoneDeviceGroup = computed<ZoneDeviceSubzone[]>(() => {
         zone_name: data.zone_name,
         subzone_id: sz.subzone_id,
         subzone_name: sz.subzone_name,
-      })) as ActuatorWithContext[],
+      })) as ActuatorWithContext[]),
     })).sort((a, b) => {
       // Named subzones first (alphabetical), "Zone-weit" (null) at end
       if (a.subzoneId === null) return 1
@@ -1304,7 +1371,7 @@ const zoneDeviceGroup = computed<ZoneDeviceSubzone[]>(() => {
     subzoneMap.set(sz.subzoneId, {
       subzoneId: sz.subzoneId,
       subzoneName: sz.subzoneId === null ? 'Zone-weit' : (sz.subzoneName || 'Zone-weit'),
-      sensors: sz.sensors as SensorWithContext[],
+      sensors: sortSensorsMetricFirst(sz.sensors as SensorWithContext[]),
       actuators: [],
     })
   }
@@ -1312,13 +1379,13 @@ const zoneDeviceGroup = computed<ZoneDeviceSubzone[]>(() => {
   for (const sz of actuatorGroup?.subzones ?? []) {
     const existing = subzoneMap.get(sz.subzoneId)
     if (existing) {
-      existing.actuators = sz.actuators as ActuatorWithContext[]
+      existing.actuators = sortActuatorsStable(sz.actuators as ActuatorWithContext[])
     } else {
       subzoneMap.set(sz.subzoneId, {
         subzoneId: sz.subzoneId,
         subzoneName: sz.subzoneId === null ? 'Zone-weit' : (sz.subzoneName || 'Zone-weit'),
         sensors: [],
-        actuators: sz.actuators as ActuatorWithContext[],
+        actuators: sortActuatorsStable(sz.actuators as ActuatorWithContext[]),
       })
     }
   }
@@ -1361,11 +1428,11 @@ const selectedZoneHealthReason = computed(() =>
   selectedZoneKpi.value?.healthReason ?? null,
 )
 
-const zoneSensorCount = computed(() =>
-  zoneDeviceGroup.value.reduce((sum, sz) => sum + sz.sensors.length, 0)
+const filteredZoneSensorCount = computed(() =>
+  filteredSubzones.value.reduce((sum, sz) => sum + sz.sensors.length, 0)
 )
-const zoneActuatorCount = computed(() =>
-  zoneDeviceGroup.value.reduce((sum, sz) => sum + sz.actuators.length, 0)
+const filteredZoneActuatorCount = computed(() =>
+  filteredSubzones.value.reduce((sum, sz) => sum + sz.actuators.length, 0)
 )
 
 /**
@@ -1885,6 +1952,18 @@ function handleFabWidgetSelected(widgetType: string) {
         <span>Archivierte Zone — nur historische Daten</span>
       </div>
 
+      <!-- Flapping Banner (PKG-20) -->
+      <div v-if="espStore.hasFlappingDevices" class="monitor-flapping-banner">
+        <AlertTriangle class="monitor-flapping-banner__icon" />
+        <span class="monitor-flapping-banner__text">
+          {{ espStore.flappingDeviceCount }} {{ espStore.flappingDeviceCount === 1 ? 'Gerät' : 'Geräte' }}
+          mit instabiler Verbindung (Disconnect-Loop)
+        </span>
+        <span class="monitor-flapping-banner__hint">
+          {{ espStore.flappingDeviceIds.slice(0, 3).join(', ') }}{{ espStore.flappingDeviceCount > 3 ? ` +${espStore.flappingDeviceCount - 3}` : '' }}
+        </span>
+      </div>
+
       <!-- Empty State (only when loading done + no error + truly empty) -->
       <div v-if="zoneKPIs.length === 0" class="monitor-view__empty">
         <Activity class="w-12 h-12" style="color: var(--color-text-muted)" />
@@ -1903,6 +1982,7 @@ function handleFabWidgetSelected(widgetType: string) {
           :zone="zone"
           :is-stale="isZoneStale(zone.lastActivity)"
           :mock-sensor-count="zoneMockSensorCounts.get(zone.zoneId) ?? 0"
+          :flapping-count="espStore.getFlappingDevicesInZone(zone.zoneId).length"
           :rules="logicStore.getRulesForZone(zone.zoneId).slice(0, 2)"
           :total-rule-count="logicStore.getRulesForZone(zone.zoneId).length"
           :is-rule-active="logicStore.isRuleActive"
@@ -2012,6 +2092,38 @@ function handleFabWidgetSelected(widgetType: string) {
         </span>
       </div>
 
+      <div class="monitor-source-filter" role="group" aria-label="Datenquelle filtern">
+        <button
+          type="button"
+          :class="['monitor-source-filter__btn', { 'monitor-source-filter__btn--active': selectedSourceFilter === 'all' }]"
+          @click="selectedSourceFilter = 'all'"
+        >
+          Alle
+        </button>
+        <button
+          type="button"
+          :class="[
+            'monitor-source-filter__btn',
+            'monitor-source-filter__btn--real',
+            { 'monitor-source-filter__btn--active': selectedSourceFilter === 'real' },
+          ]"
+          @click="selectedSourceFilter = 'real'"
+        >
+          Nur Real
+        </button>
+        <button
+          type="button"
+          :class="[
+            'monitor-source-filter__btn',
+            'monitor-source-filter__btn--mock',
+            { 'monitor-source-filter__btn--active': selectedSourceFilter === 'mock' },
+          ]"
+          @click="selectedSourceFilter = 'mock'"
+        >
+          Nur Mock
+        </button>
+      </div>
+
       <!-- Unified Subzone-First Section (sensors + actuators per subzone) -->
       <section v-if="filteredSubzones.length > 0" class="monitor-section monitor-section--subzones">
         <div
@@ -2071,6 +2183,7 @@ function handleFabWidgetSelected(widgetType: string) {
                     'monitor-sensor-card',
                     { 'monitor-sensor-card--expanded': expandedSensorKey === getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type) }
                   ]"
+                  :ref="(el) => registerSensorCardElement(getSensorKey(sensor.esp_id, sensor.gpio, sensor.sensor_type), el)"
                 >
                   <SensorCard
                     :sensor="sensor"
@@ -2198,9 +2311,15 @@ function handleFabWidgetSelected(widgetType: string) {
         mode="manage"
       />
 
-      <div v-if="zoneSensorCount === 0 && zoneActuatorCount === 0" class="monitor-view__empty">
+      <div v-if="filteredZoneSensorCount === 0 && filteredZoneActuatorCount === 0" class="monitor-view__empty">
         <Activity class="w-12 h-12" style="color: var(--color-text-muted)" />
-        <p>Keine Sensoren oder Aktoren in dieser Zone.</p>
+        <p>
+          {{
+            selectedSourceFilter === 'all'
+              ? 'Keine Sensoren oder Aktoren in dieser Zone.'
+              : 'Keine Karten für den gewählten Quellenfilter.'
+          }}
+        </p>
       </div>
       </div><!-- /monitorContentRef -->
     </template>
@@ -2495,6 +2614,47 @@ function handleFabWidgetSelected(widgetType: string) {
   border-radius: var(--radius-md);
   color: var(--color-warning);
   font-size: var(--text-sm);
+}
+
+/* Flapping Banner (PKG-20) */
+.monitor-flapping-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: var(--radius-md);
+  color: var(--color-warning);
+  font-size: var(--text-sm);
+  animation: flapping-banner-pulse 3s ease-in-out infinite;
+}
+
+.monitor-flapping-banner__icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.monitor-flapping-banner__text {
+  font-weight: 600;
+}
+
+.monitor-flapping-banner__hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@keyframes flapping-banner-pulse {
+  0%, 100% { border-color: rgba(251, 191, 36, 0.25); }
+  50% { border-color: rgba(251, 191, 36, 0.5); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .monitor-flapping-banner {
+    animation: none;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -3113,12 +3273,7 @@ function handleFabWidgetSelected(widgetType: string) {
 /* Sensor Card wrapper (SensorCard handles its own visual styling) */
 .monitor-sensor-card--expanded {
   grid-column: 1 / -1;
-}
-
-@media (min-width: 640px) {
-  .monitor-sensor-card--expanded {
-    grid-column: span 2;
-  }
+  scroll-margin-top: var(--space-8);
 }
 
 /* Charts Panel (expanded) */
@@ -3261,6 +3416,49 @@ function handleFabWidgetSelected(widgetType: string) {
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
+}
+
+.monitor-source-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  padding: 2px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-bg);
+}
+
+.monitor-source-filter__btn {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.monitor-source-filter__btn:hover {
+  color: var(--color-text-primary);
+}
+
+.monitor-source-filter__btn--active {
+  border-color: var(--glass-border-hover);
+  background: var(--color-bg-quaternary);
+  color: var(--color-text-primary);
+}
+
+.monitor-source-filter__btn--real.monitor-source-filter__btn--active {
+  border-color: color-mix(in srgb, var(--color-real) 35%, var(--glass-border));
+  color: var(--color-real);
+}
+
+.monitor-source-filter__btn--mock.monitor-source-filter__btn--active {
+  border-color: color-mix(in srgb, var(--color-mock) 35%, var(--glass-border));
+  color: var(--color-mock);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

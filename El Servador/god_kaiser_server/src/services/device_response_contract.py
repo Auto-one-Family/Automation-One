@@ -139,7 +139,13 @@ def canonicalize_config_response(payload: Mapping[str, Any], *, esp_id: str) -> 
         failures = [failed_item]
 
     correlation_id = _to_text(payload.get("correlation_id"))
-    if correlation_id is None:
+    request_id = _to_text(payload.get("request_id"))
+    if correlation_id is None and request_id is not None:
+        # Recovery path: some firmware builds mirror only request_id in config_response.
+        # Reuse it as correlation handle so downstream finalization can still resolve.
+        correlation_id = request_id
+        contract_issues.append("correlation_id=missing_used_request_id")
+    elif correlation_id is None:
         # Build deterministic fallback per response shape to avoid collisions
         # between sensor/actuator/system responses arriving in the same second.
         ts_part = _to_non_negative_int(payload.get("ts"), default=int(datetime.now(timezone.utc).timestamp()))

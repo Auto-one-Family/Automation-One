@@ -369,6 +369,75 @@ class TestHeartbeatMetadataDegradedFlags:
         )
 
 
+class TestHeartbeatWithoutGpioFieldsAccepted:
+    """PKG-17 regression: handle_heartbeat accepts payload without gpio-related fields."""
+
+    @pytest.fixture
+    def handler(self):
+        return HeartbeatHandler()
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_without_gpio_fields_accepted(self, handler):
+        """Full heartbeat flow without gpio_status, payload_degraded etc. succeeds."""
+        topic = "kaiser/god/esp/ESP_PKG17/system/heartbeat"
+        payload = {
+            "ts": int(datetime.now(timezone.utc).timestamp()),
+            "uptime": 600,
+            "heap_free": 48000,
+            "wifi_rssi": -52,
+            "sensor_count": 2,
+            "actuator_count": 1,
+        }
+
+        with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_db.flush = AsyncMock()
+            mock_db.rollback = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            mock_db.begin_nested = AsyncMock()
+            nested_ctx = MagicMock()
+            nested_ctx.commit = AsyncMock()
+            mock_db.begin_nested.return_value = nested_ctx
+
+            with patch("src.mqtt.handlers.heartbeat_handler.ESPRepository") as mock_repo_class:
+                mock_device = MagicMock()
+                mock_device.device_id = "ESP_PKG17"
+                mock_device.status = "online"
+                mock_device.device_metadata = {}
+                mock_device.last_seen = datetime.now(timezone.utc)
+                mock_device.zone_id = None
+                mock_device.master_zone_id = None
+                mock_device.zone_name = None
+                mock_device.kaiser_id = "god"
+
+                mock_repo = MagicMock()
+                mock_repo.get_by_device_id = AsyncMock(return_value=mock_device)
+                mock_repo.update_status = AsyncMock()
+                mock_repo_class.return_value = mock_repo
+
+                with patch("src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository"):
+                    with patch("src.mqtt.client.MQTTClient.get_instance") as mock_mqtt:
+                        mock_mqtt.return_value = MagicMock()
+
+                        with patch("src.websocket.manager.WebSocketManager") as mock_ws:
+                            mock_ws.get_instance = AsyncMock(return_value=AsyncMock())
+
+                            with patch(
+                                "src.services.logic_engine.get_logic_engine",
+                                return_value=None,
+                            ):
+                                result = await handler.handle_heartbeat(topic, payload)
+
+                                assert result is True
+                                mock_repo.update_status.assert_called_once()
+                                call_args = mock_repo.update_status.call_args
+                                assert call_args.args[0] == "ESP_PKG17"
+                                assert call_args.args[1] == "online"
+
+
 class TestHeartbeatTopicParsing:
     """Test heartbeat topic parsing."""
 
@@ -939,6 +1008,94 @@ class TestZoneMismatchDetection:
             if elapsed < zone_resync_cooldown_seconds:
                 should_resync = False
         assert should_resync is True
+
+
+class TestHeartbeatTimeoutAntiDuplicateEscalation:
+    """PKG-19: check_device_timeouts skips devices already handled by LWT."""
+
+    @pytest.fixture
+    def handler(self):
+        return HeartbeatHandler()
+
+    @pytest.mark.asyncio
+    async def test_timeout_skips_device_with_recent_lwt(self, handler):
+        """Device recently marked offline by LWT should not be timed out again."""
+        import time as time_module
+
+        now_ts = int(time_module.time())
+        mock_device = MagicMock()
+        mock_device.device_id = "ESP_SKIP_LWT"
+        mock_device.status = "online"
+        mock_device.last_seen = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        mock_device.device_metadata = {
+            "last_disconnect": {
+                "source": "lwt",
+                "timestamp": now_ts - 30,
+            }
+        }
+
+        with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.heartbeat_handler.ESPRepository") as mock_repo_class:
+                mock_repo = MagicMock()
+                mock_repo.get_by_status = AsyncMock(return_value=[mock_device])
+                mock_repo.update_status = AsyncMock()
+                mock_repo_class.return_value = mock_repo
+
+                result = await handler.check_device_timeouts()
+
+                mock_repo.update_status.assert_not_called()
+                assert result["timed_out"] == 0
+
+    @pytest.mark.asyncio
+    async def test_timeout_proceeds_when_lwt_is_old(self, handler):
+        """Device with old LWT should still be timed out normally."""
+        mock_device = MagicMock()
+        mock_device.device_id = "ESP_OLD_LWT"
+        mock_device.id = "uuid-old-lwt"
+        mock_device.status = "online"
+        mock_device.last_seen = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        mock_device.device_metadata = {
+            "last_disconnect": {
+                "source": "lwt",
+                "timestamp": 1000000,
+            }
+        }
+
+        with patch("src.mqtt.handlers.heartbeat_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.heartbeat_handler.ESPRepository") as mock_repo_class:
+                mock_repo = MagicMock()
+                mock_repo.get_by_status = AsyncMock(return_value=[mock_device])
+                mock_repo.update_status = AsyncMock()
+                mock_repo_class.return_value = mock_repo
+
+                with patch("src.mqtt.handlers.heartbeat_handler.ActuatorRepository") as mock_act:
+                    mock_act_repo = MagicMock()
+                    mock_act_repo.get_active_actuators_for_device = AsyncMock(return_value=[])
+                    mock_act_repo.reset_states_for_device = AsyncMock(return_value=0)
+                    mock_act.return_value = mock_act_repo
+
+                    with patch(
+                        "src.mqtt.handlers.heartbeat_handler.AuditLogRepository"
+                    ) as mock_audit:
+                        mock_audit.return_value.log_device_event = AsyncMock()
+
+                        with patch("src.websocket.manager.WebSocketManager") as mock_ws:
+                            mock_ws.get_instance = AsyncMock(return_value=AsyncMock())
+
+                            result = await handler.check_device_timeouts()
+
+                            mock_repo.update_status.assert_called_once()
+                            assert result["timed_out"] == 1
 
 
 class TestHeartbeatErrorAckContract:

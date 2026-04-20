@@ -416,6 +416,137 @@ class TestLWTPayloadHandling:
                         )
 
 
+class TestLWTFlappingDetection:
+    """PKG-19: Flapping detection in LWT handler."""
+
+    @pytest.fixture
+    def handler(self):
+        return LWTHandler()
+
+    def test_first_lwt_is_not_flapping(self, handler):
+        """First LWT for a device should not be flagged as flapping."""
+        count = handler._record_lwt_event("ESP_FLAP_01")
+        assert count == 1
+
+    def test_second_lwt_triggers_flapping(self, handler):
+        """Second LWT within the window triggers flapping."""
+        handler._record_lwt_event("ESP_FLAP_02")
+        count = handler._record_lwt_event("ESP_FLAP_02")
+        assert count >= 2
+
+    def test_different_esps_tracked_independently(self, handler):
+        """LWT events for different ESPs are tracked independently."""
+        handler._record_lwt_event("ESP_A")
+        handler._record_lwt_event("ESP_A")
+        count_b = handler._record_lwt_event("ESP_B")
+        assert count_b == 1
+
+    def test_get_lwt_count_returns_zero_for_unknown(self, handler):
+        """get_lwt_count returns 0 for unknown ESP."""
+        assert handler.get_lwt_count("ESP_NEVER_SEEN") == 0
+
+    @pytest.mark.asyncio
+    async def test_flapping_lwt_skips_actuator_reset(self, handler):
+        """PKG-19: When flapping, actuator reset is skipped."""
+        topic = "kaiser/god/esp/ESP_FLAP/system/will"
+        payload = {
+            "status": "offline",
+            "reason": "unexpected_disconnect",
+            "timestamp": int(datetime.now(timezone.utc).timestamp()),
+        }
+
+        handler._record_lwt_event("ESP_FLAP")
+
+        with patch("src.mqtt.handlers.lwt_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.lwt_handler.ESPRepository") as mock_repo_class:
+                mock_device = MagicMock()
+                mock_device.device_id = "ESP_FLAP"
+                mock_device.status = "online"
+                mock_device.device_metadata = {}
+                mock_device.last_seen = datetime.now(timezone.utc)
+
+                mock_repo = MagicMock()
+                mock_repo.get_by_device_id = AsyncMock(return_value=mock_device)
+                mock_repo.update_status = AsyncMock()
+                mock_repo_class.return_value = mock_repo
+
+                with patch("src.mqtt.handlers.lwt_handler.ActuatorRepository") as mock_act_class:
+                    mock_act_repo = MagicMock()
+                    mock_act_repo.get_active_actuators_for_device = AsyncMock(return_value=[])
+                    mock_act_repo.reset_states_for_device = AsyncMock(return_value=0)
+                    mock_act_class.return_value = mock_act_repo
+
+                    with patch("src.mqtt.handlers.lwt_handler.AuditLogRepository") as mock_audit:
+                        mock_audit.return_value.log_device_event = AsyncMock()
+
+                        with patch("src.websocket.manager.WebSocketManager") as mock_ws:
+                            mock_ws.get_instance = AsyncMock(return_value=AsyncMock())
+
+                            result = await handler.handle_lwt(topic, payload)
+
+                            assert result is True
+                            mock_repo.update_status.assert_called_once_with("ESP_FLAP", "offline")
+                            mock_act_repo.reset_states_for_device.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_flapping_flag_in_metadata_and_broadcast(self, handler):
+        """PKG-19: Flapping flag appears in device_metadata and WS broadcast."""
+        topic = "kaiser/god/esp/ESP_FLAP2/system/will"
+        payload = {
+            "status": "offline",
+            "reason": "unexpected_disconnect",
+            "timestamp": int(datetime.now(timezone.utc).timestamp()),
+        }
+
+        handler._record_lwt_event("ESP_FLAP2")
+
+        with patch("src.mqtt.handlers.lwt_handler.resilient_session") as mock_session:
+            mock_db = MagicMock()
+            mock_db.commit = AsyncMock()
+            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with patch("src.mqtt.handlers.lwt_handler.ESPRepository") as mock_repo_class:
+                mock_device = MagicMock()
+                mock_device.device_id = "ESP_FLAP2"
+                mock_device.status = "online"
+                mock_device.device_metadata = {}
+                mock_device.last_seen = datetime.now(timezone.utc)
+
+                mock_repo = MagicMock()
+                mock_repo.get_by_device_id = AsyncMock(return_value=mock_device)
+                mock_repo.update_status = AsyncMock()
+                mock_repo_class.return_value = mock_repo
+
+                with patch("src.mqtt.handlers.lwt_handler.ActuatorRepository") as mock_act_class:
+                    mock_act_repo = MagicMock()
+                    mock_act_class.return_value = mock_act_repo
+
+                    with patch("src.mqtt.handlers.lwt_handler.AuditLogRepository") as mock_audit:
+                        mock_audit.return_value.log_device_event = AsyncMock()
+
+                        with patch("src.websocket.manager.WebSocketManager") as mock_ws_class:
+                            mock_ws = AsyncMock()
+                            mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
+
+                            result = await handler.handle_lwt(topic, payload)
+
+                            assert result is True
+                            last_disc = mock_device.device_metadata["last_disconnect"]
+                            assert last_disc["is_flapping"] is True
+                            assert last_disc["lwt_count_5m"] >= 2
+
+                            call_args = mock_ws.broadcast.call_args
+                            ws_payload = call_args.args[1]
+                            assert ws_payload["is_flapping"] is True
+                            assert ws_payload["lwt_count_5m"] >= 2
+
+
 class TestLWTGlobalHandler:
     """Test global handler instance."""
 

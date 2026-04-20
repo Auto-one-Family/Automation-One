@@ -22,6 +22,7 @@ import { useUiStore } from '@/shared/stores/ui.store'
 import { useDashboardWidgets } from '@/composables/useDashboardWidgets'
 import WidgetConfigPanel from '@/components/dashboard-widgets/WidgetConfigPanel.vue'
 import { createLogger } from '@/utils/logger'
+import { getZoneTileRenderableWidgets } from '@/utils/zoneTileWidgets'
 
 const logger = createLogger('InlineDashboardPanel')
 
@@ -72,7 +73,12 @@ const layout = computed(() =>
   dashStore.getLayoutById(props.layoutId)
 )
 
-const widgets = computed(() => layout.value?.widgets ?? [])
+const allWidgets = computed(() => layout.value?.widgets ?? [])
+
+const widgets = computed(() => {
+  if (!props.compact) return allWidgets.value
+  return getZoneTileRenderableWidgets(allWidgets.value)
+})
 
 const editorRoute = computed(() => ({
   name: 'editor-dashboard' as const,
@@ -90,6 +96,44 @@ function openConfig(w: DashboardWidget): void {
 
 function closeConfig(): void {
   configWidget.value = null
+}
+
+type WidgetDataDensity = 'none' | 'low' | 'medium' | 'high'
+
+function splitConfigIds(value: unknown): string[] {
+  if (typeof value !== 'string') return []
+  return value.split(',').map(part => part.trim()).filter(Boolean)
+}
+
+/**
+ * Compact mode row-span should reflect how much content a widget can actually render.
+ * This avoids oversized empty cards while still giving dense charts enough space.
+ */
+function getWidgetDataDensity(w: DashboardWidget): WidgetDataDensity {
+  const cfg = (w.config ?? {}) as Record<string, unknown>
+
+  if (w.type === 'line-chart' || w.type === 'historical' || w.type === 'statistics') {
+    return typeof cfg['sensorId'] === 'string' && cfg['sensorId'].trim() !== '' ? 'medium' : 'none'
+  }
+
+  if (w.type === 'fertigation-pair') {
+    const hasInflow = typeof cfg['inflowSensorId'] === 'string' && cfg['inflowSensorId'].trim() !== ''
+    const hasRunoff = typeof cfg['runoffSensorId'] === 'string' && cfg['runoffSensorId'].trim() !== ''
+    if (!hasInflow && !hasRunoff) return 'none'
+    return hasInflow && hasRunoff ? 'high' : 'low'
+  }
+
+  if (w.type === 'multi-sensor') {
+    const sensors = splitConfigIds(cfg['dataSources'])
+    const actuators = splitConfigIds(cfg['actuatorIds'])
+    const signalCount = sensors.length + actuators.length
+    if (signalCount === 0) return 'none'
+    if (signalCount <= 2) return 'low'
+    if (signalCount <= 4) return 'medium'
+    return 'high'
+  }
+
+  return 'low'
 }
 
 function handleConfigUpdate(newConfig: Record<string, any>): void {
@@ -116,7 +160,40 @@ async function confirmRemove(w: DashboardWidget): Promise<void> {
  * Side-panel mode: single column, widgets stacked vertically (ignore x/w).
  * Inline mode: full 12-column grid with original positions.
  */
+function compactRowSpan(w: DashboardWidget): number {
+  if (w.type === 'gauge' || w.type === 'sensor-card') return 1
+  if (w.type === 'actuator-card') return 1
+
+  if (
+    w.type === 'line-chart' ||
+    w.type === 'historical' ||
+    w.type === 'statistics' ||
+    w.type === 'fertigation-pair' ||
+    w.type === 'multi-sensor'
+  ) {
+    const density = getWidgetDataDensity(w)
+    if (density === 'none') return 1
+
+    const isSingleWidgetPanel = widgets.value.length === 1
+    const baseSpan = (() => {
+      if (density === 'low') return 2
+      if (density === 'high') return 3
+      return 2
+    })()
+
+    return isSingleWidgetPanel ? Math.min(baseSpan + 1, 4) : baseSpan
+  }
+  return 1
+}
+
 function widgetStyle(w: DashboardWidget): Record<string, string> {
+  if (props.compact) {
+    return {
+      'grid-column': '1 / -1',
+      'grid-row': `span ${compactRowSpan(w)}`,
+    }
+  }
+
   if (isSidePanel.value) {
     // Stack vertically — each widget spans full width, height from original h
     const minH = Math.max(w.h, 2)
@@ -362,8 +439,9 @@ onUnmounted(() => {
 }
 
 .inline-dashboard--compact .inline-dashboard__grid {
+  grid-template-columns: 1fr;
   padding: 0;
-  gap: 0;
+  gap: var(--space-2);
 }
 
 .inline-dashboard--compact .inline-dashboard__cell {

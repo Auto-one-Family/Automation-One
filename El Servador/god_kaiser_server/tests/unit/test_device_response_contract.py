@@ -41,6 +41,22 @@ def test_canonicalize_config_response_unknown_values_to_contract_violation():
     assert canonical.severity == "error"
 
 
+def test_canonicalize_config_response_uses_request_id_when_correlation_missing():
+    canonical = canonicalize_config_response(
+        {
+            "status": "success",
+            "type": "sensor",
+            "count": 1,
+            "request_id": "req-123",
+        },
+        esp_id="ESP_77",
+    )
+
+    assert canonical.correlation_id == "req-123"
+    assert canonical.is_contract_violation is True
+    assert canonical.status == "success"
+
+
 def test_canonicalize_actuator_response_uses_topic_authority():
     canonical = canonicalize_actuator_response(
         {

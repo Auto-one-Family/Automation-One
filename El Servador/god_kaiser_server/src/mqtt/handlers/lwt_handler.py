@@ -18,6 +18,8 @@ Error Codes:
 - Uses ConfigErrorCode for ESP device lookup errors
 """
 
+import time as time_module
+from collections import deque
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -42,6 +44,9 @@ from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
 
+FLAPPING_WINDOW_SECONDS = 300
+FLAPPING_THRESHOLD = 2
+
 
 class LWTHandler:
     """
@@ -54,6 +59,32 @@ class LWTHandler:
     4. Update ESP device status to "offline"
     5. Broadcast via WebSocket for instant UI update
     """
+
+    def __init__(self) -> None:
+        self._recent_lwt_ts: dict[str, deque[float]] = {}
+
+    def _record_lwt_event(self, esp_id: str) -> int:
+        """Record an LWT event and return the count within the flapping window."""
+        now = time_module.monotonic()
+        if esp_id not in self._recent_lwt_ts:
+            self._recent_lwt_ts[esp_id] = deque(maxlen=20)
+        ts_deque = self._recent_lwt_ts[esp_id]
+        ts_deque.append(now)
+        cutoff = now - FLAPPING_WINDOW_SECONDS
+        while ts_deque and ts_deque[0] < cutoff:
+            ts_deque.popleft()
+        return len(ts_deque)
+
+    def get_lwt_count(self, esp_id: str) -> int:
+        """Return the number of LWT events within the flapping window (for tests)."""
+        if esp_id not in self._recent_lwt_ts:
+            return 0
+        now = time_module.monotonic()
+        ts_deque = self._recent_lwt_ts[esp_id]
+        cutoff = now - FLAPPING_WINDOW_SECONDS
+        while ts_deque and ts_deque[0] < cutoff:
+            ts_deque.popleft()
+        return len(ts_deque)
 
     async def handle_lwt(self, topic: str, payload: dict) -> bool:
         """
@@ -91,9 +122,13 @@ class LWTHandler:
 
             esp_id_str = parsed_topic["esp_id"]
 
+            lwt_count_window = self._record_lwt_event(esp_id_str)
+            is_flapping = lwt_count_window >= FLAPPING_THRESHOLD
+
             logger.warning(
                 f"LWT received: ESP {esp_id_str} disconnected unexpectedly "
-                f"(reason: {payload.get('reason', 'unknown')})"
+                f"(reason: {payload.get('reason', 'unknown')}, "
+                f"lwt_count_5m={lwt_count_window}, flapping={is_flapping})"
             )
             increment_disconnect_reason(str(payload.get("reason", "unexpected_disconnect")))
             if canonical.is_contract_violation:
@@ -164,24 +199,35 @@ class LWTHandler:
                     adoption_service = get_state_adoption_service()
                     await adoption_service.clear_cycle(esp_id_str)
 
-                    # Reset actuator states to idle for offline device
+                    # Reset actuator states to idle for offline device.
+                    # PKG-19: Skip expensive reset during flapping — actuators
+                    # are already idle from the first LWT in this window.
                     reset_count = 0
+                    if is_flapping:
+                        logger.info(
+                            "[LWT] Flapping detected for %s (lwt_count_5m=%d), "
+                            "skipping redundant actuator reset",
+                            esp_id_str,
+                            lwt_count_window,
+                        )
                     try:
                         actuator_repo = ActuatorRepository(session)
-                        # Capture active actuators BEFORE reset for history logging (Fix L2)
-                        active_actuators = await actuator_repo.get_active_actuators_for_device(
-                            esp_device.id
-                        )
-                        reset_count = await actuator_repo.reset_states_for_device(
-                            esp_id=esp_device.id,
-                            new_state="off",
-                            reason="lwt_disconnect",
-                        )
-                        if reset_count > 0:
-                            logger.info(
-                                f"[LWT] Reset {reset_count} actuator state(s) to idle "
-                                f"for disconnected device {esp_id_str}"
+                        if not is_flapping:
+                            active_actuators = await actuator_repo.get_active_actuators_for_device(
+                                esp_device.id
                             )
+                            reset_count = await actuator_repo.reset_states_for_device(
+                                esp_id=esp_device.id,
+                                new_state="off",
+                                reason="lwt_disconnect",
+                            )
+                            if reset_count > 0:
+                                logger.info(
+                                    f"[LWT] Reset {reset_count} actuator state(s) to idle "
+                                    f"for disconnected device {esp_id_str}"
+                                )
+                        else:
+                            active_actuators = []
                         # Log history entry for each actuator that was reset (Fix L2)
                         now = datetime.now(timezone.utc)
                         for actuator_state in active_actuators:
@@ -231,6 +277,8 @@ class LWTHandler:
                         "contract_violation": canonical.is_contract_violation,
                         "contract_code": canonical.contract_code,
                         "contract_reason": canonical.contract_reason,
+                        "lwt_count_5m": lwt_count_window,
+                        "is_flapping": is_flapping,
                     }
                     esp_device.device_metadata = device_metadata
 
@@ -284,6 +332,8 @@ class LWTHandler:
                         broadcast_payload["contract_violation"] = canonical.is_contract_violation
                         broadcast_payload["contract_code"] = canonical.contract_code
                         broadcast_payload["contract_reason"] = canonical.contract_reason
+                        broadcast_payload["lwt_count_5m"] = lwt_count_window
+                        broadcast_payload["is_flapping"] = is_flapping
                         await ws_manager.broadcast(
                             "esp_health",
                             broadcast_payload,

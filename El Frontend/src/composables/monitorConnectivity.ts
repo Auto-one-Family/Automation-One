@@ -60,6 +60,77 @@ export function resolveMonitorDataMode(input: MonitorDataModeInput): MonitorData
   return 'Snapshot'
 }
 
+// ============================================================================
+// Device Flapping Detection (PKG-20)
+// ============================================================================
+
+const FLAPPING_WINDOW_MS = 5 * 60 * 1000 // 5 minutes
+const FLAPPING_THRESHOLD = 3             // ≥3 disconnects → flapping
+
+export interface DeviceFlappingState {
+  espId: string
+  disconnectCount: number
+  windowMs: number
+}
+
+/**
+ * Prunes entries older than `windowMs` and returns true when the remaining
+ * disconnect count meets or exceeds `threshold`.
+ */
+export function isDeviceFlapping(
+  timestamps: number[],
+  nowTs: number = Date.now(),
+  windowMs: number = FLAPPING_WINDOW_MS,
+  threshold: number = FLAPPING_THRESHOLD,
+): boolean {
+  const cutoff = nowTs - windowMs
+  let recentCount = 0
+  for (const ts of timestamps) {
+    if (ts >= cutoff) recentCount++
+  }
+  return recentCount >= threshold
+}
+
+/**
+ * Returns the number of disconnect events within the window.
+ */
+export function countRecentDisconnects(
+  timestamps: number[],
+  nowTs: number = Date.now(),
+  windowMs: number = FLAPPING_WINDOW_MS,
+): number {
+  const cutoff = nowTs - windowMs
+  let count = 0
+  for (const ts of timestamps) {
+    if (ts >= cutoff) count++
+  }
+  return count
+}
+
+/**
+ * Prunes timestamps older than `windowMs` in-place (GC-friendly).
+ */
+export function pruneOldTimestamps(
+  timestamps: number[],
+  nowTs: number = Date.now(),
+  windowMs: number = FLAPPING_WINDOW_MS,
+): void {
+  const cutoff = nowTs - windowMs
+  let writeIdx = 0
+  for (let i = 0; i < timestamps.length; i++) {
+    if (timestamps[i] >= cutoff) {
+      timestamps[writeIdx++] = timestamps[i]
+    }
+  }
+  timestamps.length = writeIdx
+}
+
+export { FLAPPING_WINDOW_MS, FLAPPING_THRESHOLD }
+
+// ============================================================================
+// Recovery Orchestrator
+// ============================================================================
+
 export function createMonitorRecoveryOrchestrator(runSteps: () => Promise<void>) {
   let running: Promise<void> | null = null
   let rerunRequested = false

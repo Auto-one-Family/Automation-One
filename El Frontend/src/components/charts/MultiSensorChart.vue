@@ -211,6 +211,15 @@ const timeRangeLabel = computed(() => {
 })
 
 const isCompactChart = computed(() => props.height <= 180)
+const stateMinHeightPx = computed(() => {
+  const sensorCount = Math.max(props.sensors.length, 1)
+  const base = isCompactChart.value ? 92 : 112
+  return base + Math.min((sensorCount - 1) * 8, 32)
+})
+const chartContainerHeightPx = computed(() => {
+  const requested = Number.isFinite(props.height) ? props.height : 300
+  return Math.max(stateMinHeightPx.value + 18, requested)
+})
 
 /** Kombinierte Daten: Historisch + Live */
 const combinedData = computed(() => {
@@ -319,11 +328,6 @@ const actuatorAnnotations = computed(() => {
       borderWidth: 1,
       borderDash: [4, 4],
       borderCapStyle: 'butt',
-      label: {
-        display: false,
-        content: `${e.label} ${e.isOn ? 'EIN' : 'AUS'}`,
-        position: 'start',
-      },
     }
   }
   return annotations
@@ -1054,13 +1058,21 @@ onUnmounted(() => {
 <template>
   <div class="multi-sensor-chart">
     <!-- Loading State (nur beim initialen Laden) -->
-    <div v-if="isLoading && totalDataPoints === 0" class="multi-sensor-chart__loading">
+    <div
+      v-if="isLoading && totalDataPoints === 0"
+      class="multi-sensor-chart__loading"
+      :style="{ minHeight: `${stateMinHeightPx}px` }"
+    >
       <div class="multi-sensor-chart__spinner" />
       <span>Lade Sensordaten...</span>
     </div>
 
     <!-- Error State -->
-    <div v-else-if="error && totalDataPoints === 0" class="multi-sensor-chart__error">
+    <div
+      v-else-if="error && totalDataPoints === 0"
+      class="multi-sensor-chart__error"
+      :style="{ minHeight: `${stateMinHeightPx}px` }"
+    >
       <span class="multi-sensor-chart__error-icon">&#9888;&#65039;</span>
       <span>{{ error.message }}</span>
       <button @click="retry" class="multi-sensor-chart__retry-btn">
@@ -1069,7 +1081,11 @@ onUnmounted(() => {
     </div>
 
     <!-- Empty State (keine Sensoren ausgewählt) -->
-    <div v-else-if="sensors.length === 0" class="multi-sensor-chart__empty">
+    <div
+      v-else-if="sensors.length === 0"
+      class="multi-sensor-chart__empty"
+      :style="{ minHeight: `${stateMinHeightPx}px` }"
+    >
       <span class="multi-sensor-chart__empty-icon">&#128202;</span>
       <span>Keine Sensoren ausgewählt</span>
       <span class="multi-sensor-chart__empty-hint">
@@ -1081,6 +1097,7 @@ onUnmounted(() => {
     <div
       v-else-if="totalDataPoints === 0"
       class="multi-sensor-chart__no-data"
+      :style="{ minHeight: `${stateMinHeightPx}px` }"
     >
       <span class="multi-sensor-chart__no-data-icon">&#128200;</span>
       <span>Noch keine Daten verfügbar</span>
@@ -1099,7 +1116,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Chart -->
-    <div v-else class="multi-sensor-chart__container" :style="{ height: `${height}px` }">
+    <div v-else class="multi-sensor-chart__container" :style="{ height: `${chartContainerHeightPx}px` }">
       <Line
         v-if="chartData.datasets.length > 0"
         ref="chartRef"

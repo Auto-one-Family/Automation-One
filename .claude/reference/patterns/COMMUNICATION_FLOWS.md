@@ -652,19 +652,13 @@ Config-Pushes werden automatisch nach folgenden API-Operationen gesendet:
   "heap_free": 245760,
   "wifi_rssi": -65,
   "sensor_count": 3,
-  "actuator_count": 2,
-  "gpio_status": [
-    {
-      "gpio": 4,
-      "owner": "sensor",
-      "component": "DS18B20",
-      "mode": 1,
-      "safe": false
-    }
-  ],
-  "gpio_reserved_count": 4
+  "actuator_count": 2
+  // gpio_status[] + gpio_reserved_count entfernt (AUT-68 PKG-17, 2026-04)
+  // GPIO-Runtime-State: Event-Push via actuator/{gpio}/status
 }
 ```
+
+> **Hinweis (AUT-68 PKG-17):** GPIO-Runtime-State wird nicht mehr im Heartbeat übertragen. Der ESP32 publiziert jetzt auf State-Change-Basis via `kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/status` (QoS 1). Pin-Assignment (owner/component) bleibt via Config-API abrufbar.
 
 ### WebSocket Event (Server→Frontend)
 
@@ -680,8 +674,8 @@ Config-Pushes werden automatisch nach folgenden API-Operationen gesendet:
     "wifi_rssi": -65,
     "uptime": 3600,
     "sensor_count": 3,
-    "actuator_count": 2,
-    "gpio_status": [...]
+    "actuator_count": 2
+    // gpio_status: optional, nur aus DB-Cache (nicht mehr aus Live-Heartbeat)
   }
 }
 ```

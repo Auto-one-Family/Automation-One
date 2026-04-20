@@ -127,6 +127,94 @@ function toFiniteNumber(value: unknown): number | undefined {
   return undefined
 }
 
+type AnnotationType = 'line' | 'box'
+type AnnotationConfig = {
+  type: AnnotationType
+  yMin?: number
+  yMax?: number
+  value?: number
+  borderColor?: string
+  borderWidth?: number
+  borderDash?: number[]
+  borderCapStyle?: CanvasLineCap
+  backgroundColor?: string
+  label?: Record<string, unknown>
+}
+
+function sanitizeAnnotationLabel(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const label = raw as Record<string, unknown>
+  if (label.display !== true) return undefined
+
+  const content = label.content
+  const isStringArray = Array.isArray(content) && content.every((item) => typeof item === 'string')
+  if (!(typeof content === 'string' || isStringArray)) return undefined
+
+  const safe: Record<string, unknown> = {
+    display: true,
+    content,
+  }
+
+  if (typeof label.position === 'string') safe.position = label.position
+  if (typeof label.color === 'string') safe.color = label.color
+  if (typeof label.backgroundColor === 'string') safe.backgroundColor = label.backgroundColor
+  if (label.font && typeof label.font === 'object') safe.font = label.font
+  if (label.padding && typeof label.padding === 'object') safe.padding = label.padding
+
+  return safe
+}
+
+function sanitizeAnnotationConfig(raw: unknown): AnnotationConfig | null {
+  if (!raw || typeof raw !== 'object') return null
+  const config = raw as Record<string, unknown>
+  const type = config.type
+  if (type !== 'line' && type !== 'box') return null
+
+  const yMin = toFiniteNumber(config.yMin)
+  const yMax = toFiniteNumber(config.yMax)
+  const value = toFiniteNumber(config.value)
+
+  if (type === 'line' && yMin == null && yMax == null && value == null) {
+    return null
+  }
+  if (type === 'box' && (yMin == null || yMax == null)) {
+    return null
+  }
+
+  const borderWidth = toFiniteNumber(config.borderWidth)
+  const safeBorderDash = Array.isArray(config.borderDash)
+    ? config.borderDash
+      .map(toFiniteNumber)
+      .filter((val): val is number => val != null && val >= 0)
+    : undefined
+
+  const annotation: AnnotationConfig = {
+    type,
+    ...(yMin != null ? { yMin } : {}),
+    ...(yMax != null ? { yMax } : {}),
+    ...(value != null ? { value } : {}),
+    borderCapStyle: 'butt',
+  }
+
+  if (typeof config.borderColor === 'string') annotation.borderColor = config.borderColor
+  if (typeof config.backgroundColor === 'string') annotation.backgroundColor = config.backgroundColor
+  if (borderWidth != null) annotation.borderWidth = borderWidth
+  if (safeBorderDash && safeBorderDash.length > 0) annotation.borderDash = safeBorderDash
+  const safeLabel = sanitizeAnnotationLabel(config.label)
+  if (safeLabel) annotation.label = safeLabel
+
+  return annotation
+}
+
+function sanitizeAnnotations(raw: Record<string, unknown>): Record<string, AnnotationConfig> {
+  const safe: Record<string, AnnotationConfig> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    const annotation = sanitizeAnnotationConfig(value)
+    if (annotation) safe[key] = annotation
+  }
+  return safe
+}
+
 // =============================================================================
 // Gap Detection (8.0-C)
 // =============================================================================
@@ -515,14 +603,15 @@ const resolvedAnnotations = computed(() => {
   return annotations
 })
 
-const hasResolvedAnnotations = computed(() => Object.keys(resolvedAnnotations.value).length > 0)
+const safeResolvedAnnotations = computed(() => sanitizeAnnotations(resolvedAnnotations.value))
+const hasResolvedAnnotations = computed(() => Object.keys(safeResolvedAnnotations.value).length > 0)
 
 const chartPlugins = computed(() => (
   hasResolvedAnnotations.value ? [annotationPlugin] : []
 ))
 
 const chartOptions = computed(() => {
-  const safeAnnotations = hasResolvedAnnotations.value ? resolvedAnnotations.value : {}
+  const safeAnnotations = hasResolvedAnnotations.value ? safeResolvedAnnotations.value : {}
 
   return {
     responsive: true,

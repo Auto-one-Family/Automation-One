@@ -11,6 +11,7 @@ import {
   Power, ChevronRight, WifiOff,
   ToggleRight, Waves, GitBranch, Fan, Flame, Lightbulb, Cog, Activity,
 } from 'lucide-vue-next'
+import { isMockEspId } from '@/composables/useZoneGrouping'
 import type { ActuatorWithContext } from '@/composables/useZoneGrouping'
 import type { LogicRule, ExecutionHistoryItem } from '@/types/logic'
 import { formatConditionShort } from '@/types/logic'
@@ -38,7 +39,12 @@ const emit = defineEmits<{
 }>()
 
 const displayName = computed(() =>
-  props.actuator.name || `GPIO ${props.actuator.gpio}`
+  (() => {
+    const name = typeof props.actuator.name === 'string' ? props.actuator.name.trim() : ''
+    if (name.length > 0) return name
+    const typeLabel = getActuatorTypeInfo(props.actuator.actuator_type, props.actuator.hardware_type).label
+    return `${typeLabel} GPIO ${props.actuator.gpio}`
+  })()
 )
 
 const stateLabel = computed(() => (props.actuator.state ? 'Ein' : 'Aus'))
@@ -57,6 +63,13 @@ const scopeTooltip = computed(() => {
   const zones = props.actuator.assigned_zones
   if (!zones?.length) return ''
   return `Bedient: ${zones.join(', ')}`
+})
+
+const sourceBadge = computed(() => {
+  if (isMockEspId(props.actuator.esp_id ?? '')) {
+    return { text: 'Mock', cls: 'actuator-card__source-badge--mock' }
+  }
+  return { text: 'Real', cls: 'actuator-card__source-badge--real' }
 })
 
 // 6.2-A: ESP-Offline indicator (parity with SensorCard)
@@ -182,6 +195,13 @@ const dataModeHint = computed(() => {
   return ''
 })
 
+const acknowledgementLabel = computed(() => {
+  if (isEspOffline.value || isStale.value || isActuatorStale.value) {
+    return 'Rueckmeldung: letzter Stand'
+  }
+  return 'Rueckmeldung: bestaetigt'
+})
+
 function handleClick() {
   if (props.mode === 'config') {
     emit('configure', props.actuator)
@@ -236,6 +256,9 @@ function handleToggle(event: Event) {
     </div>
     <div class="actuator-card__body">
       <div class="actuator-card__badges">
+        <span :class="['actuator-card__source-badge', sourceBadge.cls]">
+          {{ sourceBadge.text }}
+        </span>
         <span :class="['actuator-card__mode-badge', `actuator-card__mode-badge--${dataMode.toLowerCase()}`]">
           {{ dataMode }}
         </span>
@@ -254,6 +277,12 @@ function handleToggle(event: Event) {
           class="actuator-card__badge actuator-card__badge--stale"
         >
           {{ lastCommandAge }}
+        </span>
+        <span
+          class="actuator-card__badge"
+          :class="isEspOffline || isStale || isActuatorStale ? 'actuator-card__badge--stale' : 'actuator-card__badge--confirmed'"
+        >
+          {{ acknowledgementLabel }}
         </span>
       </div>
       <span v-if="mode === 'monitor' && actuator.actuator_type === 'pwm' && !pwmPercent" class="actuator-card__pwm">
@@ -360,7 +389,7 @@ function handleToggle(event: Event) {
 }
 
 .actuator-card__icon--on {
-  background: rgba(34, 197, 94, 0.15);
+  background: color-mix(in srgb, var(--color-success) 16%, transparent);
 }
 
 .actuator-card__icon--off {
@@ -590,13 +619,34 @@ function handleToggle(event: Event) {
 }
 
 .actuator-card__scope-badge--multi-zone {
-  background: rgba(96, 165, 250, 0.2);
-  color: rgb(96, 165, 250);
+  background: var(--color-info-bg);
+  color: var(--color-info);
 }
 
 .actuator-card__scope-badge--mobile {
-  background: rgba(251, 146, 60, 0.2);
-  color: rgb(251, 146, 60);
+  background: var(--color-accent-bg);
+  color: var(--color-accent-bright);
+}
+
+.actuator-card__source-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  font-size: var(--text-xxs);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0.03em;
+}
+
+.actuator-card__source-badge--mock {
+  color: var(--color-mock);
+  background: var(--color-mock-bg);
+}
+
+.actuator-card__source-badge--real {
+  color: var(--color-real);
+  background: color-mix(in srgb, var(--color-real) 16%, transparent);
 }
 
 /* Offline badge */
@@ -617,5 +667,9 @@ function handleToggle(event: Event) {
 
 .actuator-card__badge--stale {
   color: var(--color-warning);
+}
+
+.actuator-card__badge--confirmed {
+  color: var(--color-success);
 }
 </style>

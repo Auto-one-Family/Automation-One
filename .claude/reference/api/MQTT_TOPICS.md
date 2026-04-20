@@ -469,16 +469,9 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
   "wifi_rssi": -65,
   "sensor_count": 3,
   "actuator_count": 2,
-  "gpio_status": [
-    {
-      "gpio": 4,
-      "owner": "sensor",
-      "component": "DS18B20",
-      "mode": 1,
-      "safe": false
-    }
-  ],
-  "gpio_reserved_count": 4,
+  // gpio_status[] + gpio_reserved_count ENTFERNT (AUT-68 PKG-17, 2026-04)
+  // GPIO-Runtime-State: Event-Push via kaiser/.../actuator/{gpio}/status (QoS 1)
+  // Pin-Assignment: via Config-API
   "persistence_degraded": false,
   "persistence_degraded_reason": "NONE",
   "runtime_state_degraded": false,
@@ -1417,46 +1410,4 @@ MQTT Wildcards für Topic-Subscriptions:
 | Wildcard | Bedeutung | Beispiel |
 |----------|-----------|----------|
 | `+` | Single-Level (ein Segment) | `esp/+/sensor` matcht `esp/ABC/sensor` |
-| `#` | Multi-Level (alle folgenden) | `esp/#` matcht `esp/ABC/sensor/data` |
-
-**ESP32 Wildcard-Subscriptions:**
-
-```cpp
-// main.cpp Zeile 731
-topic_builder.buildActuatorCommandWildcard(topic, sizeof(topic));
-// → kaiser/god/esp/{esp_id}/actuator/+/command
-
-// main.cpp Zeile 740
-topic_builder.buildSensorCommandWildcard(topic, sizeof(topic));
-// → kaiser/god/esp/{esp_id}/sensor/+/command
-```
-
-**Server Subscription-Pattern:**
-```python
-# subscriber.py:subscribe_all()
-# QoS wird automatisch bestimmt:
-# - heartbeat → QoS 0
-# - config_response/config/ack → QoS 2
-# - alle anderen → QoS 1
-```
-
----
-
-## 8. QoS-Übersicht
-
-| QoS | Verwendung | Garantie |
-|-----|------------|----------|
-| **0** | Heartbeat, Diagnostics | At most once (best effort) |
-| **1** | Sensor-Daten, Alerts, Status, Intent-Outcomes, Session-Announce | At least once |
-| **2** | Commands, Config (Server-Publish) | Exactly once |
-
-**ESP32 Subscription-QoS:** PubSubClient unterstuetzt maximal QoS 1. Alle ESP-Subscriptions (Commands, Config, Emergency, Zone, Subzone, Sensor-Commands, Heartbeat-ACK) nutzen QoS 1. Die effektive QoS ist `min(publish_qos, subscribe_qos)`, d.h. QoS 1 fuer vom Server publizierte QoS-2-Topics.
-
----
-
-## 9. Vollständige Dokumentation
-
-Für detaillierte Informationen zu jedem Topic:
-- **MQTT-Protokoll-Spezifikation:** `El Trabajante/docs/Mqtt_Protocoll.md` (~3.600 Zeilen)
-- **Server MQTT-Handler:** `El Servador/god_kaiser_server/src/mqtt/handlers/`
-- **Topic-Builder:** `El Trabajante/src/utils/topic_builder.cpp`
+| `#` | Multi-Level (al

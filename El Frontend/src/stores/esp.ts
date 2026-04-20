@@ -43,6 +43,11 @@ import {
 } from '@/utils/sensorDefaults'
 import { normalizeSubzoneId } from '@/utils/subzoneHelpers'
 import { isPwmActuator } from '@/utils/actuatorDefaults'
+import {
+  isDeviceFlapping,
+  countRecentDisconnects,
+  pruneOldTimestamps,
+} from '@/composables/monitorConnectivity'
 
 /**
  * Extract error message from Axios error response.
@@ -132,6 +137,54 @@ export const useEspStore = defineStore('esp', () => {
   // Store unsubscribe functions for cleanup
   const wsUnsubscribers: (() => void)[] = []
   let subzoneRefreshTimer: ReturnType<typeof setTimeout> | null = null
+
+  // =========================================================================
+  // Device Flapping Detection (PKG-20)
+  // =========================================================================
+  const _disconnectLog = new Map<string, number[]>()
+  const _flappingTick = ref(0)
+  let _flappingPruneTimer: ReturnType<typeof setInterval> | null = null
+
+  function recordDisconnect(espId: string): void {
+    let timestamps = _disconnectLog.get(espId)
+    if (!timestamps) {
+      timestamps = []
+      _disconnectLog.set(espId, timestamps)
+    }
+    timestamps.push(Date.now())
+    pruneOldTimestamps(timestamps)
+    _flappingTick.value++
+  }
+
+  const flappingDeviceIds = computed<string[]>(() => {
+    void _flappingTick.value
+    const result: string[] = []
+    const now = Date.now()
+    for (const [espId, timestamps] of _disconnectLog) {
+      if (isDeviceFlapping(timestamps, now)) {
+        result.push(espId)
+      }
+    }
+    return result
+  })
+
+  const flappingDeviceCount = computed(() => flappingDeviceIds.value.length)
+
+  const hasFlappingDevices = computed(() => flappingDeviceCount.value > 0)
+
+  function getDisconnectCount(espId: string): number {
+    void _flappingTick.value
+    const timestamps = _disconnectLog.get(espId)
+    if (!timestamps) return 0
+    return countRecentDisconnects(timestamps)
+  }
+
+  function getFlappingDevicesInZone(zoneId: string): string[] {
+    return flappingDeviceIds.value.filter(espId => {
+      const device = devices.value.find(d => getDeviceId(d) === espId)
+      return device?.zone_id === zoneId
+    })
+  }
 
   // Getters
   const selectedDevice = computed(() =>
@@ -1042,7 +1095,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     const espId = data.esp_id || data.device_id
 
     // DEBUG: Log when WebSocket event arrives
-    logger.info('handleEspHealth received:', {
+    logger.debug('handleEspHealth received:', {
       esp_id: espId,
       status: data.status,
       timestamp: data.timestamp,
@@ -1073,18 +1126,31 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       // Calculate new last_seen from either source:
       // - timestamp: Unix ms from heartbeat handler (MQTT) - 13 digits
       // - timestamp: Unix seconds from old handlers - 10 digits
-      // - last_seen: ISO string from MOCK-FIX (esp.py PATCH)
+      // - last_seen: ISO string from API/handlers
+      // Fallback: when status is online but no usable timestamp is present
+      // (e.g. ESP time not synced yet), use local receive time.
       let newLastSeen: string | undefined = device.last_seen ?? undefined
-      if (data.timestamp) {
-        const ts = data.timestamp > 10000000000 ? data.timestamp : data.timestamp * 1000
-        newLastSeen = new Date(ts).toISOString()
+      const parseTimestampToIso = (rawTs: unknown): string | undefined => {
+        if (typeof rawTs !== 'number' && typeof rawTs !== 'string') return undefined
+        const parsed = typeof rawTs === 'number' ? rawTs : Number(rawTs)
+        if (!Number.isFinite(parsed) || parsed <= 0) return undefined
+        const tsMs = parsed > 10000000000 ? parsed : parsed * 1000
+        return new Date(tsMs).toISOString()
+      }
+      const timestampIso = parseTimestampToIso(data.timestamp)
+      if (timestampIso) {
+        newLastSeen = timestampIso
       } else if (data.last_seen) {
         newLastSeen = data.last_seen
+      } else if (data.status === 'online') {
+        newLastSeen = new Date().toISOString()
       }
 
       // Calculate offline info if device went offline
       let offlineInfo: OfflineInfo | undefined = undefined
       if (data.status === 'offline') {
+        recordDisconnect(espId)
+
         const source = (data.source as StatusSource) || 'heartbeat_timeout'
         const reason = getOfflineReason(source, data.reason)
         const displayText = getOfflineDisplayText(source, data.reason)
@@ -1152,6 +1218,12 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         metrics?.rssi,
       )
       const runtimeHealthView = normalizeEspHealthPayload(dataRec)
+      const nextConnected =
+        data.status === 'online'
+          ? true
+          : data.status === 'offline'
+            ? false
+            : (typeof data.connected === 'boolean' ? data.connected : device.connected)
 
       // Replace device with updated copy (triggers Vue reactivity)
       devices.value[deviceIndex] = {
@@ -1164,6 +1236,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         last_seen: newLastSeen,
         last_heartbeat: newLastSeen,
         status: data.status ?? device.status,
+        connected: nextConnected,
         name: data.name ?? device.name,
         actuators: updatedActuators,
         // Clear offlineInfo when online, set when offline
@@ -1620,6 +1693,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       devices.value[deviceIndex] = {
         ...device,
         status: 'online',
+        connected: true,
         last_seen: new Date().toISOString(),
         offlineInfo: undefined,
         ip_address: (data.ip_address as string) ?? device.ip_address,
@@ -1850,6 +1924,18 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       ws.on('intent_outcome_lifecycle', handleIntentOutcomeLifecycle),
     )
 
+    // PKG-20: periodic prune of stale disconnect timestamps (every 60 s)
+    if (!_flappingPruneTimer) {
+      _flappingPruneTimer = setInterval(() => {
+        const now = Date.now()
+        for (const [espId, timestamps] of _disconnectLog) {
+          pruneOldTimestamps(timestamps, now)
+          if (timestamps.length === 0) _disconnectLog.delete(espId)
+        }
+        _flappingTick.value++
+      }, 60_000)
+    }
+
     // BUG U FIX: Register callback to refresh ESP data when WebSocket connects/reconnects
     // This ensures the UI shows the current state from the server after connection is established
     wsUnsubscribers.push(
@@ -1876,6 +1962,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       clearTimeout(subzoneRefreshTimer)
       subzoneRefreshTimer = null
     }
+    if (_flappingPruneTimer) {
+      clearInterval(_flappingPruneTimer)
+      _flappingPruneTimer = null
+    }
+    _disconnectLog.clear()
     wsUnsubscribers.forEach(unsub => unsub())
     wsUnsubscribers.length = 0
     ws.disconnect()
@@ -1950,6 +2041,13 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     updateDeviceInList,
     replaceDevices,
     applyDevicePatch,
+
+    // Flapping Detection (PKG-20)
+    flappingDeviceIds,
+    flappingDeviceCount,
+    hasFlappingDevices,
+    getDisconnectCount,
+    getFlappingDevicesInZone,
 
     // WebSocket management
     initWebSocket,

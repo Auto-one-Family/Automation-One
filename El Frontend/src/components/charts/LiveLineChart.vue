@@ -157,6 +157,55 @@ function toFiniteNumber(value: unknown): number | undefined {
   return undefined
 }
 
+type LineAnnotationConfig = {
+  type: 'line'
+  yMin: number
+  yMax: number
+  borderColor?: string
+  borderWidth?: number
+  borderDash?: number[]
+  borderCapStyle?: CanvasLineCap
+}
+
+function sanitizeLineAnnotation(raw: unknown): LineAnnotationConfig | null {
+  if (!raw || typeof raw !== 'object') return null
+  const config = raw as Record<string, unknown>
+  if (config.type !== 'line') return null
+
+  const yMin = toFiniteNumber(config.yMin)
+  const yMax = toFiniteNumber(config.yMax)
+  if (yMin == null || yMax == null) return null
+
+  const borderWidth = toFiniteNumber(config.borderWidth)
+  const safeBorderDash = Array.isArray(config.borderDash)
+    ? config.borderDash
+      .map(toFiniteNumber)
+      .filter((val): val is number => val != null && val >= 0)
+    : undefined
+
+  const annotation: LineAnnotationConfig = {
+    type: 'line',
+    yMin,
+    yMax,
+    borderCapStyle: 'butt',
+  }
+
+  if (typeof config.borderColor === 'string') annotation.borderColor = config.borderColor
+  if (borderWidth != null) annotation.borderWidth = borderWidth
+  if (safeBorderDash && safeBorderDash.length > 0) annotation.borderDash = safeBorderDash
+
+  return annotation
+}
+
+function sanitizeThresholdAnnotations(raw: Record<string, unknown>): Record<string, LineAnnotationConfig> {
+  const safe: Record<string, LineAnnotationConfig> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    const annotation = sanitizeLineAnnotation(value)
+    if (annotation) safe[key] = annotation
+  }
+  return safe
+}
+
 // Internal data buffer
 const dataBuffer = shallowRef<ChartDataPoint[]>([...props.data])
 
@@ -244,7 +293,8 @@ const thresholdAnnotations = computed(() => {
   return annotations
 })
 
-const hasResolvedAnnotations = computed(() => Object.keys(thresholdAnnotations.value).length > 0)
+const safeThresholdAnnotations = computed(() => sanitizeThresholdAnnotations(thresholdAnnotations.value))
+const hasResolvedAnnotations = computed(() => Object.keys(safeThresholdAnnotations.value).length > 0)
 
 const chartOptions = computed(() => {
   const isCompact = props.compact
@@ -275,7 +325,7 @@ const chartOptions = computed(() => {
             },
           },
       ...(!isCompact && hasResolvedAnnotations.value
-        ? { annotation: { annotations: thresholdAnnotations.value } }
+        ? { annotation: { annotations: safeThresholdAnnotations.value } }
         : {}),
     },
     scales: {
@@ -360,7 +410,7 @@ defineExpose({ addDataPoint, clear })
     <Line
       :data="chartData"
       :options="chartOptions"
-      :plugins="[annotationPlugin]"
+      :plugins="hasResolvedAnnotations ? [annotationPlugin] : []"
     />
   </div>
 </template>

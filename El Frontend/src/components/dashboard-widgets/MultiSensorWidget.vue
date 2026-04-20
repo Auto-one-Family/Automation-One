@@ -7,13 +7,13 @@
  * - Compare: user picks sensorType + zone, system auto-fills
  *   all matching subzone sensors as overlay chart with subzone labels
  */
-import { ref, computed, watch, shallowRef, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, shallowRef, onMounted, onUnmounted, nextTick } from 'vue'
 import { useEspStore } from '@/stores/esp'
 import { useZoneStore } from '@/shared/stores/zone.store'
 import MultiSensorChart from '@/components/charts/MultiSensorChart.vue'
 import type { ActuatorOverlay, ActuatorOverlayBlock, ActuatorOverlayEvent } from '@/components/charts/MultiSensorChart.vue'
 import { BarChart3, Plus, X, Download, GitCompareArrows, Zap } from 'lucide-vue-next'
-import { CHART_COLORS } from '@/utils/chartColors'
+import { CHART_COLORS, getChartColors } from '@/utils/chartColors'
 import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { useSensorOptions } from '@/composables/useSensorOptions'
 import { useExportCsv } from '@/composables/useExportCsv'
@@ -59,6 +59,8 @@ const espStore = useEspStore()
 const zoneStore = useZoneStore()
 const { exportSensorCsv, isExporting } = useExportCsv()
 const toast = useToast()
+const resolvedChartColors = getChartColors()
+const chartColorPalette = resolvedChartColors.length > 0 ? resolvedChartColors : [...CHART_COLORS]
 
 // Local state — survives render() one-shot props (Bug 1b pattern)
 const localDataSources = ref(props.dataSources || '')
@@ -156,7 +158,7 @@ const chartSensors = computed<ChartSensor[]>(() => {
           sensorType,
           name: cs.subzoneName,
           unit: sensor?.unit || SENSOR_TYPE_CONFIG[sensorType]?.unit || '',
-          color: CHART_COLORS[index % CHART_COLORS.length] as string,
+          color: chartColorPalette[index % chartColorPalette.length] as string,
         }
       })
       .filter((s): s is ChartSensor => s !== null)
@@ -182,7 +184,7 @@ const chartSensors = computed<ChartSensor[]>(() => {
       sensorType,
       name: sensor?.name || sensor?.sensor_type || `GPIO ${parsed.gpio}`,
       unit: sensor?.unit || SENSOR_TYPE_CONFIG[sensorType]?.unit || '',
-      color: CHART_COLORS[idx % CHART_COLORS.length] as string,
+      color: chartColorPalette[idx % chartColorPalette.length] as string,
     })
   })
   return result
@@ -194,6 +196,43 @@ const availableSensors = computed(() =>
 )
 
 const showAddDropdown = ref(false)
+const chartHostRef = ref<HTMLElement | null>(null)
+const chartHostHeight = ref(300)
+let chartResizeObserver: ResizeObserver | null = null
+
+const configuredActuatorCount = computed(() =>
+  localActuatorIds.value.split(',').map(id => id.trim()).filter(Boolean).length
+)
+
+const chartMinHeight = computed(() => {
+  const sensorCount = chartSensors.value.length
+  let minHeight = 170
+
+  if (sensorCount > 2) {
+    minHeight += Math.min((sensorCount - 2) * 14, 56)
+  }
+  if (configuredActuatorCount.value > 0) {
+    minHeight += 20
+  }
+  if (localCompareMode.value) {
+    minHeight += 12
+  }
+
+  return Math.min(minHeight, 280)
+})
+
+const effectiveChartHeight = computed(() =>
+  Math.max(chartMinHeight.value, Math.round(chartHostHeight.value))
+)
+
+function updateChartHostHeight(): void {
+  const host = chartHostRef.value
+  if (!host) return
+  const nextHeight = Math.floor(host.getBoundingClientRect().height)
+  if (nextHeight > 0) {
+    chartHostHeight.value = nextHeight
+  }
+}
 
 function addSensor(sensorId: string) {
   const ids = [...selectedSensorIds.value, sensorId]
@@ -500,13 +539,34 @@ function stopActuatorRefresh() {
 }
 
 onMounted(() => {
+  updateChartHostHeight()
+  if (typeof ResizeObserver !== 'undefined') {
+    chartResizeObserver = new ResizeObserver(() => updateChartHostHeight())
+    if (chartHostRef.value) {
+      chartResizeObserver.observe(chartHostRef.value)
+    }
+  }
   startActuatorRefresh()
 })
 
 onUnmounted(() => {
   stopActuatorRefresh()
   actuatorAbortController?.abort()
+  chartResizeObserver?.disconnect()
+  chartResizeObserver = null
 })
+
+watch(
+  () => [
+    chartSensors.value.length,
+    localCompareMode.value,
+    configuredActuatorCount.value,
+  ],
+  async () => {
+    await nextTick()
+    updateChartHostHeight()
+  }
+)
 </script>
 
 <template>
@@ -560,11 +620,11 @@ onUnmounted(() => {
           v-for="(sensor, idx) in chartSensors"
           :key="sensor.id"
           class="multi-sensor-widget__chip"
-          :style="{ borderColor: CHART_COLORS[idx % CHART_COLORS.length] }"
+          :style="{ borderColor: chartColorPalette[idx % chartColorPalette.length] }"
         >
           <span
             class="multi-sensor-widget__chip-dot"
-            :style="{ background: CHART_COLORS[idx % CHART_COLORS.length] }"
+            :style="{ background: chartColorPalette[idx % chartColorPalette.length] }"
           />
           {{ sensor.name }}
           <button
@@ -648,11 +708,12 @@ onUnmounted(() => {
       </div>
 
       <!-- Chart -->
-      <div class="multi-sensor-widget__chart">
+      <div ref="chartHostRef" class="multi-sensor-widget__chart">
         <MultiSensorChart
           :sensors="chartSensors"
           :time-range="localTimeRange"
           :enable-live-updates="true"
+          :height="effectiveChartHeight"
           :actuator-overlays="actuatorOverlays"
         />
       </div>

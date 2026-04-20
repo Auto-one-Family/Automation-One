@@ -183,6 +183,15 @@ export const useActuatorStore = defineStore('actuator', () => {
     return undefined
   }
 
+  function findIntentByRequest(intentType: IntentType, requestId: string): IntentRecord | undefined {
+    for (const intent of intents.values()) {
+      if (intent.intentType !== intentType) continue
+      if (intent.requestId !== requestId) continue
+      return intent
+    }
+    return undefined
+  }
+
   function saveIntent(intent: IntentRecord): void {
     intents.set(intent.key, intent)
     if (intents.size <= MAX_INTENT_HISTORY) return
@@ -887,25 +896,35 @@ export const useActuatorStore = defineStore('actuator', () => {
       return
     }
     const existing = findIntentByCorrelation('config', correlationId)
+      ?? (requestId ? findIntentByRequest('config', requestId) : undefined)
     if (!existing) {
       notifyContractIssue({
         eventType: 'config_response',
-        details: `Kein passendes Config-Intent für correlation_id "${correlationId}"`,
+        details: `Kein passendes Config-Intent für correlation_id "${correlationId}"${requestId ? ` oder request_id "${requestId}"` : ''}`,
         correlationId,
       })
       return
     }
+    const effectiveCorrelationId = existing.correlationId ?? correlationId
+    if (!findIntentByCorrelation('config', correlationId) && requestId && existing.requestId === requestId) {
+      logger.warn('config_response correlation mismatch recovered via request_id fallback', {
+        ws_correlation_id: correlationId,
+        intent_correlation_id: existing.correlationId,
+        request_id: requestId,
+        subject_id: existing.subjectId,
+      })
+    }
     const subjectId = existing.subjectId
 
-    const existingTerminal = findIntent('config', subjectId, correlationId)
+    const existingTerminal = findIntent('config', subjectId, effectiveCorrelationId)
     if (existingTerminal && isTerminalState(existingTerminal.state) && existingTerminal.state !== 'terminal_timeout') return
-    clearConfigTimeout(subjectId, correlationId, requestId)
+    clearConfigTimeout(subjectId, effectiveCorrelationId, requestId)
 
     finalizeIntent({
       intentType: 'config',
       subjectId,
       summary,
-      correlationId,
+      correlationId: effectiveCorrelationId,
       requestId,
       outcome: status === 'success' ? 'success' : status === 'failed' || status === 'partial_success' ? 'failed' : 'integration_issue',
       source: 'config_response',
@@ -936,25 +955,35 @@ export const useActuatorStore = defineStore('actuator', () => {
       return
     }
     const existing = findIntentByCorrelation('config', correlationId)
+      ?? (requestId ? findIntentByRequest('config', requestId) : undefined)
     if (!existing) {
       notifyContractIssue({
         eventType: 'config_failed',
-        details: `Kein passendes Config-Intent für correlation_id "${correlationId}"`,
+        details: `Kein passendes Config-Intent für correlation_id "${correlationId}"${requestId ? ` oder request_id "${requestId}"` : ''}`,
         correlationId,
       })
       return
     }
+    const effectiveCorrelationId = existing.correlationId ?? correlationId
+    if (!findIntentByCorrelation('config', correlationId) && requestId && existing.requestId === requestId) {
+      logger.warn('config_failed correlation mismatch recovered via request_id fallback', {
+        ws_correlation_id: correlationId,
+        intent_correlation_id: existing.correlationId,
+        request_id: requestId,
+        subject_id: existing.subjectId,
+      })
+    }
     const subjectId = existing.subjectId
 
-    const existingTerminal = findIntent('config', subjectId, correlationId)
+    const existingTerminal = findIntent('config', subjectId, effectiveCorrelationId)
     if (existingTerminal && isTerminalState(existingTerminal.state) && existingTerminal.state !== 'terminal_timeout') return
-    clearConfigTimeout(subjectId, correlationId, requestId)
+    clearConfigTimeout(subjectId, effectiveCorrelationId, requestId)
 
     finalizeIntent({
       intentType: 'config',
       subjectId,
       summary: `Config fehlgeschlagen: ${error}`,
-      correlationId,
+      correlationId: effectiveCorrelationId,
       requestId,
       outcome: error === 'Unbekannter Fehler' ? 'integration_issue' : 'failed',
       source: 'config_failed',

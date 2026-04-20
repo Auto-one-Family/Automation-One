@@ -11,6 +11,28 @@
 
 ---
 
+## 0. PKG-21 Gate-Status (2026-04-20)
+
+**Abschluss-Gate für Standby-Disconnect-Loop-Fix durchgeführt.**
+
+**Entscheidung:** ✅ **GO zur Implementierung** (PKG-18/19/20)
+
+**Kriteria-Stand:**
+- Buildability (Firmware, Frontend, Server): ✅ Erfüllt
+- Test-Baseline: ✅ Vorhanden (2 Altbaustelle-Failures = nicht Incident-kritisch)
+- Code-Pfade: ✅ Existent
+- Dokumentation: ✅ Verify-konform
+
+**Rest-Risiken:** 
+- soft_deleted_device Test-Failures → AUT-70 (separate Altbaustelle)
+- Runtime-Abnahme: Abhängig von 10-Min-Resume-Fenster nach Impl.
+
+**Nächster Schritt:** PKG-18 (esp32-dev) + PKG-19 (mqtt-dev+server-dev) parallel implementieren; dann PKG-20 (frontend-dev); PKG-21 Rückruf nach Runtime-Logs.
+
+**Detailbericht:** `.claude/reports/Testrunner/pkg-21-gate-analysis.md`
+
+---
+
 ## 1. Gerät und Scope
 
 | Feld | Wert |
@@ -205,3 +227,9 @@ Siehe **`TASK-PACKAGES.md`** (nach Verify) und **`SPECIALIST-PROMPTS.md`**. Impl
   | Code-Read Verify 2026-04-19 | `publishHeartbeat()` enthält großen `gpio_status`-Assembly-Block + `payload.reserve(1900)` + Queue-Limit 2048 bei `PUBLISH_QUEUE_SIZE=8` | Messbarer Hebel für Option-1-Slimming in PKG-17 |
 
   **Folgerung H8:** `gpio_status`-Payload-Teil + zu großes `PUBLISH_PAYLOAD_MAX_LEN` erzeugen vermeidbaren Heap-Druck. Daher PKG-17: `gpio_status`-Pfad entfernen, `reserve` reduzieren, `PUBLISH_PAYLOAD_MAX_LEN` halbieren, anschließend Runtime-DoD (`max_alloc >= 46000`, kein EAGAIN-Disconnect im 5-Min-Fenster).
+
+- **2026-04-20 (auto-debugger Orchestrierungslauf, Standby-Disconnect-Loop):**
+  Git-Status nur reportet (kein Branch-Wechsel): **Aktueller Branch** `auto-debugger/work`, **Soll-Branch** `auto-debugger/work`.
+  Neue forensische Referenz wurde in die Incident-Korrelation übernommen:
+  `.claude/reports/current/incidents/INC-2026-04-11-ea5484-mqtt-transport-keepalive/standby-disconnect-loop-2026-04-20/`.
+  Fokus dieses Laufs: Pflichtreihenfolge der Korrelation (Notification-Felder -> HTTP `request_id` -> `esp_id`+Zeitfenster -> MQTT-CID -> Titel zuletzt), neues PKG-Set für Stabilisierung/Observability und Post-Verify-Synchronisierung der Rollen-Prompts ohne Produktcode-Implementierung.

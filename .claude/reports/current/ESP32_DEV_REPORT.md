@@ -1,100 +1,111 @@
-# ESP32 Dev Report: AUT-57 — safePublish retries-Parameter Fix
+# ESP32 Dev Report: PKG-18 Standby-Resume Transporthärtung
 
 ## Modus: B (Implementierung)
-
-## Auftrag
-SafePublish ignoriert `retries`-Parameter effektiv und macht nur 2 Versuche.
-Umbau auf echte retry-gesteuerte Schleife mit Backoff+Jitter und CB-Respekt.
+## Auftrag: PKG-18 — Disconnect-Loop nach Standby/Resume entschärfen
 
 ## Codebase-Analyse
 
-### Analysierte Dateien
-- `El Trabajante/src/services/communication/mqtt_client.h` (277 Zeilen)
-- `El Trabajante/src/services/communication/mqtt_client.cpp` (1768 Zeilen)
-- `El Trabajante/src/error_handling/circuit_breaker.h` (API-Referenz)
-- 8 Callsites: main.cpp, intent_contract.cpp (×2), actuator_manager.cpp (×3), config_response.cpp (×2)
+Analysierte Dateien:
+- `El Trabajante/src/services/communication/mqtt_client.cpp` (~2000 Zeilen)
+- `El Trabajante/src/services/communication/mqtt_client.h` (291 Zeilen)
+- `El Trabajante/src/tasks/publish_queue.cpp` (181 Zeilen)
+- `El Trabajante/src/tasks/publish_queue.h` (68 Zeilen)
+- `El Trabajante/src/error_handling/circuit_breaker.h` (CB-Pattern)
+- Incident-Bericht + TASK-PACKAGES.md (PKG-18 Spezifikation)
 
-### Befund (IST-Zustand)
-```cpp
-// Zeile 633-656: retries-Parameter wird KOMPLETT ignoriert
-bool safePublish(..., uint8_t retries) {
-    // CB check → publish → CB check → yield → publish → return false
-    // = immer genau 2 Versuche, unabhängig von retries
-}
-```
+Extrahierte Patterns:
+- Managed-Reconnect mit exponential Backoff + Jitter (bestehendes Pattern)
+- `pauseForAnnounceAck()` Queue-Pause-Mechanismus (AUT-69, wiederverwendet)
+- `isWritePathTimeoutErrno()` Transport-Backpressure-Erkennung (AUT-67/PKG-15)
+- `PUBLISH_DRAIN_BUDGET_PER_TICK` Drain-Limitierung (bestehendes Throttle-Pattern)
 
-### Patterns gefunden
-- `computeReconnectJitterMs_()`: Exponential backoff + `esp_random()` Jitter — Referenz-Pattern
-- `isCriticalPublishTopic()`: Bereits vorhanden für Kritikalitätsprüfung (war aber nur im ESP-IDF ifdef)
-- `delay()` / `vTaskDelay()`: Standardmechanismus für nicht-blockierende Pausen in FreeRTOS
-
-## Qualitätsprüfung (8-Dimensionen-Checkliste)
+## Qualitätsprüfung: 8-Dimensionen-Checkliste
 
 | # | Dimension | Ergebnis |
 |---|-----------|----------|
-| 1 | Struktur & Einbindung | ✅ Keine neuen Dateien, gleiche Ordnerstruktur |
-| 2 | Namenskonvention | ✅ `safe_publish_retry_count_` mit `_` Suffix, snake_case |
-| 3 | Rückwärtskompatibilität | ✅ Signatur unverändert, Default retries=3 bleibt. Verhalten jetzt korrekt: retries=1 → 2 Versuche (vorher auch ~2), retries=3 → 4 Versuche (vorher 2) |
-| 4 | Wiederverwendbarkeit | ✅ Nutzt existierendes `isCriticalPublishTopic()`, `esp_random()` Pattern |
-| 5 | Speicher & Ressourcen | ✅ +4 Bytes RAM (uint32_t Counter). Kein Heap, keine dynamische Allokation |
-| 6 | Fehlertoleranz | ✅ CB-Check vor jedem Attempt. Kritische Topics bekommen einen Versuch auch bei CB OPEN |
-| 7 | Seiteneffekte | ✅ `isCriticalPublishTopic()` aus `#ifndef` Guard herausgezogen → jetzt in beiden Backends verfügbar (war vorher nur ESP-IDF). Kein Breaking Change |
-| 8 | Industrielles Niveau | ✅ Exponential backoff (50/100/200/250ms cap) + Jitter (0-31ms). Kein Blocking in ISR. delay() = vTaskDelay auf ESP32 |
+| 1 | Struktur & Einbindung | ✅ Alle Änderungen in bestehenden Blöcken, keine neuen Dateien/Includes |
+| 2 | Namenskonvention | ✅ `WRITE_TIMEOUT_ESCALATION_THRESHOLD`, `MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS` — konsistent mit `MANAGED_RECONNECT_*` Pattern |
+| 3 | Rückwärtskompatibilität | ✅ Keine MQTT-Payload/Topic/LWT-Änderungen, keine Contract-Breaking-Changes |
+| 4 | Wiederverwendbarkeit | ✅ Nutzt bestehende `pauseForAnnounceAck()`, `isWritePathTimeoutErrno()`, `scheduleManagedReconnect_()` |
+| 5 | Speicher & Ressourcen | ✅ 3 neue `constexpr` (keine Runtime-Allokation), 1 lokale `uint32_t`, 1 lokale `uint8_t` |
+| 6 | Fehlertoleranz | ✅ Alle neuen Pfade sind graceful (Fallback auf Default-Werte wenn Threshold nicht erreicht) |
+| 7 | Seiteneffekte | ✅ Keine GPIO-/NVS-/Topic-Änderungen; nur Timing-Verhalten der Reconnect- und Drain-Logik |
+| 8 | Industrielles Niveau | ✅ Kein Blocking in Tasks, keine delay() in Hotpaths, Watchdog-kompatibel |
 
 ## Cross-Layer Impact
 
-| Bereich | Impact |
-|---------|--------|
-| Server (heartbeat_handler) | Neues Telemetrie-Feld `safe_publish_retry_count` im Heartbeat-Payload — Server ignoriert unbekannte Felder (JSON) |
-| Frontend (ESPHealthWidget) | Kein Impact — Frontend zeigt nur bekannte Felder an |
-| MQTT-Payloads | Heartbeat-Payload +1 JSON-Feld (ca. 35 Bytes). Kein Topic geändert |
-| Error-Codes | Keine neuen Codes. Bestehende `ERROR_MQTT_PUBLISH_FAILED` unverändert |
+| Bereich | Betroffen? | Status |
+|---------|-----------|--------|
+| MQTT Topics / Payloads | Nein | ✅ Unverändert |
+| LWT Contract | Nein | ✅ Unverändert |
+| Circuit Breaker Thresholds | Nein | ✅ CB(5, 30s, 10s) unverändert |
+| Server Heartbeat-Handler | Nein | ✅ Keine Payload-Feldänderung |
+| Frontend esp.ts / Stores | Nein | ✅ Kein neues WS-Event |
+| publish_queue.h/cpp | Nein | ✅ Bestehende API `pauseForAnnounceAck(ms)` reicht aus |
 
-## Ergebnis: Geänderte Dateien
+## Ergebnis: Implementierung
 
-### A) `El Trabajante/src/services/communication/mqtt_client.cpp`
+### Geänderte Datei
 
-1. **`isCriticalPublishTopic()` verschoben** (Zeile ~30): Aus `#ifndef MQTT_USE_PUBSUBCLIENT` Guard herausgezogen, damit beide MQTT-Backends darauf zugreifen können.
+**`El Trabajante/src/services/communication/mqtt_client.cpp`** — 4 lokale Änderungen:
 
-2. **`safePublish()` komplett umgeschrieben**: Echte Retry-Schleife `for (attempt = 0; attempt < retries+1; ++attempt)` mit:
-   - CB-Check **vor jedem** Attempt (früher Abbruch)
-   - Kritische Topics: 1 Versuch auch bei CB OPEN (bestehendes Verhalten erhalten)
-   - Exponential Backoff: 50ms → 100ms → 200ms → 250ms (cap)
-   - Jitter: `esp_random() & 0x1F` = 0-31ms pro Retry
-   - `delay()` = `vTaskDelay()` auf ESP32 (RTOS-kompatibel, yield-basiert)
+#### 1. Neue Konstanten (nach Zeile 49)
+- `WRITE_TIMEOUT_ESCALATION_THRESHOLD = 3` — Ab 3 Write-Timeouts greifen die PKG-18-Maßnahmen
+- `MANAGED_RECONNECT_WRITE_TIMEOUT_BOOST_MS = 5000` — Boosted Reconnect-Delay (vs 1500ms Default)
+- `POST_RECONNECT_TRANSPORT_SETTLE_MS = 2000` — Queue-Pause nach Write-Timeout-Reconnect
 
-3. **Constructor**: `safe_publish_retry_count_(0)` initialisiert.
+#### 2. MQTT_EVENT_CONNECTED: Transport Recovery Hold
+- `prior_write_timeouts` wird VOR Counter-Reset erfasst
+- Bei `prior_write_timeouts >= 3`: `pauseForAnnounceAck(2000)` statt Default 300ms
+- Gibt dem TCP/TLS-Handshake und erstem Keepalive-Roundtrip Zeit vor Queue-Drain
 
-4. **Getter**: `getSafePublishRetryCount()` implementiert.
+#### 3. MQTT_EVENT_DISCONNECTED: Reconnect-Delay-Boost
+- Bei `transport_write_timeout_count_ >= 3`: Base-Delay auf 5000ms statt 1500ms
+- Exponentieller Backoff + Jitter läuft weiter auf dem geboostetem Base-Wert
+- Bricht das enge Reconnect-Flapping nach Standby/Resume
 
-5. **Heartbeat-Payload**: `safe_publish_retry_count` Feld eingefügt (zwischen `sensor_command_queue_overflow_count` und `config_status`).
+#### 4. processPublishQueue: Drain-Budget-Drosselung
+- `drain_budget` dynamisch: 1 (statt 3) wenn `last_transport_errno_` Write-Timeout anzeigt
+- Verhindert Publish-Burst auf instabilem Socket nach Resume
+- Wird automatisch auf 3 zurückgesetzt wenn `MQTT_EVENT_CONNECTED` den errno cleared
 
-### B) `El Trabajante/src/services/communication/mqtt_client.h`
+### Implementierte Logik-Kette (Wirkungsmechanismus)
 
-1. **Public API**: `uint32_t getSafePublishRetryCount() const;` hinzugefügt.
-2. **Private Member**: `uint32_t safe_publish_retry_count_;` hinzugefügt.
+```
+Standby → Resume → ESP MQTT write timeout
+    │
+    ├── [Bisher] sofortiger Reconnect (1.5s) → Socket noch instabil → erneuter write timeout → Loop
+    │
+    └── [PKG-18]
+        ├── Drain-Budget: 3 → 1 pro Tick (weniger Schreibdruck auf instabilem Socket)
+        ├── Disconnect → Reconnect-Delay: 1500ms → 5000ms Base (+ Jitter/Backoff)
+        ├── Connect → Queue-Pause: 300ms → 2000ms (Transport-Settle)
+        └── Ergebnis: Cycle-Zeit von ~3s auf ~8-12s gestreckt,
+            Socket hat Zeit sich zu stabilisieren → Loop bricht ab
+```
 
 ## Verifikation
 
 ```
-pio run -e esp32_dev → SUCCESS (13.03s)
-RAM:   36.7% (120220 / 327680 bytes)
-Flash: 95.1% (1495161 / 1572864 bytes)
-Exit Code: 0
+Build: pio run -e esp32_dev
+Ergebnis: SUCCESS (10.44s)
+RAM:   36.5% (119716 / 327680 B)
+Flash: 95.3% (1498221 / 1572864 B)
 ```
 
-Keine Tests für `safePublish` im Repo vorhanden (`El Trabajante/test/` hat keinen safePublish-Test).
+Keine neuen Compiler-Warnings. Bestehende `null character(s) ignored` in Zeile 2043 ist trailing-whitespace am Dateiende (vorbestehend).
 
-## Restrisiken
+## Offene Risiken / Blocker
 
-| Risiko | Schwere | Mitigation |
-|--------|---------|------------|
-| **delay() in MQTT-Event-Context**: `safePublish` kann aus dem ESP-IDF MQTT-Event-Handler aufgerufen werden (z.B. config_response). Bei retries=3 max ~443ms Blockierung des MQTT-Tasks. | Mittel | Default retries=3 ergibt worst-case ~443ms. MQTT-Task hat interne 100ms-Loops. Bei Latenz-Sensitivität retries auf 1 setzen. |
-| **Core-1 Retries wenig effektiv**: Vom Safety-Task (Core 1) routet `publish()` über die Queue — Queue-Enqueue ist schnell (~µs). Retries bei Queue-Full sinnvoll, bei normalem Betrieb nicht. | Niedrig | Kein Schaden — Queue-Retry ist billig. |
-| **Heartbeat-Payload wächst**: +35 Bytes pro Heartbeat. | Niedrig | payload.reserve(1900) hat Headroom. Heartbeat-Buffer ist 4096 Bytes. |
-| **Kein Reset des Counters**: `safe_publish_retry_count_` ist kumulativ über die gesamte Laufzeit. | Info | Reboot setzt zurück. Für Delta-Analyse: Server kann letzten Wert speichern. |
+| Risiko | Bewertung | Mitigation |
+|--------|-----------|------------|
+| 5s Reconnect-Delay kann Heartbeat-Timeout auslösen | Niedrig — Server-Timeout ist 120s (ACK), Heartbeat-Interval 60s | Kein Handlungsbedarf |
+| Queue-Pause 2s kann Critical Publishes verzögern | Niedrig — `pauseForAnnounceAck` hat Guard-Timeout, direct `publish()` bleibt aktiv | Critical Publishes laufen über direct path (Core 0) |
+| Flash 95.3% nah am Limit | Vorbestehend — keine neue Allokation durch PKG-18 | Monitoring bei nächsten Features |
+| HW-Repro ausstehend | Mittel — Logik-Korrektheit verifiziert, Runtime-Verhalten braucht reales Standby-Resume-Fenster | PKG-21 (test-log-analyst) als formales Abnahme-Gate |
 
 ## Empfehlung
 
-- **server-dev**: Optional `safe_publish_retry_count` in `heartbeat_handler.py` als Telemetrie-Feld persistieren (nicht blockierend).
-- **Kein mqtt-dev nötig**: Keine Topic-Änderung, nur Payload-Erweiterung.
+- **Nächster Agent:** `test-log-analyst` (PKG-21) für Runtime-Abnahme nach Flash
+- **Parallel möglich:** `mqtt-dev` + `server-dev` (PKG-19) für Broker-/LWT-Kette
+- **Parallel möglich:** `frontend-dev` (PKG-20) für Flapping-UX

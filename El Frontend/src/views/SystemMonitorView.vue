@@ -26,7 +26,7 @@ import { useEspStore } from '@/stores/esp'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
 import { useOpsLifecycleStore } from '@/shared/stores/ops-lifecycle.store'
 import { detectCategory } from '@/utils/errorCodeTranslator'
-import { auditApi, type AuditStatistics, type StatisticsTimeRange, type DataSource, type UnifiedEventFromAPI } from '@/api/audit'
+import { auditApi, type AuditLog, type AuditStatistics, type StatisticsTimeRange, type DataSource, type UnifiedEventFromAPI } from '@/api/audit'
 import type { UnifiedEvent } from '@/types/websocket-events'
 import type { EventOrGroup, GroupingOptions } from '@/types/event-grouping'
 import { groupEventsByTimeWindow } from '@/utils/eventGrouper'
@@ -42,7 +42,7 @@ import {
   WS_EVENT_TYPES,
 } from '@/utils/contractEventMapper'
 import type { WebSocketMessage } from '@/services/websocket'
-import { X, CheckCircle } from 'lucide-vue-next'
+import { X, CheckCircle, AlertTriangle } from 'lucide-vue-next'
 import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('SystemMonitor')
@@ -97,6 +97,7 @@ watch(isPaused, (newValue) => {
 })
 
 const unifiedEvents = ref<UnifiedEvent[]>([])
+const maxEventsWarningShown = ref(false)
 const isLoading = ref(false)
 const showStats = ref(false)
 
@@ -185,6 +186,20 @@ const groupedEvents = computed<EventOrGroup[]>(() => {
 function handleGroupingToggle(value: boolean) {
   groupingEnabled.value = value
   localStorage.setItem('systemMonitor.groupingEnabled', String(value))
+}
+
+function enforceMaxEvents(reason: string): void {
+  if (unifiedEvents.value.length <= MAX_EVENTS) {
+    maxEventsWarningShown.value = false
+    return
+  }
+
+  if (!maxEventsWarningShown.value) {
+    logger.warn(`Event count exceeds MAX_EVENTS (${MAX_EVENTS}) ${reason}`)
+    maxEventsWarningShown.value = true
+  }
+
+  unifiedEvents.value = unifiedEvents.value.slice(0, MAX_EVENTS)
 }
 
 // Toast notification state
@@ -332,12 +347,8 @@ function handleWebSocketMessage(message: WebSocketMessage) {
   const event = transformToUnifiedEvent(message)
   unifiedEvents.value.unshift(event)
 
-  // WICHTIG: Kein Hard-Limit mehr - Virtual Scrolling handled Performance
-  // MAX_EVENTS ist nur noch als Safety-Limit
-  if (unifiedEvents.value.length > MAX_EVENTS) {
-    logger.warn(`Event count exceeds MAX_EVENTS (${MAX_EVENTS}) after WebSocket message`)
-    unifiedEvents.value = unifiedEvents.value.slice(0, MAX_EVENTS)
-  }
+  // Safety-Limit: Warnung nur einmal bis wieder unterhalb des Limits.
+  enforceMaxEvents('after WebSocket message')
 }
 
 /**
@@ -653,11 +664,8 @@ async function handleLoadMore(): Promise<void> {
     // Existing events are already sorted newest-first, new events are older → append
     unifiedEvents.value = [...unifiedEvents.value, ...newEvents]
 
-    // WICHTIG: Kein Hard-Limit mehr - Virtual Scrolling handled Performance
-    if (unifiedEvents.value.length > MAX_EVENTS) {
-      logger.warn(`Event count exceeds MAX_EVENTS (${MAX_EVENTS}). This should not happen in normal operation.`)
-      unifiedEvents.value = unifiedEvents.value.slice(0, MAX_EVENTS)
-    }
+    // Safety-Limit: Warnung nur einmal bis wieder unterhalb des Limits.
+    enforceMaxEvents('while loading more historical events')
 
     logger.debug('Loaded more events', { newEvents: newEvents.length, total: unifiedEvents.value.length, hasMore: hasMoreEvents.value })
   } catch (error) {
@@ -687,6 +695,23 @@ async function loadHistoricalEvents(): Promise<void> {
   hasMoreEvents.value = true
 
   try {
+    const correlationId = filterCorrelationId.value.trim()
+    if (correlationId.length > 0) {
+      const correlatedLogs = await auditApi.getCorrelatedEvents(correlationId, 200)
+      unifiedEvents.value = correlatedLogs
+        .map(transformAuditLogToUnified)
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+
+      totalAvailableEvents.value = correlatedLogs.length
+      hasMoreEvents.value = false
+      paginationCursor.value = null
+
+      enforceMaxEvents('while loading correlated events')
+      logger.info(`Loaded ${unifiedEvents.value.length} correlated events for ${correlationId}`)
+      logger.info(`Zeige ${filteredEvents.value.length} von ${unifiedEvents.value.length} Events (${unifiedEvents.value.length - filteredEvents.value.length} durch Filter versteckt)`)
+      return
+    }
+
     // Load events from user-selected data sources (persisted via DataSourceSelector)
     // Client-side filtering in filteredEvents handles additional visibility filters
     logger.debug('loadHistoricalEvents called', { sources: selectedDataSources.value, hours: eventLoadHours.value ?? 'ALL' })
@@ -753,12 +778,8 @@ async function loadHistoricalEvents(): Promise<void> {
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     )
 
-    // WICHTIG: Kein Hard-Limit mehr - Virtual Scrolling handled Performance
-    // MAX_EVENTS ist nur noch als Safety-Limit für extreme Fälle gedacht
-    if (unifiedEvents.value.length > MAX_EVENTS) {
-      logger.warn(`Event count exceeds MAX_EVENTS (${MAX_EVENTS}). This should not happen in normal operation.`)
-      unifiedEvents.value = unifiedEvents.value.slice(0, MAX_EVENTS)
-    }
+    // Safety-Limit: Warnung nur einmal bis wieder unterhalb des Limits.
+    enforceMaxEvents('while loading historical events')
 
     // ⭐ CRITICAL DEBUG: Finale Filter-Statistiken
     logger.debug('Final unifiedEvents', {
@@ -855,6 +876,50 @@ function transformAggregatedEventToUnified(apiEvent: UnifiedEventFromAPI): Unifi
     request_id: (metadata.request_id as string) || undefined,
     data: metadata,
     // Phase 4: Tag as server-loaded event (already filtered by server, skip client-side filter)
+    _sourceType: 'server',
+  }
+}
+
+function transformAuditLogToUnified(log: AuditLog): UnifiedEvent {
+  const details = (log.details || {}) as Record<string, unknown>
+  const sourceType = String(log.source_type || '').toLowerCase()
+  const source: UnifiedEvent['source'] =
+    sourceType === 'esp' || sourceType === 'esp32'
+      ? 'esp'
+      : sourceType === 'mqtt'
+        ? 'mqtt'
+        : sourceType === 'user'
+          ? 'user'
+          : sourceType === 'scheduler'
+            ? 'logic'
+            : 'server'
+
+  const espFromDetails = typeof details.esp_id === 'string'
+    ? details.esp_id
+    : typeof details.device_id === 'string'
+      ? details.device_id
+      : undefined
+
+  const fallbackEspId = source === 'esp' && typeof log.source_id === 'string' && log.source_id.length > 0
+    ? log.source_id
+    : undefined
+
+  return {
+    id: `audit_${log.id}`,
+    timestamp: normalizeToUTCIso(log.created_at),
+    event_type: log.event_type,
+    severity: log.severity,
+    source,
+    dataSource: 'audit_log',
+    esp_id: espFromDetails ?? fallbackEspId,
+    zone_id: typeof details.zone_id === 'string' ? details.zone_id : undefined,
+    zone_name: typeof details.zone_name === 'string' ? details.zone_name : undefined,
+    message: log.message || '',
+    error_code: log.error_code || undefined,
+    error_category: log.error_code ? detectCategory(log.error_code) : undefined,
+    correlation_id: log.correlation_id || undefined,
+    request_id: log.request_id || undefined,
+    data: details,
     _sourceType: 'server',
   }
 }
@@ -1089,6 +1154,9 @@ watch(() => route.query.esp, (newEsp) => {
 
 watch(() => route.query.correlation, (newCorrelation) => {
   filterCorrelationId.value = newCorrelation ? String(newCorrelation) : ''
+  if (newCorrelation) {
+    activeTab.value = 'events'
+  }
 }, { immediate: true })
 
 // Watch for server-side filter changes to trigger reload
@@ -1096,7 +1164,7 @@ watch(() => route.query.correlation, (newCorrelation) => {
 // All three affect buildServerFilterParams() - must trigger reload when changed
 let filterReloadTimeout: ReturnType<typeof setTimeout> | null = null
 watch(
-  [selectedDataSources, filterLevels, filterEspId],
+  [selectedDataSources, filterLevels, filterEspId, filterCorrelationId],
   () => {
     // Debounce to avoid multiple rapid API calls
     if (filterReloadTimeout) {
@@ -1233,6 +1301,20 @@ watch(activeTab, (newTab) => {
 
     <!-- Content -->
     <main class="monitor-content">
+      <!-- Flapping Alert Bar (PKG-20) -->
+      <div v-if="espStore.hasFlappingDevices" class="flapping-alert-bar">
+        <div class="flapping-alert-bar__indicator" />
+        <AlertTriangle class="flapping-alert-bar__icon" />
+        <span class="flapping-alert-bar__text">
+          <strong>{{ espStore.flappingDeviceCount }}</strong>
+          {{ espStore.flappingDeviceCount === 1 ? 'Gerät' : 'Geräte' }}
+          mit Disconnect-Loop (≥3 Trennungen in 5 min)
+        </span>
+        <span class="flapping-alert-bar__devices">
+          {{ espStore.flappingDeviceIds.join(', ') }}
+        </span>
+      </div>
+
       <!-- Health Summary Bar - nur im Events Tab, nur Desktop -->
       <HealthSummaryBar
         v-if="activeTab === 'events' && !isMobile"
@@ -2336,6 +2418,86 @@ watch(activeTab, (newTab) => {
   .toast-enter-from,
   .toast-leave-to {
     transform: translateY(100%);
+  }
+}
+
+/* ============================================================================
+   Flapping Alert Bar (PKG-20)
+   ============================================================================ */
+.flapping-alert-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-lg);
+  background: linear-gradient(135deg,
+    rgba(251, 191, 36, 0.08) 0%,
+    rgba(251, 191, 36, 0.03) 100%
+  );
+  border-bottom: 1px solid rgba(251, 191, 36, 0.25);
+  color: var(--color-warning);
+  font-size: var(--text-sm);
+  animation: flapping-bar-pulse 3s ease-in-out infinite;
+}
+
+.flapping-alert-bar__indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-warning);
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.5);
+  flex-shrink: 0;
+  animation: flapping-dot 1.5s ease-in-out infinite;
+}
+
+@keyframes flapping-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.flapping-alert-bar__icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.flapping-alert-bar__text {
+  color: var(--color-text-primary);
+}
+
+.flapping-alert-bar__text strong {
+  color: var(--color-warning);
+}
+
+.flapping-alert-bar__devices {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes flapping-bar-pulse {
+  0%, 100% { border-bottom-color: rgba(251, 191, 36, 0.25); }
+  50% { border-bottom-color: rgba(251, 191, 36, 0.5); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flapping-alert-bar,
+  .flapping-alert-bar__indicator {
+    animation: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .flapping-alert-bar {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .flapping-alert-bar__devices {
+    width: 100%;
   }
 }
 </style>

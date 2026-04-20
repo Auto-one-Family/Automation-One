@@ -607,6 +607,9 @@ class HeartbeatHandler:
                     sensor_count = payload.get("sensor_count", payload.get("active_sensors", 0))
                     actuator_count = payload.get("actuator_count", payload.get("active_actuators", 0))
 
+                    # Use server-authoritative timestamp (resolved last_seen) instead of raw
+                    # payload ts. This keeps frontend online/offline badges stable even when
+                    # ESP time is not synced yet (ts can be 0 during boot/NTP lag).
                     broadcast_payload = serialize_esp_health_event(
                         esp_id=esp_id_str,
                         status="online",
@@ -615,7 +618,8 @@ class HeartbeatHandler:
                         uptime=uptime,
                         sensor_count=sensor_count,
                         actuator_count=actuator_count,
-                        timestamp=payload.get("ts"),
+                        timestamp=int(last_seen.timestamp()),
+                        source="heartbeat",
                         gpio_status=payload.get("gpio_status", []),
                         gpio_reserved_count=payload.get("gpio_reserved_count", 0),
                         runtime_telemetry=extract_heartbeat_runtime_telemetry(payload),
@@ -627,8 +631,19 @@ class HeartbeatHandler:
                             "contract_reason": canonical.contract_reason,
                             "raw_system_state": canonical.raw_fields.get("raw_system_state"),
                             "correlation_id": self._extract_correlation_id(payload),
+                            "is_reconnect": is_reconnect,
                         }
                     )
+                    last_disconnect = (esp_device.device_metadata or {}).get(
+                        "last_disconnect"
+                    )
+                    if isinstance(last_disconnect, dict) and last_disconnect.get(
+                        "is_flapping"
+                    ):
+                        broadcast_payload["reconnect_after_flapping"] = True
+                        broadcast_payload["lwt_count_5m"] = last_disconnect.get(
+                            "lwt_count_5m", 0
+                        )
                     await ws_manager.broadcast(
                         "esp_health",
                         broadcast_payload,
@@ -2076,11 +2091,28 @@ class HeartbeatHandler:
                 for device in online_devices:
                     last_seen = device.last_seen
                     if last_seen:
-                        # Make timezone-aware if naive (assume UTC for database values)
                         if last_seen.tzinfo is None:
                             last_seen = last_seen.replace(tzinfo=timezone.utc)
                         if last_seen < timeout_threshold:
-                            # Device timed out
+                            # PKG-19: If LWT already handled this device recently,
+                            # skip redundant timeout escalation to avoid double
+                            # actuator resets and duplicate WS broadcasts.
+                            last_disc = (device.device_metadata or {}).get(
+                                "last_disconnect"
+                            )
+                            if isinstance(last_disc, dict) and last_disc.get("source") == "lwt":
+                                lwt_ts = last_disc.get("timestamp")
+                                if isinstance(lwt_ts, (int, float)) and lwt_ts > 0:
+                                    lwt_age = now.timestamp() - lwt_ts
+                                    if lwt_age < HEARTBEAT_TIMEOUT_SECONDS:
+                                        logger.info(
+                                            "Skipping heartbeat timeout for %s — "
+                                            "LWT already processed %.0fs ago",
+                                            device.device_id,
+                                            lwt_age,
+                                        )
+                                        continue
+
                             await esp_repo.update_status(device.device_id, "offline")
                             offline_devices.append(device.device_id)
 
@@ -2183,6 +2215,7 @@ class HeartbeatHandler:
                                 status="offline",
                                 timestamp=int(now.timestamp()),
                                 reason="heartbeat_timeout",
+                                source="heartbeat_timeout",
                                 timeout_seconds=HEARTBEAT_TIMEOUT_SECONDS,
                                 actuator_states_reset=actuator_reset_counts.get(device_id, 0),
                             )
