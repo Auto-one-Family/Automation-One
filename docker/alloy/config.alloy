@@ -255,6 +255,14 @@ loki.process "pipeline" {
       expression          = ".*Client <unknown> disconnected.*"
       drop_counter_reason = "mqtt_healthcheck_noise"
     }
+    stage.drop {
+      expression          = ".*New client connected as healthcheck.*"
+      drop_counter_reason = "mqtt_healthcheck_noise"
+    }
+    stage.drop {
+      expression          = ".*Client healthcheck disconnected.*"
+      drop_counter_reason = "mqtt_healthcheck_noise"
+    }
 
     // Extract level from Mosquitto log lines (case-insensitive)
     stage.regex {
