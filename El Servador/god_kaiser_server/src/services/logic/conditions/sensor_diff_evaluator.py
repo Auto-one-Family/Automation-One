@@ -7,7 +7,7 @@ two sensor values meets threshold criteria.
 Pattern: (sensor_b_value - sensor_a_value) [operator] threshold
 """
 
-from typing import Dict, Optional
+from typing import Dict
 from datetime import datetime, timezone
 
 from ....core.logging_config import get_logger

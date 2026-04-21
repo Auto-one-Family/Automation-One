@@ -935,7 +935,7 @@ async def instantiate_template(
             updated_at=created.updated_at,
         )
 
-    except TemplateLoadError as e:
+    except TemplateLoadError:
         raise RuleNotFoundException(template_id)
     except ValueError as e:
         raise RuleValidationException(str(e))
