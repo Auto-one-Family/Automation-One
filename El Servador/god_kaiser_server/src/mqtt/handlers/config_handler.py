@@ -199,6 +199,16 @@ class ConfigHandler:
                             correlation_id=correlation_id,
                             request_id=request_id,
                         )
+                        # PKG-04a: distinct event type for guard-replay + correlation_id_source metadata.
+                        # Frontend can treat guard-replay as a finalization-only signal without
+                        # confusing it with a fresh ESP config_response.
+                        correlation_id_source = (
+                            "correlation_id"
+                            if payload.get("correlation_id") is not None
+                            else "request_id"
+                            if payload.get("request_id") is not None
+                            else "fallback_synthetic"
+                        )
                         replay_payload.update(
                             {
                                 "domain": canonical.domain,
@@ -211,10 +221,11 @@ class ConfigHandler:
                                 "raw_type": canonical.raw_type,
                                 "raw_error_code": canonical.raw_error_code,
                                 "terminal_authority_replay": True,
+                                "correlation_id_source": correlation_id_source,
                             }
                         )
                         await ws_manager.broadcast(
-                            "config_response",
+                            "config_response_guard_replay",
                             replay_payload,
                             correlation_id=correlation_id,
                         )

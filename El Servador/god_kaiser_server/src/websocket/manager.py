@@ -49,6 +49,8 @@ class WebSocketManager:
         self._rate_limit_bypass_types = {
             # Critical GPIO state changes (AUT-68) — must never be dropped under load
             "actuator_status",
+            # PKG-04a: guard-replay terminal event, never rate-limit
+            "config_response_guard_replay",
             "device_discovered",
             "device_rediscovered",
             "esp_health",

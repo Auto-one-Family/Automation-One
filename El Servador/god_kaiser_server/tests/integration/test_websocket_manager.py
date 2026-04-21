@@ -392,9 +392,10 @@ class TestRateLimiting:
         assert mock_websocket.send_json.call_count == 20
 
     def test_rate_limit_bypass_contains_all_critical_realtime_events(self, manager):
-        """Catalogue check: bypass set covers all critical realtime event types (AUT-68)."""
+        """Catalogue check: bypass set covers all critical realtime event types (AUT-68, PKG-04a)."""
         expected = {
             "actuator_status",
+            "config_response_guard_replay",
             "device_discovered",
             "device_rediscovered",
             "esp_health",
