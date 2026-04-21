@@ -47,7 +47,7 @@ const barData = computed<StatusBarItem[]>(() => [
   { label: 'Offline', value: statusCounts.value.offline, color: tokens.statusOffline },
   { label: 'Error', value: statusCounts.value.error, color: tokens.error },
   ...(statusCounts.value.other > 0
-    ? [{ label: 'Andere', value: statusCounts.value.other, color: '#8b5cf6' }]
+    ? [{ label: 'Andere', value: statusCounts.value.other, color: tokens.mock }]
     : []),
 ])
 

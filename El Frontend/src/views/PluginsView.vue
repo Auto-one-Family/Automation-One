@@ -156,11 +156,13 @@ onUnmounted(() => {
           class="plugins-view__refresh-btn"
           :disabled="pluginsStore.isLoading"
           @click="refreshPlugins"
+          title="Plugin-Liste aktualisieren"
         >
           <RefreshCw
             class="w-4 h-4"
             :class="{ 'animate-spin': pluginsStore.isLoading }"
           />
+          <span>Aktualisieren</span>
         </button>
       </div>
     </div>
@@ -180,7 +182,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Plugin Grid -->
-    <div class="plugins-view__grid">
+    <div class="plugins-view__grid grid-auto-md">
       <PluginCard
         v-for="plugin in filteredPlugins"
         :key="plugin.plugin_id"
@@ -403,11 +405,12 @@ onUnmounted(() => {
 }
 
 .plugins-view__refresh-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  gap: var(--space-1);
+  min-height: 32px;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border);
   background: var(--color-bg-secondary);
@@ -427,9 +430,7 @@ onUnmounted(() => {
 }
 
 .plugins-view__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 0.75rem;
+  gap: 1rem;
 }
 
 .plugins-view__ops-banner {

@@ -140,7 +140,7 @@ defineProps<Props>()
   gap: 0.375rem;
   margin-top: 0.75rem;
   font-size: 0.75rem;
-  color: #4ade80;
+  color: var(--color-success);
   opacity: 0.8;
 }
 </style>

@@ -158,7 +158,7 @@ function isMock(device: ESPDevice): boolean {
 
     <!-- Devices without subzone -->
     <div v-if="unsubzonedDevices.length > 0" class="zone-detail-view__unsubzoned">
-      <div class="zone-detail-view__grid">
+      <div class="zone-detail-view__grid grid-auto-sm">
         <DeviceSummaryCard
           v-for="device in unsubzonedDevices"
           :key="espStore.getDeviceId(device)"
@@ -292,8 +292,6 @@ function isMock(device: ESPDevice): boolean {
 
 /* Device grids */
 .zone-detail-view__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: var(--space-4);
 }
 

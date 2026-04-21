@@ -197,6 +197,8 @@ export default {
       },
 
       screens: {
+        // AUT-49 audit: 3xl/4xl remain available for explicit widescreen-only layouts.
+        // Standard responsive work should prefer default Tailwind breakpoints up to 2xl.
         '3xl': '1600px',
         '4xl': '1920px',
       },

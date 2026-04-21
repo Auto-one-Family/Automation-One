@@ -413,7 +413,7 @@ function getEventCategoryClass(event: UnifiedEvent): string {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.025em;
-  color: var(--color-text-primary, #f0f0f5);
+  color: var(--color-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

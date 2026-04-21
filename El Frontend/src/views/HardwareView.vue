@@ -985,6 +985,7 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
                       <span v-if="unassignedDevices.length > 0" class="unassigned-section__count">
                         {{ unassignedDevices.length }}
                       </span>
+                      <span v-if="unassignedDevices.length > 0" class="unassigned-section__context">Per Drag-and-drop einer Zone zuweisen</span>
                       <span v-else class="unassigned-section__empty-hint">
                         Alle Geräte zugewiesen
                       </span>
@@ -993,7 +994,7 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
 
                   <VueDraggable
                     v-model="localUnassignedDevices"
-                    class="unassigned-section__devices"
+                    class="unassigned-section__devices grid-auto-md"
                     group="esp-devices"
                     :animation="150"
                     handle=".esp-drag-handle"
@@ -1412,20 +1413,21 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   gap: var(--space-2);
   width: 100%;
   padding: var(--space-3);
-  background: transparent;
-  border: 1px dashed var(--glass-border);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
   border-radius: var(--radius-lg);
-  color: var(--color-text-muted);
+  color: var(--color-accent-bright);
   font-size: var(--text-sm);
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
 .zone-create-btn:hover:not(:disabled) {
-  border-color: var(--color-accent-bright);
-  color: var(--color-accent-bright);
-  background: var(--color-accent-bg);
+  border-color: var(--color-accent);
+  color: var(--color-text-inverse);
+  background: var(--color-accent);
+  box-shadow: var(--elevation-raised);
 }
 
 .zone-create-btn:disabled {
@@ -1519,6 +1521,7 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
 .unassigned-section {
   background: var(--color-warning-bg);
   border: 1px solid var(--color-warning-border);
+  border-left: 4px solid var(--color-warning);
   border-radius: var(--radius-md);
   overflow: hidden;
 }
@@ -1560,6 +1563,12 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   margin: 0;
 }
 
+.unassigned-section__context {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
 .unassigned-section__count {
   display: flex;
   align-items: center;
@@ -1593,8 +1602,6 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
 }
 
 .unassigned-section__devices {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 8px;
   min-height: 32px;
   padding-top: var(--space-1);

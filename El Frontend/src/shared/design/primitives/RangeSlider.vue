@@ -263,26 +263,26 @@ function handleAlarmHigh(e: Event) {
 .range-slider__input--alarm-low::-webkit-slider-thumb,
 .range-slider__input--alarm-high::-webkit-slider-thumb {
   background: var(--color-status-alarm);
-  border-color: #b91c1c;
+  border-color: var(--color-error);
 }
 
 .range-slider__input--alarm-low::-moz-range-thumb,
 .range-slider__input--alarm-high::-moz-range-thumb {
   background: var(--color-status-alarm);
-  border-color: #b91c1c;
+  border-color: var(--color-error);
 }
 
 /* Warning thumbs — yellow */
 .range-slider__input--warn-low::-webkit-slider-thumb,
 .range-slider__input--warn-high::-webkit-slider-thumb {
   background: var(--color-status-warning);
-  border-color: #a16207;
+  border-color: var(--color-warning);
 }
 
 .range-slider__input--warn-low::-moz-range-thumb,
 .range-slider__input--warn-high::-moz-range-thumb {
   background: var(--color-status-warning);
-  border-color: #a16207;
+  border-color: var(--color-warning);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

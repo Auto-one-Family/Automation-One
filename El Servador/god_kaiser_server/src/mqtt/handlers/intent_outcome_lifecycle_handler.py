@@ -34,8 +34,14 @@ class IntentOutcomeLifecycleHandler:
             payload = dict(payload)
             err = self._validate_payload(payload)
             if err:
-                logger.error("Invalid intent_outcome/lifecycle payload: %s", err)
-                return False
+                # Treat malformed lifecycle events as non-fatal noise: they should
+                # not bubble up as handler failures that pollute transport health logs.
+                logger.warning(
+                    "Dropping malformed intent_outcome/lifecycle payload: esp_id=%s reason=%s",
+                    esp_id,
+                    err,
+                )
+                return True
 
             event_type = str(payload.get("event_type") or "").strip()
             schema = str(payload.get("schema") or "").strip()

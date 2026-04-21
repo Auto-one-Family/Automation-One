@@ -559,7 +559,7 @@ defineExpose({
 
       <!-- pH-specific results -->
       <template v-if="selectedSensorType === 'ph' && calibrationResult?.calibration">
-        <div class="calibration-wizard__result-grid">
+            <div class="calibration-wizard__result-grid grid-auto-sm">
           <div v-if="calibrationResult.calibration.slope !== undefined" class="calibration-wizard__result-item">
             <div class="calibration-wizard__result-label">Slope (mV/pH)</div>
             <div class="calibration-wizard__result-value">{{ Number(calibrationResult.calibration.slope).toFixed(2) }}</div>
@@ -657,7 +657,7 @@ defineExpose({
   padding: 0.75rem;
   border-radius: var(--radius-md);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  background: var(--color-bg-secondary, #111118);
+  background: var(--color-bg-secondary);
   display: flex;
   flex-direction: column;
   gap: 0.625rem;
@@ -677,28 +677,28 @@ defineExpose({
   padding: 0.375rem 0.5rem;
   font-size: 0.75rem;
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  color: var(--color-text-secondary, #b0b0c0);
+  color: var(--color-text-secondary);
 }
 
 .calibration-wizard__hud-chip--online,
 .calibration-wizard__hud-chip--good,
 .calibration-wizard__hud-chip--success {
   border-color: rgba(52, 211, 153, 0.45);
-  color: var(--color-success, #34d399);
+  color: var(--color-success);
 }
 
 .calibration-wizard__hud-chip--offline,
 .calibration-wizard__hud-chip--critical,
 .calibration-wizard__hud-chip--error {
   border-color: rgba(248, 113, 113, 0.45);
-  color: var(--color-error, #f87171);
+  color: var(--color-error);
 }
 
 .calibration-wizard__hud-chip--warning,
 .calibration-wizard__hud-chip--suspect,
 .calibration-wizard__hud-chip--neutral {
   border-color: rgba(251, 191, 36, 0.45);
-  color: var(--color-warning, #fbbf24);
+  color: var(--color-warning);
 }
 
 .calibration-wizard__hud-context {
@@ -706,23 +706,23 @@ defineExpose({
   flex-wrap: wrap;
   gap: 0.5rem 0.75rem;
   font-size: 0.75rem;
-  color: var(--color-text-secondary, #b0b0c0);
+  color: var(--color-text-secondary);
 }
 
 .calibration-wizard__hud-context-key {
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
 }
 
 .calibration-wizard__hud-message {
   margin: 0;
   font-size: 0.75rem;
-  color: var(--color-text-secondary, #b0b0c0);
+  color: var(--color-text-secondary);
 }
 
 .calibration-wizard__mastery {
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   border-radius: var(--radius-md);
-  background: var(--color-bg-secondary, #111118);
+  background: var(--color-bg-secondary);
   padding: 0.75rem;
   display: flex;
   flex-direction: column;
@@ -741,24 +741,24 @@ defineExpose({
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   font-size: 0.6875rem;
   text-align: center;
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
 }
 
 .calibration-wizard__mastery-stage--current {
   border-color: rgba(167, 139, 250, 0.5);
-  color: var(--color-text-primary, #eaeaf2);
+  color: var(--color-text-primary);
   background: rgba(167, 139, 250, 0.08);
 }
 
 .calibration-wizard__mastery-stage--done {
   border-color: rgba(52, 211, 153, 0.45);
-  color: var(--color-success, #34d399);
+  color: var(--color-success);
 }
 
 .calibration-wizard__mastery-next {
   margin: 0;
   font-size: 0.75rem;
-  color: var(--color-text-secondary, #b0b0c0);
+  color: var(--color-text-secondary);
 }
 
 .calibration-wizard__header {
@@ -768,37 +768,37 @@ defineExpose({
 }
 
 .calibration-wizard__icon {
-  color: var(--color-iridescent-1, #a78bfa);
+  color: var(--color-iridescent-1);
 }
 
 .calibration-wizard__title {
   font-size: 1.25rem;
   font-weight: 700;
-  color: var(--color-text-primary, #eaeaf2);
+  color: var(--color-text-primary);
   margin: 0;
 }
 
 .calibration-wizard__subtitle {
   font-size: 1rem;
   font-weight: 600;
-  color: var(--color-text-primary, #eaeaf2);
+  color: var(--color-text-primary);
   margin: 0;
 }
 
 .calibration-wizard__subtitle--error {
-  color: var(--color-error, #ef4444);
+  color: var(--color-error);
 }
 
 .calibration-wizard__desc {
   font-size: 0.8125rem;
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
   line-height: 1.5;
   margin: 0;
 }
 
 .calibration-wizard__label {
   font-size: 0.75rem;
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
   margin: 0 0 0.5rem 0;
 }
 
@@ -824,20 +824,20 @@ defineExpose({
   padding: 0.875rem;
   border-radius: var(--radius-md);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  background: var(--color-bg-secondary, #111118);
-  color: var(--color-text-primary, #eaeaf2);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
   cursor: pointer;
   transition: all 0.15s;
   text-align: center;
 }
 
 .calibration-wizard__type-card:hover {
-  border-color: var(--color-iridescent-1, #a78bfa);
+  border-color: var(--color-iridescent-1);
   background: rgba(167,139,250,0.06);
 }
 
 .calibration-wizard__type-card--selected {
-  border-color: var(--color-iridescent-1, #a78bfa);
+  border-color: var(--color-iridescent-1);
   background: rgba(167,139,250,0.12);
 }
 
@@ -858,14 +858,14 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   padding: 0.625rem 0.75rem;
-  background: var(--color-bg-secondary, #111118);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   border-radius: var(--radius-md);
 }
 
 .calibration-wizard__device-name {
   font-size: 0.8125rem;
-  color: var(--color-text-primary, #eaeaf2);
+  color: var(--color-text-primary);
   font-weight: 500;
 }
 
@@ -880,20 +880,20 @@ defineExpose({
   font-family: 'JetBrains Mono', monospace;
   border-radius: var(--radius-full);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  background: var(--color-bg-tertiary, #0d0d14);
-  color: var(--color-text-muted, #8585a0);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .calibration-wizard__gpio-chip:hover {
-  border-color: var(--color-iridescent-1, #a78bfa);
-  color: var(--color-text-primary, #eaeaf2);
+  border-color: var(--color-iridescent-1);
+  color: var(--color-text-primary);
 }
 
 .calibration-wizard__empty {
   font-size: 0.8125rem;
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
   text-align: center;
   padding: 1rem;
 }
@@ -911,8 +911,8 @@ defineExpose({
   font-family: inherit;
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133, 133, 160, 0.12));
-  background: var(--color-bg-tertiary, #0d0d14);
-  color: var(--color-text-primary, #eaeaf2);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
   outline: none;
   cursor: pointer;
   transition: border-color 0.15s;
@@ -920,12 +920,12 @@ defineExpose({
 
 .calibration-wizard__ec-preset:hover,
 .calibration-wizard__ec-preset:focus {
-  border-color: var(--color-iridescent-1, #a78bfa);
+  border-color: var(--color-iridescent-1);
 }
 
 /* Summary */
 .calibration-wizard__summary {
-  background: var(--color-bg-secondary, #111118);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   border-radius: var(--radius-md);
   padding: 1rem;
@@ -939,11 +939,11 @@ defineExpose({
   justify-content: space-between;
   align-items: center;
   font-size: 0.8125rem;
-  color: var(--color-text-primary, #eaeaf2);
+  color: var(--color-text-primary);
 }
 
 .calibration-wizard__summary-label {
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
   font-size: 0.75rem;
 }
 
@@ -956,9 +956,9 @@ defineExpose({
   padding: 0.375rem 0.625rem;
   font-size: 0.75rem;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--color-warning, #fbbf24);
+  border: 1px solid var(--color-warning);
   background: transparent;
-  color: var(--color-warning, #fbbf24);
+  color: var(--color-warning);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -982,14 +982,14 @@ defineExpose({
   font-size: 0.75rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  background: var(--color-bg-secondary, #111118);
-  color: var(--color-text-primary, #eaeaf2);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .calibration-wizard__back-btn:hover {
-  border-color: var(--color-text-muted, #8585a0);
+  border-color: var(--color-text-muted);
 }
 
 .calibration-wizard__back-btn:disabled {
@@ -1004,16 +1004,16 @@ defineExpose({
   padding: 0.5rem 0.875rem;
   font-size: 0.75rem;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--color-text-muted, #8585a0);
+  border: 1px solid var(--color-text-muted);
   background: transparent;
-  color: var(--color-text-secondary, #8585a0);
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .calibration-wizard__abort-btn:hover {
-  border-color: var(--color-error, #ef4444);
-  color: var(--color-error, #ef4444);
+  border-color: var(--color-error);
+  color: var(--color-error);
   background: rgba(239, 68, 68, 0.08);
 }
 
@@ -1031,7 +1031,7 @@ defineExpose({
   font-weight: 600;
   border-radius: var(--radius-md);
   border: none;
-  background: var(--color-iridescent-1, #a78bfa);
+  background: var(--color-iridescent-1);
   color: var(--color-text-inverse);
   cursor: pointer;
   transition: all 0.15s;
@@ -1054,7 +1054,7 @@ defineExpose({
   height: 3.5rem;
   border-radius: 50%;
   background: rgba(52, 211, 153, 0.15);
-  color: var(--color-success, #34d399);
+  color: var(--color-success);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1066,7 +1066,7 @@ defineExpose({
   border-radius: var(--radius-md);
   padding: 0.75rem;
   font-size: 0.875rem;
-  color: var(--color-text-primary, #eaeaf2);
+  color: var(--color-text-primary);
   margin-bottom: 0.5rem;
 }
 
@@ -1075,14 +1075,12 @@ defineExpose({
 }
 
 .calibration-wizard__result-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 1rem;
   margin: 1rem 0;
 }
 
 .calibration-wizard__result-item {
-  background: var(--color-bg-secondary, #111118);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   border-radius: var(--radius-md);
   padding: 0.75rem;
@@ -1093,32 +1091,32 @@ defineExpose({
 
 .calibration-wizard__result-label {
   font-size: 0.75rem;
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
   font-weight: 500;
 }
 
 .calibration-wizard__result-value {
   font-size: 1.25rem;
   font-family: 'JetBrains Mono', monospace;
-  color: var(--color-iridescent-1, #a78bfa);
+  color: var(--color-iridescent-1);
   font-weight: 600;
 }
 
 .calibration-wizard__result-hint {
   font-size: 0.7rem;
-  color: var(--color-text-secondary, #b0b0c0);
+  color: var(--color-text-secondary);
 }
 
 .calibration-wizard__session-info {
   font-size: 0.75rem;
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
   text-align: center;
   margin: 0.5rem 0;
 }
 
 .calibration-wizard__session-info code {
   font-family: 'JetBrains Mono', monospace;
-  background: var(--color-bg-secondary, #111118);
+  background: var(--color-bg-secondary);
   padding: 0.25rem 0.5rem;
   border-radius: var(--radius-xs);
   word-break: break-all;
@@ -1130,20 +1128,20 @@ defineExpose({
 }
 
 .calibration-wizard__result-pre {
-  background: var(--color-bg-tertiary, #0d0d14);
+  background: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   border-radius: var(--radius-md);
   padding: 0.75rem;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.75rem;
-  color: var(--color-text-primary, #eaeaf2);
+  color: var(--color-text-primary);
   overflow-x: auto;
   text-align: left;
 }
 
 .calibration-wizard__error-msg {
   font-size: 0.875rem;
-  color: var(--color-error, #ef4444);
+  color: var(--color-error);
   margin: 0;
 }
 
@@ -1152,7 +1150,7 @@ defineExpose({
   height: 3.5rem;
   border-radius: 50%;
   background: rgba(239, 68, 68, 0.15);
-  color: var(--color-error, #ef4444);
+  color: var(--color-error);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1164,7 +1162,7 @@ defineExpose({
   height: 3.5rem;
   border-radius: 50%;
   background: rgba(167, 139, 250, 0.15);
-  color: var(--color-iridescent-1, #a78bfa);
+  color: var(--color-iridescent-1);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1176,7 +1174,7 @@ defineExpose({
 
 .calibration-wizard__finalizing-message {
   font-size: 0.875rem;
-  color: var(--color-text-secondary, #b0b0c0);
+  color: var(--color-text-secondary);
   margin: 0;
 }
 
@@ -1184,14 +1182,14 @@ defineExpose({
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   border-radius: var(--radius-md);
   padding: 0.625rem;
-  background: var(--color-bg-secondary, #111118);
+  background: var(--color-bg-secondary);
   width: 100%;
   max-width: 400px;
 }
 
 .calibration-wizard__timeout-notice {
   font-size: 0.8125rem;
-  color: var(--color-warning, #fbbf24);
+  color: var(--color-warning);
   background: rgba(251, 191, 36, 0.1);
   border: 1px solid rgba(251, 191, 36, 0.3);
   border-radius: var(--radius-sm);
@@ -1204,13 +1202,13 @@ defineExpose({
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   border-radius: var(--radius-md);
   padding: 0.625rem;
-  background: var(--color-bg-secondary, #111118);
+  background: var(--color-bg-secondary);
 }
 
 .calibration-wizard__details summary {
   cursor: pointer;
   font-size: 0.75rem;
-  color: var(--color-text-secondary, #b0b0c0);
+  color: var(--color-text-secondary);
 }
 
 .calibration-wizard--fx-success {

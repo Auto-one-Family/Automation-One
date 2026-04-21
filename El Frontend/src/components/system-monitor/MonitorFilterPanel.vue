@@ -320,21 +320,21 @@ function updateTimeRange(value: TimeRange) {
 
 /* Severity-specific active colors */
 .filter-chip--info.filter-chip--active {
-  background: linear-gradient(135deg, var(--color-info) 0%, #38bdf8 100%);
+  background: linear-gradient(135deg, var(--color-info) 0%, var(--color-accent-bright) 100%);
   border-color: var(--color-info);
   box-shadow: 0 0 15px rgba(96, 165, 250, 0.4);
 }
 
 .filter-chip--warning.filter-chip--active {
-  background: linear-gradient(135deg, var(--color-warning) 0%, #f59e0b 100%);
+  background: linear-gradient(135deg, var(--color-warning) 0%, var(--color-warning) 100%);
   border-color: var(--color-warning);
-  color: #1a1a24;
+  color: var(--color-bg-tertiary);
   box-shadow: 0 0 15px rgba(251, 191, 36, 0.4);
 }
 
 .filter-chip--error.filter-chip--active,
 .filter-chip--critical.filter-chip--active {
-  background: linear-gradient(135deg, var(--color-error) 0%, #f43f5e 100%);
+  background: linear-gradient(135deg, var(--color-error) 0%, var(--gradient-danger-end) 100%);
   border-color: var(--color-error);
   box-shadow: 0 0 15px rgba(248, 113, 113, 0.4);
 }

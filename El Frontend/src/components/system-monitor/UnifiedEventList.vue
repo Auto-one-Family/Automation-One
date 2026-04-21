@@ -316,7 +316,17 @@ function getSeverityIcon(severity: string) {
 }
 
 function formatTime(timestamp: string): string {
-  return new Date(timestamp).toLocaleTimeString('de-DE')
+  const date = new Date(timestamp)
+  const dateKey = getDateKey(timestamp)
+  const todayKey = new Date().toISOString().split('T')[0]
+  const time = date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+  if (dateKey === todayKey) {
+    return `Heute ${time}`
+  }
+
+  const shortDate = date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
+  return `${shortDate} ${time}`
 }
 
 function handleScroll(event: Event) {

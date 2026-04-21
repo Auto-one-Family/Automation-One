@@ -30,8 +30,8 @@ import {
   Save,
   Play,
   Trash2,
+  ChevronRight,
   ChevronDown,
-  ChevronUp,
   History,
   Workflow,
   Check,
@@ -802,7 +802,7 @@ onUnmounted(() => {
                 <span>Neue Regel</span>
               </button>
             </div>
-            <div class="rules-empty__cards">
+            <div class="rules-empty__cards grid-auto-md">
               <RuleCard
                 v-for="rule in logicStore.rules"
                 :key="rule.id"
@@ -868,13 +868,17 @@ onUnmounted(() => {
           <!-- ====== SECTION 2: Templates (SECONDARY — collapsible) ====== -->
           <div class="rules-empty__templates">
             <button class="rules-empty__templates-toggle" @click="toggleTemplatesCollapsed">
-              <component :is="templatesCollapsed ? ChevronDown : ChevronUp" class="w-4 h-4" />
+              <component
+                :is="templatesCollapsed ? ChevronRight : ChevronDown"
+                class="w-4 h-4 rules-empty__templates-toggle-icon"
+              />
               <h3 class="rules-empty__templates-title">
                 Vorlagen & Schnellstart ({{ ruleTemplates.length }})
               </h3>
+              <span class="rules-empty__templates-hint">{{ templatesCollapsed ? 'anzeigen' : 'ausblenden' }}</span>
             </button>
             <Transition name="collapse">
-              <div v-show="!templatesCollapsed" class="rules-empty__templates-grid">
+              <div v-show="!templatesCollapsed" class="rules-empty__templates-grid grid-auto-md">
                 <RuleTemplateCard
                   v-for="tpl in ruleTemplates"
                   :key="tpl.id"
@@ -1694,8 +1698,6 @@ onUnmounted(() => {
 }
 
 .rules-empty__cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--space-3);
 }
 
@@ -1727,6 +1729,10 @@ onUnmounted(() => {
   color: var(--color-text-muted);
 }
 
+.rules-empty__templates-toggle-icon {
+  transition: transform var(--transition-fast);
+}
+
 .rules-empty__templates-toggle:hover {
   background: rgba(13, 13, 22, 0.6);
 }
@@ -1740,9 +1746,15 @@ onUnmounted(() => {
   margin: 0;
 }
 
+.rules-empty__templates-hint {
+  margin-left: auto;
+  font-size: var(--text-xxs);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .rules-empty__templates-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: var(--space-3);
   padding-top: var(--space-3);
 }

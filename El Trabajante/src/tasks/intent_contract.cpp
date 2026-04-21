@@ -371,6 +371,13 @@ void processIntentOutcomeOutbox() {
     if (!mqttClient.isConnected()) {
         return;
     }
+    // AUT-56 hardening: do not consume replay attempts while registration gate is closed.
+    // During reconnect windows safePublish() would fail with REGISTRATION_PENDING/timeout,
+    // which previously increased attempt counters and could evict critical outcomes before
+    // the first valid heartbeat ACK reopened the gate.
+    if (!mqttClient.isRegistrationConfirmed()) {
+        return;
+    }
     if (!beginOutcomeOutboxPrefs(false)) {
         return;
     }

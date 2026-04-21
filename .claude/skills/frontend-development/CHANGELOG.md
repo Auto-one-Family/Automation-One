@@ -1,7 +1,14 @@
 ## Versions-Historie
 
-**Version:** 9.97
-**Letzte Aktualisierung:** 2026-03-30
+**Version:** 9.98
+**Letzte Aktualisierung:** 2026-04-21
+
+### Aenderungen in v9.98 (AUT-48 — Restmigration Design-Token-Farben)
+
+- Restliche 47 `.vue`-Dateien auf Token-basierte Farbverwendung migriert (`var(--color-*)` und `tokens.*`), inklusive Bereinigung von `var(--token, #hex)`-Fallbacks
+- JS/TS-Farb-Fallbacks in Widget-/Monitor-Komponenten auf Token-Fallbackketten umgestellt (keine freien Hex-Fallbacks mehr in UI-Logik)
+- Verbleibende Hardcoded-Hexwerte bewusst auf Chart-Konfigurationen begrenzt (`views/SensorHistoryView.vue`, `components/charts/MultiSensorChart.vue`)
+- Verifikation: `npm run build` und `npx vue-tsc --noEmit` erfolgreich
 
 ### Aenderungen in v9.97 (FIX-ED-1: Widget Smart Defaults — Range, Titel & Placement)
 

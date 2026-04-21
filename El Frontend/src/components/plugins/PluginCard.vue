@@ -70,10 +70,13 @@ const lastExecTime = computed(() => {
     <div class="plugin-card__header">
       <div class="plugin-card__title-row">
         <span class="plugin-card__name">{{ plugin.display_name }}</span>
-        <span
-          class="plugin-card__status-dot"
-          :class="plugin.is_enabled ? 'plugin-card__status-dot--active' : 'plugin-card__status-dot--disabled'"
-        />
+        <span class="plugin-card__status" :class="plugin.is_enabled ? 'plugin-card__status--active' : 'plugin-card__status--disabled'">
+          <span
+            class="plugin-card__status-dot"
+            :class="plugin.is_enabled ? 'plugin-card__status-dot--active' : 'plugin-card__status-dot--disabled'"
+          />
+          {{ plugin.is_enabled ? 'Aktiv' : 'Inaktiv' }}
+        </span>
       </div>
       <span class="plugin-card__category">{{ categoryLabel }}</span>
     </div>
@@ -110,10 +113,12 @@ const lastExecTime = computed(() => {
         class="plugin-card__action-btn plugin-card__action-btn--execute"
         :disabled="!plugin.is_enabled || isExecuting"
         title="Plugin ausführen"
+        aria-label="Plugin ausführen"
         @click="emit('execute', plugin.plugin_id)"
       >
         <Loader2 v-if="isExecuting" class="w-3.5 h-3.5 animate-spin" />
         <Play v-else class="w-3.5 h-3.5" />
+        <span>Ausführen</span>
       </button>
       <button
         class="plugin-card__action-btn"
@@ -121,10 +126,12 @@ const lastExecTime = computed(() => {
           ? 'plugin-card__action-btn--disable'
           : 'plugin-card__action-btn--enable'"
         :title="plugin.is_enabled ? 'Deaktivieren' : 'Aktivieren'"
+        :aria-label="plugin.is_enabled ? 'Plugin deaktivieren' : 'Plugin aktivieren'"
         @click="emit('toggle', plugin.plugin_id, !plugin.is_enabled)"
       >
         <PowerOff v-if="plugin.is_enabled" class="w-3.5 h-3.5" />
         <Power v-else class="w-3.5 h-3.5" />
+        <span>{{ plugin.is_enabled ? 'Deaktivieren' : 'Aktivieren' }}</span>
       </button>
     </div>
   </div>
@@ -182,6 +189,16 @@ const lastExecTime = computed(() => {
   flex-shrink: 0;
 }
 
+.plugin-card__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--text-xxs);
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+}
+
 .plugin-card__status-dot--active {
   background: var(--color-success);
   box-shadow: 0 0 4px var(--color-success);
@@ -189,6 +206,18 @@ const lastExecTime = computed(() => {
 
 .plugin-card__status-dot--disabled {
   background: var(--color-text-muted);
+}
+
+.plugin-card__status--active {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
+}
+
+.plugin-card__status--disabled {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
 }
 
 .plugin-card__category {
@@ -256,6 +285,7 @@ const lastExecTime = computed(() => {
 
 .plugin-card__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.375rem;
   margin-top: auto;
   padding-top: 0.375rem;
@@ -265,14 +295,17 @@ const lastExecTime = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  gap: 0.25rem;
+  min-height: 32px;
+  padding: 0 0.5rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border);
   background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
+  font-size: var(--text-xs);
+  font-weight: 500;
 }
 
 .plugin-card__action-btn:hover:not(:disabled) {

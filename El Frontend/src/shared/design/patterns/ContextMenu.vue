@@ -173,7 +173,7 @@ function isHighlighted(item: typeof state.value.items[0]): boolean {
   min-width: 180px;
   max-width: 260px;
   padding: var(--space-1, 4px);
-  background-color: var(--color-bg-secondary, #0d0d16);
+  background-color: var(--color-bg-secondary);
   border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.06));
   border-radius: var(--radius-md, 10px);
   box-shadow: var(--glass-shadow, 0 8px 32px rgba(0, 0, 0, 0.4));
@@ -196,7 +196,7 @@ function isHighlighted(item: typeof state.value.items[0]): boolean {
   border: none;
   border-radius: var(--radius-sm, 6px);
   background: transparent;
-  color: var(--color-text-secondary, #8585a0);
+  color: var(--color-text-secondary);
   font-size: var(--text-sm, 14px);
   cursor: pointer;
   transition: all var(--transition-fast, 120ms) ease;
@@ -206,22 +206,22 @@ function isHighlighted(item: typeof state.value.items[0]): boolean {
 
 .context-menu__item:hover,
 .context-menu__item--highlighted {
-  background-color: var(--color-bg-tertiary, #15151f);
-  color: var(--color-text-primary, #eaeaf2);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
 }
 
 .context-menu__item--danger {
-  color: var(--color-error, #f87171);
+  color: var(--color-error);
 }
 
 .context-menu__item--danger:hover,
 .context-menu__item--danger.context-menu__item--highlighted {
   background-color: rgba(248, 113, 113, 0.1);
-  color: var(--color-error, #f87171);
+  color: var(--color-error);
 }
 
 .context-menu__item--disabled {
-  color: var(--color-text-muted, #484860);
+  color: var(--color-text-muted);
   cursor: not-allowed;
   pointer-events: none;
 }
@@ -238,7 +238,7 @@ function isHighlighted(item: typeof state.value.items[0]): boolean {
 
 .context-menu__shortcut {
   font-size: var(--text-xs, 11px);
-  color: var(--color-text-muted, #484860);
+  color: var(--color-text-muted);
   margin-left: auto;
   padding-left: var(--space-4, 16px);
 }

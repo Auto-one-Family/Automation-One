@@ -40,7 +40,7 @@ const props = withDefaults(defineProps<Props>(), {
   showValues: true,
 })
 
-const DEFAULT_COLORS = [tokens.statusGood, tokens.statusWarning, tokens.statusAlarm, tokens.accent, '#8b5cf6']
+const DEFAULT_COLORS = [tokens.statusGood, tokens.statusWarning, tokens.statusAlarm, tokens.accent, tokens.mock]
 
 const chartData = computed(() => ({
   labels: props.data.map(d => d.label),

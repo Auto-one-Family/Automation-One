@@ -94,7 +94,7 @@ watch(() => props.zoneId, (zoneId) => {
     <!-- Rules Grid -->
     <div v-else class="zone-rules-section__content">
       <ul
-        class="zone-rules-section__grid monitor-card-grid"
+        class="zone-rules-section__grid monitor-card-grid grid-auto-sm"
         role="list"
       >
         <li
@@ -185,8 +185,6 @@ watch(() => props.zoneId, (zoneId) => {
 }
 
 .zone-rules-section__grid.monitor-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   gap: var(--space-3);
 }
 

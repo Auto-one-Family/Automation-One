@@ -26,7 +26,7 @@ defineProps<Props>()
       <div class="subzone-area__label">{{ subzoneName }}</div>
       <span class="subzone-area__count">{{ devices.length }}</span>
     </div>
-    <div class="subzone-area__grid">
+    <div class="subzone-area__grid grid-auto-sm">
       <slot />
     </div>
   </div>
@@ -77,8 +77,6 @@ defineProps<Props>()
 }
 
 .subzone-area__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: var(--space-4);
 }
 </style>

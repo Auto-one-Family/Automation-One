@@ -167,11 +167,11 @@ const displayName = computed(() =>
 }
 
 .component-card--sensor {
-  border-left: 3px solid var(--color-iridescent-2, #60a5fa);
+  border-left: 3px solid var(--color-iridescent-2);
 }
 
 .component-card--actuator {
-  border-left: 3px solid var(--color-iridescent-3, #f59e0b);
+  border-left: 3px solid var(--color-iridescent-3);
 }
 
 .component-card--stale {
@@ -212,19 +212,19 @@ const displayName = computed(() =>
 }
 
 .component-card__quality--good {
-  color: var(--color-success, #34d399);
+  color: var(--color-success);
 }
 
 .component-card__quality--fair {
-  color: var(--color-warning, #fbbf24);
+  color: var(--color-warning);
 }
 
 .component-card__quality--poor {
-  color: var(--color-error, #f87171);
+  color: var(--color-error);
 }
 
 .component-card__state--on {
-  color: var(--color-success, #34d399);
+  color: var(--color-success);
 }
 
 .component-card__state--off {
@@ -232,7 +232,7 @@ const displayName = computed(() =>
 }
 
 .component-card__state--emergency {
-  color: var(--color-error, #f87171);
+  color: var(--color-error);
   animation: pulse-error 1.5s ease-in-out infinite;
 }
 

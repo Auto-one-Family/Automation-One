@@ -250,7 +250,7 @@ function severityLabel(severity: string): string {
 
 .severity-critical {
   background: rgba(220, 38, 38, 0.2);
-  color: #dc2626;
+  color: var(--color-error);
 }
 
 .preview-events {
@@ -272,7 +272,7 @@ function severityLabel(severity: string): string {
 }
 
 .text-green-400 {
-  color: #4ade80;
+  color: var(--color-success);
 }
 
 .inline-events,
@@ -334,7 +334,7 @@ function severityLabel(severity: string): string {
 }
 
 .text-yellow-400 {
-  color: #facc15;
+  color: var(--color-warning);
 }
 
 .sample-info {
@@ -384,7 +384,7 @@ function severityLabel(severity: string): string {
   justify-content: center;
   gap: 0.5rem;
   padding: 0.75rem;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, var(--color-iridescent-2) 0%, var(--color-iridescent-3) 100%);
   border: none;
   border-radius: var(--radius-md);
   color: white;

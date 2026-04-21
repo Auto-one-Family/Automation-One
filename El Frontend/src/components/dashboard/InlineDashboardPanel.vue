@@ -489,7 +489,7 @@ onUnmounted(() => {
   height: 28px;
   border: none;
   background: transparent;
-  color: var(--color-text-secondary, #b0b0c0);
+  color: var(--color-text-secondary);
   cursor: pointer;
   border-radius: var(--radius-sm, 6px);
   transition: all var(--transition-fast, 150ms);
@@ -498,15 +498,15 @@ onUnmounted(() => {
 
 .widget-toolbar__btn:hover {
   background: var(--glass-bg-light, rgba(255, 255, 255, 0.04));
-  color: var(--color-text-primary, #f0f0f5);
+  color: var(--color-text-primary);
 }
 
 .widget-toolbar__btn--danger:hover {
-  color: var(--color-error, #f87171);
+  color: var(--color-error);
 }
 
 .widget-toolbar__btn:focus-visible {
-  outline: 2px solid var(--color-iridescent-2, #818cf8);
+  outline: 2px solid var(--color-iridescent-2);
   outline-offset: 1px;
 }
 

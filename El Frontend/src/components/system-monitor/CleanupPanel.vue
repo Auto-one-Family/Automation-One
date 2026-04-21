@@ -1709,7 +1709,7 @@ onMounted(() => {
 
 .severity-icon--critical {
   background: rgba(220, 38, 38, 0.15);
-  color: #dc2626;
+  color: var(--color-error);
 }
 
 .severity-label {
@@ -1938,7 +1938,7 @@ onMounted(() => {
 }
 
 .badge--success {
-  background: linear-gradient(135deg, var(--color-success) 0%, #10b981 100%);
+  background: linear-gradient(135deg, var(--color-success) 0%, var(--color-success) 100%);
 }
 
 .badge--muted {
@@ -1967,14 +1967,17 @@ onMounted(() => {
 }
 
 .btn-primary {
-  background: var(--gradient-iridescent);
-  color: white;
-  box-shadow: var(--glass-shadow-glow);
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  border-color: var(--color-accent);
+  box-shadow: var(--elevation-raised);
 }
 
 .btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 88%, white);
+  border-color: color-mix(in srgb, var(--color-accent) 88%, white);
   transform: translateY(-2px);
-  box-shadow: 0 0 30px rgba(96, 165, 250, 0.4);
+  box-shadow: var(--elevation-raised);
 }
 
 .btn-secondary {
@@ -2139,7 +2142,7 @@ onMounted(() => {
 
 .severity-critical {
   background: rgba(220, 38, 38, 0.2);
-  color: #dc2626;
+  color: var(--color-error);
 }
 
 .dialog-events {

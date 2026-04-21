@@ -1431,7 +1431,7 @@ const offlineTimeAbsolute = computed(() => {
 /* Heart pulse animation */
 .esp-card__heart-pulse {
   animation: heart-beat 1.5s ease-in-out infinite;
-  color: #f472b6; /* Pink heart */
+  color: var(--color-iridescent-4); /* Pink heart */
 }
 
 @keyframes heart-beat {
@@ -1563,7 +1563,7 @@ const offlineTimeAbsolute = computed(() => {
 
 /* Heartbeat button - pink/red accent */
 .esp-card__action-btn--heartbeat:hover:not(:disabled) {
-  color: #f472b6;
+  color: var(--color-iridescent-4);
   background-color: rgba(244, 114, 182, 0.1);
   border-color: rgba(244, 114, 182, 0.3);
 }

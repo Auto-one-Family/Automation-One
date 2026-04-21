@@ -7,7 +7,7 @@
         <BaseSkeleton text="Lade Maintenance-Status..." />
       </div>
 
-      <div v-else-if="status" class="status-grid">
+      <div v-else-if="status" class="status-grid grid-auto-sm">
         <div class="status-card" :class="status.service_running ? 'status-success' : 'status-error'">
           <div class="status-icon">{{ status.service_running ? '✅' : '❌' }}</div>
           <div class="status-content">
@@ -46,7 +46,7 @@
     <!-- Configuration -->
     <div class="config-section">
       <h2>Cleanup Configuration</h2>
-      <div v-if="config" class="config-grid">
+      <div v-if="config" class="config-grid grid-auto-md">
         <div class="config-card">
           <h3>Sensor Data Cleanup</h3>
           <div class="config-item">
@@ -112,7 +112,7 @@
     <!-- Maintenance Jobs -->
     <div class="jobs-section">
       <h2>Maintenance & Monitor Jobs</h2>
-      <div v-if="status" class="jobs-grid">
+      <div v-if="status" class="jobs-grid grid-auto-lg">
         <div
           v-for="job in status.jobs"
           :key="job.job_id"
@@ -305,8 +305,6 @@ onUnmounted(() => {
 }
 
 .status-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
 }
 
@@ -357,8 +355,6 @@ onUnmounted(() => {
 }
 
 .config-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 1rem;
 }
 
@@ -417,8 +413,6 @@ onUnmounted(() => {
 
 /* Jobs Section */
 .jobs-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
   gap: 1rem;
 }
 

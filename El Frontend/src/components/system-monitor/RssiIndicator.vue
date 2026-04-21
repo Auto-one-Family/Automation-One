@@ -106,21 +106,21 @@ const qualityLabel = computed(() => {
 .rssi-bar:nth-child(4) { height: 100%; }
 
 .rssi-bar.active {
-  background-color: var(--color-success, #22c55e);
+  background-color: var(--color-success);
 }
 
 /* Fair signal - Amber */
 .rssi-indicator--fair .rssi-bar.active {
-  background-color: var(--color-warning, #f59e0b);
+  background-color: var(--color-warning);
 }
 
 /* Weak signal - Orange */
 .rssi-indicator--weak .rssi-bar.active {
-  background-color: #fb923c;
+  background-color: var(--color-warning);
 }
 
 /* Critical signal - Red */
 .rssi-indicator--critical .rssi-bar.active {
-  background-color: var(--color-error, #ef4444);
+  background-color: var(--color-error);
 }
 </style>

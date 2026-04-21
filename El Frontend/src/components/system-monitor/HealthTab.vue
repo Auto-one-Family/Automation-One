@@ -293,7 +293,7 @@ onMounted(() => {
     </div>
 
     <!-- Summary Cards -->
-    <section class="health-summary">
+    <section class="health-summary grid-auto-sm">
       <StatCard
         title="Geräte Online"
         :value="loading ? '...' : `${healthData?.online_count ?? 0}/${healthData?.total_devices ?? 0}`"
@@ -339,7 +339,7 @@ onMounted(() => {
     </section>
 
     <!-- Diagnostics KPI Cards (from last diagnostic run) -->
-    <section v-if="diagStore.currentReport" class="health-summary health-summary--diagnostics">
+    <section v-if="diagStore.currentReport" class="health-summary health-summary--diagnostics grid-auto-sm">
       <StatCard
         title="Server"
         :value="diagStore.checksByName.server?.metrics?.cpu_percent != null ? `${diagStore.checksByName.server.metrics.cpu_percent}%` : '—'"
@@ -586,8 +586,6 @@ onMounted(() => {
    Summary Cards
    ============================================================================= */
 .health-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 1rem;
 }
 
@@ -961,7 +959,7 @@ onMounted(() => {
 
 .status-error {
   background: rgba(220, 38, 38, 0.15);
-  color: #dc2626;
+  color: var(--color-error);
 }
 
 .status-unknown {

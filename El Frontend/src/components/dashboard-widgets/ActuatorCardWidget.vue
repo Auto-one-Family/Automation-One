@@ -150,7 +150,7 @@ function selectActuator(id: string) {
 
 .actuator-card-widget--stale {
   opacity: 0.7;
-  border-left: 2px solid var(--color-warning, #f59e0b);
+  border-left: 2px solid var(--color-warning);
 }
 
 .actuator-card-widget__header {
@@ -228,7 +228,7 @@ function selectActuator(id: string) {
 }
 
 .actuator-card-widget__status-badge--stale {
-  color: var(--color-warning, #f59e0b);
+  color: var(--color-warning);
 }
 
 .actuator-card-widget__empty {

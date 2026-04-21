@@ -281,7 +281,7 @@ function resetFilters() {
   padding: 0.375rem 0.75rem;
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--color-text-secondary);
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -290,30 +290,30 @@ function resetFilters() {
 }
 
 .type-tab:hover {
-  color: var(--color-text-primary, #f3f4f6);
+  color: var(--color-text-primary);
   background: rgba(255, 255, 255, 0.05);
 }
 
 .type-tab--active {
-  color: var(--color-text-primary, #f3f4f6);
+  color: var(--color-text-primary);
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.2);
 }
 
 .type-tab__count {
-  color: var(--color-text-tertiary, #6b7280);
+  color: var(--color-text-tertiary);
 }
 
 .type-tab--active .type-tab__count {
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--color-text-secondary);
 }
 
 /* Time Select */
 .time-select {
   padding: 0.375rem 2rem 0.375rem 0.75rem;
   font-size: 0.875rem;
-  color: var(--color-text-primary, #f3f4f6);
-  background-color: var(--color-bg-tertiary, #1f2937);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-tertiary);
   border: 1px solid rgba(75, 85, 99, 0.5);
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -330,7 +330,7 @@ function resetFilters() {
 
 .time-select:focus {
   outline: none;
-  border-color: var(--color-iridescent-1, #60a5fa);
+  border-color: var(--color-iridescent-1);
   box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2);
 }
 

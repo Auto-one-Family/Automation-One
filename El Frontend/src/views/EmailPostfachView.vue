@@ -84,6 +84,8 @@ onMounted(() => {
           <input
             v-model="dateFrom"
             type="date"
+            lang="de"
+            placeholder="TT.MM.JJJJ"
             class="postfach__filter-input"
           />
         </div>
@@ -92,6 +94,8 @@ onMounted(() => {
           <input
             v-model="dateTo"
             type="date"
+            lang="de"
+            placeholder="TT.MM.JJJJ"
             class="postfach__filter-input"
           />
         </div>
@@ -437,7 +441,7 @@ onMounted(() => {
   text-align: left;
   font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
 }
@@ -548,7 +552,7 @@ onMounted(() => {
 .postfach__detail-dt {
   font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
 }
 

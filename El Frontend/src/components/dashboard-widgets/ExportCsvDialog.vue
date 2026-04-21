@@ -250,7 +250,7 @@ function handleClose() {
 .export-dialog__btn--download {
   background: var(--color-accent);
   border: none;
-  color: #fff;
+  color: var(--color-text-inverse);
 }
 
 .export-dialog__btn--download:hover {

@@ -63,6 +63,16 @@ const runtimeHealthBadge = computed(() => {
   return espHealthPresentation(vm, onlineLike)
 })
 
+const handoverBadge = computed(() => {
+  const handover = props.device.runtime_health_view?.handover
+  if (!handover) return null
+
+  return {
+    label: `Handover S${handover.rejectStartup}/R${handover.rejectRuntime} E${handover.epoch ?? '-'}`,
+    isWarning: handover.rejectTotal > 0,
+  }
+})
+
 /** Relative time for stale/offline devices */
 const lastSeenText = computed(() => {
   if (isDeviceOnline.value) return ''
@@ -297,6 +307,14 @@ function handleDeviceDelete() {
         >
           {{ runtimeHealthBadge.badgeLabel }}
         </span>
+        <span
+          v-if="handoverBadge"
+          class="device-mini-card__status-chip"
+          :class="handoverBadge.isWarning ? 'device-mini-card__status-chip--handover-warning' : 'device-mini-card__status-chip--handover'"
+          title="Handover-Rejects: Startup/Runtime + Epoche"
+        >
+          {{ handoverBadge.label }}
+        </span>
         <span v-if="lastSeenText" class="device-mini-card__last-seen">· {{ lastSeenText }}</span>
         <span v-if="sensorCount > 0 || actuatorCount > 0" class="device-mini-card__sensor-count">{{ sensorCount }}S<template v-if="actuatorCount > 0"> / {{ actuatorCount }}A</template></span>
       </div>
@@ -525,6 +543,18 @@ function handleDeviceDelete() {
   color: var(--color-text-muted);
   border-color: var(--glass-border);
   background: color-mix(in srgb, var(--color-bg-quaternary) 60%, transparent);
+}
+
+.device-mini-card__status-chip--handover {
+  color: var(--color-info);
+  border-color: color-mix(in srgb, var(--color-info) 40%, transparent);
+  background: color-mix(in srgb, var(--color-info) 10%, transparent);
+}
+
+.device-mini-card__status-chip--handover-warning {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
 }
 
 .device-mini-card__last-seen {

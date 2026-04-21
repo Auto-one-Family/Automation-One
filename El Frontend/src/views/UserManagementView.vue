@@ -55,7 +55,7 @@ function clearSuccessAfterDelay() {
 
 // Role options
 const ROLES: { value: UserRole; label: string; icon: typeof Shield; color: string }[] = [
-  { value: 'admin', label: 'Admin', icon: Shield, color: 'text-red-400' },
+  { value: 'admin', label: 'Admin', icon: Shield, color: 'text-indigo-300' },
   { value: 'operator', label: 'Operator', icon: Settings, color: 'text-yellow-400' },
   { value: 'viewer', label: 'Viewer', icon: Eye, color: 'text-blue-400' }
 ]
@@ -220,7 +220,11 @@ function getRoleConfig(role: string) {
 
 function formatDate(dateStr: string): string {
   try {
-    return new Date(dateStr).toLocaleDateString()
+    return new Intl.DateTimeFormat('de-DE', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(new Date(dateStr))
   } catch {
     return dateStr
   }
@@ -357,25 +361,28 @@ onUnmounted(() => {
             </td>
             <td class="p-4 text-sm text-dark-400">{{ formatDate(user.created_at) }}</td>
             <td class="p-4">
-              <div class="flex items-center justify-end gap-1">
+              <div class="flex items-center justify-end gap-2">
                 <button
-                  class="p-2 rounded hover:bg-dark-700 text-dark-400 hover:text-dark-200 transition-colors"
+                  class="min-h-10 min-w-10 p-2 rounded hover:bg-dark-700 text-dark-400 hover:text-dark-200 transition-colors"
                   title="Edit"
+                  aria-label="Benutzer bearbeiten"
                   @click="openEditModal(user)"
                 >
                   <Edit class="w-4 h-4" />
                 </button>
                 <button
-                  class="p-2 rounded hover:bg-dark-700 text-dark-400 hover:text-yellow-400 transition-colors"
+                  class="min-h-10 min-w-10 p-2 rounded hover:bg-dark-700 text-dark-400 hover:text-yellow-400 transition-colors"
                   title="Reset Password"
+                  aria-label="Passwort zurücksetzen"
                   @click="openResetPasswordModal(user)"
                 >
                   <Key class="w-4 h-4" />
                 </button>
                 <button
                   v-if="!isCurrentUser(user)"
-                  class="p-2 rounded hover:bg-dark-700 text-dark-400 hover:text-red-400 transition-colors"
+                  class="min-h-10 min-w-10 p-2 rounded hover:bg-dark-700 text-dark-400 hover:text-red-400 transition-colors"
                   title="Delete"
+                  aria-label="Benutzer löschen"
                   @click="openDeleteModal(user)"
                 >
                   <Trash2 class="w-4 h-4" />

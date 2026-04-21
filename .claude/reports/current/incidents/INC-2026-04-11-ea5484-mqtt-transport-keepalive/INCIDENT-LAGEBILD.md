@@ -4,10 +4,37 @@
 **Steuerdatei:** `.claude/auftraege/auto-debugger/inbox/STEUER-incident-ea5484-mqtt-transport-keepalive-tls-2026-04-11.md`  
 **Primärquelle:** `docs/analysen/BERICHT-cluster-ESP_EA5484-kalibrierung-mqtt-offline-monitoring-2026-04-11.md`  
 **Vorgänger-Incident (Mapping 6014):** `INC-2026-04-10-esp32-mqtt-tls-errtrak-6014` — dort abgeschlossen; **dieser Lauf** setzt bei **3014** und **Transport-/Keepalive-Muster** an.  
-**Letzte Aktualisierung:** 2026-04-19
+**Letzte Aktualisierung:** 2026-04-21
 
 **Aktueller Git-Branch:** `auto-debugger/work`  
 **Soll-Branch:** `auto-debugger/work`
+
+---
+
+## 0a. Abschlussstatus EA-Cluster (AUT-54 bis AUT-65) — 2026-04-21
+
+**Finale Gate-Entscheidung:** MQTT-Transport-&-Recovery-Hardening für den EA-Cluster wurde in Linear formal abgeschlossen (kein Ticket mehr im Status `In Review`).
+
+**Korreliertes Verify-Fenster (final):**
+- UTC: `2026-04-21T07:45:33Z` bis `2026-04-21T08:20:18Z`
+- Quellen: ESP-Serial (`COM3`), Broker-Log (`automationone-mqtt`), Server-Log (`automationone-server`), Live-Heartbeat-Captures via `mosquitto_sub`.
+
+| Ticket | Titel (Kurz) | Finalstatus |
+|--------|---------------|-------------|
+| AUT-54 | MQTT Transport/Session-Stabilität | Done |
+| AUT-55 | Outbox-Kapazität & Backpressure | Done |
+| AUT-57 | SafePublish Retry-Strategie | Done |
+| AUT-58 | Heartbeat-Degradation-Policy | Done |
+| AUT-59 | Pending-Exit-Blockade | Done |
+| AUT-60 | Cross-ESP Readiness-Gate | Done |
+| AUT-61 | Approval NVS Dedup (Call-Site) | Done |
+| AUT-63 | Broadcast-Emergency-Contract (3016) | Done |
+| AUT-65 | WS Envelope/Payload correlation_id | Done |
+
+**Finale Signaturen im Verify-Fenster:**
+- Serial: `MQTT_EVENT_DISCONNECTED=0`, `outbox_enqueue(46)=0`, `SafePublish failed after retry=0`, `CONFIG_PENDING_BLOCKED=0`.
+- Server: `contract_mismatch=0`, `3016|EMERGENCY_CONTRACT_MISMATCH=0`.
+- Broker: Reconnect-Ereignisse als Session-Takeover/controlled close beobachtet, ohne erneute Fehlerkaskade.
 
 ---
 

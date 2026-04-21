@@ -887,14 +887,14 @@ function miniMapNodeColor(node: Node): string {
     sensor: () => tokens.info,
     time: () => tokens.warning,
     logic: () => tokens.mock,
-    actuator: () => '#c084fc',
+    actuator: () => tokens.mock,
     notification: () => tokens.success,
-    delay: () => '#707080',
-    plugin: () => '#f59e0b',
-    diagnostics_status: () => '#22d3ee',
-    run_diagnostic: () => '#22d3ee',
+    delay: () => tokens.textMuted,
+    plugin: () => tokens.warning,
+    diagnostics_status: () => tokens.real,
+    run_diagnostic: () => tokens.real,
   }
-  return colors[node.type || '']?.() || '#707080'
+  return colors[node.type || '']?.() || tokens.textMuted
 }
 
 // ======================== UNDO/REDO ========================

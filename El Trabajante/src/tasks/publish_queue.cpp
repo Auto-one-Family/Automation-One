@@ -16,6 +16,51 @@ static std::atomic<uint8_t>  g_pq_high_watermark{0};
 static std::atomic<bool>     g_pq_paused_for_announce_ack{false};
 static std::atomic<uint32_t> g_pq_resume_guard_deadline_ms{0};
 
+// Reserve one queue slot for critical publishes by evicting one queued
+// non-critical message. Keeps terminal acknowledgements deliverable under load.
+static bool reserveSlotForCriticalPublish(PublishRequest* critical_req) {
+    if (critical_req == nullptr || g_publish_queue == NULL) {
+        return false;
+    }
+
+    const UBaseType_t queued = uxQueueMessagesWaiting(g_publish_queue);
+    if (queued == 0) {
+        return false;
+    }
+
+    bool evicted_non_critical = false;
+    PublishRequest item;
+
+    for (UBaseType_t i = 0; i < queued; ++i) {
+        if (xQueueReceive(g_publish_queue, &item, 0) != pdTRUE) {
+            break;
+        }
+
+        if (!evicted_non_critical && !item.critical) {
+            evicted_non_critical = true;
+            g_pq_shed_count.fetch_add(1);
+            LOG_W(PQ_TAG, "[SYNC] Evicted non-critical publish to protect critical lane: " +
+                          String(item.topic));
+            continue;
+        }
+
+        if (xQueueSend(g_publish_queue, &item, 0) != pdTRUE) {
+            g_pq_drop_count.fetch_add(1);
+            LOG_W(PQ_TAG, "[SYNC] Queue restore dropped publish: " + String(item.topic));
+        }
+    }
+
+    if (!evicted_non_critical) {
+        return false;
+    }
+
+    if (xQueueSend(g_publish_queue, critical_req, 0) == pdTRUE) {
+        return true;
+    }
+
+    return false;
+}
+
 // ============================================
 // initPublishQueue
 // ============================================
@@ -154,6 +199,10 @@ bool queuePublish(const char* topic,
 
     TickType_t wait_ticks = critical ? pdMS_TO_TICKS(20) : 0;
     if (xQueueSend(g_publish_queue, &req, wait_ticks) != pdTRUE) {
+        if (critical && reserveSlotForCriticalPublish(&req)) {
+            return true;
+        }
+
         g_pq_drop_count.fetch_add(1);
         LOG_W(PQ_TAG, "[SYNC] Publish queue full — dropping: " + String(topic));
         errorTracker.logApplicationError(ERROR_TASK_QUEUE_FULL, "Publish queue full");

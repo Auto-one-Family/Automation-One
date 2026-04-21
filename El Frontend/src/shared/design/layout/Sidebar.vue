@@ -32,9 +32,13 @@ const emit = defineEmits<{
 const route = useRoute()
 const authStore = useAuthStore()
 
-function isActive(to: string): boolean {
-  if (to === '/') return route.path === '/'
-  return route.path.startsWith(to)
+function matchesRoutePrefix(prefix: string): boolean {
+  if (prefix === '/') return route.path === '/'
+  return route.path === prefix || route.path.startsWith(`${prefix}/`)
+}
+
+function isDashboardRoute(): boolean {
+  return ['/hardware', '/monitor', '/editor'].some(matchesRoutePrefix)
 }
 
 function handleNavClick() {
@@ -74,7 +78,7 @@ function handleNavClick() {
 
       <RouterLink
         to="/hardware"
-        :class="['sidebar__link', (isActive('/hardware') || isActive('/monitor') || isActive('/editor')) && 'sidebar__link--active']"
+        :class="['sidebar__link', isDashboardRoute() && 'sidebar__link--active']"
         @click="handleNavClick"
       >
         <div class="sidebar__link-indicator" />
@@ -84,7 +88,7 @@ function handleNavClick() {
 
       <RouterLink
         to="/logic"
-        :class="['sidebar__link', isActive('/logic') && 'sidebar__link--active']"
+        :class="['sidebar__link', matchesRoutePrefix('/logic') && 'sidebar__link--active']"
         @click="handleNavClick"
       >
         <div class="sidebar__link-indicator" />
@@ -94,7 +98,7 @@ function handleNavClick() {
 
       <RouterLink
         to="/sensors"
-        :class="['sidebar__link', isActive('/sensors') && 'sidebar__link--active']"
+        :class="['sidebar__link', matchesRoutePrefix('/sensors') && 'sidebar__link--active']"
         @click="handleNavClick"
       >
         <div class="sidebar__link-indicator" />
@@ -110,7 +114,7 @@ function handleNavClick() {
 
         <RouterLink
           to="/system-monitor"
-          :class="['sidebar__link', isActive('/system-monitor') && 'sidebar__link--active']"
+          :class="['sidebar__link', matchesRoutePrefix('/system-monitor') && 'sidebar__link--active']"
           @click="handleNavClick"
         >
           <div class="sidebar__link-indicator" />
@@ -120,7 +124,7 @@ function handleNavClick() {
 
         <RouterLink
           to="/users"
-          :class="['sidebar__link', isActive('/users') && 'sidebar__link--active']"
+          :class="['sidebar__link', matchesRoutePrefix('/users') && 'sidebar__link--active']"
           @click="handleNavClick"
         >
           <div class="sidebar__link-indicator" />
@@ -130,7 +134,7 @@ function handleNavClick() {
 
         <RouterLink
           to="/calibration"
-          :class="['sidebar__link', isActive('/calibration') && 'sidebar__link--active']"
+          :class="['sidebar__link', matchesRoutePrefix('/calibration') && 'sidebar__link--active']"
           @click="handleNavClick"
         >
           <div class="sidebar__link-indicator" />
@@ -140,7 +144,7 @@ function handleNavClick() {
 
         <RouterLink
           to="/plugins"
-          :class="['sidebar__link', isActive('/plugins') && 'sidebar__link--active']"
+          :class="['sidebar__link', matchesRoutePrefix('/plugins') && 'sidebar__link--active']"
           @click="handleNavClick"
         >
           <div class="sidebar__link-indicator" />
@@ -150,7 +154,7 @@ function handleNavClick() {
 
         <RouterLink
           to="/email"
-          :class="['sidebar__link', isActive('/email') && 'sidebar__link--active']"
+          :class="['sidebar__link', matchesRoutePrefix('/email') && 'sidebar__link--active']"
           @click="handleNavClick"
         >
           <div class="sidebar__link-indicator" />
@@ -164,7 +168,7 @@ function handleNavClick() {
     <div class="sidebar__footer">
       <RouterLink
         to="/settings"
-        :class="['sidebar__link', isActive('/settings') && 'sidebar__link--active']"
+        :class="['sidebar__link', matchesRoutePrefix('/settings') && 'sidebar__link--active']"
         @click="handleNavClick"
       >
         <div class="sidebar__link-indicator" />

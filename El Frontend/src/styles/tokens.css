@@ -24,7 +24,7 @@
      ═══════════════════════════════════════════════════════════════════════════ */
   --color-text-primary:   #eaeaf2;  /* headlines, primary values, white-ish */
   --color-text-secondary: #8585a0;  /* labels, descriptions, body text */
-  --color-text-muted:     #484860;  /* timestamps, hints, disabled — 4.1:1 on primary, use on tertiary+ bg only */
+  --color-text-muted:     #5a5a75;  /* timestamps, hints, disabled — raised for WCAG AA on dark backgrounds */
   --color-text-inverse:   #ffffff;  /* light text on dark/accent buttons */
 
   /* ═══════════════════════════════════════════════════════════════════════════

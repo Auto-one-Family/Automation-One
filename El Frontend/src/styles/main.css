@@ -98,25 +98,25 @@
     pointer-events: none;
   }
 
-  /* Primary — Iridescent Gradient */
+  /* Primary — Accent */
   .btn-primary {
-    color: #fff;
-    background: var(--gradient-iridescent);
-    border-color: transparent;
+    color: var(--color-text-inverse);
+    background: var(--color-accent);
+    border-color: var(--color-accent);
     box-shadow: var(--elevation-raised);
   }
 
   .btn-primary:hover:not(:disabled) {
-    box-shadow:
-      var(--elevation-raised),
-      0 0 16px rgba(96, 165, 250, 0.2);
+    background: color-mix(in srgb, var(--color-accent) 88%, white);
+    border-color: color-mix(in srgb, var(--color-accent) 88%, white);
+    box-shadow: var(--elevation-raised);
     transform: translateY(-1px);
-    filter: brightness(1.08);
   }
 
   .btn-primary:active:not(:disabled) {
+    background: color-mix(in srgb, var(--color-accent) 82%, black);
+    border-color: color-mix(in srgb, var(--color-accent) 82%, black);
     transform: translateY(0);
-    filter: brightness(0.95);
   }
 
   /* Secondary — Ghost with border */
@@ -285,6 +285,24 @@
     letter-spacing: var(--tracking-wide);
     line-height: var(--leading-normal);
     white-space: nowrap;
+  }
+
+  .badge--sm {
+    padding: 2px var(--space-2);
+    font-size: var(--text-xs);
+    gap: var(--space-1);
+  }
+
+  .badge--md {
+    padding: 4px var(--space-2);
+    font-size: var(--text-xs);
+    gap: var(--space-1);
+  }
+
+  .badge--lg {
+    padding: 6px var(--space-3);
+    font-size: var(--text-sm);
+    gap: var(--space-2);
   }
 
   .badge-success {
@@ -692,6 +710,24 @@
   .py-responsive {
     @apply py-3 sm:py-4 md:py-6;
   }
+
+  /* Grid utilities (AUT-49) for card/list auto-placement */
+  .grid-auto-sm {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  }
+
+  .grid-auto-md {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+
+  .grid-auto-lg {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  }
+
+  /* Breakpoint policy: prefer sm/md/lg/xl/2xl; keep 3xl/4xl for explicit widescreen cases */
 
   /* Hide scrollbar but keep functionality */
   .scrollbar-hide {

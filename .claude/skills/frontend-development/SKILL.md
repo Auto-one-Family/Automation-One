@@ -15,8 +15,8 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 10.7
-**Letzte Aktualisierung:** 2026-04-11
+**Version:** 10.9
+**Letzte Aktualisierung:** 2026-04-21
 
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
@@ -988,6 +988,7 @@ component: lazyView(() => import('@/views/PluginsView.vue'))
 
 Alle Farben ueber CSS Variables definiert.
 **KEINE hardcoded Hex-Werte in Komponenten!**
+Chart-Konfigurationen (z. B. Chart.js Tooltips/Paletten) duerfen als eng begrenzte Ausnahme hardcoded bleiben, wenn kein gleichwertiger Token-Kontext verfuegbar ist.
 
 ```css
 /* Background (3 Stufen) */
@@ -1369,7 +1370,9 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 10.8 | **Letzte Aktualisierung:** 2026-04-14
+**Version:** 10.9 | **Letzte Aktualisierung:** 2026-04-21
+
+- 2026-04-21: AUT-48 abgeschlossen — verbleibende 47 `.vue` Dateien auf Design-Token-Farben migriert; `var(--token, #hex)`-Fallbacks entfernt; UI-Hexwerte auf `var(--color-*)`/`tokens.*` umgestellt; verbleibende Hexwerte nur in Chart-Konfigurationen (`SensorHistoryView.vue`, `MultiSensorChart.vue`) belassen.
 
 - 2026-04-14: Chart-Stabilitaet Monitor/L3 gehaertet — Annotation-Guards gegen ungueltige Threshold-/Event-Werte (`toFiniteNumber`, finite timestamp check), `borderCapStyle` defensiv gesetzt und Annotation-Plugin nur mit gueltigen Annotationen aktiviert (`LiveLineChart.vue`, `HistoricalChart.vue`, `MultiSensorChart.vue`).
 

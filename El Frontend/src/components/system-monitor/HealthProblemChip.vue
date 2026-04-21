@@ -112,11 +112,11 @@ const displayName = computed(() =>
 }
 
 .problem-chip--offline .problem-chip__dot {
-  background: var(--color-error, #f87171);
+  background: var(--color-error);
 }
 
 .problem-chip--offline .problem-chip__status {
-  color: var(--color-error, #f87171);
+  color: var(--color-error);
 }
 
 /* Warning types */
@@ -138,18 +138,18 @@ const displayName = computed(() =>
 .problem-chip--low-heap .problem-chip__dot,
 .problem-chip--weak-signal .problem-chip__dot,
 .problem-chip--high-errors .problem-chip__dot {
-  background: var(--color-warning, #fbbf24);
+  background: var(--color-warning);
 }
 
 .problem-chip--low-heap .problem-chip__status,
 .problem-chip--weak-signal .problem-chip__status,
 .problem-chip--high-errors .problem-chip__status {
-  color: var(--color-warning, #fbbf24);
+  color: var(--color-warning);
 }
 
 .problem-chip__name {
   font-weight: 500;
-  color: var(--color-text-primary, #e5e7eb);
+  color: var(--color-text-primary);
 }
 
 .problem-chip__status {
@@ -160,14 +160,14 @@ const displayName = computed(() =>
 }
 
 .problem-chip__detail {
-  color: var(--color-text-muted, #6b7280);
+  color: var(--color-text-muted);
   font-size: 0.75rem;
 }
 
 .problem-chip__icon {
   flex-shrink: 0;
   opacity: 0;
-  color: var(--color-text-muted, #6b7280);
+  color: var(--color-text-muted);
   margin-top: 0.25rem;
   transition: opacity 0.15s;
 }

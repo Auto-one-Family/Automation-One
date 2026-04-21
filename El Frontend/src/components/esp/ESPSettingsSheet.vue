@@ -1370,7 +1370,7 @@ onUnmounted(() => {
 .action-btn--heartbeat {
   background: linear-gradient(135deg, rgba(244, 114, 182, 0.15), rgba(168, 85, 247, 0.1));
   border: 1px solid rgba(244, 114, 182, 0.3);
-  color: #f472b6;
+  color: var(--color-iridescent-4);
 }
 
 .action-btn--heartbeat:hover:not(:disabled) {
@@ -1507,10 +1507,10 @@ onUnmounted(() => {
 .text-muted { color: var(--color-text-muted); }
 
 .text-emerald-400 { color: var(--color-success); }
-.text-yellow-400 { color: #facc15; }
-.text-orange-400 { color: #fb923c; }
+.text-yellow-400 { color: var(--color-warning); }
+.text-orange-400 { color: var(--color-warning); }
 .text-red-400 { color: var(--color-error); }
-.text-slate-500 { color: #64748b; }
+.text-slate-500 { color: var(--color-text-muted); }
 
 .text-sm { font-size: 0.8125rem; }
 .text-xs { font-size: 0.75rem; }

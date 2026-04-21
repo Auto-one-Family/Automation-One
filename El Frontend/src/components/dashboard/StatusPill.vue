@@ -170,7 +170,7 @@ const emit = defineEmits<{
 
 /* ── SafeMode ── */
 .status-pill--safemode .status-pill__dot {
-  background: #f97316;
+  background: var(--color-warning);
 }
 
 .status-pill--safemode:hover {
@@ -183,10 +183,10 @@ const emit = defineEmits<{
 }
 
 .status-pill--safemode.status-pill--active .status-pill__dot {
-  box-shadow: 0 0 6px #f97316;
+  box-shadow: 0 0 6px var(--color-warning);
 }
 
 .status-pill--safemode.status-pill--active .status-pill__count {
-  color: #f97316;
+  color: var(--color-warning);
 }
 </style>

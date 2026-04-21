@@ -187,7 +187,7 @@ watch(() => palette.query.value, () => {
 .palette {
   width: 100%;
   max-width: 560px;
-  background-color: var(--color-bg-secondary, #0d0d16);
+  background-color: var(--color-bg-secondary);
   border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.06));
   border-radius: var(--radius-lg, 14px);
   box-shadow: var(--glass-shadow, 0 8px 32px rgba(0, 0, 0, 0.4));
@@ -206,7 +206,7 @@ watch(() => palette.query.value, () => {
 .palette__search-icon {
   width: 20px;
   height: 20px;
-  color: var(--color-text-muted, #484860);
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
@@ -215,20 +215,20 @@ watch(() => palette.query.value, () => {
   background: transparent;
   border: none;
   outline: none;
-  color: var(--color-text-primary, #eaeaf2);
+  color: var(--color-text-primary);
   font-size: var(--text-base, 16px);
   font-family: inherit;
 }
 
 .palette__input::placeholder {
-  color: var(--color-text-muted, #484860);
+  color: var(--color-text-muted);
 }
 
 .palette__kbd {
   padding: 2px 6px;
   font-size: var(--text-xs, 11px);
-  color: var(--color-text-muted, #484860);
-  background: var(--color-bg-tertiary, #15151f);
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.06));
   border-radius: var(--radius-sm, 6px);
   font-family: inherit;
@@ -244,7 +244,7 @@ watch(() => palette.query.value, () => {
 .palette__empty {
   padding: var(--space-6, 24px) var(--space-4, 16px);
   text-align: center;
-  color: var(--color-text-muted, #484860);
+  color: var(--color-text-muted);
   font-size: var(--text-sm, 14px);
 }
 
@@ -252,7 +252,7 @@ watch(() => palette.query.value, () => {
   padding: var(--space-2, 8px) var(--space-3, 12px) var(--space-1, 4px);
   font-size: var(--text-xs, 11px);
   font-weight: 600;
-  color: var(--color-text-muted, #484860);
+  color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -266,7 +266,7 @@ watch(() => palette.query.value, () => {
   border: none;
   border-radius: var(--radius-sm, 6px);
   background: transparent;
-  color: var(--color-text-secondary, #8585a0);
+  color: var(--color-text-secondary);
   font-size: var(--text-sm, 14px);
   cursor: pointer;
   transition: all var(--transition-fast, 120ms) ease;
@@ -275,8 +275,8 @@ watch(() => palette.query.value, () => {
 
 .palette__item:hover,
 .palette__item--selected {
-  background-color: var(--color-bg-tertiary, #15151f);
-  color: var(--color-text-primary, #eaeaf2);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
 }
 
 .palette__item-icon {
@@ -297,7 +297,7 @@ watch(() => palette.query.value, () => {
 .palette__item-enter {
   width: 14px;
   height: 14px;
-  color: var(--color-text-muted, #484860);
+  color: var(--color-text-muted);
 }
 
 /* Footer */
@@ -310,7 +310,7 @@ watch(() => palette.query.value, () => {
 
 .palette__hint {
   font-size: var(--text-xs, 11px);
-  color: var(--color-text-muted, #484860);
+  color: var(--color-text-muted);
   display: flex;
   align-items: center;
   gap: var(--space-1, 4px);
@@ -319,7 +319,7 @@ watch(() => palette.query.value, () => {
 .palette__hint kbd {
   padding: 1px 4px;
   font-size: var(--text-xxs);
-  background: var(--color-bg-tertiary, #15151f);
+  background: var(--color-bg-tertiary);
   border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.06));
   border-radius: var(--radius-xs);
   font-family: inherit;

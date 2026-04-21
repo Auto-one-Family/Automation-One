@@ -79,7 +79,7 @@ onMounted(() => {
     <!-- Rules Grid -->
     <div v-else class="active-automations-section__content">
       <ul
-        class="active-automations-section__grid monitor-card-grid"
+        class="active-automations-section__grid monitor-card-grid grid-auto-sm"
         role="list"
       >
         <li
@@ -218,8 +218,4 @@ onMounted(() => {
   padding: 0;
 }
 
-/* Responsive: bei schmalem Viewport (z. B. 320px) eine Spalte, lesbar */
-.active-automations-section__grid.monitor-card-grid {
-  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
-}
 </style>

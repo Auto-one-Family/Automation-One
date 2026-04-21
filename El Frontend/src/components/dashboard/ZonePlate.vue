@@ -470,7 +470,7 @@ function handleDragEnd() {
       <!-- Devices inside VueDraggable for cross-zone drag-drop (disabled for archived zones) -->
       <VueDraggable
         v-model="localDevices"
-        class="zone-plate__devices"
+        class="zone-plate__devices grid-auto-md"
         :group="isArchived ? undefined : 'esp-devices'"
         :animation="150"
         handle=".esp-drag-handle"
@@ -580,11 +580,11 @@ function handleDragEnd() {
   background-size: 300% 100%;
   animation: glow-sweep 2s linear infinite;
   -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
+    linear-gradient(white 0 0) content-box,
+    linear-gradient(white 0 0);
   mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
+    linear-gradient(white 0 0) content-box,
+    linear-gradient(white 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
@@ -896,8 +896,6 @@ function handleDragEnd() {
 
 /* Device grid — auto-fill stretches cards when few devices */
 .zone-plate__devices {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--space-2);
   min-height: 32px;
   padding-top: var(--space-1);

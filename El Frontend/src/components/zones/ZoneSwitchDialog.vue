@@ -294,17 +294,17 @@ function handleClose() {
 }
 
 .zone-switch__btn--cancel:hover {
-  background-color: var(--color-bg-quaternary, #1d1d2a);
+  background-color: var(--color-bg-quaternary);
   color: var(--color-text-primary);
 }
 
 .zone-switch__btn--confirm {
   background-color: var(--color-iridescent-1);
-  color: #fff;
+  color: var(--color-text-inverse);
 }
 
 .zone-switch__btn--confirm:hover {
-  background-color: #4d94f8;
+  background-color: var(--color-accent-bright);
 }
 
 .zone-switch__btn:focus-visible {

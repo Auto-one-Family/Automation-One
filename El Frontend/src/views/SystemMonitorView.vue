@@ -1245,7 +1245,7 @@ watch(activeTab, (newTab) => {
 
     <!-- Statistics Bar (collapsible) - ENTFERNT: showStats immer false, Stats nun via Cleanup-Panel -->
     <Transition name="slide-down">
-      <div v-if="showStats && statistics" class="stats-bar">
+      <div v-if="showStats && statistics" class="stats-bar grid-auto-sm">
         <!-- Gesamt (DB) -->
         <div class="stats-bar__item stats-bar__item--with-tooltip">
           <div class="stats-bar__content">
@@ -1495,7 +1495,7 @@ watch(activeTab, (newTab) => {
 .ops-banner__title {
   font-size: var(--text-xs);
   text-transform: uppercase;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   margin-top: 0.375rem;
 }
 
@@ -1544,7 +1544,7 @@ watch(activeTab, (newTab) => {
 
 .ops-banner__meta {
   font-size: 0.6875rem;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
@@ -1730,8 +1730,6 @@ watch(activeTab, (newTab) => {
    Statistics Bar - Iridescent Cards
    ============================================================================ */
 .stats-bar {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: var(--space-md);
   padding: var(--space-md) var(--space-lg);
   background: var(--glass-bg-light);
@@ -1930,7 +1928,7 @@ watch(activeTab, (newTab) => {
 .stats-bar__label {
   font-size: 0.75rem;
   font-weight: 500;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -1944,10 +1942,6 @@ watch(activeTab, (newTab) => {
 }
 
 @media (max-width: 1024px) {
-  .stats-bar {
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  }
-
   .stats-bar__value {
     font-size: 1.25rem;
   }
@@ -2232,29 +2226,19 @@ watch(activeTab, (newTab) => {
   overflow: hidden;
 }
 
-/* Primary - Iridescent Gradient */
+/* Primary - Accent */
 .btn-primary {
-  background: var(--gradient-iridescent);
+  background: var(--color-accent);
   color: var(--color-text-inverse);
-  box-shadow: var(--glass-shadow-glow);
-}
-
-.btn-primary::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--gradient-iridescent-full);
-  opacity: 0;
-  transition: opacity var(--transition-base);
+  border-color: var(--color-accent);
+  box-shadow: var(--elevation-raised);
 }
 
 .btn-primary:hover {
+  background: color-mix(in srgb, var(--color-accent) 88%, white);
+  border-color: color-mix(in srgb, var(--color-accent) 88%, white);
   transform: translateY(-2px);
-  box-shadow: 0 0 30px color-mix(in srgb, var(--color-accent-bright) 40%, transparent);
-}
-
-.btn-primary:hover::before {
-  opacity: 0.3;
+  box-shadow: var(--elevation-raised);
 }
 
 .btn-primary:active {
@@ -2296,10 +2280,6 @@ watch(activeTab, (newTab) => {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
-}
-
-.btn-primary:disabled::before {
-  display: none;
 }
 
 /* ============================================================================

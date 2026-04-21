@@ -76,6 +76,17 @@ const pageTitle = computed(() =>
   (route.meta.title as string) || 'Dashboard'
 )
 
+const breadcrumbSegments = computed(() => {
+  if (!dashStore.showControls) return []
+
+  const raw = [
+    dashStore.breadcrumb.zoneName,
+    dashStore.breadcrumb.deviceName || dashStore.breadcrumb.dashboardName || dashStore.breadcrumb.ruleName,
+    dashStore.breadcrumb.sensorName,
+  ]
+  return raw.filter((segment): segment is string => typeof segment === 'string' && segment.trim().length > 0)
+})
+
 const pendingAndUnassignedCount = computed(() =>
   espStore.pendingDevices.length + espStore.unassignedDevices.length
 )
@@ -117,6 +128,16 @@ async function handleLogout() {
       </button>
 
       <span class="header__page-title">{{ pageTitle }}</span>
+      <nav v-if="breadcrumbSegments.length > 0" class="header__breadcrumb" aria-label="Kontextpfad">
+        <span
+          v-for="(segment, idx) in breadcrumbSegments"
+          :key="`${segment}-${idx}`"
+          class="header__crumb--current"
+        >
+          <span v-if="idx > 0" class="header__crumb-sep">›</span>
+          {{ segment }}
+        </span>
+      </nav>
     </div>
 
     <!-- ═══ CENTER: Dashboard Controls ═══ -->
@@ -895,8 +916,8 @@ async function handleLogout() {
   padding: 1px;
   background: var(--gradient-iridescent);
   -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
+    linear-gradient(white 0 0) content-box,
+    linear-gradient(white 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   animation: iridescent-shift 3s ease-in-out infinite;

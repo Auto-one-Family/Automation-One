@@ -1039,7 +1039,7 @@ onUnmounted(() => {
 
 .severity-badge--critical {
   background: rgba(220, 38, 38, 0.2);
-  color: #fca5a5;
+  color: var(--color-error);
   border: 2px solid rgba(220, 38, 38, 0.4);
   animation: critical-badge-pulse 2s ease-in-out infinite;
 }
@@ -1135,7 +1135,7 @@ onUnmounted(() => {
 }
 
 .summary-text--error {
-  color: #fca5a5;
+  color: var(--color-error);
 }
 
 /* ============================================================================
@@ -1307,7 +1307,7 @@ onUnmounted(() => {
   padding: 0.25rem 0.5rem;
   border-radius: var(--radius-sm);
   background: rgba(139, 92, 246, 0.2);
-  color: #d8b4fe;
+  color: var(--color-iridescent-3);
   border: 1px solid rgba(139, 92, 246, 0.35);
   font-size: 0.75rem;
   font-weight: 600;
@@ -1473,7 +1473,7 @@ onUnmounted(() => {
   font-family: var(--font-mono, monospace);
   font-size: 0.875rem;
   font-weight: 600;
-  color: #fca5a5;
+  color: var(--color-error);
 }
 
 .error-info {
@@ -1549,7 +1549,7 @@ onUnmounted(() => {
 
 .failure-gpio {
   font-family: var(--font-mono, monospace);
-  color: #fca5a5;
+  color: var(--color-error);
   font-weight: 600;
 }
 
@@ -1951,7 +1951,7 @@ onUnmounted(() => {
 
 .copy-correlation-btn:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: var(--color-text-primary, #f0f0f5);
+  color: var(--color-text-primary);
 }
 
 .retry-btn {
@@ -1968,7 +1968,7 @@ onUnmounted(() => {
 
 .retry-btn:hover {
   background: rgba(255, 255, 255, 0.08);
-  color: var(--color-text-primary, #f0f0f5);
+  color: var(--color-text-primary);
 }
 
 </style>

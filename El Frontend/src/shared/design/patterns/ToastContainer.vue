@@ -128,19 +128,19 @@ async function handleAction(toastId: string, action: ToastAction) {
 
 /* Type-specific accents */
 .toast--success {
-  border-left: 3px solid var(--color-success, #34d399);
+  border-left: 3px solid var(--color-success);
 }
 
 .toast--error {
-  border-left: 3px solid var(--color-error, #f87171);
+  border-left: 3px solid var(--color-error);
 }
 
 .toast--warning {
-  border-left: 3px solid var(--color-warning, #fbbf24);
+  border-left: 3px solid var(--color-warning);
 }
 
 .toast--info {
-  border-left: 3px solid var(--color-iridescent-1, #60a5fa);
+  border-left: 3px solid var(--color-iridescent-1);
 }
 
 /* Icon */
@@ -157,19 +157,19 @@ async function handleAction(toastId: string, action: ToastAction) {
 }
 
 .toast--success .toast__icon {
-  color: var(--color-success, #34d399);
+  color: var(--color-success);
 }
 
 .toast--error .toast__icon {
-  color: var(--color-error, #f87171);
+  color: var(--color-error);
 }
 
 .toast--warning .toast__icon {
-  color: var(--color-warning, #fbbf24);
+  color: var(--color-warning);
 }
 
 .toast--info .toast__icon {
-  color: var(--color-iridescent-1, #60a5fa);
+  color: var(--color-iridescent-1);
 }
 
 /* Content */
@@ -204,12 +204,12 @@ async function handleAction(toastId: string, action: ToastAction) {
 }
 
 .toast__action--primary {
-  background-color: var(--color-iridescent-1, #60a5fa);
+  background-color: var(--color-iridescent-1);
   color: white;
 }
 
 .toast__action--primary:hover {
-  background-color: var(--color-iridescent-2, #a78bfa);
+  background-color: var(--color-iridescent-2);
 }
 
 .toast__action--secondary {
@@ -257,19 +257,19 @@ async function handleAction(toastId: string, action: ToastAction) {
 }
 
 .toast--success .toast__progress {
-  color: var(--color-success, #34d399);
+  color: var(--color-success);
 }
 
 .toast--error .toast__progress {
-  color: var(--color-error, #f87171);
+  color: var(--color-error);
 }
 
 .toast--warning .toast__progress {
-  color: var(--color-warning, #fbbf24);
+  color: var(--color-warning);
 }
 
 .toast--info .toast__progress {
-  color: var(--color-iridescent-1, #60a5fa);
+  color: var(--color-iridescent-1);
 }
 
 @keyframes toast-progress {

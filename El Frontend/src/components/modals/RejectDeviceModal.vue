@@ -138,7 +138,7 @@ function handleKeydown(e: KeyboardEvent) {
   align-items: center;
   justify-content: center;
   background-color: rgba(248, 113, 113, 0.1);
-  color: var(--color-error, #f87171);
+  color: var(--color-error);
 }
 
 .reject-modal__device {
@@ -222,21 +222,21 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 .reject-modal__btn--cancel:hover {
-  background-color: var(--color-bg-quaternary, #1d1d2a);
+  background-color: var(--color-bg-quaternary);
   color: var(--color-text-primary);
 }
 
 .reject-modal__btn--danger {
-  background-color: var(--color-error, #f87171);
-  color: #fff;
+  background-color: var(--color-error);
+  color: var(--color-text-inverse);
 }
 
 .reject-modal__btn--danger:hover {
-  background-color: #f55a5a;
+  background-color: var(--color-error);
 }
 
 .reject-modal__btn:focus-visible {
-  outline: 2px solid var(--color-accent, #3b82f6);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 </style>

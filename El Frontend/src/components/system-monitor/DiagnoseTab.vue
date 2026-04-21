@@ -150,7 +150,7 @@ onMounted(() => {
     </div>
 
     <!-- Check Cards Grid -->
-    <div class="diagnose-tab__grid">
+    <div class="diagnose-tab__grid grid-auto-lg">
       <div
         v-for="check in store.availableChecks"
         :key="check.name"
@@ -348,8 +348,6 @@ onMounted(() => {
 
 /* Grid */
 .diagnose-tab__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: var(--space-3);
 }
 

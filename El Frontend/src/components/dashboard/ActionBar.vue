@@ -372,8 +372,8 @@ const isFilterActive = (filter: StatusFilter) => props.activeFilters.has(filter)
   padding: 1px;
   background: var(--gradient-iridescent);
   -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
+    linear-gradient(white 0 0) content-box,
+    linear-gradient(white 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   animation: iridescent-shift 3s ease-in-out infinite;

@@ -387,19 +387,19 @@ function formatErrorTime(isoString: string): string {
 }
 
 .health-summary__icon--warning {
-  color: var(--color-warning, #fbbf24);
+  color: var(--color-warning);
 }
 
 .health-summary__icon--ok {
-  color: var(--color-success, #34d399);
+  color: var(--color-success);
 }
 
 .health-summary--has-problems .health-summary__status {
-  color: var(--color-text-primary, #e5e7eb);
+  color: var(--color-text-primary);
 }
 
 .health-summary--all-ok .health-summary__status {
-  color: var(--color-success, #34d399);
+  color: var(--color-success);
 }
 
 /* Problem Chips */
@@ -488,7 +488,7 @@ function formatErrorTime(isoString: string): string {
   border-radius: var(--radius-md);
   font-size: 0.8125rem;
   font-weight: 500;
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--color-text-secondary);
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.08));
   cursor: pointer;
@@ -498,13 +498,13 @@ function formatErrorTime(isoString: string): string {
 
 .health-summary__toggle:hover {
   background: rgba(255, 255, 255, 0.08);
-  color: var(--color-text-primary, #e5e7eb);
+  color: var(--color-text-primary);
   border-color: rgba(255, 255, 255, 0.15);
 }
 
 .health-summary--expanded .health-summary__toggle {
   background: rgba(255, 255, 255, 0.08);
-  color: var(--color-text-primary, #e5e7eb);
+  color: var(--color-text-primary);
 }
 
 .health-summary__chevron {
@@ -545,7 +545,7 @@ function formatErrorTime(isoString: string): string {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--color-text-muted, #6b7280);
+  color: var(--color-text-muted);
 }
 
 .health-summary__divider::before,
@@ -582,28 +582,28 @@ function formatErrorTime(isoString: string): string {
 
 .error-item--critical,
 .error-item--error {
-  border-left-color: var(--color-error, #f87171);
+  border-left-color: var(--color-error);
 }
 
 .error-item--critical .error-item__icon,
 .error-item--error .error-item__icon {
-  color: var(--color-error, #f87171);
+  color: var(--color-error);
 }
 
 .error-item--warning {
-  border-left-color: var(--color-warning, #fbbf24);
+  border-left-color: var(--color-warning);
 }
 
 .error-item--warning .error-item__icon {
-  color: var(--color-warning, #fbbf24);
+  color: var(--color-warning);
 }
 
 .error-item--info {
-  border-left-color: var(--color-info, #60a5fa);
+  border-left-color: var(--color-info);
 }
 
 .error-item--info .error-item__icon {
-  color: var(--color-info, #60a5fa);
+  color: var(--color-info);
 }
 
 .error-item__icon {
@@ -611,14 +611,14 @@ function formatErrorTime(isoString: string): string {
 }
 
 .error-item__source {
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--color-text-secondary);
   font-size: 0.75rem;
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .error-item__message {
-  color: var(--color-text-primary, #e5e7eb);
+  color: var(--color-text-primary);
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -629,7 +629,7 @@ function formatErrorTime(isoString: string): string {
 .error-item--empty {
   padding: 0.75rem;
   text-align: center;
-  color: var(--color-text-muted, #6b7280);
+  color: var(--color-text-muted);
   font-size: 0.8125rem;
 }
 
@@ -643,7 +643,7 @@ function formatErrorTime(isoString: string): string {
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.02);
   font-size: 0.75rem;
-  color: var(--color-text-muted, #6b7280);
+  color: var(--color-text-muted);
 }
 
 /* Backdrop */

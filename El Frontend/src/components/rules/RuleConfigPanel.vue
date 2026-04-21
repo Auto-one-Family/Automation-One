@@ -937,7 +937,7 @@ function selectActuator(value: string) {
 
 .config-panel__type-icon--plugin {
   background: rgba(245, 158, 11, 0.1);
-  color: #f59e0b;
+  color: var(--color-warning);
 }
 
 .config-panel__type-label {

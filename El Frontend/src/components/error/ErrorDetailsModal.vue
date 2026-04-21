@@ -306,7 +306,7 @@ onUnmounted(() => {
   max-height: 85vh;
   overflow-y: auto;
   border-radius: var(--radius-md);
-  background: var(--color-bg-secondary, #1a1a2e);
+  background: var(--color-bg-secondary);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
 }
@@ -348,7 +348,7 @@ onUnmounted(() => {
 .error-modal__icon--info { color: var(--color-info); }
 .error-modal__icon--warning { color: var(--color-warning); }
 .error-modal__icon--error { color: var(--color-error); }
-.error-modal__icon--critical { color: #dc2626; }
+.error-modal__icon--critical { color: var(--color-error); }
 
 .error-modal__title {
   flex: 1;
@@ -431,7 +431,7 @@ onUnmounted(() => {
 }
 
 .error-modal__docs-link:hover {
-  color: #93bbfd;
+  color: var(--color-accent-bright);
 }
 
 /* Technical Details */

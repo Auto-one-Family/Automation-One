@@ -15,6 +15,7 @@ import { useFertigationKPIs } from '@/composables/useFertigationKPIs'
 import MultiSensorChart from '@/components/charts/MultiSensorChart.vue'
 import type { ChartSensor } from '@/types'
 import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+import { tokens } from '@/utils/cssTokens'
 
 // =============================================================================
 // Props
@@ -138,7 +139,7 @@ const chartSensors = computed<ChartSensor[]>(() => {
       gpio: 0,
       sensorType: props.sensorType,
       name: 'Inflow',
-      color: '#10b981', // green-500
+      color: tokens.success, // green-500
       unit: sensorConfig.value?.unit || '',
     },
     {
@@ -147,7 +148,7 @@ const chartSensors = computed<ChartSensor[]>(() => {
       gpio: 1,
       sensorType: props.sensorType,
       name: 'Runoff',
-      color: '#ef4444', // red-500
+      color: tokens.error, // red-500
       unit: sensorConfig.value?.unit || '',
     },
   ]

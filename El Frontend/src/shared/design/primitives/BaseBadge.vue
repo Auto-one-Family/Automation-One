@@ -64,12 +64,13 @@ const badgeClasses = computed(() => {
     neutral: 'badge-gray',
   }
 
-  // Size styles
+  // Size styles (AUT-50): normalize to shared badge size classes.
+  // `xs` aliases to `sm` to keep 3 visual sizes across views.
   const sizeClasses: Record<BadgeSize, string> = {
-    xs: 'px-1.5 py-0.5 text-[9px] gap-0.5',
-    sm: 'px-2 py-0.5 text-[10px] gap-1',
-    md: 'px-2.5 py-1 text-xs gap-1.5',
-    lg: 'px-3 py-1 text-sm gap-2',
+    xs: 'badge--sm',
+    sm: 'badge--sm',
+    md: 'badge--md',
+    lg: 'badge--lg',
   }
 
   return [base, variantClasses[props.variant], sizeClasses[props.size]].filter(Boolean).join(' ')

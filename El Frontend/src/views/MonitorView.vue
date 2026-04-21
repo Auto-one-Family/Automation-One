@@ -2175,7 +2175,7 @@ function handleFabWidgetSelected(widgetType: string) {
                 v-if="subzone.sensors.length > 0 && subzone.actuators.length > 0"
                 class="monitor-subzone__type-label"
               >Sensoren</div>
-              <div class="monitor-card-grid">
+              <div class="monitor-card-grid grid-auto-sm">
                 <div
                   v-for="sensor in subzone.sensors"
                   :key="`${sensor.esp_id}-${sensor.gpio}-${sensor.sensor_type}`"
@@ -2253,7 +2253,7 @@ function handleFabWidgetSelected(widgetType: string) {
                 v-if="subzone.sensors.length > 0 && subzone.actuators.length > 0"
                 class="monitor-subzone__type-label"
               >Aktoren</div>
-              <div class="monitor-card-grid">
+              <div class="monitor-card-grid grid-auto-sm">
                 <ActuatorCard
                   v-for="actuator in subzone.actuators"
                   :key="`${actuator.esp_id}-${actuator.gpio}`"
@@ -2292,7 +2292,7 @@ function handleFabWidgetSelected(widgetType: string) {
           Shared Sensors
           <span class="monitor-section__count">{{ sharedSensorRefs.length }}</span>
         </h3>
-        <div class="monitor-shared-equipment__grid">
+        <div class="monitor-shared-equipment__grid grid-auto-sm">
           <SharedSensorRefCard
             v-for="sensor in sharedSensorRefs"
             :key="sensor.config_id || `${sensor.esp_id}-${sensor.gpio}`"
@@ -3264,8 +3264,6 @@ function handleFabWidgetSelected(widgetType: string) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .monitor-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   gap: var(--space-3);
   max-width: 100%;
 }
@@ -3363,8 +3361,6 @@ function handleFabWidgetSelected(widgetType: string) {
 }
 
 .monitor-shared-equipment__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: var(--space-3);
   margin-top: var(--space-3);
 }

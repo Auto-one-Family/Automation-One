@@ -58,7 +58,7 @@ const chartColors = [
   tokens.mock,
   tokens.success,
   tokens.accentBright,
-  '#f472b6',
+  tokens.real,
   tokens.warning,
 ]
 

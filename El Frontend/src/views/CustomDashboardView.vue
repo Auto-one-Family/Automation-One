@@ -1527,7 +1527,7 @@ function executeBulkDelete() {
 
 .dashboard-builder__target-conflict {
   font-size: var(--text-xs);
-  color: var(--color-warning, #f59e0b);
+  color: var(--color-warning);
   font-style: italic;
 }
 
@@ -2073,7 +2073,7 @@ function executeBulkDelete() {
 
 .bulk-cleanup__btn--delete {
   background: var(--color-error);
-  color: #fff;
+  color: var(--color-text-inverse);
 }
 
 .bulk-cleanup__btn--delete:hover {

@@ -552,7 +552,7 @@ function onSensorGpioValidation(valid: boolean, _message: string | null): void {
 
 .type-summary-icon {
   flex-shrink: 0;
-  color: var(--color-info, #60a5fa);
+  color: var(--color-info);
   margin-top: 0.0625rem;
 }
 

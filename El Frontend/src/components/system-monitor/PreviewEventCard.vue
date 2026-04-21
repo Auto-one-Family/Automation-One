@@ -95,7 +95,7 @@ function truncateMessage(msg: string, maxLen: number): string {
 .severity-info { background: var(--color-accent); }
 .severity-warning { background: var(--color-warning); }
 .severity-error { background: var(--color-error); }
-.severity-critical { background: #dc2626; }
+.severity-critical { background: var(--color-error); }
 
 .event-info {
   flex: 1;

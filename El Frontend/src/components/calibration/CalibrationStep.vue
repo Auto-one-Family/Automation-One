@@ -182,7 +182,7 @@ onUnmounted(() => {
 
 <style scoped>
 .calibration-step {
-  background: var(--color-bg-secondary, #111118);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   border-radius: var(--radius-md);
   padding: 1.25rem;
@@ -198,7 +198,7 @@ onUnmounted(() => {
 }
 
 .calibration-step__badge {
-  background: var(--color-iridescent-1, #a78bfa);
+  background: var(--color-iridescent-1);
   color: var(--color-text-inverse);
   font-size: 0.6875rem;
   font-weight: 600;
@@ -209,13 +209,13 @@ onUnmounted(() => {
 .calibration-step__title {
   font-size: 0.9375rem;
   font-weight: 600;
-  color: var(--color-text-primary, #eaeaf2);
+  color: var(--color-text-primary);
   margin: 0;
 }
 
 .calibration-step__instruction {
   font-size: 0.8125rem;
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
   line-height: 1.5;
   margin: 0;
 }
@@ -226,7 +226,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
   padding: 1rem;
-  background: var(--color-bg-tertiary, #0d0d14);
+  background: var(--color-bg-tertiary);
   border-radius: var(--radius-md);
 }
 
@@ -234,18 +234,18 @@ onUnmounted(() => {
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
 }
 
 .calibration-step__reading-value {
   font-family: 'JetBrains Mono', monospace;
   font-size: 2rem;
   font-weight: 700;
-  color: var(--color-iridescent-1, #a78bfa);
+  color: var(--color-iridescent-1);
 }
 
 .calibration-step__reading-value--empty {
-  color: var(--color-text-muted, #484860);
+  color: var(--color-text-muted);
 }
 
 .calibration-step__read-btn {
@@ -253,14 +253,14 @@ onUnmounted(() => {
   font-size: 0.75rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  background: var(--color-bg-secondary, #111118);
-  color: var(--color-text-primary, #eaeaf2);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .calibration-step__read-btn:hover:not(:disabled) {
-  border-color: var(--color-iridescent-1, #a78bfa);
+  border-color: var(--color-iridescent-1);
   background: rgba(167,139,250,0.08);
 }
 
@@ -271,7 +271,7 @@ onUnmounted(() => {
 
 .calibration-step__error {
   font-size: 0.75rem;
-  color: var(--color-error, #ef4444);
+  color: var(--color-error);
 }
 
 .calibration-step__error-row {
@@ -285,9 +285,9 @@ onUnmounted(() => {
   padding: 0.375rem 1rem;
   font-size: 0.75rem;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--color-warning, #fbbf24);
+  border: 1px solid var(--color-warning);
   background: transparent;
-  color: var(--color-warning, #fbbf24);
+  color: var(--color-warning);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -309,7 +309,7 @@ onUnmounted(() => {
 
 .calibration-step__label {
   font-size: 0.75rem;
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
 }
 
 .calibration-step__input {
@@ -318,14 +318,14 @@ onUnmounted(() => {
   font-family: 'JetBrains Mono', monospace;
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  background: var(--color-bg-tertiary, #0d0d14);
-  color: var(--color-text-primary, #eaeaf2);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
   outline: none;
   transition: border-color 0.15s;
 }
 
 .calibration-step__input:focus {
-  border-color: var(--color-iridescent-1, #a78bfa);
+  border-color: var(--color-iridescent-1);
 }
 
 .calibration-step__capture-btn {
@@ -334,7 +334,7 @@ onUnmounted(() => {
   font-weight: 600;
   border-radius: var(--radius-md);
   border: none;
-  background: var(--color-iridescent-1, #a78bfa);
+  background: var(--color-iridescent-1);
   color: var(--color-text-inverse);
   cursor: pointer;
   transition: all 0.15s;

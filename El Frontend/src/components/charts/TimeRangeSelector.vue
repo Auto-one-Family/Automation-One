@@ -132,21 +132,21 @@ function applyCustom() {
   font-weight: 500;
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  background: var(--color-bg-secondary, #111118);
-  color: var(--color-text-muted, #8585a0);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .time-range-selector__btn:hover {
-  border-color: var(--color-iridescent-1, #a78bfa);
-  color: var(--color-text-primary, #eaeaf2);
+  border-color: var(--color-iridescent-1);
+  color: var(--color-text-primary);
 }
 
 .time-range-selector__btn--active {
-  border-color: var(--color-iridescent-1, #a78bfa);
+  border-color: var(--color-iridescent-1);
   background: rgba(167,139,250,0.12);
-  color: var(--color-iridescent-1, #a78bfa);
+  color: var(--color-iridescent-1);
 }
 
 .time-range-selector__custom {
@@ -164,7 +164,7 @@ function applyCustom() {
 
 .time-range-selector__label {
   font-size: 0.6875rem;
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
 }
 
 .time-range-selector__input {
@@ -173,14 +173,14 @@ function applyCustom() {
   font-family: 'JetBrains Mono', monospace;
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  background: var(--color-bg-tertiary, #0d0d14);
-  color: var(--color-text-primary, #eaeaf2);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
   outline: none;
   color-scheme: dark;
 }
 
 .time-range-selector__input:focus {
-  border-color: var(--color-iridescent-1, #a78bfa);
+  border-color: var(--color-iridescent-1);
 }
 
 .time-range-selector__apply {
@@ -189,7 +189,7 @@ function applyCustom() {
   font-weight: 600;
   border-radius: var(--radius-sm);
   border: none;
-  background: var(--color-iridescent-1, #a78bfa);
+  background: var(--color-iridescent-1);
   color: var(--color-text-inverse);
   cursor: pointer;
   transition: all 0.15s;

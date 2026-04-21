@@ -374,13 +374,13 @@ function exportCsv() {
 }
 
 .sensor-history__icon {
-  color: var(--color-iridescent-1, #a78bfa);
+  color: var(--color-iridescent-1);
 }
 
 .sensor-history__title {
   font-size: 1.25rem;
   font-weight: 700;
-  color: var(--color-text-primary, #eaeaf2);
+  color: var(--color-text-primary);
   margin: 0;
 }
 
@@ -388,7 +388,7 @@ function exportCsv() {
   display: flex;
   flex-direction: column;
   gap: 0.875rem;
-  background: var(--color-bg-secondary, #111118);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   border-radius: var(--radius-md);
   padding: 1rem;
@@ -412,7 +412,7 @@ function exportCsv() {
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
 }
 
 .sensor-history__select,
@@ -421,15 +421,15 @@ function exportCsv() {
   font-size: 0.8125rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  background: var(--color-bg-tertiary, #0d0d14);
-  color: var(--color-text-primary, #eaeaf2);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
   outline: none;
   transition: border-color 0.15s;
 }
 
 .sensor-history__select:focus,
 .sensor-history__input:focus {
-  border-color: var(--color-iridescent-1, #a78bfa);
+  border-color: var(--color-iridescent-1);
 }
 
 .sensor-history__select {
@@ -443,20 +443,20 @@ function exportCsv() {
   justify-content: center;
   gap: 0.5rem;
   padding: 2rem;
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
   font-size: 0.8125rem;
   text-align: center;
 }
 
 .sensor-history__status--error {
-  color: var(--color-error, #ef4444);
+  color: var(--color-error);
 }
 
 .sensor-history__spinner {
   width: 1.25rem;
   height: 1.25rem;
-  border: 2px solid var(--color-bg-tertiary, #1d1d2a);
-  border-top-color: var(--color-iridescent-1, #a78bfa);
+  border: 2px solid var(--color-bg-tertiary);
+  border-top-color: var(--color-iridescent-1);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -481,7 +481,7 @@ function exportCsv() {
 .sensor-history__point-count {
   font-size: 0.6875rem;
   font-family: 'JetBrains Mono', monospace;
-  color: var(--color-text-muted, #8585a0);
+  color: var(--color-text-muted);
 }
 
 .sensor-history__export-btn {
@@ -493,21 +493,21 @@ function exportCsv() {
   font-weight: 500;
   border-radius: var(--radius-sm);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
-  background: var(--color-bg-secondary, #111118);
-  color: var(--color-text-muted, #8585a0);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .sensor-history__export-btn:hover {
-  border-color: var(--color-iridescent-1, #a78bfa);
-  color: var(--color-text-primary, #eaeaf2);
+  border-color: var(--color-iridescent-1);
+  color: var(--color-text-primary);
 }
 
 .sensor-history__chart {
   position: relative;
   width: 100%;
-  background: var(--color-bg-secondary, #111118);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--glass-border, rgba(133,133,160,0.12));
   border-radius: var(--radius-md);
   padding: 0.75rem;

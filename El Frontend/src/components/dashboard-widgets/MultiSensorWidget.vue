@@ -310,7 +310,7 @@ async function handleExportAll() {
 // =============================================================================
 
 const MAX_ACTUATORS = 2
-const ACTUATOR_OVERLAY_COLORS = [tokens.success || '#34d399', tokens.info || '#60a5fa']
+const ACTUATOR_OVERLAY_COLORS = [tokens.success || tokens.info, tokens.info || tokens.accent]
 
 /** Parsed actuator IDs from comma-separated string */
 const selectedActuatorIds = computed(() => {

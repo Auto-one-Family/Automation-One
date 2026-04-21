@@ -209,7 +209,7 @@ const pageNumbers = computed(() => {
           <option :value="25">25</option>
           <option :value="50">50</option>
         </select>
-        <span class="text-xs text-dark-400">pro Seite</span>
+        <span class="text-xs text-secondary">pro Seite</span>
       </div>
     </div>
   </div>
@@ -239,7 +239,7 @@ const pageNumbers = computed(() => {
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   border-bottom: 1px solid var(--glass-border);

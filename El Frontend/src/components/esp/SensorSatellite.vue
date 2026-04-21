@@ -471,7 +471,7 @@ function handleDragEnd(event: DragEvent) {
 
 /* Quality-colored left accent border */
 .sensor-satellite:has(.sensor-satellite__quality--excellent) {
-  border-left-color: #10b981;
+  border-left-color: var(--color-success);
 }
 .sensor-satellite:has(.sensor-satellite__quality--good) {
   border-left-color: var(--color-status-good);
@@ -480,14 +480,14 @@ function handleDragEnd(event: DragEvent) {
   border-left-color: var(--color-status-warning);
 }
 .sensor-satellite:has(.sensor-satellite__quality--poor) {
-  border-left-color: #f97316;
+  border-left-color: var(--color-warning);
 }
 .sensor-satellite:has(.sensor-satellite__quality--bad),
 .sensor-satellite:has(.sensor-satellite__quality--error) {
   border-left-color: var(--color-status-alarm);
 }
 .sensor-satellite:has(.sensor-satellite__quality--stale) {
-  border-left-color: #4b5563;
+  border-left-color: var(--color-status-offline);
 }
 
 /* Multi-value: wider cards */
@@ -758,7 +758,7 @@ function handleDragEnd(event: DragEvent) {
 
 /* Quality colors - LED glow */
 .sensor-satellite__quality--excellent .sensor-satellite__quality-dot {
-  background-color: #10b981;
+  background-color: var(--color-success);
   box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
   animation: led-breathe 3s ease-in-out infinite;
 }
@@ -779,7 +779,7 @@ function handleDragEnd(event: DragEvent) {
 }
 
 .sensor-satellite__quality--poor .sensor-satellite__quality-dot {
-  background-color: #f97316;
+  background-color: var(--color-warning);
   box-shadow: 0 0 6px rgba(249, 115, 22, 0.5);
 }
 
@@ -789,12 +789,12 @@ function handleDragEnd(event: DragEvent) {
 }
 
 .sensor-satellite__quality--stale .sensor-satellite__quality-dot {
-  background-color: #4b5563;
+  background-color: var(--color-status-offline);
   box-shadow: 0 0 4px rgba(75, 85, 99, 0.3);
 }
 
 .sensor-satellite__quality--error .sensor-satellite__quality-dot {
-  background-color: #dc2626;
+  background-color: var(--color-error);
   box-shadow: 0 0 10px rgba(220, 38, 38, 0.7);
   animation: led-blink 1.2s ease-in-out infinite;
 }

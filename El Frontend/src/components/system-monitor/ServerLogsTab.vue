@@ -87,7 +87,7 @@ const LEVEL_COLORS: Record<string, { border: string; glow: string; tint: string 
     tint: 'rgba(59, 130, 246, 0.02)',
   },
   WARNING: {
-    border: '#F59E0B',
+    border: tokens.warning,
     glow: 'rgba(245, 158, 11, 0.4)',
     tint: 'rgba(245, 158, 11, 0.03)',
   },
@@ -97,7 +97,7 @@ const LEVEL_COLORS: Record<string, { border: string; glow: string; tint: string 
     tint: 'rgba(239, 68, 68, 0.04)',
   },
   CRITICAL: {
-    border: '#DC2626',
+    border: tokens.error,
     glow: 'rgba(220, 38, 38, 0.5)',
     tint: 'rgba(239, 68, 68, 0.06)',
   },
@@ -1004,7 +1004,7 @@ watch(selectedFile, () => {
    ============================================================================= */
 .log-entry {
   border-bottom: 1px solid var(--glass-border);
-  border-left: 3px solid var(--level-border, #6B7280);
+  border-left: 3px solid var(--level-border);
   box-shadow: inset 3px 0 8px var(--level-glow, transparent);
   background-color: var(--level-tint, transparent);
   transition: background-color 0.2s ease;

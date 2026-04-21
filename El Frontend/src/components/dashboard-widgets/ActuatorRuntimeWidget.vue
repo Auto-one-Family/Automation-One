@@ -193,13 +193,13 @@ function historyToBlocks(entries: ActuatorHistoryEntry[]): TimelineBlock[] {
 function getBlockColor(state: TimelineBlock['state']): string {
   switch (state) {
     case 'on':
-      return (tokens.success || '#34d399') + 'b3'
+      return (tokens.success || tokens.info) + 'b3'
     case 'off':
-      return (tokens.textMuted || '#484860') + '33'
+      return (tokens.textMuted || tokens.textSecondary) + '33'
     case 'error':
-      return (tokens.error || '#f87171') + 'b3'
+      return (tokens.error || tokens.warning) + 'b3'
     case 'emergency':
-      return (tokens.warning || '#fbbf24') + 'e6'
+      return (tokens.warning || tokens.info) + 'e6'
   }
 }
 

@@ -737,7 +737,7 @@ onMounted(() => {
 .level-pills {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.375rem;                           /* 6px gap - tight but not cramped */
+  gap: 0.5rem;                             /* 8px gap - clearer separation */
 }
 
 .level-pill {
@@ -745,7 +745,7 @@ onMounted(() => {
   align-items: center;
   gap: 0.375rem;                           /* 6px between icon and label */
   height: 2.25rem;                         /* 36px */
-  padding: 0 0.875rem;
+  padding: 0 1rem;
   border-radius: var(--radius-md);                   /* Match other buttons */
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -767,15 +767,15 @@ onMounted(() => {
 }
 
 .level-pill--info.level-pill--active {
-  background: linear-gradient(135deg, var(--color-accent) 0%, #38bdf8 100%);
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-bright) 100%);
   border-color: var(--color-accent);
   box-shadow: 0 0 12px rgba(59, 130, 246, 0.35);
 }
 
 .level-pill--warning.level-pill--active {
-  background: linear-gradient(135deg, #f59e0b 0%, var(--color-warning) 100%);
-  border-color: #f59e0b;
-  color: #1a1a24;
+  background: linear-gradient(135deg, var(--color-warning) 0%, var(--color-warning) 100%);
+  border-color: var(--color-warning);
+  color: var(--color-bg-tertiary);
   box-shadow: 0 0 12px rgba(245, 158, 11, 0.35);
 }
 
@@ -786,8 +786,8 @@ onMounted(() => {
 }
 
 .level-pill--critical.level-pill--active {
-  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
-  border-color: #dc2626;
+  background: linear-gradient(135deg, var(--color-error) 0%, var(--gradient-danger-end) 100%);
+  border-color: var(--color-error);
   box-shadow: 0 0 12px rgba(220, 38, 38, 0.4);
 }
 

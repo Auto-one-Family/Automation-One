@@ -42,7 +42,13 @@ const category = RULE_TEMPLATE_CATEGORIES[props.template.category]
       </div>
 
       <h4 class="rule-template-card__title">{{ template.name }}</h4>
-      <p class="rule-template-card__description">{{ template.description }}</p>
+      <p class="rule-template-card__description" :title="template.description">{{ template.description }}</p>
+
+      <div class="rule-template-card__meta">
+        <span class="rule-template-card__meta-chip">{{ template.rule.conditions.length }} Bedingungen</span>
+        <span class="rule-template-card__meta-chip">{{ template.rule.actions.length }} Aktion{{ template.rule.actions.length > 1 ? 'en' : '' }}</span>
+        <span class="rule-template-card__meta-chip">Prio {{ template.rule.priority }}</span>
+      </div>
 
       <button
         class="rule-template-card__action"
@@ -96,6 +102,22 @@ const category = RULE_TEMPLATE_CATEGORIES[props.template.category]
   color: var(--color-text-muted);
   margin: 0;
   line-height: 1.4;
+  min-height: 2.8em;
+}
+
+.rule-template-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.rule-template-card__meta-chip {
+  font-size: var(--text-xxs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
 }
 
 .rule-template-card__action {
