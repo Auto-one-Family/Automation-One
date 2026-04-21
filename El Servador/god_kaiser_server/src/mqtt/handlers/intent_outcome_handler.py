@@ -85,6 +85,19 @@ class IntentOutcomeHandler:
                         payload.get("intent_id"),
                         inferred_flow,
                     )
+                else:
+                    # Legacy firmware or ArduinoJson silent-drop (DynamicJsonDocument
+                    # size budget) can leave ``flow`` missing even after nested-merge
+                    # and intent_id inference. Default to a sentinel so validation
+                    # does not reject the payload; canonicalization downstream marks
+                    # it as a contract violation and persists it for observability
+                    # (Lauf-4 Live-Hartetest / AUT-108, PKG-03).
+                    payload["flow"] = "unknown"
+                    logger.warning(
+                        "intent_outcome missing flow defaulted to 'unknown': esp_id=%s intent_id=%s",
+                        esp_id,
+                        payload.get("intent_id"),
+                    )
 
             validation_error = self._validate_payload(payload)
             if validation_error:

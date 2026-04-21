@@ -54,6 +54,33 @@ def test_merge_intent_outcome_nested_data_fills_top_level():
     assert payload["generation"] == 2
 
 
+def test_merge_intent_outcome_nested_data_lifts_flow_from_nested():
+    """Legacy firmware may nest ``flow`` under ``data`` (AUT-108, PKG-03)."""
+    payload = {
+        "outcome": "persisted",
+        "data": {
+            "intent_id": "i2",
+            "flow": "config",
+        },
+    }
+    merge_intent_outcome_nested_data(payload)
+    assert payload["flow"] == "config"
+    assert payload["intent_id"] == "i2"
+
+
+def test_merge_intent_outcome_nested_data_preserves_top_level_flow():
+    """Top-level ``flow`` wins over nested value when both are present."""
+    payload = {
+        "flow": "command",
+        "outcome": "persisted",
+        "data": {
+            "flow": "config",
+        },
+    }
+    merge_intent_outcome_nested_data(payload)
+    assert payload["flow"] == "command"
+
+
 def test_canonicalize_unknown_values_to_contract_violation():
     normalized = canonicalize_intent_outcome(
         {
