@@ -143,7 +143,9 @@ export const useActuatorStore = defineStore('actuator', () => {
   const pendingCommands = new Map<string, ReturnType<typeof setTimeout>>()
   const ACTUATOR_RESPONSE_TIMEOUT_MS = 30_000
   const pendingConfigTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
-  const CONFIG_RESPONSE_TIMEOUT_MS = 45_000
+  // Keep above one heartbeat period to avoid false timeout noise
+  // when config exchange is only slightly delayed.
+  const CONFIG_RESPONSE_TIMEOUT_MS = 75_000
   const CONFIG_RESPONSE_TIMEOUT_WITH_OFFLINE_RULES_MS = 120_000
   /**
    * Offline-/Reset-Epoch je Aktor (key: `${esp_id}:${gpio}`).
@@ -444,7 +446,7 @@ export const useActuatorStore = defineStore('actuator', () => {
       toast.warning(
         `Konfigurationsauftrag ausstehend: ${summary}${buildHandleSuffix(correlationId, requestId)}. Gerät hat noch nicht terminal geantwortet.`,
         {
-          persistent: true,
+          persistent: false,
           dedupeKey: `config-timeout:${correlationId ?? requestId ?? subjectId}`,
         },
       )
@@ -876,8 +878,20 @@ export const useActuatorStore = defineStore('actuator', () => {
     const data = message.data
     const correlationId = extractCorrelationId(data)
     const requestId = extractRequestId(data)
+    const status = String(data.status || '').toLowerCase()
     const contractCheck = validateContractEvent('config_response', data)
     if (contractCheck.kind !== 'ok') {
+      // If terminal success arrives without strict contract shape, avoid false
+      // operator errors; we cannot finalize deterministically without IDs anyway.
+      if (status === 'success' || status === 'partial_success') {
+        logger.warn('Ignore non-finalizable successful config_response shape', {
+          reason: contractCheck.reason,
+          correlation_id: correlationId,
+          request_id: requestId,
+          data,
+        })
+        return
+      }
       notifyContractIssue({
         eventType: 'config_response',
         details: contractCheck.reason,
@@ -886,7 +900,6 @@ export const useActuatorStore = defineStore('actuator', () => {
       return
     }
 
-    const status = String(data.status || '').toLowerCase()
     const summary = `Config Antwort: ${status || 'unbekannt'}`
     if (!correlationId) {
       notifyContractIssue({
@@ -898,6 +911,14 @@ export const useActuatorStore = defineStore('actuator', () => {
     const existing = findIntentByCorrelation('config', correlationId)
       ?? (requestId ? findIntentByRequest('config', requestId) : undefined)
     if (!existing) {
+      if (status === 'success' || status === 'partial_success') {
+        logger.info('Late config_response without tracked intent ignored (already resolved or missed start event)', {
+          correlation_id: correlationId,
+          request_id: requestId,
+          status,
+        })
+        return
+      }
       notifyContractIssue({
         eventType: 'config_response',
         details: `Kein passendes Config-Intent für correlation_id "${correlationId}"${requestId ? ` oder request_id "${requestId}"` : ''}`,

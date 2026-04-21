@@ -217,16 +217,34 @@ function normalizeEspId(device: ESPDevice | string): string {
  * Mock ESP sensor format that the UI components expect.
  */
 function mapSensorConfigToMockSensor(config: SensorConfigResponse): MockSensor {
+  const metadata = config.metadata ?? null
+  const metadataLatestValue =
+    metadata && typeof metadata['latest_value'] === 'number'
+      ? metadata['latest_value']
+      : null
+  const metadataLatestQuality =
+    metadata && typeof metadata['latest_quality'] === 'string'
+      ? metadata['latest_quality']
+      : null
+  const metadataLatestTimestamp =
+    metadata && typeof metadata['latest_timestamp'] === 'string'
+      ? metadata['latest_timestamp']
+      : null
+
+  const latestValue = config.latest_value ?? metadataLatestValue ?? 0
+  const latestQuality = (config.latest_quality ?? metadataLatestQuality ?? 'good') as QualityLevel
+  const latestTimestamp = config.latest_timestamp ?? metadataLatestTimestamp ?? null
+
   return {
     config_id: config.id,
     gpio: config.gpio,
     sensor_type: config.sensor_type,
     name: config.name || null,
-    raw_value: config.latest_value ?? 0,
+    raw_value: latestValue,
     unit: getSensorUnit(config.sensor_type),
-    quality: (config.latest_quality as QualityLevel) || 'good',
+    quality: latestQuality,
     raw_mode: true,
-    last_read: config.latest_timestamp || null,
+    last_read: latestTimestamp,
     operating_mode: config.processing_mode as MockSensor['operating_mode'],
     config_status: config.config_status as MockSensor['config_status'],
     config_error: config.config_error || null,
