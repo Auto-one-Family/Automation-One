@@ -617,13 +617,13 @@ void subscribeToAllTopics() {
   // Queue in priority order to avoid post-connect subscribe bursts on weak TCP windows.
   // Critical control-plane topics come first.
   mqttClient.queueSubscribe(TopicBuilder::buildSystemHeartbeatAckTopic(), 1, true);
-  mqttClient.queueSubscribe(TopicBuilder::buildConfigTopic(), 1, true);
-  mqttClient.queueSubscribe(TopicBuilder::buildSystemCommandTopic(), 1, true);
-  mqttClient.queueSubscribe(TopicBuilder::buildBroadcastEmergencyTopic(), 1, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildConfigTopic(), 2, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildSystemCommandTopic(), 2, true);
+  mqttClient.queueSubscribe(TopicBuilder::buildBroadcastEmergencyTopic(), 2, true);
 
   String actuator_wildcard = String(TopicBuilder::buildActuatorCommandTopic(0));
   actuator_wildcard.replace("/0/command", "/+/command");
-  mqttClient.queueSubscribe(actuator_wildcard, 1, true);
+  mqttClient.queueSubscribe(actuator_wildcard, 2, true);
 
   mqttClient.queueSubscribe(TopicBuilder::buildActuatorEmergencyTopic(), 1, true);
   mqttClient.queueSubscribe(TopicBuilder::buildZoneAssignTopic(), 1, true);
@@ -633,7 +633,7 @@ void subscribeToAllTopics() {
 
   String sensor_wildcard = String(TopicBuilder::buildSensorCommandTopic(0));
   sensor_wildcard.replace("/0/command", "/+/command");
-  mqttClient.queueSubscribe(sensor_wildcard, 1, false);
+  mqttClient.queueSubscribe(sensor_wildcard, 2, false);
 
   mqttClient.queueSubscribe(TopicBuilder::buildServerStatusTopic(), 1, false);  // SAFETY-P5: Server LWT (QoS 1)
 
