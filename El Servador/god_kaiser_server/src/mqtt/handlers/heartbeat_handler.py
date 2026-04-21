@@ -71,8 +71,10 @@ STATE_PUSH_COOLDOWN_SECONDS = 120
 ADOPTION_GRACE_SECONDS = 2.0
 SESSION_STARTUP_REJECT_WINDOW_SECONDS = 1.0
 
-# Config-Push: Cooldown between auto config pushes (prevent mismatch loop)
-CONFIG_PUSH_COOLDOWN_SECONDS = 120
+# Config-Push: Cooldown between auto config pushes (prevent mismatch loop).
+# Keep this below one heartbeat period (60s) so a lost first push can recover
+# on the next heartbeat cycle instead of stalling for two full minutes.
+CONFIG_PUSH_COOLDOWN_SECONDS = 45
 
 # Module-level MQTTCommandBridge reference (set via set_command_bridge())
 _command_bridge = None

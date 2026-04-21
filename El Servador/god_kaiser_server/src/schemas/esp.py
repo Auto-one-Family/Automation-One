@@ -744,7 +744,33 @@ class SessionAnnouncePayload(BaseModel):
         if not isinstance(payload, dict):
             raise ValueError("session announce payload must be object")
         normalized = dict(payload)
-        normalized["handover_epoch"] = payload.get("handover_epoch", payload.get("session_epoch"))
+        epoch_raw = payload.get("handover_epoch", payload.get("session_epoch"))
+        normalized["handover_epoch"] = epoch_raw
+
+        # Legacy firmware may omit reason; infer from epoch as best effort.
+        reason = normalized.get("reason")
+        if not isinstance(reason, str) or not reason:
+            epoch_int = 0
+            try:
+                epoch_int = int(epoch_raw)
+            except (TypeError, ValueError):
+                epoch_int = 0
+            normalized["reason"] = "reconnect" if epoch_int > 1 else "boot"
+
+        # Legacy firmware publishes boot_ts (seconds, sometimes string) instead of ts_ms.
+        ts_ms_raw = normalized.get("ts_ms", payload.get("boot_ts", payload.get("ts")))
+        if ts_ms_raw is not None:
+            try:
+                ts_ms = int(ts_ms_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("session announce ts_ms/boot_ts must be numeric") from exc
+            if ts_ms > 0 and ts_ms < 10_000_000_000:
+                ts_ms *= 1000
+            normalized["ts_ms"] = ts_ms
+        else:
+            # Keep compatibility with minimal legacy payloads.
+            normalized["ts_ms"] = 0
+
         return cls(**normalized)
 
 

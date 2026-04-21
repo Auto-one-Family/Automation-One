@@ -75,6 +75,17 @@ class IntentOutcomeHandler:
                     ts_seed,
                 )
 
+            if not str(payload.get("flow") or "").strip():
+                inferred_flow = self._infer_flow_from_intent_id(str(payload.get("intent_id") or ""))
+                if inferred_flow is not None:
+                    payload["flow"] = inferred_flow
+                    logger.info(
+                        "intent_outcome missing flow normalized: esp_id=%s intent_id=%s flow=%s",
+                        esp_id,
+                        payload.get("intent_id"),
+                        inferred_flow,
+                    )
+
             validation_error = self._validate_payload(payload)
             if validation_error:
                 logger.error(
@@ -253,6 +264,28 @@ class IntentOutcomeHandler:
         if outcome == "rejected":
             return AuditSeverity.WARNING
         return AuditSeverity.INFO
+
+    @staticmethod
+    def _infer_flow_from_intent_id(intent_id: str) -> Optional[str]:
+        """Infer flow for legacy firmware payloads missing `flow`."""
+        lowered = intent_id.lower()
+        if lowered.startswith(("critical_pub_", "publish_", "pub_", "sensor_")):
+            return "publish"
+        if lowered.startswith(("config_", "cfg_")):
+            return "config"
+        if lowered.startswith(("zone_",)):
+            return "zone"
+        if lowered.startswith(("subzone_assign_",)):
+            return "subzone_assign"
+        if lowered.startswith(("subzone_remove_",)):
+            return "subzone_remove"
+        if lowered.startswith(("subzone_safe_",)):
+            return "subzone_safe"
+        if lowered.startswith(("offline_", "safety_epoch_")):
+            return "offline_rules"
+        if lowered.startswith(("command_", "cmd_", "actuator_")):
+            return "command"
+        return None
 
     @staticmethod
     def _to_non_negative_int(value: object, default: int = 0) -> int:

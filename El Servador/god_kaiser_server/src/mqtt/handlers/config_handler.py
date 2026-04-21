@@ -179,6 +179,51 @@ class ConfigHandler:
                         "authority_key": authority_key,
                     },
                 )
+                # Frontend recovery lane:
+                # If the first terminal event was missed by the client (reconnect/window),
+                # a duplicate/stale config_response can still be used to finalize
+                # pending UI intents as long as correlation_id is present.
+                if correlation_id:
+                    try:
+                        from ...websocket.manager import WebSocketManager
+
+                        ws_manager = await WebSocketManager.get_instance()
+                        replay_payload = serialize_config_response_event(
+                            esp_id=esp_id,
+                            config_type=config_type,
+                            status=status,
+                            count=count,
+                            failed_count=failed_count,
+                            message=message,
+                            timestamp=int(datetime.now(timezone.utc).timestamp()),
+                            correlation_id=correlation_id,
+                            request_id=request_id,
+                        )
+                        replay_payload.update(
+                            {
+                                "domain": canonical.domain,
+                                "severity": canonical.severity,
+                                "terminality": canonical.terminality,
+                                "retry_policy": canonical.retry_policy,
+                                "is_final": canonical.is_final,
+                                "contract_violation": canonical.is_contract_violation,
+                                "raw_status": canonical.raw_status,
+                                "raw_type": canonical.raw_type,
+                                "raw_error_code": canonical.raw_error_code,
+                                "terminal_authority_replay": True,
+                            }
+                        )
+                        await ws_manager.broadcast(
+                            "config_response",
+                            replay_payload,
+                            correlation_id=correlation_id,
+                        )
+                    except Exception as replay_error:
+                        logger.warning(
+                            "Failed to broadcast stale config_response replay for %s: %s",
+                            esp_id,
+                            replay_error,
+                        )
                 return True
 
             # Step 3: Log response based on canonical status
