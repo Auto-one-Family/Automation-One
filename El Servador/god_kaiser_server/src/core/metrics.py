@@ -340,6 +340,12 @@ HEARTBEAT_FIRMWARE_FLAG_TOTAL = Counter(
     ["flag"],
 )
 
+QUEUE_PRESSURE_EVENT_TOTAL = Counter(
+    "queue_pressure_event_total",
+    "ESP32 publish-queue pressure events (entered_pressure / recovered)",
+    ["esp_id", "event"],
+)
+
 CONTRACT_UNKNOWN_CODE_TOTAL = Counter(
     "contract_unknown_code_total",
     "Total unknown/contract-violation codes normalized by server canonicalizer",
@@ -367,6 +373,13 @@ HEARTBEAT_ACK_LATENCY_MS = Histogram(
     "heartbeat_ack_latency",
     "Heartbeat ACK turnaround latency in milliseconds",
     buckets=(1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500),
+)
+
+SENSOR_E2E_LATENCY_MS = Histogram(
+    "sensor_e2e_latency_ms",
+    "End-to-end latency from ESP32 sensor publish timestamp to server receive (milliseconds)",
+    ["sensor_type"],
+    buckets=(1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000),
 )
 
 HEARTBEAT_ACK_VALID_TOTAL = Counter(
@@ -690,6 +703,24 @@ def init_metrics() -> None:
         PLUGIN_ERRORS_TOTAL.labels(plugin_id=pid, error_type="execution_failed")
         PLUGIN_ERRORS_TOTAL.labels(plugin_id=pid, error_type="rollback_failed")
 
+    # PKG-01b: Queue pressure events (esp_id="unknown" baseline for alert visibility)
+    for _evt in ("entered_pressure", "recovered"):
+        QUEUE_PRESSURE_EVENT_TOTAL.labels(esp_id="unknown", event=_evt)
+
+    # PKG-03: Pre-init common sensor types so e2e latency histogram is visible
+    for _st in (
+        "temperature",
+        "humidity",
+        "ph",
+        "ec",
+        "co2",
+        "pressure",
+        "light",
+        "flow",
+        "soil",
+    ):
+        SENSOR_E2E_LATENCY_MS.labels(sensor_type=_st)
+
     logger.info("Prometheus metrics initialized (all label combinations visible)")
 
 
@@ -974,6 +1005,37 @@ def observe_tls_handshake_latency_ms(duration_ms: float) -> None:
 def observe_heartbeat_ack_latency_ms(duration_ms: float) -> None:
     """Observe heartbeat ACK roundtrip latency in milliseconds."""
     HEARTBEAT_ACK_LATENCY_MS.observe(max(float(duration_ms), 0.0))
+
+
+def increment_queue_pressure_event(esp_id: str, event: str) -> None:
+    """Increment ESP queue-pressure event counter (PKG-01b).
+
+    Pure observability — no DB/WS side effects. Called from the
+    queue_pressure MQTT handler.
+
+    Args:
+        esp_id: ESP device identifier (fallback to "unknown" if missing).
+        event: Lifecycle event label (typically "entered_pressure" or "recovered").
+    """
+    esp_label = str(esp_id) if esp_id else "unknown"
+    event_label = str(event) if event else "unknown"
+    QUEUE_PRESSURE_EVENT_TOTAL.labels(esp_id=esp_label, event=event_label).inc()
+
+
+def observe_sensor_e2e_latency_ms(sensor_type: str, latency_ms: float) -> None:
+    """Observe end-to-end sensor latency in milliseconds (PKG-03).
+
+    Measures the delta between the ESP32 publish timestamp and the server
+    receive time. Called from sensor_handler after payload timestamp
+    extraction and before DB write.
+
+    Args:
+        sensor_type: Sensor type label (e.g. "temperature", "ph").
+        latency_ms: Latency in milliseconds (non-negative).
+    """
+    SENSOR_E2E_LATENCY_MS.labels(sensor_type=str(sensor_type) or "unknown").observe(
+        max(float(latency_ms), 0.0)
+    )
 
 
 def increment_heartbeat_ack_valid(amount: int = 1) -> None:

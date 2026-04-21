@@ -12,6 +12,7 @@ from . import heartbeat_handler
 from . import intent_outcome_handler
 from . import intent_outcome_lifecycle_handler
 from . import lwt_handler
+from . import queue_pressure_handler
 from . import sensor_handler
 from . import subzone_ack_handler
 from . import zone_ack_handler
@@ -29,6 +30,7 @@ __all__ = [
     "intent_outcome_handler",
     "intent_outcome_lifecycle_handler",
     "lwt_handler",
+    "queue_pressure_handler",
     "sensor_handler",
     "subzone_ack_handler",
     "zone_ack_handler",

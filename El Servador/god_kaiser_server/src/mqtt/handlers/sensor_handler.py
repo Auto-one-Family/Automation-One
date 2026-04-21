@@ -19,6 +19,7 @@ Error Codes:
 """
 
 import asyncio
+import time as _time_module
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -31,7 +32,11 @@ from ...core.error_codes import (
 )
 from ...core.logging_config import get_logger
 from ...core.task_registry import create_tracked_task
-from ...core.metrics import increment_sensor_implausible, update_sensor_value
+from ...core.metrics import (
+    increment_sensor_implausible,
+    observe_sensor_e2e_latency_ms,
+    update_sensor_value,
+)
 from ...utils.sensor_formatters import format_sensor_message
 from ...utils.zone_subzone_resolver import resolve_zone_subzone_for_sensor
 from ...core.resilience import (
@@ -175,6 +180,29 @@ class SensorDataHandler:
                     f"{validation_result['error']}"
                 )
                 return False
+
+            # PKG-03: End-to-end latency observation (ESP32 publish -> server receive).
+            # Observed BEFORE DB write so the histogram reflects ingest latency, not
+            # persistence/logic cost. Accepts both "ts" and "timestamp" (alias in
+            # ESP32 payloads). Unit detection: Wokwi/NTP firmware publishes seconds
+            # (>1e9 but <1e10). Values >1e10 are treated as milliseconds.
+            payload_ts_raw = payload.get("ts", payload.get("timestamp"))
+            if isinstance(payload_ts_raw, (int, float)) and payload_ts_raw > 0:
+                payload_ts_seconds = (
+                    float(payload_ts_raw) / 1000.0
+                    if payload_ts_raw > 1e10
+                    else float(payload_ts_raw)
+                )
+                latency_ms = (_time_module.time() - payload_ts_seconds) * 1000.0
+                # NTP-drift sanity guard: only observe latencies within [0, 5 min).
+                # Negative values => ESP clock ahead of server; very large values =>
+                # stale replay or unsynced firmware. Both should not pollute the
+                # histogram.
+                if 0 < latency_ms < 300_000:
+                    observe_sensor_e2e_latency_ms(
+                        sensor_type=str(payload.get("sensor_type", "unknown")),
+                        latency_ms=latency_ms,
+                    )
 
             # Step 3: Get database session and repositories (with resilience)
             try:

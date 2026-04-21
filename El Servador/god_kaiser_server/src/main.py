@@ -50,6 +50,7 @@ from .mqtt.handlers import (
     intent_outcome_handler,
     intent_outcome_lifecycle_handler,
     lwt_handler,
+    queue_pressure_handler,
     sensor_handler,
     subzone_ack_handler,
     zone_ack_handler,
@@ -321,6 +322,15 @@ async def lifespan(app: FastAPI):
             "kaiser/+/esp/+/system/diagnostics", diagnostics_handler.handle_diagnostics
         )
         logger.info("Diagnostics handler registered: kaiser/+/esp/+/system/diagnostics")
+        # PKG-01b: Queue-Pressure Handler (pure observability, no DB/WS side effects)
+        # Topic: kaiser/+/esp/+/system/queue_pressure
+        # ESP32 publishes lifecycle events (entered_pressure / recovered) for the
+        # outbound publish queue; server increments a Prometheus counter and logs.
+        _subscriber_instance.register_handler(
+            "kaiser/+/esp/+/system/queue_pressure",
+            queue_pressure_handler.handle_queue_pressure,
+        )
+        logger.info("Queue pressure handler registered: kaiser/+/esp/+/system/queue_pressure")
         # S-P5: Calibration Sensor Response Handler
         # Processes sensor command responses during active calibration sessions
         _subscriber_instance.register_handler(
