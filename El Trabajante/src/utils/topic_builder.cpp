@@ -302,3 +302,13 @@ const char* TopicBuilder::buildZoneAckTopic() {
                          kaiser_id_, esp_id_);
   return validateTopicBuffer(written);
 }
+
+// PKG-01a: kaiser/{kaiser_id}/esp/{esp_id}/system/queue_pressure
+// Emitted on hysteresis transitions (ENTER/RECOVERED) of the Core 1 → Core 0
+// publish queue. Server handler: see PKG-01b (topics.parse_queue_pressure_topic).
+const char* TopicBuilder::buildQueuePressureTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/system/queue_pressure",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}

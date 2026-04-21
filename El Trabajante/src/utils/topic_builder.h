@@ -50,7 +50,10 @@ public:
   // WP3: Zone Management Topics
   static const char* buildZoneAssignTopic();         // kaiser/{kaiser_id}/esp/{esp_id}/zone/assign
   static const char* buildZoneAckTopic();            // kaiser/{kaiser_id}/esp/{esp_id}/zone/ack
-  
+
+  // PKG-01a (INC-2026-04-20-offline-mode-observability-hardening): Publish-Queue backpressure events
+  static const char* buildQueuePressureTopic();      // kaiser/{kaiser_id}/esp/{esp_id}/system/queue_pressure
+
 private:
   static char topic_buffer_[256];
   static char esp_id_[32];

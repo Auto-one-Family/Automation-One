@@ -15,6 +15,8 @@
 #include <freertos/portmacro.h>
 
 #include "../utils/logger.h"
+#include "../utils/topic_builder.h"
+#include "../utils/time_manager.h"
 #include "../utils/watchdog_storage.h"
 #include "../services/communication/wifi_manager.h"
 #include "../services/communication/mqtt_client.h"
@@ -24,7 +26,9 @@
 #include "../services/actuator/actuator_manager.h"
 #include "../models/system_types.h"
 #include "../models/config_types.h"
+#include "../models/error_codes.h"
 #include "../error_handling/circuit_breaker.h"
+#include "../error_handling/error_tracker.h"
 
 static const char* COMM_TAG = "COMM";
 
@@ -193,6 +197,104 @@ static void handleActuatorStatusPublish() {
 }
 
 // ============================================
+// STATIC HELPER: Publish-Queue Pressure Hysteresis (PKG-01a)
+// ============================================
+// INC-2026-04-20-offline-mode-observability-hardening:
+// Emits kaiser/{k}/esp/{id}/system/queue_pressure on hysteresis transitions of the
+// Core 1 → Core 0 publish queue. ENTER when fill crosses the shed watermark upwards,
+// RECOVERED when it falls back into the dead band.
+//
+//   Dead band: fill < PRESSURE_RECOVERED_THRESHOLD (=4)   → RECOVERED region
+//   Shed zone: fill >= PUBLISH_QUEUE_SHED_WATERMARK (=6)  → ENTER region
+//   Saturated: fill == PUBLISH_QUEUE_SIZE (=8)            → skip (defensive, avoid
+//              adding recursive load when ESP-IDF outbox is likely also strained)
+//
+// The queue_pressure publish itself runs on Core 0 and goes directly through
+// esp_mqtt_client_publish() (see MQTTClient::publish), so it does NOT consume a
+// g_publish_queue slot. The saturation-skip is kept per the PKG-01a contract.
+// Implemented only on the ESP-IDF MQTT path — PubSubClient builds have no
+// Core 1 → Core 0 publish queue. Runs at 50 ms cadence (Comm-Task loop).
+#ifndef MQTT_USE_PUBSUBCLIENT
+static const uint8_t PRESSURE_RECOVERED_THRESHOLD = 4;  // Dead band upper bound (exclusive)
+
+static void handleQueuePressureHysteresis() {
+    static bool     s_queue_pressure_entered = false;
+    static uint32_t s_last_drop_count = 0;
+
+    if (!mqttClient.isConnected()) {
+        // Nothing publishable while disconnected. State stays as-is; once reconnected
+        // the next transition will fire normally.
+        return;
+    }
+
+    PublishQueuePressureStats stats = getPublishQueuePressureStats();
+
+    // Defensive: never emit when queue is fully saturated. Keeps the Core 0 outbox
+    // from being pushed further under load. PKG-01a explicit requirement.
+    if (stats.fill_level >= PUBLISH_QUEUE_SIZE) {
+        return;
+    }
+
+    // Observe drop_count rising edge and report through the error pipeline.
+    // Local increment-only tracking — throttling handled by ErrorTracker.
+    if (stats.drop_count > s_last_drop_count) {
+        errorTracker.logApplicationError(ERROR_TASK_QUEUE_FULL,
+                                         "Publish queue full: messages dropped");
+        s_last_drop_count = stats.drop_count;
+    }
+
+    const char* event = nullptr;
+    if (!s_queue_pressure_entered && stats.fill_level >= PUBLISH_QUEUE_SHED_WATERMARK) {
+        s_queue_pressure_entered = true;
+        event = "entered_pressure";
+    } else if (s_queue_pressure_entered && stats.fill_level < PRESSURE_RECOVERED_THRESHOLD) {
+        s_queue_pressure_entered = false;
+        event = "recovered";
+    }
+
+    if (event == nullptr) {
+        return;  // No transition — nothing to emit
+    }
+
+    const char* topic_cstr = TopicBuilder::buildQueuePressureTopic();
+    if (topic_cstr == nullptr || topic_cstr[0] == '\0') {
+        LOG_W(COMM_TAG, "[COMM] queue_pressure topic build failed, dropping event");
+        return;
+    }
+    String topic(topic_cstr);
+
+    String payload;
+    payload.reserve(192);
+    payload += "{\"event\":\"";
+    payload += event;
+    payload += "\",\"fill_level\":";
+    payload += String(stats.fill_level);
+    payload += ",\"high_watermark\":";
+    payload += String(stats.high_watermark);
+    payload += ",\"shed_count\":";
+    payload += String(stats.shed_count);
+    payload += ",\"drop_count\":";
+    payload += String(stats.drop_count);
+    payload += ",\"threshold\":";
+    payload += String(PUBLISH_QUEUE_SHED_WATERMARK);
+    payload += ",\"ts\":";
+    payload += String((uint32_t)timeManager.getUnixTimestamp());
+    payload += "}";
+
+    if (!mqttClient.publish(topic, payload, 0)) {
+        LOG_W(COMM_TAG, "[COMM] queue_pressure publish failed (event=" + String(event) +
+              ", fill=" + String(stats.fill_level) + ")");
+    } else {
+        LOG_I(COMM_TAG, "[COMM] queue_pressure " + String(event) +
+              " fill=" + String(stats.fill_level) +
+              " hwm=" + String(stats.high_watermark) +
+              " shed=" + String(stats.shed_count) +
+              " drop=" + String(stats.drop_count));
+    }
+}
+#endif  // MQTT_USE_PUBSUBCLIENT
+
+// ============================================
 // STATIC HELPER: Heap Monitoring (every 60 s)
 // ============================================
 // SAFETY-RTOS M4: Detect memory leaks from queue/mutex overhead or large config payloads.
@@ -276,6 +378,9 @@ void communicationTaskFunction(void* param) {
         handleWifiDisconnectDebounce();
         handleMqttPersistentFailure();
         handleActuatorStatusPublish();
+#ifndef MQTT_USE_PUBSUBCLIENT
+        handleQueuePressureHysteresis();  // PKG-01a: backpressure ENTER/RECOVERED events
+#endif
         handleHeapMonitoring();
 
         vTaskDelay(pdMS_TO_TICKS(50));
