@@ -1307,6 +1307,18 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   }
 
   /**
+   * Config response guard-replay handler (PKG-04b, INC-2026-04-20).
+   * Server: config_handler.py Terminal Authority Guard (was_stale path) → WS: config_response_guard_replay
+   * Delegates to actuator.store (intent finalization) + config.store (operator toast).
+   */
+  function handleConfigResponseGuardReplay(message: { data: Record<string, unknown> }): void {
+    const actStore = useActuatorStore()
+    actStore.handleConfigResponseGuardReplay(message)
+    const cfgStore = useConfigStore()
+    cfgStore.handleConfigResponse(message, devices.value, getDeviceId, fetchGpioStatus)
+  }
+
+  /**
    * Handle zone_assignment WebSocket event
    * Updates device zone fields when ESP confirms zone assignment
    *
@@ -1888,6 +1900,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       ws.on('actuator_status', handleActuatorStatus),
       ws.on('actuator_alert', handleActuatorAlert),
       ws.on('config_response', handleConfigResponse),
+      ws.on('config_response_guard_replay', handleConfigResponseGuardReplay),
       ws.on('zone_assignment', handleZoneAssignment),
       ws.on('subzone_assignment', handleSubzoneAssignment),  // WP4
       ws.on('sensor_health', handleSensorHealth),  // Phase 2E

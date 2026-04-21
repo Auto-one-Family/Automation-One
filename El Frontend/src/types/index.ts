@@ -439,6 +439,7 @@ export type MessageType =
   | 'sensor_health'  // Phase 2E: Sensor timeout events
   // Configuration events
   | 'config_response'
+  | 'config_response_guard_replay'  // PKG-04b: Guard-Replay distinct event type
   | 'zone_assignment'
   // Discovery/Approval events (Phase: Device Discovery)
   | 'device_discovered'

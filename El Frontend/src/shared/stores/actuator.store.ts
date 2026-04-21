@@ -953,6 +953,61 @@ export const useActuatorStore = defineStore('actuator', () => {
     })
   }
 
+  /**
+   * Handle config_response_guard_replay WebSocket event (PKG-04b, INC-2026-04-20).
+   * Fired by server Terminal Authority Guard when a duplicate/stale config_response
+   * is detected but a frontend client may have missed the original (reconnect window).
+   * Lookup: correlation_id -> request_id fallback (3-step same as handleConfigResponse).
+   * Timeout-Shortcut: clears pending config timeout immediately.
+   */
+  function handleConfigResponseGuardReplay(message: { data: Record<string, unknown> }): void {
+    const data = message.data
+    const correlationId = extractCorrelationId(data)
+    const requestId = extractRequestId(data)
+    const status = String(data.status || '').toLowerCase()
+    const correlationIdSource = data.correlation_id_source as string | undefined
+
+    if (!correlationId) {
+      logger.warn('config_response_guard_replay without correlation_id - not finalizable', {
+        correlation_id_source: correlationIdSource,
+        request_id: requestId,
+      })
+      return
+    }
+
+    const existing = findIntentByCorrelation('config', correlationId)
+      ?? (requestId ? findIntentByRequest('config', requestId) : undefined)
+
+    if (!existing) {
+      logger.info('config_response_guard_replay: no tracked intent - already resolved or never started', {
+        correlation_id: correlationId,
+        request_id: requestId,
+        status,
+        correlation_id_source: correlationIdSource,
+      })
+      return
+    }
+
+    const effectiveCorrelationId = existing.correlationId ?? correlationId
+    const subjectId = existing.subjectId
+
+    // Timeout-Shortcut: clear pending timeout immediately (guard replay = terminal authority)
+    clearConfigTimeout(subjectId, effectiveCorrelationId, requestId)
+
+    finalizeIntent({
+      intentType: 'config',
+      subjectId,
+      summary: `Config Guard-Replay: ${status || 'unbekannt'}`,
+      correlationId: effectiveCorrelationId,
+      requestId,
+      outcome: status === 'success' ? 'success'
+             : status === 'failed' || status === 'partial_success' ? 'failed'
+             : 'integration_issue',
+      source: 'config_response',  // intentional: same finality-source, no terminalSource-Union extension needed
+      allowTimeoutOverride: true,
+    })
+  }
+
   function handleConfigFailed(message: { data: Record<string, unknown> }): void {
     const data = message.data
     const correlationId = extractCorrelationId(data)
@@ -1314,6 +1369,7 @@ export const useActuatorStore = defineStore('actuator', () => {
     handleActuatorCommandFailed,
     handleConfigPublished,
     handleConfigResponse,
+    handleConfigResponseGuardReplay,
     handleConfigFailed,
     handleSequenceStarted,
     handleSequenceStep,
