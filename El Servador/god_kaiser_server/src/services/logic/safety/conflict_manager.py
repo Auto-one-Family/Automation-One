@@ -257,7 +257,8 @@ class ConflictManager:
                     existing_lock.priority,
                     extra={
                         "event_class": "RULE_ARBITRATION",
-                        "result": "expected",
+                        "result": "blocked",
+                        "classification": "expected",
                         "policy": "first_wins",
                         "actuator_key": actuator_key,
                         "winner_rule_id": existing_lock.rule_id,
@@ -274,31 +275,6 @@ class ConflictManager:
                 resolution=resolution,
                 blocked_until=existing_lock.expires_at if winner != rule_id else None,
                 message=f"Conflict on {actuator_key}: {resolution.value}",
-            )
-            logger.info(
-                "Conflict on %s: %s",
-                actuator_key,
-                resolution.value,
-                extra={
-                    "event_class": "RULE_ARBITRATION",
-                    "result": "expected",
-                    "policy": "first_wins",
-                    "actuator_key": actuator_key,
-                    "winner_rule_id": winner,
-                    "loser_rule_id": (
-                        rule_id if winner != rule_id else existing_lock.rule_id
-                    ),
-                    "winner_priority": (
-                        existing_lock.priority
-                        if winner == existing_lock.rule_id
-                        else effective_priority
-                    ),
-                    "loser_priority": (
-                        effective_priority
-                        if winner == existing_lock.rule_id
-                        else existing_lock.priority
-                    ),
-                },
             )
 
             self._conflict_history.append(conflict)
