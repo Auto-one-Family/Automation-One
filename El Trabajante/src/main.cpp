@@ -2340,6 +2340,12 @@ void routeIncomingMessage(const char* t, const char* p) {
         bool config_available = doc["config_available"] | false;
         unsigned long server_time = doc["server_time"] | 0;
 
+        // NTP can still be pending during early boot; adopt authoritative server time
+        // from heartbeat ACK to avoid prolonged ts=0 windows.
+        if (server_time > 0 && !timeManager.isSynchronized()) {
+            timeManager.syncFromAuthoritativeUnix(static_cast<time_t>(server_time), "heartbeat_ack");
+        }
+
         LOG_D(TAG, "  Status: " + String(status) + ", Config available: " +
                   String(config_available ? "yes" : "no"));
 

@@ -44,6 +44,7 @@
 #define NTP_RESYNC_INTERVAL_MS    300000  // Re-sync every 5 minutes
 #define NTP_RETRY_DELAY_MS        1000    // Retry delay on failure
 #define NTP_MAX_RETRIES           5       // Max retries per sync attempt
+#define NTP_NO_TIMESTAMP_LOG_INTERVAL_MS 10000  // Throttle repeated "no timestamp" warnings
 
 // Validation
 #define NTP_MIN_VALID_TIMESTAMP   1700000000  // ~2023-11-14 (sanity check)
@@ -198,6 +199,18 @@ public:
      * Must only set volatile flags — no heap allocation, no LOG.
      */
     void onSyncCompleted();
+
+    /**
+     * @brief Seed local system clock from an authoritative Unix timestamp.
+     *
+     * Used as fallback when NTP is not yet synchronized but server ACKs already
+     * provide trustworthy Unix seconds.
+     *
+     * @param unix_timestamp Unix timestamp in seconds
+     * @param source Log label for observability (e.g. "heartbeat_ack")
+     * @return true if clock seed was applied successfully
+     */
+    bool syncFromAuthoritativeUnix(time_t unix_timestamp, const char* source = "external");
     
     /**
      * @brief Set custom NTP servers
@@ -229,6 +242,7 @@ private:
     unsigned long last_sync_millis_;  // millis() at last sync
     unsigned long last_resync_check_; // millis() at last resync check
     volatile bool sync_completed_;    // set by SNTP callback (LWIP thread) on successful sync
+    mutable unsigned long last_no_timestamp_log_ms_;  // rate-limit warning spam on unsynced boot
     
     // Custom NTP servers (optional)
     const char* ntp_server_primary_;

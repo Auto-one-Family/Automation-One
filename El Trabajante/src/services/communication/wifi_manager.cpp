@@ -238,6 +238,8 @@ void WiFiManager::reconnect() {
     } else {
         // ✅ RECONNECT SUCCESS
         // connectToNetwork already calls circuit_breaker_.recordSuccess()
+        // Ensure TimeManager resumes SNTP after a prior disconnect stop.
+        timeManager.onWiFiConnected();
     }
 }
 

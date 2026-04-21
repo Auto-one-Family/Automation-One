@@ -228,6 +228,9 @@ MQTTClient::MQTTClient()
       pending_subscription_count_(0),
       bootstrap_heartbeat_pending_(false),
       pending_bootstrap_ack_subscribe_msg_id_(-1),
+      pending_bootstrap_config_subscribe_msg_id_(-1),
+      bootstrap_ack_subscription_ready_(false),
+      bootstrap_config_subscription_ready_(false),
       bootstrap_heartbeat_send_pending_(false),
       next_managed_reconnect_ms_(0),
       managed_reconnect_attempts_(0),
@@ -800,6 +803,11 @@ bool MQTTClient::queueSubscribe(const String& topic, uint8_t qos, bool critical)
 void MQTTClient::requestBootstrapHeartbeatAfterAck() {
 #ifndef MQTT_USE_PUBSUBCLIENT
     bootstrap_heartbeat_pending_ = true;
+    bootstrap_heartbeat_send_pending_ = false;
+    bootstrap_ack_subscription_ready_ = false;
+    bootstrap_config_subscription_ready_ = false;
+    pending_bootstrap_ack_subscribe_msg_id_ = -1;
+    pending_bootstrap_config_subscribe_msg_id_ = -1;
 #endif
 }
 
@@ -856,6 +864,9 @@ bool MQTTClient::enqueueSubscription_(const String& topic, uint8_t qos, bool cri
 void MQTTClient::clearSubscriptionQueue_() {
     pending_subscription_count_ = 0;
     pending_bootstrap_ack_subscribe_msg_id_ = -1;
+    pending_bootstrap_config_subscribe_msg_id_ = -1;
+    bootstrap_ack_subscription_ready_ = false;
+    bootstrap_config_subscription_ready_ = false;
 }
 #endif
 
@@ -1026,18 +1037,23 @@ void MQTTClient::processSubscriptionQueue() {
     if (msg_id >= 0) {
         LOG_I(TAG, "Subscribe sent (QoS " + String(sub.qos) + "): " + sub.topic);
         bool is_ack_topic = sub.topic.indexOf("/system/heartbeat/ack") != -1;
+        bool is_config_topic = sub.topic.endsWith("/config");
 
         for (uint8_t i = 1; i < pending_subscription_count_; ++i) {
             pending_subscriptions_[i - 1] = pending_subscriptions_[i];
         }
         pending_subscription_count_--;
 
-        // Defer bootstrap heartbeat until MQTT_EVENT_SUBSCRIBED for this msg_id.
+        // Defer bootstrap heartbeat until MQTT_EVENT_SUBSCRIBED for required lanes.
         // Sending immediately after esp_mqtt_client_subscribe() races the broker: the first
-        // server ACK can be published before the subscription is active → ESP never sees it.
+        // server config push can be published before /config is active → ESP waits until retry.
         if (is_ack_topic && bootstrap_heartbeat_pending_) {
             pending_bootstrap_ack_subscribe_msg_id_ = msg_id;
             LOG_I(TAG, "[SYNC] Bootstrap heartbeat deferred until SUBSCRIBED (msg_id=" + String(msg_id) + ")");
+        }
+        if (is_config_topic && bootstrap_heartbeat_pending_) {
+            pending_bootstrap_config_subscribe_msg_id_ = msg_id;
+            LOG_I(TAG, "[SYNC] Bootstrap heartbeat waiting for config SUBSCRIBED (msg_id=" + String(msg_id) + ")");
         }
         return;
     }
@@ -1213,12 +1229,22 @@ bool MQTTClient::publishSessionAnnounce(uint32_t epoch) {
         boot_ts = (unix_timestamp > 0) ? static_cast<unsigned long>(unix_timestamp) : (millis() / 1000UL);
     }
 
-    char payload[192];
+    const char* announce_reason = epoch > 1 ? "reconnect" : "boot";
+    uint64_t ts_ms = timeManager.getUnixTimestampMs();
+    if (ts_ms == 0) {
+        ts_ms = static_cast<uint64_t>(millis());
+    }
+
+    char payload[320];
     snprintf(payload,
              sizeof(payload),
-             "{\"esp_id\":\"%s\",\"session_epoch\":%lu,\"boot_ts\":\"%lu\"}",
+             "{\"esp_id\":\"%s\",\"handover_epoch\":%lu,\"session_epoch\":%lu,"
+             "\"reason\":\"%s\",\"ts_ms\":%llu,\"boot_ts\":\"%lu\"}",
              g_system_config.esp_id.c_str(),
              static_cast<unsigned long>(epoch),
+             static_cast<unsigned long>(epoch),
+             announce_reason,
+             static_cast<unsigned long long>(ts_ms),
              boot_ts);
     payload[sizeof(payload) - 1] = '\0';
 
@@ -1510,6 +1536,9 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->clearSubscriptionQueue_();
             self->bootstrap_heartbeat_pending_ = false;
             self->pending_bootstrap_ack_subscribe_msg_id_ = -1;
+            self->pending_bootstrap_config_subscribe_msg_id_ = -1;
+            self->bootstrap_ack_subscription_ready_ = false;
+            self->bootstrap_config_subscription_ready_ = false;
             self->bootstrap_heartbeat_send_pending_ = false;
             self->next_managed_reconnect_ms_ = 0;
             self->managed_reconnect_attempts_ = 0;
@@ -1588,6 +1617,9 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->clearSubscriptionQueue_();
             self->bootstrap_heartbeat_pending_ = false;
             self->pending_bootstrap_ack_subscribe_msg_id_ = -1;
+            self->pending_bootstrap_config_subscribe_msg_id_ = -1;
+            self->bootstrap_ack_subscription_ready_ = false;
+            self->bootstrap_config_subscription_ready_ = false;
             self->bootstrap_heartbeat_send_pending_ = false;
             self->pending_session_announce_msg_id_ = -1;
             resumeAfterAnnounceAck("guard_timeout");
@@ -1737,20 +1769,37 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
         case MQTT_EVENT_SUBSCRIBED: {
             const int mid = event->msg_id;
             LOG_I(TAG, "MQTT_EVENT_SUBSCRIBED msg_id=" + String(mid));
-            if (self->bootstrap_heartbeat_pending_ &&
-                self->pending_bootstrap_ack_subscribe_msg_id_ >= 0 &&
-                mid == self->pending_bootstrap_ack_subscribe_msg_id_) {
+            if (self->bootstrap_heartbeat_pending_) {
                 if (!g_mqtt_connected.load()) {
                     LOG_W(TAG, "[SYNC] Ignoring stale SUBSCRIBED bootstrap trigger while disconnected");
                     self->bootstrap_heartbeat_pending_ = false;
                     self->pending_bootstrap_ack_subscribe_msg_id_ = -1;
+                    self->pending_bootstrap_config_subscribe_msg_id_ = -1;
+                    self->bootstrap_ack_subscription_ready_ = false;
+                    self->bootstrap_config_subscription_ready_ = false;
                     self->bootstrap_heartbeat_send_pending_ = false;
                     break;
                 }
-                self->bootstrap_heartbeat_send_pending_ = true;
-                self->bootstrap_heartbeat_pending_ = false;
-                self->pending_bootstrap_ack_subscribe_msg_id_ = -1;
-                LOG_I(TAG, "[SYNC] Bootstrap heartbeat armed after SUBSCRIBED (ACK topic active)");
+
+                if (self->pending_bootstrap_ack_subscribe_msg_id_ >= 0 &&
+                    mid == self->pending_bootstrap_ack_subscribe_msg_id_) {
+                    self->bootstrap_ack_subscription_ready_ = true;
+                    self->pending_bootstrap_ack_subscribe_msg_id_ = -1;
+                    LOG_I(TAG, "[SYNC] Bootstrap prerequisite ready: heartbeat ACK subscription active");
+                }
+
+                if (self->pending_bootstrap_config_subscribe_msg_id_ >= 0 &&
+                    mid == self->pending_bootstrap_config_subscribe_msg_id_) {
+                    self->bootstrap_config_subscription_ready_ = true;
+                    self->pending_bootstrap_config_subscribe_msg_id_ = -1;
+                    LOG_I(TAG, "[SYNC] Bootstrap prerequisite ready: config subscription active");
+                }
+
+                if (self->bootstrap_ack_subscription_ready_ && self->bootstrap_config_subscription_ready_) {
+                    self->bootstrap_heartbeat_send_pending_ = true;
+                    self->bootstrap_heartbeat_pending_ = false;
+                    LOG_I(TAG, "[SYNC] Bootstrap heartbeat armed after SUBSCRIBED (ACK+config active)");
+                }
             }
             break;
         }

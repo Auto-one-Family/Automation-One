@@ -17,6 +17,7 @@
 #include "time_manager.h"
 #include "logger.h"
 #include <WiFi.h>
+#include <sys/time.h>
 #include "esp_sntp.h"  // Direct ESP-IDF SNTP API for daemon control (esp_sntp_stop/init)
 
 // ESP-IDF TAG convention for structured logging
@@ -43,6 +44,7 @@ TimeManager::TimeManager()
     , last_sync_time_(0)
     , last_sync_millis_(0)
     , last_resync_check_(0)
+    , last_no_timestamp_log_ms_(0)
     , ntp_server_primary_(NTP_SERVER_PRIMARY)
     , ntp_server_secondary_(NTP_SERVER_SECONDARY)
     , ntp_server_tertiary_(NTP_SERVER_TERTIARY) {
@@ -62,7 +64,20 @@ static void onTimeSyncNotification(struct timeval* tv) {
 
 bool TimeManager::begin() {
     if (initialized_) {
-        LOG_W(TAG, "TimeManager already initialized");
+        // Reconnect path: daemon may be stopped after WiFi loss.
+        // Ensure SNTP resumes when WiFi is back, even after initial begin().
+        if (!sntp_daemon_running_ && WiFi.status() == WL_CONNECTED) {
+            LOG_I(TAG, "TimeManager: Restarting SNTP daemon after reconnect");
+            sync_completed_ = false;
+            configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET,
+                       ntp_server_primary_,
+                       ntp_server_secondary_,
+                       ntp_server_tertiary_);
+            sntp_daemon_running_ = true;
+            last_resync_check_ = millis();
+        } else {
+            LOG_W(TAG, "TimeManager already initialized");
+        }
         return synchronized_;
     }
 
@@ -203,9 +218,14 @@ time_t TimeManager::getUnixTimestamp() const {
         }
     }
     
-    // Last resort: return 0 to indicate no valid timestamp
-    // Server should use server-time as fallback
-    LOG_W(TAG, "TimeManager: No valid timestamp available");
+    // Last resort: return 0 to indicate no valid timestamp.
+    // Rate-limit warning spam during early boot/config bursts while NTP is pending.
+    unsigned long now_ms = millis();
+    if (last_no_timestamp_log_ms_ == 0 ||
+        (now_ms - last_no_timestamp_log_ms_) >= NTP_NO_TIMESTAMP_LOG_INTERVAL_MS) {
+        last_no_timestamp_log_ms_ = now_ms;
+        LOG_W(TAG, "TimeManager: No valid timestamp available");
+    }
     return 0;
 }
 
@@ -365,8 +385,8 @@ void TimeManager::onWiFiConnected() {
         sync_completed_ = false;
         configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET,
                    ntp_server_primary_, ntp_server_secondary_, ntp_server_tertiary_);
-        esp_sntp_init();
         sntp_daemon_running_ = true;
+        last_resync_check_ = millis();
         LOG_I(TAG, "SNTP daemon restarted after WiFi reconnect");
     }
 }
@@ -377,6 +397,34 @@ void TimeManager::onWiFiDisconnected() {
         sntp_daemon_running_ = false;
         LOG_I(TAG, "SNTP daemon stopped — WiFi disconnected");
     }
+}
+
+bool TimeManager::syncFromAuthoritativeUnix(time_t unix_timestamp, const char* source) {
+    if (!isValidTimestamp(unix_timestamp)) {
+        LOG_W(TAG, "TimeManager: Ignoring invalid authoritative timestamp: " +
+                   String((unsigned long)unix_timestamp));
+        return false;
+    }
+
+    struct timeval tv;
+    tv.tv_sec = unix_timestamp;
+    tv.tv_usec = 0;
+
+    if (settimeofday(&tv, nullptr) != 0) {
+        LOG_E(TAG, "TimeManager: settimeofday failed for authoritative sync");
+        return false;
+    }
+
+    synchronized_ = true;
+    sync_completed_ = true;
+    last_sync_time_ = unix_timestamp;
+    last_sync_millis_ = millis();
+    last_resync_check_ = last_sync_millis_;
+    last_no_timestamp_log_ms_ = 0;
+
+    LOG_I(TAG, "TimeManager: Clock seeded from " + String(source ? source : "external") +
+               " (ts=" + String((unsigned long)unix_timestamp) + ")");
+    return true;
 }
 
 // ============================================

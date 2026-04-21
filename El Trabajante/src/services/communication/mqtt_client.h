@@ -268,6 +268,11 @@ private:
     bool bootstrap_heartbeat_pending_;
     /** msg_id from esp_mqtt_client_subscribe(heartbeat/ack); bootstrap HB after MQTT_EVENT_SUBSCRIBED */
     int pending_bootstrap_ack_subscribe_msg_id_;
+    /** msg_id from esp_mqtt_client_subscribe(config); bootstrap HB waits until config lane is active */
+    int pending_bootstrap_config_subscribe_msg_id_;
+    /** Tracks SUBSCRIBED events for bootstrap prerequisites (reset on connect/disconnect). */
+    bool bootstrap_ack_subscription_ready_;
+    bool bootstrap_config_subscription_ready_;
     bool bootstrap_heartbeat_send_pending_;
     unsigned long next_managed_reconnect_ms_;
     uint16_t managed_reconnect_attempts_;
