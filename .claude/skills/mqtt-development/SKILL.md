@@ -159,6 +159,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{category}/{gpio}/{action}
 | 12 | `system/command` | Server→ESP | 2 | `buildSystemCommandTopic()` | `MQTT_TOPIC_ESP_SYSTEM_COMMAND` |
 | 13 | `system/diagnostics` | ESP→Server | 0 | `buildSystemDiagnosticsTopic()` | - |
 | 14 | `system/error` | ESP→Server | 1 | `buildSystemErrorTopic()` | - |
+| 14a | `system/queue_pressure` | ESP→Server | 1 | `buildQueuePressureTopic()` *(PKG-01a, Welle 2)* | `TopicBuilder.build_queue_pressure_topic` *(PKG-01)* |
 | 15 | `system/intent_outcome` | ESP→Server | 1 | `buildIntentOutcomeTopic()` | - |
 | 15b | `system/intent_outcome/lifecycle` | ESP→Server | 1 | `buildIntentOutcomeLifecycleTopic()` | `intent_outcome_lifecycle_handler.py` |
 | 16 | `system/will` | ESP→Server | 1 | (LWT bei connect) | - |

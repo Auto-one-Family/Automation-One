@@ -310,6 +310,8 @@ TopicBuilder::buildZoneAckTopic();             // .../zone/ack
 TopicBuilder::buildSubzoneAssignTopic();       // .../subzone/assign
 TopicBuilder::buildSubzoneRemoveTopic();       // .../subzone/remove
 TopicBuilder::buildSubzoneSafeTopic();         // .../subzone/safe (ESP subscribt + Handler)
+// PKG-01a (Welle 2, INC-2026-04-20-offline-mode-observability-hardening):
+TopicBuilder::buildQueuePressureTopic();       // .../system/queue_pressure (ENTER/RECOVERED)
 ```
 
 ### Standard Publish-Pattern

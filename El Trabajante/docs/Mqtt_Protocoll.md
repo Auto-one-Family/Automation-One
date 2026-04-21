@@ -1241,6 +1241,60 @@ Libraries werden über MQTT in Chunks übertragen, da MQTT-Payloads limitiert si
 
 ---
 
+### 15a. Publish-Queue Backpressure (PKG-01, Welle 2)
+
+**Topic:** `kaiser/god/esp/{esp_id}/system/queue_pressure`
+
+**QoS:** 1
+**Retain:** false
+**Frequency:** Nur bei Zustandswechsel (Hysterese, kein periodischer Emit)
+**Module:** `services/communication/publish_queue.cpp` + `mqtt_client.cpp`
+**TopicBuilder:** `TopicBuilder::buildQueuePressureTopic()` *(in Welle 2, PKG-01a)*
+
+**Zweck:** Strukturiertes Backpressure-Event, komplementär zum generischen
+`system/error`-Code 4062. Ermöglicht dem Server die klare Unterscheidung
+"Burst-Druck (erwartet, deterministisch)" vs. "Fehler".
+
+**Payload-Schema (Entwurf PKG-01a):**
+```json
+{
+  "ts": 1735818000,
+  "esp_id": "ESP_EA5484",
+  "event": "ENTER",              // "ENTER" | "RECOVERED"
+  "queue_fill": 7,               // aktueller Füllstand
+  "queue_capacity": 8,           // PUBLISH_QUEUE_SIZE
+  "shed_watermark": 6,           // SHED_WATERMARK
+  "hysteresis_low": 3,           // PUBLISH_QUEUE_HYSTERESIS_LOW (neu)
+  "shed_count": 1,
+  "drop_count": 0,
+  "high_watermark": 9,
+  "reason": "PUBLISH_OUTBOX_FULL"
+}
+```
+
+**Hysterese-Regeln:**
+- **ENTER** wird emittiert, wenn `queue_fill >= SHED_WATERMARK` (6) UND bisher kein aktives Backpressure-State
+- **RECOVERED** wird emittiert, wenn `queue_fill <= PUBLISH_QUEUE_HYSTERESIS_LOW` (3) UND aktives Backpressure-State
+- Keine wiederholten ENTER-Events ohne vorheriges RECOVERED (Schutz vor Flood)
+
+**Publish-Route:** Emission geschieht über `MQTTClient::publishDirect()`
+(direkter `esp_mqtt_client_publish` / PubSubClient-Pfad) und umgeht bewusst
+die reguläre `queuePublish()`-Route, um sich selbst nicht zu verlieren, wenn
+die Publish-Queue voll ist.
+
+**Call-Sites (geplant):**
+- `publish_queue.cpp:130` (nach `updateHighWatermark` → ENTER-Check)
+- `publish_queue.cpp:178` (post-enqueue → ENTER-Check)
+- `mqtt_client.cpp:processPublishQueue` (post-`xQueueReceive` → RECOVERED-Check)
+
+**Korrelation mit Error-Events:**
+- `system/error` mit `error_code=4062` (Subcategory `MQTT_PUBLISH_BACKPRESSURE`,
+  PKG-07) wird komplementär weiter emittiert. `queue_pressure` liefert den
+  strukturierten Kontext, `error` liefert die Standard-Fehler-Kette für
+  existierende Server-Pfade.
+
+---
+
 ### 16. Intent-Outcome (Core-Queue Safety-Vertrag)
 
 **Topic:** `kaiser/god/esp/{esp_id}/system/intent_outcome`
@@ -3971,13 +4025,23 @@ def test_actuator_control(mock_esp32):
 ---
 
 **Status:** ✅ Spezifikation produktionsreif & vollständig
-**Version:** 2.3 (Session-Announce ergänzt)
+**Version:** 2.4 (queue_pressure Topic ergänzt, PKG-01)
 **Last Updated:** 2026-04-20
 **Author:** System-Architektur-Team
 
 ---
 
 ## Changelog
+
+### Version 2.4 (2026-04-20) - PKG-01 QUEUE-PRESSURE (INC-2026-04-20-offline-mode-observability-hardening)
+
+**Neu hinzugefügt:**
+1. ✅ Topic `kaiser/god/esp/{esp_id}/system/queue_pressure` dokumentiert (Sektion 15a)
+2. ✅ Hysterese-Semantik (ENTER bei SHED_WATERMARK=6, RECOVERED bei HYSTERESIS_LOW=3)
+3. ✅ Publish-Route-Hinweis: `publishDirect()` statt `queuePublish()` (Selbstverlust-Schutz)
+4. ✅ Korrelation zu `system/error` 4062 (Subcategory `MQTT_PUBLISH_BACKPRESSURE`, PKG-07)
+
+**Kein Breaking Change:** Reine additive Erweiterung. Firmware-Emitter in Welle 2 (PKG-01a).
 
 ### Version 2.3 (2026-04-20) - AUT-69 SESSION-ANNOUNCE
 

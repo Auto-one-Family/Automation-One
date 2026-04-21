@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.20 | **Aktualisiert:** 2026-04-20
+> **Version:** 2.21 | **Aktualisiert:** 2026-04-20
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
-> **Änderungen:** **AUT-69 (2026-04-20):** `session/announce` an Server-Consumer angepasst (`handle_session_announce` registriert), Session-Feld-Alias dokumentiert (**kanonisch `handover_epoch`, Fallback `session_epoch`**) und Heartbeat-Metriken um `handover_contract_reject_startup`/`handover_contract_reject_runtime` plus Summenfeld `handover_contract_reject` erweitert. Zuvor: **AUT-54 (2026-04-17):** Bootstrap-Heartbeat nach `heartbeat/ack`-Subscription wird auf ESP32 nur noch deferred im normalen Loop gesendet (nicht mehr direkt im `MQTT_EVENT_SUBSCRIBED`-Callback). Stale `MQTT_EVENT_SUBSCRIBED` bei bereits getrennter Verbindung werden verworfen; `publishHeartbeat(force=true)` sendet nie im disconnected Zustand. Zuvor: **AUT-5 (2026-04-17):** Heartbeat-Payload um `sensor_command_queue_overflow_count` ergänzt (Overflow-Telemetrie der Sensor-Command-Queue). Zuvor: **PKG-05 (2026-04-14):** `system/heartbeat/ack` Reject-Diagnose erweitert (optionale Felder `reason_code`, `revocation_source`, `upstream_deleted`, `delete_intent`, `correlation_id` für Revocation/Upstream-Delete-Auswertung auf ESP-Seite). Intent-Outcome-Codes ergänzt: `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`. Zuvor: **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
+> **Änderungen:** **PKG-01 (2026-04-20, INC-2026-04-20-offline-mode-observability-hardening):** Neuer Topic `system/queue_pressure` (ESP→Server, QoS 1) für strukturierte Publish-Queue-Backpressure-Events (ENTER/RECOVERED, Hysterese). Server-TopicBuilder in `src/mqtt/topics.py` ergänzt (`build_queue_pressure_topic`, `parse_queue_pressure_topic`). Firmware-Emitter und Server-Handler folgen in Welle 2 (PKG-01a/01b). Zuvor: **AUT-69 (2026-04-20):** `session/announce` an Server-Consumer angepasst (`handle_session_announce` registriert), Session-Feld-Alias dokumentiert (**kanonisch `handover_epoch`, Fallback `session_epoch`**) und Heartbeat-Metriken um `handover_contract_reject_startup`/`handover_contract_reject_runtime` plus Summenfeld `handover_contract_reject` erweitert. Zuvor: **AUT-54 (2026-04-17):** Bootstrap-Heartbeat nach `heartbeat/ack`-Subscription wird auf ESP32 nur noch deferred im normalen Loop gesendet (nicht mehr direkt im `MQTT_EVENT_SUBSCRIBED`-Callback). Stale `MQTT_EVENT_SUBSCRIBED` bei bereits getrennter Verbindung werden verworfen; `publishHeartbeat(force=true)` sendet nie im disconnected Zustand. Zuvor: **AUT-5 (2026-04-17):** Heartbeat-Payload um `sensor_command_queue_overflow_count` ergänzt (Overflow-Telemetrie der Sensor-Command-Queue). Zuvor: **PKG-05 (2026-04-14):** `system/heartbeat/ack` Reject-Diagnose erweitert (optionale Felder `reason_code`, `revocation_source`, `upstream_deleted`, `delete_intent`, `correlation_id` für Revocation/Upstream-Delete-Auswertung auf ESP-Seite). Intent-Outcome-Codes ergänzt: `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`. Zuvor: **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
 
 ---
 
@@ -47,6 +47,7 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `kaiser/god/esp/{esp_id}/system/diagnostics` | ESP→Server | 0 | Diagnostics |
 | `kaiser/god/esp/{esp_id}/system/will` | ESP→Server | 1 | LWT (Last Will) |
 | `kaiser/god/esp/{esp_id}/system/error` | ESP→Server | 1 | Error Event |
+| `kaiser/god/esp/{esp_id}/system/queue_pressure` | ESP→Server | 1 | Publish-Queue Backpressure Event (ENTER/RECOVERED, PKG-01) |
 | `kaiser/god/esp/{esp_id}/system/intent_outcome` | ESP→Server | 1 | Intent/Outcome Events (kanonisch `buildOutcomePayload`) |
 | `kaiser/god/esp/{esp_id}/system/intent_outcome/lifecycle` | ESP→Server | 1 | CONFIG_PENDING Lifecycle (`config_pending_lifecycle_v1`) |
 | `kaiser/god/esp/{esp_id}/status` | ESP→Server | 1 | System-Status |
@@ -760,6 +761,53 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 
 ---
 
+### 3.6a system/queue_pressure (ESP→Server, PKG-01)
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/queue_pressure`
+
+**QoS:** 1 (at least once)
+**Retain:** false
+**Frequency:** Nur bei Zustandswechsel (Hysterese: ENTER bei Queue-Fill ≥ `SHED_WATERMARK=6`, RECOVERED bei ≤ `PUBLISH_QUEUE_HYSTERESIS_LOW=3`). Keine periodische Emission.
+
+**Zweck:** Strukturiertes Event für Publish-Queue-Backpressure, getrennt vom
+generischen `system/error`-Fehlercode 4062. Ermöglicht dem Server/Frontend
+eine klare Unterscheidung "Burst-Druck (erwartet)" vs. "Fehler im engeren Sinn".
+
+**Payload (geplant, PKG-01a Welle 2):**
+```json
+{
+  "ts": 1735818000,
+  "esp_id": "ESP_EA5484",
+  "event": "ENTER",
+  "queue_fill": 7,
+  "queue_capacity": 8,
+  "shed_watermark": 6,
+  "hysteresis_low": 3,
+  "shed_count": 1,
+  "drop_count": 0,
+  "high_watermark": 9,
+  "reason": "PUBLISH_OUTBOX_FULL"
+}
+```
+
+Event-Werte: `"ENTER"` (Backpressure aktiv), `"RECOVERED"` (Backpressure aufgehoben).
+
+**Status:**
+- **TopicBuilder (Server):** `TopicBuilder.build_queue_pressure_topic()` +
+  `TopicBuilder.parse_queue_pressure_topic()` — implementiert in PKG-01
+  (Commit `7e7ae245`, `El Servador/god_kaiser_server/src/mqtt/topics.py`).
+- **Firmware-Emitter:** In Welle 2 (PKG-01a) — Hot-Path nach
+  `publish_queue.cpp:130/178` + `mqtt_client.cpp:processPublishQueue`.
+- **Server-Handler:** In Welle 2 (PKG-01b) — Prometheus-/Persist-Route offen
+  (Blocker `B-QP-PERSIST-01`).
+
+**Code-Referenzen:**
+- **Server:** `src/mqtt/topics.py:build_queue_pressure_topic`,
+  `parse_queue_pressure_topic`
+- **ESP32:** `TopicBuilder::buildQueuePressureTopic()` *(PKG-01a, Welle 2)*
+
+---
+
 ### 3.7 status (ESP→Server)
 
 **Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/status`
@@ -1392,6 +1440,7 @@ Der Server subscribed zu folgenden Topic-Patterns:
 | `kaiser/+/esp/+/subzone/ack` | `handle_subzone_ack` | `main.py:280` |
 | `kaiser/+/esp/+/system/will` | `handle_lwt` | `lwt_handler.py:35` |
 | `kaiser/+/esp/+/system/error` | `handle_system_error` | `main.py:293` |
+| `kaiser/+/esp/+/system/queue_pressure` | *(PKG-01b, Welle 2: `handle_queue_pressure`)* | *(server-dev, Welle 2)* |
 | `kaiser/+/esp/+/system/intent_outcome` | `handle_intent_outcome` | `intent_outcome_handler.py` |
 | `kaiser/+/esp/+/system/intent_outcome/lifecycle` | `handle_intent_outcome_lifecycle` | `intent_outcome_lifecycle_handler.py` (Audit + WS `intent_outcome_lifecycle`, Metrik `intent_outcome_lifecycle_total`) |
 | `kaiser/+/esp/+/status` | *(nicht registriert)* | *(derzeit kein Handler in `main.py`)* |

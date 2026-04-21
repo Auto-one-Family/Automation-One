@@ -7,9 +7,10 @@ allowed-tools: Read
 
 # Error-Code Referenz
 
-> **Version:** 1.6 | **Aktualisiert:** 2026-04-04
+> **Version:** 1.7 | **Aktualisiert:** 2026-04-20
 > **Quellen:** `El Trabajante/src/models/error_codes.h`, `El Servador/god_kaiser_server/src/core/error_codes.py`
 > **Letzte Verifizierung:** AGENT 3 Error-Code Spezialist
+> **Änderungen:** **PKG-07 (2026-04-20, INC-2026-04-20-offline-mode-observability-hardening):** 4062 Mapping in `esp32_error_mapping.py` additiv um `subcategory="MQTT_PUBLISH_BACKPRESSURE"` erweitert; User-Message auf "System-Warnung: MQTT-Veroeffentlichung unter Last (kurzfristiger Burst)" präzisiert; Troubleshooting um Backpressure-Hinweise ergänzt.
 
 ---
 
@@ -326,7 +327,7 @@ allowed-tools: Read
 |------|------|--------------|
 | 4060 | `TASK_FAILED` | FreeRTOS task failed |
 | 4061 | `TASK_TIMEOUT` | FreeRTOS task timeout |
-| 4062 | `TASK_QUEUE_FULL` | FreeRTOS task queue is full |
+| 4062 | `TASK_QUEUE_FULL` | MQTT-Publish-Pfad unter Burst-Druck (Outbox voll / Shed). Subcategory `MQTT_PUBLISH_BACKPRESSURE` (PKG-07, 2026-04-20). Firmware emittiert aus `publish_queue.cpp:102/157` und `mqtt_client.cpp:637`. Korrelieren mit `system/queue_pressure`-Event (ENTER/RECOVERED). |
 
 ### Watchdog Errors (4070-4072)
 

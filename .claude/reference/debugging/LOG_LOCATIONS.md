@@ -1,6 +1,7 @@
 # Log-System - AutomationOne
 
-> **Version:** 4.10 | **Aktualisiert:** 2026-03-06
+> **Version:** 4.11 | **Aktualisiert:** 2026-04-20
+> **Änderungen 4.11 (2026-04-20):** PKG-02 / PKG-06 (INC-2026-04-20-offline-mode-observability-hardening): Neue `event_class`-Labels (`rule_arbitration`, `CONFIG_GUARD`) dokumentiert in Sektion 2.3a; Loki-Filter-Beispiele ergänzt.
 > **Änderungen 4.10:** Loki Windows: 127.0.0.1 + WebClient-Fallback (localhost-Timeout behoben)
 > **Änderungen 4.7:** Level-Normalisierung (uppercase) für loki, mqtt-broker, el-frontend in Alloy. Drop-Filter für Loki query-stats (metrics.go, engine.go, roundtrip.go). Volumen 57→24 MB/Tag
 > **Zweck:** Vollständige Dokumentation aller Log-Quellen, Speicherorte und Capture-Methoden
@@ -275,6 +276,25 @@ logs/server/              # Host-Verzeichnis (Docker Bind-Mount)
   "exception": "..." 
 }
 ```
+
+### 2.3a Strukturierte `event_class`-Labels (Welle 1 Observability, 2026-04-20)
+
+Ab PKG-02 / PKG-06 (`INC-2026-04-20-offline-mode-observability-hardening`) verwenden
+ausgewählte Server-Logs `extra={}`-Felder mit einem `event_class`-Label. Loki/Grafana
+können damit "erwartete" Betriebszustände von echten Fehlern trennen.
+
+| `event_class` | Quelle | Semantik | Erwartet? |
+|---------------|--------|----------|-----------|
+| `rule_arbitration` | `services/logic/safety/conflict_manager.py` (PKG-02) | Deterministisches `first_wins` (policy-Feld). Felder: `result` (`blocked`/`applied`), `policy`, `actuator_key`, `winner_rule_id`, `winner_priority`, `loser_rule_id`, `loser_priority`. | ja |
+| `CONFIG_GUARD` | `mqtt/handlers/config_handler.py:168` (PKG-06) | Idempotenz-Schutz: stale `config_response` per Terminal-Authority verworfen. Felder: `action=skip_stale_response`, `reason=terminal_authority`, `status=expected`, `esp_id`, `config_type`, `authority_key`. | ja |
+
+**Filter-Beispiele (Loki LogQL):**
+```
+{compose_service="god-kaiser-server"} | json | event_class="rule_arbitration"
+{compose_service="god-kaiser-server"} | json | event_class="CONFIG_GUARD" | status="expected"
+```
+
+Weitere `event_class`-Werte folgen in Welle 2+ (z. B. `queue_pressure`).
 
 ### 2.4 Zugriffs-Commands
 
