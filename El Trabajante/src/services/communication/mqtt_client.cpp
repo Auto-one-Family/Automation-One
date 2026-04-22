@@ -1368,7 +1368,6 @@ void MQTTClient::publishHeartbeat(bool force) {
     payload.reserve(768);
     payload = "{";
     payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
-    payload += "\"seq\":" + String(getNextSeq()) + ",";
     payload += "\"zone_id\":\"" + g_kaiser.zone_id + "\",";
     payload += "\"master_zone_id\":\"" + g_kaiser.master_zone_id + "\",";
     payload += "\"zone_assigned\":" + String(g_kaiser.zone_assigned ? "true" : "false") + ",";
