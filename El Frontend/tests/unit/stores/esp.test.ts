@@ -42,9 +42,11 @@ vi.mock('@/services/websocket', () => ({
 // MOCK USE_WEBSOCKET COMPOSABLE
 // =============================================================================
 
+const mockWsOn = vi.fn(() => vi.fn())
+
 vi.mock('@/composables/useWebSocket', () => ({
   useWebSocket: vi.fn(() => ({
-    on: vi.fn(() => vi.fn()),
+    on: mockWsOn,
     disconnect: vi.fn(),
     connect: vi.fn(),
     status: 'connected'
@@ -120,6 +122,41 @@ describe('ESP Store - Initial State', () => {
   it('has empty gpioStatusMap initially', () => {
     const store = useEspStore()
     expect(store.gpioStatusMap.size).toBe(0)
+  })
+})
+
+describe('ESP Store - WebSocket Health Mapping', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    server.resetHandlers()
+  })
+
+  it('maps esp_health telemetry into runtime_health_view', () => {
+    const store = useEspStore()
+    store.devices = [{ ...mockESPDevice, device_id: 'ESP_TEST_001', esp_id: 'ESP_TEST_001' } as any]
+
+    const espHealthRegistration = mockWsOn.mock.calls.find(([event]) => event === 'esp_health')
+    const handler = espHealthRegistration?.[1] as ((message: any) => void) | undefined
+
+    expect(handler).toBeTypeOf('function')
+
+    handler?.({
+      data: {
+        esp_id: 'ESP_TEST_001',
+        status: 'online',
+        timestamp: 1713984000,
+        persistence_degraded: true,
+        persistence_degraded_reason: 'db_sync_delayed',
+      },
+    })
+
+    const updated = store.devices.find((device) => (device.device_id || device.esp_id) === 'ESP_TEST_001')
+    expect(updated?.runtime_health_view?.persistenceDegraded).toBe(true)
+    expect(updated?.runtime_health_view?.persistenceDegradedReason).toBe('db_sync_delayed')
   })
 })
 
@@ -218,6 +255,47 @@ describe('ESP Store - fetchAll', () => {
 
     const ids = store.devices.map((d) => d.device_id || d.esp_id)
     expect(ids).not.toContain('ESP_STALE_001')
+  })
+
+  it('should preserve existing sensors/actuators when snapshot omits arrays', async () => {
+    server.use(
+      http.get('/api/v1/esp/devices', () => {
+        return HttpResponse.json({
+          data: [{
+            ...mockESPDevice,
+            device_id: 'ESP_TEST_001',
+            esp_id: 'ESP_TEST_001',
+            sensors: null,
+            actuators: null,
+          }],
+          total: 1,
+        })
+      }),
+      http.get('/api/v1/debug/mock-esp', () => {
+        return HttpResponse.json({
+          success: true,
+          data: [],
+          total: 0,
+        })
+      }),
+    )
+
+    const store = useEspStore()
+    store.replaceDevices([
+      {
+        ...mockESPDevice,
+        device_id: 'ESP_TEST_001',
+        esp_id: 'ESP_TEST_001',
+        sensors: [{ ...mockSensor }],
+        actuators: [{ ...mockActuator }],
+      } as any,
+    ])
+
+    await store.fetchAll()
+
+    const device = store.devices.find((entry) => (entry.device_id || entry.esp_id) === 'ESP_TEST_001')
+    expect(device?.sensors?.length).toBe(1)
+    expect(device?.actuators?.length).toBe(1)
   })
 })
 

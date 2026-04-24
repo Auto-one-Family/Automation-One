@@ -8,7 +8,7 @@
  */
 
 import api from "./index";
-import type { LogicRule, LogicRulesResponse, ExecutionHistoryResponse } from "@/types/logic";
+import type { LogicRule, LogicRulesResponse, ExecutionHistoryResponse, EscalationPolicy } from "@/types/logic";
 
 // =============================================================================
 // Request/Response Types
@@ -24,6 +24,8 @@ export interface LogicRuleCreate {
   priority?: number;
   cooldown_seconds?: number;
   max_executions_per_hour?: number;
+  is_critical?: boolean;
+  escalation_policy?: EscalationPolicy | null;
 }
 
 export interface LogicRuleUpdate {
@@ -36,6 +38,8 @@ export interface LogicRuleUpdate {
   priority?: number;
   cooldown_seconds?: number;
   max_executions_per_hour?: number;
+  is_critical?: boolean;
+  escalation_policy?: EscalationPolicy | null;
 }
 
 export interface ToggleResponse {
@@ -142,6 +146,14 @@ export const logicApi = {
       mock_time: mockTime,
       dry_run: dryRun,
     });
+    return response.data;
+  },
+
+  /**
+   * Get all currently degraded rules (AUT-111)
+   */
+  async getDegradedRules(): Promise<{ success: boolean; data: LogicRule[] }> {
+    const response = await api.get<{ success: boolean; data: LogicRule[] }>("/logic/degraded");
     return response.data;
   },
 

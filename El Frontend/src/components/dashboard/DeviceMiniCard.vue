@@ -55,6 +55,16 @@ const deviceStatus = computed<ESPStatus>(() => getESPStatus(props.device))
 const statusDisplay = computed(() => getESPStatusDisplay(deviceStatus.value))
 const isDeviceOnline = computed(() => deviceStatus.value === 'online')
 const statusText = computed(() => statusDisplay.value.text)
+const statusChipLabel = computed(() => {
+  switch (deviceStatus.value) {
+    case 'stale':
+      return 'Keine Live-Daten'
+    case 'safemode':
+      return 'Sicherheitsmodus'
+    default:
+      return statusText.value
+  }
+})
 
 const runtimeHealthBadge = computed(() => {
   const vm = props.device.runtime_health_view
@@ -62,14 +72,45 @@ const runtimeHealthBadge = computed(() => {
   const onlineLike = deviceStatus.value === 'online' || deviceStatus.value === 'stale'
   return espHealthPresentation(vm, onlineLike)
 })
+const runtimeHealthTooltip = computed(() => {
+  const badge = runtimeHealthBadge.value
+  if (!badge) return ''
+  const hasPrefixedCause = badge.tooltipLines.some(
+    line => /^Ursache:/i.test(line) || /^Weitere Ursache:/i.test(line),
+  )
+  const normalizedLines = hasPrefixedCause
+    ? badge.tooltipLines
+    : badge.tooltipLines.map((line, index) => `${index === 0 ? 'Ursache' : 'Weitere Ursache'}: ${line}`)
+  const recommendedAction = badge.recommendedAction ?? (
+    badge.showBadge
+      ? 'System-Monitor und Geräte-Details prüfen, dann bei anhaltender Meldung eskalieren.'
+      : null
+  )
+  return [
+    ...normalizedLines,
+    recommendedAction ? `Nächster Schritt: ${recommendedAction}` : null,
+  ].filter((line): line is string => Boolean(line)).join('\n')
+})
 
 const handoverBadge = computed(() => {
   const handover = props.device.runtime_health_view?.handover
   if (!handover) return null
 
+  const hasEpoch = handover.epoch !== null
+  const hasRejects = handover.rejectTotal > 0
+  if (!hasEpoch && !hasRejects) return null
+
+  const titleLines = [
+    `Startup-Rejects: ${handover.rejectStartup}`,
+    `Runtime-Rejects: ${handover.rejectRuntime}`,
+    `Gesamt-Rejects: ${handover.rejectTotal}`,
+    `Epoche: ${handover.epoch ?? 'unbekannt'}`,
+  ]
+
   return {
-    label: `Handover S${handover.rejectStartup}/R${handover.rejectRuntime} E${handover.epoch ?? '-'}`,
-    isWarning: handover.rejectTotal > 0,
+    label: hasRejects ? `Übergabe: ${handover.rejectTotal} Konflikte` : 'Übergabe aktiv',
+    title: titleLines.join('\n'),
+    isWarning: hasRejects,
   }
 })
 
@@ -87,6 +128,22 @@ const lastSeenText = computed(() => {
   if (hours < 24) return `vor ${hours} Std.`
   const days = Math.floor(hours / 24)
   return `vor ${days} Tag${days > 1 ? 'en' : ''}`
+})
+
+const statusChipTitle = computed(() => {
+  const lines: string[] = [`Status: ${statusChipLabel.value}`]
+  if (deviceStatus.value !== 'online' && lastSeenText.value) {
+    lines.push(`Letztes Lebenszeichen: ${lastSeenText.value}`)
+  }
+
+  const offlineInfo = props.device.offlineInfo
+  if (offlineInfo) {
+    lines.push(`Erkennung: ${offlineInfo.displayText}`)
+    lines.push(`Quelle: ${offlineInfo.source}`)
+    lines.push(`Grund: ${offlineInfo.reason}`)
+  }
+
+  return lines.join('\n')
 })
 
 // ── Sensor Icon Map ──────────────────────────────────────────────────────
@@ -166,7 +223,7 @@ interface ActuatorDisplay {
   icon: Component
 }
 
-function resolveActuatorValue(actuator: MockActuator): string {
+function resolveActuatorBaseValue(actuator: MockActuator): string {
   const type = actuator.hardware_type ?? actuator.actuator_type
   if ((type === 'pwm' || type === 'fan') && actuator.pwm_value > 0) {
     return `${Math.round(actuator.pwm_value)}%`
@@ -174,7 +231,16 @@ function resolveActuatorValue(actuator: MockActuator): string {
   return actuator.state ? 'EIN' : 'AUS'
 }
 
-function resolveActuatorValueColor(actuator: MockActuator): string {
+function resolveActuatorValue(actuator: MockActuator, status: ESPStatus): string {
+  const base = resolveActuatorBaseValue(actuator)
+  if (status === 'online') return base
+  return `Zuletzt ${base}`
+}
+
+function resolveActuatorValueColor(actuator: MockActuator, status: ESPStatus): string {
+  if (status === 'stale') return 'var(--color-warning)'
+  if (status !== 'online') return 'var(--color-text-muted)'
+
   const type = actuator.hardware_type ?? actuator.actuator_type
   if ((type === 'pwm' || type === 'fan') && actuator.pwm_value > 0) {
     return 'var(--color-success)'
@@ -193,8 +259,8 @@ const actuatorDisplays = computed((): ActuatorDisplay[] => {
 
   return actuators.map((actuator) => ({
     label: actuator.name || getActuatorTypeInfo(actuator.actuator_type, actuator.hardware_type).label,
-    value: resolveActuatorValue(actuator),
-    valueColor: resolveActuatorValueColor(actuator),
+    value: resolveActuatorValue(actuator, deviceStatus.value),
+    valueColor: resolveActuatorValueColor(actuator, deviceStatus.value),
     icon: resolveActuatorIcon(actuator.actuator_type, actuator.hardware_type),
   }))
 })
@@ -229,7 +295,7 @@ const dataOverflowText = computed(() => {
 /** Fallback text when no sensor data */
 const sensorFallback = computed(() => {
   if (sensorDisplays.value.length > 0) return ''
-  const count = props.device.sensor_count
+  const count = sensorCount.value
   if (count && count > 0) return `${count} Sensoren`
   return ''
 })
@@ -237,14 +303,17 @@ const sensorFallback = computed(() => {
 /** Sensor & actuator counts for status line (grouped values, consistent with overflow count) */
 const sensorCount = computed(() => {
   const sensors = props.device.sensors as RawSensor[] | undefined
-  if (!sensors || sensors.length === 0) return props.device.sensor_count ?? 0
-  const grouped = groupSensorsByBaseType(sensors)
-  return grouped.reduce((sum, g) => sum + g.values.length, 0)
+  if (Array.isArray(sensors)) {
+    const grouped = groupSensorsByBaseType(sensors)
+    return grouped.reduce((sum, g) => sum + g.values.length, 0)
+  }
+  return props.device.sensor_count ?? 0
 })
 
 const actuatorCount = computed(() => {
   const actuators = (props.device as any).actuators as unknown[] | undefined
-  return actuators?.length ?? props.device.actuator_count ?? 0
+  if (Array.isArray(actuators)) return actuators.length
+  return props.device.actuator_count ?? 0
 })
 
 /** Subzone label (if assigned) */
@@ -299,11 +368,12 @@ function handleDeviceDelete() {
         <span
           class="device-mini-card__status-chip"
           :class="`device-mini-card__status-chip--${deviceStatus}`"
-        >{{ statusText }}</span>
+          :title="statusChipTitle"
+        >{{ statusChipLabel }}</span>
         <span
           v-if="runtimeHealthBadge?.showBadge"
           class="device-mini-card__status-chip device-mini-card__status-chip--stale"
-          :title="runtimeHealthBadge.tooltipLines.join('\n')"
+          :title="runtimeHealthTooltip"
         >
           {{ runtimeHealthBadge.badgeLabel }}
         </span>
@@ -311,7 +381,7 @@ function handleDeviceDelete() {
           v-if="handoverBadge"
           class="device-mini-card__status-chip"
           :class="handoverBadge.isWarning ? 'device-mini-card__status-chip--handover-warning' : 'device-mini-card__status-chip--handover'"
-          title="Handover-Rejects: Startup/Runtime + Epoche"
+          :title="handoverBadge.title"
         >
           {{ handoverBadge.label }}
         </span>

@@ -54,6 +54,8 @@ const STANDARD_TOP_LEVEL_KEYS = new Set([
   'ip_address',
   'connected',
   'system_state',
+  'metrics_delta_ts',
+  'metrics_freshness_seconds',
 ])
 
 function asBool(v: unknown): boolean {
@@ -111,25 +113,178 @@ export interface EspHealthPresentation {
   recommendedAction: string | null
 }
 
+interface OperatorReason {
+  code: string
+  label: string
+  detail?: string
+  action: string
+}
+
+interface ReasonMeta {
+  label: string
+  action: string
+}
+
+const REASON_CODE_META: Record<string, ReasonMeta> = {
+  mqtt_disconnected: {
+    label: 'MQTT-Verbindung getrennt',
+    action: 'MQTT-Broker und Netzwerkanbindung prüfen, dann Reconnect abwarten.',
+  },
+  persistence_degraded: {
+    label: 'Persistenz eingeschränkt',
+    action: 'Persistenz-/Speicherzustand prüfen und Warnungen im Server-Log kontrollieren.',
+  },
+  runtime_state_degraded: {
+    label: 'Laufzeitstatus eingeschränkt',
+    action: 'Systemzustand und letzte Fehlerereignisse im System-Monitor prüfen.',
+  },
+  network_degraded: {
+    label: 'Netzwerk eingeschränkt',
+    action: 'Signalqualität und Erreichbarkeit des Geräts prüfen.',
+  },
+  mqtt_circuit_breaker_open: {
+    label: 'MQTT-Circuit-Breaker offen',
+    action: 'MQTT-Fehlerursache beheben und automatische Recovery beobachten.',
+  },
+  wifi_circuit_breaker_open: {
+    label: 'WiFi-Circuit-Breaker offen',
+    action: 'WLAN-Verbindung und Zugangsdaten am Gerät prüfen.',
+  },
+  handover_contract_reject: {
+    label: 'Übergabe-Konflikte',
+    action: 'Korrelations- und Übergabe-Events prüfen, dann betroffene Aktion erneut auslösen.',
+  },
+  degraded_operation: {
+    label: 'Server im Degraded-Betrieb',
+    action: 'Runtime-Health im System-Monitor prüfen und Betriebslast reduzieren.',
+  },
+}
+
+function humanizeReasonCode(code: string): string {
+  const normalized = code.trim().toLowerCase()
+  const mapped = REASON_CODE_META[normalized]
+  if (mapped) return mapped.label
+  return normalized
+    .split('_')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function actionForReason(code: string): string {
+  return REASON_CODE_META[code.trim().toLowerCase()]?.action
+    ?? 'System-Monitor und Geräte-Details prüfen, dann bei anhaltendem Zustand eskalieren.'
+}
+
+function extractReasonCodes(vm: EspHealthViewModel): string[] {
+  const rawCodes = vm.rawTelemetry.degraded_reason_codes
+  const result = new Set<string>()
+
+  if (Array.isArray(rawCodes)) {
+    for (const item of rawCodes) {
+      if (typeof item === 'string' && item.trim().length > 0) result.add(item.trim().toLowerCase())
+    }
+  }
+
+  const degradedReason = vm.rawTelemetry.degraded_reason
+  if (typeof degradedReason === 'string' && degradedReason.trim().length > 0) {
+    result.add(degradedReason.trim().toLowerCase())
+  }
+
+  return Array.from(result)
+}
+
+function pushReason(reasons: OperatorReason[], reason: OperatorReason): void {
+  if (reasons.some(existing => existing.code === reason.code)) return
+  reasons.push(reason)
+}
+
+const REASON_PRIORITY: Record<string, number> = {
+  mqtt_circuit_breaker_open: 1,
+  wifi_circuit_breaker_open: 2,
+  mqtt_disconnected: 3,
+  network_degraded: 4,
+  persistence_degraded: 5,
+  runtime_state_degraded: 6,
+  handover_contract_reject: 7,
+}
+
+function selectPrimaryReason(reasons: OperatorReason[]): OperatorReason | null {
+  if (reasons.length === 0) return null
+  const ranked = [...reasons].sort((a, b) => {
+    const pa = REASON_PRIORITY[a.code] ?? 99
+    const pb = REASON_PRIORITY[b.code] ?? 99
+    return pa - pb
+  })
+  return ranked[0] ?? null
+}
+
 export function espHealthPresentation(
   vm: EspHealthViewModel,
   deviceReportsOnline: boolean,
 ): EspHealthPresentation {
-  const lines: string[] = []
+  const reasons: OperatorReason[] = []
+
   if (vm.persistenceDegraded) {
-    lines.push('Persistenz eingeschränkt')
-    if (vm.persistenceDegradedReason) lines.push(vm.persistenceDegradedReason)
+    pushReason(reasons, {
+      code: 'persistence_degraded',
+      label: REASON_CODE_META.persistence_degraded.label,
+      detail: vm.persistenceDegradedReason ?? undefined,
+      action: actionForReason('persistence_degraded'),
+    })
   }
-  if (vm.runtimeStateDegraded) lines.push('Laufzeitstatus eingeschränkt')
-  if (vm.networkDegraded) lines.push('Netzwerk eingeschränkt')
-  if (vm.mqttCircuitBreakerOpen) lines.push('MQTT-Circuit-Breaker offen')
-  if (vm.wifiCircuitBreakerOpen) lines.push('WiFi-Circuit-Breaker offen')
+  if (vm.runtimeStateDegraded) {
+    pushReason(reasons, {
+      code: 'runtime_state_degraded',
+      label: REASON_CODE_META.runtime_state_degraded.label,
+      action: actionForReason('runtime_state_degraded'),
+    })
+  }
+  if (vm.networkDegraded) {
+    pushReason(reasons, {
+      code: 'network_degraded',
+      label: REASON_CODE_META.network_degraded.label,
+      action: actionForReason('network_degraded'),
+    })
+  }
+  if (vm.mqttCircuitBreakerOpen) {
+    pushReason(reasons, {
+      code: 'mqtt_circuit_breaker_open',
+      label: REASON_CODE_META.mqtt_circuit_breaker_open.label,
+      action: actionForReason('mqtt_circuit_breaker_open'),
+    })
+  }
+  if (vm.wifiCircuitBreakerOpen) {
+    pushReason(reasons, {
+      code: 'wifi_circuit_breaker_open',
+      label: REASON_CODE_META.wifi_circuit_breaker_open.label,
+      action: actionForReason('wifi_circuit_breaker_open'),
+    })
+  }
   if (vm.handover.rejectTotal > 0) {
     const epochText = vm.handover.epoch === null ? '' : ` (Epoche ${vm.handover.epoch})`
-    lines.push(
-      `Übergabe-Konflikte erkannt${epochText}: Start ${vm.handover.rejectStartup}, Laufzeit ${vm.handover.rejectRuntime}`,
-    )
+    pushReason(reasons, {
+      code: 'handover_contract_reject',
+      label: REASON_CODE_META.handover_contract_reject.label,
+      detail: `Erkannt${epochText}: Start ${vm.handover.rejectStartup}, Laufzeit ${vm.handover.rejectRuntime}`,
+      action: actionForReason('handover_contract_reject'),
+    })
   }
+
+  for (const code of extractReasonCodes(vm)) {
+    pushReason(reasons, {
+      code,
+      label: humanizeReasonCode(code),
+      action: actionForReason(code),
+    })
+  }
+
+  const lines: string[] = reasons.flatMap((reason, index) => {
+    const prefix = index === 0 ? 'Ursache' : 'Weitere Ursache'
+    return reason.detail
+      ? [`${prefix}: ${reason.label}`, `Detail: ${reason.detail}`]
+      : [`${prefix}: ${reason.label}`]
+  })
 
   const unknownKeys = Object.keys(vm.rawTelemetry).filter(
     k =>
@@ -146,29 +301,23 @@ export function espHealthPresentation(
         'metrics_schema_version',
         'degraded',
         'degraded_reason',
+        'degraded_reason_codes',
       ].includes(k),
   )
   if (unknownKeys.length > 0) {
     lines.push(`Weitere Telemetrie: ${unknownKeys.slice(0, 6).join(', ')}${unknownKeys.length > 6 ? '…' : ''}`)
   }
 
-  const hasDegradation =
-    vm.persistenceDegraded ||
-    vm.runtimeStateDegraded ||
-    vm.networkDegraded ||
-    vm.mqttCircuitBreakerOpen ||
-    vm.wifiCircuitBreakerOpen ||
-    vm.handover.rejectTotal > 0
+  const hasDegradation = reasons.length > 0
 
   const showBadge = deviceReportsOnline && hasDegradation
+  const primaryReason = selectPrimaryReason(reasons)
 
   return {
     severity: showBadge ? 'warning' : 'ok',
     showBadge,
     badgeLabel: 'Eingeschränkt',
     tooltipLines: lines.length > 0 ? lines : ['Keine Degradations-Marker gesetzt'],
-    recommendedAction: showBadge
-      ? 'Logs und MQTT-Verbindung prüfen; bei anhaltenden Meldungen Firmware/Server-Team informieren.'
-      : null,
+    recommendedAction: showBadge ? primaryReason?.action ?? actionForReason('degraded_operation') : null,
   }
 }

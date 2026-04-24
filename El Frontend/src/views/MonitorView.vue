@@ -357,25 +357,36 @@ function getChartColor(index: number): string {
 
 const expandedChartLoading = ref(false)
 const expandedChartReadings = ref<SensorReading[]>([])
+type ExpandedSensorRef = { espId: string; gpio: number; sensorType?: string }
+type ExpandedLivePoint = { x: number; y: number }
+const expandedLiveTail = ref<ExpandedLivePoint[]>([])
 
-async function fetchExpandedChartData(sensorKey: string) {
-  // Parse sensorKey format: "{espId}-{gpio}-{sensorType}" or legacy "{espId}-{gpio}"
+function parseExpandedSensorKey(sensorKey: string): ExpandedSensorRef | null {
+  // Format: "{espId}-{gpio}-{sensorType}" or legacy "{espId}-{gpio}"
   const parts = sensorKey.split('-')
-  if (parts.length < 2) return
+  if (parts.length < 2) return null
 
-  // sensor_type is the last part if 3+ segments and not a number
   let sensorType: string | undefined
   const lastPart = parts[parts.length - 1]
   if (parts.length >= 3 && isNaN(parseInt(lastPart, 10))) {
     sensorType = lastPart
     parts.pop()
   }
+
   const gpio = parseInt(parts[parts.length - 1], 10)
   const espId = parts.slice(0, -1).join('-')
-  if (isNaN(gpio)) return
+  if (isNaN(gpio) || !espId) return null
+  return { espId, gpio, sensorType }
+}
+
+async function fetchExpandedChartData(sensorKey: string) {
+  const parsed = parseExpandedSensorKey(sensorKey)
+  if (!parsed) return
+  const { espId, gpio, sensorType } = parsed
 
   expandedChartLoading.value = true
   expandedChartReadings.value = []
+  expandedLiveTail.value = []
   try {
     const now = new Date()
     const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
@@ -394,6 +405,51 @@ async function fetchExpandedChartData(sensorKey: string) {
     expandedChartLoading.value = false
   }
 }
+
+const expandedLiveSample = computed<ExpandedLivePoint | null>(() => {
+  if (!expandedSensorKey.value) return null
+  const parsed = parseExpandedSensorKey(expandedSensorKey.value)
+  if (!parsed) return null
+
+  const { espId, gpio, sensorType } = parsed
+
+  for (const subzone of zoneDeviceGroup.value) {
+    const sensor = subzone.sensors.find(s =>
+      s.esp_id === espId &&
+      s.gpio === gpio &&
+      (!sensorType || s.sensor_type === sensorType),
+    )
+    if (!sensor || sensor.raw_value == null || !Number.isFinite(sensor.raw_value)) continue
+
+    const tsRaw = sensor.last_read
+    const tsMs = tsRaw ? new Date(tsRaw).getTime() : Date.now()
+    return {
+      x: Number.isFinite(tsMs) ? tsMs : Date.now(),
+      y: Number(sensor.raw_value),
+    }
+  }
+  return null
+})
+
+watch(expandedLiveSample, (sample) => {
+  if (!sample || !expandedSensorKey.value) return
+
+  const latestApiTs = expandedChartReadings.value.length > 0
+    ? new Date(expandedChartReadings.value[expandedChartReadings.value.length - 1].timestamp).getTime()
+    : 0
+
+  // Live tail only for samples newer than the loaded API snapshot.
+  if (sample.x <= latestApiTs) return
+
+  const tail = expandedLiveTail.value
+  const prev = tail[tail.length - 1]
+  const isNearDuplicate = !!prev &&
+    Math.abs(sample.x - prev.x) < 1000 &&
+    Math.abs(sample.y - prev.y) < 0.0001
+  if (isNearDuplicate) return
+
+  expandedLiveTail.value = [...tail, sample].slice(-120)
+}, { immediate: true })
 
 /** Resolve unit for the currently expanded sensor (avoids duplication in chartData + chartOptions) */
 const expandedSensorUnit = computed(() => {
@@ -422,21 +478,27 @@ const expandedSensorUnit = computed(() => {
 })
 
 const expandedChartData = computed(() => {
-  if (!expandedChartReadings.value.length) return { datasets: [] }
+  const apiPoints = expandedChartReadings.value
+    .map((r) => ({
+      x: new Date(r.timestamp).getTime(),
+      y: r.processed_value ?? r.raw_value,
+    }))
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+  const combined = [...apiPoints, ...expandedLiveTail.value]
+    .sort((a, b) => a.x - b.x)
+
+  if (!combined.length) return { datasets: [] }
 
   const unit = expandedSensorUnit.value
 
   return {
     datasets: [{
       label: unit ? `Letzte Stunde (${unit})` : 'Letzte Stunde',
-      data: expandedChartReadings.value.map(r => ({
-        x: new Date(r.timestamp).getTime(),
-        y: r.processed_value ?? r.raw_value,
-      })),
+      data: combined,
       borderColor: getChartColor(0),
       backgroundColor: `${getChartColor(0)}20`,
       borderWidth: 2,
-      pointRadius: expandedChartReadings.value.length > 100 ? 0 : 2,
+      pointRadius: combined.length > 100 ? 0 : 2,
       pointHoverRadius: 4,
       tension: 0.3,
       fill: true,
@@ -1088,6 +1150,7 @@ onUnmounted(() => {
   deactivateScope('monitor-zone')
   unregisterLeft?.()
   unregisterRight?.()
+  logicStore.unsubscribeFromWebSocket()
   // Abort any in-flight zone monitor request
   zoneMonitorAbort.value?.abort()
   // KPI debounce timer cleanup handled by useZoneKPIs composable
@@ -1489,6 +1552,8 @@ const generatedZoneDashboards = ref<Set<string>>(new Set())
 watch(
   [selectedZoneId, () => espStore.devices.length],
   ([zoneId, deviceCount]) => {
+    // Wait until dashboard snapshot is loaded once to avoid restart-race duplicates.
+    if (dashStore.isSyncing || !dashStore.hasFetchedLayouts) return
     if (!zoneId || deviceCount === 0) return
 
     const zoneDevices = espStore.devices.filter(d => d.zone_id === zoneId)

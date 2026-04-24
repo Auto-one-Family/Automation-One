@@ -65,7 +65,7 @@ describe('actuator.store', () => {
       correlationId: 'corr-config-1',
       requestId: 'req-config-1',
     })
-    vi.advanceTimersByTime(45_000)
+    vi.advanceTimersByTime(80_000)
 
     const intent = store.getIntentSnapshot().find((entry) => (
       entry.intentType === 'config' &&
@@ -76,7 +76,7 @@ describe('actuator.store', () => {
     expect(intent).toBeDefined()
     expect(intent?.state).toBe('terminal_timeout')
     expect(intent?.terminalSource).toBe('config_timeout')
-    expect(mockToast.error).toHaveBeenCalled()
+    expect(mockToast.warning).toHaveBeenCalled()
   })
 
   it('verwirft stale actuator_status-events nach offline-reset-epoch', () => {
@@ -96,7 +96,7 @@ describe('actuator.store', () => {
           esp_id: 'ESP_1',
           gpio: 5,
           state: 'on',
-          timestamp: 1, // 1000 ms < reset epoch => stale
+          timestamp: 1_700_000_000, // epoch seconds => 1700000000000 ms
         },
       },
       (_espId, patchFn) => {
@@ -106,15 +106,16 @@ describe('actuator.store', () => {
     )
 
     const staleActuator = (device.actuators as Array<{ gpio: number; state: boolean }>).find((a) => a.gpio === 5)
-    expect(staleActuator?.state).toBe(false)
+    expect(staleActuator?.state).toBe(true)
 
+    store.markActuatorResetEpoch('ESP_1', 1_700_000_001_000, 5)
     store.handleActuatorStatus(
       {
         data: {
           esp_id: 'ESP_1',
           gpio: 5,
-          state: 'on',
-          timestamp: 3, // 3000 ms > reset epoch => apply
+          state: 'off',
+          timestamp: 1_700_000_000, // older than reset epoch => ignored
         },
       },
       (_espId, patchFn) => {
@@ -125,5 +126,180 @@ describe('actuator.store', () => {
 
     const freshActuator = (device.actuators as Array<{ gpio: number; state: boolean }>).find((a) => a.gpio === 5)
     expect(freshActuator?.state).toBe(true)
+  })
+
+  it('akzeptiert relative actuator_status-timestamps und normalisiert uppercase states', () => {
+    const store = useActuatorStore()
+    let device: ESPDevice = {
+      device_id: 'ESP_2',
+      esp_id: 'ESP_2',
+      actuators: [{ gpio: 9, state: false, pwm_value: 0 }],
+      sensors: [],
+    } as unknown as ESPDevice
+
+    store.markActuatorResetEpoch('ESP_2', 1_700_000_001_000, 9)
+
+    store.handleActuatorStatus(
+      {
+        data: {
+          esp_id: 'ESP_2',
+          gpio: 9,
+          state: 'ON',
+          timestamp: 123_456, // relative uptime -> not stale-guarded
+        },
+      },
+      (_espId, patchFn) => {
+        device = patchFn(device)
+        return true
+      },
+    )
+
+    const actuator = (device.actuators as Array<{ gpio: number; state: boolean }>).find((a) => a.gpio === 9)
+    expect(actuator?.state).toBe(true)
+  })
+
+  it('lokalisiert actuator_response-Fehler und formatiert logic-Quelle lesbar', () => {
+    const store = useActuatorStore()
+    const devices = [{ device_id: 'ESP_6B27C8', esp_id: 'ESP_6B27C8', name: 'ESP_6B27C8' }] as ESPDevice[]
+
+    store.handleActuatorResponse(
+      {
+        data: {
+          esp_id: 'ESP_6B27C8',
+          gpio: 25,
+          success: false,
+          command: 'ON',
+          message: 'Failed to turn actuator ON',
+          issued_by: 'logic:f95b107d-abfb-46b4-adaa-f0e53f3fd959',
+          correlation_id: '43b272fa-f1e1-4aaf-95ac-0217a44d3e70',
+        },
+      },
+      devices,
+      (d) => d.esp_id ?? d.device_id,
+    )
+
+    expect(mockToast.error).toHaveBeenCalled()
+    const [toastMessage] = mockToast.error.mock.calls.at(-1) as [string]
+    expect(toastMessage).toContain('Quelle: Automationsregel (f95b107d-abfb-46b4-adaa-f0e53f3fd959)')
+    expect(toastMessage).toContain('Aktor konnte nicht eingeschaltet werden')
+    expect(toastMessage).not.toContain('Failed to turn actuator ON')
+  })
+
+  it('lokalisiert actuator_command_failed-Fehler und behaelt Korrelation', () => {
+    const store = useActuatorStore()
+    const devices = [{ device_id: 'ESP_6B27C8', esp_id: 'ESP_6B27C8', name: 'ESP_6B27C8' }] as ESPDevice[]
+
+    store.handleActuatorCommandFailed(
+      {
+        data: {
+          esp_id: 'ESP_6B27C8',
+          gpio: 25,
+          command: 'ON',
+          error: 'Failed to turn actuator ON',
+          issued_by: 'logic:f95b107d-abfb-46b4-adaa-f0e53f3fd959',
+          correlation_id: '43b272fa-f1e1-4aaf-95ac-0217a44d3e70',
+        },
+      },
+      devices,
+      (d) => d.esp_id ?? d.device_id,
+    )
+
+    expect(mockToast.error).toHaveBeenCalled()
+    const [toastMessage] = mockToast.error.mock.calls.at(-1) as [string]
+    expect(toastMessage).toContain('Aktor konnte nicht eingeschaltet werden')
+    expect(toastMessage).toContain('Korrelation: 43b272fa-f1e1-4aaf-95ac-0217a44d3e70')
+    expect(toastMessage).not.toContain('Failed to turn actuator ON')
+  })
+
+  it('zeigt pro correlation_id genau einen terminalen actuator-toast', () => {
+    const store = useActuatorStore()
+    const devices = [{ device_id: 'ESP_6B27C8', esp_id: 'ESP_6B27C8', name: 'ESP_6B27C8' }] as ESPDevice[]
+
+    store.handleActuatorResponse(
+      {
+        data: {
+          esp_id: 'ESP_6B27C8',
+          gpio: 25,
+          success: false,
+          command: 'ON',
+          message: 'Failed to turn actuator ON',
+          issued_by: 'logic:rule-a',
+          correlation_id: 'corr-terminal-1',
+          request_id: 'req-terminal-1',
+        },
+      },
+      devices,
+      (d) => d.esp_id ?? d.device_id,
+    )
+
+    store.handleActuatorResponse(
+      {
+        data: {
+          esp_id: 'ESP_6B27C8',
+          gpio: 26,
+          success: true,
+          command: 'OFF',
+          issued_by: 'logic:rule-b',
+          correlation_id: 'corr-terminal-1',
+          request_id: 'req-terminal-1-b',
+        },
+      },
+      devices,
+      (d) => d.esp_id ?? d.device_id,
+    )
+
+    expect(mockToast.error).toHaveBeenCalledTimes(1)
+    expect(mockToast.success).not.toHaveBeenCalled()
+  })
+
+  it('wendet optimistischen Aktor-Status an und rollt bei command_failed zurueck', () => {
+    const store = useActuatorStore()
+    const devices = [{ device_id: 'ESP_6B27C8', esp_id: 'ESP_6B27C8', name: 'ESP_6B27C8' }] as ESPDevice[]
+    let device: ESPDevice = {
+      device_id: 'ESP_6B27C8',
+      esp_id: 'ESP_6B27C8',
+      actuators: [{ gpio: 25, state: false, pwm_value: 0 }],
+      sensors: [],
+    } as unknown as ESPDevice
+
+    const applyDevicePatch = (_espId: string, patchFn: (value: ESPDevice) => ESPDevice) => {
+      device = patchFn(device)
+      return true
+    }
+
+    store.handleActuatorCommand(
+      {
+        data: {
+          esp_id: 'ESP_6B27C8',
+          gpio: 25,
+          command: 'ON',
+          correlation_id: 'corr-opt-1',
+        },
+      },
+      devices,
+      (d) => d.esp_id ?? d.device_id,
+      applyDevicePatch,
+    )
+
+    const optimisticState = (device.actuators as Array<{ gpio: number; state: boolean }>).find((a) => a.gpio === 25)?.state
+    expect(optimisticState).toBe(true)
+
+    store.handleActuatorCommandFailed(
+      {
+        data: {
+          esp_id: 'ESP_6B27C8',
+          gpio: 25,
+          command: 'ON',
+          error: 'Failed to turn actuator ON',
+          correlation_id: 'corr-opt-1',
+        },
+      },
+      devices,
+      (d) => d.esp_id ?? d.device_id,
+      applyDevicePatch,
+    )
+
+    const rolledBackState = (device.actuators as Array<{ gpio: number; state: boolean }>).find((a) => a.gpio === 25)?.state
+    expect(rolledBackState).toBe(false)
   })
 })

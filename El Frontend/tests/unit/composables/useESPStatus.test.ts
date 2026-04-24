@@ -68,14 +68,14 @@ describe('getESPStatus', () => {
       expect(getESPStatus(device)).toBe('online')
     })
 
-    it('returns stale when last_seen is between 90s and 300s', () => {
+    it('returns stale when last_seen is between 90s and 210s', () => {
       // 120 seconds ago (2 min)
       const ts = new Date(1_700_000_000_000 - 120_000).toISOString()
       const device = makeDevice({ last_seen: ts })
       expect(getESPStatus(device)).toBe('stale')
     })
 
-    it('returns offline when last_seen is older than 300 seconds', () => {
+    it('returns offline when last_seen is older than 210 seconds', () => {
       // 10 minutes ago
       const ts = new Date(1_700_000_000_000 - 600_000).toISOString()
       const device = makeDevice({ last_seen: ts })
@@ -95,8 +95,8 @@ describe('getESPStatus', () => {
       expect(getESPStatus(device)).toBe('stale')
     })
 
-    it('returns offline at exactly 300s boundary', () => {
-      const ts = new Date(1_700_000_000_000 - 300_000).toISOString()
+    it('returns offline at exactly 210s boundary', () => {
+      const ts = new Date(1_700_000_000_000 - 210_000).toISOString()
       const device = makeDevice({ last_seen: ts })
       expect(getESPStatus(device)).toBe('offline')
     })
@@ -186,7 +186,7 @@ describe('getESPStatusDisplay', () => {
 
   it('returns correct display for "stale"', () => {
     const display = getESPStatusDisplay('stale')
-    expect(display.text).toBe('Verzoegert')
+    expect(display.text).toBe('Verzögert')
     expect(display.color).toBe('var(--color-warning)')
     expect(display.icon).toBe('clock')
     expect(display.pulse).toBe(false)
@@ -259,7 +259,7 @@ describe('getESPStatus - Status Transitions (FakeTimers)', () => {
     expect(getESPStatus(device)).toBe('stale')
   })
 
-  it('Online → Stale → Offline after 301 seconds without heartbeat', () => {
+  it('Online → Stale → Offline after 211 seconds without heartbeat', () => {
     const heartbeatTime = new Date(BASE_TIME).toISOString()
     const device = makeDevice({ last_seen: heartbeatTime })
 
@@ -269,8 +269,8 @@ describe('getESPStatus - Status Transitions (FakeTimers)', () => {
     vi.advanceTimersByTime(91_000)
     expect(getESPStatus(device)).toBe('stale')
 
-    // Advance to offline range (total: 301s)
-    vi.advanceTimersByTime(210_000) // 91 + 210 = 301s total
+    // Advance to offline range (total: 211s)
+    vi.advanceTimersByTime(120_000) // 91 + 120 = 211s total
     expect(getESPStatus(device)).toBe('offline')
   })
 
@@ -304,12 +304,12 @@ describe('getESPStatus - Status Transitions (FakeTimers)', () => {
     expect(getESPStatus(device)).toBe('stale')
   })
 
-  it('boundary: exactly 300_000ms = offline (threshold is >=)', () => {
+  it('boundary: exactly 210_000ms = offline (threshold is >=)', () => {
     const heartbeatTime = new Date(BASE_TIME).toISOString()
     const device = makeDevice({ last_seen: heartbeatTime })
 
-    vi.advanceTimersByTime(300_000)
-    // age < HEARTBEAT_OFFLINE_MS: 300_000 is NOT < 300_000 → offline
+    vi.advanceTimersByTime(210_000)
+    // age < HEARTBEAT_OFFLINE_MS: 210_000 is NOT < 210_000 → offline
     expect(getESPStatus(device)).toBe('offline')
   })
 

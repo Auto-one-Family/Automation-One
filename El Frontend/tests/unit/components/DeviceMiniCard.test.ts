@@ -36,10 +36,10 @@ const device = {
   last_heartbeat: null,
 }
 
-function mountCard() {
+function mountCard(deviceOverrides: Record<string, unknown> = {}) {
   return mount(DeviceMiniCard, {
     props: {
-      device: device as any,
+      device: { ...device, ...deviceOverrides } as any,
       isMock: true,
     },
     global: {
@@ -69,5 +69,17 @@ describe('DeviceMiniCard', () => {
     expect(wrapper.emitted('settings')?.[0]).toEqual([device])
     expect(wrapper.emitted('change-zone')?.[0]).toEqual([device])
     expect(wrapper.emitted('monitor-nav')?.[0]).toEqual([device])
+  })
+
+  it('does not show stale fallback sensor_count when sensors array is empty', () => {
+    const wrapper = mountCard({
+      sensors: [],
+      sensor_count: 2,
+      actuators: [],
+      actuator_count: 0,
+    })
+
+    expect(wrapper.text()).not.toContain('2 Sensoren')
+    expect(wrapper.text()).toContain('Keine Sensoren oder Aktoren')
   })
 })

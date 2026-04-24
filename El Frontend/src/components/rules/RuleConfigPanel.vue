@@ -5,7 +5,7 @@
  * Right sidebar for configuring selected node properties.
  * Dynamically renders form fields based on node type:
  * - sensor: ESP, GPIO, sensor type, operator, value
- * - time: start/end hour, days of week
+ * - time: start/end hour+minute, days of week
  * - logic: AND/OR toggle
  * - actuator: ESP, GPIO, command, value, duration
  * - notification: channel, target, message
@@ -524,28 +524,54 @@ function selectActuator(value: string) {
         <template v-if="nodeType === 'time'">
           <div class="config-field-row">
             <div class="config-field config-field--half">
-              <label class="config-label">Von</label>
+              <label class="config-label">Von (Stunde)</label>
               <input
                 type="number"
                 class="config-input"
-                :value="localData.startHour"
+                :value="localData.startHour ?? 0"
                 min="0"
                 max="23"
                 @input="updateField('startHour', Number(($event.target as HTMLInputElement).value))"
               />
             </div>
             <div class="config-field config-field--half">
-              <label class="config-label">Bis</label>
+              <label class="config-label">Von (Minute)</label>
               <input
                 type="number"
                 class="config-input"
-                :value="localData.endHour"
+                :value="localData.startMinute ?? 0"
+                min="0"
+                max="59"
+                @input="updateField('startMinute', Number(($event.target as HTMLInputElement).value))"
+              />
+            </div>
+          </div>
+
+          <div class="config-field-row">
+            <div class="config-field config-field--half">
+              <label class="config-label">Bis (Stunde)</label>
+              <input
+                type="number"
+                class="config-input"
+                :value="localData.endHour ?? 23"
                 min="0"
                 max="23"
                 @input="updateField('endHour', Number(($event.target as HTMLInputElement).value))"
               />
             </div>
+            <div class="config-field config-field--half">
+              <label class="config-label">Bis (Minute)</label>
+              <input
+                type="number"
+                class="config-input"
+                :value="localData.endMinute ?? 0"
+                min="0"
+                max="59"
+                @input="updateField('endMinute', Number(($event.target as HTMLInputElement).value))"
+              />
+            </div>
           </div>
+          <p class="config-hint">Für punktuelle Ausführung: 1-Minuten-Fenster nutzen, z. B. 07:00–07:01.</p>
 
           <div class="config-field">
             <label class="config-label">Wochentage</label>

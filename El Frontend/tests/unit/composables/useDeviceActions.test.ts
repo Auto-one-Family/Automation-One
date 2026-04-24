@@ -118,6 +118,21 @@ describe('useDeviceActions', () => {
       expect(actions.isOnline.value).toBe(false)
     })
 
+    it('treats stale heartbeat as not-online and marks state as Verzoegert', () => {
+      const staleTs = new Date(Date.now() - 120_000).toISOString()
+      const device = createMockDevice({
+        device_id: 'ESP_REAL_001',
+        esp_id: 'ESP_REAL_001',
+        status: 'online',
+        connected: true,
+        last_seen: staleTs,
+        last_heartbeat: staleTs,
+      })
+      const actions = useDeviceActions(() => device)
+      expect(actions.isOnline.value).toBe(false)
+      expect(actions.stateInfo.value.label).toBe('Verzögert')
+    })
+
     it('returns state info for online device', () => {
       const device = createMockDevice({ status: 'online' })
       const actions = useDeviceActions(() => device)
@@ -154,7 +169,7 @@ describe('useDeviceActions', () => {
     it('returns no-data tooltip when no RSSI', () => {
       const device = createMockDevice({ wifi_rssi: undefined })
       const actions = useDeviceActions(() => device)
-      expect(actions.wifiTooltip.value).toContain('Keine Daten')
+      expect(actions.wifiTooltip.value).toContain('Keine Telemetrie')
     })
   })
 

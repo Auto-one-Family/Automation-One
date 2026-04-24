@@ -368,8 +368,14 @@ const hasIncompleteData = computed(() => {
 // Satellite Dots - Compact sensor/actuator indicators
 // =============================================================================
 
-const sensorCount = computed(() => props.esp.sensor_count ?? props.esp.sensors?.length ?? 0)
-const actuatorCount = computed(() => props.esp.actuator_count ?? props.esp.actuators?.length ?? 0)
+const sensorCount = computed(() => {
+  if (Array.isArray(props.esp.sensors)) return props.esp.sensors.length
+  return props.esp.sensor_count ?? 0
+})
+const actuatorCount = computed(() => {
+  if (Array.isArray(props.esp.actuators)) return props.esp.actuators.length
+  return props.esp.actuator_count ?? 0
+})
 const hasSatellites = computed(() => sensorCount.value > 0 || actuatorCount.value > 0)
 
 // Limit displayed dots to 5 max

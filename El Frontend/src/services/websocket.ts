@@ -49,6 +49,7 @@ class WebSocketService {
   private clientId: string = ''
   private status: WebSocketStatus = 'disconnected'
   private reconnectAttempts: number = 0
+  // Used for backoff progression only (no hard-stop reconnect lock).
   private maxReconnectAttempts: number = 10
   private baseReconnectDelay: number = 1000  // Base delay for exponential backoff
   private maxReconnectDelay: number = 30000  // Max 30 seconds
@@ -210,15 +211,8 @@ class WebSocketService {
           this.ws = null
 
           // Attempt reconnect if not a normal closure
-          if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+          if (event.code !== 1000) {
             this.scheduleReconnect()
-          } else if (event.code !== 1000) {
-            // Max reconnect attempts exhausted - signal error for UI
-            logger.error(
-              `WebSocket reconnection failed after ${this.maxReconnectAttempts} attempts. ` +
-              `Connection permanently lost. Reload the page to reconnect.`
-            )
-            this.setStatus('error')
           }
         }
 
@@ -274,16 +268,18 @@ class WebSocketService {
 
     this.reconnectAttempts++
 
-    // Exponential backoff with jitter
+    // Exponential backoff with jitter.
+    // Cap the exponent growth to avoid unbounded delays, but keep retrying indefinitely.
+    const attemptForDelay = Math.min(this.reconnectAttempts, this.maxReconnectAttempts)
     const exponentialDelay = Math.min(
-      this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      this.baseReconnectDelay * Math.pow(2, attemptForDelay - 1),
       this.maxReconnectDelay
     )
     // Add jitter (±10%) to prevent thundering herd
     const jitter = exponentialDelay * 0.1 * (Math.random() * 2 - 1)
     const delay = Math.round(exponentialDelay + jitter)
 
-    logger.info(`Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`)
+    logger.info(`Scheduling reconnect attempt ${this.reconnectAttempts} in ${delay}ms`)
 
     this.reconnectTimer = setTimeout(async () => {
       // Refresh token before reconnecting if needed

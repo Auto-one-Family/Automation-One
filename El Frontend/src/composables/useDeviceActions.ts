@@ -18,6 +18,7 @@ import type { ESPDevice } from '@/api/esp'
 import { espApi } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
+import { getESPStatus } from '@/composables/useESPStatus'
 import { getStateInfo } from '@/utils/labels'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import { formatRelativeTime, DATA_STALE_THRESHOLD_S } from '@/utils/formatters'
@@ -43,7 +44,8 @@ export function useDeviceActions(device: () => ESPDevice) {
   const espId = computed(() => device().device_id || device().esp_id || '')
   const isMock = computed(() => espApi.isMockEsp(espId.value))
   const displayName = computed(() => device().name || null)
-  const isOnline = computed(() => device().status === 'online' || device().connected === true)
+  const effectiveStatus = computed(() => getESPStatus(device()))
+  const isOnline = computed(() => effectiveStatus.value === 'online')
 
   const systemState = computed(() => {
     if (isMock.value && 'system_state' in device()) {
@@ -54,8 +56,9 @@ export function useDeviceActions(device: () => ESPDevice) {
 
   const stateInfo = computed(() => {
     if (isMock.value) return getStateInfo(systemState.value)
-    const status = device().status || 'unknown'
+    const status = effectiveStatus.value
     if (status === 'online') return { label: 'Online', variant: 'success' }
+    if (status === 'stale') return { label: 'Verzögert', variant: 'warning' }
     if (status === 'offline') return { label: 'Offline', variant: 'gray' }
     if (status === 'error') return { label: 'Fehler', variant: 'danger' }
     return { label: 'Unbekannt', variant: 'gray' }
@@ -64,6 +67,9 @@ export function useDeviceActions(device: () => ESPDevice) {
   // ── WiFi ───────────────────────────────────────────────────────────
 
   const resolvedWifiRssi = computed<number | null>(() => {
+    // Offline devices must not display cached RSSI values from metadata.
+    if (!isOnline.value) return null
+
     const d = device()
     const metadata = (d.metadata || {}) as Record<string, unknown>
 

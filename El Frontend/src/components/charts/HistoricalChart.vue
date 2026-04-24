@@ -29,11 +29,23 @@ import {
 import annotationPlugin from 'chartjs-plugin-annotation'
 import zoomPlugin from 'chartjs-plugin-zoom'
 import 'chartjs-adapter-date-fns'
-import { RotateCcw } from 'lucide-vue-next'
+import { RotateCcw, AlertTriangle } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { useEspStore } from '@/stores/esp'
 import { tokens } from '@/utils/cssTokens'
 import { getAutoResolution, TIME_RANGE_MINUTES } from '@/utils/autoResolution'
+import {
+  type GapDataPoint,
+  type GapInfo,
+  type GapMarkingMode,
+  calculateMedianInterval,
+  computeExpectedInterval,
+  insertGapMarkers,
+  detectGaps,
+  countRealDataPoints,
+  formatGapDuration,
+  formatTimeShort,
+} from '@/utils/gapDetection'
 
 ChartJS.register(
   CategoryScale,
@@ -67,6 +79,8 @@ interface Props {
   }
   /** Show threshold lines */
   showThresholds?: boolean
+  /** Gap marking mode: 'auto' (default), 'hatched', or 'off' */
+  gapMarkingMode?: GapMarkingMode
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -76,6 +90,7 @@ const props = withDefaults(defineProps<Props>(), {
   height: '300px',
   thresholds: () => ({}),
   showThresholds: true,
+  gapMarkingMode: 'auto',
 })
 
 const espStore = useEspStore()
@@ -83,14 +98,9 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 
 // Data buffer — allows null values for gap markers (8.0-C)
-interface DataPoint {
-  timestamp: Date
-  value: number | null
-  minValue?: number | null
-  maxValue?: number | null
-}
-const dataBuffer = shallowRef<DataPoint[]>([])
+const dataBuffer = shallowRef<GapDataPoint[]>([])
 const isAggregated = ref(false)
+const responseResolution = ref<string | null>(null)
 
 // Stats from API (8.0-D)
 interface SensorStats {
@@ -110,11 +120,8 @@ const isZoomed = ref(false)
 
 const selectedRange = ref(props.timeRange)
 
-// Median interval for gap detection (8.0-C)
-let medianIntervalMs = 0
-
-/** Multiplier: gap if time between points exceeds median * this */
-const GAP_THRESHOLD_MULTIPLIER = 3
+// Expected interval for gap detection (8.0-C / AUT-113)
+let expectedIntervalMs = 0
 
 function toFiniteNumber(value: unknown): number | undefined {
   if (typeof value === 'number') {
@@ -215,46 +222,7 @@ function sanitizeAnnotations(raw: Record<string, unknown>): Record<string, Annot
   return safe
 }
 
-// =============================================================================
-// Gap Detection (8.0-C)
-// =============================================================================
-
-/**
- * Calculates median interval from sorted data points.
- * Returns 0 if fewer than 2 points.
- */
-function calculateMedianInterval(points: Array<{ timestamp: Date }>): number {
-  if (points.length < 2) return 0
-  const intervals: number[] = []
-  for (let i = 1; i < points.length; i++) {
-    intervals.push(points[i].timestamp.getTime() - points[i - 1].timestamp.getTime())
-  }
-  intervals.sort((a, b) => a - b)
-  return intervals[Math.floor(intervals.length / 2)]
-}
-
-/**
- * Inserts null gap markers where time between consecutive points
- * exceeds GAP_THRESHOLD_MULTIPLIER * medianInterval.
- */
-function insertGapMarkers(
-  points: DataPoint[],
-  medianInterval: number
-): DataPoint[] {
-  if (points.length < 2 || medianInterval <= 0) return points
-  const gapThreshold = medianInterval * GAP_THRESHOLD_MULTIPLIER
-  const result: DataPoint[] = [points[0]]
-
-  for (let i = 1; i < points.length; i++) {
-    const timeDiff = points[i].timestamp.getTime() - points[i - 1].timestamp.getTime()
-    if (timeDiff > gapThreshold) {
-      // Insert null marker 1ms after last valid point to break line
-      result.push({ timestamp: new Date(points[i - 1].timestamp.getTime() + 1), value: null })
-    }
-    result.push(points[i])
-  }
-  return result
-}
+// Gap detection functions imported from @/utils/gapDetection (AUT-113)
 
 // =============================================================================
 // Load Historical Data + Stats
@@ -299,11 +267,11 @@ async function loadData() {
       }).catch(() => null), // Stats failure is non-critical
     ])
 
+    responseResolution.value = dataResponse?.resolution ?? null
     isAggregated.value = resolution != null && dataResponse?.resolution !== 'raw'
 
     if (dataResponse && Array.isArray(dataResponse.readings)) {
-      const rawPoints = dataResponse.readings.map((d) => {
-        // Use processed_value (calibrated/converted) when available, fall back to raw_value
+      const rawPoints: GapDataPoint[] = dataResponse.readings.map((d) => {
         const val = d.processed_value != null ? d.processed_value : d.raw_value
         return {
           timestamp: new Date(d.timestamp),
@@ -313,14 +281,22 @@ async function loadData() {
         }
       })
 
-      // Calculate median interval for gap detection (8.0-C)
-      medianIntervalMs = calculateMedianInterval(rawPoints)
+      // AUT-113: robust gap heuristic using max(median, resolution)
+      const medianMs = calculateMedianInterval(rawPoints)
+      expectedIntervalMs = computeExpectedInterval(
+        medianMs,
+        dataResponse.resolution,
+        rawPoints.length,
+      )
 
-      // Insert gap markers where ESP was offline
-      dataBuffer.value = insertGapMarkers(rawPoints, medianIntervalMs)
+      if (props.gapMarkingMode !== 'off') {
+        dataBuffer.value = insertGapMarkers(rawPoints, expectedIntervalMs)
+      } else {
+        dataBuffer.value = rawPoints
+      }
     } else {
       dataBuffer.value = []
-      medianIntervalMs = 0
+      expectedIntervalMs = 0
     }
 
     // Extract stats (8.0-D) — stats are nested in response.stats
@@ -368,17 +344,18 @@ watch(
       const newTimestamp = new Date(sensor.last_read || Date.now())
       const newValue = sensor.raw_value
 
-      // Gap check for live append (8.0-C)
+      // Gap check for live append (8.0-C / AUT-113)
       const currentBuffer = dataBuffer.value
       const maxPoints = selectedRange.value === '7d' ? 2000 : 1000
       const newBuffer = [...currentBuffer]
 
-      if (newBuffer.length > 0 && medianIntervalMs > 0) {
+      if (newBuffer.length > 0 && expectedIntervalMs > 0 && props.gapMarkingMode !== 'off') {
         const lastPoint = newBuffer[newBuffer.length - 1]
         if (lastPoint.value !== null) {
           const timeDiff = newTimestamp.getTime() - lastPoint.timestamp.getTime()
-          if (timeDiff > medianIntervalMs * GAP_THRESHOLD_MULTIPLIER) {
-            newBuffer.push({ timestamp: new Date(lastPoint.timestamp.getTime() + 1), value: null })
+          if (timeDiff > expectedIntervalMs * 3) {
+            newBuffer.push({ timestamp: new Date(lastPoint.timestamp.getTime() + 1), value: null, _gap: true })
+            newBuffer.push({ timestamp: new Date(newTimestamp.getTime() - 1), value: null, _gap: true })
           }
         }
       }
@@ -406,6 +383,36 @@ function resetZoom() {
 // =============================================================================
 function formatStatValue(val: number): string {
   return val.toFixed(2).replace('.', ',')
+}
+
+// =============================================================================
+// Gap overlay (AUT-113)
+// =============================================================================
+
+const realPointCount = computed(() => countRealDataPoints(dataBuffer.value))
+
+const gapInfos = computed<GapInfo[]>(() => {
+  if (props.gapMarkingMode === 'off' || expectedIntervalMs <= 0) return []
+  const rawPoints = dataBuffer.value.filter((p) => !p._gap)
+  return detectGaps(rawPoints, expectedIntervalMs)
+})
+
+function createHatchedPattern(): CanvasPattern | string {
+  const fallback = tokens.chartGap || 'rgba(90, 90, 117, 0.10)'
+  if (typeof document === 'undefined') return fallback
+  const canvas = document.createElement('canvas')
+  canvas.width = 10
+  canvas.height = 10
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return fallback
+  ctx.strokeStyle = tokens.chartGapStroke || 'rgba(90, 90, 117, 0.25)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(0, 10)
+  ctx.lineTo(10, 0)
+  ctx.stroke()
+  const pattern = ctx.createPattern(canvas, 'repeat')
+  return pattern ?? fallback
 }
 
 // =============================================================================
@@ -600,6 +607,46 @@ const resolvedAnnotations = computed(() => {
     }
   }
 
+  // AUT-113: Gap overlay annotations
+  if (props.gapMarkingMode !== 'off') {
+    const bg = props.gapMarkingMode === 'hatched'
+      ? createHatchedPattern()
+      : (tokens.chartGap || 'rgba(90, 90, 117, 0.10)')
+
+    for (let i = 0; i < gapInfos.value.length; i++) {
+      const gap = gapInfos.value[i]
+      annotations[`gap_${i}`] = {
+        type: 'box' as const,
+        xMin: gap.startTime.getTime(),
+        xMax: gap.endTime.getTime(),
+        backgroundColor: bg,
+        borderColor: tokens.chartGapStroke || 'rgba(90, 90, 117, 0.25)',
+        borderWidth: 1,
+        borderDash: [4, 4],
+        label: {
+          display: false,
+          content: [
+            `Lücke: ${formatGapDuration(gap.durationMs)}`,
+            `${formatTimeShort(gap.startTime)} – ${formatTimeShort(gap.endTime)}`,
+          ],
+          position: 'center',
+          font: { size: 9, family: 'JetBrains Mono' },
+          color: tokens.textMuted || 'rgba(90, 90, 117, 0.8)',
+          backgroundColor: 'rgba(7, 7, 13, 0.85)',
+          padding: { top: 3, bottom: 3, left: 6, right: 6 },
+        },
+        enter(ctx: any) {
+          ctx.element.label.options.display = true
+          return true
+        },
+        leave(ctx: any) {
+          ctx.element.label.options.display = false
+          return true
+        },
+      }
+    }
+  }
+
   return annotations
 })
 
@@ -734,6 +781,15 @@ const chartOptions = computed(() => {
       </div>
     </div>
 
+    <!-- AUT-113: Sparse data warning -->
+    <div
+      v-if="!loading && !error && realPointCount > 0 && realPointCount < 5"
+      class="historical-chart__sparse-banner"
+    >
+      <AlertTriangle :size="14" />
+      <span>Wenige Datenpunkte ({{ realPointCount }}) — Darstellung kann ungenau sein</span>
+    </div>
+
     <!-- Chart -->
     <div class="historical-chart__canvas" :style="{ height }">
       <div v-if="loading" class="historical-chart__loading">Lade Daten...</div>
@@ -763,6 +819,19 @@ const chartOptions = computed(() => {
       </span>
       <span class="historical-chart__stat historical-chart__stat--muted">
         &sigma; {{ formatStatValue(stats.stdDev) }} &middot; {{ stats.count }} Punkte
+      </span>
+    </div>
+
+    <!-- AUT-113: Gap info summary -->
+    <div
+      v-if="gapInfos.length > 0 && !loading && gapMarkingMode !== 'off'"
+      class="historical-chart__gap-info"
+    >
+      <span class="historical-chart__gap-badge">
+        {{ gapInfos.length }} {{ gapInfos.length === 1 ? 'Lücke' : 'Lücken' }} erkannt
+      </span>
+      <span class="historical-chart__gap-hint">
+        Bereiche ohne Daten sind markiert
       </span>
     </div>
   </div>
@@ -882,5 +951,40 @@ const chartOptions = computed(() => {
 .historical-chart__stat--muted {
   color: var(--color-text-muted);
   margin-left: auto;
+}
+
+/* AUT-113: Sparse data warning banner */
+.historical-chart__sparse-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--color-warning);
+}
+
+/* AUT-113: Gap info summary */
+.historical-chart__gap-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+}
+
+.historical-chart__gap-badge {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.historical-chart__gap-hint {
+  color: var(--color-text-muted);
 }
 </style>

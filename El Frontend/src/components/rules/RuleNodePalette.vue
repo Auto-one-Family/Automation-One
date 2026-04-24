@@ -118,7 +118,7 @@ const categories = [
         description: 'Tageszeitbasierte Bedingung',
         icon: Clock,
         category: 'condition' as const,
-        defaults: { startHour: 8, endHour: 18 },
+        defaults: { startHour: 8, startMinute: 0, endHour: 18, endMinute: 0 },
       },
       {
         type: 'diagnostics_status',

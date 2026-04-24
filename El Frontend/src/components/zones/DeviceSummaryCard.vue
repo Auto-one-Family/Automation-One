@@ -87,6 +87,25 @@ const runtimeHealthBadge = computed(() => {
   const onlineLike = status === 'online' || status === 'stale'
   return espHealthPresentation(vm, onlineLike)
 })
+const runtimeHealthTooltip = computed(() => {
+  const badge = runtimeHealthBadge.value
+  if (!badge) return ''
+  const hasPrefixedCause = badge.tooltipLines.some(
+    line => /^Ursache:/i.test(line) || /^Weitere Ursache:/i.test(line),
+  )
+  const normalizedLines = hasPrefixedCause
+    ? badge.tooltipLines
+    : badge.tooltipLines.map((line, index) => `${index === 0 ? 'Ursache' : 'Weitere Ursache'}: ${line}`)
+  const recommendedAction = badge.recommendedAction ?? (
+    badge.showBadge
+      ? 'System-Monitor und Geräte-Details prüfen, dann bei anhaltender Meldung eskalieren.'
+      : null
+  )
+  return [
+    ...normalizedLines,
+    recommendedAction ? `Nächster Schritt: ${recommendedAction}` : null,
+  ].filter((line): line is string => Boolean(line)).join('\n')
+})
 
 /** Connection indicator (0-100) for bottom bar (not runtime-health severity). */
 const healthPercent = computed(() => {
@@ -165,7 +184,7 @@ function handleSettings(event: MouseEvent) {
         <span
           v-if="runtimeHealthBadge?.showBadge"
           class="device-summary-card__status-chip"
-          :title="runtimeHealthBadge.tooltipLines.join('\n')"
+          :title="runtimeHealthTooltip"
         >
           {{ runtimeHealthBadge.badgeLabel }}
         </span>

@@ -90,6 +90,22 @@ function getOfflineReason(source: StatusSource, reason?: string): OfflineReason 
   return 'unknown'
 }
 
+type ReconnectPhase = 'adopting' | 'adopted' | 'delta_enforced' | 'converged'
+
+function parseStatusSource(source: unknown): StatusSource | undefined {
+  if (source === 'lwt' || source === 'heartbeat' || source === 'heartbeat_timeout' || source === 'api') {
+    return source
+  }
+  return undefined
+}
+
+function parseReconnectPhase(phase: unknown): ReconnectPhase | undefined {
+  if (phase === 'adopting' || phase === 'adopted' || phase === 'delta_enforced' || phase === 'converged') {
+    return phase
+  }
+  return undefined
+}
+
 export const useEspStore = defineStore('esp', () => {
   // Logger
   const logger = createLogger('ESPStore')
@@ -358,7 +374,14 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         const id = getDeviceId(device)
         if (id && !seen.has(id)) {
           seen.add(id)
-          dedupedDevices.push(device)
+          const existing = devices.value.find((candidate) => getDeviceId(candidate) === id)
+          // Keep live WS payload data if the snapshot omits arrays temporarily.
+          const mergedDevice: ESPDevice = {
+            ...device,
+            sensors: Array.isArray(device.sensors) ? device.sensors : (existing?.sensors ?? []),
+            actuators: Array.isArray(device.actuators) ? device.actuators : (existing?.actuators ?? []),
+          }
+          dedupedDevices.push(mergedDevice)
         } else if (id) {
           logger.warn(`Duplicate device filtered: ${id}`)
         }
@@ -1138,12 +1161,11 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
         return new Date(tsMs).toISOString()
       }
       const timestampIso = parseTimestampToIso(data.timestamp)
+        ?? parseTimestampToIso(data.metrics_delta_ts)
       if (timestampIso) {
         newLastSeen = timestampIso
       } else if (data.last_seen) {
         newLastSeen = data.last_seen
-      } else if (data.status === 'online') {
-        newLastSeen = new Date().toISOString()
       }
 
       // Calculate offline info if device went offline
@@ -1151,7 +1173,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       if (data.status === 'offline') {
         recordDisconnect(espId)
 
-        const source = (data.source as StatusSource) || 'heartbeat_timeout'
+        const source = parseStatusSource(data.source) ?? 'heartbeat_timeout'
         const reason = getOfflineReason(source, data.reason)
         const displayText = getOfflineDisplayText(source, data.reason)
 
@@ -1255,6 +1277,41 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       if (data.gpio_status && Array.isArray(data.gpio_status)) {
         updateGpioStatusFromHeartbeat(espId, data.gpio_status as HeartbeatGpioItem[])
       }
+    }
+  }
+
+  /**
+   * Handle esp_reconnect_phase WebSocket event.
+   * Allows UI to react immediately during reconnect adoption before full esp_health update.
+   */
+  function handleEspReconnectPhase(message: { data: Record<string, unknown> }): void {
+    const data = message.data as { esp_id?: string; phase?: string; timestamp?: number }
+    if (!data.esp_id) return
+
+    const phase = parseReconnectPhase(data.phase)
+    if (!phase) return
+
+    const changed = applyDevicePatch(data.esp_id, (device) => {
+      const metadata = { ...(device.metadata ?? {}) }
+
+      if (phase === 'converged') {
+        delete metadata.reconnect_phase
+        delete metadata.reconnect_phase_ts
+      } else {
+        metadata.reconnect_phase = phase
+        metadata.reconnect_phase_ts = data.timestamp ?? Math.floor(Date.now() / 1000)
+      }
+
+      return {
+        ...device,
+        // Reconnect flow started on server side; keep local connectivity responsive.
+        connected: true,
+        metadata,
+      }
+    })
+
+    if (changed) {
+      logger.debug(`esp_reconnect_phase for ${data.esp_id}: ${phase}`)
     }
   }
 
@@ -1533,28 +1590,50 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    * Payload: { config_id, esp_id, gpio, sensor_type }
    */
   function handleSensorConfigDeleted(message: { data: Record<string, unknown> }): void {
-    const data = message.data as { esp_id?: string; gpio?: number; sensor_type?: string }
-    if (!data.esp_id || data.gpio === undefined || !data.sensor_type) return
-
-    const result = findDeviceByEspIdDefensive(data.esp_id)
-    if (!result) return
-
-    const { device } = result
-    if (!device.sensors) return
-
-    const before = device.sensors.length
-
-    device.sensors = device.sensors.filter(
-      s => !(s.gpio === data.gpio && s.sensor_type === data.sensor_type),
-    )
-
-    if (device.sensors.length < before) {
-      const toast = useToast()
-      toast.info(`Sensor entfernt (${data.sensor_type})`, {
-        duration: 3000,
-        dedupeKey: `sensor-delete:${data.esp_id}:${data.gpio}:${data.sensor_type}`,
-      })
+    const data = message.data as {
+      config_id?: string
+      esp_id?: string
+      gpio?: number
+      sensor_type?: string
     }
+    if (!data.esp_id) return
+
+    const changed = applyDevicePatch(data.esp_id, (device) => {
+      const currentSensors = (device.sensors ?? []) as MockSensor[]
+      if (!currentSensors.length) return device
+
+      const nextSensors = currentSensors.filter((sensor) => {
+        if (data.config_id) {
+          return String(sensor.config_id ?? '') !== data.config_id
+        }
+        if (data.gpio !== undefined && data.sensor_type) {
+          return !(sensor.gpio === data.gpio && sensor.sensor_type === data.sensor_type)
+        }
+        return true
+      })
+
+      if (nextSensors.length === currentSensors.length) return device
+      return {
+        ...device,
+        sensors: nextSensors,
+        sensor_count: nextSensors.length,
+      }
+    })
+
+    if (!changed) return
+
+    // Keep GPIO availability in sync after config removal so pickers in
+    // Hardware L2 immediately reflect newly freed pins.
+    fetchGpioStatus(data.esp_id).catch((err: unknown) => {
+      logger.warn(`Failed to refresh GPIO status after sensor delete (${data.esp_id})`, err)
+    })
+
+    const toast = useToast()
+    const sensorLabel = data.sensor_type ? ` (${data.sensor_type})` : ''
+    toast.info(`Sensor entfernt${sensorLabel}`, {
+      duration: 3000,
+      dedupeKey: `sensor-delete:${data.esp_id}:${data.config_id ?? `${data.gpio}:${data.sensor_type ?? 'unknown'}`}`,
+    })
   }
 
   /**
@@ -1566,25 +1645,33 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     const data = message.data as { esp_id?: string; gpio?: number; actuator_type?: string }
     if (!data.esp_id || data.gpio === undefined) return
 
-    const result = findDeviceByEspIdDefensive(data.esp_id)
-    if (!result) return
+    const changed = applyDevicePatch(data.esp_id, (device) => {
+      const currentActuators = device.actuators ?? []
+      if (!currentActuators.length) return device
 
-    const { device } = result
-    if (!device.actuators) return
+      const nextActuators = currentActuators.filter((actuator) => actuator.gpio !== data.gpio)
+      if (nextActuators.length === currentActuators.length) return device
 
-    const before = device.actuators.length
+      return {
+        ...device,
+        actuators: nextActuators,
+        actuator_count: nextActuators.length,
+      }
+    })
 
-    device.actuators = device.actuators.filter(
-      a => a.gpio !== data.gpio,
-    )
+    if (!changed) return
 
-    if (device.actuators.length < before) {
-      const toast = useToast()
-      toast.info(`Aktor entfernt (GPIO ${data.gpio})`, {
-        duration: 3000,
-        dedupeKey: `actuator-delete:${data.esp_id}:${data.gpio}`,
-      })
-    }
+    // Keep GPIO availability in sync after config removal so pickers in
+    // Hardware L2 immediately reflect newly freed pins.
+    fetchGpioStatus(data.esp_id).catch((err: unknown) => {
+      logger.warn(`Failed to refresh GPIO status after actuator delete (${data.esp_id})`, err)
+    })
+
+    const toast = useToast()
+    toast.info(`Aktor entfernt (GPIO ${data.gpio})`, {
+      duration: 3000,
+      dedupeKey: `actuator-delete:${data.esp_id}:${data.gpio}`,
+    })
   }
 
   // =============================================================================
@@ -1597,7 +1684,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
    */
   function handleActuatorResponse(message: { data: Record<string, unknown> }): void {
     const actStore = useActuatorStore()
-    actStore.handleActuatorResponse(message, devices.value, getDeviceId)
+    actStore.handleActuatorResponse(message, devices.value, getDeviceId, applyDevicePatch)
   }
 
   /**
@@ -1649,12 +1736,12 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
   function handleActuatorCommand(message: { data: Record<string, unknown> }): void {
     const actStore = useActuatorStore()
-    actStore.handleActuatorCommand(message, devices.value, getDeviceId)
+    actStore.handleActuatorCommand(message, devices.value, getDeviceId, applyDevicePatch)
   }
 
   function handleActuatorCommandFailed(message: { data: Record<string, unknown> }): void {
     const actStore = useActuatorStore()
-    actStore.handleActuatorCommandFailed(message, devices.value, getDeviceId)
+    actStore.handleActuatorCommandFailed(message, devices.value, getDeviceId, applyDevicePatch)
   }
 
   // =============================================================================
@@ -1909,6 +1996,7 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
       // T13-R2: Device Scope & Context
       ws.on('device_scope_changed', handleDeviceScopeChanged),
       ws.on('device_context_changed', handleDeviceContextChanged),
+      ws.on('esp_reconnect_phase', handleEspReconnectPhase),
       // Discovery/Approval Phase
       ws.on('device_discovered', handleDeviceDiscovered),
       ws.on('device_approved', handleDeviceApproved),

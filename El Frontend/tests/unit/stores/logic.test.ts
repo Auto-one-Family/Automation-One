@@ -796,6 +796,9 @@ describe('Logic Store - WebSocket Integration', () => {
             'sequence_completed',
             'sequence_error',
             'sequence_cancelled',
+            'conflict.arbitration',
+            'rule_degraded',
+            'rule_recovered',
           ],
         },
         expect.any(Function)
@@ -1024,6 +1027,56 @@ describe('Logic Store - WebSocket Integration', () => {
       })
 
       expect(store.recentExecutions.length).toBe(0)
+    })
+  })
+
+  describe('handleConflictArbitrationEvent', () => {
+    it('stores newest conflict arbitration event with trace id', () => {
+      const store = useLogicStore()
+      store.subscribeToWebSocket()
+
+      const callback = (websocketService.subscribe as ReturnType<typeof vi.fn>).mock.calls[0][1]
+      callback({
+        type: 'conflict.arbitration',
+        data: {
+          trace_id: 'trace-123',
+          actuator_key: 'ESP_TEST_001:16',
+          winner_rule_id: 'rule-001',
+          loser_rule_id: 'rule-002',
+          arbitration_mode: 'priority',
+          resolution: 'higher_priority_wins',
+          competing_rules: ['rule-001', 'rule-002'],
+        },
+        timestamp: Date.now(),
+      })
+
+      expect(store.recentConflictArbitrations).toHaveLength(1)
+      expect(store.recentConflictArbitrations[0].trace_id).toBe('trace-123')
+      expect(store.recentConflictArbitrations[0].arbitration_mode).toBe('priority')
+    })
+  })
+
+  describe('handleRuleDegradedEvent', () => {
+    it('maps degraded reason from legacy reason field', async () => {
+      const store = useLogicStore()
+      await store.fetchRules()
+      store.subscribeToWebSocket()
+
+      const callback = (websocketService.subscribe as ReturnType<typeof vi.fn>).mock.calls[0][1]
+      callback({
+        type: 'rule_degraded',
+        data: {
+          rule_id: 'rule-001',
+          degraded_since: '2026-04-23T08:00:00Z',
+          reason: 'target_esp_offline:ESP_TEST_001',
+          is_critical: true,
+        },
+        timestamp: Date.now(),
+      })
+
+      const updated = store.rules.find(rule => rule.id === 'rule-001')
+      expect(updated?.degraded_reason).toBe('target_esp_offline:ESP_TEST_001')
+      expect(updated?.is_critical).toBe(true)
     })
   })
 
@@ -1489,7 +1542,13 @@ describe('extractSensorConditions', () => {
 
   it('returns empty array for time-only conditions', () => {
     const conditions: LogicCondition[] = [
-      { type: 'time_window', start_hour: 6, end_hour: 22 } as LogicCondition,
+      {
+        type: 'time_window',
+        start_hour: 6,
+        start_minute: 30,
+        end_hour: 22,
+        end_minute: 15,
+      } as LogicCondition,
     ]
     const refs = extractSensorConditions(conditions)
     expect(refs).toHaveLength(0)

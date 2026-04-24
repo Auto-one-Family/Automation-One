@@ -254,7 +254,7 @@ export interface MockSensor {
   sensor_type: string
   name: string | null
   subzone_id?: string | null
-  raw_value: number
+  raw_value: number | null
   processed_value?: number  // Optional - present when Pi-enhanced processing returns data
   unit: string
   quality: QualityLevel
@@ -436,6 +436,7 @@ export type MessageType =
   | 'actuator_alert'
   // Device health & status
   | 'esp_health'
+  | 'esp_reconnect_phase'
   | 'sensor_health'  // Phase 2E: Sensor timeout events
   // Configuration events
   | 'config_response'
@@ -468,6 +469,7 @@ export type MessageType =
   | 'subzone_assignment'
   // System events
   | 'logic_execution'
+  | 'conflict.arbitration'
   | 'system_event'
   | 'notification'
   | 'notification_new'
@@ -486,6 +488,9 @@ export type MessageType =
   | 'calibration_point_rejected'
   | 'calibration_measurement_received'
   | 'calibration_measurement_failed'
+  // Rule degradation lifecycle (AUT-111)
+  | 'rule_degraded'
+  | 'rule_recovered'
 
 export interface MqttMessage {
   id: string
@@ -971,6 +976,10 @@ export interface ConfigResponse {
   count: number
   message: string
   error_code?: string
+  reason_code?: string
+  generation?: number
+  config_fingerprint?: string
+  trigger_source?: string
   timestamp: number
 }
 

@@ -135,7 +135,11 @@ export const useConfigStore = defineStore('config', () => {
     const deviceName = devices.find(d => getDeviceId(d) === espId)?.name || espId
     const keys = data.config_keys as string[] | undefined
     const detail = keys?.length ? ` (${keys.join(', ')})` : ''
-    toast.info(`Konfiguration für ${deviceName} gesendet${detail}`)
+    const reason = typeof data.reason_code === 'string' ? data.reason_code : null
+    const generation = typeof data.generation === 'number' ? data.generation : null
+    const reasonDetail = reason ? ` | Grund: ${reason}` : ''
+    const generationDetail = generation ? ` | Gen: ${generation}` : ''
+    toast.info(`Konfiguration für ${deviceName} gesendet${detail}${reasonDetail}${generationDetail}`)
   }
 
   /**
@@ -150,12 +154,16 @@ export const useConfigStore = defineStore('config', () => {
     const data = message.data
     const espId = data.esp_id as string
     const error = data.error as string || 'Unbekannter Fehler'
+    const reason = typeof data.reason_code === 'string' ? data.reason_code : null
+    const generation = typeof data.generation === 'number' ? data.generation : null
     if (!espId) return
 
     const toast = useToast()
     const deviceName = devices.find(d => getDeviceId(d) === espId)?.name || espId
+    const reasonDetail = reason ? ` (Grund: ${reason})` : ''
+    const generationDetail = generation ? ` [Gen ${generation}]` : ''
     toast.error(
-      `Konfiguration für ${deviceName} fehlgeschlagen: ${error}`,
+      `Konfiguration für ${deviceName} fehlgeschlagen${reasonDetail}${generationDetail}: ${error}`,
       { persistent: true }
     )
   }

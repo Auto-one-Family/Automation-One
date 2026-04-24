@@ -72,6 +72,7 @@ export const WS_EVENT_TYPES = [
   'plugin_execution_started',
   'plugin_execution_completed',
   'logic_execution',
+  'conflict.arbitration',
   'system_event',
   'service_start',
   'service_stop',
@@ -146,6 +147,7 @@ const EVENT_TYPE_TO_DATASOURCE: Record<string, ContractDataSource> = {
   plugin_execution_started: 'audit_log',
   plugin_execution_completed: 'audit_log',
   logic_execution: 'audit_log',
+  'conflict.arbitration': 'audit_log',
   system_event: 'audit_log',
   service_start: 'audit_log',
   service_stop: 'audit_log',
@@ -384,6 +386,15 @@ function validateKnownEventSchema(eventType: string, data: Record<string, unknow
   if (eventType === 'subzone_assignment') {
     if (!extractEspId(data)) return 'subzone_assignment ohne esp_id/device_id'
     if (!hasStringField(data, 'status')) return 'subzone_assignment ohne status'
+    return null
+  }
+
+  if (eventType === 'conflict.arbitration') {
+    if (!hasStringField(data, 'trace_id')) return 'conflict.arbitration ohne trace_id'
+    if (!hasStringField(data, 'actuator_key')) return 'conflict.arbitration ohne actuator_key'
+    if (!hasStringField(data, 'winner_rule_id')) return 'conflict.arbitration ohne winner_rule_id'
+    if (!hasStringField(data, 'loser_rule_id')) return 'conflict.arbitration ohne loser_rule_id'
+    if (!hasStringField(data, 'arbitration_mode')) return 'conflict.arbitration ohne arbitration_mode'
     return null
   }
 

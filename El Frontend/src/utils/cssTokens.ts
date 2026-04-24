@@ -91,4 +91,8 @@ export const tokens = {
 
   // Glass
   get glassBorder() { return getCssToken('--glass-border', ['--color-border']) },
+
+  // Chart gap overlay
+  get chartGap() { return getCssToken('--color-chart-gap', ['--color-text-muted']) },
+  get chartGapStroke() { return getCssToken('--color-chart-gap-stroke', ['--color-text-muted']) },
 }

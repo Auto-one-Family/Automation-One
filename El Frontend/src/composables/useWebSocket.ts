@@ -88,11 +88,12 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
     try {
       await websocketService.connect()
-      isConnected.value = true
-      serviceStatus.value = 'connected'
+      const connected = websocketService.isConnected()
+      isConnected.value = connected
+      serviceStatus.value = readServiceStatus()
       
       // Subscribe with filters if provided
-      if (activeFilters.value) {
+      if (connected && activeFilters.value) {
         subscribe(activeFilters.value)
       }
     } catch (error) {

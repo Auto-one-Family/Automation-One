@@ -100,6 +100,8 @@ const newRuleName = ref('')
 const newRuleDescription = ref('')
 const rulePriority = ref(5)
 const ruleCooldownSeconds = ref<number | undefined>(0)
+const ruleIsCritical = ref(false)
+const ruleEscalationPolicy = ref('')
 const metadataValidationErrors = ref<RuleMetadataValidationErrors>({})
 const nodeValidationErrors = ref<RuleNodeValidationErrors>({})
 
@@ -134,11 +136,17 @@ function syncMetadataFromSelectedRule(): void {
   if (selectedRule.value) {
     rulePriority.value = selectedRule.value.priority ?? 5
     ruleCooldownSeconds.value = selectedRule.value.cooldown_seconds ?? 0
+    ruleIsCritical.value = selectedRule.value.is_critical ?? false
+    ruleEscalationPolicy.value = selectedRule.value.escalation_policy
+      ? JSON.stringify(selectedRule.value.escalation_policy, null, 2)
+      : ''
     return
   }
   if (isCreatingNew.value) {
     rulePriority.value = 5
     ruleCooldownSeconds.value = 0
+    ruleIsCritical.value = false
+    ruleEscalationPolicy.value = ''
   }
 }
 
@@ -211,6 +219,8 @@ async function startNewRule() {
   newRuleDescription.value = ''
   rulePriority.value = 5
   ruleCooldownSeconds.value = 0
+  ruleIsCritical.value = false
+  ruleEscalationPolicy.value = ''
   showRuleDropdown.value = false
   editorRef.value?.clearCanvas()
   resetValidationState()
@@ -268,7 +278,19 @@ function cancelNewRule() {
   hasUnsavedChanges.value = false
   rulePriority.value = 5
   ruleCooldownSeconds.value = 0
+  ruleIsCritical.value = false
+  ruleEscalationPolicy.value = ''
   resetValidationState()
+}
+
+function parseEscalationPolicy(): Record<string, unknown> | null {
+  const raw = ruleEscalationPolicy.value.trim()
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return null
+  }
 }
 
 async function saveRule() {
@@ -306,6 +328,8 @@ async function saveRule() {
         actions: graphData.actions as unknown[],
         priority: graphData.priority ?? rulePriority.value,
         cooldown_seconds: graphData.cooldown_seconds ?? ruleCooldownSeconds.value,
+        is_critical: ruleIsCritical.value || undefined,
+        escalation_policy: parseEscalationPolicy(),
       })
 
       selectedRuleId.value = created.id
@@ -322,6 +346,8 @@ async function saveRule() {
         actions: graphData.actions as unknown[],
         priority: graphData.priority ?? rulePriority.value,
         cooldown_seconds: graphData.cooldown_seconds ?? ruleCooldownSeconds.value,
+        is_critical: ruleIsCritical.value || undefined,
+        escalation_policy: parseEscalationPolicy(),
       })
 
       hasUnsavedChanges.value = false
@@ -655,6 +681,31 @@ onUnmounted(() => {
               class="new-rule-input new-rule-input--meta"
               :class="{ 'new-rule-input--invalid': metadataValidationErrors.cooldown_seconds?.length }"
               @input="ruleCooldownSeconds = Number(($event.target as HTMLInputElement).value || 0); hasUnsavedChanges = true; clearMetadataFieldError('cooldown_seconds')"
+            />
+          </label>
+          <label class="rule-meta-field rule-meta-field--toggle">
+            <span>Kritisch</span>
+            <button
+              type="button"
+              class="rule-critical-toggle"
+              :class="{ 'rule-critical-toggle--active': ruleIsCritical }"
+              :aria-pressed="ruleIsCritical"
+              aria-label="Regel als kritisch markieren"
+              @click="ruleIsCritical = !ruleIsCritical; hasUnsavedChanges = true"
+            >
+              {{ ruleIsCritical ? 'JA' : 'NEIN' }}
+            </button>
+          </label>
+        </div>
+        <div v-if="hasRuleContext && ruleIsCritical" class="rule-escalation-row">
+          <label class="rule-meta-field rule-meta-field--wide">
+            <span>Eskalation (JSON)</span>
+            <input
+              v-model="ruleEscalationPolicy"
+              type="text"
+              class="new-rule-input new-rule-input--escalation"
+              placeholder='{"notify_after_minutes": 10}'
+              @input="hasUnsavedChanges = true"
             />
           </label>
         </div>
@@ -1297,6 +1348,57 @@ onUnmounted(() => {
 
 .new-rule-input--invalid {
   border-color: var(--color-error);
+}
+
+.new-rule-input--escalation {
+  width: 280px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.rule-meta-field--toggle {
+  gap: 0.25rem;
+}
+
+.rule-meta-field--wide {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--color-text-muted);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rule-critical-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 26px;
+  padding: 0 0.5rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.rule-critical-toggle--active {
+  background: rgba(251, 191, 36, 0.15);
+  border-color: rgba(251, 191, 36, 0.4);
+  color: var(--color-warning);
+}
+
+.rule-escalation-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: -0.25rem;
 }
 
 .rule-metadata-errors {

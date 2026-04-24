@@ -80,6 +80,21 @@ interface SequenceCancelledEvent {
   reason?: string
 }
 
+export interface ConflictArbitrationEvent {
+  trace_id: string
+  actuator_key: string
+  winner_rule_id: string
+  loser_rule_id: string
+  competing_rules: string[]
+  arbitration_mode: 'first_wins' | 'priority'
+  resolution: string
+  winner_priority?: number
+  loser_priority?: number
+  command?: string
+  message?: string
+  timestamp?: string
+}
+
 export const useLogicStore = defineStore('logic', () => {
   // =============================================================================
   // State
@@ -93,6 +108,7 @@ export const useLogicStore = defineStore('logic', () => {
 
   /** Recent execution history from WebSocket */
   const recentExecutions = ref<LogicExecutionEvent[]>([])
+  const recentConflictArbitrations = ref<ConflictArbitrationEvent[]>([])
 
   /** Merged execution history (REST + WebSocket) */
   const executionHistory = ref<ExecutionHistoryItem[]>([])
@@ -810,9 +826,84 @@ export const useLogicStore = defineStore('logic', () => {
     })
   }
 
+  function handleConflictArbitrationEvent(message: WebSocketMessage): void {
+    if (message.type !== 'conflict.arbitration') return
+    const event = message.data as Record<string, unknown>
+    const contractCheck = validateContractEvent('conflict.arbitration', event)
+    if (contractCheck.kind !== 'ok') return
+
+    const traceId = asString(event.trace_id)
+    const actuatorKey = asString(event.actuator_key)
+    const winnerRuleId = asString(event.winner_rule_id)
+    const loserRuleId = asString(event.loser_rule_id)
+    const arbitrationMode = asString(event.arbitration_mode)
+    if (!traceId || !actuatorKey || !winnerRuleId || !loserRuleId || !arbitrationMode) return
+    if (arbitrationMode !== 'first_wins' && arbitrationMode !== 'priority') return
+
+    const next: ConflictArbitrationEvent = {
+      trace_id: traceId,
+      actuator_key: actuatorKey,
+      winner_rule_id: winnerRuleId,
+      loser_rule_id: loserRuleId,
+      competing_rules: Array.isArray(event.competing_rules)
+        ? event.competing_rules.filter((value): value is string => typeof value === 'string')
+        : [winnerRuleId, loserRuleId],
+      arbitration_mode: arbitrationMode,
+      resolution: asString(event.resolution) ?? arbitrationMode,
+      winner_priority: typeof event.winner_priority === 'number' ? event.winner_priority : undefined,
+      loser_priority: typeof event.loser_priority === 'number' ? event.loser_priority : undefined,
+      command: asString(event.command),
+      message: asString(event.message),
+      timestamp: asString(event.timestamp),
+    }
+
+    const withoutDuplicate = recentConflictArbitrations.value.filter(
+      (item) => item.trace_id !== next.trace_id,
+    )
+    recentConflictArbitrations.value = [next, ...withoutDuplicate].slice(0, 20)
+  }
+
+  function handleRuleDegradedEvent(message: WebSocketMessage): void {
+    if (message.type !== 'rule_degraded') return
+    const data = message.data as Record<string, unknown>
+    const ruleId = asString(data.rule_id)
+    if (!ruleId) return
+
+    const rule = rules.value.find((r) => r.id === ruleId)
+    if (rule) {
+      rule.degraded_since = typeof data.degraded_since === 'string' ? data.degraded_since : new Date().toISOString()
+      rule.degraded_reason = typeof data.degraded_reason === 'string'
+        ? data.degraded_reason
+        : typeof data.reason === 'string'
+          ? data.reason
+          : 'Unbekannt'
+      if (typeof data.is_critical === 'boolean') rule.is_critical = data.is_critical
+    }
+
+    logger.warn('Rule degraded', { ruleId, reason: data.degraded_reason })
+  }
+
+  function handleRuleRecoveredEvent(message: WebSocketMessage): void {
+    if (message.type !== 'rule_recovered') return
+    const data = message.data as Record<string, unknown>
+    const ruleId = asString(data.rule_id)
+    if (!ruleId) return
+
+    const rule = rules.value.find((r) => r.id === ruleId)
+    if (rule) {
+      rule.degraded_since = null
+      rule.degraded_reason = null
+    }
+
+    logger.info('Rule recovered', { ruleId })
+  }
+
   function handleLifecycleEvents(message: WebSocketMessage): void {
     handleLogicExecutionEvent(message)
     handleSequenceEvent(message)
+    handleConflictArbitrationEvent(message)
+    handleRuleDegradedEvent(message)
+    handleRuleRecoveredEvent(message)
   }
 
   /**
@@ -822,7 +913,19 @@ export const useLogicStore = defineStore('logic', () => {
     if (wsSubscriptionId) return // Already subscribed
 
     wsSubscriptionId = websocketService.subscribe(
-      { types: ['logic_execution', 'sequence_started', 'sequence_step', 'sequence_completed', 'sequence_error', 'sequence_cancelled'] },
+      {
+        types: [
+          'logic_execution',
+          'sequence_started',
+          'sequence_step',
+          'sequence_completed',
+          'sequence_error',
+          'sequence_cancelled',
+          'conflict.arbitration',
+          'rule_degraded',
+          'rule_recovered',
+        ],
+      },
       handleLifecycleEvents
     )
     logger.debug('Subscribed to WebSocket for logic lifecycle events')
@@ -995,6 +1098,7 @@ export const useLogicStore = defineStore('logic', () => {
     error,
     activeExecutions,
     recentExecutions,
+    recentConflictArbitrations,
     ruleLifecycleByRuleId,
     lifecycleTransitions,
 

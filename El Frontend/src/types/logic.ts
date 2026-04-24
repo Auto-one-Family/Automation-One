@@ -11,6 +11,13 @@ import { getSensorLabel, getSensorUnit } from '@/utils/sensorDefaults'
 // Logic Rule Types
 // =============================================================================
 
+export interface EscalationPolicy {
+  notify_after_minutes?: number
+  notify_channels?: ('email' | 'webhook' | 'websocket')[]
+  auto_disable_after_minutes?: number
+  [key: string]: unknown
+}
+
 export interface LogicRule {
   id: string
   name: string
@@ -25,6 +32,14 @@ export interface LogicRule {
   last_triggered?: string
   execution_count?: number
   last_execution_success?: boolean | null
+  /** AUT-111: Rule is safety-critical (visual emphasis + escalation) */
+  is_critical?: boolean
+  /** AUT-111: Escalation behaviour when rule is degraded */
+  escalation_policy?: EscalationPolicy | null
+  /** AUT-111: ISO timestamp since when the rule is in degraded state */
+  degraded_since?: string | null
+  /** AUT-111: Human-readable reason for degradation */
+  degraded_reason?: string | null
   created_at: string
   updated_at: string
 }
@@ -50,7 +65,9 @@ export interface SensorCondition {
 export interface TimeCondition {
   type: 'time_window' | 'time'
   start_hour: number
+  start_minute?: number
   end_hour: number
+  end_minute?: number
   days_of_week?: number[] // 0 = Monday, 6 = Sunday (ISO 8601 / Python weekday())
   timezone?: string // IANA timezone name (e.g. "Europe/Berlin"). Absent = UTC.
 }
@@ -250,7 +267,9 @@ export function formatConditionShort(rule: LogicRule): string {
     }
     if (cond.type === 'time_window' || cond.type === 'time') {
       const tc = cond as TimeCondition
-      return `${String(tc.start_hour).padStart(2, '0')}:00–${String(tc.end_hour).padStart(2, '0')}:00`
+      const startMinute = tc.start_minute ?? 0
+      const endMinute = tc.end_minute ?? 0
+      return `${String(tc.start_hour).padStart(2, '0')}:${String(startMinute).padStart(2, '0')}–${String(tc.end_hour).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`
     }
     if (cond.type === 'compound') {
       return '[Komplex]'

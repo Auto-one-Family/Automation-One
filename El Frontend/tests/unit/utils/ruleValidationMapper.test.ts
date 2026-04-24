@@ -27,6 +27,21 @@ describe('ruleValidationMapper', () => {
     expect(mapped.metadataErrors.cooldown_seconds[0]).toContain('>= 0')
   })
 
+  it('maps time minute fields for condition nodes', () => {
+    const issues = [
+      { loc: ['body', 'conditions', 0, 'start_minute'], msg: 'start minute invalid' },
+      { loc: ['body', 'conditions', 0, 'end_minute'], msg: 'end minute invalid' },
+    ]
+
+    const mapped = mapRuleValidationIssues(issues, {
+      conditionNodeIds: ['time-node-1'],
+      actionNodeIds: [],
+    })
+
+    expect(mapped.nodeErrors['time-node-1'].startMinute[0]).toContain('start minute')
+    expect(mapped.nodeErrors['time-node-1'].endMinute[0]).toContain('end minute')
+  })
+
   it('extracts issues from axios-like error payload', () => {
     const error = {
       response: {

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi } from '@/api/auth'
 import { formatUiApiError, toUiApiError } from '@/api/uiApiError'
+import { useIntentSignalsStore } from '@/shared/stores/intentSignals.store'
 import { websocketService } from '@/services/websocket'
 import { createLogger } from '@/utils/logger'
 import type { User, LoginRequest, SetupRequest } from '@/types'
@@ -133,7 +134,6 @@ export const useAuthStore = defineStore('auth', () => {
       // This ensures proper resource cleanup and prevents memory leaks
       websocketService.disconnect()
 
-      const { useIntentSignalsStore } = await import('@/shared/stores/intentSignals.store')
       useIntentSignalsStore().clearAll()
 
       clearAuth()

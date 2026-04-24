@@ -8,7 +8,7 @@
  */
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Clock, AlertCircle, ChevronDown, Save, ExternalLink, Power } from 'lucide-vue-next'
+import { Clock, AlertCircle, ChevronDown, Save, ExternalLink, Power, ShieldAlert } from 'lucide-vue-next'
 import { formatDateTime, formatRelativeTime } from '@/utils/formatters'
 import { useUiStore } from '@/shared/stores/ui.store'
 import { useLogicStore } from '@/shared/stores/logic.store'
@@ -85,6 +85,8 @@ const hasError = computed(
     props.lifecycle?.state === 'terminal_integration_issue' ||
     props.rule.last_execution_success === false
 )
+
+const isDegraded = computed(() => Boolean(props.rule.degraded_since))
 
 /** Dynamic aria-label including status for screen readers (ARIA-live announces changes). */
 const statusAriaLabel = computed(() => {
@@ -327,7 +329,14 @@ async function saveQuickSettings(): Promise<void> {
           ]"
           :title="statusInfo.label"
         />
+        <span v-if="rule.is_critical" class="rule-card-compact__critical-badge" title="Kritische Regel">
+          <ShieldAlert class="rule-card-compact__critical-icon" />
+          KRIT
+        </span>
         <span class="rule-card-compact__name">{{ rule.name }}</span>
+        <span v-if="isDegraded" class="rule-card-compact__degraded-pill" :title="rule.degraded_reason || 'Degradiert'">
+          Degradiert
+        </span>
         <span class="rule-card-compact__status" :class="statusInfo.cssClass">
           {{ statusInfo.label }}
         </span>
@@ -924,5 +933,43 @@ async function saveQuickSettings(): Promise<void> {
   width: 10px;
   height: 10px;
   flex-shrink: 0;
+}
+
+.rule-card-compact__critical-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--text-xxs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+.rule-card-compact__critical-icon {
+  width: 10px;
+  height: 10px;
+}
+
+.rule-card-compact__degraded-pill {
+  font-size: var(--text-xxs);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--color-status-alarm, var(--color-status-error));
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: var(--radius-full);
+  padding: 1px 7px;
+  flex-shrink: 0;
+  animation: degraded-compact-pulse 3s ease-in-out infinite;
+}
+
+@keyframes degraded-compact-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 </style>

@@ -452,7 +452,7 @@ describe('dashboard store', () => {
 
   describe('fetchLayouts sync boundaries', () => {
     it('merged server + local layouts keep local_only sync flag', async () => {
-      dashboardsApiMock.list.mockResolvedValueOnce({
+      const srvResponse = {
         success: true,
         data: [
           {
@@ -469,7 +469,10 @@ describe('dashboard store', () => {
             target: null,
           },
         ],
-      })
+      }
+      dashboardsApiMock.list
+        .mockResolvedValueOnce(srvResponse)
+        .mockResolvedValueOnce(srvResponse)
 
       const store = useDashboardStore()
       store.layouts = [
@@ -515,7 +518,7 @@ describe('dashboard store', () => {
 
     it('keeps dirty local layout when local updatedAt is newer than server', async () => {
       vi.useFakeTimers()
-      dashboardsApiMock.list.mockResolvedValueOnce({
+      const srvResponse = {
         success: true,
         data: [
           {
@@ -532,7 +535,10 @@ describe('dashboard store', () => {
             target: null,
           },
         ],
-      })
+      }
+      dashboardsApiMock.list
+        .mockResolvedValueOnce(srvResponse)
+        .mockResolvedValueOnce(srvResponse)
 
       const store = useDashboardStore()
       store.layouts = [
@@ -569,7 +575,7 @@ describe('dashboard store', () => {
     })
 
     it('uses newer server layout when local layout is clean', async () => {
-      dashboardsApiMock.list.mockResolvedValueOnce({
+      const srvResponse = {
         success: true,
         data: [
           {
@@ -586,7 +592,10 @@ describe('dashboard store', () => {
             target: null,
           },
         ],
-      })
+      }
+      dashboardsApiMock.list
+        .mockResolvedValueOnce(srvResponse)
+        .mockResolvedValueOnce(srvResponse)
 
       const store = useDashboardStore()
       store.layouts = [
@@ -618,7 +627,7 @@ describe('dashboard store', () => {
     })
 
     it('marks conflict when local is dirty but server is newer', async () => {
-      dashboardsApiMock.list.mockResolvedValueOnce({
+      const srvResponse = {
         success: true,
         data: [
           {
@@ -635,7 +644,10 @@ describe('dashboard store', () => {
             target: null,
           },
         ],
-      })
+      }
+      dashboardsApiMock.list
+        .mockResolvedValueOnce(srvResponse)
+        .mockResolvedValueOnce(srvResponse)
 
       const store = useDashboardStore()
       store.layouts = [

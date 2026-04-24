@@ -291,15 +291,17 @@ export const useSensorStore = defineStore('sensor', () => {
     if (!existingSensor.is_multi_value) {
       existingSensor.is_multi_value = true
       existingSensor.device_type = null
-      existingSensor.multi_values = {
-        [existingSensor.sensor_type]: {
-          value: existingSensor.raw_value,
-          unit: existingSensor.unit,
-          quality: existingSensor.quality,
-          timestamp: Date.now(),
-          sensorType: existingSensor.sensor_type
-        }
-      }
+      existingSensor.multi_values = existingSensor.raw_value == null
+        ? {}
+        : {
+            [existingSensor.sensor_type]: {
+              value: existingSensor.raw_value,
+              unit: existingSensor.unit,
+              quality: existingSensor.quality,
+              timestamp: Date.now(),
+              sensorType: existingSensor.sensor_type
+            }
+          }
       existingSensor.name = `Multi-Sensor GPIO ${existingSensor.gpio}`
     }
 

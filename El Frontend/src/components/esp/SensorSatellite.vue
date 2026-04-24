@@ -492,13 +492,13 @@ function handleDragEnd(event: DragEvent) {
 
 /* Multi-value: wider cards */
 .sensor-satellite--values-2 {
-  min-width: 140px;
-  max-width: 220px;
+  min-width: 0;
+  max-width: none;
 }
 
 .sensor-satellite--values-3 {
-  min-width: 180px;
-  max-width: 260px;
+  min-width: 0;
+  max-width: none;
 }
 
 /* Hover - clean elevation with subtle scale */

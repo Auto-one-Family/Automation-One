@@ -94,13 +94,32 @@ export interface ESPHealthEvent extends WebSocketEventBase {
     uptime: number
     sensor_count: number
     actuator_count: number
+    source?: 'lwt' | 'heartbeat' | 'heartbeat_timeout' | 'api'
+    reason?: string
+    timeout_seconds?: number
+    actuator_states_reset?: number
+    is_reconnect?: boolean
+    is_flapping?: boolean
+    lwt_count_5m?: number
     handover_contract_reject_startup?: number
     handover_contract_reject_runtime?: number
     handover_contract_reject?: number
     handover_epoch?: number
     session_epoch?: number
-    gpio_status?: Record<string, boolean>
-    timestamp: number
+    gpio_status?: Array<{ gpio: number; state: boolean; [key: string]: unknown }>
+    metrics_delta_ts?: number
+    metrics_freshness_seconds?: number
+    metrics_schema_version?: number
+    persistence_degraded?: boolean
+    persistence_degraded_reason?: string
+    runtime_state_degraded?: boolean
+    network_degraded?: boolean
+    mqtt_circuit_breaker_open?: boolean
+    wifi_circuit_breaker_open?: boolean
+    degraded?: boolean
+    degraded_reason?: string
+    degraded_reason_codes?: string[]
+    timestamp?: number
   }
 }
 
@@ -118,7 +137,27 @@ export interface ConfigResponseEvent extends WebSocketEventBase {
     message?: string
     correlation_id: string
     request_id?: string
+    reason_code?: string
+    generation?: number
+    config_fingerprint?: string
+    trigger_source?: string
     timestamp: number
+  }
+}
+
+/**
+ * ESP reconnect phase event
+ * Sent during reconnect adoption/evaluation flow
+ */
+export interface ESPReconnectPhaseEvent extends WebSocketEventBase {
+  event: 'esp_reconnect_phase'
+  severity: 'info'
+  source_type: 'system'
+  data: {
+    esp_id: string
+    phase: 'adopting' | 'adopted' | 'delta_enforced' | 'converged'
+    timestamp: number
+    config_push_pending?: boolean
   }
 }
 
@@ -314,6 +353,13 @@ export interface ConfigPublishedEvent extends WebSocketEventBase {
     esp_id: string
     config_keys: string[]
     correlation_id?: string
+    queued?: boolean
+    device_status?: string
+    offline_rules_stripped?: number
+    reason_code?: string
+    generation?: number
+    config_fingerprint?: string
+    trigger_source?: string
   }
 }
 
@@ -331,6 +377,10 @@ export interface ConfigFailedEvent extends WebSocketEventBase {
     error: string
     correlation_id: string
     request_id?: string
+    reason_code?: string
+    generation?: number
+    config_fingerprint?: string
+    trigger_source?: string
   }
 }
 
@@ -428,6 +478,7 @@ export type WebSocketEvent =
   | SensorDataEvent
   | ActuatorStatusEvent
   | ESPHealthEvent
+  | ESPReconnectPhaseEvent
   | ConfigResponseEvent
   | DeviceDiscoveredEvent
   | DeviceRediscoveredEvent
@@ -453,6 +504,8 @@ export type WebSocketEvent =
   | SequenceCancelledEvent
   | ServerLogEvent
   | DBRecordChangedEvent
+  | RuleDegradedEvent
+  | RuleRecoveredEvent
 
 /**
  * Event type string union
@@ -688,6 +741,45 @@ export interface NotificationEvent extends WebSocketEventBase {
     priority: 'low' | 'normal' | 'high'
     rule_id?: string
     rule_name?: string
+  }
+}
+
+// =============================================================================
+// RULE DEGRADATION EVENTS (AUT-111)
+// =============================================================================
+
+/**
+ * Rule degraded event
+ * Sent when a rule enters degraded state (e.g. sensor offline, actuator unreachable)
+ */
+export interface RuleDegradedEvent extends WebSocketEventBase {
+  event: 'rule_degraded'
+  severity: 'warning' | 'error'
+  source_type: 'system'
+  data: {
+    rule_id: string
+    rule_name: string
+    is_critical: boolean
+    degraded_since: string
+    degraded_reason: string
+    escalation_policy?: Record<string, unknown> | null
+  }
+}
+
+/**
+ * Rule recovered event
+ * Sent when a previously degraded rule recovers
+ */
+export interface RuleRecoveredEvent extends WebSocketEventBase {
+  event: 'rule_recovered'
+  severity: 'info'
+  source_type: 'system'
+  data: {
+    rule_id: string
+    rule_name: string
+    is_critical: boolean
+    recovered_at: string
+    degraded_duration_seconds: number
   }
 }
 

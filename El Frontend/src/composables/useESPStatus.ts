@@ -11,7 +11,7 @@
  * 3. Heartbeat-based timing (fallback for stale detection)
  */
 
-import { computed, type ComputedRef, toValue, type MaybeRefOrGetter } from 'vue'
+import { computed, ref, type ComputedRef, toValue, type MaybeRefOrGetter } from 'vue'
 import type { ESPDevice } from '@/api/esp'
 import { formatRelativeTime } from '@/utils/formatters'
 
@@ -36,7 +36,7 @@ const STATUS_DISPLAY: Record<ESPStatus, StatusDisplay> = {
   },
   stale: {
     color: 'var(--color-warning)',
-    text: 'Verzoegert',
+    text: 'Verzögert',
     icon: 'clock',
     pulse: false,
   },
@@ -68,7 +68,25 @@ const STATUS_DISPLAY: Record<ESPStatus, StatusDisplay> = {
 
 /** Heartbeat timing thresholds */
 const HEARTBEAT_STALE_MS = 90_000   // 1.5x default 60s interval
-const HEARTBEAT_OFFLINE_MS = 300_000 // 5 minutes
+const HEARTBEAT_OFFLINE_MS = 210_000 // 3.5 minutes (faster offline fallback)
+const STATUS_REEVALUATION_TICK_MS = 1_000
+
+/**
+ * Global reactive tick to force periodic status reevaluation.
+ * Without this, computed() values that call getESPStatus() do not re-run
+ * because Date.now() is not reactive.
+ */
+const statusReevaluationTick = ref(0)
+
+let statusTickTimerId: ReturnType<typeof setInterval> | null = null
+
+function ensureStatusTickTimer(): void {
+  if (statusTickTimerId !== null) return
+  if (typeof globalThis.setInterval !== 'function') return
+  statusTickTimerId = globalThis.setInterval(() => {
+    statusReevaluationTick.value += 1
+  }, STATUS_REEVALUATION_TICK_MS)
+}
 
 function statusFromHeartbeatAge(ts: string | null | undefined): ESPStatus | null {
   if (!ts) return null
@@ -83,6 +101,10 @@ function statusFromHeartbeatAge(ts: string | null | undefined): ESPStatus | null
  * Use this in list iterations (v-for) where the composable can't be called per-item.
  */
 export function getESPStatus(device: ESPDevice): ESPStatus {
+  ensureStatusTickTimer()
+  // Reactive dependency for computed() callers: rerun every tick.
+  void statusReevaluationTick.value
+
   // Priority 1: Server-provided status + connected flag
   // Mock ESPs use system_state instead of status for error/safemode detection
   const systemState = (device as any).system_state as string | undefined

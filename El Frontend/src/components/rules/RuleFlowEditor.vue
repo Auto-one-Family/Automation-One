@@ -272,7 +272,9 @@ function getDefaultNodeData(type: string, defaults: Record<string, unknown> = {}
     case 'time':
       return {
         startHour: defaults.startHour ?? 8,
+        startMinute: defaults.startMinute ?? 0,
         endHour: defaults.endHour ?? 18,
+        endMinute: defaults.endMinute ?? 0,
         daysOfWeek: defaults.daysOfWeek || [0, 1, 2, 3, 4],
         ...defaults,
       }
@@ -421,13 +423,23 @@ function ruleToGraph(rule: LogicRule): { nodes: Node[]; edges: Edge[] } {
     } else if (cond.type === 'time_window' || cond.type === 'time') {
       conditionIds.push(id)
       const tc = cond as TimeCondition
+      const legacyStartTime = (tc as unknown as { start_time?: string }).start_time
+      const legacyEndTime = (tc as unknown as { end_time?: string }).end_time
+      const parsedStartMinute = typeof legacyStartTime === 'string' && legacyStartTime.includes(':')
+        ? Number(legacyStartTime.split(':')[1])
+        : 0
+      const parsedEndMinute = typeof legacyEndTime === 'string' && legacyEndTime.includes(':')
+        ? Number(legacyEndTime.split(':')[1])
+        : 0
       resultNodes.push({
         id,
         type: 'time',
         position: { x: 50, y: 60 + nodeRow * ROW_SPACING },
         data: {
           startHour: tc.start_hour,
+          startMinute: tc.start_minute ?? (Number.isFinite(parsedStartMinute) ? parsedStartMinute : 0),
           endHour: tc.end_hour,
+          endMinute: tc.end_minute ?? (Number.isFinite(parsedEndMinute) ? parsedEndMinute : 0),
           daysOfWeek: tc.days_of_week || [],
         },
       })
@@ -673,15 +685,27 @@ function graphToRuleData(): {
       }
 
       case 'time':
+        {
+          const startMinute = Number(node.data.startMinute ?? 0)
+          const endMinute = Number(node.data.endMinute ?? 0)
+          const normalizedStartMinute = Number.isFinite(startMinute)
+            ? Math.min(Math.max(Math.trunc(startMinute), 0), 59)
+            : 0
+          const normalizedEndMinute = Number.isFinite(endMinute)
+            ? Math.min(Math.max(Math.trunc(endMinute), 0), 59)
+            : 0
         conditions.push({
           type: 'time_window',
           start_hour: node.data.startHour || 0,
+          start_minute: normalizedStartMinute,
           end_hour: node.data.endHour || 23,
+          end_minute: normalizedEndMinute,
           ...(node.data.daysOfWeek?.length ? { days_of_week: node.data.daysOfWeek } : {}),
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         } as TimeCondition)
         conditionNodeIds.push(node.id)
         break
+        }
 
       case 'logic':
         logicOperator = node.data.operator || 'AND'
@@ -877,8 +901,9 @@ function getEspName(espId: string): string {
 }
 
 // Format time with leading zero
-function padHour(h: number): string {
-  return String(h).padStart(2, '0') + ':00'
+function formatHourMinute(h: number, m: number | undefined): string {
+  const minute = Number.isFinite(Number(m)) ? Number(m) : 0
+  return `${String(h).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 
 // MiniMap node color by type
@@ -1138,7 +1163,7 @@ defineExpose({
           </div>
           <div class="rule-node__body">
             <div class="rule-node__condition">
-              {{ padHour(data.startHour) }} – {{ padHour(data.endHour) }}
+              {{ formatHourMinute(data.startHour, data.startMinute) }} – {{ formatHourMinute(data.endHour, data.endMinute) }}
             </div>
           </div>
           <div v-if="data.daysOfWeek?.length" class="rule-node__footer">

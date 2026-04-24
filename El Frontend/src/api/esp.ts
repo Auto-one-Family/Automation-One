@@ -231,7 +231,8 @@ function mapSensorConfigToMockSensor(config: SensorConfigResponse): MockSensor {
       ? metadata['latest_timestamp']
       : null
 
-  const latestValue = config.latest_value ?? metadataLatestValue ?? 0
+  // Keep "no measurement yet" as null so UI can show "Keine Daten" instead of a fake 0.
+  const latestValue = config.latest_value ?? metadataLatestValue ?? null
   const latestQuality = (config.latest_quality ?? metadataLatestQuality ?? 'good') as QualityLevel
   const latestTimestamp = config.latest_timestamp ?? metadataLatestTimestamp ?? null
 

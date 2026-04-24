@@ -8,7 +8,7 @@
  */
 
 import { computed, ref } from 'vue'
-import { Zap, Clock, Trash2, AlertCircle } from 'lucide-vue-next'
+import { Zap, Clock, Trash2, AlertCircle, ShieldAlert } from 'lucide-vue-next'
 import { formatDistanceToNow } from 'date-fns'
 import { de } from 'date-fns/locale'
 import type { LogicRule, SensorCondition, ActuatorAction, RuleIntentLifecycle } from '@/types/logic'
@@ -118,6 +118,8 @@ const actionBadge = computed(() => {
   }
 })
 
+const isDegraded = computed(() => Boolean(props.rule.degraded_since))
+
 /** Format last triggered timestamp */
 const lastTriggeredText = computed(() => {
   if (!props.rule.last_triggered) return 'Noch nie'
@@ -156,7 +158,14 @@ const lastTriggeredText = computed(() => {
         :aria-label="rule.enabled ? 'Regel deaktivieren' : 'Regel aktivieren'"
         @click.stop="handleToggle"
       />
+      <span v-if="rule.is_critical" class="rule-card__critical-badge" title="Kritische Regel">
+        <ShieldAlert class="rule-card__critical-icon" />
+        KRIT
+      </span>
       <span class="rule-card__name">{{ rule.name }}</span>
+      <span v-if="isDegraded" class="rule-card__degraded-pill" :title="rule.degraded_reason || 'Degradiert'">
+        Degradiert
+      </span>
       <span class="rule-card__status-label" :class="statusInfo.cssClass">
         {{ statusInfo.label }}
       </span>
@@ -339,6 +348,44 @@ const lastTriggeredText = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.rule-card__critical-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--text-xxs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+.rule-card__critical-icon {
+  width: 10px;
+  height: 10px;
+}
+
+.rule-card__degraded-pill {
+  font-size: var(--text-xxs);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--color-status-error);
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: var(--radius-full);
+  padding: 1px 7px;
+  flex-shrink: 0;
+  animation: degraded-pulse 3s ease-in-out infinite;
+}
+
+@keyframes degraded-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 .rule-card__error-icon {
