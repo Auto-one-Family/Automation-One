@@ -15,8 +15,8 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 
 # El Frontend - KI-Agenten Dokumentation
 
-**Version:** 10.9
-**Letzte Aktualisierung:** 2026-04-21
+**Version:** 10.12
+**Letzte Aktualisierung:** 2026-04-23
 
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
 **Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
@@ -500,8 +500,8 @@ onUnmounted(() => { /* cleanup */ })
 |-------|------|-------|
 | sensor_data | esp_id, gpio, value, quality, zone_id, subzone_id (Phase 0.1) | MQTT→Server→WS |
 | actuator_status | esp_id, gpio, actuator_type (server-normalisiert), hardware_type (ESP32-Typ), state, value, emergency | MQTT→Server→WS |
-| esp_health | esp_id, status, heap, rssi, optional Telemetrie (`persistence_degraded`, `network_degraded`, `critical_outcome_drop_count`, …) | Heartbeat→Server→WS |
-| esp_reconnect_phase | esp_id, phase (`adopting`/`adopted`/`delta_enforced`), offline_seconds? | Heartbeat-Reconnect→Server→WS |
+| esp_health | esp_id, status, heap, rssi, optional Telemetrie (`persistence_degraded`, `network_degraded`, `critical_outcome_drop_count`, …), Offline-Kontext (`source`, `reason`, `timeout_seconds`, `actuator_states_reset`), Reconnect-Hinweise (`is_reconnect`, `is_flapping`, `lwt_count_5m`) | Heartbeat/LWT/Timeout→Server→WS |
+| esp_reconnect_phase | esp_id, phase (`adopting`/`adopted`/`delta_enforced`/`converged`), timestamp, offline_seconds?, config_push_pending? | Heartbeat-Reconnect→Server→WS |
 | config_response | esp_id, status, error_code, correlation_id (pflicht), request_id? | ESP→MQTT→Server→WS (terminal nur per correlation_id) |
 | config_published | esp_id, config_keys[], correlation_id? | Server Publish→WS (non-terminal, pending) |
 | config_failed | esp_id, config_keys[], error, correlation_id (pflicht), request_id? | Server Publish→WS (terminal nur per correlation_id) |
@@ -542,6 +542,7 @@ Intent-Lifecycle Zuordnung:
 - Sequence terminal nur via `sequence_completed` / `sequence_error` / `sequence_cancelled`
 - Kanonische MQTT-Intents zusaetzlich: `intent_outcome` (terminal je nach Payload) / `intent_outcome_lifecycle` (nicht-terminal) — Anzeige-SSOT `intentSignals.store.ts`; Firmware-`code` nicht als pauschaler Vertragsfehler labeln
 - Primaerer Korrelationsschluessel ist `correlation_id`; `request_id` ist optionaler Trace-Kontext und fuer Config-Events nicht durchgaengig verfuegbar.
+- Fuer Aktor-Finalitaet gilt Operator-UI-Guardrail: pro `correlation_id` genau ein terminaler Toast-Ausgang (success/failed/timeout), auch bei konkurrierenden Regelpfaden oder mehrfachen terminalen Eventquellen.
 - Wenn terminale Contract-Events ausbleiben, werden offene Aktor-/Config-Intents nach Frist als `terminal_timeout` abgeschlossen (Operator-Hinweis statt Dauer-`pending`).
 - `EventDetailsPanel` zeigt fuer terminale Fehler-/Abbruchfaelle eine einheitliche Operator-Entscheidung (Problemtyp, Prioritaet, Ursache, naechster Schritt).
 
@@ -1370,7 +1371,17 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
-**Version:** 10.9 | **Letzte Aktualisierung:** 2026-04-21
+**Version:** 10.12 | **Letzte Aktualisierung:** 2026-04-23
+
+- 2026-04-23: HardwareView/L2-Nachzug fuer konsistente Device-Counts und GPIO-Freigabe nach Delete-Events: `esp.store` triggert nach `sensor_config_deleted`/`actuator_config_deleted` ein `fetchGpioStatus(esp_id)` (Picker sieht freigegebene Pins sofort), Count-Anzeigen wurden array-first gehaertet (`DeviceMiniCard`, `ESPCard`) damit stale `sensor_count`/`actuator_count` aus Snapshot-Daten keine geloeschten Sensoren/Aktoren mehr anzeigen.
+
+- 2026-04-23: `ESPOrbitalLayout` responsive ab 6 Sensoren stabilisiert: Multi-Row-Sensor-Spalte nutzt flexibleres Grid (`minmax(0, 1fr)` + `clamp`), Mid-Breakpoint erzwingt 1-Spalten-Fallback zur Vermeidung seitlicher Spruenge; `SensorSatellite` Multi-Value-Cards ohne starre Min/Max-Breiten fuer bessere Anpassung an Viewport.
+
+- 2026-04-22: AUT-124 umgesetzt — Runtime-Health-Operatorik für Badge `Eingeschränkt` geschärft: Ursache→Handlung aus `runtime_health_view` wird menschenverständlich aufgelöst (Reason-Code-Mapping + Priorisierung), Tooltip zeigt `Ursache`/`Weitere Ursache`/`Detail`, `Nächster Schritt` ist pro Hauptursache konkret; bestehende UI-Pfade (`DeviceMiniCard`, `DeviceSummaryCard`, `ESPSettingsSheet`) wiederverwendet, Offline-Semantik bleibt getrennt.
+
+- 2026-04-22: AUT-122 nachgezogen — WS-Contract fuer `esp_health` (Offline-/Reconnect-Felder) erweitert, `esp_reconnect_phase` um Phase `converged` und optionale Felder (`timestamp`, `config_push_pending`) dokumentiert; Referenz auf `WEBSOCKET_EVENTS` aktualisiert.
+
+- 2026-04-22: AUT-123 umgesetzt — Toast-Finalitaet bei konkurrierenden Regeln gehaertet: im Actuator-Lifecycle wird pro `correlation_id` genau ein terminaler UI-Ausgang erzeugt (quelle-unabhaengig ueber `actuator_response`, `actuator_command_failed`, `actuator_status`, `actuator_timeout`), bei bestehender accepted/pending-Transparenz.
 
 - 2026-04-21: AUT-48 abgeschlossen — verbleibende 47 `.vue` Dateien auf Design-Token-Farben migriert; `var(--token, #hex)`-Fallbacks entfernt; UI-Hexwerte auf `var(--color-*)`/`tokens.*` umgestellt; verbleibende Hexwerte nur in Chart-Konfigurationen (`SensorHistoryView.vue`, `MultiSensorChart.vue`) belassen.
 

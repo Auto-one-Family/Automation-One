@@ -1,0 +1,739 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1500" font-family="'Segoe UI', Arial, sans-serif">
+  <defs>
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#1B2A4A" flood-opacity="0.1"/>
+    </filter>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="100%" stop-color="#E2E8F0"/>
+    </linearGradient>
+    <!-- Arrow markers -->
+    <marker id="fk" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748B"/>
+    </marker>
+    <marker id="fkCascade" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#DC2626"/>
+    </marker>
+    <marker id="fkSetNull" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#D97706"/>
+    </marker>
+    <!-- Group fills -->
+    <linearGradient id="grpGeraete" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#DBEAFE"/><stop offset="100%" stop-color="#EFF6FF"/>
+    </linearGradient>
+    <linearGradient id="grpSensoren" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#D1FAE5"/><stop offset="100%" stop-color="#ECFDF5"/>
+    </linearGradient>
+    <linearGradient id="grpAktoren" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FED7AA"/><stop offset="100%" stop-color="#FFF7ED"/>
+    </linearGradient>
+    <linearGradient id="grpZonen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#CCFBF1"/><stop offset="100%" stop-color="#F0FDFA"/>
+    </linearGradient>
+    <linearGradient id="grpLogic" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#EDE9FE"/><stop offset="100%" stop-color="#F5F3FF"/>
+    </linearGradient>
+    <linearGradient id="grpAuth" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FEE2E2"/><stop offset="100%" stop-color="#FEF2F2"/>
+    </linearGradient>
+    <linearGradient id="grpNotif" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FEF9C3"/><stop offset="100%" stop-color="#FEFCE8"/>
+    </linearGradient>
+    <linearGradient id="grpAudit" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#E2E8F0"/><stop offset="100%" stop-color="#F1F5F9"/>
+    </linearGradient>
+    <linearGradient id="grpDiag" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#BAE6FD"/><stop offset="100%" stop-color="#E0F2FE"/>
+    </linearGradient>
+    <linearGradient id="grpDash" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FBCFE8"/><stop offset="100%" stop-color="#FDF2F8"/>
+    </linearGradient>
+    <linearGradient id="grpKI" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#E2E8F0"/><stop offset="100%" stop-color="#F8FAFC"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1800" height="1500" fill="url(#bg)"/>
+
+  <!-- Header -->
+  <text x="900" y="38" text-anchor="middle" font-size="24" font-weight="700" fill="#0F172A">AutomationOne - Datenbank-Schema</text>
+  <text x="900" y="60" text-anchor="middle" font-size="12" fill="#475569" letter-spacing="1">god_kaiser_db - 33 Tabellen - Stand 2026-04-07</text>
+  <line x1="680" y1="70" x2="1120" y2="70" stroke="#6366F1" stroke-width="2" stroke-opacity="0.45"/>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 1: Geraete (Blau) - Top Left -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="30" y="90" width="370" height="270" rx="10" fill="url(#grpGeraete)" stroke="#93C5FD" stroke-width="1.5"/>
+  </g>
+  <rect x="30" y="90" width="370" height="24" rx="10" fill="#2563EB"/>
+  <rect x="30" y="102" width="370" height="12" fill="#2563EB"/>
+  <text x="215" y="108" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="0.8">GERAETE</text>
+
+  <!-- esp_devices -->
+  <g transform="translate(45, 125)">
+    <rect width="200" height="130" rx="5" fill="white" stroke="#60A5FA" stroke-width="1.2"/>
+    <rect width="200" height="22" rx="5" fill="#3B82F6"/>
+    <rect width="200" height="10" y="14" fill="#3B82F6"/>
+    <text x="100" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">esp_devices</text>
+    <text x="8" y="38" font-size="8.5" fill="#1E40AF" font-weight="600">id</text><text x="35" y="38" font-size="8" fill="#64748B">PK</text>
+    <text x="8" y="50" font-size="8.5" fill="#1E3A8A">esp_id, name, status</text>
+    <text x="8" y="62" font-size="8.5" fill="#1E3A8A">zone_id</text><text x="52" y="62" font-size="8" fill="#64748B">FK zones</text>
+    <text x="8" y="74" font-size="8.5" fill="#1E3A8A">firmware_version</text>
+    <text x="8" y="86" font-size="8.5" fill="#B91C1C" font-weight="600">deleted_at, deleted_by</text>
+    <!-- Soft-Delete Symbol -->
+    <text x="175" y="87" font-size="12" fill="#B91C1C" title="Soft-Delete">&#x1F5D1;</text>
+    <text x="8" y="104" font-size="7.5" fill="#6B7280" font-style="italic">TimestampMixin (created_at, updated_at)</text>
+    <text x="8" y="118" font-size="7.5" fill="#9333EA" font-weight="600">SOFT-DELETE</text>
+  </g>
+
+  <!-- kaiser_registry -->
+  <g transform="translate(260, 125)">
+    <rect width="125" height="55" rx="5" fill="white" stroke="#60A5FA" stroke-width="1.2"/>
+    <rect width="125" height="22" rx="5" fill="#3B82F6"/>
+    <rect width="125" height="10" y="14" fill="#3B82F6"/>
+    <text x="62" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">kaiser_registry</text>
+    <text x="8" y="38" font-size="8.5" fill="#64748B" font-style="italic">Multi-Kaiser Stub</text>
+    <text x="8" y="50" font-size="8.5" fill="#64748B">id, kaiser_id, name</text>
+  </g>
+
+  <!-- esp_ownership -->
+  <g transform="translate(260, 195)">
+    <rect width="125" height="55" rx="5" fill="white" stroke="#60A5FA" stroke-width="1.2"/>
+    <rect width="125" height="22" rx="5" fill="#3B82F6"/>
+    <rect width="125" height="10" y="14" fill="#3B82F6"/>
+    <text x="62" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">esp_ownership</text>
+    <text x="8" y="38" font-size="8.5" fill="#64748B">Geraete-Zuordnung</text>
+    <text x="8" y="50" font-size="8.5" fill="#1E3A8A">esp_id, user_id</text>
+  </g>
+
+  <!-- Tabellen-Count Badge -->
+  <rect x="355" y="95" width="35" height="16" rx="8" fill="#2563EB"/>
+  <text x="372" y="106" text-anchor="middle" font-size="9" font-weight="700" fill="white">3</text>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 2: Sensoren (Gruen) - Top Center -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="420" y="90" width="490" height="270" rx="10" fill="url(#grpSensoren)" stroke="#6EE7B7" stroke-width="1.5"/>
+  </g>
+  <rect x="420" y="90" width="490" height="24" rx="10" fill="#059669"/>
+  <rect x="420" y="102" width="490" height="12" fill="#059669"/>
+  <text x="665" y="108" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="0.8">SENSOREN</text>
+
+  <!-- sensor_configs -->
+  <g transform="translate(435, 125)">
+    <rect width="220" height="150" rx="5" fill="white" stroke="#34D399" stroke-width="1.2"/>
+    <rect width="220" height="22" rx="5" fill="#10B981"/>
+    <rect width="220" height="10" y="14" fill="#10B981"/>
+    <text x="110" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">sensor_configs</text>
+    <text x="8" y="38" font-size="8.5" fill="#065F46" font-weight="600">id</text><text x="25" y="38" font-size="8" fill="#64748B">PK</text>
+    <text x="8" y="50" font-size="8.5" fill="#065F46">esp_id</text><text x="42" y="50" font-size="8" fill="#DC2626">FK CASCADE</text>
+    <text x="8" y="62" font-size="8.5" fill="#065F46">gpio, sensor_type</text>
+    <text x="8" y="74" font-size="8.5" fill="#065F46">onewire_address, i2c_address</text>
+    <text x="8" y="86" font-size="8.5" fill="#065F46">sensor_name</text>
+    <text x="8" y="98" font-size="8.5" fill="#065F46">subzone_id</text><text x="62" y="98" font-size="8" fill="#64748B">FK subzone_configs</text>
+    <!-- UNIQUE Symbol -->
+    <text x="196" y="120" font-size="12" fill="#D97706" title="UNIQUE Constraint">&#x1F511;</text>
+    <text x="8" y="120" font-size="7.5" fill="#D97706" font-weight="600">UNIQUE(esp_id, gpio, sensor_type,</text>
+    <text x="8" y="130" font-size="7.5" fill="#D97706" font-weight="600">  onewire_address, i2c_address)</text>
+    <text x="8" y="144" font-size="7.5" fill="#6B7280" font-style="italic">TimestampMixin</text>
+  </g>
+
+  <!-- sensor_data -->
+  <g transform="translate(670, 125)">
+    <rect width="220" height="150" rx="5" fill="white" stroke="#34D399" stroke-width="1.2"/>
+    <rect width="220" height="22" rx="5" fill="#10B981"/>
+    <rect width="220" height="10" y="14" fill="#10B981"/>
+    <text x="110" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">sensor_data</text>
+    <text x="8" y="38" font-size="8.5" fill="#065F46" font-weight="600">id</text><text x="25" y="38" font-size="8" fill="#64748B">PK</text>
+    <text x="8" y="50" font-size="8.5" fill="#065F46">esp_id</text><text x="42" y="50" font-size="8" fill="#D97706" font-weight="600">FK SET NULL</text>
+    <text x="8" y="62" font-size="8.5" fill="#065F46">gpio, sensor_type</text>
+    <text x="8" y="74" font-size="8.5" fill="#065F46">value, processed_value</text>
+    <text x="8" y="86" font-size="8.5" fill="#065F46">timestamp</text>
+    <!-- UNIQUE Symbol -->
+    <text x="196" y="108" font-size="12" fill="#D97706" title="UNIQUE Constraint">&#x1F511;</text>
+    <text x="8" y="104" font-size="7.5" fill="#D97706" font-weight="600">UNIQUE(esp, gpio, type, timestamp)</text>
+    <text x="8" y="116" font-size="7.5" fill="#7C3AED" font-weight="600">ON CONFLICT DO NOTHING</text>
+    <text x="8" y="132" font-size="7.5" fill="#D97706" font-weight="600">SET NULL: Daten ueberleben</text>
+    <text x="8" y="142" font-size="7.5" fill="#D97706" font-weight="600">Geraete-Loeschung</text>
+  </g>
+
+  <!-- sensor_type_defaults -->
+  <g transform="translate(670, 290)">
+    <rect width="220" height="55" rx="5" fill="white" stroke="#34D399" stroke-width="1.2"/>
+    <rect width="220" height="22" rx="5" fill="#10B981"/>
+    <rect width="220" height="10" y="14" fill="#10B981"/>
+    <text x="110" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">sensor_type_defaults</text>
+    <text x="8" y="38" font-size="8.5" fill="#065F46">Defaults pro Sensortyp</text>
+    <text x="8" y="50" font-size="8.5" fill="#065F46">sensor_type, config(JSON)</text>
+  </g>
+
+  <!-- Tabellen-Count Badge -->
+  <rect x="865" y="95" width="35" height="16" rx="8" fill="#059669"/>
+  <text x="882" y="106" text-anchor="middle" font-size="9" font-weight="700" fill="white">3</text>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 3: Aktoren (Orange) - Top Right -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="930" y="90" width="410" height="270" rx="10" fill="url(#grpAktoren)" stroke="#FDBA74" stroke-width="1.5"/>
+  </g>
+  <rect x="930" y="90" width="410" height="24" rx="10" fill="#EA580C"/>
+  <rect x="930" y="102" width="410" height="12" fill="#EA580C"/>
+  <text x="1135" y="108" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="0.8">AKTOREN</text>
+
+  <!-- actuator_configs -->
+  <g transform="translate(945, 125)">
+    <rect width="185" height="110" rx="5" fill="white" stroke="#FB923C" stroke-width="1.2"/>
+    <rect width="185" height="22" rx="5" fill="#F97316"/>
+    <rect width="185" height="10" y="14" fill="#F97316"/>
+    <text x="92" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">actuator_configs</text>
+    <text x="8" y="38" font-size="8.5" fill="#9A3412" font-weight="600">id</text><text x="25" y="38" font-size="8" fill="#64748B">PK</text>
+    <text x="8" y="50" font-size="8.5" fill="#9A3412">esp_id</text><text x="42" y="50" font-size="8" fill="#64748B">FK esp_devices</text>
+    <text x="8" y="62" font-size="8.5" fill="#9A3412">gpio, actuator_type</text>
+    <text x="8" y="74" font-size="8.5" fill="#9A3412">interface_type, name</text>
+    <text x="8" y="90" font-size="7.5" fill="#6B7280" font-style="italic">TimestampMixin</text>
+  </g>
+
+  <!-- actuator_states -->
+  <g transform="translate(1145, 125)">
+    <rect width="185" height="130" rx="5" fill="white" stroke="#FB923C" stroke-width="1.2"/>
+    <rect width="185" height="22" rx="5" fill="#F97316"/>
+    <rect width="185" height="10" y="14" fill="#F97316"/>
+    <text x="92" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">actuator_states</text>
+    <text x="8" y="38" font-size="8.5" fill="#9A3412">esp_id, gpio</text>
+    <text x="8" y="50" font-size="8.5" fill="#9A3412">state</text>
+    <text x="8" y="62" font-size="7" fill="#64748B">on | off | pwm | unknown |</text>
+    <text x="8" y="72" font-size="7" fill="#64748B">error | emergency_stop</text>
+    <text x="8" y="86" font-size="8.5" fill="#9A3412">current_value</text>
+    <!-- No TimestampMixin Symbol -->
+    <text x="8" y="105" font-size="7.5" fill="#B91C1C" font-weight="600">&#x23F0;&#x0338; KEIN TimestampMixin</text>
+    <text x="8" y="116" font-size="7" fill="#64748B" font-style="italic">(Performance-Optimierung)</text>
+  </g>
+
+  <!-- actuator_history -->
+  <g transform="translate(945, 250)">
+    <rect width="185" height="55" rx="5" fill="white" stroke="#FB923C" stroke-width="1.2"/>
+    <rect width="185" height="22" rx="5" fill="#F97316"/>
+    <rect width="185" height="10" y="14" fill="#F97316"/>
+    <text x="92" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">actuator_history</text>
+    <text x="8" y="38" font-size="8.5" fill="#9A3412">Befehlshistorie</text>
+    <text x="8" y="50" font-size="8.5" fill="#9A3412">esp_id, gpio, command, ts</text>
+  </g>
+
+  <!-- Tabellen-Count Badge -->
+  <rect x="1295" y="95" width="35" height="16" rx="8" fill="#EA580C"/>
+  <text x="1312" y="106" text-anchor="middle" font-size="9" font-weight="700" fill="white">3</text>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 4: Zonen (Tuerkis) - Middle Left -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="30" y="380" width="500" height="260" rx="10" fill="url(#grpZonen)" stroke="#5EEAD4" stroke-width="1.5"/>
+  </g>
+  <rect x="30" y="380" width="500" height="24" rx="10" fill="#0D9488"/>
+  <rect x="30" y="392" width="500" height="12" fill="#0D9488"/>
+  <text x="280" y="398" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="0.8">ZONEN</text>
+
+  <!-- zones -->
+  <g transform="translate(45, 415)">
+    <rect width="170" height="115" rx="5" fill="white" stroke="#2DD4BF" stroke-width="1.2"/>
+    <rect width="170" height="22" rx="5" fill="#14B8A6"/>
+    <rect width="170" height="10" y="14" fill="#14B8A6"/>
+    <text x="85" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">zones</text>
+    <text x="8" y="38" font-size="8.5" fill="#134E4A" font-weight="600">id</text><text x="25" y="38" font-size="8" fill="#64748B">PK</text>
+    <text x="8" y="50" font-size="8.5" fill="#134E4A">name, status</text>
+    <text x="8" y="62" font-size="8.5" fill="#B91C1C" font-weight="600">deleted_at, deleted_by</text>
+    <text x="145" y="63" font-size="12" fill="#B91C1C">&#x1F5D1;</text>
+    <text x="8" y="80" font-size="7.5" fill="#9333EA" font-weight="600">SOFT-DELETE</text>
+    <text x="8" y="94" font-size="7.5" fill="#6B7280" font-style="italic">TimestampMixin</text>
+  </g>
+
+  <!-- subzone_configs -->
+  <g transform="translate(230, 415)">
+    <rect width="170" height="100" rx="5" fill="white" stroke="#2DD4BF" stroke-width="1.2"/>
+    <rect width="170" height="22" rx="5" fill="#14B8A6"/>
+    <rect width="170" height="10" y="14" fill="#14B8A6"/>
+    <text x="85" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">subzone_configs</text>
+    <text x="8" y="38" font-size="8.5" fill="#134E4A" font-weight="600">id</text><text x="25" y="38" font-size="8" fill="#64748B">PK</text>
+    <text x="8" y="50" font-size="8.5" fill="#134E4A">zone_id</text><text x="52" y="50" font-size="8" fill="#64748B">FK zones</text>
+    <text x="8" y="62" font-size="8.5" fill="#134E4A">name</text>
+    <text x="8" y="74" font-size="8.5" fill="#134E4A">assigned_gpios</text><text x="92" y="74" font-size="7.5" fill="#64748B">(Array)</text>
+    <text x="8" y="90" font-size="7.5" fill="#6B7280" font-style="italic">TimestampMixin</text>
+  </g>
+
+  <!-- zone_contexts -->
+  <g transform="translate(415, 415)">
+    <rect width="100" height="50" rx="5" fill="white" stroke="#2DD4BF" stroke-width="1.2"/>
+    <rect width="100" height="22" rx="5" fill="#14B8A6"/>
+    <rect width="100" height="10" y="14" fill="#14B8A6"/>
+    <text x="50" y="16" text-anchor="middle" font-size="9" font-weight="700" fill="white">zone_contexts</text>
+    <text x="8" y="40" font-size="8" fill="#134E4A">Zone-Metadaten</text>
+  </g>
+
+  <!-- device_active_context -->
+  <g transform="translate(45, 545)">
+    <rect width="155" height="50" rx="5" fill="white" stroke="#2DD4BF" stroke-width="1.2"/>
+    <rect width="155" height="22" rx="5" fill="#14B8A6"/>
+    <rect width="155" height="10" y="14" fill="#14B8A6"/>
+    <text x="78" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="white">device_active_context</text>
+    <text x="8" y="40" font-size="8" fill="#134E4A">aktiver Device-Kontext</text>
+  </g>
+
+  <!-- device_zone_changes -->
+  <g transform="translate(215, 545)">
+    <rect width="160" height="50" rx="5" fill="white" stroke="#2DD4BF" stroke-width="1.2"/>
+    <rect width="160" height="22" rx="5" fill="#14B8A6"/>
+    <rect width="160" height="10" y="14" fill="#14B8A6"/>
+    <text x="80" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="white">device_zone_changes</text>
+    <text x="8" y="40" font-size="8" fill="#134E4A">Aenderungshistorie</text>
+  </g>
+
+  <!-- Tabellen-Count Badge -->
+  <rect x="485" y="385" width="35" height="16" rx="8" fill="#0D9488"/>
+  <text x="502" y="396" text-anchor="middle" font-size="9" font-weight="700" fill="white">5</text>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 5: Logic Engine (Violett) - Middle Center -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="550" y="380" width="430" height="260" rx="10" fill="url(#grpLogic)" stroke="#A78BFA" stroke-width="1.5"/>
+  </g>
+  <rect x="550" y="380" width="430" height="24" rx="10" fill="#7C3AED"/>
+  <rect x="550" y="392" width="430" height="12" fill="#7C3AED"/>
+  <text x="765" y="398" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="0.8">LOGIC ENGINE</text>
+
+  <!-- cross_esp_logic -->
+  <g transform="translate(565, 415)">
+    <rect width="200" height="120" rx="5" fill="white" stroke="#8B5CF6" stroke-width="1.2"/>
+    <rect width="200" height="22" rx="5" fill="#7C3AED"/>
+    <rect width="200" height="10" y="14" fill="#7C3AED"/>
+    <text x="100" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">cross_esp_logic</text>
+    <text x="8" y="38" font-size="8.5" fill="#4C1D95" font-weight="600">id</text><text x="25" y="38" font-size="8" fill="#64748B">PK</text>
+    <text x="8" y="50" font-size="8.5" fill="#4C1D95">name, enabled, priority</text>
+    <text x="8" y="62" font-size="8.5" fill="#4C1D95">conditions</text><text x="65" y="62" font-size="8" fill="#64748B">JSON</text>
+    <text x="8" y="74" font-size="8.5" fill="#4C1D95">actions</text><text x="50" y="74" font-size="8" fill="#64748B">JSON</text>
+    <text x="8" y="86" font-size="8.5" fill="#4C1D95">cooldown</text>
+    <text x="8" y="104" font-size="7.5" fill="#6B7280" font-style="italic">TimestampMixin</text>
+  </g>
+
+  <!-- logic_execution_history -->
+  <g transform="translate(780, 415)">
+    <rect width="185" height="80" rx="5" fill="white" stroke="#8B5CF6" stroke-width="1.2"/>
+    <rect width="185" height="22" rx="5" fill="#7C3AED"/>
+    <rect width="185" height="10" y="14" fill="#7C3AED"/>
+    <text x="92" y="16" text-anchor="middle" font-size="9" font-weight="700" fill="white">logic_execution_history</text>
+    <text x="8" y="38" font-size="8.5" fill="#4C1D95">rule_id</text><text x="48" y="38" font-size="8" fill="#64748B">FK cross_esp_logic</text>
+    <text x="8" y="50" font-size="8.5" fill="#4C1D95">result, execution_time</text>
+    <text x="8" y="66" font-size="7.5" fill="#6B7280" font-style="italic">Ausfuehrungsprotokoll</text>
+  </g>
+
+  <!-- logic_hysteresis_states -->
+  <g transform="translate(780, 510)">
+    <rect width="185" height="80" rx="5" fill="white" stroke="#8B5CF6" stroke-width="1.2"/>
+    <rect width="185" height="22" rx="5" fill="#7C3AED"/>
+    <rect width="185" height="10" y="14" fill="#7C3AED"/>
+    <text x="92" y="16" text-anchor="middle" font-size="9" font-weight="700" fill="white">logic_hysteresis_states</text>
+    <text x="8" y="38" font-size="8.5" fill="#4C1D95">rule_id, condition_key</text>
+    <text x="8" y="50" font-size="8.5" fill="#4C1D95">is_active, last_transition</text>
+    <text x="8" y="66" font-size="7" fill="#64748B" font-style="italic">Ueberlebt Server-Restart</text>
+  </g>
+
+  <!-- Tabellen-Count Badge -->
+  <rect x="935" y="385" width="35" height="16" rx="8" fill="#7C3AED"/>
+  <text x="952" y="396" text-anchor="middle" font-size="9" font-weight="700" fill="white">3</text>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 6: Auth (Rot) - Middle Right -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="1000" y="380" width="260" height="150" rx="10" fill="url(#grpAuth)" stroke="#FCA5A5" stroke-width="1.5"/>
+  </g>
+  <rect x="1000" y="380" width="260" height="24" rx="10" fill="#DC2626"/>
+  <rect x="1000" y="392" width="260" height="12" fill="#DC2626"/>
+  <text x="1130" y="398" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="0.8">AUTH</text>
+
+  <!-- user_accounts -->
+  <g transform="translate(1015, 415)">
+    <rect width="120" height="100" rx="5" fill="white" stroke="#F87171" stroke-width="1.2"/>
+    <rect width="120" height="22" rx="5" fill="#EF4444"/>
+    <rect width="120" height="10" y="14" fill="#EF4444"/>
+    <text x="60" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">user_accounts</text>
+    <text x="8" y="38" font-size="8.5" fill="#7F1D1D" font-weight="600">id</text><text x="25" y="38" font-size="8" fill="#64748B">PK</text>
+    <text x="8" y="50" font-size="8.5" fill="#7F1D1D">email</text>
+    <text x="8" y="62" font-size="8.5" fill="#7F1D1D">hashed_password</text>
+    <text x="8" y="74" font-size="8.5" fill="#7F1D1D">role, token_version</text>
+    <text x="8" y="90" font-size="7.5" fill="#6B7280" font-style="italic">TimestampMixin</text>
+  </g>
+
+  <!-- token_blacklist -->
+  <g transform="translate(1150, 415)">
+    <rect width="100" height="70" rx="5" fill="white" stroke="#F87171" stroke-width="1.2"/>
+    <rect width="100" height="22" rx="5" fill="#EF4444"/>
+    <rect width="100" height="10" y="14" fill="#EF4444"/>
+    <text x="50" y="16" text-anchor="middle" font-size="9" font-weight="700" fill="white">token_blacklist</text>
+    <text x="8" y="38" font-size="8.5" fill="#7F1D1D">token_jti</text>
+    <text x="8" y="50" font-size="8.5" fill="#7F1D1D">expires_at</text>
+    <text x="8" y="62" font-size="7" fill="#64748B">Logout-Invalidierung</text>
+  </g>
+
+  <!-- Tabellen-Count Badge -->
+  <rect x="1215" y="385" width="35" height="16" rx="8" fill="#DC2626"/>
+  <text x="1232" y="396" text-anchor="middle" font-size="9" font-weight="700" fill="white">2</text>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 7: Notifications (Gelb) - Middle Far Right -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="1280" y="380" width="280" height="260" rx="10" fill="url(#grpNotif)" stroke="#FDE047" stroke-width="1.5"/>
+  </g>
+  <rect x="1280" y="380" width="280" height="24" rx="10" fill="#CA8A04"/>
+  <rect x="1280" y="392" width="280" height="12" fill="#CA8A04"/>
+  <text x="1420" y="398" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="0.8">NOTIFICATIONS</text>
+
+  <!-- notifications -->
+  <g transform="translate(1295, 415)">
+    <rect width="250" height="100" rx="5" fill="white" stroke="#FACC15" stroke-width="1.2"/>
+    <rect width="250" height="22" rx="5" fill="#EAB308"/>
+    <rect width="250" height="10" y="14" fill="#EAB308"/>
+    <text x="125" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">notifications</text>
+    <text x="8" y="38" font-size="8.5" fill="#713F12" font-weight="600">id</text><text x="25" y="38" font-size="8" fill="#64748B">PK</text>
+    <text x="8" y="50" font-size="8.5" fill="#713F12">type, severity, message</text>
+    <text x="8" y="62" font-size="8.5" fill="#713F12">fingerprint</text><text x="72" y="62" font-size="8" fill="#7C3AED">(Dedup)</text>
+    <text x="8" y="74" font-size="8.5" fill="#713F12">correlation_id</text><text x="90" y="74" font-size="8" fill="#7C3AED">(Refire-Schutz)</text>
+    <text x="8" y="90" font-size="7.5" fill="#6B7280" font-style="italic">TimestampMixin</text>
+  </g>
+
+  <!-- notification_preferences -->
+  <g transform="translate(1295, 530)">
+    <rect width="120" height="50" rx="5" fill="white" stroke="#FACC15" stroke-width="1.2"/>
+    <rect width="120" height="22" rx="5" fill="#EAB308"/>
+    <rect width="120" height="10" y="14" fill="#EAB308"/>
+    <text x="60" y="16" text-anchor="middle" font-size="8" font-weight="700" fill="white">notification_prefs</text>
+    <text x="8" y="38" font-size="8" fill="#713F12">Pro-User Settings</text>
+  </g>
+
+  <!-- email_log -->
+  <g transform="translate(1425, 530)">
+    <rect width="120" height="50" rx="5" fill="white" stroke="#FACC15" stroke-width="1.2"/>
+    <rect width="120" height="22" rx="5" fill="#EAB308"/>
+    <rect width="120" height="10" y="14" fill="#EAB308"/>
+    <text x="60" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">email_log</text>
+    <text x="8" y="38" font-size="8" fill="#713F12">Versandprotokoll</text>
+  </g>
+
+  <!-- Tabellen-Count Badge -->
+  <rect x="1515" y="385" width="35" height="16" rx="8" fill="#CA8A04"/>
+  <text x="1532" y="396" text-anchor="middle" font-size="9" font-weight="700" fill="white">3</text>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 8: Audit + System (Grau) - Bottom Left -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="30" y="660" width="370" height="220" rx="10" fill="url(#grpAudit)" stroke="#94A3B8" stroke-width="1.5"/>
+  </g>
+  <rect x="30" y="660" width="370" height="24" rx="10" fill="#475569"/>
+  <rect x="30" y="672" width="370" height="12" fill="#475569"/>
+  <text x="215" y="678" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="0.8">AUDIT + SYSTEM</text>
+
+  <!-- audit_logs -->
+  <g transform="translate(45, 695)">
+    <rect width="165" height="80" rx="5" fill="white" stroke="#94A3B8" stroke-width="1.2"/>
+    <rect width="165" height="22" rx="5" fill="#64748B"/>
+    <rect width="165" height="10" y="14" fill="#64748B"/>
+    <text x="82" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">audit_logs</text>
+    <text x="8" y="38" font-size="8.5" fill="#334155">user, action, entity</text>
+    <text x="8" y="50" font-size="8.5" fill="#334155">details(JSON)</text>
+    <text x="8" y="66" font-size="7" fill="#64748B" font-style="italic">LWT schreibt hier auch</text>
+  </g>
+
+  <!-- system_config -->
+  <g transform="translate(225, 695)">
+    <rect width="160" height="65" rx="5" fill="white" stroke="#94A3B8" stroke-width="1.2"/>
+    <rect width="160" height="22" rx="5" fill="#64748B"/>
+    <rect width="160" height="10" y="14" fill="#64748B"/>
+    <text x="80" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">system_config</text>
+    <text x="8" y="38" font-size="8.5" fill="#334155">key, value</text>
+    <text x="8" y="50" font-size="7" fill="#64748B" font-style="italic">Key-Value Konfiguration</text>
+  </g>
+
+  <!-- library_metadata -->
+  <g transform="translate(45, 790)">
+    <rect width="165" height="55" rx="5" fill="white" stroke="#94A3B8" stroke-width="1.2"/>
+    <rect width="165" height="22" rx="5" fill="#64748B"/>
+    <rect width="165" height="10" y="14" fill="#64748B"/>
+    <text x="82" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">library_metadata</text>
+    <text x="8" y="38" font-size="8.5" fill="#334155">Sensor-Library-Versionen</text>
+  </g>
+
+  <!-- Tabellen-Count Badge -->
+  <rect x="355" y="665" width="35" height="16" rx="8" fill="#475569"/>
+  <text x="372" y="676" text-anchor="middle" font-size="9" font-weight="700" fill="white">3</text>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 9: Diagnose (Hellblau) - Bottom Center-Left -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="420" y="660" width="330" height="220" rx="10" fill="url(#grpDiag)" stroke="#7DD3FC" stroke-width="1.5"/>
+  </g>
+  <rect x="420" y="660" width="330" height="24" rx="10" fill="#0284C7"/>
+  <rect x="420" y="672" width="330" height="12" fill="#0284C7"/>
+  <text x="585" y="678" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="0.8">DIAGNOSE</text>
+
+  <!-- diagnostic_reports -->
+  <g transform="translate(435, 695)">
+    <rect width="150" height="85" rx="5" fill="white" stroke="#38BDF8" stroke-width="1.2"/>
+    <rect width="150" height="22" rx="5" fill="#0EA5E9"/>
+    <rect width="150" height="10" y="14" fill="#0EA5E9"/>
+    <text x="75" y="16" text-anchor="middle" font-size="9" font-weight="700" fill="white">diagnostic_reports</text>
+    <text x="8" y="38" font-size="8.5" fill="#0C4A6E">esp_id, report(JSON)</text>
+    <text x="8" y="50" font-size="8.5" fill="#0C4A6E">timestamp</text>
+    <text x="8" y="70" font-size="7.5" fill="#B91C1C" font-weight="600">&#x23F0;&#x0338; KEIN TimestampMixin</text>
+  </g>
+
+  <!-- esp_heartbeat_logs -->
+  <g transform="translate(600, 695)">
+    <rect width="135" height="85" rx="5" fill="white" stroke="#38BDF8" stroke-width="1.2"/>
+    <rect width="135" height="22" rx="5" fill="#0EA5E9"/>
+    <rect width="135" height="10" y="14" fill="#0EA5E9"/>
+    <text x="67" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="white">esp_heartbeat_logs</text>
+    <text x="8" y="38" font-size="8.5" fill="#0C4A6E">esp_id, status</text>
+    <text x="8" y="50" font-size="8.5" fill="#0C4A6E">sensor_count, uptime</text>
+    <text x="8" y="70" font-size="7.5" fill="#B91C1C" font-weight="600">&#x23F0;&#x0338; KEIN TimestampMixin</text>
+  </g>
+
+  <!-- Tabellen-Count Badge -->
+  <rect x="705" y="665" width="35" height="16" rx="8" fill="#0284C7"/>
+  <text x="722" y="676" text-anchor="middle" font-size="9" font-weight="700" fill="white">2</text>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 10: Dashboard + Plugins (Rosa) - Bottom Center-Right -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="770" y="660" width="360" height="220" rx="10" fill="url(#grpDash)" stroke="#F9A8D4" stroke-width="1.5"/>
+  </g>
+  <rect x="770" y="660" width="360" height="24" rx="10" fill="#DB2777"/>
+  <rect x="770" y="672" width="360" height="12" fill="#DB2777"/>
+  <text x="950" y="678" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="0.8">DASHBOARD + PLUGINS</text>
+
+  <!-- dashboards -->
+  <g transform="translate(785, 695)">
+    <rect width="115" height="80" rx="5" fill="white" stroke="#F472B6" stroke-width="1.2"/>
+    <rect width="115" height="22" rx="5" fill="#EC4899"/>
+    <rect width="115" height="10" y="14" fill="#EC4899"/>
+    <text x="57" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="white">dashboards</text>
+    <text x="8" y="38" font-size="8.5" fill="#831843">id, user_id</text>
+    <text x="8" y="50" font-size="8.5" fill="#831843">layout(JSON)</text>
+    <text x="8" y="66" font-size="7.5" fill="#6B7280" font-style="italic">TimestampMixin</text>
+  </g>
+
+  <!-- plugin_configs -->
+  <g transform="translate(910, 695)">
+    <rect width="100" height="70" rx="5" fill="white" stroke="#F472B6" stroke-width="1.2"/>
+    <rect width="100" height="22" rx="5" fill="#EC4899"/>
+    <rect width="100" height="10" y="14" fill="#EC4899"/>
+    <text x="50" y="16" text-anchor="middle" font-size="9" font-weight="700" fill="white">plugin_configs</text>
+    <text x="8" y="38" font-size="8.5" fill="#831843">name, config</text>
+    <text x="8" y="50" font-size="8.5" fill="#831843">enabled</text>
+  </g>
+
+  <!-- plugin_executions -->
+  <g transform="translate(1020, 695)">
+    <rect width="100" height="85" rx="5" fill="white" stroke="#F472B6" stroke-width="1.2"/>
+    <rect width="100" height="22" rx="5" fill="#EC4899"/>
+    <rect width="100" height="10" y="14" fill="#EC4899"/>
+    <text x="50" y="16" text-anchor="middle" font-size="8" font-weight="700" fill="white">plugin_executions</text>
+    <text x="8" y="38" font-size="8.5" fill="#831843">plugin, result</text>
+    <text x="8" y="50" font-size="8.5" fill="#831843">duration</text>
+    <text x="8" y="70" font-size="7.5" fill="#B91C1C" font-weight="600">&#x23F0;&#x0338; KEIN TimestampMixin</text>
+  </g>
+
+  <!-- Tabellen-Count Badge -->
+  <rect x="1085" y="665" width="35" height="16" rx="8" fill="#DB2777"/>
+  <text x="1102" y="676" text-anchor="middle" font-size="9" font-weight="700" fill="white">3</text>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- GROUP 11: KI (Grau gestrichelt) - Bottom Far Right -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="1150" y="660" width="200" height="120" rx="10" fill="url(#grpKI)" stroke="#94A3B8" stroke-width="1.5" stroke-dasharray="8,4"/>
+  </g>
+  <rect x="1150" y="660" width="200" height="24" rx="10" fill="#94A3B8" fill-opacity="0.6"/>
+  <rect x="1150" y="672" width="200" height="12" fill="#94A3B8" fill-opacity="0.6"/>
+  <text x="1250" y="678" text-anchor="middle" font-size="11" font-weight="700" fill="#475569" letter-spacing="0.8">KI (ZUKUNFT)</text>
+
+  <!-- ai_predictions -->
+  <g transform="translate(1165, 695)">
+    <rect width="170" height="65" rx="5" fill="white" stroke="#94A3B8" stroke-width="1.2" stroke-dasharray="6,3"/>
+    <rect width="170" height="22" rx="5" fill="#CBD5E1"/>
+    <rect width="170" height="10" y="14" fill="#CBD5E1"/>
+    <text x="85" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="#475569">ai_predictions</text>
+    <text x="8" y="38" font-size="8.5" fill="#64748B" font-style="italic">STUB - leer</text>
+    <text x="8" y="52" font-size="8" fill="#94A3B8">Zukunft: ML-Vorhersagen</text>
+  </g>
+
+  <!-- Tabellen-Count Badge -->
+  <rect x="1305" y="665" width="35" height="16" rx="8" fill="#94A3B8"/>
+  <text x="1322" y="676" text-anchor="middle" font-size="9" font-weight="700" fill="white">1</text>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- FOREIGN KEY RELATIONSHIPS (Pfeile) -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+
+  <!-- FK 1: sensor_configs.esp_id → esp_devices (CASCADE DELETE - Rot) -->
+  <path d="M 435 200 L 245 200" stroke="#DC2626" stroke-width="1.8" fill="none" marker-end="url(#fkCascade)" stroke-dasharray="none"/>
+  <rect x="290" y="188" width="90" height="14" rx="3" fill="white" stroke="#DC2626" stroke-width="0.5"/>
+  <text x="335" y="198" text-anchor="middle" font-size="7" fill="#DC2626" font-weight="600">CASCADE DEL</text>
+
+  <!-- FK 2: sensor_data.esp_id → esp_devices (SET NULL - Orange) -->
+  <path d="M 670 190 L 400 190 L 400 270 L 245 270" stroke="#D97706" stroke-width="1.8" fill="none" marker-end="url(#fkSetNull)" stroke-dasharray="none"/>
+  <rect x="390" y="218" width="76" height="14" rx="3" fill="white" stroke="#D97706" stroke-width="0.5"/>
+  <text x="428" y="228" text-anchor="middle" font-size="7" fill="#D97706" font-weight="600">SET NULL</text>
+
+  <!-- FK 3: sensor_configs.subzone_id → subzone_configs -->
+  <path d="M 530 275 L 530 340 L 380 340 L 380 465" stroke="#64748B" stroke-width="1.4" fill="none" marker-end="url(#fk)"/>
+
+  <!-- FK 4: actuator_configs.esp_id → esp_devices -->
+  <path d="M 945 175 L 400 175 L 400 200 L 245 200" stroke="#64748B" stroke-width="1.4" fill="none" marker-end="url(#fk)" stroke-dasharray="4,2"/>
+
+  <!-- FK 5: esp_devices.zone_id → zones -->
+  <path d="M 130 355 L 130 420" stroke="#64748B" stroke-width="1.4" fill="none" marker-end="url(#fk)"/>
+
+  <!-- FK 6: subzone_configs.zone_id → zones -->
+  <path d="M 275 465 L 230 465 L 230 460 L 215 460" stroke="#64748B" stroke-width="1.4" fill="none" marker-end="url(#fk)"/>
+
+  <!-- FK 7: logic_execution_history.rule_id → cross_esp_logic -->
+  <path d="M 780 455 L 765 455" stroke="#64748B" stroke-width="1.4" fill="none" marker-end="url(#fk)"/>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- ZUKUNFT (Gestrichelt) - Bottom -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="30" y="910" width="1520" height="120" rx="12" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.5" stroke-dasharray="10,5"/>
+  </g>
+  <text x="790" y="935" text-anchor="middle" font-size="12" font-weight="700" fill="#64748B" letter-spacing="1">ZUKUNFT (GEPLANT)</text>
+
+  <g transform="translate(50, 955)">
+    <rect width="250" height="55" rx="5" fill="white" stroke="#94A3B8" stroke-dasharray="6,3"/>
+    <text x="125" y="18" text-anchor="middle" font-size="9" font-weight="600" fill="#64748B">Tenant-ID auf allen Tabellen</text>
+    <text x="125" y="34" text-anchor="middle" font-size="8" fill="#94A3B8">Multi-Tenant / Kaiser-Relay</text>
+    <text x="125" y="46" text-anchor="middle" font-size="8" fill="#94A3B8">Nicht implementiert</text>
+  </g>
+
+  <g transform="translate(320, 955)">
+    <rect width="300" height="55" rx="5" fill="white" stroke="#94A3B8" stroke-dasharray="6,3"/>
+    <text x="150" y="18" text-anchor="middle" font-size="9" font-weight="600" fill="#64748B">T&amp;T Plugin-DB (eigene Datenbank)</text>
+    <text x="150" y="34" text-anchor="middle" font-size="8" fill="#94A3B8">plants, batches, harvests, dispensing_logs</text>
+    <text x="150" y="46" text-anchor="middle" font-size="8" fill="#94A3B8">Track &amp; Trace fuer Cannabis-Clubs</text>
+  </g>
+
+  <g transform="translate(640, 955)">
+    <rect width="220" height="55" rx="5" fill="white" stroke="#94A3B8" stroke-dasharray="6,3"/>
+    <text x="110" y="18" text-anchor="middle" font-size="9" font-weight="600" fill="#64748B">plant_profiles</text>
+    <text x="110" y="34" text-anchor="middle" font-size="8" fill="#94A3B8">Pflanzendatenbank</text>
+    <text x="110" y="46" text-anchor="middle" font-size="8" fill="#94A3B8">Optimale Sensorwerte pro Pflanze</text>
+  </g>
+
+  <g transform="translate(880, 955)">
+    <rect width="200" height="55" rx="5" fill="white" stroke="#94A3B8" stroke-dasharray="6,3"/>
+    <text x="100" y="18" text-anchor="middle" font-size="9" font-weight="600" fill="#64748B">ai_models + ai_training_data</text>
+    <text x="100" y="34" text-anchor="middle" font-size="8" fill="#94A3B8">ML-Pipeline Metadaten</text>
+    <text x="100" y="46" text-anchor="middle" font-size="8" fill="#94A3B8">Modell-Versionen, Features</text>
+  </g>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- KENNZAHLEN-BOX (Rechts oben) -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="1380" y="90" width="390" height="270" rx="10" fill="white" stroke="#6366F1" stroke-width="2"/>
+  </g>
+  <rect x="1380" y="90" width="390" height="28" rx="10" fill="#4F46E5"/>
+  <rect x="1380" y="106" width="390" height="12" fill="#4F46E5"/>
+  <text x="1575" y="110" text-anchor="middle" font-size="12" font-weight="700" fill="white" letter-spacing="0.8">KENNZAHLEN</text>
+
+  <text x="1400" y="142" font-size="10" fill="#334155" font-weight="600">Datenbank</text>
+  <text x="1400" y="158" font-size="9" fill="#475569">Name: god_kaiser_db</text>
+  <text x="1400" y="172" font-size="9" fill="#475569">ORM: SQLAlchemy (async)</text>
+  <text x="1400" y="186" font-size="9" fill="#475569">Migrations: Alembic</text>
+  <text x="1400" y="200" font-size="9" fill="#475569">PostgreSQL mit asyncpg</text>
+
+  <line x1="1400" y1="210" x2="1750" y2="210" stroke="#E2E8F0" stroke-width="1"/>
+
+  <text x="1400" y="228" font-size="10" fill="#334155" font-weight="600">Zahlen</text>
+  <text x="1400" y="244" font-size="9" fill="#475569">33 Tabellen in 11 Gruppen</text>
+  <text x="1400" y="258" font-size="9" fill="#475569">263 REST-Endpoints (31 Router)</text>
+  <text x="1400" y="272" font-size="9" fill="#475569">13 MQTT-Handler</text>
+  <text x="1400" y="286" font-size="9" fill="#475569">5 Background-Services</text>
+
+  <line x1="1400" y1="294" x2="1750" y2="294" stroke="#E2E8F0" stroke-width="1"/>
+
+  <text x="1400" y="312" font-size="10" fill="#334155" font-weight="600">Konventionen</text>
+  <text x="1400" y="328" font-size="9" fill="#475569">DateTime: IMMER timezone=True</text>
+  <text x="1400" y="342" font-size="9" fill="#475569">TimestampMixin: created_at + updated_at</text>
+  <text x="1400" y="356" font-size="9" fill="#475569">4 Tabellen OHNE TimestampMixin</text>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <!-- LEGENDE (Rechts unten) -->
+  <!-- ════════════════════════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="1380" y="380" width="390" height="260" rx="10" fill="white" stroke="#CBD5E1" stroke-width="1.5"/>
+  </g>
+  <rect x="1380" y="380" width="390" height="28" rx="10" fill="#475569"/>
+  <rect x="1380" y="396" width="390" height="12" fill="#475569"/>
+  <text x="1575" y="399" text-anchor="middle" font-size="12" font-weight="700" fill="white" letter-spacing="0.8">LEGENDE</text>
+
+  <!-- FK Arrows -->
+  <text x="1400" y="430" font-size="10" fill="#334155" font-weight="600">Foreign Keys</text>
+  <line x1="1400" y1="440" x2="1440" y2="440" stroke="#64748B" stroke-width="1.4" marker-end="url(#fk)"/>
+  <text x="1450" y="444" font-size="9" fill="#475569">FK (Standard)</text>
+  <line x1="1400" y1="458" x2="1440" y2="458" stroke="#DC2626" stroke-width="1.8" marker-end="url(#fkCascade)"/>
+  <text x="1450" y="462" font-size="9" fill="#DC2626">CASCADE DELETE</text>
+  <line x1="1400" y1="476" x2="1440" y2="476" stroke="#D97706" stroke-width="1.8" marker-end="url(#fkSetNull)"/>
+  <text x="1450" y="480" font-size="9" fill="#D97706">SET NULL (Daten bleiben)</text>
+  <line x1="1400" y1="494" x2="1440" y2="494" stroke="#64748B" stroke-width="1.4" stroke-dasharray="4,2" marker-end="url(#fk)"/>
+  <text x="1450" y="498" font-size="9" fill="#475569">FK (sekundaer)</text>
+
+  <!-- Symbole -->
+  <line x1="1400" y1="515" x2="1750" y2="515" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="1400" y="532" font-size="10" fill="#334155" font-weight="600">Markierungen</text>
+
+  <text x="1400" y="550" font-size="12">&#x1F5D1;</text>
+  <text x="1420" y="550" font-size="9" fill="#B91C1C">Soft-Delete (deleted_at)</text>
+
+  <text x="1400" y="568" font-size="12">&#x1F511;</text>
+  <text x="1420" y="568" font-size="9" fill="#D97706">UNIQUE Constraint</text>
+
+  <text x="1400" y="586" font-size="9">&#x23F0;&#x0338;</text>
+  <text x="1420" y="586" font-size="9" fill="#B91C1C">Kein TimestampMixin</text>
+
+  <rect x="1400" y="594" width="40" height="14" rx="3" fill="white" stroke="#94A3B8" stroke-dasharray="4,2"/>
+  <text x="1450" y="604" font-size="9" fill="#64748B">Gestrichelt = Zukunft / Stub</text>
+
+  <!-- Farbcodes -->
+  <line x1="1400" y1="618" x2="1750" y2="618" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="1400" y="635" font-size="9" fill="#334155" font-weight="600">Gruppen (11)</text>
+
+  <!-- 2 Spalten fuer die Farben -->
+  <rect x="1400" y="640" width="10" height="10" rx="2" fill="#3B82F6"/><text x="1416" y="649" font-size="8" fill="#475569">Geraete (3)</text>
+  <rect x="1400" y="654" width="10" height="10" rx="2" fill="#10B981"/><text x="1416" y="663" font-size="8" fill="#475569">Sensoren (3)</text>
+  <rect x="1400" y="668" width="10" height="10" rx="2" fill="#F97316"/><text x="1416" y="677" font-size="8" fill="#475569">Aktoren (3)</text>
+  <rect x="1400" y="682" width="10" height="10" rx="2" fill="#14B8A6"/><text x="1416" y="691" font-size="8" fill="#475569">Zonen (5)</text>
+  <rect x="1400" y="696" width="10" height="10" rx="2" fill="#7C3AED"/><text x="1416" y="705" font-size="8" fill="#475569">Logic (3)</text>
+  <rect x="1400" y="710" width="10" height="10" rx="2" fill="#EF4444"/><text x="1416" y="719" font-size="8" fill="#475569">Auth (2)</text>
+
+  <rect x="1550" y="640" width="10" height="10" rx="2" fill="#EAB308"/><text x="1566" y="649" font-size="8" fill="#475569">Notifications (3)</text>
+  <rect x="1550" y="654" width="10" height="10" rx="2" fill="#64748B"/><text x="1566" y="663" font-size="8" fill="#475569">Audit+System (3)</text>
+  <rect x="1550" y="668" width="10" height="10" rx="2" fill="#0EA5E9"/><text x="1566" y="677" font-size="8" fill="#475569">Diagnose (2)</text>
+  <rect x="1550" y="682" width="10" height="10" rx="2" fill="#EC4899"/><text x="1566" y="691" font-size="8" fill="#475569">Dashboard (3)</text>
+  <rect x="1550" y="696" width="10" height="10" rx="2" fill="#CBD5E1"/><text x="1566" y="705" font-size="8" fill="#475569">KI / Zukunft (1)</text>
+
+  <!-- 33 Total Badge -->
+  <rect x="1550" y="714" width="80" height="18" rx="9" fill="#4F46E5"/>
+  <text x="1590" y="727" text-anchor="middle" font-size="9" font-weight="700" fill="white">33 GESAMT</text>
+
+  <!-- Footer -->
+  <text x="900" y="1060" text-anchor="middle" font-size="10" fill="#94A3B8">AutomationOne - god_kaiser_db - Generiert 2026-04-07</text>
+
+</svg>

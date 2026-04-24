@@ -1,0 +1,530 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1200" font-family="'Segoe UI', Arial, sans-serif">
+  <defs>
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1B2A4A" flood-opacity="0.1"/>
+    </filter>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="100%" stop-color="#E2E8F0"/>
+    </linearGradient>
+    <linearGradient id="storeGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ECFDF5"/>
+      <stop offset="100%" stop-color="#D1FAE5"/>
+    </linearGradient>
+    <linearGradient id="hubGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#D1FAE5"/>
+      <stop offset="100%" stop-color="#A7F3D0"/>
+    </linearGradient>
+    <marker id="arrowGray" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748B"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2563EB"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#059669"/>
+    </marker>
+    <marker id="arrowViolet" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#7C3AED"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#EA580C"/>
+    </marker>
+    <marker id="arrowTeal" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#0D9488"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1600" height="1200" fill="url(#bg)"/>
+
+  <!-- ===== HEADER ===== -->
+  <text x="800" y="36" text-anchor="middle" font-size="24" font-weight="700" fill="#0F172A">AutomationOne Frontend-Architektur</text>
+  <text x="800" y="58" text-anchor="middle" font-size="12" fill="#475569" letter-spacing="1">El Frontend — Vue 3 + TypeScript + Pinia — Stand 2026-04-07</text>
+  <line x1="580" y1="68" x2="1020" y2="68" stroke="#3B82F6" stroke-width="2" stroke-opacity="0.45"/>
+
+  <!-- ===== SECTION 1: VIEWS / ROUTING ===== -->
+  <g filter="url(#shadow)">
+    <rect x="50" y="82" width="1500" height="156" rx="12" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.5"/>
+  </g>
+  <rect x="50" y="82" width="1500" height="26" rx="12" fill="#2563EB"/>
+  <rect x="50" y="96" width="1500" height="12" fill="#2563EB"/>
+  <text x="800" y="100" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="1">VIEWS / ROUTING — 16 VIEWS (VUE ROUTER)</text>
+  <text x="1510" y="100" text-anchor="end" font-size="8" fill="#BFDBFE">requiresAuth + requiresAdmin Guards</text>
+
+  <!-- Group 1: Monitoring -->
+  <rect x="68" y="114" width="288" height="110" rx="6" fill="white" fill-opacity="0.6" stroke="#BFDBFE"/>
+  <text x="78" y="130" font-size="9" font-weight="700" fill="#1E40AF">Monitoring (Read-Only)</text>
+  <g transform="translate(78, 136)">
+    <rect width="125" height="48" rx="5" fill="white" stroke="#93C5FD"/>
+    <text x="62" y="16" text-anchor="middle" font-size="9" font-weight="600" fill="#1E40AF">MonitorView</text>
+    <text x="62" y="29" text-anchor="middle" font-size="7.5" fill="#6B7280">/monitor (L1-L2-L3)</text>
+    <text x="62" y="40" text-anchor="middle" font-size="7.5" fill="#6B7280">Live-Daten, Zonen</text>
+  </g>
+  <g transform="translate(213, 136)">
+    <rect width="125" height="48" rx="5" fill="white" stroke="#93C5FD"/>
+    <text x="62" y="16" text-anchor="middle" font-size="9" font-weight="600" fill="#1E40AF">DashboardViewer</text>
+    <text x="62" y="29" text-anchor="middle" font-size="7.5" fill="#6B7280">Read-Only Dashboards</text>
+    <text x="62" y="40" text-anchor="middle" font-size="7.5" fill="#6B7280">Widget-Anzeige</text>
+  </g>
+  <text x="212" y="222" text-anchor="middle" font-size="7" fill="#93C5FD">+ NotificationsView, SettingsView</text>
+
+  <!-- Group 2: Konfiguration -->
+  <rect x="374" y="114" width="416" height="110" rx="6" fill="white" fill-opacity="0.6" stroke="#BFDBFE"/>
+  <text x="384" y="130" font-size="9" font-weight="700" fill="#1E40AF">Konfiguration (Schreibend)</text>
+  <g transform="translate(384, 136)">
+    <rect width="120" height="48" rx="5" fill="white" stroke="#93C5FD"/>
+    <text x="60" y="16" text-anchor="middle" font-size="9" font-weight="600" fill="#1E40AF">HardwareView</text>
+    <text x="60" y="29" text-anchor="middle" font-size="7.5" fill="#6B7280">/hardware (L1-L2-L3)</text>
+    <text x="60" y="40" text-anchor="middle" font-size="7.5" fill="#DC2626">Einzige Konfig-View</text>
+  </g>
+  <g transform="translate(514, 136)">
+    <rect width="120" height="48" rx="5" fill="white" stroke="#93C5FD"/>
+    <text x="60" y="16" text-anchor="middle" font-size="9" font-weight="600" fill="#1E40AF">LogicView</text>
+    <text x="60" y="29" text-anchor="middle" font-size="7.5" fill="#6B7280">/logic</text>
+    <text x="60" y="40" text-anchor="middle" font-size="7.5" fill="#6B7280">Vue Flow DAG-Editor</text>
+  </g>
+  <g transform="translate(644, 136)">
+    <rect width="130" height="48" rx="5" fill="white" stroke="#93C5FD"/>
+    <text x="65" y="16" text-anchor="middle" font-size="9" font-weight="600" fill="#1E40AF">EditorView</text>
+    <text x="65" y="29" text-anchor="middle" font-size="7.5" fill="#6B7280">/editor</text>
+    <text x="65" y="40" text-anchor="middle" font-size="7.5" fill="#6B7280">GridStack.js Widgets</text>
+  </g>
+
+  <!-- Group 3: Information -->
+  <rect x="808" y="114" width="300" height="110" rx="6" fill="white" fill-opacity="0.6" stroke="#BFDBFE"/>
+  <text x="818" y="130" font-size="9" font-weight="700" fill="#1E40AF">Information</text>
+  <g transform="translate(818, 136)">
+    <rect width="130" height="48" rx="5" fill="white" stroke="#93C5FD"/>
+    <text x="65" y="16" text-anchor="middle" font-size="9" font-weight="600" fill="#1E40AF">SensorsView</text>
+    <text x="65" y="29" text-anchor="middle" font-size="7.5" fill="#6B7280">/sensors — Inventar</text>
+    <text x="65" y="40" text-anchor="middle" font-size="7.5" fill="#DC2626">KEINE Konfiguration</text>
+  </g>
+  <g transform="translate(958, 136)">
+    <rect width="135" height="48" rx="5" fill="#FEF2F2" stroke="#FCA5A5"/>
+    <text x="67" y="16" text-anchor="middle" font-size="9" font-weight="600" fill="#991B1B">SystemMonitor</text>
+    <text x="67" y="29" text-anchor="middle" font-size="7.5" fill="#7F1D1D">/system-monitor</text>
+    <text x="67" y="40" text-anchor="middle" font-size="7.5" fill="#7F1D1D">8 Tabs, requiresAdmin</text>
+  </g>
+
+  <!-- Group 4: Auth -->
+  <rect x="1126" y="114" width="406" height="110" rx="6" fill="white" fill-opacity="0.6" stroke="#BFDBFE"/>
+  <text x="1136" y="130" font-size="9" font-weight="700" fill="#1E40AF">Auth + Verwaltung</text>
+  <g transform="translate(1136, 136)">
+    <rect width="100" height="48" rx="5" fill="white" stroke="#93C5FD"/>
+    <text x="50" y="16" text-anchor="middle" font-size="9" font-weight="600" fill="#1E40AF">Login</text>
+    <text x="50" y="29" text-anchor="middle" font-size="7.5" fill="#6B7280">/login</text>
+    <text x="50" y="40" text-anchor="middle" font-size="7.5" fill="#6B7280">JWT Auth</text>
+  </g>
+  <g transform="translate(1246, 136)">
+    <rect width="100" height="48" rx="5" fill="white" stroke="#93C5FD"/>
+    <text x="50" y="16" text-anchor="middle" font-size="9" font-weight="600" fill="#1E40AF">Register</text>
+    <text x="50" y="29" text-anchor="middle" font-size="7.5" fill="#6B7280">/register</text>
+    <text x="50" y="40" text-anchor="middle" font-size="7.5" fill="#6B7280">User-Erstellung</text>
+  </g>
+  <g transform="translate(1356, 136)">
+    <rect width="100" height="48" rx="5" fill="white" stroke="#93C5FD"/>
+    <text x="50" y="16" text-anchor="middle" font-size="9" font-weight="600" fill="#1E40AF">Profile</text>
+    <text x="50" y="29" text-anchor="middle" font-size="7.5" fill="#6B7280">/profile</text>
+    <text x="50" y="40" text-anchor="middle" font-size="7.5" fill="#6B7280">Benutzer-Settings</text>
+  </g>
+  <text x="1329" y="222" text-anchor="middle" font-size="7" fill="#93C5FD">+ AboutView, NotFoundView, WelcomeView, AdminView</text>
+
+  <!-- ===== SECTION 2: PINIA STORES ===== -->
+  <g filter="url(#shadow)">
+    <rect x="50" y="262" width="860" height="282" rx="12" fill="url(#storeGrad)" stroke="#6EE7B7" stroke-width="1.8"/>
+  </g>
+  <rect x="50" y="262" width="860" height="26" rx="12" fill="#059669"/>
+  <rect x="50" y="276" width="860" height="12" fill="#059669"/>
+  <text x="480" y="280" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="1">PINIA STORES — STATE MANAGEMENT (16+ STORES)</text>
+
+  <!-- ESP.STORE HUB -->
+  <g filter="url(#shadow)">
+    <rect x="68" y="298" width="220" height="140" rx="8" fill="url(#hubGrad)" stroke="#059669" stroke-width="2.5"/>
+  </g>
+  <rect x="70" y="300" width="55" height="16" rx="4" fill="#059669"/>
+  <text x="98" y="311" text-anchor="middle" font-size="7.5" font-weight="700" fill="white">HUB</text>
+  <rect x="246" y="300" width="30" height="14" rx="3" fill="#047857"/>
+  <text x="261" y="310" text-anchor="middle" font-size="7" font-weight="700" fill="white">P1</text>
+  <text x="178" y="326" text-anchor="middle" font-size="12" font-weight="700" fill="#065F46">esp.store</text>
+  <text x="178" y="342" text-anchor="middle" font-size="8.5" fill="#047857">Zentrale WS-Drehscheibe</text>
+  <text x="178" y="358" text-anchor="middle" font-size="8" fill="#065F46">devices[] — ESPDevice-Array</text>
+  <text x="178" y="374" text-anchor="middle" font-size="8" fill="#065F46">Empfaengt ALLE WS-Events</text>
+  <text x="178" y="390" text-anchor="middle" font-size="8" fill="#065F46">Delegiert an Domain-Stores</text>
+  <text x="178" y="406" text-anchor="middle" font-size="7.5" fill="#059669">fetchAll() bei Reconnect</text>
+  <text x="178" y="420" text-anchor="middle" font-size="7.5" fill="#059669">Ground-Truth Recovery</text>
+
+  <!-- P1 Stores Row 1 -->
+  <g transform="translate(306, 298)">
+    <rect width="130" height="52" rx="5" fill="white" fill-opacity="0.9" stroke="#6EE7B7"/>
+    <rect x="0" y="0" width="22" height="14" rx="3" fill="#047857"/>
+    <text x="11" y="10" text-anchor="middle" font-size="6.5" font-weight="700" fill="white">P1</text>
+    <text x="65" y="18" text-anchor="middle" font-size="9" font-weight="600" fill="#065F46">sensor.store</text>
+    <text x="65" y="32" text-anchor="middle" font-size="7.5" fill="#047857">Mutiert esp.devices[].sensors</text>
+    <text x="65" y="43" text-anchor="middle" font-size="7.5" fill="#047857">via WS sensor_data Events</text>
+  </g>
+  <g transform="translate(446, 298)">
+    <rect width="130" height="52" rx="5" fill="white" fill-opacity="0.9" stroke="#6EE7B7"/>
+    <rect x="0" y="0" width="22" height="14" rx="3" fill="#047857"/>
+    <text x="11" y="10" text-anchor="middle" font-size="6.5" font-weight="700" fill="white">P1</text>
+    <text x="65" y="18" text-anchor="middle" font-size="9" font-weight="600" fill="#065F46">actuator.store</text>
+    <text x="65" y="32" text-anchor="middle" font-size="7.5" fill="#047857">Intent-Lifecycle</text>
+    <text x="65" y="43" text-anchor="middle" font-size="7.5" fill="#047857">accepted-pending-terminal</text>
+  </g>
+  <g transform="translate(586, 298)">
+    <rect width="130" height="52" rx="5" fill="white" fill-opacity="0.9" stroke="#6EE7B7"/>
+    <rect x="0" y="0" width="22" height="14" rx="3" fill="#047857"/>
+    <text x="11" y="10" text-anchor="middle" font-size="6.5" font-weight="700" fill="white">P1</text>
+    <text x="65" y="18" text-anchor="middle" font-size="9" font-weight="600" fill="#065F46">zone.store</text>
+    <text x="65" y="32" text-anchor="middle" font-size="7.5" fill="#047857">zoneEntities[]</text>
+    <text x="65" y="43" text-anchor="middle" font-size="7.5" fill="#047857">Zone-Zuordnungen</text>
+  </g>
+  <g transform="translate(726, 298)">
+    <rect width="130" height="52" rx="5" fill="white" fill-opacity="0.9" stroke="#6EE7B7"/>
+    <rect x="0" y="0" width="22" height="14" rx="3" fill="#047857"/>
+    <text x="11" y="10" text-anchor="middle" font-size="6.5" font-weight="700" fill="white">P1</text>
+    <text x="65" y="18" text-anchor="middle" font-size="9" font-weight="600" fill="#065F46">auth.store</text>
+    <text x="65" y="32" text-anchor="middle" font-size="7.5" fill="#047857">Session, JWT</text>
+    <text x="65" y="43" text-anchor="middle" font-size="7.5" fill="#047857">Router-Guard</text>
+  </g>
+
+  <!-- P1 Stores Row 2 -->
+  <g transform="translate(306, 360)">
+    <rect width="130" height="52" rx="5" fill="white" fill-opacity="0.9" stroke="#6EE7B7"/>
+    <rect x="0" y="0" width="22" height="14" rx="3" fill="#047857"/>
+    <text x="11" y="10" text-anchor="middle" font-size="6.5" font-weight="700" fill="white">P1</text>
+    <text x="65" y="18" text-anchor="middle" font-size="8.5" font-weight="600" fill="#065F46">notification-inbox</text>
+    <text x="65" y="32" text-anchor="middle" font-size="7.5" fill="#047857">Operator-Alarmflaeche</text>
+    <text x="65" y="43" text-anchor="middle" font-size="7.5" fill="#047857">Unread-Count + Polling</text>
+  </g>
+  <g transform="translate(446, 360)">
+    <rect width="130" height="52" rx="5" fill="white" fill-opacity="0.9" stroke="#6EE7B7"/>
+    <rect x="0" y="0" width="22" height="14" rx="3" fill="#047857"/>
+    <text x="11" y="10" text-anchor="middle" font-size="6.5" font-weight="700" fill="white">P1</text>
+    <text x="65" y="18" text-anchor="middle" font-size="9" font-weight="600" fill="#065F46">alert-center</text>
+    <text x="65" y="32" text-anchor="middle" font-size="7.5" fill="#047857">Alert-Lifecycle</text>
+    <text x="65" y="43" text-anchor="middle" font-size="7.5" fill="#047857">Dedup + Polling</text>
+  </g>
+  <g transform="translate(586, 360)">
+    <rect width="270" height="52" rx="5" fill="white" fill-opacity="0.9" stroke="#6EE7B7"/>
+    <rect x="0" y="0" width="22" height="14" rx="3" fill="#047857"/>
+    <text x="11" y="10" text-anchor="middle" font-size="6.5" font-weight="700" fill="white">P1</text>
+    <text x="135" y="18" text-anchor="middle" font-size="9" font-weight="600" fill="#065F46">dashboard.store</text>
+    <text x="135" y="32" text-anchor="middle" font-size="7.5" fill="#047857">layouts[] — localStorage + Server-Sync (2s Debounce)</text>
+    <text x="135" y="43" text-anchor="middle" font-size="7.5" fill="#047857">addWidget / removeWidget / updateWidgetConfig</text>
+  </g>
+
+  <!-- P2 Row -->
+  <rect x="68" y="448" width="828" height="22" rx="4" fill="#D1FAE5" fill-opacity="0.7"/>
+  <text x="78" y="463" font-size="8" font-weight="700" fill="#059669">P2 (Feature-spezifisch):</text>
+  <g transform="translate(68, 474)">
+    <rect width="108" height="44" rx="5" fill="white" fill-opacity="0.8" stroke="#A7F3D0"/>
+    <rect x="0" y="0" width="22" height="12" rx="3" fill="#34D399"/>
+    <text x="11" y="9" text-anchor="middle" font-size="6" font-weight="700" fill="white">P2</text>
+    <text x="54" y="18" text-anchor="middle" font-size="8.5" font-weight="600" fill="#065F46">logic.store</text>
+    <text x="54" y="32" text-anchor="middle" font-size="7.5" fill="#047857">Regel-CRUD</text>
+  </g>
+  <g transform="translate(186, 474)">
+    <rect width="118" height="44" rx="5" fill="white" fill-opacity="0.8" stroke="#A7F3D0"/>
+    <rect x="0" y="0" width="22" height="12" rx="3" fill="#34D399"/>
+    <text x="11" y="9" text-anchor="middle" font-size="6" font-weight="700" fill="white">P2</text>
+    <text x="59" y="18" text-anchor="middle" font-size="8.5" font-weight="600" fill="#065F46">subzone.store</text>
+    <text x="59" y="32" text-anchor="middle" font-size="7.5" fill="#047857">Subzone-CRUD</text>
+  </g>
+  <g transform="translate(314, 474)">
+    <rect width="112" height="44" rx="5" fill="white" fill-opacity="0.8" stroke="#A7F3D0"/>
+    <rect x="0" y="0" width="22" height="12" rx="3" fill="#34D399"/>
+    <text x="11" y="9" text-anchor="middle" font-size="6" font-weight="700" fill="white">P2</text>
+    <text x="56" y="18" text-anchor="middle" font-size="8.5" font-weight="600" fill="#065F46">settings.store</text>
+    <text x="56" y="32" text-anchor="middle" font-size="7.5" fill="#047857">User-Prefs</text>
+  </g>
+  <g transform="translate(436, 474)">
+    <rect width="138" height="44" rx="5" fill="white" fill-opacity="0.8" stroke="#A7F3D0"/>
+    <rect x="0" y="0" width="22" height="12" rx="3" fill="#34D399"/>
+    <text x="11" y="9" text-anchor="middle" font-size="6" font-weight="700" fill="white">P2</text>
+    <text x="69" y="18" text-anchor="middle" font-size="8.5" font-weight="600" fill="#065F46">system-monitor</text>
+    <text x="69" y="32" text-anchor="middle" font-size="7.5" fill="#047857">System-Diagnostik</text>
+  </g>
+  <g transform="translate(584, 474)">
+    <rect width="100" height="44" rx="5" fill="white" fill-opacity="0.8" stroke="#A7F3D0"/>
+    <rect x="0" y="0" width="22" height="12" rx="3" fill="#34D399"/>
+    <text x="11" y="9" text-anchor="middle" font-size="6" font-weight="700" fill="white">P2</text>
+    <text x="50" y="18" text-anchor="middle" font-size="8.5" font-weight="600" fill="#065F46">toast.store</text>
+    <text x="50" y="32" text-anchor="middle" font-size="7.5" fill="#047857">UI-Feedback</text>
+  </g>
+  <g transform="translate(694, 474)">
+    <rect width="100" height="44" rx="5" fill="white" fill-opacity="0.8" stroke="#A7F3D0"/>
+    <rect x="0" y="0" width="22" height="12" rx="3" fill="#34D399"/>
+    <text x="11" y="9" text-anchor="middle" font-size="6" font-weight="700" fill="white">P2</text>
+    <text x="50" y="18" text-anchor="middle" font-size="8.5" font-weight="600" fill="#065F46">sensor-type</text>
+    <text x="50" y="32" text-anchor="middle" font-size="7.5" fill="#047857">Typ-Defaults</text>
+  </g>
+
+  <!-- WS Dispatch arrows from esp.store hub -->
+  <line x1="288" y1="326" x2="304" y2="324" stroke="#059669" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+  <line x1="288" y1="345" x2="304" y2="345" stroke="#059669" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+  <line x1="288" y1="365" x2="304" y2="368" stroke="#059669" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+  <line x1="288" y1="385" x2="304" y2="386" stroke="#059669" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+  <text x="298" y="310" font-size="6.5" fill="#059669" font-weight="600" transform="rotate(90,298,336)">WS Dispatch</text>
+
+  <!-- ===== SECTION 2B: DASHBOARD SYSTEM ===== -->
+  <g filter="url(#shadow)">
+    <rect x="940" y="262" width="610" height="282" rx="12" fill="#F0FDFA" stroke="#5EEAD4" stroke-width="1.5"/>
+  </g>
+  <rect x="940" y="262" width="610" height="26" rx="12" fill="#0D9488"/>
+  <rect x="940" y="276" width="610" height="12" fill="#0D9488"/>
+  <text x="1245" y="280" text-anchor="middle" font-size="11" font-weight="700" fill="white" letter-spacing="1">DASHBOARD-SYSTEM — 10 WIDGET-TYPEN</text>
+
+  <!-- Widget table header -->
+  <text x="966" y="308" font-size="8" font-weight="700" fill="#0F766E">Widget</text>
+  <text x="1130" y="308" font-size="8" font-weight="700" fill="#0F766E">Datenquelle</text>
+  <text x="1370" y="308" font-size="8" font-weight="700" fill="#0F766E">Update</text>
+  <line x1="960" y1="312" x2="1530" y2="312" stroke="#99F6E4" stroke-width="0.8"/>
+
+  <!-- Realtime group -->
+  <rect x="958" y="316" width="574" height="72" rx="4" fill="#CCFBF1" fill-opacity="0.4"/>
+  <text x="1490" y="328" text-anchor="end" font-size="7" font-weight="600" fill="#0D9488">ECHTZEIT (WebSocket)</text>
+  <text x="966" y="338" font-size="8.5" fill="#134E4A">line-chart</text>
+  <text x="1130" y="338" font-size="8" fill="#475569">WebSocket sensor_data</text>
+  <text x="1370" y="338" font-size="8" fill="#0D9488">Echtzeit</text>
+  <text x="966" y="354" font-size="8.5" fill="#134E4A">gauge</text>
+  <text x="1130" y="354" font-size="8" fill="#475569">WebSocket sensor_data</text>
+  <text x="1370" y="354" font-size="8" fill="#0D9488">Echtzeit</text>
+  <text x="966" y="370" font-size="8.5" fill="#134E4A">sensor-card</text>
+  <text x="1130" y="370" font-size="8" fill="#475569">WebSocket sensor_data</text>
+  <text x="1370" y="370" font-size="8" fill="#0D9488">Echtzeit</text>
+  <text x="966" y="386" font-size="8.5" fill="#134E4A">actuator-card</text>
+  <text x="1130" y="386" font-size="8" fill="#475569">WebSocket actuator_status</text>
+  <text x="1370" y="386" font-size="8" fill="#0D9488">Echtzeit</text>
+
+  <!-- REST group -->
+  <rect x="958" y="392" width="574" height="58" rx="4" fill="#FFF7ED" fill-opacity="0.4"/>
+  <text x="1490" y="404" text-anchor="end" font-size="7" font-weight="600" fill="#EA580C">ABRUF (REST API)</text>
+  <text x="966" y="418" font-size="8.5" fill="#134E4A">historical</text>
+  <text x="1130" y="418" font-size="8" fill="#475569">REST aggregiert (1m/5m/1h/1d)</text>
+  <text x="1370" y="418" font-size="8" fill="#EA580C">Abruf</text>
+  <text x="966" y="434" font-size="8.5" fill="#134E4A">multi-sensor</text>
+  <text x="1130" y="434" font-size="8" fill="#475569">REST multi-sensor query</text>
+  <text x="1370" y="434" font-size="8" fill="#EA580C">Abruf</text>
+  <text x="966" y="448" font-size="8.5" fill="#134E4A">statistics</text>
+  <text x="1130" y="448" font-size="8" fill="#475569">REST /sensors/{e}/{g}/stats</text>
+  <text x="1370" y="448" font-size="8" fill="#EA580C">Abruf</text>
+
+  <!-- Store/reactive group -->
+  <rect x="958" y="454" width="574" height="36" rx="4" fill="#ECFDF5" fill-opacity="0.4"/>
+  <text x="966" y="470" font-size="8.5" fill="#134E4A">esp-health</text>
+  <text x="1130" y="470" font-size="8" fill="#475569">esp.store (reaktiv)</text>
+  <text x="1370" y="470" font-size="8" fill="#059669">Reaktiv</text>
+  <text x="966" y="486" font-size="8.5" fill="#134E4A">alarm-list</text>
+  <text x="1130" y="486" font-size="8" fill="#475569">alert-center.store (reaktiv)</text>
+  <text x="1370" y="486" font-size="8" fill="#059669">Reaktiv</text>
+
+  <!-- Polling widget -->
+  <text x="966" y="504" font-size="8.5" fill="#134E4A">actuator-runtime</text>
+  <text x="1130" y="504" font-size="8" fill="#475569">REST polling</text>
+  <text x="1370" y="504" font-size="8" fill="#64748B">60s Refresh</text>
+
+  <!-- Registration footer -->
+  <rect x="958" y="512" width="574" height="22" rx="3" fill="#0D9488" fill-opacity="0.08"/>
+  <text x="1245" y="526" text-anchor="middle" font-size="7.5" fill="#0F766E">Registrierung: useDashboardWidgets.ts (4 Stellen) — sensorId: espId:gpio:sensorType</text>
+
+  <!-- ===== SECTION 3: API / COMMUNICATION ===== -->
+  <!-- REST API -->
+  <g filter="url(#shadow)">
+    <rect x="50" y="568" width="440" height="110" rx="10" fill="#FFF7ED" stroke="#FDBA74" stroke-width="1.4"/>
+  </g>
+  <rect x="50" y="568" width="440" height="24" rx="10" fill="#EA580C" fill-opacity="0.18"/>
+  <text x="270" y="584" text-anchor="middle" font-size="10.5" font-weight="700" fill="#9A3412">REST API (AXIOS)</text>
+  <text x="70" y="608" font-size="8.5" fill="#7C2D12">Zentrale Instanz: api/index.ts</text>
+  <text x="70" y="623" font-size="8.5" fill="#7C2D12">JWT-Inject + 401-Refresh-Queue (Token-Rotation)</text>
+  <text x="70" y="641" font-size="8" fill="#9A3412">Module: esp.ts, sensors.ts, actuators.ts, zones.ts,</text>
+  <text x="70" y="654" font-size="8" fill="#9A3412">logic.ts, dashboards.ts, auth.ts, system.ts</text>
+  <text x="70" y="669" font-size="7.5" fill="#C2410C">263 Endpoints erreichbar — 4 Auth-Tiers (none/Active/Operator/Admin)</text>
+
+  <!-- WebSocket -->
+  <g filter="url(#shadow)">
+    <rect x="520" y="568" width="390" height="110" rx="10" fill="#F5F3FF" stroke="#C4B5FD" stroke-width="1.4"/>
+  </g>
+  <rect x="520" y="568" width="390" height="24" rx="10" fill="#7C3AED" fill-opacity="0.18"/>
+  <text x="715" y="584" text-anchor="middle" font-size="10.5" font-weight="700" fill="#5B21B6">WEBSOCKET (CUSTOM)</text>
+  <text x="540" y="608" font-size="8.5" fill="#4C1D95">websocketService.ts</text>
+  <text x="540" y="623" font-size="8.5" fill="#4C1D95">Exponential Backoff: 1s - 30s</text>
+  <text x="540" y="640" font-size="8.5" font-weight="600" fill="#5B21B6">35 Event-Typen (MessageType Enum)</text>
+  <text x="540" y="655" font-size="8" fill="#6D28D9">Reconnect: Resubscribe + esp.store.fetchAll()</text>
+  <text x="540" y="669" font-size="7.5" fill="#7C3AED">contractEventMapper: 51 vs 35 MessageType (Luecke)</text>
+
+  <!-- Design System -->
+  <g filter="url(#shadow)">
+    <rect x="940" y="568" width="610" height="110" rx="10" fill="#FFFBEB" stroke="#FCD34D" stroke-width="1.4"/>
+  </g>
+  <rect x="940" y="568" width="610" height="24" rx="10" fill="#D97706" fill-opacity="0.18"/>
+  <text x="1245" y="584" text-anchor="middle" font-size="10.5" font-weight="700" fill="#92400E">DESIGN-SYSTEM — 129 CSS CUSTOM PROPERTIES</text>
+  <text x="960" y="608" font-size="8.5" fill="#78350F">tokens.css: --color-*, --glass-*, --space-*, --elevation-*</text>
+  <text x="960" y="623" font-size="8.5" fill="#78350F">Glassmorphism: 3 Ebenen (l1/l2/l3) + Tailwind CSS + BEM scoped</text>
+  <text x="960" y="641" font-size="8.5" fill="#92400E">Status-Farben (Safety-reserviert):</text>
+  <rect x="1150" y="633" width="10" height="10" rx="2" fill="#22C55E"/>
+  <text x="1166" y="642" font-size="7.5" fill="#78350F">good</text>
+  <rect x="1200" y="633" width="10" height="10" rx="2" fill="#F59E0B"/>
+  <text x="1216" y="642" font-size="7.5" fill="#78350F">warning</text>
+  <rect x="1260" y="633" width="10" height="10" rx="2" fill="#EF4444"/>
+  <text x="1276" y="642" font-size="7.5" fill="#78350F">alarm</text>
+  <rect x="1320" y="633" width="10" height="10" rx="2" fill="#64748B"/>
+  <text x="1336" y="642" font-size="7.5" fill="#78350F">offline</text>
+  <text x="960" y="659" font-size="8" fill="#A16207">Semantische Prefixes (KEIN --ao-*). Sub-10px Fonts fuer Badges bewusst.</text>
+  <text x="960" y="672" font-size="7.5" fill="#A16207">Operator-Cockpit: Korrekte Entscheidungen unter Last, nicht Consumer-UI.</text>
+
+  <!-- ===== SECTION 4: KOMPONENTEN ===== -->
+  <g filter="url(#shadow)">
+    <rect x="50" y="702" width="1500" height="84" rx="10" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.3"/>
+  </g>
+  <rect x="50" y="702" width="1500" height="22" rx="10" fill="#475569" fill-opacity="0.15"/>
+  <text x="800" y="718" text-anchor="middle" font-size="10.5" font-weight="700" fill="#1E293B">KOMPONENTEN-STRUKTUR — 97+ VUE-KOMPONENTEN</text>
+
+  <g transform="translate(68, 730)">
+    <rect width="195" height="44" rx="5" fill="white" stroke="#E2E8F0"/>
+    <text x="97" y="15" text-anchor="middle" font-size="8.5" font-weight="600" fill="#334155">monitor/</text>
+    <text x="97" y="28" text-anchor="middle" font-size="7.5" fill="#64748B">ZoneTileCard, InlineDashboardPanel</text>
+    <text x="97" y="39" text-anchor="middle" font-size="7.5" fill="#64748B">AddWidgetDialog, QuickActionBall</text>
+  </g>
+  <g transform="translate(275, 730)">
+    <rect width="210" height="44" rx="5" fill="white" stroke="#E2E8F0"/>
+    <text x="105" y="15" text-anchor="middle" font-size="8.5" font-weight="600" fill="#334155">hardware/</text>
+    <text x="105" y="28" text-anchor="middle" font-size="7.5" fill="#64748B">SensorConfigPanel, ActuatorConfigPanel</text>
+    <text x="105" y="39" text-anchor="middle" font-size="7.5" fill="#DC2626">NUR in HardwareView (L1/L2)</text>
+  </g>
+  <g transform="translate(497, 730)">
+    <rect width="180" height="44" rx="5" fill="white" stroke="#E2E8F0"/>
+    <text x="90" y="15" text-anchor="middle" font-size="8.5" font-weight="600" fill="#334155">logic/</text>
+    <text x="90" y="28" text-anchor="middle" font-size="7.5" fill="#64748B">Vue Flow Custom Nodes</text>
+    <text x="90" y="39" text-anchor="middle" font-size="7.5" fill="#64748B">DAG-Editor Komponenten</text>
+  </g>
+  <g transform="translate(689, 730)">
+    <rect width="190" height="44" rx="5" fill="white" stroke="#E2E8F0"/>
+    <text x="95" y="15" text-anchor="middle" font-size="8.5" font-weight="600" fill="#334155">dashboard/</text>
+    <text x="95" y="28" text-anchor="middle" font-size="7.5" fill="#64748B">10 Widget-Komponenten</text>
+    <text x="95" y="39" text-anchor="middle" font-size="7.5" fill="#64748B">WidgetConfigPanel, GridStack</text>
+  </g>
+  <g transform="translate(891, 730)">
+    <rect width="190" height="44" rx="5" fill="white" stroke="#E2E8F0"/>
+    <text x="95" y="15" text-anchor="middle" font-size="8.5" font-weight="600" fill="#334155">shared/design/</text>
+    <text x="95" y="28" text-anchor="middle" font-size="7.5" fill="#64748B">Primitives, Patterns, Layout</text>
+    <text x="95" y="39" text-anchor="middle" font-size="7.5" fill="#64748B">BaseModal, BaseButton, ...</text>
+  </g>
+  <g transform="translate(1093, 730)">
+    <rect width="200" height="44" rx="5" fill="white" stroke="#E2E8F0"/>
+    <text x="100" y="15" text-anchor="middle" font-size="8.5" font-weight="600" fill="#334155">composables/</text>
+    <text x="100" y="28" text-anchor="middle" font-size="7.5" fill="#64748B">useSensorId, useSensorOptions</text>
+    <text x="100" y="39" text-anchor="middle" font-size="7.5" fill="#64748B">useZoneKPIs, autoResolution</text>
+  </g>
+  <g transform="translate(1305, 730)">
+    <rect width="175" height="44" rx="5" fill="white" stroke="#E2E8F0"/>
+    <text x="87" y="15" text-anchor="middle" font-size="8.5" font-weight="600" fill="#334155">api/</text>
+    <text x="87" y="28" text-anchor="middle" font-size="7.5" fill="#64748B">REST-Module pro Domain</text>
+    <text x="87" y="39" text-anchor="middle" font-size="7.5" fill="#64748B">Typisierte Responses</text>
+  </g>
+
+  <!-- ===== SECTION 5: ZUKUNFT (DASHED) ===== -->
+  <g filter="url(#shadow)">
+    <rect x="50" y="810" width="1500" height="78" rx="10" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.3" stroke-dasharray="8,4"/>
+  </g>
+  <rect x="50" y="810" width="1500" height="22" rx="10" fill="#94A3B8" fill-opacity="0.12"/>
+  <text x="800" y="826" text-anchor="middle" font-size="10" font-weight="700" fill="#64748B" letter-spacing="0.7">ZUKUNFT (GEPLANT)</text>
+  <g transform="translate(78, 840)">
+    <rect width="275" height="36" rx="5" fill="white" stroke="#CBD5E1" stroke-dasharray="5,3"/>
+    <text x="137" y="15" text-anchor="middle" font-size="8.5" font-weight="600" fill="#64748B">Self-Service-Portal</text>
+    <text x="137" y="28" text-anchor="middle" font-size="7.5" fill="#94A3B8">Eigene App, nicht im Dashboard</text>
+  </g>
+  <g transform="translate(378, 840)">
+    <rect width="275" height="36" rx="5" fill="white" stroke="#CBD5E1" stroke-dasharray="5,3"/>
+    <text x="137" y="15" text-anchor="middle" font-size="8.5" font-weight="600" fill="#64748B">Pflanzendatenbank-UI</text>
+    <text x="137" y="28" text-anchor="middle" font-size="7.5" fill="#94A3B8">plant_profiles Verwaltung</text>
+  </g>
+  <g transform="translate(678, 840)">
+    <rect width="275" height="36" rx="5" fill="white" stroke="#CBD5E1" stroke-dasharray="5,3"/>
+    <text x="137" y="15" text-anchor="middle" font-size="8.5" font-weight="600" fill="#64748B">T&amp;T-Plugin-Views</text>
+    <text x="137" y="28" text-anchor="middle" font-size="7.5" fill="#94A3B8">Track-and-Trace Seiten</text>
+  </g>
+  <g transform="translate(978, 840)">
+    <rect width="275" height="36" rx="5" fill="white" stroke="#CBD5E1" stroke-dasharray="5,3"/>
+    <text x="137" y="15" text-anchor="middle" font-size="8.5" font-weight="600" fill="#64748B">KI-Empfehlungs-Widget</text>
+    <text x="137" y="28" text-anchor="middle" font-size="7.5" fill="#94A3B8">Anomalie-Anzeige + ML-Inferenz</text>
+  </g>
+
+  <!-- ===== SERVER CONNECTION ===== -->
+  <g filter="url(#shadow)">
+    <rect x="250" y="916" width="1100" height="52" rx="8" fill="#EDE9FE" stroke="#A78BFA" stroke-width="1.3"/>
+  </g>
+  <text x="800" y="940" text-anchor="middle" font-size="12" font-weight="700" fill="#5B21B6" letter-spacing="0.8">EL SERVADOR (FASTAPI + POSTGRESQL + MQTT)</text>
+  <text x="800" y="958" text-anchor="middle" font-size="8.5" fill="#6D28D9">263 REST-Endpoints — 31 DB-Tabellen — 13 MQTT-Handler — 5 Background-Services</text>
+
+  <!-- ===== DATA FLOW ARROWS ===== -->
+
+  <!-- Views -> Stores (blue, center) -->
+  <line x1="480" y1="238" x2="480" y2="260" stroke="#2563EB" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <text x="490" y="252" font-size="7" fill="#1D4ED8">Actions / Getters</text>
+
+  <!-- Stores -> REST API (orange) -->
+  <line x1="270" y1="544" x2="270" y2="566" stroke="#EA580C" stroke-width="1.8" marker-end="url(#arrowOrange)"/>
+  <text x="282" y="558" font-size="7" fill="#EA580C">HTTP CRUD</text>
+
+  <!-- WS -> esp.store (violet, upward diagonal) -->
+  <path d="M680,568 C680,510 290,490 240,440" stroke="#7C3AED" stroke-width="2" stroke-dasharray="6,3" fill="none" marker-end="url(#arrowViolet)"/>
+  <text x="460" y="490" font-size="7.5" font-weight="600" fill="#7C3AED">35 WS-Events</text>
+
+  <!-- Dashboard -> Stores (teal, horizontal) -->
+  <line x1="938" y1="400" x2="912" y2="400" stroke="#0D9488" stroke-width="1.8" marker-end="url(#arrowTeal)"/>
+  <text x="918" y="393" font-size="7" fill="#0D9488" text-anchor="end">Widget Data Binding</text>
+
+  <!-- REST -> Server (orange) -->
+  <line x1="270" y1="678" x2="470" y2="914" stroke="#EA580C" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrowOrange)"/>
+  <text x="340" y="812" font-size="7.5" fill="#EA580C" transform="rotate(63,340,812)">REST API</text>
+
+  <!-- WS -> Server (violet) -->
+  <line x1="715" y1="678" x2="780" y2="914" stroke="#7C3AED" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrowViolet)"/>
+  <text x="762" y="812" font-size="7.5" fill="#7C3AED" transform="rotate(75,762,812)">WebSocket</text>
+
+  <!-- Views -> Dashboard (teal, horizontal at top) -->
+  <line x1="774" y1="168" x2="774" y2="238" stroke="#2563EB" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <line x1="1245" y1="168" x2="1245" y2="260" stroke="#0D9488" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrowTeal)"/>
+  <text x="1190" y="254" font-size="7" fill="#0D9488">Widget Rendering</text>
+
+  <!-- ===== LEGEND ===== -->
+  <g filter="url(#shadow)">
+    <rect x="50" y="1000" width="1500" height="60" rx="8" fill="white" stroke="#CBD5E1"/>
+  </g>
+  <text x="72" y="1020" font-size="9" font-weight="700" fill="#334155">Legende:</text>
+
+  <!-- Color legend row -->
+  <rect x="135" y="1010" width="14" height="14" rx="3" fill="#EFF6FF" stroke="#93C5FD"/>
+  <text x="155" y="1021" font-size="8" fill="#334155">Views (Blau)</text>
+  <rect x="245" y="1010" width="14" height="14" rx="3" fill="#ECFDF5" stroke="#6EE7B7"/>
+  <text x="265" y="1021" font-size="8" fill="#334155">Stores (Gruen)</text>
+  <rect x="355" y="1010" width="14" height="14" rx="3" fill="#FFF7ED" stroke="#FDBA74"/>
+  <text x="375" y="1021" font-size="8" fill="#334155">REST API (Orange)</text>
+  <rect x="490" y="1010" width="14" height="14" rx="3" fill="#F5F3FF" stroke="#C4B5FD"/>
+  <text x="510" y="1021" font-size="8" fill="#334155">WebSocket (Violett)</text>
+  <rect x="630" y="1010" width="14" height="14" rx="3" fill="#F0FDFA" stroke="#5EEAD4"/>
+  <text x="650" y="1021" font-size="8" fill="#334155">Dashboard (Tuerkis)</text>
+  <rect x="770" y="1010" width="14" height="14" rx="3" fill="#FFFBEB" stroke="#FCD34D"/>
+  <text x="790" y="1021" font-size="8" fill="#334155">Design-System (Gelb)</text>
+  <rect x="920" y="1010" width="14" height="14" rx="3" fill="#F8FAFC" stroke="#CBD5E1" stroke-dasharray="3,2"/>
+  <text x="940" y="1021" font-size="8" fill="#334155">Zukunft (gestrichelt)</text>
+
+  <!-- Arrow legend row -->
+  <line x1="135" y1="1040" x2="168" y2="1040" stroke="#2563EB" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <text x="178" y="1044" font-size="7.5" fill="#334155">View-Store Bindung</text>
+  <line x1="310" y1="1040" x2="343" y2="1040" stroke="#059669" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+  <text x="353" y="1044" font-size="7.5" fill="#334155">WS Dispatch (esp.store-Hub)</text>
+  <line x1="530" y1="1040" x2="563" y2="1040" stroke="#7C3AED" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrowViolet)"/>
+  <text x="573" y="1044" font-size="7.5" fill="#334155">WS-Events (Server-Frontend)</text>
+  <line x1="745" y1="1040" x2="778" y2="1040" stroke="#EA580C" stroke-width="1.5" marker-end="url(#arrowOrange)"/>
+  <text x="788" y="1044" font-size="7.5" fill="#334155">REST HTTP-Requests</text>
+  <line x1="935" y1="1040" x2="968" y2="1040" stroke="#0D9488" stroke-width="1.5" marker-end="url(#arrowTeal)"/>
+  <text x="978" y="1044" font-size="7.5" fill="#334155">Widget-Datenbindung</text>
+  <text x="1120" y="1044" font-size="7.5" fill="#64748B">P1 = Kern (immer aktiv) | P2 = Feature-spezifisch</text>
+
+  <!-- ===== FOOTER ===== -->
+  <line x1="50" y1="1080" x2="1550" y2="1080" stroke="#CBD5E1" stroke-width="0.8"/>
+  <text x="50" y="1094" font-size="8.2" fill="#64748B">AutomationOne Frontend-Architektur — El Frontend (Vue 3 + TypeScript + Pinia) — Operator-Cockpit fuer sicherheitskritisches Realtime-IoT</text>
+  <text x="1550" y="1094" text-anchor="end" font-size="8" fill="#94A3B8">D4 — 2026-04-07</text>
+</svg>

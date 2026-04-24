@@ -1,24 +1,14 @@
 # Frontend Debug Report
 
-**Erstellt:** 2026-04-06
-**Modus:** B (Spezifisch: "Aktor-Karte zeigt `undefined = undefined` statt `sensor_key = value`")
-**Quellen:** ActuatorCard.vue, logic.store.ts, types/logic.ts, logic_engine.py (Server), api/v1/logic.py (Server), ActuatorSatellite.vue, ActuatorColumn.vue
+**Erstellt:** 2026-04-24
+**Modus:** B – Spezifisch: "Toast ESP_x wurde zu Zone y zugewiesen taucht periodisch wieder auf"
+**Quellen:** `zone.store.ts`, `esp.ts`, `esp-websocket-subscription.ts`, `useToast.ts`, `useZoneDragDrop.ts`, `ackPresentation.ts`, `ZoneAssignmentPanel.vue`, `heartbeat_handler.py`, `zone_ack_handler.py`, `heartbeat_metrics_handler.py`, AUT-134 Steuerdatei
 
 ---
 
 ## 1. Zusammenfassung
 
-Bug vollstaendig lokalisiert. Die Ursache ist ein **fehlender Null-Guard** in
-`logic.store.ts` Zeile 436. Der WebSocket-Handler baut `trigger_reason` immer als
-Template-String `"${event.trigger.sensor_type} = ${event.trigger.value}"` — ohne zu
-pruefen ob diese Felder im `trigger`-Objekt vorhanden sind. Bei **Timer-ausgeloesten
-Regeln** (zeitbasierte Steuerung) sendet der Server `trigger: { type: "timer", timestamp, rule_id }` —
-kein `sensor_type`, kein `value`. JavaScript wandelt `undefined` in Template-Strings
-zu `"undefined"`, der resultierende String `"undefined = undefined"` wird direkt als
-`trigger_reason` in die History eingetragen und von `ActuatorCard.vue` als
-`(undefined = undefined)` angezeigt.
-
-**Handlungsbedarf: HOCH** — Ein-Zeilen-Fix in `logic.store.ts:436`.
+Der Toast `"${deviceName}" wurde zu "${zoneName}" zugewiesen` wird von **`zone.store.ts:handleZoneAssignment()`** gefeuert – ohne `dedupeKey` und ohne Idempotenz-Prüfung. Der primäre Frontend-Fehler ist, dass **jedes eintreffende `zone_assignment` WS-Event bedingungslos einen Toast auslöst**, auch wenn die Zuweisung identisch mit dem aktuellen Gerätezustand ist. Die periodische Wiederholung kommt durch zwei Backend-Trigger: den **WP7 Heartbeat Zone-Resync-Loop** (60s Cooldown) und den **Full-State-Push nach Reconnect** – beide erzeugen erneute `zone_assignment` WS-Events für bereits korrekt zugewiesene Geräte. AUT-134 (Config-Oversize) ist ein Verschärfungsfaktor, der den Resync-Loop durch einen potenziell dauerhaften `zone_assigned=false`-Zustand auf Mock-ESPs verlängert.
 
 ---
 
@@ -26,158 +16,162 @@ zu `"undefined"`, der resultierende String `"undefined = undefined"` wird direkt
 
 | Quelle | Status | Bemerkung |
 |--------|--------|-----------|
-| `src/components/devices/ActuatorCard.vue:224-229` | Korrekt | Template rendert `lastExecution.trigger_reason` unveraendert — kein Bug hier |
-| `src/shared/stores/logic.store.ts:436` | **FEHLER** | Template-String ohne Null-Guard fuer Timer/Reconnect-Trigger |
-| `src/shared/stores/logic.store.ts:27-43` | Mangelhaft | Interface `LogicExecutionEvent.trigger` typisiert alle Felder als required, obwohl Timer-Trigger diese nicht liefert |
-| `src/types/logic.ts:169-179` | OK | `ExecutionHistoryItem.trigger_reason: string` korrekt als String definiert |
-| `src/components/esp/ActuatorSatellite.vue` | OK | Kein "Zuletzt"-Rendering, kein Bug |
-| `src/components/esp/ActuatorColumn.vue` | OK | Kein "Zuletzt"-Rendering, kein Bug |
-| Server `logic_engine.py:232-240` | OK | Sensor-Trigger liefert `sensor_type` + `value` |
-| Server `logic_engine.py:351-355` | Ursache | Timer-Trigger: nur `type`, `timestamp`, `rule_id` — kein `sensor_type`, kein `value` |
-| Server `api/v1/logic.py:655-657` | Nicht betroffen | REST-Pfad formatiert serverseitig, unabhaengig |
+| `zone.store.ts` | Befund | Primärer Toast-Auslöser, kein `dedupeKey`, kein Idempotenz-Guard |
+| `esp.ts` | OK | Reines Delegate zu `zone.store.ts`, kein doppelter Handler |
+| `esp-websocket-subscription.ts` | OK | `zone_assignment` korrekt im Subscription-Set |
+| `useToast.ts` | Teilbefund | `DEDUP_WINDOW_MS = 2000` — zu kurz für periodische Resync-Events |
+| `useZoneDragDrop.ts` | OK | Nutzt `dedupeKey` korrekt für REST-Antwort-Toasts |
+| `ZoneAssignmentPanel.vue` | OK | Kein `useToast`-Import, kein zusätzlicher Toast |
+| `ackPresentation.ts` | OK | Korrekte Textkonstruktion, keine Logik |
+| `heartbeat_handler.py` | Befund | WP7 Zone Resync (60s), Full-State-Push — beide triggern `zone_assignment` WS |
+| `zone_ack_handler.py` | Befund | Broadcast ohne Idempotenz-Prüfung gegen aktuellen DB-Zustand |
+| `heartbeat_metrics_handler.py` | OK | Kein WS-Broadcast, reiner Metrics-Buffer — nicht relevant |
+| AUT-134 Steuerdatei | Kontext | Config-Oversize als Verschärfungsfaktor identifiziert |
 
 ---
 
 ## 3. Befunde
 
-### 3.1 Haupt-Bug: Fehlender Null-Guard in `handleLogicExecutionEvent` — `logic.store.ts:436`
+### 3.1 Kein Idempotenz-Guard in `zone.store.ts:handleZoneAssignment()`
 
 - **Schwere:** Hoch
-- **Detail:** Der WebSocket-Handler erstellt fuer jeden `logic_execution`-Event einen
-  `ExecutionHistoryItem`-Eintrag. `trigger_reason` wird immer als
-  `"${event.trigger.sensor_type} = ${event.trigger.value}"` gebaut.
-  Bei Timer-Triggern haben beide Felder den Wert `undefined` →
-  String wird zu `"undefined = undefined"`.
-- **Evidenz:**
+- **Detail:** Jedes eintreffende `zone_assignment` WS-Event mit `status === 'zone_assigned'` löst bedingungslos einen Toast aus. Es wird **nicht** geprüft, ob `data.zone_id === snapshot.zone_id` (d.h. ob die Zuweisung neu ist oder nur eine Wiederholung einer bereits gespeicherten).
+- **Evidenz:** `zone.store.ts:241–260`
 
-  `logic.store.ts:436`:
-  ```typescript
-  trigger_reason: `${event.trigger.sensor_type} = ${event.trigger.value}`,
+```
+if (data.status === 'zone_assigned') {
+  // ...patch...
+  toast.success(bridgeLine ? `${title}\n${bridgeLine}` : title)
+  // ← IMMER, kein Vergleich mit snapshot.zone_id
+}
+```
+
+Der `snapshot` (Zeile 233) wird **vor** dem Patch gezogen — ein Vergleich `snapshot.zone_id === data.zone_id` wäre technisch korrekt und würde redundante Toasts unterdrücken.
+
+### 3.2 Kein `dedupeKey` für WS-getriggerte Zone-Toasts
+
+- **Schwere:** Mittel
+- **Detail:** `useZoneDragDrop.ts` setzt `dedupeKey: 'zone-assign-accepted:${deviceId}:${toZoneId}'` korrekt für den REST-Response-Toast. `zone.store.ts` setzt **keinen** `dedupeKey` für den WS-Toast. Das text-basierte Dedupe in `useToast` (Zeile 73: `t.message === options.message && t.type === options.type`) gilt nur innerhalb von `DEDUP_WINDOW_MS = 2000ms`. Kommt dasselbe WS-Event nach >2s erneut, entsteht ein neuer Toast.
+- **Evidenz:** `useToast.ts:47,72-73`; `zone.store.ts:260`
+
+### 3.3 Backend-Trigger 1: Heartbeat WP7 Zone-Resync-Loop (60s)
+
+- **Schwere:** Hoch (primäre Quelle der Periodizität)
+- **Detail:** `heartbeat_handler.py`, WP7-Logik (Zeile 1110–1175): Wenn der ESP im Heartbeat `zone_assigned=false` meldet **oder** `heartbeat_zone_id != db_zone_id`, und kein Reconnect/Pending-Flag gesetzt ist, sendet der Server automatisch ein MQTT `zone/assign`. Cooldown: 60 Sekunden (`zone_resync_cooldown_seconds = 60`).
+
+  Vollständige Kausalkette:
+  ```
+  Heartbeat (zone_assigned=false oder zone_id-Mismatch)
+    → heartbeat_handler.py WP7 → MQTT zone/assign (alle 60s)
+    → ESP → MQTT zone/ack
+    → zone_ack_handler.py → WS broadcast "zone_assignment"
+    → zone.store.ts:handleZoneAssignment()
+    → toast.success("ESP_x wurde zu Zone y zugewiesen")  ← alle 60s
   ```
 
-  `logic_engine.py:351-355` (Timer-Trigger-Pfad, kein `sensor_type`/`value`):
-  ```python
-  trigger_data = {
-      "type": "timer",
-      "timestamp": int(time.time()),
-      "rule_id": str(rule.id),
-  }
-  ```
+- **Evidenz:** `heartbeat_handler.py:1110–1175`; `zone_ack_handler.py:267–278`
 
-  `logic_engine.py:232-240` (Sensor-Trigger-Pfad, korrekt):
-  ```python
-  trigger_data = {
-      "esp_id": esp_id,
-      "gpio": gpio,
-      "sensor_type": sensor_type,
-      "value": value,
-      "timestamp": int(time.time()),
-      ...
-  }
-  ```
+### 3.4 Backend-Trigger 2: Full-State-Push nach Reconnect
 
-### 3.2 Typisierungsfehler: Interface `LogicExecutionEvent` — `logic.store.ts:27-43`
+- **Schwere:** Mittel
+- **Detail:** Bei Reconnect eines echten ESP (>60s offline) mit vorhandener `zone_id` wird `_handle_reconnect_state_push()` als async Task gestartet (Zeile 715–725). Diese sendet erneut zone/assign via `MQTTCommandBridge.send_and_wait_ack()` → ESP ack → `zone_ack_handler.py` broadcast → Frontend Toast. Der Cooldown (`full_state_push_sent_at`) wird **nur nach erfolgreichem ACK** gesetzt. Bei Timeout: kein Cooldown → nächster Reconnect-Heartbeat triggert sofort erneut.
+- **Evidenz:** `heartbeat_handler.py:2065–2130`
 
-- **Schwere:** Mittel (kein Runtime-Fehler, aber falsche Sicherheitsgarantie durch TypeScript)
-- **Detail:** Das Interface definiert `trigger.sensor_type: string` und `trigger.value: number`
-  als required (kein `?`). Das gibt dem Entwickler eine falsche Sicherheit — TypeScript
-  zeigt keinen Fehler an der Verwendung obwohl der Server diese Felder bei Timer-Triggern
-  nicht sendet.
+### 3.5 AUT-134-Verbindung: Config-Oversize als Verschärfungsfaktor
 
-### 3.3 Warum "GPIO 25" korrekt, "Befeuchter" kaputt
+- **Schwere:** Mittel (Verschärfung, nicht Primärursache)
+- **Detail:** AUT-134 beschreibt `intent_outcome rejected (VALIDATION_FAIL, Payload 4164–4370 > 4096 bytes)`. Wenn der Config-Push für einen ESP wiederholt scheitert, verbleibt der ESP länger in einem Zustand, in dem er möglicherweise Zone-Config nicht persistiert hat (`zone_assigned=false` in Heartbeat). Dies verlängert den WP7 Resync-Loop (Befund 3.3) über die normale Reboot-Erholungszeit hinaus. Der Heartbeat-Handler berücksichtigt `CONFIG_PENDING_AFTER_RESET` nur für den Logic-Engine-Backoff, **nicht** für den Zone-Resync (Zeile 1085–1090 prüft nur `is_reconnect`, nicht `CONFIG_PENDING`).
+- **Evidenz:** `heartbeat_handler.py:1082–1090`; AUT-134 Steuerdatei (scope: "heartbeat/config Trigger-Burst rund um Count-Mismatch und Re-Sync")
 
-- **Schwere:** Erklaerend
-- **Detail:** "GPIO 25" wird von einer Sensor-Schwellwert-Regel gesteuert. Der Server
-  sendet einen Sensor-Trigger-Event mit `sensor_type="sht31_humidity"` und `value=48.x`.
-  Der "Befeuchter" hingegen wird per zeitbasierter Regel gesteuert. Der letzte
-  `logic_execution`-WebSocket-Event fuer den Befeuchter kam ueber den Timer-Pfad →
-  kein `sensor_type`, kein `value` → `"undefined = undefined"`.
+### 3.6 Stale JSDoc-Kommentar in `esp.ts`
+
+- **Schwere:** Niedrig (Lesbarkeit)
+- **Detail:** `esp.ts:1378–1395` enthält einen alten Dokumentationsblock für den `handleZoneAssignment`-Payload — direkt vor dem aktuellen Delegate-JSDoc. Zwei JSDoc-Blöcke für eine Funktion erzeugen Verwirrung.
+- **Evidenz:** `esp.ts:1378–1407`
 
 ---
 
-## 4. Extended Checks (eigenstaendig durchgefuehrt)
+## 4. Extended Checks (eigenständig durchgeführt)
 
 | Check | Ergebnis |
 |-------|----------|
-| `ActuatorSatellite.vue` gelesen | Kein "Zuletzt"-Rendering, kein `last_trigger_key`-Property — nicht der Bug |
-| `ActuatorColumn.vue` gelesen | Kein Bug, rendert nur `ActuatorSatellite` |
-| `logic.store.ts` vollstaendig gelesen | Bug in Zeile 436 bestaetigt |
-| Server `logic_engine.py` Timer-Trigger gelesen | Bestaetigt: kein `sensor_type`/`value` im Timer-Pfad |
-| Server REST-Pfad `api/v1/logic.py` gelesen | Eigene Formatierung, nicht betroffen |
+| Source-Code-Analyse `zone.store.ts` | Kein `dedupeKey`, kein Idempotenz-Guard bei `zone_assigned` |
+| Source-Code-Analyse `useToast.ts` | `DEDUP_WINDOW_MS = 2000` — zu kurz, kein persistenter Cache |
+| Source-Code-Analyse `heartbeat_handler.py` | WP7 Resync: 60s Cooldown, Full-State-Push: nur bei Reconnect |
+| Source-Code-Analyse `zone_ack_handler.py` | Broadcast immer nach commit, kein Idempotenz-Check gegen DB-Zustand |
+| Source-Code-Analyse `heartbeat_metrics_handler.py` | Kein WS-Broadcast — nicht relevant |
+| Doppel-Toast-Analyse REST+WS | `useZoneDragDrop` korrekt mit `dedupeKey`; `zone.store` ohne |
 
 ---
 
 ## 5. Blind-Spot-Fragen (an User)
 
-1. Wird die Regel fuer "Befeuchter" per Zeitfenster/Timer ausgeloest oder per
-   Sensor-Schwellwert? Wenn Timer → Root Cause bestaetigt.
-2. Soll bei Timer-Triggern ein spezifischer Text erscheinen (z.B. "Zeitbasierter Trigger")
-   oder gar keine Klammer-Anzeige?
+1. **Tritt der Toast auch auf, wenn keinerlei manuelle Zuweisung vorgenommen wird?** (Würde Befund 3.3/3.4 als alleinigen Trigger bestätigen — rein heartbeat-getriggert)
+2. **Welcher ESP ist betroffen?** Mock-ESP oder Real-ESP? (Mock-ESPs werden für Full-State-Push explizit ausgeschlossen, Zeile 2084–2091)
+3. **Browser Network-Tab: Kommen mehrere `zone_assignment` WS-Frames für denselben ESP innerhalb von Minuten an?** (Würde Backend-Trigger quantifizieren)
+4. **Gibt es eine `zone_resync_sent_at`-Zeitstempel-Progression in den Server-Logs?** (`grep "Auto-reassigning zone\|zone resync cooldown" logs/server/god_kaiser.log`)
 
 ---
 
-## 6. Konkreter Fix (Code-Diff)
+## 6. Bewertung & Empfehlung
 
-**Datei:** `El Frontend/src/shared/stores/logic.store.ts`
+**Root Cause:** Zweistufig — **Frontend fehlt Idempotenz-Guard** (immer Toast bei `zone_assigned`), **Backend sendet periodisch Zone-Assignments** an bereits korrekt konfigurierte ESPs (WP7 Resync-Loop + Full-State-Push).
 
-### Fix 1: Interface korrigieren (ca. Zeile 27-43)
+**Minimale Fix-Vorschläge (Frontend-Patterns, keine Breaking Changes):**
 
-```diff
- interface LogicExecutionEvent {
-   rule_id: string
-   rule_name: string
-   trigger: {
--    esp_id: string
--    gpio: number
--    sensor_type: string
--    value: number
-+    type?: string
-+    esp_id?: string
-+    gpio?: number
-+    sensor_type?: string
-+    value?: number
-+    rule_id?: string
-   }
-   action: {
-     esp_id: string
-     gpio: number
-     command: string
-   }
-   success: boolean
-   timestamp: number
- }
+### Fix A — Idempotenz-Guard in `zone.store.ts` (empfohlen, minimal-invasiv)
+
+In `handleZoneAssignment`, Zeile 250–260 — Toast nur feuern wenn sich `zone_id` wirklich geändert hat:
+
+```typescript
+// Snapshot VOR applyDevicePatch gezogen (Zeile 233) — Vergleich ist korrekt
+const zoneChanged = data.zone_id !== snapshot.zone_id
+applyDevicePatch(espId, (device) => ({ ...device, ...updates }))
+
+if (zoneChanged) {
+  const { title, bridgeLine } = formatZoneAckSuccess({ deviceName, zoneName, reasonCode: data.reason_code })
+  toast.success(bridgeLine ? `${title}\n${bridgeLine}` : title)
+} else {
+  logger.debug(`zone_assignment toast suppressed (idempotent resync): ${espId} already in ${data.zone_id}`)
+}
 ```
 
-### Fix 2: Null-Guard in trigger_reason (Zeile 436)
+**Seiteneffekte:** Keine — useZoneDragDrop/REST-Pfad bleibt unberührt; Removal-Toast (zone_removed) unberührt.
 
-```diff
--        trigger_reason: `${event.trigger.sensor_type} = ${event.trigger.value}`,
-+        trigger_reason: event.trigger.sensor_type != null
-+          ? `${event.trigger.sensor_type} = ${event.trigger.value}`
-+          : event.trigger.type === 'timer'
-+            ? 'Zeitbasierter Trigger'
-+            : event.trigger.type ?? 'Unbekannter Trigger',
+### Fix B — `dedupeKey` für WS-Toast (ergänzend zu Fix A)
+
+```typescript
+toast.success(bridgeLine ? `${title}\n${bridgeLine}` : title, {
+  dedupeKey: `zone-assigned-ws:${espId}:${data.zone_id}`
+})
 ```
 
-**Resultat nach Fix:**
-- Sensor-Trigger: `(sht31_humidity = 48.2)` — unveraendert korrekt
-- Timer-Trigger: `(Zeitbasierter Trigger)` — statt `(undefined = undefined)`
-- Reconnect-Trigger (hat `sensor_type` wenn Cache vorhanden): `(sht31_humidity = 48.2)` — korrekt
+Greift als Fallback, wenn Fix A nicht aktiv ist — verhindert doppelte Toasts innerhalb von 2s (z.B. REST + WS innerhalb des Dedupe-Fensters). Deckt **nicht** den 60s-Resync-Loop ab (DEDUP_WINDOW_MS zu kurz). Wert liegt in REST+WS-Kollisionsfall.
 
----
+### Fix C — `reason_code` für Auto-Resync-Events (Backend-seitig, nicht minimal-invasiv)
 
-## 7. Bewertung & Empfehlung
+Wenn `zone_resync_sent_at`-Logik in `heartbeat_handler.py` ein `reason_code: "auto_resync"` in den MQTT-Payload einfügt (Zeile 1157–1163), könnte `zone.store.ts` Toasts für Auto-Resync-Events unterdrücken:
 
-- **Root Cause:** `logic.store.ts:436` — Template-String ohne Null-Guard fuer
-  Timer- und Reconnect-Trigger-Events.
-- **Root Cause Server:** `logic_engine.py:351-355` sendet Timer-Trigger ohne `sensor_type`/`value` —
-  das ist **korrekt und nicht zu aendern** (Timer-Trigger haben keine Sensor-Daten).
-  Die Robustheit muss im Frontend liegen.
-- **Naechste Schritte:**
-  1. Fix 1 + Fix 2 in `El Frontend/src/shared/stores/logic.store.ts` anwenden
-  2. `npm run build` zur Verifikation (Exit 0 erwartet, keine neuen TS-Fehler)
-- **Seiteneffekte:** Keine. Der REST-History-Pfad (`loadExecutionHistory`) ist nicht
-  betroffen — der Server formatiert dort serverseitig.
-- **Lastintensive Ops:** Soll ich `vue-tsc --noEmit` ausfuehren um zu pruefen ob der
-  falsch typisierte `trigger`-Interface weitere TS-Fehler verursacht?
-  (`docker compose exec el-frontend npx vue-tsc --noEmit`, ca. 1-3 Minuten)
+```typescript
+if (data.reason_code === 'auto_resync') {
+  logger.debug(`Zone resync toast suppressed: ${espId}`)
+  return
+}
+```
+
+**Voraussetzung:** Firmware muss `reason_code` aus zone/assign-Payload transparent in zone/ack weiterleiten — aktuell nicht bestätigt. Erfordert Backend-Änderung.
+
+### Fix D — Backend: Resync-Cooldown erhöhen (Symptom-Linderung)
+
+`heartbeat_handler.py:1122`: `zone_resync_cooldown_seconds = 60` → erhöhen auf `300`. Reduziert Toast-Frequenz 5x ohne Logik-Änderung. Kein Frontend-Fix erforderlich. Nachteil: verzögert legitime Zone-Recovery nach NVS-Verlust.
+
+**Priorisierung:** Fix A allein löst das Frontend-Problem vollständig und ist der minimal-invasivste Eingriff. Fix B ist empfehlenswerter Defensiv-Layer. Fix D als Backend-Sofortmaßnahme falls Analyse-Ergebnis bestätigt.
+
+**Naechste Schritte:**
+1. Blind-Spot-Fragen 1–4 klären (besonders Server-Log-Check)
+2. Fix A implementieren in `zone.store.ts`
+3. AUT-134 Config-Oversize separat adressieren (verhindert sekundäre Verlängerung des Resync-Loops)
+
+**Lastintensive Ops (auf Anfrage):**
+- `docker compose exec el-frontend npx vue-tsc --noEmit` — Type-Check (1–3 min)
+- `grep "Auto-reassigning zone\|zone resync cooldown" logs/server/god_kaiser.log | tail -30` — Resync-Häufigkeit quantifizieren

@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.21 | **Aktualisiert:** 2026-04-20
+> **Version:** 2.23 | **Aktualisiert:** 2026-04-24
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
-> **Änderungen:** **PKG-01 (2026-04-20, INC-2026-04-20-offline-mode-observability-hardening):** Neuer Topic `system/queue_pressure` (ESP→Server, QoS 1) für strukturierte Publish-Queue-Backpressure-Events (ENTER/RECOVERED, Hysterese). Server-TopicBuilder in `src/mqtt/topics.py` ergänzt (`build_queue_pressure_topic`, `parse_queue_pressure_topic`). Firmware-Emitter und Server-Handler folgen in Welle 2 (PKG-01a/01b). Zuvor: **AUT-69 (2026-04-20):** `session/announce` an Server-Consumer angepasst (`handle_session_announce` registriert), Session-Feld-Alias dokumentiert (**kanonisch `handover_epoch`, Fallback `session_epoch`**) und Heartbeat-Metriken um `handover_contract_reject_startup`/`handover_contract_reject_runtime` plus Summenfeld `handover_contract_reject` erweitert. Zuvor: **AUT-54 (2026-04-17):** Bootstrap-Heartbeat nach `heartbeat/ack`-Subscription wird auf ESP32 nur noch deferred im normalen Loop gesendet (nicht mehr direkt im `MQTT_EVENT_SUBSCRIBED`-Callback). Stale `MQTT_EVENT_SUBSCRIBED` bei bereits getrennter Verbindung werden verworfen; `publishHeartbeat(force=true)` sendet nie im disconnected Zustand. Zuvor: **AUT-5 (2026-04-17):** Heartbeat-Payload um `sensor_command_queue_overflow_count` ergänzt (Overflow-Telemetrie der Sensor-Command-Queue). Zuvor: **PKG-05 (2026-04-14):** `system/heartbeat/ack` Reject-Diagnose erweitert (optionale Felder `reason_code`, `revocation_source`, `upstream_deleted`, `delete_intent`, `correlation_id` für Revocation/Upstream-Delete-Auswertung auf ESP-Seite). Intent-Outcome-Codes ergänzt: `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`. Zuvor: **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
+> **Änderungen:** **AUT-121 (2026-04-24, Implementierung):** Topic `system/heartbeat_metrics` (ESP→Server, QoS 0) koppelt erweiterte Laufzeit-Counter und Queue-Stats vom schlanken Core-`system/heartbeat` ab. Server: `HeartbeatMetricsHandler` (TTLCache-Ingest, kein DB/WS), Merge flach in den nächsten Core-`handle_heartbeat` → `esp_health`; `parse_heartbeat_topic` endverankert, damit `heartbeat_metrics` nicht als Core matcht; `subscriber.py` mappt QoS inkl. `MQTT_SUBSCRIBE_ESP_HEARTBEAT_METRICS`. Firmware: `ENABLE_METRICS_SPLIT` → `publishHeartbeatMetrics()` in `mqtt_client.cpp` am Ende von `publishHeartbeat()`. Zuvor: **PKG-01 (2026-04-20, INC-2026-04-20-offline-mode-observability-hardening):** Neuer Topic `system/queue_pressure` (ESP→Server, QoS 1) für strukturierte Publish-Queue-Backpressure-Events (ENTER/RECOVERED, Hysterese). Server-TopicBuilder in `src/mqtt/topics.py` ergänzt (`build_queue_pressure_topic`, `parse_queue_pressure_topic`). Firmware-Emitter und Server-Handler folgen in Welle 2 (PKG-01a/01b). Zuvor: **AUT-69 (2026-04-20):** `session/announce` an Server-Consumer angepasst (`handle_session_announce` registriert), Session-Feld-Alias dokumentiert (**kanonisch `handover_epoch`, Fallback `session_epoch`**) und Heartbeat-Metriken um `handover_contract_reject_startup`/`handover_contract_reject_runtime` plus Summenfeld `handover_contract_reject` erweitert. Zuvor: **AUT-54 (2026-04-17):** Bootstrap-Heartbeat nach `heartbeat/ack`-Subscription wird auf ESP32 nur noch deferred im normalen Loop gesendet (nicht mehr direkt im `MQTT_EVENT_SUBSCRIBED`-Callback). Stale `MQTT_EVENT_SUBSCRIBED` bei bereits getrennter Verbindung werden verworfen; `publishHeartbeat(force=true)` sendet nie im disconnected Zustand. Zuvor: **AUT-5 (2026-04-17):** Heartbeat-Payload um `sensor_command_queue_overflow_count` ergänzt (Overflow-Telemetrie der Sensor-Command-Queue). Zuvor: **PKG-05 (2026-04-14):** `system/heartbeat/ack` Reject-Diagnose erweitert (optionale Felder `reason_code`, `revocation_source`, `upstream_deleted`, `delete_intent`, `correlation_id` für Revocation/Upstream-Delete-Auswertung auf ESP-Seite). Intent-Outcome-Codes ergänzt: `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`. Zuvor: **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
 
 ---
 
@@ -39,7 +39,8 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 | `kaiser/god/esp/{esp_id}/actuator/{gpio}/alert` | ESP→Server | 1 | Actuator Alert |
 | `kaiser/god/esp/{esp_id}/actuator/emergency` | Server→ESP | 1 | ESP-spezifischer Emergency |
 | `kaiser/god/esp/{esp_id}/session/announce` | ESP→Server | 1 | Reconnect Session-Announce (AUT-69) |
-| `kaiser/god/esp/{esp_id}/system/heartbeat` | ESP→Server | 0 | Heartbeat |
+| `kaiser/god/esp/{esp_id}/system/heartbeat` | ESP→Server | 0 | Heartbeat (Core: Liveness + Registration) |
+| `kaiser/god/esp/{esp_id}/system/heartbeat_metrics` | ESP→Server | 0 | Heartbeat Metrics (Extended Telemetry, AUT-121) |
 | `kaiser/god/esp/{esp_id}/system/heartbeat/ack` | Server→ESP | 1 | Heartbeat ACK (SAFETY-P5: QoS 1) |
 | `kaiser/god/server/status` | Server→ALL | 1 | Server LWT + Online/Offline (SAFETY-P5) |
 | `kaiser/god/esp/{esp_id}/system/command` | Server→ESP | 2 | System-Befehle |
@@ -535,6 +536,64 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 **Code-Referenzen:**
 - **ESP32:** `mqtt_client.cpp:publishSessionAnnounce()`
 - **Server:** `heartbeat_handler.py:handle_session_announce()`
+
+---
+
+### 3.1b system/heartbeat_metrics (ESP→Server) — AUT-121
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat_metrics`
+
+**QoS:** 0 (best-effort, wie Core-Heartbeat)
+**Retain:** false
+**Frequency:** Wird am Ende jedes `publishHeartbeat()`-Laufs aufgerufen; tatsächlicher Publish nur bei geändertem `MetricsSnapshot` oder spätestens alle 5 Core-Zyklen (`METRICS_MAX_SKIP_COUNT` in `mqtt_client.h`).
+
+**Core vs. Metrics — Abgrenzung:**
+
+| Aspekt | `system/heartbeat` (Core) | `system/heartbeat_metrics` (Metrics) |
+|--------|---------------------------|--------------------------------------|
+| Zweck | Liveness-Signal, Registration-Gate, P1-Timer | Erweiterte Zähler/Queue-Stats (forensisch) |
+| Latenz-Kritisch | Ja (ACK muss < 120s) | Nein |
+| Payload-Größe | Schlanke Core-Felder (Ziel: unter `PUBLISH_PAYLOAD_MAX_LEN`) | Kompakt (`payload.reserve(512)`) |
+| Handler-Blockierung | Verboten (ACK-first) | Verboten: reiner Ingest (TTLCache); kein paralleles DB/WS im Metrics-Handler |
+| Auswirkung bei Verlust | P1-Timeout → Safe-State | Metriken-Lücke, kein Safety-Impact |
+
+Die Trennung verhindert, dass wachsende Telemetrie-Felder das
+latenz-kritische Core-Heartbeat-Payload aufblähen oder den
+ACK-Pfad verzögern. Serverseitig werden akzeptierte Metrics in den
+nächsten Core-Heartbeat gemerged (`heartbeat_handler`) und gehen
+mit `esp_health` an das Frontend.
+
+**Payload (Ist, `ENABLE_METRICS_SPLIT` — ESP-IDF-Pfad, nicht `MQTT_USE_PUBSUBCLIENT`):**
+```json
+{
+  "esp_id": "ESP_12AB34CD",
+  "ts": 1735818000,
+  "metrics_schema_version": 1,
+  "offline_enter_count": 0,
+  "adopting_enter_count": 0,
+  "adoption_noop_count": 0,
+  "adoption_delta_count": 0,
+  "handover_abort_count": 0,
+  "handover_contract_reject_count": 0,
+  "handover_contract_last_reject": "NONE",
+  "persistence_drift_count": 0,
+  "critical_outcome_drop_count": 0,
+  "publish_outbox_drop_count": 0,
+  "publish_queue_fill": 0,
+  "publish_queue_hwm": 0,
+  "publish_queue_shed_count": 0,
+  "publish_queue_drop_count": 0,
+  "sensor_command_queue_overflow_count": 0,
+  "safe_publish_retry_count": 0,
+  "emergency_rejected_no_token_total": 0
+}
+```
+
+Die Felder `publish_queue_*` fehlen bei `MQTT_USE_PUBSUBCLIENT=1` (siehe `mqtt_client.cpp`).
+
+**Code-Referenzen:**
+- **ESP32:** `topic_builder.cpp:buildSystemHeartbeatMetricsTopic()`, `mqtt_client.cpp:publishHeartbeatMetrics()` (nach `publishHeartbeat()`)
+- **Server:** `topics.py` (Builder/Parse inkl. `parse_heartbeat_topic`), `heartbeat_metrics_handler.py:handle_heartbeat_metrics`, `heartbeat_handler.py` (Merge vor WS), `main.py` (Handler-Registrierung), `subscriber.py` (QoS-Zuordnung)
 
 ---
 
@@ -1095,9 +1154,17 @@ Event-Werte: `"ENTER"` (Backpressure aktiv), `"RECOVERED"` (Backpressure aufgeho
         "end_minute": 0
       }
     }
-  ]
+  ],
+  "reason_code": "sensor_config_change",
+  "generation": 1745453025123,
+  "config_fingerprint": "a4e80f0bc905cf5ff2894aa9e1986354f4a0a44df8f06f2f699f0df88ad8e526"
 }
 ```
+
+**AUT-134 Erweiterung (additiv, backward-compatible):**
+- `reason_code` (optional, string): Ursache des Config-Sends, z. B. `sensor_config_change`, `actuator_config_change`, `logic_config_change`, `heartbeat_count_mismatch`, `reconnect_count_mismatch`.
+- `generation` (optional, int): monotone Version für Scope-Stale-Guards auf ESP-Seite.
+- `config_fingerprint` (optional, string): SHA-256 über kanonisierten Payload für Drift-/Forensik-Korrelation.
 
 **offline_rules Felder:**
 
@@ -1152,7 +1219,10 @@ Event-Werte: `"ENTER"` (Backpressure aktiv), `"RECOVERED"` (Backpressure aufgeho
   "count": 3,
   "message": "Configured 3 item(s) successfully",
   "correlation_id": "cfg_abc123",
-  "request_id": "req_42"
+  "request_id": "req_42",
+  "reason_code": "heartbeat_count_mismatch",
+  "generation": 1745453025123,
+  "config_fingerprint": "a4e80f0bc905cf5ff2894aa9e1986354f4a0a44df8f06f2f699f0df88ad8e526"
 }
 ```
 
@@ -1435,6 +1505,7 @@ Der Server subscribed zu folgenden Topic-Patterns:
 | `kaiser/+/esp/+/actuator/+/alert` | `handle_actuator_alert` | `main.py:244` |
 | `kaiser/+/esp/+/session/announce` | `handle_session_announce` | `heartbeat_handler.py` |
 | `kaiser/+/esp/+/system/heartbeat` | `handle_heartbeat` | `heartbeat_handler.py:61` |
+| `kaiser/+/esp/+/system/heartbeat_metrics` | `handle_heartbeat_metrics` | `heartbeat_metrics_handler.py:56` |
 | `kaiser/+/esp/+/config_response` | `handle_config_ack` | `config_handler.py:52` |
 | `kaiser/+/esp/+/zone/ack` | `handle_zone_ack` | `main.py:275` |
 | `kaiser/+/esp/+/subzone/ack` | `handle_subzone_ack` | `main.py:280` |

@@ -454,6 +454,211 @@ Erkenntnisse aus dem F4-Trockentest (Mock-Server End-to-End ohne Hardware):
 
 ---
 
+## F5: REPRODUZIERBARER AGENTEN-FLOW (Backend→Frontend→UI/UX mit verify-plan Gates)
+
+### F5.1 Überblick
+
+**Ziel:** Verifizierter End-to-End-Ablauf für Änderungen, die Backend (MQTT/Server), Frontend (Verdrahtung) und UI/UX (konsistente Darstellung) betreffen. Mit harten Gates und reproduzierbaren Agenten-Kommandos (Wokwi/Playwright).
+
+**Trigger:** AUT-130 (STACK-QA-01) oder vergleichbare Multi-Layer-Features (z.B. AUT-110, AUT-111, AUT-113, AUT-114, AUT-115 aus INC-2026-04-22).
+
+**Ergebnis:** Vier Tests-grün + verifikation Report + Master-Branch ready (oder Merge-Blocker).
+
+---
+
+### F5.2 Schritte
+
+```
+GATE 1: BACKEND CONTRACT VERIFIZIERT
+├── Wer: server-dev (oder mqtt-dev bei MQTT-Kontrakt-Änderung)
+├── Auftrag: Implementierung + lokale Verifikation
+├── Befehle:
+│   ├── cd "El Servador/god_kaiser_server"
+│   ├── pytest tests/ -v  [lokaler Unit/Integration Test]
+│   ├── python -m ruff check src/  [Syntax + Konvention]
+├── Output: Alle Tests grün, keine Ruff-Fehler
+├── Gate-Kontrolle (Primäragent): server-dev bestätigt Readiness
+├── BLOCKER: Falls Test rot → Debugging vor Frontend-Verdrahtung
+└── Nächster Schritt: → GATE 2
+
+GATE 2: FRONTEND WIRING ABGESCHLOSSEN + LOKALES BUILD
+├── Wer: frontend-dev
+├── Auftrag: WebSocket-Events verdrahten, API-Client aktualisieren, Types synchron
+├── Befehle:
+│   ├── cd "El Frontend"
+│   ├── npm run build  [Vite Build]
+│   ├── npm run lint  [ESLint + TypeScript]
+│   ├── npm run test  [Vitest Unit-Tests]
+├── Output: Build erfolgreich, Tests grün, keine ESLint-Fehler
+├── Gate-Kontrolle: frontend-dev + server-dev (Review MQTT/WS-Konsumption)
+├── BLOCKER: Falls Build fehlerhaft oder Types-Mismatch → Iteration
+└── Nächster Schritt: → GATE 3
+
+GATE 3: WOKWI-REPRO (Firmware + MQTT + Backend)
+├── Wer: esp32-dev ODER Orchestrator mit preflight
+├── Auftrag: Wokwi-Szenarien auswählen, durchlaufen, Baseline-Metriken prüfen
+├── Vorbedingung: `make wokwi-check` grün (CLI verfügbar)
+├── Befehle (Auswahl nach Feature-Typ):
+│   ├── make wokwi-seed  [Datenbank mit 3 Test-ESPs seeden]
+│   ├── make wokwi-list  [Alle 192 Szenarien anzeigen; passend filtern]
+│   │   Für MQTT/Heartbeat-Feature:
+│   │   ├── make wokwi-test-scenario SCENARIO="El Trabajante/tests/wokwi/scenarios/01-boot/boot-success.yaml"
+│   │   ├── make wokwi-test-scenario SCENARIO="El Trabajante/tests/wokwi/scenarios/05-heartbeat/heartbeat-basic.yaml"
+│   │   ├── make wokwi-test-scenario SCENARIO="El Trabajante/tests/wokwi/scenarios/02-mqtt/mqtt-connect-retry.yaml"
+│   │   Für Sensor/Actuator/Rule-Feature:
+│   │   ├── make wokwi-test-scenario SCENARIO="El Trabajante/tests/wokwi/scenarios/03-sensors/sensor-read-success.yaml"
+│   │   ├── make wokwi-test-scenario SCENARIO="El Trabajante/tests/wokwi/scenarios/04-actuators/actuator-control-success.yaml"
+│   │   ├── make wokwi-test-scenario SCENARIO="El Trabajante/tests/wokwi/scenarios/07-rules/rule-fire-simple.yaml"
+│   │   Für Offline/Recovery-Feature:
+│   │   ├── make wokwi-test-scenario SCENARIO="El Trabajante/tests/wokwi/scenarios/06-offline/offline-recovery-basic.yaml"
+│   │   ├── make wokwi-test-scenario SCENARIO="El Trabajante/tests/wokwi/scenarios/02-mqtt/mqtt-reconnect-with-state.yaml"
+├── Output: Alle Szenarien green (exit code 0), Backend-Logs konsistent mit Erwartung
+├── Gate-Kontrolle: esp32-dev (oder server-debug bei MQTT-Fehler)
+├── BLOCKER: Falls Szenario fehlschlägt → seriellen Log analysieren, esp32-debug/mqtt-debug konsultieren
+└── Nächster Schritt: → GATE 4
+
+GATE 4: PLAYWRIGHT E2E-TEST (Frontend + UI/UX)
+├── Wer: frontend-dev
+├── Auftrag: Playwright-Tests starten, Feature-spezifische Tests validieren
+├── Befehle:
+│   ├── make e2e-up  [E2E-Stack starten mit Docker]
+│   ├── make e2e-test-backend-smoke  [Backend E2E Smoke, ~2 min]
+│   ├── Danach: Feature-spezifische Playwright-Tests (Subset auswählen):
+│   │   Beispiele aus "El Frontend/tests/e2e/scenarios/":
+│   │   - heartbeat/runtime-health.spec.ts  [Runtime-Health-Badge] → für AUT-124
+│   │   - actuator/concurrent-rules.spec.ts  [Toast-Finalitaet] → für AUT-123
+│   │   - dashboard/device-offline.spec.ts  [Offline-Status] → für AUT-110/111
+│   │   - chart/historical-gap-detection.spec.ts  [Chart-Gaps] → für AUT-113
+│   │   - conflict-manager/arbitration-modal.spec.ts  [Conflict UI] → für AUT-114
+│   │   Auflistung per: npx playwright test --list --config=El\ Frontend/playwright.e2e-01.config.ts
+│   ├── npx playwright test "El Frontend/tests/e2e/scenarios/<Feature>*" --config="El Frontend/playwright.e2e-01.config.ts"
+│   ├── Optional bei UI-Änderungen: npx playwright test --ui [Interaktiv debuggen]
+│   ├── make e2e-down  [Stack stoppen]
+├── Output: Alle E2E-Tests grün, Screenshots/Videos bei Fehler
+├── Gate-Kontrolle: frontend-dev (oder auto-debugger bei Fehler)
+├── BLOCKER: Falls Test fehlschlägt → frontend-debug konsultieren, Video analysieren
+└── Nächster Schritt: → VERIFIKATION ABGESCHLOSSEN
+
+VERIFICATION SUMMARY
+├── Wer: Orchestrator oder Robin
+├── Artefakt: `.claude/reports/current/F5_VERIFICATION_REPORT.md`
+├── Inhalt:
+│   ├── Gate 1–4 Status (PASS/FAIL)
+│   ├── Commit-Hashes (Firmware, Server, Frontend)
+│   ├── Test-Ausgaben zusammengefasst
+│   ├── Alle Befehle und Ausgaben (nachvollziehbar)
+│   └── Offene Punkte (falls vorhanden)
+├── Wenn alle PASS: Ready für Merge/Deploy
+├── Falls BLOCKER: → Issue-Beschreibung aktualisieren, Zyklus wiederholen
+```
+
+---
+
+### F5.3 Abhängigkeitsmatrix (Reihenfolge ist verbindlich)
+
+```
+GATE 1 (Server) [must complete before]
+    ↓
+GATE 2 (Frontend Wiring) [must complete before]
+    ↓
+GATE 3 (Wokwi ESP32 + MQTT + Backend Integration) [must complete before]
+    ↓
+GATE 4 (Playwright E2E) [completes F5]
+```
+
+---
+
+### F5.4 Feature-Type → Szenario-Mapping (Hilfe bei Gate 3)
+
+| Feature-Typ | Beispiel-Issue | Boot | Heartbeat | MQTT-Connect | Sensor | Actuator | Rule | Offline |
+|-------------|--------|------|-----------|--------------|--------|----------|------|---------|
+| MQTT-Kontrakt | AUT-54, AUT-55 | ✅ | ✅ | ✅ | — | — | — | — |
+| Heartbeat-Change | AUT-68, AUT-121 | ✅ | ✅ | ✅ | — | — | — | — |
+| Offline-Handling | AUT-110, AUT-111 | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| Sensor-Add | AUT-127 | ✅ | — | — | ✅ | — | ✅ | — |
+| Actuator-Control | AUT-127 | ✅ | — | — | — | ✅ | ✅ | — |
+| Rule-Logic | AUT-111 | ✅ | — | — | ✅ | ✅ | ✅ | ✅ |
+| Frontend-UI | AUT-113, AUT-124 | — | — | — | — | — | — | — |
+| Toast/Modal | AUT-123, AUT-114 | ✅ | — | — | ✅ | ✅ | ✅ | — |
+
+**Lesbeispiel:** Feature "Offline-Handling" (AUT-110) wählt Szenarien aus **Boot + Heartbeat + Sensor + Actuator + Rule + Offline** Kategorien.
+
+---
+
+### F5.5 Repro-Befehle (Kopierbar für Agents)
+
+```bash
+# === GATE 1: Backend Unit + Integration Tests ===
+cd "El Servador/god_kaiser_server"
+pytest tests/unit/ tests/integration/ -v --tb=short
+python -m ruff check src/ mqtt/
+
+# === GATE 2: Frontend Build + Lint + Unit Test ===
+cd "El Frontend"
+npm run build
+npm run lint
+npm run test
+
+# === GATE 3: Wokwi Szenarien (MQTT-Features) ===
+cd "${WORKSPACE_ROOT}"
+make wokwi-check
+make wokwi-seed
+# Option A: Quick (Boot + Heartbeat + MQTT)
+make wokwi-test-scenario SCENARIO="El Trabajante/tests/wokwi/scenarios/01-boot/boot-success.yaml"
+make wokwi-test-scenario SCENARIO="El Trabajante/tests/wokwi/scenarios/05-heartbeat/heartbeat-basic.yaml"
+make wokwi-test-scenario SCENARIO="El Trabajante/tests/wokwi/scenarios/02-mqtt/mqtt-connect-retry.yaml"
+# Option B: Offline (alle Offline-relevanten)
+make wokwi-test-scenario SCENARIO="El Trabajante/tests/wokwi/scenarios/06-offline/offline-recovery-basic.yaml"
+# Option C: All 22 CI scenarios (wenn verfügbar, ~10 min)
+make wokwi-test-full
+
+# === GATE 4: Playwright E2E ===
+cd "${WORKSPACE_ROOT}"
+make e2e-up
+make e2e-test-backend-smoke
+# Feature-spezifisch (Beispiel: Runtime-Health für AUT-124)
+npx playwright test "El Frontend/tests/e2e/scenarios/*runtime-health*" \
+  --config="El Frontend/playwright.e2e-01.config.ts" \
+  --project=chromium
+make e2e-down
+```
+
+---
+
+### F5.6 Validierungskriterien (Gate-Checklisten)
+
+| Gate | Agent/Rolle | Input-Dateien | Output | Pass-Kriterium |
+|------|----------|--------------|--------|----------------|
+| 1 | server-dev | `El Servador/god_kaiser_server/src/`, `tests/` | `pytest exit=0`, `ruff exit=0` | Exit-Codes alle 0 |
+| 2 | frontend-dev | `El Frontend/src/`, `tests/unit/` | `npm run build exit=0`, `npm run test exit=0` | Vite-Build fehlerfrei, Tests grün |
+| 3 | esp32-dev / Orchestrator | `El Trabajante/`, Wokwi-Szenarien | `wokwi-cli run` Ausgabe | Alle Szenarien exit=0, keine CRASH-Logs |
+| 4 | frontend-dev | E2E-Stack, `El Frontend/tests/e2e/` | `playwright test` exit=0 | Alle Selected Tests grün, keine Flakiness |
+
+---
+
+### F5.7 Known Limitations & Workarounds
+
+| Limitation | Bereich | Workaround |
+|-----------|---------|-----------|
+| `wokwi-cli` nicht installiert (Stand 22.04.) | Gate 3 | `make wokwi-check` führt Preflight aus; falls fehlgeschlagen: Installation dokumentieren, Z.B. `npm install -g wokwi-cli@latest` |
+| Playwright Headless in CI nur | Gate 4 | Lokal: `npx playwright test --ui` für interaktives Debugging |
+| Wokwi-Szenario-Nummern (191 vs 192) | Gate 3 | `make wokwi-list` gibt aktuelle Zählung aus; Makefile-Kommentar aktualisieren nach neuen Szenarien |
+
+---
+
+### F5.8 Integration in AUT-130 und Verwandte Issues
+
+**AUT-130 (STACK-QA-01):** Dieser Flow F5 ist die **technische Ausführungsanleitung** für AUT-130. 
+
+**Zugeordnete Issues, die F5 nutzen:**
+- AUT-110 (P0, Alarm bei Nacht-Regel-Skip) → Gate 1–4 mit Offline-Szenarien
+- AUT-111 (P0, Critical-Rule Degraded) → Gate 1–4 mit Rule-Fire-Szenarien
+- AUT-113 (P1, HistoricalChart Gap-Marker) → Gate 4 mit chart-gap Spec
+- AUT-114 (P2, Conflict-Manager UI) → Gate 4 mit conflict-arbitration Spec
+- AUT-115 (P2, Cockpit-Kachel) → Gate 4 mit cockpit Spec
+
+---
+
 <!-- NEUE FLOWS HIER ANHÄNGEN -->
 <!-- Format: ## F{N}: FLOW-NAME -->
 <!-- Gleiche Struktur: Überblick, Schritte, Datenfluss, Validierungskriterien -->

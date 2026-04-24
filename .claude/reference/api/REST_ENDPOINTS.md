@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 4.2 | **Aktualisiert:** 2026-04-14
+> **Version:** 4.2 | **Aktualisiert:** 2026-04-24
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
@@ -61,7 +61,7 @@ allowed-tools: Read
 | `/sensors` | GET | JWT | Alle Sensoren |
 | `/sensors/config/{config_id}` | GET | JWT | Sensor-Config by UUID (immer eindeutig, auch bei 2x SHT31) |
 | `/sensors/{sensor_id}` | GET | JWT | Sensor Details |
-| `/sensors` | POST | JWT | Sensor erstellen |
+| `/sensors/{esp_id}/{gpio}` | POST | Operator | Sensor erstellen/aktualisieren (ESP+GPIO) |
 | `/sensors/{esp_id}/{config_id}` | DELETE | Operator | Sensor-Config löschen (by UUID, Sensordaten bleiben erhalten) |
 | `/sensors/data` | GET | JWT | Query Sensor-Daten (historisch, filterbar nach zone_id, subzone_id, resolution, before_timestamp) |
 | `/sensors/{sensor_id}/data` | GET | JWT | Sensor-Daten (historisch) |
@@ -186,12 +186,13 @@ allowed-tools: Read
 
 > **Hierarchy-Response:** Subzonen enthalten `sensors[]` und `actuators[]` (aus assigned_gpios + sensor_configs/actuator_configs). "Keine Subzone" Gruppe fuer ESPs ohne Subzone. Nutzt: `HierarchyTab.vue`, System-Monitor.
 
-### Logic/Automation (`/logic`) - 11 Endpoints
+### Logic/Automation (`/logic`) - 12 Endpoints
 
 | Endpoint | Method | Auth | Beschreibung |
 |----------|--------|------|--------------|
 | `/logic/rules` | GET | JWT | Automation Rules auflisten |
 | `/logic/rules` | POST | Operator | Neue Rule erstellen |
+| `/logic/degraded` | GET | JWT | AUT-111: Degradierte Rules auflisten |
 | `/logic/rules/{rule_id}` | GET | JWT | Rule Details |
 | `/logic/rules/{rule_id}` | PUT | Operator | Rule aktualisieren |
 | `/logic/rules/{rule_id}` | DELETE | Operator | Rule löschen |
@@ -826,6 +827,32 @@ Sensor-Details.
 
 ---
 
+### 3.2a POST /sensors/{esp_id}/{gpio}
+
+Sensor erstellen/aktualisieren (ESP+GPIO). Der Endpoint triggert nach erfolgreichem DB-Write einen Config-Publish an das Gerät.
+
+**Auth:** Operator Required
+
+**Response 200 (`SensorConfigResponse`):**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "esp_device_id": "ESP_12AB34CD",
+  "gpio": 33,
+  "sensor_type": "moisture",
+  "config_status": "pending",
+  "subzone_warning": null,
+  "correlation_id": "a6ac4243-32ae-4f28-97c3-fb72c9d4c409",
+  "request_id": "a6ac4243-32ae-4f28-97c3-fb72c9d4c409"
+}
+```
+
+- **`correlation_id`:** Primärer Handle für den anschließenden WS-Lifecycle (`config_published` → `config_response`/`config_failed`).
+- **`request_id`:** Zusätzlicher Trace-Handle; aktuell identisch zu `correlation_id`.
+- **`config_status`:** Nach REST-Write zunächst `pending`; terminale Bestätigung folgt asynchron über MQTT/WS.
+
+---
+
 ### 3.2b GET /sensors/data
 
 Query historische Sensor-Daten (global, filterbar). Phase 0.1: Response enthält `zone_id`, `subzone_id` pro Reading (zum Messzeitpunkt).
@@ -955,6 +982,32 @@ Alle Actuators auflisten.
 Actuator-Details.
 
 **Auth:** JWT Required
+
+---
+
+### 4.2a POST /actuators/{esp_id}/{gpio}
+
+Actuator erstellen/aktualisieren (ESP+GPIO). Der Endpoint triggert nach erfolgreichem DB-Write einen Config-Publish an das Gerät.
+
+**Auth:** Operator Required
+
+**Response 200 (`ActuatorConfigResponse`):**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440111",
+  "esp_device_id": "ESP_12AB34CD",
+  "gpio": 14,
+  "actuator_type": "digital",
+  "config_status": "pending",
+  "subzone_warning": null,
+  "correlation_id": "eb90b898-7805-4ea4-8c5c-69620e7379d7",
+  "request_id": "eb90b898-7805-4ea4-8c5c-69620e7379d7"
+}
+```
+
+- **`correlation_id`:** Primärer Handle für den anschließenden WS-Lifecycle (`config_published` → `config_response`/`config_failed`).
+- **`request_id`:** Zusätzlicher Trace-Handle; aktuell identisch zu `correlation_id`.
+- **`config_status`:** Nach REST-Write zunächst `pending`; terminale Bestätigung folgt asynchron über MQTT/WS.
 
 ---
 
@@ -1363,7 +1416,55 @@ Execution History abfragen (nicht rule-scoped).
 
 ---
 
-### 5.9 GET /logic/templates
+### 5.9 GET /logic/degraded (AUT-111)
+
+Degradierte Rules auflisten (Regeln, deren Target-ESP offline ist und die `is_critical=true` haben).
+
+**Auth:** JWT Required
+
+**Query-Parameter:**
+
+| Parameter | Typ | Default | Beschreibung |
+|-----------|-----|---------|-------------|
+| `critical_only` | bool | false | Nur is_critical=true Rules |
+
+**Response 200 (LogicRuleListResponse):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "...",
+      "name": "Critical pH Rule",
+      "is_critical": true,
+      "degraded_since": "2026-04-22T10:00:00Z",
+      "degraded_reason": "target_esp_offline:ESP_AABBCCDD",
+      "escalation_policy": {"notify": ["websocket"], "max_retries": 5},
+      "enabled": true
+    }
+  ]
+}
+```
+
+**Neue Felder in LogicRuleResponse (AUT-111):**
+
+| Feld | Typ | Beschreibung |
+|------|-----|-------------|
+| `is_critical` | bool | Safety-critical Flag (default false) |
+| `escalation_policy` | object? | Escalation-Policy (notify, retry_interval_s, max_retries, failover_actions) |
+| `degraded_since` | datetime? | Zeitpunkt ab wann Rule degradiert ist |
+| `degraded_reason` | string(64)? | Grund (z.B. "target_esp_offline:ESP_AABB") |
+
+**WebSocket Events (AUT-111):**
+
+| Event | Wann | Payload |
+|-------|------|---------|
+| `rule_degraded` | Critical-Rule Target geht offline | rule_id, rule_name, degraded_since, reason, escalation_policy |
+| `rule_recovered` | Target kommt wieder online | rule_id, rule_name, recovered_at, was_degraded_since |
+
+---
+
+### 5.10 GET /logic/templates
 
 Rule-Templates auflisten.
 

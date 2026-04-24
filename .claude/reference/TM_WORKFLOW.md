@@ -241,6 +241,7 @@ verify-plan ist **Qualitaetsgate zwischen Plan und Umsetzung**, nicht Ersatz fue
 ### TM-Reaktion nach verify-plan
 - Issues nachziehen (Pfade, Tests, Kriterien korrigieren)
 - **Code gewinnt** — wenn verify-plan widerspricht: Issues anpassen, nicht Realitaet schoenreden
+- **Bei Backend→Frontend-Flow (F5):** Multi-Agent verify-plan *nach* Gate 2 (Frontend Wiring von agents durchgefuehrt): Consistent Check für MQTT Topics / WebSocket Events / API-Endpunkte — müssen auf **beiden Seiten** existieren und Match.
 
 ---
 

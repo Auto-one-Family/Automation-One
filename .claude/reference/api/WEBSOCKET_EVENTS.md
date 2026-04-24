@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 3.15 | **Aktualisiert:** 2026-04-06
+> **Version:** 3.18 | **Aktualisiert:** 2026-04-24
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
-> **Event-Anzahl:** 42 relevante Event-Typen (39 serverseitige Broadcast-Events + 1 optionaler Plugin-Statuskanal + 2 Frontend-Contract-Integrationssignale)
+> **Event-Anzahl:** 45 relevante Event-Typen (42 serverseitige Broadcast-Events + 1 optionaler Plugin-Statuskanal + 2 Frontend-Contract-Integrationssignale)
 
 ---
 
@@ -21,7 +21,7 @@ allowed-tools: Read
 | Event | Richtung | Trigger | Beschreibung |
 |-------|----------|---------|--------------|
 | `esp_health` | Server→Frontend | Heartbeat | ESP Online-Status, Health-Daten |
-| `esp_reconnect_phase` | Server→Frontend | Reconnect-Handover | Adoption-Phasen: adopting, adopted, delta_enforced |
+| `esp_reconnect_phase` | Server→Frontend | Reconnect-Handover | Adoption-Phasen: adopting, adopted, delta_enforced, converged |
 | `device_discovered` | Server→Frontend | Neues ESP | Unbekanntes ESP entdeckt |
 | `device_rediscovered` | Server→Frontend | ESP wieder online | Bekanntes ESP kommt zurück |
 | `device_approved` | Server→Frontend | Admin-Aktion | Pending ESP genehmigt |
@@ -70,6 +70,9 @@ allowed-tools: Read
 | Event | Richtung | Trigger | Beschreibung |
 |-------|----------|---------|--------------|
 | `logic_execution` | Server→Frontend | Rule ausgeführt | Automation Rule triggered |
+| `conflict.arbitration` | Server→Frontend | ConflictManager | Arbitration-Entscheidung mit `trace_id`/Gewinner/Verlierer |
+| `rule_degraded` | Server→Frontend | LogicEngine (AUT-111) | Kritische Rule wechselt in Degraded-Zustand |
+| `rule_recovered` | Server→Frontend | LogicEngine (AUT-111) | Kritische Rule verlässt Degraded-Zustand |
 | `notification` | Server→Frontend | Legacy Rule-Notification | **Deprecated** Legacy-Event (nicht NotificationRouter-basiert, Sunset: 2026-07-03) |
 
 ### Notification Events (Phase 4A)
@@ -194,7 +197,7 @@ Alle WebSocket-Nachrichten haben folgendes Format:
 **Projection-Konsistenz (Step 3):**
 - Contract-kritische Events (`config_response`, `actuator_response`, `error_event`, `esp_diagnostics`, `esp_health`) werden serverseitig über einen gemeinsamen Serializer-Layer erzeugt (`event_contract_serializers`).
 - Dadurch sind Feldnamen/Typen zwischen MQTT-Ingest/WebSocket und REST-Aggregation konsistent.
-- `esp_health`-`data` kann zusätzliche Firmware-Telemetrie enthalten (z. B. `persistence_degraded`, `network_degraded`, Outbox-Zähler), die in `event_aggregator_service` unter `metadata.runtime_telemetry` gespiegelt werden.
+- `esp_health`-`data` kann zusätzliche Firmware-Telemetrie enthalten (z. B. `persistence_degraded`, `network_degraded`, Outbox-Zähler), die in `event_aggregator_service` unter `metadata.runtime_telemetry` gespiegelt werden. Ab AUT-121 können dieselben Kennzahlen teilweise per MQTT-Topic `system/heartbeat_metrics` ankommen und serverseitig in den nächsten Core-Heartbeat (`system/heartbeat`) gemerged werden — das WebSocket-Event `esp_health` bleibt der Kanal, nicht ein zweites Echtzeit-Event.
 
 ---
 
@@ -202,7 +205,7 @@ Alle WebSocket-Nachrichten haben folgendes Format:
 
 ### 3.1 esp_health
 
-ESP Heartbeat/Status Update. Wird bei jedem Heartbeat vom ESP gesendet.
+ESP Heartbeat/Status Update. Wird bei jedem Heartbeat vom ESP gesendet (Zähler/Stats aus `system/heartbeat_metrics` fließen nach Server-Merge in dieselbe `data`-Nutzlast mit ein, sofern AUT-121 aktiv ist).
 
 **Trigger:** MQTT Topic `kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat`
 
@@ -292,7 +295,7 @@ ESP System-Diagnostics Snapshot. Wird alle 60s vom HealthMonitor gesendet.
 
 Reconnect-Handover-Phase fuer deterministische State-Uebernahme ohne Flackern.
 
-**Trigger:** Heartbeat-Reconnect-Flow (`ADOPTING -> ADOPTED -> DELTA_ENFORCED`)
+**Trigger:** Heartbeat-Reconnect-Flow (`ADOPTING -> ADOPTED -> DELTA_ENFORCED -> CONVERGED`)
 
 **Code-Location:** [heartbeat_handler.py:1357](El Servador/god_kaiser_server/src/mqtt/handlers/heartbeat_handler.py#L1357)
 
@@ -304,7 +307,9 @@ Reconnect-Handover-Phase fuer deterministische State-Uebernahme ohne Flackern.
   "data": {
     "esp_id": "ESP_12AB34CD",
     "phase": "adopting",
-    "offline_seconds": 122.4
+    "timestamp": 1706787600,
+    "offline_seconds": 122.4,
+    "config_push_pending": false
   }
 }
 ```
@@ -313,6 +318,7 @@ Reconnect-Handover-Phase fuer deterministische State-Uebernahme ohne Flackern.
 - `adopting`: Reconnect erkannt, Device-Istzustand wird gesammelt
 - `adopted`: Adoption abgeschlossen, Enforce-Gate geoeffnet
 - `delta_enforced`: Delta-Vergleich/Evaluation abgeschlossen
+- `converged`: Reconnect-Lifecycle abgeschlossen (stabiler Zielzustand erreicht)
 
 ---
 
@@ -1166,6 +1172,104 @@ Notification von Automation Rule.
 
 ---
 
+### 8.2a conflict.arbitration
+
+Conflict-Manager Arbitration-Event für konkurrierende Regel-Aktionen auf denselben Aktor.
+
+**Trigger:** `ConflictManager.resolve_conflict()` bei erkannter Kollision.
+
+**Code-Location:** `src/services/logic/safety/conflict_manager.py`
+
+**Payload:**
+```json
+{
+  "type": "conflict.arbitration",
+  "timestamp": 1706787600,
+  "data": {
+    "trace_id": "uuid-string",
+    "actuator_key": "ESP_AABBCCDD:25",
+    "winner_rule_id": "rule-win-uuid",
+    "loser_rule_id": "rule-lose-uuid",
+    "competing_rules": ["rule-win-uuid", "rule-lose-uuid"],
+    "arbitration_mode": "priority",
+    "resolution": "higher_priority_wins",
+    "winner_priority": 90,
+    "loser_priority": 40,
+    "command": "ON",
+    "message": "Conflict on ESP_AABBCCDD:25: higher_priority_wins",
+    "timestamp": "2026-04-22T17:30:00Z"
+  }
+}
+```
+
+**arbitration_mode Values:**
+- `priority`: Prioritäts-/Safety-Entscheidung
+- `first_wins`: First-come-first-serve Entscheidung
+
+**Alert-Center Kopplung (AUT-131):**
+- Parallel zum Telemetrie-Event wird ein persistierter Alert via `NotificationRouter.route()` erzeugt (`notification_new`).
+- Empfohlene Metadata-Felder: `event_type=conflict.arbitration`, `trace_id`, `actuator_key`, `winner_rule_id`, `loser_rule_id`, `resolution`.
+- `acknowledge`/`resolve` wirken auf den Notification-Lifecycle (ISA-18.2), **nicht** rückwirkend auf bestehende Conflict-Manager-Locks.
+
+---
+
+### 8.2b rule_degraded
+
+Signalisiert den Übergang einer **kritischen** Rule in den Degraded-Zustand.
+
+**Trigger:** `LogicEngine._enter_degraded_state()` (AUT-111), typischerweise bei Ziel-ESP-Offline.
+
+**Code-Location:** `src/services/logic_engine.py`
+
+**Payload:**
+```json
+{
+  "type": "rule_degraded",
+  "timestamp": 1706787600,
+  "data": {
+    "rule_id": "uuid-string",
+    "rule_name": "Nacht-Heizung",
+    "degraded_since": "2026-04-22T17:30:00Z",
+    "degraded_reason": "target_esp_offline:ESP_EA5484",
+    "reason": "target_esp_offline:ESP_EA5484",
+    "is_critical": true,
+    "escalation_policy": {
+      "notify": ["websocket"],
+      "retry_interval_s": 60,
+      "max_retries": 5
+    }
+  }
+}
+```
+
+---
+
+### 8.2c rule_recovered
+
+Signalisiert den Rückweg einer Rule aus Degraded nach erfolgreicher Recovery.
+
+**Trigger:** `LogicEngine._exit_degraded_state()` (AUT-111).
+
+**Code-Location:** `src/services/logic_engine.py`
+
+**Payload:**
+```json
+{
+  "type": "rule_recovered",
+  "timestamp": 1706787600,
+  "data": {
+    "rule_id": "uuid-string",
+    "rule_name": "Nacht-Heizung",
+    "recovered_at": "2026-04-22T17:35:00Z",
+    "was_degraded_since": "2026-04-22T17:30:00Z",
+    "was_degraded_reason": "target_esp_offline:ESP_EA5484",
+    "was_reason": "target_esp_offline:ESP_EA5484"
+  }
+}
+```
+
+---
+
 ### 8.3 notification_new
 
 Neue DB-persistierte Notification. Wird vom NotificationRouter nach jeder Notification-Erstellung gesendet.
@@ -1807,6 +1911,8 @@ interface WebSocketFilters {
 | Service | Events |
 |---------|--------|
 | `notification_router.py` | `notification_new`, `notification_updated`, `notification_unread_count` |
+| `logic_engine.py` | `logic_execution`, `rule_degraded`, `rule_recovered` (triggert zusätzlich Conflict-Alerts über NotificationRouter) |
+| `conflict_manager.py` | `conflict.arbitration` |
 | `plugin_service.py` | `plugin_execution_started`, `plugin_execution_completed` |
 | `device_context.py` (Router) | `device_context_changed` |
 | `sensors.py` (Router) | `device_scope_changed` |

@@ -7,7 +7,7 @@ allowed-tools: Read
 
 # Kommunikationsmuster & Datenflüsse
 
-> **Version:** 2.10 | **Aktualisiert:** 2026-04-06
+> **Version:** 2.11 | **Aktualisiert:** 2026-04-23
 > **Quellen:** Code-Traces durch ESP32, Server, Frontend
 > **Verifiziert:** ✅ Alle Pfade mit Datei:Zeile dokumentiert
 
@@ -682,12 +682,14 @@ Config-Pushes werden automatisch nach folgenden API-Operationen gesendet:
 
 ### Config-Push on Mismatch Detection
 
-After metadata update, the handler checks `sensor_count` and `actuator_count` from the heartbeat against DB counts (`count_by_esp()`, only `enabled=True` configs). If ESP reports 0 but DB has configs, a config push is triggered.
+After metadata update, the handler checks `sensor_count` and `actuator_count` from the heartbeat against DB counts (`count_by_esp()`, only `enabled=True` configs). If counts drift (`ESP != DB`, with `DB > 0`), a targeted config push is triggered.
 
 **Guards:**
 - **Offline-Check:** No config push if `esp_device.status == "offline"`
-- **Cooldown:** `CONFIG_PUSH_COOLDOWN_SECONDS = 120` via `config_push_sent_at` in `device_metadata` (integer timestamp, same pattern as `zone_resync_sent_at`)
+- **Pending-Guard:** No parallel push if same ESP already has `_config_push_pending_esps` marker.
+- **Cooldown:** `CONFIG_PUSH_COOLDOWN_SECONDS = 45` via `config_push_sent_at` in `device_metadata` (integer timestamp, same pattern as `zone_resync_sent_at`)
 - **Handler:** `heartbeat_handler._has_pending_config()` → `_auto_push_config()` (async task with own DB session)
+- **Send-Metadata:** `send_config()` propagates `reason_code`, `generation`, `config_fingerprint` into MQTT payload + Audit + WS (`config_published`/`config_failed`).
 
 ### Zone Resync on Mismatch
 
@@ -808,6 +810,45 @@ Die Logic Engine unterstützt Rules über **mehrere ESPs**:
 | SequenceActionExecutor | actions/sequence_executor.py | Verkettete Aktionen (`sequence`) |
 | ConflictManager | safety/conflict_manager.py | GPIO-Konflikt-Prüfung (niedrigere numerische `priority` der Rule = höhere Konfliktpriorität), Zone-aware Key `esp_id:gpio:zone_id` (T13-R2) |
 | RateLimiter | safety/rate_limiter.py | Command-Flooding-Schutz |
+
+### AUT-111: Critical-Rule Degraded-State Flow
+
+Wenn eine `is_critical=true` Rule eine Actuator-Action auf einen offline-ESP ausführen will:
+
+```
+Rule evaluiert → _execute_actions()
+  └── ESP offline?
+      ├── Ja (erstmals): degraded_since = now, degraded_reason = "target_esp_offline:ESP_XX"
+      │   └── WS broadcast "rule_degraded" (einmal)
+      │   └── Action wird übersprungen (bestehender offline-backoff)
+      ├── Ja (bereits degraded): kein erneutes Event (no-double-emit)
+      └── Nein (ESP wieder online):
+          └── degraded_since = NULL, degraded_reason = NULL
+              └── WS broadcast "rule_recovered" (einmal)
+              └── Action wird normal ausgeführt
+```
+
+**API:** `GET /logic/degraded?critical_only=true` listet alle degradierten Rules.
+**Felder:** `is_critical`, `escalation_policy`, `degraded_since`, `degraded_reason` auf `CrossESPLogic`.
+**Events:** `rule_degraded`, `rule_recovered` (WebSocket, jeweils genau einmal pro Transition).
+
+### AUT-131: Conflict-Arbitration -> Alert-Center Lifecycle
+
+Konflikt-Arbitration bleibt als technisches WS-Telemetrie-Event (`conflict.arbitration`) sichtbar,
+wird aber zusätzlich als persistierter Alert in den Notification-Lifecycle geschrieben:
+
+```
+ConflictManager.acquire_actuator() erkennt Kollision
+  ├── WS broadcast: conflict.arbitration (Trace/Arbitration-Details)
+  └── LogicEngine._emit_conflict_alert()
+      └── NotificationRouter.route(NotificationCreate)
+          └── WS broadcast: notification_new (DB-persistiert, status=active)
+```
+
+**Operatorfluss:**
+- Frontend nutzt Alert-Center/NotificationDrawer als primären Bedienpfad.
+- `acknowledge`/`resolve` ändern den Alert-Status (`active -> acknowledged -> resolved`).
+- Diese Lifecycle-Aktion ist **informational** und ändert keine bereits gesetzten Conflict-Manager-Locks rückwirkend.
 
 ---
 
