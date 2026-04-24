@@ -208,6 +208,32 @@ class TestCompoundAndWithTimeWindow:
         assert tf["end_minute"] == 15
         assert tf["timezone"] == "Europe/Berlin"
 
+    def test_time_window_fallback_from_start_end_time_strings(self):
+        """Legacy start_time/end_time strings are parsed into time_filter minutes."""
+        rule = _make_rule(
+            rule_name="legacy_time_strings",
+            trigger_conditions=[
+                _hysteresis_cooling(ESP_ID_A, gpio=4),
+                {
+                    "type": "time_window",
+                    "start_time": "09:45",
+                    "end_time": "17:05",
+                    "timezone": "UTC",
+                },
+            ],
+            actions=[_actuator_action(ESP_ID_A, gpio=18)],
+        )
+        rule.logic_operator = "AND"
+
+        result = _builder()._extract_offline_rule(rule, ESP_ID_A)
+
+        assert result is not None
+        tf = result["time_filter"]
+        assert tf["start_hour"] == 9
+        assert tf["start_minute"] == 45
+        assert tf["end_hour"] == 17
+        assert tf["end_minute"] == 5
+
 
 # ---------------------------------------------------------------------------
 # Test 4 — OR-compound → None + logger.info

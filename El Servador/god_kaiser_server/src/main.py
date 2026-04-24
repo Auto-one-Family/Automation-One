@@ -25,6 +25,7 @@ from .api import sensor_processing
 from .api.v1 import api_v1_router
 from .api.v1.websocket import realtime as websocket_realtime
 from .core.config import get_settings
+from .core import constants
 from .core.exception_handlers import (
     automation_one_exception_handler,
     general_exception_handler,
@@ -47,6 +48,7 @@ from .mqtt.handlers import (
     discovery_handler,
     error_handler,
     heartbeat_handler,
+    heartbeat_metrics_handler,
     intent_outcome_handler,
     intent_outcome_lifecycle_handler,
     lwt_handler,
@@ -331,6 +333,12 @@ async def lifespan(app: FastAPI):
             queue_pressure_handler.handle_queue_pressure,
         )
         logger.info("Queue pressure handler registered: kaiser/+/esp/+/system/queue_pressure")
+        # AUT-121: Heartbeat Metrics Handler (pure ingest, no DB/WS)
+        _subscriber_instance.register_handler(
+            constants.get_topic_with_kaiser_id(constants.MQTT_SUBSCRIBE_ESP_HEARTBEAT_METRICS),
+            heartbeat_metrics_handler.handle_heartbeat_metrics,
+        )
+        logger.info("Heartbeat metrics handler registered: kaiser/+/esp/+/system/heartbeat_metrics")
         # S-P5: Calibration Sensor Response Handler
         # Processes sensor command responses during active calibration sessions
         _subscriber_instance.register_handler(

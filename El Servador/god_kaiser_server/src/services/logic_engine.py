@@ -17,11 +17,15 @@ from ..core.metrics import (
     increment_logic_dispatch_skipped_offline,
     increment_safety_trigger,
 )
+from ..schemas.notification import NotificationCreate
+from sqlalchemy import select
+
 from ..db.repositories import LogicRepository, ESPRepository, SensorRepository
 from ..db.session import get_session
 from ..websocket.manager import WebSocketManager
 from .actuator_service import ActuatorService
 from .state_adoption_service import get_state_adoption_service
+from .notification_router import NotificationRouter
 from .logic.actions import (
     ActuatorActionExecutor,
     BaseActionExecutor,
@@ -346,7 +350,9 @@ class LogicEngine:
                     for rule in timer_rules:
                         # Load latest sensor values so compound rules (time + sensor/hysteresis)
                         # can evaluate correctly in Phase 1.
-                        sensor_values = await self._load_sensor_values_for_timer(rule, session)
+                        sensor_values, offline_sensor_refs = await self._load_sensor_values_for_timer(
+                            rule, session
+                        )
 
                         # Build primary sensor_data from first available value so hysteresis
                         # evaluator can call _matches_sensor() and evaluate state transitions.
@@ -366,6 +372,7 @@ class LogicEngine:
                             "current_time": datetime.now(timezone.utc),
                             "sensor_values": sensor_values,
                             "sensor_data": primary_sensor_data,
+                            "_offline_sensor_refs": offline_sensor_refs,
                             "rule_id": str(rule.id),
                             "rule_name": rule.rule_name,
                             "condition_index": 0,
@@ -387,6 +394,49 @@ class LogicEngine:
                                 rule, trigger_data, logic_repo, batch_locks=batch_locks
                             )
                         else:
+                            if offline_sensor_refs:
+                                last_exec = await logic_repo.get_last_execution(rule.id)
+                                if last_exec:
+                                    hysteresis_eval = self._get_hysteresis_evaluator()
+                                    if hysteresis_eval:
+                                        active_keys = [
+                                            key
+                                            for key, state in list(hysteresis_eval._states.items())
+                                            if key.startswith(f"{rule.id}:") and state.is_active
+                                        ]
+                                        for key in active_keys:
+                                            hysteresis_eval.remove_state(key)
+                                    off_actions = self._build_off_actions(rule.actions)
+                                    if off_actions:
+                                        await self._execute_actions(
+                                            off_actions,
+                                            {
+                                                "type": "timer",
+                                                "timestamp": int(time.time()),
+                                                "rule_id": str(rule.id),
+                                                "reason": "source_esp_offline",
+                                            },
+                                            rule.id,
+                                            rule.rule_name,
+                                            rule.priority,
+                                            session=session,
+                                            batch_locks=batch_locks,
+                                        )
+                                        await session.commit()
+                                        logger.warning(
+                                            "Timer OFF: rule '%s' source ESP offline (%s), OFF sent",
+                                            rule.rule_name,
+                                            ", ".join(
+                                                sorted(
+                                                    {
+                                                        str(ref.get("esp_id"))
+                                                        for ref in offline_sensor_refs
+                                                        if ref.get("esp_id")
+                                                    }
+                                                )
+                                            ),
+                                        )
+                                        continue
                             # Pure time-window rule expired → send OFF if recently executed.
                             # Guard: only fire within 2× cooldown (or 120 s default) to
                             # avoid OFF spam on every 60-second tick for long-inactive rules.
@@ -459,7 +509,9 @@ class LogicEngine:
                 batch_locks: list = []
                 try:
                     for rule in reconnect_rules:
-                        sensor_values = await self._load_sensor_values_for_timer(rule, session)
+                        sensor_values, _offline_sensor_refs = await self._load_sensor_values_for_timer(
+                            rule, session
+                        )
                         if not sensor_values:
                             logger.debug(
                                 "Reconnect evaluation: skip %s (no fresh sensor context)",
@@ -526,12 +578,13 @@ class LogicEngine:
 
         try:
             # Evaluate conditions first (needed for hysteresis deactivation path)
-            sensor_values = await self._load_cross_sensor_values(
+            sensor_values, offline_sensor_refs = await self._load_cross_sensor_values(
                 rule.trigger_conditions, trigger_data, logic_repo.session
             )
             context = {
                 "sensor_data": trigger_data,
                 "sensor_values": sensor_values,
+                "_offline_sensor_refs": offline_sensor_refs,
                 "current_time": datetime.now(timezone.utc),
                 "rule_id": str(rule.id),
                 "rule_name": rule.rule_name,
@@ -623,6 +676,48 @@ class LogicEngine:
                             reason.get("freshness_limit_seconds", 0),
                             reason.get("measurement_freshness_hours"),
                         )
+                offline_sensor_refs = context.get("_offline_sensor_refs") or []
+                if offline_sensor_refs:
+                    logger.warning(
+                        "Rule '%s' condition not met because referenced sensor ESP(s) are offline: %s",
+                        rule.rule_name,
+                        ", ".join(
+                            sorted({str(ref.get("esp_id")) for ref in offline_sensor_refs if ref.get("esp_id")})
+                        ),
+                    )
+                    hysteresis_eval = self._get_hysteresis_evaluator()
+                    if hysteresis_eval:
+                        active_keys = [
+                            key
+                            for key, state in list(hysteresis_eval._states.items())
+                            if key.startswith(f"{rule.id}:") and state.is_active
+                        ]
+                        if active_keys:
+                            for key in active_keys:
+                                hysteresis_eval.remove_state(key)
+                            off_actions = self._build_off_actions(rule.actions)
+                            if off_actions:
+                                logger.info(
+                                    "Rule %s: source ESP offline with %d active hysteresis state(s) -> sending OFF to %d actuator(s)",
+                                    rule.rule_name,
+                                    len(active_keys),
+                                    len(off_actions),
+                                )
+                                await self._execute_actions(
+                                    off_actions,
+                                    {
+                                        **trigger_data,
+                                        "type": trigger_data.get("type", "sensor"),
+                                        "reason": "source_esp_offline",
+                                    },
+                                    rule.id,
+                                    rule.rule_name,
+                                    rule.priority,
+                                    session=logic_repo.session,
+                                    batch_locks=batch_locks,
+                                )
+                                await logic_repo.session.commit()
+                                return
                 else:
                     logger.debug(
                         f"Rule {rule.rule_name} conditions not met for trigger: {trigger_data}"
@@ -1032,8 +1127,15 @@ class LogicEngine:
                         if conflict
                         else f"{action.get('esp_id')}:{action.get('gpio')}"
                     ),
+                    "trace_id": conflict.trace_id if conflict else None,
                     "winner_rule_id": conflict.winner_rule_id if conflict else None,
+                    "loser_rule_id": str(rule_id),
                     "competing_rules": conflict.competing_rules if conflict else [str(rule_id)],
+                    "arbitration_mode": (
+                        "first_wins"
+                        if conflict and conflict.resolution.value == "first_wins"
+                        else "priority"
+                    ),
                     "resolution": conflict.resolution.value if conflict else "blocked",
                     "message": (
                         conflict.message
@@ -1045,6 +1147,14 @@ class LogicEngine:
                     "Actuator conflict for rule %s: %s",
                     rule_name,
                     conflict_info["message"],
+                )
+                await self._emit_conflict_alert(
+                    session=session,
+                    rule_id=rule_id,
+                    rule_name=rule_name,
+                    trigger_data=trigger_data,
+                    action=action,
+                    conflict_info=conflict_info,
                 )
                 # Ensure conflict is visible on existing UI path.
                 try:
@@ -1133,6 +1243,20 @@ class LogicEngine:
                                 f"Rule {rule_name}: ESP {esp_id_pre} is offline, "
                                 f"skipping actuator action (GPIO {gpio_pre})"
                             )
+                            # AUT-111: enter degraded state for critical rules
+                            try:
+                                await self._enter_degraded_state(
+                                    rule_id,
+                                    rule_name,
+                                    f"target_esp_offline:{esp_id_pre}",
+                                    session,
+                                )
+                            except Exception as deg_err:
+                                logger.warning(
+                                    "AUT-111: failed to enter degraded state for %s: %s",
+                                    rule_name,
+                                    deg_err,
+                                )
                             continue
                         # AUT-60: Config Pending Readiness Gate
                         if esp_device_pre.config_pending:
@@ -1168,6 +1292,17 @@ class LogicEngine:
                             # ESP back online and not config_pending — clear backoffs
                             self._offline_esp_skip.pop(esp_id_pre, None)
                             self._config_pending_skip.pop(esp_id_pre, None)
+                            # AUT-111: recover from degraded state
+                            try:
+                                await self._exit_degraded_state(
+                                    rule_id, rule_name, session
+                                )
+                            except Exception as rec_err:
+                                logger.warning(
+                                    "AUT-111: failed to exit degraded state for %s: %s",
+                                    rule_name,
+                                    rec_err,
+                                )
 
                 # Use modular executors if available
                 executor_found = False
@@ -1327,6 +1462,19 @@ class LogicEngine:
                             f"Rule {rule_name}: ESP {esp_id} is offline, "
                             f"skipping actuator action (GPIO {gpio})"
                         )
+                        # AUT-111: enter degraded state for critical rules
+                        try:
+                            await self._enter_degraded_state(
+                                rule_id, rule_name,
+                                f"target_esp_offline:{esp_id}",
+                                session,
+                            )
+                            await session.commit()
+                        except Exception as deg_err:
+                            logger.warning(
+                                "AUT-111: failed to enter degraded (legacy): %s",
+                                deg_err,
+                            )
                         return
                     # AUT-60: Config Pending Readiness Gate
                     if esp_device_pre.config_pending:
@@ -1346,6 +1494,17 @@ class LogicEngine:
                     else:
                         self._offline_esp_skip.pop(esp_id, None)
                         self._config_pending_skip.pop(esp_id, None)
+                        # AUT-111: recover from degraded state
+                        try:
+                            await self._exit_degraded_state(
+                                rule_id, rule_name, session
+                            )
+                            await session.commit()
+                        except Exception as rec_err:
+                            logger.warning(
+                                "AUT-111: failed to exit degraded (legacy): %s",
+                                rec_err,
+                            )
 
             cmd_result = await self.actuator_service.send_command(
                 esp_id=esp_id,
@@ -1394,7 +1553,7 @@ class LogicEngine:
 
     async def _load_cross_sensor_values(
         self, trigger_conditions, trigger_data: dict, session
-    ) -> dict:
+    ) -> tuple[dict, list[dict]]:
         """
         Pre-load latest sensor values for cross-sensor conditions.
 
@@ -1408,9 +1567,12 @@ class LogicEngine:
             session: SQLAlchemy async session
 
         Returns:
-            Dict mapping "ESP_ID:GPIO" to {"value": float, "sensor_type": str}
+            Tuple:
+            - sensor_values: Dict mapping "ESP_ID:GPIO" to value metadata
+            - offline_sensor_refs: sensor refs skipped because ESP is offline
         """
         sensor_values = {}
+        offline_sensor_refs: list[dict] = []
 
         # Include trigger data in sensor_values for consistency
         # Use sensor_type-specific key for multi-value sensors (SHT31 temp vs humidity)
@@ -1464,7 +1626,7 @@ class LogicEngine:
                 cross_sensor_keys.append((cond_esp, int(cond_gpio), cond_sensor_type))
 
         if not cross_sensor_keys:
-            return sensor_values
+            return sensor_values, offline_sensor_refs
 
         # Look up latest values from DB
         try:
@@ -1480,6 +1642,22 @@ class LogicEngine:
                 esp_device = await esp_repo.get_by_device_id(esp_id_str)
                 if not esp_device:
                     logger.debug(f"Cross-sensor lookup: ESP {esp_id_str} not found")
+                    continue
+                if not esp_device.is_online:
+                    offline_sensor_refs.append(
+                        {
+                            "esp_id": esp_id_str,
+                            "gpio": gpio,
+                            "sensor_type": sensor_type,
+                            "reason": "esp_offline",
+                        }
+                    )
+                    logger.debug(
+                        "Cross-sensor lookup skipped (ESP offline): %s:%s:%s",
+                        esp_id_str,
+                        gpio,
+                        sensor_type,
+                    )
                     continue
 
                 # Get latest sensor reading
@@ -1526,7 +1704,75 @@ class LogicEngine:
         except Exception as e:
             logger.warning(f"Failed to load cross-sensor values: {e}")
 
-        return sensor_values
+        return sensor_values, offline_sensor_refs
+
+    async def _emit_conflict_alert(
+        self,
+        *,
+        session,
+        rule_id: uuid.UUID,
+        rule_name: str,
+        trigger_data: dict,
+        action: dict,
+        conflict_info: dict,
+    ) -> None:
+        """Persist actuator conflicts into the notification lifecycle (Alert-Center SSOT)."""
+        if session is None:
+            return
+
+        actuator_key = str(conflict_info.get("actuator_key") or "unknown")
+        trace_id = str(conflict_info.get("trace_id") or "")
+        title = f"Regelkonflikt auf {actuator_key}"
+        body = str(
+            conflict_info.get("message")
+            or "Aktor-Aktion wurde durch Konflikt-Arbitration blockiert."
+        )
+        correlation = f"logic_conflict:{trace_id}" if trace_id else None
+        fingerprint = (
+            f"logic_conflict:{trace_id}"
+            if trace_id
+            else f"logic_conflict:{rule_id}:{actuator_key}"
+        )[:64]
+
+        metadata = {
+            "event_type": "conflict.arbitration",
+            "rule_id": str(rule_id),
+            "rule_name": rule_name,
+            "trace_id": trace_id or None,
+            "actuator_key": actuator_key,
+            "winner_rule_id": conflict_info.get("winner_rule_id"),
+            "loser_rule_id": conflict_info.get("loser_rule_id"),
+            "competing_rules": conflict_info.get("competing_rules") or [],
+            "arbitration_mode": conflict_info.get("arbitration_mode"),
+            "resolution": conflict_info.get("resolution"),
+            "trigger": trigger_data,
+            "action": action,
+            "ack_effect": "informational",
+            "resolve_effect": "informational",
+        }
+
+        try:
+            router = NotificationRouter(session)
+            await router.route(
+                NotificationCreate(
+                    user_id=None,
+                    channel="websocket",
+                    severity="warning",
+                    category="system",
+                    title=title,
+                    body=body,
+                    metadata=metadata,
+                    source="logic_engine",
+                    correlation_id=correlation,
+                    fingerprint=fingerprint,
+                )
+            )
+        except Exception as notif_err:
+            logger.warning(
+                "Failed to persist conflict alert for rule %s: %s",
+                rule_name,
+                notif_err,
+            )
 
     def _extract_sensor_refs_from_conditions(self, conditions) -> list[dict]:
         """
@@ -1572,7 +1818,7 @@ class LogicEngine:
 
         return refs
 
-    async def _load_sensor_values_for_timer(self, rule, session) -> dict:
+    async def _load_sensor_values_for_timer(self, rule, session) -> tuple[dict, list[dict]]:
         """
         Load latest sensor values for all sensor references in a timer rule.
 
@@ -1587,14 +1833,16 @@ class LogicEngine:
             session: Active SQLAlchemy async session
 
         Returns:
-            Dict mapping "ESP_ID:GPIO:sensor_type" to sensor value dicts.
-            Empty dict if no sensor references or all readings are stale.
+            Tuple:
+            - sensor_values: Dict mapping "ESP_ID:GPIO:sensor_type" to sensor value dicts
+            - offline_sensor_refs: referenced sensors skipped because ESP is offline
         """
         sensor_refs = self._extract_sensor_refs_from_conditions(rule.trigger_conditions)
         if not sensor_refs:
-            return {}
+            return {}, []
 
         sensor_values: dict = {}
+        offline_sensor_refs: list[dict] = []
         staleness_limit = datetime.now(timezone.utc) - timedelta(minutes=5)
 
         esp_repo = ESPRepository(session)
@@ -1608,6 +1856,22 @@ class LogicEngine:
             esp_device = await esp_repo.get_by_device_id(esp_id_str)
             if not esp_device:
                 logger.debug(f"Timer sensor lookup: ESP {esp_id_str} not found")
+                continue
+            if not esp_device.is_online:
+                offline_sensor_refs.append(
+                    {
+                        "esp_id": esp_id_str,
+                        "gpio": gpio,
+                        "sensor_type": sensor_type,
+                        "reason": "esp_offline",
+                    }
+                )
+                logger.debug(
+                    "Timer sensor lookup skipped (ESP offline): %s:%s:%s",
+                    esp_id_str,
+                    gpio,
+                    sensor_type,
+                )
                 continue
 
             reading = await sensor_repo.get_latest_reading(
@@ -1668,7 +1932,7 @@ class LogicEngine:
             sensor_values[key] = entry
             logger.debug(f"Timer sensor loaded: {key} = {display_value} ({sensor_type})")
 
-        return sensor_values
+        return sensor_values, offline_sensor_refs
 
     def _extract_target_esp_ids(self, actions: list) -> List[str]:
         """
@@ -1696,6 +1960,109 @@ class LogicEngine:
                         if esp_id:
                             esp_ids.add(esp_id)
         return list(esp_ids)
+
+    # =========================================================================
+    # AUT-111: Degraded-State Tracking for Critical Rules
+    # =========================================================================
+
+    async def _enter_degraded_state(
+        self,
+        rule_id: uuid.UUID,
+        rule_name: str,
+        reason: str,
+        session,
+    ) -> None:
+        """Mark a critical rule as degraded (once per transition).
+
+        Sets degraded_since/degraded_reason on the DB row and emits a
+        ``rule_degraded`` WebSocket event exactly once per entry.
+        Non-critical rules are silently ignored.
+        """
+        from ..db.models.logic import CrossESPLogic
+
+        stmt = select(CrossESPLogic).where(CrossESPLogic.id == rule_id)
+        result = await session.execute(stmt)
+        rule = result.scalar_one_or_none()
+        if not rule or not rule.is_critical:
+            return
+        if rule.degraded_since is not None:
+            return  # already degraded — no double-emit
+
+        now = datetime.now(timezone.utc)
+        rule.degraded_since = now
+        rule.degraded_reason = reason[:64]
+        await session.flush()
+
+        try:
+            await self.websocket_manager.broadcast(
+                "rule_degraded",
+                {
+                    "rule_id": str(rule_id),
+                    "rule_name": rule_name,
+                    "degraded_since": now.isoformat(),
+                    "degraded_reason": reason[:64],
+                    "reason": reason[:64],
+                    "is_critical": True,
+                    "escalation_policy": rule.escalation_policy,
+                },
+            )
+        except Exception as ws_err:
+            logger.warning(
+                "WebSocket rule_degraded broadcast failed for %s: %s",
+                rule_name,
+                ws_err,
+            )
+        logger.warning(
+            "AUT-111: Rule '%s' entered DEGRADED state: %s",
+            rule_name,
+            reason[:64],
+        )
+
+    async def _exit_degraded_state(
+        self,
+        rule_id: uuid.UUID,
+        rule_name: str,
+        session,
+    ) -> None:
+        """Clear degraded state on recovery and emit ``rule_recovered`` once."""
+        from ..db.models.logic import CrossESPLogic
+
+        stmt = select(CrossESPLogic).where(CrossESPLogic.id == rule_id)
+        result = await session.execute(stmt)
+        rule = result.scalar_one_or_none()
+        if not rule or rule.degraded_since is None:
+            return  # not degraded — nothing to recover
+
+        old_reason = rule.degraded_reason
+        old_since = rule.degraded_since
+        rule.degraded_since = None
+        rule.degraded_reason = None
+        await session.flush()
+
+        try:
+            await self.websocket_manager.broadcast(
+                "rule_recovered",
+                {
+                    "rule_id": str(rule_id),
+                    "rule_name": rule_name,
+                    "recovered_at": datetime.now(timezone.utc).isoformat(),
+                    "was_degraded_since": old_since.isoformat() if old_since else None,
+                    "was_degraded_reason": old_reason,
+                    "was_reason": old_reason,
+                },
+            )
+        except Exception as ws_err:
+            logger.warning(
+                "WebSocket rule_recovered broadcast failed for %s: %s",
+                rule_name,
+                ws_err,
+            )
+        logger.info(
+            "AUT-111: Rule '%s' RECOVERED from degraded state (was: %s since %s)",
+            rule_name,
+            old_reason,
+            old_since.isoformat() if old_since else "?",
+        )
 
     def _get_hysteresis_evaluator(self) -> Optional[HysteresisConditionEvaluator]:
         """Return the HysteresisConditionEvaluator from this engine's evaluator list.
@@ -1995,7 +2362,9 @@ class LogicEngine:
                     break  # Step 3 complete for sensor-less rules
 
                 # Step 3c: rules with sensor refs → re-evaluate with fresh values from DB
-                sensor_values = await self._load_sensor_values_for_timer(rule, session)
+                sensor_values, _offline_sensor_refs = await self._load_sensor_values_for_timer(
+                    rule, session
+                )
 
                 if not sensor_values:
                     logger.info(

@@ -58,6 +58,35 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/v1/logic", tags=["logic"])
 
 
+def _build_rule_response(
+    rule,
+    exec_count: int = 0,
+    last_exec_success: "bool | None" = None,
+) -> LogicRuleResponse:
+    """Build LogicRuleResponse from a CrossESPLogic instance (DRY helper)."""
+    return LogicRuleResponse(
+        id=rule.id,
+        name=rule.name,
+        description=rule.description,
+        conditions=rule.conditions,
+        actions=rule.actions,
+        logic_operator=rule.logic_operator,
+        enabled=rule.enabled,
+        priority=rule.priority,
+        cooldown_seconds=rule.cooldown_seconds,
+        max_executions_per_hour=rule.max_executions_per_hour,
+        last_triggered=rule.last_triggered,
+        execution_count=exec_count,
+        last_execution_success=last_exec_success,
+        is_critical=rule.is_critical,
+        escalation_policy=rule.escalation_policy,
+        degraded_since=rule.degraded_since,
+        degraded_reason=rule.degraded_reason,
+        created_at=rule.created_at,
+        updated_at=rule.updated_at,
+    )
+
+
 async def _push_config_to_affected_esps(db: DBSession, esp_ids: set[str], context: str) -> None:
     """Build and push combined config for each affected ESP (best effort)."""
     if not esp_ids:
@@ -69,7 +98,11 @@ async def _push_config_to_affected_esps(db: DBSession, esp_ids: set[str], contex
     for esp_id in esp_ids:
         try:
             combined_config = await config_builder.build_combined_config(esp_id, db)
-            config_sent = await esp_service.send_config(esp_id, combined_config)
+            config_sent = await esp_service.send_config(
+                esp_id,
+                combined_config,
+                reason_code="logic_config_change",
+            )
             if config_sent.get("success"):
                 logger.info("Config published to ESP %s after %s", esp_id, context)
             else:
@@ -139,34 +172,53 @@ async def list_rules(
     # Build responses
     responses = []
     for rule in paginated:
-        # Get execution count
         exec_count = await logic_repo.get_execution_count(rule.id)
         last_exec = await logic_repo.get_last_execution(rule.id)
-
         responses.append(
-            LogicRuleResponse(
-                id=rule.id,
-                name=rule.name,
-                description=rule.description,
-                conditions=rule.conditions,
-                actions=rule.actions,
-                logic_operator=rule.logic_operator,
-                enabled=rule.enabled,
-                priority=rule.priority,
-                cooldown_seconds=rule.cooldown_seconds,
-                max_executions_per_hour=rule.max_executions_per_hour,
-                last_triggered=rule.last_triggered,
-                execution_count=exec_count,
-                last_execution_success=last_exec.success if last_exec else None,
-                created_at=rule.created_at,
-                updated_at=rule.updated_at,
-            )
+            _build_rule_response(rule, exec_count, last_exec.success if last_exec else None)
         )
 
     return LogicRuleListResponse(
         success=True,
         data=responses,
         pagination=PaginationMeta.from_pagination(page, page_size, total_items),
+    )
+
+
+# =============================================================================
+# Degraded Rules (AUT-111)
+# =============================================================================
+
+
+@router.get(
+    "/degraded",
+    response_model=LogicRuleListResponse,
+    summary="List degraded logic rules",
+    description="Get all rules currently in degraded state (AUT-111).",
+)
+async def list_degraded_rules(
+    db: DBSession,
+    current_user: ActiveUser,
+    critical_only: Annotated[
+        bool, Query(description="Only return is_critical=True rules")
+    ] = False,
+) -> LogicRuleListResponse:
+    """List rules whose degraded_since is not null."""
+    logic_repo = LogicRepository(db)
+    rules = await logic_repo.get_degraded_rules(critical_only=critical_only)
+
+    responses = []
+    for rule in rules:
+        exec_count = await logic_repo.get_execution_count(rule.id)
+        last_exec = await logic_repo.get_last_execution(rule.id)
+        responses.append(
+            _build_rule_response(rule, exec_count, last_exec.success if last_exec else None)
+        )
+
+    return LogicRuleListResponse(
+        success=True,
+        data=responses,
+        pagination=PaginationMeta.from_pagination(1, len(responses) or 1, len(responses)),
     )
 
 
@@ -210,23 +262,7 @@ async def get_rule(
     exec_count = await logic_repo.get_execution_count(rule.id)
     last_exec = await logic_repo.get_last_execution(rule.id)
 
-    return LogicRuleResponse(
-        id=rule.id,
-        name=rule.name,
-        description=rule.description,
-        conditions=rule.conditions,
-        actions=rule.actions,
-        logic_operator=rule.logic_operator,
-        enabled=rule.enabled,
-        priority=rule.priority,
-        cooldown_seconds=rule.cooldown_seconds,
-        max_executions_per_hour=rule.max_executions_per_hour,
-        last_triggered=rule.last_triggered,
-        execution_count=exec_count,
-        last_execution_success=last_exec.success if last_exec else None,
-        created_at=rule.created_at,
-        updated_at=rule.updated_at,
-    )
+    return _build_rule_response(rule, exec_count, last_exec.success if last_exec else None)
 
 
 # =============================================================================
@@ -278,23 +314,7 @@ async def create_rule(
     exec_count = await logic_repo.get_execution_count(created.id)
     last_exec = await logic_repo.get_last_execution(created.id)
 
-    return LogicRuleResponse(
-        id=created.id,
-        name=created.name,
-        description=created.description,
-        conditions=created.conditions,
-        actions=created.actions,
-        logic_operator=created.logic_operator,
-        enabled=created.enabled,
-        priority=created.priority,
-        cooldown_seconds=created.cooldown_seconds,
-        max_executions_per_hour=created.max_executions_per_hour,
-        last_triggered=created.last_triggered,
-        execution_count=exec_count,
-        last_execution_success=last_exec.success if last_exec else None,
-        created_at=created.created_at,
-        updated_at=created.updated_at,
-    )
+    return _build_rule_response(created, exec_count, last_exec.success if last_exec else None)
 
 
 # =============================================================================
@@ -352,23 +372,7 @@ async def update_rule(
         context="logic rule update",
     )
 
-    return LogicRuleResponse(
-        id=rule.id,
-        name=rule.name,
-        description=rule.description,
-        conditions=rule.conditions,
-        actions=rule.actions,
-        logic_operator=rule.logic_operator,
-        enabled=rule.enabled,
-        priority=rule.priority,
-        cooldown_seconds=rule.cooldown_seconds,
-        max_executions_per_hour=rule.max_executions_per_hour,
-        last_triggered=rule.last_triggered,
-        execution_count=exec_count,
-        last_execution_success=last_exec.success if last_exec else None,
-        created_at=rule.created_at,
-        updated_at=rule.updated_at,
-    )
+    return _build_rule_response(rule, exec_count, last_exec.success if last_exec else None)
 
 
 # =============================================================================
@@ -482,23 +486,7 @@ async def delete_rule(
         context="logic rule delete",
     )
 
-    return LogicRuleResponse(
-        id=rule.id,
-        name=rule.name,
-        description=rule.description,
-        conditions=rule.conditions,
-        actions=rule.actions,
-        logic_operator=rule.logic_operator,
-        enabled=rule.enabled,
-        priority=rule.priority,
-        cooldown_seconds=rule.cooldown_seconds,
-        max_executions_per_hour=rule.max_executions_per_hour,
-        last_triggered=rule.last_triggered,
-        execution_count=0,
-        last_execution_success=None,
-        created_at=rule.created_at,
-        updated_at=rule.updated_at,
-    )
+    return _build_rule_response(rule, 0, None)
 
 
 # =============================================================================
@@ -917,22 +905,8 @@ async def instantiate_template(
         exec_count = await logic_repo.get_execution_count(created.id)
         last_exec = await logic_repo.get_last_execution(created.id)
 
-        return LogicRuleResponse(
-            id=created.id,
-            name=created.name,
-            description=created.description,
-            conditions=created.conditions,
-            actions=created.actions,
-            logic_operator=created.logic_operator,
-            enabled=created.enabled,
-            priority=created.priority,
-            cooldown_seconds=created.cooldown_seconds,
-            max_executions_per_hour=created.max_executions_per_hour,
-            last_triggered=created.last_triggered,
-            execution_count=exec_count,
-            last_execution_success=last_exec.success if last_exec else None,
-            created_at=created.created_at,
-            updated_at=created.updated_at,
+        return _build_rule_response(
+            created, exec_count, last_exec.success if last_exec else None
         )
 
     except TemplateLoadError:

@@ -9,6 +9,7 @@ from . import diagnostics_handler
 from . import discovery_handler
 from . import error_handler
 from . import heartbeat_handler
+from . import heartbeat_metrics_handler
 from . import intent_outcome_handler
 from . import intent_outcome_lifecycle_handler
 from . import lwt_handler
@@ -27,6 +28,7 @@ __all__ = [
     "discovery_handler",
     "error_handler",
     "heartbeat_handler",
+    "heartbeat_metrics_handler",
     "intent_outcome_handler",
     "intent_outcome_lifecycle_handler",
     "lwt_handler",

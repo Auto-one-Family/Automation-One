@@ -16,6 +16,15 @@
 // #define ENABLE_AGENT_DEBUG_LOGS
 
 // ============================================
+// HEARTBEAT METRICS SPLIT (AUT-121)
+// ============================================
+// Separates telemetry counters from core heartbeat into a dedicated
+// .../system/heartbeat_metrics topic (QoS 0, delta/freshness gated).
+// Core heartbeat retains ACK/validation/config/zone/handover fields.
+// DEFAULT: Disabled (opt-in, full legacy heartbeat preserved)
+// #define ENABLE_METRICS_SPLIT
+
+// ============================================
 // CORE-QUEUE SAFETY CONTRACT (R0-R4)
 // ============================================
 // Keep these flags enabled for the hardened queue/safety contract.

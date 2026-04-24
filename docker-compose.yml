@@ -115,6 +115,11 @@ services:
       # Database
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       DATABASE_AUTO_INIT: "true"
+      # Backup authentication (kept in sync with database credentials)
+      DB_BACKUP_PG_HOST: postgres
+      DB_BACKUP_PG_USER: ${POSTGRES_USER}
+      DB_BACKUP_PG_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_BACKUP_PG_DATABASE: ${POSTGRES_DB}
       # MQTT
       MQTT_BROKER_HOST: mqtt-broker
       MQTT_BROKER_PORT: "1883"

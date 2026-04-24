@@ -33,6 +33,7 @@
 #include "../../error_handling/error_tracker.h"
 #include "../../error_handling/circuit_breaker.h"
 #include "../../models/system_types.h"
+#include "../../config/feature_flags.h"
 
 // ============================================
 // MQTT CONFIGURATION STRUCTURE
@@ -253,6 +254,31 @@ private:
 
     // AUT-57: cumulative retry count across all safePublish calls (telemetry only)
     uint32_t safe_publish_retry_count_;
+
+    // ============================================
+    // AUT-121: HEARTBEAT METRICS SPLIT
+    // ============================================
+#ifdef ENABLE_METRICS_SPLIT
+    struct MetricsSnapshot {
+        uint32_t offline_enter_count;
+        uint32_t adopting_enter_count;
+        uint32_t adoption_noop_count;
+        uint32_t adoption_delta_count;
+        uint32_t handover_abort_count;
+        uint32_t handover_contract_reject_count;
+        uint32_t persistence_drift_count;
+        uint32_t critical_outcome_drop_count;
+        uint32_t publish_outbox_drop_count;
+        uint32_t sensor_cmd_queue_overflow_count;
+        uint32_t safe_publish_retry_count;
+        uint32_t emergency_rejected_no_token_total;
+    };
+    MetricsSnapshot last_metrics_;
+    uint8_t metrics_skip_count_;
+    static const uint8_t METRICS_MAX_SKIP_COUNT = 5;
+    void publishHeartbeatMetrics();
+    bool metricsChanged_(const MetricsSnapshot& current) const;
+#endif
 
     // ============================================
     // REGISTRATION GATE (Bug #1 Fix)

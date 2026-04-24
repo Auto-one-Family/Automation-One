@@ -96,9 +96,13 @@ class TimeWindowCondition(BaseModel):
         }
     """
 
-    type: Literal["time_window"] = Field(..., description="Condition type (must be 'time_window')")
+    type: Literal["time_window", "time"] = Field(
+        ..., description="Condition type ('time_window' or 'time')"
+    )
     start_hour: int = Field(..., description="Start hour (0-23)", ge=0, le=23)
+    start_minute: int = Field(0, description="Start minute (0-59)", ge=0, le=59)
     end_hour: int = Field(..., description="End hour (0-24)", ge=0, le=24)
+    end_minute: int = Field(0, description="End minute (0-59)", ge=0, le=59)
     days_of_week: Optional[List[int]] = Field(
         None,
         description="Days of week (0=Monday, 6=Sunday). If None, applies to all days.",
@@ -112,6 +116,15 @@ class TimeWindowCondition(BaseModel):
             for day in v:
                 if day < 0 or day > 6:
                     raise ValueError(f"Invalid day of week: {day}. Must be 0-6 (Monday-Sunday)")
+        return v
+
+    @field_validator("end_minute")
+    @classmethod
+    def validate_end_minute_for_hour_24(cls, v, info):
+        """24:xx is invalid. Allow 24:00 only as end-of-day marker."""
+        end_hour = info.data.get("end_hour")
+        if end_hour == 24 and v != 0:
+            raise ValueError("end_minute must be 0 when end_hour is 24")
         return v
 
 

@@ -90,6 +90,10 @@ def serialize_config_response_event(
     failures: list[Mapping[str, Any]] | None = None,
     failed_item: Mapping[str, Any] | None = None,
     request_id: Any = None,
+    reason_code: Any = None,
+    generation: Any = None,
+    config_fingerprint: Any = None,
+    trigger_source: Any = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "esp_id": esp_id,
@@ -119,6 +123,14 @@ def serialize_config_response_event(
         payload["failed_item"] = dict(failed_item)
     if request_id is not None:
         payload["request_id"] = str(request_id)
+    if reason_code is not None:
+        payload["reason_code"] = str(reason_code)
+    if generation is not None:
+        payload["generation"] = _to_int(generation)
+    if config_fingerprint is not None:
+        payload["config_fingerprint"] = str(config_fingerprint)
+    if trigger_source is not None:
+        payload["trigger_source"] = str(trigger_source)
     return payload
 
 

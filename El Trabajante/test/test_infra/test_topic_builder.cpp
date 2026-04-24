@@ -151,6 +151,17 @@ void test_topic_builder_id_substitution() {
   TEST_ASSERT_EQUAL_STRING("kaiser/custom_kaiser/esp/custom_esp/sensor/10/data", topic);
 }
 
+// ============================================
+// TEST: System Heartbeat Metrics Topic (AUT-121)
+// ============================================
+void test_topic_builder_heartbeat_metrics() {
+  TopicBuilder::setEspId("esp32_005");
+  TopicBuilder::setKaiserId("god");
+
+  const char* topic = TopicBuilder::buildSystemHeartbeatMetricsTopic();
+  TEST_ASSERT_EQUAL_STRING("kaiser/god/esp/esp32_005/system/heartbeat_metrics", topic);
+}
+
 void test_topic_builder_intent_outcome_lifecycle() {
   TopicBuilder::setEspId("esp_x");
   TopicBuilder::setKaiserId("god");
@@ -181,6 +192,7 @@ void setup() {
   RUN_TEST(test_topic_builder_actuator_alert);
   RUN_TEST(test_topic_builder_actuator_emergency);
   RUN_TEST(test_topic_builder_heartbeat);
+  RUN_TEST(test_topic_builder_heartbeat_metrics);
   RUN_TEST(test_topic_builder_system_command);
   RUN_TEST(test_topic_builder_config);
   RUN_TEST(test_topic_builder_broadcast_emergency);

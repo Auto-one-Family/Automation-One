@@ -796,12 +796,20 @@ async def create_or_update_sensor(
             created_sensors[0], esp_id, subzone_id=subzone_id_val, subzone_warning=subzone_error
         )
 
+        config_correlation_id: Optional[str] = None
+        config_request_id: Optional[str] = None
         # Publish combined config to ESP32 via MQTT (once for all sub-types)
         try:
             config_builder: ConfigPayloadBuilder = get_config_builder(db)
             combined_config = await config_builder.build_combined_config(esp_id, db)
             esp_service: ESPService = get_esp_service(db)
-            config_sent = await esp_service.send_config(esp_id, combined_config)
+            config_sent = await esp_service.send_config(
+                esp_id,
+                combined_config,
+                reason_code="sensor_config_change",
+            )
+            config_correlation_id = config_sent.get("correlation_id")
+            config_request_id = config_sent.get("request_id") or config_correlation_id
             if config_sent.get("success"):
                 logger.info(f"Config published to ESP {esp_id} after multi-value sensor create")
             else:
@@ -810,6 +818,8 @@ async def create_or_update_sensor(
             # Log error but don't fail the request (DB save was successful)
             logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
 
+        first_response.correlation_id = config_correlation_id
+        first_response.request_id = config_request_id
         return first_response
 
     # =========================================================================
@@ -1094,13 +1104,21 @@ async def create_or_update_sensor(
         await db.rollback()
         # Non-fatal: sensor was saved, subzone can be fixed manually
 
+    config_correlation_id: Optional[str] = None
+    config_request_id: Optional[str] = None
     # Publish config to ESP32 via MQTT (using dependency-injected services)
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
         combined_config = await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
-        config_sent = await esp_service.send_config(esp_id, combined_config)
+        config_sent = await esp_service.send_config(
+            esp_id,
+            combined_config,
+            reason_code="sensor_config_change",
+        )
+        config_correlation_id = config_sent.get("correlation_id")
+        config_request_id = config_sent.get("request_id") or config_correlation_id
 
         if config_sent.get("success"):
             logger.info(f"Config published to ESP {esp_id} after sensor create/update")
@@ -1116,7 +1134,10 @@ async def create_or_update_sensor(
     subzone_id_val = subzone.subzone_id if subzone else None
 
     # Convert model to response schema
-    return _model_to_response(sensor, esp_id, subzone_id=subzone_id_val, subzone_warning=subzone_error)
+    response = _model_to_response(sensor, esp_id, subzone_id=subzone_id_val, subzone_warning=subzone_error)
+    response.correlation_id = config_correlation_id
+    response.request_id = config_request_id
+    return response
 
 
 # =============================================================================
@@ -1172,7 +1193,9 @@ async def delete_sensor(
 
     gpio = sensor.gpio if sensor.gpio is not None else 0
 
-    # Save sensor_type before delete (ORM object stays accessible but be explicit)
+    # Save a detached response snapshot and sensor_type before delete.
+    # This avoids relying on deleted ORM state after commit.
+    deleted_sensor_response = _model_to_response(sensor, esp_id)
     deleted_sensor_type = sensor.sensor_type
 
     # 1. Delete sensor config (sensor_data rows are NOT cascade-deleted)
@@ -1245,7 +1268,11 @@ async def delete_sensor(
         combined_config = await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
-        config_sent = await esp_service.send_config(esp_id, combined_config)
+        config_sent = await esp_service.send_config(
+            esp_id,
+            combined_config,
+            reason_code="sensor_config_change",
+        )
 
         if config_sent.get("success"):
             logger.info(f"Config published to ESP {esp_id} after sensor delete")
@@ -1265,14 +1292,14 @@ async def delete_sensor(
                 "config_id": str(config_id),
                 "esp_id": esp_id,
                 "gpio": gpio,
-                "sensor_type": sensor.sensor_type,
+                "sensor_type": deleted_sensor_type,
             },
         )
     except Exception as e:
         logger.debug(f"WebSocket broadcast for sensor_config_deleted: {e}")
 
     # Convert model to response schema
-    return _model_to_response(sensor, esp_id)
+    return deleted_sensor_response
 
 
 # =============================================================================

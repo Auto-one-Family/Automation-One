@@ -24,9 +24,49 @@ References:
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .common import BaseResponse, PaginatedResponse, TimestampMixin
+
+
+# =============================================================================
+# Escalation Policy Validation (AUT-111)
+# =============================================================================
+
+_VALID_NOTIFY_CHANNELS = {"email", "websocket", "webhook"}
+
+
+def _validate_escalation_policy(v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Validate escalation_policy shape: structure + types."""
+    if v is None:
+        return v
+    if not isinstance(v, dict):
+        raise ValueError("escalation_policy must be a JSON object")
+    allowed_keys = {"notify", "retry_interval_s", "max_retries", "failover_actions"}
+    unknown = set(v.keys()) - allowed_keys
+    if unknown:
+        raise ValueError(f"Unknown escalation_policy keys: {unknown}")
+    if "notify" in v:
+        if not isinstance(v["notify"], list):
+            raise ValueError("escalation_policy.notify must be a list")
+        for ch in v["notify"]:
+            if ch not in _VALID_NOTIFY_CHANNELS:
+                raise ValueError(
+                    f"Invalid notify channel '{ch}', allowed: {_VALID_NOTIFY_CHANNELS}"
+                )
+    if "retry_interval_s" in v:
+        ri = v["retry_interval_s"]
+        if not isinstance(ri, (int, float)) or ri < 1 or ri > 3600:
+            raise ValueError("retry_interval_s must be 1..3600")
+    if "max_retries" in v:
+        mr = v["max_retries"]
+        if not isinstance(mr, int) or mr < 0 or mr > 100:
+            raise ValueError("max_retries must be 0..100")
+    if "failover_actions" in v:
+        fa = v["failover_actions"]
+        if not isinstance(fa, list):
+            raise ValueError("failover_actions must be a list")
+    return v
 
 # Kanonisch mit Laufzeit: logic_repo.get_enabled_rules (priority.asc), ConflictManager
 LOGIC_RULE_PRIORITY_FIELD_DESCRIPTION = (
@@ -327,6 +367,23 @@ class LogicRuleCreate(LogicRuleBase):
         le=60,
         description="Maximum executions per hour (None=unlimited)",
     )
+    is_critical: bool = Field(
+        False,
+        description="AUT-111: Mark rule as safety-critical (enables degraded-state tracking)",
+    )
+    escalation_policy: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "AUT-111: Escalation policy for critical rules when degraded. "
+            "Shape: {notify: ['email','websocket'], retry_interval_s: 60, "
+            "max_retries: 5, failover_actions: [...]}"
+        ),
+    )
+
+    @field_validator("escalation_policy")
+    @classmethod
+    def validate_escalation(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _validate_escalation_policy(v)
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -356,6 +413,7 @@ class LogicRuleCreate(LogicRuleBase):
                 "enabled": True,
                 "priority": 80,
                 "cooldown_seconds": 300,
+                "is_critical": False,
             }
         }
     )
@@ -382,6 +440,15 @@ class LogicRuleUpdate(BaseModel):
     )
     cooldown_seconds: Optional[int] = Field(None, ge=0, le=86400)
     max_executions_per_hour: Optional[int] = Field(None, ge=1, le=60)
+    is_critical: Optional[bool] = Field(None, description="AUT-111: Safety-critical flag")
+    escalation_policy: Optional[Dict[str, Any]] = Field(
+        None, description="AUT-111: Escalation policy"
+    )
+
+    @field_validator("escalation_policy")
+    @classmethod
+    def validate_escalation(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return _validate_escalation_policy(v)
 
 
 class LogicRuleResponse(LogicRuleBase, TimestampMixin):
@@ -429,6 +496,23 @@ class LogicRuleResponse(LogicRuleBase, TimestampMixin):
         None,
         description="Whether last execution succeeded",
     )
+    # AUT-111: Critical-Rule Degraded-Handling
+    is_critical: bool = Field(
+        False,
+        description="Whether this rule is safety-critical",
+    )
+    escalation_policy: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Escalation policy for critical rules",
+    )
+    degraded_since: Optional[datetime] = Field(
+        None,
+        description="Timestamp when rule entered degraded state",
+    )
+    degraded_reason: Optional[str] = Field(
+        None,
+        description="Reason for degraded state",
+    )
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -453,6 +537,7 @@ class LogicRuleResponse(LogicRuleBase, TimestampMixin):
                 "enabled": True,
                 "priority": 80,
                 "cooldown_seconds": 300,
+                "is_critical": False,
                 "last_triggered": "2025-01-01T12:00:00Z",
                 "execution_count": 15,
                 "last_execution_success": True,

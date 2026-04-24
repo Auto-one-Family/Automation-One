@@ -189,6 +189,12 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
 
         # 1. Prüfe ob dieser Sensor zur Condition passt
         if not self._matches_sensor(condition, sensor_data):
+            # Wenn der referenzierte Sensor-ESP als offline markiert ist,
+            # darf ein alter aktiver Hysterese-State NICHT weiter zu True führen.
+            # Sonst könnte eine Compound-Regel (hysteresis + time_window) trotz
+            # fehlender Sensorquelle weiter Aktionen triggern.
+            if self._is_condition_source_offline(condition, context):
+                return False
             # Nicht unser Sensor - keine Änderung am State
             # WICHTIG: Gib aktuellen State zurück, nicht False!
             state = self._get_state(context)
@@ -379,6 +385,47 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
                 return False
 
         return True
+
+    def _is_condition_source_offline(self, condition: Dict, context: Dict) -> bool:
+        """Check whether this condition's sensor reference is marked offline in context."""
+        offline_refs = context.get("_offline_sensor_refs") or []
+        if not isinstance(offline_refs, list):
+            return False
+
+        cond_esp = condition.get("esp_id")
+        cond_gpio = condition.get("gpio")
+        cond_sensor_type = condition.get("sensor_type")
+        if cond_esp is None or cond_gpio is None:
+            return False
+
+        try:
+            cond_gpio_int = int(cond_gpio)
+        except (TypeError, ValueError):
+            return False
+
+        cond_sensor_type_norm = str(cond_sensor_type).lower() if cond_sensor_type else None
+
+        for ref in offline_refs:
+            if not isinstance(ref, dict):
+                continue
+            if ref.get("esp_id") != cond_esp:
+                continue
+            try:
+                ref_gpio = int(ref.get("gpio"))
+            except (TypeError, ValueError):
+                continue
+            if ref_gpio != cond_gpio_int:
+                continue
+
+            ref_sensor_type = ref.get("sensor_type")
+            if cond_sensor_type_norm is None:
+                return True
+            if ref_sensor_type is None:
+                continue
+            if str(ref_sensor_type).lower() == cond_sensor_type_norm:
+                return True
+
+        return False
 
     def reset_state(self, rule_id: str, condition_index: int = 0) -> None:
         """

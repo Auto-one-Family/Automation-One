@@ -44,6 +44,8 @@ _RUNTIME_TELEMETRY_KEYS = frozenset(
         "handover_contract_reject_runtime",
         "handover_epoch",
         "session_epoch",
+        "metrics_delta_ts",
+        "metrics_freshness_seconds",
     }
 )
 

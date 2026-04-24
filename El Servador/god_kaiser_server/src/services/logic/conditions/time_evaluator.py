@@ -91,13 +91,21 @@ class TimeConditionEvaluator(BaseConditionEvaluator):
         # Support both hour-based (0-23) and time-based (HH:MM) formats
         start_hour = condition.get("start_hour")
         end_hour = condition.get("end_hour")
-        start_minute = 0
-        end_minute = 0
+        start_minute = condition.get("start_minute")
+        end_minute = condition.get("end_minute")
         start_time_str = condition.get("start_time")
         end_time_str = condition.get("end_time")
 
-        # Convert HH:MM format to hour + minute
-        if start_time_str:
+        # Parse explicit minute fields first (preferred path).
+        try:
+            start_minute = int(start_minute) if start_minute is not None else 0
+            end_minute = int(end_minute) if end_minute is not None else 0
+        except (TypeError, ValueError):
+            logger.warning("Invalid start_minute/end_minute values")
+            return False
+
+        # Backward-compatible fallback: parse HH:MM only when hour field is absent.
+        if start_hour is None and start_time_str:
             try:
                 parts = start_time_str.split(":")
                 start_hour = int(parts[0])
@@ -106,7 +114,7 @@ class TimeConditionEvaluator(BaseConditionEvaluator):
                 logger.warning(f"Invalid start_time format: {start_time_str}")
                 return False
 
-        if end_time_str:
+        if end_hour is None and end_time_str:
             try:
                 parts = end_time_str.split(":")
                 end_hour = int(parts[0])
@@ -127,6 +135,15 @@ class TimeConditionEvaluator(BaseConditionEvaluator):
             return False
         if not (0 <= end_hour <= 24):
             logger.warning(f"Invalid end_hour: {end_hour}. Must be 0-24")
+            return False
+        if not (0 <= start_minute <= 59):
+            logger.warning(f"Invalid start_minute: {start_minute}. Must be 0-59")
+            return False
+        if not (0 <= end_minute <= 59):
+            logger.warning(f"Invalid end_minute: {end_minute}. Must be 0-59")
+            return False
+        if end_hour == 24 and end_minute != 0:
+            logger.warning("Invalid end time: 24:%02d is not allowed", end_minute)
             return False
 
         # Compare using total minutes for proper HH:MM granularity

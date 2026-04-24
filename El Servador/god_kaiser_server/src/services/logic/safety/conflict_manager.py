@@ -8,13 +8,58 @@ PATTERN: Kein Singleton - wird als Dependency injiziert
 """
 
 import asyncio
+import logging
+import logging.handlers
+import uuid
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-import logging
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+from ....core.config import get_settings
+from ....core.logging_config import JSONFormatter, get_logger
+
+logger = get_logger(__name__)
+
+
+def _build_arbitration_logger() -> logging.Logger:
+    """Build dedicated structured logger for conflict arbitration decisions."""
+    logger_name = "conflict_manager.arbitration"
+    arbitration_logger = logging.getLogger(logger_name)
+    if getattr(arbitration_logger, "_aut_one_initialized", False):
+        return arbitration_logger
+
+    settings = get_settings()
+    root_log_path = Path(settings.logging.file_path)
+    conflict_log_path = root_log_path.with_name("conflict_manager.log")
+    conflict_log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    handler = logging.handlers.RotatingFileHandler(
+        filename=conflict_log_path,
+        maxBytes=settings.logging.file_max_bytes,
+        backupCount=settings.logging.file_backup_count,
+        encoding="utf-8",
+    )
+    if settings.logging.format == "json":
+        formatter = JSONFormatter(datefmt="%Y-%m-%d %H:%M:%S")
+    else:
+        formatter = logging.Formatter(
+            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    handler.setFormatter(formatter)
+    handler.setLevel(getattr(logging, settings.logging.level))
+
+    arbitration_logger.handlers.clear()
+    arbitration_logger.addHandler(handler)
+    arbitration_logger.setLevel(getattr(logging, settings.logging.level))
+    arbitration_logger.propagate = False
+    setattr(arbitration_logger, "_aut_one_initialized", True)
+    return arbitration_logger
+
+
+arbitration_logger = _build_arbitration_logger()
 
 
 class ConflictResolution(Enum):
@@ -41,6 +86,7 @@ class ConflictInfo:
     resolution: ConflictResolution
     blocked_until: Optional[datetime] = None
     message: str = ""
+    trace_id: str = ""
 
 
 @dataclass
@@ -89,6 +135,16 @@ class ConflictManager:
         self._mutexes: Dict[str, asyncio.Lock] = {}  # "esp_id:gpio" → asyncio.Lock
         self._conflict_history: List[ConflictInfo] = []
         self._websocket_manager = websocket_manager  # P0-Fix T9: user notification
+
+    @staticmethod
+    def _decision_mode_for_resolution(resolution: ConflictResolution) -> str:
+        """Map internal resolution enum to operator-facing arbitration mode."""
+        if resolution in (
+            ConflictResolution.HIGHER_PRIORITY_WINS,
+            ConflictResolution.SAFETY_WINS,
+        ):
+            return "priority"
+        return "first_wins"
 
     def _get_actuator_key(self, esp_id: str, gpio: int, zone_id: Optional[str] = None) -> str:
         """
@@ -275,27 +331,42 @@ class ConflictManager:
                 resolution=resolution,
                 blocked_until=existing_lock.expires_at if winner != rule_id else None,
                 message=f"Conflict on {actuator_key}: {resolution.value}",
+                trace_id=str(uuid.uuid4()),
             )
 
             self._conflict_history.append(conflict)
 
-            # P0-Fix T9: Broadcast conflict to user via WebSocket
+            loser_rule_id = existing_lock.rule_id if winner == rule_id else rule_id
+            winner_priority = effective_priority if winner == rule_id else existing_lock.priority
+            loser_priority = existing_lock.priority if winner == rule_id else effective_priority
+            arbitration_payload = {
+                "trace_id": conflict.trace_id,
+                "actuator_key": actuator_key,
+                "winner_rule_id": winner,
+                "loser_rule_id": loser_rule_id,
+                "competing_rules": conflict.competing_rules,
+                "arbitration_mode": self._decision_mode_for_resolution(resolution),
+                "resolution": conflict.resolution.value,
+                "winner_priority": winner_priority,
+                "loser_priority": loser_priority,
+                "command": command,
+                "message": conflict.message,
+                "timestamp": now.isoformat(),
+            }
+
+            arbitration_logger.info(
+                "Conflict arbitration decision",
+                extra={"extra": arbitration_payload},
+            )
+
             if self._websocket_manager:
                 try:
-                    asyncio.ensure_future(
-                        self._websocket_manager.broadcast(
-                            "logic_conflict",
-                            {
-                                "actuator_key": actuator_key,
-                                "competing_rules": conflict.competing_rules,
-                                "winner_rule_id": conflict.winner_rule_id,
-                                "resolution": conflict.resolution.value,
-                                "message": conflict.message,
-                            },
-                        )
+                    await self._websocket_manager.broadcast(
+                        "conflict.arbitration",
+                        arbitration_payload,
                     )
                 except Exception as ws_err:
-                    logger.debug("Conflict broadcast failed: %s", ws_err)
+                    logger.debug("Conflict arbitration broadcast failed: %s", ws_err)
 
             return winner == rule_id, conflict
 

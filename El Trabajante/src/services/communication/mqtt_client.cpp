@@ -242,7 +242,12 @@ MQTTClient::MQTTClient()
       pending_session_announce_msg_id_(-1),
 #endif
       publish_seq_(0),
-      safe_publish_retry_count_(0) {
+      safe_publish_retry_count_(0)
+#ifdef ENABLE_METRICS_SPLIT
+      , last_metrics_{}
+      , metrics_skip_count_(METRICS_MAX_SKIP_COUNT)
+#endif
+      {
     // Circuit Breaker configured:
     // - 5 failures → OPEN
     // - 30s recovery timeout
@@ -1363,8 +1368,8 @@ void MQTTClient::publishHeartbeat(bool force) {
 
     String payload;
     // Keep heartbeat assembly deterministic and reduce heap fragmentation.
-    // reserve padded to 768 to cover all forensic counters + longest
-    // config_status correlation_id (AUT-68 slim target <=512 B payload).
+    // AUT-134: reserve close to observed payload size to avoid realloc churn
+    // during reconnect/config bursts.
     payload.reserve(768);
     payload = "{";
     payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
@@ -1387,6 +1392,7 @@ void MQTTClient::publishHeartbeat(bool force) {
     // GET /api/v1/devices/{id}/gpio-status and actuator/+/status).
     // Reclaims ~8.2 kB permanent heap via halved PUBLISH_PAYLOAD_MAX_LEN.
 
+#ifndef ENABLE_METRICS_SPLIT
     payload += "\"metrics_schema_version\":" +
                String(OfflineModeManager::OFFLINE_AUTHORITY_METRICS_SCHEMA_VERSION) + ",";
     payload += "\"offline_enter_count\":" + String(offlineModeManager.getOfflineEnterCount()) + ",";
@@ -1398,6 +1404,7 @@ void MQTTClient::publishHeartbeat(bool force) {
                String(offlineModeManager.getHandoverContractRejectCount()) + ",";
     payload += "\"handover_contract_last_reject\":\"" +
                String(offlineModeManager.getLastHandoverContractRejectCode()) + "\",";
+#endif
     payload += "\"active_handover_epoch\":" + String(offlineModeManager.getActiveHandoverEpoch()) + ",";
     payload += "\"handover_completed_epoch\":" + String(offlineModeManager.getHandoverCompletedEpoch()) + ",";
     // Heartbeat health: split "degraded" semantics — persistence drift vs FSM vs network CB
@@ -1427,6 +1434,7 @@ void MQTTClient::publishHeartbeat(bool force) {
         payload += "\"wifi_circuit_breaker_open\":" + String(wifi_cb_open ? "true" : "false") + ",";
         payload += "\"network_degraded\":" + String(network_degraded ? "true" : "false") + ",";
     }
+#ifndef ENABLE_METRICS_SPLIT
     payload += "\"persistence_drift_count\":" +
                String(offlineModeManager.getPersistenceDriftCount()) + ",";
     payload += "\"critical_outcome_drop_count\":" +
@@ -1448,6 +1456,7 @@ void MQTTClient::publishHeartbeat(bool force) {
                String(safe_publish_retry_count_) + ",";
     payload += "\"emergency_rejected_no_token_total\":" +
                String(getEmergencyRejectedNoTokenCount()) + ",";
+#endif
     payload += "\"config_status\":";
     payload += configManager.getDiagnosticsJSON();
     payload += "}";
@@ -1455,7 +1464,97 @@ void MQTTClient::publishHeartbeat(bool force) {
     if (!publish(heartbeat_topic, payload, 0)) {
         LOG_W(TAG, "Heartbeat publish failed (topic=" + heartbeat_topic + ")");
     }
+
+#ifdef ENABLE_METRICS_SPLIT
+    publishHeartbeatMetrics();
+#endif
 }
+
+// ============================================
+// AUT-121: HEARTBEAT METRICS SPLIT
+// ============================================
+#ifdef ENABLE_METRICS_SPLIT
+void MQTTClient::publishHeartbeatMetrics() {
+    if (!registration_confirmed_ || !isConnected()) {
+        return;
+    }
+
+    if (metrics_skip_count_ < 0xFF) {
+        metrics_skip_count_++;
+    }
+
+    MetricsSnapshot current = {};
+    current.offline_enter_count = offlineModeManager.getOfflineEnterCount();
+    current.adopting_enter_count = offlineModeManager.getAdoptingEnterCount();
+    current.adoption_noop_count = offlineModeManager.getAdoptionNoopCount();
+    current.adoption_delta_count = offlineModeManager.getAdoptionDeltaCount();
+    current.handover_abort_count = offlineModeManager.getHandoverAbortCount();
+    current.handover_contract_reject_count = offlineModeManager.getHandoverContractRejectCount();
+    current.persistence_drift_count = offlineModeManager.getPersistenceDriftCount();
+    current.critical_outcome_drop_count = getCriticalOutcomeDropCountTelemetry();
+    current.publish_outbox_drop_count = getPublishOutboxNoncriticalDropCount();
+    current.sensor_cmd_queue_overflow_count = getSensorCommandQueueOverflowCount();
+    current.safe_publish_retry_count = safe_publish_retry_count_;
+    current.emergency_rejected_no_token_total = getEmergencyRejectedNoTokenCount();
+
+    bool changed = metricsChanged_(current);
+    bool interval_reached = (metrics_skip_count_ >= METRICS_MAX_SKIP_COUNT);
+
+    if (!changed && !interval_reached) {
+        return;
+    }
+
+    metrics_skip_count_ = 0;
+    last_metrics_ = current;
+
+    const String metrics_topic = String(TopicBuilder::buildSystemHeartbeatMetricsTopic());
+
+    String payload;
+    payload.reserve(512);
+    payload = "{";
+    payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+    payload += "\"ts\":" + String((unsigned long)timeManager.getUnixTimestamp()) + ",";
+    payload += "\"metrics_schema_version\":" +
+               String(OfflineModeManager::OFFLINE_AUTHORITY_METRICS_SCHEMA_VERSION) + ",";
+    payload += "\"offline_enter_count\":" + String(current.offline_enter_count) + ",";
+    payload += "\"adopting_enter_count\":" + String(current.adopting_enter_count) + ",";
+    payload += "\"adoption_noop_count\":" + String(current.adoption_noop_count) + ",";
+    payload += "\"adoption_delta_count\":" + String(current.adoption_delta_count) + ",";
+    payload += "\"handover_abort_count\":" + String(current.handover_abort_count) + ",";
+    payload += "\"handover_contract_reject_count\":" +
+               String(current.handover_contract_reject_count) + ",";
+    payload += "\"handover_contract_last_reject\":\"" +
+               String(offlineModeManager.getLastHandoverContractRejectCode()) + "\",";
+    payload += "\"persistence_drift_count\":" +
+               String(current.persistence_drift_count) + ",";
+    payload += "\"critical_outcome_drop_count\":" +
+               String(current.critical_outcome_drop_count) + ",";
+    payload += "\"publish_outbox_drop_count\":" +
+               String(current.publish_outbox_drop_count) + ",";
+#ifndef MQTT_USE_PUBSUBCLIENT
+    {
+        PublishQueuePressureStats pq_stats = getPublishQueuePressureStats();
+        payload += "\"publish_queue_fill\":" + String(pq_stats.fill_level) + ",";
+        payload += "\"publish_queue_hwm\":" + String(pq_stats.high_watermark) + ",";
+        payload += "\"publish_queue_shed_count\":" + String(pq_stats.shed_count) + ",";
+        payload += "\"publish_queue_drop_count\":" + String(pq_stats.drop_count) + ",";
+    }
+#endif
+    payload += "\"sensor_command_queue_overflow_count\":" +
+               String(current.sensor_cmd_queue_overflow_count) + ",";
+    payload += "\"safe_publish_retry_count\":" +
+               String(current.safe_publish_retry_count) + ",";
+    payload += "\"emergency_rejected_no_token_total\":" +
+               String(current.emergency_rejected_no_token_total);
+    payload += "}";
+
+    publish(metrics_topic, payload, 0);
+}
+
+bool MQTTClient::metricsChanged_(const MetricsSnapshot& current) const {
+    return memcmp(&current, &last_metrics_, sizeof(MetricsSnapshot)) != 0;
+}
+#endif  // ENABLE_METRICS_SPLIT
 
 // ============================================
 // REGISTRATION GATE (Bug #1 Fix)
@@ -1552,6 +1651,9 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
             self->last_transport_errno_ = 0;
             self->last_disconnect_ms_ = 0;
             self->pending_session_announce_msg_id_ = -1;
+#ifdef ENABLE_METRICS_SPLIT
+            self->metrics_skip_count_ = METRICS_MAX_SKIP_COUNT;
+#endif
 
             // AUT-69 Step 1: Hold queue drain until session/announce is acknowledged
             // or guard timeout unblocks progress.
@@ -1900,9 +2002,6 @@ void MQTTClient::mqtt_event_handler(void* args, esp_event_base_t base,
 bool MQTTClient::connectToBroker() {
     LOG_I(TAG, "Connecting to MQTT broker: " + current_config_.server + ":" + String(current_config_.port));
 
-    // Re-set server before every connection attempt to prevent dangling pointer.
-    mqtt_.setServer(current_config_.server.c_str(), current_config_.port);
-
     // Build Last-Will
     String last_will_topic = String(TopicBuilder::buildSystemHeartbeatTopic());
     last_will_topic.replace("/heartbeat", "/will");
@@ -1914,20 +2013,48 @@ bool MQTTClient::connectToBroker() {
 
     LOG_I(TAG, "Last-Will Topic: " + last_will_topic);
 
-    // ✅ FIX #2: Auto-Fallback von Port 8883 → 1883
-    bool connected = attemptMQTTConnection(last_will_topic, last_will_message);
+    const String original_host = current_config_.server;
+    const uint16_t original_port = current_config_.port;
+    String host_candidates[5] = {original_host, "", "", "", ""};
+    uint8_t host_candidate_count = 1;
 
-    if (!connected && current_config_.port == 8883) {
-        LOG_W(TAG, "Port 8883 (TLS) failed - trying port 1883 (plain MQTT)");
-        current_config_.port = 1883;
+    #ifdef WOKWI_SIMULATION
+    if (original_host == "host.wokwi.internal") {
+        host_candidates[host_candidate_count++] = "host.docker.internal";
+        host_candidates[host_candidate_count++] = "10.13.37.1";
+        host_candidates[host_candidate_count++] = "192.168.0.39";
+        host_candidates[host_candidate_count++] = "127.0.0.1";
+    }
+    #endif
+
+    bool connected = false;
+    for (uint8_t idx = 0; idx < host_candidate_count && !connected; idx++) {
+        current_config_.server = host_candidates[idx];
+        current_config_.port = original_port;
         mqtt_.setServer(current_config_.server.c_str(), current_config_.port);
+
+        if (idx > 0) {
+            LOG_W(TAG, "MQTT host fallback active: trying " + current_config_.server);
+        }
+
+        // ✅ FIX #2: Auto-Fallback von Port 8883 → 1883
         connected = attemptMQTTConnection(last_will_topic, last_will_message);
-        if (connected) {
-            LOG_I(TAG, "✅ Port-Fallback successful! Connected on port 1883");
+
+        if (!connected && current_config_.port == 8883) {
+            LOG_W(TAG, "Port 8883 (TLS) failed - trying port 1883 (plain MQTT)");
+            current_config_.port = 1883;
+            mqtt_.setServer(current_config_.server.c_str(), current_config_.port);
+            connected = attemptMQTTConnection(last_will_topic, last_will_message);
+            if (connected) {
+                LOG_I(TAG, "✅ Port-Fallback successful! Connected on port 1883");
+            }
         }
     }
 
     if (connected) {
+        if (current_config_.server != original_host) {
+            LOG_I(TAG, "MQTT connected via host fallback: " + current_config_.server);
+        }
         LOG_I(TAG, "MQTT connected!");
         reconnect_attempts_ = 0;
         reconnect_delay_ms_ = RECONNECT_BASE_DELAY_MS;
@@ -1935,6 +2062,9 @@ bool MQTTClient::connectToBroker() {
         registration_confirmed_ = false;
         registration_start_ms_ = millis();
         registration_timeout_logged_ = false;
+#ifdef ENABLE_METRICS_SPLIT
+        metrics_skip_count_ = METRICS_MAX_SKIP_COUNT;
+#endif
         LOG_I(TAG, "Registration gate closed - awaiting heartbeat ACK");
         processOfflineBuffer();
         if (on_connect_callback_) {
@@ -1942,6 +2072,8 @@ bool MQTTClient::connectToBroker() {
         }
         return true;
     } else {
+        current_config_.server = original_host;
+        current_config_.port = original_port;
         LOG_E(TAG, "MQTT connection failed, rc=" + String(mqtt_.state()));
         errorTracker.logCommunicationError(ERROR_MQTT_CONNECT_FAILED,
                                            ("MQTT connection failed, rc=" + String(mqtt_.state())).c_str());

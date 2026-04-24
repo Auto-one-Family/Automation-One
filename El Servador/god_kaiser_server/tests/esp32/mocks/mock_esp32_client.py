@@ -1287,9 +1287,7 @@ class MockESP32Client:
         self._store_and_publish(topic, payload, qos=1, retain=False)
 
     def _publish_heartbeat(self):
-        """Publish system heartbeat with all fields including GPIO status."""
-        # Build GPIO status (Phase 1)
-        gpio_status = self._build_gpio_status()
+        """Publish system heartbeat aligned with current ESP payload contract."""
 
         payload = {
             "esp_id": self.esp_id,
@@ -1305,9 +1303,6 @@ class MockESP32Client:
             "state": self.system_state.name,
             "mqtt_connected": self.connected,
             "safe_mode": self.system_state == SystemState.SAFE_MODE,
-            # GPIO-Status (Phase 1) - matches ESP32 mqtt_client.cpp:638-656
-            "gpio_status": gpio_status,
-            "gpio_reserved_count": len(gpio_status),
         }
 
         topic = TopicBuilder.build_heartbeat_topic(self.esp_id, self.kaiser_id)

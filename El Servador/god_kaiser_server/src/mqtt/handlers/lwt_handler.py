@@ -159,14 +159,17 @@ class LWTHandler:
                     )
                     return True  # Return True to acknowledge message
 
-                # Step 5: Update device status to offline
-                # Only update if currently online (avoid duplicate updates)
-                if esp_device.status == "online":
+                # Step 5: Update device status to offline for every non-offline status.
+                # LWT must be terminal-authoritative even when a device is currently
+                # in transitional states (e.g. approved/error) so offline is not delayed.
+                if esp_device.status != "offline":
                     authority_key = self._build_terminal_authority_key(
                         esp_id=esp_id_str,
                         reason=str(payload.get("reason", "unexpected_disconnect")),
                         correlation_id=payload.get("correlation_id"),
                         payload=payload,
+                        epoch_hint=self._resolve_epoch_hint(esp_device.device_metadata),
+                        last_seen=esp_device.last_seen,
                     )
                     _, was_stale = await contract_repo.upsert_terminal_event_authority(
                         event_class="lwt",
@@ -361,12 +364,82 @@ class LWTHandler:
         reason: str,
         correlation_id: Optional[str],
         payload: dict,
+        epoch_hint: Optional[int] = None,
+        last_seen: Optional[datetime] = None,
     ) -> str:
         """Build stable dedup key for terminal LWT events."""
         if correlation_id:
             return f"corr:{str(correlation_id).strip().lower()}"
-        ts_part = str(payload.get("timestamp", "na"))
-        return f"esp:{esp_id.strip().lower()}:reason:{reason.strip().lower()}:ts:{ts_part}"
+        ts_part = LWTHandler._resolve_lwt_timestamp_part(
+            payload_timestamp=payload.get("timestamp"),
+            last_seen=last_seen,
+        )
+        epoch_part = "na" if epoch_hint is None else str(epoch_hint)
+        return (
+            "esp:"
+            f"{esp_id.strip().lower()}:"
+            f"reason:{reason.strip().lower()}:"
+            f"epoch:{epoch_part}:"
+            f"ts:{ts_part}"
+        )
+
+    @staticmethod
+    def _resolve_epoch_hint(device_metadata: Optional[dict]) -> Optional[int]:
+        """
+        Resolve best-effort session/epoch discriminator from persisted metadata.
+
+        Why:
+        LWT payload timestamps can be zero when device time is not synced yet.
+        If dedup uses only reason+timestamp, repeated real disconnects in later
+        sessions can be misclassified as stale duplicates (same key ts=0).
+        """
+        if not isinstance(device_metadata, dict):
+            return None
+
+        candidates = (
+            device_metadata.get("active_handover_epoch"),
+            device_metadata.get("handover_epoch"),
+            device_metadata.get("session_epoch"),
+            device_metadata.get("handover_completed_epoch"),
+        )
+        for candidate in candidates:
+            if isinstance(candidate, int):
+                return candidate
+            if isinstance(candidate, str) and candidate.strip().isdigit():
+                return int(candidate.strip())
+        return None
+
+    @staticmethod
+    def _resolve_lwt_timestamp_part(
+        *,
+        payload_timestamp: object,
+        last_seen: Optional[datetime],
+    ) -> str:
+        """
+        Resolve timestamp part for terminal authority dedup key.
+
+        Why:
+        Some firmware versions can emit LWT payloads with timestamp=0 before
+        NTP sync. Using raw "0" in dedup keys causes false stale positives
+        across later real disconnects ("ts:0" forever).
+        """
+        normalized_payload_ts: Optional[int] = None
+        try:
+            parsed_payload_ts = int(payload_timestamp)  # type: ignore[arg-type]
+            if parsed_payload_ts > 0:
+                normalized_payload_ts = parsed_payload_ts
+        except (TypeError, ValueError):
+            normalized_payload_ts = None
+
+        if normalized_payload_ts is not None:
+            return str(normalized_payload_ts)
+
+        if isinstance(last_seen, datetime):
+            # Use persisted last_seen as per-session discriminator.
+            return str(int(last_seen.timestamp()))
+
+        # Final fallback keeps deterministic shape while avoiding permanent "ts:0".
+        return str(int(datetime.now(timezone.utc).timestamp()))
 
 
 # Global handler instance

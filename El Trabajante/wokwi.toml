@@ -31,8 +31,8 @@ rfc2217ServerPort = 4000
 # Gateway enables connection to external services (MQTT broker)
 # - Local development: host.wokwi.internal -> localhost
 # - CI: host.wokwi.internal -> CI service (mosquitto)
-[wokwi.network]
-gateway = true
+[net]
+gateway=true
 
 # HINWEIS: ESP32 verbindet zu host.wokwi.internal, was automatisch
 # zum Host-Rechner aufgelöst wird wenn gateway = true.

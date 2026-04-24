@@ -166,6 +166,14 @@ const char* TopicBuilder::buildSystemHeartbeatTopic() {
   return validateTopicBuffer(written);
 }
 
+// AUT-121: kaiser/god/esp/{esp_id}/system/heartbeat_metrics
+const char* TopicBuilder::buildSystemHeartbeatMetricsTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/system/heartbeat_metrics",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
 // Phase 2: kaiser/god/esp/{esp_id}/system/heartbeat/ack
 // Server → ESP: Acknowledgment mit Device-Status (approved/pending/rejected)
 const char* TopicBuilder::buildSystemHeartbeatAckTopic() {

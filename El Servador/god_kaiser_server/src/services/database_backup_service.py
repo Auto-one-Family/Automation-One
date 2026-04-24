@@ -238,9 +238,7 @@ class DatabaseBackupService:
                 "--verbose",
             ]
 
-            # Pass password via PGPASSWORD environment variable (secure)
-            env = os.environ.copy()
-            env["PGPASSWORD"] = self._settings.pg_password
+            env = self._build_pg_env()
 
             logger.info(
                 f"Starting database backup: {filename} "
@@ -248,20 +246,7 @@ class DatabaseBackupService:
                 f"db={self._settings.pg_database})"
             )
 
-            # Run pg_dump and pipe to gzip (atomic write via temp file)
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-            )
-
-            stdout, stderr = await process.communicate()
-
-            if process.returncode != 0:
-                error_msg = stderr.decode("utf-8", errors="replace").strip()
-                logger.error(f"pg_dump failed (exit {process.returncode}): {error_msg}")
-                raise RuntimeError(f"pg_dump failed (exit {process.returncode}): {error_msg}")
+            stdout = await self._run_pg_dump_with_retries(cmd=cmd, env=env, max_attempts=3)
 
             # Compress and write to temp file
             with gzip.open(temp_filepath, "wb", compresslevel=6) as f:
@@ -515,8 +500,7 @@ class DatabaseBackupService:
                     "--single-transaction",
                 ]
 
-                env = os.environ.copy()
-                env["PGPASSWORD"] = self._settings.pg_password
+                env = self._build_pg_env()
 
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
@@ -570,6 +554,74 @@ class DatabaseBackupService:
                 "pg_dump not found. Install postgresql-client in the Docker image. "
                 "Add 'postgresql-client' to apt-get install in Dockerfile Runtime Stage."
             )
+
+    def _build_pg_env(self) -> Dict[str, str]:
+        """
+        Build process env for pg_dump/psql.
+
+        Preference order:
+        1) DB_BACKUP_PGPASSFILE (Docker secret file)
+        2) DB_BACKUP_PG_PASSWORD fallback
+        """
+        env = os.environ.copy()
+        pgpassfile = self._settings.pgpassfile
+        if pgpassfile:
+            env["PGPASSFILE"] = pgpassfile
+            env.pop("PGPASSWORD", None)
+        else:
+            env["PGPASSWORD"] = self._settings.pg_password
+        return env
+
+    @staticmethod
+    def _is_auth_error(error_message: str) -> bool:
+        lowered = error_message.lower()
+        return "password authentication failed" in lowered or "no password supplied" in lowered
+
+    async def _run_pg_dump_with_retries(
+        self, *, cmd: List[str], env: Dict[str, str], max_attempts: int
+    ) -> bytes:
+        """
+        Execute pg_dump with bounded retries and exponential backoff.
+        """
+        for attempt in range(1, max_attempts + 1):
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            stdout, stderr = await process.communicate()
+            if process.returncode == 0:
+                return stdout
+
+            error_msg = stderr.decode("utf-8", errors="replace").strip()
+            if self._is_auth_error(error_msg):
+                logger.error(
+                    "backup_auth_failure attempt=%s max_attempts=%s host=%s db=%s error=%s",
+                    attempt,
+                    max_attempts,
+                    self._settings.pg_host,
+                    self._settings.pg_database,
+                    error_msg,
+                )
+            else:
+                logger.warning(
+                    "backup_pg_dump_failed attempt=%s max_attempts=%s host=%s db=%s error=%s",
+                    attempt,
+                    max_attempts,
+                    self._settings.pg_host,
+                    self._settings.pg_database,
+                    error_msg,
+                )
+
+            if attempt < max_attempts:
+                await asyncio.sleep(2 ** (attempt - 1))
+                continue
+
+            raise RuntimeError(f"pg_dump failed (exit {process.returncode}): {error_msg}")
+
+        # Defensive fallback; loop always returns or raises.
+        raise RuntimeError("pg_dump failed with unknown retry state")
 
     async def _get_pg_version(self) -> Optional[str]:
         """Get pg_dump version string."""

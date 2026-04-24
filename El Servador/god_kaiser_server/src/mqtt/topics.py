@@ -271,6 +271,24 @@ class TopicBuilder:
         return f"kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat"
 
     @staticmethod
+    def build_heartbeat_metrics_topic(esp_id: str, kaiser_id: str = "god") -> str:
+        """
+        Build heartbeat metrics topic for ESP.
+
+        Separate from core heartbeat: carries extended telemetry
+        (heap trends, RSSI history, error counters) without inflating
+        the latency-critical core heartbeat payload.
+
+        Args:
+            esp_id: ESP device ID (e.g., ESP_12AB34CD)
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat_metrics
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat_metrics"
+
+    @staticmethod
     def build_sensor_data_topic(esp_id: str, gpio: int, kaiser_id: str = "god") -> str:
         """
         Build sensor data topic for ESP.
@@ -484,7 +502,7 @@ class TopicBuilder:
         """
         # Pattern: kaiser/{any_kaiser_id}/esp/{esp_id}/system/heartbeat (ESP32 v4.0+)
         # Also accepts: kaiser/{any_kaiser_id}/esp/{esp_id}/heartbeat (legacy)
-        pattern = r"kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/(system/)?heartbeat"
+        pattern = r"^kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/(system/)?heartbeat$"
         match = re.match(pattern, topic)
 
         if match:
@@ -492,6 +510,33 @@ class TopicBuilder:
                 "kaiser_id": match.group(1),
                 "esp_id": match.group(2),
                 "type": "heartbeat",
+            }
+        return None
+
+    @staticmethod
+    def parse_heartbeat_metrics_topic(topic: str) -> Optional[Dict[str, any]]:
+        """
+        Parse heartbeat metrics topic.
+
+        Args:
+            topic: kaiser/{kaiser_id}/esp/ESP_12AB34CD/system/heartbeat_metrics
+
+        Returns:
+            {
+                "kaiser_id": "god",
+                "esp_id": "ESP_12AB34CD",
+                "type": "heartbeat_metrics"
+            }
+            or None if parse fails
+        """
+        pattern = r"^kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/system/heartbeat_metrics$"
+        match = re.match(pattern, topic)
+
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "type": "heartbeat_metrics",
             }
         return None
 
@@ -1084,6 +1129,7 @@ class TopicBuilder:
             cls.parse_actuator_status_topic,
             cls.parse_actuator_response_topic,
             cls.parse_actuator_alert_topic,
+            cls.parse_heartbeat_metrics_topic,
             cls.parse_heartbeat_topic,
             cls.parse_session_announce_topic,
             cls.parse_lwt_topic,

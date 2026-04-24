@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, validates
@@ -146,8 +147,46 @@ class CrossESPLogic(Base, TimestampMixin):
         doc="Additional rule metadata (tags, category, owner, etc.)",
     )
 
+    # AUT-111: Critical-Rule Degraded-Handling
+    is_critical: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        doc="Whether this rule is safety-critical (enables degraded-state tracking)",
+    )
+
+    escalation_policy: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        doc=(
+            "Escalation policy for critical rules when degraded. "
+            "Shape: {'notify': ['email','websocket'], 'retry_interval_s': 60, "
+            "'max_retries': 5, 'failover_actions': [...]}"
+        ),
+    )
+
+    degraded_since: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Timestamp when rule entered degraded state (target ESP offline)",
+    )
+
+    degraded_reason: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        doc="Reason for degraded state (e.g. 'target_esp_offline:ESP_AABB')",
+    )
+
     # Indices
-    __table_args__ = (Index("idx_rule_enabled_priority", "enabled", "priority"),)
+    __table_args__ = (
+        Index("idx_rule_enabled_priority", "enabled", "priority"),
+        Index(
+            "idx_rule_degraded_critical",
+            "is_critical",
+            "degraded_since",
+            postgresql_where=text("degraded_since IS NOT NULL"),
+        ),
+    )
 
     # Alias properties for API compatibility
     @property

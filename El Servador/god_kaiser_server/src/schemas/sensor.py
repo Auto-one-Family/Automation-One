@@ -496,6 +496,14 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
         None,
         description="Warning if subzone assignment failed (sensor was saved successfully)",
     )
+    correlation_id: Optional[str] = Field(
+        None,
+        description="Intent handle der letzten ausgelösten Config-Publish-Operation (falls verfügbar)",
+    )
+    request_id: Optional[str] = Field(
+        None,
+        description="Alias/Fallback-Handle zur Korrelation von REST-Antwort und WS-Config-Lifecycle",
+    )
 
     model_config = ConfigDict(
         from_attributes=True,

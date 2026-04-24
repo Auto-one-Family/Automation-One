@@ -128,12 +128,7 @@ class Subscriber:
         # Subscribe to all registered handler patterns
         for pattern in self.handlers.keys():
             # Determine QoS based on topic type
-            if "heartbeat" in pattern:
-                qos = 0  # Heartbeat: QoS 0
-            elif "config_response" in pattern or "config/ack" in pattern:
-                qos = 2  # Config: QoS 2 (exactly once)
-            else:
-                qos = 1  # Default: QoS 1 (at least once)
+            qos = self._resolve_qos_for_pattern(pattern)
 
             if not self.client.subscribe(pattern, qos):
                 logger.error(f"Failed to subscribe to: {pattern}")
@@ -142,6 +137,15 @@ class Subscriber:
                 logger.debug(f"Subscribed to: {pattern} (QoS {qos})")
 
         return success
+
+    @staticmethod
+    def _resolve_qos_for_pattern(pattern: str) -> int:
+        """Resolve QoS deterministically from the registered topic pattern."""
+        if pattern.endswith("/system/heartbeat") or pattern.endswith("/system/heartbeat_metrics"):
+            return 0  # Heartbeat lanes: fire and forget
+        if "config_response" in pattern or "config/ack" in pattern:
+            return 2  # Config acknowledgement lanes: exactly once
+        return 1  # Default: at least once
 
     def subscribe(self, topic: str, qos: int = 1) -> bool:
         """
@@ -331,7 +335,7 @@ class Subscriber:
             "/sensor/" in topic and topic.endswith("/data")
         ) or topic.endswith("/system/error") or topic.endswith("/config_response") or topic.endswith(
             "/system/intent_outcome"
-        ) or topic.endswith("/system/intent_outcome/lifecycle")
+        ) or topic.endswith("/system/intent_outcome/lifecycle") or topic.endswith("/system/will")
 
     def _execute_handler(
         self,

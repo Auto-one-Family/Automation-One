@@ -675,9 +675,14 @@ class DatabaseBackupSettings(BaseSettings):
         description="PostgreSQL user for pg_dump",
     )
     pg_password: str = Field(
-        default="password",
+        default="",
         alias="DB_BACKUP_PG_PASSWORD",
-        description="PostgreSQL password for pg_dump (passed via PGPASSWORD env var)",
+        description="PostgreSQL password for pg_dump (used when no pgpass file is configured)",
+    )
+    pgpassfile: Optional[str] = Field(
+        default=None,
+        alias="DB_BACKUP_PGPASSFILE",
+        description="Optional pgpass file path (preferred for Docker secrets in production)",
     )
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

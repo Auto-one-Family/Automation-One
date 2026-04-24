@@ -285,6 +285,33 @@ class TestHysteresisEvaluator:
         assert state.last_value == 29.0  # Alter Wert bleibt
 
     @pytest.mark.asyncio
+    async def test_offline_source_override_returns_false_for_non_matching_sensor(self, evaluator, cooling_condition):
+        """Offline-Quelle überstimmt Hold-State (kein True bei fehlender Sensorquelle)."""
+        # Aktivieren
+        context = self.make_context("rule-1", 29.0)
+        await evaluator.evaluate(cooling_condition, context)
+
+        # Non-matching sensor_data (wie timer-trigger ohne passenden Sensor)
+        # + offline ref für die Condition-Quelle
+        context_offline = {
+            "rule_id": "rule-1",
+            "condition_index": 0,
+            "sensor_data": {"esp_id": "ESP_OTHER", "gpio": 4, "value": 10.0},
+            "_offline_sensor_refs": [
+                {"esp_id": "ESP_TEST", "gpio": 4, "sensor_type": None, "reason": "esp_offline"}
+            ],
+        }
+        result = await evaluator.evaluate(cooling_condition, context_offline)
+
+        # Vor Fix: True (Hold-State), jetzt korrekt False bei offline Source
+        assert result is False
+
+        # State selbst wird dabei nicht mutiert (bleibt aktiv, bis LogicEngine ihn gezielt cleared)
+        state = evaluator.get_state_for_rule("rule-1", 0)
+        assert state is not None
+        assert state.is_active is True
+
+    @pytest.mark.asyncio
     async def test_missing_value_keeps_state(self, evaluator, cooling_condition):
         """Fehlender Wert ändert State nicht."""
         # Aktivieren

@@ -40,6 +40,29 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
         await self.session.refresh(rule)
         return rule
 
+    async def get_degraded_rules(
+        self, critical_only: bool = False
+    ) -> list[CrossESPLogic]:
+        """
+        Get all rules currently in degraded state (AUT-111).
+
+        Args:
+            critical_only: If True, only return rules where is_critical=True.
+
+        Returns:
+            List of CrossESPLogic rules whose degraded_since is not null.
+        """
+        conditions = [CrossESPLogic.degraded_since.isnot(None)]
+        if critical_only:
+            conditions.append(CrossESPLogic.is_critical == True)
+        stmt = (
+            select(CrossESPLogic)
+            .where(and_(*conditions))
+            .order_by(CrossESPLogic.degraded_since.asc())
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_enabled_rules(self) -> list[CrossESPLogic]:
         """
         Get all enabled rules, sorted by priority ascending.

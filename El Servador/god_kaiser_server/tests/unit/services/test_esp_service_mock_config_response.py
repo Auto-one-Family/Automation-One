@@ -32,6 +32,12 @@ async def test_send_config_mock_device_emits_terminal_config_response() -> None:
 
     assert result["success"] is True
     publisher.publish_config.assert_called_once()
+    published_config = publisher.publish_config.call_args.kwargs["config"]
+    assert published_config["reason_code"] == "manual_config_sync"
+    assert isinstance(published_config["generation"], int)
+    assert published_config["generation"] > 0
+    assert isinstance(published_config["config_fingerprint"], str)
+    assert len(published_config["config_fingerprint"]) == 64
 
     event_types = [call.args[0] for call in ws_broadcast.await_args_list]
     assert "config_published" in event_types
@@ -61,6 +67,25 @@ async def test_send_config_real_device_does_not_emit_synthetic_config_response()
     event_types = [call.args[0] for call in ws_broadcast.await_args_list]
     assert event_types.count("config_published") == 1
     assert "config_response" not in event_types
+
+
+def test_config_fingerprint_is_stable_for_semantically_equal_payloads() -> None:
+    service, _, _ = _build_service(SimpleNamespace(status="online", hardware_type="ESP32_WROOM"))
+    payload_a = {
+        "sensors": [{"gpio": 4, "sensor_type": "ds18b20"}],
+        "actuators": [{"gpio": 25, "actuator_type": "relay"}],
+        "offline_rules": [],
+    }
+    payload_b = {
+        "offline_rules": [],
+        "actuators": [{"actuator_type": "relay", "gpio": 25}],
+        "sensors": [{"sensor_type": "ds18b20", "gpio": 4}],
+    }
+
+    fingerprint_a = service._compute_config_fingerprint(payload_a)
+    fingerprint_b = service._compute_config_fingerprint(payload_b)
+
+    assert fingerprint_a == fingerprint_b
 
 
 # =============================================================================
@@ -151,6 +176,22 @@ class TestStripInconsistentOfflineRules:
 
         assert len(stripped) == 2
         assert config["offline_rules"] == []
+
+    def test_time_window_only_rule_not_stripped_by_sensor_gpio_255(self):
+        """time-window-only rule uses synthetic sensor_gpio=255 and must stay in config."""
+        service = self._service()
+        config = {
+            "sensors": [{"gpio": 4}],
+            "actuators": [{"gpio": 25}],
+            "offline_rules": [
+                {"actuator_gpio": 25, "sensor_gpio": 255, "sensor_value_type": "__twindow_on"},
+            ],
+        }
+
+        stripped = service._strip_inconsistent_offline_rules(config, "ESP_TEST01", "corr-6")
+
+        assert stripped == []
+        assert len(config["offline_rules"]) == 1
 
     @pytest.mark.asyncio
     async def test_send_config_strips_inconsistent_rules_before_publish(self):

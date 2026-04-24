@@ -747,6 +747,45 @@ class TestB2TimezoneSupport:
         result = await evaluator.evaluate(condition, {"current_time": utc_23})
         assert isinstance(result, bool)
 
+    @pytest.mark.asyncio
+    async def test_time_window_uses_start_end_minute_fields(self, logic_engine: LogicEngine):
+        """Minute fields on time_window must be evaluated directly."""
+        from src.services.logic.conditions.time_evaluator import TimeConditionEvaluator
+
+        evaluator = TimeConditionEvaluator()
+        condition = {
+            "type": "time_window",
+            "start_hour": 7,
+            "start_minute": 30,
+            "end_hour": 8,
+            "end_minute": 15,
+            "days_of_week": [0, 1, 2, 3, 4, 5, 6],
+        }
+
+        inside = datetime(2026, 7, 1, 7, 45, 0, tzinfo=timezone.utc)
+        outside = datetime(2026, 7, 1, 8, 16, 0, tzinfo=timezone.utc)
+
+        assert await evaluator.evaluate(condition, {"current_time": inside}) is True
+        assert await evaluator.evaluate(condition, {"current_time": outside}) is False
+
+    @pytest.mark.asyncio
+    async def test_time_window_falls_back_to_start_end_time_strings(self, logic_engine: LogicEngine):
+        """Legacy start_time/end_time remains supported when hour fields are absent."""
+        from src.services.logic.conditions.time_evaluator import TimeConditionEvaluator
+
+        evaluator = TimeConditionEvaluator()
+        condition = {
+            "type": "time_window",
+            "start_time": "07:05",
+            "end_time": "07:10",
+        }
+
+        inside = datetime(2026, 7, 1, 7, 6, 0, tzinfo=timezone.utc)
+        outside = datetime(2026, 7, 1, 7, 11, 0, tzinfo=timezone.utc)
+
+        assert await evaluator.evaluate(condition, {"current_time": inside}) is True
+        assert await evaluator.evaluate(condition, {"current_time": outside}) is False
+
 
 class TestB3RuleUpdateTrigger:
     """B3-fix: on_rule_updated resets hysteresis state and sends OFF when actuator was active."""

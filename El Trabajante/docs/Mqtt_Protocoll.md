@@ -57,6 +57,7 @@ kaiser/
 │   │       │   ├── command        # System-Befehle (subscribe)
 │   │       │   ├── session/announce # Reconnect Session-Announce (publish)
 │   │       │   ├── heartbeat      # System-Heartbeat (publish)
+│   │       │   ├── heartbeat_metrics # Extended Metrics (publish, optional ENABLE_METRICS_SPLIT, AUT-121)
 │   │       │   ├── intent_outcome # Intent/Outcome kanonisch (publish)
 │   │       │   ├── intent_outcome/lifecycle # CONFIG_PENDING lifecycle (publish, Schema v1)
 │   │       │   └── diagnostics   # System-Diagnostics (publish)
@@ -290,6 +291,46 @@ Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
   "sensor_command_queue_overflow_count": 0 // Verwerfungen in sensor_command_queue bei Overflow
 }
 ```
+
+### 3a. Heartbeat Metrics (system/heartbeat_metrics, AUT-121)
+
+**Topic:** `kaiser/god/esp/{esp_id}/system/heartbeat_metrics` (in Tests/Debug oft `kaiser_id=god` — siehe `TopicBuilder`).
+
+**QoS:** 0 **Retain:** false
+
+**Aktivierung:** Compile-Flag `ENABLE_METRICS_SPLIT` (z. B. in `esp32_dev`). Ohne Flag bleiben die Zähler/Queue-Stats im Core-`system/heartbeat`-JSON (siehe `#ifndef ENABLE_METRICS_SPLIT` in `publishHeartbeat()`).
+
+**Modul:** `services/communication/mqtt_client.cpp` → `publishHeartbeatMetrics()` (wird am Ende von `publishHeartbeat()` aufgerufen). **TopicBuilder:** `TopicBuilder::buildSystemHeartbeatMetricsTopic()`.
+
+**Logik:** Senden nur, wenn sich das interne `MetricsSnapshot` geändert hat oder ein Skip-Zähler `METRICS_MAX_SKIP_COUNT` (5) Zyklen ohne Publish erreicht; reduziert MQTT-Overhead bei unveränderter Forensik.
+
+**Payload (Ist, ESP-IDF, ohne PubSubClient — exemplarisch):**
+```json
+{
+  "esp_id": "ESP_12AB34CD",
+  "ts": 1735818000,
+  "metrics_schema_version": 1,
+  "offline_enter_count": 0,
+  "adopting_enter_count": 0,
+  "adoption_noop_count": 0,
+  "adoption_delta_count": 0,
+  "handover_abort_count": 0,
+  "handover_contract_reject_count": 0,
+  "handover_contract_last_reject": "NONE",
+  "persistence_drift_count": 0,
+  "critical_outcome_drop_count": 0,
+  "publish_outbox_drop_count": 0,
+  "publish_queue_fill": 0,
+  "publish_queue_hwm": 0,
+  "publish_queue_shed_count": 0,
+  "publish_queue_drop_count": 0,
+  "sensor_command_queue_overflow_count": 0,
+  "safe_publish_retry_count": 0,
+  "emergency_rejected_no_token_total": 0
+}
+```
+
+**Server:** separater Subscribe auf `.../system/heartbeat_metrics` → reiner Ingest in TTLCache; Merge in den nächsten Core-Heartbeat, sodass `esp_health` im WebSocket unverändert adressierbar bleibt. Detailliert: `.claude/reference/api/MQTT_TOPICS.md` §3.1b.
 
 **Hinweis (2026-04):** Die Felder `degraded` / `degraded_reason` (früher nur Persistence-Drift) werden **nicht mehr** gesendet; Consumer auf `persistence_degraded*` und `runtime_state_degraded` / `network_degraded` umstellen.
 

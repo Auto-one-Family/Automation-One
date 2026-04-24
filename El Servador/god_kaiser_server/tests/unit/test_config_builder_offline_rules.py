@@ -203,6 +203,59 @@ class TestExtractOfflineRuleUnit:
         assert result["sensor_gpio"] == 7
         assert result["actuator_gpio"] == 12
 
+    def test_time_window_only_rule_converted_to_offline_rule(self):
+        """Pure time_window + local actuator ON command becomes time-window offline rule."""
+        builder = self._builder()
+        rule = _make_rule(
+            rule_name="light_schedule_offline",
+            trigger_conditions={
+                "type": "time_window",
+                "start_hour": 6,
+                "start_minute": 0,
+                "end_hour": 18,
+                "end_minute": 0,
+                "timezone": "Europe/Berlin",
+            },
+            actions=[_actuator_action(ESP_ID_A, gpio=25)],
+        )
+
+        result = builder._extract_offline_rule(rule, ESP_ID_A)
+
+        assert result is not None
+        assert result["actuator_gpio"] == 25
+        assert result["sensor_gpio"] == ConfigPayloadBuilder.TIME_WINDOW_ONLY_SENSOR_GPIO
+        assert result["sensor_value_type"] == ConfigPayloadBuilder.TIME_WINDOW_ONLY_SENSOR_TYPE_ON
+        assert result["time_filter"]["enabled"] is True
+        assert result["time_filter"]["start_hour"] == 6
+        assert result["time_filter"]["end_hour"] == 18
+
+    def test_time_window_only_rule_without_on_action_is_skipped(self):
+        """time_window-only with OFF action is skipped to avoid ambiguous inverse behavior."""
+        builder = self._builder()
+        rule = _make_rule(
+            rule_name="night_off_only",
+            trigger_conditions={
+                "type": "time_window",
+                "start_hour": 22,
+                "start_minute": 0,
+                "end_hour": 6,
+                "end_minute": 0,
+                "timezone": "UTC",
+            },
+            actions=[{
+                "type": "actuator_command",
+                "esp_id": ESP_ID_A,
+                "gpio": 25,
+                "command": "OFF",
+                "value": 0.0,
+                "duration_seconds": 0,
+            }],
+        )
+
+        result = builder._extract_offline_rule(rule, ESP_ID_A)
+
+        assert result is None
+
     # ------------------------------------------------------------------
     # 6. Hysteresis condition without valid threshold pair → excluded
     # ------------------------------------------------------------------
@@ -642,3 +695,36 @@ class TestValidateOfflineRulesConsistency:
 
         assert len(result) == 1
         assert result[0]["actuator_gpio"] == 18
+
+    def test_time_window_only_rule_ignores_sensor_gpio_membership(self):
+        """time-window-only rule with synthetic sensor_gpio=255 must not be stripped."""
+        builder = self._builder()
+        sensor_payloads = [{"gpio": 4, "sensor_type": "sht31_temp"}]
+        actuator_payloads = [{"gpio": 25, "actuator_type": "relay"}]
+        offline_rules = [
+            {
+                "actuator_gpio": 25,
+                "sensor_gpio": ConfigPayloadBuilder.TIME_WINDOW_ONLY_SENSOR_GPIO,
+                "sensor_value_type": ConfigPayloadBuilder.TIME_WINDOW_ONLY_SENSOR_TYPE_ON,
+                "activate_below": 0.0,
+                "deactivate_above": 0.0,
+                "activate_above": 1.0,
+                "deactivate_below": 0.0,
+                "time_filter": {
+                    "enabled": True,
+                    "start_hour": 6,
+                    "start_minute": 0,
+                    "end_hour": 18,
+                    "end_minute": 0,
+                    "days_of_week_mask": 0x7F,
+                    "timezone": "Europe/Berlin",
+                },
+            }
+        ]
+
+        result = builder._validate_offline_rules_consistency(
+            offline_rules, sensor_payloads, actuator_payloads, ESP_ID_A
+        )
+
+        assert len(result) == 1
+        assert result[0]["sensor_gpio"] == ConfigPayloadBuilder.TIME_WINDOW_ONLY_SENSOR_GPIO

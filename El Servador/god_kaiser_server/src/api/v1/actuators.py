@@ -637,13 +637,21 @@ async def create_or_update_actuator(
         await db.rollback()
         # Non-fatal: actuator was saved, subzone can be fixed manually
 
+    config_correlation_id: Optional[str] = None
+    config_request_id: Optional[str] = None
     # Publish config to ESP32 via MQTT (using dependency-injected services)
     try:
         config_builder: ConfigPayloadBuilder = get_config_builder(db)
         combined_config = await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
-        config_sent = await esp_service.send_config(esp_id, combined_config)
+        config_sent = await esp_service.send_config(
+            esp_id,
+            combined_config,
+            reason_code="actuator_config_change",
+        )
+        config_correlation_id = config_sent.get("correlation_id")
+        config_request_id = config_sent.get("request_id") or config_correlation_id
 
         if config_sent.get("success"):
             logger.info(f"Config published to ESP {esp_id} after actuator create/update")
@@ -657,9 +665,12 @@ async def create_or_update_actuator(
     subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio)
     subzone_id_val = subzone.subzone_id if subzone else None
 
-    return _model_to_schema_response(
+    response = _model_to_schema_response(
         actuator, esp_id, None, subzone_id=subzone_id_val, subzone_warning=subzone_error
     )
+    response.correlation_id = config_correlation_id
+    response.request_id = config_request_id
+    return response
 
 
 # =============================================================================
@@ -1345,7 +1356,11 @@ async def delete_actuator(
         combined_config = await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
-        config_sent = await esp_service.send_config(esp_id, combined_config)
+        config_sent = await esp_service.send_config(
+            esp_id,
+            combined_config,
+            reason_code="actuator_config_change",
+        )
 
         if config_sent.get("success"):
             logger.info(f"Config published to ESP {esp_id} after actuator delete")

@@ -14,7 +14,11 @@ import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.mqtt.handlers.heartbeat_handler import HeartbeatHandler, get_heartbeat_handler
+from src.mqtt.handlers.heartbeat_handler import (
+    HeartbeatHandler,
+    get_heartbeat_handler,
+    set_command_bridge,
+)
 from src.schemas.esp import SessionAnnouncePayload
 
 
@@ -1008,6 +1012,64 @@ class TestZoneMismatchDetection:
             if elapsed < zone_resync_cooldown_seconds:
                 should_resync = False
         assert should_resync is True
+
+    @pytest.mark.asyncio
+    async def test_zone_resync_sets_pending_zone_assignment_marker(self, handler):
+        """WP7 auto-resync must set pending_zone_assignment like ZoneService."""
+        set_command_bridge(None)
+        mock_device = MagicMock()
+        mock_device.device_id = "ESP_ZONE_PENDING"
+        mock_device.zone_id = "zone_a"
+        mock_device.master_zone_id = "master_a"
+        mock_device.zone_name = "Zone A"
+        mock_device.kaiser_id = "god"
+        mock_device.status = "online"
+        mock_device.device_metadata = {}
+        mock_device.ip_address = None
+
+        payload = {"zone_id": "", "zone_assigned": False}
+
+        mock_session = MagicMock()
+        mock_client = MagicMock()
+        with patch("src.mqtt.client.MQTTClient.get_instance", return_value=mock_client):
+            await handler._update_esp_metadata(mock_device, payload, mock_session)
+
+        assert mock_client.publish.call_count == 1
+        pending = mock_device.device_metadata.get("pending_zone_assignment")
+        assert isinstance(pending, dict)
+        assert pending.get("zone_id") == "zone_a"
+        assert pending.get("source") == "heartbeat_zone_resync"
+        assert isinstance(pending.get("sent_at"), int)
+
+    @pytest.mark.asyncio
+    async def test_zone_resync_skipped_when_zone_command_pending(self, handler):
+        """No duplicate auto-resync publish while bridge has pending zone command."""
+        mock_bridge = MagicMock()
+        mock_bridge.has_pending.return_value = True
+        set_command_bridge(mock_bridge)
+        try:
+            mock_device = MagicMock()
+            mock_device.device_id = "ESP_ZONE_PENDING_CMD"
+            mock_device.zone_id = "zone_b"
+            mock_device.master_zone_id = "master_b"
+            mock_device.zone_name = "Zone B"
+            mock_device.kaiser_id = "god"
+            mock_device.status = "online"
+            mock_device.device_metadata = {}
+            mock_device.ip_address = None
+
+            payload = {"zone_id": "", "zone_assigned": False}
+            mock_session = MagicMock()
+            mock_client = MagicMock()
+            with patch("src.mqtt.client.MQTTClient.get_instance", return_value=mock_client):
+                await handler._update_esp_metadata(mock_device, payload, mock_session)
+
+            assert mock_client.publish.call_count == 0
+            assert "zone_resync_sent_at" not in mock_device.device_metadata
+            assert "pending_zone_assignment" not in mock_device.device_metadata
+            mock_bridge.has_pending.assert_called_once_with("ESP_ZONE_PENDING_CMD", "zone")
+        finally:
+            set_command_bridge(None)
 
 
 class TestHeartbeatTimeoutAntiDuplicateEscalation:

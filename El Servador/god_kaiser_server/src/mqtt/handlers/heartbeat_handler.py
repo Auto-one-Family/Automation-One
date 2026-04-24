@@ -56,6 +56,7 @@ from ...services.system_event_contract import canonicalize_heartbeat
 from ...services.state_adoption_service import get_state_adoption_service
 from ...schemas.esp import SessionAnnouncePayload
 from ..topics import TopicBuilder
+from .heartbeat_metrics_handler import get_heartbeat_metrics_handler
 
 logger = get_logger(__name__)
 
@@ -220,6 +221,38 @@ class HeartbeatHandler:
             metadata["handover_contract_reject"] = startup_count + runtime_count
         metadata["handover_contract_reject_count_last"] = reported_count
 
+    @staticmethod
+    def _merge_metrics_into_payload(esp_id: str, payload: dict) -> None:
+        """Merge buffered heartbeat_metrics into heartbeat payload (idempotent).
+
+        Adds ``runtime_telemetry`` fields from the latest metrics message and
+        two freshness indicators:
+        - ``metrics_delta_ts``: ESP timestamp of the latest metrics payload (unix seconds).
+        - ``metrics_freshness_seconds``: server receive-age of the metrics message.
+
+        Already-present heartbeat fields are NOT overwritten (heartbeat is authoritative).
+        """
+        entry = get_heartbeat_metrics_handler().get_latest(esp_id)
+        if entry is None:
+            return
+
+        metrics_payload: dict = entry.get("payload", {})
+        receive_ts: float = entry.get("receive_ts", 0.0)
+        metrics_esp_ts: int = entry.get("esp_ts", 0)
+
+        payload["metrics_delta_ts"] = int(metrics_esp_ts) if isinstance(metrics_esp_ts, (int, float)) else 0
+
+        if receive_ts > 0:
+            payload["metrics_freshness_seconds"] = round(time_module.time() - receive_ts, 1)
+        else:
+            payload["metrics_freshness_seconds"] = -1.0
+
+        for key, value in metrics_payload.items():
+            if key == "ts":
+                continue
+            if key not in payload:
+                payload[key] = value
+
     async def handle_session_announce(self, topic: str, payload: dict) -> bool:
         """Register session/announce to classify startup reject telemetry."""
         parsed_topic = TopicBuilder.parse_session_announce_topic(topic)
@@ -330,6 +363,9 @@ class HeartbeatHandler:
                     session_id=session_id,
                 )
                 return False
+
+            # Step 2b: Merge buffered heartbeat_metrics (AUT-121)
+            self._merge_metrics_into_payload(esp_id_str, payload)
 
             # Step 3: Get database session and repositories
             async with resilient_session() as session:
@@ -542,13 +578,6 @@ class HeartbeatHandler:
                             name=f"reconnect_adoption_{esp_id_str}",
                         )
 
-                # T13-Phase3: Fire Full-State-Push as background task after commit
-                if is_reconnect and esp_device.zone_id and _command_bridge:
-                    create_tracked_task(
-                        self._handle_reconnect_state_push(esp_device.device_id),
-                        name=f"reconnect_state_push_{esp_device.device_id}",
-                    )
-
                 # Update Prometheus metrics for Grafana alerting
                 update_esp_heartbeat_timestamp(esp_id_str)
                 boot_count = payload.get("boot_count")
@@ -669,6 +698,7 @@ class HeartbeatHandler:
                     esp_actuator_count,
                     is_reconnect=is_reconnect,
                     offline_seconds=offline_seconds,
+                    reconnect_epoch=payload.get("handover_epoch"),
                 )
                 # BUG-2 Fix: _has_pending_config sets config_push_sent_at on
                 # esp_device.device_metadata but the session.commit() at line 288
@@ -679,6 +709,20 @@ class HeartbeatHandler:
                 # written before any concurrent heartbeat can read the metadata.
                 if config_push_triggered:
                     await session.commit()
+
+                # T13-Phase3: Full-State-Push runs only when no config resync is pending.
+                # This prevents reconnect burst collisions (zone/subzone push vs. config push).
+                if is_reconnect and esp_device.zone_id and _command_bridge:
+                    if config_push_triggered:
+                        logger.info(
+                            "State push deferred for %s: config push pending",
+                            esp_device.device_id,
+                        )
+                    else:
+                        create_tracked_task(
+                            self._handle_reconnect_state_push(esp_device.device_id),
+                            name=f"reconnect_state_push_{esp_device.device_id}",
+                        )
 
                 return True
 
@@ -1098,6 +1142,27 @@ class HeartbeatHandler:
                             esp_device.device_id,
                         )
 
+                    # Do not emit an additional fire-and-forget resync while an
+                    # ACK-driven zone operation is already in flight.
+                    if (
+                        should_resync
+                        and _command_bridge
+                        and _command_bridge.has_pending(esp_device.device_id, "zone")
+                    ):
+                        should_resync = False
+                        logger.debug(
+                            "Skipping zone resync for %s: pending zone command exists",
+                            esp_device.device_id,
+                        )
+
+                    # During config resync windows, avoid extra zone resync bursts.
+                    if should_resync and esp_device.device_id in self._config_push_pending_esps:
+                        should_resync = False
+                        logger.debug(
+                            "Skipping zone resync for %s: config push pending",
+                            esp_device.device_id,
+                        )
+
                     if should_resync:
                         logger.warning(
                             f"ZONE_MISMATCH [{esp_device.device_id}]: "
@@ -1125,6 +1190,16 @@ class HeartbeatHandler:
                             )
                             current_metadata["zone_resync_sent_at"] = now_ts
                             current_metadata["zone_resync_reason"] = mismatch_reason
+                            # Keep the same pending-marker semantics as ZoneService.
+                            # This allows the next heartbeat cycles to tolerate the
+                            # mismatch until zone/ack resolves or times out.
+                            current_metadata["pending_zone_assignment"] = {
+                                "zone_id": db_zone_id,
+                                "master_zone_id": esp_device.master_zone_id,
+                                "zone_name": esp_device.zone_name,
+                                "sent_at": now_ts,
+                                "source": "heartbeat_zone_resync",
+                            }
                             logger.info(
                                 f"Auto-reassigning zone '{db_zone_id}' to ESP {esp_device.device_id} "
                                 f"(zone lost after reboot). Topic: {resync_topic}"
@@ -1811,6 +1886,7 @@ class HeartbeatHandler:
         esp_actuator_count: int = 0,
         is_reconnect: bool = False,
         offline_seconds: float = 0.0,
+        reconnect_epoch: int | None = None,
     ) -> bool:
         """
         Check if server has unsent configuration for this ESP.
@@ -1844,16 +1920,59 @@ class HeartbeatHandler:
             db_sensor_count = await sensor_repo.count_by_esp(esp_device.id)
             db_actuator_count = await actuator_repo.count_by_esp(esp_device.id)
 
-            # ESP reports 0 configs but DB has configs → reboot detected
-            needs_sensor_push = esp_sensor_count == 0 and db_sensor_count > 0
-            needs_actuator_push = esp_actuator_count == 0 and db_actuator_count > 0
+            # AUT-134: count-drift detection.
+            # Reboot-loss remains covered (ESP=0 while DB>0), but we now
+            # also detect non-zero count drift to trigger targeted resync.
+            needs_sensor_push = db_sensor_count > 0 and esp_sensor_count != db_sensor_count
+            needs_actuator_push = db_actuator_count > 0 and esp_actuator_count != db_actuator_count
 
             if needs_sensor_push or needs_actuator_push:
+                if esp_device.device_id in self._config_push_pending_esps:
+                    logger.debug(
+                        "Config push for %s skipped (already pending). ESP sensors=%d/actuators=%d, "
+                        "DB sensors=%d/actuators=%d",
+                        esp_device.device_id,
+                        esp_sensor_count,
+                        esp_actuator_count,
+                        db_sensor_count,
+                        db_actuator_count,
+                    )
+                    return False
+
                 # Check cooldown (analog to zone_resync_sent_at pattern)
                 metadata = esp_device.device_metadata or {}
                 last_push = metadata.get("config_push_sent_at")
+                last_push_epoch = metadata.get("config_push_epoch")
                 now_ts = int(time_module.time())
-                bypass_cooldown_for_reconnect = bool(is_reconnect)
+                reconnect_epoch_int: int | None = None
+                if reconnect_epoch is not None:
+                    try:
+                        reconnect_epoch_int = int(reconnect_epoch)
+                    except (TypeError, ValueError):
+                        reconnect_epoch_int = None
+
+                # Reconnect-bypass is allowed once per reconnect epoch.
+                # For missing epoch data, stay conservative and only bypass on first push.
+                bypass_cooldown_for_reconnect = False
+                if is_reconnect:
+                    if reconnect_epoch_int is not None:
+                        try:
+                            last_push_epoch_int = (
+                                int(last_push_epoch) if last_push_epoch is not None else None
+                            )
+                        except (TypeError, ValueError):
+                            last_push_epoch_int = None
+                        bypass_cooldown_for_reconnect = (
+                            last_push_epoch_int is None
+                            or reconnect_epoch_int != last_push_epoch_int
+                        )
+                    else:
+                        bypass_cooldown_for_reconnect = last_push is None
+                reason_code = (
+                    "reconnect_count_mismatch"
+                    if bypass_cooldown_for_reconnect
+                    else "heartbeat_count_mismatch"
+                )
 
                 if last_push and not bypass_cooldown_for_reconnect:
                     elapsed = now_ts - last_push
@@ -1873,10 +1992,13 @@ class HeartbeatHandler:
                     elapsed = now_ts - int(last_push)
                     logger.info(
                         "Config push cooldown bypass for reconnect %s "
-                        "(offline=%.1fs, elapsed_since_last_push=%ds, "
+                        "(offline=%.1fs, epoch=%s, elapsed_since_last_push=%ds, "
                         "ESP: sensors=%d/actuators=%d, DB: sensors=%d/actuators=%d)",
                         esp_device.device_id,
                         float(offline_seconds),
+                        str(reconnect_epoch_int)
+                        if reconnect_epoch_int is not None
+                        else "none",
                         int(elapsed),
                         esp_sensor_count,
                         esp_actuator_count,
@@ -1886,21 +2008,40 @@ class HeartbeatHandler:
 
                 # Cooldown expired or first push — update metadata and trigger
                 metadata["config_push_sent_at"] = now_ts
+                metadata["config_push_reason"] = reason_code
+                if reconnect_epoch_int is not None:
+                    metadata["config_push_epoch"] = reconnect_epoch_int
+                metadata["config_push_snapshot"] = {
+                    "esp_sensor_count": int(esp_sensor_count),
+                    "esp_actuator_count": int(esp_actuator_count),
+                    "db_sensor_count": int(db_sensor_count),
+                    "db_actuator_count": int(db_actuator_count),
+                    "is_reconnect": bool(is_reconnect),
+                    "offline_seconds": float(offline_seconds),
+                }
                 esp_device.device_metadata = metadata
                 flag_modified(esp_device, "device_metadata")
 
                 logger.info(
-                    f"Config mismatch detected for {esp_device.device_id}: "
-                    f"ESP reports sensors={esp_sensor_count}/actuators={esp_actuator_count}, "
-                    f"DB has sensors={db_sensor_count}/actuators={db_actuator_count}. "
-                    f"Triggering auto config push."
+                    "Config count mismatch detected for %s (reason=%s): "
+                    "ESP sensors=%d/actuators=%d, DB sensors=%d/actuators=%d. "
+                    "Triggering auto config push.",
+                    esp_device.device_id,
+                    reason_code,
+                    esp_sensor_count,
+                    esp_actuator_count,
+                    db_sensor_count,
+                    db_actuator_count,
                 )
                 # Mark ESP as config-push-pending so reconnect evaluation is gated
                 # until the ESP applies the new config (prevents "No actuator on GPIO X").
                 self._config_push_pending_esps.add(esp_device.device_id)
 
                 create_tracked_task(
-                        self._auto_push_config(esp_device.device_id),
+                        self._auto_push_config(
+                            esp_device.device_id,
+                            reason_code=reason_code,
+                        ),
                         name=f"auto_push_config_{esp_device.device_id}",
                     )
                 return True
@@ -1911,7 +2052,7 @@ class HeartbeatHandler:
             logger.warning(f"Failed to check pending config for {esp_device.device_id}: {e}")
             return False
 
-    async def _auto_push_config(self, esp_device_id: str) -> None:
+    async def _auto_push_config(self, esp_device_id: str, reason_code: str) -> None:
         """
         Auto-push configuration to ESP after reboot detection.
 
@@ -1928,7 +2069,11 @@ class HeartbeatHandler:
 
                 esp_repo = ESPRepository(session)
                 esp_service = ESPService(esp_repo)
-                result = await esp_service.send_config(esp_device_id, combined_config)
+                result = await esp_service.send_config(
+                    esp_device_id,
+                    combined_config,
+                    reason_code=reason_code,
+                )
 
                 if result.get("success"):
                     logger.info(

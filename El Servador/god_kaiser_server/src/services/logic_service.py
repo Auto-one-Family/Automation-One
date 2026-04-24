@@ -160,6 +160,8 @@ class LogicService:
             priority=rule_data.priority,
             cooldown_seconds=rule_data.cooldown_seconds,
             max_executions_per_hour=rule_data.max_executions_per_hour,
+            is_critical=rule_data.is_critical,
+            escalation_policy=rule_data.escalation_policy,
         )
 
         try:

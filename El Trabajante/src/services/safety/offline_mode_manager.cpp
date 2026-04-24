@@ -480,6 +480,15 @@ static bool requiresCalibration(const char* sensor_value_type) {
             strncmp(sensor_value_type, "soil", 4) == 0);
 }
 
+static bool isTimeWindowOnlyRule(const OfflineRule& rule) {
+    return strcmp(rule.sensor_value_type, "__twindow_on") == 0 ||
+           strcmp(rule.sensor_value_type, "__twindow_off") == 0;
+}
+
+static bool getTimeWindowTargetState(const OfflineRule& rule) {
+    return strcmp(rule.sensor_value_type, "__twindow_on") == 0;
+}
+
 bool OfflineModeManager::isInsideTimeWindow(uint8_t now_h, uint8_t now_m,
                                              uint8_t start_h, uint8_t start_m,
                                              uint8_t end_h,   uint8_t end_m) {
@@ -668,6 +677,29 @@ void OfflineModeManager::evaluateOfflineRules() {
                 }
                 continue;
             }
+        }
+
+        if (isTimeWindowOnlyRule(rule)) {
+            bool desired_state = getTimeWindowTargetState(rule);
+            if (desired_state != rule.is_active) {
+                bool ctrl_ok = actuatorManager.controlActuatorBinary(rule.actuator_gpio, desired_state);
+                if (!ctrl_ok) {
+                    LOG_W(TAG, String("[SAFETY-P4] Rule ") + String(i) +
+                               ": time-window-only control failed for GPIO " +
+                               String(rule.actuator_gpio) + " (desired=" +
+                               (desired_state ? "ON" : "OFF") + ")");
+                    continue;
+                }
+                rule.is_active = desired_state;
+                if (!saveOfflineRulesToNVS()) {
+                    LOG_E(TAG, String("[CONFIG] Rule ") + String(i) +
+                               ": failed to persist time-window-only state in blob-v3");
+                }
+                LOG_I(TAG, String("[SAFETY-P4] Rule ") + String(i) +
+                           ": time-window-only -> GPIO " + String(rule.actuator_gpio) +
+                           (desired_state ? " ON" : " OFF"));
+            }
+            continue;
         }
 
         float val = sensorManager.getSensorValue(rule.sensor_gpio, rule.sensor_value_type);

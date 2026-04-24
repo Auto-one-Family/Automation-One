@@ -26,6 +26,7 @@ public:
   // ORPHANED - Redundant to actuator/{gpio}/alert. See Mqtt_Protocoll.md inventory.
   static const char* buildActuatorEmergencyTopic();             // Phase 5
   static const char* buildSystemHeartbeatTopic();               // Pattern 5
+  static const char* buildSystemHeartbeatMetricsTopic();        // AUT-121: Extended telemetry (separate from core heartbeat)
   static const char* buildSystemHeartbeatAckTopic();            // Phase 2: Heartbeat-ACK (Server → ESP)
   static const char* buildServerStatusTopic();                  // SAFETY-P5: kaiser/{kaiser_id}/server/status
   static const char* buildSystemCommandTopic();                 // Pattern 6

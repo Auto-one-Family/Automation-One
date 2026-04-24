@@ -21,6 +21,7 @@ References:
 - El Trabajante/docs/Mqtt_Protocoll.md
 """
 
+import hashlib
 import json
 import uuid
 from collections import deque
@@ -367,6 +368,29 @@ class ESPService:
     # =========================================================================
 
     @staticmethod
+    def _canonicalize_payload(value: Any) -> Any:
+        """Build deterministic structures for stable fingerprint hashing."""
+        if isinstance(value, dict):
+            return {
+                str(key): ESPService._canonicalize_payload(val)
+                for key, val in sorted(value.items(), key=lambda item: str(item[0]))
+            }
+        if isinstance(value, list):
+            return [ESPService._canonicalize_payload(item) for item in value]
+        return value
+
+    @staticmethod
+    def _compute_config_fingerprint(config: Dict[str, Any]) -> str:
+        normalized = ESPService._canonicalize_payload(config)
+        payload_json = json.dumps(
+            normalized,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+
+    @staticmethod
     def _is_mock_device(device: ESPDevice, device_id: str) -> bool:
         hardware_type = str(getattr(device, "hardware_type", "") or "").upper()
         if hardware_type == "MOCK_ESP32":
@@ -423,11 +447,17 @@ class ESPService:
         for rule in offline_rules:
             a_gpio = rule.get("actuator_gpio")
             s_gpio = rule.get("sensor_gpio")
+            sensor_value_type = str(rule.get("sensor_value_type", ""))
+            is_time_window_only = sensor_value_type in {"__twindow_on", "__twindow_off"}
             drop = False
 
             if a_gpio is not None and int(a_gpio) not in actuator_gpios:
                 drop = True
-            if s_gpio is not None and int(s_gpio) not in sensor_gpios:
+            if (
+                not is_time_window_only
+                and s_gpio is not None
+                and int(s_gpio) not in sensor_gpios
+            ):
                 drop = True
 
             if drop:
@@ -458,6 +488,9 @@ class ESPService:
         config: Dict[str, Any],
         offline_behavior: str = "warn",
         require_online: bool = False,
+        reason_code: str = "manual_config_sync",
+        generation: Optional[int] = None,
+        config_fingerprint: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Send configuration update to ESP via MQTT.
@@ -484,6 +517,11 @@ class ESPService:
         from ..core.error_codes import ConfigErrorCode
 
         correlation_id = str(uuid.uuid4())
+        resolved_generation = (
+            int(generation)
+            if generation is not None and int(generation) > 0
+            else int(datetime.now(timezone.utc).timestamp() * 1000)
+        )
 
         result = {
             "success": False,
@@ -492,6 +530,8 @@ class ESPService:
             "message": "",
             "error_code": None,
             "correlation_id": correlation_id,
+            "reason_code": reason_code,
+            "generation": resolved_generation,
         }
 
         # Get device
@@ -537,6 +577,8 @@ class ESPService:
         # AUT-59: Defense-in-depth — strip offline_rules that reference GPIOs
         # absent from the same config frame before publishing.
         stripped = self._strip_inconsistent_offline_rules(config, device_id, correlation_id)
+        resolved_fingerprint = config_fingerprint or self._compute_config_fingerprint(config)
+        result["config_fingerprint"] = resolved_fingerprint
 
         # Publish config via MQTT with stable intent handles for contract tracking.
         # Keep correlation_id as primary key and mirror it in request_id/intent_id
@@ -546,10 +588,16 @@ class ESPService:
             "correlation_id": correlation_id,
             "request_id": correlation_id,
             "intent_id": correlation_id,
+            "generation": resolved_generation,
+            "config_fingerprint": resolved_fingerprint,
+            "reason_code": reason_code,
         }
         logger.debug(
-            "Config payload for %s: %s",
+            "Config payload for %s (reason=%s generation=%s fingerprint=%s): %s",
             device_id,
+            reason_code,
+            resolved_generation,
+            resolved_fingerprint[:12],
             json.dumps(config, default=str),
         )
         success = self.publisher.publish_config(
@@ -590,6 +638,9 @@ class ESPService:
                         "sensor_count": len(config.get("sensors", [])),
                         "actuator_count": len(config.get("actuators", [])),
                         "correlation_id": correlation_id,
+                        "reason_code": reason_code,
+                        "generation": resolved_generation,
+                        "config_fingerprint": resolved_fingerprint,
                     },
                 )
             except Exception as audit_err:
@@ -633,6 +684,9 @@ class ESPService:
                         "queued": not is_online,
                         "device_status": device.status or "unknown",
                         "offline_rules_stripped": len(stripped) if stripped else 0,
+                        "reason_code": reason_code,
+                        "generation": resolved_generation,
+                        "config_fingerprint": resolved_fingerprint,
                     },
                     correlation_id=correlation_id,
                 )
@@ -677,6 +731,9 @@ class ESPService:
                         "config_keys": list(config.keys()),
                         "error": "MQTT publish failed",
                         "correlation_id": correlation_id,
+                        "reason_code": reason_code,
+                        "generation": resolved_generation,
+                        "config_fingerprint": resolved_fingerprint,
                     },
                 )
             except Exception as audit_err:
@@ -694,6 +751,9 @@ class ESPService:
                         "config_keys": list(config.keys()) if config else [],
                         "error": "MQTT publish failed",
                         "correlation_id": correlation_id,
+                        "reason_code": reason_code,
+                        "generation": resolved_generation,
+                        "config_fingerprint": resolved_fingerprint,
                     },
                     correlation_id=correlation_id,
                 )

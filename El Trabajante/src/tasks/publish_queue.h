@@ -18,7 +18,9 @@
 // 8 slots still absorb short bursts while preserving headroom for Core-0 network task startup.
 static const uint8_t  PUBLISH_QUEUE_SIZE      = 8;      // 8 * ~2180 B = ~18 KB heap
 static const uint16_t PUBLISH_TOPIC_MAX_LEN   = 128;
-static const uint16_t PUBLISH_PAYLOAD_MAX_LEN = 1024;   // PKG-17: Heartbeat without gpio_status fits in 1024 B
+// AUT-134: Heartbeat payload can exceed 1KB during reconnect/config bursts.
+// 1536 B provides headroom without materially impacting heap safety.
+static const uint16_t PUBLISH_PAYLOAD_MAX_LEN = 1536;
 
 // AUT-55: When queue fill >= watermark, non-critical messages are proactively shed
 // to preserve slots for critical publishes (alerts, responses, intent_outcome).

@@ -19,6 +19,7 @@ MQTT_TOPIC_ESP_RESPONSE = "kaiser/{kaiser_id}/esp/{esp_id}/response"
 MQTT_TOPIC_ESP_PI_ENHANCED_REQUEST = "kaiser/{kaiser_id}/esp/{esp_id}/pi_enhanced/request"
 MQTT_TOPIC_ESP_DISCOVERY = "kaiser/{kaiser_id}/discovery/esp32_nodes"  # DEPRECATED: Use heartbeat
 MQTT_TOPIC_ESP_HEARTBEAT = "kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat"
+MQTT_TOPIC_ESP_HEARTBEAT_METRICS = "kaiser/{kaiser_id}/esp/{esp_id}/system/heartbeat_metrics"
 MQTT_TOPIC_ESP_SESSION_ANNOUNCE = "kaiser/{kaiser_id}/esp/{esp_id}/session/announce"
 MQTT_TOPIC_ESP_LWT = "kaiser/{kaiser_id}/esp/{esp_id}/system/will"
 
@@ -75,6 +76,7 @@ MQTT_SUBSCRIBE_ESP_SENSORS = "kaiser/{kaiser_id}/esp/+/sensor/+/data"
 MQTT_SUBSCRIBE_ESP_ACTUATORS = "kaiser/{kaiser_id}/esp/+/actuator/+/status"
 MQTT_SUBSCRIBE_ESP_HEALTH = "kaiser/{kaiser_id}/esp/+/health/status"
 MQTT_SUBSCRIBE_ESP_DISCOVERY = "kaiser/{kaiser_id}/discovery/esp32_nodes"
+MQTT_SUBSCRIBE_ESP_HEARTBEAT_METRICS = "kaiser/{kaiser_id}/esp/+/system/heartbeat_metrics"
 
 # Default Kaiser ID (can be overridden via KAISER_ID env var)
 DEFAULT_KAISER_ID = "god"
@@ -209,6 +211,7 @@ QOS_SENSOR_DATA = 1  # At least once
 QOS_ACTUATOR_COMMAND = 2  # Exactly once
 QOS_SENSOR_COMMAND = 2  # Exactly once - same as actuator commands
 QOS_HEARTBEAT = 0  # At most once
+QOS_HEARTBEAT_METRICS = 0  # At most once (same as core heartbeat)
 QOS_CONFIG = 2  # Exactly once
 
 # =============================================================================

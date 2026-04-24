@@ -198,6 +198,10 @@ class ConfigHandler:
                             timestamp=int(datetime.now(timezone.utc).timestamp()),
                             correlation_id=correlation_id,
                             request_id=request_id,
+                            reason_code=payload.get("reason_code"),
+                            generation=payload.get("generation"),
+                            config_fingerprint=payload.get("config_fingerprint"),
+                            trigger_source=payload.get("trigger_source"),
                         )
                         # PKG-04a: distinct event type for guard-replay + correlation_id_source metadata.
                         # Frontend can treat guard-replay as a finalization-only signal without
@@ -350,6 +354,10 @@ class ConfigHandler:
                     timestamp=int(datetime.now(timezone.utc).timestamp()),
                     correlation_id=correlation_id,
                     request_id=request_id,
+                    reason_code=payload.get("reason_code"),
+                    generation=payload.get("generation"),
+                    config_fingerprint=payload.get("config_fingerprint"),
+                    trigger_source=payload.get("trigger_source"),
                 )
                 broadcast_payload.update(
                     {
@@ -392,6 +400,10 @@ class ConfigHandler:
                             failures=failures if failures else None,
                             failed_item=failed_item if failed_item else None,
                             request_id=request_id,
+                            reason_code=payload.get("reason_code"),
+                            generation=payload.get("generation"),
+                            config_fingerprint=payload.get("config_fingerprint"),
+                            trigger_source=payload.get("trigger_source"),
                         )
                     )
 

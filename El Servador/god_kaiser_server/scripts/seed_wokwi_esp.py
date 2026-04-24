@@ -27,6 +27,7 @@ sys.path.insert(0, str(project_root))
 from datetime import datetime, timezone
 
 from src.core.logging_config import get_logger
+from src.core.config import get_settings
 from src.db.models.esp import ESPDevice
 from src.db.repositories.esp_repo import ESPRepository
 from src.db.session import get_session
@@ -85,47 +86,66 @@ def create_wokwi_esp_device(device_id: str, index: int) -> ESPDevice:
     )
 
 
+def _is_soft_deleted(device: ESPDevice) -> bool:
+    """Return True when device is marked as soft-deleted."""
+    return device.deleted_at is not None or device.status == "deleted"
+
+
 async def seed_wokwi_esp() -> dict[str, int]:
     """
     Create Wokwi simulation ESP devices if they don't exist.
 
     Returns:
-        Dictionary with counts: {"created": N, "existing": M, "failed": K}
+        Dictionary with counts: {"created": N, "reactivated": M, "existing": K, "failed": X}
     """
-    results = {"created": 0, "existing": 0, "failed": 0}
+    results = {"created": 0, "reactivated": 0, "existing": 0, "failed": 0}
 
-    async for session in get_session():
-        try:
-            esp_repo = ESPRepository(session)
+    session_gen = get_session()
+    session = await anext(session_gen)
+    try:
+        esp_repo = ESPRepository(session)
 
-            for index, esp_id in enumerate(WOKWI_ESP_IDS, start=1):
-                try:
-                    # Check if ESP already exists
-                    existing_esp = await esp_repo.get_by_device_id(esp_id)
-                    if existing_esp:
-                        logger.info(f"[OK] Wokwi ESP '{esp_id}' already exists (status: {existing_esp.status})")
+        for index, esp_id in enumerate(WOKWI_ESP_IDS, start=1):
+            try:
+                # Check if ESP already exists, including soft-deleted rows.
+                existing_esp = await esp_repo.get_by_device_id(esp_id, include_deleted=True)
+                if existing_esp:
+                    if _is_soft_deleted(existing_esp):
+                        # Reactivate previously deleted Wokwi devices.
+                        existing_esp.deleted_at = None
+                        existing_esp.deleted_by = None
+                        existing_esp.status = "approved"
+                        existing_esp.approved_at = datetime.now(timezone.utc)
+                        existing_esp.approved_by = "seed_script"
+                        existing_esp.rejection_reason = None
+                        await session.commit()
+                        logger.info(f"[OK] Reactivated Wokwi ESP '{esp_id}' (status=approved)")
+                        results["reactivated"] += 1
+                    else:
+                        logger.info(
+                            f"[OK] Wokwi ESP '{esp_id}' already exists (status: {existing_esp.status})"
+                        )
                         results["existing"] += 1
-                        continue
+                    continue
 
-                    # Create new Wokwi ESP device
-                    wokwi_esp = create_wokwi_esp_device(esp_id, index)
-                    session.add(wokwi_esp)
-                    await session.commit()
+                # Create new Wokwi ESP device
+                wokwi_esp = create_wokwi_esp_device(esp_id, index)
+                session.add(wokwi_esp)
+                await session.commit()
 
-                    logger.info(f"[OK] Created Wokwi ESP '{esp_id}'")
-                    results["created"] += 1
+                logger.info(f"[OK] Created Wokwi ESP '{esp_id}'")
+                results["created"] += 1
 
-                except Exception as e:
-                    logger.error(f"Failed to create Wokwi ESP '{esp_id}': {e}", exc_info=True)
-                    await session.rollback()
-                    results["failed"] += 1
-                    # Continue with next device
-
-        except Exception as e:
-            logger.error(f"Failed to seed Wokwi ESPs: {e}", exc_info=True)
-            raise
-        finally:
-            break
+            except Exception as e:
+                logger.error(f"Failed to upsert Wokwi ESP '{esp_id}': {e}", exc_info=True)
+                await session.rollback()
+                results["failed"] += 1
+                # Continue with next device
+    except Exception as e:
+        logger.error(f"Failed to seed Wokwi ESPs: {e}", exc_info=True)
+        raise
+    finally:
+        await session_gen.aclose()
 
     return results
 
@@ -136,6 +156,14 @@ async def main() -> None:
     print("Wokwi ESP Seed Script (Multi-Device)")
     print("=" * 60)
     print()
+
+    db_url = get_settings().database.url
+    print(f"Database URL: {db_url}")
+    if db_url.startswith("sqlite"):
+        print("WARNING: SQLite is active. This does NOT seed the Docker/PostgreSQL stack.")
+        print("Set DATABASE_URL to PostgreSQL before running this script for Docker setup.")
+        print()
+
     print(f"Creating {len(WOKWI_ESP_IDS)} Wokwi ESP devices:")
     for i, esp_id in enumerate(WOKWI_ESP_IDS, start=1):
         print(f"  {i}. {esp_id}")
@@ -146,13 +174,14 @@ async def main() -> None:
 
         print()
         print("Results:")
-        print(f"  ✅ Created: {results['created']}")
-        print(f"  ℹ️  Already exist: {results['existing']}")
+        print(f"  Created: {results['created']}")
+        print(f"  Reactivated: {results['reactivated']}")
+        print(f"  Already exist: {results['existing']}")
         if results['failed'] > 0:
-            print(f"  ❌ Failed: {results['failed']}")
+            print(f"  Failed: {results['failed']}")
         print()
 
-        if results['created'] > 0:
+        if results['created'] > 0 or results['reactivated'] > 0:
             print("Next steps:")
             print("  1. Mosquitto MQTT broker prüfen (läuft als Windows Service)")
             print("  2. God-Kaiser Server starten (poetry run uvicorn ...)")
@@ -169,7 +198,7 @@ async def main() -> None:
             print()
             print("Die ESPs erscheinen im Frontend sobald Wokwi verbindet.")
         else:
-            print("[OK] All Wokwi ESPs already exist - no action needed")
+            print("[OK] All Wokwi ESPs already exist and are active - no action needed")
 
         print()
         print("=" * 60)

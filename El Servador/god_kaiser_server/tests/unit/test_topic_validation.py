@@ -69,6 +69,17 @@ class TestTopicBuilderBuild:
         topic = TopicBuilder.build_sensor_batch_topic("ESP_12AB34CD", "god")
         assert topic == "kaiser/god/esp/ESP_12AB34CD/sensor/batch"
 
+    def test_build_heartbeat_metrics_topic(self):
+        """Build heartbeat metrics topic correctly."""
+        topic = TopicBuilder.build_heartbeat_metrics_topic("ESP_12AB34CD", "god")
+        assert topic == "kaiser/god/esp/ESP_12AB34CD/system/heartbeat_metrics"
+
+    def test_build_heartbeat_metrics_topic_default_kaiser_id(self):
+        """Build heartbeat metrics topic with default kaiser_id."""
+        topic = TopicBuilder.build_heartbeat_metrics_topic("ESP_12AB34CD")
+        assert "system/heartbeat_metrics" in topic
+        assert "esp/ESP_12AB34CD" in topic
+
     def test_build_system_diagnostics_topic(self):
         """Build system diagnostics topic correctly."""
         topic = TopicBuilder.build_system_diagnostics_topic("ESP_12AB34CD", "god")
@@ -182,6 +193,38 @@ class TestTopicBuilderParse:
         assert result is not None
         assert result["esp_id"] == "ESP_12AB34CD"
         assert result["type"] == "subzone_ack"
+
+    def test_parse_heartbeat_metrics_topic(self):
+        """Parse heartbeat metrics topic."""
+        result = TopicBuilder.parse_heartbeat_metrics_topic(
+            "kaiser/god/esp/ESP_12AB34CD/system/heartbeat_metrics"
+        )
+        assert result is not None
+        assert result["kaiser_id"] == "god"
+        assert result["esp_id"] == "ESP_12AB34CD"
+        assert result["type"] == "heartbeat_metrics"
+
+    def test_parse_heartbeat_metrics_parser_does_not_match_core_heartbeat(self):
+        """heartbeat_metrics parser must not parse core heartbeat topics."""
+        result = TopicBuilder.parse_heartbeat_metrics_topic(
+            "kaiser/god/esp/ESP_12AB34CD/system/heartbeat"
+        )
+        assert result is None
+
+    def test_parse_heartbeat_parser_does_not_match_heartbeat_metrics(self):
+        """Core heartbeat parser must not parse heartbeat_metrics topics."""
+        result = TopicBuilder.parse_heartbeat_topic(
+            "kaiser/god/esp/ESP_12AB34CD/system/heartbeat_metrics"
+        )
+        assert result is None
+
+    def test_parse_heartbeat_metrics_via_generic(self):
+        """Generic parse_topic routes heartbeat_metrics correctly."""
+        result = TopicBuilder.parse_topic(
+            "kaiser/god/esp/ESP_12AB34CD/system/heartbeat_metrics"
+        )
+        assert result is not None
+        assert result["type"] == "heartbeat_metrics"
 
     def test_parse_system_error_topic(self):
         """Parse system error topic."""

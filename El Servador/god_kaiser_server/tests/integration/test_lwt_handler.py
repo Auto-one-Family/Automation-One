@@ -8,7 +8,7 @@ Phase 3 Test-Suite: Instant Offline Detection, Idempotency, Unknown Device Handl
 """
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.mqtt.handlers.lwt_handler import LWTHandler, get_lwt_handler
@@ -198,8 +198,8 @@ class TestLWTIdempotency:
                 mock_repo.update_status.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_lwt_ignored_if_pending_approval(self, handler, valid_lwt_payload):
-        """LWT is processed normally for pending_approval devices."""
+    async def test_lwt_sets_offline_if_pending_approval(self, handler, valid_lwt_payload):
+        """LWT transitions pending_approval devices to offline immediately."""
         topic = "kaiser/god/esp/ESP_PENDING/system/will"
 
         with patch("src.mqtt.handlers.lwt_handler.resilient_session") as mock_session:
@@ -222,8 +222,7 @@ class TestLWTIdempotency:
                 result = await handler.handle_lwt(topic, valid_lwt_payload)
 
                 assert result is True
-                # Should NOT update status (not online)
-                mock_repo.update_status.assert_not_called()
+                mock_repo.update_status.assert_called_once_with("ESP_PENDING", "offline")
 
     @pytest.mark.asyncio
     async def test_stale_terminal_event_skips_offline_transition(self, handler, valid_lwt_payload):
@@ -259,6 +258,44 @@ class TestLWTIdempotency:
 
                     assert result is True
                     mock_repo.update_status.assert_not_called()
+
+    def test_terminal_authority_key_uses_last_seen_when_timestamp_invalid(self, handler):
+        """timestamp=0 must not produce a permanent ts:0 dedup key."""
+        base_last_seen = datetime.now(timezone.utc)
+        key = handler._build_terminal_authority_key(
+            esp_id="ESP_ONLINE",
+            reason="unexpected_disconnect",
+            correlation_id=None,
+            payload={"timestamp": 0},
+            epoch_hint=None,
+            last_seen=base_last_seen,
+        )
+        assert "ts:0" not in key
+        assert f"ts:{int(base_last_seen.timestamp())}" in key
+
+    def test_terminal_authority_key_changes_with_new_session_last_seen(self, handler):
+        """Two real disconnect sessions with timestamp=0 should not collapse to one key."""
+        first_last_seen = datetime.now(timezone.utc)
+        second_last_seen = first_last_seen + timedelta(seconds=75)
+
+        first_key = handler._build_terminal_authority_key(
+            esp_id="ESP_ONLINE",
+            reason="unexpected_disconnect",
+            correlation_id=None,
+            payload={"timestamp": 0},
+            epoch_hint=None,
+            last_seen=first_last_seen,
+        )
+        second_key = handler._build_terminal_authority_key(
+            esp_id="ESP_ONLINE",
+            reason="unexpected_disconnect",
+            correlation_id=None,
+            payload={"timestamp": 0},
+            epoch_hint=None,
+            last_seen=second_last_seen,
+        )
+
+        assert first_key != second_key
 
 
 class TestLWTUnknownDevice:
