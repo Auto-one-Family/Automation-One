@@ -94,6 +94,14 @@ static int findFinalIntentEntry(const char* intent_id) {
     return -1;
 }
 
+// Arduino Preferences::remove() logs ERROR when the key is absent; eviction/clear must be idempotent.
+static void prefsRemoveIfPresent(Preferences& prefs, const char* key) {
+    if (key == nullptr || !prefs.isKey(key)) {
+        return;
+    }
+    prefs.remove(key);
+}
+
 static const char* mapLegacyStatus(const char* normalized_outcome) {
     if (normalized_outcome == nullptr) {
         return "failed";
@@ -264,18 +272,18 @@ static bool loadOutboxEntryAt(uint8_t idx, PendingOutcomeEntry* entry_out) {
 }
 
 static void clearOutboxEntryAt(uint8_t idx) {
-    s_outcome_outbox_prefs.remove(outboxKey(idx, "flow").c_str());
-    s_outcome_outbox_prefs.remove(outboxKey(idx, "intent").c_str());
-    s_outcome_outbox_prefs.remove(outboxKey(idx, "corr").c_str());
-    s_outcome_outbox_prefs.remove(outboxKey(idx, "gen").c_str());
-    s_outcome_outbox_prefs.remove(outboxKey(idx, "created").c_str());
-    s_outcome_outbox_prefs.remove(outboxKey(idx, "ttl").c_str());
-    s_outcome_outbox_prefs.remove(outboxKey(idx, "epoch").c_str());
-    s_outcome_outbox_prefs.remove(outboxKey(idx, "outcome").c_str());
-    s_outcome_outbox_prefs.remove(outboxKey(idx, "code").c_str());
-    s_outcome_outbox_prefs.remove(outboxKey(idx, "reason").c_str());
-    s_outcome_outbox_prefs.remove(outboxKey(idx, "retryable").c_str());
-    s_outcome_outbox_prefs.remove(outboxKey(idx, "attempt").c_str());
+    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "flow").c_str());
+    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "intent").c_str());
+    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "corr").c_str());
+    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "gen").c_str());
+    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "created").c_str());
+    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "ttl").c_str());
+    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "epoch").c_str());
+    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "outcome").c_str());
+    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "code").c_str());
+    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "reason").c_str());
+    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "retryable").c_str());
+    prefsRemoveIfPresent(s_outcome_outbox_prefs, outboxKey(idx, "attempt").c_str());
 }
 
 static bool enqueueCriticalOutcome(const PendingOutcomeEntry& entry) {

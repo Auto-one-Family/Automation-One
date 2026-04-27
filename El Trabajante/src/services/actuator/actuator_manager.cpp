@@ -240,7 +240,11 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
                         (prev.critical         != config.critical)         ||
                         (prev.inverted_logic   != config.inverted_logic)   ||
                         (prev.default_state    != config.default_state)    ||
-                        (prev.default_pwm      != config.default_pwm);
+                        (prev.default_pwm      != config.default_pwm)        ||
+                        (prev.runtime_protection.max_runtime_ms !=
+                            config.runtime_protection.max_runtime_ms)      ||
+                        (prev.runtime_protection.timeout_enabled !=
+                            config.runtime_protection.timeout_enabled);
 
     if (!structural_changed && !soft_changed) {
       // Fully identical config — nothing to do
@@ -259,6 +263,19 @@ bool ActuatorManager::configureActuator(const ActuatorConfig& incoming_config) {
       existing->config.inverted_logic  = config.inverted_logic;
       existing->config.default_state   = config.default_state;
       existing->config.default_pwm     = config.default_pwm;
+      {
+        unsigned long keep_activation = existing->config.runtime_protection.activation_start_ms;
+        existing->config.runtime_protection.max_runtime_ms   =
+            config.runtime_protection.max_runtime_ms;
+        existing->config.runtime_protection.timeout_enabled  =
+            config.runtime_protection.timeout_enabled;
+        existing->config.runtime_protection.activation_start_ms = keep_activation;
+      }
+      if (existing->driver &&
+          existing->config.actuator_type == String(ActuatorTypeTokens::PUMP)) {
+        static_cast<PumpActuator*>(existing->driver.get())
+            ->syncRuntimeLimitsFromConfig(existing->config);
+      }
 
       ActuatorConfig actuators[MAX_ACTUATORS];
       uint8_t count = 0;

@@ -97,21 +97,102 @@ static String slotKey(uint8_t idx, const char* suffix) {
     return "s" + String(idx) + "_" + String(suffix);
 }
 
+// Arduino Preferences::remove() logs ERROR to serial when the key is absent; cleanup is idempotent.
+static void prefsRemoveIfPresent(Preferences& prefs, const char* key) {
+    if (key == nullptr || !prefs.isKey(key)) {
+        return;
+    }
+    prefs.remove(key);
+}
+
+// NVS Preferences string values are capped (~4000 B). Larger cfg_pending payloads use blob + marker.
+static const uint16_t CFG_PENDING_NVS_STRING_SAFE = 3900;
+
+static void clearSlotPayloadKeys(uint8_t idx) {
+    prefsRemoveIfPresent(s_config_pending_prefs, slotKey(idx, "payload").c_str());
+    prefsRemoveIfPresent(s_config_pending_prefs, slotKey(idx, "plb").c_str());
+    prefsRemoveIfPresent(s_config_pending_prefs, slotKey(idx, "plm").c_str());
+}
+
+static bool storeSlotPayload(uint8_t idx, const char* payload) {
+    if (payload == nullptr) {
+        return false;
+    }
+    size_t len = strlen(payload);
+    if (len >= CONFIG_PAYLOAD_MAX_LEN) {
+        return false;
+    }
+    clearSlotPayloadKeys(idx);
+    String mkey = slotKey(idx, "plm");
+    if (len <= CFG_PENDING_NVS_STRING_SAFE) {
+        if (!s_config_pending_prefs.putString(slotKey(idx, "payload").c_str(), payload)) {
+            return false;
+        }
+        s_config_pending_prefs.putUChar(mkey.c_str(), 0);
+        return true;
+    }
+    size_t written = s_config_pending_prefs.putBytes(slotKey(idx, "plb").c_str(), payload, len);
+    if (written != len) {
+        LOG_E(CFG_Q_TAG, String("[CONFIG] cfg_pending putBytes failed len=") + String(len) +
+                             " written=" + String(written));
+        clearSlotPayloadKeys(idx);
+        return false;
+    }
+    s_config_pending_prefs.putUChar(mkey.c_str(), 1);
+    return true;
+}
+
+static bool loadSlotPayload(uint8_t idx, char* out, size_t out_cap) {
+    if (out == nullptr || out_cap < 2) {
+        return false;
+    }
+    out[0] = '\0';
+    uint8_t mode = s_config_pending_prefs.getUChar(slotKey(idx, "plm").c_str(), 0);
+    if (mode == 1) {
+        String bkey = slotKey(idx, "plb");
+        if (!s_config_pending_prefs.isKey(bkey.c_str())) {
+            return false;
+        }
+        size_t max_read = out_cap - 1;
+        size_t n = s_config_pending_prefs.getBytes(bkey.c_str(), out, max_read);
+        if (n == 0) {
+            return false;
+        }
+        out[n] = '\0';
+        return true;
+    }
+    String pkey = slotKey(idx, "payload");
+    if (!s_config_pending_prefs.isKey(pkey.c_str())) {
+        return false;
+    }
+    String payload = s_config_pending_prefs.getString(pkey.c_str(), "");
+    if (payload.length() == 0) {
+        return false;
+    }
+    strncpy(out, payload.c_str(), out_cap - 1);
+    out[out_cap - 1] = '\0';
+    return true;
+}
+
+static bool hasSlotPayload(uint8_t idx) {
+    if (s_config_pending_prefs.isKey(slotKey(idx, "payload").c_str())) {
+        return true;
+    }
+    return s_config_pending_prefs.getUChar(slotKey(idx, "plm").c_str(), 0) == 1 &&
+           s_config_pending_prefs.isKey(slotKey(idx, "plb").c_str());
+}
+
 static bool loadPendingAt(uint8_t idx, ConfigUpdateRequest* req_out) {
     if (req_out == nullptr) {
         return false;
     }
-    String payload_key = slotKey(idx, "payload");
-    if (!s_config_pending_prefs.isKey(payload_key.c_str())) {
-        return false;
-    }
-    String payload = s_config_pending_prefs.getString(payload_key.c_str(), "");
-    if (payload.length() == 0) {
+    if (!hasSlotPayload(idx)) {
         return false;
     }
     req_out->type = ConfigUpdateRequest::CONFIG_PUSH;
-    strncpy(req_out->json_payload, payload.c_str(), sizeof(req_out->json_payload) - 1);
-    req_out->json_payload[sizeof(req_out->json_payload) - 1] = '\0';
+    if (!loadSlotPayload(idx, req_out->json_payload, sizeof(req_out->json_payload))) {
+        return false;
+    }
     initIntentMetadata(&req_out->metadata);
     String intent = "";
     String corr = "";
@@ -146,13 +227,13 @@ static bool loadPendingAt(uint8_t idx, ConfigUpdateRequest* req_out) {
 }
 
 static void clearPendingAt(uint8_t idx) {
-    s_config_pending_prefs.remove(slotKey(idx, "payload").c_str());
-    s_config_pending_prefs.remove(slotKey(idx, "intent").c_str());
-    s_config_pending_prefs.remove(slotKey(idx, "corr").c_str());
-    s_config_pending_prefs.remove(slotKey(idx, "gen").c_str());
-    s_config_pending_prefs.remove(slotKey(idx, "created").c_str());
-    s_config_pending_prefs.remove(slotKey(idx, "ttl").c_str());
-    s_config_pending_prefs.remove(slotKey(idx, "epoch").c_str());
+    clearSlotPayloadKeys(idx);
+    prefsRemoveIfPresent(s_config_pending_prefs, slotKey(idx, "intent").c_str());
+    prefsRemoveIfPresent(s_config_pending_prefs, slotKey(idx, "corr").c_str());
+    prefsRemoveIfPresent(s_config_pending_prefs, slotKey(idx, "gen").c_str());
+    prefsRemoveIfPresent(s_config_pending_prefs, slotKey(idx, "created").c_str());
+    prefsRemoveIfPresent(s_config_pending_prefs, slotKey(idx, "ttl").c_str());
+    prefsRemoveIfPresent(s_config_pending_prefs, slotKey(idx, "epoch").c_str());
 }
 
 static void persistPendingIntent(const ConfigUpdateRequest& req) {
@@ -181,7 +262,9 @@ static void persistPendingIntent(const ConfigUpdateRequest& req) {
         s_config_pending_prefs.putUChar("head", head);
     }
 
-    s_config_pending_prefs.putString(slotKey(insert, "payload").c_str(), req.json_payload);
+    if (!storeSlotPayload(insert, req.json_payload)) {
+        LOG_E(CFG_Q_TAG, "[CONFIG] cfg_pending storeSlotPayload failed — replay may lose this intent");
+    }
     s_config_pending_prefs.putString(slotKey(insert, "intent").c_str(), req.metadata.intent_id);
     s_config_pending_prefs.putString(slotKey(insert, "corr").c_str(), req.metadata.correlation_id);
     s_config_pending_prefs.putUInt(slotKey(insert, "gen").c_str(), req.metadata.generation);
@@ -227,7 +310,9 @@ static void removePendingIntentById(const char* intent_id) {
         s_config_pending_prefs.putUChar("head", 0);
         s_config_pending_prefs.putUChar("count", 0);
         for (uint8_t i = 0; i < restored; i++) {
-            s_config_pending_prefs.putString(slotKey(i, "payload").c_str(), entries[i].json_payload);
+            if (!storeSlotPayload(i, entries[i].json_payload)) {
+                LOG_E(CFG_Q_TAG, "[CONFIG] cfg_pending compaction storeSlotPayload failed at slot " + String(i));
+            }
             s_config_pending_prefs.putString(slotKey(i, "intent").c_str(), entries[i].metadata.intent_id);
             s_config_pending_prefs.putString(slotKey(i, "corr").c_str(), entries[i].metadata.correlation_id);
             s_config_pending_prefs.putUInt(slotKey(i, "gen").c_str(), entries[i].metadata.generation);
@@ -325,7 +410,7 @@ bool queueConfigUpdateWithMetadata(ConfigUpdateRequest::Type type,
                                    const IntentMetadata* metadata) {
     if (g_config_update_queue == NULL) return false;
 
-    // static: moves 4097 B (ConfigUpdateRequest) from mqtt_task stack to BSS.
+    // static: moves sizeof(ConfigUpdateRequest) from mqtt_task stack to BSS.
     // Safe: queueConfigUpdate() is called exclusively from mqtt_task (main.cpp:290).
     // xQueueSend copies req into the queue's internal storage before returning,
     // so overwriting req on the next call cannot corrupt already-queued data.

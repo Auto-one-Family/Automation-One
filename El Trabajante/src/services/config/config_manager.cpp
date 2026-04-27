@@ -1732,11 +1732,15 @@ bool ConfigManager::saveSensorConfig(const SensorConfig& config) {
 
     // Also check sensor_type to distinguish multi-value sensors on same GPIO
     snprintf(key, sizeof(key), NVS_SEN_TYPE, i);
-    String stored_type = storageManager.getString(key, "");
-    if (stored_type.isEmpty()) {
+    String stored_type;
+    if (storageManager.keyExists(key)) {
+      stored_type = storageManager.getString(key, "");
+    } else {
       char old_key[32];
       snprintf(old_key, sizeof(old_key), NVS_SEN_TYPE_OLD, i);
-      stored_type = storageManager.getString(old_key, "");
+      if (storageManager.keyExists(old_key)) {
+        stored_type = storageManager.getString(old_key, "");
+      }
     }
 
     if (stored_gpio == config.gpio && stored_type == config.sensor_type) {
@@ -2495,6 +2499,15 @@ bool ConfigManager::loadActuatorConfig(ActuatorConfig actuators[], uint8_t max_a
     } else {
       LOG_W(TAG, "ConfigManager: Skipped invalid actuator " + String(i));
     }
+  }
+
+  // After flash or NVS corruption, act_count may claim slots while every GPIO reads 255.
+  // Reset the persisted count so logs/state match reality and the next MQTT actuator scope can apply cleanly.
+  if (loaded_count == 0 && stored_count > 0) {
+    LOG_W(TAG, "ConfigManager: NVS had act_count=" + String(stored_count) +
+               " but no valid actuators — resetting act_count (server must push actuators to exit CONFIG_PENDING)");
+    storageManager.putUInt8(NVS_ACT_COUNT, 0);
+    storageManager.putUInt8(NVS_ACT_COUNT_OLD, 0);
   }
 
   storageManager.endNamespace();

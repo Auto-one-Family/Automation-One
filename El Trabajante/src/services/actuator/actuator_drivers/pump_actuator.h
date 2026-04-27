@@ -33,6 +33,8 @@ public:
   String getType() const override { return String(ActuatorTypeTokens::PUMP); }
 
   void setRuntimeProtection(const RuntimeProtection& protection);
+  /** Copy max_runtime (and related) from ActuatorConfig after soft-reconfig (R20-P11). */
+  void syncRuntimeLimitsFromConfig(const ActuatorConfig& cfg);
   bool canActivate() const;
   bool isRunning() const { return running_; }
 

@@ -2,6 +2,7 @@
 // INCLUDES
 // ============================================
 #include <Arduino.h>
+#include <cstring>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
@@ -809,6 +810,11 @@ void routeIncomingMessage(const char* t, const char* p) {
         CommandAdmissionDecision admission = shouldAcceptCommand(CommandSubtype::ACTUATOR, admission_context);
         if (!admission.accepted) {
             LOG_W(TAG, String("[ADMISSION] Actuator command rejected: ") + admission.reason_code);
+            if (admission.reason_code != nullptr &&
+                strcmp(admission.reason_code, "CONFIG_PENDING_AFTER_RESET") == 0) {
+              LOG_W(TAG, "[ADMISSION] Device is CONFIG_PENDING: need MQTT config commit that applies at least one "
+                         "valid actuator (NVS empty/invalid after reset is common). Sensor-only pushes are not enough.");
+            }
             publishIntentOutcome("command",
                                  metadata,
                                  "rejected",

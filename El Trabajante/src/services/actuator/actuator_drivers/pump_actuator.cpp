@@ -235,3 +235,8 @@ void PumpActuator::setRuntimeProtection(const RuntimeProtection& protection) {
   protection_ = protection;
 }
 
+void PumpActuator::syncRuntimeLimitsFromConfig(const ActuatorConfig& cfg) {
+  config_.runtime_protection = cfg.runtime_protection;
+  protection_.max_runtime_ms = cfg.runtime_protection.max_runtime_ms;
+}
+

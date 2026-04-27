@@ -528,9 +528,15 @@ static String formatOfflineRuleDetail(uint8_t idx, const OfflineRule& r) {
     } else {
         strcpy(tf_buf, "off");
     }
+    // Pure time-window offline rules use sensor_gpio=255 as server-side sentinel (no physical sensor).
+    String sensor_part;
+    if (isTimeWindowOnlyRule(r) && r.sensor_gpio == 255) {
+        sensor_part = "time-window only (sensor_gpio=255 placeholder)";
+    } else {
+        sensor_part = String("sensor GPIO ") + formatGpioUi(r.sensor_gpio);
+    }
     return String("[CONFIG] Rule ") + String(idx) + ": " + String(r.sensor_value_type) +
-           " (sensor GPIO " + formatGpioUi(r.sensor_gpio) + ") → actuator GPIO " +
-           formatGpioUi(r.actuator_gpio) + " | " + mode +
+           " (" + sensor_part + ") → actuator GPIO " + formatGpioUi(r.actuator_gpio) + " | " + mode +
            " | heat: below=" + String(r.activate_below, 2) + " above=" + String(r.deactivate_above, 2) +
            " | cool: above=" + String(r.activate_above, 2) + " below=" + String(r.deactivate_below, 2) +
            " | tf=" + tf_buf + " days_mask=0x" + String(r.days_of_week_mask, HEX) +

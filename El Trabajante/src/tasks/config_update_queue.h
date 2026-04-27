@@ -16,22 +16,21 @@
 // Solution: Queue the raw JSON payload. Core 0 enqueues (queueConfigUpdate),
 // Core 1 Safety-Task drains (processConfigUpdateQueue) after its own loop work.
 //
-// Memory: 5 * (1 + 4096) = ~20 KB heap — aligned to MQTT buffer_size=4096 (CP-F4).
+// Memory: CONFIG_UPDATE_QUEUE_SIZE * sizeof(ConfigUpdateRequest) heap (see init log).
+// CP-F4: ingress rejects len >= CONFIG_PAYLOAD_MAX_LEN (null-terminated copy uses MAX-1 chars).
+// Large payloads persist to cfg_pending via putBytes when NVS string limit (~4000 B) exceeded.
 // Timeout: 100 ms on enqueue — blocks Core 0 event handler briefly rather
 //          than silently dropping a config push.
 // ============================================
 
 // Queue depth tuned for heap headroom on ESP32 (no PSRAM):
-// 5 * 4244 B consumed >21 KB and contributed to CommTask create failures.
-// PKG-17 (AUT-68): reduced 3 -> 1 to enforce SSOT — parallel config-writes are
-// race-unsafe, and pending replay remains durable via cfg_pending NVS ring.
-// Frees ~2 KB of statically reserved queue heap budget.
+// PKG-17 (AUT-68): depth 1 — parallel config-writes are race-unsafe; cfg_pending NVS ring replays.
 static const uint8_t  CONFIG_UPDATE_QUEUE_SIZE = 1;
-static const uint16_t CONFIG_PAYLOAD_MAX_LEN   = 4096;  // Full-state Config-Push JSON — matches MQTT buffer_size (CP-F4)
-// CP-F2: Central single-parse doc size — allocated in BSS (module-level static in
-// config_update_queue.cpp, no heap/stack pressure). ArduinoJson overhead ~3x JSON
-// string length; payload ~1400 B * 3 = 4200 B -> 6144 B for growth headroom.
-static const uint16_t CONFIG_JSON_DOC_SIZE     = 6144;
+// Full-state config from server commonly 4–5 KB; headroom for growth without blowing dram0 BSS.
+// (6144+12288 static pushed esp32dev over dram0_0_seg — keep doc/payload balanced.)
+static const uint16_t CONFIG_PAYLOAD_MAX_LEN   = 4352;  // >4.1 KB field configs (CP-F4) without oversizing BSS
+// CP-F2: Central single-parse doc (BSS). Tuned to fit dram0 with esp32dev heap layout.
+static const uint16_t CONFIG_JSON_DOC_SIZE     = 7680;
 
 struct ConfigUpdateRequest {
     // Single CONFIG_PUSH type: one queue slot per MQTT config-topic message.

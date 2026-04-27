@@ -340,10 +340,9 @@ bool MQTTClient::connect(const MQTTConfig& config) {
     mqtt_cfg.lwt_retain = 1;
     mqtt_cfg.lwt_msg_len = 0;
 
-    // Keep conservative MQTT buffers to preserve heap headroom on ESP32 WROOM.
-    // Large payloads are now handled via MQTT_EVENT_DATA fragment reassembly below,
-    // so we no longer need aggressive buffer inflation here.
-    mqtt_cfg.buffer_size = 4096;
+    // Inbound buffer: config topic full-state JSON can exceed 4 KB (CP-F4 / CONFIG_PAYLOAD_MAX_LEN).
+    // Oversized frames still reassemble into data_buf (8192) below; keep buffer aligned with field sizes.
+    mqtt_cfg.buffer_size = 8192;
     // Extra outbox headroom reduces transport write pressure during command bursts
     // (e.g. calibration/manual measurement + heartbeat + responses).
     mqtt_cfg.out_buffer_size = 8192;
