@@ -163,3 +163,5 @@ Konsequenz fuer weitere Umsetzung:
 - Parent: `AUT-132`
 - Projekt: `MQTT-Transport & Recovery Hardening (INC EA5484)`
 
+**Repo-IST 2026-04-24 (Orchestrator-Verify):** In `El Trabajante` sind `CONFIG_PAYLOAD_MAX_LEN` und `PUBLISH_PAYLOAD_MAX_LEN` gegenüber dem reinen 4096/1024-Muster aus den älteren Beobachtungen angehoben; die in diesem Abschnitt genannten Live-Zahlen (4164, 4370, HB ~1225) bleiben historische Befunde. Für Ausarbeitung/Tests immer die **aktuellen** Header-Werte + `max=` in `intent_outcome`/Logs heranziehen. Vollständiger Incident-Stand: `.claude/reports/current/incidents/INC-2026-04-24-aut134-config-resync-oversize/`.
+

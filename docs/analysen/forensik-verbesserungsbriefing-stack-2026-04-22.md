@@ -295,3 +295,7 @@ Forensik-Konsequenz:
 - CID-first-Korrelation beibehalten.
 - Fehlende Docker-Raw-Logs (gleiches Zeitfenster fuer Server/Broker/Alloy) als BLOCKER deklarieren statt Annahmen zu treffen.
 
+**Repo-Abgleich 2026-04-24:** Firmware-Header in `El Trabajante` heben die Budgets (u. a. `CONFIG_PAYLOAD_MAX_LEN=4352`, `PUBLISH_PAYLOAD_MAX_LEN=1536`); die o. g. Byte-Zahlen aus Live-Evidence bleiben als **Vorher-Nachher-Forensik** valide, Server-seitig bleibt ein Budget-Gate wichtig, solange JSON-Payloads >4352 vorkommen (z. B. Audit `4370`).
+
+Artefakt-Bundle: `.claude/reports/current/incidents/INC-2026-04-24-aut134-config-resync-oversize/` (inkl. `VERIFY-PLAN-REPORT.md`, `LINEAR-SYNC-MANIFEST.json`).
+
