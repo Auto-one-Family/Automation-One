@@ -83,9 +83,7 @@ class SubzoneAssignRequest(BaseModel):
     def validate_subzone_id_format(cls, v: str) -> str:
         """Validate subzone_id contains only ASCII letters, numbers, and underscores."""
         if not re.match(r"^[A-Za-z0-9_]+$", v):
-            raise ValueError(
-                "subzone_id must contain only ASCII letters, numbers, and underscores"
-            )
+            raise ValueError("subzone_id must contain only ASCII letters, numbers, and underscores")
         return v.lower()
 
     @field_validator("assigned_gpios")

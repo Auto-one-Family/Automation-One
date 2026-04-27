@@ -293,9 +293,7 @@ class SensorConfig(Base, TimestampMixin):
     # fix_sensor_unique_constraint_null_coalesce.py (V19-F02+F13).
     # No SQLAlchemy UniqueConstraint here — expression indexes cannot be
     # declared in ORM __table_args__.
-    __table_args__ = (
-        Index("idx_sensor_type_enabled", "sensor_type", "enabled"),
-    )
+    __table_args__ = (Index("idx_sensor_type_enabled", "sensor_type", "enabled"),)
 
     def __repr__(self) -> str:
         return (

@@ -406,7 +406,10 @@ async def get_sensor_history(
     """Get calibration session history for a specific sensor."""
     service = CalibrationService(db)
     sessions = await service.get_session_history(
-        esp_id=esp_id, gpio=gpio, sensor_type=sensor_type, limit=limit,
+        esp_id=esp_id,
+        gpio=gpio,
+        sensor_type=sensor_type,
+        limit=limit,
     )
     return [_session_to_response(s) for s in sessions]
 

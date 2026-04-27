@@ -746,12 +746,8 @@ class ActuatorAggregation(BaseModel):
 
     total_runtime_seconds: float = Field(..., description="Total ON time in seconds")
     total_cycles: int = Field(..., description="Number of ON commands (set with value > 0)")
-    duty_cycle_percent: float = Field(
-        ..., description="Percentage of time the actuator was ON"
-    )
-    avg_cycle_seconds: float = Field(
-        ..., description="Average duration per ON cycle in seconds"
-    )
+    duty_cycle_percent: float = Field(..., description="Percentage of time the actuator was ON")
+    avg_cycle_seconds: float = Field(..., description="Average duration per ON cycle in seconds")
 
 
 class ActuatorHistoryResponse(BaseResponse):
@@ -769,12 +765,8 @@ class ActuatorHistoryResponse(BaseResponse):
     aggregation: Optional[ActuatorAggregation] = Field(
         None, description="Runtime aggregation (when include_aggregation=true)"
     )
-    from_time: Optional[datetime] = Field(
-        None, description="Start of queried time range"
-    )
-    to_time: Optional[datetime] = Field(
-        None, description="End of queried time range"
-    )
+    from_time: Optional[datetime] = Field(None, description="Start of queried time range")
+    to_time: Optional[datetime] = Field(None, description="End of queried time range")
 
 
 # =============================================================================

@@ -232,7 +232,9 @@ class ActuatorService:
                 if resolved_context is None:
                     esp_device = await esp_repo.get_by_device_id(esp_id)
                     if esp_device:
-                        actuator_config = await actuator_repo.get_by_esp_and_gpio(esp_device.id, gpio)
+                        actuator_config = await actuator_repo.get_by_esp_and_gpio(
+                            esp_device.id, gpio
+                        )
                         resolved_context = ActuatorCommandContext(
                             esp_uuid=esp_device.id,
                             actuator_type=(
@@ -651,9 +653,7 @@ class ActuatorService:
 
             if not success:
                 increment_actuator_timeout()
-                logger.error(
-                    f"Failed to publish actuator command: esp_id={esp_id}, gpio={gpio}"
-                )
+                logger.error(f"Failed to publish actuator command: esp_id={esp_id}, gpio={gpio}")
 
                 await self._persist_publish_failure(
                     esp_id=esp_id,

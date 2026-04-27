@@ -112,10 +112,16 @@ def compute_effective_config_from_cached(
     if sensor.timeout_warning_enabled is not None:
         effective["timeout_warning_enabled"] = sensor.timeout_warning_enabled
         source = "instance"
-    if hasattr(sensor, "measurement_freshness_hours") and sensor.measurement_freshness_hours is not None:
+    if (
+        hasattr(sensor, "measurement_freshness_hours")
+        and sensor.measurement_freshness_hours is not None
+    ):
         effective["measurement_freshness_hours"] = sensor.measurement_freshness_hours
         source = "instance"
-    if hasattr(sensor, "calibration_interval_days") and sensor.calibration_interval_days is not None:
+    if (
+        hasattr(sensor, "calibration_interval_days")
+        and sensor.calibration_interval_days is not None
+    ):
         effective["calibration_interval_days"] = sensor.calibration_interval_days
         source = "instance"
 
@@ -408,9 +414,7 @@ async def check_sensor_timeouts(
                 freshness_sensors.append(sensor)
 
         if freshness_sensors:
-            freshness_keys = [
-                (s.esp_id, s.gpio, s.sensor_type) for s in freshness_sensors
-            ]
+            freshness_keys = [(s.esp_id, s.gpio, s.sensor_type) for s in freshness_sensors]
             freshness_readings = await sensor_repo.get_latest_readings_batch_by_config(
                 freshness_keys
             )
@@ -442,9 +446,7 @@ async def check_sensor_timeouts(
                     freshness_stale += 1
                     sensors_stale += 1
                     seconds_overdue = (
-                        int(age_seconds - freshness_seconds)
-                        if age_seconds != float("inf")
-                        else 0
+                        int(age_seconds - freshness_seconds) if age_seconds != float("inf") else 0
                     )
                     device_id = device_id_cache.get(sensor.esp_id, str(sensor.esp_id))
                     stale_info = {
@@ -460,9 +462,7 @@ async def check_sensor_timeouts(
                     stale_details.append(stale_info)
 
                     age_display = (
-                        f"{age_seconds / 3600:.1f}h"
-                        if age_seconds != float("inf")
-                        else "never"
+                        f"{age_seconds / 3600:.1f}h" if age_seconds != float("inf") else "never"
                     )
                     logger.warning(
                         f"Sensor freshness exceeded: ESP {device_id} GPIO {sensor.gpio} "
@@ -492,9 +492,7 @@ async def check_sensor_timeouts(
                                 },
                             )
                         except Exception as e:
-                            logger.error(
-                                f"Failed to broadcast freshness event: {e}"
-                            )
+                            logger.error(f"Failed to broadcast freshness event: {e}")
                             errors.append(f"Freshness broadcast failed: {e}")
 
                         # Route notification via NotificationRouter
@@ -503,7 +501,9 @@ async def check_sensor_timeouts(
                             from src.services.notification_router import NotificationRouter
 
                             router = NotificationRouter(session)
-                            sensor_name = sensor.sensor_name or f"{sensor.sensor_type} GPIO {sensor.gpio}"
+                            sensor_name = (
+                                sensor.sensor_name or f"{sensor.sensor_type} GPIO {sensor.gpio}"
+                            )
                             notification = NotificationCreate(
                                 severity="warning",
                                 category="data_quality",
@@ -520,18 +520,16 @@ async def check_sensor_timeouts(
                                     "gpio": sensor.gpio,
                                     "sensor_type": sensor.sensor_type,
                                     "operating_mode": effective["operating_mode"],
-                                    "measurement_age_seconds": int(age_seconds)
-                                    if age_seconds != float("inf")
-                                    else None,
+                                    "measurement_age_seconds": (
+                                        int(age_seconds) if age_seconds != float("inf") else None
+                                    ),
                                     "freshness_hours": freshness_hours,
                                 },
                                 fingerprint=f"freshness_{device_id_resolved}_{sensor.gpio}_{sensor.sensor_type}",
                             )
                             await router.route(notification)
                         except Exception as e:
-                            logger.error(
-                                f"Failed to route freshness notification: {e}"
-                            )
+                            logger.error(f"Failed to route freshness notification: {e}")
 
         # =====================================================================
         # PHASE 6: Calibration reminder check
@@ -591,7 +589,9 @@ async def check_sensor_timeouts(
                         from src.services.notification_router import NotificationRouter
 
                         router = NotificationRouter(session)
-                        sensor_name = sensor.sensor_name or f"{sensor.sensor_type} GPIO {sensor.gpio}"
+                        sensor_name = (
+                            sensor.sensor_name or f"{sensor.sensor_type} GPIO {sensor.gpio}"
+                        )
                         notification = NotificationCreate(
                             severity="info",
                             category="maintenance",
@@ -615,9 +615,7 @@ async def check_sensor_timeouts(
                         )
                         await router.route(notification)
                     except Exception as e:
-                        logger.error(
-                            f"Failed to route calibration notification: {e}"
-                        )
+                        logger.error(f"Failed to route calibration notification: {e}")
 
     except Exception as e:
         logger.error(f"Sensor health check failed: {e}")

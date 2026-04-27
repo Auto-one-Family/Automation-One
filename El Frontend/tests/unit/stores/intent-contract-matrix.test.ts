@@ -83,9 +83,10 @@ describe('Intent Contract Matrix T1-T6', () => {
       getDeviceId,
     )
 
-    vi.advanceTimersByTime(10_001)
-    expect(toastMocks.warning).toHaveBeenCalledTimes(1)
-    expect(toastMocks.error).not.toHaveBeenCalled()
+    // ACTUATOR_RESPONSE_TIMEOUT_MS ist 30s; Timeout-Toast ist terminal (error), keine warning
+    vi.advanceTimersByTime(30_001)
+    expect(toastMocks.error).toHaveBeenCalledTimes(1)
+    expect(toastMocks.warning).not.toHaveBeenCalled()
 
     store.handleActuatorResponse(
       {

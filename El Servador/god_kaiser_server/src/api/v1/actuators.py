@@ -1409,9 +1409,7 @@ async def get_history(
     start_time: Annotated[
         Optional[datetime], Query(description="Start of time range (UTC)")
     ] = None,
-    end_time: Annotated[
-        Optional[datetime], Query(description="End of time range (UTC)")
-    ] = None,
+    end_time: Annotated[Optional[datetime], Query(description="End of time range (UTC)")] = None,
     include_aggregation: Annotated[
         bool, Query(description="Include runtime aggregation in response")
     ] = False,
@@ -1493,9 +1491,7 @@ def _compute_aggregation(
     """
     now = datetime.now(timezone.utc)
     range_end = end_time or now
-    range_start = start_time or (
-        entries[-1].timestamp if entries else now
-    )
+    range_start = start_time or (entries[-1].timestamp if entries else now)
 
     # Sort entries ascending by timestamp for interval pairing
     sorted_entries = sorted(entries, key=lambda e: e.timestamp)
@@ -1506,14 +1502,9 @@ def _compute_aggregation(
 
     for entry in sorted_entries:
         cmd = entry.command_type.lower() if entry.command_type else ""
-        is_on = (
-            cmd in ("set", "on", "pwm")
-            and entry.value is not None
-            and entry.value > 0
-        )
+        is_on = cmd in ("set", "on", "pwm") and entry.value is not None and entry.value > 0
         is_off = cmd in ("stop", "off", "emergency_stop") or (
-            cmd in ("set", "on", "pwm")
-            and (entry.value is None or entry.value == 0.0)
+            cmd in ("set", "on", "pwm") and (entry.value is None or entry.value == 0.0)
         )
 
         if is_on:

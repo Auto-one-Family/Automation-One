@@ -450,9 +450,7 @@ class LogicHysteresisState(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint(
-            "rule_id", "condition_index", name="uq_hysteresis_state_rule_cond"
-        ),
+        UniqueConstraint("rule_id", "condition_index", name="uq_hysteresis_state_rule_cond"),
     )
 
     def __repr__(self) -> str:

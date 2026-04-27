@@ -242,9 +242,7 @@ class ActuatorAlertHandler:
                             "troubleshooting": (
                                 alert_info["troubleshooting"] if alert_info else []
                             ),
-                            "recoverable": (
-                                alert_info["recoverable"] if alert_info else True
-                            ),
+                            "recoverable": (alert_info["recoverable"] if alert_info else True),
                             "user_action_required": (
                                 alert_info["user_action_required"] if alert_info else False
                             ),

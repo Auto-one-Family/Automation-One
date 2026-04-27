@@ -79,7 +79,9 @@ class CalibrationResponseHandler:
         if not success:
             logger.info(
                 "CalibrationResponseHandler: Sensor response failed for %s/GPIO%d: %s",
-                esp_id, gpio, payload.get("error", "unknown"),
+                esp_id,
+                gpio,
+                payload.get("error", "unknown"),
             )
             # Broadcast failure event for frontend awareness
             await self._broadcast_calibration_event(
@@ -106,7 +108,9 @@ class CalibrationResponseHandler:
                 sensor_repo = SensorRepository(session)
                 if normalized_type != "unknown":
                     active_session = await cal_repo.get_active_session(
-                        esp_id, gpio, normalized_type,
+                        esp_id,
+                        gpio,
+                        normalized_type,
                     )
                 if not active_session:
                     recent_sessions = await cal_repo.get_sessions_for_sensor(
@@ -127,9 +131,9 @@ class CalibrationResponseHandler:
                     # Firmware measure-ACK currently omits raw value; resolve latest DB reading.
                     # Retry briefly because sensor_data persistence can lag behind ACK by a few hundred ms.
                     lookup_sensor_type = (
-                        active_session.sensor_type if active_session else (
-                            None if normalized_type == "unknown" else normalized_type
-                        )
+                        active_session.sensor_type
+                        if active_session
+                        else (None if normalized_type == "unknown" else normalized_type)
                     )
                     esp_device = await esp_repo.get_by_device_id(esp_id)
                     if not esp_device:
@@ -176,7 +180,9 @@ class CalibrationResponseHandler:
                     # No active calibration — this is a normal sensor response
                     logger.debug(
                         "CalibrationResponseHandler: No active session for %s/GPIO%d/%s",
-                        esp_id, gpio, normalized_type,
+                        esp_id,
+                        gpio,
+                        normalized_type,
                     )
                     # Still broadcast the raw measurement for frontend live display
                     await self._broadcast_calibration_event(
@@ -197,7 +203,9 @@ class CalibrationResponseHandler:
                 logger.info(
                     "CalibrationResponseHandler: Measurement received for active session %s "
                     "(raw=%.1f, quality=%s)",
-                    active_session.id, float(raw_value), quality,
+                    active_session.id,
+                    float(raw_value),
+                    quality,
                 )
                 await self._broadcast_calibration_event(
                     "calibration_measurement_received",
@@ -216,7 +224,10 @@ class CalibrationResponseHandler:
         except Exception as e:
             logger.error(
                 "CalibrationResponseHandler: Error processing %s/GPIO%d: %s",
-                esp_id, gpio, e, exc_info=True,
+                esp_id,
+                gpio,
+                e,
+                exc_info=True,
             )
             return False
 

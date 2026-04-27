@@ -84,7 +84,9 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
         """
         self._states: Dict[str, HysteresisState] = {}
         self._session_factory = session_factory
-        logger.info("HysteresisConditionEvaluator initialized (persistence=%s)", session_factory is not None)
+        logger.info(
+            "HysteresisConditionEvaluator initialized (persistence=%s)", session_factory is not None
+        )
 
     def supports(self, condition_type: str) -> bool:
         """
@@ -144,21 +146,25 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
         try:
             rule_id_str, condition_index_str = key.split(":", 1)
             async for session in self._session_factory():
-                stmt = insert(LogicHysteresisState).values(
-                    rule_id=rule_id_str,
-                    condition_index=int(condition_index_str),
-                    is_active=state.is_active,
-                    last_value=state.last_value,
-                    last_activation=state.last_activation,
-                    last_deactivation=state.last_deactivation,
-                ).on_conflict_do_update(
-                    constraint="uq_hysteresis_state_rule_cond",
-                    set_={
-                        "is_active": state.is_active,
-                        "last_value": state.last_value,
-                        "last_activation": state.last_activation,
-                        "last_deactivation": state.last_deactivation,
-                    },
+                stmt = (
+                    insert(LogicHysteresisState)
+                    .values(
+                        rule_id=rule_id_str,
+                        condition_index=int(condition_index_str),
+                        is_active=state.is_active,
+                        last_value=state.last_value,
+                        last_activation=state.last_activation,
+                        last_deactivation=state.last_deactivation,
+                    )
+                    .on_conflict_do_update(
+                        constraint="uq_hysteresis_state_rule_cond",
+                        set_={
+                            "is_active": state.is_active,
+                            "last_value": state.last_value,
+                            "last_activation": state.last_activation,
+                            "last_deactivation": state.last_deactivation,
+                        },
+                    )
                 )
                 await session.execute(stmt)
                 await session.commit()
@@ -469,7 +475,9 @@ class HysteresisConditionEvaluator(BaseConditionEvaluator):
                 active_keys,
             )
         elif keys_to_reset:
-            logger.debug("Hysteresis states reset for rule %s (%d inactive)", rule_id, len(keys_to_reset))
+            logger.debug(
+                "Hysteresis states reset for rule %s (%d inactive)", rule_id, len(keys_to_reset)
+            )
         return active_keys
 
     def remove_state(self, key: str) -> bool:

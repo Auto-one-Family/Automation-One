@@ -43,6 +43,12 @@ vi.mock('@/shared/stores', () => ({
   }),
 }))
 
+vi.mock('@/shared/stores/intentSignals.store', () => ({
+  useIntentSignalsStore: () => ({
+    getDisplayForEsp: vi.fn(() => null),
+  }),
+}))
+
 vi.mock('@/api/esp', () => ({
   espApi: { isMockEsp: () => false },
 }))

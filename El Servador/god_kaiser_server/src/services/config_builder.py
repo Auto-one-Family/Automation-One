@@ -44,17 +44,17 @@ def _get_default_deadband(sensor_type: str) -> float:
     filtered out by the P4-GUARD before this function is ever reached.
     """
     DEADBAND_MAP = {
-        "sht31_temp": 2.0,       # °C — typical HVAC hysteresis band
-        "ds18b20": 2.0,          # °C
-        "bmp280_temp": 2.0,      # °C
-        "bme280_temp": 2.0,      # °C
-        "sht31_humidity": 5.0,   # %RH — higher variance for humidity
+        "sht31_temp": 2.0,  # °C — typical HVAC hysteresis band
+        "ds18b20": 2.0,  # °C
+        "bmp280_temp": 2.0,  # °C
+        "bme280_temp": 2.0,  # °C
+        "sht31_humidity": 5.0,  # %RH — higher variance for humidity
         "bme280_humidity": 5.0,
         "bmp280_pressure": 5.0,  # hPa
         "bme280_pressure": 5.0,
-        "co2": 50.0,             # ppm — large natural fluctuations
-        "light": 100.0,          # lux
-        "flow": 0.5,             # l/min — conservative
+        "co2": 50.0,  # ppm — large natural fluctuations
+        "light": 100.0,  # lux
+        "flow": 0.5,  # l/min — conservative
     }
     for prefix, deadband in DEADBAND_MAP.items():
         if sensor_type.startswith(prefix):
@@ -86,7 +86,7 @@ def _days_of_week_db_to_tm_mask(raw_days: Any) -> int:
         except (TypeError, ValueError):
             tm_wday = None
         if tm_wday is not None:
-            days_mask |= (1 << tm_wday)
+            days_mask |= 1 << tm_wday
 
     if days_mask == 0:
         logger.warning(
@@ -289,7 +289,8 @@ class ConfigPayloadBuilder:
 
         # Filter out VIRTUAL sensors — computed server-side (e.g. VPD), never sent to ESP32
         active_sensors = [
-            s for s in active_sensors
+            s
+            for s in active_sensors
             if not (getattr(s, "interface_type", None) or "").upper() == "VIRTUAL"
         ]
 
@@ -418,9 +419,13 @@ class ConfigPayloadBuilder:
             for row in result.scalars().all():
                 key = f"{row.rule_id}:{row.condition_index}"
                 hysteresis_states[key] = row.is_active
-            logger.debug("[CONFIG] Preloaded %d hysteresis states for ESP %s", len(hysteresis_states), esp_id)
+            logger.debug(
+                "[CONFIG] Preloaded %d hysteresis states for ESP %s", len(hysteresis_states), esp_id
+            )
         except Exception as exc:
-            logger.warning("[CONFIG] Could not preload hysteresis states for ESP %s: %s", esp_id, exc)
+            logger.warning(
+                "[CONFIG] Could not preload hysteresis states for ESP %s: %s", esp_id, exc
+            )
 
         offline_rules: List[Dict[str, Any]] = []
 
@@ -497,20 +502,18 @@ class ConfigPayloadBuilder:
 
             if a_gpio is not None and int(a_gpio) not in actuator_gpios:
                 reasons.append(f"actuator_gpio={a_gpio} not in config actuators")
-            if (
-                not is_time_window_only
-                and s_gpio is not None
-                and int(s_gpio) not in sensor_gpios
-            ):
+            if not is_time_window_only and s_gpio is not None and int(s_gpio) not in sensor_gpios:
                 reasons.append(f"sensor_gpio={s_gpio} not in config sensors")
 
             if reasons:
-                stripped_details.append({
-                    "actuator_gpio": a_gpio,
-                    "sensor_gpio": s_gpio,
-                    "sensor_value_type": rule.get("sensor_value_type", ""),
-                    "reasons": reasons,
-                })
+                stripped_details.append(
+                    {
+                        "actuator_gpio": a_gpio,
+                        "sensor_gpio": s_gpio,
+                        "sensor_value_type": rule.get("sensor_value_type", ""),
+                        "reasons": reasons,
+                    }
+                )
             else:
                 consistent.append(rule)
 
@@ -768,7 +771,9 @@ class ConfigPayloadBuilder:
                     "activate_below": synth_activate_below,
                     "deactivate_above": synth_deactivate_above,
                 }
-                hysteresis_cond_index = -1  # no DB hysteresis state entry for threshold-converted rules
+                hysteresis_cond_index = (
+                    -1
+                )  # no DB hysteresis state entry for threshold-converted rules
 
         # Validate that threshold fields form a valid mode
         activate_above: Optional[float] = hysteresis_cond.get("activate_above")

@@ -1257,7 +1257,11 @@ class SimulationScheduler:
                     gpio=gpio,
                 )
                 # Resolve i2c_address + interface_type from registry (V19-F13)
-                device_type = get_device_type_from_sensor_type(sub_types[0]["sensor_type"]) if sub_types else None
+                device_type = (
+                    get_device_type_from_sensor_type(sub_types[0]["sensor_type"])
+                    if sub_types
+                    else None
+                )
                 resolved_i2c = get_i2c_address(device_type) if device_type else None
                 resolved_iface = "I2C" if resolved_i2c is not None else "ANALOG"
                 for sub in sub_types:

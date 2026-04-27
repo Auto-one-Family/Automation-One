@@ -1,4 +1,5 @@
 """AI Analysis Service — Claude API integration for error intelligence (AUT-168)."""
+
 from __future__ import annotations
 
 import os

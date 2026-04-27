@@ -213,7 +213,9 @@ class SensorTypeDefaultsResponse(BaseModel):
     description: Optional[str] = Field(None, description="Usage description")
     schedule_config: Optional[Dict[str, Any]] = Field(None, description="Schedule configuration")
     measurement_freshness_hours: Optional[int] = Field(None, description="Freshness limit in hours")
-    calibration_interval_days: Optional[int] = Field(None, description="Calibration interval in days")
+    calibration_interval_days: Optional[int] = Field(
+        None, description="Calibration interval in days"
+    )
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
 
@@ -239,8 +241,12 @@ class EffectiveConfigResponse(BaseModel):
     timeout_seconds: int = Field(..., description="Effective timeout")
     timeout_warning_enabled: bool = Field(..., description="Effective warning setting")
     supports_on_demand: bool = Field(..., description="Supports on-demand")
-    measurement_freshness_hours: Optional[int] = Field(None, description="Effective freshness limit")
-    calibration_interval_days: Optional[int] = Field(None, description="Effective calibration interval")
+    measurement_freshness_hours: Optional[int] = Field(
+        None, description="Effective freshness limit"
+    )
+    calibration_interval_days: Optional[int] = Field(
+        None, description="Effective calibration interval"
+    )
     source: str = Field(
         ...,
         description="Configuration source: 'instance', 'type_default', or 'system_default'",

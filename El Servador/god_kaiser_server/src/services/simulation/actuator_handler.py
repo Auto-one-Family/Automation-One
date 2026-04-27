@@ -723,6 +723,7 @@ class MockActuatorHandler:
                     raw_type = actuator_config.get("actuator_type", "relay")
                     # Normalize ESP32 type to server type (relay/pump/valve → digital)
                     from ...schemas.actuator import normalize_actuator_type
+
                     return normalize_actuator_type(raw_type)
 
                 break

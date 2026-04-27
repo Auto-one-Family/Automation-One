@@ -73,9 +73,7 @@ class CompoundConditionEvaluator(BaseConditionEvaluator):
             # Set condition_index per sub-condition for correct hysteresis state keys.
             # AUT-41: exclude _stale_reasons from shallow copy to prevent duplication
             # during propagation — each sub-condition starts with a clean list.
-            sub_context = {
-                k: v for k, v in context.items() if k != "_stale_reasons"
-            }
+            sub_context = {k: v for k, v in context.items() if k != "_stale_reasons"}
             sub_context["condition_index"] = idx
 
             # Find appropriate evaluator for this sub-condition

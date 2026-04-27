@@ -199,9 +199,7 @@ async def list_rules(
 async def list_degraded_rules(
     db: DBSession,
     current_user: ActiveUser,
-    critical_only: Annotated[
-        bool, Query(description="Only return is_critical=True rules")
-    ] = False,
+    critical_only: Annotated[bool, Query(description="Only return is_critical=True rules")] = False,
 ) -> LogicRuleListResponse:
     """List rules whose degraded_since is not null."""
     logic_repo = LogicRepository(db)
@@ -905,9 +903,7 @@ async def instantiate_template(
         exec_count = await logic_repo.get_execution_count(created.id)
         last_exec = await logic_repo.get_last_execution(created.id)
 
-        return _build_rule_response(
-            created, exec_count, last_exec.success if last_exec else None
-        )
+        return _build_rule_response(created, exec_count, last_exec.success if last_exec else None)
 
     except TemplateLoadError:
         raise RuleNotFoundException(template_id)

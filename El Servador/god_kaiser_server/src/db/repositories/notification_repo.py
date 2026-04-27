@@ -299,9 +299,7 @@ class NotificationRepository(BaseRepository[Notification]):
                     .where(
                         and_(
                             Notification.fingerprint == notification_data["fingerprint"],
-                            Notification.status.in_(
-                                [AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]
-                            ),
+                            Notification.status.in_([AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]),
                         )
                     )
                     .limit(1)

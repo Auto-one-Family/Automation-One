@@ -516,8 +516,12 @@ class DatabaseBackupService:
 
                 if process.returncode != 0:
                     error_msg = stderr.decode("utf-8", errors="replace").strip()
-                    logger.error(f"Database restore failed (exit {process.returncode}): {error_msg}")
-                    raise RuntimeError(f"psql restore failed (exit {process.returncode}): {error_msg}")
+                    logger.error(
+                        f"Database restore failed (exit {process.returncode}): {error_msg}"
+                    )
+                    raise RuntimeError(
+                        f"psql restore failed (exit {process.returncode}): {error_msg}"
+                    )
 
                 logger.info(
                     f"Database restored successfully from {backup.filename} "

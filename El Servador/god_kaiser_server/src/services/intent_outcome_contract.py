@@ -197,6 +197,8 @@ def serialize_intent_outcome_row(row: Any) -> dict[str, Any]:
         "epoch": row.epoch,
         "ttl_ms": row.ttl_ms,
         "ts": row.ts,
-        "first_seen_at": row.first_seen_at.isoformat() if getattr(row, "first_seen_at", None) else None,
+        "first_seen_at": (
+            row.first_seen_at.isoformat() if getattr(row, "first_seen_at", None) else None
+        ),
         "terminal_at": row.terminal_at.isoformat() if getattr(row, "terminal_at", None) else None,
     }

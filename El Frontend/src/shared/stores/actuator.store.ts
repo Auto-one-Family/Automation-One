@@ -834,7 +834,11 @@ export const useActuatorStore = defineStore('actuator', () => {
       ? data.issued_by.trim()
       : existingIntent?.issuedBy
 
-    if (isIntentTerminal('actuator', subjectId, correlationId)) {
+    if (
+      existingIntent &&
+      isTerminalState(existingIntent.state) &&
+      !(success && existingIntent.state === 'terminal_timeout')
+    ) {
       logger.debug('Ignore duplicate terminal actuator_response', { esp_id: espId, gpio, correlation_id: correlationId })
       return
     }
@@ -852,6 +856,7 @@ export const useActuatorStore = defineStore('actuator', () => {
 
     if (success) {
       clearActuatorSnapshot(espId, gpio)
+      const hadActuatorTimeout = existingIntent?.state === 'terminal_timeout'
       finalizeIntent({
         intentType: 'actuator',
         subjectId,
@@ -862,7 +867,12 @@ export const useActuatorStore = defineStore('actuator', () => {
         source: 'actuator_response',
         correlationId,
         requestId,
+        allowTimeoutOverride: true,
       })
+      const normalizedCorrelation = typeof correlationId === 'string' ? correlationId.trim() : ''
+      if (hadActuatorTimeout && normalizedCorrelation) {
+        terminalToastCorrelations.delete(normalizedCorrelation)
+      }
       if (!canEmitTerminalToast(correlationId)) {
         logger.debug('Suppress duplicate terminal actuator_response success toast for correlation_id', {
           subject_id: subjectId,

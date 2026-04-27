@@ -289,14 +289,9 @@ class TestGPIOConflictDetection:
         """Integration test: Actuators are configured as OUTPUT."""
         mock_esp.configure_actuator(gpio=14, actuator_type="pump", name="Pump")
 
-        # Trigger heartbeat to get GPIO status
-        mock_esp.handle_command("heartbeat", {})
-        heartbeat = mock_esp.get_messages_by_topic_pattern("heartbeat")[-1]["payload"]
-
-        # Find actuator in gpio_status
-        actuator_gpio = next(
-            (item for item in heartbeat["gpio_status"] if item["gpio"] == 14), None
-        )
+        # Slim heartbeat omits gpio_status; use mock helper (see test_gpio_status.py).
+        gpio_status = mock_esp._build_gpio_status()
+        actuator_gpio = next((item for item in gpio_status if item["gpio"] == 14), None)
         assert actuator_gpio is not None
         assert actuator_gpio["mode"] == 1  # OUTPUT
         assert actuator_gpio["owner"] == "actuator"

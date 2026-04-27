@@ -44,6 +44,7 @@ from ..topics import TopicBuilder
 
 logger = get_logger(__name__)
 
+
 class IntentOutcomeHandler:
     """Handle intent outcome messages from ESP devices."""
 
@@ -63,7 +64,9 @@ class IntentOutcomeHandler:
                 corr_seed = str(payload.get("correlation_id") or "").strip() or "missing-corr"
                 seq_seed = self._to_non_negative_int(payload.get("seq"), default=0)
                 ts_seed = self._to_non_negative_int(payload.get("ts"), default=int(time.time()))
-                payload["intent_id"] = f"missing-intent:{esp_id}:{corr_seed}:{seq_seed}:{ts_seed}"[:128]
+                payload["intent_id"] = f"missing-intent:{esp_id}:{corr_seed}:{seq_seed}:{ts_seed}"[
+                    :128
+                ]
                 payload["code"] = "CONTRACT_MISSING_INTENT_ID"
                 payload["reason"] = "Contract violation: missing intent_id"
                 payload["retryable"] = False
@@ -144,7 +147,9 @@ class IntentOutcomeHandler:
             if canonical.is_contract_violation and canonical.code == "CONTRACT_UNKNOWN_CODE":
                 increment_contract_unknown_code("intent_outcome")
             if payload.get("code"):
-                observe_intent_outcome_firmware_code(str(payload.get("flow") or ""), str(payload.get("code")))
+                observe_intent_outcome_firmware_code(
+                    str(payload.get("flow") or ""), str(payload.get("code"))
+                )
 
             # Persist audit trace for cross-layer correlation.
             try:
@@ -152,7 +157,9 @@ class IntentOutcomeHandler:
                 async with resilient_session() as session:
                     contract_repo = CommandContractRepository(session)
                     await contract_repo.upsert_intent(payload, esp_id=esp_id)
-                    outcome_row, is_stale = await contract_repo.upsert_outcome(payload, esp_id=esp_id)
+                    outcome_row, is_stale = await contract_repo.upsert_outcome(
+                        payload, esp_id=esp_id
+                    )
 
                     if is_stale:
                         # Duplicate MQTT delivery: DB already has canonical state; avoid WS noise.

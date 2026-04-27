@@ -107,12 +107,16 @@ def _to_bool(value: Any) -> tuple[bool, bool]:
     return False, False
 
 
-def canonicalize_config_response(payload: Mapping[str, Any], *, esp_id: str) -> CanonicalConfigResponse:
+def canonicalize_config_response(
+    payload: Mapping[str, Any], *, esp_id: str
+) -> CanonicalConfigResponse:
     raw_status = _to_text(payload.get("status"))
     raw_type = _to_text(payload.get("type") or payload.get("config_type"))
     raw_error_code = _to_text(payload.get("error_code"))
 
-    status_candidate = _CONFIG_STATUS_ALIASES.get((raw_status or "").lower(), (raw_status or "").lower())
+    status_candidate = _CONFIG_STATUS_ALIASES.get(
+        (raw_status or "").lower(), (raw_status or "").lower()
+    )
     type_candidate = _CONFIG_TYPE_ALIASES.get((raw_type or "").lower(), (raw_type or "").lower())
 
     status = status_candidate if status_candidate in _KNOWN_CONFIG_STATUS else "error"
@@ -148,7 +152,9 @@ def canonicalize_config_response(payload: Mapping[str, Any], *, esp_id: str) -> 
     elif correlation_id is None:
         # Build deterministic fallback per response shape to avoid collisions
         # between sensor/actuator/system responses arriving in the same second.
-        ts_part = _to_non_negative_int(payload.get("ts"), default=int(datetime.now(timezone.utc).timestamp()))
+        ts_part = _to_non_negative_int(
+            payload.get("ts"), default=int(datetime.now(timezone.utc).timestamp())
+        )
         seq_part = _to_non_negative_int(payload.get("seq"), default=-1)
         seq_token = str(seq_part) if seq_part >= 0 else "na"
         correlation_id = f"missing-corr:cfg:{esp_id}:{config_type}:{ts_part}:{seq_token}"

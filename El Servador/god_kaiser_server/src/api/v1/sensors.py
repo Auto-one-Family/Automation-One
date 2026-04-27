@@ -1134,7 +1134,9 @@ async def create_or_update_sensor(
     subzone_id_val = subzone.subzone_id if subzone else None
 
     # Convert model to response schema
-    response = _model_to_response(sensor, esp_id, subzone_id=subzone_id_val, subzone_warning=subzone_error)
+    response = _model_to_response(
+        sensor, esp_id, subzone_id=subzone_id_val, subzone_warning=subzone_error
+    )
     response.correlation_id = config_correlation_id
     response.request_id = config_request_id
     return response
@@ -1227,9 +1229,7 @@ async def delete_sensor(
 
     # R20-P5 + T13-R1: Sync assigned_sensor_config_ids and counts after sensor delete
     try:
-        _subzone_svc = SubzoneService(
-            esp_repo=esp_repo, session=db, publisher=get_mqtt_publisher()
-        )
+        _subzone_svc = SubzoneService(esp_repo=esp_repo, session=db, publisher=get_mqtt_publisher())
         await _subzone_svc.sync_assigned_config_ids(esp_id)
         _subzone_repo = SubzoneRepository(db)
         await _subzone_repo.sync_subzone_counts(esp_id, esp_device.id)

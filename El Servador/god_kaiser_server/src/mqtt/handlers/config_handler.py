@@ -209,9 +209,11 @@ class ConfigHandler:
                         correlation_id_source = (
                             "correlation_id"
                             if payload.get("correlation_id") is not None
-                            else "request_id"
-                            if payload.get("request_id") is not None
-                            else "fallback_synthetic"
+                            else (
+                                "request_id"
+                                if payload.get("request_id") is not None
+                                else "fallback_synthetic"
+                            )
                         )
                         replay_payload.update(
                             {
@@ -349,7 +351,9 @@ class ConfigHandler:
                     count=count,
                     failed_count=failed_count,
                     message=(
-                        ws_error_info["message"] if ws_error_info and status != "success" else message
+                        ws_error_info["message"]
+                        if ws_error_info and status != "success"
+                        else message
                     ),
                     timestamp=int(datetime.now(timezone.utc).timestamp()),
                     correlation_id=correlation_id,
@@ -391,8 +395,12 @@ class ConfigHandler:
                                 if ws_error_info
                                 else f"Unbekannter Fehler: {error_code}"
                             ),
-                            severity=(ws_error_info["severity"].lower() if ws_error_info else "error"),
-                            troubleshooting=(ws_error_info["troubleshooting"] if ws_error_info else []),
+                            severity=(
+                                ws_error_info["severity"].lower() if ws_error_info else "error"
+                            ),
+                            troubleshooting=(
+                                ws_error_info["troubleshooting"] if ws_error_info else []
+                            ),
                             recoverable=(ws_error_info["recoverable"] if ws_error_info else True),
                             user_action_required=(
                                 ws_error_info["user_action_required"] if ws_error_info else True

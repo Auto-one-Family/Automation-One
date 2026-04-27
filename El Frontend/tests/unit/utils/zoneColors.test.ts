@@ -4,7 +4,7 @@
  * Tests for zone color assignment and utilities.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
 import {
   getZoneColor,
   getZoneColorRGB,
@@ -13,6 +13,26 @@ import {
   hasCustomColor
 } from '@/utils/zoneColors'
 
+/** Mirrors `src/styles/tokens.css` so getCssToken resolves in jsdom. */
+const ZONE_TEST_CSS_VARS: Record<string, string> = {
+  '--color-text-muted': '#5a5a75',
+  '--color-iridescent-1': '#60a5fa',
+  '--color-success': '#34d399',
+  '--color-iridescent-3': '#a78bfa',
+  '--color-real': '#22d3ee',
+  '--color-warning': '#fbbf24',
+  '--color-iridescent-4': '#c084fc',
+  '--color-iridescent-2': '#818cf8',
+  '--color-accent': '#3b82f6',
+}
+
+beforeAll(() => {
+  const root = document.documentElement
+  for (const [name, value] of Object.entries(ZONE_TEST_CSS_VARS)) {
+    root.style.setProperty(name, value)
+  }
+})
+
 // =============================================================================
 // ZONE COLOR ASSIGNMENT
 // =============================================================================
@@ -20,17 +40,17 @@ import {
 describe('getZoneColor', () => {
   it('returns default gray color for null zone ID', () => {
     const color = getZoneColor(null)
-    expect(color.primary).toBe('#6b7280')
-    expect(color.rgb).toBe('107, 114, 128')
-    expect(color.background).toBe('rgba(107, 114, 128, 0.05)')
-    expect(color.border).toBe('rgba(107, 114, 128, 0.2)')
-    expect(color.borderHover).toBe('rgba(107, 114, 128, 0.4)')
+    expect(color.primary).toBe('#5a5a75')
+    expect(color.rgb).toBe('90, 90, 117')
+    expect(color.background).toBe('rgba(90, 90, 117, 0.05)')
+    expect(color.border).toBe('rgba(90, 90, 117, 0.2)')
+    expect(color.borderHover).toBe('rgba(90, 90, 117, 0.4)')
   })
 
   it('returns default gray color for undefined zone ID', () => {
     const color = getZoneColor(undefined)
-    expect(color.primary).toBe('#6b7280')
-    expect(color.rgb).toBe('107, 114, 128')
+    expect(color.primary).toBe('#5a5a75')
+    expect(color.rgb).toBe('90, 90, 117')
   })
 
   it('returns consistent color for same zone ID', () => {
@@ -97,7 +117,7 @@ describe('getZoneColorRGB', () => {
 
   it('returns default gray RGB for null', () => {
     const rgb = getZoneColorRGB(null)
-    expect(rgb).toBe('107, 114, 128')
+    expect(rgb).toBe('90, 90, 117')
   })
 
   it('returns consistent RGB for same zone ID', () => {

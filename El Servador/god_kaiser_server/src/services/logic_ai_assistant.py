@@ -1,4 +1,5 @@
 """Logic Rule AI Assistant — Natural Language to Logic Rule JSON generation (AUT-172)."""
+
 from __future__ import annotations
 
 from typing import Any, Literal, Optional

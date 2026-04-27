@@ -292,8 +292,11 @@ class SensorTypeDefaultsRepository:
         # Instance override (highest priority)
         if instance_override:
             for key in [
-                "operating_mode", "timeout_seconds", "timeout_warning_enabled",
-                "measurement_freshness_hours", "calibration_interval_days",
+                "operating_mode",
+                "timeout_seconds",
+                "timeout_warning_enabled",
+                "measurement_freshness_hours",
+                "calibration_interval_days",
             ]:
                 if instance_override.get(key) is not None:
                     effective[key] = instance_override[key]

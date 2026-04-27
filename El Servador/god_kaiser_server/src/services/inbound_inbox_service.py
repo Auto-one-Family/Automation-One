@@ -210,7 +210,9 @@ class InboundInboxService:
     async def _persist_locked(self) -> None:
         if not self._ensure_parent_dir(context="persist"):
             return
-        lines = [json.dumps(event, separators=(",", ":"), ensure_ascii=True) for event in self._events]
+        lines = [
+            json.dumps(event, separators=(",", ":"), ensure_ascii=True) for event in self._events
+        ]
         # Unique temp file reduces cross-process collisions on the same inbox path.
         tmp_path = self._file_path.with_name(
             f"{self._file_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"

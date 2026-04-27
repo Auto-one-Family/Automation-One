@@ -68,6 +68,7 @@ def _validate_escalation_policy(v: Optional[Dict[str, Any]]) -> Optional[Dict[st
             raise ValueError("failover_actions must be a list")
     return v
 
+
 # Kanonisch mit Laufzeit: logic_repo.get_enabled_rules (priority.asc), ConflictManager
 LOGIC_RULE_PRIORITY_FIELD_DESCRIPTION = (
     "Priorität für Konfliktauflösung und typische Ausführungsreihenfolge: "

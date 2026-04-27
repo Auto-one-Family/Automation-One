@@ -291,7 +291,8 @@ describe('Auth Store - login', () => {
       })
     ).rejects.toThrow()
 
-    expect(store.error).toBe('Invalid username or password')
+    // 401 wird in uiApiError einheitlich als Session ungültig formuliert (auch Login)
+    expect(store.error).toBe('Sitzung nicht mehr gültig. Bitte erneut anmelden.')
     expect(store.user).toBeNull()
     expect(store.accessToken).toBeNull()
   })

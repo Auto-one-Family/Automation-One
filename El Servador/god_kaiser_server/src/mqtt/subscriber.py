@@ -218,7 +218,10 @@ class Subscriber:
                     )
                 except RuntimeError as submit_err:
                     submit_msg = str(submit_err).lower()
-                    if self._is_shutting_down or "cannot schedule new futures after shutdown" in submit_msg:
+                    if (
+                        self._is_shutting_down
+                        or "cannot schedule new futures after shutdown" in submit_msg
+                    ):
                         logger.debug(
                             "Dropping MQTT message during executor shutdown for topic %s",
                             topic,
@@ -332,10 +335,13 @@ class Subscriber:
     @staticmethod
     def _is_critical_topic(topic: str) -> bool:
         return (
-            "/sensor/" in topic and topic.endswith("/data")
-        ) or topic.endswith("/system/error") or topic.endswith("/config_response") or topic.endswith(
-            "/system/intent_outcome"
-        ) or topic.endswith("/system/intent_outcome/lifecycle") or topic.endswith("/system/will")
+            ("/sensor/" in topic and topic.endswith("/data"))
+            or topic.endswith("/system/error")
+            or topic.endswith("/config_response")
+            or topic.endswith("/system/intent_outcome")
+            or topic.endswith("/system/intent_outcome/lifecycle")
+            or topic.endswith("/system/will")
+        )
 
     def _execute_handler(
         self,
@@ -509,9 +515,7 @@ class Subscriber:
                 replay_payload = dict(payload)
                 replay_payload["_reconciliation"] = {
                     "session_id": session_id,
-                    "phase": "start"
-                    if idx == 1
-                    else ("end" if idx == total else "progress"),
+                    "phase": "start" if idx == 1 else ("end" if idx == total else "progress"),
                     "position": idx,
                     "total": total,
                     "started_at": int(datetime.now(timezone.utc).timestamp()),

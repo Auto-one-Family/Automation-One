@@ -412,10 +412,17 @@ class SensorDataHandler:
                     # Convert ESP32 timestamp to UTC datetime
                     # BUG-05 fix: ts<=0 (Wokwi without NTP) → use server timestamp
                     # NTP fix: time_valid=false → ESP has no synchronized time → use server timestamp
-                    time_valid = payload.get("time_valid", True)  # Default True for old firmware without flag
+                    time_valid = payload.get(
+                        "time_valid", True
+                    )  # Default True for old firmware without flag
                     esp32_timestamp_raw = payload.get("ts", payload.get("timestamp"))
 
-                    if not time_valid or esp32_timestamp_raw is None or esp32_timestamp_raw <= 0 or esp32_timestamp_raw < 1577836800:
+                    if (
+                        not time_valid
+                        or esp32_timestamp_raw is None
+                        or esp32_timestamp_raw <= 0
+                        or esp32_timestamp_raw < 1577836800
+                    ):
                         esp32_timestamp = datetime.now(timezone.utc)
                     else:
                         esp32_timestamp = datetime.fromtimestamp(
@@ -777,11 +784,7 @@ class SensorDataHandler:
         # Update simulation_config so REST API returns current VPD value.
         # Without this, _build_mock_esp_response defaults to raw_value=0.
         if esp_device.device_metadata:
-            sim_sensors = (
-                esp_device.device_metadata
-                .get("simulation_config", {})
-                .get("sensors", {})
-            )
+            sim_sensors = esp_device.device_metadata.get("simulation_config", {}).get("sensors", {})
             for entry in sim_sensors.values():
                 if entry.get("sensor_type") == "vpd" and entry.get("gpio") == 0:
                     entry["raw_value"] = vpd
@@ -924,9 +927,7 @@ class SensorDataHandler:
                     if ts_dt:
                         if ts_dt.tzinfo is None:
                             ts_dt = ts_dt.replace(tzinfo=_tz.utc)
-                        measurement_age_seconds = int(
-                            (_dt.now(_tz.utc) - ts_dt).total_seconds()
-                        )
+                        measurement_age_seconds = int((_dt.now(_tz.utc) - ts_dt).total_seconds())
                 except (ValueError, TypeError, OSError):
                     pass
 

@@ -46,8 +46,12 @@ from .logic.conditions import (
 
 logger = get_logger(__name__)
 
-_OFFLINE_BACKOFF_SECONDS = 30  # Skip offline-ESP actuator rules for 30s after first failure (safety net)
-_CONFIG_PENDING_BACKOFF_SECONDS = 15  # Skip config-pending-ESP actuator rules for 15s (shorter: state transitions fast)
+_OFFLINE_BACKOFF_SECONDS = (
+    30  # Skip offline-ESP actuator rules for 30s after first failure (safety net)
+)
+_CONFIG_PENDING_BACKOFF_SECONDS = (
+    15  # Skip config-pending-ESP actuator rules for 15s (shorter: state transitions fast)
+)
 
 
 class LogicEngine:
@@ -350,8 +354,8 @@ class LogicEngine:
                     for rule in timer_rules:
                         # Load latest sensor values so compound rules (time + sensor/hysteresis)
                         # can evaluate correctly in Phase 1.
-                        sensor_values, offline_sensor_refs = await self._load_sensor_values_for_timer(
-                            rule, session
+                        sensor_values, offline_sensor_refs = (
+                            await self._load_sensor_values_for_timer(rule, session)
                         )
 
                         # Build primary sensor_data from first available value so hysteresis
@@ -446,9 +450,7 @@ class LogicEngine:
                                     datetime.now(timezone.utc) - last_exec.timestamp
                                 ).total_seconds()
                                 cooldown_window = (
-                                    rule.cooldown_seconds * 2
-                                    if rule.cooldown_seconds
-                                    else 120
+                                    rule.cooldown_seconds * 2 if rule.cooldown_seconds else 120
                                 )
                                 if time_since < cooldown_window:
                                     off_actions = self._build_off_actions(rule.actions)
@@ -509,8 +511,8 @@ class LogicEngine:
                 batch_locks: list = []
                 try:
                     for rule in reconnect_rules:
-                        sensor_values, _offline_sensor_refs = await self._load_sensor_values_for_timer(
-                            rule, session
+                        sensor_values, _offline_sensor_refs = (
+                            await self._load_sensor_values_for_timer(rule, session)
                         )
                         if not sensor_values:
                             logger.debug(
@@ -682,7 +684,13 @@ class LogicEngine:
                         "Rule '%s' condition not met because referenced sensor ESP(s) are offline: %s",
                         rule.rule_name,
                         ", ".join(
-                            sorted({str(ref.get("esp_id")) for ref in offline_sensor_refs if ref.get("esp_id")})
+                            sorted(
+                                {
+                                    str(ref.get("esp_id"))
+                                    for ref in offline_sensor_refs
+                                    if ref.get("esp_id")
+                                }
+                            )
                         ),
                     )
                     hysteresis_eval = self._get_hysteresis_evaluator()
@@ -835,7 +843,9 @@ class LogicEngine:
                         rule_id_snapshot,
                     )
             except Exception as log_err:
-                logger.error("Failed to log execution error for %s: %s", rule_name_snapshot, log_err)
+                logger.error(
+                    "Failed to log execution error for %s: %s", rule_name_snapshot, log_err
+                )
 
     async def _check_conditions(
         self, conditions, sensor_data: dict, logic_operator: str = "AND"
@@ -1104,10 +1114,13 @@ class LogicEngine:
             # P0-Fix T9: Lock TTL must cover the actuator's duration to prevent
             # mid-execution override by lower-priority rules.
             action_duration = action.get("duration_seconds") or action.get("duration", 0)
-            lock_ttl = max(
-                self.conflict_manager.DEFAULT_LOCK_TTL_SECONDS,
-                int(action_duration) + 10 if action_duration else 0,
-            ) or None
+            lock_ttl = (
+                max(
+                    self.conflict_manager.DEFAULT_LOCK_TTL_SECONDS,
+                    int(action_duration) + 10 if action_duration else 0,
+                )
+                or None
+            )
 
             can_execute, conflict = await self.conflict_manager.acquire_actuator(
                 esp_id=action.get("esp_id"),
@@ -1138,9 +1151,7 @@ class LogicEngine:
                     ),
                     "resolution": conflict.resolution.value if conflict else "blocked",
                     "message": (
-                        conflict.message
-                        if conflict
-                        else "Actuator command blocked due to conflict"
+                        conflict.message if conflict else "Actuator command blocked due to conflict"
                     ),
                 }
                 logger.warning(
@@ -1294,9 +1305,7 @@ class LogicEngine:
                             self._config_pending_skip.pop(esp_id_pre, None)
                             # AUT-111: recover from degraded state
                             try:
-                                await self._exit_degraded_state(
-                                    rule_id, rule_name, session
-                                )
+                                await self._exit_degraded_state(rule_id, rule_name, session)
                             except Exception as rec_err:
                                 logger.warning(
                                     "AUT-111: failed to exit degraded state for %s: %s",
@@ -1454,9 +1463,9 @@ class LogicEngine:
                     esp_repo_pre = ESPRepository(session)
                     esp_device_pre = await esp_repo_pre.get_by_device_id(esp_id)
                     if not esp_device_pre or not esp_device_pre.is_online:
-                        self._offline_esp_skip[esp_id] = datetime.now(
-                            timezone.utc
-                        ) + timedelta(seconds=_OFFLINE_BACKOFF_SECONDS)
+                        self._offline_esp_skip[esp_id] = datetime.now(timezone.utc) + timedelta(
+                            seconds=_OFFLINE_BACKOFF_SECONDS
+                        )
                         increment_logic_dispatch_skipped_offline()
                         logger.warning(
                             f"Rule {rule_name}: ESP {esp_id} is offline, "
@@ -1465,7 +1474,8 @@ class LogicEngine:
                         # AUT-111: enter degraded state for critical rules
                         try:
                             await self._enter_degraded_state(
-                                rule_id, rule_name,
+                                rule_id,
+                                rule_name,
                                 f"target_esp_offline:{esp_id}",
                                 session,
                             )
@@ -1478,9 +1488,9 @@ class LogicEngine:
                         return
                     # AUT-60: Config Pending Readiness Gate
                     if esp_device_pre.config_pending:
-                        self._config_pending_skip[esp_id] = datetime.now(
-                            timezone.utc
-                        ) + timedelta(seconds=_CONFIG_PENDING_BACKOFF_SECONDS)
+                        self._config_pending_skip[esp_id] = datetime.now(timezone.utc) + timedelta(
+                            seconds=_CONFIG_PENDING_BACKOFF_SECONDS
+                        )
                         increment_logic_dispatch_skipped_config_pending()
                         logger.warning(
                             "Rule %s: ESP %s is in CONFIG_PENDING_AFTER_RESET, "
@@ -1496,9 +1506,7 @@ class LogicEngine:
                         self._config_pending_skip.pop(esp_id, None)
                         # AUT-111: recover from degraded state
                         try:
-                            await self._exit_degraded_state(
-                                rule_id, rule_name, session
-                            )
+                            await self._exit_degraded_state(rule_id, rule_name, session)
                             await session.commit()
                         except Exception as rec_err:
                             logger.warning(
@@ -1675,17 +1683,13 @@ class LogicEngine:
                         "sensor_type": reading.sensor_type,
                     }
                     # AUT-41: enrich with freshness metadata for require_fresh_data
-                    age_seconds = (
-                        datetime.now(timezone.utc) - reading.timestamp
-                    ).total_seconds()
+                    age_seconds = (datetime.now(timezone.utc) - reading.timestamp).total_seconds()
                     entry["age_seconds"] = age_seconds
                     sensor_config = await sensor_repo.get_by_esp_gpio_and_type(
                         esp_id=esp_device.id, gpio=gpio, sensor_type=sensor_type
                     )
                     if sensor_config:
-                        entry["operating_mode"] = (
-                            sensor_config.operating_mode or "continuous"
-                        )
+                        entry["operating_mode"] = sensor_config.operating_mode or "continuous"
                         entry["measurement_freshness_hours"] = getattr(
                             sensor_config, "measurement_freshness_hours", None
                         )
@@ -1729,9 +1733,7 @@ class LogicEngine:
         )
         correlation = f"logic_conflict:{trace_id}" if trace_id else None
         fingerprint = (
-            f"logic_conflict:{trace_id}"
-            if trace_id
-            else f"logic_conflict:{rule_id}:{actuator_key}"
+            f"logic_conflict:{trace_id}" if trace_id else f"logic_conflict:{rule_id}:{actuator_key}"
         )[:64]
 
         metadata = {
@@ -1912,11 +1914,7 @@ class LogicEngine:
                 if reading.processed_value is not None
                 else reading.raw_value
             )
-            key = (
-                f"{esp_id_str}:{gpio}:{sensor_type}"
-                if sensor_type
-                else f"{esp_id_str}:{gpio}"
-            )
+            key = f"{esp_id_str}:{gpio}:{sensor_type}" if sensor_type else f"{esp_id_str}:{gpio}"
             age_s = (datetime.now(timezone.utc) - reading.timestamp).total_seconds()
             entry = {
                 "esp_id": esp_id_str,
@@ -1925,9 +1923,11 @@ class LogicEngine:
                 "value": display_value,
                 "age_seconds": age_s,
                 "operating_mode": op_mode,
-                "measurement_freshness_hours": getattr(
-                    sensor_config, "measurement_freshness_hours", None
-                ) if sensor_config else None,
+                "measurement_freshness_hours": (
+                    getattr(sensor_config, "measurement_freshness_hours", None)
+                    if sensor_config
+                    else None
+                ),
             }
             sensor_values[key] = entry
             logger.debug(f"Timer sensor loaded: {key} = {display_value} ({sensor_type})")
@@ -2106,8 +2106,7 @@ class LogicEngine:
                 return [trigger_conditions]
             if "conditions" in trigger_conditions:
                 return [
-                    c for c in trigger_conditions["conditions"]
-                    if c.get("type") == "hysteresis"
+                    c for c in trigger_conditions["conditions"] if c.get("type") == "hysteresis"
                 ]
         return []
 
@@ -2129,9 +2128,7 @@ class LogicEngine:
         return None
 
     @staticmethod
-    def _find_matching_hysteresis(
-        new_conditions: list[dict], old_cond: dict
-    ) -> "dict | None":
+    def _find_matching_hysteresis(new_conditions: list[dict], old_cond: dict) -> "dict | None":
         """Return the first condition in *new_conditions* pointing to the same sensor as *old_cond*."""
         for nc in new_conditions:
             if (
@@ -2188,9 +2185,7 @@ class LogicEngine:
                 try:
                     rule = await logic_repo.get_by_id(uuid.UUID(rule_id))
                 except (ValueError, Exception) as exc:
-                    logger.error(
-                        "on_rule_updated: invalid rule_id '%s': %s", rule_id, exc
-                    )
+                    logger.error("on_rule_updated: invalid rule_id '%s': %s", rule_id, exc)
                     return
 
                 if not rule:
@@ -2209,8 +2204,7 @@ class LogicEngine:
                             rule.trigger_conditions
                         )
                         existing_keys = [
-                            k for k in hysteresis_eval._states
-                            if k.startswith(f"{rule_id}:")
+                            k for k in hysteresis_eval._states if k.startswith(f"{rule_id}:")
                         ]
                         for state_key in existing_keys:
                             try:
@@ -2224,9 +2218,7 @@ class LogicEngine:
                                 # State for a non-hysteresis index: clean up
                                 hysteresis_eval.remove_state(state_key)
                                 continue
-                            new_cond = self._find_matching_hysteresis(
-                                new_hysteresis, old_cond
-                            )
+                            new_cond = self._find_matching_hysteresis(new_hysteresis, old_cond)
                             if new_cond is None or self._hysteresis_params_changed(
                                 old_cond, new_cond
                             ):
@@ -2467,9 +2459,7 @@ class LogicEngine:
                 break  # Exit after first session
 
         except Exception as e:
-            logger.error(
-                "on_rule_updated failed for rule %s: %s", rule_id, e, exc_info=True
-            )
+            logger.error("on_rule_updated failed for rule %s: %s", rule_id, e, exc_info=True)
 
     async def _evaluation_loop(self) -> None:
         """

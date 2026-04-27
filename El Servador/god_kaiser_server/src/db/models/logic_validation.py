@@ -209,9 +209,7 @@ class SensorDiffCondition(BaseModel):
         }
     """
 
-    type: Literal["sensor_diff"] = Field(
-        ..., description="Condition type (must be 'sensor_diff')"
-    )
+    type: Literal["sensor_diff"] = Field(..., description="Condition type (must be 'sensor_diff')")
     sensor_a_id: str = Field(
         ...,
         description="UUID of first sensor (A)",
@@ -227,9 +225,7 @@ class SensorDiffCondition(BaseModel):
     operator: Literal[">", ">=", "<", "<=", "==", "!="] = Field(
         ..., description="Comparison operator for (B - A)"
     )
-    value: float = Field(
-        ..., description="Threshold value: (sensor_b - sensor_a) [operator] value"
-    )
+    value: float = Field(..., description="Threshold value: (sensor_b - sensor_a) [operator] value")
     consecutive_count: int = Field(
         default=1,
         description="Number of consecutive measurements exceeding threshold to trigger",

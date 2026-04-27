@@ -401,7 +401,8 @@ class ConfigMappingEngine:
         # DB may store "AUTO_..." (auto-discovered) or "SIM_..." (simulated) addresses
         # Both are placeholders — real ESPs cannot use them, so return ""
         "strip_auto_prefix": lambda x: (
-            "" if x and isinstance(x, str) and (x.startswith("AUTO_") or x.startswith("SIM_"))
+            ""
+            if x and isinstance(x, str) and (x.startswith("AUTO_") or x.startswith("SIM_"))
             else (x or "")
         ),
     }

@@ -156,7 +156,9 @@ class SensorService:
                 esp_device.id, gpio, sensor_type, i2c_address
             )
         else:
-            existing = await self.sensor_repo.get_by_esp_gpio_and_type(esp_device.id, gpio, sensor_type)
+            existing = await self.sensor_repo.get_by_esp_gpio_and_type(
+                esp_device.id, gpio, sensor_type
+            )
 
         if existing:
             # Update existing

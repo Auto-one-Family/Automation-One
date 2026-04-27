@@ -134,7 +134,9 @@ class HeartbeatHandler:
     ) -> tuple[int, str]:
         """Return (handover_epoch, session_id) for the current ACK."""
         epoch_counter = self._handover_epoch_by_esp.get(esp_id, 0)
-        preferred = preferred_epoch if isinstance(preferred_epoch, int) and preferred_epoch > 0 else None
+        preferred = (
+            preferred_epoch if isinstance(preferred_epoch, int) and preferred_epoch > 0 else None
+        )
 
         # If ESP reports its active handover epoch, use that as source of truth.
         if preferred is not None:
@@ -240,7 +242,9 @@ class HeartbeatHandler:
         receive_ts: float = entry.get("receive_ts", 0.0)
         metrics_esp_ts: int = entry.get("esp_ts", 0)
 
-        payload["metrics_delta_ts"] = int(metrics_esp_ts) if isinstance(metrics_esp_ts, (int, float)) else 0
+        payload["metrics_delta_ts"] = (
+            int(metrics_esp_ts) if isinstance(metrics_esp_ts, (int, float)) else 0
+        )
 
         if receive_ts > 0:
             payload["metrics_freshness_seconds"] = round(time_module.time() - receive_ts, 1)
@@ -636,7 +640,9 @@ class HeartbeatHandler:
                     wifi_rssi = payload.get("wifi_rssi", 0)
                     uptime = payload.get("uptime", 0)
                     sensor_count = payload.get("sensor_count", payload.get("active_sensors", 0))
-                    actuator_count = payload.get("actuator_count", payload.get("active_actuators", 0))
+                    actuator_count = payload.get(
+                        "actuator_count", payload.get("active_actuators", 0)
+                    )
 
                     # Use server-authoritative timestamp (resolved last_seen) instead of raw
                     # payload ts. This keeps frontend online/offline badges stable even when
@@ -665,16 +671,10 @@ class HeartbeatHandler:
                             "is_reconnect": is_reconnect,
                         }
                     )
-                    last_disconnect = (esp_device.device_metadata or {}).get(
-                        "last_disconnect"
-                    )
-                    if isinstance(last_disconnect, dict) and last_disconnect.get(
-                        "is_flapping"
-                    ):
+                    last_disconnect = (esp_device.device_metadata or {}).get("last_disconnect")
+                    if isinstance(last_disconnect, dict) and last_disconnect.get("is_flapping"):
                         broadcast_payload["reconnect_after_flapping"] = True
-                        broadcast_payload["lwt_count_5m"] = last_disconnect.get(
-                            "lwt_count_5m", 0
-                        )
+                        broadcast_payload["lwt_count_5m"] = last_disconnect.get("lwt_count_5m", 0)
                     await ws_manager.broadcast(
                         "esp_health",
                         broadcast_payload,
@@ -1268,12 +1268,9 @@ class HeartbeatHandler:
 
                         logic_engine = get_logic_engine()
                         if logic_engine is not None:
-                            logic_engine.invalidate_config_pending_backoff(
-                                esp_device.device_id
-                            )
+                            logic_engine.invalidate_config_pending_backoff(esp_device.device_id)
                             logger.info(
-                                "Config pending backoff cleared for %s "
-                                "(system_state %s -> %s)",
+                                "Config pending backoff cleared for %s " "(system_state %s -> %s)",
                                 esp_device.device_id,
                                 prev_state,
                                 payload["system_state"],
@@ -1724,7 +1721,9 @@ class HeartbeatHandler:
             success = mqtt_client.publish(topic, json.dumps(payload), qos=1)
 
             if success:
-                observe_heartbeat_ack_latency_ms((time_module.perf_counter() - ack_started) * 1000.0)
+                observe_heartbeat_ack_latency_ms(
+                    (time_module.perf_counter() - ack_started) * 1000.0
+                )
                 increment_heartbeat_ack_valid()
                 # Use INFO for reconnect-relevant statuses to aid boot-diagnosis in Loki
                 if status in ("online", "offline"):
@@ -1864,9 +1863,7 @@ class HeartbeatHandler:
             logic_engine = get_logic_engine()
             if logic_engine is not None:
                 await logic_engine.trigger_reconnect_evaluation(esp_id)
-                await self._broadcast_reconnect_phase(
-                    esp_id=esp_id, phase="delta_enforced"
-                )
+                await self._broadcast_reconnect_phase(esp_id=esp_id, phase="delta_enforced")
 
             # Signal full convergence after successful reconnect evaluation
             await self._broadcast_reconnect_phase(esp_id=esp_id, phase="converged")
@@ -1996,9 +1993,7 @@ class HeartbeatHandler:
                         "ESP: sensors=%d/actuators=%d, DB: sensors=%d/actuators=%d)",
                         esp_device.device_id,
                         float(offline_seconds),
-                        str(reconnect_epoch_int)
-                        if reconnect_epoch_int is not None
-                        else "none",
+                        str(reconnect_epoch_int) if reconnect_epoch_int is not None else "none",
                         int(elapsed),
                         esp_sensor_count,
                         esp_actuator_count,
@@ -2038,12 +2033,12 @@ class HeartbeatHandler:
                 self._config_push_pending_esps.add(esp_device.device_id)
 
                 create_tracked_task(
-                        self._auto_push_config(
-                            esp_device.device_id,
-                            reason_code=reason_code,
-                        ),
-                        name=f"auto_push_config_{esp_device.device_id}",
-                    )
+                    self._auto_push_config(
+                        esp_device.device_id,
+                        reason_code=reason_code,
+                    ),
+                    name=f"auto_push_config_{esp_device.device_id}",
+                )
                 return True
 
             return False
@@ -2259,9 +2254,7 @@ class HeartbeatHandler:
                             # PKG-19: If LWT already handled this device recently,
                             # skip redundant timeout escalation to avoid double
                             # actuator resets and duplicate WS broadcasts.
-                            last_disc = (device.device_metadata or {}).get(
-                                "last_disconnect"
-                            )
+                            last_disc = (device.device_metadata or {}).get("last_disconnect")
                             if isinstance(last_disc, dict) and last_disc.get("source") == "lwt":
                                 lwt_ts = last_disc.get("timestamp")
                                 if isinstance(lwt_ts, (int, float)) and lwt_ts > 0:

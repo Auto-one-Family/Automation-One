@@ -57,9 +57,7 @@ async def cancel_all_background_tasks(timeout: float = 10.0) -> int:
         task.cancel()
 
     if _background_tasks:
-        done, pending = await asyncio.wait(
-            list(_background_tasks), timeout=timeout
-        )
+        done, pending = await asyncio.wait(list(_background_tasks), timeout=timeout)
         if pending:
             logger.warning(
                 "%d background tasks did not finish within %fs",

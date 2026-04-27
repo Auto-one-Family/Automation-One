@@ -30,19 +30,26 @@ class CalibrationSessionRepository(BaseRepository[CalibrationSession]):
 
         Only one active session should exist per sensor at any time.
         """
-        stmt = select(self.model).where(
-            and_(
-                self.model.esp_id == esp_id,
-                self.model.gpio == gpio,
-                self.model.sensor_type == sensor_type,
-                self.model.status.notin_([
-                    CalibrationStatus.APPLIED,
-                    CalibrationStatus.REJECTED,
-                    CalibrationStatus.EXPIRED,
-                    CalibrationStatus.FAILED,
-                ]),
+        stmt = (
+            select(self.model)
+            .where(
+                and_(
+                    self.model.esp_id == esp_id,
+                    self.model.gpio == gpio,
+                    self.model.sensor_type == sensor_type,
+                    self.model.status.notin_(
+                        [
+                            CalibrationStatus.APPLIED,
+                            CalibrationStatus.REJECTED,
+                            CalibrationStatus.EXPIRED,
+                            CalibrationStatus.FAILED,
+                        ]
+                    ),
+                )
             )
-        ).order_by(self.model.created_at.desc()).limit(1)
+            .order_by(self.model.created_at.desc())
+            .limit(1)
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -53,11 +60,7 @@ class CalibrationSessionRepository(BaseRepository[CalibrationSession]):
         Used by point add/update/delete/finalize flows to serialize concurrent
         writes on the same calibration session.
         """
-        stmt = (
-            select(self.model)
-            .where(self.model.id == session_id)
-            .with_for_update()
-        )
+        stmt = select(self.model).where(self.model.id == session_id).with_for_update()
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -143,7 +146,11 @@ class CalibrationSessionRepository(BaseRepository[CalibrationSession]):
 
         # JSONB fields are not always reliably tracked for in-place nested mutations.
         # Build a fresh structure so SQLAlchemy marks the column as dirty on every add.
-        current_points = copy.deepcopy(session.calibration_points) if session.calibration_points else {"points": []}
+        current_points = (
+            copy.deepcopy(session.calibration_points)
+            if session.calibration_points
+            else {"points": []}
+        )
         existing_points = current_points.get("points", [])
         points_list = list(existing_points) if isinstance(existing_points, list) else []
         points_list.append(point)
@@ -226,12 +233,14 @@ class CalibrationSessionRepository(BaseRepository[CalibrationSession]):
             .where(
                 and_(
                     self.model.created_at < cutoff,
-                    self.model.status.notin_([
-                        CalibrationStatus.APPLIED,
-                        CalibrationStatus.REJECTED,
-                        CalibrationStatus.EXPIRED,
-                        CalibrationStatus.FAILED,
-                    ]),
+                    self.model.status.notin_(
+                        [
+                            CalibrationStatus.APPLIED,
+                            CalibrationStatus.REJECTED,
+                            CalibrationStatus.EXPIRED,
+                            CalibrationStatus.FAILED,
+                        ]
+                    ),
                 )
             )
             .values(

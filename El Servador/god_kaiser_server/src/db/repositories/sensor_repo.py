@@ -82,7 +82,9 @@ class SensorRepository(BaseRepository[SensorConfig]):
             await self.session.rollback()
             logger.debug(
                 "Duplicate sensor_config caught: esp=%s gpio=%s type=%s — returning existing",
-                esp_id, gpio, sensor_type,
+                esp_id,
+                gpio,
+                sensor_type,
             )
             # Re-fetch after rollback
             if i2c_address is not None:
@@ -374,9 +376,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
                     subzone_id=subzone_id,
                     device_name=device_name,
                 )
-                .on_conflict_do_nothing(
-                    constraint="uq_sensor_data_esp_gpio_type_timestamp"
-                )
+                .on_conflict_do_nothing(constraint="uq_sensor_data_esp_gpio_type_timestamp")
                 .returning(SensorData.id)
             )
             inserted_id = (await self.session.execute(insert_stmt)).scalar_one_or_none()
@@ -646,9 +646,7 @@ class SensorRepository(BaseRepository[SensorConfig]):
                 filters.append(SensorData.esp_id == config_obj.esp_id)
                 if config_obj.gpio is not None:
                     filters.append(SensorData.gpio == config_obj.gpio)
-                filters.append(
-                    func.lower(SensorData.sensor_type) == config_obj.sensor_type.lower()
-                )
+                filters.append(func.lower(SensorData.sensor_type) == config_obj.sensor_type.lower())
 
         if esp_id is not None:
             filters.append(SensorData.esp_id == esp_id)

@@ -171,9 +171,7 @@ async def list_devices(
     ] = False,
     runtime_only: Annotated[
         bool,
-        Query(
-            description="Runtime view only (default). Set false for historical/audit listings."
-        ),
+        Query(description="Runtime view only (default). Set false for historical/audit listings."),
     ] = True,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -1452,7 +1450,8 @@ async def set_device_pending(
 
     if device.status in ("deleted",):
         raise ValidationException(
-            "status", f"Device '{esp_id}' cannot be moved to pending approval (status: {device.status})"
+            "status",
+            f"Device '{esp_id}' cannot be moved to pending approval (status: {device.status})",
         )
 
     old_status = device.status

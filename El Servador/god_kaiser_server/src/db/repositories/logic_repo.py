@@ -40,9 +40,7 @@ class LogicRepository(BaseRepository[CrossESPLogic]):
         await self.session.refresh(rule)
         return rule
 
-    async def get_degraded_rules(
-        self, critical_only: bool = False
-    ) -> list[CrossESPLogic]:
+    async def get_degraded_rules(self, critical_only: bool = False) -> list[CrossESPLogic]:
         """
         Get all rules currently in degraded state (AUT-111).
 

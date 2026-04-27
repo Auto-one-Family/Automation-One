@@ -283,11 +283,13 @@ class MQTTClient:
             _server_status_topic = TopicBuilder.build_server_status_topic()
             self.client.will_set(
                 topic=_server_status_topic,
-                payload=json.dumps({
-                    "status": "offline",
-                    "timestamp": int(time.time()),
-                    "reason": "unexpected_disconnect",
-                }),
+                payload=json.dumps(
+                    {
+                        "status": "offline",
+                        "timestamp": int(time.time()),
+                        "reason": "unexpected_disconnect",
+                    }
+                ),
                 qos=1,
                 retain=True,
             )
@@ -556,10 +558,12 @@ class MQTTClient:
                 server_status_topic = TopicBuilder.build_server_status_topic()
                 self.client.publish(
                     server_status_topic,
-                    json.dumps({
-                        "status": "online",
-                        "timestamp": int(time.time()),
-                    }),
+                    json.dumps(
+                        {
+                            "status": "online",
+                            "timestamp": int(time.time()),
+                        }
+                    ),
                     qos=1,
                     retain=True,
                 )

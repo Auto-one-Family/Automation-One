@@ -541,7 +541,9 @@ class SensorReading(BaseModel):
     Single sensor reading (raw or aggregated bucket).
     """
 
-    timestamp: datetime = Field(..., description="Reading timestamp (or bucket start for aggregated)")
+    timestamp: datetime = Field(
+        ..., description="Reading timestamp (or bucket start for aggregated)"
+    )
     raw_value: float = Field(..., description="Raw sensor value (or avg for aggregated)")
     processed_value: Optional[float] = Field(
         None,

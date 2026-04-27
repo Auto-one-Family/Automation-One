@@ -66,9 +66,7 @@ class CommandContractRepository:
             result = await self.session.execute(stmt)
             intent = result.scalar_one_or_none()
             if intent is None:
-                raise RuntimeError(
-                    f"CommandIntent insert/select anomaly for intent_id={intent_id}"
-                )
+                raise RuntimeError(f"CommandIntent insert/select anomaly for intent_id={intent_id}")
 
         intent.correlation_id = str(payload["correlation_id"])
         intent.esp_id = esp_id

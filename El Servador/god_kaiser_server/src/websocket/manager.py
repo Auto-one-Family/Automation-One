@@ -231,12 +231,18 @@ class WebSocketManager:
             timestamp = unix_timestamp_s()
 
             # Resolve envelope + domain correlations without overriding domain authority.
-            envelope_correlation = correlation_id if correlation_id is not None else get_request_id()
+            envelope_correlation = (
+                correlation_id if correlation_id is not None else get_request_id()
+            )
             data_correlation = self._extract_data_correlation(data)
             if envelope_correlation is None and data_correlation:
                 envelope_correlation = data_correlation
 
-            if envelope_correlation and data_correlation and envelope_correlation != data_correlation:
+            if (
+                envelope_correlation
+                and data_correlation
+                and envelope_correlation != data_correlation
+            ):
                 increment_ws_envelope_data_divergence()
                 increment_ws_contract_mismatch()
                 logger.warning(

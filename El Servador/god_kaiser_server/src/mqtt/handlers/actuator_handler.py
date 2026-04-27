@@ -129,7 +129,9 @@ class ActuatorStatusHandler:
                 # storing raw ESP32 types in actuator_states/actuator_history.
                 raw_esp32_type = payload.get("actuator_type", payload.get("type", None))
                 if actuator_config:
-                    actuator_type = actuator_config.actuator_type  # server-normalized (e.g. "digital")
+                    actuator_type = (
+                        actuator_config.actuator_type
+                    )  # server-normalized (e.g. "digital")
                 elif raw_esp32_type and raw_esp32_type != "unknown":
                     actuator_type = normalize_actuator_type(raw_esp32_type)
                 else:
@@ -137,9 +139,12 @@ class ActuatorStatusHandler:
 
                 # Update hardware_type on config if ESP32 reported a known logical type
                 # that differs from what's stored (e.g. first status after Stufe-2 migration).
-                if actuator_config and raw_esp32_type and raw_esp32_type not in (
-                    "unknown", None
-                ) and actuator_config.hardware_type != raw_esp32_type:
+                if (
+                    actuator_config
+                    and raw_esp32_type
+                    and raw_esp32_type not in ("unknown", None)
+                    and actuator_config.hardware_type != raw_esp32_type
+                ):
                     actuator_config.hardware_type = raw_esp32_type
 
                 # Convert boolean state to string (ESP32 sends true/false)

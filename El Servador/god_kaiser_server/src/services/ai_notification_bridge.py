@@ -108,6 +108,7 @@ class AINotificationBridge:
 
         # Enrich explanation with AI analysis if not already set
         from .ai_service import ai_service as _ai_svc  # lazy — avoids circular import
+
         if _ai_svc.is_available() and not anomaly.explanation:
             asyncio.create_task(_enrich_anomaly_explanation(anomaly))
 
@@ -136,6 +137,7 @@ async def _enrich_anomaly_explanation(result: AnomalyResult) -> None:
     """
     try:
         from .ai_service import ErrorAnalysisRequest, ai_service  # lazy — avoids circular import
+
         finding = await ai_service.analyze_error(
             ErrorAnalysisRequest(
                 error_code=0,

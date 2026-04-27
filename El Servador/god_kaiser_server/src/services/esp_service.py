@@ -456,19 +456,17 @@ class ESPService:
 
             if a_gpio is not None and int(a_gpio) not in actuator_gpios:
                 drop = True
-            if (
-                not is_time_window_only
-                and s_gpio is not None
-                and int(s_gpio) not in sensor_gpios
-            ):
+            if not is_time_window_only and s_gpio is not None and int(s_gpio) not in sensor_gpios:
                 drop = True
 
             if drop:
-                stripped.append({
-                    "actuator_gpio": a_gpio,
-                    "sensor_gpio": s_gpio,
-                    "sensor_value_type": rule.get("sensor_value_type", ""),
-                })
+                stripped.append(
+                    {
+                        "actuator_gpio": a_gpio,
+                        "sensor_gpio": s_gpio,
+                        "sensor_value_type": rule.get("sensor_value_type", ""),
+                    }
+                )
             else:
                 consistent.append(rule)
 

@@ -111,7 +111,9 @@ def canonicalize_error_event(payload: Mapping[str, Any]) -> CanonicalSystemEvent
         severity_label = _LEVEL_TO_SEVERITY.get(severity_level)
     else:
         severity_text = _to_text(raw_severity)
-        severity_label = _LEVEL_TO_SEVERITY.get(_SEVERITY_TO_LEVEL.get((severity_text or "").lower(), -1))
+        severity_label = _LEVEL_TO_SEVERITY.get(
+            _SEVERITY_TO_LEVEL.get((severity_text or "").lower(), -1)
+        )
         if severity_label is not None:
             severity_level = _SEVERITY_TO_LEVEL[severity_label]
     if severity_label is None or severity_level not in (0, 1, 2, 3):
@@ -306,7 +308,9 @@ def canonicalize_lwt(payload: Mapping[str, Any]) -> CanonicalSystemEvent:
     contract_code = None
     if is_violation:
         contract_code = CONTRACT_UNKNOWN_CODE
-        contract_reason = "Contract violation: unknown system/will values (" + ", ".join(issues) + ")"
+        contract_reason = (
+            "Contract violation: unknown system/will values (" + ", ".join(issues) + ")"
+        )
         canonical["contract_violation"] = True
 
     return CanonicalSystemEvent(

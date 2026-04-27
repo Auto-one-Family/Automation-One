@@ -80,9 +80,7 @@ class CalibrationService:
         if not isfinite(float(value)):
             raise CalibrationError(f"{field_name} must be a finite number", "VALIDATION_ERROR")
 
-    async def _ensure_session_mutable(
-        self, cal_session: CalibrationSession
-    ) -> CalibrationSession:
+    async def _ensure_session_mutable(self, cal_session: CalibrationSession) -> CalibrationSession:
         if cal_session.is_terminal:
             raise CalibrationError(
                 f"Session is in terminal state: {cal_session.status.value}",
@@ -199,7 +197,9 @@ class CalibrationService:
             if existing:
                 logger.info(
                     "Expiring existing active calibration session %s for %s/GPIO%d",
-                    existing.id, esp_id, gpio,
+                    existing.id,
+                    esp_id,
+                    gpio,
                 )
                 await self.repo.update_status(
                     existing.id,
@@ -212,7 +212,9 @@ class CalibrationService:
             esp_device = await self.esp_repo.get_by_device_id(esp_id)
             if esp_device:
                 sensor = await self.sensor_repo.get_by_esp_gpio_and_type(
-                    esp_device.id, gpio, normalized_type,
+                    esp_device.id,
+                    gpio,
+                    normalized_type,
                 )
                 if sensor:
                     sensor_config_id = sensor.id
@@ -231,7 +233,11 @@ class CalibrationService:
 
         logger.info(
             "Started calibration session %s: %s/GPIO%d type=%s method=%s",
-            cal_session.id, esp_id, gpio, normalized_type, method,
+            cal_session.id,
+            esp_id,
+            gpio,
+            normalized_type,
+            method,
         )
 
         # S-P6: Broadcast session started event
@@ -316,7 +322,11 @@ class CalibrationService:
                 )
 
                 existing_idx = next(
-                    (idx for idx, item in enumerate(points) if item.get("point_role") == normalized_role),
+                    (
+                        idx
+                        for idx, item in enumerate(points)
+                        if item.get("point_role") == normalized_role
+                    ),
                     None,
                 )
                 point_id = str(uuid.uuid4())
@@ -366,7 +376,9 @@ class CalibrationService:
                     clear_result=True,
                 )
                 if not updated:
-                    raise CalibrationError("Failed to persist calibration point", "ADD_POINT_FAILED")
+                    raise CalibrationError(
+                        "Failed to persist calibration point", "ADD_POINT_FAILED"
+                    )
 
                 logger.info(
                     "Calibration point %s (%s) in session %s: role=%s raw=%.3f ref=%.3f",
@@ -428,8 +440,16 @@ class CalibrationService:
                 raise CalibrationError("point_role must be one of: dry, wet", "VALIDATION_ERROR")
 
             payload = cal_session.calibration_points or {"points": [], "history": []}
-            points = list(payload.get("points", [])) if isinstance(payload.get("points", []), list) else []
-            history = list(payload.get("history", [])) if isinstance(payload.get("history", []), list) else []
+            points = (
+                list(payload.get("points", []))
+                if isinstance(payload.get("points", []), list)
+                else []
+            )
+            history = (
+                list(payload.get("history", []))
+                if isinstance(payload.get("history", []), list)
+                else []
+            )
 
             idx = next((i for i, p in enumerate(points) if p.get("id") == point_id), None)
             if idx is None:
@@ -437,7 +457,8 @@ class CalibrationService:
 
             role_conflict = next(
                 (
-                    p for p in points
+                    p
+                    for p in points
                     if p.get("id") != point_id and p.get("point_role") == normalized_role
                 ),
                 None,
@@ -488,8 +509,16 @@ class CalibrationService:
             await self._ensure_session_mutable(cal_session)
 
             payload = cal_session.calibration_points or {"points": [], "history": []}
-            points = list(payload.get("points", [])) if isinstance(payload.get("points", []), list) else []
-            history = list(payload.get("history", [])) if isinstance(payload.get("history", []), list) else []
+            points = (
+                list(payload.get("points", []))
+                if isinstance(payload.get("points", []), list)
+                else []
+            )
+            history = (
+                list(payload.get("history", []))
+                if isinstance(payload.get("history", []), list)
+                else []
+            )
 
             idx = next((i for i, p in enumerate(points) if p.get("id") == point_id), None)
             if idx is None:
@@ -548,7 +577,9 @@ class CalibrationService:
         points = points_data.get("points", [])
 
         # Validate points based on method
-        roles = {str(point.get("point_role", "")).lower() for point in points if isinstance(point, dict)}
+        roles = {
+            str(point.get("point_role", "")).lower() for point in points if isinstance(point, dict)
+        }
 
         if cal_session.method == "moisture_2point":
             if "dry" not in roles or "wet" not in roles:
@@ -609,7 +640,8 @@ class CalibrationService:
 
         logger.info(
             "Finalized calibration session %s: %s",
-            session_id, result,
+            session_id,
+            result,
         )
 
         # S-P6: Broadcast session finalized event
@@ -709,7 +741,8 @@ class CalibrationService:
 
         logger.info(
             "Applied calibration to sensor %s (session %s)",
-            sensor.id, session_id,
+            sensor.id,
+            session_id,
         )
 
         updated = await self.repo.update_status(session_id, CalibrationStatus.APPLIED)
@@ -732,7 +765,9 @@ class CalibrationService:
 
         return updated
 
-    async def delete_session(self, session_id: uuid.UUID, reason: str = "User discarded session") -> CalibrationSession:
+    async def delete_session(
+        self, session_id: uuid.UUID, reason: str = "User discarded session"
+    ) -> CalibrationSession:
         """Delete/discard a mutable session by transitioning to REJECTED."""
         return await self.reject(session_id, reason=reason)
 
@@ -751,7 +786,9 @@ class CalibrationService:
             )
 
         updated = await self.repo.update_status(
-            session_id, CalibrationStatus.REJECTED, failure_reason=reason,
+            session_id,
+            CalibrationStatus.REJECTED,
+            failure_reason=reason,
         )
         if not updated:
             raise CalibrationError("Failed to reject", "REJECT_FAILED")
@@ -793,9 +830,7 @@ class CalibrationService:
     # ── Private computation methods ────────────────────────────────────────
 
     @staticmethod
-    def _compute_calibration(
-        method: str, sensor_type: str, points: list[dict]
-    ) -> dict:
+    def _compute_calibration(method: str, sensor_type: str, points: list[dict]) -> dict:
         """
         Compute calibration parameters from measurement points.
 
@@ -937,7 +972,11 @@ class CalibrationService:
         ideal_response_mv_per_ph = 59.16
         measured_response_mv_per_ph = abs(1.0 / slope) if slope != 0 else 0
 
-        slope_deviation_pct = abs(measured_response_mv_per_ph - ideal_response_mv_per_ph) / ideal_response_mv_per_ph * 100
+        slope_deviation_pct = (
+            abs(measured_response_mv_per_ph - ideal_response_mv_per_ph)
+            / ideal_response_mv_per_ph
+            * 100
+        )
 
         if slope_deviation_pct > 15.0:
             raise ValueError(

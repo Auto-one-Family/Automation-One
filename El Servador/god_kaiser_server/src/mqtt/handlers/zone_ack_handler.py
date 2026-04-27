@@ -223,9 +223,7 @@ class ZoneAckHandler:
                     # the standard code for foreign_key_violation, portable
                     # across asyncpg and psycopg2.
                     orig = getattr(e, "orig", None)
-                    sqlstate = getattr(orig, "sqlstate", None) or getattr(
-                        orig, "pgcode", None
-                    )
+                    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
                     if sqlstate == "23503":
                         logger.warning(
                             "Zone ACK commit failed for %s (FK violation, zone_id='%s'). "

@@ -61,12 +61,14 @@ class StateAdoptionService:
             logger.info(
                 "State adoption started for %s (offline_seconds=%s)",
                 esp_id,
-                f"{last_offline_seconds:.1f}" if isinstance(last_offline_seconds, (int, float)) else "n/a",
+                (
+                    f"{last_offline_seconds:.1f}"
+                    if isinstance(last_offline_seconds, (int, float))
+                    else "n/a"
+                ),
             )
 
-    async def record_adopted_state(
-        self, esp_id: str, gpio: int, state: str, value: float
-    ) -> None:
+    async def record_adopted_state(self, esp_id: str, gpio: int, state: str, value: float) -> None:
         async with self._lock:
             cycle = self._cycles.get(esp_id)
             if not cycle or cycle.phase != "adopting":

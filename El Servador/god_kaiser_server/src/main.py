@@ -992,7 +992,9 @@ async def lifespan(app: FastAPI):
         logger.info("Resilience: Circuit Breakers (mqtt, database, external_api) + Retry + Timeout")
         logger.info("=" * 60)
 
-        final_runtime_mode = RuntimeMode.NORMAL_OPERATION if connected else RuntimeMode.DEGRADED_OPERATION
+        final_runtime_mode = (
+            RuntimeMode.NORMAL_OPERATION if connected else RuntimeMode.DEGRADED_OPERATION
+        )
         await runtime_state.transition(final_runtime_mode, "startup completed")
 
         yield  # Server runs here
@@ -1106,11 +1108,13 @@ async def lifespan(app: FastAPI):
             _server_status_topic = TopicBuilder.build_server_status_topic()
             mqtt_client.publish(
                 _server_status_topic,
-                json.dumps({
-                    "status": "offline",
-                    "timestamp": int(time.time()),
-                    "reason": "graceful_shutdown",
-                }),
+                json.dumps(
+                    {
+                        "status": "offline",
+                        "timestamp": int(time.time()),
+                        "reason": "graceful_shutdown",
+                    }
+                ),
                 qos=1,
                 retain=True,
             )
