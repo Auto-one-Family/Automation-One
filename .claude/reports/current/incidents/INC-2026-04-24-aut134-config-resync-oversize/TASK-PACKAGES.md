@@ -15,6 +15,9 @@
 | PKG-03 | Heartbeat-Oversize (1024-Lane) entkoppeln/härten | esp32-dev + mqtt-dev | P1 | PKG-02 |
 | PKG-04 | Operatorische Sicht auf Config-Reject-Kette | frontend-dev | P1 | PKG-01, PKG-02 |
 | PKG-05 | Forensik-Vollkette CID -> DB -> Audit verifizieren | db-inspector (optional, empfohlen) | P1 | PKG-01 |
+| PKG-06 | `max_runtime_ms` muss R20-P11 Skip nicht umgehen (RuntimeProtection apply) | esp32-dev | P0 | — |
+| PKG-07 | Sensor-NVS: Dedup-Loop ohne laute `getString`-Fehler (keyExists/Helper) | esp32-dev | P2 | — |
+| PKG-08 | Klarheit Regelanzahl: Logic/`offline_rules` im Config vs. UI (Doku + ggf. Telemetrie) | server-dev (+ optional frontend-dev) | P2 | — |
 
 ---
 
@@ -57,11 +60,11 @@
 **Mindeständerung:**
 1. Sicherstellen, dass `intent_outcome` für Config-Reject immer `correlation_id/intent_id/request_id` konsistent trägt.
 2. Bei `Payload too large` keine sekundäre Retry-Flood-Kaskade auslösen.
-3. Reason-Text deterministisch (`[CONFIG] Payload too large: <len> bytes, max=4096`).
+3. Reason-Text deterministisch; `max=` entspricht `CONFIG_PAYLOAD_MAX_LEN` (Repo-IST: **4352** — nicht hardcodieren 4096).
 
 **Tests (verify-korrigiert):**
 - `cd "El Trabajante" && pio run -e esp32_dev`
-- `cd "El Trabajante" && pio test -e native -f test_topic_builder`
+- `cd "El Trabajante" && pio test -e native -f test_topic_*` (siehe `platformio.ini` — TopicBuilder-Tests in `test/test_infra/test_topic_builder.cpp`)
 
 **Akzeptanzkriterien:**
 - [ ] Rejected-Outcome bleibt einmalig/terminal pro Versuch.
@@ -81,14 +84,14 @@
 - `docs/analysen/heartbeat-architektur-metrics-routing-2026-04-23.md` (Abgleich)
 
 **Mindeständerung:**
-1. Größe des Heartbeat-Core-Payloads im kritischen Pfad stabil unter 1024 halten.
+1. Größe des Heartbeat-Core-Payloads im kritischen Pfad stabil unter `PUBLISH_PAYLOAD_MAX_LEN` halten (Repo-IST: **1536**; Incident-Serial zeigte ~1225 bei früherem kleineren Limit).
 2. Metriklast aus Core-Lane weiter separieren (AUT-121/AUT-133-kompatibel), ohne Contract-Bruch.
 3. Oversize-Fall bleibt sichtbar, aber ohne Queue-Full-Sturm.
 
 **Tests (verify-korrigiert):**
 - `cd "El Trabajante" && pio run -e esp32_dev`
-- `cd "El Trabajante" && pio test -e native -f test_topic_builder`
-- Live-Check durch Robin: COM3 Monitor, kein `payload_len>1024` im Heartbeat über 10 Minuten.
+- `cd "El Trabajante" && pio test -e native -f test_topic_*`
+- Live-Check durch Robin: COM3 Monitor, kein `Publish rejected (oversize)` im Heartbeat-Pfad über 10 Minuten (Grenze = `PUBLISH_PAYLOAD_MAX_LEN` im Build).
 
 **Akzeptanzkriterien:**
 - [ ] Keine Heartbeat-Oversize-Rejects im Reconnect/Zone-Assign-Fenster.
@@ -140,11 +143,51 @@
 
 ---
 
+## PKG-06 — R20-P11: `max_runtime_ms` / RuntimeProtection trotz „unchanged“ (P0)
+
+**Code-Root-Cause (Repo):** `El Trabajante/src/services/actuator/actuator_manager.cpp` — `soft_changed` vergleicht nur `actuator_name`, `subzone_id`, `critical`, `inverted_logic`, `default_state`, `default_pwm` (ca. Z. 237–243). `runtime_protection.max_runtime_ms` fehlt. Wenn beides false ist, früher Return „config unchanged, skipping“ (Z. 245–250) — das frisch in `parseActuatorDefinition` gesetzte `max_runtime_ms` (Z. 911–915) geht ins Leere. Zusatz: der Soft-Update-Zweig (Z. 253–277) aktualisiert `runtime_protection` ebenfalls nicht und ruft ggf. `setRuntimeProtection` am Treiber nicht auf.
+
+**Ziel:** Jede vollwertige Config-Push-Zeile mit geändertem `max_runtime_ms` muss NVS + Pump-Treiber erreichen, ohne sinnlose GPIO-Neuinitialisierung.
+
+**Akzeptanzkriterien:**
+- [ ] `soft_changed` enthält mindestens Vergleich `prev.runtime_protection.max_runtime_ms` vs. `config` (und ggf. weitere `RuntimeProtection`-Felder, die vom Server gepusht werden).
+- [ ] Soft-Update-Pfad: Felder persistieren, `PumpActuator::setRuntimeProtection` o. ä. aufrufen wo zutreffend.
+- [ ] Test/Manual: Server sendet geändertes `max_runtime_ms` bei sonst identischem Actuator-JSON; ESP-Log/NVS widerspricht nicht mehr dem Serverwert.
+- [ ] Commit nur auf `auto-debugger/work`.
+
+---
+
+## PKG-07 — NVS: Sensor-Dedup ohne `[E] getString` Noise (P2)
+
+**Code-Stelle:** `El Trabajante/src/services/config/config_manager.cpp` in `saveSensorConfig` (Schleife ab ca. Z. 1722): `storageManager.getString` auf `NVS_SEN_TYPE` / `NVS_SEN_TYPE_OLD` vor `keyExists` → ESP-Log `[E] ... NOT_FOUND` bei fehlendem Slot.
+
+**Ziel:** Semantik unverändert, Logs sauber: vor `getString` `keyExists` prüfen oder `migrateReadString` wiederverwenden.
+
+**Akzeptanzkriterien:**
+- [ ] Keine wiederholten `Preferences` [E]-Zeilen für fehlende Type-Keys im normalen Happy-Path.
+- [ ] Keine Regression bei Migration Alt→Neu-Keys.
+- [ ] Commit nur auf `auto-debugger/work`.
+
+---
+
+## PKG-08 — Anzahl `offline_rules` vs. sichtbare Logik-Regeln (P2)
+
+**Hintergrund:** Config enthält `offline_rules` aus `config_builder._build_offline_rules` (Kappung `MAX_OFFLINE_RULES`); UI kann weniger Regeln anzeigen oder andere SSOT. Serial zeigt 6 Regeln, „nur eine gespeichert“ ist ein **Produkt/Erwartung**-Gap, kein Beweis für fehlgeschlagenen Austausch.
+
+**Ziel:** server-dev: Doku/Operator-Hinweis (welche Regeln in den Push einfließen); optional `reason_code`/Meta im Payload, ohne Breaking Change.
+
+**Akzeptanzkriterien:**
+- [ ] Verhalten dokumentiert oder telemetriert: „6 Regeln“ = welche Quellen (inkl. Zeitfenster- und effektiv `__twindow_on` mit GPIO 255).
+- [ ] Kein Breaking Change an MQTT-Schema ohne separates Gate.
+
+---
+
 ## Cross-PKG-Abhängigkeiten
 
 - PKG-01 -> PKG-02: Server muss zuerst den Push-Gate liefern, sonst bleibt Firmware im Oversize-Burst.
 - PKG-02 -> PKG-03: Heartbeat-Lane-Härtung erst sinnvoll bewertbar, wenn Config-Reject-Kette stabil ist.
 - PKG-01 + PKG-02 -> PKG-04: UI-Wiring erst nach stabiler, konsistenter Outcome-Kette finalisieren.
+- **PKG-06** unabhängig von Oversize-Work, kann parallel zu PKG-01/02 priorisiert werden (P0 Sicherheitsrelevanz).
 
 ---
 

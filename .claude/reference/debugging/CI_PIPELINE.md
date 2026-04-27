@@ -111,7 +111,7 @@ concurrency:
 | Modus | Trigger | Szenarien | Jobs |
 |-------|---------|-----------|------|
 | **Core (PR/Push)** | push, pull_request | 52 | 16 (1 build + 15 test) |
-| **Nightly (Full)** | schedule, workflow_dispatch | 173 (52 core + 121 extended) | 23 (16 core + 6 nightly + 1 summary) |
+| **Nightly (Full)** | schedule, workflow_dispatch | 191 (52 core + 139 extended) | 23 (16 core + 6 nightly + 1 summary) |
 
 **Core Jobs (bei jedem PR/Push, 52 Szenarien):**
 
@@ -423,7 +423,7 @@ wokwi-cli . --timeout 90000 --scenario tests/wokwi/scenarios/01-boot/boot_full.y
 # Oder via Makefile
 make wokwi-test-quick          # 3 Boot-Tests
 make wokwi-test-full           # 22 Core-Szenarien
-make wokwi-test-all            # Alle 173 Szenarien
+make wokwi-test-all            # Alle 191 Szenarien
 make wokwi-test-error-injection # 10 Error-Injection
 ```
 

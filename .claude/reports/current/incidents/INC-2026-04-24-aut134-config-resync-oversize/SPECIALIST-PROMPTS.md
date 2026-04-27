@@ -62,7 +62,7 @@ Heartbeat-Core unter 1024 stabilisieren, ohne ACK-/Registration-Verhalten zu bre
 
 ### Verifikation
 - `cd "El Trabajante" && pio run -e esp32_dev`
-- `cd "El Trabajante" && pio test -e native -f test_topic_builder`
+- `cd "El Trabajante" && pio test -e native -f test_topic_*`
 
 ### Abhängigkeit
 - PKG-02 startet nach PKG-01.
@@ -147,3 +147,60 @@ CID `f9f74534-5c3a-4735-876f-4c3132cec644` durch DB/Audit verfolgen und Lücken 
 
 ### Abhängigkeit
 - Kann nach PKG-01 parallel zu PKG-02/03 laufen.
+
+---
+
+## Rolle: `esp32-dev` — PKG-06 (parallel zu PKG-01/02 möglich, P0)
+
+### Git (Pflicht)
+- Arbeitsbranch: **`auto-debugger/work`**.
+- Vor allen Dateiänderungen: `git checkout auto-debugger/work` und mit `git branch --show-current` verifizieren.
+- Alle Commits dieses Auftrags nur auf diesem Branch; **kein** Commit direkt auf `master`; kein `git push --force` auf Shared-Remotes.
+
+### Auftrag
+`max_runtime_ms` (RuntimeProtection) darf bei R20-P11 „config unchanged, skipping“ **nicht** verworfen werden. Siehe `actuator_manager.cpp` ca. Z. 225–277: `soft_changed` ohne `runtime_protection`, Soft-Update kopiert `max_runtime_ms` nicht.
+
+### Scope
+- `El Trabajante/src/services/actuator/actuator_manager.cpp` (Hauptfix)
+- ggf. `El Trabajante/src/services/actuator/actuator_drivers/pump_actuator.cpp` (`setRuntimeProtection` nach in-place-Update)
+
+### Verifikation
+- Manuell/Mini-Test: JSON mit geändertem `max_runtime_ms`, sonst identischen Feldern; NVS + Treiber müssen neuen Wert annehmen; kein früher Return bei Z. 245–250.
+- `cd "El Trabajante" && pio run -e esp32_dev`
+
+### Abhängigkeit
+- Unabhängig von Oversize-Paketen; mit AUT-132/Config-Sync-Thema inhaltlich verwandt.
+
+---
+
+## Rolle: `esp32-dev` — PKG-07 (P2, Kosmetik/Diagnostik)
+
+### Git (Pflicht)
+- Wie oben, Branch **`auto-debugger/work`**.
+
+### Auftrag
+In `config_manager.cpp` `saveSensorConfig`/`saveSensor` Dedup-Schleife: `getString` für `sen_%d_type` / Legacy nur nach `keyExists` oder via `migrateReadString`, damit Serial nicht mit `[E] NOT_FOUND` zugespammt wird.
+
+### Scope
+- `El Trabajante/src/services/config/config_manager.cpp` (ca. Z. 1722–1740)
+
+### Verifikation
+- Config-Push-Szenario: keine wiederholten `Preferences.cpp:483` Fehler pro Sensor-Update im Happy-Path.
+- `cd "El Trabajante" && pio run -e esp32_dev`
+
+---
+
+## Rolle: `server-dev` — PKG-08 (P2, Erwartung/Transparenz)
+
+### Git (Pflicht)
+- Wie oben, Branch **`auto-debugger/work`**.
+
+### Auftrag
+Klären/dokumentieren, warum `offline_rules` im Config (bis zu `MAX_OFFLINE_RULES`) von der „Anzahl sichtbarer“ Logik-Regeln in der UI abweichen kann; optional Meta- oder Audit-Feld ohne Schema-Bruch (abstimmen mit `mqtt-dev` / TM).
+
+### Scope
+- `El Servador/god_kaiser_server/src/services/config_builder.py` (`_build_offline_rules`, Kappung)
+- ggf. kurze Doku: `docs/analysen/…` oder Server-interne README — nur nach Abgleich `forbidden` der Steuerdatei
+
+### Verifikation
+- Review-Abnahme: Operator versteht „6 im Log, 1 in UI“ ohne false-positive Bug-Report.

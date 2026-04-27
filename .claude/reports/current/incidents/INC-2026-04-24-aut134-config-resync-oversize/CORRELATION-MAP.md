@@ -71,11 +71,11 @@ Dedup wurde bewusst erst nach Feld-Korrelation angewendet.
 
 ## Cross-Layer-Karte (kompakt)
 
-1. CID `f9f74534-...` -> `intent_outcome rejected / VALIDATION_FAIL / payload too large 4164>4096`.
-2. Parallel/nah: AUT-134-Doku zeigt wiederholte Config-Responses inkl. 4370>4096.
-3. In Live-Serialfenstern treten zusätzliche Heartbeat-Oversize-Rejects 1225..1229>1024 auf.
+1. CID `f9f74534-...` -> `intent_outcome rejected / VALIDATION_FAIL / payload too large` (Evidence: 4164 vs. `max=4096` am älteren Build; Repo-IST siehe `CONFIG_PAYLOAD_MAX_LEN`).
+2. Parallel/nah: AUT-134-Doku zeigt wiederholte Config-Responses inkl. 4370 über damaligem Limit (weiterhin zwingend serverseitig klären, wenn Payload > aktuellem `CONFIG_PAYLOAD_MAX_LEN`).
+3. In Live-Serialfenstern treten zusätzliche Heartbeat-Oversize-Rejects auf (Evidence: `payload_len=1225..1229` vs. früherem 1024-Budget; Repo-IST: `PUBLISH_PAYLOAD_MAX_LEN`).
 4. Docker-Server-Logs zeigen parallel die Config-/Intent-Verarbeitung auf derselben Device-Familie, jedoch ohne den exakten User-CID-Schlüssel im gezogenen Tail-Fenster.
-5. Diese Ketten teilen das Muster "Payload-Budget verletzt", aber auf **zwei unterschiedlichen Limits** (4096 vs 1024) und dürfen nicht blind als identischer Defekt behandelt werden.
+5. Diese Ketten teilen das Muster "Payload-Budget verletzt", aber auf **zwei unterschiedlichen Lanes (Config-Ingress vs. Heartbeat-Publish)** mit jeweils eigenem `max` — nicht blind als identischer Defekt behandeln.
 
 ---
 

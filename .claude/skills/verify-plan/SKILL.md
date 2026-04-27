@@ -293,6 +293,13 @@ Für jeden erwarteten Output:
 |-----|---------------------------------------------------------------|
 | PKG-01 | … |
 
+### PKG → Linear-Identifier (optional, Pflicht wenn `LINEAR-ISSUES.md` im Run-Ordner existiert)
+| PKG | Linear (z. B. AUT-201) | Anmerkung (Titel / Relation) |
+|-----|------------------------|------------------------------|
+| PKG-01 | … | … |
+
+Wenn im **gebundenen** Artefaktordner eine Datei **`LINEAR-ISSUES.md`** existiert: diese Tabelle **mit den dortigen IDs abgleichen** — keine PKG-Zeile ohne passende Linear-ID; bei Abweichung Drift im Chat und in der Delta-Spalte benennen.
+
 ### Cross-PKG-Abhängigkeiten
 - PKG-XX → PKG-YY: [ein Satz: warum / was zuerst]
 
@@ -300,7 +307,7 @@ Für jeden erwarteten Output:
 - [Was Implementierung verzögert; fehlende HW/Evidenz; externe Abhängigkeit]
 ```
 
-**Mindestinhalt:** (a) pro betroffenem Paket mindestens eine **Delta**-Zeile, (b) **empfohlene Dev-Rolle** pro PKG mit Umsetzungsanteil, (c) **Kanten** zwischen PKGs wo relevant, (d) alle **BLOCKER** explizit. Formulierungen so, dass **`auto-debugger`** den Block **1:1** zum Patchen von `TASK-PACKAGES.md` verwenden kann (konkrete Pfade, konkrete Testkommandos).
+**Mindestinhalt:** (a) pro betroffenem Paket mindestens eine **Delta**-Zeile, (b) **empfohlene Dev-Rolle** pro PKG mit Umsetzungsanteil, (c) **Kanten** zwischen PKGs wo relevant, (d) alle **BLOCKER** explizit, (e) wenn `LINEAR-ISSUES.md` im Run-Ordner liegt: zusätzlich die Unterüberschrift und Tabelle **PKG → Linear-Identifier** vollständig ausfüllen (keine PKG-Referenz ohne abgleichbare Linear-ID). Formulierungen so, dass **`auto-debugger`** den Block **1:1** zum Patchen von `TASK-PACKAGES.md` verwenden kann (konkrete Pfade, konkrete Testkommandos).
 
 **Bei Test-Flow-Plan (F1 in flow_reference.md):** Zusätzliche Sektion hinzufügen:
 

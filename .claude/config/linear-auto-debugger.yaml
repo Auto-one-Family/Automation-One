@@ -1,0 +1,27 @@
+# Linear — auto-debugger (repo-lokal, keine Secrets)
+# API-Key nur über Umgebung: LINEAR_API_KEY (siehe .env.example)
+#
+# Team-/Label-Namen an den eigenen Linear-Workspace anpassen (z. B. Team "AutoOne").
+# IDs aus Linear: Issue/Label/Project → URL oder Entwicklereinstellungen / API.
+
+linear_api_url: "https://api.linear.app/graphql"
+
+# Team: Anzeigename, Key oder UUID (Skript löst Namen/Key über teams-Query auf)
+team: "AutoOne"
+
+# Optional: Standard-Projekt (Name, Slug oder UUID)
+default_project: ""
+
+# Optional: Start-Workflow-Status für neu angelegte Debugger-Issues (Name oder UUID)
+default_state: "Backlog"
+
+# Optional: Vorgegebenes Parent-Epic bzw. großes Forensik-Parent (Issue-Identifier z. B. AUT-100 oder UUID)
+parent_epic_id: ""
+
+# Label-Namen (Linear), die an neue Debugger-Issues gehängt werden — müssen im Workspace existieren
+labels:
+  auto_debugger: "auto-debugger"
+  bug: "bug"
+  resilience: "resilience"
+  verify_plan: "verify-plan"
+  blocked: "blocked"

@@ -13,9 +13,9 @@
 
 ### ✅ Bestätigt
 - `auto-debugger/work` ist aktiver Branch und als Pflichtbranch korrekt.
-- Firmware-Limits sind real: Config-Ingress `4096`, Publish-Lane `1024`.
+- Firmware-Limits (Repo-IST **2026-04-24, Nachlauf**): `El Trabajante/src/tasks/config_update_queue.h` → `CONFIG_PAYLOAD_MAX_LEN = 4352`; `El Trabajante/src/tasks/publish_queue.h` → `PUBLISH_PAYLOAD_MAX_LEN = 1536`. Incident-Live-Evidence (4164/4096, 4370/4096, HB 1225/1024) bezieht sich auf **historische/ältere** Grenzen bzw. ältere Builds — Befunde bleiben für Trigger-/Forensik-Logik valide, absolute Zahlen müssen mit Header-`max=` abgeglichen werden. **4370 B > 4352** bleibt ein belastbares Oversize-Szenario; **4164 B** wäre mit 4352-Limit auf der Firmware-Seite nicht mehr abgewiesen.
 - Drift-getriebener Auto-Push-Pfad in `heartbeat_handler.py` ist vorhanden.
-- Relevante Testpfade existieren (`test_heartbeat_handler.py`, `test_esp_service_mock_config_response.py`, `useESPStatus.test.ts`, `test_topic_builder.cpp`).
+- Relevante Testpfade existieren (`test_heartbeat_handler.py`, `test_esp_service_mock_config_response.py`, `useESPStatus.test.ts`, Native-Filter `test_topic_*` in `El Trabajante/test/test_infra/test_topic_builder.cpp` gemäß `platformio.ini`-Kommentar).
 - Zielkonflikt "Stabilität zuerst, dann Split/Utilization" ist mit TM-Kontext kompatibel.
 
 ### ⚠️ Korrekturen nötig (eingearbeitet)
@@ -36,6 +36,10 @@
 ### Zusammenfassung für TM
 Der Plan ist ausführbar, wenn zuerst der serverseitige Budget-Gate (PKG-01) umgesetzt wird und erst danach Firmware/Frontend folgen. Die Post-Verify-Korrekturen sind bereits in Paketreihenfolge, Testbefehlen und Rollenaufteilung eingearbeitet. Hauptblocker bleibt die unvollständige Docker-Forensik für exakt dieselbe Zeitachse.
 
+### Nachlauf 2026-04-24 (Orchestrator-Steuerlauf, Repo-Gegenprüfung)
+- `pio test`-Korrektur: `pio test -e native -f test_topic_*` (nicht `test_topic_builder`).
+- `LINEAR-SYNC-MANIFEST.json` im Incident-Ordner ergänzt (konsistent mit `LINEAR-ISSUES.md` AUT-164..166).
+
 ---
 
 ## OUTPUT FÜR ORCHESTRATOR (auto-debugger)
@@ -44,7 +48,7 @@ Der Plan ist ausführbar, wenn zuerst der serverseitige Budget-Gate (PKG-01) umg
 | PKG | Delta (Pfad, Testbefehl/-pfad, Reihenfolge, Risiko, HW-Gate, verworfene Teile) |
 |-----|-----------------------------------------------------------------------------------|
 | PKG-01 | Pfade auf `heartbeat_handler.py` + `esp_service.py` fokussiert; Testkommandos auf existierende pytest-Dateien präzisiert; Reihenfolge auf Startpaket gesetzt; Risiko: ohne Budget-Gate bleibt Oversize-Loop. |
-| PKG-02 | Correlation-Echo als explizites AK ergänzt; Scope auf Config-Ingress-Pfade begrenzt; HW-Gate: ESP-Build Pflicht; Risiko: ohne Echo bleibt Korrelation lückenhaft. |
+| PKG-02 | Correlation-Echo als explizites AK ergänzt; Scope auf Config-Ingress-Pfade begrenzt; Reason-`max=` folgt `CONFIG_PAYLOAD_MAX_LEN` (Repo-IST 4352); HW-Gate: ESP-Build Pflicht; Risiko: ohne Echo bleibt Korrelation lückenhaft. |
 | PKG-03 | Von Einzelrolle auf Co-Ownership (`esp32-dev` + `mqtt-dev`) geändert; Ziel klar auf 1024-HB-Lane; Live-HW-Gate (10min COM3) ergänzt; verworfener Teil: pauschale Topic-Umbauten ohne Evidence. |
 | PKG-04 | Start erst nach PKG-01/02; Scope auf bestehende UI-Pfade ohne Parallel-UI; Testpfade auf vorhandene Unit-Tests korrigiert. |
 | PKG-05 | Neu ergänzt: optionale DB-Stichprobe für CID-Vollkette; kein Produktcode, nur Evidence-Nachzug. |

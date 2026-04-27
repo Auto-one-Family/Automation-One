@@ -5,7 +5,8 @@ description: |
   Start immer ueber Steuerdatei unter .claude/auftraege/auto-debugger/inbox/.
   Verwenden bei: auto-debugger, Incident-Artefakte, Korrelation, TASK-PACKAGES,
   artefact_improvement, verify-plan-Gate vor Implementierung,
-  VERIFY-PLAN-REPORT.md, Post-Verify TASK-PACKAGES mutieren, SPECIALIST-PROMPTS rollenweise, Dev-Handoff.
+  VERIFY-PLAN-REPORT.md, Post-Verify TASK-PACKAGES mutieren, SPECIALIST-PROMPTS rollenweise, Dev-Handoff,
+  Linear-first, LINEAR-SYNC-MANIFEST, LINEAR-ISSUES.md, Resilienz-Check.
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash
 user-invocable: true
 argument-hint: "Pfad zur Steuerdatei oder @inbox/STEUER-….md"
@@ -14,7 +15,35 @@ argument-hint: "Pfad zur Steuerdatei oder @inbox/STEUER-….md"
 # Auto-Debugger Skill
 
 > **Agent:** `.claude/agents/auto-debugger.md`  
-> **Konzept:** `docs/analysen/KONZEPT-auto-debugger-frontend-flow-api-alertcenter-2026-04-09.md`
+> **Konzept:** `docs/analysen/KONZEPT-auto-debugger-frontend-flow-api-alertcenter-2026-04-09.md`  
+> **Linear / Konfiguration:** `.claude/reference/linear-auto-debugger.md`, `.claude/config/linear-auto-debugger.yaml`  
+> **Headless-Skript:** `scripts/linear/auto_debugger_sync.py`
+
+---
+
+## 0. Linear-first (kanonische SSOT)
+
+- **Linear** ist die **kanonische** Oberfläche für Status, Verknüpfungen, Historie und nachvollziehbare Kommentare (Evidence gekürzt + **vollständiger Repo-Pfad** zur Rohdatei).
+- **Lokale** Markdown-Artefakte unter `.claude/reports/current/incidents/` bzw. `auto-debugger-runs/` bleiben der **Evidence-Store**; jedes nennenswerte Ergebnis wird **zusätzlich** in Linear gespiegelt (Kommentar oder Issue-Beschreibung).
+- **Ausnahme:** `linear_local_only: true` in der Steuerdatei (mit Begründung in `scope`) — dann entfallen Linear-Pflichtkommentare für diesen Lauf, soweit ausgenommen.
+- **Dedup:** Vor Anlage neuer Issues: Linear durchsuchen (Cursor: MCP **user-linear** `list_issues` / Query aus Steuerfeld `linear_dedup_search_query`; headless: `python scripts/linear/auto_debugger_sync.py search --query "…"`). Treffer **verknüpfen** (`relatedTo` / `duplicateOf`) oder **Non-Duplikat** kurz begründen.
+- **Idempotenz:** Pro Run `LINEAR-SYNC-MANIFEST.json` im **gebundenen** Artefaktordner (Parent-/Child-IDs, Kommentar-Hashes) — kein Issue-Spam bei Wiederholung. Konvention: `.claude/reference/linear-auto-debugger.md`.
+- **PKG ↔ Linear:** Optional `LINEAR-ISSUES.md` (Tabelle PKG → Linear-Identifier); verify-plan muss dieselben IDs kennen, wenn die Datei existiert (Skill **verify-plan**).
+
+### TM-parallele Phasen A–F (Kurz)
+
+| Phase | Linear-Pflicht (wenn nicht `linear_local_only`) |
+|-------|--------------------------------------------------|
+| **A** Volldiagnose | Parent-/Run-Issue: Kommentar Lagebild + Hypothesen + Pfade zu `INCIDENT-LAGEBILD.md` / `CORRELATION-MAP.md` |
+| **B** Spezial-Issues | Sub-Issues je klarer Frage; `parentId`, Labels; vorher Dedup |
+| **C** Plan / PKG | Kommentar mit Checkliste; gleiche PKG-Nummern wie `TASK-PACKAGES.md` |
+| **D** verify-plan | Kommentar `VERIFY-PLAN: passed` oder `failed` + BLOCKER-IDs; Verweis auf `VERIFY-PLAN-REPORT.md` |
+| **E** Umsetzung | (Dev-Agenten) Abschlusskommentar mit Diff-/Pfad-Evidenz |
+| **F** Live-Verifikation | Kommentar-Vorlage für Robin (Schritte, erwartete Signale) |
+
+### Resilienz-Check (Querschnitt)
+
+Wenn Symptom **Zustand, Sync, Lifecycle, Reconnect, NVS, MQTT-Offline, Stromausfall** berührt: **expliziter Abschnitt** „Resilienz-Check“ im Lagebild oder im Linear-Parent-Kommentar — kein „sicher“ ohne **Code-/State-Machine-Beleg** (Pfade, Symbole, kurze Zitate).
 
 ---
 
@@ -50,6 +79,11 @@ argument-hint: "Pfad zur Steuerdatei oder @inbox/STEUER-….md"
 | `incident_id` | bei `incident` oder `both` — Ziel `.claude/reports/current/incidents/<id>/` |
 | `run_id` | Ausgabe `.claude/reports/current/auto-debugger-runs/<run_id>/` fuer Pakete/Verify im Artefakt-Modus |
 | `order` | bei `both`: `incident_first` (Default) oder `artefact_first` |
+| `linear_local_only` | optional: `true` — kein Linear-Pflichtspiegel (nur mit Begründung in `scope`) |
+| `linear_epic_issue_id` / `linear_parent_issue_id` | optional: bestehendes Epic/Parent (Identifier oder URL-Slug) |
+| `linear_run_issue_id` | optional: bestehendes Run-Issue statt neuem Parent |
+| `linear_target_labels` | optional: kommagetrennte Label-Namen (oder leer) |
+| `linear_dedup_search_query` | optional: Suchstring vor Issue-Erstellung |
 
 **Startpattern (Robin):** Steuerdatei im Chat referenzieren, z. B. `@.claude/auftraege/auto-debugger/inbox/STEUER-….md`
 
@@ -75,6 +109,8 @@ Unter `.claude/reports/current/incidents/<incident_id>/`:
 - `TASK-PACKAGES.md`
 - `SPECIALIST-PROMPTS.md`
 - `VERIFY-PLAN-REPORT.md`
+- `LINEAR-SYNC-MANIFEST.json` (Idempotenz / Linear-IDs; vom Orchestrator gepflegt)
+- `LINEAR-ISSUES.md` (optional; PKG → Linear-Identifier — **gleiche** IDs wie verify-plan/TASK-PACKAGES)
 
 **Clustering-Reihenfolge** fuer Korrelation (nicht mischen ohne Evidence):
 
@@ -143,5 +179,6 @@ Der Spezialisten-Prompt für `server-dev` verweist dann explizit auf **PKG-01 (n
 
 - Abweichungen zwischen Konzeptbericht und Repo-Ist: im **VERIFY-PLAN-REPORT** festhalten; Repo-Ist gewinnt.  
 - Playwright/E2E-Flows fuer Alert-Center: separate Roadmap-Phase laut Konzept — nicht Teil dieses Skills.
+- **Tooling:** Linear-Schreibzugriff in Cursor typischerweise über MCP **user-linear**; headless über `scripts/linear/auto_debugger_sync.py` (stdlib). Keine erfundenen Topic-/Dateinamen — nur repo-belegte Pfade.
 
 **Struktur von `VERIFY-PLAN-REPORT.md`:** Sollte den fachlichen Verify-Teil und denselben Inhalt wie der Chat-Block **OUTPUT FÜR ORCHESTRATOR (auto-debugger)** konsistent abbilden (oder darauf verweisen), damit Post-Verify-Patches an `TASK-PACKAGES.md` nachvollziehbar bleiben.

@@ -1,0 +1,15 @@
+{
+  "run_id": "aut134-config-resync-2026-04-24",
+  "incident_id": "INC-2026-04-24-aut134-config-resync-oversize",
+  "parent": {
+    "identifier": "AUT-134",
+    "url": "https://linear.app/autoone/issue/AUT-134/ea-132-config-resync-gezielt-statt-flood-heartbeat-count-mismatch"
+  },
+  "children": {
+    "PKG-06": { "identifier": "AUT-164" },
+    "PKG-07": { "identifier": "AUT-165" },
+    "PKG-08": { "identifier": "AUT-166" }
+  },
+  "comment_sha256": {},
+  "note": "Sub-Issues laut LINEAR-ISSUES.md; Idempotenz: vor Issue-Anlage zusaetzlich `linear_dedup_search_query` / MCP search nutzen."
+}

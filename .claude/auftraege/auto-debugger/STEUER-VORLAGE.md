@@ -13,6 +13,12 @@ forbidden: |
   keine direkten Commits auf master im Rahmen dieses Laufs (nur Branch auto-debugger/work); …
 done_criteria: |
   Messbar: z. B. alle P0-Luecken aus Steuerdatei geschlossen oder als BLOCKER dokumentiert.
+linear_local_only: false          # true = kein Linear-Pflichtspiegel (nur mit Begruendung in scope)
+linear_epic_issue_id: ""          # optional: Epic/Parent-Identifier (z. B. AUT-100)
+linear_parent_issue_id: ""      # optional: direktes Parent-Issue
+linear_run_issue_id: ""         # optional: bestehendes Run-Issue statt neuem Parent
+linear_target_labels: ""       # optional: kommagetrennte Label-Namen fuer neue Issues
+linear_dedup_search_query: ""   # optional: Suchstring vor Issue-Erstellung (Dedup)
 ---
 
 # Steuerdatei — auto-debugger
@@ -33,6 +39,14 @@ done_criteria: |
 | `forbidden` | ja | Verbotenes |
 | `done_criteria` | ja | Abnahme |
 | `order` | bei both | `incident_first` (Default) oder `artefact_first` |
+| `linear_local_only` | nein | `true`: lokale Artefakte ohne Linear-Pflicht (Begruendung in `scope`) |
+| `linear_epic_issue_id` | nein | Epic oder grosses Parent-Issue (Identifier) |
+| `linear_parent_issue_id` | nein | Direktes Parent-Issue fuer Sub-Issues |
+| `linear_run_issue_id` | nein | Bereits angelegtes Run-Issue wiederverwenden |
+| `linear_target_labels` | nein | Liste zusaetzlicher Linear-Label-Namen |
+| `linear_dedup_search_query` | nein | String fuer Dedup-Suche vor Neuanlage |
+
+**Linear / Evidence:** Siehe `.claude/reference/linear-auto-debugger.md`, Konfiguration `.claude/config/linear-auto-debugger.yaml`, Skript `scripts/linear/auto_debugger_sync.py`. Optional im Run-Ordner: `LINEAR-ISSUES.md` (PKG → Linear-ID) — **dieselben** IDs in verify-plan-OUTPUT referenzieren.
 
 ## Gate: db-inspector (Schema / Migration / DB-Invarianten)
 
