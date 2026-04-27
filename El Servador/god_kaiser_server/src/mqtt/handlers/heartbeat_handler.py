@@ -25,7 +25,7 @@ import json
 import time as time_module
 
 from cachetools import TTLCache
-from ...core.error_codes import ValidationErrorCode
+from ...core.error_codes import ESP32ApplicationError, ValidationErrorCode
 from ...core.config import get_settings
 from ...core.logging_config import get_logger
 from ...core.task_registry import create_tracked_task
@@ -2086,6 +2086,21 @@ class HeartbeatHandler:
                         f"Auto config push failed for {esp_device_id}: "
                         f"{result.get('message', 'unknown error')}"
                     )
+                    # AUT-134: Cooldown was written in _has_pending_config before this task
+                    # runs; if the frame cannot fit the ESP ingress budget, clear the
+                    # premature "push scheduled" metadata so a future resync is possible.
+                    if result.get("error_code") == ESP32ApplicationError.PAYLOAD_TOO_LARGE:
+                        dev = await esp_repo.get_by_device_id(esp_device_id)
+                        if dev:
+                            meta = dict(dev.device_metadata or {})
+                            meta.pop("config_push_sent_at", None)
+                            meta["config_push_oversize_blocked_at"] = int(time_module.time())
+                            meta["config_push_oversize_reason_code"] = reason_code
+                            dev.device_metadata = meta
+                            flag_modified(dev, "device_metadata")
+                        await session.commit()
+                        # Unblock zone-resync / adoption gate: no config is in flight.
+                        self._config_push_pending_esps.discard(esp_device_id)
 
         except Exception as e:
             logger.error(

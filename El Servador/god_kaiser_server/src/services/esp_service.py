@@ -23,6 +23,7 @@ References:
 
 import hashlib
 import json
+import time
 import uuid
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -39,6 +40,8 @@ from .event_contract_serializers import serialize_config_response_event
 
 logger = get_logger(__name__)
 
+# El Trabajante: CONFIG_PAYLOAD_MAX_LEN in config_update_queue.h (ingress rejects if >=)
+ESP_COMBINED_CONFIG_MQTT_MAX_BYTES = 4352
 
 # =============================================================================
 # Discovery Rate Limiter
@@ -514,7 +517,7 @@ class ESPService:
             - message: str
             - error_code: int (if failed)
         """
-        from ..core.error_codes import ConfigErrorCode
+        from ..core.error_codes import ConfigErrorCode, ESP32ApplicationError, MQTTErrorCode
 
         correlation_id = str(uuid.uuid4())
         resolved_generation = (
@@ -600,6 +603,51 @@ class ESPService:
             resolved_fingerprint[:12],
             json.dumps(config, default=str),
         )
+        wire_for_size = {**config_with_correlation, "timestamp": int(time.time())}
+        try:
+            wire_len = len(json.dumps(wire_for_size, default=str).encode("utf-8"))
+        except Exception as ser_err:
+            logger.error("Config JSON serialization failed for %s: %s", device_id, ser_err)
+            result["message"] = str(ser_err)
+            result["error_code"] = MQTTErrorCode.PAYLOAD_SERIALIZATION_FAILED
+            return result
+
+        if wire_len >= ESP_COMBINED_CONFIG_MQTT_MAX_BYTES:
+            logger.error(
+                "AUT-134: Config publish blocked for %s: wire_len=%d >= ESP limit %d (reason=%s)",
+                device_id,
+                wire_len,
+                ESP_COMBINED_CONFIG_MQTT_MAX_BYTES,
+                reason_code,
+            )
+            result["message"] = (
+                f"Config JSON too large for ESP ingress ({wire_len} bytes >= "
+                f"{ESP_COMBINED_CONFIG_MQTT_MAX_BYTES})"
+            )
+            result["error_code"] = ESP32ApplicationError.PAYLOAD_TOO_LARGE
+            result["sent"] = False
+            try:
+                audit_repo = AuditLogRepository(self.esp_repo.session)
+                await audit_repo.create(
+                    event_type=AuditEventType.CONFIG_FAILED,
+                    severity=AuditSeverity.ERROR,
+                    source_type=AuditSourceType.MQTT,
+                    source_id=device_id,
+                    status="failed",
+                    message=result["message"],
+                    correlation_id=correlation_id,
+                    details={
+                        "esp_id": device_id,
+                        "aut134": "config_wire_exceeds_esp_ingress",
+                        "wire_len": wire_len,
+                        "max_bytes": ESP_COMBINED_CONFIG_MQTT_MAX_BYTES,
+                        "reason_code": reason_code,
+                    },
+                )
+            except Exception as audit_err:
+                logger.warning("Failed to write audit for config oversize: %s", audit_err)
+            return result
+
         success = self.publisher.publish_config(
             esp_id=device_id,
             config=config_with_correlation,

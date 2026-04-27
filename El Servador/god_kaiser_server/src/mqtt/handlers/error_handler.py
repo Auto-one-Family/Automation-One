@@ -28,6 +28,7 @@ Error Codes:
 - Uses ConfigErrorCode for ESP device lookup errors
 """
 
+import asyncio
 from typing import Optional
 
 from ...core.esp32_error_mapping import get_error_info
@@ -40,6 +41,7 @@ from ...core.metrics import increment_contract_unknown_code, increment_esp_error
 from ...core.resilience import ServiceUnavailableError
 from ...db.repositories import AuditLogRepository, ESPRepository
 from ...db.session import resilient_session
+from ...services.ai_service import ErrorAnalysisRequest, ai_service
 from ...services.event_contract_serializers import serialize_error_event
 from ...services.system_event_contract import canonicalize_error_event
 from ..topics import TopicBuilder
@@ -195,6 +197,16 @@ class ErrorEventHandler:
                     # Commit transaction
                     await session.commit()
 
+                    # AI enrichment — fire-and-forget, non-blocking
+                    if ai_service.is_available():
+                        asyncio.create_task(
+                            _enrich_error_with_ai(
+                                error_code_int,
+                                esp_id_str,
+                                payload.get("context", {}),
+                            )
+                        )
+
                     # Update Prometheus metrics for Grafana alerting
                     increment_esp_error(esp_id_str)
 
@@ -315,6 +327,31 @@ class ErrorEventHandler:
             }
 
         return {"valid": True, "error": "", "error_code": ValidationErrorCode.NONE}
+
+
+async def _enrich_error_with_ai(error_code: int, esp_id: str, context: dict) -> None:
+    """
+    Fire-and-forget AI enrichment for error events.
+
+    Non-critical: exceptions are swallowed to never affect the main handler flow.
+    """
+    try:
+        finding = await ai_service.analyze_error(
+            ErrorAnalysisRequest(
+                error_code=error_code,
+                context={"esp_id": esp_id, **context},
+                recent_errors=[],
+                system_state={},
+            )
+        )
+        logger.info(
+            "AI finding for error %d (ESP %s): %s",
+            error_code,
+            esp_id,
+            finding.root_cause,
+        )
+    except Exception:
+        logger.debug("AI error enrichment failed (non-critical)", exc_info=True)
 
 
 # Global handler instance (follows sensor_handler pattern)

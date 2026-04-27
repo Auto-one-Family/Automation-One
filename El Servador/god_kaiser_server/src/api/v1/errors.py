@@ -36,6 +36,7 @@ from ...schemas.error_schemas import (
     ErrorLogResponse,
     ErrorSummaryResponse,
 )
+from ...services.ai_service import ErrorAnalysisRequest, ErrorAnalysisFinding, ai_service
 from ..deps import ActiveUser, DBSession
 
 logger = get_logger(__name__)
@@ -447,3 +448,62 @@ async def get_error_code_info(
         recoverable=error_info.get("recoverable", True),
         user_action_required=error_info.get("user_action_required", False),
     )
+
+
+# =============================================================================
+# AI Error Analysis Endpoint
+# =============================================================================
+
+
+@router.get(
+    "/codes/{error_code}/analysis",
+    response_model=ErrorAnalysisFinding,
+    summary="Get AI analysis for error code",
+    description="Get AI-powered root cause analysis and recommendations for a specific error code",
+)
+async def get_error_code_analysis(
+    error_code: int,
+    current_user: ActiveUser,
+    esp_id: Optional[str] = Query(default=None),
+    recent_errors: Optional[str] = Query(
+        default=None,
+        description="Comma-separated list of recent error codes",
+    ),
+) -> ErrorAnalysisFinding:
+    """
+    Get AI-powered analysis for a specific error code.
+
+    Uses the AI service to provide root cause analysis, recommended actions,
+    and confidence scores for the given error code.
+
+    Args:
+        error_code: Error code to analyze (e.g., 1026)
+        esp_id: Optional ESP device ID for context
+        recent_errors: Optional comma-separated list of recent error codes
+
+    Returns:
+        AI analysis finding with root cause and recommendations
+
+    Raises:
+        HTTPException: 503 if AI service is not configured
+    """
+    if not ai_service.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail="AI service not configured (ANTHROPIC_API_KEY missing)",
+        )
+
+    recent: list[int] = []
+    if recent_errors:
+        try:
+            recent = [int(x.strip()) for x in recent_errors.split(",") if x.strip()]
+        except ValueError:
+            pass
+
+    request = ErrorAnalysisRequest(
+        error_code=error_code,
+        context={"esp_id": esp_id} if esp_id else {},
+        recent_errors=recent,
+        system_state={},
+    )
+    return await ai_service.analyze_error(request)

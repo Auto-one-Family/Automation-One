@@ -16,7 +16,12 @@ Issue Categories:
 - System Issues: MQTT disconnect, high error rate, memory issues
 """
 
-from typing import Any
+import json
+import logging
+import re
+from typing import Any, Literal, Optional
+
+from pydantic import BaseModel
 
 from ..core.api_client import APIError, GodKaiserClient
 from ..core.base_plugin import (
@@ -28,6 +33,65 @@ from ..core.base_plugin import (
     plugin_metadata,
 )
 from ..core.context import AutoOpsContext
+
+_logger = logging.getLogger(__name__)
+
+
+class DebugFinding(BaseModel):
+    root_cause: str
+    affected_components: list[str]
+    code_references: list[dict]  # {"file": str, "line": int, "symbol": str}
+    recommended_actions: list[str]
+    auto_fix_applied: bool = False
+    fix_description: Optional[str] = None
+    confidence: Literal["high", "medium", "low"] = "medium"
+    evidence: list[str] = []
+
+
+_DEBUG_TOOLS = [
+    {
+        "name": "get_esp_error_history",
+        "description": "Lese die letzten N Error-Events eines ESPs aus audit_logs",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "esp_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 50},
+            },
+            "required": ["esp_id"],
+        },
+    },
+    {
+        "name": "get_logic_rules_for_esp",
+        "description": "Alle aktiven Logic Rules die diesen ESP als Condition-Source oder Action-Target haben",
+        "input_schema": {
+            "type": "object",
+            "properties": {"esp_id": {"type": "string"}},
+            "required": ["esp_id"],
+        },
+    },
+    {
+        "name": "get_offline_mode_state",
+        "description": "Aktueller Online/Offline-Status eines ESPs inklusive letzter Heartbeat-Zeit",
+        "input_schema": {
+            "type": "object",
+            "properties": {"esp_id": {"type": "string"}},
+            "required": ["esp_id"],
+        },
+    },
+    {
+        "name": "get_sensor_last_values",
+        "description": "Letzte Messwerte aller Sensoren eines ESPs",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "esp_id": {"type": "string"},
+                "hours": {"type": "integer", "default": 24},
+            },
+            "required": ["esp_id"],
+        },
+    },
+]
 
 
 class DiagnosticIssue:
@@ -159,6 +223,21 @@ class DebugFixPlugin(AutoOpsPlugin):
             )
 
         # =============================================
+        # Phase 1.5: LLM Deep Analysis (optional)
+        # =============================================
+        from ...services.ai_service import ai_service as _ai_svc
+
+        llm_finding: Optional[DebugFinding] = None
+        if _ai_svc.is_available() and all_issues:
+            try:
+                esp_id = getattr(all_issues[0], "device_id", None) or context.data.get(
+                    "esp_id", "unknown"
+                )
+                llm_finding = await self._run_llm_debug(esp_id, all_issues, client)
+            except Exception:
+                _logger.debug("LLM debug failed (non-critical)", exc_info=True)
+
+        # =============================================
         # Phase 2: FIX - Auto-fix what's safe
         # =============================================
         auto_fixable = [i for i in all_issues if i.auto_fixable]
@@ -234,20 +313,24 @@ class DebugFixPlugin(AutoOpsPlugin):
         if not all_issues:
             summary_parts = ["System is healthy - no issues found"]
 
+        result_data: dict = {
+            "total_issues": total,
+            "auto_fixed": fixed,
+            "remaining": remaining,
+            "issues_by_category": self._count_by_category(all_issues),
+            "issues_by_severity": self._count_by_severity(all_issues),
+            "fixed_issues": fixed_issues,
+        }
+        if llm_finding is not None:
+            result_data["llm_finding"] = llm_finding.model_dump()
+
         return PluginResult(
             success=len(errors) == 0,
             summary=", ".join(summary_parts),
             actions=actions,
             errors=errors,
             warnings=warnings,
-            data={
-                "total_issues": total,
-                "auto_fixed": fixed,
-                "remaining": remaining,
-                "issues_by_category": self._count_by_category(all_issues),
-                "issues_by_severity": self._count_by_severity(all_issues),
-                "fixed_issues": fixed_issues,
-            },
+            data=result_data,
         )
 
     # =========================================================================
@@ -531,6 +614,124 @@ class DebugFixPlugin(AutoOpsPlugin):
             return False
 
         return False
+
+    # =========================================================================
+    # LLM Debug Methods
+    # =========================================================================
+
+    async def _execute_debug_tool(
+        self,
+        tool_name: str,
+        tool_input: dict,
+        client: "GodKaiserClient",
+    ) -> str:
+        """Execute a debug tool call and return JSON-serialised result."""
+        try:
+            if tool_name == "get_esp_error_history":
+                esp_id = tool_input["esp_id"]
+                limit = tool_input.get("limit", 50)
+                response = await client.list_audit_logs(limit=limit)
+                logs = self._extract_list(response, "logs")
+                return json.dumps(logs[:limit])
+
+            if tool_name == "get_logic_rules_for_esp":
+                esp_id = tool_input["esp_id"]
+                response = await client.list_logic_rules()
+                rules = self._extract_list(response, "rules")
+                esp_rules = [r for r in rules if esp_id in json.dumps(r)]
+                return json.dumps(esp_rules[:10])
+
+            if tool_name == "get_offline_mode_state":
+                esp_id = tool_input["esp_id"]
+                device = await client.get_device(esp_id)
+                payload = device if isinstance(device, dict) else {}
+                return json.dumps(
+                    {
+                        "status": payload.get("status", "unknown"),
+                        "last_seen": payload.get("last_seen"),
+                    }
+                )
+
+            if tool_name == "get_sensor_last_values":
+                esp_id = tool_input["esp_id"]
+                response = await client.list_sensors(esp_id=esp_id)
+                sensors = self._extract_list(response, "sensors")
+                return json.dumps(sensors[:20])
+
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+        return json.dumps({"error": f"unknown tool: {tool_name}"})
+
+    async def _run_llm_debug(
+        self,
+        esp_id: str,
+        issues: list,  # list[DiagnosticIssue]
+        client: "GodKaiserClient",
+    ) -> Optional[DebugFinding]:
+        """Run an agentic LLM debug loop using Anthropic tool use."""
+        from anthropic import AsyncAnthropic
+
+        anthropic_client = AsyncAnthropic()
+        issue_descriptions = [getattr(i, "description", str(i)) for i in issues]
+
+        messages: list[dict] = [
+            {
+                "role": "user",
+                "content": (
+                    f"Analysiere ESP {esp_id}.\n"
+                    f"Bekannte Probleme: {issue_descriptions}\n"
+                    "Nutze die verfuegbaren Tools um Evidenz zu sammeln, "
+                    "dann gib einen strukturierten Befund zurueck."
+                ),
+            }
+        ]
+
+        max_iterations = 5
+        for _ in range(max_iterations):
+            response = await anthropic_client.messages.create(
+                model="claude-opus-4-7",
+                max_tokens=4096,
+                tools=_DEBUG_TOOLS,
+                messages=messages,
+            )
+
+            if response.stop_reason == "end_turn":
+                for block in reversed(response.content):
+                    if hasattr(block, "text") and block.text:
+                        try:
+                            json_match = re.search(r"\{.*\}", block.text, re.DOTALL)
+                            if json_match:
+                                return DebugFinding(**json.loads(json_match.group()))
+                        except Exception:
+                            pass
+                        return DebugFinding(
+                            root_cause=block.text[:500],
+                            affected_components=[f"ESP {esp_id}"],
+                            code_references=[],
+                            recommended_actions=["Manuelle Analyse empfohlen"],
+                            evidence=issue_descriptions,
+                        )
+                break
+
+            if response.stop_reason == "tool_use":
+                tool_results = []
+                for block in response.content:
+                    if hasattr(block, "type") and block.type == "tool_use":
+                        result = await self._execute_debug_tool(block.name, block.input, client)
+                        tool_results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": block.id,
+                                "content": result,
+                            }
+                        )
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({"role": "user", "content": tool_results})
+            else:
+                break
+
+        return None
 
     # =========================================================================
     # Helpers

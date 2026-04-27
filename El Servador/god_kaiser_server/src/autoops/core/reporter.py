@@ -139,6 +139,13 @@ class AutoOpsReporter:
                 lines.append("```")
                 lines.append("")
 
+        # Claude debug finding sections (one per plugin that produced an llm_finding)
+        for _plugin_name, result in plugin_results:
+            finding_data = result.data.get("llm_finding") if isinstance(result.data, dict) else None
+            if finding_data and isinstance(finding_data, dict):
+                lines.append(self._render_debug_finding_section(finding_data))
+                lines.append("")
+
         # Overall API log
         if api_actions:
             lines.extend(
@@ -181,6 +188,45 @@ class AutoOpsReporter:
         content = "\n".join(lines)
         filepath.write_text(content, encoding="utf-8")
         return str(filepath)
+
+    def _render_debug_finding_section(self, finding_data: dict) -> str:
+        """Render a Claude debug finding as a markdown section."""
+        lines = [
+            "## Claude Debug-Befund",
+            "",
+            f"**Root Cause:** {finding_data.get('root_cause', '?')}",
+            f"**Confidence:** {finding_data.get('confidence', '?')}",
+            "",
+            "**Betroffene Komponenten:**",
+        ]
+        for comp in finding_data.get("affected_components", []):
+            lines.append(f"- {comp}")
+
+        code_refs = finding_data.get("code_references", [])
+        if code_refs:
+            lines.extend(["", "**Code-Referenzen:**"])
+            for ref in code_refs:
+                if isinstance(ref, dict):
+                    lines.append(
+                        f"- `{ref.get('file', '?')}:{ref.get('line', '?')}` — {ref.get('symbol', '?')}"
+                    )
+
+        actions = finding_data.get("recommended_actions", [])
+        if actions:
+            lines.extend(["", "**Empfohlene Aktionen:**"])
+            for i, action in enumerate(actions, 1):
+                lines.append(f"{i}. {action}")
+
+        evidence = finding_data.get("evidence", [])
+        if evidence:
+            lines.extend(["", "**Evidenz:**"])
+            for ev in evidence[:5]:
+                lines.append(f"> {ev}")
+
+        if finding_data.get("auto_fix_applied") and finding_data.get("fix_description"):
+            lines.extend(["", f"**Auto-Fix angewendet:** {finding_data['fix_description']}"])
+
+        return "\n".join(lines)
 
     def generate_quick_summary(
         self,

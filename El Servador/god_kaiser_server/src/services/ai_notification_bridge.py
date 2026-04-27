@@ -7,6 +7,7 @@ Vorbedingung: NOTIFICATION_SOURCES += "ai_anomaly_service", NOTIFICATION_CATEGOR
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import dataclass
 from typing import Optional
@@ -105,6 +106,11 @@ class AINotificationBridge:
                 anomaly.sensor_config_id,
             )
 
+        # Enrich explanation with AI analysis if not already set
+        from .ai_service import ai_service as _ai_svc  # lazy — avoids circular import
+        if _ai_svc.is_available() and not anomaly.explanation:
+            asyncio.create_task(_enrich_anomaly_explanation(anomaly))
+
         # 3. Route notification
         notification = NotificationCreate(
             channel="websocket",
@@ -120,3 +126,27 @@ class AINotificationBridge:
         except Exception as e:
             logger.exception("AI bridge: notification route failed: %s", e)
         return prediction_id
+
+
+async def _enrich_anomaly_explanation(result: AnomalyResult) -> None:
+    """
+    Fire-and-forget AI enrichment for anomaly results without an explanation.
+
+    Non-critical: exceptions are swallowed to never affect the main bridge flow.
+    """
+    try:
+        from .ai_service import ErrorAnalysisRequest, ai_service  # lazy — avoids circular import
+        finding = await ai_service.analyze_error(
+            ErrorAnalysisRequest(
+                error_code=0,
+                context={
+                    "sensor_config_id": str(result.sensor_config_id),
+                    "value": result.value,
+                },
+                recent_errors=[],
+                system_state={"anomaly_severity": result.severity},
+            )
+        )
+        result.explanation = finding.root_cause
+    except Exception:
+        logger.debug("AI anomaly enrichment failed", exc_info=True)
