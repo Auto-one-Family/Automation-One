@@ -77,7 +77,10 @@ export const useIntentSignalsStore = defineStore('intentSignals', () => {
     const iid = typeof data.intent_id === 'string' ? data.intent_id : undefined
 
     const terminal = isTerminalOutcome(data)
-    const resultLine = `Ergebnis: ${flow || '?'}/${outcome || '?'}${reason ? ` — ${reason}` : ''}`
+    const resultLine =
+      flow === 'config' && outcome === 'rejected'
+        ? `Konfiguration abgelehnt${code ? ` (${code})` : ''}${reason ? ` — ${reason}` : ''}`
+        : `Ergebnis: ${flow || '?'}/${outcome || '?'}${reason ? ` — ${reason}` : ''}`
 
     const prev = byEspId.value[espId]
     const next: IntentSignalsDisplay = {

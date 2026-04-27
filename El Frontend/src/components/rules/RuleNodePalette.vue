@@ -28,6 +28,7 @@ import {
   Stethoscope,
   Snowflake,
   Flame,
+  ArrowLeftRight,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -127,6 +128,14 @@ const categories = [
         icon: Stethoscope,
         category: 'condition' as const,
         defaults: { checkName: 'mqtt', expectedStatus: 'critical', operator: '==' },
+      },
+      {
+        type: 'sensor_diff',
+        label: 'Sensor-Differenz',
+        description: 'Differenz zwischen zwei Sensoren vergleichen',
+        icon: ArrowLeftRight,
+        category: 'condition' as const,
+        defaults: { sensor_a_uuid: '', sensor_b_uuid: '', operator: '>', threshold: 2.5, consecutive_count: 3 },
       },
     ],
   },

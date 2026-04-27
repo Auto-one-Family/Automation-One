@@ -48,7 +48,7 @@ export interface LogicRule {
 // Condition Types
 // =============================================================================
 
-export type LogicCondition = SensorCondition | TimeCondition | HysteresisCondition | CompoundCondition | DiagnosticsCondition
+export type LogicCondition = SensorCondition | TimeCondition | HysteresisCondition | CompoundCondition | DiagnosticsCondition | SensorDiffCondition
 
 export interface SensorCondition {
   type: 'sensor' | 'sensor_threshold'
@@ -94,6 +94,15 @@ export interface DiagnosticsCondition {
   check_name: string
   expected_status: 'healthy' | 'warning' | 'critical' | 'error'
   operator?: '==' | '!='
+}
+
+export interface SensorDiffCondition {
+  type: 'sensor_diff'
+  sensor_a_uuid: string
+  sensor_b_uuid: string
+  operator: '>' | '>=' | '<' | '<=' | '==' | '!='
+  threshold: number
+  consecutive_count?: number
 }
 
 // =============================================================================
