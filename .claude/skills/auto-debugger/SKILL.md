@@ -2,14 +2,14 @@
 name: auto-debugger
 description: |
   Orchestrierung fuer Incident-Laeufe und additive Verbesserung von Markdown-Analyseberichten.
-  Start immer ueber Steuerdatei unter .claude/auftraege/auto-debugger/inbox/.
+  Steuerung primaer ueber Linear-Issue (Label auto-debugger); historisch per Steuerdatei (Lesepfad).
   Verwenden bei: auto-debugger, Incident-Artefakte, Korrelation, TASK-PACKAGES,
   artefact_improvement, verify-plan-Gate vor Implementierung,
   VERIFY-PLAN-REPORT.md, Post-Verify TASK-PACKAGES mutieren, SPECIALIST-PROMPTS rollenweise, Dev-Handoff,
-  Linear-first, LINEAR-SYNC-MANIFEST, LINEAR-ISSUES.md, Resilienz-Check.
+  Linear-first, BELEG-MD, Findings-Kategorien, LINEAR-SYNC-MANIFEST, LINEAR-ISSUES.md, Resilienz-Check.
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash
 user-invocable: true
-argument-hint: "Pfad zur Steuerdatei oder @inbox/STEUER-….md"
+argument-hint: "Linear-Issue-ID (z. B. AUT-209) oder legacy @inbox/STEUER-….md"
 ---
 
 # Auto-Debugger Skill
@@ -57,37 +57,105 @@ Wenn Symptom **Zustand, Sync, Lifecycle, Reconnect, NVS, MQTT-Offline, Stromausf
 
 ---
 
-## 2. Normative Steuerdatei
+## 2. Normative Steuerung — Linear-First
 
-**Pflichtablage:** `.claude/auftraege/auto-debugger/inbox/`  
-**Vorlage:** `.claude/auftraege/auto-debugger/STEUER-VORLAGE.md`
+**Primärer Eingang:** Linear-Issue mit Label **`auto-debugger`** + passendem Status (TM legt fest).  
+**Vorlage Issue-Body:** Felder `scope`, `forbidden`, `done_criteria` im Issue-Body (analog Steuerdatei-Felder).
 
-### Pflichtfelder
+**Fallback (historisch, Lesepfad):** `.claude/auftraege/auto-debugger/inbox/STEUER-*.md`  
+Inbox ist eingefroren — kein neues Schreibziel. Bestehende MDs für historische Läufe weiter nutzbar.  
+**Legacy-Vorlage:** `.claude/auftraege/auto-debugger/STEUER-VORLAGE.md`
+
+### Pflichtfelder (im Linear-Issue-Body oder Steuerdatei)
 
 | Feld | Werte / Bedeutung |
 |------|-------------------|
-| `run_mode` | `incident` \| `artefact_improvement` \| `both` |
-| `target_docs` | Liste repo-relativer Pfade (bei reinem `incident` leer erlaubt wenn in `scope` begruendet) |
-| `scope` | Was du bearbeitest (z. B. nur additive Abschnitte, nur Korrelation) |
-| `forbidden` | Harte Grenzen (keine Schema-Aenderungen, keine Secrets, …) |
-| `done_criteria` | Messbare Abnahme |
+| `scope` | Was zu analysieren ist (Docker/Loki/Prometheus/DB/Code-Schicht) |
+| `forbidden` | Harte Grenzen (keine Breaking Changes, keine Secrets, kein Direktcommit auf `master`) |
+| `done_criteria` | Messbare Abnahme (z. B. „≥1 tracing-gap-Finding mit Beleg-MD") |
+| `run_mode` | `incident` \| `artefact_improvement` \| `both` (nur Steuerdatei-Compat) |
+| `target_docs` | Liste repo-relativer Pfade (nur Steuerdatei-Compat, bei `incident` leer erlaubt) |
 
-### Optionale Felder
+### Optionale Felder (weiterhin gültig)
 
 | Feld | Wann |
 |------|------|
 | `incident_id` | bei `incident` oder `both` — Ziel `.claude/reports/current/incidents/<id>/` |
-| `run_id` | Ausgabe `.claude/reports/current/auto-debugger-runs/<run_id>/` fuer Pakete/Verify im Artefakt-Modus |
+| `run_id` | Ausgabe `.claude/reports/current/auto-debugger-runs/<run_id>/` |
 | `order` | bei `both`: `incident_first` (Default) oder `artefact_first` |
-| `linear_local_only` | optional: `true` — kein Linear-Pflichtspiegel (nur mit Begründung in `scope`) |
-| `linear_epic_issue_id` / `linear_parent_issue_id` | optional: bestehendes Epic/Parent (Identifier oder URL-Slug) |
-| `linear_run_issue_id` | optional: bestehendes Run-Issue statt neuem Parent |
-| `linear_target_labels` | optional: kommagetrennte Label-Namen (oder leer) |
-| `linear_dedup_search_query` | optional: Suchstring vor Issue-Erstellung |
+| `linear_local_only` | `true` — kein Linear-Pflichtspiegel (nur mit Begründung in `scope`) |
+| `linear_epic_issue_id` / `linear_parent_issue_id` | bestehendes Epic/Parent |
+| `linear_run_issue_id` | bestehendes Run-Issue statt neuem Parent |
+| `linear_target_labels` | kommagetrennte Label-Namen |
+| `linear_dedup_search_query` | Suchstring vor Issue-Erstellung |
 
-**Startpattern (Robin):** Steuerdatei im Chat referenzieren, z. B. `@.claude/auftraege/auto-debugger/inbox/STEUER-….md`
+**Startpattern (Robin):** Linear-Issue-ID im Chat, z. B. `AUT-209 abarbeiten` — oder legacy `@inbox/STEUER-….md`.
 
-**Ohne gueltige Steuerdatei:** nur Klärungsfragen — **keine** vollstaendige Artefaktstruktur ausgeben.
+**Ohne gültigen Eingang:** nur Klärungsfragen — **keine** vollständige Artefaktstruktur ausgeben.
+
+---
+
+## 2a. Beleg-MD-Template (pro Finding)
+
+Dateiname: `.claude/reports/current/auto-debugger-runs/<run_id>/BELEG-<finding-id>-<YYYY-MM-DD>.md`  
+Vorlage: `.claude/auftraege/auto-debugger/BELEG-VORLAGE.md`
+
+```markdown
+# BELEG — <Finding-Titel>
+
+**Finding-ID:** <id>  
+**Datum:** <YYYY-MM-DD>  
+**Linear-Issue:** <URL>  
+**Kategorie:** <error | tracing-gap | duplicate | inconsistency | overcomplexity | unstructured>  
+**Schicht:** <El Trabajante | El Servador | El Frontend | Stack>
+
+## Symptom-Zusammenfassung
+
+<1–2 Absätze>
+
+## Logs-Beleg
+
+```loki
+<LogQL-Query>
+```
+
+<5–20 Zeilen Roh-Output mit Timestamps, request_id/correlation_id>
+
+## Stack-Beleg
+
+<Stacktrace oder State-Snapshot aus Service>
+
+## Code-Beleg
+
+`path/to/file.py:123` (Kontext: 5–15 Zeilen)
+
+```python
+<Code-Ausschnitt>
+```
+
+## Kausalerklärung
+
+<Wie Logs + Stack + Code das Symptom verursachen>
+```
+
+---
+
+## 2b. Duplikat-Output-Schritt (Kategorie `duplicate`)
+
+Wenn `duplicate` erkannt wird, **muss** der Linear-Issue-Body enthalten:
+- **Kanonische Stelle:** `path/to/file.py:123` — mit Begründung (höchste Test-Abdeckung, längste Lebensdauer, klarste API, wenigste Sonderfälle)
+- **Zu prüfende andere Stellen:** Liste `path/to/other.py:456`, …
+- **Begründung der Kanonisierung:** explizit, nicht nur als Behauptung
+
+Verweis auf Profil-Sektion: `.claude/agents/auto-debugger.md` — **8. Konsolidierungs-Regel**.
+
+---
+
+## 2c. Rollen-Trennung (Verweis)
+
+`auto-debugger` ist **Analyst**, nicht Implementierer. Kein Code-Change direkt — Ausgabe geht als Linear-Issue an Spezialagenten.
+
+Vollständige Regel: `.claude/agents/auto-debugger.md` — **9. Rollen-Trennung**.
 
 ---
 

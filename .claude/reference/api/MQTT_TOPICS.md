@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
-> **Version:** 2.23 | **Aktualisiert:** 2026-04-24
+> **Version:** 2.24 | **Aktualisiert:** 2026-04-28
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
-> **Änderungen:** **AUT-121 (2026-04-24, Implementierung):** Topic `system/heartbeat_metrics` (ESP→Server, QoS 0) koppelt erweiterte Laufzeit-Counter und Queue-Stats vom schlanken Core-`system/heartbeat` ab. Server: `HeartbeatMetricsHandler` (TTLCache-Ingest, kein DB/WS), Merge flach in den nächsten Core-`handle_heartbeat` → `esp_health`; `parse_heartbeat_topic` endverankert, damit `heartbeat_metrics` nicht als Core matcht; `subscriber.py` mappt QoS inkl. `MQTT_SUBSCRIBE_ESP_HEARTBEAT_METRICS`. Firmware: `ENABLE_METRICS_SPLIT` → `publishHeartbeatMetrics()` in `mqtt_client.cpp` am Ende von `publishHeartbeat()`. Zuvor: **PKG-01 (2026-04-20, INC-2026-04-20-offline-mode-observability-hardening):** Neuer Topic `system/queue_pressure` (ESP→Server, QoS 1) für strukturierte Publish-Queue-Backpressure-Events (ENTER/RECOVERED, Hysterese). Server-TopicBuilder in `src/mqtt/topics.py` ergänzt (`build_queue_pressure_topic`, `parse_queue_pressure_topic`). Firmware-Emitter und Server-Handler folgen in Welle 2 (PKG-01a/01b). Zuvor: **AUT-69 (2026-04-20):** `session/announce` an Server-Consumer angepasst (`handle_session_announce` registriert), Session-Feld-Alias dokumentiert (**kanonisch `handover_epoch`, Fallback `session_epoch`**) und Heartbeat-Metriken um `handover_contract_reject_startup`/`handover_contract_reject_runtime` plus Summenfeld `handover_contract_reject` erweitert. Zuvor: **AUT-54 (2026-04-17):** Bootstrap-Heartbeat nach `heartbeat/ack`-Subscription wird auf ESP32 nur noch deferred im normalen Loop gesendet (nicht mehr direkt im `MQTT_EVENT_SUBSCRIBED`-Callback). Stale `MQTT_EVENT_SUBSCRIBED` bei bereits getrennter Verbindung werden verworfen; `publishHeartbeat(force=true)` sendet nie im disconnected Zustand. Zuvor: **AUT-5 (2026-04-17):** Heartbeat-Payload um `sensor_command_queue_overflow_count` ergänzt (Overflow-Telemetrie der Sensor-Command-Queue). Zuvor: **PKG-05 (2026-04-14):** `system/heartbeat/ack` Reject-Diagnose erweitert (optionale Felder `reason_code`, `revocation_source`, `upstream_deleted`, `delete_intent`, `correlation_id` für Revocation/Upstream-Delete-Auswertung auf ESP-Seite). Intent-Outcome-Codes ergänzt: `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`. Zuvor: **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
+> **Änderungen:** **AUT-118 (2026-04-28, Implementierung):** Bidirektionaler ACK-Flow für Emergency-Stop/Recovery: Neue Topics `actuator/emergency/ack` (Sections 2.6) und `actuator/recovery_confirm` (Section 2.7), beide ESP→Server QoS 1. Server: `EmergencyAckHandler`, `RecoveryConfirmHandler` in `handlers/`; `build_emergency_ack_topic`, `parse_recovery_confirm_topic` in `topics.py`; `MQTT_SUBSCRIBE_ESP_EMERGENCY_ACK/RECOVERY_CONFIRM` in `constants.py`. Firmware: `buildEmergencyAckTopic()`/`buildRecoveryConfirmTopic()` in `topic_builder.cpp`; ACK-Publish via direktem `mqttClient.publish()` (Safety-Epoch-Race-Mitigation). Zuvor: **AUT-121 (2026-04-24, Implementierung):** Topic `system/heartbeat_metrics` (ESP→Server, QoS 0) koppelt erweiterte Laufzeit-Counter und Queue-Stats vom schlanken Core-`system/heartbeat` ab. Server: `HeartbeatMetricsHandler` (TTLCache-Ingest, kein DB/WS), Merge flach in den nächsten Core-`handle_heartbeat` → `esp_health`; `parse_heartbeat_topic` endverankert, damit `heartbeat_metrics` nicht als Core matcht; `subscriber.py` mappt QoS inkl. `MQTT_SUBSCRIBE_ESP_HEARTBEAT_METRICS`. Firmware: `ENABLE_METRICS_SPLIT` → `publishHeartbeatMetrics()` in `mqtt_client.cpp` am Ende von `publishHeartbeat()`. Zuvor: **PKG-01 (2026-04-20, INC-2026-04-20-offline-mode-observability-hardening):** Neuer Topic `system/queue_pressure` (ESP→Server, QoS 1) für strukturierte Publish-Queue-Backpressure-Events (ENTER/RECOVERED, Hysterese). Server-TopicBuilder in `src/mqtt/topics.py` ergänzt (`build_queue_pressure_topic`, `parse_queue_pressure_topic`). Firmware-Emitter und Server-Handler folgen in Welle 2 (PKG-01a/01b). Zuvor: **AUT-69 (2026-04-20):** `session/announce` an Server-Consumer angepasst (`handle_session_announce` registriert), Session-Feld-Alias dokumentiert (**kanonisch `handover_epoch`, Fallback `session_epoch`**) und Heartbeat-Metriken um `handover_contract_reject_startup`/`handover_contract_reject_runtime` plus Summenfeld `handover_contract_reject` erweitert. Zuvor: **AUT-54 (2026-04-17):** Bootstrap-Heartbeat nach `heartbeat/ack`-Subscription wird auf ESP32 nur noch deferred im normalen Loop gesendet (nicht mehr direkt im `MQTT_EVENT_SUBSCRIBED`-Callback). Stale `MQTT_EVENT_SUBSCRIBED` bei bereits getrennter Verbindung werden verworfen; `publishHeartbeat(force=true)` sendet nie im disconnected Zustand. Zuvor: **AUT-5 (2026-04-17):** Heartbeat-Payload um `sensor_command_queue_overflow_count` ergänzt (Overflow-Telemetrie der Sensor-Command-Queue). Zuvor: **PKG-05 (2026-04-14):** `system/heartbeat/ack` Reject-Diagnose erweitert (optionale Felder `reason_code`, `revocation_source`, `upstream_deleted`, `delete_intent`, `correlation_id` für Revocation/Upstream-Delete-Auswertung auf ESP-Seite). Intent-Outcome-Codes ergänzt: `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`. Zuvor: **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
 
 ---
 
@@ -443,6 +443,97 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 - **ESP32:** `main.cpp` (actuator/emergency Subscription, command clear_emergency)
 - **Server:** `topics.py:build_actuator_emergency_topic()`, `actuators.py` clear_emergency Endpoint
 - **Mock-Simulation:** `actuator_handler.py` handle_emergency/handle_broadcast_emergency werten `command` aus
+
+---
+
+### 2.6 actuator/emergency/ack (ESP→Server)
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency/ack`
+
+**QoS:** 1
+
+**Richtung:** ESP → Server
+
+**Trigger:** Nach erfolgreicher Ausführung von `emergency_stop`-Command (nach `EMERGENCY_STOP_TRIGGERED`-Outcome)
+
+**Payload:**
+```json
+{
+  "ts": 1735818000,
+  "esp_id": "ESP_12AB34CD",
+  "correlation_id": "emg_abc123",
+  "command": "emergency_stop",
+  "gpio_count": 3,
+  "outcome": "executed",
+  "seq": 42
+}
+```
+
+**Fields:**
+
+| Feld | Typ | Required | Beschreibung |
+|------|-----|----------|--------------|
+| `ts` | int | Ja | Unix Timestamp |
+| `esp_id` | string | Ja | ESP Device ID |
+| `correlation_id` | string | Nein | Aus empfangenem Emergency-Command; Fallback `""` |
+| `command` | string | Ja | `"emergency_stop"` |
+| `gpio_count` | int | Ja | Anzahl betroffener GPIOs |
+| `outcome` | string | Ja | `"executed"` |
+| `seq` | int | Nein | Sequenz-Counter |
+
+**Scope:** Nur device-spezifischer Emergency-Stop (nicht Broadcast `broadcast/emergency`). Broadcast-ACK-Tracking erfordert separate Architektur (N Geräte, eine correlation_id).
+
+**Safety-Epoch-Race-Mitigation:** ACK wird via direktem `mqttClient.publish()` gesendet (nicht über SafePublish-Queue), da `bumpSafetyEpoch()` die Queue invalidiert. Der ACK ist reine Observability — die Safety-Ausführung ist zu diesem Zeitpunkt bereits abgeschlossen.
+
+**Code-Referenzen:**
+- **ESP32:** `main.cpp` Zeile ~468 (Publish nach `EMERGENCY_STOP_TRIGGERED`), `topic_builder.cpp:buildEmergencyAckTopic()`
+- **Server:** `emergency_ack_handler.py:EmergencyAckHandler`, `topics.py:build_emergency_ack_topic()`, `parse_emergency_ack_topic()`
+- **Constants:** `MQTT_SUBSCRIBE_ESP_EMERGENCY_ACK` in `constants.py`
+
+---
+
+### 2.7 actuator/recovery_confirm (ESP→Server)
+
+**Topic:** `kaiser/{kaiser_id}/esp/{esp_id}/actuator/recovery_confirm`
+
+**QoS:** 1
+
+**Richtung:** ESP → Server
+
+**Trigger:** Nach erfolgreicher Ausführung von `clear_emergency`-Command
+
+**Payload:**
+```json
+{
+  "ts": 1735818000,
+  "esp_id": "ESP_12AB34CD",
+  "correlation_id": "emg_abc123",
+  "command": "clear_emergency",
+  "state": "cleared",
+  "seq": 43
+}
+```
+
+**Fields:**
+
+| Feld | Typ | Required | Beschreibung |
+|------|-----|----------|--------------|
+| `ts` | int | Ja | Unix Timestamp |
+| `esp_id` | string | Ja | ESP Device ID |
+| `correlation_id` | string | Nein | Aus empfangenem Clear-Emergency-Command |
+| `command` | string | Ja | `"clear_emergency"` |
+| `state` | string | Ja | `"cleared"` |
+| `seq` | int | Nein | Sequenz-Counter |
+
+**Server-Verarbeitung:**
+- `RecoveryConfirmHandler` setzt `emergency_state` auf `normal` in DB
+- WS-Broadcast `actuator_alert` mit `alert_type: "recovery_confirmed"`
+- Bei Reconnect-Reconciliation in `heartbeat_handler.py`: wenn ESP `emergency_active` und kein `recovery_confirm` im Session-Fenster → `recovery_confirm_pending: True` in Device-Metadata
+
+**Code-Referenzen:**
+- **ESP32:** `main.cpp` Zeile ~482 (Publish nach `clear_emergency`), `topic_builder.cpp:buildRecoveryConfirmTopic()`
+- **Server:** `recovery_confirm_handler.py:RecoveryConfirmHandler`, `topics.py:parse_recovery_confirm_topic()`
+- **Constants:** `MQTT_SUBSCRIBE_ESP_RECOVERY_CONFIRM` in `constants.py`
 
 ---
 

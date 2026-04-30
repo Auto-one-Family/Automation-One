@@ -80,13 +80,13 @@ Jede Sub-Agent-Invocation muss enthalten:
 
 **Wann weiterhin Einzel-Agenten:** reine Log-Triage in einer Schicht → `server-debug`, `frontend-debug`, `mqtt-debug`, `esp32-debug`; DB → `db-inspector`; reine Test-Log-Analyse → `test-log-analyst`; Querschnitt aus Auftrag + Code (Handoff an Dev) → `meta-analyst` (Report-only = Legacy).
 
-**Steuerdatei-Pflicht:** Strukturierter Lauf startet mit einer Datei unter **`.claude/auftraege/auto-debugger/inbox/`** (Vorlage: `STEUER-VORLAGE.md`). Im Chat z. B. `@.claude/auftraege/auto-debugger/inbox/STEUER-….md`. Ohne gueltige Steuerdatei: nur Klaerung, keine vollstaendige Artefaktstruktur.
+**Steuerung (Linear-first):** Strukturierter Lauf startet mit einem **Linear-Issue** (Label `auto-debugger`, Status vom TM). Im Chat z. B. `AUT-209 abarbeiten`. **Fallback (historisch):** Steuerdatei unter `inbox/` (eingefroren, Lesepfad). Ohne gültigen Eingang: nur Klärung, keine vollständige Artefaktstruktur. **Findings-Output:** Linear-Issue (Search-vor-Create) + genau eine Beleg-MD pro Finding (Vorlage: `BELEG-VORLAGE.md`).
 
 **Git-Arbeitsbranch:** Orchestrierte und delegierte **Code-Änderungen** nur auf Branch **`auto-debugger/work`** (von `master`); Details und Spezialisten-Pflicht siehe `.claude/agents/auto-debugger.md` (0a) und Skill `auto-debugger`.
 
-**Skill:** `.claude/skills/auto-debugger/SKILL.md` — **Pflichtgate:** Skill **`verify-plan`** vor Implementierung aus abgeleiteten `TASK-PACKAGES.md`.
+**Skill:** `.claude/skills/auto-debugger/SKILL.md` — **Pflichtgate:** Skill **`verify-plan`** vor Implementierung aus abgeleiteten `TASK-PACKAGES.md`. Konsolidierungs-Regel + Rollen-Trennung in Agenten-Sektionen 8/9.
 
-**Kette (ein Satz):** `TASK-PACKAGES.md` → Inhalt gemäss **`verify-plan`** (inkl. Chat-Block **OUTPUT FÜR ORCHESTRATOR**) → **`VERIFY-PLAN-REPORT.md`** → **Plan-Anpassung** (`TASK-PACKAGES.md` mutieren) durch **`auto-debugger`** → **`SPECIALIST-PROMPTS.md`** rollenweise → Dev-Agenten auf Branch **`auto-debugger/work`**.
+**Kette (ein Satz):** Linear-Issue → Analyse (Docker/Loki/Prom/DB/Traces) → Findings als Linear-Issues + BELEG-MDs → bei Code-Folge: `TASK-PACKAGES.md` → **`verify-plan`** (inkl. **OUTPUT FÜR ORCHESTRATOR**) → **`VERIFY-PLAN-REPORT.md`** → **Plan-Anpassung** (`TASK-PACKAGES.md` mutieren) → **`SPECIALIST-PROMPTS.md`** rollenweise → Dev-Agenten auf Branch **`auto-debugger/work`**.
 
 **Slash-Command (optional):** `.claude/commands/auto-debugger.md` mit Argument `path` zur Steuerdatei.
 

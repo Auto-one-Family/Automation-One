@@ -1,8 +1,8 @@
 # AutomationOne Agenten
 
-> **Version:** 5.1 | **Aktualisiert:** 2026-03-07
+> **Version:** 5.2 | **Aktualisiert:** 2026-04-29
 > **Format:** Offizielles Claude Code Plugin-Agent-Format
-> **Agenten gesamt:** 13 | **Struktur:** Flach (alle .md direkt im agents/)
+> **Agenten gesamt:** 14 | **Struktur:** Flach (alle .md direkt im agents/)
 
 ---
 
@@ -24,6 +24,12 @@
 |-------|-------|-------|--------------|
 | **system-control** | `system-control.md` | blue | System-Steuerung, Briefing, 7 Modi |
 | **db-inspector** | `db-inspector.md` | yellow | Datenbank-Inspektion & Cleanup |
+
+### Orchestrierung
+
+| Agent | Datei | Color | Beschreibung |
+|-------|-------|-------|--------------|
+| **auto-debugger** | `auto-debugger.md` | red | Incident-Orchestrierung + Artefakt-Verbesserung; Linear-first Steuerung; Findings → Linear-Issue + BELEG-MD |
 
 ### Utility-Agenten
 
@@ -94,6 +100,7 @@ skills: ["skill-name"]  # Optional: Skill automatisch vorladen
 | **green** | Implementierung | esp32-dev, server-dev, mqtt-dev, frontend-dev |
 | **blue** | System Operations | system-control |
 | **yellow** | Validation & Utility | db-inspector, agent-manager |
+| **red** | Orchestrierung | auto-debugger |
 
 ---
 
@@ -154,6 +161,7 @@ Alle Agenten schreiben Reports nach: `.claude/reports/current/`
 .claude/agents/
 ├── Readme.md              # Dieser Index
 ├── agent-manager.md       # Agent-Manager (yellow)
+├── auto-debugger.md       # Auto-Debugger Orchestrator (red)
 ├── db-inspector.md        # DB Inspector (yellow)
 ├── esp32-debug.md         # ESP32 Debug (cyan)
 ├── esp32-dev.md           # ESP32 Dev (green)

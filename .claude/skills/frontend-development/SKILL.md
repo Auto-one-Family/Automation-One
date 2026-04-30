@@ -812,7 +812,10 @@ INTENT_CONTRACT_INVENTORY: actuator/config/sequence (REST-Start + WS-Start/Termi
 // Config terminal strictness:
 // config_response/config_failed ohne data.correlation_id => contract_mismatch (nicht finalisierbar)
 getOperatorActionGuidance(event): OperatorActionGuidance | null  // SSOT fuer terminale Operator-Hinweise
-// WS_EVENT_TYPES / validateContractEvent: u.a. intent_outcome, intent_outcome_lifecycle, notification_new/updated/unread_count, subzone_assignment (System Monitor Live-Pfad)
+// WS_EVENT_TYPES: muss alle Server-Broadcast-Typen abdecken, die SystemMonitorView.transformToUnifiedEvent()
+// durchlaufen — sonst false-positive contract_unknown_event (z. B. rule_degraded/rule_recovered/events_restored,
+// Kalibrierungs-Lifecycle, esp_reconnect_phase, config_response_guard_replay). Bei neuem MessageType in types/index.ts
+// Eintrag + ggf. EVENT_TYPE_TO_DATASOURCE; siehe AUT-128 (Stack-FE).
 ```
 
 ### eventTypeLabels.ts

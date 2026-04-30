@@ -593,6 +593,8 @@ Event-Push-Pattern: ESP32 publiziert NUR bei State-Change (kein periodisches Ful
 ```
 
 **Felder:**
+- `state`: Nach Verarbeitung durch den Handler **Zeichenkette** `"on"` / `"off"` / `"pwm"` / … (vorher bool-kompatibel) — Frontend darf nicht `if (state)` nutzen (non-empty Strings sind truthy; `"off"` ≠ aus).
+- `value`: Numerischer Stellwert; typisch **8-Bit-PWM 0–255** vom ESP, alternativ Duty **0.0–1.0** — UI-Prozent: 0–1 → ×100, sonst **/255** bis 255 (nicht blind `value×100`).
 - `actuator_type`: Server-normalisierter Typ (`"digital"`, `"pwm"`, `"servo"`) — konsistent mit `actuator_configs.actuator_type`
 - `hardware_type`: Original-ESP32-Typ (`"relay"`, `"pump"`, `"valve"`, `"pwm"`) — aus `actuator_configs.hardware_type`, für Icon-Mapping im Frontend
 
