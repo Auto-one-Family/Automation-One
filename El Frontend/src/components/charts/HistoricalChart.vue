@@ -81,6 +81,11 @@ interface Props {
   showThresholds?: boolean
   /** Gap marking mode: 'auto' (default), 'hatched', or 'off' */
   gapMarkingMode?: GapMarkingMode
+  /**
+   * Render as scatter plot (points only, no interpolated line) — used for
+   * snapshot sensors (Wave 1, MultispeQ) where interpolation is misleading.
+   */
+  scatterMode?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -91,6 +96,7 @@ const props = withDefaults(defineProps<Props>(), {
   thresholds: () => ({}),
   showThresholds: true,
   gapMarkingMode: 'auto',
+  scatterMode: false,
 })
 
 const espStore = useEspStore()
@@ -452,17 +458,22 @@ const chartData = computed(() => {
     })
   }
 
-  // Main avg line (always present)
+  // Main avg line (always present).
+  // Wave 1: Snapshot-Sensoren rendern als Scatter (nur Punkte, keine Interpolation).
   datasets.push({
-    label: 'Avg',
+    label: props.scatterMode ? 'Snapshot' : 'Avg',
     data: dataBuffer.value.map(d => d.value),
     borderColor: props.color,
-    backgroundColor: hasMinMax ? 'transparent' : `${props.color}1a`,
-    borderWidth: 2,
-    pointRadius: 0,
+    backgroundColor: props.scatterMode ? props.color : (hasMinMax ? 'transparent' : `${props.color}1a`),
+    borderWidth: props.scatterMode ? 0 : 2,
+    pointRadius: props.scatterMode ? 4 : 0,
+    pointHoverRadius: props.scatterMode ? 6 : 4,
+    pointBackgroundColor: props.color,
+    pointBorderColor: props.color,
     pointHitRadius: 8,
-    tension: 0.3,
-    fill: !hasMinMax,
+    tension: props.scatterMode ? 0 : 0.3,
+    showLine: !props.scatterMode,
+    fill: props.scatterMode ? false : !hasMinMax,
     spanGaps: false, // Break line at null values (8.0-C)
   })
 

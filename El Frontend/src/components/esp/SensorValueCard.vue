@@ -21,7 +21,7 @@ import {
 } from '@/utils/sensorDefaults'
 import { getQualityInfo, getGpioDescription } from '@/utils/labels'
 import { formatRelativeTime, formatNumber, formatSensorStatus, getModeLabel, getMeasurementFreshness, formatStaleReason } from '@/utils/formatters'
-import type { SensorOperatingMode } from '@/types'
+import type { SensorOperatingMode, SensorKind } from '@/types'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('SensorValueCard')
@@ -47,6 +47,8 @@ interface Sensor {
   freshness_hours?: number | null
   calibration_interval_days?: number | null
   calibration_data?: Record<string, unknown> | null
+  // Wave 1: Snapshot-Sensor Kennzeichnung (MultispeQ etc.)
+  sensor_kind?: SensorKind | null
 }
 
 interface Props {
@@ -216,6 +218,10 @@ const badgeVariant = computed((): BadgeVariant => {
   const variant = sensorStatus.value.variant
   return variant === 'error' ? 'danger' : variant
 })
+
+// Wave 1: Snapshot sensor (MultispeQ) — suppress live freshness/timeout warnings,
+// show "Letzte Messung" label instead of relative-live timing.
+const isSnapshot = computed(() => props.sensor.sensor_kind === 'snapshot')
 </script>
 
 <template>
@@ -249,6 +255,16 @@ const badgeVariant = computed((): BadgeVariant => {
           {{ qualityInfo.label }}
         </Badge>
 
+        <!-- Wave 1: Snapshot Badge (MultispeQ etc.) -->
+        <Badge
+          v-if="isSnapshot"
+          variant="warning"
+          size="sm"
+          title="Snapshot-Sensor: Punktmessung, kein Live-Stream"
+        >
+          Snapshot
+        </Badge>
+
         <!-- Phase 2E: Operating Mode Badge (nur wenn nicht continuous) -->
         <Badge
           v-if="sensor.operating_mode && sensor.operating_mode !== 'continuous'"
@@ -263,9 +279,9 @@ const badgeVariant = computed((): BadgeVariant => {
           {{ getModeLabel(sensor.operating_mode) }}
         </Badge>
 
-        <!-- Phase 2E: Stale-Warnung (nur bei continuous + stale) -->
+        <!-- Phase 2E: Stale-Warnung (nur bei continuous + stale, nicht für Snapshot) -->
         <Badge
-          v-if="sensor.operating_mode === 'continuous' && sensor.is_stale"
+          v-if="!isSnapshot && sensor.operating_mode === 'continuous' && sensor.is_stale"
           variant="danger"
           size="sm"
           :title="sensorStatus.label"
@@ -274,9 +290,9 @@ const badgeVariant = computed((): BadgeVariant => {
           Stale
         </Badge>
 
-        <!-- Sensor-Lifecycle: Freshness-Indikator für On-Demand/Scheduled -->
+        <!-- Sensor-Lifecycle: Freshness-Indikator für On-Demand/Scheduled (nicht für Snapshot) -->
         <Badge
-          v-if="showFreshnessIndicator && measurementFreshness"
+          v-if="!isSnapshot && showFreshnessIndicator && measurementFreshness"
           :variant="measurementFreshness.variant === 'error' ? 'danger' : measurementFreshness.variant"
           size="sm"
           :title="measurementFreshness.label"
@@ -366,7 +382,7 @@ const badgeVariant = computed((): BadgeVariant => {
             <span>{{ formatNumber(sensor.raw_value, 4) }}</span>
           </div>
           <div v-if="sensor.updated_at || sensor.last_reading_at" class="sensor-value-card__detail-row">
-            <span>Aktualisiert</span>
+            <span>{{ isSnapshot ? 'Letzte Messung' : 'Aktualisiert' }}</span>
             <span>{{ formatRelativeTime(sensor.last_reading_at || sensor.updated_at) }}</span>
           </div>
           <!-- Phase 2E: Operating Mode -->

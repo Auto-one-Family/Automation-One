@@ -522,6 +522,119 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     description: 'Vapor Pressure Deficit. Berechnet aus Temperatur und Luftfeuchte (SHT31).',
     category: 'air',
   },
+
+  // =========================================================================
+  // MULTISPEQ SNAPSHOT SENSORS (Wave 1)
+  // Photosynthesis spot measurements; sensor_kind = 'snapshot'.
+  // =========================================================================
+
+  'phi2': {
+    label: 'Phi2 (Φ)',
+    unit: 'Φ',
+    min: 0,
+    max: 1,
+    decimals: 3,
+    icon: 'Leaf',
+    defaultValue: 0.5,
+    description: 'PSII operating efficiency (Φ). MultispeQ Snapshot-Messung.',
+    category: 'light',
+  },
+
+  'fv_fm': {
+    label: 'Fv/Fm',
+    unit: 'Fv/Fm',
+    min: 0,
+    max: 1,
+    decimals: 3,
+    icon: 'Activity',
+    defaultValue: 0.8,
+    description: 'Maximum quantum yield of PSII. MultispeQ Snapshot-Messung.',
+    category: 'light',
+  },
+
+  'npqt': {
+    label: 'NPQt',
+    unit: 'NPQt',
+    min: 0,
+    max: 10,
+    decimals: 2,
+    icon: 'Sun',
+    defaultValue: 1.0,
+    description: 'Non-photochemical quenching (transient). MultispeQ Snapshot-Messung.',
+    category: 'light',
+  },
+
+  'lef': {
+    label: 'LEF',
+    unit: 'μmol e⁻/m²/s',
+    min: 0,
+    max: 500,
+    decimals: 1,
+    icon: 'Zap',
+    defaultValue: 100,
+    description: 'Linear Electron Flow. MultispeQ Snapshot-Messung.',
+    category: 'light',
+  },
+
+  'par_internal': {
+    label: 'PAR (intern)',
+    unit: 'μmol/m²/s',
+    min: 0,
+    max: 2500,
+    decimals: 0,
+    icon: 'Sun',
+    defaultValue: 500,
+    description: 'Photosynthetically Active Radiation (interner Sensor). MultispeQ Snapshot-Messung.',
+    category: 'light',
+  },
+
+  'ppfd': {
+    label: 'PPFD',
+    unit: 'μmol/m²/s',
+    min: 0,
+    max: 2500,
+    decimals: 0,
+    icon: 'Sun',
+    defaultValue: 500,
+    description: 'Photosynthetic Photon Flux Density. MultispeQ Snapshot-Messung.',
+    category: 'light',
+  },
+
+  'chlorophyll_spad': {
+    label: 'Chlorophyll SPAD',
+    unit: 'SPAD',
+    min: 0,
+    max: 100,
+    decimals: 1,
+    icon: 'Leaf',
+    defaultValue: 40,
+    description: 'Chlorophyll-Index nach SPAD. MultispeQ Snapshot-Messung.',
+    category: 'soil',
+  },
+
+  'leaf_temp': {
+    label: 'Blatttemperatur',
+    unit: '°C',
+    min: -10,
+    max: 60,
+    decimals: 1,
+    icon: 'Thermometer',
+    defaultValue: 22,
+    description: 'Blatttemperatur (IR-Thermometer). MultispeQ Snapshot-Messung.',
+    category: 'temperature',
+  },
+
+  'anthocyanin_index': {
+    label: 'Anthocyanin ARI',
+    unit: 'ARI',
+    min: 0,
+    max: 5,
+    decimals: 2,
+    icon: 'Droplet',
+    defaultValue: 1.0,
+    description: 'Anthocyanin Reflectance Index. MultispeQ Snapshot-Messung.',
+    category: 'other',
+  },
 }
 
 // =============================================================================

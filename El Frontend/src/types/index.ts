@@ -220,6 +220,16 @@ export type MockSystemState =
 
 export type QualityLevel = 'excellent' | 'good' | 'fair' | 'poor' | 'bad' | 'stale' | 'error'
 
+/**
+ * Sensor kind: distinguishes continuous measurement sensors from snapshot-style
+ * sensors (e.g. MultispeQ photosynthesis measurements that produce point readings
+ * rather than a time series). Server-side defined in Wave 1 (SensorConfig.sensor_kind).
+ *
+ * - continuous: Live time-series readings, suitable for line charts / live blink indicators
+ * - snapshot: Discrete point readings, suitable for scatter plots / "letzte Messung" labels
+ */
+export type SensorKind = 'continuous' | 'snapshot'
+
 // =============================================================================
 // Multi-Value Sensor Types (Phase 6)
 // =============================================================================
@@ -304,6 +314,12 @@ export interface MockSensor {
   device_scope?: DeviceScope | null
   /** Assigned zones for multi_zone/mobile devices */
   assigned_zones?: string[] | null
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Sensor Kind (Wave 1 — MultispeQ / Snapshot Sensors)
+  // ═══════════════════════════════════════════════════════════════════════════
+  /** Sensor kind: continuous (default) or snapshot (point measurements) */
+  sensor_kind?: SensorKind | null
 }
 
 export interface MockActuator {
@@ -717,6 +733,8 @@ export interface SensorConfigCreate {
   assigned_zones?: string[] | null
   /** Subzones this sensor is assigned to (T13-R2) */
   assigned_subzones?: string[] | null
+  /** Sensor kind: continuous (default) or snapshot (Wave 1, MultispeQ) */
+  sensor_kind?: SensorKind
 }
 
 export interface SensorConfigResponse {
@@ -759,6 +777,8 @@ export interface SensorConfigResponse {
   assigned_zones: string[] | null
   /** Subzones this sensor is assigned to (T13-R2) */
   assigned_subzones?: string[] | null
+  /** Sensor kind: continuous (default) or snapshot (Wave 1, MultispeQ) */
+  sensor_kind?: SensorKind | null
   latest_value?: number | null
   latest_quality?: QualityLevel | null
   latest_timestamp?: string | null

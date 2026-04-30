@@ -67,6 +67,9 @@ const parsedSensor = computed(() => {
   return { espId: parsedEspId.value!, gpio: parsedGpio.value!, sensor }
 })
 
+// Wave 1: Snapshot-Sensoren (MultispeQ) → Scatter-Mode (keine Interpolation).
+const isSnapshot = computed(() => parsedSensor.value?.sensor.sensor_kind === 'snapshot')
+
 // Resolved names for ExportCsvDialog
 const resolvedSensorName = computed(() =>
   parsedSensor.value?.sensor.name || parsedSensorType.value || ''
@@ -89,6 +92,11 @@ function selectSensor(sensorId: string) {
         <span class="historical-widget__sensor-name">
           {{ parsedSensor.sensor.name || parsedSensor.sensor.sensor_type }}
         </span>
+        <span
+          v-if="isSnapshot"
+          class="historical-widget__snapshot-badge"
+          title="Snapshot-Sensor (Punktmessungen, kein Live-Stream)"
+        >Snapshot</span>
         <button
           class="historical-widget__export-btn"
           title="Als CSV exportieren"
@@ -105,6 +113,7 @@ function selectSensor(sensorId: string) {
           :time-range="selectedRange"
           :unit="parsedSensor.sensor.unit || ''"
           :show-thresholds="showThresholds"
+          :scatter-mode="isSnapshot"
           height="100%"
         />
       </div>
@@ -156,6 +165,18 @@ function selectSensor(sensorId: string) {
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+}
+
+.historical-widget__snapshot-badge {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 0 var(--space-1);
+  margin-right: var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg, rgba(251, 191, 36, 0.15));
+  color: var(--color-warning, #fbbf24);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
 }
 
 .historical-widget__export-btn {

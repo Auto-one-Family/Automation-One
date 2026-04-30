@@ -89,6 +89,10 @@ const TREND_TITLES: Record<TrendDirection, string> = {
   falling: 'Fallend',
 }
 
+// Snapshot sensor detection (Wave 1, MultispeQ): suppress live indicators,
+// show "Snapshot"-Badge instead of live trend.
+const isSnapshot = computed(() => currentSensor.value?.sensor_kind === 'snapshot')
+
 function selectSensor(sensorId: string) {
   localSensorId.value = sensorId  // Immediate local update (Bug 1b fix)
   emit('update:config', { sensorId })
@@ -101,8 +105,13 @@ function selectSensor(sensorId: string) {
       <div class="sensor-card-widget__header">
         <span class="sensor-card-widget__name">{{ currentSensor.name || currentSensor.sensor_type }}</span>
         <span class="sensor-card-widget__header-right">
+          <span
+            v-if="isSnapshot"
+            class="sensor-card-widget__snapshot-badge"
+            title="Snapshot-Sensor (Punktmessung, kein Live-Stream)"
+          >Snapshot</span>
           <component
-            v-if="trend"
+            v-if="trend && !isSnapshot"
             :is="TREND_ICONS[trend]"
             class="sensor-card-widget__trend"
             :class="`sensor-card-widget__trend--${trend}`"
@@ -161,6 +170,17 @@ function selectSensor(sensorId: string) {
 .sensor-card-widget__trend--rising { color: var(--color-success); }
 .sensor-card-widget__trend--falling { color: var(--color-warning); }
 .sensor-card-widget__trend--stable { color: var(--color-text-muted); }
+
+.sensor-card-widget__snapshot-badge {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg, rgba(251, 191, 36, 0.15));
+  color: var(--color-warning, #fbbf24);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
 
 .sensor-card-widget__name {
   font-size: var(--text-sm);

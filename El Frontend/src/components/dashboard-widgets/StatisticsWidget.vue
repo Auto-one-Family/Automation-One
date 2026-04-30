@@ -7,10 +7,11 @@
  */
 import { ref, computed, watch } from 'vue'
 import { sensorsApi } from '@/api/sensors'
+import { useEspStore } from '@/stores/esp'
 import { useSensorId } from '@/composables/useSensorId'
 import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
 import { formatNumber } from '@/utils/formatters'
-import type { SensorStats } from '@/types'
+import type { MockSensor, SensorStats } from '@/types'
 import { Loader2, AlertTriangle, BarChart3 } from 'lucide-vue-next'
 
 interface Props {
@@ -30,6 +31,46 @@ const props = withDefaults(defineProps<Props>(), {
 
 // Centralized sensorId parsing (getter fallback for optional prop)
 const { espId, gpio, sensorType } = useSensorId(() => props.sensorId ?? '')
+
+// Resolve sensor instance from store for sensor_kind / alert_config lookups (Wave 1)
+const espStore = useEspStore()
+const resolvedSensor = computed<MockSensor | null>(() => {
+  if (!espId.value || gpio.value === null || !sensorType.value) return null
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === espId.value)
+  if (!device) return null
+  return ((device.sensors as MockSensor[]) || []).find(s =>
+    s.gpio === gpio.value && s.sensor_type === sensorType.value
+  ) ?? null
+})
+
+// Wave 1: Snapshot-Sensoren (MultispeQ) → Badge anzeigen, kein Live-Stream
+const isSnapshot = computed(() => resolvedSensor.value?.sensor_kind === 'snapshot')
+
+// Wave 1: alert_config.custom_thresholds als Override für Schwellenwerte.
+// Falls vorhanden, hat custom_thresholds Vorrang vor sensor.thresholds.
+interface ThresholdSet {
+  warning_min?: number | null
+  warning_max?: number | null
+  critical_min?: number | null
+  critical_max?: number | null
+}
+const effectiveThresholds = computed<ThresholdSet | null>(() => {
+  const sensor = resolvedSensor.value as (MockSensor & {
+    alert_config?: { custom_thresholds?: ThresholdSet | null } | null
+    thresholds?: ThresholdSet | null
+  }) | null
+  if (!sensor) return null
+  const custom = sensor.alert_config?.custom_thresholds
+  if (custom && (
+    custom.warning_min != null ||
+    custom.warning_max != null ||
+    custom.critical_min != null ||
+    custom.critical_max != null
+  )) {
+    return custom
+  }
+  return sensor.thresholds ?? null
+})
 
 // Unit from SENSOR_TYPE_CONFIG (NOT from API response)
 const unit = computed(() => {
@@ -166,7 +207,14 @@ function fmt(value: number | null): string {
     <template v-else-if="stats">
       <!-- Header -->
       <div class="statistics-widget__header">
-        <span class="statistics-widget__title">{{ title || sensorLabel }}</span>
+        <span class="statistics-widget__title">
+          {{ title || sensorLabel }}
+          <span
+            v-if="isSnapshot"
+            class="statistics-widget__snapshot-badge"
+            title="Snapshot-Sensor (Punktmessungen)"
+          >Snapshot</span>
+        </span>
         <span class="statistics-widget__range">{{ TIME_RANGE_LABELS[timeRange] ?? timeRange }}</span>
       </div>
 
@@ -186,10 +234,17 @@ function fmt(value: number | null): string {
         </div>
       </div>
 
-      <!-- Footer: Count -->
+      <!-- Footer: Count + Threshold-Hinweis -->
       <div class="statistics-widget__footer">
         <span class="statistics-widget__count">
           {{ formatNumber(stats.reading_count, 0) }} Messwerte
+        </span>
+        <span
+          v-if="effectiveThresholds"
+          class="statistics-widget__thresholds"
+          :title="`Schwellen: warn ${effectiveThresholds.warning_min ?? '—'}/${effectiveThresholds.warning_max ?? '—'}, crit ${effectiveThresholds.critical_min ?? '—'}/${effectiveThresholds.critical_max ?? '—'}`"
+        >
+          Schwellen aktiv
         </span>
       </div>
 
@@ -319,6 +374,25 @@ function fmt(value: number | null): string {
 .statistics-widget__count {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+}
+
+.statistics-widget__thresholds {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.statistics-widget__snapshot-badge {
+  display: inline-block;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 0 var(--space-1);
+  margin-left: var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg, rgba(251, 191, 36, 0.15));
+  color: var(--color-warning, #fbbf24);
+  letter-spacing: 0.02em;
+  vertical-align: middle;
 }
 
 .statistics-widget__quality {
