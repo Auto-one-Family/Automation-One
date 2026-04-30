@@ -37,6 +37,7 @@ from .diagnostics import router as diagnostics_router
 from .zone_context import router as zone_context_router
 from .calibration_sessions import router as calibration_sessions_router
 from .component_export import router as component_export_router
+from .multispeq import router as multispeq_router
 from .schema_registry import router as schema_registry_router
 
 # PLANNED routers - stubs with no endpoints yet, included for discoverability.
@@ -79,6 +80,7 @@ api_v1_router.include_router(zone_context_router)  # Phase K3 - Zone Context Dat
 api_v1_router.include_router(component_export_router)  # Phase K4 - AI-Ready Export
 api_v1_router.include_router(schema_registry_router)  # Phase K4 L0.2 - Schema Registry
 api_v1_router.include_router(calibration_sessions_router)  # S-P3 - Calibration Sessions
+api_v1_router.include_router(multispeq_router)  # AUT-217 - MultispeQ Ingress
 
 # Export individual routers for direct access if needed
 __all__ = [
@@ -96,6 +98,7 @@ __all__ = [
     "kaiser_router",
     "logic_router",
     "logs_router",
+    "multispeq_router",
     "notifications_router",
     "intent_outcomes_router",
     "plants_router",
