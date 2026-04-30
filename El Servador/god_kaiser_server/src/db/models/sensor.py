@@ -274,6 +274,14 @@ class SensorConfig(Base, TimestampMixin):
         doc="Detailed error message if config_status=failed",
     )
 
+    sensor_kind: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="continuous",
+        server_default="continuous",
+        doc="Sensor kind: continuous (MQTT stream) or snapshot (manual, e.g. MultispeQ)",
+    )
+
     # Relationships
     esp: Mapped["ESPDevice"] = relationship(
         "ESPDevice",
@@ -431,6 +439,15 @@ class SensorData(Base):
         String(128),
         nullable=True,
         doc="Device name at measurement time (from esp_devices.name)",
+    )
+
+    # Plant association (MultispeQ snapshot data — AUT-222)
+    plant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("plants.plant_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        doc="Plant FK (nullable — only set for MultispeQ snapshot sensor_data rows)",
     )
 
     # Time-Series Optimized Indices

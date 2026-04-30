@@ -80,13 +80,28 @@ SENSOR_TYPE_MAPPING: Dict[str, str] = {
     # Flow sensor (Phase 3)
     "flow": "flow",
     "yfs201": "flow",
+    # MultispeQ snapshot sensors (VIRTUAL, via HTTP import, GPIO 200-249)
+    "phi2": "phi2",
+    "fv_fm": "fv_fm",
+    "npqt": "npqt",
+    "lef": "lef",
+    "par_internal": "par_internal",
+    "ppfd": "ppfd",
+    "chlorophyll_spad": "chlorophyll_spad",
+    "leaf_temp": "leaf_temp",
+    "anthocyanin_index": "anthocyanin_index",
 }
 
 
 # Virtual Sensor Types: computed/event-driven, never scheduled by the simulation scheduler.
 # These sensors must not appear in simulation_config.sensors and must not receive
 # scheduled MQTT publishes. They are calculated on-the-fly from other sensor readings.
-VIRTUAL_SENSOR_TYPES: set[str] = {"vpd"}
+VIRTUAL_SENSOR_TYPES: set[str] = {
+    "vpd",
+    "phi2", "fv_fm", "npqt", "lef",
+    "par_internal", "ppfd",
+    "chlorophyll_spad", "leaf_temp", "anthocyanin_index",
+}
 
 
 # Multi-Value Sensor Definitions
@@ -186,6 +201,16 @@ SENSOR_TYPE_MOCK_DEFAULTS: Dict[str, Dict[str, object]] = {
     "flow": {"raw_value": 0.0, "unit": "L/min"},
     # VPD: computed from temperature + humidity (optimal range ~0.8-1.2 kPa)
     "vpd": {"raw_value": 1.0, "unit": "kPa"},
+    # MultispeQ photosynthesis snapshot sensors
+    "phi2": {"raw_value": 0.75, "unit": "Φ"},
+    "fv_fm": {"raw_value": 0.80, "unit": "Fv/Fm"},
+    "npqt": {"raw_value": 0.30, "unit": "NPQt"},
+    "lef": {"raw_value": 120.0, "unit": "µmol/(m²·s)"},
+    "par_internal": {"raw_value": 800.0, "unit": "µmol/(m²·s)"},
+    "ppfd": {"raw_value": 800.0, "unit": "µmol/(m²·s)"},
+    "chlorophyll_spad": {"raw_value": 40.0, "unit": "SPAD"},
+    "leaf_temp": {"raw_value": 22.0, "unit": "°C"},
+    "anthocyanin_index": {"raw_value": 0.15, "unit": "ACI"},
 }
 
 

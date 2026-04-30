@@ -25,6 +25,7 @@ from . import (  # noqa: F401
     library,
     logic,
     notification,  # Notification + Preferences (Phase 4A.1)
+    plant,  # Plants + Cannabis extension + Lifecycle events (AUT-222)
     plugin,  # Plugin configs + execution history (Phase 4C)
     sensor,
     sensor_type_defaults,  # Sensor type default configuration (Phase 2A)
@@ -64,6 +65,11 @@ from .notification import (
     NotificationSeverity,
     NotificationSource,
 )  # noqa: F401
+from .plant import (
+    Plant,
+    PlantCannabisExtension,
+    PlantLifecycleEvent,
+)  # noqa: F401
 from .sensor import SensorConfig, SensorData  # noqa: F401
 from .sensor_type_defaults import SensorTypeDefaults  # noqa: F401
 from .plugin import PluginConfig, PluginExecution  # noqa: F401
@@ -94,6 +100,7 @@ __all__ = [
     "library",
     "logic",
     "notification",
+    "plant",
     "plugin",
     "sensor",
     "sensor_type_defaults",
@@ -135,6 +142,9 @@ __all__ = [
     "NotificationPreferences",
     "NotificationSeverity",
     "NotificationSource",
+    "Plant",
+    "PlantCannabisExtension",
+    "PlantLifecycleEvent",
     "SensorConfig",
     "SensorData",
     "SensorTypeDefaults",

@@ -1909,6 +1909,10 @@ class HeartbeatHandler:
                 logger.debug("Skipping config push for offline ESP %s", esp_device.device_id)
                 return False
 
+            if esp_device.status == "virtual":
+                logger.debug("Skipping config push for virtual ESP %s", esp_device.device_id)
+                return False
+
             from ...db.repositories import SensorRepository, ActuatorRepository
 
             sensor_repo = SensorRepository(session)
@@ -2246,6 +2250,8 @@ class HeartbeatHandler:
                 timeout_threshold = now - timedelta(seconds=HEARTBEAT_TIMEOUT_SECONDS)
 
                 for device in online_devices:
+                    if device.status == "virtual":
+                        continue  # Virtual devices have no heartbeat, skip timeout check
                     last_seen = device.last_seen
                     if last_seen:
                         if last_seen.tzinfo is None:

@@ -14,6 +14,7 @@ from .esp_heartbeat_repo import ESPHeartbeatRepository
 from .esp_repo import ESPRepository
 from .logic_repo import LogicRepository
 from .notification_repo import NotificationPreferencesRepository, NotificationRepository
+from .plant_repo import PlantRepository
 from .sensor_repo import SensorRepository
 from .sensor_type_defaults_repo import SensorTypeDefaultsRepository
 from .subzone_repo import SubzoneRepository
@@ -40,6 +41,7 @@ __all__ = [
     "LogicRepository",
     "NotificationPreferencesRepository",
     "NotificationRepository",
+    "PlantRepository",
     "SubzoneRepository",
     "TokenBlacklistRepository",
     "SystemConfigRepository",
