@@ -14,7 +14,7 @@ Usage:
     sht31_def = get_multi_value_sensor_def("sht31")  # Returns multi-value definition
 """
 
-from typing import Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from ..core.logging_config import get_logger
 
@@ -166,6 +166,35 @@ MULTI_VALUE_SENSORS: Dict[str, MultiValueSensorDefinition] = {
     # Future multi-value sensors can be added here:
     # "scd30": { ... },  # CO2 + Temp + Humidity
 }
+
+
+# MultispeQ virtual multi-value "device" (HTTP import, GPIO 200+).
+# This entry uses an extended schema (`value_type`, `unit`, `gpio_offset`) that
+# differs from the hardware MultiValueSensorDefinition above because MultispeQ
+# values are imported as snapshots (no I2C address, no SDA/SCL pins). The list
+# is consumed by the MultispeQ parser/import pipeline (AUT-212).
+_MULTISPEQ_VALUE_DEFS: List[Dict[str, Any]] = [
+    {"value_type": "phi2", "unit": "Φ", "gpio_offset": 0},
+    {"value_type": "fv_fm", "unit": "Fv/Fm", "gpio_offset": 1},
+    {"value_type": "npqt", "unit": "NPQt", "gpio_offset": 2},
+    {"value_type": "lef", "unit": "μmol e⁻/m²/s", "gpio_offset": 3},
+    {"value_type": "par_internal", "unit": "μmol/m²/s", "gpio_offset": 4},
+    {"value_type": "ppfd", "unit": "μmol/m²/s", "gpio_offset": 5},
+    {"value_type": "chlorophyll_spad", "unit": "SPAD", "gpio_offset": 6},
+    {"value_type": "leaf_temp", "unit": "°C", "gpio_offset": 7},
+    {"value_type": "anthocyanin_index", "unit": "ARI", "gpio_offset": 8},
+]
+
+# Register MultispeQ in MULTI_VALUE_SENSORS without breaking the hardware
+# schema consumers (expand_multi_value, get_all_value_types_for_device, ...).
+# The entry is added only if not already present so re-imports stay idempotent.
+if "multispeq" not in MULTI_VALUE_SENSORS:
+    MULTI_VALUE_SENSORS["multispeq"] = {  # type: ignore[typeddict-item]
+        "device_type": "virtual_http",
+        "device_address": 0,
+        "values": _MULTISPEQ_VALUE_DEFS,  # type: ignore[typeddict-item]
+        "i2c_pins": None,
+    }
 
 
 # Plausible physical default start values for mock sensors.
@@ -362,10 +391,13 @@ def get_device_type_from_sensor_type(sensor_type: str) -> Optional[str]:
     """
     normalized = normalize_sensor_type(sensor_type)
 
-    # Check if this sensor type belongs to a multi-value sensor
+    # Check if this sensor type belongs to a multi-value sensor.
+    # Hardware sensors expose ``sensor_type`` per value; the MultispeQ entry
+    # uses ``value_type`` (extended schema), so we accept both.
     for device_type, definition in MULTI_VALUE_SENSORS.items():
         for value_def in definition["values"]:
-            if value_def["sensor_type"] == normalized:
+            value_type_key = value_def.get("sensor_type") or value_def.get("value_type")
+            if value_type_key == normalized:
                 return device_type
 
     return None
@@ -403,13 +435,17 @@ def expand_multi_value(
 
     configs: List[dict] = []
     for value_def in definition["values"]:
-        name_suffix = value_def["name"]
-        sensor_name = f"{user_name} {name_suffix}" if user_name else value_def["sensor_type"]
+        # Hardware schema uses ``sensor_type`` + ``name``; the MultispeQ entry
+        # uses ``value_type`` and has no friendly name. Fall back gracefully so
+        # both schemas are supported by the same expansion helper.
+        sensor_type = value_def.get("sensor_type") or value_def.get("value_type", "")
+        name_suffix = value_def.get("name") or sensor_type
+        sensor_name = f"{user_name} {name_suffix}" if user_name else sensor_type
         configs.append(
             {
-                "sensor_type": value_def["sensor_type"],
+                "sensor_type": sensor_type,
                 "name": sensor_name,
-                "unit": value_def["unit"],
+                "unit": value_def.get("unit", ""),
                 **common_fields,
             }
         )
@@ -434,7 +470,10 @@ def get_all_value_types_for_device(device_type: str) -> List[str]:
     if not definition:
         return []
 
-    return [value_def["sensor_type"] for value_def in definition["values"]]
+    return [
+        value_def.get("sensor_type") or value_def.get("value_type", "")
+        for value_def in definition["values"]
+    ]
 
 
 def get_i2c_address(device_type: str, default_address: Optional[int] = None) -> Optional[int]:
