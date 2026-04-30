@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .common import BaseResponse
 
-
 # Valid values for device_scope
 VALID_DEVICE_SCOPES = ["zone_local", "multi_zone", "mobile"]
 VALID_CONTEXT_SOURCES = ["manual", "sequence", "mqtt"]

@@ -21,9 +21,10 @@ if ! command -v wokwi-cli >/dev/null 2>&1; then
   export PATH="$HOME/.wokwi/bin:$HOME/bin:$PATH"
 fi
 
-INSTALLED_VERSION="$(wokwi-cli --short-version 2>/dev/null || true)"
+INSTALLED_VERSION="$(wokwi-cli --short-version 2>/dev/null | tr -d '\r' | head -1 || true)"
 if [[ -z "${INSTALLED_VERSION}" ]]; then
-  INSTALLED_VERSION="$(wokwi-cli --version | awk '{print $NF}' | tr -d '\r' || true)"
+  # e.g. "wokwi-cli version 0.26.1 (9d71b975b7eb)" — compare semver only, not build hash
+  INSTALLED_VERSION="$(wokwi-cli --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 | tr -d '\r' || true)"
 fi
 
 if [[ -z "${INSTALLED_VERSION}" ]]; then

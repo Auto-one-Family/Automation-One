@@ -36,6 +36,7 @@ import {
   getNotificationCategoryLabel,
 } from '@/utils/labels'
 import { buildEspContextRoute } from '@/utils/notificationNavigation'
+import AlertAuditLines from '@/components/notifications/AlertAuditLines.vue'
 import type { NotificationDTO } from '@/api/notifications'
 
 type QuickAlertFilter = 'active' | 'acknowledged' | 'all'
@@ -321,7 +322,7 @@ function handleShowAll(): void {
         :class="['qa-alert-panel__filter', { 'qa-alert-panel__filter--active': statusFilter === 'acknowledged' }]"
         @click="statusFilter = 'acknowledged'"
       >
-        Gesehen
+        Bestätigt
       </button>
       <button
         :class="['qa-alert-panel__filter', { 'qa-alert-panel__filter--active': statusFilter === 'all' }]"
@@ -404,6 +405,11 @@ function handleShowAll(): void {
           <div v-if="expandedId === alert.id" class="alert-item__details">
             <div v-if="alert.body" class="alert-item__body">{{ alert.body }}</div>
             <div class="alert-item__detail-grid">
+              <AlertAuditLines
+                :acknowledged-at="alert.acknowledged_at"
+                :acknowledged-by="alert.acknowledged_by"
+                :resolved-at="alert.resolved_at"
+              />
               <div v-if="alert.severity" class="alert-item__detail">
                 <component
                   :is="alert.severity === 'critical' || alert.severity === 'warning' ? AlertTriangle : Info"

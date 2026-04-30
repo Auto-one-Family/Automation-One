@@ -763,6 +763,40 @@ class TopicBuilder:
         return None
 
     @staticmethod
+    def parse_emergency_ack_topic(topic: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse emergency application-ACK topic (AUT-118).
+
+        Expected: kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency/ack
+        """
+        pattern = r"^kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/actuator/emergency/ack$"
+        match = re.match(pattern, topic)
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "type": "emergency_ack",
+            }
+        return None
+
+    @staticmethod
+    def parse_recovery_confirm_topic(topic: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse recovery_confirm topic (AUT-118).
+
+        Expected: kaiser/{kaiser_id}/esp/{esp_id}/actuator/recovery_confirm
+        """
+        pattern = r"^kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/actuator/recovery_confirm$"
+        match = re.match(pattern, topic)
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "type": "recovery_confirm",
+            }
+        return None
+
+    @staticmethod
     def parse_intent_outcome_lifecycle_topic(topic: str) -> Optional[Dict[str, Any]]:
         """
         Parse CONFIG_PENDING lifecycle subtopic (not canonical intent_outcome JSON).
@@ -1003,6 +1037,29 @@ class TopicBuilder:
         return f"kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency"
 
     @staticmethod
+    def build_emergency_ack_topic(esp_id: str, kaiser_id: str = "god") -> str:
+        """
+        ESP → Server: application-level emergency execution ACK (AUT-118).
+
+        Parallel to ``intent_outcome``; uses MQTT QoS 1 for observability when
+        ``intent_outcome`` could not be delivered while offline.
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency/ack
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency/ack"
+
+    @staticmethod
+    def build_recovery_confirm_topic(esp_id: str, kaiser_id: str = "god") -> str:
+        """
+        ESP → Server: confirms successful clear_emergency on device (AUT-118).
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/actuator/recovery_confirm
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/actuator/recovery_confirm"
+
+    @staticmethod
     def build_system_response_topic(esp_id: str, kaiser_id: str = "god") -> str:
         """
         Build system command response topic.
@@ -1143,6 +1200,8 @@ class TopicBuilder:
             cls.parse_pi_enhanced_request_topic,
             cls.parse_zone_ack_topic,
             cls.parse_subzone_ack_topic,
+            cls.parse_emergency_ack_topic,
+            cls.parse_recovery_confirm_topic,
         ]
 
         for parser in parsers:

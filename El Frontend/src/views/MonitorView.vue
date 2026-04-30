@@ -12,7 +12,7 @@ defineOptions({ name: 'MonitorView' })
  * L3 SlideOver — Sensor detail with historical time series
  */
 
-import { ref, computed, onMounted, onUnmounted, watch, nextTick, type ComponentPublicInstance } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent, type ComponentPublicInstance } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
@@ -26,6 +26,7 @@ import type { ZoneHealthStatus } from '@/composables/useZoneKPIs'
 import { useSubzoneResolver } from '@/composables/useSubzoneResolver'
 import { useSparklineCache } from '@/composables/useSparklineCache'
 import { useWebSocket } from '@/composables/useWebSocket'
+import { useWebSocketStatus } from '@/composables/useWebSocketStatus'
 import {
   createMonitorRecoveryOrchestrator,
   resolveMonitorConnectivityState,
@@ -40,6 +41,7 @@ import {
   formatSubzoneKpiLine,
 } from '@/utils/sensorDefaults'
 import { getActuatorTypeInfo } from '@/utils/labels'
+import { storeToRefs } from 'pinia'
 import { useDashboardStore, type DashboardLayout } from '@/shared/stores/dashboard.store'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { formatRelativeTime, qualityToStatus, DATA_STALE_THRESHOLD_S } from '@/utils/formatters'
@@ -47,10 +49,22 @@ import { calculateTrend } from '@/utils/trendUtils'
 import type { TrendDirection } from '@/utils/trendUtils'
 import { sensorsApi } from '@/api/sensors'
 import { zonesApi } from '@/api/zones'
-import type { SensorReading, SensorStats } from '@/types'
+import type { MockSensor, SensorReading, SensorStats } from '@/types'
 import type { ZoneMonitorData } from '@/types/monitor'
 import type { SensorWithContext, ActuatorWithContext } from '@/composables/useZoneGrouping'
-import { Download, Clock, TrendingUp, TrendingDown, Minus, ListFilter } from 'lucide-vue-next'
+import {
+  Download,
+  Clock,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  ListFilter,
+  ArrowLeft,
+  Activity,
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-vue-next'
 import ZoneTileCard from '@/components/monitor/ZoneTileCard.vue'
 import ZoneTileInsightBlock from '@/components/monitor/ZoneTileInsightBlock.vue'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
@@ -71,17 +85,6 @@ import {
 } from 'chart.js'
 import type { TooltipItem } from 'chart.js'
 import 'chartjs-adapter-date-fns'
-
-ChartJS.register(
-  CategoryScale, LinearScale, PointElement, LineElement,
-  Title, Tooltip, Legend, TimeScale, Filler,
-)
-import {
-  ArrowLeft, Activity, AlertTriangle,
-  ChevronLeft, ChevronRight,
-} from 'lucide-vue-next'
-import type { MockSensor } from '@/types'
-import ViewTabBar from '@/components/common/ViewTabBar.vue'
 import SensorCard from '@/components/devices/SensorCard.vue'
 import ActuatorCard from '@/components/devices/ActuatorCard.vue'
 import SharedSensorRefCard from '@/components/devices/SharedSensorRefCard.vue'
@@ -96,14 +99,50 @@ import { getChartColors } from '@/utils/chartColors'
 import { tokens } from '@/utils/cssTokens'
 import { getZoneTileRenderableWidgets } from '@/utils/zoneTileWidgets'
 
+ChartJS.register(
+  CategoryScale, LinearScale, PointElement, LineElement,
+  Title, Tooltip, Legend, TimeScale, Filler,
+)
+
+/** Async load breaks dev-time circular import / HMR edges that left the component undefined under KeepAlive */
+const ViewTabBar = defineAsyncComponent(() => import('@/components/common/ViewTabBar.vue'))
+
 const router = useRouter()
 const route = useRoute()
 const espStore = useEspStore()
 const zoneStore = useZoneStore()
 const deviceContextStore = useDeviceContextStore()
 const dashStore = useDashboardStore()
+const { sideMonitorPanels, bottomMonitorPanels } = storeToRefs(dashStore)
 const logicStore = useLogicStore()
 const monitorWs = useWebSocket({ autoConnect: true, autoReconnect: true })
+const wsConnectivity = useWebSocketStatus()
+
+const wsBadgeLabel = computed(() => {
+  if (wsConnectivity.isConnected.value) return 'Live'
+  if (wsConnectivity.status.value === 'error') {
+    return 'Verbindungsfehler'
+  }
+  if (wsConnectivity.isConnecting.value || wsConnectivity.showReconnectingUi.value) {
+    const n = wsConnectivity.reconnectAttempts.value
+    return n > 0 ? `Verbindet… (Versuch ${n})` : 'Verbindet…'
+  }
+  if (wsConnectivity.lastDisconnectAt.value) {
+    return `Getrennt seit ${formatRelativeTime(wsConnectivity.lastDisconnectAt.value.toISOString())}`
+  }
+  return 'Nicht verbunden'
+})
+
+const wsBadgeDotClass = computed(() => {
+  if (wsConnectivity.isConnected.value) return 'monitor-ws-badge__dot--live'
+  if (
+    wsConnectivity.isConnecting.value ||
+    wsConnectivity.showReconnectingUi.value
+  ) {
+    return 'monitor-ws-badge__dot--reconnect'
+  }
+  return 'monitor-ws-badge__dot--offline'
+})
 // =============================================================================
 // L1 Zone KPIs (extracted composable)
 // =============================================================================
@@ -1954,8 +1993,18 @@ function handleFabWidgetSelected(widgetType: string) {
 
 <template>
   <div class="monitor-view">
-    <!-- View Tab Bar (Hardware / Monitor / Dashboard) -->
-    <ViewTabBar />
+    <!-- View Tab Bar (Hardware / Monitor / Dashboard) + WS operator indicator (AUT-200) -->
+    <div class="monitor-view__head">
+      <ViewTabBar class="monitor-view__head-tabs" />
+      <div
+        class="monitor-ws-badge"
+        role="status"
+        :aria-label="`Echtzeitverbindung: ${wsBadgeLabel}`"
+      >
+        <span class="monitor-ws-badge__dot" :class="wsBadgeDotClass" aria-hidden="true" />
+        <span class="monitor-ws-badge__text">{{ wsBadgeLabel }}</span>
+      </div>
+    </div>
 
     <!-- L3 Dashboard View (Cross-Zone or Zone-specific) -->
     <template v-if="isDashboardView">
@@ -1963,7 +2012,7 @@ function handleFabWidgetSelected(widgetType: string) {
     </template>
 
     <!-- L1/L2 with optional Side-Panel and Bottom-Panel -->
-    <div v-else class="monitor-layout" :class="{ 'monitor-layout--has-side': dashStore.sideMonitorPanels.length > 0 }">
+    <div v-else class="monitor-layout" :class="{ 'monitor-layout--has-side': sideMonitorPanels.length > 0 }">
       <div class="monitor-layout__main-col">
       <main class="monitor-layout__main">
 
@@ -2392,9 +2441,9 @@ function handleFabWidgetSelected(widgetType: string) {
       </main>
 
       <!-- Bottom-Panel (target.view='monitor', placement='bottom-panel') -->
-      <div v-if="dashStore.bottomMonitorPanels?.length > 0" class="monitor-layout__bottom">
+      <div v-if="bottomMonitorPanels?.length > 0" class="monitor-layout__bottom">
         <InlineDashboardPanel
-          v-for="panel in dashStore.bottomMonitorPanels"
+          v-for="panel in bottomMonitorPanels"
           :key="panel.id"
           :layoutId="panel.id"
           mode="manage"
@@ -2404,9 +2453,9 @@ function handleFabWidgetSelected(widgetType: string) {
       </div>
 
       <!-- Side-Panel (target.view='monitor', placement='side-panel') -->
-      <aside v-if="dashStore.sideMonitorPanels.length > 0" class="monitor-layout__side">
+      <aside v-if="sideMonitorPanels.length > 0" class="monitor-layout__side">
         <InlineDashboardPanel
-          v-for="panel in dashStore.sideMonitorPanels"
+          v-for="panel in sideMonitorPanels"
           :key="panel.id"
           :layoutId="panel.id"
           mode="side-panel"
@@ -2603,7 +2652,68 @@ function handleFabWidgetSelected(widgetType: string) {
   overflow-x: hidden;
 }
 
-/* ViewTabBar hat eigenen margin-bottom; im Monitor steuern wir den Abstand zentral */
+/* Kopfzeile: Tabs + WS-Status (AUT-200) */
+.monitor-view__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.monitor-view__head-tabs {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.monitor-ws-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--glass-bg-l1);
+  border: 1px solid var(--glass-border-l1);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.monitor-ws-badge__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.monitor-ws-badge__dot--live {
+  background: var(--color-status-good);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-status-good) 35%, transparent);
+}
+
+.monitor-ws-badge__dot--reconnect {
+  background: var(--color-warning);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-warning) 35%, transparent);
+}
+
+.monitor-ws-badge__dot--offline {
+  background: var(--color-status-alarm);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-status-alarm) 30%, transparent);
+}
+
+.monitor-ws-badge__text {
+  font-weight: 500;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 640px) {
+  .monitor-ws-badge__text {
+    max-width: 280px;
+  }
+}
+
 .monitor-view :deep(.view-tab-bar) {
   margin-bottom: 0;
 }

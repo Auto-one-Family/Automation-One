@@ -18,7 +18,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .common import BaseResponse
 
-
 # =============================================================================
 # Request Schemas
 # =============================================================================

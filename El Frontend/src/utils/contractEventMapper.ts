@@ -85,6 +85,19 @@ export const WS_EVENT_TYPES = [
   'login_failed',
   'logout',
   'notification',
+  'rule_degraded',
+  'rule_recovered',
+  'events_restored',
+  'esp_reconnect_phase',
+  'config_response_guard_replay',
+  'calibration_session_started',
+  'calibration_session_finalized',
+  'calibration_session_applied',
+  'calibration_session_rejected',
+  'calibration_point_added',
+  'calibration_point_rejected',
+  'calibration_measurement_received',
+  'calibration_measurement_failed',
   'contract_mismatch',
   'contract_unknown_event',
 ] as const
@@ -160,6 +173,19 @@ const EVENT_TYPE_TO_DATASOURCE: Record<string, ContractDataSource> = {
   login_failed: 'audit_log',
   logout: 'audit_log',
   notification: 'audit_log',
+  rule_degraded: 'audit_log',
+  rule_recovered: 'audit_log',
+  events_restored: 'audit_log',
+  esp_reconnect_phase: 'audit_log',
+  config_response_guard_replay: 'audit_log',
+  calibration_session_started: 'audit_log',
+  calibration_session_finalized: 'audit_log',
+  calibration_session_applied: 'audit_log',
+  calibration_session_rejected: 'audit_log',
+  calibration_point_added: 'audit_log',
+  calibration_point_rejected: 'audit_log',
+  calibration_measurement_received: 'audit_log',
+  calibration_measurement_failed: 'audit_log',
   contract_mismatch: 'audit_log',
   contract_unknown_event: 'audit_log',
 }
@@ -308,6 +334,18 @@ export function inferFallbackSeverity(eventType: string, data: Record<string, un
     return 'info'
   }
 
+  if (eventType === 'rule_degraded') {
+    return 'warning'
+  }
+
+  if (eventType === 'rule_recovered') {
+    return 'info'
+  }
+
+  if (eventType === 'events_restored') {
+    return 'info'
+  }
+
   return 'info'
 }
 
@@ -405,6 +443,33 @@ function validateKnownEventSchema(eventType: string, data: Record<string, unknow
 
   if (eventType === 'actuator_config_deleted') {
     if (!extractEspId(data)) return 'actuator_config_deleted ohne esp_id'
+    return null
+  }
+
+  if (eventType === 'events_restored') {
+    if (!hasStringField(data, 'backup_id')) return 'events_restored ohne backup_id'
+    if (typeof data.restored_count !== 'number') return 'events_restored ohne restored_count'
+    return null
+  }
+
+  if (eventType === 'rule_degraded') {
+    if (!hasStringField(data, 'rule_id')) return 'rule_degraded ohne rule_id'
+    return null
+  }
+
+  if (eventType === 'rule_recovered') {
+    if (!hasStringField(data, 'rule_id')) return 'rule_recovered ohne rule_id'
+    return null
+  }
+
+  if (eventType === 'esp_reconnect_phase') {
+    if (!hasStringField(data, 'esp_id')) return 'esp_reconnect_phase ohne esp_id'
+    if (!hasStringField(data, 'phase')) return 'esp_reconnect_phase ohne phase'
+    return null
+  }
+
+  if (eventType === 'config_response_guard_replay') {
+    if (!extractEspId(data)) return 'config_response_guard_replay ohne esp_id/device_id'
     return null
   }
 

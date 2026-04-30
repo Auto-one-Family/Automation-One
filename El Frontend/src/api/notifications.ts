@@ -67,6 +67,9 @@ export interface NotificationListFilters {
   severity?: NotificationSeverity
   category?: NotificationCategory
   source?: NotificationSource
+  /** Grouped sources: system = manual|system|device_event|autoops (server-side, AUT-196) */
+  source_bucket?: 'system'
+  status?: AlertStatus
   is_read?: boolean
   page?: number
   page_size?: number

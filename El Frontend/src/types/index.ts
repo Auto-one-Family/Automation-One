@@ -427,6 +427,7 @@ export interface MockActuatorConfig {
  * - config_handler.py       → config_response
  * - zone_ack_handler.py     → zone_assignment
  * - heartbeat_handler.py    → esp_health
+ * - audit_backup_service.py → events_restored (Backup-Restore)
  */
 export type MessageType =
   // Core sensor/actuator events
@@ -491,6 +492,8 @@ export type MessageType =
   // Rule degradation lifecycle (AUT-111)
   | 'rule_degraded'
   | 'rule_recovered'
+  // Backup restore notify (audit_backup_service → WS broadcast)
+  | 'events_restored'
 
 export interface MqttMessage {
   id: string

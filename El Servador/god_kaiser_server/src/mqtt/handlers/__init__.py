@@ -7,6 +7,7 @@ from . import calibration_response_handler
 from . import config_handler
 from . import diagnostics_handler
 from . import discovery_handler
+from . import emergency_ack_handler
 from . import error_handler
 from . import heartbeat_handler
 from . import heartbeat_metrics_handler
@@ -14,6 +15,7 @@ from . import intent_outcome_handler
 from . import intent_outcome_lifecycle_handler
 from . import lwt_handler
 from . import queue_pressure_handler
+from . import recovery_confirm_handler
 from . import sensor_handler
 from . import subzone_ack_handler
 from . import zone_ack_handler
@@ -26,6 +28,7 @@ __all__ = [
     "config_handler",
     "diagnostics_handler",
     "discovery_handler",
+    "emergency_ack_handler",
     "error_handler",
     "heartbeat_handler",
     "heartbeat_metrics_handler",
@@ -33,6 +36,7 @@ __all__ = [
     "intent_outcome_lifecycle_handler",
     "lwt_handler",
     "queue_pressure_handler",
+    "recovery_confirm_handler",
     "sensor_handler",
     "subzone_ack_handler",
     "zone_ack_handler",

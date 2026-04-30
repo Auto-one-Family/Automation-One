@@ -12,7 +12,7 @@
  */
 
 import { ref, computed, watch } from 'vue'
-import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp } from 'lucide-vue-next'
+import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp, Filter } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import NotificationItem from '@/components/notifications/NotificationItem.vue'
 import NotificationPreferences from '@/components/notifications/NotificationPreferences.vue'
@@ -32,8 +32,14 @@ const alertStore = useAlertCenterStore()
 const authStore = useAuthStore()
 
 type StatusFilter = 'all' | 'active' | 'acknowledged' | 'resolved'
-const activeStatusFilter = ref<StatusFilter>('all')
 const isResolvingAll = ref(false)
+const advancedSourcesOpen = ref(false)
+
+function applyActiveCriticalPreset(): void {
+  inboxStore.activeFilter = 'critical'
+  inboxStore.lifecycleFilter = 'active'
+  inboxStore.setSourceFilter(null)
+}
 
 const filterTabs: { key: InboxFilter; label: string }[] = [
   { key: 'all', label: 'Alle' },
@@ -44,7 +50,7 @@ const filterTabs: { key: InboxFilter; label: string }[] = [
 
 /** Source filter chips: Alle | Sensor | Infrastruktur | Aktor | Regel | System */
 const sourceChips: { value: SourceFilterValue; label: string }[] = [
-  { value: null, label: 'Alle' },
+  { value: null, label: 'Alle Quellen' },
   { value: 'sensor_threshold', label: 'Sensor' },
   { value: 'grafana', label: 'Infrastruktur' },
   { value: 'mqtt_handler', label: 'Aktor' },
@@ -57,30 +63,20 @@ const sourceChips: { value: SourceFilterValue; label: string }[] = [
 
 const statusTabs = computed(() => {
   const stats = alertStore.alertStats
-  const active = stats?.active_count ?? inboxStore.notifications.filter(n => n.status === 'active').length
-  const ack = stats?.acknowledged_count ?? inboxStore.notifications.filter(n => n.status === 'acknowledged').length
-  const resolved = inboxStore.notifications.filter(n => n.status === 'resolved').length
+  const active = stats?.active_count ?? 0
+  const ack = stats?.acknowledged_count ?? 0
 
   return [
     { key: 'all' as StatusFilter, label: 'Alle' },
     { key: 'active' as StatusFilter, label: `Aktiv (${active})` },
-    { key: 'acknowledged' as StatusFilter, label: `Gesehen (${ack})` },
-    { key: 'resolved' as StatusFilter, label: `Erledigt (${resolved})` },
+    { key: 'acknowledged' as StatusFilter, label: `Bestätigt (${ack})` },
+    { key: 'resolved' as StatusFilter, label: 'Erledigt' },
   ]
 })
 
-const filteredGroupedNotifications = computed(() => {
-  if (activeStatusFilter.value === 'all') {
-    return inboxStore.groupedNotifications
-  }
-
-  return inboxStore.groupedNotifications
-    .map(group => ({
-      ...group,
-      items: group.items.filter(n => n.status === activeStatusFilter.value),
-    }))
-    .filter(group => group.items.length > 0)
-})
+function setLifecycleFilter(key: StatusFilter): void {
+  inboxStore.lifecycleFilter = key === 'all' ? 'all' : key
+}
 
 function handleClose(): void {
   inboxStore.isDrawerOpen = false
@@ -128,14 +124,11 @@ async function loadEmailLog(): Promise<void> {
 
 const hasEmailLog = computed(() => emailLog.value.length > 0)
 
-// Refresh list when drawer opens
 watch(
   () => inboxStore.isDrawerOpen,
   (isOpen) => {
-    if (isOpen) {
-      inboxStore.loadInitial()
-      activeStatusFilter.value = 'all'
-      if (authStore.isAdmin) loadEmailLog()
+    if (isOpen && authStore.isAdmin) {
+      void loadEmailLog()
     }
   },
 )
@@ -152,6 +145,8 @@ watch(
     <template #default>
       <!-- Header Actions Row -->
       <div class="drawer__header-actions">
+      <!-- Primary row: severity + lifecycle + preset -->
+      <div class="drawer__primary-toolbar">
         <div class="drawer__tabs">
           <button
             v-for="tab in filterTabs"
@@ -165,8 +160,35 @@ watch(
             {{ tab.label }}
           </button>
         </div>
+        <div class="drawer__status-tabs drawer__status-tabs--inline">
+          <button
+            v-for="tab in statusTabs"
+            :key="tab.key"
+            :class="[
+              'drawer__status-tab',
+              {
+                'drawer__status-tab--active':
+                  tab.key === 'all'
+                    ? inboxStore.lifecycleFilter === 'all'
+                    : inboxStore.lifecycleFilter === tab.key,
+              },
+            ]"
+            @click="setLifecycleFilter(tab.key)"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
+        <button
+          type="button"
+          class="drawer__preset-btn"
+          title="Nur aktive kritische Alerts"
+          @click="applyActiveCriticalPreset"
+        >
+          Kritisch · aktiv
+        </button>
+      </div>
 
-        <div class="drawer__actions">
+      <div class="drawer__actions-row">
           <button
             class="drawer__action-btn"
             title="Alle aktiven Alerts erledigen"
@@ -188,34 +210,33 @@ watch(
         </div>
       </div>
 
-      <!-- Status Filter Tabs -->
-      <div class="drawer__status-tabs">
+      <!-- Advanced: source chips (collapsed by default) -->
+      <div class="drawer__advanced">
         <button
-          v-for="tab in statusTabs"
-          :key="tab.key"
-          :class="[
-            'drawer__status-tab',
-            { 'drawer__status-tab--active': activeStatusFilter === tab.key },
-          ]"
-          @click="activeStatusFilter = tab.key"
+          type="button"
+          class="drawer__advanced-toggle"
+          @click="advancedSourcesOpen = !advancedSourcesOpen"
         >
-          {{ tab.label }}
+          <Filter class="drawer__advanced-icon" />
+          <span>Quelle filtern</span>
+          <component
+            :is="advancedSourcesOpen ? ChevronUp : ChevronDown"
+            class="drawer__advanced-chevron"
+          />
         </button>
-      </div>
-
-      <!-- Source Filter Chips -->
-      <div class="drawer__source-chips">
-        <button
-          v-for="chip in sourceChips"
-          :key="chip.value ?? 'all'"
-          :class="[
-            'drawer__source-chip',
-            { 'drawer__source-chip--active': inboxStore.sourceFilter === chip.value },
-          ]"
-          @click="inboxStore.setSourceFilter(chip.value)"
-        >
-          {{ chip.label }}
-        </button>
+        <div v-show="advancedSourcesOpen" class="drawer__source-chips">
+          <button
+            v-for="chip in sourceChips"
+            :key="chip.value ?? 'all'"
+            :class="[
+              'drawer__source-chip',
+              { 'drawer__source-chip--active': inboxStore.sourceFilter === chip.value },
+            ]"
+            @click="inboxStore.setSourceFilter(chip.value)"
+          >
+            {{ chip.label }}
+          </button>
+        </div>
       </div>
 
       <!-- Notification List -->
@@ -227,13 +248,13 @@ watch(
 
         <!-- Empty State -->
         <div
-          v-else-if="filteredGroupedNotifications.length === 0"
+          v-else-if="inboxStore.groupedNotifications.length === 0"
           class="drawer__empty"
         >
           <span class="drawer__empty-icon">🔔</span>
           <span class="drawer__empty-text">Keine Benachrichtigungen</span>
           <span class="drawer__empty-sub">
-            {{ inboxStore.activeFilter !== 'all' || inboxStore.sourceFilter
+            {{ inboxStore.activeFilter !== 'all' || inboxStore.sourceFilter || inboxStore.lifecycleFilter !== 'all'
               ? 'Kein Ergebnis für diesen Filter'
               : 'Hier erscheinen zukünftige Alarme und Ereignisse' }}
           </span>
@@ -242,7 +263,7 @@ watch(
         <!-- Grouped Notifications -->
         <template v-else>
           <div
-            v-for="group in filteredGroupedNotifications"
+            v-for="group in inboxStore.groupedNotifications"
             :key="group.label"
             class="drawer__group"
           >
@@ -330,11 +351,92 @@ watch(
 /* Header Actions */
 .drawer__header-actions {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: var(--space-2);
   padding-bottom: var(--space-3);
   border-bottom: 1px solid var(--glass-border);
   margin-bottom: var(--space-3);
+}
+
+.drawer__primary-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.drawer__status-tabs--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding-bottom: 0;
+  border-bottom: none;
+  margin-bottom: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.drawer__preset-btn {
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xxs);
+  font-weight: 600;
+  color: var(--color-iridescent-2);
+  background: rgba(129, 140, 248, 0.08);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.drawer__preset-btn:hover {
+  background: rgba(129, 140, 248, 0.14);
+  border-color: var(--glass-border-hover);
+}
+
+.drawer__actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+.drawer__advanced {
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--glass-border);
+  padding-bottom: var(--space-3);
+}
+
+.drawer__advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.drawer__advanced-toggle:hover {
+  color: var(--color-text-primary);
+}
+
+.drawer__advanced-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.drawer__advanced-chevron {
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  color: var(--color-text-muted);
 }
 
 /* Filter Tabs */
@@ -372,13 +474,7 @@ watch(
 }
 
 /* Action Buttons */
-.drawer__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.drawer__action-btn {
+.drawer__actions-row .drawer__action-btn {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);

@@ -28,7 +28,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .common import BaseResponse, PaginatedResponse, TimestampMixin
 
-
 # =============================================================================
 # Escalation Policy Validation (AUT-111)
 # =============================================================================

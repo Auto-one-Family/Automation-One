@@ -9,7 +9,7 @@
  * Active tab is determined by the current route path.
  */
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { LayoutDashboard, Activity, PenTool } from 'lucide-vue-next'
 
 const route = useRoute()

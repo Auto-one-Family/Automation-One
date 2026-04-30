@@ -25,6 +25,7 @@ import {
 } from '@/utils/labels'
 import { useEspStore } from '@/stores/esp'
 import { buildEspContextRoute } from '@/utils/notificationNavigation'
+import AlertAuditLines from '@/components/notifications/AlertAuditLines.vue'
 import type { NotificationDTO } from '@/api/notifications'
 import { GRAFANA_BASE_URL } from '@/composables/useGrafana'
 
@@ -79,7 +80,7 @@ const isAutoResolved = computed(() =>
 const statusLabel = computed(() => {
   switch (props.notification.status) {
     case 'active': return 'Aktiv'
-    case 'acknowledged': return 'Gesehen'
+    case 'acknowledged': return 'Bestätigt'
     case 'resolved': return 'Erledigt'
     default: return ''
   }
@@ -206,6 +207,11 @@ function navigateToCorrelation(): void {
     <Transition name="expand">
       <div v-if="isExpanded" class="item__details">
         <div class="item__detail-grid">
+          <AlertAuditLines
+            :acknowledged-at="notification.acknowledged_at"
+            :acknowledged-by="notification.acknowledged_by"
+            :resolved-at="notification.resolved_at"
+          />
           <div v-if="notification.source" class="item__detail">
             <span class="item__detail-label">Quelle</span>
             <span class="item__detail-value">{{ sourceLabel || notification.source }}</span>
@@ -514,6 +520,10 @@ function navigateToCorrelation(): void {
   grid-template-columns: 1fr 1fr;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
+}
+
+.item__detail--full-width {
+  grid-column: 1 / -1;
 }
 
 .item__detail {

@@ -449,6 +449,39 @@ static void publishSubzoneConfigLaneBusyAck(const char* payload_cstr, const char
                        true);
 }
 
+// AUT-118: QoS 1 transports parallel to intent_outcome (offline-gap mitigation).
+static void publishEmergencyTransportAck(const IntentMetadata& meta, const char* command_label) {
+  if (!mqttClient.isConnected()) {
+    return;
+  }
+  const char* cmd = (command_label != nullptr && strlen(command_label) > 0) ? command_label : "emergency_stop";
+  String corr = String(meta.correlation_id);
+  corr.replace("\\", "\\\\");
+  corr.replace("\"", "\\\"");
+  uint8_t gpio_count = actuatorManager.isInitialized() ? actuatorManager.getActiveActuatorCount() : 0;
+  String payload =
+      String("{\"ts\":") + String(static_cast<unsigned long>(timeManager.getUnixTimestamp())) +
+      ",\"esp_id\":\"" + g_system_config.esp_id + "\",\"correlation_id\":\"" + corr +
+      "\",\"command\":\"" + String(cmd) +
+      "\",\"gpio_count\":" + String(gpio_count) + ",\"outcome\":\"executed\",\"seq\":" +
+      String(mqttClient.getNextSeq()) + "}";
+  mqttClient.publish(String(TopicBuilder::buildEmergencyAckTopic()), payload, 1);
+}
+
+static void publishRecoveryTransportConfirm(const IntentMetadata& meta) {
+  if (!mqttClient.isConnected()) {
+    return;
+  }
+  String corr = String(meta.correlation_id);
+  corr.replace("\\", "\\\\");
+  corr.replace("\"", "\\\"");
+  String payload = String("{\"ts\":") + String(static_cast<unsigned long>(timeManager.getUnixTimestamp())) +
+                   ",\"esp_id\":\"" + g_system_config.esp_id + "\",\"correlation_id\":\"" + corr +
+                   "\",\"command\":\"clear_emergency\",\"state\":\"cleared\",\"seq\":" +
+                   String(mqttClient.getNextSeq()) + "}";
+  mqttClient.publish(String(TopicBuilder::buildRecoveryConfirmTopic()), payload, 1);
+}
+
 static bool hasValidLocalAutonomyConfig() {
   WiFiConfig wifi_config = configManager.getWiFiConfig();
   if (!wifi_config.configured || wifi_config.ssid.length() == 0) {
@@ -995,6 +1028,7 @@ void routeIncomingMessage(const char* t, const char* p) {
                                      "EMERGENCY_STOP_TRIGGERED",
                                      "ESP emergency stop accepted and dispatched",
                                      false);
+                publishEmergencyTransportAck(metadata, "emergency_stop");
             } else if (command == "clear_emergency") {
                 LOG_I(TAG, "╔════════════════════════════════════════╗");
                 LOG_I(TAG, "║  AUTHORIZED EMERGENCY-CLEAR TRIGGERED ║");
@@ -1010,6 +1044,7 @@ void routeIncomingMessage(const char* t, const char* p) {
                                          "EMERGENCY_CLEAR_APPLIED",
                                          "ESP emergency clear applied",
                                          false);
+                    publishRecoveryTransportConfirm(metadata);
                 } else {
                     mqttClient.publish(esp_emergency_topic + "/error",
                                       "{\"error\":\"clear_failed\",\"message\":\"Safety verification failed\",\"seq\":" + String(mqttClient.getNextSeq()) + "}");

@@ -67,9 +67,52 @@ const ACTUATOR_NAMES: Record<string, string> = {
   'valve': 'Ventil',
   'relay': 'Relais',
   'pwm': 'PWM-Ausgang',
+  'digital': 'Digital-Ausgang',
   'light': 'Beleuchtung',
   'fan': 'Lüfter',
   'heater': 'Heizung',
+}
+
+// =============================================================================
+// Actuator status display (MQTT/WS Contract: ESP sendet oft 8‑Bit 0–255;
+// Legacy-Pfade können 0–1 Duty liefern. Server broadcastet state als "on"|"off".)
+// =============================================================================
+
+/**
+ * Ein/Aus aus Payload — niemals rohen String wie boolean behandeln
+ * (non-empty Strings sind in JS truthy → "off" würde fälschlich EIN sein).
+ */
+export function normalizeActuatorOnState(raw: unknown): boolean {
+  if (typeof raw === 'boolean') return raw
+  if (typeof raw === 'string') {
+    const s = raw.trim().toLowerCase()
+    if (s === 'on') return true
+    if (s === 'off') return false
+    if (s === 'pwm') return true
+    if (s === 'error' || s === 'unknown') return false
+  }
+  return Boolean(raw)
+}
+
+/** 0–1 → Prozent 0–100; >1 bis 255 → 8‑Bit-PWM relativ 255 (nicht ×100!). */
+export function actuatorDutyToDisplayPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  if (value >= 0 && value <= 1) {
+    return Math.min(100, Math.max(0, Math.round(value * 100)))
+  }
+  if (value > 1 && value <= 255) {
+    return Math.min(100, Math.max(0, Math.round((value / 255) * 100)))
+  }
+  return Math.min(100, Math.max(0, Math.round(value)))
+}
+
+/** Relais/Ventil/Digital-Ausgang: keine redundanten %-Zusätze wie EIN (0 %) / EIN (100 %). */
+function isBinaryStyleActuator(actuatorType: string, hardwareType?: string): boolean {
+  const a = actuatorType.toLowerCase()
+  const h = (hardwareType || '').toLowerCase()
+  if (a === 'relay' || a === 'valve' || a === 'digital') return true
+  if (h.includes('digital')) return true
+  return false
 }
 
 const CONFIG_ERROR_MESSAGES: Record<string, string> = {
@@ -358,14 +401,20 @@ function transformSensorData(event: UnifiedEvent, data: Record<string, unknown>)
 
 function transformActuatorStatus(event: UnifiedEvent, data: Record<string, unknown>): TransformedMessage {
   const actuatorType = (data.actuator_type || event.device_type || 'actuator') as string
-  const state = data.state as boolean
+  const hwType = typeof data.hardware_type === 'string' ? data.hardware_type : undefined
+  const state = normalizeActuatorOnState(data.state)
   const value = typeof data.value === 'number' ? data.value : undefined
   const gpio = event.gpio ?? data.gpio
   const commandSource = typeof data.command_source === 'string' ? data.command_source.trim() : ''
 
   const actuatorName = ACTUATOR_NAMES[actuatorType.toLowerCase()] || actuatorType
   const stateStr = state ? 'EIN' : 'AUS'
-  const valueStr = value !== undefined ? ` (${Math.round(value * 100)}%)` : ''
+  const binary = isBinaryStyleActuator(actuatorType, hwType)
+  let valueStr = ''
+  if (value !== undefined && !binary) {
+    const pct = actuatorDutyToDisplayPercent(value)
+    valueStr = ` (${pct}%)`
+  }
 
   return {
     type: 'actuator_status',
@@ -541,7 +590,10 @@ function transformActuatorCommand(event: UnifiedEvent, data: Record<string, unkn
   const value = data.value as number | undefined
   const issuedBy = (data.issued_by || 'API') as string
 
-  const valueStr = value !== undefined && value !== 1.0 ? ` (${Math.round(value * 100)}%)` : ''
+  let valueStr = ''
+  if (value !== undefined && value !== 1.0 && value !== 0.0) {
+    valueStr = ` (${actuatorDutyToDisplayPercent(value)}%)`
+  }
 
   return {
     type: 'actuator_command',

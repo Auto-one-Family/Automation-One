@@ -14,7 +14,7 @@
  */
 
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import {
   notificationsApi,
   type AlertStatus,
@@ -22,6 +22,7 @@ import {
   type NotificationSeverity,
   type NotificationListFilters,
 } from '@/api/notifications'
+import router from '@/router'
 import { createLogger } from '@/utils/logger'
 import { useAuthStore } from '@/shared/stores/auth.store'
 
@@ -29,6 +30,9 @@ const logger = createLogger('NotificationInboxStore')
 
 /** Filter tabs in the drawer */
 export type InboxFilter = 'all' | 'critical' | 'warning' | 'info'
+
+/** Alert lifecycle filter (server-side list; 'all' = no status query) */
+export type InboxLifecycleFilter = 'all' | AlertStatus
 
 /** Source filter: null = all, or backend source value. "__system__" = manual|system|device_event|autoops */
 export type SourceFilterValue = string | null
@@ -57,6 +61,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
   const isDrawerOpen = ref(false)
   const isPreferencesOpen = ref(false)
   const activeFilter = ref<InboxFilter>('all')
+  const lifecycleFilter = ref<InboxLifecycleFilter>('all')
   const sourceFilter = ref<SourceFilterValue>(null)
   const isLoading = ref(false)
   const hasMore = ref(true)
@@ -76,39 +81,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
   // Computed
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /** Filtered notifications based on active tab (severity) and source filter */
-  const filteredNotifications = computed(() => {
-    let list = notifications.value
-
-    // Severity filter
-    if (activeFilter.value !== 'all') {
-      list = list.filter((n) => {
-        switch (activeFilter.value) {
-          case 'critical':
-            return n.severity === 'critical'
-          case 'warning':
-            return n.severity === 'warning'
-          case 'info':
-            return n.severity === 'info'
-          default:
-            return true
-        }
-      })
-    }
-
-    // Source filter
-    if (sourceFilter.value) {
-      if (sourceFilter.value === '__system__') {
-        list = list.filter((n) => n.source && SYSTEM_SOURCES_SET.has(n.source))
-      } else {
-        list = list.filter((n) => n.source === sourceFilter.value)
-      }
-    }
-
-    return list
-  })
-
-  /** Group notifications by date (Heute / Gestern / Älter) */
+  /** Group notifications by date (Heute / Gestern / Älter) — list is server-filtered */
   const groupedNotifications = computed(() => {
     const groups: { label: string; items: NotificationDTO[] }[] = []
     const today = new Date()
@@ -120,7 +93,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     const yesterdayItems: NotificationDTO[] = []
     const olderItems: NotificationDTO[] = []
 
-    for (const n of filteredNotifications.value) {
+    for (const n of notifications.value) {
       const date = n.created_at ? new Date(n.created_at) : new Date(0)
       if (date >= today) {
         todayItems.push(n)
@@ -149,17 +122,116 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
   // Actions
   // ═══════════════════════════════════════════════════════════════════════════
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // List fetching (server-side filters — AUT-196)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  function buildListFilters(page: number): NotificationListFilters {
+    const f: NotificationListFilters = { page, page_size: PAGE_SIZE }
+    if (activeFilter.value !== 'all') {
+      f.severity = activeFilter.value as NotificationSeverity
+    }
+    if (lifecycleFilter.value !== 'all') {
+      f.status = lifecycleFilter.value
+    }
+    if (sourceFilter.value === '__system__') {
+      f.source_bucket = 'system'
+    } else if (sourceFilter.value) {
+      f.source = sourceFilter.value as NotificationDTO['source']
+    }
+    return f
+  }
+
+  function notificationMatchesCurrentFilters(n: NotificationDTO): boolean {
+    if (activeFilter.value !== 'all' && n.severity !== activeFilter.value) return false
+    if (lifecycleFilter.value !== 'all' && n.status !== lifecycleFilter.value) return false
+    if (sourceFilter.value === '__system__') {
+      if (!n.source || !SYSTEM_SOURCES_SET.has(n.source)) return false
+    } else if (sourceFilter.value && n.source !== sourceFilter.value) return false
+    return true
+  }
+
+  /** When true, opening the drawer does not reset lifecycle filter (AlertStatusBar deep-focus). */
+  const skipLifecycleResetOnOpen = ref(false)
+
+  /** Verhindert doppeltes reload beim ersten Öffnen über ?notifications=alerts (vor loadInitial). */
+  const suppressNextDrawerReload = ref(false)
+
   /**
-   * Initial load: Fetch first page of notifications + unread count.
-   * Called once on app start.
+   * Unfiltered first page for QuickAlertPanel / global inbox cache when drawer is closed.
+   * Drawer list uses server filters; closing the drawer must not leave a truncated slice in memory.
    */
-  async function loadInitial(): Promise<void> {
+  async function reloadUnfilteredFirstPageForAmbient(): Promise<void> {
+    if (isLoading.value) return
+    isLoading.value = true
+    try {
+      const [listRes, countRes] = await Promise.all([
+        notificationsApi.list({ page: 1, page_size: PAGE_SIZE }),
+        notificationsApi.getUnreadCount(),
+      ])
+      notifications.value = listRes.data
+      totalItems.value = listRes.pagination.total_items
+      currentPage.value = 1
+      hasMore.value = listRes.data.length < listRes.pagination.total_items
+      unreadCount.value = countRes.unread_count
+      highestSeverity.value = countRes.highest_severity
+    } catch (err) {
+      logger.error('Failed to reload ambient notifications', err)
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  function mergeNotificationsRouteQuery(value: 'alerts'): void {
+    const q = { ...router.currentRoute.value.query }
+    if (q.notifications === value) return
+    q.notifications = value
+    void router.replace({ query: q })
+  }
+
+  function stripNotificationsRouteQuery(): void {
+    const q = { ...router.currentRoute.value.query }
+    if (q.notifications === undefined) return
+    delete q.notifications
+    void router.replace({ query: q })
+  }
+
+  watch(isDrawerOpen, (isOpen, wasOpen) => {
+    if (isOpen) {
+      const prevLifecycle = lifecycleFilter.value
+      if (!skipLifecycleResetOnOpen.value) {
+        lifecycleFilter.value = 'all'
+      }
+      skipLifecycleResetOnOpen.value = false
+      if (suppressNextDrawerReload.value) {
+        suppressNextDrawerReload.value = false
+        return
+      }
+      if (prevLifecycle === lifecycleFilter.value) {
+        void reloadListForFilters()
+      }
+    } else if (wasOpen) {
+      stripNotificationsRouteQuery()
+      void reloadUnfilteredFirstPageForAmbient()
+    }
+  })
+
+  watch([activeFilter, lifecycleFilter, sourceFilter], () => {
+    if (!isDrawerOpen.value) return
+    void reloadListForFilters()
+  })
+
+  /**
+   * Reload first page with current inbox filters (+ badge counters).
+   */
+  async function reloadListForFilters(): Promise<void> {
     if (isLoading.value) return
     isLoading.value = true
 
     try {
+      const filters = buildListFilters(1)
       const [listRes, countRes] = await Promise.all([
-        notificationsApi.list({ page: 1, page_size: PAGE_SIZE }),
+        notificationsApi.list(filters),
         notificationsApi.getUnreadCount(),
       ])
 
@@ -172,17 +244,63 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
       highestSeverity.value = countRes.highest_severity
 
       logger.info(
-        `Loaded ${listRes.data.length} notifications, ${countRes.unread_count} unread`,
+        `Reloaded ${listRes.data.length} notifications (filtered), ${countRes.unread_count} unread`,
       )
     } catch (err) {
-      logger.error('Failed to load notifications', err)
+      logger.error('Failed to reload notifications', err)
     } finally {
       isLoading.value = false
     }
   }
 
   /**
-   * Load next page (lazy loading).
+   * App-Start: Route ?notifications=alerts → Lifecycle + Drawer, ohne Reload bis loadInitial().
+   */
+  function bootstrapInboxFromRoute(): void {
+    const raw = router.currentRoute.value.query.notifications
+    const v = Array.isArray(raw) ? raw[0] : raw
+    if (v !== 'alerts') return
+    skipLifecycleResetOnOpen.value = true
+    lifecycleFilter.value = 'active'
+    activeFilter.value = 'all'
+    sourceFilter.value = null
+    suppressNextDrawerReload.value = true
+    isDrawerOpen.value = true
+  }
+
+  /**
+   * Initial load: Fetch first page of notifications + unread count.
+   * Called from App.vue on startup (store not yet subscribed to drawer watch for reload).
+   */
+  async function loadInitial(): Promise<void> {
+    await reloadListForFilters()
+  }
+
+  /**
+   * AlertStatusBar / Deep-Link: Fokus auf aktive Alerts.
+   * Setzt optional `?notifications=alerts` für Bookmark/Share (AUT-196 Paket E).
+   */
+  function openDrawerWithActiveAlertsFocus(options?: { syncRoute?: boolean }): void {
+    skipLifecycleResetOnOpen.value = true
+    lifecycleFilter.value = 'active'
+    activeFilter.value = 'all'
+    sourceFilter.value = null
+    isDrawerOpen.value = true
+    if (options?.syncRoute !== false) {
+      mergeNotificationsRouteQuery('alerts')
+    }
+  }
+
+  /** Route bereits mit ?notifications=alerts — z. B. Client-Navigation ohne zweite replace. */
+  function applyNotificationsRouteDeepLink(): void {
+    const raw = router.currentRoute.value.query.notifications
+    const v = Array.isArray(raw) ? raw[0] : raw
+    if (v !== 'alerts') return
+    openDrawerWithActiveAlertsFocus({ syncRoute: false })
+  }
+
+  /**
+   * Load next page (lazy loading) with the same filters.
    */
   async function loadMore(): Promise<void> {
     if (isLoading.value || !hasMore.value) return
@@ -190,12 +308,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
 
     try {
       const nextPage = currentPage.value + 1
-      const filters: NotificationListFilters = {
-        page: nextPage,
-        page_size: PAGE_SIZE,
-      }
-
-      const res = await notificationsApi.list(filters)
+      const res = await notificationsApi.list(buildListFilters(nextPage))
       notifications.value.push(...res.data)
       currentPage.value = nextPage
       hasMore.value = notifications.value.length < res.pagination.total_items
@@ -315,6 +428,19 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
 
     // Deduplicate: don't add if already in list
     if (notifications.value.some((n) => n.id === notification.id)) return
+
+    if (!notificationMatchesCurrentFilters(notification)) {
+      unreadCount.value++
+      if (
+        !highestSeverity.value ||
+        SEVERITY_PRIORITY[notification.severity] <
+          SEVERITY_PRIORITY[highestSeverity.value]
+      ) {
+        highestSeverity.value = notification.severity
+      }
+      logger.debug(`WS notification_new skipped list insert (filter): ${notification.title}`)
+      return
+    }
 
     notifications.value.unshift(notification)
     unreadCount.value++
@@ -454,22 +580,26 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     isDrawerOpen,
     isPreferencesOpen,
     activeFilter,
+    lifecycleFilter,
     sourceFilter,
     setSourceFilter,
     isLoading,
     hasMore,
 
     // Computed
-    filteredNotifications,
     groupedNotifications,
     badgeText,
 
     // Actions
     loadInitial,
+    reloadListForFilters,
     loadMore,
     markAsRead,
     markAllAsRead,
     toggleDrawer,
+    openDrawerWithActiveAlertsFocus,
+    applyNotificationsRouteDeepLink,
+    bootstrapInboxFromRoute,
     openPreferences,
     closePreferences,
 

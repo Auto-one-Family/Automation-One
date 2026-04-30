@@ -295,6 +295,8 @@ class ActuatorStatusHandler:
                         "gpio": gpio,
                         "actuator_type": actuator_type,
                         "hardware_type": hardware_type,
+                        # String "on"|"off"|"pwm"|… (frontend must not treat as boolean).
+                        # value: ESP sendet typisch 8-Bit-PWM 0–255; 0–1 Duty nur bei normalisierten Pfaden.
                         "state": state,
                         "value": value,
                         "emergency": payload.get("emergency", "normal"),

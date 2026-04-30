@@ -158,6 +158,22 @@ const char* TopicBuilder::buildActuatorEmergencyTopic() {
   return validateTopicBuffer(written);
 }
 
+// AUT-118: kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency/ack (ESP → Server)
+const char* TopicBuilder::buildEmergencyAckTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/actuator/emergency/ack",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
+// AUT-118: kaiser/{kaiser_id}/esp/{esp_id}/actuator/recovery_confirm (ESP → Server)
+const char* TopicBuilder::buildRecoveryConfirmTopic() {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/actuator/recovery_confirm",
+                         kaiser_id_, esp_id_);
+  return validateTopicBuffer(written);
+}
+
 // Pattern 5: kaiser/god/esp/{esp_id}/system/heartbeat
 const char* TopicBuilder::buildSystemHeartbeatTopic() {
   int written = snprintf(topic_buffer_, sizeof(topic_buffer_),

@@ -12,7 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-
 # Aligned with El Trabajante publishIntentOutcome(flow, ...) — extend when firmware adds flows.
 CANONICAL_FLOWS = {
     "command",

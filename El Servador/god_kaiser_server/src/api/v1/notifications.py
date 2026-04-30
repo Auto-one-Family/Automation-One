@@ -58,12 +58,15 @@ from ...schemas.notification import (
     EmailLogListResponse,
     EmailLogResponse,
     EmailLogStatsResponse,
+    EmailLogStatusFilter,
     NotificationCreate,
     NotificationListResponse,
+    NotificationListStatusFilter,
     NotificationPreferencesResponse,
     NotificationPreferencesUpdate,
     NotificationResponse,
     NotificationSendRequest,
+    NotificationSourceBucketQuery,
     NotificationUnreadCountResponse,
     TestEmailRequest,
     TestEmailResponse,
@@ -94,6 +97,14 @@ async def list_notifications(
     severity: Optional[str] = Query(None, description="Filter by severity"),
     category: Optional[str] = Query(None, description="Filter by category"),
     source: Optional[str] = Query(None, description="Filter by source"),
+    source_bucket: Optional[NotificationSourceBucketQuery] = Query(
+        None,
+        description='Grouped source filter: "system" = manual|system|device_event|autoops',
+    ),
+    status: Optional[NotificationListStatusFilter] = Query(
+        None,
+        description="Alert lifecycle filter: active, acknowledged, resolved",
+    ),
     is_read: Optional[bool] = Query(None, description="Filter by read status"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
@@ -106,6 +117,8 @@ async def list_notifications(
         severity=severity,
         category=category,
         source=source,
+        source_bucket=source_bucket,
+        status=status,
         is_read=is_read,
         skip=skip,
         limit=page_size,
@@ -163,7 +176,10 @@ async def get_active_alerts(
     user: ActiveUser,
     severity: Optional[str] = Query(None, description="Filter by severity"),
     category: Optional[str] = Query(None, description="Filter by category"),
-    status: str = Query("active", description="Alert status filter (active, acknowledged)"),
+    status: NotificationListStatusFilter = Query(
+        "active",
+        description="Alert status filter (active, acknowledged, resolved)",
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
 ):
@@ -246,7 +262,9 @@ async def get_preferences(
 async def get_email_log(
     db: DBSession,
     user: AdminUser,
-    status: Optional[str] = Query(None, description="Filter by status (sent, failed, pending)"),
+    status: Optional[EmailLogStatusFilter] = Query(
+        None, description="Filter by status (pending, sent, failed, permanently_failed)"
+    ),
     date_from: Optional[datetime] = Query(None, description="Filter from date (ISO 8601)"),
     date_to: Optional[datetime] = Query(None, description="Filter to date (ISO 8601)"),
     template: Optional[str] = Query(None, description="Filter by template (partial match)"),

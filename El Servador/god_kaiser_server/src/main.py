@@ -46,6 +46,7 @@ from .mqtt.handlers import (
     config_handler,
     diagnostics_handler,
     discovery_handler,
+    emergency_ack_handler,
     error_handler,
     heartbeat_handler,
     heartbeat_metrics_handler,
@@ -53,6 +54,7 @@ from .mqtt.handlers import (
     intent_outcome_lifecycle_handler,
     lwt_handler,
     queue_pressure_handler,
+    recovery_confirm_handler,
     sensor_handler,
     subzone_ack_handler,
     zone_ack_handler,
@@ -333,6 +335,17 @@ async def lifespan(app: FastAPI):
             queue_pressure_handler.handle_queue_pressure,
         )
         logger.info("Queue pressure handler registered: kaiser/+/esp/+/system/queue_pressure")
+        # AUT-118: Emergency application ACK + recovery_confirm (ESP → Server, QoS 1)
+        _subscriber_instance.register_handler(
+            "kaiser/+/esp/+/actuator/emergency/ack",
+            emergency_ack_handler.handle_emergency_ack,
+        )
+        logger.info("Emergency ACK handler registered: kaiser/+/esp/+/actuator/emergency/ack")
+        _subscriber_instance.register_handler(
+            "kaiser/+/esp/+/actuator/recovery_confirm",
+            recovery_confirm_handler.handle_recovery_confirm,
+        )
+        logger.info("Recovery confirm handler registered: kaiser/+/esp/+/actuator/recovery_confirm")
         # AUT-121: Heartbeat Metrics Handler (pure ingest, no DB/WS)
         _subscriber_instance.register_handler(
             constants.get_topic_with_kaiser_id(constants.MQTT_SUBSCRIBE_ESP_HEARTBEAT_METRICS),

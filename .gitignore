@@ -154,6 +154,9 @@ El Frontend/dist.old/
 # Cursor/Claude lokale Worktrees
 .claude/worktrees/
 
+# Claude scheduled-tasks runtime lock
+.claude/scheduled_tasks.lock
+
 # Editor-Backups neben Quellcode
 **/*.bak
 

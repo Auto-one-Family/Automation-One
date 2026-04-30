@@ -37,7 +37,7 @@ groups:
               to: 0
             datasourceUid: loki
             model:
-              expr: "sum(count_over_time({compose_service=\"el-servador\"} |~ \"(level=\\\"ERROR\\\"|Traceback|Exception|HTTP/1\\.1\\\" 5[0-9]{2})\" [5m]))"
+              expr: "sum(count_over_time({compose_service=\"el-servador\"} |~ \"(level=\\\"ERROR\\\"|Traceback|Exception|HTTP/1[.]1\\\" 5[0-9]{2})\" [5m]))"
               intervalMs: 60000
               maxDataPoints: 60
               refId: A

@@ -2042,10 +2042,12 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
     wsUnsubscribers.push(
       websocketService.onConnect(() => {
         logger.info('WebSocket connected, refreshing ESP data...')
-        // Use fetchAll to get current state from server
-        // This handles the case where heartbeats arrived before WebSocket was connected
         fetchAll().catch(err => {
           logger.error(`Failed to refresh ESP data after WebSocket connect:`, err)
+        })
+        const zs = useZoneStore()
+        zs.fetchZoneEntities().catch(err => {
+          logger.error(`Failed to refresh zone entities after WebSocket connect:`, err)
         })
       })
     )

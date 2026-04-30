@@ -16,7 +16,7 @@ Provides:
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -28,6 +28,12 @@ from .common import BaseResponse, PaginationMeta
 
 NOTIFICATION_SEVERITIES = ["critical", "warning", "info"]
 ALERT_STATUSES = ["active", "acknowledged", "resolved"]
+
+# Query-string filters (FastAPI + Pydantic): invalid values → 422 instead of empty/ignored results.
+NotificationListStatusFilter = Literal["active", "acknowledged", "resolved"]
+NotificationSourceBucketQuery = Literal["system"]
+EmailLogStatusFilter = Literal["pending", "sent", "failed", "permanently_failed"]
+
 NOTIFICATION_SOURCES = [
     "logic_engine",
     "mqtt_handler",

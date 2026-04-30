@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RouterView } from 'vue-router'
+import { RouterView, useRoute } from 'vue-router'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { useEspStore } from '@/stores/esp'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
@@ -16,6 +16,7 @@ const authStore = useAuthStore()
 const espStore = useEspStore()
 const notificationInboxStore = useNotificationInboxStore()
 const alertCenterStore = useAlertCenterStore()
+const route = useRoute()
 
 // Error Details Modal state (triggered via CustomEvent from toast actions)
 const errorModalOpen = ref(false)
@@ -28,7 +29,8 @@ function handleShowErrorDetails(e: Event) {
 }
 
 function initNotificationData(): void {
-  notificationInboxStore.loadInitial()
+  notificationInboxStore.bootstrapInboxFromRoute()
+  void notificationInboxStore.loadInitial()
   alertCenterStore.fetchStats()
   alertCenterStore.startStatsPolling()
 }
@@ -49,6 +51,18 @@ watch(
       initNotificationData()
     } else {
       alertCenterStore.stopStatsPolling()
+    }
+  },
+)
+
+/** SPA-Navigation zu ?notifications=alerts (Bookmark / Teilen) */
+watch(
+  () => route.query.notifications,
+  (raw) => {
+    if (!authStore.isAuthenticated) return
+    const v = Array.isArray(raw) ? raw[0] : raw
+    if (v === 'alerts' && !notificationInboxStore.isDrawerOpen) {
+      notificationInboxStore.applyNotificationsRouteDeepLink()
     }
   },
 )

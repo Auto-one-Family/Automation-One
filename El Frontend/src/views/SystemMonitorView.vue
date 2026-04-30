@@ -19,7 +19,7 @@
  */
 
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { useEspStore } from '@/stores/esp'
@@ -81,6 +81,7 @@ const ALL_EVENT_TYPES = WS_EVENT_TYPES
 // ============================================================================
 
 const route = useRoute()
+const router = useRouter()
 const authStore = useAuthStore()
 const espStore = useEspStore()
 const inboxStore = useNotificationInboxStore()
@@ -220,6 +221,22 @@ const wsUnsubscribers: (() => void)[] = []
 const filteredEvents = computed(() => {
   let events = unifiedEvents.value
 
+  const correlationTrimmed = filterCorrelationId.value.trim()
+  const correlationFocus = correlationTrimmed.length > 0
+
+  if (correlationFocus) {
+    const correlationLower = correlationTrimmed.toLowerCase()
+    events = events.filter(e =>
+      (e.correlation_id ?? '').toLowerCase().includes(correlationLower),
+    )
+    if (activeTab.value === 'mqtt') {
+      events = events.filter(e => e.source === 'mqtt' || e.source === 'esp')
+    } else if (activeTab.value === 'logs') {
+      events = events.filter(e => e.source === 'server')
+    }
+    return events
+  }
+
   // ⭐ Filter by selected data sources (KATEGORISCH - ALLE Events filtern!)
   // Anders als severity/esp_id: DataSource-Änderung kann Events AUSSCHLIESSEN
   // die vorher inkludiert waren (z.B. User deselektiert "sensor_data")
@@ -251,11 +268,6 @@ const filteredEvents = computed(() => {
     events = events.filter(e => {
       return e.esp_id?.toLowerCase().includes(espFilter)
     })
-  }
-
-  if (filterCorrelationId.value) {
-    const correlationFilter = filterCorrelationId.value.toLowerCase()
-    events = events.filter(e => (e.correlation_id ?? '').toLowerCase().includes(correlationFilter))
   }
 
   // Filter by severity level (KATEGORISCH - ALLE Events filtern!)
@@ -341,6 +353,10 @@ const uniqueEspIds = computed(() => {
 // ============================================================================
 
 function handleWebSocketMessage(message: WebSocketMessage) {
+  if (message.type === 'events_restored') {
+    void handleEventsRestored(message)
+  }
+
   if (isPaused.value) return
 
   // ⭐ CHANGED: Don't filter here - add dataSource and let filteredEvents handle it
@@ -537,7 +553,13 @@ function determineSource(eventType: string): UnifiedEvent['source'] {
     'intent_outcome', 'intent_outcome_lifecycle',
   ]
   const mqttEvents = ['sensor_data', 'actuator_status', 'esp_health']
-  const logicEvents = ['logic_execution', 'notification']
+  const logicEvents = [
+    'logic_execution',
+    'notification',
+    'rule_degraded',
+    'rule_recovered',
+    'conflict.arbitration',
+  ]
   const userEvents = ['device_approved', 'device_rejected']
 
   if (userEvents.includes(eventType)) return 'user'
@@ -1085,6 +1107,14 @@ function handleResize() {
   checkMobile()
 }
 
+const isCorrelationDeepLink = computed(() => filterCorrelationId.value.trim().length > 0)
+
+function clearCorrelationFromRoute(): void {
+  const next = { ...route.query } as Record<string, string | string[] | undefined>
+  delete next.correlation
+  void router.replace({ path: route.path, query: next })
+}
+
 // ============================================================================
 // Lifecycle
 // ============================================================================
@@ -1095,7 +1125,10 @@ onMounted(async () => {
   window.addEventListener('resize', handleResize)
 
   // Read URL params for deep-linking (esp handled by watcher with immediate: true)
-  if (route.query.tab) {
+  // correlation= erzwingt Tab "events" und hat Vorrang vor ?tab= (AUT-196)
+  if (route.query.correlation) {
+    activeTab.value = 'events'
+  } else if (route.query.tab) {
     const tab = String(route.query.tab) as TabId
     if (['events', 'logs', 'database', 'mqtt', 'health', 'diagnostics', 'reports', 'hierarchy'].includes(tab)) {
       activeTab.value = tab
@@ -1112,9 +1145,6 @@ onMounted(async () => {
   ALL_EVENT_TYPES.forEach(eventType => {
     wsUnsubscribers.push(on(eventType, handleWebSocketMessage))
   })
-
-  // Subscribe to special system events (like events_restored)
-  wsUnsubscribers.push(on('events_restored', handleEventsRestored))
 
   // Load historical events from Audit Log
   await loadHistoricalEvents()
@@ -1220,6 +1250,24 @@ watch(activeTab, (newTab) => {
       @export="handleExport"
       @open-cleanup-panel="showCleanupPanel = true"
     />
+
+    <div
+      v-if="isCorrelationDeepLink"
+      class="correlation-deep-link-banner"
+      role="status"
+    >
+      <AlertTriangle class="correlation-deep-link-banner__icon" :size="16" />
+      <span class="correlation-deep-link-banner__text">
+        Korrelations-Deep-Link: Datenquellen-, Schweregrad-, Zeitraum- und ESP-Filter sind für diese Ansicht ausgeschaltet.
+      </span>
+      <button
+        type="button"
+        class="correlation-deep-link-banner__btn"
+        @click="clearCorrelationFromRoute"
+      >
+        Korrelation schließen
+      </button>
+    </div>
 
     <div v-if="opsBannerEntries.length > 0" class="ops-banner">
       <div class="ops-banner__title">High-Risk Jobs</div>
@@ -1473,6 +1521,47 @@ watch(activeTab, (newTab) => {
   min-height: 100vh;  /* ⭐ Page-Scroll: Mindesthöhe statt fixe Höhe */
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
+}
+
+.correlation-deep-link-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-lg);
+  border-bottom: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--color-info) 12%, var(--color-bg-secondary));
+}
+
+.correlation-deep-link-banner__icon {
+  flex-shrink: 0;
+  color: var(--color-info);
+}
+
+.correlation-deep-link-banner__text {
+  flex: 1;
+  min-width: 200px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.correlation-deep-link-banner__btn {
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.correlation-deep-link-banner__btn:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--glass-border-hover);
 }
 
 /* Content */

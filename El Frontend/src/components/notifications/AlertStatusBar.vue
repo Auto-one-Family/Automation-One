@@ -60,7 +60,7 @@ const assistiveLabel = computed(() => {
   if (mttrText.value !== '–') parts.push(`durchschnittliche Lösungszeit ${mttrText.value}`)
   if (acknowledgedCount.value > 0) parts.push(`${acknowledgedCount.value} bestätigt`)
   if (unreadCount.value > 0) parts.push(`${unreadCount.value} neue Benachrichtigungen`)
-  return `${parts.join(', ')}. Klicken für Details.`
+  return `${parts.join(', ')}. Klicken für Benachrichtigungen und Alerts (aktive Alerts im Fokus).`
 })
 
 </script>
@@ -72,7 +72,7 @@ const assistiveLabel = computed(() => {
     :class="{ 'alert-status-bar--critical': isCritical }"
     :title="assistiveLabel"
     :aria-label="assistiveLabel"
-    @click="inboxStore.toggleDrawer()"
+    @click="inboxStore.openDrawerWithActiveAlertsFocus()"
   >
     <AlertTriangle
       :size="14"

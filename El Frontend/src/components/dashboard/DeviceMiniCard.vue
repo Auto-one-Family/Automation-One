@@ -26,6 +26,7 @@ import { espHealthPresentation } from '@/domain/esp/espHealth'
 import { groupSensorsByBaseType, type RawSensor } from '@/utils/sensorDefaults'
 import { getActuatorTypeInfo } from '@/utils/labels'
 import type { MockActuator } from '@/types'
+import { actuatorDutyToDisplayPercent } from '@/utils/eventTransformer'
 
 interface Props {
   device: ESPDevice
@@ -226,7 +227,7 @@ interface ActuatorDisplay {
 function resolveActuatorBaseValue(actuator: MockActuator): string {
   const type = actuator.hardware_type ?? actuator.actuator_type
   if ((type === 'pwm' || type === 'fan') && actuator.pwm_value > 0) {
-    return `${Math.round(actuator.pwm_value)}%`
+    return `${actuatorDutyToDisplayPercent(actuator.pwm_value)}%`
   }
   return actuator.state ? 'EIN' : 'AUS'
 }

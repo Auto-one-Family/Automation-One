@@ -25,6 +25,9 @@ public:
   static const char* buildActuatorAlertTopic(uint8_t gpio);     // Phase 5
   // ORPHANED - Redundant to actuator/{gpio}/alert. See Mqtt_Protocoll.md inventory.
   static const char* buildActuatorEmergencyTopic();             // Phase 5
+  // AUT-118: Parallel application-level transport to intent_outcome (QoS 1)
+  static const char* buildEmergencyAckTopic();
+  static const char* buildRecoveryConfirmTopic();
   static const char* buildSystemHeartbeatTopic();               // Pattern 5
   static const char* buildSystemHeartbeatMetricsTopic();        // AUT-121: Extended telemetry (separate from core heartbeat)
   static const char* buildSystemHeartbeatAckTopic();            // Phase 2: Heartbeat-ACK (Server → ESP)

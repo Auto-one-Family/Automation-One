@@ -36,6 +36,8 @@ class NotificationRepository(BaseRepository[Notification]):
         severity: Optional[str] = None,
         category: Optional[str] = None,
         source: Optional[str] = None,
+        source_bucket: Optional[str] = None,
+        status: Optional[str] = None,
         is_read: Optional[bool] = None,
         skip: int = 0,
         limit: int = 50,
@@ -52,8 +54,14 @@ class NotificationRepository(BaseRepository[Notification]):
             conditions.append(Notification.severity == severity)
         if category is not None:
             conditions.append(Notification.category == category)
-        if source is not None:
+        if source_bucket == "system":
+            conditions.append(
+                Notification.source.in_(["manual", "system", "device_event", "autoops"])
+            )
+        elif source is not None:
             conditions.append(Notification.source == source)
+        if status is not None:
+            conditions.append(Notification.status == status)
         if is_read is not None:
             conditions.append(Notification.is_read == is_read)
 

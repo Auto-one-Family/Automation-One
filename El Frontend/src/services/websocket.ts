@@ -49,6 +49,10 @@ class WebSocketService {
   private clientId: string = ''
   private status: WebSocketStatus = 'disconnected'
   private reconnectAttempts: number = 0
+  /** Unix ms of last successful `onopen` (for operator UX / AUT-200). */
+  private lastSuccessfulConnectAt: number | null = null
+  /** Unix ms of last abnormal close (code !== 1000), cleared on next successful open. */
+  private lastUnexpectedDisconnectAt: number | null = null
   // Used for backoff progression only (no hard-stop reconnect lock).
   private maxReconnectAttempts: number = 10
   private baseReconnectDelay: number = 1000  // Base delay for exponential backoff
@@ -186,6 +190,8 @@ class WebSocketService {
           this.setStatus('connected')
           this.reconnectAttempts = 0
           this.rateLimitWarning = false
+          this.lastSuccessfulConnectAt = Date.now()
+          this.lastUnexpectedDisconnectAt = null
 
           // Enable visibility handling for tab switches
           this.setupVisibilityHandling()
@@ -212,12 +218,14 @@ class WebSocketService {
 
           // Attempt reconnect if not a normal closure
           if (event.code !== 1000) {
+            this.lastUnexpectedDisconnectAt = Date.now()
             this.scheduleReconnect()
           }
         }
 
         this.ws.onerror = (event) => {
           logger.error('WebSocket error', event)
+          this.lastUnexpectedDisconnectAt = Date.now()
           this.setStatus('error')
           reject(new Error('WebSocket connection failed'))
         }
@@ -643,6 +651,27 @@ class WebSocketService {
    */
   getStatus(): WebSocketStatus {
     return this.status
+  }
+
+  /**
+   * Reconnect attempt counter (incremented before each scheduled reconnect).
+   */
+  getReconnectAttempts(): number {
+    return this.reconnectAttempts
+  }
+
+  /**
+   * Timestamp (Unix ms) of the last successful connection open, or null if never connected.
+   */
+  getLastConnectedAt(): number | null {
+    return this.lastSuccessfulConnectAt
+  }
+
+  /**
+   * Timestamp (Unix ms) of the last abnormal disconnect, or null.
+   */
+  getLastDisconnectAt(): number | null {
+    return this.lastUnexpectedDisconnectAt
   }
 
   /**

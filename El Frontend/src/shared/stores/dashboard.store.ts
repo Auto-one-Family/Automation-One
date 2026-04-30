@@ -664,7 +664,8 @@ export const useDashboardStore = defineStore('dashboard', () => {
     isSyncing.value = true
     lastSyncError.value = null
     try {
-      const pageSize = 200
+      // API maximum (see GET /dashboards — page_size le 100)
+      const pageSize = 100
       const serverDtos: DashboardDTO[] = []
       let page = 1
       let fetchedFromServer = false
