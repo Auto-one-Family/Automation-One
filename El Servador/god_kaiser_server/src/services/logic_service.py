@@ -28,6 +28,7 @@ from .logic.conditions import (
     BaseConditionEvaluator,
     CompoundConditionEvaluator,
     HysteresisConditionEvaluator,
+    MetadataFilterEvaluator,
     SensorConditionEvaluator,
     SensorDiffConditionEvaluator,
     TimeConditionEvaluator,
@@ -92,8 +93,16 @@ class LogicService:
             time_eval = TimeConditionEvaluator()
             hysteresis_eval = HysteresisConditionEvaluator()
             diagnostics_eval = DiagnosticsConditionEvaluator(session_factory=get_session)
+            metadata_filter_eval = MetadataFilterEvaluator()
             compound_eval = CompoundConditionEvaluator(
-                [sensor_eval, sensor_diff_eval, time_eval, hysteresis_eval, diagnostics_eval]
+                [
+                    sensor_eval,
+                    sensor_diff_eval,
+                    time_eval,
+                    hysteresis_eval,
+                    diagnostics_eval,
+                    metadata_filter_eval,
+                ]
             )
             self.condition_evaluators = [
                 sensor_eval,
@@ -101,6 +110,7 @@ class LogicService:
                 time_eval,
                 hysteresis_eval,
                 diagnostics_eval,
+                metadata_filter_eval,
                 compound_eval,
             ]
         else:
