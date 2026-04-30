@@ -252,6 +252,67 @@ class SensorDiffCondition(BaseModel):
         return v
 
 
+class MetadataFilterCondition(BaseModel):
+    """
+    Metadata Filter Condition (AUT-214 / AUT-219).
+
+    Filters sensor data based on payload metadata fields (e.g.
+    sensor_metadata.phase, plant_id). Supports nested field access
+    via dot-notation and 7 comparison operators.
+
+    The runtime evaluator lives in
+    ``services/logic/conditions/metadata_filter_evaluator.py`` and uses
+    ``condition.get("type") == "metadata_filter"`` for dispatch.
+
+    Example:
+        {
+            "type": "metadata_filter",
+            "field": "sensor_metadata.phase",
+            "operator": "eq",
+            "value": "bluete-bulk"
+        }
+
+    Nullary operators (``is_null`` / ``is_not_null``) omit ``value``.
+    The ``in`` operator expects ``value`` to be a list.
+    """
+
+    type: Literal["metadata_filter"] = Field(
+        ..., description="Condition type (must be 'metadata_filter')"
+    )
+    field: str = Field(
+        ...,
+        description="Field path (dot-notation, e.g. 'sensor_metadata.phase')",
+        min_length=1,
+        max_length=200,
+    )
+    operator: Literal["eq", "neq", "lt", "gt", "in", "is_null", "is_not_null"] = Field(
+        ..., description="Comparison operator (matches MetadataFilterEvaluator)"
+    )
+    value: Optional[Any] = Field(
+        None,
+        description=(
+            "Comparison value. Required for all operators except is_null/is_not_null. "
+            "Must be a list for the 'in' operator."
+        ),
+    )
+
+    @field_validator("value", mode="after")
+    @classmethod
+    def validate_value_required(cls, v, info):
+        """Ensure 'value' is present for non-nullary operators."""
+        operator = info.data.get("operator")
+        if operator in ("is_null", "is_not_null"):
+            return v
+        if v is None:
+            raise ValueError(
+                f"'value' is required for operator '{operator}' "
+                "(only is_null/is_not_null may omit it)"
+            )
+        if operator == "in" and not isinstance(v, list):
+            raise ValueError("'in' operator requires 'value' to be a list")
+        return v
+
+
 class CompoundCondition(BaseModel):
     """
     Compound Condition (AND/OR logic).
@@ -278,6 +339,7 @@ ConditionType = Union[
     TimeWindowCondition,
     HysteresisCondition,
     SensorDiffCondition,
+    MetadataFilterCondition,
     CompoundCondition,
 ]
 
@@ -423,6 +485,8 @@ def validate_condition(condition: dict) -> ConditionType:
         return HysteresisCondition(**condition)
     elif cond_type == "sensor_diff":
         return SensorDiffCondition(**condition)
+    elif cond_type == "metadata_filter":
+        return MetadataFilterCondition(**condition)
     elif "logic" in condition and "conditions" in condition:
         # Compound condition - recursively validate sub-conditions
         validated_sub_conditions = [
