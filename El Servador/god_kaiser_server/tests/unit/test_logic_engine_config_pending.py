@@ -178,8 +178,12 @@ class TestModernPathConfigPendingGate:
         mock_adoption = AsyncMock()
         mock_adoption.is_adoption_completed = AsyncMock(return_value=True)
 
-        with patch("src.services.logic_engine.ESPRepository", return_value=mock_repo), \
-             patch("src.services.logic_engine.get_state_adoption_service", return_value=mock_adoption):
+        with (
+            patch("src.services.logic_engine.ESPRepository", return_value=mock_repo),
+            patch(
+                "src.services.logic_engine.get_state_adoption_service", return_value=mock_adoption
+            ),
+        ):
             result = await engine._execute_actions(
                 actions=actions,
                 trigger_data=trigger_data,
@@ -222,8 +226,12 @@ class TestModernPathConfigPendingGate:
         mock_executor.execute = AsyncMock(return_value=mock_action_result)
         engine.action_executors = [mock_executor]
 
-        with patch("src.services.logic_engine.ESPRepository", return_value=mock_repo), \
-             patch("src.services.logic_engine.get_state_adoption_service", return_value=mock_adoption):
+        with (
+            patch("src.services.logic_engine.ESPRepository", return_value=mock_repo),
+            patch(
+                "src.services.logic_engine.get_state_adoption_service", return_value=mock_adoption
+            ),
+        ):
             result = await engine._execute_actions(
                 actions=actions,
                 trigger_data=trigger_data,
@@ -254,8 +262,12 @@ class TestModernPathConfigPendingGate:
         mock_adoption = AsyncMock()
         mock_adoption.is_adoption_completed = AsyncMock(return_value=True)
 
-        with patch("src.services.logic_engine.ESPRepository", return_value=mock_repo), \
-             patch("src.services.logic_engine.get_state_adoption_service", return_value=mock_adoption):
+        with (
+            patch("src.services.logic_engine.ESPRepository", return_value=mock_repo),
+            patch(
+                "src.services.logic_engine.get_state_adoption_service", return_value=mock_adoption
+            ),
+        ):
             await engine._execute_actions(
                 actions=actions,
                 trigger_data=trigger_data,
@@ -286,8 +298,12 @@ class TestModernPathConfigPendingGate:
         mock_adoption = AsyncMock()
         mock_adoption.is_adoption_completed = AsyncMock(return_value=True)
 
-        with patch("src.services.logic_engine.ESPRepository", return_value=mock_repo), \
-             patch("src.services.logic_engine.get_state_adoption_service", return_value=mock_adoption):
+        with (
+            patch("src.services.logic_engine.ESPRepository", return_value=mock_repo),
+            patch(
+                "src.services.logic_engine.get_state_adoption_service", return_value=mock_adoption
+            ),
+        ):
             result = await engine._execute_actions(
                 actions=actions,
                 trigger_data=trigger_data,
@@ -328,9 +344,13 @@ class TestLegacyPathConfigPendingGate:
 
         engine.actuator_service.send_command = AsyncMock()
 
-        with patch("src.services.logic_engine.ESPRepository", return_value=mock_repo), \
-             patch("src.services.logic_engine.get_session", return_value=mock_get_session()), \
-             patch("src.services.logic_engine.get_state_adoption_service", return_value=mock_adoption):
+        with (
+            patch("src.services.logic_engine.ESPRepository", return_value=mock_repo),
+            patch("src.services.logic_engine.get_session", return_value=mock_get_session()),
+            patch(
+                "src.services.logic_engine.get_state_adoption_service", return_value=mock_adoption
+            ),
+        ):
             await engine._execute_action_legacy(
                 action=action,
                 trigger_data=trigger_data,
@@ -374,9 +394,13 @@ class TestLegacyPathConfigPendingGate:
         cmd_result.success = True
         engine.actuator_service.send_command = AsyncMock(return_value=cmd_result)
 
-        with patch("src.services.logic_engine.ESPRepository", return_value=mock_repo), \
-             patch("src.services.logic_engine.get_session", return_value=mock_get_session()), \
-             patch("src.services.logic_engine.get_state_adoption_service", return_value=mock_adoption):
+        with (
+            patch("src.services.logic_engine.ESPRepository", return_value=mock_repo),
+            patch("src.services.logic_engine.get_session", return_value=mock_get_session()),
+            patch(
+                "src.services.logic_engine.get_state_adoption_service", return_value=mock_adoption
+            ),
+        ):
             await engine._execute_action_legacy(
                 action=action,
                 trigger_data=trigger_data,

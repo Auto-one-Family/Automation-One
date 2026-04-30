@@ -6,7 +6,9 @@ import pytest
 from src.services.esp_service import ESPService
 
 
-def _build_service(device: SimpleNamespace, publish_success: bool = True) -> tuple[ESPService, MagicMock, AsyncMock]:
+def _build_service(
+    device: SimpleNamespace, publish_success: bool = True
+) -> tuple[ESPService, MagicMock, AsyncMock]:
     esp_repo = MagicMock()
     esp_repo.get_by_device_id = AsyncMock(return_value=device)
     esp_repo.session = AsyncMock()
@@ -25,7 +27,10 @@ async def test_send_config_mock_device_emits_terminal_config_response() -> None:
 
     with (
         patch("src.services.esp_service.AuditLogRepository") as audit_repo_cls,
-        patch("src.websocket.manager.WebSocketManager.get_instance", new=AsyncMock(return_value=SimpleNamespace(broadcast=ws_broadcast))),
+        patch(
+            "src.websocket.manager.WebSocketManager.get_instance",
+            new=AsyncMock(return_value=SimpleNamespace(broadcast=ws_broadcast)),
+        ),
     ):
         audit_repo_cls.return_value.create = AsyncMock()
         result = await service.send_config("MOCK_TEST01", config)
@@ -43,7 +48,9 @@ async def test_send_config_mock_device_emits_terminal_config_response() -> None:
     assert "config_published" in event_types
     assert "config_response" in event_types
 
-    terminal_call = next(call for call in ws_broadcast.await_args_list if call.args[0] == "config_response")
+    terminal_call = next(
+        call for call in ws_broadcast.await_args_list if call.args[0] == "config_response"
+    )
     payload = terminal_call.args[1]
     assert payload["esp_id"] == "MOCK_TEST01"
     assert payload["status"] == "success"
@@ -58,7 +65,10 @@ async def test_send_config_real_device_does_not_emit_synthetic_config_response()
 
     with (
         patch("src.services.esp_service.AuditLogRepository") as audit_repo_cls,
-        patch("src.websocket.manager.WebSocketManager.get_instance", new=AsyncMock(return_value=SimpleNamespace(broadcast=ws_broadcast))),
+        patch(
+            "src.websocket.manager.WebSocketManager.get_instance",
+            new=AsyncMock(return_value=SimpleNamespace(broadcast=ws_broadcast)),
+        ),
     ):
         audit_repo_cls.return_value.create = AsyncMock()
         result = await service.send_config("ESP_A1B2C3D4", config)

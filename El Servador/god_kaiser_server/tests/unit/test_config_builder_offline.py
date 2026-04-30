@@ -22,7 +22,6 @@ from unittest.mock import MagicMock
 
 from src.services.config_builder import ConfigPayloadBuilder
 
-
 # ---------------------------------------------------------------------------
 # Shared constants
 # ---------------------------------------------------------------------------
@@ -270,9 +269,7 @@ class TestSoilMoistureP4Guard:
         """soil_moisture sensor_threshold → None (P4-GUARD: ADC raw value only on ESP32)."""
         rule = _make_rule(
             rule_name="irrigation_trigger",
-            trigger_conditions=_threshold_condition(
-                ESP_ID_A, "soil_moisture", "<", 30.0, gpio=32
-            ),
+            trigger_conditions=_threshold_condition(ESP_ID_A, "soil_moisture", "<", 30.0, gpio=32),
             actions=[_actuator_action(ESP_ID_A, gpio=25)],
         )
 
@@ -319,9 +316,7 @@ class TestCrossEspThresholdCondition:
         """sensor_threshold condition referencing ESP_B while querying ESP_A → None."""
         rule = _make_rule(
             rule_name="cross_esp_threshold",
-            trigger_conditions=_threshold_condition(
-                ESP_ID_B, "sht31_temp", ">", 28.0, gpio=4
-            ),
+            trigger_conditions=_threshold_condition(ESP_ID_B, "sht31_temp", ">", 28.0, gpio=4),
             actions=[_actuator_action(ESP_ID_A, gpio=18)],
         )
 

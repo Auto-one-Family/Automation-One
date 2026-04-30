@@ -405,9 +405,7 @@ class TestMeasurementRole:
         assert data["gpio"] == 36
 
     @pytest.mark.asyncio
-    async def test_create_sensor_with_runoff_role(
-        self, auth_headers: dict, test_esp: ESPDevice
-    ):
+    async def test_create_sensor_with_runoff_role(self, auth_headers: dict, test_esp: ESPDevice):
         """Test creating sensor with runoff measurement role."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -480,9 +478,7 @@ class TestMeasurementRole:
         assert data["measurement_role"] == "inflow"
 
     @pytest.mark.asyncio
-    async def test_invalid_measurement_role(
-        self, auth_headers: dict, test_esp: ESPDevice
-    ):
+    async def test_invalid_measurement_role(self, auth_headers: dict, test_esp: ESPDevice):
         """Test that invalid measurement_role is rejected."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -529,6 +525,7 @@ class TestMeasurementRole:
 
         # Verify in database directly
         from src.db.repositories import SensorRepository
+
         sensor_repo = SensorRepository(db_session)
         sensor = await sensor_repo.get_by_id(sensor_id)
         assert sensor is not None

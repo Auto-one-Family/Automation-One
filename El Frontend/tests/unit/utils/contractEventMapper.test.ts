@@ -28,6 +28,34 @@ describe('contractEventMapper', () => {
     expect(result.kind).toBe('unknown_event')
   })
 
+  it('accepts documented server broadcasts omitted from whitelist previously (AUT-111 / backup)', () => {
+    expect(
+      validateContractEvent('rule_degraded', {
+        rule_id: 'uuid',
+      }).kind,
+    ).toBe('ok')
+    expect(
+      validateContractEvent('rule_recovered', {
+        rule_id: 'uuid',
+      }).kind,
+    ).toBe('ok')
+    expect(
+      validateContractEvent('events_restored', {
+        backup_id: 'b1',
+        restored_count: 3,
+        event_ids: ['e1'],
+        message: 'ok',
+      }).kind,
+    ).toBe('ok')
+    expect(
+      validateContractEvent('esp_reconnect_phase', {
+        esp_id: 'ESP_1',
+        phase: 'adopt',
+        timestamp: Date.now(),
+      }).kind,
+    ).toBe('ok')
+  })
+
   it('reports actuator schema mismatch with concrete reason', () => {
     const result = validateContractEvent('actuator_response', {
       esp_id: 'ESP_0001',
@@ -117,5 +145,8 @@ describe('contractEventMapper', () => {
     expect(inferFallbackSeverity('sensor_health', { status: 'stale' })).toBe('warning')
     expect(inferFallbackSeverity('system_event', { event_type: 'sync_warning' })).toBe('warning')
     expect(inferFallbackSeverity('device_online', {})).toBe('info')
+    expect(inferFallbackSeverity('rule_degraded', {})).toBe('warning')
+    expect(inferFallbackSeverity('rule_recovered', {})).toBe('info')
+    expect(inferFallbackSeverity('events_restored', {})).toBe('info')
   })
 })

@@ -16,7 +16,6 @@ from src.db.models.user import User
 from src.db.models.zone import Zone
 from src.main import app
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================

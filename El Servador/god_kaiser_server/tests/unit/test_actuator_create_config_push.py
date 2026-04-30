@@ -23,7 +23,6 @@ import pytest
 from src.schemas.actuator import ActuatorConfigResponse
 from src.api.v1.actuators import _model_to_schema_response
 
-
 # =============================================================================
 # Helpers
 # =============================================================================
@@ -232,6 +231,6 @@ class TestConfigPushAfterSubzoneError:
             "send_config was NOT called after ValueError in subzone block — "
             "Config-Push guarantee violated!"
         )
-        assert subzone_error == "Subzone not found", (
-            "subzone_error should be set (not silenced) for response warning"
-        )
+        assert (
+            subzone_error == "Subzone not found"
+        ), "subzone_error should be set (not silenced) for response warning"

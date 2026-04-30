@@ -351,9 +351,7 @@ class TestRateLimiting:
         assert mock_websocket.send_json.call_count == 3
 
     @pytest.mark.asyncio
-    async def test_actuator_status_bypasses_rate_limit_under_burst(
-        self, manager, mock_websocket
-    ):
+    async def test_actuator_status_bypasses_rate_limit_under_burst(self, manager, mock_websocket):
         """AUT-68: burst of 20 actuator_status events in <1s — none dropped.
 
         Regression test: actuator_status carries GPIO state changes, which must
@@ -385,9 +383,7 @@ class TestRateLimiting:
         assert "esp_health" in manager._rate_limit_bypass_types
 
         for i in range(20):
-            await manager.broadcast(
-                "esp_health", {"esp_id": "ESP_1", "status": "online", "seq": i}
-            )
+            await manager.broadcast("esp_health", {"esp_id": "ESP_1", "status": "online", "seq": i})
 
         assert mock_websocket.send_json.call_count == 20
 

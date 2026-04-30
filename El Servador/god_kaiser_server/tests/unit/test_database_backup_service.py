@@ -21,7 +21,6 @@ from src.services.database_backup_service import (
     _parse_backup_filename,
 )
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -339,7 +338,9 @@ class TestRestoreBackup:
         _create_fake_backup(backup_service.backup_dir, "20260303_020000", sql_dump)
 
         mock_process_psql_version = AsyncMock()
-        mock_process_psql_version.communicate = AsyncMock(return_value=(b"psql (PostgreSQL) 16.12\n", b""))
+        mock_process_psql_version.communicate = AsyncMock(
+            return_value=(b"psql (PostgreSQL) 16.12\n", b"")
+        )
         mock_process_psql_version.returncode = 0
 
         mock_process_restore = AsyncMock()
@@ -386,7 +387,9 @@ class TestRestoreBackup:
         _create_fake_backup(backup_service.backup_dir, "20260303_020000")
 
         mock_process_psql_version = AsyncMock()
-        mock_process_psql_version.communicate = AsyncMock(return_value=(b"psql (PostgreSQL) 16.12\n", b""))
+        mock_process_psql_version.communicate = AsyncMock(
+            return_value=(b"psql (PostgreSQL) 16.12\n", b"")
+        )
         mock_process_psql_version.returncode = 0
 
         mock_process_restore = AsyncMock()

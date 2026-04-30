@@ -20,7 +20,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.config_builder import ConfigPayloadBuilder
 
-
 # ---------------------------------------------------------------------------
 # Helper factories
 # ---------------------------------------------------------------------------
@@ -242,14 +241,16 @@ class TestExtractOfflineRuleUnit:
                 "end_minute": 0,
                 "timezone": "UTC",
             },
-            actions=[{
-                "type": "actuator_command",
-                "esp_id": ESP_ID_A,
-                "gpio": 25,
-                "command": "OFF",
-                "value": 0.0,
-                "duration_seconds": 0,
-            }],
+            actions=[
+                {
+                    "type": "actuator_command",
+                    "esp_id": ESP_ID_A,
+                    "gpio": 25,
+                    "command": "OFF",
+                    "value": 0.0,
+                    "duration_seconds": 0,
+                }
+            ],
         )
 
         result = builder._extract_offline_rule(rule, ESP_ID_A)
@@ -394,7 +395,9 @@ class TestExtractOfflineRuleUnit:
         # "temperature_sht31" is an alias → normalizes to "sht31_temp"
         rule = _make_rule(
             rule_name="temp_alias_rule",
-            trigger_conditions=_heating_condition(ESP_ID_A, gpio=4, sensor_type="temperature_sht31"),
+            trigger_conditions=_heating_condition(
+                ESP_ID_A, gpio=4, sensor_type="temperature_sht31"
+            ),
             actions=[_actuator_action(ESP_ID_A, gpio=18)],
         )
 
@@ -541,9 +544,7 @@ class TestBuildOfflineRulesAsync:
         """If get_enabled_rules raises, _build_offline_rules returns [] without propagating."""
         builder = self._builder()
         mock_logic_repo = AsyncMock()
-        mock_logic_repo.get_enabled_rules = AsyncMock(
-            side_effect=Exception("DB connection lost")
-        )
+        mock_logic_repo.get_enabled_rules = AsyncMock(side_effect=Exception("DB connection lost"))
         builder.logic_repo = mock_logic_repo
 
         esp = _make_esp(ESP_ID_A)

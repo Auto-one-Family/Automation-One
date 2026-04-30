@@ -220,9 +220,7 @@ class TestTopicBuilderParse:
 
     def test_parse_heartbeat_metrics_via_generic(self):
         """Generic parse_topic routes heartbeat_metrics correctly."""
-        result = TopicBuilder.parse_topic(
-            "kaiser/god/esp/ESP_12AB34CD/system/heartbeat_metrics"
-        )
+        result = TopicBuilder.parse_topic("kaiser/god/esp/ESP_12AB34CD/system/heartbeat_metrics")
         assert result is not None
         assert result["type"] == "heartbeat_metrics"
 
@@ -582,6 +580,9 @@ class TestIntentOutcomeLifecycleTopicParse:
         assert parsed["type"] == "intent_outcome_lifecycle"
 
     def test_parse_intent_outcome_topic_does_not_match_lifecycle(self):
-        assert TopicBuilder.parse_intent_outcome_topic(
-            "kaiser/god/esp/ESP_12AB34CD/system/intent_outcome/lifecycle"
-        ) is None
+        assert (
+            TopicBuilder.parse_intent_outcome_topic(
+                "kaiser/god/esp/ESP_12AB34CD/system/intent_outcome/lifecycle"
+            )
+            is None
+        )

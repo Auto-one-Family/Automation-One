@@ -114,7 +114,11 @@ async def test_send_command_correlation_id_matches_mqtt_kwarg(
     kwargs = publisher.publish_actuator_command.call_args.kwargs
     assert kwargs["correlation_id"] == result.correlation_id
 
-    row = (await db_session.execute(select(CommandIntent).where(CommandIntent.intent_id == result.correlation_id))).scalar_one_or_none()
+    row = (
+        await db_session.execute(
+            select(CommandIntent).where(CommandIntent.intent_id == result.correlation_id)
+        )
+    ).scalar_one_or_none()
     assert row is not None
     assert row.orchestration_state == "sent"
 
@@ -216,11 +220,14 @@ async def test_send_command_midflow_exception_records_transport_fail(
         session_factory=_test_session_factory(test_engine),
     )
 
-    with _patch_ws(), patch.object(
-        ActuatorService,
-        "_persist_publish_success",
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("forced mid-flow failure"),
+    with (
+        _patch_ws(),
+        patch.object(
+            ActuatorService,
+            "_persist_publish_success",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("forced mid-flow failure"),
+        ),
     ):
         result = await svc.send_command(
             esp_id=esp.device_id,
@@ -279,14 +286,18 @@ async def test_send_command_parallel_with_stale_injected_session_uses_fresh_cont
     )
 
     caplog.set_level("ERROR")
-    with _patch_ws(), patch.object(
-        ActuatorRepository,
-        "log_command",
-        new_callable=AsyncMock,
-    ), patch.object(
-        AuditLogRepository,
-        "log_actuator_command",
-        new_callable=AsyncMock,
+    with (
+        _patch_ws(),
+        patch.object(
+            ActuatorRepository,
+            "log_command",
+            new_callable=AsyncMock,
+        ),
+        patch.object(
+            AuditLogRepository,
+            "log_actuator_command",
+            new_callable=AsyncMock,
+        ),
     ):
         results = await asyncio.gather(
             *[
@@ -364,11 +375,14 @@ async def test_send_command_pre_dispatch_exception_persists_terminal_fail(
         session_factory=_test_session_factory(test_engine),
     )
 
-    with _patch_ws(), patch.object(
-        ActuatorService,
-        "_load_command_context",
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("forced pre-dispatch failure"),
+    with (
+        _patch_ws(),
+        patch.object(
+            ActuatorService,
+            "_load_command_context",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("forced pre-dispatch failure"),
+        ),
     ):
         result = await svc.send_command(
             esp_id=esp.device_id,
@@ -412,11 +426,14 @@ async def test_send_command_post_dispatch_exception_persists_transport_fail_auth
         session_factory=_test_session_factory(test_engine),
     )
 
-    with _patch_ws(), patch.object(
-        ActuatorService,
-        "_persist_publish_success",
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("forced post-dispatch persistence failure"),
+    with (
+        _patch_ws(),
+        patch.object(
+            ActuatorService,
+            "_persist_publish_success",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("forced post-dispatch persistence failure"),
+        ),
     ):
         result = await svc.send_command(
             esp_id=esp.device_id,

@@ -79,7 +79,9 @@ async def test_upsert_intent_after_sent_moves_to_accepted(db_session):
     )
     await db_session.commit()
 
-    result = await db_session.execute(select(CommandIntent).where(CommandIntent.intent_id == "intent-a"))
+    result = await db_session.execute(
+        select(CommandIntent).where(CommandIntent.intent_id == "intent-a")
+    )
     assert result.scalar_one().orchestration_state == "accepted"
 
 
@@ -96,7 +98,9 @@ async def test_record_sent_does_not_downgrade_ack_pending(db_session):
         },
         esp_id="ESP_X",
     )
-    assert (await db_session.execute(select(CommandIntent).where(CommandIntent.intent_id == "intent-b"))).scalar_one().orchestration_state == "ack_pending"
+    assert (
+        await db_session.execute(select(CommandIntent).where(CommandIntent.intent_id == "intent-b"))
+    ).scalar_one().orchestration_state == "ack_pending"
 
     await repo.record_intent_publish_sent(
         intent_id="intent-b",
@@ -106,7 +110,9 @@ async def test_record_sent_does_not_downgrade_ack_pending(db_session):
     )
     await db_session.commit()
 
-    result = await db_session.execute(select(CommandIntent).where(CommandIntent.intent_id == "intent-b"))
+    result = await db_session.execute(
+        select(CommandIntent).where(CommandIntent.intent_id == "intent-b")
+    )
     assert result.scalar_one().orchestration_state == "ack_pending"
 
 
@@ -136,9 +142,13 @@ async def test_record_intent_publish_sent_parallel_same_intent_is_idempotent(tes
 
     async with async_session_maker() as session:
         rows = (
-            await session.execute(
-                select(CommandIntent).where(CommandIntent.intent_id == "intent-parallel-1")
+            (
+                await session.execute(
+                    select(CommandIntent).where(CommandIntent.intent_id == "intent-parallel-1")
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1
         assert rows[0].intent_id == "intent-parallel-1"

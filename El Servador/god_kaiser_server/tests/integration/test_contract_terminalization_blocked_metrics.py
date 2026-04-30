@@ -25,15 +25,21 @@ async def test_config_stale_terminalization_increments_blocked_metric():
     authority_session = MagicMock()
     authority_session.commit = AsyncMock()
     contract_repo = MagicMock()
-    contract_repo.upsert_terminal_event_authority = AsyncMock(return_value=(SimpleNamespace(), True))
+    contract_repo.upsert_terminal_event_authority = AsyncMock(
+        return_value=(SimpleNamespace(), True)
+    )
 
     with (
         patch(
             "src.mqtt.handlers.config_handler.resilient_session",
             side_effect=[_session_cm(authority_session)],
         ),
-        patch("src.mqtt.handlers.config_handler.CommandContractRepository", return_value=contract_repo),
-        patch("src.mqtt.handlers.config_handler.increment_contract_terminalization_blocked") as blocked_metric,
+        patch(
+            "src.mqtt.handlers.config_handler.CommandContractRepository", return_value=contract_repo
+        ),
+        patch(
+            "src.mqtt.handlers.config_handler.increment_contract_terminalization_blocked"
+        ) as blocked_metric,
     ):
         result = await handler.handle_config_ack(topic, payload)
 
@@ -60,15 +66,22 @@ async def test_actuator_stale_terminalization_increments_blocked_metric():
 
     session = MagicMock()
     contract_repo = MagicMock()
-    contract_repo.upsert_terminal_event_authority = AsyncMock(return_value=(SimpleNamespace(), True))
+    contract_repo.upsert_terminal_event_authority = AsyncMock(
+        return_value=(SimpleNamespace(), True)
+    )
 
     with (
-        patch("src.mqtt.handlers.actuator_response_handler.resilient_session", return_value=_session_cm(session)),
+        patch(
+            "src.mqtt.handlers.actuator_response_handler.resilient_session",
+            return_value=_session_cm(session),
+        ),
         patch(
             "src.mqtt.handlers.actuator_response_handler.CommandContractRepository",
             return_value=contract_repo,
         ),
-        patch("src.mqtt.handlers.actuator_response_handler.increment_contract_terminalization_blocked") as blocked_metric,
+        patch(
+            "src.mqtt.handlers.actuator_response_handler.increment_contract_terminalization_blocked"
+        ) as blocked_metric,
     ):
         result = await handler.handle_actuator_response(topic, payload)
 
@@ -102,13 +115,19 @@ async def test_lwt_stale_terminalization_increments_blocked_metric():
         )
     )
     contract_repo = MagicMock()
-    contract_repo.upsert_terminal_event_authority = AsyncMock(return_value=(SimpleNamespace(), True))
+    contract_repo.upsert_terminal_event_authority = AsyncMock(
+        return_value=(SimpleNamespace(), True)
+    )
 
     with (
         patch("src.mqtt.handlers.lwt_handler.resilient_session", return_value=_session_cm(session)),
         patch("src.mqtt.handlers.lwt_handler.ESPRepository", return_value=esp_repo),
-        patch("src.mqtt.handlers.lwt_handler.CommandContractRepository", return_value=contract_repo),
-        patch("src.mqtt.handlers.lwt_handler.increment_contract_terminalization_blocked") as blocked_metric,
+        patch(
+            "src.mqtt.handlers.lwt_handler.CommandContractRepository", return_value=contract_repo
+        ),
+        patch(
+            "src.mqtt.handlers.lwt_handler.increment_contract_terminalization_blocked"
+        ) as blocked_metric,
     ):
         result = await handler.handle_lwt(topic, payload)
 

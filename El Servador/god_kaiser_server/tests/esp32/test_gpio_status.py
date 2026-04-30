@@ -86,9 +86,7 @@ class TestMockHeartbeatGpioStatus:
         mock_esp.handle_command("emergency_stop", {"reason": "test"})
 
         gpio_status = mock_esp._build_gpio_status()
-        actuator_status = next(
-            (item for item in gpio_status if item["gpio"] == 14), None
-        )
+        actuator_status = next((item for item in gpio_status if item["gpio"] == 14), None)
         assert actuator_status is not None
         assert actuator_status["safe"] is True, "Emergency-stopped actuator should have safe=True"
 
@@ -119,9 +117,7 @@ class TestMockHeartbeatGpioStatus:
         mock_esp.configure_zone("test_zone", "main")
         mock_esp.configure_actuator(gpio=14, actuator_type="pump")
         gpio_status = mock_esp._build_gpio_status()
-        actuator_status = next(
-            (item for item in gpio_status if item["gpio"] == 14), None
-        )
+        actuator_status = next((item for item in gpio_status if item["gpio"] == 14), None)
         assert actuator_status is not None
         assert actuator_status["mode"] == 1, "Actuator should have mode=1 (OUTPUT)"
 

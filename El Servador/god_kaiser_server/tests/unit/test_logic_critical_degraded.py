@@ -23,7 +23,6 @@ from src.schemas.logic import (
     _validate_escalation_policy,
 )
 
-
 # =============================================================================
 # Model field presence (migration sanity)
 # =============================================================================
@@ -120,7 +119,9 @@ class TestSchemaIsCriticalField:
     def test_create_defaults_is_critical_false(self):
         data = LogicRuleCreate(
             name="Test Rule",
-            conditions=[{"type": "sensor", "esp_id": "ESP_AABB", "gpio": 1, "operator": ">", "value": 5}],
+            conditions=[
+                {"type": "sensor", "esp_id": "ESP_AABB", "gpio": 1, "operator": ">", "value": 5}
+            ],
             actions=[{"type": "actuator", "esp_id": "ESP_CCDD", "gpio": 2, "command": "ON"}],
         )
         assert data.is_critical is False
@@ -129,7 +130,9 @@ class TestSchemaIsCriticalField:
     def test_create_with_is_critical_true(self):
         data = LogicRuleCreate(
             name="Critical Rule",
-            conditions=[{"type": "sensor", "esp_id": "ESP_AABB", "gpio": 1, "operator": ">", "value": 5}],
+            conditions=[
+                {"type": "sensor", "esp_id": "ESP_AABB", "gpio": 1, "operator": ">", "value": 5}
+            ],
             actions=[{"type": "actuator", "esp_id": "ESP_CCDD", "gpio": 2, "command": "ON"}],
             is_critical=True,
             escalation_policy={"notify": ["websocket"], "max_retries": 3},
@@ -141,7 +144,9 @@ class TestSchemaIsCriticalField:
         with pytest.raises(Exception):
             LogicRuleCreate(
                 name="Bad Policy",
-                conditions=[{"type": "sensor", "esp_id": "ESP_AABB", "gpio": 1, "operator": ">", "value": 5}],
+                conditions=[
+                    {"type": "sensor", "esp_id": "ESP_AABB", "gpio": 1, "operator": ">", "value": 5}
+                ],
                 actions=[{"type": "actuator", "esp_id": "ESP_CCDD", "gpio": 2, "command": "ON"}],
                 escalation_policy={"notify": ["sms"]},
             )

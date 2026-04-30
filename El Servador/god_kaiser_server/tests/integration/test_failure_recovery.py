@@ -26,6 +26,7 @@ def clear_emergency_stop_state():
     yield
     SafetyService._global_emergency_stop_active.clear()
 
+
 # =========================================================================
 # ESP32 Emergency Recovery Workflow
 # =========================================================================

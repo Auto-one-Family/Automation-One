@@ -83,7 +83,9 @@ class TestFullConfigCycle:
                     return_value=(MagicMock(), False)
                 )
 
-                with patch("src.mqtt.handlers.config_handler.AuditLogRepository") as mock_audit_class:
+                with patch(
+                    "src.mqtt.handlers.config_handler.AuditLogRepository"
+                ) as mock_audit_class:
                     mock_audit = MagicMock()
                     mock_audit.log_config_response = AsyncMock()
                     mock_audit_class.return_value = mock_audit
@@ -669,7 +671,9 @@ class TestNetworkPartitionRecovery:
                                                 for c in mock_ws.broadcast.call_args_list
                                                 if c.args and c.args[0] == "esp_reconnect_phase"
                                             ]
-                                            assert reconnect_calls, "esp_reconnect_phase not broadcasted"
+                                            assert (
+                                                reconnect_calls
+                                            ), "esp_reconnect_phase not broadcasted"
                                             phase_payload = reconnect_calls[0].args[1]
                                             assert phase_payload["esp_id"] == "ESP_ADOPT"
                                             assert phase_payload["phase"] == "adopting"
@@ -844,7 +848,9 @@ class TestCrossHandlerInteraction:
                     return_value=(MagicMock(), False)
                 )
 
-                with patch("src.mqtt.handlers.config_handler.AuditLogRepository") as mock_audit_class:
+                with patch(
+                    "src.mqtt.handlers.config_handler.AuditLogRepository"
+                ) as mock_audit_class:
                     mock_audit = MagicMock()
                     mock_audit.log_config_response = AsyncMock()
                     mock_audit_class.return_value = mock_audit
@@ -854,7 +860,9 @@ class TestCrossHandlerInteraction:
                         mock_ws.broadcast = AsyncMock()
                         mock_ws_class.get_instance = AsyncMock(return_value=mock_ws)
 
-                        result = await config_handler.handle_config_ack(config_topic, config_payload)
+                        result = await config_handler.handle_config_ack(
+                            config_topic, config_payload
+                        )
 
                         assert result is True
 
@@ -898,7 +906,9 @@ class TestCrossHandlerInteraction:
                     return_value=(MagicMock(), False)
                 )
 
-                with patch("src.mqtt.handlers.config_handler.AuditLogRepository") as mock_audit_class:
+                with patch(
+                    "src.mqtt.handlers.config_handler.AuditLogRepository"
+                ) as mock_audit_class:
                     mock_audit = MagicMock()
                     mock_audit.log_config_response = AsyncMock()
                     mock_audit_class.return_value = mock_audit

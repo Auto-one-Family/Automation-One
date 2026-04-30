@@ -38,7 +38,9 @@ async def test_t1_config_response_unknown_contract_visible_and_stable():
 
     ws = AsyncMock()
     contract_repo = MagicMock()
-    contract_repo.upsert_terminal_event_authority = AsyncMock(return_value=(SimpleNamespace(), False))
+    contract_repo.upsert_terminal_event_authority = AsyncMock(
+        return_value=(SimpleNamespace(), False)
+    )
     audit_repo = MagicMock()
     audit_repo.log_config_response = AsyncMock()
 
@@ -47,7 +49,9 @@ async def test_t1_config_response_unknown_contract_visible_and_stable():
             "src.mqtt.handlers.config_handler.resilient_session",
             side_effect=[_session_cm(authority_session), _session_cm(audit_session)],
         ),
-        patch("src.mqtt.handlers.config_handler.CommandContractRepository", return_value=contract_repo),
+        patch(
+            "src.mqtt.handlers.config_handler.CommandContractRepository", return_value=contract_repo
+        ),
         patch("src.mqtt.handlers.config_handler.AuditLogRepository", return_value=audit_repo),
         patch("src.websocket.manager.WebSocketManager.get_instance", AsyncMock(return_value=ws)),
     ):
@@ -79,9 +83,13 @@ async def test_t2_actuator_response_unknown_contract_visible_and_stable():
     session = MagicMock()
     session.commit = AsyncMock()
     contract_repo = MagicMock()
-    contract_repo.upsert_terminal_event_authority = AsyncMock(return_value=(SimpleNamespace(), False))
+    contract_repo.upsert_terminal_event_authority = AsyncMock(
+        return_value=(SimpleNamespace(), False)
+    )
     esp_repo = MagicMock()
-    esp_repo.get_by_device_id = AsyncMock(return_value=SimpleNamespace(id="esp-uuid", name="ESP_T2"))
+    esp_repo.get_by_device_id = AsyncMock(
+        return_value=SimpleNamespace(id="esp-uuid", name="ESP_T2")
+    )
     actuator_repo = MagicMock()
     actuator_repo.log_command = AsyncMock()
     audit_repo = MagicMock()
@@ -89,13 +97,19 @@ async def test_t2_actuator_response_unknown_contract_visible_and_stable():
     ws = AsyncMock()
 
     with (
-        patch("src.mqtt.handlers.actuator_response_handler.resilient_session", return_value=_session_cm(session)),
+        patch(
+            "src.mqtt.handlers.actuator_response_handler.resilient_session",
+            return_value=_session_cm(session),
+        ),
         patch(
             "src.mqtt.handlers.actuator_response_handler.CommandContractRepository",
             return_value=contract_repo,
         ),
         patch("src.mqtt.handlers.actuator_response_handler.ESPRepository", return_value=esp_repo),
-        patch("src.mqtt.handlers.actuator_response_handler.ActuatorRepository", return_value=actuator_repo),
+        patch(
+            "src.mqtt.handlers.actuator_response_handler.ActuatorRepository",
+            return_value=actuator_repo,
+        ),
         patch("src.db.repositories.audit_log_repo.AuditLogRepository", return_value=audit_repo),
         patch("src.websocket.manager.WebSocketManager.get_instance", AsyncMock(return_value=ws)),
     ):
@@ -150,9 +164,15 @@ async def test_t3_heartbeat_unknown_system_state_visible_without_drop():
     mqtt_client.publish = MagicMock(return_value=True)
 
     with (
-        patch("src.mqtt.handlers.heartbeat_handler.resilient_session", return_value=_session_cm(session)),
+        patch(
+            "src.mqtt.handlers.heartbeat_handler.resilient_session",
+            return_value=_session_cm(session),
+        ),
         patch("src.mqtt.handlers.heartbeat_handler.ESPRepository", return_value=esp_repo),
-        patch("src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository", return_value=heartbeat_repo),
+        patch(
+            "src.mqtt.handlers.heartbeat_handler.ESPHeartbeatRepository",
+            return_value=heartbeat_repo,
+        ),
         patch.object(handler, "_send_heartbeat_ack", AsyncMock(return_value=True)),
         patch.object(handler, "_has_pending_config", AsyncMock(return_value=False)),
         patch.object(handler, "_update_esp_metadata", AsyncMock(return_value=None)),
@@ -193,7 +213,9 @@ async def test_t4_lwt_unknown_reason_visible_and_terminal_authority_kept():
     esp_repo.get_by_device_id = AsyncMock(return_value=esp_device)
     esp_repo.update_status = AsyncMock()
     contract_repo = MagicMock()
-    contract_repo.upsert_terminal_event_authority = AsyncMock(return_value=(SimpleNamespace(), False))
+    contract_repo.upsert_terminal_event_authority = AsyncMock(
+        return_value=(SimpleNamespace(), False)
+    )
     actuator_repo = MagicMock()
     actuator_repo.get_active_actuators_for_device = AsyncMock(return_value=[])
     actuator_repo.reset_states_for_device = AsyncMock(return_value=0)
@@ -204,7 +226,9 @@ async def test_t4_lwt_unknown_reason_visible_and_terminal_authority_kept():
     with (
         patch("src.mqtt.handlers.lwt_handler.resilient_session", return_value=_session_cm(session)),
         patch("src.mqtt.handlers.lwt_handler.ESPRepository", return_value=esp_repo),
-        patch("src.mqtt.handlers.lwt_handler.CommandContractRepository", return_value=contract_repo),
+        patch(
+            "src.mqtt.handlers.lwt_handler.CommandContractRepository", return_value=contract_repo
+        ),
         patch("src.mqtt.handlers.lwt_handler.ActuatorRepository", return_value=actuator_repo),
         patch("src.mqtt.handlers.lwt_handler.AuditLogRepository", return_value=audit_repo),
         patch(
@@ -245,7 +269,10 @@ async def test_t5_diagnostics_unknown_state_visible_and_persisted():
     ws = AsyncMock()
 
     with (
-        patch("src.mqtt.handlers.diagnostics_handler.resilient_session", return_value=_session_cm(session)),
+        patch(
+            "src.mqtt.handlers.diagnostics_handler.resilient_session",
+            return_value=_session_cm(session),
+        ),
         patch("src.mqtt.handlers.diagnostics_handler.ESPRepository", return_value=esp_repo),
         patch("src.mqtt.handlers.diagnostics_handler.flag_modified", MagicMock()),
         patch("src.websocket.manager.WebSocketManager.get_instance", AsyncMock(return_value=ws)),
@@ -282,7 +309,9 @@ async def test_t6_error_event_unknown_fields_visible_without_pipeline_break():
     ws = AsyncMock()
 
     with (
-        patch("src.mqtt.handlers.error_handler.resilient_session", return_value=_session_cm(session)),
+        patch(
+            "src.mqtt.handlers.error_handler.resilient_session", return_value=_session_cm(session)
+        ),
         patch("src.mqtt.handlers.error_handler.ESPRepository", return_value=esp_repo),
         patch("src.mqtt.handlers.error_handler.AuditLogRepository", return_value=audit_repo),
         patch("src.mqtt.handlers.error_handler.get_error_info", MagicMock(return_value=None)),

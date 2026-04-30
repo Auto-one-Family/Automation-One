@@ -310,7 +310,9 @@ class TestOneWireAddressTransform:
         from src.core.config_mapping import ConfigMappingEngine
 
         transform = ConfigMappingEngine.TRANSFORMS["strip_auto_prefix"]
-        assert transform("28FF641E8D3C0C79") == "28FF641E8D3C0C79", "Real ROM code should be unchanged"
+        assert (
+            transform("28FF641E8D3C0C79") == "28FF641E8D3C0C79"
+        ), "Real ROM code should be unchanged"
 
     @pytest.mark.onewire
     @pytest.mark.sensor

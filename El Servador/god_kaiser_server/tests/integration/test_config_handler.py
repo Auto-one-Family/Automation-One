@@ -281,7 +281,9 @@ class TestConfigStatusProcessing:
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch("src.mqtt.handlers.config_handler.CommandContractRepository") as mock_repo_class:
+            with patch(
+                "src.mqtt.handlers.config_handler.CommandContractRepository"
+            ) as mock_repo_class:
                 mock_repo = MagicMock()
                 mock_repo.upsert_terminal_event_authority = AsyncMock(
                     return_value=(MagicMock(), True)

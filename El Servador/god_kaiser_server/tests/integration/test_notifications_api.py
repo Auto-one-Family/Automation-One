@@ -163,6 +163,125 @@ async def test_get_notifications_filter_severity(
 
 
 # =============================================================================
+# Test 2a: GET /v1/notifications?status — Lifecycle filter (AUT-196)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_notifications_filter_status(
+    operator_headers,
+    db_session: AsyncSession,
+    operator_user: User,
+):
+    """GET /v1/notifications?status filters on alert lifecycle (server-side)."""
+    active_n = Notification(
+        user_id=operator_user.id,
+        title="Active alert",
+        body="",
+        channel="websocket",
+        severity="warning",
+        category="system",
+        source="manual",
+        status="active",
+    )
+    ack_n = Notification(
+        user_id=operator_user.id,
+        title="Ack alert",
+        body="",
+        channel="websocket",
+        severity="warning",
+        category="system",
+        source="manual",
+        status="acknowledged",
+    )
+    db_session.add_all([active_n, ack_n])
+    await db_session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            "/api/v1/notifications",
+            headers=operator_headers,
+            params={"status": "acknowledged", "page_size": 50},
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    ids = {item["id"] for item in body["data"]}
+    assert str(ack_n.id) in ids
+    assert str(active_n.id) not in ids
+    for item in body["data"]:
+        if item["id"] == str(ack_n.id):
+            assert item["status"] == "acknowledged"
+
+
+@pytest.mark.asyncio
+async def test_get_notifications_filter_source_bucket_system(
+    operator_headers,
+    db_session: AsyncSession,
+    operator_user: User,
+):
+    """GET /v1/notifications?source_bucket=system matches grouped sources."""
+    logic_n = Notification(
+        user_id=operator_user.id,
+        title="Logic",
+        body="",
+        channel="websocket",
+        severity="info",
+        category="system",
+        source="logic_engine",
+        status="active",
+    )
+    manual_n = Notification(
+        user_id=operator_user.id,
+        title="Manual",
+        body="",
+        channel="websocket",
+        severity="info",
+        category="system",
+        source="manual",
+        status="active",
+    )
+    db_session.add_all([logic_n, manual_n])
+    await db_session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            "/api/v1/notifications",
+            headers=operator_headers,
+            params={"source_bucket": "system"},
+        )
+    assert response.status_code == 200
+    body = response.json()
+    ids = {item["id"] for item in body["data"]}
+    assert str(manual_n.id) in ids
+    assert str(logic_n.id) not in ids
+
+
+@pytest.mark.asyncio
+async def test_get_notifications_invalid_status_returns_422(operator_headers):
+    """Invalid ?status= yields 422 (not an empty list)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            "/api/v1/notifications",
+            headers=operator_headers,
+            params={"status": "not_a_status"},
+        )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_notifications_invalid_source_bucket_returns_422(operator_headers):
+    """Invalid ?source_bucket= yields 422 (not silently ignored)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            "/api/v1/notifications",
+            headers=operator_headers,
+            params={"source_bucket": "bogus"},
+        )
+    assert response.status_code == 422
+
+
+# =============================================================================
 # Test 3: GET /v1/notifications?category=system — Filter
 # =============================================================================
 

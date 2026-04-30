@@ -665,7 +665,9 @@ class TestSensorServiceTriggerMeasurementContract:
 
         with patch("src.services.sensor_service.CommandContractRepository") as repo_cls:
             repo_instance = repo_cls.return_value
-            repo_instance.record_intent_publish_sent = AsyncMock(side_effect=RuntimeError("db down"))
+            repo_instance.record_intent_publish_sent = AsyncMock(
+                side_effect=RuntimeError("db down")
+            )
 
             result = await service.trigger_measurement(esp_id="ESP_TEST002", gpio=5)
 

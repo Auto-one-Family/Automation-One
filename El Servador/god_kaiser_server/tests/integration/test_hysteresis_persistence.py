@@ -19,7 +19,6 @@ from src.services.logic.conditions.compound_evaluator import CompoundConditionEv
 from src.services.logic.conditions.sensor_evaluator import SensorConditionEvaluator
 from src.services.logic.conditions.time_evaluator import TimeConditionEvaluator
 
-
 # =============================================================================
 # TEST-2: State Persistence After Restart (Simulated)
 # =============================================================================
@@ -228,11 +227,11 @@ class TestCompoundHysteresisConditionIndex:
         return TimeConditionEvaluator()
 
     @pytest.mark.asyncio
-    async def test_hysteresis_at_index_0_gets_correct_key(self, hysteresis_evaluator, time_evaluator):
+    async def test_hysteresis_at_index_0_gets_correct_key(
+        self, hysteresis_evaluator, time_evaluator
+    ):
         """Compound AND(Hysteresis[0], Time[1]) — hysteresis gets condition_index=0."""
-        compound_eval = CompoundConditionEvaluator(
-            [hysteresis_evaluator, time_evaluator]
-        )
+        compound_eval = CompoundConditionEvaluator([hysteresis_evaluator, time_evaluator])
 
         rule_id = str(uuid.uuid4())
         compound_cond = {
@@ -270,11 +269,11 @@ class TestCompoundHysteresisConditionIndex:
         assert state.is_active is True
 
     @pytest.mark.asyncio
-    async def test_hysteresis_at_index_1_gets_correct_key(self, hysteresis_evaluator, time_evaluator):
+    async def test_hysteresis_at_index_1_gets_correct_key(
+        self, hysteresis_evaluator, time_evaluator
+    ):
         """Compound AND(Time[0], Hysteresis[1]) — hysteresis gets condition_index=1."""
-        compound_eval = CompoundConditionEvaluator(
-            [hysteresis_evaluator, time_evaluator]
-        )
+        compound_eval = CompoundConditionEvaluator([hysteresis_evaluator, time_evaluator])
 
         rule_id = str(uuid.uuid4())
         compound_cond = {

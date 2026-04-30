@@ -143,7 +143,9 @@ class TestDS18B20RealProcessing:
     def test_calibration_offset(self, processor):
         """Test calibration offset application in pre-converted mode."""
         calibration = {"offset": 0.5}
-        result = processor.process(raw_value=23.0, calibration=calibration, params={"raw_mode": False})
+        result = processor.process(
+            raw_value=23.0, calibration=calibration, params={"raw_mode": False}
+        )
 
         assert result.value == 23.5  # 23.0 + 0.5 offset
         assert result.metadata["calibrated"] is True

@@ -79,6 +79,9 @@ export class MockWebSocketService {
   private statusChangeCallbacks = new Set<(status: string) => void>()
   private _isConnected = false
   private _status: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected'
+  private _reconnectAttempts = 0
+  private _lastConnectedAt: number | null = null
+  private _lastDisconnectAt: number | null = null
 
   // Subscription management
   private subscriptions = new Map<string, WebSocketSubscription>()
@@ -100,6 +103,22 @@ export class MockWebSocketService {
     return this._isConnected
   }
 
+  getStatus(): string {
+    return this._status
+  }
+
+  getReconnectAttempts(): number {
+    return this._reconnectAttempts
+  }
+
+  getLastConnectedAt(): number | null {
+    return this._lastConnectedAt
+  }
+
+  getLastDisconnectAt(): number | null {
+    return this._lastDisconnectAt
+  }
+
   /**
    * Connect to WebSocket (mock)
    * No delay - immediate connection for fast unit tests
@@ -110,6 +129,9 @@ export class MockWebSocketService {
     // Immediate resolution - no delay for unit tests
     this._isConnected = true
     this._status = 'connected'
+    this._reconnectAttempts = 0
+    this._lastConnectedAt = Date.now()
+    this._lastDisconnectAt = null
     this.notifyStatusChange('connected')
   }
 
@@ -119,6 +141,7 @@ export class MockWebSocketService {
   disconnect(): void {
     this._isConnected = false
     this._status = 'disconnected'
+    this._reconnectAttempts = 0
     this.notifyStatusChange('disconnected')
     this.handlers.clear()
     this.globalHandlers.clear()
@@ -252,6 +275,7 @@ export class MockWebSocketService {
   simulateError(): void {
     this._isConnected = false
     this._status = 'error'
+    this._lastDisconnectAt = Date.now()
     this.notifyStatusChange('error')
   }
 
@@ -261,7 +285,31 @@ export class MockWebSocketService {
   simulateReconnect(): void {
     this._isConnected = true
     this._status = 'connected'
+    this._reconnectAttempts = 0
+    this._lastConnectedAt = Date.now()
+    this._lastDisconnectAt = null
     this.notifyStatusChange('connected')
+  }
+
+  /**
+   * Abnormal disconnect with pending reconnect attempts (AUT-200 tests)
+   */
+  simulateAbnormalDisconnectState(attempts: number): void {
+    this._isConnected = false
+    this._status = 'disconnected'
+    this._reconnectAttempts = attempts
+    this._lastDisconnectAt = Date.now()
+    this.notifyStatusChange('disconnected')
+  }
+
+  /**
+   * Connecting state with prior attempt counter (backoff / retry UI)
+   */
+  simulateConnectingWithAttempts(attempts: number): void {
+    this._isConnected = false
+    this._status = 'connecting'
+    this._reconnectAttempts = attempts
+    this.notifyStatusChange('connecting')
   }
 
   /**
@@ -311,6 +359,9 @@ export class MockWebSocketService {
     this.subscriptions.clear()
     this._isConnected = false
     this._status = 'disconnected'
+    this._reconnectAttempts = 0
+    this._lastConnectedAt = null
+    this._lastDisconnectAt = null
     this._nextSubId = 1
   }
 }

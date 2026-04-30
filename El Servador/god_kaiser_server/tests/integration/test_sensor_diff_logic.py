@@ -12,7 +12,6 @@ from src.db.models.logic_validation import SensorDiffCondition, validate_conditi
 from src.services.logic.conditions import SensorDiffConditionEvaluator
 from src.services.logic.template_loader import TemplateLoader, TemplateLoadError
 
-
 # =============================================================================
 # Tests: SensorDiffCondition Validation
 # =============================================================================

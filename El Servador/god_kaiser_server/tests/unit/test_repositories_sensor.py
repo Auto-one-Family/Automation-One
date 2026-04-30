@@ -602,9 +602,7 @@ class TestSensorRepositoryCalibration:
         # Force JSON null in SQLite JSON column (distinct from SQL NULL).
         await sensor_repo.session.execute(
             text(
-                "UPDATE sensor_configs "
-                "SET calibration_data = json('null') "
-                "WHERE gpio = :gpio"
+                "UPDATE sensor_configs " "SET calibration_data = json('null') " "WHERE gpio = :gpio"
             ),
             {"gpio": 32},
         )

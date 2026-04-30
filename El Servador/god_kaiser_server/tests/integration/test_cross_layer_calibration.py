@@ -29,7 +29,6 @@ from src.db.models.user import User
 from src.main import app
 from src.services.calibration_service import CalibrationService, CalibrationError
 
-
 # ============================================================================
 # Test Fixtures
 # ============================================================================

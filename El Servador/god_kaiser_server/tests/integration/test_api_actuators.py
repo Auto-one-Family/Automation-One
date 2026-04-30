@@ -342,7 +342,9 @@ class TestEmergencyStop:
         """Epic 1-03: each emergency OFF publish must include deterministic correlation_id."""
         fixed_incident = uuid.UUID("aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee")
         with patch("src.api.v1.actuators.uuid.uuid4", return_value=fixed_incident):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
                 response = await client.post(
                     "/api/v1/actuators/emergency_stop",
                     json={
@@ -392,19 +394,23 @@ class TestEmergencyStop:
             if c.kwargs.get("topic") == "kaiser/broadcast/emergency"
             or (c.args and c.args[0] == "kaiser/broadcast/emergency")
         ]
-        assert len(broadcast_calls) == 1, f"Expected 1 broadcast publish, got {len(broadcast_calls)}"
+        assert (
+            len(broadcast_calls) == 1
+        ), f"Expected 1 broadcast publish, got {len(broadcast_calls)}"
 
         call = broadcast_calls[0]
         raw_payload = call.kwargs.get("payload") or call.args[1]
         payload = json.loads(raw_payload)
 
         FIRMWARE_ACCEPTED = {"emergency_stop", "stop_all"}
-        assert payload["command"] in FIRMWARE_ACCEPTED, (
-            f"Broadcast command '{payload['command']}' not in firmware-accepted set {FIRMWARE_ACCEPTED}"
-        )
+        assert (
+            payload["command"] in FIRMWARE_ACCEPTED
+        ), f"Broadcast command '{payload['command']}' not in firmware-accepted set {FIRMWARE_ACCEPTED}"
         assert payload.get("reason"), "Broadcast payload must include non-empty 'reason'"
         assert payload.get("timestamp"), "Broadcast payload must include 'timestamp'"
-        assert payload.get("incident_correlation_id"), "Broadcast payload must include 'incident_correlation_id'"
+        assert payload.get(
+            "incident_correlation_id"
+        ), "Broadcast payload must include 'incident_correlation_id'"
 
 
 class TestGetStatus:

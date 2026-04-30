@@ -17,6 +17,7 @@ def handler() -> HeartbeatMetricsHandler:
 
 # ── Topic parsing ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_happy_path_buffers_metrics(handler: HeartbeatMetricsHandler) -> None:
     topic = "kaiser/god/esp/ESP_AABB1122/system/heartbeat_metrics"
@@ -48,6 +49,7 @@ async def test_malformed_topic_returns_false(handler: HeartbeatMetricsHandler) -
 
 # ── Cache behaviour ────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_latest_overwrite(handler: HeartbeatMetricsHandler) -> None:
     topic = "kaiser/god/esp/ESP_001/system/heartbeat_metrics"
@@ -68,6 +70,7 @@ async def test_get_latest_returns_none_for_unknown_esp(
 
 
 # ── Non-dict payload safety ────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_non_dict_payload_treated_as_empty(

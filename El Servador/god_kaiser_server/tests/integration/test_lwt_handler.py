@@ -247,7 +247,9 @@ class TestLWTIdempotency:
                 mock_repo.update_status = AsyncMock()
                 mock_repo_class.return_value = mock_repo
 
-                with patch("src.mqtt.handlers.lwt_handler.CommandContractRepository") as mock_contract:
+                with patch(
+                    "src.mqtt.handlers.lwt_handler.CommandContractRepository"
+                ) as mock_contract:
                     mock_contract_repo = MagicMock()
                     mock_contract_repo.upsert_terminal_event_authority = AsyncMock(
                         return_value=(MagicMock(), True)

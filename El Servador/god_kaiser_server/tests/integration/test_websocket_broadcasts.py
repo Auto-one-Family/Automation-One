@@ -163,7 +163,9 @@ class TestConfigWebSocketBroadcast:
         }
 
         with _mock_resilient_session():
-            with patch("src.mqtt.handlers.config_handler.CommandContractRepository") as mock_contract:
+            with patch(
+                "src.mqtt.handlers.config_handler.CommandContractRepository"
+            ) as mock_contract:
                 mock_contract.return_value.upsert_terminal_event_authority = AsyncMock(
                     return_value=(MagicMock(), False)
                 )
@@ -186,7 +188,9 @@ class TestConfigWebSocketBroadcast:
         }
 
         with _mock_resilient_session():
-            with patch("src.mqtt.handlers.config_handler.CommandContractRepository") as mock_contract:
+            with patch(
+                "src.mqtt.handlers.config_handler.CommandContractRepository"
+            ) as mock_contract:
                 mock_contract.return_value.upsert_terminal_event_authority = AsyncMock(
                     return_value=(MagicMock(), False)
                 )
@@ -209,7 +213,9 @@ class TestConfigWebSocketBroadcast:
         }
 
         with _mock_resilient_session():
-            with patch("src.mqtt.handlers.config_handler.CommandContractRepository") as mock_contract:
+            with patch(
+                "src.mqtt.handlers.config_handler.CommandContractRepository"
+            ) as mock_contract:
                 mock_contract.return_value.upsert_terminal_event_authority = AsyncMock(
                     return_value=(MagicMock(), False)
                 )

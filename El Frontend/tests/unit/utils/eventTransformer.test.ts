@@ -12,6 +12,8 @@ import {
   formatSensorValue,
   getOperatorActionGuidance,
   transformEventMessage,
+  normalizeActuatorOnState,
+  actuatorDutyToDisplayPercent,
   type EventCategory
 } from '@/utils/eventTransformer'
 import type { UnifiedEvent } from '@/types/websocket-events'
@@ -267,6 +269,73 @@ describe('transformEventMessage - actuator_status', () => {
     })
     const result = transformEventMessage(event)
     expect(result.summary).toContain('AUS')
+  })
+
+  /** Regression: Server sendet state als String "on"|"off" und value oft 8‑Bit 0–255 (nicht 0–1 Duty). */
+  it('maps server state string "off" to AUS even with pwm_value 0', () => {
+    const event = makeEvent({
+      event_type: 'actuator_status',
+      gpio: 15,
+      data: {
+        actuator_type: 'digital',
+        hardware_type: 'digital_out',
+        state: 'off',
+        value: 0,
+        command_source: 'firmware:auto_duration',
+      },
+    })
+    const result = transformEventMessage(event)
+    expect(result.summary).toContain('AUS')
+    expect(result.summary).not.toContain('EIN (0%)')
+  })
+
+  it('maps 8‑bit value 255 to 100% display for PWM (not 25500%)', () => {
+    const event = makeEvent({
+      event_type: 'actuator_status',
+      gpio: 25,
+      data: {
+        actuator_type: 'pwm',
+        state: 'on',
+        value: 255,
+        command_source: 'logic:5337541a-f3a9-461b-b7ee-09b69d6511ad',
+      },
+    })
+    const result = transformEventMessage(event)
+    expect(result.summary).toContain('100%')
+    expect(result.summary).not.toMatch(/25500/)
+    expect(result.summary).toContain('EIN')
+  })
+
+  it('omits redundant percent for relay/digital (EIN/AUS genügt)', () => {
+    const event = makeEvent({
+      event_type: 'actuator_status',
+      gpio: 12,
+      data: {
+        actuator_type: 'relay',
+        state: 'on',
+        value: 255,
+      },
+    })
+    const result = transformEventMessage(event)
+    expect(result.summary).toContain('EIN')
+    expect(result.summary).not.toContain('%')
+  })
+})
+
+describe('normalizeActuatorOnState / actuatorDutyToDisplayPercent', () => {
+  it('normalizes MQTT/WebSocket state strings', () => {
+    expect(normalizeActuatorOnState(true)).toBe(true)
+    expect(normalizeActuatorOnState(false)).toBe(false)
+    expect(normalizeActuatorOnState('on')).toBe(true)
+    expect(normalizeActuatorOnState('off')).toBe(false)
+    expect(normalizeActuatorOnState('pwm')).toBe(true)
+  })
+
+  it('converts duty values for display', () => {
+    expect(actuatorDutyToDisplayPercent(1)).toBe(100)
+    expect(actuatorDutyToDisplayPercent(0.5)).toBe(50)
+    expect(actuatorDutyToDisplayPercent(255)).toBe(100)
+    expect(actuatorDutyToDisplayPercent(128)).toBe(50)
   })
 })
 

@@ -1,7 +1,6 @@
 import importlib.util
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[4]
 SCRIPT_PATH = ROOT / ".github" / "scripts" / "contract_governance_gate.py"
 

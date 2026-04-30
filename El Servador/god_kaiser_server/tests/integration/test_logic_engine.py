@@ -129,9 +129,7 @@ class TestLogicHotpathContractStabilization:
         assert isinstance(result.get("action_results"), list)
 
     @pytest.mark.asyncio
-    async def test_evaluate_rule_error_path_logs_with_snapshots(
-        self, logic_engine: LogicEngine
-    ):
+    async def test_evaluate_rule_error_path_logs_with_snapshots(self, logic_engine: LogicEngine):
         mock_rule = MagicMock()
         mock_rule.id = uuid.uuid4()
         mock_rule.rule_name = "snapshot-rule"
@@ -476,9 +474,7 @@ class TestTimerCompoundRuleEvaluation:
     """Tests for timer-triggered compound rule evaluation (R1-FIX2)."""
 
     @pytest.mark.asyncio
-    async def test_context_includes_sensor_values_and_sensor_data(
-        self, logic_engine: LogicEngine
-    ):
+    async def test_context_includes_sensor_values_and_sensor_data(self, logic_engine: LogicEngine):
         """evaluate_timer_triggered_rules builds Phase-1 context with sensor_values + sensor_data."""
         rule_id = uuid.uuid4()
         mock_rule = MagicMock()
@@ -546,9 +542,7 @@ class TestTimerCompoundRuleEvaluation:
         assert "current_time" in ctx
 
     @pytest.mark.asyncio
-    async def test_context_sensor_data_empty_when_no_sensor_refs(
-        self, logic_engine: LogicEngine
-    ):
+    async def test_context_sensor_data_empty_when_no_sensor_refs(self, logic_engine: LogicEngine):
         """Pure time-window rules get empty sensor context — evaluate_timer still runs."""
         rule_id = uuid.uuid4()
         mock_rule = MagicMock()
@@ -702,12 +696,16 @@ class TestB2TimezoneSupport:
 
         utc_21 = datetime(2026, 7, 1, 21, 0, 0, tzinfo=timezone.utc)
         result = await evaluator.evaluate(condition, {"current_time": utc_21})
-        assert result is True, "21:00 UTC should be inside 23:00-24:00 window for Europe/Berlin (CEST)"
+        assert (
+            result is True
+        ), "21:00 UTC should be inside 23:00-24:00 window for Europe/Berlin (CEST)"
 
         # 23:00 UTC = 01:00 CEST next day → window should be closed
         utc_23 = datetime(2026, 7, 1, 23, 0, 0, tzinfo=timezone.utc)
         result = await evaluator.evaluate(condition, {"current_time": utc_23})
-        assert result is False, "23:00 UTC should be outside 23:00-24:00 window for Europe/Berlin (CEST)"
+        assert (
+            result is False
+        ), "23:00 UTC should be outside 23:00-24:00 window for Europe/Berlin (CEST)"
 
     @pytest.mark.asyncio
     async def test_time_window_without_timezone_uses_utc(self, logic_engine: LogicEngine):
@@ -726,7 +724,9 @@ class TestB2TimezoneSupport:
 
         utc_23 = datetime(2026, 7, 1, 23, 0, 0, tzinfo=timezone.utc)
         result = await evaluator.evaluate(condition, {"current_time": utc_23})
-        assert result is True, "23:00 UTC should be inside 23:00-24:00 window when no timezone is set"
+        assert (
+            result is True
+        ), "23:00 UTC should be inside 23:00-24:00 window when no timezone is set"
 
     @pytest.mark.asyncio
     async def test_invalid_timezone_falls_back_to_utc(self, logic_engine: LogicEngine):
@@ -769,7 +769,9 @@ class TestB2TimezoneSupport:
         assert await evaluator.evaluate(condition, {"current_time": outside}) is False
 
     @pytest.mark.asyncio
-    async def test_time_window_falls_back_to_start_end_time_strings(self, logic_engine: LogicEngine):
+    async def test_time_window_falls_back_to_start_end_time_strings(
+        self, logic_engine: LogicEngine
+    ):
         """Legacy start_time/end_time remains supported when hour fields are absent."""
         from src.services.logic.conditions.time_evaluator import TimeConditionEvaluator
 
@@ -856,7 +858,9 @@ class TestB3RuleUpdateTrigger:
             for call in mock_actuator_service.send_command.call_args_list
             if call[1].get("command") == "OFF"
         ]
-        assert len(off_calls) >= 1, "Expected at least one OFF command after rule update with active hysteresis"
+        assert (
+            len(off_calls) >= 1
+        ), "Expected at least one OFF command after rule update with active hysteresis"
 
     @pytest.mark.asyncio
     async def test_on_rule_updated_no_off_when_hysteresis_was_inactive(
@@ -977,9 +981,7 @@ class TestBumplessTransfer:
         assert hysteresis_eval is not None
         from src.services.logic.conditions.hysteresis_evaluator import HysteresisState
 
-        hysteresis_eval._states[f"{rule_id}:0"] = HysteresisState(
-            is_active=True, last_value=63.0
-        )
+        hysteresis_eval._states[f"{rule_id}:0"] = HysteresisState(is_active=True, last_value=63.0)
 
         # New rule: time_window removed, hysteresis identical
         new_conditions = [hysteresis_cond]
@@ -1000,7 +1002,9 @@ class TestBumplessTransfer:
         # State must be preserved
         preserved = hysteresis_eval._states.get(f"{rule_id}:0")
         assert preserved is not None, "Hysteresis state must not be deleted on orthogonal change"
-        assert preserved.is_active is True, "Hysteresis must remain active after time_window removal"
+        assert (
+            preserved.is_active is True
+        ), "Hysteresis must remain active after time_window removal"
 
         # No OFF command must have been sent
         off_calls = [
@@ -1036,9 +1040,7 @@ class TestBumplessTransfer:
         assert hysteresis_eval is not None
         from src.services.logic.conditions.hysteresis_evaluator import HysteresisState
 
-        hysteresis_eval._states[f"{rule_id}:0"] = HysteresisState(
-            is_active=True, last_value=63.0
-        )
+        hysteresis_eval._states[f"{rule_id}:0"] = HysteresisState(is_active=True, last_value=63.0)
 
         mock_rule = self._make_mock_rule(rule_id, [new_hysteresis])
         fake_get_session, mock_logic_repo_inst = self._patch_session_and_repo(mock_rule)
@@ -1055,9 +1057,9 @@ class TestBumplessTransfer:
                 )
 
         # State must be cleared (thresholds changed)
-        assert f"{rule_id}:0" not in hysteresis_eval._states, (
-            "Hysteresis state must be reset when thresholds change"
-        )
+        assert (
+            f"{rule_id}:0" not in hysteresis_eval._states
+        ), "Hysteresis state must be reset when thresholds change"
 
         # OFF must have been sent
         off_calls = [
@@ -1129,9 +1131,7 @@ class TestBumplessTransfer:
             for call in mock_actuator_service.send_command.call_args_list
             if call[1].get("command") == "ON"
         ]
-        assert len(on_calls) >= 1, (
-            "rule_update trigger must bypass cooldown and execute actions"
-        )
+        assert len(on_calls) >= 1, "rule_update trigger must bypass cooldown and execute actions"
 
 
 class TestCompoundPostReEvalOFFGuard:
@@ -1239,12 +1239,12 @@ class TestCompoundPostReEvalOFFGuard:
             for call in mock_actuator_service.send_command.call_args_list
             if call[1].get("command") == "OFF"
         ]
-        assert len(off_calls) >= 1, (
-            "Post-Re-Eval OFF-Guard must send OFF when TW inactive + hysteresis in deadband"
-        )
-        assert f"{rule_id}:0" not in hysteresis_eval._states, (
-            "Hysteresis state must be cleared by OFF-Guard"
-        )
+        assert (
+            len(off_calls) >= 1
+        ), "Post-Re-Eval OFF-Guard must send OFF when TW inactive + hysteresis in deadband"
+        assert (
+            f"{rule_id}:0" not in hysteresis_eval._states
+        ), "Hysteresis state must be cleared by OFF-Guard"
 
     @pytest.mark.asyncio
     async def test_no_spurious_off_when_tw_still_active(
@@ -1291,13 +1291,13 @@ class TestCompoundPostReEvalOFFGuard:
             for call in mock_actuator_service.send_command.call_args_list
             if call[1].get("command") == "OFF"
         ]
-        assert len(off_calls) == 0, (
-            "No spurious OFF when TW is still active (bumpless transfer must be preserved)"
-        )
+        assert (
+            len(off_calls) == 0
+        ), "No spurious OFF when TW is still active (bumpless transfer must be preserved)"
         state = hysteresis_eval._states.get(f"{rule_id}:0")
-        assert state is not None and state.is_active, (
-            "Hysteresis state must remain active when compound conditions are still met"
-        )
+        assert (
+            state is not None and state.is_active
+        ), "Hysteresis state must remain active when compound conditions are still met"
 
 
 class TestPureTimeWindowRuleUpdate:
@@ -1376,9 +1376,9 @@ class TestPureTimeWindowRuleUpdate:
             for call in mock_actuator_service.send_command.call_args_list
             if call[1].get("command") == "OFF"
         ]
-        assert len(off_calls) >= 1, (
-            "OFF must be sent when pure TW rule is saved with window now inactive"
-        )
+        assert (
+            len(off_calls) >= 1
+        ), "OFF must be sent when pure TW rule is saved with window now inactive"
 
     @pytest.mark.asyncio
     async def test_on_sent_when_tw_becomes_active(
@@ -1403,9 +1403,9 @@ class TestPureTimeWindowRuleUpdate:
             for call in mock_actuator_service.send_command.call_args_list
             if call[1].get("command") == "ON"
         ]
-        assert len(on_calls) >= 1, (
-            "ON must be sent when pure TW rule is saved with window now active"
-        )
+        assert (
+            len(on_calls) >= 1
+        ), "ON must be sent when pure TW rule is saved with window now active"
 
     @pytest.mark.asyncio
     async def test_no_spurious_off_when_never_executed(
@@ -1432,9 +1432,9 @@ class TestPureTimeWindowRuleUpdate:
             for call in mock_actuator_service.send_command.call_args_list
             if call[1].get("command") == "OFF"
         ]
-        assert len(off_calls) == 0, (
-            "No spurious OFF when rule was never executed (avoid phantom OFF for new rules)"
-        )
+        assert (
+            len(off_calls) == 0
+        ), "No spurious OFF when rule was never executed (avoid phantom OFF for new rules)"
 
 
 class TestTimerSchedulerOFF:
@@ -1503,9 +1503,9 @@ class TestTimerSchedulerOFF:
             for call in mock_actuator_service.send_command.call_args_list
             if call[1].get("command") == "OFF"
         ]
-        assert len(off_calls) >= 1, (
-            "Timer must send OFF when TW expired and rule was recently executed"
-        )
+        assert (
+            len(off_calls) >= 1
+        ), "Timer must send OFF when TW expired and rule was recently executed"
 
     @pytest.mark.asyncio
     async def test_no_off_spam_when_stale_execution(
@@ -1544,6 +1544,6 @@ class TestTimerSchedulerOFF:
             for call in mock_actuator_service.send_command.call_args_list
             if call[1].get("command") == "OFF"
         ]
-        assert len(off_calls) == 0, (
-            "No OFF spam when last execution was > 120s ago (rule is long-inactive)"
-        )
+        assert (
+            len(off_calls) == 0
+        ), "No OFF spam when last execution was > 120s ago (rule is long-inactive)"

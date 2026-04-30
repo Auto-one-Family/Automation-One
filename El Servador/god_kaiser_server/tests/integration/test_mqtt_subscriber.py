@@ -191,13 +191,9 @@ class TestMessageRouting:
         """Critical inbound classes are detected for durable inbox."""
         assert Subscriber._is_critical_topic("kaiser/god/esp/ESP_1/system/error") is True
         assert Subscriber._is_critical_topic("kaiser/god/esp/ESP_1/config_response") is True
+        assert Subscriber._is_critical_topic("kaiser/god/esp/ESP_1/system/intent_outcome") is True
         assert (
-            Subscriber._is_critical_topic("kaiser/god/esp/ESP_1/system/intent_outcome") is True
-        )
-        assert (
-            Subscriber._is_critical_topic(
-                "kaiser/god/esp/ESP_1/system/intent_outcome/lifecycle"
-            )
+            Subscriber._is_critical_topic("kaiser/god/esp/ESP_1/system/intent_outcome/lifecycle")
             is True
         )
         assert Subscriber._is_critical_topic("kaiser/god/esp/ESP_1/sensor/34/data") is True

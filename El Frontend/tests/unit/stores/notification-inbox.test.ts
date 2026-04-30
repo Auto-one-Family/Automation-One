@@ -10,6 +10,24 @@ const { notificationsApiMock } = vi.hoisted(() => ({
   },
 }))
 
+const mockRouteQuery = vi.hoisted(() => ({} as Record<string, unknown>))
+
+vi.mock('@/router', () => ({
+  default: {
+    currentRoute: {
+      get value() {
+        return { query: mockRouteQuery }
+      },
+    },
+    replace: vi.fn((opts: { query: Record<string, unknown> }) => {
+      for (const k of Object.keys(mockRouteQuery)) {
+        delete mockRouteQuery[k]
+      }
+      Object.assign(mockRouteQuery, opts.query)
+    }),
+  },
+}))
+
 vi.mock('@/api/notifications', () => ({
   notificationsApi: notificationsApiMock,
 }))
@@ -43,10 +61,28 @@ function makeNotification(id: string) {
   }
 }
 
+const emptyListResponse = {
+  data: [] as ReturnType<typeof makeNotification>[],
+  pagination: {
+    page: 1,
+    page_size: 50,
+    total_items: 0,
+    total_pages: 0,
+  },
+}
+
 describe('notification-inbox store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    for (const k of Object.keys(mockRouteQuery)) {
+      delete mockRouteQuery[k]
+    }
+    notificationsApiMock.list.mockResolvedValue(emptyListResponse)
+    notificationsApiMock.getUnreadCount.mockResolvedValue({
+      unread_count: 0,
+      highest_severity: null,
+    })
   })
 
   it('notification_new fuegt Eintrag oben ein', () => {
@@ -91,5 +127,28 @@ describe('notification-inbox store', () => {
 
     expect(applied).toBe(true)
     expect(store.notifications[0].status).toBe('resolved')
+  })
+
+  it('reloadListForFilters sendet status=active wenn Lifecycle aktiv (AUT-196)', async () => {
+    const store = useNotificationInboxStore()
+    store.isDrawerOpen = true
+    store.lifecycleFilter = 'active'
+
+    await store.reloadListForFilters()
+
+    expect(notificationsApiMock.list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'active',
+        page: 1,
+        page_size: 50,
+      }),
+    )
+  })
+
+  it('openDrawerWithActiveAlertsFocus setzt notifications=alerts in der Route', () => {
+    const store = useNotificationInboxStore()
+    store.openDrawerWithActiveAlertsFocus()
+
+    expect(mockRouteQuery.notifications).toBe('alerts')
   })
 })

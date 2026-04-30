@@ -216,10 +216,12 @@ async def test_calibration_session_overwrite_flow(operator_headers: dict[str, st
 
 @pytest.mark.asyncio
 async def test_calibration_apply_requires_persisted_sensor_binding(
-    operator_headers: dict[str, str]
+    operator_headers: dict[str, str],
 ):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        session_id = await _start_session(client, operator_headers, gpio=48, esp_id="ESP_NO_SENSOR_001")
+        session_id = await _start_session(
+            client, operator_headers, gpio=48, esp_id="ESP_NO_SENSOR_001"
+        )
 
         dry_response = await client.post(
             f"/api/v1/calibration/sessions/{session_id}/points",
@@ -347,7 +349,7 @@ async def test_calibration_session_requires_operator_role(
 
 @pytest.mark.asyncio
 async def test_calibration_session_points_parallel_same_role_conflict(
-    operator_headers: dict[str, str]
+    operator_headers: dict[str, str],
 ):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         repetitions = 30
@@ -408,9 +410,7 @@ async def test_calibration_session_points_parallel_same_role_conflict(
 
 
 @pytest.mark.asyncio
-async def test_calibration_session_points_parallel_with_overwrite(
-    operator_headers: dict[str, str]
-):
+async def test_calibration_session_points_parallel_with_overwrite(operator_headers: dict[str, str]):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         repetitions = 30
         distribution = Counter()
@@ -471,7 +471,7 @@ async def test_calibration_session_points_parallel_with_overwrite(
 
 @pytest.mark.asyncio
 async def test_calibration_session_points_parallel_both_overwrite_deterministic_contract(
-    operator_headers: dict[str, str]
+    operator_headers: dict[str, str],
 ):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         repetitions = 30
@@ -530,7 +530,7 @@ async def test_calibration_session_points_parallel_both_overwrite_deterministic_
 
 @pytest.mark.asyncio
 async def test_calibration_session_points_parallel_dry_wet_independent(
-    operator_headers: dict[str, str]
+    operator_headers: dict[str, str],
 ):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         session_id = await _start_session(client, operator_headers, gpio=23)
@@ -575,7 +575,7 @@ async def test_calibration_session_points_parallel_dry_wet_independent(
 
 @pytest.mark.asyncio
 async def test_calibration_session_add_delete_parallel_consistency(
-    operator_headers: dict[str, str]
+    operator_headers: dict[str, str],
 ):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         session_id = await _start_session(client, operator_headers, gpio=24)
@@ -621,9 +621,7 @@ async def test_calibration_session_add_delete_parallel_consistency(
 
 
 @pytest.mark.asyncio
-async def test_calibration_session_points_same_role_short_soak(
-    operator_headers: dict[str, str]
-):
+async def test_calibration_session_points_same_role_short_soak(operator_headers: dict[str, str]):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         session_id = await _start_session(client, operator_headers, gpio=25)
 

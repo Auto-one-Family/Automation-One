@@ -56,9 +56,12 @@ async def test_create_rule_triggers_config_push():
         cooldown_seconds=60,
     )
 
-    with patch("src.api.v1.logic.LogicService") as logic_service_cls, patch(
-        "src.api.v1.logic._push_config_to_affected_esps", new_callable=AsyncMock
-    ) as push_mock:
+    with (
+        patch("src.api.v1.logic.LogicService") as logic_service_cls,
+        patch(
+            "src.api.v1.logic._push_config_to_affected_esps", new_callable=AsyncMock
+        ) as push_mock,
+    ):
         logic_service = MagicMock()
         logic_service.create_rule = AsyncMock(return_value=created_rule)
         logic_service_cls.return_value = logic_service
@@ -81,9 +84,12 @@ async def test_update_rule_triggers_config_push():
     rule = _mock_rule()
     request = LogicRuleUpdate(name="Rule A updated")
 
-    with patch("src.api.v1.logic.LogicService") as logic_service_cls, patch(
-        "src.api.v1.logic._push_config_to_affected_esps", new_callable=AsyncMock
-    ) as push_mock:
+    with (
+        patch("src.api.v1.logic.LogicService") as logic_service_cls,
+        patch(
+            "src.api.v1.logic._push_config_to_affected_esps", new_callable=AsyncMock
+        ) as push_mock,
+    ):
         logic_service = MagicMock()
         logic_service.update_rule = AsyncMock(return_value=rule)
         logic_service_cls.return_value = logic_service
@@ -105,9 +111,12 @@ async def test_delete_rule_triggers_config_push():
     current_user = SimpleNamespace(username="operator")
     rule = _mock_rule()
 
-    with patch("src.api.v1.logic.LogicRepository") as logic_repo_cls, patch(
-        "src.api.v1.logic._push_config_to_affected_esps", new_callable=AsyncMock
-    ) as push_mock:
+    with (
+        patch("src.api.v1.logic.LogicRepository") as logic_repo_cls,
+        patch(
+            "src.api.v1.logic._push_config_to_affected_esps", new_callable=AsyncMock
+        ) as push_mock,
+    ):
         logic_repo = MagicMock()
         logic_repo.get_by_id = AsyncMock(return_value=rule)
         logic_repo.delete = AsyncMock(return_value=None)
@@ -134,9 +143,12 @@ async def test_toggle_rule_triggers_config_push():
         )
     )
 
-    with patch("src.api.v1.logic.LogicRepository") as logic_repo_cls, patch(
-        "src.api.v1.logic._push_config_to_affected_esps", new_callable=AsyncMock
-    ) as push_mock:
+    with (
+        patch("src.api.v1.logic.LogicRepository") as logic_repo_cls,
+        patch(
+            "src.api.v1.logic._push_config_to_affected_esps", new_callable=AsyncMock
+        ) as push_mock,
+    ):
         logic_repo = MagicMock()
         logic_repo.get_by_id = AsyncMock(return_value=rule)
         logic_repo_cls.return_value = logic_repo
@@ -159,7 +171,9 @@ async def test_push_config_logs_failure_on_unsuccessful_send_config():
     builder = MagicMock()
     builder.build_combined_config = AsyncMock(return_value={"sensors": [], "actuators": []})
     esp_service = MagicMock()
-    esp_service.send_config = AsyncMock(return_value={"success": False, "message": "publish failed"})
+    esp_service.send_config = AsyncMock(
+        return_value={"success": False, "message": "publish failed"}
+    )
 
     with (
         patch("src.api.v1.logic.get_config_builder", return_value=builder),

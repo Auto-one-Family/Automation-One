@@ -18,7 +18,6 @@ import pytest
 from src.mqtt.handlers.actuator_handler import ActuatorStatusHandler
 from src.mqtt.handlers.lwt_handler import LWTHandler
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -92,9 +91,7 @@ class TestL1StatusHandlerStateChange:
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch(
-                "src.mqtt.handlers.actuator_handler.ESPRepository", return_value=esp_repo
-            ):
+            with patch("src.mqtt.handlers.actuator_handler.ESPRepository", return_value=esp_repo):
                 with patch(
                     "src.mqtt.handlers.actuator_handler.ActuatorRepository",
                     return_value=actuator_repo,
@@ -178,16 +175,12 @@ class TestL2LWTHandlerHistory:
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch(
-                "src.mqtt.handlers.lwt_handler.ESPRepository", return_value=esp_repo
-            ):
+            with patch("src.mqtt.handlers.lwt_handler.ESPRepository", return_value=esp_repo):
                 with patch(
                     "src.mqtt.handlers.lwt_handler.ActuatorRepository",
                     return_value=actuator_repo,
                 ):
-                    with patch(
-                        "src.mqtt.handlers.lwt_handler.AuditLogRepository"
-                    ) as mock_audit:
+                    with patch("src.mqtt.handlers.lwt_handler.AuditLogRepository") as mock_audit:
                         mock_audit.return_value.log_device_event = AsyncMock()
                         with patch(
                             "src.mqtt.handlers.lwt_handler.CommandContractRepository"
@@ -247,9 +240,7 @@ class TestL2LWTHandlerHistory:
         await self._run_handler(handler, topic, lwt_payload, esp_repo, actuator_repo)
 
         assert actuator_repo.log_command.call_count == 2
-        issued_by_values = [
-            c.kwargs["issued_by"] for c in actuator_repo.log_command.call_args_list
-        ]
+        issued_by_values = [c.kwargs["issued_by"] for c in actuator_repo.log_command.call_args_list]
         assert all(v == "system:lwt_disconnect" for v in issued_by_values)
 
     async def test_no_log_when_all_actuators_already_off(self, handler, lwt_payload):
@@ -296,6 +287,7 @@ class TestL2LWTHandlerHistory:
 
         await self._run_handler(handler, topic, lwt_payload, esp_repo, actuator_repo)
 
-        assert call_order == ["get_active", "reset"], (
-            "get_active_actuators_for_device must run before reset_states_for_device"
-        )
+        assert call_order == [
+            "get_active",
+            "reset",
+        ], "get_active_actuators_for_device must run before reset_states_for_device"

@@ -285,7 +285,9 @@ class TestHysteresisEvaluator:
         assert state.last_value == 29.0  # Alter Wert bleibt
 
     @pytest.mark.asyncio
-    async def test_offline_source_override_returns_false_for_non_matching_sensor(self, evaluator, cooling_condition):
+    async def test_offline_source_override_returns_false_for_non_matching_sensor(
+        self, evaluator, cooling_condition
+    ):
         """Offline-Quelle überstimmt Hold-State (kein True bei fehlender Sensorquelle)."""
         # Aktivieren
         context = self.make_context("rule-1", 29.0)
@@ -605,7 +607,9 @@ class TestHysteresisEvaluator:
         assert "_hysteresis_just_deactivated" not in ctx
 
     @pytest.mark.asyncio
-    async def test_deactivation_flag_not_set_on_non_matching_sensor(self, evaluator, cooling_condition):
+    async def test_deactivation_flag_not_set_on_non_matching_sensor(
+        self, evaluator, cooling_condition
+    ):
         """Flag is NOT set for non-matching sensor."""
         # Activate first
         ctx1 = self.make_context("rule-flag-nm", 30.0)
