@@ -19,15 +19,16 @@ import hashlib
 import io
 import json
 import uuid as uuid_module
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import and_, func, select, update
 
 from ...core.logging_config import get_logger
 from ...db.models.audit_log import AuditSeverity, AuditSourceType
+from ...db.models.esp import ESPDevice
 from ...db.models.sensor import SensorData
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.repositories.plant_repo import PlantRepository
@@ -50,6 +51,44 @@ MAX_UPLOAD_BYTES: int = 10 * 1024 * 1024
 
 # Audit event types — local to this module to avoid bloating the global enum.
 _EVENT_MULTISPEQ_ASSIGN_PLANT = "multispeq_assign_plant"
+
+# Allowed grouping fields for the aggregates endpoint. Mapped to actual
+# ``SensorData`` columns to prevent SQL injection via the query parameter.
+_AGGREGATE_GROUP_FIELDS: dict[str, Any] = {
+    "zone_id": SensorData.zone_id,
+    "subzone_id": SensorData.subzone_id,
+    "plant_id": SensorData.plant_id,
+}
+
+# Date-range tokens accepted by the analytics endpoints. Keeps the API stable
+# even when callers experiment with phrasing.
+_DATE_RANGE_DAYS: dict[str, int] = {
+    "7d": 7,
+    "30d": 30,
+    "90d": 90,
+    "season": 365,
+}
+
+# Marker on ``esp_devices.status`` that identifies virtual MultispeQ devices.
+_VIRTUAL_ESP_STATUS = "virtual"
+
+
+def _resolve_date_cutoff(date_range: str) -> datetime:
+    """Translate a date-range token into a UTC cutoff timestamp.
+
+    Raises ``HTTPException`` 422 for unknown tokens so callers see the same
+    validation behaviour for all analytics query parameters.
+    """
+    days = _DATE_RANGE_DAYS.get(date_range)
+    if days is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Unsupported date_range '{date_range}'. "
+                f"Allowed values: {sorted(_DATE_RANGE_DAYS.keys())}."
+            ),
+        )
+    return datetime.now(timezone.utc) - timedelta(days=days)
 
 
 # --- Request schemas --------------------------------------------------------
@@ -399,3 +438,186 @@ async def assign_plant_to_snapshot(
             ),
         },
     )
+
+
+# --- Analytics: aggregates & correlation (AUT-215) -------------------------
+
+
+@router.get(
+    "/aggregates",
+    response_model=DataResponse[list[dict]],
+    summary="MultispeQ aggregate statistics (boxplot quintiles)",
+    description=(
+        "Return min / Q1 / median / Q3 / max plus sample count for a given "
+        "MultispeQ ``sensor_type``, grouped by zone, subzone or plant. Only "
+        "rows from virtual MultispeQ ESP devices are considered."
+    ),
+)
+async def get_multispeq_aggregates(
+    db: DBSession,
+    current_user: OperatorUser,
+    sensor_type: str = Query(..., description="MultispeQ sensor_type, e.g. ppfd, phi2"),
+    group_by: str = Query(
+        ...,
+        description="Group dimension: zone_id | subzone_id | plant_id",
+    ),
+    date_range: str = Query(
+        "30d", description="Window: 7d | 30d | 90d | season"
+    ),
+) -> DataResponse[list[dict]]:
+    # 1. Validate group_by → resolve to actual column.
+    group_column = _AGGREGATE_GROUP_FIELDS.get(group_by)
+    if group_column is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Unsupported group_by '{group_by}'. "
+                f"Allowed values: {sorted(_AGGREGATE_GROUP_FIELDS.keys())}."
+            ),
+        )
+
+    # 2. Resolve date window.
+    cutoff = _resolve_date_cutoff(date_range)
+
+    # 3. Build aggregate query — PostgreSQL percentile_cont WITHIN GROUP.
+    median_expr = func.percentile_cont(0.5).within_group(
+        SensorData.processed_value.asc()
+    )
+    q1_expr = func.percentile_cont(0.25).within_group(
+        SensorData.processed_value.asc()
+    )
+    q3_expr = func.percentile_cont(0.75).within_group(
+        SensorData.processed_value.asc()
+    )
+
+    stmt = (
+        select(
+            group_column.label("group_label"),
+            func.min(SensorData.processed_value).label("min"),
+            q1_expr.label("q1"),
+            median_expr.label("median"),
+            q3_expr.label("q3"),
+            func.max(SensorData.processed_value).label("max"),
+            func.count().label("n"),
+        )
+        .join(ESPDevice, ESPDevice.id == SensorData.esp_id)
+        .where(
+            and_(
+                SensorData.sensor_type == sensor_type,
+                SensorData.timestamp >= cutoff,
+                SensorData.processed_value.is_not(None),
+                ESPDevice.status == _VIRTUAL_ESP_STATUS,
+            )
+        )
+        .group_by(group_column)
+        .order_by(group_column)
+    )
+
+    rows = (await db.execute(stmt)).all()
+
+    data: list[dict[str, Any]] = []
+    for row in rows:
+        label = row.group_label
+        # UUIDs (plant_id) and ints become strings for stable JSON output.
+        if label is not None and not isinstance(label, str):
+            label = str(label)
+        data.append(
+            {
+                "group_label": label,
+                "min": float(row.min) if row.min is not None else None,
+                "q1": float(row.q1) if row.q1 is not None else None,
+                "median": float(row.median) if row.median is not None else None,
+                "q3": float(row.q3) if row.q3 is not None else None,
+                "max": float(row.max) if row.max is not None else None,
+                "n": int(row.n),
+            }
+        )
+
+    logger.info(
+        "MultispeQ aggregates: sensor_type=%s group_by=%s range=%s -> %d groups",
+        sensor_type,
+        group_by,
+        date_range,
+        len(data),
+    )
+
+    return DataResponse[list[dict]](success=True, data=data)
+
+
+@router.get(
+    "/correlation",
+    response_model=DataResponse[list[dict]],
+    summary="MultispeQ correlation scatter (X = sensor, Y = metadata key)",
+    description=(
+        "Return raw (x, y) tuples for scatter / correlation plots where ``x`` "
+        "is a MultispeQ ``sensor_type`` reading and ``y`` is a numeric value "
+        "extracted from ``sensor_metadata`` by key (e.g. ``yield_g``)."
+    ),
+)
+async def get_multispeq_correlation(
+    db: DBSession,
+    current_user: OperatorUser,
+    x_type: str = Query(..., description="MultispeQ sensor_type for X axis (e.g. ppfd)"),
+    y_metadata_key: str = Query(
+        ..., description="Key in sensor_metadata for Y axis (e.g. yield_g)"
+    ),
+    date_range: str = Query(
+        "30d", description="Window: 7d | 30d | 90d | season"
+    ),
+) -> DataResponse[list[dict]]:
+    cutoff = _resolve_date_cutoff(date_range)
+
+    # Pull rows Python-side: keeps the JSON extraction portable and lets us
+    # gracefully tolerate heterogeneous metadata payloads (PhotosynQ exports
+    # vary widely between protocols). For Stufe-1 dashboards the dataset size
+    # is bounded by the date window and the virtual-ESP filter.
+    stmt = (
+        select(
+            SensorData.processed_value,
+            SensorData.sensor_metadata,
+            SensorData.plant_id,
+        )
+        .join(ESPDevice, ESPDevice.id == SensorData.esp_id)
+        .where(
+            and_(
+                SensorData.sensor_type == x_type,
+                SensorData.timestamp >= cutoff,
+                SensorData.processed_value.is_not(None),
+                ESPDevice.status == _VIRTUAL_ESP_STATUS,
+            )
+        )
+        .order_by(SensorData.timestamp.asc())
+    )
+
+    rows = (await db.execute(stmt)).all()
+
+    data: list[dict[str, Any]] = []
+    for processed_value, sensor_metadata, plant_id in rows:
+        if not isinstance(sensor_metadata, dict):
+            continue
+        y_raw = sensor_metadata.get(y_metadata_key)
+        if y_raw is None:
+            continue
+        try:
+            y_value = float(y_raw)
+        except (TypeError, ValueError):
+            continue
+
+        data.append(
+            {
+                "x": float(processed_value),
+                "y": y_value,
+                "label": str(plant_id) if plant_id is not None else None,
+                "metadata_phase": sensor_metadata.get("phase"),
+            }
+        )
+
+    logger.info(
+        "MultispeQ correlation: x_type=%s y_key=%s range=%s -> %d points",
+        x_type,
+        y_metadata_key,
+        date_range,
+        len(data),
+    )
+
+    return DataResponse[list[dict]](success=True, data=data)
