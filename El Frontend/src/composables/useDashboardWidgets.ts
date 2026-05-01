@@ -24,10 +24,13 @@ import ActuatorRuntimeWidget from '@/components/dashboard-widgets/ActuatorRuntim
 import MultiSensorWidget from '@/components/dashboard-widgets/MultiSensorWidget.vue'
 import StatisticsWidget from '@/components/dashboard-widgets/StatisticsWidget.vue'
 import FertigationPairWidget from '@/components/dashboard-widgets/FertigationPairWidget.vue'
+import BoxplotWidget from '@/components/dashboard-widgets/BoxplotWidget.vue'
+import CorrelationScatterWidget from '@/components/dashboard-widgets/CorrelationScatterWidget.vue'
 
 // Icons for widget catalog
 import {
   BarChart3, Gauge, Activity, Zap, Bell, Cpu, Droplets,
+  BoxSelect, GitCompareArrows,
 } from 'lucide-vue-next'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -93,6 +96,8 @@ const widgetComponentMap: Record<string, Component> = {
   'multi-sensor': MultiSensorWidget,
   'statistics': StatisticsWidget,
   'fertigation-pair': FertigationPairWidget,
+  'comparison-boxplot': BoxplotWidget,
+  'correlation-scatter': CorrelationScatterWidget,
 }
 
 /** Widget type metadata for catalog and auto-generation */
@@ -108,6 +113,8 @@ const WIDGET_TYPE_META: WidgetTypeMeta[] = [
   { type: 'alarm-list', label: 'Alarm-Liste', description: 'Liste aktiver und vergangener Alarme', icon: Bell, w: 4, h: 4, minW: 4, minH: 4, category: 'System' },
   { type: 'statistics', label: 'Statistik', description: 'Min / Avg / Max und Standardabweichung fuer einen Sensor ueber einen Zeitraum', icon: BarChart3, w: 4, h: 3, minW: 3, minH: 2, category: 'Sensoren' },
   { type: 'fertigation-pair', label: 'Fertigation-Paar', description: 'Inflow vs. Runoff Vergleich (EC/pH) mit Differenz-Trend', icon: Droplets, w: 6, h: 4, minW: 4, minH: 3, category: 'Sensoren' },
+  { type: 'comparison-boxplot', label: 'MultispeQ Boxplot', description: 'Vergleich von MultispeQ-Aggregaten (Min/Q1/Median/Q3/Max) pro Gruppe', icon: BoxSelect, w: 6, h: 4, minW: 4, minH: 3, category: 'MultispeQ' },
+  { type: 'correlation-scatter', label: 'MultispeQ Korrelation', description: 'Scatter-Plot Sensorwert vs. Metadaten (z. B. PPFD vs. Yield)', icon: GitCompareArrows, w: 6, h: 4, minW: 4, minH: 3, category: 'MultispeQ' },
 ]
 
 /** Default config per widget type */
@@ -123,6 +130,22 @@ const WIDGET_DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
   'alarm-list': {},
   'statistics': { timeRange: '7d', showStdDev: true, showQuality: false },
   'fertigation-pair': { sensorType: 'ec', timeRange: '24h', diffWarningThreshold: 0.5, diffCriticalThreshold: 0.8 },
+  'comparison-boxplot': {
+    config: {
+      sensor_type: 'phi2',
+      group_by: 'zone_id',
+      date_range: '30d',
+      anonymize_labels: true,
+    },
+  },
+  'correlation-scatter': {
+    config: {
+      x_sensor_type: 'ppfd',
+      y_metadata_key: 'yield_g',
+      date_range: '30d',
+      show_regression_line: false,
+    },
+  },
 }
 
 /** Gear icon SVG (inline, no external dependency) */
@@ -281,6 +304,23 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
     if (config.diffCriticalThreshold != null) props.diffCriticalThreshold = config.diffCriticalThreshold
     if (config.referenceBands) props.referenceBands = config.referenceBands
     if (config.title) props.title = config.title
+
+    // BoxplotWidget + CorrelationScatterWidget: nested config object (AUT-220)
+    if (type === 'comparison-boxplot' || type === 'correlation-scatter') {
+      // Pass widget-specific config as a nested object (the widgets expect `config` prop)
+      // Falls back to flat config keys to remain compatible with legacy widget configs.
+      props.config = (config.config && typeof config.config === 'object')
+        ? config.config
+        : {
+            sensor_type: config.sensor_type,
+            group_by: config.group_by,
+            date_range: config.date_range,
+            anonymize_labels: config.anonymize_labels,
+            x_sensor_type: config.x_sensor_type,
+            y_metadata_key: config.y_metadata_key,
+            show_regression_line: config.show_regression_line,
+          }
+    }
 
     // readOnly prop for actuator widgets (monitor context = no toggle)
     if (readOnly && type === 'actuator-card') {
