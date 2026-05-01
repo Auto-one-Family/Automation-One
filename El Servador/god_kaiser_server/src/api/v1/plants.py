@@ -2,31 +2,46 @@
 Plant Entity CRUD API Endpoints (AUT-222 — Phyta Plants Schema).
 
 Provides:
-- POST   /v1/plants                       - Create a new plant (auto QR code)
-- GET    /v1/plants                       - List active plants (filter by kaiser_id, phase)
-- GET    /v1/plants/{plant_id}            - Get plant by plant_id
-- PATCH  /v1/plants/{plant_id}            - Partial update
-- GET    /v1/plants/{plant_id}/qr-code.png - PNG QR-code label
+- POST   /v1/plants                              - Create a new plant (auto QR code)
+- GET    /v1/plants                              - List active plants (filter by kaiser_id, phase)
+- GET    /v1/plants/{plant_id}                   - Get plant by plant_id
+- PATCH  /v1/plants/{plant_id}                   - Partial update
+- DELETE /v1/plants/{plant_id}                   - Soft-delete (AUT-221)
+- GET    /v1/plants/{plant_id}/qr-code.png       - PNG QR-code label
+- GET    /v1/plants/{plant_id}/measurements      - Recent sensor_data window (AUT-221)
+- POST   /v1/plants/{plant_id}/lifecycle-event   - Append lifecycle event + WS broadcast (AUT-221)
+- GET    /v1/plants/zone-summary/{zone_id}       - Plant histogram + avg phi2 per zone (AUT-221)
 """
 
 import io
+import json
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
+from sqlalchemy import and_, func, select
 
 from ...core.logging_config import get_logger
 from ...db.models.audit_log import (
     AuditSeverity,
     AuditSourceType,
 )
+from ...db.models.plant import Plant, PlantLifecycleEvent
+from ...db.models.sensor import SensorData
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.repositories.plant_repo import PlantRepository
 from ...schemas.plant import (
+    LifecycleEventCreate,
+    LifecycleEventResponse,
     PlantCreate,
+    PlantDeleteResponse,
     PlantListResponse,
+    PlantMeasurementEntry,
+    PlantMeasurementsResponse,
     PlantResponse,
     PlantUpdate,
+    ZonePlantSummaryResponse,
 )
 from ..deps import ActiveUser, DBSession, OperatorUser
 
@@ -39,6 +54,12 @@ router = APIRouter(prefix="/v1/plants", tags=["plants"])
 # AuditEventType class for a single feature area.
 _EVENT_PLANT_CREATED = "plant_created"
 _EVENT_PLANT_UPDATED = "plant_updated"
+_EVENT_PLANT_DELETED = "plant_deleted"
+_EVENT_PLANT_LIFECYCLE = "plant_lifecycle_event_added"
+
+# Sensor type used for plant photosynthetic efficiency aggregation.
+_PHI2_SENSOR_TYPE = "phi2"
+_PHI2_WINDOW_DAYS = 30
 
 
 async def _audit_safe(
@@ -308,4 +329,346 @@ async def get_plant_qr_code_png(
             "Cache-Control": "public, max-age=86400",
             "Content-Disposition": f'inline; filename="{plant.qr_code}.png"',
         },
+    )
+
+
+# =============================================================================
+# AUT-221 Wave 2 — DELETE, Measurements, Lifecycle-Event, Zone-Summary
+# =============================================================================
+
+
+@router.delete(
+    "/{plant_id}",
+    response_model=PlantDeleteResponse,
+    summary="Soft-Delete Plant",
+    description=(
+        "Soft-delete a plant. Sets ``deleted_at`` and ``deleted_by``; the "
+        "row remains in the database for audit / history. Returns 404 when "
+        "the plant does not exist or is already deleted."
+    ),
+    responses={
+        200: {"description": "Plant soft-deleted"},
+        404: {"description": "Plant not found or already deleted"},
+    },
+)
+async def delete_plant(
+    plant_id: uuid.UUID,
+    db: DBSession,
+    current_user: OperatorUser,
+) -> PlantDeleteResponse:
+    plant_repo = PlantRepository(db)
+
+    # ``soft_delete`` itself returns None when the plant is already deleted
+    # (because ``get_by_plant_id(include_deleted=False)`` filters it out),
+    # so a single call covers both 404 cases.
+    deleted = await plant_repo.soft_delete(plant_id, deleted_by=current_user.id)
+    if deleted is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plant '{plant_id}' not found or already deleted",
+        )
+
+    await db.commit()
+
+    await _audit_safe(
+        db,
+        event_type=_EVENT_PLANT_DELETED,
+        severity=AuditSeverity.INFO,
+        source_id=str(current_user.id),
+        message=f"Plant soft-deleted by {current_user.username}",
+        details={
+            "plant_id": str(deleted.plant_id),
+            "qr_code": deleted.qr_code,
+            "kaiser_id": deleted.kaiser_id,
+        },
+    )
+    await db.commit()
+
+    logger.info(
+        "Plant soft-deleted by %s: plant_id=%s, qr_code=%s",
+        current_user.username,
+        deleted.plant_id,
+        deleted.qr_code,
+    )
+
+    return PlantDeleteResponse(
+        success=True,
+        message="Plant soft-deleted",
+        plant_id=deleted.plant_id,
+    )
+
+
+@router.get(
+    "/{plant_id}/measurements",
+    response_model=PlantMeasurementsResponse,
+    summary="Plant Measurements (Time-Series)",
+    description=(
+        "Return ``sensor_data`` rows associated with this plant via "
+        "``sensor_data.plant_id`` over the last ``days`` days, ordered by "
+        "timestamp DESC. Used by the Phyta UI to render per-plant trends."
+    ),
+    responses={
+        200: {"description": "Measurements returned (possibly empty)"},
+        404: {"description": "Plant not found"},
+    },
+)
+async def get_plant_measurements(
+    plant_id: uuid.UUID,
+    db: DBSession,
+    _user: ActiveUser,
+    days: int = Query(
+        30,
+        ge=1,
+        le=365,
+        description="Sliding window size in days (default 30, max 365)",
+    ),
+    limit: int = Query(
+        1000,
+        ge=1,
+        le=10_000,
+        description="Hard upper bound on returned rows",
+    ),
+) -> PlantMeasurementsResponse:
+    plant_repo = PlantRepository(db)
+    plant = await plant_repo.get_by_plant_id(plant_id, include_deleted=True)
+    if plant is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plant '{plant_id}' not found",
+        )
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    stmt = (
+        select(SensorData)
+        .where(
+            and_(
+                SensorData.plant_id == plant_id,
+                SensorData.timestamp >= cutoff,
+            )
+        )
+        .order_by(SensorData.timestamp.desc())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    rows = list(result.scalars().all())
+
+    measurements = [
+        PlantMeasurementEntry(
+            sensor_type=row.sensor_type,
+            processed_value=row.processed_value,
+            raw_value=row.raw_value,
+            unit=row.unit,
+            timestamp=row.timestamp,
+            gpio=row.gpio,
+        )
+        for row in rows
+    ]
+
+    return PlantMeasurementsResponse(
+        plant_id=plant_id,
+        days=days,
+        total=len(measurements),
+        measurements=measurements,
+    )
+
+
+@router.post(
+    "/{plant_id}/lifecycle-event",
+    response_model=LifecycleEventResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Append Plant Lifecycle Event",
+    description=(
+        "Append an immutable lifecycle event to a plant. When "
+        "``event_type == 'phase_changed'`` and ``new_phase`` is provided, "
+        "the plant's ``phase`` is updated atomically and ``previous_phase`` "
+        "is recorded on the event row. After successful insert a "
+        "``plant_lifecycle_update`` WebSocket event is broadcast."
+    ),
+    responses={
+        201: {"description": "Lifecycle event recorded"},
+        400: {"description": "Invalid payload (e.g. phase_changed without new_phase)"},
+        404: {"description": "Plant not found or already deleted"},
+    },
+)
+async def add_lifecycle_event(
+    plant_id: uuid.UUID,
+    body: LifecycleEventCreate,
+    db: DBSession,
+    current_user: OperatorUser,
+) -> LifecycleEventResponse:
+    plant_repo = PlantRepository(db)
+    plant = await plant_repo.get_by_plant_id(plant_id, include_deleted=False)
+    if plant is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plant '{plant_id}' not found or already deleted",
+        )
+
+    # Phase-Change semantics: ``new_phase`` is mandatory and must differ
+    # from the current phase to avoid no-op event spam.
+    previous_phase: Optional[str] = None
+    new_phase: Optional[str] = None
+    if body.event_type == "phase_changed":
+        if body.new_phase is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="phase_changed requires 'new_phase'",
+            )
+        previous_phase = plant.phase
+        new_phase = body.new_phase
+        plant.phase = new_phase
+
+    # Persist the optional structured ``metadata`` blob inside ``notes``
+    # because the underlying model has no JSON metadata column. ``note``
+    # always wins over ``metadata`` when both are present.
+    notes_value: Optional[str] = body.note
+    if notes_value is None and body.metadata is not None:
+        notes_value = json.dumps(body.metadata, sort_keys=True, default=str)
+
+    event_timestamp = datetime.now(timezone.utc)
+    event = PlantLifecycleEvent(
+        plant_id=plant.plant_id,
+        kaiser_id=plant.kaiser_id,
+        event_type=body.event_type,
+        event_timestamp=event_timestamp,
+        previous_phase=previous_phase,
+        new_phase=new_phase,
+        notes=notes_value,
+        created_by_user=current_user.id,
+        created_at=event_timestamp,
+    )
+    db.add(event)
+    await db.flush()
+    await db.commit()
+    await db.refresh(event)
+
+    await _audit_safe(
+        db,
+        event_type=_EVENT_PLANT_LIFECYCLE,
+        severity=AuditSeverity.INFO,
+        source_id=str(current_user.id),
+        message=f"Plant lifecycle event '{body.event_type}' by {current_user.username}",
+        details={
+            "plant_id": str(plant.plant_id),
+            "event_id": str(event.event_id),
+            "event_type": event.event_type,
+            "previous_phase": previous_phase,
+            "new_phase": new_phase,
+        },
+    )
+    await db.commit()
+
+    # ==========================================================================
+    # WS BROADCAST plant_lifecycle_update
+    # Best-effort: failures must not break the request — the event row is
+    # already committed and the audit log captures the change.
+    # ==========================================================================
+    try:
+        from ...websocket.manager import WebSocketManager
+
+        ws_manager = await WebSocketManager.get_instance()
+        await ws_manager.broadcast(
+            "plant_lifecycle_update",
+            {
+                "plant_id": str(plant.plant_id),
+                "event_id": str(event.event_id),
+                "event_type": event.event_type,
+                "previous_phase": previous_phase,
+                "new_phase": new_phase,
+                "event_timestamp": event_timestamp.isoformat(),
+            },
+        )
+    except Exception as exc:  # pragma: no cover - WS broadcast is best-effort
+        logger.warning(
+            "Failed to broadcast plant_lifecycle_update for plant %s: %s",
+            plant.plant_id,
+            exc,
+        )
+
+    logger.info(
+        "Plant lifecycle event recorded by %s: plant_id=%s, type=%s",
+        current_user.username,
+        plant.plant_id,
+        event.event_type,
+    )
+
+    return LifecycleEventResponse.model_validate(event)
+
+
+@router.get(
+    "/zone-summary/{zone_id}",
+    response_model=ZonePlantSummaryResponse,
+    summary="Zone Plant Summary",
+    description=(
+        "Aggregate plant statistics for a single zone: total active plant "
+        "count, phase histogram, and the average ``phi2`` measurement over "
+        f"the last {_PHI2_WINDOW_DAYS} days. The endpoint resolves the "
+        "zone via ``subzone_configs.parent_zone_id`` joined through "
+        "``plants.subzone_id``. Returns zero counts when the zone is "
+        "unknown — it does not validate against the zones table to avoid "
+        "coupling the Phyta surface to zone lifecycle."
+    ),
+    responses={
+        200: {"description": "Summary returned (possibly empty)"},
+    },
+)
+async def get_zone_plant_summary(
+    zone_id: str,
+    db: DBSession,
+    _user: ActiveUser,
+) -> ZonePlantSummaryResponse:
+    # Local import keeps the SubzoneConfig dependency near its single
+    # use-site and avoids polluting the module-level import graph.
+    from ...db.models.subzone import SubzoneConfig
+
+    # Phase histogram + plant_count in a single grouped query.
+    phase_stmt = (
+        select(Plant.phase, func.count(Plant.plant_id))
+        .join(SubzoneConfig, SubzoneConfig.id == Plant.subzone_id)
+        .where(
+            and_(
+                SubzoneConfig.parent_zone_id == zone_id,
+                Plant.deleted_at.is_(None),
+            )
+        )
+        .group_by(Plant.phase)
+    )
+    phase_result = await db.execute(phase_stmt)
+    phases: dict[str, int] = {phase: int(count) for phase, count in phase_result.all()}
+    plant_count = sum(phases.values())
+
+    # Average phi2 over the last 30 days for plants in this zone. We use a
+    # subquery to collect the relevant plant IDs first; this avoids
+    # accidental cross-products when sensor_data has many rows per plant.
+    avg_phi2: Optional[float] = None
+    if plant_count > 0:
+        plant_id_stmt = (
+            select(Plant.plant_id)
+            .join(SubzoneConfig, SubzoneConfig.id == Plant.subzone_id)
+            .where(
+                and_(
+                    SubzoneConfig.parent_zone_id == zone_id,
+                    Plant.deleted_at.is_(None),
+                )
+            )
+        )
+        cutoff = datetime.now(timezone.utc) - timedelta(days=_PHI2_WINDOW_DAYS)
+        avg_stmt = select(func.avg(SensorData.processed_value)).where(
+            and_(
+                SensorData.plant_id.in_(plant_id_stmt),
+                SensorData.sensor_type == _PHI2_SENSOR_TYPE,
+                SensorData.timestamp >= cutoff,
+                SensorData.processed_value.isnot(None),
+            )
+        )
+        avg_result = await db.execute(avg_stmt)
+        avg_value = avg_result.scalar_one_or_none()
+        avg_phi2 = float(avg_value) if avg_value is not None else None
+
+    return ZonePlantSummaryResponse(
+        zone_id=zone_id,
+        plant_count=plant_count,
+        phases=phases,
+        avg_phi2=avg_phi2,
     )
