@@ -1263,3 +1263,158 @@ export interface SafeModeResponse {
   safe_mode_active: boolean
   mqtt_sent: boolean
 }
+
+// =============================================================================
+// Plant Lifecycle Types (AUT-221 / AUT-222)
+// =============================================================================
+
+/**
+ * Plant lifecycle phase (15 + archived states).
+ * Mirrors the backend `plants.phase` enum (cannabis nursery + grow stages).
+ */
+export type PlantPhase =
+  | 'invitro_donor'
+  | 'invitro_initiation'
+  | 'invitro_multiplication'
+  | 'invitro_rooting'
+  | 'invitro_acclimatization'
+  | 'clone'
+  | 'veg-frueh'
+  | 'veg-spaet'
+  | 'bluete-stretch'
+  | 'bluete-bulk'
+  | 'bluete-ende'
+  | 'mutter'
+  | 'steckling_wurzelung'
+  | 'steckling_vor_versand'
+  | 'harvested'
+  | 'archived'
+
+/** Available phases as a runtime list (for select dropdowns / filter chips). */
+export const PLANT_PHASES: readonly PlantPhase[] = [
+  'invitro_donor',
+  'invitro_initiation',
+  'invitro_multiplication',
+  'invitro_rooting',
+  'invitro_acclimatization',
+  'clone',
+  'veg-frueh',
+  'veg-spaet',
+  'bluete-stretch',
+  'bluete-bulk',
+  'bluete-ende',
+  'mutter',
+  'steckling_wurzelung',
+  'steckling_vor_versand',
+  'harvested',
+  'archived',
+] as const
+
+/**
+ * Plant entity returned from `GET /v1/plants` and `GET /v1/plants/{id}`.
+ *
+ * Server endpoint: AUT-221 / AUT-222.
+ */
+export interface Plant {
+  /** UUID */
+  id: string
+  /** QR-Code label (e.g. "P-2026-0001") */
+  qr_code: string
+  /** Optional external/legacy identifier */
+  external_plant_id?: string | null
+  /** Genotype/strain name */
+  genotype: string
+  /** Optional charge/batch identifier */
+  batch?: string | null
+  /** Lifecycle phase */
+  phase: PlantPhase
+  /** ISO date string (YYYY-MM-DD) */
+  planting_date?: string | null
+  /** Zone assignment */
+  zone_id?: string | null
+  /** Subzone assignment */
+  subzone_id?: string | null
+  /** Soft-delete timestamp */
+  deleted_at?: string | null
+  /** ISO timestamp */
+  created_at: string
+  /** Optional list returned by GET /v1/plants/{id} */
+  lifecycle_events?: PlantLifecycleEvent[]
+  /** Optional list returned by GET /v1/plants/{id} */
+  audit_logs?: PlantAuditLog[]
+}
+
+/**
+ * Lifecycle event (phase change, note, harvest, etc.) attached to a plant.
+ */
+export interface PlantLifecycleEvent {
+  /** UUID */
+  id: string
+  /** Owning plant UUID */
+  plant_id: string
+  /** Event type, e.g. "phase_change", "note", "harvest" */
+  event_type: string
+  /** Free-text note from the operator */
+  note?: string | null
+  /** ISO timestamp */
+  created_at: string
+  /** Optional metadata (phase transitions: { from: PlantPhase, to: PlantPhase }) */
+  metadata?: Record<string, unknown>
+}
+
+/**
+ * Audit-log entry for a plant (who changed what, when).
+ */
+export interface PlantAuditLog {
+  id: string
+  action: string
+  user?: string | null
+  created_at: string
+  changes?: Record<string, unknown>
+}
+
+/**
+ * Single MultispeQ measurement aggregated to a plant.
+ */
+export interface PlantMeasurement {
+  /** UUID */
+  id: string
+  /** ISO timestamp */
+  timestamp: string
+  /** Phi2 (PSII operating efficiency) */
+  phi2?: number | null
+  /** Fv/Fm (max quantum yield) */
+  fv_fm?: number | null
+  /** Non-photochemical quenching */
+  npq?: number | null
+  /** Other measured parameters */
+  sensor_values?: Record<string, number>
+}
+
+/**
+ * Create-payload for `POST /v1/plants`.
+ */
+export interface PlantCreate {
+  genotype: string
+  batch?: string | null
+  zone_id?: string | null
+  subzone_id?: string | null
+  /** ISO date "YYYY-MM-DD" */
+  planting_date?: string | null
+  phase?: PlantPhase
+  external_plant_id?: string | null
+}
+
+/**
+ * Update-payload for `PATCH /v1/plants/{id}`.
+ */
+export type PlantUpdate = Partial<PlantCreate>
+
+/**
+ * Create-payload for `POST /v1/plants/{id}/lifecycle-event`.
+ */
+export interface PlantLifecycleEventCreate {
+  event_type: string
+  note?: string | null
+  metadata?: Record<string, unknown>
+}
