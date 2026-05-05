@@ -8,10 +8,10 @@
  *   Zone 3 (ERWEITERT): Statistics options — accordion, collapsed by default
  */
 import { ref, computed, watch } from 'vue'
-import { ChevronRight, Download } from 'lucide-vue-next'
+import { ChevronRight, Download, Plus, X } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
 import { SlideOver } from '@/shared/design/primitives'
-import { SENSOR_TYPE_CONFIG } from '@/utils/sensorDefaults'
+import { SENSOR_TYPE_CONFIG, getSensorTypeOptions } from '@/utils/sensorDefaults'
 import { CHART_COLORS } from '@/utils/chartColors'
 import { useSensorOptions } from '@/composables/useSensorOptions'
 import { sensorsApi } from '@/api/sensors'
@@ -48,12 +48,76 @@ const hasSensorField = computed(() =>
 const hasActuatorField = computed(() =>
   ['actuator-card'].includes(props.widgetType)
 )
-const hasTimeRange = computed(() =>
-  ['historical', 'statistics'].includes(props.widgetType)
+/** Short time range chips (1h/6h/24h/7d/30d) — historical, statistics, fertigation-pair */
+const hasShortTimeRange = computed(() =>
+  ['historical', 'statistics', 'fertigation-pair'].includes(props.widgetType)
+)
+/** Long time range chips (7d/30d/90d/season) — boxplot, correlation-scatter */
+const hasLongTimeRange = computed(() =>
+  ['boxplot', 'correlation-scatter'].includes(props.widgetType)
 )
 const hasYRange = computed(() =>
   ['line-chart', 'historical', 'gauge'].includes(props.widgetType)
 )
+
+// AUT-231: Boxplot/Correlation-Scatter widget-type-specific computeds
+const hasSensorTypeField = computed(() =>
+  ['boxplot', 'correlation-scatter'].includes(props.widgetType)
+)
+const hasGroupByField = computed(() => props.widgetType === 'boxplot')
+const hasAnonymizeField = computed(() => props.widgetType === 'boxplot')
+const hasCorrelationConfig = computed(() => props.widgetType === 'correlation-scatter')
+
+// AUT-239 Fix 2: Multi-Sensor list (max 6 sensors)
+const hasMultiSensorField = computed(() => props.widgetType === 'multi-sensor')
+const MULTI_SENSOR_MIN = 1
+const MULTI_SENSOR_MAX = 6
+
+const multiSensorList = computed<string[]>(() => {
+  const raw = localConfig.value.dataSources
+  if (typeof raw !== 'string' || !raw) return []
+  return raw.split(',').map((s) => s.trim()).filter(Boolean)
+})
+
+const showAddSensorPicker = ref(false)
+
+function commitMultiSensorList(list: string[]): void {
+  updateField('dataSources', list.join(','))
+}
+
+function addMultiSensor(sensorId: string): void {
+  if (!sensorId) return
+  const list = multiSensorList.value.slice()
+  if (list.includes(sensorId)) {
+    showAddSensorPicker.value = false
+    return
+  }
+  if (list.length >= MULTI_SENSOR_MAX) return
+  list.push(sensorId)
+  commitMultiSensorList(list)
+  showAddSensorPicker.value = false
+}
+
+function removeMultiSensor(sensorId: string): void {
+  const list = multiSensorList.value.slice()
+  const idx = list.indexOf(sensorId)
+  if (idx === -1) return
+  if (list.length <= MULTI_SENSOR_MIN) return
+  list.splice(idx, 1)
+  commitMultiSensorList(list)
+}
+
+function getSensorOptionLabel(sensorId: string): string {
+  for (const group of groupedSensorOptions.value) {
+    for (const subgroup of group.subgroups) {
+      const opt = subgroup.options.find((o) => o.value === sensorId)
+      if (opt) return opt.label
+    }
+  }
+  return sensorId
+}
+
+const sensorTypeOptions = getSensorTypeOptions()
 
 /** Threshold fields — same widget types as Y-axis (line-chart, gauge, historical) */
 const hasThresholdFields = computed(() =>
@@ -253,6 +317,8 @@ const widgetTypeLabels: Record<string, string> = {
   'multi-sensor': 'Multi-Sensor-Chart',
   'statistics': 'Statistik',
   'fertigation-pair': 'Fertigation-Paar',
+  'boxplot': 'Boxplot',
+  'correlation-scatter': 'Korrelation',
 }
 </script>
 
@@ -417,8 +483,8 @@ const widgetTypeLabels: Record<string, string> = {
         </select>
       </div>
 
-      <!-- Time Range (Fertigation-Pair) -->
-      <div v-if="isFertigationPair" class="widget-config-panel__field">
+      <!-- Time Range — Short (Historical, Statistics, Fertigation-Pair) -->
+      <div v-if="hasShortTimeRange" class="widget-config-panel__field">
         <label class="widget-config-panel__label">Zeitraum</label>
         <div class="widget-config-panel__chips">
           <button
@@ -430,17 +496,157 @@ const widgetTypeLabels: Record<string, string> = {
         </div>
       </div>
 
-      <!-- Time Range (Historical, Statistics) -->
-      <div v-if="hasTimeRange" class="widget-config-panel__field">
+      <!-- Time Range — Long (Boxplot, Correlation-Scatter) -->
+      <div v-if="hasLongTimeRange" class="widget-config-panel__field">
         <label class="widget-config-panel__label">Zeitraum</label>
         <div class="widget-config-panel__chips">
           <button
-            v-for="range in ['1h', '6h', '24h', '7d', '30d']"
+            v-for="range in ['7d', '30d', '90d', 'season']"
             :key="range"
             :class="['widget-config-panel__chip', { 'widget-config-panel__chip--active': localConfig.timeRange === range }]"
             @click="updateField('timeRange', range)"
           >{{ range }}</button>
         </div>
+      </div>
+
+      <!-- AUT-231: Sensor-Type (Boxplot, Correlation-Scatter) -->
+      <div v-if="hasSensorTypeField" class="widget-config-panel__field">
+        <label class="widget-config-panel__label">Sensortyp</label>
+        <select
+          class="widget-config-panel__select"
+          :value="localConfig.sensor_type || ''"
+          @change="updateField('sensor_type', ($event.target as HTMLSelectElement).value)"
+        >
+          <option value="" disabled>— Sensortyp wählen —</option>
+          <option
+            v-for="opt in sensorTypeOptions"
+            :key="opt.value"
+            :value="opt.value"
+          >{{ opt.label }}</option>
+        </select>
+      </div>
+
+      <!-- AUT-231: Group-By (Boxplot) -->
+      <div v-if="hasGroupByField" class="widget-config-panel__field">
+        <label class="widget-config-panel__label">Gruppieren nach</label>
+        <select
+          class="widget-config-panel__select"
+          :value="localConfig.group_by || 'zone_id'"
+          @change="updateField('group_by', ($event.target as HTMLSelectElement).value)"
+        >
+          <option value="zone_id">Zone</option>
+          <option value="subzone_id">Subzone</option>
+          <option value="plant_id">Pflanze</option>
+        </select>
+      </div>
+
+      <!-- AUT-231: Anonymize Labels (Boxplot) -->
+      <div v-if="hasAnonymizeField" class="widget-config-panel__field">
+        <label class="widget-config-panel__label-row">
+          <span>Labels anonymisieren</span>
+          <input
+            type="checkbox"
+            :checked="localConfig.anonymize_labels ?? false"
+            @change="updateField('anonymize_labels', ($event.target as HTMLInputElement).checked)"
+          />
+        </label>
+      </div>
+
+      <!-- AUT-231: Correlation-Scatter Config -->
+      <template v-if="hasCorrelationConfig">
+        <div class="widget-config-panel__field">
+          <label class="widget-config-panel__label">X-Sensortyp</label>
+          <select
+            class="widget-config-panel__select"
+            :value="localConfig.x_sensor_type || ''"
+            @change="updateField('x_sensor_type', ($event.target as HTMLSelectElement).value)"
+          >
+            <option value="" disabled>— Sensortyp wählen —</option>
+            <option
+              v-for="opt in sensorTypeOptions"
+              :key="opt.value"
+              :value="opt.value"
+            >{{ opt.label }}</option>
+          </select>
+        </div>
+        <div class="widget-config-panel__field">
+          <label class="widget-config-panel__label">Y-Metadata-Key</label>
+          <input
+            type="text"
+            class="widget-config-panel__input"
+            :value="localConfig.y_metadata_key || ''"
+            placeholder="z.B. yield_kg"
+            @input="updateField('y_metadata_key', ($event.target as HTMLInputElement).value)"
+          />
+        </div>
+        <div class="widget-config-panel__field">
+          <label class="widget-config-panel__label-row">
+            <span>Regressionslinie anzeigen</span>
+            <input
+              type="checkbox"
+              :checked="localConfig.show_regression_line ?? false"
+              @change="updateField('show_regression_line', ($event.target as HTMLInputElement).checked)"
+            />
+          </label>
+        </div>
+      </template>
+
+      <!-- AUT-239 Fix 2: Multi-Sensor list -->
+      <div v-if="hasMultiSensorField" class="widget-config-panel__field">
+        <label class="widget-config-panel__label">
+          Sensoren
+          <span class="widget-config-panel__hint">
+            ({{ multiSensorList.length }} / {{ MULTI_SENSOR_MAX }})
+          </span>
+        </label>
+        <ul class="widget-config-panel__sensor-list">
+          <li
+            v-for="sId in multiSensorList"
+            :key="sId"
+            class="widget-config-panel__sensor-item"
+          >
+            <span class="widget-config-panel__sensor-label">{{ getSensorOptionLabel(sId) }}</span>
+            <button
+              type="button"
+              class="widget-config-panel__sensor-remove"
+              :disabled="multiSensorList.length <= MULTI_SENSOR_MIN"
+              :aria-label="`Sensor ${getSensorOptionLabel(sId)} entfernen`"
+              @click="removeMultiSensor(sId)"
+            >
+              <X :size="14" />
+            </button>
+          </li>
+        </ul>
+        <div v-if="showAddSensorPicker" class="widget-config-panel__sensor-picker">
+          <select
+            class="widget-config-panel__select"
+            :value="''"
+            @change="addMultiSensor(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="" disabled>— Sensor wählen —</option>
+            <template v-for="zoneGroup in groupedSensorOptions" :key="zoneGroup.zoneId ?? '__unassigned'">
+              <template v-for="subgroup in zoneGroup.subgroups" :key="`${zoneGroup.zoneId}_${subgroup.subzoneId ?? '__nosub'}`">
+                <optgroup :label="subgroup.label ? `${zoneGroup.label} / ${subgroup.label}` : zoneGroup.label">
+                  <option
+                    v-for="opt in subgroup.options"
+                    :key="opt.value"
+                    :value="opt.value"
+                    :disabled="multiSensorList.includes(opt.value)"
+                  >{{ opt.label }}</option>
+                </optgroup>
+              </template>
+            </template>
+          </select>
+        </div>
+        <button
+          type="button"
+          class="widget-config-panel__sensor-add"
+          :disabled="multiSensorList.length >= MULTI_SENSOR_MAX"
+          @click="showAddSensorPicker = !showAddSensorPicker"
+        >
+          <Plus :size="14" />
+          <span>Sensor hinzufügen</span>
+        </button>
       </div>
 
       <!-- ═══════════════════════════════════════════════════════
@@ -524,12 +730,15 @@ const widgetTypeLabels: Record<string, string> = {
             </Transition>
           </div>
 
-          <!-- Threshold values (when enabled) -->
+          <!-- Threshold values (when enabled) — AUT-235: visualization-only context -->
           <div v-if="hasThresholdFields && localConfig.showThresholds" class="widget-config-panel__field">
-            <label class="widget-config-panel__label">Alarm-Schwellen</label>
+            <label class="widget-config-panel__label">Anzeigelinien (nur Visualisierung)</label>
+            <p class="widget-config-panel__threshold-info">
+              Diese Werte steuern nur die Chart-Darstellung. Echte Alarme konfigurierst du unter Geräte → Sensor → Alert-Schwellen.
+            </p>
             <div class="widget-config-panel__threshold-grid">
               <div class="widget-config-panel__threshold-row">
-                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--alarm">Alarm Low</span>
+                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--alarm">Kritisch min.</span>
                 <input
                   type="number"
                   class="widget-config-panel__input widget-config-panel__input--small"
@@ -539,7 +748,7 @@ const widgetTypeLabels: Record<string, string> = {
                 />
               </div>
               <div class="widget-config-panel__threshold-row">
-                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--warn">Warn Low</span>
+                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--warn">Warnung min.</span>
                 <input
                   type="number"
                   class="widget-config-panel__input widget-config-panel__input--small"
@@ -549,7 +758,7 @@ const widgetTypeLabels: Record<string, string> = {
                 />
               </div>
               <div class="widget-config-panel__threshold-row">
-                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--warn">Warn High</span>
+                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--warn">Warnung max.</span>
                 <input
                   type="number"
                   class="widget-config-panel__input widget-config-panel__input--small"
@@ -559,7 +768,7 @@ const widgetTypeLabels: Record<string, string> = {
                 />
               </div>
               <div class="widget-config-panel__threshold-row">
-                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--alarm">Alarm High</span>
+                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--alarm">Kritisch max.</span>
                 <input
                   type="number"
                   class="widget-config-panel__input widget-config-panel__input--small"
@@ -794,9 +1003,9 @@ const widgetTypeLabels: Record<string, string> = {
   gap: var(--space-1);
   padding: var(--space-1) var(--space-2);
   background: transparent;
-  border: 1px dashed var(--glass-border);
+  border: 1px solid var(--color-accent);
   border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
+  color: var(--color-accent-bright);
   font-size: var(--text-xs);
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -804,8 +1013,98 @@ const widgetTypeLabels: Record<string, string> = {
 }
 
 .widget-config-panel__sync-btn:hover:not(:disabled) {
+  border-color: var(--color-accent-bright);
+  color: var(--color-accent-bright);
+}
+
+.widget-config-panel__threshold-info {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-2);
+}
+
+/* AUT-239 Fix 2: Multi-Sensor list */
+.widget-config-panel__sensor-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.widget-config-panel__sensor-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-bg-quaternary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  min-height: 32px;
+}
+
+.widget-config-panel__sensor-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.widget-config-panel__sensor-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.widget-config-panel__sensor-remove:hover:not(:disabled) {
+  color: var(--color-error);
+}
+
+.widget-config-panel__sensor-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.widget-config-panel__sensor-picker {
+  margin-top: var(--space-1);
+}
+
+.widget-config-panel__sensor-add {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-height: 32px;
+  align-self: flex-start;
+}
+
+.widget-config-panel__sensor-add:hover:not(:disabled) {
   border-color: var(--color-accent);
   color: var(--color-accent-bright);
+}
+
+.widget-config-panel__sensor-add:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .widget-config-panel__sync-btn:disabled {
