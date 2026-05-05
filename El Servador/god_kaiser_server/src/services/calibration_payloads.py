@@ -108,3 +108,34 @@ def build_canonical_calibration_result(
             "normalized_at": _utc_iso_now(),
         },
     }
+
+
+# Keys present on canonical rows written via ``canonicalize_calibration_data`` /
+# ``build_canonical_calibration_result``.
+_CANONICAL_WRAPPER_KEYS = frozenset({"method", "points", "derived", "metadata"})
+
+
+def resolve_calibration_for_processor(payload: Any) -> dict | None:
+    """
+    Extract a flat calibration dict for ``BaseSensorProcessor.process()``.
+
+    Session apply and API normalization store physics parameters (``dry_value`` /
+    ``wet_value``, ``slope`` / ``offset``, …) inside ``derived``. Processors
+    expect those keys at the top level of the ``calibration`` argument.
+
+    Returns:
+        Flat dict usable by sensor libraries, or ``None`` if no usable data.
+    """
+    if payload is None or not isinstance(payload, dict):
+        return None
+
+    derived = payload.get("derived")
+    if isinstance(derived, dict) and derived:
+        return dict(derived)
+
+    # Canonical wrapper with empty derived — processors cannot use this.
+    if _CANONICAL_WRAPPER_KEYS.issubset(payload.keys()):
+        return None
+
+    # Legacy flat row (pre-canonical schema): the whole object is calibration.
+    return dict(payload)

@@ -185,7 +185,15 @@ class Subscriber:
             try:
                 payload = json.loads(payload_str)
             except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON payload on topic {topic}: {e}")
+                # Synthetic correlation for log correlation when payload cannot be parsed (no handler run).
+                mqtt_parse_fail_id = f"parse-fail:{uuid4().hex}"
+                logger.error(
+                    "Invalid JSON payload topic=%s mqtt_parse_fail_id=%s: %s",
+                    topic,
+                    mqtt_parse_fail_id,
+                    e,
+                    extra={"failure_class": "mqtt_json_parse"},
+                )
                 self.messages_failed += 1
                 return
 
@@ -233,7 +241,11 @@ class Subscriber:
                 logger.warning(f"No handler registered for topic: {topic}")
 
         except Exception as e:
-            logger.error(f"Error routing message from {topic}: {e}", exc_info=True)
+            logger.error(
+                f"Error routing message from {topic}: {e}",
+                exc_info=True,
+                extra={"failure_class": "mqtt_route"},
+            )
             self.messages_failed += 1
 
     def _append_critical_inbound_event(

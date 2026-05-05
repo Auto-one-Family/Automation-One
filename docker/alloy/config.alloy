@@ -18,13 +18,13 @@
 //     - level: extracted by parser (all services, 5 values = low cardinality)
 //   Structured Metadata (stored, queryable via | filter):
 //     - logger:     el-servador (Python module path, e.g. "src.mqtt.handlers.sensor_handler")
-//     - request_id: el-servador (request correlation UUID)
+//     - request_id: el-servador (ContextVar: REST UUID or synthetic MQTT CID — same name, two semantics; see IST doc)
+//     - correlation_id: el-servador (optional; when the log *message* includes `correlation_id=…`)
 //     - component:  el-frontend, esp32-serial-logger (Vue/ESP component name)
 //     - device:     esp32-serial-logger (ESP32 device ID)
 //     - error_code: esp32-serial-logger (error taxonomy code, e.g. "3001")
 //   NOT indexed (remain in log text, queryable via |= filter):
 //     - function, line, module: from server logs
-//     - correlation_id: future (see auftrag-correlation-ids.md)
 // =========================================================================
 
 // ---------------------------------------------------------------------------
@@ -129,6 +129,13 @@ loki.process "pipeline" {
       expression = "^\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2}\\s-\\s(?P<logger>\\S+)\\s-\\s(?P<level>\\w+)\\s-\\s\\[(?P<request_id>[^\\]]*)\\]\\s-\\s(?P<message>.*)"
     }
 
+    // Optional: business correlation_id echoed in log message (actuator, MQTT bridge, zone/ack, …)
+    // Word-boundary avoids matching `envelope_correlation_id` / `data_correlation_id`.
+    stage.regex {
+      source     = "message"
+      expression = "\\bcorrelation_id=(?P<correlation_id>[^\\s\\),\\]]+)"
+    }
+
     // Promote level to label (low cardinality: DEBUG/INFO/WARNING/ERROR/CRITICAL)
     stage.labels {
       values = {
@@ -136,13 +143,15 @@ loki.process "pipeline" {
       }
     }
 
-    // Store logger and request_id as structured metadata
+    // Store logger, request_id, and optional correlation_id as structured metadata
     // logger: Python module path (medium cardinality, ~50 values)
-    // request_id: UUID per request (high cardinality)
+    // request_id: UUID or MQTT CID (high cardinality — not promoted to Loki labels)
+    // correlation_id: only when extracted from message (high cardinality)
     stage.structured_metadata {
       values = {
-        "logger"     = "",
-        "request_id" = "",
+        "logger"          = "",
+        "request_id"      = "",
+        "correlation_id"  = "",
       }
     }
   }

@@ -839,6 +839,9 @@ class CalibrationService:
         if method == "moisture_2point":
             return CalibrationService._compute_moisture(points)
         elif method in ("linear_2point", "linear"):
+            # Legacy sessions: Feuchte mit linear_2point → gleiche derived-Form wie moisture_2point (dry/wet).
+            if normalize_sensor_type(sensor_type or "") == "moisture":
+                return CalibrationService._compute_moisture_from_role_points(points)
             return CalibrationService._compute_linear_2point(sensor_type, points)
         elif method == "offset":
             return CalibrationService._compute_offset(sensor_type, points)
@@ -884,20 +887,40 @@ class CalibrationService:
     @staticmethod
     def _compute_moisture(points: list[dict]) -> dict:
         """Moisture 2-point: dry/wet ADC boundary mapping."""
+        return CalibrationService._compute_moisture_from_role_points(points)
+
+    @staticmethod
+    def _compute_moisture_from_role_points(points: list[dict]) -> dict:
+        """Derive dry/wet ADC from session points (prefer point_role dry/wet)."""
         if len(points) < 2:
             raise ValueError("Need at least 2 points for moisture calibration")
 
-        p1 = points[0]
-        p2 = points[1]
+        dry_raw: float | None = None
+        wet_raw: float | None = None
+        for point in points:
+            if not isinstance(point, dict):
+                continue
+            role = str(point.get("point_role", "")).lower()
+            if role == "dry":
+                dry_raw = float(point["raw"])
+            elif role == "wet":
+                wet_raw = float(point["raw"])
 
-        dry_raw = float(p1["raw"])
-        wet_raw = float(p2["raw"])
+        if dry_raw is None or wet_raw is None:
+            p1 = points[0]
+            p2 = points[1]
+            dry_raw = float(p1["raw"])
+            wet_raw = float(p2["raw"])
 
         return {
             "type": "moisture_2point",
             "dry_value": dry_raw,
             "wet_value": wet_raw,
-            "invert": dry_raw > wet_raw,  # Most capacitive sensors: dry=high, wet=low
+            # MoistureSensorProcessor._adc_to_moisture_calibrated already maps
+            # dry_value → 0% and wet_value → 100% for both dry>wet and dry<wet.
+            # Persisting invert=True when dry>wet would apply a second flip and
+            # show dry soil as ~100% (BUG: calibration invert stacked on linear map).
+            "invert": False,
             "calibrated_at": datetime.now(timezone.utc).isoformat(),
         }
 

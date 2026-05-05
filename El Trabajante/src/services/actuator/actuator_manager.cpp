@@ -1096,6 +1096,7 @@ void ActuatorManager::publishActuatorResponse(const ActuatorCommand& command,
 void ActuatorManager::publishActuatorAlert(uint8_t gpio,
                                            const String& alert_type,
                                            const String& message) {
+  // seq is used by El Servador (MQTT subscriber) to build ingress correlation_id with esp_id + topic suffix "alert".
   // Phase 8: Use NTP-synchronized Unix timestamp
   time_t unix_ts = timeManager.getUnixTimestamp();
   

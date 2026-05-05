@@ -2,6 +2,9 @@
 #include "../../utils/logger.h"
 #include <nvs_flash.h>
 #include <esp_log.h>
+#include <freertos/task.h>
+#include <cstdio>
+#include <cstring>
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "NVS";
@@ -98,13 +101,28 @@ bool StorageManager::beginTransaction() {
   if (nvs_mutex_ == nullptr) {
     return false;
   }
+  const uint32_t t0 = millis();
   if (xSemaphoreTakeRecursive(nvs_mutex_, pdMS_TO_TICKS(250)) != pdTRUE) {
-    LOG_E(TAG, "StorageManager: beginTransaction lock timeout");
+    char msg[96];
+    snprintf(msg, sizeof(msg), "[NVS] beginTransaction lock timeout wait_ms=%lu",
+             static_cast<unsigned long>(millis() - t0));
+    LOG_E(TAG, msg);
     return false;
   }
   namespace_owner_task_ = xTaskGetCurrentTaskHandle();
+  {
+    const char* owner = pcTaskGetName(nullptr);
+    if (owner == nullptr) {
+      owner = "?";
+    }
+    char msg[120];
+    snprintf(msg, sizeof(msg), "[NVS] txn_begin ok lock_ms=%lu owner=%.10s",
+             static_cast<unsigned long>(millis() - t0), owner);
+    LOG_I(TAG, msg);
+  }
 #endif
   transaction_active_ = true;
+  LOG_D(TAG, "[NVS_TX] begin txn=1");
   return true;
 }
 
@@ -127,6 +145,7 @@ void StorageManager::endTransaction() {
     xSemaphoreGiveRecursive(nvs_mutex_);
   }
 #endif
+  LOG_D(TAG, "[NVS_TX] end txn=0");
   transaction_active_ = false;
 }
 
@@ -150,22 +169,29 @@ uint32_t StorageManager::getNoSessionAccessCount() const {
 // NAMESPACE MANAGEMENT
 // ============================================
 bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) {
+  uint32_t lock_wait_ms = 0;
 #ifdef CONFIG_ENABLE_THREAD_SAFETY
   if (nvs_mutex_ == nullptr) {
     LOG_E(TAG, "StorageManager: Mutex not initialized");
     return false;
   }
+  const uint32_t t_lock = millis();
   if (xSemaphoreTakeRecursive(nvs_mutex_, pdMS_TO_TICKS(250)) != pdTRUE) {
-    LOG_E(TAG, "StorageManager: beginNamespace lock timeout");
+    char msg[112];
+    snprintf(msg, sizeof(msg), "[NVS] beginNamespace lock timeout ns=%.15s wait_ms=%lu",
+             namespace_name != nullptr ? namespace_name : "?",
+             static_cast<unsigned long>(millis() - t_lock));
+    LOG_E(TAG, msg);
     return false;
   }
+  lock_wait_ms = static_cast<uint32_t>(millis() - t_lock);
   TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
 #endif
   if (namespace_open_) {
     recordNamespaceConflict();
     LOG_E(
         TAG,
-        "StorageManager: Session conflict - namespace '" + String(current_namespace_) +
+        "[NVS] Session conflict - namespace '" + String(current_namespace_) +
             "' still open; beginNamespace(" + String(namespace_name) + ") denied"
     );
 #ifdef CONFIG_ENABLE_THREAD_SAFETY
@@ -193,7 +219,10 @@ bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) 
     if (read_only) {
       LOG_D(TAG, "StorageManager: Namespace not found (expected for new device): " + String(namespace_name));
     } else {
-      LOG_E(TAG, "StorageManager: Failed to open namespace for write: " + String(namespace_name));
+      char msg[96];
+      snprintf(msg, sizeof(msg), "[NVS] ns_open FAIL write ns=%.15s",
+               namespace_name != nullptr ? namespace_name : "?");
+      LOG_E(TAG, msg);
     }
 #ifdef CONFIG_ENABLE_THREAD_SAFETY
     xSemaphoreGiveRecursive(nvs_mutex_);
@@ -208,6 +237,19 @@ bool StorageManager::beginNamespace(const char* namespace_name, bool read_only) 
   namespace_owner_task_ = current_task;
 #endif
   
+  {
+    const char* owner = pcTaskGetName(nullptr);
+    if (owner == nullptr) {
+      owner = "?";
+    }
+    char msg[128];
+    snprintf(msg, sizeof(msg), "[NVS] ns_open ok ns=%.15s ro=%d lock_ms=%lu owner=%.10s",
+             namespace_name != nullptr ? namespace_name : "?",
+             read_only ? 1 : 0,
+             static_cast<unsigned long>(lock_wait_ms),
+             owner);
+    LOG_I(TAG, msg);
+  }
   LOG_D(TAG, "StorageManager: Opened namespace: " + String(namespace_name));
   return true;
 }

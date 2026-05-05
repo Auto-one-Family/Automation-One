@@ -145,6 +145,10 @@ async def websocket_realtime(websocket: WebSocket, client_id: str):
                 await manager.unsubscribe(client_id, filters)
                 logger.debug(f"Client {client_id} unsubscribed")
 
+            elif action == "ping":
+                # Application-level keepalive (proxies / idle TCP); no response required
+                continue
+
             else:
                 logger.warning(f"Unknown action from client {client_id}: {action}")
 

@@ -419,6 +419,87 @@ class TestSensorHandlerProcessing:
         assert saved_data[0].processing_mode == "local"
 
     @pytest.mark.asyncio
+    async def test_handle_sensor_data_without_matching_config_sets_quality_degraded(
+        self,
+        test_session: AsyncSession,
+        sample_esp_device: ESPDevice,
+        sample_sensor_config: SensorConfig,
+    ):
+        """PKG-HW-01: Ingest with no sensor_configs row — quality forced to degraded (not good)."""
+        handler = SensorDataHandler()
+        handler.publisher = MagicMock()
+        handler.publisher.publish_pi_enhanced_response = MagicMock()
+
+        topic = "kaiser/god/esp/ESP_12AB34CD/sensor/35/data"
+        payload = {
+            "ts": int(time.time()),
+            "esp_id": "ESP_12AB34CD",
+            "gpio": 35,
+            "sensor_type": "moisture",
+            "raw": 2100,
+            "value": 0.0,
+            "unit": "",
+            "quality": "good",
+            "raw_mode": True,
+        }
+
+        @asynccontextmanager
+        async def mock_resilient_session():
+            yield test_session
+
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
+            result = await handler.handle_sensor_data(topic, payload)
+
+        assert result is True
+        sensor_repo = SensorRepository(test_session)
+        saved = await sensor_repo.get_latest_data(
+            sample_esp_device.id, 35, sensor_type="moisture", limit=1
+        )
+        assert len(saved) == 1
+        assert saved[0].quality == "degraded"
+        assert saved[0].raw_value == 2100
+
+    @pytest.mark.asyncio
+    async def test_handle_sensor_data_without_config_preserves_error_quality(
+        self,
+        test_session: AsyncSession,
+        sample_esp_device: ESPDevice,
+        sample_sensor_config: SensorConfig,
+    ):
+        """PKG-HW-01: Missing config must not downgrade explicit error/critical from payload."""
+        handler = SensorDataHandler()
+        handler.publisher = MagicMock()
+        handler.publisher.publish_pi_enhanced_response = MagicMock()
+
+        topic = "kaiser/god/esp/ESP_12AB34CD/sensor/36/data"
+        payload = {
+            "ts": int(time.time()),
+            "esp_id": "ESP_12AB34CD",
+            "gpio": 36,
+            "sensor_type": "moisture",
+            "raw": 100,
+            "value": 0.0,
+            "unit": "",
+            "quality": "error",
+            "raw_mode": True,
+        }
+
+        @asynccontextmanager
+        async def mock_resilient_session():
+            yield test_session
+
+        with patch("src.mqtt.handlers.sensor_handler.resilient_session", mock_resilient_session):
+            result = await handler.handle_sensor_data(topic, payload)
+
+        assert result is True
+        sensor_repo = SensorRepository(test_session)
+        saved = await sensor_repo.get_latest_data(
+            sample_esp_device.id, 36, sensor_type="moisture", limit=1
+        )
+        assert len(saved) == 1
+        assert saved[0].quality == "error"
+
+    @pytest.mark.asyncio
     async def test_handle_sensor_data_unknown_esp(self, test_session: AsyncSession):
         """Handle sensor data from unknown ESP device."""
         handler = SensorDataHandler()

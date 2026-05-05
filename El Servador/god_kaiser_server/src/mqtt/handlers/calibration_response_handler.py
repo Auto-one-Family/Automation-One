@@ -23,15 +23,16 @@ Expected response payload from ESP32 (E-P4 enhanced):
 }
 
 Resilience: Uses resilient_session() with circuit breaker protection.
+
+If the device omits ``raw``/``raw_value``, we do **not** substitute the latest DB row:
+that row may belong to periodic (continuous) sampling, not the manual measure command
+(H2 / calibration wizard). The operator gets ``calibration_measurement_failed`` instead.
 """
 
-import asyncio
 from typing import Optional
 
 from ...core.logging_config import get_logger
 from ...db.repositories.calibration_session_repo import CalibrationSessionRepository
-from ...db.repositories.esp_repo import ESPRepository
-from ...db.repositories.sensor_repo import SensorRepository
 from ...db.session import resilient_session
 from ...sensors.sensor_type_registry import normalize_sensor_type
 from ..topics import TopicBuilder
@@ -90,6 +91,7 @@ class CalibrationResponseHandler:
                 gpio=gpio,
                 error=payload.get("error", "Measurement failed on device"),
                 correlation_id=payload.get("correlation_id"),
+                request_id=payload.get("request_id"),
             )
             return True
 
@@ -101,11 +103,10 @@ class CalibrationResponseHandler:
         # Step 3: Check for active calibration session
         active_session = None
         normalized_type = normalize_sensor_type(sensor_type) if sensor_type else "unknown"
+        request_id = payload.get("request_id")
         try:
             async with resilient_session() as session:
                 cal_repo = CalibrationSessionRepository(session)
-                esp_repo = ESPRepository(session)
-                sensor_repo = SensorRepository(session)
                 if normalized_type != "unknown":
                     active_session = await cal_repo.get_active_session(
                         esp_id,
@@ -128,6 +129,7 @@ class CalibrationResponseHandler:
 
                 raw_value = payload.get("raw", payload.get("raw_value"))
                 if raw_value is None:
+<<<<<<< Updated upstream
                     # Firmware measure-ACK currently omits raw value; resolve latest DB reading.
                     # Retry briefly because sensor_data persistence can lag behind ACK by a few hundred ms.
                     lookup_sensor_type = (
@@ -161,9 +163,11 @@ class CalibrationResponseHandler:
                             break
                         await asyncio.sleep(0.25)
                 if raw_value is None:
+=======
+>>>>>>> Stashed changes
                     logger.warning(
-                        "CalibrationResponseHandler: No raw value available for %s/GPIO%d "
-                        "(response payload and DB fallback empty)",
+                        "CalibrationResponseHandler: No raw/raw_value in MQTT payload for %s/GPIO%d "
+                        "(no DB fallback — latest row may be from interval sampling, not this measure)",
                         esp_id,
                         gpio,
                     )
@@ -171,8 +175,12 @@ class CalibrationResponseHandler:
                         "calibration_measurement_failed",
                         esp_id=esp_id,
                         gpio=gpio,
-                        error="Kein Messwert aus Sensorantwort ableitbar",
+                        error=(
+                            "Sensorantwort ohne Rohwert — bitte erneut messen oder Firmware prüfen "
+                            "(Rohwert muss in der MQTT-Antwort enthalten sein)."
+                        ),
                         correlation_id=correlation_id,
+                        request_id=request_id if isinstance(request_id, str) else None,
                     )
                     return True
 
@@ -194,6 +202,7 @@ class CalibrationResponseHandler:
                         quality=quality,
                         intent_id=intent_id,
                         correlation_id=correlation_id,
+                        request_id=request_id if isinstance(request_id, str) else None,
                     )
                     return True
 
@@ -219,6 +228,7 @@ class CalibrationResponseHandler:
                     quality=quality,
                     intent_id=intent_id,
                     correlation_id=correlation_id,
+                    request_id=request_id if isinstance(request_id, str) else None,
                 )
 
         except Exception as e:

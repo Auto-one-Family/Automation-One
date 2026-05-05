@@ -212,7 +212,8 @@ Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
 ```json
 {
   "command": "measure",                  // Currently only "measure" supported
-  "request_id": "req_12345"              // Optional: Request ID for tracking response
+  "request_id": "req_12345",             // Optional: Request ID for tracking response
+  "timeout_ms": 5000                    // Optional: 1–60000, Default 5000 (Messdauer-Guard)
 }
 ```
 
@@ -224,9 +225,10 @@ Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
 **ESP32-Verhalten:**
 1. Empfängt Command
 2. Parst GPIO aus Topic
-3. Führt `sensorManager.triggerManualMeasurement(gpio)` aus
-4. Sendet Response (wenn `request_id` vorhanden)
-5. Publiziert Messwert via reguläres `/data` Topic
+3. Führt `sensorManager.triggerManualMeasurement(gpio, timeout_ms)` aus (Timeout aus Payload oder Default)
+4. Messblock serialisiert mit `g_sensor_mutex` gegen `performAllMeasurements` (bounded wait; bei Timeout `reason_code` = `MUTEX_TIMEOUT` in der Response)
+5. Sendet Response (wenn `request_id` vorhanden), inkl. `measurement_ok`, `publish_ok`, `timeout`, `reason_code`, `quality`, `sensor_type`, `raw`
+6. Publiziert Messwert via reguläres `/data` Topic (wenn Messung und Publish erfolgreich)
 
 ---
 
@@ -240,16 +242,26 @@ Der Server akzeptiert folgende Feld-Alternativen für Backward-Compatibility:
 **Module:** `main.cpp::handleSensorCommand()`
 **TopicBuilder:** `TopicBuilder::buildSensorResponseTopic(gpio)`
 
-**Payload-Schema:**
+**Payload-Schema (Minimal; voll siehe `main.cpp` wenn `request_id` im Command gesetzt):**
 ```json
 {
   "request_id": "req_12345",             // Echo of original request_id
   "gpio": 4,                             // GPIO pin
   "command": "measure",                  // Executed command
   "success": true,                       // true if measurement succeeded
-  "ts": 1735818000                       // Timestamp (Unix seconds)
+  "measurement_ok": true,
+  "publish_ok": true,
+  "timeout": false,
+  "reason_code": "NONE",
+  "quality": "good",
+  "sensor_type": "moisture",
+  "raw": 2150,
+  "ts": 1735818000,
+  "seq": 42
 }
 ```
+
+Zusätzlich optional: `intent_id`, `correlation_id`, `ttl_ms`. `reason_code` z. B. `MUTEX_TIMEOUT`, wenn `g_sensor_mutex` nicht rechtzeitig erworben wurde. **God-Kaiser** (`CalibrationResponseHandler`): Kalibrier-Livepfad per WebSocket nutzt **keinen** Ersatz aus dem letzten `sensor_data`-Datensatz, wenn `raw`/`raw_value` fehlt (siehe `.claude/reference/api/MQTT_TOPICS.md` §1.4).
 
 ---
 

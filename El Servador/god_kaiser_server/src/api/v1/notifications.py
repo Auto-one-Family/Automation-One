@@ -413,6 +413,14 @@ async def acknowledge_alert(
     await db.commit()
     increment_alert_acknowledged(notification.severity)
 
+    logger.info(
+        "Alert acknowledged via REST API",
+        extra={
+            "notification_id": str(notification.id),
+            "alert_status": notification.status,
+        },
+    )
+
     # Broadcast updated status via WebSocket
     router_service = NotificationRouter(db)
     await router_service.broadcast_notification_updated(notification)
@@ -461,6 +469,14 @@ async def resolve_alert(
 
     await db.commit()
     increment_alert_resolved(notification.severity, resolution_type="manual")
+
+    logger.info(
+        "Alert resolved via REST API",
+        extra={
+            "notification_id": str(notification.id),
+            "alert_status": notification.status,
+        },
+    )
 
     # Broadcast updated status via WebSocket
     router_service = NotificationRouter(db)

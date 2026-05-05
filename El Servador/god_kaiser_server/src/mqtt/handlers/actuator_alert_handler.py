@@ -32,6 +32,7 @@ from typing import Optional
 
 from ...core.esp32_error_mapping import get_actuator_alert_info
 from ...core.logging_config import get_logger
+from ...core.request_context import generate_mqtt_correlation_id, get_request_id
 from ...db.repositories import ActuatorRepository, ESPRepository
 from ...db.session import resilient_session
 
@@ -114,6 +115,14 @@ class ActuatorAlertHandler:
 
             # Step 2: Convert ESP32 timestamp
             esp32_timestamp = self._convert_timestamp(payload.get("ts", 0))
+
+            # MQTT ingress correlation (subscriber ContextVar); fallback matches Subscriber logic
+            topic_suffix = topic.rsplit("/", 1)[-1] if "/" in topic else topic
+            ingress_cid = get_request_id()
+            if not ingress_cid:
+                ingress_cid = generate_mqtt_correlation_id(
+                    esp_id_str, topic_suffix, payload.get("seq")
+                )
 
             # Step 3: Get database session and repositories
             async with resilient_session() as session:
@@ -208,6 +217,7 @@ class ActuatorAlertHandler:
                             ),
                             "zone_id": zone_id,
                             "timestamp": payload.get("ts", 0),
+                            "correlation_id": ingress_cid,
                         },
                     )
                     logger.debug(f"Alert broadcast via WebSocket: {alert_type}")
@@ -224,6 +234,17 @@ class ActuatorAlertHandler:
                     title = alert_info["message"] if alert_info else f"Actuator Alert: {alert_type}"
                     body = message if message and message != alert_type else None
 
+                    dev_corr = payload.get("correlation_id")
+                    meta = {
+                        "esp_id": esp_id_str,
+                        "gpio": gpio,
+                        "alert_type": alert_type,
+                        "zone_id": zone_id,
+                        "mqtt_ingress_correlation_id": ingress_cid,
+                    }
+                    if isinstance(dev_corr, str) and dev_corr.strip():
+                        meta["device_correlation_id"] = dev_corr.strip()
+
                     notification = NotificationCreate(
                         user_id=None,  # Broadcast to all users
                         channel="websocket",
@@ -231,6 +252,7 @@ class ActuatorAlertHandler:
                         category=category,
                         title=title[:255],
                         body=body,
+<<<<<<< Updated upstream
                         metadata={
                             "esp_id": esp_id_str,
                             "gpio": gpio,
@@ -247,7 +269,11 @@ class ActuatorAlertHandler:
                                 alert_info["user_action_required"] if alert_info else False
                             ),
                         },
+=======
+                        metadata=meta,
+>>>>>>> Stashed changes
                         source="mqtt_handler",
+                        correlation_id=ingress_cid,
                     )
 
                     notification_router = NotificationRouter(session)

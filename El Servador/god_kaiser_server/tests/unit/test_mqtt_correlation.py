@@ -6,6 +6,8 @@ sets and clears the ContextVar in the event loop context.
 """
 
 import asyncio
+import logging
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -117,3 +119,15 @@ async def test_mqtt_handler_preserves_outer_context():
 
     # Cleanup
     clear_request_id(outer_token)
+
+
+def test_route_message_json_decode_error_logs_mqtt_parse_fail_id(caplog):
+    """Invalid JSON on a topic yields a stable mqtt_parse_fail_id in the error log."""
+    mock_client = MagicMock()
+    sub = Subscriber(mqtt_client=mock_client, max_workers=1)
+    before_failed = sub.messages_failed
+    with caplog.at_level(logging.ERROR):
+        sub._route_message("kaiser/god/esp/ESP_UNIT/sensor/temp/data", "{not-json")
+    assert sub.messages_failed == before_failed + 1
+    assert "mqtt_parse_fail_id=" in caplog.text
+    assert "parse-fail:" in caplog.text

@@ -314,7 +314,15 @@ bool OfflineModeManager::validateServerAckContract(uint32_t incoming_handover_ep
     if (mode_ == OfflineMode::RECONNECTING ||
         mode_ == OfflineMode::OFFLINE_ACTIVE ||
         mode_ == OfflineMode::ADOPTING) {
+        // P5 / broker-up path: OFFLINE_ACTIVE can be entered after grace while MQTT never
+        // dropped, so onMqttConnectCallback() never ran → active_handover_epoch_ stayed 0.
+        // Server ACK still carries handover_epoch >= 1 — allow validation; onServerAckReceived
+        // arms local epoch from the incoming value (ADOPTING keeps strict: epoch should exist).
         if (active_handover_epoch_ == 0) {
+            if ((mode_ == OfflineMode::OFFLINE_ACTIVE || mode_ == OfflineMode::RECONNECTING) &&
+                incoming_handover_epoch >= 1U) {
+                return true;
+            }
             if (reject_code != nullptr) {
                 *reject_code = "MISSING_ACTIVE_SESSION_EPOCH";
             }
@@ -343,6 +351,13 @@ void OfflineModeManager::onServerAckReceived(uint32_t incoming_handover_epoch) {
             return;
         }
         uint32_t expected_epoch = active_handover_epoch_;
+        if (expected_epoch == 0U) {
+            active_handover_epoch_     = incoming_handover_epoch;
+            handover_completed_epoch_  = 0U;
+            expected_epoch             = active_handover_epoch_;
+            LOG_I(TAG, String("[SAFETY-P4] Handover epoch armed from server ACK (unarmed session, epoch=") +
+                           String(expected_epoch) + ")");
+        }
         uint32_t effective_incoming_epoch = incoming_handover_epoch;
 
         if (effective_incoming_epoch != expected_epoch) {
@@ -1152,6 +1167,8 @@ void OfflineModeManager::activateOfflineMode() {
     LOG_W(TAG, String("[SAFETY-P4] Grace period elapsed (") + String(grace_ms) +
                "ms) → OFFLINE_ACTIVE");
     mode_ = OfflineMode::OFFLINE_ACTIVE;
+    // New offline-autonomy period: prior adoption completion must not block the next ACK handshake.
+    handover_completed_epoch_ = 0U;
     offline_enter_count_++;
     memset(warmup_valid_samples_, 0, sizeof(warmup_valid_samples_));
 

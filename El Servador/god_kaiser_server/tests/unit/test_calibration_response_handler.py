@@ -53,3 +53,50 @@ async def test_measurement_event_does_not_persist_point(db_session):
     assert event_kwargs["raw"] == 1234.5
     assert event_kwargs["raw_value"] == 1234.5
     assert event_kwargs["session_id"] == "session-123"
+
+
+@pytest.mark.asyncio
+async def test_missing_raw_emits_failure_without_db_fallback(db_session):
+    """H2: No get_latest_reading substitution — avoids wrong interval sample."""
+    handler = CalibrationResponseHandler()
+    broadcast_mock = AsyncMock()
+
+    class _ActiveSession:
+        id = "session-456"
+
+    @asynccontextmanager
+    async def _session_ctx():
+        yield db_session
+
+    with (
+        patch(
+            "src.mqtt.handlers.calibration_response_handler.resilient_session",
+            side_effect=_session_ctx,
+        ),
+        patch(
+            "src.mqtt.handlers.calibration_response_handler.CalibrationSessionRepository"
+        ) as repo_cls,
+        patch.object(handler, "_broadcast_calibration_event", broadcast_mock),
+    ):
+        repo_instance = repo_cls.return_value
+        repo_instance.get_active_session = AsyncMock(return_value=_ActiveSession())
+
+        topic = "kaiser/main/esp/ESP_TEST_001/sensor/4/response"
+        payload = {
+            "success": True,
+            "sensor_type": "moisture",
+            "intent_id": "intent-1",
+            "correlation_id": "corr-1",
+            "request_id": "req-missing-raw",
+            # no raw / raw_value — must not invent value from DB
+        }
+
+        result = await handler.handle_sensor_response(topic, payload)
+
+    assert result is True
+    assert broadcast_mock.await_count == 1
+    event_type = broadcast_mock.await_args.args[0]
+    event_kwargs = broadcast_mock.await_args.kwargs
+    assert event_type == "calibration_measurement_failed"
+    assert "Rohwert" in event_kwargs["error"]
+    assert event_kwargs["request_id"] == "req-missing-raw"

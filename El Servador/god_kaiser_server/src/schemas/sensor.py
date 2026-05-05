@@ -12,7 +12,7 @@ Provides:
 
 Consistency with El Trabajante:
 - Sensor types: ph, temperature, humidity, ec, moisture, pressure, co2, light, flow
-- Quality levels: excellent, good, fair, poor, bad, stale
+- Quality levels: excellent, good, fair, poor, bad, stale, degraded, …
 - MQTT Topic: kaiser/god/esp/{esp_id}/sensor/{gpio}/data
 
 References:
@@ -63,6 +63,7 @@ QUALITY_LEVELS = [
     "suspect",
     "critical",
     "error",
+    "degraded",  # PKG-HW-01: server-side ingest without matching sensor_configs row
     "aggregated",
     "unknown",
 ]
@@ -498,11 +499,18 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     )
     correlation_id: Optional[str] = Field(
         None,
+<<<<<<< Updated upstream
         description="Intent handle der letzten ausgelösten Config-Publish-Operation (falls verfügbar)",
     )
     request_id: Optional[str] = Field(
         None,
         description="Alias/Fallback-Handle zur Korrelation von REST-Antwort und WS-Config-Lifecycle",
+=======
+        description=(
+            "MQTT config push correlation_id from the last send_config in this request; "
+            "matches ESP config_response and WS config_published/config_failed for UI contract tracking."
+        ),
+>>>>>>> Stashed changes
     )
 
     model_config = ConfigDict(

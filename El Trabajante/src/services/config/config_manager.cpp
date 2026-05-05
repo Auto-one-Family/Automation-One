@@ -1,5 +1,6 @@
 #include "config_manager.h"
 #include "storage_manager.h"
+#include <cstdio>
 #include "../../utils/logger.h"
 #include "../../utils/onewire_utils.h"  // For ROM-Code validation
 #include "../../drivers/gpio_manager.h"
@@ -1289,6 +1290,7 @@ bool ConfigManager::isDeviceApproved() const {
 }
 
 void ConfigManager::setDeviceApproved(bool approved, time_t timestamp) {
+<<<<<<< Updated upstream
   // ============================================
   // INC-2026-04-11-ea5484-mqtt-transport-keepalive (PKG-04)
   // ============================================
@@ -1323,6 +1325,15 @@ void ConfigManager::setDeviceApproved(bool approved, time_t timestamp) {
     return;
   }
 
+=======
+  const uint32_t appr_us0 = micros();
+  {
+    char b[128];
+    snprintf(b, sizeof(b), "[NVS_APPR] begin approved=%d ts=%lld", approved ? 1 : 0,
+             static_cast<long long>(timestamp));
+    LOG_D(TAG, b);
+  }
+>>>>>>> Stashed changes
   if (!storageManager.beginTransaction()) {
     LOG_E(TAG, "ConfigManager: Cannot save approval status - transaction error");
     return;
@@ -1343,6 +1354,13 @@ void ConfigManager::setDeviceApproved(bool approved, time_t timestamp) {
 
   storageManager.endNamespace();
   storageManager.endTransaction();
+
+  {
+    const uint32_t appr_dt = micros() - appr_us0;
+    char b[128];
+    snprintf(b, sizeof(b), "[NVS_APPR] us=%lu", static_cast<unsigned long>(appr_dt));
+    LOG_D(TAG, b);
+  }
 
   if (approved) {
     LOG_I(TAG, "ConfigManager: Device approval saved (approved=true, ts=" +

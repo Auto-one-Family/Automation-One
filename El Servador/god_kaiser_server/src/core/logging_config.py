@@ -1,5 +1,21 @@
 """
 Structured Logging Setup mit JSON-Format und File-Rotation
+
+Optional structured field ``failure_class`` (I08 pilot): small string enum for error
+taxonomy in JSON file logs. Set via ``logger.*(..., extra={"failure_class": "<value>"})``.
+Values must not contain PII (no free-form user text). Pilot set:
+
+- ``mqtt_json_parse`` — MQTT payload is not valid JSON (subscriber).
+- ``mqtt_route`` — uncaught exception while routing an MQTT message (subscriber).
+- ``sensor_payload_validation`` — sensor handler rejected payload (validation).
+
+Additional keys can be allowlisted in ``_STRUCTURED_JSON_FIELDS`` when needed.
+
+Notification / Alert Center (additive observability, no PII):
+
+- ``notification_id`` — UUID string of the persisted notification row.
+- ``alert_status`` — ISA-18.2 lifecycle status (e.g. ``active``, ``acknowledged``, ``resolved``).
+- ``ws_event_type`` — Realtime fan-out event name (e.g. ``notification_new``) or omitted on pure REST logs.
 """
 
 import json
@@ -10,15 +26,25 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .config import get_settings
-from .request_context import get_request_id, get_correlation_id
+from .request_context import get_request_id, get_traceparent
+
+# Keys copied from LogRecord into JSON log lines (set via logging ``extra=``).
+# Keep minimal: arbitrary LogRecord attrs are not merged (reserved / collision risk).
+_STRUCTURED_JSON_FIELDS: tuple[str, ...] = (
+    "failure_class",
+    "notification_id",
+    "alert_status",
+    "ws_event_type",
+)
 
 
 class RequestIdFilter(logging.Filter):
-    """Filter that adds request_id and correlation_id to every log record."""
+    """Filter that adds request_id (and optional traceparent) to every log record."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.request_id = get_request_id() or "-"
-        record.correlation_id = get_correlation_id() or "-"
+        tp = get_traceparent()
+        record.traceparent = tp if tp else "-"
         return True
 
 
@@ -50,24 +76,30 @@ class JSONFormatter(logging.Formatter):
         if request_id and request_id != "-":
             log_data["request_id"] = request_id
 
-        # Add correlation_id for cross-layer tracing (MQTT context)
-        correlation_id = getattr(record, "correlation_id", "-")
-        if correlation_id and correlation_id != "-":
-            log_data["correlation_id"] = correlation_id
+        traceparent = getattr(record, "traceparent", "-")
+        if traceparent and traceparent != "-":
+            log_data["traceparent"] = traceparent
 
         # Add exception info if present
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
 
-        # Add extra fields from record
-        if hasattr(record, "extra"):
+        # Optional structured fields (passed via logger's extra= dict → LogRecord attrs)
+        for key in _STRUCTURED_JSON_FIELDS:
+            if hasattr(record, key):
+                val = getattr(record, key)
+                if val is not None and val != "":
+                    log_data[key] = val
+
+        # Legacy: nested dict on record.extra (rare; prefer extra= keys above)
+        if hasattr(record, "extra") and isinstance(getattr(record, "extra"), dict):
             log_data.update(record.extra)
 
         return json.dumps(log_data, default=str)
 
 
 class TextFormatter(logging.Formatter):
-    """Standard text formatter for human-readable logs"""
+    """Standard text formatter for human-readable logs (stdout/Docker)."""
 
     def format(self, record: logging.LogRecord) -> str:
         """
@@ -79,12 +111,23 @@ class TextFormatter(logging.Formatter):
         Returns:
             str: Formatted log message
         """
-        # Ensure request_id and correlation_id exist to avoid formatting errors
+        # Ensure request_id / traceparent exist to avoid formatting errors
         if not hasattr(record, "request_id"):
             record.request_id = "-"
-        if not hasattr(record, "correlation_id"):
-            record.correlation_id = "-"
-        return super().format(record)
+        if not hasattr(record, "traceparent"):
+            record.traceparent = "-"
+        line = super().format(record)
+        tp = getattr(record, "traceparent", "-")
+        if tp and tp != "-":
+            line = f"{line} traceparent={tp}"
+        fc = getattr(record, "failure_class", None)
+        if fc:
+            line = f"{line} failure_class={fc}"
+        for key in ("notification_id", "alert_status", "ws_event_type"):
+            val = getattr(record, key, None)
+            if val:
+                line = f"{line} {key}={val}"
+        return line
 
 
 def setup_logging() -> None:

@@ -13,6 +13,8 @@ from src.middleware.request_id import RequestIdMiddleware
 from src.core.request_context import (
     get_request_id,
     clear_request_id,
+    get_traceparent,
+    clear_traceparent,
 )
 
 
@@ -30,8 +32,10 @@ def _make_http_scope(path: str = "/test", method: str = "GET", headers: list = N
 def _cleanup_request_id():
     """Ensure ContextVar is clean before and after each test."""
     clear_request_id()
+    clear_traceparent()
     yield
     clear_request_id()
+    clear_traceparent()
 
 
 @pytest.mark.asyncio
@@ -242,6 +246,118 @@ async def test_non_http_scope_passes_through():
 
     assert called is True
     assert get_request_id() is None
+
+
+_VALID_TRACEPARENT = (
+    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+)
+
+
+@pytest.mark.asyncio
+async def test_traceparent_forwarded_to_response():
+    """traceparent from request is echoed on HTTP response."""
+
+    async def inner_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware = RequestIdMiddleware(inner_app)
+    scope = _make_http_scope(
+        headers=[
+            (b"traceparent", _VALID_TRACEPARENT.encode("latin-1")),
+        ]
+    )
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    sent_messages = []
+
+    async def send(message):
+        sent_messages.append(message)
+
+    await middleware(scope, receive, send)
+
+    response_start = next(m for m in sent_messages if m["type"] == "http.response.start")
+    response_headers = dict(response_start["headers"])
+    assert response_headers[b"traceparent"] == _VALID_TRACEPARENT.encode("latin-1")
+
+
+@pytest.mark.asyncio
+async def test_traceparent_available_in_handler():
+    """traceparent is readable via get_traceparent() inside the app."""
+    captured = None
+
+    async def inner_app(scope, receive, send):
+        nonlocal captured
+        captured = get_traceparent()
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware = RequestIdMiddleware(inner_app)
+    scope = _make_http_scope(
+        headers=[(b"traceparent", _VALID_TRACEPARENT.encode("latin-1"))]
+    )
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    async def send(message):
+        pass
+
+    await middleware(scope, receive, send)
+
+    assert captured == _VALID_TRACEPARENT
+
+
+@pytest.mark.asyncio
+async def test_traceparent_cleared_after_request():
+    """traceparent ContextVar is cleared after request completes."""
+
+    async def inner_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware = RequestIdMiddleware(inner_app)
+    scope = _make_http_scope(
+        headers=[(b"traceparent", _VALID_TRACEPARENT.encode("latin-1"))]
+    )
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    async def send(message):
+        pass
+
+    await middleware(scope, receive, send)
+
+    assert get_traceparent() is None
+
+
+@pytest.mark.asyncio
+async def test_traceparent_omitted_when_too_long():
+    """Overlong traceparent is not stored or echoed (W3C length limit)."""
+    too_long = "00-" + "a" * 300
+
+    async def inner_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware = RequestIdMiddleware(inner_app)
+    scope = _make_http_scope(headers=[(b"traceparent", too_long.encode("latin-1"))])
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    sent_messages = []
+
+    async def send(message):
+        sent_messages.append(message)
+
+    await middleware(scope, receive, send)
+
+    response_start = next(m for m in sent_messages if m["type"] == "http.response.start")
+    assert b"traceparent" not in dict(response_start["headers"])
 
 
 @pytest.mark.asyncio

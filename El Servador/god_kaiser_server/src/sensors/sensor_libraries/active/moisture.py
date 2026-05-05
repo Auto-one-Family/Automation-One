@@ -103,8 +103,9 @@ class MoistureSensorProcessor(BaseSensorProcessor):
             calibration: Optional calibration data
                 - "dry_value": float - ADC value when dry (in air)
                 - "wet_value": float - ADC value when wet (in water/saturated)
+                - "invert": bool - If set and params omit invert, used for inversion
             params: Optional processing parameters
-                - "invert": bool - Invert logic (HIGH voltage = DRY) (default: False)
+                - "invert": bool - Invert logic (HIGH voltage = DRY); overrides calibration["invert"]
                 - "decimal_places": int - Decimal places for rounding (default: 1)
 
         Returns:
@@ -154,11 +155,14 @@ class MoistureSensorProcessor(BaseSensorProcessor):
             calibrated = False
 
         # Step 4: Apply invert logic if enabled (HIGH voltage = DRY)
+        # params["invert"] overrides calibration["invert"] when both are set.
         invert = False
         if params and "invert" in params:
-            invert = params["invert"]
-            if invert:
-                moisture = 100.0 - moisture
+            invert = bool(params["invert"])
+        elif calibration is not None and "invert" in calibration:
+            invert = bool(calibration["invert"])
+        if invert:
+            moisture = 100.0 - moisture
 
         # Step 5: Clamp to valid range (0-100%)
         moisture = max(self.MOISTURE_MIN, min(self.MOISTURE_MAX, moisture))

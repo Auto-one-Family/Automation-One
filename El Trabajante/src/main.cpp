@@ -2,13 +2,19 @@
 // INCLUDES
 // ============================================
 #include <Arduino.h>
+<<<<<<< Updated upstream
 #include <cstring>
+=======
+#include <cstdio>
+>>>>>>> Stashed changes
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <ArduinoJson.h>
+#include <cstring>
 #include <esp_task_wdt.h>
 #include <atomic>
+#include <vector>
 #include "tasks/safety_task.h"
 #include "tasks/actuator_command_queue.h"
 #include "tasks/sensor_command_queue.h"
@@ -720,18 +726,76 @@ void onMqttConnectCallback() {
 //   Actuator commands: queueActuatorCommand → Core 1 (actuatorManager owner)
 //
 // M3 will migrate remaining direct-call handlers (config, zone, subzone) to queues.
+
+// MQTT ingress: one INFO line (grep [MQTTIN]); config topic = no payload preview (secrets/size).
+static void logMqttIngressDispatch(const String& topic, const String& payload, bool hide_payload_preview) {
+    const size_t plen = payload.length();
+    const char* ts = topic.c_str();
+    const size_t tl = strlen(ts);
+    char topic_tail[52] = "";
+    if (tl > 0) {
+        const size_t keep = sizeof(topic_tail) - 1;
+        const char* start = (tl > keep) ? (ts + (tl - keep)) : ts;
+        strncpy(topic_tail, start, keep);
+        topic_tail[keep] = '\0';
+    }
+
+    char pv[44] = "";
+    if (!hide_payload_preview && plen > 0) {
+        const char* p = payload.c_str();
+        size_t j = 0;
+        for (size_t i = 0; i < plen && j + 1 < sizeof(pv); ++i) {
+            char c = p[i];
+            if (c == '\n' || c == '\r' || c == '\t') {
+                c = ' ';
+            }
+            if (static_cast<unsigned char>(c) < 32 || static_cast<unsigned char>(c) > 126) {
+                c = '.';
+            }
+            pv[j++] = c;
+        }
+        pv[j] = '\0';
+    }
+
+    char path_tail[33] = "";
+    if (tl > 0) {
+        const char* slash = strrchr(ts, '/');
+        const char* seg = slash ? slash + 1 : ts;
+        size_t slen = strlen(seg);
+        if (slen > sizeof(path_tail) - 1) {
+            slen = sizeof(path_tail) - 1;
+        }
+        memcpy(path_tail, seg, slen);
+        path_tail[slen] = '\0';
+    }
+    char mqtt_in[128];
+    snprintf(mqtt_in, sizeof(mqtt_in), "[MQTT_IN] len=%u tail=%s pay_len=%u", static_cast<unsigned>(tl), path_tail,
+             static_cast<unsigned>(plen));
+    LOG_D(TAG, mqtt_in);
+
+    char line[128];
+    if (hide_payload_preview) {
+        snprintf(line, sizeof(line), "[MQTTIN] len=%u tail=%s pvw=off", static_cast<unsigned>(plen), topic_tail);
+    } else if (plen == 0) {
+        snprintf(line, sizeof(line), "[MQTTIN] len=0 tail=%s", topic_tail);
+    } else {
+        snprintf(line, sizeof(line), "[MQTTIN] len=%u tail=%s pvw=%.40s", static_cast<unsigned>(plen), topic_tail, pv);
+    }
+    LOG_I(TAG, line);
+}
+
 void routeIncomingMessage(const char* t, const char* p) {
     // Wrap raw char* to String — existing handler code uses String comparisons
     const String topic(t);
-    const String payload(p);
+    const String payload(p != nullptr ? p : "");
 
-    LOG_I(TAG, "MQTT message received: " + topic);
+    const String config_topic = String(TopicBuilder::buildConfigTopic());
+    logMqttIngressDispatch(topic, payload, topic == config_topic);
     LOG_D(TAG, "Payload: " + payload);
 
     // ─── Config (sensor / actuator / offline_rules) ─────────────────────────
     // SAFETY-RTOS M4.6: Queue to Core 1 — eliminates race on sensors_[]/actuators_[].
     // processConfigUpdateQueue() on Core 1 calls all three handlers with the same payload.
-    String config_topic = String(TopicBuilder::buildConfigTopic());
     if (topic == config_topic) {
         IntentMetadata metadata = extractIntentMetadataFromPayloadNoCorrelationFallback(payload.c_str(), "cfg");
         String corr_id = String(metadata.correlation_id);
@@ -803,6 +867,14 @@ void routeIncomingMessage(const char* t, const char* p) {
                                  msg,
                                  false);
             return;
+        }
+
+        {
+            char cfg_in[128];
+            snprintf(cfg_in, sizeof(cfg_in), "[CFG_IN] corr=%.40s gen=%lu pay_len=%u",
+                     metadata.correlation_id, (unsigned long)metadata.generation,
+                     (unsigned)payload_len);
+            LOG_I(TAG, cfg_in);
         }
 
         if (!queueConfigUpdateWithMetadata(ConfigUpdateRequest::CONFIG_PUSH, payload.c_str(), &metadata)) {
@@ -1265,6 +1337,12 @@ void routeIncomingMessage(const char* t, const char* p) {
         LOG_I(TAG, "Command parsed: '" + command + "'");
 
         IntentMetadata metadata = extractIntentMetadataFromPayload(payload.c_str(), "sys");
+        {
+            char sys_line[128];
+            snprintf(sys_line, sizeof(sys_line), "[SYS_CMD] cmd=%.32s corr=%.40s", command.c_str(),
+                     metadata.correlation_id);
+            LOG_I(TAG, sys_line);
+        }
         CommandAdmissionContext admission_context{
             mqttClient.isRegistrationConfirmed(),
             isConfigPendingAfterResetState(),
@@ -2381,17 +2459,27 @@ void routeIncomingMessage(const char* t, const char* p) {
         bool config_available = doc["config_available"] | false;
         unsigned long server_time = doc["server_time"] | 0;
 
+<<<<<<< Updated upstream
         // NTP can still be pending during early boot; adopt authoritative server time
         // from heartbeat ACK to avoid prolonged ts=0 windows.
         if (server_time > 0 && !timeManager.isSynchronized()) {
             timeManager.syncFromAuthoritativeUnix(static_cast<time_t>(server_time), "heartbeat_ack");
         }
 
+=======
+        {
+            char hb_line[128];
+            snprintf(hb_line, sizeof(hb_line), "[HB_ACK] epoch=%lu cfg_avail=%d",
+                     (unsigned long)handover_epoch, config_available ? 1 : 0);
+            LOG_I(TAG, hb_line);
+        }
+>>>>>>> Stashed changes
         LOG_D(TAG, "  Status: " + String(status) + ", Config available: " +
                   String(config_available ? "yes" : "no"));
 
         if (strcmp(status, "approved") == 0 || strcmp(status, "online") == 0) {
             time_t approval_ts = server_time > 0 ? (time_t)server_time : timeManager.getUnixTimestamp();
+<<<<<<< Updated upstream
             const bool already_approved = configManager.isDeviceApproved();
             const time_t persisted_approval_ts = configManager.getApprovalTimestamp();
             bool should_persist_approval = !already_approved;
@@ -2415,6 +2503,17 @@ void routeIncomingMessage(const char* t, const char* p) {
             if (should_persist_approval) {
                 configManager.setDeviceApproved(true, approval_ts);
             }
+=======
+            {
+                char hb[120];
+                snprintf(hb, sizeof(hb), "[HBINF] pre setDeviceApproved st=%s epoch=%lu ts=%ld cfg=%d",
+                         status, static_cast<unsigned long>(handover_epoch), static_cast<long>(approval_ts),
+                         config_available ? 1 : 0);
+                LOG_I(TAG, hb);
+            }
+            configManager.setDeviceApproved(true, approval_ts);
+            LOG_I(TAG, "[HBINF] post setDeviceApproved approved=1");
+>>>>>>> Stashed changes
 
             if (isConfigPendingAfterResetState()) {
                 // Do not evaluate pending-exit on every heartbeat ACK.
@@ -2446,6 +2545,11 @@ void routeIncomingMessage(const char* t, const char* p) {
                 }
             }
         } else if (strcmp(status, "pending_approval") == 0) {
+            {
+                char appr_line[128];
+                snprintf(appr_line, sizeof(appr_line), "[HB_ACK] status=%.16s -> NVS approve", status);
+                LOG_I(TAG, appr_line);
+            }
             configManager.setDeviceApproved(false, 0);
             if (isConfigPendingAfterResetState()) {
                 // Same as approved/online branch: keep callback path lightweight and
@@ -2494,6 +2598,11 @@ void routeIncomingMessage(const char* t, const char* p) {
             errorTracker.trackError(ERROR_DEVICE_REJECTED, ERROR_SEVERITY_ERROR,
                                    rejection_reason.c_str());
 
+            {
+                char appr_line[128];
+                snprintf(appr_line, sizeof(appr_line), "[HB_ACK] status=%.16s -> NVS approve", status);
+                LOG_I(TAG, appr_line);
+            }
             configManager.setDeviceApproved(false, 0);
             g_system_config.current_state = STATE_ERROR;
             configManager.saveSystemConfig(g_system_config);
@@ -3967,8 +4076,14 @@ bool handleSensorConfig(JsonObject doc, const String& correlationId) {
 
   size_t total = sensors.size();
   if (total == 0) {
-    // Empty sensor array is valid for actuator-only ESPs
+    // Empty sensor array is valid for actuator-only ESPs — drop stale RAM/NVS sensors (PKG-HW-01)
     LOG_I(TAG, "No sensors configured (actuator-only device)");
+    {
+      char sens_line[128];
+      snprintf(sens_line, sizeof(sens_line), "[CFG_SENS] n=0 ok=0 fail=0 corr=%.36s", correlationId.c_str());
+      LOG_I(TAG, sens_line);
+    }
+    sensorManager.syncSensorsAfterConfigPush(nullptr, 0);
     ConfigResponseBuilder::publishSuccess(ConfigType::SENSOR, 0,
                                           "No sensors configured",
                                           correlationId);
@@ -3979,8 +4094,30 @@ bool handleSensorConfig(JsonObject doc, const String& correlationId) {
   std::vector<ConfigFailureItem> failures;
   failures.reserve(min(total, (size_t)MAX_CONFIG_FAILURES));
   uint8_t success_count = 0;
+  size_t sensor_index = 0;
+
+  {
+    char sens_line[128];
+    snprintf(sens_line, sizeof(sens_line), "[CFG_SENS] n=%u corr=%.36s", static_cast<unsigned>(total),
+             correlationId.c_str());
+    LOG_I(TAG, sens_line);
+  }
 
   for (JsonObject sensorObj : sensors) {
+    {
+      int gpio_log = -1;
+      (void)JsonHelpers::extractInt(sensorObj, "gpio", gpio_log, -1);
+      char type_buf[24] = "?";
+      String stmp;
+      if (JsonHelpers::extractString(sensorObj, "sensor_type", stmp)) {
+        strncpy(type_buf, stmp.c_str(), sizeof(type_buf) - 1);
+        type_buf[sizeof(type_buf) - 1] = '\0';
+      }
+      char cfgline[128];
+      snprintf(cfgline, sizeof(cfgline), "[CFGIN] sensor item=%u gpio=%d type=%.20s",
+               static_cast<unsigned>(sensor_index), gpio_log, type_buf);
+      LOG_I(TAG, cfgline);
+    }
     ConfigFailureItem failure;
     if (parseAndConfigureSensorWithTracking(sensorObj, &failure)) {
       success_count++;
@@ -3990,10 +4127,52 @@ bool handleSensorConfig(JsonObject doc, const String& correlationId) {
         failures.push_back(failure);
       }
     }
+    sensor_index++;
+  }
+
+  // PKG-HW-01: RAM/NVS must match server list when full apply succeeded (no partial orphan drops)
+  uint8_t fail_count = static_cast<uint8_t>(total - success_count);
+  if (fail_count == 0) {
+    std::vector<SensorSyncSlot> sync_slots;
+    sync_slots.reserve(total);
+    for (JsonObject sensorObj : sensors) {
+      bool active = true;
+      if (!JsonHelpers::extractBool(sensorObj, "active", active, true) || !active) {
+        continue;
+      }
+      int gpio_value = 255;
+      if (!JsonHelpers::extractInt(sensorObj, "gpio", gpio_value)) {
+        continue;
+      }
+      String st;
+      if (!JsonHelpers::extractString(sensorObj, "sensor_type", st)) {
+        continue;
+      }
+      st.toLowerCase();
+      String ow;
+      JsonHelpers::extractString(sensorObj, "onewire_address", ow, "");
+      int i2c_int = 0;
+      JsonHelpers::extractInt(sensorObj, "i2c_address", i2c_int, 0);
+      SensorSyncSlot slot;
+      slot.gpio = static_cast<uint8_t>(gpio_value);
+      slot.i2c_address = static_cast<uint8_t>(i2c_int);
+      slot.onewire_address = ow;
+      slot.sensor_type = st;
+      sync_slots.push_back(slot);
+    }
+    sensorManager.syncSensorsAfterConfigPush(
+        sync_slots.empty() ? nullptr : sync_slots.data(),
+        sync_slots.size());
+  }
+
+  {
+    char sens_done[128];
+    snprintf(sens_done, sizeof(sens_done), "[CFG_SENS] ok=%u fail=%u corr=%.36s",
+             (unsigned)success_count, (unsigned)fail_count, correlationId.c_str());
+    LOG_I(TAG, sens_done);
   }
 
   // Phase 4: Use publishWithFailures for aggregated response
-  uint8_t fail_count = static_cast<uint8_t>(total - success_count);
   ConfigResponseBuilder::publishWithFailures(
       ConfigType::SENSOR,
       success_count,

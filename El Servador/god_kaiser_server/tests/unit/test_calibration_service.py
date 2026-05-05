@@ -1,9 +1,11 @@
 """Unit tests for calibration service session flow and guards."""
 
 import pytest
+from sqlalchemy import select
 
 from src.db.models.esp import ESPDevice
 from src.db.models.sensor import SensorConfig
+from src.services.calibration_payloads import resolve_calibration_for_processor
 from src.services.calibration_service import CalibrationError, CalibrationService
 
 
@@ -63,6 +65,99 @@ async def test_calibration_service_add_finalize_apply_flow(db_session):
 
     session = await service.apply(session.id)
     assert session.status.value == "applied"
+
+
+@pytest.mark.asyncio
+async def test_moisture_finalize_apply_persists_moisture_2point_derived(db_session):
+    """Nach apply muss calibration_data derived moisture_2point + dry/wet fuer Processor aufloesbar sein."""
+    await _create_bound_sensor(db_session, esp_id="ESP_TEST_001", gpio=4)
+    service = CalibrationService(db_session)
+    session = await service.start_session(
+        esp_id="ESP_TEST_001",
+        gpio=4,
+        sensor_type="moisture",
+        method="linear_2point",
+        expected_points=2,
+        initiated_by="tester",
+    )
+    await service.add_point(
+        session_id=session.id,
+        raw=850.0,
+        reference=0.0,
+        point_role="dry",
+    )
+    await service.add_point(
+        session_id=session.id,
+        raw=620.0,
+        reference=100.0,
+        point_role="wet",
+    )
+    await service.finalize(session.id)
+    await service.apply(session.id)
+
+    stmt = (
+        select(SensorConfig)
+        .join(ESPDevice, SensorConfig.esp_id == ESPDevice.id)
+        .where(ESPDevice.device_id == "ESP_TEST_001", SensorConfig.gpio == 4)
+    )
+    result = await db_session.execute(stmt)
+    sensor_cfg = result.scalar_one()
+    cal = sensor_cfg.calibration_data
+    assert isinstance(cal, dict)
+    derived = cal.get("derived")
+    assert isinstance(derived, dict)
+    assert derived.get("type") == "moisture_2point"
+
+    flat = resolve_calibration_for_processor(cal)
+    assert flat is not None
+    assert flat.get("dry_value") == pytest.approx(850.0)
+    assert flat.get("wet_value") == pytest.approx(620.0)
+
+
+@pytest.mark.asyncio
+async def test_moisture_2point_method_finalize_apply_persists_derived(db_session):
+    """Explizite Session mit method=moisture_2point — gleiche Persistenz-Assertions (API-Variante)."""
+    await _create_bound_sensor(db_session, esp_id="ESP_TEST_001", gpio=20)
+    service = CalibrationService(db_session)
+    session = await service.start_session(
+        esp_id="ESP_TEST_001",
+        gpio=20,
+        sensor_type="moisture",
+        method="moisture_2point",
+        expected_points=2,
+        initiated_by="tester",
+    )
+    await service.add_point(
+        session_id=session.id,
+        raw=800.0,
+        reference=0.0,
+        point_role="dry",
+    )
+    await service.add_point(
+        session_id=session.id,
+        raw=600.0,
+        reference=100.0,
+        point_role="wet",
+    )
+    await service.finalize(session.id)
+    await service.apply(session.id)
+
+    stmt = (
+        select(SensorConfig)
+        .join(ESPDevice, SensorConfig.esp_id == ESPDevice.id)
+        .where(ESPDevice.device_id == "ESP_TEST_001", SensorConfig.gpio == 20)
+    )
+    result = await db_session.execute(stmt)
+    sensor_cfg = result.scalar_one()
+    cal = sensor_cfg.calibration_data
+    assert isinstance(cal, dict)
+    derived = cal.get("derived")
+    assert isinstance(derived, dict)
+    assert derived.get("type") == "moisture_2point"
+    flat = resolve_calibration_for_processor(cal)
+    assert flat is not None
+    assert flat.get("dry_value") == pytest.approx(800.0)
+    assert flat.get("wet_value") == pytest.approx(600.0)
 
 
 @pytest.mark.asyncio
@@ -224,6 +319,7 @@ async def test_apply_is_idempotent(db_session):
     assert second_apply.id == first_apply.id
 
 
+<<<<<<< Updated upstream
 # ─────────────────────────────────────────────────────────────────────────────
 # pH Calibration (2-point) Tests
 # ─────────────────────────────────────────────────────────────────────────────
@@ -512,3 +608,27 @@ async def test_canonical_structure_ec_1point(db_session):
     # Check derived has cell_factor
     assert "cell_factor" in result["derived"]
     assert 0.5 <= result["derived"]["cell_factor"] <= 2.0
+=======
+def test_compute_calibration_linear_moisture_maps_to_moisture_2point_derived():
+    """linear_2point + moisture: same derived shape as moisture_2point (dry/wet), not slope/offset."""
+    points = [
+        {"raw": 850.0, "reference": 0.0, "point_role": "dry"},
+        {"raw": 620.0, "reference": 100.0, "point_role": "wet"},
+    ]
+    result = CalibrationService._compute_calibration("linear_2point", "moisture", points)
+    assert result["type"] == "moisture_2point"
+    assert result["dry_value"] == 850.0
+    assert result["wet_value"] == 620.0
+    assert result.get("invert") is False
+
+
+def test_compute_calibration_linear_ec_stays_linear():
+    """Non-moisture linear_2point remains slope/offset."""
+    points = [
+        {"raw": 100.0, "reference": 0.0, "point_role": "dry"},
+        {"raw": 200.0, "reference": 10.0, "point_role": "wet"},
+    ]
+    result = CalibrationService._compute_calibration("linear_2point", "ec", points)
+    assert result["type"] == "linear_2point"
+    assert "slope" in result
+>>>>>>> Stashed changes

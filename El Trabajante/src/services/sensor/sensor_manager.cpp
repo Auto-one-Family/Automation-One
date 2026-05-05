@@ -18,9 +18,46 @@
 #include "../../models/watchdog_types.h"
 #include "../../models/sensor_types.h"
 #include "../../models/sensor_registry.h"
+<<<<<<< Updated upstream
+=======
+#include <map>
+#include <tuple>
+#include <vector>
+>>>>>>> Stashed changes
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "SENSOR";
+
+// SAFETY-RTOS M4: serialize manual vs autonomous measurement (same as performAllMeasurements).
+// performMeasurement / performMultiValueMeasurement do NOT take g_sensor_mutex — safe to hold once here.
+namespace {
+class SensorArrayMutexLock {
+public:
+    SensorArrayMutexLock() = default;
+    bool tryTake(uint32_t wait_ms) {
+        if (xSemaphoreTake(g_sensor_mutex, pdMS_TO_TICKS(wait_ms)) == pdTRUE) {
+            held_ = true;
+            return true;
+        }
+        return false;
+    }
+    void give() {
+        if (held_) {
+            xSemaphoreGive(g_sensor_mutex);
+            held_ = false;
+        }
+    }
+    ~SensorArrayMutexLock() { give(); }
+
+    SensorArrayMutexLock(const SensorArrayMutexLock&) = delete;
+    SensorArrayMutexLock& operator=(const SensorArrayMutexLock&) = delete;
+
+private:
+    bool held_ = false;
+};
+
+static constexpr uint32_t kManualSensorMutexWaitMs = 10000;  // bounded wait vs portMAX_DELAY in autonomous path
+}  // namespace
 
 
 // ============================================
@@ -87,6 +124,30 @@ static uint32_t getAndIncrementDs18b20ReadingCount(uint8_t gpio, const String& o
 // ============================================
 static constexpr uint8_t  CB_MAX_CONSECUTIVE_FAILURES = 10;
 static constexpr uint32_t CB_PROBE_INTERVAL_MS = 300000;  // 5 minutes
+
+// ============================================
+// ADC (analogRead) — ESP32 noise / safe-mode
+// ============================================
+// Safe-mode sets many pins to INPUT_PULLUP; analog path switches to INPUT before read.
+// Single analogRead() is noisy; short spikes can hit rail. We discard warmup reads and
+// return the median of ADC_SAMPLE_COUNT samples (odd count → robust median).
+static constexpr uint8_t  ADC_WARMUP_READS = 2;
+static constexpr uint8_t  ADC_SAMPLE_COUNT = 9;  // must be odd
+static constexpr uint32_t ADC_RAIL_LOG_INTERVAL_MS = 300000;  // throttle identical rail warnings
+
+static uint32_t medianOddSamples(uint32_t* buf, uint8_t n) {
+    // n small (9): simple insertion sort in place
+    for (uint8_t i = 1; i < n; i++) {
+        uint32_t key = buf[i];
+        int8_t j = (int8_t)i - 1;
+        while (j >= 0 && buf[(uint8_t)j] > key) {
+            buf[(uint8_t)(j + 1)] = buf[(uint8_t)j];
+            j--;
+        }
+        buf[(uint8_t)(j + 1)] = key;
+    }
+    return buf[n / 2];
+}
 
 // ============================================
 // LOCAL PREVIEW CONVERSION (Direct MQTT Flow)
@@ -671,6 +732,64 @@ bool SensorManager::configureSensor(const SensorConfig& config) {
 
     xSemaphoreGive(g_sensor_mutex);
     return true;
+}
+
+void SensorManager::syncSensorsAfterConfigPush(const SensorSyncSlot* slots, size_t slot_count) {
+    if (!initialized_) {
+        return;
+    }
+
+    auto matchesSlot = [&](const SensorConfig& local) -> bool {
+        if (!slots || slot_count == 0) {
+            return false;
+        }
+        for (size_t i = 0; i < slot_count; i++) {
+            const SensorSyncSlot& s = slots[i];
+            if (local.gpio != s.gpio) {
+                continue;
+            }
+            if (local.sensor_type != s.sensor_type) {
+                continue;
+            }
+            if (local.onewire_address != s.onewire_address) {
+                continue;
+            }
+            if (local.i2c_address != s.i2c_address) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    };
+
+    std::vector<std::tuple<uint8_t, String, uint8_t>> to_remove;
+
+    if (xSemaphoreTake(g_sensor_mutex, pdMS_TO_TICKS(5000)) != pdTRUE) {
+        LOG_E(TAG, "syncSensorsAfterConfigPush: mutex timeout");
+        return;
+    }
+
+    for (uint8_t i = 0; i < sensor_count_; i++) {
+        if (!sensors_[i].active) {
+            continue;
+        }
+        const bool listed = (slot_count > 0) && matchesSlot(sensors_[i]);
+        const bool should_remove = (slot_count == 0) || !listed;
+        if (should_remove) {
+            to_remove.emplace_back(
+                sensors_[i].gpio, sensors_[i].onewire_address, sensors_[i].i2c_address);
+        }
+    }
+    xSemaphoreGive(g_sensor_mutex);
+
+    for (const auto& entry : to_remove) {
+        removeSensor(std::get<0>(entry), std::get<1>(entry), std::get<2>(entry));
+    }
+
+    if (!to_remove.empty()) {
+        LOG_I(TAG, "PKG-HW-01: Removed " + String(to_remove.size()) +
+                     " local sensor(s) not present in server config payload");
+    }
 }
 
 bool SensorManager::removeSensor(uint8_t gpio, const String& onewire_address,
@@ -1468,42 +1587,53 @@ ManualMeasurementResult SensorManager::triggerManualMeasurement(uint8_t gpio, ui
              " (mode: " + config->operating_mode + ", timeout: " + String(timeout_ms) + "ms)");
     result.sensor_type = config->sensor_type;
 
-    unsigned long start_ms = millis();
-
-    // Check if this is a multi-value sensor
-    const SensorCapability* capability = findSensorCapability(config->sensor_type);
-
-    if (capability && capability->is_multi_value) {
-        // Multi-value sensor - create multiple readings
-        SensorReading readings[4];  // Max 4 values per sensor
-        uint8_t count = performMultiValueMeasurement(gpio, readings, 4);
-
-        // E-P3: Timeout-Guard — check elapsed time after measurement
-        unsigned long elapsed = millis() - start_ms;
-        if (elapsed > timeout_ms) {
-            result.timeout_reached = true;
-            LOG_W(TAG, "SensorManager: Manual measurement TIMEOUT on GPIO " + String(gpio) +
-                     " (elapsed: " + String(elapsed) + "ms, limit: " + String(timeout_ms) + "ms)");
-            errorTracker.trackError(ERROR_SENSOR_TIMEOUT, ERROR_SEVERITY_WARNING,
-                                   "Manual measurement exceeded timeout");
-        }
-
-        if (count == 0) {
-            LOG_E(TAG, "SensorManager: Manual multi-value measurement failed for GPIO " + String(gpio));
-            result.reason_code = result.timeout_reached ? "MEASURE_TIMEOUT" : "MEASUREMENT_FAILED";
-            result.measurement_ok = false;
-            result.publish_ok = false;
+    {
+        SensorArrayMutexLock sensor_lock;
+        if (!sensor_lock.tryTake(kManualSensorMutexWaitMs)) {
+            LOG_W(TAG, "SensorManager: g_sensor_mutex not acquired within " +
+                           String(kManualSensorMutexWaitMs) + "ms — manual measurement aborted (GPIO " +
+                           String(gpio) + ")");
+            result.reason_code = "MUTEX_TIMEOUT";
             return result;
         }
 
-        result.measurement_ok = true;
-        result.publish_ok = mqtt_client_ && mqtt_client_->isConnected() && mqtt_client_->isRegistrationConfirmed();
-        result.reason_code = result.timeout_reached ? "MEASURE_TIMEOUT" : (result.publish_ok ? "NONE" : "PUBLISH_SKIPPED");
-        result.quality = "good";
-        result.raw_value = static_cast<int32_t>(readings[0].raw_value);
-        config->last_reading = start_ms;
-        return result;
-    } else {
+        unsigned long start_ms = millis();
+
+        // Check if this is a multi-value sensor
+        const SensorCapability* capability = findSensorCapability(config->sensor_type);
+
+        if (capability && capability->is_multi_value) {
+            // Multi-value sensor - create multiple readings
+            SensorReading readings[4];  // Max 4 values per sensor
+            uint8_t count = performMultiValueMeasurement(gpio, readings, 4);
+
+            // E-P3: Timeout-Guard — check elapsed time after measurement
+            unsigned long elapsed = millis() - start_ms;
+            if (elapsed > timeout_ms) {
+                result.timeout_reached = true;
+                LOG_W(TAG, "SensorManager: Manual measurement TIMEOUT on GPIO " + String(gpio) +
+                         " (elapsed: " + String(elapsed) + "ms, limit: " + String(timeout_ms) + "ms)");
+                errorTracker.trackError(ERROR_SENSOR_TIMEOUT, ERROR_SEVERITY_WARNING,
+                                       "Manual measurement exceeded timeout");
+            }
+
+            if (count == 0) {
+                LOG_E(TAG, "SensorManager: Manual multi-value measurement failed for GPIO " + String(gpio));
+                result.reason_code = result.timeout_reached ? "MEASURE_TIMEOUT" : "MEASUREMENT_FAILED";
+                result.measurement_ok = false;
+                result.publish_ok = false;
+                return result;
+            }
+
+            result.measurement_ok = true;
+            result.publish_ok = mqtt_client_ && mqtt_client_->isConnected() && mqtt_client_->isRegistrationConfirmed();
+            result.reason_code = result.timeout_reached ? "MEASURE_TIMEOUT" : (result.publish_ok ? "NONE" : "PUBLISH_SKIPPED");
+            result.quality = "good";
+            result.raw_value = static_cast<int32_t>(readings[0].raw_value);
+            config->last_reading = start_ms;
+            return result;
+        }
+
         // Single-value sensor - standard measurement
         SensorReading reading;
         if (performMeasurement(gpio, reading)) {
@@ -1564,12 +1694,20 @@ uint32_t SensorManager::readRawAnalog(uint8_t gpio) {
         }
     }
 
-    // Configure pin as analog input if needed
+    // High-impedance analog input: release pull-up from safe-mode / previous owners
     gpio_manager_->configurePinMode(gpio, INPUT);
-    analogSetPinAttenuation(gpio, ADC_11db);  // Safety-Net: 100-3100mV range for all analog sensors
+    analogSetPinAttenuation(gpio, ADC_11db);  // ~0–3.3 V mapping for 12-bit ADC
 
-    // Read analog value (ESP32: 0-4095)
-    return analogRead(gpio);
+    // Charge ADC sampling cap; discard glitchy first conversions after mode change
+    for (uint8_t w = 0; w < ADC_WARMUP_READS; w++) {
+        (void)analogRead(gpio);
+    }
+
+    uint32_t buf[ADC_SAMPLE_COUNT];
+    for (uint8_t i = 0; i < ADC_SAMPLE_COUNT; i++) {
+        buf[i] = analogRead(gpio);
+    }
+    return medianOddSamples(buf, ADC_SAMPLE_COUNT);
 }
 
 // E-P2: ADC Validation — classify raw ADC reading quality
@@ -1577,16 +1715,37 @@ uint32_t SensorManager::readRawAnalog(uint8_t gpio) {
 // Server uses this to decide whether to accept the raw value for calibration.
 const char* SensorManager::validateAdcReading(uint32_t raw, uint8_t gpio) {
     // Hard bounds: ESP32 12-bit ADC range is 0..4095
-    // Exact rail values indicate disconnected sensor or saturation
+    // Exact rail: open/floating pin, wiring fault, or many soil probes at "dry" = max voltage → full scale.
     if (raw == 0 || raw == 4095) {
-        LOG_W(TAG, "ADC rail on GPIO " + String(gpio) + ": raw=" + String(raw) + " (disconnected or saturated)");
+        if (gpio < 40) {
+            static unsigned long s_next_adc_rail_log_ms[40] = {0};
+            unsigned long now = millis();
+            if (now >= s_next_adc_rail_log_ms[gpio]) {
+                LOG_W(TAG, "ADC rail on GPIO " + String(gpio) + ": raw=" + String(raw) +
+                              " (floating/disconnected, wiring, or sensor at max Vin e.g. dry soil)");
+                s_next_adc_rail_log_ms[gpio] = now + ADC_RAIL_LOG_INTERVAL_MS;
+            }
+        } else {
+            LOG_W(TAG, "ADC rail on GPIO " + String(gpio) + ": raw=" + String(raw));
+        }
         return "suspect";
     }
 
     // Near-rail zone: within 50 counts of rails (ADC noise floor / ceiling)
     // Not an error but flagged for operator awareness during calibration
     if (raw < 50 || raw > 4045) {
-        LOG_I(TAG, "ADC near-rail on GPIO " + String(gpio) + ": raw=" + String(raw) + " (close to ADC boundary)");
+        if (gpio < 40) {
+            static unsigned long s_next_adc_near_log_ms[40] = {0};
+            unsigned long now = millis();
+            if (now >= s_next_adc_near_log_ms[gpio]) {
+                LOG_I(TAG, "ADC near-rail on GPIO " + String(gpio) + ": raw=" + String(raw) +
+                              " (close to ADC boundary)");
+                s_next_adc_near_log_ms[gpio] = now + ADC_RAIL_LOG_INTERVAL_MS;
+            }
+        } else {
+            LOG_I(TAG, "ADC near-rail on GPIO " + String(gpio) + ": raw=" + String(raw) +
+                      " (close to ADC boundary)");
+        }
         return "suspect";
     }
 

@@ -1,4 +1,5 @@
 #include "config_update_queue.h"
+#include <cstdio>
 #include <cstring>
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -466,6 +467,12 @@ bool queueConfigUpdateWithMetadata(ConfigUpdateRequest::Type type,
         LOG_W(CFG_Q_TAG, "[SYNC] Config update queue full — config push dropped");
         return false;
     }
+    {
+        char qline[128];
+        snprintf(qline, sizeof(qline), "[CFG_Q] enqueued corr=%.40s intent=%.40s", req.metadata.correlation_id,
+                 req.metadata.intent_id);
+        LOG_I(CFG_Q_TAG, qline);
+    }
     persistPendingIntent(req);
     publishIntentOutcome("config",
                          req.metadata,
@@ -488,6 +495,12 @@ void processConfigUpdateQueue(uint8_t max_items) {
     uint32_t current_epoch = getSafetyEpoch();
     while (processed < max_items && xQueueReceive(g_config_update_queue, &req, 0) == pdTRUE) {
         LOG_I(CFG_Q_TAG, "[SYNC] Processing config update on Core " + String(xPortGetCoreID()));
+        {
+            char qline[128];
+            snprintf(qline, sizeof(qline), "[CFG_Q] dequeue core=%u corr=%.40s",
+                     static_cast<unsigned>(xPortGetCoreID()), req.metadata.correlation_id);
+            LOG_I(CFG_Q_TAG, qline);
+        }
 
         IntentInvalidationReason invalidation_reason =
             getIntentInvalidationReason(req.metadata, current_epoch);
@@ -584,6 +597,14 @@ void processConfigUpdateQueue(uint8_t max_items) {
         bool reject_actuator_scope = false;
         bool reject_offline_scope = false;
 
+        {
+            char scopes[128];
+            snprintf(scopes, sizeof(scopes), "[CFG_Q] scopes s=%d a=%d o=%d gen_in=%lu",
+                     has_sensor_scope ? 1 : 0, has_actuator_scope ? 1 : 0, has_offline_scope ? 1 : 0,
+                     static_cast<unsigned long>(incoming_generation));
+            LOG_D(CFG_Q_TAG, scopes);
+        }
+
         if (incoming_generation > 0) {
             uint32_t sensor_applied_generation = loadScopeGeneration(CONFIG_APPLIED_GENERATION_SENSOR_KEY);
             uint32_t actuator_applied_generation = loadScopeGeneration(CONFIG_APPLIED_GENERATION_ACTUATOR_KEY);
@@ -624,6 +645,12 @@ void processConfigUpdateQueue(uint8_t max_items) {
         bool offline_ok = false;
         if (g_config_lane_mutex != nullptr &&
             xSemaphoreTake(g_config_lane_mutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+            {
+                char to[128];
+                snprintf(to, sizeof(to), "[CFG_Q] lane_timeout corr=%.40s intent=%.40s", req.metadata.correlation_id,
+                         req.metadata.intent_id);
+                LOG_E(CFG_Q_TAG, to);
+            }
             ConfigResponseBuilder::publishError(
                 ConfigType::SYSTEM,
                 ConfigErrorCode::WRITE_TIMEOUT,

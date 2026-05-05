@@ -160,9 +160,15 @@ class NotificationRouter:
             db_notification = await self.notification_repo.create(**create_kwargs)
 
         logger.info(
-            f"Notification created: id={db_notification.id}, "
-            f"severity={notification.severity}, source={notification.source}, "
-            f"title='{notification.title}'"
+            "Notification created: id=%s severity=%s source=%s title=%s",
+            str(db_notification.id),
+            notification.severity,
+            notification.source,
+            notification.title,
+            extra={
+                "notification_id": str(db_notification.id),
+                "alert_status": db_notification.status,
+            },
         )
         increment_notification_created(
             severity=notification.severity,
@@ -242,7 +248,15 @@ class NotificationRouter:
             }
             await ws_manager.broadcast("notification_new", data)
             increment_ws_notification_broadcast("notification_new")
-            logger.debug(f"WebSocket broadcast: notification_new for user {notification.user_id}")
+            logger.info(
+                "WebSocket broadcast notification_new user_id=%s",
+                notification.user_id,
+                extra={
+                    "notification_id": str(notification.id),
+                    "alert_status": notification.status,
+                    "ws_event_type": "notification_new",
+                },
+            )
         except Exception as e:
             # WebSocket failure MUST NOT block notification processing
             logger.error(f"WebSocket broadcast failed: {e}")
@@ -485,8 +499,20 @@ class NotificationRouter:
                 ),
             }
             await ws_manager.broadcast("notification_updated", data)
+<<<<<<< Updated upstream
             increment_ws_notification_broadcast("notification_updated")
             logger.debug(f"WebSocket broadcast: notification_updated for {notification.id}")
+=======
+            logger.info(
+                "WebSocket broadcast notification_updated id=%s",
+                str(notification.id),
+                extra={
+                    "notification_id": str(notification.id),
+                    "alert_status": notification.status,
+                    "ws_event_type": "notification_updated",
+                },
+            )
+>>>>>>> Stashed changes
         except Exception as e:
             logger.error(f"Failed to broadcast notification_updated: {e}")
 

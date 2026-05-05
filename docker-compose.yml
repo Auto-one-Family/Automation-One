@@ -133,6 +133,8 @@ services:
       # Environment
       ENVIRONMENT: development
       LOG_LEVEL: INFO
+      # Explizit: entspricht WORKDIR /app + Volume ./logs/server:/app/logs (Default waere logs/god_kaiser.log → /app/logs/god_kaiser.log)
+      LOG_FILE_PATH: /app/logs/god_kaiser.log
       # CORS (allow frontend)
       CORS_ALLOWED_ORIGINS: '["http://localhost:5173","http://localhost:3000"]'
     ports:

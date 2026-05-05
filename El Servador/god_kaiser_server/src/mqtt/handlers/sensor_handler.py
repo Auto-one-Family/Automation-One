@@ -50,8 +50,10 @@ from ...db.repositories import (
     SensorRepository,
     SubzoneRepository,
 )
+from ...services.calibration_payloads import resolve_calibration_for_processor
 from ...services.device_scope_service import DeviceScopeService
 from ...db.session import resilient_session
+from ...schemas.sensor import QUALITY_LEVELS
 from ..publisher import Publisher
 from ..topics import TopicBuilder
 
@@ -177,7 +179,8 @@ class SensorDataHandler:
                 )
                 logger.error(
                     f"[{error_code}] Invalid sensor data payload from {esp_id_str}: "
-                    f"{validation_result['error']}"
+                    f"{validation_result['error']}",
+                    extra={"failure_class": "sensor_payload_validation"},
                 )
                 return False
 
@@ -279,6 +282,10 @@ class SensorDataHandler:
                     raw_mode = payload.get("raw_mode", True)
                     value = payload.get("value", 0.0)
                     quality = payload.get("quality", "unknown")
+                    # PKG-HW-01: Ingest without matching sensor_configs row — not "good" path;
+                    # keeps operator/observability distinct from calibrated good readings.
+                    if not sensor_config and quality not in ("error", "critical"):
+                        quality = "degraded"
 
                     # Unit resolution: registry > payload (avoids Latin-1/UTF-8 encoding issues)
                     from ...sensors.sensor_type_registry import (
@@ -1140,11 +1147,13 @@ class SensorDataHandler:
         # Validate quality field (optional, but must be valid if present)
         quality = payload.get("quality")
         if quality is not None:
-            valid_qualities = ["good", "fair", "poor", "suspect", "error", "unknown"]
-            if quality not in valid_qualities:
+            if quality not in QUALITY_LEVELS:
                 return {
                     "valid": False,
-                    "error": f"Invalid quality value: '{quality}'. Must be one of {valid_qualities}",
+                    "error": (
+                        f"Invalid quality value: '{quality}'. "
+                        f"Must be one of {list(QUALITY_LEVELS)}"
+                    ),
                     "error_code": ValidationErrorCode.FIELD_TYPE_MISMATCH,
                 }
 
@@ -1352,9 +1361,15 @@ class SensorDataHandler:
             # For DS18B20: raw_mode=True means ESP sent 12-bit integer (400 = 25°C)
             processing_params["raw_mode"] = raw_mode
 
+            proc_calibration = None
+            if sensor_config and sensor_config.calibration_data:
+                proc_calibration = resolve_calibration_for_processor(
+                    sensor_config.calibration_data
+                )
+
             result = processor.process(
                 raw_value=raw_value,
-                calibration=sensor_config.calibration_data if sensor_config else None,
+                calibration=proc_calibration,
                 params=processing_params,
             )
 

@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from ..core.logging_config import get_logger
+from .calibration_payloads import resolve_calibration_for_processor
 from ..db.models.sensor import SensorConfig, SensorData
 from ..db.repositories import ESPRepository, SensorRepository
 from ..db.repositories.command_contract_repo import CommandContractRepository
@@ -275,8 +276,8 @@ class SensorService:
         # Get stored config if calibration not provided
         if calibration is None:
             config = await self.get_config(esp_id, gpio)
-            if config and config.calibration:
-                calibration = config.calibration
+            if config and config.calibration_data:
+                calibration = resolve_calibration_for_processor(config.calibration_data)
 
         # Get processor from library
         processor = self.library_loader.get_processor(sensor_type)

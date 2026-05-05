@@ -772,11 +772,111 @@
         "tooltip": { "mode": "multi", "sort": "desc" }
       }
     },
+    {
+      "title": "MQTT processing errors (El Servador)",
+      "description": "Counter `god_kaiser_mqtt_errors_total` in `metrics.py` — label `direction` (received | published).",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 35 },
+      "id": 105,
+      "targets": [
+        {
+          "expr": "sum by (direction) (rate(god_kaiser_mqtt_errors_total[5m]))",
+          "legendFormat": "{{direction}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "errors/s",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": ["mean", "max"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "title": "WS contract mismatch (El Servador)",
+      "description": "Counter `god_kaiser_ws_contract_mismatch_total` (`WS_CONTRACT_MISMATCH_TOTAL` in `metrics.py`).",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 35 },
+      "id": 106,
+      "targets": [
+        {
+          "expr": "rate(god_kaiser_ws_contract_mismatch_total[5m])",
+          "legendFormat": "contract_mismatch/s",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "orange" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "events/s",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": ["mean", "max"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
 
     {
       "title": "Database",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
       "id": 103,
       "collapsed": true,
       "panels": [
@@ -784,7 +884,7 @@
           "title": "Active Connections",
           "type": "stat",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 36 },
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 43 },
           "id": 20,
           "targets": [
             {
@@ -819,7 +919,7 @@
           "title": "DB Size",
           "type": "stat",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 36 },
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 43 },
           "id": 21,
           "targets": [
             {
@@ -853,7 +953,7 @@
           "title": "Deadlocks",
           "type": "stat",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 36 },
+          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 43 },
           "id": 22,
           "targets": [
             {
@@ -887,7 +987,7 @@
           "title": "Connections Over Time",
           "type": "timeseries",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 43 },
           "id": 23,
           "targets": [
             {
@@ -940,7 +1040,7 @@
     {
       "title": "Logs & Errors",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 43 },
       "id": 104,
       "collapsed": true,
       "panels": [
@@ -948,7 +1048,7 @@
           "title": "Error Rate by Service",
           "type": "timeseries",
           "datasource": { "type": "loki", "uid": "loki" },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 37 },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 },
           "id": 24,
           "targets": [
             {
@@ -999,7 +1099,7 @@
           "title": "Log Volume by Service",
           "type": "timeseries",
           "datasource": { "type": "loki", "uid": "loki" },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 37 },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 },
           "id": 25,
           "targets": [
             {
@@ -1050,7 +1150,7 @@
           "title": "Recent Error Logs",
           "type": "logs",
           "datasource": { "type": "loki", "uid": "loki" },
-          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 45 },
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 52 },
           "id": 26,
           "targets": [
             {
