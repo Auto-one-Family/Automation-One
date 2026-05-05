@@ -15,6 +15,7 @@ from ..core.metrics import (
     increment_logic_error,
     increment_logic_dispatch_skipped_config_pending,
     increment_logic_dispatch_skipped_offline,
+    increment_rule_skip_target_offline,
     increment_safety_trigger,
 )
 from ..schemas.notification import NotificationCreate
@@ -50,6 +51,7 @@ logger = get_logger(__name__)
 _OFFLINE_BACKOFF_SECONDS = (
     30  # Skip offline-ESP actuator rules for 30s after first failure (safety net)
 )
+_DEGRADED_NOTIFICATION_THRESHOLD_MINUTES = 10  # AUT-110: notify operator after 10 min degraded
 _CONFIG_PENDING_BACKOFF_SECONDS = (
     15  # Skip config-pending-ESP actuator rules for 15s (shorter: state transitions fast)
 )
@@ -1260,6 +1262,7 @@ class LogicEngine:
                                 timezone.utc
                             ) + timedelta(seconds=_OFFLINE_BACKOFF_SECONDS)
                             increment_logic_dispatch_skipped_offline()
+                            increment_rule_skip_target_offline(str(rule_id), esp_id_pre)
                             logger.warning(
                                 f"Rule {rule_name}: ESP {esp_id_pre} is offline, "
                                 f"skipping actuator action (GPIO {gpio_pre})"
@@ -1477,6 +1480,7 @@ class LogicEngine:
                             seconds=_OFFLINE_BACKOFF_SECONDS
                         )
                         increment_logic_dispatch_skipped_offline()
+                        increment_rule_skip_target_offline(str(rule_id), esp_id)
                         logger.warning(
                             f"Rule {rule_name}: ESP {esp_id} is offline, "
                             f"skipping actuator action (GPIO {gpio})"
@@ -1996,7 +2000,13 @@ class LogicEngine:
         if not rule or not rule.is_critical:
             return
         if rule.degraded_since is not None:
-            return  # already degraded — no double-emit
+            # AUT-110: already degraded — check threshold for operator notification
+            minutes_degraded = (
+                datetime.now(timezone.utc) - rule.degraded_since
+            ).total_seconds() / 60
+            if minutes_degraded >= _DEGRADED_NOTIFICATION_THRESHOLD_MINUTES:
+                await self._emit_degraded_notification(rule, rule_name, reason, session)
+            return  # no double WS-emit
 
         now = datetime.now(timezone.utc)
         rule.degraded_since = now
@@ -2027,6 +2037,40 @@ class LogicEngine:
             rule_name,
             reason[:64],
         )
+
+    async def _emit_degraded_notification(self, rule, rule_name: str, reason: str, session) -> None:
+        """Route a persistent operator notification after the degraded threshold is exceeded.
+
+        Called by _enter_degraded_state when degraded_since >= _DEGRADED_NOTIFICATION_THRESHOLD_MINUTES.
+        Uses NotificationRouter (DB persist + email + WS notification_new). Exceptions are caught
+        so a routing failure never aborts the rule-evaluation loop.
+        """
+        minutes = (datetime.now(timezone.utc) - rule.degraded_since).total_seconds() / 60
+        notif = NotificationCreate(
+            source="logic_engine",
+            category="connectivity",
+            severity="critical",
+            title=f"Kritische Regel '{rule_name}' degradiert seit {minutes:.0f} min",
+            body=(
+                f"Ziel-ESP offline ({reason[:64]}). Aktion wird nicht ausgeführt. "
+                f"Bitte ESP-Status prüfen und ggf. manuell eingreifen."
+            ),
+            metadata={
+                "rule_id": str(rule.id),
+                "rule_name": rule_name,
+                "degraded_reason": reason[:64],
+                "minutes_degraded": round(minutes),
+            },
+        )
+        try:
+            router = NotificationRouter(session)
+            await router.route(notif)
+        except Exception as notif_err:
+            logger.warning(
+                "AUT-110: notification routing failed for rule '%s': %s",
+                rule_name,
+                notif_err,
+            )
 
     async def _exit_degraded_state(
         self,
