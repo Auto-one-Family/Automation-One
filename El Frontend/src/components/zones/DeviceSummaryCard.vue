@@ -21,6 +21,7 @@ import {
   Heart,
   Settings2,
 } from 'lucide-vue-next'
+import StatusBadge from '@/components/base/StatusBadge.vue'
 
 interface Props {
   device: ESPDevice
@@ -181,13 +182,12 @@ function handleSettings(event: MouseEvent) {
     <!-- Content: live sensor values OR fallback counts + actions -->
     <template #default="{ lastSeenText }">
       <div class="device-summary-card__status-line">
-        <span
+        <StatusBadge
           v-if="runtimeHealthBadge?.showBadge"
-          class="device-summary-card__status-chip"
+          level="warning"
+          :label-override="runtimeHealthBadge!.badgeLabel"
           :title="runtimeHealthTooltip"
-        >
-          {{ runtimeHealthBadge.badgeLabel }}
-        </span>
+        />
       </div>
 
       <!-- Live sensor values -->

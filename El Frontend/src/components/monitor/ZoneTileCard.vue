@@ -2,11 +2,12 @@
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
-import { CheckCircle2, AlertTriangle, Minus, XCircle, Zap, Pencil } from 'lucide-vue-next'
+import { AlertTriangle, Zap, Pencil } from 'lucide-vue-next'
 import type { ZoneKPI, ZoneHealthStatus } from '@/composables/useZoneKPIs'
 import { HEALTH_STATUS_CONFIG as DEFAULT_HEALTH_CONFIG } from '@/composables/useZoneKPIs'
 import type { LogicRule } from '@/types/logic'
-import { formatNumber } from '@/utils/formatters'
+import { formatNumber, zoneHealthToLevel } from '@/utils/formatters'
+import StatusBadge from '@/components/base/StatusBadge.vue'
 import { useAuthStore } from '@/shared/stores/auth.store'
 
 interface Props {
@@ -89,13 +90,10 @@ const ZONE_KPI_GROUP_ARIA =
         >
           <Pencil class="monitor-zone-tile__editor-icon" />
         </RouterLink>
-        <span :class="['monitor-zone-tile__status', healthConfig[zone.healthStatus].colorClass]">
-          <CheckCircle2 v-if="zone.healthStatus === 'ok'" class="w-3.5 h-3.5" />
-          <AlertTriangle v-else-if="zone.healthStatus === 'warning'" class="w-3.5 h-3.5" />
-          <Minus v-else-if="zone.healthStatus === 'empty'" class="w-3.5 h-3.5" />
-          <XCircle v-else class="w-3.5 h-3.5" />
-          <span>{{ healthConfig[zone.healthStatus].label }}</span>
-        </span>
+        <StatusBadge
+          :level="zoneHealthToLevel(zone.healthStatus)"
+          :label-override="healthConfig[zone.healthStatus].label"
+        />
       </div>
     </div>
     <!-- Health Reason (only for warning/alarm) -->

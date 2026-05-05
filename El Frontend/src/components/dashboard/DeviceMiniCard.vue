@@ -24,6 +24,8 @@ import ESPCardBase from '@/components/esp/ESPCardBase.vue'
 import { getESPStatus, getESPStatusDisplay, type ESPStatus } from '@/composables/useESPStatus'
 import { espHealthPresentation } from '@/domain/esp/espHealth'
 import { groupSensorsByBaseType, type RawSensor } from '@/utils/sensorDefaults'
+import { espStatusToLevel } from '@/utils/formatters'
+import StatusBadge from '@/components/base/StatusBadge.vue'
 import { getActuatorTypeInfo } from '@/utils/labels'
 import type { MockActuator } from '@/types'
 import { actuatorDutyToDisplayPercent } from '@/utils/eventTransformer'
@@ -366,11 +368,12 @@ function handleDeviceDelete() {
     <template #default>
       <!-- Status line: dot + text + last seen + sensor count -->
       <div class="device-mini-card__status-line">
-        <span
-          class="device-mini-card__status-chip"
-          :class="`device-mini-card__status-chip--${deviceStatus}`"
+        <StatusBadge
+          :level="espStatusToLevel(deviceStatus)"
+          :label-override="statusChipLabel"
           :title="statusChipTitle"
-        >{{ statusChipLabel }}</span>
+          compact
+        />
         <span
           v-if="runtimeHealthBadge?.showBadge"
           class="device-mini-card__status-chip device-mini-card__status-chip--stale"

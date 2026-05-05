@@ -16,6 +16,7 @@ import type { ActuatorWithContext } from '@/composables/useZoneGrouping'
 import type { LogicRule, ExecutionHistoryItem } from '@/types/logic'
 import { formatConditionShort } from '@/types/logic'
 import { formatRelativeTime, ZONE_STALE_THRESHOLD_MS } from '@/utils/formatters'
+import StatusBadge from '@/components/base/StatusBadge.vue'
 import { getActuatorTypeInfo } from '@/utils/labels'
 import { getSensorLabel, getSensorUnit } from '@/utils/sensorDefaults'
 import { useActuatorStore } from '@/shared/stores/actuator.store'
@@ -314,9 +315,7 @@ function handleToggle(event: Event) {
         <span v-if="commandIsPending" class="actuator-card__badge actuator-card__badge--pending">
           Wird ausgeführt...
         </span>
-        <span v-if="showWarnBadge && !commandIsPending" class="actuator-card__badge actuator-card__badge--warn">
-          Keine Bestätigung
-        </span>
+        <StatusBadge v-if="showWarnBadge && !commandIsPending" level="warning" label-override="Keine Bestätigung" />
         <span v-if="scopeBadge" :class="['actuator-card__scope-badge', scopeBadge.cls]" :title="scopeTooltip">{{ scopeBadge.text }}</span>
         <span v-if="isEspOffline" class="actuator-card__badge actuator-card__badge--offline">
           <WifiOff :size="12" /> ESP offline

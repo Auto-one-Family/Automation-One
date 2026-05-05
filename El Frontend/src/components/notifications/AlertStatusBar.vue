@@ -4,11 +4,13 @@
  * Kombiniert Alert-Lage + Einstieg in Benachrichtigungen (kein doppelter Badge).
  */
 import { computed } from 'vue'
-import { AlertTriangle, BellRing } from 'lucide-vue-next'
+import { BellRing } from 'lucide-vue-next'
 import { useAlertCenterStore } from '@/shared/stores'
 import { STATS_POLL_INTERVAL_MS } from '@/shared/stores/alert-center.store'
 import { useEspStore } from '@/stores/esp'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
+import type { StatusLevel } from '@/utils/formatters'
+import StatusBadge from '@/components/base/StatusBadge.vue'
 
 const alertStore = useAlertCenterStore()
 const espStore = useEspStore()
@@ -56,6 +58,12 @@ const stateText = computed(() => {
   return 'Stabil'
 })
 
+const alertLevel = computed<StatusLevel>(() => {
+  if (isCritical.value) return 'alarm'
+  if (activeCount.value > 0) return 'warning'
+  return 'ok'
+})
+
 const kpiPollSeconds = Math.round(STATS_POLL_INTERVAL_MS / 1000)
 
 const assistiveLabel = computed(() => {
@@ -80,13 +88,8 @@ const assistiveLabel = computed(() => {
     :aria-label="assistiveLabel"
     @click="inboxStore.openDrawerWithActiveAlertsFocus()"
   >
-    <AlertTriangle
-      :size="14"
-      class="alert-status-bar__icon"
-      :class="isCritical ? 'text-error' : 'text-warning'"
-    />
+    <StatusBadge :level="alertLevel" :label-override="stateText" />
     <span class="alert-status-bar__primary">{{ primaryText }}</span>
-    <span class="alert-status-bar__state">{{ stateText }}</span>
     <span v-if="mttrText !== '–'" class="alert-status-bar__chip">
       Lösung Ø {{ mttrText }}
     </span>

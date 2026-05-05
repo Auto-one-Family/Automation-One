@@ -32,12 +32,13 @@ import { useQuickActionStore } from '@/shared/stores/quickAction.store'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { sensorsApi } from '@/api/sensors'
-import { formatRelativeTime } from '@/utils/formatters'
+import { formatRelativeTime, severityToStatus } from '@/utils/formatters'
 import {
   getNotificationSeverityLabel,
   getNotificationSourceLabel,
   getNotificationCategoryLabel,
 } from '@/utils/labels'
+import StatusBadge from '@/components/base/StatusBadge.vue'
 import { buildEspContextRoute } from '@/utils/notificationNavigation'
 import { formatAlertLifecycleFailureMessage } from '@/utils/alertLifecycleUi'
 import AlertAuditLines from '@/components/notifications/AlertAuditLines.vue'
@@ -114,14 +115,6 @@ const showBatchAck = computed(() =>
 
 const hasAlerts = computed(() => topAlerts.value.length > 0)
 
-function severityDotClass(severity: string): string {
-  switch (severity) {
-    case 'critical': return 'alert-item__dot--critical'
-    case 'warning': return 'alert-item__dot--warning'
-    case 'info': return 'alert-item__dot--info'
-    default: return 'alert-item__dot--info'
-  }
-}
 
 async function handleAck(id: string): Promise<void> {
   const res = await alertStore.acknowledgeAlert(id)
@@ -398,7 +391,7 @@ function handleShowAll(): void {
       >
         <!-- Main Row -->
         <div class="alert-item__row">
-          <span class="alert-item__dot" :class="severityDotClass(alert.severity)" />
+          <StatusBadge :level="severityToStatus(alert.severity)" compact />
           <div class="alert-item__content">
             <span class="alert-item__title">{{ alert.title }}</span>
             <span class="alert-item__meta">

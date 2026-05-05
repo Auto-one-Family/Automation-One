@@ -788,6 +788,47 @@ export function qualityToStatus(quality: string, opts?: QualityToStatusOpts): Se
   return 'good'
 }
 
+// ─── AUT-250: Canonical 4-level status vocabulary ────────────────────────────
+
+/** Canonical 4-level status used by StatusBadge. stale always → offline (AUT-27). */
+export type StatusLevel = 'ok' | 'warning' | 'alarm' | 'offline'
+
+/** Maps sensor quality string directly to 4-level StatusLevel. */
+export function qualityToStatusLevel(quality: string, opts?: QualityToStatusOpts): StatusLevel {
+  return sensorStatusToLevel(qualityToStatus(quality, opts))
+}
+
+/** Maps notification/alert severity string to 4-level StatusLevel. */
+export function severityToStatus(severity: string): StatusLevel {
+  if (severity === 'critical') return 'alarm'
+  if (severity === 'warning') return 'warning'
+  return 'ok'
+}
+
+/** Collapses the 5-level SensorStatus to 4-level StatusLevel. stale → offline per AUT-27. */
+export function sensorStatusToLevel(status: SensorStatus): StatusLevel {
+  if (status === 'good') return 'ok'
+  if (status === 'warning') return 'warning'
+  if (status === 'alarm') return 'alarm'
+  return 'offline'  // stale | offline → offline
+}
+
+/** Maps ESPStatus to 4-level StatusLevel. */
+export function espStatusToLevel(status: 'online' | 'offline' | 'stale' | 'safemode' | string): StatusLevel {
+  if (status === 'online') return 'ok'
+  if (status === 'stale') return 'warning'
+  if (status === 'safemode') return 'alarm'
+  return 'offline'
+}
+
+/** Maps zone health string to 4-level StatusLevel. */
+export function zoneHealthToLevel(health: 'ok' | 'warning' | 'alarm' | 'empty' | string): StatusLevel {
+  if (health === 'ok') return 'ok'
+  if (health === 'warning') return 'warning'
+  if (health === 'alarm') return 'alarm'
+  return 'offline'  // empty | unknown → offline
+}
+
 
 
 

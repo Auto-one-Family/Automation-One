@@ -24,7 +24,7 @@
      ═══════════════════════════════════════════════════════════════════════════ */
   --color-text-primary:   #eaeaf2;  /* headlines, primary values, white-ish */
   --color-text-secondary: #8585a0;  /* labels, descriptions, body text */
-  --color-text-muted:     #5a5a75;  /* timestamps, hints, disabled — raised for WCAG AA on dark backgrounds */
+  --color-text-muted:     #7e7e9a;  /* timestamps, hints — 4.7:1 on bg-secondary; disabled elements are WCAG-exempt */
   --color-text-inverse:   #ffffff;  /* light text on dark/accent buttons */
 
   /* ═══════════════════════════════════════════════════════════════════════════
@@ -265,6 +265,11 @@
   --color-status-warning:  #eab308;   /* yellow-500 */
   --color-status-alarm:    #ef4444;   /* red-500 */
   --color-status-offline:  #6b7280;   /* gray-500 */
+
+  /* 4-level canonical aliases (AUT-250) — ok/warn/alarm/offl */
+  --color-status-ok:       var(--color-status-good);
+  --color-status-warn:     var(--color-status-warning);
+  --color-status-offl:     var(--color-status-offline);
 
   /* ═══════════════════════════════════════════════════════════════════════════
      THRESHOLD ZONES — For charts and range sliders

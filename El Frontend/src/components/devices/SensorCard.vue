@@ -10,7 +10,8 @@ import { Settings, ChevronRight, WifiOff, Clock, Thermometer, Droplets, Wind, Su
 import { isMockEspId } from '@/composables/useZoneGrouping'
 import type { SensorWithContext } from '@/composables/useZoneGrouping'
 import type { TrendDirection } from '@/utils/trendUtils'
-import { qualityToStatus, getDataFreshness, formatRelativeTime } from '@/utils/formatters'
+import { qualityToStatus, sensorStatusToLevel, getDataFreshness, formatRelativeTime } from '@/utils/formatters'
+import StatusBadge from '@/components/base/StatusBadge.vue'
 import { getSensorLabel, getSensorUnit, getSensorDisplayName, SENSOR_TYPE_CONFIG, VIRTUAL_SENSOR_META } from '@/utils/sensorDefaults'
 import { useDeviceContextStore } from '@/shared/stores/deviceContext.store'
 import { useZoneStore } from '@/shared/stores/zone.store'
@@ -68,9 +69,6 @@ const effectiveQualityStatus = computed(() => {
   return qualityToStatus(props.sensor.quality, { lastRead: props.sensor.last_read })
 })
 
-const statusClass = computed(() =>
-  `sensor-card__dot--${effectiveQualityStatus.value}`
-)
 
 // ESP offline indicator
 const isEspOffline = computed(() =>
@@ -288,8 +286,11 @@ function handleClick() {
           <span :class="['sensor-card__mode-badge', `sensor-card__mode-badge--${dataMode.toLowerCase()}`]">
             {{ dataMode }}
           </span>
-          <span :class="['sensor-card__dot', statusClass]" />
-          <span v-if="qualityLabel" :class="['sensor-card__quality-text', `sensor-card__quality-text--${effectiveQualityStatus}`]">{{ qualityLabel }}</span>
+          <StatusBadge
+            :level="sensorStatusToLevel(effectiveQualityStatus)"
+            :label-override="qualityLabel || undefined"
+            :show-icon="false"
+          />
         </div>
       </div>
       <div class="sensor-card__value">

@@ -24,7 +24,12 @@ import {
   formatCount,
   formatDateTime,
   formatDate,
-  formatTime
+  formatTime,
+  qualityToStatusLevel,
+  severityToStatus,
+  sensorStatusToLevel,
+  espStatusToLevel,
+  zoneHealthToLevel,
 } from '@/utils/formatters'
 
 // =============================================================================
@@ -391,5 +396,110 @@ describe('formatTime', () => {
 
   it('returns dash for invalid input', () => {
     expect(formatTime(null)).toBe('-')
+  })
+})
+
+// =============================================================================
+// AUT-250: 4-LEVEL STATUS VOCABULARY
+// =============================================================================
+
+describe('qualityToStatusLevel', () => {
+  it('maps good quality to ok', () => {
+    expect(qualityToStatusLevel('good')).toBe('ok')
+    expect(qualityToStatusLevel('excellent')).toBe('ok')
+  })
+
+  it('maps degraded quality to warning', () => {
+    expect(qualityToStatusLevel('fair')).toBe('warning')
+    expect(qualityToStatusLevel('degraded')).toBe('warning')
+  })
+
+  it('maps poor quality to alarm', () => {
+    expect(qualityToStatusLevel('poor')).toBe('alarm')
+    expect(qualityToStatusLevel('bad')).toBe('alarm')
+    expect(qualityToStatusLevel('error')).toBe('alarm')
+  })
+
+  it('maps stale quality to offline (AUT-27: stale ≠ warning)', () => {
+    expect(qualityToStatusLevel('stale')).toBe('offline')
+  })
+
+  it('defaults unknown quality to ok', () => {
+    expect(qualityToStatusLevel('unknown')).toBe('ok')
+  })
+})
+
+describe('severityToStatus', () => {
+  it('maps critical to alarm', () => {
+    expect(severityToStatus('critical')).toBe('alarm')
+  })
+
+  it('maps warning to warning', () => {
+    expect(severityToStatus('warning')).toBe('warning')
+  })
+
+  it('maps info and unknown to ok', () => {
+    expect(severityToStatus('info')).toBe('ok')
+    expect(severityToStatus('unknown')).toBe('ok')
+  })
+})
+
+describe('sensorStatusToLevel', () => {
+  it('maps good to ok', () => {
+    expect(sensorStatusToLevel('good')).toBe('ok')
+  })
+
+  it('maps warning to warning', () => {
+    expect(sensorStatusToLevel('warning')).toBe('warning')
+  })
+
+  it('maps alarm to alarm', () => {
+    expect(sensorStatusToLevel('alarm')).toBe('alarm')
+  })
+
+  it('maps stale to offline (AUT-27: stale ≠ warning)', () => {
+    expect(sensorStatusToLevel('stale')).toBe('offline')
+  })
+
+  it('maps offline to offline', () => {
+    expect(sensorStatusToLevel('offline')).toBe('offline')
+  })
+})
+
+describe('espStatusToLevel', () => {
+  it('maps online to ok', () => {
+    expect(espStatusToLevel('online')).toBe('ok')
+  })
+
+  it('maps stale to warning', () => {
+    expect(espStatusToLevel('stale')).toBe('warning')
+  })
+
+  it('maps safemode to alarm', () => {
+    expect(espStatusToLevel('safemode')).toBe('alarm')
+  })
+
+  it('maps offline and unknown strings to offline', () => {
+    expect(espStatusToLevel('offline')).toBe('offline')
+    expect(espStatusToLevel('unknown')).toBe('offline')
+  })
+})
+
+describe('zoneHealthToLevel', () => {
+  it('maps ok to ok', () => {
+    expect(zoneHealthToLevel('ok')).toBe('ok')
+  })
+
+  it('maps warning to warning', () => {
+    expect(zoneHealthToLevel('warning')).toBe('warning')
+  })
+
+  it('maps alarm to alarm', () => {
+    expect(zoneHealthToLevel('alarm')).toBe('alarm')
+  })
+
+  it('maps empty and unknown to offline', () => {
+    expect(zoneHealthToLevel('empty')).toBe('offline')
+    expect(zoneHealthToLevel('unknown')).toBe('offline')
   })
 })

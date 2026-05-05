@@ -16,13 +16,14 @@ import {
   Check, CheckCheck, ChevronDown, ChevronUp,
   Activity, Workflow, BarChart3, ShieldCheck, Mail
 } from 'lucide-vue-next'
-import { formatRelativeTime } from '@/utils/formatters'
+import { formatRelativeTime, severityToStatus } from '@/utils/formatters'
 import {
   getEmailStatusLabel,
   getNotificationCategoryLabel,
   getNotificationSeverityLabel,
   getNotificationSourceLabel,
 } from '@/utils/labels'
+import StatusBadge from '@/components/base/StatusBadge.vue'
 import { useEspStore } from '@/stores/esp'
 import { buildEspContextRoute } from '@/utils/notificationNavigation'
 import AlertAuditLines from '@/components/notifications/AlertAuditLines.vue'
@@ -44,14 +45,6 @@ const router = useRouter()
 const espStore = useEspStore()
 const isExpanded = ref(false)
 
-const severityDotClass = computed(() => {
-  switch (props.notification.severity) {
-    case 'critical': return 'item__dot--critical'
-    case 'warning': return 'item__dot--warning'
-    case 'info': return 'item__dot--info'
-    default: return 'item__dot--info'
-  }
-})
 
 const metadata = computed(() => props.notification.metadata || {})
 const hasEspId = computed(() => !!metadata.value.esp_id)
@@ -175,7 +168,7 @@ function navigateToCorrelation(): void {
   >
     <!-- Top Row -->
     <div class="item__row">
-      <span :class="['item__dot', severityDotClass]" />
+      <StatusBadge :level="severityToStatus(notification.severity)" compact />
 
       <div class="item__content">
         <div class="item__title-row">
