@@ -155,7 +155,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Bevor du stoppst: Pruefe ob alle TodoWrite-Tasks als completed markiert sind und ob die Verifikationskriterien (Build/Test/Lint) fuer alle geaenderten Bereiche erfolgreich waren. Falls nicht, arbeite weiter."
+            "prompt": "Bevor du stoppst: Pruefe ob in dieser Session Dateien veraendert oder TodoWrite-Tasks erstellt wurden. Falls ja: Stelle sicher dass alle Tasks als completed markiert sind und die Verifikationskriterien (Build/Test/Lint) fuer alle geaenderten Bereiche erfolgreich waren — falls nicht, arbeite weiter. Falls keine Code-Aenderungen und keine Tasks in dieser Session existieren: stoppe direkt ohne weitere Pruefung."
           }
         ]
       }

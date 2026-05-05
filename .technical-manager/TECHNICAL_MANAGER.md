@@ -1,6 +1,7 @@
 # Technical Manager — Session-Router
 
-> **Letzte Aktualisierung:** 2026-04-24 (TM-Auftrag **Kaiser Edge-Relay** — Vorplanung: **Repo** `docs/analysen/ANALYSE-kaiser-edge-relay-ist-soll-sync-2026-04-24.md` + `IMPLEMENTIERUNGSPLAN-kaiser-edge-relay-master-2026-04-24.md` (Entwurf bis F1); **Linear-Projekt** *Kaiser Edge-Relay — Vorplanung & Implementierungsplan (2026-Q2)* mit **28 Issues** Epics A–F **AUT-135..AUT-163**; F1 `verify-plan` = GO vor Implementierungs-Phase)  
+> **Letzte Aktualisierung:** 2026-05-01 (MultispeQ/PhotosynQ + Pflanzen-Wissensschicht: **12 Issues AUT-211..222** auf `auto-debugger/work` committed, alle **In Review**; USER-HAND: `alembic upgrade head`, `pip install qrcode pillow`, PhotosynQ Custom-Field — Details im Aktiven Kontext)  
+> **Vorher 2026-04-24:** (TM-Auftrag **Kaiser Edge-Relay** — Vorplanung: **Repo** `docs/analysen/ANALYSE-kaiser-edge-relay-ist-soll-sync-2026-04-24.md` + `IMPLEMENTIERUNGSPLAN-kaiser-edge-relay-master-2026-04-24.md` (Entwurf bis F1); **Linear-Projekt** *Kaiser Edge-Relay — Vorplanung & Implementierungsplan (2026-Q2)* mit **28 Issues** Epics A–F **AUT-135..AUT-163**; F1 `verify-plan` = GO vor Implementierungs-Phase)  
 > **Vorher 2026-04-23:** (Heartbeat-Architektur-Review; AUT-121/AUT-133; `docs/analysen/heartbeat-architektur-metrics-routing-2026-04-23.md`)
 > **Aktiver Analyseauftrag (primär):** MQTT-Transport & Recovery Hardening (INC EA5484) — **20 Issues** (AUT-54..72 + AUT-121 + AUT-133)
 > **Aktiver Analyseauftrag (neu, parallel):** **Testfeld Live-System 2 — Klima-Forensik (INC-2026-04-22)** — **7 Issues** (AUT-109..115): 1 Sub-Issue zu AUT-68 (H8–H10) + 6 systemische Verbesserungen aus 12-h-Forensik (ESP_EA5484 offline 22:12–03:45 UTC, Heizung GPIO25 nicht dispatched, Temp 19.8 °C vs. Soll 22 °C).
@@ -15,17 +16,40 @@
 | # | Thema | Status | Linear-Projekt | Naechster Schritt |
 |---|-------|--------|----------------|-------------------|
 | 0 | **Kaiser Edge-Relay (Vorplanung Q2, Deadline 2026-05-15)** | **28 Issues, 6 Epics (AUT-135..163); Analyse+Master-Plan im Repo** | [Kaiser Edge-Relay 2026-Q2](https://linear.app/autoone/project/kaiser-edge-relay-vorplanung-and-implementierungsplan-2026-q2-3308e7b8cd67) | **A1–E4** Plan-Issues ausfuehren; dann **F1 (AUT-162) verify-plan** auf Master-Plan; **F2 (AUT-163)** split Implementierung |
-| 1 | **MQTT-Transport & Recovery Hardening (INC EA5484)** | **20 Issues, 3x In Review, 17x Backlog; AUT-69 Firmware+Server live-verified, AUT-68 repositioniert + AUT-121 ausgekoppelt 22.04.; 23.04 neues Folge-Issue AUT-133 fuer Metrics-Utilization angelegt** | MQTT-Transport & Recovery Hardening (INC EA5484) | **User-Hand: `pio run -e esp32_dev` + Reflash EA5484 + 10-min Live-Stresstest für AUT-68 Iter1 DoD. Danach AUT-72 (Memory-Leak) + AUT-71 (FE-Wiring) W1c/W2c ziehen. Anschliessend AUT-121 (Split) und AUT-133 (Nutzung) strikt sequenziell via Verify-Gates ausfuehren.** |
-| 2 | **Testfeld Live-System 2 — Klima-Forensik (INC-2026-04-22)** | **9 Issues: AUT-109 (H8–H10 Sub von AUT-68) + AUT-110..115 + AUT-123 (Toast-Finalitaet, abgeschlossen 22.04.) + AUT-124 (operatorische Runtime-Health-Aufloesung umgesetzt, In Review 22.04.)** | Testfeld Live-System 2 — Klima-Forensik (INC-2026-04-22) | **verify-plan-Gates: AUT-111 (B-CRIT-01..04) zuerst, dann AUT-110 (B-ALRM-01..04) — AUT-124 (B-RTH-01..04) ist umgesetzt (bestehendes UI-Muster, Ursache+Handlungshinweis), jetzt fachlich abnehmen und dann DONE; AUT-123 ist umgesetzt und in Frontend-Store-Tests abgesichert; P0 vor W18-Start** |
-| 3 | Bodenfeuchte-Kalibrierung W16 | 6 PARTIAL-Pakete offen | Bodenfeuchte-Kalibrierung | Sprint-Pakete abschliessen |
-| 4 | Monitor L2 Layout-Fixes | 12 Issues angelegt | Monitor L2 Layout & Sensor-Card Fixes | verify-plan Phase 1 Quick Wins |
-| 5 | UI/UX Design-Token & Konsistenz-Audit | 12 Issues (AUT-42 bis AUT-53) | UI/UX Design-Token & Konsistenz-Audit | Phase 1 Quick Wins: AUT-42, AUT-44 |
-| 6 | Sensor-Lifecycle-Vereinheitlichung | 7 Issues angelegt | Sensor-Lifecycle-Vereinheitlichung | Wartet auf W16-Abschluss |
-| 7 | pH/EC Fertigation Datenpfad | Backlog | pH/EC Fertigation Datenpfad | Wartet auf W16-Abschluss |
+| 1 | **MultispeQ/PhotosynQ + Pflanzen-Wissensschicht (NEU 2026-05-01)** | **12 Issues AUT-211..222, alle In Review; 12 Commits auf `auto-debugger/work`** | MultispeQ/PhotosynQ + Pflanzen-Wissensschicht | **USER-HAND CRITICAL: `alembic upgrade head` (2 Migrationen), `pip install qrcode pillow`; Cannabis-Trigger-Seeding + PhotosynQ Custom-Field — Details Aktiver Kontext** |
+| 2 | **MQTT-Transport & Recovery Hardening (INC EA5484)** | **20 Issues, 3x In Review, 17x Backlog; AUT-69 Firmware+Server live-verified, AUT-68 repositioniert + AUT-121 ausgekoppelt 22.04.; 23.04 neues Folge-Issue AUT-133 fuer Metrics-Utilization angelegt** | MQTT-Transport & Recovery Hardening (INC EA5484) | **User-Hand: `pio run -e esp32_dev` + Reflash EA5484 + 10-min Live-Stresstest für AUT-68 Iter1 DoD. Danach AUT-72 (Memory-Leak) + AUT-71 (FE-Wiring) W1c/W2c ziehen. Anschliessend AUT-121 (Split) und AUT-133 (Nutzung) strikt sequenziell via Verify-Gates ausfuehren.** |
+| 3 | **Testfeld Live-System 2 — Klima-Forensik (INC-2026-04-22)** | **9 Issues: AUT-109 (H8–H10 Sub von AUT-68) + AUT-110..115 + AUT-123 (Toast-Finalitaet, abgeschlossen 22.04.) + AUT-124 (operatorische Runtime-Health-Aufloesung umgesetzt, In Review 22.04.)** | Testfeld Live-System 2 — Klima-Forensik (INC-2026-04-22) | **verify-plan-Gates: AUT-111 (B-CRIT-01..04) zuerst, dann AUT-110 (B-ALRM-01..04) — AUT-124 (B-RTH-01..04) ist umgesetzt (bestehendes UI-Muster, Ursache+Handlungshinweis), jetzt fachlich abnehmen und dann DONE; AUT-123 ist umgesetzt und in Frontend-Store-Tests abgesichert; P0 vor W18-Start** |
+| 4 | Bodenfeuchte-Kalibrierung W16 | 6 PARTIAL-Pakete offen | Bodenfeuchte-Kalibrierung | Sprint-Pakete abschliessen |
+| 5 | Monitor L2 Layout-Fixes | 12 Issues angelegt | Monitor L2 Layout & Sensor-Card Fixes | verify-plan Phase 1 Quick Wins |
+| 6 | UI/UX Design-Token & Konsistenz-Audit | 12 Issues (AUT-42 bis AUT-53) | UI/UX Design-Token & Konsistenz-Audit | Phase 1 Quick Wins: AUT-42, AUT-44 |
+| 7 | Sensor-Lifecycle-Vereinheitlichung | 7 Issues angelegt | Sensor-Lifecycle-Vereinheitlichung | Wartet auf W16-Abschluss |
+| 8 | pH/EC Fertigation Datenpfad | Backlog | pH/EC Fertigation Datenpfad | Wartet auf W16-Abschluss |
 
 ---
 
 ## Offene Epics (Linear)
+
+- **AUT-211 bis AUT-222:** MultispeQ/PhotosynQ + Pflanzen-Wissensschicht (**12 Issues**, committed 2026-04-30, alle **In Review**)
+  - **Branch:** `auto-debugger/work` — 12 Commits (5c39c4c1..0e5772f1)
+  - **Neue Schichten:** Virtual ESP (`is_virtual=true`, `sensor_kind='snapshot'`), 9 MultispeQ-Sensortypen (GPIO 200–208: phi2/fv_fm/npqt/lef/par_internal/ppfd/chlorophyll_spad/leaf_temp/anthocyanin_index), Plant-Entität mit Lifecycle-Events, `metadata_filter_evaluator` (7 Operatoren), 7 Cannabis-Trigger (`enabled=False`)
+  - **AUT-211 + AUT-222 (Wave 1):** `sensor_kind`, Virtual-ESP-Status-Guards, `plants`-Entität + Alembic-Migrationen
+  - **AUT-212:** MultispeQ Parser-Library + `MULTI_VALUE_SENSORS` Registry
+  - **AUT-213:** Frontend Audits-Tab + Upload-Modal + API-Client
+  - **AUT-214:** Logic Engine `metadata_filter_evaluator` (7 Operatoren)
+  - **AUT-215:** `GET /aggregates` + `GET /correlation` Endpoints (Boxplot/Scatter-Daten)
+  - **AUT-216:** Operator-Anleitung `docs/operator/multispeq-upload-anleitung.md`
+  - **AUT-217:** `POST /multispeq/import` Ingress-Endpoint + IngestService
+  - **AUT-218:** Frontend Snapshot-Kennzeichnung in Widget-Komponenten
+  - **AUT-219:** Cannabis-Trigger LPAP-01/02, CSC-01/02, GO-01/02/03 (`enabled=False`)
+  - **AUT-220:** Dashboard BoxplotWidget + CorrelationScatterWidget
+  - **AUT-221:** Plant-CRUD-Endpoints + Lifecycle-Event WS-Broadcast + Plant-Tab + Plant-Detail-Panel (Frontend)
+  - **USER-HAND CRITICAL (vor erstem Betrieb):**
+    1. `alembic upgrade head` — 2 Migrationen: `add_multispeq_sensor_kind_virtual_status` + `add_plants_entity_lifecycle_events`
+    2. `pip install qrcode pillow` (im Server-Container)
+    3. `poetry run python scripts/seed_multispeq_triggers.py` (7 Cannabis-Trigger, erst nach 30 gesunden Messungen aktivieren)
+    4. PhotosynQ Custom-Field `AutomationOne-Plant-ID` im Projekt anlegen
+  - **OQ-2 (TM-Entscheidung offen):** `plants.kaiser_id` ist `VARCHAR(50) nullable` — FK-Constraint optional wenn Tenant-Tabelle formalisiert wird
+  - **Workflow:** `auto-debugger/work` Branch, kein neuer `verify-plan`-Run nötig (alle 12 Issues vollständig committed); nächster Schritt: Code-Review + Merge nach `master` + USER-HAND-Schritte ausführen
 
 - **AUT-109 bis AUT-115 + AUT-123 + AUT-124:** Testfeld Live-System 2 — Klima-Forensik (**INC-2026-04-22**, 9 Issues, **~27 SP**)
   - **Projekt:** `Testfeld Live-System 2 — Klima-Forensik (INC-2026-04-22)` — ID `bb2b88cc-2c4d-4d61-ad96-ae442d64073c` — [Linear](https://linear.app/autoone/project/testfeld-live-system-2-klima-forensik-inc-2026-04-22-86660920c6bf)
@@ -120,6 +144,7 @@
 
 ## Aktiver Kontext (fuer naechste Session)
 
+- **MultispeQ/PhotosynQ USER-HAND (NEU 2026-05-01, CRITICAL):** 12 Issues AUT-211..222 committed auf `auto-debugger/work`, alle In Review. Vor Inbetriebnahme zwingend manuell ausführen: (1) **`alembic upgrade head`** (2 neue Migrationen: `add_multispeq_sensor_kind_virtual_status` + `add_plants_entity_lifecycle_events`); (2) **`pip install qrcode pillow`** im Server-Container; (3) **Cannabis-Trigger-Seed:** `poetry run python scripts/seed_multispeq_triggers.py` (7 Trigger als `enabled=False`; Aktivierung erst nach 30 gesunden Baseline-Messungen in Woche 3 Blütephase; Trigger-Conditions verwenden Platzhalter `esp_id="MOCK_MULTISPEQ"` → auf reales virtuelles MultispeQ-Device mappen); (4) **PhotosynQ Custom-Field** `AutomationOne-Plant-ID` im PhotosynQ-Projekt anlegen (Anleitung: `docs/operator/multispeq-upload-anleitung.md`). Rollback-Test: `alembic downgrade -1` + `alembic upgrade head` verifizieren.
 - **INC-2026-04-22 Klima-Forensik (NEU, 22.04.):** 9 Issues angelegt — AUT-109 (EA-18 Sub-Issue unter AUT-68, H8–H10), AUT-110 (P0 Nacht-Regel-Alarm), AUT-111 (P0 Critical-Rule Degraded-Handling mit `is_critical` + `escalation_policy`), AUT-112 (P1 pg_dump Backup-Auth), AUT-113 (P1 HistoricalChart Gap-Marker), AUT-114 (P2 Conflict-Manager Logging/UX), AUT-115 (P2 Cockpit-Kachel, blockedBy AUT-110+AUT-111), **AUT-123 (P1 Toast-Finalitaet pro correlation_id, umgesetzt 22.04.)**, **AUT-124 (P1 Runtime-Health "Eingeschraenkt" operatorisch aufgeloest, In Review 22.04., B-RTH-01..04 gruen)**. Delta-Kommentar an AUT-68 (ID `e37ba8ed-7a89-4e03-b4a9-54212ba00435`) mit Verweis auf AUT-109. Basis-Artefakte: `docs/analysen/testfeld-live2-klima-forensik-2026-04-22.md` + `-evidenz-2026-04-22.md` + `docs/analysen/testfeld-live2-cross-esp-offline-analyse-2026-04-22.md` + `docs/analysen/forensik-verbesserungsbriefing-stack-2026-04-22.md`.
 - **NEU 22.04. (Stack-Welle vorbereitet):** Parent **AUT-126** + 4 Cluster-Issues erstellt, um die Reihenfolge **Backend absichern → Frontend verdrahten → UI/UX vereinheitlichen** verbindlich zu machen: **AUT-127 (Backend Contract/Performance-Haertung), AUT-128 (Frontend Wiring End-to-End), AUT-129 (UI/UX Konsistenz im Bestand), AUT-130 (reproduzierbarer Agenten-Flow mit verify-plan Gate + Wokwi/Playwright Repro — **Ausführungsanleitung jetzt dokumentiert: F5-Flow in flow_reference.md + verify-plan Gate in TM_WORKFLOW.md**)** . Abhaengigkeiten: AUT-128 blocked by AUT-127 (+ AUT-110/111), AUT-129 blocked by AUT-128. **AUT-130 Dokumentation (agent-manager Session 22.04. abend):** F5-Flow mit 4 Gaten (Backend Unit Tests → Frontend Build+Lint → Wokwi Repro → Playwright E2E), Feature-Type-Matrix (MQTT/Heartbeat/Offline/Sensor/Actuator/Rule/UI/Toast), konkrete Repro-Befehle (kopierbar), Szenario-Mapping, Validierungskriterien. verify-plan Gate in TM_WORKFLOW.md erweitert fuer Multi-Layer Backend→Frontend Konsistenz-Check (MQTT Topics / WS Events / API Match). Meta-Bericht: `.claude/reports/current/AUT130_FLOW_SETUP_2026-04-22.md`.
 - **Tooling-Check 22.04. (reale Maschine):** `Playwright 1.58.2` und `PlatformIO 6.1.19` verfuegbar; `wokwi-cli` aktuell **nicht installiert** (`scripts/wokwi/wokwi_preflight.py` liefert `[FAIL] wokwi-cli missing`). Playwright-Testinventar ist abrufbar (`npx playwright test --list --config=playwright.e2e-01.config.ts`), aktuell **414 Tests / 34 Files**. Wokwi-Szenariozaehlung ergibt **192 YAMLs** in `El Trabajante/tests/wokwi/scenarios/` (Hinweis: Makefile-Help nennt noch 191).
