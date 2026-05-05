@@ -90,6 +90,9 @@ SENSOR_TYPE_MAPPING: Dict[str, str] = {
     "chlorophyll_spad": "chlorophyll_spad",
     "leaf_temp": "leaf_temp",
     "anthocyanin_index": "anthocyanin_index",
+    # VPD virtual sensor (computed from temp+humidity in sensor_handler.py;
+    # registered explicitly so normalize_sensor_type("vpd") is a registry hit).
+    "vpd": "vpd",
 }
 
 
