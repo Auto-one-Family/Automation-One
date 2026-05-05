@@ -10,7 +10,7 @@
  */
 
 import { ref, computed, onMounted, watch } from 'vue'
-import { Save, Power, AlertOctagon, Zap, Clock, Shield, Settings, Trash2 } from 'lucide-vue-next'
+import { Save, Power, AlertOctagon, AlertTriangle, Info, Zap, Clock, Shield, Settings, Trash2 } from 'lucide-vue-next'
 import { actuatorsApi } from '@/api/actuators'
 import { espApi } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
@@ -30,6 +30,7 @@ import SettingsBreadcrumb from '@/components/settings/SettingsBreadcrumb.vue'
 import { deviceContextApi } from '@/api/device-context'
 import { useZoneStore } from '@/shared/stores/zone.store'
 import { useActuatorStore } from '@/shared/stores/actuator.store'
+import { useLogicStore } from '@/shared/stores/logic.store'
 import { normalizeSubzoneId } from '@/utils/subzoneHelpers'
 import { createLogger } from '@/utils/logger'
 import type { DeviceScope } from '@/types'
@@ -60,6 +61,7 @@ const espStore = useEspStore()
 const actuatorStore = useActuatorStore()
 const uiStore = useUiStore()
 const zoneStore = useZoneStore()
+const logicStore = useLogicStore()
 
 // =============================================================================
 // State
@@ -132,6 +134,11 @@ const zoneContextLabel = computed(() =>
   || 'nicht zugewiesen',
 )
 const subzoneContextLabel = computed(() => subzoneId.value || 'Zone-weit')
+
+// Verknuepfte Regeln (AUT-256): prominente Anzeige + Konflikt-Warnung
+const linkedRules = computed(() => logicStore.getRulesForActuator(props.espId, props.gpio))
+const activeRuleCount = computed(() => linkedRules.value.filter(r => r.enabled).length)
+const hasActiveRules = computed(() => activeRuleCount.value > 0)
 
 /** GPIO options for aux_gpio (Valve): "Nicht verwendet" + available pins excluding main gpio */
 const { allPinStatuses } = useGpioStatus(computed(() => props.espId))
@@ -236,6 +243,11 @@ onMounted(async () => {
   // Ensure zone entities are loaded for the scope section
   if (zoneStore.zoneEntities.length === 0) {
     zoneStore.fetchZoneEntities().catch(() => {})
+  }
+
+  // AUT-256: Stelle sicher, dass Regeln geladen sind (fuer linkedRules / Konflikt-Warnung)
+  if (logicStore.rules.length === 0) {
+    logicStore.fetchRules().catch(() => {})
   }
 })
 
@@ -484,7 +496,12 @@ function formatDuration(seconds: number): string {
       <section class="actuator-config__section actuator-config__section--control">
         <h3 class="actuator-config__section-title">
           <Power class="w-4 h-4" />
-          Steuerung
+          <span>Steuerung</span>
+          <!-- Konflikt-Warnung Pill (AUT-256): mehrere aktive Regeln steuern diesen Aktor -->
+          <span v-if="activeRuleCount >= 2" class="actuator-config__conflict-pill">
+            <AlertTriangle class="actuator-config__conflict-icon" />
+            {{ activeRuleCount }} Regeln steuern diesen Aktor
+          </span>
         </h3>
 
         <div class="actuator-config__state-box" :class="isOn ? 'actuator-config__state-box--on' : 'actuator-config__state-box--off'">
@@ -508,6 +525,12 @@ function formatDuration(seconds: number): string {
           </button>
         </div>
 
+        <!-- AUT-256: Manuelle-Schaltung-Banner (nur wenn aktive Regeln vorhanden) -->
+        <div v-if="hasActiveRules" class="actuator-config__manual-banner">
+          <Info class="actuator-config__manual-banner-icon" />
+          <span>Manuelle Schaltung erhaelt Priority -1000 (gewinnt immer). Wird durch die naechste Regel-Auswertung ueberschrieben.</span>
+        </div>
+
         <!-- PWM Slider -->
         <div v-if="isPWM" class="actuator-config__pwm-control">
           <label class="actuator-config__label">PWM-Wert: {{ currentPwmValue }}%</label>
@@ -525,6 +548,16 @@ function formatDuration(seconds: number): string {
             <span>{{ powerLimit }}%</span>
           </div>
         </div>
+      </section>
+
+      <!-- ═══ AUT-256: Verknuepfte Regeln prominent (vor Grundeinstellungen) ═══ -->
+      <section class="actuator-config__section actuator-config__section--linked-rules">
+        <h3 class="actuator-config__section-title">Verknuepfte Regeln</h3>
+        <LinkedRulesSection
+          :esp-id="espId"
+          :gpio="gpio"
+          device-type="actuator"
+        />
       </section>
 
       <!-- Basic Fields -->
@@ -752,17 +785,8 @@ function formatDuration(seconds: number): string {
         />
       </AccordionSection>
 
-      <!-- ═══ LINKED RULES ════════════════════════════════════════════════ -->
-      <AccordionSection
-        title="Verknüpfte Regeln"
-        :storage-key="`${accordionKey}-linked-rules`"
-      >
-        <LinkedRulesSection
-          :esp-id="espId"
-          :gpio="gpio"
-          device-type="actuator"
-        />
-      </AccordionSection>
+      <!-- AUT-256: Verknuepfte Regeln werden prominent als ERSTE Sektion gezeigt
+           (siehe oben, direkt nach der Steuerung). Kein zweiter Eintrag im Akkordeon. -->
 
       <!-- AUT-251: Zone-Zuordnung wird ausschliesslich auf Geraete-Ebene gepflegt
            (HardwareView -> ESPSettingsSheet). Aktoren erben die Zone vom Geraet
@@ -839,6 +863,50 @@ function formatDuration(seconds: number): string {
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
   margin: 0;
+}
+
+/* AUT-256: Konflikt-Warnung Pill (neben Steuerung-Titel) */
+.actuator-config__conflict-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
+}
+
+.actuator-config__conflict-icon {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+/* AUT-256: Hinweis-Banner fuer manuelle Schaltung (Priority -1000) */
+.actuator-config__manual-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--color-info) 25%, transparent);
+  background: color-mix(in srgb, var(--color-info) 8%, transparent);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.actuator-config__manual-banner-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-info);
 }
 
 /* AUT-251: Zone-Header (read-only, vom Geraet vererbt) */
