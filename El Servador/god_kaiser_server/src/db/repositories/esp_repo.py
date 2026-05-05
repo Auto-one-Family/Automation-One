@@ -68,6 +68,26 @@ class ESPRepository(BaseRepository[ESPDevice]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_all_with_components(
+        self, *, include_deleted: bool = False
+    ) -> list[ESPDevice]:
+        """Return all devices with sensors + actuators eager-loaded.
+
+        AUT-224 A2: replaces an inline ``select(ESPDevice).options(selectinload(...))``
+        in ``api/v1/component_export.py``. Eager-loading prevents
+        ``MissingGreenlet`` errors when the API serializes relationships.
+        """
+        from sqlalchemy.orm import selectinload  # local import: keep module surface small
+
+        stmt = select(self.model).options(
+            selectinload(self.model.sensors),
+            selectinload(self.model.actuators),
+        )
+        if not include_deleted:
+            stmt = stmt.where(self._not_deleted())
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def soft_delete(self, device_id: str, deleted_by: str) -> Optional[ESPDevice]:
         """
         Soft-delete a device by setting deleted_at timestamp.

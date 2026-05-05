@@ -17,9 +17,10 @@ from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import and_, desc, func, select
 
 from ...core.logging_config import get_logger
-from ...db.models.audit_log import AuditEventType, AuditSeverity, AuditSourceType
+from ...db.models.audit_log import AuditEventType, AuditLog, AuditSeverity, AuditSourceType
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...services.audit_retention_service import AuditRetentionService
 from ...services.event_aggregator_service import EventAggregatorService, DataSource
@@ -293,10 +294,7 @@ async def list_audit_logs(
     - error_code: Specific error code
     - Time range: start_time/end_time or last N hours
     """
-    from sqlalchemy import and_, desc, select, func
-    from ...db.models.audit_log import AuditLog
-
-    # Build filter conditions
+    # Build filter conditions (sqlalchemy + AuditLog imported at module level — AUT-224 A2)
     conditions = []
 
     if event_type:

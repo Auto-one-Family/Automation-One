@@ -79,6 +79,21 @@ class SensorAlertConfigResponse(BaseResponse):
     alert_config: Dict[str, Any] = Field(default_factory=dict)
 
 
+class SensorAlertConfigViewResponse(BaseModel):
+    """Lightweight response for GET/PATCH per-sensor alert config endpoints.
+
+    Matches the legacy ``{status, alert_config, thresholds}`` payload shape used by
+    ``/v1/sensors/{sensor_id}/alert-config`` so consumers don't break.
+    """
+
+    status: str = Field("ok", description="Operation status marker")
+    alert_config: Dict[str, Any] = Field(default_factory=dict)
+    thresholds: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Default thresholds (only present on GET).",
+    )
+
+
 # =============================================================================
 # Actuator Alert Config
 # =============================================================================
@@ -207,3 +222,30 @@ class RuntimeStatsResponse(BaseResponse):
     last_restart: Optional[str] = None
     next_maintenance: Optional[str] = None
     maintenance_overdue: bool = False
+
+
+class SensorRuntimeViewResponse(BaseModel):
+    """Response for ``GET /v1/sensors/{sensor_id}/runtime``.
+
+    Mirrors the historic dict payload (status, runtime_stats, computed fields)
+    so frontend consumers continue to work without changes.
+    """
+
+    status: str = Field("ok", description="Operation status marker")
+    runtime_stats: Dict[str, Any] = Field(default_factory=dict)
+    computed_uptime_hours: Optional[float] = None
+    last_restart: Optional[str] = None
+    expected_lifetime_hours: Optional[float] = None
+    maintenance_log: List[Dict[str, Any]] = Field(default_factory=list)
+    next_maintenance: Optional[str] = None
+    maintenance_overdue: bool = False
+
+
+class SensorRuntimeUpdateResponse(BaseModel):
+    """Response for ``PATCH /v1/sensors/{sensor_id}/runtime``.
+
+    Matches the legacy ``{status, runtime_stats}`` payload.
+    """
+
+    status: str = Field("ok", description="Operation status marker")
+    runtime_stats: Dict[str, Any] = Field(default_factory=dict)

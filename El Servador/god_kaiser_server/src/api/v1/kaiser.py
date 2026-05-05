@@ -113,26 +113,22 @@ async def register_kaiser(
     session: DBSession,
     user: OperatorUser,
 ) -> dict:
-    """Register a new Kaiser."""
-    from ...db.repositories.kaiser_repo import KaiserRepository
-
+    """Register a new Kaiser via :class:`KaiserService` (P2 service-pattern)."""
     kaiser_id = body.get("kaiser_id")
     if not kaiser_id:
         raise HTTPException(status_code=400, detail="kaiser_id is required")
 
-    repo = KaiserRepository(session)
-    existing = await repo.get_by_kaiser_id(kaiser_id)
-    if existing:
-        raise HTTPException(status_code=409, detail=f"Kaiser '{kaiser_id}' already exists")
-
-    kaiser = await repo.create(
-        kaiser_id=kaiser_id,
-        zone_ids=body.get("zone_ids", []),
-        capabilities=body.get("capabilities"),
-        ip_address=body.get("ip_address"),
-        mac_address=body.get("mac_address"),
-    )
-    await session.commit()
+    service = KaiserService(session)
+    try:
+        kaiser = await service.register_kaiser(
+            kaiser_id=kaiser_id,
+            zone_ids=body.get("zone_ids", []),
+            capabilities=body.get("capabilities"),
+            ip_address=body.get("ip_address"),
+            mac_address=body.get("mac_address"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     logger.info(f"Kaiser '{kaiser_id}' registered by {user.username}")
 

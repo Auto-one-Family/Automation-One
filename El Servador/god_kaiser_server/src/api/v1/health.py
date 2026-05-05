@@ -21,14 +21,13 @@ import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
-from sqlalchemy import and_, desc, select
 
 from ...core.config import get_settings
 from ...core.logging_config import get_logger
 from ...core.resilience import ResilienceRegistry
-from ...db.models.audit_log import AuditLog, AuditSourceType
 from ...db.repositories import ActuatorRepository, ESPRepository, SensorRepository
 from ...mqtt.client import MQTTClient
+from ...services.health_service import HealthService
 from ...services.runtime_state_service import get_runtime_state_service
 from ...schemas import (
     DatabaseHealth,
@@ -319,38 +318,27 @@ async def esp_health_summary(
             )
         )
 
-    # Fetch recent errors for problem devices from audit log
+    # Fetch recent errors for problem devices via HealthService (AUT-224 A2)
     if problem_device_ids:
-        stmt = (
-            select(AuditLog)
-            .where(
-                and_(
-                    AuditLog.source_type == AuditSourceType.ESP32,
-                    AuditLog.source_id.in_(problem_device_ids),
-                    AuditLog.severity.in_(["warning", "error", "critical"]),
-                )
-            )
-            .order_by(desc(AuditLog.created_at))
-            .limit(50)
+        health_service = HealthService(db)
+        grouped = await health_service.get_recent_esp_errors(
+            problem_device_ids,
+            max_per_device=5,
+            limit=50,
         )
-        result = await db.execute(stmt)
-        audit_entries = list(result.scalars().all())
 
-        # Group by device_id, max 5 per device
-        errors_by_device: dict[str, list[RecentError]] = {}
-        for entry in audit_entries:
-            did = entry.source_id
-            if did not in errors_by_device:
-                errors_by_device[did] = []
-            if len(errors_by_device[did]) < 5:
-                errors_by_device[did].append(
-                    RecentError(
-                        timestamp=entry.created_at,
-                        severity=entry.severity,
-                        category=entry.event_type,
-                        message=entry.message or entry.error_description or entry.event_type,
-                    )
+        errors_by_device: dict[str, list[RecentError]] = {
+            did: [
+                RecentError(
+                    timestamp=entry.created_at,
+                    severity=entry.severity,
+                    category=entry.event_type,
+                    message=entry.message or entry.error_description or entry.event_type,
                 )
+                for entry in entries
+            ]
+            for did, entries in grouped.items()
+        }
 
         # Attach errors to device items
         for item in device_items:

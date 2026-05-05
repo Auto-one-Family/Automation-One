@@ -60,6 +60,11 @@ from ...schemas import (
     SensorStatsResponse,
     TriggerMeasurementResponse,
 )
+from ...schemas.alert_config import (
+    SensorAlertConfigViewResponse,
+    SensorRuntimeUpdateResponse,
+    SensorRuntimeViewResponse,
+)
 from ...schemas.common import PaginationMeta
 from ...sensors.sensor_type_registry import (
     get_all_value_types_for_device,
@@ -339,37 +344,37 @@ async def list_sensors(
 
 @router.get(
     "/{sensor_id}/alert-config",
-    response_model=dict,
+    response_model=SensorAlertConfigViewResponse,
     summary="Get sensor alert configuration",
 )
 async def get_sensor_alert_config(
     sensor_id: uuid.UUID,
     session: DBSession,
     user: ActiveUser,
-):
+) -> SensorAlertConfigViewResponse:
     """Get the current alert configuration for a sensor."""
     sensor_repo = SensorRepository(session)
     sensor = await sensor_repo.get_by_id(sensor_id)
     if not sensor:
         raise SensorNotFoundException(str(sensor_id))
 
-    return {
-        "status": "ok",
-        "alert_config": sensor.alert_config or {},
-        "thresholds": sensor.thresholds or {},
-    }
+    return SensorAlertConfigViewResponse(
+        status="ok",
+        alert_config=sensor.alert_config or {},
+        thresholds=sensor.thresholds or {},
+    )
 
 
 @router.get(
     "/{sensor_id}/runtime",
-    response_model=dict,
+    response_model=SensorRuntimeViewResponse,
     summary="Get sensor runtime stats",
 )
 async def get_sensor_runtime(
     sensor_id: uuid.UUID,
     session: DBSession,
     user: ActiveUser,
-):
+) -> SensorRuntimeViewResponse:
     """Get runtime statistics for a sensor."""
     sensor_repo = SensorRepository(session)
     sensor = await sensor_repo.get_by_id(sensor_id)
@@ -384,8 +389,6 @@ async def get_sensor_runtime(
     installation_date = metadata.get("installation_date")
     if installation_date:
         try:
-            from datetime import timezone
-
             inst_dt = datetime.fromisoformat(installation_date)
             if inst_dt.tzinfo is None:
                 inst_dt = inst_dt.replace(tzinfo=timezone.utc)
@@ -411,16 +414,16 @@ async def get_sensor_runtime(
         except (ValueError, TypeError):
             pass
 
-    return {
-        "status": "ok",
-        "runtime_stats": runtime,
-        "computed_uptime_hours": uptime_hours,
-        "last_restart": runtime.get("last_restart"),
-        "expected_lifetime_hours": runtime.get("expected_lifetime_hours"),
-        "maintenance_log": runtime.get("maintenance_log", []),
-        "next_maintenance": next_maintenance,
-        "maintenance_overdue": maintenance_overdue,
-    }
+    return SensorRuntimeViewResponse(
+        status="ok",
+        runtime_stats=runtime,
+        computed_uptime_hours=uptime_hours,
+        last_restart=runtime.get("last_restart"),
+        expected_lifetime_hours=runtime.get("expected_lifetime_hours"),
+        maintenance_log=runtime.get("maintenance_log", []) or [],
+        next_maintenance=next_maintenance,
+        maintenance_overdue=maintenance_overdue,
+    )
 
 
 # =============================================================================
@@ -1772,6 +1775,7 @@ async def scan_onewire_bus(
     esp_id: str,
     db: DBSession,
     current_user: OperatorUser,
+    publisher: MQTTPublisher,
     pin: Annotated[int, Query(ge=0, le=48, description="GPIO pin for OneWire bus")] = 4,
 ) -> OneWireScanResponse:
     """
@@ -1793,7 +1797,6 @@ async def scan_onewire_bus(
     import asyncio
     import time
 
-    from ...mqtt.publisher import Publisher
     from ...mqtt.client import MQTTClient
     from ...schemas.sensor import OneWireDevice, OneWireScanResponse
 
@@ -1876,8 +1879,7 @@ async def scan_onewire_bus(
             f"ESP device {esp_id} is {esp_device.status}, must be online for OneWire scan",
         )
 
-    # Step 2: Prepare MQTT command
-    publisher = Publisher()
+    # Step 2: Prepare MQTT command (publisher injected via Depends)
 
     # Command topic: kaiser/god/esp/{esp_id}/system/command
     # Payload: {"command": "onewire/scan", "pin": 4}
@@ -2275,7 +2277,7 @@ async def _validate_onewire_config(
 
 @router.patch(
     "/{sensor_id}/alert-config",
-    response_model=dict,
+    response_model=SensorAlertConfigViewResponse,
     summary="Update sensor alert configuration",
 )
 async def update_sensor_alert_config(
@@ -2283,7 +2285,7 @@ async def update_sensor_alert_config(
     body: dict,
     session: DBSession,
     user: OperatorUser,
-):
+) -> SensorAlertConfigViewResponse:
     """
     Update per-sensor alert configuration (suppression, thresholds, severity).
 
@@ -2306,12 +2308,12 @@ async def update_sensor_alert_config(
     await session.commit()
 
     logger.info(f"Alert config updated: sensor {sensor_id}, config={existing}")
-    return {"status": "ok", "alert_config": existing}
+    return SensorAlertConfigViewResponse(status="ok", alert_config=existing)
 
 
 @router.patch(
     "/{sensor_id}/runtime",
-    response_model=dict,
+    response_model=SensorRuntimeUpdateResponse,
     summary="Update sensor runtime stats",
 )
 async def update_sensor_runtime(
@@ -2319,7 +2321,7 @@ async def update_sensor_runtime(
     body: dict,
     session: DBSession,
     user: OperatorUser,
-):
+) -> SensorRuntimeUpdateResponse:
     """Update runtime statistics for a sensor (expected_lifetime, maintenance_log)."""
     sensor_repo = SensorRepository(session)
     sensor = await sensor_repo.get_by_id(sensor_id)
@@ -2336,4 +2338,4 @@ async def update_sensor_runtime(
     sensor.runtime_stats = existing
     await session.commit()
 
-    return {"status": "ok", "runtime_stats": existing}
+    return SensorRuntimeUpdateResponse(status="ok", runtime_stats=existing)

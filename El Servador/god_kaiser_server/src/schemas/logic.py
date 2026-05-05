@@ -782,3 +782,32 @@ class ExecutionHistoryPaginatedResponse(PaginatedResponse[ExecutionHistoryEntry]
     """
 
     pass
+
+
+# =============================================================================
+# Rule Templates (AUT-224 A1: typed responses)
+# =============================================================================
+
+
+class TemplateListResponse(BaseModel):
+    """Response for ``GET /v1/logic/templates``.
+
+    Wraps the dynamic template-info payloads returned by the template loader.
+    """
+
+    success: bool = True
+    templates: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Loaded template metadata dicts (shape determined by loader).",
+    )
+    total_count: int = 0
+
+
+class TemplateDetailResponse(BaseModel):
+    """Response for ``GET /v1/logic/templates/{template_id}``."""
+
+    success: bool = True
+    template: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Template metadata and parameter schema (shape from loader).",
+    )

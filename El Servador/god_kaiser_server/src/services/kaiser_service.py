@@ -108,6 +108,33 @@ class KaiserService:
     async def get_kaiser(self, kaiser_id: str) -> Optional[KaiserRegistry]:
         return await self.repo.get_by_kaiser_id(kaiser_id)
 
+    async def register_kaiser(
+        self,
+        kaiser_id: str,
+        zone_ids: Optional[List[str]] = None,
+        capabilities: Optional[Dict[str, Any]] = None,
+        ip_address: Optional[str] = None,
+        mac_address: Optional[str] = None,
+    ) -> KaiserRegistry:
+        """Register a new Kaiser relay node.
+
+        Raises:
+            ValueError: If a Kaiser with this ``kaiser_id`` already exists.
+        """
+        existing = await self.repo.get_by_kaiser_id(kaiser_id)
+        if existing:
+            raise ValueError(f"Kaiser '{kaiser_id}' already exists")
+
+        kaiser = await self.repo.create(
+            kaiser_id=kaiser_id,
+            zone_ids=zone_ids or [],
+            capabilities=capabilities,
+            ip_address=ip_address,
+            mac_address=mac_address,
+        )
+        await self.session.commit()
+        return kaiser
+
     async def get_hierarchy(self, kaiser_id: str) -> Optional[Dict[str, Any]]:
         """Full hierarchy: Kaiser → Zones → Subzones → Devices."""
         kaiser = await self.repo.get_by_kaiser_id(kaiser_id)
