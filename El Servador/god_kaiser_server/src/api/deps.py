@@ -350,6 +350,22 @@ async def verify_api_key(
     if configured_key and x_api_key == configured_key:
         return x_api_key
 
+    # AUT-228 (E4): DB-backed API-Key-Validation noch nicht implementiert.
+    # Aktueller Stand: Prefix-Check (esp_ / god_) ohne DB-Lookup.
+    # Folge-Ticket erforderlich: api_keys-Tabelle existiert nicht in
+    # src/db/models/. Bevor das hier umgestellt wird, MUSS db-inspector ein
+    # Schema vorschlagen. Vorgeschlagenes Schema:
+    #   table api_keys:
+    #     id: UUID PK
+    #     key_hash: TEXT NOT NULL  (bcrypt/argon2-Hash, NICHT plaintext)
+    #     key_prefix: VARCHAR(8) NOT NULL  (z.B. "esp_", "god_")
+    #     owner_type: VARCHAR(16) NOT NULL  ("esp", "god_layer", "service")
+    #     owner_id: UUID NULL  (FK auf esp_devices.id wenn owner_type="esp")
+    #     scopes: JSONB NOT NULL DEFAULT '[]'
+    #     created_at, last_used_at, revoked_at: TIMESTAMPTZ
+    #   index unique(key_hash)
+    # Lookup-Pfad: hash(x_api_key) -> SELECT WHERE key_hash=? AND revoked_at IS NULL
+    # Folge-Ticket: AUT-XXX "API-Key DB-Backed Validation" (siehe AUT-228 Report)
     # Accept keys starting with "esp_" (ESP32 device keys)
     if x_api_key.startswith("esp_"):
         return x_api_key

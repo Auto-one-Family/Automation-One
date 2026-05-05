@@ -879,3 +879,86 @@ class AlertInvalidStateTransition(NotificationException):
             },
             numeric_code=5860,
         )
+
+
+# Kaiser Exceptions (AUT-228 E3)
+# Strukturierte Exceptions fuer Kaiser-Router; loesen direkte HTTPException-Aufrufe
+# in src/api/v1/kaiser.py ab und mappen ueber den globalen Exception-Handler auf
+# numeric_code (5xxx) im API-Response.
+class KaiserException(GodKaiserException):
+    """Base exception for Kaiser relay node errors"""
+
+    pass
+
+
+class KaiserNotFoundException(KaiserException, NotFoundError):
+    """Raised when a Kaiser relay node is not found"""
+
+    status_code = 404
+    error_code = "KAISER_NOT_FOUND"
+
+    def __init__(self, kaiser_id: str) -> None:
+        GodKaiserException.__init__(
+            self,
+            message=f"Kaiser '{kaiser_id}' not found",
+            error_code="KAISER_NOT_FOUND",
+            details={
+                "resource_type": "Kaiser",
+                "identifier": kaiser_id,
+                "kaiser_id": kaiser_id,
+            },
+            numeric_code=5307,  # DatabaseErrorCode.RECORD_NOT_FOUND (kein dedizierter Kaiser-Range)
+        )
+
+
+class KaiserAlreadyExistsError(KaiserException):
+    """Raised when attempting to register a Kaiser that already exists"""
+
+    status_code = 409
+    error_code = "KAISER_ALREADY_EXISTS"
+
+    def __init__(self, kaiser_id: str, details: Optional[str] = None) -> None:
+        super().__init__(
+            message=f"Kaiser '{kaiser_id}' already exists" + (f": {details}" if details else ""),
+            error_code="KAISER_ALREADY_EXISTS",
+            details={"kaiser_id": kaiser_id, "details": details},
+            numeric_code=5308,  # DatabaseErrorCode.RECORD_DUPLICATE
+        )
+
+
+class KaiserIdRequiredError(ValidationException):
+    """Raised when kaiser_id is missing in a register request"""
+
+    error_code = "KAISER_ID_REQUIRED"
+
+    def __init__(self) -> None:
+        GodKaiserException.__init__(
+            self,
+            message="Validation failed for field 'kaiser_id': kaiser_id is required",
+            error_code="KAISER_ID_REQUIRED",
+            details={"field": "kaiser_id", "validation_message": "kaiser_id is required"},
+            numeric_code=5205,  # ValidationErrorCode.MISSING_REQUIRED_FIELD
+        )
+
+
+class SensorConfigInvalidUuidError(ValidationException):
+    """Raised when sensor_config_id is not a valid UUID"""
+
+    error_code = "INVALID_SENSOR_CONFIG_UUID"
+
+    def __init__(self, value: str) -> None:
+        GodKaiserException.__init__(
+            self,
+            message=(
+                f"Validation failed for field 'sensor_config_id': "
+                f"'{value}' is not a valid UUID"
+            ),
+            error_code="INVALID_SENSOR_CONFIG_UUID",
+            details={
+                "field": "sensor_config_id",
+                "validation_message": "must be a valid UUID",
+                "value": value,
+            },
+            numeric_code=5209,  # ValidationErrorCode.INVALID_PAYLOAD_FORMAT
+        )
+

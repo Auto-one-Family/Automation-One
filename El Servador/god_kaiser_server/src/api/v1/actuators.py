@@ -29,15 +29,18 @@ from datetime import datetime, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.exc import SQLAlchemyError
 
 from ...schemas.alert_config import ActuatorAlertConfigUpdate, RuntimeStatsUpdate
 
 from ...core.exceptions import (
+    ActuatorCommandFailedException,
     ActuatorNotFoundError,
     DeviceNotApprovedError,
     DeviceOfflineError,
     ESPNotFoundError,
     GpioConflictError,
+    ServiceUnavailableError,
     ValidationException,
 )
 from ...core.logging_config import get_logger
@@ -630,9 +633,20 @@ async def create_or_update_actuator(
         logger.warning(f"Subzone assignment skipped for {esp_id}/GPIO {gpio}: {e}")
         await db.rollback()
         subzone_error = str(e)
-    except Exception as e:
-        logger.warning(f"Subzone assignment failed for {esp_id}/GPIO {gpio}: {e}")
+    except SQLAlchemyError as e:
+        # AUT-228 (E2): Erwartete DB-Fehler -> WARNING, non-fatal
+        logger.warning(f"Subzone assignment DB error for {esp_id}/GPIO {gpio}: {e}")
         await db.rollback()
+        subzone_error = "subzone_db_error"
+    except Exception as e:
+        # AUT-228 (E2): Unerwartete Exceptions -> ERROR + Stacktrace,
+        # damit Drift in der Subzone-Logik nicht stillschweigend untergeht.
+        logger.error(
+            f"Unexpected subzone assignment failure for {esp_id}/GPIO {gpio}: {e}",
+            exc_info=True,
+        )
+        await db.rollback()
+        subzone_error = "subzone_unexpected_error"
         # Non-fatal: actuator was saved, subzone can be fixed manually
 
     config_correlation_id: Optional[str] = None
@@ -753,11 +767,22 @@ async def send_command(
     )
 
     if not cmd_result.success:
-        # Get last error from safety check
-        raise ValidationException(
-            "command",
-            "Command rejected by safety validation or MQTT publish failed",
-        )
+        # AUT-228 (E1): Disambiguate failure causes so HTTP layer maps to the
+        # correct status code. ValidationException collapsed all reasons into 400
+        # which made retries indistinguishable for clients.
+        reason = cmd_result.rejection_reason
+        message = cmd_result.rejection_message or "Actuator command failed"
+        if reason == "safety":
+            # Safety-Rejection -> 400 (retry sinnlos), code 5413
+            raise ValidationException("command", message)
+        if reason == "esp_not_found":
+            # ESP wurde zwischen Lookup und send_command entfernt -> 404, code 5001
+            raise ESPNotFoundError(esp_id)
+        if reason == "mqtt_publish":
+            # MQTT-Publish-Fehler -> 503 (retry moeglich), code 5410
+            raise ServiceUnavailableError("MQTT publisher", message)
+        # exception oder unbekannt -> 500 mit ActuatorCommandFailedException, code 5412
+        raise ActuatorCommandFailedException(esp_id, gpio, command.command, message)
 
     logger.info(
         f"Actuator command sent: {esp_id} GPIO {gpio} {command.command} "

@@ -26,7 +26,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.exc import SQLAlchemyError
 
 from ...core.exceptions import (
     ConfigurationException,
@@ -35,6 +36,7 @@ from ...core.exceptions import (
     ESPNotFoundError,
     GatewayTimeoutError,
     GpioConflictError,
+    SensorConfigInvalidUuidError,
     SensorNotFoundException,
     SensorProcessingException,
     ServiceUnavailableError,
@@ -789,9 +791,22 @@ async def create_or_update_sensor(
             logger.warning(f"Subzone assignment skipped for {esp_id}/GPIO {gpio}: {e}")
             await db.rollback()
             subzone_error = str(e)
-        except Exception as e:
-            logger.warning(f"Subzone assignment failed for {esp_id}/GPIO {gpio}: {e}")
+        except SQLAlchemyError as e:
+            # AUT-228 (E2): Erwartete DB-Fehler -> WARNING, non-fatal
+            logger.warning(
+                f"Subzone assignment DB error for {esp_id}/GPIO {gpio}: {e}"
+            )
             await db.rollback()
+            subzone_error = "subzone_db_error"
+        except Exception as e:
+            # AUT-228 (E2): Unerwartete Exceptions -> ERROR + Stacktrace,
+            # damit Drift in der Subzone-Logik nicht stillschweigend untergeht.
+            logger.error(
+                f"Unexpected subzone assignment failure for {esp_id}/GPIO {gpio}: {e}",
+                exc_info=True,
+            )
+            await db.rollback()
+            subzone_error = "subzone_unexpected_error"
 
         subzone_repo = SubzoneRepository(db)
         subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio)
@@ -1102,9 +1117,20 @@ async def create_or_update_sensor(
         logger.warning(f"Subzone assignment skipped for {esp_id}/GPIO {gpio}: {e}")
         await db.rollback()
         subzone_error = str(e)
-    except Exception as e:
-        logger.warning(f"Subzone assignment failed for {esp_id}/GPIO {gpio}: {e}")
+    except SQLAlchemyError as e:
+        # AUT-228 (E2): Erwartete DB-Fehler -> WARNING, non-fatal
+        logger.warning(f"Subzone assignment DB error for {esp_id}/GPIO {gpio}: {e}")
         await db.rollback()
+        subzone_error = "subzone_db_error"
+    except Exception as e:
+        # AUT-228 (E2): Unerwartete Exceptions -> ERROR + Stacktrace,
+        # damit Drift in der Subzone-Logik nicht stillschweigend untergeht.
+        logger.error(
+            f"Unexpected subzone assignment failure for {esp_id}/GPIO {gpio}: {e}",
+            exc_info=True,
+        )
+        await db.rollback()
+        subzone_error = "subzone_unexpected_error"
         # Non-fatal: sensor was saved, subzone can be fixed manually
 
     config_correlation_id: Optional[str] = None
@@ -1396,8 +1422,9 @@ async def query_sensor_data(
 
         try:
             resolved_config_id = _uuid.UUID(sensor_config_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid sensor_config_id UUID")
+        except ValueError as exc:
+            # AUT-228 (E3): Strukturierte Exception statt HTTPException -> numeric_code 5209
+            raise SensorConfigInvalidUuidError(sensor_config_id) from exc
 
     # Effective resolution (default = raw)
     effective_resolution = resolution or "raw"

@@ -14,8 +14,13 @@ Provides REST endpoints for Kaiser relay node management:
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, Path
 
+from ...core.exceptions import (
+    KaiserAlreadyExistsError,
+    KaiserIdRequiredError,
+    KaiserNotFoundException,
+)
 from ...core.logging_config import get_logger
 from ..deps import ActiveUser, DBSession, OperatorUser
 from ...services.kaiser_service import KaiserService
@@ -70,7 +75,8 @@ async def get_kaiser(
     service = KaiserService(session)
     kaiser = await service.get_kaiser(kaiser_id)
     if not kaiser:
-        raise HTTPException(status_code=404, detail=f"Kaiser '{kaiser_id}' not found")
+        # AUT-228 (E3): Strukturierte Exception statt HTTPException -> numeric_code 5307
+        raise KaiserNotFoundException(kaiser_id)
 
     return {
         "success": True,
@@ -97,7 +103,8 @@ async def get_hierarchy(
     service = KaiserService(session)
     hierarchy = await service.get_hierarchy(kaiser_id)
     if not hierarchy:
-        raise HTTPException(status_code=404, detail=f"Kaiser '{kaiser_id}' not found")
+        # AUT-228 (E3): Strukturierte Exception statt HTTPException -> numeric_code 5307
+        raise KaiserNotFoundException(kaiser_id)
 
     return {"success": True, **hierarchy}
 
@@ -116,7 +123,8 @@ async def register_kaiser(
     """Register a new Kaiser via :class:`KaiserService` (P2 service-pattern)."""
     kaiser_id = body.get("kaiser_id")
     if not kaiser_id:
-        raise HTTPException(status_code=400, detail="kaiser_id is required")
+        # AUT-228 (E3): Strukturierte Exception statt HTTPException -> numeric_code 5205
+        raise KaiserIdRequiredError()
 
     service = KaiserService(session)
     try:
@@ -128,7 +136,8 @@ async def register_kaiser(
             mac_address=body.get("mac_address"),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # AUT-228 (E3 + AUT-224): Strukturierte Exception statt HTTPException(409)
+        raise KaiserAlreadyExistsError(kaiser_id, str(exc)) from exc
 
     logger.info(f"Kaiser '{kaiser_id}' registered by {user.username}")
 
@@ -157,7 +166,8 @@ async def update_zones(
     repo = KaiserRepository(session)
     kaiser = await repo.get_by_kaiser_id(kaiser_id)
     if not kaiser:
-        raise HTTPException(status_code=404, detail=f"Kaiser '{kaiser_id}' not found")
+        # AUT-228 (E3): Strukturierte Exception statt HTTPException -> numeric_code 5307
+        raise KaiserNotFoundException(kaiser_id)
 
     zone_ids = body.get("zone_ids", [])
     kaiser.zone_ids = zone_ids

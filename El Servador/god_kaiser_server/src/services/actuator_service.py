@@ -8,7 +8,7 @@ import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from math import isclose
-from typing import AsyncIterator, Callable, Optional
+from typing import AsyncIterator, Callable, Literal, Optional
 
 from ..core.logging_config import get_logger
 from ..core.metrics import increment_actuator_timeout
@@ -22,6 +22,9 @@ from .safety_service import SafetyService
 logger = get_logger(__name__)
 
 
+RejectionReason = Literal["safety", "esp_not_found", "mqtt_publish", "exception"]
+
+
 @dataclass(frozen=True)
 class ActuatorSendCommandResult:
     """
@@ -29,12 +32,18 @@ class ActuatorSendCommandResult:
 
     correlation_id is generated once per call and matches MQTT / WebSocket payloads
     when a publish is attempted; for no-op skips it still identifies the REST/logic trace.
+
+    AUT-228 (E1): rejection_reason disambiguates failure causes so HTTP layer can
+    map to the correct status code (400 safety, 404 esp_not_found, 503 mqtt_publish,
+    500 exception). For success/no-op results it is None.
     """
 
     success: bool
     correlation_id: str
     command_sent: bool
     safety_warnings: list[str]
+    rejection_reason: Optional[RejectionReason] = None
+    rejection_message: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -570,6 +579,8 @@ class ActuatorService:
                     correlation_id=correlation_id,
                     command_sent=False,
                     safety_warnings=[],
+                    rejection_reason="safety",
+                    rejection_message=safety_result.error,
                 )
 
             # Log warnings if any
@@ -611,6 +622,8 @@ class ActuatorService:
                     correlation_id=correlation_id,
                     command_sent=False,
                     safety_warnings=warnings,
+                    rejection_reason="esp_not_found",
+                    rejection_message=f"ESP device not found: {esp_id}",
                 )
 
             # Reconnect-safe delta guard: if desired output already equals current
@@ -710,6 +723,8 @@ class ActuatorService:
                     correlation_id=correlation_id,
                     command_sent=False,
                     safety_warnings=warnings,
+                    rejection_reason="mqtt_publish",
+                    rejection_message="MQTT publish failed",
                 )
             command_sent = True
 
@@ -792,6 +807,8 @@ class ActuatorService:
                 correlation_id=correlation_id,
                 command_sent=False,
                 safety_warnings=[],
+                rejection_reason="exception",
+                rejection_message=f"Internal error while sending command: {e}",
             )
 
     @staticmethod
