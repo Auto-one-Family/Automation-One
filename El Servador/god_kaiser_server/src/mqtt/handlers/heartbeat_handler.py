@@ -22,6 +22,7 @@ from typing import Optional
 
 import asyncio
 import json
+import os
 import time as time_module
 
 from cachetools import TTLCache
@@ -379,6 +380,33 @@ class HeartbeatHandler:
                 esp_device = await esp_repo.get_by_device_id(esp_id_str)
 
                 if not esp_device:
+                    # ============================================
+                    # Check for soft-deleted tombstone first
+                    # ============================================
+                    tombstone = await esp_repo.get_by_device_id(esp_id_str, include_deleted=True)
+                    if tombstone is not None:
+                        restore_policy = os.environ.get(
+                            "ESP_SOFT_DELETE_RESTORE_POLICY", "allow"
+                        )
+                        if restore_policy == "deny":
+                            logger.info(
+                                f"Restore blocked by policy for soft-deleted device {esp_id_str}"
+                            )
+                            return True
+                        # Restore: clear soft-delete fields
+                        tombstone.deleted_at = None
+                        tombstone.deleted_by = None
+                        tombstone.status = "pending_approval"
+                        await session.commit()
+                        await self._send_heartbeat_ack(
+                            esp_id=esp_id_str,
+                            status="pending_approval",
+                            config_available=False,
+                            handover_epoch=handover_epoch,
+                            session_id=session_id,
+                        )
+                        return True
+
                     # ============================================
                     # NEW DEVICE: Auto-Discovery
                     # ============================================

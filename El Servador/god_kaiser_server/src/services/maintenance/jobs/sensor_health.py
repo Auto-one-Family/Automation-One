@@ -185,6 +185,10 @@ async def check_sensor_timeouts(
     sensors_stale = 0
     sensors_healthy = 0
     sensors_skipped = 0
+    freshness_checked = 0
+    freshness_stale = 0
+    calibration_due = 0
+    freshness_sensors: List[Any] = []
     stale_details: List[Dict[str, Any]] = []
     errors: List[str] = []
     total_sensors = 0
