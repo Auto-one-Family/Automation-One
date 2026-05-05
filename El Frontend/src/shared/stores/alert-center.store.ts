@@ -10,6 +10,10 @@
  * - Lifecycle actions: acknowledge/resolve → REST API → WS update
  * - Real-time: notification-inbox.store handles WS events for list updates
  *
+ * P3 (Poll vs. WS): Tab-/KPI-Zähler (alertStats) werden per REST alle STATS_POLL_INTERVAL_MS
+ * nachgezogen; die Inbox-Liste und unreadCount können per WebSocket schneller wechseln —
+ * UI zeigt „Live“ + Zeit der letzten KPI-Synchronisation (statsSyncedAt), siehe Drawer.
+ *
  * Cross-store: Reads from notification-inbox.store for unified view.
  */
 
@@ -22,15 +26,35 @@ import {
   type NotificationDTO,
   type NotificationSeverity,
 } from '@/api/notifications'
+import { toUiApiError } from '@/api/uiApiError'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('AlertCenterStore')
 
+<<<<<<< Updated upstream
 /** Polling interval for alert stats (30s) */
 const STATS_POLL_INTERVAL_MS = 30_000
 const REALTIME_STATS_REFRESH_DEBOUNCE_MS = 600
+=======
+/** Ergebnis von Ack / Resolve / Resolve-All — für einheitliche UI-Finalität (Toast). */
+export type AlertLifecycleFailure = {
+  success: false
+  message: string
+  requestId: string | null
+}
+
+export type AlertLifecycleResult = { success: true } | AlertLifecycleFailure
+
+function mapAlertLifecycleError(err: unknown, fallback: string): AlertLifecycleFailure {
+  const ui = toUiApiError(err, fallback)
+  return { success: false, message: ui.message, requestId: ui.request_id }
+}
+
+/** Polling interval for alert stats (30s). Export für Operator-Hinweise (P3 Poll vs. WS). */
+export const STATS_POLL_INTERVAL_MS = 30_000
+>>>>>>> Stashed changes
 
 export const useAlertCenterStore = defineStore('alert-center', () => {
   // ═══════════════════════════════════════════════════════════════════════════
@@ -38,6 +62,8 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   const alertStats = ref<AlertStatsDTO | null>(null)
+  /** Zeitpunkt der letzten erfolgreichen KPI-/Statistik-Synchronisation (ms), für P3-Hinweise. */
+  const statsSyncedAt = ref<number | null>(null)
   const isLoadingStats = ref(false)
   const activeAlerts = ref<NotificationDTO[]>([])
   const isLoadingAlerts = ref(false)
@@ -116,6 +142,7 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
       isLoadingStats.value = true
       try {
         alertStats.value = await notificationsApi.getAlertStats()
+        statsSyncedAt.value = Date.now()
         logger.debug(
           `Stats loaded: ${alertStats.value.active_count} active, ` +
             `${alertStats.value.acknowledged_count} acknowledged`,
@@ -157,7 +184,7 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
   /**
    * Acknowledge an alert (active → acknowledged).
    */
-  async function acknowledgeAlert(id: string): Promise<boolean> {
+  async function acknowledgeAlert(id: string): Promise<AlertLifecycleResult> {
     try {
       const updated = await notificationsApi.acknowledgeAlert(id)
 
@@ -168,17 +195,17 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
       await fetchStats({ force: true })
 
       logger.info(`Alert acknowledged: ${id}`)
-      return true
+      return { success: true }
     } catch (err) {
       logger.error(`Failed to acknowledge alert ${id}`, err)
-      return false
+      return mapAlertLifecycleError(err, 'Alert konnte nicht bestätigt werden.')
     }
   }
 
   /**
    * Resolve an alert (active/acknowledged → resolved).
    */
-  async function resolveAlert(id: string): Promise<boolean> {
+  async function resolveAlert(id: string): Promise<AlertLifecycleResult> {
     try {
       const updated = await notificationsApi.resolveAlert(id)
 
@@ -192,17 +219,17 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
       await fetchStats({ force: true })
 
       logger.info(`Alert resolved: ${id}`)
-      return true
+      return { success: true }
     } catch (err) {
       logger.error(`Failed to resolve alert ${id}`, err)
-      return false
+      return mapAlertLifecycleError(err, 'Alert konnte nicht erledigt werden.')
     }
   }
 
   /**
    * Resolve all unresolved alerts (active + acknowledged) for current user.
    */
-  async function resolveAllAlerts(): Promise<boolean> {
+  async function resolveAllAlerts(): Promise<AlertLifecycleResult> {
     try {
       const result = await notificationsApi.resolveAllAlerts()
 
@@ -227,10 +254,13 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
       }
       await fetchStats({ force: true })
       logger.info(`All unresolved alerts resolved (${result.resolved_count})`)
-      return true
+      return { success: true }
     } catch (err) {
       logger.error('Failed to resolve all alerts', err)
-      return false
+      return mapAlertLifecycleError(
+        err,
+        'Alle Alerts erledigen ist fehlgeschlagen. Bitte erneut versuchen.',
+      )
     }
   }
 
@@ -295,6 +325,7 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
   return {
     // State
     alertStats,
+    statsSyncedAt,
     isLoadingStats,
     activeAlerts,
     isLoadingAlerts,

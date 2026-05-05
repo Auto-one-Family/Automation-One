@@ -12,7 +12,11 @@
  */
 
 import { ref, computed, watch } from 'vue'
+<<<<<<< Updated upstream
 import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp, Filter } from 'lucide-vue-next'
+=======
+import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp, Bell, Activity } from 'lucide-vue-next'
+>>>>>>> Stashed changes
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import NotificationItem from '@/components/notifications/NotificationItem.vue'
 import NotificationPreferences from '@/components/notifications/NotificationPreferences.vue'
@@ -21,15 +25,18 @@ import {
   type InboxFilter,
   type SourceFilterValue,
 } from '@/shared/stores/notification-inbox.store'
-import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
+import { useAlertCenterStore, STATS_POLL_INTERVAL_MS } from '@/shared/stores/alert-center.store'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { notificationsApi, type EmailLogEntry } from '@/api/notifications'
 import { formatRelativeTime } from '@/utils/formatters'
 import { getEmailStatusLabel } from '@/utils/labels'
+import { useToast } from '@/composables/useToast'
+import { formatAlertLifecycleFailureMessage } from '@/utils/alertLifecycleUi'
 
 const inboxStore = useNotificationInboxStore()
 const alertStore = useAlertCenterStore()
 const authStore = useAuthStore()
+const toast = useToast()
 
 type StatusFilter = 'all' | 'active' | 'acknowledged' | 'resolved'
 const isResolvingAll = ref(false)
@@ -74,9 +81,44 @@ const statusTabs = computed(() => {
   ]
 })
 
+<<<<<<< Updated upstream
 function setLifecycleFilter(key: StatusFilter): void {
   inboxStore.lifecycleFilter = key === 'all' ? 'all' : key
 }
+=======
+/** P3: KPI-Tabs nutzen gepollte Server-Stats; Liste unread/WS kann schneller sein. */
+const syncHintLine = computed(() => {
+  const t = alertStore.statsSyncedAt
+  const kpi = t != null ? `KPI-Tabs: zuletzt ${formatRelativeTime(new Date(t))}` : 'KPI-Tabs: noch nicht synchronisiert'
+  return `Liste Live (WebSocket). ${kpi}.`
+})
+
+/** Liste/Zähler neuer als letzte KPI-Sync → kurzer Degrade-Hinweis (Polling-Intervall). */
+const listAheadOfKpiStats = computed(() => {
+  const a = alertStore.statsSyncedAt
+  const b = inboxStore.inboxLiveTouchedAt
+  if (a == null || b == null) return false
+  return b > a + 1500
+})
+
+const kpiPollHuman = computed(() => {
+  const s = Math.round(STATS_POLL_INTERVAL_MS / 1000)
+  return `${s}s`
+})
+
+const filteredGroupedNotifications = computed(() => {
+  if (activeStatusFilter.value === 'all') {
+    return inboxStore.groupedNotifications
+  }
+
+  return inboxStore.groupedNotifications
+    .map(group => ({
+      ...group,
+      items: group.items.filter(n => n.status === activeStatusFilter.value),
+    }))
+    .filter(group => group.items.length > 0)
+})
+>>>>>>> Stashed changes
 
 function handleClose(): void {
   inboxStore.isDrawerOpen = false
@@ -90,7 +132,15 @@ async function handleResolveAll(): Promise<void> {
   if (isResolvingAll.value || alertStore.unresolvedCount === 0) return
   isResolvingAll.value = true
   try {
-    await alertStore.resolveAllAlerts()
+    const res = await alertStore.resolveAllAlerts()
+    if (!res.success) {
+      toast.show({
+        type: 'error',
+        message: formatAlertLifecycleFailureMessage(res),
+        dedupeKey: 'resolve-all-alerts-failed',
+      })
+      return
+    }
     await inboxStore.loadInitial()
   } finally {
     isResolvingAll.value = false
@@ -98,11 +148,25 @@ async function handleResolveAll(): Promise<void> {
 }
 
 async function handleAcknowledge(id: string): Promise<void> {
-  await alertStore.acknowledgeAlert(id)
+  const res = await alertStore.acknowledgeAlert(id)
+  if (!res.success) {
+    toast.show({
+      type: 'error',
+      message: formatAlertLifecycleFailureMessage(res),
+      dedupeKey: `ack-alert-${id}`,
+    })
+  }
 }
 
 async function handleResolve(id: string): Promise<void> {
-  await alertStore.resolveAlert(id)
+  const res = await alertStore.resolveAlert(id)
+  if (!res.success) {
+    toast.show({
+      type: 'error',
+      message: formatAlertLifecycleFailureMessage(res),
+      dedupeKey: `resolve-alert-${id}`,
+    })
+  }
 }
 
 // Email log footer
@@ -138,11 +202,13 @@ watch(
   <SlideOver
     :open="inboxStore.isDrawerOpen"
     title="Benachrichtigungen"
+    subtitle="Server-Inbox (Ack/Resolve). Echtzeit-Fehler (error_event) nur als Toast — nicht diese Liste."
     width="lg"
     @close="handleClose"
   >
     <!-- Custom header actions (injected via default slot, header area) -->
     <template #default>
+      <div class="drawer__panel-root" data-testid="notification-drawer-panel">
       <!-- Header Actions Row -->
       <div class="drawer__header-actions">
       <!-- Primary row: severity + lifecycle + preset -->
@@ -151,6 +217,8 @@ watch(
           <button
             v-for="tab in filterTabs"
             :key="tab.key"
+            type="button"
+            :data-testid="`notification-inbox-filter-${tab.key}`"
             :class="[
               'drawer__tab',
               { 'drawer__tab--active': inboxStore.activeFilter === tab.key },
@@ -190,8 +258,10 @@ watch(
 
       <div class="drawer__actions-row">
           <button
+            type="button"
             class="drawer__action-btn"
             title="Alle aktiven Alerts erledigen"
+            data-testid="notification-resolve-all"
             :disabled="alertStore.unresolvedCount === 0 || isResolvingAll"
             @click="handleResolveAll"
           >
@@ -201,8 +271,11 @@ watch(
             </span>
           </button>
           <button
+            type="button"
             class="drawer__action-btn"
             title="Einstellungen"
+            aria-label="Benachrichtigungseinstellungen öffnen"
+            data-testid="notification-preferences-button"
             @click="inboxStore.openPreferences()"
           >
             <Settings class="drawer__action-icon" />
@@ -213,6 +286,7 @@ watch(
       <!-- Advanced: source chips (collapsed by default) -->
       <div class="drawer__advanced">
         <button
+<<<<<<< Updated upstream
           type="button"
           class="drawer__advanced-toggle"
           @click="advancedSourcesOpen = !advancedSourcesOpen"
@@ -223,6 +297,48 @@ watch(
             :is="advancedSourcesOpen ? ChevronUp : ChevronDown"
             class="drawer__advanced-chevron"
           />
+=======
+          v-for="tab in statusTabs"
+          :key="tab.key"
+          type="button"
+          :data-testid="`alert-status-tab-${tab.key}`"
+          :class="[
+            'drawer__status-tab',
+            { 'drawer__status-tab--active': activeStatusFilter === tab.key },
+          ]"
+          @click="activeStatusFilter = tab.key"
+        >
+          {{ tab.label }}
+        </button>
+      </div>
+
+      <p
+        class="drawer__sync-hint"
+        data-testid="notification-drawer-sync-hint"
+        role="status"
+      >
+        <Activity class="drawer__sync-hint-icon" :size="12" aria-hidden="true" />
+        <span class="drawer__sync-hint-text">{{ syncHintLine }}</span>
+        <span v-if="listAheadOfKpiStats" class="drawer__sync-hint-lag">
+          Tab-Zähler können bis zu {{ kpiPollHuman }} hinter der Liste liegen.
+        </span>
+      </p>
+
+      <!-- Source Filter Chips -->
+      <div class="drawer__source-chips">
+        <button
+          v-for="chip in sourceChips"
+          :key="chip.value ?? 'all'"
+          type="button"
+          :data-testid="`notification-source-filter-${chip.value ?? 'all'}`"
+          :class="[
+            'drawer__source-chip',
+            { 'drawer__source-chip--active': inboxStore.sourceFilter === chip.value },
+          ]"
+          @click="inboxStore.setSourceFilter(chip.value)"
+        >
+          {{ chip.label }}
+>>>>>>> Stashed changes
         </button>
         <div v-show="advancedSourcesOpen" class="drawer__source-chips">
           <button
@@ -250,8 +366,9 @@ watch(
         <div
           v-else-if="inboxStore.groupedNotifications.length === 0"
           class="drawer__empty"
+          data-testid="notification-drawer-empty"
         >
-          <span class="drawer__empty-icon">🔔</span>
+          <Bell class="drawer__empty-icon" aria-hidden="true" />
           <span class="drawer__empty-text">Keine Benachrichtigungen</span>
           <span class="drawer__empty-sub">
             {{ inboxStore.activeFilter !== 'all' || inboxStore.sourceFilter || inboxStore.lifecycleFilter !== 'all'
@@ -281,7 +398,9 @@ watch(
           <!-- Load More Button -->
           <div v-if="inboxStore.hasMore" class="drawer__load-more">
             <button
+              type="button"
               class="drawer__load-more-btn"
+              data-testid="notification-load-more"
               :disabled="inboxStore.isLoading"
               @click="inboxStore.loadMore()"
             >
@@ -340,6 +459,7 @@ watch(
           </div>
         </Transition>
       </div>
+      </div>
     </template>
   </SlideOver>
 
@@ -348,6 +468,12 @@ watch(
 </template>
 
 <style scoped>
+.drawer__panel-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
 /* Header Actions */
 .drawer__header-actions {
   display: flex;
@@ -542,6 +668,35 @@ watch(
   border-color: var(--glass-border);
 }
 
+/* P3: Poll vs. WebSocket — Operator-Hinweis */
+.drawer__sync-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-3);
+}
+
+.drawer__sync-hint-icon {
+  flex-shrink: 0;
+  color: var(--color-info);
+  opacity: 0.9;
+}
+
+.drawer__sync-hint-text {
+  flex: 1;
+  min-width: min(100%, 12rem);
+}
+
+.drawer__sync-hint-lag {
+  flex-basis: 100%;
+  color: var(--color-warning);
+  font-weight: 500;
+}
+
 /* Source Filter Chips */
 .drawer__source-chips {
   display: flex;
@@ -620,8 +775,16 @@ watch(
 }
 
 .drawer__empty-icon {
+<<<<<<< Updated upstream
   font-size: var(--text-display);
   opacity: 0.4;
+=======
+  width: 32px;
+  height: 32px;
+  color: var(--color-text-muted);
+  opacity: 0.45;
+  flex-shrink: 0;
+>>>>>>> Stashed changes
 }
 
 .drawer__empty-text {

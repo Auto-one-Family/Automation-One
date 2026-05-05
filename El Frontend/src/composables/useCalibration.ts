@@ -1,6 +1,9 @@
 /**
  * useCalibration Composable
  *
+ * @deprecated Fuer neue Features den Wizard-Flow ueber `useCalibrationWizard` nutzen.
+ *   Dieses Composable ist eine aeltere, isolierte Zustands-Hilfe ohne API-Anbindung.
+ *
  * Manages pH, EC, and moisture sensor calibration wizard state.
  *
  * pH Calibration (2-point):

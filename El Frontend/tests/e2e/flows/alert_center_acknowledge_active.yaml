@@ -1,0 +1,49 @@
+# Flow-Katalog (Contract) — Ausführung ausschließlich über Playwright/TypeScript.
+# Siehe: tests/e2e/scenarios/alert-center.spec.ts
+# Schema angelehnt an docs/analysen/KONZEPT-auto-debugger-frontend-flow-api-alertcenter-2026-04-09.md §4.4
+
+flow_id: alert_center_acknowledge_active
+version: 1
+description: >
+  Öffnet den Benachrichtigungs-Drawer, wechselt zum Tab „Aktiv“, optional Acknowledge
+  (P1-Referenz mit REST-Mock für absichtlich fehlgeschlagenes Ack).
+catalog_note: >
+  Playwright mappt dies auf mehrere Tests in einer Datei: Tab „Aktiv“ nur im ersten Test;
+  der P1-Ack-Test öffnet den Drawer und klickt Ack ohne vorherigen Tab-Wechsel.
+  Untenstehende Schritte sind die zusammengeführte Referenzsequenz (Contract), nicht ein einzelner `test()`.
+
+# Repo-Ist (global-setup.ts): nicht E2E_USER/E2E_PASSWORD aus älterem Konzept-Beispiel
+required_env:
+  PLAYWRIGHT_BASE_URL: string
+  E2E_TEST_USER: string
+  E2E_TEST_PASSWORD: string
+
+playwright_spec: tests/e2e/scenarios/alert-center.spec.ts
+playwright_grep: "Alert Center / Notification Drawer"
+
+data_fixtures:
+  - type: playwright_route_mock
+    description: >
+      Test „P1 Finalität“ mockt GET/PATCH /api/v1/notifications** (siehe alert-center.spec.ts).
+
+steps:
+  - id: open_drawer
+    action: click
+    target: { testid: notification-drawer-trigger }
+  - id: filter_active
+    action: click
+    target: { testid: alert-status-tab-active }
+  - id: acknowledge_first_active
+    action: click
+    target: { testid: notification-alert-ack-e2e-p1-ack-fail }
+
+assertions:
+  - after_step: open_drawer
+    type: dom
+    description: notification-drawer-panel sichtbar (expect_visible)
+  - after_step: filter_active
+    type: dom
+    description: Tab „Aktiv“ trägt Klasse drawer__status-tab--active (toHaveClass)
+  - after_step: acknowledge_first_active
+    type: dom
+    description: Fehlertoast (.toast.toast--error) enthält Text des Mock-500-Body

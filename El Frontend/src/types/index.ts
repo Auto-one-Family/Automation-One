@@ -784,6 +784,8 @@ export interface SensorConfigResponse {
   latest_timestamp?: string | null
   created_at: string
   updated_at: string
+  /** MQTT send_config correlation_id for this save; matches WS config_response / config_published */
+  correlation_id?: string | null
 }
 
 // =============================================================================

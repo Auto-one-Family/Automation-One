@@ -50,11 +50,18 @@ export interface CalibrationSessionResponse {
   failure_reason: string | null
 }
 
+/** Aligniert mit Backend Session-Start; Feuchte kanonisch `moisture_2point`. */
+export type CalibrationSessionMethod =
+  | 'linear_2point'
+  | 'moisture_2point'
+  | 'offset'
+  | string
+
 export interface StartSessionRequest {
   esp_id: string
   gpio: number
   sensor_type: string
-  method?: string
+  method?: CalibrationSessionMethod
   expected_points?: number
 }
 
@@ -87,6 +94,12 @@ function normalizeCalibrationPoints(points: CalibrationPoint[]): CalibrationPoin
   return points.filter((point) =>
     Number.isFinite(point.raw) && Number.isFinite(point.reference),
   )
+}
+
+/** Wie useCalibrationWizard: Alias fuer Server-Typ `moisture`. */
+function normalizeCalibrationSensorType(sensorType: string): string {
+  const normalized = sensorType.trim().toLowerCase()
+  return normalized === 'soil_moisture' ? 'moisture' : normalized
 }
 
 /**
@@ -123,15 +136,18 @@ export const calibrationApi = {
     }
 
     // JWT fallback path: run the newer session-based lifecycle.
-    const sessionMethod =
+    const normalizedSensorType = normalizeCalibrationSensorType(request.sensor_type)
+    const sessionMethod: CalibrationSessionMethod =
       request.method === 'offset'
         ? 'offset'
-        : 'linear_2point'
+        : normalizedSensorType === 'moisture'
+          ? 'moisture_2point'
+          : 'linear_2point'
 
     const session = await calibrationApi.startSession({
       esp_id: request.esp_id,
       gpio: request.gpio,
-      sensor_type: request.sensor_type,
+      sensor_type: normalizedSensorType,
       method: sessionMethod,
       expected_points: requiredPoints,
     })

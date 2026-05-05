@@ -13,6 +13,8 @@ import { formatDateTime, formatRelativeTime } from '@/utils/formatters'
 import { useUiStore } from '@/shared/stores/ui.store'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { useToast } from '@/composables/useToast'
+import { useRuleLifecycleBadge } from '@/composables/useRuleLifecycleBadge'
+import BaseBadge from '@/shared/design/primitives/BaseBadge.vue'
 import type {
   LogicRule,
   SensorCondition,
@@ -50,34 +52,11 @@ const quickName = ref(props.rule.name)
 const quickFirstNodeDraft = ref<Record<string, unknown> | null>(null)
 const sensorOperatorOptions = ['>', '>=', '<', '<=', '==', '!=', 'between'] as const
 
-/** Status dot + label based on enabled and last execution */
-const statusInfo = computed(() => {
-  if (props.lifecycle?.state === 'terminal_conflict') {
-    return { label: 'Konflikt', cssClass: 'rule-card-compact__status--warning' }
-  }
-  if (props.lifecycle?.state === 'terminal_integration_issue') {
-    return { label: 'Integration', cssClass: 'rule-card-compact__status--error' }
-  }
-  if (props.lifecycle?.state === 'terminal_failed') {
-    return { label: 'Fehler', cssClass: 'rule-card-compact__status--error' }
-  }
-  if (props.lifecycle?.state === 'terminal_success') {
-    return { label: 'Erfolg', cssClass: 'rule-card-compact__status--active' }
-  }
-  if (props.lifecycle?.state === 'accepted') {
-    return { label: 'Angenommen', cssClass: 'rule-card-compact__status--pending' }
-  }
-  if (props.lifecycle?.state === 'pending_activation') {
-    return { label: 'Aktivierung...', cssClass: 'rule-card-compact__status--pending' }
-  }
-  if (props.lifecycle?.state === 'pending_execution') {
-    return { label: 'Ausfuehrung...', cssClass: 'rule-card-compact__status--pending' }
-  }
-  if (props.rule.enabled) {
-    return { label: 'Aktiv', cssClass: 'rule-card-compact__status--active' }
-  }
-  return { label: 'Deaktiviert', cssClass: 'rule-card-compact__status--disabled' }
-})
+const { label: lifecycleLabel, variant: lifecycleVariant, isPulsing: lifecycleIsPulsing } =
+  useRuleLifecycleBadge(
+    () => props.lifecycle ?? null,
+    () => props.rule.enabled,
+  )
 
 const hasError = computed(
   () =>
@@ -93,7 +72,7 @@ const statusAriaLabel = computed(() => {
   const base = `Regel ${props.rule.name} öffnen`
   if (hasError.value) return `${base}. Status: Fehler.`
   if (props.isActive) return `${base}. Wird ausgeführt.`
-  return `${base}. ${statusInfo.value.label}.`
+  return `${base}. ${lifecycleLabel.value}.`
 })
 
 /** Optional 1-line badge: first condition + action */
@@ -327,7 +306,7 @@ async function saveQuickSettings(): Promise<void> {
             rule.enabled ? 'rule-card-compact__status-dot--on' : 'rule-card-compact__status-dot--off',
             { 'rule-card-compact__status-dot--error': hasError },
           ]"
-          :title="statusInfo.label"
+          :title="lifecycleLabel"
         />
         <span v-if="rule.is_critical" class="rule-card-compact__critical-badge" title="Kritische Regel">
           <ShieldAlert class="rule-card-compact__critical-icon" />
@@ -337,9 +316,14 @@ async function saveQuickSettings(): Promise<void> {
         <span v-if="isDegraded" class="rule-card-compact__degraded-pill" :title="rule.degraded_reason || 'Degradiert'">
           Degradiert
         </span>
-        <span class="rule-card-compact__status" :class="statusInfo.cssClass">
-          {{ statusInfo.label }}
-        </span>
+        <BaseBadge
+          class="rule-card-compact__lifecycle-badge"
+          :variant="lifecycleVariant"
+          size="xs"
+          :pulse="lifecycleIsPulsing"
+        >
+          {{ lifecycleLabel }}
+        </BaseBadge>
         <AlertCircle
           v-if="hasError"
           class="rule-card-compact__error-icon"
@@ -761,7 +745,7 @@ async function saveQuickSettings(): Promise<void> {
 }
 
 .rule-card-compact__history-command--on {
-  color: var(--color-status-good);
+  color: var(--color-success);
 }
 
 .rule-card-compact__history-command--off {
@@ -799,7 +783,7 @@ async function saveQuickSettings(): Promise<void> {
 @keyframes rule-compact-flash {
   0% {
     box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
-    border-color: var(--color-status-good);
+    border-color: var(--color-success);
   }
   100% {
     box-shadow: 0 0 0 0 transparent;
@@ -809,12 +793,12 @@ async function saveQuickSettings(): Promise<void> {
 
 .rule-card-compact--error {
   border-color: rgba(248, 113, 113, 0.4);
-  border-left: 3px solid var(--color-status-alarm);
+  border-left: 3px solid var(--color-error);
 }
 
 .rule-card-compact--error:hover {
   border-color: rgba(248, 113, 113, 0.6);
-  border-left-color: var(--color-status-alarm);
+  border-left-color: var(--color-error);
 }
 
 .rule-card-compact__header {
@@ -832,8 +816,8 @@ async function saveQuickSettings(): Promise<void> {
 }
 
 .rule-card-compact__status-dot--on {
-  background: var(--color-status-good);
-  box-shadow: 0 0 4px var(--color-status-good);
+  background: var(--color-success);
+  box-shadow: 0 0 4px var(--color-success);
 }
 
 .rule-card-compact__status-dot--off {
@@ -841,8 +825,8 @@ async function saveQuickSettings(): Promise<void> {
 }
 
 .rule-card-compact__status-dot--error {
-  background: var(--color-status-alarm);
-  box-shadow: 0 0 4px var(--color-status-alarm);
+  background: var(--color-error);
+  box-shadow: 0 0 4px var(--color-error);
 }
 
 .rule-card-compact__name {
@@ -855,37 +839,15 @@ async function saveQuickSettings(): Promise<void> {
   text-overflow: ellipsis;
 }
 
-.rule-card-compact__status {
-  font-size: var(--text-xxs);
-  font-weight: 600;
-  letter-spacing: 0.03em;
+/* Lifecycle status badge — rendered by BaseBadge, needs flex alignment */
+.rule-card-compact__lifecycle-badge {
   flex-shrink: 0;
-}
-
-.rule-card-compact__status--active {
-  color: var(--color-status-good);
-}
-
-.rule-card-compact__status--disabled {
-  color: var(--color-text-muted);
-}
-
-.rule-card-compact__status--error {
-  color: var(--color-status-alarm);
-}
-
-.rule-card-compact__status--warning {
-  color: var(--color-warning);
-}
-
-.rule-card-compact__status--pending {
-  color: var(--color-warning);
 }
 
 .rule-card-compact__error-icon {
   width: 12px;
   height: 12px;
-  color: var(--color-status-alarm);
+  color: var(--color-error);
   flex-shrink: 0;
 }
 
@@ -959,7 +921,7 @@ async function saveQuickSettings(): Promise<void> {
   font-size: var(--text-xxs);
   font-weight: 700;
   letter-spacing: 0.03em;
-  color: var(--color-status-alarm, var(--color-status-error));
+  color: var(--color-error);
   background: rgba(248, 113, 113, 0.12);
   border: 1px solid rgba(248, 113, 113, 0.3);
   border-radius: var(--radius-full);

@@ -28,7 +28,9 @@ import {
 } from 'lucide-vue-next'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
 import AlertStatusBar from '@/components/notifications/AlertStatusBar.vue'
+import NotificationBadge from '@/components/notifications/NotificationBadge.vue'
 import StatusPill from '@/components/dashboard/StatusPill.vue'
+import HeaderDeviceStatus from '@/components/layout/HeaderDeviceStatus.vue'
 
 const emit = defineEmits<{
   'toggle-sidebar': []
@@ -91,27 +93,6 @@ const pendingAndUnassignedCount = computed(() =>
   espStore.pendingDevices.length + espStore.unassignedDevices.length
 )
 
-const headerMetrics = computed(() => ([
-  {
-    key: 'real',
-    label: 'Real',
-    value: dashStore.deviceCounts.real,
-    variant: 'header__metric-chip--real',
-  },
-  {
-    key: 'mock',
-    label: 'Mock',
-    value: dashStore.deviceCounts.mock,
-    variant: 'header__metric-chip--mock',
-  },
-  {
-    key: 'offline',
-    label: 'Offline',
-    value: dashStore.statusCounts.offline,
-    variant: 'header__metric-chip--offline',
-  },
-]))
-
 async function handleLogout() {
   showUserMenu.value = false
   await authStore.logout()
@@ -140,28 +121,19 @@ async function handleLogout() {
       </nav>
     </div>
 
-    <!-- ═══ CENTER: Dashboard Controls ═══ -->
-    <div v-if="dashStore.showControls" class="header__controls">
-      <!-- Compact metrics chips -->
-      <div class="header__metrics" aria-label="Dashboard-Metriken">
-        <span
-          v-for="metric in headerMetrics"
-          :key="metric.key"
-          class="header__metric-chip"
-          :class="metric.variant"
-        >
-          {{ metric.label }} {{ metric.value }}
-        </span>
-      </div>
+    <!-- ═══ CENTER: Device Status + Dashboard Controls ═══ -->
+    <div class="header__controls">
+      <!-- Online/Offline/Alarm counters — always visible on all routes -->
+      <HeaderDeviceStatus />
 
-      <!-- Problem Alert (inline) -->
-      <div v-if="dashStore.hasProblems && dashStore.problemMessage" class="header__alert">
+      <!-- Problem Alert (inline, dashboard only) -->
+      <div v-if="dashStore.showControls && dashStore.hasProblems && dashStore.problemMessage" class="header__alert">
         <AlertTriangle class="header__alert-icon" />
         <span class="header__alert-text">{{ dashStore.problemMessage }}</span>
       </div>
 
-      <!-- Desktop Filters — only visible when devices exist (≥1024px) -->
-      <div v-if="dashStore.deviceCounts.all > 0" class="header__filters-desktop">
+      <!-- Error/SafeMode pills — desktop only, dashboard only -->
+      <div v-if="dashStore.showControls && dashStore.deviceCounts.all > 0" class="header__filters-desktop">
         <StatusPill
           v-if="dashStore.statusCounts.warning > 0"
           type="warning"
@@ -178,27 +150,11 @@ async function handleLogout() {
           :active="dashStore.activeStatusFilters.has('safemode')"
           @click="dashStore.toggleStatusFilter('safemode')"
         />
-
-        <!-- Type Segment -->
-        <div class="header__type-segment">
-          <button
-            :class="['header__type-btn', { 'header__type-btn--active': dashStore.filterType === 'all' }]"
-            @click="dashStore.filterType = 'all'"
-          >Alle <span class="header__type-count">{{ dashStore.deviceCounts.all }}</span></button>
-          <button
-            :class="['header__type-btn', 'header__type-btn--mock', { 'header__type-btn--active': dashStore.filterType === 'mock' }]"
-            @click="dashStore.filterType = 'mock'"
-          >Mock <span class="header__type-count">{{ dashStore.deviceCounts.mock }}</span></button>
-          <button
-            :class="['header__type-btn', 'header__type-btn--real', { 'header__type-btn--active': dashStore.filterType === 'real' }]"
-            @click="dashStore.filterType = 'real'"
-          >Real <span class="header__type-count">{{ dashStore.deviceCounts.real }}</span></button>
-        </div>
       </div>
 
-      <!-- Mobile Filter Toggle (<1024px, only when devices exist) -->
+      <!-- Mobile Filter Toggle (<1024px, dashboard only) -->
       <button
-        v-if="dashStore.deviceCounts.all > 0"
+        v-if="dashStore.showControls && dashStore.deviceCounts.all > 0"
         class="header__filter-toggle"
         :class="{ 'header__filter-toggle--active': showMobileFilters }"
         @click="showMobileFilters = !showMobileFilters"
@@ -245,6 +201,7 @@ async function handleLogout() {
 
       <div class="header__alerts-group">
         <div class="header__divider" />
+        <NotificationBadge />
         <!-- Alert Status (Phase 4B — ISA-18.2) -->
         <AlertStatusBar />
         <div class="header__divider" />
@@ -293,7 +250,7 @@ async function handleLogout() {
     </div>
   </header>
 
-  <!-- Mobile Filter Dropdown (slides below header, only when devices exist) -->
+  <!-- Mobile Filter Dropdown (slides below header, error/safemode pills only) -->
   <Transition name="filter-slide">
     <div v-if="dashStore.showControls && showMobileFilters && dashStore.deviceCounts.all > 0" class="header-mobile-filters">
       <div class="header-mobile-filters__pills">
@@ -313,21 +270,6 @@ async function handleLogout() {
           :active="dashStore.activeStatusFilters.has('safemode')"
           @click="dashStore.toggleStatusFilter('safemode')"
         />
-      </div>
-
-      <div class="header-mobile-filters__segment">
-        <button
-          :class="['header__type-btn', { 'header__type-btn--active': dashStore.filterType === 'all' }]"
-          @click="dashStore.filterType = 'all'"
-        >Alle <span class="header__type-count">{{ dashStore.deviceCounts.all }}</span></button>
-        <button
-          :class="['header__type-btn', 'header__type-btn--mock', { 'header__type-btn--active': dashStore.filterType === 'mock' }]"
-          @click="dashStore.filterType = 'mock'"
-        >Mock <span class="header__type-count">{{ dashStore.deviceCounts.mock }}</span></button>
-        <button
-          :class="['header__type-btn', 'header__type-btn--real', { 'header__type-btn--active': dashStore.filterType === 'real' }]"
-          @click="dashStore.filterType = 'real'"
-        >Real <span class="header__type-count">{{ dashStore.deviceCounts.real }}</span></button>
       </div>
     </div>
   </Transition>
@@ -514,55 +456,6 @@ async function handleLogout() {
   cursor: default;
 }
 
-.header__metrics {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  flex-shrink: 0;
-}
-
-.header__metric-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px var(--space-2);
-  border-radius: var(--radius-full);
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-}
-
-.header__metric-chip--real {
-  color: var(--color-real);
-}
-
-.header__metric-chip--mock {
-  color: var(--color-mock);
-}
-
-.header__metric-chip--offline {
-  color: var(--color-warning);
-}
-
-.header__status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-full);
-  flex-shrink: 0;
-}
-
-.header__status-dot--online {
-  background-color: var(--color-success);
-  box-shadow: 0 0 4px var(--color-success);
-}
-
-.header__status-dot--offline {
-  background-color: var(--color-text-muted);
-}
-
 /* ── Problem Alert (inline) ── */
 .header__alert {
   display: flex;
@@ -595,62 +488,6 @@ async function handleLogout() {
   gap: var(--space-1);
 }
 
-/* ── Type Segment Control ── */
-.header__type-segment {
-  display: flex;
-  gap: 1px;
-  background: var(--color-bg-primary);
-  padding: 2px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--glass-border);
-  margin-left: var(--space-2);
-}
-
-.header__type-btn {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 3px 8px;
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-xs);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  white-space: nowrap;
-}
-
-.header__type-btn:hover {
-  color: var(--color-text-secondary);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.header__type-btn--active {
-  color: var(--color-text-primary);
-  background: var(--color-bg-secondary);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-}
-
-.header__type-btn--mock.header__type-btn--active {
-  color: var(--color-mock);
-}
-
-.header__type-btn--real.header__type-btn--active {
-  color: var(--color-real);
-}
-
-.header__type-count {
-  font-size: var(--text-xxs);
-  font-variant-numeric: tabular-nums;
-  opacity: 0.6;
-}
-
-.header__type-btn--active .header__type-count {
-  opacity: 1;
-}
-
 /* ── Mobile Filter Toggle (visible <1024px) ── */
 .header__filter-toggle {
   display: none;
@@ -678,10 +515,6 @@ async function handleLogout() {
 }
 
 @media (max-width: 1399px) {
-  .header__type-segment {
-    display: none;
-  }
-
   .header__crumb--current {
     max-width: 140px;
   }
@@ -725,10 +558,6 @@ async function handleLogout() {
 
   .header__controls {
     justify-content: flex-start;
-  }
-
-  .header__metrics {
-    display: none;
   }
 
   .header__right {
@@ -796,8 +625,6 @@ async function handleLogout() {
   }
 
   .header__status-chip,
-  .header__metric-chip,
-  .header__type-segment,
   .header__action-btn--default {
     background: var(--color-bg-tertiary);
     border-color: var(--glass-border-hover);
@@ -1148,20 +975,6 @@ async function handleLogout() {
   align-items: center;
   gap: var(--space-1);
   flex-wrap: wrap;
-}
-
-.header-mobile-filters__segment {
-  display: flex;
-  gap: 1px;
-  background: var(--color-bg-primary);
-  padding: 2px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--glass-border);
-}
-
-.header-mobile-filters__segment .header__type-btn {
-  flex: 1;
-  justify-content: center;
 }
 
 @media (min-width: 1536px) {

@@ -7,7 +7,8 @@
  * Consolidates phase machine, EC presets, sensor type presets,
  * device selection, API submission, and navigation logic.
  *
- * Delegates math/point-state to useCalibration (pure computation layer).
+ * Bodenfeuchte nutzt `method: moisture_2point`, damit der Server `derived` mit
+ * dry_value/wet_value fuer den MoistureSensorProcessor schreibt (Schema-Alignment).
  *
  * Phase: F-P1 (State-Refactor)
  */
@@ -19,6 +20,7 @@ import { sensorsApi } from '@/api/sensors'
 import { formatUiApiError, toUiApiError } from '@/api/uiApiError'
 import { useUiStore } from '@/shared/stores/ui.store'
 import { useWebSocket } from '@/composables/useWebSocket'
+import type { WebSocketMessage } from '@/services/websocket'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -187,6 +189,11 @@ function normalizeCalibrationSensorType(sensorType: string): string {
   return normalized === 'soil_moisture' ? 'moisture' : normalized
 }
 
+/** Kalibrier-Methode fuer die Session-API: Feuchte → moisture_2point (Server leitet dry/wet ab). */
+function calibrationApiMethodForSensorType(normalizedSensorType: string): 'moisture_2point' | 'linear_2point' {
+  return normalizedSensorType === 'moisture' ? 'moisture_2point' : 'linear_2point'
+}
+
 // ─── Composable ───────────────────────────────────────────────────────────────
 
 export function useCalibrationWizard(
@@ -219,8 +226,11 @@ export function useCalibrationWizard(
   const isFreshMeasurement = ref(false)
   const lastMeasurementAt = ref<number | null>(null)
   const measurementRequestId = ref<string | null>(null)
+<<<<<<< Updated upstream
   const measurementTriggerAt = ref<number | null>(null)
   const measureCooldownTimerId = ref<ReturnType<typeof setTimeout> | null>(null)
+=======
+>>>>>>> Stashed changes
   const lifecycleState = ref<CalibrationLifecycleState>('idle')
   const lifecycleMessage = ref('')
 
@@ -237,7 +247,32 @@ export function useCalibrationWizard(
     },
   })
 
-  const unsubscribeMeasurement = ws.on('calibration_measurement_received', (message) => {
+  /** IDs aus WS-Payload + Top-Level correlation_id (Server broadcast) fuer Messung↔Request-Zuordnung. */
+  function measurementCorrelationCandidates(
+    message: WebSocketMessage,
+    data: Record<string, unknown>,
+  ): string[] {
+    const out: string[] = []
+    const push = (v: unknown): void => {
+      if (typeof v === 'string' && v.length > 0) out.push(v)
+    }
+    push(message.correlation_id)
+    push(data.intent_id)
+    push(data.correlation_id)
+    push(data.request_id)
+    return out
+  }
+
+  function matchesActiveMeasurementRequest(
+    message: WebSocketMessage,
+    data: Record<string, unknown>,
+  ): boolean {
+    const expected = measurementRequestId.value
+    if (!expected) return false
+    return measurementCorrelationCandidates(message, data).some((id) => id === expected)
+  }
+
+  const unsubscribeMeasurement = ws.on('calibration_measurement_received', (message: WebSocketMessage) => {
     const data = message.data ?? {}
     if (
       data.esp_id !== selectedEspId.value ||
@@ -253,21 +288,23 @@ export function useCalibrationWizard(
       return
     }
 
-    const intentId = typeof data.intent_id === 'string' ? data.intent_id : null
-    const correlationId = typeof data.correlation_id === 'string' ? data.correlation_id : null
-    if (!intentId && !correlationId) {
+    if (!measurementRequestId.value) {
+      return
+    }
+
+    const ids = measurementCorrelationCandidates(message, data)
+    if (ids.length === 0) {
       isFreshMeasurement.value = false
       lifecycleState.value = 'terminal_integration_issue'
-      lifecycleMessage.value = 'Messung ohne intent/correlation erhalten und verworfen.'
+      lifecycleMessage.value = 'Messung ohne zuordenbare Request-ID (intent/correlation) erhalten und verworfen.'
+      return
+    }
+
+    if (!matchesActiveMeasurementRequest(message, data)) {
       return
     }
 
     const eventReceivedAt = Date.now()
-    const triggeredAt = measurementTriggerAt.value ?? 0
-    if (eventReceivedAt < triggeredAt) {
-      return
-    }
-
     const rawValue = Number(data.raw_value ?? data.raw)
     if (Number.isFinite(rawValue)) {
       setLastRawValue(rawValue, String(data.quality ?? 'good'))
@@ -278,7 +315,7 @@ export function useCalibrationWizard(
     }
   })
 
-  const unsubscribeMeasurementFailed = ws.on('calibration_measurement_failed', (message) => {
+  const unsubscribeMeasurementFailed = ws.on('calibration_measurement_failed', (message: WebSocketMessage) => {
     const data = message.data ?? {}
     if (
       data.esp_id !== selectedEspId.value ||
@@ -286,6 +323,22 @@ export function useCalibrationWizard(
     ) {
       return
     }
+
+    if (!measurementRequestId.value) {
+      return
+    }
+
+    const ids = measurementCorrelationCandidates(message, data)
+    if (ids.length === 0) {
+      lifecycleState.value = 'terminal_integration_issue'
+      lifecycleMessage.value = 'Messfehler ohne zuordenbare Request-ID erhalten.'
+      return
+    }
+
+    if (!matchesActiveMeasurementRequest(message, data)) {
+      return
+    }
+
     measurementQuality.value = 'error'
     isFreshMeasurement.value = false
     lifecycleState.value = 'terminal_failed'
@@ -391,9 +444,12 @@ export function useCalibrationWizard(
     lifecycleMessage.value = ''
     isFreshMeasurement.value = false
     measurementRequestId.value = null
+<<<<<<< Updated upstream
     measurementTriggerAt.value = null
     clearMeasureCooldownTimer()
     isMeasuring.value = false
+=======
+>>>>>>> Stashed changes
   }
 
   async function ensureSessionStarted(): Promise<string> {
@@ -406,8 +462,13 @@ export function useCalibrationWizard(
       esp_id: selectedEspId.value,
       gpio: selectedGpio.value ?? 0,
       sensor_type: selectedSensorType.value,
+<<<<<<< Updated upstream
       method: preset.calibrationMethod,
       expected_points: preset.expectedPoints,
+=======
+      method: calibrationApiMethodForSensorType(selectedSensorType.value),
+      expected_points: 2,
+>>>>>>> Stashed changes
     })
     currentSessionId.value = session.id
     return session.id
@@ -644,14 +705,18 @@ export function useCalibrationWizard(
           esp_id: selectedEspId.value,
           gpio: selectedGpio.value,
           sensor_type: selectedSensorType.value,
+<<<<<<< Updated upstream
           method: preset.calibrationMethod,
           expected_points: preset.expectedPoints,
+=======
+          method: calibrationApiMethodForSensorType(selectedSensorType.value),
+          expected_points: 2,
+>>>>>>> Stashed changes
         })
         currentSessionId.value = session.id
       }
       const triggerResult = await sensorsApi.triggerMeasurement(selectedEspId.value, selectedGpio.value)
       measurementRequestId.value = triggerResult.request_id
-      measurementTriggerAt.value = Date.now()
       lifecycleState.value = 'pending'
       lifecycleMessage.value = `Messung angefordert (Request-ID: ${triggerResult.request_id}).`
     } catch (err: unknown) {
@@ -865,8 +930,11 @@ export function useCalibrationWizard(
     isFreshMeasurement.value = false
     lastMeasurementAt.value = null
     measurementRequestId.value = null
+<<<<<<< Updated upstream
     measurementTriggerAt.value = null
     measurementTriggerAt.value = null
+=======
+>>>>>>> Stashed changes
     lifecycleState.value = 'idle'
     lifecycleMessage.value = ''
     clearDraft()

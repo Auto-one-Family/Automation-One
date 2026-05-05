@@ -60,7 +60,7 @@ const emit = defineEmits<{
 // ============================================================================
 
 const tabs: Tab[] = [
-  { id: 'events', label: 'Ereignisse', icon: Activity },
+  { id: 'events', label: 'Ereignisse (Stream)', icon: Activity },
   { id: 'logs', label: 'Server Logs', icon: FileText },
   { id: 'database', label: 'Datenbank', icon: Database },
   { id: 'mqtt', label: 'MQTT Traffic', icon: MessageSquare },

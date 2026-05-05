@@ -24,12 +24,16 @@ import {
   ShieldCheck,
 } from 'lucide-vue-next'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
-import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
+import {
+  useAlertCenterStore,
+  type AlertLifecycleFailure,
+} from '@/shared/stores/alert-center.store'
 import { useQuickActionStore } from '@/shared/stores/quickAction.store'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { sensorsApi } from '@/api/sensors'
 import { formatRelativeTime } from '@/utils/formatters'
+<<<<<<< Updated upstream
 import {
   getNotificationSeverityLabel,
   getNotificationSourceLabel,
@@ -37,6 +41,9 @@ import {
 } from '@/utils/labels'
 import { buildEspContextRoute } from '@/utils/notificationNavigation'
 import AlertAuditLines from '@/components/notifications/AlertAuditLines.vue'
+=======
+import { formatAlertLifecycleFailureMessage } from '@/utils/alertLifecycleUi'
+>>>>>>> Stashed changes
 import type { NotificationDTO } from '@/api/notifications'
 
 type QuickAlertFilter = 'active' | 'acknowledged' | 'all'
@@ -62,7 +69,7 @@ const alertStore = useAlertCenterStore()
 const quickActionStore = useQuickActionStore()
 const espStore = useEspStore()
 
-const { success, error } = useToast()
+const { success, error, warning } = useToast()
 const expandedId = ref<string | null>(null)
 const mutingId = ref<string | null>(null)
 const snoozeOpenId = ref<string | null>(null)
@@ -120,11 +127,17 @@ function severityDotClass(severity: string): string {
 }
 
 async function handleAck(id: string): Promise<void> {
-  await alertStore.acknowledgeAlert(id)
+  const res = await alertStore.acknowledgeAlert(id)
+  if (!res.success) {
+    error(formatAlertLifecycleFailureMessage(res), { dedupeKey: `qa-ack-${id}` })
+  }
 }
 
 async function handleResolve(id: string): Promise<void> {
-  await alertStore.resolveAlert(id)
+  const res = await alertStore.resolveAlert(id)
+  if (!res.success) {
+    error(formatAlertLifecycleFailureMessage(res), { dedupeKey: `qa-resolve-${id}` })
+  }
 }
 
 async function handleBatchAcknowledge(): Promise<void> {
@@ -133,12 +146,31 @@ async function handleBatchAcknowledge(): Promise<void> {
 
   isBatchAcking.value = true
   try {
+    let okCount = 0
+    let lastFail: AlertLifecycleFailure | null = null
+
     for (const alert of activeAlerts) {
-      await alertStore.acknowledgeAlert(alert.id)
+      const res = await alertStore.acknowledgeAlert(alert.id)
+      if (res.success) {
+        okCount++
+      } else {
+        lastFail = res
+      }
     }
-    success(`${activeAlerts.length} Alerts bestätigt`)
-  } catch (e) {
-    error(e instanceof Error ? e.message : 'Fehler beim Bestätigen')
+
+    if (okCount === activeAlerts.length) {
+      success(`${activeAlerts.length} Alerts bestätigt`)
+    } else if (okCount === 0 && lastFail) {
+      error(formatAlertLifecycleFailureMessage(lastFail), { dedupeKey: 'qa-batch-ack-all-fail' })
+    } else if (lastFail) {
+      warning(
+        `${okCount} von ${activeAlerts.length} Alerts bestätigt. ` +
+          formatAlertLifecycleFailureMessage(lastFail),
+        { dedupeKey: 'qa-batch-ack-partial' },
+      )
+    } else {
+      error('Fehler beim Bestätigen', { dedupeKey: 'qa-batch-ack-unknown' })
+    }
   } finally {
     isBatchAcking.value = false
   }
@@ -218,7 +250,7 @@ async function handleSnooze(
       suppressionMap.value.set(sensorId, until)
       success(`Sensor-Alerts für ${preset.label} stummgeschaltet`)
     }
-    handleAck(notification.id)
+    await handleAck(notification.id)
   } catch (e) {
     error(e instanceof Error ? e.message : 'Fehler beim Stummschalten')
   } finally {
@@ -298,10 +330,20 @@ function handleShowAll(): void {
 </script>
 
 <template>
-  <div class="qa-alert-panel" role="region" aria-label="Quick Alerts">
+  <div
+    class="qa-alert-panel"
+    role="region"
+    aria-label="Quick Alerts"
+    data-testid="quick-alert-panel"
+  >
     <!-- Header -->
     <div class="qa-alert-panel__header">
-      <button class="qa-alert-panel__back" aria-label="Zurück" @click="handleBack">
+      <button
+        class="qa-alert-panel__back"
+        aria-label="Zurück"
+        data-testid="quick-alert-back"
+        @click="handleBack"
+      >
         <ArrowLeft class="qa-alert-panel__back-icon" />
       </button>
       <span class="qa-alert-panel__title">Alerts</span>
@@ -314,18 +356,21 @@ function handleShowAll(): void {
     <div class="qa-alert-panel__filters">
       <button
         :class="['qa-alert-panel__filter', { 'qa-alert-panel__filter--active': statusFilter === 'active' }]"
+        data-testid="quick-alert-filter-active"
         @click="statusFilter = 'active'"
       >
         Aktiv
       </button>
       <button
         :class="['qa-alert-panel__filter', { 'qa-alert-panel__filter--active': statusFilter === 'acknowledged' }]"
+        data-testid="quick-alert-filter-acknowledged"
         @click="statusFilter = 'acknowledged'"
       >
         Bestätigt
       </button>
       <button
         :class="['qa-alert-panel__filter', { 'qa-alert-panel__filter--active': statusFilter === 'all' }]"
+        data-testid="quick-alert-filter-all"
         @click="statusFilter = 'all'"
       >
         Alle
@@ -335,6 +380,7 @@ function handleShowAll(): void {
       <button
         v-if="showBatchAck"
         class="qa-alert-panel__batch-ack"
+        data-testid="quick-alert-batch-ack"
         :disabled="isBatchAcking"
         title="Alle aktiven Alerts bestätigen"
         @click.stop="handleBatchAcknowledge"
@@ -345,11 +391,12 @@ function handleShowAll(): void {
     </div>
 
     <!-- Alert List -->
-    <div v-if="hasAlerts" class="qa-alert-panel__list">
+    <div v-if="hasAlerts" class="qa-alert-panel__list" data-testid="quick-alert-list">
       <div
         v-for="alert in topAlerts"
         :key="alert.id"
         class="alert-item"
+        :data-testid="`quick-alert-row-${alert.id}`"
         :class="{ 'alert-item--expanded': expandedId === alert.id }"
       >
         <!-- Main Row -->
@@ -368,6 +415,7 @@ function handleShowAll(): void {
             <button
               v-if="alert.status === 'active'"
               class="alert-item__action alert-item__action--ack"
+              :data-testid="`quick-alert-ack-${alert.id}`"
               title="Bestätigen (Acknowledge)"
               @click.stop="handleAck(alert.id)"
             >
@@ -376,6 +424,7 @@ function handleShowAll(): void {
             <button
               v-if="alert.status === 'active' || alert.status === 'acknowledged'"
               class="alert-item__action alert-item__action--resolve"
+              :data-testid="`quick-alert-resolve-${alert.id}`"
               title="Erledigen (Resolve)"
               @click.stop="handleResolve(alert.id)"
             >
@@ -489,13 +538,17 @@ function handleShowAll(): void {
     </div>
 
     <!-- Empty State -->
-    <div v-else class="qa-alert-panel__empty">
+    <div v-else class="qa-alert-panel__empty" data-testid="quick-alert-empty">
       <CheckCircle2 class="qa-alert-panel__empty-icon" />
       <span>Keine aktiven Alerts</span>
     </div>
 
     <!-- Footer -->
-    <button class="qa-alert-panel__footer" @click="handleShowAll">
+    <button
+      class="qa-alert-panel__footer"
+      data-testid="quick-alert-show-all"
+      @click="handleShowAll"
+    >
       Alle Alerts anzeigen &rarr;
     </button>
   </div>

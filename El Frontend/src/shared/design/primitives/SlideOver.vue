@@ -22,6 +22,8 @@ interface Props {
   open: boolean
   /** Panel header title */
   title?: string
+  /** Optional one-line context under the title (e.g. operator hints) */
+  subtitle?: string
   /** Panel width variant */
   width?: 'sm' | 'md' | 'lg'
   /** Elevation for stacked modals: 'default' | 'high' (z-index +10 when opened over another SlideOver) */
@@ -30,6 +32,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   title: '',
+  subtitle: '',
   width: 'md',
   elevation: 'default',
 })
@@ -84,7 +87,15 @@ onUnmounted(() => {
           >
             <!-- Header -->
             <header class="slide-over__header">
-              <h2 id="sheet-title" class="slide-over__title">{{ title }}</h2>
+              <div class="slide-over__title-block">
+                <h2 id="sheet-title" class="slide-over__title">{{ title }}</h2>
+                <p
+                  v-if="subtitle"
+                  class="slide-over__subtitle"
+                >
+                  {{ subtitle }}
+                </p>
+              </div>
               <button
                 class="slide-over__close"
                 aria-label="Schließen"
@@ -183,11 +194,17 @@ onUnmounted(() => {
 
 .slide-over__header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: var(--space-3);
   padding: var(--space-4) var(--space-6);
   border-bottom: 1px solid var(--glass-border);
   flex-shrink: 0;
+}
+
+.slide-over__title-block {
+  flex: 1;
+  min-width: 0;
 }
 
 .slide-over__title {
@@ -198,6 +215,14 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.slide-over__subtitle {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--color-text-secondary);
 }
 
 .slide-over__close {

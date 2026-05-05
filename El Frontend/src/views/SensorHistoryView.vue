@@ -159,7 +159,7 @@ const chartOptions = computed(() => {
         displayFormats: { second: 'HH:mm:ss', minute: 'HH:mm', hour: 'HH:mm', day: 'dd.MM' },
       },
       grid: { color: 'rgba(29,29,42,0.8)' },
-      ticks: { color: '#484860', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 8 },
+      ticks: { color: '#5a5a75', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 8 },
       border: { display: false },
     },
     y: {

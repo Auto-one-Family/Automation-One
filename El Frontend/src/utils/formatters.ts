@@ -782,7 +782,7 @@ export function qualityToStatus(quality: string, opts?: QualityToStatusOpts): Se
   }
 
   if (quality === 'good' || quality === 'excellent') return 'good'
-  if (quality === 'fair') return 'warning'
+  if (quality === 'fair' || quality === 'degraded') return 'warning'
   if (quality === 'poor' || quality === 'bad' || quality === 'error') return 'alarm'
   if (quality === 'stale') return 'stale'
   return 'good'

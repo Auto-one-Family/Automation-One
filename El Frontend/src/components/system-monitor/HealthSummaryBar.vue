@@ -254,19 +254,25 @@ function formatErrorTime(isoString: string): string {
       <!-- Alert Chips -->
       <button
         v-if="alertStore.criticalCount > 0"
+        type="button"
         class="alert-chip alert-chip--critical"
+        aria-label="Server-Inbox öffnen: Critical Alerts (nicht Echtzeit-error_event-Stream)"
+        title="Öffnet die Server-Inbox — Echtzeit-Fehler siehe Tab Ereignisse (Stream)"
         @click="handleOpenAlerts"
       >
         <Bell :size="12" />
-        {{ alertStore.criticalCount }} Critical
+        Inbox · {{ alertStore.criticalCount }} Critical
       </button>
       <button
         v-if="alertStore.warningCount > 0"
+        type="button"
         class="alert-chip alert-chip--warning"
+        aria-label="Server-Inbox öffnen: Warning Alerts (nicht Echtzeit-error_event-Stream)"
+        title="Öffnet die Server-Inbox — Echtzeit-Fehler siehe Tab Ereignisse (Stream)"
         @click="handleOpenAlerts"
       >
         <Bell :size="12" />
-        {{ alertStore.warningCount }} Warnings
+        Inbox · {{ alertStore.warningCount }} Warnings
       </button>
     </div>
 

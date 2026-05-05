@@ -12,6 +12,8 @@ import { Zap, Clock, Trash2, AlertCircle, ShieldAlert } from 'lucide-vue-next'
 import { formatDistanceToNow } from 'date-fns'
 import { de } from 'date-fns/locale'
 import type { LogicRule, SensorCondition, ActuatorAction, RuleIntentLifecycle } from '@/types/logic'
+import BaseBadge from '@/shared/design/primitives/BaseBadge.vue'
+import { useRuleLifecycleBadge } from '@/composables/useRuleLifecycleBadge'
 
 interface Props {
   /** The logic rule */
@@ -38,34 +40,11 @@ const emit = defineEmits<{
 
 const isToggling = ref(false)
 
-/** Status label + color based on enabled state and last execution */
-const statusInfo = computed(() => {
-  if (props.lifecycle?.state === 'terminal_conflict') {
-    return { label: 'Konflikt', cssClass: 'rule-card__status-label--warning' }
-  }
-  if (props.lifecycle?.state === 'terminal_integration_issue') {
-    return { label: 'Integration', cssClass: 'rule-card__status-label--error' }
-  }
-  if (props.lifecycle?.state === 'terminal_failed') {
-    return { label: 'Fehler', cssClass: 'rule-card__status-label--error' }
-  }
-  if (props.lifecycle?.state === 'terminal_success') {
-    return { label: 'Erfolg', cssClass: 'rule-card__status-label--active' }
-  }
-  if (props.lifecycle?.state === 'accepted') {
-    return { label: 'Angenommen', cssClass: 'rule-card__status-label--pending' }
-  }
-  if (props.lifecycle?.state === 'pending_activation') {
-    return { label: 'Aktivierung...', cssClass: 'rule-card__status-label--pending' }
-  }
-  if (props.lifecycle?.state === 'pending_execution') {
-    return { label: 'Ausfuehrung...', cssClass: 'rule-card__status-label--pending' }
-  }
-  if (props.rule.enabled) {
-    return { label: 'Aktiv', cssClass: 'rule-card__status-label--active' }
-  }
-  return { label: 'Deaktiviert', cssClass: 'rule-card__status-label--disabled' }
-})
+const { label: lifecycleLabel, variant: lifecycleVariant, isPulsing: lifecycleIsPulsing } =
+  useRuleLifecycleBadge(
+    () => props.lifecycle ?? null,
+    () => props.rule.enabled,
+  )
 
 /** Whether last execution failed */
 const hasError = computed(
@@ -166,9 +145,14 @@ const lastTriggeredText = computed(() => {
       <span v-if="isDegraded" class="rule-card__degraded-pill" :title="rule.degraded_reason || 'Degradiert'">
         Degradiert
       </span>
-      <span class="rule-card__status-label" :class="statusInfo.cssClass">
-        {{ statusInfo.label }}
-      </span>
+      <BaseBadge
+        class="rule-card__lifecycle-badge"
+        :variant="lifecycleVariant"
+        size="xs"
+        :pulse="lifecycleIsPulsing"
+      >
+        {{ lifecycleLabel }}
+      </BaseBadge>
       <span
         v-if="lifecycle?.state === 'terminal_conflict' && lifecycle.terminal_reason_code"
         class="rule-card__reason-code"
@@ -250,7 +234,7 @@ const lastTriggeredText = computed(() => {
 @keyframes rule-flash {
   0% {
     box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
-    border-color: var(--color-status-success);
+    border-color: var(--color-success);
   }
   100% {
     box-shadow: 0 0 0 0 transparent;
@@ -288,8 +272,8 @@ const lastTriggeredText = computed(() => {
 }
 
 .rule-card__status-dot--on {
-  background: var(--color-status-success);
-  box-shadow: 0 0 4px var(--color-status-success);
+  background: var(--color-success);
+  box-shadow: 0 0 4px var(--color-success);
 }
 
 .rule-card__status-dot--off {
@@ -297,8 +281,8 @@ const lastTriggeredText = computed(() => {
 }
 
 .rule-card__status-dot--error {
-  background: var(--color-status-error);
-  box-shadow: 0 0 4px var(--color-status-error);
+  background: var(--color-error);
+  box-shadow: 0 0 4px var(--color-error);
 }
 
 .rule-card__status-dot--toggling {
@@ -310,46 +294,9 @@ const lastTriggeredText = computed(() => {
   50% { opacity: 0.3; }
 }
 
-.rule-card__status-label {
-  display: inline-flex;
-  align-items: center;
-  font-size: var(--text-xxs);
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
+/* Lifecycle status badge — rendered by BaseBadge, needs flex alignment */
+.rule-card__lifecycle-badge {
   flex-shrink: 0;
-}
-
-.rule-card__status-label--active {
-  color: var(--color-status-success);
-  background: color-mix(in srgb, var(--color-status-success) 12%, transparent);
-  border-color: color-mix(in srgb, var(--color-status-success) 25%, transparent);
-}
-
-.rule-card__status-label--disabled {
-  color: var(--color-text-muted);
-  background: color-mix(in srgb, var(--color-text-muted) 8%, transparent);
-  border-color: color-mix(in srgb, var(--color-text-muted) 18%, transparent);
-}
-
-.rule-card__status-label--error {
-  color: var(--color-status-error);
-  background: color-mix(in srgb, var(--color-status-error) 12%, transparent);
-  border-color: color-mix(in srgb, var(--color-status-error) 25%, transparent);
-}
-
-.rule-card__status-label--pending {
-  color: var(--color-warning);
-  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
-  border-color: color-mix(in srgb, var(--color-warning) 25%, transparent);
-}
-
-.rule-card__status-label--warning {
-  color: var(--color-warning);
-  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
-  border-color: color-mix(in srgb, var(--color-warning) 25%, transparent);
 }
 
 .rule-card__reason-code {
@@ -389,7 +336,7 @@ const lastTriggeredText = computed(() => {
   font-size: var(--text-xxs);
   font-weight: 700;
   letter-spacing: 0.03em;
-  color: var(--color-status-error);
+  color: var(--color-error);
   background: rgba(248, 113, 113, 0.12);
   border: 1px solid rgba(248, 113, 113, 0.3);
   border-radius: var(--radius-full);
@@ -406,7 +353,7 @@ const lastTriggeredText = computed(() => {
 .rule-card__error-icon {
   width: 12px;
   height: 12px;
-  color: var(--color-status-error);
+  color: var(--color-error);
   flex-shrink: 0;
 }
 
@@ -446,7 +393,7 @@ const lastTriggeredText = computed(() => {
 .rule-card__delete-icon {
   width: 12px;
   height: 12px;
-  color: var(--color-status-error);
+  color: var(--color-error);
 }
 
 .rule-card__flow {
@@ -478,7 +425,7 @@ const lastTriggeredText = computed(() => {
 }
 
 .rule-card__badge--action {
-  color: var(--color-status-success);
+  color: var(--color-success);
   background: rgba(34, 197, 94, 0.1);
   border: 1px solid rgba(34, 197, 94, 0.2);
 }

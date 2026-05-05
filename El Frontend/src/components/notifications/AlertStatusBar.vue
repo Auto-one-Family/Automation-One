@@ -6,6 +6,7 @@
 import { computed } from 'vue'
 import { AlertTriangle, BellRing } from 'lucide-vue-next'
 import { useAlertCenterStore } from '@/shared/stores'
+import { STATS_POLL_INTERVAL_MS } from '@/shared/stores/alert-center.store'
 import { useEspStore } from '@/stores/esp'
 import { useNotificationInboxStore } from '@/shared/stores/notification-inbox.store'
 
@@ -55,12 +56,19 @@ const stateText = computed(() => {
   return 'Stabil'
 })
 
+const kpiPollSeconds = Math.round(STATS_POLL_INTERVAL_MS / 1000)
+
 const assistiveLabel = computed(() => {
   const parts = [primaryText.value, stateText.value]
   if (mttrText.value !== '–') parts.push(`durchschnittliche Lösungszeit ${mttrText.value}`)
   if (acknowledgedCount.value > 0) parts.push(`${acknowledgedCount.value} bestätigt`)
   if (unreadCount.value > 0) parts.push(`${unreadCount.value} neue Benachrichtigungen`)
+<<<<<<< Updated upstream
   return `${parts.join(', ')}. Klicken für Benachrichtigungen und Alerts (aktive Alerts im Fokus).`
+=======
+  parts.push(`KPI-Zähler alle ${kpiPollSeconds}s; Liste per WebSocket oft schneller`)
+  return `${parts.join(', ')}. Klicken für Details. Server-Inbox — Echtzeit-Fehler (error_event) nur als Toast.`
+>>>>>>> Stashed changes
 })
 
 </script>
@@ -68,8 +76,10 @@ const assistiveLabel = computed(() => {
 <template>
   <button
     v-if="showBar && alertStore.alertStats"
+    type="button"
     class="alert-status-bar"
     :class="{ 'alert-status-bar--critical': isCritical }"
+    data-testid="notification-drawer-trigger-status-bar"
     :title="assistiveLabel"
     :aria-label="assistiveLabel"
     @click="inboxStore.openDrawerWithActiveAlertsFocus()"

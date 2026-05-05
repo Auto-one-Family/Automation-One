@@ -58,6 +58,9 @@ class WebSocketService {
   private baseReconnectDelay: number = 1000  // Base delay for exponential backoff
   private maxReconnectDelay: number = 30000  // Max 30 seconds
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  /** Keeps dev-proxy / NAT paths from treating the socket as fully idle */
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null
+  private static readonly KEEP_ALIVE_MS = 25_000
   private subscriptions: Map<string, WebSocketSubscription> = new Map()
   private messageQueue: WebSocketMessage[] = []
   private rateLimitWarning: boolean = false
@@ -190,8 +193,12 @@ class WebSocketService {
           this.setStatus('connected')
           this.reconnectAttempts = 0
           this.rateLimitWarning = false
+<<<<<<< Updated upstream
           this.lastSuccessfulConnectAt = Date.now()
           this.lastUnexpectedDisconnectAt = null
+=======
+          this.startKeepAlive()
+>>>>>>> Stashed changes
 
           // Enable visibility handling for tab switches
           this.setupVisibilityHandling()
@@ -212,6 +219,7 @@ class WebSocketService {
         }
 
         this.ws.onclose = (event) => {
+          this.stopKeepAlive()
           logger.info('Disconnected', { code: event.code, reason: event.reason })
           this.setStatus('disconnected')
           this.ws = null
@@ -245,6 +253,7 @@ class WebSocketService {
    * Disconnect from WebSocket
    */
   disconnect(): void {
+    this.stopKeepAlive()
     // Cleanup visibility handling
     this.cleanupVisibilityHandling()
 
@@ -263,6 +272,28 @@ class WebSocketService {
 
     this.setStatus('disconnected')
     this.reconnectAttempts = 0
+  }
+
+  private stopKeepAlive(): void {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer)
+      this.keepAliveTimer = null
+    }
+  }
+
+  private startKeepAlive(): void {
+    this.stopKeepAlive()
+    this.keepAliveTimer = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        this.stopKeepAlive()
+        return
+      }
+      try {
+        this.ws.send(JSON.stringify({ action: 'ping' }))
+      } catch (error) {
+        logger.debug('Keepalive send failed', error)
+      }
+    }, WebSocketService.KEEP_ALIVE_MS)
   }
 
   /**

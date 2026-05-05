@@ -57,10 +57,13 @@ const severityClass = computed(() => {
 
 <template>
   <button
+    type="button"
     :class="['notification-badge', severityClass]"
+    data-testid="notification-drawer-trigger"
+    aria-label="Server-Inbox öffnen (Meldungen und Alerts, nicht Echtzeit-Fehlerstrom)"
     :title="alertStore.unresolvedCount > 0
-      ? `${alertStore.unresolvedCount} aktive Alerts`
-      : `${inboxStore.unreadCount} ungelesene Benachrichtigungen`"
+      ? `Server-Inbox: ${alertStore.unresolvedCount} aktive Alerts (Echtzeit-Fehler nur als Toast)`
+      : `Server-Inbox: ${inboxStore.unreadCount} ungelesen (Echtzeit-Fehler nur als Toast)`"
     @click="inboxStore.toggleDrawer()"
   >
     <Bell class="notification-badge__icon" />

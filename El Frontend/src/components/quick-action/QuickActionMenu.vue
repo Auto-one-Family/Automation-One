@@ -53,6 +53,7 @@ function handleWidgetKeydown(e: KeyboardEvent, item: WidgetDragItem): void {
         :badge-variant="action.badgeVariant"
         :shortcut-hint="action.shortcutHint"
         :disabled="action.disabled"
+        :data-testid="`quick-action-item-${action.id}`"
         role="menuitem"
         @click="handleAction(action.id)"
       />
@@ -116,6 +117,7 @@ function handleWidgetKeydown(e: KeyboardEvent, item: WidgetDragItem): void {
           : action.badgeVariant"
         :shortcut-hint="action.shortcutHint"
         :disabled="action.disabled"
+        :data-testid="`quick-action-item-${action.id}`"
         role="menuitem"
         @click="handleAction(action.id)"
       />

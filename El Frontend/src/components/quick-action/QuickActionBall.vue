@@ -103,6 +103,7 @@ onUnmounted(() => {
     <!-- FAB Button -->
     <button
       class="qa-fab__button"
+      data-testid="quick-action-fab-toggle"
       :class="{
         'qa-fab__button--open': store.isMenuOpen,
         'qa-fab__button--critical': !store.isMenuOpen && store.isCritical,

@@ -11,6 +11,9 @@
  * - Real-time: WS notification_unread_count → update badge count
  *
  * Cross-store: esp.store.ts WS-Dispatcher delegates 3 events here.
+ *
+ * P3: inboxLiveTouchedAt = letzte Änderung an Liste/Zähler (REST oder WS) — für Abgleich mit
+ * alert-center.statsSyncedAt (KPI-Polling), siehe NotificationDrawer.
  */
 
 import { defineStore } from 'pinia'
@@ -67,6 +70,12 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
   const hasMore = ref(true)
   const currentPage = ref(1)
   const totalItems = ref(0)
+  /** Letzte lokale Änderung an Inbox-Liste oder unreadCount (ms) — P3 Live vs. KPI-Poll. */
+  const inboxLiveTouchedAt = ref<number | null>(null)
+
+  function touchInboxLive(): void {
+    inboxLiveTouchedAt.value = Date.now()
+  }
 
   function isCurrentUserEvent(data: Record<string, unknown>): boolean {
     const eventUserIdRaw = data.user_id as string | number | undefined
@@ -243,6 +252,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
       unreadCount.value = countRes.unread_count
       highestSeverity.value = countRes.highest_severity
 
+      touchInboxLive()
       logger.info(
         `Reloaded ${listRes.data.length} notifications (filtered), ${countRes.unread_count} unread`,
       )
@@ -312,6 +322,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
       notifications.value.push(...res.data)
       currentPage.value = nextPage
       hasMore.value = notifications.value.length < res.pagination.total_items
+      touchInboxLive()
 
       logger.debug(`Loaded page ${nextPage}, total items: ${notifications.value.length}`)
     } catch (err) {
@@ -445,6 +456,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     notifications.value.unshift(notification)
     unreadCount.value++
     totalItems.value++
+    touchInboxLive()
 
     // Update highest severity
     if (
@@ -515,6 +527,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
       notifications.value[idx].resolved_at = data.resolved_at as string | null
     }
 
+    touchInboxLive()
     logger.debug(`WS notification_updated: ${id}`)
   }
 
@@ -527,6 +540,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
 
     unreadCount.value = (data.unread_count as number) || 0
     highestSeverity.value = (data.highest_severity as NotificationSeverity) || null
+    touchInboxLive()
 
     logger.debug(`WS unread count: ${unreadCount.value}`)
   }
@@ -539,6 +553,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     const idx = notifications.value.findIndex((n) => n.id === updated.id)
     if (idx < 0) return false
     notifications.value[idx] = updated
+    touchInboxLive()
     return true
   }
 
@@ -585,6 +600,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     setSourceFilter,
     isLoading,
     hasMore,
+    inboxLiveTouchedAt,
 
     // Computed
     groupedNotifications,

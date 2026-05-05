@@ -172,6 +172,6 @@ function handleInput(value: unknown): void {
 
 .form-field__error {
   font-size: var(--text-xs);
-  color: var(--color-status-error);
+  color: var(--color-error);
 }
 </style>

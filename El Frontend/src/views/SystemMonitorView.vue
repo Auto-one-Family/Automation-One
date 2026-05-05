@@ -50,6 +50,7 @@ const logger = createLogger('SystemMonitor')
 // Sub-Components (always rendered)
 import MonitorTabs, { type TabId } from '@/components/system-monitor/MonitorTabs.vue'
 import HealthSummaryBar from '@/components/system-monitor/HealthSummaryBar.vue'
+import RestRequestIdDevBar from '@/components/system-monitor/RestRequestIdDevBar.vue'
 
 // Tab Content Components — lazy-loaded to reduce initial module request burst.
 // Only the active tab triggers its import, preventing ERR_INSUFFICIENT_RESOURCES.
@@ -1251,6 +1252,7 @@ watch(activeTab, (newTab) => {
       @open-cleanup-panel="showCleanupPanel = true"
     />
 
+<<<<<<< Updated upstream
     <div
       v-if="isCorrelationDeepLink"
       class="correlation-deep-link-banner"
@@ -1268,6 +1270,9 @@ watch(activeTab, (newTab) => {
         Korrelation schließen
       </button>
     </div>
+=======
+    <RestRequestIdDevBar />
+>>>>>>> Stashed changes
 
     <div v-if="opsBannerEntries.length > 0" class="ops-banner">
       <div class="ops-banner__title">High-Risk Jobs</div>

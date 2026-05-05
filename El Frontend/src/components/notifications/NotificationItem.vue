@@ -170,6 +170,7 @@ function navigateToCorrelation(): void {
 <template>
   <div
     :class="['item', { 'item--unread': !notification.is_read, 'item--resolved': isResolved }]"
+    :data-testid="`notification-item-${notification.id}`"
     @click="isExpanded = !isExpanded"
   >
     <!-- Top Row -->
@@ -250,13 +251,19 @@ function navigateToCorrelation(): void {
               <span v-if="emailProvider" class="item__email-provider">via {{ emailProvider }}</span>
             </span>
           </div>
+          <div v-if="notification.correlation_id" class="item__detail">
+            <span class="item__detail-label">Korrelation (MQTT/Log)</span>
+            <span class="item__detail-value item__correlation-id">{{ notification.correlation_id }}</span>
+          </div>
         </div>
 
         <div class="item__actions">
           <button
             v-if="canAcknowledge"
+            type="button"
             class="item__action item__action--ack"
             title="Alert bestätigen (Acknowledge)"
+            :data-testid="`notification-alert-ack-${notification.id}`"
             @click.stop="handleAcknowledge"
           >
             <ShieldCheck class="item__action-icon" />
@@ -264,8 +271,10 @@ function navigateToCorrelation(): void {
           </button>
           <button
             v-if="canResolve"
+            type="button"
             class="item__action item__action--resolve"
             title="Alert erledigen (Resolve)"
+            :data-testid="`notification-alert-resolve-${notification.id}`"
             @click.stop="handleResolve"
           >
             <CheckCheck class="item__action-icon" />
@@ -543,6 +552,11 @@ function navigateToCorrelation(): void {
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
+}
+
+.item__correlation-id {
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 /* Email Status (Phase C V1.1) */

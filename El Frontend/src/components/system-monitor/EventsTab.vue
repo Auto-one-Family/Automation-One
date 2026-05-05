@@ -113,6 +113,12 @@ function selectEvent(event: UnifiedEvent) {
 
 <template>
   <div class="events-tab">
+    <p
+      class="events-tab__stream-hint"
+      data-testid="system-monitor-events-stream-hint"
+    >
+      Echtzeit-Stream inkl. Fehler — Inbox/Ack im Meldungs-Panel (Glocke).
+    </p>
     <!-- Filter Section (fixed at top) - DataSourceSelector now includes all filters -->
     <div class="events-filters">
       <DataSourceSelector
@@ -156,6 +162,15 @@ function selectEvent(event: UnifiedEvent) {
   flex-direction: column;
   flex: 1;  /* ⭐ FIX: Nutze flex: 1 statt height: 100% für korrekte Flexbox-Hierarchie */
   /* ⭐ Page-Scroll: Kein overflow: hidden - Seite scrollt als Ganzes */
+}
+
+.events-tab__stream-hint {
+  flex-shrink: 0;
+  margin: 0 0 var(--space-2);
+  padding: 0 var(--space-1);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  color: var(--color-text-secondary);
 }
 
 /* =============================================================================

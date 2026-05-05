@@ -85,13 +85,13 @@ onUnmounted(() => {
 })
 
 const QUALITY_COLORS: Record<string, string> = {
-  excellent: 'var(--color-status-success)',
-  good: 'var(--color-status-success)',
+  excellent: 'var(--color-success)',
+  good: 'var(--color-success)',
   fair: 'var(--color-status-warning)',
   poor: 'var(--color-status-warning)',
-  bad: 'var(--color-status-error)',
+  bad: 'var(--color-error)',
   stale: 'var(--color-text-muted)',
-  error: 'var(--color-status-error)',
+  error: 'var(--color-error)',
   unknown: 'var(--color-text-muted)',
 }
 </script>

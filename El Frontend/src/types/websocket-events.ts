@@ -636,6 +636,8 @@ export interface ActuatorAlertEvent extends WebSocketEventBase {
     alert_type: 'emergency_stop' | 'timeout' | 'runtime_exceeded' | 'safety_triggered'
     reason: string
     error_code?: number
+    /** MQTT ingress correlation (Server: generate_mqtt_correlation_id / ContextVar) */
+    correlation_id?: string
   }
 }
 
