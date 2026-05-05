@@ -64,6 +64,7 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  Pencil,
 } from 'lucide-vue-next'
 import ZoneTileCard from '@/components/monitor/ZoneTileCard.vue'
 import ZoneTileInsightBlock from '@/components/monitor/ZoneTileInsightBlock.vue'
@@ -1530,6 +1531,18 @@ const selectedZoneHealthReason = computed(() =>
   selectedZoneKpi.value?.healthReason ?? null,
 )
 
+/**
+ * AUT-237: Direct edit-link for L2 zone dashboard.
+ * Resolves the first inline monitor panel attached to the active zone so the
+ * header can offer a deep-link into the dashboard editor.
+ */
+const zoneDashboardId = computed<string | null>(() => {
+  const zoneId = selectedZoneId.value
+  if (!zoneId) return null
+  const panels = dashStore.inlineMonitorPanelsForZone(zoneId)
+  return panels[0]?.id ?? null
+})
+
 const filteredZoneSensorCount = computed(() =>
   filteredSubzones.value.reduce((sum, sz) => sum + sz.sensors.length, 0)
 )
@@ -2178,6 +2191,16 @@ function handleFabWidgetSelected(widgetType: string) {
           <span class="monitor-view__header-status-dot" />
           <span class="monitor-view__header-status-text">{{ selectedZoneHealthLabel }}</span>
         </div>
+
+        <router-link
+          v-if="zoneDashboardId"
+          :to="`/editor/${zoneDashboardId}`"
+          class="monitor-zone-header__edit-btn"
+          title="Dashboard bearbeiten"
+          aria-label="Dashboard bearbeiten"
+        >
+          <Pencil class="w-3.5 h-3.5" />
+        </router-link>
       </div>
       <p v-if="selectedZoneHealthReason" class="monitor-view__header-reason">
         {{ selectedZoneHealthReason }}
@@ -3012,6 +3035,36 @@ function handleFabWidgetSelected(widgetType: string) {
   border-color: var(--glass-border-hover);
   background: var(--glass-bg-light);
   transform: translateX(-2px);
+}
+
+/* AUT-237: Direct edit-link in L2 zone-header */
+.monitor-zone-header__edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: var(--space-1) var(--space-2);
+  margin-left: var(--space-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.monitor-zone-header__edit-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--glass-bg-light);
+  border-color: var(--glass-border);
+}
+
+.monitor-zone-header__edit-btn:focus-visible {
+  outline: 2px solid var(--color-iridescent-1);
+  outline-offset: 2px;
 }
 
 .monitor-view__header-info {
