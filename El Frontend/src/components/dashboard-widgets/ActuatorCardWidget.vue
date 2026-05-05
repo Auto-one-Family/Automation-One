@@ -5,10 +5,14 @@
  * Fix: Uses local actuatorId ref to survive render() one-shot props.
  * Fix-U: Offline/stale detection via espStore (no props-drilling).
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useEspStore } from '@/stores/esp'
-import { Zap, Power, WifiOff } from 'lucide-vue-next'
+import { useActuatorStore } from '@/shared/stores/actuator.store'
+import { useToast } from '@/composables/useToast'
+import { Zap, Power, WifiOff, Loader2 } from 'lucide-vue-next'
 import type { MockActuator } from '@/types'
+
+const ACTUATOR_COMMAND_TIMEOUT_MS = 15_000
 
 const ZONE_STALE_THRESHOLD_MS = 60_000
 
@@ -23,6 +27,8 @@ const emit = defineEmits<{
 }>()
 
 const espStore = useEspStore()
+const actuatorStore = useActuatorStore()
+const { warning: toastWarning } = useToast()
 
 // Local actuatorId state — survives render() one-shot props (Bug 1b fix)
 const localActuatorId = ref(props.actuatorId || '')
@@ -69,8 +75,36 @@ const isStale = computed(() => {
   return age > ZONE_STALE_THRESHOLD_MS
 })
 
+const commandIsPending = computed(() =>
+  espId.value ? actuatorStore.isActuatorCommandPending(espId.value, gpio.value) : false
+)
+
+const showWarnBadge = ref(false)
+let pendingTimeoutHandle: ReturnType<typeof setTimeout> | null = null
+
+watch(commandIsPending, (pending) => {
+  if (pending) {
+    pendingTimeoutHandle = setTimeout(() => {
+      if (commandIsPending.value) {
+        showWarnBadge.value = true
+        toastWarning('Keine Bestätigung erhalten — Aktor-Befehl möglicherweise nicht ausgeführt.')
+      }
+    }, ACTUATOR_COMMAND_TIMEOUT_MS)
+  } else {
+    if (pendingTimeoutHandle !== null) {
+      clearTimeout(pendingTimeoutHandle)
+      pendingTimeoutHandle = null
+    }
+    showWarnBadge.value = false
+  }
+})
+
+onUnmounted(() => {
+  if (pendingTimeoutHandle !== null) clearTimeout(pendingTimeoutHandle)
+})
+
 async function toggle() {
-  if (!currentActuator.value || isEspOffline.value || isStale.value) return
+  if (!currentActuator.value || isEspOffline.value || isStale.value || commandIsPending.value) return
   const command = currentActuator.value.state ? 'OFF' : 'ON'
   await espStore.sendActuatorCommand(espId.value, gpio.value, command)
 }
@@ -98,20 +132,27 @@ function selectActuator(id: string) {
       </div>
       <div class="actuator-card-widget__controls">
         <span :class="['actuator-card-widget__state-badge', currentActuator.state ? 'actuator-card-widget__state-badge--on' : '']">
-          {{ currentActuator.state ? 'EIN' : 'AUS' }}
+          {{ commandIsPending ? '...' : (currentActuator.state ? 'EIN' : 'AUS') }}
         </span>
         <button
           v-if="!readOnly"
           class="actuator-card-widget__toggle"
-          :class="{ 'actuator-card-widget__toggle--on': currentActuator.state }"
-          :disabled="isEspOffline || isStale"
-          :title="isEspOffline ? 'ESP ist offline' : isStale ? 'Status veraltet' : ''"
+          :class="{ 'actuator-card-widget__toggle--on': currentActuator.state, 'actuator-card-widget__toggle--pending': commandIsPending }"
+          :disabled="isEspOffline || isStale || commandIsPending"
+          :title="commandIsPending ? 'Befehl wird ausgeführt...' : isEspOffline ? 'ESP ist offline' : isStale ? 'Status veraltet' : ''"
           @click.stop="toggle"
         >
-          <Power class="w-4 h-4" />
+          <Loader2 v-if="commandIsPending" class="w-4 h-4 actuator-card-widget__spinner" />
+          <Power v-else class="w-4 h-4" />
         </button>
       </div>
-      <span v-if="isEspOffline" class="actuator-card-widget__status-badge">
+      <span v-if="commandIsPending" class="actuator-card-widget__status-badge actuator-card-widget__status-badge--pending">
+        Wird ausgeführt...
+      </span>
+      <span v-else-if="showWarnBadge" class="actuator-card-widget__status-badge actuator-card-widget__status-badge--warn">
+        Keine Bestätigung
+      </span>
+      <span v-else-if="isEspOffline" class="actuator-card-widget__status-badge">
         <WifiOff :size="10" /> ESP offline
       </span>
       <span v-else-if="isStale" class="actuator-card-widget__status-badge actuator-card-widget__status-badge--stale">
@@ -229,6 +270,28 @@ function selectActuator(id: string) {
 
 .actuator-card-widget__status-badge--stale {
   color: var(--color-warning);
+}
+
+.actuator-card-widget__status-badge--pending {
+  color: var(--color-accent);
+}
+
+.actuator-card-widget__status-badge--warn {
+  color: var(--color-warning);
+}
+
+.actuator-card-widget__toggle--pending {
+  border-color: var(--color-accent);
+  opacity: 0.7;
+}
+
+.actuator-card-widget__spinner {
+  color: var(--color-accent);
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .actuator-card-widget__empty {

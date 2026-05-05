@@ -1597,6 +1597,17 @@ export const useActuatorStore = defineStore('actuator', () => {
     return true
   }
 
+  function isActuatorCommandPending(espId: string, gpio: number): boolean {
+    const key = getIntentKey('actuator', `${espId}:${gpio}`)
+    const intent = intents.get(key)
+    if (!intent) return false
+    return !isTerminalState(intent.state)
+  }
+
+  function getActuatorIntent(espId: string, gpio: number): IntentRecord | undefined {
+    return intents.get(getIntentKey('actuator', `${espId}:${gpio}`))
+  }
+
   return {
     // WS Handlers (called by esp.store dispatcher)
     handleActuatorAlert,
@@ -1623,5 +1634,7 @@ export const useActuatorStore = defineStore('actuator', () => {
     pendingConfigOrders,
     findConfigIntentBySubject,
     dismissConfigTimeout,
+    isActuatorCommandPending,
+    getActuatorIntent,
   }
 })

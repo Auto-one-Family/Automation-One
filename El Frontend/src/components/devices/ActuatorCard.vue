@@ -6,9 +6,9 @@
  * Monitor mode: State badge (read-only), PWM value for PWM actuators, no toggle,
  *               linked rules with status dots, last execution with trigger reason
  */
-import { computed } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import {
-  Power, ChevronRight, WifiOff,
+  Power, ChevronRight, WifiOff, Loader2,
   ToggleRight, Waves, GitBranch, Fan, Flame, Lightbulb, Cog, Activity,
 } from 'lucide-vue-next'
 import { isMockEspId } from '@/composables/useZoneGrouping'
@@ -18,6 +18,10 @@ import { formatConditionShort } from '@/types/logic'
 import { formatRelativeTime, ZONE_STALE_THRESHOLD_MS } from '@/utils/formatters'
 import { getActuatorTypeInfo } from '@/utils/labels'
 import { getSensorLabel, getSensorUnit } from '@/utils/sensorDefaults'
+import { useActuatorStore } from '@/shared/stores/actuator.store'
+import { useToast } from '@/composables/useToast'
+
+const ACTUATOR_COMMAND_TIMEOUT_MS = 15_000
 
 interface Props {
   actuator: ActuatorWithContext
@@ -202,6 +206,43 @@ const acknowledgementLabel = computed(() => {
   return 'Rueckmeldung: bestaetigt'
 })
 
+const actuatorStore = useActuatorStore()
+const { warning: toastWarning } = useToast()
+
+const commandIsPending = computed(() =>
+  actuatorStore.isActuatorCommandPending(props.actuator.esp_id, props.actuator.gpio)
+)
+
+const commandIntent = computed(() =>
+  actuatorStore.getActuatorIntent(props.actuator.esp_id, props.actuator.gpio)
+)
+
+const showWarnBadge = ref(false)
+let pendingTimeoutHandle: ReturnType<typeof setTimeout> | null = null
+
+watch(commandIsPending, (pending) => {
+  if (pending) {
+    pendingTimeoutHandle = setTimeout(() => {
+      if (commandIsPending.value) {
+        showWarnBadge.value = true
+        toastWarning('Keine Bestätigung erhalten — Aktor-Befehl möglicherweise nicht ausgeführt.')
+      }
+    }, ACTUATOR_COMMAND_TIMEOUT_MS)
+  } else {
+    if (pendingTimeoutHandle !== null) {
+      clearTimeout(pendingTimeoutHandle)
+      pendingTimeoutHandle = null
+    }
+    if (commandIntent.value?.terminalOutcome === 'success') {
+      showWarnBadge.value = false
+    }
+  }
+})
+
+onUnmounted(() => {
+  if (pendingTimeoutHandle !== null) clearTimeout(pendingTimeoutHandle)
+})
+
 function handleClick() {
   if (props.mode === 'config') {
     emit('configure', props.actuator)
@@ -232,9 +273,11 @@ function handleToggle(event: Event) {
         :class="[
           'actuator-card__icon',
           actuator.state ? 'actuator-card__icon--on' : 'actuator-card__icon--off',
+          { 'actuator-card__icon--pending': commandIsPending },
         ]"
       >
-        <component :is="actuatorIcon" :class="['w-5 h-5', actuator.state ? 'text-green-400' : 'text-dark-400']" />
+        <Loader2 v-if="commandIsPending" class="w-5 h-5 actuator-card__pending-spinner" />
+        <component v-else :is="actuatorIcon" :class="['w-5 h-5', actuator.state ? 'text-green-400' : 'text-dark-400']" />
       </div>
       <div class="actuator-card__info">
         <div class="actuator-card__title-row">
@@ -268,6 +311,12 @@ function handleToggle(event: Event) {
         <span v-if="actuator.emergency_stopped" class="badge badge-danger">
           Not-Stopp
         </span>
+        <span v-if="commandIsPending" class="actuator-card__badge actuator-card__badge--pending">
+          Wird ausgeführt...
+        </span>
+        <span v-if="showWarnBadge && !commandIsPending" class="actuator-card__badge actuator-card__badge--warn">
+          Keine Bestätigung
+        </span>
         <span v-if="scopeBadge" :class="['actuator-card__scope-badge', scopeBadge.cls]" :title="scopeTooltip">{{ scopeBadge.text }}</span>
         <span v-if="isEspOffline" class="actuator-card__badge actuator-card__badge--offline">
           <WifiOff :size="12" /> ESP offline
@@ -279,6 +328,7 @@ function handleToggle(event: Event) {
           {{ lastCommandAge }}
         </span>
         <span
+          v-if="!commandIsPending && !showWarnBadge"
           class="actuator-card__badge"
           :class="isEspOffline || isStale || isActuatorStale ? 'actuator-card__badge--stale' : 'actuator-card__badge--confirmed'"
         >
@@ -291,11 +341,11 @@ function handleToggle(event: Event) {
       <button
         v-if="mode !== 'monitor'"
         class="btn-secondary btn-sm flex-shrink-0 touch-target"
-        :disabled="actuator.emergency_stopped || isEspOffline || isStale"
-        :title="isEspOffline ? 'ESP ist offline' : isStale ? 'Status veraltet' : ''"
+        :disabled="actuator.emergency_stopped || isEspOffline || isStale || commandIsPending"
+        :title="commandIsPending ? 'Befehl wird ausgeführt...' : isEspOffline ? 'ESP ist offline' : isStale ? 'Status veraltet' : ''"
         @click="handleToggle"
       >
-        {{ actuator.state ? 'Ausschalten' : 'Einschalten' }}
+        {{ commandIsPending ? 'Wird ausgeführt...' : (actuator.state ? 'Ausschalten' : 'Einschalten') }}
       </button>
     </div>
     <div
@@ -671,5 +721,30 @@ function handleToggle(event: Event) {
 
 .actuator-card__badge--confirmed {
   color: var(--color-success);
+}
+
+.actuator-card__badge--pending {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border-radius: var(--radius-xs);
+}
+
+.actuator-card__badge--warn {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  border-radius: var(--radius-xs);
+}
+
+.actuator-card__icon--pending {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.actuator-card__pending-spinner {
+  color: var(--color-accent);
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>
