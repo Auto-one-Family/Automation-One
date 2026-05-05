@@ -10,6 +10,7 @@ PATTERN: Kein Singleton - wird als Dependency injiziert
 import asyncio
 import logging
 import logging.handlers
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -359,6 +360,40 @@ class ConflictManager:
                 extra={"extra": arbitration_payload},
             )
 
+            # AUT-114: Structured rule_conflict_resolved log + WS telemetry event.
+            # Distinct from AUT-131 _emit_conflict_alert (alert-center lifecycle):
+            # this is a pure telemetry signal for system-monitor and dashboards.
+            policy_name = self._decision_mode_for_resolution(resolution)
+            losers_payload = [
+                {
+                    "id": loser_rule_id,
+                    "name": loser_rule_id,  # Conflict-Manager only knows rule_id
+                    "priority": loser_priority,
+                    "reason": "lower_priority",
+                }
+            ]
+            winning_payload = {
+                "id": winner,
+                "name": winner,  # Conflict-Manager only knows rule_id
+                "priority": winner_priority,
+            }
+            correlation_id = (
+                f"conflict_{esp_id}_{gpio}_{int(time.time() * 1000)}"
+            )
+
+            logger.info(
+                "rule_conflict_resolved",
+                extra={
+                    "correlation_id": correlation_id,
+                    "category": "rule_arbitration",
+                    "target_esp_id": esp_id,
+                    "target_gpio": gpio,
+                    "winning_rule": winning_payload,
+                    "losing_rules": losers_payload,
+                    "resolution_policy": policy_name,
+                },
+            )
+
             if self._websocket_manager:
                 try:
                     await self._websocket_manager.broadcast(
@@ -367,6 +402,27 @@ class ConflictManager:
                     )
                 except Exception as ws_err:
                     logger.debug("Conflict arbitration broadcast failed: %s", ws_err)
+
+                # AUT-114: dedicated telemetry event (separate from AUT-131
+                # _emit_conflict_alert which drives the alert-center lifecycle).
+                try:
+                    await self._websocket_manager.broadcast(
+                        "rule_conflict_resolved",
+                        {
+                            "category": "rule_arbitration",
+                            "correlation_id": correlation_id,
+                            "target_esp_id": esp_id,
+                            "target_gpio": gpio,
+                            "winning_rule_id": winner,
+                            "winning_rule_name": winner,
+                            "losing_rule_ids": [loser_rule_id],
+                            "resolution_policy": policy_name,
+                        },
+                    )
+                except Exception as ws_err:
+                    logger.warning(
+                        "rule_conflict_resolved WS broadcast failed: %s", ws_err
+                    )
 
             return winner == rule_id, conflict
 
