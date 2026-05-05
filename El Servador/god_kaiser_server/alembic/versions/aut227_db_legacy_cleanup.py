@@ -1,7 +1,7 @@
 """AUT-227 DB legacy cleanup: device_scope CheckConstraints + assigned_subzones deprecation comment
 
 Revision ID: aut227_db_legacy_cleanup
-Revises: add_critical_degraded
+Revises: add_plants_entity_lifecycle_events
 Create Date: 2026-05-05
 
 AUT-227 Server Cleanup D: DB Legacy-Cleanup.
@@ -25,7 +25,7 @@ import sqlalchemy as sa
 
 
 revision: str = "aut227_db_legacy_cleanup"
-down_revision: Union[str, None] = "add_critical_degraded"
+down_revision: Union[str, None] = "add_plants_entity_lifecycle_events"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
