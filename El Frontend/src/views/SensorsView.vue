@@ -775,7 +775,7 @@ function toggleZoneFilter(zone: string) {
             </label>
           </div>
 
-          <div class="audits-form__row audits-form__row--two">
+          <div class="audits-form__row audits-form__row--two grid-auto-sm">
             <label class="audits-form__field">
               <span class="audits-form__label">Device Serial</span>
               <input
@@ -798,7 +798,7 @@ function toggleZoneFilter(zone: string) {
             </label>
           </div>
 
-          <div class="audits-form__row audits-form__row--two">
+          <div class="audits-form__row audits-form__row--two grid-auto-sm">
             <label class="audits-form__field">
               <span class="audits-form__label">Zone</span>
               <select v-model="uploadForm.zone_id" class="audits-form__input" required>
@@ -860,7 +860,7 @@ function toggleZoneFilter(zone: string) {
         <h2 class="audits-card__title">
           {{ uploadForm.dry_run || (lastResult && needsReviewSnapshots.length === 0 && lastResult.imported === 0) ? 'Vorschau-Ergebnis' : 'Import-Ergebnis' }}
         </h2>
-        <div class="audits-result">
+        <div class="audits-result grid-auto-sm">
           <div class="audits-result__stat">
             <span class="audits-result__value">{{ lastResult.imported }}</span>
             <span class="audits-result__label">Importiert</span>
@@ -1319,8 +1319,6 @@ function toggleZoneFilter(zone: string) {
 }
 
 .audits-form__row--two {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: var(--space-3);
 }
 
@@ -1433,8 +1431,6 @@ function toggleZoneFilter(zone: string) {
 
 /* Result */
 .audits-result {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: var(--space-2);
 }
 

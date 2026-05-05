@@ -33,11 +33,6 @@ import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('AlertCenterStore')
 
-<<<<<<< Updated upstream
-/** Polling interval for alert stats (30s) */
-const STATS_POLL_INTERVAL_MS = 30_000
-const REALTIME_STATS_REFRESH_DEBOUNCE_MS = 600
-=======
 /** Ergebnis von Ack / Resolve / Resolve-All — für einheitliche UI-Finalität (Toast). */
 export type AlertLifecycleFailure = {
   success: false
@@ -54,7 +49,7 @@ function mapAlertLifecycleError(err: unknown, fallback: string): AlertLifecycleF
 
 /** Polling interval for alert stats (30s). Export für Operator-Hinweise (P3 Poll vs. WS). */
 export const STATS_POLL_INTERVAL_MS = 30_000
->>>>>>> Stashed changes
+const REALTIME_STATS_REFRESH_DEBOUNCE_MS = 600
 
 export const useAlertCenterStore = defineStore('alert-center', () => {
   // ═══════════════════════════════════════════════════════════════════════════

@@ -666,7 +666,7 @@ watch(selectedFile, () => {
               </div>
 
               <!-- Details Grid -->
-              <div class="log-details__grid">
+              <div class="log-details__grid grid-auto-sm">
                 <div class="log-details__item">
                   <span class="log-details__label">Zeitstempel</span>
                   <span class="log-details__value">{{ formatTimestamp(log.timestamp) }}</span>
@@ -1163,8 +1163,6 @@ watch(selectedFile, () => {
 
 /* Details Grid */
 .log-details__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   gap: 0.75rem;
   margin-bottom: 1rem;
 }

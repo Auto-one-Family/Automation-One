@@ -193,12 +193,9 @@ class WebSocketService {
           this.setStatus('connected')
           this.reconnectAttempts = 0
           this.rateLimitWarning = false
-<<<<<<< Updated upstream
           this.lastSuccessfulConnectAt = Date.now()
           this.lastUnexpectedDisconnectAt = null
-=======
           this.startKeepAlive()
->>>>>>> Stashed changes
 
           // Enable visibility handling for tab switches
           this.setupVisibilityHandling()

@@ -133,7 +133,7 @@ function handleClose(): void {
         />
       </label>
 
-      <div class="plant-create-form__row">
+      <div class="plant-create-form__row grid-auto-sm">
         <label class="plant-create-form__field">
           <span class="plant-create-form__label">Charge</span>
           <input
@@ -163,7 +163,7 @@ function handleClose(): void {
         </select>
       </label>
 
-      <div class="plant-create-form__row">
+      <div class="plant-create-form__row grid-auto-sm">
         <label class="plant-create-form__field">
           <span class="plant-create-form__label">Zone</span>
           <select v-model="form.zone_id" class="plant-create-form__input">
@@ -221,8 +221,6 @@ function handleClose(): void {
 }
 
 .plant-create-form__row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: var(--space-3);
 }
 

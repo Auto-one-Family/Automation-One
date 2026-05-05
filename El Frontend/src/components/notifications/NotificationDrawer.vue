@@ -12,11 +12,7 @@
  */
 
 import { ref, computed, watch } from 'vue'
-<<<<<<< Updated upstream
-import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp, Filter } from 'lucide-vue-next'
-=======
-import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp, Bell, Activity } from 'lucide-vue-next'
->>>>>>> Stashed changes
+import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp, Filter, Bell, Activity } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import NotificationItem from '@/components/notifications/NotificationItem.vue'
 import NotificationPreferences from '@/components/notifications/NotificationPreferences.vue'
@@ -81,11 +77,10 @@ const statusTabs = computed(() => {
   ]
 })
 
-<<<<<<< Updated upstream
 function setLifecycleFilter(key: StatusFilter): void {
   inboxStore.lifecycleFilter = key === 'all' ? 'all' : key
 }
-=======
+
 /** P3: KPI-Tabs nutzen gepollte Server-Stats; Liste unread/WS kann schneller sein. */
 const syncHintLine = computed(() => {
   const t = alertStore.statsSyncedAt
@@ -105,20 +100,6 @@ const kpiPollHuman = computed(() => {
   const s = Math.round(STATS_POLL_INTERVAL_MS / 1000)
   return `${s}s`
 })
-
-const filteredGroupedNotifications = computed(() => {
-  if (activeStatusFilter.value === 'all') {
-    return inboxStore.groupedNotifications
-  }
-
-  return inboxStore.groupedNotifications
-    .map(group => ({
-      ...group,
-      items: group.items.filter(n => n.status === activeStatusFilter.value),
-    }))
-    .filter(group => group.items.length > 0)
-})
->>>>>>> Stashed changes
 
 function handleClose(): void {
   inboxStore.isDrawerOpen = false
@@ -286,7 +267,6 @@ watch(
       <!-- Advanced: source chips (collapsed by default) -->
       <div class="drawer__advanced">
         <button
-<<<<<<< Updated upstream
           type="button"
           class="drawer__advanced-toggle"
           @click="advancedSourcesOpen = !advancedSourcesOpen"
@@ -297,48 +277,6 @@ watch(
             :is="advancedSourcesOpen ? ChevronUp : ChevronDown"
             class="drawer__advanced-chevron"
           />
-=======
-          v-for="tab in statusTabs"
-          :key="tab.key"
-          type="button"
-          :data-testid="`alert-status-tab-${tab.key}`"
-          :class="[
-            'drawer__status-tab',
-            { 'drawer__status-tab--active': activeStatusFilter === tab.key },
-          ]"
-          @click="activeStatusFilter = tab.key"
-        >
-          {{ tab.label }}
-        </button>
-      </div>
-
-      <p
-        class="drawer__sync-hint"
-        data-testid="notification-drawer-sync-hint"
-        role="status"
-      >
-        <Activity class="drawer__sync-hint-icon" :size="12" aria-hidden="true" />
-        <span class="drawer__sync-hint-text">{{ syncHintLine }}</span>
-        <span v-if="listAheadOfKpiStats" class="drawer__sync-hint-lag">
-          Tab-Zähler können bis zu {{ kpiPollHuman }} hinter der Liste liegen.
-        </span>
-      </p>
-
-      <!-- Source Filter Chips -->
-      <div class="drawer__source-chips">
-        <button
-          v-for="chip in sourceChips"
-          :key="chip.value ?? 'all'"
-          type="button"
-          :data-testid="`notification-source-filter-${chip.value ?? 'all'}`"
-          :class="[
-            'drawer__source-chip',
-            { 'drawer__source-chip--active': inboxStore.sourceFilter === chip.value },
-          ]"
-          @click="inboxStore.setSourceFilter(chip.value)"
-        >
-          {{ chip.label }}
->>>>>>> Stashed changes
         </button>
         <div v-show="advancedSourcesOpen" class="drawer__source-chips">
           <button
@@ -354,6 +292,19 @@ watch(
           </button>
         </div>
       </div>
+
+      <!-- P3: Poll vs. WebSocket — Operator-Hinweis -->
+      <p
+        class="drawer__sync-hint"
+        data-testid="notification-drawer-sync-hint"
+        role="status"
+      >
+        <Activity class="drawer__sync-hint-icon" :size="12" aria-hidden="true" />
+        <span class="drawer__sync-hint-text">{{ syncHintLine }}</span>
+        <span v-if="listAheadOfKpiStats" class="drawer__sync-hint-lag">
+          Tab-Zähler können bis zu {{ kpiPollHuman }} hinter der Liste liegen.
+        </span>
+      </p>
 
       <!-- Notification List -->
       <div class="drawer__list">
@@ -775,16 +726,11 @@ watch(
 }
 
 .drawer__empty-icon {
-<<<<<<< Updated upstream
-  font-size: var(--text-display);
-  opacity: 0.4;
-=======
   width: 32px;
   height: 32px;
   color: var(--color-text-muted);
   opacity: 0.45;
   flex-shrink: 0;
->>>>>>> Stashed changes
 }
 
 .drawer__empty-text {

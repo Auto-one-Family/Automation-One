@@ -499,18 +499,10 @@ class SensorConfigResponse(SensorConfigBase, TimestampMixin):
     )
     correlation_id: Optional[str] = Field(
         None,
-<<<<<<< Updated upstream
-        description="Intent handle der letzten ausgelösten Config-Publish-Operation (falls verfügbar)",
-    )
-    request_id: Optional[str] = Field(
-        None,
-        description="Alias/Fallback-Handle zur Korrelation von REST-Antwort und WS-Config-Lifecycle",
-=======
         description=(
             "MQTT config push correlation_id from the last send_config in this request; "
             "matches ESP config_response and WS config_published/config_failed for UI contract tracking."
         ),
->>>>>>> Stashed changes
     )
 
     model_config = ConfigDict(
