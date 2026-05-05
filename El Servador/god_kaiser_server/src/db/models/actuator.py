@@ -8,6 +8,7 @@ from typing import Optional
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -217,6 +218,11 @@ class ActuatorConfig(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("esp_id", "gpio", name="unique_esp_gpio_actuator"),
         Index("idx_actuator_type_enabled", "actuator_type", "enabled"),
+        # AUT-227: enforce valid device_scope values at the DB layer.
+        CheckConstraint(
+            "device_scope IN ('zone_local', 'multi_zone', 'mobile')",
+            name="ck_actuator_configs_device_scope",
+        ),
     )
 
     def __repr__(self) -> str:

@@ -207,8 +207,8 @@ def _schema_to_model_fields(
         fields["device_scope"] = request.device_scope
     if request.assigned_zones is not None:
         fields["assigned_zones"] = request.assigned_zones
-    if request.assigned_subzones is not None:
-        fields["assigned_subzones"] = request.assigned_subzones
+    # AUT-227: assigned_subzones is DEPRECATED (read-only API).
+    # Writes from clients are ignored; column is not modified.
 
     return fields
 

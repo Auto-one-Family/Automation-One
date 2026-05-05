@@ -5,8 +5,6 @@ Processes raw humidity values from digital sensors into standardized relative hu
 
 Supported Sensors:
 - SHT31 (I2C Temperature & Humidity Sensor)
-- BME280 humidity is implemented in `bme280.py` (separate file because
-  the BME280 ships temperature + pressure + humidity as one device).
 
 Each processor converts raw values to calibrated humidity measurements with
 validation and quality assessment.

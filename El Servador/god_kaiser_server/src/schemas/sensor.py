@@ -357,10 +357,9 @@ class SensorConfigUpdate(BaseModel):
         None,
         description="List of zone_ids this sensor can serve",
     )
-    assigned_subzones: Optional[List[str]] = Field(
-        None,
-        description="List of subzone_ids for static multi-zone",
-    )
+    # NOTE (AUT-227): assigned_subzones removed from SensorConfigUpdate (read-only).
+    # The DB column is DEPRECATED and is not consumed by any business-logic layer.
+    # Reads are still served via SensorConfigResponse for backwards compatibility.
 
 
 class SensorConfigResponse(SensorConfigBase, TimestampMixin):

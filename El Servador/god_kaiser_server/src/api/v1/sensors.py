@@ -257,9 +257,10 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         # =========================================================================
         "device_scope": request.device_scope if request.device_scope is not None else "zone_local",
         "assigned_zones": request.assigned_zones if request.assigned_zones is not None else [],
-        "assigned_subzones": (
-            request.assigned_subzones if request.assigned_subzones is not None else []
-        ),
+        # AUT-227: assigned_subzones is DEPRECATED (read-only API).
+        # Writes from clients are ignored; column persists as empty list for new rows.
+        # Reads continue via the response schema for backwards compatibility.
+        "assigned_subzones": [],
     }
 
 
@@ -723,8 +724,7 @@ async def create_or_update_sensor(
                         existing_vt.device_scope = model_fields["device_scope"]
                     if request.assigned_zones is not None:
                         existing_vt.assigned_zones = model_fields["assigned_zones"]
-                    if request.assigned_subzones is not None:
-                        existing_vt.assigned_subzones = model_fields["assigned_subzones"]
+                    # AUT-227: assigned_subzones is read-only — writes from clients are ignored.
                     existing_vt.config_status = "pending"
                     existing_vt.config_error = None
                     existing_vt.config_error_detail = None
@@ -956,8 +956,7 @@ async def create_or_update_sensor(
             existing.device_scope = model_fields["device_scope"]
         if request.assigned_zones is not None:
             existing.assigned_zones = model_fields["assigned_zones"]
-        if request.assigned_subzones is not None:
-            existing.assigned_subzones = model_fields["assigned_subzones"]
+        # AUT-227: assigned_subzones is read-only — writes from clients are ignored.
         # =========================================================================
         # ADDRESS FIELDS (R20-P1): Update if provided so re-addressing works
         # =========================================================================

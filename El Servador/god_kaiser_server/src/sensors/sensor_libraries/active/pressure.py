@@ -3,14 +3,6 @@ Pressure & Temperature Sensor Library - BMP280 I2C Sensor
 
 Processes raw pressure and temperature values from BMP280 digital sensor.
 
-NAMING CLARIFICATION (BMP280 vs. BME280):
-- BMP280 (this file): Pressure + Temperature only — NO humidity.
-- BME280 (see bme280.py): BMP280 + dedicated humidity sensor.
-Processor types `bmp280_*` and `bme280_*` are intentionally distinct
-in `sensor_type_registry.MULTI_VALUE_SENSORS`. Do NOT alias
-`bme280_*` -> `bmp280_*`; multi-value device assembly relies on
-per-device sub-type prefixes.
-
 BMP280 is a dual-purpose sensor providing both:
 - Barometric Pressure (hPa)
 - Temperature (°C)
