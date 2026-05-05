@@ -2654,11 +2654,12 @@ function handleFabWidgetSelected(widgetType: string) {
       @widget-selected="handleFabWidgetSelected"
     />
 
-    <!-- Add Widget Dialog (D3) -->
+    <!-- Add Widget Dialog (D3) — opened from FAB; not in zone-tile context -->
     <AddWidgetDialog
       :open="showAddWidgetDialog"
       :default-zone-id="selectedZoneId ?? undefined"
       :default-widget-type="addWidgetDefaultType"
+      :tile-context="false"
       @update:open="showAddWidgetDialog = $event"
       @close="showAddWidgetDialog = false"
     />

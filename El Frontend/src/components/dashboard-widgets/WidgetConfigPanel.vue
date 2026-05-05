@@ -16,6 +16,7 @@ import { CHART_COLORS } from '@/utils/chartColors'
 import { useSensorOptions } from '@/composables/useSensorOptions'
 import { sensorsApi } from '@/api/sensors'
 import type { MockActuator } from '@/types'
+import { getWidgetCapabilities } from '@/types/widgetRegistry'
 
 interface Props {
   open: boolean
@@ -41,43 +42,39 @@ watch(() => props.config, (cfg) => {
   localConfig.value = { ...cfg }
 }, { immediate: true, deep: true })
 
-// Determine which fields to show based on widget type
-const hasSensorField = computed(() =>
-  ['line-chart', 'gauge', 'sensor-card', 'historical', 'statistics'].includes(props.widgetType)
-)
-const hasActuatorField = computed(() =>
-  ['actuator-card'].includes(props.widgetType)
-)
-/** Short time range chips (1h/6h/24h/7d/30d) — historical, statistics, fertigation-pair */
-const hasShortTimeRange = computed(() =>
-  ['historical', 'statistics', 'fertigation-pair'].includes(props.widgetType)
-)
-/** Long time range chips (7d/30d/90d/season) — comparison-boxplot, correlation-scatter */
-const hasLongTimeRange = computed(() =>
-  ['comparison-boxplot', 'correlation-scatter'].includes(props.widgetType)
-)
-const hasYRange = computed(() =>
-  ['line-chart', 'historical', 'gauge'].includes(props.widgetType)
-)
+// AUT-247: Widget capability resolution via registry — replaces 10+
+// `computed(() => [...].includes(widgetType))` with one declarative lookup.
+// New widget types add a row to WIDGET_REGISTRY in src/types/widgetRegistry.ts.
+const caps = computed(() => getWidgetCapabilities(props.widgetType))
 
-// AUT-231: Comparison-Boxplot/Correlation-Scatter widget-type-specific computeds
-const hasSensorTypeField = computed(() =>
-  ['comparison-boxplot', 'correlation-scatter'].includes(props.widgetType)
-)
-const hasGroupByField = computed(() => props.widgetType === 'comparison-boxplot')
-const hasAnonymizeField = computed(() => props.widgetType === 'comparison-boxplot')
-const hasCorrelationConfig = computed(() => props.widgetType === 'correlation-scatter')
+const hasSensorField = computed(() => caps.value.hasSensorPicker)
+const hasActuatorField = computed(() => caps.value.hasActuatorPicker)
+/** Short time range chips (1h/6h/24h/7d/30d) */
+const hasShortTimeRange = computed(() => caps.value.hasShortTimeRange)
+/** Long time range chips (7d/30d/90d/season) */
+const hasLongTimeRange = computed(() => caps.value.hasLongTimeRange)
+const hasYRange = computed(() => caps.value.hasYRange)
+
+// AUT-231: Comparison-Boxplot / Correlation-Scatter capability flags
+const hasSensorTypeField = computed(() => caps.value.hasSensorType)
+const hasGroupByField = computed(() => caps.value.hasGroupBy)
+const hasAnonymizeField = computed(() => caps.value.hasAnonymize)
+const hasCorrelationConfig = computed(() => caps.value.hasCorrelationConfig)
 
 // AUT-239 Fix 2: Multi-Sensor list (max 6 sensors)
-const hasMultiSensorField = computed(() => props.widgetType === 'multi-sensor')
-const MULTI_SENSOR_MIN = 1
-const MULTI_SENSOR_MAX = 6
+const hasMultiSensorField = computed(() => caps.value.hasMultiSensorList)
+const MIN_MULTI_SENSOR_COUNT = 1
+const MAX_MULTI_SENSOR_COUNT = 6
 
 const multiSensorList = computed<string[]>(() => {
   const raw = localConfig.value.dataSources
   if (typeof raw !== 'string' || !raw) return []
   return raw.split(',').map((s) => s.trim()).filter(Boolean)
 })
+
+const isMultiSensorMaxReached = computed(
+  () => multiSensorList.value.length >= MAX_MULTI_SENSOR_COUNT,
+)
 
 const showAddSensorPicker = ref(false)
 
@@ -92,7 +89,7 @@ function addMultiSensor(sensorId: string): void {
     showAddSensorPicker.value = false
     return
   }
-  if (list.length >= MULTI_SENSOR_MAX) return
+  if (list.length >= MAX_MULTI_SENSOR_COUNT) return
   list.push(sensorId)
   commitMultiSensorList(list)
   showAddSensorPicker.value = false
@@ -102,7 +99,7 @@ function removeMultiSensor(sensorId: string): void {
   const list = multiSensorList.value.slice()
   const idx = list.indexOf(sensorId)
   if (idx === -1) return
-  if (list.length <= MULTI_SENSOR_MIN) return
+  if (list.length <= MIN_MULTI_SENSOR_COUNT) return
   list.splice(idx, 1)
   commitMultiSensorList(list)
 }
@@ -119,23 +116,15 @@ function getSensorOptionLabel(sensorId: string): string {
 
 const sensorTypeOptions = getSensorTypeOptions()
 
-/** Threshold fields — same widget types as Y-axis (line-chart, gauge, historical) */
-const hasThresholdFields = computed(() =>
-  ['line-chart', 'gauge', 'historical'].includes(props.widgetType)
-)
+/** Threshold fields — sensor widgets that have warn/alarm low/high inputs */
+const hasThresholdFields = computed(() => caps.value.hasThresholds)
 
 /** Widgets that support zoneFilter (AlarmListWidget, ESPHealthWidget, ActuatorRuntimeWidget) */
-const hasZoneFilterField = computed(() =>
-  ['alarm-list', 'esp-health', 'actuator-runtime'].includes(props.widgetType)
-)
+const hasZoneFilterField = computed(() => caps.value.hasZoneFilter)
 
-const hasStatisticsOptions = computed(() =>
-  props.widgetType === 'statistics'
-)
+const hasStatisticsOptions = computed(() => caps.value.hasStatisticsOptions)
 
-const isFertigationPair = computed(() =>
-  props.widgetType === 'fertigation-pair'
-)
+const isFertigationPair = computed(() => caps.value.isFertigationPair)
 
 // Zone 3 is visible only for statistics or fertigation-pair widgets
 const hasZone3 = computed(() =>
@@ -264,6 +253,107 @@ function showSyncMessage(msg: string) {
   syncMessageTimer = setTimeout(() => { thresholdSyncMessage.value = null }, 3000)
 }
 
+// AUT-246: Cache for base sensor thresholds (SensorConfig.thresholds — SSoT for alerts)
+// Used for divergence detection between widget visual lines and sensor base thresholds.
+interface SensorBaseThresholds {
+  warning_min: number | null
+  warning_max: number | null
+  alarm_min: number | null
+  alarm_max: number | null
+}
+const sensorBaseThresholds = ref<SensorBaseThresholds | null>(null)
+const sensorBaseLoadedFor = ref<string | null>(null)
+
+async function fetchSensorBaseThresholds(sensorId: string): Promise<void> {
+  if (sensorBaseLoadedFor.value === sensorId) return
+  const configId = findSensorConfigId(sensorId)
+  if (!configId) {
+    sensorBaseThresholds.value = null
+    sensorBaseLoadedFor.value = sensorId
+    return
+  }
+  try {
+    const cfg = await sensorsApi.getByConfigId(configId)
+    sensorBaseThresholds.value = {
+      warning_min: cfg?.warning_min ?? null,
+      warning_max: cfg?.warning_max ?? null,
+      alarm_min: cfg?.threshold_min ?? null,
+      alarm_max: cfg?.threshold_max ?? null,
+    }
+  } catch {
+    sensorBaseThresholds.value = null
+  } finally {
+    sensorBaseLoadedFor.value = sensorId
+  }
+}
+
+watch(
+  () => localConfig.value.sensorId,
+  (sId) => {
+    if (typeof sId === 'string' && sId) {
+      void fetchSensorBaseThresholds(sId)
+    } else {
+      sensorBaseThresholds.value = null
+      sensorBaseLoadedFor.value = null
+    }
+  },
+  { immediate: true },
+)
+
+/**
+ * AUT-246: True if any widget visual threshold differs from the sensor base threshold.
+ * Used to display a yellow divergence warning so the operator knows alerts are
+ * still triggered by the sensor base threshold, not the visible chart lines.
+ */
+const thresholdsDiverge = computed<boolean>(() => {
+  if (!localConfig.value.showThresholds) return false
+  const base = sensorBaseThresholds.value
+  if (!base) return false
+  const checks: Array<[number | null, number | null | undefined]> = [
+    [base.warning_min, localConfig.value.warnLow],
+    [base.warning_max, localConfig.value.warnHigh],
+    [base.alarm_min, localConfig.value.alarmLow],
+    [base.alarm_max, localConfig.value.alarmHigh],
+  ]
+  for (const [b, w] of checks) {
+    const bVal = b == null ? null : Number(b)
+    const wVal = w == null ? null : Number(w)
+    if (bVal == null && wVal == null) continue
+    if (bVal == null || wVal == null) return true
+    if (Math.abs(bVal - wVal) > 1e-6) return true
+  }
+  return false
+})
+
+/**
+ * AUT-246: Copy sensor base thresholds (SensorConfig.thresholds) into widget config.
+ * One-shot click — no auto-sync. Operator can keep widget thresholds independent.
+ */
+function loadThresholdsFromSensorBase(): void {
+  const base = sensorBaseThresholds.value
+  if (!base) {
+    showSyncMessage('Sensor-Schwellwerte nicht geladen')
+    return
+  }
+  if (
+    base.warning_min == null
+    && base.warning_max == null
+    && base.alarm_min == null
+    && base.alarm_max == null
+  ) {
+    showSyncMessage('Keine Sensor-Schwellwerte konfiguriert')
+    return
+  }
+  const updates: Record<string, any> = { ...localConfig.value, showThresholds: true }
+  if (base.warning_min != null) updates.warnLow = base.warning_min
+  if (base.warning_max != null) updates.warnHigh = base.warning_max
+  if (base.alarm_min != null) updates.alarmLow = base.alarm_min
+  if (base.alarm_max != null) updates.alarmHigh = base.alarm_max
+  localConfig.value = updates
+  emit('update:config', localConfig.value)
+  showSyncMessage('Aus Sensor-Schwelle übernommen')
+}
+
 async function loadThresholdsFromAlertConfig(): Promise<void> {
   const sensorId = localConfig.value.sensorId
   if (!sensorId) {
@@ -306,6 +396,7 @@ async function loadThresholdsFromAlertConfig(): Promise<void> {
 }
 
 const widgetTypeLabels: Record<string, string> = {
+  'sensor-tile': 'Sensor-Kachel',
   'line-chart': 'Linien-Chart',
   'gauge': 'Gauge',
   'sensor-card': 'Sensor-Karte',
@@ -596,7 +687,7 @@ const widgetTypeLabels: Record<string, string> = {
         <label class="widget-config-panel__label">
           Sensoren
           <span class="widget-config-panel__hint">
-            ({{ multiSensorList.length }} / {{ MULTI_SENSOR_MAX }})
+            ({{ multiSensorList.length }} / {{ MAX_MULTI_SENSOR_COUNT }})
           </span>
         </label>
         <ul class="widget-config-panel__sensor-list">
@@ -609,7 +700,7 @@ const widgetTypeLabels: Record<string, string> = {
             <button
               type="button"
               class="widget-config-panel__sensor-remove"
-              :disabled="multiSensorList.length <= MULTI_SENSOR_MIN"
+              :disabled="multiSensorList.length <= MIN_MULTI_SENSOR_COUNT"
               :aria-label="`Sensor ${getSensorOptionLabel(sId)} entfernen`"
               @click="removeMultiSensor(sId)"
             >
@@ -617,7 +708,7 @@ const widgetTypeLabels: Record<string, string> = {
             </button>
           </li>
         </ul>
-        <div v-if="showAddSensorPicker" class="widget-config-panel__sensor-picker">
+        <div v-if="showAddSensorPicker && !isMultiSensorMaxReached" class="widget-config-panel__sensor-picker">
           <select
             class="widget-config-panel__select"
             :value="''"
@@ -639,14 +730,17 @@ const widgetTypeLabels: Record<string, string> = {
           </select>
         </div>
         <button
+          v-if="!isMultiSensorMaxReached"
           type="button"
           class="widget-config-panel__sensor-add"
-          :disabled="multiSensorList.length >= MULTI_SENSOR_MAX"
           @click="showAddSensorPicker = !showAddSensorPicker"
         >
           <Plus :size="14" />
           <span>Sensor hinzufügen</span>
         </button>
+        <p v-else class="widget-config-panel__sensor-max-warning">
+          Maximum von {{ MAX_MULTI_SENSOR_COUNT }} Sensoren erreicht
+        </p>
       </div>
 
       <!-- ═══════════════════════════════════════════════════════
@@ -713,15 +807,25 @@ const widgetTypeLabels: Record<string, string> = {
             </label>
           </div>
 
-          <!-- Load thresholds from alert-config (P8-A3) -->
-          <div v-if="hasThresholdFields && localConfig.showThresholds && localConfig.sensorId" class="widget-config-panel__field">
+          <!-- AUT-246: Sync buttons — operator chooses which source to copy -->
+          <div v-if="hasThresholdFields && localConfig.showThresholds && localConfig.sensorId" class="widget-config-panel__field widget-config-panel__sync-row">
             <button
+              type="button"
               class="widget-config-panel__sync-btn"
+              :disabled="!sensorBaseThresholds"
+              @click="loadThresholdsFromSensorBase"
+            >
+              <Download :size="14" />
+              <span>Aus Sensor-Schwelle übernehmen</span>
+            </button>
+            <button
+              type="button"
+              class="widget-config-panel__sync-btn widget-config-panel__sync-btn--secondary"
               :disabled="isLoadingThresholds"
               @click="loadThresholdsFromAlertConfig"
             >
               <Download :size="14" />
-              <span>{{ isLoadingThresholds ? 'Laden…' : 'Schwellen aus Sensor-Config laden' }}</span>
+              <span>{{ isLoadingThresholds ? 'Laden…' : 'Aus Alert-Override laden' }}</span>
             </button>
             <Transition name="sync-msg">
               <span v-if="thresholdSyncMessage" class="widget-config-panel__sync-msg">
@@ -730,15 +834,24 @@ const widgetTypeLabels: Record<string, string> = {
             </Transition>
           </div>
 
-          <!-- Threshold values (when enabled) — AUT-235: visualization-only context -->
+          <!-- AUT-246: Divergence warning — widget lines differ from sensor base threshold -->
+          <p
+            v-if="thresholdsDiverge"
+            class="widget-config-panel__divergence-warning"
+            data-testid="widget-threshold-divergence-warning"
+          >
+            Diese Anzeige-Linien weichen von der Sensor-Schwelle ab. Alerts werden weiter durch die Sensor-Schwelle getriggert.
+          </p>
+
+          <!-- Anzeige-Linien (nur visuell) — AUT-246: Labels + Disclaimer -->
           <div v-if="hasThresholdFields && localConfig.showThresholds" class="widget-config-panel__field">
-            <label class="widget-config-panel__label">Anzeigelinien (nur Visualisierung)</label>
+            <label class="widget-config-panel__label">Anzeige-Linien (nur visuell)</label>
             <p class="widget-config-panel__threshold-info">
-              Diese Werte steuern nur die Chart-Darstellung. Echte Alarme konfigurierst du unter Geräte → Sensor → Alert-Schwellen.
+              Diese Werte steuern nur die Chart-Darstellung. Sensor-Alerts werden durch <strong>SensorConfig.thresholds</strong> getriggert (Sensor-Settings).
             </p>
             <div class="widget-config-panel__threshold-grid">
               <div class="widget-config-panel__threshold-row">
-                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--alarm">Kritisch min.</span>
+                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--alarm">Anzeige-Linie Alarm Low</span>
                 <input
                   type="number"
                   class="widget-config-panel__input widget-config-panel__input--small"
@@ -748,7 +861,7 @@ const widgetTypeLabels: Record<string, string> = {
                 />
               </div>
               <div class="widget-config-panel__threshold-row">
-                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--warn">Warnung min.</span>
+                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--warn">Anzeige-Linie Warn Low</span>
                 <input
                   type="number"
                   class="widget-config-panel__input widget-config-panel__input--small"
@@ -758,7 +871,7 @@ const widgetTypeLabels: Record<string, string> = {
                 />
               </div>
               <div class="widget-config-panel__threshold-row">
-                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--warn">Warnung max.</span>
+                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--warn">Anzeige-Linie Warn High</span>
                 <input
                   type="number"
                   class="widget-config-panel__input widget-config-panel__input--small"
@@ -768,7 +881,7 @@ const widgetTypeLabels: Record<string, string> = {
                 />
               </div>
               <div class="widget-config-panel__threshold-row">
-                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--alarm">Kritisch max.</span>
+                <span class="widget-config-panel__threshold-label widget-config-panel__threshold-label--alarm">Anzeige-Linie Alarm High</span>
                 <input
                   type="number"
                   class="widget-config-panel__input widget-config-panel__input--small"
@@ -1023,6 +1136,35 @@ const widgetTypeLabels: Record<string, string> = {
   margin-bottom: var(--space-2);
 }
 
+/* AUT-246: Divergence warning + sync row */
+.widget-config-panel__divergence-warning {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: var(--radius-sm);
+  color: var(--color-warning);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.widget-config-panel__sync-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.widget-config-panel__sync-btn--secondary {
+  border-color: var(--glass-border);
+  color: var(--color-text-secondary);
+}
+
+.widget-config-panel__sync-btn--secondary:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent-bright);
+}
+
 /* AUT-239 Fix 2: Multi-Sensor list */
 .widget-config-panel__sensor-list {
   list-style: none;
@@ -1105,6 +1247,14 @@ const widgetTypeLabels: Record<string, string> = {
 .widget-config-panel__sensor-add:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.widget-config-panel__sensor-max-warning {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-error);
+  align-self: flex-start;
 }
 
 .widget-config-panel__sync-btn:disabled {

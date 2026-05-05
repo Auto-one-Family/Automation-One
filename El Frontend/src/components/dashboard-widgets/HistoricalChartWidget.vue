@@ -2,22 +2,24 @@
 /**
  * HistoricalChartWidget — Historical sensor data over selectable time range
  *
- * Dashboard widget wrapping HistoricalChart.vue with sensor selector.
- * Min-size: 6x4 (6 columns, 4 rows = 320px)
+ * AUT-247: Thin wrapper around SensorTile (displayMode='historic') with the
+ * additional CSV-Export overlay button preserved (the export dialog is
+ * widget-level, not part of the unified SensorTile).
+ *
+ * Existing dashboard JSONs continue to load unchanged.
  */
 import { ref, computed, watch } from 'vue'
 import { useEspStore } from '@/stores/esp'
 import { useZoneStore } from '@/shared/stores/zone.store'
-import HistoricalChart from '@/components/charts/HistoricalChart.vue'
+import { Download } from 'lucide-vue-next'
+import SensorTile from './SensorTile.vue'
 import ExportCsvDialog from '@/components/dashboard-widgets/ExportCsvDialog.vue'
-import { BarChart3, Download } from 'lucide-vue-next'
 import type { MockSensor } from '@/types'
 import { useSensorId } from '@/composables/useSensorId'
-import { useSensorOptions } from '@/composables/useSensorOptions'
 
 interface Props {
-  sensorId?: string // "espId:gpio:sensorType"
-  zoneId?: string   // Zone-scoped sensor filtering (PA-02c)
+  sensorId?: string
+  zoneId?: string
   title?: string
   timeRange?: '1h' | '6h' | '24h' | '7d' | '30d'
   showThresholds?: boolean
@@ -34,105 +36,66 @@ const emit = defineEmits<{
 
 const espStore = useEspStore()
 const zoneStore = useZoneStore()
-const selectedRange = ref<'1h' | '6h' | '24h' | '7d' | '30d'>(props.timeRange)
 const showExportDialog = ref(false)
 
-// Local sensorId state — survives render() one-shot props (Bug 1b fix)
 const localSensorId = ref(props.sensorId || '')
 const localZoneId = ref<string | undefined>(props.zoneId)
 
-// Sync from props when they change (e.g. page reload with saved config)
 watch(() => props.sensorId, (v) => { if (v) localSensorId.value = v })
 watch(() => props.zoneId, (v) => { localZoneId.value = v })
 
-// Centralized sensorId parsing
 const { espId: parsedEspId, gpio: parsedGpio, sensorType: parsedSensorType, isValid: sensorIdValid } = useSensorId(localSensorId)
 
-watch(selectedRange, (val) => {
-  emit('update:config', { timeRange: val })
-})
-
-// Centralized sensor options (deduplicated, zone-filtered via PA-02c)
-const { flatSensorOptions: availableSensors } = useSensorOptions(localZoneId)
-
-// Parsed sensor data — uses parsed sensorId parts
 const parsedSensor = computed(() => {
   if (!sensorIdValid.value) return null
   const device = espStore.devices.find(d => espStore.getDeviceId(d) === parsedEspId.value)
   if (!device) return null
-  const sensor = ((device.sensors as MockSensor[]) || []).find(s =>
+  return ((device.sensors as MockSensor[]) || []).find(s =>
     s.gpio === parsedGpio.value && (!parsedSensorType.value || s.sensor_type === parsedSensorType.value)
-  )
-  if (!sensor) return null
-  return { espId: parsedEspId.value!, gpio: parsedGpio.value!, sensor }
+  ) ?? null
 })
 
-// Wave 1: Snapshot-Sensoren (MultispeQ) → Scatter-Mode (keine Interpolation).
-const isSnapshot = computed(() => parsedSensor.value?.sensor.sensor_kind === 'snapshot')
-
-// Resolved names for ExportCsvDialog
 const resolvedSensorName = computed(() =>
-  parsedSensor.value?.sensor.name || parsedSensorType.value || ''
+  parsedSensor.value?.name || parsedSensorType.value || ''
 )
+
 const zoneNameFromContext = computed(() => {
   if (!localZoneId.value) return undefined
   return zoneStore.zoneEntities.find(z => z.zone_id === localZoneId.value)?.name
 })
 
-function selectSensor(sensorId: string) {
-  localSensorId.value = sensorId  // Immediate local update (Bug 1b fix)
-  emit('update:config', { sensorId })
+function onTileUpdate(cfg: { sensorId?: string; timeRange?: string }) {
+  if (cfg.sensorId) {
+    localSensorId.value = cfg.sensorId
+    emit('update:config', { sensorId: cfg.sensorId })
+  }
+  if (cfg.timeRange) {
+    emit('update:config', { timeRange: cfg.timeRange })
+  }
 }
 </script>
 
 <template>
   <div class="historical-widget">
-    <template v-if="localSensorId && parsedSensor">
-      <div class="historical-widget__info">
-        <span class="historical-widget__sensor-name">
-          {{ parsedSensor.sensor.name || parsedSensor.sensor.sensor_type }}
-        </span>
-        <span
-          v-if="isSnapshot"
-          class="historical-widget__snapshot-badge"
-          title="Snapshot-Sensor (Punktmessungen, kein Live-Stream)"
-        >Snapshot</span>
-        <button
-          class="historical-widget__export-btn"
-          title="Als CSV exportieren"
-          @click="showExportDialog = true"
-        >
-          <Download :size="14" />
-        </button>
-      </div>
-      <div class="historical-widget__chart">
-        <HistoricalChart
-          :esp-id="parsedSensor.espId"
-          :gpio="parsedSensor.gpio"
-          :sensor-type="parsedSensor.sensor.sensor_type"
-          :time-range="selectedRange"
-          :unit="parsedSensor.sensor.unit || ''"
-          :show-thresholds="showThresholds"
-          :scatter-mode="isSnapshot"
-          height="100%"
-        />
-      </div>
-    </template>
-    <div v-else class="historical-widget__empty">
-      <BarChart3 class="w-8 h-8" style="opacity: 0.3" />
-      <p>Sensor für Zeitreihe auswählen{{ props.title ? ` für ${props.title}` : '' }}:</p>
-      <select
-        class="historical-widget__select"
-        @change="selectSensor(($event.target as HTMLSelectElement).value)"
-      >
-        <option value="" disabled selected>— Sensor wählen —</option>
-        <option
-          v-for="s in availableSensors"
-          :key="s.id"
-          :value="s.id"
-        >{{ s.label }}</option>
-      </select>
-    </div>
+    <button
+      v-if="localSensorId && parsedSensor"
+      class="historical-widget__export-btn"
+      title="Als CSV exportieren"
+      @click="showExportDialog = true"
+    >
+      <Download :size="14" />
+    </button>
+
+    <SensorTile
+      :sensor-id="props.sensorId"
+      :zone-id="props.zoneId"
+      :title="props.title"
+      display-mode="historic"
+      hide-mode-toggle
+      :time-range="props.timeRange"
+      :show-thresholds="props.showThresholds"
+      @update:config="onTileUpdate"
+    />
 
     <ExportCsvDialog
       v-model:open="showExportDialog"
@@ -146,40 +109,16 @@ function selectSensor(sensorId: string) {
 <style scoped>
 .historical-widget {
   height: 100%;
+  position: relative;
   display: flex;
   flex-direction: column;
 }
 
-.historical-widget__info {
-  display: flex;
-  align-items: center;
-  padding: 0 var(--space-1) var(--space-1) var(--space-1);
-  flex-shrink: 0;
-}
-
-.historical-widget__sensor-name {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
-}
-
-.historical-widget__snapshot-badge {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  padding: 0 var(--space-1);
-  margin-right: var(--space-1);
-  border-radius: var(--radius-sm);
-  background: var(--color-warning-bg, rgba(251, 191, 36, 0.15));
-  color: var(--color-warning, #fbbf24);
-  letter-spacing: 0.02em;
-  flex-shrink: 0;
-}
-
 .historical-widget__export-btn {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -205,32 +144,5 @@ function selectSensor(sensorId: string) {
   .historical-widget__export-btn {
     opacity: 0.8;
   }
-}
-
-.historical-widget__chart {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.historical-widget__empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  height: 100%;
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-}
-
-.historical-widget__select {
-  padding: var(--space-1) var(--space-2);
-  background: var(--color-bg-quaternary);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-primary);
-  font-size: var(--text-sm);
-  max-width: 220px;
 }
 </style>

@@ -16,6 +16,7 @@ import { getCurrentInstance, h, render, type Component, type Ref, unref } from '
 import LineChartWidget from '@/components/dashboard-widgets/LineChartWidget.vue'
 import GaugeWidget from '@/components/dashboard-widgets/GaugeWidget.vue'
 import SensorCardWidget from '@/components/dashboard-widgets/SensorCardWidget.vue'
+import SensorTile from '@/components/dashboard-widgets/SensorTile.vue'
 import ActuatorCardWidget from '@/components/dashboard-widgets/ActuatorCardWidget.vue'
 import HistoricalChartWidget from '@/components/dashboard-widgets/HistoricalChartWidget.vue'
 import ESPHealthWidget from '@/components/dashboard-widgets/ESPHealthWidget.vue'
@@ -86,6 +87,7 @@ export interface UseDashboardWidgetsReturn {
 
 /** Widget component registry — all 11 types */
 const widgetComponentMap: Record<string, Component> = {
+  'sensor-tile': SensorTile,
   'line-chart': LineChartWidget,
   'gauge': GaugeWidget,
   'sensor-card': SensorCardWidget,
@@ -104,6 +106,8 @@ const widgetComponentMap: Record<string, Component> = {
 
 /** Widget type metadata for catalog and auto-generation */
 const WIDGET_TYPE_META: WidgetTypeMeta[] = [
+  // AUT-247: SensorTile is the unified sensor widget — listed first as preferred
+  { type: 'sensor-tile', label: 'Sensor-Kachel', description: 'Sensor mit Anzeige-Toggle (Zahl / Gauge / Live / Verlauf)', icon: Activity, w: 4, h: 3, minW: 3, minH: 2, category: 'Sensoren' },
   { type: 'line-chart', label: 'Linien-Chart', description: 'Live-Verlauf eines Sensors mit Y-Achsen-Defaults', icon: BarChart3, w: 6, h: 4, minW: 4, minH: 3, category: 'Sensoren' },
   { type: 'gauge', label: 'Gauge-Chart', description: 'Kreisanzeige für aktuelle Messwerte', icon: Gauge, w: 3, h: 3, minW: 2, minH: 3, category: 'Sensoren' },
   { type: 'sensor-card', label: 'Sensor-Karte', description: 'Kompakte Karte mit aktuellem Wert', icon: Activity, w: 3, h: 2, minW: 2, minH: 2, category: 'Sensoren' },
@@ -122,6 +126,7 @@ const WIDGET_TYPE_META: WidgetTypeMeta[] = [
 
 /** Default config per widget type */
 const WIDGET_DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
+  'sensor-tile': { displayMode: 'numeric', timeRange: '1h', showThresholds: false },
   'line-chart': { timeRange: '1h', showThresholds: false },
   'gauge': {},
   'sensor-card': {},
@@ -299,6 +304,14 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
     if (config.compareMode != null) props.compareMode = config.compareMode
     if (config.compareSensorType) props.compareSensorType = config.compareSensorType
     if (config.compareZoneId) props.compareZoneId = config.compareZoneId
+
+    // AUT-247: SensorTile-specific props
+    if (config.displayMode) props.displayMode = config.displayMode
+    if (config.liveBufferSize != null) props.liveBufferSize = config.liveBufferSize
+    if (config.unit) props.unit = config.unit
+    if (config.showTrendIcon != null) props.showTrendIcon = config.showTrendIcon
+    if (config.showQualityDot != null) props.showQualityDot = config.showQualityDot
+    if (config.hideModeToggle != null) props.hideModeToggle = config.hideModeToggle
 
     // FertigationPairWidget props
     if (config.inflowSensorId) props.inflowSensorId = config.inflowSensorId

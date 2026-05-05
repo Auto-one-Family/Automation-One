@@ -26,7 +26,7 @@ export type StatusFilter = 'online' | 'offline' | 'warning' | 'safemode'
 export type TypeFilter = 'all' | 'mock' | 'real'
 
 /** Widget type identifiers */
-export type WidgetType = 'line-chart' | 'gauge' | 'sensor-card' |
+export type WidgetType = 'sensor-tile' | 'line-chart' | 'gauge' | 'sensor-card' |
   'historical' | 'actuator-card' | 'actuator-runtime' |
   'esp-health' | 'alarm-list' | 'multi-sensor' | 'statistics' |
   'fertigation-pair' | 'comparison-boxplot' | 'correlation-scatter'
@@ -77,6 +77,10 @@ export interface DashboardWidget {
     alarmLow?: number
     /** Alarm/critical high threshold (maps to alert_config.custom_thresholds.critical_max) */
     alarmHigh?: number
+    /** AUT-247: SensorTile display mode (numeric|gauge|sparkline|historic) */
+    displayMode?: 'numeric' | 'gauge' | 'sparkline' | 'historic'
+    /** AUT-247: Live buffer size for sparkline mode */
+    liveBufferSize?: number
   }
 }
 
@@ -1114,7 +1118,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
       }
     }
 
-    const sensorWidgetTypes = new Set(['line-chart', 'gauge', 'sensor-card', 'historical'])
+    const sensorWidgetTypes = new Set(['sensor-tile', 'line-chart', 'gauge', 'sensor-card', 'historical'])
 
     const layout: DashboardLayout = {
       id: `dash-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

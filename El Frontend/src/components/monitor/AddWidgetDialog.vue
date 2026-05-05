@@ -15,6 +15,10 @@ import { useDashboardWidgets } from '@/composables/useDashboardWidgets'
 import { useToast } from '@/composables/useToast'
 import BaseModal from '@/shared/design/primitives/BaseModal.vue'
 import {
+  getZoneTileRenderableWidgets,
+  ZONE_TILE_MAX_WIDGETS,
+} from '@/utils/zoneTileWidgets'
+import {
   BarChart3, Gauge, Activity, Zap, Bell, Cpu, Info,
   LayoutGrid, PanelRight, PanelBottom,
 } from 'lucide-vue-next'
@@ -110,17 +114,39 @@ const needsSensor = computed(() => {
 
 // Check if selected widget type is NOT tile-compatible
 const isNonTileWidget = computed(() =>
-  selectedWidgetType.value && !TILE_ALLOWED_WIDGET_TYPES.has(selectedWidgetType.value)
+  Boolean(selectedWidgetType.value) && !TILE_ALLOWED_WIDGET_TYPES.has(selectedWidgetType.value),
 )
 
-/** Whether a widget type is disabled for placement inside a zone-tile slot. */
-function isDisabledForTile(type: string): boolean {
-  return !TILE_ALLOWED_WIDGET_TYPES.has(type)
-}
+/** Widget types that appear in the L1 zone tile (for-tiles section, tileContext only). */
+const tileWidgetMetas = computed(() =>
+  WIDGET_TYPE_META.filter(m => TILE_ALLOWED_WIDGET_TYPES.has(m.type)),
+)
 
-/** Click handler for type buttons — blocks selection of non-tile types in tileContext. */
+/** Widget types that only appear in dashboards / side-panels (for-dashboards section). */
+const dashboardWidgetMetas = computed(() =>
+  WIDGET_TYPE_META.filter(m => !TILE_ALLOWED_WIDGET_TYPES.has(m.type)),
+)
+
+/**
+ * Number of tile-renderable widgets already present in the canonical zone-tile dashboard.
+ * Source of truth: getZoneTileRenderableWidgets() / ZONE_TILE_MAX_WIDGETS.
+ * Returns 0 when no zone-tile shell exists yet for the selected zone.
+ */
+const existingTileWidgetCount = computed(() => {
+  const zoneId = selectedZoneId.value
+  if (!zoneId) return 0
+  const tileLayout = dashStore.getCanonicalZoneTileLayout(zoneId)
+  if (!tileLayout) return 0
+  return getZoneTileRenderableWidgets(tileLayout.widgets ?? []).length
+})
+
+/** True when the active zone tile already has the maximum number of renderable widgets. */
+const isTileFull = computed(
+  () => props.tileContext === true && existingTileWidgetCount.value >= ZONE_TILE_MAX_WIDGETS,
+)
+
+/** Click handler for type buttons — all types stay selectable; user is informed via hints. */
 function handleTypeSelect(type: string): void {
-  if (props.tileContext && isDisabledForTile(type)) return
   selectedWidgetType.value = type
 }
 
@@ -248,19 +274,82 @@ function handleAdd() {
       <!-- Step 1: Widget Type -->
       <div class="add-widget-dialog__section">
         <label class="add-widget-dialog__label">1. Widget-Typ waehlen</label>
-        <div class="add-widget-dialog__type-grid">
+
+        <!-- Tile-Limit hint: visible when the active zone tile already has max widgets -->
+        <div
+          v-if="isTileFull"
+          class="add-widget-dialog__limit-hint"
+          role="status"
+        >
+          <Info :size="14" class="add-widget-dialog__limit-icon" />
+          <span>
+            Diese Kachel ist voll ({{ existingTileWidgetCount }}/{{ ZONE_TILE_MAX_WIDGETS }} Widgets).
+            Neue Widgets werden in einem Side-Panel platziert.
+          </span>
+        </div>
+
+        <!-- Grouped layout in tileContext: separate "Fuer Kacheln" vs "Fuer Dashboards" -->
+        <template v-if="tileContext">
+          <!-- Group 1: For tiles -->
+          <div class="add-widget-dialog__group">
+            <div class="add-widget-dialog__group-header">
+              <span class="add-widget-dialog__group-title">Fuer Kacheln</span>
+              <span class="add-widget-dialog__group-hint">Erscheint direkt in Zone-Kachel</span>
+            </div>
+            <div class="add-widget-dialog__type-grid">
+              <button
+                v-for="meta in tileWidgetMetas"
+                :key="meta.type"
+                class="add-widget-dialog__type-btn"
+                :class="{
+                  'add-widget-dialog__type-btn--active': selectedWidgetType === meta.type,
+                }"
+                :title="meta.description"
+                @click="handleTypeSelect(meta.type)"
+              >
+                <component :is="getWidgetIcon(meta)" class="add-widget-dialog__type-icon" />
+                <span class="add-widget-dialog__type-label">{{ meta.label }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Visual separator between groups -->
+          <div class="add-widget-dialog__group-separator" role="presentation" />
+
+          <!-- Group 2: For dashboards -->
+          <div class="add-widget-dialog__group">
+            <div class="add-widget-dialog__group-header">
+              <span class="add-widget-dialog__group-title">Fuer Dashboards</span>
+              <span class="add-widget-dialog__group-hint">Sichtbar als Side-Panel</span>
+            </div>
+            <div class="add-widget-dialog__type-grid">
+              <button
+                v-for="meta in dashboardWidgetMetas"
+                :key="meta.type"
+                class="add-widget-dialog__type-btn"
+                :class="{
+                  'add-widget-dialog__type-btn--active': selectedWidgetType === meta.type,
+                }"
+                :title="meta.description"
+                @click="handleTypeSelect(meta.type)"
+              >
+                <component :is="getWidgetIcon(meta)" class="add-widget-dialog__type-icon" />
+                <span class="add-widget-dialog__type-label">{{ meta.label }}</span>
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <!-- Flat layout (FAB / non-tile context): no grouping, all types -->
+        <div v-else class="add-widget-dialog__type-grid">
           <button
             v-for="meta in WIDGET_TYPE_META"
             :key="meta.type"
             class="add-widget-dialog__type-btn"
             :class="{
               'add-widget-dialog__type-btn--active': selectedWidgetType === meta.type,
-              'add-widget-dialog__type-btn--disabled': tileContext && isDisabledForTile(meta.type),
             }"
-            :disabled="tileContext && isDisabledForTile(meta.type)"
-            :title="tileContext && isDisabledForTile(meta.type)
-              ? 'Nur in Dashboard/Side/Bottom-Panels — nicht in Zone-Kacheln'
-              : meta.description"
+            :title="meta.description"
             @click="handleTypeSelect(meta.type)"
           >
             <component :is="getWidgetIcon(meta)" class="add-widget-dialog__type-icon" />
@@ -353,7 +442,10 @@ function handleAdd() {
       <!-- Non-tile hint -->
       <div v-if="isNonTileWidget && selectedWidgetType" class="add-widget-dialog__hint">
         <Info :size="14" class="add-widget-dialog__hint-icon" />
-        <span>Dieses Widget ist auf L2 und im Editor sichtbar.</span>
+        <span v-if="tileContext">
+          Dieses Widget passt nicht in die Zone-Kachel und wird als Side-Panel platziert.
+        </span>
+        <span v-else>Dieses Widget ist auf L2 und im Editor sichtbar.</span>
       </div>
     </div>
 
@@ -396,6 +488,61 @@ function handleAdd() {
   color: var(--color-text-primary);
 }
 
+/* ── Group Layout (tileContext) ── */
+
+.add-widget-dialog__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.add-widget-dialog__group-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-1);
+}
+
+.add-widget-dialog__group-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+.add-widget-dialog__group-hint {
+  font-size: var(--text-xxs);
+  color: var(--color-text-muted);
+}
+
+.add-widget-dialog__group-separator {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--color-border);
+}
+
+/* ── Limit hint (Tile full) ── */
+
+.add-widget-dialog__limit-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  font-size: var(--text-xs);
+  color: var(--color-status-warning);
+}
+
+.add-widget-dialog__limit-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--color-status-warning);
+}
+
 /* ── Type Grid ── */
 
 .add-widget-dialog__type-grid {
@@ -429,15 +576,6 @@ function handleAdd() {
   background: rgba(96, 165, 250, 0.12);
   border-color: rgba(96, 165, 250, 0.4);
   color: var(--color-accent);
-}
-
-.add-widget-dialog__type-btn--disabled,
-.add-widget-dialog__type-btn--disabled:hover {
-  opacity: 0.5;
-  cursor: not-allowed;
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.08);
-  color: var(--color-text-secondary);
 }
 
 .add-widget-dialog__type-icon {
