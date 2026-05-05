@@ -202,6 +202,44 @@ class LWTHandler:
                     adoption_service = get_state_adoption_service()
                     await adoption_service.clear_cycle(esp_id_str)
 
+                    # AUT-122: Early WS-Broadcast — surface offline status to operators
+                    # immediately, BEFORE the (potentially slow) actuator reset and
+                    # audit logging. The full broadcast with telemetry/reset counters
+                    # still follows after commit (see Step 6 below).
+                    # Flush so the status update is visible to concurrent readers
+                    # without committing the transaction (rollback on later error
+                    # remains intact).
+                    try:
+                        await session.flush()
+                    except Exception as flush_err:
+                        logger.warning(
+                            "Early LWT session.flush failed for %s: %s",
+                            esp_id_str,
+                            flush_err,
+                        )
+                    try:
+                        from ...websocket.manager import WebSocketManager
+
+                        early_ws_manager = await WebSocketManager.get_instance()
+                        await early_ws_manager.broadcast(
+                            "esp_health",
+                            {
+                                "esp_id": esp_id_str,
+                                "status": "offline",
+                                "source": "lwt",
+                                "reason": payload.get(
+                                    "reason", "unexpected_disconnect"
+                                ),
+                                "early": True,
+                            },
+                        )
+                    except Exception as early_ws_err:
+                        logger.warning(
+                            "Early LWT WS broadcast failed for %s: %s",
+                            esp_id_str,
+                            early_ws_err,
+                        )
+
                     # Reset actuator states to idle for offline device.
                     # PKG-19: Skip expensive reset during flapping — actuators
                     # are already idle from the first LWT in this window.

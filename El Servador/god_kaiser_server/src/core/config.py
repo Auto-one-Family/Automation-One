@@ -492,11 +492,18 @@ class MaintenanceSettings(BaseSettings):
     # ─────────────────────────────────────────────────────────
     # HEALTH CHECKS (IMMER ENABLED - löschen keine Daten)
     # ─────────────────────────────────────────────────────────
+    # AUT-122: reduced from 180s -> 120s to lower offline-detection latency.
+    # ENV alias is HEARTBEAT_TIMEOUT_SECONDS (NOT ESP_HEARTBEAT_TIMEOUT — that
+    # alias maps to Settings.heartbeat_timeout and does NOT influence the
+    # heartbeat timeout checker in mqtt/handlers/heartbeat_handler.py).
     heartbeat_timeout_seconds: int = Field(
-        default=180,
+        default=120,
         alias="HEARTBEAT_TIMEOUT_SECONDS",
         ge=30,
-        description="Seconds before ESP is considered offline (3x heartbeat interval)",
+        description=(
+            "Seconds before ESP is considered offline (AUT-122: 120s). "
+            "ENV: HEARTBEAT_TIMEOUT_SECONDS"
+        ),
     )
     mqtt_health_check_interval_seconds: int = Field(
         default=30,
