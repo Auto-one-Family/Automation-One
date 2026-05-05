@@ -52,20 +52,20 @@ const hasActuatorField = computed(() =>
 const hasShortTimeRange = computed(() =>
   ['historical', 'statistics', 'fertigation-pair'].includes(props.widgetType)
 )
-/** Long time range chips (7d/30d/90d/season) — boxplot, correlation-scatter */
+/** Long time range chips (7d/30d/90d/season) — comparison-boxplot, correlation-scatter */
 const hasLongTimeRange = computed(() =>
-  ['boxplot', 'correlation-scatter'].includes(props.widgetType)
+  ['comparison-boxplot', 'correlation-scatter'].includes(props.widgetType)
 )
 const hasYRange = computed(() =>
   ['line-chart', 'historical', 'gauge'].includes(props.widgetType)
 )
 
-// AUT-231: Boxplot/Correlation-Scatter widget-type-specific computeds
+// AUT-231: Comparison-Boxplot/Correlation-Scatter widget-type-specific computeds
 const hasSensorTypeField = computed(() =>
-  ['boxplot', 'correlation-scatter'].includes(props.widgetType)
+  ['comparison-boxplot', 'correlation-scatter'].includes(props.widgetType)
 )
-const hasGroupByField = computed(() => props.widgetType === 'boxplot')
-const hasAnonymizeField = computed(() => props.widgetType === 'boxplot')
+const hasGroupByField = computed(() => props.widgetType === 'comparison-boxplot')
+const hasAnonymizeField = computed(() => props.widgetType === 'comparison-boxplot')
 const hasCorrelationConfig = computed(() => props.widgetType === 'correlation-scatter')
 
 // AUT-239 Fix 2: Multi-Sensor list (max 6 sensors)
@@ -317,7 +317,7 @@ const widgetTypeLabels: Record<string, string> = {
   'multi-sensor': 'Multi-Sensor-Chart',
   'statistics': 'Statistik',
   'fertigation-pair': 'Fertigation-Paar',
-  'boxplot': 'Boxplot',
+  'comparison-boxplot': 'Boxplot',
   'correlation-scatter': 'Korrelation',
 }
 </script>
