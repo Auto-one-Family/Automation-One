@@ -795,26 +795,14 @@ async def create_or_update_sensor(
         subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio)
         subzone_id_val = subzone.subzone_id if subzone else None
 
-        config_correlation_id: Optional[str] = None
-        config_request_id: Optional[str] = None
         # Publish combined config to ESP32 via MQTT (once for all sub-types)
         mqtt_correlation_id: Optional[str] = None
         try:
             config_builder: ConfigPayloadBuilder = get_config_builder(db)
             combined_config = await config_builder.build_combined_config(esp_id, db)
             esp_service: ESPService = get_esp_service(db)
-<<<<<<< Updated upstream
-            config_sent = await esp_service.send_config(
-                esp_id,
-                combined_config,
-                reason_code="sensor_config_change",
-            )
-            config_correlation_id = config_sent.get("correlation_id")
-            config_request_id = config_sent.get("request_id") or config_correlation_id
-=======
             config_sent = await esp_service.send_config(esp_id, combined_config)
             mqtt_correlation_id = config_sent.get("correlation_id")
->>>>>>> Stashed changes
             if config_sent.get("success"):
                 logger.info(f"Config published to ESP {esp_id} after multi-value sensor create")
             else:
@@ -823,11 +811,6 @@ async def create_or_update_sensor(
             # Log error but don't fail the request (DB save was successful)
             logger.error(f"Failed to publish config to ESP {esp_id}: {e}", exc_info=True)
 
-<<<<<<< Updated upstream
-        first_response.correlation_id = config_correlation_id
-        first_response.request_id = config_request_id
-        return first_response
-=======
         return _model_to_response(
             created_sensors[0],
             esp_id,
@@ -835,7 +818,6 @@ async def create_or_update_sensor(
             subzone_warning=subzone_error,
             correlation_id=mqtt_correlation_id,
         )
->>>>>>> Stashed changes
 
     # =========================================================================
     # SINGLE-VALUE SENSOR (existing logic unchanged)
@@ -1119,8 +1101,6 @@ async def create_or_update_sensor(
         await db.rollback()
         # Non-fatal: sensor was saved, subzone can be fixed manually
 
-    config_correlation_id: Optional[str] = None
-    config_request_id: Optional[str] = None
     # Publish config to ESP32 via MQTT (using dependency-injected services)
     mqtt_correlation_id: Optional[str] = None
     try:
@@ -1128,18 +1108,8 @@ async def create_or_update_sensor(
         combined_config = await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
-<<<<<<< Updated upstream
-        config_sent = await esp_service.send_config(
-            esp_id,
-            combined_config,
-            reason_code="sensor_config_change",
-        )
-        config_correlation_id = config_sent.get("correlation_id")
-        config_request_id = config_sent.get("request_id") or config_correlation_id
-=======
         config_sent = await esp_service.send_config(esp_id, combined_config)
         mqtt_correlation_id = config_sent.get("correlation_id")
->>>>>>> Stashed changes
 
         if config_sent.get("success"):
             logger.info(f"Config published to ESP {esp_id} after sensor create/update")
@@ -1155,14 +1125,6 @@ async def create_or_update_sensor(
     subzone_id_val = subzone.subzone_id if subzone else None
 
     # Convert model to response schema
-<<<<<<< Updated upstream
-    response = _model_to_response(
-        sensor, esp_id, subzone_id=subzone_id_val, subzone_warning=subzone_error
-    )
-    response.correlation_id = config_correlation_id
-    response.request_id = config_request_id
-    return response
-=======
     return _model_to_response(
         sensor,
         esp_id,
@@ -1170,7 +1132,6 @@ async def create_or_update_sensor(
         subzone_warning=subzone_error,
         correlation_id=mqtt_correlation_id,
     )
->>>>>>> Stashed changes
 
 
 # =============================================================================
@@ -1300,16 +1261,8 @@ async def delete_sensor(
         combined_config = await config_builder.build_combined_config(esp_id, db)
 
         esp_service: ESPService = get_esp_service(db)
-<<<<<<< Updated upstream
-        config_sent = await esp_service.send_config(
-            esp_id,
-            combined_config,
-            reason_code="sensor_config_change",
-        )
-=======
         config_sent = await esp_service.send_config(esp_id, combined_config)
         mqtt_correlation_id = config_sent.get("correlation_id")
->>>>>>> Stashed changes
 
         if config_sent.get("success"):
             logger.info(f"Config published to ESP {esp_id} after sensor delete")
@@ -1335,13 +1288,9 @@ async def delete_sensor(
     except Exception as e:
         logger.debug(f"WebSocket broadcast for sensor_config_deleted: {e}")
 
-<<<<<<< Updated upstream
-    # Convert model to response schema
-    return deleted_sensor_response
-=======
     # Convert model to response schema (correlation_id = last MQTT config push, like create/update)
-    return _model_to_response(sensor, esp_id, correlation_id=mqtt_correlation_id)
->>>>>>> Stashed changes
+    deleted_sensor_response.correlation_id = mqtt_correlation_id
+    return deleted_sensor_response
 
 
 # =============================================================================

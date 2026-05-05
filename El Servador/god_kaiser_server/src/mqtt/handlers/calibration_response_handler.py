@@ -129,42 +129,6 @@ class CalibrationResponseHandler:
 
                 raw_value = payload.get("raw", payload.get("raw_value"))
                 if raw_value is None:
-<<<<<<< Updated upstream
-                    # Firmware measure-ACK currently omits raw value; resolve latest DB reading.
-                    # Retry briefly because sensor_data persistence can lag behind ACK by a few hundred ms.
-                    lookup_sensor_type = (
-                        active_session.sensor_type
-                        if active_session
-                        else (None if normalized_type == "unknown" else normalized_type)
-                    )
-                    esp_device = await esp_repo.get_by_device_id(esp_id)
-                    if not esp_device:
-                        logger.warning(
-                            "CalibrationResponseHandler: ESP %s not found for DB raw-value fallback",
-                            esp_id,
-                        )
-                        await self._broadcast_calibration_event(
-                            "calibration_measurement_failed",
-                            esp_id=esp_id,
-                            gpio=gpio,
-                            error="ESP fuer Messwert-Fallback nicht gefunden",
-                            correlation_id=correlation_id,
-                        )
-                        return True
-                    for _ in range(3):
-                        latest = await sensor_repo.get_latest_reading(
-                            esp_device.id,
-                            gpio,
-                            sensor_type=lookup_sensor_type,
-                        )
-                        if latest and latest.raw_value is not None:
-                            raw_value = float(latest.raw_value)
-                            quality = latest.quality or quality
-                            break
-                        await asyncio.sleep(0.25)
-                if raw_value is None:
-=======
->>>>>>> Stashed changes
                     logger.warning(
                         "CalibrationResponseHandler: No raw/raw_value in MQTT payload for %s/GPIO%d "
                         "(no DB fallback — latest row may be from interval sampling, not this measure)",

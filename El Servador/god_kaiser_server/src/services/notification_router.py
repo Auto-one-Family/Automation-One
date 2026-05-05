@@ -499,10 +499,7 @@ class NotificationRouter:
                 ),
             }
             await ws_manager.broadcast("notification_updated", data)
-<<<<<<< Updated upstream
             increment_ws_notification_broadcast("notification_updated")
-            logger.debug(f"WebSocket broadcast: notification_updated for {notification.id}")
-=======
             logger.info(
                 "WebSocket broadcast notification_updated id=%s",
                 str(notification.id),
@@ -512,7 +509,6 @@ class NotificationRouter:
                     "ws_event_type": "notification_updated",
                 },
             )
->>>>>>> Stashed changes
         except Exception as e:
             logger.error(f"Failed to broadcast notification_updated: {e}")
 
