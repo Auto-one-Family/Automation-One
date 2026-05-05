@@ -240,6 +240,36 @@ class TestUpdateRule:
         assert data["name"] == "Updated Rule Name"
         assert data["priority"] == 90
 
+    @pytest.mark.asyncio
+    async def test_patch_critical_flag(self, override_db, auth_headers: dict, test_rule: CrossESPLogic):
+        """AUT-111 B-CRIT-04: PUT accepts is_critical and escalation_policy."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.put(
+                f"/api/v1/logic/rules/{test_rule.id}",
+                json={
+                    "is_critical": True,
+                    "escalation_policy": {"notify": ["websocket"], "max_retries": 3},
+                },
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["is_critical"] is True
+        assert data["escalation_policy"]["max_retries"] == 3
+
+    @pytest.mark.asyncio
+    async def test_patch_escalation_policy_invalid(self, override_db, auth_headers: dict, test_rule: CrossESPLogic):
+        """AUT-111 B-CRIT-04: PUT rejects escalation_policy with unknown keys → 422."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.put(
+                f"/api/v1/logic/rules/{test_rule.id}",
+                json={"escalation_policy": {"invalid_key": True}},
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 422
+
 
 class TestToggleRule:
     """Test rule toggling."""
