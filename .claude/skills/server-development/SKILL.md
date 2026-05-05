@@ -189,7 +189,7 @@ DB Persist → Logic Engine → WebSocket Broadcast
 | esp | /v1/esp | 17 | Active/Operator |
 | sensors | /v1/sensors | 16 | Active/Operator |
 | actuators | /v1/actuators | 12 | Active/Operator |
-| logic | /v1/logic | 11 | Operator+ |
+| logic | /v1/logic | 12 | Operator+ |
 | health | /v1/health | 6 | Mixed |
 | audit | /v1/audit | 21 | Admin/Active |
 | debug | /v1/debug | 59 | Admin |
@@ -256,7 +256,7 @@ class YourRepository(BaseRepository[YourModel]):
 | Zone | `zones` | id (UUID PK), zone_id (UNIQUE), name, description, status (active/archived/deleted), deleted_at, deleted_by, created_at, updated_at. FK: esp_devices.zone_id → zones.zone_id (T13-R1) |
 | SubzoneConfig | `subzone_configs` | id (UUID PK), esp_id (FK), subzone_id, assigned_gpios (JSON), assigned_sensor_config_ids (JSON), is_active (Bool), safe_mode_active |
 | DeviceZoneChange | `device_zone_changes` | id (UUID PK), esp_id, old_zone_id, new_zone_id, subzone_strategy, affected_subzones (JSON), changed_by, changed_at (T13-R1 Audit) |
-| CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority (kleinere Zahl = höhere Ausführungs-/Konfliktpriorität), cooldown_seconds |
+| CrossESPLogic | `cross_esp_logic` | rule_name (UNIQUE), trigger_conditions (JSON), logic_operator, actions (JSON), priority (kleinere Zahl = höhere Ausführungs-/Konfliktpriorität), cooldown_seconds, is_critical (Bool, default false), escalation_policy (JSON, nullable), degraded_since (DateTime TZ, nullable), degraded_reason (VARCHAR 64, nullable) |
 | LogicHysteresisState | `logic_hysteresis_states` | rule_id (FK CASCADE), condition_index, is_active, last_value, last_activation, last_deactivation, updated_at. UQ(rule_id, condition_index) |
 | SensorData | `sensor_data` | sensor_id (FK), esp_id (FK SET NULL), raw_value, processed_value, zone_id, subzone_id (Phase 0.1), device_name, data_source |
 | AuditLog | `audit_logs` | event_type, severity, source_type |
@@ -385,7 +385,7 @@ poetry run python scripts/seed_wokwi_esp.py
 
 | Service | Datei | Zeilen | Hauptmethoden |
 |---------|-------|--------|---------------|
-| **LogicEngine** | logic_engine.py | 1502 | `start()`, `stop()`, `evaluate_sensor_data()`, `evaluate_timer_triggered_rules()` |
+| **LogicEngine** | logic_engine.py | ~2100 | `start()`, `stop()`, `evaluate_sensor_data()`, `evaluate_timer_triggered_rules()`, `_enter_degraded_state()`, `_exit_degraded_state()` |
 | **SafetyService** | safety_service.py | 264 | `validate_actuator_command()`, `emergency_stop_all()` |
 | **SensorService** | sensor_service.py | 545 | `process_reading()`, `trigger_measurement()` |
 | **ActuatorService** | actuator_service.py | ~347 | `send_command()` → `ActuatorSendCommandResult` |
