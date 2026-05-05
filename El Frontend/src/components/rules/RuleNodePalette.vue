@@ -29,6 +29,7 @@ import {
   Snowflake,
   Flame,
   ArrowLeftRight,
+  Cpu,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -39,6 +40,8 @@ export interface PaletteItem {
   icon: Component
   category: 'condition' | 'logic' | 'action' | 'template'
   defaults?: Record<string, unknown>
+  /** AUT-248: True for hysteresis-based blocks that run directly on the ESP. */
+  offlineCapable?: boolean
 }
 
 const searchQuery = ref('')
@@ -211,7 +214,7 @@ const categories = [
   },
   {
     id: 'template',
-    label: 'Klimasteuerung',
+    label: 'Offline-fähig (auf Gerät)',
     collapsed: ref(false),
     items: [
       {
@@ -220,6 +223,7 @@ const categories = [
         description: 'Lüfter/Kühlung: Ein über Schwellwert, Aus unter Schwellwert',
         icon: Snowflake,
         category: 'template' as const,
+        offlineCapable: true,
         defaults: {
           sensorType: 'sht31_temp',
           operator: 'hysteresis',
@@ -234,6 +238,7 @@ const categories = [
         description: 'Befeuchter: Ein unter Schwellwert, Aus über Schwellwert',
         icon: Flame,
         category: 'template' as const,
+        offlineCapable: true,
         defaults: {
           sensorType: 'sht31_humidity',
           operator: 'hysteresis',
@@ -296,9 +301,17 @@ function matchesSearch(item: PaletteItem): boolean {
       >
         <button
           class="palette__category-header"
+          :class="{ 'palette__category-header--esp': category.id === 'template' }"
           @click="category.collapsed.value = !category.collapsed.value"
         >
-          <span class="palette__category-label">{{ category.label }}</span>
+          <span class="palette__category-label">
+            <Cpu
+              v-if="category.id === 'template'"
+              class="palette__category-icon"
+              aria-hidden="true"
+            />
+            {{ category.label }}
+          </span>
           <ChevronDown
             class="palette__category-chevron"
             :class="{ 'palette__category-chevron--collapsed': category.collapsed.value }"
@@ -311,15 +324,31 @@ function matchesSearch(item: PaletteItem): boolean {
               <div
                 v-if="matchesSearch(item)"
                 class="palette__item"
-                :class="`palette__item--${item.category}`"
+                :class="[
+                  `palette__item--${item.category}`,
+                  { 'palette__item--offline-capable': (item as PaletteItem).offlineCapable },
+                ]"
                 draggable="true"
+                :title="(item as PaletteItem).offlineCapable
+                  ? 'Offline-fähig: Diese Bedingung wird direkt auf dem ESP-Chip ausgewertet — funktioniert auch wenn der Server nicht erreichbar ist. Limit: 20 solcher Regeln pro ESP.'
+                  : item.description"
                 @dragstart="onDragStart($event, item)"
               >
                 <div class="palette__item-icon">
                   <component :is="item.icon" class="w-4 h-4" />
                 </div>
                 <div class="palette__item-text">
-                  <span class="palette__item-label">{{ item.label }}</span>
+                  <span class="palette__item-label">
+                    {{ item.label }}
+                    <span
+                      v-if="(item as PaletteItem).offlineCapable"
+                      class="palette__item-badge"
+                      aria-label="Offline-fähig auf ESP"
+                    >
+                      <Cpu class="palette__item-badge-icon" aria-hidden="true" />
+                      ESP
+                    </span>
+                  </span>
                   <span class="palette__item-desc">{{ item.description }}</span>
                 </div>
               </div>
@@ -613,5 +642,62 @@ function matchesSearch(item: PaletteItem): boolean {
   .palette-collapse-leave-active {
     transition-duration: 0.01ms;
   }
+}
+
+/* ======================== AUT-248: OFFLINE-CAPABLE MARKERS ======================== */
+
+.palette__category-header--esp .palette__category-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--color-status-good);
+}
+
+.palette__category-icon {
+  width: 11px;
+  height: 11px;
+}
+
+/* Hysteresis blocks: orange tint + microchip indicator */
+.palette__item--offline-capable {
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 20%, transparent) !important;
+  border-left: 2px solid var(--color-warning) !important;
+}
+
+.palette__item--offline-capable:hover {
+  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent) !important;
+}
+
+.palette__item--offline-capable .palette__item-icon {
+  background: color-mix(in srgb, var(--color-warning) 16%, transparent);
+  color: var(--color-warning);
+}
+
+.palette__item-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.palette__item-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--color-status-good) 18%, transparent);
+  color: var(--color-status-good);
+  border: 1px solid color-mix(in srgb, var(--color-status-good) 35%, transparent);
+}
+
+.palette__item-badge-icon {
+  width: 9px;
+  height: 9px;
 }
 </style>
