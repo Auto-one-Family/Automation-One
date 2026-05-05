@@ -30,7 +30,7 @@ class TestSensorDiffValidation:
             "type": "sensor_diff",
             "sensor_a_id": sensor_a,
             "sensor_b_id": sensor_b,
-            "operator": "gt",
+            "operator": ">",
             "value": 0.8,
             "consecutive_count": 3,
         }
@@ -39,7 +39,7 @@ class TestSensorDiffValidation:
         assert isinstance(validated, SensorDiffCondition)
         assert validated.sensor_a_id == sensor_a
         assert validated.sensor_b_id == sensor_b
-        assert validated.operator == "gt"
+        assert validated.operator == ">"
         assert validated.value == 0.8
         assert validated.consecutive_count == 3
 
@@ -48,7 +48,7 @@ class TestSensorDiffValidation:
         condition = {
             "type": "sensor_diff",
             "sensor_a_id": str(uuid.uuid4()),
-            "operator": "gt",
+            "operator": ">",
             "value": 0.8,
         }
 
@@ -78,7 +78,7 @@ class TestSensorDiffValidation:
             "type": "sensor_diff",
             "sensor_a_id": sensor_id,
             "sensor_b_id": sensor_id,
-            "operator": "gt",
+            "operator": ">",
             "value": 0.8,
         }
 
@@ -91,7 +91,7 @@ class TestSensorDiffValidation:
             "type": "sensor_diff",
             "sensor_a_id": "not-a-uuid",
             "sensor_b_id": str(uuid.uuid4()),
-            "operator": "gt",
+            "operator": ">",
             "value": 0.8,
         }
 
@@ -123,7 +123,7 @@ class TestSensorDiffValidation:
             "type": "sensor_diff",
             "sensor_a_id": sensor_a,
             "sensor_b_id": sensor_b,
-            "operator": "gte",
+            "operator": ">=",
             "value": 1.5,
         }
 

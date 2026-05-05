@@ -33,6 +33,10 @@ def _mock_rule(rule_id: uuid.UUID | None = None, enabled: bool = True):
     rule.cooldown_seconds = 60
     rule.max_executions_per_hour = None
     rule.last_triggered = None
+    rule.is_critical = False
+    rule.escalation_policy = None
+    rule.degraded_since = None
+    rule.degraded_reason = None
     now = datetime.now(timezone.utc)
     rule.created_at = now
     rule.updated_at = now

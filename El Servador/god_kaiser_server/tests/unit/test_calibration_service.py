@@ -369,10 +369,11 @@ async def test_ec_1point_calibration_happy_path(db_session):
         initiated_by="tester",
     )
 
-    # Standard 1.413 mS/cm reference
+    # Standard 1.413 mS/cm reference — raw must be in conductance units (mS/cm)
+    # so cell_factor = reference / raw falls in [0.5, 2.0]. raw=1.5 → cell_factor≈0.942.
     session = await service.add_point(
         session_id=session.id,
-        raw=1050.0,  # ADC raw reading
+        raw=1.5,  # conductance in mS/cm
         reference=1.413,  # mS/cm
         point_role="reference",
     )
@@ -387,8 +388,8 @@ async def test_ec_1point_calibration_happy_path(db_session):
 
     derived = result["derived"]
     assert "cell_factor" in derived
-    # cell_factor = 1.413 / 1050 ≈ 0.001346
-    assert 0.001 < derived["cell_factor"] < 0.002
+    # cell_factor = 1.413 / 1.5 = 0.942
+    assert 0.5 < derived["cell_factor"] < 2.0
     assert "point_raw" in derived
     assert "point_reference" in derived
 
@@ -487,9 +488,10 @@ async def test_canonical_structure_ec_1point(db_session):
         initiated_by="tester",
     )
 
+    # raw in conductance units (mS/cm); cell_factor = 1.413/1.5 ≈ 0.942 — in [0.5, 2.0]
     session = await service.add_point(
         session_id=session.id,
-        raw=1050.0,
+        raw=1.5,
         reference=1.413,
         point_role="reference",
     )

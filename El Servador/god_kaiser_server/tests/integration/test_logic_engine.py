@@ -31,6 +31,7 @@ def _logic_repo_session_mock_online_esp():
     exec_result = MagicMock()
     esp = MagicMock()
     esp.is_online = True
+    esp.config_pending = False
     exec_result.scalar_one_or_none.return_value = esp
     session.execute = AsyncMock(return_value=exec_result)
     return session
@@ -523,7 +524,7 @@ class TestTimerCompoundRuleEvaluation:
                 "src.services.logic_engine.LogicRepository", return_value=mock_logic_repo_inst
             ):
                 logic_engine._load_sensor_values_for_timer = AsyncMock(
-                    return_value=fake_sensor_values
+                    return_value=(fake_sensor_values, [])
                 )
                 logic_engine._check_conditions = AsyncMock(side_effect=spy_check_conditions)
 
@@ -572,7 +573,7 @@ class TestTimerCompoundRuleEvaluation:
             with patch(
                 "src.services.logic_engine.LogicRepository", return_value=mock_logic_repo_inst
             ):
-                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value={})
+                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value=({}, []))
                 logic_engine._check_conditions = AsyncMock(side_effect=spy_check_conditions)
 
                 await logic_engine.evaluate_timer_triggered_rules()
@@ -848,7 +849,7 @@ class TestB3RuleUpdateTrigger:
             with patch(
                 "src.services.logic_engine.LogicRepository", return_value=mock_logic_repo_inst
             ):
-                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value={})
+                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value=({}, []))
                 await logic_engine.on_rule_updated(str(rule_id))
 
         # OFF must have been sent for the actuator that was active
@@ -908,7 +909,7 @@ class TestB3RuleUpdateTrigger:
             with patch(
                 "src.services.logic_engine.LogicRepository", return_value=mock_logic_repo_inst
             ):
-                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value={})
+                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value=({}, []))
                 await logic_engine.on_rule_updated(str(rule_id))
 
         off_calls = [
@@ -993,7 +994,7 @@ class TestBumplessTransfer:
                 "src.services.logic_engine.LogicRepository",
                 return_value=mock_logic_repo_inst,
             ):
-                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value={})
+                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value=({}, []))
                 await logic_engine.on_rule_updated(
                     str(rule_id),
                     old_trigger_conditions=[hysteresis_cond, time_window_cond],
@@ -1050,7 +1051,7 @@ class TestBumplessTransfer:
                 "src.services.logic_engine.LogicRepository",
                 return_value=mock_logic_repo_inst,
             ):
-                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value={})
+                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value=({}, []))
                 await logic_engine.on_rule_updated(
                     str(rule_id),
                     old_trigger_conditions=[old_hysteresis],
@@ -1222,7 +1223,7 @@ class TestCompoundPostReEvalOFFGuard:
                 "src.services.logic_engine.LogicRepository", return_value=mock_logic_repo_inst
             ):
                 logic_engine._load_sensor_values_for_timer = AsyncMock(
-                    return_value=fake_sensor_values
+                    return_value=(fake_sensor_values, [])
                 )
                 # _evaluate_rule does nothing — simulates the bug: no OFF from re-eval
                 logic_engine._evaluate_rule = AsyncMock()
@@ -1275,7 +1276,7 @@ class TestCompoundPostReEvalOFFGuard:
                 "src.services.logic_engine.LogicRepository", return_value=mock_logic_repo_inst
             ):
                 logic_engine._load_sensor_values_for_timer = AsyncMock(
-                    return_value=fake_sensor_values
+                    return_value=(fake_sensor_values, [])
                 )
                 logic_engine._evaluate_rule = AsyncMock()
                 # Step 4 re-check: TW still active → conditions_met=True → guard must NOT fire
@@ -1492,7 +1493,7 @@ class TestTimerSchedulerOFF:
             with patch(
                 "src.services.logic_engine.LogicRepository", return_value=mock_logic_repo_inst
             ):
-                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value={})
+                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value=({}, []))
                 # TW just expired → conditions_met=False
                 logic_engine._check_conditions = AsyncMock(return_value=False)
 
@@ -1534,7 +1535,7 @@ class TestTimerSchedulerOFF:
             with patch(
                 "src.services.logic_engine.LogicRepository", return_value=mock_logic_repo_inst
             ):
-                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value={})
+                logic_engine._load_sensor_values_for_timer = AsyncMock(return_value=({}, []))
                 logic_engine._check_conditions = AsyncMock(return_value=False)
 
                 await logic_engine.evaluate_timer_triggered_rules()

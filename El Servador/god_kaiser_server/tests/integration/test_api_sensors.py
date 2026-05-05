@@ -524,9 +524,10 @@ class TestMeasurementRole:
         sensor_id = response.json()["id"]
 
         # Verify in database directly
+        import uuid as _uuid
         from src.db.repositories import SensorRepository
 
         sensor_repo = SensorRepository(db_session)
-        sensor = await sensor_repo.get_by_id(sensor_id)
+        sensor = await sensor_repo.get_by_id(_uuid.UUID(sensor_id))
         assert sensor is not None
         assert sensor.sensor_metadata.get("measurement_role") == "inflow"
