@@ -27,7 +27,7 @@ import RuntimeMaintenanceSection from '@/components/devices/RuntimeMaintenanceSe
 import DeviceMetadataSection from '@/components/devices/DeviceMetadataSection.vue'
 import LinkedRulesSection from '@/components/devices/LinkedRulesSection.vue'
 import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSection.vue'
-import DeviceScopeSection from '@/components/devices/DeviceScopeSection.vue'
+import SettingsBreadcrumb from '@/components/settings/SettingsBreadcrumb.vue'
 import { deviceContextApi } from '@/api/device-context'
 import { useZoneStore } from '@/shared/stores/zone.store'
 import { useActuatorStore } from '@/shared/stores/actuator.store'
@@ -85,11 +85,11 @@ const enabled = ref(true)
 // Subzone
 const subzoneId = ref<string | null>(null)
 
-// Device Scope (T13-R3 WP4)
+// Device Scope (T13-R3 WP4) — UI auf Sensor-Ebene entfernt (AUT-251),
+// Werte werden weiterhin geladen/gespeichert um Backend-Kompatibilitaet zu wahren.
 const localScope = ref<DeviceScope>('zone_local')
 const localAssignedZones = ref<string[]>([])
 const activeZoneId = ref<string | null>(null)
-const availableZones = computed(() => zoneStore.activeZones)
 
 // Operating mode (Block C: Phase 2B)
 const operatingMode = ref<'continuous' | 'on_demand' | 'scheduled' | 'paused'>('continuous')
@@ -487,17 +487,26 @@ async function handleSave() {
     <div v-if="loading" class="sensor-config__loading">Lade Konfiguration...</div>
 
     <template v-else>
+      <!-- Settings-Kontextpfad: Zone -> Subzone -> ESP -> GPIO (AUT-251) -->
+      <SettingsBreadcrumb
+        :zone="zoneContextLabel"
+        :subzone="subzoneContextLabel"
+        :esp-id="espId"
+        :gpio="gpio"
+      />
+
       <section v-if="isMockEsp" class="sensor-config__simulation-badge" aria-label="Simulation Hinweis">
         [Simulation] Mock-ESP - Aktionen werden simuliert.
       </section>
       <!-- ═══ ZONE 1: BASIC (always visible) ══════════════════════════════ -->
       <section class="sensor-config__section">
         <h3 class="sensor-config__section-title">Grundeinstellungen</h3>
-        <div class="sensor-config__context-anchor">
-          <span class="sensor-config__context-label">Kontextanker</span>
-          <span class="sensor-config__context-item">Zone: {{ zoneContextLabel }}</span>
-          <span class="sensor-config__context-item">Subzone: {{ subzoneContextLabel }}</span>
-          <span class="sensor-config__context-item sensor-config__context-item--mono">ESP: {{ espId }} / GPIO {{ gpio }}</span>
+
+        <!-- Zone: read-only, vom Geraet vererbt (Subzone wird unten als Dropdown gepflegt) -->
+        <div class="sensor-config__zone-header">
+          <span class="sensor-config__zone-label">Zone:</span>
+          <span class="sensor-config__zone-value">{{ contextDevice?.zone_name || contextDevice?.zone_id || 'Keine Zone' }}</span>
+          <span class="sensor-config__zone-hint">(vom Geraet vererbt)</span>
         </div>
 
         <div class="sensor-config__field">
@@ -830,21 +839,9 @@ async function handleSave() {
         />
       </AccordionSection>
 
-      <!-- ═══ ZONE-ZUORDNUNG (T13-R3 WP4) ═════════════════════════════════ -->
-      <AccordionSection
-        title="Zone-Zuordnung"
-        :storage-key="`${accordionKey}-zone-scope`"
-      >
-        <DeviceScopeSection
-          :config-id="sensorDbId"
-          config-type="sensor"
-          v-model="localScope"
-          v-model:assigned-zones="localAssignedZones"
-          v-model:active-zone-id="activeZoneId"
-          :available-zones="availableZones"
-          :disabled="saving"
-        />
-      </AccordionSection>
+      <!-- AUT-251: Zone-Zuordnung wird ausschliesslich auf Geraete-Ebene gepflegt
+           (HardwareView -> ESPSettingsSheet). Sensoren erben die Zone vom Geraet
+           und besitzen nur eine eigene Subzone (siehe Dropdown oben). -->
 
       <!-- ═══ PENDING CONFIG STATUS (AUT-64) ═══════════════════════════════ -->
       <PendingConfigBanner
@@ -946,6 +943,36 @@ async function handleSave() {
 
 .sensor-config__context-item--mono {
   font-family: var(--font-mono);
+}
+
+/* Zone-Header (read-only, vom Geraet vererbt) — AUT-251 */
+.sensor-config__zone-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+}
+
+.sensor-config__zone-label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.sensor-config__zone-value {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.sensor-config__zone-hint {
+  font-size: var(--text-xxs);
+  color: var(--color-text-muted);
+  font-style: italic;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

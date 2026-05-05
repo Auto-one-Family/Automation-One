@@ -832,11 +832,11 @@ onUnmounted(() => {
         </AccordionSection>
       </section>
 
-      <!-- Geräte nach Subzone (read-only) -->
+      <!-- Subzonen-Übersicht (read-only) — AUT-251 -->
       <section v-if="devicesBySubzone.length > 0" class="sheet-section">
         <h4 class="sheet-section__title">
           <Thermometer class="w-3.5 h-3.5" />
-          Geräte nach Subzone
+          Subzonen-Übersicht
         </h4>
         <div class="sheet-section__content">
           <div

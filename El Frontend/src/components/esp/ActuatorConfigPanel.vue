@@ -26,7 +26,7 @@ import RuntimeMaintenanceSection from '@/components/devices/RuntimeMaintenanceSe
 import DeviceMetadataSection from '@/components/devices/DeviceMetadataSection.vue'
 import LinkedRulesSection from '@/components/devices/LinkedRulesSection.vue'
 import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSection.vue'
-import DeviceScopeSection from '@/components/devices/DeviceScopeSection.vue'
+import SettingsBreadcrumb from '@/components/settings/SettingsBreadcrumb.vue'
 import { deviceContextApi } from '@/api/device-context'
 import { useZoneStore } from '@/shared/stores/zone.store'
 import { useActuatorStore } from '@/shared/stores/actuator.store'
@@ -76,11 +76,11 @@ const name = ref('')
 const description = ref('')
 const enabled = ref(true)
 
-// Device Scope (T13-R3 WP4)
+// Device Scope (T13-R3 WP4) — UI auf Aktor-Ebene entfernt (AUT-251),
+// Werte werden weiterhin geladen/gespeichert um Backend-Kompatibilitaet zu wahren.
 const localScope = ref<DeviceScope>('zone_local')
 const localAssignedZones = ref<string[]>([])
 const activeZoneId = ref<string | null>(null)
-const availableZones = computed(() => zoneStore.activeZones)
 
 // Subzone
 const subzoneId = ref<string | null>(null)
@@ -121,6 +121,17 @@ const currentPwmValue = ref(0)
 
 /** Storage key prefix for accordion persistence */
 const accordionKey = computed(() => `actuator-${props.espId}-${props.gpio}`)
+
+// Context-Anker fuer SettingsBreadcrumb (AUT-251)
+const contextDevice = computed(() =>
+  espStore.devices.find(d => espStore.getDeviceId(d) === props.espId),
+)
+const zoneContextLabel = computed(() =>
+  (contextDevice.value as any)?.zone_name
+  || (contextDevice.value as any)?.zone_id
+  || 'nicht zugewiesen',
+)
+const subzoneContextLabel = computed(() => subzoneId.value || 'Zone-weit')
 
 /** GPIO options for aux_gpio (Valve): "Nicht verwendet" + available pins excluding main gpio */
 const { allPinStatuses } = useGpioStatus(computed(() => props.espId))
@@ -456,6 +467,14 @@ function formatDuration(seconds: number): string {
     <div v-if="loading" class="actuator-config__loading">Lade Konfiguration...</div>
 
     <template v-else>
+      <!-- Settings-Kontextpfad: Zone -> Subzone -> ESP -> GPIO (AUT-251) -->
+      <SettingsBreadcrumb
+        :zone="zoneContextLabel"
+        :subzone="subzoneContextLabel"
+        :esp-id="espId"
+        :gpio="gpio"
+      />
+
       <section v-if="isMock" class="actuator-config__simulation-badge" aria-label="Simulation Hinweis">
         [Simulation] Mock-ESP - Aktionen werden simuliert.
       </section>
@@ -511,6 +530,13 @@ function formatDuration(seconds: number): string {
       <!-- Basic Fields -->
       <section class="actuator-config__section">
         <h3 class="actuator-config__section-title">Grundeinstellungen</h3>
+
+        <!-- Zone: read-only, vom Geraet vererbt (Subzone wird unten als Dropdown gepflegt) — AUT-251 -->
+        <div class="actuator-config__zone-header">
+          <span class="actuator-config__zone-label">Zone:</span>
+          <span class="actuator-config__zone-value">{{ contextDevice?.zone_name || contextDevice?.zone_id || 'Keine Zone' }}</span>
+          <span class="actuator-config__zone-hint">(vom Geraet vererbt)</span>
+        </div>
 
         <div class="actuator-config__field">
           <label class="actuator-config__label">Name</label>
@@ -738,21 +764,9 @@ function formatDuration(seconds: number): string {
         />
       </AccordionSection>
 
-      <!-- ═══ ZONE-ZUORDNUNG (T13-R3 WP4) ═════════════════════════════════ -->
-      <AccordionSection
-        title="Zone-Zuordnung"
-        :storage-key="`${accordionKey}-zone-scope`"
-      >
-        <DeviceScopeSection
-          :config-id="actuatorDbId"
-          config-type="actuator"
-          v-model="localScope"
-          v-model:assigned-zones="localAssignedZones"
-          v-model:active-zone-id="activeZoneId"
-          :available-zones="availableZones"
-          :disabled="saving"
-        />
-      </AccordionSection>
+      <!-- AUT-251: Zone-Zuordnung wird ausschliesslich auf Geraete-Ebene gepflegt
+           (HardwareView -> ESPSettingsSheet). Aktoren erben die Zone vom Geraet
+           und besitzen nur eine eigene Subzone (siehe Dropdown oben). -->
 
       <!-- ═══ PENDING CONFIG STATUS (AUT-64) ═══════════════════════════════ -->
       <PendingConfigBanner
@@ -825,6 +839,36 @@ function formatDuration(seconds: number): string {
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
   margin: 0;
+}
+
+/* AUT-251: Zone-Header (read-only, vom Geraet vererbt) */
+.actuator-config__zone-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+}
+
+.actuator-config__zone-label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.actuator-config__zone-value {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.actuator-config__zone-hint {
+  font-size: var(--text-xxs);
+  color: var(--color-text-muted);
+  font-style: italic;
 }
 
 /* Control Panel */
