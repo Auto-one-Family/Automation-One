@@ -7,11 +7,11 @@ allowed-tools: Read
 
 # REST API Referenz
 
-> **Version:** 4.2 | **Aktualisiert:** 2026-04-24
+> **Version:** 4.3 | **Aktualisiert:** 2026-05-01
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
-> **Endpoint-Anzahl:** ~240 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry, Dashboards, IntentOutcomes)
+> **Endpoint-Anzahl:** ~255 Endpoints (inkl. Zone Context, Backups, Export, Schema Registry, Dashboards, IntentOutcomes, MultispeQ, Plants)
 
 ---
 
@@ -237,6 +237,33 @@ allowed-tools: Read
 | `/sensor-type-defaults/{sensor_type}` | PATCH | JWT | Default aktualisieren |
 | `/sensor-type-defaults/{sensor_type}` | DELETE | JWT | Default löschen |
 | `/sensor-type-defaults/{sensor_type}/effective` | GET | JWT | Effektive Konfiguration |
+
+### MultispeQ (`/sensors/multispeq`) - 4 Endpoints (AUT-211..222)
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/sensors/multispeq/import` | POST | JWT/API-Key | PhotosynQ CSV/JSON importieren (Dedup via measurement_id SHA-256, 9 Sensor-Typen GPIO 200-208, sensor_kind='snapshot') |
+| `/sensors/multispeq/aggregates` | GET | JWT | Boxplot-Daten (percentile_cont) nach sensor_type + zone_id |
+| `/sensors/multispeq/correlation` | GET | JWT | Scatter-Daten (x/y aus sensor_metadata) für Korrelationsanalyse |
+| `/sensors/multispeq/{import_id}/assign-plant` | POST | JWT | Messung einer Pflanze nachträglich zuordnen |
+
+> **Sensor-Typen:** phi2 (GPIO 200), fv_fm (201), npqt (202), lef (203), par_internal (204), ppfd (205), chlorophyll_spad (206), leaf_temp (207), anthocyanin_index (208).
+> **Virtueller ESP:** MultispeQ nutzt einen virtuellen ESP (`is_virtual=true`) mit `sensor_kind='snapshot'` — kein physischer MQTT-Transport.
+> **Logic Engine:** Cannabis-Trigger (7 Regeln, `enabled=False`) werden über `metadata_filter_evaluator.py` (7 Operatoren) nach `alembic upgrade head` und Seed-Skript aktivierbar.
+
+### Plants (`/plants`) - 6 Endpoints (AUT-211..222)
+
+| Endpoint | Method | Auth | Beschreibung |
+|----------|--------|------|--------------|
+| `/plants` | GET | JWT | Alle Pflanzen (filterbar nach zone, phase, active) |
+| `/plants` | POST | Operator | Pflanze anlegen (QR-Code PL-XXXXXXXX auto-generiert via qrcode+pillow) |
+| `/plants/{plant_id}` | PATCH | Operator | Pflanze aktualisieren (name, zone, phase, notes) |
+| `/plants/{plant_id}` | DELETE | Operator | Pflanze soft-delete |
+| `/plants/{plant_id}/lifecycle-event` | POST | Operator | Lifecycle-Event (phase_change, transplant, harvest) — WS-Broadcast `plant_lifecycle_update` |
+| `/plants/{plant_id}/measurements` | GET | JWT | Phi2-Zeitreihe + alle MultispeQ-Typen für Plant-Detail-Panel |
+
+> **DB-Tabellen:** `plants`, `plants_cannabis_extension`, `plant_lifecycle_events` (Alembic: `add_plants_entity_lifecycle_events`).
+> **Abhängigkeit:** Erfordert `pip install qrcode pillow` im Server-Container für QR-Code-PNG-Generierung.
 
 ### Debug/Mock-ESP (`/debug`) - ~60 Endpoints
 
@@ -1939,6 +1966,8 @@ Detaillierter Health Check mit Komponenten-Status (JWT erforderlich, ActiveUser)
 | auth | `auth.ts` | Authentication |
 | esp | `esp.ts` | ESP Devices (Mock + Real) |
 | sensors | `sensors.ts` | Sensor CRUD |
+| multispeq | `multispeq.ts` | MultispeQ Import + Aggregates + Correlation (AUT-211..222) |
+| plants | `plants.ts` | Plant CRUD + Lifecycle-Events + Measurements (AUT-211..222) |
 | actuators | `actuators.ts` | Actuator Control |
 | zones | `zones.ts` | Zone Management |
 | subzones | `subzones.ts` | Subzone Management |
@@ -1959,6 +1988,8 @@ Detaillierter Health Check mit Komponenten-Status (JWT erforderlich, ActiveUser)
 | auth | `auth.py` | 10 |
 | esp | `esp.py` | 17 |
 | sensors | `sensors.py` | 16 |
+| multispeq | `multispeq.py` | 4 (AUT-211..222) |
+| plants | `plants.py` | 6 (AUT-211..222) |
 | actuators | `actuators.py` | 12 |
 | zone | `zone.py` | 5 |
 | zone_context | `zone_context.py` | 7 |

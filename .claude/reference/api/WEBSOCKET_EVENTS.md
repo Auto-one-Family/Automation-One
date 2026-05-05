@@ -7,10 +7,10 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
-> **Version:** 3.18 | **Aktualisiert:** 2026-04-24
+> **Version:** 3.19 | **Aktualisiert:** 2026-05-01
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
-> **Event-Anzahl:** 45 relevante Event-Typen (42 serverseitige Broadcast-Events + 1 optionaler Plugin-Statuskanal + 2 Frontend-Contract-Integrationssignale)
+> **Event-Anzahl:** 47 relevante Event-Typen (44 serverseitige Broadcast-Events + 1 optionaler Plugin-Statuskanal + 2 Frontend-Contract-Integrationssignale)
 
 ---
 
@@ -35,6 +35,12 @@ allowed-tools: Read
 | `sensor_data` | Server→Frontend | Sensor-Messung | Neuer Sensor-Wert |
 | `sensor_health` | Server→Frontend | Health-Check | Sensor Timeout/Recovery |
 | `sensor_config_deleted` | Server→Frontend | Sensor DELETE | Sensor-Config entfernt (Ghost-Cleanup) |
+
+### Plant Events
+
+| Event | Richtung | Trigger | Beschreibung |
+|-------|----------|---------|--------------|
+| `plant_lifecycle_update` | Server→Frontend | POST /plants/{id}/lifecycle-event | Pflanzen-Lifecycle-Ereignis (Phase, Anmerkung, Ernte) |
 
 ### Actuator Events
 
@@ -557,6 +563,43 @@ Sensor-Konfiguration wurde gelöscht (T08-Fix-D Ghost-Cleanup).
 ```
 
 **Frontend-Handler:** `esp.ts → handleSensorConfigDeleted` — entfernt Ghost-Sensor aus `device.sensors` per `gpio + sensor_type` Match, zeigt Toast. Wird fuer Mock UND Real ESPs ausgeloest (T10-Fix-B: unified DELETE-Pipeline per config_id UUID).
+
+---
+
+### 4.4 plant_lifecycle_update
+
+Pflanzen-Lifecycle-Ereignis wurde eingetragen (Phase-Wechsel, Anmerkung, Ernte-Event).
+
+**Trigger:** `POST /api/v1/plants/{plant_id}/lifecycle-event`
+
+**Code-Location:** [plants.py:571](El Servador/god_kaiser_server/src/api/v1/plants.py#L571)
+
+**Payload:**
+```json
+{
+  "type": "plant_lifecycle_update",
+  "timestamp": 1706787600,
+  "data": {
+    "plant_id": "550e8400-e29b-41d4-a716-446655440000",
+    "event_id": "661f9511-f30c-52e5-b827-557766551111",
+    "event_type": "phase_changed",
+    "new_phase": "flowering",
+    "notes": "Tag 1 Blütephase",
+    "event_timestamp": "2026-05-01T10:23:45+00:00"
+  }
+}
+```
+
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `plant_id` | UUID string | Betroffene Pflanze |
+| `event_id` | UUID string | Neu erstellter Lifecycle-Event |
+| `event_type` | string | `phase_changed`, `note`, `harvest`, `treatment`, `observation` |
+| `new_phase` | string? | Neue Phase (nur bei `event_type=phase_changed`) |
+| `notes` | string? | Freitext-Anmerkung |
+| `event_timestamp` | ISO 8601 | Zeitpunkt des Ereignisses |
+
+**Frontend-Handler:** `plants.store.ts` — aktualisiert Plant-Lifecycle-Liste und zeigt Toast.
 
 ---
 
@@ -1919,6 +1962,7 @@ interface WebSocketFilters {
 | `device_context.py` (Router) | `device_context_changed` |
 | `sensors.py` (Router) | `device_scope_changed` |
 | `actuators.py` (Router) | `device_scope_changed` |
+| `plants.py` (Router) | `plant_lifecycle_update` |
 
 ---
 
