@@ -25,10 +25,13 @@ import {
   Puzzle,
   Trash2,
   Copy,
+  Download,
 } from 'lucide-vue-next'
 import { useEspStore } from '@/stores/esp'
 import { getSensorDisplayName, isMultiValueBaseType } from '@/utils/sensorDefaults'
 import { pluginsApi, type PluginDTO } from '@/api/plugins'
+import { sensorsApi } from '@/api/sensors'
+import { useToast } from '@/composables/useToast'
 import type { Node } from '@vue-flow/core'
 import type { MockSensor, MockActuator } from '@/types'
 
@@ -47,6 +50,7 @@ const emit = defineEmits<{
 }>()
 
 const espStore = useEspStore()
+const toast = useToast()
 
 // Load available plugins for plugin node config
 const availablePlugins = ref<PluginDTO[]>([])
@@ -306,6 +310,140 @@ function selectActuator(value: string) {
     updateField('gpio', actuator.gpio)
   }
 }
+
+// =============================================================================
+// AUT-246: Sync rule trigger value with sensor base threshold
+// =============================================================================
+//
+// The rule's `value` field is INDEPENDENT from SensorConfig.thresholds by design
+// (a rule can deliberately use a different threshold than the sensor alert).
+// This helper allows the operator to opt-in to syncing — one-shot copy,
+// no automatic re-sync. A small indicator shows whether the rule value
+// matches the sensor's warning threshold.
+
+interface SensorBaseThresholdsRule {
+  warning_min: number | null
+  warning_max: number | null
+  alarm_min: number | null
+  alarm_max: number | null
+}
+
+const ruleSensorBaseThresholds = ref<SensorBaseThresholdsRule | null>(null)
+const ruleSensorBaseLoadedFor = ref<string | null>(null)
+const isLoadingRuleThreshold = ref(false)
+
+function ruleSensorKey(): string | null {
+  const espId = localData.value.espId as string | undefined
+  const gpio = localData.value.gpio as number | undefined
+  const sensorType = localData.value.sensorType as string | undefined
+  if (!espId || gpio == null || !sensorType) return null
+  return `${espId}:${gpio}:${sensorType}`
+}
+
+async function fetchRuleSensorBase(): Promise<void> {
+  const espId = localData.value.espId as string | undefined
+  const gpio = localData.value.gpio as number | undefined
+  const sensorType = localData.value.sensorType as string | undefined
+  if (!espId || gpio == null || !sensorType) {
+    ruleSensorBaseThresholds.value = null
+    return
+  }
+  const key = `${espId}:${gpio}:${sensorType}`
+  if (ruleSensorBaseLoadedFor.value === key && ruleSensorBaseThresholds.value) return
+  try {
+    const cfg = await sensorsApi.get(espId, gpio, sensorType)
+    if (cfg) {
+      ruleSensorBaseThresholds.value = {
+        warning_min: cfg.warning_min ?? null,
+        warning_max: cfg.warning_max ?? null,
+        alarm_min: cfg.threshold_min ?? null,
+        alarm_max: cfg.threshold_max ?? null,
+      }
+    } else {
+      ruleSensorBaseThresholds.value = null
+    }
+  } catch {
+    ruleSensorBaseThresholds.value = null
+  } finally {
+    ruleSensorBaseLoadedFor.value = key
+  }
+}
+
+watch(
+  () => ruleSensorKey(),
+  (key) => {
+    if (key) {
+      void fetchRuleSensorBase()
+    } else {
+      ruleSensorBaseThresholds.value = null
+      ruleSensorBaseLoadedFor.value = null
+    }
+  },
+  { immediate: true },
+)
+
+/**
+ * AUT-246: Pick the most relevant sensor threshold for the current operator.
+ * Operator semantics:
+ *   '>' / '>=' → warn high or alarm high (above-threshold breach)
+ *   '<' / '<=' → warn low or alarm low (below-threshold breach)
+ *   '==' / '!='/'between' → warn high (default)
+ */
+function getRuleSyncTargetValue(): number | null {
+  const base = ruleSensorBaseThresholds.value
+  if (!base) return null
+  const op = String(localData.value.operator || '>')
+  if (op === '<' || op === '<=') {
+    return base.warning_min ?? base.alarm_min ?? null
+  }
+  return base.warning_max ?? base.alarm_max ?? null
+}
+
+/**
+ * AUT-246: Indicator state — synced (●) when rule.value === target, else independent (◯).
+ * Returns null when no sensor base threshold is available (no indicator shown).
+ */
+const ruleSyncState = computed<'synced' | 'independent' | null>(() => {
+  if (nodeType.value !== 'sensor') return null
+  if (localData.value.operator === 'between' || localData.value.operator === 'hysteresis') {
+    return null
+  }
+  const target = getRuleSyncTargetValue()
+  if (target == null) return null
+  const current = localData.value.value
+  if (current == null || current === '') return 'independent'
+  const cur = Number(current)
+  if (Number.isNaN(cur)) return 'independent'
+  return Math.abs(cur - target) < 1e-6 ? 'synced' : 'independent'
+})
+
+const ruleSyncTargetLabel = computed<string>(() => {
+  const base = ruleSensorBaseThresholds.value
+  if (!base) return ''
+  const op = String(localData.value.operator || '>')
+  if (op === '<' || op === '<=') {
+    return base.warning_min != null ? 'Warn Low' : 'Alarm Low'
+  }
+  return base.warning_max != null ? 'Warn High' : 'Alarm High'
+})
+
+async function loadRuleValueFromSensorBase(): Promise<void> {
+  isLoadingRuleThreshold.value = true
+  try {
+    await fetchRuleSensorBase()
+    const target = getRuleSyncTargetValue()
+    if (target == null) {
+      toast.error('Keine Sensor-Schwelle gefunden')
+      return
+    }
+    updateField('value', target)
+    toast.success(`Wert aus Sensor-Schwelle übernommen (${ruleSyncTargetLabel.value})`)
+  } catch {
+    toast.error('Sensor-Schwelle konnte nicht geladen werden')
+  } finally {
+    isLoadingRuleThreshold.value = false
+  }
+}
 </script>
 
 <template>
@@ -507,16 +645,60 @@ function selectActuator(value: string) {
           </div>
 
           <div v-else class="config-field">
-            <label class="config-label">Schwellwert</label>
-            <input
-              type="number"
-              class="config-input"
-              :class="{ 'config-input--invalid': fieldError('value') }"
-              :value="localData.value"
-              step="0.1"
-              @input="updateField('value', Number(($event.target as HTMLInputElement).value))"
-            />
+            <div class="config-label-row">
+              <label class="config-label">Schwellwert</label>
+              <!-- AUT-246: Sync indicator (read-only) — '● synced' / '◯ unabhängig' -->
+              <span
+                v-if="ruleSyncState"
+                :class="[
+                  'rule-sync-indicator',
+                  ruleSyncState === 'synced'
+                    ? 'rule-sync-indicator--synced'
+                    : 'rule-sync-indicator--independent',
+                ]"
+                :title="
+                  ruleSyncState === 'synced'
+                    ? `Synchron mit Sensor-Schwelle (${ruleSyncTargetLabel})`
+                    : 'Regel-Schwelle weicht von der Sensor-Schwelle ab — bewusste Entkopplung möglich.'
+                "
+              >
+                <span class="rule-sync-indicator__dot">{{ ruleSyncState === 'synced' ? '●' : '◯' }}</span>
+                {{ ruleSyncState === 'synced' ? 'synced' : 'unabhängig' }}
+              </span>
+            </div>
+            <div class="rule-sync-row">
+              <input
+                type="number"
+                class="config-input rule-sync-row__input"
+                :class="{ 'config-input--invalid': fieldError('value') }"
+                :value="localData.value"
+                step="0.1"
+                @input="updateField('value', Number(($event.target as HTMLInputElement).value))"
+              />
+              <!-- AUT-246: One-shot sync button — copies sensor base threshold into rule value -->
+              <button
+                v-if="localData.espId && localData.gpio != null && localData.sensorType"
+                type="button"
+                class="rule-sync-btn"
+                :disabled="isLoadingRuleThreshold"
+                :title="
+                  ruleSensorBaseThresholds
+                    ? `Wert aus Sensor-Schwelle (${ruleSyncTargetLabel}) übernehmen`
+                    : 'Sensor-Schwelle wird geladen...'
+                "
+                @click="loadRuleValueFromSensorBase"
+              >
+                <Download :size="13" />
+                <span>Aus Sensor-Schwelle übernehmen</span>
+              </button>
+            </div>
             <p v-if="fieldError('value')" class="config-hint config-hint--error">{{ fieldError('value') }}</p>
+            <p
+              v-else-if="ruleSyncState === 'independent' && ruleSensorBaseThresholds"
+              class="config-hint"
+            >
+              Hinweis: Regel-Schwelle ist unabhängig von der Sensor-Schwelle — Rule-Engine triggert beim hier eingegebenen Wert.
+            </p>
           </div>
         </template>
 
@@ -1060,6 +1242,82 @@ function selectActuator(value: string) {
 
 .config-input--invalid {
   border-color: var(--color-error);
+}
+
+/* AUT-246: Rule sync row + indicator */
+.config-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.rule-sync-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  font-size: var(--text-xxs);
+  font-weight: 600;
+  border-radius: var(--radius-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+}
+
+.rule-sync-indicator__dot {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.rule-sync-indicator--synced {
+  color: var(--color-success);
+  background: rgba(52, 211, 153, 0.12);
+}
+
+.rule-sync-indicator--independent {
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+}
+
+.rule-sync-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
+.rule-sync-row__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.rule-sync-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.375rem 0.625rem;
+  background: transparent;
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  min-height: 32px;
+}
+
+.rule-sync-btn:hover:not(:disabled) {
+  border-color: rgba(129, 140, 248, 0.4);
+  color: var(--color-text-primary);
+  background: rgba(129, 140, 248, 0.06);
+}
+
+.rule-sync-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 .config-input::placeholder,

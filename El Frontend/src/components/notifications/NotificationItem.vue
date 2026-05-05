@@ -108,6 +108,134 @@ const statusClass = computed(() => {
 /** Source label for badge (Sensor, Infrastruktur, Aktor, Regel, System) */
 const sourceLabel = computed(() => getNotificationSourceLabel(props.notification.source))
 
+/**
+ * AUT-246: Source line — formatted "{Source-Type}: {Specific-Name}" for clarity.
+ * Helps the operator immediately see WHO triggered the alert without expanding.
+ *
+ * Mapping (per AUT-246):
+ *   sensor_threshold → "Sensor-Schwelle: {Sensor-Name}" (clickable → Sensor-Settings)
+ *   logic_engine     → "Regel: {Rule-Name}" (clickable → Rule-Editor)
+ *   device_event     → "Gerät: {ESP-Name} ({Reason})"
+ *   system           → "System: {reason}"
+ *   freshness_reminder/calibration_reminder → "Sensor-Hinweis: {Sensor-Name}"
+ *   grafana          → "Infrastruktur: {Title or 'Grafana'}"
+ *   mqtt_handler     → "Aktor: {ESP-Name}"
+ */
+interface SourceLine {
+  prefix: string
+  name: string
+  clickable: boolean
+  navigate: (() => void) | null
+}
+
+const sourceLine = computed<SourceLine | null>(() => {
+  const src = props.notification.source
+  if (!src) return null
+  const meta = metadata.value
+  switch (src) {
+    case 'sensor_threshold': {
+      const sensorName =
+        (meta.sensor_name as string)
+        || (meta.sensor_type as string)
+        || 'Unbekannter Sensor'
+      return {
+        prefix: 'Sensor-Schwelle',
+        name: sensorName,
+        clickable: !!meta.esp_id,
+        navigate: meta.esp_id ? navigateToSensor : null,
+      }
+    }
+    case 'logic_engine': {
+      const ruleName = (meta.rule_name as string) || (meta.rule_id as string) || 'Regel'
+      return {
+        prefix: 'Regel',
+        name: ruleName,
+        clickable: !!meta.rule_id,
+        navigate: meta.rule_id ? navigateToRule : null,
+      }
+    }
+    case 'device_event': {
+      const espName = (meta.esp_id as string) || 'Gerät'
+      const reason = (meta.event_type as string) || (meta.reason as string) || ''
+      return {
+        prefix: 'Gerät',
+        name: reason ? `${espName} (${reason})` : espName,
+        clickable: !!meta.esp_id,
+        navigate: meta.esp_id ? navigateToSensor : null,
+      }
+    }
+    case 'manual':
+    case 'system':
+    case 'autoops': {
+      const reason = (meta.reason as string) || (meta.event_type as string) || 'Systemereignis'
+      return {
+        prefix: 'System',
+        name: reason,
+        clickable: false,
+        navigate: null,
+      }
+    }
+    case 'freshness_reminder':
+    case 'calibration_reminder': {
+      const sensorName =
+        (meta.sensor_name as string)
+        || (meta.sensor_type as string)
+        || 'Unbekannter Sensor'
+      return {
+        prefix: 'Sensor-Hinweis',
+        name: sensorName,
+        clickable: !!meta.esp_id,
+        navigate: meta.esp_id ? navigateToSensor : null,
+      }
+    }
+    case 'grafana': {
+      const title = (meta.alert_name as string) || 'Grafana-Alert'
+      return {
+        prefix: 'Infrastruktur',
+        name: title,
+        clickable: false,
+        navigate: null,
+      }
+    }
+    case 'mqtt_handler': {
+      const espName = (meta.esp_id as string) || 'Aktor'
+      return {
+        prefix: 'Aktor',
+        name: espName,
+        clickable: !!meta.esp_id,
+        navigate: meta.esp_id ? navigateToSensor : null,
+      }
+    }
+    case 'ai_anomaly_service': {
+      const sensorName = (meta.sensor_name as string) || (meta.sensor_type as string) || 'KI-Erkennung'
+      return {
+        prefix: 'KI-Anomalie',
+        name: sensorName,
+        clickable: !!meta.esp_id,
+        navigate: meta.esp_id ? navigateToSensor : null,
+      }
+    }
+    default: {
+      // Unknown source — fall back to the human-readable source label.
+      const fallback = getNotificationSourceLabel(src)
+      return fallback
+        ? {
+            prefix: fallback,
+            name: '',
+            clickable: false,
+            navigate: null,
+          }
+        : null
+    }
+  }
+})
+
+function handleSourceLineClick(event: MouseEvent): void {
+  if (!sourceLine.value?.clickable || !sourceLine.value.navigate) return
+  event.stopPropagation()
+  sourceLine.value.navigate()
+}
+
 /** CSS class for source badge color (optional differentiation) */
 const sourceBadgeClass = computed(() => {
   const s = props.notification.source
@@ -203,6 +331,21 @@ function navigateToCorrelation(): void {
         <span v-if="notification.body" class="item__body">
           {{ notification.body }}
         </span>
+        <!-- AUT-246: Source line — "{Source-Type}: {Specific-Name}" with optional navigation -->
+        <component
+          :is="sourceLine?.clickable ? 'button' : 'span'"
+          v-if="sourceLine"
+          :class="[
+            'item__source-line',
+            { 'item__source-line--clickable': sourceLine.clickable },
+          ]"
+          :type="sourceLine.clickable ? 'button' : undefined"
+          :data-testid="`notification-source-line-${notification.id}`"
+          @click="handleSourceLineClick"
+        >
+          <span class="item__source-line-prefix">{{ sourceLine.prefix }}:</span>
+          <span class="item__source-line-name">{{ sourceLine.name || '—' }}</span>
+        </component>
         <div
           v-if="isArbitrationInfo"
           class="item__arbitration-hint"
@@ -511,6 +654,45 @@ function navigateToCorrelation(): void {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* AUT-246: Source line ("Sensor-Schwelle: …", "Regel: …", "Gerät: …", "System: …") */
+.item__source-line {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: 2px;
+  padding: 1px var(--space-1);
+  font-size: var(--text-xxs);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  align-self: flex-start;
+  text-align: left;
+  font-family: inherit;
+}
+
+.item__source-line--clickable {
+  color: var(--color-info);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.item__source-line--clickable:hover {
+  color: var(--color-text-primary);
+  background: rgba(96, 165, 250, 0.08);
+}
+
+.item__source-line-prefix {
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.item__source-line-name {
+  font-weight: 500;
 }
 
 /* Meta (time + chevron) */

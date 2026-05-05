@@ -10,7 +10,8 @@
  */
 
 import { ref, computed, onMounted } from 'vue'
-import { Save, Gauge, Settings, Cpu, Trash2 } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
+import { Save, Gauge, Settings, Cpu, Trash2, LayoutGrid, Workflow, ExternalLink, Info } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { espApi } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
@@ -28,6 +29,10 @@ import DeviceMetadataSection from '@/components/devices/DeviceMetadataSection.vu
 import LinkedRulesSection from '@/components/devices/LinkedRulesSection.vue'
 import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSection.vue'
 import SettingsBreadcrumb from '@/components/settings/SettingsBreadcrumb.vue'
+import { useDashboardStore } from '@/shared/stores/dashboard.store'
+import { useLogicStore } from '@/shared/stores/logic.store'
+import { extractSensorConditions } from '@/types/logic'
+import type { LogicRule } from '@/types/logic'
 import { deviceContextApi } from '@/api/device-context'
 import { useZoneStore } from '@/shared/stores/zone.store'
 import { useActuatorStore } from '@/shared/stores/actuator.store'
@@ -62,10 +67,13 @@ const emit = defineEmits<{
 }>()
 
 const toast = useToast()
+const router = useRouter()
 const espStore = useEspStore()
 const actuatorStore = useActuatorStore()
 const uiStore = useUiStore()
 const zoneStore = useZoneStore()
+const dashboardStore = useDashboardStore()
+const logicStore = useLogicStore()
 
 // =============================================================================
 // State
@@ -172,6 +180,87 @@ const i2cAddressOptions = computed(() => {
 
 /** Storage key prefix for accordion persistence */
 const accordionKey = computed(() => `sensor-${props.espId}-${props.gpio}`)
+
+// =============================================================================
+// AUT-246: Cross-References (Verlinkte Quellen) — read-only
+// =============================================================================
+
+/** Composite sensor ID used by dashboard widgets: "{espId}:{gpio}:{sensorType}" */
+const sensorWidgetKey = computed(
+  () => `${props.espId}:${props.gpio}:${props.sensorType}`,
+)
+
+/**
+ * AUT-246: Widgets, die diesen Sensor visuell darstellen.
+ * Quelle: dashboardStore.layouts[].widgets[].config.sensorId
+ * Diese Widgets nutzen visuelle (read-only) Schwellwerte; KEIN Alert.
+ */
+interface LinkedWidgetEntry {
+  layoutId: string
+  layoutName: string
+  widgetId: string
+  widgetTitle: string
+}
+
+const linkedWidgets = computed<LinkedWidgetEntry[]>(() => {
+  const key = sensorWidgetKey.value
+  const result: LinkedWidgetEntry[] = []
+  for (const layout of dashboardStore.layouts) {
+    for (const widget of layout.widgets) {
+      if (widget.config?.sensorId === key) {
+        result.push({
+          layoutId: layout.id,
+          layoutName: layout.name || 'Unbenanntes Dashboard',
+          widgetId: widget.id,
+          widgetTitle: widget.config?.title || widget.type,
+        })
+      }
+    }
+  }
+  return result
+})
+
+/**
+ * AUT-246: Regeln, die diesen Sensor als Trigger verwenden.
+ * Quelle: logicStore.rules[].conditions[] mit type='sensor'|'sensor_threshold'|'hysteresis'
+ * Vergleich: esp_id + gpio + sensor_type (sensor_type optional bei hysteresis).
+ */
+interface LinkedRuleEntry {
+  ruleId: string
+  ruleName: string
+  enabled: boolean
+}
+
+const linkedRules = computed<LinkedRuleEntry[]>(() => {
+  const result: LinkedRuleEntry[] = []
+  const sensorType = String(props.sensorType || '').toLowerCase()
+  for (const rule of logicStore.rules as LogicRule[]) {
+    const sensorConds = extractSensorConditions(rule.conditions)
+    const matches = sensorConds.some((sc) => {
+      if (sc.esp_id !== props.espId) return false
+      if (Number(sc.gpio) !== props.gpio) return false
+      const condType = String(sc.sensor_type || '').toLowerCase()
+      // sensor_type may be empty for hysteresis; fall back to gpio match only.
+      return condType === '' || condType === sensorType
+    })
+    if (matches) {
+      result.push({
+        ruleId: rule.id,
+        ruleName: rule.name,
+        enabled: rule.enabled,
+      })
+    }
+  }
+  return result
+})
+
+function navigateToWidget(entry: LinkedWidgetEntry): void {
+  router.push({ name: 'editor-dashboard', params: { dashboardId: entry.layoutId } })
+}
+
+function navigateToRule(entry: LinkedRuleEntry): void {
+  router.push({ name: 'logic-rule', params: { ruleId: entry.ruleId } })
+}
 
 // =============================================================================
 // Load existing config
@@ -285,6 +374,11 @@ onMounted(async () => {
   // Ensure zone entities are loaded for the scope section
   if (zoneStore.zoneEntities.length === 0) {
     zoneStore.fetchZoneEntities().catch(() => {})
+  }
+
+  // AUT-246: Ensure logic rules are loaded for the cross-reference list
+  if (logicStore.rules.length === 0) {
+    logicStore.fetchRules().catch(() => {})
   }
 })
 
@@ -642,45 +736,145 @@ async function handleSave() {
 
       <!-- ═══ ZONE 2: ADVANCED (Accordion sections) ═══════════════════════ -->
 
-      <!-- Haupt-Schwellen: Basiskonfiguration für den Sensor. Werden an createOrUpdate gesendet.
-           Alert-spezifische Overrides: AlertConfigSection (eigener Save PATCH /sensors/{id}/alert-config). -->
+      <!--
+        AUT-246: Schwellwerte & Alerts — vereinigtes Akkordeon
+        Vereint die früheren zwei Akkordeons:
+          1) "Sensor-Schwellwerte (Basis)" → SSoT für Sensor-Threshold-Alerts
+             (Speichert in SensorConfig.thresholds via createOrUpdate)
+          2) "Alert-Konfiguration"        → Override/Suppression (ISA-18.2)
+             (Speichert in SensorConfig.alert_config via PATCH /sensors/{id}/alert-config)
+        Inhalt 1:1 erhalten — nur visuelle Restrukturierung mit Sub-Sektionen.
+        Zusätzlich: Read-only Cross-Reference auf Widgets + Regeln (verlinkte Quellen).
+      -->
       <AccordionSection
-        title="Sensor-Schwellwerte (Basis)"
-        :storage-key="`${accordionKey}-thresholds`"
+        title="Schwellwerte & Alerts"
+        :storage-key="`${accordionKey}-thresholds-alerts`"
         :icon="Gauge"
       >
-        <RangeSlider
-          :min="sensorConfig?.min ?? 0"
-          :max="sensorConfig?.max ?? 100"
-          :alarm-low="alarmLow"
-          :warn-low="warnLow"
-          :warn-high="warnHigh"
-          :alarm-high="alarmHigh"
-          :unit="unitValue"
-          :step="0.1"
-          @update:alarm-low="alarmLow = $event"
-          @update:warn-low="warnLow = $event"
-          @update:warn-high="warnHigh = $event"
-          @update:alarm-high="alarmHigh = $event"
-        />
+        <!-- ─── Sub-Sektion 1: Sensor-Schwelle (Basis) ───────────────── -->
+        <div class="sensor-config__sub-section">
+          <div class="sensor-config__sub-header">
+            <h4 class="sensor-config__sub-title">Sensor-Schwelle (Basis)</h4>
+            <span class="sensor-config__source-tag">DB: sensor_config</span>
+          </div>
+          <p class="sensor-config__sub-hint">
+            <Info class="sensor-config__sub-hint-icon" aria-hidden="true" />
+            Diese Schwelle löst direkte Sensor-Alerts beim Datenempfang aus.
+          </p>
 
-        <div class="sensor-config__threshold-inputs">
-          <div class="sensor-config__field sensor-config__field--quarter">
-            <label class="sensor-config__label sensor-config__label--alarm">Alarm &#8595;</label>
-            <input v-model.number="alarmLow" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
+          <RangeSlider
+            :min="sensorConfig?.min ?? 0"
+            :max="sensorConfig?.max ?? 100"
+            :alarm-low="alarmLow"
+            :warn-low="warnLow"
+            :warn-high="warnHigh"
+            :alarm-high="alarmHigh"
+            :unit="unitValue"
+            :step="0.1"
+            @update:alarm-low="alarmLow = $event"
+            @update:warn-low="warnLow = $event"
+            @update:warn-high="warnHigh = $event"
+            @update:alarm-high="alarmHigh = $event"
+          />
+
+          <div class="sensor-config__threshold-inputs">
+            <div class="sensor-config__field sensor-config__field--quarter">
+              <label class="sensor-config__label sensor-config__label--alarm">Alarm &#8595;</label>
+              <input v-model.number="alarmLow" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
+            </div>
+            <div class="sensor-config__field sensor-config__field--quarter">
+              <label class="sensor-config__label sensor-config__label--warn">Warn &#8595;</label>
+              <input v-model.number="warnLow" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
+            </div>
+            <div class="sensor-config__field sensor-config__field--quarter">
+              <label class="sensor-config__label sensor-config__label--warn">Warn &#8593;</label>
+              <input v-model.number="warnHigh" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
+            </div>
+            <div class="sensor-config__field sensor-config__field--quarter">
+              <label class="sensor-config__label sensor-config__label--alarm">Alarm &#8593;</label>
+              <input v-model.number="alarmHigh" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
+            </div>
           </div>
-          <div class="sensor-config__field sensor-config__field--quarter">
-            <label class="sensor-config__label sensor-config__label--warn">Warn &#8595;</label>
-            <input v-model.number="warnLow" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
+        </div>
+
+        <!-- ─── Sub-Sektion 2: Alert-Override ────────────────────────── -->
+        <div v-if="sensorDbId" class="sensor-config__sub-section">
+          <div class="sensor-config__sub-header">
+            <h4 class="sensor-config__sub-title">Alert-Override</h4>
+            <span class="sensor-config__source-tag">DB: alert_config</span>
           </div>
-          <div class="sensor-config__field sensor-config__field--quarter">
-            <label class="sensor-config__label sensor-config__label--warn">Warn &#8593;</label>
-            <input v-model.number="warnHigh" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
+          <p class="sensor-config__sub-hint">
+            <Info class="sensor-config__sub-hint-icon" aria-hidden="true" />
+            Override gilt zusätzlich zur Basis-Schwelle (ISA-18.2 Suppression-Hierarchie).
+          </p>
+
+          <AlertConfigSection
+            :entity-id="sensorDbId"
+            entity-type="sensor"
+            :fetch-fn="sensorsApi.getAlertConfig"
+            :update-fn="sensorsApi.updateAlertConfig"
+          />
+        </div>
+
+        <!-- ─── Sub-Sektion 3: Verlinkte Quellen (Cross-Reference) ───── -->
+        <div class="sensor-config__sub-section">
+          <div class="sensor-config__sub-header">
+            <h4 class="sensor-config__sub-title">Verlinkte Quellen</h4>
+            <span class="sensor-config__source-tag sensor-config__source-tag--readonly">read-only</span>
           </div>
-          <div class="sensor-config__field sensor-config__field--quarter">
-            <label class="sensor-config__label sensor-config__label--alarm">Alarm &#8593;</label>
-            <input v-model.number="alarmHigh" type="number" step="0.1" class="sensor-config__input sensor-config__input--sm" />
-          </div>
+
+          <ul class="sensor-config__cross-ref-list">
+            <li class="sensor-config__cross-ref-item">
+              <LayoutGrid class="sensor-config__cross-ref-icon" aria-hidden="true" />
+              <span class="sensor-config__cross-ref-count">{{ linkedWidgets.length }}</span>
+              <span class="sensor-config__cross-ref-text">
+                {{ linkedWidgets.length === 1 ? 'Widget nutzt' : 'Widgets nutzen' }} visuelle Schwellen
+              </span>
+            </li>
+            <li
+              v-for="entry in linkedWidgets"
+              :key="`widget-${entry.layoutId}-${entry.widgetId}`"
+              class="sensor-config__cross-ref-link-item"
+            >
+              <button
+                type="button"
+                class="sensor-config__cross-ref-link"
+                @click="navigateToWidget(entry)"
+              >
+                <span class="sensor-config__cross-ref-link-name">{{ entry.widgetTitle }}</span>
+                <span class="sensor-config__cross-ref-link-meta">in {{ entry.layoutName }}</span>
+                <ExternalLink class="sensor-config__cross-ref-nav-icon" aria-hidden="true" />
+              </button>
+            </li>
+
+            <li class="sensor-config__cross-ref-item">
+              <Workflow class="sensor-config__cross-ref-icon" aria-hidden="true" />
+              <span class="sensor-config__cross-ref-count">{{ linkedRules.length }}</span>
+              <span class="sensor-config__cross-ref-text">
+                {{ linkedRules.length === 1 ? 'Regel nutzt' : 'Regeln nutzen' }} diesen Sensor als Trigger
+              </span>
+            </li>
+            <li
+              v-for="entry in linkedRules"
+              :key="`rule-${entry.ruleId}`"
+              class="sensor-config__cross-ref-link-item"
+            >
+              <button
+                type="button"
+                class="sensor-config__cross-ref-link"
+                @click="navigateToRule(entry)"
+              >
+                <span class="sensor-config__cross-ref-link-name">{{ entry.ruleName }}</span>
+                <span
+                  :class="[
+                    'sensor-config__cross-ref-state',
+                    entry.enabled ? 'sensor-config__cross-ref-state--on' : 'sensor-config__cross-ref-state--off',
+                  ]"
+                >{{ entry.enabled ? 'Aktiv' : 'Inaktiv' }}</span>
+                <ExternalLink class="sensor-config__cross-ref-nav-icon" aria-hidden="true" />
+              </button>
+            </li>
+          </ul>
         </div>
       </AccordionSection>
 
@@ -787,19 +981,8 @@ async function handleSave() {
         </div>
       </AccordionSection>
 
-      <!-- ═══ ALERT CONFIGURATION (Phase 4A.7) ═════════════════════════ -->
-      <AccordionSection
-        v-if="sensorDbId"
-        title="Alert-Konfiguration"
-        :storage-key="`${accordionKey}-alert-config`"
-      >
-        <AlertConfigSection
-          :entity-id="sensorDbId"
-          entity-type="sensor"
-          :fetch-fn="sensorsApi.getAlertConfig"
-          :update-fn="sensorsApi.updateAlertConfig"
-        />
-      </AccordionSection>
+      <!-- AUT-246: "Alert-Konfiguration" Akkordeon entfernt — Inhalt jetzt
+           als Sub-Sektion innerhalb von "Schwellwerte & Alerts" oben. -->
 
       <!-- ═══ RUNTIME & MAINTENANCE (Phase 4A.8) ══════════════════════ -->
       <AccordionSection
@@ -1160,6 +1343,173 @@ async function handleSave() {
 .sensor-config__threshold-inputs {
   display: flex;
   gap: var(--space-2);
+}
+
+/* AUT-246: Sub-Sektionen innerhalb des "Schwellwerte & Alerts"-Akkordeons */
+.sensor-config__sub-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+}
+
+.sensor-config__sub-section + .sensor-config__sub-section {
+  margin-top: var(--space-3);
+}
+
+.sensor-config__sub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sensor-config__sub-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.sensor-config__source-tag {
+  font-size: var(--text-xxs);
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+  padding: 1px var(--space-1);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-secondary);
+}
+
+.sensor-config__source-tag--readonly {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.sensor-config__sub-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: var(--leading-normal);
+}
+
+.sensor-config__sub-hint-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-info);
+}
+
+/* Cross-Reference list (Verlinkte Quellen) */
+.sensor-config__cross-ref-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.sensor-config__cross-ref-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.sensor-config__cross-ref-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.sensor-config__cross-ref-count {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  min-width: 20px;
+}
+
+.sensor-config__cross-ref-text {
+  flex: 1;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.sensor-config__cross-ref-link-item {
+  padding-left: var(--space-5);
+}
+
+.sensor-config__cross-ref-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sensor-config__cross-ref-link:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--glass-border);
+  color: var(--color-text-primary);
+}
+
+.sensor-config__cross-ref-link-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.sensor-config__cross-ref-link-meta {
+  font-size: var(--text-xxs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.sensor-config__cross-ref-state {
+  font-size: var(--text-xxs);
+  font-weight: 600;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-xs);
+  text-transform: uppercase;
+}
+
+.sensor-config__cross-ref-state--on {
+  background: rgba(52, 211, 153, 0.12);
+  color: var(--color-success);
+}
+
+.sensor-config__cross-ref-state--off {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-muted);
+  border: 1px solid var(--glass-border);
+}
+
+.sensor-config__cross-ref-nav-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
