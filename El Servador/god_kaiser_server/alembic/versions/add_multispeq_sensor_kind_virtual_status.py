@@ -9,7 +9,7 @@ Changes:
 2. sensor_configs: Add CHECK constraint sensor_kind IN ('continuous', 'snapshot')
 
 Revision ID: add_multispeq_sensor_kind_virtual_status
-Revises: soft_delete_devices_preserve_sensor_data
+Revises: add_critical_degraded
 Create Date: 2026-04-30
 
 """
@@ -22,7 +22,7 @@ import sqlalchemy as sa
 
 # revision identifiers
 revision: str = "add_multispeq_sensor_kind_virtual_status"
-down_revision: Union[str, None] = "soft_delete_devices_preserve_sensor_data"
+down_revision: Union[str, None] = "add_critical_degraded"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
