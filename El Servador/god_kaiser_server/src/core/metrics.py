@@ -229,6 +229,13 @@ LOGIC_DISPATCH_SKIPPED_OFFLINE_TOTAL = Counter(
     "Actuator dispatches skipped because ESP is offline",
 )
 
+# AUT-110: Per-rule offline-skip counter (labeled)
+RULE_SKIP_TARGET_OFFLINE_TOTAL = Counter(
+    "god_kaiser_rule_skip_target_offline_total",
+    "Actuator dispatches skipped because target ESP is offline, labeled per rule",
+    ["rule_id", "esp_id", "time_window"],
+)
+
 ACTUATOR_TIMEOUTS_TOTAL = Counter(
     "god_kaiser_actuator_timeouts_total",
     "Total actuator command timeouts",
@@ -844,6 +851,11 @@ def increment_logic_dispatch_skipped_config_pending() -> None:
 def increment_logic_dispatch_skipped_offline() -> None:
     """Increment counter for actuator dispatches skipped due to ESP offline."""
     LOGIC_DISPATCH_SKIPPED_OFFLINE_TOTAL.inc()
+
+
+def increment_rule_skip_target_offline(rule_id: str, esp_id: str, time_window: str = "unknown") -> None:
+    """Increment per-rule offline-skip counter (AUT-110)."""
+    RULE_SKIP_TARGET_OFFLINE_TOTAL.labels(rule_id=rule_id, esp_id=esp_id, time_window=time_window).inc()
 
 
 def increment_actuator_timeout() -> None:
