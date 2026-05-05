@@ -406,6 +406,14 @@ async function toggleRule() {
   }
 }
 
+/**
+ * AUT-249: Header-Toggle-Switch im RuleFlowEditor.
+ * Reuses the existing toggleRule store action (single source of truth).
+ */
+async function onEditorToggleActive(_enabled: boolean): Promise<void> {
+  await toggleRule()
+}
+
 async function deleteRule() {
   if (!selectedRule.value) return
 
@@ -971,6 +979,8 @@ onUnmounted(() => {
           @node-selected="onNodeSelected"
           @graph-changed="onGraphChanged"
           @metadata-restored="onMetadataRestored"
+          @update:active="onEditorToggleActive"
+          @show-history="onToggleHistory"
         />
 
         <!-- Config Panel -->
