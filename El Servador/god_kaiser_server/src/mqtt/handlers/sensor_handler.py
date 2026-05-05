@@ -613,6 +613,42 @@ class SensorDataHandler:
                             except Exception as e:
                                 logger.debug(f"VPD computation skipped for {esp_id_str}: {e}")
 
+                    # Reconnect-bootstrap guard (AUT-125):
+                    # During the adoption phase right after an ESP reconnect,
+                    # analog sensors (e.g. soil moisture) can briefly report 0 %
+                    # due to ADC charge relaxation. Skip logic evaluation while
+                    # the adoption cycle is still ongoing to avoid spurious
+                    # actuator triggers from these bootstrap artefacts. The data
+                    # is still persisted, broadcast and counted in metrics.
+                    skip_logic_for_adoption = False
+                    try:
+                        from ...services.state_adoption_service import (
+                            get_state_adoption_service,
+                        )
+
+                        adoption_svc = get_state_adoption_service()
+                        if adoption_svc is not None and await adoption_svc.is_adopting(
+                            esp_id_str
+                        ):
+                            skip_logic_for_adoption = True
+                            logger.info(
+                                "reconnect_bootstrap_guard: skipping logic eval for %s "
+                                "GPIO %s (%s value=%.3f) during adoption phase",
+                                esp_id_str,
+                                gpio,
+                                sensor_type,
+                                float(
+                                    processed_value
+                                    if processed_value is not None
+                                    else raw_value
+                                ),
+                            )
+                    except Exception as e:
+                        # Guard must never block ingest — log and continue.
+                        logger.debug(
+                            f"Adoption-phase guard check failed (continuing): {e}"
+                        )
+
                     # Logic trigger is freshness-gated on event-time.
                     if stale_for_logic:
                         logger.info(
@@ -622,6 +658,9 @@ class SensorDataHandler:
                             sensor_type,
                             event_age_seconds,
                         )
+                    elif skip_logic_for_adoption:
+                        # Already logged above; explicit branch keeps control flow obvious.
+                        pass
                     else:
                         try:
                             from ...services.logic_engine import get_logic_engine

@@ -56,6 +56,12 @@ _CONFIG_PENDING_BACKOFF_SECONDS = (
     15  # Skip config-pending-ESP actuator rules for 15s (shorter: state transitions fast)
 )
 
+# AUT-125: During reconnect evaluation, ignore sensor readings whose quality
+# indicates a likely bootstrap artefact (e.g. analog moisture relaxation 0 %).
+# Real, sustained low-quality issues are still surfaced by the regular ingest
+# path and threshold notifications — this only suppresses spurious *triggers*.
+_RECONNECT_SKIP_QUALITIES = frozenset({"poor", "suspect", "error"})
+
 
 class LogicEngine:
     """
@@ -533,6 +539,35 @@ class LogicEngine:
                             )
                             continue
 
+                        # AUT-125: Filter out low-quality readings that may be
+                        # reconnect bootstrap artefacts (e.g. soil-moisture 0 %
+                        # during ADC relaxation). The data row is kept in the
+                        # DB; we only refuse to *trigger* on it during the
+                        # reconnect-driven re-evaluation.
+                        filtered_sensor_values = {}
+                        for key, sv in sensor_values.items():
+                            quality = sv.get("quality")
+                            if quality in _RECONNECT_SKIP_QUALITIES:
+                                logger.debug(
+                                    "reconnect_eval_quality_guard: skipping %s "
+                                    "quality=%s during reconnect evaluation of "
+                                    "rule '%s'",
+                                    key,
+                                    quality,
+                                    rule.rule_name,
+                                )
+                                continue
+                            filtered_sensor_values[key] = sv
+
+                        if not filtered_sensor_values:
+                            logger.debug(
+                                "Reconnect evaluation: skip %s (all sensor values "
+                                "filtered by quality guard)",
+                                rule.rule_name,
+                            )
+                            continue
+
+                        sensor_values = filtered_sensor_values
                         first_val = next(iter(sensor_values.values()))
                         trigger_data = {
                             "type": "reconnect",
@@ -1935,6 +1970,7 @@ class LogicEngine:
                 "gpio": gpio,
                 "sensor_type": sensor_type,
                 "value": display_value,
+                "quality": getattr(reading, "quality", None),
                 "age_seconds": age_s,
                 "operating_mode": op_mode,
                 "measurement_freshness_hours": (

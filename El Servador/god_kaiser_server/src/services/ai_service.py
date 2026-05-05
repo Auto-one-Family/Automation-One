@@ -5,7 +5,14 @@ from __future__ import annotations
 import os
 from typing import Literal, Optional
 
-from anthropic import AsyncAnthropic
+try:
+    from anthropic import AsyncAnthropic
+
+    _ANTHROPIC_AVAILABLE = True
+except ImportError:
+    AsyncAnthropic = None  # type: ignore[assignment,misc]
+    _ANTHROPIC_AVAILABLE = False
+
 from pydantic import BaseModel
 
 from ..core.logging_config import get_logger
@@ -101,8 +108,8 @@ class AiService:
         return self._client
 
     def is_available(self) -> bool:
-        """Returns True if ANTHROPIC_API_KEY is configured."""
-        return bool(os.environ.get("ANTHROPIC_API_KEY"))
+        """Returns True if anthropic is installed and ANTHROPIC_API_KEY is configured."""
+        return _ANTHROPIC_AVAILABLE and bool(os.environ.get("ANTHROPIC_API_KEY"))
 
     async def analyze_error(self, request: ErrorAnalysisRequest) -> ErrorAnalysisFinding:
         """
