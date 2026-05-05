@@ -21,6 +21,7 @@ References:
 - services/logic_engine.py (Rule execution)
 """
 
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -782,3 +783,91 @@ class ExecutionHistoryPaginatedResponse(PaginatedResponse[ExecutionHistoryEntry]
     """
 
     pass
+
+
+# =============================================================================
+# Rule Health (AUT-115) - Climate Cockpit Tile
+# =============================================================================
+
+
+class RuleHealthDispatchInfo(BaseModel):
+    """Last successful actuator dispatch for a rule."""
+
+    ts: datetime = Field(..., description="Dispatch timestamp (UTC)")
+    command: str = Field(..., description="Dispatched command (e.g. 'ON', 'OFF', 'PWM')")
+    state: str = Field(..., description="Resulting actuator state ('on', 'off', 'pwm')")
+    source: str = Field(
+        ...,
+        description="Dispatch source ('rule', 'manual', 'sequence')",
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RuleHealthSkipInfo(BaseModel):
+    """Last suppressed dispatch (cooldown, rate-limit, target offline, ...)."""
+
+    ts: datetime = Field(..., description="Skip timestamp (UTC)")
+    reason: str = Field(..., description="Skip reason")
+    consecutive_count: int = Field(
+        0,
+        ge=0,
+        description="Number of consecutive skips for the same reason",
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RuleHealthPayload(BaseModel):
+    """
+    Aggregated runtime health snapshot for a single logic rule.
+
+    AUT-115: Powers the Climate-Cockpit tile (frontend) and is broadcast
+    every 60s via WebSocket as 'rule.health' for all is_critical rules.
+    """
+
+    rule_id: uuid.UUID = Field(..., description="Rule ID (UUID)")
+    rule_name: str = Field(..., description="Rule name")
+    is_critical: bool = Field(False, description="Whether this rule is safety-critical")
+    setpoint: Optional[float] = Field(
+        None,
+        description="Configured threshold (from conditions.activate_below/above/value)",
+    )
+    current_value: Optional[float] = Field(
+        None,
+        description="Latest processed sensor value for the trigger sensor",
+    )
+    deviation: Optional[float] = Field(
+        None,
+        description="current_value - setpoint (None if either is None)",
+    )
+    target_esp_id: Optional[str] = Field(
+        None,
+        description="Target ESP for the first action",
+    )
+    target_esp_online: bool = Field(
+        False,
+        description="Whether the target ESP is currently online",
+    )
+    target_esp_offline_since: Optional[datetime] = Field(
+        None,
+        description="last_seen timestamp when target ESP is offline",
+    )
+    last_dispatch: Optional[RuleHealthDispatchInfo] = Field(
+        None,
+        description="Last successful action dispatch",
+    )
+    last_skip: Optional[RuleHealthSkipInfo] = Field(
+        None,
+        description="Last suppressed dispatch",
+    )
+    degraded_since: Optional[datetime] = Field(
+        None,
+        description="When the rule entered degraded state (target offline)",
+    )
+    time_window_active: Optional[str] = Field(
+        None,
+        description="Label of the active time-window condition (if any)",
+    )
+
+    model_config = ConfigDict(from_attributes=True)

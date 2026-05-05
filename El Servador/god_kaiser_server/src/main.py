@@ -791,9 +791,12 @@ async def lifespan(app: FastAPI):
             await runtime_state.set_logic_liveness(True)
 
             # Initialize Logic Scheduler
+            # AUT-115: pass websocket_manager so the scheduler can broadcast
+            # rule.health snapshots for is_critical rules every interval.
             _logic_scheduler = LogicScheduler(
                 _logic_engine,
                 interval_seconds=settings.performance.logic_scheduler_interval_seconds,
+                websocket_manager=_websocket_manager,
             )
             await _logic_scheduler.start()
 

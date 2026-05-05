@@ -26,11 +26,12 @@ import StatisticsWidget from '@/components/dashboard-widgets/StatisticsWidget.vu
 import FertigationPairWidget from '@/components/dashboard-widgets/FertigationPairWidget.vue'
 import BoxplotWidget from '@/components/dashboard-widgets/BoxplotWidget.vue'
 import CorrelationScatterWidget from '@/components/dashboard-widgets/CorrelationScatterWidget.vue'
+import ClimateRuleHealthWidget from '@/components/dashboard-widgets/ClimateRuleHealthWidget.vue'
 
 // Icons for widget catalog
 import {
   BarChart3, Gauge, Activity, Zap, Bell, Cpu, Droplets,
-  BoxSelect, GitCompareArrows,
+  BoxSelect, GitCompareArrows, ThermometerSun,
 } from 'lucide-vue-next'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -98,6 +99,7 @@ const widgetComponentMap: Record<string, Component> = {
   'fertigation-pair': FertigationPairWidget,
   'comparison-boxplot': BoxplotWidget,
   'correlation-scatter': CorrelationScatterWidget,
+  'climate-rule-health': ClimateRuleHealthWidget,
 }
 
 /** Widget type metadata for catalog and auto-generation */
@@ -115,6 +117,7 @@ const WIDGET_TYPE_META: WidgetTypeMeta[] = [
   { type: 'fertigation-pair', label: 'Fertigation-Paar', description: 'Inflow vs. Runoff Vergleich (EC/pH) mit Differenz-Trend', icon: Droplets, w: 6, h: 4, minW: 4, minH: 3, category: 'Sensoren' },
   { type: 'comparison-boxplot', label: 'MultispeQ Boxplot', description: 'Vergleich von MultispeQ-Aggregaten (Min/Q1/Median/Q3/Max) pro Gruppe', icon: BoxSelect, w: 6, h: 4, minW: 4, minH: 3, category: 'MultispeQ' },
   { type: 'correlation-scatter', label: 'MultispeQ Korrelation', description: 'Scatter-Plot Sensorwert vs. Metadaten (z. B. PPFD vs. Yield)', icon: GitCompareArrows, w: 6, h: 4, minW: 4, minH: 3, category: 'MultispeQ' },
+  { type: 'climate-rule-health', label: 'Klima-Regel Cockpit', description: 'Soll/IST/ESP-Status/Dispatch für eine kritische Klimaregel', icon: ThermometerSun, w: 4, h: 3, minW: 3, minH: 2, category: 'Regeln' },
 ]
 
 /** Default config per widget type */
@@ -146,6 +149,7 @@ const WIDGET_DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
       show_regression_line: false,
     },
   },
+  'climate-rule-health': { ruleId: 0 },
 }
 
 /** Gear icon SVG (inline, no external dependency) */
@@ -304,6 +308,9 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
     if (config.diffCriticalThreshold != null) props.diffCriticalThreshold = config.diffCriticalThreshold
     if (config.referenceBands) props.referenceBands = config.referenceBands
     if (config.title) props.title = config.title
+
+    // ClimateRuleHealthWidget props (AUT-115)
+    if (config.ruleId != null) props.ruleId = config.ruleId
 
     // BoxplotWidget + CorrelationScatterWidget: nested config object (AUT-220)
     if (type === 'comparison-boxplot' || type === 'correlation-scatter') {

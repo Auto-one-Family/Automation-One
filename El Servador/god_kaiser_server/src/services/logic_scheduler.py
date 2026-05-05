@@ -1,14 +1,21 @@
 """
 Logic Scheduler
 
-Periodically evaluates timer-triggered rules (time_window conditions).
+Periodically evaluates timer-triggered rules (time_window conditions) and
+broadcasts aggregated rule.health snapshots for is_critical rules every
+``interval_seconds`` (AUT-115).
 """
 
 import asyncio
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from ..core.logging_config import get_logger
+from ..db.session import get_session_maker
 from .logic_engine import LogicEngine
+from .rule_health_service import RuleHealthService
+
+if TYPE_CHECKING:
+    from ..websocket.manager import WebSocketManager
 
 logger = get_logger(__name__)
 
@@ -17,19 +24,29 @@ class LogicScheduler:
     """
     Logic Scheduler for timer-based rule evaluation.
 
-    Periodically checks and evaluates rules with time_window conditions.
+    Periodically checks and evaluates rules with time_window conditions
+    and (when configured) broadcasts ``rule.health`` snapshots for all
+    safety-critical rules via WebSocket (AUT-115).
     """
 
-    def __init__(self, logic_engine: LogicEngine, interval_seconds: int = 60):
+    def __init__(
+        self,
+        logic_engine: LogicEngine,
+        interval_seconds: int = 60,
+        websocket_manager: Optional["WebSocketManager"] = None,
+    ):
         """
         Initialize Logic Scheduler.
 
         Args:
             logic_engine: LogicEngine instance
             interval_seconds: Evaluation interval in seconds (default: 60)
+            websocket_manager: Optional WebSocket manager for rule.health
+                broadcasts. If None, broadcasting is disabled (AUT-115).
         """
         self.logic_engine = logic_engine
         self.interval_seconds = interval_seconds
+        self._websocket_manager = websocket_manager
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
@@ -45,7 +62,11 @@ class LogicScheduler:
 
         self._running = True
         self._task = asyncio.create_task(self._scheduler_loop())
-        logger.info(f"Logic Scheduler started (interval: {self.interval_seconds}s)")
+        logger.info(
+            "Logic Scheduler started (interval: %ss, rule.health broadcast: %s)",
+            self.interval_seconds,
+            "enabled" if self._websocket_manager else "disabled",
+        )
 
     async def stop(self) -> None:
         """
@@ -71,7 +92,8 @@ class LogicScheduler:
         """
         Main scheduler loop.
 
-        Runs periodically to evaluate timer-triggered rules.
+        Runs periodically to evaluate timer-triggered rules and broadcast
+        rule.health snapshots (AUT-115).
         """
         logger.info("Logic Scheduler loop started")
 
@@ -82,6 +104,11 @@ class LogicScheduler:
 
                 # Evaluate timer-triggered rules
                 await self._evaluate_timer_rules()
+
+                # AUT-115: Broadcast aggregated rule.health snapshots
+                # for all safety-critical rules (best effort).
+                if self._websocket_manager is not None:
+                    await self._broadcast_rule_health()
 
             except asyncio.CancelledError:
                 break
@@ -105,3 +132,27 @@ class LogicScheduler:
                 f"Error evaluating timer-triggered rules: {e}",
                 exc_info=True,
             )
+
+    async def _broadcast_rule_health(self) -> None:
+        """
+        Build and broadcast rule.health payloads for all is_critical rules.
+
+        Best-effort: any error is logged at WARNING and never aborts the
+        scheduler loop (AUT-115).
+        """
+        try:
+            session_maker = get_session_maker()
+            async with session_maker() as session:
+                service = RuleHealthService(session)
+                payloads = await service.get_all_critical_rules_health()
+
+            for payload in payloads:
+                try:
+                    await self._websocket_manager.broadcast(
+                        "rule.health",
+                        payload.model_dump(mode="json"),
+                    )
+                except Exception as exc:
+                    logger.warning("rule.health broadcast failed: %s", exc)
+        except Exception as exc:
+            logger.warning("rule.health snapshot build failed: %s", exc)

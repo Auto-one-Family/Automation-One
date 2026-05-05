@@ -508,6 +508,8 @@ export type MessageType =
   // Rule degradation lifecycle (AUT-111)
   | 'rule_degraded'
   | 'rule_recovered'
+  // Rule health snapshot (AUT-115 climate cockpit)
+  | 'rule.health'
   // Backup restore notify (audit_backup_service → WS broadcast)
   | 'events_restored'
 

@@ -44,6 +44,7 @@ from ...schemas import (
     RuleToggleResponse,
 )
 from ...schemas.common import PaginationMeta
+from ...services.rule_health_service import RuleHealthService
 from ..deps import (
     ActiveUser,
     DBSession,
@@ -909,3 +910,45 @@ async def instantiate_template(
         raise RuleNotFoundException(template_id)
     except ValueError as e:
         raise RuleValidationException(str(e))
+
+
+# =============================================================================
+# Rule Health (AUT-115) — Climate Cockpit Tile
+# =============================================================================
+
+
+@router.get(
+    "/{rule_id}/health",
+    response_model=dict,
+    summary="Get rule health (AUT-115)",
+    description=(
+        "Aggregated health/state payload for a single rule, used by the "
+        "Climate-Cockpit tile (frontend). Includes setpoint, latest sensor "
+        "value, target ESP online state, last dispatch/skip and degraded info."
+    ),
+    responses={
+        200: {"description": "Rule health payload"},
+        404: {"description": "Rule not found"},
+    },
+)
+async def get_rule_health(
+    rule_id: uuid.UUID,
+    db: DBSession,
+    user: OperatorUser,
+) -> dict:
+    """
+    Return aggregated health information for a logic rule.
+
+    Args:
+        rule_id: UUID of the logic rule
+        db: Database session
+        user: Operator or admin user
+
+    Returns:
+        Standard success envelope with the RuleHealthPayload.
+    """
+    service = RuleHealthService(db)
+    payload = await service.get_rule_health(rule_id)
+    if payload is None:
+        raise RuleNotFoundException(rule_id)
+    return {"status": "success", "data": payload.model_dump(mode="json")}
