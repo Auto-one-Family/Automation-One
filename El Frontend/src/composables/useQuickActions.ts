@@ -12,18 +12,16 @@ import { useQuickActionStore } from '@/shared/stores/quickAction.store'
 import { useUiStore } from '@/shared/stores/ui.store'
 import type { QuickAction, ViewContext } from '@/shared/stores/quickAction.store'
 import {
-  Bell,
   Search,
-  ShieldAlert,
   Activity,
   FileText,
   Cpu,
-  Navigation,
   LayoutDashboard,
   LayoutGrid,
   Stethoscope,
   HeartPulse,
-  Database,
+  Power,
+  FilePlus,
 } from 'lucide-vue-next'
 
 /** Navigate helper — wraps router.push and catches dynamic import failures */
@@ -170,39 +168,24 @@ function buildContextActions(
   }
 }
 
-/** Build global actions (always available) */
+/**
+ * Build global actions (always available).
+ *
+ * AUT-253: Reduced from 7 to 3 actions.
+ * - Quick-Search (Ctrl+K) — opens command palette
+ * - Aktor schalten — opens QuickActuatorPanel
+ * - Schnell-Notiz — placeholder, IncidentNote feature pending
+ *
+ * Removed: Alert-Panel (header has it), Navigation (sidebar has it),
+ * Emergency Stop (in header, double-path is dangerous), Diagnose
+ * (in System tab), Letzter Report (rarely used), Backup (settings).
+ */
 function buildGlobalActions(
-  router: ReturnType<typeof useRouter>,
+  _router: ReturnType<typeof useRouter>,
   quickActionStore: ReturnType<typeof useQuickActionStore>,
   uiStore: ReturnType<typeof useUiStore>,
 ): QuickAction[] {
   return [
-    {
-      id: 'global-alerts',
-      label: 'Alert-Panel',
-      icon: markRaw(Bell),
-      category: 'global',
-      handler: () => quickActionStore.setActivePanel('alerts'),
-      badge: 0,
-      badgeVariant: 'info',
-    },
-    {
-      id: 'global-navigation',
-      label: 'Navigation',
-      icon: markRaw(Navigation),
-      category: 'global',
-      handler: () => quickActionStore.setActivePanel('navigation'),
-    },
-    {
-      id: 'global-emergency',
-      label: 'Emergency Stop',
-      icon: markRaw(ShieldAlert),
-      category: 'global',
-      handler: () => {
-        /* Triggers EmergencyStopButton via event or direct call */
-        window.dispatchEvent(new CustomEvent('emergency-stop-trigger'))
-      },
-    },
     {
       id: 'global-search',
       label: 'Quick-Search',
@@ -212,35 +195,21 @@ function buildGlobalActions(
       handler: () => uiStore.toggleCommandPalette(),
     },
     {
-      id: 'global-diagnose',
-      label: 'Diagnose starten',
-      icon: markRaw(Stethoscope),
+      id: 'global-actuator-toggle',
+      label: 'Aktor schalten',
+      icon: markRaw(Power),
       category: 'global',
-      handler: async () => {
-        const { useDiagnosticsStore } = await import('@/shared/stores/diagnostics.store')
-        const diagnosticsStore = useDiagnosticsStore()
-        await diagnosticsStore.runDiagnostic()
-      },
+      handler: () => quickActionStore.setActivePanel('actuator-toggle'),
     },
     {
-      id: 'global-last-report',
-      label: 'Letzter Report',
-      icon: markRaw(FileText),
+      id: 'global-quick-note',
+      label: 'Schnell-Notiz',
+      icon: markRaw(FilePlus),
       category: 'global',
-      handler: () => nav(router, '/system-monitor?tab=reports'),
-    },
-    {
-      id: 'global-backup-create',
-      label: 'Backup erstellen',
-      icon: markRaw(Database),
-      category: 'global',
-      handler: async () => {
-        const { backupsApi } = await import('@/api/backups')
-        try {
-          await backupsApi.createBackup()
-        } catch {
-          // Error is handled by API interceptor (toast)
-        }
+      disabled: true,
+      shortcutHint: 'Kommt bald',
+      handler: () => {
+        /* stub — IncidentNote feature pending */
       },
     },
   ]

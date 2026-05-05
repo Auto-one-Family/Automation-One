@@ -24,6 +24,7 @@ import QuickAlertPanel from './QuickAlertPanel.vue'
 import QuickNavPanel from './QuickNavPanel.vue'
 import QuickWidgetPanel from './QuickWidgetPanel.vue'
 import QuickDashboardPanel from './QuickDashboardPanel.vue'
+import QuickActuatorPanel from './QuickActuatorPanel.vue'
 
 interface Props {
   /** 'editor' = drag-to-grid (default), 'monitor' = click opens AddWidgetDialog */
@@ -52,6 +53,7 @@ const activePanelComponent = computed(() => {
     case 'navigation': return QuickNavPanel
     case 'widgets': return QuickWidgetPanel
     case 'dashboards': return QuickDashboardPanel
+    case 'actuator-toggle': return QuickActuatorPanel
     default: return QuickActionMenu
   }
 })
