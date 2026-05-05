@@ -14,7 +14,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Check, CheckCheck, ChevronDown, ChevronUp,
-  Activity, Workflow, BarChart3, ShieldCheck, Mail
+  Activity, Workflow, BarChart3, ShieldCheck, Mail, Info
 } from 'lucide-vue-next'
 import { formatRelativeTime, severityToStatus } from '@/utils/formatters'
 import {
@@ -54,6 +54,23 @@ const hasMeasurementAgeAtAlert = computed(() => {
   const age = metadata.value.measurement_age_seconds
   const mode = metadata.value.operating_mode
   return typeof age === 'number' && age >= 0 && mode !== 'continuous'
+})
+
+/**
+ * AUT-131 B-CNFL2-04: Konflikt-Arbitration ist informational.
+ * Erkennt Notifications die aus dem ConflictManager stammen
+ * (metadata.event_type === "conflict.arbitration") oder
+ * eine zukuenftige Kategorisierung "rule_arbitration" tragen.
+ * Server stuetzt zusaetzlich metadata.ack_effect / resolve_effect = "informational".
+ */
+const isArbitrationInfo = computed<boolean>(() => {
+  const eventType = metadata.value.event_type
+  if (eventType === 'conflict.arbitration') return true
+  // Forward-compatible fallback: category-Erweiterung "rule_arbitration"
+  // (zur Zeit nicht in NotificationCategory-Union, daher String-Vergleich ueber unknown)
+  const category = props.notification.category as unknown as string
+  if (category === 'rule_arbitration') return true
+  return false
 })
 
 // Email delivery status from metadata (Phase C V1.1)
@@ -186,6 +203,14 @@ function navigateToCorrelation(): void {
         <span v-if="notification.body" class="item__body">
           {{ notification.body }}
         </span>
+        <div
+          v-if="isArbitrationInfo"
+          class="item__arbitration-hint"
+          :data-testid="`notification-arbitration-hint-${notification.id}`"
+        >
+          <Info class="item__arbitration-icon" />
+          <span>Dieser Alert ist informativ. Die Regel wurde bereits arbitriert.</span>
+        </div>
       </div>
 
       <div class="item__meta">
@@ -585,6 +610,27 @@ function navigateToCorrelation(): void {
 .item__email-provider {
   color: var(--color-text-muted);
   font-size: var(--text-xxs);
+}
+
+/* Arbitration Info Hint (AUT-131 B-CNFL2-04) */
+.item__arbitration-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  padding: 3px var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-info);
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-border);
+  border-radius: var(--radius-sm);
+  align-self: flex-start;
+}
+
+.item__arbitration-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
 }
 
 /* Action Buttons */
