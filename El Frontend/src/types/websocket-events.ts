@@ -618,6 +618,15 @@ export interface ActuatorResponseEvent extends WebSocketEventBase {
     error_code?: number
     message?: string
     issued_by?: string
+    /**
+     * Correlation ID propagated from the originating command (REST/MQTT send_command).
+     * Required for terminal toast finality dedup per correlation_id (AUT-123).
+     * Backend sends this from the originating send_command(); not all legacy paths
+     * may include it, hence optional.
+     */
+    correlation_id?: string
+    /** Optional trace context (request_id) for log correlation */
+    request_id?: string
   }
 }
 

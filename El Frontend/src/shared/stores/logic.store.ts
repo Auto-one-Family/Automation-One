@@ -24,6 +24,7 @@ import type {
 } from '@/types/logic'
 import { websocketService, type WebSocketMessage } from '@/services/websocket'
 import { useEspStore } from '@/stores/esp'
+import { useActuatorStore } from '@/shared/stores/actuator.store'
 import { extractCorrelationId, extractRequestId, validateContractEvent } from '@/utils/contractEventMapper'
 
 const logger = createLogger('LogicStore')
@@ -864,6 +865,30 @@ export const useLogicStore = defineStore('logic', () => {
       (item) => item.trace_id !== next.trace_id,
     )
     recentConflictArbitrations.value = [next, ...withoutDuplicate].slice(0, 20)
+
+    // AUT-123 / B-TOAST-02: finalize the losing actuator's pending intent so it
+    // does not stay in `pending` forever. The loser's command never reached
+    // the device — close it as terminal_failed with reason `conflict_arbitration`.
+    // actuator_key format from server (conflict_manager.py): "esp_id:gpio"
+    // (zone-scoped variants may use "esp_id:gpio:zone_id"; we take the first two).
+    const keyParts = actuatorKey.split(':')
+    if (keyParts.length >= 2) {
+      const loserEspId = keyParts[0]
+      const loserGpio = Number.parseInt(keyParts[1], 10)
+      if (loserEspId && Number.isFinite(loserGpio)) {
+        try {
+          const actuatorStore = useActuatorStore()
+          actuatorStore.finalizeConflictLoserIntent(loserEspId, loserGpio, traceId)
+        } catch (err) {
+          logger.warn('Failed to finalize conflict loser intent', {
+            err,
+            actuator_key: actuatorKey,
+            loser_rule_id: loserRuleId,
+            trace_id: traceId,
+          })
+        }
+      }
+    }
   }
 
   function handleRuleDegradedEvent(message: WebSocketMessage): void {

@@ -237,6 +237,22 @@ export const useActuatorStore = defineStore('actuator', () => {
     return intents.get(getIntentKey(intentType, subjectId))
   }
 
+  /**
+   * Find the active (non-terminal) actuator intent currently bound to a specific
+   * actuator (espId:gpio), independent of correlation_id. Used as actuator-global
+   * pending-intent guard for AUT-123: when a competing rule produces a second
+   * `actuator_command` with a different correlation_id, we want to detect that
+   * the actuator is already busy with another intent and avoid duplicate UI
+   * outputs (info toasts) for the loser command.
+   */
+  function findActiveIntentByActuator(espId: string, gpio: number): IntentRecord | undefined {
+    const subjectId = `${espId}:${gpio}`
+    const intent = intents.get(getIntentKey('actuator', subjectId))
+    if (!intent) return undefined
+    if (isTerminalState(intent.state)) return undefined
+    return intent
+  }
+
   function findIntentByCorrelation(intentType: IntentType, correlationId: string): IntentRecord | undefined {
     for (const intent of intents.values()) {
       if (intent.intentType !== intentType) continue
@@ -951,6 +967,41 @@ export const useActuatorStore = defineStore('actuator', () => {
       ? data.issued_by.trim()
       : undefined
 
+    // AUT-123: Actuator-global pending-intent guard.
+    // If another active (non-terminal) intent already exists for this actuator
+    // with a DIFFERENT correlation_id, this is a concurrent command (typically
+    // two rules acting on the same actuator). The existing intent is preserved;
+    // the new (loser/competing) command is logged but does NOT emit a duplicate
+    // info-toast and does NOT overwrite the existing intent. The losing intent
+    // will be finalized via `conflict.arbitration` (see finalizeConflictLoserIntent).
+    const existingActiveIntent = findActiveIntentByActuator(espId, gpio)
+    const isConcurrentCommand = !!existingActiveIntent
+      && !!correlationId
+      && !!existingActiveIntent.correlationId
+      && existingActiveIntent.correlationId !== correlationId
+
+    if (isConcurrentCommand) {
+      logger.warn(
+        `Concurrent actuator_command for ${espId}:${gpio}: existing correlation=${existingActiveIntent?.correlationId}, new correlation=${correlationId}. ` +
+        `Suppressing duplicate info-toast; awaiting conflict.arbitration to finalize loser.`,
+        {
+          esp_id: espId,
+          gpio,
+          existing_correlation_id: existingActiveIntent?.correlationId,
+          new_correlation_id: correlationId,
+          new_request_id: requestId,
+          command,
+          issued_by: issuedBy,
+        }
+      )
+      // Do NOT mutate the existing intent and do NOT emit info-toast.
+      // The existing intent stays bound to its correlation_id and will be
+      // resolved by its own actuator_response / actuator_command_failed /
+      // timeout. The losing command's correlation_id has no separate intent
+      // record in the FE; conflict.arbitration drives the loser UX.
+      return
+    }
+
     createOrUpdateIntentPending({
       intentType: 'actuator',
       subjectId: `${espId}:${gpio}`,
@@ -1608,6 +1659,79 @@ export const useActuatorStore = defineStore('actuator', () => {
     return intents.get(getIntentKey('actuator', `${espId}:${gpio}`))
   }
 
+  /**
+   * Finalize a pending actuator intent that lost a `conflict.arbitration`
+   * (AUT-123 / B-TOAST-02). Called by the logic store when a conflict
+   * arbitration event arrives for a given actuator (esp_id:gpio). The losing
+   * pending intent is closed as `terminal_failed` with reason
+   * `conflict_arbitration` so it does not stay open forever and does not block
+   * the actuator-global pending guard.
+   *
+   * - No-op if no active intent exists for the actuator.
+   * - No-op if the existing intent is already terminal (idempotent).
+   * - Cancels the actuator response timeout and restores the optimistic
+   *   actuator snapshot (the loser command never executed on the device).
+   * - Emits a single terminal toast (deduped via `correlation_id`).
+   */
+  function finalizeConflictLoserIntent(
+    espId: string,
+    gpio: number,
+    traceId?: string,
+  ): boolean {
+    const existing = findActiveIntentByActuator(espId, gpio)
+    if (!existing) return false
+
+    const subjectId = `${espId}:${gpio}`
+    const correlationId = existing.correlationId
+    const requestId = existing.requestId
+    const command = existing.command
+    const issuedBy = existing.issuedBy
+
+    // Cancel pending response timeout: loser command will not execute.
+    const timeoutKey = `${espId}:${gpio}`
+    const pendingTimeout = pendingCommands.get(timeoutKey)
+    if (pendingTimeout) {
+      clearTimeout(pendingTimeout)
+      pendingCommands.delete(timeoutKey)
+    }
+    // Restore optimistic state — the actuator did not change for the loser.
+    pendingActuatorSnapshots.delete(timeoutKey)
+
+    finalizeIntent({
+      intentType: 'actuator',
+      subjectId,
+      gpio,
+      command,
+      issuedBy,
+      outcome: 'failed',
+      source: 'actuator_command_failed',
+      correlationId,
+      requestId,
+      summary: `Konflikt: Regel verlor Arbitrierung${traceId ? ` (trace_id: ${traceId})` : ''}`,
+    })
+
+    if (!canEmitTerminalToast(correlationId)) {
+      logger.debug('Suppress duplicate terminal conflict-loser toast for correlation_id', {
+        subject_id: subjectId,
+        correlation_id: correlationId,
+        request_id: requestId,
+        trace_id: traceId,
+      })
+      return true
+    }
+
+    const toast = useToast()
+    const sourceLabel = formatIssuedBy(issuedBy)
+    toast.warning(
+      `${espId} GPIO ${gpio}: Befehl durch Konflikt-Arbitrierung verworfen (Quelle: ${sourceLabel})${traceId ? ` (trace_id: ${traceId})` : ''}${buildHandleSuffix(correlationId, requestId)}`,
+      {
+        persistent: true,
+        dedupeKey: buildActuatorTerminalToastKey(subjectId, correlationId, requestId),
+      }
+    )
+    return true
+  }
+
   return {
     // WS Handlers (called by esp.store dispatcher)
     handleActuatorAlert,
@@ -1636,5 +1760,7 @@ export const useActuatorStore = defineStore('actuator', () => {
     dismissConfigTimeout,
     isActuatorCommandPending,
     getActuatorIntent,
+    findActiveIntentByActuator,
+    finalizeConflictLoserIntent,
   }
 })
