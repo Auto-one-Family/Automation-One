@@ -63,12 +63,8 @@ const assistiveLabel = computed(() => {
   if (mttrText.value !== '–') parts.push(`durchschnittliche Lösungszeit ${mttrText.value}`)
   if (acknowledgedCount.value > 0) parts.push(`${acknowledgedCount.value} bestätigt`)
   if (unreadCount.value > 0) parts.push(`${unreadCount.value} neue Benachrichtigungen`)
-<<<<<<< Updated upstream
-  return `${parts.join(', ')}. Klicken für Benachrichtigungen und Alerts (aktive Alerts im Fokus).`
-=======
   parts.push(`KPI-Zähler alle ${kpiPollSeconds}s; Liste per WebSocket oft schneller`)
   return `${parts.join(', ')}. Klicken für Details. Server-Inbox — Echtzeit-Fehler (error_event) nur als Toast.`
->>>>>>> Stashed changes
 })
 
 </script>

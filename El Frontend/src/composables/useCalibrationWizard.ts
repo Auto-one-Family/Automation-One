@@ -189,10 +189,6 @@ function normalizeCalibrationSensorType(sensorType: string): string {
   return normalized === 'soil_moisture' ? 'moisture' : normalized
 }
 
-/** Kalibrier-Methode fuer die Session-API: Feuchte → moisture_2point (Server leitet dry/wet ab). */
-function calibrationApiMethodForSensorType(normalizedSensorType: string): 'moisture_2point' | 'linear_2point' {
-  return normalizedSensorType === 'moisture' ? 'moisture_2point' : 'linear_2point'
-}
 
 // ─── Composable ───────────────────────────────────────────────────────────────
 
@@ -226,11 +222,8 @@ export function useCalibrationWizard(
   const isFreshMeasurement = ref(false)
   const lastMeasurementAt = ref<number | null>(null)
   const measurementRequestId = ref<string | null>(null)
-<<<<<<< Updated upstream
   const measurementTriggerAt = ref<number | null>(null)
   const measureCooldownTimerId = ref<ReturnType<typeof setTimeout> | null>(null)
-=======
->>>>>>> Stashed changes
   const lifecycleState = ref<CalibrationLifecycleState>('idle')
   const lifecycleMessage = ref('')
 
@@ -444,12 +437,9 @@ export function useCalibrationWizard(
     lifecycleMessage.value = ''
     isFreshMeasurement.value = false
     measurementRequestId.value = null
-<<<<<<< Updated upstream
     measurementTriggerAt.value = null
     clearMeasureCooldownTimer()
     isMeasuring.value = false
-=======
->>>>>>> Stashed changes
   }
 
   async function ensureSessionStarted(): Promise<string> {
@@ -462,13 +452,8 @@ export function useCalibrationWizard(
       esp_id: selectedEspId.value,
       gpio: selectedGpio.value ?? 0,
       sensor_type: selectedSensorType.value,
-<<<<<<< Updated upstream
       method: preset.calibrationMethod,
       expected_points: preset.expectedPoints,
-=======
-      method: calibrationApiMethodForSensorType(selectedSensorType.value),
-      expected_points: 2,
->>>>>>> Stashed changes
     })
     currentSessionId.value = session.id
     return session.id
@@ -705,13 +690,8 @@ export function useCalibrationWizard(
           esp_id: selectedEspId.value,
           gpio: selectedGpio.value,
           sensor_type: selectedSensorType.value,
-<<<<<<< Updated upstream
           method: preset.calibrationMethod,
           expected_points: preset.expectedPoints,
-=======
-          method: calibrationApiMethodForSensorType(selectedSensorType.value),
-          expected_points: 2,
->>>>>>> Stashed changes
         })
         currentSessionId.value = session.id
       }
@@ -930,11 +910,7 @@ export function useCalibrationWizard(
     isFreshMeasurement.value = false
     lastMeasurementAt.value = null
     measurementRequestId.value = null
-<<<<<<< Updated upstream
     measurementTriggerAt.value = null
-    measurementTriggerAt.value = null
-=======
->>>>>>> Stashed changes
     lifecycleState.value = 'idle'
     lifecycleMessage.value = ''
     clearDraft()

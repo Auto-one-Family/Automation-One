@@ -33,17 +33,14 @@ import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
 import { sensorsApi } from '@/api/sensors'
 import { formatRelativeTime } from '@/utils/formatters'
-<<<<<<< Updated upstream
 import {
   getNotificationSeverityLabel,
   getNotificationSourceLabel,
   getNotificationCategoryLabel,
 } from '@/utils/labels'
 import { buildEspContextRoute } from '@/utils/notificationNavigation'
-import AlertAuditLines from '@/components/notifications/AlertAuditLines.vue'
-=======
 import { formatAlertLifecycleFailureMessage } from '@/utils/alertLifecycleUi'
->>>>>>> Stashed changes
+import AlertAuditLines from '@/components/notifications/AlertAuditLines.vue'
 import type { NotificationDTO } from '@/api/notifications'
 
 type QuickAlertFilter = 'active' | 'acknowledged' | 'all'

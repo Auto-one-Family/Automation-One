@@ -1252,7 +1252,6 @@ watch(activeTab, (newTab) => {
       @open-cleanup-panel="showCleanupPanel = true"
     />
 
-<<<<<<< Updated upstream
     <div
       v-if="isCorrelationDeepLink"
       class="correlation-deep-link-banner"
@@ -1270,9 +1269,8 @@ watch(activeTab, (newTab) => {
         Korrelation schließen
       </button>
     </div>
-=======
+
     <RestRequestIdDevBar />
->>>>>>> Stashed changes
 
     <div v-if="opsBannerEntries.length > 0" class="ops-banner">
       <div class="ops-banner__title">High-Risk Jobs</div>
