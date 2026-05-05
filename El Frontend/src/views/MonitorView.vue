@@ -2124,7 +2124,7 @@ function handleFabWidgetSelected(widgetType: string) {
                 :layout-id="getZoneMiniPanelId(zone.zoneId)!"
                 :zone-id="zone.zoneId"
                 :compact="true"
-                mode="inline"
+                mode="view"
                 class="monitor-zone-tile__mini-widget"
               />
             </div>

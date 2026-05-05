@@ -7,7 +7,7 @@
  * Used for inline/side-panel dashboard embedding in Monitor/Hardware views.
  *
  * Mode system (D4):
- * - 'view' / 'inline': Read-only, no toolbar (guests, readonly)
+ * - 'view': Read-only, no toolbar (guests, readonly previews, zone-tile mini widgets)
  * - 'manage': Read-only + hover toolbar for widget config/remove (authenticated users)
  * - 'side-panel': Side panel layout (single column stacking)
  *
@@ -28,7 +28,7 @@ const logger = createLogger('InlineDashboardPanel')
 
 interface Props {
   layoutId: string
-  mode?: 'manage' | 'inline' | 'side-panel'
+  mode?: 'view' | 'manage' | 'side-panel'
   /** Zone ID for zone-scoped sensor filtering in widgets (PA-02c) */
   zoneId?: string
   /** Compact mode: hide header, reduced padding (L1 zone-tile; Editor-Stift in ZoneTileCard) */
@@ -36,7 +36,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  mode: 'inline',
+  mode: 'view',
   compact: false,
 })
 const componentUid = getCurrentInstance()?.uid ?? Math.floor(Math.random() * 1_000_000)
@@ -158,7 +158,7 @@ async function confirmRemove(w: DashboardWidget): Promise<void> {
 /**
  * Calculate grid cell style from widget position.
  * Side-panel mode: single column, widgets stacked vertically (ignore x/w).
- * Inline mode: full 12-column grid with original positions.
+ * View / manage mode: full 12-column grid with original positions.
  */
 function compactRowSpan(w: DashboardWidget): number {
   if (w.type === 'gauge' || w.type === 'sensor-card') return 1

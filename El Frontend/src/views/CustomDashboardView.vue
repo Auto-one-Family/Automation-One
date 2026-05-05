@@ -1126,7 +1126,7 @@ function executeBulkDelete() {
                 :layout-id="dashStore.activeLayoutId"
                 :zone-id="layoutZoneId"
                 :compact="true"
-                mode="inline"
+                mode="view"
                 class="dashboard-builder__tile-preview-panel"
               />
             </div>
