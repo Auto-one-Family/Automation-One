@@ -7,10 +7,17 @@ allowed-tools: Read
 
 # MQTT Topic Referenz
 
+<<<<<<< Updated upstream
 > **Version:** 2.24 | **Aktualisiert:** 2026-04-28
 > **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
 > **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
 > **Änderungen:** **AUT-118 (2026-04-28, Implementierung):** Bidirektionaler ACK-Flow für Emergency-Stop/Recovery: Neue Topics `actuator/emergency/ack` (Sections 2.6) und `actuator/recovery_confirm` (Section 2.7), beide ESP→Server QoS 1. Server: `EmergencyAckHandler`, `RecoveryConfirmHandler` in `handlers/`; `build_emergency_ack_topic`, `parse_recovery_confirm_topic` in `topics.py`; `MQTT_SUBSCRIBE_ESP_EMERGENCY_ACK/RECOVERY_CONFIRM` in `constants.py`. Firmware: `buildEmergencyAckTopic()`/`buildRecoveryConfirmTopic()` in `topic_builder.cpp`; ACK-Publish via direktem `mqttClient.publish()` (Safety-Epoch-Race-Mitigation). Zuvor: **AUT-121 (2026-04-24, Implementierung):** Topic `system/heartbeat_metrics` (ESP→Server, QoS 0) koppelt erweiterte Laufzeit-Counter und Queue-Stats vom schlanken Core-`system/heartbeat` ab. Server: `HeartbeatMetricsHandler` (TTLCache-Ingest, kein DB/WS), Merge flach in den nächsten Core-`handle_heartbeat` → `esp_health`; `parse_heartbeat_topic` endverankert, damit `heartbeat_metrics` nicht als Core matcht; `subscriber.py` mappt QoS inkl. `MQTT_SUBSCRIBE_ESP_HEARTBEAT_METRICS`. Firmware: `ENABLE_METRICS_SPLIT` → `publishHeartbeatMetrics()` in `mqtt_client.cpp` am Ende von `publishHeartbeat()`. Zuvor: **PKG-01 (2026-04-20, INC-2026-04-20-offline-mode-observability-hardening):** Neuer Topic `system/queue_pressure` (ESP→Server, QoS 1) für strukturierte Publish-Queue-Backpressure-Events (ENTER/RECOVERED, Hysterese). Server-TopicBuilder in `src/mqtt/topics.py` ergänzt (`build_queue_pressure_topic`, `parse_queue_pressure_topic`). Firmware-Emitter und Server-Handler folgen in Welle 2 (PKG-01a/01b). Zuvor: **AUT-69 (2026-04-20):** `session/announce` an Server-Consumer angepasst (`handle_session_announce` registriert), Session-Feld-Alias dokumentiert (**kanonisch `handover_epoch`, Fallback `session_epoch`**) und Heartbeat-Metriken um `handover_contract_reject_startup`/`handover_contract_reject_runtime` plus Summenfeld `handover_contract_reject` erweitert. Zuvor: **AUT-54 (2026-04-17):** Bootstrap-Heartbeat nach `heartbeat/ack`-Subscription wird auf ESP32 nur noch deferred im normalen Loop gesendet (nicht mehr direkt im `MQTT_EVENT_SUBSCRIBED`-Callback). Stale `MQTT_EVENT_SUBSCRIBED` bei bereits getrennter Verbindung werden verworfen; `publishHeartbeat(force=true)` sendet nie im disconnected Zustand. Zuvor: **AUT-5 (2026-04-17):** Heartbeat-Payload um `sensor_command_queue_overflow_count` ergänzt (Overflow-Telemetrie der Sensor-Command-Queue). Zuvor: **PKG-05 (2026-04-14):** `system/heartbeat/ack` Reject-Diagnose erweitert (optionale Felder `reason_code`, `revocation_source`, `upstream_deleted`, `delete_intent`, `correlation_id` für Revocation/Upstream-Delete-Auswertung auf ESP-Seite). Intent-Outcome-Codes ergänzt: `UPSTREAM_DELETE_REVOKED`, `HEARTBEAT_REJECTED`. Zuvor: **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
+=======
+> **Version:** 2.17 | **Aktualisiert:** 2026-04-10
+> **Quellen:** `El Trabajante/docs/Mqtt_Protocoll.md`, `CLAUDE_SERVER.md` Section 4
+> **Verifiziert gegen:** `topic_builder.cpp`, `main.py`, `constants.py`
+> **Änderungen:** **v2.17 (2026-04-10):** `sensor/{gpio}/response` (measure): Payload-Doku inkl. `raw`/Mutex; `CalibrationResponseHandler` ohne DB-Latest bei fehlendem Rohwert. **Epic1-05:** Server `publish_actuator_command`: bei gesetztem `correlation_id` zusätzlich **`intent_id`** (gleicher Wert) im JSON; nach erfolgreichem Publish schreibt `CommandContractRepository.record_intent_publish_sent` `command_intents.orchestration_state=sent` (Support: `El Servador/god_kaiser_server/docs/support/intent_orchestration_state.md`). Zuvor: **MQTTCommandBridge** `resolve_ack` nur per `correlation_id` (Epic1-04). Zone/Subzone-ACK ohne passende UUID → `ACK dropped: no correlation match`. Zuvor: `system/intent_outcome/lifecycle`; Heartbeat-Felder getrennt; Intent-Outcome-Codes u. a. `PENDING_RING_EVICTION`, `CONFIG_LANE_BUSY`, `PUBLISH_OUTBOX_FULL`, `JSON_PARSE_ERROR`; Zone/Subzone-ACK optional `reason_code`; Intent-Metadaten optional unter `data.*` (2026-04-05). Früher: Heartbeat-ACK Contract-Härtung, `CONFIG_PENDING_AFTER_RESET`, Intent-Outcome v2.9, Canonical-First Ingest, Firmware-Strict-Config (2026-04-04).
+>>>>>>> Stashed changes
 
 ---
 
@@ -192,9 +199,14 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 ```json
 {
   "command": "measure",
-  "request_id": "req_12345"
+  "request_id": "req_12345",
+  "timeout_ms": 5000
 }
 ```
+
+Optional: `timeout_ms` (1–60000, Default 5000) — Obergrenze für den Messdauer-Guard in der Firmware (`main.cpp` / `triggerManualMeasurement`).
+
+**Firmware:** Messung läuft unter `g_sensor_mutex` (gleiche Semaphore wie `performAllMeasurements`), damit manuelle und autonome Messung nicht gleichzeitig denselben ADC-/Sensorpfad nutzen. Bei Mutex-Warte-Timeout: `reason_code` `MUTEX_TIMEOUT` in `sensor/{gpio}/response` (wenn `request_id` gesetzt).
 
 **Code-Referenzen:**
 - **ESP32:** `main.cpp` Zeile 740 (Subscription via Wildcard)
@@ -208,20 +220,34 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 
 **QoS:** 1
 
-**Payload:**
+**Payload (measure, mit `request_id` im Command — typisch Kalibrier-Wizard / On-Demand):**
+
+Firmware sendet u. a. `raw` (ADC-Rohwert), `sensor_type`, `quality`, Outcome-Felder (`measurement_ok`, `publish_ok`, `timeout`, `reason_code` — u. a. `MUTEX_TIMEOUT`, wenn `g_sensor_mutex` bis Ablauf der Wartezeit nicht frei wird) sowie optionale Intent-Felder (`intent_id`, `correlation_id`, `ttl_ms`). **El Servador** (`CalibrationResponseHandler`): bei aktiver Kalibrier-Session wird **kein** Ersatzwert aus der DB („latest reading“) genutzt, wenn `raw`/`raw_value` fehlen — stattdessen WebSocket `calibration_measurement_failed` (vermeidet Verwechslung mit periodischem Intervall-Messbetrieb).
+
 ```json
 {
   "request_id": "req_12345",
   "gpio": 4,
   "command": "measure",
   "success": true,
-  "ts": 1735818000
+  "measurement_ok": true,
+  "publish_ok": true,
+  "timeout": false,
+  "reason_code": "NONE",
+  "quality": "good",
+  "sensor_type": "moisture",
+  "raw": 2150,
+  "ts": 1735818000,
+  "seq": 42,
+  "intent_id": "intent-uuid",
+  "correlation_id": "corr-uuid",
+  "ttl_ms": 5000
 }
 ```
 
 **Code-Referenzen:**
-- **ESP32:** `topic_builder.cpp:buildSensorResponseTopic()` (Zeile 79)
-- **Server:** `main.py` Zeile 254 (Handler Registration)
+- **ESP32:** `topic_builder.cpp` → `buildSensorResponseTopic()`; Antwortaufbau `main.cpp` → `handleSensorCommand` (measure)
+- **Server:** `main.py` (Handler-Registrierung `calibration_response_handler.handle_sensor_response`); `mqtt/handlers/calibration_response_handler.py`
 
 ---
 
@@ -378,15 +404,20 @@ kaiser/{kaiser_id}/esp/{esp_id}/{kategorie}/{gpio}/{aktion}
 
 **QoS:** 1
 
-**Payload:**
+**Payload (Ist-Firmware `publishActuatorAlert`, ergänzend zum Handler-Contract):**
 ```json
 {
+  "esp_id": "ESP_12AB34CD",
+  "seq": 42,
+  "zone_id": "zone_main",
   "ts": 1735818000,
   "gpio": 5,
-  "type": "emergency_stop",
+  "alert_type": "emergency_stop",
   "message": "Actuator stopped"
 }
 ```
+
+**Korrelation:** Der Server setzt pro MQTT-Ingress eine synthetische CID (`generate_mqtt_correlation_id` aus `esp_id`, Topic-Suffix `alert`, `seq`) und persistiert sie am Notification-Datensatz. Optional kann `correlation_id` gesetzt werden (z. B. Befehlsbezug) — sie landet zusätzlich in `metadata.device_correlation_id`, während die Ingress-CID in `notifications.correlation_id` und `metadata.mqtt_ingress_correlation_id` gespiegelt wird.
 
 **Alert-Types:**
 - `emergency_stop`: Actuator wurde notgestoppt

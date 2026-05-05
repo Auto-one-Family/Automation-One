@@ -1,166 +1,198 @@
 ---
 run_mode: artefact_improvement
 incident_id: ""
-run_id: bodenfeuchte-vollimpl-2026-04-10
-order: artefact_first
+run_id: bodenfeuchte-kalibrierung-followup-2026-04-10
+order: incident_first
 target_docs:
   - docs/analysen/VERIFIKATION-IST-SOLL-bodenfeuchte-kalibrierung-komplett-2026-04-10.md
 scope: |
-  Vollständige Nachverfolgung der IST/SOLL-Verifikation Bodenfeuchte: (1) Operator-Pfad für bestehende
-  defekte calibration_data-Zeilen (Re-Kalibrierung); optional (2) Backend-Legacy-Shim in
-  resolve_calibration_for_processor für alte linear_2point-Derived mit point1_raw/point2_raw und
-  Referenzen 0/100 — nur nach verify-plan und eigenem PKG-02; (3) Tests erweitern; (4) Verifikation
-  pytest/vue-tsc/ruff wie unten. Branch auto-debugger/work; keine MQTT-Topic-Änderung.
+  Folgelauf nach abgeschlossener IST/SOLL-Verifikation (2026-04-10): Der Kernpfad Option (a)
+  (Frontend moisture_2point, Backend linear_2point+moisture → moisture_2point-derived, Resolver,
+  Processor) ist im Repo unter auto-debugger/work umgesetzt. Diese STEUER adressiert **Restarbeit**:
+  (1) harte Test-Assertion Finalize→Apply→persistierte calibration_data, (2) Operator-/DB-Hinweise
+  für Altbefunde ohne Neu-Kalibrierung, (3) Frontend: JWT-Fallback `calibrationApi.calibrate()` startet
+  Sessions fuer Feuchte mit `moisture_2point` (wie Wizard; siehe VERIFIKATION Matrix 2.2), (4) optionale
+  Typschärfe Client, (5) kurze Doku-Ergänzung.
+  Keine MQTT-Topic-Änderungen, keine SafetyController/Logic-Engine-Eingriffe.
 forbidden: |
-  Keine Secrets in Artefakten oder SQL-Beispielen. Keine Breaking Changes an öffentlichen REST-Response-Schemata
-  ohne explizite API-Versionierung. Keine Änderung der MQTT-Topic-Namen. Kein git push --force.
-  Firmware nur bei eigenem Scope-PKG und verify-plan. DB: keine DROP/TRUNCATE; Migrationen nur reviewbar.
+  Keine Secrets, Tokens, Passwörter oder produktiven Connection-Strings in Artefakten oder SQL-Beispielen.
+  Branch auto-debugger/work für alle Produktänderungen; kein git push / --force durch Agenten.
+  Keine Breaking Changes an REST-Response-Schemas ohne separates Review-Gate.
+  Bash nur: git status, branch, checkout, diff (read-only) wie in Projektregeln.
 done_criteria: |
-  - PKG-01: Betriebs-Checkliste für betroffene Sensoren ausgeführt oder dokumentiert (kein Treffer = OK).
-  - PKG-02 (falls gewählt): resolve_calibration_for_processor mappt dokumentierte Legacy-Form → flaches
-    dry_value/wet_value für moisture; pytest src-Tests grün.
-  - PKG-03: test_calibration_payloads + ggf. test_moisture_mqtt_flow erweitert; alle genannten Verify-Befehle Exit 0.
-  - Dokument: Kurzvermerk in docs/analysen/ oder Verifikationsdatei „Operator abgeschlossen“ — oder Verweis auf Ticket.
+  - PKG-01: Test erweitert; pytest für betroffene Datei grün; ruff für src/ unverändert grün oder nur erwartete Fixes.
+  - PKG-02: Operator-Abschnitt (SQL SELECT-Template + Handlungsempfehlung) in docs/analysen eingecheckt.
+  - PKG-03: `calibrate()` setzt fuer Feuchte `moisture_2point` ODER im Run-README begründet ausgespart; optional TS-Union dokumentiert.
+  - Alle Referenztests aus Regressionstests-Liste grün nach Änderung.
+  - verify-plan-OUTPUT für Orchestrator vor erster Code-Delegation dokumentiert (VERIFY-PLAN-REPORT im Run-Ordner).
+no_chat_questions: true
+allow_user_escalation: false
 ---
 
-# STEUER — Bodenfeuchte-Kalibrierung: Vollimplementierung (Nachlauf zur Verifikation 2026-04-10)
+# STEUER — Bodenfeuchte Kalibrierung: Implementierungs-Folgelauf (Restarbeit)
 
-**Bezug:** `docs/analysen/VERIFIKATION-IST-SOLL-bodenfeuchte-kalibrierung-komplett-2026-04-10.md` (HEAD-Stand bei Erstellung: `5fba29a`).  
-**Agent (Ausführung):** nach **`/verify-plan`**-Gate: `server-dev` / `frontend-dev` nur bei Code-PKG; sonst Operator.
-
----
-
-## Executive Summary
-
-Die **kanonische Methode** bleibt **Option (a)**: Feuchte-Kalibrierung liefert **`derived`** mit **`type: moisture_2point`** und **`dry_value`/`wet_value`** (Finalize über `CalibrationService._compute_calibration`). Der **MoistureSensorProcessor** nutzt genau diese Keys; **ältere DB-Zeilen** mit **`linear_2point`**-Derived ohne dry/wet müssen **betrieblich nachgezogen** werden (Re-Kalibrierung) **und/oder** durch einen **kleinen Legacy-Adapter** in `resolve_calibration_for_processor` entschärft werden — letzteres nur nach **verify-plan** und **PKG-02**.
+**Bezug:** `docs/analysen/VERIFIKATION-IST-SOLL-bodenfeuchte-kalibrierung-komplett-2026-04-10.md`  
+**Agent (Orchestrierung):** `auto-debugger` → Delegation `server-dev` / `frontend-dev` / Doku  
+**Modus:** `artefact_improvement` (kein separates Incident)
 
 ---
 
-## IST → SOLL — Delta-Tabelle
+## Executive Summary (eine kanonische Methode)
+
+Die **kanonische** Produktentscheidung bleibt **Option (a)** aus dem Implementierungsplan 2026-04-09: Nach Feuchte-Kalibrierung muss die gespeicherte bzw. aufgelöste Kalibrierung **`dry_value`/`wet_value`** für den **`MoistureSensorProcessor`** liefern. Im aktuellen Code geschieht das über **`moisture_2point`** und den Backend-Fallback **`linear_2point` + `sensor_type` moisture → `_compute_moisture_from_role_points`**. Diese STEUER ergänzt **Absicherung und Betrieb**, nicht die Kernlogik — außer **Persistenz-Assertion** in Tests und **JWT-`calibrate()`-Konsistenz** (Matrix 2.2 im IST-Dokument).
+
+---
+
+## IST→SOLL-Delta (Rest)
 
 | Komponente | Änderung | Risiko |
 |------------|----------|--------|
-| `sensor_configs.calibration_data` (Prod) | Alte `linear_2point`-Derived für moisture → neue Session + Apply **oder** Adapter | Mittel (Daten) |
-| `calibration_payloads.py` | Optional: Legacy-Mapping linear_2point → dry/wet für moisture | Niedrig–Mittel (Semantik) |
-| Tests | Neue Fälle für Legacy-Shape + Resolver | Niedrig |
-| Operator | Anleitung Re-Kalibrierung GPIO/ESP | Niedrig |
+| `tests/unit/test_calibration_service.py` | Nach `apply`: **`SensorConfig.calibration_data`** muss **`derived`** mit **`dry_value`/`wet_value`** (und `type: moisture_2point`) enthalten — Assertion + ggf. `resolve_calibration_for_processor`-Check. | Niedrig — rein Test. |
+| `docs/analysen/` | Kurzes Addendum: SQL zur Erkennung von Legacy-Rows (`derived.type = linear_2point` ohne dry/wet bei Feuchte); Empfehlung **Neu-Kalibrierung**. | Kein technisches Risiko. |
+| `El Frontend/src/api/calibration.ts` | JWT-Fallback (`calibrate` ohne API-Key): `startSession` nutzt noch `linear_2point` für Nicht-offset — für Feuchte auf **`moisture_2point`** umstellen (Normalisierung `soil_moisture` → `moisture` wie `useCalibrationWizard` `173:176`). Optional danach: `method` als Union typisieren. | Niedrig — Server mappt Legacy zwar; Konsistenz + Klarheit. |
 
 ---
 
-## Arbeitspakete (Reihenfolge)
+## Arbeitspakete (reihenfolgetreu; PKG-N+1 nach grünem Verify von PKG-N)
 
-### PKG-01 — Betrieb: Bestand prüfen & Re-Kalibrierung (kein Code)
+### PKG-01 — Backend-Test: Apply persistiert brauchbare Feuchte-`derived`
 
-**Ziel:** Alle Produktions-Sensoren `sensor_type` moisture (bzw. normalisiert), bei denen `calibration_data->derived->type` = `linear_2point` **und** keine `dry_value`/`wet_value` im flachen Resolver-Ergebnis wirken, **neu kalibrieren** (Wizard durchlaufen, Finalize, Apply).
+**Owner:** server-dev  
+**Dateien (verifiziert):**
 
-**Schritte (checkbox):**
+- `El Servador/god_kaiser_server/tests/unit/test_calibration_service.py`
+- bei Bedarf Hilfsimport: `src.services.calibration_payloads.resolve_calibration_for_processor`
+- DB-Model: `SensorConfig` laden nach `apply` (gleiche Session `esp_id`/`gpio`)
 
-- [ ] Read-only: SQL-Stichprobe (PostgreSQL) — `sensor_configs` join/filter auf `calibration_data::jsonb`, Feuchte-Sensoren; Shape dokumentieren (keine Secrets).
-- [ ] Pro betroffenem Eintrag: ESP/GPIO notieren; Operator kalibriert nach UI-Standard.
-- [ ] Nach Apply: Stichprobe `sensor_configs.calibration_data` — `derived.type` = `moisture_2point` oder Resolver liefert dry/wet.
+**Inhalt:**
 
-**Verify:** Kein Repo-Befehl — dokumentierter Nachweis in Ticket/Notiz.
+1. Erweitere **`test_calibration_service_add_finalize_apply_flow`** oder füge **`test_moisture_finalize_apply_persists_moisture_2point_derived`** hinzu:
+   - Nach `await service.apply(session.id)` die **`SensorConfig`** für `ESP_TEST_001` / `gpio=4` aus der DB lesen.
+   - Assert: `calibration_data["derived"]["type"] == "moisture_2point"` (oder äquivalent kanonisch).
+   - Assert: `resolve_calibration_for_processor(sensor_config.calibration_data)` liefert Dict mit **`dry_value`** und **`wet_value`** (Floats wie in Session-Punkten).
+2. Optional zweiter Fall: Session mit `method="moisture_2point"` starten — gleiche Assertions (Regression gegen API-Variante).
 
-**Abhängigkeit:** Keine — **zuerst** ausführen, wenn Datenzugriff möglich.
+**Akzeptanzkriterien:**
 
----
-
-### PKG-02 — Backend (optional): Legacy in `resolve_calibration_for_processor`
-
-**Ziel:** Wenn `derived` **`type: linear_2point`** enthält **und** `sensor_type` moisture erkennbar aus Payload/Metadaten **oder** Heuristik über `point1_ref`/`point2_ref` ∈ {0,100} und vorhandene `point*_raw`: flaches **`dry_value`/`wet_value`** für den Processor ableiten (ein klarer, kommentierter Zweig — kein Umbau der Finalize-Logik).
-
-**Dateien:** `El Servador/god_kaiser_server/src/services/calibration_payloads.py` (primär).
-
-**Akzeptanz:**
-
-- [ ] Neue Unit-Tests in `tests/unit/test_calibration_payloads.py`: mindestens ein JSON-Fixture wie historisches `linear_2point`-Derived mit `point1_raw`/`point2_raw` → `resolve_calibration_for_processor` liefert `dry_value`/`wet_value`.
-- [ ] Bestehende Tests unverändert grün.
+- [ ] Neuer/erweiterter Test faellt auf **main** nicht durch absichtliche Logikänderung ohne Anpassung.
+- [ ] Keine Änderung an Produktcode außerhalb von `tests/` in PKG-01.
 
 **Verify (exakt):**
 
 ```text
 cd "El Servador/god_kaiser_server"
-poetry run pytest tests/unit/test_calibration_payloads.py -q --tb=short
-poetry run ruff check src/services/calibration_payloads.py
+.\.venv\Scripts\python.exe -m pytest tests/unit/test_calibration_service.py -q --tb=short
 ```
 
-**Abhängigkeit:** Nach PKG-01 **oder** parallel wenn DB nicht blockiert — **nach** verify-plan-Freigabe für dieses PKG.
+**Windows-Hinweis:** Falls `poetry` im PATH fehlt, venv wie oben nutzen (siehe VERIFIKATION-README REF-03).
 
 ---
 
-### PKG-03 — Tests: Regression Finalize → derived → Processor
+### PKG-02 — Doku: Operator & „Altdaten“
 
-**Ziel:** Absicherung der Kette wie in Verifikationsmatrix §6.
+**Owner:** server-dev oder Technical Writer (Markdown-only)  
+**Dateien:**
 
-**Dateien:** ggf. `tests/unit/test_calibration_service.py`, `tests/integration/test_moisture_mqtt_flow.py`.
+- Neu oder Erweiterung: `docs/analysen/FIX-kalibrierungsflow-bodenfeuchte-operator-hinweis-2026-04-10.md` **oder** Abschnitt in bestehender Analyse-Datei mit klarem Datum.
 
-**Akzeptanz:**
+**Inhalt:**
 
-- [ ] Mindestens ein Test, der explizit **`finalize`-nahe** canonical payload (aus `build_canonical_calibration_result`) + `resolve` + `MoistureSensorProcessor.process` verbindet — falls nicht schon vollständig durch bestehende Tests abgedeckt (siehe `test_moisture_mqtt_flow.py` „Canonical calibration → Processor“).
+1. **SQL-SELECT (read-only):** Beispiel, das `sensor_configs` mit `sensor_type` in (`moisture`,`soil_moisture`) und JSON-Pfad `calibration_data->derived->type` = `linear_2point` **ohne** `dry_value` listet (Dialect PostgreSQL; **keine** echten ESP-IDs aus Prod nennen — Platzhalter).
+2. **Handlung:** Neu-Kalibrierung über UI-Wizard **oder** dokumentiertes Risiko manueller JSON-Korrektur (nicht empfohlen ohne Review).
+3. Verweis auf Pi-Enhanced: Prozent nur mit **`pi_enhanced`** + Rohdatenpfad.
 
-**Verify:**
+**Verify:** rein menschlich / Markdown-Review; optional `ruff` nicht betroffen.
 
-```text
-cd "El Servador/god_kaiser_server"
-poetry run pytest tests/unit/test_calibration_service.py tests/integration/test_moisture_mqtt_flow.py -q --tb=short
-```
+**Akzeptanzkriterien:**
 
-**Abhängigkeit:** Nach PKG-02 **oder** überspringen wenn nur PKG-01 (nur dann Test-Erweiterung optional streichen).
+- [ ] Keine Secrets; SQL nur als Template.
+- [ ] Konsistent mit `VERIFIKATION-IST-SOLL-bodenfeuchte-kalibrierung-komplett-2026-04-10.md`.
 
 ---
 
-### PKG-04 — Frontend-Sanity (nur bei Änderung)
+### PKG-03 — Frontend: `calibrationApi.calibrate()` Feuchte-Session + optionale Typen
 
-**Ziel:** Keine Regression in `useCalibrationWizard.ts`.
+**Owner:** frontend-dev  
+**Dateien:**
+
+- `El Frontend/src/api/calibration.ts` (JWT-Zweig `startSession`, ca. Zeilen 125–137)
+
+**Inhalt:**
+
+1. **Runtime (empfohlen):** Vor `calibrationApi.startSession` den `sensor_type` wie im Wizard normalisieren (`soil_moisture` → `moisture`). Wenn Ergebnis `moisture`, **`sessionMethod = 'moisture_2point'`** statt pauschal `linear_2point` (Offset-Branch unverändert).
+2. **Optional:** `StartSessionRequest` / lokale Typen so schärfen, dass `'moisture_2point'` explizit vorkommt (Union mit `'linear_2point'`, `'offset'`, … — mit Backend `StartSessionRequest` abgleichen).
+3. **Optional:** Kleiner Vitest-Mock-Test: bei `calibrate` mit `sensor_type: 'moisture'` wird `moisture_2point` an `startSession` übergeben.
 
 **Verify:**
 
 ```text
 cd "El Frontend"
 npx vue-tsc --noEmit
+npx vitest run tests/unit/composables/useCalibrationWizard.test.ts -q
 ```
 
-**Abhängigkeit:** Nur wenn Frontend in diesem Lauf geändert wird — sonst **optional** einmalig CI-nah.
+*(Zusätzlich ggf. neue Testdatei für `calibration.ts` — siehe Inhalt Punkt 3.)*
+
+**Akzeptanzkriterien:**
+
+- [ ] Kein `startSession` mit `linear_2point` für normalisierte Feuchte über den `calibrate()`-Pfad.
+- [ ] `vue-tsc` fehlerfrei.
 
 ---
 
-## Daten-Migration / Operator
+### PKG-04 — Lint + Regressionssuite (nach PKG-01–03)
 
-**Primär:** Kein automatisches SQL-Update von Produktionsdaten ohne Review. **Empfohlen:** Re-Kalibrierung (PKG-01).
-
-**Rollback:** Vor manueller JSON-Manipulation Backup-Row exportieren (`COPY`/`SELECT` in gesicherte Tabelle).
-
-**Optional (nur mit DBA-Review):** Einmal-`UPDATE` von `calibration_data` **nur**, wenn identische Punkte bereits im JSON stehen und Ziel-Shape validiert wurde — **nicht** Teil des Mindestumfangs.
-
----
-
-## Regressionstests-Liste (müssen grün sein)
-
-- `tests/unit/test_calibration_service.py` (insb. `test_compute_calibration_linear_moisture_maps_to_moisture_2point_derived`)
-- `tests/unit/test_moisture_processor.py`
-- `tests/unit/test_calibration_payloads.py` (nach PKG-02 erweitert)
-- `tests/integration/test_moisture_mqtt_flow.py` (Canonical-Pfad)
-
-**Gesamt-Verify (Backend):**
+**Owner:** server-dev / frontend-dev je nach geänderten Dateien  
+**Verify:**
 
 ```text
 cd "El Servador/god_kaiser_server"
-poetry run pytest tests/unit/test_calibration_service.py tests/unit/test_moisture_processor.py tests/unit/test_calibration_payloads.py tests/integration/test_moisture_mqtt_flow.py -q --tb=short
+.\.venv\Scripts\python.exe -m pytest tests/unit/test_calibration_service.py tests/unit/test_moisture_processor.py tests/unit/test_calibration_payloads.py tests/integration/test_moisture_mqtt_flow.py -q --tb=short
+.\.venv\Scripts\python.exe -m ruff check src/
 ```
 
+```text
+cd "El Frontend"
+npx vue-tsc --noEmit
+```
+
+**Akzeptanzkriterien:**
+
+- [ ] Alle genannten pytest-Dateien Exit-Code 0.
+- [ ] `ruff` ohne neue Errors in `src/` (Warnungen nach Projektstandard).
+
 ---
 
-## forbidden / done_criteria
+## Daten-Migration
 
-Siehe YAML-Frontmatter oben — für Implementierungsläufe **kopieren**.
+**Automatische Migration:** nicht Teil dieses Laufs (kein Alembic ohne separates Gate).  
+**Operator:** siehe PKG-02 — **Neu-Kalibrierung** ist der sichere Weg; einmalige SQL-`UPDATE` auf JSON nur mit Produkt-Review und Backup.
+
+**Rollback:** Vor jedem manuellen JSON-Update Backup-Tabelle / Row-Dump; Rollback = Restore des Dumps.
 
 ---
 
-## SPECIALIST-PROMPTS (Kurzblock)
+## Regressionstests-Liste (müssen grün bleiben)
 
-Jeder Dev-Block muss enthalten: **Git (`auto-debugger/work`)**, **Pattern-Reuse** (closest: `resolve_calibration_for_processor`, `test_calibration_payloads`), **Verify-Befehl** wie oben, **Fehler-Register** bei Code-PKGs (Mikrozirkular). Vollständiges Gerüst: `.claude/agents/auto-debugger.md` §0a.
+| Test-Datei / Bereich | Zweck |
+|----------------------|-------|
+| `tests/unit/test_calibration_service.py` | Finalize/Apply + **neue** Persistenz-Assertions |
+| `tests/unit/test_moisture_processor.py` | Processor-Kern |
+| `tests/unit/test_calibration_payloads.py` | Resolver |
+| `tests/integration/test_moisture_mqtt_flow.py` | Kanonische Payload → Processor |
+| `tests/unit/test_calibration_service.py::test_compute_calibration_linear_moisture_*` | linear_2point+Feuchte → moisture_2point |
 
-**verify-plan OUTPUT:** Vor PKG-02/03 Skill `verify-plan` auf diese Datei + betroffene Pfade anwenden; Ergebnis in `.claude/reports/current/auto-debugger-runs/bodenfeuchte-vollimpl-2026-04-10/VERIFY-PLAN-REPORT.md` ablegen.
+**Neue Tests:** mindestens die unter PKG-01 beschriebene Persistenz-Assertion ( **`dry_value`/`wet_value` nach apply** ).
+
+---
+
+## verify-plan & SPECIALIST-PROMPTS
+
+**Vor erster Code-Änderung:** Skill **`verify-plan`** (`.claude/skills/verify-plan/SKILL.md`) auf diese STEUER + betroffene Pfade anwenden; Ergebnis in  
+`.claude/reports/current/auto-debugger-runs/bodenfeuchte-kalibrierung-followup-2026-04-10/VERIFY-PLAN-REPORT.md`  
+und Chat-Block **OUTPUT FÜR ORCHESTRATOR (auto-debugger)** gemäß Skill.
+
+**SPECIALIST-PROMPTS** pro Rolle müssen die Pflichtabschnitte aus `.claude/agents/auto-debugger.md` §0a enthalten: **Git (auto-debugger/work)**, **Pattern-Reuse**, **Alert-Pfad** (hier tangential), **Verify-Befehl**, **Fehler-Register** bei Code.
 
 ---
 
@@ -168,5 +200,11 @@ Jeder Dev-Block muss enthalten: **Git (`auto-debugger/work`)**, **Pattern-Reuse*
 
 ```text
 @auto-debugger @.claude/auftraege/auto-debugger/inbox/STEUER-bodenfeuchte-kalibrierung-vollimplementierung-2026-04-10.md
-Bitte PKG-01ff. nach verify-plan; Branch auto-debugger/work; kein Scope-Drift.
+Bitte verify-plan, dann PKG-01–04 auf Branch auto-debugger/work; keine Kernlogik ändern ohne Evidence aus VERIFIKATION-IST-SOLL.
 ```
+
+---
+
+## Konsistenzcheck
+
+Diese STEUER darf **nicht** dem IST-Dokument widersprechen: Kernpfad ist **bereits implementiert**; dieser Lauf ergänzt **Tests, Betrieb, JWT-`calibrate()`-Konsistenz** (Matrix 2.2), **optionale Typen**.

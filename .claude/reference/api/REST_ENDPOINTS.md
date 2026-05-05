@@ -7,7 +7,11 @@ allowed-tools: Read
 
 # REST API Referenz
 
+<<<<<<< Updated upstream
 > **Version:** 4.3 | **Aktualisiert:** 2026-05-01
+=======
+> **Version:** 4.3 | **Aktualisiert:** 2026-04-10
+>>>>>>> Stashed changes
 > **Base URL:** `/api/v1/`
 > **Auth:** JWT Bearer Token (außer `/auth/status`, `/auth/setup`, `/health`)
 > **Quellen:** Vollständige Codebase-Analyse aller Router in `El Servador/god_kaiser_server/src/api/v1/`
@@ -76,6 +80,8 @@ allowed-tools: Read
 | `/sensors/{sensor_id}/alert-config` | GET | JWT | Per-Sensor Alert-Config abrufen |
 | `/sensors/{sensor_id}/runtime` | GET | JWT | Runtime-Stats + Wartungsstatus (Phase 4A.8) |
 | `/sensors/{sensor_id}/runtime` | PATCH | Operator | Runtime-Stats aktualisieren (Wartungslog) |
+
+> **Calibration Sessions:** Mehrpunkt-Kalibrierung unter **`/api/v1/calibration/sessions`** (Router `calibration_sessions.py`). Request-Feld `method` z. B. **`moisture_2point`** (Bodenfeuchte: `derived` mit `dry_value`/`wet_value`) oder **`linear_2point`** (u. a. andere Sensortypen). Abgleich Feuchte-Wizard/Server: `docs/analysen/FIX-kalibrierungsflow-bodenfeuchte-2026-04-09.md`. **El Frontend:** Ohne `VITE_CALIBRATION_API_KEY` mappt `calibrationApi.calibrate()` auf den JWT-Session-Pfad und startet Feuchte (`moisture` / Alias `soil_moisture`) mit **`method: moisture_2point`** — konsistent zu `useCalibrationWizard` (`El Frontend/src/api/calibration.ts`). Altbestände / Operator-SQL: `docs/analysen/FIX-kalibrierungsflow-bodenfeuchte-operator-hinweis-2026-04-10.md`.
 
 ### Actuators (`/actuators`) - 13 Endpoints
 

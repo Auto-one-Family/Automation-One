@@ -7,10 +7,17 @@ allowed-tools: Read
 
 # WebSocket Event Referenz
 
+<<<<<<< Updated upstream
 > **Version:** 3.19 | **Aktualisiert:** 2026-05-01
 > **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
 > **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
 > **Event-Anzahl:** 47 relevante Event-Typen (44 serverseitige Broadcast-Events + 1 optionaler Plugin-Statuskanal + 2 Frontend-Contract-Integrationssignale)
+=======
+> **Version:** 3.16 | **Aktualisiert:** 2026-04-10
+> **Endpoint:** `ws://localhost:8000/api/v1/ws/realtime/{client_id}?token={jwt_token}`
+> **Quellen:** Vollständige Codebase-Analyse aller `broadcast` Aufrufe
+> **Event-Anzahl:** 44 relevante Event-Typen (41 serverseitige Broadcast-Events + 1 optionaler Plugin-Statuskanal + 2 Frontend-Contract-Integrationssignale)
+>>>>>>> Stashed changes
 
 ---
 
@@ -35,6 +42,8 @@ allowed-tools: Read
 | `sensor_data` | Server→Frontend | Sensor-Messung | Neuer Sensor-Wert |
 | `sensor_health` | Server→Frontend | Health-Check | Sensor Timeout/Recovery |
 | `sensor_config_deleted` | Server→Frontend | Sensor DELETE | Sensor-Config entfernt (Ghost-Cleanup) |
+| `calibration_measurement_received` | Server→Frontend | CalibrationResponseHandler | Rohwert aus Sensorantwort (Kalibrier-Session / Live) |
+| `calibration_measurement_failed` | Server→Frontend | CalibrationResponseHandler | Messfehler (z. B. `success: false`, fehlendes `raw` — **kein** Ersatz aus letztem `sensor_data`-Eintrag) |
 
 ### Plant Events
 
@@ -89,6 +98,8 @@ allowed-tools: Read
 | `notification_updated` | Server→Frontend | NotificationRouter | Notification gelesen/acknowledged/resolved |
 | `notification_unread_count` | Server→Frontend | NotificationRouter | Ungelesene-Anzahl + höchste Severity |
 
+**Operator / Korrelation:** Events unter „Notification Events“ stammen aus **`NotificationRouter`** (DB-persistiert, Inbox/Ack). Das ist **nicht** dieselbe Kette wie **`error_event`** (System Events): dort z. B. MQTT `error_handler` → Audit + WS-Broadcast **ohne** NotificationRouter. Symptom- und Feldzuordnung (keine Vermischung der Root-Cause): `docs/analysen/IST-observability-correlation-contracts-2026-04-09.md` (Abschnitt „Zwei Benachrichtigungsketten“).
+
 ### Sequence Events
 
 | Event | Richtung | Trigger | Beschreibung |
@@ -128,6 +139,7 @@ Der Pinia **ESP-Store** (`El Frontend/src/stores/esp.ts`) nutzt `useWebSocket` m
 - **Intent-Outcomes (WS):** `intent_outcome` / `intent_outcome_lifecycle` → `El Frontend/src/shared/stores/intentSignals.store.ts` (Zwischenstand vs. Ergebnis, Firmware-`code` getrennt).
 - **`esp_health`:** Zusätzliche Felder aus gespreizter Laufzeit-Telemetrie → `runtime_health_view` auf `ESPDevice` via `El Frontend/src/domain/esp/espHealth.ts`.
 - **Zone/Subzone-ACK:** optionales `reason_code` (Brückengrund MQTT/Firmware) in Toasts über `El Frontend/src/domain/zone/ackPresentation.ts` (nicht mit Intent-`code` verwechseln).
+- **Kalibrierwizard (Live-Messung):** `useCalibrationWizard` nutzt ein **eigenes** `useWebSocket`-Abonnement (nur `calibration_measurement_received` / `calibration_measurement_failed`); diese Typen sind nicht in `esp-websocket-subscription.ts` zu duplizieren, sofern der Store sie nicht verarbeitet.
 
 ---
 
@@ -566,6 +578,7 @@ Sensor-Konfiguration wurde gelöscht (T08-Fix-D Ghost-Cleanup).
 
 ---
 
+<<<<<<< Updated upstream
 ### 4.4 plant_lifecycle_update
 
 Pflanzen-Lifecycle-Ereignis wurde eingetragen (Phase-Wechsel, Anmerkung, Ernte-Event).
@@ -600,6 +613,44 @@ Pflanzen-Lifecycle-Ereignis wurde eingetragen (Phase-Wechsel, Anmerkung, Ernte-E
 | `event_timestamp` | ISO 8601 | Zeitpunkt des Ereignisses |
 
 **Frontend-Handler:** `plants.store.ts` — aktualisiert Plant-Lifecycle-Liste und zeigt Toast.
+=======
+### 4.4 calibration_measurement_received
+
+Rohmesswert aus der ESP-Sensorantwort, wenn der Server die Antwort fuer eine Kalibrier-Session oder zur Live-Anzeige auswertet (`CalibrationResponseHandler`).
+
+**Trigger:** MQTT Topic `kaiser/{kaiser_id}/esp/{esp_id}/sensor/{gpio}/response` (Payload mit `raw`/`raw_value`, optional `intent_id`, `correlation_id`)
+
+**Code-Location:** [calibration_response_handler.py](El Servador/god_kaiser_server/src/mqtt/handlers/calibration_response_handler.py)
+
+**Payload (`data`):**
+| Feld | Typ | Beschreibung |
+|------|-----|--------------|
+| `esp_id` | string | ESP-Geraet |
+| `gpio` | number | GPIO |
+| `raw` / `raw_value` | number | Rohwert |
+| `quality` | string | z. B. `good` |
+| `intent_id` | string? | Echo der Mess-Intent-ID (MQTT/ESP) |
+| `correlation_id` | string? | Korrelations-ID (oft gleiche UUID-Kette wie Intent) |
+| `request_id` | string? | Echo aus MQTT-Antwort (`measure`-Command), wenn als String vorhanden |
+| `session_id` | string? | Aktive Kalibrier-Session (UUID), wenn vorhanden |
+| `sensor_type` | string? | Normalisierter Sensortyp |
+
+**Top-Level:** `correlation_id` am WebSocket-Message-Root kann gesetzt sein (gleich wie bei anderen Broadcasts).
+
+**El Frontend — Korrelation (Kalibrierwizard):** `useCalibrationWizard` setzt nach `POST …/sensors/{esp_id}/{gpio}/measure` die `request_id` aus der Antwort als `measurementRequestId`. `lastRawValue` wird **nur** aktualisiert, wenn mindestens eine der IDs **`intent_id`**, **`correlation_id`** oder **`request_id`** in `data` **oder** `correlation_id` auf der **Message** mit dieser `request_id` uebereinstimmt. Fremde IDs (verzoegerte/alte Messungen) werden verworfen.
+
+---
+
+### 4.5 calibration_measurement_failed
+
+Fehlerpfad zur gleichen Sensorantwort-Kette (ESP meldet `success: false`, oder Antwort ohne `raw`/`raw_value` trotz `success: true`). **Server:** kein stiller Ersatzwert aus der Datenbank — ein veralteter Intervall-Messwert darf den Wizard nicht täuschen.
+
+**Code-Location:** [calibration_response_handler.py](El Servador/god_kaiser_server/src/mqtt/handlers/calibration_response_handler.py)
+
+**Payload (`data`):** u. a. `esp_id`, `gpio`, `error`; `intent_id` / `correlation_id` / `request_id` wie in 4.4, sofern in der MQTT-Payload vorhanden.
+
+**El Frontend:** Gleiche **Request-ID-Korrelation** wie bei 4.4; Fehleranzeige nur bei Match zum aktuellen `measurementRequestId`.
+>>>>>>> Stashed changes
 
 ---
 
@@ -769,10 +820,13 @@ Actuator Alert (Emergency-Stop, Timeout, Fehler).
     "alert_type": "emergency_stop",
     "message": "Actuator stopped by user request",
     "severity": "critical",
-    "timestamp": "2026-02-01T10:23:45Z"
+    "timestamp": "2026-02-01T10:23:45Z",
+    "correlation_id": "ESP_12AB34CD:alert:7:1706787600000"
   }
 }
 ```
+
+**`correlation_id`:** MQTT-Ingress-CID (gleiche Semantik wie `generate_mqtt_correlation_id` / Subscriber-Context), für Abgleich mit Server-Logs und persistierter Notification (`notifications.correlation_id`).
 
 **API-Not-Aus (`POST /v1/actuators/emergency_stop`):** `data` enthält zusätzlich u.a. `incident_correlation_id`, `devices_stopped`, `actuators_stopped`, `issued_by`, optional `reason`. Dieselbe `incident_correlation_id` steht in der REST-Antwort (`EmergencyStopResponse`). Die zugehörigen MQTT-GPIO-Commands nutzen eine **eigene** pro-Pin-`correlation_id` (Format siehe `MQTT_TOPICS.md` §2.1); sie ist aus `incident_correlation_id` ableitbar, aber nicht identisch mit dem WS-Feld allein. Dieselbe GPIO-Zeichenkette liegt in `actuator_history.command_metadata` (`correlation_id` / `mqtt_correlation_id`); Überblick `El Servador/god_kaiser_server/docs/emergency-stop-mqtt-correlation.md`.
 
@@ -1923,6 +1977,7 @@ interface WebSocketFilters {
 |-------|--------------|
 | `src/services/websocket.ts` | WebSocket Service (Singleton) |
 | `src/composables/useWebSocket.ts` | WebSocket Composable |
+| `src/composables/useCalibrationWizard.ts` | Kalibrierwizard: `calibration_measurement_received` / `_failed` (Request-ID-Korrelation) |
 | `src/stores/esp.ts` | ESP Store mit Event Handlers |
 | `src/types/websocket-events.ts` | Event Type Definitions |
 
@@ -1939,6 +1994,7 @@ interface WebSocketFilters {
 | Handler | Events |
 |---------|--------|
 | `sensor_handler.py` | `sensor_data` |
+| `calibration_response_handler.py` | `calibration_measurement_received`, `calibration_measurement_failed` |
 | `actuator_handler.py` | `actuator_status` |
 | `actuator_response_handler.py` | `actuator_response` |
 | `actuator_alert_handler.py` | `actuator_alert` |

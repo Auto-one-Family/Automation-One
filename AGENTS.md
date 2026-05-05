@@ -80,7 +80,11 @@ AutomationOne ist ein IoT-Framework mit 3 Schichten:
 
 ### Gotchas
 
+<<<<<<< Updated upstream
 - The `docker-compose.yml` references an external network `shared-infra-net` — create it with `docker network create shared-infra-net` before starting services.
+=======
+- The `docker-compose.yml` references an external network `shared-infra-net` — must create it with `docker network create shared-infra-net` before starting services. **Windows:** einmalig `powershell -File scripts/windows/ensure-dev-prerequisites.ps1` im Repo-Root (legt Netzwerk an und optional `.env` aus `.env.example`, ohne bestehende `.env` zu überschreiben).
+>>>>>>> Stashed changes
 - The Docker daemon in the Cloud VM needs `fuse-overlayfs` storage driver and `iptables-legacy` for nested container support.
 - Backend env vars use `DATABASE_URL` with `postgresql+asyncpg://` scheme (async driver), not plain `postgresql://`.
 - Default `.env.example` password is `CHANGE_ME_USE_STRONG_PASSWORD` — use for dev; the Docker PostgreSQL container is created with it.
@@ -93,6 +97,7 @@ AutomationOne ist ein IoT-Framework mit 3 Schichten:
 
 ---
 
+<<<<<<< Updated upstream
 ## Verifikationskriterien
 
 Nach JEDER Code-Aenderung die passenden Checks ausfuehren:
@@ -201,3 +206,6 @@ Steuerdatei unter `.claude/auftraege/auto-debugger/inbox/` (Vorlage: `.claude/au
 Branch: `auto-debugger/work` (von `master`).
 Kette: `TASK-PACKAGES.md` → `verify-plan` → `VERIFY-PLAN-REPORT.md` → Plan-Anpassung → `SPECIALIST-PROMPTS.md` → Dev-Umsetzung.
 Skill: `.claude/skills/auto-debugger/SKILL.md`.
+=======
+For structured **incident** or **markdown artefact improvement** workflows in-repo, use the **`auto-debugger`** agent with a **control file** under [`.claude/auftraege/auto-debugger/inbox/`](.claude/auftraege/auto-debugger/inbox/) (template: [`STEUER-VORLAGE.md`](.claude/auftraege/auto-debugger/STEUER-VORLAGE.md)). Chat example: `@.claude/auftraege/auto-debugger/inbox/STEUER-….md`. **Work branch:** `auto-debugger/work` (branched from `master`) — check out before runs; delegated dev work should commit only there. **Flow:** `TASK-PACKAGES.md` → apply **`verify-plan`** (orchestrator output block in skill) → **`VERIFY-PLAN-REPORT.md`** → **`auto-debugger`** revises **`TASK-PACKAGES.md`** → updates **`SPECIALIST-PROMPTS.md`** per dev role → hand off to dev agents. **`auto-debugger`** additionally enforces **pattern fidelity** (reuse before greenfield), **per-error verification** (`FEHLER-REGISTER.md` / micro-loop), and **no standard chat questions** when a valid control file is used. Router details: [`.claude/CLAUDE.md`](.claude/CLAUDE.md) (Orchestrator section). Skill: [`.claude/skills/auto-debugger/SKILL.md`](.claude/skills/auto-debugger/SKILL.md). Slash command: [`.claude/commands/auto-debugger.md`](.claude/commands/auto-debugger.md).
+>>>>>>> Stashed changes

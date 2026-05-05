@@ -99,6 +99,9 @@ GPIOManager delegiert alle Hardware-Zugriffe an ein `IGPIOHal`-Interface. In Pro
 **Pfad:** `src/services/sensor/sensor_manager.h/.cpp`
 
 **Dependencies:** GPIOManager, MQTTClient, I2CBusManager, OneWireBusManager, PiEnhancedProcessor
+
+**Manuelle Messung:** `struct ManualMeasurementResult` und Signatur `triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms = 5000)` in `sensor_manager.h`.
+
 ```cpp
 class SensorManager {
 public:
@@ -120,11 +123,14 @@ public:
     uint8_t performMultiValueMeasurement(uint8_t gpio, SensorReading* readings_out, uint8_t max);
     void performAllMeasurements();
     void setMeasurementInterval(unsigned long interval_ms);
-    bool triggerManualMeasurement(uint8_t gpio);  // Phase 2C On-Demand
+    // Phase 2C On-Demand; timeout_ms Default 5000 (E-P3). Outcome in ManualMeasurementResult.
+    ManualMeasurementResult triggerManualMeasurement(uint8_t gpio, uint32_t timeout_ms = 5000);
 };
 
 extern SensorManager& sensorManager;
 ```
+
+**RTOS / `g_sensor_mutex`:** schützt `sensors_[]` (und verwandte Messpfade). Gehalten in `configureSensor`, `performAllMeasurements` sowie während der Messphase von `triggerManualMeasurement` (Take mit Timeout, Freigabe RAII — serialisiert gegen den autonomen Messzyklus). Details: `src/tasks/rtos_globals.h`, `sensor_manager.cpp`.
 
 ---
 

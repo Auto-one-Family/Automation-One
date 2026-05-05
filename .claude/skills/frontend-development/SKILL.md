@@ -15,11 +15,16 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 
 # El Frontend - KI-Agenten Dokumentation
 
+<<<<<<< Updated upstream
 **Version:** 10.12
 **Letzte Aktualisierung:** 2026-04-23
+=======
+**Version:** 10.7
+**Letzte Aktualisierung:** 2026-04-10
+>>>>>>> Stashed changes
 
 **Zweck:** Massgebliche Referenz fuer Frontend-Entwicklung (Vue 3 + TypeScript + Vite + Pinia + Tailwind)
-**Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, 143 .vue Komponenten)
+**Codebase:** `El Frontend/src/` (~10.000+ Zeilen TypeScript/Vue, ~145+ `.vue` Komponenten unter `src/components/`)
 
 > **Server-Dokumentation:** Siehe `.claude/skills/server-development/SKILL.md`
 > **ESP32-Firmware:** Siehe `.claude/skills/esp32-development/SKILL.md`
@@ -27,6 +32,8 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 ---
 
 ## 0. Quick Reference - Was suche ich?
+
+**Pflicht fuer Agenten:** Zuerst im Repo nach bestehenden Mustern suchen (`Glob`/`Grep` auf `El Frontend/src/`), dann erst neue Abstraktionen vorschlagen. Details: [Section 19: Coding-Agenten](#19-coding-agenten-typische-fehler-und-soll-verhalten).
 
 | Ich will... | Primaere Quelle | Code-Location |
 |-------------|-----------------|---------------|
@@ -38,7 +45,7 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 | **System Monitor** | [Section 10: Router](#10-router--navigation) | `SystemMonitorView.vue` |
 | **Komponente finden** | [Section 2: Ordnerstruktur](#2-ordnerstruktur) | `src/components/` |
 | **Error-Codes verstehen** | `.claude/reference/errors/ERROR_CODES.md` | ESP32 + Server Codes |
-| **Farben/Design** | [Section 11: Farbsystem](#11-farbsystem--design) | `src/style.css` |
+| **Farben/Design** | [Section 11: Farbsystem](#11-farbsystem--design) | `src/styles/tokens.css` (Import-Kette: `main.ts` → `src/styles/main.css`) |
 
 ---
 
@@ -58,28 +65,40 @@ argument-hint: "[Beschreibe was implementiert werden soll]"
 | date-fns | ^4.1.0 | Datum-Utilities |
 | @vueuse/core | ^10.11.1 | Vue Composition Utilities |
 | vue-draggable-plus | ^0.6.0 | Drag & Drop |
-| gridstack | ^12.1.2 | Dashboard Grid Layout (Custom Dashboard Builder) |
+| gridstack | ^12.4.2 | Dashboard Grid Layout (Custom Dashboard Builder) |
 | chartjs-plugin-annotation | ^3.1.0 | Threshold-Linien in Charts |
 | chartjs-plugin-zoom | ^2.2.0 | Zoom/Pan in Charts (Wheel, Pinch, Drag) |
-| @vue-flow/core | ^1.43.2 | Node-basierter Rule-Flow-Editor |
+| @vue-flow/core | ^1.48.2 | Node-basierter Rule-Flow-Editor |
 | vite | ^6.2.4 | Build Tool |
 | tailwindcss | ^3.4.17 | CSS Framework |
 | typescript | ~5.7.2 | Type Safety |
-| vitest | ^3.0.0 | Unit Test Framework |
-| @vue/test-utils | ^2.4.0 | Vue Component Testing |
-| jsdom | ^25.0.0 | DOM Environment fuer Tests |
-| msw | ^2.7.0 | HTTP Request Mocking (Mock Service Worker) |
-| @vitest/coverage-v8 | ^3.0.0 | Code Coverage |
+| vitest | ^4.0.18 | Unit Test Framework |
+| @vue/test-utils | ^2.4.6 | Vue Component Testing |
+| happy-dom | ^20.6.1 | DOM-Umgebung fuer Vitest (`vitest.config.ts`: `environment: 'happy-dom'`) |
+| msw | ^2.12.10 | HTTP Request Mocking (Mock Service Worker) |
+| @vitest/coverage-v8 | ^4.0.18 | Code Coverage |
+| @playwright/test | ^1.58.2 | E2E + CSS/A11y-Suites (siehe `package.json` Scripts `test:e2e`, `test:css*`) |
+
+### Stack-Anker (Import-Pfade, verifizierbar)
+
+- **REST-Basis:** Axios-Instanz und Helper in `El Frontend/src/api/index.ts` (`baseURL: '/api/v1'`).
+- **Pinia:** Fast alle Stores unter `El Frontend/src/shared/stores/*.store.ts`; zentraler Re-Export `shared/stores/index.ts`. Ausnahme: ESP-Domain + WS-Contract in `El Frontend/src/stores/esp.ts` und `esp-websocket-subscription.ts`.
+- **WebSocket-Singleton:** `El Frontend/src/services/websocket.ts` (von Composables/Stores genutzt).
+- **Router:** `El Frontend/src/router/index.ts` (`lazyView`, Legacy-Redirects, Guards).
+- **Design-System:** Primitives/Layout unter `El Frontend/src/shared/design/`; globale Styles `El Frontend/src/styles/main.css` → `tokens.css`, `tailwind.css`, etc.
 
 ### Build-Konfiguration
 
 **vite.config.ts:**
 ```typescript
 // Port: 5173 (Dev)
-// Proxy: /api → http://el-servador:8000
-// Proxy: /ws → ws://el-servador:8000
+// Proxy: /api → process.env.VITE_API_TARGET || 'http://localhost:8000' (ws: true)
+// Proxy: /ws → process.env.VITE_WS_TARGET || 'ws://localhost:8000'
+// Proxy: /grafana → process.env.VITE_GRAFANA_TARGET || 'http://localhost:3000'
 // Alias: @ → ./src/
 ```
+
+**Lokale API/WS (Dev):** `El Frontend/.env.development` setzt `VITE_API_URL` und `VITE_WS_URL` auf `http://localhost:8000` bzw. `ws://localhost:8000` (Vite laedt diese Datei im Development-Modus).
 
 **tsconfig.json:**
 ```typescript
@@ -103,10 +122,14 @@ make build        # Production build
 make logs         # el-frontend Container Logs
 docker exec automationone-frontend npm run build  # Build im Container
 
-# Tests (lokal)
-npm test          # Vitest run (einmalig)
+# Tests (lokal, aus El Frontend/)
+npm test              # vitest run (alias: npm run test)
+npm run test:unit     # vitest run tests/unit
 npm run test:watch    # Vitest watch mode
 npm run test:coverage # Vitest mit v8 Coverage
+npm run type-check    # vue-tsc --noEmit (Pflicht laut .claude/CLAUDE.md Verifikation)
+npm run test:e2e      # Playwright: tests/e2e/scenarios/
+npm run test:css      # Playwright CSS-Regression/A11y (eigenes Config-File)
 ```
 
 ---
@@ -115,13 +138,14 @@ npm run test:coverage # Vitest mit v8 Coverage
 
 ```
 El Frontend/src/
-├── api/           # 28 API-Module
+├── api/           # 29 TypeScript-Module (eine Datei pro Thema + index.ts)
 │   ├── index.ts           # Axios Instance + Interceptors (~89 Zeilen)
 │   ├── uiApiError.ts      # REST-Error-SSOT: toUiApiError()/formatUiApiError() inkl. request_id/retryability
 │   ├── auth.ts            # Login, Logout, Token Refresh
 │   ├── esp.ts             # ESP Device Management
 │   ├── intentOutcomes.ts  # GET /intent-outcomes (Parität zu WS intent_outcome)
 │   ├── sensors.ts         # Sensor CRUD + History
+│   ├── calibration.ts     # POST /sensors/calibrate (API-Key) oder Session-Flow (JWT); Feuchte → moisture_2point
 │   ├── actuators.ts       # Actuator Commands
 │   ├── zones.ts           # Zone Assignment + ZoneEntity CRUD (T13-R3)
 │   ├── subzones.ts        # Subzone Management
@@ -171,7 +195,7 @@ El Frontend/src/
 │   ├── main.css         # Hauptstyles (Buttons, Layout)
 │   ├── forms.css        # Shared Form + Modal Styles
 │   └── tailwind.css     # Tailwind Konfiguration
-├── composables/   # 32 Composables
+├── composables/   # ~35 *.ts (inkl. index.ts)
 │   ├── useWebSocket.ts
 │   ├── useToast.ts
 │   ├── useModal.ts
@@ -185,7 +209,11 @@ El Frontend/src/
 │   ├── useSwipeNavigation.ts
 │   ├── useConfigResponse.ts
 │   ├── useCalibration.ts
+<<<<<<< Updated upstream
 │   ├── useCalibrationWizard.ts   # Kalibrier-Wizard F-P1; Live-Messung: POST measure + Cooldown wie SensorValueCard
+=======
+│   ├── useCalibrationWizard.ts   # Session-Flow; Bodenfeuchte: `moisture_2point`; Live-Messung: WS `calibration_measurement_*` nur bei Match `request_id`↔`intent_id`/`correlation_id`/`request_id`/Message-`correlation_id` (POST `/measure`)
+>>>>>>> Stashed changes
 │   ├── useCommandPalette.ts
 │   ├── useContextMenu.ts
 │   ├── useDashboardWidgets.ts  # Container-agnostic widget mount/unmount, zoneId propagation (PA-02c)
@@ -236,25 +264,19 @@ El Frontend/src/
 │   ├── gridLayout.ts      # findFirstFreePosition(widgets, w, h, cols?) → {x,y} — Smart Placement fuer Dashboard-Widgets (FIX-ED-1)
 │   └── ...
 ├── views/         # 19 View-Komponenten (inkl. NotFoundView + AccessDeniedView)
-├── main.ts        # Bootstrap
+├── main.ts        # Bootstrap (importiert ./styles/main.css)
 ├── App.vue        # Root Component
-└── style.css      # CSS Variablen (~800 Zeilen)
 
-El Frontend/tests/           # Test-Infrastruktur (Vitest + MSW)
-├── setup.ts                 # Global Setup: MSW, Pinia, jsdom Mocks
+El Frontend/tests/           # Vitest (happy-dom) + MSW; Playwright unter e2e/
+├── setup.ts                 # Global Setup: u.a. ResizeObserver-Mock, Chart-canvas-Mock
 ├── mocks/
 │   ├── server.ts            # MSW setupServer
-│   ├── handlers.ts          # ~80 MSW Request Handlers
+│   ├── handlers.ts          # MSW Request Handlers
 │   └── websocket.ts         # MockWebSocketService
-└── unit/
-    ├── stores/
-    │   ├── auth.test.ts     # 37 Tests
-    │   └── esp.test.ts      # 40 Tests
-    ├── composables/
-    │   ├── useToast.test.ts     # 27 Tests
-    │   └── useWebSocket.test.ts # 55 Tests
-    └── utils/
-        └── formatters.test.ts   # 65 Tests
+├── unit/                    # tests/**/*.test.ts (siehe vitest.config.ts)
+│   ├── api/, components/, composables/, stores/, utils/, router/, ...
+│   └── …                    # Umfang waechst mit Features — immer Nachbar-Test kopieren
+└── e2e/                     # Playwright: scenarios/, css/, helpers/, global-setup/teardown
 ```
 
 ---
@@ -499,6 +521,8 @@ onUnmounted(() => { /* cleanup */ })
 | Event | Data | Woher |
 |-------|------|-------|
 | sensor_data | esp_id, gpio, value, quality, zone_id, subzone_id (Phase 0.1) | MQTT→Server→WS |
+| calibration_measurement_received | esp_id, gpio, sensor_type, raw/raw_value, quality, session_id?, intent_id?, correlation_id?, request_id? | MQTT `sensor/.../response` → `CalibrationResponseHandler` → WS |
+| calibration_measurement_failed | esp_id, gpio, error, correlation_id?, request_id? | MQTT Response / fehlender Rohwert (kein DB-Latest-Fallback) → WS |
 | actuator_status | esp_id, gpio, actuator_type (server-normalisiert), hardware_type (ESP32-Typ), state, value, emergency | MQTT→Server→WS |
 | esp_health | esp_id, status, heap, rssi, optional Telemetrie (`persistence_degraded`, `network_degraded`, `critical_outcome_drop_count`, …), Offline-Kontext (`source`, `reason`, `timeout_seconds`, `actuator_states_reset`), Reconnect-Hinweise (`is_reconnect`, `is_flapping`, `lwt_count_5m`) | Heartbeat/LWT/Timeout→Server→WS |
 | esp_reconnect_phase | esp_id, phase (`adopting`/`adopted`/`delta_enforced`/`converged`), timestamp, offline_seconds?, config_push_pending? | Heartbeat-Reconnect→Server→WS |
@@ -582,20 +606,31 @@ Intent-Lifecycle Zuordnung:
 
 ### Store-Architektur
 
+**Pfad-Konvention:** Fast alle Pinia-Stores liegen unter `src/shared/stores/<name>.store.ts` und werden aus `src/shared/stores/index.ts` re-exportiert. Die ESP-Geraetedomain bleibt in `src/stores/esp.ts` (plus `esp-websocket-subscription.ts`).
+
 | Store | Datei | State | Wichtigste Actions |
 |-------|-------|-------|-------------------|
-| auth | stores/auth.ts | user, tokens, setupRequired | login, logout, refreshTokens |
+| auth | shared/stores/auth.store.ts | user, tokens, setupRequired | login, logout, refreshTokens |
 | esp | stores/esp.ts | devices[] (inkl. optional `runtime_health_view`), pendingDevices[] | fetchAll, fetchDevice, `replaceDevices(snapshot)`, `applyDevicePatch(espId, patchFn)` (Write-Boundary fuer Device-Domain), isMock, gpioStatusMap, onlineDevices (via getESPStatus), offlineDevices; WS: `initWebSocket` + Filterliste/Mutation-Contract in `esp-websocket-subscription.ts` |
 | intentSignals | shared/stores/intentSignals.store.ts | byEspId (Intent/Zwischenstand pro Geraet) | ingestOutcome, ingestLifecycle, getDisplayForEsp, clearAll (Logout / esp cleanupWebSocket) |
-| dashboard | stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb (level, zoneName, deviceName, sensorName, ruleName, dashboardName), layouts[], DASHBOARD_TEMPLATES, DashboardTarget (interface), inlineMonitorPanels (alias), inlineMonitorPanelsCrossZone (computed), inlineMonitorPanelsForZone(zoneId) (fn), sideMonitorPanels (computed), bottomMonitorPanels (computed), hardwarePanels (computed), autoGeneratedLayouts (computed), lastSyncError, syncFlags pro Layout (`local_only`/`dirty`/`server_synced`/`conflict`, inkl. last_sync_*) | toggleStatusFilter, resetFilters, createLayout, saveLayout, createLayoutFromTemplate, deleteLayout, bulkDeleteLayouts(layoutIds), exportLayout, importLayout, setLayoutTarget, setLayoutScope, setLayoutMetadata, generateZoneDashboard, claimAutoLayout, retrySync, flushPendingSyncs, buildLayoutIdentityKey, addWidget(layoutId, config), removeWidget(layoutId, widgetId), updateWidgetConfig(layoutId, widgetId, newConfig); fetchLayouts (Server-Merge mit Dirty-/Zeitregeln + Orphan-Sync + autoGenerated-Migration); cleanupOrphanedDashboards (V19-F05: auto-delete orphaned zone dashboards, watch on zoneEntities once + after deleteZoneEntity) |
-| zone | stores/zone.store.ts | zoneEntities[], isLoadingZones | handleZoneAssignment (+ Toasts), handleSubzoneAssignment (+ Toasts), fetchZoneEntities, createZone, updateZone, archiveZone, reactivateZone, deleteZoneEntity (+ cleanupOrphanedDashboards V19-F05); activeZones/archivedZones (computed); handleDeviceScopeChanged, handleDeviceContextChanged (T13-R3) |
+| dashboard | shared/stores/dashboard.store.ts | statusCounts (computed via getESPStatus), deviceCounts, filters, breadcrumb (level, zoneName, deviceName, sensorName, ruleName, dashboardName), layouts[], DASHBOARD_TEMPLATES, DashboardTarget (interface), inlineMonitorPanels (alias), inlineMonitorPanelsCrossZone (computed), inlineMonitorPanelsForZone(zoneId) (fn), sideMonitorPanels (computed), bottomMonitorPanels (computed), hardwarePanels (computed), autoGeneratedLayouts (computed), lastSyncError, syncFlags pro Layout (`local_only`/`dirty`/`server_synced`/`conflict`, inkl. last_sync_*) | toggleStatusFilter, resetFilters, createLayout, saveLayout, createLayoutFromTemplate, deleteLayout, bulkDeleteLayouts(layoutIds), exportLayout, importLayout, setLayoutTarget, setLayoutScope, setLayoutMetadata, generateZoneDashboard, claimAutoLayout, retrySync, flushPendingSyncs, buildLayoutIdentityKey, addWidget(layoutId, config), removeWidget(layoutId, widgetId), updateWidgetConfig(layoutId, widgetId, newConfig); fetchLayouts (Server-Merge mit Dirty-/Zeitregeln + Orphan-Sync + autoGenerated-Migration); cleanupOrphanedDashboards (V19-F05: auto-delete orphaned zone dashboards, watch on zoneEntities once + after deleteZoneEntity) |
+| zone | shared/stores/zone.store.ts | zoneEntities[], isLoadingZones | handleZoneAssignment (+ Toasts), handleSubzoneAssignment (+ Toasts), fetchZoneEntities, createZone, updateZone, archiveZone, reactivateZone, deleteZoneEntity (+ cleanupOrphanedDashboards V19-F05); activeZones/archivedZones (computed); handleDeviceScopeChanged, handleDeviceContextChanged (T13-R3) |
 | deviceContext | shared/stores/deviceContext.store.ts | contexts (Map\<string, DeviceContextResponse\>), isLoaded | loadContextsForDevices, setContext, clearContext, handleContextChanged (WS), getActiveZoneId, getContext; fuer mobile/multi_zone Sensoren (6.7) |
+<<<<<<< Updated upstream
 | logic | shared/stores/logic.store.ts | rules[], activeExecutions, executionHistory[], historyLoaded, ruleLifecycleByRuleId, lifecycleTransitions, `degradedRules` (computed: rules mit `degraded_since != null`, AUT-128) | fetchRules (inkl. WS-Reconnect via `websocketService.onConnect`), toggleRule, crossEspConnections, getRulesForZone(zoneId), getZonesForRule(rule), getRulesForActuator(espId, gpio), getLastExecutionForActuator(espId, gpio), loadExecutionHistory, `setRuleLifecycle`/`getRuleLifecycleState`, `lifecycleByReasonCode`, pushToHistory, undo, redo, canUndo, canRedo; WS: `rule_degraded`→`degraded_since`/`degraded_reason` setzen, `rule_recovered`→nullen |
 | dragState | stores/dragState.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
 | database | stores/database.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
 | quickAction | stores/quickAction.store.ts | isMenuOpen, activePanel (QuickActionPanel: 'menu' \| 'alerts' \| 'navigation'), currentView, contextActions[], globalActions[] | toggleMenu, closeMenu, setActivePanel, setViewContext, setContextActions, executeAction; alertSummary (computed from alert-center + inbox fallback), hasActiveAlerts, isCritical, isWarning |
 | notificationInbox | stores/notification-inbox.store.ts | notifications[], unreadCount, highestSeverity, isDrawerOpen, activeFilter (InboxFilter), sourceFilter (SourceFilterValue) | loadInitial, loadMore, markAsRead, markAllAsRead, toggleDrawer, setSourceFilter, `applyAlertUpdate(updated)` (einzige Inbox-Write-API fuer Fremdstores); filteredNotifications (Severity + Source); WS-Listener: notification_new, notification_updated, notification_unread_count |
 | alertCenter | stores/alert-center.store.ts | alertStats, activeAlerts[], statusFilter, severityFilter | fetchStats, fetchActiveAlerts, acknowledgeAlert, resolveAlert, startStatsPolling, stopStatsPolling; Inbox-Updates nur via `notificationInbox.applyAlertUpdate()` (kein Direkt-Write in `notifications[]`); unresolvedCount, criticalCount, warningCount, hasCritical, mttaFormatted, mttrFormatted (computed) |
+=======
+| logic | shared/stores/logic.store.ts | rules[], activeExecutions, executionHistory[], historyLoaded, ruleLifecycleByRuleId, lifecycleTransitions | fetchRules, toggleRule, crossEspConnections, getRulesForZone(zoneId), getZonesForRule(rule), getRulesForActuator(espId, gpio), getLastExecutionForActuator(espId, gpio), loadExecutionHistory, `setRuleLifecycle`/`getRuleLifecycleState`, `lifecycleByReasonCode`, pushToHistory, undo, redo, canUndo, canRedo |
+| dragState | shared/stores/dragState.store.ts | isDragging* flags, payloads | start/endDrag, 30s timeout |
+| database | shared/stores/database.store.ts | tables, currentData, queryParams | loadTables, selectTable, refreshData |
+| quickAction | shared/stores/quickAction.store.ts | isMenuOpen, activePanel (QuickActionPanel: 'menu' \| 'alerts' \| 'navigation'), currentView, contextActions[], globalActions[] | toggleMenu, closeMenu, setActivePanel, setViewContext, setContextActions, executeAction; alertSummary (computed from alert-center + inbox fallback), hasActiveAlerts, isCritical, isWarning |
+| notificationInbox | shared/stores/notification-inbox.store.ts | notifications[], unreadCount, highestSeverity, isDrawerOpen, activeFilter (InboxFilter), sourceFilter (SourceFilterValue) | loadInitial, loadMore, markAsRead, markAllAsRead, toggleDrawer, setSourceFilter, `applyAlertUpdate(updated)` (einzige Inbox-Write-API fuer Fremdstores); filteredNotifications (Severity + Source); WS-Listener: notification_new, notification_updated, notification_unread_count |
+| alertCenter | shared/stores/alert-center.store.ts | alertStats, activeAlerts[], statusFilter, severityFilter | fetchStats, fetchActiveAlerts, acknowledgeAlert, resolveAlert, startStatsPolling, stopStatsPolling; Inbox-Updates nur via `notificationInbox.applyAlertUpdate()` (kein Direkt-Write in `notifications[]`); unresolvedCount, criticalCount, warningCount, hasCritical, mttaFormatted, mttrFormatted (computed) |
+>>>>>>> Stashed changes
 | diagnostics | shared/stores/diagnostics.store.ts | currentReport, history[], availableChecks[], isRunning | runDiagnostic, runCheck, loadHistory, loadReport, exportReport; lastRunAge (aus currentReport oder history[0]), checksByName, statusCounts (Phase 4D) |
 | inventory | shared/stores/inventory.store.ts | searchQuery, zoneFilter, typeFilter, statusFilter, scopeFilter, sortKey, sortDirection, pageSize, currentPage, visibleColumns, selectedDeviceId, isDetailOpen | toggleSort, setPage, toggleColumn, openDetail, closeDetail, resetFilters; allComponents (unified sensors+actuators), filteredComponents, sortedComponents, paginatedComponents, availableZones, hasNonLocalScope (computed); ComponentItem mit scope/activeZone (T13-R3 WP5) |
 | plugins | shared/stores/plugins.store.ts | plugins[], selectedPlugin, executionHistory[], pluginOptions (computed), executionLifecycleIds | fetchPlugins, fetchPluginDetail, executePlugin, togglePlugin, updateConfig, fetchHistory, startLifecycleMonitoring, stopLifecycleMonitoring, reconcileRunningExecutions (Phase 4C/F11) |
@@ -989,7 +1024,9 @@ component: lazyView(() => import('@/views/PluginsView.vue'))
 
 ## 11. Farbsystem & Design
 
-### CSS Variables (style.css)
+### CSS Variables (`src/styles/main.css` → `tokens.css` + weitere Imports)
+
+Semantische Farben und Glass-Tokens liegen in `src/styles/tokens.css` (global eingebunden via `main.ts` → `./styles/main.css`).
 
 Alle Farben ueber CSS Variables definiert.
 **KEINE hardcoded Hex-Werte in Komponenten!**
@@ -1227,11 +1264,11 @@ Mock ESP erstellen (POST /v1/debug/mock-esp)
 
 | Feature | Status | Hinweis |
 |---------|--------|---------|
-| Dark/Light Mode Toggle | CSS vorhanden, kein UI | Dark Theme ONLY |
+| Dark/Light Mode Toggle | CSS vorhanden, kein UI | Dark Theme ONLY (siehe `.cursor/rules/frontend.mdc`) |
 | PWA/Offline-First | Nicht implementiert | - |
 | i18n | Hardcoded German | Kein Mehrsprachigkeit |
-| Unit Tests | 5 Files, 250 Tests (Vitest + MSW) | Stores, Composables, Utils |
-| E2E Tests | Nicht vorhanden | - |
+| Unit Tests | Vitest + happy-dom + MSW; viele Dateien unter `tests/unit/` | Nachbar-Test als Vorlage; `vitest.config.ts` |
+| E2E / UI-Tests | Playwright unter `tests/e2e/` (Szenarien, CSS/A11y) | Scripts: `test:e2e`, `test:css*` in `package.json`; Stack laeuft separat |
 | ESPOrbitalLayout | 410 Zeilen (von 3913 reduziert) | 3-Spalten Grid, DnD-Logik in useOrbitalDragDrop Composable |
 
 ---
@@ -1360,6 +1397,38 @@ cleanupWebSocket() {
 
 ---
 
+## 19. Coding-Agenten: typische Fehler und Soll-Verhalten
+
+Ziel: **repo-spezifische** Leitplanken fuer KI- und Menschen-Reviews; keine parallelen Stacks (kein zweites State-Management, keine andere Chart-Library).
+
+### Typische Fehler (vermeiden)
+
+- **Falsche Bibliothek:** Zusaetzliche Chart-/State-/UI-Pakete vorschlagen (Projekt nutzt **Chart.js + vue-chartjs**, **Pinia**, **GridStack**, **vue-draggable-plus**, **@vue-flow/core**, **lucide-vue-next** — siehe `El Frontend/package.json`).
+- **Ignorieren bestehender Patterns:** Aehnliche Feature-Komponente/Composable/Store existiert bereits (z. B. unter `components/`, `composables/`, `shared/stores/`) — nicht neu erfinden.
+- **Stilbruch:** Relative `../../`-Imports statt `@/`; Hex-Farben statt `var(--color-*)` / Tokens; Light-Mode-Styles; Inline-`style` statt Tailwind/Tokens (siehe `.cursor/rules/frontend.mdc`).
+- **Scope-Creep:** Refactors, neue Routen oder Dateien ausserhalb des Auftrags; „waehrend wir dabei“-Aenderungen.
+- **Legacy-Pfade:** Redirects in `router/index.ts` (`LEGACY_REDIRECT_PATTERNS`, deprecated `/monitor/dashboard/:id` → `/editor/...`) — keine neuen Features auf deprecated Routes bauen.
+- **Falsche Konfig-Oberflaeche:** Sensor-/Aktor-**Konfigurations**-Panels nur ueber **Hardware** (`/hardware`, ESPSettingsSheet / Card-Klick) — nicht ueber Komponenten-Inventar `/sensors` (Wissensdatenbank); siehe `.claude/CLAUDE.md` Compact Instructions und Section 3 dieses Skills.
+- **Tests auslassen oder falsches Tool:** Annahme „kein E2E“ — es gibt Playwright; Unit-Tests mit Vitest/happy-dom. Mindestens: fuer Aenderungen `npm run build` und `npm run type-check` im Frontend (Verifikation wie `.claude/CLAUDE.md`).
+
+### Soll-Verhalten (immer)
+
+1. **Suchen:** `Glob`/`Grep` in `El Frontend/src/` nach aehnlichen Komponenten, Stores, API-Modulen.
+2. **Minimal-invasiv:** Gleiche Namenskonventionen, Dateiablage (`components/<bereich>/`, `api/*.ts`), Composable-Struktur wie Nachbarcode.
+3. **REST/WebSocket:** HTTP nur ueber `src/api/`; WS ueber `WebSocketService` / dokumentierte Events (`.claude/reference/api/WEBSOCKET_EVENTS.md`); Device-Writes nur `esp.applyDevicePatch` / `replaceDevices` wo vorgesehen.
+4. **Realtime-Cleanup:** Handler in `onUnmounted` abmelden (useWebSocket-Pattern).
+5. **Abgleich vor Merge:** Router-`meta`, Design-Tokens, Store-Grenzen (`notificationInbox.applyAlertUpdate`, keine direkte Inbox-Mutation aus fremden Stores).
+6. **Checks ausfuehren:** `npm run build`, `npm run type-check`; bei testrelevanten Aenderungen passende Vitest-Datei erweitern oder Playwright-Szenario pruefen (wenn UI-Flow betroffen).
+
+### Feature erweitern (Kurzablauf)
+
+1. **Referenz finden:** Quick-Reference-Tabelle (Section 0) oder `Grep` nach Schluesselwort.
+2. **Pattern kopieren:** Naechstliegende View/Komponente/Composable/Store erweitern statt Greenfield.
+3. **API/Typen:** Endpunkt in passendem `api/<thema>.ts`; Response-Typen in `types/` abgleichen.
+4. **Tests:** Unit-Test unter `tests/unit/...` analog vorhandener Datei; kritische Flows: E2E nur wenn bestehende Playwright-Suite den Bereich abdeckt.
+
+---
+
 ## Referenz-Dokumentation
 
 | Referenz | Pfad | Wann lesen? |
@@ -1375,6 +1444,7 @@ cleanupWebSocket() {
 
 ## Versions-Historie
 
+<<<<<<< Updated upstream
 **Version:** 10.13 | **Letzte Aktualisierung:** 2026-05-05
 
 - 2026-05-05: AUT-128 Frontend-Wiring End-to-End — `logic.store` um `degradedRules` (computed, AUT-128) und WS-Reconnect-Refresh (`websocketService.onConnect(() => fetchRules())`) erweitert; `actuator.store` um `isActuatorCommandPending(espId, gpio)` + `getActuatorIntent(espId, gpio)` ergaenzt (Basis fuer 15s-Timeout-Warning in `ActuatorCard`/`ActuatorCardWidget`); `LogicView.vue` zeigt Warning-Banner wenn `degradedRules.length > 0`; Store-Tabelle um `actuator`-Zeile ergaenzt.
@@ -1396,6 +1466,13 @@ cleanupWebSocket() {
 - 2026-04-17: AUT-27 Status-Semantik nachgezogen — `qualityToStatus()` behandelt `stale` als eigenen Status (nicht warning/offline); SensorCard/QualityIndicator/Monitor-Statusdarstellung visuell und semantisch getrennt fuer `stale` vs. `warning`.
 
 - 2026-04-11: Composables-Index — `useCalibrationWizard.ts` (Kalibrier-Wizard, Live-`triggerMeasurement` mit 2 s Post-HTTP-Cooldown, Parität `SensorValueCard`).
+=======
+**Version:** 10.8 | **Letzte Aktualisierung:** 2026-04-10
+
+- 2026-04-10: `useCalibrationWizard` — Dokumentation Mess-Korrelation (REST `request_id` vs. WS-IDs); Querverweis `.claude/reference/api/WEBSOCKET_EVENTS.md` §4.4/4.5; Ordnerstruktur-Zeile `useCalibrationWizard.ts` präzisiert.
+
+- 2026-04-10: Skill-Zieloptimierung (Agenten-Leitplanken) — Stack-Anker und korrekte Pfade (`shared/stores/*.store.ts`, `api/` 29 Module, `main.ts` → `styles/main.css`); `package.json`-Versionen (Vitest 4, happy-dom, GridStack 12.4.x, Playwright); Vite-Proxy (`VITE_API_TARGET`/`VITE_WS_TARGET`); Tests: Vitest/happy-dom + Playwright `tests/e2e/`; neuer Abschnitt **19 Coding-Agenten** (Fehler/Soll, Feature-Kurzablauf); Section 15 E2E-Korrektur; Store-Tabelle Pfad-Fix. Ergänzung: `api/calibration.ts` in Ordnerstruktur; Kalibrierung JWT/API-Key und Feuchte-`moisture_2point` gegenüber `useCalibrationWizard` vermerkt.
+>>>>>>> Stashed changes
 
 - 2026-04-06: F11 Ops-Lifecycle vereinheitlicht — neuer Shared-Contract `types/ops-lifecycle.ts` + `shared/stores/ops-lifecycle.store.ts`; `plugins.store` auf execution_id-zentriertes Lifecycle-Tracking mit Timeout-Guard und Reconciliation erweitert; `LoadTestView` mit Guardrail-Flow (Preflight, typed confirm, Lifecycle, Summary); `SystemConfigView` mit Key-Diff/Risiko und `saved` vs `applied`; `SystemMonitorView` zeigt globale High-Risk-Ops-Banner-Queue.
 

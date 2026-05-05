@@ -61,6 +61,17 @@ God-Kaiser Server-spezifische Test- und Deployment-Commands.
 
 ---
 
+## 🧭 Orchestration Commands
+
+| Command | Datei | Beschreibung |
+|---------|-------|--------------|
+| `/auto-debugger` | [auto-debugger.md](auto-debugger.md) | Start mit `path` zur Steuerdatei — Incident- oder Artefakt-Modus (Skill `auto-debugger`) |
+
+**Steuerdatei:** `.claude/auftraege/auto-debugger/inbox/` · Vorlage: `../auftraege/auto-debugger/STEUER-VORLAGE.md`  
+**Git:** Arbeitsbranch **`auto-debugger/work`**; kein Push durch Agent; Bash nur eingeschränkt (siehe Agent `auto-debugger` Abschnitt 0a).
+
+---
+
 ## 🔗 Integration Commands (`integration/`)
 
 System-übergreifende Commands für End-to-End-Tests und Validierung.
@@ -83,6 +94,7 @@ System-übergreifende Commands für End-to-End-Tests und Validierung.
 /autoops-run        # Autonome ESP-Konfiguration (NEU)
 /autoops-debug      # System-Diagnose & Auto-Fix (NEU)
 /autoops-status     # AutoOps Plugin-Status (NEU)
+/auto-debugger <path>  # auto-debugger Steuerdatei (Incident / Artefakt)
 /esp-build          # Build ESP32 Firmware
 /esp-test           # ESP32 Tests (Server-orchestriert)
 /server-test        # Server Python Tests

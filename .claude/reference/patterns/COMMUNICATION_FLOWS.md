@@ -7,7 +7,11 @@ allowed-tools: Read
 
 # Kommunikationsmuster & Datenflüsse
 
+<<<<<<< Updated upstream
 > **Version:** 2.11 | **Aktualisiert:** 2026-04-23
+=======
+> **Version:** 2.11 | **Aktualisiert:** 2026-04-10
+>>>>>>> Stashed changes
 > **Quellen:** Code-Traces durch ESP32, Server, Frontend
 > **Verifiziert:** ✅ Alle Pfade mit Datei:Zeile dokumentiert
 
@@ -89,6 +93,8 @@ allowed-tools: Read
 | 10 | `logic_engine.py` | `evaluate_sensor_data()` mit zone_id Filter (T13-R2) | 135 |
 | 11 | `websocket/manager.py` | `broadcast()` | 179 |
 | 12 | `esp.ts` | `handleSensorData()` | 1482 |
+
+**Hinweis (Sensor-Mutex M4):** `performAllMeasurements()` und der Messblock in `triggerManualMeasurement()` nutzen dasselbe `g_sensor_mutex` (`sensor_manager.cpp` / `rtos_globals.h`), um ADC-/Messzugriffe gegen parallele manuelle Sensor-Commands zu serialisieren. Zeilenangaben im Diagramm oben können sich durch Refactors verschieben — Verhalten im Code prüfen.
 
 ### MQTT Topic & Payload
 

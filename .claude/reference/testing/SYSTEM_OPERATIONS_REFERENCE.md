@@ -1,7 +1,9 @@
 # SYSTEM_OPERATIONS_REFERENCE.md
 
-> **Version:** 2.15 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-02-28
+> **Version:** 2.17 | **Erstellt:** 2026-02-02 | **Aktualisiert:** 2026-04-10
 > **Zweck:** Vollständige Befehls-Referenz für Debug-Operations-Agent
+> **Änderungen 2.17:** Windows `scripts/windows/ensure-dev-prerequisites.ps1` (externes Netzwerk `shared-infra-net`, optionale `.env` aus Vorlage); Frontend `El Frontend/.env.development` mit `VITE_API_URL` / `VITE_WS_URL`; §0.1.1 Playwright-Login-Fallback vs. CI
+> **Änderungen 2.16:** Grafana Operations-Dashboard (`system-health.json`): Prometheus-Panels für `god_kaiser_mqtt_errors_total` / `god_kaiser_ws_contract_mismatch_total`; §8.5 Beispielqueries ergänzt
 > **Änderungen 2.13:** Auth-Token-Pfad korrigiert (response.tokens.access_token statt response.access_token)
 > **Änderungen 2.12:** E2E Sensor-Test-Script (scripts/test_e2e_sensor_publish.py), ENVIRONMENT Bugfix (test→testing in CI/Test Compose)
 > **Änderungen 2.15:** Wokwi 178 Szenarien (15 Kategorien), Backend 27 Router in api/v1 (24 aktiv, 3 PLANNED: ai, kaiser, library), Frontend 137 .vue (13 Primitives), Logic sort fix
@@ -28,6 +30,10 @@
 | Username | Password | Rolle | Verwendung |
 |----------|----------|-------|------------|
 | admin | Admin123# | Admin | Production, Development & Testing |
+
+### 0.1.1 Abweichungen (lokal / Playwright)
+
+Die Curl-Beispiele nutzen **Admin123#** als Referenzpasswort; der tatsächliche Admin in der Datenbank kann davon abweichen. **Playwright** (`El Frontend/tests/e2e/global-setup.ts`): Fallback `admin` / `admin123`, wenn `E2E_TEST_USER` / `E2E_TEST_PASSWORD` nicht gesetzt sind; GitHub Actions setzt `E2E_TEST_PASSWORD=Admin123#` (siehe `El Frontend/tests/e2e/README.md`). **Vite (lokal):** `El Frontend/.env.development` enthält `VITE_API_URL` und `VITE_WS_URL` für `localhost:8000`.
 
 ### 0.2 Login (Bash)
 
@@ -63,6 +69,8 @@ $TOKEN = $response.tokens.access_token
 ```
 
 ### 0.4 Windows-Umgebung
+
+**Docker (einmalig):** externes Netzwerk `shared-infra-net` und optional `.env` aus Vorlage — `powershell -ExecutionPolicy Bypass -File scripts/windows/ensure-dev-prerequisites.ps1` (Projektroot, überschreibt keine bestehende `.env`). Siehe `AGENTS.md`.
 
 ```powershell
 # MQTT Tools Pfade (müssen im PATH sein oder vollständig angeben):
@@ -1699,6 +1707,14 @@ curl -s http://localhost:8000/api/v1/health/metrics
 
 # Prometheus Targets pruefen
 curl -s http://localhost:9090/api/v1/targets | python -m json.tool
+
+# God-Kaiser: MQTT-Fehler / WS-Contract (Counter; gleiche Namen wie in metrics.py)
+curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=god_kaiser_mqtt_errors_total"
+curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=god_kaiser_ws_contract_mismatch_total"
+
+# PromQL wie im Grafana-Dashboard „Operations“ (5m-Rate)
+curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=sum by (direction) (rate(god_kaiser_mqtt_errors_total[5m]))"
+curl -sG "http://localhost:9090/api/v1/query" --data-urlencode "query=rate(god_kaiser_ws_contract_mismatch_total[5m])"
 ```
 
 ### 8.6 Hardware-Profile (ESP32 Serial Logger)
@@ -1749,9 +1765,9 @@ docker logs automationone-esp32-serial --tail=100 -f
 | **PostgreSQL Config** | `docker/postgres/postgresql.conf` |
 | **Mosquitto Config** | `docker/mosquitto/mosquitto.conf` |
 | **Loki Config** | `docker/loki/loki-config.yml` |
-| **Alloy Config** | `docker/alloy/config.alloy` (native River syntax) |
+| **Alloy Config** | `docker/alloy/config.alloy` (native River syntax; Structured Metadata u. a. `logger`, `request_id`, optional `correlation_id` aus Message-Regex für `el-servador`) |
 | **Prometheus Config** | `docker/prometheus/prometheus.yml` |
-| **Grafana Provisioning** | `docker/grafana/provisioning/` |
+| **Grafana Provisioning** | `docker/grafana/provisioning/` (Dashboards z. B. `dashboards/system-health.json` — u. a. MQTT-Fehlerrate + WS-Contract-Mismatch als Prometheus-Panels) |
 | **Session Script** | `scripts/debug/start_session.sh` (v4.0) |
 | **Playwright E2E Config** | `El Frontend/playwright.config.ts` |
 | **Playwright E2E Report** | `logs/frontend/playwright/playwright-report/` |
@@ -1772,4 +1788,4 @@ Wenn Cursor den Playwright MCP-Server nutzt (z. B. cursor-ide-browser), kann der
 
 ---
 
-*Erstellt: 2026-02-02 | Aktualisiert: 2026-02-25 | AutomationOne Debug-Operations-Reference*
+*Erstellt: 2026-02-02 | Aktualisiert: 2026-04-10 | AutomationOne Debug-Operations-Reference*

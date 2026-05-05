@@ -1,5 +1,6 @@
 ## Versions-Historie
 
+<<<<<<< Updated upstream
 **Version:** 9.98
 **Letzte Aktualisierung:** 2026-04-21
 
@@ -9,6 +10,21 @@
 - JS/TS-Farb-Fallbacks in Widget-/Monitor-Komponenten auf Token-Fallbackketten umgestellt (keine freien Hex-Fallbacks mehr in UI-Logik)
 - Verbleibende Hardcoded-Hexwerte bewusst auf Chart-Konfigurationen begrenzt (`views/SensorHistoryView.vue`, `components/charts/MultiSensorChart.vue`)
 - Verifikation: `npm run build` und `npx vue-tsc --noEmit` erfolgreich
+=======
+**Version:** 10.7 (Skill-Meta)
+**Letzte Aktualisierung:** 2026-04-10
+
+### Aenderungen in v10.7 (SKILL.md — Agenten-Leitplanken, IST-Pfade)
+
+- Stack-Anker, korrigierte Store-Pfade (`shared/stores`), API-Zaehlung, Vite-Env-Proxy, Vitest 4 + happy-dom + Playwright
+- Neuer Abschnitt 19 „Coding-Agenten“; Section 15 E2E-Status korrigiert
+- Delta-Dokument: `.claude/skills/frontend-development/FRONTEND-SKILL-DELTA-2026-04-10.md`
+
+---
+
+**Version:** 9.97
+**Letzte Aktualisierung:** 2026-03-30
+>>>>>>> Stashed changes
 
 ### Aenderungen in v9.97 (FIX-ED-1: Widget Smart Defaults — Range, Titel & Placement)
 
