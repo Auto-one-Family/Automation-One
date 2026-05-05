@@ -2021,7 +2021,6 @@ class LogicEngine:
                     "rule_name": rule_name,
                     "degraded_since": now.isoformat(),
                     "degraded_reason": reason[:64],
-                    "reason": reason[:64],
                     "is_critical": True,
                     "escalation_policy": rule.escalation_policy,
                 },
