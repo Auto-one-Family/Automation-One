@@ -12,13 +12,26 @@
 import { ref, computed, onMounted } from 'vue'
 import { BellOff, Bell, Clock, Shield } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
+import { useAlertSuppression } from '@/composables/useAlertSuppression'
+import { formatDateTime, formatSuppressionReason } from '@/utils/formatters'
 import type { AlertConfigUpdate, AlertConfigResponse } from '@/api/sensors'
+
+interface DeviceAlertConfig {
+  propagate_to_children?: boolean
+  suppression_until?: string | null
+  suppression_reason?: string | null
+}
 
 interface Props {
   entityId: string
   entityType: 'sensor' | 'actuator'
   fetchFn: (id: string) => Promise<AlertConfigResponse>
   updateFn: (id: string, config: AlertConfigUpdate) => Promise<AlertConfigResponse>
+  /**
+   * AUT-255: Optional device-level alert config (parent ESP).
+   * When provided, the suppression banner shows the inherited cascade.
+   */
+  deviceAlertConfig?: DeviceAlertConfig | null
 }
 
 const props = defineProps<Props>()
@@ -46,6 +59,15 @@ const customWarningMin = ref<number | null>(null)
 const customWarningMax = ref<number | null>(null)
 const customCriticalMin = ref<number | null>(null)
 const customCriticalMax = ref<number | null>(null)
+
+// AUT-255: Suppression cascade view-model (sensor + device).
+const sensorAlertConfigRef = computed(() => alertConfig.value as {
+  alerts_enabled?: boolean
+  suppression_until?: string | null
+  suppression_reason?: string | null
+})
+const deviceAlertConfigRef = computed(() => props.deviceAlertConfig ?? null)
+const { suppression } = useAlertSuppression(sensorAlertConfigRef, deviceAlertConfigRef)
 
 const SUPPRESSION_REASONS = [
   { value: 'maintenance', label: 'Wartung' },
@@ -146,6 +168,28 @@ async function saveConfig() {
     </div>
 
     <template v-else>
+      <!-- AUT-255: Suppression-Banner (sensor + device cascade) -->
+      <div v-if="suppression.isActive" class="alert-config__suppression-banner">
+        <BellOff class="alert-config__suppression-icon" aria-hidden="true" />
+        <div class="alert-config__suppression-body">
+          <span class="alert-config__suppression-title">
+            Alerts unterdrückt
+            <template v-if="suppression.source === 'device' || suppression.source === 'both'">
+              (vom Gerät vererbt)
+            </template>
+          </span>
+          <span
+            v-if="suppression.deviceReason && (suppression.source === 'device' || suppression.source === 'both')"
+            class="alert-config__suppression-reason"
+          >
+            Grund: {{ formatSuppressionReason(suppression.deviceReason) }}
+          </span>
+          <span v-if="suppression.effectiveUntil" class="alert-config__suppression-until">
+            Reaktivierung: {{ formatDateTime(suppression.effectiveUntil) }}
+          </span>
+        </div>
+      </div>
+
       <!-- Master Toggle -->
       <div class="alert-config__toggle-row">
         <div class="alert-config__toggle-info">
@@ -306,6 +350,45 @@ async function saveConfig() {
   font-size: var(--text-sm);
   padding: var(--space-4) 0;
   text-align: center;
+}
+
+/* AUT-255: Suppression-Banner */
+.alert-config__suppression-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 25%, transparent);
+  margin-bottom: var(--space-3);
+}
+
+.alert-config__suppression-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--color-warning);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.alert-config__suppression-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.alert-config__suppression-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-warning);
+}
+
+.alert-config__suppression-reason,
+.alert-config__suppression-until {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
 }
 
 .alert-config__toggle-row {

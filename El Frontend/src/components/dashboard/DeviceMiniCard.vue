@@ -95,6 +95,33 @@ const runtimeHealthTooltip = computed(() => {
   ].filter((line): line is string => Boolean(line)).join('\n')
 })
 
+// AUT-255: Device-level alert suppression (propagate_to_children).
+interface DeviceAlertConfigShape {
+  propagate_to_children?: boolean
+  suppression_reason?: string | null
+  suppression_until?: string | null
+}
+
+const deviceAlertConfig = computed<DeviceAlertConfigShape | null>(() => {
+  const cfg = (props.device as unknown as { alert_config?: DeviceAlertConfigShape }).alert_config
+  return cfg ?? null
+})
+
+const isDeviceSuppressed = computed(() => {
+  return deviceAlertConfig.value?.propagate_to_children === true
+})
+
+const suppressionTooltip = computed(() => {
+  if (!isDeviceSuppressed.value) return ''
+  const cfg = deviceAlertConfig.value
+  const reason = cfg?.suppression_reason
+  const until = cfg?.suppression_until
+  const parts = ['Alerts unterdrückt (Device-Suppression aktiv)']
+  if (reason) parts.push(`Grund: ${reason}`)
+  if (until) parts.push(`Reaktivierung: ${until}`)
+  return parts.join('\n')
+})
+
 const handoverBadge = computed(() => {
   const handover = props.device.runtime_health_view?.handover
   if (!handover) return null
@@ -374,6 +401,13 @@ function handleDeviceDelete() {
           :title="statusChipTitle"
           compact
         />
+        <span
+          v-if="isDeviceSuppressed"
+          class="device-mini-card__suppression-pill"
+          :title="suppressionTooltip"
+        >
+          🔕 Alerts pausiert
+        </span>
         <span
           v-if="runtimeHealthBadge?.showBadge"
           class="device-mini-card__status-chip device-mini-card__status-chip--stale device-mini-card__status-chip--health"
@@ -660,6 +694,22 @@ function handleDeviceDelete() {
   color: var(--color-warning);
   border-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
   background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+}
+
+/* AUT-255: Device-level alert suppression pill */
+.device-mini-card__suppression-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xxs);
+  font-weight: 500;
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .device-mini-card__last-seen {

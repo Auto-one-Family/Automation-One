@@ -829,6 +829,25 @@ export function zoneHealthToLevel(health: 'ok' | 'warning' | 'alarm' | 'empty' |
   return 'offline'  // empty | unknown → offline
 }
 
+// =============================================================================
+// ALERT SUPPRESSION
+// =============================================================================
+
+export function formatSuppressionReason(reason: string | null | undefined): string {
+  switch (reason) {
+    case 'maintenance':
+      return 'Wartung'
+    case 'intentionally_offline':
+      return 'Geplant offline'
+    case 'calibration':
+      return 'Kalibrierung'
+    case 'custom':
+      return 'Benutzerdefiniert'
+    default:
+      return reason ?? 'Unbekannt'
+  }
+}
+
 
 
 

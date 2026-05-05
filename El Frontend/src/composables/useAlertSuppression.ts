@@ -1,146 +1,96 @@
 /**
- * useAlertSuppression — AUT-255
+ * useAlertSuppression — AUT-255 Alert-Suppression-Kaskade
  *
- * Computes the effective alert suppression state for a sensor by combining
- * sensor-level suppression (alerts_enabled, suppression_until, suppression_reason)
- * with device-level suppression (propagate_to_children).
+ * Aggregates sensor-level and device-level alert-suppression state into a single
+ * reactive view-model so that UI components can display the suppression cascade
+ * (sensor own suppression vs. device-wide propagation).
  *
  * Server contract (read-only):
- * - SensorConfig.alert_config.alerts_enabled (boolean, default true)
- * - SensorConfig.alert_config.suppression_until (ISO DateTime, optional)
- * - SensorConfig.alert_config.suppression_reason ('maintenance'|'intentionally_offline'|'calibration'|'custom')
- * - esp_device.alert_config.propagate_to_children (boolean) — device-wide suppression
- * - esp_device.alert_config.suppression_until / suppression_reason
+ * - SensorConfig.alert_config: { alerts_enabled?: boolean, suppression_until?: string|null, suppression_reason?: string|null }
+ * - esp_device.alert_config:   { propagate_to_children?: boolean, suppression_until?: string|null, suppression_reason?: string|null }
  */
-
-import { computed, type ComputedRef, type Ref } from 'vue'
+import { computed } from 'vue'
+import type { Ref } from 'vue'
+import { formatSuppressionReason } from '@/utils/formatters'
 
 export type SuppressionSource = 'sensor' | 'device' | 'both' | 'none'
 
 export interface SuppressionState {
+  /** True when either sensor or device suppression is active */
   isActive: boolean
+  /** Where the active suppression originates */
   source: SuppressionSource
+  /** ISO timestamp of sensor-level suppression end (null if not set) */
   sensorSuppressedUntil: string | null
+  /** ISO timestamp of device-level suppression end (null if not set) */
   deviceSuppressedUntil: string | null
+  /** Sensor-level suppression reason (raw enum value) */
   sensorReason: string | null
+  /** Device-level suppression reason (raw enum value) */
   deviceReason: string | null
-  /** Later of the two timestamps (sensor vs device), null when neither exists */
+  /** The later of the two end timestamps (effective reactivation time) */
   effectiveUntil: string | null
 }
 
-export interface SensorAlertConfig {
+interface SensorAlertConfig {
   alerts_enabled?: boolean
   suppression_until?: string | null
   suppression_reason?: string | null
 }
 
-export interface DeviceAlertConfig {
+interface DeviceAlertConfig {
   propagate_to_children?: boolean
   suppression_until?: string | null
   suppression_reason?: string | null
-  /** When false, device-level suppression is disabled regardless of propagate flag */
-  alerts_enabled?: boolean
 }
 
-/** True when an ISO timestamp lies in the future (or is empty/null = no expiry). */
-function isFutureOrOpen(iso: string | null | undefined): boolean {
-  if (!iso) return true
-  const ts = Date.parse(iso)
-  if (Number.isNaN(ts)) return true
-  return ts > Date.now()
-}
-
-/** True when an ISO timestamp lies strictly in the future. */
-function isFuture(iso: string | null | undefined): boolean {
-  if (!iso) return false
-  const ts = Date.parse(iso)
-  if (Number.isNaN(ts)) return false
-  return ts > Date.now()
-}
-
-/** Returns the later of two ISO timestamps, or whichever is non-null. */
-function laterIso(a: string | null, b: string | null): string | null {
-  if (a && b) {
-    const ta = Date.parse(a)
-    const tb = Date.parse(b)
-    if (Number.isNaN(ta)) return b
-    if (Number.isNaN(tb)) return a
-    return ta >= tb ? a : b
-  }
-  return a ?? b ?? null
-}
-
-/**
- * Computes the effective suppression state for a sensor.
- *
- * Sensor is considered suppressed when:
- *  - alerts_enabled === false, OR
- *  - suppression_until is set and lies in the future
- *
- * Device-level suppression applies when:
- *  - alert_config.propagate_to_children === true, AND
- *  - device alerts_enabled !== false (device disabled = active suppression for children)
- *  - if suppression_until is set, must lie in the future
- */
 export function useAlertSuppression(
   sensorAlertConfig: Ref<SensorAlertConfig | null | undefined>,
   deviceAlertConfig: Ref<DeviceAlertConfig | null | undefined>,
-): { suppression: ComputedRef<SuppressionState> } {
-  const suppression = computed<SuppressionState>(() => {
-    const sensor = sensorAlertConfig.value ?? null
-    const device = deviceAlertConfig.value ?? null
+) {
+  const suppression = computed((): SuppressionState => {
+    const now = new Date()
+    const sac = sensorAlertConfig.value
+    const dac = deviceAlertConfig.value
 
-    // Sensor-level suppression
-    const sensorEnabled = sensor?.alerts_enabled !== false
-    const sensorUntilFuture = isFuture(sensor?.suppression_until)
-    const sensorIsSuppressed =
-      sensor != null && (!sensorEnabled || sensorUntilFuture)
+    const sensorSuppressedUntil = sac?.suppression_until ?? null
+    const deviceSuppressedUntil = dac?.suppression_until ?? null
 
-    // Device-level suppression: only effective when propagate_to_children is true
-    // AND the device suppression itself is active (alerts_enabled false OR until in future)
-    const propagate = device?.propagate_to_children === true
-    const deviceEnabled = device?.alerts_enabled !== false
-    const deviceUntilOpen = isFutureOrOpen(device?.suppression_until)
-    const deviceIsSuppressed =
-      propagate && (!deviceEnabled || isFuture(device?.suppression_until)) && deviceUntilOpen
+    const sensorActive =
+      sac?.alerts_enabled === false ||
+      (sensorSuppressedUntil != null && new Date(sensorSuppressedUntil) > now)
+
+    const deviceActive =
+      dac?.propagate_to_children === true ||
+      (deviceSuppressedUntil != null && new Date(deviceSuppressedUntil) > now)
+
+    const isActive = sensorActive || deviceActive
 
     let source: SuppressionSource = 'none'
-    if (sensorIsSuppressed && deviceIsSuppressed) source = 'both'
-    else if (sensorIsSuppressed) source = 'sensor'
-    else if (deviceIsSuppressed) source = 'device'
+    if (sensorActive && deviceActive) source = 'both'
+    else if (sensorActive) source = 'sensor'
+    else if (deviceActive) source = 'device'
 
-    const sensorSuppressedUntil = sensor?.suppression_until ?? null
-    const deviceSuppressedUntil = device?.suppression_until ?? null
+    let effectiveUntil: string | null = null
+    if (sensorSuppressedUntil && deviceSuppressedUntil) {
+      effectiveUntil =
+        new Date(sensorSuppressedUntil) > new Date(deviceSuppressedUntil)
+          ? sensorSuppressedUntil
+          : deviceSuppressedUntil
+    } else {
+      effectiveUntil = sensorSuppressedUntil ?? deviceSuppressedUntil
+    }
 
     return {
-      isActive: source !== 'none',
+      isActive,
       source,
-      sensorSuppressedUntil: sensorIsSuppressed ? sensorSuppressedUntil : null,
-      deviceSuppressedUntil: deviceIsSuppressed ? deviceSuppressedUntil : null,
-      sensorReason: sensorIsSuppressed ? (sensor?.suppression_reason ?? null) : null,
-      deviceReason: deviceIsSuppressed ? (device?.suppression_reason ?? null) : null,
-      effectiveUntil: laterIso(
-        sensorIsSuppressed ? sensorSuppressedUntil : null,
-        deviceIsSuppressed ? deviceSuppressedUntil : null,
-      ),
+      sensorSuppressedUntil,
+      deviceSuppressedUntil,
+      sensorReason: sac?.suppression_reason ?? null,
+      deviceReason: dac?.suppression_reason ?? null,
+      effectiveUntil,
     }
   })
 
-  return { suppression }
-}
-
-/** Maps suppression_reason enum to German label. */
-export function formatSuppressionReason(reason: string | null | undefined): string {
-  switch (reason) {
-    case 'maintenance':
-      return 'Wartung'
-    case 'intentionally_offline':
-      return 'Geplant offline'
-    case 'calibration':
-      return 'Kalibrierung'
-    case 'custom':
-      return 'Benutzerdefiniert'
-    default:
-      return reason ?? 'Unbekannt'
-  }
+  return { suppression, formatSuppressionReason }
 }
