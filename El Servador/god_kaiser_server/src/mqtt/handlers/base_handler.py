@@ -1,7 +1,28 @@
 """
 Base MQTT Handler
 
-Provides common functionality for all MQTT message handlers:
+DEPRECATION NOTICE (AUT-225, 2026-05):
+====================================================================
+This abstract base class is currently UNUSED. None of the 19 concrete
+MQTT handlers (HeartbeatHandler, SensorDataHandler, ActuatorResponseHandler,
+LWTHandler, ConfigHandler, CalibrationResponseHandler, ZoneAckHandler,
+SubzoneAckHandler, EmergencyAckHandler, RecoveryConfirmHandler,
+DiagnosticsHandler, ErrorEventHandler, IntentOutcomeHandler,
+IntentOutcomeLifecycleHandler, QueuePressureHandler, ActuatorAlertHandler,
+ActuatorStatusHandler, HeartbeatMetricsHandler) inherit from
+BaseMQTTHandler. Each handler implements its own validation/parsing.
+
+Status: KEPT for backwards compatibility / future migration.
+Migration: tracked via follow-up issue (planned post AUT-225). Do NOT
+extend this class for NEW handlers without a clear migration plan
+covering all 19 existing handlers. Adding partial inheritance would
+introduce two parallel handler patterns and increase confusion.
+
+If you are starting a new handler, follow the pattern of one of the
+existing concrete handlers (e.g., ``heartbeat_handler.py``) until the
+migration is scheduled.
+
+Original purpose (preserved for reference):
 - Standardized topic parsing
 - Payload validation with structured errors
 - ESP device lookup with error handling
@@ -9,12 +30,9 @@ Provides common functionality for all MQTT message handlers:
 - Audit logging
 - Consistent error patterns
 
-All MQTT handlers should inherit from BaseMQTTHandler to ensure
-consistent behavior across the system.
-
 Phase: Runtime Config Flow Implementation
 Priority: MEDIUM
-Status: IMPLEMENTED
+Status: DEPRECATED-UNUSED (AUT-225)
 """
 
 from abc import ABC, abstractmethod

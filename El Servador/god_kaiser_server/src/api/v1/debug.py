@@ -1757,8 +1757,9 @@ async def emergency_stop_via_scheduler(
     if handler:
         # Simulate emergency message
         import json
+        from ...mqtt.topics import TopicBuilder
 
-        topic = f"kaiser/god/esp/{esp_id}/actuator/emergency"
+        topic = TopicBuilder.build_actuator_emergency_topic(esp_id)
         payload = json.dumps(
             {"reason": "manual_api_trigger", "timestamp": int(__import__("time").time())}
         )

@@ -24,7 +24,6 @@ References:
 - El Trabajante/docs/Mqtt_Protocoll.md (Actuator topics)
 """
 
-import json
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Optional
@@ -53,7 +52,6 @@ from ...db.repositories import (
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.repositories.command_contract_repo import CommandContractRepository
 from ...mqtt.publisher import Publisher
-from ...mqtt.topics import TopicBuilder
 from ...schemas import (
     ActuatorAggregation,
     ActuatorCommand,
@@ -1046,13 +1044,7 @@ async def emergency_stop(
         }
         if not broadcast_data.get("command"):
             raise ValueError("broadcast payload missing required 'command' field")
-        broadcast_payload = json.dumps(broadcast_data)
-        publisher.client.publish(
-            topic="kaiser/broadcast/emergency",
-            payload=broadcast_payload,
-            qos=1,
-            retain=False,
-        )
+        publisher.publish_emergency_broadcast(broadcast_data, qos=1)
         logger.info("MQTT broadcast emergency stop published on kaiser/broadcast/emergency")
     except Exception as mqtt_error:
         logger.warning(f"Failed to publish MQTT emergency broadcast: {mqtt_error}")
@@ -1139,13 +1131,12 @@ async def clear_emergency(
     else:
         devices = await esp_repo.get_all()
 
-    payload = json.dumps({"command": "clear_emergency", "reason": request.reason})
+    payload = {"command": "clear_emergency", "reason": request.reason}
     publish_failures = 0
 
     for device in devices:
         try:
-            topic = TopicBuilder.build_actuator_emergency_topic(device.device_id)
-            publisher.client.publish(topic, payload, qos=1)
+            publisher.publish_actuator_emergency(device.device_id, payload, qos=1)
             devices_cleared += 1
         except Exception as exc:
             logger.warning(f"Clear emergency MQTT publish failed for {device.device_id}: {exc}")

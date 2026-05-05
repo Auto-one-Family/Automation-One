@@ -363,6 +363,132 @@ class Publisher:
         )
         return self._publish_with_retry(topic, payload, qos, retry)
 
+    def publish_emergency_broadcast(
+        self,
+        payload: Dict[str, Any],
+        qos: int = 1,
+        retry: bool = False,
+    ) -> bool:
+        """
+        Publish safety-critical emergency broadcast to ALL ESPs.
+
+        Topic: kaiser/broadcast/emergency (Server -> ALL ESPs).
+        ESPs subscribed to this topic will execute global emergency stop.
+
+        Args:
+            payload: Broadcast payload dict (must include "command" field; e.g.,
+                "emergency_stop" or "stop_all", per firmware contract).
+            qos: QoS level (default 1; QoS 2 reserved per QoS-Strategie but
+                paired with retain=False to remain firmware-compatible).
+            retry: Enable retry on failure (default False — emergency is fire-and-forget;
+                a duplicate broadcast on retry could mask client logic).
+
+        Returns:
+            True if publish successful.
+        """
+        topic = TopicBuilder.build_emergency_broadcast_topic()
+        try:
+            payload_str = json.dumps(payload)
+        except Exception as e:
+            logger.error(f"Failed to serialize emergency broadcast payload: {e}", exc_info=True)
+            self._publish_failures += 1
+            return False
+
+        logger.info(f"Publishing emergency broadcast: {payload.get('command')}")
+        self._publish_attempts += 1
+        success = self.client.publish(topic, payload_str, qos, retain=False)
+        if success:
+            self._publish_successes += 1
+        else:
+            self._publish_failures += 1
+            if retry:
+                # Single retry attempt only — emergency is time-critical.
+                logger.warning("Emergency broadcast publish failed; retrying once")
+                self._publish_attempts += 1
+                success = self.client.publish(topic, payload_str, qos, retain=False)
+                if success:
+                    self._publish_successes += 1
+                else:
+                    self._publish_failures += 1
+        return success
+
+    def publish_actuator_emergency(
+        self,
+        esp_id: str,
+        payload: Dict[str, Any],
+        qos: int = 1,
+    ) -> bool:
+        """
+        Publish per-ESP actuator emergency command (Server -> single ESP).
+
+        Topic: kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency.
+        Used for ``clear_emergency`` and per-device emergency dispatch.
+
+        Args:
+            esp_id: Target ESP device ID
+            payload: Command payload (must include "command", e.g., "clear_emergency")
+            qos: QoS level (default 1)
+
+        Returns:
+            True if publish successful.
+        """
+        topic = TopicBuilder.build_actuator_emergency_topic(esp_id)
+        try:
+            payload_str = json.dumps(payload) if isinstance(payload, dict) else payload
+        except Exception as e:
+            logger.error(f"Failed to serialize actuator emergency payload: {e}", exc_info=True)
+            self._publish_failures += 1
+            return False
+
+        self._publish_attempts += 1
+        success = self.client.publish(topic, payload_str, qos)
+        if success:
+            self._publish_successes += 1
+        else:
+            self._publish_failures += 1
+        return success
+
+    def publish_raw(
+        self,
+        topic: str,
+        payload: Any,
+        qos: int = 1,
+        retain: bool = False,
+    ) -> bool:
+        """
+        Publish raw message to an arbitrary topic (escape hatch).
+
+        Use this only when no dedicated ``publish_*`` method exists for the topic
+        and the caller has built the topic via ``TopicBuilder``. Required for
+        zone/subzone-services that build dynamic topic strings (zone-id /
+        subzone-id are not part of the Publisher's static topic catalogue).
+
+        Args:
+            topic: Pre-built MQTT topic string (must come from TopicBuilder).
+            payload: dict (will be JSON-serialised) or pre-serialised string.
+            qos: QoS level.
+            retain: Retain flag.
+
+        Returns:
+            True if publish successful.
+        """
+        try:
+            payload_str = json.dumps(payload) if isinstance(payload, dict) else payload
+        except Exception as e:
+            logger.error(f"Failed to serialize publish_raw payload for {topic}: {e}", exc_info=True)
+            self._publish_failures += 1
+            return False
+
+        self._publish_attempts += 1
+        success = self.client.publish(topic, payload_str, qos, retain)
+        if success:
+            self._publish_successes += 1
+            logger.debug(f"publish_raw OK: {topic}")
+        else:
+            self._publish_failures += 1
+            logger.error(f"publish_raw failed: {topic}")
+        return success
+
     def _publish_with_retry(
         self,
         topic: str,

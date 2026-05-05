@@ -388,19 +388,17 @@ class TestEmergencyStop:
 
         assert response.status_code == 200
 
-        broadcast_calls = [
-            c
-            for c in override_mqtt_publisher.client.publish.call_args_list
-            if c.kwargs.get("topic") == "kaiser/broadcast/emergency"
-            or (c.args and c.args[0] == "kaiser/broadcast/emergency")
-        ]
+        # AUT-225: emergency broadcast goes through publisher.publish_emergency_broadcast(payload, qos)
+        broadcast_calls = override_mqtt_publisher.publish_emergency_broadcast.call_args_list
         assert (
             len(broadcast_calls) == 1
-        ), f"Expected 1 broadcast publish, got {len(broadcast_calls)}"
+        ), f"Expected 1 publish_emergency_broadcast call, got {len(broadcast_calls)}"
 
         call = broadcast_calls[0]
-        raw_payload = call.kwargs.get("payload") or call.args[1]
-        payload = json.loads(raw_payload)
+        # First positional arg is the payload dict (already JSON-serialisable)
+        raw_payload = call.args[0] if call.args else call.kwargs.get("payload")
+        # Support either a dict (new API) or a JSON string (legacy)
+        payload = raw_payload if isinstance(raw_payload, dict) else json.loads(raw_payload)
 
         FIRMWARE_ACCEPTED = {"emergency_stop", "stop_all"}
         assert (

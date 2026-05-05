@@ -597,7 +597,7 @@ class SubzoneService:
         # Use QoS 1 (At least once) for subzone operations
         qos = constants.QOS_SENSOR_DATA  # QoS 1
 
-        success = self.publisher.client.publish(topic, payload_str, qos)
+        success = self.publisher.publish_raw(topic, payload_str, qos=qos)
 
         if success:
             logger.debug(f"Subzone message published to {topic}")

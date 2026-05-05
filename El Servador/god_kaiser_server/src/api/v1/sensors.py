@@ -90,6 +90,7 @@ from ...services.sensor_service import SensorService
 from ...services.gpio_validation_service import GpioValidationService
 from ...services.subzone_service import SubzoneService
 from ...services.calibration_payloads import canonicalize_calibration_data
+from ...mqtt.topics import TopicBuilder
 from ...utils.subzone_helpers import normalize_subzone_id
 
 logger = get_logger(__name__)
@@ -1884,7 +1885,7 @@ async def scan_onewire_bus(
     # Command topic: kaiser/god/esp/{esp_id}/system/command
     # Payload: {"command": "onewire/scan", "pin": 4}
     # Response topic: kaiser/god/esp/{esp_id}/onewire/scan_result
-    response_topic = f"kaiser/god/esp/{esp_id}/onewire/scan_result"
+    response_topic = TopicBuilder.build_onewire_scan_result_topic(esp_id)
 
     # Step 3: Setup response listener with asyncio.Future
     # IMPORTANT: Capture event loop in async context BEFORE callback registration
