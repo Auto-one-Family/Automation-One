@@ -376,10 +376,15 @@ function handleDeviceDelete() {
         />
         <span
           v-if="runtimeHealthBadge?.showBadge"
-          class="device-mini-card__status-chip device-mini-card__status-chip--stale"
+          class="device-mini-card__status-chip device-mini-card__status-chip--stale device-mini-card__status-chip--health"
           :title="runtimeHealthTooltip"
         >
-          {{ runtimeHealthBadge.badgeLabel }}
+          <span class="device-mini-card__status-chip-label">{{ runtimeHealthBadge.badgeLabel }}</span>
+          <!-- Primäre Ursache als Sublabel (AUT-124) -->
+          <span
+            v-if="runtimeHealthBadge.primaryReasonLabel"
+            class="device-mini-card__health-reason"
+          >{{ runtimeHealthBadge.primaryReasonLabel }}</span>
         </span>
         <span
           v-if="handoverBadge"
@@ -604,6 +609,32 @@ function handleDeviceDelete() {
   color: var(--color-warning);
   border-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
   background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+}
+
+/* AUT-124: Health chip with primary reason sublabel */
+.device-mini-card__status-chip--health {
+  gap: var(--space-1);
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.device-mini-card__status-chip-label {
+  flex-shrink: 0;
+}
+
+.device-mini-card__health-reason {
+  font-weight: 500;
+  font-size: var(--text-xxs);
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.device-mini-card__health-reason::before {
+  content: '· ';
+  opacity: 0.6;
 }
 
 .device-mini-card__status-chip--error {

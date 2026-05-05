@@ -10,6 +10,15 @@ export interface EspHealthViewModel {
   networkDegraded: boolean
   mqttCircuitBreakerOpen: boolean
   wifiCircuitBreakerOpen: boolean
+  /**
+   * Aggregated runtime-degradation marker from backend (AUT-124).
+   * When true, the device is operationally degraded; the primary reason is in `degradedReason`.
+   */
+  degraded: boolean
+  /** Primary degradation reason code (machine-readable, e.g. 'mqtt_disconnected'). */
+  degradedReason: string | null
+  /** Additional reason codes contributing to the degraded state. */
+  degradedReasonCodes: string[]
   handover: {
     epoch: number | null
     rejectStartup: number
@@ -33,6 +42,10 @@ const MAPPED_TELEMETRY_FLAG_KEYS = new Set([
   'handover_contract_reject',
   'handover_epoch',
   'session_epoch',
+  // AUT-124: aggregated degradation fields
+  'degraded',
+  'degraded_reason',
+  'degraded_reason_codes',
 ])
 
 const STANDARD_TOP_LEVEL_KEYS = new Set([
@@ -88,6 +101,17 @@ export function normalizeEspHealthPayload(raw: Record<string, unknown>): EspHeal
   const rejectRawTotal = asNum(raw.handover_contract_reject) ?? 0
   const rejectTotal = Math.max(rejectStartup + rejectRuntime, rejectRawTotal)
 
+  // AUT-124: extract aggregated degradation fields
+  const degradedReasonCodes: string[] = []
+  const rawCodes = raw.degraded_reason_codes
+  if (Array.isArray(rawCodes)) {
+    for (const item of rawCodes) {
+      if (typeof item === 'string' && item.trim().length > 0) {
+        degradedReasonCodes.push(item.trim().toLowerCase())
+      }
+    }
+  }
+
   return {
     persistenceDegraded: asBool(raw.persistence_degraded),
     persistenceDegradedReason: asStr(raw.persistence_degraded_reason),
@@ -95,6 +119,9 @@ export function normalizeEspHealthPayload(raw: Record<string, unknown>): EspHeal
     networkDegraded: asBool(raw.network_degraded),
     mqttCircuitBreakerOpen: asBool(raw.mqtt_circuit_breaker_open),
     wifiCircuitBreakerOpen: asBool(raw.wifi_circuit_breaker_open),
+    degraded: asBool(raw.degraded),
+    degradedReason: asStr(raw.degraded_reason),
+    degradedReasonCodes,
     handover: {
       epoch: asNum(raw.handover_epoch) ?? asNum(raw.session_epoch) ?? null,
       rejectStartup,
@@ -109,6 +136,12 @@ export interface EspHealthPresentation {
   severity: 'ok' | 'warning'
   showBadge: boolean
   badgeLabel: string
+  /**
+   * Human-readable label of the primary (highest-priority) cause.
+   * AUT-124: used as sublabel directly on the device card to surface the
+   * cause of "Eingeschränkt" without requiring tooltip hover.
+   */
+  primaryReasonLabel?: string
   tooltipLines: string[]
   recommendedAction: string | null
 }
@@ -177,18 +210,14 @@ function actionForReason(code: string): string {
 }
 
 function extractReasonCodes(vm: EspHealthViewModel): string[] {
-  const rawCodes = vm.rawTelemetry.degraded_reason_codes
   const result = new Set<string>()
 
-  if (Array.isArray(rawCodes)) {
-    for (const item of rawCodes) {
-      if (typeof item === 'string' && item.trim().length > 0) result.add(item.trim().toLowerCase())
-    }
+  // AUT-124: prefer typed VM fields (also populates from primary degraded_reason)
+  for (const code of vm.degradedReasonCodes) {
+    if (code.length > 0) result.add(code)
   }
-
-  const degradedReason = vm.rawTelemetry.degraded_reason
-  if (typeof degradedReason === 'string' && degradedReason.trim().length > 0) {
-    result.add(degradedReason.trim().toLowerCase())
+  if (vm.degradedReason && vm.degradedReason.trim().length > 0) {
+    result.add(vm.degradedReason.trim().toLowerCase())
   }
 
   return Array.from(result)
@@ -279,6 +308,16 @@ export function espHealthPresentation(
     })
   }
 
+  // AUT-124: aggregated degraded flag without granular reason → generic marker
+  // ensures the badge can still surface a cause if backend only sets `degraded=true`.
+  if (vm.degraded && reasons.length === 0) {
+    pushReason(reasons, {
+      code: 'degraded_operation',
+      label: REASON_CODE_META.degraded_operation.label,
+      action: actionForReason('degraded_operation'),
+    })
+  }
+
   const lines: string[] = reasons.flatMap((reason, index) => {
     const prefix = index === 0 ? 'Ursache' : 'Weitere Ursache'
     return reason.detail
@@ -289,19 +328,10 @@ export function espHealthPresentation(
   const unknownKeys = Object.keys(vm.rawTelemetry).filter(
     k =>
       ![
-        'persistence_degraded',
-        'persistence_degraded_reason',
-        'runtime_state_degraded',
-        'network_degraded',
-        'mqtt_circuit_breaker_open',
-        'wifi_circuit_breaker_open',
         'critical_outcome_drop_count',
         'publish_outbox_drop_count',
         'persistence_drift_count',
         'metrics_schema_version',
-        'degraded',
-        'degraded_reason',
-        'degraded_reason_codes',
       ].includes(k),
   )
   if (unknownKeys.length > 0) {
@@ -317,6 +347,7 @@ export function espHealthPresentation(
     severity: showBadge ? 'warning' : 'ok',
     showBadge,
     badgeLabel: 'Eingeschränkt',
+    primaryReasonLabel: showBadge ? primaryReason?.label : undefined,
     tooltipLines: lines.length > 0 ? lines : ['Keine Degradations-Marker gesetzt'],
     recommendedAction: showBadge ? primaryReason?.action ?? actionForReason('degraded_operation') : null,
   }
