@@ -139,6 +139,9 @@ export const useLogicStore = defineStore('logic', () => {
     return rules.value.filter((rule) => rule.enabled)
   })
 
+  /** Rules that are currently in degraded state (target ESP offline) */
+  const degradedRules = computed(() => rules.value.filter((r) => !!r.degraded_since))
+
   /** Rule count */
   const ruleCount = computed(() => rules.value.length)
 
@@ -746,7 +749,7 @@ export const useLogicStore = defineStore('logic', () => {
     }
 
     activeExecutions.value.set(event.rule_id, Date.now())
-    setTimeout(() => activeExecutions.value.delete(event.rule_id), 2000)
+    setTimeout(() => activeExecutions.value.delete(event.rule_id), 150)
 
     const rule = rules.value.find((r) => r.id === event.rule_id)
     if (rule) {
@@ -906,6 +909,9 @@ export const useLogicStore = defineStore('logic', () => {
     handleRuleRecoveredEvent(message)
   }
 
+  /** Cleanup function for WebSocket reconnect callback */
+  let removeOnConnect: (() => void) | null = null
+
   /**
    * Subscribe to WebSocket for logic execution events.
    */
@@ -928,6 +934,11 @@ export const useLogicStore = defineStore('logic', () => {
       },
       handleLifecycleEvents
     )
+
+    removeOnConnect = websocketService.onConnect(() => {
+      fetchRules().catch((err) => logger.warn('Post-reconnect rule refresh failed', { err }))
+    })
+
     logger.debug('Subscribed to WebSocket for logic lifecycle events')
   }
 
@@ -939,6 +950,10 @@ export const useLogicStore = defineStore('logic', () => {
       websocketService.unsubscribe(wsSubscriptionId)
       wsSubscriptionId = null
       logger.debug('Unsubscribed from WebSocket')
+    }
+    if (removeOnConnect) {
+      removeOnConnect()
+      removeOnConnect = null
     }
   }
 
@@ -1106,6 +1121,7 @@ export const useLogicStore = defineStore('logic', () => {
     connections,
     crossEspConnections,
     enabledRules,
+    degradedRules,
     ruleCount,
     enabledCount,
     lifecycleByReasonCode,

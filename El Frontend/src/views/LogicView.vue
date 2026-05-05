@@ -37,6 +37,7 @@ import {
   Check,
   X,
   AlertCircle,
+  AlertTriangle,
   Maximize2,
   Loader2,
   ArrowLeft,
@@ -821,6 +822,21 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- ======================== DEGRADED BANNER ======================== -->
+    <div
+      v-if="logicStore.degradedRules.length > 0"
+      class="rules-degraded-banner"
+      role="alert"
+      aria-live="polite"
+    >
+      <AlertTriangle class="rules-degraded-banner__icon w-4 h-4" aria-hidden="true" />
+      <span class="rules-degraded-banner__text">
+        {{ logicStore.degradedRules.length }}
+        kritische Regel{{ logicStore.degradedRules.length === 1 ? '' : 'n' }}
+        aktuell degradiert — Target-ESP offline
+      </span>
+    </div>
+
     <!-- ======================== MAIN CONTENT ======================== -->
     <div class="rules-content">
       <!-- Loading -->
@@ -1083,6 +1099,29 @@ onUnmounted(() => {
   height: 100%;
   overflow: hidden;
   background: var(--color-bg-primary);
+}
+
+/* ======================== DEGRADED BANNER ======================== */
+
+.rules-degraded-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 1rem;
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
+  flex-shrink: 0;
+}
+
+.rules-degraded-banner__icon {
+  color: var(--color-warning);
+  flex-shrink: 0;
+}
+
+.rules-degraded-banner__text {
+  font-size: var(--text-xs);
+  color: var(--color-warning);
+  font-weight: 500;
 }
 
 /* ======================== TOOLBAR ======================== */

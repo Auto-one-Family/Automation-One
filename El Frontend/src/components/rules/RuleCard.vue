@@ -244,7 +244,7 @@ const lastTriggeredText = computed(() => {
 }
 
 .rule-card--active {
-  animation: rule-flash 1.5s ease-out;
+  animation: rule-flash 150ms ease-out;
 }
 
 @keyframes rule-flash {
@@ -311,30 +311,45 @@ const lastTriggeredText = computed(() => {
 }
 
 .rule-card__status-label {
+  display: inline-flex;
+  align-items: center;
   font-size: var(--text-xxs);
   font-weight: 600;
   letter-spacing: 0.03em;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
   flex-shrink: 0;
 }
 
 .rule-card__status-label--active {
   color: var(--color-status-success);
+  background: color-mix(in srgb, var(--color-status-success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-status-success) 25%, transparent);
 }
 
 .rule-card__status-label--disabled {
   color: var(--color-text-muted);
+  background: color-mix(in srgb, var(--color-text-muted) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-text-muted) 18%, transparent);
 }
 
 .rule-card__status-label--error {
   color: var(--color-status-error);
+  background: color-mix(in srgb, var(--color-status-error) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-status-error) 25%, transparent);
 }
 
 .rule-card__status-label--pending {
   color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 25%, transparent);
 }
 
 .rule-card__status-label--warning {
   color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 25%, transparent);
 }
 
 .rule-card__reason-code {

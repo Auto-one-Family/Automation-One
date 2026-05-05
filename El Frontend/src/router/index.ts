@@ -20,7 +20,6 @@ const LEGACY_DECOMMISSION_PLAN = {
 } as const
 const LEGACY_REDIRECT_PATTERNS: RegExp[] = [
   /^\/custom-dashboard$/,
-  /^\/dashboard-legacy$/,
   /^\/devices(?:\/.*)?$/,
   /^\/mock-esp(?:\/.*)?$/,
   /^\/database$/,
@@ -158,12 +157,6 @@ const router = createRouter({
         {
           path: 'custom-dashboard',
           redirect: '/editor',
-        },
-
-        // DEPRECATED 2026-02-23: DashboardView-Legacy → Hardware
-        {
-          path: 'dashboard-legacy',
-          redirect: '/hardware',
         },
 
         // DEPRECATED redirects (backward compatibility)
