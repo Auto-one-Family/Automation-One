@@ -347,6 +347,12 @@ HEARTBEAT_FIRMWARE_FLAG_TOTAL = Counter(
     ["flag"],
 )
 
+HEARTBEAT_FIRMWARE_COUNTER_GAUGE = Gauge(
+    "heartbeat_firmware_counter",
+    "Latest firmware counter value reported in heartbeat (drop/reject/drift)",
+    ["esp_id", "counter_name"],
+)
+
 QUEUE_PRESSURE_EVENT_TOTAL = Counter(
     "queue_pressure_event_total",
     "ESP32 publish-queue pressure events (entered_pressure / recovered)",
@@ -988,6 +994,35 @@ def observe_heartbeat_firmware_flags(payload: dict) -> None:
     for key, label in flag_map:
         if payload.get(key) is True:
             HEARTBEAT_FIRMWARE_FLAG_TOTAL.labels(flag=label).inc()
+
+
+def observe_heartbeat_firmware_counters(esp_id: str, payload: dict) -> None:
+    """Track latest firmware counter values as Prometheus Gauges (per ESP).
+
+    Called from heartbeat_handler after successful payload validation (AUT-133 B-MU-04).
+    Covers both existing telemetry fields and the new B-MU-02 queue/retry counters.
+
+    Args:
+        esp_id: ESP device identifier used as Gauge label.
+        payload: Merged heartbeat payload dict.
+    """
+    if not isinstance(payload, dict):
+        return
+    counter_fields = (
+        "critical_outcome_drop_count",
+        "publish_outbox_drop_count",
+        "persistence_drift_count",
+        "heartbeat_degraded_count",
+        "publish_queue_drop_count",
+        "safe_publish_retry_count",
+    )
+    esp_label = str(esp_id) if esp_id else "unknown"
+    for field in counter_fields:
+        value = payload.get(field)
+        if isinstance(value, (int, float)) and value >= 0:
+            HEARTBEAT_FIRMWARE_COUNTER_GAUGE.labels(
+                esp_id=esp_label, counter_name=field
+            ).set(value)
 
 
 def increment_contract_unknown_code(event_type: str, amount: int = 1) -> None:

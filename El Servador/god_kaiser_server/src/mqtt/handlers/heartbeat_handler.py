@@ -37,6 +37,7 @@ from ...core.metrics import (
     increment_connect_attempt,
     observe_heartbeat_ack_latency_ms,
     observe_heartbeat_firmware_flags,
+    observe_heartbeat_firmware_counters,
     observe_tls_handshake_latency_ms,
     update_esp_boot_count,
     update_esp_heartbeat_timestamp,
@@ -351,6 +352,7 @@ class HeartbeatHandler:
             validation_result = self._validate_payload(payload)
             if validation_result["valid"]:
                 observe_heartbeat_firmware_flags(payload)
+                observe_heartbeat_firmware_counters(esp_id_str, payload)
 
             if not validation_result["valid"]:
                 error_code = validation_result.get(

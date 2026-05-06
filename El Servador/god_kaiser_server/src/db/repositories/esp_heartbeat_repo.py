@@ -46,6 +46,9 @@ _RUNTIME_TELEMETRY_KEYS = frozenset(
         "session_epoch",
         "metrics_delta_ts",
         "metrics_freshness_seconds",
+        "publish_queue_drop_count",
+        "safe_publish_retry_count",
+        "adoption_delta_count",
     }
 )
 
