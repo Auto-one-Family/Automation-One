@@ -821,6 +821,23 @@ function closeActuatorConfigPanel() {
   showActuatorConfig.value = false
 }
 
+/**
+ * AUT-251: User clicked "im Geraet aendern" inside SensorConfigPanel/ActuatorConfigPanel.
+ * Closes the config panel and opens the ESP-Settings-Sheet for the device, where the
+ * Zone is actually managed (Zone gehoert zum Geraet, nicht zum einzelnen Sensor/Aktor).
+ */
+function handleOpenEspSettingsFromConfig(payload: { espId: string }) {
+  const device = espStore.devices.find(d => espStore.getDeviceId(d) === payload.espId)
+  if (!device) return
+  // Close the inner config panels first (avoid stacked SlideOvers competing)
+  showSensorConfig.value = false
+  showActuatorConfig.value = false
+  // Open ESP-Settings-Sheet
+  if (settingsCloseTimer) { clearTimeout(settingsCloseTimer); settingsCloseTimer = null }
+  settingsDevice.value = device
+  isSettingsOpen.value = true
+}
+
 function handleDeviceDeleted(_payload: { deviceId: string }) {
   handleSettingsClose()
 }
@@ -1258,6 +1275,7 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
         :show-metadata="false"
         @deleted="closeSensorConfigPanel(); espStore.fetchDevice(configSensorData!.espId)"
         @saved="closeSensorConfigPanel(); espStore.fetchDevice(configSensorData!.espId)"
+        @open-esp-settings="handleOpenEspSettingsFromConfig"
       />
     </SlideOver>
 
@@ -1277,6 +1295,7 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
         :show-metadata="false"
         @deleted="closeActuatorConfigPanel(); espStore.fetchDevice(configActuatorData!.espId)"
         @saved="closeActuatorConfigPanel(); espStore.fetchDevice(configActuatorData!.espId)"
+        @open-esp-settings="handleOpenEspSettingsFromConfig"
       />
     </SlideOver>
 

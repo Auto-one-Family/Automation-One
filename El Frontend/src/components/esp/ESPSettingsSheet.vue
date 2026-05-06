@@ -29,6 +29,7 @@ import {
   Tag,
   Activity,
   Thermometer,
+  ChevronRight,
 } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import { Badge, AccordionSection } from '@/shared/design/primitives'
@@ -65,7 +66,17 @@ const emit = defineEmits<{
   'zone-updated': [payload: { deviceId: string; zoneId: string; zoneName: string }]
   deleted: [payload: { deviceId: string }]
   'heartbeat-triggered': [payload: { deviceId: string }]
+  /** AUT-251: Drilldown to subzone (consumer should open SubzoneContextEditor when available) */
+  'subzone-drilldown': [payload: { subzoneId: string; subzoneName: string }]
 }>()
+
+/**
+ * AUT-251: Subzone-Drilldown aus der "Subzonen-Übersicht".
+ * Emittiert Event nach oben — Consumer kann SubzoneContextEditor öffnen, falls vorhanden.
+ */
+function handleSubzoneDrilldown(subzoneId: string, subzoneName: string) {
+  emit('subzone-drilldown', { subzoneId, subzoneName })
+}
 
 // =============================================================================
 // REFS & STORE
@@ -838,13 +849,26 @@ onUnmounted(() => {
           <Thermometer class="w-3.5 h-3.5" />
           Subzonen-Übersicht
         </h4>
+        <p class="sheet-section__hint">
+          Welche Subzonen mit Sensoren/Aktoren dieses Gerätes verknüpft sind. Read-only.
+        </p>
         <div class="sheet-section__content">
           <div
             v-for="group in devicesBySubzone"
             :key="group.subzoneId ?? 'none'"
             class="device-group"
           >
-            <h5 class="device-group__title">{{ group.subzoneName }}</h5>
+            <button
+              v-if="group.subzoneId"
+              type="button"
+              class="device-group__title device-group__title--clickable"
+              :aria-label="`Subzone ${group.subzoneName} öffnen`"
+              @click="handleSubzoneDrilldown(group.subzoneId, group.subzoneName)"
+            >
+              <span>{{ group.subzoneName }}</span>
+              <ChevronRight class="device-group__drilldown-icon" />
+            </button>
+            <h5 v-else class="device-group__title">{{ group.subzoneName }}</h5>
             <ul class="device-list">
               <li
                 v-for="(item, idx) in group.items"
@@ -1022,6 +1046,14 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+/* AUT-251: Hinweistext unterhalb Sektions-Titel */
+.sheet-section__hint {
+  font-size: var(--text-xxs);
+  color: var(--color-text-muted);
+  margin: var(--space-1) 0;
+  font-style: italic;
 }
 
 .sheet-hint {
@@ -1277,6 +1309,38 @@ onUnmounted(() => {
   color: var(--color-text-secondary);
   margin: 0;
   padding: 0 var(--space-1);
+}
+
+/* AUT-251: Drilldown auf benannte Subzonen */
+.device-group__title--clickable {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-iridescent-1);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  transition: color var(--transition-fast);
+}
+
+.device-group__title--clickable:hover {
+  color: var(--color-text-primary);
+}
+
+.device-group__title--clickable:focus-visible {
+  outline: 2px solid var(--color-iridescent-1);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.device-group__drilldown-icon {
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
 }
 
 .device-list {

@@ -55,7 +55,14 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   deleted: []
   saved: []
+  /** AUT-251: User wants to edit zone — open ESP-Settings-Sheet for current device */
+  'open-esp-settings': [payload: { espId: string }]
 }>()
+
+/** AUT-251: Emit request to open ESP-Settings-Sheet (zone is edited there). */
+function requestOpenEspSettings() {
+  emit('open-esp-settings', { espId: props.espId })
+}
 
 const toast = useToast()
 const espStore = useEspStore()
@@ -608,10 +615,23 @@ function formatDuration(seconds: number): string {
         <h3 class="actuator-config__section-title">Grundeinstellungen</h3>
 
         <!-- Zone: read-only, vom Geraet vererbt (Subzone wird unten als Dropdown gepflegt) — AUT-251 -->
+        <!-- Zone gehoert zum Geraet, NICHT zum Aktor — "im Geraet aendern" oeffnet ESP-Settings -->
+        <div class="actuator-config__zone-header">
+          <span class="actuator-config__zone-label">Geraet:</span>
+          <span class="actuator-config__zone-value">{{ contextDevice?.name || espId }}</span>
+          <span class="actuator-config__zone-hint">(vom Geraet vererbt)</span>
+        </div>
         <div class="actuator-config__zone-header">
           <span class="actuator-config__zone-label">Zone:</span>
           <span class="actuator-config__zone-value">{{ contextDevice?.zone_name || contextDevice?.zone_id || 'Keine Zone' }}</span>
-          <span class="actuator-config__zone-hint">(vom Geraet vererbt)</span>
+          <button
+            type="button"
+            class="actuator-config__zone-link"
+            aria-label="Zone im Geraet aendern"
+            @click="requestOpenEspSettings"
+          >
+            im Geraet aendern
+          </button>
         </div>
 
         <div class="actuator-config__field">
@@ -1033,6 +1053,32 @@ function formatDuration(seconds: number): string {
   font-size: var(--text-xxs);
   color: var(--color-text-muted);
   font-style: italic;
+}
+
+.actuator-config__zone-link {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  color: var(--color-iridescent-1);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.actuator-config__zone-link:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-iridescent-1);
+  background: var(--color-bg-tertiary);
+}
+
+.actuator-config__zone-link:focus-visible {
+  outline: 2px solid var(--color-iridescent-1);
+  outline-offset: 2px;
 }
 
 /* Control Panel */

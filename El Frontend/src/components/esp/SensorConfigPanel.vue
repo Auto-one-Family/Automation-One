@@ -11,7 +11,7 @@
 
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Save, Gauge, Settings, Cpu, Trash2, LayoutGrid, Workflow, ExternalLink, Info } from 'lucide-vue-next'
+import { Save, Gauge, Settings, Cpu, Trash2, LayoutGrid, Workflow, ExternalLink, Info, FileText, Sprout } from 'lucide-vue-next'
 import { sensorsApi } from '@/api/sensors'
 import { espApi } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
@@ -31,6 +31,10 @@ import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSect
 import SettingsBreadcrumb from '@/components/settings/SettingsBreadcrumb.vue'
 import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { useLogicStore } from '@/shared/stores/logic.store'
+import { usePlantsStore } from '@/shared/stores/plants.store'
+import { formatRelativeTime } from '@/utils/formatters'
+import { PLANT_PHASE_LABELS, getPlantEventTypeLabel } from '@/components/plants/plantLabels'
+import type { Plant, PlantLifecycleEvent } from '@/types'
 import { extractSensorConditions } from '@/types/logic'
 import type { LogicRule } from '@/types/logic'
 import { deviceContextApi } from '@/api/device-context'
@@ -64,7 +68,14 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   deleted: []
   saved: []
+  /** AUT-251: User wants to edit zone — open ESP-Settings-Sheet for current device */
+  'open-esp-settings': [payload: { espId: string }]
 }>()
+
+/** AUT-251: Emit request to open ESP-Settings-Sheet (zone is edited there). */
+function requestOpenEspSettings() {
+  emit('open-esp-settings', { espId: props.espId })
+}
 
 const toast = useToast()
 const router = useRouter()
@@ -74,6 +85,7 @@ const uiStore = useUiStore()
 const zoneStore = useZoneStore()
 const dashboardStore = useDashboardStore()
 const logicStore = useLogicStore()
+const plantsStore = usePlantsStore()
 
 // =============================================================================
 // State
@@ -143,6 +155,116 @@ const metadata = ref<DeviceMetadata>({})
 
 const sensorConfig = computed(() => SENSOR_TYPE_CONFIG[props.sensorType])
 const defaultUnit = computed(() => getSensorUnit(props.sensorType) || props.unit || '')
+
+// =============================================================================
+// AUT-252: Datasheet metadata (read-only) + Plant context
+// =============================================================================
+
+/** Hat dieser Sensor-Typ Datenblatt-Metadaten hinterlegt? */
+const hasDatasheet = computed<boolean>(() => {
+  const cfg = sensorConfig.value
+  if (!cfg) return false
+  return Boolean(
+    cfg.manufacturer
+    || cfg.accuracy
+    || cfg.datasheetUrl
+    || cfg.maintenanceYears != null
+    || cfg.calibrationRequired != null
+    || cfg.calibrationNote,
+  )
+})
+
+/**
+ * AUT-252: Pflanzen-Kontext fuer die aktuelle Subzone.
+ * Liefert die Pflanze, die der Subzone des Sensors zugeordnet ist (soft-deleted ausgeschlossen).
+ */
+const subzonePlant = computed<Plant | null>(() => {
+  const sz = subzoneId.value
+  if (!sz) return null
+  const found = plantsStore.plants.find(
+    (p) => p.subzone_id === sz && !p.deleted_at,
+  )
+  return found ?? null
+})
+
+/** Letzte 3 Lifecycle-Events der zugeordneten Pflanze (chronologisch absteigend). */
+const recentLifecycleEvents = computed<PlantLifecycleEvent[]>(() => {
+  const plant = subzonePlant.value
+  if (!plant) return []
+  const events = plant.lifecycle_events ?? []
+  // events kommen vom Server in der Regel absteigend; Defensiv erneut sortieren.
+  return [...events]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 3)
+})
+
+/**
+ * AUT-252: Empfohlene Schwellwerte aus Plant-Profil ableiten.
+ * Plant-Schema hat aktuell kein `thresholds_json` Feld — wir lesen defensiv und
+ * unterstuetzen es, sobald Server es liefert (kein Schema-Bruch).
+ * Erwartetes Format: { [sensorType: string]: { warn_low?: number; warn_high?: number; alarm_low?: number; alarm_high?: number } }
+ */
+interface PlantThresholdProfile {
+  warn_low?: number | null
+  warn_high?: number | null
+  alarm_low?: number | null
+  alarm_high?: number | null
+}
+
+const plantThresholdsForSensor = computed<PlantThresholdProfile | null>(() => {
+  const plant = subzonePlant.value
+  if (!plant) return null
+  const ext = plant as unknown as Record<string, unknown>
+  const raw = ext.thresholds_json
+  if (!raw || typeof raw !== 'object') return null
+  const sensorTypeKey = String(props.sensorType)
+  const map = raw as Record<string, unknown>
+  // Try exact, lower, and upper key variants
+  const candidate =
+    map[sensorTypeKey]
+    ?? map[sensorTypeKey.toLowerCase()]
+    ?? map[sensorTypeKey.toUpperCase()]
+  if (!candidate || typeof candidate !== 'object') return null
+  const t = candidate as Record<string, unknown>
+  const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  return {
+    warn_low: num(t.warn_low),
+    warn_high: num(t.warn_high),
+    alarm_low: num(t.alarm_low),
+    alarm_high: num(t.alarm_high),
+  }
+})
+
+const hasPlantThresholds = computed<boolean>(() => {
+  const t = plantThresholdsForSensor.value
+  if (!t) return false
+  return [t.alarm_low, t.warn_low, t.warn_high, t.alarm_high].some(v => v != null)
+})
+
+/** Pflanzen-Phase als deutsches Label (Fallback: roher Wert). */
+const plantPhaseLabel = computed<string>(() => {
+  const plant = subzonePlant.value
+  if (!plant) return ''
+  return PLANT_PHASE_LABELS[plant.phase] ?? plant.phase
+})
+
+/** Schwellwerte aus Pflanzenprofil uebernehmen + speichern. */
+const applyingPlantThresholds = ref(false)
+
+async function applyPlantThresholds(): Promise<void> {
+  const t = plantThresholdsForSensor.value
+  if (!t) return
+  applyingPlantThresholds.value = true
+  try {
+    if (t.alarm_low != null) alarmLow.value = roundToDecimals(t.alarm_low, 2)
+    if (t.warn_low != null) warnLow.value = roundToDecimals(t.warn_low, 2)
+    if (t.warn_high != null) warnHigh.value = roundToDecimals(t.warn_high, 2)
+    if (t.alarm_high != null) alarmHigh.value = roundToDecimals(t.alarm_high, 2)
+    await handleSave()
+  } finally {
+    applyingPlantThresholds.value = false
+  }
+}
 
 const isI2C = computed(() => interfaceType.value === 'I2C')
 const isOneWire = computed(() => interfaceType.value === 'ONEWIRE')
@@ -380,6 +502,11 @@ onMounted(async () => {
   if (logicStore.rules.length === 0) {
     logicStore.fetchRules().catch(() => {})
   }
+
+  // AUT-252: Plants fuer Subzone-Pflanzen-Kontext laden
+  if (plantsStore.plants.length === 0) {
+    plantsStore.fetchPlants().catch(() => {})
+  }
 })
 
 function setCronExpression(expression: string) {
@@ -597,10 +724,23 @@ async function handleSave() {
         <h3 class="sensor-config__section-title">Grundeinstellungen</h3>
 
         <!-- Zone: read-only, vom Geraet vererbt (Subzone wird unten als Dropdown gepflegt) -->
+        <!-- AUT-251: Zone gehoert zum Geraet, NICHT zum Sensor — "im Geraet aendern" oeffnet ESP-Settings -->
+        <div class="sensor-config__zone-header">
+          <span class="sensor-config__zone-label">Geraet:</span>
+          <span class="sensor-config__zone-value">{{ contextDevice?.name || espId }}</span>
+          <span class="sensor-config__zone-hint">(vom Geraet vererbt)</span>
+        </div>
         <div class="sensor-config__zone-header">
           <span class="sensor-config__zone-label">Zone:</span>
           <span class="sensor-config__zone-value">{{ contextDevice?.zone_name || contextDevice?.zone_id || 'Keine Zone' }}</span>
-          <span class="sensor-config__zone-hint">(vom Geraet vererbt)</span>
+          <button
+            type="button"
+            class="sensor-config__zone-link"
+            aria-label="Zone im Geraet aendern"
+            @click="requestOpenEspSettings"
+          >
+            im Geraet aendern
+          </button>
         </div>
 
         <div class="sensor-config__field">
@@ -970,6 +1110,64 @@ async function handleSave() {
         </template>
       </AccordionSection>
 
+      <!-- AUT-252: Sensor-Datenblatt (read-only, aus SENSOR_TYPE_CONFIG) -->
+      <AccordionSection
+        title="Sensor-Datenblatt"
+        :storage-key="`${accordionKey}-datasheet`"
+        :icon="FileText"
+      >
+        <div v-if="hasDatasheet && sensorConfig" class="sensor-config__datasheet">
+          <div class="sensor-config__datasheet-row">
+            <span class="sensor-config__datasheet-label">Typ</span>
+            <span class="sensor-config__datasheet-value">{{ sensorConfig.label }} ({{ sensorType }})</span>
+          </div>
+          <div v-if="sensorConfig.manufacturer" class="sensor-config__datasheet-row">
+            <span class="sensor-config__datasheet-label">Hersteller</span>
+            <span class="sensor-config__datasheet-value">{{ sensorConfig.manufacturer }}</span>
+          </div>
+          <div v-if="sensorConfig.accuracy" class="sensor-config__datasheet-row">
+            <span class="sensor-config__datasheet-label">Genauigkeit</span>
+            <span class="sensor-config__datasheet-value">{{ sensorConfig.accuracy }}</span>
+          </div>
+          <div v-if="sensorConfig.calibrationRequired != null" class="sensor-config__datasheet-row">
+            <span class="sensor-config__datasheet-label">Kalibrierung</span>
+            <span class="sensor-config__datasheet-value">
+              {{ sensorConfig.calibrationRequired ? 'Periodisch erforderlich' : 'Werks-kalibriert' }}
+              <span v-if="sensorConfig.calibrationNote" class="sensor-config__datasheet-note">
+                — {{ sensorConfig.calibrationNote }}
+              </span>
+            </span>
+          </div>
+          <div v-if="sensorConfig.maintenanceYears != null" class="sensor-config__datasheet-row">
+            <span class="sensor-config__datasheet-label">Wartungsintervall</span>
+            <span class="sensor-config__datasheet-value">
+              {{ sensorConfig.maintenanceYears }} {{ sensorConfig.maintenanceYears === 1 ? 'Jahr' : 'Jahre' }}
+            </span>
+          </div>
+          <div v-if="sensorConfig.datasheetUrl" class="sensor-config__datasheet-row">
+            <span class="sensor-config__datasheet-label">Datenblatt</span>
+            <a
+              class="sensor-config__datasheet-link"
+              :href="sensorConfig.datasheetUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Hersteller-Dokumentation
+              <ExternalLink class="sensor-config__datasheet-link-icon" aria-hidden="true" />
+            </a>
+          </div>
+        </div>
+        <div v-else class="sensor-config__datasheet-empty">
+          <Info class="sensor-config__datasheet-empty-icon" aria-hidden="true" />
+          <div>
+            <p class="sensor-config__datasheet-empty-title">Datenblatt nicht hinterlegt</p>
+            <p class="sensor-config__datasheet-empty-hint">
+              Hersteller- und Genauigkeitsdaten werden zentral in der Komponenten-Bibliothek gepflegt.
+            </p>
+          </div>
+        </div>
+      </AccordionSection>
+
       <!-- Live Preview -->
       <AccordionSection
         title="Live-Vorschau"
@@ -978,6 +1176,79 @@ async function handleSave() {
       >
         <div class="sensor-config__preview">
           <LiveDataPreview :esp-id="espId" :gpio="gpio" :sensor-type="sensorType" :unit="unitValue || defaultUnit" />
+        </div>
+      </AccordionSection>
+
+      <!-- AUT-252: Pflanzen-Kontext (nur wenn Subzone eine Pflanze hat) -->
+      <AccordionSection
+        v-if="subzonePlant"
+        title="Pflanzen-Kontext"
+        :storage-key="`${accordionKey}-plant-context`"
+        :icon="Sprout"
+      >
+        <div class="sensor-config__plant-context">
+          <!-- Stammdaten -->
+          <div class="sensor-config__plant-header">
+            <div class="sensor-config__plant-genotype">{{ subzonePlant.genotype }}</div>
+            <span class="sensor-config__plant-phase">{{ plantPhaseLabel }}</span>
+          </div>
+          <div v-if="subzonePlant.qr_code" class="sensor-config__plant-qr">
+            QR-Label: <span class="sensor-config__plant-qr-code">{{ subzonePlant.qr_code }}</span>
+          </div>
+
+          <!-- Empfohlene Schwellwerte -->
+          <div class="sensor-config__plant-thresholds">
+            <h4 class="sensor-config__plant-section-title">Empfohlene Schwellwerte</h4>
+            <div v-if="hasPlantThresholds && plantThresholdsForSensor" class="sensor-config__plant-thresholds-grid">
+              <div v-if="plantThresholdsForSensor.alarm_low != null" class="sensor-config__plant-threshold">
+                <span class="sensor-config__plant-threshold-label sensor-config__label--alarm">Alarm &#8595;</span>
+                <span class="sensor-config__plant-threshold-value">{{ plantThresholdsForSensor.alarm_low }} {{ unitValue || defaultUnit }}</span>
+              </div>
+              <div v-if="plantThresholdsForSensor.warn_low != null" class="sensor-config__plant-threshold">
+                <span class="sensor-config__plant-threshold-label sensor-config__label--warn">Warn &#8595;</span>
+                <span class="sensor-config__plant-threshold-value">{{ plantThresholdsForSensor.warn_low }} {{ unitValue || defaultUnit }}</span>
+              </div>
+              <div v-if="plantThresholdsForSensor.warn_high != null" class="sensor-config__plant-threshold">
+                <span class="sensor-config__plant-threshold-label sensor-config__label--warn">Warn &#8593;</span>
+                <span class="sensor-config__plant-threshold-value">{{ plantThresholdsForSensor.warn_high }} {{ unitValue || defaultUnit }}</span>
+              </div>
+              <div v-if="plantThresholdsForSensor.alarm_high != null" class="sensor-config__plant-threshold">
+                <span class="sensor-config__plant-threshold-label sensor-config__label--alarm">Alarm &#8593;</span>
+                <span class="sensor-config__plant-threshold-value">{{ plantThresholdsForSensor.alarm_high }} {{ unitValue || defaultUnit }}</span>
+              </div>
+            </div>
+            <p v-else class="sensor-config__plant-hint">
+              <Info class="sensor-config__sub-hint-icon" aria-hidden="true" />
+              Fuer dieses Pflanzenprofil sind keine sensor-typ-spezifischen Schwellwerte hinterlegt. Werte werden manuell gepflegt.
+            </p>
+
+            <button
+              v-if="hasPlantThresholds"
+              type="button"
+              class="sensor-config__plant-apply-btn"
+              :disabled="applyingPlantThresholds || saving"
+              @click="applyPlantThresholds"
+            >
+              <Save class="w-4 h-4" />
+              {{ applyingPlantThresholds ? 'Übernehme...' : 'Aus Pflanzenprofil übernehmen' }}
+            </button>
+          </div>
+
+          <!-- Letzte Lifecycle-Events -->
+          <div v-if="recentLifecycleEvents.length > 0" class="sensor-config__plant-events">
+            <h4 class="sensor-config__plant-section-title">Letzte Ereignisse</h4>
+            <ul class="sensor-config__plant-events-list">
+              <li
+                v-for="evt in recentLifecycleEvents"
+                :key="evt.id"
+                class="sensor-config__plant-event"
+              >
+                <span class="sensor-config__plant-event-type">{{ getPlantEventTypeLabel(evt.event_type) }}</span>
+                <span class="sensor-config__plant-event-time">{{ formatRelativeTime(evt.created_at) }}</span>
+                <p v-if="evt.note" class="sensor-config__plant-event-note">{{ evt.note }}</p>
+              </li>
+            </ul>
+          </div>
         </div>
       </AccordionSection>
 
@@ -1156,6 +1427,32 @@ async function handleSave() {
   font-size: var(--text-xxs);
   color: var(--color-text-muted);
   font-style: italic;
+}
+
+.sensor-config__zone-link {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  color: var(--color-iridescent-1);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.sensor-config__zone-link:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-iridescent-1);
+  background: var(--color-bg-tertiary);
+}
+
+.sensor-config__zone-link:focus-visible {
+  outline: 2px solid var(--color-iridescent-1);
+  outline-offset: 2px;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1716,5 +2013,268 @@ async function handleSave() {
 .sensor-config__delete:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUT-252: Sensor-Datenblatt (read-only)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.sensor-config__datasheet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sensor-config__datasheet-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.sensor-config__datasheet-row:last-child {
+  border-bottom: none;
+}
+
+.sensor-config__datasheet-label {
+  flex: 0 0 140px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.sensor-config__datasheet-value {
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.sensor-config__datasheet-note {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.sensor-config__datasheet-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-accent-bright);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.sensor-config__datasheet-link:hover {
+  color: var(--color-iridescent-2);
+  text-decoration: underline;
+}
+
+.sensor-config__datasheet-link-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.sensor-config__datasheet-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-bg-tertiary);
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-sm);
+}
+
+.sensor-config__datasheet-empty-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-info);
+}
+
+.sensor-config__datasheet-empty-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.sensor-config__datasheet-empty-hint {
+  margin: var(--space-1) 0 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: var(--leading-normal);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUT-252: Pflanzen-Kontext
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.sensor-config__plant-context {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sensor-config__plant-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+}
+
+.sensor-config__plant-genotype {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.sensor-config__plant-phase {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--color-accent-dim);
+  color: var(--color-accent-bright);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.sensor-config__plant-qr {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.sensor-config__plant-qr-code {
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+}
+
+.sensor-config__plant-section-title {
+  margin: 0 0 var(--space-2) 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.sensor-config__plant-thresholds {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sensor-config__plant-thresholds-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-2);
+}
+
+.sensor-config__plant-threshold {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+}
+
+.sensor-config__plant-threshold-label {
+  font-size: var(--text-xxs);
+  font-weight: 500;
+}
+
+.sensor-config__plant-threshold-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.sensor-config__plant-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: var(--leading-normal);
+}
+
+.sensor-config__plant-apply-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-accent-dim);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent-bright);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sensor-config__plant-apply-btn:hover:not(:disabled) {
+  background: rgba(96, 165, 250, 0.2);
+}
+
+.sensor-config__plant-apply-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sensor-config__plant-events-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sensor-config__plant-event {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-left: 2px solid var(--color-accent-dim);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sensor-config__plant-event-type {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.sensor-config__plant-event-time {
+  font-size: var(--text-xxs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.sensor-config__plant-event-note {
+  margin: var(--space-1) 0 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
 }
 </style>
