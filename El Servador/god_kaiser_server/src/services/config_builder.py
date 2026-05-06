@@ -19,6 +19,8 @@ Priority: CRITICAL
 Status: IMPLEMENTED
 """
 
+import json
+import time
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
@@ -33,6 +35,52 @@ from ..db.repositories import ESPRepository, SensorRepository, ActuatorRepositor
 from ..sensors.sensor_type_registry import normalize_sensor_type
 
 logger = get_logger(__name__)
+
+# AUT-134 PKG-01: Pre-flight Config-Budget für serverseitigen Auto-Push.
+#
+# El Trabajante: ``CONFIG_PAYLOAD_MAX_LEN`` (config_update_queue.h) liegt bei
+# 4352 Bytes inkl. MQTT-/Header-Overhead. Für reines JSON ist das effektive
+# Budget ~4096 Bytes — wir nutzen diese konservative Schwelle als Pre-flight
+# Gate VOR dem Auto-Push, damit der Server gar nicht erst Frames produziert,
+# die der ESP32-Ingress beim Empfang verwirft. Die finale Wire-Schwelle in
+# ``ESPService.send_config`` (4352) bleibt als Defense-in-Depth bestehen.
+CONFIG_AUTOPUSH_BUDGET_BYTES = 4096
+
+
+def estimate_config_wire_size(config: Dict[str, Any]) -> int:
+    """
+    Schätzt die finale JSON-Wire-Größe der Config wie ``ESPService.send_config``.
+
+    Spiegelt die Felder, die der Publisher zusätzlich injiziert
+    (``correlation_id``/``request_id``/``intent_id``/``generation``/
+    ``config_fingerprint``/``reason_code``/``timestamp``), um eine realistische
+    Vorab-Schätzung zu erhalten. Genaue Werte sind nicht kritisch — wir nutzen
+    Platzhalter mit identischer Länge.
+
+    Args:
+        config: Config-Frame, der an ``send_config`` übergeben würde.
+
+    Returns:
+        Anzahl Bytes der serialisierten Wire-Form (UTF-8).
+    """
+    sentinel_correlation = "00000000-0000-0000-0000-000000000000"
+    wire_for_size = {
+        **config,
+        "correlation_id": sentinel_correlation,
+        "request_id": sentinel_correlation,
+        "intent_id": sentinel_correlation,
+        "generation": int(time.time() * 1000),
+        "config_fingerprint": "0" * 64,
+        "reason_code": str(config.get("reason_code", "auto_push")),
+        "timestamp": int(time.time()),
+    }
+    try:
+        return len(json.dumps(wire_for_size, default=str).encode("utf-8"))
+    except (TypeError, ValueError) as exc:  # noqa: BLE001 — defensive
+        logger.error("Config wire size estimation failed: %s", exc)
+        # Konservative Annahme: bei Serialisierungsfehlern als oversize behandeln,
+        # damit der Caller den sauberen Abbruchpfad wählt.
+        return CONFIG_AUTOPUSH_BUDGET_BYTES + 1
 
 
 def _get_default_deadband(sensor_type: str) -> float:

@@ -2087,14 +2087,38 @@ class HeartbeatHandler:
 
         Runs as a separate async task so it doesn't block heartbeat processing.
         Uses its own DB session to avoid conflicts with the heartbeat session.
+
+        AUT-134 PKG-01: Pre-flight Budget-Gate. Wenn die geschätzte JSON-Wire-
+        Größe der Combined-Config das ESP32-Ingress-Budget überschreitet, wird
+        der Auto-Push terminiert (kein Publish), das ``config_push_pending``-
+        Flag aufgelöst und Operator-Sichtbarkeit über Audit + WS hergestellt.
+        Damit verhindern wir Retry-Bursts durch wiederkehrende Reject-Loops.
         """
         try:
-            from ...services.config_builder import ConfigPayloadBuilder
+            from ...services.config_builder import (
+                CONFIG_AUTOPUSH_BUDGET_BYTES,
+                ConfigPayloadBuilder,
+                estimate_config_wire_size,
+            )
             from ...services.esp_service import ESPService
 
             async with resilient_session() as session:
                 config_builder = ConfigPayloadBuilder()
                 combined_config = await config_builder.build_combined_config(esp_device_id, session)
+
+                # AUT-134 PKG-01: Pre-flight Budget-Check — VOR dem Publish.
+                estimated_wire_len = estimate_config_wire_size(combined_config)
+                if estimated_wire_len > CONFIG_AUTOPUSH_BUDGET_BYTES:
+                    await self._handle_oversize_auto_push(
+                        session=session,
+                        esp_device_id=esp_device_id,
+                        reason_code=reason_code,
+                        estimated_wire_len=estimated_wire_len,
+                        sensor_count=len(combined_config.get("sensors", [])),
+                        actuator_count=len(combined_config.get("actuators", [])),
+                        offline_rules_count=len(combined_config.get("offline_rules", [])),
+                    )
+                    return
 
                 esp_repo = ESPRepository(session)
                 esp_service = ESPService(esp_repo)
@@ -2135,6 +2159,137 @@ class HeartbeatHandler:
             logger.error(
                 f"Auto config push error for {esp_device_id}: {e}",
                 exc_info=True,
+            )
+
+    async def _handle_oversize_auto_push(
+        self,
+        session,
+        esp_device_id: str,
+        reason_code: str,
+        estimated_wire_len: int,
+        sensor_count: int,
+        actuator_count: int,
+        offline_rules_count: int,
+    ) -> None:
+        """
+        AUT-134 PKG-01: Sauberer Abbruchpfad bei Config-Oversize VOR dem Publish.
+
+        - Räumt das ``config_push_pending``-Flag auf (kein hängendes Pending).
+        - Setzt Metadata: ``config_push_oversize_blocked_at`` + Snapshot.
+        - Schreibt ein strukturiertes Audit-Ereignis (``CONFIG_FAILED``).
+        - Broadcastet ``config_failed`` mit ``intent_outcome="VALIDATION_FAIL"``
+          und ``reason_code="config_oversize"`` an WebSocket-Clients.
+
+        Das Pattern spiegelt den bestehenden Oversize-Pfad in
+        ``ESPService.send_config`` (Wire-Schwelle 4352) — hier greift der
+        Pre-flight Gate früher (4096) und verhindert den MQTT-Publish komplett.
+        """
+        from ...db.models.audit_log import AuditEventType, AuditSeverity, AuditSourceType
+        from ...services.config_builder import CONFIG_AUTOPUSH_BUDGET_BYTES
+
+        # 1) Pending-Flag auflösen, damit Adoption-/Reconnect-Gate weiterläuft.
+        self._config_push_pending_esps.discard(esp_device_id)
+
+        # 2) Metadata aufräumen: kein "scheduled push" hängen lassen.
+        try:
+            esp_repo = ESPRepository(session)
+            dev = await esp_repo.get_by_device_id(esp_device_id)
+            if dev:
+                meta = dict(dev.device_metadata or {})
+                meta.pop("config_push_sent_at", None)
+                meta["config_push_oversize_blocked_at"] = int(time_module.time())
+                meta["config_push_oversize_reason_code"] = reason_code
+                meta["config_push_oversize_snapshot"] = {
+                    "estimated_wire_len": int(estimated_wire_len),
+                    "budget_bytes": int(CONFIG_AUTOPUSH_BUDGET_BYTES),
+                    "sensor_count": int(sensor_count),
+                    "actuator_count": int(actuator_count),
+                    "offline_rules_count": int(offline_rules_count),
+                }
+                dev.device_metadata = meta
+                flag_modified(dev, "device_metadata")
+            await session.commit()
+        except Exception as meta_err:
+            logger.warning(
+                "AUT-134 PKG-01: Failed to persist oversize metadata for %s: %s",
+                esp_device_id,
+                meta_err,
+            )
+
+        # 3) Strukturiertes Log-Ereignis (Operator-sichtbar).
+        logger.error(
+            "AUT-134 PKG-01: Auto-push BLOCKED for %s (reason=%s, "
+            "estimated_wire_len=%d > budget=%d, sensors=%d, actuators=%d, "
+            "offline_rules=%d). Config too large for ESP ingress — Auto-Push terminated.",
+            esp_device_id,
+            reason_code,
+            estimated_wire_len,
+            CONFIG_AUTOPUSH_BUDGET_BYTES,
+            sensor_count,
+            actuator_count,
+            offline_rules_count,
+        )
+
+        # 4) Audit-Log: CONFIG_FAILED mit reason_code=config_oversize.
+        try:
+            audit_repo = AuditLogRepository(session)
+            await audit_repo.create(
+                event_type=AuditEventType.CONFIG_FAILED,
+                severity=AuditSeverity.ERROR,
+                source_type=AuditSourceType.MQTT,
+                source_id=esp_device_id,
+                status="failed",
+                message=(
+                    f"Auto-push blocked for {esp_device_id}: config oversize "
+                    f"({estimated_wire_len} bytes > budget)"
+                ),
+                details={
+                    "esp_id": esp_device_id,
+                    "aut134": "auto_push_preflight_oversize",
+                    "reason_code": "config_oversize",
+                    "trigger_reason_code": reason_code,
+                    "estimated_wire_len": int(estimated_wire_len),
+                    "sensor_count": int(sensor_count),
+                    "actuator_count": int(actuator_count),
+                    "offline_rules_count": int(offline_rules_count),
+                },
+            )
+            await session.commit()
+        except Exception as audit_err:
+            logger.warning(
+                "AUT-134 PKG-01: Failed to write audit for oversize block (%s): %s",
+                esp_device_id,
+                audit_err,
+            )
+
+        # 5) WebSocket-Broadcast: Operator-UI signalisieren (intent_outcome).
+        try:
+            from ...websocket.manager import WebSocketManager
+
+            ws_manager = await WebSocketManager.get_instance()
+            await ws_manager.broadcast(
+                "config_failed",
+                {
+                    "esp_id": esp_device_id,
+                    "intent_outcome": "VALIDATION_FAIL",
+                    "reason_code": "config_oversize",
+                    "trigger_reason_code": reason_code,
+                    "estimated_wire_len": int(estimated_wire_len),
+                    "sensor_count": int(sensor_count),
+                    "actuator_count": int(actuator_count),
+                    "offline_rules_count": int(offline_rules_count),
+                    "error": (
+                        "Combined config exceeds ESP32 ingress budget — "
+                        "Auto-Push blocked before publish."
+                    ),
+                    "timestamp": int(time_module.time()),
+                },
+            )
+        except Exception as ws_err:
+            logger.warning(
+                "AUT-134 PKG-01: WebSocket broadcast for oversize block failed (%s): %s",
+                esp_device_id,
+                ws_err,
             )
 
     async def _handle_reconnect_state_push(self, device_id: str) -> None:
