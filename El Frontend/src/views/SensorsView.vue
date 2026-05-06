@@ -24,6 +24,7 @@ import { useZoneStore } from '@/shared/stores/zone.store'
 import { usePlantsStore } from '@/shared/stores/plants.store'
 import InventoryTable from '@/components/inventory/InventoryTable.vue'
 import DeviceDetailPanel from '@/components/inventory/DeviceDetailPanel.vue'
+import { EmptyState } from '@/shared/design/patterns'
 import PlantDetailPanel from '@/components/plants/PlantDetailPanel.vue'
 import PlantCreateModal from '@/components/plants/PlantCreateModal.vue'
 import { PLANT_PHASES, type Plant } from '@/types'
@@ -571,8 +572,22 @@ function toggleZoneFilter(zone: string) {
       </span>
     </div>
 
+    <!-- Empty State (no components configured at all) -->
+    <EmptyState
+      v-if="store.allComponents.length === 0"
+      :icon="Package"
+      title="Noch keine Sensoren konfiguriert"
+      description="Sobald Sensoren oder Aktoren auf einem ESP32 eingerichtet sind, erscheinen sie hier in der Wissensdatenbank."
+      cta-text="Zur Hardware-Ansicht"
+      :cta-to="{ path: '/hardware' }"
+    >
+      <template #hint>
+        Konfiguration erfolgt unter <strong>Hardware</strong> - hier siehst du nur das Inventar.
+      </template>
+    </EmptyState>
+
     <!-- Table -->
-    <InventoryTable @select="handleSelect" />
+    <InventoryTable v-else @select="handleSelect" />
 
     <!-- Detail SlideOver -->
     <SlideOver

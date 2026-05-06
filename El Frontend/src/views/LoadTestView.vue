@@ -8,7 +8,7 @@ import {
 } from '@/api/loadtest'
 import {
   Zap, Plus, Play, Square, RefreshCw, AlertCircle, Check, X,
-  Server, Thermometer, Power, MessageSquare, Clock
+  Server, Thermometer, Power, MessageSquare, Clock, Info
 } from 'lucide-vue-next'
 import { createLogger } from '@/utils/logger'
 import { useOpsLifecycleStore } from '@/shared/stores/ops-lifecycle.store'
@@ -223,6 +223,29 @@ onUnmounted(() => {
 
 <template>
   <div class="h-full overflow-auto space-y-6">
+    <!-- Intro / Anleitung (sichtbar wenn keine Mock-ESPs aktiv) -->
+    <div v-if="!metrics || metrics.mock_esp_count === 0" class="loadtest-intro">
+      <div class="loadtest-intro__icon-wrap">
+        <Info class="loadtest-intro__icon" />
+      </div>
+      <div class="loadtest-intro__body">
+        <h3 class="loadtest-intro__title">Lasttest noch nicht gestartet</h3>
+        <p class="loadtest-intro__text">
+          Hier kannst du das System mit virtuellen Mock-ESPs unter Last setzen, um
+          Server, MQTT-Broker und Datenbank zu validieren. Drei Schritte:
+        </p>
+        <ol class="loadtest-intro__steps">
+          <li><strong>Preflight pruefen</strong> &mdash; das System schaetzt Geraete-Anzahl, Nachrichten-Volumen und Last/Sekunde ab.</li>
+          <li><strong>Mock-ESPs erstellen</strong> &mdash; ueber das Formular &bdquo;Bulk Create&ldquo; (Anzahl, Sensoren, Aktoren).</li>
+          <li><strong>Simulation starten</strong> &mdash; legt Intervall und Dauer fest. Bei High-Risk: getippte Bestaetigung erforderlich.</li>
+        </ol>
+        <p class="loadtest-intro__hint">
+          Hinweis: Lasttests erzeugen echte MQTT-Nachrichten und DB-Schreibvorgaenge.
+          Verwende sie nicht waehrend produktiver Beobachtungen.
+        </p>
+      </div>
+    </div>
+
     <!-- Header Actions -->
     <div class="flex justify-end">
       <button
@@ -492,13 +515,81 @@ onUnmounted(() => {
       <h4 class="font-medium text-dark-200 mb-2">About Load Testing</h4>
       <p class="text-sm text-dark-400">
         Use this tool to create multiple mock ESP devices and simulate sensor activity.
-        This is useful for stress testing the system, validating MQTT throughput, 
-        and testing the UI under load. Mock ESPs are identified by 
+        This is useful for stress testing the system, validating MQTT throughput,
+        and testing the UI under load. Mock ESPs are identified by
         <code class="text-purple-400">hardware_type = "MOCK_ESP32"</code>.
       </p>
     </div>
   </div>
 </template>
+
+<style scoped>
+.loadtest-intro {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--glass-border);
+}
+
+.loadtest-intro__icon-wrap {
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+}
+
+.loadtest-intro__icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--color-iridescent-1);
+}
+
+.loadtest-intro__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.loadtest-intro__title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-2);
+}
+
+.loadtest-intro__text {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin-bottom: var(--space-3);
+}
+
+.loadtest-intro__steps {
+  list-style: decimal;
+  padding-left: var(--space-5);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+  margin-bottom: var(--space-3);
+}
+
+.loadtest-intro__steps strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.loadtest-intro__hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+  line-height: 1.5;
+}
+</style>
 
 
 

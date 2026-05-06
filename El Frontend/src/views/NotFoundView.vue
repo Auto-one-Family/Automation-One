@@ -28,12 +28,20 @@ const sourcePath = computed(() => {
 
       <div class="not-found__actions">
         <RouterLink to="/hardware" class="btn-primary">
-          Zur Uebersicht
+          Zur Hardware-Uebersicht
         </RouterLink>
         <RouterLink to="/monitor" class="btn-secondary">
-          Zum Monitor
+          Zum Live-Monitor
+        </RouterLink>
+        <RouterLink to="/sensors" class="btn-secondary">
+          Zur Wissensdatenbank
         </RouterLink>
       </div>
+
+      <p class="not-found__hint">
+        Falls du ueber einen Lesezeichen-Link hier gelandet bist, wurde die Route
+        moeglicherweise umbenannt. Pruefe den Pfad oder waehle einen Bereich oben.
+      </p>
     </div>
   </section>
 </template>
@@ -86,5 +94,14 @@ const sourcePath = computed(() => {
   gap: var(--space-3);
   justify-content: center;
   flex-wrap: wrap;
+}
+
+.not-found__hint {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--glass-border);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: 1.5;
 }
 </style>

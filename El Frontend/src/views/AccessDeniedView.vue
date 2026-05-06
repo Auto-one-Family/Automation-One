@@ -34,6 +34,12 @@ const deniedTarget = computed(() => {
           Zu Einstellungen
         </RouterLink>
       </div>
+
+      <p class="access-denied__contact">
+        Du benoetigst Admin-Rechte fuer diesen Bereich? Wende dich an einen
+        bestehenden Administrator. Die Verwaltung der Berechtigungen erfolgt
+        unter <RouterLink to="/users" class="access-denied__contact-link">Benutzer-Verwaltung</RouterLink>.
+      </p>
     </div>
   </section>
 </template>
@@ -86,5 +92,23 @@ const deniedTarget = computed(() => {
   gap: var(--space-3);
   justify-content: center;
   flex-wrap: wrap;
+}
+
+.access-denied__contact {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--glass-border);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.access-denied__contact-link {
+  color: var(--color-iridescent-1);
+  text-decoration: none;
+}
+
+.access-denied__contact-link:hover {
+  text-decoration: underline;
 }
 </style>

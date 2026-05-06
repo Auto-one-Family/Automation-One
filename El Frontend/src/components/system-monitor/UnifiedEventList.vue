@@ -62,12 +62,15 @@ interface Props {
   groupingEnabled: boolean
   isPaused: boolean
   restoredEventIds?: Set<string>
+  /** Whether filters (ESP, Level, Zeitraum) are currently active — drives the empty-state hint. */
+  hasActiveFilters?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   restoredEventIds: () => new Set<string>(),
   groupingEnabled: false,
   groupedEvents: () => [],
+  hasActiveFilters: false,
 })
 
 const emit = defineEmits<{
@@ -467,9 +470,20 @@ onUnmounted(() => {
     <!-- Empty State -->
     <div v-if="events.length === 0" class="monitor-empty">
       <Activity class="w-16 h-16 opacity-20" />
-      <p class="monitor-empty__title">Keine Ereignisse</p>
+      <p class="monitor-empty__title">
+        {{ hasActiveFilters ? 'Keine Events im gewaehlten Zeitraum' : 'Keine Ereignisse' }}
+      </p>
       <p class="monitor-empty__subtitle">
-        {{ isPaused ? 'Stream ist pausiert - klicke Play zum Fortsetzen' : 'Live-Events werden hier angezeigt' }}
+        <template v-if="hasActiveFilters">
+          Mit den aktuellen Filtern (ESP / Level / Zeitraum) wurden keine Events gefunden.
+          Erweitere den Zeitraum oder entferne Filter, um mehr Eintraege zu sehen.
+        </template>
+        <template v-else-if="isPaused">
+          Stream ist pausiert &mdash; klicke Play zum Fortsetzen.
+        </template>
+        <template v-else>
+          Live-Events werden hier angezeigt, sobald Geraete oder Server Aktivitaet melden.
+        </template>
       </p>
     </div>
 

@@ -139,8 +139,12 @@ const particles = Array.from({ length: 18 }, (_, i) => ({
         ]"
       >
         <div class="setup-card__header">
-          <h2 class="setup-card__title">Administrator</h2>
-          <p class="setup-card__desc">Erster Benutzer mit vollen Rechten</p>
+          <h2 class="setup-card__title">Willkommen bei AutomationOne</h2>
+          <p class="setup-card__desc">
+            Schritt 1 von 1 &mdash; lege das erste Administrator-Konto an. Damit
+            erhaeltst du vollen Zugriff auf Geraete, Zonen, Regeln und Systemverwaltung.
+            Weitere Benutzer kannst du spaeter unter <em>Benutzer-Verwaltung</em> hinzufuegen.
+          </p>
         </div>
 
         <form @submit.prevent="handleSetup" class="setup-form">

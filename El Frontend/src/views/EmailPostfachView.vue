@@ -15,9 +15,10 @@ import BaseSelect from '@/shared/design/primitives/BaseSelect.vue'
 import BaseInput from '@/shared/design/primitives/BaseInput.vue'
 import BaseButton from '@/shared/design/primitives/BaseButton.vue'
 import ErrorState from '@/shared/design/patterns/ErrorState.vue'
+import EmptyState from '@/shared/design/patterns/EmptyState.vue'
 import BaseSkeleton from '@/shared/design/primitives/BaseSkeleton.vue'
 import Pagination from '@/components/database/Pagination.vue'
-import { Mail, ExternalLink, RotateCcw } from 'lucide-vue-next'
+import { Mail, MailX, ExternalLink, RotateCcw } from 'lucide-vue-next'
 
 const {
   emails,
@@ -205,9 +206,17 @@ onMounted(() => {
           </table>
         </div>
 
-        <div v-if="emails.length === 0 && !isLoading" class="postfach__empty">
-          Keine E-Mails gefunden.
-        </div>
+        <EmptyState
+          v-if="emails.length === 0 && !isLoading"
+          :icon="MailX"
+          title="Keine E-Mails gefunden"
+          :description="(statusFilter || dateFrom || dateTo || templateFilter)
+            ? 'Mit den aktuellen Filterkriterien wurden keine E-Mails gefunden. Setze die Filter zurück, um alle Eintraege zu sehen.'
+            : 'Sobald das System E-Mails versendet (Alerts, Tagesberichte, Test-Mails), erscheinen sie hier mit Status, Empfaenger und Template.'"
+          :action-text="(statusFilter || dateFrom || dateTo || templateFilter) ? 'Filter zuruecksetzen' : undefined"
+          @action="resetFilters"
+        />
+
 
         <Pagination
           v-if="pagination && pagination.total_items > 0"

@@ -147,6 +147,7 @@ function selectEvent(event: UnifiedEvent) {
         :grouping-enabled="groupingEnabled"
         :is-paused="isPaused"
         :restored-event-ids="restoredEventIds"
+        :has-active-filters="filterEspId !== '' || filterLevels.size > 0 || filterTimeRange !== 'all'"
         @select="selectEvent"
       />
     </div>
