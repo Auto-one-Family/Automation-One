@@ -10,7 +10,7 @@
  */
 
 import { ref, computed, onMounted, watch } from 'vue'
-import { Save, Power, AlertOctagon, AlertTriangle, Info, Zap, Clock, Shield, Settings, Trash2 } from 'lucide-vue-next'
+import { Save, Power, AlertOctagon, AlertTriangle, Info, Zap, Clock, Shield, Settings, Trash2, FileText, ExternalLink } from 'lucide-vue-next'
 import { actuatorsApi } from '@/api/actuators'
 import { espApi } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
@@ -18,13 +18,14 @@ import { useToast } from '@/composables/useToast'
 import { AccordionSection } from '@/shared/design/primitives'
 import { useUiStore } from '@/shared/stores/ui.store'
 import { useGpioStatus } from '@/composables/useGpioStatus'
-import { supportsAuxGpio } from '@/utils/actuatorDefaults'
+import { supportsAuxGpio, ACTUATOR_TYPE_CONFIG } from '@/utils/actuatorDefaults'
 import { getGpioConfig } from '@/utils/gpioConfig'
 import type { MockActuator } from '@/types'
 import AlertConfigSection from '@/components/devices/AlertConfigSection.vue'
 import RuntimeMaintenanceSection from '@/components/devices/RuntimeMaintenanceSection.vue'
 import DeviceMetadataSection from '@/components/devices/DeviceMetadataSection.vue'
 import LinkedRulesSection from '@/components/devices/LinkedRulesSection.vue'
+import ActuatorActionTimeline from '@/components/devices/ActuatorActionTimeline.vue'
 import SubzoneAssignmentSection from '@/components/devices/SubzoneAssignmentSection.vue'
 import SettingsBreadcrumb from '@/components/settings/SettingsBreadcrumb.vue'
 import { deviceContextApi } from '@/api/device-context'
@@ -123,6 +124,24 @@ const currentPwmValue = ref(0)
 
 /** Storage key prefix for accordion persistence */
 const accordionKey = computed(() => `actuator-${props.espId}-${props.gpio}`)
+
+// =============================================================================
+// AUT-252: Aktor-Datenblatt (read-only, aus ACTUATOR_TYPE_CONFIG)
+// =============================================================================
+
+const actuatorTypeConfig = computed(() => ACTUATOR_TYPE_CONFIG[props.actuatorType.toLowerCase()])
+
+const hasActuatorDatasheet = computed<boolean>(() => {
+  const cfg = actuatorTypeConfig.value
+  if (!cfg) return false
+  return Boolean(
+    cfg.manufacturer
+    || cfg.maxFlow
+    || cfg.nominalVoltage
+    || cfg.maintenanceHours != null
+    || cfg.datasheetUrl,
+  )
+})
 
 // Context-Anker fuer SettingsBreadcrumb (AUT-251)
 const contextDevice = computed(() =>
@@ -551,12 +570,36 @@ function formatDuration(seconds: number): string {
       </section>
 
       <!-- ═══ AUT-256: Verknuepfte Regeln prominent (vor Grundeinstellungen) ═══ -->
+      <!--
+        AUT-256 Section A: ERSTES Akkordeon (expandiert default), enthaelt
+        Rule-level Liste (Priority, Cooldown, Zeitfenster) + inline Warning-Pill
+        bei 2+ aktiven Regeln. Header-Pill (Steuerung-Section) bleibt zusaetzlich
+        als Sofort-Indikator sichtbar.
+
+        AUT-256 Section C (Konflikt-Erklaerung):
+        // TODO: AUT-114 Blocker — `conflict.arbitration` als dedizierter WebSocket-Event fehlt
+        //       (existiert aktuell nur als Audit-Log-Eintrag in services/logic_engine.py).
+        //       Sobald der Server den Event ueber NotificationRouter/WS broadcastet,
+        //       hier eine ausfuehrliche Konflikt-Erklaerung (winner/loser-Regel, Mode,
+        //       Resolution) anzeigen. Bis dahin verbleibt die statische Heuristik
+        //       "N aktive Regeln steuern diesen Aktor" als Operator-Hinweis.
+      -->
       <section class="actuator-config__section actuator-config__section--linked-rules">
         <h3 class="actuator-config__section-title">Verknuepfte Regeln</h3>
         <LinkedRulesSection
           :esp-id="espId"
           :gpio="gpio"
           device-type="actuator"
+        />
+      </section>
+
+      <!-- ═══ AUT-256 Section D: Last-Action-Timeline (letzte 5 Schaltvorgaenge) ═══ -->
+      <section class="actuator-config__section actuator-config__section--timeline">
+        <h3 class="actuator-config__section-title">Letzte Schaltvorgaenge</h3>
+        <ActuatorActionTimeline
+          :esp-id="espId"
+          :gpio="gpio"
+          :limit="5"
         />
       </section>
 
@@ -711,6 +754,59 @@ function formatDuration(seconds: number): string {
             </div>
           </div>
         </template>
+      </AccordionSection>
+
+      <!-- AUT-252: Aktor-Datenblatt (read-only, aus ACTUATOR_TYPE_CONFIG) -->
+      <AccordionSection
+        title="Aktor-Datenblatt"
+        :storage-key="`${accordionKey}-datasheet`"
+        :icon="FileText"
+      >
+        <div v-if="hasActuatorDatasheet && actuatorTypeConfig" class="actuator-config__datasheet">
+          <div class="actuator-config__datasheet-row">
+            <span class="actuator-config__datasheet-label">Typ</span>
+            <span class="actuator-config__datasheet-value">{{ actuatorTypeConfig.label }} ({{ actuatorType }})</span>
+          </div>
+          <div v-if="actuatorTypeConfig.manufacturer" class="actuator-config__datasheet-row">
+            <span class="actuator-config__datasheet-label">Hersteller</span>
+            <span class="actuator-config__datasheet-value">{{ actuatorTypeConfig.manufacturer }}</span>
+          </div>
+          <div v-if="actuatorTypeConfig.maxFlow" class="actuator-config__datasheet-row">
+            <span class="actuator-config__datasheet-label">{{ actuatorTypeConfig.isPwm ? 'Max. Last' : 'Max. Durchfluss / Schaltleistung' }}</span>
+            <span class="actuator-config__datasheet-value">{{ actuatorTypeConfig.maxFlow }}</span>
+          </div>
+          <div v-if="actuatorTypeConfig.nominalVoltage" class="actuator-config__datasheet-row">
+            <span class="actuator-config__datasheet-label">Nennspannung</span>
+            <span class="actuator-config__datasheet-value">{{ actuatorTypeConfig.nominalVoltage }}</span>
+          </div>
+          <div v-if="actuatorTypeConfig.maintenanceHours != null" class="actuator-config__datasheet-row">
+            <span class="actuator-config__datasheet-label">Wartungsintervall</span>
+            <span class="actuator-config__datasheet-value">
+              {{ actuatorTypeConfig.maintenanceHours.toLocaleString('de-DE') }} Betriebsstunden
+            </span>
+          </div>
+          <div v-if="actuatorTypeConfig.datasheetUrl" class="actuator-config__datasheet-row">
+            <span class="actuator-config__datasheet-label">Datenblatt</span>
+            <a
+              class="actuator-config__datasheet-link"
+              :href="actuatorTypeConfig.datasheetUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Hersteller-Dokumentation
+              <ExternalLink class="actuator-config__datasheet-link-icon" aria-hidden="true" />
+            </a>
+          </div>
+        </div>
+        <div v-else class="actuator-config__datasheet-empty">
+          <Info class="actuator-config__datasheet-empty-icon" aria-hidden="true" />
+          <div>
+            <p class="actuator-config__datasheet-empty-title">Datenblatt nicht hinterlegt</p>
+            <p class="actuator-config__datasheet-empty-hint">
+              Hersteller- und Leistungsdaten werden zentral in der Komponenten-Bibliothek gepflegt.
+            </p>
+          </div>
+        </div>
       </AccordionSection>
 
       <!-- Safety -->
@@ -1224,4 +1320,92 @@ function formatDuration(seconds: number): string {
 
 .actuator-config__delete:hover:not(:disabled) { background: rgba(239, 68, 68, 0.1); }
 .actuator-config__delete:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUT-252: Aktor-Datenblatt (read-only)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.actuator-config__datasheet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.actuator-config__datasheet-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.actuator-config__datasheet-row:last-child {
+  border-bottom: none;
+}
+
+.actuator-config__datasheet-label {
+  flex: 0 0 180px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.actuator-config__datasheet-value {
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.actuator-config__datasheet-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-accent-bright);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.actuator-config__datasheet-link:hover {
+  color: var(--color-iridescent-2);
+  text-decoration: underline;
+}
+
+.actuator-config__datasheet-link-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.actuator-config__datasheet-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-bg-tertiary);
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-sm);
+}
+
+.actuator-config__datasheet-empty-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-info);
+}
+
+.actuator-config__datasheet-empty-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.actuator-config__datasheet-empty-hint {
+  margin: var(--space-1) 0 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: var(--leading-normal);
+}
 </style>
