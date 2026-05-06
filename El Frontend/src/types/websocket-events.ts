@@ -110,6 +110,12 @@ export interface ESPHealthEvent extends WebSocketEventBase {
     metrics_delta_ts?: number
     metrics_freshness_seconds?: number
     metrics_schema_version?: number
+    critical_outcome_drop_count?: number
+    publish_outbox_drop_count?: number
+    persistence_drift_count?: number
+    heartbeat_degraded_count?: number
+    publish_queue_drop_count?: number
+    safe_publish_retry_count?: number
     persistence_degraded?: boolean
     persistence_degraded_reason?: string
     runtime_state_degraded?: boolean

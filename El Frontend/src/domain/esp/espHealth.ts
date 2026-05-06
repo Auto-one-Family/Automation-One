@@ -25,6 +25,14 @@ export interface EspHealthViewModel {
     rejectRuntime: number
     rejectTotal: number
   }
+  /** AUT-133: Heartbeat counter indicators surfaced as structured ViewModel fields. */
+  metrics: {
+    criticalOutcomeDropCount: number
+    publishOutboxDropCount: number
+    persistenceDriftCount: number
+    heartbeatDegradedCount: number
+    publishQueueDropCount: number
+  }
   /** Telemetry keys not mapped above (debug / forward-compatible) */
   rawTelemetry: Record<string, unknown>
 }
@@ -46,6 +54,13 @@ const MAPPED_TELEMETRY_FLAG_KEYS = new Set([
   'degraded',
   'degraded_reason',
   'degraded_reason_codes',
+  // AUT-133: heartbeat counter indicators
+  'critical_outcome_drop_count',
+  'publish_outbox_drop_count',
+  'persistence_drift_count',
+  'heartbeat_degraded_count',
+  'publish_queue_drop_count',
+  'safe_publish_retry_count',
 ])
 
 const STANDARD_TOP_LEVEL_KEYS = new Set([
@@ -127,6 +142,13 @@ export function normalizeEspHealthPayload(raw: Record<string, unknown>): EspHeal
       rejectStartup,
       rejectRuntime,
       rejectTotal,
+    },
+    metrics: {
+      criticalOutcomeDropCount: asNum(raw.critical_outcome_drop_count) ?? 0,
+      publishOutboxDropCount: asNum(raw.publish_outbox_drop_count) ?? 0,
+      persistenceDriftCount: asNum(raw.persistence_drift_count) ?? 0,
+      heartbeatDegradedCount: asNum(raw.heartbeat_degraded_count) ?? 0,
+      publishQueueDropCount: asNum(raw.publish_queue_drop_count) ?? 0,
     },
     rawTelemetry,
   }
@@ -326,16 +348,25 @@ export function espHealthPresentation(
   })
 
   const unknownKeys = Object.keys(vm.rawTelemetry).filter(
-    k =>
-      ![
-        'critical_outcome_drop_count',
-        'publish_outbox_drop_count',
-        'persistence_drift_count',
-        'metrics_schema_version',
-      ].includes(k),
+    k => !['metrics_schema_version'].includes(k),
   )
   if (unknownKeys.length > 0) {
     lines.push(`Weitere Telemetrie: ${unknownKeys.slice(0, 6).join(', ')}${unknownKeys.length > 6 ? '…' : ''}`)
+  }
+
+  // AUT-133: Counter-Indikatoren strukturiert anzeigen
+  const { metrics } = vm
+  const counterLines: string[] = []
+  if (metrics.criticalOutcomeDropCount > 0)
+    counterLines.push(`Kritische Drops: ${metrics.criticalOutcomeDropCount}`)
+  if (metrics.publishOutboxDropCount > 0)
+    counterLines.push(`Outbox-Drops: ${metrics.publishOutboxDropCount}`)
+  if (metrics.persistenceDriftCount > 0)
+    counterLines.push(`Persistenz-Drifts: ${metrics.persistenceDriftCount}`)
+  if (metrics.publishQueueDropCount > 0)
+    counterLines.push(`Queue-Drops: ${metrics.publishQueueDropCount}`)
+  if (counterLines.length > 0) {
+    lines.push('Metriken:', ...counterLines)
   }
 
   const hasDegradation = reasons.length > 0
