@@ -24,11 +24,10 @@ import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { useEspStore } from '@/stores/esp'
 import {
   LogOut, ChevronDown, Menu, Filter,
-  Plus, Sparkles, Radio, AlertTriangle,
+  Plus, AlertTriangle,
 } from 'lucide-vue-next'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
 import AlertStatusBar from '@/components/notifications/AlertStatusBar.vue'
-import NotificationBadge from '@/components/notifications/NotificationBadge.vue'
 import StatusPill from '@/components/dashboard/StatusPill.vue'
 import HeaderDeviceStatus from '@/components/layout/HeaderDeviceStatus.vue'
 
@@ -88,10 +87,6 @@ const breadcrumbSegments = computed(() => {
   ]
   return raw.filter((segment): segment is string => typeof segment === 'string' && segment.trim().length > 0)
 })
-
-const pendingAndUnassignedCount = computed(() =>
-  espStore.pendingDevices.length + espStore.unassignedDevices.length
-)
 
 async function handleLogout() {
   showUserMenu.value = false
@@ -165,27 +160,9 @@ async function handleLogout() {
 
     <!-- ═══ RIGHT: Actions + System ═══ -->
     <div class="header__right">
-      <!-- Pending/Unassigned Badge (visible on ALL routes) -->
-      <button
-        :class="[
-          'header__action-btn',
-          pendingAndUnassignedCount > 0
-            ? 'header__action-btn--pending'
-            : 'header__action-btn--default'
-        ]"
-        :title="pendingAndUnassignedCount > 0
-          ? `${pendingAndUnassignedCount} Geräte offen`
-          : 'Geräte verwalten'"
-        @click="dashStore.showPendingPanel = true"
-      >
-        <component
-          :is="pendingAndUnassignedCount > 0 ? Sparkles : Radio"
-          class="header__action-btn-icon"
-        />
-        <span class="header__action-btn-label">
-          {{ pendingAndUnassignedCount > 0 ? `${pendingAndUnassignedCount} offen` : 'Geräte' }}
-        </span>
-      </button>
+      <!-- AUT-258: Redundanter "Geräte"-Button entfernt — kanonischer Eintrittspunkt
+           ist der Sub-Nav-Tab "Geräte" (ViewTabBar → /hardware). Das
+           PendingDevicesPanel wird innerhalb der HardwareView geöffnet. -->
 
       <!-- Dashboard Actions (only on hardware routes) -->
       <template v-if="dashStore.showControls">
@@ -201,8 +178,6 @@ async function handleLogout() {
 
       <div class="header__alerts-group">
         <div class="header__divider" />
-        <NotificationBadge />
-        <!-- Alert Status (Phase 4B — ISA-18.2) -->
         <AlertStatusBar />
         <div class="header__divider" />
       </div>
@@ -624,26 +599,9 @@ async function handleLogout() {
     border-bottom-color: var(--glass-border-hover);
   }
 
-  .header__status-chip,
-  .header__action-btn--default {
+  .header__status-chip {
     background: var(--color-bg-tertiary);
     border-color: var(--glass-border-hover);
-    box-shadow: none;
-  }
-
-  .header__action-btn--pending {
-    animation: none;
-    background: rgba(96, 165, 250, 0.12);
-    border-color: rgba(129, 140, 248, 0.35);
-  }
-
-  .header__action-btn--pending::before {
-    animation: none;
-    opacity: 0.65;
-  }
-
-  .header__action-btn--pending:hover {
-    transform: none;
     box-shadow: none;
   }
 
@@ -705,57 +663,6 @@ async function handleLogout() {
   .header__action-btn-label {
     display: inline;
   }
-}
-
-/* Default (Devices) */
-.header__action-btn--default {
-  color: var(--color-text-secondary);
-  background: rgba(255, 255, 255, 0.03);
-  border-color: var(--glass-border);
-}
-
-.header__action-btn--default:hover {
-  color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.06);
-  border-color: var(--glass-border-hover);
-}
-
-/* Pending (Iridescent Pulse) */
-.header__action-btn--pending {
-  position: relative;
-  color: white;
-  background: linear-gradient(
-    135deg,
-    rgba(96, 165, 250, 0.15),
-    rgba(129, 140, 248, 0.15),
-    rgba(167, 139, 250, 0.15)
-  );
-  border-color: transparent;
-  overflow: hidden;
-  animation: iridescent-pulse 3s ease-in-out infinite;
-}
-
-.header__action-btn--pending::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: var(--gradient-iridescent);
-  -webkit-mask:
-    linear-gradient(white 0 0) content-box,
-    linear-gradient(white 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  animation: iridescent-shift 3s ease-in-out infinite;
-  pointer-events: none;
-}
-
-.header__action-btn--pending:hover {
-  transform: translateY(-1px);
-  box-shadow:
-    0 4px 12px rgba(96, 165, 250, 0.2),
-    0 0 16px rgba(129, 140, 248, 0.1);
 }
 
 /* Create Mock */
@@ -1066,8 +973,6 @@ async function handleLogout() {
 @media (prefers-reduced-motion: reduce) {
   .header__dot--connected,
   .header__dot--connecting,
-  .header__action-btn--pending,
-  .header__action-btn--pending::before,
   .header__flapping-badge {
     animation: none;
   }
