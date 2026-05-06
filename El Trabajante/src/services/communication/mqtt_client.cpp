@@ -1447,6 +1447,9 @@ void MQTTClient::publishHeartbeat(bool force) {
         payload += "\"publish_queue_hwm\":" + String(pq_stats.high_watermark) + ",";
         payload += "\"publish_queue_shed_count\":" + String(pq_stats.shed_count) + ",";
         payload += "\"publish_queue_drop_count\":" + String(pq_stats.drop_count) + ",";
+        // AUT-134 PKG-03: oversize-skip telemetry (heartbeat + queue boundary).
+        payload += "\"publish_queue_oversize_skip_count\":" +
+                   String(pq_stats.oversize_skip_count) + ",";
     }
 #endif
     payload += "\"sensor_command_queue_overflow_count\":" +
@@ -1460,6 +1463,27 @@ void MQTTClient::publishHeartbeat(bool force) {
     payload += configManager.getDiagnosticsJSON();
     payload += "}";
 
+    // AUT-134 PKG-03: Heartbeat oversize lane guard.
+    // The publish-queue boundary rejects payloads >= PUBLISH_PAYLOAD_MAX_LEN.
+    // If the (Core-0) heartbeat ever races into the queue path (xPortGetCoreID() == 1
+    // or in-MQTT-callback in publish()), an oversize payload would be dropped and —
+    // because heartbeats fire on a tight cadence (5 s during registration retry) —
+    // could pressure the lane. Drop here, before publish(), so the rejection is
+    // attributed to the heartbeat builder, surfaces a single LOG_W per occurrence,
+    // and never enters the queue. AUT-121 ENABLE_METRICS_SPLIT is preserved: the
+    // metrics topic is published independently below.
+#ifndef MQTT_USE_PUBSUBCLIENT
+    if (payload.length() >= PUBLISH_PAYLOAD_MAX_LEN) {
+        // Reuse the queue-boundary oversize counter so heartbeat regressions
+        // surface in the same telemetry knob (publish_queue_oversize_skip_count).
+        // Heartbeat is non-critical (QoS 0) — no intent_outcome.
+        // The next heartbeat tick will rebuild and re-publish a fresh payload.
+        noteHeartbeatOversizeSkip();
+        LOG_W(TAG, "[AUT-134] Heartbeat oversize skipped: len=" + String(payload.length()) +
+              " limit=" + String((uint32_t)PUBLISH_PAYLOAD_MAX_LEN) +
+              " topic=" + heartbeat_topic);
+    } else
+#endif
     if (!publish(heartbeat_topic, payload, 0)) {
         LOG_W(TAG, "Heartbeat publish failed (topic=" + heartbeat_topic + ")");
     }
@@ -1537,6 +1561,9 @@ void MQTTClient::publishHeartbeatMetrics() {
         payload += "\"publish_queue_hwm\":" + String(pq_stats.high_watermark) + ",";
         payload += "\"publish_queue_shed_count\":" + String(pq_stats.shed_count) + ",";
         payload += "\"publish_queue_drop_count\":" + String(pq_stats.drop_count) + ",";
+        // AUT-134 PKG-03: oversize-skip telemetry (heartbeat + queue boundary).
+        payload += "\"publish_queue_oversize_skip_count\":" +
+                   String(pq_stats.oversize_skip_count) + ",";
     }
 #endif
     payload += "\"sensor_command_queue_overflow_count\":" +
@@ -1547,6 +1574,20 @@ void MQTTClient::publishHeartbeatMetrics() {
                String(current.emergency_rejected_no_token_total);
     payload += "}";
 
+    // AUT-134 PKG-03: same oversize lane guard for the metrics topic. AUT-121
+    // intentionally split metrics off the core heartbeat to keep both topics
+    // small; if a future field push grows the metrics payload past the queue
+    // envelope, drop here rather than entering the publish lane.
+#ifndef MQTT_USE_PUBSUBCLIENT
+    if (payload.length() >= PUBLISH_PAYLOAD_MAX_LEN) {
+        noteHeartbeatOversizeSkip();
+        LOG_W(TAG, "[AUT-134] Heartbeat metrics oversize skipped: len=" +
+              String(payload.length()) + " limit=" +
+              String((uint32_t)PUBLISH_PAYLOAD_MAX_LEN) +
+              " topic=" + metrics_topic);
+        return;
+    }
+#endif
     publish(metrics_topic, payload, 0);
 }
 
