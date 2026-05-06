@@ -51,7 +51,8 @@ function navigateAndFilter(statusKey: 'online' | 'offline') {
       class="hds__chip hds__chip--alarm"
       :title="`${alarmCount} aktive Alarme`"
     >
-      <span class="hds__label">&#9888; {{ alarmCount }}</span>
+      <span class="hds__label" aria-hidden="true">&#9888;</span>
+      <span class="hds__label">{{ alarmCount }}</span>
     </span>
 
     <template v-if="showDevTypeToggle">
@@ -115,6 +116,9 @@ function navigateAndFilter(statusKey: 'online' | 'offline') {
   background: rgba(248, 113, 113, 0.08);
   border-color: rgba(248, 113, 113, 0.25);
   cursor: default;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .hds__dot {
