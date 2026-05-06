@@ -49,18 +49,19 @@ import type { LogicRule, SensorCondition, TimeCondition, HysteresisCondition, Co
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { useEspStore } from '@/stores/esp'
 import { useToast } from '@/composables/useToast'
-import { useRuleDeployment } from '@/composables/useRuleDeployment'
+import { useRuleDeployment, classifyRuleDeployment } from '@/composables/useRuleDeployment'
 import { tokens } from '@/utils/cssTokens'
 import { formatRelativeTime } from '@/utils/formatters'
 import { getNodeColumnX } from '@/utils/ruleNodeColumns'
 import BaseToggle from '@/shared/design/primitives/BaseToggle.vue'
 
 /**
- * AUT-248: Maximum number of offline_rules per ESP enforced by the server.
- * @see ConfigPayloadBuilder._build_offline_rules() in
- *      El Servador/god_kaiser_server/src/services/config_builder.py
+ * AUT-248: Maximum number of offline_rules per ESP.
+ * Mirrors MAX_OFFLINE_RULES in:
+ *   El Trabajante/src/models/offline_rule.h
+ *   El Servador/god_kaiser_server/src/services/config_builder.py
  */
-const OFFLINE_RULES_LIMIT_PER_ESP = 20
+const OFFLINE_RULES_LIMIT_PER_ESP = 8
 
 /** AUT-248: Operator-readable labels for server-only constructs. */
 const SERVER_ONLY_REASON_LABELS: Record<string, string> = {
@@ -71,6 +72,9 @@ const SERVER_ONLY_REASON_LABELS: Record<string, string> = {
   compound_condition: 'Verschachtelte Bedingung',
   diagnostics_condition: 'Diagnose-Bedingung',
   sensor_diff_condition: 'Sensor-Differenz-Bedingung',
+  calibration_required_sensor: 'Sensor mit Kalibrierung (pH/EC/Feuchte)',
+  unsupported_operator: 'Nicht-konvertierbarer Operator (==, !=)',
+  or_compound_rule: 'ODER-Logik mit mehreren Bedingungen',
 }
 
 // Vue Flow CSS
@@ -283,17 +287,12 @@ const offlineRulesUsedOnEsp = computed<number>(() => {
   for (const rule of logicStore.rules) {
     if (rule.id === editingRuleId) continue
     if (!rule.enabled) continue
-    const hyst = rule.conditions.find(
-      (c): c is HysteresisCondition =>
-        c.type === 'hysteresis' && (c as HysteresisCondition).esp_id === espId,
-    )
-    if (!hyst) continue
-    const sameEspActuator = rule.actions.find(
-      (a): a is ActuatorAction =>
-        (a.type === 'actuator' || a.type === 'actuator_command') &&
-        (a as ActuatorAction).esp_id === espId,
-    )
-    if (sameEspActuator) count += 1
+    // Use classifyRuleDeployment to count all offline-capable rule types
+    // (hysteresis, sensor_threshold, time_window) consistently.
+    const info = classifyRuleDeployment(rule)
+    if (info.hasOfflineCapablePair && info.offlineEspId === espId) {
+      count += 1
+    }
   }
   if (ruleDeployment.value.hasOfflineCapablePair) count += 1
   return count
@@ -1324,11 +1323,11 @@ defineExpose({
       <div class="deployment-banner__text">
         <template v-if="ruleDeployment.target === 'server'">
           <strong>Diese Regel läuft auf: SERVER</strong>
-          <span class="deployment-banner__sub">— Bei MQTT-Ausfall wird sie nicht ausgewertet.</span>
+          <span class="deployment-banner__sub">— Wird immer vom Server ausgewertet. Aktor-Befehle an offline ESPs werden übersprungen.</span>
         </template>
         <template v-else-if="ruleDeployment.target === 'esp'">
           <strong>Diese Regel läuft auf: {{ offlineEspDisplayName }} (offline-fähig)</strong>
-          <span class="deployment-banner__sub">— Funktioniert auch ohne MQTT/Internet.</span>
+          <span class="deployment-banner__sub">— Greift nach 30 s ohne Server-Verbindung. Funktioniert ohne MQTT/Internet.</span>
         </template>
         <template v-else>
           <strong>Hybrid:</strong>

@@ -46,6 +46,21 @@ export interface SensorTypeConfig {
   supportsMultipleOnSamePin?: boolean
   /** Recommended GPIO pins for this sensor type */
   recommendedGpios?: number[]
+  // =========================================================================
+  // DATASHEET METADATA (AUT-252) — read-only, displayed in SensorConfigPanel
+  // =========================================================================
+  /** Manufacturer name (e.g. "Sensirion") */
+  manufacturer?: string
+  /** Accuracy specification (e.g. "±0.3°C / ±2% RH") */
+  accuracy?: string
+  /** Whether this sensor type requires periodic calibration (false = factory-calibrated) */
+  calibrationRequired?: boolean
+  /** Free-text calibration hint shown in the sensor datasheet accordion (AUT-252) */
+  calibrationNote?: string
+  /** Datasheet URL (manufacturer documentation) */
+  datasheetUrl?: string
+  /** Recommended replacement / re-calibration interval in years */
+  maintenanceYears?: number
 }
 
 /**
@@ -106,6 +121,13 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     requiresAddressScanning: true,
     supportsMultipleOnSamePin: true,
     recommendedGpios: [4, 5, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33],
+    // Datasheet (AUT-252)
+    manufacturer: 'Dallas Semiconductor / Maxim',
+    accuracy: '±0.5°C (-10…+85 °C)',
+    calibrationRequired: false,
+    calibrationNote: 'Kalibrierung im bekannten Referenzwasser (0 °C / 100 °C).',
+    datasheetUrl: 'https://www.analog.com/media/en/technical-documentation/data-sheets/DS18B20.pdf',
+    maintenanceYears: 10,
   },
 
   // Lowercase variant for consistency (ESP32 may send lowercase)
@@ -126,8 +148,15 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     requiresAddressScanning: true,
     supportsMultipleOnSamePin: true,
     recommendedGpios: [4, 5, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33],
+    // Datasheet (AUT-252)
+    manufacturer: 'Dallas Semiconductor / Maxim',
+    accuracy: '±0.5°C (-10…+85 °C)',
+    calibrationRequired: false,
+    calibrationNote: 'Kalibrierung im bekannten Referenzwasser (0 °C / 100 °C).',
+    datasheetUrl: 'https://www.analog.com/media/en/technical-documentation/data-sheets/DS18B20.pdf',
+    maintenanceYears: 10,
   },
-  
+
   'pH': {
     label: 'pH-Wert',
     unit: 'pH',  // NICHT °C!
@@ -142,8 +171,15 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'on_demand',
     recommendedTimeout: 0,
     supportsOnDemand: true,
+    // Datasheet (AUT-252)
+    manufacturer: 'Generisch (analoge pH-Sonde)',
+    accuracy: '±0.1 pH',
+    calibrationRequired: true,
+    calibrationNote: '2-Punkt-Kalibrierung mit pH 4.0 und pH 7.0 Pufferlösung alle 30 Tage.',
+    datasheetUrl: 'https://wiki.dfrobot.com/Gravity__Analog_pH_Sensor_Meter_Kit_V2_SKU_SEN0161-V2',
+    maintenanceYears: 1,
   },
-  
+
   'EC': {
     label: 'Leitfähigkeit',
     unit: 'µS/cm',
@@ -158,6 +194,13 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'on_demand',
     recommendedTimeout: 0,
     supportsOnDemand: true,
+    // Datasheet (AUT-252)
+    manufacturer: 'Generisch (EC-Sonde)',
+    accuracy: '±2 % FS',
+    calibrationRequired: true,
+    calibrationNote: 'Kalibrierung mit 1413 µS/cm Standardlösung alle 30 Tage.',
+    datasheetUrl: 'https://wiki.dfrobot.com/Gravity__Analog_Electrical_Conductivity_Sensor___Meter_V2__K%3D1__SKU_DFR0300',
+    maintenanceYears: 2,
   },
   
   // SHT31 base/alias keys: Backward compat when API/DB sends "SHT31". Add-Dropdown shows only "sht31" (getSensorTypeOptions).
@@ -176,6 +219,12 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedTimeout: 180,
     supportsOnDemand: false,
     defaultIntervalSeconds: 30,
+    // Datasheet (AUT-252)
+    manufacturer: 'Sensirion',
+    accuracy: '±0.3°C / ±2% RH',
+    calibrationRequired: false,
+    datasheetUrl: 'https://sensirion.com/products/catalog/SHT31-DIS-B',
+    maintenanceYears: 5,
   },
 
   // Lowercase variants for consistency
@@ -193,6 +242,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedTimeout: 180,
     supportsOnDemand: false,
     defaultIntervalSeconds: 30,
+    manufacturer: 'Sensirion',
+    accuracy: '±0.3°C / ±2% RH',
+    calibrationRequired: false,
+    datasheetUrl: 'https://sensirion.com/products/catalog/SHT31-DIS-B',
+    maintenanceYears: 5,
   },
 
   'sht31_temp': {
@@ -209,6 +263,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedTimeout: 180,
     supportsOnDemand: false,
     defaultIntervalSeconds: 30,
+    manufacturer: 'Sensirion',
+    accuracy: '±0.3°C',
+    calibrationRequired: false,
+    datasheetUrl: 'https://sensirion.com/products/catalog/SHT31-DIS-B',
+    maintenanceYears: 5,
   },
 
   'sht31_humidity': {
@@ -225,6 +284,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedTimeout: 180,
     supportsOnDemand: false,
     defaultIntervalSeconds: 30,
+    manufacturer: 'Sensirion',
+    accuracy: '±2% RH',
+    calibrationRequired: false,
+    datasheetUrl: 'https://sensirion.com/products/catalog/SHT31-DIS-B',
+    maintenanceYears: 5,
   },
 
   // Alias for DB/API sending "SHT31_humidity"; value-type sht31_humidity is canonical.
@@ -242,6 +306,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
+    manufacturer: 'Sensirion',
+    accuracy: '±2% RH',
+    calibrationRequired: false,
+    datasheetUrl: 'https://sensirion.com/products/catalog/SHT31-DIS-B',
+    maintenanceYears: 5,
   },
 
   'BME280': {
@@ -259,6 +328,12 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedTimeout: 180,
     supportsOnDemand: false,
     defaultIntervalSeconds: 60,
+    // Datasheet (AUT-252)
+    manufacturer: 'Bosch Sensortec',
+    accuracy: '±1°C / ±3% RH / ±1 hPa',
+    calibrationRequired: false,
+    datasheetUrl: 'https://www.bosch-sensortec.com/products/environmental-sensors/humidity-sensors-bme280/',
+    maintenanceYears: 5,
   },
 
   'BME280_humidity': {
@@ -275,6 +350,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
+    manufacturer: 'Bosch Sensortec',
+    accuracy: '±3% RH',
+    calibrationRequired: false,
+    datasheetUrl: 'https://www.bosch-sensortec.com/products/environmental-sensors/humidity-sensors-bme280/',
+    maintenanceYears: 5,
   },
 
   'BME280_pressure': {
@@ -291,6 +371,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 300,
     supportsOnDemand: false,
+    manufacturer: 'Bosch Sensortec',
+    accuracy: '±1 hPa',
+    calibrationRequired: false,
+    datasheetUrl: 'https://www.bosch-sensortec.com/products/environmental-sensors/humidity-sensors-bme280/',
+    maintenanceYears: 5,
   },
 
   // Lowercase variants (API/Firmware send lowercase sensor_type)
@@ -309,6 +394,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedTimeout: 180,
     supportsOnDemand: false,
     defaultIntervalSeconds: 60,
+    manufacturer: 'Bosch Sensortec',
+    accuracy: '±1°C',
+    calibrationRequired: false,
+    datasheetUrl: 'https://www.bosch-sensortec.com/products/environmental-sensors/pressure-sensors/bmp280/',
+    maintenanceYears: 5,
   },
 
   'bmp280_pressure': {
@@ -325,6 +415,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedTimeout: 300,
     supportsOnDemand: false,
     defaultIntervalSeconds: 60,
+    manufacturer: 'Bosch Sensortec',
+    accuracy: '±1 hPa',
+    calibrationRequired: false,
+    datasheetUrl: 'https://www.bosch-sensortec.com/products/environmental-sensors/pressure-sensors/bmp280/',
+    maintenanceYears: 5,
   },
 
   'bme280_temp': {
@@ -341,6 +436,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedTimeout: 180,
     supportsOnDemand: false,
     defaultIntervalSeconds: 60,
+    manufacturer: 'Bosch Sensortec',
+    accuracy: '±1°C',
+    calibrationRequired: false,
+    datasheetUrl: 'https://www.bosch-sensortec.com/products/environmental-sensors/humidity-sensors-bme280/',
+    maintenanceYears: 5,
   },
 
   'bme280_humidity': {
@@ -357,6 +457,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedTimeout: 180,
     supportsOnDemand: false,
     defaultIntervalSeconds: 60,
+    manufacturer: 'Bosch Sensortec',
+    accuracy: '±3% RH',
+    calibrationRequired: false,
+    datasheetUrl: 'https://www.bosch-sensortec.com/products/environmental-sensors/humidity-sensors-bme280/',
+    maintenanceYears: 5,
   },
 
   'bme280_pressure': {
@@ -373,6 +478,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedTimeout: 300,
     supportsOnDemand: false,
     defaultIntervalSeconds: 60,
+    manufacturer: 'Bosch Sensortec',
+    accuracy: '±1 hPa',
+    calibrationRequired: false,
+    datasheetUrl: 'https://www.bosch-sensortec.com/products/environmental-sensors/humidity-sensors-bme280/',
+    maintenanceYears: 5,
   },
 
   'analog': {
@@ -421,6 +531,12 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 60,
     supportsOnDemand: false,
+    // Datasheet (AUT-252)
+    manufacturer: 'Generisch (Hall-Effekt-Durchflusssensor, z.B. YF-S201)',
+    accuracy: '±3 %',
+    calibrationRequired: true,
+    calibrationNote: 'Kalibrierung durch Volumenmessung über definierte Zeit (Impulse pro Liter abgleichen).',
+    maintenanceYears: 3,
   },
 
   'level': {
@@ -453,6 +569,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
+    // Datasheet (AUT-252)
+    manufacturer: 'Generisch (BH1750/VEML7700)',
+    accuracy: '±20%',
+    calibrationRequired: false,
+    maintenanceYears: 5,
   },
 
   'co2': {
@@ -469,6 +590,13 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     recommendedMode: 'continuous',
     recommendedTimeout: 180,
     supportsOnDemand: false,
+    // Datasheet (AUT-252)
+    manufacturer: 'NDIR CO₂-Sensor (z.B. MH-Z19B)',
+    accuracy: '±50 ppm + 5 % Messwert',
+    calibrationRequired: true,
+    calibrationNote: 'ABC-Autokalibrierung aktiv; manuelle Basiskalibrierung an Frischluft (~400 ppm).',
+    datasheetUrl: 'https://www.winsen-sensor.com/d/files/MH-Z19B.pdf',
+    maintenanceYears: 5,
   },
 
   'moisture': {
@@ -487,6 +615,12 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     supportsOnDemand: false,
     defaultIntervalSeconds: 60,
     recommendedGpios: [32, 33, 34, 35, 36, 39],
+    // Datasheet (AUT-252)
+    manufacturer: 'Generisch (kapazitiv)',
+    accuracy: '±3 % (kapazitiv) / ±10 % (resistiv)',
+    calibrationRequired: true,
+    calibrationNote: '2-Punkt-Kalibrierung: trocken (Luft) und nass (Wasser).',
+    maintenanceYears: 2,
   },
 
   'soil_moisture': {
@@ -505,6 +639,11 @@ export const SENSOR_TYPE_CONFIG: Record<string, SensorTypeConfig> = {
     supportsOnDemand: false,
     defaultIntervalSeconds: 60,
     recommendedGpios: [32, 33, 34, 35, 36, 39],
+    manufacturer: 'Generisch (kapazitiv)',
+    accuracy: '±3 % (kapazitiv) / ±10 % (resistiv)',
+    calibrationRequired: true,
+    calibrationNote: '2-Punkt-Kalibrierung: trocken (Luft) und nass (Wasser).',
+    maintenanceYears: 2,
   },
 
   // =========================================================================

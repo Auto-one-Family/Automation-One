@@ -264,7 +264,10 @@ defineExpose({
         <span class="calibration-wizard__summary-mono">{{ selectedEspId || '—' }}</span>
         <span>GPIO {{ selectedGpio ?? '—' }}</span>
         <span>Zone {{ (selectedDevice as any)?.zone_name || (selectedDevice as any)?.zone_id || 'nicht zugewiesen' }}</span>
-        <span>Subzone {{ (selectedSensorContext as any)?.subzone_id || 'Zone-weit' }}</span>
+        <span
+          :title="(selectedSensorContext as any)?.subzone_id ? undefined : 'Diese Kalibrierung gilt für alle Sensoren der Zone, unabhängig von Subzone-Zuordnung.'"
+          :class="{ 'calibration-wizard__hud-zoneweit': !(selectedSensorContext as any)?.subzone_id }"
+        >Subzone {{ (selectedSensorContext as any)?.subzone_id || 'Zone-weit' }}</span>
       </div>
       <p v-if="lifecycleMessage" class="calibration-wizard__hud-message">{{ lifecycleMessage }}</p>
     </div>
@@ -711,6 +714,11 @@ defineExpose({
 
 .calibration-wizard__hud-context-key {
   color: var(--color-text-muted);
+}
+
+.calibration-wizard__hud-zoneweit {
+  text-decoration: underline dotted;
+  cursor: help;
 }
 
 .calibration-wizard__hud-message {

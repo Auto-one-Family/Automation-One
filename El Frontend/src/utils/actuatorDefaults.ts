@@ -38,6 +38,19 @@ export interface ActuatorTypeConfig {
   supportsAuxGpio: boolean
   /** Supports inverted logic (LOW = ON) */
   supportsInvertedLogic: boolean
+  // =========================================================================
+  // DATASHEET METADATA (AUT-252) — read-only, displayed in ActuatorConfigPanel
+  // =========================================================================
+  /** Manufacturer name */
+  manufacturer?: string
+  /** Maximum flow / switching capacity (e.g. "1.5 L/min", "10 A @ 250 V AC") */
+  maxFlow?: string
+  /** Operating hours until recommended maintenance */
+  maintenanceHours?: number
+  /** Datasheet URL (manufacturer documentation) */
+  datasheetUrl?: string
+  /** Nominal supply voltage (e.g. "12V DC", "230V AC") */
+  nominalVoltage?: string
 }
 
 /**
@@ -99,6 +112,11 @@ export const ACTUATOR_TYPE_CONFIG: Record<string, ActuatorTypeConfig> = {
     cooldownSeconds: 30,
     supportsAuxGpio: false,
     supportsInvertedLogic: true,
+    // Datasheet (AUT-252)
+    manufacturer: 'Generisch (Membran-/Zentrifugalpumpe)',
+    maxFlow: '1.5 L/min',
+    nominalVoltage: '12V DC',
+    maintenanceHours: 2000,
   },
 
   'valve': {
@@ -113,6 +131,11 @@ export const ACTUATOR_TYPE_CONFIG: Record<string, ActuatorTypeConfig> = {
     cooldownSeconds: 0,
     supportsAuxGpio: true,
     supportsInvertedLogic: true,
+    // Datasheet (AUT-252)
+    manufacturer: 'Generisch (Magnet-/Kugelventil)',
+    maxFlow: '5 L/min',
+    nominalVoltage: '12V DC',
+    maintenanceHours: 5000,
   },
 
   'relay': {
@@ -127,6 +150,11 @@ export const ACTUATOR_TYPE_CONFIG: Record<string, ActuatorTypeConfig> = {
     cooldownSeconds: 0,
     supportsAuxGpio: false,
     supportsInvertedLogic: true,
+    // Datasheet (AUT-252)
+    manufacturer: 'Generisch (Optokoppler-Relais)',
+    maxFlow: '10 A @ 250 V AC',
+    nominalVoltage: '5V DC (Steuerung)',
+    maintenanceHours: 100000,
   },
 
   'pwm': {
@@ -141,6 +169,11 @@ export const ACTUATOR_TYPE_CONFIG: Record<string, ActuatorTypeConfig> = {
     cooldownSeconds: 0,
     supportsAuxGpio: false,
     supportsInvertedLogic: false, // PWM doesn't support inverted logic
+    // Datasheet (AUT-252)
+    manufacturer: 'Generisch (PWM-Treiber)',
+    maxFlow: '—',
+    nominalVoltage: '12V / 24V DC',
+    maintenanceHours: 20000,
   },
 }
 

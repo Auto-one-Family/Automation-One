@@ -62,8 +62,6 @@ import {
   Wifi,
   Database,
   MemoryStick,
-  Radio,
-  TimerOff,
   Pencil,
   Check,
   X,
@@ -71,7 +69,7 @@ import {
   Activity,
 } from 'lucide-vue-next'
 import { Badge } from '@/shared/design'
-import { formatUptimeShort, formatHeapSize, getDataFreshness, type FreshnessLevel } from '@/utils/formatters'
+import { formatUptimeShort, formatHeapSize } from '@/utils/formatters'
 import { getWifiStrength, type WifiStrengthInfo } from '@/utils/wifiStrength'
 import type { ESPDevice } from '@/api/esp'
 import { useEspStore } from '@/stores/esp'
@@ -335,25 +333,6 @@ const dataSourceInfo = computed(() => {
     return { label: 'Live-Speicher', icon: 'memory', colorClass: 'text-success' }
   }
   return { label: 'Datenbank', icon: 'database', colorClass: 'text-info' }
-})
-
-// Data freshness based on last heartbeat
-const dataFreshness = computed<FreshnessLevel>(() => {
-  const timestamp = props.esp.last_heartbeat || props.esp.last_seen
-  return getDataFreshness(timestamp)
-})
-
-const freshnessInfo = computed(() => {
-  switch (dataFreshness.value) {
-    case 'live':
-      return { label: 'Live', colorClass: 'freshness--live', title: 'Daten sind aktuell (< 30s)' }
-    case 'recent':
-      return { label: 'Aktuell', colorClass: 'freshness--recent', title: 'Daten sind aktuell (< 2min)' }
-    case 'stale':
-      return { label: 'Veraltet', colorClass: 'freshness--stale', title: 'Daten sind veraltet (> 2min)' }
-    default:
-      return { label: 'Unbekannt', colorClass: 'freshness--unknown', title: 'Kein Heartbeat empfangen' }
-  }
 })
 
 // Check if important data might be stale or missing
@@ -743,17 +722,6 @@ const offlineTimeAbsolute = computed(() => {
           <MemoryStick v-if="dataSource === 'memory'" class="w-3.5 h-3.5" />
           <Database v-else class="w-3.5 h-3.5" />
           <span>{{ dataSourceInfo.label }}</span>
-        </div>
-
-        <!-- Separator -->
-        <span class="esp-card__data-separator">•</span>
-
-        <!-- Freshness -->
-        <div :class="['esp-card__freshness', freshnessInfo.colorClass]" :title="freshnessInfo.title">
-          <Radio v-if="dataFreshness === 'live'" class="w-3.5 h-3.5" />
-          <Clock v-else-if="dataFreshness === 'recent'" class="w-3.5 h-3.5" />
-          <TimerOff v-else class="w-3.5 h-3.5" />
-          <span>{{ freshnessInfo.label }}</span>
         </div>
 
         <!-- Incomplete Data Warning -->
@@ -1277,7 +1245,6 @@ const offlineTimeAbsolute = computed(() => {
 }
 
 .esp-card__data-source,
-.esp-card__freshness,
 .esp-card__incomplete-data {
   display: flex;
   align-items: center;
@@ -1287,23 +1254,6 @@ const offlineTimeAbsolute = computed(() => {
 .esp-card__data-separator {
   color: var(--color-text-muted);
   opacity: 0.5;
-}
-
-/* Freshness color states */
-.freshness--live {
-  color: var(--color-success);
-}
-
-.freshness--recent {
-  color: var(--color-info);
-}
-
-.freshness--stale {
-  color: var(--color-warning);
-}
-
-.freshness--unknown {
-  color: var(--color-text-muted);
 }
 
 .esp-card__incomplete-data {
