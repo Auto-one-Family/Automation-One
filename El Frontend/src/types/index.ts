@@ -568,6 +568,36 @@ export interface OfflineInfo {
 }
 
 /**
+ * Terminales Config-Reject-Ergebnis pro ESP-Gerät (AUT-134 PKG-04).
+ *
+ * Wird gesetzt, wenn der Server (PKG-01) ein `config_failed` mit
+ * `reason_code='config_oversize'` sendet ODER wenn ein `intent_outcome`
+ * mit `flow='config'` und `code='PAYLOAD_TOO_LARGE'` (ESP32 PKG-02)
+ * eintrifft.
+ *
+ * Semantik:
+ * - Read-only informational state (kein Auto-Retry)
+ * - Wird durch nächste erfolgreiche Config-Operation NICHT automatisch
+ *   gelöscht — Operator sieht den letzten Reject bis ein neues Reject
+ *   eintrifft oder explizit abgewiesen wird.
+ * - SEPARATER Pfad zum runtime_health_view.degraded `Eingeschränkt`-Badge.
+ */
+export interface ConfigLastReject {
+  /** Maschinenlesbarer Reject-Grund (z. B. 'config_oversize', 'PAYLOAD_TOO_LARGE') */
+  reason_code: string
+  /** Größe des abgelehnten Config-Payloads in Bytes (optional) */
+  payload_size_bytes: number | null
+  /** Maximal erlaubte Größe in Bytes (optional) */
+  budget_bytes: number | null
+  /** Korrelations-ID des fehlgeschlagenen Intents (optional) */
+  correlation_id: string | null
+  /** ISO-Timestamp oder Unix-ms wann das Reject empfangen wurde */
+  timestamp: string
+  /** Quelle des Rejects: Server (config_failed) oder ESP32 (intent_outcome) */
+  source: 'config_failed' | 'intent_outcome'
+}
+
+/**
  * WebSocket esp_health Event Payload.
  * Erweitert um source und reason Felder.
  */

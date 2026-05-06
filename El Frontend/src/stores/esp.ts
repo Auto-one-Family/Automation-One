@@ -41,6 +41,12 @@ import {
   inferInterfaceType,
   getDefaultI2CAddress
 } from '@/utils/sensorDefaults'
+import {
+  extractConfigRejectFromConfigFailed,
+  extractConfigRejectFromIntentOutcome,
+  type ConfigRejectSnapshot,
+} from '@/utils/contractEventMapper'
+import type { ConfigLastReject } from '@/types'
 import { normalizeSubzoneId } from '@/utils/subzoneHelpers'
 import { isPwmActuator } from '@/utils/actuatorDefaults'
 import {
@@ -1761,11 +1767,58 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
   /**
    * Config failed handler - delegates to config.store.ts
    * Server: config_publisher → WS: config_failed
+   *
+   * AUT-134 PKG-04: Bei reason_code='config_oversize' wird zusätzlich
+   * `config_last_reject` auf dem Device gesetzt (terminale UI-Sichtbarkeit).
+   * Pending-State (z.B. `metadata.config_push_pending`) wird gelöscht,
+   * damit kein Spinner-Deadlock entsteht.
    */
   function handleConfigFailed(message: { data: Record<string, unknown> }): void {
     const actStore = useActuatorStore()
     actStore.handleConfigFailed(message)
     useConfigStore().handleConfigFailed(message, devices.value, getDeviceId)
+
+    const reject = extractConfigRejectFromConfigFailed(message.data)
+    if (reject) {
+      applyConfigRejectToDevice(reject)
+    }
+  }
+
+  /**
+   * Apply a terminal config-reject snapshot to the device entity (AUT-134 PKG-04).
+   * - Setzt `config_last_reject` für Operator-UI-Sichtbarkeit
+   * - Löscht `metadata.config_push_pending` (kein Spinner-Deadlock bei Oversize)
+   * - Read-only informational; kein Auto-Retry-Trigger
+   */
+  function applyConfigRejectToDevice(reject: ConfigRejectSnapshot): void {
+    const lastReject: ConfigLastReject = {
+      reason_code: reject.reasonCode,
+      payload_size_bytes: reject.payloadSizeBytes,
+      budget_bytes: reject.budgetBytes,
+      correlation_id: reject.correlationId,
+      timestamp: reject.timestamp,
+      source: reject.source,
+    }
+    const changed = applyDevicePatch(reject.espId, (device) => {
+      const metadata = { ...(device.metadata ?? {}) }
+      // Defensive: clear any pending-config flag so spinners don't hang.
+      if ('config_push_pending' in metadata) {
+        delete metadata.config_push_pending
+      }
+      return {
+        ...device,
+        metadata,
+        config_last_reject: lastReject,
+      }
+    })
+    if (changed) {
+      logger.warn(
+        `Config-Reject (${reject.source}) für ${reject.espId}: ${reject.reasonCode}` +
+          (reject.payloadSizeBytes !== null && reject.budgetBytes !== null
+            ? ` (${reject.payloadSizeBytes}/${reject.budgetBytes} bytes)`
+            : ''),
+      )
+    }
   }
 
   // =============================================================================
@@ -1839,6 +1892,13 @@ function findDeviceByEspIdDefensive(espId: string): { index: number; device: ESP
 
   function handleIntentOutcome(message: { data: Record<string, unknown> }): void {
     useIntentSignalsStore().ingestOutcome(message.data)
+
+    // AUT-134 PKG-04: ESP32 (PKG-02) sendet Reject-Outcome via Server an Frontend.
+    // Map flow='config' + code='PAYLOAD_TOO_LARGE' (terminal) → ConfigLastReject.
+    const reject = extractConfigRejectFromIntentOutcome(message.data)
+    if (reject) {
+      applyConfigRejectToDevice(reject)
+    }
   }
 
   function handleIntentOutcomeLifecycle(message: WebSocketMessage): void {

@@ -13,6 +13,7 @@
 
 import { computed, ref, type ComputedRef, toValue, type MaybeRefOrGetter } from 'vue'
 import type { ESPDevice } from '@/api/esp'
+import type { ConfigLastReject } from '@/types'
 import { formatRelativeTime } from '@/utils/formatters'
 
 /** Possible ESP status values */
@@ -199,6 +200,22 @@ export function useESPStatus(esp: MaybeRefOrGetter<ESPDevice>) {
     return formatRelativeTime(ts)
   })
 
+  /**
+   * AUT-134 PKG-04: Letztes terminales Config-Reject (Server config_failed
+   * mit reason_code='config_oversize' ODER ESP32 intent_outcome mit
+   * code='PAYLOAD_TOO_LARGE'). Read-only informational.
+   *
+   * SEPARATER Pfad zum runtime_health_view.degraded `Eingeschränkt`-Badge
+   * (das ist Runtime-Health, NICHT Config-Reject).
+   */
+  const configLastReject = computed<ConfigLastReject | null>(() => {
+    const device = toValue(esp)
+    return device.config_last_reject ?? null
+  })
+
+  /** Boolescher Indikator für UI-Sichtbarkeitslogik (Card/Sheet) */
+  const hasConfigReject = computed(() => configLastReject.value !== null)
+
   return {
     status,
     statusColor,
@@ -212,6 +229,8 @@ export function useESPStatus(esp: MaybeRefOrGetter<ESPDevice>) {
     displayName,
     deviceId,
     lastSeenText,
+    configLastReject,
+    hasConfigReject,
   }
 }
 

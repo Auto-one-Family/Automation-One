@@ -281,6 +281,106 @@ export function extractIntegrationIssueSnapshot(event: {
   }
 }
 
+/**
+ * Config-Reject-Snapshot aus terminalen Outcomes (AUT-134 PKG-04).
+ * Wird befüllt, wenn:
+ * - `intent_outcome` mit flow='config' und code='PAYLOAD_TOO_LARGE' eintrifft (ESP32 PKG-02), ODER
+ * - `config_failed` mit reason_code='config_oversize' eintrifft (Server PKG-01).
+ *
+ * Read-only informational — kein Auto-Retry.
+ */
+export interface ConfigRejectSnapshot {
+  espId: string
+  reasonCode: string
+  payloadSizeBytes: number | null
+  budgetBytes: number | null
+  correlationId: string | null
+  timestamp: string
+  source: 'intent_outcome' | 'config_failed'
+}
+
+function isTerminalIntentOutcome(data: Record<string, unknown>): boolean {
+  if (data.is_final === true) return true
+  const t = String(data.terminality ?? '')
+  return t.includes('terminal')
+}
+
+function asNumberOrNull(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+/**
+ * Mapper: intent_outcome → ConfigRejectSnapshot, falls flow='config' und
+ * code='PAYLOAD_TOO_LARGE'. Liefert null, wenn kein Reject-Match.
+ *
+ * Terminale Semantik: Nur terminal markierte Outcomes erzeugen einen Snapshot.
+ */
+export function extractConfigRejectFromIntentOutcome(
+  data: Record<string, unknown>,
+): ConfigRejectSnapshot | null {
+  const flow = typeof data.flow === 'string' ? data.flow : ''
+  if (flow !== 'config') return null
+  const code = typeof data.code === 'string' ? data.code : ''
+  if (code !== 'PAYLOAD_TOO_LARGE') return null
+  if (!isTerminalIntentOutcome(data)) return null
+
+  const espId = extractEspId(data)
+  if (!espId) return null
+
+  const correlationId = extractCorrelationId(data) ?? null
+  const tsValue = data.timestamp
+  const timestamp = typeof tsValue === 'string' && tsValue.trim().length > 0
+    ? tsValue
+    : new Date().toISOString()
+
+  return {
+    espId,
+    reasonCode: code,
+    payloadSizeBytes: asNumberOrNull(data.payload_size_bytes),
+    budgetBytes: asNumberOrNull(data.budget_bytes),
+    correlationId,
+    timestamp,
+    source: 'intent_outcome',
+  }
+}
+
+/**
+ * Mapper: config_failed → ConfigRejectSnapshot, falls reason_code='config_oversize'
+ * (Server PKG-01). Liefert null, wenn kein Reject-Match.
+ */
+export function extractConfigRejectFromConfigFailed(
+  data: Record<string, unknown>,
+): ConfigRejectSnapshot | null {
+  const reasonCode = typeof data.reason_code === 'string' ? data.reason_code : ''
+  if (reasonCode !== 'config_oversize') return null
+
+  const espId = extractEspId(data)
+  if (!espId) return null
+
+  const correlationId = extractCorrelationId(data) ?? null
+  const tsValue = data.timestamp
+  const timestamp = typeof tsValue === 'string' && tsValue.trim().length > 0
+    ? tsValue
+    : typeof tsValue === 'number' && Number.isFinite(tsValue)
+    ? new Date(tsValue).toISOString()
+    : new Date().toISOString()
+
+  return {
+    espId,
+    reasonCode,
+    payloadSizeBytes: asNumberOrNull(data.payload_size_bytes),
+    budgetBytes: asNumberOrNull(data.budget_bytes),
+    correlationId,
+    timestamp,
+    source: 'config_failed',
+  }
+}
+
 export function inferFallbackSeverity(eventType: string, data: Record<string, unknown>): ContractEventSeverity {
   if (eventType === 'error_event' || eventType === 'actuator_alert') {
     return 'error'

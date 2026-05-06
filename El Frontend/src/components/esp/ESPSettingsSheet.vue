@@ -88,7 +88,38 @@ const intentSignalsStore = useIntentSignalsStore()
 const { success: showSuccess, error: showError } = useToast()
 
 // Status via useESPStatus (single source of truth)
-const { statusColor, statusText, statusPulse, isMock, lastSeenText } = useESPStatus(() => props.device)
+const { statusColor, statusText, statusPulse, isMock, lastSeenText, configLastReject, hasConfigReject } = useESPStatus(() => props.device)
+
+// AUT-134 PKG-04: Config-Reject Reason-Code → menschenlesbares Label
+const configRejectReasonLabel = computed(() => {
+  const r = configLastReject.value
+  if (!r) return ''
+  switch (r.reason_code) {
+    case 'config_oversize':
+    case 'PAYLOAD_TOO_LARGE':
+      return 'Konfiguration zu groß'
+    default:
+      return r.reason_code
+  }
+})
+
+const configRejectSizeText = computed(() => {
+  const r = configLastReject.value
+  if (!r) return ''
+  if (r.payload_size_bytes !== null && r.budget_bytes !== null) {
+    return `${r.payload_size_bytes} / ${r.budget_bytes} Bytes`
+  }
+  if (r.payload_size_bytes !== null) {
+    return `${r.payload_size_bytes} Bytes`
+  }
+  return ''
+})
+
+const configRejectSourceLabel = computed(() => {
+  const r = configLastReject.value
+  if (!r) return ''
+  return r.source === 'config_failed' ? 'Server' : 'Gerät'
+})
 
 // Loading states
 const heartbeatLoading = ref(false)
@@ -796,6 +827,31 @@ onUnmounted(() => {
                 </ul>
               </details>
             </template>
+
+            <!-- AUT-134 PKG-04: Letzter Config-Reject (terminale UI-Sichtbarkeit, separat von runtime_health) -->
+            <div
+              v-if="hasConfigReject && configLastReject"
+              class="esp-settings__config-reject"
+              :title="`Letzter Config-Reject — ${configRejectReasonLabel}`"
+            >
+              <div class="esp-settings__config-reject-header">
+                <AlertTriangle class="w-3.5 h-3.5" />
+                <span class="esp-settings__config-reject-title">Letzter Config-Reject</span>
+                <Badge variant="warning" size="sm">{{ configRejectReasonLabel }}</Badge>
+              </div>
+              <ul class="esp-settings__config-reject-list text-xs text-muted m-0 mt-1 pl-4">
+                <li v-if="configRejectSizeText">Größe: {{ configRejectSizeText }}</li>
+                <li>Quelle: {{ configRejectSourceLabel }}</li>
+                <li v-if="configLastReject.correlation_id">
+                  Korrelation: <span class="font-mono">{{ configLastReject.correlation_id }}</span>
+                </li>
+                <li>Zeitpunkt: {{ configLastReject.timestamp }}</li>
+              </ul>
+              <p class="esp-settings__config-reject-hint text-xs m-0 mt-1">
+                <strong>Hinweis:</strong> Konfiguration wurde abgelehnt. Reduziere Regelumfang
+                oder prüfe das Server-Log. Kein automatischer Retry.
+              </p>
+            </div>
           </AccordionSection>
         </div>
       </section>
@@ -1584,5 +1640,34 @@ onUnmounted(() => {
 
 .esp-settings__recommended-action {
   color: var(--color-warning);
+}
+
+/* AUT-134 PKG-04: Config-Reject Block — terminales Operator-Ergebnis */
+.esp-settings__config-reject {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md, 0.375rem);
+}
+
+.esp-settings__config-reject-header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--color-warning);
+}
+
+.esp-settings__config-reject-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.esp-settings__config-reject-list {
+  list-style: disc;
+}
+
+.esp-settings__config-reject-hint {
+  color: var(--color-text-secondary);
 }
 </style>

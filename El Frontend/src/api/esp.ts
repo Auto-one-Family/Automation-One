@@ -104,6 +104,14 @@ export interface ESPDevice {
    * Gesetzt im ESP-Store bei Heartbeat-WS; enthält Degradations-Flags + Roh-Telemetrie.
    */
   runtime_health_view?: import('@/domain/esp/espHealth').EspHealthViewModel
+  /**
+   * Letzter terminaler Config-Reject (AUT-134 PKG-04).
+   * Gesetzt im ESP-Store bei `config_failed` (reason_code='config_oversize')
+   * oder `intent_outcome` (flow='config', code='PAYLOAD_TOO_LARGE').
+   * Read-only informational; kein Auto-Retry.
+   * SEPARAT vom runtime_health_view-Pfad (Eingeschränkt-Badge).
+   */
+  config_last_reject?: import('@/types').ConfigLastReject | null
 }
 
 /** Summary of a subzone assigned to an ESP device (from GET /esp/devices) */
