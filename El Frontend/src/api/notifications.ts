@@ -71,6 +71,8 @@ export interface NotificationListFilters {
   source_bucket?: 'system'
   status?: AlertStatus
   is_read?: boolean
+  /** Include channel=suppressed audit rows (AUT-269) */
+  show_suppressed?: boolean
   page?: number
   page_size?: number
 }

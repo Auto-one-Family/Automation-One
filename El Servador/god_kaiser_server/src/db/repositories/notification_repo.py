@@ -39,6 +39,7 @@ class NotificationRepository(BaseRepository[Notification]):
         source_bucket: Optional[str] = None,
         status: Optional[str] = None,
         is_read: Optional[bool] = None,
+        show_suppressed: bool = False,
         skip: int = 0,
         limit: int = 50,
     ) -> Tuple[List[Notification], int]:
@@ -49,6 +50,10 @@ class NotificationRepository(BaseRepository[Notification]):
             Tuple of (notifications, total_count)
         """
         conditions = [Notification.user_id == user_id, Notification.is_archived == False]
+
+        # ISA-18.2 / AUT-269: suppressed audit rows (channel=suppressed) hidden unless requested
+        if not show_suppressed:
+            conditions.append(Notification.channel != "suppressed")
 
         if severity is not None:
             conditions.append(Notification.severity == severity)

@@ -151,4 +151,34 @@ describe('notification-inbox store', () => {
 
     expect(mockRouteQuery.notifications).toBe('alerts')
   })
+
+  it('reloadListForFilters sendet show_suppressed wenn aktiviert', async () => {
+    const store = useNotificationInboxStore()
+    store.isDrawerOpen = true
+    store.showSuppressed = true
+
+    await store.reloadListForFilters()
+
+    expect(notificationsApiMock.list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        show_suppressed: true,
+        page: 1,
+        page_size: 50,
+      }),
+    )
+  })
+
+  it('notification_new ignoriert suppressed wenn Anzeige aus', () => {
+    const store = useNotificationInboxStore()
+    store.showSuppressed = false
+    store.notifications = []
+    store.unreadCount = 0
+
+    store.handleWSNotificationNew({
+      ...makeNotification('sup'),
+      channel: 'suppressed',
+    } as unknown as Record<string, unknown>)
+
+    expect(store.notifications).toHaveLength(0)
+  })
 })

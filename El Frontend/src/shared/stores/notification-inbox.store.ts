@@ -28,8 +28,18 @@ import { useAuthStore } from '@/shared/stores/auth.store'
 
 const logger = createLogger('NotificationInboxStore')
 
-/** Filter tabs in the drawer */
-export type InboxFilter = 'all' | 'critical' | 'warning' | 'info'
+/** Severity chips in the drawer (info-only messages appear under „Alle“) */
+export type InboxFilter = 'all' | 'critical' | 'warning'
+
+const SHOW_SUPPRESSED_STORAGE_KEY = 'ao-notification-inbox-show-suppressed'
+
+function readShowSuppressedPreference(): boolean {
+  try {
+    return localStorage.getItem(SHOW_SUPPRESSED_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
 
 /** Alert lifecycle filter (server-side list; 'all' = no status query) */
 export type InboxLifecycleFilter = 'all' | AlertStatus
@@ -63,6 +73,8 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
   const activeFilter = ref<InboxFilter>('all')
   const lifecycleFilter = ref<InboxLifecycleFilter>('all')
   const sourceFilter = ref<SourceFilterValue>(null)
+  /** Include suppressed audit notifications (API show_suppressed), persisted locally */
+  const showSuppressed = ref(readShowSuppressedPreference())
   const isLoading = ref(false)
   const hasMore = ref(true)
   const currentPage = ref(1)
@@ -139,6 +151,9 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     } else if (sourceFilter.value) {
       f.source = sourceFilter.value as NotificationDTO['source']
     }
+    if (showSuppressed.value) {
+      f.show_suppressed = true
+    }
     return f
   }
 
@@ -148,6 +163,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     if (sourceFilter.value === '__system__') {
       if (!n.source || !SYSTEM_SOURCES_SET.has(n.source)) return false
     } else if (sourceFilter.value && n.source !== sourceFilter.value) return false
+    if (!showSuppressed.value && n.channel === 'suppressed') return false
     return true
   }
 
@@ -165,8 +181,10 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     if (isLoading.value) return
     isLoading.value = true
     try {
+      const ambientFilters: NotificationListFilters = { page: 1, page_size: PAGE_SIZE }
+      if (showSuppressed.value) ambientFilters.show_suppressed = true
       const [listRes, countRes] = await Promise.all([
-        notificationsApi.list({ page: 1, page_size: PAGE_SIZE }),
+        notificationsApi.list(ambientFilters),
         notificationsApi.getUnreadCount(),
       ])
       notifications.value = listRes.data
@@ -216,9 +234,20 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     }
   })
 
-  watch([activeFilter, lifecycleFilter, sourceFilter], () => {
+  watch([activeFilter, lifecycleFilter, sourceFilter, showSuppressed], () => {
     if (!isDrawerOpen.value) return
     void reloadListForFilters()
+  })
+
+  watch(showSuppressed, (v) => {
+    try {
+      localStorage.setItem(SHOW_SUPPRESSED_STORAGE_KEY, v ? 'true' : 'false')
+    } catch {
+      /* ignore quota / private mode */
+    }
+    if (!isDrawerOpen.value) {
+      void reloadUnfilteredFirstPageForAmbient()
+    }
   })
 
   /**
@@ -400,10 +429,16 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
   function handleWSNotificationNew(data: Record<string, unknown>): void {
     if (!isCurrentUserEvent(data)) return
 
+    const channel = (data.channel as string) || 'websocket'
+
+    if (!showSuppressed.value && channel === 'suppressed') {
+      return
+    }
+
     const notification: NotificationDTO = {
       id: data.id as string,
       user_id: data.user_id as number,
-      channel: (data.channel as string) || 'websocket',
+      channel,
       severity: data.severity as NotificationSeverity,
       category: data.category as string as NotificationDTO['category'],
       title: data.title as string,
@@ -583,6 +618,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     lifecycleFilter,
     sourceFilter,
     setSourceFilter,
+    showSuppressed,
     isLoading,
     hasMore,
 

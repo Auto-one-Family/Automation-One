@@ -293,7 +293,7 @@ function handleBack(): void {
 
 function handleShowAll(): void {
   quickActionStore.closeMenu()
-  inboxStore.toggleDrawer()
+  inboxStore.openDrawerWithActiveAlertsFocus()
 }
 </script>
 

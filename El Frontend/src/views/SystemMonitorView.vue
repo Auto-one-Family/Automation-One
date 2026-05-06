@@ -160,6 +160,52 @@ const filterCorrelationId = ref<string>('')
 const filterLevels = ref<Set<string>>(new Set(['info', 'warning', 'error', 'critical']))
 const filterTimeRange = ref<'all' | '1h' | '6h' | '24h' | '7d' | '30d' | 'custom'>('all')
 
+/** Deep-Link `?level=` (Deutsch/Englisch) → Schwere-Filter */
+const LEVEL_QUERY_TOKEN_MAP: Record<string, string> = {
+  kritisch: 'critical',
+  critical: 'critical',
+  warnung: 'warning',
+  warning: 'warning',
+  fehler: 'error',
+  error: 'error',
+  info: 'info',
+}
+
+function applyLevelQueryFromRoute(raw: unknown): void {
+  if (raw == null || raw === '') return
+  const str = Array.isArray(raw) ? String(raw[0]) : String(raw)
+  const parts = str.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+  const levels = new Set<string>()
+  for (const p of parts) {
+    const mapped = LEVEL_QUERY_TOKEN_MAP[p]
+    if (mapped) levels.add(mapped)
+  }
+  if (levels.size > 0) {
+    filterLevels.value = levels
+  }
+}
+
+/** Deep-Link `?source=alerts` — Schwerpunkte Audit-Log + ESP-Gesundheit */
+function applySourceQueryFromRoute(raw: unknown): void {
+  if (raw == null || raw === '') return
+  const str = (Array.isArray(raw) ? String(raw[0]) : String(raw)).toLowerCase()
+  if (str === 'alerts') {
+    selectedDataSources.value = ['audit_log', 'esp_health']
+  }
+}
+
+watch(
+  () => route.query.level,
+  lvl => applyLevelQueryFromRoute(lvl),
+  { immediate: true },
+)
+
+watch(
+  () => route.query.source,
+  src => applySourceQueryFromRoute(src),
+  { immediate: true },
+)
+
 // Custom Date Range for 'custom' timeRange
 const customStartDate = ref<string | undefined>(undefined)
 const customEndDate = ref<string | undefined>(undefined)

@@ -215,6 +215,58 @@ async def test_get_notifications_filter_status(
 
 
 @pytest.mark.asyncio
+async def test_get_notifications_show_suppressed_query(
+    operator_headers,
+    db_session: AsyncSession,
+    operator_user: User,
+):
+    """Suppressed audit notifications excluded by default; show_suppressed=true lists them (AUT-269)."""
+    normal = Notification(
+        user_id=operator_user.id,
+        title="Visible",
+        body="",
+        channel="websocket",
+        severity="warning",
+        category="system",
+        source="manual",
+        status="active",
+    )
+    suppressed_row = Notification(
+        user_id=operator_user.id,
+        title="Suppressed audit",
+        body="",
+        channel="suppressed",
+        severity="info",
+        category="system",
+        source="manual",
+        status="resolved",
+    )
+    db_session.add_all([normal, suppressed_row])
+    await db_session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        hidden = await client.get(
+            "/api/v1/notifications",
+            headers=operator_headers,
+            params={"page_size": 50},
+        )
+        shown = await client.get(
+            "/api/v1/notifications",
+            headers=operator_headers,
+            params={"page_size": 50, "show_suppressed": True},
+        )
+
+    assert hidden.status_code == 200
+    hidden_ids = {item["id"] for item in hidden.json()["data"]}
+    assert str(normal.id) in hidden_ids
+    assert str(suppressed_row.id) not in hidden_ids
+
+    assert shown.status_code == 200
+    shown_ids = {item["id"] for item in shown.json()["data"]}
+    assert str(suppressed_row.id) in shown_ids
+
+
+@pytest.mark.asyncio
 async def test_get_notifications_filter_source_bucket_system(
     operator_headers,
     db_session: AsyncSession,

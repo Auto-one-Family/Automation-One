@@ -28,8 +28,8 @@ import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('AlertCenterStore')
 
-/** Polling interval for alert stats (30s) */
-const STATS_POLL_INTERVAL_MS = 30_000
+/** Polling interval for alert stats (10s, AUT-269) */
+const STATS_POLL_INTERVAL_MS = 10_000
 const REALTIME_STATS_REFRESH_DEBOUNCE_MS = 600
 
 export const useAlertCenterStore = defineStore('alert-center', () => {
@@ -167,6 +167,11 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
       // Refresh stats
       await fetchStats({ force: true })
 
+      const inboxStore = useNotificationInboxStore()
+      if (inboxStore.isDrawerOpen) {
+        void inboxStore.reloadListForFilters()
+      }
+
       logger.info(`Alert acknowledged: ${id}`)
       return true
     } catch (err) {
@@ -190,6 +195,11 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
 
       // Refresh stats
       await fetchStats({ force: true })
+
+      const inboxStore = useNotificationInboxStore()
+      if (inboxStore.isDrawerOpen) {
+        void inboxStore.reloadListForFilters()
+      }
 
       logger.info(`Alert resolved: ${id}`)
       return true
@@ -226,6 +236,11 @@ export const useAlertCenterStore = defineStore('alert-center', () => {
         }
       }
       await fetchStats({ force: true })
+
+      if (inboxStore.isDrawerOpen) {
+        void inboxStore.reloadListForFilters()
+      }
+
       logger.info(`All unresolved alerts resolved (${result.resolved_count})`)
       return true
     } catch (err) {

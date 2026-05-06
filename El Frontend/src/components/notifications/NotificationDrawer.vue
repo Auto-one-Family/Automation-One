@@ -3,23 +3,18 @@
  * NotificationDrawer — Slide-in inbox panel
  *
  * Uses SlideOver.vue primitive (width="lg" = 560px).
- * Features:
- * - Header: Title + Settings gear + "Alle gelesen" button
- * - Filter tabs: Alle | Kritisch | Warnungen | Infos
- * - Grouped by Heute/Gestern/Älter
- * - Lazy loading: first 50, then "Mehr laden" button
- * - ESC and click-outside close (SlideOver feature)
+ * Lifecycle + Schweregrad-Filter; Deep-Link zum Ereignis-Monitor (AUT-269).
  */
 
 import { ref, computed, watch } from 'vue'
-import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp, Filter } from 'lucide-vue-next'
+import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
+import BaseToggle from '@/shared/design/primitives/BaseToggle.vue'
 import NotificationItem from '@/components/notifications/NotificationItem.vue'
 import NotificationPreferences from '@/components/notifications/NotificationPreferences.vue'
 import {
   useNotificationInboxStore,
   type InboxFilter,
-  type SourceFilterValue,
 } from '@/shared/stores/notification-inbox.store'
 import { useAlertCenterStore } from '@/shared/stores/alert-center.store'
 import { useAuthStore } from '@/shared/stores/auth.store'
@@ -33,33 +28,18 @@ const authStore = useAuthStore()
 
 type StatusFilter = 'all' | 'active' | 'acknowledged' | 'resolved'
 const isResolvingAll = ref(false)
-const advancedSourcesOpen = ref(false)
 
-function applyActiveCriticalPreset(): void {
-  inboxStore.activeFilter = 'critical'
-  inboxStore.lifecycleFilter = 'active'
-  inboxStore.setSourceFilter(null)
-}
-
-const filterTabs: { key: InboxFilter; label: string }[] = [
+/** Schwere als kompakte Chips — reine Info-Meldungen erscheinen unter „Alle“. */
+const severityChips: { key: InboxFilter; label: string }[] = [
   { key: 'all', label: 'Alle' },
   { key: 'critical', label: 'Kritisch' },
   { key: 'warning', label: 'Warnungen' },
-  { key: 'info', label: 'Infos' },
 ]
 
-/** Source filter chips: Alle | Sensor | Infrastruktur | Aktor | Regel | System */
-const sourceChips: { value: SourceFilterValue; label: string }[] = [
-  { value: null, label: 'Alle Quellen' },
-  { value: 'sensor_threshold', label: 'Sensor' },
-  { value: 'grafana', label: 'Infrastruktur' },
-  { value: 'mqtt_handler', label: 'Aktor' },
-  { value: 'logic_engine', label: 'Regel' },
-  { value: 'ai_anomaly_service', label: 'KI-Anomalie' },
-  { value: 'freshness_reminder', label: 'Frische' },
-  { value: 'calibration_reminder', label: 'Kalibrierung' },
-  { value: '__system__', label: 'System' },
-]
+const eventsMonitorLink = {
+  path: '/system-monitor',
+  query: { tab: 'events', level: 'kritisch,fehler' },
+} as const
 
 const statusTabs = computed(() => {
   const stats = alertStore.alertStats
@@ -145,21 +125,12 @@ watch(
     <template #default>
       <!-- Header Actions Row -->
       <div class="drawer__header-actions">
-      <!-- Primary row: severity + lifecycle + preset -->
+      <p class="drawer__intro">
+        Hier siehst du gespeicherte Alarme und Meldungen aus dem Betrieb.
+        Sofortige Live-Fehler zusätzlich als Toast — für Details nutze den Ereignis-Monitor.
+      </p>
+      <!-- Lifecycle first, then severity chips -->
       <div class="drawer__primary-toolbar">
-        <div class="drawer__tabs">
-          <button
-            v-for="tab in filterTabs"
-            :key="tab.key"
-            :class="[
-              'drawer__tab',
-              { 'drawer__tab--active': inboxStore.activeFilter === tab.key },
-            ]"
-            @click="inboxStore.activeFilter = tab.key"
-          >
-            {{ tab.label }}
-          </button>
-        </div>
         <div class="drawer__status-tabs drawer__status-tabs--inline">
           <button
             v-for="tab in statusTabs"
@@ -178,15 +149,32 @@ watch(
             {{ tab.label }}
           </button>
         </div>
-        <button
-          type="button"
-          class="drawer__preset-btn"
-          title="Nur aktive kritische Alerts"
-          @click="applyActiveCriticalPreset"
-        >
-          Kritisch · aktiv
-        </button>
+        <div class="drawer__severity-row">
+          <span class="drawer__severity-label">Schwere</span>
+          <div class="drawer__severity-chips">
+            <button
+              v-for="chip in severityChips"
+              :key="chip.key"
+              type="button"
+              :class="[
+                'drawer__severity-chip',
+                { 'drawer__severity-chip--active': inboxStore.activeFilter === chip.key },
+              ]"
+              @click="inboxStore.activeFilter = chip.key"
+            >
+              {{ chip.label }}
+            </button>
+          </div>
+        </div>
       </div>
+
+      <BaseToggle
+        v-model="inboxStore.showSuppressed"
+        size="sm"
+        active-color="purple"
+        label="Unterdrückte Einträge anzeigen"
+        description="Audit-Einträge zum Unterdrücken (Kanal suppressed) in der Liste einblenden."
+      />
 
       <div class="drawer__actions-row">
           <button
@@ -206,35 +194,6 @@ watch(
             @click="inboxStore.openPreferences()"
           >
             <Settings class="drawer__action-icon" />
-          </button>
-        </div>
-      </div>
-
-      <!-- Advanced: source chips (collapsed by default) -->
-      <div class="drawer__advanced">
-        <button
-          type="button"
-          class="drawer__advanced-toggle"
-          @click="advancedSourcesOpen = !advancedSourcesOpen"
-        >
-          <Filter class="drawer__advanced-icon" />
-          <span>Quelle filtern</span>
-          <component
-            :is="advancedSourcesOpen ? ChevronUp : ChevronDown"
-            class="drawer__advanced-chevron"
-          />
-        </button>
-        <div v-show="advancedSourcesOpen" class="drawer__source-chips">
-          <button
-            v-for="chip in sourceChips"
-            :key="chip.value ?? 'all'"
-            :class="[
-              'drawer__source-chip',
-              { 'drawer__source-chip--active': inboxStore.sourceFilter === chip.value },
-            ]"
-            @click="inboxStore.setSourceFilter(chip.value)"
-          >
-            {{ chip.label }}
           </button>
         </div>
       </div>
@@ -291,6 +250,16 @@ watch(
         </template>
       </div>
 
+      <div class="drawer__footer-nav">
+        <RouterLink
+          :to="eventsMonitorLink"
+          class="drawer__footer-nav-link"
+          @click="inboxStore.isDrawerOpen = false"
+        >
+          Im Ereignis-Monitor öffnen
+        </RouterLink>
+      </div>
+
       <!-- Email Log Footer (Admin only) -->
       <div v-if="authStore.isAdmin" class="drawer__email-footer">
         <div class="drawer__email-toggle-row">
@@ -311,7 +280,7 @@ watch(
             class="drawer__email-all-link"
             @click="inboxStore.isDrawerOpen = false"
           >
-            Alle anzeigen
+            E-Mail-Postfach
           </RouterLink>
         </div>
 
@@ -358,11 +327,19 @@ watch(
   margin-bottom: var(--space-3);
 }
 
+.drawer__intro {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: 1.45;
+  margin: 0 0 var(--space-1) 0;
+}
+
 .drawer__primary-toolbar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-2);
+  width: 100%;
 }
 
 .drawer__status-tabs--inline {
@@ -372,26 +349,54 @@ watch(
   padding-bottom: 0;
   border-bottom: none;
   margin-bottom: 0;
+  width: 100%;
+}
+
+.drawer__severity-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.drawer__severity-label {
+  font-size: var(--text-xxs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.drawer__severity-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
   flex: 1;
   min-width: 0;
 }
 
-.drawer__preset-btn {
-  flex-shrink: 0;
-  padding: var(--space-1) var(--space-2);
+.drawer__severity-chip {
+  padding: 2px var(--space-2);
   font-size: var(--text-xxs);
-  font-weight: 600;
-  color: var(--color-iridescent-2);
-  background: rgba(129, 140, 248, 0.08);
-  border: 1px solid var(--glass-border);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all var(--transition-fast);
+  white-space: nowrap;
 }
 
-.drawer__preset-btn:hover {
-  background: rgba(129, 140, 248, 0.14);
-  border-color: var(--glass-border-hover);
+.drawer__severity-chip:hover {
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.drawer__severity-chip--active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border-color: var(--glass-border);
 }
 
 .drawer__actions-row {
@@ -401,76 +406,21 @@ watch(
   gap: var(--space-1);
 }
 
-.drawer__advanced {
-  margin-bottom: var(--space-3);
-  border-bottom: 1px solid var(--glass-border);
-  padding-bottom: var(--space-3);
+.drawer__footer-nav {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--glass-border);
 }
 
-.drawer__advanced-toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-1) 0;
+.drawer__footer-nav-link {
   font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--color-text-secondary);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  text-align: left;
+  color: var(--color-iridescent-2);
+  text-decoration: none;
 }
 
-.drawer__advanced-toggle:hover {
-  color: var(--color-text-primary);
-}
-
-.drawer__advanced-icon {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-
-.drawer__advanced-chevron {
-  width: 12px;
-  height: 12px;
-  margin-left: auto;
-  color: var(--color-text-muted);
-}
-
-/* Filter Tabs */
-.drawer__tabs {
-  display: flex;
-  gap: 1px;
-  background: var(--color-bg-primary);
-  padding: 2px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--glass-border);
-}
-
-.drawer__tab {
-  padding: var(--space-1) var(--space-3);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-xs);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  white-space: nowrap;
-}
-
-.drawer__tab:hover {
-  color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.drawer__tab--active {
-  color: var(--color-text-primary);
-  background: var(--color-bg-secondary);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+.drawer__footer-nav-link:hover {
+  text-decoration: underline;
 }
 
 /* Action Buttons */
@@ -537,40 +487,6 @@ watch(
 }
 
 .drawer__status-tab--active {
-  color: var(--color-text-primary);
-  background: var(--color-bg-tertiary);
-  border-color: var(--glass-border);
-}
-
-/* Source Filter Chips */
-.drawer__source-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  padding-bottom: var(--space-3);
-  margin-bottom: var(--space-3);
-  border-bottom: 1px solid var(--glass-border);
-}
-
-.drawer__source-chip {
-  padding: 2px var(--space-2);
-  font-size: var(--text-xxs);
-  font-weight: 500;
-  color: var(--color-text-muted);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  white-space: nowrap;
-}
-
-.drawer__source-chip:hover {
-  color: var(--color-text-secondary);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.drawer__source-chip--active {
   color: var(--color-text-primary);
   background: var(--color-bg-tertiary);
   border-color: var(--glass-border);
