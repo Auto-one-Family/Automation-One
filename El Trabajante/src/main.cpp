@@ -2,11 +2,7 @@
 // INCLUDES
 // ============================================
 #include <Arduino.h>
-<<<<<<< Updated upstream
-#include <cstring>
-=======
 #include <cstdio>
->>>>>>> Stashed changes
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
@@ -2459,27 +2455,16 @@ void routeIncomingMessage(const char* t, const char* p) {
         bool config_available = doc["config_available"] | false;
         unsigned long server_time = doc["server_time"] | 0;
 
-<<<<<<< Updated upstream
         // NTP can still be pending during early boot; adopt authoritative server time
         // from heartbeat ACK to avoid prolonged ts=0 windows.
         if (server_time > 0 && !timeManager.isSynchronized()) {
             timeManager.syncFromAuthoritativeUnix(static_cast<time_t>(server_time), "heartbeat_ack");
         }
-
-=======
-        {
-            char hb_line[128];
-            snprintf(hb_line, sizeof(hb_line), "[HB_ACK] epoch=%lu cfg_avail=%d",
-                     (unsigned long)handover_epoch, config_available ? 1 : 0);
-            LOG_I(TAG, hb_line);
-        }
->>>>>>> Stashed changes
         LOG_D(TAG, "  Status: " + String(status) + ", Config available: " +
                   String(config_available ? "yes" : "no"));
 
         if (strcmp(status, "approved") == 0 || strcmp(status, "online") == 0) {
             time_t approval_ts = server_time > 0 ? (time_t)server_time : timeManager.getUnixTimestamp();
-<<<<<<< Updated upstream
             const bool already_approved = configManager.isDeviceApproved();
             const time_t persisted_approval_ts = configManager.getApprovalTimestamp();
             bool should_persist_approval = !already_approved;
@@ -2503,17 +2488,6 @@ void routeIncomingMessage(const char* t, const char* p) {
             if (should_persist_approval) {
                 configManager.setDeviceApproved(true, approval_ts);
             }
-=======
-            {
-                char hb[120];
-                snprintf(hb, sizeof(hb), "[HBINF] pre setDeviceApproved st=%s epoch=%lu ts=%ld cfg=%d",
-                         status, static_cast<unsigned long>(handover_epoch), static_cast<long>(approval_ts),
-                         config_available ? 1 : 0);
-                LOG_I(TAG, hb);
-            }
-            configManager.setDeviceApproved(true, approval_ts);
-            LOG_I(TAG, "[HBINF] post setDeviceApproved approved=1");
->>>>>>> Stashed changes
 
             if (isConfigPendingAfterResetState()) {
                 // Do not evaluate pending-exit on every heartbeat ACK.

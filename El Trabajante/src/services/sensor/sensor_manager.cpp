@@ -18,12 +18,6 @@
 #include "../../models/watchdog_types.h"
 #include "../../models/sensor_types.h"
 #include "../../models/sensor_registry.h"
-<<<<<<< Updated upstream
-=======
-#include <map>
-#include <tuple>
-#include <vector>
->>>>>>> Stashed changes
 
 // ESP-IDF TAG convention for structured logging
 static const char* TAG = "SENSOR";
