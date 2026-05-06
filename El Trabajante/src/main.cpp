@@ -842,27 +842,39 @@ void routeIncomingMessage(const char* t, const char* p) {
                                  true);
             return;
         }
-        // CP-F4: Reject payload that exceeds queue buffer — truncation causes partial config.
+        // CP-F4 / AUT-134 PKG-02: Reject payload that exceeds queue buffer — truncation
+        // causes partial config. Reject is TERMINAL: no requeue, no retry, retryable=false.
+        // Correlation echo: intent_id, correlation_id, generation are mirrored from the
+        // incoming payload via `metadata` (extracted at line 796) into both
+        // `config_response` (publishError) and `intent_outcome` (publishIntentOutcome).
         size_t payload_len = payload.length();
         if (payload_len >= CONFIG_PAYLOAD_MAX_LEN) {
             LOG_E(TAG, "[CONFIG] TRUNCATION: payload=" + String(payload_len) +
                        " bytes, max=" + String(CONFIG_PAYLOAD_MAX_LEN) + " — config REJECTED (CP-F4)");
 
-            String msg = String("[CONFIG] Payload too large: ") + payload_len +
-                         " bytes, max=" + CONFIG_PAYLOAD_MAX_LEN;
+            // Reason text uses repo constant CONFIG_PAYLOAD_MAX_LEN (do NOT hardcode 4096).
+            String reason = String("Config payload too large: ") + payload_len +
+                            " bytes, max=" + CONFIG_PAYLOAD_MAX_LEN;
+
+            // AUT-134 PKG-02: classify in errorTracker like other config reject paths
+            // (e.g. ERROR_TASK_QUEUE_FULL below) so heartbeat metrics see the event.
+            errorTracker.logApplicationError(ERROR_PAYLOAD_TOO_LARGE, reason.c_str());
             ConfigResponseBuilder::publishError(
                 ConfigType::SYSTEM,
                 ConfigErrorCode::PAYLOAD_TOO_LARGE,
-                msg,
+                reason,
                 JsonVariantConst(),
                 corr_id);
+            // AUT-134 PKG-02: specific code "PAYLOAD_TOO_LARGE" (not generic VALIDATION_FAIL)
+            // so server-side can correlate the oversize-pre-flight gate with the firmware reject.
+            // retryable=false: terminal — server must not auto-republish the same payload.
             publishIntentOutcome("config",
                                  metadata,
                                  "rejected",
-                                 "VALIDATION_FAIL",
-                                 msg,
+                                 "PAYLOAD_TOO_LARGE",
+                                 reason,
                                  false);
-            return;
+            return;  // Terminal — no enqueue, no retry path executes.
         }
 
         {
