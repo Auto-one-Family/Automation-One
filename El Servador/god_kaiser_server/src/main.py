@@ -40,6 +40,7 @@ from .mqtt.client import MQTTClient
 from .mqtt.topics import TopicBuilder
 from .mqtt.handlers import (
     actuator_handler,
+    actuator_latched_offline_handler,
     actuator_response_handler,
     actuator_alert_handler,
     calibration_response_handler,
@@ -346,6 +347,16 @@ async def lifespan(app: FastAPI):
             recovery_confirm_handler.handle_recovery_confirm,
         )
         logger.info("Recovery confirm handler registered: kaiser/+/esp/+/actuator/recovery_confirm")
+        # AUT-117: Actuator latched-offline telemetry (ESP → Server, QoS 0)
+        # Pure observability: log + WS broadcast, no DB writes.
+        _subscriber_instance.register_handler(
+            "kaiser/+/esp/+/actuator/+/latched_offline",
+            actuator_latched_offline_handler.handle_actuator_latched_offline,
+        )
+        logger.info(
+            "Actuator latched-offline handler registered: "
+            "kaiser/+/esp/+/actuator/+/latched_offline"
+        )
         # AUT-121: Heartbeat Metrics Handler (pure ingest, no DB/WS)
         _subscriber_instance.register_handler(
             constants.get_topic_with_kaiser_id(constants.MQTT_SUBSCRIBE_ESP_HEARTBEAT_METRICS),

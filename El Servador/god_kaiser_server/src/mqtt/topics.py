@@ -1110,6 +1110,64 @@ class TopicBuilder:
         return f"kaiser/{kaiser_id}/esp/{esp_id}/system/queue_pressure"
 
     @staticmethod
+    def build_actuator_latched_offline_topic(
+        esp_id: str, gpio: int, kaiser_id: str = "god"
+    ) -> str:
+        """
+        Build actuator latched-offline telemetry topic (AUT-117).
+
+        Used by ESPs to publish a structured event when an actuator is either
+        held active under an offline rule (`reason="offline_rule_hold"`) or
+        forced into the safe state at MQTT disconnect (`reason="safety_forced_off"`).
+
+        Counterpart to ``actuator/{gpio}/alert`` — same trigger, but
+        machine-readable payload (``actuator_state``, ``offline_rule_count``)
+        for forensic dashboards.
+
+        Args:
+            esp_id: ESP device ID
+            gpio: GPIO pin number
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/latched_offline
+        """
+        return (
+            f"kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/latched_offline"
+        )
+
+    @staticmethod
+    def parse_actuator_latched_offline_topic(
+        topic: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Parse actuator latched-offline telemetry topic (AUT-117).
+
+        Expected topic:
+            ``kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/latched_offline``
+
+        Args:
+            topic: MQTT topic string
+
+        Returns:
+            Parsed topic components ``{kaiser_id, esp_id, gpio, type}``
+            or ``None`` if parse fails.
+        """
+        pattern = (
+            r"^kaiser/([a-zA-Z0-9_]+)/esp/([A-Z0-9_]+)/"
+            r"actuator/(\d+)/latched_offline$"
+        )
+        match = re.match(pattern, topic)
+        if match:
+            return {
+                "kaiser_id": match.group(1),
+                "esp_id": match.group(2),
+                "gpio": int(match.group(3)),
+                "type": "actuator_latched_offline",
+            }
+        return None
+
+    @staticmethod
     def build_library_event_topic(esp_id: str, event: str, kaiser_id: str = "god") -> str:
         """
         Build library event topic.
@@ -1202,6 +1260,7 @@ class TopicBuilder:
             cls.parse_subzone_ack_topic,
             cls.parse_emergency_ack_topic,
             cls.parse_recovery_confirm_topic,
+            cls.parse_actuator_latched_offline_topic,
         ]
 
         for parser in parsers:

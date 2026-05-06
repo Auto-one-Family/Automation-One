@@ -589,14 +589,26 @@ void ActuatorManager::setAllActuatorsToSafeState() {
   // SAFETY-RTOS M4: protect actuators_[] against publishAllActuatorStatus (Core 0)
   xSemaphoreTake(g_actuator_mutex, portMAX_DELAY);
   uint8_t count = 0;
+  uint8_t forced = 0;
   for (uint8_t i = 0; i < MAX_ACTUATORS; i++) {
     if (actuators_[i].in_use && actuators_[i].driver) {
-      controlActuatorBinary(actuators_[i].config.gpio, actuators_[i].config.default_state);
+      uint8_t gpio = actuators_[i].config.gpio;
+      bool was_on = actuators_[i].config.current_state;
+      controlActuatorBinary(gpio, actuators_[i].config.default_state);
       count++;
+      // AUT-117: Structured telemetry for actuators that were actually ON
+      // before being forced to default_state. Forensic value: which
+      // actuators got shed at disconnect (without offline-rule coverage).
+      // QoS 0 — best-effort, non-blocking.
+      if (was_on) {
+        forced++;
+        publishLatchedOffline(gpio, "safety_forced_off", was_on);
+      }
     }
   }
   xSemaphoreGive(g_actuator_mutex);
-  LOG_W(TAG, "[SAFETY] " + String(count) + " actuator(s) set to safe state (default_state)");
+  LOG_W(TAG, "[SAFETY] " + String(count) + " actuator(s) set to safe state (default_state)" +
+             ", forced_off=" + String(forced));
 }
 
 void ActuatorManager::setUncoveredActuatorsToSafeState() {
@@ -616,6 +628,8 @@ void ActuatorManager::setUncoveredActuatorsToSafeState() {
                    String(actuators_[i].config.critical ? "true" : "false") + ")");
         publishActuatorAlert(gpio, "offline_rule_hold",
                              "Actuator held ON — offline rule coverage active");
+        // AUT-117: Structured telemetry parallel to alert (QoS 0).
+        publishLatchedOffline(gpio, "offline_rule_hold", is_on);
       }
     } else {
       controlActuatorBinary(gpio, actuators_[i].config.default_state);
@@ -627,6 +641,9 @@ void ActuatorManager::setUncoveredActuatorsToSafeState() {
         publishActuatorAlert(gpio, "safety_forced_off",
                              String("No offline rule — forced to default_state") +
                              (actuators_[i].config.critical ? " (critical)" : ""));
+        // AUT-117: Structured telemetry parallel to alert (QoS 0).
+        // pre_disconnect_state=true: actuator was ON before being forced to default_state.
+        publishLatchedOffline(gpio, "safety_forced_off", is_on);
       }
     }
   }
@@ -1115,4 +1132,42 @@ void ActuatorManager::publishActuatorAlert(uint8_t gpio,
   payload += "\"message\":\"" + message + "\"";
   payload += "}";
   mqttClient.safePublish(String(topic), payload, 1);
+}
+
+// AUT-117: Publish structured telemetry for actuator latch decision at MQTT disconnect.
+// QoS 0 — telemetry is best-effort: actuator state authority remains
+// `actuator/{gpio}/status` (QoS 1) and `actuator_history` (server-side).
+// This event is observability-only (Operator Dashboard, Forensik).
+//
+// reason values are SSOT (see MQTT_TOPICS.md §2.8):
+//   "offline_rule_hold"  - covered by an offline rule, kept active under P4
+//   "safety_forced_off"  - no covering rule (or no rules at all) -> default_state
+//   "manual_override"    - reserved for future Manual-Recovery commands
+void ActuatorManager::publishLatchedOffline(uint8_t gpio,
+                                            const char* reason,
+                                            bool pre_disconnect_state) const {
+  if (reason == nullptr) {
+    return;  // Defensive: never publish without an SSOT reason value.
+  }
+  extern SystemConfig g_system_config;
+
+  time_t unix_ts = timeManager.getUnixTimestamp();
+  uint8_t offline_rule_count = offlineModeManager.getOfflineRuleCount();
+
+  const char* topic = TopicBuilder::buildActuatorLatchedOfflineTopic(gpio);
+  if (topic == nullptr || topic[0] == '\0') {
+    return;  // Topic-build failure (validateTopicBuffer logs the error).
+  }
+
+  String payload = "{";
+  payload += "\"esp_id\":\"" + g_system_config.esp_id + "\",";
+  payload += "\"gpio\":" + String(gpio) + ",";
+  payload += "\"ts\":" + String((unsigned long)unix_ts) + ",";
+  payload += "\"reason\":\"" + String(reason) + "\",";
+  payload += "\"actuator_state\":\"" + String(pre_disconnect_state ? "on" : "off") + "\",";
+  payload += "\"offline_rule_count\":" + String(offline_rule_count);
+  payload += "}";
+
+  // QoS 0: telemetry, drop on disconnect/outbox-pressure is acceptable.
+  mqttClient.safePublish(String(topic), payload, 0);
 }

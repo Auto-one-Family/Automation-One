@@ -143,6 +143,10 @@ class Subscriber:
         """Resolve QoS deterministically from the registered topic pattern."""
         if pattern.endswith("/system/heartbeat") or pattern.endswith("/system/heartbeat_metrics"):
             return 0  # Heartbeat lanes: fire and forget
+        if pattern.endswith("/latched_offline"):
+            # AUT-117: Actuator latched-offline telemetry. Lossy on purpose —
+            # actuator state authority is ``actuator/{gpio}/status`` (QoS 1).
+            return 0
         if "config_response" in pattern or "config/ack" in pattern:
             return 2  # Config acknowledgement lanes: exactly once
         return 1  # Default: at least once

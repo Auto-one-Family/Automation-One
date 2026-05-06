@@ -2,6 +2,7 @@
 
 from . import actuator_alert_handler
 from . import actuator_handler
+from . import actuator_latched_offline_handler
 from . import actuator_response_handler
 from . import calibration_response_handler
 from . import config_handler
@@ -23,6 +24,7 @@ from . import zone_ack_handler
 __all__ = [
     "actuator_alert_handler",
     "actuator_handler",
+    "actuator_latched_offline_handler",
     "actuator_response_handler",
     "calibration_response_handler",
     "config_handler",

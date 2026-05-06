@@ -97,6 +97,10 @@ private:
                                ConfigErrorCode& error_code) const;
   String buildStatusPayload(const ActuatorStatus& status, const ActuatorConfig& config) const;
   String buildResponsePayload(const ActuatorCommand& command, bool success, const String& message) const;
+  // AUT-117: Telemetry publish for latch decision at MQTT disconnect (QoS 0).
+  // reason: "offline_rule_hold" | "safety_forced_off" | "manual_override"
+  // pre_disconnect_state: actuator state at decision time (true = ON, false = OFF)
+  void publishLatchedOffline(uint8_t gpio, const char* reason, bool pre_disconnect_state) const;
 
   RegisteredActuator actuators_[MAX_ACTUATORS];
   uint8_t actuator_count_;

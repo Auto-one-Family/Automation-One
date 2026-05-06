@@ -174,6 +174,18 @@ const char* TopicBuilder::buildRecoveryConfirmTopic() {
   return validateTopicBuffer(written);
 }
 
+// AUT-117: kaiser/{kaiser_id}/esp/{esp_id}/actuator/{gpio}/latched_offline (ESP → Server)
+// Telemetry for actuator latch decision at MQTT disconnect (QoS 0).
+// Emitted when an actuator is either held active under an offline rule
+// (reason="offline_rule_hold") or forced to safe state at disconnect
+// (reason="safety_forced_off").
+const char* TopicBuilder::buildActuatorLatchedOfflineTopic(uint8_t gpio) {
+  int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
+                         "kaiser/%s/esp/%s/actuator/%d/latched_offline",
+                         kaiser_id_, esp_id_, gpio);
+  return validateTopicBuffer(written);
+}
+
 // Pattern 5: kaiser/god/esp/{esp_id}/system/heartbeat
 const char* TopicBuilder::buildSystemHeartbeatTopic() {
   int written = snprintf(topic_buffer_, sizeof(topic_buffer_),
