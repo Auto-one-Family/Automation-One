@@ -22,7 +22,7 @@
 // .../system/heartbeat_metrics topic (QoS 0, delta/freshness gated).
 // Core heartbeat retains ACK/validation/config/zone/handover fields.
 // DEFAULT: Disabled (opt-in, full legacy heartbeat preserved)
-// #define ENABLE_METRICS_SPLIT
+#define ENABLE_METRICS_SPLIT
 
 // ============================================
 // CORE-QUEUE SAFETY CONTRACT (R0-R4)
