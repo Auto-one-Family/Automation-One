@@ -197,6 +197,20 @@ class ActuatorConfigCreate(ActuatorConfigBase):
         None,
         description="Custom metadata",
     )
+    # AUT-120: Fail-safe behaviour on MQTT disconnect.
+    # None = server has no opinion → ESP32 keeps its own default (true for
+    # critical actuators such as pumps/valves, false otherwise).
+    # Backward compatible: existing payloads without this field retain
+    # previous behaviour because the server omits the field from the
+    # config-push payload when it is None.
+    fail_safe_on_disconnect: Optional[bool] = Field(
+        None,
+        description=(
+            "AUT-120: Override ESP32 fail-safe-on-disconnect default. "
+            "None = ESP32 default applies, True = force OFF on disconnect, "
+            "False = keep last state."
+        ),
+    )
     subzone_id: Optional[str] = Field(
         None,
         max_length=50,
@@ -247,6 +261,15 @@ class ActuatorConfigUpdate(BaseModel):
     servo_min_pulse: Optional[int] = Field(None, ge=500, le=2500)
     servo_max_pulse: Optional[int] = Field(None, ge=500, le=2500)
     metadata: Optional[Dict[str, Any]] = Field(None)
+    # AUT-120: Override ESP32 fail-safe-on-disconnect default.
+    # None = unchanged (no override sent), True/False = explicit override.
+    fail_safe_on_disconnect: Optional[bool] = Field(
+        None,
+        description=(
+            "AUT-120: Override ESP32 fail-safe-on-disconnect default. "
+            "None leaves the persisted value unchanged."
+        ),
+    )
     # Multi-Zone Device Scope (T13-R2)
     device_scope: Optional[str] = Field(
         None,
@@ -290,6 +313,14 @@ class ActuatorConfigResponse(ActuatorConfigBase, TimestampMixin):
     servo_min_pulse: Optional[int] = Field(None)
     servo_max_pulse: Optional[int] = Field(None)
     metadata: Optional[Dict[str, Any]] = Field(None)
+    # AUT-120: Fail-safe-on-disconnect override (None = ESP32 default).
+    fail_safe_on_disconnect: Optional[bool] = Field(
+        None,
+        description=(
+            "AUT-120: Persisted fail-safe override. None means the ESP32 "
+            "applies its own default (true for critical actuators)."
+        ),
+    )
     # Config status from ESP32 verification
     config_status: Optional[str] = Field(
         None,

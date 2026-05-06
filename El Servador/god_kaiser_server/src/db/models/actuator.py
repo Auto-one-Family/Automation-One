@@ -134,6 +134,22 @@ class ActuatorConfig(Base, TimestampMixin):
         doc="Safety constraints (max_runtime, cooldown_period, emergency_stop_priority)",
     )
 
+    # AUT-120: Fail-safe behaviour on MQTT disconnect.
+    # None  -> server takes no opinion; ESP32 firmware applies its own default
+    #          (true for critical actuators such as pumps/valves, false otherwise).
+    # True  -> ESP32 must turn the actuator OFF when the connection is lost.
+    # False -> ESP32 keeps the last applied state on disconnect.
+    # Server-driven override; persisted nullable for backward compatibility.
+    fail_safe_on_disconnect: Mapped[Optional[bool]] = mapped_column(
+        Boolean,
+        nullable=True,
+        doc=(
+            "AUT-120: Override ESP32 fail-safe-on-disconnect default. "
+            "None = ESP32 default applies, True = force OFF on disconnect, "
+            "False = keep last state."
+        ),
+    )
+
     # Metadata
     actuator_metadata: Mapped[dict] = mapped_column(
         JSON,

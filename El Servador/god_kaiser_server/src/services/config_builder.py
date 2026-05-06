@@ -165,6 +165,18 @@ class ConfigPayloadBuilder:
     TIME_WINDOW_ONLY_SENSOR_TYPE_ON = "__twindow_on"
     TIME_WINDOW_ONLY_SENSOR_TYPE_OFF = "__twindow_off"
 
+    # =========================================================================
+    # AUT-132: Offline-rules diagnostics — Reason-Code SSOT
+    # =========================================================================
+    # Stable strings shared with frontend / firmware diagnostics. Do NOT change
+    # these literals without coordinating with consumers. The ESP32 firmware
+    # treats these as opaque, but human operators read them in logs and UI.
+    REASON_CALIBRATION_REQUIRED = "CALIBRATION_REQUIRED"
+    REASON_GPIO_NOT_IN_FRAME = "GPIO_NOT_IN_FRAME"
+    REASON_MAX_RULE_LIMIT = "MAX_RULE_LIMIT"
+    REASON_UNSUPPORTED_CONDITION = "UNSUPPORTED_CONDITION"
+    REASON_CONSISTENCY_CHECK_FAILED = "CONSISTENCY_CHECK_FAILED"
+
     def __init__(
         self,
         sensor_repo: Optional[SensorRepository] = None,
@@ -235,13 +247,28 @@ class ConfigPayloadBuilder:
         - actuator_metadata.default_state → default_state (default: false)
         - actuator_metadata.default_pwm → default_pwm (default: 0)
 
+        AUT-120 — fail_safe_on_disconnect:
+            The optional ``fail_safe_on_disconnect`` column is added to the
+            payload only when it is set on the DB row (``is not None``). A
+            ``None`` value means "server has no opinion" so the ESP32 keeps
+            its built-in default (true for critical actuators). This keeps
+            the payload backward compatible for existing devices.
+
         Args:
             actuator: ActuatorConfig model instance
 
         Returns:
             Dictionary with ESP32-compatible actuator payload
         """
-        return self.mapping_engine.apply_actuator_mapping(actuator)
+        payload = self.mapping_engine.apply_actuator_mapping(actuator)
+
+        # AUT-120: Add fail_safe_on_disconnect only when the server has an
+        # explicit opinion. None → field omitted → ESP32 default applies.
+        fail_safe = getattr(actuator, "fail_safe_on_disconnect", None)
+        if fail_safe is not None:
+            payload["fail_safe_on_disconnect"] = bool(fail_safe)
+
+        return payload
 
     async def build_combined_config(
         self,
@@ -333,21 +360,49 @@ class ConfigPayloadBuilder:
         sensor_payloads = [self.build_sensor_payload(s) for s in active_sensors]
         actuator_payloads = [self.build_actuator_payload(a) for a in active_actuators]
 
+        # AUT-132: Collect per-rule skip diagnostics so the ESP32 (and operators
+        # reading the config push) see *why* offline rules were stripped.
+        stripped_rules: List[Dict[str, Any]] = []
+        candidate_counter: Dict[str, int] = {"total_candidate_rules": 0}
+
         # Build offline rules for local hysteresis control during network loss
-        offline_rules = await self._build_offline_rules(db, esp_device)
+        offline_rules = await self._build_offline_rules(
+            db,
+            esp_device,
+            skip_collector=stripped_rules,
+            candidate_counter=candidate_counter,
+        )
 
         # AUT-59: Validate offline_rules consistency against config frame.
         # Rules referencing actuator/sensor GPIOs not present in this config
         # frame would cause a pending-exit blockade on the ESP32 firmware.
         offline_rules = self._validate_offline_rules_consistency(
-            offline_rules, sensor_payloads, actuator_payloads, esp_device_id
+            offline_rules,
+            sensor_payloads,
+            actuator_payloads,
+            esp_device_id,
+            skip_collector=stripped_rules,
         )
+
+        # AUT-132: assemble the diagnostics block in a backward-compatible way.
+        # The legacy ``offline_rules`` field is unchanged; ``offline_rules_diagnostics``
+        # is additive metadata for operators and firmware diagnostics.
+        accepted_count = len(offline_rules)
+        stripped_count = len(stripped_rules)
+        total_candidate_rules = candidate_counter.get("total_candidate_rules", 0)
+        offline_rules_diagnostics: Dict[str, Any] = {
+            "total_candidate_rules": total_candidate_rules,
+            "accepted_count": accepted_count,
+            "stripped_count": stripped_count,
+            "stripped_rules": stripped_rules,
+        }
 
         # Build combined config
         config = {
             "sensors": sensor_payloads,
             "actuators": actuator_payloads,
             "offline_rules": offline_rules,
+            "offline_rules_diagnostics": offline_rules_diagnostics,
         }
 
         # Log zone information for better traceability
@@ -358,7 +413,9 @@ class ConfigPayloadBuilder:
         logger.info(
             f"Built config payload for {esp_device_id}: "
             f"{len(sensor_payloads)} sensors, {len(actuator_payloads)} actuators, "
-            f"{len(offline_rules)} offline_rules, {zone_info}"
+            f"{len(offline_rules)} offline_rules "
+            f"(candidates={total_candidate_rules}, stripped={stripped_count}), "
+            f"{zone_info}"
         )
 
         return config
@@ -367,6 +424,8 @@ class ConfigPayloadBuilder:
         self,
         db: AsyncSession,
         esp_device: Any,
+        skip_collector: Optional[List[Dict[str, Any]]] = None,
+        candidate_counter: Optional[Dict[str, int]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Build offline hysteresis rules for local ESP32 execution during network loss.
@@ -378,6 +437,44 @@ class ConfigPayloadBuilder:
         Only local rules are included — cross-ESP rules (sensor and actuator on
         different ESPs) cannot be executed locally and are excluded.
 
+        ## Inclusion criteria (all must be met)
+        A rule is included in offline_rules when:
+        1. At least one actuator action targets this ESP (``action.esp_id == esp_id``).
+        2. The rule has exactly one of: a hysteresis condition, a simple threshold
+           condition (``sensor_threshold``/``sensor``), or a time-window-only condition
+           (``time_window``/``time``) — all scoped to this ESP.
+        3. For sensor-based conditions: ``sensor_gpio >= 0`` and a valid threshold pair
+           (cooling: activate_above + deactivate_below; heating: activate_below +
+           deactivate_above).
+        4. Sensor type is NOT calibration-required (ph, ec, moisture, soil_moisture —
+           these lack calibration data on the ESP32 so thresholds would fire against
+           raw ADC counts, not physical units).
+        5. ``sensor_value_type`` fits in 23 chars (ESP OfflineRule struct limit).
+        6. For compound rules: operator must be AND (OR-compound cannot be flattened
+           to a single ESP hysteresis struct).
+
+        ## Why offline_rules count may differ from UI logic-rule count
+
+        The UI displays all *CrossESPLogic* rules regardless of locality. The
+        ``offline_rules`` array in the config payload only carries rules that the
+        ESP32 can execute autonomously. The delta is expected and breaks down as:
+
+        - **Cross-ESP rules** — actuator or sensor belongs to a different ESP.
+        - **Calibration-required sensors** — ph / ec / moisture / soil_moisture excluded.
+        - **OR-compound rules** — cannot be represented as a single hysteresis struct.
+        - **No convertible condition** — unsupported operator or missing threshold value.
+        - **Time-window-only rules** — *are* included but use ``sensor_gpio=255`` and
+          ``sensor_value_type=__twindow_on`` or ``__twindow_off`` as a firmware
+          display-semantic marker; these entries do NOT correspond to a physical sensor
+          and may not be visible as "sensor rules" in the UI logic rule list.
+        - **AUT-59 consistency strip** — rules referencing GPIOs absent in the current
+          config frame are removed by ``_validate_offline_rules_consistency``.
+        - **MAX_OFFLINE_RULES cap** — hard limit of 8; excess entries are truncated.
+
+        Per-rule skip details are logged at WARNING/INFO level inside
+        ``_extract_offline_rule``. A structured audit summary is emitted at INFO level
+        after the build loop (search for "[CONFIG] offline_rules audit").
+
         Args:
             db: Database session
             esp_device: ESPDevice model instance (must have device_id attribute)
@@ -385,12 +482,14 @@ class ConfigPayloadBuilder:
         Returns:
             List of offline rule dicts with fields:
                 - actuator_gpio: int
-                - sensor_gpio: int
-                - sensor_value_type: str  (e.g. "sht31_humidity", "ds18b20")
+                - sensor_gpio: int  (255 for time-window-only rules)
+                - sensor_value_type: str  (e.g. "sht31_humidity", "__twindow_on")
                 - activate_below: float   (heating mode; 0.0 if cooling mode)
                 - deactivate_above: float (heating mode; 0.0 if cooling mode)
                 - activate_above: float   (cooling mode; 0.0 if heating mode)
                 - deactivate_below: float (cooling mode; 0.0 if heating mode)
+                - current_state_active: bool
+                - time_filter: dict  (optional, present when a time_window condition exists)
             Maximum MAX_OFFLINE_RULES entries; excess entries are truncated with a warning.
         """
         if not self.logic_repo:
@@ -429,9 +528,17 @@ class ConfigPayloadBuilder:
 
         offline_rules: List[Dict[str, Any]] = []
 
+        if candidate_counter is not None:
+            candidate_counter["total_candidate_rules"] = len(enabled_rules)
+
         for rule in enabled_rules:
             try:
-                rule_entry = self._extract_offline_rule(rule, esp_id, hysteresis_states)
+                rule_entry = self._extract_offline_rule(
+                    rule,
+                    esp_id,
+                    hysteresis_states,
+                    skip_collector=skip_collector,
+                )
                 if rule_entry is not None:
                     offline_rules.append(rule_entry)
             except Exception as exc:
@@ -440,22 +547,69 @@ class ConfigPayloadBuilder:
                     getattr(rule, "rule_name", "<unknown>"),
                     exc,
                 )
+                if skip_collector is not None:
+                    skip_collector.append(
+                        {
+                            "rule_id": str(getattr(rule, "id", "") or ""),
+                            "rule_name": getattr(rule, "rule_name", "<unknown>")
+                            or "<unknown>",
+                            "actuator_gpio": None,
+                            "reason_code": self.REASON_UNSUPPORTED_CONDITION,
+                            "reason_detail": f"extraction error: {exc}",
+                        }
+                    )
                 continue
 
-        if len(offline_rules) > self.MAX_OFFLINE_RULES:
+        rules_before_cap = len(offline_rules)
+        if rules_before_cap > self.MAX_OFFLINE_RULES:
             logger.warning(
                 "[CONFIG] ESP %s: %d offline rules exceed limit of %d, truncating",
                 esp_id,
-                len(offline_rules),
+                rules_before_cap,
                 self.MAX_OFFLINE_RULES,
             )
+            if skip_collector is not None:
+                # AUT-132: Record each truncated rule so the diagnostics payload
+                # tells operators *why* a rule did not reach the ESP.
+                for dropped in offline_rules[self.MAX_OFFLINE_RULES :]:
+                    skip_collector.append(
+                        {
+                            "rule_id": "",
+                            "rule_name": "<truncated>",
+                            "actuator_gpio": dropped.get("actuator_gpio"),
+                            "reason_code": self.REASON_MAX_RULE_LIMIT,
+                            "reason_detail": (
+                                f"rule exceeded firmware limit of {self.MAX_OFFLINE_RULES} "
+                                f"offline rules (had {rules_before_cap})"
+                            ),
+                        }
+                    )
             offline_rules = offline_rules[: self.MAX_OFFLINE_RULES]
 
+        twindow_count = sum(
+            1
+            for r in offline_rules
+            if self._is_time_window_only_sensor_type(str(r.get("sensor_value_type", "")))
+        )
+        skipped_count = len(enabled_rules) - rules_before_cap
+        capped_count = rules_before_cap - len(offline_rules)
+
         logger.info(
-            "[CONFIG] Built %d offline rules for ESP %s (checked %d active rules)",
-            len(offline_rules),
+            "[CONFIG] offline_rules audit ESP %s: "
+            "enabled_rules_checked=%d | included=%d (sensor_hysteresis=%d, time_window_only=%d) | "
+            "skipped=%d | capped=%d. "
+            "Skip reasons per rule logged above as [CONFIG] Rule/Offline-rule skip. "
+            "Typical causes: cross_esp_actuator, calibration_required (ph/ec/moisture), "
+            "or_compound, no_convertible_condition, invalid_gpio. "
+            "time_window_only rules use sensor_gpio=255 and sensor_value_type=__twindow_on/off — "
+            "these count in offline_rules but are not listed as sensor-based logic rules in the UI.",
             esp_id,
             len(enabled_rules),
+            len(offline_rules),
+            len(offline_rules) - twindow_count,
+            twindow_count,
+            skipped_count,
+            capped_count,
         )
 
         return offline_rules
@@ -466,6 +620,7 @@ class ConfigPayloadBuilder:
         sensor_payloads: List[Dict[str, Any]],
         actuator_payloads: List[Dict[str, Any]],
         esp_id: str,
+        skip_collector: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Filter offline_rules that reference GPIOs absent from the config frame.
@@ -514,6 +669,18 @@ class ConfigPayloadBuilder:
                         "reasons": reasons,
                     }
                 )
+                if skip_collector is not None:
+                    # AUT-132: forward consistency-strip reasons into the
+                    # diagnostics payload using the canonical reason code.
+                    skip_collector.append(
+                        {
+                            "rule_id": "",
+                            "rule_name": "<consistency-strip>",
+                            "actuator_gpio": a_gpio,
+                            "reason_code": self.REASON_GPIO_NOT_IN_FRAME,
+                            "reason_detail": "; ".join(reasons),
+                        }
+                    )
             else:
                 consistent.append(rule)
 
@@ -534,6 +701,7 @@ class ConfigPayloadBuilder:
         rule: Any,
         esp_id: str,
         hysteresis_states: Optional[Dict[str, bool]] = None,
+        skip_collector: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Extract a single offline rule entry from a CrossESPLogic rule.
@@ -549,13 +717,48 @@ class ConfigPayloadBuilder:
         4. Either cooling mode (activate_above + deactivate_below) or
            heating mode (activate_below + deactivate_above) must be present
 
+        AUT-132: When a ``skip_collector`` list is provided, every rejection
+        appends a structured diagnostic record::
+
+            {
+                "rule_id": str,
+                "rule_name": str,
+                "actuator_gpio": int | None,
+                "reason_code": str,   # one of REASON_* constants
+                "reason_detail": str,
+            }
+
+        The collector is optional so existing callers (and tests) keep their
+        previous ``Optional[Dict]`` contract.
+
         Args:
             rule: CrossESPLogic model instance
             esp_id: Device ID of the target ESP (e.g. "ESP_12AB34CD")
+            hysteresis_states: Preloaded hysteresis state map (rule_id:idx)
+            skip_collector: Optional list that receives skip diagnostics
 
         Returns:
-            Offline rule dict or None
+            Offline rule dict or None.
         """
+        rule_id_str = str(getattr(rule, "id", "") or "")
+        rule_name = getattr(rule, "rule_name", "<unknown>") or "<unknown>"
+
+        def _skip(
+            reason_code: str,
+            reason_detail: str,
+            actuator_gpio: Optional[int] = None,
+        ) -> None:
+            if skip_collector is not None:
+                skip_collector.append(
+                    {
+                        "rule_id": rule_id_str,
+                        "rule_name": rule_name,
+                        "actuator_gpio": actuator_gpio,
+                        "reason_code": reason_code,
+                        "reason_detail": reason_detail,
+                    }
+                )
+
         tc = rule.trigger_conditions
 
         # Normalise to a list of conditions for uniform processing
@@ -569,6 +772,10 @@ class ConfigPayloadBuilder:
                 rule.rule_name,
                 type(tc).__name__,
             )
+            _skip(
+                self.REASON_UNSUPPORTED_CONDITION,
+                f"trigger_conditions has unsupported type {type(tc).__name__}",
+            )
             return None
 
         # Determine compound operator; used for 3b rejection and 3c time_filter extraction.
@@ -580,6 +787,10 @@ class ConfigPayloadBuilder:
                 "[CONFIG] Rule '%s': OR compound not convertible to offline rule",
                 rule.rule_name,
             )
+            _skip(
+                self.REASON_UNSUPPORTED_CONDITION,
+                "OR compound rules cannot be flattened to a single ESP hysteresis struct",
+            )
             return None
 
         # Locate actuator action on the SAME ESP.
@@ -589,6 +800,10 @@ class ConfigPayloadBuilder:
                 "[CONFIG] Offline-rule skip: rule '%s' — actions is not a list (type: %s)",
                 rule.rule_name,
                 type(actions).__name__,
+            )
+            _skip(
+                self.REASON_UNSUPPORTED_CONDITION,
+                f"actions has unsupported type {type(actions).__name__}",
             )
             return None
 
@@ -625,6 +840,10 @@ class ConfigPayloadBuilder:
                 "[CONFIG] Offline-rule skip: rule '%s' — no matching actuator action for esp %s",
                 rule.rule_name,
                 esp_id,
+            )
+            _skip(
+                self.REASON_GPIO_NOT_IN_FRAME,
+                f"no actuator action targets ESP '{esp_id}' (cross-ESP or missing gpio)",
             )
             return None
 
@@ -679,6 +898,12 @@ class ConfigPayloadBuilder:
                         rule.rule_name,
                         condition_types,
                     )
+                    _skip(
+                        self.REASON_UNSUPPORTED_CONDITION,
+                        f"no hysteresis/threshold/time_window condition found "
+                        f"(types: {condition_types})",
+                        actuator_gpio=actuator_gpio,
+                    )
                     return None
 
                 if time_window_target_state is None:
@@ -687,6 +912,11 @@ class ConfigPayloadBuilder:
                         "has no binary ON action for ESP %s",
                         rule.rule_name,
                         esp_id,
+                    )
+                    _skip(
+                        self.REASON_UNSUPPORTED_CONDITION,
+                        "time_window-only rule has no binary ON action",
+                        actuator_gpio=actuator_gpio,
                     )
                     return None
 
@@ -720,6 +950,11 @@ class ConfigPayloadBuilder:
                         raw_sensor_type,
                         normalized_type,
                     )
+                    _skip(
+                        self.REASON_CALIBRATION_REQUIRED,
+                        f"sensor type '{normalized_type}' requires calibration data",
+                        actuator_gpio=actuator_gpio,
+                    )
                     return None
 
                 op: str = threshold_cond.get("operator", "")
@@ -729,6 +964,11 @@ class ConfigPayloadBuilder:
                         "[CONFIG] Rule '%s': threshold condition missing 'value', skipping",
                         rule.rule_name,
                     )
+                    _skip(
+                        self.REASON_UNSUPPORTED_CONDITION,
+                        "threshold condition missing 'value'",
+                        actuator_gpio=actuator_gpio,
+                    )
                     return None
                 try:
                     threshold_value = float(raw_value)
@@ -736,6 +976,11 @@ class ConfigPayloadBuilder:
                     logger.info(
                         "[CONFIG] Rule '%s': threshold 'value' is not numeric, skipping",
                         rule.rule_name,
+                    )
+                    _skip(
+                        self.REASON_UNSUPPORTED_CONDITION,
+                        f"threshold 'value' is not numeric ({raw_value!r})",
+                        actuator_gpio=actuator_gpio,
                     )
                     return None
 
@@ -756,6 +1001,11 @@ class ConfigPayloadBuilder:
                         "[CONFIG] Rule '%s': operator '%s' not convertible to offline hysteresis",
                         rule.rule_name,
                         op,
+                    )
+                    _skip(
+                        self.REASON_UNSUPPORTED_CONDITION,
+                        f"operator '{op}' not convertible to offline hysteresis",
+                        actuator_gpio=actuator_gpio,
                     )
                     return None
 
@@ -789,6 +1039,12 @@ class ConfigPayloadBuilder:
                 "[CONFIG] Rule '%s': hysteresis condition missing valid threshold pair, skipping",
                 rule.rule_name,
             )
+            _skip(
+                self.REASON_UNSUPPORTED_CONDITION,
+                "hysteresis condition missing valid threshold pair "
+                "(needs activate_above+deactivate_below or activate_below+deactivate_above)",
+                actuator_gpio=actuator_gpio,
+            )
             return None
 
         sensor_gpio: int = int(hysteresis_cond.get("gpio", -1))
@@ -796,6 +1052,11 @@ class ConfigPayloadBuilder:
             logger.debug(
                 "[CONFIG] Rule '%s': hysteresis condition has invalid gpio, skipping",
                 rule.rule_name,
+            )
+            _skip(
+                self.REASON_GPIO_NOT_IN_FRAME,
+                f"hysteresis sensor_gpio={sensor_gpio} is invalid (<0)",
+                actuator_gpio=actuator_gpio,
             )
             return None
 
@@ -820,6 +1081,12 @@ class ConfigPayloadBuilder:
                 len(sensor_value_type),
                 _MAX_SENSOR_VALUE_TYPE_LEN,
             )
+            _skip(
+                self.REASON_UNSUPPORTED_CONDITION,
+                f"sensor_value_type '{sensor_value_type}' exceeds firmware limit "
+                f"({_MAX_SENSOR_VALUE_TYPE_LEN} chars)",
+                actuator_gpio=actuator_gpio,
+            )
             return None
 
         # Guard: analog sensors have no calibration parameters on the ESP32.
@@ -840,6 +1107,11 @@ class ConfigPayloadBuilder:
                 rule.rule_name,
                 sensor_value_type,
                 actuator_gpio,
+            )
+            _skip(
+                self.REASON_CALIBRATION_REQUIRED,
+                f"sensor type '{sensor_value_type}' requires calibration data",
+                actuator_gpio=actuator_gpio,
             )
             return None
 
