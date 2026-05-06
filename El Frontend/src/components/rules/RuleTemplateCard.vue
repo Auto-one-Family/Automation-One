@@ -67,6 +67,14 @@ const category = RULE_TEMPLATE_CATEGORIES[props.template.category]
   gap: var(--space-2);
   padding: var(--space-1);
   cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+/* B4.4: Hover-Feedback auf Karten-Ebene (zusaetzlich zu BaseCard hoverable). */
+.rule-template-card:hover {
+  background: var(--glass-bg);
+  transform: translateY(-1px);
 }
 
 .rule-template-card__header {
@@ -98,11 +106,17 @@ const category = RULE_TEMPLATE_CATEGORIES[props.template.category]
 }
 
 .rule-template-card__description {
+  /* B4.2: Beschreibung sichtbarer (secondary statt muted, mehr Zeilen erlaubt). */
   font-size: var(--text-sm);
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   margin: 0;
-  line-height: 1.4;
-  min-height: 2.8em;
+  line-height: var(--leading-loose, 1.55);
+  min-height: 3.4em;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rule-template-card__meta {

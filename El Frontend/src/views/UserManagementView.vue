@@ -54,10 +54,11 @@ function clearSuccessAfterDelay() {
 }
 
 // Role options
+// B7.1: Admin-Badge nutzt accent (NICHT error/red), damit Rolle != Alarm signalisiert wird.
 const ROLES: { value: UserRole; label: string; icon: typeof Shield; color: string }[] = [
-  { value: 'admin', label: 'Admin', icon: Shield, color: 'text-indigo-300' },
-  { value: 'operator', label: 'Operator', icon: Settings, color: 'text-yellow-400' },
-  { value: 'viewer', label: 'Viewer', icon: Eye, color: 'text-blue-400' }
+  { value: 'admin', label: 'Admin', icon: Shield, color: 'role-badge--admin' },
+  { value: 'operator', label: 'Operator', icon: Settings, color: 'role-badge--operator' },
+  { value: 'viewer', label: 'Viewer', icon: Eye, color: 'role-badge--viewer' }
 ]
 
 // Methods
@@ -340,7 +341,7 @@ onUnmounted(() => {
             <td class="p-4">
               <span
                 :class="[
-                  'inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium',
+                  'role-badge inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium',
                   getRoleConfig(user.role).color
                 ]"
               >
@@ -361,18 +362,18 @@ onUnmounted(() => {
             </td>
             <td class="p-4 text-sm text-dark-400">{{ formatDate(user.created_at) }}</td>
             <td class="p-4">
-              <div class="flex items-center justify-end gap-2">
+              <div class="flex items-center justify-end gap-3">
                 <button
-                  class="min-h-10 min-w-10 p-2 rounded hover:bg-dark-700 text-dark-400 hover:text-dark-200 transition-colors"
-                  title="Edit"
+                  class="min-w-[44px] min-h-[44px] p-2 rounded hover:bg-dark-700 text-dark-400 hover:text-dark-200 transition-colors flex items-center justify-center"
+                  title="Bearbeiten"
                   aria-label="Benutzer bearbeiten"
                   @click="openEditModal(user)"
                 >
                   <Edit class="w-4 h-4" />
                 </button>
                 <button
-                  class="min-h-10 min-w-10 p-2 rounded hover:bg-dark-700 text-dark-400 hover:text-yellow-400 transition-colors"
-                  title="Reset Password"
+                  class="min-w-[44px] min-h-[44px] p-2 rounded hover:bg-dark-700 text-dark-400 hover:text-yellow-400 transition-colors flex items-center justify-center"
+                  title="Passwort zurücksetzen"
                   aria-label="Passwort zurücksetzen"
                   @click="openResetPasswordModal(user)"
                 >
@@ -380,8 +381,8 @@ onUnmounted(() => {
                 </button>
                 <button
                   v-if="!isCurrentUser(user)"
-                  class="min-h-10 min-w-10 p-2 rounded hover:bg-dark-700 text-dark-400 hover:text-red-400 transition-colors"
-                  title="Delete"
+                  class="min-w-[44px] min-h-[44px] p-2 rounded hover:bg-dark-700 text-dark-400 hover:text-red-400 transition-colors flex items-center justify-center"
+                  title="Löschen"
                   aria-label="Benutzer löschen"
                   @click="openDeleteModal(user)"
                 >
@@ -572,8 +573,30 @@ onUnmounted(() => {
   </div>
 </template>
 
+<style scoped>
+/* B7.1: Role badges nutzen Design-Tokens (NICHT error/red fuer Admin). */
+.role-badge {
+  border: 1px solid transparent;
+}
 
+.role-badge--admin {
+  color: var(--color-accent, var(--color-iridescent-2));
+  background: color-mix(in srgb, var(--color-accent, var(--color-iridescent-2)) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent, var(--color-iridescent-2)) 30%, transparent);
+}
 
+.role-badge--operator {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+}
+
+.role-badge--viewer {
+  color: var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-info) 30%, transparent);
+}
+</style>
 
 
 

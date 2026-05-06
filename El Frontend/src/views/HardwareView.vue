@@ -42,6 +42,7 @@ import ESPConfigPanel from '@/components/esp/ESPConfigPanel.vue'
 import CreateMockEspModal from '@/components/modals/CreateMockEspModal.vue'
 import ESPSettingsSheet from '@/components/esp/ESPSettingsSheet.vue'
 import ZoneSettingsSheet from '@/components/zones/ZoneSettingsSheet.vue'
+import SubzonePlantPanel from '@/components/zones/SubzonePlantPanel.vue'
 import ComponentSidebar from '@/components/dashboard/ComponentSidebar.vue'
 import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
 import LoadingState from '@/shared/design/primitives/BaseSkeleton.vue'
@@ -462,6 +463,22 @@ function openZoneSettings(zoneId: string) {
 function handleZoneSettingsClose() {
   isZoneSettingsOpen.value = false
   setTimeout(() => { if (!isZoneSettingsOpen.value) zoneSettingsEntity.value = null }, 200)
+}
+
+// SubzonePlantPanel state (AUT-252 Section C)
+const subzonePlantData = ref<{ subzoneId: string; subzoneName: string } | null>(null)
+const isSubzonePlantOpen = ref(false)
+
+function openSubzonePlant(payload: { subzoneId: string; subzoneName: string; zoneId: string }) {
+  subzonePlantData.value = { subzoneId: payload.subzoneId, subzoneName: payload.subzoneName }
+  isSubzonePlantOpen.value = true
+}
+
+function closeSubzonePlant() {
+  isSubzonePlantOpen.value = false
+  setTimeout(() => {
+    if (!isSubzonePlantOpen.value) subzonePlantData.value = null
+  }, 200)
 }
 
 function handleZoneEntityUpdated() {
@@ -943,6 +960,22 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
                 <p>Alle Geräte sind noch keiner Zone zugewiesen.</p>
                 <p class="text-sm">Ziehe Geräte aus der unteren Leiste in eine Zone.</p>
               </div>
+              <!-- B1.1: Warnbanner "Nicht zugewiesen" ueber Zone-Liste (prominent oben mit Bezug auf folgende Zonen). -->
+              <div
+                v-if="unassignedDevices.length > 0"
+                class="unassigned-banner"
+                role="status"
+                aria-live="polite"
+              >
+                <Inbox class="unassigned-banner__icon" aria-hidden="true" />
+                <div class="unassigned-banner__body">
+                  <strong class="unassigned-banner__count">
+                    {{ unassignedDevices.length }} Gerät{{ unassignedDevices.length === 1 ? '' : 'e' }}
+                  </strong>
+                  ohne Zone — per Drag-and-drop unten in eine Zone ziehen.
+                </div>
+              </div>
+
               <ZonePlate
                 v-for="entry in activeZoneEntries"
                 :id="`zone-${entry.zoneId}`"
@@ -961,6 +994,7 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
                 @settings="handleSettings"
                 @monitor-nav="onDeviceMonitorNav"
                 @zone-settings="openZoneSettings"
+                @subzone-plant="openSubzonePlant"
               />
 
               <!-- Unassigned Devices Section (hidden when empty) -->
@@ -1107,6 +1141,7 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
                   @settings="handleSettings"
                   @monitor-nav="onDeviceMonitorNav"
                   @zone-settings="openZoneSettings"
+                  @subzone-plant="openSubzonePlant"
                 />
               </AccordionSection>
             </div>
@@ -1190,6 +1225,20 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
       @zone-archived="handleZoneEntityArchived"
       @zone-reactivated="handleZoneEntityUpdated"
     />
+
+    <!-- Subzone Plant Panel (AUT-252 Section C) -->
+    <SlideOver
+      :open="isSubzonePlantOpen"
+      :title="subzonePlantData?.subzoneName || 'Pflanzenkontext'"
+      width="lg"
+      @close="closeSubzonePlant"
+    >
+      <SubzonePlantPanel
+        v-if="subzonePlantData"
+        :subzone-id="subzonePlantData.subzoneId"
+        :subzone-name="subzonePlantData.subzoneName"
+      />
+    </SlideOver>
 
     <!-- Sensor Config SlideOver (elevation=high wenn über Settings-Sheet) -->
     <SlideOver
@@ -1405,29 +1454,35 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   color: white;
 }
 
-/* Zone Create Button */
+/* B1.3: Zone Create Button — primary/accent statt grau, damit klar sichtbar. */
 .zone-create-btn {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
   width: 100%;
+  min-height: 48px;
   padding: var(--space-3);
-  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
+  background: var(--gradient-iridescent, linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2)));
+  border: 1px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
   border-radius: var(--radius-lg);
-  color: var(--color-accent-bright);
-  font-size: var(--text-sm);
+  color: var(--color-text-inverse, #fff);
+  font-size: var(--text-base);
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-fast);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--color-accent) 25%, transparent);
 }
 
 .zone-create-btn:hover:not(:disabled) {
-  border-color: var(--color-accent);
-  color: var(--color-text-inverse);
-  background: var(--color-accent);
-  box-shadow: var(--elevation-raised);
+  filter: brightness(1.1);
+  box-shadow: 0 4px 18px color-mix(in srgb, var(--color-accent) 40%, transparent);
+  transform: translateY(-1px);
+}
+
+.zone-create-btn:focus-visible {
+  outline: 2px solid var(--color-accent-bright, var(--color-iridescent-2));
+  outline-offset: 2px;
 }
 
 .zone-create-btn:disabled {
@@ -1515,6 +1570,53 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
 .zone-create-form__btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* B1.1: Unassigned Banner (prominent oben, mit visuellem Bezug zur folgenden Zonen-Liste). */
+.unassigned-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+  border-left: 4px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  position: relative;
+}
+
+/* Pfeil-/Pointer-Andeutung nach unten als visuelle Verbindung zu Zone-Liste. */
+.unassigned-banner::after {
+  content: '';
+  position: absolute;
+  bottom: -7px;
+  left: var(--space-6);
+  width: 12px;
+  height: 12px;
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+  transform: rotate(45deg);
+}
+
+.unassigned-banner__icon {
+  width: 18px;
+  height: 18px;
+  color: var(--color-warning);
+  flex-shrink: 0;
+}
+
+.unassigned-banner__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.unassigned-banner__count {
+  color: var(--color-warning);
+  font-weight: 700;
 }
 
 /* ── Unassigned Section ─────────────────────────────────────────────────── */

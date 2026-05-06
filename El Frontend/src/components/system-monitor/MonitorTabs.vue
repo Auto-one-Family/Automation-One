@@ -277,6 +277,7 @@ function handleTabClick(tabId: TabId) {
    Tabs Container
    ============================================================================ */
 .tabs-container {
+  /* B6.1: Scrollbare Tab-Bar mit Fade-Hinweis an den Raendern, falls Tabs ueberlaufen. */
   display: flex;
   align-items: center;
   gap: 0.375rem;                          /* Slightly more gap between tabs */
@@ -284,6 +285,20 @@ function handleTabClick(tabId: TabId) {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    var(--color-text-inverse) 16px,
+    var(--color-text-inverse) calc(100% - 16px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    var(--color-text-inverse) 16px,
+    var(--color-text-inverse) calc(100% - 16px),
+    transparent 100%
+  );
 }
 
 .tabs-container::-webkit-scrollbar {

@@ -924,7 +924,7 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <h2 class="rules-empty__title">Automatisierung</h2>
+            <h1 class="rules-empty__title">Automatisierung</h1>
             <p class="rules-empty__desc">
               Erstelle visuelle Regeln, um Aktoren basierend auf Sensordaten und Zeitplänen zu steuern.
             </p>
@@ -942,15 +942,23 @@ onUnmounted(() => {
 
           <!-- ====== SECTION 2: Templates (SECONDARY — collapsible) ====== -->
           <div class="rules-empty__templates">
-            <button class="rules-empty__templates-toggle" @click="toggleTemplatesCollapsed">
+            <button
+              class="rules-empty__templates-toggle"
+              :aria-expanded="!templatesCollapsed"
+              :aria-label="templatesCollapsed ? 'Vorlagen anzeigen' : 'Vorlagen ausblenden'"
+              @click="toggleTemplatesCollapsed"
+            >
               <component
                 :is="templatesCollapsed ? ChevronRight : ChevronDown"
-                class="w-4 h-4 rules-empty__templates-toggle-icon"
+                class="rules-empty__templates-toggle-icon"
+                aria-hidden="true"
               />
               <h3 class="rules-empty__templates-title">
                 Vorlagen & Schnellstart ({{ ruleTemplates.length }})
               </h3>
-              <span class="rules-empty__templates-hint">{{ templatesCollapsed ? 'anzeigen' : 'ausblenden' }}</span>
+              <span class="rules-empty__templates-hint">
+                {{ templatesCollapsed ? 'Anzeigen' : 'Ausblenden' }}
+              </span>
             </button>
             <Transition name="collapse">
               <div v-show="!templatesCollapsed" class="rules-empty__templates-grid grid-auto-md">
@@ -1744,7 +1752,8 @@ onUnmounted(() => {
 }
 
 .rules-empty__title {
-  font-size: var(--text-2xl);
+  /* B4.1: H1 with display token to dominate vs. toolbar "Regel auswählen" (subtitle) */
+  font-size: var(--text-display);
   font-weight: 700;
   color: var(--color-text-primary);
   margin-bottom: 0.625rem;
@@ -1867,31 +1876,45 @@ onUnmounted(() => {
 }
 
 .rules-empty__templates-toggle {
+  /* B4.3: Klar als interaktiver Button erkennbar (Border, Hover, Chevron 18px). */
   display: flex;
   align-items: center;
   gap: var(--space-2);
   width: 100%;
+  min-height: 44px;
   padding: var(--space-2) var(--space-3);
-  background: rgba(13, 13, 22, 0.4);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background var(--transition-fast);
-  color: var(--color-text-muted);
-}
-
-.rules-empty__templates-toggle-icon {
-  transition: transform var(--transition-fast);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+  color: var(--color-text-secondary);
 }
 
 .rules-empty__templates-toggle:hover {
-  background: rgba(13, 13, 22, 0.6);
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-iridescent-2);
+  color: var(--color-text-primary);
+}
+
+.rules-empty__templates-toggle:focus-visible {
+  outline: 2px solid var(--color-iridescent-2);
+  outline-offset: 2px;
+}
+
+.rules-empty__templates-toggle-icon {
+  /* Chevron deutlich vergrößert (war 16px → 18px) für klare Affordance. */
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--color-iridescent-2);
+  transition: transform var(--transition-fast);
 }
 
 .rules-empty__templates-title {
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin: 0;
@@ -1899,9 +1922,13 @@ onUnmounted(() => {
 
 .rules-empty__templates-hint {
   margin-left: auto;
-  font-size: var(--text-xxs);
+  padding: 2px var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
   color: var(--color-text-secondary);
-  text-transform: uppercase;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
   letter-spacing: 0.04em;
 }
 

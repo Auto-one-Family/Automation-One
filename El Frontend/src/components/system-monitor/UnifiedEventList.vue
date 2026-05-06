@@ -319,16 +319,27 @@ function getSeverityIcon(severity: string) {
 }
 
 function formatTime(timestamp: string): string {
+  // B6.2: Event-Timestamps mit Datums-Kontext (Heute/Gestern/Datum + Uhrzeit).
   const date = new Date(timestamp)
   const dateKey = getDateKey(timestamp)
-  const todayKey = new Date().toISOString().split('T')[0]
+  const now = new Date()
+  const todayKey = now.toISOString().split('T')[0]
+  const yesterdayKey = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   const time = date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
   if (dateKey === todayKey) {
     return `Heute ${time}`
   }
+  if (dateKey === yesterdayKey) {
+    return `Gestern ${time}`
+  }
 
-  const shortDate = date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
+  // Aelter als gestern: Datum mit Jahr (DE-Format dd.MM.yyyy) + Uhrzeit
+  const shortDate = new Intl.DateTimeFormat('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(date)
   return `${shortDate} ${time}`
 }
 
@@ -999,11 +1010,12 @@ onUnmounted(() => {
  */
 
 .event-item__time {
+  /* B6.2: Breiter, damit "Gestern 12:28:13" / "01.05.2026 12:28:13" nicht umbricht. */
   font-size: 0.75rem;
   color: var(--color-text-muted);
   font-family: var(--font-mono, monospace);
   white-space: nowrap;
-  min-width: 5rem;
+  min-width: 8.5rem;
 }
 
 .event-item__content {
