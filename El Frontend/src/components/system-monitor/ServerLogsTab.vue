@@ -1062,28 +1062,28 @@ watch(selectedFile, () => {
 }
 
 .log-level--debug {
-  background-color: rgba(156, 163, 175, 0.15);
-  color: rgb(156, 163, 175);
+  background-color: color-mix(in srgb, var(--color-text-muted) 15%, transparent);
+  color: var(--color-text-muted);
 }
 
 .log-level--info {
-  background-color: rgba(59, 130, 246, 0.15);
-  color: rgb(96, 165, 250);
+  background-color: var(--color-info-bg);
+  color: var(--color-info);
 }
 
 .log-level--warning {
-  background-color: rgba(251, 191, 36, 0.15);
-  color: rgb(251, 191, 36);
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning);
 }
 
 .log-level--error {
-  background-color: rgba(239, 68, 68, 0.15);
-  color: rgb(248, 113, 113);
+  background-color: var(--color-error-bg);
+  color: var(--color-error);
 }
 
 .log-level--critical {
-  background-color: rgba(220, 38, 38, 0.2);
-  color: rgb(252, 165, 165);
+  background-color: color-mix(in srgb, var(--color-error) 20%, transparent);
+  color: color-mix(in srgb, var(--color-error) 70%, white);
 }
 
 .log-entry__logger {
@@ -1113,12 +1113,10 @@ watch(selectedFile, () => {
   margin: 0.5rem 1rem 0.75rem 2.5rem;
   padding: 1rem;
   border-radius: var(--radius-md);
-  background: rgba(15, 15, 20, 0.85);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow:
-    0 4px 24px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background: var(--glass-bg-l3);
+  backdrop-filter: blur(var(--glass-blur-l3));
+  border: 1px solid var(--glass-border-l3);
+  box-shadow: var(--glass-shadow-l3);
 }
 
 /* Summary Section */
@@ -1131,10 +1129,10 @@ watch(selectedFile, () => {
   border-radius: var(--radius-md);
   background: linear-gradient(
     135deg,
-    rgba(59, 130, 246, 0.08) 0%,
-    rgba(139, 92, 246, 0.08) 100%
+    color-mix(in srgb, var(--color-info) 8%, transparent) 0%,
+    color-mix(in srgb, var(--color-iridescent-3) 8%, transparent) 100%
   );
-  border: 1px solid rgba(139, 92, 246, 0.15);
+  border: 1px solid color-mix(in srgb, var(--color-iridescent-3) 15%, transparent);
 }
 
 .log-detail-summary__icon {
@@ -1201,58 +1199,58 @@ watch(selectedFile, () => {
 }
 
 .log-category-badge[data-category="scheduler"] {
-  background-color: rgba(168, 85, 247, 0.15);
-  color: rgb(192, 132, 252);
+  background-color: color-mix(in srgb, var(--color-iridescent-3) 15%, transparent);
+  color: var(--color-iridescent-4);
 }
 
 .log-category-badge[data-category="sensor"] {
-  background-color: rgba(16, 185, 129, 0.15);
-  color: rgb(52, 211, 153);
+  background-color: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .log-category-badge[data-category="heartbeat"] {
-  background-color: rgba(59, 130, 246, 0.15);
-  color: rgb(96, 165, 250);
+  background-color: var(--color-info-bg);
+  color: var(--color-info);
 }
 
 .log-category-badge[data-category="mqtt"] {
-  background-color: rgba(20, 184, 166, 0.15);
-  color: rgb(45, 212, 191);
+  background-color: color-mix(in srgb, var(--color-real) 15%, transparent);
+  color: var(--color-real);
 }
 
 .log-category-badge[data-category="config"] {
-  background-color: rgba(107, 114, 128, 0.2);
-  color: rgb(156, 163, 175);
+  background-color: color-mix(in srgb, var(--color-text-muted) 20%, transparent);
+  color: var(--color-text-muted);
 }
 
 .log-category-badge[data-category="maintenance"] {
-  background-color: rgba(245, 158, 11, 0.15);
-  color: rgb(251, 191, 36);
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning);
 }
 
 .log-category-badge[data-category="websocket"] {
-  background-color: rgba(99, 102, 241, 0.15);
-  color: rgb(129, 140, 248);
+  background-color: color-mix(in srgb, var(--color-iridescent-2) 15%, transparent);
+  color: var(--color-iridescent-2);
 }
 
 .log-category-badge[data-category="actuator"] {
-  background-color: rgba(236, 72, 153, 0.15);
-  color: rgb(244, 114, 182);
+  background-color: color-mix(in srgb, var(--color-iridescent-4) 15%, transparent);
+  color: var(--color-iridescent-4);
 }
 
 .log-category-badge[data-category="auth"] {
-  background-color: rgba(251, 191, 36, 0.15);
-  color: rgb(251, 191, 36);
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning);
 }
 
 .log-category-badge[data-category="error"] {
-  background-color: rgba(239, 68, 68, 0.15);
-  color: rgb(248, 113, 113);
+  background-color: var(--color-error-bg);
+  color: var(--color-error);
 }
 
 .log-category-badge[data-category="system"] {
-  background-color: rgba(107, 114, 128, 0.15);
-  color: rgb(156, 163, 175);
+  background-color: color-mix(in srgb, var(--color-text-muted) 15%, transparent);
+  color: var(--color-text-muted);
 }
 
 /* Sections */
@@ -1286,13 +1284,13 @@ watch(selectedFile, () => {
 }
 
 .log-details__section-title--error {
-  color: rgb(248, 113, 113);
+  color: var(--color-error);
 }
 
 .log-details__section-hint {
   font-size: 0.6875rem;
   font-style: italic;
-  color: rgba(156, 163, 175, 0.5);
+  color: var(--color-text-muted);
 }
 
 .log-details__section--error .log-details__section-title {
@@ -1305,8 +1303,8 @@ watch(selectedFile, () => {
   font-family: var(--font-mono);
   line-height: 1.5;
   color: var(--color-text-secondary);
-  background-color: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background-color: var(--color-bg-primary);
+  border: 1px solid var(--glass-border-l1);
   border-radius: var(--radius-sm);
   overflow-x: auto;
   white-space: pre-wrap;
@@ -1315,15 +1313,15 @@ watch(selectedFile, () => {
 }
 
 .log-details__code--error {
-  background-color: rgba(220, 38, 38, 0.1);
-  color: rgb(248, 113, 113);
-  border-color: rgba(239, 68, 68, 0.15);
+  background-color: var(--color-error-bg);
+  color: var(--color-error);
+  border-color: var(--color-error-border);
 }
 
 .log-details__code--extra {
-  background-color: rgba(59, 130, 246, 0.08);
-  color: rgb(147, 197, 253);
-  border-color: rgba(59, 130, 246, 0.15);
+  background-color: var(--color-info-bg);
+  color: var(--color-accent-bright);
+  border-color: var(--color-info-border);
 }
 
 /* Actions */

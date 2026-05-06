@@ -841,28 +841,28 @@ watch(
 }
 
 .mqtt-badge--info {
-  background-color: rgba(59, 130, 246, 0.15);
-  color: rgb(96, 165, 250);
+  background-color: var(--color-info-bg);
+  color: var(--color-info);
 }
 
 .mqtt-badge--success {
-  background-color: rgba(34, 197, 94, 0.15);
-  color: rgb(74, 222, 128);
+  background-color: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .mqtt-badge--warning {
-  background-color: rgba(251, 191, 36, 0.15);
-  color: rgb(251, 191, 36);
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning);
 }
 
 .mqtt-badge--danger {
-  background-color: rgba(239, 68, 68, 0.15);
-  color: rgb(248, 113, 113);
+  background-color: var(--color-error-bg);
+  color: var(--color-error);
 }
 
 .mqtt-badge--gray {
-  background-color: rgba(156, 163, 175, 0.15);
-  color: rgb(156, 163, 175);
+  background-color: color-mix(in srgb, var(--color-text-muted) 15%, transparent);
+  color: var(--color-text-muted);
 }
 
 .mqtt-message__esp {

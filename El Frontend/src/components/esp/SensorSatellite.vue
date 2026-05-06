@@ -619,13 +619,13 @@ function handleDragEnd(event: DragEvent) {
 }
 
 .sensor-satellite__scope-badge--multi-zone {
-  background: rgba(96, 165, 250, 0.2);
+  background: var(--color-info-bg);
   color: var(--color-info);
 }
 
 .sensor-satellite__scope-badge--mobile {
-  background: rgba(251, 146, 60, 0.2);
-  color: rgb(251, 146, 60);
+  background: var(--color-accent-bg);
+  color: var(--color-accent-bright);
 }
 
 /* =============================================================================

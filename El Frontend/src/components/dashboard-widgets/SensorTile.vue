@@ -529,8 +529,8 @@ const HISTORIC_RANGES: Array<NonNullable<SensorTileProps['timeRange']>> = ['1h',
   font-weight: 700;
   padding: 0 var(--space-1);
   border-radius: var(--radius-sm);
-  background: rgba(167, 139, 250, 0.15);
-  color: var(--color-mock, #a78bfa);
+  background: var(--color-mock-bg);
+  color: var(--color-mock);
   letter-spacing: 0.04em;
 }
 
@@ -539,8 +539,8 @@ const HISTORIC_RANGES: Array<NonNullable<SensorTileProps['timeRange']>> = ['1h',
   font-weight: 600;
   padding: 0 var(--space-1);
   border-radius: var(--radius-sm);
-  background: var(--color-warning-bg, rgba(251, 191, 36, 0.15));
-  color: var(--color-warning, #fbbf24);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
   letter-spacing: 0.02em;
 }
 

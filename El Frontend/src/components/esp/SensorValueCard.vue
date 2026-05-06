@@ -609,15 +609,15 @@ const isSnapshot = computed(() => props.sensor.sensor_kind === 'snapshot')
   font-weight: 500;
   border-radius: var(--radius-md);
   transition: all 0.2s;
-  background-color: rgba(59, 130, 246, 0.2);
-  color: rgb(96, 165, 250);
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  background-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  color: var(--color-accent-bright);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
   cursor: pointer;
 }
 
 .sensor-value-card__measure-btn:hover:not(:disabled) {
-  background-color: rgba(59, 130, 246, 0.3);
-  border-color: rgba(59, 130, 246, 0.5);
+  background-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
 }
 
 .sensor-value-card__measure-btn:disabled {

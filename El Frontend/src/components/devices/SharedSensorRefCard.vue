@@ -119,8 +119,8 @@ function goToHomeZone(): void {
   font-weight: 500;
   padding: 1px 6px;
   border-radius: var(--radius-xs);
-  background: rgba(96, 165, 250, 0.2);
-  color: rgb(96, 165, 250);
+  background: var(--color-info-bg);
+  color: var(--color-info);
   white-space: nowrap;
   flex-shrink: 0;
 }

@@ -524,13 +524,13 @@ function handleDragEnd(event: DragEvent) {
 }
 
 .actuator-satellite__scope-badge--multi-zone {
-  background: rgba(96, 165, 250, 0.2);
-  color: rgb(96, 165, 250);
+  background: var(--color-info-bg);
+  color: var(--color-info);
 }
 
 .actuator-satellite__scope-badge--mobile {
-  background: rgba(251, 146, 60, 0.2);
-  color: rgb(251, 146, 60);
+  background: var(--color-accent-bg);
+  color: var(--color-accent-bright);
 }
 
 /* Connection indicator */

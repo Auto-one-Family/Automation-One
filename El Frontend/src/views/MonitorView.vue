@@ -191,6 +191,46 @@ const isArchivedZoneSelected = computed(() => {
 
 const isZoneFilterActive = computed(() => selectedZoneFilter.value !== null)
 
+// =============================================================================
+// L1 Subzone Filter (AUT-251): visible only when Zone filter is active
+// =============================================================================
+
+const selectedL1SubzoneFilter = ref<string | null>(null)
+
+/** Subzones available for the currently selected L1 zone (derived from device store) */
+const availableL1Subzones = computed<{ id: string; name: string }[]>(() => {
+  if (!selectedZoneFilter.value) return []
+  const devicesInZone = espStore.devices.filter(d => d.zone_id === selectedZoneFilter.value)
+  const seen = new Map<string, string>()
+  for (const device of devicesInZone) {
+    for (const sensor of (device.sensors ?? [])) {
+      const subId = (sensor as any).subzone_id
+      if (subId && !seen.has(subId)) {
+        seen.set(subId, (sensor as any).subzone_name || subId)
+      }
+    }
+    for (const actuator of (device.actuators ?? [])) {
+      const subId = (actuator as any).subzone_id
+      if (subId && !seen.has(subId)) {
+        seen.set(subId, (actuator as any).subzone_name || subId)
+      }
+    }
+  }
+  return [...seen.entries()].map(([id, name]) => ({ id, name }))
+})
+
+// Reset L1 subzone filter when zone changes or is cleared
+watch(selectedZoneFilter, () => {
+  selectedL1SubzoneFilter.value = null
+})
+
+// Navigate to zone L2 detail when L1 subzone is selected (AUT-251)
+watch(selectedL1SubzoneFilter, (subzoneId) => {
+  if (subzoneId !== null && selectedZoneFilter.value) {
+    router.push({ name: 'monitor-zone', params: { zoneId: selectedZoneFilter.value } })
+    selectedL1SubzoneFilter.value = null
+  }
+})
 
 // =============================================================================
 // L2 Subzone Filter
@@ -2073,6 +2113,26 @@ function handleFabWidgetSelected(widgetType: string) {
         </span>
       </div>
 
+      <!-- L1 Subzone Filter (AUT-251): only visible when Zone filter is active and subzones exist -->
+      <div v-if="isZoneFilterActive && availableL1Subzones.length > 0" class="monitor-zone-filter monitor-zone-filter--subzone">
+        <div class="monitor-zone-filter__select-wrap">
+          <ListFilter class="monitor-zone-filter__icon" />
+          <select
+            v-model="selectedL1SubzoneFilter"
+            class="monitor-zone-filter__select"
+          >
+            <option :value="null">Alle Subzonen</option>
+            <option
+              v-for="sz in availableL1Subzones"
+              :key="sz.id"
+              :value="sz.id"
+            >
+              {{ sz.name }}
+            </option>
+          </select>
+        </div>
+      </div>
+
       <!-- Archived Zone Banner -->
       <div v-if="isArchivedZoneSelected" class="monitor-archived-banner">
         <AlertTriangle class="w-4 h-4" />
@@ -3294,7 +3354,7 @@ function handleFabWidgetSelected(widgetType: string) {
 .monitor-subzone__status-dot--good { background: var(--color-success); }
 .monitor-subzone__status-dot--warning { background: var(--color-warning); }
 .monitor-subzone__status-dot--alarm { background: var(--color-error); }
-.monitor-subzone__status-dot--stale { background: rgb(251, 146, 60); }
+.monitor-subzone__status-dot--stale { background: var(--color-warning); }
 .monitor-subzone__status-dot--offline { background: var(--color-text-muted); }
 
 .monitor-subzone__kpis {

@@ -1463,10 +1463,10 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
   width: 100%;
   min-height: 48px;
   padding: var(--space-3);
-  background: var(--gradient-iridescent, linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2)));
+  background: var(--gradient-iridescent);
   border: 1px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
   border-radius: var(--radius-lg);
-  color: var(--color-text-inverse, #fff);
+  color: var(--color-text-inverse);
   font-size: var(--text-base);
   font-weight: 600;
   cursor: pointer;
