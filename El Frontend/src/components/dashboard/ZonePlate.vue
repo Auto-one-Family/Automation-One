@@ -22,7 +22,7 @@ import { useEspStore } from '@/stores/esp'
 import { useDragStateStore } from '@/shared/stores'
 import { useUiStore } from '@/shared/stores/ui.store'
 import { useSubzoneCRUD } from '@/composables/useSubzoneCRUD'
-import { Pencil, Trash2, Plus, Check, X } from 'lucide-vue-next'
+import { Pencil, Trash2, Plus, Check, X, Leaf } from 'lucide-vue-next'
 import { PackageOpen } from 'lucide-vue-next'
 import AccordionSection from '@/shared/design/primitives/AccordionSection.vue'
 import { EmptyState } from '@/shared/design/patterns'
@@ -31,6 +31,8 @@ import { aggregateZoneSensors } from '@/utils/sensorDefaults'
 import { getESPStatus } from '@/composables/useESPStatus'
 import type { ZoneContextSummary, ZoneEntity } from '@/types'
 import { Settings } from 'lucide-vue-next'
+import StatusBadge from '@/components/base/StatusBadge.vue'
+import type { StatusLevel } from '@/utils/formatters'
 
 
 interface Props {
@@ -59,6 +61,7 @@ const emit = defineEmits<{
   (e: 'device-delete', deviceId: string): void
   (e: 'monitor-nav', device: ESPDevice): void
   (e: 'zone-settings', zoneId: string): void
+  (e: 'subzone-plant', payload: { subzoneId: string; subzoneName: string; zoneId: string }): void
 }>()
 
 const espStore = useEspStore()
@@ -140,12 +143,12 @@ const zoneContextLabel = computed(() => {
   return parts.join(' · ')
 })
 
-// ── B2: Status Dot Color ─────────────────────────────────────────────────
-const statusDotColor = computed(() => {
-  if (stats.value.total === 0) return 'var(--color-text-muted)'
-  if (stats.value.online === 0) return 'var(--color-error)'
-  if (stats.value.online < stats.value.total) return 'var(--color-warning)'
-  return 'var(--color-success)'
+// ── B2: Status Level (AUT-250: StatusBadge migration) ───────────────────
+const statusLevel = computed<StatusLevel>(() => {
+  if (stats.value.total === 0) return 'offline'
+  if (stats.value.online === 0) return 'alarm'
+  if (stats.value.online < stats.value.total) return 'warning'
+  return 'ok'
 })
 
 const statusLabel = computed(() => {
@@ -359,14 +362,11 @@ function handleDragEnd() {
             {{ zoneContextLabel }}
           </span>
 
-          <!-- B2: Status with colored dot -->
+          <!-- B2: Status with colored dot (AUT-250: StatusBadge) -->
           <span class="zone-plate__stats">
             {{ stats.total }} ESP{{ stats.total !== 1 ? 's' : '' }}
             <span class="zone-plate__stats-sep">·</span>
-            <span
-              class="zone-plate__status-dot"
-              :style="{ backgroundColor: statusDotColor }"
-            />
+            <StatusBadge :level="statusLevel" compact />
             {{ statusLabel }}
           </span>
 
@@ -430,6 +430,13 @@ function handleDragEnd() {
               <div class="zone-plate__subzone-hover-actions">
                 <button class="zone-plate__subzone-action" title="Umbenennen" @click.stop="subzoneCRUD.startRenameSubzone(sz.subzoneId!, sz.subzoneName)">
                   <Pencil class="w-2.5 h-2.5" />
+                </button>
+                <button
+                  class="zone-plate__subzone-action zone-plate__subzone-action--plant"
+                  title="Pflanzenprofil anzeigen"
+                  @click.stop="emit('subzone-plant', { subzoneId: sz.subzoneId!, subzoneName: sz.subzoneName, zoneId })"
+                >
+                  <Leaf class="w-2.5 h-2.5" />
                 </button>
                 <button class="zone-plate__subzone-action zone-plate__subzone-action--danger" title="Loeschen" @click.stop="uiStore.confirm({ title: 'Subzone loeschen', message: `&quot;${sz.subzoneName}&quot; wirklich loeschen?`, variant: 'danger', confirmText: 'Loeschen' }).then(ok => { if (ok) subzoneCRUD.deleteSubzone(sz.subzoneId!, sz.subzoneName, zoneId) })">
                   <Trash2 class="w-2.5 h-2.5" />
@@ -736,14 +743,6 @@ function handleDragEnd() {
   margin: 0 1px;
 }
 
-/* Status dot in header */
-.zone-plate__status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-full);
-  flex-shrink: 0;
-}
-
 /* Subzone chips */
 .zone-plate__subzone-chips {
   display: flex;
@@ -838,6 +837,11 @@ function handleDragEnd() {
 .zone-plate__subzone-action--danger:hover {
   color: var(--color-error);
   background: rgba(248, 113, 113, 0.1);
+}
+
+.zone-plate__subzone-action--plant:hover {
+  color: var(--color-success);
+  background: rgba(74, 222, 128, 0.1);
 }
 
 .zone-plate__subzone-action:disabled {

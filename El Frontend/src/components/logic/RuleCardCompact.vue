@@ -10,11 +10,13 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Clock, AlertCircle, ChevronDown, Save, ExternalLink, Power, ShieldAlert } from 'lucide-vue-next'
 import { formatDateTime, formatRelativeTime } from '@/utils/formatters'
+import type { StatusLevel } from '@/utils/formatters'
 import { useUiStore } from '@/shared/stores/ui.store'
 import { useLogicStore } from '@/shared/stores/logic.store'
 import { useToast } from '@/composables/useToast'
 import { useRuleLifecycleBadge } from '@/composables/useRuleLifecycleBadge'
 import BaseBadge from '@/shared/design/primitives/BaseBadge.vue'
+import StatusBadge from '@/components/base/StatusBadge.vue'
 import type {
   LogicRule,
   SensorCondition,
@@ -66,6 +68,13 @@ const hasError = computed(
 )
 
 const isDegraded = computed(() => Boolean(props.rule.degraded_since))
+
+/** AUT-250: Map rule state to canonical 4-level StatusLevel for StatusBadge. */
+const ruleStatusLevel = computed<StatusLevel>(() => {
+  if (hasError.value) return 'alarm'
+  if (!props.rule.enabled) return 'offline'
+  return 'ok'
+})
 
 /** Dynamic aria-label including status for screen readers (ARIA-live announces changes). */
 const statusAriaLabel = computed(() => {
@@ -300,13 +309,10 @@ async function saveQuickSettings(): Promise<void> {
       @click="handleMainClick"
     >
       <div class="rule-card-compact__header">
-        <span
-          class="rule-card-compact__status-dot"
-          :class="[
-            rule.enabled ? 'rule-card-compact__status-dot--on' : 'rule-card-compact__status-dot--off',
-            { 'rule-card-compact__status-dot--error': hasError },
-          ]"
-          :title="lifecycleLabel"
+        <StatusBadge
+          :level="ruleStatusLevel"
+          :label-override="lifecycleLabel"
+          compact
         />
         <span v-if="rule.is_critical" class="rule-card-compact__critical-badge" title="Kritische Regel">
           <ShieldAlert class="rule-card-compact__critical-icon" />
@@ -805,28 +811,6 @@ async function saveQuickSettings(): Promise<void> {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.rule-card-compact__status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  transition: background-color var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.rule-card-compact__status-dot--on {
-  background: var(--color-success);
-  box-shadow: 0 0 4px var(--color-success);
-}
-
-.rule-card-compact__status-dot--off {
-  background: var(--color-text-muted);
-}
-
-.rule-card-compact__status-dot--error {
-  background: var(--color-error);
-  box-shadow: 0 0 4px var(--color-error);
 }
 
 .rule-card-compact__name {

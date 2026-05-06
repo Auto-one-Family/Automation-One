@@ -44,7 +44,8 @@ import { getActuatorTypeInfo } from '@/utils/labels'
 import { storeToRefs } from 'pinia'
 import { useDashboardStore, type DashboardLayout } from '@/shared/stores/dashboard.store'
 import { useLogicStore } from '@/shared/stores/logic.store'
-import { formatRelativeTime, qualityToStatus, DATA_STALE_THRESHOLD_S } from '@/utils/formatters'
+import { formatRelativeTime, qualityToStatus, sensorStatusToLevel, zoneHealthToLevel, DATA_STALE_THRESHOLD_S } from '@/utils/formatters'
+import StatusBadge from '@/components/base/StatusBadge.vue'
 import { calculateTrend } from '@/utils/trendUtils'
 import type { TrendDirection } from '@/utils/trendUtils'
 import { sensorsApi } from '@/api/sensors'
@@ -2247,9 +2248,12 @@ function handleFabWidgetSelected(widgetType: string) {
           <h2 class="monitor-view__title">{{ selectedZoneName }}</h2>
         </div>
 
-        <div class="monitor-view__header-status" :class="selectedZoneHealthStatus ? `monitor-view__header-status--${selectedZoneHealthStatus}` : ''">
-          <span class="monitor-view__header-status-dot" />
-          <span class="monitor-view__header-status-text">{{ selectedZoneHealthLabel }}</span>
+        <div class="monitor-view__header-status">
+          <StatusBadge
+            v-if="selectedZoneHealthStatus"
+            :level="zoneHealthToLevel(selectedZoneHealthStatus)"
+            :label-override="selectedZoneHealthLabel"
+          />
         </div>
 
         <router-link
@@ -2339,7 +2343,7 @@ function handleFabWidgetSelected(widgetType: string) {
             <ChevronRight
               :class="['monitor-subzone__chevron', { 'monitor-subzone__chevron--expanded': isSubzoneExpanded(getSubzoneKey(selectedZoneId, subzone.subzoneId)) }]"
             />
-            <span :class="['monitor-subzone__status-dot', `monitor-subzone__status-dot--${getWorstQualityStatus(subzone.sensors)}`]" />
+            <StatusBadge :level="sensorStatusToLevel(getWorstQualityStatus(subzone.sensors))" compact />
             <span class="monitor-subzone__name">{{ subzone.subzoneName }}</span>
             <span class="monitor-subzone__count">
               {{ subzone.sensors.length }}S · {{ subzone.actuators.length }}A
@@ -2350,7 +2354,7 @@ function handleFabWidgetSelected(widgetType: string) {
             v-else
             class="monitor-subzone__header monitor-subzone__header--static monitor-subzone__header--zoneweit"
           >
-            <span :class="['monitor-subzone__status-dot', `monitor-subzone__status-dot--${getWorstQualityStatus(subzone.sensors)}`]" />
+            <StatusBadge :level="sensorStatusToLevel(getWorstQualityStatus(subzone.sensors))" compact />
             <span class="monitor-subzone__name">{{ subzone.subzoneName }}</span>
             <span class="monitor-subzone__count">
               {{ subzone.sensors.length }}S · {{ subzone.actuators.length }}A
@@ -3150,22 +3154,7 @@ function handleFabWidgetSelected(widgetType: string) {
   flex-shrink: 0;
 }
 
-.monitor-view__header-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-text-muted);
-}
-
-.monitor-view__header-status--ok .monitor-view__header-status-dot { background: var(--color-success); }
-.monitor-view__header-status--warning .monitor-view__header-status-dot { background: var(--color-warning); }
-.monitor-view__header-status--alarm .monitor-view__header-status-dot { background: var(--color-error); }
-
-.monitor-view__header-status-text {
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
-  font-weight: 600;
-}
+/* AUT-250: Header status now uses StatusBadge — legacy dot/text rules removed. */
 
 .monitor-view__header-reason {
   margin: calc(-1 * var(--space-1)) 0 0;
@@ -3344,18 +3333,7 @@ function handleFabWidgetSelected(widgetType: string) {
   flex: 1;
 }
 
-.monitor-subzone__status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.monitor-subzone__status-dot--good { background: var(--color-success); }
-.monitor-subzone__status-dot--warning { background: var(--color-warning); }
-.monitor-subzone__status-dot--alarm { background: var(--color-error); }
-.monitor-subzone__status-dot--stale { background: var(--color-warning); }
-.monitor-subzone__status-dot--offline { background: var(--color-text-muted); }
+/* AUT-250: Subzone status dots now rendered by StatusBadge compact. */
 
 .monitor-subzone__kpis {
   font-size: var(--text-xs);

@@ -38,7 +38,7 @@ import type {
   MultispeqImportResponse,
   NeedsReviewSnapshot,
 } from '@/api/multispeq'
-import { formatDateTime } from '@/utils/formatters'
+import DateDisplay from '@/components/base/DateDisplay.vue'
 
 const route = useRoute()
 const espStore = useEspStore()
@@ -920,7 +920,7 @@ function toggleZoneFilter(zone: string) {
             class="audits-needs-review__item"
           >
             <div class="audits-needs-review__meta">
-              <span class="audits-needs-review__time">{{ formatDateTime(snapshot.timestamp) }}</span>
+              <DateDisplay class="audits-needs-review__time" :date="snapshot.timestamp" format="absolute" />
               <span
                 v-if="snapshot.sensor_values.phi2 !== undefined"
                 class="audits-needs-review__metric"

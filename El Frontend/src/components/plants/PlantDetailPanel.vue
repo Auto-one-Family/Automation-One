@@ -32,7 +32,8 @@ import { plantsApi } from '@/api/plants'
 import { usePlantsStore } from '@/shared/stores/plants.store'
 import { useToast } from '@/composables/useToast'
 import { AccordionSection } from '@/shared/design/primitives'
-import { formatDateTime, formatRelativeTime } from '@/utils/formatters'
+import { formatRelativeTime } from '@/utils/formatters'
+import DateDisplay from '@/components/base/DateDisplay.vue'
 import { PLANT_PHASE_LABELS, getPlantEventTypeLabel } from '@/components/plants/plantLabels'
 import PlantPhaseChangeModal from '@/components/plants/PlantPhaseChangeModal.vue'
 import type { Plant, PlantLifecycleEvent, PlantMeasurement, PlantPhase } from '@/types'
@@ -345,7 +346,7 @@ onMounted(() => {
           :key="event.id"
           class="plant-events__item"
         >
-          <span class="plant-events__date">{{ formatDateTime(event.created_at) }}</span>
+          <DateDisplay class="plant-events__date" :date="event.created_at" format="absolute" />
           <span class="plant-events__type">{{ getPlantEventTypeLabel(event.event_type) }}</span>
           <span v-if="event.note" class="plant-events__note">{{ event.note }}</span>
         </li>
@@ -401,7 +402,7 @@ onMounted(() => {
           :key="log.id"
           class="plant-audit__item"
         >
-          <span class="plant-audit__date">{{ formatDateTime(log.created_at) }}</span>
+          <DateDisplay class="plant-audit__date" :date="log.created_at" format="absolute" />
           <span class="plant-audit__action">{{ log.action }}</span>
           <span v-if="log.user" class="plant-audit__user">von {{ log.user }}</span>
         </li>
