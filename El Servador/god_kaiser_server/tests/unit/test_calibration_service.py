@@ -319,7 +319,6 @@ async def test_apply_is_idempotent(db_session):
     assert second_apply.id == first_apply.id
 
 
-<<<<<<< Updated upstream
 # ─────────────────────────────────────────────────────────────────────────────
 # pH Calibration (2-point) Tests
 # ─────────────────────────────────────────────────────────────────────────────
@@ -608,7 +607,8 @@ async def test_canonical_structure_ec_1point(db_session):
     # Check derived has cell_factor
     assert "cell_factor" in result["derived"]
     assert 0.5 <= result["derived"]["cell_factor"] <= 2.0
-=======
+
+
 def test_compute_calibration_linear_moisture_maps_to_moisture_2point_derived():
     """linear_2point + moisture: same derived shape as moisture_2point (dry/wet), not slope/offset."""
     points = [
@@ -631,4 +631,3 @@ def test_compute_calibration_linear_ec_stays_linear():
     result = CalibrationService._compute_calibration("linear_2point", "ec", points)
     assert result["type"] == "linear_2point"
     assert "slope" in result
->>>>>>> Stashed changes

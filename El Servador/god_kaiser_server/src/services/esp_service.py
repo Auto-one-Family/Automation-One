@@ -581,6 +581,17 @@ class ESPService:
         resolved_fingerprint = config_fingerprint or self._compute_config_fingerprint(config)
         result["config_fingerprint"] = resolved_fingerprint
 
+        # Strip server-only diagnostics before building the ESP32 wire payload.
+        # offline_rules_diagnostics is for operator audit/WS only — not sent to firmware.
+        offline_rules_diagnostics = config.pop("offline_rules_diagnostics", None)
+        if offline_rules_diagnostics:
+            logger.debug(
+                "offline_rules_diagnostics for %s: accepted=%d stripped=%d",
+                device_id,
+                offline_rules_diagnostics.get("accepted_count", 0),
+                offline_rules_diagnostics.get("stripped_count", 0),
+            )
+
         # Publish config via MQTT with stable intent handles for contract tracking.
         # Keep correlation_id as primary key and mirror it in request_id/intent_id
         # for firmware paths that still rely on those fields.
@@ -687,6 +698,7 @@ class ESPService:
                         "reason_code": reason_code,
                         "generation": resolved_generation,
                         "config_fingerprint": resolved_fingerprint,
+                        **({"offline_rules_diagnostics": offline_rules_diagnostics} if offline_rules_diagnostics else {}),
                     },
                 )
             except Exception as audit_err:
@@ -721,19 +733,22 @@ class ESPService:
                 from ..websocket.manager import WebSocketManager
 
                 ws_manager = await WebSocketManager.get_instance()
+                ws_payload: dict = {
+                    "esp_id": device_id,
+                    "config_keys": list(config.keys()),
+                    "correlation_id": correlation_id,
+                    "queued": not is_online,
+                    "device_status": device.status or "unknown",
+                    "offline_rules_stripped": len(stripped) if stripped else 0,
+                    "reason_code": reason_code,
+                    "generation": resolved_generation,
+                    "config_fingerprint": resolved_fingerprint,
+                }
+                if offline_rules_diagnostics:
+                    ws_payload["offline_rules_diagnostics"] = offline_rules_diagnostics
                 await ws_manager.broadcast(
                     "config_published",
-                    {
-                        "esp_id": device_id,
-                        "config_keys": list(config.keys()),
-                        "correlation_id": correlation_id,
-                        "queued": not is_online,
-                        "device_status": device.status or "unknown",
-                        "offline_rules_stripped": len(stripped) if stripped else 0,
-                        "reason_code": reason_code,
-                        "generation": resolved_generation,
-                        "config_fingerprint": resolved_fingerprint,
-                    },
+                    ws_payload,
                     correlation_id=correlation_id,
                 )
                 if self._is_mock_device(device, device_id):

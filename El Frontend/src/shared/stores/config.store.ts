@@ -121,6 +121,7 @@ export const useConfigStore = defineStore('config', () => {
   /**
    * Handle config_published WebSocket event.
    * Notifies that config was sent to ESP via MQTT.
+   * Shows operator warning when offline rules were stripped (AUT-132).
    */
   function handleConfigPublished(
     message: { data: Record<string, unknown> },
@@ -140,6 +141,23 @@ export const useConfigStore = defineStore('config', () => {
     const reasonDetail = reason ? ` | Grund: ${reason}` : ''
     const generationDetail = generation ? ` | Gen: ${generation}` : ''
     toast.info(`Konfiguration für ${deviceName} gesendet${detail}${reasonDetail}${generationDetail}`)
+
+    const diagnostics = data.offline_rules_diagnostics as {
+      stripped_count?: number
+      stripped_rules?: Array<{ rule_name?: string; actuator_gpio?: number; reason_code?: string }>
+    } | undefined
+    if (diagnostics && (diagnostics.stripped_count ?? 0) > 0) {
+      const count = diagnostics.stripped_count!
+      const examples = (diagnostics.stripped_rules ?? []).slice(0, 2)
+        .map(r => `${r.rule_name ?? 'Regel'} (GPIO ${r.actuator_gpio ?? '?'}: ${r.reason_code ?? '?'})`)
+        .join(', ')
+      const suffix = examples ? ` — ${examples}` : ''
+      logger.warn(`AUT-132: ${count} Offline-Regel(n) nicht gesendet für ${espId}${suffix}`)
+      toast.warning(
+        `${deviceName}: ${count} Offline-Regel${count > 1 ? 'n' : ''} nicht gesendet${suffix}`,
+        { duration: 8000 },
+      )
+    }
   }
 
   /**

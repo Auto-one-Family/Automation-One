@@ -347,6 +347,21 @@ export interface ActuatorCommandFailedEvent extends WebSocketEventBase {
 // CONFIG PUBLISH LIFECYCLE EVENTS
 // =============================================================================
 
+export interface OfflineRuleStrippedEntry {
+  rule_id: string
+  rule_name: string
+  actuator_gpio: number
+  reason_code: string
+  reason_detail: string
+}
+
+export interface OfflineRulesDiagnostics {
+  total_candidate_rules: number
+  accepted_count: number
+  stripped_count: number
+  stripped_rules: OfflineRuleStrippedEntry[]
+}
+
 /**
  * Config published event
  * Sent when config is successfully published to ESP via MQTT
@@ -362,6 +377,7 @@ export interface ConfigPublishedEvent extends WebSocketEventBase {
     queued?: boolean
     device_status?: string
     offline_rules_stripped?: number
+    offline_rules_diagnostics?: OfflineRulesDiagnostics
     reason_code?: string
     generation?: number
     config_fingerprint?: string
