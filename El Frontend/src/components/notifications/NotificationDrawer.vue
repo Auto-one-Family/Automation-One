@@ -232,10 +232,12 @@ watch(
         <button
           type="button"
           class="drawer__preset-btn"
-          title="Nur aktive kritische Alerts"
+          title="Nur aktive kritische Alerts (Schnellauswahl)"
+          aria-label="Schnellauswahl: Nur aktive kritische Alerts anzeigen"
+          data-testid="notification-preset-active-critical"
           @click="applyActiveCriticalPreset"
         >
-          Kritisch · aktiv
+          Nur Alerts
         </button>
       </div>
 
@@ -271,16 +273,30 @@ watch(
         <button
           type="button"
           class="drawer__advanced-toggle"
+          :aria-expanded="advancedSourcesOpen"
+          aria-controls="notification-advanced-sources"
+          data-testid="notification-advanced-toggle"
           @click="advancedSourcesOpen = !advancedSourcesOpen"
         >
           <Filter class="drawer__advanced-icon" />
-          <span>Quelle filtern</span>
+          <span class="drawer__advanced-label">Erweitert: Quelle filtern</span>
+          <span
+            v-if="inboxStore.sourceFilter !== null"
+            class="drawer__advanced-badge"
+            aria-hidden="true"
+          >
+            1
+          </span>
           <component
             :is="advancedSourcesOpen ? ChevronUp : ChevronDown"
             class="drawer__advanced-chevron"
           />
         </button>
-        <div v-show="advancedSourcesOpen" class="drawer__source-chips">
+        <div
+          v-show="advancedSourcesOpen"
+          id="notification-advanced-sources"
+          class="drawer__source-chips"
+        >
           <button
             v-for="chip in sourceChips"
             :key="chip.value ?? 'all'"
@@ -531,8 +547,25 @@ watch(
 .drawer__advanced-chevron {
   width: 12px;
   height: 12px;
-  margin-left: auto;
   color: var(--color-text-muted);
+}
+
+.drawer__advanced-label {
+  flex: 1;
+}
+
+.drawer__advanced-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 var(--space-1);
+  font-size: var(--text-xxs);
+  font-weight: 600;
+  color: var(--color-iridescent-2);
+  background: rgba(129, 140, 248, 0.16);
+  border-radius: var(--radius-full);
 }
 
 /* Filter Tabs */

@@ -310,6 +310,29 @@ const filteredEvents = computed(() => {
   return events
 })
 
+/**
+ * AUT-196 Paket C: All events matching the correlation deep-link, regardless of
+ * other active filters (tab/severity/esp/timeRange/dataSources). Used to detect
+ * whether other filters are hiding correlation-relevant events.
+ */
+const allCorrelationEvents = computed(() => {
+  const correlationTrimmed = filterCorrelationId.value.trim()
+  if (correlationTrimmed.length === 0) return [] as UnifiedEvent[]
+  const correlationLower = correlationTrimmed.toLowerCase()
+  return unifiedEvents.value.filter(e =>
+    (e.correlation_id ?? '').toLowerCase().includes(correlationLower),
+  )
+})
+
+/**
+ * AUT-196 Paket C: Show banner only when a correlation deep-link is active AND
+ * other filters (tab) currently hide some correlation events.
+ */
+const correlationFilterMismatchCount = computed(() => {
+  if (!isCorrelationDeepLink.value) return 0
+  return Math.max(0, allCorrelationEvents.value.length - filteredEvents.value.length)
+})
+
 const eventCounts = computed(() => {
   let events = 0
   let logs = 0
@@ -1116,6 +1139,20 @@ function clearCorrelationFromRoute(): void {
   void router.replace({ path: route.path, query: next })
 }
 
+/**
+ * AUT-196 Paket C: Reset all "other" filters that could hide correlation events,
+ * keeping the correlation focus active. Switches to the events tab so all
+ * correlation-related events become visible.
+ */
+function resetFiltersForCorrelation(): void {
+  activeTab.value = 'events'
+  filterEspId.value = ''
+  filterLevels.value = new Set(['info', 'warning', 'error', 'critical'])
+  filterTimeRange.value = 'all'
+  customStartDate.value = undefined
+  customEndDate.value = undefined
+}
+
 // ============================================================================
 // Lifecycle
 // ============================================================================
@@ -1375,6 +1412,29 @@ watch(activeTab, (newTab) => {
         @update:expanded="healthExpanded = $event"
         @filter-device="handleFilterDevice"
       />
+
+      <!-- AUT-196 Paket C: Correlation-Filter-Hinweis -->
+      <div
+        v-if="activeTab === 'events' && correlationFilterMismatchCount > 0"
+        class="correlation-banner"
+        role="status"
+        data-testid="correlation-filter-banner"
+      >
+        <AlertTriangle class="correlation-banner__icon" />
+        <span class="correlation-banner__text">
+          <strong>{{ correlationFilterMismatchCount }}</strong>
+          {{ correlationFilterMismatchCount === 1 ? 'Ereignis' : 'Ereignisse' }}
+          durch aktive Filter ausgeblendet
+        </span>
+        <button
+          type="button"
+          class="correlation-banner__cta"
+          data-testid="correlation-filter-reset"
+          @click="resetFiltersForCorrelation"
+        >
+          Filter für Korrelation zurücksetzen
+        </button>
+      </div>
 
       <!-- Events Tab (with integrated filter controls) -->
       <EventsTab

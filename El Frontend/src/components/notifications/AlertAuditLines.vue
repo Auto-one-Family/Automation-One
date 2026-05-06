@@ -22,10 +22,13 @@ defineProps<Props>()
         class="alert-audit__value"
         :title="formatDateTime(acknowledgedAt)"
       >
-        {{ formatRelativeTime(acknowledgedAt) }}
+        am {{ formatDateTime(acknowledgedAt) }}
         <template v-if="acknowledgedBy != null">
-          · User-ID {{ acknowledgedBy }}
+          von User-ID {{ acknowledgedBy }}
         </template>
+        <span class="alert-audit__relative">
+          ({{ formatRelativeTime(acknowledgedAt) }})
+        </span>
       </span>
     </div>
     <div v-if="resolvedAt" class="alert-audit__row alert-audit__row--full">
@@ -34,7 +37,10 @@ defineProps<Props>()
         class="alert-audit__value"
         :title="formatDateTime(resolvedAt)"
       >
-        {{ formatRelativeTime(resolvedAt) }}
+        am {{ formatDateTime(resolvedAt) }}
+        <span class="alert-audit__relative">
+          ({{ formatRelativeTime(resolvedAt) }})
+        </span>
       </span>
     </div>
   </div>
@@ -71,5 +77,10 @@ defineProps<Props>()
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
+}
+
+.alert-audit__relative {
+  margin-left: var(--space-1);
+  color: var(--color-text-muted);
 }
 </style>
