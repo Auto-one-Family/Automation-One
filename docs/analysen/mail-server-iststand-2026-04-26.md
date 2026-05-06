@@ -1,9 +1,20 @@
 # AUT-192 — Mail-Server IST-Stand + email_service.py Audit
 
-**Stand:** 2026-04-26  
-**Linear:** [AUT-192](https://linear.app/autoone/issue/AUT-192)  
+**Stand:** 2026-04-26 (aktualisiert 2026-05-07)  
+**Linear:** [AUT-192](https://linear.app/autoone/issue/AUT-192) — **In Review**  
 **Projekt:** Claude API Integration in AutomationOne (Phase 1–3)  
 **Etappe:** 2 von 4 — blockiert AUT-194 (DailyAnalysisJob)
+
+### Delta 2026-05-07
+
+| Gap | Status |
+|-----|--------|
+| `resend` + `jinja2` nicht in pyproject.toml | ✅ BEHOBEN — `pyproject.toml` Z. 52–53 |
+| `.env.example` ohne EMAIL_*-Variablen | ✅ BEHOBEN — Sektion `# Email Notifications` ergänzt |
+| `EMAIL_FROM`-Default `noreply@god-kaiser.local` | 🔴 OFFEN — Folge-Issue |
+| `pending`-Status-Recovery beim App-Start | 🟡 OFFEN — Folge-Issue |
+| Bounce-Handling (Resend-Webhook) | 🟡 OFFEN — Folge-Issue |
+| Retention-Policy `email_log` | 🟡 OFFEN — Folge-Issue |
 
 ---
 
@@ -216,11 +227,11 @@ Der Mail-Stack ist **vollständig implementiert** (EmailService, EmailRetryServi
 Er ist durch `EMAIL_ENABLED=False` (Default in `config.py` Z. 275) **absichtlich deaktiviert**.
 
 Die drei kritischen Blocker vor Aktivierung:
-1. `.env.example`-Dokumentation fehlt
-2. `resend`/`jinja2` nicht in `pyproject.toml` deklariert
-3. `email_from` Default `noreply@god-kaiser.local` nicht produktionstauglich
+1. ~~`.env.example`-Dokumentation fehlt~~ → ✅ Behoben 2026-05-07
+2. ~~`resend`/`jinja2` nicht in `pyproject.toml` deklariert~~ → ✅ Behoben (pyproject.toml Z. 52-53)
+3. `email_from` Default `noreply@god-kaiser.local` nicht produktionstauglich → 🔴 offen
 
-**Empfohlener Aktivierungs-Pfad:** Resend als Primärprovider mit `notifications@phyta.org` (DNS-Konfiguration bei Resend vorausgesetzt). Go-Signal für AUT-194 Mail-Versand: nach Critical-Fixes + 48h-Stabilisierungstest.
+**Empfohlener Aktivierungs-Pfad:** Resend als Primärprovider mit `notifications@phyta.org` (DNS-Konfiguration bei Resend vorausgesetzt). Go-Signal für AUT-194 Mail-Versand: nach Critical-Fix #3 + 48h-Stabilisierungstest.
 
 ---
 
