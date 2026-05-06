@@ -64,12 +64,13 @@ SENSOR_TYPE_MAPPING: Dict[str, str] = {
     "moisture": "moisture",
     "soil_moisture": "moisture",  # Alias — normalize_sensor_type() returns "moisture"
     # BME280 variants (Phase 2)
-    "pressure_bme280": "bme280_pressure",
-    "temperature_bme280": "bme280_temp",
+    # BME280 = BMP280 + humidity chip; temp/pressure reuse BMP280 processors.
+    "pressure_bme280": "bmp280_pressure",
+    "temperature_bme280": "bmp280_temp",
     "humidity_bme280": "bme280_humidity",
-    "bme280_pressure": "bme280_pressure",  # Already normalized
-    "bme280_temp": "bme280_temp",  # Already normalized
-    "bme280_humidity": "bme280_humidity",  # Already normalized
+    "bme280_pressure": "bmp280_pressure",  # Reuse BMP280PressureProcessor
+    "bme280_temp": "bmp280_temp",  # Reuse BMP280TemperatureProcessor
+    "bme280_humidity": "bme280_humidity",  # BME280HumidityProcessor
     # CO2 sensors (Phase 3)
     "mhz19_co2": "mhz19_co2",
     "scd30_co2": "scd30_co2",
@@ -80,6 +81,8 @@ SENSOR_TYPE_MAPPING: Dict[str, str] = {
     # Flow sensor (Phase 3)
     "flow": "flow",
     "yfs201": "flow",
+    # VPD: computed from temperature + humidity (VIRTUAL — no processor, raw passthrough)
+    "vpd": "vpd",
     # MultispeQ snapshot sensors (VIRTUAL, via HTTP import, GPIO 200-249)
     "phi2": "phi2",
     "fv_fm": "fv_fm",

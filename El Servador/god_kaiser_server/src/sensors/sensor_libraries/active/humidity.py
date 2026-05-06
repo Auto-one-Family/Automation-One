@@ -379,3 +379,181 @@ class SHT31HumidityProcessor(BaseSensorProcessor):
 
         # Fair: Outside typical range but within reasonable limits
         return "fair"
+
+
+class BME280HumidityProcessor(BaseSensorProcessor):
+    """
+    BME280 I2C Humidity Sensor Processor.
+
+    The BME280 is a combined temperature, pressure, and humidity sensor (I2C/SPI).
+    Unlike the BMP280 (pressure + temperature only), the BME280 adds a humidity
+    channel that outputs pre-converted %RH values via the ESP32 Adafruit_BME280 library.
+
+    BME280 delivers humidity directly in %RH (no raw ADC conversion required server-side).
+    Temperature and pressure from BME280 are handled by BMP280Processor classes since
+    the underlying physics and calibration are identical.
+
+    Sensor Specifications:
+    - Humidity Range: 0-100% RH
+    - Humidity Accuracy: ±3% RH (20-80% RH)
+    - Response Time: 1 second
+    - Communication: I2C (Address: 0x76 or 0x77)
+
+    ESP32 Setup:
+    - Library: Adafruit_BME280
+    - I2C: GPIO21 (SDA), GPIO22 (SCL)
+    - Address: 0x76 (default) or 0x77
+    """
+
+    RECOMMENDED_MODE = "continuous"
+    RECOMMENDED_TIMEOUT_SECONDS = 180
+    RECOMMENDED_INTERVAL_SECONDS = 30
+    SUPPORTS_ON_DEMAND = False
+
+    HUMIDITY_MIN = 0.0
+    HUMIDITY_MAX = 100.0
+    HUMIDITY_TYPICAL_MIN = 20.0
+    HUMIDITY_TYPICAL_MAX = 80.0
+    CONDENSATION_THRESHOLD = 95.0
+    LOW_THRESHOLD = 5.0
+
+    def get_sensor_type(self) -> str:
+        """Return sensor type identifier."""
+        return "bme280_humidity"
+
+    def process(
+        self,
+        raw_value: float,
+        calibration: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> ProcessingResult:
+        """
+        Process BME280 humidity reading.
+
+        ESP32 Adafruit_BME280 library delivers %RH directly (pre-converted).
+
+        Args:
+            raw_value: Humidity in % RH (pre-converted by ESP32 library)
+            calibration: Optional calibration data — "offset": float (%RH)
+            params: Optional processing parameters
+                - "decimal_places": int (default: 1)
+                - "condensation_warning": bool (default: True)
+
+        Returns:
+            ProcessingResult with humidity value, unit "%RH", quality assessment
+        """
+        validation = self.validate(raw_value)
+        if not validation.valid:
+            return ProcessingResult(
+                value=0.0,
+                unit="%RH",
+                quality="error",
+                metadata={"error": validation.error},
+            )
+
+        humidity = raw_value
+        calibrated = False
+        if calibration and "offset" in calibration:
+            humidity += calibration["offset"]
+            calibrated = True
+
+        humidity = max(self.HUMIDITY_MIN, min(self.HUMIDITY_MAX, humidity))
+
+        decimal_places = 1
+        if params and "decimal_places" in params:
+            decimal_places = params["decimal_places"]
+        humidity = round(humidity, decimal_places)
+
+        quality = self._assess_quality(humidity, calibrated)
+
+        metadata_dict: Dict[str, Any] = {
+            "raw_humidity": raw_value,
+            "calibrated": calibrated,
+            "warnings": validation.warnings,
+        }
+
+        condensation_warning_enabled = True
+        if params and "condensation_warning" in params:
+            condensation_warning_enabled = params["condensation_warning"]
+
+        if condensation_warning_enabled and humidity > self.CONDENSATION_THRESHOLD:
+            if not metadata_dict["warnings"]:
+                metadata_dict["warnings"] = []
+            metadata_dict["warnings"].append(
+                f"High humidity ({humidity}% RH) may indicate condensation."
+            )
+
+        return ProcessingResult(
+            value=humidity,
+            unit="%RH",
+            quality=quality,
+            metadata=metadata_dict,
+        )
+
+    def validate(self, raw_value: float) -> ValidationResult:
+        """Validate BME280 humidity reading (0-100% RH)."""
+        if raw_value < self.HUMIDITY_MIN or raw_value > self.HUMIDITY_MAX:
+            return ValidationResult(
+                valid=False,
+                error=f"Humidity {raw_value}% RH out of physical range "
+                f"({self.HUMIDITY_MIN}-{self.HUMIDITY_MAX}% RH)",
+            )
+
+        warnings = []
+        if raw_value < self.LOW_THRESHOLD:
+            warnings.append(
+                f"Very low humidity ({raw_value}% RH). Check sensor connection."
+            )
+        if raw_value > self.CONDENSATION_THRESHOLD:
+            warnings.append(
+                f"Very high humidity ({raw_value}% RH). Possible condensation."
+            )
+        if raw_value < self.HUMIDITY_TYPICAL_MIN or raw_value > self.HUMIDITY_TYPICAL_MAX:
+            warnings.append(
+                f"Humidity {raw_value}% RH outside typical accuracy range "
+                f"({self.HUMIDITY_TYPICAL_MIN}-{self.HUMIDITY_TYPICAL_MAX}% RH)."
+            )
+
+        return ValidationResult(valid=True, warnings=warnings if warnings else None)
+
+    def calibrate(
+        self,
+        calibration_points: list[Dict[str, float]],
+        method: str = "offset",
+    ) -> Dict[str, Any]:
+        """Perform BME280 humidity calibration (offset method only)."""
+        if len(calibration_points) < 1:
+            raise ValueError("BME280 humidity calibration requires at least 1 point")
+        if method != "offset":
+            raise ValueError(
+                f"Calibration method '{method}' not supported. Only 'offset' is supported."
+            )
+
+        total_offset = sum(p["reference"] - p["raw"] for p in calibration_points)
+        return {
+            "offset": total_offset / len(calibration_points),
+            "method": "offset",
+            "points": len(calibration_points),
+        }
+
+    def get_default_params(self) -> Dict[str, Any]:
+        """Get default processing parameters for BME280 humidity."""
+        return {"decimal_places": 1, "condensation_warning": True}
+
+    def get_value_range(self) -> Dict[str, float]:
+        """Get expected humidity value range (0-100% RH)."""
+        return {"min": self.HUMIDITY_MIN, "max": self.HUMIDITY_MAX}
+
+    def get_raw_value_range(self) -> Dict[str, float]:
+        """Get expected raw value range (same as value range)."""
+        return {"min": self.HUMIDITY_MIN, "max": self.HUMIDITY_MAX}
+
+    def _assess_quality(self, humidity: float, calibrated: bool) -> str:
+        """Assess humidity data quality."""
+        if humidity < self.HUMIDITY_MIN or humidity > self.HUMIDITY_MAX:
+            return "error"
+        if humidity < self.LOW_THRESHOLD or humidity > self.CONDENSATION_THRESHOLD:
+            return "poor"
+        if self.HUMIDITY_TYPICAL_MIN <= humidity <= self.HUMIDITY_TYPICAL_MAX:
+            return "good"
+        return "fair"
