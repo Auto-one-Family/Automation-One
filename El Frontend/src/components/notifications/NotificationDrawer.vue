@@ -12,7 +12,7 @@
  */
 
 import { ref, computed, watch } from 'vue'
-import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp, Filter, Bell, Activity } from 'lucide-vue-next'
+import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp, Filter, Bell, BellOff, Activity } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import NotificationItem from '@/components/notifications/NotificationItem.vue'
 import NotificationPreferences from '@/components/notifications/NotificationPreferences.vue'
@@ -37,6 +37,8 @@ const toast = useToast()
 type StatusFilter = 'all' | 'active' | 'acknowledged' | 'resolved'
 const isResolvingAll = ref(false)
 const advancedSourcesOpen = ref(false)
+// AUT-255: Toggle to include suppressed alerts in the list view.
+const showSuppressed = ref(false)
 
 function applyActiveCriticalPreset(): void {
   inboxStore.activeFilter = 'critical'
@@ -291,6 +293,23 @@ watch(
             {{ chip.label }}
           </button>
         </div>
+      </div>
+
+      <!-- AUT-255: Suppression-Filter-Toggle -->
+      <div class="drawer__suppressed-toggle">
+        <label class="drawer__suppressed-label">
+          <input
+            v-model="showSuppressed"
+            type="checkbox"
+            class="drawer__suppressed-checkbox"
+            data-testid="notification-show-suppressed"
+          />
+          <BellOff :size="12" aria-hidden="true" class="drawer__suppressed-icon" />
+          Auch unterdrückte Alerts anzeigen
+        </label>
+        <span v-if="showSuppressed" class="drawer__suppressed-hint">
+          Alerts mit aktiver Suppression werden ausgegraut angezeigt (wenn vorhanden).
+        </span>
       </div>
 
       <!-- P3: Poll vs. WebSocket — Operator-Hinweis -->
@@ -617,6 +636,43 @@ watch(
   color: var(--color-text-primary);
   background: var(--color-bg-tertiary);
   border-color: var(--glass-border);
+}
+
+/* AUT-255: Suppression-Filter-Toggle */
+.drawer__suppressed-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.drawer__suppressed-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.drawer__suppressed-checkbox {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  accent-color: var(--color-warning);
+}
+
+.drawer__suppressed-icon {
+  color: var(--color-warning);
+  flex-shrink: 0;
+}
+
+.drawer__suppressed-hint {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  padding-left: 26px;
 }
 
 /* P3: Poll vs. WebSocket — Operator-Hinweis */

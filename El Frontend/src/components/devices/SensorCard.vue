@@ -6,7 +6,7 @@
  * Monitor mode: Name, live value, quality dot, sparkline, ESP-ID
  */
 import { computed, ref, type Component } from 'vue'
-import { Settings, ChevronRight, WifiOff, Clock, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity, CircleDot, TrendingUp, TrendingDown, Minus, Info } from 'lucide-vue-next'
+import { Settings, ChevronRight, WifiOff, Clock, BellOff, Thermometer, Droplets, Wind, Sun, Gauge, Leaf, Activity, CircleDot, TrendingUp, TrendingDown, Minus, Info } from 'lucide-vue-next'
 import { isMockEspId } from '@/composables/useZoneGrouping'
 import type { SensorWithContext } from '@/composables/useZoneGrouping'
 import type { TrendDirection } from '@/utils/trendUtils'
@@ -31,6 +31,10 @@ interface Props {
   mode: 'monitor' | 'config'
   dataMode?: 'Live' | 'Hybrid' | 'Snapshot'
   trend?: TrendDirection
+  /** AUT-255: When true, shows 🔕 paused pill in monitor mode footer. */
+  isSuppressed?: boolean
+  /** AUT-255: Tooltip text for the suppression pill. */
+  suppressionTooltip?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -314,6 +318,13 @@ function handleClick() {
         <div class="sensor-card__footer-badges">
           <span class="sensor-card__subzone-badge">{{ subzoneLabel }}</span>
           <span v-if="scopeBadge" :class="['sensor-card__scope-badge', scopeBadge.cls]" :title="scopeTooltip">{{ scopeBadge.text }}</span>
+          <span
+            v-if="isSuppressed"
+            class="sensor-card__badge sensor-card__badge--suppressed"
+            :title="suppressionTooltip || 'Alerts unterdrückt'"
+          >
+            <BellOff class="w-3 h-3" /> paused
+          </span>
           <span v-if="isEspOffline" class="sensor-card__badge sensor-card__badge--offline">
             <WifiOff class="w-3 h-3" /> ESP offline
           </span>
@@ -669,6 +680,12 @@ function handleClick() {
 .sensor-card__badge--no-data {
   color: var(--color-text-muted);
   background: rgba(112, 112, 128, 0.1);
+}
+
+/* AUT-255: Alert-Suppression-Indicator */
+.sensor-card__badge--suppressed {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
 }
 
 .sensor-card__number--no-data {
