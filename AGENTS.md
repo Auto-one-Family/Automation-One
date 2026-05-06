@@ -70,8 +70,8 @@ AutomationOne ist ein IoT-Framework mit 3 Schichten:
 
 ### Running Tests
 
-- **Backend tests**: `cd "/workspace/El Servador/god_kaiser_server" && poetry run pytest tests/ --timeout=120`
-  - 1820+ unit/integration tests; E2E tests need `--e2e` flag and running stack
+- **Backend tests**: `cd "/workspace/El Servador/god_kaiser_server" && poetry run pytest tests/ --timeout=120 --import-mode=importlib --ignore=tests/e2e`
+ - 1820+ unit/integration tests; E2E tests need `--e2e` flag and running stack
 - **Backend lint**: `cd "/workspace/El Servador/god_kaiser_server" && poetry run ruff check src/`
 - **Frontend tests**: `cd "/workspace/El Frontend" && npx vitest run`
   - 1581+ unit tests (47 test files)
@@ -90,6 +90,10 @@ AutomationOne ist ein IoT-Framework mit 3 Schichten:
 - The `Makefile` provides Docker Compose shortcuts; see `make help` for targets.
 - ESP32 firmware (`El Trabajante/`) is optional for dev — Mock ESPs can be created via the Debug API.
 - `vue-tsc --noEmit` may show a few pre-existing type issues (unused imports, type cast) — verify whether your change introduced new errors before treating as regressions.
+- Backend pytest requires `--import-mode=importlib --ignore=tests/e2e` flags to avoid module name collisions (duplicate `test_heartbeat_handler.py` in `tests/integration/` and `tests/mqtt/`). Without these flags, test collection fails. E2E tests need a running stack and the `--e2e` marker.
+- There are ~20 pre-existing backend test failures (calibration_service, logic_engine, logic_config_push, mqtt_auth_service) — verify whether your change introduced new failures before treating as regressions.
+- Poetry 2.x installation on the Cloud VM may hit a `packaging` conflict with the system Python; use `pip install --ignore-installed poetry` as a workaround.
+- Frontend tests now report 1796+ tests across 69 test files (updated from earlier 1581+ count).
 
 ---
 
