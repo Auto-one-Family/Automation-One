@@ -160,6 +160,41 @@ const filterCorrelationId = ref<string>('')
 const filterLevels = ref<Set<string>>(new Set(['info', 'warning', 'error', 'critical']))
 const filterTimeRange = ref<'all' | '1h' | '6h' | '24h' | '7d' | '30d' | 'custom'>('all')
 
+/** Default + deep-link presets for the event stream data-source chips */
+const DEFAULT_MONITOR_DATA_SOURCES: DataSource[] = ['audit_log', 'sensor_data', 'esp_health', 'actuators']
+const ALERT_FOCUS_DATA_SOURCES: DataSource[] = ['audit_log', 'esp_health']
+
+/** URL ?level= accepts German or English tokens (comma-separated) */
+const LEVEL_QUERY_MAP: Record<string, string> = {
+  kritisch: 'critical',
+  critical: 'critical',
+  warnung: 'warning',
+  warning: 'warning',
+  fehler: 'error',
+  error: 'error',
+  info: 'info',
+}
+
+function applyLevelQueryParam(raw: unknown): void {
+  const q = Array.isArray(raw) ? raw[0] : raw
+  if (q === undefined || q === null || String(q).trim() === '') {
+    filterLevels.value = new Set(['info', 'warning', 'error', 'critical'])
+    return
+  }
+  const parts = String(q)
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean)
+  const next = new Set<string>()
+  for (const p of parts) {
+    const mapped = LEVEL_QUERY_MAP[p]
+    if (mapped) next.add(mapped)
+  }
+  if (next.size > 0) {
+    filterLevels.value = next
+  }
+}
+
 // Custom Date Range for 'custom' timeRange
 const customStartDate = ref<string | undefined>(undefined)
 const customEndDate = ref<string | undefined>(undefined)
@@ -1188,6 +1223,30 @@ watch(() => route.query.correlation, (newCorrelation) => {
     activeTab.value = 'events'
   }
 }, { immediate: true })
+
+watch(() => route.query.level, applyLevelQueryParam, { immediate: true })
+
+watch(
+  () => route.query.source,
+  (newRaw, oldRaw) => {
+    const norm = (x: unknown): string =>
+      x === undefined || x === null
+        ? ''
+        : String(Array.isArray(x) ? x[0] : x)
+            .trim()
+            .toLowerCase()
+    const v = norm(newRaw)
+    if (v === 'alerts' || v === 'alert') {
+      selectedDataSources.value = [...ALERT_FOCUS_DATA_SOURCES]
+      return
+    }
+    const prev = norm(oldRaw)
+    if ((prev === 'alerts' || prev === 'alert') && v === '') {
+      selectedDataSources.value = [...DEFAULT_MONITOR_DATA_SOURCES]
+    }
+  },
+  { immediate: true },
+)
 
 // Watch for server-side filter changes to trigger reload
 // These filters are now sent to the server for efficient filtering

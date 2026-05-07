@@ -106,6 +106,10 @@ async def list_notifications(
         description="Alert lifecycle filter: active, acknowledged, resolved",
     ),
     is_read: Optional[bool] = Query(None, description="Filter by read status"),
+    show_suppressed: bool = Query(
+        False,
+        description="When true, include audit notifications with channel=suppressed",
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
 ):
@@ -120,6 +124,7 @@ async def list_notifications(
         source_bucket=source_bucket,
         status=status,
         is_read=is_read,
+        show_suppressed=show_suppressed,
         skip=skip,
         limit=page_size,
     )

@@ -63,6 +63,8 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
   const activeFilter = ref<InboxFilter>('all')
   const lifecycleFilter = ref<InboxLifecycleFilter>('all')
   const sourceFilter = ref<SourceFilterValue>(null)
+  /** When true, GET /notifications includes suppressed-channel audit notifications */
+  const showSuppressed = ref(false)
   const isLoading = ref(false)
   const hasMore = ref(true)
   const currentPage = ref(1)
@@ -139,6 +141,9 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     } else if (sourceFilter.value) {
       f.source = sourceFilter.value as NotificationDTO['source']
     }
+    if (showSuppressed.value) {
+      f.show_suppressed = true
+    }
     return f
   }
 
@@ -148,6 +153,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     if (sourceFilter.value === '__system__') {
       if (!n.source || !SYSTEM_SOURCES_SET.has(n.source)) return false
     } else if (sourceFilter.value && n.source !== sourceFilter.value) return false
+    if (!showSuppressed.value && n.channel === 'suppressed') return false
     return true
   }
 
@@ -165,8 +171,12 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     if (isLoading.value) return
     isLoading.value = true
     try {
+      const ambientFilters: NotificationListFilters = { page: 1, page_size: PAGE_SIZE }
+      if (showSuppressed.value) {
+        ambientFilters.show_suppressed = true
+      }
       const [listRes, countRes] = await Promise.all([
-        notificationsApi.list({ page: 1, page_size: PAGE_SIZE }),
+        notificationsApi.list(ambientFilters),
         notificationsApi.getUnreadCount(),
       ])
       notifications.value = listRes.data
@@ -216,7 +226,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     }
   })
 
-  watch([activeFilter, lifecycleFilter, sourceFilter], () => {
+  watch([activeFilter, lifecycleFilter, sourceFilter, showSuppressed], () => {
     if (!isDrawerOpen.value) return
     void reloadListForFilters()
   })
@@ -582,6 +592,7 @@ export const useNotificationInboxStore = defineStore('notification-inbox', () =>
     activeFilter,
     lifecycleFilter,
     sourceFilter,
+    showSuppressed,
     setSourceFilter,
     isLoading,
     hasMore,

@@ -5,14 +5,16 @@
  * Uses SlideOver.vue primitive (width="lg" = 560px).
  * Features:
  * - Header: Title + Settings gear + "Alle gelesen" button
- * - Filter tabs: Alle | Kritisch | Warnungen | Infos
+ * - Schweregrad: kompakte Chips (Alle · Kritisch · Warnungen — Info in „Alle“)
+ * - Quelle: nur Regel / System / Sensor (optional)
  * - Grouped by Heute/Gestern/Älter
  * - Lazy loading: first 50, then "Mehr laden" button
  * - ESC and click-outside close (SlideOver feature)
  */
 
 import { ref, computed, watch } from 'vue'
-import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp, Filter } from 'lucide-vue-next'
+import { storeToRefs } from 'pinia'
+import { Settings, CheckCheck, Mail, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import SlideOver from '@/shared/design/primitives/SlideOver.vue'
 import NotificationItem from '@/components/notifications/NotificationItem.vue'
 import NotificationPreferences from '@/components/notifications/NotificationPreferences.vue'
@@ -28,37 +30,26 @@ import { formatRelativeTime } from '@/utils/formatters'
 import { getEmailStatusLabel } from '@/utils/labels'
 
 const inboxStore = useNotificationInboxStore()
+const { showSuppressed } = storeToRefs(inboxStore)
 const alertStore = useAlertCenterStore()
 const authStore = useAuthStore()
 
 type StatusFilter = 'all' | 'active' | 'acknowledged' | 'resolved'
 const isResolvingAll = ref(false)
-const advancedSourcesOpen = ref(false)
 
-function applyActiveCriticalPreset(): void {
-  inboxStore.activeFilter = 'critical'
-  inboxStore.lifecycleFilter = 'active'
-  inboxStore.setSourceFilter(null)
-}
-
-const filterTabs: { key: InboxFilter; label: string }[] = [
+/** Severity chips (kein eigener „Info“-Filter — Infos sind in „Alle“ enthalten) */
+const severityChips: { key: InboxFilter; label: string }[] = [
   { key: 'all', label: 'Alle' },
   { key: 'critical', label: 'Kritisch' },
   { key: 'warning', label: 'Warnungen' },
-  { key: 'info', label: 'Infos' },
 ]
 
-/** Source filter chips: Alle | Sensor | Infrastruktur | Aktor | Regel | System */
+/** Kompakte Quellen: Regel / System / Sensor */
 const sourceChips: { value: SourceFilterValue; label: string }[] = [
   { value: null, label: 'Alle Quellen' },
-  { value: 'sensor_threshold', label: 'Sensor' },
-  { value: 'grafana', label: 'Infrastruktur' },
-  { value: 'mqtt_handler', label: 'Aktor' },
   { value: 'logic_engine', label: 'Regel' },
-  { value: 'ai_anomaly_service', label: 'KI-Anomalie' },
-  { value: 'freshness_reminder', label: 'Frische' },
-  { value: 'calibration_reminder', label: 'Kalibrierung' },
   { value: '__system__', label: 'System' },
+  { value: 'sensor_threshold', label: 'Sensor' },
 ]
 
 const statusTabs = computed(() => {
@@ -76,6 +67,17 @@ const statusTabs = computed(() => {
 
 function setLifecycleFilter(key: StatusFilter): void {
   inboxStore.lifecycleFilter = key === 'all' ? 'all' : key
+}
+
+function isSeverityChipActive(key: InboxFilter): boolean {
+  if (key === 'all') {
+    return inboxStore.activeFilter === 'all' || inboxStore.activeFilter === 'info'
+  }
+  return inboxStore.activeFilter === key
+}
+
+function selectSeverityChip(key: InboxFilter): void {
+  inboxStore.activeFilter = key
 }
 
 function handleClose(): void {
@@ -145,98 +147,93 @@ watch(
     <template #default>
       <!-- Header Actions Row -->
       <div class="drawer__header-actions">
-      <!-- Primary row: severity + lifecycle + preset -->
-      <div class="drawer__primary-toolbar">
-        <div class="drawer__tabs">
-          <button
-            v-for="tab in filterTabs"
-            :key="tab.key"
-            :class="[
-              'drawer__tab',
-              { 'drawer__tab--active': inboxStore.activeFilter === tab.key },
-            ]"
-            @click="inboxStore.activeFilter = tab.key"
-          >
-            {{ tab.label }}
-          </button>
-        </div>
-        <div class="drawer__status-tabs drawer__status-tabs--inline">
-          <button
-            v-for="tab in statusTabs"
-            :key="tab.key"
-            :class="[
-              'drawer__status-tab',
-              {
-                'drawer__status-tab--active':
-                  tab.key === 'all'
-                    ? inboxStore.lifecycleFilter === 'all'
-                    : inboxStore.lifecycleFilter === tab.key,
-              },
-            ]"
-            @click="setLifecycleFilter(tab.key)"
-          >
-            {{ tab.label }}
-          </button>
-        </div>
-        <button
-          type="button"
-          class="drawer__preset-btn"
-          title="Nur aktive kritische Alerts"
-          @click="applyActiveCriticalPreset"
-        >
-          Kritisch · aktiv
-        </button>
-      </div>
+        <p class="drawer__hint">
+          Zentrale Inbox für Alarme und Hinweise. Status <strong>Aktiv</strong> bedeutet: noch zu bearbeiten.
+        </p>
 
-      <div class="drawer__actions-row">
-          <button
-            class="drawer__action-btn"
-            title="Alle aktiven Alerts erledigen"
-            :disabled="alertStore.unresolvedCount === 0 || isResolvingAll"
-            @click="handleResolveAll"
-          >
-            <CheckCheck class="drawer__action-icon" />
-            <span class="drawer__action-label">
-              {{ isResolvingAll ? 'Erledige...' : 'Alle erledigen' }}
-            </span>
-          </button>
-          <button
-            class="drawer__action-btn"
-            title="Einstellungen"
-            @click="inboxStore.openPreferences()"
-          >
-            <Settings class="drawer__action-icon" />
-          </button>
+        <div class="drawer__primary-toolbar">
+          <div class="drawer__status-tabs drawer__status-tabs--inline">
+            <button
+              v-for="tab in statusTabs"
+              :key="tab.key"
+              :class="[
+                'drawer__status-tab',
+                {
+                  'drawer__status-tab--active':
+                    tab.key === 'all'
+                      ? inboxStore.lifecycleFilter === 'all'
+                      : inboxStore.lifecycleFilter === tab.key,
+                },
+              ]"
+              @click="setLifecycleFilter(tab.key)"
+            >
+              {{ tab.label }}
+            </button>
+          </div>
+          <div class="drawer__actions-row drawer__actions-row--toolbar">
+            <button
+              class="drawer__action-btn"
+              title="Alle aktiven Alerts erledigen"
+              :disabled="alertStore.unresolvedCount === 0 || isResolvingAll"
+              @click="handleResolveAll"
+            >
+              <CheckCheck class="drawer__action-icon" />
+              <span class="drawer__action-label">
+                {{ isResolvingAll ? 'Erledige...' : 'Alle erledigen' }}
+              </span>
+            </button>
+            <button
+              class="drawer__action-btn"
+              title="Einstellungen"
+              @click="inboxStore.openPreferences()"
+            >
+              <Settings class="drawer__action-icon" />
+            </button>
+          </div>
         </div>
-      </div>
 
-      <!-- Advanced: source chips (collapsed by default) -->
-      <div class="drawer__advanced">
-        <button
-          type="button"
-          class="drawer__advanced-toggle"
-          @click="advancedSourcesOpen = !advancedSourcesOpen"
-        >
-          <Filter class="drawer__advanced-icon" />
-          <span>Quelle filtern</span>
-          <component
-            :is="advancedSourcesOpen ? ChevronUp : ChevronDown"
-            class="drawer__advanced-chevron"
-          />
-        </button>
-        <div v-show="advancedSourcesOpen" class="drawer__source-chips">
-          <button
-            v-for="chip in sourceChips"
-            :key="chip.value ?? 'all'"
-            :class="[
-              'drawer__source-chip',
-              { 'drawer__source-chip--active': inboxStore.sourceFilter === chip.value },
-            ]"
-            @click="inboxStore.setSourceFilter(chip.value)"
-          >
-            {{ chip.label }}
-          </button>
+        <div class="drawer__severity-row">
+          <span class="drawer__row-label">Schwere</span>
+          <div class="drawer__tabs drawer__tabs--compact">
+            <button
+              v-for="chip in severityChips"
+              :key="chip.key"
+              :class="[
+                'drawer__tab',
+                { 'drawer__tab--active': isSeverityChipActive(chip.key) },
+              ]"
+              @click="selectSeverityChip(chip.key)"
+            >
+              {{ chip.label }}
+            </button>
+          </div>
         </div>
+
+        <div class="drawer__source-row">
+          <span class="drawer__row-label">Quelle</span>
+          <div class="drawer__source-chips drawer__source-chips--inline">
+            <button
+              v-for="chip in sourceChips"
+              :key="chip.value ?? 'all'"
+              :class="[
+                'drawer__source-chip',
+                { 'drawer__source-chip--active': inboxStore.sourceFilter === chip.value },
+              ]"
+              @click="inboxStore.setSourceFilter(chip.value)"
+            >
+              {{ chip.label }}
+            </button>
+          </div>
+        </div>
+
+        <label class="drawer__suppressed">
+          <input
+            v-model="showSuppressed"
+            type="checkbox"
+            class="drawer__suppressed-input"
+          >
+          <span>Unterdrückte Alerts anzeigen (Audit)</span>
+        </label>
       </div>
 
       <!-- Notification List -->
@@ -254,7 +251,7 @@ watch(
           <span class="drawer__empty-icon">🔔</span>
           <span class="drawer__empty-text">Keine Benachrichtigungen</span>
           <span class="drawer__empty-sub">
-            {{ inboxStore.activeFilter !== 'all' || inboxStore.sourceFilter || inboxStore.lifecycleFilter !== 'all'
+            {{ inboxStore.activeFilter !== 'all' || inboxStore.sourceFilter || inboxStore.lifecycleFilter !== 'all' || inboxStore.showSuppressed
               ? 'Kein Ergebnis für diesen Filter'
               : 'Hier erscheinen zukünftige Alarme und Ereignisse' }}
           </span>
@@ -306,13 +303,25 @@ watch(
               class="drawer__email-toggle-chevron"
             />
           </button>
-          <RouterLink
-            to="/email"
-            class="drawer__email-all-link"
-            @click="inboxStore.isDrawerOpen = false"
-          >
-            Alle anzeigen
-          </RouterLink>
+          <div class="drawer__email-links">
+            <RouterLink
+              :to="{
+                path: '/system-monitor',
+                query: { tab: 'events', level: 'kritisch,fehler', source: 'alerts' },
+              }"
+              class="drawer__email-all-link"
+              @click="inboxStore.isDrawerOpen = false"
+            >
+              Alle Ereignisse
+            </RouterLink>
+            <RouterLink
+              to="/email"
+              class="drawer__email-secondary-link"
+              @click="inboxStore.isDrawerOpen = false"
+            >
+              E-Mail-Postfach
+            </RouterLink>
+          </div>
         </div>
 
         <Transition name="expand">
@@ -358,11 +367,93 @@ watch(
   margin-bottom: var(--space-3);
 }
 
+.drawer__hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
 .drawer__primary-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  justify-content: space-between;
+  width: 100%;
+}
+
+.drawer__actions-row--toolbar {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.drawer__severity-row,
+.drawer__source-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.drawer__row-label {
+  min-width: 3.25rem;
+  font-size: var(--text-xxs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.drawer__tabs--compact .drawer__tab {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xxs);
+}
+
+.drawer__source-chips--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: 0;
+  margin: 0;
+  border: none;
+}
+
+.drawer__suppressed {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.drawer__suppressed-input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--color-iridescent-2);
+  cursor: pointer;
+}
+
+.drawer__email-links {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.drawer__email-secondary-link {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.drawer__email-secondary-link:hover {
+  color: var(--color-text-secondary);
+  text-decoration: underline;
 }
 
 .drawer__status-tabs--inline {
@@ -376,67 +467,11 @@ watch(
   min-width: 0;
 }
 
-.drawer__preset-btn {
-  flex-shrink: 0;
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--text-xxs);
-  font-weight: 600;
-  color: var(--color-iridescent-2);
-  background: rgba(129, 140, 248, 0.08);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.drawer__preset-btn:hover {
-  background: rgba(129, 140, 248, 0.14);
-  border-color: var(--glass-border-hover);
-}
-
 .drawer__actions-row {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-1);
-}
-
-.drawer__advanced {
-  margin-bottom: var(--space-3);
-  border-bottom: 1px solid var(--glass-border);
-  padding-bottom: var(--space-3);
-}
-
-.drawer__advanced-toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-1) 0;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  text-align: left;
-}
-
-.drawer__advanced-toggle:hover {
-  color: var(--color-text-primary);
-}
-
-.drawer__advanced-icon {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-
-.drawer__advanced-chevron {
-  width: 12px;
-  height: 12px;
-  margin-left: auto;
-  color: var(--color-text-muted);
 }
 
 /* Filter Tabs */

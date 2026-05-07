@@ -214,6 +214,61 @@ async def test_get_notifications_filter_status(
             assert item["status"] == "acknowledged"
 
 
+# =============================================================================
+# Test 2b: GET /v1/notifications?show_suppressed (AUT-269)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_notifications_show_suppressed_toggle(
+    operator_headers,
+    db_session: AsyncSession,
+    operator_user: User,
+):
+    """Suppressed-channel rows are hidden by default and visible with show_suppressed=true."""
+    visible = Notification(
+        user_id=operator_user.id,
+        title="Normal",
+        body="",
+        channel="websocket",
+        severity="warning",
+        category="system",
+        source="manual",
+        status="active",
+    )
+    suppressed_row = Notification(
+        user_id=operator_user.id,
+        title="Suppressed audit",
+        body="",
+        channel="suppressed",
+        severity="info",
+        category="data_quality",
+        source="sensor_threshold",
+        status="active",
+    )
+    db_session.add_all([visible, suppressed_row])
+    await db_session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        hidden_resp = await client.get(
+            "/api/v1/notifications",
+            headers=operator_headers,
+            params={"page_size": 50},
+        )
+        shown_resp = await client.get(
+            "/api/v1/notifications",
+            headers=operator_headers,
+            params={"show_suppressed": "true", "page_size": 50},
+        )
+    assert hidden_resp.status_code == 200
+    assert shown_resp.status_code == 200
+    hidden_ids = {item["id"] for item in hidden_resp.json()["data"]}
+    shown_ids = {item["id"] for item in shown_resp.json()["data"]}
+    assert str(visible.id) in hidden_ids
+    assert str(suppressed_row.id) not in hidden_ids
+    assert str(suppressed_row.id) in shown_ids
+
+
 @pytest.mark.asyncio
 async def test_get_notifications_filter_source_bucket_system(
     operator_headers,

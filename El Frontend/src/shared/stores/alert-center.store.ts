@@ -28,8 +28,8 @@ import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('AlertCenterStore')
 
-/** Polling interval for alert stats (30s) */
-const STATS_POLL_INTERVAL_MS = 30_000
+/** Polling interval for alert stats (10s — keeps TopBar counts close to inbox without heavy load) */
+const STATS_POLL_INTERVAL_MS = 10_000
 const REALTIME_STATS_REFRESH_DEBOUNCE_MS = 600
 
 export const useAlertCenterStore = defineStore('alert-center', () => {

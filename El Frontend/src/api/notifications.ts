@@ -71,6 +71,8 @@ export interface NotificationListFilters {
   source_bucket?: 'system'
   status?: AlertStatus
   is_read?: boolean
+  /** When true, list includes ISA-18.2 audit rows with channel=suppressed */
+  show_suppressed?: boolean
   page?: number
   page_size?: number
 }
