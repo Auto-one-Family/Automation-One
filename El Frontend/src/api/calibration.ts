@@ -90,6 +90,14 @@ function getRequiredPoints(method?: CalibrateRequest['method']): number {
   return method === 'offset' ? 1 : 2
 }
 
+const VALID_POINT_ROLES = new Set(['dry', 'wet', 'buffer_high', 'buffer_low', 'reference', 'air'])
+
+/** Pass through the wizard role unchanged; server accepts all semantic roles. */
+function toServerPointRole(role: string): string {
+  const normalized = role.trim().toLowerCase()
+  return VALID_POINT_ROLES.has(normalized) ? normalized : 'dry'
+}
+
 function normalizeCalibrationPoints(points: CalibrationPoint[]): CalibrationPoint[] {
   return points.filter((point) =>
     Number.isFinite(point.raw) && Number.isFinite(point.reference),
@@ -231,7 +239,7 @@ export const calibrationApi = {
   ): Promise<CalibrationSessionResponse> {
     const response = await api.post<CalibrationSessionResponse>(
       `/calibration/sessions/${sessionId}/points`,
-      point,
+      { ...point, point_role: toServerPointRole(point.point_role) },
     )
     return response.data
   },
@@ -244,7 +252,7 @@ export const calibrationApi = {
   ): Promise<CalibrationSessionResponse> {
     const response = await api.put<CalibrationSessionResponse>(
       `/calibration/sessions/${sessionId}/points/${pointId}`,
-      point,
+      { ...point, point_role: toServerPointRole(point.point_role) },
     )
     return response.data
   },

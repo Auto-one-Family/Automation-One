@@ -84,6 +84,44 @@ describe('calibrationApi.calibrate (JWT-Pfad)', () => {
     expect(startBody.sensor_type).toBe('moisture')
   })
 
+  it('leitet buffer_high und buffer_low unveraendert an den Server weiter', async () => {
+    const phSession = baseSession({
+      sensor_type: 'ph',
+      method: 'ph_2point',
+      points_collected: 1,
+      calibration_points: {
+        points: [{ id: 'p1', point_role: 'buffer_high', raw: 512, reference: 7.01 }],
+      },
+    })
+
+    post
+      .mockResolvedValueOnce({ data: { ...phSession, points_collected: 1 } })
+
+    const { calibrationApi } = await import('@/api/calibration')
+
+    await calibrationApi.addPoint('sess-ph-1', {
+      raw_value: 512,
+      reference_value: 7.01,
+      point_role: 'buffer_high',
+    })
+
+    const addBody = post.mock.calls[0][1] as { point_role?: string }
+    expect(addBody.point_role).toBe('buffer_high')
+
+    post.mockReset()
+
+    post.mockResolvedValueOnce({ data: { ...phSession, points_collected: 2 } })
+
+    await calibrationApi.addPoint('sess-ph-1', {
+      raw_value: 318,
+      reference_value: 4.01,
+      point_role: 'buffer_low',
+    })
+
+    const addBody2 = post.mock.calls[0][1] as { point_role?: string }
+    expect(addBody2.point_role).toBe('buffer_low')
+  })
+
   it('mappt soil_moisture auf moisture und nutzt moisture_2point', async () => {
     post
       .mockResolvedValueOnce({ data: baseSession({ points_collected: 0 }) })

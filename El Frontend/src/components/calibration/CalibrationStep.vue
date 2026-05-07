@@ -133,7 +133,7 @@ onUnmounted(() => {
 
     <!-- Live raw value -->
     <div class="calibration-step__reading">
-      <div class="calibration-step__reading-label">Aktueller Rohwert (ADC)</div>
+      <div class="calibration-step__reading-label">Aktueller Rohwert (Sensor)</div>
       <div class="calibration-step__reading-value" :class="{ 'calibration-step__reading-value--empty': rawValue === null }">
         {{ rawValue !== null ? rawValue.toFixed(1) : '—' }}
       </div>

@@ -577,8 +577,19 @@ defineExpose({
             <div class="calibration-wizard__result-label">Abweichung</div>
             <div class="calibration-wizard__result-value">{{ Number(calibrationResult.calibration.slope_deviation_pct).toFixed(2) }}%</div>
             <div class="calibration-wizard__result-hint">
-              {{ Number(calibrationResult.calibration.slope_deviation_pct) < 5 ? 'Ausgezeichnet' : Number(calibrationResult.calibration.slope_deviation_pct) < 10 ? 'Gut' : 'Akzeptabel' }}
+              {{ Number(calibrationResult.calibration.slope_deviation_pct) < 5 ? 'Ausgezeichnet' : Number(calibrationResult.calibration.slope_deviation_pct) < 15 ? 'Gut' : 'Abweichend (Signalaufbereitung)' }}
             </div>
+          </div>
+        </div>
+
+        <!-- Validation warnings from signal conditioning / non-Nernst sensors -->
+        <div
+          v-if="Array.isArray(calibrationResult.calibration.validation_warnings) && (calibrationResult.calibration.validation_warnings as string[]).length > 0"
+          class="calibration-wizard__validation-warnings"
+        >
+          <div v-for="(warning, i) in (calibrationResult.calibration.validation_warnings as string[])" :key="i" class="calibration-wizard__validation-warning">
+            <AlertCircle :size="13" class="calibration-wizard__warning-icon" />
+            <span>{{ warning }}</span>
           </div>
         </div>
       </template>
@@ -1113,6 +1124,31 @@ defineExpose({
 .calibration-wizard__result-hint {
   font-size: 0.7rem;
   color: var(--color-text-secondary);
+}
+
+.calibration-wizard__validation-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+}
+
+.calibration-wizard__validation-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--color-warning);
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 0.375rem 0.625rem;
+  line-height: 1.4;
+}
+
+.calibration-wizard__warning-icon {
+  flex-shrink: 0;
+  margin-top: 0.125rem;
 }
 
 .calibration-wizard__session-info {

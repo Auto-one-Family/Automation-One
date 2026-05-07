@@ -47,7 +47,7 @@ class AddPointRequest(BaseModel):
 
     raw_value: float = Field(..., description="Raw ADC/sensor value")
     reference_value: float = Field(..., description="Known reference value")
-    point_role: str = Field(..., description="Calibration point role: dry|wet")
+    point_role: str = Field(..., description="Calibration point role: dry|wet|buffer_high|buffer_low|reference|air")
     overwrite: bool = Field(default=False, description="Overwrite point with same role if true")
     quality: str = Field(default="good", max_length=20)
     intent_id: Optional[str] = Field(default=None, max_length=64)
@@ -65,8 +65,8 @@ class AddPointRequest(BaseModel):
     @classmethod
     def _validate_point_role(cls, value: str) -> str:
         normalized = value.strip().lower()
-        if normalized not in {"dry", "wet"}:
-            raise ValueError("must be one of: dry, wet")
+        if normalized not in {"dry", "wet", "buffer_high", "buffer_low", "reference", "air"}:
+            raise ValueError("must be one of: dry, wet, buffer_high, buffer_low, reference, air")
         return normalized
 
 
@@ -75,7 +75,7 @@ class UpdatePointRequest(BaseModel):
 
     raw_value: float = Field(..., description="Raw ADC/sensor value")
     reference_value: float = Field(..., description="Known reference value")
-    point_role: str = Field(..., description="Calibration point role: dry|wet")
+    point_role: str = Field(..., description="Calibration point role: dry|wet|buffer_high|buffer_low|reference|air")
     quality: str = Field(default="good", max_length=20)
     intent_id: Optional[str] = Field(default=None, max_length=64)
     measured_at: Optional[str] = Field(default=None, max_length=64)
@@ -92,8 +92,8 @@ class UpdatePointRequest(BaseModel):
     @classmethod
     def _validate_point_role(cls, value: str) -> str:
         normalized = value.strip().lower()
-        if normalized not in {"dry", "wet"}:
-            raise ValueError("must be one of: dry, wet")
+        if normalized not in {"dry", "wet", "buffer_high", "buffer_low", "reference", "air"}:
+            raise ValueError("must be one of: dry, wet, buffer_high, buffer_low, reference, air")
         return normalized
 
 
@@ -434,7 +434,6 @@ def _status_from_calibration_error(error_code: str) -> int:
     }:
         return status.HTTP_409_CONFLICT
     if error_code in {
-        "COMPUTE_FAILED",
         "SET_RESULT_FAILED",
         "STATUS_UPDATE_FAILED",
         "ADD_POINT_FAILED",
@@ -442,7 +441,7 @@ def _status_from_calibration_error(error_code: str) -> int:
         "POINT_DELETE_FAILED",
     }:
         return status.HTTP_500_INTERNAL_SERVER_ERROR
-    if error_code == "VALIDATION_ERROR":
+    if error_code in {"COMPUTE_FAILED", "VALIDATION_ERROR"}:
         return status.HTTP_422_UNPROCESSABLE_ENTITY
     return status.HTTP_400_BAD_REQUEST
 

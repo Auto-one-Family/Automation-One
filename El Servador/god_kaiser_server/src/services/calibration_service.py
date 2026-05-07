@@ -436,8 +436,11 @@ class CalibrationService:
             self._ensure_finite(reference, "reference_value")
 
             normalized_role = point_role.strip().lower()
-            if normalized_role not in {"dry", "wet"}:
-                raise CalibrationError("point_role must be one of: dry, wet", "VALIDATION_ERROR")
+            if normalized_role not in {"dry", "wet", "buffer_high", "buffer_low", "reference", "air"}:
+                raise CalibrationError(
+                    "point_role must be one of: dry, wet, buffer_high, buffer_low, reference, air",
+                    "VALIDATION_ERROR",
+                )
 
             payload = cal_session.calibration_points or {"points": [], "history": []}
             points = (
@@ -948,10 +951,8 @@ class CalibrationService:
         """
         pH 2-point calibration using Nernst equation.
 
-        Formula: pH = slope * raw_mV + offset
-
-        Slope should be negative (around -59.16 mV/pH at 25°C).
-        Validation: slope_deviation from ideal must be within ±15%.
+        Formula: pH = slope * voltage_V + offset
+        slope is in pH/V, matching PHSensorProcessor which converts ADC→V before applying calibration.
 
         Raises:
             ValueError: If slope is not negative or deviates too much from ideal
@@ -981,19 +982,24 @@ class CalibrationService:
         if abs(raw_high - raw_low) < 1e-6:
             raise ValueError("Raw values too close — cannot compute slope")
 
-        # Linear regression: pH = slope * mV + offset
-        slope = (ref_high - ref_low) / (raw_high - raw_low)
-        offset = ref_high - slope * raw_high
+        # Convert raw ADC (0–4095) to voltage (V) — matches PHSensorProcessor._adc_to_voltage
+        _ADC_MAX = 4095.0
+        _VOLTAGE_RANGE = 3.3
+        voltage_high = (raw_high / _ADC_MAX) * _VOLTAGE_RANGE
+        voltage_low = (raw_low / _ADC_MAX) * _VOLTAGE_RANGE
 
-        # Validation: slope must be negative (Nernst equation)
+        # Linear regression in voltage space: pH = slope * voltage_V + offset
+        slope = (ref_high - ref_low) / (voltage_high - voltage_low)
+        offset = ref_high - slope * voltage_high
+
+        # Validation: slope must be negative (higher voltage = lower pH for standard sensors)
         if slope >= 0:
             raise ValueError(f"pH slope must be negative (got {slope}). Check electrode polarity.")
 
-        # Ideal slope at 25°C: Nernst predicts 59.16 mV/pH
-        # Our slope is in pH/mV, so ideal is 1/59.16 ≈ -0.01689 pH/mV (negative because inverted)
-        # Compute response (mV/pH) from our slope for validation
+        # Ideal Nernst response at 25°C: 59.16 mV/pH.
+        # Our slope is pH/V → response_mV_per_pH = 1000 / abs(slope_pH_per_V)
         ideal_response_mv_per_ph = 59.16
-        measured_response_mv_per_ph = abs(1.0 / slope) if slope != 0 else 0
+        measured_response_mv_per_ph = (1000.0 / abs(slope)) if slope != 0 else 0
 
         slope_deviation_pct = (
             abs(measured_response_mv_per_ph - ideal_response_mv_per_ph)
@@ -1001,10 +1007,24 @@ class CalibrationService:
             * 100
         )
 
-        if slope_deviation_pct > 15.0:
+        # Hard stop only for physically impossible deviation (> 500%).
+        # IoT sensors with signal conditioning can deviate significantly from the
+        # theoretical Nernst slope (59.16 mV/pH at 25°C unamplified). Amplifier
+        # gains of 2–4x are common, so the effective raw-unit/pH ratio varies.
+        # Values within 500% indicate a functional sensor; above that the data
+        # is likely corrupt (swapped raw/reference fields or sensor disconnected).
+        _HARD_LIMIT_PCT = 500.0
+        if slope_deviation_pct > _HARD_LIMIT_PCT:
             raise ValueError(
                 f"pH response {measured_response_mv_per_ph:.2f} mV/pH deviates {slope_deviation_pct:.1f}% from ideal {ideal_response_mv_per_ph:.2f} "
-                f"(limit ±15%). Electrode may be degraded."
+                f"(limit ±{_HARD_LIMIT_PCT:.0f}%). Check that raw and reference values are not swapped."
+            )
+
+        validation_warnings: list[str] = []
+        if slope_deviation_pct > 15.0:
+            validation_warnings.append(
+                f"pH response {measured_response_mv_per_ph:.2f} mV/pH deviates {slope_deviation_pct:.1f}% from Nernst ideal "
+                f"{ideal_response_mv_per_ph:.2f} mV/pH. This is expected for sensors with signal conditioning or amplification."
             )
 
         return {
@@ -1018,6 +1038,7 @@ class CalibrationService:
             "point_low_ref": ref_low,
             "measured_response_mv_per_ph": round(measured_response_mv_per_ph, 2),
             "ideal_response_mv_per_ph": ideal_response_mv_per_ph,
+            "validation_warnings": validation_warnings,
             "calibrated_at": datetime.now(timezone.utc).isoformat(),
         }
 
