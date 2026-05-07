@@ -6,10 +6,10 @@
  * 48px header. Dashboard-specific controls appear only when DashboardView
  * is active (via dashboard store).
  *
- * Layout (Dashboard):
+ * Layout (Hardware):
  * LEFT:   [Hamburger] [Breadcrumb: Dashboard > Zone > Device]
  * CENTER: [StatusPills] [TypeSegment]
- * RIGHT:  [+Mock] [Pending] | [NOT-AUS] | [Dot] [User]
+ * RIGHT:  [+Mock] [Geräte (Pending Badge)] | [NOT-AUS] | [Dot] [User]
  *
  * Layout (Other pages):
  * LEFT:   [Hamburger] [PageTitle]
@@ -24,7 +24,7 @@ import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { useEspStore } from '@/stores/esp'
 import {
   LogOut, ChevronDown, Menu, Filter,
-  Plus, AlertTriangle,
+  Plus, AlertTriangle, Inbox,
 } from 'lucide-vue-next'
 import EmergencyStopButton from '@/components/safety/EmergencyStopButton.vue'
 import AlertStatusBar from '@/components/notifications/AlertStatusBar.vue'
@@ -160,11 +160,7 @@ async function handleLogout() {
 
     <!-- ═══ RIGHT: Actions + System ═══ -->
     <div class="header__right">
-      <!-- AUT-258: Redundanter "Geräte"-Button entfernt — kanonischer Eintrittspunkt
-           ist der Sub-Nav-Tab "Geräte" (ViewTabBar → /hardware). Das
-           PendingDevicesPanel wird innerhalb der HardwareView geöffnet. -->
-
-      <!-- Dashboard Actions (only on hardware routes) -->
+      <!-- Hardware Actions (only on /hardware route) -->
       <template v-if="dashStore.showControls">
         <button
           class="header__action-btn header__action-btn--create"
@@ -173,6 +169,19 @@ async function handleLogout() {
         >
           <Plus class="header__action-btn-icon" />
           <span class="header__action-btn-label">Mock</span>
+        </button>
+
+        <button
+          class="header__action-btn header__action-btn--pending"
+          :class="{ 'header__action-btn--pending-active': espStore.pendingCount > 0 }"
+          title="Ausstehende Geräte"
+          @click="dashStore.showPendingPanel = true"
+        >
+          <Inbox class="header__action-btn-icon" />
+          <span class="header__action-btn-label">Geräte</span>
+          <span v-if="espStore.pendingCount > 0" class="header__action-btn-badge">
+            {{ espStore.pendingCount }}
+          </span>
         </button>
       </template>
 
@@ -677,6 +686,54 @@ async function handleLogout() {
   border-color: rgba(52, 211, 153, 0.3);
 }
 
+/* Pending Devices */
+.header__action-btn--pending {
+  color: var(--color-iridescent-1);
+  background: rgba(96, 165, 250, 0.06);
+  border-color: rgba(96, 165, 250, 0.15);
+  position: relative;
+}
+
+.header__action-btn--pending:hover {
+  background: rgba(96, 165, 250, 0.12);
+  border-color: rgba(96, 165, 250, 0.3);
+}
+
+.header__action-btn--pending-active {
+  background: rgba(96, 165, 250, 0.1);
+  border-color: rgba(96, 165, 250, 0.28);
+  box-shadow: 0 0 8px rgba(96, 165, 250, 0.15);
+}
+
+.header__action-btn--pending-active:hover {
+  background: rgba(96, 165, 250, 0.16);
+  border-color: rgba(96, 165, 250, 0.45);
+  box-shadow: 0 0 14px rgba(96, 165, 250, 0.28);
+}
+
+/* Pending count badge */
+.header__action-btn-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--color-iridescent-1), var(--color-iridescent-2));
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 8px rgba(96, 165, 250, 0.5);
+  animation: badge-pulse 2s ease-in-out infinite;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
 /* ── Divider ── */
 .header__divider {
   width: 1px;
@@ -754,6 +811,11 @@ async function handleLogout() {
 @keyframes flapping-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
+}
+
+@keyframes badge-pulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(96, 165, 250, 0.5); }
+  50%       { box-shadow: 0 0 14px rgba(129, 140, 248, 0.75); }
 }
 
 /* Connection label removed — tooltip-only via :title attribute */
@@ -973,7 +1035,8 @@ async function handleLogout() {
 @media (prefers-reduced-motion: reduce) {
   .header__dot--connected,
   .header__dot--connecting,
-  .header__flapping-badge {
+  .header__flapping-badge,
+  .header__action-btn-badge {
     animation: none;
   }
 }
