@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple
 
-from sqlalchemy import String, and_, case, cast, desc, func, select, text, update
+from sqlalchemy import String, and_, case, cast, desc, func, not_, select, text, update
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import CompileError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +39,7 @@ class NotificationRepository(BaseRepository[Notification]):
         source_bucket: Optional[str] = None,
         status: Optional[str] = None,
         is_read: Optional[bool] = None,
+        show_suppressed: bool = False,
         skip: int = 0,
         limit: int = 50,
     ) -> Tuple[List[Notification], int]:
@@ -64,6 +65,8 @@ class NotificationRepository(BaseRepository[Notification]):
             conditions.append(Notification.status == status)
         if is_read is not None:
             conditions.append(Notification.is_read == is_read)
+        if not show_suppressed:
+            conditions.append(not_(Notification.channel == "suppressed"))
 
         where_clause = and_(*conditions)
 

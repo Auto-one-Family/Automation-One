@@ -6,14 +6,13 @@ Provides REST endpoints for querying ESP32 error events:
 - GET /summary - Get error statistics across all devices
 - GET /codes - Get all known error codes with descriptions
 
-Pattern: Follows sensors.py endpoint structure
+Pattern: Follows sensors.py endpoint structure. DB queries live in
+``services/error_service.py`` (AUT-224 A2: Service-Layer-Konsistenz).
 """
 
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import and_, desc, func, select
 
 from ...core.esp32_error_mapping import (
     ALL_ESP32_ERROR_MESSAGES,
@@ -25,7 +24,7 @@ from ...core.server_error_mapping import (
     get_server_error_info,
 )
 from ...core.logging_config import get_logger
-from ...db.models.audit_log import AuditEventType, AuditLog, AuditSeverity, AuditSourceType
+from ...db.models.audit_log import AuditLog
 from ...db.repositories import ESPRepository
 from ...schemas.common import PaginationMeta
 from ...schemas.error_schemas import (
@@ -37,6 +36,7 @@ from ...schemas.error_schemas import (
     ErrorSummaryResponse,
 )
 from ...services.ai_service import ErrorAnalysisRequest, ErrorAnalysisFinding, ai_service
+from ...services.error_service import ErrorService
 from ..deps import ActiveUser, DBSession
 
 logger = get_logger(__name__)
@@ -138,44 +138,15 @@ async def get_esp_errors(
             detail=f"ESP device not found: {esp_id}",
         )
 
-    # Build query conditions
-    start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
-    conditions = [
-        AuditLog.source_type == AuditSourceType.MQTT,
-        AuditLog.source_id == esp_id,
-        AuditLog.event_type == AuditEventType.MQTT_ERROR,
-        AuditLog.created_at >= start_time,
-    ]
-
-    if severity:
-        conditions.append(AuditLog.severity == severity.lower())
-
-    # Query total count
-    count_stmt = select(func.count(AuditLog.id)).where(and_(*conditions))
-    count_result = await session.execute(count_stmt)
-    total_count = count_result.scalar_one()
-
-    # Query unacknowledged count (user_action_required == True)
-    # This is stored in the details JSON, so we need a raw SQL check
-    # For now, we'll count errors with severity >= warning
-    unack_conditions = conditions + [
-        AuditLog.severity.in_([AuditSeverity.ERROR, AuditSeverity.CRITICAL])
-    ]
-    unack_stmt = select(func.count(AuditLog.id)).where(and_(*unack_conditions))
-    unack_result = await session.execute(unack_stmt)
-    unacknowledged_count = unack_result.scalar_one()
-
-    # Query error logs with pagination
-    offset = (page - 1) * page_size
-    logs_stmt = (
-        select(AuditLog)
-        .where(and_(*conditions))
-        .order_by(desc(AuditLog.created_at))
-        .offset(offset)
-        .limit(page_size)
+    # Delegate query work to ErrorService (AUT-224 A2)
+    service = ErrorService(session)
+    logs, total_count, unacknowledged_count = await service.list_esp_errors(
+        esp_id=esp_id,
+        hours=hours,
+        severity=severity,
+        page=page,
+        page_size=page_size,
     )
-    logs_result = await session.execute(logs_stmt)
-    logs = list(logs_result.scalars().all())
 
     # Convert to response models
     error_responses = [_audit_log_to_error_response(log, esp_device.name) for log in logs]
@@ -233,67 +204,11 @@ async def get_error_summary(
     Returns:
         Error summary with statistics
     """
-    start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+    # Delegate aggregation work to ErrorService (AUT-224 A2)
+    service = ErrorService(session)
+    summary = await service.get_error_summary(hours=hours)
 
-    # Base conditions for MQTT errors
-    base_conditions = [
-        AuditLog.source_type == AuditSourceType.MQTT,
-        AuditLog.event_type == AuditEventType.MQTT_ERROR,
-        AuditLog.created_at >= start_time,
-    ]
-
-    # Total errors count
-    total_stmt = select(func.count(AuditLog.id)).where(and_(*base_conditions))
-    total_result = await session.execute(total_stmt)
-    total_errors = total_result.scalar_one()
-
-    # Errors by severity
-    severity_stmt = (
-        select(AuditLog.severity, func.count(AuditLog.id).label("count"))
-        .where(and_(*base_conditions))
-        .group_by(AuditLog.severity)
-    )
-    severity_result = await session.execute(severity_stmt)
-    errors_by_severity = {row.severity: row.count for row in severity_result.all() if row.severity}
-
-    # Errors by ESP device
-    esp_stmt = (
-        select(AuditLog.source_id, func.count(AuditLog.id).label("count"))
-        .where(and_(*base_conditions))
-        .group_by(AuditLog.source_id)
-    )
-    esp_result = await session.execute(esp_stmt)
-    errors_by_esp = {row.source_id: row.count for row in esp_result.all() if row.source_id}
-
-    # Get all error logs to count by category and error code
-    # (These are stored in the JSON details field)
-    logs_stmt = select(AuditLog).where(and_(*base_conditions))
-    logs_result = await session.execute(logs_stmt)
-    logs = list(logs_result.scalars().all())
-
-    # Count by category and error code
-    errors_by_category: dict[str, int] = {}
-    error_code_counts: dict[int, int] = {}
-    action_required_count = 0
-
-    for log in logs:
-        details = log.details or {}
-
-        # Count by category
-        category = details.get("category")
-        if category:
-            errors_by_category[category] = errors_by_category.get(category, 0) + 1
-
-        # Count by error code
-        error_code = details.get("error_code")
-        if error_code:
-            error_code_counts[error_code] = error_code_counts.get(error_code, 0) + 1
-
-        # Count action required
-        if details.get("user_action_required"):
-            action_required_count += 1
-
-    # Build top error codes list
+    error_code_counts: dict[int, int] = summary["error_code_counts"]
     sorted_codes = sorted(error_code_counts.items(), key=lambda x: x[1], reverse=True)[
         :10
     ]  # Top 10
@@ -313,12 +228,12 @@ async def get_error_summary(
     return ErrorSummaryResponse(
         success=True,
         period_hours=hours,
-        total_errors=total_errors,
-        errors_by_severity=errors_by_severity,
-        errors_by_category=errors_by_category,
-        errors_by_esp=errors_by_esp,
+        total_errors=summary["total_errors"],
+        errors_by_severity=summary["errors_by_severity"],
+        errors_by_category=summary["errors_by_category"],
+        errors_by_esp=summary["errors_by_esp"],
         top_error_codes=top_error_codes,
-        action_required_count=action_required_count,
+        action_required_count=summary["action_required_count"],
     )
 
 

@@ -735,7 +735,7 @@ class ZoneService:
             return False
 
         qos = constants.QOS_SENSOR_DATA  # QoS 1
-        success = self.publisher.client.publish(topic, payload_str, qos)
+        success = self.publisher.publish_raw(topic, payload_str, qos=qos)
 
         if success:
             logger.debug("Zone assignment published to %s", topic)

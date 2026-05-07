@@ -306,7 +306,13 @@ onMounted(() => {
             class="postfach__detail-dd"
           >
             <RouterLink
-              :to="{ path: '/system-monitor', query: { tab: 'events' } }"
+              :to="{
+                path: '/system-monitor',
+                query: {
+                  tab: 'events',
+                  correlation: selectedEntry.notification_id,
+                },
+              }"
               class="postfach__detail-link"
               @click="closeDetail"
             >

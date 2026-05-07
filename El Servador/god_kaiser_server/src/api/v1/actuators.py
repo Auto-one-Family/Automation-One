@@ -24,21 +24,23 @@ References:
 - El Trabajante/docs/Mqtt_Protocoll.md (Actuator topics)
 """
 
-import json
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.exc import SQLAlchemyError
 
 from ...schemas.alert_config import ActuatorAlertConfigUpdate, RuntimeStatsUpdate
 
 from ...core.exceptions import (
+    ActuatorCommandFailedException,
     ActuatorNotFoundError,
     DeviceNotApprovedError,
     DeviceOfflineError,
     ESPNotFoundError,
     GpioConflictError,
+    ServiceUnavailableError,
     ValidationException,
 )
 from ...core.logging_config import get_logger
@@ -53,7 +55,6 @@ from ...db.repositories import (
 from ...db.repositories.audit_log_repo import AuditLogRepository
 from ...db.repositories.command_contract_repo import CommandContractRepository
 from ...mqtt.publisher import Publisher
-from ...mqtt.topics import TopicBuilder
 from ...schemas import (
     ActuatorAggregation,
     ActuatorCommand,
@@ -209,8 +210,8 @@ def _schema_to_model_fields(
         fields["device_scope"] = request.device_scope
     if request.assigned_zones is not None:
         fields["assigned_zones"] = request.assigned_zones
-    if request.assigned_subzones is not None:
-        fields["assigned_subzones"] = request.assigned_subzones
+    # AUT-227: assigned_subzones is DEPRECATED (read-only API).
+    # Writes from clients are ignored; column is not modified.
 
     return fields
 
@@ -632,9 +633,20 @@ async def create_or_update_actuator(
         logger.warning(f"Subzone assignment skipped for {esp_id}/GPIO {gpio}: {e}")
         await db.rollback()
         subzone_error = str(e)
-    except Exception as e:
-        logger.warning(f"Subzone assignment failed for {esp_id}/GPIO {gpio}: {e}")
+    except SQLAlchemyError as e:
+        # AUT-228 (E2): Erwartete DB-Fehler -> WARNING, non-fatal
+        logger.warning(f"Subzone assignment DB error for {esp_id}/GPIO {gpio}: {e}")
         await db.rollback()
+        subzone_error = "subzone_db_error"
+    except Exception as e:
+        # AUT-228 (E2): Unerwartete Exceptions -> ERROR + Stacktrace,
+        # damit Drift in der Subzone-Logik nicht stillschweigend untergeht.
+        logger.error(
+            f"Unexpected subzone assignment failure for {esp_id}/GPIO {gpio}: {e}",
+            exc_info=True,
+        )
+        await db.rollback()
+        subzone_error = "subzone_unexpected_error"
         # Non-fatal: actuator was saved, subzone can be fixed manually
 
     config_correlation_id: Optional[str] = None
@@ -755,11 +767,22 @@ async def send_command(
     )
 
     if not cmd_result.success:
-        # Get last error from safety check
-        raise ValidationException(
-            "command",
-            "Command rejected by safety validation or MQTT publish failed",
-        )
+        # AUT-228 (E1): Disambiguate failure causes so HTTP layer maps to the
+        # correct status code. ValidationException collapsed all reasons into 400
+        # which made retries indistinguishable for clients.
+        reason = cmd_result.rejection_reason
+        message = cmd_result.rejection_message or "Actuator command failed"
+        if reason == "safety":
+            # Safety-Rejection -> 400 (retry sinnlos), code 5413
+            raise ValidationException("command", message)
+        if reason == "esp_not_found":
+            # ESP wurde zwischen Lookup und send_command entfernt -> 404, code 5001
+            raise ESPNotFoundError(esp_id)
+        if reason == "mqtt_publish":
+            # MQTT-Publish-Fehler -> 503 (retry moeglich), code 5410
+            raise ServiceUnavailableError("MQTT publisher", message)
+        # exception oder unbekannt -> 500 mit ActuatorCommandFailedException, code 5412
+        raise ActuatorCommandFailedException(esp_id, gpio, command.command, message)
 
     logger.info(
         f"Actuator command sent: {esp_id} GPIO {gpio} {command.command} "
@@ -1046,13 +1069,7 @@ async def emergency_stop(
         }
         if not broadcast_data.get("command"):
             raise ValueError("broadcast payload missing required 'command' field")
-        broadcast_payload = json.dumps(broadcast_data)
-        publisher.client.publish(
-            topic="kaiser/broadcast/emergency",
-            payload=broadcast_payload,
-            qos=1,
-            retain=False,
-        )
+        publisher.publish_emergency_broadcast(broadcast_data, qos=1)
         logger.info("MQTT broadcast emergency stop published on kaiser/broadcast/emergency")
     except Exception as mqtt_error:
         logger.warning(f"Failed to publish MQTT emergency broadcast: {mqtt_error}")
@@ -1139,13 +1156,12 @@ async def clear_emergency(
     else:
         devices = await esp_repo.get_all()
 
-    payload = json.dumps({"command": "clear_emergency", "reason": request.reason})
+    payload = {"command": "clear_emergency", "reason": request.reason}
     publish_failures = 0
 
     for device in devices:
         try:
-            topic = TopicBuilder.build_actuator_emergency_topic(device.device_id)
-            publisher.client.publish(topic, payload, qos=1)
+            publisher.publish_actuator_emergency(device.device_id, payload, qos=1)
             devices_cleared += 1
         except Exception as exc:
             logger.warning(f"Clear emergency MQTT publish failed for {device.device_id}: {exc}")

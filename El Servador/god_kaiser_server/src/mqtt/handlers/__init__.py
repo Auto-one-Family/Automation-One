@@ -7,7 +7,6 @@ from . import actuator_response_handler
 from . import calibration_response_handler
 from . import config_handler
 from . import diagnostics_handler
-from . import discovery_handler
 from . import emergency_ack_handler
 from . import error_handler
 from . import heartbeat_handler
@@ -29,7 +28,6 @@ __all__ = [
     "calibration_response_handler",
     "config_handler",
     "diagnostics_handler",
-    "discovery_handler",
     "emergency_ack_handler",
     "error_handler",
     "heartbeat_handler",

@@ -283,10 +283,11 @@ async def test_mock_esp_skips_bridge():
     mock_client.publish.return_value = True
     bridge = MQTTCommandBridge(mock_client)
 
-    # Mock publisher for fire-and-forget path
+    # Mock publisher for fire-and-forget path (post-AUT-225: zone_service uses publish_raw)
     mock_publisher = MagicMock()
     mock_publisher.client = MagicMock()
     mock_publisher.client.publish.return_value = True
+    mock_publisher.publish_raw = MagicMock(return_value=True)
 
     # Use a MOCK device ID
     repo, device = _make_mock_esp_repo("ESP_MOCK_001")
@@ -307,8 +308,8 @@ async def test_mock_esp_skips_bridge():
         )
 
     assert result.mqtt_sent is True
-    # Should use fire-and-forget via publisher, not bridge
-    assert mock_publisher.client.publish.call_count == 1
+    # Should use fire-and-forget via publisher.publish_raw (AUT-225), not bridge
+    assert mock_publisher.publish_raw.call_count == 1
     # Bridge mock_client should NOT have been called (skipped for mock ESPs)
     assert mock_client.publish.call_count == 0
 
@@ -435,6 +436,7 @@ async def test_mock_esp_ack_received_is_none():
     mock_publisher = MagicMock()
     mock_publisher.client = MagicMock()
     mock_publisher.client.publish.return_value = True
+    mock_publisher.publish_raw = MagicMock(return_value=True)
 
     repo, device = _make_mock_esp_repo("ESP_MOCK_002")
     mock_client = MagicMock()

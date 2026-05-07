@@ -1037,6 +1037,36 @@ class TopicBuilder:
         return f"kaiser/{kaiser_id}/esp/{esp_id}/actuator/emergency"
 
     @staticmethod
+    def build_onewire_scan_result_topic(esp_id: str, kaiser_id: str = "god") -> str:
+        """
+        Build OneWire scan-result topic (ESP -> Server).
+
+        Used by ESPs to publish OneWire bus scan results (DS18B20 ROM addresses)
+        in response to a ``onewire/scan`` system command.
+
+        Args:
+            esp_id: ESP device ID
+            kaiser_id: Kaiser ID (default: "god")
+
+        Returns:
+            kaiser/{kaiser_id}/esp/{esp_id}/onewire/scan_result
+        """
+        return f"kaiser/{kaiser_id}/esp/{esp_id}/onewire/scan_result"
+
+    @staticmethod
+    def build_emergency_broadcast_topic() -> str:
+        """
+        Build emergency broadcast topic (Server -> ALL ESPs).
+
+        Safety-critical broadcast. ESPs subscribe to this topic to receive
+        global emergency stop commands.
+
+        Returns:
+            kaiser/broadcast/emergency
+        """
+        return "kaiser/broadcast/emergency"
+
+    @staticmethod
     def build_emergency_ack_topic(esp_id: str, kaiser_id: str = "god") -> str:
         """
         ESP → Server: application-level emergency execution ACK (AUT-118).

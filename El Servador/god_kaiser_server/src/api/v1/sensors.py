@@ -26,7 +26,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.exc import SQLAlchemyError
 
 from ...core.exceptions import (
     ConfigurationException,
@@ -35,6 +36,7 @@ from ...core.exceptions import (
     ESPNotFoundError,
     GatewayTimeoutError,
     GpioConflictError,
+    SensorConfigInvalidUuidError,
     SensorNotFoundException,
     SensorProcessingException,
     ServiceUnavailableError,
@@ -59,6 +61,11 @@ from ...schemas import (
     SensorStats,
     SensorStatsResponse,
     TriggerMeasurementResponse,
+)
+from ...schemas.alert_config import (
+    SensorAlertConfigViewResponse,
+    SensorRuntimeUpdateResponse,
+    SensorRuntimeViewResponse,
 )
 from ...schemas.common import PaginationMeta
 from ...sensors.sensor_type_registry import (
@@ -85,6 +92,7 @@ from ...services.sensor_service import SensorService
 from ...services.gpio_validation_service import GpioValidationService
 from ...services.subzone_service import SubzoneService
 from ...services.calibration_payloads import canonicalize_calibration_data
+from ...mqtt.topics import TopicBuilder
 from ...utils.subzone_helpers import normalize_subzone_id
 
 logger = get_logger(__name__)
@@ -253,9 +261,10 @@ def _schema_to_model_fields(request: SensorConfigCreate) -> dict:
         # =========================================================================
         "device_scope": request.device_scope if request.device_scope is not None else "zone_local",
         "assigned_zones": request.assigned_zones if request.assigned_zones is not None else [],
-        "assigned_subzones": (
-            request.assigned_subzones if request.assigned_subzones is not None else []
-        ),
+        # AUT-227: assigned_subzones is DEPRECATED (read-only API).
+        # Writes from clients are ignored; column persists as empty list for new rows.
+        # Reads continue via the response schema for backwards compatibility.
+        "assigned_subzones": [],
     }
 
 
@@ -341,37 +350,37 @@ async def list_sensors(
 
 @router.get(
     "/{sensor_id}/alert-config",
-    response_model=dict,
+    response_model=SensorAlertConfigViewResponse,
     summary="Get sensor alert configuration",
 )
 async def get_sensor_alert_config(
     sensor_id: uuid.UUID,
     session: DBSession,
     user: ActiveUser,
-):
+) -> SensorAlertConfigViewResponse:
     """Get the current alert configuration for a sensor."""
     sensor_repo = SensorRepository(session)
     sensor = await sensor_repo.get_by_id(sensor_id)
     if not sensor:
         raise SensorNotFoundException(str(sensor_id))
 
-    return {
-        "status": "ok",
-        "alert_config": sensor.alert_config or {},
-        "thresholds": sensor.thresholds or {},
-    }
+    return SensorAlertConfigViewResponse(
+        status="ok",
+        alert_config=sensor.alert_config or {},
+        thresholds=sensor.thresholds or {},
+    )
 
 
 @router.get(
     "/{sensor_id}/runtime",
-    response_model=dict,
+    response_model=SensorRuntimeViewResponse,
     summary="Get sensor runtime stats",
 )
 async def get_sensor_runtime(
     sensor_id: uuid.UUID,
     session: DBSession,
     user: ActiveUser,
-):
+) -> SensorRuntimeViewResponse:
     """Get runtime statistics for a sensor."""
     sensor_repo = SensorRepository(session)
     sensor = await sensor_repo.get_by_id(sensor_id)
@@ -386,8 +395,6 @@ async def get_sensor_runtime(
     installation_date = metadata.get("installation_date")
     if installation_date:
         try:
-            from datetime import timezone
-
             inst_dt = datetime.fromisoformat(installation_date)
             if inst_dt.tzinfo is None:
                 inst_dt = inst_dt.replace(tzinfo=timezone.utc)
@@ -413,16 +420,16 @@ async def get_sensor_runtime(
         except (ValueError, TypeError):
             pass
 
-    return {
-        "status": "ok",
-        "runtime_stats": runtime,
-        "computed_uptime_hours": uptime_hours,
-        "last_restart": runtime.get("last_restart"),
-        "expected_lifetime_hours": runtime.get("expected_lifetime_hours"),
-        "maintenance_log": runtime.get("maintenance_log", []),
-        "next_maintenance": next_maintenance,
-        "maintenance_overdue": maintenance_overdue,
-    }
+    return SensorRuntimeViewResponse(
+        status="ok",
+        runtime_stats=runtime,
+        computed_uptime_hours=uptime_hours,
+        last_restart=runtime.get("last_restart"),
+        expected_lifetime_hours=runtime.get("expected_lifetime_hours"),
+        maintenance_log=runtime.get("maintenance_log", []) or [],
+        next_maintenance=next_maintenance,
+        maintenance_overdue=maintenance_overdue,
+    )
 
 
 # =============================================================================
@@ -721,8 +728,7 @@ async def create_or_update_sensor(
                         existing_vt.device_scope = model_fields["device_scope"]
                     if request.assigned_zones is not None:
                         existing_vt.assigned_zones = model_fields["assigned_zones"]
-                    if request.assigned_subzones is not None:
-                        existing_vt.assigned_subzones = model_fields["assigned_subzones"]
+                    # AUT-227: assigned_subzones is read-only — writes from clients are ignored.
                     existing_vt.config_status = "pending"
                     existing_vt.config_error = None
                     existing_vt.config_error_detail = None
@@ -787,9 +793,22 @@ async def create_or_update_sensor(
             logger.warning(f"Subzone assignment skipped for {esp_id}/GPIO {gpio}: {e}")
             await db.rollback()
             subzone_error = str(e)
-        except Exception as e:
-            logger.warning(f"Subzone assignment failed for {esp_id}/GPIO {gpio}: {e}")
+        except SQLAlchemyError as e:
+            # AUT-228 (E2): Erwartete DB-Fehler -> WARNING, non-fatal
+            logger.warning(
+                f"Subzone assignment DB error for {esp_id}/GPIO {gpio}: {e}"
+            )
             await db.rollback()
+            subzone_error = "subzone_db_error"
+        except Exception as e:
+            # AUT-228 (E2): Unerwartete Exceptions -> ERROR + Stacktrace,
+            # damit Drift in der Subzone-Logik nicht stillschweigend untergeht.
+            logger.error(
+                f"Unexpected subzone assignment failure for {esp_id}/GPIO {gpio}: {e}",
+                exc_info=True,
+            )
+            await db.rollback()
+            subzone_error = "subzone_unexpected_error"
 
         subzone_repo = SubzoneRepository(db)
         subzone = await subzone_repo.get_subzone_by_gpio(esp_id, gpio)
@@ -949,8 +968,7 @@ async def create_or_update_sensor(
             existing.device_scope = model_fields["device_scope"]
         if request.assigned_zones is not None:
             existing.assigned_zones = model_fields["assigned_zones"]
-        if request.assigned_subzones is not None:
-            existing.assigned_subzones = model_fields["assigned_subzones"]
+        # AUT-227: assigned_subzones is read-only — writes from clients are ignored.
         # =========================================================================
         # ADDRESS FIELDS (R20-P1): Update if provided so re-addressing works
         # =========================================================================
@@ -1096,9 +1114,20 @@ async def create_or_update_sensor(
         logger.warning(f"Subzone assignment skipped for {esp_id}/GPIO {gpio}: {e}")
         await db.rollback()
         subzone_error = str(e)
-    except Exception as e:
-        logger.warning(f"Subzone assignment failed for {esp_id}/GPIO {gpio}: {e}")
+    except SQLAlchemyError as e:
+        # AUT-228 (E2): Erwartete DB-Fehler -> WARNING, non-fatal
+        logger.warning(f"Subzone assignment DB error for {esp_id}/GPIO {gpio}: {e}")
         await db.rollback()
+        subzone_error = "subzone_db_error"
+    except Exception as e:
+        # AUT-228 (E2): Unerwartete Exceptions -> ERROR + Stacktrace,
+        # damit Drift in der Subzone-Logik nicht stillschweigend untergeht.
+        logger.error(
+            f"Unexpected subzone assignment failure for {esp_id}/GPIO {gpio}: {e}",
+            exc_info=True,
+        )
+        await db.rollback()
+        subzone_error = "subzone_unexpected_error"
         # Non-fatal: sensor was saved, subzone can be fixed manually
 
     # Publish config to ESP32 via MQTT (using dependency-injected services)
@@ -1384,8 +1413,9 @@ async def query_sensor_data(
 
         try:
             resolved_config_id = _uuid.UUID(sensor_config_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid sensor_config_id UUID")
+        except ValueError as exc:
+            # AUT-228 (E3): Strukturierte Exception statt HTTPException -> numeric_code 5209
+            raise SensorConfigInvalidUuidError(sensor_config_id) from exc
 
     # Effective resolution (default = raw)
     effective_resolution = resolution or "raw"
@@ -1763,6 +1793,7 @@ async def scan_onewire_bus(
     esp_id: str,
     db: DBSession,
     current_user: OperatorUser,
+    publisher: MQTTPublisher,
     pin: Annotated[int, Query(ge=0, le=48, description="GPIO pin for OneWire bus")] = 4,
 ) -> OneWireScanResponse:
     """
@@ -1784,7 +1815,6 @@ async def scan_onewire_bus(
     import asyncio
     import time
 
-    from ...mqtt.publisher import Publisher
     from ...mqtt.client import MQTTClient
     from ...schemas.sensor import OneWireDevice, OneWireScanResponse
 
@@ -1867,13 +1897,12 @@ async def scan_onewire_bus(
             f"ESP device {esp_id} is {esp_device.status}, must be online for OneWire scan",
         )
 
-    # Step 2: Prepare MQTT command
-    publisher = Publisher()
+    # Step 2: Prepare MQTT command (publisher injected via Depends)
 
     # Command topic: kaiser/god/esp/{esp_id}/system/command
     # Payload: {"command": "onewire/scan", "pin": 4}
     # Response topic: kaiser/god/esp/{esp_id}/onewire/scan_result
-    response_topic = f"kaiser/god/esp/{esp_id}/onewire/scan_result"
+    response_topic = TopicBuilder.build_onewire_scan_result_topic(esp_id)
 
     # Step 3: Setup response listener with asyncio.Future
     # IMPORTANT: Capture event loop in async context BEFORE callback registration
@@ -2266,7 +2295,7 @@ async def _validate_onewire_config(
 
 @router.patch(
     "/{sensor_id}/alert-config",
-    response_model=dict,
+    response_model=SensorAlertConfigViewResponse,
     summary="Update sensor alert configuration",
 )
 async def update_sensor_alert_config(
@@ -2274,7 +2303,7 @@ async def update_sensor_alert_config(
     body: dict,
     session: DBSession,
     user: OperatorUser,
-):
+) -> SensorAlertConfigViewResponse:
     """
     Update per-sensor alert configuration (suppression, thresholds, severity).
 
@@ -2297,12 +2326,12 @@ async def update_sensor_alert_config(
     await session.commit()
 
     logger.info(f"Alert config updated: sensor {sensor_id}, config={existing}")
-    return {"status": "ok", "alert_config": existing}
+    return SensorAlertConfigViewResponse(status="ok", alert_config=existing)
 
 
 @router.patch(
     "/{sensor_id}/runtime",
-    response_model=dict,
+    response_model=SensorRuntimeUpdateResponse,
     summary="Update sensor runtime stats",
 )
 async def update_sensor_runtime(
@@ -2310,7 +2339,7 @@ async def update_sensor_runtime(
     body: dict,
     session: DBSession,
     user: OperatorUser,
-):
+) -> SensorRuntimeUpdateResponse:
     """Update runtime statistics for a sensor (expected_lifetime, maintenance_log)."""
     sensor_repo = SensorRepository(session)
     sensor = await sensor_repo.get_by_id(sensor_id)
@@ -2327,4 +2356,4 @@ async def update_sensor_runtime(
     sensor.runtime_stats = existing
     await session.commit()
 
-    return {"status": "ok", "runtime_stats": existing}
+    return SensorRuntimeUpdateResponse(status="ok", runtime_stats=existing)

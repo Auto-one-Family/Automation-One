@@ -42,6 +42,8 @@ from ...schemas import (
     RuleTestResponse,
     RuleToggleRequest,
     RuleToggleResponse,
+    TemplateDetailResponse,
+    TemplateListResponse,
 )
 from ...schemas.common import PaginationMeta
 from ...services.rule_health_service import RuleHealthService
@@ -753,14 +755,14 @@ async def get_execution_history(
 
 @router.get(
     "/templates",
-    response_model=dict,
+    response_model=TemplateListResponse,
     summary="List available rule templates",
     description="Get list of available rule templates for creation.",
 )
 async def list_templates(
     db: DBSession,
     current_user: ActiveUser,
-) -> dict:
+) -> TemplateListResponse:
     """
     List all available rule templates.
 
@@ -776,7 +778,7 @@ async def list_templates(
     loader = get_template_loader()
     template_ids = loader.list_templates()
 
-    templates = []
+    templates: list[dict] = []
     for template_id in template_ids:
         try:
             info = loader.get_template_info(template_id)
@@ -784,16 +786,16 @@ async def list_templates(
         except Exception as e:
             logger.warning(f"Failed to load template info for {template_id}: {e}")
 
-    return {
-        "success": True,
-        "templates": templates,
-        "total_count": len(templates),
-    }
+    return TemplateListResponse(
+        success=True,
+        templates=templates,
+        total_count=len(templates),
+    )
 
 
 @router.get(
     "/templates/{template_id}",
-    response_model=dict,
+    response_model=TemplateDetailResponse,
     responses={
         200: {"description": "Template info retrieved"},
         404: {"description": "Template not found"},
@@ -805,7 +807,7 @@ async def get_template(
     template_id: str,
     db: DBSession,
     current_user: ActiveUser,
-) -> dict:
+) -> TemplateDetailResponse:
     """
     Get template details and parameter schema.
 
@@ -822,7 +824,7 @@ async def get_template(
     loader = get_template_loader()
     try:
         info = loader.get_template_info(template_id)
-        return {"success": True, "template": info}
+        return TemplateDetailResponse(success=True, template=info)
     except TemplateLoadError:
         raise RuleNotFoundException(template_id)
 

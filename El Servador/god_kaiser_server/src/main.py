@@ -46,7 +46,6 @@ from .mqtt.handlers import (
     calibration_response_handler,
     config_handler,
     diagnostics_handler,
-    discovery_handler,
     emergency_ack_handler,
     error_handler,
     heartbeat_handler,
@@ -279,9 +278,6 @@ async def lifespan(app: FastAPI):
         _subscriber_instance.register_handler(
             "kaiser/+/esp/+/session/announce",
             heartbeat_handler.get_heartbeat_handler().handle_session_announce,
-        )
-        _subscriber_instance.register_handler(
-            "kaiser/+/discovery/esp32_nodes", discovery_handler.handle_discovery
         )
         _subscriber_instance.register_handler(
             "kaiser/+/esp/+/config_response", config_handler.handle_config_ack

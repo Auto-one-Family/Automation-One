@@ -81,7 +81,13 @@ from ...sensors.sensor_type_registry import (
     get_mock_default_raw_value,
     is_multi_value_sensor,
 )
-from ..deps import AdminUser, DBSession, SimulationSchedulerDep, get_simulation_scheduler
+from ..deps import (
+    AdminUser,
+    DBSession,
+    MQTTPublisher,
+    SimulationSchedulerDep,
+    get_simulation_scheduler,
+)
 
 logger = get_logger(__name__)
 
@@ -1751,8 +1757,9 @@ async def emergency_stop_via_scheduler(
     if handler:
         # Simulate emergency message
         import json
+        from ...mqtt.topics import TopicBuilder
 
-        topic = f"kaiser/god/esp/{esp_id}/actuator/emergency"
+        topic = TopicBuilder.build_actuator_emergency_topic(esp_id)
         payload = json.dumps(
             {"reason": "manual_api_trigger", "timestamp": int(__import__("time").time())}
         )
@@ -4272,6 +4279,7 @@ async def get_resilience_status(
 )
 async def get_resilience_metrics(
     current_user: AdminUser,
+    publisher: MQTTPublisher,
 ) -> Dict[str, Any]:
     """
     Get detailed metrics from all circuit breakers.
@@ -4283,13 +4291,11 @@ async def get_resilience_metrics(
     - State transition history
     """
     from ...core.resilience import ResilienceRegistry
-    from ...mqtt.publisher import Publisher
 
     registry = ResilienceRegistry.get_instance()
     breaker_metrics = registry.get_metrics()
 
-    # Get publisher metrics
-    publisher = Publisher()
+    # Get publisher metrics (publisher injected via Depends — see api/deps.py)
     publisher_metrics = publisher.get_metrics()
 
     return {

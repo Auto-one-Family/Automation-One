@@ -44,7 +44,6 @@ import ESPSettingsSheet from '@/components/esp/ESPSettingsSheet.vue'
 import ZoneSettingsSheet from '@/components/zones/ZoneSettingsSheet.vue'
 import SubzonePlantPanel from '@/components/zones/SubzonePlantPanel.vue'
 import ComponentSidebar from '@/components/dashboard/ComponentSidebar.vue'
-import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
 import LoadingState from '@/shared/design/primitives/BaseSkeleton.vue'
 // EmptyState replaced by custom inline hardware-empty block
 
@@ -793,14 +792,6 @@ function handleChangeZone(device: ESPDevice) {
   uiStore.openContextMenu(x, y, menuItems)
 }
 
-/** Block 3: Open ESP config from PendingDevicesPanel (Variante A → Variante B) */
-function handleOpenEspConfigFromPanel(device: ESPDevice) {
-  if (settingsCloseTimer) { clearTimeout(settingsCloseTimer); settingsCloseTimer = null }
-  dashStore.showPendingPanel = false
-  settingsDevice.value = device
-  isSettingsOpen.value = true
-}
-
 function handleSettingsClose() {
   endAnyDragIfActive()
   isSettingsOpen.value = false
@@ -1210,13 +1201,6 @@ function handleActuatorClickFromDetail(payload: { espId: string; gpio: number })
 
     <!-- Create Mock ESP Modal -->
     <CreateMockEspModal v-model="dashStore.showCreateMock" @created="onMockEspCreated" />
-
-    <!-- Pending Devices Panel (SlideOver) -->
-    <PendingDevicesPanel
-      v-model:is-open="dashStore.showPendingPanel"
-      @close="dashStore.showPendingPanel = false"
-      @open-esp-config="handleOpenEspConfigFromPanel"
-    />
 
     <!-- ESP Settings Sheet -->
     <ESPSettingsSheet

@@ -85,6 +85,7 @@ async def mock_mqtt_publisher():
     mock = MagicMock()
     mock.client = MagicMock()
     mock.client.publish = MagicMock(return_value=True)
+    mock.publish_raw = MagicMock(return_value=True)
     return mock
 
 
@@ -522,6 +523,7 @@ class TestSubzoneRemoval:
         ok_publisher = MagicMock()
         ok_publisher.client = MagicMock()
         ok_publisher.client.publish = MagicMock(return_value=True)
+        ok_publisher.publish_raw = MagicMock(return_value=True)
 
         esp_repo = ESPRepository(db_session)
         service_ok = SubzoneService(esp_repo=esp_repo, session=db_session, publisher=ok_publisher)
@@ -536,6 +538,7 @@ class TestSubzoneRemoval:
         fail_publisher = MagicMock()
         fail_publisher.client = MagicMock()
         fail_publisher.client.publish = MagicMock(return_value=False)
+        fail_publisher.publish_raw = MagicMock(return_value=False)
 
         service = SubzoneService(esp_repo=esp_repo, session=db_session, publisher=fail_publisher)
 

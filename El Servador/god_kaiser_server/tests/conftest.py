@@ -329,6 +329,9 @@ def mock_mqtt_publisher_for_subzone():
     mock_publisher = MagicMock()
     mock_publisher.client = MagicMock()
     mock_publisher.client.publish = MagicMock(return_value=MagicMock(rc=0))
+    mock_publisher.publish_raw = MagicMock(return_value=True)
+    mock_publisher.publish_emergency_broadcast = MagicMock(return_value=True)
+    mock_publisher.publish_actuator_emergency = MagicMock(return_value=True)
     return mock_publisher
 
 
@@ -401,9 +404,10 @@ async def override_mqtt_publisher(test_engine: AsyncEngine):
     mock_publisher.publish_system_command.return_value = True
     mock_publisher.publish_pi_enhanced_response.return_value = True
     mock_publisher._publish_with_retry.return_value = True
-    # SubzoneService uses publisher.client.publish() directly
+    # SubzoneService uses publisher.publish_raw() (post-AUT-225)
     mock_publisher.client = MagicMock()
     mock_publisher.client.publish.return_value = True
+    mock_publisher.publish_raw = MagicMock(return_value=True)
 
     def override_get_mqtt_publisher_func():
         return mock_publisher

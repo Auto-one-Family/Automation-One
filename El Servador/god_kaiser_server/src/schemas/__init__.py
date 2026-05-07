@@ -167,6 +167,8 @@ from .logic import (
     RuleToggleRequest,
     RuleToggleResponse,
     SensorCondition,
+    TemplateDetailResponse,
+    TemplateListResponse,
     TimeCondition,
 )
 
@@ -385,6 +387,8 @@ __all__ = [
     "RuleToggleRequest",
     "RuleToggleResponse",
     "SensorCondition",
+    "TemplateDetailResponse",
+    "TemplateListResponse",
     "TimeCondition",
     # Zone
     "ZoneAckPayload",
