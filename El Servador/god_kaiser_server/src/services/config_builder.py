@@ -884,15 +884,23 @@ class ConfigPayloadBuilder:
             break  # Take first matching local actuator action
 
         if actuator_gpio is None:
+            seen_esp_ids = [
+                str(a.get("esp_id", ""))
+                for a in actions
+                if isinstance(a, dict) and a.get("type") in ("actuator_command", "actuator")
+            ]
+            detail = (
+                f"no actuator action targets ESP '{esp_id}'"
+                f"; seen_esp_ids={seen_esp_ids}"
+                if seen_esp_ids
+                else f"no actuator action targets ESP '{esp_id}' (no matching action type or empty)"
+            )
             logger.warning(
-                "[CONFIG] Offline-rule skip: rule '%s' — no matching actuator action for esp %s",
+                "[CONFIG] Offline-rule skip: rule '%s' — %s",
                 rule.rule_name,
-                esp_id,
+                detail,
             )
-            _skip(
-                self.REASON_GPIO_NOT_IN_FRAME,
-                f"no actuator action targets ESP '{esp_id}' (cross-ESP or missing gpio)",
-            )
+            _skip(self.REASON_GPIO_NOT_IN_FRAME, detail)
             return None
 
         # Locate the first hysteresis condition that belongs to our ESP.
