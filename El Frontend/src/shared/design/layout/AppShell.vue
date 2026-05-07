@@ -7,14 +7,24 @@
  */
 
 import { ref, onMounted, onUnmounted } from 'vue'
-import { RouterView } from 'vue-router'
+import { RouterView, useRouter } from 'vue-router'
 import AppSidebar from './Sidebar.vue'
 import AppHeader from './TopBar.vue'
 import QuickActionBall from '@/components/quick-action/QuickActionBall.vue'
+import PendingDevicesPanel from '@/components/esp/PendingDevicesPanel.vue'
 import { useUiStore } from '@/shared/stores'
+import { useDashboardStore } from '@/shared/stores/dashboard.store'
 import { useKeyboardShortcuts } from '@/composables'
+import type { ESPDevice } from '@/api/esp'
 
 const uiStore = useUiStore()
+const dashStore = useDashboardStore()
+const router = useRouter()
+
+function handlePendingPanelOpenEspConfig(device: ESPDevice): void {
+  dashStore.showPendingPanel = false
+  void router.push({ name: 'hardware', query: { openSettings: device.device_id } })
+}
 const { register } = useKeyboardShortcuts()
 
 // Mobile sidebar state
@@ -98,6 +108,13 @@ onUnmounted(() => {
 
     <!-- Quick Action Ball (FAB) — global, bottom-right -->
     <QuickActionBall />
+
+    <!-- Geräte / Wartend — global (TopBar „N offen“), damit es auf allen Routen funktioniert -->
+    <PendingDevicesPanel
+      v-model:is-open="dashStore.showPendingPanel"
+      @close="dashStore.showPendingPanel = false"
+      @open-esp-config="handlePendingPanelOpenEspConfig"
+    />
   </div>
 </template>
 
