@@ -14,6 +14,21 @@ from ..models.dashboard import Dashboard
 from .base_repo import BaseRepository
 
 
+def _widget_references_esp(widget: dict, esp_id: str, prefix: str) -> bool:
+    config = widget.get("config") if isinstance(widget, dict) else {}
+    if not isinstance(config, dict):
+        return False
+    if config.get("espId") == esp_id:
+        return True
+    sensor_id = config.get("sensorId") or ""
+    if isinstance(sensor_id, str) and sensor_id.startswith(prefix):
+        return True
+    actuator_id = config.get("actuatorId") or ""
+    if isinstance(actuator_id, str) and actuator_id.startswith(prefix):
+        return True
+    return False
+
+
 class DashboardRepository(BaseRepository[Dashboard]):
     """
     Dashboard Repository with dashboard-specific queries.
@@ -157,3 +172,31 @@ class DashboardRepository(BaseRepository[Dashboard]):
         )
         result = await self.session.execute(stmt)
         return result.scalar_one() > 0
+
+    async def remove_widgets_by_esp_id(self, esp_id: str) -> int:
+        """
+        Remove all dashboard widgets that reference a given ESP device.
+
+        Scans all dashboards and filters out widgets whose config references
+        the device by espId, sensorId or actuatorId.
+
+        Args:
+            esp_id: ESP device identifier
+
+        Returns:
+            Total number of widgets removed across all dashboards
+        """
+        stmt = select(Dashboard)
+        result = await self.session.execute(stmt)
+        all_dashboards = list(result.scalars().all())
+        prefix = f"{esp_id}:"
+        total_removed = 0
+        for dashboard in all_dashboards:
+            widgets: list = dashboard.widgets or []
+            kept = [w for w in widgets if not _widget_references_esp(w, esp_id, prefix)]
+            removed = len(widgets) - len(kept)
+            if removed > 0:
+                dashboard.widgets = kept
+                await self.session.flush()
+                total_removed += removed
+        return total_removed

@@ -711,6 +711,16 @@ async def delete_device(
     if resolved_count > 0:
         logger.info(f"Auto-resolved {resolved_count} alerts for deleted device {esp_id}")
 
+    # Remove dashboard widgets referencing this device before deletion
+    from ...db.repositories.dashboard_repo import DashboardRepository
+
+    dashboard_repo = DashboardRepository(db)
+    removed_widgets = await dashboard_repo.remove_widgets_by_esp_id(esp_id)
+    if removed_widgets > 0:
+        logger.info(
+            f"Removed {removed_widgets} dashboard widget(s) referencing deleted device {esp_id}"
+        )
+
     # Soft-delete the device (sets deleted_at, status='deleted')
     await esp_repo.soft_delete(esp_id, deleted_by=current_user.username)
     await db.commit()
