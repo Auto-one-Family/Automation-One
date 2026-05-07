@@ -111,6 +111,39 @@ class AiService:
         """Returns True if anthropic is installed and ANTHROPIC_API_KEY is configured."""
         return _ANTHROPIC_AVAILABLE and bool(os.environ.get("ANTHROPIC_API_KEY"))
 
+    async def get_configured_api_key(self, db_session=None) -> Optional[str]:
+        """
+        Resolve the Anthropic API key using a two-step priority chain.
+
+        Priority order:
+        1. DB plugin config (PluginConfig for "claude") — requires db_session
+        2. Environment variable ANTHROPIC_API_KEY — always checked as fallback
+
+        This method is intended for use in ClaudeDebugAgent (AUT-270) and
+        other services that have a DB session available.
+
+        Args:
+            db_session: Optional AsyncSession. When provided, the DB is queried
+                        first for a non-empty api_key in the "claude" plugin config.
+
+        Returns:
+            The resolved API key string, or None if no key is configured.
+        """
+        if db_session is not None:
+            try:
+                from ..db.models.plugin import PluginConfig
+
+                plugin_config = await db_session.get(PluginConfig, "claude")
+                if plugin_config is not None:
+                    db_key: Optional[str] = (plugin_config.config or {}).get("api_key")
+                    if db_key:
+                        return db_key
+            except Exception:
+                # Non-fatal: fall through to env-based resolution
+                logger.debug("Claude plugin config DB lookup failed — falling back to env")
+
+        return os.environ.get("ANTHROPIC_API_KEY")
+
     async def analyze_error(self, request: ErrorAnalysisRequest) -> ErrorAnalysisFinding:
         """
         Analyze an error event using Claude and return a structured finding.
