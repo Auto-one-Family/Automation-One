@@ -18,6 +18,7 @@ import { useToast } from '@/composables/useToast'
 import { createLogger } from '@/utils/logger'
 import type { ESPDevice } from '@/api/esp'
 import type { ConfigResponseExtended, ConfigFailure } from '@/types'
+import type { OfflineRuleStrippedEntry } from '@/types/websocket-events'
 
 const logger = createLogger('ConfigStore')
 
@@ -144,13 +145,19 @@ export const useConfigStore = defineStore('config', () => {
 
     const diagnostics = data.offline_rules_diagnostics as {
       stripped_count?: number
-      stripped_rules?: Array<{ rule_name?: string; actuator_gpio?: number; reason_code?: string }>
+      stripped_rules?: Array<Partial<OfflineRuleStrippedEntry>>
     } | undefined
     if (diagnostics && (diagnostics.stripped_count ?? 0) > 0) {
       const count = diagnostics.stripped_count!
       const examples = (diagnostics.stripped_rules ?? []).slice(0, 2)
-        .map(r => `${r.rule_name ?? 'Regel'} (GPIO ${r.actuator_gpio ?? '?'}: ${r.reason_code ?? '?'})`)
-        .join(', ')
+        .map(r => {
+          const gpioStr = r.actuator_gpio != null ? `GPIO ${r.actuator_gpio}` : 'GPIO ?'
+          const detail = r.reason_detail
+            ? ` [${r.reason_detail.substring(0, 80)}${r.reason_detail.length > 80 ? '…' : ''}]`
+            : ''
+          return `${r.rule_name ?? 'Regel'} (${gpioStr}: ${r.reason_code ?? '?'}${detail})`
+        })
+        .join('; ')
       const suffix = examples ? ` — ${examples}` : ''
       logger.warn(`AUT-132: ${count} Offline-Regel(n) nicht gesendet für ${espId}${suffix}`)
       toast.warning(
