@@ -29,7 +29,8 @@ export type TypeFilter = 'all' | 'mock' | 'real'
 export type WidgetType = 'sensor-tile' | 'line-chart' | 'gauge' | 'sensor-card' |
   'historical' | 'actuator-card' | 'actuator-runtime' |
   'esp-health' | 'alarm-list' | 'multi-sensor' | 'statistics' |
-  'fertigation-pair' | 'comparison-boxplot' | 'correlation-scatter'
+  'fertigation-pair' | 'comparison-boxplot' | 'correlation-scatter' |
+  'climate-rule-health' | 'claude-chat'
 
 /** Single widget configuration */
 export interface DashboardWidget {

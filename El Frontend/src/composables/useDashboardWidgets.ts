@@ -28,11 +28,12 @@ import FertigationPairWidget from '@/components/dashboard-widgets/FertigationPai
 import BoxplotWidget from '@/components/dashboard-widgets/BoxplotWidget.vue'
 import CorrelationScatterWidget from '@/components/dashboard-widgets/CorrelationScatterWidget.vue'
 import ClimateRuleHealthWidget from '@/components/dashboard-widgets/ClimateRuleHealthWidget.vue'
+import ClaudeChatWidget from '@/components/monitor/widgets/ClaudeChatWidget.vue'
 
 // Icons for widget catalog
 import {
   BarChart3, Gauge, Activity, Zap, Bell, Cpu, Droplets,
-  BoxSelect, GitCompareArrows, ThermometerSun,
+  BoxSelect, GitCompareArrows, ThermometerSun, Sparkles,
 } from 'lucide-vue-next'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -102,6 +103,7 @@ const widgetComponentMap: Record<string, Component> = {
   'comparison-boxplot': BoxplotWidget,
   'correlation-scatter': CorrelationScatterWidget,
   'climate-rule-health': ClimateRuleHealthWidget,
+  'claude-chat': ClaudeChatWidget,
 }
 
 /** Widget type metadata for catalog and auto-generation */
@@ -122,6 +124,7 @@ const WIDGET_TYPE_META: WidgetTypeMeta[] = [
   { type: 'comparison-boxplot', label: 'MultispeQ Boxplot', description: 'Vergleich von MultispeQ-Aggregaten (Min/Q1/Median/Q3/Max) pro Gruppe', icon: BoxSelect, w: 6, h: 4, minW: 4, minH: 3, category: 'MultispeQ' },
   { type: 'correlation-scatter', label: 'MultispeQ Korrelation', description: 'Scatter-Plot Sensorwert vs. Metadaten (z. B. PPFD vs. Yield)', icon: GitCompareArrows, w: 6, h: 4, minW: 4, minH: 3, category: 'MultispeQ' },
   { type: 'climate-rule-health', label: 'Klima-Regel Cockpit', description: 'Soll/IST/ESP-Status/Dispatch für eine kritische Klimaregel', icon: ThermometerSun, w: 4, h: 3, minW: 3, minH: 2, category: 'Regeln' },
+  { type: 'claude-chat', label: 'Claude Assistant', description: 'KI-gestütztes Debugging und Stack-Analyse', icon: Sparkles, w: 4, h: 6, minW: 3, minH: 4, category: 'System' },
 ]
 
 /** Default config per widget type */
@@ -155,6 +158,7 @@ const WIDGET_DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
     },
   },
   'climate-rule-health': { ruleId: 0 },
+  'claude-chat': {},
 }
 
 /** Gear icon SVG (inline, no external dependency) */
@@ -341,6 +345,9 @@ export function useDashboardWidgets(options: UseDashboardWidgetsOptions = {}): U
             show_regression_line: config.show_regression_line,
           }
     }
+
+    // espId prop for widgets that support device-scoped context (e.g. ClaudeChatWidget)
+    if (config.espId) props.espId = config.espId
 
     // readOnly prop for actuator widgets (monitor context = no toggle)
     if (readOnly && type === 'actuator-card') {
